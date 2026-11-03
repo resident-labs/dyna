@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<!-- The box desktop's window manager: a taskbar of open windows along the bottom, and nothing on the desktop. -->
+<JWM>
+  <Tray x="0" y="-1" height="28" autohide="off">
+    <TaskList maxwidth="240"/>
+  </Tray>
+  <Desktops width="1" height="1">
+    <Background type="solid">#1d2025</Background>
+  </Desktops>
+  <WindowStyle>
+    <Font>Liberation Sans-10</Font>
+    <Active><Foreground>#ffffff</Foreground><Background>#3b4252</Background></Active>
+    <Foreground>#c8ccd4</Foreground><Background>#2a2e36</Background>
+  </WindowStyle>
+  <TrayStyle>
+    <Font>Liberation Sans-10</Font>
+    <Foreground>#c8ccd4</Foreground><Background>#22252b</Background>
+  </TrayStyle>
+  <TaskListStyle>
+    <Active><Foreground>#ffffff</Foreground><Background>#3b4252</Background></Active>
+    <Foreground>#c8ccd4</Foreground><Background>#22252b</Background>
+  </TaskListStyle>
+  <FocusModel>click</FocusModel>
+</JWM>

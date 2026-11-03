@@ -1,8 +1,10 @@
-// Package computer manages the box's Chromium process and DevTools connection.
+// Package computer runs the box's desktop: one X display that is also its VNC server, a window manager and Chromium, and
+// the DevTools connection the agent's computer tool drives the page with.
 package computer
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"log"
@@ -15,14 +17,35 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
 
 const URL = "http://127.0.0.1:9222"
 
-var launchArgs = []string{
-	"--headless=new", "--remote-debugging-address=127.0.0.1",
-	"--remote-debugging-port=9222", "--user-data-dir=/box/computer",
-	"--disable-dev-shm-usage", "--no-first-run", "about:blank",
+// VNCSocket is where the display serves VNC. Only the box reaches it; dyna computer stream carries it to the owner's view.
+const VNCSocket = "/run/dyna/vnc.sock"
+
+// Size is the agent's screen. The desktop never resizes for a viewer, who sees it scaled to fit.
+const Size = "1280x800"
+
+const display = ":1"
+
+//go:embed jwmrc
+var jwmrc []byte
+
+// desktopArgs make TigerVNC's Xvnc both the display and its VNC server, so it knows exactly what changed. It serves VNC
+// on a Unix socket only, with no password: the socket is inside the box, and the engine checks the owner. A box has no
+// GPU, and without GLX Xvnc loads no Mesa: about 17 MiB instead of 60, and Chromium draws in software either way.
+func desktopArgs(socket string) []string {
+	return []string{display, "-geometry", Size, "-depth", "24", "-rfbunixpath", socket, "-rfbport", "-1", "-SecurityTypes", "None",
+		"-AlwaysShared", "-AcceptSetDesktopSize=0", "-FrameRate", "30", "-extension", "GLX"}
+}
+
+// browserArgs open Chromium in a window on the display, with DevTools on the port the agent's actions use.
+var browserArgs = []string{
+	"--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9222", "--user-data-dir=/box/computer",
+	"--disable-dev-shm-usage", "--no-first-run", "--no-default-browser-check", "--password-store=basic",
+	"--hide-crash-restore-bubble", "--start-maximized", "about:blank",
 }
 
 // cgroup moves the agent out of the root and creates a half-memory child.
@@ -80,19 +103,37 @@ func oomCount(root string) uint64 {
 	return 0
 }
 
-// Process owns Chromium until its context is cancelled.
-type Process struct {
-	mu     sync.Mutex
-	cmd    *exec.Cmd
-	done   chan struct{}
-	exit   string
-	root   string
-	once   sync.Once
-	group  *os.File
-	notify func(bool)
+// program is one running part of the desktop. done closes when it has exited.
+type program struct {
+	name string
+	cmd  *exec.Cmd
+	done chan struct{}
 }
 
-func NewProcess() *Process { return &Process{root: "/sys/fs/cgroup"} }
+func (p *program) kill() {
+	if p != nil {
+		_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
+	}
+}
+
+// Process owns the desktop until its context is cancelled: the display, then the window manager and Chromium on it, all
+// in the computer cgroup. Nothing runs until the first Start.
+type Process struct {
+	mu      sync.Mutex
+	display *program
+	wm      *program
+	browser *program
+	exit    string
+	ooms    uint64 // the computer cgroup's OOM kills when a program last exited
+	root    string // the box's cgroup
+	socket  string // the display's VNC socket; the window manager's config goes beside it
+	tmp     string // where X keeps its lock and socket
+	once    sync.Once
+	group   *os.File
+	notify  func(bool)
+}
+
+func NewProcess() *Process { return &Process{root: "/sys/fs/cgroup", socket: VNCSocket, tmp: "/tmp"} }
 
 func (p *Process) setup() {
 	p.once.Do(func() {
@@ -101,80 +142,168 @@ func (p *Process) setup() {
 		if err != nil {
 			log.Printf("computer: cgroup limit unavailable: %v", err)
 		}
+		p.ooms = oomCount(p.root)
 	})
 }
 
-// Start returns a previous exit report once and starts Chromium when needed.
+// Start returns a previous exit report once, and starts the parts of the desktop that are not running. A Chromium the
+// owner closed opens again on the next use.
 func (p *Process) Start(ctx context.Context) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	report := p.exit
 	p.exit = ""
-	if p.cmd != nil {
-		return report, nil
-	}
 	p.setup()
-	cmd := exec.CommandContext(ctx, "chromium", launchArgs...)
-	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if p.group != nil {
-		cmd.SysProcAttr.UseCgroupFD = true
-		cmd.SysProcAttr.CgroupFD = int(p.group.Fd())
+	if p.display == nil {
+		if err := p.startDisplay(ctx); err != nil {
+			p.exit = report
+			return "", err
+		}
 	}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	before := oomCount(p.root)
-	err := cmd.Start()
-	if p.group != nil && (errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EINVAL)) {
-		log.Printf("computer: cgroup limit unavailable: %v", err)
-		_ = p.group.Close()
-		p.group = nil
-		cmd = exec.CommandContext(ctx, "chromium", launchArgs...)
-		cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-		err = cmd.Start()
+	var err error
+	if p.wm == nil {
+		config := filepath.Join(filepath.Dir(p.socket), "jwmrc")
+		if err = os.WriteFile(config, jwmrc, 0644); err == nil {
+			p.wm, err = p.spawn(ctx, "jwm", "-f", config)
+		}
+	}
+	if err == nil && p.browser == nil {
+		p.browser, err = p.spawn(ctx, "chromium", browserArgs...)
 	}
 	if err != nil {
 		p.exit = report
 		return "", err
 	}
-	p.cmd = cmd
-	if p.notify != nil {
-		p.notify(true)
-	}
-	p.done = make(chan struct{})
-	done := p.done
-	go func() {
-		defer close(done)
-		err := cmd.Wait()
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		p.cmd = nil
-		if p.notify != nil {
-			p.notify(false)
-		}
-		if ctx.Err() != nil {
-			return
-		}
-		if oomCount(p.root) > before {
-			p.exit = "Chromium was killed by the computer memory limit"
-		} else if err != nil {
-			p.exit = "Chromium exited: " + err.Error()
-		} else {
-			p.exit = "Chromium exited"
-		}
-	}()
 	return report, nil
 }
 
-// Close stops Chromium and waits for its process to exit.
+// startDisplay starts Xvnc and waits for its VNC socket, which it opens once the display takes clients. A display that
+// was killed leaves its lock and sockets, and the lock's process ID may belong to another process after a restart, so
+// they go first: only this process runs display :1 in the box.
+func (p *Process) startDisplay(ctx context.Context) error {
+	for _, stale := range []string{p.socket, filepath.Join(p.tmp, ".X1-lock"), filepath.Join(p.tmp, ".X11-unix", "X1")} {
+		if err := os.Remove(stale); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(p.socket), 0755); err != nil {
+		return err
+	}
+	display, err := p.spawn(ctx, "Xvnc", desktopArgs(p.socket)...)
+	if err != nil {
+		return err
+	}
+	p.display = display
+	wait, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	for {
+		if _, err := os.Stat(p.socket); err == nil {
+			break
+		}
+		select {
+		case <-display.done:
+			p.display = nil
+			return errors.New("the desktop exited as it started")
+		case <-wait.Done():
+			p.display = nil
+			display.kill()
+			return errors.New("the desktop did not start in 10 seconds")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	if p.notify != nil {
+		p.notify(true)
+	}
+	return nil
+}
+
+// spawn starts one program of the desktop in its own process group in the computer cgroup, and watches it. The caller
+// holds p.mu.
+func (p *Process) spawn(ctx context.Context, name string, args ...string) (*program, error) {
+	command := func() *exec.Cmd {
+		cmd := exec.CommandContext(ctx, name, args...)
+		cmd.Env = append(os.Environ(), "DISPLAY="+display)
+		cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+		return cmd
+	}
+	cmd := command()
+	if p.group != nil {
+		cmd.SysProcAttr.UseCgroupFD = true
+		cmd.SysProcAttr.CgroupFD = int(p.group.Fd())
+	}
+	err := cmd.Start()
+	if p.group != nil && (errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EINVAL)) {
+		log.Printf("computer: cgroup limit unavailable: %v", err)
+		_ = p.group.Close()
+		p.group = nil
+		cmd = command()
+		err = cmd.Start()
+	}
+	if err != nil {
+		return nil, err
+	}
+	started := &program{name: name, cmd: cmd, done: make(chan struct{})}
+	go p.watch(ctx, started)
+	return started, nil
+}
+
+// watch waits for a program to exit. The display takes the rest of the desktop with it. An exit nobody asked for is
+// reported on the next Start, unless the display went first and stopped the program. The programs share one cgroup, so
+// an OOM kill counts for the first exit after it.
+func (p *Process) watch(ctx context.Context, exited *program) {
+	err := exited.cmd.Wait()
+	close(exited.done)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	count := oomCount(p.root)
+	killed := count > p.ooms
+	p.ooms = count
+	what := "Chromium"
+	switch exited {
+	case p.display:
+		p.display = nil
+		p.wm.kill()
+		p.browser.kill()
+		if p.notify != nil {
+			p.notify(false)
+		}
+		what = "The desktop"
+	case p.wm:
+		p.wm = nil
+		return
+	case p.browser:
+		p.browser = nil
+		if p.display == nil {
+			return
+		}
+	default:
+		return
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	if killed {
+		p.exit = what + " was killed by the computer memory limit"
+	} else if err != nil {
+		p.exit = what + " exited: " + err.Error()
+	} else {
+		p.exit = what + " exited"
+	}
+}
+
+// Close stops the desktop and waits for its programs to exit.
 func (p *Process) Close() {
 	p.mu.Lock()
-	cmd, done, group := p.cmd, p.done, p.group
+	running := []*program{p.browser, p.wm, p.display}
+	group := p.group
 	p.mu.Unlock()
-	if cmd != nil {
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		<-done
+	for _, program := range running {
+		if program != nil {
+			program.kill()
+			<-program.done
+		}
 	}
 	if group != nil {
 		_ = group.Close()
@@ -193,14 +322,14 @@ func Serve(ctx context.Context, socket string, errs chan<- error, notify func(bo
 	if err != nil {
 		return nil, err
 	}
-	browser := NewProcess()
-	browser.notify = notify
-	browser.setup()
-	server := &http.Server{Handler: browser.Handler(ctx)}
+	desktop := NewProcess()
+	desktop.notify = notify
+	desktop.setup()
+	server := &http.Server{Handler: desktop.Handler(ctx)}
 	go func() { errs <- server.Serve(listener) }()
 	return func() {
 		_ = server.Close()
-		browser.Close()
+		desktop.Close()
 		_ = os.Remove(socket)
 	}, nil
 }
