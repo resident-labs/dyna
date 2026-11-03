@@ -172,3 +172,20 @@ func TestRealSystemdRunLeavesCommandAsWritten(t *testing.T) {
 		t.Fatalf("out %q", out)
 	}
 }
+
+// QuotedLen matches bash's printf %q for ASCII, so the size the refusal states is the size the run would have had.
+func TestQuotedLenMatchesBash(t *testing.T) {
+	words := []string{"", "plain", "a b", "#x", "x#", "~y", "y~", "it's", "a\nb", "tab\t", "esc\x1b", "bell\a\x01\x7f", `back\slash`, "${x##*/}", "=+:@%,", "naïve"}
+	for c := byte(1); c < 127; c++ {
+		words = append(words, "a"+string(rune(c))+"b")
+	}
+	for _, w := range words {
+		out, err := exec.Command("bash", "-c", `printf '%q ' "$1"`, "q", w).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := QuotedLen([]string{w}); got < len(out) || (w != "naïve" && got != len(out)) {
+			t.Errorf("%q: QuotedLen %d, bash %d (%s)", w, got, len(out), out)
+		}
+	}
+}

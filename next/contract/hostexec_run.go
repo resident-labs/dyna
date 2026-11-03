@@ -12,6 +12,7 @@ const (
 	MethodHostexecRun  Method    = "hostexec.run"
 	MethodHostexecStop Method    = "hostexec.stop"
 	ErrNoGrant         ErrorCode = "no_grant"
+	ErrCommandTooLong  ErrorCode = "command_too_long"
 )
 
 // HostexecRunRequest runs Command on Host with bash -c.
