@@ -47,7 +47,7 @@ func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox, host
 	if row.State != contract.BoxClosing {
 		next := row.Box
 		next.State, next.Reason = contract.BoxClosing, ""
-		changed, err := r.change(ctx, row.Box, next, time.Time{}, 0, "") // From here failures counts failed archives.
+		changed, err := r.change(ctx, row.Box, next, time.Time{}, 0, "", "", false) // From here failures counts failed archives.
 		if err != nil || !changed {
 			return err
 		}
@@ -147,7 +147,7 @@ func (r *Reconciler) closeStep(ctx context.Context, row store.LifecycleBox) erro
 		if err = r.boxes.Remove(ctx, row.ID); err == nil {
 			next := row.Box
 			next.State, next.Reason = contract.BoxDeleted, ""
-			_, err = r.change(ctx, row.Box, next, time.Time{}, row.Failures, "")
+			_, err = r.change(ctx, row.Box, next, time.Time{}, row.Failures, "", "", false)
 			return err
 		}
 	}

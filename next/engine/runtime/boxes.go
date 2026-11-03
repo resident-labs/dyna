@@ -697,7 +697,7 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 		return "", err
 	}
 	if err := b.Sockets.AddBox(spec.Box, spec.Session, session.Room); err != nil {
-		return "", err
+		return "", box.RuntimeCreateError{Err: err}
 	}
 	ok := false
 	var forwarded, sliced, created, stacked bool
@@ -706,20 +706,7 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 		if ok {
 			return
 		}
-		if stacked {
-			_ = h.RemovePod(context.Background(), spec.Box)
-			_ = h.RemoveStackVolumes(context.Background(), spec.Box)
-		}
-		if created {
-			_ = h.RemoveContainer(context.Background(), spec.Box)
-			_ = h.RemoveVolume(context.Background(), spec.Box)
-		}
-		if forwarded {
-			_ = h.RemoveForward(context.Background(), forward)
-		}
-		if sliced {
-			_ = h.RemoveSlice(context.Background(), spec.Slice)
-		}
+		cleanupCreate(ctx, h, spec, forward, stacked, created, forwarded, sliced)
 		_ = b.Sockets.RemoveBox(spec.Box)
 	}()
 	if err = b.installBinary(ctx, h); err != nil {
@@ -741,12 +728,12 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	spec.Needs, spec.Stack = image.Needs, image.Stack
 	slice, c := b.container(spec, image.Tag, shared)
 	if err = h.EnsureSlice(ctx, slice); err != nil {
-		return "", err
+		return "", box.RuntimeCreateError{Err: err}
 	}
 	sliced = true
 	steps.Done("slice")
 	if err = h.AddForward(ctx, forward); err != nil {
-		return "", err
+		return "", box.RuntimeCreateError{Err: err}
 	}
 	forwarded = true
 	steps.Done("forward")
@@ -763,7 +750,11 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 			missing.Host = string(spec.Host)
 			return "", missing
 		}
-		return "", err
+		var imageErr box.ImageCreateError
+		if errors.As(err, &imageErr) {
+			return "", err
+		}
+		return "", box.RuntimeCreateError{Err: err}
 	}
 	created = true
 	steps.Done("container create")
@@ -774,11 +765,34 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 		steps.Done("sidecars")
 	}
 	if err = h.StartContainer(ctx, spec.Box); err != nil {
-		return "", err
+		return "", box.RuntimeCreateError{Err: err}
 	}
 	steps.Done("container start")
 	ok = true
 	return image.Tag, nil
+}
+
+// createCleanupTimeout bounds cleanup of a failed creation, which must run even after the creation deadline expired.
+const createCleanupTimeout = 30 * time.Second
+
+// cleanupCreate removes what a failed creation made, on its own bounded context: the creation context is often the reason it failed.
+func cleanupCreate(ctx context.Context, h box.HostDriver, spec lifecycle.BoxSpec, forward box.Forward, stacked, created, forwarded, sliced bool) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), createCleanupTimeout)
+	defer cancel()
+	if stacked {
+		_ = h.RemovePod(ctx, spec.Box)
+		_ = h.RemoveStackVolumes(ctx, spec.Box)
+	}
+	if created {
+		_ = h.RemoveContainer(ctx, spec.Box)
+		_ = h.RemoveVolume(ctx, spec.Box)
+	}
+	if forwarded {
+		_ = h.RemoveForward(ctx, forward)
+	}
+	if sliced {
+		_ = h.RemoveSlice(ctx, spec.Slice)
+	}
 }
 
 // recovery is one host's way back after the engine starts.

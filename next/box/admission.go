@@ -101,7 +101,8 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 	var chosen contract.HostName
 	var best int64 = -1
 	for _, h := range hosts {
-		if h.State != HostReady || (existing != nil && h.Name != existing.Host) {
+		// A create quarantine blocks new boxes, including retries, not wakes or CI runners.
+		if h.State != HostReady || (existing != nil && h.Name != existing.Host) || (h.Problem != "" && request.Image != RunnerImage && (existing == nil || existing.State == contract.BoxPending && existing.Image == "")) {
 			continue
 		}
 		if !h.Serves(request.Room) || existing == nil && !takes(h, request.ID, only) {
