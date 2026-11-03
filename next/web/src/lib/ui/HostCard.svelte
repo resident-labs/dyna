@@ -2,13 +2,13 @@
   import { MediaQuery } from "svelte/reactivity";
   import type { HostSummary } from "../contract.gen.ts";
   import { boxWords, count } from "../feed.ts";
-  import { backupProblem, hang, hostLabel, hostMeters, largeShared, lastSeen, roomSessions, sharedSize } from "../hosts.ts";
+  import { hang, hostLabel, hostMeters, largeShared, lastSeen, roomSessions, sharedSize } from "../hosts.ts";
   import Avatar from "./Avatar.svelte";
   import MeterTile from "./MeterTile.svelte";
   import StatusPill from "./StatusPill.svelte";
   // One machine on Home: the name and the workspace count, then CPU, memory and disk tiles. A healthy host shows no
   // status. A host low on disk, as the engine judges it, shows the warning pill. An unreachable one shows the warning pill and its last figures dimmed with their age, or no figures if
-  // it never answered. The control plane has no workspaces. A backup problem shows its pill; a healthy backup shows nothing.
+  // it never answered. The control plane has no workspaces.
   // A room's shared folder past a quarter of the disk is a muted line under the tiles: it needs cleaning, not a decision.
   // The workspace count opens the machine's sessions by room, as Jobs does: a popover, a sheet on a phone. Workspaces
   // count running boxes and the list also holds asleep ones, so its rows can outnumber the count, and "0 workspaces" can
@@ -18,7 +18,6 @@
   // That layer gives Escape, the click away and focus's return. Its backdrop lets taps through, so a phone's scrim is the popover itself.
   let { host, now, roomName, navigate }: { host: HostSummary; now: number; roomName: (room: string) => string; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void } = $props();
   let seen = $derived(host.reachable ? undefined : lastSeen(host, now));
-  let backup = $derived(backupProblem(host, now));
   let groups = $derived(roomSessions(host, roomName));
   let listed = $derived(host.reachable && groups.length > 0);
   const phone = new MediaQuery("max-width: 640px");
@@ -34,8 +33,7 @@
 
 <section class="card" aria-label={hostLabel(host.name)}>
   <h3>{hostLabel(host.name)}
-    <span class="aside state">{#if backup}<StatusPill tone={backup.tone} label={backup.label} title={backup.title} />{/if}
-      {#if host.diskLow}<StatusPill tone="warning" label="Disk low" />{/if}
+    <span class="aside state">{#if host.diskLow}<StatusPill tone="warning" label="Disk low" />{/if}
       {#if !host.reachable}<StatusPill tone="error" label="Unreachable" />
       {:else if listed}<button type="button" class="count" bind:this={button} popovertarget={`sessions-${host.name}`} aria-haspopup="dialog" aria-expanded={open}>{count(host.boxes, "workspace")}</button>
       {:else if host.name !== "control-plane"}{count(host.boxes, "workspace")}{/if}</span></h3>

@@ -3,7 +3,6 @@ module github.com/resident-labs/dyna
 go 1.26.10
 
 require (
-	filippo.io/age v1.2.1
 	github.com/coder/websocket v1.8.14
 	github.com/compose-spec/compose-go/v2 v2.16.2
 	github.com/creack/pty v1.1.24

@@ -31,7 +31,6 @@ import (
 //	<Data>/compose/<name>.yaml                      global compose files
 //	<Data>/addons.json, <Data>/skills/<name>/       global add-ons
 //	<Data>/store.db, <Data>/store.lock              the store and its lock
-//	<Data>/backups/                                 local copies of the store
 //	<Data>/connect/                                 Connect credentials
 //	<Data>/pools/<name>/script                      a node pool's script, which runs here and no box can reach
 //	<Data>/cliproxy/, <Data>/cliproxy/auth-v2/      the model proxy and its sign-in folder
@@ -103,9 +102,6 @@ func (l Layout) StoreLock() string { return filepath.Join(l.Data, "store.lock") 
 // V1Store is where a v1 engine kept its database. The engine only checks for it, to refuse the folder.
 func (l Layout) V1Store() string { return filepath.Join(l.Data, "dyna.db") }
 
-// Backups is the folder of local store copies.
-func (l Layout) Backups() string { return filepath.Join(l.Data, "backups") }
-
 // Connect is the folder of Connect credentials.
 func (l Layout) Connect() string { return filepath.Join(l.Data, "connect") }
 
@@ -142,11 +138,6 @@ func (l Layout) room(room contract.RoomID) string {
 // Shared is a room's shared folder, the one copy that the boxes of every host see at /box/shared.
 func (l Layout) Shared(room contract.RoomID) string {
 	return filepath.Join(l.room(room), sharedFolder)
-}
-
-// IsShared says whether path is a room's shared folder.
-func (l Layout) IsShared(path string) bool {
-	return filepath.Base(path) == sharedFolder && filepath.Dir(filepath.Dir(path)) == l.Rooms()
 }
 
 // Instructions is the instructions file of a room, or the global one for no room.
