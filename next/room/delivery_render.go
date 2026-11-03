@@ -271,6 +271,11 @@ func renderPRChanged(b contract.PrChanged) string {
 			continue
 		}
 		lines := changeHead("PR", change.PR.Repo, change.PR.Number, change.PR.URL, prChangeWords, change.Kinds, change.Actions)
+		if change.PR.Head != "" && slices.ContainsFunc(change.Kinds, func(kind contract.PrChangeKind) bool {
+			return kind == contract.PrChangeCIFailed || kind == contract.PrChangeCIPassed
+		}) {
+			lines = append(lines, "The checks ran on "+change.PR.Head+".")
+		}
 		if len(change.FailedChecks) > 0 {
 			checks := strings.Join(change.FailedChecks, ", ")
 			if change.Outside {
