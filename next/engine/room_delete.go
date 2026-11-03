@@ -53,10 +53,10 @@ func (s *Service) HostSet(ctx context.Context, caller contract.Principal, req co
 	if caller.Kind != contract.PrincipalOwner {
 		return contract.HostSetResponse{}, forbidden()
 	}
-	if req.Agents == nil && req.CI == nil {
-		return contract.HostSetResponse{}, invalid("set agents, ci or both")
+	if req.Agents == nil && req.CI == nil && !req.ClearCreateProblem {
+		return contract.HostSetResponse{}, invalid("set agents, ci or clear the create problem")
 	}
-	if err := s.store.SetHostSwitches(ctx, req.Host, req.Agents, req.CI); err != nil {
+	if err := s.store.SetHostSwitches(ctx, req.Host, req.Agents, req.CI, req.ClearCreateProblem); err != nil {
 		return contract.HostSetResponse{}, failure(err)
 	}
 	s.reconciler.Kick()

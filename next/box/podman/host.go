@@ -495,7 +495,7 @@ func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
 	}
 	if checks == "" {
 		_, err := h.run(ctx, args...)
-		return err
+		return imageFailure(err)
 	}
 	command := append([]string{"bash", "-c", checks + `exec "$@"`, "dyna-devices"}, args...)
 	out, err := h.run(ctx, command...)
@@ -506,6 +506,24 @@ func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
 			return box.MissingDevice{Need: box.NeedNestedContainers}
 		case string(box.NeedKVM):
 			return box.MissingDevice{Need: box.NeedKVM}
+		}
+	}
+	return imageFailure(err)
+}
+
+// imageMarkers are lowercase podman messages that say the image could not be pulled, found or read: they say nothing about the host.
+var imageMarkers = []string{"trying to pull", "registry", "short-name", "name unknown", "unauthorized", "auth token", "manifest", "pull access denied", "image not known", "invalid reference format"}
+
+// imageFailure types the podman errors that say the image is missing or invalid. An error that matches no marker is
+// treated as a host failure and counts toward quarantine, so a new image message must be added above.
+func imageFailure(err error) error {
+	if err == nil {
+		return nil
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range imageMarkers {
+		if strings.Contains(message, marker) {
+			return box.ImageCreateError{Err: err}
 		}
 	}
 	return err

@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 81
+const schemaVersion = 82
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
@@ -48,6 +48,13 @@ var steps = map[int][]string{
 	},
 	// Backups are gone, so nothing records an off-host copy.
 	80: {`DROP TABLE backup_copy_status`},
+	81: {
+		`ALTER TABLE hosts ADD COLUMN create_failures INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE hosts ADD COLUMN create_problem TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE hosts ADD COLUMN create_generation INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE boxes ADD COLUMN create_generation INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE boxes ADD COLUMN failed_create INTEGER NOT NULL DEFAULT 0`,
+	},
 }
 
 // upgrade applies each future numbered step in the same transaction as its version.

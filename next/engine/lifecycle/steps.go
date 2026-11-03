@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"log"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -44,6 +45,8 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 	var due time.Time
 	failures := row.Failures
 	var cause contract.FailureCause
+	var runtimeFailure bool
+	var createPhase contract.CreatePhase
 	var workErr error
 	switch {
 	case row.Want == store.WantHold:
@@ -95,19 +98,33 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		delete(r.fresh, b.ID)
 		repos := r.repos
 		r.mu.Unlock()
+		createCtx, cancelCreate := r.createContext(ctx)
+		defer cancelCreate()
+		phase := contract.CreatePhaseRemoveOld
 		steps := box.NewStepLog("box " + string(b.ID))
 		if !fresh {
-			workErr = r.boxes.Remove(ctx, b.ID)
+			workErr = r.boxes.Remove(createCtx, b.ID)
 			steps.Done("remove old")
 		}
 		var sources []contract.BoxRepo
 		if workErr == nil && repos != nil {
-			sources, workErr = repos.Get(ctx, b.Session, b.Host, true)
+			phase = contract.CreatePhaseRepository
+			sources, workErr = repos.Get(createCtx, b.Session, b.Host, true)
 			steps.Done("repositories")
 		}
 		if workErr == nil {
-			next.Image, workErr = r.boxes.Create(ctx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: b.Slice, Size: b.Size, Repos: sources})
+			phase = contract.CreatePhaseBox
+			next.Image, workErr = r.boxes.Create(createCtx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: b.Slice, Size: b.Size, Repos: sources})
 			steps.Done("create")
+		}
+		// A deadline or cancellation says nothing about the host, whatever step it cut short.
+		createCause := context.Cause(createCtx)
+		cut := errors.Is(createCause, context.DeadlineExceeded) || errors.Is(createCause, context.Canceled)
+		var runtimeErr box.RuntimeCreateError
+		runtimeFailure = !cut && errors.As(workErr, &runtimeErr)
+		if workErr != nil {
+			createPhase = phase
+			log.Printf("box %s: creation failed in %s: %v", b.ID, phase, workErr)
 		}
 		var missing box.MissingDevice
 		if errors.As(workErr, &missing) {
@@ -119,6 +136,9 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			}
 		} else if workErr != nil {
 			failures++
+			if errors.Is(createCause, context.DeadlineExceeded) {
+				failures = 3
+			}
 			if failures >= 3 {
 				next.State, next.Reason = contract.BoxFailed, string(contract.CauseCreateFailed)
 				cause = contract.CauseCreateFailed
@@ -226,7 +246,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		// A successful stop is an observed fact even if close cancelled it.
 		ctx = context.WithoutCancel(ctx)
 	}
-	changed, err := r.change(ctx, b, next, due, failures, cause)
+	changed, err := r.change(ctx, b, next, due, failures, cause, createPhase, runtimeFailure)
 	if changed && err == nil && next.State == contract.BoxStopped {
 		r.view.BoxStopped(ctx, b.Session)
 	}

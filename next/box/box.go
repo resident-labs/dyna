@@ -7,6 +7,18 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+// ImageCreateError is a create failure that names a missing or invalid image, which says nothing about the host.
+type ImageCreateError struct{ Err error }
+
+func (e ImageCreateError) Error() string { return e.Err.Error() }
+func (e ImageCreateError) Unwrap() error { return e.Err }
+
+// RuntimeCreateError identifies failure in host container infrastructure, not image or repository work.
+type RuntimeCreateError struct{ Err error }
+
+func (e RuntimeCreateError) Error() string { return e.Err.Error() }
+func (e RuntimeCreateError) Unwrap() error { return e.Err }
+
 type HostState string
 
 const (
@@ -25,6 +37,7 @@ type Host struct {
 	Name                contract.HostName
 	SSH                 string
 	State               HostState
+	Problem             contract.HostProblem
 	CPUs                int
 	MemBytes, DiskBytes int64
 	DiskFloor           int64
