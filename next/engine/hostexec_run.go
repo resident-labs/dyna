@@ -43,6 +43,9 @@ func (s *Service) HostexecRun(ctx context.Context, who contract.Principal, req c
 	if req.Host == "" || strings.TrimSpace(req.Command) == "" || req.Timeout < 0 || req.Timeout > contract.DurationMS((2*time.Hour).Milliseconds()) {
 		return contract.HostexecRunResponse{}, invalid("invalid host, command or timeout")
 	}
+	if len(req.ClientID) > 64 {
+		return contract.HostexecRunResponse{}, invalid("client_id is at most 64 characters")
+	}
 	grant, err := s.matchHostexec(ctx, session.Room, who, req.Host)
 	if errors.Is(err, hostexec.ErrNoGrant) {
 		return contract.HostexecRunResponse{}, &contract.Error{Code: contract.ErrNoGrant, Message: "no matching host-exec grant"}
@@ -51,17 +54,58 @@ func (s *Service) HostexecRun(ctx context.Context, who contract.Principal, req c
 		return contract.HostexecRunResponse{}, failure(err)
 	}
 	a := contract.HostexecRunArgs{Room: session.Room, Host: req.Host, Argv: []string{"bash", "-c", req.Command}, Cwd: req.Cwd, Timeout: req.Timeout, Grant: grant.ID}
-	op, err := s.approvals.Submit(ctx, who, contract.Operation{Room: session.Room, Args: a})
+	op, err := s.approvals.SubmitWithClientID(ctx, who, contract.Operation{Room: session.Room, Args: a}, req.ClientID)
 	if err != nil {
 		return contract.HostexecRunResponse{}, failure(err)
 	}
 	return contract.HostexecRunResponse{Operation: op}, nil
 }
+
+// hostexecStopWait is how long a stop waits for a run that has been submitted but not started.
+const hostexecStopWait = 2 * time.Second
+
+// HostexecStop stops a session's own run, as job stop asks. The run's scope is stopped on the host at once, the run is stored
+// as stopped, and a stop that fails here is retried by the sweep. A run that has ended is left alone.
+func (s *Service) HostexecStop(ctx context.Context, who contract.Principal, req contract.HostexecStopRequest) (contract.HostexecStopResponse, *contract.Error) {
+	if who.Kind != contract.PrincipalSession {
+		return contract.HostexecStopResponse{}, forbidden()
+	}
+	if req.ClientID == "" || len(req.ClientID) > 64 {
+		return contract.HostexecStopResponse{}, invalid("client_id names the run, in at most 64 characters")
+	}
+	record, err := s.store.ReadReplayOperation(ctx, who, req.ClientID)
+	if err != nil {
+		return contract.HostexecStopResponse{}, failure(err)
+	}
+	if record.Operation.ID == "" || record.Operation.Kind != (contract.HostexecRunArgs{}).OpKind() {
+		return contract.HostexecStopResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "no host run of this session has that client_id"}
+	}
+	for deadline := time.Now().Add(hostexecStopWait); ; {
+		run, ok, err := s.store.StopHostexecRun(ctx, record.Operation.ID)
+		if err != nil {
+			return contract.HostexecStopResponse{}, failure(err)
+		}
+		if ok {
+			stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			_ = s.hostexec.StopHostexec(stopCtx, run.Host, run.Scope)
+			cancel()
+			return contract.HostexecStopResponse{}, nil
+		}
+		// A run that has not started gets a moment to start, since the job server stops it the moment its job is stopped.
+		if run.Op != "" || !time.Now().Before(deadline) {
+			return contract.HostexecStopResponse{}, nil
+		}
+		select {
+		case <-time.After(50 * time.Millisecond):
+		case <-ctx.Done():
+			return contract.HostexecStopResponse{}, failure(ctx.Err())
+		}
+	}
+}
 func (s *Service) HostexecRunEntry() approve.Entry {
 	return approve.Entry{
-		Scope:       contract.ScopeTerminal,
-		CallerBound: true,
-		Class:       func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassAuto },
+		Scope: contract.ScopeTerminal,
+		Class: func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassAuto },
 		Card: func(_ context.Context, args contract.OpArgs, _ contract.Principal) contract.Card {
 			a := args.(contract.HostexecRunArgs)
 			body := fmt.Sprintf("timeout: %s", time.Duration(a.Timeout)*time.Millisecond)
@@ -100,35 +144,22 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 			}
 			started := s.now()
 			runCtx, cancel := s.hostexecTimeout(ctx, time.Duration(a.Timeout)*time.Millisecond+15*time.Second)
-			// A caller that goes away, as a stopped job does, ends the run now rather than at its timeout.
-			caller := approve.Caller(ctx)
-			unbind := context.AfterFunc(caller, cancel)
 			out, code, truncated, err := s.hostexec.RunHostexec(runCtx, a, op)
-			unbind()
 			cancel()
-			left := err != nil && caller.Err() != nil
 			stopped := store.HostexecStop("")
-			if left {
-				// Ending the connection need not end the command, so its scope is stopped on the host. A stop that fails
-				// leaves the run lost, and the sweep stops it once the host answers.
-				stopCtx, done := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-				stopped = store.HostexecStopped
-				if s.hostexec.StopHostexec(stopCtx, a.Host, run.Scope) != nil {
-					stopped = store.HostexecLost
-				}
-				done()
-			} else if err != nil {
+			if err != nil {
 				stopped = store.HostexecLost
 			} else if err == nil && (code == 137 || code == 143) && !s.now().Before(started.Add(time.Duration(a.Timeout)*time.Millisecond)) {
 				// A signal-like exit at the deadline is treated as RuntimeMaxSec expiry.
 				stopped = store.HostexecTimeout
 			}
-			if e := s.store.FinishHostexec(ctx, op, s.now(), len(out), stopped); e != nil {
+			final, e := s.store.FinishHostexec(ctx, op, s.now(), len(out), stopped)
+			if e != nil {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: e.Error()}
 			}
 			result := contract.OpResult{ExitCode: code, Truncated: truncated}
-			if left {
-				result.Error = "stopped: its caller ended the run"
+			if final == store.HostexecStopped {
+				result.Error = "stopped by its session"
 			} else if err != nil {
 				result.Error = err.Error()
 				result.Cause = contract.CauseHostLost

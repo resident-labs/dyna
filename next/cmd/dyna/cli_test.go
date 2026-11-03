@@ -92,6 +92,7 @@ type fakeClient struct {
 	submitResp   contract.OpSubmitResponse
 	uploads      []string
 	hostexecResp contract.HostexecRunResponse
+	hostexecReq  contract.HostexecRunRequest
 	devicePair   contract.DevicePairRequest
 	devices      []contract.Device
 	deviceRevoke contract.DeviceRevokeRequest
@@ -163,8 +164,12 @@ func (f *fakeClient) DeviceSetScopes(_ context.Context, q contract.DeviceSetScop
 	return contract.DeviceSetScopesResponse{}, nil
 }
 
-func (f *fakeClient) HostexecRun(context.Context, contract.HostexecRunRequest) (contract.HostexecRunResponse, error) {
+func (f *fakeClient) HostexecRun(_ context.Context, q contract.HostexecRunRequest) (contract.HostexecRunResponse, error) {
+	f.hostexecReq = q
 	return f.hostexecResp, nil
+}
+func (f *fakeClient) HostexecStop(context.Context, contract.HostexecStopRequest) (contract.HostexecStopResponse, error) {
+	return contract.HostexecStopResponse{}, nil
 }
 func (f *fakeClient) File(context.Context, string, io.Writer) error { return nil }
 func (f *fakeClient) Upload(_ context.Context, _ contract.RoomID, path string) (contract.Attachment, error) {
@@ -527,6 +532,9 @@ func TestHostexecPending(t *testing.T) {
 	out := runCLI(t, f, "bash", "--host", "h", "true")
 	if !strings.Contains(out, "waits for approval") || !strings.Contains(out, "op_1") || !strings.Contains(out, "op.ran") {
 		t.Fatalf("pending output: %q", out)
+	}
+	if len(f.hostexecReq.ClientID) != 32 {
+		t.Fatalf("a run has no client ID to stop it by: %+v", f.hostexecReq)
 	}
 }
 func TestRoomLogFollowsInOrder(t *testing.T) {
