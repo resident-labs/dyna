@@ -104,6 +104,7 @@ const (
 	ErrUnknownAction        ErrorCode = "unknown_action"
 	ErrNotFound             ErrorCode = "not_found"
 	ErrForbidden            ErrorCode = "forbidden"
+	ErrCrossRoomAttachment  ErrorCode = "cross_room_attachment"
 	ErrConflict             ErrorCode = "conflict"
 	ErrRoomLimited          ErrorCode = "room_limited"
 	ErrProfileExists        ErrorCode = "profile_exists"
@@ -615,6 +616,7 @@ type BoxRepo struct {
 }
 
 type BoxHelloResponse struct {
+	Room          RoomID           `json:"room"`
 	GitName       string           `json:"gitName,omitempty"`
 	GitEmail      string           `json:"gitEmail,omitempty"`
 	CompactTokens int              `json:"compactTokens,omitempty"`
@@ -780,6 +782,7 @@ type TranscriptPostLocation struct {
 	Seq  int64  `json:"seq"`
 }
 type TranscriptInput struct {
+	Source      *PostSource   `json:"source,omitempty"`
 	Home        *Conversation `json:"home,omitempty"`
 	At          time.Time     `json:"at"`
 	ID          EventID       `json:"id"`

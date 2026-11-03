@@ -82,7 +82,6 @@ func TestAnotherRoomNamesTheCallersOwn(t *testing.T) {
 		method contract.Method
 		body   string
 	}{
-		{contract.MethodPost, `{"room":"horizon","text":"x"}`},
 		{contract.MethodEventsList, `{"room":"horizon"}`},
 		{contract.MethodSessionList, `{"room":"horizon"}`},
 		{contract.MethodOpSubmit, `{"operation":{"kind":"pr.open","room":"horizon","args":{"title":"t","body":"b","base":"main","draft":false}}}`},

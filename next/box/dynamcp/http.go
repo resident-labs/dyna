@@ -182,7 +182,16 @@ func (s *Server) call(ctx context.Context, p callParams) result {
 		if s.preparer.Upload == nil {
 			return failure(contract.ErrUnavailable, "Post preparation is unavailable.")
 		}
-		req, checks, err := s.preparer.Prepare(ctx, *decoded.(*tools.PostInput))
+		input := decoded.(*tools.PostInput)
+		if input.Room != "" && s.preparer.Room != "" && input.Room != s.preparer.Room {
+			if len(input.Paths) != 0 || input.HTML != "" {
+				return failure(contract.ErrCrossRoomAttachment, "cross-room posts cannot carry attachments")
+			}
+			if input.EndTurn {
+				return failure(contract.ErrForbidden, "cross-room posts cannot end a turn")
+			}
+		}
+		req, checks, err := s.preparer.Prepare(ctx, *input)
 		if err != nil {
 			return failure(contract.ErrInvalid, err.Error())
 		}

@@ -50,6 +50,9 @@ func (s *Store) SearchPosts(ctx context.Context, req contract.PostSearchRequest,
 		if err = json.Unmarshal(body, &payload); err != nil {
 			return result, err
 		}
+		if payload.Source != nil {
+			result.Names[post.Author.Session] = string(payload.Source.RoomName) + ":" + payload.Source.SessionName
+		}
 		post.Text, post.Home = payload.Text, payload.Home
 		result.Posts = append(result.Posts, post)
 	}
