@@ -14,7 +14,8 @@ func activityLabel(e event) string {
 	if e.ToolName == "bash" && json.Unmarshal(args["host"], &host) == nil && host != "" {
 		label += " on " + host + ":"
 	}
-	for _, key := range []string{"path", "command", "pattern", "query", "url", "job"} {
+	// A computer action's status is v1's --status: what it is for, which the owner watching reads under the screen.
+	for _, key := range []string{"status", "path", "command", "pattern", "query", "url", "job"} {
 		var value string
 		if json.Unmarshal(args[key], &value) != nil || value == "" {
 			continue
