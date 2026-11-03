@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { approvalOn, autopilotOn, autopilotRequest, rootApprovals, switchRequest } from "./autopilot.ts";
+import { approvalOn, autopilotConfirm, autopilotOn, autopilotRequest, rootApprovals, switchRequest } from "./autopilot.ts";
 import type { RoomSummary } from "./contract.gen.ts";
 
 const room = (rootApproves?: RoomSummary["rootApproves"]) => ({ id: "room_a", name: "web", rootApproves }) as RoomSummary;
@@ -23,4 +23,17 @@ test("Autopilot turns every kind on, and off again once they all are", () => {
   const all = room(["hostexec", "addons", "hosts", "pools"]);
   assert.equal(autopilotOn(all), true);
   assert.deepEqual(autopilotRequest(all), { room: "room_a", rootApproves: { hostexec: false, addons: false, hosts: false, pools: false } });
+});
+
+test("the page lists only the four kinds the engine has", () => {
+  assert.deepEqual(rootApprovals.map(item => item.kind), ["hostexec", "addons", "hosts", "pools"]);
+  assert.equal(rootApprovals.find(item => item.kind === "hosts")?.label, "Root changes room host rules");
+});
+
+test("Autopilot asks, naming all four and the cost of pools, before turning on, and asks nothing to turn off", () => {
+  const ask = autopilotConfirm(room(["hosts"]));
+  assert.ok(ask);
+  for (const item of rootApprovals) assert.ok(ask.message.includes(item.label.replace(/^Root /, "")), item.label);
+  assert.match(ask.note, /cost money/);
+  assert.equal(autopilotConfirm(room(["hostexec", "addons", "hosts", "pools"])), undefined);
 });
