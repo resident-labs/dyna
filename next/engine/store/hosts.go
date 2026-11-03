@@ -55,9 +55,10 @@ func (s *Store) SetHostRooms(ctx context.Context, host contract.HostName, rooms 
 
 // SetHostSwitches turns a host's agents switch, its CI switch or both; nil leaves one as it is. Boxes and runners already on
 // the host stay.
-func (s *Store) SetHostSwitches(ctx context.Context, host contract.HostName, agents, ci *bool) error {
+func (s *Store) SetHostSwitches(ctx context.Context, host contract.HostName, agents, ci *bool, clear ...bool) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, "UPDATE hosts SET agents=coalesce(?2,agents), ci=coalesce(?3,ci) WHERE name=?1", host, agents, ci)
+		reset := len(clear) > 0 && clear[0]
+		result, err := tx.ExecContext(ctx, "UPDATE hosts SET agents=coalesce(?2,agents), ci=coalesce(?3,ci), create_failures=CASE WHEN ?4 THEN 0 ELSE create_failures END, create_problem=CASE WHEN ?4 THEN '' ELSE create_problem END, create_generation=create_generation+CASE WHEN ?4 THEN 1 ELSE 0 END WHERE name=?1", host, agents, ci, reset)
 		if err != nil {
 			return err
 		}
@@ -297,7 +298,7 @@ func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
 }
 
 func (s *Store) hosts(ctx context.Context, where string) ([]box.Host, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT h.name, h.ssh, h.state, h.cpus, h.mem_bytes, h.disk_bytes, h.disk_floor, h.checked_at, h.maintained_at, h.engine_host, h.pool, h.box, h.agents, h.ci, hr.room FROM hosts h LEFT JOIN host_rooms hr ON hr.host=h.name WHERE `+where+` ORDER BY h.name,hr.room`)
+	rows, err := s.Read().QueryContext(ctx, `SELECT h.name, h.ssh, h.state, h.cpus, h.mem_bytes, h.disk_bytes, h.disk_floor, h.checked_at, h.maintained_at, h.engine_host, h.pool, h.box, h.agents, h.ci, h.create_problem, hr.room FROM hosts h LEFT JOIN host_rooms hr ON hr.host=h.name WHERE `+where+` ORDER BY h.name,hr.room`)
 	if err != nil {
 		return nil, err
 	}
@@ -308,7 +309,7 @@ func (s *Store) hosts(ctx context.Context, where string) ([]box.Host, error) {
 		var checked, maintained int64
 		var room sql.NullString
 		var agents bool
-		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &h.DiskFloor, &checked, &maintained, &h.EngineHost, &h.Pool, &h.Box, &agents, &h.CI, &room); err != nil {
+		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &h.DiskFloor, &checked, &maintained, &h.EngineHost, &h.Pool, &h.Box, &agents, &h.CI, &h.Problem, &room); err != nil {
 			return nil, err
 		}
 		if len(hosts) == 0 || hosts[len(hosts)-1].Name != h.Name {
