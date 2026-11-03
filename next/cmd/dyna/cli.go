@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,9 +14,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/dustin/go-humanize"
@@ -38,6 +42,7 @@ type client interface {
 	SessionList(context.Context, contract.SessionListRequest) (contract.SessionListResponse, error)
 	SessionResponsibilities(context.Context, contract.SessionResponsibilitiesRequest) (contract.SessionResponsibilitiesResponse, error)
 	HostexecRun(context.Context, contract.HostexecRunRequest) (contract.HostexecRunResponse, error)
+	HostexecStop(context.Context, contract.HostexecStopRequest) (contract.HostexecStopResponse, error)
 	File(context.Context, string, io.Writer) error
 	Upload(context.Context, contract.RoomID, string) (contract.Attachment, error)
 	HostAdd(context.Context, contract.HostAddRequest) (contract.HostAddResponse, error)
@@ -110,7 +115,7 @@ type requestType interface {
 		contract.SessionResponsibilitiesRequest |
 		contract.GoalSetRequest | contract.GoalListRequest | contract.GoalItemRequest | contract.GoalDoneRequest | contract.GoalJournalRequest |
 		contract.PoolAddRequest | contract.PoolListRequest | contract.PoolRemoveRequest | contract.RoomHostsRequest | contract.HostRemoveRequest | contract.HostSetRequest |
-		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostSetLimitsRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomDeleteRequest | contract.RoomRepoAddRequest | contract.RepoCISetRequest | contract.RoomReposRequest | contract.ComposeListRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.SessionRefreshRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest | contract.PrListRequest | contract.PrStatusRequest | contract.PrTrackRequest | contract.PrUntrackRequest
+		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.HostexecStopRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostSetLimitsRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomDeleteRequest | contract.RoomRepoAddRequest | contract.RepoCISetRequest | contract.RoomReposRequest | contract.ComposeListRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.SessionRefreshRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest | contract.PrListRequest | contract.PrStatusRequest | contract.PrTrackRequest | contract.PrUntrackRequest
 }
 type responseType interface {
 	contract.ProxyKeyResponse | contract.ProxyUsageResponse |
@@ -127,7 +132,7 @@ type responseType interface {
 		contract.SessionResponsibilitiesResponse |
 		contract.GoalSetResponse | contract.GoalListResponse | contract.GoalItemResponse | contract.GoalDoneResponse | contract.GoalJournalResponse |
 		contract.PoolAddResponse | contract.PoolListResponse | contract.PoolRemoveResponse | contract.RoomHostsResponse | contract.HostRemoveResponse | contract.HostSetResponse |
-		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.HostSetLimitsResponse | contract.HostListResponse | contract.RoomCreateResponse | contract.RoomDeleteResponse | contract.RoomRepoAddResponse | contract.RepoCISetResponse | contract.RoomReposResponse | contract.ComposeListResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.SessionRefreshResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse | contract.PrListResponse | contract.PrStatusResponse | contract.PrTrackResponse | contract.PrUntrackResponse
+		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.HostexecStopResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.HostSetLimitsResponse | contract.HostListResponse | contract.RoomCreateResponse | contract.RoomDeleteResponse | contract.RoomRepoAddResponse | contract.RepoCISetResponse | contract.RoomReposResponse | contract.ComposeListResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.SessionRefreshResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse | contract.PrListResponse | contract.PrStatusResponse | contract.PrTrackResponse | contract.PrUntrackResponse
 }
 
 func call[Q requestType, R responseType](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {
@@ -197,6 +202,9 @@ func (c *socketClient) OpWithdraw(ctx context.Context, q contract.OpWithdrawRequ
 }
 func (c *socketClient) HostexecRun(ctx context.Context, q contract.HostexecRunRequest) (contract.HostexecRunResponse, error) {
 	return call[contract.HostexecRunRequest, contract.HostexecRunResponse](ctx, c, contract.MethodHostexecRun, q)
+}
+func (c *socketClient) HostexecStop(ctx context.Context, q contract.HostexecStopRequest) (contract.HostexecStopResponse, error) {
+	return call[contract.HostexecStopRequest, contract.HostexecStopResponse](ctx, c, contract.MethodHostexecStop, q)
 }
 func (c *socketClient) File(ctx context.Context, hash string, out io.Writer) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://dyna/v1/files/"+hash, nil)
@@ -428,7 +436,29 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	var timeout time.Duration
 	run := &cobra.Command{Use: "bash --host HOST COMMAND", Short: "Run a command on a host with bash -c, under a host grant.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		c := getClient()
-		res, err := c.HostexecRun(cmd.Context(), contract.HostexecRunRequest{Host: contract.HostName(runHost), Command: args[0], Cwd: cwd, Timeout: contract.DurationMS(timeout.Milliseconds())})
+		var id [16]byte
+		_, _ = rand.Read(id[:])
+		req := contract.HostexecRunRequest{Host: contract.HostName(runHost), Command: args[0], Cwd: cwd, Timeout: contract.DurationMS(timeout.Milliseconds()), ClientID: hex.EncodeToString(id[:])}
+		// An interrupt stops the run and still waits for its result. A dropped call would not stop it, so the stop is asked
+		// for by name, and a second interrupt ends this at once.
+		interrupted, restore := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+		defer restore()
+		finished := make(chan struct{})
+		defer close(finished)
+		go func() {
+			select {
+			case <-finished:
+				return
+			case <-interrupted.Done():
+			}
+			restore()
+			stopCtx, cancel := context.WithTimeout(context.WithoutCancel(cmd.Context()), 5*time.Second)
+			defer cancel()
+			if _, err := c.HostexecStop(stopCtx, contract.HostexecStopRequest{ClientID: req.ClientID}); err != nil {
+				fmt.Fprintln(cmd.ErrOrStderr(), "The run could not be stopped:", err)
+			}
+		}()
+		res, err := c.HostexecRun(cmd.Context(), req)
 		if err != nil {
 			return err
 		}

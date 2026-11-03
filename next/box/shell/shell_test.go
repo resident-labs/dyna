@@ -373,14 +373,38 @@ func TestSlowHostCommandMovesToBackgroundAndReportsItsEnd(t *testing.T) {
 	}
 }
 
-// job stop on a host command ends its call at once, which has the engine stop it on the host, and the job reads stopped.
-func TestStoppingAHostCommandEndsItsCall(t *testing.T) {
-	ended := make(chan struct{})
-	r := hostRig(func(ctx context.Context, _ Run, _ io.Writer) (int, *contract.Error) {
-		<-ctx.Done()
-		close(ended)
-		return 0, &contract.Error{Code: contract.ErrUnavailable, Message: ctx.Err().Error()}
+// stoppableHostRig runs host commands on a fake engine that ends a run when it is asked to stop it by its client ID, as the
+// engine does by stopping its scope. ignore leaves every run going.
+func stoppableHostRig(ignore bool) (*rig, chan string, chan string) {
+	started, stops := make(chan string, 4), make(chan string, 4)
+	asked := make(chan string, 4)
+	r := hostRig(func(ctx context.Context, run Run, out io.Writer) (int, *contract.Error) {
+		started <- run.ClientID
+		for {
+			select {
+			case id := <-asked:
+				if id == run.ClientID {
+					_, _ = io.WriteString(out, "host run: stopped by its session\n")
+					return 143, nil
+				}
+			case <-ctx.Done():
+				return 0, &contract.Error{Code: contract.ErrUnavailable, Message: ctx.Err().Error()}
+			}
+		}
 	})
+	r.server.cfg.HostStop = func(_ context.Context, id string) error {
+		stops <- id
+		if !ignore {
+			asked <- id
+		}
+		return nil
+	}
+	return r, started, stops
+}
+
+// startHostJob starts a host command and moves it to the background.
+func startHostJob(t *testing.T, r *rig) {
+	t.Helper()
 	finish := make(chan string, 1)
 	go func() {
 		_, body := call(t, r.server.Handler(), "/run", `{"command":"find / -name x","host":"h"}`)
@@ -390,8 +414,20 @@ func TestStoppingAHostCommandEndsItsCall(t *testing.T) {
 	if body := <-finish; !strings.Contains(body, `"running":true`) {
 		t.Fatalf("run = %s", body)
 	}
+}
+
+// job stop on a host command asks the engine to stop that run, by the client ID its run sent, and the job reads stopped.
+func TestStoppingAHostCommandStopsItsRun(t *testing.T) {
+	r, started, stops := stoppableHostRig(false)
+	startHostJob(t, r)
+	id := <-started
+	if len(id) != 32 {
+		t.Fatalf("client ID %q", id)
+	}
 	_, body := call(t, r.server.Handler(), "/job", `{"action":"stop","job":"job_1"}`)
-	<-ended
+	if got := <-stops; got != id {
+		t.Fatalf("stopped %q, ran %q", got, id)
+	}
 	if !strings.Contains(body, `"status":"stopped"`) || strings.Contains(body, "unavailable") {
 		t.Fatalf("stop = %s", body)
 	}
@@ -403,6 +439,38 @@ func TestStoppingAHostCommandEndsItsCall(t *testing.T) {
 	case got := <-r.reports:
 		t.Fatalf("report %+v", got)
 	default:
+	}
+}
+
+// A run the engine does not stop in the grace period stops being waited for, as SIGKILL ends a box command.
+func TestAHostRunThatOutlastsItsStopEndsTheJob(t *testing.T) {
+	r, _, stops := stoppableHostRig(true)
+	startHostJob(t, r)
+	stopped := make(chan string, 1)
+	go func() {
+		_, body := call(t, r.server.Handler(), "/job", `{"action":"stop","job":"job_1"}`)
+		stopped <- body
+	}()
+	<-stops
+	(<-r.timers).fire <- time.Now() // the grace period
+	if body := <-stopped; !strings.Contains(body, `"status":"stopped"`) || strings.Contains(body, "unavailable") {
+		t.Fatalf("stop = %s", body)
+	}
+}
+
+// Closing the box stops its host runs, and waits for those stops to reach the engine.
+func TestClosingStopsHostRuns(t *testing.T) {
+	r, started, stops := stoppableHostRig(false)
+	startHostJob(t, r)
+	id := <-started
+	r.server.Close()
+	select {
+	case got := <-stops:
+		if got != id {
+			t.Fatalf("stopped %q, ran %q", got, id)
+		}
+	default:
+		t.Fatal("close returned before the stop was asked")
 	}
 }
 
