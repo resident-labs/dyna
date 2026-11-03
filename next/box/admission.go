@@ -124,9 +124,11 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 				}
 			}
 		}
-		// A session box idles most of the time, so a host takes four times its CPUs of them. A CI runner keeps its CPUs busy
-		// for the whole job, so the runners on a host fit in its CPUs, and the sessions there keep the rest.
-		if cpu+request.Size.CPUs > 4*h.CPUs || request.Image == RunnerImage && runnerCPU+request.Size.CPUs > h.CPUs {
+		// A session box idles most of the time, so a host takes four times its CPUs of them. A CI runner is busy for its whole
+		// job but uses about half its CPUs on average, between links, tests and waits, so a host takes twice its CPUs of
+		// runners. At four times, hosts ran at two to six times their CPUs and jobs took two to three times as long; at once,
+		// they sat half idle.
+		if cpu+request.Size.CPUs > 4*h.CPUs || request.Image == RunnerImage && runnerCPU+request.Size.CPUs > 2*h.CPUs {
 			reason = PendingCPU
 			continue
 		}
