@@ -491,3 +491,24 @@ func TestLatestReturnsAtOnceAndAddsNoReads(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+func TestQuotaShowsInsufficientBalanceFromRouting(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/dyna/credentials":
+			fmt.Fprint(w, `{"credentials":[{"id":"invented","auth_index":"invented","provider":"claude","state":"unknown"}]}`)
+		case "/v0/management/auth-files/quota":
+			fmt.Fprint(w, `{"files":[{"auth_index":"invented","observed_at":"2026-01-01T00:00:00Z","status_code":200,"windows":[{"kind":"weekly_all","utilization":42}]}]}`)
+		case "/v8/management/routing/status":
+			fmt.Fprint(w, `{"providers":{"claude":[{"auth_index":"invented","state":"cooldown","reason":"insufficient_balance"}]}}`)
+		default:
+			t.Error("unexpected request")
+		}
+	}))
+	defer server.Close()
+	q := quotaProxy(server.URL, server.Client().Transport).Quotas("key", quotaStore(t), func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) })
+	got, err := q.Read(context.Background())
+	if err != nil || len(got.Accounts) != 1 || got.Accounts[0].Cause != contract.UsageInsufficientBalance || got.Accounts[0].Active {
+		t.Fatalf("got %+v, %v", got.Accounts, err)
+	}
+}

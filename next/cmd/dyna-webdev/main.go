@@ -189,6 +189,7 @@ func devAccounts(now time.Time) []devAccount {
 		account(contract.ProviderAnthropic, "claude", "spare", "weekend.plan", contract.UsageSignInExpired),
 		account(contract.ProviderOpenAI, "codex", "busy", "shared.pool", contract.UsageRateLimited),
 		account(contract.ProviderAnthropic, "claude", "lost", "side.project", contract.UsageUnreachable),
+		account(contract.ProviderDeepSeek, "openai-compatible-deepseek", "broke", "deepseek.empty", contract.UsageInsufficientBalance),
 	}
 }
 
