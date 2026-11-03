@@ -263,7 +263,7 @@ func Inspect(data []byte) (Meta, error) {
 	}
 }
 
-// Request turns what a caller named into a save request. HOST:PATH goes to the engine to copy over SSH. A link goes to the engine as it is, and a local folder or
+// Request turns what a caller named into a save request. NAME:REST reads as HOST:PATH and goes to the engine to copy over SSH, unless a local folder of that name exists (an error: ./NAME:REST is the folder). A link goes to the engine as it is, and a local folder or
 // SKILL.md travels inside the request, because the engine cannot read this machine. dir anchors a relative path.
 func Request(path, dir string, room contract.RoomID, global bool) (contract.SkillSaveRequest, error) {
 	req := contract.SkillSaveRequest{Room: room, Global: global}
@@ -272,6 +272,13 @@ func Request(path, dir string, room contract.RoomID, global bool) (contract.Skil
 		return req, nil
 	}
 	if host, rest, ok := strings.Cut(path, ":"); ok && hostPart.MatchString(host) && rest != "" && !strings.HasPrefix(rest, "//") {
+		local := path
+		if dir != "" && !filepath.IsAbs(local) {
+			local = filepath.Join(dir, local)
+		}
+		if _, err := os.Stat(local); err == nil {
+			return req, fmt.Errorf("%s is a local folder and also reads as HOST:PATH; write ./%s for the folder", path, path)
+		}
 		req.Host, req.Path = contract.HostName(host), rest
 		return req, nil
 	}

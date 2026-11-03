@@ -13,9 +13,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -69,8 +69,12 @@ func (s *serviceWithHosts) HostList(ctx context.Context, caller contract.Princip
 }
 
 func (s *serviceWithHosts) HostAdd(ctx context.Context, caller contract.Principal, req contract.HostAddRequest) (contract.HostAddResponse, *contract.Error) {
-	if req.Name == "" || !req.OwnerOnlyAdmin || strings.Count(req.SSH, "@") != 1 || strings.HasPrefix(req.SSH, "@") || strings.HasSuffix(req.SSH, "@") {
-		return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "name, user@host, and owner-only administration are required"}
+	// The name reaches prompts and file names, and the address reaches ssh, so both are checked here and nowhere inward.
+	if !hostNamePattern.MatchString(string(req.Name)) || !sshPattern.MatchString(req.SSH) {
+		return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "a host name is letters, digits, hyphens and underscores, and its ssh is user@host"}
+	}
+	if !req.OwnerOnlyAdmin && !req.ExecOnly() {
+		return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "owner-only administration is required"}
 	}
 	for i, room := range req.Rooms {
 		if room == "" || slices.Contains(req.Rooms[:i], room) {
@@ -431,3 +435,8 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 	}
 }
+
+var (
+	hostNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+	sshPattern      = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9_.-]*$`)
+)

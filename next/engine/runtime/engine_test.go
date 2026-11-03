@@ -87,3 +87,26 @@ func TestHostAddRefusesMissingPodman(t *testing.T) {
 		t.Fatalf("problem: %+v", problem)
 	}
 }
+
+func TestHostAddChecksNameAndSSHAtTheBoundary(t *testing.T) {
+	off := false
+	for _, req := range []contract.HostAddRequest{
+		{Name: "bad\nname", SSH: "user@host", OwnerOnlyAdmin: true},
+		{Name: "*bold*", SSH: "user@host", OwnerOnlyAdmin: true},
+		{Name: "ok", SSH: "user@ho st", OwnerOnlyAdmin: true},
+		{Name: "ok", SSH: "-oProxyCommand=x@host", OwnerOnlyAdmin: true},
+		{Name: "ok", SSH: "user@host:22", OwnerOnlyAdmin: true},
+	} {
+		f := &fakeRegistrar{}
+		s := serviceWithHosts{boxes: f}
+		if _, err := s.HostAdd(context.Background(), contract.Principal{Kind: contract.PrincipalOwner}, req); err == nil || err.Code != contract.ErrInvalid || f.called {
+			t.Fatalf("%+v: error=%v called=%v", req, err, f.called)
+		}
+	}
+	// An exec-only host is added with no administration flag, as the documented command has none.
+	f := &fakeRegistrar{}
+	s := serviceWithHosts{boxes: f}
+	if _, err := s.HostAdd(context.Background(), contract.Principal{Kind: contract.PrincipalOwner}, contract.HostAddRequest{Name: "omarchy", SSH: "ari@omarchy", Agents: &off, CI: &off}); err != nil || !f.called {
+		t.Fatalf("error=%v called=%v", err, f.called)
+	}
+}
