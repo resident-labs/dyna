@@ -593,6 +593,9 @@ func addCLI(root *cobra.Command, getClient func() client) {
 			if h.Problem == contract.HostProblemCreateFailed {
 				state += "\tbox creation failed; clear with host set --clear-create-problem"
 			}
+			if h.Problem == contract.HostProblemShareUnavailable {
+				state += "\tshared folder mount unavailable, so no session boxes (CI may run); fix FUSE, then host set --clear-create-problem"
+			}
 			if h.Leftovers > 0 {
 				state += fmt.Sprintf("\t%d left from deleted rooms", h.Leftovers)
 			}

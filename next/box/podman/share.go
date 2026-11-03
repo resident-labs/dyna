@@ -18,6 +18,7 @@ const (
 	// shareNeeds says what a host lacks for its mount, and exits 1. Dyna changes no host system file itself.
 	shareNeeds = `[ -c /dev/fuse ] || { echo "/dev/fuse is missing"; exit 1; }
 command -v fusermount3 >/dev/null || { echo "fusermount3 is missing: install fuse3"; exit 1; }
+[ "$EUID" = 0 ] || [ -u "$(command -v fusermount3)" ] || { echo "fusermount3 is not setuid, so FUSE mounts fail with Operation not permitted"; exit 1; }
 grep -Eq '^[[:space:]]*user_allow_other' /etc/fuse.conf 2>/dev/null || { echo "user_allow_other is not set in /etc/fuse.conf"; exit 1; }
 `
 	// shareScript brings the mount at $1 up. A user service holds it, so it outlives the SSH connection and the engine, which

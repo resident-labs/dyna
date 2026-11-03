@@ -59,7 +59,7 @@ system) echo "podman $*" >> ` + rig.log + `; ` + migrate + ` ;;
 esac`,
 	})
 	script := strings.ReplaceAll(shareScript, "grep -Eq '^[[:space:]]*user_allow_other'", "true")
-	script = strings.ReplaceAll(script, "[ -c /dev/fuse ]", "[ -c /dev/null ]")
+	script = strings.ReplaceAll(strings.ReplaceAll(script, "[ -c /dev/fuse ]", "[ -c /dev/null ]"), "$EUID", "0")
 	cmd := exec.Command("/bin/bash", "-c", script, "dyna-share", filepath.Join(rig.dir, "mount"), filepath.Join(rig.dir, "cache"), "/bin/dyna", "/sock")
 	cmd.Env = []string{"PATH=" + tools + ":" + os.Getenv("PATH")}
 	out, err := cmd.CombinedOutput()

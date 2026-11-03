@@ -152,7 +152,7 @@ func (s *Store) StartPoolNode(ctx context.Context, p Pool, node box.Host) (bool,
 // what its box needs and no more.
 func (s *Store) FinishPoolNode(ctx context.Context, h box.Host) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, "UPDATE hosts SET ssh=?,state='ready',cpus=?,mem_bytes=?,disk_bytes=?,checked_at=?,maintained_at=?,engine_host=? WHERE name=? AND state='provisioning'", h.SSH, h.CPUs, h.MemBytes, h.DiskBytes, h.CheckedAt.UnixMilli(), h.CheckedAt.UnixMilli(), h.EngineHost, h.Name)
+		result, err := tx.ExecContext(ctx, "UPDATE hosts SET ssh=?,state='ready',cpus=?,mem_bytes=?,disk_bytes=?,checked_at=?,maintained_at=?,engine_host=?,create_problem=? WHERE name=? AND state='provisioning'", h.SSH, h.CPUs, h.MemBytes, h.DiskBytes, h.CheckedAt.UnixMilli(), h.CheckedAt.UnixMilli(), h.EngineHost, h.Problem, h.Name)
 		if err != nil {
 			return err
 		}
