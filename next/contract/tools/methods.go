@@ -51,7 +51,7 @@ var methodTable = []MethodEntry{
 		act("goal", "done", typ[contract.GoalDoneRequest](), "End goal with a summary, once its done condition holds and no item is open. Set drop to give it up instead.", "goal done"),
 	),
 	method(contract.MethodGoalJournal, contract.ScopeOperate, UserAccess,
-		act("goal", "journal", typ[contract.GoalJournalRequest](), "Add a line of text to goal's journal and read its newest lines. Omit text to only read.", "goal journal"),
+		act("goal", "journal", typ[contract.GoalJournalRequest](), "Add a line of text to goal's journal and read its newest 5 lines, with older, the count of lines before them. Omit text to only read.", "goal journal"),
 	),
 	method(contract.MethodDeviceList, contract.ScopeAdmin, OwnerAccess,
 		act("device", "list", typ[contract.DeviceListRequest](), "List devices", "device list"),
@@ -133,7 +133,7 @@ var methodTable = []MethodEntry{
 	// op.submit checks its own scope by operation kind, so the row names none.
 	method(contract.MethodOpSubmit, "", UserAccess,
 		opAct("hostexec", "request_grant", contract.HostexecGrantArgs{}.OpKind(), typ[contract.HostexecGrantArgs](), "Request host access with a reason. The grant lasts until the session closes. hosts is a list of host names; reason is one line of at most 300 characters.", "hostexec grant"),
-		opAct("pr", "open", contract.PrOpenArgs{}.OpKind(), typ[contract.PrOpenArgs](), "Open a pull request with title and base. Body and draft are optional; omit head to use your session branch.", "pr open"),
+		opAct("pr", "open", contract.PrOpenArgs{}.OpKind(), typ[contract.PrOpenArgs](), "Open a pull request with title and base. Body and draft are optional; omit head to use your session branch v2/<session>, and set head to name another branch. Returns the PR number and url.", "pr open"),
 	),
 	method(contract.MethodOpWithdraw, contract.ScopeOperate, UserAccess,
 		act("op", "withdraw", typ[contract.OpWithdrawRequest](), "Withdraw your pending operation by id.", "op withdraw"),

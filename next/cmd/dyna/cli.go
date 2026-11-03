@@ -1286,7 +1286,7 @@ func goalCommand(getClient func() client) *cobra.Command {
 		return err
 	}}
 	done.Flags().BoolVar(&drop, "drop", false, "Give the goal up instead")
-	journal := &cobra.Command{Use: "journal GOAL [TEXT]", Short: "Add to a goal's journal and read its newest lines", Args: cobra.RangeArgs(1, 2), RunE: func(cmd *cobra.Command, args []string) error {
+	journal := &cobra.Command{Use: "journal GOAL [TEXT]", Short: "Add to a goal's journal and read its newest 5 lines", Args: cobra.RangeArgs(1, 2), RunE: func(cmd *cobra.Command, args []string) error {
 		req := contract.GoalJournalRequest{Room: contract.RoomID(roomID), Goal: contract.GoalID(args[0])}
 		if len(args) == 2 {
 			req.Text = args[1]
@@ -1295,7 +1295,7 @@ func goalCommand(getClient func() client) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		return printJSON(cmd, r.Entries)
+		return printJSON(cmd, r)
 	}}
 	goal.AddCommand(set, list, itemCmd, done, journal)
 	return goal
