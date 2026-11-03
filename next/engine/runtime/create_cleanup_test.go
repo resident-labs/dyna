@@ -9,29 +9,56 @@ import (
 	"github.com/resident-labs/dyna/engine/lifecycle"
 )
 
-type blockedCleanup struct {
+type recordedCleanup struct {
 	box.HostDriver
-	entered chan struct{}
+	removed []string
 }
 
-func (h blockedCleanup) RemovePod(ctx context.Context, _ contract.BoxID) error {
-	close(h.entered)
-	<-ctx.Done()
-	return ctx.Err()
+func (h *recordedCleanup) RemovePod(ctx context.Context, _ contract.BoxID) error {
+	h.removed = append(h.removed, "pod:"+errText(ctx.Err()))
+	return nil
 }
-func (blockedCleanup) RemoveStackVolumes(ctx context.Context, _ contract.BoxID) error {
-	return ctx.Err()
+func (h *recordedCleanup) RemoveStackVolumes(context.Context, contract.BoxID) error {
+	h.removed = append(h.removed, "stack")
+	return nil
+}
+func (h *recordedCleanup) RemoveContainer(context.Context, contract.BoxID) error {
+	h.removed = append(h.removed, "container")
+	return nil
+}
+func (h *recordedCleanup) RemoveVolume(context.Context, contract.BoxID) error {
+	h.removed = append(h.removed, "volume")
+	return nil
+}
+func (h *recordedCleanup) RemoveForward(context.Context, box.Forward) error {
+	h.removed = append(h.removed, "forward")
+	return nil
+}
+func (h *recordedCleanup) RemoveSlice(context.Context, string) error {
+	h.removed = append(h.removed, "slice")
+	return nil
 }
 
-func TestCreateCleanupRespectsCancellation(t *testing.T) {
+func errText(err error) string {
+	if err == nil {
+		return "live"
+	}
+	return err.Error()
+}
+
+// A creation that hit its deadline still cleans up what it made, on a context the deadline does not reach.
+func TestCreateCleanupRunsAfterCreationContextEnds(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	h := blockedCleanup{entered: make(chan struct{})}
-	done := make(chan struct{})
-	go func() {
-		cleanupCreate(ctx, h, lifecycle.BoxSpec{}, box.Forward{}, true, false, false, false)
-		close(done)
-	}()
-	<-h.entered
 	cancel()
-	<-done
+	h := &recordedCleanup{}
+	cleanupCreate(ctx, h, lifecycle.BoxSpec{}, box.Forward{}, true, true, true, true)
+	want := []string{"pod:live", "stack", "container", "volume", "forward", "slice"}
+	if len(h.removed) != len(want) {
+		t.Fatalf("removed %v, want %v", h.removed, want)
+	}
+	for i := range want {
+		if h.removed[i] != want[i] {
+			t.Fatalf("removed %v, want %v", h.removed, want)
+		}
+	}
 }

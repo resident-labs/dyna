@@ -39,7 +39,11 @@ func TestStartupFailsStaleCreatingBox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b.State != contract.BoxFailed || b.Reason != "box creation timed out before engine restart" {
+	if b.State != contract.BoxFailed || b.Reason != string(contract.CauseCreateFailed) {
 		t.Fatalf("stale box: %s %q", b.State, b.Reason)
+	}
+	leftovers, err := rig.st.Leftovers(rig.ctx, b.Host)
+	if err != nil || len(leftovers) != 1 || leftovers[0].Box != "b" {
+		t.Fatalf("leftovers %+v: %v", leftovers, err)
 	}
 }

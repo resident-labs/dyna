@@ -750,9 +750,11 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 			missing.Host = string(spec.Host)
 			return "", missing
 		}
-		// Container create can implicitly pull a missing image; its errors are not
-		// safely distinguishable from image errors at this boundary.
-		return "", err
+		var imageErr box.ImageCreateError
+		if errors.As(err, &imageErr) {
+			return "", err
+		}
+		return "", box.RuntimeCreateError{Err: err}
 	}
 	created = true
 	steps.Done("container create")
@@ -770,8 +772,13 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	return image.Tag, nil
 }
 
-// cleanupCreate shares the creation deadline. The next attempt, close or restart removes leftovers.
+// createCleanupTimeout bounds cleanup of a failed creation, which must run even after the creation deadline expired.
+const createCleanupTimeout = 30 * time.Second
+
+// cleanupCreate removes what a failed creation made, on its own bounded context: the creation context is often the reason it failed.
 func cleanupCreate(ctx context.Context, h box.HostDriver, spec lifecycle.BoxSpec, forward box.Forward, stacked, created, forwarded, sliced bool) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), createCleanupTimeout)
+	defer cancel()
 	if stacked {
 		_ = h.RemovePod(ctx, spec.Box)
 		_ = h.RemoveStackVolumes(ctx, spec.Box)
