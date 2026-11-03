@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -308,7 +309,7 @@ func TestHandlerListsReadsAndStopsJobs(t *testing.T) {
 }
 
 // hostRig runs a command on a fake engine that answers when the test says.
-func hostRig(answer func(Run, io.Writer) (int, *contract.Error)) *rig {
+func hostRig(answer func(context.Context, Run, io.Writer) (int, *contract.Error)) *rig {
 	r := newRig("", syscall.SIGKILL)
 	r.server.cfg.Host = answer
 	return r
@@ -316,7 +317,7 @@ func hostRig(answer func(Run, io.Writer) (int, *contract.Error)) *rig {
 
 func TestHostCommandRunsThroughTheEngine(t *testing.T) {
 	var asked Run
-	r := hostRig(func(run Run, out io.Writer) (int, *contract.Error) {
+	r := hostRig(func(_ context.Context, run Run, out io.Writer) (int, *contract.Error) {
 		asked = run
 		_, _ = io.WriteString(out, "token=abc\n")
 		return 3, nil
@@ -338,7 +339,7 @@ func TestHostCommandRunsThroughTheEngine(t *testing.T) {
 }
 
 func TestRefusedHostCommandLeavesNoJob(t *testing.T) {
-	r := hostRig(func(Run, io.Writer) (int, *contract.Error) {
+	r := hostRig(func(context.Context, Run, io.Writer) (int, *contract.Error) {
 		return 0, &contract.Error{Code: contract.ErrNoGrant, Message: "no matching host-exec grant"}
 	})
 	status, body := call(t, r.server.Handler(), "/run", `{"command":"uptime","host":"h"}`)
@@ -352,7 +353,7 @@ func TestRefusedHostCommandLeavesNoJob(t *testing.T) {
 
 func TestSlowHostCommandMovesToBackgroundAndReportsItsEnd(t *testing.T) {
 	release := make(chan struct{})
-	r := hostRig(func(_ Run, out io.Writer) (int, *contract.Error) {
+	r := hostRig(func(_ context.Context, _ Run, out io.Writer) (int, *contract.Error) {
 		<-release
 		_, _ = io.WriteString(out, "done\n")
 		return 0, nil
@@ -366,18 +367,116 @@ func TestSlowHostCommandMovesToBackgroundAndReportsItsEnd(t *testing.T) {
 	if body := <-finish; !strings.Contains(body, `"running":true`) {
 		t.Fatalf("run = %s", body)
 	}
-	if status, body := call(t, r.server.Handler(), "/job", `{"action":"stop","job":"job_1"}`); status != http.StatusBadRequest || !strings.Contains(body, "nothing here can stop a host run") {
-		t.Fatalf("stop = %d %s", status, body)
-	}
 	close(release)
 	if got := <-r.reports; got.Job != "job_1" || got.ExitCode != 0 || !strings.Contains(got.Tail, "done") {
 		t.Fatalf("report %+v", got)
 	}
 }
 
+// stoppableHostRig runs host commands on a fake engine that ends a run when it is asked to stop it by its client ID, as the
+// engine does by stopping its scope. ignore leaves every run going.
+func stoppableHostRig(ignore bool) (*rig, chan string, chan string) {
+	started, stops := make(chan string, 4), make(chan string, 4)
+	asked := make(chan string, 4)
+	r := hostRig(func(ctx context.Context, run Run, out io.Writer) (int, *contract.Error) {
+		started <- run.ClientID
+		for {
+			select {
+			case id := <-asked:
+				if id == run.ClientID {
+					_, _ = io.WriteString(out, "host run: stopped by its session\n")
+					return 143, nil
+				}
+			case <-ctx.Done():
+				return 0, &contract.Error{Code: contract.ErrUnavailable, Message: ctx.Err().Error()}
+			}
+		}
+	})
+	r.server.cfg.HostStop = func(_ context.Context, id string) error {
+		stops <- id
+		if !ignore {
+			asked <- id
+		}
+		return nil
+	}
+	return r, started, stops
+}
+
+// startHostJob starts a host command and moves it to the background.
+func startHostJob(t *testing.T, r *rig) {
+	t.Helper()
+	finish := make(chan string, 1)
+	go func() {
+		_, body := call(t, r.server.Handler(), "/run", `{"command":"find / -name x","host":"h"}`)
+		finish <- body
+	}()
+	(<-r.timers).fire <- time.Now()
+	if body := <-finish; !strings.Contains(body, `"running":true`) {
+		t.Fatalf("run = %s", body)
+	}
+}
+
+// job stop on a host command asks the engine to stop that run, by the client ID its run sent, and the job reads stopped.
+func TestStoppingAHostCommandStopsItsRun(t *testing.T) {
+	r, started, stops := stoppableHostRig(false)
+	startHostJob(t, r)
+	id := <-started
+	if len(id) != 32 {
+		t.Fatalf("client ID %q", id)
+	}
+	_, body := call(t, r.server.Handler(), "/job", `{"action":"stop","job":"job_1"}`)
+	if got := <-stops; got != id {
+		t.Fatalf("stopped %q, ran %q", got, id)
+	}
+	if !strings.Contains(body, `"status":"stopped"`) || strings.Contains(body, "unavailable") {
+		t.Fatalf("stop = %s", body)
+	}
+	if _, body := call(t, r.server.Handler(), "/job", `{"action":"list"}`); !strings.Contains(body, `"status":"stopped"`) {
+		t.Fatalf("list = %s", body)
+	}
+	// A stop the agent asked for wakes no one, as for a box command.
+	select {
+	case got := <-r.reports:
+		t.Fatalf("report %+v", got)
+	default:
+	}
+}
+
+// A run the engine does not stop in the grace period stops being waited for, as SIGKILL ends a box command.
+func TestAHostRunThatOutlastsItsStopEndsTheJob(t *testing.T) {
+	r, _, stops := stoppableHostRig(true)
+	startHostJob(t, r)
+	stopped := make(chan string, 1)
+	go func() {
+		_, body := call(t, r.server.Handler(), "/job", `{"action":"stop","job":"job_1"}`)
+		stopped <- body
+	}()
+	<-stops
+	(<-r.timers).fire <- time.Now() // the grace period
+	if body := <-stopped; !strings.Contains(body, `"status":"stopped"`) || strings.Contains(body, "unavailable") {
+		t.Fatalf("stop = %s", body)
+	}
+}
+
+// Closing the box stops its host runs, and waits for those stops to reach the engine.
+func TestClosingStopsHostRuns(t *testing.T) {
+	r, started, stops := stoppableHostRig(false)
+	startHostJob(t, r)
+	id := <-started
+	r.server.Close()
+	select {
+	case got := <-stops:
+		if got != id {
+			t.Fatalf("stopped %q, ran %q", got, id)
+		}
+	default:
+		t.Fatal("close returned before the stop was asked")
+	}
+}
+
 func TestLateHostRefusalReachesTheJobOutput(t *testing.T) {
 	release := make(chan struct{})
-	r := hostRig(func(Run, io.Writer) (int, *contract.Error) {
+	r := hostRig(func(context.Context, Run, io.Writer) (int, *contract.Error) {
 		<-release
 		return 0, &contract.Error{Code: contract.ErrNoGrant, Message: "no grant"}
 	})

@@ -230,6 +230,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodRoomList, c, a.service.RoomList)
 	call(mux, contract.MethodSessionList, c, a.service.SessionList)
 	call(mux, contract.MethodHostexecRun, c, a.service.HostexecRun)
+	call(mux, contract.MethodHostexecStop, c, a.service.HostexecStop)
 	call(mux, contract.MethodHostexecList, c, a.service.HostexecList)
 	call(mux, contract.MethodOpSubmit, c, func(ctx context.Context, p contract.Principal, req contract.OpSubmitRequest) (contract.OpSubmitResponse, *contract.Error) {
 		c := requestCaller(ctx, c)

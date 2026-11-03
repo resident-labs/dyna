@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -202,7 +201,7 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	jobs := shell.New(shell.Config{After: time.After, Report: func(r contract.ShellJobEndedRequest) error { return client.ShellJobEnded(ctx, r) }, Running: func(r contract.ShellJobRunningRequest) error { return client.ShellJobRunning(ctx, r) }, Host: func(r shell.Run, out io.Writer) (int, *contract.Error) { return client.HostRun(ctx, r, out) }})
+	jobs := shell.New(shell.Config{After: time.After, Report: func(r contract.ShellJobEndedRequest) error { return client.ShellJobEnded(ctx, r) }, Running: func(r contract.ShellJobRunningRequest) error { return client.ShellJobRunning(ctx, r) }, Host: client.HostRun, HostStop: client.HostStop})
 	defer jobs.Close()
 	client.shellJobs = jobs.Running
 	mux := http.NewServeMux()

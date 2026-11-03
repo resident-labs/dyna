@@ -165,9 +165,10 @@ func (c *Client) forward(ctx context.Context, method contract.Method, body []byt
 }
 
 // HostRun runs one command on a host and writes its output as the run ends. The engine answers only then, so the call stays
-// open as long as the command does. A problem after the engine took the command is the job's failure, not a refusal.
+// open as long as the command does. Ending ctx ends only the call; HostStop stops the command. A problem after the engine
+// took the command is the job's failure, not a refusal.
 func (c *Client) HostRun(ctx context.Context, r shell.Run, out io.Writer) (int, *contract.Error) {
-	req := contract.HostexecRunRequest{Host: r.Host, Command: r.Command, Cwd: r.Cwd, Timeout: contract.DurationMS(r.Timeout) * 1000}
+	req := contract.HostexecRunRequest{Host: r.Host, Command: r.Command, Cwd: r.Cwd, Timeout: contract.DurationMS(r.Timeout) * 1000, ClientID: r.ClientID}
 	body, err := json.Marshal(req)
 	if err != nil {
 		return 0, &contract.Error{Code: contract.ErrInvalid, Message: err.Error()}
@@ -202,6 +203,18 @@ func (c *Client) HostRun(ctx context.Context, r shell.Run, out io.Writer) (int, 
 		}
 	}
 	return result.ExitCode, nil
+}
+
+// HostStop asks the engine to stop the host run that HostRun started with that client ID.
+func (c *Client) HostStop(ctx context.Context, clientID string) error {
+	body, err := json.Marshal(contract.HostexecStopRequest{ClientID: clientID})
+	if err != nil {
+		return err
+	}
+	if _, problem := c.forward(ctx, contract.MethodHostexecStop, body); problem != nil {
+		return fmt.Errorf("%s: %s", problem.Code, problem.Message)
+	}
+	return nil
 }
 
 func (c *Client) file(ctx context.Context, hash string, out io.Writer) error {
