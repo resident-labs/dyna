@@ -12,6 +12,8 @@ func TestActivityLabel(t *testing.T) {
 		{"bash", `{"command":"` + strings.Repeat("x", 90) + `\nignored"}`, "bash " + strings.Repeat("x", 90)},
 		{"bash", `{"command":"uptime","host":"hermeslab"}`, "bash on hermeslab: uptime"},
 		{"job", `{"action":"output","job":"job_1"}`, "job job_1"},
+		{"computer", `{"action":"click","x":10,"y":20,"status":"Opening the settings"}`, "computer Opening the settings"},
+		{"computer", `{"action":"launch","command":"urxvt"}`, "computer urxvt"},
 		{"tool", `{"other":"value"}`, "tool"},
 		{"tool", `["not an object"]`, "tool"},
 	} {

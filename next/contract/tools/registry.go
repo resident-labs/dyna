@@ -32,6 +32,14 @@ const (
 	ComputerType
 	ComputerText
 	ComputerScreenshot
+	ComputerMove
+	ComputerDrag
+	ComputerScroll
+	ComputerKey
+	ComputerWait
+	ComputerLaunch
+	ComputerStop
+	lastBoxHandler = ComputerStop
 )
 
 // Action is one agent action with its CLI commands. Request is the schema
@@ -88,16 +96,6 @@ type SkillSaveInput struct {
 
 type FileRequest struct {
 	File string `json:"file" desc:"Absolute, or relative to your working directory."`
-}
-type OpenRequest struct {
-	URL string `json:"url"`
-}
-type SelectorRequest struct {
-	Selector string `json:"selector"`
-}
-type TypeRequest struct {
-	Selector string `json:"selector"`
-	Text     string `json:"text"`
 }
 
 // The generic type is the concrete request struct named at each row.
