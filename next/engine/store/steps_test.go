@@ -23,7 +23,7 @@ func TestUpgradeRunsOneStep(t *testing.T) {
 		t.Fatal(err)
 	}
 	stepsForTest := map[int][]string{schemaVersion - 1: {"CREATE TABLE probe (id INTEGER PRIMARY KEY)"}}
-	if err := upgrade(db, 1, "", stepsForTest, nil); err != nil {
+	if err := upgrade(db, 1, "", stepsForTest); err != nil {
 		t.Fatal(err)
 	}
 	var value string

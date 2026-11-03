@@ -27,8 +27,8 @@ that no job waits for a pool that does not exist yet.
    with `user_allow_other` in `/etc/fuse.conf`, and that is all: `dyna host add`
    copies the Dyna binary across, and `jq`, `socat` and the rest live in the
    runner image. The engine's key must be a plain one in the
-   host user's `authorized_keys`. A key with a forced command, such as a backup
-   key, cannot run anything. SSH once by hand as the engine's user, because the
+   host user's `authorized_keys`. A key with a forced command cannot run
+   anything. SSH once by hand as the engine's user, because the
    engine cannot answer a host key prompt. A laptop or any host that logs out needs
    `sudo loginctl enable-linger USER` first, because rootless containers stop with
    the user's session.
