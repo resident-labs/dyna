@@ -59,8 +59,9 @@ func (s *Service) HostexecRun(ctx context.Context, who contract.Principal, req c
 }
 func (s *Service) HostexecRunEntry() approve.Entry {
 	return approve.Entry{
-		Scope: contract.ScopeTerminal,
-		Class: func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassAuto },
+		Scope:       contract.ScopeTerminal,
+		CallerBound: true,
+		Class:       func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassAuto },
 		Card: func(_ context.Context, args contract.OpArgs, _ contract.Principal) contract.Card {
 			a := args.(contract.HostexecRunArgs)
 			body := fmt.Sprintf("timeout: %s", time.Duration(a.Timeout)*time.Millisecond)
@@ -99,10 +100,24 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 			}
 			started := s.now()
 			runCtx, cancel := s.hostexecTimeout(ctx, time.Duration(a.Timeout)*time.Millisecond+15*time.Second)
+			// A caller that goes away, as a stopped job does, ends the run now rather than at its timeout.
+			caller := approve.Caller(ctx)
+			unbind := context.AfterFunc(caller, cancel)
 			out, code, truncated, err := s.hostexec.RunHostexec(runCtx, a, op)
+			unbind()
 			cancel()
+			left := err != nil && caller.Err() != nil
 			stopped := store.HostexecStop("")
-			if err != nil {
+			if left {
+				// Ending the connection need not end the command, so its scope is stopped on the host. A stop that fails
+				// leaves the run lost, and the sweep stops it once the host answers.
+				stopCtx, done := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				stopped = store.HostexecStopped
+				if s.hostexec.StopHostexec(stopCtx, a.Host, run.Scope) != nil {
+					stopped = store.HostexecLost
+				}
+				done()
+			} else if err != nil {
 				stopped = store.HostexecLost
 			} else if err == nil && (code == 137 || code == 143) && !s.now().Before(started.Add(time.Duration(a.Timeout)*time.Millisecond)) {
 				// A signal-like exit at the deadline is treated as RuntimeMaxSec expiry.
@@ -112,7 +127,9 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: e.Error()}
 			}
 			result := contract.OpResult{ExitCode: code, Truncated: truncated}
-			if err != nil {
+			if left {
+				result.Error = "stopped: its caller ended the run"
+			} else if err != nil {
 				result.Error = err.Error()
 				result.Cause = contract.CauseHostLost
 			}

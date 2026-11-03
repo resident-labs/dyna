@@ -16,6 +16,7 @@ const (
 	HostexecClosed  HostexecStop = "closed"
 	HostexecLost    HostexecStop = "lost"
 	HostexecTimeout HostexecStop = "timeout"
+	HostexecStopped HostexecStop = "stopped" // its caller went away, as a stopped job does
 )
 
 type HostexecRun struct {
