@@ -92,12 +92,18 @@ func (b *Boxes) syncInstructions(ctx context.Context, h *podman.Host) error {
 			files = append(files, podman.InstructionFile{Path: b.Layout.HostInstructions(room), Data: data})
 		}
 		if b.Addons != nil {
-			bundle, err := b.Addons.Bundle(room)
-			if err != nil {
-				return err
-			}
-			if bundle != nil {
-				files = append(files, podman.InstructionFile{Path: b.Layout.HostAddons(room), Data: bundle})
+			for _, rootOnly := range []bool{false, true} {
+				bundle, err := b.Addons.Bundle(room, rootOnly)
+				if err != nil {
+					return err
+				}
+				path := b.Layout.HostAddons(room)
+				if rootOnly {
+					path = b.Layout.HostRootAddons(room)
+				}
+				if bundle != nil {
+					files = append(files, podman.InstructionFile{Path: path, Data: bundle})
+				}
 			}
 		}
 	}

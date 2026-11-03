@@ -736,6 +736,7 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	if err != nil {
 		return "", err
 	}
+	spec.Root = session.Root
 	if err := b.Sockets.AddBox(spec.Box, spec.Session, session.Room); err != nil {
 		return "", box.RuntimeCreateError{Err: err}
 	}
@@ -1418,6 +1419,11 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image stri
 		return err
 	}
 	steps.Done("shared folder")
+	session, err := b.Store.Session(ctx, spec.Session)
+	if err != nil {
+		return err
+	}
+	spec.Root = session.Root
 	if err := h.StopContainer(ctx, spec.Box); err != nil {
 		return err
 	}
@@ -1476,6 +1482,11 @@ func (b *Boxes) container(spec lifecycle.BoxSpec, image string, shared box.Mount
 		{HostPath: filepath.Dir(b.Layout.HostInstructions("")), BoxPath: "/run/dyna/instructions/global", ReadOnly: true, MakeDir: true},
 		{HostPath: filepath.Dir(b.Layout.HostInstructions(spec.Room)), BoxPath: "/run/dyna/instructions/room", ReadOnly: true, MakeDir: true},
 	}, Env: []box.EnvVar{{Name: "GOMODCACHE", Value: "/box/cache/gomod"}, {Name: "GOCACHE", Value: "/box/cache/gocache"}, {Name: "CARGO_HOME", Value: box.CargoHome}, {Name: "npm_config_store_dir", Value: "/box/cache/pnpm"}}}
+	if spec.Root {
+		c.Mounts = append(c.Mounts,
+			box.Mount{HostPath: filepath.Dir(b.Layout.HostRootAddons("")), BoxPath: "/run/dyna/root-addons/global", ReadOnly: true, MakeDir: true},
+			box.Mount{HostPath: filepath.Dir(b.Layout.HostRootAddons(spec.Room)), BoxPath: "/run/dyna/root-addons/room", ReadOnly: true, MakeDir: true})
+	}
 	for _, repo := range spec.Repos {
 		c.Mounts = append(c.Mounts, box.Mount{HostPath: repo.Cache, BoxPath: repo.Cache, ReadOnly: true})
 	}
