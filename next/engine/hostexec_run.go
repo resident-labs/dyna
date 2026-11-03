@@ -52,6 +52,9 @@ func (s *Service) HostexecRun(ctx context.Context, who contract.Principal, req c
 	if len(req.ClientID) > 64 {
 		return contract.HostexecRunResponse{}, invalid("client_id is at most 64 characters")
 	}
+	if n := boxhostexec.QuotedLen([]string{"bash", "-c", req.Command}); n > boxhostexec.MaxQuoted {
+		return contract.HostexecRunResponse{}, &contract.Error{Code: contract.ErrCommandTooLong, Message: fmt.Sprintf("the command takes %d bytes once quoted for the host; one environment string holds at most %d", n, boxhostexec.MaxQuoted)}
+	}
 	grant, err := s.matchHostexec(ctx, session.Room, who, req.Host)
 	if errors.Is(err, hostexec.ErrNoGrant) {
 		return contract.HostexecRunResponse{}, &contract.Error{Code: contract.ErrNoGrant, Message: "no matching host-exec grant"}
