@@ -281,8 +281,18 @@ type BoxChanged struct {
 	From    BoxState     `json:"from,omitempty"` // empty for a new box
 	To      BoxState     `json:"to"`
 	Cause   FailureCause `json:"cause,omitempty"` // a failed box, or a close that could not archive
+	Phase   CreatePhase  `json:"phase,omitempty"` // where a failed creation stopped
 	Reason  string       `json:"reason,omitempty"`
 }
+
+// CreatePhase says which step of box creation failed.
+type CreatePhase string
+
+const (
+	CreatePhaseRemoveOld  CreatePhase = "remove_old" // removing resources of an earlier attempt
+	CreatePhaseRepository CreatePhase = "repository" // preparing the session repositories
+	CreatePhaseBox        CreatePhase = "box"        // creating the box on its host
+)
 
 // FailureCause says in owner terms why a box, an operation or a turn failed. The Reason or Error
 // text beside it is detail for agents and logs; owner views show only the cause (r8).

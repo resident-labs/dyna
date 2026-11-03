@@ -495,7 +495,7 @@ func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
 	}
 	if checks == "" {
 		_, err := h.run(ctx, args...)
-		return err
+		return imageFailure(err)
 	}
 	command := append([]string{"bash", "-c", checks + `exec "$@"`, "dyna-devices"}, args...)
 	out, err := h.run(ctx, command...)
@@ -506,6 +506,20 @@ func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
 			return box.MissingDevice{Need: box.NeedNestedContainers}
 		case string(box.NeedKVM):
 			return box.MissingDevice{Need: box.NeedKVM}
+		}
+	}
+	return imageFailure(err)
+}
+
+// imageFailure types the podman errors that say the image is missing or invalid.
+func imageFailure(err error) error {
+	if err == nil {
+		return nil
+	}
+	message := err.Error()
+	for _, marker := range []string{"image not known", "manifest unknown", "invalid reference format", "pull access denied", "requested access to the resource is denied"} {
+		if strings.Contains(message, marker) {
+			return box.ImageCreateError{Err: err}
 		}
 	}
 	return err

@@ -312,3 +312,11 @@ func (s *Store) ForgetLeftover(ctx context.Context, l Leftover) error {
 		return err
 	})
 }
+
+// AddBoxLeftover records that a host may still hold a box's resources, for the leftovers sweep to remove.
+func (s *Store) AddBoxLeftover(ctx context.Context, host contract.HostName, room contract.RoomID, id contract.BoxID, slice string) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO room_leftovers(host,room,box,slice) VALUES(?,?,?,?)", host, room, id, slice)
+		return err
+	})
+}
