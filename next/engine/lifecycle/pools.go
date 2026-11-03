@@ -301,7 +301,7 @@ func holdsNode(node box.Host, rows []store.LifecycleBox) bool {
 		if row.State == contract.BoxDeleted {
 			return false
 		}
-		return row.Host == node.Name || row.ID == node.Box && row.Host == "" && node.State == box.HostReady
+		return row.Host == node.Name || row.ID == node.Box && row.Host == "" && node.State == box.HostReady && node.Problem != contract.HostProblemCreateFailed
 	})
 }
 
