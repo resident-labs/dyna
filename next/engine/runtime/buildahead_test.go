@@ -1,10 +1,12 @@
 package runtime
 
 import (
-	"github.com/resident-labs/dyna/box/skills"
+	"archive/tar"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"github.com/resident-labs/dyna/box/skills"
 	"os"
 	"path/filepath"
 	"slices"
@@ -94,6 +96,15 @@ type aheadGit struct{}
 func (aheadGit) Run(_ context.Context, _ []string, args ...string) ([]byte, error) {
 	if strings.Contains(args[1], "missing") {
 		return nil, errors.New("not a git repository")
+	}
+	joined := strings.Join(args, " ")
+	switch {
+	case strings.Contains(joined, "ls-tree HEAD .dyna/images"):
+		return []byte("040000 tree aaa\t.dyna/images\n"), nil
+	case strings.Contains(joined, "ls-tree aaa"):
+		return []byte("040000 tree bbb\tlegacy\n"), nil
+	case strings.Contains(joined, "archive"):
+		return aheadLegacyTar, nil
 	}
 	return nil, nil
 }
@@ -222,5 +233,37 @@ func TestBuildAheadMakesTheTagABoxWillAskFor(t *testing.T) {
 	base, err := b.hosts["one"].BuildBase(context.Background(), images.BaseContainerfile, b.PiTarball)
 	if err != nil || r.count("'-t' '"+base+"'") == 0 {
 		t.Fatalf("base %s: %v", base, err)
+	}
+}
+
+// aheadLegacyTar is what git archive gives for a repository image folder holding just a Containerfile.
+var aheadLegacyTar = func() []byte {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	body := "ARG DYNA_BASE\nFROM ${DYNA_BASE}\n"
+	if err := errors.Join(tw.WriteHeader(&tar.Header{Name: "Containerfile", Mode: 0o644, Size: int64(len(body))}), func() error { _, err := tw.Write([]byte(body)); return err }(), tw.Close()); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}()
+
+// A repository whose mirror came after the migration at start is migrated at its first use, so its room does not lose its image.
+func TestFirstUseMigratesARepositoryWhoseMirrorCameLate(t *testing.T) {
+	r := &aheadHost{}
+	b := newAheadBoxes(t, r, []box.Host{{Name: "one", State: box.HostReady}}, map[contract.RoomID][]contract.RepoName{"room_1": {"owner/repo"}})
+	b.Layout = b.Mirror.Layout
+	if err := os.RemoveAll(b.Layout.Images("room_1")); err != nil {
+		t.Fatal(err)
+	}
+	path, err := b.Mirror.Layout.Git("owner/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	b.BuildAhead(context.Background())
+	if r.count("'-t' 'dyna-img-legacy:") == 0 {
+		t.Fatalf("the repository's image was not brought over and built: %v", r.commands)
 	}
 }
