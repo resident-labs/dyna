@@ -78,6 +78,11 @@ func (h *Host) Build(ctx context.Context, tag, base string, contextTar []byte) (
 }
 
 func (h *Host) build(ctx context.Context, tag, base string, contextTar []byte, warm bool) (bool, error) {
+	return h.buildWith(ctx, tag, "DYNA_BASE", base, contextTar, warm)
+}
+
+// buildWith is build with the name of the argument that carries the base.
+func (h *Host) buildWith(ctx context.Context, tag, baseArg, base string, contextTar []byte, warm bool) (bool, error) {
 	select {
 	case h.buildGate <- struct{}{}:
 		defer func() { <-h.buildGate }()
@@ -94,7 +99,7 @@ func (h *Host) build(ctx context.Context, tag, base string, contextTar []byte, w
 	}
 	args := []string{"podman", "build", "-t", tag}
 	if base != "" {
-		args = append(args, "--build-arg", "DYNA_BASE="+base)
+		args = append(args, "--build-arg", baseArg+"="+base)
 	}
 	args = append(args, "-")
 	// A build has no bound, so like a warm it takes no short-command slot.
