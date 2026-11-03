@@ -58,7 +58,10 @@ func TestAdmissionFollowsARoomsRule(t *testing.T) {
 		want  contract.HostName
 	}{
 		{[]box.Host{plain, shared}, nil, "plain"},
-		{[]box.Host{shared}, nil, ""},
+		{[]box.Host{shared}, nil, "shared"}, // no rule means any host, shared pool nodes included
+		{[]box.Host{shared}, []string{"other"}, ""},
+		{[]box.Host{own}, nil, "own"},
+		{[]box.Host{theirs}, nil, ""},
 		{[]box.Host{plain}, []string{"other"}, ""},
 		{[]box.Host{plain, shared}, []string{"boats"}, "shared"},
 		{[]box.Host{plain, shared}, []string{"plain"}, "plain"},
@@ -69,6 +72,12 @@ func TestAdmissionFollowsARoomsRule(t *testing.T) {
 		if p.Host != tc.want || (tc.want == "") != (p.Reason == box.PendingRoomHost) {
 			t.Errorf("%+v: %+v", tc, p)
 		}
+	}
+	// A shared node lists the rooms that named its pool when it came up, and a room with no rule is served all the same.
+	listed := shared
+	listed.Rooms = []contract.RoomID{"another"}
+	if p := box.Admit([]box.Host{listed}, nil, request); p.Host != "shared" {
+		t.Fatalf("no rule, node listing another room: %+v", p)
 	}
 	// A box already on a host stays there, whatever the rule says now.
 	placed := request
