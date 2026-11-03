@@ -23,6 +23,7 @@ type profile struct {
 	Cost          int                    `json:"cost"`
 	Provider      contract.ModelProvider `json:"provider"`
 	Model         string                 `json:"model"`
+	Images        *bool                  `json:"images,omitempty"`
 	AllowedModels []string               `json:"allowedModels"`
 	Thinking      contract.ThinkingLevel `json:"thinking"`
 	CompactTokens int                    `json:"compactTokens,omitempty"`
@@ -95,7 +96,7 @@ func (p *ProfileConfig) List() []contract.ProfileSummary {
 	defer p.mu.RUnlock()
 	result := make([]contract.ProfileSummary, 0, len(p.entries))
 	for name, profile := range p.entries {
-		result = append(result, contract.ProfileSummary{Name: name, Provider: profile.Provider, Model: profile.Model, Thinking: profile.Thinking, Description: profile.Description, Taste: profile.Taste, Diagnostics: profile.Diagnostics, Intelligence: profile.Intelligence, Cost: profile.Cost, AllowedModels: slices.Clone(profile.AllowedModels), CompactTokens: profile.CompactTokens, MaxConcurrent: profile.MaxConcurrent})
+		result = append(result, contract.ProfileSummary{Name: name, Provider: profile.Provider, Model: profile.Model, Images: profile.Images, Thinking: profile.Thinking, Description: profile.Description, Taste: profile.Taste, Diagnostics: profile.Diagnostics, Intelligence: profile.Intelligence, Cost: profile.Cost, AllowedModels: slices.Clone(profile.AllowedModels), CompactTokens: profile.CompactTokens, MaxConcurrent: profile.MaxConcurrent})
 	}
 	slices.SortFunc(result, func(a, b contract.ProfileSummary) int { return strings.Compare(string(a.Name), string(b.Name)) })
 	return result
@@ -224,7 +225,7 @@ func (s *Service) ProfileSet(ctx context.Context, who contract.Principal, req co
 		return contract.ProfileSetResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "profile configuration is read-only"}
 	}
 	v := req.Profile
-	err := p.update(v.Name, &profile{Description: v.Description, Taste: v.Taste, Diagnostics: v.Diagnostics, Intelligence: v.Intelligence, Cost: v.Cost, Provider: v.Provider, Model: v.Model, AllowedModels: slices.Clone(v.AllowedModels), Thinking: v.Thinking, CompactTokens: v.CompactTokens, MaxConcurrent: v.MaxConcurrent}, req.Create)
+	err := p.update(v.Name, &profile{Description: v.Description, Taste: v.Taste, Diagnostics: v.Diagnostics, Intelligence: v.Intelligence, Cost: v.Cost, Provider: v.Provider, Model: v.Model, Images: v.Images, AllowedModels: slices.Clone(v.AllowedModels), Thinking: v.Thinking, CompactTokens: v.CompactTokens, MaxConcurrent: v.MaxConcurrent}, req.Create)
 	if err == nil && !req.Create {
 		// An edit can move every session on the profile to another model at its next turn.
 		if sessions, readErr := s.store.SessionsOnProfile(ctx, v.Name); readErr == nil {

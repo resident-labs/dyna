@@ -29,6 +29,8 @@ the owner's proxy sign-in. For example:
 }
 ```
 
+For a text-only model, add `"images": false` to its profile. Omit it for models that accept images. Boxes read these settings at start; refresh running sessions after adding or changing a text-only profile.
+
 Start the engine. Use an absolute path on the host for `--host-data`. The
 host check creates this directory.
 

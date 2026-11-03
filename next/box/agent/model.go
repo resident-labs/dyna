@@ -115,24 +115,52 @@ type ModelProvider struct {
 	BaseURL string            `json:"baseUrl"`
 	APIKey  string            `json:"apiKey"`
 	Headers map[string]string `json:"headers,omitempty"`
+	Models  []ModelDefinition `json:"models,omitempty"`
+}
+
+type ModelDefinition struct {
+	ID            string   `json:"id"`
+	API           string   `json:"api"`
+	Reasoning     bool     `json:"reasoning"`
+	Input         []string `json:"input"`
+	ContextWindow int      `json:"contextWindow"`
+	MaxTokens     int      `json:"maxTokens"`
 }
 
 type ModelsConfig struct {
 	Providers map[string]ModelProvider `json:"providers"`
 }
 
-func Models() ModelsConfig {
+func Models(profiles ...contract.ProfileSummary) ModelsConfig {
 	origin := "http://127.0.0.1:7781"
-	return ModelsConfig{Providers: map[string]ModelProvider{
+	config := ModelsConfig{Providers: map[string]ModelProvider{
 		"anthropic": {BaseURL: origin, APIKey: "box"},
 		"openai":    {BaseURL: origin + "/v1", APIKey: "box"},
 	}}
+	for _, profile := range profiles {
+		if profile.Images == nil || *profile.Images {
+			continue
+		}
+		provider := config.Providers[string(profile.Provider)]
+		// Pi's fallback uses the provider's default model. These limits and APIs are from
+		// the installed Pi catalog's gpt-5.5 and claude-opus-4-8, respectively.
+		model := ModelDefinition{ID: profile.Model, Reasoning: profile.Thinking != contract.ThinkingOff, Input: []string{"text"}, MaxTokens: 128000}
+		switch profile.Provider {
+		case contract.ModelProviderOpenAI:
+			model.API, model.ContextWindow = "openai-responses", 272000
+		case contract.ModelProviderAnthropic:
+			model.API, model.ContextWindow = "anthropic-messages", 1000000
+		}
+		provider.Models = append(provider.Models, model)
+		config.Providers[string(profile.Provider)] = provider
+	}
+	return config
 }
 
 // WorkerModels is one crew worker's configuration. The engine's route reads the header, so each worker holds its own account
 // affinity although a crew is one session.
-func WorkerModels(worker string) ModelsConfig {
-	config := Models()
+func WorkerModels(worker string, profiles ...contract.ProfileSummary) ModelsConfig {
+	config := Models(profiles...)
 	for name, provider := range config.Providers {
 		provider.Headers = map[string]string{contract.WorkerHeader: worker}
 		config.Providers[name] = provider
