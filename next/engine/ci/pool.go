@@ -23,13 +23,12 @@ import (
 const (
 	namePrefix = "dyna-ci-"
 
-	leaseFor   = 10 * time.Minute
+	// The lease is written for leaseFor every leaseEvery, so two writes in a row can fail, or a restart and a slow pass
+	// can take their time, before a run sees the pool gone.
+	leaseFor   = 15 * time.Minute
 	leaseEvery = 5 * time.Minute
-	// serveWindow is how old the last long poll may be for the pool to count as
-	// alive. A poll returns within about a minute.
-	serveWindow = 3 * time.Minute
-	reapEvery   = time.Hour
-	retryAfter  = 5 * time.Minute
+	reapEvery  = time.Hour
+	retryAfter = 5 * time.Minute
 	// scaleLimit is one pass, and leaves room for the first image build on a host.
 	scaleLimit = 20 * time.Minute
 )
@@ -98,7 +97,6 @@ type Pool struct {
 	images    map[contract.HostName]string // each host's current runner image, once built or found there
 	building  map[contract.HostName]bool   // hosts a build-ahead is working on
 	retry     map[contract.HostName]time.Time
-	serving   map[contract.RepoName]time.Time
 	leased    map[contract.RepoName]time.Time
 	reaped    map[contract.RepoName]time.Time
 
@@ -175,7 +173,12 @@ func (p *Pool) Tick(ctx context.Context, group *sync.WaitGroup) error {
 		}
 	}
 	for repo := range view.repos {
-		if err := p.upkeep(ctx, repo, alive[repo]); err != nil {
+		hosts := make([]box.Host, 0, len(view.hosts))
+		for _, host := range view.hosts {
+			hosts = append(hosts, host.host)
+		}
+		pooled := slices.ContainsFunc(hosts, func(h box.Host) bool { return h.TakesRunners(view.repos[repo].Only) })
+		if err := p.upkeep(ctx, repo, pooled, alive[repo]); err != nil {
 			failures = append(failures, fmt.Errorf("repository %s: %w", repo, err))
 		}
 	}
@@ -259,12 +262,6 @@ func (p *Pool) scale(ctx context.Context, key scaleSet, assigned int) int {
 	capacity, err := p.place(ctx, key, assigned, view)
 	if err != nil {
 		log.Printf("ci pool: repository %s: %s: %v", key.repo, SetName(key.size), err)
-	}
-	if capacity > 0 {
-		if p.serving == nil {
-			p.serving = make(map[contract.RepoName]time.Time)
-		}
-		p.serving[key.repo] = p.Now()
 	}
 	return capacity
 }
@@ -615,11 +612,13 @@ func (p *Pool) sweep(ctx context.Context, host *surveyed, view survey, alive map
 	return nil
 }
 
-// upkeep renews the lease while the pool can serve and removes dead registrations.
-func (p *Pool) upkeep(ctx context.Context, repo contract.RepoName, alive map[string]bool) error {
+// upkeep renews the lease while the pool is alive for the repository, and removes dead registrations. pooled says that a ready
+// ci host the repository's rule allows answered this pass's survey. It holds with every slot busy, and on the first pass after
+// a start, since only the time of the last write is kept in memory.
+func (p *Pool) upkeep(ctx context.Context, repo contract.RepoName, pooled bool, alive map[string]bool) error {
 	var failures []error
 	now := p.Now()
-	if !p.serving[repo].IsZero() && now.Sub(p.serving[repo]) < serveWindow && !now.Before(p.leased[repo]) {
+	if pooled && !now.Before(p.leased[repo]) {
 		if err := p.GitHub.RenewLease(ctx, repo, now.Add(leaseFor)); err != nil {
 			failures = append(failures, err)
 		} else {

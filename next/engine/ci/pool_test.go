@@ -558,41 +558,88 @@ func TestReapRunsHourly(t *testing.T) {
 	f.stop()
 }
 
-func TestLeaseRenewsOnlyWhileThePoolServes(t *testing.T) {
+func TestLeaseRenewsEveryFiveMinutesWhileAHostIsPooled(t *testing.T) {
 	f := newFixture(1)
-	f.tick(t)
-	if len(f.api.leases) != 0 {
-		t.Fatal("leased before any poll")
-	}
-	f.scale(0)
 	f.tick(t)
 	if len(f.api.leases) != 1 || !f.api.leases[0].Equal(f.now.Add(leaseFor)) {
 		t.Fatalf("leases %v", f.api.leases)
 	}
-	f.now = f.now.Add(time.Minute)
-	f.scale(0)
+	f.now = f.now.Add(leaseEvery - time.Second)
 	f.tick(t)
 	if len(f.api.leases) != 1 {
 		t.Fatalf("renewed early: %v", f.api.leases)
 	}
-	f.now = f.now.Add(leaseEvery)
-	f.scale(0)
+	f.now = f.now.Add(time.Second)
 	f.tick(t)
 	if len(f.api.leases) != 2 {
 		t.Fatalf("leases %v", f.api.leases)
 	}
-	// The listener died: polls stop, so the lease runs out.
-	f.now = f.now.Add(serveWindow)
+	f.stop()
+}
+
+func TestLeaseRenewsOnTheFirstPassAfterARestart(t *testing.T) {
+	f := newFixture(1)
 	f.tick(t)
-	if len(f.api.leases) != 2 {
-		t.Fatalf("a silent listener renewed its lease: %v", f.api.leases)
+	f.stop()
+	// A new engine knows nothing of the last write and has seen no poll.
+	f.pool = &Pool{Store: f.store, GitHub: f.api, Sets: f.sets, Now: f.pool.Now, Hosts: f.pool.Hosts}
+	f.now = f.now.Add(time.Minute)
+	f.tick(t)
+	if len(f.api.leases) != 2 || !f.api.leases[1].Equal(f.now.Add(leaseFor)) {
+		t.Fatalf("leases %v", f.api.leases)
 	}
-	// Every host below its floor: polls go on, but with no capacity.
-	f.store.hosts[0].DiskBytes = 0
-	f.scale(0)
+	f.stop()
+}
+
+func TestLeaseRenewsWithEverySlotBusy(t *testing.T) {
+	f := newFixture(1)
+	// The bound is spent by a runner of another size, so this set's capacity is 0 though the pool is alive.
+	small, _ := box.Size(contract.BoxSizeSmall)
+	f.drivers["pve"].runners = []box.Runner{{Name: "dyna-ci-pve-1", Repo: repo, ID: 100, Slot: 0, Size: small, Running: true}}
+	f.drivers["pve"].egress = true
+	if capacity := f.scale(1); capacity != 0 {
+		t.Fatalf("pool not saturated: capacity %d", capacity)
+	}
+	f.tick(t)
+	f.now = f.now.Add(10 * time.Minute)
+	f.scale(1)
 	f.tick(t)
 	if len(f.api.leases) != 2 {
-		t.Fatalf("a pool with no capacity renewed its lease: %v", f.api.leases)
+		t.Fatalf("a full pool let its lease lapse: %v", f.api.leases)
+	}
+	f.stop()
+}
+
+func TestLeaseHoldsForAHostWithoutRoomButNotWithoutAHost(t *testing.T) {
+	f := newFixture(1)
+	// Below its disk floor the host takes no runner, and is still the pool.
+	f.store.hosts[0].DiskBytes = 0
+	f.tick(t)
+	if len(f.api.leases) != 1 {
+		t.Fatalf("leases %v", f.api.leases)
+	}
+	f.now = f.now.Add(leaseEvery)
+	f.store.hosts[0].CI = false
+	f.tick(t)
+	if len(f.api.leases) != 1 {
+		t.Fatalf("a host with ci off kept the lease: %v", f.api.leases)
+	}
+	f.store.hosts[0].CI = true
+	f.drivers["pve"].listErr = errors.New("unreachable")
+	f.pool.Tick(context.Background(), &f.group)
+	if len(f.api.leases) != 1 {
+		t.Fatalf("a host that did not answer kept the lease: %v", f.api.leases)
+	}
+	f.drivers["pve"].listErr = nil
+	f.store.repos[0].Only = []string{"other"}
+	f.tick(t)
+	if len(f.api.leases) != 1 {
+		t.Fatalf("a host the rule excludes kept the lease: %v", f.api.leases)
+	}
+	f.store.repos[0].Only = nil
+	f.tick(t)
+	if len(f.api.leases) != 2 {
+		t.Fatalf("leases %v", f.api.leases)
 	}
 	f.stop()
 }
