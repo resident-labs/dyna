@@ -65,7 +65,7 @@ func TestRegistryTableIsValid(t *testing.T) {
 			t.Errorf("missing toolkit metadata for %s", b.Tool)
 		}
 		key := b.Tool + "/" + b.Name
-		if b.Tool == "" || b.Name == "" || b.Help == "" || len(b.CLI) == 0 || b.Request == nil || b.Request.Kind() != reflect.Struct || b.Handler == NoBoxHandler || b.Handler > ComputerScreenshot {
+		if b.Tool == "" || b.Name == "" || b.Help == "" || len(b.CLI) == 0 || b.Request == nil || b.Request.Kind() != reflect.Struct || b.Handler == NoBoxHandler || b.Handler > lastBoxHandler {
 			t.Errorf("invalid box action %s", key)
 			continue
 		}
@@ -119,7 +119,7 @@ func TestAgentActionsHideOwnerMethods(t *testing.T) {
 
 func TestPhaseOneActionCoverage(t *testing.T) {
 	required := map[string]string{
-		"context": "show", "question": "ask list", "post": "send", "session": "start list stop close restart set_profile move", "room": "log repos pause", "op": "withdraw", "hostexec": "request_grant", "pr": "open list status track untrack", "issue": "list status track untrack", "visual": "check", "computer": "open click type text screenshot", "goal": "set list item done journal",
+		"context": "show", "question": "ask list", "post": "send", "session": "start list stop close restart set_profile move", "room": "log repos pause", "op": "withdraw", "hostexec": "request_grant", "pr": "open list status track untrack", "issue": "list status track untrack", "visual": "check", "computer": "open click move drag scroll key type text wait screenshot launch stop", "goal": "set list item done journal",
 	}
 	found := map[string]bool{}
 	for _, a := range AgentActions() {

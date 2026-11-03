@@ -3,9 +3,12 @@ package computer
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -178,6 +181,42 @@ func TestDesktopExitStopsItsProgramsAndReports(t *testing.T) {
 	}
 	if len(states) != 3 || !states[0] || states[1] || !states[2] {
 		t.Fatalf("states %v", states)
+	}
+}
+
+// A launch runs on the desktop with a log of its own, and stop ends it with the desktop.
+func TestLaunchLogsAndStopEndsEverything(t *testing.T) {
+	p, _ := fakeDesktop(t, false)
+	var states []bool
+	p.notify = func(running bool) { states = append(states, running) }
+	handler := p.Handler(context.Background())
+	post := func(path, body string) (Started, int) {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))
+		var started Started
+		_ = json.Unmarshal(w.Body.Bytes(), &started)
+		return started, w.Code
+	}
+	if _, code := post("/computer/launch", `{}`); code != http.StatusBadRequest {
+		t.Fatalf("a launch without a command: %d", code)
+	}
+	started, code := post("/computer/launch", `{"launch":"echo launched on $DISPLAY; exec sleep 600"}`)
+	if code != http.StatusOK || started.URL != URL || started.Log == "" {
+		t.Fatalf("launch %d %+v", code, started)
+	}
+	t.Cleanup(func() { _ = os.Remove(started.Log) })
+	waitFor(t, func() bool { out, _ := os.ReadFile(started.Log); return string(out) == "launched on :1\n" })
+	if _, code := post("/computer/stop", ""); code != http.StatusOK {
+		t.Fatalf("stop %d", code)
+	}
+	p.mu.Lock()
+	left := p.display != nil || p.wm != nil || p.browser != nil || len(p.apps) > 0
+	p.mu.Unlock()
+	if left || len(states) != 2 || states[1] {
+		t.Fatalf("after stop: running=%v states=%v", left, states)
+	}
+	if started, code := post("/computer", ""); code != http.StatusOK || started.Exit != "" {
+		t.Fatalf("start after stop %d %+v: a stop is no exit to report", code, started)
 	}
 }
 

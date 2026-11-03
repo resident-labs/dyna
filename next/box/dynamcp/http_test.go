@@ -339,7 +339,8 @@ func TestAnUnknownFieldListsTheFieldsTheActionTakes(t *testing.T) {
 	for _, tc := range []struct{ name, args, want string }{
 		{"post", `{"to":"api-lead"}`, `unknown field "to"; post takes: allowNet, clientId, endTurn, home, html, mentions, paths, replyTo, room, text, visualReply, visualUpdate`},
 		{"session", `{"action":"close","to":"x"}`, `unknown field "to"; session close takes: discard, session`},
-		{"computer", `{"action":"screenshot","to":"x"}`, `unknown field "to"; computer screenshot takes no fields`},
+		{"computer", `{"action":"stop","to":"x"}`, `unknown field "to"; computer stop takes: status`},
+		{"computer", `{"action":"wait","to":"x"}`, `unknown field "to"; computer wait takes: ms`},
 	} {
 		out := server.call(context.Background(), callParams{Name: tc.name, Arguments: arguments(t, tc.args)})
 		var problem contract.Error
