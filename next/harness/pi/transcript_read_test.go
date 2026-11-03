@@ -13,7 +13,7 @@ func TestCodemodeTranscript(t *testing.T) {
 	code := strings.Repeat("x", 9000)
 	data := `{"type":"message","message":{"role":"user","deliveryId":"1"}}` + "\n" +
 		`{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"call","name":"codemode","arguments":{"code":"` + code + `"}},{"type":"toolCall","id":"empty","name":"codemode","arguments":{"code":"ok"}}]}}` + "\n" +
-		`{"type":"message","message":{"role":"toolResult","toolCallId":"call","content":[{"type":"text","text":"` + strings.Repeat("o", 1100) + `"}],"details":{"calls":[{"name":"read","args":"{\"path\":\"/tmp/a\"}","status":"error","durationMs":42,"error":"token=secretvalue"}]}}}` + "\n" +
+		`{"type":"message","message":{"role":"toolResult","toolCallId":"call","content":[{"type":"text","text":"` + strings.Repeat("o", 1100) + `"}],"details":{"calls":[{"name":"read","args":"{\"path\":\"/tmp/a\"}","status":"error","durationMs":42,"error":"token=secretvalue123456"}]}}}` + "\n" +
 		`{"type":"message","message":{"role":"toolResult","toolCallId":"empty","content":[]}}` + "\n"
 	deliveries := map[contract.DeliverySeq]contract.TurnID{1: "t"}
 	items, _, _, err := ReadTranscript(strings.NewReader(data), deliveries, "x", "", 0, 10)
@@ -28,8 +28,8 @@ func TestCodemodeTranscript(t *testing.T) {
 
 func TestTranscriptItemsMaskAndKeepToolIdentity(t *testing.T) {
 	data := `{"type":"message","id":"m1","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","deliveryId":"1","content":[{"type":"text","text":"wake"}]}}
-{"type":"message","id":"m2","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"reason"},{"type":"text","text":"answer"},{"type":"toolCall","id":"call1","name":"bash","arguments":{"command":"token=secretvalue"}}]}}
-{"type":"message","id":"m3","timestamp":"2026-01-01T00:00:02Z","message":{"role":"toolResult","toolCallId":"call1","content":[{"type":"text","text":"token=secretvalue"}]}}
+{"type":"message","id":"m2","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"reason"},{"type":"text","text":"answer"},{"type":"toolCall","id":"call1","name":"bash","arguments":{"command":"token=secretvalue123456"}}]}}
+{"type":"message","id":"m3","timestamp":"2026-01-01T00:00:02Z","message":{"role":"toolResult","toolCallId":"call1","content":[{"type":"text","text":"token=secretvalue123456"}]}}
 `
 	items, _, _, err := ReadTranscript(strings.NewReader(data), map[contract.DeliverySeq]contract.TurnID{1: "turn_a"}, "test", "", 0, 64)
 	if err != nil || len(items) != 3 {
@@ -56,7 +56,7 @@ func TestTranscriptShowsACompactionInItsTurn(t *testing.T) {
 }
 
 func TestTranscriptEditAppliedDiffPreviewAndFull(t *testing.T) {
-	patch := strings.Repeat("x", 9000) + " token=secretvalue"
+	patch := strings.Repeat("x", 9000) + " token=secretvalue123456"
 	data := `{"type":"message","message":{"role":"user","deliveryId":"1"}}
 {"type":"message","id":"m","message":{"role":"assistant","content":[{"type":"toolCall","id":"call","name":"edit","arguments":{}}]}}
 {"type":"message","message":{"role":"toolResult","toolCallId":"call","content":[{"type":"text","text":"done"}],"details":{"diff":"` + patch + `"}}}
