@@ -78,6 +78,7 @@ func TestFailedCheckNamesAreOutsideOnlyFromAnOutsidersFork(t *testing.T) {
 		"an outsider's fork":               {"stranger", "stranger/repo", true},
 		"an outsider's branch in the repo": {"stranger", "owner/repo", false},
 		"the owner's account":              {"me", "owner/repo", false},
+		"an unknown author on a fork":      {"", "ghost/repo", true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			row := tracked(func(r *store.TrackedPR) { r.Author = test.author })

@@ -386,7 +386,7 @@ type gqlPull struct {
 
 // verdictLine is the approval convention for a PR opened by the account that reviews it, which GitHub cannot record as a
 // review: a line in a comment that names the sha it judged.
-var verdictLine = regexp.MustCompile(`(?m)^\*\*Verdict: (Approved|Changes requested) at ([0-9a-f]{7,40})\*\*\s*$`)
+var verdictLine = regexp.MustCompile(`\A[^\n]*\n\*\*Verdict: (Approved|Changes requested) at ([0-9a-f]{12,40})\*\*[ \t]*(?:\n|$)`)
 
 // graphQL runs one query and returns its repository, which is nil for a query that names none.
 func (c *Client) graphQL(ctx context.Context, query string, variables map[string]string) (map[string]json.RawMessage, error) {
