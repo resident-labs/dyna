@@ -108,6 +108,7 @@ func TestDeviceScopesReturnsTheCallersOwn(t *testing.T) {
 	}{
 		{"read device", Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}, Web: true, Scopes: []contract.Scope{contract.ScopeRead}}, `{"scopes":["read"]}`},
 		{"device without read", Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}, Web: true, Scopes: []contract.Scope{contract.ScopeTerminal}}, `{"scopes":["terminal"]}`},
+		{"device with a host", Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}, Web: true, Scopes: []contract.Scope{contract.ScopeRead, contract.ScopeOperate}, Host: "omarchy"}, `{"scopes":["read","operate"],"host":"omarchy"}`},
 		{"owner socket", Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}}, `{"scopes":["read","operate","files","terminal","computers","admin"]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

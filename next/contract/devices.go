@@ -37,7 +37,8 @@ type DeviceListResponse struct {
 // DeviceScopesRequest asks for the caller's own scopes. Any scope may ask.
 type DeviceScopesRequest struct{}
 type DeviceScopesResponse struct {
-	Scopes []Scope `json:"scopes"`
+	Scopes []Scope  `json:"scopes"`
+	Host   HostName `json:"host,omitempty"` // the host this device is on, if the owner named one
 }
 type DeviceRevokeRequest struct {
 	ID string `json:"id"`
