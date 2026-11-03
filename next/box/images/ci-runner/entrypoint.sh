@@ -10,6 +10,8 @@ bash -n "$ACTIONS_RUNNER_HOOK_JOB_STARTED"
 # The container has no network. This local port is the way out, and the proxy
 # behind the socket reaches public addresses only.
 socat TCP-LISTEN:3128,bind=127.0.0.1,fork,reuseaddr UNIX-CONNECT:/run/dyna-egress/egress.sock &
+# The host's compiler cache, which sccache reads and writes over HTTP.
+socat TCP-LISTEN:3129,bind=127.0.0.1,fork,reuseaddr UNIX-CONNECT:/run/dyna-build-cache/cache.sock &
 
 # The runner writes beside its own binaries, so bin/ is copied. The large
 # externals/ folder is only read, and a link keeps it out of the tmpfs.

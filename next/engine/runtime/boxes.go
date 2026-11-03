@@ -132,9 +132,18 @@ func (b *Boxes) binarySum() (string, error) {
 	return b.binSum, b.binErr
 }
 
+// startBuildCache starts the host's compiler cache for a box or runner about to start there. A build without it compiles every
+// crate itself, so a failure is only logged.
+func (b *Boxes) startBuildCache(ctx context.Context, name contract.HostName, h *podman.Host) {
+	if err := h.EnsureBuildCache(ctx, b.Layout); err != nil && ctx.Err() == nil {
+		log.Printf("host %s: build cache: %v", name, err)
+	}
+}
+
 // ciHost gives the CI pool a host's runner operations.
 type ciHost struct {
 	*podman.Host
+	name  contract.HostName
 	boxes *Boxes
 }
 
@@ -146,9 +155,10 @@ func (h ciHost) EnsureEgress(ctx context.Context, image string) error {
 	return h.Host.EnsureEgress(ctx, image, h.boxes.Layout.HostBin())
 }
 
-// StartRunner gives the runner the host's cache, the one its boxes mount at /box/cache.
+// StartRunner gives the runner the host's cache, the one its boxes mount at /box/cache, and their compiler cache.
 func (h ciHost) StartRunner(ctx context.Context, spec box.RunnerSpec) error {
-	spec.Cache = h.boxes.Layout.HostCache()
+	h.boxes.startBuildCache(ctx, h.name, h.Host)
+	spec.Cache, spec.BuildCache = h.boxes.Layout.HostCache(), h.boxes.Layout.HostBuildCacheSocketFolder()
 	return h.Host.StartRunner(ctx, spec)
 }
 
@@ -157,7 +167,7 @@ func (b *Boxes) ciDriver(ctx context.Context, name contract.HostName) (ci.Driver
 	if err != nil {
 		return nil, err
 	}
-	return ciHost{Host: h, boxes: b}, nil
+	return ciHost{Host: h, name: name, boxes: b}, nil
 }
 
 func executableSum() (string, error) {
@@ -716,6 +726,8 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 		return "", err
 	}
 	steps.Done("binary")
+	b.startBuildCache(ctx, spec.Host, h)
+	steps.Done("build cache")
 	shared, err := b.sharedMount(ctx, spec.Host, spec.Room)
 	if err != nil {
 		return "", err
@@ -1083,6 +1095,7 @@ func (b *Boxes) Start(ctx context.Context, id contract.BoxID) error {
 		if _, err := b.shareReady(ctx, record.Host); err != nil {
 			return err
 		}
+		b.startBuildCache(ctx, record.Host, host)
 		if session.Compose != "" {
 			if err := host.StartSidecars(ctx, id); err != nil {
 				return err
@@ -1336,6 +1349,8 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image stri
 		return err
 	}
 	steps.Done("instructions")
+	b.startBuildCache(ctx, spec.Host, h)
+	steps.Done("build cache")
 	shared, err := b.sharedMount(ctx, spec.Host, spec.Room)
 	if err != nil {
 		return err
@@ -1394,6 +1409,7 @@ func (b *Boxes) container(spec lifecycle.BoxSpec, image string, shared box.Mount
 		{HostPath: b.Layout.HostSocketFolder(spec.Box), BoxPath: "/run/dyna/engine", ReadOnly: true},
 		{HostPath: b.Layout.HostBin(), BoxPath: "/opt/dyna/bin", ReadOnly: true},
 		{HostPath: b.Layout.HostCache(), BoxPath: "/box/cache"},
+		{HostPath: b.Layout.HostBuildCacheSocketFolder(), BoxPath: "/run/dyna/build-cache", ReadOnly: true, MakeDir: true},
 		shared,
 		{HostPath: filepath.Dir(b.Layout.HostInstructions("")), BoxPath: "/run/dyna/instructions/global", ReadOnly: true, MakeDir: true},
 		{HostPath: filepath.Dir(b.Layout.HostInstructions(spec.Room)), BoxPath: "/run/dyna/instructions/room", ReadOnly: true, MakeDir: true},
