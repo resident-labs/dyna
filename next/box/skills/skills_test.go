@@ -188,3 +188,19 @@ func TestRequestTakesHostAndPath(t *testing.T) {
 		t.Fatalf("%+v %v", req, err)
 	}
 }
+
+func TestAFolderNamedLikeHostAndPathNeedsDotSlash(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "my:skill"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "my:skill", File), []byte("---\nname: my-skill\ndescription: x\n---\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Request("my:skill", dir, "", true); err == nil || !strings.Contains(err.Error(), "./my:skill") {
+		t.Fatalf("%v", err)
+	}
+	if req, err := Request("./my:skill", dir, "", true); err != nil || len(req.Archive) == 0 || req.Host != "" {
+		t.Fatalf("%+v %v", req, err)
+	}
+}
