@@ -31,6 +31,7 @@ type Service interface {
 	DeviceList(context.Context, contract.Principal, contract.DeviceListRequest) (contract.DeviceListResponse, *contract.Error)
 	DeviceRevoke(context.Context, contract.Principal, contract.DeviceRevokeRequest) (contract.DeviceRevokeResponse, *contract.Error)
 	DeviceSetScopes(context.Context, contract.Principal, contract.DeviceSetScopesRequest) (contract.DeviceSetScopesResponse, *contract.Error)
+	DeviceSetHost(context.Context, contract.Principal, contract.DeviceSetHostRequest) (contract.DeviceSetHostResponse, *contract.Error)
 	InstructionsGet(context.Context, contract.Principal, contract.InstructionsGetRequest) (contract.InstructionsGetResponse, *contract.Error)
 	InstructionsSet(context.Context, contract.Principal, contract.InstructionsSetRequest) (contract.InstructionsSetResponse, *contract.Error)
 	OperationScope(contract.OpKind) contract.Scope
