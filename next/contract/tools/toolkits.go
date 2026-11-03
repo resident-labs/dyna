@@ -8,10 +8,14 @@ type Toolkit struct {
 	Destructive bool
 	Idempotent  bool
 	OpenWorld   bool
+	// Description opens the tool's description, before each action's help: what every action shares.
+	Description string
+	// Fields describes, by JSON name, the fields several of the tool's actions take, once. A field's own desc tag wins.
+	Fields map[string]string
 }
 
 var toolkits = map[string]Toolkit{
-	"computer":     {Name: "computer", Title: "Computer", Destructive: true, OpenWorld: true},
+	"computer":     {Name: "computer", Title: "Computer", Destructive: true, OpenWorld: true, Description: computerHelp, Fields: computerFields},
 	"context":      {Name: "context", Title: "Context", Idempotent: true},
 	"device":       {Name: "device", Title: "Devices", Destructive: true},
 	"goal":         {Name: "goal", Title: "Goals"},

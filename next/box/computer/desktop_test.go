@@ -92,7 +92,8 @@ func TestRealDesktop(t *testing.T) {
 <button id=b style="position:absolute;left:700px;top:200px;width:120px;height:40px">Button</button>
 <canvas id=c width=400 height=200 style="position:absolute;left:300px;top:300px;background:#eee"></canvas>
 <p id=p style="position:absolute;top:600px">hello desktop</p>
-<script>window.seen = [];
+<script>window.seen = []; window.keys = [];
+for (const kind of ["keydown", "keyup"]) addEventListener(kind, e => keys.push([kind, e.key, e.timeStamp]));
 for (const kind of ["mousedown", "mouseup", "dblclick", "contextmenu"]) addEventListener(kind, e => seen.push(kind + " " + e.button + " " + e.target.id + (e.shiftKey ? " shift" : "")));
 </script>`
 	open := do(Open, Request{URL: "data:text/html," + url.PathEscape(html), Status: "Checking the desktop actions"})
@@ -118,6 +119,25 @@ for (const kind of ["mousedown", "mouseup", "dblclick", "contextmenu"]) addEvent
 	do(Type, Request{Selector: "#q", Text: "!"})
 	if got := page("document.querySelector('#q').value"); got != `"dyna é ü ñ 日本 → Ça!"` {
 		t.Fatalf("inserted value %s", got)
+	}
+	// key takes a single non-ASCII key, chords and a held key, all as Xvnc key events.
+	do(Key, Request{Keys: []string{"End"}})
+	do(Key, Request{Keys: []string{"é"}})
+	if got := page("document.querySelector('#q').value"); got != `"dyna é ü ñ 日本 → Ça!é"` {
+		t.Fatalf("key é: value %s", got)
+	}
+	do(Key, Request{Keys: []string{"TAB"}})
+	if got := page("document.activeElement.id"); got != `"b"` {
+		t.Fatalf("Tab: focus %s", got)
+	}
+	do(Key, Request{Keys: []string{"shift+tab"}})
+	if got := page("document.activeElement.id"); got != `"q"` {
+		t.Fatalf("shift+tab: focus %s", got)
+	}
+	do(Key, Request{Keys: []string{"x"}, HoldMS: number(600)})
+	held := page(`(() => { const d = keys.find(k => k[0] == "keydown" && k[1] == "x"), u = keys.findLast(k => k[0] == "keyup" && k[1] == "x"); return u[2] - d[2]; })()`)
+	if ms, err := strconv.ParseFloat(held, 64); err != nil || ms < 550 || ms > 1500 {
+		t.Fatalf("x held for %s ms", held)
 	}
 	do(Click, Request{Selector: "#b", Double: true, Keys: []string{"SHIFT"}})
 	do(Click, Request{Selector: "#b", Button: "right"})
