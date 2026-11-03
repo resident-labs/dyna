@@ -21,7 +21,8 @@
   // same. It leads with the run's name, state and figures, its one status line and why it failed, then the run as a flowchart
   // or a timeline. A node or a bar opens its steps under the chart, and what the steps made follows. A worker opens in place, in
   // the session thread, by its step; the page stays behind it, so Back returns to the same view and the same place.
-  let { store, session, roomName, operate, navigate, onpostlocation, clock = Date.now }: {
+  let { store, hasRoom, session, roomName, operate, navigate, onpostlocation, clock = Date.now }: {
+    hasRoom: (room: string) => boolean;
     store: RoomStore; session: string; roomName: string; operate: boolean;
     navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; onpostlocation: (room: string, seq: number) => void; clock?: () => number;
   } = $props();
@@ -137,7 +138,7 @@
       {#if state.tone}<StatusPill tone={state.tone} label={state.word} word />{:else}<span class="muted">{state.word}</span>{/if}
     </div>
     {#if worker.reason}<div class="failure worker-failure"><span class="slot"><Icon name="warning" size={16} /></span><span>{worker.reason}</span></div>{/if}
-    <div class="thread">{#key worker.key}<SessionThread {store} {session} {roomName} {navigate} {onpostlocation} {operate} step={worker.key} unsent={[]} onunsent={() => {}} onsettled={() => {}} />{/key}</div>
+    <div class="thread">{#key worker.key}<SessionThread {store} {hasRoom} {session} {roomName} {navigate} {onpostlocation} {operate} step={worker.key} unsent={[]} onunsent={() => {}} onsettled={() => {}} />{/key}</div>
   {/if}
   <div class="run" hidden={!!worker}><div class="body">
     {#if !info && failed}<p class="muted" role="alert">The run did not load. <button type="button" class="retry" onclick={() => void run.read()}>Try again</button></p>
