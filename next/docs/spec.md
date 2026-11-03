@@ -295,7 +295,11 @@ Each box has its own slice and hard limit; the session tree carries no resources
 
 The owner accepts a kernel kill when RAM and swap fill, or at a box's own limit. A build may exit 137; a killed Pi, agent or init follows the crash path. The volume and session stay, and `box.pressure` records the kill. No pause policy ships unless pressure shows real kills.
 
+<<<<<<< HEAD
 A host quarantines new session-box creation after three completed box-creation failures in a row; retry attempts for one box count once, and missing-device failures do not count. A successful in-flight creation or the owner's `dyna host set NAME --clear-create-problem` clears it. Heartbeats do not. Running boxes and wakes of existing boxes stay, and CI admission is independent. The create boundary currently cannot distinguish host-wide failures from repository or image failures, so a broken repository can cause quarantine; the failed box records the available reason. Host list reports the typed problem.
+=======
+A host quarantines new session-box creation after three completed box-creation failures in a row; retry attempts for one box count once. A successful in-flight creation or the owner's `dyna host set NAME --clear-create-problem` clears it. Heartbeats do not. Running boxes and wakes of existing boxes stay, and CI admission is independent. Only failures in host runtime steps count; repository preparation, image build or pull, and compose failures do not. The failed box records the available reason. Host list reports the typed problem.
+>>>>>>> e3a46d309 (Limit host quarantine to classified runtime failures)
 
 New boxes choose the ready host with most free memory; existing boxes stay on their host. Children can run while their parent is dormant. `sameHost` pins a child to its parent's host. Default maximum depth is 3; zero removes the limit. Room limits count placed requests across hosts; zero means unlimited. There is no subtree cap. M1 uses hermeslab.
 

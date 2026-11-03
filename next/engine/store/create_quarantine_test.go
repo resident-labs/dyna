@@ -39,8 +39,17 @@ func TestCreateQuarantine(t *testing.T) {
 	if _, err := s.writer.Exec("UPDATE boxes SET state='creating' WHERE id='b'"); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.FinishCreate(ctx, b, "", "image build failed", time.Time{}, 3, event(10), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Read().QueryRow("SELECT create_failures FROM hosts WHERE name='h'").Scan(&retries); err != nil || retries != 0 {
+		t.Fatalf("image failure counted: %d %v", retries, err)
+	}
+	if _, err := s.writer.Exec("UPDATE boxes SET state='creating' WHERE id='b'"); err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < 3; i++ {
-		if err := s.FinishCreate(ctx, b, "", "failure", time.Time{}, 3, event(i)); err != nil {
+		if err := s.FinishCreate(ctx, b, "", "failure", time.Time{}, 3, event(i), true); err != nil {
 			t.Fatal(err)
 		}
 		if i < 2 {
@@ -92,7 +101,7 @@ func TestCreateQuarantine(t *testing.T) {
 	if err := s.SetHostSwitches(ctx, "h", nil, nil, true); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.FinishCreate(ctx, b, "", "failure", time.Time{}, 3, event(4)); err != nil {
+	if err := s.FinishCreate(ctx, b, "", "failure", time.Time{}, 3, event(4), true); err != nil {
 		t.Fatal(err)
 	}
 	var count int
