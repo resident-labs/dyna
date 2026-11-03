@@ -387,7 +387,7 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 				}
 			}(ctx)
 		}
-		ctx = context.WithValue(ctx, callerKey{}, Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner, Device: contract.DeviceID(device.ID)}, Device: device.ID, Scopes: device.Scopes, Web: true})
+		ctx = context.WithValue(ctx, callerKey{}, Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner, Device: contract.DeviceID(device.ID)}, Device: device.ID, Scopes: device.Scopes, Host: device.Host, Web: true})
 		handler := w.handler
 		if handler == nil {
 			w.muxOnce.Do(func() {

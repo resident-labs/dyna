@@ -81,6 +81,11 @@ func (s *Store) AuthenticateDevice(ctx context.Context, hash [32]byte, now time.
 	if err != nil {
 		return Device{}, false, err
 	}
+	// As DeviceHost: a host that has been removed counts as none.
+	err = tx.QueryRowContext(ctx, "SELECT d.host FROM devices d JOIN hosts h ON h.name=d.host AND h.state!='removed' WHERE d.id=?", d.ID).Scan(&d.Host)
+	if err != nil && err != sql.ErrNoRows {
+		return Device{}, false, err
+	}
 	if err = tx.Commit(); err != nil {
 		return Device{}, false, err
 	}

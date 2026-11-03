@@ -220,7 +220,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodDeviceScopes, c, func(ctx context.Context, _ contract.Principal, _ contract.DeviceScopesRequest) (contract.DeviceScopesResponse, *contract.Error) {
 		c := requestCaller(ctx, c)
 		if c.Web {
-			return contract.DeviceScopesResponse{Scopes: c.Scopes}, nil
+			return contract.DeviceScopesResponse{Scopes: c.Scopes, Host: c.Host}, nil
 		}
 		return contract.DeviceScopesResponse{Scopes: store.FullDeviceScopes}, nil
 	})
