@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -95,19 +96,27 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		delete(r.fresh, b.ID)
 		repos := r.repos
 		r.mu.Unlock()
+		createCtx, cancelCreate := r.createContext(ctx)
+		defer cancelCreate()
+		phase := "remove old resources"
 		steps := box.NewStepLog("box " + string(b.ID))
 		if !fresh {
-			workErr = r.boxes.Remove(ctx, b.ID)
+			workErr = r.boxes.Remove(createCtx, b.ID)
 			steps.Done("remove old")
 		}
 		var sources []contract.BoxRepo
 		if workErr == nil && repos != nil {
-			sources, workErr = repos.Get(ctx, b.Session, b.Host, true)
+			phase = "prepare repositories"
+			sources, workErr = repos.Get(createCtx, b.Session, b.Host, true)
 			steps.Done("repositories")
 		}
 		if workErr == nil {
-			next.Image, workErr = r.boxes.Create(ctx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: b.Slice, Size: b.Size, Repos: sources})
+			phase = "create box"
+			next.Image, workErr = r.boxes.Create(createCtx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: b.Slice, Size: b.Size, Repos: sources})
 			steps.Done("create")
+		}
+		if errors.Is(context.Cause(createCtx), context.DeadlineExceeded) && ctx.Err() == nil {
+			workErr = fmt.Errorf("%s timed out after 15 minutes: %w", phase, context.DeadlineExceeded)
 		}
 		var missing box.MissingDevice
 		if errors.As(workErr, &missing) {
@@ -119,13 +128,12 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			}
 		} else if workErr != nil {
 			failures++
+			if errors.Is(context.Cause(createCtx), context.DeadlineExceeded) {
+				failures = 3
+			}
 			if failures >= 3 {
-				next.State, next.Reason = contract.BoxFailed, string(contract.CauseCreateFailed)
+				next.State, next.Reason = contract.BoxFailed, workErr.Error()
 				cause = contract.CauseCreateFailed
-				var stack box.StackError
-				if errors.As(workErr, &stack) {
-					next.Reason = stack.Error()
-				}
 			} else {
 				next.State, next.Reason = contract.BoxPending, string(box.PendingCreateRetry)
 				due = r.retryAt(failures)
