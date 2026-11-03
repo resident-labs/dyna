@@ -277,9 +277,12 @@ func (b *Boxes) HostLoad(ctx context.Context, hosts []contract.HostSummary) erro
 		for len(h.History) > 0 && h.History[0].At.Before(cutoff) {
 			h.History = h.History[1:]
 		}
+		// A host's latest sample knows its disk's size, which the stored figures do not, so its warning comes from that.
+		if load.DiskBytes > 0 {
+			h.DiskLow = load.DiskBytes-load.DiskUsed < box.DiskWarn(box.DiskFloor(load.DiskBytes), load.DiskBytes)
+		}
 		if h.Name == contract.ControlPlane {
 			h.Reachable, h.CPUs, h.MemBytes = true, goruntime.NumCPU(), load.MemBytes
-			h.DiskLow = load.DiskBytes > 0 && load.DiskBytes-load.DiskUsed < box.DiskWarn(box.DiskFloor(load.DiskBytes))
 		}
 	}
 	return nil
