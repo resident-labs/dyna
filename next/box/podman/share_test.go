@@ -72,8 +72,13 @@ func TestShareNeedsSaysWhatAHostLacks(t *testing.T) {
 	dir := t.TempDir()
 	conf := filepath.Join(dir, "fuse.conf")
 	withFuse := fakeTools(t, map[string]string{"fusermount3": "exit 0", "grep": `exec /usr/bin/grep "$@"`})
+	if err := os.Chmod(filepath.Join(withFuse, "fusermount3"), os.ModeSetuid|0o700); err != nil {
+		t.Fatal(err)
+	}
+	plain := fakeTools(t, map[string]string{"fusermount3": "exit 0", "grep": `exec /usr/bin/grep "$@"`})
 	for name, c := range map[string]struct{ path, conf, want string }{
 		"no fusermount3":   {path: dir, conf: "user_allow_other\n", want: "fusermount3 is missing: install fuse3"},
+		"not setuid":       {path: plain, conf: "user_allow_other\n", want: "fusermount3 is not setuid, so FUSE mounts fail with Operation not permitted"},
 		"option off":       {path: withFuse, conf: "# user_allow_other\n", want: "user_allow_other is not set in /etc/fuse.conf"},
 		"no file":          {path: withFuse, conf: "", want: "user_allow_other is not set in /etc/fuse.conf"},
 		"everything there": {path: withFuse, conf: "mount_max = 1000\n  user_allow_other\n"},
@@ -85,7 +90,7 @@ func TestShareNeedsSaysWhatAHostLacks(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			script := strings.ReplaceAll(strings.ReplaceAll(shareNeeds, "/etc/fuse.conf 2", conf+" 2"), "[ -c /dev/fuse ]", "[ -c /dev/null ]")
+			script := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(shareNeeds, "/etc/fuse.conf 2", conf+" 2"), "[ -c /dev/fuse ]", "[ -c /dev/null ]"), "$EUID", "1000")
 			cmd := exec.Command("/bin/bash", "-c", script)
 			cmd.Env = []string{"PATH=" + c.path}
 			out, err := cmd.CombinedOutput()
@@ -161,7 +166,7 @@ func TestEnsureShareLeavesARunningMountAlone(t *testing.T) {
 	log := filepath.Join(dir, "calls")
 	tools := fakeTools(t, map[string]string{"mountpoint": `[ "$1" = -d ] && echo 0:42; exit 0`, "podman": `[ "$1" = unshare ] && { shift; exec "$@"; }; echo "podman $*" >> ` + log, "fusermount3": "echo fusermount3 >> " + log, "systemd-run": "echo systemd-run >> " + log, "systemctl": "exit 1"})
 	script := strings.ReplaceAll(strings.ReplaceAll(shareScript, "/etc/fuse.conf 2", os.DevNull+" 2"), "grep -Eq '^[[:space:]]*user_allow_other'", "true")
-	script = strings.ReplaceAll(script, "[ -c /dev/fuse ]", "[ -c /dev/null ]")
+	script = strings.ReplaceAll(strings.ReplaceAll(script, "[ -c /dev/fuse ]", "[ -c /dev/null ]"), "$EUID", "0")
 	cmd := exec.Command("/bin/bash", "-c", script, "dyna-share", filepath.Join(dir, "mount"), filepath.Join(dir, "cache"), "/bin/dyna", "/sock")
 	cmd.Env = []string{"PATH=" + tools + ":" + os.Getenv("PATH")}
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -206,7 +211,7 @@ func TestEnsureShareStartsAMountWhereThereIsNone(t *testing.T) {
 		"systemctl":   "exit 3",
 	})
 	script := strings.ReplaceAll(shareScript, "grep -Eq '^[[:space:]]*user_allow_other'", "true")
-	script = strings.ReplaceAll(script, "[ -c /dev/fuse ]", "[ -c /dev/null ]")
+	script = strings.ReplaceAll(strings.ReplaceAll(script, "[ -c /dev/fuse ]", "[ -c /dev/null ]"), "$EUID", "0")
 	cmd := exec.Command("/bin/bash", "-c", script, "dyna-share", filepath.Join(dir, "mount"), filepath.Join(dir, "cache"), "/bin/dyna", "/sock")
 	cmd.Env = []string{"PATH=" + tools + ":" + os.Getenv("PATH")}
 	if out, err := cmd.CombinedOutput(); err != nil {
