@@ -191,7 +191,7 @@ func Run(ctx context.Context) error {
 		}
 		log.Printf("transcript restore: %v", err)
 	}
-	models, err := json.Marshal(Models(hello.Profiles...))
+	models, err := json.Marshal(Models(hello.TextOnlyModels...))
 	if err != nil {
 		return err
 	}
@@ -255,7 +255,7 @@ func Run(ctx context.Context) error {
 			}
 			return worker, nil
 		}
-		config := CrewConfig{Workflow: *hello.Workflow, Profiles: hello.Profiles, Engine: client, Open: open, Transcript: transcript, Workdir: workdir, Sessions: sessions, State: piDir}
+		config := CrewConfig{Workflow: *hello.Workflow, TextOnlyModels: hello.TextOnlyModels, Engine: client, Open: open, Transcript: transcript, Workdir: workdir, Sessions: sessions, State: piDir}
 		if len(hello.Repos) > 0 {
 			config.Branch, config.Base = hello.Repos[0].Branch, hello.Repos[0].Commit
 		}

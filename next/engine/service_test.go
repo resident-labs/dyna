@@ -84,7 +84,8 @@ func testChannel(t *testing.T, s *Service, ctx context.Context, caller contract.
 
 type fakeProfiles struct{}
 
-func (fakeProfiles) List() []contract.ProfileSummary { return nil }
+func (fakeProfiles) TextOnlyModels() []contract.TextOnlyModel { return nil }
+func (fakeProfiles) List() []contract.ProfileSummary          { return nil }
 
 func (fakeProfiles) CompactionTokens(contract.ProfileName) int { return 0 }
 

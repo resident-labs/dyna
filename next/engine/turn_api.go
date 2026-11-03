@@ -90,7 +90,7 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return contract.BoxHelloResponse{}, failure(err)
 	}
-	return contract.BoxHelloResponse{Room: session.Room, GitName: s.gitName, GitEmail: s.gitEmail, Session: session.ID, Box: session.Box, Model: model, Profiles: s.profiles.List(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: instructions, Workflow: workflow, GitHub: s.githubTools != nil}, nil
+	return contract.BoxHelloResponse{Room: session.Room, GitName: s.gitName, GitEmail: s.gitEmail, Session: session.ID, Box: session.Box, Model: model, TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: instructions, Workflow: workflow, GitHub: s.githubTools != nil}, nil
 }
 
 func (s *Service) DeliveryDone(ctx context.Context, caller contract.Principal, req contract.DeliveryDoneRequest) (contract.DeliveryDoneResponse, *contract.Error) {
