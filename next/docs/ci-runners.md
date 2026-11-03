@@ -242,9 +242,22 @@ it outside any job container.
 
 ## When things die
 
-- **No pool at all:** the engine renews `DYNA_CI_POOL_UNTIL` every 5 minutes for
-  10 minutes, only while a poll is alive and some host has capacity. Once it
-  expires, new runs use GitHub-hosted runners.
+- **The lease:** the engine sets `DYNA_CI_POOL_UNTIL` 15 minutes ahead every 5
+  minutes, on every pass, for as long as the pool is alive for the repository: a
+  listener of it is running and has polled (one that replaced a failed listener
+  counts only after a poll reaches it), and at least one host that is ready, has ci
+  on and is allowed by the room's rule answered that pass's survey. A pass whose
+  store reads fail aborts with no write. The write comes right after the survey,
+  before build-ahead and the sweep, on its own 30-second timeout. A restart, or a
+  survey of up to 10 minutes, opens no gap; a survey longer than that (it runs
+  under the 20-minute limit) can still let the old lease lapse. Free slots, `--max`, disk, memory and the
+  polls' capacity do not matter, so a pool with every slot busy keeps its lease and extra jobs
+  queue (see "Pool is busy"). The first pass after an engine start writes it at
+  once, so a restart opens no gap.
+- **No pool at all:** no host that is ready, has ci on and is allowed answered, or
+  the listeners keep failing before they poll (a revoked token, a broken scale
+  set), so the lease is not renewed and runs out within 15 minutes. After that, new runs
+  use GitHub-hosted runners.
 - **Pool is busy:** a job past what the hosts hold, or past `--max`, stays queued on
   GitHub and takes the next free runner. It can wait as long as it needs: nothing
   cancels a job for waiting while the pool is working.
@@ -273,7 +286,7 @@ it outside any job container.
 ## Requests
 
 Long polls and JIT configs go to the Actions service, not the REST API, so they
-spend none of the budget in spec 7.7. REST use is one lease write every 5 minutes,
+spend none of the budget in spec 7.7. REST use is one lease write every 5 minutes (valid for 15),
 one registration list an hour, and the token exchange when the client's admin
 token expires. Below 20% of quota the REST client pauses at least 10 minutes.
 
