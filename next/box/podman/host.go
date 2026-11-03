@@ -511,13 +511,17 @@ func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
 	return imageFailure(err)
 }
 
-// imageFailure types the podman errors that say the image is missing or invalid.
+// imageMarkers are lowercase podman messages that say the image could not be pulled, found or read: they say nothing about the host.
+var imageMarkers = []string{"trying to pull", "registry", "short-name", "name unknown", "unauthorized", "auth token", "manifest", "pull access denied", "image not known", "invalid reference format"}
+
+// imageFailure types the podman errors that say the image is missing or invalid. An error that matches no marker is
+// treated as a host failure and counts toward quarantine, so a new image message must be added above.
 func imageFailure(err error) error {
 	if err == nil {
 		return nil
 	}
-	message := err.Error()
-	for _, marker := range []string{"image not known", "manifest unknown", "invalid reference format", "pull access denied", "requested access to the resource is denied"} {
+	message := strings.ToLower(err.Error())
+	for _, marker := range imageMarkers {
 		if strings.Contains(message, marker) {
 			return box.ImageCreateError{Err: err}
 		}
