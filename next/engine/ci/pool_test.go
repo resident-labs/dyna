@@ -44,6 +44,7 @@ type fakeDriver struct {
 	listCtx  context.Context
 	gate     chan struct{} // when set, a build waits for it to close
 	buildMu  sync.Mutex    // a build-ahead runs beside placement
+	onEgress func()        // runs when the proxy is started, which a sweep does
 }
 
 func (d *fakeDriver) BuildRunnerImage(ctx context.Context) (string, error) {
@@ -59,8 +60,14 @@ func (d *fakeDriver) BuildRunnerImage(ctx context.Context) (string, error) {
 	d.builds++
 	return "image", nil
 }
-func (d *fakeDriver) EnsureEgress(context.Context, string) error { d.egress = true; return nil }
-func (d *fakeDriver) RemoveEgress(context.Context) error         { d.egress = false; return nil }
+func (d *fakeDriver) EnsureEgress(context.Context, string) error {
+	if d.onEgress != nil {
+		d.onEgress()
+	}
+	d.egress = true
+	return nil
+}
+func (d *fakeDriver) RemoveEgress(context.Context) error { d.egress = false; return nil }
 func (d *fakeDriver) StartRunner(_ context.Context, s box.RunnerSpec) error {
 	d.specs = append(d.specs, s)
 	if d.startErr != nil {
@@ -639,6 +646,60 @@ func TestLeaseHoldsForAHostWithoutRoomButNotWithoutAHost(t *testing.T) {
 	f.store.repos[0].Only = nil
 	f.tick(t)
 	if len(f.api.leases) != 2 {
+		t.Fatalf("leases %v", f.api.leases)
+	}
+	f.stop()
+}
+
+func TestLeaseNeedsAListenerThatHasNotFailed(t *testing.T) {
+	f := newFixture(1)
+	f.tick(t)
+	if len(f.api.leases) != 1 {
+		t.Fatalf("leases %v", f.api.leases)
+	}
+	// Every listener ends and its replacement fails before any poll, as with a revoked token: the host still answers.
+	f.stop()
+	f.sets.listenErr = errors.New("unauthorized")
+	f.now = f.now.Add(leaseEvery)
+	f.pool.Tick(context.Background(), &f.group)
+	f.group.Wait()
+	f.now = f.now.Add(leaseEvery)
+	f.pool.Tick(context.Background(), &f.group)
+	f.group.Wait()
+	if len(f.api.leases) != 1 {
+		t.Fatalf("a pool nothing polls kept its lease: %v", f.api.leases)
+	}
+	// Once the listener polls again the lease returns.
+	f.sets.listenErr = nil
+	f.pool.Tick(context.Background(), &f.group)
+	f.scale(0)
+	f.now = f.now.Add(leaseEvery)
+	f.tick(t)
+	if len(f.api.leases) != 2 {
+		t.Fatalf("leases %v", f.api.leases)
+	}
+	f.stop()
+}
+
+func TestLeaseIsWrittenBeforeTheSweep(t *testing.T) {
+	smallSize, _ := box.Size(contract.BoxSizeSmall)
+	f := newFixture(1)
+	// A runner without its proxy makes the sweep start it, which on a slow host takes long.
+	f.drivers["pve"].runners = []box.Runner{{Name: "dyna-ci-pve-1", Repo: repo, ID: 100, Slot: 0, Size: smallSize, Running: true}}
+	var leasesAtSweep = -1
+	f.drivers["pve"].onEgress = func() { leasesAtSweep = len(f.api.leases) }
+	f.tick(t)
+	if leasesAtSweep != 1 {
+		t.Fatalf("the lease was written after the sweep: %d leases when it began", leasesAtSweep)
+	}
+	f.stop()
+}
+
+func TestNoHostsMeansNoLease(t *testing.T) {
+	f := newFixture(1)
+	f.store.hosts = nil
+	f.tick(t)
+	if len(f.api.leases) != 0 {
 		t.Fatalf("leases %v", f.api.leases)
 	}
 	f.stop()
