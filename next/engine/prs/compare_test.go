@@ -69,6 +69,29 @@ func TestCompareFindsEachChange(t *testing.T) {
 	}
 }
 
+func TestFailedCheckNamesAreOutsideOnlyFromAnOutsidersFork(t *testing.T) {
+	failed := observed(func(o *Observed) { o.CI = contract.PrCIFailure; o.FailedChecks = []string{"lint"} })
+	for name, test := range map[string]struct {
+		author, head string
+		want         bool
+	}{
+		"an outsider's fork":               {"stranger", "stranger/repo", true},
+		"an outsider's branch in the repo": {"stranger", "owner/repo", false},
+		"the owner's account":              {"me", "owner/repo", false},
+		"an unknown author on a fork":      {"", "ghost/repo", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			row := tracked(func(r *store.TrackedPR) { r.Author = test.author })
+			seen := *failed
+			seen.HeadRepo = contract.RepoName(test.head)
+			update, _ := ComparePR(row, nil, nil, &seen, "me", at)
+			if update.Change == nil || update.Change.Outside != test.want {
+				t.Fatalf("%+v", update.Change)
+			}
+		})
+	}
+}
+
 func TestCompareTellsACIResultOncePerHead(t *testing.T) {
 	failed := func(o *Observed) { o.CI = contract.PrCIFailure }
 	first, _ := ComparePR(tracked(nil), nil, nil, observed(failed), "me", at)

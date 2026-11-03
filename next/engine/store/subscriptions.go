@@ -342,6 +342,14 @@ func subscriptionMatches(sub Subscription, event contract.Event, dm bool) bool {
 		if body.Session == sub.Wake {
 			return false
 		}
+	case contract.CIFinished:
+		if body.Session == sub.Wake {
+			return false
+		}
+	case interface{ Item() contract.GitHubItem }:
+		if body.Item().Session == sub.Wake {
+			return false
+		}
 	}
 	_, err := room.RenderDelivery(event.Body)
 	return err == nil

@@ -84,6 +84,14 @@ func TestRenderPRActionsSitBesideItsNews(t *testing.T) {
 	}
 }
 
+func TestRenderNamesTheHeadTheChecksRanOn(t *testing.T) {
+	pr := contract.PrSummary{Repo: "o/r", Number: 3, URL: "url", Author: "me", Head: "abc123"}
+	got, err := RenderDelivery(contract.PrChanged{Changes: []contract.PrChange{{PR: pr, Kinds: []contract.PrChangeKind{contract.PrChangeCIPassed}}}})
+	if want := "PR o/r#3: CI passed. url\nThe checks ran on abc123."; err != nil || got != want {
+		t.Fatalf("got %q, %v", got, err)
+	}
+}
+
 func TestRenderWrapsOutsideTextByItsActor(t *testing.T) {
 	issue := contract.IssueSummary{Repo: "o/r", Number: 1, URL: "url", Author: "me"}
 	got, err := RenderDelivery(contract.IssueChanged{Changes: []contract.IssueChange{{Issue: issue, Kinds: []contract.PrChangeKind{contract.PrChangeMetadata}, Actions: []contract.GitHubItem{
