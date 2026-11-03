@@ -1,6 +1,8 @@
 package hostexec
 
 import (
+	_ "embed"
+	"encoding/base64"
 	"fmt"
 	"github.com/resident-labs/dyna/contract"
 )
@@ -13,6 +15,11 @@ const CollectTimeout = contract.DurationMS(2 * 60 * 1000)
 // desktopVars are what a run on an exec-only host takes from the user's graphical session, so GUI commands work over SSH.
 const desktopVars = "WAYLAND_DISPLAY=*|HYPRLAND_INSTANCE_SIGNATURE=*|DBUS_SESSION_BUS_ADDRESS=*|XDG_RUNTIME_DIR=*|DISPLAY=*"
 
+// podmanGuard is the shim a run puts first on its PATH (spec 6.3).
+//
+//go:embed podman-guard.sh
+var podmanGuard []byte
+
 // OutDir is where a run's $DYNA_OUT lives on the host.
 func OutDir(op contract.OpID) string { return `${TMPDIR:-/tmp}/dyna-out-` + string(op) }
 
@@ -22,6 +29,7 @@ func prelude(a contract.HostexecRunArgs, op contract.OpID) string {
 		return ""
 	}
 	s := `d=` + OutDir(op) + `; mkdir -m 0700 -- "$d" || exit 254; export DYNA_OUT=$d; `
+	s += `g=$d.bin; mkdir -m 0700 -- "$g" || exit 254; printf %s ` + base64.StdEncoding.EncodeToString(podmanGuard) + ` | base64 -d > "$g/podman"; chmod 0700 "$g/podman"; command -v docker >/dev/null && ln -s podman "$g/docker"; export PATH=$g:$PATH; `
 	if a.Desktop {
 		s += `while IFS= read -r l; do case $l in ` + desktopVars + `) export "$l";; esac; done < <(systemctl --user show-environment 2>/dev/null); `
 	}
@@ -31,7 +39,7 @@ func prelude(a contract.HostexecRunArgs, op contract.OpID) string {
 // collectScript prints a tar of the files a run left in $DYNA_OUT, or nothing when there are none, and removes the folder.
 func collectScript(op contract.OpID) string {
 	d := OutDir(op)
-	return `d=` + d + `; rc=0; if [ -n "$(find "$d" -type f -print -quit 2>/dev/null)" ]; then tar -C "$d" -cf - . || rc=3; fi; rm -rf -- "$d" || rc=3; exit $rc`
+	return `d=` + d + `; rc=0; if [ -n "$(find "$d" -type f -print -quit 2>/dev/null)" ]; then tar -C "$d" -cf - . || rc=3; fi; rm -rf -- "$d" "$d.bin" || rc=3; exit $rc`
 }
 
 // CollectArgs is the run that reads back and removes a finished run's $DYNA_OUT.
