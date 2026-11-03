@@ -605,7 +605,7 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool,
 	if err != nil {
 		return false, err
 	}
-	record.Rooms, record.NoAgents, record.CI = req.Rooms, req.Agents != nil && !*req.Agents, req.CI
+	record.Rooms, record.NoAgents, record.CI = req.Rooms, req.Agents != nil && !*req.Agents, req.CIOn(*record.EngineHost)
 	if err := b.Store.AddHost(ctx, record); err != nil {
 		return false, err
 	}

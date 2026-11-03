@@ -75,7 +75,7 @@ type Scaleset interface {
 type Store interface {
 	CIRepos(context.Context) ([]store.CIRepo, error)
 	Hosts(context.Context) ([]box.Host, error)
-	Boxes(context.Context) ([]box.Box, error)
+	LifecycleBoxes(context.Context) ([]store.LifecycleBox, error)
 	Pools(context.Context) ([]store.Pool, error)
 }
 
@@ -268,6 +268,7 @@ type survey struct {
 	repos    map[contract.RepoName]store.CIRepo
 	hosts    map[contract.HostName]*surveyed
 	boxes    []box.Box
+	rows     []store.LifecycleBox
 	pools    []store.Pool
 	nodes    map[string]int // each pool's nodes
 	failures []error
@@ -293,8 +294,11 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 	if err != nil {
 		return s, err
 	}
-	if s.boxes, err = p.Store.Boxes(ctx); err != nil {
+	if s.rows, err = p.Store.LifecycleBoxes(ctx); err != nil {
 		return s, err
+	}
+	for _, row := range s.rows {
+		s.boxes = append(s.boxes, row.Box)
 	}
 	if s.pools, err = p.Store.Pools(ctx); err != nil {
 		return s, err
@@ -355,7 +359,8 @@ func waitID(key scaleSet, job int) contract.BoxID {
 	return contract.BoxID(fmt.Sprintf("%swait-%s-%s-%d", namePrefix, strings.ReplaceAll(string(key.repo), "/", "-"), key.size, job))
 }
 
-// place starts a runner for each assigned job that has none, on a ready host with ci on, as admission picks one for a box. A
+// place starts a runner for each assigned job that has none, on a ready host with ci on where no session box waits for room,
+// as admission picks one for a box. A
 // job that no host takes waits for a node of its room's pool, as a box does. It returns the capacity: the runners of this
 // size, the ones admission would still take, and the nodes the room's pools could add, within the repository's bound.
 func (p *Pool) place(ctx context.Context, key scaleSet, assigned int, view survey) (int, error) {
@@ -395,7 +400,7 @@ func (p *Pool) place(ctx context.Context, key scaleSet, assigned int, view surve
 	admit := func(id contract.BoxID) contract.HostName {
 		var open []box.Host
 		for _, host := range box.RunnerHosts(hosts) {
-			if held[host.Name] < box.RunnerSlots && !p.Now().Before(p.retry[host.Name]) {
+			if held[host.Name] < box.RunnerSlots && !p.Now().Before(p.retry[host.Name]) && !waitsForRoom(view.hosts[host.Name].host, view) {
 				open = append(open, host)
 			}
 		}
@@ -605,4 +610,23 @@ func (p *Pool) reap(ctx context.Context, repo contract.RepoName, alive map[strin
 		}
 	}
 	return nil
+}
+
+// waitsForRoom says whether a session box that waits for CPU or memory would take the host if its runners were gone. Such a
+// box comes before a runner: a runner started in each slot that frees up would keep it waiting. A box that fits nowhere, that
+// its room's rule keeps off the host, or that other boxes keep out is not waiting on runners and holds none back. The
+// snapshot holds no runners, so Admit sees the host as it is without them.
+func waitsForRoom(h box.Host, view survey) bool {
+	for _, row := range view.rows {
+		if row.State != contract.BoxPending || row.Image == box.RunnerImage || (row.Reason != string(box.PendingCPU) && row.Reason != string(box.PendingMemory)) {
+			continue
+		}
+		if row.Host != "" && row.Host != h.Name {
+			continue
+		}
+		if box.Admit([]box.Host{h}, view.boxes, row.Box, row.Only...).Host == h.Name {
+			return true
+		}
+	}
+	return false
 }
