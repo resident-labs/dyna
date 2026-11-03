@@ -88,7 +88,7 @@ func (s *Store) SessionWork(ctx context.Context, session contract.SessionID, bef
 		if nextSeq.Valid && (bound == 0 || nextSeq.Int64 < bound) {
 			bound = nextSeq.Int64
 		}
-		posts, err := s.read.QueryContext(ctx, `SELECT seq FROM events WHERE room=? AND type='post.created' AND from_kind='session' AND from_id=? AND seq>? AND (?=0 OR seq<?) ORDER BY seq`, started.Room, session, seq, bound, bound)
+		posts, err := s.read.QueryContext(ctx, `SELECT seq FROM events WHERE type='post.created' AND from_kind='session' AND from_id=? AND seq>? AND (?=0 OR seq<?) ORDER BY seq`, session, seq, bound, bound)
 		if err != nil {
 			return nil, false, 0, err
 		}
