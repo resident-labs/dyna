@@ -72,6 +72,7 @@ const answers = {
 };
 globalThis.fetch = async (url, init) => {
 	if (url.endsWith("/dyna/")) return { json: async () => ({ error: { message: "down" } }) };
+	if (init.signal?.aborted) throw new DOMException("This operation was aborted", "AbortError");
 	const body = JSON.parse(init.body);
 	asked.push({ url, body });
 	if (body.command === "refused") return { ok: false, json: async () => ({ code: "no_grant", message: "no matching host-exec grant" }) };
@@ -90,6 +91,15 @@ const call = async (name, id, parent, input) => {
 		return { thrown: error.message };
 	}
 };
+const abortedCall = async () => {
+	const controller = new AbortController();
+	controller.abort();
+	try {
+		return await registered.bash.execute("k", { command: "done" }, controller.signal, undefined, { cwd: "/box/work/repo" });
+	} catch (error) {
+		return { thrown: error.message };
+	}
+};
 console.log(JSON.stringify({
 	done: await call("bash", "a", undefined, { command: "done", description: "title" }),
 	failed: await call("bash", "b", undefined, { command: "failed", cwd: "src" }),
@@ -103,6 +113,7 @@ console.log(JSON.stringify({
 		handlers.tool_call({ toolName: "tool_search", toolCallId: "s", input });
 		return input.limit;
 	}),
+	stoppedCall: await abortedCall(),
 	moved: await call("bash", "i", undefined, { command: "running" }),
 	stepped: await call("bash", "j", undefined, { command: "stepped" }),
 	asked,
@@ -163,6 +174,7 @@ func TestExtensionBashAndJobTools(t *testing.T) {
 	}
 	var got struct {
 		Done, Failed, Stopped, Running, Nested, Host, Refused, List, Moved, Stepped result
+		StoppedCall                                                                 result
 		Asked                                                                       []struct {
 			URL  string
 			Body map[string]any
@@ -202,6 +214,9 @@ func TestExtensionBashAndJobTools(t *testing.T) {
 	}
 	if want := "building\n[job job_5] The owner sent you a message, so this command moved to the background, where it keeps running. Read the message now. job output reads its new output, and Dyna will wake you when it completes."; got.Stepped.IsError || got.Stepped.Content[0].Text != want {
 		t.Fatalf("stepped aside %+v", got.Stepped)
+	}
+	if want := "The turn was stopped while this call ran, so its answer was dropped. A command that had started keeps running in the background; job list shows it, and Dyna will wake you when it completes."; got.StoppedCall.Thrown != want {
+		t.Fatalf("aborted %+v", got.StoppedCall)
 	}
 	if got.Refused.Thrown != "no_grant: no matching host-exec grant" {
 		t.Fatalf("refused %+v", got.Refused)

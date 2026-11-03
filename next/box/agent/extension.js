@@ -85,6 +85,10 @@ const movedNote = "The job is in the background. You can end your turn and Dyna 
 const steppedNote =
 	"The owner sent you a message, so this command moved to the background, where it keeps running. Read the message now. job output reads its new output, and Dyna will wake you when it completes.";
 
+// What bash says when Pi stopped the call, as for the owner's stop of the turn. The job server keeps a command that had started, in the background, whether it runs in the box or on a host.
+const abortedNote =
+	"The turn was stopped while this call ran, so its answer was dropped. A command that had started keeps running in the background; job list shows it, and Dyna will wake you when it completes.";
+
 // One job's state as a tool result. A nonzero exit is not a tool error, since grep finding nothing is one: the text says the code.
 async function jobResult(answer, moved = false) {
 	let state = `[job ${answer.job}: ${answer.status}]`;
@@ -176,7 +180,11 @@ export default async function (pi) {
 			const callId = roots.get(toolCallId) ?? toolCallId;
 			// A worker's tree is Pi's working directory, so a relative cwd starts from there.
 			const start = host ? cwd : resolve(ctx.cwd, cwd ?? "");
-			return jobResult(await shell("run", { command, description, cwd: start, callId, host, timeout }, signal), true);
+			const answer = await shell("run", { command, description, cwd: start, callId, host, timeout }, signal).catch((error) => {
+				if (signal?.aborted) throw new Error(abortedNote);
+				throw error;
+			});
+			return jobResult(answer, true);
 		},
 	});
 	pi.registerTool({

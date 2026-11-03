@@ -72,7 +72,7 @@ export class McpTimeoutError extends Error {
 }
 
 export class McpAbortError extends Error {
-	constructor(message = "MCP request aborted") {
+	constructor(message = "MCP request aborted: the caller stopped it, as when its turn is stopped. The server was asked to cancel it, and work it had started, such as a page loading, can continue") {
 		super(message);
 		this.name = "AbortError";
 	}
