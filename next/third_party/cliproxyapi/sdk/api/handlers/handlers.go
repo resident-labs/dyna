@@ -6,6 +6,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -142,6 +143,16 @@ func BuildErrorResponseBodyWithError(status int, errText string, err error) []by
 		if status >= http.StatusInternalServerError {
 			errType = "server_error"
 			code = "internal_server_error"
+			// A failure that wraps the last upstream error (every credential cooling after
+			// an overload) keeps that error's own code, so the client sees the cause.
+			var upstream *coreauth.Error
+			if errors.As(errors.Unwrap(err), &upstream) && upstream != nil && upstream.HTTPStatus >= http.StatusInternalServerError {
+				if upstreamCode := gjson.GetMany(upstream.Message, "error.code", "code"); upstreamCode[0].String() != "" {
+					code = upstreamCode[0].String()
+				} else if upstreamCode[1].String() != "" {
+					code = upstreamCode[1].String()
+				}
+			}
 		}
 	}
 
