@@ -41,9 +41,16 @@ type fakeDriver struct {
 	startErr error
 	listErr  error
 	listCtx  context.Context
+	gate     chan struct{} // when set, a build waits for it to close
+	buildMu  sync.Mutex    // a build-ahead runs beside placement
 }
 
 func (d *fakeDriver) BuildRunnerImage(context.Context) (string, error) {
+	if d.gate != nil {
+		<-d.gate
+	}
+	d.buildMu.Lock()
+	defer d.buildMu.Unlock()
 	d.builds++
 	return "image", nil
 }
@@ -256,8 +263,8 @@ func TestAnIdleHostGetsNoProxyUntilAJobNeedsIt(t *testing.T) {
 	f := newFixture(1)
 	defer f.stop()
 	f.tick(t)
-	if d := f.drivers["pve"]; d.egress || d.builds != 0 {
-		t.Fatalf("an idle pool started a proxy: %+v", d)
+	if d := f.drivers["pve"]; d.egress { // the image builds ahead, the proxy waits
+		t.Fatal("an idle pool started a proxy")
 	}
 }
 
@@ -395,6 +402,7 @@ func TestFailedStartDeletesRegistrationAndTriesAnotherHost(t *testing.T) {
 	big.startErr = nil
 	f.drivers["pve"].runners = nil
 	f.now = f.now.Add(retryAfter)
+	delete(f.pool.images, "pve") // pve, which has its image, would take the job before big, which must build again
 	f.scale(1)
 	if len(big.runners) != 1 || big.builds != 2 {
 		t.Fatalf("big %+v", big)
