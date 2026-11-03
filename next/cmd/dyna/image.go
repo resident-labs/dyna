@@ -28,14 +28,14 @@ func imageCommands(get func() *socketClient) *cobra.Command {
 		}
 		return err
 	}}
-	list := &cobra.Command{Use: "list", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	list := &cobra.Command{Use: "list", Short: "List the room's images with content id, file count and size", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		result, err := call[contract.ImageListRequest, contract.ImageListResponse](cmd.Context(), get(), contract.MethodImageList, contract.ImageListRequest{Room: contract.RoomID(room)})
 		for _, item := range result.Images {
 			fmt.Fprintln(cmd.OutOrStdout(), describeImage(item))
 		}
 		return err
 	}}
-	show := &cobra.Command{Use: "show NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	show := &cobra.Command{Use: "show NAME", Short: "Show an image's Containerfile and files", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		result, err := call[contract.ImageShowRequest, contract.ImageShowResponse](cmd.Context(), get(), contract.MethodImageShow, contract.ImageShowRequest{Name: args[0], Room: contract.RoomID(room)})
 		if err == nil {
 			fmt.Fprintln(cmd.OutOrStdout(), describeImage(result.Image))
@@ -44,7 +44,7 @@ func imageCommands(get func() *socketClient) *cobra.Command {
 		}
 		return err
 	}}
-	remove := &cobra.Command{Use: "remove NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	remove := &cobra.Command{Use: "remove NAME", Short: "Remove an image; running boxes keep what they have", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := call[contract.ImageRemoveRequest, contract.ImageRemoveResponse](cmd.Context(), get(), contract.MethodImageRemove, contract.ImageRemoveRequest{Name: args[0], Room: contract.RoomID(room)})
 		if err == nil {
 			fmt.Fprintln(cmd.OutOrStdout(), "removed", args[0])
