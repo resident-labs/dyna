@@ -35,15 +35,26 @@ const (
 	MaxRoomBytes     = 128 << 20 // unpacked, over all of a room's images
 )
 
+// directive is a parser directive line. The builder reads them only in the comment block that opens the file.
+var directive = regexp.MustCompile(`^#\s*[A-Za-z][A-Za-z0-9_-]*\s*=`)
+
 // checkRecipe holds a Containerfile to the one rule: every stage starts FROM the base, declared by an ARG before the first
 // FROM, so what a repository adds is layers on Dyna's image. Comments and blank lines are skipped and a trailing backslash
 // joins lines, as a builder reads them. A later stage may start only from the base too, not from an earlier stage.
 func checkRecipe(recipe, variable string) error {
 	var instructions []string
 	var joined string
-	for _, line := range strings.Split(strings.ReplaceAll(string(recipe), "\r\n", "\n"), "\n") {
+	lines := strings.Split(strings.ReplaceAll(recipe, "\r\n", "\n"), "\n")
+	// A parser directive, as in # syntax=... or # escape=\x60, changes how the builder reads the file, so none is accepted.
+	for _, line := range lines {
+		if !directive.MatchString(strings.TrimSpace(line)) {
+			break
+		}
+		return fmt.Errorf("a parser directive is not allowed: %q", line)
+	}
+	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "#") || (line == "" && joined == "") {
+		if strings.HasPrefix(line, "#") || line == "" {
 			continue
 		}
 		if part, more := strings.CutSuffix(line, "\\"); more {
@@ -53,9 +64,15 @@ func checkRecipe(recipe, variable string) error {
 		instructions = append(instructions, joined+line)
 		joined = ""
 	}
+	if joined != "" {
+		instructions = append(instructions, joined) // a backslash on the last line
+	}
 	declared, from := false, 0
 	for _, instruction := range instructions {
 		fields := strings.Fields(instruction)
+		if len(fields) == 0 {
+			continue // a line of only a backslash
+		}
 		switch strings.ToUpper(fields[0]) {
 		case "ARG":
 			declared = declared || from == 0 && len(fields) == 2 && fields[1] == variable
@@ -133,6 +150,9 @@ const (
 // took its place.
 func recoverSaves(dir string) error {
 	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -226,7 +246,7 @@ func (s *Store) Save(room contract.RoomID, name string, archive []byte) (contrac
 		return contract.RoomImage{}, err
 	}
 	if err := os.Rename(unpacked, target); err != nil {
-		return contract.RoomImage{}, err
+		return contract.RoomImage{}, errors.Join(err, recoverSaves(dir))
 	}
 	if err := os.RemoveAll(aside); err != nil {
 		return contract.RoomImage{}, err
@@ -236,8 +256,11 @@ func (s *Store) Save(room contract.RoomID, name string, archive []byte) (contrac
 
 // List gives a room's images by name.
 func (s *Store) List(room contract.RoomID) ([]contract.RoomImage, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock() // recovery writes
+	defer s.mu.Unlock()
+	if err := recoverSaves(s.Layout.Images(room)); err != nil {
+		return nil, err
+	}
 	entries, err := os.ReadDir(s.Layout.Images(room))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -264,8 +287,11 @@ func (s *Store) Show(room contract.RoomID, name string) (contract.RoomImage, str
 	if !validImageName.MatchString(name) {
 		return contract.RoomImage{}, "", nil, ErrMissing
 	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock() // recovery writes
+	defer s.mu.Unlock()
+	if err := recoverSaves(s.Layout.Images(room)); err != nil {
+		return contract.RoomImage{}, "", nil, err
+	}
 	image, err := s.info(room, name)
 	if err != nil {
 		return image, "", nil, err
@@ -295,6 +321,9 @@ func (s *Store) Remove(room contract.RoomID, name string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := recoverSaves(s.Layout.Images(room)); err != nil {
+		return err
+	}
 	dir := filepath.Join(s.Layout.Images(room), name)
 	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
 		return ErrMissing

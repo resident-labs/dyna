@@ -198,3 +198,60 @@ func noise(n int) []byte {
 	_, _ = rand.Read(data)
 	return data
 }
+
+func TestRecipeParserCannotBeSidestepped(t *testing.T) {
+	store := &Store{Layout: box.Layout{Data: t.TempDir()}}
+	head := "ARG DYNA_BASE\nFROM ${DYNA_BASE}\n"
+	for name, recipe := range map[string]string{
+		"a backslash at the end":    head + "FROM ubuntu \\",
+		"a syntax directive":        "# syntax=evil/frontend\n" + head,
+		"an escape directive":       "# escape=`\n" + head + "RUN true \\\nFROM ubuntu\n",
+		"a check directive":         "#check=skip=all\n" + head,
+		"a directive after another": "# syntax=a/b\n# escape=`\n" + head,
+	} {
+		if _, err := store.Save("room_a", "rust", pack(t, map[string]string{"Containerfile": recipe})); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: got %v", name, err)
+		}
+	}
+	// Only a backslash on a line: no panic, and the file is fine.
+	if _, err := store.Save("room_a", "rust", pack(t, map[string]string{"Containerfile": head + "\\\n\n"})); err != nil {
+		t.Errorf("lone backslash: %v", err)
+	}
+	// A comment that is not a directive is fine, as is one after the first line.
+	if _, err := store.Save("room_a", "rust", pack(t, map[string]string{"Containerfile": "# a note\n" + head + "# escape=x\nRUN true\n"})); err != nil {
+		t.Errorf("comments: %v", err)
+	}
+}
+
+func TestAnImageMovedAsideByACrashComesBackOnEveryRead(t *testing.T) {
+	recipe := pack(t, map[string]string{"Containerfile": "ARG DYNA_BASE\nFROM ${DYNA_BASE}\n"})
+	for name, read := range map[string]func(*Store) error{
+		"list":   func(s *Store) error { _, err := s.List("room_a"); return err },
+		"show":   func(s *Store) error { _, _, _, err := s.Show("room_a", "x"); return err },
+		"remove": func(s *Store) error { return s.Remove("room_a", "x") },
+	} {
+		store := &Store{Layout: box.Layout{Data: t.TempDir()}}
+		if _, err := store.Save("room_a", "x", recipe); err != nil {
+			t.Fatal(err)
+		}
+		dir := store.Layout.Images("room_a")
+		if err := os.Rename(filepath.Join(dir, "x"), filepath.Join(dir, ".old-x")); err != nil {
+			t.Fatal(err)
+		}
+		if err := read(store); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		// After the read the image is back or, for remove, gone for good: a later save must not resurrect it.
+		if _, err := store.Save("room_a", "y", recipe); err != nil {
+			t.Fatal(err)
+		}
+		list, _ := store.List("room_a")
+		want := 2
+		if name == "remove" {
+			want = 1
+		}
+		if len(list) != want {
+			t.Errorf("%s: %+v", name, list)
+		}
+	}
+}
