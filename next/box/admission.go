@@ -115,7 +115,7 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 			reason = PendingMemory
 			continue
 		}
-		cpu, runnerCPU, mem, disk := 0, 0, int64(0), h.DiskBytes
+		cpu, runnerCPU, mem, runnerMem, disk := 0, 0, int64(0), int64(0), h.DiskBytes
 		for _, b := range boxes {
 			if b.Host != h.Name || b.ID == request.ID || b.State == contract.BoxDeleted || b.State == contract.BoxFailed {
 				continue
@@ -128,18 +128,19 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 				mem += b.Size.MemBytes
 				if b.Image == RunnerImage {
 					runnerCPU += b.Size.CPUs
+					runnerMem += b.Size.MemBytes
 				}
 			}
 		}
 		// A session box idles most of the time, so a host takes four times its CPUs of them. A CI runner is busy for its whole
 		// job but uses about half its CPUs on average, between links, tests and waits, so a host takes twice its CPUs of
 		// runners. At four times, hosts ran at two to six times their CPUs and jobs took two to three times as long; at once,
-		// they sat half idle.
+		// they sat half idle. Runners fit in real memory at 1x because a busy compile peaks near its limit.
 		if cpu+request.Size.CPUs > 4*h.CPUs || request.Image == RunnerImage && runnerCPU+request.Size.CPUs > 2*h.CPUs {
 			reason = PendingCPU
 			continue
 		}
-		if mem+request.Size.MemBytes > 4*h.MemBytes {
+		if mem+request.Size.MemBytes > 4*h.MemBytes || request.Image == RunnerImage && runnerMem+request.Size.MemBytes > h.MemBytes {
 			reason = PendingMemory
 			continue
 		}
