@@ -27,7 +27,7 @@ func TestCreateQuarantine(t *testing.T) {
 	size, _ := box.Size(contract.BoxSizeAgent)
 	b := box.Box{ID: "b", Session: "s", Host: "h", Size: size, State: contract.BoxCreating}
 	event := func(i int) contract.Event {
-		return contract.Event{ID: contract.EventID(fmt.Sprintf("e%d", i)), Room: "r", Time: time.UnixMilli(100), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{}}
+		return contract.Event{ID: contract.EventID(fmt.Sprintf("e%d", i)), Room: "r", Time: time.UnixMilli(100), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{Cause: contract.CauseCreateFailed}}
 	}
 	if err := s.FinishCreate(ctx, b, "", "retry", time.Time{}, 1, event(9)); err != nil {
 		t.Fatal(err)
@@ -99,5 +99,16 @@ func TestCreateQuarantine(t *testing.T) {
 	var problem string
 	if err := s.Read().QueryRow("SELECT create_failures,create_problem FROM hosts WHERE name='h'").Scan(&count, &problem); err != nil || count != 0 || problem != "" {
 		t.Fatalf("stale result after clear: %d %q %v", count, problem, err)
+	}
+	if _, err := s.writer.Exec("UPDATE boxes SET state='starting',create_generation=(SELECT create_generation FROM hosts WHERE name='h') WHERE id='b'"); err != nil {
+		t.Fatal(err)
+	}
+	missing := event(5)
+	missing.Body = contract.BoxChanged{Cause: contract.CauseKVMDeviceMissing}
+	if err := s.FinishCreate(ctx, b, "", "KVM unavailable", time.Time{}, 0, missing); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Read().QueryRow("SELECT create_failures FROM hosts WHERE name='h'").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("missing device counted: %d %v", count, err)
 	}
 }
