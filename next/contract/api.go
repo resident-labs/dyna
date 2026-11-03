@@ -782,6 +782,7 @@ type TranscriptPostLocation struct {
 	Seq  int64  `json:"seq"`
 }
 type TranscriptInput struct {
+	Source      *PostSource   `json:"source,omitempty"`
 	Home        *Conversation `json:"home,omitempty"`
 	At          time.Time     `json:"at"`
 	ID          EventID       `json:"id"`
