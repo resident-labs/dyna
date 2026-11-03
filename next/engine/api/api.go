@@ -203,6 +203,10 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodSkillList, c, a.service.SkillList)
 	call(mux, contract.MethodSkillRemove, c, a.service.SkillRemove)
 	call(mux, contract.MethodSkillSave, c, a.service.SkillSave)
+	call(mux, contract.MethodImageList, c, a.service.ImageList)
+	call(mux, contract.MethodImageRemove, c, a.service.ImageRemove)
+	call(mux, contract.MethodImageSave, c, a.service.ImageSave)
+	call(mux, contract.MethodImageShow, c, a.service.ImageShow)
 	call(mux, contract.MethodInstructionsGet, c, a.service.InstructionsGet)
 	call(mux, contract.MethodInstructionsSet, c, a.service.InstructionsSet)
 	call(mux, contract.MethodDevicePair, c, func(ctx context.Context, p contract.Principal, req contract.DevicePairRequest) (contract.DevicePairResponse, *contract.Error) {
