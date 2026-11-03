@@ -95,6 +95,7 @@ func TestHostAddChecksNameAndSSHAtTheBoundary(t *testing.T) {
 		{Name: "*bold*", SSH: "user@host", OwnerOnlyAdmin: true},
 		{Name: "ok", SSH: "user@ho st", OwnerOnlyAdmin: true},
 		{Name: "ok", SSH: "-oProxyCommand=x@host", OwnerOnlyAdmin: true},
+		{Name: "ok", SSH: "user@host:22", OwnerOnlyAdmin: true},
 	} {
 		f := &fakeRegistrar{}
 		s := serviceWithHosts{boxes: f}
