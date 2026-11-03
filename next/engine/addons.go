@@ -194,7 +194,7 @@ func (s *Service) SkillSave(ctx context.Context, caller contract.Principal, req 
 	if skills.IsBuiltIn(meta.Name) {
 		return contract.AddonChangeResponse{}, invalid(meta.Name + " is a built-in skill; pick another name")
 	}
-	change := contract.AddonGlobalArgs{Kind: contract.AddonSkill, Name: meta.Name, Description: meta.Description, Source: req.URL, Host: req.Host}
+	change := contract.AddonGlobalArgs{Kind: contract.AddonSkill, Name: meta.Name, Description: meta.Description, Source: req.URL, Host: req.Host, RootOnly: req.RootOnly}
 	if target.ask != "" {
 		if change.Bundle, _, err = s.saveFile(ctx, target.ask, bytes.NewReader(archive), 25<<20); err != nil {
 			return contract.AddonChangeResponse{}, failure(err)
