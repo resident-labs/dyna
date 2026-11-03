@@ -50,6 +50,8 @@ type Pull struct {
 	LatestReviews  []string
 	Rollup         string
 	FailedChecks   []string
+	NoChecks       bool   // the rollup holds no check
+	RollupHead     string // the commit the rollup is of, when it is not Head, as GitHub can answer for a push it has not caught up with
 	Reviews        []Comment
 	Comments       []Comment
 	Meta           Meta
@@ -737,15 +739,23 @@ func (s *Server) pullNode(p *Pull) map[string]any {
 		decision = p.ReviewDecision
 	}
 	if p.Rollup != "" {
-		rollup = map[string]any{"state": p.Rollup, "contexts": nodes(p.FailedChecks, func(name string) map[string]any {
+		checks := nodes(p.FailedChecks, func(name string) map[string]any {
 			return map[string]any{"__typename": "CheckRun", "name": name, "conclusion": "FAILURE"}
-		})}
+		})
+		if !p.NoChecks {
+			checks["nodes"] = append(checks["nodes"].([]map[string]any), map[string]any{"__typename": "CheckRun", "name": "build", "conclusion": "SUCCESS"})
+		}
+		rollup = map[string]any{"state": p.Rollup, "contexts": checks}
+	}
+	commit := p.Head
+	if p.RollupHead != "" {
+		commit = p.RollupHead
 	}
 	return map[string]any{
 		"number": p.Number, "state": p.State, "merged": p.State == "MERGED",
 		"headRefOid": p.Head, "headRepository": map[string]string{"nameWithOwner": string(p.HeadRepo)}, "mergeable": p.Mergeable, "mergeStateStatus": p.MergeState, "reviewDecision": decision,
 		"latestOpinionatedReviews": nodes(p.LatestReviews, func(state string) map[string]any { return map[string]any{"state": state} }),
-		"commits":                  map[string]any{"nodes": []any{map[string]any{"commit": map[string]any{"statusCheckRollup": rollup}}}},
+		"commits":                  map[string]any{"nodes": []any{map[string]any{"commit": map[string]any{"oid": commit, "statusCheckRollup": rollup}}}},
 		"reviews": nodes(p.Reviews, func(c Comment) map[string]any {
 			return map[string]any{"fullDatabaseId": strconv.FormatInt(c.ID, 10), "state": c.State, "body": c.Body, "url": fmt.Sprintf("%s#%d", link, c.ID), "author": user(c.Author)}
 		}),

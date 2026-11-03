@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -132,6 +133,21 @@ func TestNoWakeRepeatsAcrossARestart(t *testing.T) {
 	}
 }
 
+func TestAPushDoesNotReportTheOldHeadsCIAsPassing(t *testing.T) {
+	r := newPRRig(t)
+	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1, Rollup: "SUCCESS"})
+	r.pass(t)
+	r.github.Edit("owner/repo", 1, func(p *fakegithub.Pull) { p.Head, p.RollupHead = "head2", "head1" })
+	r.pass(t)
+	for _, wake := range r.wakes(t, r.child) {
+		for _, change := range wake.Changes {
+			if change.PR.Head == "head2" && slices.Contains(change.Kinds, contract.PrChangeCIPassed) {
+				t.Fatalf("the old head's result was told for the new head: %+v", change)
+			}
+		}
+	}
+}
+
 func TestHookTrackActsAsTheNamedSession(t *testing.T) {
 	r := newPRRig(t)
 	r.github.Add(fakegithub.Pull{Repo: "owner/repo", Number: 3})
@@ -199,7 +215,7 @@ func TestPRAuthority(t *testing.T) {
 	if _, e := r.s.PrTrack(r.ctx, child, contract.PrTrackRequest{Number: 2}); e != nil {
 		t.Fatalf("own repository: %+v", e)
 	}
-	if _, e := r.s.PrTrack(r.ctx, sessionCaller(sibling.Session), contract.PrTrackRequest{Repo: "owner/repo", Number: 2}); e == nil || e.Code != contract.ErrConflict {
+	if _, e := r.s.PrTrack(r.ctx, sessionCaller(sibling.Session), contract.PrTrackRequest{Repo: "owner/repo", Number: 2}); e == nil || e.Code != contract.ErrConflict || !strings.Contains(e.Message, "session pr-child ("+string(child.Session)+") already tracks") {
 		t.Fatalf("another session's PR: %+v", e)
 	}
 
@@ -299,6 +315,22 @@ func (r *prRig) pushes(t *testing.T, to contract.SessionID) []contract.PrChanged
 	t.Helper()
 	r.dispatch(t)
 	return r.wakes(t, to)
+}
+
+func TestAMergeReachesItsOwnerOnce(t *testing.T) {
+	r := newPRRig(t)
+	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1})
+	r.settle(t)
+	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.pr.merged", "github.ci.finished"}, Wake: string(r.child)}); e != nil {
+		t.Fatalf("%+v", e)
+	}
+	r.github.Edit("owner/repo", 1, func(p *fakegithub.Pull) { p.State = "MERGED" })
+	r.pass(t)
+	r.dispatch(t)
+	var n int
+	if err := r.s.store.Read().QueryRowContext(r.ctx, "SELECT COUNT(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_id=? AND d.wake=1 AND e.type IN ('github.pr.merged','github.pr.changed')", r.child).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("the owner heard of the merge %d times, %v", n, err)
+	}
 }
 
 func TestSubscribersHearAPushWithBeforeAndAfter(t *testing.T) {

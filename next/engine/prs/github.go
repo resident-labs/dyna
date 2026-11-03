@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -324,8 +325,9 @@ type Observed struct {
 // pullFields is everything a read asks per PR.
 const pullFields = `number state merged headRefOid headRepository{nameWithOwner} mergeable mergeStateStatus reviewDecision
 latestOpinionatedReviews(first:20,writersOnly:true){nodes{state}}
-commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:50){nodes{__typename ...on CheckRun{name conclusion} ...on StatusContext{context state}}}}}}}
-reviews(last:10){nodes{fullDatabaseId state body url author{login}}}`
+commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(first:50){nodes{__typename ...on CheckRun{name conclusion} ...on StatusContext{context state}}}}}}}
+reviews(last:10){nodes{fullDatabaseId state body url author{login}}}
+comments(last:20){nodes{body author{login}}}`
 
 type gqlAuthor struct {
 	Login string `json:"login"`
@@ -350,6 +352,7 @@ type gqlPull struct {
 	Commits struct {
 		Nodes []struct {
 			Commit struct {
+				OID               string `json:"oid"`
 				StatusCheckRollup *struct {
 					State    string `json:"state"`
 					Contexts struct {
@@ -373,7 +376,17 @@ type gqlPull struct {
 			Author *gqlAuthor `json:"author"`
 		} `json:"nodes"`
 	} `json:"reviews"`
+	Comments struct {
+		Nodes []struct {
+			Body   string     `json:"body"`
+			Author *gqlAuthor `json:"author"`
+		} `json:"nodes"`
+	} `json:"comments"`
 }
+
+// verdictLine is the approval convention for a PR opened by the account that reviews it, which GitHub cannot record as a
+// review: a line in a comment that names the sha it judged.
+var verdictLine = regexp.MustCompile(`(?m)^\*\*Verdict: (Approved|Changes requested) at ([0-9a-f]{7,40})\*\*\s*$`)
 
 // graphQL runs one query and returns its repository, which is nil for a query that names none.
 func (c *Client) graphQL(ctx context.Context, query string, variables map[string]string) (map[string]json.RawMessage, error) {
@@ -463,7 +476,7 @@ func (c *Client) Read(ctx context.Context, repo contract.RepoName, numbers []int
 		if err := json.Unmarshal(raw, &pull); err != nil {
 			return nil, fmt.Errorf("GitHub answer: %w", err)
 		}
-		seen := pull.observed()
+		seen := pull.observed(c.Viewer())
 		pulls[number] = &seen
 	}
 	return pulls, nil
@@ -476,7 +489,8 @@ func login(author *gqlAuthor) string {
 	return author.Login
 }
 
-func (p gqlPull) observed() Observed {
+// observed reads one PR's answer. viewer is the token's account, whose marked comments can carry the review (see verdictLine).
+func (p gqlPull) observed(viewer string) Observed {
 	seen := Observed{Number: p.Number, State: contract.PrOpen, Head: p.HeadRefOid, CI: contract.PrCINone}
 	if p.Merged {
 		seen.State = contract.PrMerged
@@ -515,7 +529,25 @@ func (p gqlPull) observed() Observed {
 			}
 		}
 	}
-	if len(p.Commits.Nodes) > 0 && p.Commits.Nodes[0].Commit.StatusCheckRollup != nil {
+	// The latest verdict comment at the current head from the viewer's account counts as a review. A request for changes
+	// from GitHub or from a comment stands over an approval.
+	verdict := contract.PrReview("")
+	for _, comment := range p.Comments.Nodes {
+		if match := verdictLine.FindStringSubmatch(comment.Body); match != nil && viewer != "" && login(comment.Author) == viewer && agentWrote(comment.Body) && strings.HasPrefix(p.HeadRefOid, match[2]) {
+			verdict = contract.PrApproved
+			if match[1] != "Approved" {
+				verdict = contract.PrChangesRequested
+			}
+		}
+	}
+	if seen.Review != contract.PrChangesRequested && verdict != "" {
+		seen.Review = verdict
+	}
+	// A rollup with no check in it says nothing about CI: GitHub reports success for it before any check has run. A rollup
+	// of another commit than the head is an earlier push's, and the head's own checks have not reported yet.
+	if len(p.Commits.Nodes) > 0 && p.Commits.Nodes[0].Commit.OID != p.HeadRefOid {
+		seen.CI = contract.PrCIPending
+	} else if len(p.Commits.Nodes) > 0 && p.Commits.Nodes[0].Commit.StatusCheckRollup != nil && (p.Commits.Nodes[0].Commit.StatusCheckRollup.State != "SUCCESS" || len(p.Commits.Nodes[0].Commit.StatusCheckRollup.Contexts.Nodes) > 0) {
 		rollup := p.Commits.Nodes[0].Commit.StatusCheckRollup
 		switch rollup.State {
 		case "SUCCESS":

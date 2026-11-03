@@ -138,8 +138,8 @@ type PrComment struct {
 type PrChange struct {
 	PR           PrSummary      `json:"pr"`
 	Kinds        []PrChangeKind `json:"kinds,omitempty"`
-	FailedChecks []string       `json:"failedChecks,omitempty"` // named by workflow files, so they count as text from the PR's author
-	Outside      bool           `json:"outside"`                // the PR's author is not the owner's GitHub account
+	FailedChecks []string       `json:"failedChecks,omitempty"` // named by the workflow files at the PR's head
+	Outside      bool           `json:"outside"`                // the PR comes from a fork of an author who is not the owner's GitHub account, so the head's workflow files, and the check names in them, are the author's
 	Comments     []PrComment    `json:"comments,omitempty"`
 	MoreComments int            `json:"moreComments,omitempty"`
 	Actions      []GitHubItem   `json:"actions,omitempty"`
