@@ -5,7 +5,8 @@
   import { hue } from "../identity.ts";
   import { causes, dayLabel, formatTime } from "../feed.ts";
   import { watchTranscripts } from "../stream.ts";
-  import type { Attachment, Principal, PostRequest, TranscriptInput, TranscriptItem, TranscriptPart, TranscriptReadResponse, TranscriptTurn, TranscriptPage } from "../contract.gen.ts";
+  import { sourceLabel } from "../source.ts";
+  import type { Attachment, Principal, RoomID, PostRequest, TranscriptInput, TranscriptItem, TranscriptPart, TranscriptReadResponse, TranscriptTurn, TranscriptPage } from "../contract.gen.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import Icon from "./Icon.svelte";
   import Avatar from "./Avatar.svelte";
@@ -22,7 +23,7 @@
   import { compactionNote, finalTimelineItem, ownPost, postDestination, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief } from "../timeline.ts";
 
   // With step, the thread reads one worker of a crew: its transcript alone, and nothing that was sent to the crew.
-  let { session, step, roomName, store, operate, unsent, onunsent, onsettled, onpostlocation, navigate, startingBrief, clock = Date.now }: { startingBrief?: string; session: string; step?: string; roomName: string; store: RoomStore; operate: boolean; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
+  let { hasRoom, session, step, roomName, store, operate, unsent, onunsent, onsettled, onpostlocation, navigate, startingBrief, clock = Date.now }: { hasRoom: (room: RoomID) => boolean; startingBrief?: string; session: string; step?: string; roomName: string; store: RoomStore; operate: boolean; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
   const view = untrack(() => store.window({ kind: "dm", session }));
   view.onunsent = request => onunsent(request);
   view.onsettled = request => onsettled(request);
@@ -283,9 +284,10 @@
 
 <!-- Another speaker mirrors the owner's bubble from the left. Attachments stay in view, so a message with them never folds. -->
 {#snippet inbound(key: string, from: Principal, at: string, body: Snippet, whole: boolean, source?: TranscriptInput["source"])}
-  {@const name = source ? `${source.roomName}:${source.sessionName}` : sender(from.kind, from.session)}
+  {@const linked = !source || hasRoom(source.room)}
+  {@const name = source ? sourceLabel(source) : sender(from.kind, from.session)}
   <div class="agent-input" data-media-key={key}>
-    <div class="agent-sender"><Avatar kind={from.kind} {name} size={20} />{#if from.session}<a href={`/r/${encodeURIComponent(source?.room ?? store.room)}/s/${encodeURIComponent(from.session)}`} onclick={navigate} style:--hue={hue(name)}>{name}</a>{:else}<strong>{name}</strong>{/if}<time datetime={at}>{formatTime(at)}</time></div>
+    <div class="agent-sender"><Avatar kind={from.kind} {name} size={20} />{#if from.session && linked}<a href={`/r/${encodeURIComponent(source?.room ?? store.room)}/s/${encodeURIComponent(from.session)}`} onclick={navigate} style:--hue={hue(name)}>{name}</a>{:else}<strong class={from.kind} style:--hue={hue(name)}>{name}</strong>{/if}<time datetime={at}>{formatTime(at)}</time></div>
     {#if whole}{@render body()}{:else}<CollapsibleBody>{@render body()}</CollapsibleBody>{/if}
   </div>
 {/snippet}
@@ -316,10 +318,10 @@
     {@render textRetry(turn, part)}
   {/snippet}
   {#if shown.kind !== "message"}
-    {@const name = input.source ? `${input.source.roomName}:${input.source.sessionName}` : input.from.session ? sender("session", input.from.session) : undefined}
+    {@const name = input.source ? sourceLabel(input.source) : input.from.session ? sender("session", input.from.session) : undefined}
     <div class="muted turn-note input-line" class:failure={shown.kind === "failed"} title={formatTime(input.at)}>
       <span class="slot"><Icon name={shown.kind === "failed" ? "warning" : "inbox"} size={14} /></span>
-      {#if name}<span class="agent-sender"><a href={`/r/${encodeURIComponent(input.source?.room ?? store.room)}/s/${encodeURIComponent(input.from.session ?? "")}`} onclick={navigate} style:--hue={hue(name)}>{name}</a></span>{/if}
+      {#if name}<span class="agent-sender">{#if !input.source || hasRoom(input.source.room)}<a href={`/r/${encodeURIComponent(input.source?.room ?? store.room)}/s/${encodeURIComponent(input.from.session ?? "")}`} onclick={navigate} style:--hue={hue(name)}>{name}</a>{:else}<strong class={input.from.kind} style:--hue={hue(name)}>{name}</strong>{/if}</span>{/if}
       <span>{shown.text}</span>
     </div>
     {@render textRetry(turn, part)}
