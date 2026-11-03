@@ -56,6 +56,10 @@ type Layout struct{ Data, HostData string }
 // AttachmentFolder is where a box keeps the files of the posts it reads. It is a variable so that tests can run outside a box.
 var AttachmentFolder = "/box/attachments"
 
+// CargoHome is CARGO_HOME in every box and CI runner. sccache's keys hold it, and the paths under it, so one path lets each
+// hit what the other compiled.
+const CargoHome = "/box/cache/cargo"
+
 const (
 	instructionsFile = "AGENTS.md"
 	composeFolder    = "compose"
@@ -79,20 +83,36 @@ func roomFolder(rooms string, room contract.RoomID) (string, error) {
 	return filepath.Join(rooms, name), nil
 }
 
-func repoFolder(git string, repo contract.RepoName) (string, error) {
+// repoParts splits a repository name into its owner and name, which each name one folder.
+func repoParts(repo contract.RepoName) (string, string, error) {
 	parts := strings.Split(string(repo), "/")
 	if len(parts) != 2 {
-		return "", fmt.Errorf("invalid repository name %q", repo)
+		return "", "", fmt.Errorf("invalid repository name %q", repo)
 	}
 	for _, part := range parts {
 		if part == "" || part == "." || part == ".." || strings.Trim(part, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-") != "" {
-			return "", fmt.Errorf("invalid repository name %q", repo)
+			return "", "", fmt.Errorf("invalid repository name %q", repo)
 		}
+	}
+	return parts[0], parts[1], nil
+}
+
+func repoFolder(git string, repo contract.RepoName) (string, error) {
+	owner, name, err := repoParts(repo)
+	if err != nil {
+		return "", err
 	}
 	if !filepath.IsAbs(git) {
 		return "", fmt.Errorf("repository folder %q is not absolute", git)
 	}
-	return filepath.Join(git, parts[0], parts[1]+".git"), nil
+	return filepath.Join(git, owner, name+".git"), nil
+}
+
+// RepoFolder is a repository's checkout in a box. A CI runner of that repository builds into the target folder there, because
+// sccache's keys hold the target folder's path, through OUT_DIR.
+func RepoFolder(repo contract.RepoName) (string, error) {
+	owner, name, err := repoParts(repo)
+	return filepath.Join("/box/work", owner, name), err
 }
 
 // Store is the engine's database.

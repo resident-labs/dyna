@@ -1421,9 +1421,16 @@ func (b *Boxes) container(spec lifecycle.BoxSpec, image string, shared box.Mount
 		shared,
 		{HostPath: filepath.Dir(b.Layout.HostInstructions("")), BoxPath: "/run/dyna/instructions/global", ReadOnly: true, MakeDir: true},
 		{HostPath: filepath.Dir(b.Layout.HostInstructions(spec.Room)), BoxPath: "/run/dyna/instructions/room", ReadOnly: true, MakeDir: true},
-	}, Env: []box.EnvVar{{Name: "GOMODCACHE", Value: "/box/cache/gomod"}, {Name: "GOCACHE", Value: "/box/cache/gocache"}, {Name: "CARGO_HOME", Value: "/box/cache/cargo"}, {Name: "npm_config_store_dir", Value: "/box/cache/pnpm"}}}
+	}, Env: []box.EnvVar{{Name: "GOMODCACHE", Value: "/box/cache/gomod"}, {Name: "GOCACHE", Value: "/box/cache/gocache"}, {Name: "CARGO_HOME", Value: box.CargoHome}, {Name: "npm_config_store_dir", Value: "/box/cache/pnpm"}}}
 	for _, repo := range spec.Repos {
 		c.Mounts = append(c.Mounts, box.Mount{HostPath: repo.Cache, BoxPath: repo.Cache, ReadOnly: true})
+	}
+	// Cargo's default for the checkout, set because a CI runner of the repository sets it, and sccache hashes every CARGO_
+	// variable: with the same two, each hits what the other compiled.
+	if len(spec.Repos) > 0 {
+		if work, err := box.RepoFolder(spec.Repos[0].Name); err == nil {
+			c.Env = append(c.Env, box.EnvVar{Name: "CARGO_TARGET_DIR", Value: filepath.Join(work, "target")})
+		}
 	}
 	if stack := spec.Stack; stack != nil {
 		c.Env = append(c.Env, stack.Env...)

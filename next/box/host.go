@@ -37,7 +37,7 @@ type ContainerSpec struct {
 }
 
 // ContainerLayout identifies the mount layout created by the current engine.
-const ContainerLayout = "5"
+const ContainerLayout = "6"
 
 type ContainerStatus struct {
 	Box         contract.BoxID
