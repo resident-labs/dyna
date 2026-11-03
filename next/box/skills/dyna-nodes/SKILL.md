@@ -107,7 +107,7 @@ dyna host add NAME --ssh user@addr --owner-only-admin
 
 - `--ssh` is `user@host`, with no port. `--owner-only-admin` confirms that only the owner administers the machine. A host that runs boxes or CI runners needs it, and `host add` refuses without it. A host added `--agents off --ci off` is exec only, takes host-exec runs and nothing else, and needs neither the flag nor the list above: its check asks for SSH and bash.
 - For any other host the check needs what the pool nodes need, from rootless Podman 5 down to the free disk, and it reports each item. FUSE is not checked on the host the engine runs on.
-- The engine connects with `ssh user@addr` as its own user. Dyna names no key: ssh takes the engine user's usual identity, config and agent, so that user's public key has to be in `authorized_keys` of `user` on the machine, as a plain key with no forced command. Dyna takes the machine's host key on first contact and keeps it in a list of its own, apart from the owner's `known_hosts`.
+- The engine runs plain `ssh user@addr` as its own user and names no key, so the engine user's ssh config picks the key per host (on hermeslab, entries point at `~/.ssh/dyna-engine_ed25519`); a machine with no entry uses the engine user's default keys or agent. The public key of whichever applies has to be in `authorized_keys` of `user` on the machine, as a plain key with no forced command. Dyna takes the machine's host key on first contact and keeps it in a list of its own, apart from the owner's `known_hosts`.
 
 ## What `dyna host remove` leaves
 

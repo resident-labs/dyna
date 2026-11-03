@@ -16,7 +16,7 @@ vendor="$repo_root/next/third_party/pi"
 # dyna-base, whose tag hashes the tarball. The placeholder stands in for the
 # build until the package exists to hash. The package manifest's dynaFork stays
 # the level alone.
-fork_level=1.4.0-dyna.13
+fork_level=1.4.0-dyna.14
 version="$fork_level.000000000000"
 # The tarball packs the working files: uncommitted Pi changes would ship code
 # that no commit records. Refuse them.
@@ -115,7 +115,7 @@ for (const file of files) {
   const path = join(stage, file);
   const manifest = JSON.parse(readFileSync(path, "utf8"));
   manifest.version = version;
-  manifest.dynaFork = 13;
+  manifest.dynaFork = 14;
   if (file !== "package.json") {
     // Match how upstream publishes its internal packages: no dependencies of
     // their own. npm treats bundleDependencies as complete and never installs
