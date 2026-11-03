@@ -70,6 +70,13 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	}
 	parent := contract.SessionID("")
 	if roomName == "" {
+		if req.Parent != "" {
+			named, problem := s.resolveSession(ctx, caller, req.Parent)
+			if problem != nil {
+				return contract.SessionStartResponse{}, problem
+			}
+			req.Parent = named.ID
+		}
 		parent, err = tree.ParentFor(caller, req.Parent)
 		if err != nil {
 			return contract.SessionStartResponse{}, invalid(err.Error())
