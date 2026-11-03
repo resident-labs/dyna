@@ -407,29 +407,38 @@ const (
 	HostProblemShareUnavailable HostProblem = "share_unavailable"
 )
 
+// RunnerImageProblem says a room's ci-runner image failed to build on a host, so the jobs of its repositories there run on the
+// shared image. Reason ends with the build's last lines.
+type RunnerImageProblem struct {
+	Room   RoomID `json:"room"`
+	Image  string `json:"image"` // the saved image's id
+	Reason string `json:"reason"`
+}
+
 type HostSummary struct {
-	Problem    HostProblem     `json:"problem,omitempty"`
-	Sessions   []HostSession   `json:"sessions,omitempty"`  // in rooms the caller can read
-	Shared     []RoomShared    `json:"shared"`              // Every room's folder is on the control plane, so only its summary lists any.
-	Leftovers  int             `json:"leftovers,omitempty"` // boxes and room folders of deleted rooms that this host still holds, removed when it returns
-	Name       HostName        `json:"name"`
-	Reachable  bool            `json:"reachable"`
-	Boxes      int             `json:"boxes"`
-	CPUs       int             `json:"cpus"`
-	MemBytes   int64           `json:"memBytes"`
-	CPUUsed    float64         `json:"cpuUsed"`
-	MemUsed    int64           `json:"memUsed"`
-	DiskBytes  int64           `json:"diskBytes"`
-	DiskUsed   int64           `json:"diskUsed"`
-	DiskLow    bool            `json:"diskLow"`
-	EngineHost bool            `json:"engineHost,omitempty"` // this added host is the machine the engine runs on
-	Pool       string          `json:"pool,omitempty"`       // the pool that holds this node
-	Agents     bool            `json:"agents,omitempty"`     // new session boxes may land on this added host
-	CI         bool            `json:"ci,omitempty"`         // the CI pool may start runners on this added host
-	ExecOnly   bool            `json:"execOnly,omitempty"`   // added exec only: host-exec runs, no boxes or runners
-	Runners    int             `json:"runners,omitempty"`    // the CI runners on this added host now
-	LastSeen   time.Time       `json:"lastSeen,omitzero"`
-	History    []HostLoadPoint `json:"history"`
+	Problem      HostProblem          `json:"problem,omitempty"`
+	RunnerImages []RunnerImageProblem `json:"runnerImages,omitempty"` // runner images that failed to build here
+	Sessions     []HostSession        `json:"sessions,omitempty"`     // in rooms the caller can read
+	Shared       []RoomShared         `json:"shared"`                 // Every room's folder is on the control plane, so only its summary lists any.
+	Leftovers    int                  `json:"leftovers,omitempty"`    // boxes and room folders of deleted rooms that this host still holds, removed when it returns
+	Name         HostName             `json:"name"`
+	Reachable    bool                 `json:"reachable"`
+	Boxes        int                  `json:"boxes"`
+	CPUs         int                  `json:"cpus"`
+	MemBytes     int64                `json:"memBytes"`
+	CPUUsed      float64              `json:"cpuUsed"`
+	MemUsed      int64                `json:"memUsed"`
+	DiskBytes    int64                `json:"diskBytes"`
+	DiskUsed     int64                `json:"diskUsed"`
+	DiskLow      bool                 `json:"diskLow"`
+	EngineHost   bool                 `json:"engineHost,omitempty"` // this added host is the machine the engine runs on
+	Pool         string               `json:"pool,omitempty"`       // the pool that holds this node
+	Agents       bool                 `json:"agents,omitempty"`     // new session boxes may land on this added host
+	CI           bool                 `json:"ci,omitempty"`         // the CI pool may start runners on this added host
+	ExecOnly     bool                 `json:"execOnly,omitempty"`   // added exec only: host-exec runs, no boxes or runners
+	Runners      int                  `json:"runners,omitempty"`    // the CI runners on this added host now
+	LastSeen     time.Time            `json:"lastSeen,omitzero"`
+	History      []HostLoadPoint      `json:"history"`
 }
 
 type HostLoadPoint struct {

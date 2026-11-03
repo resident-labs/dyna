@@ -69,6 +69,14 @@ type RunnerSpec struct {
 	Cache, BuildCache   string
 }
 
+// RunnerLayer is a room's ci-runner image, which a host builds on top of the shared runner image. Context is the saved folder as a
+// tar, and ID is its content id.
+type RunnerLayer struct {
+	Room    contract.RoomID
+	ID      string
+	Context []byte
+}
+
 // Runner is a runner container found on a host.
 type Runner struct {
 	Name    string

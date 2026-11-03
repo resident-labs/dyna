@@ -104,3 +104,8 @@ func (s *Service) SetImageMigration(ctx context.Context, mirror *enginegit.Mirro
 	go s.migrator.All(ctx)
 	return s.migrator
 }
+
+// SetRunnerImageProblems gives host list the runner images that failed to build on each host, before the service starts.
+func (s *Service) SetRunnerImageProblems(problems func() map[contract.HostName][]contract.RunnerImageProblem) {
+	s.runnerImageProblems = problems
+}

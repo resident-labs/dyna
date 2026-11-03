@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -41,7 +42,9 @@ func SetName(size contract.BoxSizeName) string { return "dyna-" + string(size) }
 
 // Driver is what the pool needs from one host.
 type Driver interface {
-	BuildRunnerImage(context.Context) (string, error)
+	BuildRunnerImage(context.Context, *box.RunnerLayer) (string, error)
+	// PruneRunnerLayers removes the room layer images of every room but these.
+	PruneRunnerLayers(context.Context, []contract.RoomID) error
 	EnsureEgress(ctx context.Context, image string) error
 	RemoveEgress(context.Context) error
 	StartRunner(context.Context, box.RunnerSpec) error
@@ -90,20 +93,32 @@ type Pool struct {
 	Now    func() time.Time
 	// Kick tells the node pools that the runners waiting for a node changed.
 	Kick func()
+	// LayerID reads the id of a room's ci-runner image, or "" when it has none, and is cheap. Layer reads the whole image, for a build.
+	// Nil LayerID means no room has one. A room whose id cannot be read uses the shared image and shows a problem.
+	LayerID func(contract.RoomID) (string, error)
+	Layer   func(contract.RoomID) (*box.RunnerLayer, error)
+	// LayerLimit is how long one layer may build, layerLimit when zero.
+	LayerLimit time.Duration
 
 	mu        sync.Mutex
 	clean     bool // no repository wants runners and no host holds any
 	listeners map[scaleSet]*listening
-	images    map[contract.HostName]string // each host's current runner image, once built or found there
+	images    map[imageKey]string          // each host's current runner images, once built or found there
+	fellBack  map[imageKey]time.Time       // room layers whose build failed on a host, when, so its jobs run on the shared image
+	failed    map[imageKey]time.Time       // builds that failed outright, when
+	pruned    map[contract.HostName]string // the rooms whose layers each host kept at its last prune
 	building  map[contract.HostName]bool   // hosts a build-ahead is working on
 	retry     map[contract.HostName]time.Time
 	leased    map[contract.RepoName]time.Time
 	broken    map[scaleSet]bool // sets whose listener failed and has not polled since
 	reaped    map[contract.RepoName]time.Time
 
-	shown   sync.Mutex
-	placed  []box.Box
-	waiting map[scaleSet][]store.LifecycleBox
+	shown      sync.Mutex
+	placed     []box.Box
+	problems   map[contract.HostName]map[contract.RoomID]contract.RunnerImageProblem
+	unreadable map[contract.RoomID]string // rooms whose ci-runner image could not be read, and why
+	ciHosts    []contract.HostName
+	waiting    map[scaleSet][]store.LifecycleBox
 }
 
 // scaleSet is one repository's scale set of one size.
@@ -178,8 +193,31 @@ func (p *Pool) Tick(ctx context.Context, group *sync.WaitGroup) error {
 			failures = append(failures, fmt.Errorf("repository %s: %w", repo, err))
 		}
 	}
+	// What a layer no room has now left behind goes: its images, failures and problems, so a room that removed its image shows no
+	// problem for good.
+	current := make(map[string]bool)
+	currentRooms := make(map[contract.RoomID]bool)
+	for _, layer := range view.layers {
+		current[layer.ID] = true
+		currentRooms[layer.Room] = true
+	}
+	for _, table := range []map[imageKey]time.Time{p.fellBack, p.failed} {
+		maps.DeleteFunc(table, func(key imageKey, _ time.Time) bool { return key.layer != "" && !current[key.layer] })
+	}
+	maps.DeleteFunc(p.images, func(key imageKey, _ string) bool { return key.layer != "" && !current[key.layer] })
+	p.shown.Lock()
+	for _, rooms := range p.problems {
+		maps.DeleteFunc(rooms, func(room contract.RoomID, _ contract.RunnerImageProblem) bool { return !currentRooms[room] })
+	}
+	p.ciHosts = p.ciHosts[:0]
 	for _, host := range view.hosts {
-		p.buildAhead(buildCtx, host, group)
+		if host.host.CI {
+			p.ciHosts = append(p.ciHosts, host.host.Name)
+		}
+	}
+	p.shown.Unlock()
+	for _, host := range view.hosts {
+		p.buildAhead(buildCtx, host, view.layers, group)
 	}
 	alive := make(map[contract.RepoName]map[string]bool)
 	for _, host := range view.hosts {
@@ -287,6 +325,7 @@ func (p *Pool) scale(ctx context.Context, key scaleSet, assigned int) int {
 // survey is what one pass knows about the fleet. Only ready hosts that answered are in hosts.
 type survey struct {
 	repos    map[contract.RepoName]store.CIRepo
+	layers   map[contract.RepoName]*box.RunnerLayer // the ci-runner image of each repository's room, where it has one
 	hosts    map[contract.HostName]*surveyed
 	boxes    []box.Box
 	rows     []store.LifecycleBox
@@ -308,8 +347,33 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 	if err != nil {
 		return s, err
 	}
+	unreadable := make(map[contract.RoomID]string)
+	if p.LayerID != nil {
+		s.layers = make(map[contract.RepoName]*box.RunnerLayer)
+	}
 	for _, repo := range repos {
 		s.repos[repo.Repo] = repo
+		if p.LayerID != nil {
+			// One room's unreadable image is that room's problem. The pool goes on, and its jobs use the shared image.
+			id, err := p.LayerID(repo.Room)
+			switch {
+			case err != nil:
+				unreadable[repo.Room] = err.Error()
+				p.shown.Lock()
+				changed := p.unreadable[repo.Room] != err.Error()
+				p.shown.Unlock()
+				if changed {
+					log.Printf("ci pool: room %s: read its ci-runner image: %v. Its jobs use the shared image.", repo.Room, err)
+				}
+			case id != "":
+				s.layers[repo.Repo] = &box.RunnerLayer{Room: repo.Room, ID: id}
+			}
+		}
+	}
+	if p.LayerID != nil {
+		p.shown.Lock()
+		p.unreadable = unreadable
+		p.shown.Unlock()
 	}
 	hosts, err := p.Store.Hosts(ctx)
 	if err != nil {
@@ -427,7 +491,7 @@ func (p *Pool) place(ctx context.Context, key scaleSet, assigned int, view surve
 		}
 		// A host that has the image starts a runner at once, and one that must build it makes the job wait minutes, so a host
 		// with the image takes the runner while it has room.
-		ready := slices.DeleteFunc(slices.Clone(open), func(h box.Host) bool { return p.images[h.Name] == "" })
+		ready := slices.DeleteFunc(slices.Clone(open), func(h box.Host) bool { return p.imageFor(h.Name, view.layers[key.repo]) == "" })
 		if host := box.Admit(ready, boxes, runnerRequest(id, repo.Room, size), repo.Only...).Host; host != "" {
 			return host
 		}
@@ -447,7 +511,7 @@ func (p *Pool) place(ctx context.Context, key scaleSet, assigned int, view surve
 			// Its image is being built ahead. A second build would race the first, so the job takes a later poll.
 			break
 		}
-		name, err := p.start(ctx, key, view.hosts[host], size)
+		name, err := p.start(ctx, key, view.hosts[host], size, view.layers[key.repo])
 		var registration jitError
 		if errors.As(err, &registration) {
 			// GitHub, not the host, failed, and the next poll tries again.
@@ -487,8 +551,8 @@ func (p *Pool) place(ctx context.Context, key scaleSet, assigned int, view surve
 }
 
 // start prepares a host and starts one runner on it.
-func (p *Pool) start(ctx context.Context, key scaleSet, host *surveyed, size contract.BoxSize) (string, error) {
-	image, err := p.prepare(ctx, host)
+func (p *Pool) start(ctx context.Context, key scaleSet, host *surveyed, size contract.BoxSize, layer *box.RunnerLayer) (string, error) {
+	image, err := p.prepare(ctx, host, layer)
 	if err != nil {
 		return "", err
 	}
@@ -510,7 +574,7 @@ func (p *Pool) start(ctx context.Context, key scaleSet, host *surveyed, size con
 	}
 	if err := host.driver.StartRunner(ctx, box.RunnerSpec{Name: name, Image: image, Config: config, Repo: key.repo, ID: id, Slot: slot, Size: size}); err != nil {
 		// The next attempt checks the image again, in case a host lost it.
-		delete(p.images, host.host.Name)
+		delete(p.images, imageKey{host.host.Name, layerID(layer)})
 		// A runner that did start after an uncertain reply loses its registration and exits.
 		return "", errors.Join(err, p.GitHub.DeleteRunner(ctx, key.repo, id))
 	}
@@ -523,18 +587,151 @@ type jitError struct{ error }
 
 func (e jitError) Unwrap() error { return e.error }
 
-// prepare returns a host's runner image, with its proxy running.
-func (p *Pool) prepare(ctx context.Context, host *surveyed) (string, error) {
-	image := p.images[host.host.Name]
+// imageKey names one runner image on one host: the shared image when layer is empty, else the room's layer with that id.
+type imageKey struct {
+	host  contract.HostName
+	layer string
+}
+
+func layerID(layer *box.RunnerLayer) string {
+	if layer == nil {
+		return ""
+	}
+	return layer.ID
+}
+
+// imageFor returns the image a runner of this layer would start on this host now, or "" when none is ready: the layer's own,
+// or the shared image where the layer's build failed.
+func (p *Pool) imageFor(host contract.HostName, layer *box.RunnerLayer) string {
+	if image := p.images[imageKey{host, layerID(layer)}]; image != "" {
+		return image
+	}
+	if _, failed := p.fellBack[imageKey{host, layerID(layer)}]; failed {
+		return p.images[imageKey{host, ""}]
+	}
+	return ""
+}
+
+// layerLimit bounds one room's layer build on a host, so one hanging Containerfile cannot use the pass's budget, which every
+// other room's layer on that host shares. A longer build counts as a failed one.
+const layerLimit = 10 * time.Minute
+
+// built is the outcome of building a layer on a host. Image is what its runners use. Reason is why the layer failed, when
+// they use the shared image instead.
+type built struct {
+	image, reason string
+}
+
+// build builds the shared image on a host, then a layer's image on it. A layer that fails to load, to build or to finish within
+// its limit is a failure of that layer alone: its runners use the shared image and Reason says why, with the build's last
+// lines. A shared image that fails to build, or a pass that was cancelled, is an error. It touches no pool state, so a caller
+// may hold p.mu or not.
+func (p *Pool) build(ctx context.Context, driver Driver, ref *box.RunnerLayer) (built, error) {
+	shared, err := driver.BuildRunnerImage(ctx, nil)
+	if err != nil || ref == nil {
+		return built{image: shared}, err
+	}
+	limit := p.LayerLimit
+	if limit == 0 {
+		limit = layerLimit
+	}
+	layerCtx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	// The context is read now, from the room's current save, and only for a build that is needed.
+	layer, err := p.Layer(ref.Room)
+	if err == nil && (layer == nil || layer.ID != ref.ID) {
+		err = errors.New("the room saved another image meanwhile; the next pass builds it")
+	}
+	if err == nil {
+		var image string
+		if image, err = driver.BuildRunnerImage(layerCtx, layer); err == nil {
+			return built{image: image}, nil
+		}
+	}
+	if ctx.Err() != nil {
+		return built{}, ctx.Err()
+	}
+	reason := err.Error()
+	var logged interface{ BuildLog() string }
+	if errors.Is(layerCtx.Err(), context.DeadlineExceeded) {
+		reason = fmt.Sprintf("the build took longer than %s", limit)
+	} else if errors.As(err, &logged) {
+		reason += ": " + logged.BuildLog()
+	}
+	return built{image: shared, reason: reason}, nil
+}
+
+// maxReason is how much of a build's output a problem keeps: its end, where the error is.
+const maxReason = 400
+
+// remember records a build's outcome. The caller holds p.mu.
+func (p *Pool) remember(host contract.HostName, layer *box.RunnerLayer, result built) {
+	if p.images == nil {
+		p.images = make(map[imageKey]string)
+	}
+	if p.fellBack == nil {
+		p.fellBack = make(map[imageKey]time.Time)
+	}
+	key := imageKey{host, layerID(layer)}
+	p.shown.Lock()
+	defer p.shown.Unlock()
+	if layer != nil && result.reason != "" {
+		reason := strings.Join(strings.Fields(result.reason), " ")
+		if runes := []rune(reason); len(runes) > maxReason {
+			reason = "…" + string(runes[len(runes)-maxReason:])
+		}
+		p.images[imageKey{host, ""}] = result.image
+		p.fellBack[key] = p.Now()
+		if p.problems == nil {
+			p.problems = make(map[contract.HostName]map[contract.RoomID]contract.RunnerImageProblem)
+		}
+		if p.problems[host] == nil {
+			p.problems[host] = make(map[contract.RoomID]contract.RunnerImageProblem)
+		}
+		p.problems[host][layer.Room] = contract.RunnerImageProblem{Room: layer.Room, Image: layer.ID, Reason: reason}
+		log.Printf("ci pool: host %s: build the runner image of room %s: %s. Its jobs use the shared image.", host, layer.Room, reason)
+		return
+	}
+	p.images[key] = result.image
+	delete(p.fellBack, key)
+	delete(p.failed, key)
+	if layer != nil {
+		delete(p.problems[host], layer.Room)
+	}
+}
+
+// Problems lists the runner images that failed to build on each host, for host list, and a room whose image could not be read
+// on every ci host.
+func (p *Pool) Problems() map[contract.HostName][]contract.RunnerImageProblem {
+	p.shown.Lock()
+	defer p.shown.Unlock()
+	out := make(map[contract.HostName][]contract.RunnerImageProblem, len(p.problems))
+	for host, rooms := range p.problems {
+		for _, problem := range rooms {
+			out[host] = append(out[host], problem)
+		}
+	}
+	for _, host := range p.ciHosts {
+		for room, reason := range p.unreadable {
+			out[host] = append(out[host], contract.RunnerImageProblem{Room: room, Reason: "the image could not be read: " + reason})
+		}
+	}
+	for _, problems := range out {
+		slices.SortFunc(problems, func(a, b contract.RunnerImageProblem) int { return strings.Compare(string(a.Room), string(b.Room)) })
+	}
+	return out
+}
+
+// prepare returns a host's runner image for a layer, with its proxy running.
+func (p *Pool) prepare(ctx context.Context, host *surveyed, layer *box.RunnerLayer) (string, error) {
+	image := p.imageFor(host.host.Name, layer)
 	if image == "" {
-		var err error
-		if image, err = host.driver.BuildRunnerImage(ctx); err != nil {
+		result, err := p.build(ctx, host.driver, layer)
+		if err != nil {
 			return "", err
 		}
-		if p.images == nil {
-			p.images = make(map[contract.HostName]string)
-		}
-		p.images[host.host.Name] = image
+		p.remember(host.host.Name, layer, result)
+		image = result.image
 	}
 	if !host.egress {
 		if err := host.driver.EnsureEgress(ctx, image); err != nil {
@@ -545,12 +742,45 @@ func (p *Pool) prepare(ctx context.Context, host *surveyed) (string, error) {
 	return image, nil
 }
 
-// buildAhead builds a host's runner image in the background when the pool has not seen it there, as after a deploy or on a new
-// host. It does not hold p.mu while it builds, so placement goes on, and place prefers hosts whose image is ready. The build
-// reuses an image the host already has, so a host that has it is ready within moments.
-func (p *Pool) buildAhead(ctx context.Context, host *surveyed, group *sync.WaitGroup) {
+// buildAhead builds a host's runner images in the background when the pool has not seen them there, as after a deploy, on a new
+// host, or when a room saves a new ci-runner image: the shared image, then each room's layer, from the engine's copy at this
+// moment, so a host that was offline for a save builds the current image and never an old one. A build that failed is tried
+// again after retryAfter, and each layer has a time limit of its own. It also removes the layers of rooms that have none now.
+// It does not hold p.mu while it builds, so placement goes on, and place prefers hosts whose image is ready. A build reuses an
+// image the host already has, so a host that has them is ready within moments.
+func (p *Pool) buildAhead(ctx context.Context, host *surveyed, layers map[contract.RepoName]*box.RunnerLayer, group *sync.WaitGroup) {
 	name := host.host.Name
-	if !host.host.CI || p.images[name] != "" || p.building[name] {
+	if !host.host.CI || p.building[name] {
+		return
+	}
+	var want []*box.RunnerLayer
+	waiting := func(key imageKey) bool {
+		at, failed := p.failed[key]
+		if !failed {
+			at, failed = p.fellBack[key]
+		}
+		return failed && p.Now().Before(at.Add(retryAfter))
+	}
+	if p.images[imageKey{name, ""}] == "" && !waiting(imageKey{name, ""}) {
+		want = append(want, nil)
+	}
+	seen := make(map[string]bool)
+	var rooms []contract.RoomID
+	for _, layer := range layers {
+		rooms = append(rooms, layer.Room)
+		key := imageKey{name, layer.ID}
+		if seen[layer.ID] || p.images[key] != "" || waiting(key) {
+			continue
+		}
+		seen[layer.ID] = true
+		want = append(want, layer)
+	}
+	slices.Sort(rooms)
+	rooms = slices.Compact(rooms)
+	pruneKey := fmt.Sprint(rooms)
+	pruned, prunedBefore := p.pruned[name]
+	prune := !prunedBefore || pruned != pruneKey
+	if len(want) == 0 && !prune {
 		return
 	}
 	if p.building == nil {
@@ -562,18 +792,38 @@ func (p *Pool) buildAhead(ctx context.Context, host *surveyed, group *sync.WaitG
 		defer group.Done()
 		buildCtx, cancel := context.WithTimeout(ctx, scaleLimit)
 		defer cancel()
-		image, err := host.driver.BuildRunnerImage(buildCtx)
+		results := make([]built, len(want))
+		errs := make([]error, len(want))
+		for i, layer := range want {
+			results[i], errs[i] = p.build(buildCtx, host.driver, layer)
+		}
+		var pruneErr error
+		if prune {
+			pruneErr = host.driver.PruneRunnerLayers(buildCtx, rooms)
+		}
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		delete(p.building, name)
-		if err != nil {
-			log.Printf("ci pool: host %s: build runner image: %v", name, err)
-			return
+		if prune && pruneErr == nil {
+			if p.pruned == nil {
+				p.pruned = make(map[contract.HostName]string)
+			}
+			p.pruned[name] = pruneKey
 		}
-		if p.images == nil {
-			p.images = make(map[contract.HostName]string)
+		if pruneErr != nil {
+			log.Printf("ci pool: host %s: remove old runner images: %v", name, pruneErr)
 		}
-		p.images[name] = image
+		for i, layer := range want {
+			if errs[i] != nil {
+				log.Printf("ci pool: host %s: build runner image: %v", name, errs[i])
+				if p.failed == nil {
+					p.failed = make(map[imageKey]time.Time)
+				}
+				p.failed[imageKey{name, layerID(layer)}] = p.Now()
+				continue
+			}
+			p.remember(name, layer, results[i])
+		}
 	}()
 }
 
@@ -624,7 +874,7 @@ func (p *Pool) sweep(ctx context.Context, host *surveyed, view survey, alive map
 	}
 	// Its restart policy covers a crash, not a stop or a host restart, and a runner with no proxy loses its job.
 	if serving && !host.egress {
-		_, err := p.prepare(ctx, host)
+		_, err := p.prepare(ctx, host, nil)
 		return err
 	}
 	return nil
