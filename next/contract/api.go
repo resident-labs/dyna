@@ -367,8 +367,9 @@ type HostSetLimitsResponse struct{}
 
 // HostSetRequest turns a host's two switches, each on its own; a nil one stays as it is. With agents off no new session box
 // lands on the host, and with CI off the CI pool starts no runner there, though a repository still names it. Both off
-// disables the host: with both off a host is exec only (host exec runs only, checked by SSH and bash alone), and turning
-// either on again runs the full host check first. What already runs there stays until it stops.
+// disables the host and keeps it registered, as before. A host added exec only (HostAddRequest.ExecOnly) stays exec only
+// whatever its switches say until agents or ci is turned on, which runs the full host check first and ends exec only. What
+// already runs there stays until it stops.
 type HostSetRequest struct {
 	Host               HostName `json:"host"`
 	Agents             *bool    `json:"agents,omitempty"`
@@ -425,6 +426,7 @@ type HostSummary struct {
 	Pool       string          `json:"pool,omitempty"`       // the pool that holds this node
 	Agents     bool            `json:"agents,omitempty"`     // new session boxes may land on this added host
 	CI         bool            `json:"ci,omitempty"`         // the CI pool may start runners on this added host
+	ExecOnly   bool            `json:"execOnly,omitempty"`   // added exec only: host-exec runs, no boxes or runners
 	Runners    int             `json:"runners,omitempty"`    // the CI runners on this added host now
 	LastSeen   time.Time       `json:"lastSeen,omitzero"`
 	History    []HostLoadPoint `json:"history"`

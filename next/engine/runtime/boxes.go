@@ -202,7 +202,17 @@ func (b *Boxes) cache(name contract.HostName, h *podman.Host) {
 	}
 	ctx, stop := context.WithCancel(b.Context)
 	b.beats[name] = stop
-	h.SetExecOnly(func() bool { return b.execOnly(ctx, name) })
+	// The heartbeat asks each beat, since host set can turn an exec-only host into a full one. A store error keeps the last answer.
+	last := false
+	h.SetExecOnly(func() bool {
+		hosts, err := b.Store.Hosts(ctx)
+		if err != nil {
+			log.Printf("host %s: exec-only check: %v", name, err)
+			return last
+		}
+		last = slices.ContainsFunc(hosts, func(record box.Host) bool { return record.Name == name && record.ExecOnly })
+		return last
+	})
 	ticker := time.NewTicker(10 * time.Second)
 	go func() {
 		defer ticker.Stop()
@@ -220,20 +230,6 @@ func (b *Boxes) cache(name contract.HostName, h *podman.Host) {
 			}
 		}, b.pressure(name))
 	}()
-}
-
-// execOnly reports whether a host takes only host-exec runs now, which the owner can change with host set.
-func (b *Boxes) execOnly(ctx context.Context, name contract.HostName) bool {
-	hosts, err := b.Store.Hosts(ctx)
-	if err != nil {
-		return false
-	}
-	for _, record := range hosts {
-		if record.Name == name {
-			return record.ExecOnly()
-		}
-	}
-	return false
 }
 
 // forgetHost drops the engine's side of a host that is leaving: its heartbeat, its connection, its forwards and what this
@@ -467,7 +463,7 @@ func (b *Boxes) BuildAhead(ctx context.Context) {
 	}
 	var wg sync.WaitGroup
 	for _, record := range hosts {
-		if record.State != box.HostReady || record.ExecOnly() {
+		if record.State != box.HostReady || record.ExecOnly {
 			continue
 		}
 		wg.Add(1)
@@ -628,7 +624,7 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool,
 			return false, fmt.Errorf("host check %s: %w", podman.CheckExec, err)
 		}
 		notEngine := false
-		record := box.Host{EngineHost: &notEngine, Name: req.Name, SSH: req.SSH, State: box.HostReady, NoAgents: true, Rooms: req.Rooms, CheckedAt: time.Now()}
+		record := box.Host{EngineHost: &notEngine, Name: req.Name, SSH: req.SSH, State: box.HostReady, NoAgents: true, ExecOnly: true, Rooms: req.Rooms, CheckedAt: time.Now()}
 		if err := b.Store.AddHost(ctx, record); err != nil {
 			return false, err
 		}
@@ -884,7 +880,7 @@ func (b *Boxes) Restore(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	hosts = slices.DeleteFunc(hosts, func(host box.Host) bool { return host.State == box.HostRemoved || host.ExecOnly() })
+	hosts = slices.DeleteFunc(hosts, func(host box.Host) bool { return host.State == box.HostRemoved || host.ExecOnly })
 	b.mu.Lock()
 	if b.recoveries == nil {
 		b.recoveries = make(map[contract.HostName]*recovery)

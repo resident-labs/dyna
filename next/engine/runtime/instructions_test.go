@@ -477,7 +477,7 @@ func TestAddExecOnlyHostNeedsOnlyBash(t *testing.T) {
 	if len(commands) != 1 || !strings.Contains(commands[0], "true") {
 		t.Fatalf("commands %q", commands)
 	}
-	if !added.ExecOnly() || added.State != box.HostReady || added.EngineHost == nil {
+	if !added.ExecOnly || added.State != box.HostReady || added.EngineHost == nil {
 		t.Fatalf("record %+v", added)
 	}
 }
