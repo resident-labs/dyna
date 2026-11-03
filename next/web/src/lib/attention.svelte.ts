@@ -38,10 +38,11 @@ export class Attention {
   // then offers every control, and the engine still refuses what the device cannot do.
   private readonly scopes = new SvelteSet<Scope>(everyScope.map(item => item.scope));
   can = (scope: Scope) => this.scopes.has(scope);
-  // The host this device is on (spec 7.8), shown beside the composer. device.list needs admin, so a device without it has none.
+  // The host this device is on (spec 7.8), shown beside the composer. device.scopes gives it on connect; Settings sets it when the owner changes it.
   // A set of at most one, like scopes, so reads track it without the compiler.
   private readonly hosts = new SvelteSet<HostName>();
   host = () => this.hosts.values().next().value;
+  setHost(host?: HostName) { this.hosts.clear(); if (host) this.hosts.add(host); }
   // What waits for the owner in a room: requests and questions.
   asks = (room: string) => (this.waiting.get(room)?.size ?? 0) + (this.questions.get(room)?.size ?? 0);
   // The newest event applied; room.list gives the first value and the stream resumes after it.
@@ -51,12 +52,8 @@ export class Attention {
   constructor(connect: typeof stream = stream) { this.connect = connect; }
 
   async open(): Promise<void> {
-    const [list, mine, devices] = await Promise.all([call("room.list", {}), call("device.scopes", {}).catch((error: unknown) => { if (error instanceof APIError && error.detail.code === "not_found") return undefined; throw error; }),
-      call("device.list", {}).catch(() => undefined)]);
-    const host = devices?.devices?.find(device => device.current)?.host;
-    this.hosts.clear();
-    if (host) this.hosts.add(host);
-    if (mine) { this.scopes.clear(); for (const scope of mine.scopes ?? []) this.scopes.add(scope); }
+    const [list, mine] = await Promise.all([call("room.list", {}), call("device.scopes", {}).catch((error: unknown) => { if (error instanceof APIError && error.detail.code === "not_found") return undefined; throw error; })]);
+    if (mine) { this.scopes.clear(); for (const scope of mine.scopes ?? []) this.scopes.add(scope); this.setHost(mine.host); }
     this.head = list.seq;
     for (const room of list.rooms ?? []) this.add(room);
     this.stop = this.connect(undefined, () => this.head, event => this.apply(event));

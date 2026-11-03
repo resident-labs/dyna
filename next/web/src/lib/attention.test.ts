@@ -36,7 +36,6 @@ test("a room's hostless count loads which sessions wait for a host that takes th
     const method = String(input).replace("/v1/", "");
     if (method === "room.list") return new Response(JSON.stringify({ seq: 3, rooms: [{ id: "a", name: "A", created: "", waiting: [], working: ["s1"], failed: 0, hostless: 1 }] }));
     if (method === "device.scopes") return new Response(JSON.stringify({ scopes: ["read"] }));
-    if (method === "device.list") return new Response(JSON.stringify({ devices: [] }));
     if (method !== "session.list") { unexpected.push(method); throw new Error(`Unexpected fetch: ${method}`); }
     if (offline) throw new Error("offline");
     return new Response(JSON.stringify({ seq: 3, sessions: [{ id: "s1", boxState: "pending", boxReason: "room-host" }, { id: "s2", boxState: "pending", boxReason: "cpu" }] }));
@@ -62,7 +61,6 @@ test("Home's session read and the room's own seed share one read, so a box chang
   globalThis.fetch = async input => {
     if (String(input).endsWith("room.list")) return new Response(JSON.stringify({ seq: 3, rooms: [{ id: "a", name: "A", created: "", waiting: [], working: [], failed: 0, hostless: 1 }] }));
     if (String(input).endsWith("device.scopes")) return new Response(JSON.stringify({ scopes: ["read"] }));
-    if (String(input).endsWith("device.list")) return new Response(JSON.stringify({ devices: [] }));
     if (!String(input).endsWith("session.list")) { unexpected.push(String(input)); throw new Error(`Unexpected fetch: ${String(input)}`); }
     reads++;
     await new Promise<void>(done => { answer = done; });
@@ -233,22 +231,21 @@ test("the page reads its device's scopes once at connect, and offers every contr
   } finally { globalThis.fetch = original; }
 });
 
-test("the composer's host is this device's, read from device.list, and none without one or without admin", async () => {
+test("the composer's host comes from device.scopes on connect, follows a change in Settings, and is none without one", async () => {
   const original = globalThis.fetch;
-  const open = async (devices: Response) => {
-    globalThis.fetch = async input => {
-      const method = String(input).replace("/v1/", "");
-      if (method === "device.list") return devices;
-      return new Response(JSON.stringify(method === "device.scopes" ? { scopes: ["read", "operate"] } : { seq: 1, rooms: [] }));
-    };
+  const open = async (scopes: { scopes: string[]; host?: string }) => {
+    globalThis.fetch = async input => new Response(JSON.stringify(String(input).endsWith("device.scopes") ? scopes : { seq: 1, rooms: [] }));
     const attention = new Attention(() => () => {});
     await attention.open();
-    return attention.host();
+    return attention;
   };
-  const device = (id: string, current: boolean, host?: string) => ({ id, name: id, pairedAt: "", lastSeenAt: "", expiresAt: "", scopes: ["read"], current, host });
   try {
-    assert.equal(await open(new Response(JSON.stringify({ devices: [device("a", false, "desktop"), device("b", true, "omarchy")] }))), "omarchy");
-    assert.equal(await open(new Response(JSON.stringify({ devices: [device("a", false, "desktop"), device("b", true)] }))), undefined);
-    assert.equal(await open(new Response(JSON.stringify({ error: { code: "forbidden" } }), { status: 403 })), undefined);
+    const attention = await open({ scopes: ["read", "operate"], host: "omarchy" });
+    assert.equal(attention.host(), "omarchy");
+    attention.setHost("desktop");
+    assert.equal(attention.host(), "desktop");
+    attention.setHost(undefined);
+    assert.equal(attention.host(), undefined);
+    assert.equal((await open({ scopes: ["read"] })).host(), undefined);
   } finally { globalThis.fetch = original; }
 });
