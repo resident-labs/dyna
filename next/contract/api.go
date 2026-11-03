@@ -197,11 +197,26 @@ type RoomSetLimitsRequest struct {
 type RoomSetLimitsResponse struct{}
 
 // RoomSetRequest changes a room's settings, each on its own; a nil one stays as it is. Only the owner calls it.
-// RootApprovesHostexec lets the room's root decide its sessions' hostexec.grant requests, as the owner can. It is off by default.
+// RootApproves says per kind whether the room's root decides that kind's operations as the owner can; a kind left out stays.
+// Every kind is off by default.
 type RoomSetRequest struct {
-	Room                 RoomID `json:"room"`
-	RootApprovesHostexec *bool  `json:"rootApprovesHostexec,omitempty"`
+	Room         RoomID                `json:"room"`
+	RootApproves map[RootApproval]bool `json:"rootApproves,omitempty"`
 }
+
+// RootApproval names the owner-class operations a room's root may also decide, when the owner allows it for the room.
+type RootApproval string
+
+const (
+	RootApprovesHostexec RootApproval = "hostexec" // hostexec.grant
+	RootApprovesAddons   RootApproval = "addons"   // addon.global
+	RootApprovesHosts    RootApproval = "hosts"    // room.hosts
+	RootApprovesPools    RootApproval = "pools"    // pool.add
+)
+
+// AllRootApprovals lists every kind, in the order the web and the CLI show them.
+var AllRootApprovals = []RootApproval{RootApprovesHostexec, RootApprovesAddons, RootApprovesHosts, RootApprovesPools}
+
 type RoomSetResponse struct{}
 
 type RoomPauseRequest struct {
@@ -223,7 +238,9 @@ type RoomSummary struct {
 	Paused   bool      `json:"paused"`
 	Created  time.Time `json:"created"`
 	LastRead int64     `json:"lastRead"`
-	Waiting  []OpID    `json:"waiting"` // pending owner-class operations, which only the owner decides
+	Waiting  []OpID    `json:"waiting"` // pending owner-class operations, which the owner decides, and the root for the kinds RootApproves names
+	// RootApproves lists the kinds the room's root may decide.
+	RootApproves []RootApproval `json:"rootApproves,omitempty"`
 	// Questions are those the owner has not answered.
 	Questions []QuestionID `json:"questions,omitempty"`
 	Working   []SessionID  `json:"working"`  // open sessions with a running turn

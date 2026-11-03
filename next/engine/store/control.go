@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"slices"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -35,26 +37,39 @@ func (s *Store) StopRequested(ctx context.Context, session contract.SessionID) (
 	return turn, err
 }
 
-// SetRoomRootApprovesHostexec turns the room's setting that lets its root decide host exec grant requests.
-func (s *Store) SetRoomRootApprovesHostexec(ctx context.Context, room contract.RoomID, on bool) error {
+// SetRoomRootApproves turns on or off the kinds of operation the room's root may decide; a kind left out stays.
+func (s *Store) SetRoomRootApproves(ctx context.Context, room contract.RoomID, changes map[contract.RootApproval]bool) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, "UPDATE rooms SET root_approves_hostexec=? WHERE id=? AND state='open'", on, room)
+		var current string
+		if err := tx.QueryRowContext(ctx, "SELECT root_approves FROM rooms WHERE id=? AND state='open'", room).Scan(&current); err != nil {
+			return err
+		}
+		var before []contract.RootApproval
+		if err := json.Unmarshal([]byte(current), &before); err != nil {
+			return err
+		}
+		after := []contract.RootApproval{}
+		for _, kind := range contract.AllRootApprovals {
+			on, changed := changes[kind]
+			if !changed {
+				on = slices.Contains(before, kind)
+			}
+			if on {
+				after = append(after, kind)
+			}
+		}
+		set, err := json.Marshal(after)
 		if err != nil {
 			return err
 		}
-		if n, err := result.RowsAffected(); err != nil || n == 0 {
-			if err == nil {
-				err = sql.ErrNoRows
-			}
-			return err
-		}
-		return nil
+		_, err = tx.ExecContext(ctx, "UPDATE rooms SET root_approves=? WHERE id=?", string(set), room)
+		return err
 	})
 }
 
-// RoomRootApprovesHostexec reads a room's name and whether its root may decide host exec grant requests.
-func (s *Store) RoomRootApprovesHostexec(ctx context.Context, room contract.RoomID) (name string, on bool, err error) {
-	err = s.Read().QueryRowContext(ctx, "SELECT name,root_approves_hostexec FROM rooms WHERE id=?", room).Scan(&name, &on)
+// RoomRootApproves reads a room's name and whether its root may decide the operations of a kind.
+func (s *Store) RoomRootApproves(ctx context.Context, room contract.RoomID, kind contract.RootApproval) (name string, on bool, err error) {
+	err = s.Read().QueryRowContext(ctx, "SELECT name,EXISTS(SELECT 1 FROM json_each(root_approves) WHERE value=?) FROM rooms WHERE id=?", kind, room).Scan(&name, &on)
 	return
 }
 
