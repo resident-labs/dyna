@@ -395,13 +395,13 @@ func TestBashInARealBox(t *testing.T) {
 	script := func(code string) crewTool { return crewTool{"codemode", jsonOf(t, map[string]string{"code": code})} }
 	provider := &toolUpstream{tools: map[string][]crewTool{
 		"task-run":      {bash(map[string]any{"command": "echo hello; pwd"})},
-		"task-mask":     {bash(map[string]any{"command": "echo secret=abc123"})},
+		"task-mask":     {bash(map[string]any{"command": "echo secret=abc123abc123"})},
 		"task-fail":     {bash(map[string]any{"command": "echo broken; exit 3"})},
 		"task-cwd":      {bash(map[string]any{"command": "true", "cwd": "no\u200bpe"})},
 		"task-long":     {bash(map[string]any{"command": "sleep 40; echo finished box", "description": "Slow in the box"})},
 		"task-jobs":     {{"job", `{"action":"list"}`}},
 		"task-big":      {bash(map[string]any{"command": "seq 1 20000"})},
-		"task-host":     {bash(map[string]any{"command": "echo on-host $((1+1)) | cat; echo secret=abc123", "host": "local"})},
+		"task-host":     {bash(map[string]any{"command": "echo on-host $((1+1)) | cat; echo secret=abc123abc123", "host": "local"})},
 		"task-hostfail": {bash(map[string]any{"command": "exit 5", "host": "local"})},
 		"task-refused":  {bash(map[string]any{"command": "true", "host": "elsewhere"})},
 		"task-hostlong": {bash(map[string]any{"command": "sleep 40; echo finished host", "host": "local", "description": "Slow on a host"})},

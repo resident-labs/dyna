@@ -135,10 +135,10 @@ func TestAClosedCrewKeepsWhatItsStepsRanAndCountsThem(t *testing.T) {
 	w := setupWorkflow(t)
 	started, crew := w.start(w.owner, workflowScript)
 	w.turn(crew)
-	if _, problem := w.WorkflowStepStart(w.ctx, crew, contract.WorkflowStepStartRequest{Key: "cmd", Kind: contract.WorkflowStepCommand, Name: "run: deploy", Detail: "deploy --token=hunter2"}); problem != nil {
+	if _, problem := w.WorkflowStepStart(w.ctx, crew, contract.WorkflowStepStartRequest{Key: "cmd", Kind: contract.WorkflowStepCommand, Name: "run: deploy", Detail: "deploy --token=hunter2hunter2"}); problem != nil {
 		t.Fatal(problem)
 	}
-	if _, problem := w.WorkflowStepEnd(w.ctx, crew, contract.WorkflowStepEndRequest{Key: "cmd", State: contract.WorkflowStepDone, Result: `{"code":0,"stdout":"token=hunter2 sent"}`}); problem != nil {
+	if _, problem := w.WorkflowStepEnd(w.ctx, crew, contract.WorkflowStepEndRequest{Key: "cmd", State: contract.WorkflowStepDone, Result: `{"code":0,"stdout":"token=hunter2hunter2 sent"}`}); problem != nil {
 		t.Fatal(problem)
 	}
 	w.step(crew, "other", contract.WorkflowStepFailed, "refused")
@@ -323,7 +323,7 @@ func TestAStepChangeIsLiveAndQuiet(t *testing.T) {
 	if _, problem := w.WorkflowStepTranscript(w.ctx, crew, contract.WorkflowStepTranscriptRequest{Key: "a", Transcript: "../a.jsonl"}); problem == nil {
 		t.Fatal("a path outside the crew's folder was taken")
 	}
-	if _, problem := w.WorkflowStepEnd(w.ctx, crew, contract.WorkflowStepEndRequest{Key: "a", State: contract.WorkflowStepFailed, Reason: "refused: password=hunter2", Transcript: "a.jsonl", Usage: contract.Usage{OutputTokens: 5}}); problem != nil {
+	if _, problem := w.WorkflowStepEnd(w.ctx, crew, contract.WorkflowStepEndRequest{Key: "a", State: contract.WorkflowStepFailed, Reason: "refused: password=hunter2hunter2", Transcript: "a.jsonl", Usage: contract.Usage{OutputTokens: 5}}); problem != nil {
 		t.Fatal(problem)
 	}
 	if stored, problem := w.WorkflowStepStart(w.ctx, crew, contract.WorkflowStepStartRequest{Key: "a", Kind: contract.WorkflowStepAgent}); problem != nil || stored.State != contract.WorkflowStepFailed {

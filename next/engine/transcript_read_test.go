@@ -92,7 +92,7 @@ func TestTranscriptTurnPageAndFullOutput(t *testing.T) {
 	if unclaimedErr != nil {
 		t.Fatal(unclaimedErr)
 	}
-	output := strings.Repeat("x", 1200) + " token=secretvalue"
+	output := strings.Repeat("x", 1200) + " token=secretvalue123456"
 	data := fmt.Sprintf(`{"type":"message","id":"user","message":{"role":"user","deliveryId":"%d"}}
 {"type":"message","id":"assistant","message":{"role":"assistant","content":[{"type":"toolCall","id":"call1","name":"bash","arguments":{}},{"type":"toolCall","id":"post-call","name":"bash","arguments":{"command":"dyna post hello"}}]}}
 {"type":"message","id":"result","message":{"role":"toolResult","toolCallId":"call1","content":[{"type":"text","text":%q}]}}
@@ -297,13 +297,13 @@ func TestTranscriptInputAttachmentsAndBudget(t *testing.T) {
 	}
 	attachments := make([]contract.Attachment, 16)
 	for i := range attachments {
-		attachments[i] = contract.Attachment{Name: "token=secretvalue" + strings.Repeat("\x01", 200), Media: strings.Repeat("\x01", 200), SHA256: strings.Repeat("a", 64), Bytes: 42}
+		attachments[i] = contract.Attachment{Name: "token=secretvalue123456 " + strings.Repeat("\x01", 200), Media: strings.Repeat("\x01", 200), SHA256: strings.Repeat("a", 64), Bytes: 42}
 	}
 	checks := make([]contract.VisualCheck, 16)
 	for i := range checks {
 		checks[i].Detail = strings.Repeat("\x01", 200)
 	}
-	attachments[0].Visual = &contract.VisualCard{Title: "token=secretvalue", Checks: checks}
+	attachments[0].Visual = &contract.VisualCard{Title: "token=secretvalue123456", Checks: checks}
 	ids := make([]contract.EventID, 6)
 	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
 		for i := range ids {
