@@ -38,20 +38,29 @@ func Context(ctx context.Context, runner Runner, mirror, wanted string) (string,
 		if err != nil {
 			return "", "", nil, nil, err
 		}
-		for _, word := range strings.Fields(string(data)) {
-			need := box.Need(word)
-			switch need {
-			case box.NeedNestedContainers, box.NeedKVM:
-				if !slices.Contains(needs, need) {
-					needs = append(needs, need)
-				}
-			default:
-				return "", "", nil, nil, errors.New("unknown box need: " + word)
-			}
+		if needs, err = ParseNeeds(string(data)); err != nil {
+			return "", "", nil, nil, err
 		}
 	}
 	data, err := runner.Run(ctx, nil, "--git-dir", mirror, "archive", "--format=tar", string(tree))
 	return name, tree, data, needs, err
+}
+
+// ParseNeeds reads a box-needs file: words naming devices or kernel access, each once.
+func ParseNeeds(text string) ([]box.Need, error) {
+	var needs []box.Need
+	for _, word := range strings.Fields(text) {
+		need := box.Need(word)
+		switch need {
+		case box.NeedNestedContainers, box.NeedKVM:
+			if !slices.Contains(needs, need) {
+				needs = append(needs, need)
+			}
+		default:
+			return nil, errors.New("unknown box need: " + word)
+		}
+	}
+	return needs, nil
 }
 
 // DefaultSize reads the size file of a toolchain image, chosen as in Context. It returns "" when there is none.
