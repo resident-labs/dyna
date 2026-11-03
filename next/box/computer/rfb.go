@@ -11,6 +11,7 @@ import (
 	"image/png"
 	"io"
 	"net"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -312,10 +313,31 @@ func draw(img *image.RGBA, r Rect, data []byte) {
 	}
 }
 
+// captureTimeout is how long Capture waits for the desktop. A variable so a test need not wait it out.
+var captureTimeout = 10 * time.Second
+
+// NoFrameError is a screenshot that got no picture from the desktop in time, as when Chromium is busy loading a page.
+// The desktop is still there, and a later capture can work.
+type NoFrameError struct {
+	Within time.Duration
+	Err    error // the connection's own timeout
+}
+
+func (e *NoFrameError) Error() string {
+	return fmt.Sprintf("the desktop sent no frame within %g s; it may be busy, for instance loading a page: %v", e.Within.Seconds(), e.Err)
+}
+
+func (e *NoFrameError) Unwrap() error { return e.Err }
+
 // Capture returns a PNG of region of the desktop, or of all of it when region is empty. The pointer is not in it.
-func Capture(ctx context.Context, socket string, region Rect) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+func Capture(ctx context.Context, socket string, region Rect) (shot []byte, err error) {
+	ctx, cancel := context.WithTimeout(ctx, captureTimeout)
 	defer cancel()
+	defer func() {
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			err = &NoFrameError{Within: captureTimeout, Err: err}
+		}
+	}()
 	c, err := dialRFB(ctx, socket, 4)
 	if err != nil {
 		return nil, err
