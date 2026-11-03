@@ -39,9 +39,15 @@ func CgroupArgs(slice string) []string { return []string{"--cgroup-parent=" + sl
 // DiskFloor is the free space a host keeps: 20 GiB, or a tenth of its disk if that is more.
 func DiskFloor(total int64) int64 { return max(20*GiB, total/10) }
 
-// DiskWarn is the free space that warns: 85% used on a large disk, and always above the point where the largest box is refused.
-func DiskWarn(floor int64) int64 {
-	return floor + max(floor/2, diskRequest(contract.BoxSizeXLarge))
+// DiskWarn is the free space that warns: 85% used on a large disk, and above the point where the largest box is refused. On a
+// small disk that box takes at most a quarter of it, so a new node of 150 GB does not warn while it is still empty. total is
+// the disk's size, or 0 when unknown.
+func DiskWarn(floor, total int64) int64 {
+	headroom := diskRequest(contract.BoxSizeXLarge)
+	if total > 0 {
+		headroom = min(headroom, total/4)
+	}
+	return floor + max(floor/2, headroom)
 }
 
 // Serves says whether a host takes a room's session boxes: agents are on, and its room list, which empty means every room,
