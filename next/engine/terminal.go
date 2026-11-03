@@ -64,34 +64,10 @@ func (s *Service) Terminal(ctx context.Context, session contract.SessionID, host
 	var id contract.BoxID
 	release := func() {}
 	if session != "" {
-		record, open, err := s.store.OpenSession(ctx, session)
-		if err != nil {
-			return nil, release, failure(err)
-		}
-		if !open {
-			return nil, release, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
-		}
-		current, err := s.store.Box(ctx, record.Box)
-		if err != nil {
-			return nil, release, failure(err)
-		}
-		if current.State != contract.BoxReady {
-			return nil, release, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
-		}
-		host, id = current.Host, current.ID
-		handle, problem := s.createSession(ctx, session)
-		if problem != nil {
+		var problem *contract.Error
+		if host, id, release, problem = s.holdBox(ctx, session); problem != nil {
 			return nil, release, problem
 		}
-		if !handle.OpenTerminal() {
-			return nil, release, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
-		}
-		release = handle.CloseTerminal
-		if err := s.store.WakeTerminal(ctx, id); err != nil {
-			release()
-			return nil, func() {}, failure(err)
-		}
-		s.reconciler.Kick()
 	}
 	argv, err := s.boxes.TerminalArgv(ctx, host, id)
 	if err != nil {
@@ -99,4 +75,47 @@ func (s *Service) Terminal(ctx context.Context, session contract.SessionID, host
 		return nil, func() {}, failure(err)
 	}
 	return argv, release, nil
+}
+
+// readyBox returns the box of an open session, if it is ready.
+func (s *Service) readyBox(ctx context.Context, session contract.SessionID) (box.Box, *contract.Error) {
+	record, open, err := s.store.OpenSession(ctx, session)
+	if err != nil {
+		return box.Box{}, failure(err)
+	}
+	if !open {
+		return box.Box{}, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+	}
+	current, err := s.store.Box(ctx, record.Box)
+	if err != nil {
+		return box.Box{}, failure(err)
+	}
+	if current.State != contract.BoxReady {
+		return box.Box{}, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
+	}
+	return current, nil
+}
+
+// holdBox keeps a session's ready box awake until release, for an owner terminal or computer view, and wakes a box that
+// was about to stop.
+func (s *Service) holdBox(ctx context.Context, session contract.SessionID) (contract.HostName, contract.BoxID, func(), *contract.Error) {
+	release := func() {}
+	current, problem := s.readyBox(ctx, session)
+	if problem != nil {
+		return "", "", release, problem
+	}
+	handle, problem := s.createSession(ctx, session)
+	if problem != nil {
+		return "", "", release, problem
+	}
+	if !handle.OpenTerminal() {
+		return "", "", release, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+	}
+	release = handle.CloseTerminal
+	if err := s.store.WakeTerminal(ctx, current.ID); err != nil {
+		release()
+		return "", "", func() {}, failure(err)
+	}
+	s.reconciler.Kick()
+	return current.Host, current.ID, release, nil
 }
