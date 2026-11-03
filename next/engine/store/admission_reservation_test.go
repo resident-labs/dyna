@@ -59,7 +59,7 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 		t.Fatalf("early hello: %+v", p)
 	}
 	event.ID, event.Time = "done", time.Unix(103, 0)
-	if err := s.FinishCreate(ctx, boxes[0], "image", "", time.Time{}, 0, event); err != nil {
+	if err := s.FinishCreate(ctx, boxes[0], "image", "", time.Time{}, 0, event, false); err != nil {
 		t.Fatal(err)
 	}
 	boxes, err = s.Boxes(ctx)
