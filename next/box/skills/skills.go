@@ -344,3 +344,30 @@ func Annotate(data []byte, host contract.HostName) ([]byte, error) {
 	line := fmt.Sprintf("This skill's commands run on host %s: use bash with host: %q. Files you write to $DYNA_OUT come back to this box.", host, string(host))
 	return []byte("---\n" + string(out) + "---\n" + line + "\n" + body), nil
 }
+
+// PackFolder packs the folder at path, below dir when it is relative, for the engine to save as a room image. A caller
+// cannot send a folder the engine cannot read, so the box or the CLI packs it.
+func PackFolder(path, dir string) ([]byte, error) {
+	if dir != "" && !filepath.IsAbs(path) {
+		path = filepath.Join(dir, path)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("%s is not a folder", path)
+	}
+	archive := NewArchive()
+	if err := archive.Folder("", path); err != nil {
+		return nil, err
+	}
+	packed, err := archive.Bytes()
+	if err != nil {
+		return nil, err
+	}
+	if len(packed) > MaxPacked {
+		return nil, fmt.Errorf("%s packs to %d KiB, over the limit of %d KiB", path, len(packed)>>10, MaxPacked>>10)
+	}
+	return packed, nil
+}

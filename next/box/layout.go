@@ -65,6 +65,7 @@ const (
 	composeFolder    = "compose"
 	addonsFile       = "addons.json"
 	skillsFolder     = "skills"
+	imagesFolder     = "images"
 	sharedFolder     = "shared"
 	// AddonBundle is the name of the file a box unpacks its add-ons from, beside AGENTS.md in the folders it mounts.
 	AddonBundle = "addons.tgz"
@@ -193,6 +194,9 @@ func (l Layout) Skills(room contract.RoomID) string {
 	}
 	return filepath.Join(l.room(room), skillsFolder)
 }
+
+// Images is the folder of a room's images, one folder each.
+func (l Layout) Images(room contract.RoomID) string { return filepath.Join(l.room(room), imagesFolder) }
 
 // Files is the folder of a room's blobs.
 func (l Layout) Files(room contract.RoomID) string { return filepath.Join(l.room(room), "files") }

@@ -15,6 +15,7 @@ import (
 	"github.com/resident-labs/dyna/engine/addons"
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/compose"
+	"github.com/resident-labs/dyna/engine/images"
 	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/live"
 	"github.com/resident-labs/dyna/engine/model"
@@ -82,6 +83,7 @@ type Service struct {
 	instructionsMu      sync.Mutex
 	publishInstructions func(context.Context)
 	addons              *addons.Files
+	images              *images.Store
 	addonSources        *addons.Sources
 }
 
@@ -197,6 +199,7 @@ func (s *Service) SetBinary(sum string) { s.binary = sum }
 func (s *Service) SetLayout(layout box.Layout) {
 	s.layout = layout
 	s.addons = &addons.Files{Layout: layout}
+	s.images = &images.Store{Layout: layout}
 }
 
 func (s *Service) transition(ctx context.Context, room contract.RoomID, b box.Box, state contract.BoxState, reason string, cause contract.FailureCause) (box.Box, error) {
