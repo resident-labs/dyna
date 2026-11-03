@@ -13,6 +13,12 @@ import (
 func (s *Service) HostexecGrant() approve.Entry {
 	return approve.Entry{
 		Scope: contract.ScopeAdmin,
+		// The request waits for a decision, or for its session to close. A room setting also lets its root decide.
+		NoExpiry: true,
+		RootDecides: func(ctx context.Context, room contract.RoomID) (bool, error) {
+			_, on, err := s.store.RoomRootApprovesHostexec(ctx, room)
+			return on, err
+		},
 		Class: func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassOwner },
 
 		// The title is the phrase after the asker's name, as for every card: "<session> asks for host access".
@@ -70,6 +76,9 @@ func (s *Service) HostexecGrant() approve.Entry {
 			}
 			if unknown {
 				body += "\nA host here may hold the model sign-ins. Approve only if you trust this session with them."
+			}
+			if name, on, err := s.store.RoomRootApprovesHostexec(ctx, a.Room); err == nil && on {
+				body += "\nWaiting for " + name + "'s root or the owner."
 			}
 			return contract.Card{Title: "asks for host access", Target: target, Body: body}
 		},

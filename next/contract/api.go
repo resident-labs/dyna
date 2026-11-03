@@ -62,6 +62,7 @@ const (
 	MethodAccountsQuota           Method = "accounts.quota"
 	MethodRoomPause               Method = "room.pause"
 	MethodRoomSetLimits           Method = "room.set_limits"
+	MethodRoomSet                 Method = "room.set"
 	MethodRoomCreate              Method = "room.create"
 	MethodRoomDelete              Method = "room.delete"
 	MethodRoomRepoAdd             Method = "room.repo.add"
@@ -194,6 +195,14 @@ type RoomSetLimitsRequest struct {
 	MemBytes int64  `json:"memBytes"`
 }
 type RoomSetLimitsResponse struct{}
+
+// RoomSetRequest changes a room's settings, each on its own; a nil one stays as it is. Only the owner calls it.
+// RootApprovesHostexec lets the room's root decide its sessions' hostexec.grant requests, as the owner can. It is off by default.
+type RoomSetRequest struct {
+	Room                 RoomID `json:"room"`
+	RootApprovesHostexec *bool  `json:"rootApprovesHostexec,omitempty"`
+}
+type RoomSetResponse struct{}
 
 type RoomPauseRequest struct {
 	Room   RoomID `json:"room"`

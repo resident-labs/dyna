@@ -63,6 +63,20 @@ func (s *Service) HostSet(ctx context.Context, caller contract.Principal, req co
 	return contract.HostSetResponse{}, nil
 }
 
+// RoomSet changes a room's settings. Only the owner does, and an unset one stays.
+func (s *Service) RoomSet(ctx context.Context, caller contract.Principal, req contract.RoomSetRequest) (contract.RoomSetResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalOwner {
+		return contract.RoomSetResponse{}, forbidden()
+	}
+	if req.RootApprovesHostexec == nil {
+		return contract.RoomSetResponse{}, invalid("set rootApprovesHostexec")
+	}
+	if err := s.store.SetRoomRootApprovesHostexec(ctx, req.Room, *req.RootApprovesHostexec); err != nil {
+		return contract.RoomSetResponse{}, failure(err)
+	}
+	return contract.RoomSetResponse{}, nil
+}
+
 // roomWrite runs a write to the room's folder while no deletion can remove it, and refuses a room that is going or gone.
 // So nothing recreates a folder after the deletion removed it.
 func (s *Service) roomWrite(ctx context.Context, room contract.RoomID, write func() error) error {

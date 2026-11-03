@@ -40,7 +40,7 @@ type OpRequested struct {
 	By      Principal `json:"by"`
 	Class   Class     `json:"class"`
 	Card    Card      `json:"card"`
-	Expires time.Time `json:"expires"`
+	Expires time.Time `json:"expires,omitzero"`
 }
 
 // OpDecided is an operation approved or denied.
