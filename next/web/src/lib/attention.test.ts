@@ -230,3 +230,22 @@ test("the page reads its device's scopes once at connect, and offers every contr
     assert.equal(old.can("operate"), true);
   } finally { globalThis.fetch = original; }
 });
+
+test("the composer's host comes from device.scopes on connect, follows a change in Settings, and is none without one", async () => {
+  const original = globalThis.fetch;
+  const open = async (scopes: { scopes: string[]; host?: string }) => {
+    globalThis.fetch = async input => new Response(JSON.stringify(String(input).endsWith("device.scopes") ? scopes : { seq: 1, rooms: [] }));
+    const attention = new Attention(() => () => {});
+    await attention.open();
+    return attention;
+  };
+  try {
+    const attention = await open({ scopes: ["read", "operate"], host: "omarchy" });
+    assert.equal(attention.host(), "omarchy");
+    attention.setHost("desktop");
+    assert.equal(attention.host(), "desktop");
+    attention.setHost(undefined);
+    assert.equal(attention.host(), undefined);
+    assert.equal((await open({ scopes: ["read"] })).host(), undefined);
+  } finally { globalThis.fetch = original; }
+});

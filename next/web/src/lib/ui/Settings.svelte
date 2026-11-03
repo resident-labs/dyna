@@ -12,14 +12,14 @@
   import type { Device } from "../contract.gen.ts";
   // The Settings page, in the feed's and the sidebar's place. It opens over the app, so the room behind keeps its feed,
   // its position and its draft. A wide page opens the first pane. A phone opens the pane list, and a pane's arrow returns to it.
-  let { path, phone, navigate, onmenu, signedout, element = $bindable(), menu = $bindable() }: { path: string; phone: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void;
-    onmenu: (event: MouseEvent) => void; signedout: () => void; element?: HTMLElement; menu?: HTMLButtonElement } = $props();
+  let { path, phone, navigate, onmenu, signedout, thishost, element = $bindable(), menu = $bindable() }: { path: string; phone: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void;
+    onmenu: (event: MouseEvent) => void; signedout: () => void; thishost: (host?: string) => void; element?: HTMLElement; menu?: HTMLButtonElement } = $props();
 
   // device.list needs admin, so its refusal tells that this device has no Devices pane (spec 7.8).
   let devices: Device[] | undefined = $state.raw();
   let admin = $state(true), failed = $state(false);
   function reload() {
-    call("device.list", {}).then(list => { devices = list.devices ?? []; admin = true; failed = false; }, (error: unknown) => {
+    call("device.list", {}).then(list => { devices = list.devices ?? []; thishost(devices.find(device => device.current)?.host); admin = true; failed = false; }, (error: unknown) => {
       if (error instanceof SignedOut) signedout();
       else if (error instanceof APIError && error.detail.code === "forbidden") admin = false;
       // A failed poll keeps the list and the pair card on screen.

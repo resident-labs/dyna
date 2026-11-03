@@ -24,9 +24,9 @@
   // Files wait above the text as chips, as in v1's tray; the paperclip, a paste or the picker adds them.
   // While a DM's session runs a turn, an empty draft's Send becomes a square Stop, as in T3 Code; a draft keeps Send, which
   // steers the turn.
-  let { value = $bindable(""), placeholder, onsend, quote, replacement, onundo, onunquote, sessions = [], files, stop, thread = false, element = $bindable() }: {
+  let { value = $bindable(""), placeholder, onsend, quote, replacement, onundo, onunquote, sessions = [], files, stop, thread = false, host, element = $bindable() }: {
     value?: string; placeholder: string; onsend: () => void; quote?: Quote; replacement?: Quote; onundo: () => void; onunquote: () => void; sessions?: Mentionable[]; files: FileDraft;
-    stop?: { stopping: boolean; failed: boolean; run: () => void }; thread?: boolean;
+    stop?: { stopping: boolean; failed: boolean; run: () => void }; thread?: boolean; host?: string;
     element?: HTMLTextAreaElement;
   } = $props();
   let picker: HTMLInputElement | undefined = $state();
@@ -155,6 +155,7 @@
     <button type="button" class="attach" aria-label="Attach files" title="Attach files" onclick={() => picker?.click()}><Icon name="clip" /></button>
     <input bind:this={picker} type="file" multiple hidden onchange={event => { addFiles(event.currentTarget.files ?? []); event.currentTarget.value = ""; element?.focus(); }} />
     <span class="keys">Enter to send · Shift+Enter for a new line</span>
+    {#if host}<span class="host">on {host}</span>{/if}
     {#if stop && empty}<button type="button" class="send stop" aria-label={stop.stopping ? "Stopping" : "Stop"} title={stop.stopping ? "Stopping" : "Stop"} disabled={stop.stopping}
       onclick={event => { stop.run(); if (!event.detail) element?.focus(); }}><Icon name="stop" /></button>
     {:else}<button type="button" class="send" aria-label="Send" title="Send" disabled={!canSend} onclick={() => { note = ""; onsend(); element?.focus(); }}><Icon name="send" /></button>{/if}
@@ -226,6 +227,8 @@
   /* The key hint shows only while the empty message box has focus. */
   .keys { font-size: 12px; color: var(--muted); visibility: hidden; }
   .composer:has(textarea:focus:placeholder-shown) .keys { visibility: visible; }
+  /* The mock's quiet "on omarchy": the key hint's size and color. */
+  .host { font-size: 12px; color: var(--muted); }
   @media (pointer: coarse) {
     .composer { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; align-items: center; padding: 8px 10px; }
     .quote, .tray, .file-summary, .note, .mentions { grid-column: 1 / -1; }
@@ -236,7 +239,7 @@
     .actions { display: contents; }
     .actions .attach { grid-column: 1; grid-row: 4; }
     .actions .send { grid-column: 3; grid-row: 4; }
-    .composer .keys { display: none; }
+    .composer .keys, .composer .host { display: none; }
   }
   .actions button, .remove { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border: 0; border-radius: 8px; cursor: pointer; }
   .attach, .remove { background: none; color: var(--muted); }
