@@ -177,6 +177,7 @@
   // a large shared folder, machines and the busiest usage window; a part with nothing to say is left out.
   let needs = $derived(asks + failures.length + hostless.length + alerts.length);
   let unreachable = $derived(hosts?.filter(h => !h.reachable).length ?? 0);
+  let runners = $derived(hosts?.reduce((sum, h) => sum + (h.runners ?? 0), 0) ?? 0);
   let low = $derived(hosts?.filter(h => h.diskLow) ?? []);
   let lowDisk = $derived(low.length === 1 ? `${hostLabel(low[0].name)} is low on disk` : `${low.length} machines are low on disk`);
   // A large shared folder never changes the sentence; the muted line names the largest and its room.
@@ -187,7 +188,7 @@
     shared.length && `Shared folder of ${roomName(shared[0].room)} holds ${sharedSize(shared[0].bytes)}`
       + (shared.length > 1 ? `, and ${shared.length - 1} more ${shared.length === 2 ? "is" : "are"} large` : ""),
     !active.length && "No room is working",
-    hosts?.length && count(hosts.length, "machine") + (unreachable ? `, ${unreachable} unreachable` : ""),
+    hosts?.length && count(hosts.length, "machine") + (unreachable ? `, ${unreachable} unreachable` : "") + (runners ? `, ${count(runners, "CI runner")}` : ""),
     busiestWindow(shown),
   ].filter(Boolean).join(" · "));
 </script>

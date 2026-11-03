@@ -63,6 +63,16 @@ func (r *Reconciler) runnerView() ([]box.Box, []store.LifecycleBox) {
 	return placed, rows
 }
 
+// RunnerCounts says how many CI runners each host has now, as admission counts them.
+func (r *Reconciler) RunnerCounts() map[contract.HostName]int {
+	placed, _ := r.runnerView()
+	counts := make(map[contract.HostName]int)
+	for _, b := range placed {
+		counts[b.Host]++
+	}
+	return counts
+}
+
 // drainHost closes a host to admission once nothing holds it, box or runner.
 func (r *Reconciler) drainHost(ctx context.Context, name contract.HostName) error {
 	if r.runners == nil {

@@ -101,7 +101,7 @@ func TestRealImagesWarmAndPrune(t *testing.T) {
 	tags := make([]string, 4)
 	for i := range tags {
 		tags[i] = fmt.Sprintf("%s:%d", family, i)
-		if err := h.Build(ctx, tags[i], base, contextFrom(t, fmt.Sprintf("%d-%d", stamp, i))); err != nil {
+		if _, err := h.Build(ctx, tags[i], base, contextFrom(t, fmt.Sprintf("%d-%d", stamp, i))); err != nil {
 			t.Fatal(err)
 		}
 		// Image times have one-second resolution.

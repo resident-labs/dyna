@@ -397,6 +397,7 @@ type HostSummary struct {
 	Pool              string            `json:"pool,omitempty"`       // the pool that holds this node
 	Agents            bool              `json:"agents,omitempty"`     // new session boxes may land on this added host
 	CI                bool              `json:"ci,omitempty"`         // the CI pool may start runners on this added host
+	Runners           int               `json:"runners,omitempty"`    // the CI runners on this added host now
 	BackupCopyEnabled bool              `json:"backupCopyEnabled,omitempty"`
 	BackupCopyAt      time.Time         `json:"backupCopyAt,omitzero"`
 	BackupCopyFailure BackupCopyFailure `json:"backupCopyFailure,omitempty"`
