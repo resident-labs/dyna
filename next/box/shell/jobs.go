@@ -370,8 +370,9 @@ func (s *Server) run(cancel <-chan struct{}, r Run) (*job, error) {
 		if j.stopped {
 			j.end = &contract.ShellJobEnd{Kind: contract.ShellJobStopped}
 		}
-		// Until the web understands stopped endings, do not wake on an explicit stop. A timeout wakes, as the agent did not see it.
-		report := j.background && (!j.stopped || j.timedOut > 0)
+		// An explicit stop is reported silently: the engine drops the job from what the session holds and sends no wake.
+		// A timeout wakes, as the agent did not see it.
+		report := j.background
 		j.mu.Unlock()
 		close(j.done)
 		if report {
@@ -482,7 +483,7 @@ func (s *Server) report(j *job) {
 		}
 		tail += "[" + timeoutNote(j.timedOut) + "]"
 	}
-	req := contract.ShellJobEndedRequest{Job: j.id, Description: j.description, End: j.end, ExitCode: j.exit, Tail: tail}
+	req := contract.ShellJobEndedRequest{Job: j.id, Description: j.description, End: j.end, ExitCode: j.exit, Tail: tail, Silent: j.stopped && j.timedOut == 0}
 	j.mu.Unlock()
 	for delay := retryStart; s.cfg.Report(req) != nil; delay = min(delay*2, retryMax) {
 		select {
