@@ -59,21 +59,6 @@ func (h Host) Serves(room contract.RoomID) bool {
 	return !h.NoAgents && (shared || len(h.Rooms) == 0 || slices.Contains(h.Rooms, room))
 }
 
-// WaitsForRoom says whether a session box is pending for CPU or memory on a host, or could be placed there. Such a box comes
-// before a CI runner: a runner started in each slot that frees up would keep it waiting. A per-session node serves only its
-// own box.
-func WaitsForRoom(h Host, boxes []Box) bool {
-	for _, b := range boxes {
-		if b.State != contract.BoxPending || b.Image == RunnerImage || (b.Reason != string(PendingCPU) && b.Reason != string(PendingMemory)) {
-			continue
-		}
-		if b.Host == h.Name || b.Host == "" && h.Box == "" && h.Serves(b.Room) {
-			return true
-		}
-	}
-	return false
-}
-
 // RunnerImage marks a CI runner where admission sees it as a box: one on a host, or one that waits for a host.
 const RunnerImage = "runner"
 
