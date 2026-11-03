@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	engineimages "github.com/resident-labs/dyna/engine/images"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -157,6 +158,7 @@ func creatingBoxes(t *testing.T, r *stackRunner) (*Boxes, lifecycle.BoxSpec) {
 	sockets := api.NewSockets(api.New(&serviceWithHosts{Service: engine.New(st, nil, nil, time.Now)}, nil), runtimeDir, uint32(os.Getuid()), nil)
 	t.Cleanup(func() { _ = sockets.Close() })
 	files := &compose.Files{Layout: box.Layout{Data: t.TempDir()}}
+	files.Images = &engineimages.Store{Layout: files.Layout}
 	dir := files.Layout.Compose("")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
@@ -164,7 +166,7 @@ func creatingBoxes(t *testing.T, r *stackRunner) (*Boxes, lifecycle.BoxSpec) {
 	if err := os.WriteFile(filepath.Join(dir, "default.yaml"), []byte("services:\n  agent: {}\n  db:\n    image: postgres:16\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	b := &Boxes{Store: composeStore{}, Compose: files, Sockets: sockets, Runtime: runtimeDir, Version: "v1", Layout: box.Layout{HostData: "/host"}, hosts: map[contract.HostName]*podman.Host{"host": host}}
+	b := &Boxes{Store: composeStore{}, Compose: files, RoomImages: files.Images.(*engineimages.Store), Sockets: sockets, Runtime: runtimeDir, Version: "v1", Layout: box.Layout{HostData: "/host"}, hosts: map[contract.HostName]*podman.Host{"host": host}}
 	b.binOnce.Do(func() { b.binSum = "sum" })
 	size, _ := box.Size(contract.BoxSizeAgent)
 	return b, lifecycle.BoxSpec{Box: "box_1", Session: "ses_1", Room: "room_1", Host: "host", Slice: "dyna-box_1.slice", Size: size}

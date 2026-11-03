@@ -125,19 +125,18 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	}
 	if req.Size != "" {
 		sizeName = req.Size
-	} else if repo != "" && s.repos != nil {
-		var size contract.BoxSizeName
-		var err error
-		if composeFile != nil && composeFile.Agent.Build != "" {
-			size, err = s.imageSize(ctx, repo, composeFile.Agent.Build)
-		} else {
-			size, err = s.repos.Size(ctx, repo)
+	} else if s.images != nil { // set with the layout
+		wanted := ""
+		if composeFile != nil {
+			wanted = composeFile.Agent.Build
 		}
+		sizeText, err := s.images.Size(req.Room, wanted)
 		if err != nil {
 			return contract.SessionStartResponse{}, failure(err)
 		}
+		size := contract.BoxSizeName(sizeText)
 		if _, ok := box.Size(size); size != "" && !ok {
-			return contract.SessionStartResponse{}, invalid("the repository size file is not a size")
+			return contract.SessionStartResponse{}, invalid("the image's size file is not a size")
 		}
 		if size != "" {
 			sizeName = size

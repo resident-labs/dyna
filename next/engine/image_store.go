@@ -3,8 +3,11 @@ package engine
 import (
 	"context"
 	"errors"
+	"log"
+	"slices"
 
 	"github.com/resident-labs/dyna/contract"
+	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/images"
 )
 
@@ -93,4 +96,49 @@ func (s *Service) ImageRemove(ctx context.Context, caller contract.Principal, re
 		return contract.ImageRemoveResponse{}, imageFailure(err)
 	}
 	return contract.ImageRemoveResponse{}, nil
+}
+
+// MigrateImages copies each room's repositories' legacy .dyna/images into the room's store, once per repository and room,
+// and logs what it copied and what it left. A repository with no mirror yet waits for a later start. The default repository
+// goes first, so its image wins a name two repositories share.
+func (s *Service) MigrateImages(ctx context.Context, mirror *enginegit.Mirror) error {
+	rooms, err := s.store.OpenRooms(ctx)
+	if err != nil {
+		return err
+	}
+	for _, room := range rooms {
+		repos, err := s.store.RoomRepos(ctx, room)
+		if err != nil {
+			return err
+		}
+		slices.SortStableFunc(repos, func(a, b contract.RoomRepo) int {
+			if a.Default == b.Default {
+				return 0
+			}
+			if a.Default {
+				return -1
+			}
+			return 1
+		})
+		for _, repo := range repos {
+			path, err := mirror.Layout.Git(repo.Repo)
+			if err != nil || !mirror.Cloned(repo.Repo) {
+				log.Printf("room %s: images of %s not migrated yet: no mirror", room, repo.Repo)
+				continue
+			}
+			var copied, left []string
+			err = s.roomWrite(ctx, room, func() (err error) {
+				copied, left, err = s.images.Migrate(ctx, mirror.Runner, room, repo.Repo, path)
+				return err
+			})
+			if err != nil {
+				log.Printf("room %s: migrate images of %s: %v", room, repo.Repo, err)
+				continue
+			}
+			if len(copied)+len(left) > 0 {
+				log.Printf("room %s: moved the legacy .dyna/images of %s into the room: copied %v, left %v. Repository images are no longer read; use dyna image save.", room, repo.Repo, copied, left)
+			}
+		}
+	}
+	return nil
 }
