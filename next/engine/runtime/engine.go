@@ -327,6 +327,9 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	defer sockets.Close()
+	if err := service.Reconciler().FailStaleCreates(ctx); err != nil {
+		return err
+	}
 	if err := boxes.Restore(ctx); err != nil {
 		return err
 	}
