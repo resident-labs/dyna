@@ -18,7 +18,7 @@ type Device struct {
 	LastSeenAt time.Time `json:"lastSeenAt"`
 	ExpiresAt  time.Time `json:"expiresAt"`
 	Scopes     []Scope   `json:"scopes"`
-	Current    bool      `json:"current"` // the device that made this call
+	Current    bool      `json:"current"`        // the device that made this call
 	Host       HostName  `json:"host,omitempty"` // the host this device is on, if the owner named one
 }
 type DevicePairRequest struct {
