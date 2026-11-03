@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -48,13 +49,34 @@ func TestSessionAffinitySurvivesRestart(t *testing.T) {
 
 func TestPersistentSessionCacheDropsExpiredBindings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session-affinity.state")
-	first := NewPersistentSessionCache(50*time.Millisecond, path)
-	first.Set("k", "auth-a")
-	first.Stop()
-	time.Sleep(80 * time.Millisecond)
-	second := NewPersistentSessionCache(time.Hour, path)
-	defer second.Stop()
-	if id, ok := second.Get("k"); ok {
+	past := time.Now().Add(-time.Minute).Format(time.RFC3339Nano)
+	future := time.Now().Add(time.Hour).Format(time.RFC3339Nano)
+	state := `[{"auth_id":"auth-old","expires_at":"` + past + `","aliases":["old"]},{"auth_id":"auth-new","expires_at":"` + future + `","aliases":["new"]}]`
+	if err := os.WriteFile(path, []byte(state), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := NewPersistentSessionCache(time.Hour, path)
+	defer c.Stop()
+	if id, ok := c.Get("old"); ok {
 		t.Fatalf("expired binding came back as %q", id)
+	}
+	if id, ok := c.Get("new"); !ok || id != "auth-new" {
+		t.Fatalf("live binding = %q, %v", id, ok)
+	}
+}
+
+func TestLoadedBindingFailsOverWhenItsAuthIsInvalidated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session-affinity.state")
+	c := NewPersistentSessionCache(time.Hour, path)
+	c.Set("k", "auth-a")
+	c.Stop()
+	loaded := NewPersistentSessionCache(time.Hour, path)
+	defer loaded.Stop()
+	if id, ok := loaded.Get("k"); !ok || id != "auth-a" {
+		t.Fatalf("loaded binding = %q, %v", id, ok)
+	}
+	loaded.InvalidateAuth("auth-a")
+	if id, ok := loaded.Get("k"); ok {
+		t.Fatalf("invalidated binding still bound to %q", id)
 	}
 }
