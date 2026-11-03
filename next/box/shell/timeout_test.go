@@ -106,7 +106,7 @@ func TestATimeoutStopsABackgroundJobAndWakesTheSession(t *testing.T) {
 	}
 	r.fire(t, 120*time.Second)
 	report := <-r.reports
-	if report.Job != "job_1" || report.End == nil || report.End.Kind != contract.ShellJobStopped || report.Tail != "building\n[stopped after its 120 s timeout]" {
+	if report.Job != "job_1" || report.End == nil || report.End.Kind != contract.ShellJobStopped || report.Silent || report.Tail != "building\n[stopped after its 120 s timeout]" {
 		t.Fatalf("report = %+v", report)
 	}
 	if _, body := call(t, r.server.Handler(), "/job", `{"action":"output","job":"job_1"}`); !strings.Contains(body, `"status":"stopped after its 120 s timeout"`) {
