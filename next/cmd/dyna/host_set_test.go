@@ -1,6 +1,7 @@
 package main
 
 import (
+	"maps"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
@@ -58,11 +59,19 @@ func TestHostListShowsBothSwitches(t *testing.T) {
 	}
 }
 
-func TestRoomSetRootApprovesHostexec(t *testing.T) {
+func TestRoomSetRootApproves(t *testing.T) {
 	f := &fakeClient{}
-	runCLI(t, f, "room", "set", "r", "--root-approves-hostexec", "on")
-	if f.roomSet == nil || f.roomSet.Room != "r" || f.roomSet.RootApprovesHostexec == nil || !*f.roomSet.RootApprovesHostexec {
+	runCLI(t, f, "room", "set", "r", "--root-approves-hostexec", "on", "--root-approves-pools", "off")
+	want := map[contract.RootApproval]bool{contract.RootApprovesHostexec: true, contract.RootApprovesPools: false}
+	if f.roomSet == nil || f.roomSet.Room != "r" || !maps.Equal(f.roomSet.RootApproves, want) {
 		t.Fatalf("on: %+v", f.roomSet)
+	}
+	for _, kind := range []string{"addons", "hosts"} {
+		g := &fakeClient{}
+		runCLI(t, g, "room", "set", "r", "--root-approves-"+kind, "on")
+		if g.roomSet == nil || !maps.Equal(g.roomSet.RootApproves, map[contract.RootApproval]bool{contract.RootApproval(kind): true}) {
+			t.Fatalf("%s: %+v", kind, g.roomSet)
+		}
 	}
 	for _, args := range [][]string{{"room", "set", "r"}, {"room", "set", "r", "--root-approves-hostexec", "maybe"}} {
 		g := &fakeClient{}
