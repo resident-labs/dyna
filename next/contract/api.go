@@ -555,6 +555,7 @@ type PostSearchRequest struct {
 	Limit  int    `json:"limit,omitempty"`
 }
 type SearchPost struct {
+	Source *PostSource  `json:"source,omitempty"`
 	Seq    int64        `json:"seq"`
 	Room   RoomID       `json:"room"`
 	Home   Conversation `json:"home"`
