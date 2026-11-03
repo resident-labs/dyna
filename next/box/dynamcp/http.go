@@ -217,6 +217,7 @@ func (s *Server) call(ctx context.Context, p callParams) result {
 		if err != nil {
 			return failure(contract.ErrInvalid, err.Error())
 		}
+		req.RootOnly = in.RootOnly
 		data = marshal(req)
 	}
 

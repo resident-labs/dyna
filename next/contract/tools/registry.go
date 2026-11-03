@@ -89,9 +89,10 @@ type PostInput struct {
 
 // SkillSaveInput is what a caller names. A box reads a local path itself, so the engine gets the folder.
 type SkillSaveInput struct {
-	Path   string          `json:"path"`
-	Room   contract.RoomID `json:"room,omitempty"`
-	Global bool            `json:"global,omitempty"`
+	Path     string          `json:"path"`
+	Room     contract.RoomID `json:"room,omitempty"`
+	Global   bool            `json:"global,omitempty"`
+	RootOnly bool            `json:"rootOnly,omitempty" desc:"Only root sessions' boxes get it."`
 }
 
 type FileRequest struct {

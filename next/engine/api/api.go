@@ -192,6 +192,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodSubscriptionSetEnabled, c, a.service.SubscriptionSetEnabled)
 	call(mux, contract.MethodAddonList, c, a.service.AddonList)
 	call(mux, contract.MethodAddonSetEnabled, c, a.service.AddonSetEnabled)
+	call(mux, contract.MethodAddonSetRootOnly, c, a.service.AddonSetRootOnly)
 	call(mux, contract.MethodBoxNotice, c, a.service.BoxNotice)
 	call(mux, contract.MethodMCPAdd, c, a.service.MCPAdd)
 	call(mux, contract.MethodMCPList, c, a.service.MCPList)
