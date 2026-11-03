@@ -6,7 +6,7 @@ import { endCause, failed } from "./jobs.ts";
 import { parsedJson } from "./json.ts";
 
 export type Row =
-  | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[]; source?: PostSource | null; pending?: Pending }
+  | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[]; source?: PostSource | null; target?: PostSource | null; pending?: Pending }
   | { kind: "restarted"; key: string; session: string; at: string }
   // A plain line for what the owner did to a session or the room; describe gives its words.
   | { kind: "notice"; key: string; event: Event; resumedAt?: string }
@@ -149,14 +149,14 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     deferred = [];
   };
   // A post to other people, its mentions or a final reply's target, starts a new run with its own name line.
-  const post = (key: string, seq: number, from: Principal, at: string, text: string, attachments: Attachment[], to: Principal[] = [], pending?: Pending, source?: PostSource | null) => {
+  const post = (key: string, seq: number, from: Principal, at: string, text: string, attachments: Attachment[], to: Principal[] = [], pending?: Pending, source?: PostSource | null, target?: PostSource | null) => {
     flush();
     dated(at);
     fresh(seq, from);
     const previous = rows.at(-1);
     const first = previous?.kind !== "post" || !sameAuthor(previous.from, from) ||
-      previous.source?.room !== source?.room || previous.to.length !== to.length || previous.to.some((target, i) => !sameAuthor(target, to[i]));
-    rows.push({ kind: "post", key, from, at, text, attachments, first, to, source, ...pending && { pending } });
+      previous.source?.room !== source?.room || previous.target?.room !== target?.room || previous.to.length !== to.length || previous.to.some((target, i) => !sameAuthor(target, to[i]));
+    rows.push({ kind: "post", key, from, at, text, attachments, first, to, source, target, ...pending && { pending } });
   };
   // A post that carried a final reply goes to that reply's target too. The engine records this at the turn's end, later
   // than the post, so the targets are gathered first.
@@ -183,7 +183,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       if (sameHome(event.body.home, home)) {
         for (const turn of turns.values()) if (turn.session === event.from.session) turn.posted = true;
         if (replies.has(event.id) && crewData(event.from.session, event.body.text)) continue;
-        post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, event.body.attachments ?? [], [...mentions, ...replied], undefined, event.body.source);
+        post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, event.body.attachments ?? [], [...mentions, ...replied], undefined, event.body.source, event.body.target);
       }
       continue;
     }
