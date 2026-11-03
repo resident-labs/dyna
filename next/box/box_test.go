@@ -130,6 +130,28 @@ func TestAdmissionCountsEveryPlacedBoxAtQuarterSize(t *testing.T) {
 		}
 	}
 }
+func TestRunnerAdmissionFitsRealMemory(t *testing.T) {
+	size, _ := box.Size(contract.BoxSizeMedium)
+	size.MemBytes = 8 * box.GiB
+	request := box.Box{ID: "new", Image: box.RunnerImage, Size: size}
+	for _, tc := range []struct {
+		name   string
+		memory int64
+		want   box.Placement
+	}{
+		{"small host refuses second runner", 11 * box.GiB, box.Placement{Reason: box.PendingMemory}},
+		{"larger host fits both runners", 16 * box.GiB, box.Placement{Host: "host"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			host := box.Host{Name: "host", State: box.HostReady, CPUs: 7, MemBytes: tc.memory, DiskBytes: 200 * box.GiB}
+			placed := box.Box{ID: "old", Host: host.Name, Image: box.RunnerImage, Size: size, State: contract.BoxReady}
+			if got := box.Admit([]box.Host{host}, []box.Box{placed}, request); got != tc.want {
+				t.Fatalf("got %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestAdmissionStopsAtRealMemoryThreshold(t *testing.T) {
 	size, _ := box.Size(contract.BoxSizeAgent)
 	host := box.Host{Name: "host", State: box.HostReady, CPUs: 4, MemBytes: 10 * box.GiB, DiskBytes: 100 * box.GiB}
