@@ -63,7 +63,7 @@ var (
 )
 
 // reservedEnv holds what Dyna itself sets in a box. A file may not change it.
-var reservedEnv = []string{"CARGO_HOME", "GOCACHE", "GOMODCACHE", "HOME", "PI_CODING_AGENT_DIR", "npm_config_store_dir"}
+var reservedEnv = []string{"CARGO_HOME", "CARGO_TARGET_DIR", "GOCACHE", "GOMODCACHE", "HOME", "PI_CODING_AGENT_DIR", "npm_config_store_dir"}
 
 // agentPaths are where Dyna mounts things in a box. A compose volume may not cover them.
 var agentPaths = []string{"/box", "/opt/dyna", "/run/dyna"}

@@ -83,6 +83,7 @@ func TestRealRunnersKeepTheirOwnBuildFolders(t *testing.T) {
 		script := fmt.Sprintf(`set -e
 cat /cache/gomod/seed
 echo %s > "$DYNA_CI_BUILD/proof"
+touch "$CARGO_HOME/proof" "$CARGO_TARGET_DIR/proof"
 if touch /cache/escape 2>/dev/null; then echo wrote the cache; exit 1; fi
 if touch /cache/gomod/seed 2>/dev/null; then echo wrote a box file; exit 1; fi
 if touch /cache/%s/intrude 2>/dev/null; then echo wrote another slot; exit 1; fi
@@ -95,6 +96,11 @@ echo "$DYNA_CI_CACHE $DYNA_CI_BUILD"`, spec.Size.Name, other)
 		if err != nil || strings.TrimSpace(string(written)) != string(spec.Size.Name) {
 			t.Fatalf("slot %d folder on the host holds %q: %v", spec.Slot, written, err)
 		}
+		for _, folder := range []string{"cargo", "target"} {
+			if _, err := os.Stat(filepath.Join(cache, buildFolder(spec.Slot), folder, "proof")); err != nil {
+				t.Fatalf("slot %d's %s folder is not Cargo's: %v", spec.Slot, folder, err)
+			}
+		}
 		t.Logf("%s runner: wrote %s on the host, and nothing else", spec.Size.Name, filepath.Join(cache, buildFolder(spec.Slot), "proof"))
 	}
 	if _, err := os.Stat(filepath.Join(cache, "escape")); err == nil {
@@ -106,8 +112,14 @@ echo "$DYNA_CI_CACHE $DYNA_CI_BUILD"`, spec.Size.Name, other)
 	if _, err := h.run(ctx, "bash", "-c", buildScript, "dyna-ci-build", filepath.Join(cache, buildFolder(0)), "0"); err != nil {
 		t.Fatal(err)
 	}
-	if entries, err := os.ReadDir(filepath.Join(cache, buildFolder(0))); err != nil || len(entries) != 0 {
+	entries, err := os.ReadDir(filepath.Join(cache, buildFolder(0)))
+	if err != nil || len(entries) != 2 || entries[0].Name() != "cargo" || entries[1].Name() != "target" {
 		t.Fatalf("a folder past the cap kept %v: %v", entries, err)
+	}
+	for _, entry := range entries {
+		if inside, err := os.ReadDir(filepath.Join(cache, buildFolder(0), entry.Name())); err != nil || len(inside) != 0 {
+			t.Fatalf("a folder past the cap kept %s/%v: %v", entry.Name(), inside, err)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(cache, buildFolder(1), "proof")); err != nil {
 		t.Fatalf("emptying one slot touched another: %v", err)
