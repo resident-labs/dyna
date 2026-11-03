@@ -121,7 +121,9 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		createCause := context.Cause(createCtx)
 		cut := errors.Is(createCause, context.DeadlineExceeded) || errors.Is(createCause, context.Canceled)
 		var runtimeErr box.RuntimeCreateError
-		runtimeFailure = !cut && errors.As(workErr, &runtimeErr)
+		var shareErr box.ShareDown
+		// A mount that is only down for now counts as any host failure; one that cannot ever come up is quarantined at once below.
+		runtimeFailure = !cut && (errors.As(workErr, &runtimeErr) || errors.As(workErr, &shareErr) && !shareErr.Permanent)
 		if workErr != nil {
 			createPhase = phase
 			log.Printf("box %s: creation failed in %s: %v", b.ID, phase, workErr)
@@ -247,6 +249,10 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		ctx = context.WithoutCancel(ctx)
 	}
 	changed, err := r.change(ctx, b, next, due, failures, cause, createPhase, runtimeFailure)
+	var shareDown box.ShareDown
+	if changed && err == nil && errors.As(workErr, &shareDown) && shareDown.Permanent {
+		err = r.store.QuarantineShare(ctx, b)
+	}
 	if changed && err == nil && next.State == contract.BoxStopped {
 		r.view.BoxStopped(ctx, b.Session)
 	}

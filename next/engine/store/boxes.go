@@ -185,6 +185,29 @@ func (s *Store) SetBoxLifecycle(ctx context.Context, old, next box.Box, due time
 	return updated, err
 }
 
+// QuarantineShare keeps session boxes off the host that a create just found without its shared folder, as the host check does
+// for a host that cannot mount it. It is for a box that built nothing there: a box with files on the host is not moved. Boxes
+// waiting there that built nothing place elsewhere, and the failed box detaches on restart.
+func (s *Store) QuarantineShare(ctx context.Context, b box.Box) error {
+	if b.Image != "" {
+		return nil
+	}
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `UPDATE hosts SET create_problem=?1 WHERE name=?2 AND create_problem='' AND create_generation=(SELECT create_generation FROM boxes WHERE id=?3)`, contract.HostProblemShareUnavailable, b.Host, b.ID)
+		if err != nil {
+			return err
+		}
+		if n, err := result.RowsAffected(); err != nil || n == 0 {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO room_leftovers(host,room,box,slice) SELECT b.host,s.room,b.id,b.slice FROM boxes b JOIN sessions s ON s.id=b.session WHERE b.host=?1 AND b.state='pending' AND b.image=''`, b.Host); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE boxes SET host=NULL WHERE host=?1 AND state='pending' AND image=''`, b.Host)
+		return err
+	})
+}
+
 // FinishCreate records the host result without overwriting a concurrent hello.
 func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure string, due time.Time, failures int, event contract.Event, runtimeFailure bool) error {
 	finished, ok := event.Body.(contract.BoxChanged)
@@ -248,7 +271,7 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 		if failure == "" || to == contract.BoxFailed && cause == contract.CauseCreateFailed && runtimeFailure {
 			_, err = tx.ExecContext(ctx, `UPDATE hosts SET
 				create_failures=CASE WHEN ?='' THEN 0 ELSE create_failures+1 END,
-				create_problem=CASE WHEN ?='' THEN '' WHEN create_failures+1>=3 THEN 'create_failed' ELSE create_problem END
+				create_problem=CASE WHEN ?='' THEN CASE WHEN create_problem='create_failed' THEN '' ELSE create_problem END WHEN create_failures+1>=3 THEN 'create_failed' ELSE create_problem END
 				WHERE name=? AND create_generation=(SELECT create_generation FROM boxes WHERE id=?)`, failure, failure, b.Host, b.ID)
 			if err != nil {
 				return err

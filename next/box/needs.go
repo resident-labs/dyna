@@ -21,6 +21,9 @@ type Image struct {
 // ShareDown says a host's mount of the shared folders is down, so a box cannot start there.
 type ShareDown struct {
 	Host, Reason string
+	// Permanent says the host cannot mount the folder however long it waits, as when fusermount3 is not setuid, unlike a mount
+	// that is down or not yet seen by Podman.
+	Permanent bool
 }
 
 func (e ShareDown) Error() string {

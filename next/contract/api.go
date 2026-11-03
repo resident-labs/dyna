@@ -379,7 +379,11 @@ type HostSession struct {
 // HostProblem identifies a durable admission problem independently of reachability.
 type HostProblem string
 
-const HostProblemCreateFailed HostProblem = "create_failed"
+const (
+	HostProblemCreateFailed HostProblem = "create_failed"
+	// HostProblemShareUnavailable says the host cannot bring up the shared folder's FUSE mount, so it takes no session box.
+	HostProblemShareUnavailable HostProblem = "share_unavailable"
+)
 
 type HostSummary struct {
 	Problem    HostProblem     `json:"problem,omitempty"`
