@@ -145,7 +145,7 @@ func (s *Store) RecordHostHeartbeat(ctx context.Context, name contract.HostName,
 		floor := box.DiskFloor(diskTotal)
 		var low int64
 		if reachable && freeDisk != nil {
-			if err := s.warnDisk(ctx, tx, name, *freeDisk, floor, at); err != nil {
+			if err := s.warnDisk(ctx, tx, name, *freeDisk, floor, diskTotal, at); err != nil {
 				return err
 			}
 			if *freeDisk <= floor {
@@ -164,8 +164,8 @@ func (s *Store) RecordHostHeartbeat(ctx context.Context, name contract.HostName,
 }
 
 // warnDisk alerts room roots once per low spell. A spell ends a tenth above the warn level and diskAlertGap after its alert, so a host that hovers stays quiet.
-func (s *Store) warnDisk(ctx context.Context, tx *sql.Tx, name contract.HostName, free, floor int64, at time.Time) error {
-	warn := box.DiskWarn(floor)
+func (s *Store) warnDisk(ctx context.Context, tx *sql.Tx, name contract.HostName, free, floor, total int64, at time.Time) error {
+	warn := box.DiskWarn(floor, total)
 	if free >= warn+warn/10 {
 		_, err := tx.ExecContext(ctx, "DELETE FROM disk_warnings WHERE host=? AND at<=?", name, at.Add(-diskAlertGap).UnixMilli())
 		return err
