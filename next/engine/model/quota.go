@@ -149,6 +149,10 @@ type RoutingPlace struct {
 	Index string `json:"auth_index"`
 	Rank  int    `json:"rank"`
 	Spent bool   `json:"spent"`
+	// Reason is the proxy's raw reason, read once into Cause.
+	Reason string `json:"reason"`
+	// Cause is the typed reason routing skips the credential; empty for any reason Dyna does not know.
+	Cause contract.UsageCause `json:"-"`
 }
 
 // Routing reads the order the proxy's selector would use, by credential index. It costs
@@ -167,6 +171,9 @@ func (q *Quotas) Routing(ctx context.Context) (map[string]RoutingPlace, bool) {
 	places := make(map[string]RoutingPlace)
 	for _, provider := range status.Providers {
 		for _, place := range provider {
+			if place.Reason == string(contract.UsageInsufficientBalance) {
+				place.Cause = contract.UsageInsufficientBalance
+			}
 			places[place.Index] = place
 		}
 	}
@@ -190,6 +197,10 @@ func (q *Quotas) markActive(ctx context.Context, files []Credential, usage []con
 	for i, file := range files {
 		place := places[file.Index]
 		usage[i].Active = !place.Spent && (place.Rank == 1 || (place.Rank > 0 && slices.Contains(pins, usage[i].AccountID)))
+		// A cause already read, such as an expired sign-in, outranks routing's reason.
+		if usage[i].Cause == contract.UsageOK {
+			usage[i].Cause = place.Cause
+		}
 	}
 }
 
