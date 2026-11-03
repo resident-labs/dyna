@@ -31,7 +31,7 @@ export function machines(hosts: HostSummary[]): HostSummary[] {
   const plane = hosts.find(h => h.name === "control-plane");
   const same = hosts.find(h => h.engineHost);
   if (!plane || !same || !hostMeters(plane).length) return hosts;
-  const merged = { ...plane, name: same.name, reachable: same.reachable, lastSeen: same.lastSeen, boxes: plane.boxes + same.boxes,
+  const merged = { ...plane, name: same.name, reachable: same.reachable, lastSeen: same.lastSeen, boxes: plane.boxes + same.boxes, runners: same.runners,
     diskLow: plane.diskLow || same.diskLow, sessions: [...plane.sessions ?? [], ...same.sessions ?? []], engineHost: true };
   return hosts.filter(h => h !== same).map(h => h === plane ? merged : h);
 }

@@ -75,7 +75,7 @@ func (h *Host) BuildRunnerImage(ctx context.Context) (string, error) {
 		return "", err
 	}
 	tag := fmt.Sprintf("localhost/dyna-ci-runner:%x", hash.Sum(nil))
-	if err := h.build(ctx, tag, "", contextTar.Bytes(), false); err != nil {
+	if _, err := h.build(ctx, tag, "", contextTar.Bytes(), false); err != nil {
 		return "", err
 	}
 	// An image a running container still uses fails to delete, and goes with a later image.
