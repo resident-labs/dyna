@@ -2,6 +2,7 @@
   import { onMount, tick, untrack } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
   import { call } from "../client.ts";
+  import { sourceLabel } from "../source.ts";
   import type { RoomSummary } from "../contract.gen.ts";
   import { build, rows, marks, count, showAll, move, parse, escape, backspace, stamp, type Action, visits, type Item, type Person, type Place, type Scope, type Visit } from "../palette.ts";
   import { MessageSearch, SessionSearch, type SearchCall } from "../search.svelte.ts";
@@ -150,7 +151,7 @@
             {:else if item.kind === "more"}
               <span class="icon"></span><span>{showAll(item.scope, item.total)}</span>
             {:else}
-              {@const author = item.post.source ? `${item.post.source.roomName}:${item.post.source.sessionName}` : item.post.author.kind === "owner" ? "you" : item.post.author.kind === "engine" ? "Dyna" : name(item.post.author.session)}
+              {@const author = item.post.source ? sourceLabel(item.post.source) : item.post.author.kind === "owner" ? "you" : item.post.author.kind === "engine" ? "Dyna" : name(item.post.author.session)}
               <Avatar kind={item.post.author.kind} name={author} size={22} />
               <span class="body"><span class="excerpt">{#each marks(item.post.text, mode.query) as part}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}</span>
                 <span class="meta"><strong style:--hue={hue(author)}>{author}</strong><span>in #{roomName(item.post.room)}</span><span>·</span><time>{stamp(item.post.time)}</time></span></span>
