@@ -438,5 +438,5 @@ func Run(ctx context.Context, cfg Config) error {
 
 var (
 	hostNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
-	sshPattern      = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9_.:\[\]-]*$`)
+	sshPattern      = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 )

@@ -47,7 +47,7 @@ func RunArgs(a contract.HostexecRunArgs, op contract.OpID) []string {
 	}
 	merge := " 2>&1"
 	if a.Collect {
-		merge = "" // a collect run prints an archive, and stderr in it would corrupt it
+		merge = "" // a collect run prints an archive: stderr stays on the ssh stderr channel, since in stdout it would corrupt it
 	}
 	args := []string{"bash", "-c", prelude(a, op) + `cd -- "$1" || exit 254; shift; "$@"` + merge + ` | { head -c 8388609; cat >/dev/null; }; exit "${PIPESTATUS[0]}"`, "dyna-hostexec", cwd, "systemd-run", "--quiet", "--user", "--scope", "--unit=dyna-hostexec-" + string(op), "-p", fmt.Sprintf("RuntimeMaxSec=%g", float64(a.Timeout)/1000), "-p", "TimeoutStopSec=5", "--"}
 	return append(args, a.Argv...)
