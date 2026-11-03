@@ -2,7 +2,7 @@
   import { onMount, tick } from "svelte";
   import { requestDecision } from "../request-decision.ts";
   import { hue } from "../identity.ts";
-  import { closedSession, fromNow } from "../feed.ts";
+  import { byExpiry, closedSession, fromNow } from "../feed.ts";
   import { requestGroups, requestOrder, requestsFor } from "../request-groups.ts";
   import type { Request, RoomStore } from "../room.svelte.ts";
   import type { Question } from "../contract.gen.ts";
@@ -22,9 +22,9 @@
   let questions = $derived(store.pendingQuestions(session));
   let answered = $derived([...store.questions.values()].filter(item => item.state === "answered" && (!session || item.session === session) && new Date(item.answered ?? 0).toDateString() === new Date(now).toDateString()));
   let waiting = $derived(requests.filter(item => item.state === "pending" && item.class === "owner")
-    .sort((a, b) => Date.parse(a.expires) - Date.parse(b.expires)));
+    .sort(byExpiry));
   let shared = $derived(requests.filter(item => item.state === "pending" && item.class !== "owner")
-    .sort((a, b) => Date.parse(a.expires) - Date.parse(b.expires)));
+    .sort(byExpiry));
   let groups = $derived(requestGroups(waiting));
   let pending = $derived(requestOrder(waiting, shared, groups, waiting.length > groupThreshold));
   let decided = $derived(requests.filter(item => item.decision && new Date(item.decision.at).toDateString() === new Date(now).toDateString())
@@ -83,7 +83,7 @@
     {#if waiting.length > groupThreshold}
       {#each moreGroups ? groups : groups.slice(0, initialGroups) as [id, items] (id)}
         {@const name = id ? store.names.get(id) ?? closedSession : "Dyna"}
-        <div class="group"><Avatar kind="session" {name} size={24} /><strong style:--hue={hue(name)}>{name}</strong><span>{items.length} waiting · earliest expires {fromNow(items[0].expires, now)}</span>
+        <div class="group"><Avatar kind="session" {name} size={24} /><strong style:--hue={hue(name)}>{name}</strong><span>{items.length} waiting{items[0].expires ? ` · earliest expires ${fromNow(items[0].expires, now)}` : ""}</span>
           {#if admin}<button type="button" onclick={() => { denying = id || "engine"; reason = ""; }}>Deny all {items.length}…</button>{/if}</div>
         {#if denying === (id || "engine")}<div class="deny"><input aria-label="Note for all denials" placeholder="Add a note" bind:value={reason} /><button type="button" onclick={() => void denyGroup(items)}>Confirm denial</button><button type="button" onclick={() => { denying = ""; }}>Cancel</button></div>{/if}
         {#each expanded.includes(id) ? items : items.slice(0, 1) as request (request.id)}{@render row(request, true)}{/each}

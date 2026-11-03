@@ -24,7 +24,7 @@ type Operation struct {
 	Args     OpArgs    `json:"args"` // sealed union, one struct per kind
 	State    OpState   `json:"state"`
 	Created  time.Time `json:"created"`
-	Expires  time.Time `json:"expires"`
+	Expires  time.Time `json:"expires,omitzero"` // zero for a request that waits until decided or its session closes
 	Decision *Decision `json:"decision,omitempty"`
 	Result   *OpResult `json:"result,omitempty"`
 }
