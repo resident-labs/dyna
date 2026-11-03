@@ -156,16 +156,21 @@ func (s *Store) RecordHostHeartbeat(ctx context.Context, name contract.HostName,
 			state=CASE WHEN ? AND state='unreachable' THEN 'ready' WHEN NOT ? AND state='ready' THEN 'unreachable' ELSE state END,
 			disk_bytes=CASE WHEN ? AND ? IS NOT NULL THEN ? ELSE disk_bytes END,
 			disk_floor=CASE WHEN ? AND ? IS NOT NULL THEN ? ELSE disk_floor END,
+			disk_total=CASE WHEN ? AND ? IS NOT NULL THEN ? ELSE disk_total END,
 			disk_low_since=CASE WHEN ?=0 OR disk_low_since=0 THEN ? ELSE disk_low_since END,
 			checked_at=CASE WHEN ? AND ? IS NOT NULL THEN ? ELSE checked_at END
-			WHERE name=? AND state!='removed'`, reachable, reachable, reachable, freeDisk, freeDisk, reachable, freeDisk, floor, low, low, reachable, freeDisk, at.UnixMilli(), name)
+			WHERE name=? AND state!='removed'`, reachable, reachable, reachable, freeDisk, freeDisk, reachable, freeDisk, floor, reachable, freeDisk, diskTotal, low, low, reachable, freeDisk, at.UnixMilli(), name)
 		return err
 	})
 }
 
 // warnDisk alerts room roots once per low spell. A spell ends a tenth above the warn level and diskAlertGap after its alert, so a host that hovers stays quiet.
 func (s *Store) warnDisk(ctx context.Context, tx *sql.Tx, name contract.HostName, free, floor, total int64, at time.Time) error {
-	warn := box.DiskWarn(floor, total)
+	var pool string
+	if err := tx.QueryRowContext(ctx, "SELECT pool FROM hosts WHERE name=?", name).Scan(&pool); err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	warn := box.DiskWarn(floor, total, pool != "")
 	if free >= warn+warn/10 {
 		_, err := tx.ExecContext(ctx, "DELETE FROM disk_warnings WHERE host=? AND at<=?", name, at.Add(-diskAlertGap).UnixMilli())
 		return err
@@ -297,7 +302,7 @@ func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
 }
 
 func (s *Store) hosts(ctx context.Context, where string) ([]box.Host, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT h.name, h.ssh, h.state, h.cpus, h.mem_bytes, h.disk_bytes, h.disk_floor, h.checked_at, h.maintained_at, h.engine_host, h.pool, h.box, h.agents, h.ci, h.create_problem, hr.room FROM hosts h LEFT JOIN host_rooms hr ON hr.host=h.name WHERE `+where+` ORDER BY h.name,hr.room`)
+	rows, err := s.Read().QueryContext(ctx, `SELECT h.name, h.ssh, h.state, h.cpus, h.mem_bytes, h.disk_bytes, h.disk_floor, h.disk_total, h.checked_at, h.maintained_at, h.engine_host, h.pool, h.box, h.agents, h.ci, h.create_problem, hr.room FROM hosts h LEFT JOIN host_rooms hr ON hr.host=h.name WHERE `+where+` ORDER BY h.name,hr.room`)
 	if err != nil {
 		return nil, err
 	}
@@ -308,7 +313,7 @@ func (s *Store) hosts(ctx context.Context, where string) ([]box.Host, error) {
 		var checked, maintained int64
 		var room sql.NullString
 		var agents bool
-		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &h.DiskFloor, &checked, &maintained, &h.EngineHost, &h.Pool, &h.Box, &agents, &h.CI, &h.Problem, &room); err != nil {
+		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &h.DiskFloor, &h.DiskTotal, &checked, &maintained, &h.EngineHost, &h.Pool, &h.Box, &agents, &h.CI, &h.Problem, &room); err != nil {
 			return nil, err
 		}
 		if len(hosts) == 0 || hosts[len(hosts)-1].Name != h.Name {
