@@ -108,3 +108,67 @@ func bashOfStdout(t *testing.T, a contract.HostexecRunArgs) string {
 	}
 	return string(out)
 }
+
+// expandingSystemdRun behaves like systemd 254 and later: it expands ${NAME} inside a word, and $NAME when it is the whole word, then runs what follows "--".
+// An invalid name inside ${...} becomes empty, as systemd does with a warning.
+const expandingSystemdRun = `#!/bin/bash
+while [ "$1" != -- ]; do shift; done; shift
+out=()
+for w in "$@"; do
+  while [[ $w =~ \$\{([^}]*)\} ]]; do
+    m=${BASH_REMATCH[0]}; n=${BASH_REMATCH[1]}; v=
+    [[ $n =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && v=${!n}
+    w=${w/"$m"/$v}
+  done
+  if [[ $w =~ ^\$([A-Za-z_][A-Za-z0-9_]*)$ ]]; then n=${BASH_REMATCH[1]}; w=${!n}; fi
+  out+=("$w")
+done
+exec "${out[@]}"
+`
+
+// The run hands the user's text to the command as written: systemd's expansion of the words after "--" must not touch it.
+func TestCommandIsNotExpandedBySystemd(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "systemd-run"), []byte(expandingSystemdRun), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := "x=abc/def; echo \"${x##*/}\" '${n}' 50%s\ncat <<'EOF'\n`${p}` $HOME\nEOF\nprintf '<%s>' \"$@\"; echo"
+	cases := map[string]contract.HostexecRunArgs{
+		"command":    {Argv: []string{"bash", "-c", script, "arg", "$HOME", "${HOME}", "$$", "a b", ""}, Timeout: 1000},
+		"whole word": {Argv: []string{"printf", "<%s>", "$HOME", "${HOME}"}, Timeout: 1000},
+	}
+	wants := map[string]string{
+		"command":    "def ${n} 50%s\n`${p}` $HOME\n<$HOME><${HOME}><$$><a b><>\n",
+		"whole word": "<$HOME><${HOME}>",
+	}
+	for name, a := range cases {
+		args := RunArgs(a, "op9")
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin", "TMPDIR=" + t.TempDir(), "HOME=/home/x"}
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s: %v: %s", name, err, out)
+		}
+		if string(out) != wants[name] {
+			t.Errorf("%s: got %q, want %q", name, out, wants[name])
+		}
+	}
+}
+
+// With the host's real systemd-run, the command still arrives as written, and the shim and $DYNA_OUT work. It skips where no user manager runs.
+func TestRealSystemdRunLeavesCommandAsWritten(t *testing.T) {
+	if err := exec.Command("systemd-run", "--user", "--scope", "--quiet", "true").Run(); err != nil {
+		t.Skipf("no systemd-run --user here: %v", err)
+	}
+	a := contract.HostexecRunArgs{Argv: []string{"bash", "-c", `x=abc/def; echo "${x##*/}"; printf '<%s>' "$1" "$2"; echo; echo "$DYNA_ARGV|$DYNA_OUT" | grep -c dyna-out; command -v podman`, "arg", "$HOME", "${HOME}"}, Timeout: 10000}
+	args := RunArgs(a, "real1")
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Env = append(os.Environ(), "TMPDIR="+t.TempDir())
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	if !strings.HasPrefix(string(out), "def\n<$HOME><${HOME}>\n1\n") || !strings.Contains(string(out), "dyna-out-real1.bin/podman") {
+		t.Fatalf("out %q", out)
+	}
+}

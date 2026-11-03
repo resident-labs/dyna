@@ -48,6 +48,10 @@ func CollectArgs(a contract.HostexecRunArgs, op contract.OpID) contract.Hostexec
 	return a
 }
 
+// runWords is the only command systemd-run sees. It has no $ or %, which systemd 254 and later expand in the words after "--".
+// The user's words travel quoted in DYNA_ARGV, so the command gets exactly the text given.
+const runWords = "eval \"exec env -u DYNA_ARGV `printenv DYNA_ARGV`\""
+
 func RunArgs(a contract.HostexecRunArgs, op contract.OpID) []string {
 	cwd := a.Cwd
 	if cwd == "" {
@@ -57,6 +61,6 @@ func RunArgs(a contract.HostexecRunArgs, op contract.OpID) []string {
 	if a.Collect {
 		merge = "" // a collect run prints an archive: stderr stays on the ssh stderr channel, since in stdout it would corrupt it
 	}
-	args := []string{"bash", "-c", prelude(a, op) + `cd -- "$1" || exit 254; shift; "$@"` + merge + ` | { head -c 8388609; cat >/dev/null; }; exit "${PIPESTATUS[0]}"`, "dyna-hostexec", cwd, "systemd-run", "--quiet", "--user", "--scope", "--unit=dyna-hostexec-" + string(op), "-p", fmt.Sprintf("RuntimeMaxSec=%g", float64(a.Timeout)/1000), "-p", "TimeoutStopSec=5", "--"}
+	args := []string{"bash", "-c", prelude(a, op) + `cd -- "$1" || exit 254; u=$2; t=$3; shift 3; DYNA_ARGV=$(printf '%q ' "$@") systemd-run --quiet --user --scope --unit="$u" -p "RuntimeMaxSec=$t" -p TimeoutStopSec=5 -- bash -c '` + runWords + `'` + merge + ` | { head -c 8388609; cat >/dev/null; }; exit "${PIPESTATUS[0]}"`, "dyna-hostexec", cwd, "dyna-hostexec-" + string(op), fmt.Sprintf("%g", float64(a.Timeout)/1000)}
 	return append(args, a.Argv...)
 }
