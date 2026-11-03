@@ -704,3 +704,19 @@ func TestNoHostsMeansNoLease(t *testing.T) {
 	}
 	f.stop()
 }
+
+func TestLeaseFollowsTheRulesNamingOfAPool(t *testing.T) {
+	f := newFixture(1)
+	f.store.hosts[0].Pool = "burst"
+	f.store.repos[0].Only = []string{"other"}
+	f.tick(t)
+	if len(f.api.leases) != 0 {
+		t.Fatalf("a rule naming another pool kept the lease: %v", f.api.leases)
+	}
+	f.store.repos[0].Only = []string{"burst"}
+	f.tick(t)
+	if len(f.api.leases) != 1 {
+		t.Fatalf("leases %v", f.api.leases)
+	}
+	f.stop()
+}
