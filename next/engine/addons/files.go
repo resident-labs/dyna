@@ -89,7 +89,9 @@ func (f *Files) put(room contract.RoomID, item contract.Addon) error {
 		return err
 	}
 	// A replacement keeps the mark: only SetRootOnly, the owner's, takes it off.
-	item.RootOnly = item.RootOnly || slices.ContainsFunc(items, func(held contract.Addon) bool { return same(item.Kind, item.Name)(held) && held.RootOnly })
+	if i := slices.IndexFunc(items, same(item.Kind, item.Name)); i >= 0 {
+		item.RootOnly = item.RootOnly || items[i].RootOnly
+	}
 	return f.write(room, append(slices.DeleteFunc(items, same(item.Kind, item.Name)), item))
 }
 
