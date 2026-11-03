@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { backupProblem, hang, hostLabel, hostLoads, hostMeters, largeShared, lastSeen, machines, onHost, roomSessions } from "./hosts.ts";
+import { hang, hostLabel, hostLoads, hostMeters, largeShared, lastSeen, machines, onHost, roomSessions } from "./hosts.ts";
 
 test("labels the Dyna host without implying that it runs this browser", () => {
   assert.equal(hostLabel("control-plane"), "Dyna host");
@@ -49,7 +49,7 @@ test("a merged card keeps the sessions both sides report, and an unmerged host k
 test("one machine reported as the control plane and a registered host is one card, named for the host, with whole-machine figures", () => {
   const gib = 2 ** 30;
   const plane = { name: "control-plane", reachable: true, boxes: 0, cpus: 20, memBytes: 31 * gib, cpuUsed: 0.2, memUsed: 4 * gib, diskBytes: 1900 * gib, diskUsed: 1192 * gib,
-    diskLow: false, shared: [{ room: "r", bytes: gib }], history: null, backupCopyEnabled: true, lastSeen: "2026-10-31T00:00:00Z" };
+    diskLow: false, shared: [{ room: "r", bytes: gib }], history: null, lastSeen: "2026-10-31T00:00:00Z" };
   const lab = { name: "lab", reachable: true, boxes: 3, cpus: 19, memBytes: 27 * gib, cpuUsed: 0, memUsed: 0, diskBytes: 1900 * gib, diskUsed: 1192 * gib,
     diskLow: false, shared: [], history: null, lastSeen: "2026-10-31T00:00:05Z", engineHost: true };
   const other = { ...lab, name: "gpu-box", engineHost: undefined, boxes: 1 };
@@ -57,7 +57,6 @@ test("one machine reported as the control plane and a registered host is one car
   assert.deepEqual(rest, [other]);
   assert.deepEqual([one.name, one.boxes, one.shared], ["lab", 3, plane.shared]);
   assert.deepEqual(hostMeters(one).map(m => m.text), hostMeters(plane).map(m => m.text));
-  assert.equal(one.backupCopyEnabled, true);
   assert.equal(hostLabel(one.name), "lab");
   // Either side's low disk shows, and a host the engine cannot reach still says so.
   assert.equal(machines([{ ...plane, diskLow: true }, lab])[0].diskLow, true);
@@ -91,18 +90,6 @@ test("the panel foot shows unreachable hosts first, then those low on disk, then
   assert.deepEqual(lines(hosts), [["down", "Unreachable"], ["cpu", "CPU 95% busy", "Memory 10%"], ["mem", "CPU 20%", "Memory 60%"]]);
   assert.deepEqual(hostLoads([...hosts, { ...host("full", 0.1, 1), diskLow: true }]).map(h => h.name), ["down", "full", "cpu"]);
   assert.deepEqual(lines(hosts.filter(h => h.reachable)), [["cpu", "CPU 95% busy", "Memory 10%"], ["mem", "CPU 20%", "Memory 60%"], ["calm", "CPU 10%", "Memory 10%"]]);
-});
-
-test("Home marks a stored backup failure or a copy over 48 hours old, and nothing else", () => {
-  const now = Date.parse("2026-10-31T12:00:00Z");
-  const h = { name: "control-plane", reachable: true, boxes: 0, cpus: 8, memBytes: 8, cpuUsed: 1, memUsed: 1, diskBytes: 0, diskUsed: 0, diskLow: false, shared: [], history: null };
-  const on = { ...h, backupCopyEnabled: true };
-  assert.equal(backupProblem(h, now), undefined);
-  assert.equal(backupProblem(on, now), undefined);
-  assert.equal(backupProblem({ ...on, backupCopyAt: "2026-10-29T12:00:00Z" }, now), undefined);
-  assert.deepEqual(backupProblem({ ...on, backupCopyAt: "2026-10-28T11:00:00Z" }, now), { tone: "warning", label: "Backup 3 days old" });
-  assert.deepEqual(backupProblem({ ...on, backupCopyAt: "2026-10-31T00:00:00Z", backupCopyFailure: "no_space" }, now), { tone: "error", label: "Backup machine full", title: "The second machine has no room for the backup" });
-  assert.equal(backupProblem({ ...on, backupCopyFailure: "failed" }, now)?.label, "Backup failed");
 });
 
 test("Home names a room's shared folder only past a quarter of its host's disk, largest first", () => {

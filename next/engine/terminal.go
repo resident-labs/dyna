@@ -5,7 +5,6 @@ import (
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
-	"github.com/resident-labs/dyna/engine/store"
 )
 
 func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contract.HostListRequest) (contract.HostListResponse, *contract.Error) {
@@ -17,17 +16,6 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 	if err != nil {
 		return contract.HostListResponse{}, failure(err)
 	}
-	status, err := s.store.BackupCopyStatus(ctx)
-	if err != nil {
-		return contract.HostListResponse{}, failure(err)
-	}
-	var copyFailure contract.BackupCopyFailure
-	if status.Failure != "" {
-		copyFailure = contract.BackupCopyFailed
-		if status.Failure == store.BackupCopyNoSpace {
-			copyFailure = contract.BackupCopyNoSpace
-		}
-	}
 	leftovers, err := s.store.LeftoverCounts(ctx)
 	if err != nil {
 		return contract.HostListResponse{}, failure(err)
@@ -37,7 +25,7 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 		return contract.HostListResponse{}, problem
 	}
 	runners := s.reconciler.RunnerCounts()
-	result := contract.HostListResponse{Hosts: []contract.HostSummary{{Name: contract.ControlPlane, Sessions: sessions[contract.ControlPlane], Shared: shared, BackupCopyAt: status.LastSuccess, BackupCopyFailure: copyFailure}}}
+	result := contract.HostListResponse{Hosts: []contract.HostSummary{{Name: contract.ControlPlane, Sessions: sessions[contract.ControlPlane], Shared: shared}}}
 	for _, host := range hosts {
 		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, Sessions: sessions[host.Name], Shared: []contract.RoomShared{}, Pool: host.Pool, Agents: !host.NoAgents, CI: host.CI, Runners: runners[host.Name], CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.CheckedAt.IsZero() && host.DiskBytes < box.DiskWarn(host.DiskFloor), EngineHost: host.EngineHost != nil && *host.EngineHost, Leftovers: leftovers[host.Name]})
 	}

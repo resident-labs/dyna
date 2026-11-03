@@ -81,7 +81,6 @@ func TestLayoutNamesWhatNoRoomOwns(t *testing.T) {
 		l.Store():               "/data/store.db",
 		l.StoreLock():           "/data/store.lock",
 		l.V1Store():             "/data/dyna.db",
-		l.Backups():             "/data/backups",
 		l.Connect():             "/data/connect",
 		l.Proxy():               "/data/cliproxy",
 		l.ProxyAuth():           "/data/cliproxy/auth-v2",
@@ -104,18 +103,6 @@ func TestLayoutNamesWhatNoRoomOwns(t *testing.T) {
 	} {
 		if got != want {
 			t.Errorf("got %s, want %s", got, want)
-		}
-	}
-}
-
-func TestLayoutKnowsARoomsSharedFolder(t *testing.T) {
-	l := box.Layout{Data: "/data"}
-	if !l.IsShared(l.Shared("r")) {
-		t.Error("a room's shared folder was not recognised")
-	}
-	for _, path := range []string{l.Files("r"), "/data/rooms/shared", "/data/rooms/r/files/shared", "/data/rooms/r/shared/shared"} {
-		if l.IsShared(path) {
-			t.Errorf("%s is not a room's shared folder", path)
 		}
 	}
 }
