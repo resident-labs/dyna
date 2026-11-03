@@ -55,10 +55,9 @@ func (s *Store) SetHostRooms(ctx context.Context, host contract.HostName, rooms 
 
 // SetHostSwitches turns a host's agents switch, its CI switch or both; nil leaves one as it is. Boxes and runners already on
 // the host stay.
-func (s *Store) SetHostSwitches(ctx context.Context, host contract.HostName, agents, ci *bool, clear ...bool) error {
+func (s *Store) SetHostSwitches(ctx context.Context, host contract.HostName, agents, ci *bool, clearCreateProblem bool) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		reset := len(clear) > 0 && clear[0]
-		result, err := tx.ExecContext(ctx, "UPDATE hosts SET agents=coalesce(?2,agents), ci=coalesce(?3,ci), create_failures=CASE WHEN ?4 THEN 0 ELSE create_failures END, create_problem=CASE WHEN ?4 THEN '' ELSE create_problem END, create_generation=create_generation+CASE WHEN ?4 THEN 1 ELSE 0 END WHERE name=?1", host, agents, ci, reset)
+		result, err := tx.ExecContext(ctx, "UPDATE hosts SET agents=coalesce(?2,agents), ci=coalesce(?3,ci), create_failures=CASE WHEN ?4 THEN 0 ELSE create_failures END, create_problem=CASE WHEN ?4 THEN '' ELSE create_problem END, create_generation=create_generation+CASE WHEN ?4 THEN 1 ELSE 0 END WHERE name=?1", host, agents, ci, clearCreateProblem)
 		if err != nil {
 			return err
 		}
