@@ -99,7 +99,7 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 	}
 	reason := PendingNoReadyHost
 	var chosen contract.HostName
-	var best int64 = -1
+	var best float64
 	for _, h := range hosts {
 		// A create quarantine blocks new boxes, including retries, not wakes or CI runners.
 		if h.State != HostReady || (existing != nil && h.Name != existing.Host) || (h.Problem != "" && request.Image != RunnerImage && (existing == nil || existing.State == contract.BoxPending && existing.Image == "")) {
@@ -152,9 +152,12 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 			reason = PendingDisk
 			continue
 		}
-		free := 4*h.MemBytes - mem
-		if chosen == "" || free > best || (free == best && h.Name < chosen) {
-			chosen, best = h.Name, free
+		// Earlier capacity guards reject hosts with zero CPUs or memory.
+		cpuFree := float64(4*h.CPUs-cpu-request.Size.CPUs) / float64(4*h.CPUs)
+		memFree := float64(4*h.MemBytes-mem-request.Size.MemBytes) / float64(4*h.MemBytes)
+		headroom := min(cpuFree, memFree)
+		if chosen == "" || headroom > best || (headroom == best && h.Name < chosen) {
+			chosen, best = h.Name, headroom
 		}
 	}
 	if chosen == "" {
