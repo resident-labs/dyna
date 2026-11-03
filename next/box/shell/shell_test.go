@@ -187,10 +187,8 @@ func TestStopKillsTheGroupAfterTheGracePeriod(t *testing.T) {
 		t.Fatalf("second signal = %v, want SIGKILL", sig)
 	}
 	<-stopped
-	select {
-	case report := <-r.reports:
-		t.Fatalf("stopped job reported: %+v", report)
-	default:
+	if report := <-r.reports; report.Job != "job_1" || !report.Silent || report.End == nil || report.End.Kind != contract.ShellJobStopped {
+		t.Fatalf("stopped job report = %+v, want a silent stopped end", report)
 	}
 }
 
@@ -434,11 +432,9 @@ func TestStoppingAHostCommandStopsItsRun(t *testing.T) {
 	if _, body := call(t, r.server.Handler(), "/job", `{"action":"list"}`); !strings.Contains(body, `"status":"stopped"`) {
 		t.Fatalf("list = %s", body)
 	}
-	// A stop the agent asked for wakes no one, as for a box command.
-	select {
-	case got := <-r.reports:
-		t.Fatalf("report %+v", got)
-	default:
+	// A stop the agent asked for wakes no one: the engine is told silently, as for a box command.
+	if got := <-r.reports; !got.Silent {
+		t.Fatalf("report %+v, want a silent end", got)
 	}
 }
 
