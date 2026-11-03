@@ -142,3 +142,20 @@ func TestABundleHoldsWhatIsEnabled(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRootOnlyIsStoredAndBundled(t *testing.T) {
+	f := &Files{Layout: box.Layout{Data: t.TempDir()}}
+	if err := f.SaveSkill("", contract.Addon{Kind: contract.AddonSkill, Name: "one"}, archive(t, "one")); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetRootOnly("", contract.AddonSkill, "one", true); err != nil {
+		t.Fatal(err)
+	}
+	items, err := f.List("")
+	if err != nil || len(items) != 1 || !items[0].RootOnly {
+		t.Fatalf("%+v %v", items, err)
+	}
+	if err := f.SetRootOnly("", contract.AddonSkill, "none", true); !errors.Is(err, ErrMissing) {
+		t.Fatal(err)
+	}
+}
