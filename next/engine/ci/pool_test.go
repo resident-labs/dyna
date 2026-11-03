@@ -44,6 +44,7 @@ type fakeDriver struct {
 	listCtx  context.Context
 	gate     chan struct{} // when set, a build waits for it to close
 	buildMu  sync.Mutex    // a build-ahead runs beside placement
+	onEgress func()        // runs when the proxy is started, which a sweep does
 }
 
 func (d *fakeDriver) BuildRunnerImage(ctx context.Context) (string, error) {
@@ -59,8 +60,14 @@ func (d *fakeDriver) BuildRunnerImage(ctx context.Context) (string, error) {
 	d.builds++
 	return "image", nil
 }
-func (d *fakeDriver) EnsureEgress(context.Context, string) error { d.egress = true; return nil }
-func (d *fakeDriver) RemoveEgress(context.Context) error         { d.egress = false; return nil }
+func (d *fakeDriver) EnsureEgress(context.Context, string) error {
+	if d.onEgress != nil {
+		d.onEgress()
+	}
+	d.egress = true
+	return nil
+}
+func (d *fakeDriver) RemoveEgress(context.Context) error { d.egress = false; return nil }
 func (d *fakeDriver) StartRunner(_ context.Context, s box.RunnerSpec) error {
 	d.specs = append(d.specs, s)
 	if d.startErr != nil {
@@ -558,41 +565,158 @@ func TestReapRunsHourly(t *testing.T) {
 	f.stop()
 }
 
-func TestLeaseRenewsOnlyWhileThePoolServes(t *testing.T) {
+func TestLeaseRenewsEveryFiveMinutesWhileAHostIsPooled(t *testing.T) {
 	f := newFixture(1)
-	f.tick(t)
-	if len(f.api.leases) != 0 {
-		t.Fatal("leased before any poll")
-	}
-	f.scale(0)
 	f.tick(t)
 	if len(f.api.leases) != 1 || !f.api.leases[0].Equal(f.now.Add(leaseFor)) {
 		t.Fatalf("leases %v", f.api.leases)
 	}
-	f.now = f.now.Add(time.Minute)
-	f.scale(0)
+	f.now = f.now.Add(leaseEvery - time.Second)
 	f.tick(t)
 	if len(f.api.leases) != 1 {
 		t.Fatalf("renewed early: %v", f.api.leases)
 	}
-	f.now = f.now.Add(leaseEvery)
-	f.scale(0)
+	f.now = f.now.Add(time.Second)
 	f.tick(t)
 	if len(f.api.leases) != 2 {
 		t.Fatalf("leases %v", f.api.leases)
 	}
-	// The listener died: polls stop, so the lease runs out.
-	f.now = f.now.Add(serveWindow)
+	f.stop()
+}
+
+func TestLeaseRenewsOnTheFirstPassAfterARestart(t *testing.T) {
+	f := newFixture(1)
 	f.tick(t)
-	if len(f.api.leases) != 2 {
-		t.Fatalf("a silent listener renewed its lease: %v", f.api.leases)
+	f.stop()
+	// A new engine knows nothing of the last write and has seen no poll.
+	f.pool = &Pool{Store: f.store, GitHub: f.api, Sets: f.sets, Now: f.pool.Now, Hosts: f.pool.Hosts}
+	f.now = f.now.Add(time.Minute)
+	f.tick(t)
+	if len(f.api.leases) != 2 || !f.api.leases[1].Equal(f.now.Add(leaseFor)) {
+		t.Fatalf("leases %v", f.api.leases)
 	}
-	// Every host below its floor: polls go on, but with no capacity.
-	f.store.hosts[0].DiskBytes = 0
-	f.scale(0)
+	f.stop()
+}
+
+func TestLeaseRenewsWithEverySlotBusy(t *testing.T) {
+	f := newFixture(1)
+	// The bound is spent by a runner of another size, so this set's capacity is 0 though the pool is alive.
+	small, _ := box.Size(contract.BoxSizeSmall)
+	f.drivers["pve"].runners = []box.Runner{{Name: "dyna-ci-pve-1", Repo: repo, ID: 100, Slot: 0, Size: small, Running: true}}
+	f.drivers["pve"].egress = true
+	if capacity := f.scale(1); capacity != 0 {
+		t.Fatalf("pool not saturated: capacity %d", capacity)
+	}
+	f.tick(t)
+	f.now = f.now.Add(10 * time.Minute)
+	f.scale(1)
 	f.tick(t)
 	if len(f.api.leases) != 2 {
-		t.Fatalf("a pool with no capacity renewed its lease: %v", f.api.leases)
+		t.Fatalf("a full pool let its lease lapse: %v", f.api.leases)
+	}
+	f.stop()
+}
+
+func TestLeaseHoldsForAHostWithoutRoomButNotWithoutAHost(t *testing.T) {
+	f := newFixture(1)
+	// Below its disk floor the host takes no runner, and is still the pool.
+	f.store.hosts[0].DiskBytes = 0
+	f.tick(t)
+	if len(f.api.leases) != 1 {
+		t.Fatalf("leases %v", f.api.leases)
+	}
+	f.now = f.now.Add(leaseEvery)
+	f.store.hosts[0].CI = false
+	f.tick(t)
+	if len(f.api.leases) != 1 {
+		t.Fatalf("a host with ci off kept the lease: %v", f.api.leases)
+	}
+	f.store.hosts[0].CI = true
+	f.drivers["pve"].listErr = errors.New("unreachable")
+	f.pool.Tick(context.Background(), &f.group)
+	if len(f.api.leases) != 1 {
+		t.Fatalf("a host that did not answer kept the lease: %v", f.api.leases)
+	}
+	f.drivers["pve"].listErr = nil
+	f.store.repos[0].Only = []string{"other"}
+	f.tick(t)
+	if len(f.api.leases) != 1 {
+		t.Fatalf("a host the rule excludes kept the lease: %v", f.api.leases)
+	}
+	f.store.repos[0].Only = nil
+	f.tick(t)
+	if len(f.api.leases) != 2 {
+		t.Fatalf("leases %v", f.api.leases)
+	}
+	f.stop()
+}
+
+func TestLeaseNeedsAListenerThatHasNotFailed(t *testing.T) {
+	f := newFixture(1)
+	f.tick(t)
+	if len(f.api.leases) != 1 {
+		t.Fatalf("leases %v", f.api.leases)
+	}
+	// Every listener ends and its replacement fails before any poll, as with a revoked token: the host still answers.
+	f.stop()
+	f.sets.listenErr = errors.New("unauthorized")
+	f.now = f.now.Add(leaseEvery)
+	f.pool.Tick(context.Background(), &f.group)
+	f.group.Wait()
+	f.now = f.now.Add(leaseEvery)
+	f.pool.Tick(context.Background(), &f.group)
+	f.group.Wait()
+	if len(f.api.leases) != 1 {
+		t.Fatalf("a pool nothing polls kept its lease: %v", f.api.leases)
+	}
+	// Once the listener polls again the lease returns.
+	f.sets.listenErr = nil
+	f.pool.Tick(context.Background(), &f.group)
+	f.scale(0)
+	f.now = f.now.Add(leaseEvery)
+	f.tick(t)
+	if len(f.api.leases) != 2 {
+		t.Fatalf("leases %v", f.api.leases)
+	}
+	f.stop()
+}
+
+func TestLeaseIsWrittenBeforeTheSweep(t *testing.T) {
+	smallSize, _ := box.Size(contract.BoxSizeSmall)
+	f := newFixture(1)
+	// A runner without its proxy makes the sweep start it, which on a slow host takes long.
+	f.drivers["pve"].runners = []box.Runner{{Name: "dyna-ci-pve-1", Repo: repo, ID: 100, Slot: 0, Size: smallSize, Running: true}}
+	var leasesAtSweep = -1
+	f.drivers["pve"].onEgress = func() { leasesAtSweep = len(f.api.leases) }
+	f.tick(t)
+	if leasesAtSweep != 1 {
+		t.Fatalf("the lease was written after the sweep: %d leases when it began", leasesAtSweep)
+	}
+	f.stop()
+}
+
+func TestNoHostsMeansNoLease(t *testing.T) {
+	f := newFixture(1)
+	f.store.hosts = nil
+	f.tick(t)
+	if len(f.api.leases) != 0 {
+		t.Fatalf("leases %v", f.api.leases)
+	}
+	f.stop()
+}
+
+func TestLeaseFollowsTheRulesNamingOfAPool(t *testing.T) {
+	f := newFixture(1)
+	f.store.hosts[0].Pool = "burst"
+	f.store.repos[0].Only = []string{"other"}
+	f.tick(t)
+	if len(f.api.leases) != 0 {
+		t.Fatalf("a rule naming another pool kept the lease: %v", f.api.leases)
+	}
+	f.store.repos[0].Only = []string{"burst"}
+	f.tick(t)
+	if len(f.api.leases) != 1 {
+		t.Fatalf("leases %v", f.api.leases)
 	}
 	f.stop()
 }
