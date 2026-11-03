@@ -333,6 +333,22 @@ func TestAMergeReachesItsOwnerOnce(t *testing.T) {
 	}
 }
 
+func TestAMergeReachesAnotherSubscriberToo(t *testing.T) {
+	r := newPRRig(t)
+	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1})
+	r.settle(t)
+	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.pr.merged"}, Wake: string(r.root)}); e != nil {
+		t.Fatalf("%+v", e)
+	}
+	r.github.Edit("owner/repo", 1, func(p *fakegithub.Pull) { p.State = "MERGED" })
+	r.pass(t)
+	r.dispatch(t)
+	var n int
+	if err := r.s.store.Read().QueryRowContext(r.ctx, "SELECT COUNT(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_id=? AND d.wake=1 AND e.type='github.pr.merged'", r.root).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("a subscriber that is not the owner heard of the merge %d times, %v", n, err)
+	}
+}
+
 func TestSubscribersHearAPushWithBeforeAndAfter(t *testing.T) {
 	r := newPRRig(t)
 	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1, Head: "aaa111"})
