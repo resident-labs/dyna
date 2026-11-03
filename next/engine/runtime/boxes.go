@@ -706,20 +706,7 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 		if ok {
 			return
 		}
-		if stacked {
-			_ = h.RemovePod(context.Background(), spec.Box)
-			_ = h.RemoveStackVolumes(context.Background(), spec.Box)
-		}
-		if created {
-			_ = h.RemoveContainer(context.Background(), spec.Box)
-			_ = h.RemoveVolume(context.Background(), spec.Box)
-		}
-		if forwarded {
-			_ = h.RemoveForward(context.Background(), forward)
-		}
-		if sliced {
-			_ = h.RemoveSlice(context.Background(), spec.Slice)
-		}
+		cleanupCreate(ctx, h, spec, forward, stacked, created, forwarded, sliced)
 		_ = b.Sockets.RemoveBox(spec.Box)
 	}()
 	if err = b.installBinary(ctx, h); err != nil {
@@ -779,6 +766,24 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	steps.Done("container start")
 	ok = true
 	return image.Tag, nil
+}
+
+// cleanupCreate shares the creation deadline. The next attempt, close or restart removes leftovers.
+func cleanupCreate(ctx context.Context, h box.HostDriver, spec lifecycle.BoxSpec, forward box.Forward, stacked, created, forwarded, sliced bool) {
+	if stacked {
+		_ = h.RemovePod(ctx, spec.Box)
+		_ = h.RemoveStackVolumes(ctx, spec.Box)
+	}
+	if created {
+		_ = h.RemoveContainer(ctx, spec.Box)
+		_ = h.RemoveVolume(ctx, spec.Box)
+	}
+	if forwarded {
+		_ = h.RemoveForward(ctx, forward)
+	}
+	if sliced {
+		_ = h.RemoveSlice(ctx, spec.Slice)
+	}
 }
 
 // recovery is one host's way back after the engine starts.

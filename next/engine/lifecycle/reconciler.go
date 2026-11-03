@@ -23,34 +23,37 @@ type activeStep struct {
 }
 
 type Reconciler struct {
-	hostMemory   func(contract.HostName) int64
-	restoring    func(contract.HostName) bool
-	store        *store.Store
-	boxes        BoxAdapter
-	view         View
-	event        eventFunc
-	now          func() time.Time
-	kick         chan struct{}
-	mu           sync.Mutex
-	repos        Repositories
-	roomHosts    RoomHosts
-	roomData     RoomData
-	nodes        Nodes
-	runners      Runners
-	idle         map[contract.HostName]time.Time // when each shared node last held a box, as this engine saw
-	audited      map[string]time.Time            // when each pool last ran list
-	roomSteps    map[string]bool
-	active       map[contract.BoxID]*activeStep
-	hosts        map[contract.HostName]int
-	fresh        map[contract.BoxID]bool
-	disconnected map[contract.BoxID]time.Time
-	wg           sync.WaitGroup
-	pass         sync.Mutex
+	hostMemory    func(contract.HostName) int64
+	restoring     func(contract.HostName) bool
+	store         *store.Store
+	boxes         BoxAdapter
+	view          View
+	event         eventFunc
+	now           func() time.Time
+	createContext func(context.Context) (context.Context, context.CancelFunc)
+	kick          chan struct{}
+	mu            sync.Mutex
+	repos         Repositories
+	roomHosts     RoomHosts
+	roomData      RoomData
+	nodes         Nodes
+	runners       Runners
+	idle          map[contract.HostName]time.Time // when each shared node last held a box, as this engine saw
+	audited       map[string]time.Time            // when each pool last ran list
+	roomSteps     map[string]bool
+	active        map[contract.BoxID]*activeStep
+	hosts         map[contract.HostName]int
+	fresh         map[contract.BoxID]bool
+	disconnected  map[contract.BoxID]time.Time
+	wg            sync.WaitGroup
+	pass          sync.Mutex
 }
 
 func New(st *store.Store, boxes BoxAdapter, view View, repos Repositories, event func(contract.RoomID, contract.Principal, contract.EventBody) (contract.Event, error), now func() time.Time) *Reconciler {
 	st.SetTerminals(func(id contract.SessionID) bool { return view.OpenTerminal(id) })
-	return &Reconciler{store: st, boxes: boxes, view: view, repos: repos, event: event, now: now, kick: make(chan struct{}, 1), roomSteps: make(map[string]bool), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool), disconnected: make(map[contract.BoxID]time.Time), idle: make(map[contract.HostName]time.Time), audited: make(map[string]time.Time)}
+	return &Reconciler{store: st, boxes: boxes, view: view, repos: repos, event: event, now: now, createContext: func(ctx context.Context) (context.Context, context.CancelFunc) {
+		return context.WithTimeout(ctx, 15*time.Minute)
+	}, kick: make(chan struct{}, 1), roomSteps: make(map[string]bool), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool), disconnected: make(map[contract.BoxID]time.Time), idle: make(map[contract.HostName]time.Time), audited: make(map[string]time.Time)}
 }
 func (r *Reconciler) SetHostMemory(read func(contract.HostName) int64) { r.hostMemory = read }
 
