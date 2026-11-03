@@ -76,11 +76,14 @@ func TestShareNeedsSaysWhatAHostLacks(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain := fakeTools(t, map[string]string{"fusermount3": "exit 0", "grep": `exec /usr/bin/grep "$@"`})
-	for name, c := range map[string]struct{ path, conf, want string }{
-		"no fusermount3":   {path: dir, conf: "user_allow_other\n", want: "fusermount3 is missing: install fuse3"},
-		"not setuid":       {path: plain, conf: "user_allow_other\n", want: "fusermount3 is not setuid, so FUSE mounts fail with Operation not permitted"},
-		"option off":       {path: withFuse, conf: "# user_allow_other\n", want: "user_allow_other is not set in /etc/fuse.conf"},
-		"no file":          {path: withFuse, conf: "", want: "user_allow_other is not set in /etc/fuse.conf"},
+	for name, c := range map[string]struct {
+		path, conf, want string
+		code             int
+	}{
+		"no fusermount3":   {path: dir, conf: "user_allow_other\n", want: "fusermount3 is missing: install fuse3", code: 1},
+		"not setuid":       {path: plain, conf: "user_allow_other\n", want: "fusermount3 is not setuid, so FUSE mounts fail with Operation not permitted", code: 2},
+		"option off":       {path: withFuse, conf: "# user_allow_other\n", want: "user_allow_other is not set in /etc/fuse.conf", code: 1},
+		"no file":          {path: withFuse, conf: "", want: "user_allow_other is not set in /etc/fuse.conf", code: 1},
 		"everything there": {path: withFuse, conf: "mount_max = 1000\n  user_allow_other\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -94,7 +97,11 @@ func TestShareNeedsSaysWhatAHostLacks(t *testing.T) {
 			cmd := exec.Command("/bin/bash", "-c", script)
 			cmd.Env = []string{"PATH=" + c.path}
 			out, err := cmd.CombinedOutput()
-			if got := strings.TrimSpace(string(out)); got != c.want || (err != nil) != (c.want != "") {
+			code := 0
+			if exit := (&exec.ExitError{}); errors.As(err, &exit) {
+				code = exit.ExitCode()
+			}
+			if got := strings.TrimSpace(string(out)); got != c.want || (err != nil) != (c.want != "") || code != c.code {
 				t.Fatalf("got %q, err %v, want %q", got, err, c.want)
 			}
 		})
@@ -224,5 +231,18 @@ func TestEnsureShareStartsAMountWhereThereIsNone(t *testing.T) {
 	want := "share mount --server /sock --dir " + filepath.Join(dir, "mount") + " --cache " + filepath.Join(dir, "cache")
 	if !strings.HasPrefix(string(calls), "fusermount3\n") || !strings.Contains(string(calls), want) {
 		t.Fatalf("calls: %s", calls)
+	}
+}
+
+func TestEnsureShareTellsAPermanentFailureFromATransientOne(t *testing.T) {
+	for status, permanent := range map[int]bool{1: false, 2: true} {
+		h, err := New("user@host", t.TempDir(), "host", &runner{body: "why", status: status})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var down box.ShareDown
+		if err := h.EnsureShare(context.Background(), box.Layout{}); !errors.As(err, &down) || down.Permanent != permanent {
+			t.Fatalf("status %d: %v", status, err)
+		}
 	}
 }

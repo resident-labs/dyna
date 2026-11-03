@@ -92,7 +92,7 @@ func TestCreateDeadlineAndShutdown(t *testing.T) {
 type shareDownCreate struct{ runningBoxes }
 
 func (shareDownCreate) Create(context.Context, BoxSpec) (string, error) {
-	return "", box.ShareDown{Host: "h", Reason: "fusermount3 is not setuid, so FUSE mounts fail with Operation not permitted"}
+	return "", box.ShareDown{Host: "h", Reason: "fusermount3 is not setuid", Permanent: true}
 }
 
 // A create that finds the host's shared folder down is the host's fault, and one such failure is enough to keep session
@@ -120,7 +120,7 @@ func TestCreateWithoutTheSharedFolderCountsAgainstTheHost(t *testing.T) {
 type transientShareDown struct{ runningBoxes }
 
 func (transientShareDown) Create(context.Context, BoxSpec) (string, error) {
-	return "", box.ShareDown{Host: "h", Reason: "the mount is down"}
+	return "", box.ShareDown{Host: "h", Reason: "the mount is down", Permanent: false}
 }
 
 // A mount that is down for now is not a reason to keep the host out until the owner clears it.
