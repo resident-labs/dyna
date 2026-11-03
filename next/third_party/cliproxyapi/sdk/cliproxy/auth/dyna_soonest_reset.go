@@ -592,6 +592,7 @@ type RoutingAccountView struct {
 	Spent     bool       `json:"spent,omitempty"`
 	Gated     bool       `json:"gated,omitempty"`
 	State     string     `json:"state"`
+	Reason    string     `json:"reason,omitempty"`
 	Deadline  *time.Time `json:"deadline,omitempty"`
 }
 
@@ -651,6 +652,9 @@ func routingOrder(board *quotaResetBoard, auths []*Auth, now time.Time) map[stri
 		for _, auth := range pool {
 			blocked, reason, _ := isAuthBlockedForModel(auth, "", now)
 			view := RoutingAccountView{AuthIndex: auth.Index}
+			if blocked && auth.LastError != nil && auth.LastError.Code == ErrorCodeInsufficientBalance {
+				view.Reason = ErrorCodeInsufficientBalance
+			}
 			switch {
 			case blocked && reason == blockReasonDisabled:
 				view.State = RoutingStateDisabled
