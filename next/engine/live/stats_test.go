@@ -7,7 +7,7 @@ import (
 )
 
 func TestAStatsAnswerReachesItsQuestionOnly(t *testing.T) {
-	c := NewChannel(func() {}, make(chan struct{}))
+	c := NewChannel(func() {})
 	first, firstAnswer := c.AskStats()
 	second, secondAnswer := c.AskStats()
 	c.AnswerStats(second, contract.BoxReading{MemUsed: 2})
@@ -25,7 +25,7 @@ func TestAStatsAnswerReachesItsQuestionOnly(t *testing.T) {
 }
 
 func TestALateStatsAnswerIsDropped(t *testing.T) {
-	c := NewChannel(func() {}, make(chan struct{}))
+	c := NewChannel(func() {})
 	ask, answer := c.AskStats()
 	c.ForgetStats(ask)
 	c.AnswerStats(ask, contract.BoxReading{MemUsed: 1})
@@ -42,7 +42,7 @@ func TestALateStatsAnswerIsDropped(t *testing.T) {
 
 // A box that stopped reading fills the queue. A question past that keeps no entry, so nothing grows.
 func TestAFullStatsQueueDropsTheQuestion(t *testing.T) {
-	c := NewChannel(func() {}, make(chan struct{}))
+	c := NewChannel(func() {})
 	for range cap(c.asks) + 3 {
 		c.AskStats()
 	}

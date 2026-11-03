@@ -1182,6 +1182,14 @@ func (b *Boxes) TerminalArgv(ctx context.Context, host contract.HostName, id con
 	return h.TerminalArgv(id), nil
 }
 
+func (b *Boxes) ExecArgv(ctx context.Context, host contract.HostName, id contract.BoxID, argv ...string) ([]string, error) {
+	h, err := b.host(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	return h.ExecArgv(id, argv...), nil
+}
+
 func (b *Boxes) scopeRunner(ctx context.Context, host contract.HostName) (scopeRunner, error) {
 	if host == contract.ControlPlane {
 		return hostexec.Local{}, nil

@@ -33,7 +33,6 @@
   import { activityLabel } from "./lib/steps.ts";
   import { FileDraft } from "./lib/attach.svelte.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
-  import type { Size } from "./lib/computerInput.ts";
   import JobsTool from "./lib/ui/JobsTool.svelte";
   import HeaderActions from "./lib/ui/HeaderActions.svelte";
   import TermDock from "./lib/ui/TermDock.svelte";
@@ -53,7 +52,7 @@
   import { distinctInitials } from "./lib/identity.ts";
   import { computerPlace, fitted, type Rect } from "./lib/float.ts";
   import { pinPage } from "./lib/viewport.ts";
-  import type { ComputerInput, Conversation, PostRequest } from "./lib/contract.gen.ts";
+  import type { Conversation, PostRequest } from "./lib/contract.gen.ts";
   // A pairing link leaves the address bar and history at once, whatever this browser's state. Only a signed-out page uses it.
   const move = new URLSearchParams(location.hash.slice(1));
   const moveData = move.has("route") ? move : new URLSearchParams(sessionStorage.getItem("dyna-connect-move") ?? "");
@@ -283,27 +282,33 @@
     if (target) void call("room.pause", { room: target, paused: !paused }).catch(() => { pauseFailed = target; });
   }
   // A DM's running turn, which the composer can stop.
-  let stop = $derived.by(() => {
-    const running = session, current = store;
+  const stopOf = (running: string | undefined) => {
+    const current = store;
     if (!running || !current?.running(running)) return undefined;
     return { stopping: current.stopping.has(running), failed: current.stopFailed.has(running), run: () => current.stop(running) };
-  });
-  function send() {
+  };
+  let stop = $derived(stopOf(session));
+  // Sends the draft of the open conversation, or of dm's DM from the computer's chat bar. A DM that is not open sends
+  // directly, and a post that does not send waits as a failed row in that DM for Retry.
+  function send(dm = session) {
     if (!store || !room) return;
-    const text = savedDrafts.draft(key, drafts[key]), quote = quotes[key], draft = files(key);
+    const to = `${room}/${dm ?? ""}`;
+    const text = savedDrafts.draft(to, drafts[to]), quote = quotes[to], draft = files(to);
     if (draft.busy || (!text.trim() && !quote && !draft.items.length)) return;
     const attachments = [...quote?.attachments ?? [], ...draft.take()];
-    drafts[key] = "";
-    savedDrafts.clear(key);
-    quotes[key] = undefined;
-    clearReplacement();
+    drafts[to] = "";
+    savedDrafts.clear(to);
+    quotes[to] = undefined;
+    if (to === key) clearReplacement();
     // The engine refuses mentions on a DM post; in the feed, @names of open sessions become mentions.
     // Mentions come from the owner's own words only, so an @name inside a forwarded post wakes nobody.
-    const post = session ? { text, mentions: [] } : parseMentions(text, store.sessions.values());
+    const post = dm ? { text, mentions: [] } : parseMentions(text, store.sessions.values());
     // A forward carries the post's files; the engine keeps each file once, by hash, for every conversation.
     const request: PostRequest = { room, text: quote ? quoted(quote, post.text) : post.text, mentions: post.mentions.length ? post.mentions : undefined,
-      home: session ? home : undefined, attachments: attachments.length ? attachments : undefined };
-    if (session) void thread?.send(request); else void view?.send(request);
+      home: dm ? { kind: "dm", session: dm } : undefined, attachments: attachments.length ? attachments : undefined };
+    if (dm && dm === session) void thread?.send(request);
+    else if (dm) void call("post", request).catch(() => keep(request));
+    else void view?.send(request);
   }
   let view: Feed | undefined = $state();
   let thread: SessionThread | undefined = $state();
@@ -421,7 +426,7 @@
     if (covered) return;
     // Only areas on screen take part; below 761 px the closed sessions panel has no boxes.
     // The requests view takes the place of the feed and the composer.
-    const areas = (inSettings ? [rail, settings] : [rail, section ? page : feed, section ? undefined : composer, dock, members, docked ? undefined : computer])
+    const areas = (inSettings ? [rail, settings] : [rail, section ? page : feed, section ? undefined : composer, dock, members, computer])
       .filter(area => area != null)
       .filter(area => area.getClientRects().length > 0);
     const index = areas.findIndex(area => area.contains(document.activeElement));
@@ -431,7 +436,7 @@
   // The tree is virtual, so the next row may not be rendered yet: the list scrolls to it first. A held key's presses
   // that come meanwhile move on from that row, and only the newest one focuses.
   let walkingTo: number | undefined;
-  // Focus goes back to a row's computer icon when the docked computer closes. The list may have scrolled, so
+  // Focus goes back to a row's computer icon when the computer it opened closes. The list may have scrolled, so
   // the row is scrolled back in first; and a row shows its icons only on hover or focus, so its link takes focus
   // before the icon. With the icon gone, focus stays on the link.
   async function focusRowIcon(id: string, tapped = false) {
@@ -488,51 +493,38 @@
   let panel = $state(false);
   // From 761 px the panel shows until the owner closes it.
   let tucked = $state(false);
-  // The session whose computer the owner watches, while it runs: in a window over the app, or docked
-  // in the sessions panel instead of the list. Docked, the view mounts only while the panel shows.
+  // The session whose computer the owner watches: in a window over the app on every display, or full screen with control.
   // Each session's window keeps its place and size for the page view.
   let watching: string | undefined = $state();
-  let docked = $state(false);
+  let computerFull = $state(false);
   let rect = $state({ x: window.innerWidth - 504, y: window.innerHeight - 420, w: 480, h: 300 });
-  // A session's first window opens inside the feed's right edge, clear of its cards and the composer; where it
-  // cannot clear them it docks, unless the owner has used Dock or Undock. It then opens where the owner left it.
-  // On a phone the window fills the screen (fix 3).
+  // A session's first window opens inside the feed's right edge, then where the owner left it.
   const places = new Map<string, Rect>();
-  let dockChosen = false;
   // The header's Computer button when it opened the view; focus goes back to it, as the row's icon has no place under About.
   let opener: HTMLElement | undefined;
   const centered = (box: DOMRect) => (box.left + box.right + 744) / 2;
   function watch(id: string, from?: HTMLElement) {
+    if (watching === id) { computer?.focus(); return; }
     if (watching) places.set(watching, rect);
     const box = (section ? page : feed)?.getBoundingClientRect();
     const place = places.get(id);
+    // Feed cards start at the feed's left; the Requests page centers its 744 px cards.
     if (place) rect = place;
-    else if (box) {
-      // Feed cards start at the feed's left; the Requests page centers its 744 px cards.
-      const first = computerPlace(box.right, box.top + 16, section ? centered(box) : box.left + 680);
-      rect = first.rect;
-      if (!dockChosen && !phone.current) {
-        docked = !first.clear;
-        if (docked && !panelShown) void showPanel(true).then(() => computer?.focus());
-      }
-    }
+    else if (box) rect = computerPlace(box.right, box.top + 16, section ? centered(box) : box.left + 680).rect;
     opener = from;
+    computerFull = false;
+    ran = false;
     watching = id;
   }
-  // Requests opened under a floating window docks it if it would hide the cards; a window the owner moved clear stays,
-  // and focus stays on the page, whose keys decide requests.
-  $effect(() => {
-    if (!section || !page || !watching || docked || phone.current) return;
-    const box = page.getBoundingClientRect();
-    untrack(() => {
-      if (dockChosen || rect.x >= centered(box) + 8) return;
-      docked = true;
-      void (panelShown ? tick() : showPanel(true)).then(() => page?.focus());
-    });
+  // The view starts its computer, and closes when that computer stops, when the box is no longer ready, or when the room
+  // changes, before the DOM updates, so it never streams again unasked. Focus that was in the view returns to the row's
+  // button, or to the panel; below 761 px with the panel closed, it returns to the panel's toggle button.
+  let ran = false;
+  $effect.pre(() => {
+    if (!watching) return;
+    if (store?.boxes.get(watching) !== "ready" || (ran && !store.computers.has(watching))) void stopWatching();
+    else if (store.computers.has(watching)) ran = true;
   });
-  // The view closes when its computer stops or the room changes, before the DOM updates, so it never
-  // streams again unasked. Focus that was in the view returns to the row's button, or to the panel;
-  // below 761 px with the panel closed, it returns to the panel's toggle button.
   async function stopWatching(tapped = false) {
     const id = watching ?? "";
     if (watching) places.set(watching, rect);
@@ -544,9 +536,6 @@
     else if (!members?.getClientRects().length) { if (toggle?.isConnected) toggle.focus({ focusVisible: !tapped }); else roomMenu?.focus({ focusVisible: !tapped }); }
     else await focusRowIcon(id, tapped);
   }
-  // Every refusal shows in the view as a notice; its next batch goes on.
-  const sendInput = (session: string, events: ComputerInput[], frame: Size) => call("computer.input", { session, frame, events }).then(() => undefined);
-  $effect.pre(() => { if (watching && !store?.computers.has(watching)) void stopWatching(); });
   // A session's running background jobs while its box is ready. The header's Jobs tool, like About's Jobs row, keeps every
   // session that ever had jobs, since a finished job's output stays in its box. In a DM it lists only that session.
   const jobs = (id: string) => store?.boxes.get(id) === "ready" ? store.shellJobs.get(id) ?? 0 : 0;
@@ -556,8 +545,8 @@
   // them. A pick closes it; the scrim and Escape close it and return focus to the menu button. A keyboard open or
   // close (Escape) shows the ring; a tap open focuses the dialog itself, and no ring follows a tap either way.
   const phone = new MediaQuery("max-width: 640px");
-  // On a phone the full-screen computer covers everything else, so nothing behind it takes focus.
-  let covered = $derived(phone.current && !!watching && !docked && !inSettings && section !== "instructions");
+  // The full-screen computer covers everything else, so nothing behind it takes focus.
+  let covered = $derived(!!watching && computerFull && !inSettings && section !== "instructions");
   let drawer = $state(false);
   let menuButton: HTMLButtonElement | undefined = $state();
   async function showDrawer(open: boolean, refocus = true, tapped = false) {
@@ -644,10 +633,16 @@
 {/snippet}
 
 {#snippet computerView(id: string)}
-  <!-- Another session's view is a new view, so the old image runs its cleanup and drops its stream. -->
-  {#key id}<ComputerView session={id} name={store?.names.get(id) ?? "Session"} root={!store?.sessions.get(id)?.parent} activity={store?.activity.get(id)} steps={store?.steps.get(id) ?? []} {docked} full={phone.current && !docked} bind:rect bind:element={computer} input={attention.can("computers") ? (events, frame) => sendInput(id, events, frame) : undefined}
+  {@const to = `${room}/${id}`}
+  <!-- Another session's view is a new view, so the old one runs its cleanup and drops its stream. Full screen, the
+       chat bar is the session's DM composer, with the same draft as its page. -->
+  {#key id}<ComputerView session={id} name={store?.names.get(id) ?? "Session"} root={!store?.sessions.get(id)?.parent} activity={store?.activity.get(id)}
+    bind:full={computerFull} bind:rect bind:element={computer} start={() => call("computer.start", { session: id }).then(() => undefined)}
     onfit={(ratio, chrome) => { if (!places.has(id)) places.set(id, rect = fitted(rect, ratio, chrome, (feed?.getBoundingClientRect().bottom ?? window.innerHeight) - 16)); }}
-    onclose={tapped => void stopWatching(tapped)} ondock={event => { docked = !docked; dockChosen = true; if (docked && !panelShown) void showPanel(true, event.detail > 0); }} />{/key}
+    onclose={tapped => void stopWatching(tapped)}>
+    {#snippet chat()}{#if attention.can("operate")}<Composer bind:value={() => savedDrafts.draft(to, drafts[to]),text => { drafts[to] = text; savedDrafts.save(to, text); }} onsend={() => send(id)} thread
+      placeholder={"Message " + (store?.names.get(id) ?? "Session")} quote={quotes[to]} onundo={() => {}} onunquote={() => { quotes[to] = undefined; }} files={files(to)} stop={stopOf(id)} />{/if}{/snippet}
+  </ComputerView>{/key}
 {/snippet}
 
 <svelte:window onkeydown={cycle} onclickcapture={dismissRequests} onfocusin={formEvent} oninput={formEvent} onpagehide={() => savedDrafts.flush()} />
@@ -712,7 +707,7 @@
       {#if store && !unavailable}
         {#if session}<span class="session-spacer"></span>{/if}
         {#if session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title={terminals?.hasShell(session) ? "Show this session's terminal" : "Open a terminal in this session's box"} aria-pressed={terminals?.hasShell(session) ?? false} onclick={() => terminals?.shell(session, title, !store?.sessions.get(session)?.parent)}><Icon name="terminal" /></button>{/if}
-        {#if session && attention.can("computers") && store.computers.has(session)}<button type="button" class="tool" aria-label="Computer" title="Watch this session's computer" onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /></button>{/if}
+        {#if session && !closed && attention.can("computers") && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Computer" title={watching === session ? "Show this session's computer" : "Open this session's computer"} aria-pressed={watching === session} onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /></button>{/if}
         {#key session}<HeaderActions {store} {session} {attention} {closed} phone={phone.current} {paused} panelShown={panelShown} requestsOpen={section === "requests"}
           bind:jobsTool bind:roomMenu bind:requestsButton bind:toggle
           onopen={(item, job) => terminals?.openJob(item, job)} onpause={pause} oninstructions={openInstructions} onrequests={() => { section = section === "requests" ? undefined : "requests"; }} onpanel={tapped => void showPanel(!panelShown, tapped)}
@@ -753,9 +748,7 @@
     </div>
   </main>
   {#if room}
-    <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} class:watching={watching && docked} aria-label="Sessions" tabindex="-1" role={panel && phone.current && !covered ? "dialog" : undefined} aria-modal={(panel && phone.current && !covered) || undefined} bind:this={members} inert={drawer || covered || inSettings}>
-      <!-- Docked, the computer sits above the session list. -->
-      {#if watching && docked && panelShown}{@render computerView(watching)}{/if}
+    <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} aria-label="Sessions" tabindex="-1" role={panel && phone.current && !covered ? "dialog" : undefined} aria-modal={(panel && phone.current && !covered) || undefined} bind:this={members} inert={drawer || covered || inSettings}>
       {#if phone.current}{@render sheetHandle("sessions")}{/if}
       {#if session && !closed}<header class="bar tabs">
         <button type="button" aria-pressed={!about} onclick={() => tabs.set(key, "sessions")}>Sessions</button>
@@ -792,7 +785,7 @@
       <!-- The foot polls hosts, so it mounts only while the panel shows; a phone's closed panel polls nothing. -->
       {#if panelShown}<HostFoot {navigate} />{/if}
     </aside>
-    {#if watching && !docked && !inSettings && section !== "instructions"}{@render computerView(watching)}{/if}
+    {#if watching && !inSettings && section !== "instructions"}{@render computerView(watching)}{/if}
   {/if}
   {#if inSettings}<Settings {path} phone={phone.current} {navigate} onmenu={event => void showDrawer(true, true, event.detail > 0)} signedout={() => { revoked = true; }} bind:element={settings} bind:menu={settingsMenu} />{/if}
 </div>{/if}
@@ -914,9 +907,4 @@
   @media (hover: none) { .fold { width: 24px; min-height: 44px; } .idle { height: 44px; } .watch { width: 40px; height: 40px; margin-right: 0; } }
   /* The name wins: a pointer shows a row's icons on hover, and the keyboard on focus; an open view keeps its icon. */
   @media (hover: hover) { .row:not(:hover, :focus-within) .watch:not(.open) { display: none; } }
-  /* The docked computer needs 420 px. It docks beside the feed from 1024 px, where the feed keeps 540 px; below
-     that it covers the feed, and Back or Escape closes it. */
-  @media (min-width: 1024px) { .shell.open:not(.tucked):has(aside.watching) { grid-template-columns: 64px 1fr 420px; } }
-  @media (min-width: 761px) and (max-width: 1023px) { .shell > aside.members.watching { position: fixed; top: calc(var(--panel-top, 52px) + env(safe-area-inset-top)); right: 0; bottom: 0; width: 420px; z-index: 1; box-shadow: -8px 0 24px var(--shadow-lg); } }
-  @media (max-width: 760px) { .shell > aside.members.shown.watching { width: min(420px, 100vw); } }
 </style>

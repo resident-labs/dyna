@@ -193,7 +193,8 @@ func (w *Web) login(_ context.Context, _ contract.Principal, _ contract.WebLogin
 
 func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 	routes, managed := w.routeOrigins(r.Context())
-	out.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' blob:; connect-src 'self' "+strings.Join(routes, " ")+"; frame-ancestors 'none'")
+	// data: images are the computer view's cursor, which noVNC draws from the desktop's cursor shape.
+	out.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' blob: data:; connect-src 'self' "+strings.Join(routes, " ")+"; frame-ancestors 'none'")
 	out.Header().Set("X-Content-Type-Options", "nosniff")
 	if r.Header.Get("Tailscale-Funnel-Request") != "" {
 		http.Error(out, "forbidden", http.StatusForbidden)
@@ -347,7 +348,7 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/terminal":
 			streamScope = contract.ScopeTerminal
-		case "/v1/computers/watch":
+		case "/v1/computers/stream":
 			streamScope = contract.ScopeComputers
 		case "/v1/events":
 			streamScope = contract.ScopeRead
