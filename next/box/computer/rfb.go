@@ -11,6 +11,7 @@ import (
 	"image/png"
 	"io"
 	"net"
+	"slices"
 	"strings"
 	"time"
 )
@@ -138,43 +139,89 @@ func textKeysyms(text string) []uint32 {
 			out = append(out, 0xff0d)
 		case c == '\t':
 			out = append(out, 0xff09)
-		case c >= 0x20 && c <= 0x7e || c >= 0xa0 && c <= 0xff:
-			out = append(out, uint32(c))
 		default:
-			out = append(out, 0x01000000+uint32(c))
+			out = append(out, runeKeysym(c))
 		}
 	}
 	return out
 }
 
-// TypeText types text on the desktop as VNC key events, a press and a release for each character. xdotool types a
-// character the keyboard map lacks by mapping it onto a spare key, typing it and restoring the map at once, and an app
-// that reads the key after the restore drops it, as in about 2 typings of "é" in 10. Xvnc maps a keysym it lacks onto a
-// spare key itself and keeps it there, and adds Shift where a character needs it, so every character arrives.
-func TypeText(ctx context.Context, socket, text string) error {
+// Keyboard sends the desktop's keyboard input as VNC key events, for every computer action that types or holds a key.
+// xdotool types a keysym the keyboard map lacks by mapping it onto a spare key, sending it and restoring the map at once,
+// and an app that reads the key after the restore drops it, as in about 2 typings of "é" in 10. Xvnc maps a keysym it
+// lacks onto a spare key itself and keeps it there, and adds Shift where a character needs it, so every key arrives.
+type Keyboard struct {
+	c    *rfbClient
+	held []uint32
+}
+
+func DialKeyboard(ctx context.Context, socket string) (*Keyboard, error) {
 	c, err := dialRFB(ctx, socket, 1)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer c.Close()
+	return &Keyboard{c: c}, nil
+}
+
+// Close lets go of every key still down, and ends the connection.
+func (k *Keyboard) Close() {
+	_ = k.Up(k.held...)
+	k.c.Close()
+}
+
+func (k *Keyboard) send(down bool, keysyms []uint32) error {
+	flag := byte(0)
+	if down {
+		flag = 1
+	}
 	var events []byte
-	for _, keysym := range textKeysyms(text) {
-		for _, down := range []byte{1, 0} {
-			events = binary.BigEndian.AppendUint32(append(events, 4, down, 0, 0), keysym)
-		}
+	for _, keysym := range keysyms {
+		events = binary.BigEndian.AppendUint32(append(events, 4, flag, 0, 0), keysym)
 	}
-	if _, err := c.conn.Write(events); err != nil {
-		return err
-	}
-	// The events are Xvnc's once it answers a request sent after them, so the settle that follows sees what they did.
-	if err := c.request(false, Rect{0, 0, 1, 1}); err != nil {
+	_, err := k.c.conn.Write(events)
+	return err
+}
+
+// Down presses keys in order, and Up lets them go in order.
+func (k *Keyboard) Down(keysyms ...uint32) error {
+	k.held = append(k.held, keysyms...)
+	return k.send(true, keysyms)
+}
+
+func (k *Keyboard) Up(keysyms ...uint32) error {
+	k.held = slices.DeleteFunc(k.held, func(held uint32) bool { return slices.Contains(keysyms, held) })
+	return k.send(false, keysyms)
+}
+
+// Sync returns once Xvnc has taken the events before it, as it answers a request sent after them, so input from
+// another source, such as xdotool's pointer, comes after them, and the settle that follows sees what they did.
+func (k *Keyboard) Sync(ctx context.Context) error {
+	if err := k.c.request(false, Rect{0, 0, 1, 1}); err != nil {
 		return err
 	}
 	if deadline, ok := ctx.Deadline(); ok {
-		_ = c.conn.SetReadDeadline(deadline)
+		_ = k.c.conn.SetReadDeadline(deadline)
 	}
-	_, err = c.update(nil)
+	_, err := k.c.update(nil)
 	return err
+}
+
+// TypeText types text on the desktop, a press and a release for each character.
+func TypeText(ctx context.Context, socket, text string) error {
+	k, err := DialKeyboard(ctx, socket)
+	if err != nil {
+		return err
+	}
+	defer k.Close()
+	for _, keysym := range textKeysyms(text) {
+		if err := k.Down(keysym); err != nil {
+			return err
+		}
+		if err := k.Up(keysym); err != nil {
+			return err
+		}
+	}
+	return k.Sync(ctx)
 }
 
 func (c *rfbClient) request(incremental bool, r Rect) error {
