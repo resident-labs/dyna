@@ -69,7 +69,7 @@ hosts.
 A runner is placed as a box is, by the same `box.Admit`: a ready host with ci on,
 with room for the runner's CPUs and memory and a free disk floor, the one with the
 most free memory. A host where a session box is pending for CPU or memory takes no
-new runner, so the box gets the next free slot. Runners and boxes count against each other there, and several
+new runner when only runners keep that box out, so the box gets the next free slot. Runners and boxes count against each other there, and several
 runners share a host while it has room, up to 16, one per slot. A host with ci off
 gets no new runner. The agents switch and the room list keep sessions off a host,
 so a runner ignores both.
