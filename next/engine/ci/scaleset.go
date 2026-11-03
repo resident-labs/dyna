@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/actions/scaleset"
 	"github.com/actions/scaleset/listener"
@@ -111,7 +112,11 @@ func (s *Sets) Listen(ctx context.Context, repo contract.RepoName, name string, 
 		s.forget(repo, name)
 		return err
 	}
-	defer session.Close(context.WithoutCancel(ctx))
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		session.Close(closeCtx)
+	}()
 	poll, err := listener.New(session, listener.Config{ScaleSetID: opened.id})
 	if err != nil {
 		return err
