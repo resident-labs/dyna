@@ -40,7 +40,12 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 	if e := s.roomAccess(ctx, caller, req.Room); e != nil {
 		return contract.SessionListResponse{}, e
 	}
-	result, err := s.store.SessionList(ctx, req.Room)
+	// A session reads the list as tool output, which its harness cuts at about 10 KB, so it gets a page unless it asks for a size.
+	limit := req.Limit
+	if limit == 0 && caller.Kind == contract.PrincipalSession {
+		limit = contract.SessionListPage
+	}
+	result, err := s.store.SessionList(ctx, req, limit)
 	if err != nil {
 		return contract.SessionListResponse{}, failure(err)
 	}

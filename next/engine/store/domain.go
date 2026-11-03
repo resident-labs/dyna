@@ -42,6 +42,7 @@ type Session struct {
 	NewRoomName string // nonempty only for a new room root
 	Compose     string // the compose file this session chose when it started, or ""
 	Root        bool   // read back only: the session has no parent
+	Closing     bool   // read back only: the session is closing
 	// Workflow makes the new session a crew. It is set only to start one: Session does not read it back.
 	Workflow *WorkflowRun
 }
@@ -385,12 +386,17 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			replyPosts = nil
 		}
 		body.Replies = room.FinalReplies(inputs, replyPosts, endIDs)
+		// A turn the close ended has nothing to answer with, and the closing session's notice tells its parent.
+		if output.Cause == contract.CauseClosed {
+			body.Replies = nil
+		}
+		owed := slices.ContainsFunc(inputs, func(d contract.Delivery) bool { return d.Reply.Kind == contract.ReplyFinal })
 		event.Body = body
 		seq, err := s.AppendEvent(tx, event)
 		if err != nil {
 			return err
 		}
-		if output.Outcome != contract.TurnStopped && !retrying && len(body.Replies) == 0 && !slices.ContainsFunc(posts, func(post contract.Event) bool {
+		if output.Outcome != contract.TurnStopped && !retrying && owed && output.Final == "" && !slices.ContainsFunc(posts, func(post contract.Event) bool {
 			return post.From.Kind == contract.PrincipalSession && post.From.Session == session
 		}) {
 			if err := markSilent(ctx, tx, session, output.Turn); err != nil {
@@ -432,7 +438,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 
 func (s *Store) Session(ctx context.Context, id contract.SessionID) (Session, error) {
 	var session Session
-	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.repo,s.profile,b.id,s.close_reason,s.compose,s.parent IS NULL FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL", id).Scan(&session.ID, &session.Room, &session.Name, &session.Repo, &session.Profile, &session.Box, &session.CloseReason, &session.Compose, &session.Root)
+	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.repo,s.profile,b.id,s.close_reason,s.compose,s.parent IS NULL,s.state='closing' FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL", id).Scan(&session.ID, &session.Room, &session.Name, &session.Repo, &session.Profile, &session.Box, &session.CloseReason, &session.Compose, &session.Root, &session.Closing)
 	return session, err
 }
 
