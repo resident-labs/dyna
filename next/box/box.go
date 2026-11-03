@@ -41,6 +41,7 @@ type Host struct {
 	CPUs                int
 	MemBytes, DiskBytes int64
 	DiskFloor           int64
+	DiskTotal           int64 // the disk's size from the latest heartbeat, 0 until one arrives
 	MemUsed             int64 // latest heartbeat; not stored
 	MaintainedAt        time.Time
 	Labels              []string

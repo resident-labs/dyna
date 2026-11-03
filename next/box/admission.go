@@ -41,8 +41,12 @@ func DiskFloor(total int64) int64 { return max(20*GiB, total/10) }
 
 // DiskWarn is the free space that warns: 85% used on a large disk, and above the point where the largest box is refused. On a
 // small disk that box takes at most a quarter of it, so a new node of 150 GB does not warn while it is still empty. total is
-// the disk's size, or 0 when unknown.
-func DiskWarn(floor, total int64) int64 {
+// the disk's size, or 0 when unknown. A pool node is disposable and the floor already stops its boxes, so its warn level is the
+// floor itself: it warns only when boxes would start waiting with disk.
+func DiskWarn(floor, total int64, pool bool) int64 {
+	if pool {
+		return floor
+	}
 	headroom := diskRequest(contract.BoxSizeXLarge)
 	if total > 0 {
 		headroom = min(headroom, total/4)
