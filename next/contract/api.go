@@ -917,6 +917,8 @@ type ShellJobEndedRequest struct {
 	Job         ShellJobID   `json:"job"`
 	ExitCode    int          `json:"exitCode"` // unread; box agents still send it and requests decode strictly
 	Tail        string       `json:"tail"`     // the last output, masked
+	// Silent says the session asked for the end with job stop. The engine takes the job off what the session holds and sends no notice.
+	Silent bool `json:"silent,omitempty"`
 }
 type ShellJobEndedResponse struct{}
 

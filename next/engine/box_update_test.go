@@ -254,3 +254,31 @@ func TestWakeDuringStaleStopStartsNoTurnOnDyingBox(t *testing.T) {
 		t.Fatalf("starts=%d state=%s", host.starts, stateOf(t, s, ctx, sid))
 	}
 }
+
+// A job the session stopped leaves what the session holds at once, with no wake and no notice, while another job stays.
+func TestStoppedJobLeavesWhatTheSessionHolds(t *testing.T) {
+	s, _, room, sid, ctx := staleSession(t)
+	turn := openTurn(t, s, ctx, room, sid, "turn_open")
+	other := contract.ShellJobID("job_a1b2")
+	endTurn(t, s, ctx, sid, turn, testJob, other)
+	if _, problem := s.ShellJobEnded(ctx, boxCaller(sid), contract.ShellJobEndedRequest{Job: testJob, End: &contract.ShellJobEnd{Kind: contract.ShellJobStopped}, Silent: true}); problem != nil {
+		t.Fatal(problem)
+	}
+	held, err := s.store.Responsibilities(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var jobs []contract.ShellJobID
+	for _, item := range held {
+		if item.Kind == contract.ResponsibilityShellJob {
+			jobs = append(jobs, contract.ShellJobID(item.ID))
+		}
+	}
+	if len(jobs) != 1 || jobs[0] != other {
+		t.Fatalf("held jobs = %v, want only %s", jobs, other)
+	}
+	var events int
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM events WHERE type='shell.job.ended'").Scan(&events); err != nil || events != 0 {
+		t.Fatalf("shell.job.ended events = %d, err %v", events, err)
+	}
+}

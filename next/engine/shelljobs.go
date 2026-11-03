@@ -8,6 +8,7 @@ import (
 
 // ShellJobEnded records the end of a background shell job and wakes its session once.
 // A retry of the same job changes nothing. A running turn takes the wake as a steer.
+// A silent end, from job stop, takes the job off the session's list and sends no event or wake.
 func (s *Service) ShellJobEnded(ctx context.Context, caller contract.Principal, req contract.ShellJobEndedRequest) (contract.ShellJobEndedResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalSession {
 		return contract.ShellJobEndedResponse{}, forbidden()
@@ -26,7 +27,7 @@ func (s *Service) ShellJobEnded(ctx context.Context, caller contract.Principal, 
 	if err != nil {
 		return contract.ShellJobEndedResponse{}, failure(err)
 	}
-	if err = s.store.ShellJobEnded(ctx, session.ID, req.Job, event); err != nil {
+	if err = s.store.ShellJobEnded(ctx, session.ID, req.Job, event, req.Silent); err != nil {
 		return contract.ShellJobEndedResponse{}, failure(err)
 	}
 	return contract.ShellJobEndedResponse{}, nil
