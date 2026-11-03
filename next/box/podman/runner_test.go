@@ -66,6 +66,9 @@ func TestRunnerArgsKeepTheContainerSealed(t *testing.T) {
 		"--label dyna.ci.size=large", "--mount type=bind,source=/data/cache,destination=/cache,ro",
 		"--mount type=bind,source=/data/cache/ci/3,destination=/build", "--env DYNA_CI_CACHE=/cache", "--env DYNA_CI_BUILD=/build",
 		"--mount type=bind,source=/data/sock/build-cache,destination=/run/dyna-build-cache,ro",
+		"--mount type=bind,source=/data/cache/ci/3/cargo,destination=/box/cache/cargo",
+		"--mount type=bind,source=/data/cache/ci/3/target,destination=/box/work/owner/repo/target",
+		"--env CARGO_HOME=/box/cache/cargo", "--env CARGO_TARGET_DIR=/box/work/owner/repo/target",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("args miss %q: %s", want, joined)
