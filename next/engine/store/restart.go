@@ -54,6 +54,11 @@ func (s *Store) RestartSession(ctx context.Context, id contract.SessionID, event
 		}
 		body.Cause = event.Body.(contract.BoxChanged).Cause
 		event.Body = body
+		// Record the old host's partial resources before detaching its quarantined box.
+		_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO room_leftovers(host,room,box,slice) SELECT b.host,s.room,b.id,b.slice FROM boxes b JOIN sessions s ON s.id=b.session JOIN hosts h ON h.name=b.host WHERE b.id=? AND h.create_problem!=''`, b.ID)
+		if err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx, `UPDATE boxes SET state='pending',want='run',failures=0,due_at=0,image='',host=CASE WHEN EXISTS (SELECT 1 FROM hosts h WHERE h.name=boxes.host AND h.state='ready' AND h.create_problem='') THEN host ELSE NULL END,reason='',updated_at=? WHERE id=? AND state='failed'`, event.Time.UnixMilli(), b.ID)
 		if err != nil {
 			return err
