@@ -322,3 +322,17 @@ func TestRunnerLayerFollowsTheRoomsSave(t *testing.T) {
 		t.Fatalf("another room: %v %v", other, err)
 	}
 }
+
+func TestRunnerLayerIDReadsTheIdAlone(t *testing.T) {
+	store := &Store{Layout: box.Layout{Data: t.TempDir()}}
+	if id, err := store.RunnerLayerID("r"); err != nil || id != "" {
+		t.Fatalf("no image: %q %v", id, err)
+	}
+	if _, err := store.Save("r", "ci-runner", pack(t, map[string]string{"Containerfile": "ARG DYNA_CI_BASE\nFROM ${DYNA_CI_BASE}\n"})); err != nil {
+		t.Fatal(err)
+	}
+	layer, err := store.RunnerLayer("r")
+	if id, idErr := store.RunnerLayerID("r"); err != nil || idErr != nil || id != layer.ID || id == "" {
+		t.Fatalf("id %q, layer %+v: %v %v", id, layer, err, idErr)
+	}
+}

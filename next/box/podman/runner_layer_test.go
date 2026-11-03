@@ -6,9 +6,10 @@ import (
 	"testing"
 
 	"github.com/resident-labs/dyna/box"
+	"github.com/resident-labs/dyna/contract"
 )
 
-// A room's ci-runner file only adds layers: Dyna names the entrypoint and the user on every start, so a layer that sets its own
+// A room's ci-runner file adds layers on the shared image: Dyna names the entrypoint and the user on every start, so a layer that sets its own
 // ENTRYPOINT or USER changes neither.
 func TestRunnerArgsNameTheEntrypointAndUserBeforeTheImage(t *testing.T) {
 	spec := testSpec()
@@ -64,5 +65,21 @@ func TestARunnerLayerWithAnUnsafeNameIsRefused(t *testing.T) {
 		if _, err := h.BuildRunnerImage(context.Background(), layer); err == nil {
 			t.Errorf("%+v built", layer)
 		}
+	}
+}
+
+// A room that left CI or dropped its ci-runner image has no build to replace its layer, so the prune removes it. The shared
+// image and the layers of the rooms named stay.
+func TestPruneRunnerLayersRemovesTheLayersOfOtherRooms(t *testing.T) {
+	r := &pruneRunner{images: "localhost/dyna-ci-runner:h\nlocalhost/dyna-ci-room-room_1:a-b\nlocalhost/dyna-ci-room-gone:c-d\nlocalhost/dyna-base:x\n"}
+	h, err := New("user@host", t.TempDir(), "host", r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.PruneRunnerLayers(context.Background(), []contract.RoomID{"room_1"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.removed) != 1 || r.removed[0] != "localhost/dyna-ci-room-gone:c-d" {
+		t.Fatalf("removed %v", r.removed)
 	}
 }

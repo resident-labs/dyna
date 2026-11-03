@@ -44,7 +44,7 @@ USER 1001:1001
 
 Save it with `dyna image save ci-runner ./dir` (or the `image` tool). The repository's PRs cannot change it.
 
-- You can only add layers. Dyna sets the entrypoint, the user, the read-only root, no network and the dropped capabilities on every runner, so those lines in your file do nothing.
+- You add layers on the shared image. Dyna sets the entrypoint, the user, the read-only root, no network and the dropped capabilities on every runner, so those lines in your file do nothing. Files you overwrite change only your own room's runners.
 - The first build on each CI host takes minutes, and runs in the background, so the first job after a save may wait or run on the shared image. A later save builds again.
 - If your file fails to build, the jobs use the shared image and `dyna host list` shows the host with the build's error. Fix it and save again.
 - To see which image a job got, run `podman ps --filter label=dyna.ci` on the host: the image is `dyna-ci-room-<room>:<id>-<hash>` for yours and `dyna-ci-runner:<hash>` for the shared one. `dyna image show ci-runner` gives the id.

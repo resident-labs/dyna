@@ -47,6 +47,9 @@ type fakeDriver struct {
 	onEgress    func()        // runs when the proxy is started, which a sweep does
 	layerBuilds []string      // the id of each room layer built here
 	failLayer   error         // when set, building a room layer fails with it
+	hangLayer   bool          // when set, building a room layer waits for its context
+	failShared  error         // when set, building the shared image fails with it
+	pruned      [][]contract.RoomID
 }
 
 func (d *fakeDriver) BuildRunnerImage(ctx context.Context, layer *box.RunnerLayer) (string, error) {
@@ -60,6 +63,16 @@ func (d *fakeDriver) BuildRunnerImage(ctx context.Context, layer *box.RunnerLaye
 	d.buildMu.Lock()
 	defer d.buildMu.Unlock()
 	d.builds++
+	if layer == nil && d.failShared != nil {
+		return "", d.failShared
+	}
+	if layer != nil && d.hangLayer {
+		d.layerBuilds = append(d.layerBuilds, layer.ID)
+		d.buildMu.Unlock()
+		<-ctx.Done()
+		d.buildMu.Lock()
+		return "", ctx.Err()
+	}
 	if layer != nil {
 		d.layerBuilds = append(d.layerBuilds, layer.ID)
 		if d.failLayer != nil {
@@ -68,6 +81,10 @@ func (d *fakeDriver) BuildRunnerImage(ctx context.Context, layer *box.RunnerLaye
 		return "layer-" + layer.ID, nil
 	}
 	return "image", nil
+}
+func (d *fakeDriver) PruneRunnerLayers(_ context.Context, keep []contract.RoomID) error {
+	d.pruned = append(d.pruned, keep)
+	return nil
 }
 func (d *fakeDriver) EnsureEgress(context.Context, string) error {
 	if d.onEgress != nil {
