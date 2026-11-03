@@ -151,3 +151,29 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 		t.Fatalf("a box with files moved: %v %v", host, err)
 	}
 }
+
+// A successful create, such as a CI runner's, proves nothing about FUSE, so it leaves share_unavailable alone.
+func TestASuccessfulCreateKeepsShareUnavailable(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	_, err = s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+INSERT INTO hosts(name,ssh,state,cpus,mem_bytes,disk_bytes,checked_at,create_problem) VALUES('h','','ready',8,8589934592,107374182400,0,'share_unavailable');
+INSERT INTO sessions(id,room,name,parent,profile,state,goal,created_at) VALUES('s','r','s',NULL,'p','open','',0);
+INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updated_at) VALUES('b','s','h','','agent','creating','','slice',0,0)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	size, _ := box.Size(contract.BoxSizeAgent)
+	event := contract.Event{ID: "e", Room: "r", Time: time.UnixMilli(100), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{}}
+	if err := s.FinishCreate(ctx, box.Box{ID: "b", Session: "s", Host: "h", Size: size, State: contract.BoxCreating}, "runner", "", time.Time{}, 0, event, false); err != nil {
+		t.Fatal(err)
+	}
+	var problem string
+	if err := s.Read().QueryRow("SELECT create_problem FROM hosts WHERE name='h'").Scan(&problem); err != nil || problem != "share_unavailable" {
+		t.Fatalf("problem %q: %v", problem, err)
+	}
+}
