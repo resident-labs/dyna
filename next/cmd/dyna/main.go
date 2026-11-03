@@ -69,6 +69,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(proxyCommand(func() *socketClient { return newClient(socket) }))
 	root.AddCommand(ciEgressCommand())
 	root.AddCommand(shareCommand())
+	root.AddCommand(buildCacheCommand())
 	addEngine(root)
 	for _, a := range tools.Actions() {
 		for _, binding := range a.CLI {
