@@ -126,6 +126,9 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	if req.Size != "" {
 		sizeName = req.Size
 	} else if s.images != nil { // set with the layout
+		if s.migrator != nil {
+			s.migrator.Room(ctx, req.Room, true)
+		}
 		wanted := ""
 		if composeFile != nil {
 			wanted = composeFile.Agent.Build

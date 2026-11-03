@@ -209,10 +209,8 @@ func Run(ctx context.Context, cfg Config) error {
 			service.SetGitHubTools(tools)
 		}
 	}
-	if err := service.MigrateImages(ctx, mirror); err != nil {
-		return fmt.Errorf("migrate room images: %w", err)
-	}
 	boxes.RoomImages = service.Images()
+	boxes.Migrator = service.SetImageMigration(boxCtx, mirror)
 	boxes.Compose = &compose.Files{Layout: layout, Repo: mirror, Images: service.Images()}
 	service.SetCompose(boxes.Compose)
 	if err := st.RecoverHostexec(ctx, time.Now()); err != nil {

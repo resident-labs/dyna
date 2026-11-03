@@ -69,6 +69,7 @@ type Boxes struct {
 	Mirror            *enginegit.Mirror
 	Images            *engineimages.Builder
 	RoomImages        *engineimages.Store
+	Migrator          *engineimages.Migrator
 	Compose           *compose.Files
 	Addons            *addons.Files
 	Context           context.Context
@@ -1313,18 +1314,9 @@ func (b *Boxes) image(ctx context.Context, h *podman.Host, host contract.HostNam
 		return box.Image{}, err
 	}
 	steps.Done("base image")
-	// Migration at start skips a repository with no mirror yet, so the first use of such a repository brings its images over.
-	if repo != "" && b.Mirror != nil {
-		if !b.Mirror.Cloned(repo) {
-			if err := b.Mirror.Refresh(ctx, repo); err != nil {
-				log.Printf("host %s: fetch %s for its images: %v", host, repo, err)
-			}
-		}
-		if path, err := b.Layout.Git(repo); err == nil && b.Mirror.Cloned(repo) {
-			if _, _, err := b.RoomImages.Migrate(ctx, b.Mirror.Runner, room, repo, path); err != nil {
-				return box.Image{}, fmt.Errorf("move the images of %s into the room: %w", repo, err)
-			}
-		}
+	// A room's repository images move into the room before its image is chosen, so a late mirror loses nothing.
+	if room != "" && b.Migrator != nil {
+		b.Migrator.Room(ctx, room, true)
 	}
 	var file *compose.File
 	folder := ""

@@ -2,16 +2,13 @@ package git
 
 import (
 	"context"
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/box"
-	"github.com/resident-labs/dyna/box/skills"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/compose"
 	"github.com/resident-labs/dyna/engine/images"
@@ -151,59 +148,4 @@ func TestAnOversizedRepositoryFileIsNotRead(t *testing.T) {
 	if _, err := compose.Parse(data); err == nil || !strings.Contains(err.Error(), "over") {
 		t.Fatalf("got %v", err)
 	}
-}
-
-// Migration copies a repository's images, from its image branch too, into the room once, and the room's own images win.
-func TestMigrationCopiesARepositorysImagesIntoTheRoom(t *testing.T) {
-	m := mirrorOf(t, func(dir string) {
-		commitFiles(t, dir, map[string]string{"README": "upstream"})
-		gitIn(t, dir, "checkout", "-q", "-b", "dyna-images")
-		commitFiles(t, dir, map[string]string{
-			".dyna/images/go/Containerfile":   "ARG DYNA_BASE\nFROM ${DYNA_BASE}\n",
-			".dyna/images/rust/Containerfile": "ARG DYNA_BASE\nFROM ${DYNA_BASE}\n",
-			".dyna/images/rust/box-needs":     "kvm\n",
-			".dyna/images/rust/size":          "large\n",
-		})
-		gitIn(t, dir, "checkout", "-q", "main")
-	})
-	ctx := context.Background()
-	store := &images.Store{Layout: m.Layout}
-	path, err := m.Layout.Git(composeRepo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	own := packOne(t, "ARG DYNA_BASE\nFROM ${DYNA_BASE}\nRUN echo mine\n")
-	if _, err := store.Save("r", "go", own); err != nil {
-		t.Fatal(err)
-	}
-	copied, left, err := store.Migrate(ctx, m.Runner, "r", composeRepo, path)
-	if err != nil || !slices.Equal(copied, []string{"rust"}) || len(left) != 1 {
-		t.Fatalf("copied %v left %v: %v", copied, left, err)
-	}
-	_, _, _, needs, err := store.Context("r", "rust")
-	if err != nil || len(needs) != 1 || needs[0] != box.NeedKVM {
-		t.Fatalf("needs %v: %v", needs, err)
-	}
-	if size, err := store.Size("r", "rust"); err != nil || size != "large" {
-		t.Fatalf("size %q: %v", size, err)
-	}
-	if again, _, err := store.Migrate(ctx, m.Runner, "r", composeRepo, path); err != nil || len(again) != 0 {
-		t.Fatalf("second run copied %v: %v", again, err)
-	}
-	if _, _, _, _, err := store.Context("r", ""); !errors.Is(err, images.ErrImageChoice) {
-		t.Fatalf("several images, no choice: %v", err)
-	}
-}
-
-func packOne(t *testing.T, containerfile string) []byte {
-	t.Helper()
-	archive := skills.NewArchive()
-	if err := archive.Add("Containerfile", 0o600, []byte(containerfile)); err != nil {
-		t.Fatal(err)
-	}
-	packed, err := archive.Bytes()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return packed
 }
