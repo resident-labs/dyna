@@ -54,6 +54,7 @@ type Runner struct {
 	holding      bool                 // steers wait in held: Pi has not accepted the turn, or one worker is sending them in order
 	held         []contract.TurnSteer // in arrival order
 	flushing     sync.WaitGroup
+	turns        sync.WaitGroup  // the goroutine running each turn, which ends once finish has cleared the turn
 	attaching    context.Context // ends with the turn, so a download cannot outlive it
 	stopAttach   context.CancelFunc
 	compacting   chan struct{} // set during a compaction before a quiet stop; closes when it ends
@@ -197,7 +198,7 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 	})
 	var readyOnce sync.Once
 	started := func() { readyOnce.Do(func() { close(ready) }) }
-	go func() {
+	r.turns.Go(func() {
 		defer started()
 		defer stopAttach()
 		var result contract.TurnEnded
@@ -314,7 +315,7 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 			default:
 			}
 		}
-	}()
+	})
 	select {
 	case <-ready:
 		return nil
