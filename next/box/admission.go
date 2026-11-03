@@ -152,6 +152,7 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 			reason = PendingDisk
 			continue
 		}
+		// Earlier capacity guards reject hosts with zero CPUs or memory.
 		cpuFree := float64(4*h.CPUs-cpu-request.Size.CPUs) / float64(4*h.CPUs)
 		memFree := float64(4*h.MemBytes-mem-request.Size.MemBytes) / float64(4*h.MemBytes)
 		headroom := min(cpuFree, memFree)
