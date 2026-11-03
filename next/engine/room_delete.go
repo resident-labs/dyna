@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
@@ -77,10 +78,15 @@ func (s *Service) RoomSet(ctx context.Context, caller contract.Principal, req co
 	if caller.Kind != contract.PrincipalOwner {
 		return contract.RoomSetResponse{}, forbidden()
 	}
-	if req.RootApprovesHostexec == nil {
-		return contract.RoomSetResponse{}, invalid("set rootApprovesHostexec")
+	if len(req.RootApproves) == 0 {
+		return contract.RoomSetResponse{}, invalid("set rootApproves")
 	}
-	if err := s.store.SetRoomRootApprovesHostexec(ctx, req.Room, *req.RootApprovesHostexec); err != nil {
+	for kind := range req.RootApproves {
+		if !slices.Contains(contract.AllRootApprovals, kind) {
+			return contract.RoomSetResponse{}, invalid(fmt.Sprintf("rootApproves has no kind %q; the kinds are %v", kind, contract.AllRootApprovals))
+		}
+	}
+	if err := s.store.SetRoomRootApproves(ctx, req.Room, req.RootApproves); err != nil {
 		return contract.RoomSetResponse{}, failure(err)
 	}
 	return contract.RoomSetResponse{}, nil

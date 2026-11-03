@@ -330,8 +330,9 @@ func (s *Service) AddonSetRootOnly(ctx context.Context, _ contract.Principal, re
 // AddonGlobal registers a session's global change. A skill's folder stays out of the operation's record, among the room's files.
 func (s *Service) AddonGlobal() approve.Entry {
 	return approve.Entry{
-		Scope: contract.ScopeAdmin,
-		Class: func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassOwner },
+		Scope:        contract.ScopeAdmin,
+		RootApproves: contract.RootApprovesAddons,
+		Class:        func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassOwner },
 		Card: func(_ context.Context, args contract.OpArgs, _ contract.Principal) contract.Card {
 			input := args.(contract.AddonGlobalArgs)
 			kind := map[contract.AddonKind]string{contract.AddonSkill: "a skill", contract.AddonPackage: "a Pi package", contract.AddonMCP: "an MCP server"}[input.Kind]
