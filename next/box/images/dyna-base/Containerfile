@@ -19,7 +19,7 @@ RUN mkdir -p /opt/dyna/extensions/ubol /opt/dyna/extensions/isdcac \
     && curl -fsSL -o /tmp/ubol.zip https://github.com/uBlockOrigin/uBOL-home/releases/download/2026.1026.1812/uBOLite_2026.1026.1812.chromium.zip \
     && echo "d3788eac9f0a44c67f3745a43c3fd446ef33d56b1121f469b19e0fa0a836c2b5  /tmp/ubol.zip" | sha256sum -c - \
     && unzip -q /tmp/ubol.zip -d /opt/dyna/extensions/ubol \
-    && node -e 'const fs=require("fs");for(const p of ["manifest.json","rulesets/ruleset-details.json"]){const f="/opt/dyna/extensions/ubol/"+p,m=JSON.parse(fs.readFileSync(f));for(const r of p==="manifest.json"?m.declarative_net_request.rule_resources:m)if(["annoyances-cookies","annoyances-overlays","annoyances-others"].includes(r.id))r.enabled=true;fs.writeFileSync(f,JSON.stringify(m))}' \
+    && node -e 'const fs=require("fs");for(const p of ["manifest.json","rulesets/ruleset-details.json"]){const f="/opt/dyna/extensions/ubol/"+p,m=JSON.parse(fs.readFileSync(f));let n=0;for(const r of p==="manifest.json"?m.declarative_net_request.rule_resources:m)if(["annoyances-cookies","annoyances-overlays","annoyances-others"].includes(r.id)){r.enabled=true;n++}if(n!==3)throw new Error(p+": "+n+" annoyance rulesets");fs.writeFileSync(f,JSON.stringify(m))}' \
     && curl -fsSL -o /tmp/isdcac.zip https://github.com/OhMyGuus/I-Still-Dont-Care-About-Cookies/releases/download/v1.1.9/ISDCAC-chrome-source.zip \
     && echo "8f70ab947cb2d274f4022a970f5dd3cecd8ec02b060e05187bef9ee3cb18bbcb  /tmp/isdcac.zip" | sha256sum -c - \
     && unzip -q /tmp/isdcac.zip -d /opt/dyna/extensions/isdcac \
