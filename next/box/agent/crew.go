@@ -62,6 +62,7 @@ type crewWorker interface {
 // CrewConfig is what a crew's box hands it.
 type CrewConfig struct {
 	Workflow contract.BoxWorkflow
+	Profiles []contract.ProfileSummary
 	Engine   crewEngine
 	// Open starts a worker for a step in dir, its working tree. Folder is the worker's own, for the time it runs, and holds
 	// its model configuration in models.json.
@@ -688,7 +689,7 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 		return stepOutcome{reason: err.Error()}
 	}
 	defer os.RemoveAll(folder)
-	data, err := json.Marshal(WorkerModels(key[:16]))
+	data, err := json.Marshal(WorkerModels(key[:16], c.config.Profiles...))
 	if err != nil {
 		return stepOutcome{reason: err.Error()}
 	}

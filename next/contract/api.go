@@ -178,6 +178,7 @@ type ProfileSummary struct {
 	Name          ProfileName   `json:"name"`
 	Provider      ModelProvider `json:"provider"`
 	Model         string        `json:"model"`
+	Images        *bool         `json:"images,omitempty"`
 	Thinking      ThinkingLevel `json:"thinking"`
 	AllowedModels []string      `json:"allowedModels,omitempty"`
 	CompactTokens int           `json:"compactTokens,omitempty"`
@@ -636,6 +637,7 @@ type BoxHelloResponse struct {
 	Session       SessionID        `json:"session"`
 	Box           BoxID            `json:"box"`
 	Model         ModelChoice      `json:"model"`
+	Profiles      []ProfileSummary `json:"profiles,omitempty"`
 	Repos         []BoxRepo        `json:"repos,omitempty"`
 	Transcripts   []TranscriptFile `json:"transcripts,omitempty"`
 	Workflow      *BoxWorkflow     `json:"workflow,omitempty"` // a crew's box runs this script and no Pi of its own
