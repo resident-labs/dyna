@@ -1,6 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { autoQuality, setEncodingMode } from "./computerStream.ts";
+import { autoQuality, drawCursor, requestedEncodings, setEncodingMode } from "./computerStream.ts";
+
+test("continuous updates stay asked, and the cursor encodings only while the owner has control", () => {
+  const watching = {}, controlling = {};
+  const all = [7, -26, -313, -312, 0x574d5664, -239];
+  drawCursor(watching, false);
+  drawCursor(controlling, true);
+  assert.deepEqual(requestedEncodings(watching, all), [7, -26, -313, -312], "Xvnc draws the agent's pointer into the picture");
+  assert.deepEqual(requestedEncodings(controlling, all), all);
+  assert.deepEqual(requestedEncodings({}, all), [7, -26, -313, -312], "a socket not yet seen watches");
+});
 
 // v1's Auto tests, with its rules unchanged.
 test("the picture starts at quality 6, sharpens after 1.5 seconds still, and needs sustained motion to return", () => {

@@ -136,6 +136,8 @@
      fit inside it at its own shape. */
   .screen { position: relative; display: flex; flex: 1; min-height: 0; overflow: hidden; background: var(--screen); }
   .desktop { flex: 1; min-width: 0; min-height: 0; }
+  /* Watching, the picture holds the agent's pointer and noVNC has no cursor to draw, so the owner's is the plain one. */
+  .screen:not(.full) .desktop :global(canvas) { cursor: default !important; }
   /* The frame is drawn over the picture, which would cover an outline. */
   .screen.full::after { content: ""; position: absolute; inset: 0; border: 2px solid var(--focus); pointer-events: none; }
   /* v1's badge: a dark chip over the last picture, readable on any frame. */
