@@ -56,13 +56,13 @@ func TestMessagesJoinARunningTurnInARealBox(t *testing.T) {
 	}
 	after := bodies[1]
 	result := provider.lastOf(provider.results(t))
-	moved := regexp.MustCompile(`\[job (job_[0-9a-f]+)\] A message arrived for you, so this command moved to the background, where it keeps running\. Read the message now\. job output reads its new output, and Dyna will wake you when it completes\.$`).FindStringSubmatch(result.Text)
+	moved := regexp.MustCompile(`\[job (job_[0-9a-f]+)\] The owner sent you a message, so this command moved to the background, where it keeps running\. Read the message now\. job output reads its new output, and Dyna will wake you when it completes\.$`).FindStringSubmatch(result.Text)
 	if result.IsError || moved == nil {
 		t.Fatalf("the moved command: %+v", result)
 	}
 	job := contract.ShellJobID(moved[1])
 	// The message follows the call's result in the very next request, and the command did not wait out its sleep.
-	if i, j := strings.Index(after, "A message arrived for you"), strings.Index(after, "note-one"); i < 0 || j < i {
+	if i, j := strings.Index(after, "The owner sent you a message"), strings.Index(after, "note-one"); i < 0 || j < i {
 		t.Fatalf("the message is not after the result: %s", after)
 	}
 	if took := time.Since(sent); took > 10*time.Second {

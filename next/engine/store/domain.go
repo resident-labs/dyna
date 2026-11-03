@@ -734,7 +734,7 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 				if err != nil {
 					return err
 				}
-				if !held[session].NeedsBox() {
+				if !held[session].RunsInBox() {
 					active = ""
 					s.wakePending = append(s.wakePending, session)
 					return nil

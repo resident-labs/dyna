@@ -138,7 +138,7 @@ type fixture struct {
 }
 
 func readyHost(name contract.HostName, memory int64) box.Host {
-	return box.Host{Name: name, State: box.HostReady, CI: true, CPUs: 16, MemBytes: memory, DiskBytes: 100 * box.GiB, DiskFloor: 20 * box.GiB, CheckedAt: time.Unix(1, 0)}
+	return box.Host{Name: name, State: box.HostReady, CI: true, CPUs: 64, MemBytes: memory, DiskBytes: 100 * box.GiB, DiskFloor: 20 * box.GiB, CheckedAt: time.Unix(1, 0)}
 }
 
 // newFixture turns the repository on with max as its bound, beside one host with ci on.
@@ -199,7 +199,8 @@ func TestRunnersFollowAssignedJobsUpToTheBound(t *testing.T) {
 	}
 }
 
-// With no bound, admission alone decides: a 16-CPU host takes 4 x 16 CPUs of runners, eight large ones.
+// With no bound, admission alone decides: a runner keeps its CPUs busy, so a 64-CPU host takes 64 CPUs of runners, eight
+// large ones.
 func TestWithoutABoundAdmissionDecides(t *testing.T) {
 	f := newFixture(0)
 	if capacity := f.scale(10); capacity != 8 || len(f.drivers["pve"].runners) != 8 {
@@ -224,7 +225,7 @@ func TestFinishedRunnerLeavesAndTheNextJobGetsANewOne(t *testing.T) {
 func TestAdmissionSpillsToTheNextHostWhenOneIsFull(t *testing.T) {
 	f := newFixture(0)
 	big := readyHost("big", 128*box.GiB)
-	big.CPUs = 2 // 4 x 2 CPUs: one large runner
+	big.CPUs = 8 // one large runner
 	f.addHost(big)
 	f.scale(1)
 	if len(f.drivers["big"].runners) != 1 || len(f.drivers["pve"].runners) != 0 {
@@ -286,7 +287,7 @@ func TestAnotherRepositorysRunnerHoldsItsSlot(t *testing.T) {
 
 func TestAHostWithEverySlotInUseStartsNoRunner(t *testing.T) {
 	f := newFixture(0)
-	f.store.hosts[0].CPUs, f.store.hosts[0].MemBytes = 64, 256*box.GiB
+	f.store.hosts[0].CPUs, f.store.hosts[0].MemBytes = 128, 256*box.GiB
 	if capacity := f.scale(box.RunnerSlots + 1); capacity != box.RunnerSlots {
 		t.Fatalf("capacity %d", capacity)
 	}
@@ -323,9 +324,9 @@ func TestHostMemoryPressureStopsNewRunners(t *testing.T) {
 func TestSessionBoxesCountAgainstCIPlacement(t *testing.T) {
 	f := newFixture(5)
 	size, _ := box.Size(large)
-	f.store.boxes = []box.Box{{ID: "b", Host: "pve", State: contract.BoxReady, Image: "image", Size: contract.BoxSize{Name: size.Name, CPUs: 60, MemBytes: size.MemBytes}}}
+	f.store.boxes = []box.Box{{ID: "b", Host: "pve", State: contract.BoxReady, Image: "image", Size: contract.BoxSize{Name: size.Name, CPUs: 252, MemBytes: size.MemBytes}}}
 	f.scale(5)
-	// 4 x 16 CPUs is 64, the box takes 60, and no large runner fits in the rest.
+	// 4 x 64 CPUs is 256, the box takes 252, and no large runner fits in the rest.
 	if len(f.sets.names) != 0 {
 		t.Fatalf("registered %v past the host's CPUs", f.sets.names)
 	}
