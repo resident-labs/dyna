@@ -3,6 +3,7 @@ package shell
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -80,9 +81,11 @@ func (p *execProcess) GroupAlive() bool { return syscall.Kill(-p.cmd.Process.Pid
 
 func (p *execProcess) Signal(sig syscall.Signal) { _ = syscall.Kill(-p.cmd.Process.Pid, sig) }
 
-// hostProcess is one command on a host. The engine runs it and answers when it ends, so nothing here can signal it.
+// hostProcess is one command on a host. The engine runs it and answers when it ends. A signal ends the call, and the engine
+// then stops the command on the host.
 type hostProcess struct {
 	done    chan struct{}
+	cancel  context.CancelFunc
 	code    int
 	refused *contract.Error // the engine ran nothing
 }
@@ -94,7 +97,7 @@ func (p *hostProcess) Wait() (int, string) {
 
 func (p *hostProcess) GroupAlive() bool { return false }
 
-func (p *hostProcess) Signal(syscall.Signal) {}
+func (p *hostProcess) Signal(syscall.Signal) { p.cancel() }
 
 type job struct {
 	id          contract.ShellJobID
@@ -228,8 +231,9 @@ type Config struct {
 	Report func(contract.ShellJobEndedRequest) error // called when a background job ends; retried until it succeeds
 	// Running is called at each mark of a background job's running time. A failed call is not retried: the next mark says more.
 	Running func(contract.ShellJobRunningRequest) error
-	// Host runs a command on a host through the engine and returns its exit code. All its output comes as the run ends.
-	Host func(Run, io.Writer) (int, *contract.Error)
+	// Host runs a command on a host through the engine and returns its exit code. All its output comes as the run ends,
+	// and the engine stops the command when the context ends.
+	Host func(context.Context, Run, io.Writer) (int, *contract.Error)
 
 	newID func() contract.ShellJobID
 	start func(command, cwd, callID string, out io.Writer) (process, error)
@@ -285,10 +289,17 @@ func (s *Server) find(id contract.ShellJobID) (*job, bool) {
 
 // startHost hands a command to the engine. A refusal also goes in the output, in case the call has moved to the background.
 func (s *Server) startHost(r Run, out io.Writer) *hostProcess {
-	p := &hostProcess{done: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	p := &hostProcess{done: make(chan struct{}), cancel: cancel}
 	go func() {
 		defer close(p.done)
-		p.code, p.refused = s.cfg.Host(r, out)
+		defer cancel()
+		p.code, p.refused = s.cfg.Host(ctx, r, out)
+		if p.refused != nil && ctx.Err() != nil {
+			// The job was stopped, which ended the call; the engine refused nothing.
+			p.code, p.refused = -1, nil
+			return
+		}
 		if p.refused != nil {
 			p.code = 1
 			_, _ = fmt.Fprintln(out, refusal{*p.refused})

@@ -21,12 +21,15 @@ var ErrConflict = errors.New("operation is no longer pending")
 type Entry struct {
 	Ephemeral bool
 	Global    bool
-	Scope     contract.Scope
-	Class     func(contract.OpArgs, contract.Principal) contract.Class
-	Card      func(context.Context, contract.OpArgs, contract.Principal) contract.Card
-	Check     func(context.Context, contract.OpArgs, contract.Principal) error
-	Execute   func(context.Context, contract.OpID, contract.OpArgs, contract.Principal) contract.OpResult
-	Decode    func(json.RawMessage) (contract.OpArgs, error)
+	// CallerBound says the operation ends when the call that waits for it goes away. Execute reads that call with Caller,
+	// and a result whose caller left wakes no one.
+	CallerBound bool
+	Scope       contract.Scope
+	Class       func(contract.OpArgs, contract.Principal) contract.Class
+	Card        func(context.Context, contract.OpArgs, contract.Principal) contract.Card
+	Check       func(context.Context, contract.OpArgs, contract.Principal) error
+	Execute     func(context.Context, contract.OpID, contract.OpArgs, contract.Principal) contract.OpResult
+	Decode      func(json.RawMessage) (contract.OpArgs, error)
 }
 
 type Service struct {
@@ -43,6 +46,17 @@ type Service struct {
 type waiter struct {
 	ctx  context.Context
 	done chan runResult
+}
+
+type callerKey struct{}
+
+// Caller is the call that waits for a caller-bound operation, which ends when that caller goes away. Any other operation
+// gets a caller that never ends.
+func Caller(ctx context.Context) context.Context {
+	if caller, ok := ctx.Value(callerKey{}).(context.Context); ok {
+		return caller
+	}
+	return context.Background()
 }
 
 type runResult struct {
@@ -173,7 +187,7 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 	resultCh := make(chan runResult, 1)
 	s.waiters[op.ID] = waiter{ctx: ctx, done: resultCh}
 	s.mu.Unlock()
-	go s.start(op, entry)
+	go s.start(op, entry, ctx)
 	select {
 	case result := <-resultCh:
 		return result.op, result.err
@@ -249,7 +263,7 @@ func (s *Service) Decide(ctx context.Context, who contract.Principal, id contrac
 	if state == contract.OpApproved {
 		op.State = state
 		op.Decision = &decision
-		go s.start(op, entry)
+		go s.start(op, entry, nil)
 	}
 	return nil
 }
@@ -288,8 +302,8 @@ func (s *Service) Expire(ctx context.Context) error {
 	}
 	return nil
 }
-func (s *Service) start(op contract.Operation, entry Entry) {
-	err := s.run(op, entry)
+func (s *Service) start(op contract.Operation, entry Entry, caller context.Context) {
+	err := s.run(op, entry, caller)
 	if err == nil {
 		return
 	}
@@ -302,7 +316,7 @@ func (s *Service) start(op contract.Operation, entry Entry) {
 		slog.Error("operation execution failed", "operation", op.ID, "error", err)
 	}
 }
-func (s *Service) run(op contract.Operation, entry Entry) error {
+func (s *Service) run(op contract.Operation, entry Entry, caller context.Context) error {
 	changed, err := s.Store.ChangeOperation(s.Context, op.ID, contract.OpApproved, contract.OpRunning, nil, contract.Event{}, nil)
 	if err != nil {
 		return err
@@ -311,20 +325,30 @@ func (s *Service) run(op contract.Operation, entry Entry) error {
 		return fmt.Errorf("operation %s is not approved", op.ID)
 	}
 
+	execCtx := s.Context
+	if !entry.CallerBound {
+		caller = nil
+	}
+	if caller != nil {
+		execCtx = context.WithValue(execCtx, callerKey{}, caller)
+	}
 	result := contract.OpResult{}
 	if err := entry.Check(s.Context, op.Args, op.By); err != nil {
 		result.Error = "stale: " + err.Error()
 		result.Cause = contract.CauseStale
 	} else {
-		result = entry.Execute(s.Context, op.ID, op.Args, op.By)
+		result = entry.Execute(execCtx, op.ID, op.Args, op.By)
 	}
-	err = s.finish(s.Context, op, result)
+	quiet := caller != nil && caller.Err() != nil
+	err = s.finish(s.Context, op, result, quiet)
 	if err != nil {
-		err = s.finish(context.WithoutCancel(s.Context), op, result)
+		err = s.finish(context.WithoutCancel(s.Context), op, result, quiet)
 	}
 	return err
 }
-func (s *Service) finish(ctx context.Context, op contract.Operation, result contract.OpResult) error {
+
+// finish records a result, and wakes the operation's session when no call waits for it, unless quiet.
+func (s *Service) finish(ctx context.Context, op contract.Operation, result contract.OpResult, quiet bool) error {
 	state := contract.OpDone
 	if result.Error != "" || result.ExitCode != 0 {
 		state = contract.OpFailed
@@ -341,7 +365,7 @@ func (s *Service) finish(ctx context.Context, op contract.Operation, result cont
 		present = false
 	}
 	var notify []contract.Delivery
-	if !present {
+	if !present && !quiet {
 		notify = delivery(op.By.Session)
 	}
 	changed, err := s.Store.ChangeOperation(ctx, op.ID, contract.OpRunning, state, &result, event, notify)
@@ -369,7 +393,7 @@ func (s *Service) Recover(ctx context.Context) error {
 		if record.Operation.Kind == "pr.open" {
 			message += "; check whether the PR exists before opening another"
 		}
-		if err := s.finish(ctx, record.Operation, contract.OpResult{Error: message, Cause: contract.CauseInterrupted}); err != nil {
+		if err := s.finish(ctx, record.Operation, contract.OpResult{Error: message, Cause: contract.CauseInterrupted}, false); err != nil {
 			return err
 		}
 	}
@@ -386,7 +410,7 @@ func (s *Service) Recover(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		go s.start(record.Operation, entry)
+		go s.start(record.Operation, entry, nil)
 	}
 	return nil
 }
