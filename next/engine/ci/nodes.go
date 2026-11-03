@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"log"
 	"slices"
 	"strings"
 
@@ -78,6 +79,9 @@ func (p *Pool) wait(key scaleSet, rows []store.LifecycleBox) {
 		p.waiting[key] = rows
 	}
 	p.shown.Unlock()
+	if !same {
+		log.Printf("ci pool: repository %s: %s: %d jobs wait for a node", key.repo, SetName(key.size), len(rows))
+	}
 	if !same && p.Kick != nil {
 		p.Kick()
 	}
