@@ -108,7 +108,7 @@ func subscriptionCommand(get func() *socketClient) *cobra.Command {
 ses_… ID.
 
 --where keeps only the github.* and git.* events it matches, and the engine checks it before anything starts. Each --where is one of
-key=value, key!=value or text~value, and all of them must hold. Keys are repo, author, actor, label and number. text~ is a plain
+key=value, key!=value or text~value, and all of them must hold. Keys are repo, author, actor, label, kind and number. kind is a change kind of github.pr.changed, such as pushed (a tracked PR's head moved, told to subscribers and not to its owner), ci_failed or merged. text~ is a plain
 substring of a comment or a body. A field the event does not have matches neither = nor !=.
 
 A Run fired by an event gets that event as JSON on stdin, with DYNA_EVENT set to its type, one Run per event. A scheduled Run gets
@@ -117,6 +117,7 @@ empty stdin and no DYNA_EVENT. Any text with "outside": true beside it came from
 dyna subscription events lists the event types.`,
 		Example: `  dyna subscription add --room ROOM --session upstream-sync --every 1h --wake upstream-sync
   dyna subscription add --room ROOM --on github.pr.opened --where author=levzzz5154 --wake SESSION
+  dyna subscription add --room ROOM --on github.pr.changed --where kind=pushed --where repo=horizon-rust/horizon --wake SESSION
   dyna subscription add --room ROOM --on github.mention --where actor!=arismoko --wake SESSION
   dyna subscription add --room ROOM --on github.comment --where 'text~#4953' --where repo=horizon-rust/horizon --wake SESSION
   dyna subscription add --room ROOM --on git.main_updated --where repo=horizon-rust/horizon --image horizon --file upstream-watch.sh=upstream-watch.sh -- bash upstream-watch.sh`,
