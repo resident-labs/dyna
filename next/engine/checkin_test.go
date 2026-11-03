@@ -403,3 +403,34 @@ func TestGoalLifecycleThroughTheAPI(t *testing.T) {
 		t.Fatalf("items %+v", ended.Items)
 	}
 }
+
+func TestGoalJournalReturnsTheNewestFiveAndCountsTheRest(t *testing.T) {
+	r := newGoalRig(t)
+	child := asSession(r.child)
+	var last contract.GoalJournalResponse
+	for i := 1; i <= 7; i++ {
+		var e *contract.Error
+		last, e = r.s.GoalJournal(r.ctx, child, contract.GoalJournalRequest{Goal: "g1", Text: strings.Repeat("x", i)})
+		if e != nil {
+			t.Fatal(e)
+		}
+	}
+	if len(last.Entries) != 5 || last.Older != 2 || last.Entries[0].Text != "xxxxxxx" || last.Entries[4].Text != "xxx" {
+		t.Fatalf("journal %+v", last)
+	}
+	read, e := r.s.GoalJournal(r.ctx, child, contract.GoalJournalRequest{Goal: "g1"})
+	if e != nil || len(read.Entries) != 5 || read.Older != 2 {
+		t.Fatalf("read %+v: %v", read, e)
+	}
+}
+
+func TestGoalListTakesASessionName(t *testing.T) {
+	r := newGoalRig(t)
+	named, e := r.s.GoalList(r.ctx, asSession(r.root), contract.GoalListRequest{Session: "child"})
+	if e != nil || len(named.Goals) != 1 || named.Goals[0].Session != r.child {
+		t.Fatalf("by name %+v: %v", named, e)
+	}
+	if _, e := r.s.GoalList(r.ctx, asSession(r.root), contract.GoalListRequest{Session: "nobody"}); e == nil || e.Code != contract.ErrNotFound {
+		t.Fatalf("unknown name: %v", e)
+	}
+}
