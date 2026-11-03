@@ -87,6 +87,10 @@ func (a addonStart) apply(ctx context.Context) (map[string]pi.MCPServer, []strin
 		case contract.AddonSkill:
 			if err := os.Rename(filepath.Join(item.dir, item.Name), filepath.Join(a.Skills, item.Name)); err != nil {
 				problems = append(problems, fmt.Sprintf("skill %s: %v", item.Name, err))
+			} else if item.Host != "" {
+				if err := annotateSkill(filepath.Join(a.Skills, item.Name, skills.File), item.Host); err != nil {
+					problems = append(problems, fmt.Sprintf("skill %s: %v", item.Name, err))
+				}
 			}
 		case contract.AddonPackage:
 			packages = append(packages, item.Addon)
@@ -228,4 +232,16 @@ func addonNotice(problems []string) string {
 		return ""
 	}
 	return "These add-ons did not load at this box start:\n" + strings.Join(problems, "\n")
+}
+
+// annotateSkill tells a skill saved from a host where its commands run.
+func annotateSkill(path string, host contract.HostName) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if data, err = skills.Annotate(data, host); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
 }

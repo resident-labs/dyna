@@ -9,7 +9,12 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
+	"time"
+
+	"github.com/resident-labs/dyna/box"
+	boxhostexec "github.com/resident-labs/dyna/box/hostexec"
 
 	"github.com/resident-labs/dyna/box/skills"
 	"github.com/resident-labs/dyna/contract"
@@ -79,7 +84,7 @@ func (s *Service) addonChange(ctx context.Context, caller contract.Principal, ta
 
 func (s *Service) applyAddon(ctx context.Context, target addonTarget, change contract.AddonGlobalArgs, archive []byte) (*contract.Addon, error) {
 	at := s.now()
-	item := contract.Addon{Kind: change.Kind, Name: change.Name, Room: target.room, By: target.by, At: &at, Description: change.Description, Source: change.Source, URL: change.URL, Command: change.Command, Args: change.Args}
+	item := contract.Addon{Kind: change.Kind, Name: change.Name, Room: target.room, By: target.by, At: &at, Description: change.Description, Source: change.Source, Host: change.Host, URL: change.URL, Command: change.Command, Args: change.Args}
 	apply := func() error {
 		switch {
 		case change.Remove:
@@ -160,10 +165,22 @@ func (s *Service) SkillSave(ctx context.Context, caller contract.Principal, req 
 	if problem != nil {
 		return contract.AddonChangeResponse{}, problem
 	}
-	if (req.URL == "") == (len(req.Archive) == 0) {
+	if req.Host != "" {
+		if caller.Kind != contract.PrincipalOwner {
+			return contract.AddonChangeResponse{}, forbidden()
+		}
+		if req.URL != "" || len(req.Archive) > 0 || req.Path == "" {
+			return contract.AddonChangeResponse{}, invalid("give a host and path, or a folder, or a link")
+		}
+	} else if (req.URL == "") == (len(req.Archive) == 0) {
 		return contract.AddonChangeResponse{}, invalid("give a folder or a link")
 	}
 	archive := req.Archive
+	if req.Host != "" {
+		if archive, problem = s.hostSkill(ctx, req.Host, req.Path); problem != nil {
+			return contract.AddonChangeResponse{}, problem
+		}
+	}
 	if req.URL != "" {
 		var err error
 		if archive, err = s.addonSources.Skill(ctx, req.URL); err != nil {
@@ -177,7 +194,7 @@ func (s *Service) SkillSave(ctx context.Context, caller contract.Principal, req 
 	if skills.IsBuiltIn(meta.Name) {
 		return contract.AddonChangeResponse{}, invalid(meta.Name + " is a built-in skill; pick another name")
 	}
-	change := contract.AddonGlobalArgs{Kind: contract.AddonSkill, Name: meta.Name, Description: meta.Description, Source: req.URL}
+	change := contract.AddonGlobalArgs{Kind: contract.AddonSkill, Name: meta.Name, Description: meta.Description, Source: req.URL, Host: req.Host}
 	if target.ask != "" {
 		if change.Bundle, _, err = s.saveFile(ctx, target.ask, bytes.NewReader(archive), 25<<20); err != nil {
 			return contract.AddonChangeResponse{}, failure(err)
@@ -390,4 +407,29 @@ func (s *Service) BoxNotice(ctx context.Context, caller contract.Principal, req 
 		return contract.BoxNoticeResponse{}, failure(err)
 	}
 	return contract.BoxNoticeResponse{}, nil
+}
+
+// hostSkill copies a skill's folder from a host over SSH as the archive a save takes, SKILL.md at its top.
+func (s *Service) hostSkill(ctx context.Context, host contract.HostName, path string) ([]byte, *contract.Error) {
+	hosts, err := s.store.Hosts(ctx)
+	if err != nil {
+		return nil, failure(err)
+	}
+	if !slices.ContainsFunc(hosts, func(h box.Host) bool { return h.Name == host && h.State == box.HostReady }) {
+		return nil, &contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("no ready host named %s", host)}
+	}
+	script := `p=$1; case $p in "~") p=$HOME;; "~/"*) p=$HOME/${p#"~/"};; esac; cd -- "$p" && test -f SKILL.md || { echo "no SKILL.md in $p" >&2; exit 2; }; find . -mindepth 1 -maxdepth 1 -printf '%P\0' | tar -czf - --null -T -`
+	args := contract.HostexecRunArgs{Host: host, Argv: []string{"bash", "-c", script, "dyna-skill", path}, Timeout: boxhostexec.CollectTimeout, Collect: true}
+	ctx, cancel := s.hostexecTimeout(ctx, 2*time.Minute+15*time.Second)
+	defer cancel()
+	out, code, truncated, err := s.hostexec.RunHostexec(ctx, args, contract.OpID(fmt.Sprintf("skill-%d", s.now().UnixNano())))
+	switch {
+	case err != nil:
+		return nil, invalid(fmt.Sprintf("copying from %s: %v", host, err))
+	case code != 0:
+		return nil, invalid(fmt.Sprintf("%s:%s is not a skill folder (exit %d)", host, path, code))
+	case truncated || len(out) > skills.MaxBytes:
+		return nil, invalid(fmt.Sprintf("%s:%s is too large to copy", host, path))
+	}
+	return out, nil
 }

@@ -7,8 +7,8 @@ import (
 
 const OutputLimit = 8 << 20
 
-// collectTimeout bounds reading back a run's $DYNA_OUT.
-const collectTimeout = contract.DurationMS(2 * 60 * 1000)
+// CollectTimeout bounds reading back a run's $DYNA_OUT.
+const CollectTimeout = contract.DurationMS(2 * 60 * 1000)
 
 // desktopVars are what a run on an exec-only host takes from the user's graphical session, so GUI commands work over SSH.
 const desktopVars = "WAYLAND_DISPLAY=*|HYPRLAND_INSTANCE_SIGNATURE=*|DBUS_SESSION_BUS_ADDRESS=*|XDG_RUNTIME_DIR=*|DISPLAY=*"
@@ -36,7 +36,7 @@ func collectScript(op contract.OpID) string {
 
 // CollectArgs is the run that reads back and removes a finished run's $DYNA_OUT.
 func CollectArgs(a contract.HostexecRunArgs, op contract.OpID) contract.HostexecRunArgs {
-	a.Argv, a.Cwd, a.Desktop, a.Collect, a.Timeout = []string{"bash", "-c", collectScript(op)}, "", false, true, collectTimeout
+	a.Argv, a.Cwd, a.Desktop, a.Collect, a.Timeout = []string{"bash", "-c", collectScript(op)}, "", false, true, CollectTimeout
 	return a
 }
 
