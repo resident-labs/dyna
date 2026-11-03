@@ -106,9 +106,9 @@ The engine stores an event once and creates one delivery per recipient. A delive
 
 ### 3.5 Operation and grant
 
-Agent writes that need a decision are typed operations. The engine registry supplies the class, card, check and executor. The owner's own operations and `auto` operations run at once; `owner` operations wait for the owner, including for root. The engine rechecks before execution and fails stale cards without running. Pending operations expire after 24 hours by default; identical pending requests from the same caller return the existing operation. Waiting, decision and execution emit typed events.
+Agent writes that need a decision are typed operations. The engine registry supplies the class, card, check and executor. The owner's own operations and `auto` operations run at once; `owner` operations wait for the owner, including for root. A kind may also let the room's root decide it when a room setting allows; today only `hostexec.grant` does, through `dyna room set <room> --root-approves-hostexec on` (owner only, off by default). The request still waits for a decision, and its card says who can approve. The engine rechecks before execution and fails stale cards without running. Pending operations expire after 24 hours by default, except `hostexec.grant`, which waits until it is decided or its session closes, across engine restarts; identical pending requests from the same caller return the existing operation. Waiting, decision and execution emit typed events.
 
-Grants add powers outside the session tree. A new room grants root `ask-owner` and `hostexec` on all hosts, with no expiry, and subscribes it to notices. Only the owner grants host exec. Section 6 describes the rules.
+Grants add powers outside the session tree. A new room grants root `ask-owner` and `hostexec` on all hosts, with no expiry, and subscribes it to notices. Only the owner grants host exec, unless the room's `root-approves-hostexec` setting lets its root decide too. Section 6 describes the rules.
 
 ### 3.7 API
 
@@ -503,7 +503,7 @@ A grant names hosts and reason, and permits any command until the session closes
 
 ### 6.2 Default grant, owner grants and session close
 
-Each room root gets a default grant for all hosts, including the control plane. Only the owner grants host exec. A request names hosts and reason. Grants have no expiry or revoke control. Closing the session ends its grants, prevents pending runs, and stops running units with retries and forced termination. A new non-root session needs a new grant. Root gets its default grant as before. The web lists active grants (owner, 2026-10-31, msg_64eccb5e3dff2300).
+Each room root gets a default grant for all hosts, including the control plane. Only the owner grants host exec, and the room's root too when the owner has turned on `root-approves-hostexec` for the room (off by default; no other security change). A request names hosts and reason and never expires: it waits until it is decided, or until the requesting or target session closes, which withdraws it. Grants have no expiry or revoke control. Closing the session ends its grants, prevents pending runs, and stops running units with retries and forced termination. A new non-root session needs a new grant. Root gets its default grant as before. The web lists active grants (owner, 2026-10-31, msg_64eccb5e3dff2300).
 
 The planned `show_pty` tool (`dyna show-pty`) requests a live terminal for the owner to see. Owner questions remain separate.
 

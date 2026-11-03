@@ -1,6 +1,6 @@
 <script lang="ts">
   import { APIError, call } from "../client.ts";
-  import { causes, clause, commandLine, fromNow, requestLine } from "../feed.ts";
+  import { causes, clause, commandLine, expiryText, expiryTime, fromNow, requestLine } from "../feed.ts";
   import { hue } from "../identity.ts";
   import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
@@ -27,7 +27,7 @@
   let named = $derived(request.card.target.kind !== "room" ? request.card.target.name : "");
   let line = $derived(requestLine(request.card));
   // The engine decides expiry; the owner sees it in the attention color for its last 5 minutes.
-  let soon = $derived(Date.parse(request.expires) - now < 5 * 60_000);
+  let soon = $derived(expiryTime(request.expires) - now < 5 * 60_000);
   // One muted line for a decided request, such as "builder-feed · host access · denied by you · just now · “Use CI”".
   // A decision can be newer than the half-minute clock, so it never reads as in the future.
   let decided = $derived.by(() => {
@@ -66,7 +66,7 @@
 
 {#snippet ask()}{#if line.named}{line.text}<code>{line.named}</code>{clause(line.after)}{:else}{clause(lead)}{/if}{/snippet}
 
-{#snippet expiry()}{#if soon}<StatusPill tone="warning" label="Expires {fromNow(request.expires, now)}" />{:else}Expires {fromNow(request.expires, now)}{/if}{/snippet}
+{#snippet expiry()}{#if soon}<StatusPill tone="warning" label={expiryText(request.expires, now)} />{:else}{expiryText(request.expires, now)}{/if}{/snippet}
 
 <!-- While it waits, a request reads as a sentence on a card, with the exact command that runs; an owner-class card has the attention edge.
      Folded on the Requests page, it is one row: the sentence, what it allows, and its own Approve and Deny. -->

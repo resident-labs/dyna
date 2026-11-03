@@ -48,6 +48,7 @@ type client interface {
 	HostAdd(context.Context, contract.HostAddRequest) (contract.HostAddResponse, error)
 	HostSetLimits(context.Context, contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, error)
 	HostSet(context.Context, contract.HostSetRequest) (contract.HostSetResponse, error)
+	RoomSet(context.Context, contract.RoomSetRequest) (contract.RoomSetResponse, error)
 	HostRemove(context.Context, contract.HostRemoveRequest) (contract.HostRemoveResponse, error)
 	PoolAdd(context.Context, contract.PoolAddRequest) (contract.PoolAddResponse, error)
 	PoolList(context.Context, contract.PoolListRequest) (contract.PoolListResponse, error)
@@ -114,7 +115,7 @@ type requestType interface {
 		contract.SessionListRequest |
 		contract.SessionResponsibilitiesRequest |
 		contract.GoalSetRequest | contract.GoalListRequest | contract.GoalItemRequest | contract.GoalDoneRequest | contract.GoalJournalRequest |
-		contract.PoolAddRequest | contract.PoolListRequest | contract.PoolRemoveRequest | contract.RoomHostsRequest | contract.HostRemoveRequest | contract.HostSetRequest |
+		contract.PoolAddRequest | contract.PoolListRequest | contract.PoolRemoveRequest | contract.RoomHostsRequest | contract.HostRemoveRequest | contract.HostSetRequest | contract.RoomSetRequest |
 		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.HostexecStopRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostSetLimitsRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomDeleteRequest | contract.RoomRepoAddRequest | contract.RepoCISetRequest | contract.RoomReposRequest | contract.ComposeListRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.SessionRefreshRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest | contract.PrListRequest | contract.PrStatusRequest | contract.PrTrackRequest | contract.PrUntrackRequest
 }
 type responseType interface {
@@ -131,7 +132,7 @@ type responseType interface {
 		contract.SessionListResponse |
 		contract.SessionResponsibilitiesResponse |
 		contract.GoalSetResponse | contract.GoalListResponse | contract.GoalItemResponse | contract.GoalDoneResponse | contract.GoalJournalResponse |
-		contract.PoolAddResponse | contract.PoolListResponse | contract.PoolRemoveResponse | contract.RoomHostsResponse | contract.HostRemoveResponse | contract.HostSetResponse |
+		contract.PoolAddResponse | contract.PoolListResponse | contract.PoolRemoveResponse | contract.RoomHostsResponse | contract.HostRemoveResponse | contract.HostSetResponse | contract.RoomSetResponse |
 		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.HostexecStopResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.HostSetLimitsResponse | contract.HostListResponse | contract.RoomCreateResponse | contract.RoomDeleteResponse | contract.RoomRepoAddResponse | contract.RepoCISetResponse | contract.RoomReposResponse | contract.ComposeListResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.SessionRefreshResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse | contract.PrListResponse | contract.PrStatusResponse | contract.PrTrackResponse | contract.PrUntrackResponse
 }
 
@@ -266,6 +267,9 @@ func (c *socketClient) RoomCreate(ctx context.Context, q contract.RoomCreateRequ
 }
 func (c *socketClient) HostSetLimits(ctx context.Context, q contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, error) {
 	return call[contract.HostSetLimitsRequest, contract.HostSetLimitsResponse](ctx, c, contract.MethodHostSetLimits, q)
+}
+func (c *socketClient) RoomSet(ctx context.Context, q contract.RoomSetRequest) (contract.RoomSetResponse, error) {
+	return call[contract.RoomSetRequest, contract.RoomSetResponse](ctx, c, contract.MethodRoomSet, q)
 }
 func (c *socketClient) HostSet(ctx context.Context, q contract.HostSetRequest) (contract.HostSetResponse, error) {
 	return call[contract.HostSetRequest, contract.HostSetResponse](ctx, c, contract.MethodHostSet, q)
@@ -657,7 +661,19 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	limit.Flags().StringVar(&limitMem, "mem", "", "Memory limit; 0 means unlimited")
 	_ = limit.MarkFlagRequired("cpus")
 	_ = limit.MarkFlagRequired("mem")
-	room.AddCommand(limit, roomHostsCommand(getClient))
+	var rootApprovesHostexec string
+	setRoom := &cobra.Command{Use: "set ROOM --root-approves-hostexec on|off", Short: "Change a room setting", Long: "Change a room setting. With --root-approves-hostexec on, the room's root decides its sessions' host exec grant requests with op approve and op deny, as the owner can. It is off by default, and the request still waits for a decision.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		req := contract.RoomSetRequest{Room: contract.RoomID(args[0])}
+		var err error
+		if req.RootApprovesHostexec, err = hostSwitch("root-approves-hostexec", rootApprovesHostexec); err != nil {
+			return err
+		}
+		_, err = getClient().RoomSet(cmd.Context(), req)
+		return err
+	}}
+	setRoom.Flags().StringVar(&rootApprovesHostexec, "root-approves-hostexec", "", "on or off: whether the room's root may decide its sessions' host exec grant requests")
+	_ = setRoom.MarkFlagRequired("root-approves-hostexec")
+	room.AddCommand(limit, setRoom, roomHostsCommand(getClient))
 	var rootProfile string
 	create := &cobra.Command{Use: "create NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		r, err := getClient().RoomCreate(cmd.Context(), contract.RoomCreateRequest{Name: args[0], RootProfile: contract.ProfileName(rootProfile)})
