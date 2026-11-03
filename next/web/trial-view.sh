@@ -4,6 +4,8 @@
 # ~/.config/dyna-next/web-qa.url (0600); the view serves only the browser that opened that link.
 # The first run pairs a read-scope device named Web QA through the owner socket and keeps its cookie jar in a 0600 file.
 # The pairing code goes from the pair step to the redeem step on stdin only; nothing prints the code or the cookie.
+# The view carries the terminal's and the computer view's WebSockets too, which need the device's terminal and computers
+# scopes (vite.config.ts).
 set -euo pipefail
 cookie=$HOME/.config/dyna-next/web-qa.cookie
 trial=dyna.localhost:7790

@@ -1,5 +1,7 @@
 // A box desktop's live view: noVNC over the engine's WebSocket to the box's Xvnc (spec 5.14). Xvnc sends only the
-// regions that changed, the view asks for each picture, and noVNC draws the cursor itself.
+// regions that changed, and pushes them as continuous updates up to its frame cap, paced by fences, so the frame rate
+// does not fall with the round trip. Watching, Xvnc draws the pointer into the picture, so the owner sees where the
+// agent points; in control, noVNC draws the owner's own cursor in the browser.
 //
 // The view starts view only; the caller turns control on. While the picture moves it streams at JPEG quality 6, and
 // after 1.5 s still it asks for quality 9 and a full redraw, so still text is sharp: v1's Auto mode, ported from its
@@ -11,9 +13,13 @@ import type { RfbDecoder, RfbMessages } from "@novnc/novnc";
 type RfbClass = typeof import("@novnc/novnc").default;
 export type Rfb = InstanceType<RfbClass>;
 
-// The RFB pseudo-encoding that asks the server to push frames. The view leaves it out, so it requests each one and a slow
-// link gets fewer frames rather than a queue.
-const continuousUpdates = -313;
+// The cursor pseudo-encodings, VMware's and RFB's, which the view asks for only while it has control. Without them Xvnc
+// draws the pointer itself. Each socket keeps its own choice, as v1 kept each socket's encoding mode.
+const cursors = [0x574d5664, -239];
+const localCursor = new WeakMap<object, boolean>();
+export const drawCursor = (sock: object, local: boolean) => { localCursor.set(sock, local); };
+export const requestedEncodings = (sock: object, encodings: number[]): number[] =>
+  localCursor.get(sock) ? encodings : encodings.filter(e => !cursors.includes(e));
 const tight = 7;
 
 let loading: Promise<RfbClass> | undefined;
@@ -28,7 +34,7 @@ export function loadRFB(): Promise<RfbClass> {
     try {
       const RFB = (await import("@novnc/novnc")).default;
       const send = RFB.messages.clientEncodings;
-      RFB.messages.clientEncodings = (sock, encodings) => send.call(RFB.messages, sock, encodings.filter(e => e !== continuousUpdates));
+      RFB.messages.clientEncodings = (sock, encodings) => send.call(RFB.messages, sock, requestedEncodings(sock, encodings));
       return RFB;
     } finally {
       if (decoder && !("VideoDecoder" in window)) Object.defineProperty(window, "VideoDecoder", decoder);
@@ -231,6 +237,7 @@ export function openStream(target: HTMLElement, url: string, on: StreamEvents): 
   void loadRFB().then(RFB => {
     if (closed) return;
     const mine = rfb = new RFB(target, url, { shared: true });
+    drawCursor(mine._sock, control);
     instrument(mine);
     mine.viewOnly = !control;
     mine.focusOnClick = control;
@@ -256,6 +263,9 @@ export function openStream(target: HTMLElement, url: string, on: StreamEvents): 
       if (!rfb) return;
       rfb.viewOnly = !on;
       rfb.focusOnClick = on;
+      // Who draws the pointer changes with control; Xvnc takes new encodings on the open connection.
+      drawCursor(rfb._sock, on);
+      if (rfb._rfbConnectionState === "connected") rfb._sendEncodings();
       if (on) rfb.focus({ preventScroll: true });
       else rfb.blur();
     },
