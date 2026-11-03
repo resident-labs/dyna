@@ -14,15 +14,12 @@ type Runner interface {
 	Run(context.Context, []string, ...string) ([]byte, error)
 }
 
-// ErrImageChoice is a repository with several images and nothing to say which. A compose file chooses one with build.
-var ErrImageChoice = errors.New("the repository has several images, so a compose file must choose one")
-
 // imageBranch holds the images of a repository whose default branch must stay free of Dyna files,
 // such as a fork that mirrors its upstream.
 const imageBranch = "refs/heads/dyna-images"
 
-// Context reads a toolchain image from the mirrored default branch or the image branch: the one called wanted, or the sole
-// image when wanted is empty.
+// Context reads a repository's legacy toolchain image (.dyna/images) from the mirror, for the migration into room images (5.2):
+// from the mirrored default branch or the image branch, the one called wanted, or the sole image when wanted is empty.
 func Context(ctx context.Context, runner Runner, mirror, wanted string) (string, TreeID, []byte, []box.Need, error) {
 	name, tree, err := chooseImage(ctx, runner, mirror, wanted)
 	if err != nil || name == "" {
@@ -61,23 +58,6 @@ func ParseNeeds(text string) ([]box.Need, error) {
 		}
 	}
 	return needs, nil
-}
-
-// DefaultSize reads the size file of a toolchain image, chosen as in Context. It returns "" when there is none.
-func DefaultSize(ctx context.Context, runner Runner, mirror, wanted string) (string, error) {
-	name, tree, err := chooseImage(ctx, runner, mirror, wanted)
-	if errors.Is(err, ErrImageChoice) {
-		return "", nil // several images: no repository default
-	}
-	if err != nil || name == "" {
-		return "", err
-	}
-	out, err := runner.Run(ctx, nil, "--git-dir", mirror, "ls-tree", string(tree), "size")
-	if err != nil || len(out) == 0 {
-		return "", err
-	}
-	data, err := runner.Run(ctx, nil, "--git-dir", mirror, "show", string(tree)+":size")
-	return strings.TrimSpace(string(data)), err
 }
 
 // dynaFolder finds a folder of .dyna on the default branch, or else on the image branch. It returns "" when neither has it.

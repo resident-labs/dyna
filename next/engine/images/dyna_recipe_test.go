@@ -30,3 +30,14 @@ func TestDynaToolchainImageBuildUser(t *testing.T) {
 		t.Fatalf("box must run as node, got %q", user)
 	}
 }
+
+// The room image made from the repository's own folder passes the store's check, so `dyna image save` takes it.
+func TestDynaToolchainImagePassesTheStoreCheck(t *testing.T) {
+	recipe, err := os.ReadFile("../../../.dyna/images/dyna/Containerfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := checkRecipe(string(recipe), "DYNA_BASE"); err != nil {
+		t.Fatal(err)
+	}
+}
