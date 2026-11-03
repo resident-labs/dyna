@@ -572,7 +572,15 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 			}
 			event.Body = post
 		}
-		if post, ok := event.Body.(contract.PostCreated); ok && post.Source != nil {
+		var crossRoom bool
+		if event.From.Kind == contract.PrincipalSession {
+			var sourceRoom contract.RoomID
+			if err := tx.QueryRowContext(ctx, "SELECT room FROM sessions WHERE id=?", event.From.Session).Scan(&sourceRoom); err != nil {
+				return err
+			}
+			crossRoom = sourceRoom != event.Room
+		}
+		if post, ok := event.Body.(contract.PostCreated); ok && crossRoom {
 			var sourceRoom contract.RoomID
 			var sourceName contract.RoomName
 			var sessionName string
@@ -590,8 +598,13 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 			}
 			post.Source = &contract.PostSource{Room: sourceRoom, RoomName: sourceName, SessionName: sessionName}
 			event.Body = post
-		} else if err := routePost(ctx, tx, event.From, deliveries); err != nil {
-			return err
+		} else {
+			if post, ok := event.Body.(contract.PostCreated); ok && post.Source != nil {
+				return &ChainError{Message: "invalid cross-room source"}
+			}
+			if err := routePost(ctx, tx, event.From, deliveries); err != nil {
+				return err
+			}
 		}
 		for _, delivery := range deliveries {
 			if delivery.To.Kind != contract.PrincipalSession {

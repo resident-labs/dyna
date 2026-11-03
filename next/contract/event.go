@@ -62,13 +62,14 @@ type SessionProfileChanged struct {
 func (SessionProfileChanged) EventType() EventType { return "session.profile_changed" }
 func (SessionProfileChanged) isEventBody()         {}
 
-// PostCreated is a post in a room.
+// PostSource identifies a cross-room post's author after its room is removed.
 type PostSource struct {
 	Room        RoomID   `json:"room"`
 	RoomName    RoomName `json:"roomName"`
 	SessionName string   `json:"sessionName"`
 }
 
+// PostCreated is a post in a room.
 type PostCreated struct {
 	Source      *PostSource  `json:"source,omitempty"` // immutable identity for a cross-room post
 	Text        string       `json:"text"`
