@@ -45,11 +45,42 @@ func desktopArgs(socket string) []string {
 		"-AlwaysShared", "-AcceptSetDesktopSize=0", "-FrameRate", "60", "-extension", "GLX"}
 }
 
+// Profile is Chromium's profile, in the box's volume, so it lasts across restarts.
+const Profile = "/box/computer"
+
 // browserArgs open Chromium in a window on the display, with DevTools on the port the agent's actions use.
-var browserArgs = []string{
-	"--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9222", "--user-data-dir=/box/computer",
-	"--disable-dev-shm-usage", "--no-first-run", "--no-default-browser-check", "--password-store=basic",
-	"--hide-crash-restore-bubble", "--start-maximized", "about:blank",
+func browserArgs(profile string) []string {
+	return []string{
+		"--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9222", "--user-data-dir=" + profile,
+		"--disable-dev-shm-usage", "--no-first-run", "--no-default-browser-check", "--password-store=basic",
+		"--hide-crash-restore-bubble", "--start-maximized", "about:blank",
+	}
+}
+
+// clearProfileLock removes the lock a killed Chromium leaves in its profile, unless a Chromium on this host still holds
+// it. The lock names the host and process that took it, and a restarted box is another container with another
+// hostname, so Chromium takes the old lock for another computer's and asks whether to unlock it instead of starting.
+// Its cookie and socket go with it. The caller has no Chromium of the desktop running.
+func clearProfileLock(profile string) error {
+	lock := filepath.Join(profile, "SingletonLock")
+	owner, err := os.Readlink(lock)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err == nil {
+		host, _ := os.Hostname()
+		if at := strings.LastIndex(owner, "-"); at > 0 && owner[:at] == host {
+			if pid, err := strconv.Atoi(owner[at+1:]); err == nil && syscall.Kill(pid, 0) == nil {
+				return nil
+			}
+		}
+	}
+	for _, name := range []string{"SingletonLock", "SingletonCookie", "SingletonSocket"} {
+		if err := os.Remove(filepath.Join(profile, name)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 // cgroup moves the agent out of the root and creates a half-memory child.
@@ -134,12 +165,15 @@ type Process struct {
 	root    string // the box's cgroup
 	socket  string // the display's VNC socket; the window manager's config goes beside it
 	tmp     string // where X keeps its lock and socket
+	profile string // Chromium's profile
 	once    sync.Once
 	group   *os.File
 	notify  func(bool)
 }
 
-func NewProcess() *Process { return &Process{root: "/sys/fs/cgroup", socket: VNCSocket, tmp: "/tmp"} }
+func NewProcess() *Process {
+	return &Process{root: "/sys/fs/cgroup", socket: VNCSocket, tmp: "/tmp", profile: Profile}
+}
 
 func (p *Process) setup() {
 	p.once.Do(func() {
@@ -174,7 +208,9 @@ func (p *Process) Start(ctx context.Context) (string, error) {
 		}
 	}
 	if err == nil && p.browser == nil {
-		p.browser, err = p.spawn(ctx, os.Stderr, "chromium", browserArgs...)
+		if err = clearProfileLock(p.profile); err == nil {
+			p.browser, err = p.spawn(ctx, os.Stderr, "chromium", browserArgs(p.profile)...)
+		}
 	}
 	if err != nil {
 		p.exit = report
