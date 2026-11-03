@@ -402,6 +402,8 @@ func (devService) ComputerStart(context.Context, contract.Principal, contract.Co
 
 type profiles struct{ empty bool }
 
+func (p profiles) TextOnlyModels() []contract.TextOnlyModel { return nil }
+
 func (p profiles) List() []contract.ProfileSummary {
 	// Invented models, so the session profile menu has choices. Model still runs every profile on the fake harness.
 	list := []contract.ProfileSummary{{Name: "fake", Provider: contract.ModelProviderAnthropic, Model: "claude-sonnet-5-5", Thinking: contract.ThinkingMedium},
