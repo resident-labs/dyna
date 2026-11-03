@@ -95,6 +95,13 @@ type SkillSaveInput struct {
 	RootOnly bool            `json:"rootOnly,omitempty" desc:"Only root sessions' boxes get it."`
 }
 
+// ImageSaveInput is what a caller names. A box reads the folder itself, so the engine gets its archive.
+type ImageSaveInput struct {
+	Name string          `json:"name"`
+	Path string          `json:"path" desc:"The image's folder, with its Containerfile; absolute, or relative to your working directory."`
+	Room contract.RoomID `json:"room,omitempty"`
+}
+
 type FileRequest struct {
 	File string `json:"file" desc:"Absolute, or relative to your working directory."`
 }
