@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	stdlog "log"
@@ -297,8 +298,11 @@ func (s *localStack) stream(url, key, body, first string) string {
 			released = true
 			s.provider.arrived <- struct{}{}
 		}
-		if err != nil {
+		if errors.Is(err, io.EOF) {
 			break
+		}
+		if err != nil {
+			s.t.Fatalf("stream cut off: %v, after %s", err, all.String())
 		}
 	}
 	if !released {
@@ -495,6 +499,26 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+// serveForTest runs serveModelRoute over a stand-in for the owner socket and returns its address.
+func serveForTest(t *testing.T, transport http.RoundTripper) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		_ = serveModelRoute(ctx, listener, transport)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-served
+	})
+	return listener.Addr().String()
+}
+
 // The forwarder must not read the harness's connection while the reply streams back: the server closes
 // that body when the first chunk goes out, and the transport would close the owner socket under the reply.
 func TestServeModelRouteUploadsBeforeTheReplyStarts(t *testing.T) {
@@ -511,21 +535,8 @@ func TestServeModelRouteUploadsBeforeTheReplyStarts(t *testing.T) {
 		}()
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: reply}, nil
 	})
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	served := make(chan struct{})
-	go func() {
-		defer close(served)
-		_ = serveModelRoute(ctx, listener, transport)
-	}()
-	defer func() {
-		cancel()
-		<-served
-	}()
-	res, err := http.Post("http://"+listener.Addr().String()+"/model/v1/messages", "application/json", strings.NewReader(`{"model":"m"}`))
+	address := serveForTest(t, transport)
+	res, err := http.Post("http://"+address+"/model/v1/messages", "application/json", strings.NewReader(`{"model":"m"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -541,3 +552,48 @@ func TestServeModelRouteUploadsBeforeTheReplyStarts(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Only a request over the cap is too large. One cut short by its sender is a bad request, and neither reaches the engine.
+func TestServeModelRouteRefusesWhatItCannotReadInFull(t *testing.T) {
+	var calls atomic.Int64
+	address := serveForTest(t, roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return nil, errors.New("reached the owner socket")
+	}))
+
+	res, err := http.Post("http://"+address+"/model/v1/messages", "application/json", io.LimitReader(zeroReader{}, maxLocalRequestBytes+1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("a request over the cap: %d", res.StatusCode)
+	}
+
+	conn, err := net.Dial("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := fmt.Fprint(conn, "POST /model/v1/messages HTTP/1.1\r\nHost: x\r\nContent-Length: 100\r\n\r\n{\"model\""); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.(*net.TCPConn).CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	cut, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cut.Body.Close()
+	if cut.StatusCode != http.StatusBadRequest {
+		t.Fatalf("a request cut short: %d", cut.StatusCode)
+	}
+	if calls.Load() != 0 {
+		t.Fatal("an unread request reached the owner socket")
+	}
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) { clear(p); return len(p), nil }
