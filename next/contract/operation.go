@@ -43,6 +43,8 @@ type Card struct {
 	Target  Target   `json:"target"`
 	Changes []Change `json:"changes,omitempty"`
 	Command []string `json:"command,omitempty"` // argv, for host exec
+	// RootOnly says the card names a root-only add-on, so only the owner and root sessions read it.
+	RootOnly bool `json:"rootOnly,omitempty"`
 }
 
 type Target struct {
