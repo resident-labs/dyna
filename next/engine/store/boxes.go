@@ -198,6 +198,7 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 			return nil
 		}
 		b.State = state
+		cause := event.Body.(contract.BoxChanged).Cause
 		to := state
 		reason := ""
 		if failure != "" {
@@ -219,7 +220,7 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 				return err
 			}
 			body.Cause = event.Body.(contract.BoxChanged).Cause
-			if to == contract.BoxFailed {
+			if to == contract.BoxFailed && body.Cause == "" {
 				body.Cause = contract.CauseCreateFailed
 			}
 			event.Body = body
@@ -239,7 +240,7 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 		}
 		// Count completed failed creations, not their retry attempts. The generation fences
 		// a result that was already in flight when the owner cleared the problem.
-		if failure == "" || to == contract.BoxFailed {
+		if failure == "" || to == contract.BoxFailed && cause == contract.CauseCreateFailed {
 			_, err = tx.ExecContext(ctx, `UPDATE hosts SET
 				create_failures=CASE WHEN ?='' THEN 0 ELSE create_failures+1 END,
 				create_problem=CASE WHEN ?='' THEN '' WHEN create_failures+1>=3 THEN 'create_failed' ELSE create_problem END
