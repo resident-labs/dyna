@@ -130,6 +130,7 @@ func registry() ([]tool, map[string]map[string]action, error) {
 		}
 		readOnly := true
 		props := map[string]schema{}
+		takers := map[string][]string{} // the actions that take each property
 		for verb := range actions[name] {
 			verbs = append(verbs, verb)
 		}
@@ -143,6 +144,15 @@ func registry() ([]tool, map[string]map[string]action, error) {
 					return nil, nil, fmt.Errorf("%s.%s: incompatible property %s", name, verb, key)
 				}
 				props[key] = value
+				takers[key] = append(takers[key], verb)
+			}
+		}
+		// The actions share one schema, and each decodes strictly, so a property that only some take says which.
+		for key, by := range takers {
+			if len(by) < len(verbs) {
+				prop := props[key]
+				prop.Description = strings.TrimSpace(prop.Description + " For " + listWords(by) + ".")
+				props[key] = prop
 			}
 		}
 		props["action"] = schema{Type: "string", Enum: verbs}
@@ -153,4 +163,12 @@ func registry() ([]tool, map[string]map[string]action, error) {
 		result = append(result, tool{Name: name, Title: metadata.Title, Description: strings.Join(help, "\n"), InputSchema: schema{Type: "object", Properties: props, Required: required}, Annotations: annotations{ReadOnly: readOnly, Destructive: metadata.Destructive, Idempotent: metadata.Idempotent, OpenWorld: metadata.OpenWorld}})
 	}
 	return result, actions, nil
+}
+
+// listWords joins words as a sentence does: "a", "a and b", "a, b and c".
+func listWords(words []string) string {
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
 }
