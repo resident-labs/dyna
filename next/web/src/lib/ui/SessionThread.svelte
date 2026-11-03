@@ -282,10 +282,10 @@
 {/snippet}
 
 <!-- Another speaker mirrors the owner's bubble from the left. Attachments stay in view, so a message with them never folds. -->
-{#snippet inbound(key: string, from: Principal, at: string, body: Snippet, whole: boolean)}
-  {@const name = sender(from.kind, from.session)}
+{#snippet inbound(key: string, from: Principal, at: string, body: Snippet, whole: boolean, source?: TranscriptInput["source"])}
+  {@const name = source ? `${source.roomName}:${source.sessionName}` : sender(from.kind, from.session)}
   <div class="agent-input" data-media-key={key}>
-    <div class="agent-sender"><Avatar kind={from.kind} {name} size={20} />{#if from.session}<a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(from.session)}`} onclick={navigate} style:--hue={hue(name)}>{name}</a>{:else}<strong>{name}</strong>{/if}<time datetime={at}>{formatTime(at)}</time></div>
+    <div class="agent-sender"><Avatar kind={from.kind} {name} size={20} />{#if from.session}<a href={`/r/${encodeURIComponent(source?.room ?? store.room)}/s/${encodeURIComponent(from.session)}`} onclick={navigate} style:--hue={hue(name)}>{name}</a>{:else}<strong>{name}</strong>{/if}<time datetime={at}>{formatTime(at)}</time></div>
     {#if whole}{@render body()}{:else}<CollapsibleBody>{@render body()}</CollapsibleBody>{/if}
   </div>
 {/snippet}
@@ -316,15 +316,15 @@
     {@render textRetry(turn, part)}
   {/snippet}
   {#if shown.kind !== "message"}
-    {@const name = input.from.session ? sender("session", input.from.session) : undefined}
+    {@const name = input.source ? `${input.source.roomName}:${input.source.sessionName}` : input.from.session ? sender("session", input.from.session) : undefined}
     <div class="muted turn-note input-line" class:failure={shown.kind === "failed"} title={formatTime(input.at)}>
       <span class="slot"><Icon name={shown.kind === "failed" ? "warning" : "inbox"} size={14} /></span>
-      {#if name}<span class="agent-sender"><a href={`/r/${encodeURIComponent(store.room)}/s/${encodeURIComponent(input.from.session ?? "")}`} onclick={navigate} style:--hue={hue(name)}>{name}</a></span>{/if}
+      {#if name}<span class="agent-sender"><a href={`/r/${encodeURIComponent(input.source?.room ?? store.room)}/s/${encodeURIComponent(input.from.session ?? "")}`} onclick={navigate} style:--hue={hue(name)}>{name}</a></span>{/if}
       <span>{shown.text}</span>
     </div>
     {@render textRetry(turn, part)}
   {:else if input.from.kind === "owner"}{@render ownerMessage(key, input.at, false, body)}
-  {:else}{@render inbound(key, input.from, input.at, body, !!input.attachments?.length)}{/if}
+  {:else}{@render inbound(key, input.from, input.at, body, !!input.attachments?.length, input.source)}{/if}
 {/snippet}
 
 {#snippet dayMark(at: string, before?: string)}
@@ -384,7 +384,7 @@
       {#snippet queued()}<p class="owner-note queued">Queued</p>{/snippet}
       {#if post.from.kind === "owner"}{@render ownerMessage(post.id, post.at, false, body, closed ? undefined : queued)}
       {:else if post.from.kind === "session" && post.from.session === session}<div class="agent-message" data-media-key={post.id}>{@render body()}</div>
-      {:else}{@render inbound(post.id, post.from, post.at, body, !!post.body.attachments?.length)}{/if}
+      {:else}{@render inbound(post.id, post.from, post.at, body, !!post.body.attachments?.length, post.body.source)}{/if}
     {/each}
     {#each pendingPosts as post (post.id)}
       {#snippet body()}{@render message(pendingKey(post.id), post.request.text, post.request.attachments)}{/snippet}
