@@ -383,7 +383,7 @@ func (s *Store) ApplyPRPoll(ctx context.Context, pass GitHubPass, at time.Time) 
 		for _, group := range batches {
 			var body interface {
 				contract.EventBody
-				Waking() bool
+				WakesOwner() bool
 			} = contract.IssueChanged{Session: group.session, Changes: group.issues}
 			if len(group.changes) > 0 {
 				body = contract.PrChanged{Session: group.session, Changes: group.changes, Issues: group.issues}
@@ -392,7 +392,7 @@ func (s *Store) ApplyPRPoll(ctx context.Context, pass GitHubPass, at time.Time) 
 			if err != nil {
 				return err
 			}
-			if body.Waking() {
+			if body.WakesOwner() {
 				if err := s.InsertDelivery(ctx, tx, seq, body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: group.session}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}); err != nil {
 					return err
 				}

@@ -77,14 +77,14 @@ func TestCompareTellsACIResultOncePerHead(t *testing.T) {
 		t.Fatalf("a rerun that failed again woke: %+v", update.Change)
 	}
 	moved := observed(func(o *Observed) { o.Head, o.CI = "b", contract.PrCIFailure })
-	if update, _ := ComparePR(row, nil, nil, moved, "me", at); update.Change == nil || !slices.Equal(update.Change.Kinds, []contract.PrChangeKind{contract.PrChangeCIFailed}) {
+	if update, _ := ComparePR(row, nil, nil, moved, "me", at); update.Change == nil || !slices.Equal(update.Change.Kinds, []contract.PrChangeKind{contract.PrChangeCIFailed, contract.PrChangePushed}) {
 		t.Fatalf("a new head's failure stayed quiet: %+v", update.Change)
 	}
 }
 
 func TestCompareMovesStateWithoutWaking(t *testing.T) {
 	update, moved := ComparePR(tracked(nil), nil, nil, observed(func(o *Observed) { o.Head, o.CI = "b", contract.PrCIPending }), "me", at)
-	if !moved || update.Change == nil || len(update.Change.Kinds) != 0 || update.PR.CI != contract.PrCIPending {
+	if !moved || update.Change == nil || !slices.Equal(update.Change.Kinds, []contract.PrChangeKind{contract.PrChangePushed}) || *update.Change.Push != (contract.PrPush{Before: "a", After: "b"}) || update.PR.CI != contract.PrCIPending {
 		t.Fatalf("moved %v update %+v", moved, update)
 	}
 }

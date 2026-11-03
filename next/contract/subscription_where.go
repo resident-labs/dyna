@@ -15,6 +15,7 @@ type EventFields struct {
 	Author string
 	Actor  string
 	Label  string
+	Kind   string // one PrChangeKind of a change, such as pushed
 	Text   string
 }
 
@@ -33,6 +34,8 @@ func (f EventFields) value(key string) string {
 		return f.Actor
 	case "label":
 		return f.Label
+	case "kind":
+		return f.Kind
 	}
 	return f.Text
 }
@@ -45,8 +48,13 @@ func itemFields(item GitHubItem) EventFields {
 	return fields
 }
 
-func changeFields(base EventFields, actions []GitHubItem, comments []PrComment) []EventFields {
+func changeFields(base EventFields, kinds []PrChangeKind, actions []GitHubItem, comments []PrComment) []EventFields {
 	out := []EventFields{base}
+	for _, kind := range kinds {
+		fields := base
+		fields.Kind = string(kind)
+		out = append(out, fields)
+	}
 	for _, action := range actions {
 		fields := itemFields(action)
 		fields.Repo, fields.Number, fields.Author = base.Repo, base.Number, base.Author
@@ -70,12 +78,12 @@ func Fields(body EventBody) []EventFields {
 		out = append(out, EventFields{Repo: b.Repo})
 	case PrChanged:
 		for _, change := range b.Changes {
-			out = append(out, changeFields(EventFields{Repo: change.PR.Repo, Number: change.PR.Number, Author: change.PR.Author}, change.Actions, change.Comments)...)
+			out = append(out, changeFields(EventFields{Repo: change.PR.Repo, Number: change.PR.Number, Author: change.PR.Author}, change.Kinds, change.Actions, change.Comments)...)
 		}
 		out = append(out, Fields(IssueChanged{Changes: b.Issues})...)
 	case IssueChanged:
 		for _, change := range b.Changes {
-			out = append(out, changeFields(EventFields{Repo: change.Issue.Repo, Number: change.Issue.Number, Author: change.Issue.Author}, change.Actions, change.Comments)...)
+			out = append(out, changeFields(EventFields{Repo: change.Issue.Repo, Number: change.Issue.Number, Author: change.Issue.Author}, change.Kinds, change.Actions, change.Comments)...)
 		}
 	}
 	return out
@@ -84,7 +92,7 @@ func Fields(body EventBody) []EventFields {
 // whereClause is one parsed line of a Where.
 type whereClause struct{ key, op, value string }
 
-var whereKeys = []string{"repo", "number", "author", "actor", "label"}
+var whereKeys = []string{"repo", "number", "author", "actor", "label", "kind"}
 
 func parseWhere(text string) (whereClause, error) {
 	if value, ok := strings.CutPrefix(text, "text~"); ok && value != "" {
