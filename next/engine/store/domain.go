@@ -572,7 +572,25 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 			}
 			event.Body = post
 		}
-		if err := routePost(ctx, tx, event.From, deliveries); err != nil {
+		if post, ok := event.Body.(contract.PostCreated); ok && post.Source != nil {
+			var sourceRoom contract.RoomID
+			var sourceName contract.RoomName
+			var sessionName string
+			var parent sql.NullString
+			err := tx.QueryRowContext(ctx, `SELECT s.room,r.name,s.name,s.parent FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=? AND s.closed_at IS NULL AND r.state='open'`, event.From.Session).Scan(&sourceRoom, &sourceName, &sessionName, &parent)
+			if err != nil {
+				return err
+			}
+			var target contract.SessionID
+			if err := tx.QueryRowContext(ctx, `SELECT id FROM sessions WHERE room=? AND parent IS NULL AND closed_at IS NULL`, event.Room).Scan(&target); err != nil {
+				return err
+			}
+			if event.From.Kind != contract.PrincipalSession || parent.Valid || sourceRoom == event.Room || len(deliveries) != 1 || deliveries[0].To.Session != target || deliveries[0].To.Kind != contract.PrincipalSession || deliveries[0].Surface != contract.SurfaceFeed || deliveries[0].Reply.Kind != contract.ReplyPost || len(post.Mentions) != 1 || post.Mentions[0] != deliveries[0].To || post.Home.Kind != contract.ConversationFeed || post.Home.Session != "" || post.ReplyTo != "" || len(post.Attachments) != 0 || strings.TrimSpace(post.Text) == "" || visualUpdate != "" || visualReply != "" {
+				return &ChainError{Message: "cross-room posts may only address another room's root in its feed"}
+			}
+			post.Source = &contract.PostSource{Room: sourceRoom, RoomName: sourceName, SessionName: sessionName}
+			event.Body = post
+		} else if err := routePost(ctx, tx, event.From, deliveries); err != nil {
 			return err
 		}
 		for _, delivery := range deliveries {
