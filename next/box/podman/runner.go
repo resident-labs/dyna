@@ -35,8 +35,9 @@ const (
 	// cacheMount is where a runner reads the host's cache, the folder the host's boxes mount at /box/cache. It writes only its
 	// slot's build folder there, which outlives the job, as upstream projects keep CARGO_TARGET_DIR on their own runners.
 	cacheMount = "/cache"
-	// buildMount is where a runner writes its slot's build folder. It is one path for every slot because sccache's keys hold the
-	// paths a build hands the compiler, such as CARGO_HOME, so a job finds what another slot's job compiled.
+	// buildMount is where a runner writes its slot's build folder, one path for every slot. sccache's keys hold the paths a
+	// build hands the compiler, so the folder's cargo and target folders are mounted again where a box has them, and a job and
+	// a box each hit what the other compiled.
 	buildMount = "/build"
 	// buildCacheMount holds the socket of the host's compiler cache, which the entrypoint relays to the port sccache uses.
 	buildCacheMount = "/run/dyna-build-cache"
@@ -48,14 +49,15 @@ const (
 func buildFolder(slot int) string { return path.Join("ci", strconv.Itoa(slot)) }
 
 // buildScript makes a slot's build folder, owned by the runner's user, and empties it when it has grown past cacheLimitKB. du
-// and rm run in Podman's user namespace, where the job's files live.
+// and rm run in Podman's user namespace, where the job's files live. Its cargo and target folders are mounts of their own.
 const buildScript = `b="$1"; limit="$2"
 mkdir -p -- "$b"
 # The runner's user must pass through the cache root and ci/ to reach its folder; a box may have made them 700.
 chmod a+rx -- "$(dirname -- "$(dirname -- "$b")")" "$(dirname -- "$b")"
-podman unshare chown 1001:1001 "$b"
 kb=$(podman unshare du -sk "$b" | cut -f1)
-if [ "$kb" -gt "$limit" ]; then podman unshare find "$b" -mindepth 1 -delete; fi`
+if [ "$kb" -gt "$limit" ]; then podman unshare find "$b" -mindepth 1 -delete; fi
+podman unshare mkdir -p -- "$b/cargo" "$b/target"
+podman unshare chown 1001:1001 "$b" "$b/cargo" "$b/target"`
 
 // BuildRunnerImage builds or reuses the runner image, and drops any older one.
 func (h *Host) BuildRunnerImage(ctx context.Context) (string, error) {
@@ -133,7 +135,9 @@ func runnerArgs(s box.RunnerSpec) []string {
 	// tmpfs pages count against the memory limit, so one job can never hold more than that. Leaving
 	// a quarter for processes means a full disk is an ordinary write error, not an OOM kill.
 	disk := fmt.Sprintf("size=%d", s.Size.MemBytes/4*3)
-	build := buildFolder(s.Slot)
+	build := filepath.Join(s.Cache, buildFolder(s.Slot))
+	work, _ := box.RepoFolder(s.Repo) // StartRunner checked the name
+	target := path.Join(work, "target")
 	return []string{"podman", "--cgroup-manager=systemd", "run", "--detach", "--rm", runnerLimit, "--name", s.Name,
 		"--label", ciLabel + "=runner", "--label", runnerRepoLabel + "=" + string(s.Repo), "--label", runnerIDLabel + "=" + strconv.FormatInt(s.ID, 10),
 		"--label", runnerSlotLabel + "=" + strconv.Itoa(s.Slot), "--label", runnerSizeLabel + "=" + string(s.Size.Name),
@@ -147,18 +151,25 @@ func runnerArgs(s box.RunnerSpec) []string {
 		"--mount", fmt.Sprintf("type=volume,source=%s,destination=%s,subpath=%d,ro", egressName, egressMount, s.Slot),
 		// The host's cache is read-only, so a job cannot change the boxes' files, and its slot's folder alone is writable.
 		"--mount", fmt.Sprintf("type=bind,source=%s,destination=%s,ro", s.Cache, cacheMount),
-		"--mount", fmt.Sprintf("type=bind,source=%s,destination=%s", filepath.Join(s.Cache, build), buildMount),
+		"--mount", fmt.Sprintf("type=bind,source=%s,destination=%s", build, buildMount),
+		"--mount", fmt.Sprintf("type=bind,source=%s,destination=%s", filepath.Join(build, "cargo"), box.CargoHome),
+		"--mount", fmt.Sprintf("type=bind,source=%s,destination=%s", filepath.Join(build, "target"), target),
 		// The compiler cache is the boxes' too, so a job writes what they read, which spec 5.6 accepts.
 		"--mount", fmt.Sprintf("type=bind,source=%s,destination=%s,ro", s.BuildCache, buildCacheMount),
 		"--log-driver=k8s-file", "--log-opt=max-size=1m",
 		"--env", "ACTIONS_RUNNER_INPUT_JITCONFIG", "--env", "DYNA_CI_REPO=" + string(s.Repo),
 		"--env", "DYNA_CI_CACHE=" + cacheMount, "--env", "DYNA_CI_BUILD=" + buildMount,
+		// A box of this repository sets the same two, and no other CARGO_ variable, which sccache hashes too.
+		"--env", "CARGO_HOME=" + box.CargoHome, "--env", "CARGO_TARGET_DIR=" + target,
 		s.Image}
 }
 
 // StartRunner starts one ephemeral runner. It is gone when its job ends.
 func (h *Host) StartRunner(ctx context.Context, s box.RunnerSpec) error {
-	if s.Name == "" || strings.HasPrefix(s.Name, "-") || s.Repo == "" || s.Image == "" || s.Config == "" || strings.ContainsAny(s.Config, "\n\x00") || s.Slot < 0 || s.Slot >= box.RunnerSlots {
+	if _, err := box.RepoFolder(s.Repo); err != nil {
+		return errors.New("invalid runner")
+	}
+	if s.Name == "" || strings.HasPrefix(s.Name, "-") || s.Image == "" || s.Config == "" || strings.ContainsAny(s.Config, "\n\x00") || s.Slot < 0 || s.Slot >= box.RunnerSlots {
 		return errors.New("invalid runner")
 	}
 	if _, sized := box.Size(s.Size.Name); !sized || !filepath.IsAbs(s.Cache) || strings.ContainsAny(s.Cache, ",=\n\x00") || !filepath.IsAbs(s.BuildCache) || strings.ContainsAny(s.BuildCache, ",=\n\x00") {
