@@ -11,6 +11,7 @@ type BoxSpec struct {
 	Box     contract.BoxID
 	Session contract.SessionID
 	Room    contract.RoomID
+	Root    bool // the session has no parent, so its box mounts the root-only add-ons; the runtime sets it
 	Host    contract.HostName
 	Slice   string
 	Size    contract.BoxSize

@@ -12,13 +12,15 @@ import (
 
 // addonFlags are the flags of every change: the room is the default, and in a box it is the box's own.
 type addonFlags struct {
-	room   string
-	global bool
+	room     string
+	global   bool
+	rootOnly bool
 }
 
 func (f *addonFlags) bind(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&f.room, "room", "", "the room, which a box already knows")
 	cmd.Flags().BoolVar(&f.global, "global", false, "every room; a session's request waits for the owner")
+	cmd.Flags().BoolVar(&f.rootOnly, "root-only", false, "only root sessions' boxes get it")
 }
 
 func describeChange(cmd *cobra.Command, result contract.AddonChangeResponse) {
@@ -51,6 +53,9 @@ func describeAddon(item contract.Addon) string {
 	state := "on"
 	if item.Disabled {
 		state = "off"
+	}
+	if item.RootOnly {
+		state += " (root only)"
 	}
 	return strings.Join([]string{item.Name, scope, state, item.By, what}, "\t")
 }
@@ -102,7 +107,7 @@ func addonCommands(get func() *socketClient) []*cobra.Command {
 	var packageFlags addonFlags
 	packageAdd := &cobra.Command{Use: "add SOURCE", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		return change(cmd.Context(), cmd, func(ctx context.Context) (contract.AddonChangeResponse, error) {
-			return call[contract.PackageAddRequest, contract.AddonChangeResponse](ctx, get(), contract.MethodPackageAdd, contract.PackageAddRequest{Source: args[0], Room: contract.RoomID(packageFlags.room), Global: packageFlags.global})
+			return call[contract.PackageAddRequest, contract.AddonChangeResponse](ctx, get(), contract.MethodPackageAdd, contract.PackageAddRequest{Source: args[0], Room: contract.RoomID(packageFlags.room), Global: packageFlags.global, RootOnly: packageFlags.rootOnly})
 		})
 	}}
 	packageFlags.bind(packageAdd)
@@ -115,6 +120,7 @@ func addonCommands(get func() *socketClient) []*cobra.Command {
 		if err != nil {
 			return err
 		}
+		req.RootOnly = skillFlags.rootOnly
 		return change(cmd.Context(), cmd, func(ctx context.Context) (contract.AddonChangeResponse, error) {
 			return call[contract.SkillSaveRequest, contract.AddonChangeResponse](ctx, get(), contract.MethodSkillSave, req)
 		})
@@ -125,7 +131,7 @@ func addonCommands(get func() *socketClient) []*cobra.Command {
 	mcp := &cobra.Command{Use: "mcp", Short: "MCP servers, beside dyna and shell"}
 	var mcpFlags addonFlags
 	mcpAdd := &cobra.Command{Use: "add NAME URL_OR_COMMAND [ARGS...]", Short: "Add a server. Put -- before a command with flags of its own.", Args: cobra.MinimumNArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
-		req := contract.MCPAddRequest{Name: args[0], Room: contract.RoomID(mcpFlags.room), Global: mcpFlags.global}
+		req := contract.MCPAddRequest{Name: args[0], Room: contract.RoomID(mcpFlags.room), Global: mcpFlags.global, RootOnly: mcpFlags.rootOnly}
 		if strings.HasPrefix(args[1], "https://") || strings.HasPrefix(args[1], "http://") {
 			req.URL = args[1]
 		} else {

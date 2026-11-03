@@ -219,3 +219,12 @@ func TestAHostSkillSaysWhereItsCommandsRun(t *testing.T) {
 		t.Fatalf("%q %v", plain, err)
 	}
 }
+
+func TestOnlyARootBoxReadsTheRootOnlyBundles(t *testing.T) {
+	if got := roomAddons(false).Bundles; len(got) != 2 || strings.Contains(strings.Join(got, " "), "root-addons") {
+		t.Fatalf("%v", got)
+	}
+	if got := roomAddons(true).Bundles; len(got) != 4 || !strings.Contains(strings.Join(got, " "), "/run/dyna/root-addons/room/") {
+		t.Fatalf("%v", got)
+	}
+}

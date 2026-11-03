@@ -88,6 +88,10 @@ func (f *Files) put(room contract.RoomID, item contract.Addon) error {
 	if err != nil {
 		return err
 	}
+	// A replacement keeps the mark: only SetRootOnly, the owner's, takes it off.
+	if i := slices.IndexFunc(items, same(item.Kind, item.Name)); i >= 0 {
+		item.RootOnly = item.RootOnly || items[i].RootOnly
+	}
 	return f.write(room, append(slices.DeleteFunc(items, same(item.Kind, item.Name)), item))
 }
 
@@ -143,6 +147,22 @@ func (f *Files) Remove(room contract.RoomID, kind contract.AddonKind, name strin
 	return f.write(room, slices.DeleteFunc(items, same(kind, name)))
 }
 
+// SetRootOnly marks an item for root sessions' boxes only, or for every box again.
+func (f *Files) SetRootOnly(room contract.RoomID, kind contract.AddonKind, name string, rootOnly bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	items, _, err := f.read(room)
+	if err != nil {
+		return err
+	}
+	i := slices.IndexFunc(items, same(kind, name))
+	if i < 0 {
+		return ErrMissing
+	}
+	items[i].RootOnly = rootOnly
+	return f.write(room, items)
+}
+
 // SetEnabled turns an item on or off.
 func (f *Files) SetEnabled(room contract.RoomID, kind contract.AddonKind, name string, enabled bool) error {
 	f.mu.Lock()
@@ -159,9 +179,10 @@ func (f *Files) SetEnabled(room contract.RoomID, kind contract.AddonKind, name s
 	return f.write(room, items)
 }
 
-// Bundle packs what a box of this scope gets: the list of enabled items and their skill folders. It is nil for a scope
-// that has never held anything, so such a scope mirrors nothing, and a scope emptied later mirrors an empty list.
-func (f *Files) Bundle(room contract.RoomID) ([]byte, error) {
+// Bundle packs what a box of this scope gets: the list of enabled items and their skill folders. Root-only items go in
+// the root bundle and never in the other, which every box mounts. It is nil for a scope that has never held anything,
+// so such a scope mirrors nothing, and a scope emptied later mirrors an empty list.
+func (f *Files) Bundle(room contract.RoomID, rootOnly bool) ([]byte, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	items, found, err := f.read(room)
@@ -169,7 +190,7 @@ func (f *Files) Bundle(room contract.RoomID) ([]byte, error) {
 		return nil, err
 	}
 	archive := skills.NewArchive()
-	enabled := slices.DeleteFunc(items, func(item contract.Addon) bool { return item.Disabled })
+	enabled := slices.DeleteFunc(items, func(item contract.Addon) bool { return item.Disabled || item.RootOnly != rootOnly })
 	list, err := json.Marshal(skills.List{Items: enabled})
 	if err != nil {
 		return nil, err

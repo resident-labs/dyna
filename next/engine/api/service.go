@@ -140,6 +140,7 @@ type Service interface {
 	SubscriptionSetEnabled(context.Context, contract.Principal, contract.SubscriptionSetEnabledRequest) (contract.SubscriptionSetEnabledResponse, *contract.Error)
 	AddonList(context.Context, contract.Principal, contract.AddonListRequest) (contract.AddonListResponse, *contract.Error)
 	AddonSetEnabled(context.Context, contract.Principal, contract.AddonSetEnabledRequest) (contract.AddonSetEnabledResponse, *contract.Error)
+	AddonSetRootOnly(context.Context, contract.Principal, contract.AddonSetRootOnlyRequest) (contract.AddonSetRootOnlyResponse, *contract.Error)
 	BoxNotice(context.Context, contract.Principal, contract.BoxNoticeRequest) (contract.BoxNoticeResponse, *contract.Error)
 	MCPAdd(context.Context, contract.Principal, contract.MCPAddRequest) (contract.AddonChangeResponse, *contract.Error)
 	MCPList(context.Context, contract.Principal, contract.AddonListRequest) (contract.AddonListResponse, *contract.Error)
