@@ -538,8 +538,7 @@ func input(ctx context.Context, base string, action Action, r Request) (string, 
 			defer d.Close()
 			return fmt.Sprintf("Typed %d characters into %s.", utf8.RuneCountInString(r.Text), r.Selector), pageInsert(ctx, d, r.Selector, r.Text)
 		}
-		text := strings.ReplaceAll(r.Text, "\r\n", "\n")
-		return fmt.Sprintf("Typed %d characters.", utf8.RuneCountInString(r.Text)), xdotool(ctx, "type", "--delay", "8", "--", text)
+		return fmt.Sprintf("Typed %d characters.", utf8.RuneCountInString(r.Text)), TypeText(ctx, VNCSocket, r.Text)
 	}
 	return "", fmt.Errorf("unknown computer action %q", action)
 }
