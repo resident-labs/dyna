@@ -16,7 +16,7 @@ Nothing here has been changed. State as of 2026-11-01.
 | hermeslab `dyna-7daa4abfd32e.slice`, `dyna-db8f272fb5d8.slice`, `dyna-needsproof.slice` | active user slices with no tasks; no box row names them | Stop them. They go at the next reboot anyway. |
 | Each host's `rooms/<room>/shared` | empty on hermeslab (4 rooms), pve and arch (2 each); no `shared.before-move` on any of them; `lt-24-005` not checked | Delete the empty folders. |
 | hermeslab `~/port-bundle` | present; a bundle holds device token hashes | Owner's OK. |
-| hermeslab `~/.local/share/dyna-next/backups/port-before-*` | present: `port-before-20261101-053450.db`, `-shm`, `-wal` | Delete when the transfer has proved good. |
+| hermeslab `~/.local/share/dyna-next/backups/` | empty since 2026-11-02, when the owner had its 294 MB of copies deleted | Delete the empty folder; nothing writes it any more. |
 | `/home/pip` host data path | present on arch and pve | Goes when host data can differ per host. Hosts still need the same path today. |
 | Desktop `dyna computers`, `dyna engine tunnel` | enabled user units `dyna-computers.service` and `dyna-tunnel.service` | Confirm that nothing in v2 needs them, then stop and disable both units. |
 | Worktrees of this repository on the desktop | hundreds, some in use by running agents | With the owner's OK, after checking each for unpushed work. |
