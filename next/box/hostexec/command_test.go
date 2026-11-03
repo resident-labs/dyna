@@ -1,6 +1,7 @@
 package hostexec
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -187,5 +188,22 @@ func TestQuotedLenMatchesBash(t *testing.T) {
 		if got := QuotedLen([]string{w}); got < len(out) || (w != "naïve" && got != len(out)) {
 			t.Errorf("%q: QuotedLen %d, bash %d (%s)", w, got, len(out), out)
 		}
+	}
+}
+
+// A run that fails before its command starts, on a cwd the host lacks, says why on the same stream as the command's own stderr.
+func TestRunShowsAFailedCdInItsOutput(t *testing.T) {
+	a := contract.HostexecRunArgs{Argv: []string{"bash", "-c", "true"}, Cwd: "/nonexistent-dir", Timeout: 1000}
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "systemd-run"), []byte("#!/bin/bash\nwhile [ \"$1\" != -- ]; do shift; done; shift; exec \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	args := RunArgs(a, "op1")
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin", "TMPDIR=" + t.TempDir()}
+	out, err := cmd.Output() // stdout only, as the engine's local run reads it
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 254 || !strings.Contains(string(out), "/nonexistent-dir") {
+		t.Fatalf("err %v, out %q", err, out)
 	}
 }
