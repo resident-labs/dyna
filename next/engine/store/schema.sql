@@ -63,7 +63,7 @@ CREATE INDEX hostexec_runs_pending ON hostexec_runs(ended_at) WHERE ended_at IS 
 
 CREATE TABLE conversation_reads (room TEXT NOT NULL, conversation TEXT NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY(room, conversation));
 
-CREATE TABLE devices (id TEXT PRIMARY KEY, name TEXT NOT NULL, token_sha256 BLOB NOT NULL UNIQUE, paired_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, revoked_at INTEGER);
+CREATE TABLE devices (id TEXT PRIMARY KEY, name TEXT NOT NULL, token_sha256 BLOB NOT NULL UNIQUE, paired_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, revoked_at INTEGER, host TEXT NOT NULL DEFAULT '');
 CREATE TABLE device_scopes (device TEXT NOT NULL REFERENCES devices(id), scope TEXT NOT NULL, PRIMARY KEY(device, scope));
 CREATE TABLE connect_revocations (relay_device TEXT PRIMARY KEY, revoked_at INTEGER NOT NULL);
 CREATE TABLE connect_devices (relay_device TEXT PRIMARY KEY, device TEXT NOT NULL UNIQUE REFERENCES devices(id));
