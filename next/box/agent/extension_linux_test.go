@@ -200,7 +200,7 @@ func TestExtensionBashAndJobTools(t *testing.T) {
 	if want := "[job job_4] The job is in the background. You can end your turn and Dyna will wake you when it completes."; got.Moved.IsError || got.Moved.Content[0].Text != want {
 		t.Fatalf("moved %+v", got.Moved)
 	}
-	if want := "building\n[job job_5] A message arrived for you, so this command moved to the background, where it keeps running. Read the message now. job output reads its new output, and Dyna will wake you when it completes."; got.Stepped.IsError || got.Stepped.Content[0].Text != want {
+	if want := "building\n[job job_5] The owner sent you a message, so this command moved to the background, where it keeps running. Read the message now. job output reads its new output, and Dyna will wake you when it completes."; got.Stepped.IsError || got.Stepped.Content[0].Text != want {
 		t.Fatalf("stepped aside %+v", got.Stepped)
 	}
 	if got.Refused.Thrown != "no_grant: no matching host-exec grant" {

@@ -21,7 +21,7 @@ const (
 type ResponsibilityGroup string
 
 const (
-	ResponsibilityNeedsBox ResponsibilityGroup = "needs_box" // something runs in the box, so it must stay up
+	ResponsibilityNeedsBox ResponsibilityGroup = "needs_box" // something runs in the box or reports to it, so it must stay up
 	ResponsibilityOwesWork ResponsibilityGroup = "owes_work" // work is still due, which needs no box until it moves
 )
 

@@ -33,7 +33,9 @@ type Runner struct {
 	Setup   func(context.Context) error
 	// Attach stores an input's files in the box before Pi reads the input. It fails only when its context ends.
 	Attach func(context.Context, contract.TurnInput) (contract.TurnInput, error)
-	// Steered hears each input Pi has queued for the running turn, so a command waiting in the foreground can step aside.
+	// Steered hears each input from the owner that Pi has queued for the running turn, so a command waiting in the foreground
+	// can step aside. A session's or the engine's input waits for the call to end: those come often, and each command that
+	// stepped aside wakes the session again when it ends.
 	Steered  func()
 	setupErr error
 	// What the last transfer applied. Both start empty, so a new Pi process runs its transfer on the first turn:
@@ -393,7 +395,7 @@ func (r *Runner) forward(ctx context.Context, input contract.TurnSteer) error {
 	var err error
 	switch input.Queue {
 	case contract.QueueSteer:
-		if err = r.Harness.Steer(ctx, input.Input); err == nil && r.Steered != nil {
+		if err = r.Harness.Steer(ctx, input.Input); err == nil && r.Steered != nil && input.Input.Reply.Target.Kind == contract.PrincipalOwner {
 			r.Steered()
 		}
 	case contract.QueueFollowUp:

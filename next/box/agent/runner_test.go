@@ -241,7 +241,8 @@ func TestRunnerWaitsForStartBeforeReadingSteer(t *testing.T) {
 	<-sink.done
 }
 
-// A replayed steer reaches neither Pi nor the job server again: only the steer Pi queued lets a foreground command step aside.
+// A replayed steer reaches neither Pi nor the job server again: only the steer Pi queued lets a foreground command step aside,
+// and only the owner's. A session's message waits for the call to end.
 func TestRunnerSkipsReplayedSteer(t *testing.T) {
 	h := &harnessFake{started: make(chan struct{}), release: make(chan struct{}), delivered: make(map[contract.DeliverySeq]bool)}
 	sink := &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 1)}
@@ -252,11 +253,16 @@ func TestRunnerSkipsReplayedSteer(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-h.started
-	steer := contract.BoxMessage{Body: contract.TurnSteer{Input: contract.TurnInput{Delivery: 2, Text: "update"}, Queue: contract.QueueSteer}}
+	owner := contract.ReplyChannel{Kind: contract.ReplyFinal, Target: contract.Principal{Kind: contract.PrincipalOwner}}
+	steer := contract.BoxMessage{Body: contract.TurnSteer{Input: contract.TurnInput{Delivery: 2, Text: "update", Reply: owner}, Queue: contract.QueueSteer}}
 	if err := runner.Handle(ctx, steer); err != nil {
 		t.Fatal(err)
 	}
 	if err := runner.Handle(ctx, steer); err != nil {
+		t.Fatal(err)
+	}
+	child := contract.ReplyChannel{Kind: contract.ReplyPost, Target: contract.Principal{Kind: contract.PrincipalSession, Session: "ses_child"}}
+	if err := runner.Handle(ctx, contract.BoxMessage{Body: contract.TurnSteer{Input: contract.TurnInput{Delivery: 3, Text: "report", Reply: child}, Queue: contract.QueueSteer}}); err != nil {
 		t.Fatal(err)
 	}
 	close(h.release)
@@ -265,9 +271,9 @@ func TestRunnerSkipsReplayedSteer(t *testing.T) {
 	count := h.steers
 	h.mu.Unlock()
 	sink.mu.Lock()
-	acked := sink.acked[1] && sink.acked[2]
+	acked := sink.acked[1] && sink.acked[2] && sink.acked[3]
 	sink.mu.Unlock()
-	if count != 1 || !acked || stepped.Load() != 1 {
+	if count != 2 || !acked || stepped.Load() != 1 {
 		t.Fatalf("steers=%d acked=%v stepped aside=%d", count, acked, stepped.Load())
 	}
 }
