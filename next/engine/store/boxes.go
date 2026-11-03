@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -167,7 +168,7 @@ func (s *Store) SetBoxLifecycle(ctx context.Context, old, next box.Box, due time
 		}
 		admission := (old.State == contract.BoxPending || old.State == contract.BoxStopped) && next.State != contract.BoxClosing
 		// created_at is the allocation time for disk accounting, not the waiter's enqueue time.
-		result, err := tx.ExecContext(ctx, `UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,created_at=CASE WHEN state='pending' AND ?='creating' AND image='' THEN ? ELSE created_at END,updated_at=?,due_at=?,failures=? WHERE id=? AND state=? AND (NOT ? OR (want='run' AND due_at<=?)) AND (?!='lost' OR ?='closing' OR EXISTS (SELECT 1 FROM hosts WHERE name=boxes.host AND state='ready')) AND (?!='lost' OR ?!='ready' OR want IN ('run','stop'))`, host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, next.State, event.Time.UnixMilli(), event.Time.UnixMilli(), dueMS, failures, old.ID, old.State, admission, event.Time.UnixMilli(), old.State, next.State, old.State, next.State)
+		result, err := tx.ExecContext(ctx, `UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,created_at=CASE WHEN state='pending' AND ?='creating' AND image='' THEN ? ELSE created_at END,updated_at=?,due_at=?,failures=?,create_generation=CASE WHEN ?='creating' THEN coalesce((SELECT create_generation FROM hosts WHERE name=?),0) ELSE create_generation END WHERE id=? AND state=? AND (NOT ? OR (want='run' AND due_at<=?)) AND (?!='creating' OR image!='' OR EXISTS (SELECT 1 FROM hosts WHERE name=? AND create_problem='')) AND (?!='lost' OR ?='closing' OR EXISTS (SELECT 1 FROM hosts WHERE name=boxes.host AND state='ready')) AND (?!='lost' OR ?!='ready' OR want IN ('run','stop'))`, host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, next.State, event.Time.UnixMilli(), event.Time.UnixMilli(), dueMS, failures, next.State, host, old.ID, old.State, admission, event.Time.UnixMilli(), next.State, host, old.State, next.State, old.State, next.State)
 		if err != nil {
 			return err
 		}
@@ -185,16 +186,24 @@ func (s *Store) SetBoxLifecycle(ctx context.Context, old, next box.Box, due time
 }
 
 // FinishCreate records the host result without overwriting a concurrent hello.
-func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure string, due time.Time, failures int, event contract.Event) error {
+func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure string, due time.Time, failures int, event contract.Event, runtimeFailure bool) error {
+	finished, ok := event.Body.(contract.BoxChanged)
+	if !ok {
+		return fmt.Errorf("finish create of box %s: event body is %T, not a box change", b.ID, event.Body)
+	}
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		var state contract.BoxState
 		if err := tx.QueryRowContext(ctx, `SELECT state FROM boxes WHERE id=?`, b.ID).Scan(&state); err != nil {
+			if err == sql.ErrNoRows {
+				return nil
+			}
 			return err
 		}
 		if state != contract.BoxCreating && state != contract.BoxStarting && state != contract.BoxReady {
 			return nil
 		}
 		b.State = state
+		cause := finished.Cause
 		to := state
 		reason := ""
 		if failure != "" {
@@ -215,8 +224,8 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 			if err != nil {
 				return err
 			}
-			body.Cause = event.Body.(contract.BoxChanged).Cause
-			if to == contract.BoxFailed {
+			body.Cause, body.Phase = finished.Cause, finished.Phase
+			if to == contract.BoxFailed && body.Cause == "" {
 				body.Cause = contract.CauseCreateFailed
 			}
 			event.Body = body
@@ -226,13 +235,33 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 			dueMS = due.UnixMilli()
 		}
 		// A completed turn after an early hello may have reset the current failure count.
-		result, err := tx.ExecContext(ctx, `UPDATE boxes SET image=?,state=?,reason=?,due_at=?,created_at=CASE WHEN ?='' THEN ? ELSE created_at END,failures=CASE WHEN ?='ready' THEN failures ELSE ? END WHERE id=? AND state=?`, image, to, reason, dueMS, failure, event.Time.UnixMilli(), state, failures, b.ID, state)
+		result, err := tx.ExecContext(ctx, `UPDATE boxes SET failed_create=CASE WHEN ?='failed' AND ?!='' THEN 1 ELSE 0 END,image=?,state=?,reason=?,due_at=?,created_at=CASE WHEN ?='' THEN ? ELSE created_at END,failures=CASE WHEN ?='ready' THEN failures ELSE ? END WHERE id=? AND state=?`, to, failure, image, to, reason, dueMS, failure, event.Time.UnixMilli(), state, failures, b.ID, state)
 		if err != nil {
 			return err
 		}
 		n, err := result.RowsAffected()
 		if err != nil || n == 0 {
 			return err
+		}
+		// Count completed failed creations, not their retry attempts. The generation fences
+		// a result that was already in flight when the owner cleared the problem.
+		if failure == "" || to == contract.BoxFailed && cause == contract.CauseCreateFailed && runtimeFailure {
+			_, err = tx.ExecContext(ctx, `UPDATE hosts SET
+				create_failures=CASE WHEN ?='' THEN 0 ELSE create_failures+1 END,
+				create_problem=CASE WHEN ?='' THEN '' WHEN create_failures+1>=3 THEN 'create_failed' ELSE create_problem END
+				WHERE name=? AND create_generation=(SELECT create_generation FROM boxes WHERE id=?)`, failure, failure, b.Host, b.ID)
+			if err != nil {
+				return err
+			}
+			if failure != "" {
+				// A host that just stopped taking boxes keeps no waiting box that has built nothing: they place elsewhere.
+				if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO room_leftovers(host,room,box,slice) SELECT b.host,s.room,b.id,b.slice FROM boxes b JOIN sessions s ON s.id=b.session JOIN hosts h ON h.name=b.host WHERE b.host=?1 AND b.state='pending' AND b.image='' AND h.create_problem!=''`, b.Host); err != nil {
+					return err
+				}
+				if _, err := tx.ExecContext(ctx, `UPDATE boxes SET host=NULL WHERE host=?1 AND state='pending' AND image='' AND EXISTS (SELECT 1 FROM hosts h WHERE h.name=?1 AND h.create_problem!='')`, b.Host); err != nil {
+					return err
+				}
+			}
 		}
 		if to != state {
 			_, err = s.AppendEvent(tx, event)

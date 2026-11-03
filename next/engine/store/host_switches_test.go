@@ -47,31 +47,31 @@ func TestHostSwitchesTurnEachOnItsOwn(t *testing.T) {
 		t.Fatalf("as added: %+v", h)
 	}
 	on, off := true, false
-	if err := s.SetHostSwitches(ctx, "plain", nil, &on); err != nil {
+	if err := s.SetHostSwitches(ctx, "plain", nil, &on, false); err != nil {
 		t.Fatal(err)
 	}
 	if h := hostSwitches(t, s, "plain"); h.NoAgents || !h.CI {
 		t.Fatalf("ci alone on: %+v", h)
 	}
-	if err := s.SetHostSwitches(ctx, "plain", &off, nil); err != nil {
+	if err := s.SetHostSwitches(ctx, "plain", &off, nil, false); err != nil {
 		t.Fatal(err)
 	}
 	if h := hostSwitches(t, s, "plain"); !h.NoAgents || !h.CI {
 		t.Fatalf("agents alone off: %+v", h)
 	}
-	if err := s.SetHostSwitches(ctx, "plain", &off, &off); err != nil {
+	if err := s.SetHostSwitches(ctx, "plain", &off, &off, false); err != nil {
 		t.Fatal(err)
 	}
 	if h := hostSwitches(t, s, "plain"); !h.NoAgents || h.CI {
 		t.Fatalf("both off: %+v", h)
 	}
-	if err := s.SetHostSwitches(ctx, "ci", &on, nil); err != nil {
+	if err := s.SetHostSwitches(ctx, "ci", &on, nil, false); err != nil {
 		t.Fatal(err)
 	}
 	if h := hostSwitches(t, s, "ci"); h.NoAgents || !h.CI {
 		t.Fatalf("agents back on: %+v", h)
 	}
-	if err := s.SetHostSwitches(ctx, "missing", &on, nil); !errors.Is(err, ErrNotFound) {
+	if err := s.SetHostSwitches(ctx, "missing", &on, nil, false); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown host: %v", err)
 	}
 }
@@ -91,7 +91,7 @@ func TestBothSwitchesOffKeepsTheHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	off := false
-	if err := s.SetHostSwitches(ctx, "h", &off, &off); err != nil {
+	if err := s.SetHostSwitches(ctx, "h", &off, &off, false); err != nil {
 		t.Fatal(err)
 	}
 	h := hostSwitches(t, s, "h")
