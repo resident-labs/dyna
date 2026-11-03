@@ -72,6 +72,7 @@ type PostSource struct {
 // PostCreated is a post in a room.
 type PostCreated struct {
 	Source      *PostSource  `json:"source,omitempty"` // immutable identity for a cross-room post
+	Target      *PostSource  `json:"target,omitempty"` // immutable destination for an outgoing cross-room post
 	Text        string       `json:"text"`
 	Turn        TurnID       `json:"turn,omitempty"`
 	Mentions    []Principal  `json:"mentions,omitempty"`

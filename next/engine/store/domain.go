@@ -573,6 +573,7 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 			event.Body = post
 		}
 		var crossRoom bool
+		var outgoing *contract.Event
 		if event.From.Kind == contract.PrincipalSession {
 			var sourceRoom contract.RoomID
 			if err := tx.QueryRowContext(ctx, "SELECT room FROM sessions WHERE id=?", event.From.Session).Scan(&sourceRoom); err != nil {
@@ -596,6 +597,19 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 			if event.From.Kind != contract.PrincipalSession || parent.Valid || sourceRoom == event.Room || len(deliveries) != 1 || deliveries[0].To.Session != target || deliveries[0].To.Kind != contract.PrincipalSession || deliveries[0].Surface != contract.SurfaceFeed || deliveries[0].Reply.Kind != contract.ReplyPost || len(post.Mentions) != 1 || post.Mentions[0] != deliveries[0].To || post.Home.Kind != contract.ConversationFeed || post.Home.Session != "" || post.ReplyTo != "" || len(post.Attachments) != 0 || strings.TrimSpace(post.Text) == "" || visualUpdate != "" || visualReply != "" {
 				return &ChainError{Message: "cross-room posts may only address another room's root in its feed"}
 			}
+			var targetName contract.RoomName
+			if err := tx.QueryRowContext(ctx, "SELECT name FROM rooms WHERE id=? AND state='open'", event.Room).Scan(&targetName); err != nil {
+				return err
+			}
+			copyPost := post
+			copyPost.Mentions = nil
+			copyPost.ClientID = ""
+			copyPost.Target = &contract.PostSource{Room: event.Room, RoomName: targetName, SessionName: "root"}
+			copyEvent := event
+			copyEvent.ID = contract.EventID(string(event.ID) + "-sent")
+			copyEvent.Room = sourceRoom
+			copyEvent.Body = copyPost
+			outgoing = &copyEvent
 			post.Source = &contract.PostSource{Room: sourceRoom, RoomName: sourceName, SessionName: sessionName}
 			event.Body = post
 		} else {
@@ -624,10 +638,20 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 				return err
 			}
 			event.Body = post
+			if outgoing != nil {
+				copyPost := outgoing.Body.(contract.PostCreated)
+				copyPost.Turn = post.Turn
+				outgoing.Body = copyPost
+			}
 		}
 		seq, err = s.AppendEvent(tx, event)
 		if err != nil {
 			return err
+		}
+		if outgoing != nil {
+			if _, err := s.AppendEvent(tx, *outgoing); err != nil {
+				return err
+			}
 		}
 		if post, ok := event.Body.(contract.PostCreated); ok {
 			for _, file := range post.Attachments {
