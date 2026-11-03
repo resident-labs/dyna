@@ -341,6 +341,15 @@ func (l Layout) HostAddons(room contract.RoomID) string {
 	return filepath.Join(filepath.Dir(l.HostInstructions(room)), AddonBundle)
 }
 
+// HostRootAddons is the bundle of a room's root-only add-ons, or the global ones for no room. It lies outside the folders
+// every box mounts, and only a root session's box mounts its folder.
+func (l Layout) HostRootAddons(room contract.RoomID) string {
+	if room == "" {
+		return filepath.Join(l.HostData, "root-addons", "global", AddonBundle)
+	}
+	return filepath.Join(l.hostRoom(room), "root-addons", AddonBundle)
+}
+
 // HostShareMount is where a host other than the engine's mounts <Data>/rooms.
 func (l Layout) HostShareMount() string { return filepath.Join(l.HostData, "share", "rooms") }
 

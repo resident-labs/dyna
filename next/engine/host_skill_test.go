@@ -48,3 +48,16 @@ func TestSkillSaveFromAHostRecordsTheHost(t *testing.T) {
 		t.Fatalf("%v", problem)
 	}
 }
+
+func TestSkillSaveFromAHostCarriesRootOnly(t *testing.T) {
+	s, room, _, ctx := setup(t)
+	s.SetLayout(box.Layout{Data: t.TempDir()})
+	if err := s.store.AddHost(ctx, box.Host{Name: "omarchy", State: box.HostReady, NoAgents: true, ExecOnly: true, CheckedAt: s.now()}); err != nil {
+		t.Fatal(err)
+	}
+	s.SetHostexecRunner(&outHostexec{files: skillArchive(t, "hypruse", "Drive Hyprland", nil)})
+	saved, problem := s.SkillSave(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SkillSaveRequest{Host: "omarchy", Path: "~/skills/hypruse", Room: room, RootOnly: true})
+	if problem != nil || saved.Item == nil || !saved.Item.RootOnly || saved.Item.Host != "omarchy" {
+		t.Fatalf("%+v %v", saved, problem)
+	}
+}

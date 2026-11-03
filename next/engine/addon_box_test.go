@@ -126,7 +126,7 @@ func skillArchive(t *testing.T, name, description string, extra map[string]strin
 func (w *addonWorld) mirror() {
 	c := w.c
 	for _, scope := range []contract.RoomID{"", c.room} {
-		data, err := c.s.Addons().Bundle(scope)
+		data, err := c.s.Addons().Bundle(scope, false)
 		if err != nil {
 			c.t.Fatal(err)
 		}

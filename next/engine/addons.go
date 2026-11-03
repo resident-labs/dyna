@@ -84,7 +84,7 @@ func (s *Service) addonChange(ctx context.Context, caller contract.Principal, ta
 
 func (s *Service) applyAddon(ctx context.Context, target addonTarget, change contract.AddonGlobalArgs, archive []byte) (*contract.Addon, error) {
 	at := s.now()
-	item := contract.Addon{Kind: change.Kind, Name: change.Name, Room: target.room, By: target.by, At: &at, Description: change.Description, Source: change.Source, Host: change.Host, URL: change.URL, Command: change.Command, Args: change.Args}
+	item := contract.Addon{Kind: change.Kind, Name: change.Name, Room: target.room, By: target.by, At: &at, Description: change.Description, RootOnly: change.RootOnly, Source: change.Source, Host: change.Host, URL: change.URL, Command: change.Command, Args: change.Args}
 	apply := func() error {
 		switch {
 		case change.Remove:
@@ -126,7 +126,7 @@ func (s *Service) PackageAdd(ctx context.Context, caller contract.Principal, req
 	if err != nil {
 		return contract.AddonChangeResponse{}, invalid(err.Error())
 	}
-	return s.addonChange(ctx, caller, target, contract.AddonGlobalArgs{Kind: contract.AddonPackage, Name: name, Source: source}, nil)
+	return s.addonChange(ctx, caller, target, contract.AddonGlobalArgs{Kind: contract.AddonPackage, Name: name, Source: source, RootOnly: req.RootOnly}, nil)
 }
 
 func checkMCP(name, link, command string, args []string) *contract.Error {
@@ -156,7 +156,7 @@ func (s *Service) MCPAdd(ctx context.Context, caller contract.Principal, req con
 	if problem := checkMCP(req.Name, req.URL, req.Command, req.Args); problem != nil {
 		return contract.AddonChangeResponse{}, problem
 	}
-	return s.addonChange(ctx, caller, target, contract.AddonGlobalArgs{Kind: contract.AddonMCP, Name: req.Name, URL: req.URL, Command: req.Command, Args: req.Args}, nil)
+	return s.addonChange(ctx, caller, target, contract.AddonGlobalArgs{Kind: contract.AddonMCP, Name: req.Name, URL: req.URL, Command: req.Command, Args: req.Args, RootOnly: req.RootOnly}, nil)
 }
 
 // SkillSave reads the skill now. A global save from a session keeps the archive among its room's files until the owner decides.
@@ -194,7 +194,7 @@ func (s *Service) SkillSave(ctx context.Context, caller contract.Principal, req 
 	if skills.IsBuiltIn(meta.Name) {
 		return contract.AddonChangeResponse{}, invalid(meta.Name + " is a built-in skill; pick another name")
 	}
-	change := contract.AddonGlobalArgs{Kind: contract.AddonSkill, Name: meta.Name, Description: meta.Description, Source: req.URL, Host: req.Host}
+	change := contract.AddonGlobalArgs{Kind: contract.AddonSkill, Name: meta.Name, Description: meta.Description, Source: req.URL, Host: req.Host, RootOnly: req.RootOnly}
 	if target.ask != "" {
 		if change.Bundle, _, err = s.saveFile(ctx, target.ask, bytes.NewReader(archive), 25<<20); err != nil {
 			return contract.AddonChangeResponse{}, failure(err)
@@ -234,6 +234,7 @@ func (s *Service) MCPRemove(ctx context.Context, caller contract.Principal, req 
 // addonList gathers the scopes a caller can see, built-ins first, then global, then rooms. An empty kind means all three.
 func (s *Service) addonList(ctx context.Context, caller contract.Principal, kind contract.AddonKind, room contract.RoomID) (contract.AddonListResponse, *contract.Error) {
 	rooms := []contract.RoomID{room}
+	hideRootOnly := false
 	switch {
 	case caller.Kind == contract.PrincipalSession:
 		session, err := s.store.Session(ctx, caller.Session)
@@ -244,6 +245,7 @@ func (s *Service) addonList(ctx context.Context, caller contract.Principal, kind
 			return contract.AddonListResponse{}, forbidden()
 		}
 		rooms[0] = session.Room
+		hideRootOnly = !session.Root
 	case room == "":
 		var err error
 		if rooms, err = s.store.OpenRooms(ctx); err != nil {
@@ -264,7 +266,7 @@ func (s *Service) addonList(ctx context.Context, caller contract.Principal, kind
 	}
 	out := contract.AddonListResponse{Items: []contract.Addon{}}
 	for _, item := range items {
-		if kind == "" || item.Kind == kind {
+		if (kind == "" || item.Kind == kind) && !(hideRootOnly && item.RootOnly) {
 			out.Items = append(out.Items, item)
 		}
 	}
@@ -306,6 +308,25 @@ func (s *Service) AddonSetEnabled(ctx context.Context, _ contract.Principal, req
 	return contract.AddonSetEnabledResponse{}, nil
 }
 
+// AddonSetRootOnly is the owner's, like AddonSetEnabled.
+func (s *Service) AddonSetRootOnly(ctx context.Context, _ contract.Principal, req contract.AddonSetRootOnlyRequest) (contract.AddonSetRootOnlyResponse, *contract.Error) {
+	apply := func() error { return s.addons.SetRootOnly(req.Room, req.Kind, req.Name, req.RootOnly) }
+	var err error
+	if req.Room == "" {
+		err = apply()
+	} else {
+		err = s.roomWrite(ctx, req.Room, apply)
+	}
+	if errors.Is(err, addons.ErrMissing) {
+		return contract.AddonSetRootOnlyResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("no %s named %s", req.Kind, req.Name)}
+	}
+	if err != nil {
+		return contract.AddonSetRootOnlyResponse{}, failure(err)
+	}
+	s.publishAddons(ctx)
+	return contract.AddonSetRootOnlyResponse{}, nil
+}
+
 // AddonGlobal registers a session's global change. A skill's folder stays out of the operation's record, among the room's files.
 func (s *Service) AddonGlobal() approve.Entry {
 	return approve.Entry{
@@ -322,6 +343,9 @@ func (s *Service) AddonGlobal() approve.Entry {
 				if part != "" {
 					detail = append(detail, part)
 				}
+			}
+			if input.RootOnly {
+				detail = append(detail, "root sessions only")
 			}
 			return contract.Card{Title: "asks to add " + kind + " for every room", Body: strings.Join(detail, "\n")}
 		},

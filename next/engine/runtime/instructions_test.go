@@ -481,3 +481,22 @@ func TestAddExecOnlyHostNeedsOnlyBash(t *testing.T) {
 		t.Fatalf("record %+v", added)
 	}
 }
+
+func TestRootOnlyAddonsAreMountedOnlyInARootsBox(t *testing.T) {
+	b := &Boxes{Layout: box.Layout{HostData: "/host"}}
+	for _, root := range []bool{false, true} {
+		_, spec := b.container(lifecycle.BoxSpec{Room: "room", Root: root}, "image", box.Mount{})
+		found := map[string]string{}
+		for _, mount := range spec.Mounts {
+			found[mount.BoxPath] = mount.HostPath
+		}
+		_, hasGlobal := found["/run/dyna/root-addons/global"]
+		_, hasRoom := found["/run/dyna/root-addons/room"]
+		if hasGlobal != root || hasRoom != root {
+			t.Fatalf("root=%v: %v", root, found)
+		}
+		if root && (found["/run/dyna/root-addons/global"] != "/host/root-addons/global" || found["/run/dyna/root-addons/room"] != "/host/rooms/room/root-addons") {
+			t.Fatal(found)
+		}
+	}
+}
