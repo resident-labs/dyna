@@ -25,6 +25,7 @@ test("the origin names who added an item", () => {
   assert.equal(addonOrigin({ ...skill, builtIn: true }, now), "Built in");
   assert.equal(addonOrigin({ ...skill, by: "owner", at: "2026-11-01T10:00:00Z" }, now), "Added by you 2 hours ago");
   assert.equal(addonOrigin({ ...skill, by: "lead-web" }, now), "Added by lead-web");
+  assert.equal(addonOrigin({ ...skill, by: "owner", host: "omarchy" }, now), "Added by you · from omarchy");
 });
 
 test("an MCP field is a link or an executable with its arguments", () => {

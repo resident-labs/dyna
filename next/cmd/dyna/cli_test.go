@@ -98,6 +98,7 @@ type fakeClient struct {
 	devices      []contract.Device
 	deviceRevoke contract.DeviceRevokeRequest
 	deviceScopes contract.DeviceSetScopesRequest
+	deviceHost   contract.DeviceSetHostRequest
 	prList       contract.PrListRequest
 	prStatus     contract.PrStatusRequest
 	prTrack      contract.PrTrackRequest
@@ -159,6 +160,10 @@ func (f *fakeClient) IssueTrack(_ context.Context, q contract.IssueTrackRequest)
 func (f *fakeClient) IssueUntrack(_ context.Context, q contract.IssueUntrackRequest) (contract.IssueUntrackResponse, error) {
 	f.issueUntrack = q
 	return contract.IssueUntrackResponse{}, nil
+}
+func (f *fakeClient) DeviceSetHost(_ context.Context, q contract.DeviceSetHostRequest) (contract.DeviceSetHostResponse, error) {
+	f.deviceHost = q
+	return contract.DeviceSetHostResponse{}, nil
 }
 func (f *fakeClient) DeviceSetScopes(_ context.Context, q contract.DeviceSetScopesRequest) (contract.DeviceSetScopesResponse, error) {
 	f.deviceScopes = q
@@ -795,5 +800,16 @@ func TestWorkflowRunSendsTheFileItNames(t *testing.T) {
 	}
 	if got.Script != "export const meta = {}" || got.Args != `{"n":1}` || got.Resume != "wf_0" || !strings.Contains(out.String(), "wf_1") {
 		t.Fatalf("sent %+v, printed %s", got, out.String())
+	}
+}
+
+func TestDeviceSetHostMapsFlag(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "device", "set", "dev_1", "--host", "omarchy")
+	if f.deviceHost.ID != "dev_1" || f.deviceHost.Host != "omarchy" {
+		t.Fatalf("%+v", f.deviceHost)
+	}
+	if _, err := execCLI(f, "device", "set", "dev_1"); err == nil {
+		t.Fatal("device set accepted a missing --host")
 	}
 }

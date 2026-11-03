@@ -15,6 +15,7 @@
   let pairing = $state(false);
   let pairButton: HTMLButtonElement | undefined = $state();
   let editing: { id: string; scopes: Scope[] } | undefined = $state();
+  let hosting: { id: string; host: string } | undefined = $state();
   let busy = $state(false);
   // One row's failed change, in the owner's words.
   let problem: { id: string; text: string } | undefined = $state();
@@ -36,6 +37,12 @@
       action: "Revoke", opener, run: () => call("device.revoke", { id: device.id }), failed: "The device was not revoked. Try again." });
     if (!ok) return;
     if (device.current) signedout(); else reload();
+  }
+  // "On a host" makes the owner's inputs from this device read as coming from that host. Empty clears it.
+  function saveHost(device: Device) {
+    if (!hosting) return;
+    const host = hosting.host.trim();
+    void act(device.id, "The host did not change. Try again.", () => call("device.set_host", { id: device.id, host }), () => { hosting = undefined; reload(); });
   }
   // Without admin this browser loses the Devices pane, so that change confirms first. Its row goes when the list reloads.
   async function save(device: Device) {
@@ -65,10 +72,10 @@
           <Icon name={isPhone(device.name) ? "phone" : "laptop"} size={20} />
           <span class="lines">
             <span class="title">{device.name}{#if device.current}<span class="badge">This device</span>{/if}</span>
-            <span class="line">{#if warning}<StatusPill tone="warning" label={warning} />{" · "}{/if}{seen(device, Date.now())} · {access(device.scopes ?? [])}</span>
+            <span class="line">{#if warning}<StatusPill tone="warning" label={warning} />{" · "}{/if}{seen(device, Date.now())} · {access(device.scopes ?? [])}{#if device.host} · on {device.host}{/if}</span>
           </span>
-          {#if editing?.id !== device.id}
-            <span class="acts"><button type="button" class="btn ghost" aria-label={`Change the access of ${device.name}`} onclick={() => { problem = undefined; editing = { id: device.id, scopes: [...device.scopes ?? []] }; }}>Scopes</button>
+          {#if editing?.id !== device.id && hosting?.id !== device.id}
+            <span class="acts"><button type="button" class="btn ghost" aria-label={`Set the host of ${device.name}`} onclick={() => { problem = undefined; hosting = { id: device.id, host: device.host ?? "" }; }}>Host</button><button type="button" class="btn ghost" aria-label={`Change the access of ${device.name}`} onclick={() => { problem = undefined; editing = { id: device.id, scopes: [...device.scopes ?? []] }; }}>Scopes</button>
               <button type="button" class="btn ghost" aria-label={`Revoke ${device.name}`} aria-haspopup="dialog" onclick={event => void revoke(device, event.currentTarget)}>Revoke</button></span>
           {/if}
         </div>
@@ -77,6 +84,13 @@
             <ScopeBoxes value={editing.scopes} disabled={busy} onchange={next => { if (editing) editing = { ...editing, scopes: next }; }} />
             <span class="choices"><button type="button" class="btn fill" disabled={busy} onclick={() => void save(device)}>Save</button>
               <button type="button" class="btn ghost" disabled={busy} onclick={() => { editing = undefined; }}>Cancel</button></span>
+          </div>
+        {/if}
+        {#if hosting?.id === device.id}
+          <div class="edit">
+            <input class="mono" aria-label={`Host of ${device.name}`} placeholder="omarchy" bind:value={hosting.host} disabled={busy} autocomplete="off" spellcheck="false" />
+            <span class="choices"><button type="button" class="btn fill" disabled={busy} onclick={() => saveHost(device)}>Save</button>
+              <button type="button" class="btn ghost" disabled={busy} onclick={() => { hosting = undefined; }}>Cancel</button></span>
           </div>
         {/if}
         {#if problem?.id === device.id}<p class="problem" role="alert">{problem.text}</p>{/if}

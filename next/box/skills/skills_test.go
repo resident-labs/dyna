@@ -176,3 +176,15 @@ func TestRequestFromALinkOrAFile(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRequestTakesHostAndPath(t *testing.T) {
+	for in, want := range map[string][2]string{"omarchy:~/.claude/skills/hypruse": {"omarchy", "~/.claude/skills/hypruse"}, "ari-pc:/srv/s": {"ari-pc", "/srv/s"}} {
+		req, err := Request(in, "", "", true)
+		if err != nil || string(req.Host) != want[0] || req.Path != want[1] || len(req.Archive) != 0 {
+			t.Fatalf("%s: %+v %v", in, req, err)
+		}
+	}
+	if req, err := Request("https://x.test/a:b", "", "", true); err != nil || req.URL == "" || req.Host != "" {
+		t.Fatalf("%+v %v", req, err)
+	}
+}

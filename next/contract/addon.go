@@ -37,6 +37,7 @@ type Addon struct {
 	At          *time.Time `json:"at,omitempty"`
 	Description string     `json:"description,omitempty"` // a skill's
 	Source      string     `json:"source,omitempty"`      // a package's pinned source, or the link a skill came from
+	Host        HostName   `json:"host,omitempty"`        // a skill saved from a host: its commands run there
 	URL         string     `json:"url,omitempty"`         // an HTTP MCP server's
 	Command     string     `json:"command,omitempty"`     // a stdio MCP server's
 	Args        []string   `json:"args,omitempty"`
@@ -63,12 +64,14 @@ type PackageAddRequest struct {
 	Global bool   `json:"global,omitempty"`
 }
 
-// SkillSaveRequest carries a gzip tar of a skill's folder, or a link for the engine to fetch.
+// SkillSaveRequest carries a gzip tar of a skill's folder, a link for the engine to fetch, or a Host and Path the engine copies over SSH.
 type SkillSaveRequest struct {
-	Archive []byte `json:"archive,omitempty"`
-	URL     string `json:"url,omitempty"`
-	Room    RoomID `json:"room,omitempty"`
-	Global  bool   `json:"global,omitempty"`
+	Archive []byte   `json:"archive,omitempty"`
+	URL     string   `json:"url,omitempty"`
+	Host    HostName `json:"host,omitempty"` // with Path: the engine copies the folder from this host over SSH, for the owner
+	Path    string   `json:"path,omitempty"`
+	Room    RoomID   `json:"room,omitempty"`
+	Global  bool     `json:"global,omitempty"`
 }
 
 // MCPAddRequest names a server by URL or by Command and Args, which are one executable and its arguments, not a shell line.
@@ -141,6 +144,7 @@ type AddonGlobalArgs struct {
 	Kind        AddonKind `json:"addon"`
 	Name        string    `json:"name"`
 	Source      string    `json:"source,omitempty"`
+	Host        HostName  `json:"host,omitempty"`
 	Description string    `json:"description,omitempty"`
 	Bundle      string    `json:"bundle,omitempty"`
 	URL         string    `json:"url,omitempty"`

@@ -221,6 +221,7 @@ func (a *API) handler(c Caller) http.Handler {
 	})
 	call(mux, contract.MethodDeviceRevoke, c, a.service.DeviceRevoke)
 	call(mux, contract.MethodDeviceSetScopes, c, a.service.DeviceSetScopes)
+	call(mux, contract.MethodDeviceSetHost, c, a.service.DeviceSetHost)
 	call(mux, contract.MethodConversationRead, c, a.service.ConversationRead)
 	call(mux, contract.MethodRoomSetLimits, c, a.service.RoomSetLimits)
 	call(mux, contract.MethodRoomPause, c, a.service.RoomPause)
