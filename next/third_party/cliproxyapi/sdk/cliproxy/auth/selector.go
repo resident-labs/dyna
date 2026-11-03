@@ -1046,6 +1046,8 @@ type SessionAffinityConfig struct {
 	TTL              time.Duration
 	SubagentAffinity *bool
 	RebindOn         string
+	// StatePath, when set, keeps the session bindings across restarts.
+	StatePath string
 }
 
 // NewSessionAffinitySelector creates a new session-aware selector.
@@ -1069,9 +1071,13 @@ func NewSessionAffinitySelectorWithConfig(cfg SessionAffinityConfig) *SessionAff
 		subagentAffinity = *cfg.SubagentAffinity
 	}
 	rebindOnQuotaOnly := normalizeSessionAffinityRebindOn(cfg.RebindOn) == SessionAffinityRebindOnQuota
+	cache := NewSessionCache(cfg.TTL)
+	if cfg.StatePath != "" {
+		cache = NewPersistentSessionCache(cfg.TTL, cfg.StatePath)
+	}
 	return &SessionAffinitySelector{
 		fallback:          cfg.Fallback,
-		cache:             NewSessionCache(cfg.TTL),
+		cache:             cache,
 		matcher:           cliproxysession.NewMerklePrefixMatcher(cfg.TTL),
 		subagentAffinity:  subagentAffinity,
 		rebindOnQuotaOnly: rebindOnQuotaOnly,
