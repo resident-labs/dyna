@@ -15,7 +15,7 @@ import (
 
 func (s *Store) AddHost(ctx context.Context, h box.Host) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "INSERT INTO hosts (name, ssh, state, cpus, mem_bytes, disk_bytes, checked_at, engine_host, agents, ci, create_problem) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", h.Name, h.SSH, h.State, h.CPUs, h.MemBytes, h.DiskBytes, h.CheckedAt.UnixMilli(), h.EngineHost, !h.NoAgents, h.CI, h.Problem)
+		_, err := tx.ExecContext(ctx, "INSERT INTO hosts (name, ssh, state, cpus, mem_bytes, disk_bytes, checked_at, engine_host, agents, ci, create_problem, exec_only) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", h.Name, h.SSH, h.State, h.CPUs, h.MemBytes, h.DiskBytes, h.CheckedAt.UnixMilli(), h.EngineHost, !h.NoAgents, h.CI, h.Problem, h.ExecOnly)
 		if err != nil {
 			return err
 		}
@@ -302,7 +302,7 @@ func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
 }
 
 func (s *Store) hosts(ctx context.Context, where string) ([]box.Host, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT h.name, h.ssh, h.state, h.cpus, h.mem_bytes, h.disk_bytes, h.disk_floor, h.disk_total, h.checked_at, h.maintained_at, h.engine_host, h.pool, h.box, h.agents, h.ci, h.create_problem, hr.room FROM hosts h LEFT JOIN host_rooms hr ON hr.host=h.name WHERE `+where+` ORDER BY h.name,hr.room`)
+	rows, err := s.Read().QueryContext(ctx, `SELECT h.name, h.ssh, h.state, h.cpus, h.mem_bytes, h.disk_bytes, h.disk_floor, h.disk_total, h.checked_at, h.maintained_at, h.engine_host, h.pool, h.box, h.agents, h.ci, h.create_problem, h.exec_only, hr.room FROM hosts h LEFT JOIN host_rooms hr ON hr.host=h.name WHERE `+where+` ORDER BY h.name,hr.room`)
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +313,7 @@ func (s *Store) hosts(ctx context.Context, where string) ([]box.Host, error) {
 		var checked, maintained int64
 		var room sql.NullString
 		var agents bool
-		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &h.DiskFloor, &h.DiskTotal, &checked, &maintained, &h.EngineHost, &h.Pool, &h.Box, &agents, &h.CI, &h.Problem, &room); err != nil {
+		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &h.DiskFloor, &h.DiskTotal, &checked, &maintained, &h.EngineHost, &h.Pool, &h.Box, &agents, &h.CI, &h.Problem, &h.ExecOnly, &room); err != nil {
 			return nil, err
 		}
 		if len(hosts) == 0 || hosts[len(hosts)-1].Name != h.Name {
@@ -342,6 +342,24 @@ func (s *Store) ResetEngineHosts(ctx context.Context) error {
 func (s *Store) SetEngineHost(ctx context.Context, name contract.HostName, value bool) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "UPDATE hosts SET engine_host=? WHERE name=?", value, name)
+		return err
+	})
+}
+
+// ExecOnly reports whether a host was added exec only and has not been turned into a full host since. The control plane is not a stored host.
+func (s *Store) ExecOnly(ctx context.Context, name contract.HostName) (bool, error) {
+	var execOnly bool
+	err := s.Read().QueryRowContext(ctx, "SELECT exec_only FROM hosts WHERE name=?", name).Scan(&execOnly)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return execOnly, err
+}
+
+// SetHostChecked records what the full host check found and ends exec-only: the host is about to take boxes or runners.
+func (s *Store) SetHostChecked(ctx context.Context, h box.Host) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE hosts SET exec_only=0, cpus=?, mem_bytes=?, disk_bytes=?, checked_at=?, engine_host=?, create_problem=? WHERE name=?", h.CPUs, h.MemBytes, h.DiskBytes, h.CheckedAt.UnixMilli(), h.EngineHost, h.Problem, h.Name)
 		return err
 	})
 }

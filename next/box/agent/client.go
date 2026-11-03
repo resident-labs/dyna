@@ -196,6 +196,16 @@ func (c *Client) HostRun(ctx context.Context, r shell.Run, out io.Writer) (int, 
 	if result.Truncated {
 		fmt.Fprintln(out, "[output truncated at 8 MiB]")
 	}
+	if result.OutFiles != "" {
+		var tarball bytes.Buffer
+		err := c.file(ctx, result.OutFiles, &tarball)
+		if err == nil {
+			err = extractHostOut(&tarball, hostOutRoot, string(answer.Operation.ID), out)
+		}
+		if err != nil {
+			fmt.Fprintln(out, "host run: the files in $DYNA_OUT could not be copied back:", err)
+		}
+	}
 	if result.Error != "" {
 		fmt.Fprintln(out, "host run:", result.Error)
 		if result.ExitCode == 0 {

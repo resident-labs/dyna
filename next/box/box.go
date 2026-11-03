@@ -50,6 +50,7 @@ type Host struct {
 	// runners there. Rooms decides which rooms the host serves while agents are on.
 	NoAgents  bool
 	CI        bool
+	ExecOnly  bool // added with agents and ci off: host-exec runs only, checked by SSH and bash, never a box or runner
 	CheckedAt time.Time
 	Pool      string         // the pool that holds this node
 	Box       contract.BoxID // the one box a per-session node serves

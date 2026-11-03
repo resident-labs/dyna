@@ -59,7 +59,8 @@ type Host struct {
 	restored            bool
 	masterReset         bool
 	generation          atomic.Uint64
-	hostKeys            []string // ssh options for a machine whose key nobody has yet
+	hostKeys            []string    // ssh options for a machine whose key nobody has yet
+	execOnly            func() bool // reports a host that takes only host-exec runs, so its heartbeat asks only that it answers
 }
 
 // New returns one driver per host. runtime is Dyna v2's private runtime directory.
@@ -595,3 +596,6 @@ func (h *Host) MachineID(ctx context.Context) (string, error) {
 	}
 	return value, nil
 }
+
+// SetExecOnly gives the heartbeat a way to ask whether the host takes only host-exec runs, which it may stop being.
+func (h *Host) SetExecOnly(f func() bool) { h.execOnly = f }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	boxhostexec "github.com/resident-labs/dyna/box/hostexec"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/hostexec"
@@ -17,6 +18,11 @@ import (
 type HostexecRunner interface {
 	RunHostexec(context.Context, contract.HostexecRunArgs, contract.OpID) ([]byte, int, bool, error)
 	StopHostexec(context.Context, contract.HostName, string) error
+}
+
+// SetHostPromoter gives host set the full host check that an exec-only host passes before it takes boxes or runners.
+func (s *Service) SetHostPromoter(f func(context.Context, contract.HostName, bool) error) {
+	s.promoteHost = f
 }
 
 func (s *Service) SetHostexecRunner(r HostexecRunner) { s.hostexec = r }
@@ -142,6 +148,11 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 				}
 				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
 			}
+			desktop, err := s.store.ExecOnly(ctx, a.Host)
+			if err != nil {
+				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
+			}
+			a.Desktop = desktop
 			started := s.now()
 			runCtx, cancel := s.hostexecTimeout(ctx, time.Duration(a.Timeout)*time.Millisecond+15*time.Second)
 			out, code, truncated, err := s.hostexec.RunHostexec(runCtx, a, op)
@@ -174,6 +185,22 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 				out = out[:64<<10]
 			}
 			result.Output = strings.ToValidUTF8(string(out), "�")
+			// The folder is read back and removed whatever became of the run, so a stopped or lost run leaves none behind.
+			collectCtx, cancel := s.hostexecTimeout(context.WithoutCancel(ctx), 2*time.Minute+15*time.Second)
+			tar, collectCode, tarTruncated, e := s.hostexec.RunHostexec(collectCtx, boxhostexec.CollectArgs(a, op), op+"-out")
+			cancel()
+			switch {
+			case e != nil || collectCode != 0:
+				result.Output += "\n[$DYNA_OUT could not be read back, and may remain on the host]"
+			case len(tar) == 0:
+			case tarTruncated:
+				result.Output += "\n[files in $DYNA_OUT exceed 8 MiB: not copied back]"
+			default:
+				result.OutFiles, _, e = s.saveFile(ctx, a.Room, bytes.NewReader(tar), int64(len(tar)))
+				if e != nil {
+					return contract.OpResult{Cause: contract.CauseInternal, Error: e.Error()}
+				}
+			}
 			return result
 		},
 	}
