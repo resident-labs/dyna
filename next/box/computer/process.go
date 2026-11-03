@@ -5,8 +5,10 @@ package computer
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -35,10 +37,12 @@ var jwmrc []byte
 
 // desktopArgs make TigerVNC's Xvnc both the display and its VNC server, so it knows exactly what changed. It serves VNC
 // on a Unix socket only, with no password: the socket is inside the box, and the engine checks the owner. A box has no
-// GPU, and without GLX Xvnc loads no Mesa: about 17 MiB instead of 60, and Chromium draws in software either way.
+// GPU, and without GLX Xvnc loads no Mesa: about 17 MiB instead of 60, and Chromium draws in software either way. The
+// view takes continuous updates, so the frame cap, not the round trip, sets its rate; 60 costs Xvnc about 9% of a core
+// under motion where 30 costs 7%.
 func desktopArgs(socket string) []string {
 	return []string{display, "-geometry", Size, "-depth", "24", "-rfbunixpath", socket, "-rfbport", "-1", "-SecurityTypes", "None",
-		"-AlwaysShared", "-AcceptSetDesktopSize=0", "-FrameRate", "30", "-extension", "GLX"}
+		"-AlwaysShared", "-AcceptSetDesktopSize=0", "-FrameRate", "60", "-extension", "GLX"}
 }
 
 // browserArgs open Chromium in a window on the display, with DevTools on the port the agent's actions use.
@@ -123,6 +127,8 @@ type Process struct {
 	display *program
 	wm      *program
 	browser *program
+	apps    map[*program]struct{} // what launch started
+	stopped *program              // the display Stop ended, whose exit is no news
 	exit    string
 	ooms    uint64 // the computer cgroup's OOM kills when a program last exited
 	root    string // the box's cgroup
@@ -164,11 +170,11 @@ func (p *Process) Start(ctx context.Context) (string, error) {
 	if p.wm == nil {
 		config := filepath.Join(filepath.Dir(p.socket), "jwmrc")
 		if err = os.WriteFile(config, jwmrc, 0644); err == nil {
-			p.wm, err = p.spawn(ctx, "jwm", "-f", config)
+			p.wm, err = p.spawn(ctx, os.Stderr, "jwm", "-f", config)
 		}
 	}
 	if err == nil && p.browser == nil {
-		p.browser, err = p.spawn(ctx, "chromium", browserArgs...)
+		p.browser, err = p.spawn(ctx, os.Stderr, "chromium", browserArgs...)
 	}
 	if err != nil {
 		p.exit = report
@@ -189,7 +195,7 @@ func (p *Process) startDisplay(ctx context.Context) error {
 	if err := os.MkdirAll(filepath.Dir(p.socket), 0755); err != nil {
 		return err
 	}
-	display, err := p.spawn(ctx, "Xvnc", desktopArgs(p.socket)...)
+	display, err := p.spawn(ctx, os.Stderr, "Xvnc", desktopArgs(p.socket)...)
 	if err != nil {
 		return err
 	}
@@ -217,13 +223,59 @@ func (p *Process) startDisplay(ctx context.Context) error {
 	return nil
 }
 
+// Launch starts command with sh on the running desktop and does not wait for it, as the agent's launch action. It runs
+// in the computer cgroup and stops with the desktop. Its output goes to a log of its own in the temporary directory,
+// whose path it returns.
+func (p *Process) Launch(ctx context.Context, command string) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.display == nil {
+		return "", errors.New("the desktop is not running")
+	}
+	log, err := os.CreateTemp("", "dyna-launch-*.log")
+	if err != nil {
+		return "", err
+	}
+	defer log.Close()
+	app, err := p.spawn(ctx, log, "sh", "-c", command)
+	if err != nil {
+		return "", err
+	}
+	if p.apps == nil {
+		p.apps = map[*program]struct{}{}
+	}
+	p.apps[app] = struct{}{}
+	return log.Name(), nil
+}
+
+// Stop stops the desktop and what runs on it, for the agent's stop action. The next Start starts it again.
+func (p *Process) Stop() {
+	p.mu.Lock()
+	display := p.display
+	p.stopped = display
+	p.mu.Unlock()
+	if display != nil {
+		display.kill()
+		<-display.done
+	}
+	// The display's watch stops the rest. Wait for it, so the next Start finds nothing running.
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		p.mu.Lock()
+		gone := p.display == nil && p.wm == nil && p.browser == nil && len(p.apps) == 0
+		p.mu.Unlock()
+		if gone {
+			return
+		}
+	}
+}
+
 // spawn starts one program of the desktop in its own process group in the computer cgroup, and watches it. The caller
 // holds p.mu.
-func (p *Process) spawn(ctx context.Context, name string, args ...string) (*program, error) {
+func (p *Process) spawn(ctx context.Context, out io.Writer, name string, args ...string) (*program, error) {
 	command := func() *exec.Cmd {
 		cmd := exec.CommandContext(ctx, name, args...)
 		cmd.Env = append(os.Environ(), "DISPLAY="+display)
-		cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+		cmd.Stdout, cmd.Stderr = out, out
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 		return cmd
@@ -266,6 +318,9 @@ func (p *Process) watch(ctx context.Context, exited *program) {
 		p.display = nil
 		p.wm.kill()
 		p.browser.kill()
+		for app := range p.apps {
+			app.kill()
+		}
 		if p.notify != nil {
 			p.notify(false)
 		}
@@ -279,9 +334,10 @@ func (p *Process) watch(ctx context.Context, exited *program) {
 			return
 		}
 	default:
+		delete(p.apps, exited)
 		return
 	}
-	if ctx.Err() != nil {
+	if ctx.Err() != nil || exited == p.stopped {
 		return
 	}
 	if killed {
@@ -297,6 +353,9 @@ func (p *Process) watch(ctx context.Context, exited *program) {
 func (p *Process) Close() {
 	p.mu.Lock()
 	running := []*program{p.browser, p.wm, p.display}
+	for app := range p.apps {
+		running = append(running, app)
+	}
 	group := p.group
 	p.mu.Unlock()
 	for _, program := range running {
@@ -334,19 +393,46 @@ func Serve(ctx context.Context, socket string, errs chan<- error, notify func(bo
 	}, nil
 }
 
-// Handler serves the private in-box start endpoint.
+// StartRequest is the body of a launch: a command for sh.
+type StartRequest struct {
+	Launch string `json:"launch,omitempty"`
+}
+
+// Handler serves the private in-box endpoint: POST /computer starts the desktop, /computer/launch starts the desktop and
+// then a command on it, and /computer/stop stops it. Every computer action but stop starts the desktop through it first.
 func (p *Process) Handler(ctx context.Context) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/computer" {
+		if r.Method != http.MethodPost {
 			http.NotFound(w, r)
 			return
 		}
-		report, err := p.Start(ctx)
+		var started Started
+		var err error
+		switch r.URL.Path {
+		case "/computer/stop":
+			p.Stop()
+		case "/computer", "/computer/launch":
+			var req StartRequest
+			if r.URL.Path == "/computer/launch" {
+				if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&req); err != nil || req.Launch == "" {
+					http.Error(w, "a launch needs a command", http.StatusBadRequest)
+					return
+				}
+			}
+			started.URL = URL
+			started.Exit, err = p.Start(ctx)
+			if err == nil && req.Launch != "" {
+				started.Log, err = p.Launch(ctx, req.Launch)
+			}
+		default:
+			http.NotFound(w, r)
+			return
+		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, "{\"url\":%q,\"exit\":%q}\n", URL, report)
+		_ = json.NewEncoder(w).Encode(started)
 	})
 }

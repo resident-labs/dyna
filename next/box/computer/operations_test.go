@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -27,7 +25,7 @@ func TestSameDocumentNavigationDoesNotWaitForLoad(t *testing.T) {
 			return
 		}
 		defer ws.CloseNow()
-		for i := 0; i < 2; i++ {
+		for i := 0; i < 3; i++ { // enable, navigate, then the title
 			_, data, err := ws.Read(r.Context())
 			if err != nil {
 				return
@@ -46,7 +44,7 @@ func TestSameDocumentNavigationDoesNotWaitForLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	if err := Execute(context.Background(), d, Open, []string{"https://example.test/#section"}, "", false, io.Discard); err != nil {
+	if _, err := navigate(context.Background(), d, "https://example.test/#section"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -93,7 +91,7 @@ func TestFullScreenshotUsesContentSize(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	if err := Execute(context.Background(), d, Screenshot, []string{filepath.Join(t.TempDir(), "shot.png")}, "", true, io.Discard); err != nil {
+	if _, err := pageScreenshot(context.Background(), d); err != nil {
 		t.Fatal(err)
 	}
 	clip := <-clips
