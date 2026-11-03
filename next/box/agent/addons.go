@@ -37,9 +37,14 @@ type addonStart struct {
 	Install  func(ctx context.Context, dir, source string) error
 }
 
-func roomAddons() addonStart {
+func roomAddons(root bool) addonStart {
+	bundles := []string{"/run/dyna/instructions/global/" + box.AddonBundle, "/run/dyna/instructions/room/" + box.AddonBundle}
+	if root {
+		// Only a root session's box has these folders; the engine never puts root-only items in the others.
+		bundles = []string{"/run/dyna/instructions/global/" + box.AddonBundle, "/run/dyna/root-addons/global/" + box.AddonBundle, "/run/dyna/instructions/room/" + box.AddonBundle, "/run/dyna/root-addons/room/" + box.AddonBundle}
+	}
 	return addonStart{
-		Bundles:  []string{"/run/dyna/instructions/global/" + box.AddonBundle, "/run/dyna/instructions/room/" + box.AddonBundle},
+		Bundles:  bundles,
 		Skills:   "/box/pi/skills",
 		Settings: "/box/pi/settings.json",
 		Cache:    "/box/cache/pi-packages",

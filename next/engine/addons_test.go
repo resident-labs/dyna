@@ -103,3 +103,39 @@ func TestAForgedGlobalOperationGetsNowhere(t *testing.T) {
 		t.Fatalf("%+v %v", items, err)
 	}
 }
+
+func TestOnlyRootAndTheOwnerListRootOnlyItems(t *testing.T) {
+	s, room, worker, ctx, _ := setupAddons(t)
+	var rootID contract.SessionID
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT parent FROM sessions WHERE id=?", worker.Session).Scan(&rootID); err != nil {
+		t.Fatal(err)
+	}
+	root := contract.Principal{Kind: contract.PrincipalSession, Session: rootID}
+	if _, problem := s.MCPAdd(ctx, ownerCaller, contract.MCPAddRequest{Name: "private", Command: "server", Room: room, RootOnly: true}); problem != nil {
+		t.Fatal(problem)
+	}
+	if _, problem := s.MCPAdd(ctx, ownerCaller, contract.MCPAddRequest{Name: "public", Command: "server", Room: room}); problem != nil {
+		t.Fatal(problem)
+	}
+	names := func(caller contract.Principal) string {
+		t.Helper()
+		listed, problem := s.MCPList(ctx, caller, contract.AddonListRequest{Room: room})
+		if problem != nil {
+			t.Fatal(problem)
+		}
+		var out []string
+		for _, item := range listed.Items {
+			out = append(out, item.Name)
+		}
+		return strings.Join(out, ",")
+	}
+	if got := names(worker); got != "public" {
+		t.Fatalf("a session that is not root lists %q", got)
+	}
+	if got := names(root); got != "private,public" {
+		t.Fatalf("root lists %q", got)
+	}
+	if got := names(ownerCaller); got != "private,public" {
+		t.Fatalf("the owner lists %q", got)
+	}
+}

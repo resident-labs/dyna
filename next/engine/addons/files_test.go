@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/box"
@@ -30,7 +31,7 @@ func archive(t *testing.T, name string) []byte {
 
 func bundleItems(t *testing.T, f *Files, room contract.RoomID) ([]string, string) {
 	t.Helper()
-	data, err := f.Bundle(room)
+	data, err := f.Bundle(room, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +54,7 @@ func TestAScopeKeepsItsItemsInItsOwnFolder(t *testing.T) {
 	layout := box.Layout{Data: t.TempDir()}
 	f := &Files{Layout: layout}
 	for _, room := range []contract.RoomID{"", "room"} {
-		if data, err := f.Bundle(room); err != nil || data != nil {
+		if data, err := f.Bundle(room, false); err != nil || data != nil {
 			t.Fatalf("a scope that never held anything bundled %d bytes: %v", len(data), err)
 		}
 	}
@@ -103,11 +104,11 @@ func TestABundleHoldsWhatIsEnabled(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	first, err := f.Bundle("")
+	first, err := f.Bundle("", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again, err := f.Bundle(""); err != nil || string(again) != string(first) {
+	if again, err := f.Bundle("", false); err != nil || string(again) != string(first) {
 		t.Fatal("the same scope bundled differently", err)
 	}
 	if err := f.SetEnabled("", contract.AddonSkill, "two", false); err != nil {
@@ -140,5 +141,64 @@ func TestABundleHoldsWhatIsEnabled(t *testing.T) {
 	}
 	if err := f.SetEnabled("", contract.AddonMCP, "none", true); !errors.Is(err, ErrMissing) {
 		t.Fatal(err)
+	}
+}
+
+func TestRootOnlyItemsAreBundledApartFromTheOthers(t *testing.T) {
+	f := &Files{Layout: box.Layout{Data: t.TempDir()}}
+	for _, name := range []string{"open", "secret"} {
+		if err := f.SaveSkill("", contract.Addon{Kind: contract.AddonSkill, Name: name, RootOnly: name == "secret"}, archive(t, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.Put("", contract.Addon{Kind: contract.AddonMCP, Name: "private", Command: "server", RootOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	if names, _ := bundleItems(t, f, ""); !slices.Equal(names, []string{"addons.json", "open"}) {
+		t.Fatal("the bundle every box mounts holds", names)
+	}
+	data, err := f.Bundle("", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := skills.Extract(data, dir); err != nil {
+		t.Fatal(err)
+	}
+	list, err := os.ReadFile(filepath.Join(dir, skills.ListFile))
+	if err != nil || strings.Contains(string(list), `"open"`) || !strings.Contains(string(list), `"secret"`) || !strings.Contains(string(list), `"private"`) {
+		t.Fatalf("%s %v", list, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "secret", skills.File)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAReplacementKeepsTheRootOnlyMark(t *testing.T) {
+	f := &Files{Layout: box.Layout{Data: t.TempDir()}}
+	skill := contract.Addon{Kind: contract.AddonSkill, Name: "one", RootOnly: true}
+	if err := f.SaveSkill("", skill, archive(t, "one")); err != nil {
+		t.Fatal(err)
+	}
+	skill.RootOnly = false
+	if err := f.SaveSkill("", skill, archive(t, "one")); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Put("", contract.Addon{Kind: contract.AddonMCP, Name: "m", Command: "x", RootOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Put("", contract.Addon{Kind: contract.AddonMCP, Name: "m", Command: "y"}); err != nil {
+		t.Fatal(err)
+	}
+	items, err := f.List("")
+	if err != nil || len(items) != 2 || !items[0].RootOnly || !items[1].RootOnly {
+		t.Fatalf("%+v %v", items, err)
+	}
+	// The owner's own toggle still takes it off.
+	if err := f.SetRootOnly("", contract.AddonSkill, "one", false); err != nil {
+		t.Fatal(err)
+	}
+	if items, _ := f.List(""); slices.ContainsFunc(items, func(i contract.Addon) bool { return i.Kind == contract.AddonSkill && i.RootOnly }) {
+		t.Fatal("the owner could not clear it")
 	}
 }

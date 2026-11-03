@@ -51,6 +51,7 @@
     addButton?.focus();
   }
   const toggle = (item: Addon, enabled: boolean) => act(rowId(item), () => call("addon.set_enabled", { kind: item.kind, name: item.name, room: item.room, enabled }));
+  const toggleRoot = (item: Addon, rootOnly: boolean) => act(rowId(item), () => call("addon.set_root_only", { kind: item.kind, name: item.name, room: item.room, rootOnly }));
   const sourceLabel: Record<AddonKind, string> = { skill: "Link", package: "Source", mcp: "URL or command" };
   const sourceHint: Record<AddonKind, string> = {
     skill: "A link to a SKILL.md or a GitHub folder. To save a folder from a box, use dyna skill save.",
@@ -94,12 +95,13 @@
             <div class="row" class:off={item.disabled}>
               <Icon name={kind.icon} size={20} />
               <span class="lines">
-                <span class="title"><span class="name">{item.name}</span><span class="badge">{kind.label}</span></span>
+                <span class="title"><span class="name">{item.name}</span><span class="badge">{kind.label}</span>{#if item.rootOnly}<span class="badge">Root only</span>{/if}</span>
                 <span class="line detail">{addonDetail(item)}</span>
                 <span class="line">{addonOrigin(item, Date.now())}</span>
               </span>
               {#if admin && !item.builtIn}
                 <span class="acts"><label class="switch"><input type="checkbox" checked={!item.disabled} disabled={busy} aria-label={`Enable ${item.name}`} onchange={event => void toggle(item, event.currentTarget.checked)} />On</label>
+                  <label class="switch"><input type="checkbox" checked={item.rootOnly ?? false} disabled={busy} aria-label={`Root sessions only for ${item.name}`} onchange={event => void toggleRoot(item, event.currentTarget.checked)} />Root only</label>
                   <button type="button" class="btn ghost" aria-label={`Remove ${item.name}`} aria-haspopup="dialog" disabled={busy} onclick={() => void remove(item)}>Remove</button></span>
               {:else if item.disabled}<span class="badge">Off</span>{/if}
             </div>
