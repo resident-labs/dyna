@@ -138,11 +138,17 @@ func TestBuildAheadDoesNotHoldThePoolLock(t *testing.T) {
 	f := newFixture(0)
 	release := make(chan struct{})
 	f.drivers["pve"].gate = release
-	f.tick(t)
-	f.scale(0) // takes p.mu while the build is still running
+	f.tickNoWait(t)
+	// A job whose only host is still building waits for a later poll, with no second build.
+	done := make(chan struct{})
+	go func() { f.scale(1); close(done) }()
+	<-done // returns while the build is still running, so p.mu is free
+	if len(f.drivers["pve"].runners) != 0 {
+		t.Fatal("a runner started on a host that is still building")
+	}
 	close(release)
-	f.stop()
-	if f.pool.images["pve"] != "image" {
-		t.Fatalf("images %v", f.pool.images)
+	f.stop() // the build outlives the tick and finishes
+	if f.pool.images["pve"] != "image" || f.drivers["pve"].builds != 1 {
+		t.Fatalf("images %v, builds %d", f.pool.images, f.drivers["pve"].builds)
 	}
 }

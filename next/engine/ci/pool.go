@@ -156,6 +156,8 @@ func (p *Pool) Tick(ctx context.Context, group *sync.WaitGroup) error {
 		return errors.Join(failures...)
 	}
 	// The lock is held across SSH, and --off acts here. A host that hangs must not leave a repository that cannot be turned off.
+	// A build-ahead outlives this pass, so it takes the context Run gave, not the pass's timeout.
+	buildCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, scaleLimit)
 	defer cancel()
 	view, err := p.survey(ctx)
@@ -164,7 +166,7 @@ func (p *Pool) Tick(ctx context.Context, group *sync.WaitGroup) error {
 	}
 	failures = append(failures, view.failures...)
 	for _, host := range view.hosts {
-		p.buildAhead(ctx, host, group)
+		p.buildAhead(buildCtx, host, group)
 	}
 	alive := make(map[contract.RepoName]map[string]bool)
 	for _, host := range view.hosts {
@@ -425,6 +427,10 @@ func (p *Pool) place(ctx context.Context, key scaleSet, assigned int, view surve
 			waiting = append(waiting, store.LifecycleBox{Box: runnerRequest(id, repo.Room, size), Want: store.WantRun, Only: repo.Only})
 			job++
 			continue
+		}
+		if p.building[host] {
+			// Its image is being built ahead. A second build would race the first, so the job takes a later poll.
+			break
 		}
 		name, err := p.start(ctx, key, view.hosts[host], size)
 		var registration jitError
