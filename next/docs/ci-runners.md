@@ -130,9 +130,9 @@ GiB of memory.
 Each runner is a rootless Podman container, built from
 `next/box/images/ci-runner` and set in `next/box/podman/runner.go`:
 
-- **Host:** one host mount, the host's cache, below. No Podman socket, no
-  capabilities, `no-new-privileges`, a read-only image. Its process runs as a
-  subordinate UID on the host, not as the host user.
+- **Host:** two host mounts, the host's cache and the socket of its compiler cache,
+  below. No Podman socket, no capabilities, `no-new-privileges`, a read-only image.
+  Its process runs as a subordinate UID on the host, not as the host user.
 - **Network:** `--network=none`. It has only loopback and no route. The only way
   out is an HTTPS proxy, reached over a Unix socket in the `dyna-ci-egress` volume.
   The proxy (`next/box/egress`) runs on the host and refuses everything but port
@@ -152,15 +152,22 @@ Each runner is a rootless Podman container, built from
   counts against that limit. The one write path that outlives the job is its build
   folder in the host's cache. `/cache` (`DYNA_CI_CACHE`) is the host's cache, the
   folder its boxes mount at `/box/cache`, every room's alike, mounted read-only: a
-  job reads what the boxes fetched, and cannot change what they build from. Inside
-  it, `/cache/ci/N` (`DYNA_CI_BUILD`) is the build folder of the runner's slot, the
-  one writable mount, so a folder such as `CARGO_TARGET_DIR=$DYNA_CI_BUILD/target`
-  stays warm, as on upstream projects' own runners. A slot holds one running runner
-  on its host, and the pool gives slots out under its lock, so two jobs never share
-  a build folder at once, whatever their sizes or repositories. A job sees the other
-  slots' folders read-only. Only the repository's own pushes and pull requests reach
-  the pool. Before a job starts, a build folder over 40 GiB is emptied. Everything
-  else a job wrote dies with it.
+  job reads what the boxes fetched, and cannot change their files. The build folder
+  of the runner's slot, `/cache/ci/N` there, is the one writable mount, at `/build`
+  (`DYNA_CI_BUILD`) in every slot, so a folder such as
+  `CARGO_TARGET_DIR=$DYNA_CI_BUILD/target` stays warm, as on upstream projects' own
+  runners. A slot holds one running runner on its host, and the pool gives slots out
+  under its lock, so two jobs never share a build folder at once, whatever their
+  sizes or repositories. A job sees the other slots' folders read-only. Only the
+  repository's own pushes and pull requests reach the pool. Before a job starts, a
+  build folder over 40 GiB is emptied. Everything else a job wrote dies with it.
+- **Compiler cache:** Cargo compiles through sccache, which reads and writes the
+  host's compiler cache, the one its boxes use, through a socket mounted at
+  `/run/dyna-build-cache` that the entrypoint relays to `127.0.0.1:3129` (spec 5.6).
+  So a job can change what a box links, which the owner accepts. sccache's keys hold
+  the build's paths, so a job finds what another slot's job compiled because every
+  slot's build folder is at `/build`, and what a box compiled only if it uses the
+  boxes' paths. A job that sets `RUSTC_WRAPPER` to nothing builds without it.
 - **Secrets:** the only one is its JIT config. It reaches `podman run` on standard
   input, never argv. Podman keeps it in the container's config, and conmon has it
   in its environment, both readable only by the host user, until the container

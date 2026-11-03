@@ -33,6 +33,8 @@ const (
 	engineSocket = "/run/dyna/engine/engine.sock"
 	piDir        = "/box/pi"
 	shellURL     = "http://127.0.0.1:7781/shell/"
+	// buildCacheSocket is the host's compiler cache. dyna-base's sccache reaches it at 127.0.0.1:7781/build-cache.
+	buildCacheSocket = "/run/dyna/build-cache/cache.sock"
 )
 
 //go:embed extension.js
@@ -206,6 +208,7 @@ func Run(ctx context.Context) error {
 	client.shellJobs = jobs.Running
 	mux := http.NewServeMux()
 	mux.Handle("/shell/", http.StripPrefix("/shell", jobs.Handler()))
+	mux.Handle("/build-cache/", http.StripPrefix("/build-cache", BuildCacheRoute(buildCacheSocket)))
 	mux.Handle("/", ModelRoute(engineSocket))
 	mcpPath := filepath.Join(piDir, "mcp.json")
 	dynaTools, problem := dynamcp.New(client.forward, dynamcp.BoxTools("/run/dyna/agent.sock"), post.Preparer{Dir: workdir, Render: visual.Preview, Upload: func(ctx context.Context, path string) (contract.Attachment, error) {
