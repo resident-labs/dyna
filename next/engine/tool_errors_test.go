@@ -69,7 +69,7 @@ func TestPrOpenNamesTheMissingBranch(t *testing.T) {
 	}
 	s.SetRepositories(&fakeRepos{err: errors.New("no such ref")})
 	_, problem := s.OpSubmit(ctx, sessionCaller(session), contract.OpSubmitRequest{Operation: contract.Operation{Room: record.Room, Kind: "pr.open", Args: contract.PrOpenArgs{Title: "Trial", Base: "main"}}})
-	want := "invalid operation: branch v2/" + string(session) + " not found on owner/repo; head names another branch"
+	want := "invalid operation: branch v2/" + string(session) + " not found on owner/repo; head was not given and defaulted to it; head names another branch"
 	if problem == nil || problem.Code != contract.ErrInvalid || problem.Message != want {
 		t.Fatalf("%+v", problem)
 	}
