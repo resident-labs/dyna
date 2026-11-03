@@ -21,7 +21,7 @@ func TestWebScopeRefusals(t *testing.T) {
 		{"/v1/host.add", "POST", `{}`},
 		{"/v1/files", "GET", ""},
 		{"/v1/terminal", "GET", ""},
-		{"/v1/computers/watch", "GET", ""},
+		{"/v1/computers/stream", "GET", ""},
 		{"/v1/events", "GET", ""},
 		{"/v1/shell/watch", "GET", ""},
 		{"/v1/op.submit", "POST", `{"operation":{"kind":"pr.open","args":{"title":"t","body":"b","base":"main","draft":false}}}`},

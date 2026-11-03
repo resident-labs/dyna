@@ -29,7 +29,7 @@ var methodTable = []MethodEntry{
 	method(contract.MethodBoxStats, contract.ScopeRead, OwnerAccess),
 	method(contract.MethodBoxStatsReport, contract.ScopeRead, BoxAccess),
 	method(contract.MethodComputerChanged, contract.ScopeRead, BoxAccess),
-	method(contract.MethodComputerInput, contract.ScopeComputers, OwnerAccess),
+	method(contract.MethodComputerStart, contract.ScopeComputers, OwnerAccess),
 	method(contract.MethodConnectCancel, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodConnectStart, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodConnectStatus, contract.ScopeAdmin, OwnerAccess),

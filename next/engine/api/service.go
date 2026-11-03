@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"github.com/resident-labs/dyna/contract"
-	"io"
 )
 
 // Caller is fixed by the listener, not by a request body.
@@ -41,9 +40,8 @@ type Service interface {
 	BoxStats(context.Context, contract.Principal, contract.BoxStatsRequest) (contract.BoxStatsResponse, *contract.Error)
 	BoxStatsReport(context.Context, contract.Principal, contract.BoxStatsReportRequest) (contract.BoxStatsReportResponse, *contract.Error)
 	ComputerChanged(context.Context, contract.Principal, contract.ComputerChangedRequest) (contract.ComputerChangedResponse, *contract.Error)
-	ComputerWatch(context.Context, contract.SessionID) (<-chan []byte, *contract.Error)
-	ComputerInput(context.Context, contract.Principal, contract.ComputerInputRequest) (contract.ComputerInputResponse, *contract.Error)
-	ComputerFrames(context.Context, contract.Principal, uint64, io.Reader) *contract.Error
+	ComputerStart(context.Context, contract.Principal, contract.ComputerStartRequest) (contract.ComputerStartResponse, *contract.Error)
+	ComputerStream(context.Context, contract.SessionID) ([]string, func(), *contract.Error)
 	RoomSetLimits(context.Context, contract.Principal, contract.RoomSetLimitsRequest) (contract.RoomSetLimitsResponse, *contract.Error)
 	RoomPause(context.Context, contract.Principal, contract.RoomPauseRequest) (contract.RoomPauseResponse, *contract.Error)
 	SessionStop(context.Context, contract.Principal, contract.SessionStopRequest) (contract.SessionStopResponse, *contract.Error)

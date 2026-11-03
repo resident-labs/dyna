@@ -23,6 +23,8 @@ type BoxAdapter interface {
 	MaintainHost(context.Context, contract.HostName) error
 	Inspect(context.Context, contract.BoxID) (box.ContainerStatus, bool, error)
 	TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error)
+	// ExecArgv runs a command in a box with no terminal, so its stdin and stdout carry bytes as they are.
+	ExecArgv(context.Context, contract.HostName, contract.BoxID, ...string) ([]string, error)
 	Create(context.Context, BoxSpec) (string, error)
 	CurrentImage(context.Context, contract.SessionID, contract.HostName) (box.Image, error)
 	Remove(context.Context, contract.BoxID) error
