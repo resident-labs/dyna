@@ -685,7 +685,7 @@ func forbidden() *contract.Error {
 func writeError(w http.ResponseWriter, err *contract.Error) {
 	status := http.StatusInternalServerError
 	switch err.Code {
-	case contract.ErrInvalid, contract.ErrCrossRoomAttachment:
+	case contract.ErrInvalid, contract.ErrCrossRoomAttachment, contract.ErrCommandTooLong:
 		status = http.StatusBadRequest
 	case contract.ErrForbidden, contract.ErrNoGrant:
 		status = http.StatusForbidden
