@@ -32,7 +32,10 @@ func scanOperation(row operationRow) (StoredOperation, error) {
 		return r, err
 	}
 	o.Room = contract.RoomID(room.String)
-	o.Created, o.Expires = time.UnixMilli(created).UTC(), time.UnixMilli(expires).UTC()
+	o.Created = time.UnixMilli(created).UTC()
+	if expires != 0 { // zero means the request never expires
+		o.Expires = time.UnixMilli(expires).UTC()
+	}
 	if err := json.Unmarshal(card, &o.Card); err != nil {
 		return r, err
 	}
@@ -86,7 +89,7 @@ func (s *Store) Operations(ctx context.Context, room contract.RoomID, state cont
 	} else if due.IsZero() {
 		rows, err = s.read.QueryContext(ctx, query+" WHERE state=? ORDER BY created_at,id", state)
 	} else {
-		rows, err = s.read.QueryContext(ctx, query+" WHERE state=? AND expires_at<=? ORDER BY expires_at,id", state, due.UnixMilli())
+		rows, err = s.read.QueryContext(ctx, query+" WHERE state=? AND expires_at>0 AND expires_at<=? ORDER BY expires_at,id", state, due.UnixMilli())
 	}
 	if err != nil {
 		return nil, err
@@ -155,7 +158,11 @@ func (s *Store) InsertOperation(tx *sql.Tx, record StoredOperation, event contra
 		return err
 	}
 	hash := sha256.Sum256(record.Args)
-	_, err = tx.Exec("INSERT INTO operations("+operationColumns+",args_sha256) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", o.ID, o.Kind, sql.NullString{String: string(o.Room), Valid: o.Room != ""}, o.By.Kind, o.By.Session, o.Class, o.State, card, []byte(record.Args), o.Created.UnixMilli(), o.Expires.UnixMilli(), nullableJSON(o.Decision != nil, decision), nullableJSON(o.Result != nil, result), hash[:])
+	var expires int64
+	if !o.Expires.IsZero() {
+		expires = o.Expires.UnixMilli()
+	}
+	_, err = tx.Exec("INSERT INTO operations("+operationColumns+",args_sha256) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", o.ID, o.Kind, sql.NullString{String: string(o.Room), Valid: o.Room != ""}, o.By.Kind, o.By.Session, o.Class, o.State, card, []byte(record.Args), o.Created.UnixMilli(), expires, nullableJSON(o.Decision != nil, decision), nullableJSON(o.Result != nil, result), hash[:])
 	if err != nil {
 		return err
 	}
@@ -226,7 +233,7 @@ func (s *Store) SubmitOperation(ctx context.Context, record StoredOperation, req
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		if err == nil && !found.Operation.Expires.After(now) {
+		if err == nil && !found.Operation.Expires.IsZero() && !found.Operation.Expires.After(now) {
 			if err := s.expireOperation(tx, found.Operation, expiry); err != nil {
 				return err
 			}
@@ -253,7 +260,7 @@ func (s *Store) SubmitOperation(ctx context.Context, record StoredOperation, req
 
 func (s *Store) DecideOperation(ctx context.Context, op contract.Operation, state contract.OpState, decision contract.Decision, event contract.Event, deliveries []contract.Delivery, now func() time.Time, expiry OperationExpiry) (expired, changed bool, err error) {
 	err = s.Write(ctx, func(tx *sql.Tx) error {
-		if !op.Expires.After(now()) {
+		if !op.Expires.IsZero() && !op.Expires.After(now()) {
 			expired = true
 			return s.expireOperation(tx, op, expiry)
 		}
@@ -266,6 +273,45 @@ func (s *Store) DecideOperation(ctx context.Context, op contract.Operation, stat
 
 func (s *Store) ExpireOperation(ctx context.Context, op contract.Operation, expiry OperationExpiry) error {
 	return s.Write(ctx, func(tx *sql.Tx) error { return s.expireOperation(tx, op, expiry) })
+}
+
+// withdrawGrantRequests ends the pending host exec grant requests of sessions that are closing, whether they asked or were asked for.
+func (s *Store) withdrawGrantRequests(ctx context.Context, tx *sql.Tx, at time.Time) error {
+	engine := contract.Principal{Kind: contract.PrincipalEngine}
+	decision := contract.Decision{By: engine, Reason: "session closed", At: at}
+	data, err := json.Marshal(decision)
+	if err != nil {
+		return err
+	}
+	rows, err := tx.QueryContext(ctx, `UPDATE operations SET state=?1, decision=?2 WHERE state='pending' AND kind='hostexec.grant' AND (
+		(by_kind='session' AND by_id IN (SELECT id FROM sessions WHERE state='closing'))
+		OR json_extract(CAST(args AS TEXT),'$.to.session') IN (SELECT id FROM sessions WHERE state='closing')) RETURNING id,COALESCE(room,'')`,
+		contract.OpWithdrawn, data)
+	if err != nil {
+		return err
+	}
+	var events []contract.Event
+	for rows.Next() {
+		var id contract.OpID
+		var room contract.RoomID
+		if err := rows.Scan(&id, &room); err != nil {
+			rows.Close()
+			return err
+		}
+		events = append(events, contract.Event{ID: contract.EventID("ev_" + string(id) + "_closed"), Time: at, Room: room, From: engine, Body: contract.OpDecided{ID: id, State: contract.OpWithdrawn, Decision: decision}})
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, event := range events {
+		if _, err := s.AppendEvent(tx, event); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) ChangeOperation(ctx context.Context, id contract.OpID, from, to contract.OpState, result *contract.OpResult, event contract.Event, deliveries []contract.Delivery) (changed bool, err error) {
