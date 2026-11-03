@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	boxhostexec "github.com/resident-labs/dyna/box/hostexec"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/hostexec"
@@ -103,7 +102,7 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 			out, code, truncated, err := s.hostexec.RunHostexec(runCtx, a, op)
 			cancel()
 			stopped := store.HostexecStop("")
-			if err != nil && !errors.Is(err, boxhostexec.ErrHostBusy) {
+			if err != nil {
 				stopped = store.HostexecLost
 			} else if err == nil && (code == 137 || code == 143) && !s.now().Before(started.Add(time.Duration(a.Timeout)*time.Millisecond)) {
 				// A signal-like exit at the deadline is treated as RuntimeMaxSec expiry.
@@ -116,9 +115,6 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 			if err != nil {
 				result.Error = err.Error()
 				result.Cause = contract.CauseHostLost
-				if errors.Is(err, boxhostexec.ErrHostBusy) {
-					result.Cause = contract.CauseHostBusy
-				}
 			}
 			if len(out) > 64<<10 {
 				rest := out[64<<10:]
