@@ -51,6 +51,8 @@ var steps = map[int][]string{
 	// Backups are gone, so nothing records an off-host copy.
 	80: {`DROP TABLE backup_copy_status`},
 	82: {`ALTER TABLE hosts ADD COLUMN disk_total INTEGER NOT NULL DEFAULT 0`},
+	// A host added exec only takes host-exec runs and nothing else, whatever its switches say.
+	83: {`ALTER TABLE hosts ADD COLUMN exec_only INTEGER NOT NULL DEFAULT 0`},
 	81: {
 		`ALTER TABLE hosts ADD COLUMN create_failures INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE hosts ADD COLUMN create_problem TEXT NOT NULL DEFAULT ''`,

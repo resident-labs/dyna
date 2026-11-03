@@ -185,19 +185,20 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 				out = out[:64<<10]
 			}
 			result.Output = strings.ToValidUTF8(string(out), "�")
-			if err == nil {
-				collectCtx, cancel := s.hostexecTimeout(ctx, 2*time.Minute+15*time.Second)
-				tar, _, tarTruncated, e := s.hostexec.RunHostexec(collectCtx, boxhostexec.CollectArgs(a, op), op+"-out")
-				cancel()
-				switch {
-				case e != nil || len(tar) == 0:
-				case tarTruncated:
-					result.Output += "\n[files in $DYNA_OUT exceed 8 MiB: not copied back]"
-				default:
-					result.OutFiles, _, e = s.saveFile(ctx, a.Room, bytes.NewReader(tar), int64(len(tar)))
-					if e != nil {
-						return contract.OpResult{Cause: contract.CauseInternal, Error: e.Error()}
-					}
+			// The folder is read back and removed whatever became of the run, so a stopped or lost run leaves none behind.
+			collectCtx, cancel := s.hostexecTimeout(context.WithoutCancel(ctx), 2*time.Minute+15*time.Second)
+			tar, collectCode, tarTruncated, e := s.hostexec.RunHostexec(collectCtx, boxhostexec.CollectArgs(a, op), op+"-out")
+			cancel()
+			switch {
+			case e != nil || collectCode != 0:
+				result.Output += "\n[$DYNA_OUT could not be read back, and may remain on the host]"
+			case len(tar) == 0:
+			case tarTruncated:
+				result.Output += "\n[files in $DYNA_OUT exceed 8 MiB: not copied back]"
+			default:
+				result.OutFiles, _, e = s.saveFile(ctx, a.Room, bytes.NewReader(tar), int64(len(tar)))
+				if e != nil {
+					return contract.OpResult{Cause: contract.CauseInternal, Error: e.Error()}
 				}
 			}
 			return result

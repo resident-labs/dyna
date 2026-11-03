@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -31,13 +32,18 @@ func (f *outHostexec) RunHostexec(_ context.Context, a contract.HostexecRunArgs,
 }
 func (*outHostexec) StopHostexec(context.Context, contract.HostName, string) error { return nil }
 
-func runOn(t *testing.T, host contract.HostName, runner *outHostexec) *contract.OpResult {
+func runOn(t *testing.T, host contract.HostName, runner *outHostexec, via ...HostexecRunner) *contract.OpResult {
 	t.Helper()
 	s, _, root, ctx := setupRoot(t)
-	if err := s.store.AddHost(ctx, box.Host{Name: "omarchy", State: box.HostReady, NoAgents: true, CheckedAt: s.now()}); err != nil {
+	s.SetLayout(box.Layout{Data: t.TempDir()})
+	if err := s.store.AddHost(ctx, box.Host{Name: "omarchy", State: box.HostReady, NoAgents: true, ExecOnly: true, CheckedAt: s.now()}); err != nil {
 		t.Fatal(err)
 	}
-	s.SetHostexecRunner(runner)
+	if len(via) > 0 {
+		s.SetHostexecRunner(via[0])
+	} else {
+		s.SetHostexecRunner(runner)
+	}
 	if err := s.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.run": s.HostexecRunEntry()}, time.Hour); err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +87,7 @@ func TestHostexecOutFilesOverTheCap(t *testing.T) {
 func TestHostSetPromotesAnExecOnlyHost(t *testing.T) {
 	s, _, _, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	if err := s.store.AddHost(ctx, box.Host{Name: "omarchy", State: box.HostReady, NoAgents: true, CheckedAt: s.now()}); err != nil {
+	if err := s.store.AddHost(ctx, box.Host{Name: "omarchy", State: box.HostReady, NoAgents: true, ExecOnly: true, CheckedAt: s.now()}); err != nil {
 		t.Fatal(err)
 	}
 	on := true
@@ -89,7 +95,10 @@ func TestHostSetPromotesAnExecOnlyHost(t *testing.T) {
 	var fail error
 	s.SetHostPromoter(func(_ context.Context, name contract.HostName, admin bool) error {
 		checked = append(checked, admin)
-		return fail
+		if fail != nil {
+			return fail
+		}
+		return s.store.SetHostChecked(ctx, box.Host{Name: name, CheckedAt: s.now()})
 	})
 	fail = errors.New("host check paths: podman missing")
 	if _, problem := s.HostSet(ctx, owner, contract.HostSetRequest{Host: "omarchy", Agents: &on}); problem == nil || problem.Code != contract.ErrInvalid {
@@ -109,4 +118,43 @@ func TestHostSetPromotesAnExecOnlyHost(t *testing.T) {
 	if _, problem := s.HostSet(ctx, owner, contract.HostSetRequest{Host: "omarchy", CI: &on}); problem != nil || len(checked) != 2 {
 		t.Fatalf("%v checks %v", problem, checked)
 	}
+}
+
+// A host with both switches off that was not added exec only stays a full host: no desktop environment, and the full probe.
+func TestBothSwitchesOffIsNotExecOnly(t *testing.T) {
+	s, _, _, ctx := setup(t)
+	if err := s.store.AddHost(ctx, box.Host{Name: "off", State: box.HostReady, NoAgents: true, CheckedAt: s.now()}); err != nil {
+		t.Fatal(err)
+	}
+	if only, err := s.store.ExecOnly(ctx, "off"); err != nil || only {
+		t.Fatalf("exec only %v %v", only, err)
+	}
+	list, problem := s.HostList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.HostListRequest{})
+	if problem != nil || list.Hosts[len(list.Hosts)-1].ExecOnly {
+		t.Fatalf("%+v %v", list, problem)
+	}
+}
+
+// The folder is collected and removed after a lost run too, and a failed collect is said in the output.
+func TestHostexecCollectsAfterALostRunAndReportsFailure(t *testing.T) {
+	runner := &lostThenFailHostexec{}
+	result := runOn(t, "omarchy", &runner.outHostexec, runner)
+	if len(runner.runs) != 2 || !runner.runs[1].Collect {
+		t.Fatalf("runs %+v", runner.runs)
+	}
+	if !strings.Contains(result.Output, "could not be read back") {
+		t.Fatalf("output %q", result.Output)
+	}
+}
+
+type lostThenFailHostexec struct{ outHostexec }
+
+func (f *lostThenFailHostexec) RunHostexec(ctx context.Context, a contract.HostexecRunArgs, op contract.OpID) ([]byte, int, bool, error) {
+	f.mu.Lock()
+	f.runs = append(f.runs, a)
+	f.mu.Unlock()
+	if a.Collect {
+		return nil, 3, false, nil
+	}
+	return nil, 0, false, errors.New("ssh: no route")
 }
