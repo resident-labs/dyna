@@ -347,7 +347,7 @@ func (s *Service) AddonGlobal() approve.Entry {
 			if input.RootOnly {
 				detail = append(detail, "root sessions only")
 			}
-			return contract.Card{Title: "asks to add " + kind + " for every room", Body: strings.Join(detail, "\n")}
+			return contract.Card{Title: "asks to add " + kind + " for every room", Body: strings.Join(detail, "\n"), RootOnly: input.RootOnly}
 		},
 		Check: func(ctx context.Context, args contract.OpArgs, _ contract.Principal) error {
 			input := args.(contract.AddonGlobalArgs)
