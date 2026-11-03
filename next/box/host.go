@@ -37,7 +37,7 @@ type ContainerSpec struct {
 }
 
 // ContainerLayout identifies the mount layout created by the current engine.
-const ContainerLayout = "4"
+const ContainerLayout = "5"
 
 type ContainerStatus struct {
 	Box         contract.BoxID
@@ -59,14 +59,14 @@ const RunnerSlots = 16
 const EgressSocket = "egress.sock"
 
 // RunnerSpec is one ephemeral CI runner. Config is its single-job JIT config, a secret. Cache is the host's cache folder,
-// which its boxes mount at /box/cache.
+// which its boxes mount at /box/cache, and BuildCache the folder of the socket of its compiler cache.
 type RunnerSpec struct {
 	Name, Image, Config string
 	Repo                contract.RepoName
 	ID                  int64 // GitHub's runner ID
 	Slot                int
 	Size                contract.BoxSize
-	Cache               string
+	Cache, BuildCache   string
 }
 
 // Runner is a runner container found on a host.

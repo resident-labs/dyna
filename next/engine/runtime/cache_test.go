@@ -4,6 +4,7 @@ import (
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/engine/lifecycle"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -25,15 +26,13 @@ func TestContainerMountsRoomSharedReadWrite(t *testing.T) {
 func TestContainerSharesDependencyCaches(t *testing.T) {
 	b := &Boxes{Layout: box.Layout{HostData: "/host"}}
 	_, c := b.container(lifecycle.BoxSpec{}, "image", box.Mount{})
-	want := box.Mount{HostPath: "/host/cache", BoxPath: "/box/cache"}
-	found := false
-	for _, mount := range c.Mounts {
-		if mount == want {
-			found = true
+	for _, want := range []box.Mount{
+		{HostPath: "/host/cache", BoxPath: "/box/cache"},
+		{HostPath: "/host/sock/build-cache", BoxPath: "/run/dyna/build-cache", ReadOnly: true, MakeDir: true},
+	} {
+		if !slices.Contains(c.Mounts, want) {
+			t.Fatalf("mounts miss %#v: %#v", want, c.Mounts)
 		}
-	}
-	if !found {
-		t.Fatalf("mounts: %#v", c.Mounts)
 	}
 	env := []box.EnvVar{{Name: "GOMODCACHE", Value: "/box/cache/gomod"}, {Name: "GOCACHE", Value: "/box/cache/gocache"}, {Name: "CARGO_HOME", Value: "/box/cache/cargo"}, {Name: "npm_config_store_dir", Value: "/box/cache/pnpm"}}
 	if !reflect.DeepEqual(c.Env, env) {
