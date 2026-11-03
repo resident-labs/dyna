@@ -480,6 +480,7 @@ func TestAddExecOnlyHostNeedsOnlyBash(t *testing.T) {
 	if !added.ExecOnly || added.State != box.HostReady || added.EngineHost == nil {
 		t.Fatalf("record %+v", added)
 	}
+}
 
 func TestRootOnlyAddonsAreMountedOnlyInARootsBox(t *testing.T) {
 	b := &Boxes{Layout: box.Layout{HostData: "/host"}}
