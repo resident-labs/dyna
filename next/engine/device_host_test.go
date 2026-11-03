@@ -63,3 +63,32 @@ func TestDeviceSetHostRefusesWhatItCannotName(t *testing.T) {
 		t.Fatalf("unknown device: %+v", problem)
 	}
 }
+
+func TestAuthenticatedDeviceCarriesItsHost(t *testing.T) {
+	s, _, _, ctx := setup(t)
+	if err := s.store.AddHost(ctx, box.Host{Name: "omarchy", State: box.HostReady, NoAgents: true, CheckedAt: s.now()}); err != nil {
+		t.Fatal(err)
+	}
+	now := s.now()
+	hash := [32]byte{9}
+	if err := s.store.CreateDevice(ctx, store.Device{ID: "dev_a", Name: "a", TokenHash: hash, PairedAt: now, LastSeenAt: now, ExpiresAt: s.now().Add(time.Hour), Scopes: store.FullDeviceScopes}); err != nil {
+		t.Fatal(err)
+	}
+	host := func() contract.HostName {
+		t.Helper()
+		device, valid, err := s.store.AuthenticateDevice(ctx, hash, now)
+		if err != nil || !valid {
+			t.Fatal(valid, err)
+		}
+		return device.Host
+	}
+	if got := host(); got != "" {
+		t.Fatalf("before: %q", got)
+	}
+	if _, problem := s.DeviceSetHost(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.DeviceSetHostRequest{ID: "dev_a", Host: "omarchy"}); problem != nil {
+		t.Fatal(problem)
+	}
+	if got := host(); got != "omarchy" {
+		t.Fatalf("after: %q", got)
+	}
+}
