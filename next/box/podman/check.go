@@ -89,7 +89,7 @@ func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
 		result.Items = append(result.Items, item)
 	}
 	if !o.AdminOnly {
-		add(CheckAdmin, fmt.Errorf("owner did not confirm exclusive administration"))
+		add(CheckAdmin, fmt.Errorf("the owner did not confirm that only they administer the machine (--owner-only-admin)"))
 	} else {
 		add(CheckAdmin, nil)
 	}

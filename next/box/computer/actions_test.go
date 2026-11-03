@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -291,5 +292,42 @@ func TestInputActionsSendOneXdotoolChain(t *testing.T) {
 		if result.Text == "" {
 			t.Errorf("%s says nothing", tc.action)
 		}
+	}
+}
+
+// A desktop that takes the connection but sends no picture, as with Chromium busy loading a page, ends a screenshot as a
+// typed error that says so, not as the connection's raw read timeout.
+func TestCaptureTellsADesktopThatSentNoFrame(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "vnc.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		r := bufio.NewReader(conn)
+		read := func(n int) { _, _ = io.ReadFull(r, make([]byte, n)) }
+		_, _ = conn.Write([]byte("RFB 003.008\n\x01\x01"))
+		read(12 + 1)
+		_, _ = conn.Write([]byte{0, 0, 0, 0})
+		read(1)
+		_, _ = conn.Write(append([]byte{0, 1, 0, 1}, make([]byte, 20)...))
+		_, _ = io.Copy(io.Discard, r) // takes the picture request and never answers it
+	}()
+	previous := captureTimeout
+	captureTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { captureTimeout = previous })
+	_, err = Capture(context.Background(), socket, Rect{})
+	var noFrame *NoFrameError
+	if !errors.As(err, &noFrame) || noFrame.Within != captureTimeout {
+		t.Fatalf("error %v", err)
+	}
+	if !strings.HasPrefix(err.Error(), "the desktop sent no frame within 0.1 s") || !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("text %q", err)
 	}
 }

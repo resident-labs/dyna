@@ -74,7 +74,7 @@ func (s *serviceWithHosts) HostAdd(ctx context.Context, caller contract.Principa
 		return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "a host name is letters, digits, hyphens and underscores, and its ssh is user@host"}
 	}
 	if !req.OwnerOnlyAdmin && !req.ExecOnly() {
-		return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "owner-only administration is required"}
+		return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "--owner-only-admin is required: it confirms that only the owner administers the machine, which a host that runs boxes or CI runners needs; a host added with --agents off --ci off (exec only) does not"}
 	}
 	for i, room := range req.Rooms {
 		if room == "" || slices.Contains(req.Rooms[:i], room) {

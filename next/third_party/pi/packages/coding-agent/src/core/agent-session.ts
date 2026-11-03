@@ -2340,7 +2340,7 @@ export class AgentSession {
 					role: "toolResult",
 					toolCallId: block.id,
 					toolName: block.name,
-					content: [{ type: "text", text: "interrupted; state unknown" }],
+					content: [{ type: "text", text: "interrupted: the session restarted while this call ran, so whether it finished is unknown, and it is not run again. A command it started on another machine can still be running there" }],
 					isError: true,
 					timestamp: Date.now(),
 				};

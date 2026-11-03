@@ -214,6 +214,7 @@ describe("McpClient", () => {
 		const aborted = client.callTool("wait", {}, { signal: controller.signal });
 		controller.abort("stop");
 		await expect(aborted).rejects.toBeInstanceOf(McpAbortError);
+		await expect(aborted).rejects.toThrow(/^MCP request aborted: the caller stopped it.*server was asked to cancel it/);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(server.messages).toContainEqual({
 			jsonrpc: "2.0",
