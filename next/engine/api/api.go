@@ -7,9 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
-	"net/textproto"
 	"reflect"
 	"strconv"
 	"time"
@@ -354,44 +352,11 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 	})
 	call(mux, contract.MethodComputerChanged, c, a.service.ComputerChanged)
-	// Input is a batched POST, not a WebSocket: the watch stream is one-way HTTP, a batch keeps a
-	// mouse-move flood to one request per frame, and POST needs no new socket handling in the web listener.
-	call(mux, contract.MethodComputerInput, c, func(ctx context.Context, p contract.Principal, req contract.ComputerInputRequest) (contract.ComputerInputResponse, *contract.Error) {
-		if req.Session == "" || req.Frame.Width < 1 || req.Frame.Width > 16384 || req.Frame.Height < 1 || req.Frame.Height > 16384 || len(req.Events) == 0 || len(req.Events) > 256 {
-			return contract.ComputerInputResponse{}, invalid()
+	call(mux, contract.MethodComputerStart, c, func(ctx context.Context, p contract.Principal, req contract.ComputerStartRequest) (contract.ComputerStartResponse, *contract.Error) {
+		if req.Session == "" {
+			return contract.ComputerStartResponse{}, invalid()
 		}
-		for _, e := range req.Events {
-			ok := false
-			switch e.Kind {
-			case contract.InputKeyDown, contract.InputKeyUp:
-				ok = e.Key != "" && len(e.Key) <= 32
-			case contract.InputChar:
-				ok = e.Text != "" && len(e.Text) <= 1024
-			case contract.InputMouseMove, contract.InputWheel:
-				ok = true
-			case contract.InputMouseDown, contract.InputMouseUp:
-				ok = e.Button == contract.ButtonLeft || e.Button == contract.ButtonMiddle || e.Button == contract.ButtonRight
-			}
-			if !ok || e.X < 0 || e.X > float64(req.Frame.Width) || e.Y < 0 || e.Y > float64(req.Frame.Height) || e.Modifiers < 0 || e.Modifiers > 15 {
-				return contract.ComputerInputResponse{}, invalid()
-			}
-		}
-		return a.service.ComputerInput(ctx, p, req)
-	})
-	mux.HandleFunc("POST /v1/computers/frames", func(w http.ResponseWriter, r *http.Request) {
-		c := requestCaller(r.Context(), c)
-		if !box(c) {
-			writeError(w, forbidden())
-			return
-		}
-		generation, err := strconv.ParseUint(r.URL.Query().Get("generation"), 10, 64)
-		if err != nil || generation == 0 {
-			writeError(w, invalid())
-			return
-		}
-		if err := a.service.ComputerFrames(r.Context(), c.Principal, generation, r.Body); err != nil {
-			writeError(w, err)
-		}
+		return a.service.ComputerStart(ctx, p, req)
 	})
 	mux.HandleFunc("GET /v1/terminal", func(w http.ResponseWriter, r *http.Request) {
 		c := requestCaller(r.Context(), c)
@@ -415,10 +380,9 @@ func (a *API) handler(c Caller) http.Handler {
 		defer release()
 		terminal(w, r, argv, uint16(cols), uint16(rows))
 	})
-	mux.HandleFunc("GET /v1/computers/watch", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/computers/stream", func(w http.ResponseWriter, r *http.Request) {
 		c := requestCaller(r.Context(), c)
-		w.Header().Set("Cache-Control", "no-store")
-		if !owner(c) || !c.Web || !hasScope(c, contract.ScopeComputers) {
+		if !owner(c) || !hasScope(c, contract.ScopeComputers) {
 			writeError(w, forbidden())
 			return
 		}
@@ -427,31 +391,13 @@ func (a *API) handler(c Caller) http.Handler {
 			writeError(w, invalid())
 			return
 		}
-		frames, err := a.service.ComputerWatch(r.Context(), session)
+		argv, release, err := a.service.ComputerStream(r.Context(), session)
 		if err != nil {
 			writeError(w, err)
 			return
 		}
-		multi := multipart.NewWriter(w)
-		_ = multi.SetBoundary("frame")
-		w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
-		w.WriteHeader(http.StatusOK)
-		f, ok := w.(http.Flusher)
-		if !ok {
-			return
-		}
-		f.Flush()
-		header := textproto.MIMEHeader{"Content-Type": []string{"image/jpeg"}}
-		for frame := range frames {
-			part, err := multi.CreatePart(header)
-			if err != nil {
-				return
-			}
-			if _, err = part.Write(frame); err != nil {
-				return
-			}
-			f.Flush()
-		}
+		defer release()
+		computerStream(w, r, argv)
 	})
 	call(mux, contract.MethodBoxHello, c, a.service.BoxHello)
 	call(mux, contract.MethodBoxCompacted, c, a.service.BoxCompacted)

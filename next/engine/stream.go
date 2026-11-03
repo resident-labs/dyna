@@ -176,7 +176,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 		roomID, stopped = handle.ClearComputer()
 		handle.ClearShell()
 	}
-	channel := live.NewChannel(stop, ctx.Done())
+	channel := live.NewChannel(stop)
 	handle.SetChannel(channel)
 	stale := binary != "" && s.binary != "" && binary != s.binary
 	handle.SetStale(stale)
@@ -211,12 +211,6 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 			defer close(pumpDone)
 			for {
 				select {
-				case batch := <-channel.Inputs():
-					select {
-					case out <- contract.BoxMessage{Body: batch}:
-					case <-ctx.Done():
-						return
-					}
 				case ask := <-channel.Asks():
 					select {
 					case out <- contract.BoxMessage{Body: contract.BoxStatsAsk{Ask: ask}}:
@@ -248,12 +242,10 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 				archiveSent = false
 			}
 			compactTurn, compact := channel.TakeCompact()
-			desired := handle.ComputerWatchGeneration()
 			shellDesired := handle.ShellWatchGeneration()
-			computerChanged, shellChanged := channel.WatchChanges(desired, shellDesired)
+			shellChanged := channel.ShellWatchChanged(shellDesired)
 			handle.Unlock()
-			if !sendWatch(ctx, out, computerChanged, desired, contract.ComputerWatchStart{Generation: desired}, contract.ComputerWatchStop{}) ||
-				!sendWatch(ctx, out, shellChanged, shellDesired, contract.ShellWatchStart{Generation: shellDesired}, contract.ShellWatchStop{}) {
+			if !sendWatch(ctx, out, shellChanged, shellDesired, contract.ShellWatchStart{Generation: shellDesired}, contract.ShellWatchStop{}) {
 				reason, cause = streamWatchStopped, ctx.Err()
 				return
 			}

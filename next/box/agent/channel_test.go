@@ -37,7 +37,7 @@ func TestChannelReportsBinaryOnEveryConnection(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = append(seen, r.URL.Query().Get("binary"))
 		if len(seen) == 2 {
-			_, _ = w.Write([]byte("{\"type\":\"computer.watch.stop\",\"body\":{}}\n"))
+			_, _ = w.Write([]byte("{\"type\":\"shell.watch.stop\",\"body\":{}}\n"))
 		}
 	}))
 	defer server.Close()

@@ -72,7 +72,7 @@ export type InstructionsGetRequest = { room?: RoomID; };
 export type InstructionsGetResponse = { text: string; hash: string; savedAt?: string | null; };
 export type InstructionsSetRequest = { room?: RoomID; text: string; base: string; };
 export type InstructionsSetResponse = { hash: string; };
-export type Method = "addon.list" | "addon.set_enabled" | "box.notice" | "mcp.add" | "mcp.list" | "mcp.remove" | "package.add" | "package.list" | "package.remove" | "skill.list" | "skill.remove" | "skill.save" | "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "proxy.key" | "proxy.usage" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.set" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.refresh" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.compacted" | "box.hello" | "computer.changed" | "computer.input" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.job.running" | "shell.output" | "box.stats" | "box.stats.report" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "hostexec.stop" | "issue.list" | "issue.status" | "issue.track" | "issue.untrack" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pool.add" | "pool.list" | "pool.remove" | "room.hosts" | "host.remove" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "session.responsibilities" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled" | "workflow.run" | "workflow.reload" | "workflow.status" | "workflow.step" | "workflow.list" | "workflow.pin" | "workflow.step_start" | "workflow.step_end" | "workflow.step_transcript" | "workflow.set_status";
+export type Method = "addon.list" | "addon.set_enabled" | "box.notice" | "mcp.add" | "mcp.list" | "mcp.remove" | "package.add" | "package.list" | "package.remove" | "skill.list" | "skill.remove" | "skill.save" | "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "proxy.key" | "proxy.usage" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.set" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.refresh" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.compacted" | "box.hello" | "computer.changed" | "computer.start" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.job.running" | "shell.output" | "box.stats" | "box.stats.report" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "hostexec.stop" | "issue.list" | "issue.status" | "issue.track" | "issue.untrack" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pool.add" | "pool.list" | "pool.remove" | "room.hosts" | "host.remove" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "session.responsibilities" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled" | "workflow.run" | "workflow.reload" | "workflow.status" | "workflow.step" | "workflow.list" | "workflow.pin" | "workflow.step_start" | "workflow.step_end" | "workflow.step_transcript" | "workflow.set_status";
 export type ErrorCode = "podman_required" | "invalid" | "unknown_action" | "not_found" | "forbidden" | "conflict" | "room_limited" | "profile_exists" | "move_busy" | "has_children" | "parent_closing" | "session_closing" | "stale" | "github_quota" | "visual_superseded" | "unavailable" | "reconnect_unavailable" | "models_unavailable" | "store_from_v1" | "store_too_old" | "no_grant";
 export type Error = { code: ErrorCode; message: string; visual?: VisualSuperseded | null; limited?: RoomLimited | null; };
 export type VisualSuperseded = { event: EventID; version: number; seq: number; };
@@ -193,16 +193,8 @@ export type TurnStart = { sections: Array<ContextSection> | null; turn: TurnID; 
 export type TurnQueue = "steer" | "follow_up";
 export type TurnSteer = { input: TurnInput; queue: TurnQueue; };
 export type TurnStop = { turn: TurnID; reason: string; };
-export type ComputerWatchStart = { generation: number; };
-export type ComputerWatchStop = { };
-export type ComputerInputKind = "key.down" | "key.up" | "char" | "mouse.move" | "mouse.down" | "mouse.up" | "wheel";
-export type MouseButton = "left" | "middle" | "right";
-export type InputModifiers = number;
-export type FrameSize = { width: number; height: number; };
-export type ComputerInput = { kind: ComputerInputKind; key?: string; code?: string; text?: string; modifiers?: InputModifiers; button?: MouseButton; x: number; y: number; deltaX?: number; deltaY?: number; };
-export type ComputerInputRequest = { session: SessionID; frame: FrameSize; events: Array<ComputerInput> | null; };
-export type ComputerInputResponse = { };
-export type ComputerInputBatch = { frame: FrameSize; events: Array<ComputerInput> | null; };
+export type ComputerStartRequest = { session: SessionID; };
+export type ComputerStartResponse = { };
 export type ShellWatchStart = { generation: number; };
 export type ShellWatchStop = { };
 export type ShellOutputRequest = { generation: number; jobs: Array<ShellJobOutput> | null; };
@@ -599,9 +591,6 @@ export type BoxMessageBody =
   | { type: "archive"; body: Archive }
   | { type: "box.stats.ask"; body: BoxStatsAsk }
   | { type: "compact"; body: Compact }
-  | { type: "computer.input"; body: ComputerInputBatch }
-  | { type: "computer.watch.start"; body: ComputerWatchStart }
-  | { type: "computer.watch.stop"; body: ComputerWatchStop }
   | { type: "shell.watch.start"; body: ShellWatchStart }
   | { type: "shell.watch.stop"; body: ShellWatchStop }
   | { type: "turn.start"; body: TurnStart }
@@ -677,7 +666,7 @@ export interface MethodMap {
   "box.compacted": { request: BoxCompactedRequest; response: BoxCompactedResponse };
   "box.hello": { request: BoxHelloRequest; response: BoxHelloResponse };
   "computer.changed": { request: ComputerChangedRequest; response: ComputerChangedResponse };
-  "computer.input": { request: ComputerInputRequest; response: ComputerInputResponse };
+  "computer.start": { request: ComputerStartRequest; response: ComputerStartResponse };
   "turn.output": { request: TurnOutputRequest; response: TurnOutputResponse };
   "turn.activity": { request: TurnActivityRequest; response: TurnActivityResponse };
   "transcript.fetch": { request: TranscriptFetchRequest; response: TranscriptFetchResponse };
