@@ -46,14 +46,21 @@ func (t Tree) Depth(id contract.SessionID) int {
 	return depth
 }
 
-// ParentFor picks the caller for a session start, or the requested parent
-// for an owner start, defaulting to root.
+// ParentFor picks the parent for a session start. A session caller gets itself
+// by default, or a requested parent that is itself or below it; any other is
+// refused. An owner gets the requested parent, defaulting to root.
 func (t Tree) ParentFor(caller contract.Principal, requested contract.SessionID) (contract.SessionID, error) {
 	if t.root == "" {
 		return "", errors.New("room has no root")
 	}
 	if caller.Kind == contract.PrincipalSession {
-		return caller.Session, nil
+		switch {
+		case requested == "":
+			return caller.Session, nil
+		case requested == caller.Session || t.Above(caller.Session, requested):
+			return requested, nil
+		}
+		return "", errors.New("parent must be you or a session under you")
 	}
 	if requested == "" {
 		requested = t.root

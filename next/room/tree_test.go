@@ -27,7 +27,12 @@ func TestTree(t *testing.T) {
 	}{
 		{"owner default", owner, "", "root", false},
 		{"owner choice", owner, "a", "a", false},
-		{"session", a, "c", "a", false},
+		{"session default", a, "", "a", false},
+		{"session itself", a, "a", "a", false},
+		{"session child", a, "b", "b", false},
+		{"session sibling", a, "c", "", true},
+		{"session above", a, "root", "", true},
+		{"session missing", a, "missing", "", true},
 		{"missing parent", owner, "missing", "", true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
