@@ -40,6 +40,10 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 	if rows[0].Host != "" {
 		t.Fatalf("restart retained quarantined host %q", rows[0].Host)
 	}
+	leftovers, err := s.Leftovers(ctx, "bad")
+	if err != nil || len(leftovers) != 1 || leftovers[0].Box != "b" || leftovers[0].Slice != "slice" {
+		t.Fatalf("old host cleanup: %+v %v", leftovers, err)
+	}
 	if got := box.Admit(hosts, []box.Box{rows[0].Box}, rows[0].Box); got.Host != "good" {
 		t.Fatalf("placement: %+v", got)
 	}
