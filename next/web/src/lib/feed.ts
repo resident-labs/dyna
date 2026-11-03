@@ -80,6 +80,7 @@ export const causes: Record<FailureCause, string> = {
   harness_failed: "The agent program stopped unexpectedly",
   set_model_failed: "The session could not switch to its new model",
   not_started: "It stopped before it began",
+  closed: "Its session was closing",
   workflow_failed: "Its workflow script failed",
 };
 

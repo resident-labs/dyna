@@ -192,15 +192,24 @@ func (s *Store) responsibilities(ctx context.Context, q sqlQuery, ids []contract
 }
 
 // ClosePlan says what closing these sessions does with what they hold. order is the closing session and its subtree, and to
-// is the parent that takes the work.
-func (s *Store) ClosePlan(ctx context.Context, order []contract.SessionID, to contract.SessionID) (contract.SessionCloseResponse, error) {
-	plan := contract.SessionCloseResponse{To: to, Handed: []contract.Responsibility{}, Ended: []contract.Responsibility{}}
+// is the parent that takes the work. Root holds no goals, so with root as to, goals are listed as unheld instead of handed.
+func (s *Store) ClosePlan(ctx context.Context, order []contract.SessionID, to contract.SessionID, toRoot bool) (contract.SessionCloseResponse, error) {
+	plan := contract.SessionCloseResponse{To: to, Handed: []contract.Responsibility{}, Unheld: []contract.GoalID{}, Ended: []contract.Responsibility{}}
 	held, err := s.ResponsibilitiesOf(ctx, order)
 	if err != nil {
 		return plan, err
 	}
 	for _, id := range order {
 		handed, ended := held[id].splitClose()
+		if toRoot && id == order[len(order)-1] {
+			handed = slices.DeleteFunc(handed, func(item contract.Responsibility) bool {
+				if item.Kind != contract.ResponsibilityGoal {
+					return false
+				}
+				plan.Unheld = append(plan.Unheld, contract.GoalID(item.ID))
+				return true
+			})
+		}
 		plan.Handed, plan.Ended = append(plan.Handed, handed...), append(plan.Ended, ended...)
 	}
 	return plan, nil

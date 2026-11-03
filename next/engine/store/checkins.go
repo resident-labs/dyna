@@ -43,7 +43,7 @@ func checkinRooms(ctx context.Context, q sqlQuery) ([]contract.RoomID, error) {
 }
 
 const checkinFacts = `SELECT s.id,COALESCE(s.parent,''),s.name,s.state='closing',s.created_at,s.model_retry_at>0,b.state,b.updated_at,
-	COALESCE(t.id,''),COALESCE(t.started_at,0),COALESCE(t.ended_at,0),COALESCE(t.outcome,''),
+	COALESCE(t.id,''),MAX(COALESCE(t.started_at,0),COALESCE(t.active_at,0)),COALESCE(t.ended_at,0),COALESCE(t.outcome,''),
 	EXISTS (SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=s.id AND d.wake=1 AND d.state='pending')
 		OR EXISTS (SELECT 1 FROM operations o WHERE o.by_kind='session' AND o.by_id=s.id AND o.state IN ('approved','running')),
 	COALESCE((SELECT MIN(o.created_at) FROM operations o WHERE o.by_kind='session' AND o.by_id=s.id AND o.state='pending'),0),

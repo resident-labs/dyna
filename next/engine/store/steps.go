@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 87
+const schemaVersion = 88
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
@@ -61,6 +61,8 @@ var steps = map[int][]string{
 		`UPDATE rooms SET root_approves='["hostexec"]' WHERE root_approves_hostexec=1`,
 		`ALTER TABLE rooms DROP COLUMN root_approves_hostexec`,
 	},
+	// A running turn records when it last used a tool, so a long turn that keeps working is not a stalled one.
+	87: {`ALTER TABLE turns ADD COLUMN active_at INTEGER NOT NULL DEFAULT 0`},
 	81: {
 		`ALTER TABLE hosts ADD COLUMN create_failures INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE hosts ADD COLUMN create_problem TEXT NOT NULL DEFAULT ''`,
