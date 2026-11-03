@@ -6,8 +6,44 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
+
+func TestRestartOnQuarantinedHost(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	_, err = s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+INSERT INTO hosts(name,ssh,state,cpus,mem_bytes,disk_bytes,checked_at,create_problem) VALUES('bad','','ready',8,8589934592,107374182400,0,'create_failed'),('good','','ready',8,8589934592,107374182400,0,'');
+INSERT INTO sessions(id,room,name,parent,profile,state,goal,created_at) VALUES('s','r','s',NULL,'p','open','',0);
+INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updated_at) VALUES('b','s','bad','','agent','failed','create_failed','slice',0,0)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := contract.Event{ID: "e", Room: "r", Time: time.UnixMilli(200), From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.BoxChanged{}}
+	notice := contract.Event{ID: "n", Room: "r", Time: event.Time, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionRestarted{Session: "s"}}
+	if ok, err := s.RestartSession(ctx, "s", event, notice); err != nil || !ok {
+		t.Fatalf("restart: %v %v", ok, err)
+	}
+	rows, err := s.LifecycleBoxes(ctx)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("boxes: %v %v", rows, err)
+	}
+	hosts, err := s.Hosts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows[0].Host != "" {
+		t.Fatalf("restart retained quarantined host %q", rows[0].Host)
+	}
+	if got := box.Admit(hosts, []box.Box{rows[0].Box}, rows[0].Box); got.Host != "good" {
+		t.Fatalf("placement: %+v", got)
+	}
+}
 
 func TestRestartFailedSessions(t *testing.T) {
 	ctx := context.Background()
