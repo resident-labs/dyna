@@ -60,7 +60,7 @@ func TestCgroupUnlimitedMemory(t *testing.T) {
 }
 
 func TestLaunchArgs(t *testing.T) {
-	browser := strings.Join(browserArgs, " ")
+	browser := strings.Join(browserArgs(Profile), " ")
 	for _, flag := range []string{"--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9222", "--user-data-dir=/box/computer", "--disable-dev-shm-usage", "--no-first-run", "about:blank"} {
 		if !strings.Contains(browser, flag) {
 			t.Fatalf("missing %s", flag)
@@ -111,7 +111,10 @@ func fakeDesktop(t *testing.T, oom bool) (*Process, string) {
 			t.Fatal(err)
 		}
 	}
-	p := &Process{root: root, socket: filepath.Join(root, "run", "vnc.sock"), tmp: tmp}
+	p := &Process{root: root, socket: filepath.Join(root, "run", "vnc.sock"), tmp: tmp, profile: filepath.Join(root, "profile")}
+	if err := os.Mkdir(p.profile, 0700); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(p.Close)
 	return p, root
 }
@@ -181,6 +184,48 @@ func TestDesktopExitStopsItsProgramsAndReports(t *testing.T) {
 	}
 	if len(states) != 3 || !states[0] || states[1] || !states[2] {
 		t.Fatalf("states %v", states)
+	}
+}
+
+// A restarted box is another container with another hostname, and the profile in its volume still holds the old
+// container's lock. Chromium starts on it cleanly; a lock a live Chromium of this host holds stays.
+func TestAProfileLockedForAnotherHostStartsCleanly(t *testing.T) {
+	p, root := fakeDesktop(t, false)
+	lock := map[string]string{"SingletonLock": "526aeb5bbd13-66", "SingletonCookie": "6633711284523391337", "SingletonSocket": "/tmp/.org.chromium.Chromium.x/SingletonSocket"}
+	for name, target := range lock {
+		if err := os.Symlink(target, filepath.Join(p.profile, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := p.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for name := range lock {
+		if _, err := os.Lstat(filepath.Join(p.profile, name)); !os.IsNotExist(err) {
+			t.Errorf("%s stays: %v", name, err)
+		}
+	}
+	waitFor(t, func() bool { args, _ := os.ReadFile(filepath.Join(root, "chromium.args")); return len(args) > 0 })
+	if args, _ := os.ReadFile(filepath.Join(root, "chromium.args")); !strings.Contains(string(args), "--user-data-dir="+p.profile) {
+		t.Fatalf("Chromium args %q", args)
+	}
+
+	host, _ := os.Hostname()
+	live := filepath.Join(t.TempDir(), "live")
+	if err := os.Mkdir(live, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(fmt.Sprintf("%s-%d", host, os.Getpid()), filepath.Join(live, "SingletonLock")); err != nil {
+		t.Fatal(err)
+	}
+	if err := clearProfileLock(live); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(live, "SingletonLock")); err != nil {
+		t.Fatalf("a live Chromium's lock went: %v", err)
+	}
+	if err := clearProfileLock(filepath.Join(t.TempDir(), "none")); err != nil {
+		t.Fatalf("a profile with no lock: %v", err)
 	}
 }
 
