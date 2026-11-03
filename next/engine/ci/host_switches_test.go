@@ -1,6 +1,7 @@
 package ci
 
 import (
+	"github.com/resident-labs/dyna/box"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
@@ -53,5 +54,29 @@ func TestAgentsOffStillServesCIAndBothOffServesNothing(t *testing.T) {
 	g.store.hosts[0].NoAgents, g.store.hosts[0].CI = true, false
 	if capacity := g.scale(1); capacity != 0 || len(g.drivers["pve"].runners) != 0 {
 		t.Fatalf("both off: capacity %d, runners %+v", capacity, g.drivers["pve"].runners)
+	}
+}
+
+// A session box waiting for CPU or memory comes before a runner: no runner starts on a host that box could take, so a freed
+// slot goes to the box. A box waiting for anything else holds nobody back.
+func TestARunnerSkipsAHostWhereASessionBoxWaitsForRoom(t *testing.T) {
+	size, _ := box.Size(contract.BoxSizeSmall)
+	for _, tc := range []struct {
+		name    string
+		pending box.Box
+		wantPVE int
+	}{
+		{"cpu, not yet placed", box.Box{ID: "b", Room: "r2", Size: size, State: contract.BoxPending, Reason: string(box.PendingCPU)}, 0},
+		{"memory, on its host", box.Box{ID: "b", Room: "r2", Host: "pve", Image: "img", Size: size, State: contract.BoxPending, Reason: string(box.PendingMemory)}, 0},
+		{"disk", box.Box{ID: "b", Room: "r2", Size: size, State: contract.BoxPending, Reason: string(box.PendingDisk)}, 1},
+	} {
+		f := newFixture(0)
+		arch := f.addHost(readyHost("arch", 32*box.GiB))        // pve has more free memory, so it wins unless it is skipped
+		f.store.hosts[1].Rooms = []contract.RoomID{"elsewhere"} // the waiting box cannot go to arch
+		f.store.boxes = []box.Box{tc.pending}
+		f.scale(1)
+		if got := len(f.drivers["pve"].runners); got != tc.wantPVE || len(arch.runners) != 1-tc.wantPVE {
+			t.Errorf("%s: pve %d, arch %d", tc.name, got, len(arch.runners))
+		}
 	}
 }

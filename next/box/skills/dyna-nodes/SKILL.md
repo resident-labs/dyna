@@ -94,7 +94,7 @@ dyna pool list
 - `--max` is required. It is the most nodes the pool may hold, counting those being created.
 - `--per-session` gives each box its own node, which goes when the session closes.
 - Without `--per-session`, sessions share nodes, and a node destroyed after it has held no box for `--idle`, 30 minutes by default.
-- `dyna room hosts ROOM --only POOL[,HOST...]` keeps a room's new boxes on one pool and these hosts, and the pool grows only for such a room. A box already placed stays where it is. `--clear` removes the rule.
+- `dyna room hosts ROOM --only POOL[,HOST...]` keeps a room's new boxes on one pool and these hosts, and the pool grows only for such a room. A box already placed stays where it is. `--clear` removes the rule. A room with no rule may use any host and any shared pool node, but a pool grows only for a room whose rule names it. A cleared rule now includes pools: the room's boxes and runners may use a shared pool's nodes, though they no longer make it grow.
 - From a box, `dyna pool add` and `dyna room hosts` ask the owner, because the script runs on the engine host and costs money.
 
 ## What to expect
@@ -107,3 +107,15 @@ dyna pool list
 - CI runners of the room's repositories use its pool as its boxes do: a job no host takes gets a node of its size, which goes after `--idle` once its runner has gone.
 - `dyna host remove NAME` removes a node through its script once nothing is on it.
 - `dyna pool remove NAME` needs an empty pool that no room names.
+
+## CI capacity
+
+CI runners go where boxes go, through the same admission, and balance by themselves:
+
+- A host takes runners when its `ci` switch is on. New hosts start with it on, except the host the engine runs on, so a host the owner adds takes CI with no flag. Hosts added before this keep the switch they had; turn it on with `dyna host set NAME --ci on`.
+- A runner starts on the ready host with the most free memory, up to its memory and twice its CPUs, so a busy host takes fewer.
+- Session boxes come first: no runner starts on a host where a session box is waiting for CPU or memory.
+- A room with no rule may use shared pool nodes for runners and boxes. A rule restricts both to what it names.
+- A room's rule holds its repository's runners too, and a job no host takes waits for a node of the pool the rule names.
+
+To change this, a root asks the owner with the owner op: `dyna host set NAME --ci on|off` for one host, and `dyna room hosts ROOM --only ...` or `--clear` for a room's rule. Check `dyna host list` first.

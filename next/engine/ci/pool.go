@@ -355,7 +355,8 @@ func waitID(key scaleSet, job int) contract.BoxID {
 	return contract.BoxID(fmt.Sprintf("%swait-%s-%s-%d", namePrefix, strings.ReplaceAll(string(key.repo), "/", "-"), key.size, job))
 }
 
-// place starts a runner for each assigned job that has none, on a ready host with ci on, as admission picks one for a box. A
+// place starts a runner for each assigned job that has none, on a ready host with ci on where no session box waits for room,
+// as admission picks one for a box. A
 // job that no host takes waits for a node of its room's pool, as a box does. It returns the capacity: the runners of this
 // size, the ones admission would still take, and the nodes the room's pools could add, within the repository's bound.
 func (p *Pool) place(ctx context.Context, key scaleSet, assigned int, view survey) (int, error) {
@@ -395,7 +396,7 @@ func (p *Pool) place(ctx context.Context, key scaleSet, assigned int, view surve
 	admit := func(id contract.BoxID) contract.HostName {
 		var open []box.Host
 		for _, host := range box.RunnerHosts(hosts) {
-			if held[host.Name] < box.RunnerSlots && !p.Now().Before(p.retry[host.Name]) {
+			if held[host.Name] < box.RunnerSlots && !p.Now().Before(p.retry[host.Name]) && !box.WaitsForRoom(view.hosts[host.Name].host, view.boxes) {
 				open = append(open, host)
 			}
 		}

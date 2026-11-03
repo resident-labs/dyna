@@ -33,8 +33,8 @@ that no job waits for a pool that does not exist yet.
    `sudo loginctl enable-linger USER` first, because rootless containers stop with
    the user's session.
 3. Keep sessions off a CI host with `--agents off`. A host has two switches:
-   `agents`, on by default, lets new session boxes land there, and `ci`, off by
-   default, lets the pool start runners there. With agents on, every room's boxes
+   `agents`, on by default, lets new session boxes land there, and `ci`, on by
+   default except on the host the engine runs on, lets the pool start runners there. With agents on, every room's boxes
    can land on a host its room list allows, and admission prefers the host with the
    most free memory, so a CI host wants agents off and ci on.
 
@@ -68,13 +68,14 @@ hosts.
 
 A runner is placed as a box is, by the same `box.Admit`: a ready host with ci on,
 with room for the runner's CPUs and memory and a free disk floor, the one with the
-most free memory. Runners and boxes count against each other there, and several
+most free memory. A host where a session box is pending for CPU or memory takes no
+new runner, so the box gets the next free slot. Runners and boxes count against each other there, and several
 runners share a host while it has room, up to 16, one per slot. A host with ci off
 gets no new runner. The agents switch and the room list keep sessions off a host,
 so a runner ignores both.
 
 The repository's room is its default room, and its rule (`dyna room hosts ROOM
---only POOL,HOST`) holds its runners as it holds its boxes. When no host takes a
+--only POOL,HOST`) holds its runners as it holds its boxes. With no rule, runners may use any host and any shared pool node. When no host takes a
 job and the rule names a pool that can grow, the job waits for a node, as a box
 does: the pool makes one of the runner's size, the next poll places the runner
 there, and the pool takes the node back once nothing has held it for `--idle`. A

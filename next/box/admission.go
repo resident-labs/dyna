@@ -53,7 +53,25 @@ func DiskWarn(floor, total int64) int64 {
 // Serves says whether a host takes a room's session boxes: agents are on, and its room list, which empty means every room,
 // holds the room.
 func (h Host) Serves(room contract.RoomID) bool {
-	return !h.NoAgents && (len(h.Rooms) == 0 || slices.Contains(h.Rooms, room))
+	// A shared pool node lists the rooms that named its pool when it came up, but a room with no rule may use it too, so
+	// takes holds each room to its rule and the list does not.
+	shared := h.Pool != "" && h.Box == ""
+	return !h.NoAgents && (shared || len(h.Rooms) == 0 || slices.Contains(h.Rooms, room))
+}
+
+// WaitsForRoom says whether a session box is pending for CPU or memory on a host, or could be placed there. Such a box comes
+// before a CI runner: a runner started in each slot that frees up would keep it waiting. A per-session node serves only its
+// own box.
+func WaitsForRoom(h Host, boxes []Box) bool {
+	for _, b := range boxes {
+		if b.State != contract.BoxPending || b.Image == RunnerImage || (b.Reason != string(PendingCPU) && b.Reason != string(PendingMemory)) {
+			continue
+		}
+		if b.Host == h.Name || b.Host == "" && h.Box == "" && h.Serves(b.Room) {
+			return true
+		}
+	}
+	return false
 }
 
 // RunnerImage marks a CI runner where admission sees it as a box: one on a host, or one that waits for a host.
@@ -73,13 +91,13 @@ func RunnerHosts(hosts []Host) []Host {
 }
 
 // takes says whether a host may take a new box. A per-session node serves its one box, a shared node the rooms that name its
-// pool, and any other host every room whose rule, if it has one, names it.
+// pool or has no rule, and any other host every room whose rule, if it has one, names it.
 func takes(h Host, id contract.BoxID, only []string) bool {
 	switch {
 	case h.Box != "":
 		return h.Box == id
 	case h.Pool != "":
-		return slices.Contains(only, h.Pool)
+		return len(only) == 0 || slices.Contains(only, h.Pool)
 	}
 	return len(only) == 0 || slices.Contains(only, string(h.Name))
 }
