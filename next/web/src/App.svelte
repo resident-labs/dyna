@@ -739,7 +739,7 @@
       {:else if paused || pauseFailed === room}<p class="paused" role="status"><span>{pauseFailed === room ? "The room did not change." : "Room paused. No session starts a new turn."}</span>
         {#if attention.can("operate")}<button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button>{/if}</p>{/if}
       {#if crew}<!-- The run page has the stop. -->
-      {:else if attention.can("operate")}<Composer bind:this={composerBox} bind:element={composer} bind:value={() => savedDrafts.draft(key, drafts[key]),text => { drafts[key] = text; savedDrafts.save(key, text); clearReplacement(); }} onsend={send} thread={!!session} placeholder={"Message " + title}
+      {:else if attention.can("operate")}<Composer bind:this={composerBox} bind:element={composer} bind:value={() => savedDrafts.draft(key, drafts[key]),text => { drafts[key] = text; savedDrafts.save(key, text); clearReplacement(); }} onsend={send} thread={!!session} placeholder={"Message " + title} host={attention.host()}
         quote={quotes[key]} replacement={replaced[key]} onundo={() => { quotes[key] = undoForward({ quote: quotes[key], previous: replaced[key] }).quote; clearReplacement(); }} onunquote={() => { quotes[key] = undefined; clearReplacement(); }} sessions={mentions} files={files(key)} {stop} />
       {:else}<p class="readonly" role="status">This device can read the room but not post in it.</p>{/if}
     {/if}
