@@ -202,6 +202,7 @@ func TestRunnersFollowAssignedJobsUpToTheBound(t *testing.T) {
 // With no bound, admission alone decides: a 64-CPU host takes twice its CPUs of runners, sixteen large ones.
 func TestWithoutABoundAdmissionDecides(t *testing.T) {
 	f := newFixture(0)
+	f.store.hosts[0].MemBytes = 256 * box.GiB // Leave memory ample so CPU sets the bound.
 	if capacity := f.scale(20); capacity != 16 || len(f.drivers["pve"].runners) != 16 {
 		t.Fatalf("capacity %d, runners %d", capacity, len(f.drivers["pve"].runners))
 	}
@@ -338,7 +339,7 @@ func TestSessionBoxesCountAgainstCIPlacement(t *testing.T) {
 func TestHostDroppingOutReapsItsIdleRunners(t *testing.T) {
 	f := newFixture(0)
 	f.store.hosts[0].DiskBytes = 0 // pve takes nothing, so both jobs go to the laptop
-	laptop := f.addHost(readyHost("laptop", 128*box.GiB))
+	laptop := f.addHost(readyHost("laptop", 256*box.GiB))
 	f.scale(2)
 	if len(laptop.runners) != 2 {
 		t.Fatalf("laptop %d", len(laptop.runners))
