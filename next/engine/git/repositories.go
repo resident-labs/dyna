@@ -26,10 +26,6 @@ type Repositories struct {
 	Mirror *Mirror
 }
 
-func (r *Repositories) Size(ctx context.Context, repo contract.RepoName) (contract.BoxSizeName, error) {
-	return r.Mirror.Size(ctx, repo)
-}
-
 func (r *Repositories) DeleteArchiveRef(ctx context.Context, repo contract.RepoName, ref, commit string) error {
 	return r.Mirror.DeleteArchiveRef(ctx, repo, ref, commit)
 }

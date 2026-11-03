@@ -68,6 +68,8 @@ type Boxes struct {
 	PiTarball         []byte
 	Mirror            *enginegit.Mirror
 	Images            *engineimages.Builder
+	RoomImages        *engineimages.Store
+	Migrator          *engineimages.Migrator
 	Compose           *compose.Files
 	Addons            *addons.Files
 	Context           context.Context
@@ -488,7 +490,7 @@ func (b *Boxes) prepareImages(ctx context.Context, h *podman.Host, name contract
 		return
 	}
 	steps := box.NewStepLog("host " + string(name))
-	repos, rooms, err := b.hostRepos(ctx, name)
+	rooms, err := b.hostRepos(ctx, name)
 	if err != nil {
 		log.Printf("host %s: build ahead: %v", name, err)
 		return
@@ -499,10 +501,10 @@ func (b *Boxes) prepareImages(ctx context.Context, h *podman.Host, name contract
 		return
 	}
 	keep := []string{image.Tag}
-	for repo, room := range repos {
-		image, err := b.image(ctx, h, name, room, repo, "", contract.BoxSize{})
+	for _, pair := range rooms {
+		image, err := b.image(ctx, h, name, pair.room, pair.repo, "", contract.BoxSize{})
 		if err != nil {
-			log.Printf("host %s: build ahead %s: %v", name, repo, err)
+			log.Printf("host %s: build ahead %s %s: %v", name, pair.room, pair.repo, err)
 			continue
 		}
 		keep = append(keep, image.Tag)
@@ -546,12 +548,12 @@ type roomRepo struct {
 	repo contract.RepoName
 }
 
-// hostRepos returns each repository that a room on this host can use, with one such room to record its build in, and
-// every room and repository pair, because compose files differ by room.
-func (b *Boxes) hostRepos(ctx context.Context, name contract.HostName) (map[contract.RepoName]contract.RoomID, []roomRepo, error) {
+// hostRepos returns every room and repository pair a room on this host can use, and each room once with no repository,
+// because images and compose files are the room's.
+func (b *Boxes) hostRepos(ctx context.Context, name contract.HostName) ([]roomRepo, error) {
 	hosts, err := b.Store.Hosts(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	var host box.Host
 	for _, record := range hosts {
@@ -561,9 +563,8 @@ func (b *Boxes) hostRepos(ctx context.Context, name contract.HostName) (map[cont
 	}
 	rooms, err := b.Store.OpenRooms(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	repos := make(map[contract.RepoName]contract.RoomID)
 	var pairs []roomRepo
 	for _, room := range rooms {
 		// A host with agents off serves no room, so it builds no room's images.
@@ -572,15 +573,14 @@ func (b *Boxes) hostRepos(ctx context.Context, name contract.HostName) (map[cont
 		}
 		listed, err := b.Store.RoomRepos(ctx, room)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		pairs = append(pairs, roomRepo{room: room})
 		for _, repo := range listed {
-			repos[repo.Repo] = room
 			pairs = append(pairs, roomRepo{room, repo.Repo})
 		}
 	}
-	return repos, pairs, nil
+	return pairs, nil
 }
 
 // RemoveRoom removes a room's folder from a host.
@@ -1314,6 +1314,10 @@ func (b *Boxes) image(ctx context.Context, h *podman.Host, host contract.HostNam
 		return box.Image{}, err
 	}
 	steps.Done("base image")
+	// A room's repository images move into the room before its image is chosen, so a late mirror loses nothing.
+	if room != "" && b.Migrator != nil {
+		b.Migrator.Room(ctx, room, true)
+	}
 	var file *compose.File
 	folder := ""
 	if composeName != "" {
@@ -1328,7 +1332,7 @@ func (b *Boxes) image(ctx context.Context, h *podman.Host, host contract.HostNam
 		folder = file.Agent.Build
 		steps.Done("compose file")
 	}
-	tag, needs, err := b.toolchain(ctx, h, host, room, repo, folder, base)
+	tag, needs, err := b.toolchain(ctx, h, host, room, folder, base)
 	if err != nil {
 		return box.Image{}, err
 	}
@@ -1342,13 +1346,13 @@ func (b *Boxes) image(ctx context.Context, h *podman.Host, host contract.HostNam
 	return image, nil
 }
 
-// toolchain builds one image of a repository: folder, or its sole image when folder is empty. With neither it is base.
-func (b *Boxes) toolchain(ctx context.Context, h *podman.Host, host contract.HostName, room contract.RoomID, repo contract.RepoName, folder, base string) (string, []box.Need, error) {
-	if repo == "" {
+// toolchain builds one image of the room: the one called name, or its sole box image when name is empty. With neither it is base.
+func (b *Boxes) toolchain(ctx context.Context, h *podman.Host, host contract.HostName, room contract.RoomID, name, base string) (string, []box.Need, error) {
+	if room == "" {
 		return base, nil, nil
 	}
 	steps := box.NewStepLog("host " + string(host))
-	name, tree, data, needs, err := b.Mirror.ImageContext(ctx, repo, folder)
+	name, tree, data, needs, err := b.RoomImages.Context(room, name)
 	if err != nil {
 		return "", nil, err
 	}
@@ -1356,7 +1360,7 @@ func (b *Boxes) toolchain(ctx context.Context, h *podman.Host, host contract.Hos
 	if name == "" {
 		return base, needs, nil
 	}
-	tag, err := b.Images.Build(ctx, h, room, host, repo, name, base, tree, data)
+	tag, err := b.Images.Build(ctx, h, room, host, "", name, base, tree, data)
 	if err != nil {
 		return "", nil, err
 	}
@@ -1375,7 +1379,7 @@ func (b *Boxes) stack(ctx context.Context, h *podman.Host, host contract.HostNam
 			tags[sidecar.Name] = sidecar.Image
 			continue
 		}
-		tag, needs, err := b.toolchain(ctx, h, host, room, repo, sidecar.Build, base)
+		tag, needs, err := b.toolchain(ctx, h, host, room, sidecar.Build, base)
 		if err != nil {
 			return nil, err
 		}

@@ -25,13 +25,18 @@ type Repo interface {
 	ComposeNames(context.Context, contract.RepoName) ([]string, error)
 	// ComposeFile returns nil for a name the repository does not have.
 	ComposeFile(context.Context, contract.RepoName, string) ([]byte, error)
-	ImageFolders(context.Context, contract.RepoName) ([]string, error)
+}
+
+// Images lists the box images of a room, which a service builds by name.
+type Images interface {
+	BoxImages(contract.RoomID) ([]contract.RoomImage, error)
 }
 
 // Files finds compose files. A name resolves global, then room, then repository, and the most specific file wins whole.
 type Files struct {
 	Layout box.Layout
 	Repo   Repo
+	Images Images
 }
 
 func localNames(dir string) ([]string, error) {
@@ -84,30 +89,27 @@ func (f *Files) read(ctx context.Context, room contract.RoomID, repo contract.Re
 	return data, contract.ComposeGlobal, err
 }
 
-// parse checks a file and the images it builds against the repository as it stands.
-func (f *Files) parse(ctx context.Context, repo contract.RepoName, data []byte) (*File, error) {
+// parse checks a file and the images it builds against the room as it stands.
+func (f *Files) parse(room contract.RoomID, data []byte) (*File, error) {
 	file, err := Parse(data)
 	if err != nil {
 		return nil, err
 	}
-	builds := file.Builds()
-	if repo == "" {
-		if len(builds) > 0 {
-			return nil, refuse("build needs a repository, and this session has none")
-		}
-		return file, nil
-	}
-	folders, err := f.Repo.ImageFolders(ctx, repo)
+	held, err := f.Images.BoxImages(room)
 	if err != nil {
 		return nil, err
 	}
-	for _, folder := range builds {
-		if !slices.Contains(folders, folder) {
-			return nil, refuse("%s has no image folder %s", repo, folder)
+	names := make([]string, len(held))
+	for i, image := range held {
+		names[i] = image.Name
+	}
+	for _, name := range file.Builds() {
+		if !slices.Contains(names, name) {
+			return nil, refuse("the room has no image %s; save it with dyna image save", name)
 		}
 	}
-	if file.Agent.Build == "" && len(folders) > 1 {
-		return nil, refuse("%s has several images, so the agent service must name one with build", repo)
+	if file.Agent.Build == "" && len(names) > 1 {
+		return nil, refuse("the room has several images, so the agent service must name one with build")
 	}
 	return file, nil
 }
@@ -121,7 +123,7 @@ func (f *Files) Load(ctx context.Context, room contract.RoomID, repo contract.Re
 	if data == nil {
 		return nil, refuse("no file named %s at any level", name)
 	}
-	return f.parse(ctx, repo, data)
+	return f.parse(room, data)
 }
 
 // Start chooses the file for a new session. It returns the name to keep on the session, or "" when requested is empty and
@@ -161,7 +163,7 @@ func (f *Files) Start(ctx context.Context, room contract.RoomID, repo contract.R
 		}
 		return "", nil, refuse("no file named %s at any level; session compose_list shows what there is", name)
 	}
-	file, err := f.parse(ctx, repo, data)
+	file, err := f.parse(room, data)
 	if err != nil {
 		return "", nil, err
 	}
@@ -205,7 +207,7 @@ func (f *Files) List(ctx context.Context, room contract.RoomID, repo contract.Re
 			return nil, err
 		}
 		entry := contract.ComposeFile{Name: name, Level: level}
-		if _, err := f.parse(ctx, repo, data); err != nil {
+		if _, err := f.parse(room, data); err != nil {
 			var refused box.StackError
 			if !errors.As(err, &refused) {
 				return nil, err

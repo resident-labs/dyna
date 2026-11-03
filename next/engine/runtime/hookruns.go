@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"slices"
 
@@ -64,22 +63,16 @@ func (b *Boxes) boot(ctx context.Context, h *podman.Host, spec box.RunSpec, imag
 	return h.StartRun(ctx, box.RunContainer{ID: string(spec.ID), Image: image, Size: spec.Size, Command: spec.Command, Mounts: mounts, Event: spec.Event})
 }
 
-// runImage resolves a Run's image the way a session's is: base, or a folder of the room's default repository.
+// runImage resolves a Run's image the way a session's is: base, or an image of the room.
 func (b *Boxes) runImage(ctx context.Context, h *podman.Host, spec box.RunSpec) (string, error) {
 	base, err := h.BuildBase(ctx, images.BaseContainerfile, b.PiTarball)
 	if err != nil || spec.Image == box.BaseImage {
 		return base, err
 	}
-	repos, err := b.Store.RoomRepos(ctx, spec.Room)
-	if err != nil {
-		return "", err
+	if b.Migrator != nil {
+		b.Migrator.Room(ctx, spec.Room, true)
 	}
-	index := slices.IndexFunc(repos, func(r contract.RoomRepo) bool { return r.Default })
-	if index < 0 {
-		return "", fmt.Errorf("image %q needs a default repository in its room", spec.Image)
-	}
-	repo := repos[index].Repo
-	name, tree, data, _, err := b.Mirror.ImageContext(ctx, repo, spec.Image)
+	name, tree, data, _, err := b.RoomImages.Context(spec.Room, spec.Image)
 	if err != nil {
 		return "", err
 	}
@@ -88,7 +81,7 @@ func (b *Boxes) runImage(ctx context.Context, h *podman.Host, spec box.RunSpec) 
 	if found, err := h.HasImage(ctx, tag); found || err != nil {
 		return tag, err
 	}
-	return b.Images.Build(ctx, h, spec.Room, spec.Host, repo, name, base, tree, data)
+	return b.Images.Build(ctx, h, spec.Room, spec.Host, "", name, base, tree, data)
 }
 
 // RestoreRun reopens the socket of a Run that outlived the last engine.

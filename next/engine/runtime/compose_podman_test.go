@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	engineimages "github.com/resident-labs/dyna/engine/images"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -409,7 +410,7 @@ func TestAComposeSessionFromStartToClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	layout := box.Layout{Data: filepath.Join(data, "data"), HostData: hostData}
-	files := &compose.Files{Layout: layout}
+	files := &compose.Files{Layout: layout, Images: &engineimages.Store{Layout: layout}}
 	if err := os.MkdirAll(files.Layout.Compose(""), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -418,12 +419,12 @@ func TestAComposeSessionFromStartToClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtimeDir := t.TempDir()
-	b := &Boxes{Store: st, Runtime: runtimeDir, Layout: layout, Version: "v1", PiTarball: pi, Context: ctx, Compose: files,
+	b := &Boxes{Store: st, Runtime: runtimeDir, Layout: layout, Version: "v1", PiTarball: pi, Context: ctx, Compose: files, RoomImages: files.Images.(*engineimages.Store),
 		hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, installed: map[contract.HostName]bool{"host": true}}
 	sum := sha256.Sum256(script)
 	b.binOnce.Do(func() { b.binSum = hex.EncodeToString(sum[:]) })
 	service := engine.New(st, b, stackProfiles{}, time.Now)
-	service.SetCompose(files, nil)
+	service.SetCompose(files)
 	sockets := api.NewSockets(api.New(&serviceWithHosts{Service: service}, nil), runtimeDir, uint32(os.Getuid()), nil)
 	t.Cleanup(func() { _ = sockets.Close() })
 	b.Sockets = sockets

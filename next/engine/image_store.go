@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/resident-labs/dyna/contract"
+	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/images"
 )
 
@@ -93,4 +94,13 @@ func (s *Service) ImageRemove(ctx context.Context, caller contract.Principal, re
 		return contract.ImageRemoveResponse{}, imageFailure(err)
 	}
 	return contract.ImageRemoveResponse{}, nil
+}
+
+// SetImageMigration makes the migration of repository images into rooms, and starts it for every room in the background, so a
+// slow mirror never holds the engine back. The service's session starts and the boxes use the returned migrator before they
+// choose an image.
+func (s *Service) SetImageMigration(ctx context.Context, mirror *enginegit.Mirror) *images.Migrator {
+	s.migrator = &images.Migrator{Store: s.images, Rooms: s.store, Guard: s.roomWrite, Source: images.Source{Cloned: mirror.Cloned, Refresh: mirror.Refresh, Dir: mirror.Layout.Git, Runner: mirror.Runner}}
+	go s.migrator.All(ctx)
+	return s.migrator
 }
