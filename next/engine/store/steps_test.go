@@ -132,3 +132,47 @@ func TestUpgradeStripsShellJobExitCode(t *testing.T) {
 		}
 	}
 }
+
+// TestUpgradeCarriesRootApprovesHostexec turns a current store back into a version 86 one, with one room that let its root
+// approve host exec and one that did not. The upgrade keeps the first as the hostexec kind and drops the old column.
+func TestUpgradeCarriesRootApprovesHostexec(t *testing.T) {
+	dir := floorStore(t, nil)
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(dir, "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		"ALTER TABLE rooms DROP COLUMN root_approves",
+		"ALTER TABLE rooms ADD COLUMN root_approves_hostexec INTEGER NOT NULL DEFAULT 0",
+		"INSERT INTO rooms(id,name,created_at,cpus,mem_bytes,root_approves_hostexec) VALUES ('room_on','on',1,0,0,1),('room_off','off',1,0,0,0)",
+		"UPDATE meta SET value='86' WHERE key='schema_version'",
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for id, want := range map[string]string{"room_on": `["hostexec"]`, "room_off": `[]`} {
+		var got string
+		if err := s.Read().QueryRow("SELECT root_approves FROM rooms WHERE id=?", id).Scan(&got); err != nil || got != want {
+			t.Errorf("%s: root_approves = %q, want %s: %v", id, got, want, err)
+		}
+	}
+	if _, err := s.Read().Exec("SELECT root_approves_hostexec FROM rooms"); err == nil {
+		t.Error("root_approves_hostexec is still there")
+	}
+}
