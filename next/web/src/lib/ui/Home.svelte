@@ -6,7 +6,7 @@
   import type { Attention } from "../attention.svelte.ts";
   import { accountPath, reconnectPath } from "../accounts.ts";
   import type { AccountUsage, AccountsListResponse, Card, HostSummary, Principal, Question, SessionListResponse } from "../contract.gen.ts";
-  import { clause, fromNow, requestLine } from "../feed.ts";
+  import { clause, expiryText, expiryTime, fromNow, requestLine } from "../feed.ts";
   import { hostLabel, hostMeters, largeShared, sharedSize, watchHosts } from "../hosts.ts";
   import { questionPlan } from "../questions.ts";
   import { accountAlerts, busiestWindow, holdFor, holding, outOfLimit, tucked, usageRows, type UsageHold, type UsageRow } from "../usage.ts";
@@ -28,7 +28,7 @@
   // Each room's sessions load once while Home is open, for its failure and request rows. Requests load per room, and
   // again only when a room gains a request or requester that no answer named yet. A failed load forgets its IDs and
   // offers Try again.
-  const requests = new SvelteMap<string, { title: string; body: string; by: Principal; target: Card["target"]; expires: string }>();
+  const requests = new SvelteMap<string, { title: string; body: string; by: Principal; target: Card["target"]; expires?: string }>();
   const questions = new SvelteMap<string, Question>();
   const sessions = new SvelteMap<string, { name: string; root: boolean; room: string }>();
   // Requester IDs a session.list answered for; one it did not name is a closed session.
@@ -202,12 +202,12 @@
     <div class="list">{#each groups as { room, count } (room.id)}<a class="item fold" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>
       <Icon name="chevron" /><Avatar kind="room" name={room.name} label={initials.get(room.name)} size={28} />
       <span class="lines"><span class="title">{room.name}</span><span class="line">{count} waiting</span></span></a>
-    {:else}{#each waiting as { id, room, value, who, root } (id)}{@const soon = Date.parse(value.expires) - now < 5 * 60_000}{@const line = requestLine(value)}<div class="item request">
+    {:else}{#each waiting as { id, room, value, who, root } (id)}{@const soon = expiryTime(value.expires) - now < 5 * 60_000}{@const line = requestLine(value)}<div class="item request">
       <Avatar kind={value.by.kind} name={who} label={value.by.session ? sessionInitials.get(value.by.session) : undefined} {root} size={28} />
       <!-- The title is the phrase after the asker's name, as on the request card. The body's first line says who gets what for how long, so Approve never hides it; only a line that does not name the host gives way to the host. -->
       <span class="lines"><span class="title"><b class="who">{who}</b> {value.title}</span>
         <span class="line">{#if line.named}{line.text}<code>{line.named}</code>{clause(line.after)}{" · "}{:else if value.target.kind === "host"}on <code>{value.target.name}</code>{" · "}{:else if value.body}{clause(value.body)}{" · "}{:else if value.target.kind !== "room"}on {value.target.kind} {value.target.name}{" · "}{/if}{room.name} ·
-          {#if soon}<StatusPill tone="warning" label="Expires {fromNow(value.expires, now)}" />{:else}Expires {fromNow(value.expires, now)}{/if}</span>
+          {#if soon}<StatusPill tone="warning" label={expiryText(value.expires, now)} />{:else}{expiryText(value.expires, now)}{/if}</span>
         {#if refused.has(id)}<span class="line" role="alert">{refused.get(id)}</span>{/if}</span>
       <span class="acts">{#if attention.can("admin")}<button type="button" class="approve" disabled={deciding.has(id)} onclick={event => void decide(id, `${who} ${value.title}`, true, event.currentTarget.closest(".request") ?? event.currentTarget)}>Approve</button>
         <button type="button" disabled={deciding.has(id)} onclick={event => void decide(id, `${who} ${value.title}`, false, event.currentTarget.closest(".request") ?? event.currentTarget)}>Deny</button>{/if}
