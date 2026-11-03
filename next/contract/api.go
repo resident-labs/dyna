@@ -325,15 +325,25 @@ type UsageBalance struct {
 	Amount   string `json:"amount"`
 }
 
-// HostAddRequest adds a host. Its switches start with agents on unless Agents is false, and CI off unless CI is true.
+// HostAddRequest adds a host. Its switches start with agents on unless Agents is false, and CI on unless CI is false or the
+// host is the machine the engine runs on; an explicit CI wins.
 type HostAddRequest struct {
 	Rooms          []RoomID `json:"rooms,omitempty"`
 	Name           HostName `json:"name"`
 	SSH            string   `json:"ssh"`
 	OwnerOnlyAdmin bool     `json:"ownerOnlyAdmin"`
 	Agents         *bool    `json:"agents,omitempty"`
-	CI             bool     `json:"ci,omitempty"`
+	CI             *bool    `json:"ci,omitempty"`
 }
+
+// CIOn is the ci switch a new host starts with.
+func (r HostAddRequest) CIOn(engineHost bool) bool {
+	if r.CI != nil {
+		return *r.CI
+	}
+	return !engineHost
+}
+
 type HostAddResponse struct {
 	NoSwap bool `json:"noSwap"`
 }
