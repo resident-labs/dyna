@@ -18,8 +18,8 @@ type Runner interface {
 // such as a fork that mirrors its upstream.
 const imageBranch = "refs/heads/dyna-images"
 
-// Context reads a repository's legacy toolchain image (.dyna/images) from the mirror, for the one-time migration into room images (5.2): from the mirrored default branch or the image branch: the one called wanted, or the sole
-// image when wanted is empty.
+// Context reads a repository's legacy toolchain image (.dyna/images) from the mirror, for the migration into room images (5.2):
+// from the mirrored default branch or the image branch, the one called wanted, or the sole image when wanted is empty.
 func Context(ctx context.Context, runner Runner, mirror, wanted string) (string, TreeID, []byte, []box.Need, error) {
 	name, tree, err := chooseImage(ctx, runner, mirror, wanted)
 	if err != nil || name == "" {
