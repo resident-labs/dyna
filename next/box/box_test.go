@@ -218,8 +218,8 @@ func TestDiskFloorAndWarn(t *testing.T) {
 		{4000 * box.GiB, 400 * box.GiB, 600 * box.GiB},
 	} {
 		floor := box.DiskFloor(tc.total)
-		if floor != tc.floor || box.DiskWarn(floor, tc.total) != tc.warn {
-			t.Errorf("total %d: floor %d warn %d, want %d and %d", tc.total, floor, box.DiskWarn(floor, tc.total), tc.floor, tc.warn)
+		if floor != tc.floor || box.DiskWarn(floor, tc.total, false) != tc.warn {
+			t.Errorf("total %d: floor %d warn %d, want %d and %d", tc.total, floor, box.DiskWarn(floor, tc.total, false), tc.floor, tc.warn)
 		}
 	}
 }
@@ -247,7 +247,7 @@ func TestWarnComesBeforeAnySizeIsRefused(t *testing.T) {
 		for _, name := range []contract.BoxSizeName{contract.BoxSizeAgent, contract.BoxSizeSmall, contract.BoxSizeMedium, contract.BoxSizeLarge, contract.BoxSizeXLarge} {
 			size, _ := box.Size(name)
 			// At the warn level nothing has warned yet, so nothing may be refused.
-			h := box.Host{Name: "host", State: box.HostReady, CPUs: 64, MemBytes: 256 * box.GiB, DiskBytes: box.DiskWarn(floor, 0), DiskFloor: floor, CheckedAt: now}
+			h := box.Host{Name: "host", State: box.HostReady, CPUs: 64, MemBytes: 256 * box.GiB, DiskBytes: box.DiskWarn(floor, 0, false), DiskFloor: floor, CheckedAt: now}
 			if p := box.Admit([]box.Host{h}, nil, box.Box{ID: "new", Size: size}); p.Host != "host" {
 				t.Errorf("total %d, size %s: refused before the warning: %+v", total, name, p)
 			}
@@ -318,5 +318,15 @@ func TestXLargeIsTheSizeTheSpecNames(t *testing.T) {
 	host.DiskBytes = 99 * box.GiB
 	if p := box.Admit([]box.Host{host}, nil, box.Box{ID: "new", Size: size}); p.Reason != box.PendingDisk {
 		t.Fatalf("99 GiB free: %+v", p)
+	}
+}
+
+func TestPoolNodeWarnsAtItsFloor(t *testing.T) {
+	floor := box.DiskFloor(146 * box.GiB)
+	if got := box.DiskWarn(floor, 146*box.GiB, true); got != 20*box.GiB {
+		t.Fatalf("pool warn %d, want the floor", got)
+	}
+	if got := box.DiskWarn(floor, 146*box.GiB, false); got <= floor {
+		t.Fatalf("hand-added warn %d", got)
 	}
 }
