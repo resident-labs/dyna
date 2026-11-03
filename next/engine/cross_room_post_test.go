@@ -29,6 +29,18 @@ func TestRootCrossRoomPost(t *testing.T) {
 	if err != nil || len(events) != 1 {
 		t.Fatalf("events: %v %v", events, err)
 	}
+	outgoing, err := s.store.Events(ctx, source, sent.Seq-1, 10, []contract.EventType{"post.created"})
+	if err != nil || len(outgoing) != 1 {
+		t.Fatalf("outgoing: %v %v", outgoing, err)
+	}
+	copy := outgoing[0].Body.(contract.PostCreated)
+	if copy.Text != "hello" || copy.Target == nil || copy.Target.Room != other.Room || copy.Target.RoomName != "other" || copy.Target.SessionName != "root" {
+		t.Fatalf("outgoing post: %+v", copy)
+	}
+	var deliveryCount int
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM deliveries WHERE seq=?", outgoing[0].Seq).Scan(&deliveryCount); err != nil || deliveryCount != 0 {
+		t.Fatalf("outgoing deliveries: %d %v", deliveryCount, err)
+	}
 	post := events[0].Body.(contract.PostCreated)
 	if post.Source == nil || post.Source.Room != source || post.Source.RoomName != "room" || post.Source.SessionName != "root" {
 		t.Fatalf("source: %+v", post.Source)
