@@ -305,6 +305,13 @@ func TestHostAddMapsFlags(t *testing.T) {
 	if f.host.Name != "h" || f.host.SSH != "u@h" || !f.host.OwnerOnlyAdmin {
 		t.Fatalf("%+v", f.host)
 	}
+	if f.host.CI != nil {
+		t.Fatalf("--ci left out must leave the choice to the engine: %v", *f.host.CI)
+	}
+	runCLI(t, f, "host", "add", "h", "--ssh", "u@h", "--ci", "off")
+	if f.host.CI == nil || *f.host.CI {
+		t.Fatalf("--ci off: %v", f.host.CI)
+	}
 }
 func TestPoolCommandsMapFlags(t *testing.T) {
 	f := &fakeClient{}
