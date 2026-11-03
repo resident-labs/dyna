@@ -345,3 +345,21 @@ func (s *Store) SetEngineHost(ctx context.Context, name contract.HostName, value
 		return err
 	})
 }
+
+// ExecOnly reports whether a host takes only host-exec runs: agents and CI both off. The control plane is not a stored host.
+func (s *Store) ExecOnly(ctx context.Context, name contract.HostName) (bool, error) {
+	var execOnly bool
+	err := s.Read().QueryRowContext(ctx, "SELECT NOT agents AND NOT ci FROM hosts WHERE name=?", name).Scan(&execOnly)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return execOnly, err
+}
+
+// SetHostChecked records what the full host check found, as for an exec-only host that is about to take boxes or runners.
+func (s *Store) SetHostChecked(ctx context.Context, h box.Host) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE hosts SET cpus=?, mem_bytes=?, disk_bytes=?, checked_at=?, engine_host=?, create_problem=? WHERE name=?", h.CPUs, h.MemBytes, h.DiskBytes, h.CheckedAt.UnixMilli(), h.EngineHost, h.Problem, h.Name)
+		return err
+	})
+}

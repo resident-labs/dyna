@@ -173,6 +173,7 @@ func Run(ctx context.Context, cfg Config) error {
 	service.Reconciler().SetRunners(runners)
 	service.SetGitIdentity(cfg.GitName, cfg.GitEmail)
 	service.SetHostexecRunner(boxes)
+	service.SetHostPromoter(boxes.PromoteHost)
 	service.SetHookRunner(boxes, boxes.hostMemory)
 	boxes.Pressure = service
 	go boxes.controlPlane(cfg.Data)

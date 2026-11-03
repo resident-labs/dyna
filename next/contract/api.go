@@ -367,12 +367,14 @@ type HostSetLimitsResponse struct{}
 
 // HostSetRequest turns a host's two switches, each on its own; a nil one stays as it is. With agents off no new session box
 // lands on the host, and with CI off the CI pool starts no runner there, though a repository still names it. Both off
-// disables the host and keeps it registered. What already runs there stays until it stops.
+// disables the host: with both off a host is exec only (host exec runs only, checked by SSH and bash alone), and turning
+// either on again runs the full host check first. What already runs there stays until it stops.
 type HostSetRequest struct {
 	Host               HostName `json:"host"`
 	Agents             *bool    `json:"agents,omitempty"`
 	CI                 *bool    `json:"ci,omitempty"`
 	ClearCreateProblem bool     `json:"clearCreateProblem,omitempty"`
+	OwnerOnlyAdmin     bool     `json:"ownerOnlyAdmin,omitempty"` // for an exec-only host that agents or ci turn into a full one: the owner confirms exclusive administration, as host add does
 }
 type HostSetResponse struct{}
 
@@ -1093,4 +1095,9 @@ type TranscriptFetchResponse struct {
 type TranscriptFile struct {
 	Path  string `json:"path"`
 	Bytes int64  `json:"bytes"`
+}
+
+// ExecOnly reports a host added with agents and CI both off: it takes host-exec runs only and needs just SSH and bash.
+func (r HostAddRequest) ExecOnly() bool {
+	return r.Agents != nil && !*r.Agents && r.CI != nil && !*r.CI
 }

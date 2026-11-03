@@ -69,5 +69,30 @@ func TestRoomSetRootApprovesHostexec(t *testing.T) {
 		if _, err := execCLI(g, args...); err == nil || g.roomSet != nil {
 			t.Fatalf("%v: err=%v sent=%+v", args, err, g.roomSet)
 		}
+
+func TestHostAddExecOnlyNeedsNoAdminFlag(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "host", "add", "omarchy", "--ssh", "ari@omarchy", "--agents", "off", "--ci", "off")
+	if !f.host.ExecOnly() || f.host.OwnerOnlyAdmin {
+		t.Fatalf("%+v", f.host)
+	}
+	runCLI(t, f, "host", "add", "pve", "--ssh", "b@pve", "--agents", "off", "--ci", "on")
+	if f.host.ExecOnly() {
+		t.Fatalf("a CI host is not exec only: %+v", f.host)
+	}
+}
+
+func TestHostListShowsExecOnly(t *testing.T) {
+	f := &fakeClient{hosts: []contract.HostSummary{{Name: "omarchy"}}}
+	if out := runCLI(t, f, "host", "list"); out != "omarchy\t0 B\t0 B\tok\texec only\n" {
+		t.Fatalf("output=%q", out)
+	}
+}
+
+func TestHostSetSendsOwnerOnlyAdmin(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "host", "set", "omarchy", "--agents", "on", "--owner-only-admin")
+	if !f.hostSet.OwnerOnlyAdmin {
+		t.Fatalf("%+v", f.hostSet)
 	}
 }

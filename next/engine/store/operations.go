@@ -128,6 +128,11 @@ func (s *Store) operationEvent(tx *sql.Tx, event contract.Event, deliveries []co
 			return err
 		}
 	}
+	if ran, ok := event.Body.(contract.OpRan); ok && ran.Result.OutFiles != "" {
+		if _, err := tx.Exec("INSERT OR IGNORE INTO event_files(seq,sha256,media) VALUES(?,?,?)", seq, ran.Result.OutFiles, "application/x-tar"); err != nil {
+			return err
+		}
+	}
 	for _, delivery := range deliveries {
 		if err := s.InsertDelivery(context.Background(), tx, seq, event.Body, delivery); err != nil {
 			return err

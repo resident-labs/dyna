@@ -118,6 +118,7 @@ func setupStore(t *testing.T, st *store.Store) (*Service, contract.RoomID, contr
 		t.Fatal(err)
 	}
 	s := New(st, fakeBoxes{}, fakeProfiles{}, now)
+	s.SetHostPromoter(func(context.Context, contract.HostName, bool) error { return nil })
 	resetLifecycle(s)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
