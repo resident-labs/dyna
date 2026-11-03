@@ -55,6 +55,19 @@ const feedRows = (...args: Parameters<typeof dayRows>) => dayRows(...args).filte
 const usage = { model: "m", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 const names: Record<string, string> = { l: "lead-web" };
 
+test("an outgoing cross-room post names its target without IDs", () => {
+  const sent = decodeEvent(event(1, { type: "post.sent", body: { text: "hello", target: { room: "room_secret", roomName: "Room", sessionName: "root" } } }, lead));
+  assert.ok(sent);
+  const rows = feedRows([sent], { kind: "feed" });
+  assert.equal(rows.length, 1);
+  const row = rows[0];
+  assert.equal(row.kind, "post");
+  if (row.kind === "post") {
+    assert.equal(row.text, "hello");
+    assert.equal(row.target, "Room:root");
+  }
+});
+
 test("groups work, stopped turns and failures without letting dividers split the block", () => {
   const rows = feedRows([
     event(1, { type: "turn.started", body: { session: "l", turn: "t", inputs: [] } }),
