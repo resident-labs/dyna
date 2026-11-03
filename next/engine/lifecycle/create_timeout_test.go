@@ -92,7 +92,7 @@ func TestCreateDeadlineAndShutdown(t *testing.T) {
 type shareDownCreate struct{ runningBoxes }
 
 func (shareDownCreate) Create(context.Context, BoxSpec) (string, error) {
-	return "", box.ShareDown{Host: "h", Reason: "the mount did not come up"}
+	return "", box.ShareDown{Host: "h", Reason: "fusermount3 is not setuid, so FUSE mounts fail with Operation not permitted"}
 }
 
 // A create that finds the host's shared folder down is the host's fault, and one such failure is enough to keep session
@@ -113,6 +113,33 @@ func TestCreateWithoutTheSharedFolderCountsAgainstTheHost(t *testing.T) {
 	_ = rig.r.step(rig.ctx, rows[0])
 	var problem string
 	if err := rig.st.Read().QueryRow("SELECT create_problem FROM hosts WHERE name=?", rows[0].Host).Scan(&problem); err != nil || problem != string(contract.HostProblemShareUnavailable) {
+		t.Fatalf("host problem %q: %v", problem, err)
+	}
+}
+
+type transientShareDown struct{ runningBoxes }
+
+func (transientShareDown) Create(context.Context, BoxSpec) (string, error) {
+	return "", box.ShareDown{Host: "h", Reason: "the mount is down"}
+}
+
+// A mount that is down for now is not a reason to keep the host out until the owner clears it.
+func TestCreateWithATransientlyDownMountDoesNotQuarantineAtOnce(t *testing.T) {
+	rig := newHostRig(t)
+	rig.r.boxes = transientShareDown{}
+	if err := rig.st.Write(rig.ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE boxes SET state='creating', want='run', image='' WHERE id='b'")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := rig.st.LifecycleBoxes(rig.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = rig.r.step(rig.ctx, rows[0])
+	var problem string
+	if err := rig.st.Read().QueryRow("SELECT create_problem FROM hosts WHERE name=?", rows[0].Host).Scan(&problem); err != nil || problem != "" {
 		t.Fatalf("host problem %q: %v", problem, err)
 	}
 }
