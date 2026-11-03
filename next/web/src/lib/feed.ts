@@ -1,3 +1,4 @@
+import { sourceLabel } from "./source.ts";
 import type { Attachment, BoxState, Card, Conversation, Event, FailureCause, PrChange, PrChanged, PrChangeKind, Principal, PrSummary, SessionCloseReason, WorkflowEnded, PostSource } from "./contract.gen.ts";
 import type { BoxFailure } from "./status.ts";
 import type { PendingReason } from "./event.ts";
@@ -6,7 +7,7 @@ import { endCause, failed } from "./jobs.ts";
 import { parsedJson } from "./json.ts";
 
 export type Row =
-  | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[]; source?: PostSource | null; pending?: Pending }
+  | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[]; source?: PostSource | null; target?: string; pending?: Pending }
   | { kind: "restarted"; key: string; session: string; at: string }
   // A plain line for what the owner did to a session or the room; describe gives its words.
   | { kind: "notice"; key: string; event: Event; resumedAt?: string }
@@ -88,7 +89,7 @@ const sameAuthor = (a: Principal, b: Principal) => a.kind === b.kind && a.sessio
 // The session an event is about; events without one belong to the room feed only.
 export function subject(event: Event): string | undefined {
   switch (event.type) {
-    case "git.main_updated": case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": case "session.failed": case "goal.set": case "goal.item_changed": case "goal.ended": case "checkin.due": return undefined;
+    case "post.sent": case "git.main_updated": case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": case "session.failed": case "goal.set": case "goal.item_changed": case "goal.ended": case "checkin.due": return undefined;
     case "hook.finished": case "hook.due": case "notice.posted": case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": return undefined;
     case "op.requested": return event.body.by.session;
     case "op.decided": case "op.ran": return event.from.session;
@@ -149,14 +150,14 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     deferred = [];
   };
   // A post to other people, its mentions or a final reply's target, starts a new run with its own name line.
-  const post = (key: string, seq: number, from: Principal, at: string, text: string, attachments: Attachment[], to: Principal[] = [], pending?: Pending, source?: PostSource | null) => {
+  const post = (key: string, seq: number, from: Principal, at: string, text: string, attachments: Attachment[], to: Principal[] = [], pending?: Pending, source?: PostSource | null, target?: string) => {
     flush();
     dated(at);
     fresh(seq, from);
     const previous = rows.at(-1);
     const first = previous?.kind !== "post" || !sameAuthor(previous.from, from) ||
-      previous.source?.room !== source?.room || previous.to.length !== to.length || previous.to.some((target, i) => !sameAuthor(target, to[i]));
-    rows.push({ kind: "post", key, from, at, text, attachments, first, to, source, ...pending && { pending } });
+      previous.source?.room !== source?.room || previous.target !== target || previous.to.length !== to.length || previous.to.some((target, i) => !sameAuthor(target, to[i]));
+    rows.push({ kind: "post", key, from, at, text, attachments, first, to, source, target, ...pending && { pending } });
   };
   // A post that carried a final reply goes to that reply's target too. The engine records this at the turn's end, later
   // than the post, so the targets are gathered first.
@@ -177,6 +178,10 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     if (event.type === "hook.due" || event.type === "hook.finished" && event.body.result !== "failed") continue;
     const firstAt = work[0]?.at ?? (deferred[0]?.kind === "notice" ? deferred[0].event.at : deferred[0]?.kind === "failed" || deferred[0]?.kind === "request" || deferred[0]?.kind === "restarted" || deferred[0]?.kind === "run" ? deferred[0].at : undefined);
     if (firstAt && new Date(firstAt).toDateString() !== new Date(event.at).toDateString()) flush();
+    if (event.type === "post.sent") {
+      if (home.kind === "feed") post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, [], [], undefined, undefined, sourceLabel(event.body.target));
+      continue;
+    }
     if (event.type === "post.created") {
       const mentions = event.body.mentions ?? [];
       const replied = (carried.get(event.id) ?? []).filter(target => !mentions.some(mention => sameAuthor(mention, target)));
@@ -297,7 +302,7 @@ export function timeSpan(start: string, end: string): string {
 // Every event type has a plural group label, including types that do not currently appear in a work block.
 export const eventGroups: Record<Event["type"], string> = {
   "connect.connector": "Connect connector changes", "account.failed": "account failures", "account.quota_low": "account quota alerts",
-  "post.created": "posts", "session.started": "sessions started", "session.closed": "sessions closed", "session.compacted": "compactions",
+  "post.sent": "sent posts", "post.created": "posts", "session.started": "sessions started", "session.closed": "sessions closed", "session.compacted": "compactions",
   "session.restarted": "boxes replaced", "session.moved": "sessions moved", "session.profile_changed": "profiles changed",
   "turn.started": "turns started", "turn.ended": "turns ended", "turn.activity": "turn updates", "transcript.changed": "transcript updates",
   "computer.changed": "computer changes", "box.changed": "box changes", "box.pressure": "memory warnings",
@@ -534,7 +539,7 @@ export function describe(event: Event, name: Name): string {
     case "workflow.ended": return ""; // feedRows gives it a row of its own.
     case "workflow.step_changed": case "workflow.status_changed": case "session.profile_changed": case "session.failed": case "goal.set": case "goal.item_changed": case "goal.ended": case "checkin.due": return ""; // feedRows shows no row for them.
     case "box.pressure": return event.body.kind === "max" ? "A session reached its memory limit" : "A session is short of memory";
-    case "post.created": return event.body.text;
+    case "post.sent": case "post.created": return event.body.text;
     case "hook.finished": return `A subscription's run ${event.body.result}: ${event.body.cause ? causes[event.body.cause] : `exit code ${event.body.exitCode}`}`;
     case "hook.due": return "A subscription woke a session";
     case "notice.posted": case "session.notice": return event.body.text;

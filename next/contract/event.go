@@ -69,6 +69,12 @@ type PostSource struct {
 	SessionName string   `json:"sessionName"`
 }
 
+// PostSent records an outgoing cross-room post in its sender's feed.
+type PostSent struct {
+	Text   string     `json:"text"`
+	Target PostSource `json:"target"`
+}
+
 // PostCreated is a post in a room.
 type PostCreated struct {
 	Source      *PostSource  `json:"source,omitempty"` // immutable identity for a cross-room post
@@ -404,6 +410,9 @@ type BoxSize struct {
 	MemBytes int64       `json:"memBytes"`
 	Pids     int         `json:"pids"`
 }
+
+func (PostSent) EventType() EventType { return "post.sent" }
+func (PostSent) isEventBody()         {}
 
 func (PostCreated) EventType() EventType { return "post.created" }
 func (PostCreated) isEventBody()         {}
