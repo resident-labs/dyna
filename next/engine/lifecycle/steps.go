@@ -247,6 +247,10 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		ctx = context.WithoutCancel(ctx)
 	}
 	changed, err := r.change(ctx, b, next, due, failures, cause, createPhase, runtimeFailure)
+	var shareDown box.ShareDown
+	if changed && err == nil && errors.As(workErr, &shareDown) {
+		err = r.store.QuarantineShare(ctx, b)
+	}
 	if changed && err == nil && next.State == contract.BoxStopped {
 		r.view.BoxStopped(ctx, b.Session)
 	}
