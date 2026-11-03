@@ -36,12 +36,13 @@ all=0 targets=() filters=()
 for ((i = 0; i < ${#rest[@]}; i++)); do
 	case ${rest[i]} in
 	--) targets+=("${rest[@]:i+1}"); break ;;
-	--all) all=1 ;;
-	--latest) all=1 filters+=(--latest) ;;
+	--all | --all=*) [[ ${rest[i]} == --all=false || ${rest[i]} == --all=0 ]] || all=1 ;;
+	--latest | --latest=*) [[ ${rest[i]} == --latest=false || ${rest[i]} == --latest=0 ]] || { all=1; filters+=(--latest); } ;;
 	--filter) filters+=(--filter "${rest[i + 1]:-}"); all=1; i=$((i + 1)) ;;
 	--filter=*) filters+=(--filter "${rest[i]#--filter=}"); all=1 ;;
 	-t | --time | -s | --signal) i=$((i + 1)) ;;
 	--*) ;;
+	# A short cluster (-fa, -a=true) with an a or l anywhere counts as bulk. A stray match in a value such as -sKILL only refuses more.
 	-[a-zA-Z]*)
 		[[ ${rest[i]} == *a* ]] && all=1
 		[[ ${rest[i]} == *l* ]] && all=1 filters+=(--latest) ;;
@@ -58,7 +59,8 @@ if ((all)); then
 	pod) list=(pod ps -q) ;;
 	volume) list=(volume ls -q) ;;
 	esac
-	mapfile -t targets < <("$real" "${list[@]}" "${filters[@]}" 2>/dev/null)
+	listed=$("$real" "${list[@]}" "${filters[@]}" 2>/dev/null) || { echo "Stopped: could not list the containers '$tool $*' would hit, so it was not run." >&2; exit 125; }
+	mapfile -t targets <<<"$listed"
 fi
 ((${#targets[@]})) || exec "$real" "$@"
 [ "${DYNA_FORCE:-}" = 1 ] && exec "$real" "$@"
