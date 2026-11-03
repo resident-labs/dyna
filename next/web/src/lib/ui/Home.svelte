@@ -7,7 +7,7 @@
   import { accountPath, reconnectPath } from "../accounts.ts";
   import type { AccountUsage, AccountsListResponse, Card, HostSummary, Principal, Question, SessionListResponse } from "../contract.gen.ts";
   import { clause, expiryText, expiryTime, fromNow, requestLine } from "../feed.ts";
-  import { hostLabel, hostMeters, largeShared, sharedSize, watchHosts } from "../hosts.ts";
+  import { diskLow, hostLabel, hostMeters, largeShared, sharedSize, watchHosts } from "../hosts.ts";
   import { questionPlan } from "../questions.ts";
   import { accountAlerts, busiestWindow, holdFor, holding, outOfLimit, tucked, usageRows, type UsageHold, type UsageRow } from "../usage.ts";
   import { distinctInitials, initials as letters } from "../identity.ts";
@@ -178,7 +178,7 @@
   let needs = $derived(asks + failures.length + hostless.length + alerts.length);
   let unreachable = $derived(hosts?.filter(h => !h.reachable).length ?? 0);
   let runners = $derived(hosts?.reduce((sum, h) => sum + (h.runners ?? 0), 0) ?? 0);
-  let low = $derived(hosts?.filter(h => h.diskLow) ?? []);
+  let low = $derived(hosts?.filter(diskLow) ?? []);
   let lowDisk = $derived(low.length === 1 ? `${hostLabel(low[0].name)} is low on disk` : `${low.length} machines are low on disk`);
   // A large shared folder never changes the sentence; the muted line names the largest and its room.
   const roomName = (room: string) => attention.rooms.get(room)?.name ?? "a closed room";

@@ -598,8 +598,13 @@ func addCLI(root *cobra.Command, getClient func() client) {
 			return err
 		}
 		for _, h := range r.Hosts {
-			state := "ok"
-			if h.DiskLow {
+			state, used, total := "ok", humanize.IBytes(uint64(h.DiskUsed)), humanize.IBytes(uint64(h.DiskBytes))
+			if h.ExecOnly {
+				state, used, total = "offline", "-", "-"
+				if h.Reachable {
+					state = "online"
+				}
+			} else if h.DiskLow {
 				state = "low"
 			}
 			if h.Problem == contract.HostProblemCreateFailed {
@@ -622,7 +627,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 			} else if h.Name != contract.ControlPlane {
 				state += "\tagents " + onOff(h.Agents) + "\tci " + onOff(h.CI)
 			}
-			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n", h.Name, humanize.IBytes(uint64(h.DiskUsed)), humanize.IBytes(uint64(h.DiskBytes)), state); err != nil {
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n", h.Name, used, total, state); err != nil {
 				return err
 			}
 		}

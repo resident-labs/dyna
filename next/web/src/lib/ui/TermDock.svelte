@@ -2,7 +2,7 @@
   import { tick } from "svelte";
   import { call } from "../client.ts";
   import type { HostSummary } from "../contract.gen.ts";
-  import { hostLabel, machines } from "../hosts.ts";
+  import { diskLow, hostLabel, machines } from "../hosts.ts";
   import type { TerminalTarget } from "../terminal.ts";
   import FloatWindow from "./FloatWindow.svelte";
   import Icon from "./Icon.svelte";
@@ -176,7 +176,7 @@
         {#if sessions.length}<p class="label">Sessions</p>{/if}
         {#each sessions as session (session.id)}<button type="button" role="menuitem" tabindex="-1" onclick={() => open2({ box: session.id }, session.name, session.root)}>{session.name}</button>{/each}
         {#if hosts.length}<p class="label">Hosts</p>{/if}
-        {#each hosts as host (host.name)}<button type="button" role="menuitem" tabindex="-1" onclick={() => open2({ host: host.name }, hostLabel(host.name))}>{hostLabel(host.name)}{#if host.diskLow}<StatusPill tone="warning" label="Disk low" />{/if}</button>{/each}
+        {#each hosts as host (host.name)}<button type="button" role="menuitem" tabindex="-1" onclick={() => open2({ host: host.name }, hostLabel(host.name))}>{hostLabel(host.name)}{#if diskLow(host)}<StatusPill tone="warning" label="Disk low" />{/if}</button>{/each}
       </div>{/if}
     </span>
     {#if tabs.length}<span class="rule"></span>{/if}
