@@ -294,3 +294,45 @@ func TestContextChoosesTheSoleBoxImageAndNeverTheRunnerImage(t *testing.T) {
 		t.Fatalf("a path as a name: %v", err)
 	}
 }
+
+// A save changes the runner layer's id, which a CI host builds its tag from, and a room with none has no layer.
+func TestRunnerLayerFollowsTheRoomsSave(t *testing.T) {
+	store := &Store{Layout: box.Layout{Data: t.TempDir()}}
+	if layer, err := store.RunnerLayer("r"); err != nil || layer != nil {
+		t.Fatalf("no image: %v %v", layer, err)
+	}
+	file := func(extra string) []byte {
+		return pack(t, map[string]string{"Containerfile": "ARG DYNA_CI_BASE\nFROM ${DYNA_CI_BASE}\nRUN true" + extra + "\n"})
+	}
+	if _, err := store.Save("r", "ci-runner", file("")); err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.RunnerLayer("r")
+	if err != nil || first == nil || first.Room != "r" || len(first.Context) == 0 {
+		t.Fatalf("layer %+v %v", first, err)
+	}
+	if _, err := store.Save("r", "ci-runner", file(" && true")); err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.RunnerLayer("r")
+	if err != nil || second.ID == first.ID {
+		t.Fatalf("ids %s then %+v: %v", first.ID, second, err)
+	}
+	if other, err := store.RunnerLayer("other"); err != nil || other != nil {
+		t.Fatalf("another room: %v %v", other, err)
+	}
+}
+
+func TestRunnerLayerIDReadsTheIdAlone(t *testing.T) {
+	store := &Store{Layout: box.Layout{Data: t.TempDir()}}
+	if id, err := store.RunnerLayerID("r"); err != nil || id != "" {
+		t.Fatalf("no image: %q %v", id, err)
+	}
+	if _, err := store.Save("r", "ci-runner", pack(t, map[string]string{"Containerfile": "ARG DYNA_CI_BASE\nFROM ${DYNA_CI_BASE}\n"})); err != nil {
+		t.Fatal(err)
+	}
+	layer, err := store.RunnerLayer("r")
+	if id, idErr := store.RunnerLayerID("r"); err != nil || idErr != nil || id != layer.ID || id == "" {
+		t.Fatalf("id %q, layer %+v: %v %v", id, layer, err, idErr)
+	}
+}
