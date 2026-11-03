@@ -2,10 +2,12 @@ package cliproxy
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/watcher/synthesizer"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
@@ -60,6 +62,7 @@ type routingRuntimeState struct {
 	sessionAffinityTTL       time.Duration
 	sessionAffinitySubagents bool
 	sessionAffinityRebindOn  string
+	sessionAffinityStatePath string
 }
 
 func normalizedRoutingRuntimeState(cfg *config.Config) routingRuntimeState {
@@ -82,6 +85,10 @@ func normalizedRoutingRuntimeState(cfg *config.Config) routingRuntimeState {
 		state.strategy = "soonest-reset"
 	}
 	state.sessionAffinity = cfg.Routing.SessionAffinity
+	if authDir, err := util.ResolveAuthDir(cfg.AuthDir); err == nil && cfg.AuthDir != "" {
+		// Not .json: the auth watcher reads those as credentials.
+		state.sessionAffinityStatePath = filepath.Join(authDir, "session-affinity.state")
+	}
 	if ttl := strings.TrimSpace(cfg.Routing.SessionAffinityTTL); ttl != "" {
 		if parsed, errParse := time.ParseDuration(ttl); errParse == nil && parsed > 0 {
 			if parsed < time.Second {
@@ -118,6 +125,7 @@ func newRoutingSelector(state routingRuntimeState) coreauth.Selector {
 			TTL:              state.sessionAffinityTTL,
 			SubagentAffinity: &subagents,
 			RebindOn:         state.sessionAffinityRebindOn,
+			StatePath:        state.sessionAffinityStatePath,
 		})
 	}
 	return selector
