@@ -57,11 +57,13 @@ func RunArgs(a contract.HostexecRunArgs, op contract.OpID) []string {
 	if cwd == "" {
 		cwd = "."
 	}
-	merge := " 2>&1"
-	if a.Collect {
-		merge = "" // a collect run prints an archive: stderr stays on the ssh stderr channel, since in stdout it would corrupt it
+	script := prelude(a, op) + `cd -- "$1" || exit 254; u=$2; t=$3; shift 3; DYNA_ARGV=$(printf '%q ' "$@") systemd-run --quiet --user --scope --unit="$u" -p "RuntimeMaxSec=$t" -p TimeoutStopSec=5 -- bash -c '` + runWords + `'`
+	if !a.Collect {
+		// The prelude and the cd sit inside the merge, so a failed mkdir or a missing cwd shows in the output like the command's own errors.
+		// A collect run prints an archive: its stderr stays on the ssh stderr channel, since in stdout it would corrupt it.
+		script = "{ " + script + "; } 2>&1"
 	}
-	args := []string{"bash", "-c", prelude(a, op) + `cd -- "$1" || exit 254; u=$2; t=$3; shift 3; DYNA_ARGV=$(printf '%q ' "$@") systemd-run --quiet --user --scope --unit="$u" -p "RuntimeMaxSec=$t" -p TimeoutStopSec=5 -- bash -c '` + runWords + `'` + merge + ` | { head -c 8388609; cat >/dev/null; }; exit "${PIPESTATUS[0]}"`, "dyna-hostexec", cwd, "dyna-hostexec-" + string(op), fmt.Sprintf("%g", float64(a.Timeout)/1000)}
+	args := []string{"bash", "-c", script + ` | { head -c 8388609; cat >/dev/null; }; exit "${PIPESTATUS[0]}"`, "dyna-hostexec", cwd, "dyna-hostexec-" + string(op), fmt.Sprintf("%g", float64(a.Timeout)/1000)}
 	return append(args, a.Argv...)
 }
 
