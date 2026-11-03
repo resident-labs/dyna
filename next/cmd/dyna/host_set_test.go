@@ -6,14 +6,14 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-func TestHostAddSwitchesDefaultToAgentsOnCIOff(t *testing.T) {
+func TestHostAddSwitchesDefaultToAgentsOnCIUnset(t *testing.T) {
 	f := &fakeClient{}
 	runCLI(t, f, "host", "add", "h", "--ssh", "u@h", "--owner-only-admin")
-	if f.host.Agents == nil || !*f.host.Agents || f.host.CI {
+	if f.host.Agents == nil || !*f.host.Agents || f.host.CI != nil {
 		t.Fatalf("defaults: %+v", f.host)
 	}
 	runCLI(t, f, "host", "add", "pve", "--ssh", "b@pve", "--owner-only-admin", "--agents", "off", "--ci", "on")
-	if f.host.Agents == nil || *f.host.Agents || !f.host.CI {
+	if f.host.Agents == nil || *f.host.Agents || f.host.CI == nil || !*f.host.CI {
 		t.Fatalf("a CI host: %+v", f.host)
 	}
 	if _, err := execCLI(&fakeClient{}, "host", "add", "h", "--ssh", "u@h", "--owner-only-admin", "--ci", "yes"); err == nil {

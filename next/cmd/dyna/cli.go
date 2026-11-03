@@ -517,7 +517,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	var hostRooms []string
 	var admin bool
 	var addAgents, addCI string
-	add := &cobra.Command{Use: "add NAME", Long: "Add a host. With --agents on (the default) new session boxes may land on it; with --ci on (default off) the CI pool may start runners there, placed as boxes are.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	add := &cobra.Command{Use: "add NAME", Long: "Add a host. With --agents on (the default) new session boxes may land on it; with --ci on (the default, except on the host the engine runs on) the CI pool may start runners there, placed as boxes are.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		rooms := make([]contract.RoomID, len(hostRooms))
 		for i, room := range hostRooms {
 			rooms[i] = contract.RoomID(room)
@@ -526,11 +526,13 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		if err != nil {
 			return err
 		}
-		ci, err := hostSwitch("ci", addCI)
-		if err != nil {
-			return err
+		var ci *bool
+		if cmd.Flags().Changed("ci") {
+			if ci, err = hostSwitch("ci", addCI); err != nil {
+				return err
+			}
 		}
-		result, err := getClient().HostAdd(cmd.Context(), contract.HostAddRequest{Name: contract.HostName(args[0]), SSH: ssh, OwnerOnlyAdmin: admin, Rooms: rooms, Agents: agents, CI: *ci})
+		result, err := getClient().HostAdd(cmd.Context(), contract.HostAddRequest{Name: contract.HostName(args[0]), SSH: ssh, OwnerOnlyAdmin: admin, Rooms: rooms, Agents: agents, CI: ci})
 		if err == nil && result.NoSwap {
 			fmt.Fprintln(cmd.ErrOrStderr(), "Warning: host has no swap; memory pressure can kill box processes.")
 		}
@@ -540,7 +542,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	add.Flags().StringVar(&ssh, "ssh", "", "SSH destination")
 	add.Flags().BoolVar(&admin, "owner-only-admin", false, "Only the owner has host admin rights")
 	add.Flags().StringVar(&addAgents, "agents", "on", "on or off: whether new session boxes may land on this host")
-	add.Flags().StringVar(&addCI, "ci", "off", "on or off: whether the CI pool may start runners on this host")
+	add.Flags().StringVar(&addCI, "ci", "", "on or off: whether the CI pool may start runners on this host (default on, off on the engine's own host)")
 	var setAgents, setCI string
 	var clearCreateProblem bool
 	setHost := &cobra.Command{Use: "set NAME [--agents on|off] [--ci on|off]", Short: "Turn a host's agents and CI switches", Long: "Turn a host's two switches. With agents off no new session box lands on the host; its room list still says which rooms it serves while agents are on. With ci off the CI pool starts no new runner there, and runners come back when ci is on again. Both off disables the host and keeps it registered. Boxes and runners already on the host stay until they stop, and a stopped box there waits until agents are on again.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
