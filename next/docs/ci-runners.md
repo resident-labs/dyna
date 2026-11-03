@@ -154,9 +154,11 @@ Each runner is a rootless Podman container, built from
   folder its boxes mount at `/box/cache`, every room's alike, mounted read-only: a
   job reads what the boxes fetched, and cannot change their files. The build folder
   of the runner's slot, `/cache/ci/N` there, is the one writable mount, at `/build`
-  (`DYNA_CI_BUILD`) in every slot, so a folder such as
-  `CARGO_TARGET_DIR=$DYNA_CI_BUILD/target` stays warm, as on upstream projects' own
-  runners. A slot holds one running runner on its host, and the pool gives slots out
+  (`DYNA_CI_BUILD`) in every slot. Two of its folders are mounted again where a box
+  of the repository has them: `cargo` at `/box/cache/cargo` (`CARGO_HOME`) and
+  `target` at `/box/work/<owner>/<repo>/target` (`CARGO_TARGET_DIR`). So Cargo's
+  downloads and build stay warm, as on upstream projects' own runners, with no setup
+  in the workflow. A slot holds one running runner on its host, and the pool gives slots out
   under its lock, so two jobs never share a build folder at once, whatever their
   sizes or repositories. A job sees the other slots' folders read-only. Only the
   repository's own pushes and pull requests reach the pool. Before a job starts, a
@@ -165,9 +167,13 @@ Each runner is a rootless Podman container, built from
   host's compiler cache, the one its boxes use, through a socket mounted at
   `/run/dyna-build-cache` that the entrypoint relays to `127.0.0.1:3129` (spec 5.6).
   So a job can change what a box links, which the owner accepts. sccache's keys hold
-  the build's paths, so a job finds what another slot's job compiled because every
-  slot's build folder is at `/build`, and what a box compiled only if it uses the
-  boxes' paths. A job that sets `RUSTC_WRAPPER` to nothing builds without it.
+  the build's paths and every `CARGO_` variable, so a job and a box of its
+  repository each find what the other compiled because they share `CARGO_HOME` and
+  `CARGO_TARGET_DIR`, except a crate that takes a derive macro or C code, whose keys
+  hold what each image's C toolchain made. A job that sets either variable itself,
+  or another `CARGO_` variable such as `CARGO_TERM_COLOR`, finds only entries made
+  the same way. A job that sets
+  `RUSTC_WRAPPER` to nothing builds without it.
 - **Secrets:** the only one is its JIT config. It reaches `podman run` on standard
   input, never argv. Podman keeps it in the container's config, and conmon has it
   in its environment, both readable only by the host user, until the container
