@@ -86,7 +86,7 @@ func TestHostAddExecOnlyNeedsNoAdminFlag(t *testing.T) {
 
 func TestHostListShowsExecOnly(t *testing.T) {
 	f := &fakeClient{hosts: []contract.HostSummary{{Name: "omarchy", ExecOnly: true}}}
-	if out := runCLI(t, f, "host", "list"); out != "omarchy\t0 B\t0 B\tok\texec only\n" {
+	if out := runCLI(t, f, "host", "list"); out != "omarchy\t-\t-\toffline\texec only\n" {
 		t.Fatalf("output=%q", out)
 	}
 }
@@ -96,5 +96,13 @@ func TestHostSetSendsOwnerOnlyAdmin(t *testing.T) {
 	runCLI(t, f, "host", "set", "omarchy", "--agents", "on", "--owner-only-admin")
 	if !f.hostSet.OwnerOnlyAdmin {
 		t.Fatalf("%+v", f.hostSet)
+	}
+}
+
+func TestHostListExecOnlyShowsOnlineOrOfflineWithoutDisk(t *testing.T) {
+	f := &fakeClient{hosts: []contract.HostSummary{{Name: "omarchy", ExecOnly: true, Reachable: true}, {Name: "gone", ExecOnly: true, DiskLow: true}}}
+	want := "omarchy\t-\t-\tonline\texec only\ngone\t-\t-\toffline\texec only\n"
+	if out := runCLI(t, f, "host", "list"); out != want {
+		t.Fatalf("output=%q", out)
 	}
 }

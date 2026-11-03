@@ -254,3 +254,22 @@ func TestDiskWarnPoolNodeWarnsAtFloor(t *testing.T) {
 		t.Fatalf("stored total: %+v %v", hosts, err)
 	}
 }
+
+// An exec-only host has no disk figures, so a sample it somehow reports never warns the roots and never makes it an eviction host.
+func TestDiskWarnSkipsExecOnlyHost(t *testing.T) {
+	ctx := context.Background()
+	s := diskStore(t)
+	if _, err := s.writer.Exec("UPDATE hosts SET exec_only=1 WHERE name='h'"); err != nil {
+		t.Fatal(err)
+	}
+	free := 10 * box.GiB
+	for range 2 {
+		if err := s.RecordHostHeartbeat(ctx, "h", true, &free, 1000*box.GiB, time.Unix(1, 0)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	events, wakes := diskAlerts(t, s)
+	if events["r1"] != 0 || events["r2"] != 0 || wakes["root1"] != 0 || wakes["root2"] != 0 {
+		t.Fatalf("events %v wakes %v", events, wakes)
+	}
+}
