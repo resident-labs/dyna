@@ -172,7 +172,7 @@ func Run(ctx context.Context, cfg Config) error {
 	service.Reconciler().SetHostRestoring(boxes.restoring)
 	service.Reconciler().SetRoomHosts(boxes)
 	service.Reconciler().SetNodes(poolHosts{Script: lifecycle.Script{Layout: layout}, boxes: boxes})
-	runners := &ci.Pool{Store: st, Hosts: boxes.ciDriver, Sets: &ci.Sets{Token: token}, Memory: boxes.hostMemory, Now: time.Now, Kick: service.Reconciler().Kick, Layer: service.Images().RunnerLayer,
+	runners := &ci.Pool{Store: st, Hosts: boxes.ciDriver, Sets: &ci.Sets{Token: token}, Memory: boxes.hostMemory, Now: time.Now, Kick: service.Reconciler().Kick, LayerID: service.Images().RunnerLayerID, Layer: service.Images().RunnerLayer,
 		GitHub: &ci.GitHub{Token: token, Endpoint: &url.URL{Scheme: "https", Host: "api.github.com"}, Transport: http.DefaultTransport, Now: time.Now}}
 	service.Reconciler().SetRunners(runners)
 	service.SetRunnerImageProblems(runners.Problems)
