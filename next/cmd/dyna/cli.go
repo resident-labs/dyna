@@ -521,7 +521,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	var hostRooms []string
 	var admin bool
 	var addAgents, addCI string
-	add := &cobra.Command{Use: "add NAME", Long: "Add a host. With --agents on (the default) new session boxes may land on it; with --ci on (the default, except on the host the engine runs on) the CI pool may start runners there, placed as boxes are.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	add := &cobra.Command{Use: "add NAME", Long: "Add a host. With --agents off and --ci off the host is exec only: it needs just SSH and bash, takes host-exec runs, and never has a box or runner. With --agents on (the default) new session boxes may land on it; with --ci on (the default, except on the host the engine runs on) the CI pool may start runners there, placed as boxes are.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		rooms := make([]contract.RoomID, len(hostRooms))
 		for i, room := range hostRooms {
 			rooms[i] = contract.RoomID(room)
@@ -548,9 +548,10 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	add.Flags().StringVar(&addAgents, "agents", "on", "on or off: whether new session boxes may land on this host")
 	add.Flags().StringVar(&addCI, "ci", "", "on or off: whether the CI pool may start runners on this host (default on, off on the engine's own host)")
 	var setAgents, setCI string
+	var setAdmin bool
 	var clearCreateProblem bool
-	setHost := &cobra.Command{Use: "set NAME [--agents on|off] [--ci on|off]", Short: "Turn a host's agents and CI switches", Long: "Turn a host's two switches. With agents off no new session box lands on the host; its room list still says which rooms it serves while agents are on. With ci off the CI pool starts no new runner there, and runners come back when ci is on again. Both off disables the host and keeps it registered. Boxes and runners already on the host stay until they stop, and a stopped box there waits until agents are on again.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		req := contract.HostSetRequest{Host: contract.HostName(args[0]), ClearCreateProblem: clearCreateProblem}
+	setHost := &cobra.Command{Use: "set NAME [--agents on|off] [--ci on|off]", Short: "Turn a host's agents and CI switches", Long: "Turn a host's two switches. With agents off no new session box lands on the host; its room list still says which rooms it serves while agents are on. With ci off the CI pool starts no new runner there, and runners come back when ci is on again. Both off makes the host exec only: it takes host-exec runs and nothing else, and its check is SSH and bash alone. Turning agents or ci on for an exec-only host runs the full host check first, which needs --owner-only-admin as host add does. Boxes and runners already on the host stay until they stop, and a stopped box there waits until agents are on again.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		req := contract.HostSetRequest{Host: contract.HostName(args[0]), ClearCreateProblem: clearCreateProblem, OwnerOnlyAdmin: setAdmin}
 		var err error
 		if cmd.Flags().Changed("agents") {
 			if req.Agents, err = hostSwitch("agents", setAgents); err != nil {
@@ -568,6 +569,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		_, err = getClient().HostSet(cmd.Context(), req)
 		return err
 	}}
+	setHost.Flags().BoolVar(&setAdmin, "owner-only-admin", false, "Only the owner has host admin rights; needed to turn agents or ci on for an exec-only host")
 	setHost.Flags().BoolVar(&clearCreateProblem, "clear-create-problem", false, "Clear the host's create-failure quarantine")
 	setHost.Flags().StringVar(&setAgents, "agents", "", "on or off: whether new session boxes may land on this host")
 	setHost.Flags().StringVar(&setCI, "ci", "", "on or off: whether the CI pool may start runners on this host")
@@ -608,7 +610,9 @@ func addCLI(root *cobra.Command, getClient func() client) {
 			if h.Pool != "" {
 				state += "\tpool " + h.Pool
 			}
-			if h.Name != contract.ControlPlane {
+			if h.Name != contract.ControlPlane && !h.Agents && !h.CI {
+				state += "\texec only"
+			} else if h.Name != contract.ControlPlane {
 				state += "\tagents " + onOff(h.Agents) + "\tci " + onOff(h.CI)
 			}
 			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n", h.Name, humanize.IBytes(uint64(h.DiskUsed)), humanize.IBytes(uint64(h.DiskBytes)), state); err != nil {

@@ -173,7 +173,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	hostState := make(map[contract.HostName]box.HostState, len(hosts))
 	for _, host := range hosts {
 		hostState[host.Name] = host.State
-		if host.State == box.HostReady && !host.MaintainedAt.After(r.now().Add(-24*time.Hour)) {
+		if host.State == box.HostReady && !host.ExecOnly() && !host.MaintainedAt.After(r.now().Add(-24*time.Hour)) {
 			claimed, err := r.store.ClaimHostMaintenance(ctx, host.Name, r.now())
 			if err != nil {
 				return err
