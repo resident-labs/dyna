@@ -45,6 +45,9 @@ const streamTruncatedErrorCode = ErrorCodeStreamTruncated
 // quota labelling or quota exponential backoff.
 const ErrorCodeTransientRateLimit = "transient_rate_limit"
 
+// ErrorCodeInsufficientBalance marks a payment failure affecting the whole account.
+const ErrorCodeInsufficientBalance = "insufficient_balance"
+
 const transientRateLimitErrorCode = ErrorCodeTransientRateLimit
 
 // Error describes an authentication related failure in a provider agnostic format.

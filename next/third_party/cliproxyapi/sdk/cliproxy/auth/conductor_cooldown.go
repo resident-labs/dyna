@@ -901,6 +901,18 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 			}
 		}
 	}
+	// A balance applies to the whole credential, not just the requested model.
+	// The match is on the message, not the provider: any provider that says
+	// "insufficient balance" with a 402 is out of credit.
+	if !result.Success && result.Error != nil && result.Error.HTTPStatus == http.StatusPaymentRequired && strings.Contains(strings.ToLower(result.Error.Message), "insufficient balance") {
+		result.Error = cloneError(result.Error)
+		result.Error.Code = ErrorCodeInsufficientBalance
+		result.CredentialScope = true
+		if result.RetryAfter == nil {
+			retry := time.Hour
+			result.RetryAfter = &retry
+		}
+	}
 	modelKey := canonicalModelKey(result.Model)
 
 	var authSnapshot *Auth
@@ -1054,6 +1066,11 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 					}
 
 					statusCode := statusCodeFromResult(result.Error)
+					// The 402 stays on the client's answer; here it is cooled as a
+					// quota failure, and the cooldown rules only treat 429 as quota.
+					if result.Error != nil && result.Error.Code == ErrorCodeInsufficientBalance {
+						statusCode = http.StatusTooManyRequests
+					}
 					if isModelSupportResultError(result.Error) {
 						if disableCooling {
 							state.NextRetryAfter = time.Time{}

@@ -280,10 +280,11 @@ type AccountsQuotaResponse struct {
 type UsageCause string
 
 const (
-	UsageOK            UsageCause = ""
-	UsageSignInExpired UsageCause = "sign_in_expired"
-	UsageUnreachable   UsageCause = "unreachable"
-	UsageRateLimited   UsageCause = "rate_limited"
+	UsageOK                  UsageCause = ""
+	UsageSignInExpired       UsageCause = "sign_in_expired"
+	UsageUnreachable         UsageCause = "unreachable"
+	UsageRateLimited         UsageCause = "rate_limited"
+	UsageInsufficientBalance UsageCause = "insufficient_balance"
 )
 
 type AccountUsage struct {
