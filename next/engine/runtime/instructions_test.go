@@ -442,3 +442,42 @@ func TestANodeWhoseSharedFolderCannotMountJoinsWithoutSessionBoxes(t *testing.T)
 		t.Fatalf("a session box was placed on %q", got.Host)
 	}
 }
+
+// recordTransport answers anything and records the remote commands it was asked to run.
+type recordTransport struct{ commands *[]string }
+
+func (r recordTransport) Run(_ context.Context, _ []byte, args ...string) ([]byte, error) {
+	for _, arg := range args {
+		if arg == "-O" || arg == "-M" {
+			return nil, nil
+		}
+	}
+	*r.commands = append(*r.commands, strings.Join(args[len(args)-3:], " "))
+	return []byte("DYNA-END 00000000000000000000 000\n"), nil
+}
+
+type recordHostStore struct {
+	instructionStore
+	added *box.Host
+}
+
+func (s recordHostStore) AddHost(_ context.Context, h box.Host) error { *s.added = h; return nil }
+
+// An exec-only host is checked by running bash alone, and nothing is installed or synced there.
+func TestAddExecOnlyHostNeedsOnlyBash(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var commands []string
+	var added box.Host
+	b := &Boxes{Store: recordHostStore{added: &added}, Runtime: t.TempDir(), Layout: box.Layout{Data: t.TempDir(), HostData: t.TempDir()}, Context: ctx, hostRunner: recordTransport{&commands}}
+	off := false
+	if _, err := b.AddHost(ctx, contract.HostAddRequest{Name: "omarchy", SSH: "ari@omarchy", Agents: &off, CI: &off}); err != nil {
+		t.Fatal(err)
+	}
+	if len(commands) != 1 || !strings.Contains(commands[0], "true") {
+		t.Fatalf("commands %q", commands)
+	}
+	if !added.ExecOnly || added.State != box.HostReady || added.EngineHost == nil {
+		t.Fatalf("record %+v", added)
+	}
+}

@@ -87,6 +87,7 @@ type OpResult struct {
 	Output     string        `json:"output,omitempty"` // up to 64 KiB inline
 	Truncated  bool          `json:"truncated,omitempty"`
 	OutputFile string        `json:"outputFile,omitempty"` // the rest, by hash
+	OutFiles   string        `json:"outFiles,omitempty"`   // a host run's $DYNA_OUT files as a tar, by hash
 }
 
 const (
