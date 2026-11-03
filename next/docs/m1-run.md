@@ -73,6 +73,4 @@ next/scripts/deploy-trial.sh
 ```
 
 The trial never rolls back. Fix failures forward on main. An older binary
-cannot open a store after a schema step. The engine keeps
-`backups/pre-upgrade-v*.db` for an emergency restore; only the owner decides
-whether to restore one.
+cannot open a store after a schema step.

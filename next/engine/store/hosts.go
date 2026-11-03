@@ -183,13 +183,6 @@ func (s *Store) warnDisk(ctx context.Context, tx *sql.Tx, name contract.HostName
 	return s.alertRoots(ctx, tx, contract.HostDiskLow{Host: name, FreeBytes: free, FloorBytes: floor}, at)
 }
 
-// AlertDisk tells room roots that work could not run for lack of disk.
-func (s *Store) AlertDisk(ctx context.Context, name contract.HostName, free, need int64, at time.Time) error {
-	return s.Write(ctx, func(tx *sql.Tx) error {
-		return s.alertRoots(ctx, tx, contract.HostDiskLow{Host: name, FreeBytes: free, FloorBytes: need}, at)
-	})
-}
-
 // alertRoots posts the event in every room and wakes its root, which can close finished work.
 func (s *Store) alertRoots(ctx context.Context, tx *sql.Tx, body contract.HostDiskLow, at time.Time) error {
 	rows, err := tx.QueryContext(ctx, "SELECT id,room FROM sessions WHERE parent IS NULL AND state='open' AND closed_at IS NULL")

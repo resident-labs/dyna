@@ -71,15 +71,6 @@ export const largeShared = (h: HostSummary): RoomShared[] =>
 // A folder's size in whole GB of 2^30 bytes, as the meters count.
 export const sharedSize = (bytes: number) => `${Math.round(bytes / 2 ** 30).toLocaleString()} GB`;
 
-// The off-host backup problem Home marks, if any (spec 4.1): the stored failure, or a copy over 48 hours old. No copy
-// yet, a copy in time and backups that are not configured all show nothing.
-export function backupProblem(h: HostSummary, now: number): { tone: "warning" | "error"; label: string; title?: string } | undefined {
-  if (!h.backupCopyEnabled) return undefined;
-  if (h.backupCopyFailure) return { tone: "error", ...h.backupCopyFailure === "no_space" ? { label: "Backup machine full", title: "The second machine has no room for the backup" } : { label: "Backup failed" } };
-  if (!h.backupCopyAt || now - Date.parse(h.backupCopyAt) <= 48 * 3_600_000) return undefined;
-  return { tone: "warning", label: `Backup ${Math.floor((now - Date.parse(h.backupCopyAt)) / 86_400_000)} days old` };
-}
-
 // The sessions panel's foot: at most 3 hosts. Unreachable hosts come first, then those low on disk, since they need
 // attention; then the reachable ones that report load, busiest first by the higher of CPU and memory.
 export function hostLoads(hosts: HostSummary[]): { name: string; reachable: boolean; diskLow: boolean; meters: Meter[] }[] {
