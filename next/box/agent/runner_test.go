@@ -303,6 +303,8 @@ func TestRunnerTransfersOnFirstTurnAndOnEachChange(t *testing.T) {
 			t.Fatal(err)
 		}
 		<-sink.done
+		// The sink hears the result before the runner clears the turn, so wait for the turn to end, not for a time.
+		runner.turns.Wait()
 	}
 	if want := []contract.ModelChoice{modelA, modelB, modelB}; !reflect.DeepEqual(h.Models, want) {
 		t.Fatalf("transfers: %+v", h.Models)
