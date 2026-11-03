@@ -366,6 +366,11 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, typ string, input
 				if h.Activity != nil {
 					h.Activity(id, activityLabel(e))
 				}
+			case "compaction_start":
+				// A compaction runs a model call with no tool, so the line says so rather than keep the last command.
+				if h.Activity != nil {
+					h.Activity(id, "compacting the conversation")
+				}
 			case "message_end":
 				m := e.Message
 				switch m.Role {
