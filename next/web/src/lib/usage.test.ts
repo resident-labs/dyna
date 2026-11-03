@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountAlerts, balancesText, busiestWindow, hideLabel, holdFor, holding, limitReached, outOfLimit, tucked, usageRows, visibleWindows, windowLabel, windowMeter } from "./usage.ts";
+import { accountAlerts, balancesText, causeText, busiestWindow, hideLabel, holdFor, holding, limitReached, outOfLimit, tucked, usageRows, visibleWindows, windowLabel, windowMeter } from "./usage.ts";
 import type { AccountUsage, AccountsListResponse, UsageWindow } from "./contract.gen.ts";
 
 test("labels each window and hides only unused model-specific windows", () => {
@@ -192,4 +192,9 @@ test("names the busiest usage window of any shown account by its title", () => {
     { accountId: "b", provider: "codex", label: "team", active: true, cause: "sign_in_expired", windows: [w(99, 604800)] },
     { accountId: "c", provider: "kimi", label: "spare", active: true, cause: "", windows: null }])), "pipsqueak.tasks · 5-hour 62% used");
   assert.equal(busiestWindow([]), undefined);
+});
+
+test("says in plain words when an account is out of credit, and nothing for causes that pass", () => {
+  assert.equal(causeText("insufficient_balance"), "Out of credit: top up this account");
+  for (const cause of ["", "sign_in_expired", "unreachable", "rate_limited"] as const) assert.equal(causeText(cause), undefined);
 });

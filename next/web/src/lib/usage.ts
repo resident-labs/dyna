@@ -59,6 +59,9 @@ export function usageRows(accounts: AccountUsage[], catalog?: AccountsListRespon
 // Prepaid balances as text, such as "110.00 CNY · 3.50 USD". They are not limits, so they get no meter.
 export const balancesText = (balances: readonly UsageBalance[]) => balances.map(b => `${b.amount} ${b.currency}`).join(" · ");
 
+// The sentence for a usage cause the owner can act on; none for the others, which pass by themselves.
+export const causeText = (cause: AccountUsage["cause"]): string | undefined => cause === "insufficient_balance" ? "Out of credit: top up this account" : undefined;
+
 export type AccountAlert = { id: string; title: string; provider?: string; reconnect: boolean };
 
 // The accounts that go in Needs you, by name: an expired sign-in is the one cause the owner can act on. Only one on a
