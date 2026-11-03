@@ -113,9 +113,12 @@ var (
 	runnerLayerID   = regexp.MustCompile(`^[0-9a-f]{8,64}$`)
 )
 
+// runnerLayerRepoPrefix starts the name of every room layer image.
+const runnerLayerRepoPrefix = "localhost/dyna-ci-room-"
+
 // roomRunnerRepo is the image name of a room's runner layers.
 func roomRunnerRepo(room contract.RoomID) string {
-	return "localhost/dyna-ci-room-" + strings.ToLower(string(room))
+	return runnerLayerRepoPrefix + strings.ToLower(string(room))
 }
 
 func egressArgs(image, bin string) []string {
@@ -189,7 +192,7 @@ func runnerArgs(s box.RunnerSpec) []string {
 		"--env", "DYNA_CI_CACHE=" + cacheMount, "--env", "DYNA_CI_BUILD=" + buildMount,
 		// A box of this repository sets the same two, and no other CARGO_ variable, which sccache hashes too.
 		"--env", "CARGO_HOME=" + box.CargoHome, "--env", "CARGO_TARGET_DIR=" + target,
-		// Dyna's entrypoint and user, whatever a room's layer sets, so a layer only adds files.
+		// Dyna's entrypoint and user, whatever a room's layer sets. A layer can still change files in its own image.
 		"--entrypoint", runnerEntrypoint,
 		s.Image}
 }
@@ -268,4 +271,30 @@ func (h *Host) RemoveRunner(ctx context.Context, name string) error {
 	}
 	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "rm", "--force", "--ignore", "--time", "0", name)
 	return err
+}
+
+// PruneRunnerLayers removes the room layer images of every room but these, as a room that dropped its ci-runner image, was
+// deleted or left CI has no build to replace its image. An image a container still uses stays until a later prune.
+func (h *Host) PruneRunnerLayers(ctx context.Context, keep []contract.RoomID) error {
+	select {
+	case h.buildGate <- struct{}{}:
+		defer func() { <-h.buildGate }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	out, err := h.run(ctx, "podman", "images", "--format", "{{.Repository}}:{{.Tag}}")
+	if err != nil {
+		return err
+	}
+	kept := make(map[string]bool, len(keep))
+	for _, room := range keep {
+		kept[roomRunnerRepo(room)] = true
+	}
+	for _, image := range strings.Fields(string(out)) {
+		repo, _, _ := strings.Cut(image, ":")
+		if strings.HasPrefix(repo, runnerLayerRepoPrefix) && !kept[repo] {
+			_, _ = h.run(ctx, "podman", "rmi", image)
+		}
+	}
+	return nil
 }

@@ -106,9 +106,11 @@ dyna image save ci-runner ./ci-runner     # the folder holds a Containerfile
 ```
 
 It starts `ARG DYNA_CI_BASE` and `FROM ${DYNA_CI_BASE}`, the shared runner image
-below, which is not the box base. A room file only adds layers: Dyna starts every
-runner with its own entrypoint, user (1001:1001), read-only root, no network, and
-dropped capabilities, whatever the file sets. Install as `root`, then end `USER 1001:1001`.
+below, which is not the box base. Dyna starts every runner with its own entrypoint, user (1001:1001), read-only root, no network, and
+dropped capabilities, whatever the file sets. The file can still overwrite files in the image,
+such as the entrypoint script or the runner binary, but only for its own room's runners, which gain no reach by it. The layer
+build itself has network access and may use `RUN --network=host` and `COPY --from=` another image, as a room's box images do, so
+only the owner and the room's agents should save it. Install as `root`, then end `USER 1001:1001`.
 
 A repository has one CI room, the one it is turned on in, so it has one runner
 image: that room's. A room whose image conflicts with another's is not possible, since a repository reads one room only.
@@ -122,7 +124,9 @@ image's id, so either change builds again. A build takes minutes the first time.
 Placement counts a host as ready for a repository only when it has that repository's
 current image, so a host that has it wins over one that must build it.
 
-A room with no `ci-runner` image uses the shared image. When the room's image fails
+A host builds each layer within 10 minutes, one at a time, so one room's slow file does not stop another room's. A layer
+that no room has any more is removed from the host. A job placed on a host that must still build runs after that build,
+which can take minutes, and placement holds the pool lock meanwhile. A room with no `ci-runner` image uses the shared image. When the room's image fails
 to build on a host, the job runs on the shared image, the pool logs why, and
 `dyna host list` shows the host with a CI runner image problem (room, image id and the
 last lines of the build), until a build there succeeds. A save with a fix builds
