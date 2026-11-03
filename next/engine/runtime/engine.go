@@ -112,11 +112,8 @@ type Config struct {
 func Run(ctx context.Context, cfg Config) error {
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
-	shutdown := shutdownWait{start: func() (context.Context, context.CancelFunc) {
-		stop()
-		return context.WithTimeout(context.Background(), shutdownTimeout)
-	}}
-	defer shutdown.close()
+	shutdown := engineShutdown{stop: stop}
+	defer shutdown.run()
 	token := os.Getenv("GH_TOKEN")
 	if err := os.Unsetenv("GH_TOKEN"); err != nil {
 		return err
@@ -133,7 +130,7 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	defer shutdown.run("store", func() { _ = st.Close() })
+	shutdown.cleanup("store", func() { _ = st.Close() })
 	layout := box.Layout{Data: cfg.Data, HostData: cfg.HostData}
 	if err := st.ResetEngineHosts(ctx); err != nil {
 		return fmt.Errorf("reset host identity: %w", err)
@@ -151,9 +148,9 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	defer proxy.Listener.Close()
+	shutdown.cleanup("proxy listener", func() { _ = proxy.Listener.Close() })
 	proxyCtx, stopProxy := context.WithCancel(context.WithoutCancel(ctx))
-	defer stopProxy()
+	shutdown.cleanup("proxy context", stopProxy)
 	done := make(chan struct{})
 	drain := model.NewDrain()
 	boxCtx, stopBoxes := context.WithCancel(ctx)
@@ -224,7 +221,7 @@ func Run(ctx context.Context, cfg Config) error {
 		defer close(done)
 		proxy.Supervise(proxyCtx, executable, st, accounts.CompleteOAuth, connections)
 	}()
-	defer func() { stopProxy(); shutdown.wait("model proxy", done) }()
+	shutdown.cleanup("model proxy", func() { stopProxy(); <-done })
 	if err := service.ExpireHostexecGrantRequests(ctx); err != nil {
 		return fmt.Errorf("expire host grant requests: %w", err)
 	}
@@ -281,7 +278,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	go cardServer.Serve(card)
-	defer card.Close()
+	shutdown.cleanup("connect card", func() { _ = card.Close() })
 	appPort := 0
 	webRoutes := func(context.Context) []string { return nil }
 	var webServer *api.Web
@@ -302,11 +299,11 @@ func Run(ctx context.Context, cfg Config) error {
 		if err != nil {
 			return err
 		}
-		defer listener.Close()
+		shutdown.cleanup("web listener", func() { _ = listener.Close() })
 		appPort = listener.Addr().(*net.TCPAddr).Port
 	}
 	connectOps := connect.NewOperations(ctx, files, st, appPort, card.Addr().(*net.TCPAddr).Port)
-	defer shutdown.run("connect operations", connectOps.Close)
+	shutdown.cleanup("connect operations", connectOps.Close)
 	if webServer != nil {
 		webServer.SetDiscovery(connect.TailscaleRoute, func() {
 			select {
@@ -327,20 +324,20 @@ func Run(ctx context.Context, cfg Config) error {
 		defer close(tunnelDone)
 		connect.SuperviseTunnel(tunnelCtx, files, st, appPort, card.Addr().(*net.TCPAddr).Port, webRoutes, connectOps.Wake())
 	}()
-	defer func() { stopTunnel(); shutdown.wait("connect tunnel", tunnelDone) }()
+	shutdown.cleanup("connect tunnel", func() { stopTunnel(); <-tunnelDone })
 	sockets := api.NewSockets(apiServer, cfg.Runtime, uint32(os.Getuid()), nil)
 	boxes.Sockets = sockets
 	if err := sockets.OpenOwner(); err != nil {
 		return err
 	}
-	defer shutdown.run("sockets", func() { _ = sockets.Close() })
+	shutdown.cleanup("sockets", func() { _ = sockets.Close() })
 	if err := service.Reconciler().FailStaleCreates(ctx); err != nil {
 		return err
 	}
 	if err := boxes.Restore(ctx); err != nil {
 		return err
 	}
-	defer shutdown.run("host recovery", boxes.WaitRecovered)
+	shutdown.workers = append(shutdown.workers, shutdownStep{name: "host recovery", run: boxes.WaitRecovered})
 
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
@@ -352,19 +349,19 @@ func Run(ctx context.Context, cfg Config) error {
 		service.Reconciler().Run(ctx, reconcilerTicks.C)
 		service.Reconciler().Wait()
 	}()
-	defer shutdown.wait("reconciler", reconcilerDone)
+	shutdown.join("reconciler", reconcilerDone)
 	subscriptionsDone := make(chan struct{})
 	go func() {
 		defer close(subscriptionsDone)
 		service.RunSubscriptions(ctx)
 	}()
-	defer shutdown.wait("subscriptions", subscriptionsDone)
+	shutdown.join("subscriptions", subscriptionsDone)
 	buildDone := make(chan struct{})
 	go func() {
 		defer close(buildDone)
 		boxes.BuildAhead(ctx)
 	}()
-	defer shutdown.wait("image builds", buildDone)
+	shutdown.join("image builds", buildDone)
 	archiveDone := make(chan struct{})
 	go func() {
 		defer close(archiveDone)
@@ -384,7 +381,7 @@ func Run(ctx context.Context, cfg Config) error {
 			}
 		}
 	}()
-	defer shutdown.wait("archive expiry", archiveDone)
+	shutdown.join("archive expiry", archiveDone)
 	ciDone := make(chan struct{})
 	go func() {
 		defer close(ciDone)
@@ -392,7 +389,7 @@ func Run(ctx context.Context, cfg Config) error {
 		defer ticks.Stop()
 		runners.Run(ctx, ticks.C)
 	}()
-	defer shutdown.wait("CI pool", ciDone)
+	shutdown.join("CI pool", ciDone)
 	prDone := make(chan struct{})
 	go func() {
 		defer close(prDone)
@@ -400,7 +397,7 @@ func Run(ctx context.Context, cfg Config) error {
 		defer ticks.Stop()
 		prPoll.Run(ctx, ticks.C)
 	}()
-	defer shutdown.wait("PR poller", prDone)
+	shutdown.join("PR poller", prDone)
 	lastDormant, lastCheckins := time.Now(), time.Now()
 	for {
 		select {

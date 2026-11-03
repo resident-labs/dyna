@@ -6,45 +6,67 @@ import (
 	"time"
 )
 
-const shutdownTimeout = 15 * time.Second
+const (
+	shutdownTimeout = 15 * time.Second
+	cleanupTimeout  = 3 * time.Second
+)
 
-// shutdownWait gives all post-drain joins and cleanup one budget, not one per
-// subsystem. Start it lazily so the admitted model calls keep their full drain.
-// A timed-out worker is left to process exit; it must not delay the other cleanup.
-type shutdownWait struct {
-	start  func() (context.Context, context.CancelFunc)
-	ctx    context.Context
-	cancel context.CancelFunc
+type shutdownStep struct {
+	name string
+	done <-chan struct{}
+	run  func()
 }
 
-func (s *shutdownWait) wait(name string, done <-chan struct{}) {
-	if s.ctx == nil {
-		s.ctx, s.cancel = s.start()
-	}
-	// Prefer an already joined worker when the shared deadline is also ready.
-	select {
-	case <-done:
-		return
-	default:
-	}
-	select {
-	case <-done:
-	case <-s.ctx.Done():
-		log.Printf("shutdown: %s did not finish within the shared %s budget", name, shutdownTimeout)
-	}
+// engineShutdown is Run's shutdown stack, in acquisition order. Worker joins
+// share 15 s; final cleanup gets a separate 3 s so a stuck worker cannot consume
+// the time needed to close sockets, stop the proxy and close the store.
+type engineShutdown struct {
+	stop    context.CancelFunc
+	workers []shutdownStep
+	final   []shutdownStep
 }
 
-func (s *shutdownWait) run(name string, cleanup func()) {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		cleanup()
-	}()
-	s.wait(name, done)
+func (s *engineShutdown) join(name string, done <-chan struct{}) {
+	s.workers = append(s.workers, shutdownStep{name: name, done: done})
 }
 
-func (s *shutdownWait) close() {
-	if s.cancel != nil {
-		s.cancel()
+func (s *engineShutdown) cleanup(name string, run func()) {
+	s.final = append(s.final, shutdownStep{name: name, run: run})
+}
+
+func (s *engineShutdown) run() {
+	// SIGTERM already cancels the workers; stop matters on early-error returns.
+	s.stop()
+	workers, cancelWorkers := context.WithTimeout(context.Background(), shutdownTimeout)
+	s.finish(workers, s.workers)
+	cancelWorkers()
+	final, cancelFinal := context.WithTimeout(context.Background(), cleanupTimeout)
+	defer cancelFinal()
+	s.finish(final, s.final)
+}
+
+func (*engineShutdown) finish(ctx context.Context, steps []shutdownStep) {
+	for i := len(steps) - 1; i >= 0; i-- {
+		step := steps[i]
+		done := step.done
+		if step.run != nil {
+			finished := make(chan struct{})
+			done = finished
+			go func() {
+				defer close(finished)
+				step.run()
+			}()
+		}
+		// Do not label an already finished worker late when its phase expired.
+		select {
+		case <-done:
+			continue
+		default:
+		}
+		select {
+		case <-done:
+		case <-ctx.Done():
+			log.Printf("shutdown: %s exceeded its phase deadline", step.name)
+		}
 	}
 }

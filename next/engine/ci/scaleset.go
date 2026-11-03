@@ -112,11 +112,7 @@ func (s *Sets) Listen(ctx context.Context, repo contract.RepoName, name string, 
 		s.forget(repo, name)
 		return err
 	}
-	defer func() {
-		closeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		session.Close(closeCtx)
-	}()
+	defer closeMessageSession(ctx, session)
 	poll, err := listener.New(session, listener.Config{ScaleSetID: opened.id})
 	if err != nil {
 		return err
@@ -126,6 +122,14 @@ func (s *Sets) Listen(ctx context.Context, repo contract.RepoName, name string, 
 		return err
 	}
 	return nil
+}
+
+// closeMessageSession gives the delete a short deadline of its own. The poll
+// context is already canceled during shutdown, but the GitHub session must go.
+func closeMessageSession(ctx context.Context, session interface{ Close(context.Context) error }) {
+	closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_ = session.Close(closeCtx)
 }
 
 // JIT generates a single-job config for one more runner in a scale set of repo.
