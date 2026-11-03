@@ -60,3 +60,68 @@ it("continues an interrupted tool call without running it again", async () => {
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+async function recoveredSession(last: "error" | "aborted" | "stop") {
+	const dir = mkdtempSync(join(tmpdir(), "pi-resume-"));
+	const model = getModel("anthropic", "claude-sonnet-4-5")!;
+	const base: AssistantMessage = {
+		role: "assistant", content: [], api: "anthropic-messages", provider: "anthropic", model: model.id,
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+		stopReason: "stop", timestamp: 0,
+	};
+	const failed: AssistantMessage = {
+		...base, stopReason: last, ...(last === "error" ? { errorMessage: "503 auth_unavailable" } : {}),
+		content: last === "stop" ? [{ type: "text", text: "done" }] : [],
+	};
+	const manager = SessionManager.inMemory();
+	const user = { role: "user" as const, content: "hello", timestamp: 0 };
+	manager.appendMessage(user);
+	manager.appendMessage(failed);
+	let calls = 0;
+	const agent = new Agent({
+		getApiKey: () => "test-key",
+		initialState: { model, systemPrompt: "test", tools: [], messages: [user, failed] },
+		streamFn: () => {
+			calls++;
+			const answer: AssistantMessage = { ...base, content: [{ type: "text", text: "ok" }] };
+			const stream = createAssistantMessageEventStream();
+			queueMicrotask(() => {
+				stream.push({ type: "start", partial: answer });
+				stream.push({ type: "done", reason: "stop", message: answer });
+				stream.end();
+			});
+			return stream;
+		},
+	});
+	const auth = AuthStorage.inMemory();
+	await auth.modify("anthropic", async () => ({ type: "api_key", key: "test-key" }));
+	const registry = await createModelRegistry(auth, dir);
+	const session = new AgentSession({
+		agent, sessionManager: manager, settingsManager: SettingsManager.create(dir, dir),
+		cwd: dir, modelRuntime: getModelRuntime(registry), resourceLoader: createTestResourceLoader(),
+	});
+	return { session, agent, calls: () => calls, cleanup: () => { session.dispose(); rmSync(dir, { recursive: true, force: true }); } };
+}
+
+it.each(["error", "aborted"] as const)("continues after a %s reply, leaving it out of model context", async (reason) => {
+	const { session, agent, calls, cleanup } = await recoveredSession(reason);
+	try {
+		await session.continueRun();
+		expect(calls()).toBe(1);
+		expect(agent.state.messages.filter((m) => m.role === "assistant")).toHaveLength(1);
+		expect(agent.state.messages.some((m) => m.role === "assistant" && m.stopReason === reason)).toBe(false);
+	} finally {
+		cleanup();
+	}
+});
+
+it("still refuses a recovered session that ended on a completed reply", async () => {
+	const { session, calls, cleanup } = await recoveredSession("stop");
+	try {
+		await expect(session.continueRun()).rejects.toThrow("no pending input or tool result");
+		expect(calls()).toBe(0);
+	} finally {
+		cleanup();
+	}
+});

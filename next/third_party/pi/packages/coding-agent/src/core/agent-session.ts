@@ -2314,6 +2314,11 @@ export class AgentSession {
 	 */
 	async continueRun(onStarted?: () => void): Promise<void> {
 		if (this.isStreaming) throw new Error("Agent is already processing");
+		// A reply that failed or was aborted never answered the turn; drop it from model context and run again.
+		const failed = this._findLastAssistantMessage();
+		if (failed && (failed.stopReason === "error" || failed.stopReason === "aborted")) {
+			this._omitRecoveryAttempt(failed);
+		}
 		const messages = this.agent.state.messages;
 		let assistantIndex = -1;
 		for (let i = messages.length - 1; i >= 0; i--) {
