@@ -1,6 +1,9 @@
 package dynamcp
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRegistryBuilds(t *testing.T) {
 	list, actions, err := registry()
@@ -50,11 +53,34 @@ func TestFieldDescriptionsComeFromTheContract(t *testing.T) {
 	for _, tc := range []struct{ tool, field, want string }{
 		{"post", "room", "A room_… ID, from your instructions. Omitted, it is your own room."},
 		{"post", "home", "A session may name only its own DM, {kind: dm}. With no home, a post that names no session goes to the owner's conversation with you: where this turn's reply to the owner goes, else where the owner last wrote to you, else the feed. One that names sessions goes to the feed."},
-		{"room", "home", "home narrows the log to one owner DM: {kind: dm, session: ses_…}."},
+		{"room", "home", "home narrows the log to one owner DM: {kind: dm, session: ses_…}. For log."},
 		{"visual", "file", "Absolute, or relative to your working directory."},
 	} {
 		if got := described[tc.tool][tc.field].Description; got != tc.want {
 			t.Errorf("%s.%s: %q", tc.tool, tc.field, got)
 		}
 	}
+}
+
+// A property only some of a tool's actions take names them, since the actions share one schema and each decodes strictly:
+// pr open takes no repo.
+func TestAPropertySomeActionsTakeNamesThem(t *testing.T) {
+	tools, _, err := registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range tools {
+		if tool.Name != "pr" {
+			continue
+		}
+		repo := tool.InputSchema.Properties["repo"].Description
+		if !strings.Contains(repo, "For ") || strings.Contains(repo, "open") || !strings.Contains(repo, "status") {
+			t.Fatalf("repo says %q", repo)
+		}
+		if title := tool.InputSchema.Properties["title"].Description; !strings.HasSuffix(title, "For open.") {
+			t.Fatalf("title says %q", title)
+		}
+		return
+	}
+	t.Fatal("no pr tool")
 }
