@@ -165,7 +165,8 @@ func (c *Client) forward(ctx context.Context, method contract.Method, body []byt
 }
 
 // HostRun runs one command on a host and writes its output as the run ends. The engine answers only then, so the call stays
-// open as long as the command does. A problem after the engine took the command is the job's failure, not a refusal.
+// open as long as the command does, and ending ctx ends the call, which has the engine stop the command. A problem after the
+// engine took the command is the job's failure, not a refusal.
 func (c *Client) HostRun(ctx context.Context, r shell.Run, out io.Writer) (int, *contract.Error) {
 	req := contract.HostexecRunRequest{Host: r.Host, Command: r.Command, Cwd: r.Cwd, Timeout: contract.DurationMS(r.Timeout) * 1000}
 	body, err := json.Marshal(req)
@@ -183,7 +184,7 @@ func (c *Client) HostRun(ctx context.Context, r shell.Run, out io.Writer) (int, 
 	}
 	result := answer.Operation.Result
 	if result == nil {
-		fmt.Fprintln(out, "host run: the call ended before the command; op.ran wakes the session with its result")
+		fmt.Fprintln(out, "host run: the call ended before the command, so the engine stopped it")
 		return 1, nil
 	}
 	_, _ = io.WriteString(out, result.Output)

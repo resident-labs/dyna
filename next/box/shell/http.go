@@ -113,9 +113,6 @@ func (s *Server) jobCall(call JobCall) (any, error) {
 		return nil, unknownJob(call.Job)
 	}
 	if call.Action == "stop" {
-		if j.host != "" {
-			return nil, invalid(fmt.Sprintf("job %s runs on %s and ends at its timeout: nothing here can stop a host run", j.id, j.host))
-		}
 		s.stop(j)
 	}
 	return result(j), nil

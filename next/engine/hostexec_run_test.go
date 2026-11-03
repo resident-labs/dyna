@@ -8,6 +8,7 @@ import (
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
+	"github.com/resident-labs/dyna/engine/store"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -79,6 +80,65 @@ func TestHostexecSessionCloseStopsAndEndsGrant(t *testing.T) {
 	close(runner.release)
 	if e := <-done; e != nil || !stopped {
 		t.Fatalf("late run: stopped=%v, error=%v", stopped, e)
+	}
+}
+
+// leavingHostexec runs until its context ends and passes on the scopes it is asked to stop.
+type leavingHostexec struct {
+	entered chan struct{}
+	stops   chan string
+}
+
+func (f leavingHostexec) RunHostexec(ctx context.Context, _ contract.HostexecRunArgs, _ contract.OpID) ([]byte, int, bool, error) {
+	close(f.entered)
+	<-ctx.Done()
+	return nil, 0, false, ctx.Err()
+}
+func (f leavingHostexec) StopHostexec(_ context.Context, _ contract.HostName, scope string) error {
+	f.stops <- scope
+	return nil
+}
+
+// A caller that goes away, as a stopped job's call does, ends the run at once: its scope is stopped on the host, the run is
+// stored as stopped, and no one is woken for it.
+func TestHostexecCallerLeavingStopsTheRun(t *testing.T) {
+	s, _, root, ctx := setupRoot(t)
+	runner := leavingHostexec{entered: make(chan struct{}), stops: make(chan string, 1)}
+	s.SetHostexecRunner(runner)
+	if err := s.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"hostexec.run": s.HostexecRunEntry()}, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	who := contract.Principal{Kind: contract.PrincipalSession, Session: root}
+	call, leave := context.WithCancel(ctx)
+	answered := make(chan contract.HostexecRunResponse, 1)
+	go func() {
+		res, _ := s.HostexecRun(call, who, contract.HostexecRunRequest{Host: "host", Command: "find / -name x", Timeout: contract.DurationMS(time.Hour.Milliseconds())})
+		answered <- res
+	}()
+	<-runner.entered
+	leave()
+	op := (<-answered).Operation.ID
+	select {
+	case scope := <-runner.stops:
+		if scope != "dyna-hostexec-"+string(op)+".scope" {
+			t.Fatalf("stopped %s", scope)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the host scope was not stopped")
+	}
+	waitForOperation(t, s, ctx, op, contract.OpFailed)
+	var stopped string
+	var ended sql.NullInt64
+	if err := s.store.Read().QueryRow("SELECT stopped,ended_at FROM hostexec_runs WHERE op=?", op).Scan(&stopped, &ended); err != nil || stopped != string(store.HostexecStopped) || !ended.Valid {
+		t.Fatalf("run stopped=%q ended=%v: %v", stopped, ended, err)
+	}
+	record, err := s.store.Operation(ctx, op)
+	if err != nil || record.Operation.Result == nil || record.Operation.Result.Cause != "" || !strings.HasPrefix(record.Operation.Result.Error, "stopped") {
+		t.Fatalf("result %+v: %v", record.Operation.Result, err)
+	}
+	var wakes int
+	if err := s.store.Read().QueryRow("SELECT count(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.type='op.ran' AND d.to_id=?", root).Scan(&wakes); err != nil || wakes != 0 {
+		t.Fatalf("%d op.ran deliveries: %v", wakes, err)
 	}
 }
 
