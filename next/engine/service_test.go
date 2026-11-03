@@ -33,6 +33,11 @@ func (fakeBoxes) TerminalArgv(context.Context, contract.HostName, contract.BoxID
 	return []string{"sh"}, nil
 }
 
+// ExecArgv echoes the command it would run in the box, so a test can read what the engine asked of it.
+func (fakeBoxes) ExecArgv(_ context.Context, _ contract.HostName, id contract.BoxID, argv ...string) ([]string, error) {
+	return append([]string{"echo", string(id)}, argv...), nil
+}
+
 func (fakeBoxes) Recreate(context.Context, BoxSpec, string) error { return nil }
 
 func (fakeBoxes) Create(context.Context, BoxSpec) (string, error) { return "image", nil }

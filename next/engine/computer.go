@@ -2,8 +2,9 @@ package engine
 
 import (
 	"context"
-	"encoding/binary"
-	"io"
+	"os/exec"
+	"strings"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -48,100 +49,49 @@ func (s *Service) ComputerChanged(ctx context.Context, caller contract.Principal
 	return contract.ComputerChangedResponse{}, nil
 }
 
-func (s *Service) ComputerWatch(ctx context.Context, id contract.SessionID) (<-chan []byte, *contract.Error) {
-	session, err := s.store.Session(ctx, id)
-	if err != nil {
-		return nil, failure(err)
-	}
-	box, err := s.store.Box(ctx, session.Box)
-	if err != nil {
-		return nil, failure(err)
-	}
-	handle, ok := s.lookupSession(id)
-	if !ok {
-		return nil, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
-	}
-	defer handle.Unlock()
-	if box.State != contract.BoxReady || handle.Channel() == nil {
-		return nil, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
-	}
-	watch := handle.WatchComputer()
-	if watch == nil {
-		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "computer is not running"}
-	}
-	go func() {
-		<-ctx.Done()
-		if !handle.Lock() {
-			return
-		}
-		defer handle.Unlock()
-		handle.RemoveComputerWatch(watch)
-	}()
-	return watch.Events(), nil
-}
+// computerStartLimit covers the SSH connection and the desktop's start, which waits up to 10 seconds for its display.
+const computerStartLimit = 30 * time.Second
 
-// ComputerInput queues owner events for the box's computer. It does not touch the session's turn.
-func (s *Service) ComputerInput(ctx context.Context, caller contract.Principal, req contract.ComputerInputRequest) (contract.ComputerInputResponse, *contract.Error) {
+// ComputerStart starts the desktop in the session's box for the owner, and returns once it runs. It runs the box's own
+// `dyna computer start`, which the agent's computer actions also start the desktop with. It does not touch the turn.
+func (s *Service) ComputerStart(ctx context.Context, caller contract.Principal, req contract.ComputerStartRequest) (contract.ComputerStartResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalOwner {
-		return contract.ComputerInputResponse{}, forbidden()
+		return contract.ComputerStartResponse{}, forbidden()
 	}
-	if _, err := s.store.Session(ctx, req.Session); err != nil {
-		return contract.ComputerInputResponse{}, failure(err)
+	current, problem := s.readyBox(ctx, req.Session)
+	if problem != nil {
+		return contract.ComputerStartResponse{}, problem
 	}
-	handle, ok := s.lookupSession(req.Session)
-	if !ok {
-		return contract.ComputerInputResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
+	argv, err := s.boxes.ExecArgv(ctx, current.Host, current.ID, "dyna", "computer", "start")
+	if err != nil {
+		return contract.ComputerStartResponse{}, failure(err)
 	}
-	defer handle.Unlock()
-	channel := handle.Channel()
-	if channel == nil {
-		return contract.ComputerInputResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "box is not ready"}
+	ctx, cancel := context.WithTimeout(ctx, computerStartLimit)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.WaitDelay = 2 * time.Second
+	if out, err := cmd.CombinedOutput(); err != nil {
+		message := "the desktop did not start"
+		if lines := strings.Split(strings.TrimSpace(string(out)), "\n"); lines[len(lines)-1] != "" {
+			message += ": " + strings.TrimPrefix(lines[len(lines)-1], "Error: ")
+		}
+		return contract.ComputerStartResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: message}
 	}
-	if handle.ComputerState() != contract.ComputerRunning {
-		return contract.ComputerInputResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "computer is not running"}
-	}
-	return contract.ComputerInputResponse{}, channel.SendInput(ctx, contract.ComputerInputBatch{Frame: req.Frame, Events: req.Events})
+	return contract.ComputerStartResponse{}, nil
 }
 
-func (s *Service) ComputerFrames(ctx context.Context, caller contract.Principal, generation uint64, r io.Reader) *contract.Error {
-	if caller.Kind != contract.PrincipalSession {
-		return forbidden()
+// ComputerStream returns the command that carries the VNC stream of a session's desktop, and a release for when the view
+// closes. An open view keeps the box awake, as an open terminal does. The command fails at once if the desktop is not
+// running, so the view starts it first.
+func (s *Service) ComputerStream(ctx context.Context, session contract.SessionID) ([]string, func(), *contract.Error) {
+	host, id, release, problem := s.holdBox(ctx, session)
+	if problem != nil {
+		return nil, release, problem
 	}
-	handle, ok := s.lookupSession(caller.Session)
-	if !ok {
-		return &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+	argv, err := s.boxes.ExecArgv(ctx, host, id, "dyna", "computer", "stream")
+	if err != nil {
+		release()
+		return nil, func() {}, failure(err)
 	}
-	stream, attached := handle.ComputerStream()
-	handle.Unlock()
-	if !attached {
-		return &contract.Error{Code: contract.ErrNotFound, Message: "computer is not attached"}
-	}
-	defer func() {
-		if !handle.Lock() {
-			return
-		}
-		defer handle.Unlock()
-		handle.EndComputerStream(stream, generation)
-	}()
-	for {
-		var size uint32
-		if err := binary.Read(r, binary.BigEndian, &size); err != nil {
-			return nil
-		}
-		if size == 0 || size > 8<<20 {
-			return invalid("invalid frame size")
-		}
-		frame := make([]byte, size)
-		if _, err := io.ReadFull(r, frame); err != nil {
-			return nil
-		}
-		if !handle.Lock() {
-			return nil
-		}
-		handle.ComputerFrame(generation, frame)
-		handle.Unlock()
-		if ctx.Err() != nil {
-			return nil
-		}
-	}
+	return argv, release, nil
 }

@@ -46,6 +46,9 @@ func (runningBoxes) Inspect(context.Context, contract.BoxID) (box.ContainerStatu
 func (runningBoxes) TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error) {
 	return nil, nil
 }
+func (runningBoxes) ExecArgv(context.Context, contract.HostName, contract.BoxID, ...string) ([]string, error) {
+	return nil, nil
+}
 func (runningBoxes) Create(context.Context, BoxSpec) (string, error) { return "image", nil }
 func (runningBoxes) CurrentImage(context.Context, contract.SessionID, contract.HostName) (box.Image, error) {
 	return box.Image{}, nil

@@ -283,9 +283,6 @@ func Run(ctx context.Context) error {
 	go transcript.Run(ctx, ticks.C, files)
 	runner := &Runner{Harness: h, Sink: endedSink{turnSink: client, transcript: transcript, files: files}, Setup: setup, Attach: client.Attach, Steered: steered, setupErr: setupErr}
 	var closing atomic.Bool
-	ownerInput := computer.NewInput(computer.URL)
-	go ownerInput.Run(ctx)
-	var stopWatch context.CancelFunc
 	var stopShellWatch context.CancelFunc
 	var shellDone chan struct{}
 	stats := newBoxStats()
@@ -320,26 +317,6 @@ func Run(ctx context.Context) error {
 				// A first reading takes a moment, and the channel keeps reading meanwhile.
 				go client.reportStats(ctx, stats, body.Ask)
 				return nil
-			case contract.ComputerWatchStart:
-				if stopWatch != nil {
-					stopWatch()
-				}
-				var watch context.Context
-				watch, stopWatch = context.WithCancel(ctx)
-				go client.watchComputer(watch, body.Generation)
-				return nil
-			case contract.ComputerInputBatch:
-				// A worker sends input, so a stuck browser never holds control messages.
-				if !ownerInput.Enqueue(body) {
-					log.Print("computer input: queue full, batch dropped")
-				}
-				return nil
-			case contract.ComputerWatchStop:
-				if stopWatch != nil {
-					stopWatch()
-					stopWatch = nil
-				}
-				return nil
 			case contract.WorkflowReload:
 				if crew != nil {
 					crew.Reload(body.Workflow)
@@ -362,10 +339,6 @@ func Run(ctx context.Context) error {
 			}
 			if !connected {
 				stopShell()
-			}
-			if !connected && stopWatch != nil {
-				stopWatch()
-				stopWatch = nil
 			}
 		})
 	}()

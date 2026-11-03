@@ -26,10 +26,9 @@ type message struct {
 
 // DevTools is a single sequential page connection.
 type DevTools struct {
-	conn    *websocket.Conn
-	id      int
-	loaded  bool
-	pending []message
+	conn   *websocket.Conn
+	id     int
+	loaded bool
 }
 
 // ConnectTimeoutError reports that Chromium did not expose a page in time.
@@ -112,9 +111,6 @@ func (d *DevTools) Call(ctx context.Context, method string, params json.RawMessa
 			d.loaded = true
 		}
 		if msg.ID != d.id {
-			if msg.Method == "Page.screencastFrame" {
-				d.pending = append(d.pending, msg)
-			}
 			continue
 		}
 		if msg.Error != nil {

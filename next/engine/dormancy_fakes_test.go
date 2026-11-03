@@ -16,6 +16,10 @@ func (*recoveryBoxes) TerminalArgv(context.Context, contract.HostName, contract.
 	return nil, nil
 }
 
+func (*recoveryBoxes) ExecArgv(context.Context, contract.HostName, contract.BoxID, ...string) ([]string, error) {
+	return nil, nil
+}
+
 func (*recoveryBoxes) Inspect(_ context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
 	return box.ContainerStatus{Box: id, Running: true}, true, nil
 }

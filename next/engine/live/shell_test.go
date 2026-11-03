@@ -13,7 +13,7 @@ func TestShellOutputDropsOnlySlowWatcher(t *testing.T) {
 	if !ok || !s.Lock() {
 		t.Fatal("session refused")
 	}
-	s.SetChannel(NewChannel(func() {}, make(chan struct{})))
+	s.SetChannel(NewChannel(func() {}))
 	s.Unlock()
 	slow, problem := s.WatchShell(true)
 	if problem != nil {
@@ -82,7 +82,7 @@ func TestShellWatchCloseRacesCancellation(t *testing.T) {
 	if !ok || !s.Lock() {
 		t.Fatal("session refused")
 	}
-	s.SetChannel(NewChannel(func() {}, make(chan struct{})))
+	s.SetChannel(NewChannel(func() {}))
 	s.Unlock()
 	watch, problem := s.WatchShell(true)
 	if problem != nil {
