@@ -3,6 +3,7 @@ package ci
 import (
 	"context"
 	"errors"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -45,9 +46,13 @@ type fakeDriver struct {
 	buildMu  sync.Mutex    // a build-ahead runs beside placement
 }
 
-func (d *fakeDriver) BuildRunnerImage(context.Context) (string, error) {
+func (d *fakeDriver) BuildRunnerImage(ctx context.Context) (string, error) {
 	if d.gate != nil {
-		<-d.gate
+		select {
+		case <-d.gate:
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
 	}
 	d.buildMu.Lock()
 	defer d.buildMu.Unlock()
@@ -172,6 +177,21 @@ func (f *fixture) scaleSize(size contract.BoxSizeName, assigned int) int {
 func (f *fixture) scale(assigned int) int { return f.scaleSize(large, assigned) }
 
 func (f *fixture) tick(t *testing.T) {
+	t.Helper()
+	f.tickNoWait(t)
+	// A build-ahead is done before the test goes on, so placement sees the image as it would a poll later.
+	for {
+		f.pool.mu.Lock()
+		busy := len(f.pool.building) > 0
+		f.pool.mu.Unlock()
+		if !busy {
+			return
+		}
+		runtime.Gosched()
+	}
+}
+
+func (f *fixture) tickNoWait(t *testing.T) {
 	t.Helper()
 	if err := f.pool.Tick(context.Background(), &f.group); err != nil {
 		t.Fatal(err)
