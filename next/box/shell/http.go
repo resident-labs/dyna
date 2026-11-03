@@ -18,7 +18,7 @@ type Result struct {
 	Running  bool                `json:"running"`
 	Status   string              `json:"status"`
 	ExitCode *int                `json:"exit_code,omitempty"`
-	// MessageArrived marks a bash call that returned early because a message arrived for the session.
+	// MessageArrived marks a bash call that returned early because the owner sent the session a message.
 	MessageArrived bool `json:"message_arrived,omitempty"`
 }
 

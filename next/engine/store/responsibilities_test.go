@@ -58,7 +58,7 @@ func TestEachKindAppearsAndClears(t *testing.T) {
 		{"issue", "INSERT INTO issue_owners(repo,number,session,url,title,author,state) VALUES('repo',2,'s','u','t','a','open')", "UPDATE issue_owners SET state='closed'", contract.Responsibility{Kind: contract.ResponsibilityIssue, Group: contract.ResponsibilityOwesWork, ID: "repo#2"}},
 		{"question", "INSERT INTO questions(id,room,session,text,state,asked_at) VALUES('q','r','s','why','pending',0)", "UPDATE questions SET state='answered'", contract.Responsibility{Kind: contract.ResponsibilityQuestion, Group: contract.ResponsibilityOwesWork, ID: "q"}},
 		{"blocked question", "INSERT INTO questions(id,room,session,text,state,asked_at,blocked) VALUES('q','r','s','why','pending',0,1)", "UPDATE questions SET state='withdrawn'", contract.Responsibility{Kind: contract.ResponsibilityQuestion, Group: contract.ResponsibilityOwesWork, ID: "q", Blocked: true}},
-		{"child", addChild, "UPDATE sessions SET closed_at=1 WHERE id='c'", contract.Responsibility{Kind: contract.ResponsibilityChild, Group: contract.ResponsibilityOwesWork, ID: "c"}},
+		{"child", addChild, "UPDATE sessions SET closed_at=1 WHERE id='c'", contract.Responsibility{Kind: contract.ResponsibilityChild, Group: contract.ResponsibilityNeedsBox, ID: "c"}},
 		{"unnamed job", "UPDATE sessions SET shell_jobs=1 WHERE id='s'", "UPDATE sessions SET shell_jobs=0", contract.Responsibility{Kind: contract.ResponsibilityShellJob, Group: contract.ResponsibilityNeedsBox}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -203,7 +203,7 @@ func TestBoxStopAndTheClosesAgreeWithTheList(t *testing.T) {
 		{"pr", addPR, true, false, true},
 		{"issue", "INSERT INTO issue_owners(repo,number,session,url,title,author,state) VALUES('repo',2,'s','u','t','a','open')", true, true, true},
 		{"question", "INSERT INTO questions(id,room,session,text,state,asked_at) VALUES('q','r','s','why','pending',0)", true, false, false},
-		{"child", addChild, true, false, false},
+		{"child", addChild, false, false, false},
 		{"job", "UPDATE sessions SET shell_jobs=1 WHERE id='s'", false, false, false},
 		{"turn", strings.Replace(addTurn, "'t','s',0", "'t','s',5", 1), false, false, false},
 	} {
@@ -240,6 +240,30 @@ func TestBoxStopAndTheClosesAgreeWithTheList(t *testing.T) {
 				t.Fatalf("eviction %v: %v", evict, err)
 			}
 		})
+	}
+}
+
+// An update stops a parent whose box only its children hold, and starts it again at once, so a child never reports to a
+// parent whose box is down.
+func TestAnUpdateRestartsAParentAtOnce(t *testing.T) {
+	ctx := context.Background()
+	s := responsibilityStore(t)
+	if _, err := s.writer.Exec(addChild); err != nil {
+		t.Fatal(err)
+	}
+	stopped, err := s.StopStale(ctx, []contract.SessionID{"s"})
+	if err != nil || len(stopped) != 1 {
+		t.Fatalf("stopped %v: %v", stopped, err)
+	}
+	if _, err := s.writer.Exec("UPDATE boxes SET state='stopped' WHERE session='s'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WakeStopped(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var want string
+	if err := s.Read().QueryRow("SELECT want FROM boxes WHERE session='s'").Scan(&want); err != nil || want != "run" {
+		t.Fatalf("want %q: %v", want, err)
 	}
 }
 

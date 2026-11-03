@@ -39,25 +39,28 @@ func (s *Store) StopQuiet(ctx context.Context, ids []contract.SessionID, cutoff 
 	return s.stopFree(ctx, ids, false, quiet, cutoff.UnixMilli())
 }
 
-// StopStale requests stops for boxes on an old binary, or marked to restart, as soon as nothing needs them, with no wait. A wake
+// StopStale requests stops for boxes on an old binary, or marked to restart, as soon as nothing runs in them, with no wait.
+// An open child does not hold one back: WakeStopped starts its parent again at once. A wake
 // on its way does not hold one back: its delivery stays stored, DispatchStale opens no turn on a box nothing needs, and WakeStopped
 // starts it again. The stop applies the update, so a notice that it was coming and that no turn read is dropped.
 func (s *Store) StopStale(ctx context.Context, ids []contract.SessionID) ([]contract.SessionID, error) {
 	return s.stopFree(ctx, ids, true, `1`)
 }
 
-// WakeStopped starts a stopped box again when a wake is waiting for it, which a stale stop leaves on purpose. The rows are
-// the record, so a box stopped just before an engine restart still comes back. A paused room waits for its resume.
+// WakeStopped starts a stopped box again when a wake is waiting for it, which a stale stop leaves on purpose, or when it has
+// an open child, so a stale stop is a restart for a parent. The rows are the record, so a box stopped just before an engine
+// restart still comes back. A paused room waits for its resume.
 func (s *Store) WakeStopped(ctx context.Context) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE boxes SET want='run' WHERE want='stop' AND state='stopped' AND EXISTS (SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND s.state='open' AND s.closed_at IS NULL AND r.paused_at IS NULL AND EXISTS (SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=s.id AND d.wake=1 AND d.state='pending'))`)
+		_, err := tx.ExecContext(ctx, `UPDATE boxes SET want='run' WHERE want='stop' AND state='stopped' AND EXISTS (SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND s.state='open' AND s.closed_at IS NULL AND r.paused_at IS NULL AND (EXISTS (SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=s.id AND d.wake=1 AND d.state='pending') OR EXISTS (SELECT 1 FROM sessions c WHERE c.parent=s.id AND c.closed_at IS NULL)))`)
 		return err
 	})
 }
 
-// stopFree requests stops for the boxes nothing needs, of those that also pass rule. With dropNotices the same write drops their
-// update notices, so no box is seen stopping with one still waiting.
-func (s *Store) stopFree(ctx context.Context, ids []contract.SessionID, dropNotices bool, rule string, args ...any) ([]contract.SessionID, error) {
+// stopFree requests stops for the boxes nothing needs, of those that also pass rule. An update stop is a restart, so only
+// what runs in a box holds it, and the same write drops their update notices, so no box is seen stopping with one still
+// waiting.
+func (s *Store) stopFree(ctx context.Context, ids []contract.SessionID, update bool, rule string, args ...any) ([]contract.SessionID, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -70,7 +73,7 @@ func (s *Store) stopFree(ctx context.Context, ids []contract.SessionID, dropNoti
 		}
 		free := make([]contract.SessionID, 0, len(ids))
 		for _, id := range ids {
-			if !held[id].NeedsBox() {
+			if !held[id].NeedsBox() || update && !held[id].RunsInBox() {
 				free = append(free, id)
 			}
 		}
@@ -90,7 +93,7 @@ func (s *Store) stopFree(ctx context.Context, ids []contract.SessionID, dropNoti
 			}
 			stopped = append(stopped, id)
 		}
-		if err := rows.Err(); err != nil || !dropNotices || len(stopped) == 0 {
+		if err := rows.Err(); err != nil || !update || len(stopped) == 0 {
 			return err
 		}
 		if err := rows.Close(); err != nil {

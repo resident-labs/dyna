@@ -108,7 +108,7 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 			reason = PendingMemory
 			continue
 		}
-		cpu, mem, disk := 0, int64(0), h.DiskBytes
+		cpu, runnerCPU, mem, disk := 0, 0, int64(0), h.DiskBytes
 		for _, b := range boxes {
 			if b.Host != h.Name || b.ID == request.ID || b.State == contract.BoxDeleted || b.State == contract.BoxFailed {
 				continue
@@ -119,9 +119,14 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 			if b.State != contract.BoxStopped && b.State != contract.BoxPending {
 				cpu += b.Size.CPUs
 				mem += b.Size.MemBytes
+				if b.Image == RunnerImage {
+					runnerCPU += b.Size.CPUs
+				}
 			}
 		}
-		if cpu+request.Size.CPUs > 4*h.CPUs {
+		// A session box idles most of the time, so a host takes four times its CPUs of them. A CI runner keeps its CPUs busy
+		// for the whole job, so the runners on a host fit in its CPUs, and the sessions there keep the rest.
+		if cpu+request.Size.CPUs > 4*h.CPUs || request.Image == RunnerImage && runnerCPU+request.Size.CPUs > h.CPUs {
 			reason = PendingCPU
 			continue
 		}

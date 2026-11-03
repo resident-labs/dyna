@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -20,8 +22,9 @@ func (e *ChainError) Error() string { return e.Message }
 // a grandparent or another branch. The owner and the engine may address any session. What a session sends its parent goes, while the parent cannot receive, to the parent's nearest
 // ancestor that can, ending at root; why then says what stops the parent. Anything else goes where it was sent.
 //
-// A session cannot receive while it closes or after, or while its box is failed, lost, or pending because it cannot be
-// placed.
+// A session cannot receive while it closes or after, or while its box is failed, lost, or pending for a reason that lasts
+// until someone acts: no host its room allows, its room's limit, a size no host has, or a pool that fails. A box that waits
+// for CPU, memory, disk or a pool's next node starts by itself, and the parent reads its messages then.
 func receiver(ctx context.Context, tx rowQuerier, from contract.Principal, to contract.SessionID) (got contract.SessionID, why string, reach bool, err error) {
 	if from.Kind != contract.PrincipalSession {
 		return to, "", true, nil
@@ -57,17 +60,19 @@ func receiver(ctx context.Context, tx rowQuerier, from contract.Principal, to co
 	}
 }
 
-func cantReceive(state string, closed bool, box contract.BoxState, reason string, want BoxWant) string {
+var lasting = []box.PendingReason{box.PendingRoomHost, box.PendingRoomLimit, box.PendingInvalidSize, box.PendingPoolFailed}
+
+func cantReceive(state string, closed bool, boxState contract.BoxState, reason string, want BoxWant) string {
 	switch {
 	case closed:
 		return "closed"
 	case state == "closing" || want == WantClose || want == WantDiscard:
 		return "closing"
-	case box == contract.BoxFailed:
+	case boxState == contract.BoxFailed:
 		return "box failed"
-	case box == contract.BoxLost:
+	case boxState == contract.BoxLost:
 		return "box lost"
-	case box == contract.BoxPending && reason != "":
+	case boxState == contract.BoxPending && slices.Contains(lasting, box.PendingReason(reason)):
 		return "box can't be placed"
 	}
 	return ""
