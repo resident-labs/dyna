@@ -128,7 +128,7 @@ func TestPostGoesUpPastParentThatCantReceive(t *testing.T) {
 			setBox(t, s, ctx, id, contract.BoxLost, "")
 		}, "box lost"},
 		{"unplaced", func(s *Service, ctx context.Context, id contract.SessionID) {
-			setBox(t, s, ctx, id, contract.BoxPending, "no-ready-host")
+			setBox(t, s, ctx, id, contract.BoxPending, "room-host")
 		}, "box can't be placed"},
 		{"closing", func(s *Service, ctx context.Context, id contract.SessionID) {
 			if err := s.store.Write(ctx, func(tx *sql.Tx) error {
@@ -165,6 +165,23 @@ func TestPostGoesUpPastParentThatCantReceive(t *testing.T) {
 			frame, _, err := s.inputFrame(ctx, root, event, contract.Delivery{Surface: contract.SurfaceFeed, Reply: contract.ReplyChannel{Kind: contract.ReplyPost}, MeantFor: meantFor, Why: why})
 			if line := "[Dyna] From \"kid\", in the room feed. For worker, which can't receive (" + c.want + ")."; err != nil || !strings.HasPrefix(frame, line) {
 				t.Fatalf("frame %q, want it to start %q: %v", frame, line, err)
+			}
+		})
+	}
+}
+
+// A parent whose box waits for CPU, memory or a pool's node starts by itself, so the post waits for it there.
+func TestPostWaitsForAParentWhoseBoxWaitsForCapacity(t *testing.T) {
+	for _, reason := range []string{"cpu", "memory", "disk", "no-ready-host", "pool-node"} {
+		t.Run(reason, func(t *testing.T) {
+			s, room, root, worker, kid, ctx := receiveTree(t)
+			setBox(t, s, ctx, worker, contract.BoxPending, reason)
+			workerBefore, rootBefore := pendingTo(t, s, ctx, worker), pendingTo(t, s, ctx, root)
+			if _, problem := s.Post(ctx, asSession(kid), contract.PostRequest{Room: room, Text: "result", Mentions: []string{"@parent"}}); problem != nil {
+				t.Fatal(problem)
+			}
+			if pendingTo(t, s, ctx, worker) != workerBefore+1 || pendingTo(t, s, ctx, root) != rootBefore {
+				t.Fatal("the post went past a parent that will start")
 			}
 		})
 	}

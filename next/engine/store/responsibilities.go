@@ -38,8 +38,9 @@ var responsibilityRules = []responsibilityRule{
 	{kind: contract.ResponsibilityIssue, group: contract.ResponsibilityOwesWork, handed: true},
 	// An answer needs the session that asked, so close withdraws a question rather than moving it.
 	{kind: contract.ResponsibilityQuestion, group: contract.ResponsibilityOwesWork, sevenDay: true, eviction: true},
-	// A close takes the subtree along, deepest first.
-	{kind: contract.ResponsibilityChild, group: contract.ResponsibilityOwesWork, sevenDay: true, eviction: true},
+	// A child's reports reach its parent at once, so a parent's box stays up while it has one. A close takes the subtree
+	// along, deepest first.
+	{kind: contract.ResponsibilityChild, group: contract.ResponsibilityNeedsBox, sevenDay: true, eviction: true},
 }
 
 // responsibilityQuery reads the lists of a JSON array of sessions in one statement. Each branch walks an index by session.
@@ -68,6 +69,14 @@ type Held []contract.Responsibility
 // NeedsBox answers "does anything need this box running?".
 func (h Held) NeedsBox() bool {
 	return slices.ContainsFunc(h, func(item contract.Responsibility) bool { return item.Group == contract.ResponsibilityNeedsBox })
+}
+
+// RunsInBox answers "does anything run in this box?": what needs it besides a child, which an update's restart does not keep
+// waiting.
+func (h Held) RunsInBox() bool {
+	return slices.ContainsFunc(h, func(item contract.Responsibility) bool {
+		return item.Group == contract.ResponsibilityNeedsBox && item.Kind != contract.ResponsibilityChild
+	})
 }
 
 // Count says how many items of a kind the session holds.
