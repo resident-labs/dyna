@@ -30,6 +30,11 @@ func (s *Service) OpSubmit(ctx context.Context, caller contract.Principal, req c
 	if err != nil {
 		return contract.OpSubmitResponse{}, failure(err)
 	}
+	// The caller wrote the PR body, and its echo would push the result out of a truncated reply.
+	if args, ok := op.Args.(contract.PrOpenArgs); ok {
+		args.Body = ""
+		op.Args = args
+	}
 	return contract.OpSubmitResponse{Operation: op}, nil
 }
 func (s *Service) OpDecide(ctx context.Context, caller contract.Principal, req contract.OpDecideRequest) (contract.OpDecideResponse, *contract.Error) {

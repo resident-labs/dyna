@@ -103,9 +103,10 @@ type GoalJournalEntry struct {
 	Text string    `json:"text"`
 }
 
-// GoalJournalResponse holds the newest entries first.
+// GoalJournalResponse holds the newest 5 entries first. Older counts the entries before them.
 type GoalJournalResponse struct {
 	Entries []GoalJournalEntry `json:"entries"`
+	Older   int                `json:"older,omitempty"`
 }
 
 // GoalSet records a new goal, an edit or a new holder. It wakes a holder that someone else handed the goal to.

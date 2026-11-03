@@ -17,7 +17,7 @@ import (
 const goalListLimit = 200
 
 // goalJournalLimit is how many entries a journal read returns.
-const goalJournalLimit = 50
+const goalJournalLimit = 5
 
 // GoalRefusal is a request the caller can fix, with the fix in its message. Missing marks a request that names something absent.
 type GoalRefusal struct {
@@ -278,35 +278,37 @@ func (s *Store) AddGoalJournal(ctx context.Context, room contract.RoomID, goal c
 	})
 }
 
-// GoalJournal returns the newest entries of one goal.
-func (s *Store) GoalJournal(ctx context.Context, room contract.RoomID, goal contract.GoalID) ([]contract.GoalJournalEntry, error) {
+// GoalJournal returns the newest entries of one goal, and how many older ones there are.
+func (s *Store) GoalJournal(ctx context.Context, room contract.RoomID, goal contract.GoalID) (entries []contract.GoalJournalEntry, older int, err error) {
 	number, err := goalNumber(goal)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	var exists bool
 	if err := s.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM goals WHERE room=? AND number=?)", room, number).Scan(&exists); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if !exists {
-		return nil, goalMissing(goal)
+		return nil, 0, goalMissing(goal)
 	}
-	rows, err := s.Read().QueryContext(ctx, "SELECT at,by_kind,by_id,text FROM goal_journal WHERE room=? AND goal=? ORDER BY number DESC LIMIT ?", room, number, goalJournalLimit)
+	rows, err := s.Read().QueryContext(ctx, "SELECT at,by_kind,by_id,text,(SELECT COUNT(*) FROM goal_journal WHERE room=?1 AND goal=?2) FROM goal_journal WHERE room=?1 AND goal=?2 ORDER BY number DESC LIMIT ?3", room, number, goalJournalLimit)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
-	entries := []contract.GoalJournalEntry{}
+	entries = []contract.GoalJournalEntry{}
 	for rows.Next() {
 		var entry contract.GoalJournalEntry
 		var at int64
-		if err := rows.Scan(&at, &entry.By.Kind, &entry.By.Session, &entry.Text); err != nil {
-			return nil, err
+		var total int
+		if err := rows.Scan(&at, &entry.By.Kind, &entry.By.Session, &entry.Text, &total); err != nil {
+			return nil, 0, err
 		}
 		entry.At = time.UnixMilli(at).UTC()
 		entries = append(entries, entry)
+		older = total - len(entries)
 	}
-	return entries, rows.Err()
+	return entries, older, rows.Err()
 }
 
 // ListGoals returns a room's goals with their items, active ones first and the newest of each kind first.
