@@ -17,7 +17,7 @@ case "$1 $2" in
 "container inspect")
 	shift 4
 	for n; do case $n in box-*) echo "$n dyna.box=${n#box-} dyna.layout=1 other=x";; *) echo "$n other=x";; esac; done;;
-"ps -a"|"ps -aq") printf 'box-one\nmine\n';;
+"ps -a"|"ps -aq") [ -z "$PS_FAIL" ] || exit 125; printf 'box-one\nmine\n';;
 *) echo "$*" >> "$LOG";;
 esac
 `
@@ -70,6 +70,13 @@ func TestPodmanGuard(t *testing.T) {
 		{name: "rm -fa refused", cmd: "podman rm -fa", refused: true},
 		{name: "rm -a refused when forced", cmd: "podman rm -a", env: force, refused: true},
 		{name: "bulk xargs form refused", cmd: "podman ps -aq | xargs podman rm -f", refused: true, said: "box-one"},
+		{name: "rm --all=true refused", cmd: "podman rm --all=true", refused: true},
+		{name: "rm --latest=true refused", cmd: "podman rm --latest=true", refused: true},
+		{name: "rm -a=true refused", cmd: "podman rm -a=true", refused: true},
+		{name: "rm --all=true refused when forced", cmd: "podman rm --all=true", env: force, refused: true},
+		{name: "rm --all=false names its targets", cmd: "podman rm --all=false mine", ran: "rm --all=false mine\n"},
+		{name: "rm -a fails closed when the list fails", cmd: "podman rm -a", env: "PS_FAIL=1", refused: true, said: "could not list"},
+		{name: "rm --filter fails closed when the list fails", cmd: "podman rm --filter label=x", env: "PS_FAIL=1", refused: true, said: "could not list"},
 		{name: "other commands pass", cmd: "podman ps -a", ran: ""},
 		{name: "run passes", cmd: "podman run --name mine x", ran: "run --name mine x\n"},
 	} {
