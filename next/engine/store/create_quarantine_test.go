@@ -1,0 +1,103 @@
+package store
+
+import (
+	"context"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/resident-labs/dyna/box"
+	"github.com/resident-labs/dyna/contract"
+)
+
+func TestCreateQuarantine(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	_, err = s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+ INSERT INTO hosts(name,ssh,state,cpus,mem_bytes,disk_bytes,checked_at) VALUES('h','','ready',4,10000000000,100000000000,0);
+ INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('s','r','s','p','open','',0);
+ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updated_at) VALUES('b','s','h','','agent','creating','','',0,0)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	size, _ := box.Size(contract.BoxSizeAgent)
+	b := box.Box{ID: "b", Session: "s", Host: "h", Size: size, State: contract.BoxCreating}
+	event := func(i int) contract.Event {
+		return contract.Event{ID: contract.EventID(fmt.Sprintf("e%d", i)), Room: "r", Time: time.UnixMilli(100), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{}}
+	}
+	if err := s.FinishCreate(ctx, b, "", "retry", time.Time{}, 1, event(9)); err != nil {
+		t.Fatal(err)
+	}
+	var retries int
+	if err := s.Read().QueryRow("SELECT create_failures FROM hosts WHERE name='h'").Scan(&retries); err != nil || retries != 0 {
+		t.Fatalf("attempt counted: %d %v", retries, err)
+	}
+	if _, err := s.writer.Exec("UPDATE boxes SET state='creating' WHERE id='b'"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := s.FinishCreate(ctx, b, "", "failure", time.Time{}, 3, event(i)); err != nil {
+			t.Fatal(err)
+		}
+		if i < 2 {
+			if _, err := s.writer.Exec("UPDATE boxes SET state='creating' WHERE id='b'"); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	hosts, err := s.Hosts(ctx)
+	if err != nil || len(hosts) != 1 || hosts[0].Problem != contract.HostProblemCreateFailed {
+		t.Fatalf("quarantine: %+v %v", hosts, err)
+	}
+	if err := s.RecordHostHeartbeat(ctx, "h", true, nil, 0, time.UnixMilli(101)); err != nil {
+		t.Fatal(err)
+	}
+	hosts, _ = s.Hosts(ctx)
+	if hosts[0].Problem == "" {
+		t.Fatal("heartbeat cleared problem")
+	}
+	if got := box.Admit(hosts, nil, box.Box{ID: "new", Room: "r", Size: size}); got.Host != "" {
+		t.Fatalf("admitted quarantined host: %+v", got)
+	}
+	// A stale placement snapshot cannot admit a new creation after quarantine.
+	if _, err := s.writer.Exec("UPDATE boxes SET state='pending' WHERE id='b'"); err != nil {
+		t.Fatal(err)
+	}
+	pending := b
+	pending.State = contract.BoxPending
+	if ok, err := s.SetBoxLifecycle(ctx, pending, b, time.Time{}, 0, event(8)); err != nil || ok {
+		t.Fatalf("stale admission: %v %v", ok, err)
+	}
+	// A successful creation already in flight is stronger evidence than a heartbeat.
+	if _, err := s.writer.Exec("UPDATE boxes SET state='creating' WHERE id='b'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishCreate(ctx, b, "image", "", time.Time{}, 0, event(3)); err != nil {
+		t.Fatal(err)
+	}
+	hosts, _ = s.Hosts(ctx)
+	if hosts[0].Problem != "" {
+		t.Fatal("in-flight success did not clear problem")
+	}
+	if _, err := s.writer.Exec("UPDATE hosts SET create_failures=3,create_problem='create_failed' WHERE name='h'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.writer.Exec("UPDATE boxes SET state='creating' WHERE id='b'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetHostSwitches(ctx, "h", nil, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishCreate(ctx, b, "", "failure", time.Time{}, 3, event(4)); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	var problem string
+	if err := s.Read().QueryRow("SELECT create_failures,create_problem FROM hosts WHERE name='h'").Scan(&count, &problem); err != nil || count != 0 || problem != "" {
+		t.Fatalf("stale result after clear: %d %q %v", count, problem, err)
+	}
+}

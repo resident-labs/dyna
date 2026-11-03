@@ -25,6 +25,7 @@ type Host struct {
 	Name                contract.HostName
 	SSH                 string
 	State               HostState
+	Problem             contract.HostProblem
 	CPUs                int
 	MemBytes, DiskBytes int64
 	DiskFloor           int64

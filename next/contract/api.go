@@ -347,9 +347,10 @@ type HostSetLimitsResponse struct{}
 // lands on the host, and with CI off the CI pool starts no runner there, though a repository still names it. Both off
 // disables the host and keeps it registered. What already runs there stays until it stops.
 type HostSetRequest struct {
-	Host   HostName `json:"host"`
-	Agents *bool    `json:"agents,omitempty"`
-	CI     *bool    `json:"ci,omitempty"`
+	Host               HostName `json:"host"`
+	Agents             *bool    `json:"agents,omitempty"`
+	CI                 *bool    `json:"ci,omitempty"`
+	ClearCreateProblem bool     `json:"clearCreateProblem,omitempty"`
 }
 type HostSetResponse struct{}
 
@@ -372,7 +373,13 @@ type HostSession struct {
 	BoxState BoxState  `json:"boxState"`
 }
 
+// HostProblem identifies a durable admission problem independently of reachability.
+type HostProblem string
+
+const HostProblemCreateFailed HostProblem = "create_failed"
+
 type HostSummary struct {
+	Problem    HostProblem     `json:"problem,omitempty"`
 	Sessions   []HostSession   `json:"sessions,omitempty"`  // in rooms the caller can read
 	Shared     []RoomShared    `json:"shared"`              // Every room's folder is on the control plane, so only its summary lists any.
 	Leftovers  int             `json:"leftovers,omitempty"` // boxes and room folders of deleted rooms that this host still holds, removed when it returns
