@@ -210,7 +210,7 @@ func ComparePR(row store.TrackedPR, items []contract.GitHubItem, listed *FeedIte
 	if next == row.PrSummary && update.HeadRepo == row.HeadRepo && update.CITold == row.CITold && !tell {
 		return update, update.SeenReviews != row.SeenReviews || !reflect.DeepEqual(update.Meta, row.Meta)
 	}
-	change := contract.PrChange{PR: next, Kinds: found.kinds(kinds), FailedChecks: failed, Outside: next.Author != "" && next.Author != viewer, Actions: found.actions}
+	change := contract.PrChange{PR: next, Kinds: found.kinds(kinds), FailedChecks: failed, Outside: next.Author != viewer && update.HeadRepo != row.Repo, Actions: found.actions}
 	// A first read has no head to move from. A push is told to subscribers only, and spends no wake window.
 	if row.Head != "" && next.Head != row.Head && next.State == contract.PrOpen {
 		change.Kinds = append(change.Kinds, contract.PrChangePushed)
