@@ -137,7 +137,34 @@ type Migrator struct {
 	Source Source
 	// Guard runs a write to the room's folder while no deletion can remove it. It is nil in tests.
 	Guard func(context.Context, contract.RoomID, func() error) error
-	mu    sync.Mutex
+	// Now is the clock; nil is time.Now.
+	Now func() time.Time
+
+	mu    sync.Mutex // guards rooms
+	rooms map[contract.RoomID]*roomState
+}
+
+// retryAfter is how long a room waits after a failed migration before a start tries again.
+const retryAfter = 5 * time.Minute
+
+// roomState is one room's migration, which runs one at a time and rests after a failure, so a repository that never clones
+// costs one fetch per interval and holds up no other room.
+type roomState struct {
+	mu             sync.Mutex
+	retryAt        time.Time
+	noPrimaryNoted bool
+}
+
+func (m *Migrator) state(room contract.RoomID) *roomState {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.rooms == nil {
+		m.rooms = make(map[contract.RoomID]*roomState)
+	}
+	if m.rooms[room] == nil {
+		m.rooms[room] = &roomState{}
+	}
+	return m.rooms[room]
 }
 
 // All migrates every open room, as the engine does after it starts. A room that fails is logged and the rest go on.
@@ -157,8 +184,16 @@ func (m *Migrator) All(ctx context.Context) {
 // a mirror that came late, or a repository added after the upgrade, is moved before the room's image is chosen. A failure is
 // logged and not recorded, so the next call retries it.
 func (m *Migrator) Room(ctx context.Context, room contract.RoomID, fetch bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	now := time.Now
+	if m.Now != nil {
+		now = m.Now
+	}
+	state := m.state(room)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if now().Before(state.retryAt) {
+		return
+	}
 	repos, err := m.Rooms.RoomRepos(ctx, room)
 	if err != nil {
 		log.Printf("room %s: migrate images: %v", room, err)
@@ -171,6 +206,10 @@ func (m *Migrator) Room(ctx context.Context, room contract.RoomID, fetch bool) {
 		}
 	}
 	if primary == "" {
+		if len(repos) > 1 && !state.noPrimaryNoted {
+			state.noPrimaryNoted = true
+			log.Printf("room %s: its repositories' images are not moved into the room: it has %d repositories and none is primary. Save an image with dyna image save.", room, len(repos))
+		}
 		return
 	}
 	done, err := m.Store.Migrated(room)
@@ -184,6 +223,7 @@ func (m *Migrator) Room(ctx context.Context, room contract.RoomID, fetch bool) {
 	if !m.Source.Cloned(primary) && fetch {
 		if err := m.Source.Refresh(ctx, primary); err != nil {
 			log.Printf("room %s: fetch %s for its images: %v", room, primary, err)
+			state.retryAt = now().Add(retryAfter)
 		}
 	}
 	if !m.Source.Cloned(primary) {
@@ -215,6 +255,7 @@ func (m *Migrator) Room(ctx context.Context, room contract.RoomID, fetch bool) {
 	}
 	if err != nil {
 		log.Printf("room %s: migrate images of %s: %v", room, primary, err)
+		state.retryAt = now().Add(retryAfter)
 		return
 	}
 	for _, repo := range repos {

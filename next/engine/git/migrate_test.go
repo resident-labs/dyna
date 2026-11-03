@@ -1,13 +1,16 @@
 package git
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/skills"
@@ -21,12 +24,18 @@ const (
 	otherRepo   = contract.RepoName("owner/other")
 )
 
-type migrateRooms struct{ repos []contract.RoomRepo }
+type migrateRooms struct {
+	repos  []contract.RoomRepo
+	byRoom map[contract.RoomID][]contract.RoomRepo // when set, each room has its own
+}
 
 func (migrateRooms) OpenRooms(context.Context) ([]contract.RoomID, error) {
 	return []contract.RoomID{"r"}, nil
 }
-func (r migrateRooms) RoomRepos(context.Context, contract.RoomID) ([]contract.RoomRepo, error) {
+func (r migrateRooms) RoomRepos(_ context.Context, room contract.RoomID) ([]contract.RoomRepo, error) {
+	if r.byRoom != nil {
+		return r.byRoom[room], nil
+	}
 	return r.repos, nil
 }
 
@@ -58,7 +67,7 @@ func cloneInto(t *testing.T, m *Mirror, repo contract.RepoName, build func(dir s
 
 func migrator(m *Mirror, runner images.Runner, repos ...contract.RoomRepo) (*images.Migrator, *images.Store) {
 	store := &images.Store{Layout: m.Layout}
-	return &images.Migrator{Store: store, Rooms: migrateRooms{repos}, Source: images.Source{
+	return &images.Migrator{Store: store, Rooms: migrateRooms{repos: repos}, Source: images.Source{
 		Cloned: m.Cloned, Refresh: func(context.Context, contract.RepoName) error { return nil }, Dir: m.Layout.Git, Runner: runner,
 	}}, store
 }
@@ -177,11 +186,14 @@ func TestAMissingMirrorIsSkippedAndNotRecorded(t *testing.T) {
 func TestAFailedReadLeavesTheRepositoryUnrecorded(t *testing.T) {
 	m := mirrorWith(t, primaryRepo, imageFiles(map[string]string{"x/Containerfile": recipe}))
 	mig, store := migrator(m, failing{on: "archive"}, contract.RoomRepo{Repo: primaryRepo, Default: true})
+	now := time.Now()
+	mig.Now = func() time.Time { return now }
 	mig.Room(context.Background(), "r", false)
 	if done, _ := store.Migrated("r"); len(done) != 0 {
 		t.Fatalf("recorded %v", done)
 	}
 	mig.Source.Runner = GitRunner{}
+	now = now.Add(10 * time.Minute)
 	mig.Room(context.Background(), "r", false)
 	if held, _ := store.List("r"); len(held) != 1 {
 		t.Fatalf("the retry did not copy: %v", held)
@@ -231,4 +243,59 @@ func packOne(t *testing.T, containerfile string) []byte {
 		t.Fatal(err)
 	}
 	return packed
+}
+
+func TestAFailingFetchRetriesOncePerIntervalAndHoldsUpNoOtherRoom(t *testing.T) {
+	m := mirrorWith(t, otherRepo, imageFiles(map[string]string{"x/Containerfile": recipe}))
+	mig, store := migrator(m, GitRunner{})
+	mig.Rooms = migrateRooms{byRoom: map[contract.RoomID][]contract.RoomRepo{
+		"slow": {{Repo: primaryRepo, Default: true}},
+		"fast": {{Repo: otherRepo, Default: true}},
+	}}
+	now := time.Now()
+	mig.Now = func() time.Time { return now }
+	entered, release := make(chan struct{}), make(chan struct{})
+	fetches := 0
+	mig.Source.Refresh = func(context.Context, contract.RepoName) error {
+		fetches++
+		close(entered)
+		<-release
+		return errors.New("network down")
+	}
+	done := make(chan struct{})
+	go func() { mig.Room(context.Background(), "slow", true); close(done) }()
+	<-entered
+	// The first room sits in its fetch; another room's start goes through.
+	mig.Room(context.Background(), "fast", true)
+	if held, _ := store.List("fast"); len(held) != 1 {
+		t.Fatalf("a room waited on another room's fetch: %v", held)
+	}
+	close(release)
+	<-done
+	mig.Source.Refresh = func(context.Context, contract.RepoName) error { fetches++; return errors.New("network down") }
+	mig.Room(context.Background(), "slow", true)
+	if fetches != 1 {
+		t.Fatalf("a start inside the interval fetched again: %d", fetches)
+	}
+	now = now.Add(10 * time.Minute)
+	mig.Room(context.Background(), "slow", true)
+	if fetches != 2 {
+		t.Fatalf("no retry after the interval: %d", fetches)
+	}
+}
+
+func TestSeveralRepositoriesAndNoPrimaryIsLoggedOnce(t *testing.T) {
+	m := mirrorWith(t, primaryRepo, imageFiles(map[string]string{"x/Containerfile": recipe}))
+	mig, store := migrator(m, GitRunner{}, contract.RoomRepo{Repo: primaryRepo}, contract.RoomRepo{Repo: otherRepo})
+	var out bytes.Buffer
+	log.SetOutput(&out)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	mig.Room(context.Background(), "r", false)
+	mig.Room(context.Background(), "r", false)
+	if strings.Count(out.String(), "none is primary") != 1 {
+		t.Fatalf("log %q", out.String())
+	}
+	if held, _ := store.List("r"); len(held) != 0 {
+		t.Fatalf("moved %v", held)
+	}
 }
