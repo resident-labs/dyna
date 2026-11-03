@@ -223,6 +223,7 @@ func TestFinishedRunnerLeavesAndTheNextJobGetsANewOne(t *testing.T) {
 
 func TestAdmissionSpillsToTheNextHostWhenOneIsFull(t *testing.T) {
 	f := newFixture(0)
+	f.store.hosts[0].CPUs = 4 // equal CPU headroom, so the first runner takes the smaller name
 	big := readyHost("big", 128*box.GiB)
 	big.CPUs = 4 // one large runner
 	f.addHost(big)
