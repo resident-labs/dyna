@@ -29,6 +29,9 @@ type ExecRunner struct{}
 
 func (ExecRunner) Run(ctx context.Context, in []byte, args ...string) ([]byte, error) {
 	c := exec.CommandContext(ctx, args[0], args[1:]...)
+	// A killed SSH can leave descendants holding its output pipes. Bound the
+	// copy goroutines too, not just the lifetime of the direct child.
+	c.WaitDelay = 2 * time.Second
 	c.Stdin = strings.NewReader(string(in))
 	out, err := c.Output()
 	// ssh says why it failed only on stderr; without it an error reads "exit status 255".
