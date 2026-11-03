@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	stdlog "log"
 	"net"
 	"net/http"
@@ -486,5 +487,57 @@ func TestProxyWithoutConfigShowsHelp(t *testing.T) {
 	root.SetArgs([]string{"proxy"})
 	if err := root.Execute(); err != nil || !strings.Contains(out.String(), "serve") {
 		t.Fatalf("err = %v, help = %s", err, out.String())
+	}
+}
+
+// roundTripFunc lets a test stand in for the owner socket.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// The forwarder must not read the harness's connection while the reply streams back: the server closes
+// that body when the first chunk goes out, and the transport would close the owner socket under the reply.
+func TestServeModelRouteUploadsBeforeTheReplyStarts(t *testing.T) {
+	uploaded := make(chan error, 1)
+	first := make(chan struct{})
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		reply, stream := io.Pipe()
+		go func() {
+			defer stream.Close()
+			_, _ = stream.Write([]byte("chunk"))
+			<-first
+			_, err := io.ReadAll(r.Body)
+			uploaded <- err
+		}()
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: reply}, nil
+	})
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		_ = serveModelRoute(ctx, listener, transport)
+	}()
+	defer func() {
+		cancel()
+		<-served
+	}()
+	res, err := http.Post("http://"+listener.Addr().String()+"/model/v1/messages", "application/json", strings.NewReader(`{"model":"m"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if _, err := io.ReadFull(res.Body, make([]byte, len("chunk"))); err != nil {
+		t.Fatal(err)
+	}
+	close(first)
+	if err := <-uploaded; err != nil {
+		t.Fatalf("the request body broke once the reply started: %v", err)
+	}
+	if _, err := io.ReadAll(res.Body); err != nil {
+		t.Fatal(err)
 	}
 }
