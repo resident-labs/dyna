@@ -111,12 +111,12 @@ for (const kind of ["mousedown", "mouseup", "dblclick", "contextmenu"]) addEvent
 	}
 	do(Type, Request{Text: "hiH"})
 	do(Key, Request{Keys: []string{"ctrl+a"}})
-	do(Type, Request{Text: "dyna é"})
-	if got := page("document.querySelector('#q').value"); got != `"dyna é"` {
+	do(Type, Request{Text: "dyna é ü ñ 日本 → Ça"})
+	if got := page("document.querySelector('#q').value"); got != `"dyna é ü ñ 日本 → Ça"` {
 		t.Fatalf("typed value %s", got)
 	}
 	do(Type, Request{Selector: "#q", Text: "!"})
-	if got := page("document.querySelector('#q').value"); got != `"dyna é!"` {
+	if got := page("document.querySelector('#q').value"); got != `"dyna é ü ñ 日本 → Ça!"` {
 		t.Fatalf("inserted value %s", got)
 	}
 	do(Click, Request{Selector: "#b", Double: true, Keys: []string{"SHIFT"}})
