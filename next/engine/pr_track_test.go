@@ -293,3 +293,32 @@ func (r *prRig) dispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// pushes returns the github.pr.changed deliveries a subscription made for a session.
+func (r *prRig) pushes(t *testing.T, to contract.SessionID) []contract.PrChanged {
+	t.Helper()
+	r.dispatch(t)
+	return r.wakes(t, to)
+}
+
+func TestSubscribersHearAPushWithBeforeAndAfter(t *testing.T) {
+	r := newPRRig(t)
+	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1, Head: "aaa111"})
+	r.settle(t)
+	if _, e := r.s.SubscriptionAdd(r.ctx, prOwner, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: r.room, On: []contract.EventType{"github.pr.changed"}, Where: []string{"kind=pushed", "repo=owner/repo"}, Wake: string(r.root)}); e != nil {
+		t.Fatalf("%+v", e)
+	}
+	r.github.Edit("owner/repo", 1, func(p *fakegithub.Pull) { p.Head = "bbb222" })
+	r.pass(t)
+	got := r.pushes(t, r.root)
+	if len(got) != 1 || len(got[0].Changes) != 1 || got[0].Changes[0].Push == nil || *got[0].Changes[0].Push != (contract.PrPush{Before: "aaa111", After: "bbb222"}) {
+		t.Fatalf("subscriber wakes %+v", got)
+	}
+	text, err := room.RenderDelivery(got[0])
+	if err != nil || !strings.Contains(text, "aaa111") || !strings.Contains(text, "bbb222") {
+		t.Fatalf("%q %v", text, err)
+	}
+	if owner := r.wakes(t, r.child); len(owner) != 0 {
+		t.Fatalf("a bare push woke the PR's owner: %+v", owner)
+	}
+}

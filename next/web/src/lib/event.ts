@@ -34,7 +34,7 @@ const visual = object({ id: string, version: number, title: string, height: numb
   shots: nullable(array(object({ width: number, file: string }))), checks: nullable(array(object({
     name: oneOf("renders", "console", "widths", "contrast", "network"), status: oneOf("pass", "warn", "fail", "skip"), detail: optional(string),
   }))) });
-const prChangeKind = oneOf("ci_failed", "ci_passed", "changes_requested", "approved", "conflict", "merged", "closed", "comment", "metadata");
+const prChangeKind = oneOf("ci_failed", "ci_passed", "changes_requested", "approved", "conflict", "merged", "closed", "comment", "metadata", "pushed");
 const changeComments = optional(nullable(array(object({ author: string, body: string, url: string, outside: boolean }))));
 const names = optional(nullable(array(string)));
 // A stored event from before the feeds holds only repo, number, session and url.
@@ -85,7 +85,7 @@ const bodies: Record<string, Check> = {
   "github.label": githubAction,
   "github.mention": githubAction,
   "github.pr.changed": object({ session: string, changes: nullable(array(object({ pr: prSummary, kinds: optional(nullable(array(prChangeKind))), failedChecks: optional(nullable(array(string))),
-    outside: boolean, comments: changeComments, moreComments: optional(number), actions }))), issues: optional(issueChanges) }),
+    outside: boolean, comments: changeComments, moreComments: optional(number), actions, push: optional(nullable(object({ before: string, after: string }))) }))), issues: optional(issueChanges) }),
   "github.issue.changed": object({ session: string, changes: issueChanges }),
   "github.issue.closed": githubAction,
   "hook.finished": object({ subscription: string, result: oneOf("passed", "failed", "stopped"), exitCode: number, cause, output: optional(string), failures: optional(number), retryAt: optional(string) }),
