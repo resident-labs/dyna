@@ -8,9 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"hash/crc32"
-	"image"
-	"image/color"
-	"image/jpeg"
 	pngenc "image/png"
 	"io/fs"
 	"log"
@@ -28,6 +25,7 @@ import (
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/agent"
+	"github.com/resident-labs/dyna/box/computer"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/api"
@@ -396,42 +394,9 @@ func (d devService) SessionList(ctx context.Context, p contract.Principal, req c
 	return list, problem
 }
 
-// ComputerWatch streams a 16:10 desktop with a bar that moves each frame, twice a second. The first frame comes after
-// 4 s, as after an engine restart, so the Connecting state can be seen.
-func (devService) ComputerWatch(ctx context.Context, _ contract.SessionID) (<-chan []byte, *contract.Error) {
-	frames := make(chan []byte)
-	go func() {
-		defer close(frames)
-		select {
-		case <-time.After(4 * time.Second):
-		case <-ctx.Done():
-			return
-		}
-		for i := 0; ; i++ {
-			shot := image.NewRGBA(image.Rect(0, 0, 1280, 800))
-			for y := range 800 {
-				for x := range 1280 {
-					c := color.RGBA{uint8(30 + y/10), uint8(50 + x/16), 110, 255}
-					if y > 120 && y < 640 && x > 200 && x < 1080 { // a window, with a bar that moves each frame
-						c = color.RGBA{236, 233, 228, 255}
-						if y < 160 || (y > 300 && y < 330 && x < 220+(i*40)%840) {
-							c = color.RGBA{70, 90, 160, 255}
-						}
-					}
-					shot.Set(x, y, c)
-				}
-			}
-			var frame bytes.Buffer
-			fatal(jpeg.Encode(&frame, shot, nil))
-			select {
-			case frames <- frame.Bytes():
-			case <-ctx.Done():
-				return
-			}
-			time.Sleep(500 * time.Millisecond)
-		}
-	}()
-	return frames, nil
+// ComputerStart has no desktop to start in a fake box. The view's stream then shows DYNA_WEBDEV_VNC's desktop (see ExecArgv).
+func (devService) ComputerStart(context.Context, contract.Principal, contract.ComputerStartRequest) (contract.ComputerStartResponse, *contract.Error) {
+	return contract.ComputerStartResponse{}, nil
 }
 
 type profiles struct{ empty bool }
@@ -515,6 +480,16 @@ type boxes struct {
 // Every webdev terminal is a plain local shell, so the web app's terminal can be tried and checked.
 func (b *boxes) TerminalArgv(context.Context, contract.HostName, contract.BoxID) ([]string, error) {
 	return []string{"bash", "--norc", "--noprofile"}, nil
+}
+
+// Every webdev computer view streams the VNC socket DYNA_WEBDEV_VNC names, such as a local Xvnc's -rfbunixpath, through
+// this binary's vnc-stream mode. Without one the view shows its failed state.
+func (b *boxes) ExecArgv(context.Context, contract.HostName, contract.BoxID, ...string) ([]string, error) {
+	self, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	return []string{self, "vnc-stream"}, nil
 }
 
 func (b *boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, error) {
@@ -605,6 +580,13 @@ func (r *routeList) Set(route string) error {
 }
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "vnc-stream" {
+		if err := computer.Stream(context.Background(), os.Getenv("DYNA_WEBDEV_VNC"), os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	listen := flag.String("web.listen", "127.0.0.1:7790", "web listen address")
 	seed := flag.Bool("seed", false, "create example room")
 	fixture := flag.String("fixture", "", "fixture: full or empty")
