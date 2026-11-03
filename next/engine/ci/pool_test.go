@@ -34,20 +34,25 @@ func (s *fakeStore) LifecycleBoxes(context.Context) ([]store.LifecycleBox, error
 func (s *fakeStore) Pools(context.Context) ([]store.Pool, error) { return s.pools, nil }
 
 type fakeDriver struct {
-	runners  []box.Runner
-	egress   bool
-	builds   int
-	specs    []box.RunnerSpec
-	removed  []string
-	startErr error
-	listErr  error
-	listCtx  context.Context
-	gate     chan struct{} // when set, a build waits for it to close
-	buildMu  sync.Mutex    // a build-ahead runs beside placement
-	onEgress func()        // runs when the proxy is started, which a sweep does
+	runners     []box.Runner
+	egress      bool
+	builds      int
+	specs       []box.RunnerSpec
+	removed     []string
+	startErr    error
+	listErr     error
+	listCtx     context.Context
+	gate        chan struct{} // when set, a build waits for it to close
+	buildMu     sync.Mutex    // a build-ahead runs beside placement
+	onEgress    func()        // runs when the proxy is started, which a sweep does
+	layerBuilds []string      // the id of each room layer built here
+	failLayer   error         // when set, building a room layer fails with it
+	hangLayer   bool          // when set, building a room layer waits for its context
+	failShared  error         // when set, building the shared image fails with it
+	pruned      [][]contract.RoomID
 }
 
-func (d *fakeDriver) BuildRunnerImage(ctx context.Context) (string, error) {
+func (d *fakeDriver) BuildRunnerImage(ctx context.Context, layer *box.RunnerLayer) (string, error) {
 	if d.gate != nil {
 		select {
 		case <-d.gate:
@@ -58,7 +63,28 @@ func (d *fakeDriver) BuildRunnerImage(ctx context.Context) (string, error) {
 	d.buildMu.Lock()
 	defer d.buildMu.Unlock()
 	d.builds++
+	if layer == nil && d.failShared != nil {
+		return "", d.failShared
+	}
+	if layer != nil && d.hangLayer {
+		d.layerBuilds = append(d.layerBuilds, layer.ID)
+		d.buildMu.Unlock()
+		<-ctx.Done()
+		d.buildMu.Lock()
+		return "", ctx.Err()
+	}
+	if layer != nil {
+		d.layerBuilds = append(d.layerBuilds, layer.ID)
+		if d.failLayer != nil {
+			return "", d.failLayer
+		}
+		return "layer-" + layer.ID, nil
+	}
 	return "image", nil
+}
+func (d *fakeDriver) PruneRunnerLayers(_ context.Context, keep []contract.RoomID) error {
+	d.pruned = append(d.pruned, keep)
+	return nil
 }
 func (d *fakeDriver) EnsureEgress(context.Context, string) error {
 	if d.onEgress != nil {
@@ -429,7 +455,7 @@ func TestFailedStartDeletesRegistrationAndTriesAnotherHost(t *testing.T) {
 	big.startErr = nil
 	f.drivers["pve"].runners = nil
 	f.now = f.now.Add(retryAfter)
-	delete(f.pool.images, "pve") // pve, which has its image, would take the job before big, which must build again
+	delete(f.pool.images, imageKey{"pve", ""}) // pve, which has its image, would take the job before big, which must build again
 	f.scale(1)
 	if len(big.runners) != 1 || big.builds != 2 {
 		t.Fatalf("big %+v", big)

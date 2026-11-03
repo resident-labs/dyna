@@ -119,7 +119,7 @@ func TestPlacementPrefersAHostWithTheRunnerImage(t *testing.T) {
 	f := newFixture(0)
 	f.store.hosts[0].MemBytes = 128 * box.GiB // pve has the most free memory, and no image
 	ready := f.addHost(readyHost("desktop", 32*box.GiB))
-	f.pool.images = map[contract.HostName]string{"desktop": "image"}
+	f.pool.images = map[imageKey]string{{"desktop", ""}: "image"}
 	f.scale(1)
 	if len(ready.runners) != 1 || len(f.drivers["pve"].runners) != 0 || f.drivers["pve"].builds != 0 {
 		t.Fatalf("desktop %d, pve %d runners, %d builds", len(ready.runners), len(f.drivers["pve"].runners), f.drivers["pve"].builds)
@@ -148,7 +148,7 @@ func TestBuildAheadDoesNotHoldThePoolLock(t *testing.T) {
 	}
 	close(release)
 	f.stop() // the build outlives the tick and finishes
-	if f.pool.images["pve"] != "image" || f.drivers["pve"].builds != 1 {
+	if f.pool.images[imageKey{"pve", ""}] != "image" || f.drivers["pve"].builds != 1 {
 		t.Fatalf("images %v, builds %d", f.pool.images, f.drivers["pve"].builds)
 	}
 }

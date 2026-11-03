@@ -94,6 +94,49 @@ still take, plus the nodes the room's pools could add, within `--max`. A host be
 its disk floor or above 80% memory adds nothing, so GitHub stops assigning jobs
 there.
 
+## The room's runner image
+
+A room can add layers to the runner image its repositories' jobs use, for example
+a Vulkan driver a test needs. The file is a room image named `ci-runner`, kept in
+the room's own files (spec 5.2), not in the repository, so a PR cannot change what
+its own job runs on:
+
+```
+dyna image save ci-runner ./ci-runner     # the folder holds a Containerfile
+```
+
+It starts `ARG DYNA_CI_BASE` and `FROM ${DYNA_CI_BASE}`, the shared runner image
+below, which is not the box base. Dyna starts every runner with its own entrypoint, user (1001:1001), read-only root, no network, and
+dropped capabilities, whatever the file sets. The file can still overwrite files in the image,
+such as the entrypoint script or the runner binary, but only for its own room's runners, which gain no reach by it. The layer
+build itself has network access and may use `RUN --network=host` and `COPY --from=` another image, as a room's box images do, so
+only the owner and the room's agents should save it. Install as `root`, then end `USER 1001:1001`.
+
+A repository has one CI room, the one it is turned on in, so it has one runner
+image: that room's. A room whose image conflicts with another's is not possible, since a repository reads one room only.
+
+Each ci host builds the room's image from the engine's copy when it first needs it:
+at the next job placed there, or in the background when the engine starts, a host is
+added, or the room saves a new one. Every build sends the context from the engine,
+so a host that was offline during a save builds the current image at its next
+build and never an old one. The tag holds the shared image's hash and the saved
+image's id, so either change builds again. A build takes minutes the first time.
+Placement counts a host as ready for a repository only when it has that repository's
+current image, so a host that has it wins over one that must build it.
+
+A host builds each layer within 10 minutes, one at a time, so one room's slow file does not stop another room's. A layer
+that no room has any more is removed from the host. A job placed on a host that must still build runs after that build,
+which can take minutes, and placement holds the pool lock meanwhile. A room with no `ci-runner` image uses the shared image. When the room's image fails
+to build on a host, the job runs on the shared image, the pool logs why, and
+`dyna host list` shows the host with a CI runner image problem (room, image id and the
+last lines of the build), until a build there succeeds. A save with a fix builds
+again at the next job.
+
+To see which image a job got: `podman ps --filter label=dyna.ci` on the host lists
+runners with their image, which is `localhost/dyna-ci-runner:HASH` for the shared
+image and `localhost/dyna-ci-room-ROOM:ID-HASH` for a room's; `dyna image show
+ci-runner` gives the ID.
+
 ## Turn it off
 
 - **Stop new jobs now:** delete `DYNA_CI_SELF_HOSTED`, or set it to anything but
