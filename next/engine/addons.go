@@ -234,6 +234,7 @@ func (s *Service) MCPRemove(ctx context.Context, caller contract.Principal, req 
 // addonList gathers the scopes a caller can see, built-ins first, then global, then rooms. An empty kind means all three.
 func (s *Service) addonList(ctx context.Context, caller contract.Principal, kind contract.AddonKind, room contract.RoomID) (contract.AddonListResponse, *contract.Error) {
 	rooms := []contract.RoomID{room}
+	hideRootOnly := false
 	switch {
 	case caller.Kind == contract.PrincipalSession:
 		session, err := s.store.Session(ctx, caller.Session)
@@ -244,6 +245,7 @@ func (s *Service) addonList(ctx context.Context, caller contract.Principal, kind
 			return contract.AddonListResponse{}, forbidden()
 		}
 		rooms[0] = session.Room
+		hideRootOnly = !session.Root
 	case room == "":
 		var err error
 		if rooms, err = s.store.OpenRooms(ctx); err != nil {
@@ -264,7 +266,7 @@ func (s *Service) addonList(ctx context.Context, caller contract.Principal, kind
 	}
 	out := contract.AddonListResponse{Items: []contract.Addon{}}
 	for _, item := range items {
-		if kind == "" || item.Kind == kind {
+		if (kind == "" || item.Kind == kind) && !(hideRootOnly && item.RootOnly) {
 			out.Items = append(out.Items, item)
 		}
 	}
