@@ -31,7 +31,7 @@ func prelude(a contract.HostexecRunArgs, op contract.OpID) string {
 // collectScript prints a tar of the files a run left in $DYNA_OUT, or nothing when there are none, and removes the folder.
 func collectScript(op contract.OpID) string {
 	d := OutDir(op)
-	return `d=` + d + `; if [ -n "$(find "$d" -type f -print -quit 2>/dev/null)" ]; then tar -C "$d" -cf - . 2>/dev/null; fi; rm -rf -- "$d" 2>/dev/null; exit 0`
+	return `d=` + d + `; rc=0; if [ -n "$(find "$d" -type f -print -quit 2>/dev/null)" ]; then tar -C "$d" -cf - . || rc=3; fi; rm -rf -- "$d" || rc=3; exit $rc`
 }
 
 // CollectArgs is the run that reads back and removes a finished run's $DYNA_OUT.

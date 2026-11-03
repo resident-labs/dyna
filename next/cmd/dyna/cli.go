@@ -610,7 +610,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 			if h.Pool != "" {
 				state += "\tpool " + h.Pool
 			}
-			if h.Name != contract.ControlPlane && !h.Agents && !h.CI {
+			if h.ExecOnly {
 				state += "\texec only"
 			} else if h.Name != contract.ControlPlane {
 				state += "\tagents " + onOff(h.Agents) + "\tci " + onOff(h.CI)
