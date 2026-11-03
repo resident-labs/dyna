@@ -322,3 +322,17 @@ func TestHostexecApprovalAndSessionCloseRecheck(t *testing.T) {
 		t.Fatal("closed session grant passed recheck")
 	}
 }
+
+// A command whose quoted form cannot fit one environment string is refused before any run starts, with its size and the limit.
+func TestHostexecRefusesACommandTooLongToQuote(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	who := contract.Principal{Kind: contract.PrincipalSession, Session: worker}
+	g := contract.Grant{ID: "grant_long", Kind: contract.GrantHostExec, Room: room, To: who, By: contract.Principal{Kind: contract.PrincipalOwner}, Created: s.now(), Hosts: []contract.HostName{"host"}}
+	if err := s.store.CreateGrant(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	_, e := s.HostexecRun(ctx, who, contract.HostexecRunRequest{Host: "host", Command: strings.Repeat("a\n", 70000)})
+	if e == nil || e.Code != contract.ErrCommandTooLong || e.Message != "the command takes 210012 bytes once quoted for the host; one environment string holds at most 131061" {
+		t.Fatalf("got %+v", e)
+	}
+}
