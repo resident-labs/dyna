@@ -139,3 +139,34 @@ func TestOnlyRootAndTheOwnerListRootOnlyItems(t *testing.T) {
 		t.Fatalf("the owner lists %q", got)
 	}
 }
+
+func TestAPendingRootOnlyRequestIsHiddenFromASessionThatIsNotRoot(t *testing.T) {
+	s, room, worker, ctx, _ := setupAddons(t)
+	var rootID contract.SessionID
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT parent FROM sessions WHERE id=?", worker.Session).Scan(&rootID); err != nil {
+		t.Fatal(err)
+	}
+	root := contract.Principal{Kind: contract.PrincipalSession, Session: rootID}
+	for _, req := range []contract.MCPAddRequest{{Name: "private", URL: "https://secret.test/mcp?token=x", Global: true, RootOnly: true}, {Name: "public", URL: "https://open.test/mcp", Global: true}} {
+		if _, problem := s.MCPAdd(ctx, root, req); problem != nil {
+			t.Fatal(problem)
+		}
+	}
+	count := func(caller contract.Principal) int {
+		t.Helper()
+		listed, problem := s.OpList(ctx, caller, contract.OpListRequest{Room: room})
+		if problem != nil {
+			t.Fatal(problem)
+		}
+		return len(listed.Operations)
+	}
+	if got := count(worker); got != 1 {
+		t.Fatalf("a session that is not root sees %d requests", got)
+	}
+	if got := count(root); got != 2 {
+		t.Fatalf("root sees %d", got)
+	}
+	if got := count(ownerCaller); got != 2 {
+		t.Fatalf("the owner sees %d", got)
+	}
+}
