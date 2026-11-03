@@ -73,7 +73,7 @@ var agentPaths = []string{"/box", "/opt/dyna", "/run/dyna"}
 type Service struct {
 	Name          string
 	Image         string // a fully qualified reference
-	Build         string // a folder under .dyna/images
+	Build         string // the name of a room image
 	Command       []string
 	Env           []box.EnvVar
 	Volumes       []box.Volume
@@ -310,17 +310,22 @@ func checkImage(image string) (string, error) {
 	}
 	// Local names reach every other repository's images on the host.
 	if domain := reference.Domain(ref); domain == "localhost" || strings.HasPrefix(domain, "localhost:") {
-		return "", fmt.Errorf("image %q: only a registry image is allowed; a local image belongs in .dyna/images and a build", image)
+		return "", fmt.Errorf("image %q: only a registry image is allowed; a local image is a room image, named by build", image)
 	}
 	return ref.String(), nil
 }
 
+// checkBuild reads build as the name of a room image. The old form, a folder under .dyna/images, still names the image of that
+// name, so a repository's compose file keeps working after its images moved to the room.
 func checkBuild(context string) (string, error) {
-	folder, ok := strings.CutPrefix(path.Clean(context), imagesFolder)
-	if !ok || !imageFolder.MatchString(folder) || folder == "." || folder == ".." {
-		return "", fmt.Errorf("build %q: build must be a folder in %s", context, imagesFolder)
+	name := context
+	if clean := path.Clean(context); strings.HasPrefix(clean, imagesFolder) {
+		name = strings.TrimPrefix(clean, imagesFolder)
 	}
-	return folder, nil
+	if !imageFolder.MatchString(name) || name == "." || name == ".." || name == "ci-runner" {
+		return "", fmt.Errorf("build %q: build must name an image of the room (dyna image list)", context)
+	}
+	return name, nil
 }
 
 func checkEnv(service string, env types.MappingWithEquals) ([]box.EnvVar, error) {

@@ -35,7 +35,6 @@ type Repositories interface {
 	Get(context.Context, contract.SessionID, contract.HostName, bool) ([]contract.BoxRepo, error)
 	Ref(context.Context, contract.RepoName, string) (string, error)
 	DeleteArchiveRef(context.Context, contract.RepoName, string, string) error
-	Size(context.Context, contract.RepoName) (contract.BoxSizeName, error)
 }
 
 // Usage gives the newest usage reading without waiting on a provider.
@@ -62,7 +61,6 @@ type Service struct {
 	profiles          Profiles
 	repos             Repositories
 	compose           *compose.Files
-	imageSize         func(context.Context, contract.RepoName, string) (contract.BoxSizeName, error)
 	approvals         *approve.Service
 	pulls             *prs.Client
 	githubTools       http.Handler
@@ -160,9 +158,9 @@ func (s *Service) SetRepositories(repos Repositories) {
 	s.reconciler.SetRepositories(repos)
 }
 
-// SetCompose configures compose files before the service starts. imageSize reads the default size of one image.
-func (s *Service) SetCompose(files *compose.Files, imageSize func(context.Context, contract.RepoName, string) (contract.BoxSizeName, error)) {
-	s.compose, s.imageSize = files, imageSize
+// SetCompose configures compose files before the service starts.
+func (s *Service) SetCompose(files *compose.Files) {
+	s.compose = files
 }
 
 func (s *Service) Reconciler() *lifecycle.Reconciler { return s.reconciler }

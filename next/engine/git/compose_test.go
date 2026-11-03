@@ -2,15 +2,19 @@ package git
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/box"
+	"github.com/resident-labs/dyna/box/skills"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/compose"
+	"github.com/resident-labs/dyna/engine/images"
 )
 
 const composeRepo contract.RepoName = "owner/repo"
@@ -99,10 +103,6 @@ func TestComposeFilesFallBackToTheImageBranch(t *testing.T) {
 	if err != nil || string(data) != "branch" {
 		t.Fatalf("data %q: %v", data, err)
 	}
-	folders, err := m.ImageFolders(ctx, composeRepo)
-	if err != nil || strings.Join(folders, " ") != "go rust" {
-		t.Fatalf("folders %v: %v", folders, err)
-	}
 }
 
 // The three levels together, with the repository level read from a real mirror.
@@ -110,7 +110,7 @@ func TestARepositoryFileBeatsARoomFileBeatsAGlobalFile(t *testing.T) {
 	m := mirrorOf(t, func(dir string) {
 		commitFiles(t, dir, map[string]string{".dyna/compose/shared.yaml": "services:\n  agent:\n    environment: {FROM: repo}\n"})
 	})
-	files := &compose.Files{Layout: m.Layout, Repo: m}
+	files := &compose.Files{Layout: m.Layout, Repo: m, Images: &images.Store{Layout: m.Layout}}
 	for dir, data := range map[string]map[string]string{
 		files.Layout.Compose(""):  {"shared": "global", "top": "global", "room": "global"},
 		files.Layout.Compose("r"): {"shared": "room", "room": "room"},
@@ -153,26 +153,57 @@ func TestAnOversizedRepositoryFileIsNotRead(t *testing.T) {
 	}
 }
 
-// One image of several, read by name: this is what ends ErrImageChoice for a repository with a compose file.
-func TestImageContextChoosesANamedImage(t *testing.T) {
+// Migration copies a repository's images, from its image branch too, into the room once, and the room's own images win.
+func TestMigrationCopiesARepositorysImagesIntoTheRoom(t *testing.T) {
 	m := mirrorOf(t, func(dir string) {
+		commitFiles(t, dir, map[string]string{"README": "upstream"})
+		gitIn(t, dir, "checkout", "-q", "-b", "dyna-images")
 		commitFiles(t, dir, map[string]string{
-			".dyna/images/go/Containerfile":   "FROM go",
-			".dyna/images/rust/Containerfile": "FROM rust",
+			".dyna/images/go/Containerfile":   "ARG DYNA_BASE\nFROM ${DYNA_BASE}\n",
+			".dyna/images/rust/Containerfile": "ARG DYNA_BASE\nFROM ${DYNA_BASE}\n",
 			".dyna/images/rust/box-needs":     "kvm\n",
 			".dyna/images/rust/size":          "large\n",
 		})
+		gitIn(t, dir, "checkout", "-q", "main")
 	})
 	ctx := context.Background()
-	name, tree, data, needs, err := m.ImageContext(ctx, composeRepo, "rust")
-	if err != nil || name != "rust" || tree == "" || len(data) == 0 || len(needs) != 1 || needs[0] != box.NeedKVM {
-		t.Fatalf("name %q tree %q needs %v: %v", name, tree, needs, err)
+	store := &images.Store{Layout: m.Layout}
+	path, err := m.Layout.Git(composeRepo)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, _, _, _, err := m.ImageContext(ctx, composeRepo, "zig"); err == nil {
-		t.Fatal("found an image that is not there")
+	own := packOne(t, "ARG DYNA_BASE\nFROM ${DYNA_BASE}\nRUN echo mine\n")
+	if _, err := store.Save("r", "go", own); err != nil {
+		t.Fatal(err)
 	}
-	size, err := m.ImageSize(ctx, composeRepo, "rust")
-	if err != nil || size != contract.BoxSizeLarge {
+	copied, left, err := store.Migrate(ctx, m.Runner, "r", composeRepo, path)
+	if err != nil || !slices.Equal(copied, []string{"rust"}) || len(left) != 1 {
+		t.Fatalf("copied %v left %v: %v", copied, left, err)
+	}
+	_, _, _, needs, err := store.Context("r", "rust")
+	if err != nil || len(needs) != 1 || needs[0] != box.NeedKVM {
+		t.Fatalf("needs %v: %v", needs, err)
+	}
+	if size, err := store.Size("r", "rust"); err != nil || size != "large" {
 		t.Fatalf("size %q: %v", size, err)
 	}
+	if again, _, err := store.Migrate(ctx, m.Runner, "r", composeRepo, path); err != nil || len(again) != 0 {
+		t.Fatalf("second run copied %v: %v", again, err)
+	}
+	if _, _, _, _, err := store.Context("r", ""); !errors.Is(err, images.ErrImageChoice) {
+		t.Fatalf("several images, no choice: %v", err)
+	}
+}
+
+func packOne(t *testing.T, containerfile string) []byte {
+	t.Helper()
+	archive := skills.NewArchive()
+	if err := archive.Add("Containerfile", 0o600, []byte(containerfile)); err != nil {
+		t.Fatal(err)
+	}
+	packed, err := archive.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return packed
 }

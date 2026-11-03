@@ -1,6 +1,6 @@
 # Container toolchain image
 
-A repository can put `nested-containers` in `.dyna/images/<name>/box-needs`.
+A room image can put `nested-containers` in its `box-needs` file (`dyna image save`).
 Dyna supplies the TUN device and unmasks `/proc/sys` only for that image.
 A `kvm` need supplies `/dev/kvm` and keeps the host user’s supplementary groups.
 This allows access when the host grants it through a group. It also gives the
@@ -9,7 +9,7 @@ List one need per line.
 Dyna refuses any unknown need.
 
 This example uses the Debian packages in the current `dyna-base`. Put it in
-`.dyna/images/<name>/Containerfile`:
+the image folder's `Containerfile`:
 
 ```Dockerfile
 ARG DYNA_BASE

@@ -46,8 +46,12 @@ func (r *fakeRepo) ComposeFile(_ context.Context, _ contract.RepoName, name stri
 	}
 	return []byte(data), nil
 }
-func (r *fakeRepo) ImageFolders(context.Context, contract.RepoName) ([]string, error) {
-	return r.folders, nil
+func (r *fakeRepo) BoxImages(room contract.RoomID) ([]contract.RoomImage, error) {
+	images := make([]contract.RoomImage, len(r.folders))
+	for i, name := range r.folders {
+		images[i] = contract.RoomImage{Name: name, Room: room}
+	}
+	return images, nil
 }
 
 func marked(value string) string {
@@ -56,7 +60,7 @@ func marked(value string) string {
 
 func levels(t *testing.T, repo *fakeRepo, global, room map[string]string) *Files {
 	t.Helper()
-	f := &Files{Layout: box.Layout{Data: t.TempDir()}, Repo: repo}
+	f := &Files{Layout: box.Layout{Data: t.TempDir()}, Repo: repo, Images: repo}
 	for dir, files := range map[string]map[string]string{f.Layout.Compose(""): global, f.Layout.Compose("r"): room} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
@@ -201,17 +205,10 @@ func TestAFileChoosesAmongSeveralImages(t *testing.T) {
 	if _, file, err := f.Start(ctx, "r", "owner/repo", "rust"); err != nil || file.Agent.Build != "rust" {
 		t.Fatalf("%+v %v", file, err)
 	}
-	for name, want := range map[string]string{"bare": "several images", "gone": "no image folder zig", "side": "no image folder zig"} {
+	for name, want := range map[string]string{"bare": "several images", "gone": "no image zig", "side": "no image zig"} {
 		if _, _, err := f.Start(ctx, "r", "owner/repo", name); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: got %v", name, err)
 		}
-	}
-}
-
-func TestABuildNeedsARepository(t *testing.T) {
-	f := levels(t, &fakeRepo{}, map[string]string{"x": "services:\n  agent:\n    build: .dyna/images/rust\n"}, nil)
-	if _, _, err := f.Start(context.Background(), "r", "", "x"); err == nil || !strings.Contains(err.Error(), "needs a repository") {
-		t.Fatalf("got %v", err)
 	}
 }
 
@@ -251,5 +248,22 @@ func TestLocalFilesOverTheLimitAreRefused(t *testing.T) {
 	f := levels(t, &fakeRepo{}, map[string]string{"big": strings.Repeat("#", MaxFileBytes+100)}, nil)
 	if _, _, err := f.Start(context.Background(), "r", "", "big"); err == nil || !strings.Contains(err.Error(), "over") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestABuildNamesARoomImageWithOrWithoutTheOldFolder(t *testing.T) {
+	repo := &fakeRepo{folders: []string{"rust"}, files: map[string]string{
+		"old":   "services:\n  agent:\n    build: .dyna/images/rust\n",
+		"plain": "services:\n  agent:\n    build: rust\n",
+		"other": "services:\n  agent:\n    build: go\n",
+	}}
+	f := levels(t, repo, nil, nil)
+	for _, name := range []string{"old", "plain"} {
+		if _, file, err := f.Start(context.Background(), "r", "owner/repo", name); err != nil || file.Agent.Build != "rust" {
+			t.Errorf("%s: %+v %v", name, file, err)
+		}
+	}
+	if _, _, err := f.Start(context.Background(), "r", "owner/repo", "other"); err == nil || !strings.Contains(err.Error(), "no image go") {
+		t.Errorf("got %v", err)
 	}
 }
