@@ -85,9 +85,15 @@ func fileSize(bytes int64) string {
 }
 
 func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, event contract.Event, delivery contract.Delivery) (string, []contract.TurnFile, error) {
-	sender, err := s.framePrincipal(ctx, viewer, event.From)
-	if err != nil {
-		return "", nil, err
+	var sender string
+	if post, ok := event.Body.(contract.PostCreated); ok && post.Source != nil {
+		sender = fmt.Sprintf("%s:%s", post.Source.RoomName, post.Source.SessionName)
+	} else {
+		var err error
+		sender, err = s.framePrincipal(ctx, viewer, event.From)
+		if err != nil {
+			return "", nil, err
+		}
 	}
 	// A Run's post comes through the engine, but a script wrote it, so the frame must not vouch for it.
 	if post, ok := event.Body.(contract.PostCreated); ok && post.Hook != "" {

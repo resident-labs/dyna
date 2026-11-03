@@ -211,7 +211,7 @@ func Run(ctx context.Context) error {
 	mux.Handle("/build-cache/", http.StripPrefix("/build-cache", BuildCacheRoute(buildCacheSocket)))
 	mux.Handle("/", ModelRoute(engineSocket))
 	mcpPath := filepath.Join(piDir, "mcp.json")
-	dynaTools, problem := dynamcp.New(client.forward, dynamcp.BoxTools("/run/dyna/agent.sock"), post.Preparer{Dir: workdir, Render: visual.Preview, Upload: func(ctx context.Context, path string) (contract.Attachment, error) {
+	dynaTools, problem := dynamcp.New(client.forward, dynamcp.BoxTools("/run/dyna/agent.sock"), post.Preparer{Room: hello.Room, Dir: workdir, Render: visual.Preview, Upload: func(ctx context.Context, path string) (contract.Attachment, error) {
 		return post.UploadHTTP(ctx, client.http, "", path)
 	}})
 	if problem != nil {

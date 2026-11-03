@@ -186,10 +186,11 @@ func TestBoxPostDefaultsToListenerRoom(t *testing.T) {
 	}
 }
 
-func TestBoxCannotPostInAnotherRoom(t *testing.T) {
-	w := request(New(&fakeService{}, nil).handler(boxCaller()), "/v1/post", `{"room":"room-b","text":"x"}`)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d", w.Code)
+func TestBoxPostPassesNamedRoomToService(t *testing.T) {
+	f := &fakeService{}
+	w := request(New(f, nil).handler(boxCaller()), "/v1/post", `{"room":"room-b","text":"x"}`)
+	if w.Code != http.StatusOK || f.post.Room != "room-b" {
+		t.Fatalf("status %d, room %s", w.Code, f.post.Room)
 	}
 }
 

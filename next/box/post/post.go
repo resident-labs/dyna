@@ -21,6 +21,7 @@ type Upload func(context.Context, string) (contract.Attachment, error)
 
 // Preparer uploads local files and renders visuals before posting.
 type Preparer struct {
+	Room   contract.RoomID
 	Upload Upload
 	Render func(context.Context, []byte, string, bool) visual.Result
 	Dir    string
