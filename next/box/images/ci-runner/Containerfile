@@ -8,7 +8,7 @@ ARG RUNNER_SHA256=baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c
 # apt's sandbox user needs GID 65534, which a host with a short subuid range does not map.
 RUN echo 'APT::Sandbox::User "root";' > /etc/apt/apt.conf.d/10dyna \
     && apt-get update && apt-get install -y --no-install-recommends \
-    bash build-essential ca-certificates curl file git git-lfs jq libicu74 libkrb5-3 liblttng-ust1t64 libssl3t64 \
+    bash build-essential ca-certificates curl file git git-lfs jq libicu74 libkrb5-3 liblttng-ust1t64 libssl3t64 libvulkan1 mesa-vulkan-drivers \
     openssh-client openssh-server procps python3 shellcheck socat tar tini unzip xz-utils zip zlib1g zstd \
     && rm -rf /var/lib/apt/lists/*
 

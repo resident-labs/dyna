@@ -128,6 +128,9 @@ and Podman's default `/dev/shm`. A job installs its own tools, and a test must n
 lean on the machine it runs on. A test that skips when a tool is missing passes
 without running, so `next` installs Node for the tests in `box/agent`.
 
+It does carry Mesa's software Vulkan driver (lavapipe: `mesa-vulkan-drivers` and `libvulkan1`), so a
+test that needs a Vulkan adapter finds llvmpipe.
+
 `next` fits `medium`, so its jobs say `dyna-medium`. In a `medium` container on pve
 it took 2 minutes from a cold cache, and peaked at 2.6 of 6 GiB of tmpfs and 4 of 8
 GiB of memory.
