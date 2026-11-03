@@ -1,12 +1,16 @@
 package computer
 
 import (
+	"bufio"
 	"context"
+	"encoding/binary"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -77,6 +81,55 @@ func TestSettledSaysWhatChanged(t *testing.T) {
 	}
 }
 
+// Typed text goes to Xvnc as key events, one keysym a character, Enter for each line break.
+func TestTypeTextSendsAKeysymForEveryCharacter(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "vnc.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	keys := make(chan []uint32, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		r := bufio.NewReader(conn)
+		read := func(n int) []byte { b := make([]byte, n); _, _ = io.ReadFull(r, b); return b }
+		_, _ = conn.Write([]byte("RFB 003.008\n\x01\x01"))
+		read(12 + 1)                                                       // version, security None
+		_, _ = conn.Write([]byte{0, 0, 0, 0})                              // security result
+		read(1)                                                            // shared
+		_, _ = conn.Write(append([]byte{0, 1, 0, 1}, make([]byte, 20)...)) // 1x1, no name
+		read(20)                                                           // SetPixelFormat
+		encodings := read(4)[3]                                            // SetEncodings, then the encodings
+		read(4 * int(encodings))
+		var got []uint32
+		for {
+			kind := read(1)[0]
+			if kind == 3 { // the request after the keys
+				read(9)
+				_, _ = conn.Write([]byte{0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0x55})
+				keys <- got
+				return
+			}
+			event := read(7)
+			if event[0] == 1 {
+				got = append(got, binary.BigEndian.Uint32(event[3:]))
+			}
+		}
+	}()
+	if err := TypeText(context.Background(), socket, "Hé ü\r\nñ 日本\t→"); err != nil {
+		t.Fatal(err)
+	}
+	want := []uint32{'H', 0xe9, ' ', 0xfc, 0xff0d, 0xf1, ' ', 0x01000000 + 0x65e5, 0x01000000 + 0x672c, 0xff09, 0x01000000 + 0x2192}
+	if got := <-keys; !slices.Equal(got, want) {
+		t.Fatalf("keysyms %x, want %x", got, want)
+	}
+}
+
 // fakeAgent serves the box agent's endpoint on a socket, as Process.Handler answers it, with no desktop behind it.
 func fakeAgent(t *testing.T, launched *[]string) Agent {
 	socket := filepath.Join(t.TempDir(), "agent.sock")
@@ -119,7 +172,6 @@ func TestInputActionsSendOneXdotoolChain(t *testing.T) {
 		{Scroll, Request{ScrollY: -3, ScrollX: 2}, ":1 mousemove 640 400 click --repeat 3 --delay 20 4 click --repeat 2 --delay 20 7"},
 		{Key, Request{Keys: []string{"l", "CTRL"}, HoldMS: number(0)}, ":1 keydown Control_L sleep 0.05 keydown U006C sleep 0.000 keyup U006C keyup Control_L"},
 		{Key, Request{Keys: []string{"SHIFT"}}, ":1 keydown Shift_L sleep 0.050 keyup Shift_L"},
-		{Type, Request{Text: "hi\r\nthere"}, ":1 type --delay 8 -- hi\nthere"},
 	} {
 		_ = os.Remove(log)
 		result, err := Do(context.Background(), agent, tc.action, tc.req)
