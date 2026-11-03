@@ -40,6 +40,9 @@ type SessionCache struct {
 	stopOnce         sync.Once
 	sessionGroups    map[string]map[string]struct{}
 	bindingSequence  uint64
+	statePath        string
+	flushMu          sync.Mutex
+	dirty            bool
 }
 
 // NewSessionCache creates a cache with the specified TTL.
@@ -210,6 +213,7 @@ func (c *SessionCache) replaceAliasGroupsLocked(authID string, expiresAt time.Ti
 	if len(aliases) == 0 {
 		return
 	}
+	c.dirty = true
 	primaryKey := aliases[0]
 	if existing, ok := c.groups[primaryKey]; ok {
 		c.removeAliasGroupLocked(existing)
@@ -252,6 +256,7 @@ func (c *SessionCache) removeAliasGroupLocked(entry sessionEntry) {
 	if len(entry.aliases) == 0 {
 		return
 	}
+	c.dirty = true
 	primaryKey := entry.aliases[0]
 	if currentGroup, ok := c.groups[primaryKey]; ok && sameSessionEntryGroup(currentGroup, entry) {
 		delete(c.groups, primaryKey)
@@ -470,6 +475,9 @@ func (c *SessionCache) Stop() {
 	c.stopOnce.Do(func() {
 		if c.stopCh != nil {
 			close(c.stopCh)
+		}
+		if c.statePath != "" {
+			c.flush()
 		}
 	})
 }
