@@ -32,7 +32,10 @@ const gate: Plugin = { name: "trial-gate", apply: "serve", transformIndexHtml: (
       else res.writeHead(403).end("forbidden");
     });
   } };
+// noVNC awaits at its top level as it loads, which needs ES2022; the computer view loads it on demand.
 export default defineConfig({
+  build: { target: "es2022" },
+  optimizeDeps: { esbuildOptions: { target: "es2022" } },
   plugins: [svelte(), renderBlocking, ...cookie && key ? [gate] : []],
   server: cookie && key ? { cors: false, proxy: { "/v1": { target: "http://127.0.0.1:7790",
     headers: { host: trial, origin: `http://${trial}`, cookie: `dyna_device=${cookie}` },

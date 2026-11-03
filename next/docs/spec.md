@@ -14,7 +14,7 @@ Only the owner can reopen a settled owner decision. Sources and history are in [
 6. **Host exec.** Only the owner grants it. Root's default grant covers all hosts, including the control plane, without approval. Root can therefore reach model sign-ins and the GitHub token. This is the exception to the no-secret-in-a-box goal. A control-plane grant gives full owner power, including owner-only API calls (owner, 2026-10-31, msg_462f3f1d210856c2).
 7. **Root.** Root is a position in the tree. An ancestor can start, move or close descendants. Root's extra powers are the ask-owner and host-exec grants and the engine-notice subscription.
 8. **Self-hosting.** Trial v2 beside v1 before cutover, with separate data, runtime and SSH control folders. Start in M2 once a box can build and test Dyna. v1 remains the fallback until the trial works and a dry-run import passes.
-9. **Scope.** Voice returns after cutover. Dyna web search ships in v2 now (owner, 2026-10-31). The library is cut for now. Minimal computers ship in M2; workflows and the desktop window ship in M3. The frozen v1 backup keeps the feature map.
+9. **Scope.** Voice returns after cutover. Dyna web search ships in v2 now (owner, 2026-10-31). The library is cut for now. Computers ship in M2; workflows ship in M3. The frozen v1 backup keeps the feature map.
 10. **Node jobs.** Do not port them. GitHub Actions runs CI, with Dyna's self-hosted runners of the size each job asks for, placed as boxes are on hosts with ci on ([CI runners](ci-runners.md)). Host-specific work uses host exec or a room restricted to a suitable host. Admission does not yet select hosts by device needs.
 11. **Proxy process.** Vendor CLIProxyAPI in `next/third_party/cliproxyapi`. The engine supervises a child of the same binary over a Unix socket.
 12. **Size and cuts.** Milestone reports count product lines per package against the plan. Keep subtree moves, `Run` subscriptions and `show_pty` requests. Defer box growth, cross-host restart, checkpoints, relocation commands, bundle data for issue watches and room MCP servers, one cgroup per shell job, `node_modules` reflink seeding and external members. Ship `box.pressure`; use process groups for shell jobs and a manual relocation procedure.
@@ -393,7 +393,11 @@ Every view change requires a T3 Code side-by-side on the PR and reviewer checks.
 
 ### 5.14 Computers (M2)
 
-One Chromium runs inside each box's budget, starts on first use and stops with the box. Agents can drive loopback pages and public sites, but not the engine web app. Screencast frames reach the session page. The local owner or a paired device with `computers` scope can send input; sessions cannot send owner input, and owner input does not pause them. No second browser, recording, reminders or host computer ships.
+Each box has one desktop at the agent's size, 1280x800. TigerVNC's `Xvnc` is both its display and its VNC server, on the box-only socket `/run/dyna/vnc.sock`; `jwm` gives it a taskbar and nothing else; Chromium runs in a window on it, with DevTools on port 9222 for the agent's actions; `xdotool` is installed for agent input. Nothing runs until the first agent action or `computer.start`. All of it runs in the box's `computer` cgroup with half the box's memory, and stops with the box; a Chromium that exits opens again on the next use. The box reports `computer.changed` while the display runs. Agents can drive loopback pages and public sites, but not the engine web app.
+
+The owner's view is noVNC in the web app. `computer.start` (owner, `computers` scope) starts the desktop and returns once it runs. `GET /v1/computers/stream?session=` is a WebSocket, also under `computers`, that runs the box's `dyna computer stream` through the host's `podman exec -i`, with no terminal, and carries the VNC bytes both ways. Xvnc sends only changed regions, the viewer requests each picture, and noVNC draws the cursor. While the picture moves it streams at JPEG quality 6; after 1.5 seconds still it asks for quality 9 and a full redraw. An open view keeps the box awake, as an open terminal does.
+
+The session header's Computer button shows while the box is ready. The view floats over the app at the desktop's shape, scaled to fit, on every display; the desktop never resizes for it. A double tap or double click makes it full screen and gives the owner control; leaving full screen gives control back. Full screen has a chat bar along the bottom, the session's DM composer. Sessions cannot send owner input, and owner input does not pause them. No second browser, recording, reminders or host computer ships.
 
 ### 5.15 Shell job view and owner terminal (M2)
 
@@ -669,7 +673,7 @@ Each `contract/tools/` toolkit registers one area tool with a flat `action` enum
 | `hostexec` | request_grant | `op.submit` with `hostexec.grant` | 1 |
 | `pr` | open, list, status, track, untrack | `pr.open`, `pr.list`, `pr.status`, `pr.track`, `pr.untrack`; approval is deferred (7.6) | 1, 2 |
 | `visual` | check | the visual checker in the box | 1 |
-| `computer` | open, click, type, text, screenshot | the box computer (5.14); screenshots return as image results | 1 |
+| `computer` | open, click, type, text, screenshot | the box desktop's Chromium through DevTools (5.14); any action starts the desktop; screenshots return as image results | 1 |
 | `context` | show | `context.snapshot` (one section in full, past its cap) | 1 |
 | `goal` | set, list, item, done, journal | `goal.*` (done) | 2 |
 | `issue` | track, untrack, list, status | `issue.track`, `issue.untrack`, `issue.list`, `issue.status` | 2 |
@@ -771,7 +775,7 @@ Engine timers remain scheduled tasks. The updater replaces the self-update hook.
 All M1–M3 features below are cutover gates.
 
 - **M1 and M2:** The thin slice and trial features are in section 11.
-- **M3:** goals and check-ins (done, section 7.4), questions, issues, thin PR approval and GitHub merges, the Actions runner pool, typed subscriptions, settings, accounts, remote access, Connect and device scopes, web push, desktop, skills, install guard, manual update, command palette and workflows. Add arch, lt-24-005, Boat and pve only after each passes the host check and real-box QA. The relay remains unchanged. Remote access precedes workflows. Daily maintenance includes archive-ref expiry, host pruning and closing eligible boxes stopped for seven days; root, sessions whose list holds them (7.4) and sessions with pending input are excluded.
+- **M3:** goals and check-ins (done, section 7.4), questions, issues, thin PR approval and GitHub merges, the Actions runner pool, typed subscriptions, settings, accounts, remote access, Connect and device scopes, web push, skills, install guard, manual update, command palette and workflows. Add arch, lt-24-005, Boat and pve only after each passes the host check and real-box QA. The relay remains unchanged. Remote access precedes workflows. Daily maintenance includes archive-ref expiry, host pruning and closing eligible boxes stopped for seven days; root, sessions whose list holds them (7.4) and sessions with pending input are excluded.
 - **Web search:** The direct MCP web tool searches through eligible providers. CLIProxyAPI holds model credentials; the engine holds search-only keys, including the Muse search key. The owner requested this port before cutover on 2026-10-31.
 - **After cutover:** voice returns as the existing Go service and persona without redesign; issue watches, room MCP, computer reminders, settings panes, release pipeline, WSL and branch QA follow. Issue-watch and room-MCP data are not imported. Manual update ships in M3; hourly auto-update follows.
 - **Dropped:** reviewer service and workspace, Dyna merge trials, comment-trust holds, CI budget service, conflict radar, room PR views, jobs, session worktrees, load doctor, test slots, harness settings, Claude Code and session-format conversion. Session profile changes remain. The library is cut for now; its map stays in the frozen v1 backup. External members and placement by device needs are absent. GitHub supplies PR state; outside text is wrapped, with the accepted risks in decision 13.
@@ -870,7 +874,7 @@ Gate on tree, reply, approval, host-exec, admission, transcript, git, archive an
 
 ### M3: self-hosting
 
-Deliver durable account affinity, GitHub approval and CI, `gh` routing, goals, issues, questions, instructions, subscriptions, accounts, remote access, desktop, workflows and cutover. Build the box reconciler first, then remote access before workflows. Expand the M2 trial as features land.
+Deliver durable account affinity, GitHub approval and CI, `gh` routing, goals, issues, questions, instructions, subscriptions, accounts, remote access, workflows and cutover. Build the box reconciler first, then remote access before workflows. Expand the M2 trial as features land.
 
 Gate on routing, account isolation, GitHub safety, PR approval and workflow replay. Manually prove a v2 PR, `gh`, Connect, host recovery and handoff. Require one full working day in all rooms without a blocking failure, `.dyna/images/` merged in every active repository, one real horizon trial task, and an fl-rea workflow with multiple agents sharing files.
 
