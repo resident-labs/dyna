@@ -85,7 +85,7 @@ func TestBuildPassesBaseTag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Build(context.Background(), "toolchain:hash", "dyna-base:hash", []byte("tar")); err != nil {
+	if _, err := h.Build(context.Background(), "toolchain:hash", "dyna-base:hash", []byte("tar")); err != nil {
 		t.Fatal(err)
 	}
 	if len(r.commands) != 3 || !strings.HasSuffix(r.commands[1], "'podman' 'build' '-t' 'toolchain:hash' '--build-arg' 'DYNA_BASE=dyna-base:hash' '-'") {
@@ -115,7 +115,7 @@ func TestBuildFailureReturnsOutputTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = h.Build(context.Background(), "toolchain:hash", "", []byte("tar"))
+	_, err = h.Build(context.Background(), "toolchain:hash", "", []byte("tar"))
 	var buildErr *BuildError
 	if !errors.As(err, &buildErr) {
 		t.Fatalf("expected BuildError, got %v", err)
@@ -197,7 +197,7 @@ func TestAWarmThatMissesItsLimitLeavesTheImageUsable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Build(context.Background(), "toolchain:hash", "dyna-base:hash", []byte("tar")); err != nil {
+	if _, err := h.Build(context.Background(), "toolchain:hash", "dyna-base:hash", []byte("tar")); err != nil {
 		t.Fatalf("a stopped warm failed the build: %v", err)
 	}
 	if !strings.Contains(r.commands[2], "timeout -k 5") {
@@ -211,7 +211,7 @@ func TestReusedImageIsNotWarmedAgain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Build(context.Background(), "toolchain:hash", "dyna-base:hash", []byte("tar")); err != nil {
+	if _, err := h.Build(context.Background(), "toolchain:hash", "dyna-base:hash", []byte("tar")); err != nil {
 		t.Fatal(err)
 	}
 	if len(r.commands) != 1 {
@@ -225,7 +225,7 @@ func TestRunnerImagesAreNotWarmed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.build(context.Background(), "localhost/dyna-ci-runner:hash", "", []byte("tar"), false); err != nil {
+	if _, err := h.build(context.Background(), "localhost/dyna-ci-runner:hash", "", []byte("tar"), false); err != nil {
 		t.Fatal(err)
 	}
 	if len(r.commands) != 2 {

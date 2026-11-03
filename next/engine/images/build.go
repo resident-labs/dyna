@@ -11,7 +11,7 @@ import (
 )
 
 type Host interface {
-	Build(context.Context, string, string, []byte) error
+	Build(context.Context, string, string, []byte) (bool, error)
 }
 type Recorder interface {
 	Record(context.Context, contract.RoomID, contract.EventBody) error
@@ -28,7 +28,8 @@ type Builder struct {
 	locks    map[contract.HostName]*sync.Mutex
 }
 
-// Build serializes a host's build checks and records their outcome.
+// Build serializes a host's build checks and records their outcome: a new image or a failure. An image that already
+// exists records nothing, since every engine start checks them all.
 func (b *Builder) Build(ctx context.Context, host Host, room contract.RoomID, hostName contract.HostName, repo contract.RepoName, name, base string, tree TreeID, data []byte) (string, error) {
 	tag := Tag(name, base, tree)
 	b.mu.Lock()
@@ -44,8 +45,11 @@ func (b *Builder) Build(ctx context.Context, host Host, room contract.RoomID, ho
 	lock.Lock()
 	defer lock.Unlock()
 	start := b.Now()
-	err := host.Build(ctx, tag, base, data)
+	built, err := host.Build(ctx, tag, base, data)
 	var body contract.EventBody
+	if err == nil && !built {
+		return tag, nil
+	}
 	if err == nil {
 		body = contract.ImageBuilt{Host: hostName, Repo: repo, Name: name, Tag: tag, Seconds: b.Now().Sub(start).Seconds()}
 	} else {

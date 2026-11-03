@@ -59,7 +59,8 @@ func (h *Host) BuildBase(ctx context.Context, containerfile, piTarball []byte) (
 	if err := tw.Close(); err != nil {
 		return "", err
 	}
-	return tag, h.Build(ctx, tag, "", contextTar.Bytes())
+	_, err := h.Build(ctx, tag, "", contextTar.Bytes())
+	return tag, err
 }
 
 // BuildError reports that podman build exited non-zero.
@@ -71,25 +72,25 @@ func (e *BuildError) Error() string { return "podman build failed" }
 // BuildLog returns the build output tail.
 func (e *BuildError) BuildLog() string { return e.Tail }
 
-// Build builds or reuses a box image. A new image comes back ready for boxUserNS.
-func (h *Host) Build(ctx context.Context, tag, base string, contextTar []byte) error {
+// Build builds or reuses a box image, and says whether it built one. A new image comes back ready for boxUserNS.
+func (h *Host) Build(ctx context.Context, tag, base string, contextTar []byte) (bool, error) {
 	return h.build(ctx, tag, base, contextTar, true)
 }
 
-func (h *Host) build(ctx context.Context, tag, base string, contextTar []byte, warm bool) error {
+func (h *Host) build(ctx context.Context, tag, base string, contextTar []byte, warm bool) (bool, error) {
 	select {
 	case h.buildGate <- struct{}{}:
 		defer func() { <-h.buildGate }()
 	case <-ctx.Done():
-		return ctx.Err()
+		return false, ctx.Err()
 	}
 	_, err := h.run(ctx, "podman", "image", "exists", tag)
 	if err == nil {
-		return nil
+		return false, nil
 	}
 	var exit remoteExit
 	if !errors.As(err, &exit) || exit != 1 {
-		return err
+		return false, err
 	}
 	args := []string{"podman", "build", "-t", tag}
 	if base != "" {
@@ -99,12 +100,12 @@ func (h *Host) build(ctx context.Context, tag, base string, contextTar []byte, w
 	// A build has no bound, so like a warm it takes no short-command slot.
 	out, err := h.runUnbounded(ctx, contextTar, args...)
 	if errors.As(err, &exit) {
-		return &BuildError{Tail: string(out[max(0, len(out)-4096):])}
+		return false, &BuildError{Tail: string(out[max(0, len(out)-4096):])}
 	}
 	if err != nil || !warm {
-		return err
+		return err == nil, err
 	}
-	return h.warm(ctx, tag)
+	return true, h.warm(ctx, tag)
 }
 
 // warm makes Podman copy an image for boxUserNS now. The caller holds buildGate.
