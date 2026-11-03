@@ -67,3 +67,57 @@ func TestPrOpenRejectsUnownedHead(t *testing.T) {
 		t.Fatal("unowned head was accepted")
 	}
 }
+
+func TestPrOpenReportsTheDefaultHeadWhenGitHubRefuses(t *testing.T) {
+	s, session, ctx := prFixture(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		fmt.Fprint(w, `{"message":"Validation Failed","errors":[{"message":"No commits between main and head"}]}`)
+	})
+	record, err := s.store.Session(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	open := func(head string) string {
+		result, failure := s.OpSubmit(ctx, sessionCaller(session), contract.OpSubmitRequest{Operation: contract.Operation{Room: record.Room, Kind: "pr.open", Args: contract.PrOpenArgs{Title: "Trial", Base: "main", Head: head}}})
+		if failure != nil {
+			t.Fatal(failure)
+		}
+		return result.Operation.Result.Error
+	}
+	branch := "v2/" + string(session)
+	if message := open(""); !strings.Contains(message, "head was not given and defaulted to "+branch+"; head names another branch") {
+		t.Fatalf("default head: %q", message)
+	}
+	if message := open(branch); strings.Contains(message, "defaulted") {
+		t.Fatalf("explicit head: %q", message)
+	}
+}
+
+func TestPrOpenResultLeavesOutTheBodyAndSurvivesALateFailure(t *testing.T) {
+	s, session, ctx := prFixture(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"number":433}`)
+	})
+	record, err := s.store.Session(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	open := func() contract.Operation {
+		result, failure := s.OpSubmit(ctx, sessionCaller(session), contract.OpSubmitRequest{Operation: contract.Operation{Room: record.Room, Kind: "pr.open", Args: contract.PrOpenArgs{Title: "Trial", Body: strings.Repeat("long body ", 100), Base: "main"}}})
+		if failure != nil || result.Operation.Result == nil {
+			t.Fatalf("response %+v error %+v", result, failure)
+		}
+		return result.Operation
+	}
+	first := open()
+	if first.State != contract.OpDone || first.Result.PR == nil || first.Result.PR.Number != 433 || first.Args.(contract.PrOpenArgs).Body != "" {
+		t.Fatalf("first %+v", first)
+	}
+	// GitHub answers 433 again, as if another path already recorded it: recording fails after the PR exists.
+	second := open()
+	url := "https://github.com/owner/repo/pull/433"
+	if second.State != contract.OpDone || second.Result.Error != "" || second.Result.PR == nil || second.Result.PR.URL != url ||
+		!strings.Contains(second.Result.Output, url) || !strings.Contains(second.Result.Output, "recording its owner failed") {
+		t.Fatalf("second %+v", second.Result)
+	}
+}
