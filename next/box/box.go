@@ -131,3 +131,6 @@ func diskRequest(name contract.BoxSizeName) int64 {
 	}
 	return 0
 }
+
+// ExecOnly reports a host that takes only host-exec runs: agents and CI both off, so nothing is ever placed there.
+func (h Host) ExecOnly() bool { return h.NoAgents && !h.CI }

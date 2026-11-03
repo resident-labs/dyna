@@ -66,6 +66,7 @@ type Service struct {
 	pulls             *prs.Client
 	githubTools       http.Handler
 	hostexec          HostexecRunner
+	promoteHost       func(context.Context, contract.HostName, bool) error
 	hostexecTimeout   func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 	hooks             HookRunner
 	hookMemory        func(contract.HostName) int64

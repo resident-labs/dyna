@@ -16,6 +16,7 @@ type Load struct {
 	CPUUsed                                float64
 	MemBytes, MemUsed, DiskBytes, DiskUsed int64
 	ShareUp                                bool // The host's shared mount is up.
+	ExecOnly                               bool // An exec-only host: the beat says only that it answers, and the rest is zero.
 }
 
 // LocalDisk reads the disk at path on this machine with the host probe. It returns zeros when the probe fails.
@@ -64,7 +65,14 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box
 			return
 		case now := <-ticks:
 			probeCtx, cancel := context.WithTimeout(ctx, heartbeatProbe)
-			out, err := h.runUnbounded(probeCtx, nil, "bash", "-c", heartbeatScript, "dyna", layout.HostData, layout.HostShareMount())
+			execOnly := h.execOnly != nil && h.execOnly()
+			var out []byte
+			var err error
+			if execOnly {
+				out, err = h.runUnbounded(probeCtx, nil, "bash", "-c", "true")
+			} else {
+				out, err = h.runUnbounded(probeCtx, nil, "bash", "-c", heartbeatScript, "dyna", layout.HostData, layout.HostShareMount())
+			}
 			cancel()
 			if err != nil {
 				if ctx.Err() != nil {
@@ -85,6 +93,12 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box
 				continue
 			}
 			misses, busy = 0, false
+			if execOnly {
+				load = Load{ExecOnly: true}
+				report(true, load)
+				continue
+			}
+			load.ExecOnly = false
 			load.DiskBytes, load.DiskUsed = parseDisk(out)
 			load.ShareUp = false
 			for _, line := range strings.Split(string(out), "\n") {

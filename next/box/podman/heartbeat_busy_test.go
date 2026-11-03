@@ -87,3 +87,27 @@ func TestHeartbeatGoneHostIsUnreachable(t *testing.T) {
 		}
 	}
 }
+
+// An exec-only host's heartbeat only runs `true`: no probe script, no load, and the report says exec only.
+func TestHeartbeatExecOnlyAsksOnlyThatTheHostAnswers(t *testing.T) {
+	r := &runner{}
+	h := newTestHost(t, r)
+	h.SetExecOnly(func() bool { return true })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ticks := make(chan time.Time)
+	loads := make(chan Load, 4)
+	go h.Heartbeat(ctx, ticks, box.Layout{HostData: "/data"}, func(ok bool, load Load) { loads <- load }, func(string, contract.PressureKind) { t.Error("pressure") })
+	ticks <- time.Unix(1000, 0)
+	load := <-loads
+	if !load.ExecOnly || load.DiskBytes != 0 || load.MemUsed != 0 {
+		t.Fatalf("load %+v", load)
+	}
+	for _, call := range r.calls {
+		for _, a := range call {
+			if a == "dyna-disk" || a == "/data" {
+				t.Fatalf("full probe ran: %v", call)
+			}
+		}
+	}
+}

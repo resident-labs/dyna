@@ -36,6 +36,7 @@ import (
 type boxStore interface {
 	Hosts(context.Context) ([]box.Host, error)
 	AddHost(context.Context, box.Host) error
+	SetHostChecked(context.Context, box.Host) error
 	SetRoomShared(context.Context, []contract.RoomShared, time.Time) error
 	SetEngineHost(context.Context, contract.HostName, bool) error
 	Session(context.Context, contract.SessionID) (store.Session, error)
@@ -201,23 +202,38 @@ func (b *Boxes) cache(name contract.HostName, h *podman.Host) {
 	}
 	ctx, stop := context.WithCancel(b.Context)
 	b.beats[name] = stop
+	h.SetExecOnly(func() bool { return b.execOnly(ctx, name) })
 	ticker := time.NewTicker(10 * time.Second)
 	go func() {
 		defer ticker.Stop()
 		h.Heartbeat(ctx, ticker.C, b.Layout, func(ok bool, load podman.Load) {
 			now := time.Now()
-			if ok {
+			if ok && !load.ExecOnly {
 				if err := b.syncInstructions(ctx, h); err != nil {
 					log.Printf("host %s: instructions: %v", name, err)
 				}
 			}
 			b.record(name, ok, load, now)
 			b.reportHeartbeat(ctx, name, ok, load, now)
-			if ok && !load.ShareUp && b.recovered(name) {
+			if ok && !load.ExecOnly && !load.ShareUp && b.recovered(name) {
 				b.repairShare(ctx, name)
 			}
 		}, b.pressure(name))
 	}()
+}
+
+// execOnly reports whether a host takes only host-exec runs now, which the owner can change with host set.
+func (b *Boxes) execOnly(ctx context.Context, name contract.HostName) bool {
+	hosts, err := b.Store.Hosts(ctx)
+	if err != nil {
+		return false
+	}
+	for _, record := range hosts {
+		if record.Name == name {
+			return record.ExecOnly()
+		}
+	}
+	return false
 }
 
 // forgetHost drops the engine's side of a host that is leaving: its heartbeat, its connection, its forwards and what this
@@ -309,7 +325,12 @@ func (b *Boxes) record(name contract.HostName, ok bool, sample podman.Load, now 
 	load := &state.summary
 	load.Reachable = ok
 	if ok {
-		load.CPUUsed, load.MemUsed, load.DiskBytes, load.DiskUsed, load.LastSeen = sample.CPUUsed, sample.MemUsed, sample.DiskBytes, sample.DiskUsed, now
+		load.LastSeen = now
+		if sample.ExecOnly {
+			b.loads[name] = state
+			return
+		}
+		load.CPUUsed, load.MemUsed, load.DiskBytes, load.DiskUsed = sample.CPUUsed, sample.MemUsed, sample.DiskBytes, sample.DiskUsed
 		load.MemBytes = sample.MemBytes
 		minute := now.Truncate(time.Minute)
 		for len(load.History) > 0 && load.History[0].At.Before(minute.Add(-59*time.Minute)) {
@@ -446,7 +467,7 @@ func (b *Boxes) BuildAhead(ctx context.Context) {
 	}
 	var wg sync.WaitGroup
 	for _, record := range hosts {
-		if record.State != box.HostReady {
+		if record.State != box.HostReady || record.ExecOnly() {
 			continue
 		}
 		wg.Add(1)
@@ -600,6 +621,19 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool,
 	h, err := podman.New(req.SSH, b.Runtime, string(req.Name), b.hostRunner)
 	if err != nil {
 		return false, err
+	}
+	// An exec-only host needs SSH and bash. Nothing is installed there and no box or runner is ever placed there.
+	if req.ExecOnly() {
+		if err := h.CheckExec(ctx); err != nil {
+			return false, fmt.Errorf("host check %s: %w", podman.CheckExec, err)
+		}
+		notEngine := false
+		record := box.Host{EngineHost: &notEngine, Name: req.Name, SSH: req.SSH, State: box.HostReady, NoAgents: true, Rooms: req.Rooms, CheckedAt: time.Now()}
+		if err := b.Store.AddHost(ctx, record); err != nil {
+			return false, err
+		}
+		b.adopt(req.Name, h)
+		return false, nil
 	}
 	record, noSwap, err := b.setUpHost(ctx, h, req.Name, req.SSH, req.OwnerOnlyAdmin)
 	if err != nil {
@@ -850,7 +884,7 @@ func (b *Boxes) Restore(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	hosts = slices.DeleteFunc(hosts, func(host box.Host) bool { return host.State == box.HostRemoved })
+	hosts = slices.DeleteFunc(hosts, func(host box.Host) bool { return host.State == box.HostRemoved || host.ExecOnly() })
 	b.mu.Lock()
 	if b.recoveries == nil {
 		b.recoveries = make(map[contract.HostName]*recovery)
@@ -1482,4 +1516,26 @@ func (b *Boxes) engineHost(ctx context.Context, h *podman.Host) (bool, error) {
 	}
 	remote, err := h.MachineID(ctx)
 	return id == remote, err
+}
+
+// PromoteHost runs the full host check on an exec-only host that is to take boxes or runners, installs what it needs and
+// records what the check found. An error leaves the host exec only.
+func (b *Boxes) PromoteHost(ctx context.Context, name contract.HostName, ownerOnly bool) error {
+	hosts, err := b.Store.Hosts(ctx)
+	if err != nil {
+		return err
+	}
+	i := slices.IndexFunc(hosts, func(h box.Host) bool { return h.Name == name })
+	if i < 0 {
+		return fmt.Errorf("host %q: %w", name, store.ErrNotFound)
+	}
+	h, err := b.host(ctx, name)
+	if err != nil {
+		return err
+	}
+	record, _, err := b.setUpHost(ctx, h, name, hosts[i].SSH, ownerOnly)
+	if err != nil {
+		return err
+	}
+	return b.Store.SetHostChecked(ctx, record)
 }

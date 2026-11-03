@@ -643,9 +643,9 @@ func TestDeviceListPrintsDevices(t *testing.T) {
 	}
 }
 func TestHostListPrintsDiskState(t *testing.T) {
-	f := &fakeClient{hosts: []contract.HostSummary{{Name: contract.ControlPlane, DiskBytes: 100 << 30, DiskUsed: 40 << 30}, {Name: "worker", DiskBytes: 100 << 30, DiskUsed: 90 << 30, DiskLow: true}}}
+	f := &fakeClient{hosts: []contract.HostSummary{{Name: contract.ControlPlane, DiskBytes: 100 << 30, DiskUsed: 40 << 30}, {Name: "worker", DiskBytes: 100 << 30, DiskUsed: 90 << 30, DiskLow: true, Agents: true, CI: true}}}
 	out := runCLI(t, f, "host", "list")
-	if out != "control-plane\t40 GiB\t100 GiB\tok\nworker\t90 GiB\t100 GiB\tlow\tagents off\tci off\n" {
+	if out != "control-plane\t40 GiB\t100 GiB\tok\nworker\t90 GiB\t100 GiB\tlow\tagents on\tci on\n" {
 		t.Fatalf("output=%q", out)
 	}
 }
