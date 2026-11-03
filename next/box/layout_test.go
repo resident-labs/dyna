@@ -118,6 +118,12 @@ func TestLayoutRefusesARepositoryThatLeavesTheGitFolder(t *testing.T) {
 		if dir, err := l.HostGit(repo); err == nil {
 			t.Errorf("host repo %q: %s", repo, dir)
 		}
+		if dir, err := box.RepoFolder(repo); err == nil {
+			t.Errorf("box repo %q: %s", repo, dir)
+		}
+	}
+	if dir, err := box.RepoFolder("owner/repo"); err != nil || dir != "/box/work/owner/repo" {
+		t.Errorf("box repo folder %s: %v", dir, err)
 	}
 	if dir, err := (box.Layout{}).Git("owner/repo"); err == nil {
 		t.Errorf("an unset root named %s", dir)
