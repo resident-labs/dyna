@@ -635,6 +635,16 @@ func (b *Boxes) setUpHost(ctx context.Context, h *podman.Host, name contract.Hos
 		return box.Host{}, false, err
 	}
 	check := h.Check(ctx, podman.CheckOptions{Layout: b.Layout, Runtime: b.Runtime, AdminOnly: ownerOnly, EngineHost: same})
+	// A host without its shared-folder mount still serves CI runners, which do not use the folder, so it is ready but takes no
+	// session box: the create quarantine says so.
+	var problem contract.HostProblem
+	for i, item := range check.Items {
+		if !item.OK && item.Name == podman.CheckShare {
+			log.Printf("host %s: no session boxes: %s: %s", name, item.Name, item.Reason)
+			problem = contract.HostProblemShareUnavailable
+			check.Items[i].OK = true
+		}
+	}
 	if !check.Ready() {
 		for _, item := range check.Items {
 			if !item.OK {
@@ -652,7 +662,7 @@ func (b *Boxes) setUpHost(ctx context.Context, h *podman.Host, name contract.Hos
 	if err := b.syncInstructions(ctx, h); err != nil {
 		return box.Host{}, false, err
 	}
-	return box.Host{EngineHost: &same, Name: name, SSH: ssh, State: box.HostReady, CPUs: check.CPUs, MemBytes: check.MemBytes, DiskBytes: check.DiskBytes, CheckedAt: time.Now()}, check.NoSwap, nil
+	return box.Host{EngineHost: &same, Name: name, SSH: ssh, State: box.HostReady, Problem: problem, CPUs: check.CPUs, MemBytes: check.MemBytes, DiskBytes: check.DiskBytes, CheckedAt: time.Now()}, check.NoSwap, nil
 }
 
 // adopt starts a recorded host's heartbeat.

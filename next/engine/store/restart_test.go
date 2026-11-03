@@ -101,3 +101,79 @@ func TestRestartFailedSessions(t *testing.T) {
 		}
 	}
 }
+
+// A create that finds the host without its shared folder counts against the host at once, so the failed box leaves it on
+// restart and a box that built nothing there places elsewhere. A box with files on the host is not moved.
+func TestShareDownQuarantinesTheHostForABoxThatBuiltNothing(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	_, err = s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+INSERT INTO hosts(name,ssh,state,cpus,mem_bytes,disk_bytes,checked_at) VALUES('bad','','ready',8,8589934592,107374182400,0),('good','','ready',8,8589934592,107374182400,0),('other','','ready',8,8589934592,107374182400,0);
+INSERT INTO sessions(id,room,name,parent,profile,state,goal,created_at) VALUES('s','r','s',NULL,'p','open','',0),('w','r','w',NULL,'p','open','',0),('f','r','f',NULL,'p','open','',0);
+INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updated_at) VALUES('b','s','bad','','agent','failed','create_failed','slice',0,0),('waiting','w','bad','','agent','pending','create_retry','',0,0),('built','f','other','image','agent','failed','create_failed','slice',0,0)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	size, _ := box.Size(contract.BoxSizeAgent)
+	if err := s.QuarantineShare(ctx, box.Box{ID: "built", Session: "f", Host: "other", Image: "image", Size: size}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.QuarantineShare(ctx, box.Box{ID: "b", Session: "s", Host: "bad", Size: size}); err != nil {
+		t.Fatal(err)
+	}
+	hosts, err := s.Hosts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range hosts {
+		if want := map[contract.HostName]contract.HostProblem{"bad": contract.HostProblemShareUnavailable}[h.Name]; h.Problem != want {
+			t.Fatalf("host %s problem %q, want %q", h.Name, h.Problem, want)
+		}
+	}
+	var waiting sql.NullString
+	if err := s.Read().QueryRow("SELECT host FROM boxes WHERE id='waiting'").Scan(&waiting); err != nil || waiting.Valid {
+		t.Fatalf("a box that built nothing kept the host: %v %v", waiting, err)
+	}
+	event := contract.Event{ID: "e", Room: "r", Time: time.UnixMilli(200), From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.BoxChanged{}}
+	notice := contract.Event{ID: "n", Room: "r", Time: event.Time, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionRestarted{Session: "s"}}
+	if ok, err := s.RestartSession(ctx, "s", event, notice); err != nil || !ok {
+		t.Fatalf("restart: %v %v", ok, err)
+	}
+	var host sql.NullString
+	if err := s.Read().QueryRow("SELECT host FROM boxes WHERE id='b'").Scan(&host); err != nil || host.Valid {
+		t.Fatalf("restart kept the host: %v %v", host, err)
+	}
+	if err := s.Read().QueryRow("SELECT host FROM boxes WHERE id='built'").Scan(&host); err != nil || host.String != "other" {
+		t.Fatalf("a box with files moved: %v %v", host, err)
+	}
+}
+
+// A successful create, such as a CI runner's, proves nothing about FUSE, so it leaves share_unavailable alone.
+func TestASuccessfulCreateKeepsShareUnavailable(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	_, err = s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+INSERT INTO hosts(name,ssh,state,cpus,mem_bytes,disk_bytes,checked_at,create_problem) VALUES('h','','ready',8,8589934592,107374182400,0,'share_unavailable');
+INSERT INTO sessions(id,room,name,parent,profile,state,goal,created_at) VALUES('s','r','s',NULL,'p','open','',0);
+INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updated_at) VALUES('b','s','h','','agent','creating','','slice',0,0)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	size, _ := box.Size(contract.BoxSizeAgent)
+	event := contract.Event{ID: "e", Room: "r", Time: time.UnixMilli(100), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{}}
+	if err := s.FinishCreate(ctx, box.Box{ID: "b", Session: "s", Host: "h", Size: size, State: contract.BoxCreating}, "runner", "", time.Time{}, 0, event, false); err != nil {
+		t.Fatal(err)
+	}
+	var problem string
+	if err := s.Read().QueryRow("SELECT create_problem FROM hosts WHERE name='h'").Scan(&problem); err != nil || problem != "share_unavailable" {
+		t.Fatalf("problem %q: %v", problem, err)
+	}
+}

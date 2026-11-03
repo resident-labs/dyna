@@ -408,3 +408,37 @@ func TestSaveThenResumeRepairsBeforeDelayedPublish(t *testing.T) {
 		t.Fatalf("got %q: %v", got, err)
 	}
 }
+
+// shareFailTransport answers the shared-folder probe as a host whose fusermount3 is not setuid.
+type shareFailTransport struct{ admissionTransport }
+
+func (t shareFailTransport) Run(ctx context.Context, input []byte, args ...string) ([]byte, error) {
+	if command := args[len(args)-1]; strings.Contains(command, "/dev/fuse") {
+		body := "fusermount3 is not setuid, so FUSE mounts fail with Operation not permitted"
+		return []byte(fmt.Sprintf("%sDYNA-END %020d 001\n", body, len(body))), nil
+	}
+	return t.admissionTransport.Run(ctx, input, args...)
+}
+
+func TestANodeWhoseSharedFolderCannotMountJoinsWithoutSessionBoxes(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	machineID := filepath.Join(t.TempDir(), "machine-id")
+	if err := os.WriteFile(machineID, []byte("ffffffffffffffffffffffffffffffff"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	b := &Boxes{Store: addHostStore{}, Runtime: t.TempDir(), Layout: box.Layout{Data: t.TempDir(), HostData: t.TempDir()}, Version: "dev", Context: ctx, hostRunner: shareFailTransport{}, machineIDFile: machineID}
+	b.binOnce.Do(func() { b.binSum = "test-sum" })
+	record, err := poolHosts{boxes: b}.Join(ctx, "boats-1", "ssh://pip@host:22")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.State != box.HostReady || record.Problem != contract.HostProblemShareUnavailable {
+		t.Fatalf("%+v", record)
+	}
+	record.CI = true
+	agentSize, _ := box.Size(contract.BoxSizeAgent)
+	if got := box.Admit([]box.Host{record}, nil, box.Box{ID: "b", Size: agentSize}); got.Host != "" {
+		t.Fatalf("a session box was placed on %q", got.Host)
+	}
+}

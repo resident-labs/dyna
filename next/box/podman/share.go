@@ -15,9 +15,12 @@ const (
 	shareUpLine = "dyna-share up"
 	// shareDownStatus is how a host refuses to make a folder under a mount that is down.
 	shareDownStatus = remoteExit(253)
-	// shareNeeds says what a host lacks for its mount, and exits 1. Dyna changes no host system file itself.
+	// shareUnmountableStatus is how shareNeeds says the host can never mount, whatever its wait: fusermount3 is not setuid.
+	shareUnmountableStatus = remoteExit(2)
+	// shareNeeds says what a host lacks for its mount, and exits 1, or 2 when no wait will help. Dyna changes no host system file itself.
 	shareNeeds = `[ -c /dev/fuse ] || { echo "/dev/fuse is missing"; exit 1; }
 command -v fusermount3 >/dev/null || { echo "fusermount3 is missing: install fuse3"; exit 1; }
+[ "$EUID" = 0 ] || [ -u "$(command -v fusermount3)" ] || { echo "fusermount3 is not setuid, so FUSE mounts fail with Operation not permitted"; exit 2; }
 grep -Eq '^[[:space:]]*user_allow_other' /etc/fuse.conf 2>/dev/null || { echo "user_allow_other is not set in /etc/fuse.conf"; exit 1; }
 `
 	// shareScript brings the mount at $1 up. A user service holds it, so it outlives the SSH connection and the engine, which
@@ -99,7 +102,7 @@ func (h *Host) EnsureShare(ctx context.Context, layout box.Layout) error {
 	out, err := h.run(ctx, "bash", "-c", shareScript, "dyna-share", layout.HostShareMount(), layout.HostShareCache(), layout.HostBinary(), layout.HostShareSocket())
 	var exit remoteExit
 	if errors.As(err, &exit) {
-		return box.ShareDown{Reason: strings.TrimSpace(string(out))}
+		return box.ShareDown{Reason: strings.TrimSpace(string(out)), Permanent: exit == shareUnmountableStatus}
 	}
 	return err
 }
