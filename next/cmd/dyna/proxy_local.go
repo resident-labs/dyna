@@ -113,8 +113,13 @@ func serveModelRoute(ctx context.Context, listener net.Listener, transport http.
 	mux := http.NewServeMux()
 	mux.HandleFunc("/model/", func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxLocalRequestBytes))
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			http.Error(w, "The request is too large.", http.StatusRequestEntityTooLarge)
+			return
+		}
 		if err != nil {
-			http.Error(w, "The request could not be read.", http.StatusRequestEntityTooLarge)
+			http.Error(w, "The request could not be read.", http.StatusBadRequest)
 			return
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
