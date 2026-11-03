@@ -35,6 +35,11 @@ const (
 	// cacheMount is where a runner reads the host's cache, the folder the host's boxes mount at /box/cache. It writes only its
 	// slot's build folder there, which outlives the job, as upstream projects keep CARGO_TARGET_DIR on their own runners.
 	cacheMount = "/cache"
+	// buildMount is where a runner writes its slot's build folder. It is one path for every slot because sccache's keys hold the
+	// paths a build hands the compiler, such as CARGO_HOME, so a job finds what another slot's job compiled.
+	buildMount = "/build"
+	// buildCacheMount holds the socket of the host's compiler cache, which the entrypoint relays to the port sccache uses.
+	buildCacheMount = "/run/dyna-build-cache"
 	// cacheLimitKB empties a build folder above 40 GiB before the next job starts.
 	cacheLimitKB = 40 << 20
 )
@@ -140,12 +145,14 @@ func runnerArgs(s box.RunnerSpec) []string {
 		"--tmpfs", "/tmp:rw,exec,mode=1777," + disk,
 		// Its slot alone: the proxy limits a job by socket, so a job must not reach another.
 		"--mount", fmt.Sprintf("type=volume,source=%s,destination=%s,subpath=%d,ro", egressName, egressMount, s.Slot),
-		// The host's cache is read-only, so a job cannot change what the boxes build from, and its slot's folder alone is writable.
+		// The host's cache is read-only, so a job cannot change the boxes' files, and its slot's folder alone is writable.
 		"--mount", fmt.Sprintf("type=bind,source=%s,destination=%s,ro", s.Cache, cacheMount),
-		"--mount", fmt.Sprintf("type=bind,source=%s,destination=%s", filepath.Join(s.Cache, build), path.Join(cacheMount, build)),
+		"--mount", fmt.Sprintf("type=bind,source=%s,destination=%s", filepath.Join(s.Cache, build), buildMount),
+		// The compiler cache is the boxes' too, so a job writes what they read, which spec 5.6 accepts.
+		"--mount", fmt.Sprintf("type=bind,source=%s,destination=%s,ro", s.BuildCache, buildCacheMount),
 		"--log-driver=k8s-file", "--log-opt=max-size=1m",
 		"--env", "ACTIONS_RUNNER_INPUT_JITCONFIG", "--env", "DYNA_CI_REPO=" + string(s.Repo),
-		"--env", "DYNA_CI_CACHE=" + cacheMount, "--env", "DYNA_CI_BUILD=" + path.Join(cacheMount, build),
+		"--env", "DYNA_CI_CACHE=" + cacheMount, "--env", "DYNA_CI_BUILD=" + buildMount,
 		s.Image}
 }
 
@@ -154,7 +161,7 @@ func (h *Host) StartRunner(ctx context.Context, s box.RunnerSpec) error {
 	if s.Name == "" || strings.HasPrefix(s.Name, "-") || s.Repo == "" || s.Image == "" || s.Config == "" || strings.ContainsAny(s.Config, "\n\x00") || s.Slot < 0 || s.Slot >= box.RunnerSlots {
 		return errors.New("invalid runner")
 	}
-	if _, sized := box.Size(s.Size.Name); !sized || !filepath.IsAbs(s.Cache) || strings.ContainsAny(s.Cache, ",=\n\x00") {
+	if _, sized := box.Size(s.Size.Name); !sized || !filepath.IsAbs(s.Cache) || strings.ContainsAny(s.Cache, ",=\n\x00") || !filepath.IsAbs(s.BuildCache) || strings.ContainsAny(s.BuildCache, ",=\n\x00") {
 		return errors.New("invalid runner")
 	}
 	if _, err := h.run(ctx, "bash", "-c", buildScript, "dyna-ci-build", filepath.Join(s.Cache, buildFolder(s.Slot)), strconv.Itoa(cacheLimitKB)); err != nil {

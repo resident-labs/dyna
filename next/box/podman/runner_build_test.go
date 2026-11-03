@@ -11,7 +11,8 @@ import (
 )
 
 // Runners on one host share its cache, read-only, and each writes only the build folder of its own slot. A slot holds one
-// running runner, so two jobs never share a build folder at once, whatever their sizes or repositories.
+// running runner, so two jobs never share a build folder at once, whatever their sizes or repositories. Each sees its folder at
+// one path, so the compiler cache's keys match across slots.
 func TestConcurrentRunnersGetDistinctBuildFolders(t *testing.T) {
 	small, _ := box.Size(contract.BoxSizeSmall)
 	first, second := testSpec(), testSpec()
@@ -26,7 +27,7 @@ func TestConcurrentRunnersGetDistinctBuildFolders(t *testing.T) {
 				mounts = append(mounts, args[i+1])
 			}
 		}
-		if len(mounts) != 2 || mounts[0] != "type=bind,source=/data/cache,destination=/cache,ro" {
+		if len(mounts) != 3 || mounts[0] != "type=bind,source=/data/cache,destination=/cache,ro" || mounts[2] != "type=bind,source=/data/sock/build-cache,destination=/run/dyna-build-cache,ro" {
 			t.Fatalf("slot %d mounts %v", spec.Slot, mounts)
 		}
 		writable = append(writable, mounts[1])
@@ -35,7 +36,7 @@ func TestConcurrentRunnersGetDistinctBuildFolders(t *testing.T) {
 			t.Fatalf("DYNA_CI_BUILD does not name the writable folder %s: %v", mounts[1], args)
 		}
 	}
-	want := []string{"type=bind,source=/data/cache/ci/0,destination=/cache/ci/0", "type=bind,source=/data/cache/ci/1,destination=/cache/ci/1"}
+	want := []string{"type=bind,source=/data/cache/ci/0,destination=/build", "type=bind,source=/data/cache/ci/1,destination=/build"}
 	if !slices.Equal(writable, want) {
 		t.Fatalf("writable mounts %v, want %v", writable, want)
 	}
