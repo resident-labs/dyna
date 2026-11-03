@@ -29,15 +29,54 @@ const containerfile = "Containerfile"
 
 var validImageName = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,63}$`)
 
-// fromLine finds a FROM naming a base variable, as ${DYNA_BASE}, $DYNA_BASE, or either with a stage name after.
-func fromLine(variable string) *regexp.Regexp {
-	return regexp.MustCompile(`(?mi)^\s*FROM\s+\$(\{` + variable + `\}|` + variable + `)(\s+AS\s+\S+)?\s*$`)
-}
-
-var (
-	fromBase   = fromLine("DYNA_BASE")
-	fromCIBase = fromLine("DYNA_CI_BASE")
+// Per-room limits, so one session cannot fill the engine's disk with images.
+const (
+	MaxImagesPerRoom = 16
+	MaxRoomBytes     = 128 << 20 // unpacked, over all of a room's images
 )
+
+// checkRecipe holds a Containerfile to the one rule: every stage starts FROM the base, declared by an ARG before the first
+// FROM, so what a repository adds is layers on Dyna's image. Comments and blank lines are skipped and a trailing backslash
+// joins lines, as a builder reads them. A later stage may start only from the base too, not from an earlier stage.
+func checkRecipe(recipe, variable string) error {
+	var instructions []string
+	var joined string
+	for _, line := range strings.Split(strings.ReplaceAll(string(recipe), "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") || (line == "" && joined == "") {
+			continue
+		}
+		if part, more := strings.CutSuffix(line, "\\"); more {
+			joined += part + " "
+			continue
+		}
+		instructions = append(instructions, joined+line)
+		joined = ""
+	}
+	declared, from := false, 0
+	for _, instruction := range instructions {
+		fields := strings.Fields(instruction)
+		switch strings.ToUpper(fields[0]) {
+		case "ARG":
+			declared = declared || from == 0 && len(fields) == 2 && fields[1] == variable
+		case "FROM":
+			base := len(fields) >= 2 && (fields[1] == "${"+variable+"}" || fields[1] == "$"+variable)
+			stage := len(fields) == 2 || len(fields) == 4 && strings.EqualFold(fields[2], "AS")
+			if !base || !stage {
+				return fmt.Errorf("every FROM must be FROM ${%s}, optionally AS a stage name: %q", variable, instruction)
+			}
+			from++
+		default:
+			if from == 0 {
+				return fmt.Errorf("only ARG may come before the first FROM: %q", instruction)
+			}
+		}
+	}
+	if from == 0 || !declared {
+		return fmt.Errorf("start with ARG %s, then FROM ${%s}", variable, variable)
+	}
+	return nil
+}
 
 // Store keeps each room's images in folders beside its instructions.
 type Store struct {
@@ -84,11 +123,46 @@ func (s *Store) info(room contract.RoomID, name string) (contract.RoomImage, err
 	return contract.RoomImage{Name: name, Room: room, ID: string(id), Files: files, Bytes: size}, err
 }
 
+// asidePrefix marks an image a save moved aside, and savePrefix a save in progress. Neither is a valid image name.
+const (
+	asidePrefix = ".old-"
+	savePrefix  = ".save-"
+)
+
+// recoverSaves finishes what a crash left: a save in progress is dropped, and an image moved aside comes back unless a newer one
+// took its place.
+func recoverSaves(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		path := filepath.Join(dir, entry.Name())
+		if image, aside := strings.CutPrefix(entry.Name(), asidePrefix); aside {
+			if _, err := os.Stat(filepath.Join(dir, image)); errors.Is(err, os.ErrNotExist) {
+				if err := os.Rename(path, filepath.Join(dir, image)); err != nil {
+					return err
+				}
+				continue
+			}
+		} else if !strings.HasPrefix(entry.Name(), savePrefix) {
+			continue
+		}
+		if err := os.RemoveAll(path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Save puts a folder's archive in place of the room's image of that name. It checks the name, the Containerfile's base and
 // box-needs first, and keeps the old image when any of it fails.
 func (s *Store) Save(room contract.RoomID, name string, archive []byte) (contract.RoomImage, error) {
 	if !validImageName.MatchString(name) {
 		return contract.RoomImage{}, fmt.Errorf("%w: a name is lowercase letters, digits, _, . and -", ErrInvalid)
+	}
+	if len(archive) > skills.MaxPacked {
+		return contract.RoomImage{}, fmt.Errorf("%w: the folder packs to %d KiB, over the limit of %d KiB", ErrInvalid, len(archive)>>10, skills.MaxPacked>>10)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -96,7 +170,10 @@ func (s *Store) Save(room contract.RoomID, name string, archive []byte) (contrac
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return contract.RoomImage{}, err
 	}
-	unpacked, err := os.MkdirTemp(dir, ".save-")
+	if err := recoverSaves(dir); err != nil {
+		return contract.RoomImage{}, err
+	}
+	unpacked, err := os.MkdirTemp(dir, savePrefix)
 	if err != nil {
 		return contract.RoomImage{}, err
 	}
@@ -108,23 +185,50 @@ func (s *Store) Save(room contract.RoomID, name string, archive []byte) (contrac
 	if err != nil {
 		return contract.RoomImage{}, fmt.Errorf("%w: the folder has no %s", ErrInvalid, containerfile)
 	}
-	want, variable := fromBase, "${DYNA_BASE}"
+	variable := "DYNA_BASE"
 	if name == contract.CIRunnerImage {
-		want, variable = fromCIBase, "${DYNA_CI_BASE}"
+		variable = "DYNA_CI_BASE"
 	}
-	if !want.Match(recipe) {
-		return contract.RoomImage{}, fmt.Errorf("%w: the %s of %s must have a line FROM %s", ErrInvalid, containerfile, name, variable)
+	if err := checkRecipe(string(recipe), variable); err != nil {
+		return contract.RoomImage{}, fmt.Errorf("%w: %s of %s: %v", ErrInvalid, containerfile, name, err)
 	}
 	if needs, err := os.ReadFile(filepath.Join(unpacked, "box-needs")); err == nil {
 		if _, err := ParseNeeds(string(needs)); err != nil {
 			return contract.RoomImage{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 		}
 	}
-	target := filepath.Join(dir, name)
-	if err := os.RemoveAll(target); err != nil {
+	_, _, size, err := scan(unpacked)
+	if err != nil {
+		return contract.RoomImage{}, err
+	}
+	others, err := os.ReadDir(dir)
+	if err != nil {
+		return contract.RoomImage{}, err
+	}
+	count, total := 1, size
+	for _, entry := range others {
+		if !entry.IsDir() || !validImageName.MatchString(entry.Name()) || entry.Name() == name {
+			continue
+		}
+		_, _, held, err := scan(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return contract.RoomImage{}, err
+		}
+		count++
+		total += held
+	}
+	if count > MaxImagesPerRoom || total > MaxRoomBytes {
+		return contract.RoomImage{}, fmt.Errorf("%w: a room holds at most %d images and %d MiB; remove one first", ErrInvalid, MaxImagesPerRoom, MaxRoomBytes>>20)
+	}
+	// The old image moves aside first, so a crash between the two renames leaves it for the next save to restore.
+	target, aside := filepath.Join(dir, name), filepath.Join(dir, asidePrefix+name)
+	if err := os.Rename(target, aside); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return contract.RoomImage{}, err
 	}
 	if err := os.Rename(unpacked, target); err != nil {
+		return contract.RoomImage{}, err
+	}
+	if err := os.RemoveAll(aside); err != nil {
 		return contract.RoomImage{}, err
 	}
 	return s.info(room, name)
@@ -157,6 +261,9 @@ func (s *Store) List(room contract.RoomID) ([]contract.RoomImage, error) {
 
 // Show gives one image with its Containerfile and its files' paths.
 func (s *Store) Show(room contract.RoomID, name string) (contract.RoomImage, string, []string, error) {
+	if !validImageName.MatchString(name) {
+		return contract.RoomImage{}, "", nil, ErrMissing
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	image, err := s.info(room, name)
