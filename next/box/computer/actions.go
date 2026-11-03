@@ -213,7 +213,7 @@ func Validate(action Action, r Request) error {
 	if len(r.Keys) > maxKeys {
 		return fmt.Errorf("keys holds at most %d names", maxKeys)
 	}
-	if _, err := keyNames(r.Keys); err != nil {
+	if _, err := keysymsOf(r.Keys); err != nil {
 		return err
 	}
 	return nil
@@ -226,45 +226,76 @@ var buttons = map[string]string{"left": "1", "middle": "2", "right": "3"}
 // v1's key aliases, read in any case.
 var aliases = map[string]string{"CTRL": "Control_L", "CONTROL": "Control_L", "ALT": "Alt_L", "SHIFT": "Shift_L", "META": "Super_L", "SUPER": "Super_L", "CMD": "Super_L", "ENTER": "Return", "RETURN": "Return", "ESC": "Escape", "ESCAPE": "Escape", "TAB": "Tab", "BACKSPACE": "BackSpace", "DELETE": "Delete", "SPACE": "space", "UP": "Up", "DOWN": "Down", "LEFT": "Left", "RIGHT": "Right", "HOME": "Home", "END": "End", "PAGEUP": "Page_Up", "PAGEDOWN": "Page_Down"}
 
-// keyName is v1's: an alias, a character as its Unicode keysym name, or an X keysym name as it is.
-func keyName(key string) string {
-	if name, ok := aliases[strings.ToUpper(key)]; ok {
-		return name
+// runeKeysym is a character's keysym: a Latin-1 character is its own, and any other its Unicode keysym.
+func runeKeysym(c rune) uint32 {
+	if c >= 0x20 && c <= 0x7e || c >= 0xa0 && c <= 0xff {
+		return uint32(c)
 	}
-	if utf8.RuneCountInString(key) == 1 {
-		return fmt.Sprintf("U%04X", []rune(key)[0])
-	}
-	return key
+	return 0x01000000 + uint32(c)
 }
 
-// keyNames turns the request's keys into X keysym names. Each name may also be a chord such as ctrl+l, an improvement
-// on v1, which took only a list.
-func keyNames(keys []string) ([]string, error) {
-	var out []string
+// v1's names for the keys Shift turns a US key into, by the name without Shift.
+var shiftedNames = map[string]string{"minus": "underscore", "equal": "plus", "bracketleft": "braceleft", "bracketright": "braceright", "backslash": "bar", "semicolon": "colon", "apostrophe": "quotedbl", "comma": "less", "period": "greater", "slash": "question", "grave": "asciitilde"}
+
+// keysymsOf turns the request's keys into keysyms: v1's aliases, a character, or an X keysym name. Each may also be a
+// chord such as ctrl+l, an improvement on v1, which took only a list. With Shift among them, v1's rule applies: a
+// character is the one Shift types on a US keyboard, so shift+1 presses Shift and !, and ctrl+shift+t presses T, as
+// Xvnc would otherwise let go of Shift to type a lower-case t.
+func keysymsOf(keys []string) ([]uint32, error) {
+	var parts []string
 	for _, key := range keys {
-		parts := []string{key}
 		if utf8.RuneCountInString(key) > 1 && strings.Contains(strings.Trim(key, "+"), "+") {
-			parts = strings.Split(key, "+")
+			parts = append(parts, strings.Split(key, "+")...)
+		} else {
+			parts = append(parts, key)
 		}
-		for _, part := range parts {
-			if part == "" || utf8.RuneCountInString(part) == 1 && unicode.IsControl([]rune(part)[0]) {
-				return nil, fmt.Errorf("unknown key %q", key)
-			}
-			name := keyName(part)
-			if utf8.RuneCountInString(part) > 1 && !knownKey(name) {
-				return nil, fmt.Errorf("unknown key %q", part)
-			}
-			out = append(out, name)
+	}
+	names := make([]string, len(parts))
+	shift := false
+	for i, part := range parts {
+		if part == "" || utf8.RuneCountInString(part) == 1 && unicode.IsControl([]rune(part)[0]) {
+			return nil, fmt.Errorf("unknown key %q", strings.Join(keys, " "))
 		}
+		names[i] = part
+		if alias, ok := aliases[strings.ToUpper(part)]; ok {
+			names[i] = alias
+		}
+		shift = shift || names[i] == "Shift_L" || names[i] == "Shift_R"
+	}
+	out := make([]uint32, len(names))
+	for i, name := range names {
+		if utf8.RuneCountInString(name) == 1 {
+			c := []rune(name)[0]
+			if shift {
+				const plain, shifted = "1234567890-=[]\\;',./`", "!@#$%^&*()_+{}|:\"<>?~"
+				if at := strings.IndexRune(plain, c); at >= 0 {
+					c = rune(shifted[at])
+				} else {
+					c = unicode.ToUpper(c)
+				}
+			}
+			out[i] = runeKeysym(c)
+			continue
+		}
+		if shift && shiftedNames[name] != "" {
+			name = shiftedNames[name]
+		}
+		keysym, ok := keysyms[name]
+		if !ok {
+			return nil, fmt.Errorf("unknown key %q", parts[i])
+		}
+		out[i] = keysym
 	}
 	return out, nil
 }
 
-func modifier(name string) bool {
-	return slices.Contains([]string{"Shift_L", "Shift_R", "Control_L", "Control_R", "Alt_L", "Alt_R", "Super_L", "Super_R", "Meta_L", "Meta_R"}, name)
+// modifier reports Shift, Control, Meta, Alt, Super and Hyper, left or right, which a chord presses first.
+func modifier(keysym uint32) bool {
+	return keysym >= 0xffe1 && keysym <= 0xffee && keysym != 0xffe5 && keysym != 0xffe6
 }
 
-// xdotoolCommand is xdotool on the desktop. It reads typed text as UTF-8, which the box's C locale would refuse.
+// xdotoolCommand is xdotool on the desktop, for the pointer and window lookups; keys go to Xvnc. It reads window names
+// as UTF-8, which the box's C locale would refuse.
 func xdotoolCommand(ctx context.Context, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "xdotool", args...)
 	cmd.Env = append(os.Environ(), "DISPLAY="+display, "LC_ALL=C.UTF-8")
@@ -282,23 +313,43 @@ func xdotool(ctx context.Context, args ...string) error {
 
 func seconds(ms int) string { return strconv.FormatFloat(float64(ms)/1000, 'f', 3, 64) }
 
-// holding wraps a chain in keys held down around it, modifiers first, as v1 pressed a chord. A failed chain still lets
-// them go.
-func holding(ctx context.Context, keys []string, chain []string) error {
-	if len(keys) == 0 {
+// holding runs a pointer chain with keys held down around it, as v1 held a click's keys. The keys go down on Xvnc and
+// the pointer goes through xdotool, two connections, so the keys are Xvnc's before the chain starts, and the chain's
+// events get a moment to land before they go up. A failed chain still lets them go.
+func holding(ctx context.Context, held []uint32, chain []string) error {
+	if len(held) == 0 {
 		return xdotool(ctx, chain...)
 	}
-	up := []string{"keyup"}
-	for _, k := range slices.Backward(keys) {
-		up = append(up, k)
-	}
-	args := append(append([]string{"keydown"}, keys...), "sleep", "0.05")
-	err := xdotool(ctx, append(append(args, chain...), up...)...)
+	k, err := DialKeyboard(ctx, desktopSocket)
 	if err != nil {
-		_ = xdotool(context.WithoutCancel(ctx), up...)
+		return err
+	}
+	defer k.Close()
+	if err := k.Down(held...); err != nil {
+		return err
+	}
+	if err := k.Sync(ctx); err != nil {
+		return err
+	}
+	err = xdotool(ctx, chain...)
+	time.Sleep(50 * time.Millisecond)
+	if up := k.Up(reversed(held)...); err == nil {
+		err = up
+	}
+	if synced := k.Sync(ctx); err == nil {
+		err = synced
 	}
 	return err
 }
+
+func reversed(keysyms []uint32) []uint32 {
+	out := slices.Clone(keysyms)
+	slices.Reverse(out)
+	return out
+}
+
+// desktopSocket is the display's VNC socket, which the actions read the screen and send keys through.
+var desktopSocket = VNCSocket
 
 // Agent reaches the box agent's computer endpoint, which owns the desktop.
 type Agent struct{ client *http.Client }
@@ -408,14 +459,14 @@ func run(ctx context.Context, agent Agent, base string, action Action, r Request
 			region = Rect{at.X, at.Y, r.Width, r.Height}
 			text = fmt.Sprintf("%s of the %s desktop; add %d,%d to a point in it for the desktop's.", region, Size, at.X, at.Y)
 		}
-		shot, err := Capture(ctx, VNCSocket, region)
+		shot, err := Capture(ctx, desktopSocket, region)
 		return Result{PNG: shot, Text: text}, err
 	case Launch:
 		return launch(ctx, agent, r)
 	}
 	// Input: watch the screen from before it, and say what changed once it settles. v1 waited for damage after a click
 	// or a shortcut only; every input waits here, since what changed is the answer.
-	changes, watchErr := WatchChanges(ctx, VNCSocket)
+	changes, watchErr := WatchChanges(ctx, desktopSocket)
 	if watchErr == nil {
 		defer changes.Close()
 	}
@@ -436,7 +487,7 @@ func run(ctx context.Context, agent Agent, base string, action Action, r Request
 
 // input sends one pointer or key action.
 func input(ctx context.Context, base string, action Action, r Request) (string, error) {
-	keys, _ := keyNames(r.Keys)
+	keys, _ := keysymsOf(r.Keys)
 	at, _, _ := r.at()
 	switch action {
 	case Click:
@@ -511,24 +562,19 @@ func input(ctx context.Context, base string, action Action, r Request) (string, 
 		if r.HoldMS != nil {
 			hold = *r.HoldMS
 		}
-		// v1 pressed a chord's modifiers before its other keys.
-		var modifiers, others []string
+		// v1 pressed a chord's modifiers before its other keys, and let them go last.
+		var chord []uint32
 		for _, k := range keys {
 			if modifier(k) {
-				modifiers = append(modifiers, k)
-			} else {
-				others = append(others, k)
+				chord = append(chord, k)
 			}
 		}
-		if len(others) == 0 {
-			others, modifiers = modifiers, nil
+		for _, k := range keys {
+			if !modifier(k) {
+				chord = append(chord, k)
+			}
 		}
-		chain := append([]string{"keydown"}, others...)
-		chain = append(chain, "sleep", seconds(hold), "keyup")
-		for _, k := range slices.Backward(others) {
-			chain = append(chain, k)
-		}
-		return "Pressed " + strings.Join(r.Keys, " ") + ".", holding(ctx, modifiers, chain)
+		return "Pressed " + strings.Join(r.Keys, " ") + ".", press(ctx, chord, time.Duration(hold)*time.Millisecond)
 	case Type:
 		if r.Selector != "" {
 			d, err := Connect(ctx, base)
@@ -538,9 +584,33 @@ func input(ctx context.Context, base string, action Action, r Request) (string, 
 			defer d.Close()
 			return fmt.Sprintf("Typed %d characters into %s.", utf8.RuneCountInString(r.Text), r.Selector), pageInsert(ctx, d, r.Selector, r.Text)
 		}
-		return fmt.Sprintf("Typed %d characters.", utf8.RuneCountInString(r.Text)), TypeText(ctx, VNCSocket, r.Text)
+		return fmt.Sprintf("Typed %d characters.", utf8.RuneCountInString(r.Text)), TypeText(ctx, desktopSocket, r.Text)
 	}
 	return "", fmt.Errorf("unknown computer action %q", action)
+}
+
+// press holds a chord's keys down for hold, from when Xvnc has taken them, then lets them go in reverse.
+func press(ctx context.Context, chord []uint32, hold time.Duration) error {
+	k, err := DialKeyboard(ctx, desktopSocket)
+	if err != nil {
+		return err
+	}
+	defer k.Close()
+	if err := k.Down(chord...); err != nil {
+		return err
+	}
+	if err := k.Sync(ctx); err != nil {
+		return err
+	}
+	select {
+	case <-time.After(hold):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if err := k.Up(reversed(chord)...); err != nil {
+		return err
+	}
+	return k.Sync(ctx)
 }
 
 // windows lists the desktop's visible windows.
