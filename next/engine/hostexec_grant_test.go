@@ -54,15 +54,12 @@ func TestHostGrantAfterEngineMove(t *testing.T) {
 	if err != nil || len(grants) != 0 {
 		t.Fatalf("unapproved grant: %+v %v", grants, err)
 	}
-	// Startup clears comparisons and expires cards made before the engine moved.
+	// A restart no longer expires the request; it waits for a decision.
 	if err := s.store.ResetEngineHosts(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ExpireHostexecGrantRequests(ctx); err != nil {
-		t.Fatal(err)
-	}
 	old, err := s.store.Operation(ctx, result.Operation.ID)
-	if err != nil || old.Operation.State != contract.OpExpired {
+	if err != nil || old.Operation.State != contract.OpPending {
 		t.Fatalf("old request: %+v %v", old, err)
 	}
 	card := s.HostexecGrant().Card(ctx, args, to)

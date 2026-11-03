@@ -57,3 +57,17 @@ func TestHostListShowsBothSwitches(t *testing.T) {
 		t.Fatalf("output=%q", out)
 	}
 }
+
+func TestRoomSetRootApprovesHostexec(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "room", "set", "r", "--root-approves-hostexec", "on")
+	if f.roomSet == nil || f.roomSet.Room != "r" || f.roomSet.RootApprovesHostexec == nil || !*f.roomSet.RootApprovesHostexec {
+		t.Fatalf("on: %+v", f.roomSet)
+	}
+	for _, args := range [][]string{{"room", "set", "r"}, {"room", "set", "r", "--root-approves-hostexec", "maybe"}} {
+		g := &fakeClient{}
+		if _, err := execCLI(g, args...); err == nil || g.roomSet != nil {
+			t.Fatalf("%v: err=%v sent=%+v", args, err, g.roomSet)
+		}
+	}
+}

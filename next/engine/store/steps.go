@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 83
+const schemaVersion = 84
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
@@ -46,6 +46,8 @@ var steps = map[int][]string{
 		`DROP TABLE repo_ci_hosts`,
 		`UPDATE hosts SET ci=1 WHERE pool!=''`,
 	},
+	// A room's root may decide its sessions' host exec grant requests when the owner allows it; off until then.
+	83: {`ALTER TABLE rooms ADD COLUMN root_approves_hostexec INTEGER NOT NULL DEFAULT 0`},
 	// Backups are gone, so nothing records an off-host copy.
 	80: {`DROP TABLE backup_copy_status`},
 	82: {`ALTER TABLE hosts ADD COLUMN disk_total INTEGER NOT NULL DEFAULT 0`},

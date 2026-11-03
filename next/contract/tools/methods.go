@@ -77,6 +77,9 @@ var methodTable = []MethodEntry{
 	method(contract.MethodHostSet, contract.ScopeAdmin, OwnerAccess,
 		act("host", "set", typ[contract.HostSetRequest](), "Turn a host's agents switch (new session boxes) or ci switch (CI runners) on or off; an omitted one stays. What already runs there stays until it stops.", "host set"),
 	),
+	method(contract.MethodRoomSet, contract.ScopeAdmin, OwnerAccess,
+		act("room", "set", typ[contract.RoomSetRequest](), "Change a room setting; an omitted one stays. rootApprovesHostexec lets the room's root decide its sessions' host exec grant requests.", "room set"),
+	),
 	method(contract.MethodHostList, contract.ScopeRead, OwnerAccess,
 		act("host", "list", typ[contract.HostListRequest](), "List hosts with disk use and whether disk is low", "host list"),
 	),
@@ -118,8 +121,8 @@ var methodTable = []MethodEntry{
 	method(contract.MethodPoolRemove, contract.ScopeAdmin, OwnerAccess,
 		act("pool", "remove", typ[contract.PoolRemoveRequest](), "Remove an empty pool that no room names.", "pool remove"),
 	),
-	// Only the owner decides; the approval service keeps its own check.
-	method(contract.MethodOpDecide, contract.ScopeAdmin, OwnerAccess,
+	// The owner decides; so does a room's root where its room setting allows. The approval service keeps its own check.
+	method(contract.MethodOpDecide, contract.ScopeAdmin, UserAccess,
 		act("op", "decide", typ[contract.OpDecideRequest](), "Decide an operation", "op approve", "op deny"),
 	),
 	method(contract.MethodOpList, contract.ScopeRead, UserAccess),
