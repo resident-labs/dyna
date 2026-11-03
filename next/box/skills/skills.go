@@ -38,6 +38,9 @@ var builtIn embed.FS
 
 var validName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
+// hostPart is the HOST of HOST:PATH, which the engine checks against its registered hosts.
+var hostPart = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
 // List is one scope's add-ons as JSON, in the engine's file and in a bundle.
 type List struct {
 	Items []contract.Addon `json:"items"`
@@ -260,12 +263,16 @@ func Inspect(data []byte) (Meta, error) {
 	}
 }
 
-// Request turns what a caller named into a save request. A link goes to the engine as it is, and a local folder or
+// Request turns what a caller named into a save request. HOST:PATH goes to the engine to copy over SSH. A link goes to the engine as it is, and a local folder or
 // SKILL.md travels inside the request, because the engine cannot read this machine. dir anchors a relative path.
 func Request(path, dir string, room contract.RoomID, global bool) (contract.SkillSaveRequest, error) {
 	req := contract.SkillSaveRequest{Room: room, Global: global}
 	if strings.HasPrefix(path, "https://") || strings.HasPrefix(path, "http://") {
 		req.URL = path
+		return req, nil
+	}
+	if host, rest, ok := strings.Cut(path, ":"); ok && hostPart.MatchString(host) && rest != "" && !strings.HasPrefix(rest, "//") {
+		req.Host, req.Path = contract.HostName(host), rest
 		return req, nil
 	}
 	if dir != "" && !filepath.IsAbs(path) {
@@ -297,4 +304,36 @@ func Request(path, dir string, room contract.RoomID, global bool) (contract.Skil
 		return req, fmt.Errorf("%s packs to %d KiB, over the limit of %d KiB", path, len(req.Archive)>>10, MaxPacked>>10)
 	}
 	return req, nil
+}
+
+// Annotate marks a skill saved from a host: its description says so in Pi's skills list, and one line after the
+// frontmatter tells the agent where the skill's commands run.
+func Annotate(data []byte, host contract.HostName) ([]byte, error) {
+	text := strings.ReplaceAll(strings.TrimPrefix(string(data), "\xef\xbb\xbf"), "\r\n", "\n")
+	front, ok := strings.CutPrefix(text, "---\n")
+	if ok {
+		front, _, ok = strings.Cut(front, "\n---")
+	}
+	if !ok {
+		return nil, errors.New("SKILL.md must start with frontmatter between --- lines")
+	}
+	body := strings.TrimPrefix(text[len("---\n")+len(front)+len("\n---"):], "\n")
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(front), &doc); err != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("SKILL.md frontmatter: %v", err)
+	}
+	fields := doc.Content[0].Content
+	for i := 0; i+1 < len(fields); i += 2 {
+		if fields[i].Value == "description" {
+			fields[i+1].Value = strings.TrimSpace(fields[i+1].Value) + " · from host " + string(host)
+			fields[i+1].Style = yaml.DoubleQuotedStyle
+			fields[i+1].Tag = "!!str"
+		}
+	}
+	out, err := yaml.Marshal(doc.Content[0])
+	if err != nil {
+		return nil, err
+	}
+	line := fmt.Sprintf("This skill's commands run on host %s: use bash with host: %q. Files you write to $DYNA_OUT come back to this box.", host, string(host))
+	return []byte("---\n" + string(out) + "---\n" + line + "\n" + body), nil
 }
