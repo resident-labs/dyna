@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { hang, hostLabel, hostLoads, hostMeters, largeShared, lastSeen, machines, onHost, roomSessions } from "./hosts.ts";
+import { diskLow, hang, hostLabel, hostLoads, hostMeters, largeShared, lastSeen, machines, onHost, roomSessions } from "./hosts.ts";
 
 test("labels the Dyna host without implying that it runs this browser", () => {
   assert.equal(hostLabel("control-plane"), "Dyna host");
@@ -99,4 +99,11 @@ test("Home names a room's shared folder only past a quarter of its host's disk, 
   assert.deepEqual(largeShared(host(4 * quarter, [{ room: "a", bytes: quarter }, { room: "b", bytes: quarter + 1 }, { room: "c", bytes: 2 * quarter }])).map(f => f.room), ["c", "b"]);
   assert.deepEqual(largeShared(host(4 * quarter, null)), []);
   assert.deepEqual(largeShared(host(0, [{ room: "a", bytes: quarter }])), []);
+});
+
+test("an exec-only host is online or offline and never low on disk", () => {
+  const execOnly = { name: "omarchy", reachable: true, boxes: 0, cpus: 0, memBytes: 0, cpuUsed: 0, memUsed: 0, diskBytes: 0, diskUsed: 0, diskLow: true, execOnly: true, shared: [], history: null };
+  assert.equal(diskLow(execOnly), false);
+  assert.equal(diskLow({ ...execOnly, execOnly: false }), true);
+  assert.equal(hostLoads([execOnly])[0]?.diskLow ?? false, false);
 });

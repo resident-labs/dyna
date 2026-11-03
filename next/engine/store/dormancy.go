@@ -120,7 +120,7 @@ AND NOT EXISTS (SELECT 1 FROM operations o WHERE o.by_kind='session' AND o.by_id
 const aged = `b.updated_at<=?`
 
 // atFloor needs a run of samples, so one bad reading closes nothing. Its parameter is the latest time the run may have started.
-const atFloor = `h.state='ready' AND h.disk_bytes<=h.disk_floor AND h.disk_low_since BETWEEN 1 AND ?`
+const atFloor = `h.state='ready' AND h.exec_only=0 AND h.disk_bytes<=h.disk_floor AND h.disk_low_since BETWEEN 1 AND ?`
 
 // closeRoom bounds what eviction may have open on a host. A close that cannot finish stays running and holds its box, so a failure
 // common to every box, such as a remote outage, must stop eviction rather than start the rest of the host without admission.

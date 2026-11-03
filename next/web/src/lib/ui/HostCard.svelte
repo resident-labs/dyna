@@ -2,7 +2,7 @@
   import { MediaQuery } from "svelte/reactivity";
   import type { HostSummary } from "../contract.gen.ts";
   import { boxWords, count } from "../feed.ts";
-  import { hang, hostLabel, hostMeters, largeShared, lastSeen, roomSessions, sharedSize } from "../hosts.ts";
+  import { diskLow, hang, hostLabel, hostMeters, largeShared, lastSeen, roomSessions, sharedSize } from "../hosts.ts";
   import Avatar from "./Avatar.svelte";
   import MeterTile from "./MeterTile.svelte";
   import StatusPill from "./StatusPill.svelte";
@@ -33,8 +33,9 @@
 
 <section class="card" aria-label={hostLabel(host.name)}>
   <h3>{hostLabel(host.name)}
-    <span class="aside state">{#if host.diskLow}<StatusPill tone="warning" label="Disk low" />{/if}
-      {#if !host.reachable}<StatusPill tone="error" label="Unreachable" />
+    <span class="aside state">{#if diskLow(host)}<StatusPill tone="warning" label="Disk low" />{/if}
+      {#if host.execOnly}{#if host.reachable}Online{:else}<StatusPill tone="error" label="Offline" />{/if}
+      {:else if !host.reachable}<StatusPill tone="error" label="Unreachable" />
       {:else if listed}<button type="button" class="count" bind:this={button} popovertarget={`sessions-${host.name}`} aria-haspopup="dialog" aria-expanded={open}>{count(host.boxes, "workspace")}</button>
       {:else if host.name !== "control-plane"}{count(host.boxes, "workspace")}{/if}</span></h3>
   {#if host.reachable || seen}<div class="tiles" class:dimmed={!host.reachable}>{#each hostMeters(host) as meter (meter.label)}<MeterTile {meter} />{/each}</div>{/if}
