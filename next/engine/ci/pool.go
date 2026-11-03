@@ -95,7 +95,8 @@ type Pool struct {
 	mu        sync.Mutex
 	clean     bool // no repository wants runners and no host holds any
 	listeners map[scaleSet]*listening
-	images    map[contract.HostName]string
+	images    map[contract.HostName]string // each host's current runner image, once built or found there
+	building  map[contract.HostName]bool   // hosts a build-ahead is working on
 	retry     map[contract.HostName]time.Time
 	serving   map[contract.RepoName]time.Time
 	leased    map[contract.RepoName]time.Time
@@ -162,6 +163,9 @@ func (p *Pool) Tick(ctx context.Context, group *sync.WaitGroup) error {
 		return err
 	}
 	failures = append(failures, view.failures...)
+	for _, host := range view.hosts {
+		p.buildAhead(ctx, host, group)
+	}
 	alive := make(map[contract.RepoName]map[string]bool)
 	for _, host := range view.hosts {
 		if err := p.sweep(ctx, host, view, alive); err != nil {
@@ -404,6 +408,12 @@ func (p *Pool) place(ctx context.Context, key scaleSet, assigned int, view surve
 				open = append(open, host)
 			}
 		}
+		// A host that has the image starts a runner at once, and one that must build it makes the job wait minutes, so a host
+		// with the image takes the runner while it has room.
+		ready := slices.DeleteFunc(slices.Clone(open), func(h box.Host) bool { return p.images[h.Name] == "" })
+		if host := box.Admit(ready, boxes, runnerRequest(id, repo.Room, size), repo.Only...).Host; host != "" {
+			return host
+		}
 		return box.Admit(open, boxes, runnerRequest(id, repo.Room, size), repo.Only...).Host
 	}
 	var failures []error
@@ -512,6 +522,38 @@ func (p *Pool) prepare(ctx context.Context, host *surveyed) (string, error) {
 		host.egress = true
 	}
 	return image, nil
+}
+
+// buildAhead builds a host's runner image in the background when the pool has not seen it there, as after a deploy or on a new
+// host. It does not hold p.mu while it builds, so placement goes on, and place prefers hosts whose image is ready. The build
+// reuses an image the host already has, so a host that has it is ready within moments.
+func (p *Pool) buildAhead(ctx context.Context, host *surveyed, group *sync.WaitGroup) {
+	name := host.host.Name
+	if !host.host.CI || p.images[name] != "" || p.building[name] {
+		return
+	}
+	if p.building == nil {
+		p.building = make(map[contract.HostName]bool)
+	}
+	p.building[name] = true
+	group.Add(1)
+	go func() {
+		defer group.Done()
+		buildCtx, cancel := context.WithTimeout(ctx, scaleLimit)
+		defer cancel()
+		image, err := host.driver.BuildRunnerImage(buildCtx)
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		delete(p.building, name)
+		if err != nil {
+			log.Printf("ci pool: host %s: build runner image: %v", name, err)
+			return
+		}
+		if p.images == nil {
+			p.images = make(map[contract.HostName]string)
+		}
+		p.images[name] = image
+	}()
 }
 
 // freeSlot picks the slot of a new runner on a host: its proxy socket and its build folder. Every repository's runners count,

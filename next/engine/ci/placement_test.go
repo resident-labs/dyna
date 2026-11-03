@@ -112,3 +112,37 @@ func TestANodeWithARunnerIsNotDrainedAndADrainedHostTakesNone(t *testing.T) {
 		t.Fatal("claimed a runner on a draining host")
 	}
 }
+
+// After a deploy, or on a new host, the host with the most free memory may still have to build the runner image. A runner goes
+// to a host that has it, and a host that must build takes one only when none with the image has room.
+func TestPlacementPrefersAHostWithTheRunnerImage(t *testing.T) {
+	f := newFixture(0)
+	f.store.hosts[0].MemBytes = 128 * box.GiB // pve has the most free memory, and no image
+	ready := f.addHost(readyHost("desktop", 32*box.GiB))
+	f.pool.images = map[contract.HostName]string{"desktop": "image"}
+	f.scale(1)
+	if len(ready.runners) != 1 || len(f.drivers["pve"].runners) != 0 || f.drivers["pve"].builds != 0 {
+		t.Fatalf("desktop %d, pve %d runners, %d builds", len(ready.runners), len(f.drivers["pve"].runners), f.drivers["pve"].builds)
+	}
+	// With no room left where the image is, the building host takes the job, so a new host still gets its image.
+	for range box.RunnerSlots {
+		f.scale(box.RunnerSlots + 1)
+	}
+	if len(f.drivers["pve"].runners) == 0 || f.drivers["pve"].builds != 1 {
+		t.Fatalf("pve %d runners, %d builds", len(f.drivers["pve"].runners), f.drivers["pve"].builds)
+	}
+}
+
+// A host that must build its image does it beside placement, without p.mu, and is preferred once it is done.
+func TestBuildAheadDoesNotHoldThePoolLock(t *testing.T) {
+	f := newFixture(0)
+	release := make(chan struct{})
+	f.drivers["pve"].gate = release
+	f.tick(t)
+	f.scale(0) // takes p.mu while the build is still running
+	close(release)
+	f.stop()
+	if f.pool.images["pve"] != "image" {
+		t.Fatalf("images %v", f.pool.images)
+	}
+}
