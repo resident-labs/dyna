@@ -13,7 +13,7 @@ RUN case "$(dpkg --print-architecture)" in \
     && echo "${sha}  /tmp/sccache.tgz" | sha256sum -c - \
     && tar -xzf /tmp/sccache.tgz -C /usr/local/bin --strip-components=1 --no-same-owner "${name}/sccache" \
     && rm /tmp/sccache.tgz
-# Chromium's extensions, unpacked from their GitHub releases, load at every launch (5.14). uBlock Origin Lite keeps its filter
+# Chromium's extensions, unpacked from their GitHub releases, load at every launch (5.14). The node user owns them because Chromium writes each unpacked extension's indexed rulesets into its _metadata folder and refuses an extension with rules when it cannot ("Internal error while parsing rules"). Debian's /etc/chromium.d/extensions would add an empty --load-extension=, so it keeps only its --enable-remote-extensions line. uBlock Origin Lite keeps its filter
 # lists as rulesets named in its manifest and ruleset details, so the cookie-notice, overlay and other annoyance lists, off in the release, are turned on there.
 RUN mkdir -p /opt/dyna/extensions/ubol /opt/dyna/extensions/isdcac \
     && curl -fsSL -o /tmp/ubol.zip https://github.com/uBlockOrigin/uBOL-home/releases/download/2026.1026.1812/uBOLite_2026.1026.1812.chromium.zip \
@@ -23,7 +23,9 @@ RUN mkdir -p /opt/dyna/extensions/ubol /opt/dyna/extensions/isdcac \
     && curl -fsSL -o /tmp/isdcac.zip https://github.com/OhMyGuus/I-Still-Dont-Care-About-Cookies/releases/download/v1.1.9/ISDCAC-chrome-source.zip \
     && echo "8f70ab947cb2d274f4022a970f5dd3cecd8ec02b060e05187bef9ee3cb18bbcb  /tmp/isdcac.zip" | sha256sum -c - \
     && unzip -q /tmp/isdcac.zip -d /opt/dyna/extensions/isdcac \
-    && rm /tmp/ubol.zip /tmp/isdcac.zip
+    && rm /tmp/ubol.zip /tmp/isdcac.zip \
+    && chown -R node:node /opt/dyna/extensions \
+    && echo 'export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --enable-remote-extensions"' > /etc/chromium.d/extensions
 COPY pi.tgz /tmp/pi.tgz
 RUN npm install --global --ignore-scripts /tmp/pi.tgz && rm /tmp/pi.tgz \
     && mkdir -p /box/home /box/pi /box/work && chown node:node /box /box/home /box/pi /box/work

@@ -52,14 +52,15 @@ const Profile = "/box/computer"
 const extensions = "/opt/dyna/extensions/ubol,/opt/dyna/extensions/isdcac"
 
 // browserArgs open Chromium in a window on the display, with DevTools on the port the agent's actions use, and with the
-// image's extensions. A managed policy cannot install an unpacked extension, and this Chromium, 156, loads one from
-// --load-extension without the DisableLoadExtensionCommandLineSwitch override that Chrome 137 and later need.
+// image's extensions. A managed policy cannot install an unpacked extension. This Chromium, 156, loads one from
+// --load-extension without the override, but Chrome 137 and later need DisableLoadExtensionCommandLineSwitch, so it is
+// passed ahead of the next bump. The extension folders must be writable by the user (see the dyna-base Containerfile).
 func browserArgs(profile string) []string {
 	return []string{
 		"--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9222", "--user-data-dir=" + profile,
 		"--disable-dev-shm-usage", "--no-first-run", "--no-default-browser-check", "--password-store=basic",
 		"--hide-crash-restore-bubble", "--start-maximized",
-		"--load-extension=" + extensions, "about:blank",
+		"--disable-features=DisableLoadExtensionCommandLineSwitch", "--load-extension=" + extensions, "about:blank",
 	}
 }
 

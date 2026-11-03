@@ -61,10 +61,13 @@ func TestCgroupUnlimitedMemory(t *testing.T) {
 
 func TestLaunchArgs(t *testing.T) {
 	browser := strings.Join(browserArgs(Profile), " ")
-	for _, flag := range []string{"--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9222", "--user-data-dir=/box/computer", "--disable-dev-shm-usage", "--no-first-run", "--load-extension=/opt/dyna/extensions/ubol,/opt/dyna/extensions/isdcac", "about:blank"} {
+	for _, flag := range []string{"--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9222", "--user-data-dir=/box/computer", "--disable-dev-shm-usage", "--no-first-run", "--disable-features=DisableLoadExtensionCommandLineSwitch", "--load-extension=/opt/dyna/extensions/ubol,/opt/dyna/extensions/isdcac", "about:blank"} {
 		if !strings.Contains(browser, flag) {
 			t.Fatalf("missing %s", flag)
 		}
+	}
+	if n := strings.Count(browser, "--load-extension"); n != 1 || strings.Contains(browser, "--load-extension= ") {
+		t.Fatalf("want one non-empty --load-extension, got %d in %s", n, browser)
 	}
 	if strings.Contains(browser, "headless") {
 		t.Fatal("Chromium must open a window on the desktop")
