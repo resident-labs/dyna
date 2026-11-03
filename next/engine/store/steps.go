@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 86
+const schemaVersion = 87
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
@@ -55,6 +55,12 @@ var steps = map[int][]string{
 	84: {`ALTER TABLE hosts ADD COLUMN exec_only INTEGER NOT NULL DEFAULT 0`},
 	// The owner can say which host a paired device is on, so its inputs say where they come from.
 	85: {`ALTER TABLE devices ADD COLUMN host TEXT NOT NULL DEFAULT ''`},
+	// The owner-class operations a room's root may also decide are one set of kinds, which replaces the host exec flag. DROP COLUMN needs SQLite 3.35 or later.
+	86: {
+		`ALTER TABLE rooms ADD COLUMN root_approves TEXT NOT NULL DEFAULT '[]'`,
+		`UPDATE rooms SET root_approves='["hostexec"]' WHERE root_approves_hostexec=1`,
+		`ALTER TABLE rooms DROP COLUMN root_approves_hostexec`,
+	},
 	81: {
 		`ALTER TABLE hosts ADD COLUMN create_failures INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE hosts ADD COLUMN create_problem TEXT NOT NULL DEFAULT ''`,

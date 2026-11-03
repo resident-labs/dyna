@@ -677,18 +677,31 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	limit.Flags().StringVar(&limitMem, "mem", "", "Memory limit; 0 means unlimited")
 	_ = limit.MarkFlagRequired("cpus")
 	_ = limit.MarkFlagRequired("mem")
-	var rootApprovesHostexec string
-	setRoom := &cobra.Command{Use: "set ROOM --root-approves-hostexec on|off", Short: "Change a room setting", Long: "Change a room setting. With --root-approves-hostexec on, the room's root decides its sessions' host exec grant requests with op approve and op deny, as the owner can. It is off by default, and the request still waits for a decision.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		req := contract.RoomSetRequest{Room: contract.RoomID(args[0])}
-		var err error
-		if req.RootApprovesHostexec, err = hostSwitch("root-approves-hostexec", rootApprovesHostexec); err != nil {
-			return err
+	rootApproves := map[contract.RootApproval]*string{}
+	for _, kind := range contract.AllRootApprovals {
+		rootApproves[kind] = new(string)
+	}
+	setRoom := &cobra.Command{Use: "set ROOM --root-approves-KIND on|off", Short: "Change a room setting", Long: "Change a room setting; a kind left out stays. With --root-approves-KIND on, the room's root decides that kind of its sessions' requests with op approve and op deny, as the owner can, and the owner still can. KIND is hostexec (host exec grants), addons (global skills, packages and MCP servers), hosts (room hosts rules) or pools (pool add). Each is off by default, and the request still waits for a decision.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		req := contract.RoomSetRequest{Room: contract.RoomID(args[0]), RootApproves: map[contract.RootApproval]bool{}}
+		for _, kind := range contract.AllRootApprovals {
+			if *rootApproves[kind] == "" {
+				continue
+			}
+			on, err := hostSwitch("root-approves-"+string(kind), *rootApproves[kind])
+			if err != nil {
+				return err
+			}
+			req.RootApproves[kind] = *on
 		}
-		_, err = getClient().RoomSet(cmd.Context(), req)
+		if len(req.RootApproves) == 0 {
+			return fmt.Errorf("set at least one --root-approves-KIND on|off")
+		}
+		_, err := getClient().RoomSet(cmd.Context(), req)
 		return err
 	}}
-	setRoom.Flags().StringVar(&rootApprovesHostexec, "root-approves-hostexec", "", "on or off: whether the room's root may decide its sessions' host exec grant requests")
-	_ = setRoom.MarkFlagRequired("root-approves-hostexec")
+	for _, kind := range contract.AllRootApprovals {
+		setRoom.Flags().StringVar(rootApproves[kind], "root-approves-"+string(kind), "", "on or off: whether the room's root may decide its sessions' "+string(kind)+" requests")
+	}
 	room.AddCommand(limit, setRoom, roomHostsCommand(getClient))
 	var rootProfile string
 	create := &cobra.Command{Use: "create NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
