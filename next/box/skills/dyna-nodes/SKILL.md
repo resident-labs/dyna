@@ -97,6 +97,28 @@ dyna pool list
 - `dyna room hosts ROOM --only POOL[,HOST...]` keeps a room's new boxes on one pool and these hosts, and the pool grows only for such a room. A box already placed stays where it is. `--clear` removes the rule. A room with no rule may use any host and any shared pool node, but a pool grows only for a room whose rule names it. Clearing a rule frees the room to use shared pool nodes as well as hosts; it does not make a pool grow for the room.
 - From a box, `dyna pool add` and `dyna room hosts` ask the owner, because the script runs on the engine host and costs money.
 
+## Add one machine by hand
+
+Only the owner adds a host, so from a box the call asks the owner.
+
+```bash
+dyna host add NAME --ssh user@addr --owner-only-admin
+```
+
+- `--ssh` is `user@host`, with no port. `--owner-only-admin` confirms that only the owner administers the machine. A host that runs boxes or CI runners needs it, and `host add` refuses without it. A host added `--agents off --ci off` is exec only, takes host-exec runs and nothing else, and needs neither the flag nor the list above: its check asks for SSH and bash.
+- For any other host the check needs what the pool nodes need, from rootless Podman 5 down to the free disk, and it reports each item. FUSE is not checked on the host the engine runs on.
+- The engine connects with `ssh user@addr` as its own user. Dyna names no key: ssh takes the engine user's usual identity, config and agent, so that user's public key has to be in `authorized_keys` of `user` on the machine, as a plain key with no forced command. Dyna takes the machine's host key on first contact and keeps it in a list of its own, apart from the owner's `known_hosts`.
+
+## What `dyna host remove` leaves
+
+`dyna host remove NAME` removes the row, the engine's SSH connection and its forwards. It runs nothing on the machine, which keeps:
+
+- the host data folder (`--host-data` of the engine, `~/.local/share/dyna-next-host` here): `cache/`, `bin/` with the Dyna binaries, `share/`, `git/` and `rooms/`
+- the user units `dyna-share.service` and `dyna-build-cache.service`, started with `systemd-run --user`, which run until stopped (`systemctl --user stop`) or the machine restarts
+- Podman's images, among them `localhost/dyna-ci-runner:*` and `localhost/dyna-ci-room-*`, which `podman rmi` removes
+
+Runners run rootless as user 1001, so files they wrote belong to IDs that Podman maps into the user's subordinate range. The host's user gets `Permission denied` from `rm` on them, and `podman unshare rm -rf PATH` removes them, since it runs as the container's root.
+
 ## What to expect
 
 - A box waits with `pool-node` while its node comes up.

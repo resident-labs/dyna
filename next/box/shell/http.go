@@ -128,7 +128,7 @@ func unknownJob(id contract.ShellJobID) error {
 	case !jobID.MatchString(string(id)):
 		return invalid(fmt.Sprintf("no job %q: a job ID looks like job_1f3a9c0b7d42, and job list shows the current ones", id))
 	}
-	return refusal{contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("no job %s in this box; jobs end when their box restarts, only the last %d finished ones are kept, and job list shows the current ones", id, keepFinished)}}
+	return refusal{contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("no job %s in this box; a box holds only the jobs it started since it began and the last %d finished ones, and job list shows the current ones. Commands that ran in a box that was replaced ended with it. A host run (bash with host) is stopped when its box closes, but when the box was lost or its connection dropped the run keeps going on its host, and its end arrives as a notice", id, keepFinished)}}
 }
 
 // result returns the unread output and the job state.

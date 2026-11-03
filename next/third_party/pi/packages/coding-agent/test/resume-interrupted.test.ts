@@ -72,7 +72,7 @@ it("continues an interrupted tool call without running it again", async () => {
 		expect(result.message).toMatchObject({
 			toolCallId: "call-1",
 			isError: true,
-			content: [{ type: "text", text: "interrupted; state unknown" }],
+			content: [{ type: "text", text: "interrupted: the session restarted while this call ran, so whether it finished is unknown, and it is not run again. A command it started on another machine can still be running there" }],
 		});
 	} finally {
 		session.dispose();
