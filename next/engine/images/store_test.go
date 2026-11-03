@@ -255,3 +255,42 @@ func TestAnImageMovedAsideByACrashComesBackOnEveryRead(t *testing.T) {
 		}
 	}
 }
+
+func TestContextChoosesTheSoleBoxImageAndNeverTheRunnerImage(t *testing.T) {
+	store := &Store{Layout: box.Layout{Data: t.TempDir()}}
+	if name, _, _, _, err := store.Context("r", ""); err != nil || name != "" {
+		t.Fatalf("an empty room: %q %v", name, err)
+	}
+	runner := pack(t, map[string]string{"Containerfile": "ARG DYNA_CI_BASE\nFROM ${DYNA_CI_BASE}\n"})
+	if _, err := store.Save("r", "ci-runner", runner); err != nil {
+		t.Fatal(err)
+	}
+	if name, _, _, _, err := store.Context("r", ""); err != nil || name != "" {
+		t.Fatalf("only the runner image: %q %v", name, err)
+	}
+	if _, err := store.Save("r", "rust", pack(t, map[string]string{"Containerfile": "ARG DYNA_BASE\nFROM ${DYNA_BASE}\n", "size": "large\n", "box-needs": "kvm\n"})); err != nil {
+		t.Fatal(err)
+	}
+	name, _, data, needs, err := store.Context("r", "")
+	if err != nil || name != "rust" || len(data) == 0 || len(needs) != 1 {
+		t.Fatalf("%q %v %v", name, needs, err)
+	}
+	if size, err := store.Size("r", ""); err != nil || size != "large" {
+		t.Fatalf("size %q: %v", size, err)
+	}
+	if _, err := store.Save("r", "go", pack(t, map[string]string{"Containerfile": "ARG DYNA_BASE\nFROM ${DYNA_BASE}\n"})); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, _, err := store.Context("r", ""); !errors.Is(err, ErrImageChoice) {
+		t.Fatalf("two box images, no choice: %v", err)
+	}
+	if size, err := store.Size("r", ""); err != nil || size != "" {
+		t.Fatalf("size of an undecided room: %q %v", size, err)
+	}
+	if _, _, _, _, err := store.Context("r", "zig"); !errors.Is(err, ErrMissing) {
+		t.Fatalf("an image the room lacks: %v", err)
+	}
+	if _, _, _, _, err := store.Context("r", "../x"); !errors.Is(err, ErrMissing) {
+		t.Fatalf("a path as a name: %v", err)
+	}
+}

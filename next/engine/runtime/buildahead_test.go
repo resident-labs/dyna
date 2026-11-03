@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/resident-labs/dyna/box/skills"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,6 +17,7 @@ import (
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/images"
 	"github.com/resident-labs/dyna/box/podman"
+	"github.com/resident-labs/dyna/box/skills"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/compose"
 	enginegit "github.com/resident-labs/dyna/engine/git"
@@ -99,6 +99,8 @@ func (aheadGit) Run(_ context.Context, _ []string, args ...string) ([]byte, erro
 	}
 	joined := strings.Join(args, " ")
 	switch {
+	case strings.Contains(joined, "ls-tree -r -l"):
+		return []byte("100644 blob ccc      33\tContainerfile\n"), nil
 	case strings.Contains(joined, "ls-tree HEAD .dyna/images"):
 		return []byte("040000 tree aaa\t.dyna/images\n"), nil
 	case strings.Contains(joined, "ls-tree aaa"):
@@ -262,6 +264,7 @@ func TestFirstUseMigratesARepositoryWhoseMirrorCameLate(t *testing.T) {
 	if err := os.MkdirAll(path, 0700); err != nil {
 		t.Fatal(err)
 	}
+	b.Migrator = &engineimages.Migrator{Store: b.RoomImages, Rooms: aheadStore{rooms: map[contract.RoomID][]contract.RepoName{"room_1": {"owner/repo"}}}, Source: engineimages.Source{Cloned: b.Mirror.Cloned, Refresh: func(context.Context, contract.RepoName) error { return nil }, Dir: b.Mirror.Layout.Git, Runner: aheadGit{}}}
 	b.BuildAhead(context.Background())
 	if r.count("'-t' 'dyna-img-legacy:") == 0 {
 		t.Fatalf("the repository's image was not brought over and built: %v", r.commands)

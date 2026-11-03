@@ -223,6 +223,8 @@ func TestParseRefuses(t *testing.T) {
 		"image ID":         {"services:\n  agent: {}\n  db:\n    image: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n", "image"},
 		"build outside":    {"services:\n  agent: {}\n  db:\n    build: .\n", "build must name an image"},
 		"build traversal":  {"services:\n  agent: {}\n  db:\n    build: .dyna/images/../../etc\n", "build must name an image"},
+		"build runner":     {"services:\n  agent: {}\n  db:\n    build: ci-runner\n", "build must name an image"},
+		"build dotdot":     {"services:\n  agent: {}\n  db:\n    build: ../x\n", "build must name an image"},
 		"build root":       {"services:\n  agent: {}\n  db:\n    build: .dyna/images\n", "build must name an image"},
 		"build nested":     {"services:\n  agent: {}\n  db:\n    build: .dyna/images/a/b\n", "build must name an image"},
 		"build absolute":   {"services:\n  agent: {}\n  db:\n    build: /etc\n", "build must name an image"},

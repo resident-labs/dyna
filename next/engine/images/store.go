@@ -3,8 +3,6 @@ package images
 import (
 	"archive/tar"
 	"bytes"
-	"compress/gzip"
-	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -441,64 +439,4 @@ func (s *Store) Size(room contract.RoomID, wanted string) (string, error) {
 		return "", nil
 	}
 	return strings.TrimSpace(string(data)), err
-}
-
-// migratedFile lists the repositories whose legacy images were copied into the room, one per line.
-const migratedFile = ".migrated"
-
-// Migrate copies a repository's legacy images (.dyna/images on its default branch or on dyna-images) into the room, once per
-// repository and room. An image the room already has stays, so a room's own wins, and the CI runner's name is skipped, since
-// a repository never had one. A copied Containerfile is not rechecked: it has built so far, and the repository's lookup ends
-// with this copy. It returns what it copied and what it left, with why.
-func (s *Store) Migrate(ctx context.Context, runner Runner, room contract.RoomID, repo contract.RepoName, mirror string) (copied, left []string, err error) {
-	s.mu.Lock()
-	dir := s.Layout.Images(room)
-	done, err := os.ReadFile(filepath.Join(dir, migratedFile))
-	s.mu.Unlock()
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, nil, err
-	}
-	if slices.Contains(strings.Fields(string(done)), string(repo)) {
-		return nil, nil, nil
-	}
-	names, err := Folders(ctx, runner, mirror)
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, name := range names {
-		held, err := s.List(room)
-		if err != nil {
-			return copied, left, err
-		}
-		if name == contract.CIRunnerImage || slices.ContainsFunc(held, func(i contract.RoomImage) bool { return i.Name == name }) {
-			left = append(left, name+" (the room has one, or the name is reserved)")
-			continue
-		}
-		_, _, tarball, _, err := Context(ctx, runner, mirror, name)
-		if err != nil {
-			return copied, left, err
-		}
-		var packed bytes.Buffer
-		gz := gzip.NewWriter(&packed)
-		_, writeErr := gz.Write(tarball)
-		if err := errors.Join(writeErr, gz.Close()); err != nil {
-			return copied, left, err
-		}
-		if _, err := s.save(room, name, packed.Bytes(), false); err != nil {
-			left = append(left, name+" ("+err.Error()+")")
-			continue
-		}
-		copied = append(copied, name)
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return copied, left, err
-	}
-	file, err := os.OpenFile(filepath.Join(dir, migratedFile), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		return copied, left, err
-	}
-	_, writeErr := file.WriteString(string(repo) + "\n")
-	return copied, left, errors.Join(writeErr, file.Close())
 }
