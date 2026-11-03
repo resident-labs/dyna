@@ -4,7 +4,7 @@ import type { RoomSetRequest, RoomSummary, RootApproval } from "./contract.gen.t
 export const rootApprovals: readonly { kind: RootApproval; label: string; note: string }[] = [
   { kind: "hostexec", label: "Root approves host exec", note: "Sessions' host exec requests go to root" },
   { kind: "addons", label: "Root approves global add-ons", note: "Skills, packages and MCP servers for every room" },
-  { kind: "hosts", label: "Root changes host rules", note: "room hosts rules for this room" },
+  { kind: "hosts", label: "Root changes room host rules", note: "Where this room's new boxes may go" },
   { kind: "pools", label: "Root adds node pools", note: "Pools run scripts that can cost money" },
 ];
 
@@ -21,3 +21,11 @@ export const switchRequest = (room: RoomSummary, kind: RootApproval, on: boolean
 
 // The Autopilot button turns every kind on, or, when all are on, every kind off.
 export const autopilotRequest = (room: RoomSummary) => request(room, () => !autopilotOn(room));
+
+// What the Autopilot button asks before it turns the kinds on: the owner reads each one, and what pools can cost. Turning them off asks nothing.
+export const autopilotConfirm = (room: RoomSummary) => autopilotOn(room) ? undefined : {
+  title: `Turn on Autopilot for ${room.name}?`,
+  message: `The root of ${room.name} will decide these requests, and you still can: ${rootApprovals.map(item => item.label.replace(/^Root /, "")).join("; ")}.`,
+  note: "Node pools run scripts that can cost money.",
+  action: "Turn on Autopilot",
+};

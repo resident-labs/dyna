@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, type Snippet } from "svelte";
   import { APIError, call, SignedOut } from "../client.ts";
-  import { approvalOn, autopilotOn, autopilotRequest, rootApprovals, switchRequest } from "../autopilot.ts";
+  import { approvalOn, autopilotConfirm, autopilotOn, autopilotRequest, rootApprovals, switchRequest } from "../autopilot.ts";
+  import { confirm } from "../modal.ts";
   import type { RoomSetRequest, RoomSummary } from "../contract.gen.ts";
   // Settings > Rooms. One card per room with a switch for each safeguard that waits for the owner today. A switch on lets the room's
   // root decide that kind of request; the owner still can. The Autopilot button turns every switch on, or off when all are on.
@@ -16,6 +17,11 @@
   }
   onMount(() => { void reload(); window.addEventListener("focus", reload); return () => window.removeEventListener("focus", reload); });
 
+  async function autopilot(room: RoomSummary) {
+    const ask = autopilotConfirm(room);
+    if (ask && !(await confirm(ask))) return;
+    await change(room, autopilotRequest(room));
+  }
   async function change(room: RoomSummary, request: RoomSetRequest) {
     busy = true; problem = undefined;
     await call("room.set", request).then(reload, (error: unknown) => {
@@ -35,7 +41,7 @@
     {#each rooms as room (room.id)}
       <section aria-labelledby={`room-${room.id}`}>
         <header class="scope"><h2 id={`room-${room.id}`}>{room.name}</h2>
-          <button type="button" class="btn ghost autopilot" aria-pressed={autopilotOn(room)} disabled={busy} onclick={() => void change(room, autopilotRequest(room))}>Autopilot</button></header>
+          <button type="button" class="btn ghost autopilot" aria-pressed={autopilotOn(room)} disabled={busy} onclick={() => void autopilot(room)}>Autopilot</button></header>
         <div class="list">
           {#each rootApprovals as { kind, label, note } (kind)}
             <label class="row"><span class="lines"><span class="title">{label}</span><span class="line">{note}</span></span>
