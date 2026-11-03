@@ -78,6 +78,29 @@ func TestAdmissionFollowsARoomsRule(t *testing.T) {
 	}
 }
 
+func TestAdmissionHeadroom(t *testing.T) {
+	size, _ := box.Size(contract.BoxSizeSmall)
+	large := box.Host{Name: "large", State: box.HostReady, CPUs: 8, MemBytes: 128 * box.GiB, DiskBytes: 200 * box.GiB}
+	small := box.Host{Name: "small", State: box.HostReady, CPUs: 8, MemBytes: 32 * box.GiB, DiskBytes: 200 * box.GiB}
+	busySize, _ := box.Size(contract.BoxSizeXLarge)
+	request := box.Box{ID: "new", Size: size}
+	for _, tc := range []struct {
+		name  string
+		hosts []box.Host
+		boxes []box.Box
+		want  contract.HostName
+	}{
+		{"CPU busy large host", []box.Host{large, small}, []box.Box{{ID: "busy", Host: large.Name, Size: busySize, State: contract.BoxReady}}, small.Name},
+		{"equal headroom chooses smaller name", []box.Host{small, large}, nil, large.Name},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := box.Admit(tc.hosts, tc.boxes, request); got.Host != tc.want {
+				t.Fatalf("got %+v, want host %s", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestAdmission(t *testing.T) {
 	size, _ := box.Size(contract.BoxSizeSmall)
 	h := box.Host{Name: "host", State: box.HostReady, CPUs: 1, MemBytes: 4 * box.GiB, DiskBytes: 40 * box.GiB, DiskFloor: 20 * box.GiB}
