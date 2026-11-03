@@ -608,6 +608,9 @@ func addCLI(root *cobra.Command, getClient func() client) {
 			if h.Problem == contract.HostProblemShareUnavailable {
 				state += "\tshared folder mount unavailable, so no session boxes (CI may run); fix FUSE, then host set --clear-create-problem"
 			}
+			for _, p := range h.RunnerImages {
+				state += fmt.Sprintf("\tCI runner image of room %s (%s) failed to build, jobs use the shared image: %s", p.Room, p.Image, p.Reason)
+			}
 			if h.Leftovers > 0 {
 				state += fmt.Sprintf("\t%d left from deleted rooms", h.Leftovers)
 			}

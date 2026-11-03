@@ -440,3 +440,16 @@ func (s *Store) Size(room contract.RoomID, wanted string) (string, error) {
 	}
 	return strings.TrimSpace(string(data)), err
 }
+
+// RunnerLayer reads the room's ci-runner image, which a CI host builds on the shared runner image. It returns nil for a room
+// that has none.
+func (s *Store) RunnerLayer(room contract.RoomID) (*box.RunnerLayer, error) {
+	_, id, data, _, err := s.build(room, contract.CIRunnerImage)
+	if errors.Is(err, ErrMissing) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &box.RunnerLayer{Room: room, ID: string(id), Context: data}, nil
+}

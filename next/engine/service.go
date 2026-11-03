@@ -83,6 +83,7 @@ type Service struct {
 	addons              *addons.Files
 	images              *images.Store
 	migrator            *images.Migrator
+	runnerImageProblems func() map[contract.HostName][]contract.RunnerImageProblem
 	addonSources        *addons.Sources
 }
 

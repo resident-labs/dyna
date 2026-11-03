@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -17,6 +18,9 @@ import (
 	"github.com/resident-labs/dyna/box/images"
 	"github.com/resident-labs/dyna/contract"
 )
+
+// runnerEntrypoint is the shared image's ENTRYPOINT, passed on every start so a room's layer cannot replace it.
+const runnerEntrypoint = `["/usr/bin/tini","--","/opt/dyna-ci/entrypoint.sh"]`
 
 const (
 	ciLabel         = "dyna.ci" // "runner" or "egress"
@@ -59,8 +63,9 @@ if [ "$kb" -gt "$limit" ]; then podman unshare find "$b" -mindepth 1 -delete; fi
 podman unshare mkdir -p -- "$b/cargo" "$b/target"
 podman unshare chown 1001:1001 "$b" "$b/cargo" "$b/target"`
 
-// BuildRunnerImage builds or reuses the runner image, and drops any older one.
-func (h *Host) BuildRunnerImage(ctx context.Context) (string, error) {
+// BuildRunnerImage builds or reuses the shared runner image, and drops any older one. With a layer it builds the room's image on
+// that and returns the room's tag, dropping the room's older ones. The shared image stays on the host as the fallback.
+func (h *Host) BuildRunnerImage(ctx context.Context, layer *box.RunnerLayer) (string, error) {
 	var contextTar bytes.Buffer
 	tw := tar.NewWriter(&contextTar)
 	hash := sha256.New()
@@ -87,7 +92,30 @@ func (h *Host) BuildRunnerImage(ctx context.Context) (string, error) {
 	}
 	// An image a running container still uses fails to delete, and goes with a later image.
 	_, err := h.run(ctx, "bash", "-c", `podman images --format '{{.Repository}}:{{.Tag}}' | { grep '^localhost/dyna-ci-runner:' || true; } | { grep -vxF "$1" || true; } | xargs -r podman rmi >/dev/null 2>&1 || true`, "dyna", tag)
-	return tag, err
+	if err != nil || layer == nil {
+		return tag, err
+	}
+	if !runnerLayerName.MatchString(string(layer.Room)) || !runnerLayerID.MatchString(layer.ID) {
+		return "", errors.New("invalid runner layer")
+	}
+	roomRepo := roomRunnerRepo(layer.Room)
+	roomTag := fmt.Sprintf("%s:%s-%x", roomRepo, layer.ID, hash.Sum(nil)[:6])
+	if _, err := h.buildWith(ctx, roomTag, "DYNA_CI_BASE", tag, layer.Context, false); err != nil {
+		return "", err
+	}
+	_, err = h.run(ctx, "bash", "-c", `podman images --format '{{.Repository}}:{{.Tag}}' | { grep "^$1:" || true; } | { grep -vxF "$2" || true; } | xargs -r podman rmi >/dev/null 2>&1 || true`, "dyna", roomRepo, roomTag)
+	return roomTag, err
+}
+
+// runnerLayerName and runnerLayerID are what a layer's room and id may hold, since both go into an image name.
+var (
+	runnerLayerName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+	runnerLayerID   = regexp.MustCompile(`^[0-9a-f]{8,64}$`)
+)
+
+// roomRunnerRepo is the image name of a room's runner layers.
+func roomRunnerRepo(room contract.RoomID) string {
+	return "localhost/dyna-ci-room-" + strings.ToLower(string(room))
 }
 
 func egressArgs(image, bin string) []string {
@@ -161,6 +189,8 @@ func runnerArgs(s box.RunnerSpec) []string {
 		"--env", "DYNA_CI_CACHE=" + cacheMount, "--env", "DYNA_CI_BUILD=" + buildMount,
 		// A box of this repository sets the same two, and no other CARGO_ variable, which sccache hashes too.
 		"--env", "CARGO_HOME=" + box.CargoHome, "--env", "CARGO_TARGET_DIR=" + target,
+		// Dyna's entrypoint and user, whatever a room's layer sets, so a layer only adds files.
+		"--entrypoint", runnerEntrypoint,
 		s.Image}
 }
 
