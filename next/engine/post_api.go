@@ -6,6 +6,7 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
@@ -304,6 +305,14 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 	}
 	var events []contract.Event
 	var err error
+	hideRootOnly := false
+	if caller.Kind == contract.PrincipalSession {
+		session, err := s.store.Session(ctx, caller.Session)
+		if err != nil {
+			return contract.EventsListResponse{}, failure(err)
+		}
+		hideRootOnly = !session.Root
+	}
 	if req.Event != "" {
 		if req.AfterSeq != 0 || req.BeforeSeq != 0 || req.Home != nil || len(req.Types) != 0 {
 			return contract.EventsListResponse{}, invalid("event lookup cannot have filters")
@@ -324,6 +333,13 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 	next := req.AfterSeq
 	if len(events) > 0 {
 		next = events[len(events)-1].Seq
+	}
+	// A request for a root-only add-on names its source, URL or command. The cursor above still passes it.
+	if hideRootOnly {
+		events = slices.DeleteFunc(events, func(event contract.Event) bool {
+			requested, ok := event.Body.(contract.OpRequested)
+			return ok && requested.Card.RootOnly
+		})
 	}
 	// Names of the sessions this page names, so that posts and events of closed sessions keep their authors.
 	named := map[contract.SessionID]bool{}
