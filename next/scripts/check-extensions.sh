@@ -11,7 +11,7 @@ if [[ -z "${DYNA_INSIDE:-}" ]]; then
   image=${1:-dyna-base}
   name=dyna-ext-check-$$
   trap 'podman rm -f "$name" >/dev/null 2>&1 || true' EXIT
-  podman run --name "$name" -e DYNA_INSIDE=1 -v "$(readlink -f "$0"):/check.sh:ro" --entrypoint bash "$image" /check.sh
+  podman run --name "$name" --user node -e DYNA_INSIDE=1 -v "$(readlink -f "$0"):/check.sh:ro" --entrypoint bash "$image" /check.sh
   exit
 fi
 
@@ -26,7 +26,8 @@ args=(--remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --user-d
 DISPLAY=:1 chromium "${args[@]}" >/tmp/chromium.log 2>&1 &
 for _ in $(seq 30); do curl -fsm2 http://127.0.0.1:9222/json >/dev/null && break; sleep 1; done
 
-pid=$(pgrep -f '^/usr/lib/chromium/chromium --show' | head -1)
+pid=$(pgrep -f '^/usr/lib/chromium/chromium --show' | head -1 || true)
+[[ -n $pid ]] || { echo "Chromium is not running; its log:" >&2; cat /tmp/chromium.log >&2; exit 1; }
 mapfile -t argv < <(tr '\0' '\n' </proc/"$pid"/cmdline)
 echo "argv: ${argv[*]}"
 [[ $(printf '%s\n' "${argv[@]}" | grep -c '^--load-extension=') == 1 ]] || { echo "want exactly one non-empty --load-extension" >&2; exit 1; }
