@@ -12,6 +12,7 @@ type Caller struct {
 	Room      contract.RoomID
 	Device    string
 	Scopes    []contract.Scope
+	Host      contract.HostName // the host the owner says a paired device is on
 	Web       bool
 }
 
