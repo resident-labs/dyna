@@ -163,6 +163,23 @@ func TestEndPostsMustBeTheSessionsOwn(t *testing.T) {
 	}
 }
 
+func TestEndPostsIgnoreOtherRoom(t *testing.T) {
+	channel := contract.ReplyChannel{Kind: contract.ReplyFinal, Target: endTurnParent, Home: endTurnFeed}
+	s, _ := endTurnFixture(t, []contract.ReplyChannel{channel}, contract.PostCreated{Text: "report", Home: endTurnDM})
+	ctx := context.Background()
+	if err := s.CreateRoom(ctx, "other", "other", time.Unix(1000, 0)); err != nil {
+		t.Fatal(err)
+	}
+	post := contract.Event{ID: "foreign", Time: time.Unix(1000, 0), Room: "other", From: endTurnChild, Body: contract.PostCreated{Text: "cross-room", Home: endTurnFeed}}
+	if _, err := s.Post(ctx, post, nil); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := endChildTurn(t, s, contract.TurnOutputRequest{Outcome: contract.TurnCompleted, Final: "answer", EndPosts: []contract.EventID{post.ID}})
+	if len(body.Replies) != 1 || body.Replies[0].Posted != "" {
+		t.Fatalf("turn %+v", body)
+	}
+}
+
 func TestFailedTurnIgnoresEndPosts(t *testing.T) {
 	channel := contract.ReplyChannel{Kind: contract.ReplyFinal, Target: endTurnParent, Home: endTurnFeed}
 	s, post := endTurnFixture(t, []contract.ReplyChannel{channel}, contract.PostCreated{Text: "report", Home: endTurnDM})
