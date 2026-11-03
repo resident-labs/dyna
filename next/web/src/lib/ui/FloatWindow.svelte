@@ -66,7 +66,10 @@
   header { gap: 6px; padding: 0 6px 0 12px; }
   .floating header { height: 40px; cursor: grab; user-select: none; touch-action: none; }
   /* Full screen: no frame, clear of the notch and the home bar; its one focus is the window itself, so no ring. */
-  .full { inset: 0; padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); border: 0; border-radius: 0; box-shadow: none; }
+  /* Full screen fills the visible height, not the window's: an iPhone's keyboard covers the window without shrinking it, so
+     the bottom row would sit under the keyboard. The keyboard also covers the bottom inset, which drops while it is open. */
+  .full { inset: 0 0 auto; height: var(--app-height, 100dvh); box-sizing: border-box; border: 0; border-radius: 0; box-shadow: none;
+    padding: 0 env(safe-area-inset-right) max(0px, env(safe-area-inset-bottom) - var(--keyboard, 0px)) env(safe-area-inset-left); }
   .full:focus-visible { outline: none; }
   .full header { box-sizing: content-box; padding-top: env(safe-area-inset-top); cursor: default; }
   .full header :global(button) { width: 40px; height: 40px; }
