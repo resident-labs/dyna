@@ -45,8 +45,9 @@ const masterStart = 2 * time.Minute
 type Host struct {
 	buildGate           chan struct{}
 	shortGate           chan struct{}
-	hostexecGate        chan struct{}
 	stopGate            chan struct{}
+	dialGate            chan struct{} // host runs opening their connections
+	dialSetup           time.Duration
 	gate                chan struct{}
 	destination, socket string
 	runner              Runner
@@ -86,7 +87,7 @@ func New(destination, runtime, hostKey string, runner Runner) (*Host, error) {
 	if !ok || !info.IsDir() || info.Mode().Perm() != 0700 || stat.Uid != uint32(os.Getuid()) {
 		return nil, errors.New("insecure SSH control socket directory")
 	}
-	return &Host{gate: make(chan struct{}, 1), buildGate: make(chan struct{}, 1), shortGate: make(chan struct{}, 5), hostexecGate: make(chan struct{}, 3), stopGate: make(chan struct{}, 1), destination: destination, socket: socket, runner: runner, forwards: make(map[box.Forward]struct{}), bound: make(map[box.Forward]struct{})}, nil
+	return &Host{gate: make(chan struct{}, 1), buildGate: make(chan struct{}, 1), shortGate: make(chan struct{}, 5), stopGate: make(chan struct{}, 1), dialGate: make(chan struct{}, hostexecDialing), dialSetup: hostexecSetup, destination: destination, socket: socket, runner: runner, forwards: make(map[box.Forward]struct{}), bound: make(map[box.Forward]struct{})}, nil
 }
 
 // Generation changes each time the SSH master and its forwards are restored.
@@ -103,6 +104,14 @@ func (h *Host) lock(ctx context.Context) error {
 func (h *Host) unlock() { <-h.gate }
 func (h *Host) base() []string {
 	return append([]string{"ssh", "-S", h.socket, "-o", "ControlMaster=no", "-o", "StreamLocalBindUnlink=yes"}, h.hostKeys...)
+}
+
+// direct is an SSH connection of its own, for a session command. Over the master it would hold one of sshd's MaxSessions,
+// 10 by default, until it ended, and those belong to the engine's heartbeats, box operations and stops. ControlPath=none
+// keeps a ControlPath in the owner's ssh config from sharing a master anyway, and with no master's keepalive behind it,
+// ServerAlive ends a command on a host that went away before its timeout does.
+func (h *Host) direct() []string {
+	return append([]string{"ssh", "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3"}, h.hostKeys...)
 }
 
 // TrustNewKey is for a disposable machine. Its host key cannot be known before a script creates it, and its address may be one
@@ -382,13 +391,16 @@ func (h *Host) execute(ctx context.Context, argv ...string) ([]byte, error) {
 	return h.executeInput(ctx, nil, argv...)
 }
 func (h *Host) executeInput(ctx context.Context, input []byte, argv ...string) ([]byte, error) {
+	return h.executeOver(ctx, h.base(), input, argv...)
+}
+func (h *Host) executeOver(ctx context.Context, ssh []string, input []byte, argv ...string) ([]byte, error) {
 	// Do not retry a mutation after an uncertain reply; reconcile containers instead.
 	parts := []string{"bash", "-c", frameScript, "dyna-frame"}
 	parts = append(parts, argv...)
 	for i := range parts {
 		parts[i] = quote(parts[i])
 	}
-	args := append(h.base(), h.destination, strings.Join(parts, " "))
+	args := append(ssh, h.destination, strings.Join(parts, " "))
 	frame := append([]byte(fmt.Sprintf("DYNA-IN %020d\n", len(input))), input...)
 	out, sshErr := h.runner.Run(ctx, frame, args...)
 	body, status, err := parseReply(out)

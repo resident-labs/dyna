@@ -85,6 +85,7 @@ var methodTable = []MethodEntry{
 	),
 	method(contract.MethodHostexecList, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodHostexecRun, contract.ScopeRead, BoxAccess),
+	method(contract.MethodHostexecStop, contract.ScopeRead, BoxAccess),
 	method(contract.MethodInstructionsGet, contract.ScopeRead, OwnerAccess),
 	method(contract.MethodInstructionsSet, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodIssueList, contract.ScopeRead, UserAccess,

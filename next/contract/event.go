@@ -299,7 +299,7 @@ const (
 	CauseArchiveFailed       FailureCause = "archive_failed"        // close could not archive the session's branch
 	CauseGrantInactive       FailureCause = "grant_inactive"        // the host-exec grant is no longer active
 	CauseHostLost            FailureCause = "host_lost"             // the host stopped answering during the run
-	CauseHostBusy            FailureCause = "host_busy"             // the host execution limit is full
+	CauseHostBusy            FailureCause = "host_busy"             // stored runs only: the host execution limit was full, before host runs had connections of their own
 	CauseGithubFailed        FailureCause = "github_failed"         // GitHub refused the request or did not answer
 	CauseStale               FailureCause = "stale"                 // what the request needed changed before it ran
 	CauseInterrupted         FailureCause = "interrupted"           // the engine stopped during the run; the outcome is unknown

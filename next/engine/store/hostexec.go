@@ -16,6 +16,7 @@ const (
 	HostexecClosed  HostexecStop = "closed"
 	HostexecLost    HostexecStop = "lost"
 	HostexecTimeout HostexecStop = "timeout"
+	HostexecStopped HostexecStop = "stopped" // its session stopped it, as with job stop
 )
 
 type HostexecRun struct {
@@ -44,15 +45,47 @@ func (s *Store) StartHostexec(ctx context.Context, run HostexecRun, who contract
 		return nil
 	})
 }
-func (s *Store) FinishHostexec(ctx context.Context, id contract.OpID, now time.Time, bytes int, stopped HostexecStop) error {
-	return s.Write(ctx, func(tx *sql.Tx) error {
+
+// FinishHostexec records a run's end and returns how it stopped, which a stop during the run decides.
+func (s *Store) FinishHostexec(ctx context.Context, id contract.OpID, now time.Time, bytes int, stopped HostexecStop) (HostexecStop, error) {
+	var final HostexecStop
+	err := s.Write(ctx, func(tx *sql.Tx) error {
 		if stopped == HostexecLost {
 			_, err := tx.Exec("UPDATE hostexec_runs SET stopped='lost',lost_at=?,output_bytes=? WHERE op=?", now.UnixMilli(), bytes, id)
+			final = stopped
 			return err
 		}
-		_, err := tx.Exec("UPDATE hostexec_runs SET ended_at=?,output_bytes=?,stopped=CASE WHEN stopped IN ('closed','revoked') THEN stopped ELSE ? END WHERE op=?", now.UnixMilli(), bytes, stopped, id)
-		return err
+		if _, err := tx.Exec("UPDATE hostexec_runs SET ended_at=?,output_bytes=?,stopped=CASE WHEN stopped IN ('closed','revoked','stopped') THEN stopped ELSE ? END WHERE op=?", now.UnixMilli(), bytes, stopped, id); err != nil {
+			return err
+		}
+		return tx.QueryRow("SELECT stopped FROM hostexec_runs WHERE op=?", id).Scan(&final)
 	})
+	return final, err
+}
+
+// StopHostexecRun marks a running run stopped and returns it. ok is false for a run that has ended or is being stopped
+// already, and the returned run is empty for one that has not started.
+func (s *Store) StopHostexecRun(ctx context.Context, id contract.OpID) (HostexecRun, bool, error) {
+	var run HostexecRun
+	var ok bool
+	err := s.Write(ctx, func(tx *sql.Tx) error {
+		run, ok = HostexecRun{}, false
+		var ended sql.NullInt64
+		err := tx.QueryRow("SELECT op,grant_id,host,scope,timeout_ms,stopped,ended_at FROM hostexec_runs WHERE op=?", id).Scan(&run.Op, &run.Grant, &run.Host, &run.Scope, &run.Timeout, &run.Stopped, &ended)
+		if errors.Is(err, sql.ErrNoRows) {
+			run = HostexecRun{}
+			return nil
+		}
+		if err != nil || ended.Valid || run.Stopped != "" {
+			return err
+		}
+		if _, err := tx.Exec("UPDATE hostexec_runs SET stopped='stopped' WHERE op=?", id); err != nil {
+			return err
+		}
+		run.Stopped, ok = HostexecStopped, true
+		return nil
+	})
+	return run, ok, err
 }
 func (s *Store) HostexecStops(ctx context.Context, now time.Time) ([]HostexecRun, error) {
 	if err := s.Write(ctx, func(tx *sql.Tx) error {
