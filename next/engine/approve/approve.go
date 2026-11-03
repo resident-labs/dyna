@@ -24,13 +24,13 @@ type Entry struct {
 	Scope     contract.Scope
 	// NoExpiry keeps a request pending until it is decided or withdrawn.
 	NoExpiry bool
-	// RootDecides says whether the room's root may decide this kind in the room, as the owner can. Nil means only the owner.
-	RootDecides func(context.Context, contract.RoomID) (bool, error)
-	Class       func(contract.OpArgs, contract.Principal) contract.Class
-	Card        func(context.Context, contract.OpArgs, contract.Principal) contract.Card
-	Check       func(context.Context, contract.OpArgs, contract.Principal) error
-	Execute     func(context.Context, contract.OpID, contract.OpArgs, contract.Principal) contract.OpResult
-	Decode      func(json.RawMessage) (contract.OpArgs, error)
+	// RootApproves names the room setting that lets the room's root decide this kind in the room, as the owner can. Empty means only the owner.
+	RootApproves contract.RootApproval
+	Class        func(contract.OpArgs, contract.Principal) contract.Class
+	Card         func(context.Context, contract.OpArgs, contract.Principal) contract.Card
+	Check        func(context.Context, contract.OpArgs, contract.Principal) error
+	Execute      func(context.Context, contract.OpID, contract.OpArgs, contract.Principal) contract.OpResult
+	Decode       func(json.RawMessage) (contract.OpArgs, error)
 }
 
 type Service struct {
@@ -148,7 +148,13 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 	if err != nil {
 		return contract.Operation{}, err
 	}
-	op := contract.Operation{ID: contract.OpID(id), Kind: kind, Room: input.Room, By: who, Args: input.Args, Class: class, Card: entry.Card(ctx, input.Args, who), State: contract.OpPending, Created: now}
+	card := entry.Card(ctx, input.Args, who)
+	if !immediate && entry.RootApproves != "" {
+		if name, on, err := s.Store.RoomRootApproves(ctx, input.Room, entry.RootApproves); err == nil && on {
+			card.Body += "\nWaiting for " + name + "'s root or the owner."
+		}
+	}
+	op := contract.Operation{ID: contract.OpID(id), Kind: kind, Room: input.Room, By: who, Args: input.Args, Class: class, Card: card, State: contract.OpPending, Created: now}
 	if !entry.NoExpiry {
 		op.Expires = now.Add(s.Expiry)
 	}
@@ -224,10 +230,10 @@ func (s *Service) Decide(ctx context.Context, who contract.Principal, id contrac
 	entry, known := s.Kinds[op.Kind]
 	// The owner decides. A session may withdraw its own request, and the room's root decides a kind that lets it.
 	if who.Kind != contract.PrincipalOwner && (state != contract.OpWithdrawn || who != op.By) {
-		if state == contract.OpWithdrawn || entry.RootDecides == nil {
+		if state == contract.OpWithdrawn || entry.RootApproves == "" {
 			return ErrForbidden
 		}
-		allowed, err := entry.RootDecides(ctx, op.Room)
+		_, allowed, err := s.Store.RoomRootApproves(ctx, op.Room, entry.RootApproves)
 		if err != nil {
 			return err
 		}

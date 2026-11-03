@@ -107,11 +107,12 @@ func (s *Service) PoolAdd(ctx context.Context, caller contract.Principal, req co
 	return contract.PoolAddResponse{}, nil
 }
 
-// ownerEntry is a session's change that only the owner can approve.
-func ownerEntry[A contract.OpArgs](card func(A) contract.Card, check func(context.Context, A) *contract.Error, apply func(context.Context, A) (string, error)) approve.Entry {
+// ownerEntry is a session's change that the owner approves, and the room's root when its setting for the kind is on.
+func ownerEntry[A contract.OpArgs](root contract.RootApproval, card func(A) contract.Card, check func(context.Context, A) *contract.Error, apply func(context.Context, A) (string, error)) approve.Entry {
 	return approve.Entry{
-		Scope: contract.ScopeAdmin,
-		Class: func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassOwner },
+		Scope:        contract.ScopeAdmin,
+		RootApproves: root,
+		Class:        func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassOwner },
 		Card: func(_ context.Context, args contract.OpArgs, _ contract.Principal) contract.Card {
 			return card(args.(A))
 		},
@@ -138,7 +139,7 @@ func ownerEntry[A contract.OpArgs](card func(A) contract.Card, check func(contex
 
 // PoolAddEntry registers a session's pool. The card shows the script, which is what the owner approves.
 func (s *Service) PoolAddEntry() approve.Entry {
-	return ownerEntry(func(req contract.PoolAddRequest) contract.Card {
+	return ownerEntry(contract.RootApprovesPools, func(req contract.PoolAddRequest) contract.Card {
 		shape := fmt.Sprintf("Shared by sessions, at most %d nodes.", req.Max)
 		if req.PerSession {
 			shape = fmt.Sprintf("One node per session, at most %d.", req.Max)
@@ -252,7 +253,7 @@ func (s *Service) RoomHosts(ctx context.Context, caller contract.Principal, req 
 
 // RoomHostsEntry registers a session's rule.
 func (s *Service) RoomHostsEntry() approve.Entry {
-	return ownerEntry(func(req contract.RoomHostsRequest) contract.Card {
+	return ownerEntry(contract.RootApprovesHosts, func(req contract.RoomHostsRequest) contract.Card {
 		card := contract.Card{Title: "asks to let this room's new boxes use any host", Target: contract.Target{Kind: contract.TargetRoom, Name: string(req.Room)}}
 		if len(req.Only) > 0 {
 			card.Title, card.Body = "asks to keep this room's new boxes on these hosts", strings.Join(req.Only, ", ")
