@@ -68,7 +68,13 @@ hosts.
 
 A runner is placed as a box is, by the same `box.Admit`: a ready host with ci on,
 with room for the runner's CPUs and memory and a free disk floor, the one with the
-most free memory. A host where a session box is pending for CPU or memory takes no
+most free memory. Among those, a host that already has the current runner image wins,
+whatever its free memory: a host that must build the image first makes the job wait
+minutes. Only when no host with the image has room does a runner go to a host that
+builds it, so a new host still gets its image. The pool builds the image on each ci
+host in the background, outside its lock, when the engine starts or a host is added or
+its image changes; a build reuses an image already there, so that is quick. Until a
+host's build is done, it counts as not ready. A host where a session box is pending for CPU or memory takes no
 new runner when only runners keep that box out, so the box gets the next free slot. Runners and boxes count against each other there, and several
 runners share a host while it has room, up to 16, one per slot. A host with ci off
 gets no new runner. The agents switch and the room list keep sessions off a host,

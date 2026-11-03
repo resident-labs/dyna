@@ -3,6 +3,7 @@ package ci
 import (
 	"context"
 	"errors"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -41,9 +42,20 @@ type fakeDriver struct {
 	startErr error
 	listErr  error
 	listCtx  context.Context
+	gate     chan struct{} // when set, a build waits for it to close
+	buildMu  sync.Mutex    // a build-ahead runs beside placement
 }
 
-func (d *fakeDriver) BuildRunnerImage(context.Context) (string, error) {
+func (d *fakeDriver) BuildRunnerImage(ctx context.Context) (string, error) {
+	if d.gate != nil {
+		select {
+		case <-d.gate:
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	d.buildMu.Lock()
+	defer d.buildMu.Unlock()
 	d.builds++
 	return "image", nil
 }
@@ -166,6 +178,21 @@ func (f *fixture) scale(assigned int) int { return f.scaleSize(large, assigned) 
 
 func (f *fixture) tick(t *testing.T) {
 	t.Helper()
+	f.tickNoWait(t)
+	// A build-ahead is done before the test goes on, so placement sees the image as it would a poll later.
+	for {
+		f.pool.mu.Lock()
+		busy := len(f.pool.building) > 0
+		f.pool.mu.Unlock()
+		if !busy {
+			return
+		}
+		runtime.Gosched()
+	}
+}
+
+func (f *fixture) tickNoWait(t *testing.T) {
+	t.Helper()
 	if err := f.pool.Tick(context.Background(), &f.group); err != nil {
 		t.Fatal(err)
 	}
@@ -256,8 +283,8 @@ func TestAnIdleHostGetsNoProxyUntilAJobNeedsIt(t *testing.T) {
 	f := newFixture(1)
 	defer f.stop()
 	f.tick(t)
-	if d := f.drivers["pve"]; d.egress || d.builds != 0 {
-		t.Fatalf("an idle pool started a proxy: %+v", d)
+	if d := f.drivers["pve"]; d.egress { // the image builds ahead, the proxy waits
+		t.Fatal("an idle pool started a proxy")
 	}
 }
 
@@ -395,6 +422,7 @@ func TestFailedStartDeletesRegistrationAndTriesAnotherHost(t *testing.T) {
 	big.startErr = nil
 	f.drivers["pve"].runners = nil
 	f.now = f.now.Add(retryAfter)
+	delete(f.pool.images, "pve") // pve, which has its image, would take the job before big, which must build again
 	f.scale(1)
 	if len(big.runners) != 1 || big.builds != 2 {
 		t.Fatalf("big %+v", big)
