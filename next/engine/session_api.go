@@ -240,7 +240,7 @@ func (s *Service) Stale(id contract.SessionID) bool {
 func (s *Service) managedSession(ctx context.Context, caller contract.Principal, id contract.SessionID) (store.Session, *contract.Error) {
 	session, err := s.store.Session(ctx, id)
 	if errors.Is(err, store.ErrNotFound) {
-		return store.Session{}, &contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("session %s is closed or does not exist; a crew closes itself when its run ends", id)}
+		return store.Session{}, &contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("no open session named or with ID %q in this room", id)}
 	}
 	if err != nil {
 		return store.Session{}, failure(err)
@@ -262,7 +262,21 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 	if req.Discard && caller.Kind != contract.PrincipalOwner {
 		return contract.SessionCloseResponse{}, forbidden()
 	}
-	session, problem := s.managedSession(ctx, caller, req.Session)
+	target := req.Session
+	if _, err := s.store.Session(ctx, target); errors.Is(err, store.ErrNotFound) && caller.Kind == contract.PrincipalSession {
+		self, problem := s.callerSession(ctx, caller)
+		if problem != nil {
+			return contract.SessionCloseResponse{}, problem
+		}
+		if named, err := s.store.SessionByName(ctx, self.Room, string(target)); err == nil {
+			target = named.ID
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return contract.SessionCloseResponse{}, failure(err)
+		}
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return contract.SessionCloseResponse{}, failure(err)
+	}
+	session, problem := s.managedSession(ctx, caller, target)
 	if problem != nil {
 		return contract.SessionCloseResponse{}, problem
 	}
