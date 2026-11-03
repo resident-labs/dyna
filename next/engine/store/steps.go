@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 80
+const schemaVersion = 81
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
@@ -46,10 +46,12 @@ var steps = map[int][]string{
 		`DROP TABLE repo_ci_hosts`,
 		`UPDATE hosts SET ci=1 WHERE pool!=''`,
 	},
+	// Backups are gone, so nothing records an off-host copy.
+	80: {`DROP TABLE backup_copy_status`},
 }
 
 // upgrade applies each future numbered step in the same transaction as its version.
-func upgrade(db *sql.DB, floor int, commit string, steps map[int][]string, before func(int) error) error {
+func upgrade(db *sql.DB, floor int, commit string, steps map[int][]string) error {
 	var value string
 	if err := db.QueryRow("SELECT value FROM meta WHERE key = 'schema_version'").Scan(&value); err != nil {
 		return err
@@ -60,11 +62,6 @@ func upgrade(db *sql.DB, floor int, commit string, steps map[int][]string, befor
 	}
 	if version < floor {
 		return &Error{Code: StoreTooOld, Message: fmt.Sprintf("This store is too old. Update through commit %s first.", commit)}
-	}
-	if version < schemaVersion && before != nil {
-		if err := before(version); err != nil {
-			return fmt.Errorf("pre-upgrade backup: %w", err)
-		}
 	}
 	for ; version < schemaVersion; version++ {
 		statements, ok := steps[version]

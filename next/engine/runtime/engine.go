@@ -18,7 +18,6 @@ import (
 	"strings"
 	"time"
 
-	"filippo.io/age"
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
@@ -48,7 +47,6 @@ type serviceWithHosts struct {
 	boxes  hostRegistrar
 	quotas *model.Quotas
 	*engine.AccountActions
-	backupEnabled bool
 }
 
 func (s *serviceWithHosts) AccountsQuota(ctx context.Context, caller contract.Principal, _ contract.AccountsQuotaRequest) (contract.AccountsQuotaResponse, *contract.Error) {
@@ -67,7 +65,6 @@ func (s *serviceWithHosts) HostList(ctx context.Context, caller contract.Princip
 	if err := s.boxes.HostLoad(ctx, result.Hosts); err != nil {
 		return contract.HostListResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: err.Error()}
 	}
-	result.Hosts[0].BackupCopyEnabled = s.backupEnabled
 	return result, nil
 }
 
@@ -109,22 +106,10 @@ type Config struct {
 	SessionMaxDepth                            int
 	WebListen                                  string
 	WebRoutes                                  []string
-	BackupDest, BackupRecipient                string
 	GitName, GitEmail                          string
 }
 
 func Run(ctx context.Context, cfg Config) error {
-	if (cfg.BackupDest == "") != (cfg.BackupRecipient == "") {
-		return fmt.Errorf("backup.dest and backup.recipient must be set together")
-	}
-	var recipient age.Recipient
-	if cfg.BackupRecipient != "" {
-		parsed, err := age.ParseX25519Recipient(cfg.BackupRecipient)
-		if err != nil {
-			return fmt.Errorf("backup.recipient: %w", err)
-		}
-		recipient = parsed
-	}
 	token := os.Getenv("GH_TOKEN")
 	if err := os.Unsetenv("GH_TOKEN"); err != nil {
 		return err
@@ -143,16 +128,6 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	defer st.Close()
 	layout := box.Layout{Data: cfg.Data, HostData: cfg.HostData}
-	backupCtx, stopBackup := context.WithCancel(ctx)
-	backupDone := make(chan struct{})
-	go func() {
-		defer close(backupDone)
-		(&backupLoop{store: st, layout: layout, dest: cfg.BackupDest, recipient: recipient, now: time.Now, run: sshBackup, free: func(ctx context.Context) (int64, bool) {
-			total, used := podman.LocalDisk(ctx, cfg.Data)
-			return total - used, total > 0
-		}}).start(backupCtx)
-	}()
-	defer func() { stopBackup(); <-backupDone }()
 	if err := st.ResetEngineHosts(ctx); err != nil {
 		return fmt.Errorf("reset host identity: %w", err)
 	}
@@ -248,7 +223,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	boxes.Mirror = mirror
 	boxes.Images = &images.Builder{Recorder: service, Now: time.Now}
-	apiServer := api.New(&serviceWithHosts{Service: service, boxes: boxes, quotas: quotas, AccountActions: accounts, backupEnabled: recipient != nil}, func(c api.Caller) http.Handler {
+	apiServer := api.New(&serviceWithHosts{Service: service, boxes: boxes, quotas: quotas, AccountActions: accounts}, func(c api.Caller) http.Handler {
 		return drain.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			session, err := st.Session(r.Context(), c.Principal.Session)
 			if err != nil {
