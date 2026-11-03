@@ -202,6 +202,12 @@ func (s *Service) PrTrack(ctx context.Context, caller contract.Principal, req co
 	}
 	row := store.TrackedPR{HeadRepo: pull.HeadRepo, Meta: pull.Meta, PrSummary: contract.PrSummary{Repo: pull.Repo, Number: req.Number, URL: pull.URL, Title: pull.Title, Author: pull.Author, Session: owner.ID, Draft: pull.Draft, State: pull.State, Head: pull.Head}}
 	if err := s.store.TrackPR(ctx, row); err != nil {
+		// The holder is named only to a caller who may see the PR, which is one of its own room.
+		if held, e := s.trackedPR(ctx, caller, pull.Repo, req.Number); errors.Is(err, store.ErrPRTracked) && e == nil {
+			if holder, err := s.store.Session(ctx, held.Session); err == nil {
+				return contract.PrTrackResponse{}, &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s (%s) already tracks this pull request", holder.Name, holder.ID)}
+			}
+		}
 		return contract.PrTrackResponse{}, failure(err)
 	}
 	stored, e := s.trackedPR(ctx, caller, pull.Repo, req.Number)

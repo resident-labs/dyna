@@ -1,0 +1,79 @@
+package prs
+
+import (
+	"encoding/json"
+	"fmt"
+	"testing"
+
+	"github.com/resident-labs/dyna/contract"
+)
+
+const sha = "0123456789abcdef0123456789abcdef01234567"
+
+func pullJSON(t *testing.T, rollup, reviewDecision, comments string) gqlPull {
+	t.Helper()
+	var pull gqlPull
+	raw := fmt.Sprintf(`{"number":1,"state":"OPEN","headRefOid":%q,"reviewDecision":%s,"commits":{"nodes":[{"commit":{"oid":%q,"statusCheckRollup":%s}}]},"comments":{"nodes":[%s]}}`, sha, reviewDecision, sha, rollup, comments)
+	if err := json.Unmarshal([]byte(raw), &pull); err != nil {
+		t.Fatal(err)
+	}
+	return pull
+}
+
+func TestAnEmptyRollupIsNoChecksNotAPass(t *testing.T) {
+	for name, test := range map[string]struct {
+		rollup string
+		want   contract.PrCI
+	}{
+		"no rollup":                  {`null`, contract.PrCINone},
+		"success with no checks":     {`{"state":"SUCCESS","contexts":{"nodes":[]}}`, contract.PrCINone},
+		"success with a check":       {`{"state":"SUCCESS","contexts":{"nodes":[{"__typename":"CheckRun","name":"lint","conclusion":"SUCCESS"}]}}`, contract.PrCISuccess},
+		"pending with no checks yet": {`{"state":"PENDING","contexts":{"nodes":[]}}`, contract.PrCIPending},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := pullJSON(t, test.rollup, "null", "").observed("me"); got.CI != test.want {
+				t.Fatalf("CI %q, want %q", got.CI, test.want)
+			}
+		})
+	}
+}
+
+func TestARollupOfAnEarlierHeadIsPendingForTheNewOne(t *testing.T) {
+	pull := pullJSON(t, `{"state":"SUCCESS","contexts":{"nodes":[{"__typename":"CheckRun","name":"lint","conclusion":"SUCCESS"}]}}`, "null", "")
+	pull.Commits.Nodes[0].Commit.OID = "deadbeef"
+	if got := pull.observed("me"); got.CI != contract.PrCIPending {
+		t.Fatalf("CI %q for a head whose own checks have not reported", got.CI)
+	}
+}
+
+func TestAVerdictCommentAtTheHeadFromTheViewerIsTheReview(t *testing.T) {
+	comment := func(author, body string) string {
+		text, _ := json.Marshal(body)
+		return fmt.Sprintf(`{"body":%s,"author":{"login":%q}}`, text, author)
+	}
+	const disclosure = "> 🤖 Review by Aria's agent swarm, Dyna, not by Aria.\n"
+	approved := comment("me", disclosure+"**Verdict: Approved at "+sha[:12]+"**\nfine")
+	for name, test := range map[string]struct {
+		decision string
+		comments string
+		want     contract.PrReview
+	}{
+		"approved at the head":          {`null`, approved, contract.PrApproved},
+		"full sha":                      {`null`, comment("me", disclosure+"**Verdict: Approved at "+sha+"**"), contract.PrApproved},
+		"approved at an older head":     {`null`, comment("me", disclosure+"**Verdict: Approved at deadbeefcafe**"), ""},
+		"someone else's comment":        {`null`, comment("stranger", disclosure+"**Verdict: Approved at "+sha[:12]+"**"), ""},
+		"the viewer without the mark":   {`null`, comment("me", "**Verdict: Approved at "+sha[:12]+"**"), ""},
+		"too short a sha":               {`null`, comment("me", disclosure+"**Verdict: Approved at 0123**"), ""},
+		"changes requested at head":     {`null`, comment("me", disclosure+"**Verdict: Changes requested at "+sha[:12]+"**"), contract.PrChangesRequested},
+		"the later verdict wins":        {`null`, approved + "," + comment("me", disclosure+"**Verdict: Changes requested at "+sha[:12]+"**"), contract.PrChangesRequested},
+		"review required, then comment": {`"REVIEW_REQUIRED"`, approved, contract.PrApproved},
+		"a GitHub request stands":       {`"CHANGES_REQUESTED"`, approved, contract.PrChangesRequested},
+		"a GitHub approval stands":      {`"APPROVED"`, "", contract.PrApproved},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := pullJSON(t, `null`, test.decision, test.comments).observed("me"); got.Review != test.want {
+				t.Fatalf("review %q, want %q", got.Review, test.want)
+			}
+		})
+	}
+}
