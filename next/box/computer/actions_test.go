@@ -11,7 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -63,11 +65,31 @@ func TestValidateChecksAWholeActionBeforeInput(t *testing.T) {
 	}
 }
 
-func TestKeyNamesTakeV1AliasesCharactersAndChords(t *testing.T) {
-	got, err := keyNames([]string{"CTRL", "enter", "l", "é", "ctrl+shift+t", "+", "Page_Down"})
-	want := "Control_L Return U006C U00E9 Control_L Shift_L U0074 U002B Page_Down"
-	if err != nil || strings.Join(got, " ") != want {
-		t.Fatalf("keys %v, %v", got, err)
+func TestKeysTakeV1AliasesCharactersKeysymNamesAndChords(t *testing.T) {
+	for _, tc := range []struct {
+		keys []string
+		want []uint32
+	}{
+		{[]string{"CTRL", "l"}, []uint32{0xffe3, 'l'}},
+		{[]string{"ctrl+l"}, []uint32{0xffe3, 'l'}},
+		{[]string{"enter"}, []uint32{0xff0d}},
+		{[]string{"é"}, []uint32{0xe9}},
+		{[]string{"日"}, []uint32{0x01000000 + 0x65e5}},
+		{[]string{"+"}, []uint32{'+'}},
+		{[]string{"Page_Down", "F5", "XF86AudioMute"}, []uint32{0xff56, 0xffc2, 0x1008ff12}},
+		// v1's Shift rule: with Shift, a character is the one Shift types, so Xvnc keeps Shift down for it.
+		{[]string{"ctrl+shift+t"}, []uint32{0xffe3, 0xffe1, 'T'}},
+		{[]string{"shift+tab"}, []uint32{0xffe1, 0xff09}},
+		{[]string{"SHIFT", "1", "minus"}, []uint32{0xffe1, '!', '_'}},
+	} {
+		if got, err := keysymsOf(tc.keys); err != nil || !slices.Equal(got, tc.want) {
+			t.Errorf("%v: %x, %v; want %x", tc.keys, got, err, tc.want)
+		}
+	}
+	for _, bad := range [][]string{{"NoSuchKey"}, {"ctrl+"}, {"\x07"}} {
+		if _, err := keysymsOf(bad); err == nil {
+			t.Errorf("%q is a key", bad)
+		}
 	}
 }
 
@@ -81,52 +103,138 @@ func TestSettledSaysWhatChanged(t *testing.T) {
 	}
 }
 
-// Typed text goes to Xvnc as key events, one keysym a character, Enter for each line break.
-func TestTypeTextSendsAKeysymForEveryCharacter(t *testing.T) {
+type keyEvent struct {
+	keysym uint32
+	down   bool
+	at     time.Time
+}
+
+// fakeVNC serves the display's socket as Xvnc does for the actions' keyboard: it records every key event and answers
+// each picture request. desktopSocket points at it for the test.
+func fakeVNC(t *testing.T) func() []keyEvent {
 	socket := filepath.Join(t.TempDir(), "vnc.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
-	keys := make(chan []uint32, 1)
-	go func() {
-		conn, err := listener.Accept()
-		if err != nil {
-			return
-		}
+	t.Cleanup(func() { listener.Close() })
+	previous := desktopSocket
+	desktopSocket = socket
+	t.Cleanup(func() { desktopSocket = previous })
+	var mu sync.Mutex
+	var events []keyEvent
+	serve := func(conn net.Conn) {
 		defer conn.Close()
 		r := bufio.NewReader(conn)
-		read := func(n int) []byte { b := make([]byte, n); _, _ = io.ReadFull(r, b); return b }
+		read := func(n int) ([]byte, error) { b := make([]byte, n); _, err := io.ReadFull(r, b); return b, err }
 		_, _ = conn.Write([]byte("RFB 003.008\n\x01\x01"))
-		read(12 + 1)                                                       // version, security None
+		_, _ = read(12 + 1)                                                // version, security None
 		_, _ = conn.Write([]byte{0, 0, 0, 0})                              // security result
-		read(1)                                                            // shared
+		_, _ = read(1)                                                     // shared
 		_, _ = conn.Write(append([]byte{0, 1, 0, 1}, make([]byte, 20)...)) // 1x1, no name
-		read(20)                                                           // SetPixelFormat
-		encodings := read(4)[3]                                            // SetEncodings, then the encodings
-		read(4 * int(encodings))
-		var got []uint32
+		_, _ = read(20)                                                    // SetPixelFormat
+		head, _ := read(4)                                                 // SetEncodings, then the encodings
+		_, _ = read(4 * int(head[3]))
 		for {
-			kind := read(1)[0]
-			if kind == 3 { // the request after the keys
-				read(9)
-				_, _ = conn.Write([]byte{0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0x55})
-				keys <- got
+			kind, err := read(1)
+			if err != nil {
 				return
 			}
-			event := read(7)
-			if event[0] == 1 {
-				got = append(got, binary.BigEndian.Uint32(event[3:]))
+			if kind[0] == 3 {
+				_, _ = read(9)
+				_, _ = conn.Write([]byte{0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0x55})
+				continue
 			}
+			event, err := read(7)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			events = append(events, keyEvent{binary.BigEndian.Uint32(event[3:]), event[0] == 1, time.Now()})
+			mu.Unlock()
+		}
+	}
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go serve(conn)
 		}
 	}()
-	if err := TypeText(context.Background(), socket, "Hé ü\r\nñ 日本\t→"); err != nil {
+	return func() []keyEvent {
+		mu.Lock()
+		defer mu.Unlock()
+		out := slices.Clone(events)
+		events = nil
+		return out
+	}
+}
+
+// presses lists the keysyms that went down, in order.
+func presses(events []keyEvent) []uint32 {
+	var out []uint32
+	for _, e := range events {
+		if e.down {
+			out = append(out, e.keysym)
+		}
+	}
+	return out
+}
+
+// Typed text goes to Xvnc as key events, one keysym a character, Enter for each line break.
+func TestTypeTextSendsAKeysymForEveryCharacter(t *testing.T) {
+	sent := fakeVNC(t)
+	if err := TypeText(context.Background(), desktopSocket, "Hé ü\r\nñ 日本\t→"); err != nil {
 		t.Fatal(err)
 	}
 	want := []uint32{'H', 0xe9, ' ', 0xfc, 0xff0d, 0xf1, ' ', 0x01000000 + 0x65e5, 0x01000000 + 0x672c, 0xff09, 0x01000000 + 0x2192}
-	if got := <-keys; !slices.Equal(got, want) {
+	if got := presses(sent()); !slices.Equal(got, want) {
 		t.Fatalf("keysyms %x, want %x", got, want)
+	}
+}
+
+// A chord goes down modifiers first and up in reverse, and stays down for its hold from when Xvnc took it.
+func TestAKeyChordIsHeldAndLetGoInReverse(t *testing.T) {
+	sent := fakeVNC(t)
+	keys, _ := keysymsOf([]string{"shift+tab"})
+	if err := press(context.Background(), keys, 300*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	events := sent()
+	want := []keyEvent{{0xffe1, true, time.Time{}}, {0xff09, true, time.Time{}}, {0xff09, false, time.Time{}}, {0xffe1, false, time.Time{}}}
+	if len(events) != len(want) {
+		t.Fatalf("events %+v", events)
+	}
+	for i, e := range events {
+		if e.keysym != want[i].keysym || e.down != want[i].down {
+			t.Fatalf("event %d: %+v, want %+v", i, e, want[i])
+		}
+	}
+	if held := events[2].at.Sub(events[1].at); held < 300*time.Millisecond {
+		t.Fatalf("held %v", held)
+	}
+}
+
+// Keys held around a click go down on Xvnc before xdotool clicks, and up after it.
+func TestKeysHeldAroundAPointerChain(t *testing.T) {
+	sent := fakeVNC(t)
+	dir := t.TempDir()
+	log := filepath.Join(dir, "xdotool.log")
+	if err := os.WriteFile(filepath.Join(dir, "xdotool"), []byte("#!/bin/sh\ndate +%s%N >> "+log+"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	if err := holding(context.Background(), []uint32{0xffe1}, []string{"click", "1"}); err != nil {
+		t.Fatal(err)
+	}
+	stamp, _ := os.ReadFile(log)
+	nanos, _ := strconv.ParseInt(strings.TrimSpace(string(stamp)), 10, 64)
+	clicked := time.Unix(0, nanos)
+	events := sent()
+	if len(events) != 2 || !events[0].down || events[1].down || !events[0].at.Before(clicked) || !events[1].at.After(clicked) {
+		t.Fatalf("shift %+v around the click at %v", events, clicked)
 	}
 }
 
@@ -150,7 +258,7 @@ func fakeAgent(t *testing.T, launched *[]string) Agent {
 	return NewAgent(socket)
 }
 
-// Each input action is one xdotool chain, with held keys around it, modifiers before the key they modify.
+// Each pointer action is one xdotool chain; its keys go to Xvnc.
 func TestInputActionsSendOneXdotoolChain(t *testing.T) {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "xdotool.log")
@@ -166,12 +274,10 @@ func TestInputActionsSendOneXdotoolChain(t *testing.T) {
 		req    Request
 		want   string
 	}{
-		{Click, Request{X: number(10), Y: number(20), Button: "right", Double: true, Keys: []string{"SHIFT"}}, ":1 keydown Shift_L sleep 0.05 mousemove 10 20 click --repeat 2 --delay 80 3 keyup Shift_L"},
+		{Click, Request{X: number(10), Y: number(20), Button: "right", Double: true}, ":1 mousemove 10 20 click --repeat 2 --delay 80 3"},
 		{Move, Request{X: number(5), Y: number(6)}, ":1 mousemove 5 6"},
 		{Drag, Request{Path: []Point{{1, 2}, {3, 4}}, StepMS: number(120)}, ":1 mousemove 1 2 mousedown 1 sleep 0.120 mousemove 3 4 sleep 0.120 mouseup 1"},
 		{Scroll, Request{ScrollY: -3, ScrollX: 2}, ":1 mousemove 640 400 click --repeat 3 --delay 20 4 click --repeat 2 --delay 20 7"},
-		{Key, Request{Keys: []string{"l", "CTRL"}, HoldMS: number(0)}, ":1 keydown Control_L sleep 0.05 keydown U006C sleep 0.000 keyup U006C keyup Control_L"},
-		{Key, Request{Keys: []string{"SHIFT"}}, ":1 keydown Shift_L sleep 0.050 keyup Shift_L"},
 	} {
 		_ = os.Remove(log)
 		result, err := Do(context.Background(), agent, tc.action, tc.req)
