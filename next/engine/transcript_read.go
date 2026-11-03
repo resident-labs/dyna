@@ -120,7 +120,11 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 				t.More = true
 				break
 			}
-			t.Inputs = append(t.Inputs, contract.TranscriptInput{Home: home, At: input.Time, ID: input.ID, Seq: input.Seq, Room: input.Room, Type: input.Body.EventType(), From: input.From, Text: clipTranscript(value, 512), More: len(value) > 512, Attachments: attachments})
+			var source *contract.PostSource
+			if post, ok := input.Body.(contract.PostCreated); ok {
+				source = post.Source
+			}
+			t.Inputs = append(t.Inputs, contract.TranscriptInput{Source: source, Home: home, At: input.Time, ID: input.ID, Seq: input.Seq, Room: input.Room, Type: input.Body.EventType(), From: input.From, Text: clipTranscript(value, 512), More: len(value) > 512, Attachments: attachments})
 			// Reserve room for turn metadata and cursor fields before adding items.
 			encoded, _ := json.Marshal(t)
 			if len(encoded) > 170<<10 && len(t.Inputs) > 1 {
