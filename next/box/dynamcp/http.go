@@ -221,6 +221,15 @@ func (s *Server) call(ctx context.Context, p callParams) result {
 		data = marshal(req)
 	}
 
+	if a.method == contract.MethodImageSave {
+		in := decoded.(*tools.ImageSaveInput)
+		archive, err := skills.PackFolder(in.Path, s.preparer.Dir)
+		if err != nil {
+			return failure(contract.ErrInvalid, err.Error())
+		}
+		data = marshal(contract.ImageSaveRequest{Name: in.Name, Archive: archive, Room: in.Room})
+	}
+
 	if a.local == tools.VisualCheck {
 		in := decoded.(*tools.FileRequest)
 		in.File = s.preparer.Path(in.File)
