@@ -548,7 +548,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	}}
 	add.Flags().StringSliceVar(&hostRooms, "room", nil, "Room ID allowed on this host (repeatable; default: all rooms)")
 	add.Flags().StringVar(&ssh, "ssh", "", "SSH destination")
-	add.Flags().BoolVar(&admin, "owner-only-admin", false, "Only the owner has host admin rights")
+	add.Flags().BoolVar(&admin, "owner-only-admin", false, "Confirm that only the owner administers the machine; a host that runs boxes or CI runners needs it, an exec-only host (--agents off --ci off) does not")
 	add.Flags().StringVar(&addAgents, "agents", "on", "on or off: whether new session boxes may land on this host")
 	add.Flags().StringVar(&addCI, "ci", "", "on or off: whether the CI pool may start runners on this host (default on, off on the engine's own host)")
 	var setAgents, setCI string
@@ -573,7 +573,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		_, err = getClient().HostSet(cmd.Context(), req)
 		return err
 	}}
-	setHost.Flags().BoolVar(&setAdmin, "owner-only-admin", false, "Only the owner has host admin rights; needed to turn agents or ci on for an exec-only host")
+	setHost.Flags().BoolVar(&setAdmin, "owner-only-admin", false, "Confirm that only the owner administers the machine; turning agents or ci on for an exec-only host needs it")
 	setHost.Flags().BoolVar(&clearCreateProblem, "clear-create-problem", false, "Clear the host's create-failure quarantine")
 	setHost.Flags().StringVar(&setAgents, "agents", "", "on or off: whether new session boxes may land on this host")
 	setHost.Flags().StringVar(&setCI, "ci", "", "on or off: whether the CI pool may start runners on this host")
