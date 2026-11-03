@@ -123,7 +123,7 @@ func (c *Crew) push(ctx context.Context, dir, commit, branch string) error {
 	var err error
 	for attempt := 1; attempt <= pushAttempts; attempt++ {
 		bound, cancel := context.WithTimeout(ctx, saveTimeout)
-		_, err = runGit(bound, dir, "", "push", "--force", "origin", commit+":refs/heads/"+branch)
+		_, err = runGit(bound, dir, "", "push", "--no-verify", "--force", "origin", commit+":refs/heads/"+branch)
 		cancel()
 		if err == nil || attempt == pushAttempts {
 			break

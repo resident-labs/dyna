@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -218,7 +219,7 @@ func TestArchiveRetryAfterAnotherRepoFails(t *testing.T) {
 			if strings.HasSuffix(dir, "/b") && fail {
 				return "", errors.New("push failed")
 			}
-			if pushed[dir] && args[1] != "--force" {
+			if pushed[dir] && !slices.Contains(args, "--force") {
 				return "", errors.New("non-fast-forward")
 			}
 			pushed[dir] = true
@@ -290,7 +291,7 @@ func TestArchiveRepo(t *testing.T) {
 				if got.Commit != "snapshot" || got.Error != "" || index == "" {
 					t.Fatal(got)
 				}
-				want := [][]string{{"read-tree", "HEAD"}, {"ls-files", "--others", "--exclude-standard", "-z"}, {"add", "-A"}, {"write-tree"}, {"-c", "user.name=Dyna Archive", "-c", "user.email=archive@dyna.invalid", "commit-tree", "tree", "-p", "head", "-m", "archive s"}, {"push", "--force", "origin", "snapshot:refs/dyna/archive/s"}}
+				want := [][]string{{"read-tree", "HEAD"}, {"ls-files", "--others", "--exclude-standard", "-z"}, {"add", "-A"}, {"write-tree"}, {"-c", "user.name=Dyna Archive", "-c", "user.email=archive@dyna.invalid", "commit-tree", "tree", "-p", "head", "-m", "archive s"}, {"push", "--no-verify", "--force", "origin", "snapshot:refs/dyna/archive/s"}}
 				if !reflect.DeepEqual(calls[3:], want) {
 					t.Fatal(calls)
 				}
@@ -447,6 +448,32 @@ func TestArchiveLeavesOutLargeUntrackedFiles(t *testing.T) {
 	}
 	if status := git("status", "--porcelain", "--", "tracked.txt"); status != "M tracked.txt" {
 		t.Fatalf("the real index changed: %q", status)
+	}
+}
+
+// A repository's own hooks guard its owner's pushes, so a Dyna backup push never runs them: a pre-push hook in the
+// repository, or one that core.hooksPath names, must not stop the archive.
+func TestArchivePushRunsNoRepositoryHooks(t *testing.T) {
+	for name, hooks := range map[string]string{"hooks folder": ".git/hooks", "core.hooksPath": ".githooks"} {
+		t.Run(name, func(t *testing.T) {
+			root, origin, repo, git := archiveTestRepo(t)
+			dir := filepath.Join(root, string(repo.Name))
+			if hooks == ".githooks" {
+				git("config", "core.hooksPath", hooks)
+			}
+			if err := os.MkdirAll(filepath.Join(dir, hooks), 0755); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(dir, hooks, "pre-push"), "#!/bin/sh\necho 'is not checked out here' >&2\nexit 1\n")
+			writeFile(t, filepath.Join(dir, "small.txt"), "small")
+			got := archiveRepo(context.Background(), root, "s", repo, runGit)
+			if got.Error != "" || got.Commit == "" {
+				t.Fatalf("%+v", got)
+			}
+			if pushed := git("ls-remote", origin, "refs/dyna/archive/s"); !strings.HasPrefix(pushed, got.Commit) {
+				t.Fatalf("pushed %q, want %s", pushed, got.Commit)
+			}
+		})
 	}
 }
 
