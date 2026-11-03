@@ -1,6 +1,10 @@
 package images
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -178,6 +182,11 @@ func recoverSaves(dir string) error {
 // Save puts a folder's archive in place of the room's image of that name. It checks the name, the Containerfile's base and
 // box-needs first, and keeps the old image when any of it fails.
 func (s *Store) Save(room contract.RoomID, name string, archive []byte) (contract.RoomImage, error) {
+	return s.save(room, name, archive, true)
+}
+
+// save is Save, and with check false it leaves the Containerfile unchecked, as migration does for a file that has built so far.
+func (s *Store) save(room contract.RoomID, name string, archive []byte, check bool) (contract.RoomImage, error) {
 	if !validImageName.MatchString(name) {
 		return contract.RoomImage{}, fmt.Errorf("%w: a name is lowercase letters, digits, _, . and -", ErrInvalid)
 	}
@@ -209,7 +218,7 @@ func (s *Store) Save(room contract.RoomID, name string, archive []byte) (contrac
 	if name == contract.CIRunnerImage {
 		variable = "DYNA_CI_BASE"
 	}
-	if err := checkRecipe(string(recipe), variable); err != nil {
+	if err := checkRecipe(string(recipe), variable); check && err != nil {
 		return contract.RoomImage{}, fmt.Errorf("%w: %s of %s: %v", ErrInvalid, containerfile, name, err)
 	}
 	if needs, err := os.ReadFile(filepath.Join(unpacked, "box-needs")); err == nil {
@@ -329,4 +338,167 @@ func (s *Store) Remove(room contract.RoomID, name string) error {
 		return ErrMissing
 	}
 	return os.RemoveAll(dir)
+}
+
+// ErrImageChoice is a room with several box images and nothing to say which. A compose file chooses one with build.
+var ErrImageChoice = errors.New("the room has several images, so a compose file must choose one")
+
+// BoxImages lists the room's box images: every image but the CI runner's.
+func (s *Store) BoxImages(room contract.RoomID) ([]contract.RoomImage, error) {
+	all, err := s.List(room)
+	return slices.DeleteFunc(all, func(image contract.RoomImage) bool { return image.Name == contract.CIRunnerImage }), err
+}
+
+// Context reads a box image for a build: the one called wanted, or the room's sole box image when wanted is empty. It
+// returns no name for a room with none. The tar holds the folder's files, in sorted order, so one folder is one tar.
+func (s *Store) Context(room contract.RoomID, wanted string) (string, TreeID, []byte, []box.Need, error) {
+	name := wanted
+	if name == "" {
+		held, err := s.BoxImages(room)
+		if err != nil || len(held) == 0 {
+			return "", "", nil, nil, err
+		}
+		if len(held) > 1 {
+			return "", "", nil, nil, ErrImageChoice
+		}
+		name = held[0].Name
+	}
+	return s.build(room, name)
+}
+
+// build reads one named image, box or CI runner, as the tar a builder takes.
+func (s *Store) build(room contract.RoomID, name string) (string, TreeID, []byte, []box.Need, error) {
+	if !validImageName.MatchString(name) {
+		return "", "", nil, nil, ErrMissing
+	}
+	s.mu.Lock() // recovery writes
+	defer s.mu.Unlock()
+	if err := recoverSaves(s.Layout.Images(room)); err != nil {
+		return "", "", nil, nil, err
+	}
+	image, err := s.info(room, name)
+	if err != nil {
+		if errors.Is(err, ErrMissing) {
+			err = fmt.Errorf("the room has no image %s: %w", name, ErrMissing)
+		}
+		return "", "", nil, nil, err
+	}
+	dir := filepath.Join(s.Layout.Images(room), name)
+	var needs []box.Need
+	if text, err := os.ReadFile(filepath.Join(dir, "box-needs")); err == nil {
+		if needs, err = ParseNeeds(string(text)); err != nil {
+			return "", "", nil, nil, err
+		}
+	}
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	err = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || !entry.Type().IsRegular() {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		mode := int64(0o644)
+		if info, err := entry.Info(); err == nil && info.Mode()&0o111 != 0 {
+			mode = 0o755
+		}
+		if err := tw.WriteHeader(&tar.Header{Name: filepath.ToSlash(rel), Mode: mode, Size: int64(len(data))}); err != nil {
+			return err
+		}
+		_, err = tw.Write(data)
+		return err
+	})
+	if err := errors.Join(err, tw.Close()); err != nil {
+		return "", "", nil, nil, err
+	}
+	return name, TreeID(image.ID), buf.Bytes(), needs, nil
+}
+
+// Size reads the default box size of a box image, chosen as in Context. It is empty when there is none, and for a room with
+// several images and no choice, which has no default.
+func (s *Store) Size(room contract.RoomID, wanted string) (string, error) {
+	name := wanted
+	if name == "" {
+		held, err := s.BoxImages(room)
+		if err != nil || len(held) != 1 {
+			return "", err
+		}
+		name = held[0].Name
+	}
+	if !validImageName.MatchString(name) {
+		return "", ErrMissing
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	data, err := os.ReadFile(filepath.Join(s.Layout.Images(room), name, "size"))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	return strings.TrimSpace(string(data)), err
+}
+
+// migratedFile lists the repositories whose legacy images were copied into the room, one per line.
+const migratedFile = ".migrated"
+
+// Migrate copies a repository's legacy images (.dyna/images on its default branch or on dyna-images) into the room, once per
+// repository and room. An image the room already has stays, so a room's own wins, and the CI runner's name is skipped, since
+// a repository never had one. A copied Containerfile is not rechecked: it has built so far, and the repository's lookup ends
+// with this copy. It returns what it copied and what it left, with why.
+func (s *Store) Migrate(ctx context.Context, runner Runner, room contract.RoomID, repo contract.RepoName, mirror string) (copied, left []string, err error) {
+	s.mu.Lock()
+	dir := s.Layout.Images(room)
+	done, err := os.ReadFile(filepath.Join(dir, migratedFile))
+	s.mu.Unlock()
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, nil, err
+	}
+	if slices.Contains(strings.Fields(string(done)), string(repo)) {
+		return nil, nil, nil
+	}
+	names, err := Folders(ctx, runner, mirror)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, name := range names {
+		held, err := s.List(room)
+		if err != nil {
+			return copied, left, err
+		}
+		if name == contract.CIRunnerImage || slices.ContainsFunc(held, func(i contract.RoomImage) bool { return i.Name == name }) {
+			left = append(left, name+" (the room has one, or the name is reserved)")
+			continue
+		}
+		_, _, tarball, _, err := Context(ctx, runner, mirror, name)
+		if err != nil {
+			return copied, left, err
+		}
+		var packed bytes.Buffer
+		gz := gzip.NewWriter(&packed)
+		_, writeErr := gz.Write(tarball)
+		if err := errors.Join(writeErr, gz.Close()); err != nil {
+			return copied, left, err
+		}
+		if _, err := s.save(room, name, packed.Bytes(), false); err != nil {
+			left = append(left, name+" ("+err.Error()+")")
+			continue
+		}
+		copied = append(copied, name)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return copied, left, err
+	}
+	file, err := os.OpenFile(filepath.Join(dir, migratedFile), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return copied, left, err
+	}
+	_, writeErr := file.WriteString(string(repo) + "\n")
+	return copied, left, errors.Join(writeErr, file.Close())
 }

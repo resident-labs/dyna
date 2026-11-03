@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"github.com/resident-labs/dyna/box/skills"
 	"context"
 	"errors"
 	"fmt"
@@ -87,21 +88,12 @@ func (r *aheadHost) count(part string) int {
 	return n
 }
 
-// aheadGit is a mirror of owner/repo with one toolchain image, where owner/missing has no mirror at all.
+// aheadGit is a mirror where owner/missing has no mirror at all.
 type aheadGit struct{}
 
 func (aheadGit) Run(_ context.Context, _ []string, args ...string) ([]byte, error) {
 	if strings.Contains(args[1], "missing") {
 		return nil, errors.New("not a git repository")
-	}
-	joined := strings.Join(args, " ")
-	switch {
-	case strings.Contains(joined, "ls-tree HEAD .dyna/images"):
-		return []byte("040000 tree aaa\t.dyna/images\n"), nil
-	case strings.Contains(joined, "ls-tree aaa"):
-		return []byte("040000 tree bbb\ttoolchain\n"), nil
-	case strings.Contains(joined, "archive"):
-		return []byte("context"), nil
 	}
 	return nil, nil
 }
@@ -113,6 +105,20 @@ func (aheadEvents) Record(context.Context, contract.RoomID, contract.EventBody) 
 func newAheadBoxes(t *testing.T, r *aheadHost, hosts []box.Host, rooms map[contract.RoomID][]contract.RepoName) *Boxes {
 	t.Helper()
 	b := &Boxes{Store: aheadStore{hosts: hosts, rooms: rooms}, PiTarball: []byte("pi"), Mirror: &enginegit.Mirror{Layout: box.Layout{Data: t.TempDir(), HostData: "/host"}, Runner: aheadGit{}}, Images: &engineimages.Builder{Recorder: aheadEvents{}, Now: time.Now}}
+	b.RoomImages = &engineimages.Store{Layout: b.Mirror.Layout}
+	archive := skills.NewArchive()
+	if err := archive.Add("Containerfile", 0o600, []byte("ARG DYNA_BASE\nFROM ${DYNA_BASE}\n")); err != nil {
+		t.Fatal(err)
+	}
+	packed, err := archive.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for room := range rooms {
+		if _, err := b.RoomImages.Save(room, "toolchain", packed); err != nil {
+			t.Fatal(err)
+		}
+	}
 	b.hosts = make(map[contract.HostName]*podman.Host)
 	for _, host := range hosts {
 		h, err := podman.New("user@host", t.TempDir(), string(host.Name), r)
@@ -149,7 +155,7 @@ func TestBuildAheadCoversComposeImages(t *testing.T) {
 	if err := os.MkdirAll(path, 0700); err != nil {
 		t.Fatal(err)
 	}
-	b.Compose = &compose.Files{Layout: b.Mirror.Layout, Repo: b.Mirror}
+	b.Compose = &compose.Files{Layout: b.Mirror.Layout, Repo: b.Mirror, Images: b.RoomImages}
 	dir := b.Compose.Layout.Compose("room_1")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
