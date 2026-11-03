@@ -21,14 +21,16 @@ const large = contract.BoxSizeLarge
 type fakeStore struct {
 	repos []store.CIRepo
 	hosts []box.Host
-	boxes []box.Box
+	boxes []store.LifecycleBox
 	pools []store.Pool
 }
 
 func (s *fakeStore) CIRepos(context.Context) ([]store.CIRepo, error) { return s.repos, nil }
 func (s *fakeStore) Hosts(context.Context) ([]box.Host, error)       { return s.hosts, nil }
-func (s *fakeStore) Boxes(context.Context) ([]box.Box, error)        { return s.boxes, nil }
-func (s *fakeStore) Pools(context.Context) ([]store.Pool, error)     { return s.pools, nil }
+func (s *fakeStore) LifecycleBoxes(context.Context) ([]store.LifecycleBox, error) {
+	return s.boxes, nil
+}
+func (s *fakeStore) Pools(context.Context) ([]store.Pool, error) { return s.pools, nil }
 
 type fakeDriver struct {
 	runners  []box.Runner
@@ -325,7 +327,7 @@ func TestHostMemoryPressureStopsNewRunners(t *testing.T) {
 func TestSessionBoxesCountAgainstCIPlacement(t *testing.T) {
 	f := newFixture(5)
 	size, _ := box.Size(large)
-	f.store.boxes = []box.Box{{ID: "b", Host: "pve", State: contract.BoxReady, Image: "image", Size: contract.BoxSize{Name: size.Name, CPUs: 252, MemBytes: size.MemBytes}}}
+	f.store.boxes = []store.LifecycleBox{{Box: box.Box{ID: "b", Host: "pve", State: contract.BoxReady, Image: "image", Size: contract.BoxSize{Name: size.Name, CPUs: 252, MemBytes: size.MemBytes}}}}
 	f.scale(5)
 	// 4 x 64 CPUs is 256, the box takes 252, and no large runner fits in the rest.
 	if len(f.sets.names) != 0 {

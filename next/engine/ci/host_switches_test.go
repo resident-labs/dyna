@@ -1,10 +1,11 @@
 package ci
 
 import (
-	"github.com/resident-labs/dyna/box"
 	"testing"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 // A host with ci off gets no runner, and its runners come back when ci is on again.
@@ -57,25 +58,40 @@ func TestAgentsOffStillServesCIAndBothOffServesNothing(t *testing.T) {
 	}
 }
 
-// A session box waiting for CPU or memory comes before a runner: no runner starts on a host that box could take, so a freed
-// slot goes to the box. A box waiting for anything else holds nobody back.
+// A session box waiting for CPU or memory comes before a runner: no runner starts on a host that box would take once its
+// runners were gone, so a freed slot goes to the box. A box that fits nowhere, that its rule keeps off the host, that other
+// boxes keep out, or that waits for something else, holds nobody back.
 func TestARunnerSkipsAHostWhereASessionBoxWaitsForRoom(t *testing.T) {
-	size, _ := box.Size(contract.BoxSizeSmall)
+	small, _ := box.Size(contract.BoxSizeSmall)
+	huge := contract.BoxSize{Name: contract.BoxSizeXLarge, CPUs: 1000, MemBytes: small.MemBytes}
+	waiting := func(reason box.PendingReason, host contract.HostName, size contract.BoxSize, only ...string) store.LifecycleBox {
+		image := ""
+		if host != "" {
+			image = "img"
+		}
+		return store.LifecycleBox{Box: box.Box{ID: "b", Room: "r2", Host: host, Image: image, Size: size, State: contract.BoxPending, Reason: string(reason)}, Only: only}
+	}
+	full := store.LifecycleBox{Box: box.Box{ID: "full", Host: "pve", Image: "img", Size: contract.BoxSize{Name: contract.BoxSizeAgent, CPUs: 240, MemBytes: small.MemBytes}, State: contract.BoxReady}}
+	// arch is busier, so a runner prefers pve unless pve is skipped.
+	busyArch := store.LifecycleBox{Box: box.Box{ID: "busy", Host: "arch", Image: "img", Size: contract.BoxSize{Name: contract.BoxSizeAgent, CPUs: 248, MemBytes: small.MemBytes}, State: contract.BoxReady}}
 	for _, tc := range []struct {
-		name    string
-		pending box.Box
-		wantPVE int
+		name  string
+		boxes []store.LifecycleBox
+		onPVE int // runners on pve; the rest go to arch
 	}{
-		{"cpu, not yet placed", box.Box{ID: "b", Room: "r2", Size: size, State: contract.BoxPending, Reason: string(box.PendingCPU)}, 0},
-		{"memory, on its host", box.Box{ID: "b", Room: "r2", Host: "pve", Image: "img", Size: size, State: contract.BoxPending, Reason: string(box.PendingMemory)}, 0},
-		{"disk", box.Box{ID: "b", Room: "r2", Size: size, State: contract.BoxPending, Reason: string(box.PendingDisk)}, 1},
+		{"cpu, not yet placed", []store.LifecycleBox{waiting(box.PendingCPU, "", small)}, 0},
+		{"memory, on its host", []store.LifecycleBox{waiting(box.PendingMemory, "pve", small)}, 0},
+		{"disk", []store.LifecycleBox{waiting(box.PendingDisk, "", small)}, 1},
+		{"too big for any host", []store.LifecycleBox{waiting(box.PendingCPU, "", huge)}, 1},
+		{"its rule names another host", []store.LifecycleBox{waiting(box.PendingCPU, "", small, "elsewhere")}, 1},
+		{"other boxes keep it out", []store.LifecycleBox{full, busyArch, waiting(box.PendingCPU, "", contract.BoxSize{Name: contract.BoxSizeLarge, CPUs: 20, MemBytes: small.MemBytes})}, 1},
 	} {
 		f := newFixture(0)
 		arch := f.addHost(readyHost("arch", 32*box.GiB))        // pve has more free memory, so it wins unless it is skipped
 		f.store.hosts[1].Rooms = []contract.RoomID{"elsewhere"} // the waiting box cannot go to arch
-		f.store.boxes = []box.Box{tc.pending}
+		f.store.boxes = tc.boxes
 		f.scale(1)
-		if got := len(f.drivers["pve"].runners); got != tc.wantPVE || len(arch.runners) != 1-tc.wantPVE {
+		if got := len(f.drivers["pve"].runners); got != tc.onPVE || len(arch.runners) != 1-tc.onPVE {
 			t.Errorf("%s: pve %d, arch %d", tc.name, got, len(arch.runners))
 		}
 	}
