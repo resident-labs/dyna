@@ -95,14 +95,23 @@ func (s *Service) HostexecGrant() approve.Entry {
 			err := json.Unmarshal(data, &a)
 			return a, err
 		},
-		Execute: func(ctx context.Context, _ contract.OpID, args contract.OpArgs, _ contract.Principal) contract.OpResult {
+		Execute: func(ctx context.Context, op contract.OpID, args contract.OpArgs, _ contract.Principal) contract.OpResult {
 			a := args.(contract.HostexecGrantArgs)
 			now := s.now()
 			value, err := id("grant_", now)
 			if err != nil {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
 			}
-			g := contract.Grant{ID: contract.GrantID(value), Kind: contract.GrantHostExec, Room: a.Room, To: a.To, Hosts: a.Hosts, Reason: a.Reason, By: contract.Principal{Kind: contract.PrincipalOwner}, Created: now}
+			// The grant records who decided it: the owner, or the room's root. An owner's own request has no decision.
+			by := contract.Principal{Kind: contract.PrincipalOwner}
+			record, err := s.store.Operation(ctx, op)
+			if err != nil {
+				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
+			}
+			if record.Operation.Decision != nil {
+				by = record.Operation.Decision.By
+			}
+			g := contract.Grant{ID: contract.GrantID(value), Kind: contract.GrantHostExec, Room: a.Room, To: a.To, Hosts: a.Hosts, Reason: a.Reason, By: by, Created: now}
 			err = s.store.CreateGrant(ctx, g)
 			if err != nil {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
