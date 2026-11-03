@@ -29,6 +29,9 @@ func TestWhereMatchesExactly(t *testing.T) {
 		{"= on a field the event lacks", []string{"author=x"}, main, false},
 		{"repo on a branch move", []string{"repo=o/r"}, main, true},
 		{"not that repo", []string{"repo!=o/r"}, main, false},
+		{"kind of a push", []string{"kind=pushed", "repo=o/r"}, PrChanged{Changes: []PrChange{{PR: PrSummary{Repo: "o/r"}, Kinds: []PrChangeKind{PrChangeCIPassed, PrChangePushed}}}}, true},
+		{"another kind", []string{"kind=pushed"}, PrChanged{Changes: []PrChange{{PR: PrSummary{Repo: "o/r"}, Kinds: []PrChangeKind{PrChangeCIPassed}}}}, false},
+		{"kind on an event with none", []string{"kind=pushed"}, opened, false},
 		{"a value holding an equals sign", []string{"text~a=b"}, PrOpened{Text: "x a=b y"}, true},
 	} {
 		if got := MatchesWhere(test.where, test.body); got != test.want {

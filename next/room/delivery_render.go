@@ -135,6 +135,7 @@ var prChangeWords = map[contract.PrChangeKind]string{
 	contract.PrChangeMerged:           "merged",
 	contract.PrChangeClosed:           "closed without merging",
 	contract.PrChangeComment:          "new comments",
+	contract.PrChangePushed:           "pushed",
 }
 
 var issueChangeWords = map[contract.PrChangeKind]string{
@@ -276,6 +277,9 @@ func renderPRChanged(b contract.PrChanged) string {
 				checks = WrapExternal(change.PR.Author, checks)
 			}
 			lines = append(lines, "Failed checks: "+checks)
+		}
+		if push := change.Push; push != nil {
+			lines = append(lines, fmt.Sprintf("Head moved %s -> %s.", push.Before, push.After))
 		}
 		lines = append(lines, commentLines(change.Comments, change.MoreComments)...)
 		blocks = append(blocks, strings.Join(lines, "\n"))
