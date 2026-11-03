@@ -98,6 +98,7 @@ type Pool struct {
 	building  map[contract.HostName]bool   // hosts a build-ahead is working on
 	retry     map[contract.HostName]time.Time
 	leased    map[contract.RepoName]time.Time
+	broken    map[scaleSet]bool // sets whose listener failed and has not polled since
 	reaped    map[contract.RepoName]time.Time
 
 	shown   sync.Mutex
@@ -112,6 +113,9 @@ type scaleSet struct {
 }
 
 type listening struct {
+	// polled is false for a listener started to replace one that failed, until a poll reaches it. One that fails again
+	// before any poll is not a pool that serves, and its restarts must not keep the lease.
+	polled  bool
 	cancel  context.CancelFunc
 	done    chan struct{}
 	err     error
@@ -163,6 +167,17 @@ func (p *Pool) Tick(ctx context.Context, group *sync.WaitGroup) error {
 		return err
 	}
 	failures = append(failures, view.failures...)
+	hosts := make([]box.Host, 0, len(view.hosts))
+	for _, host := range view.hosts {
+		hosts = append(hosts, host.host)
+	}
+	// The lease comes before anything that can take minutes (a build-ahead, a sweep over SSH), on a context of its own, so a
+	// slow or hung host cannot make a due renewal late or fail it.
+	for repo, row := range view.repos {
+		if err := p.renew(buildCtx, repo, hosts, row.Only); err != nil {
+			failures = append(failures, fmt.Errorf("repository %s: %w", repo, err))
+		}
+	}
 	for _, host := range view.hosts {
 		p.buildAhead(buildCtx, host, group)
 	}
@@ -173,12 +188,7 @@ func (p *Pool) Tick(ctx context.Context, group *sync.WaitGroup) error {
 		}
 	}
 	for repo := range view.repos {
-		hosts := make([]box.Host, 0, len(view.hosts))
-		for _, host := range view.hosts {
-			hosts = append(hosts, host.host)
-		}
-		pooled := slices.ContainsFunc(hosts, func(h box.Host) bool { return h.TakesRunners(view.repos[repo].Only) })
-		if err := p.upkeep(ctx, repo, pooled, alive[repo]); err != nil {
+		if err := p.upkeep(ctx, repo, alive[repo]); err != nil {
 			failures = append(failures, fmt.Errorf("repository %s: %w", repo, err))
 		}
 	}
@@ -218,6 +228,10 @@ func (p *Pool) steer(ctx context.Context, wanted map[scaleSet]bool, group *sync.
 				failures = append(failures, fmt.Errorf("repository %s: listener %s stopped: %w", key.repo, SetName(key.size), l.err))
 			}
 			delete(p.listeners, key)
+			if p.broken == nil {
+				p.broken = make(map[scaleSet]bool)
+			}
+			p.broken[key] = true
 		}
 	}
 	for key := range wanted {
@@ -225,7 +239,7 @@ func (p *Pool) steer(ctx context.Context, wanted map[scaleSet]bool, group *sync.
 			continue
 		}
 		listenCtx, cancel := context.WithCancel(ctx)
-		l := &listening{cancel: cancel, done: make(chan struct{})}
+		l := &listening{cancel: cancel, done: make(chan struct{}), polled: !p.broken[key]}
 		p.listeners[key] = l
 		group.Add(1)
 		go func() {
@@ -259,6 +273,10 @@ func (p *Pool) scale(ctx context.Context, key scaleSet, assigned int) int {
 	for _, failure := range view.failures {
 		log.Printf("ci pool: %v", failure)
 	}
+	if l := p.listeners[key]; l != nil {
+		l.polled = true
+	}
+	delete(p.broken, key)
 	capacity, err := p.place(ctx, key, assigned, view)
 	if err != nil {
 		log.Printf("ci pool: repository %s: %s: %v", key.repo, SetName(key.size), err)
@@ -612,22 +630,56 @@ func (p *Pool) sweep(ctx context.Context, host *surveyed, view survey, alive map
 	return nil
 }
 
-// upkeep renews the lease while the pool is alive for the repository, and removes dead registrations. pooled says that a ready
-// ci host the repository's rule allows answered this pass's survey. It holds with every slot busy, and on the first pass after
-// a start, since only the time of the last write is kept in memory.
-func (p *Pool) upkeep(ctx context.Context, repo contract.RepoName, pooled bool, alive map[string]bool) error {
-	var failures []error
+// leaseWrite bounds one lease write.
+const leaseWrite = 30 * time.Second
+
+// renew writes the lease while the pool is alive for the repository: a listener of it runs and has not failed since its last
+// poll, and a host that is ready, has
+// ci on and is allowed by the room's rule answered this pass's survey. Free slots, the bound, disk, memory and the polls'
+// capacity do not count, so a full pool keeps its lease. Only the time of the last write is kept in memory, so the first pass
+// after a start writes at once.
+func (p *Pool) renew(ctx context.Context, repo contract.RepoName, hosts []box.Host, only []string) error {
 	now := p.Now()
-	if pooled && !now.Before(p.leased[repo]) {
-		if err := p.GitHub.RenewLease(ctx, repo, now.Add(leaseFor)); err != nil {
-			failures = append(failures, err)
-		} else {
-			if p.leased == nil {
-				p.leased = make(map[contract.RepoName]time.Time)
-			}
-			p.leased[repo] = now.Add(leaseEvery)
+	if now.Before(p.leased[repo]) {
+		return nil
+	}
+	listening := false
+	for key, l := range p.listeners {
+		if key.repo != repo {
+			continue
+		}
+		select {
+		case <-l.done:
+		default:
+			listening = listening || l.polled
 		}
 	}
+	if !listening || !slices.ContainsFunc(hosts, func(h box.Host) bool {
+		// The room's rule names hosts, or the pool of a node; a per-session node serves its one box only.
+		name := string(h.Name)
+		if h.Pool != "" {
+			name = h.Pool
+		}
+		return h.CI && h.Box == "" && (len(only) == 0 || slices.Contains(only, name))
+	}) {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, leaseWrite)
+	defer cancel()
+	if err := p.GitHub.RenewLease(ctx, repo, now.Add(leaseFor)); err != nil {
+		return err
+	}
+	if p.leased == nil {
+		p.leased = make(map[contract.RepoName]time.Time)
+	}
+	p.leased[repo] = now.Add(leaseEvery)
+	return nil
+}
+
+// upkeep removes dead registrations.
+func (p *Pool) upkeep(ctx context.Context, repo contract.RepoName, alive map[string]bool) error {
+	var failures []error
+	now := p.Now()
 	if !now.Before(p.reaped[repo]) {
 		if err := p.reap(ctx, repo, alive); err != nil {
 			failures = append(failures, err)

@@ -79,12 +79,6 @@ func RunnerHosts(hosts []Host) []Host {
 	return open
 }
 
-// TakesRunners says whether a host is one a repository's runners may use: ready, ci on, and allowed by the room's rule only.
-// It ignores free slots, CPU, memory and disk, so it says whether the host belongs to the repository's pool, not whether it has room.
-func (h Host) TakesRunners(only []string) bool {
-	return h.State == HostReady && h.CI && h.Box == "" && takes(h, "", only)
-}
-
 // takes says whether a host may take a new box. A per-session node serves its one box, a shared node the rooms that name its
 // pool or has no rule, and any other host every room whose rule, if it has one, names it.
 func takes(h Host, id contract.BoxID, only []string) bool {
