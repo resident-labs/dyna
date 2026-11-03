@@ -217,8 +217,8 @@ func TestMaskHidesSecretsOnly(t *testing.T) {
 		"xoxb-1234567890-abcdef":                                       "1234567890",
 		"AKIAIOSFODNN7EXAMPLE":                                         "IOSFODNN7",
 		"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijk": "abcdefghijk",
-		"DATABASE_PASSWORD=hunter2":                                    "hunter2",
-		`"api_key": "abc123"`:                                          "abc123",
+		"DATABASE_PASSWORD=hunter2-hunter2":                            "hunter2-hunter2",
+		`"api_key": "abc123-abc123"`:                                   "abc123-abc123",
 		"token: 9f86d081884c7d659a2feaa0c55ad015":                      "9f86d081",
 	} {
 		got := Mask("before " + text + "\nafter")
@@ -241,10 +241,10 @@ func call(t *testing.T, handler http.Handler, path, body string) (int, string) {
 }
 
 func TestHandlerRunsACommand(t *testing.T) {
-	r := newRig("secret=abc\n", syscall.SIGKILL)
+	r := newRig("secret=abc123def456\n", syscall.SIGKILL)
 	r.proc.exit <- 0
 	status, body := call(t, r.server.Handler(), "/run", `{"command":"env"}`)
-	if status != http.StatusOK || !strings.Contains(body, "secret=[masked]") || strings.Contains(body, "abc") || !strings.Contains(body, `"status":"exit 0"`) || !strings.Contains(body, `"exit_code":0`) || !strings.Contains(body, `"job":"job_1"`) {
+	if status != http.StatusOK || !strings.Contains(body, "secret=[masked]") || strings.Contains(body, "abc123") || !strings.Contains(body, `"status":"exit 0"`) || !strings.Contains(body, `"exit_code":0`) || !strings.Contains(body, `"job":"job_1"`) {
 		t.Fatalf("run = %d %s", status, body)
 	}
 }
@@ -319,7 +319,7 @@ func TestHostCommandRunsThroughTheEngine(t *testing.T) {
 	var asked Run
 	r := hostRig(func(_ context.Context, run Run, out io.Writer) (int, *contract.Error) {
 		asked = run
-		_, _ = io.WriteString(out, "token=abc\n")
+		_, _ = io.WriteString(out, "token=abc123def456\n")
 		return 3, nil
 	})
 	r.server.cfg.start = func(string, string, string, io.Writer) (process, error) {
