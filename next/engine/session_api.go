@@ -25,6 +25,9 @@ func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, r
 	if !mentionName.MatchString(req.Name) {
 		return contract.SessionStartResponse{}, invalid("session name must be 1–64 letters, digits, dots, underscores or hyphens and start with a letter or digit")
 	}
+	if sessionID.MatchString(req.Name) {
+		return contract.SessionStartResponse{}, invalid("session name cannot be a session ID")
+	}
 	switch req.Name {
 	case "root", "parent", "children", "siblings":
 		// room.ParseAddress reads these names as roles, so no one could mention the session by its name.
@@ -240,7 +243,7 @@ func (s *Service) Stale(id contract.SessionID) bool {
 func (s *Service) managedSession(ctx context.Context, caller contract.Principal, id contract.SessionID) (store.Session, *contract.Error) {
 	session, err := s.store.Session(ctx, id)
 	if errors.Is(err, store.ErrNotFound) {
-		return store.Session{}, &contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("no open session named or with ID %q in this room", id)}
+		return store.Session{}, &contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("session %s is closed or does not exist", id)}
 	}
 	if err != nil {
 		return store.Session{}, failure(err)
@@ -263,18 +266,19 @@ func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, r
 		return contract.SessionCloseResponse{}, forbidden()
 	}
 	target := req.Session
-	if _, err := s.store.Session(ctx, target); errors.Is(err, store.ErrNotFound) && caller.Kind == contract.PrincipalSession {
+	if !sessionID.MatchString(string(target)) && caller.Kind == contract.PrincipalSession {
 		self, problem := s.callerSession(ctx, caller)
 		if problem != nil {
 			return contract.SessionCloseResponse{}, problem
 		}
-		if named, err := s.store.SessionByName(ctx, self.Room, string(target)); err == nil {
-			target = named.ID
-		} else if !errors.Is(err, store.ErrNotFound) {
+		named, err := s.store.SessionByName(ctx, self.Room, string(target))
+		if errors.Is(err, store.ErrNotFound) {
+			return contract.SessionCloseResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("no open session named %q in this room", target)}
+		}
+		if err != nil {
 			return contract.SessionCloseResponse{}, failure(err)
 		}
-	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return contract.SessionCloseResponse{}, failure(err)
+		target = named.ID
 	}
 	session, problem := s.managedSession(ctx, caller, target)
 	if problem != nil {
