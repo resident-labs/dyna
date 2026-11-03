@@ -125,6 +125,43 @@ func TestAWorktreeWorkerGetsItsOwnBranchAndItsWorkReachesTheRemote(t *testing.T)
 	}
 }
 
+// installHooks puts hooks in the repository's hooks folder, which its worktrees share. Each one records that it ran.
+func installHooks(t *testing.T, workdir string, names ...string) string {
+	t.Helper()
+	ran := filepath.Join(t.TempDir(), "ran")
+	for _, name := range names {
+		writeFile(t, filepath.Join(workdir, ".git", "hooks", name), "#!/bin/sh\necho "+name+" >> "+ran+"\necho 'is not checked out here' >&2\nexit 1\n")
+	}
+	return ran
+}
+
+func TestAWorkflowBranchPushRunsNoRepositoryHooks(t *testing.T) {
+	h, origin := newTreeHarness(t)
+	ran := installHooks(t, h.workdir, "pre-push")
+	got := h.result(crewMeta + `return await agent('plain', { worktree: true })`).(map[string]any)
+	if remote := gitIn(t, origin, "rev-parse", "refs/heads/"+got["branch"].(string)); remote != got["commit"] {
+		t.Fatalf("remote %s, result %v", remote, got["commit"])
+	}
+	if _, err := os.Stat(ran); !os.IsNotExist(err) {
+		t.Fatal("the repository's pre-push hook ran")
+	}
+}
+
+// Dyna's trees, commits and merges are its own bookkeeping, so none of them runs the repository's hooks either.
+func TestWorktreeAndMergeRunNoRepositoryHooks(t *testing.T) {
+	h, _ := newTreeHarness(t)
+	ran := installHooks(t, h.workdir, "post-checkout", "post-merge", "post-commit", "prepare-commit-msg", "reference-transaction")
+	got := h.result(crewMeta + `
+		const results = await parallel([() => agent('one', { worktree: true }), () => agent('two', { worktree: true })])
+		return await merge(results)`).(map[string]any)
+	if len(got["merged"].([]any)) != 2 {
+		t.Fatalf("merged %v", got)
+	}
+	if out, err := os.ReadFile(ran); err == nil {
+		t.Fatalf("repository hooks ran:\n%s", out)
+	}
+}
+
 func TestASchemaWorktreeStepKeepsItsOutput(t *testing.T) {
 	h, _ := newTreeHarness(t)
 	h.reply = func(string, string) (contract.TurnEnded, error) {
