@@ -29,7 +29,7 @@ export function addonDetail(item: Addon): string {
 export function addonOrigin(item: Addon, now: number): string {
   if (item.builtIn) return "Built in";
   const by = item.by === "owner" ? "you" : item.by || "unknown";
-  return `Added by ${by}${item.at ? ` ${fromNow(item.at, now)}` : ""}`;
+  return `Added by ${by}${item.at ? ` ${fromNow(item.at, now)}` : ""}${item.host ? ` · from ${item.host}` : ""}`;
 }
 
 export type AddonDraft = { kind: AddonKind; scope: string; source: string; name: string };
