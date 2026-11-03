@@ -65,6 +65,10 @@ func computerCommand(socket string) *cobra.Command {
 	text := &cobra.Command{Use: "text [CSS]", Args: cobra.MaximumNArgs(1), RunE: run(computer.Text)}
 	shot := &cobra.Command{Use: "screenshot FILE", Args: cobra.ExactArgs(1), RunE: run(computer.Screenshot)}
 	shot.Flags().BoolVar(&full, "full", false, "Capture the full page")
-	root.AddCommand(start, open, click, typ, text, shot)
+	// The engine runs this through podman exec for the owner's view; it does not start the desktop.
+	stream := &cobra.Command{Use: "stream", Short: "Carry the desktop's VNC stream over stdin and stdout", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		return computer.Stream(cmd.Context(), computer.VNCSocket, cmd.InOrStdin(), cmd.OutOrStdout())
+	}}
+	root.AddCommand(start, open, click, typ, text, shot, stream)
 	return root
 }

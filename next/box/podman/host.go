@@ -136,6 +136,13 @@ func (h *Host) TerminalArgv(id contract.BoxID) []string {
 	return args
 }
 
+// ExecArgv runs argv in a box over an SSH connection of its own, as a session command does. It has no terminal, so its
+// stdin and stdout carry bytes as they are, such as a computer's VNC stream.
+func (h *Host) ExecArgv(id contract.BoxID, argv ...string) []string {
+	args := append(h.direct(), "-T", h.destination, "podman", "exec", "-i", string(id))
+	return append(args, argv...)
+}
+
 func (h *Host) control(ctx context.Context, op string, extra ...string) error {
 	args := append(h.base(), "-O", op)
 	args = append(args, extra...)

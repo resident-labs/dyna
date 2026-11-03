@@ -358,7 +358,7 @@ func (r rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func TestChannelSkipsAnUnknownMessageType(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("{\"type\":\"computer.watch.stop\",\"body\":{}}\n{\"type\":\"from.a.newer.engine\",\"body\":{}}\n{\"type\":\"computer.watch.stop\",\"body\":{}}\n"))
+		_, _ = w.Write([]byte("{\"type\":\"shell.watch.stop\",\"body\":{}}\n{\"type\":\"from.a.newer.engine\",\"body\":{}}\n{\"type\":\"shell.watch.stop\",\"body\":{}}\n"))
 	}))
 	defer server.Close()
 	c := &Client{http: server.Client()}
