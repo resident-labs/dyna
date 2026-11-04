@@ -19,6 +19,8 @@ test("a way's name comes from its host: loopback is local, .ts.net is Tailscale,
   assert.equal(wayName("http://127.0.0.1:7790"), "Local address");
   assert.equal(wayName("https://hermeslab.tail9c3e.ts.net"), "Tailscale HTTPS");
   assert.equal(wayName("https://HERMESLAB.TAIL9C3E.TS.NET"), "Tailscale HTTPS");
+  assert.equal(wayName("http://[::1]:7790"), "Local address");
+  assert.equal(wayName("https://foots.net"), "Your HTTPS address");
   assert.equal(wayName("https://ts.net.example.com"), "Your HTTPS address");
   assert.equal(wayName("https://dyna.example.net"), "Your HTTPS address");
 });
@@ -27,11 +29,12 @@ test("the ways in come first in the engine's order without the tunnel, then Conn
   const items = sharingItems(status({ routes: ["https://b.example.net", "http://localhost:7790", "https://t.connect.dev", "https://a.example.net"], tunnel: "https://t.connect.dev", linked: true }), [
     device("old", { pairedAt: iso(-40 * day) }), device("me", { pairedAt: iso(-90 * day), current: true }), device("new", { pairedAt: iso(-1 * day) }),
   ], "http://localhost:7790", now);
-  assert.deepEqual(keys(items), ["way:b.example.net", "way:localhost:7790", "way:a.example.net", "connect", "me", "new", "old"]);
+  assert.deepEqual(keys(items), ["way:https://b.example.net", "way:http://localhost:7790", "way:https://a.example.net", "connect", "me", "new", "old"]);
   assert.deepEqual(items.map(item => sharingGroup(item).title), ["Ways in", "Ways in", "Ways in", "Ways in", "Devices", "Devices", "Devices"]);
+  assert.notEqual(...keys(sharingItems(status({ routes: ["http://d.example.net", "https://d.example.net"] }), [], "", now)).slice(0, 2) as [string, string]);
   // The page came through the local address, so it, and not the tunnel, is this browser's.
-  assert.deepEqual(items.filter(item => item.kind !== "device" && item.current).map(item => item.key), ["way:localhost:7790"]);
-  assert.deepEqual(items.filter(item => item.kind === "way" && item.local).map(item => item.key), ["way:localhost:7790"]);
+  assert.deepEqual(items.filter(item => item.kind !== "device" && item.current).map(item => item.key), ["way:http://localhost:7790"]);
+  assert.deepEqual(items.filter(item => item.kind === "way" && item.local).map(item => item.key), ["way:http://localhost:7790"]);
 });
 
 test("Connect is this browser's way when the page came through its tunnel, and a status that did not load still lists Connect", () => {
@@ -48,7 +51,7 @@ test("a device warns from 3 days left, and the Expiring and Admin chips count de
     device("three", { expiresAt: iso(3 * day) }), device("four", { expiresAt: iso(3 * day + 60_000) }), device("today", { expiresAt: iso(day / 2) }),
     device("admin", { scopes: ["read", "admin"] }), device("plain"), device("Admin2", { scopes: ["admin"], expiresAt: iso(2 * day) }),
   ], "http://localhost:7790", now);
-  const warning = (id: string) => items.find(item => item.key === id && item.kind === "device")?.kind === "device" ? (items.find(item => item.key === id) as SharingItem & { kind: "device" }).warning : "none";
+  const warning = (id: string) => { const found = items.find(item => item.key === id); return found?.kind === "device" ? found.warning : "none"; };
   assert.equal(warning("three"), "Expires in 3 days");
   assert.equal(warning("four"), undefined);
   assert.equal(warning("today"), "Expires today");
@@ -61,7 +64,7 @@ test("a device warns from 3 days left, and the Expiring and Admin chips count de
 });
 
 test("the search finds a device by name in any case, by host and by access, and a way by its address", () => {
-  const items = sharingItems(status({ routes: ["https://hermeslab.tail9c3e.ts.net"] }), [
+  const items = sharingItems(status({ routes: ["https://hermeslab.tail9c3e.ts.net", "https://t9.relay.example"], tunnel: "https://t9.relay.example", linked: true }), [
     device("iPhone", { host: "omarchy" }), device("Pixel", { scopes: ["read", "terminal"] }), device("Laptop"),
   ], "http://localhost:7790", now);
   const find = (query: string) => listView(items, { text: sharingText, key: item => item.key, query, chip: sharingChips[0], chips: sharingChips, group: sharingGroup, folded: new Set() })
@@ -69,8 +72,9 @@ test("the search finds a device by name in any case, by host and by access, and 
   assert.deepEqual(find("IPHONE"), ["iPhone"]);
   assert.deepEqual(find("omarchy"), ["iPhone"]);
   assert.deepEqual(find("terminal"), ["Pixel"]);
-  assert.deepEqual(find("tail9c3e"), ["way:hermeslab.tail9c3e.ts.net"]);
+  assert.deepEqual(find("tail9c3e"), ["way:https://hermeslab.tail9c3e.ts.net"]);
   assert.deepEqual(find("connect"), ["connect"]);
+  assert.deepEqual(find("t9.relay"), ["connect"]);
 });
 
 test("a row's line: a way's address, a device's seen, access and host", () => {
@@ -92,7 +96,7 @@ test("Connect's line and mark follow its state, turning first, then linked, then
   assert.equal(connectLine(status({ attempt: { state: "starting", expires: 0 } })), "Turning on…");
   assert.equal(connectLine(status({ attempt: { state: "unlinking", expires: 0 }, linked: true, tunnel: "https://t.connect.dev" })), "Turning off…");
   assert.equal(connectLine(status({ attempt: { state: "linked", expires: 0 }, linked: true, tunnel: "https://t.connect.dev" })), "https://t.connect.dev");
-  assert.equal(connectLine(status({ linked: true })), "On");
+  assert.equal(connectLine(status({ linked: true })), "No address yet");
   assert.equal(connectPill(status()), undefined);
   assert.equal(connectPill(undefined), undefined);
   assert.deepEqual(connectPill(status({ linked: true })), { label: "On" });

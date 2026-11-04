@@ -61,6 +61,7 @@ test("the expiry warning starts at 3 days left", () => {
 
 test("a device's detail says how long ago it paired, and when it expires in whole days, the last one today", () => {
   assert.equal(ago(new Date(at - 30_000).toISOString(), at), "just now");
+  assert.equal(ago(new Date(at - 60_000).toISOString(), at), "1 min ago");
   assert.equal(ago(new Date(at - 59 * 60_000).toISOString(), at), "59 min ago");
   assert.equal(ago(new Date(at - 60 * 60_000).toISOString(), at), "1 h ago");
   assert.equal(ago(new Date(at - 86_400_000).toISOString(), at), "1 day ago");
