@@ -64,4 +64,10 @@ The server joins Pi's MCP config beside `dyna`. Load its tools with `tool_search
 
 ## Where a package is documented
 
-The box carries no Pi documentation, and none of PiG's. A Pi package declares what it bundles in the `pi` block of its `package.json`. Nothing in the box says what that block may hold. To write one, read the `package.json` and layout of a published Pi package, or ask the owner. Do not guess keys.
+The box carries no Pi documentation, and none of PiG's. A Pi package declares what it bundles in the `pi` block of its `package.json`. The block takes `extensions`, `skills`, `prompts` and `themes`, each a list of files, directories or globs relative to the package:
+
+```json
+{ "pi": { "extensions": ["extensions/*"], "skills": ["skills/*"], "prompts": ["prompts/*.md"], "themes": ["themes/*.json"] } }
+```
+
+This is all the box can tell you. For anything more, such as filters, read a published package or ask the owner.
