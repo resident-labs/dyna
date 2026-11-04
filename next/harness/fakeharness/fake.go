@@ -43,7 +43,9 @@ type Harness struct {
 	Transfer func(context.Context) (harness.ModelTransfer, error)
 	// CompactFunc stands in for Pi's compaction, if set. It can block to hold one open, and it gets the size asked for.
 	CompactFunc func(context.Context, int64) (harness.Compaction, error)
-	Compacts    int // each Compact call
+	Compacts    int   // each Compact call
+	Clears      int   // each ClearQueue call
+	SteerErr    error // what Steer and FollowUp return, if set
 	delivered   map[contract.DeliverySeq]bool
 	stopped     chan struct{}
 }
@@ -132,6 +134,9 @@ func (h *Harness) FollowUp(_ context.Context, input contract.TurnInput) error {
 func (h *Harness) queue(input contract.TurnInput, queue contract.TurnQueue) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.SteerErr != nil {
+		return h.SteerErr
+	}
 	h.Inputs = append(h.Inputs, Input{TurnInput: input, Queue: queue})
 	return nil
 }
@@ -150,6 +155,13 @@ func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, e
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.delivered[id], nil
+}
+
+func (h *Harness) ClearQueue(context.Context) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.Clears++
+	return nil
 }
 
 func (h *Harness) Abort(context.Context) error {
