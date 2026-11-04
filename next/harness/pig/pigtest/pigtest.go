@@ -91,7 +91,7 @@ func AgentDir(t *testing.T, model *Model, mcpServers string) string {
 		mcpServers = "{}"
 	}
 	for name, content := range map[string]string{
-		"models.json":   `{"providers":{"anthropic":{"baseUrl":"` + server.URL + `","apiKey":"box","models":[{"id":"test-model","api":"anthropic-messages","reasoning":true,"input":["text"],"contextWindow":200000,"maxTokens":8000}]}}}`,
+		"models.json":   `{"providers":{"anthropic":{"baseUrl":"` + server.URL + `","apiKey":"box","models":[{"id":"test-model","api":"anthropic-messages","reasoning":true,"input":["text","image"],"contextWindow":200000,"maxTokens":8000}]}}}`,
 		"settings.json": `{"defaultProjectTrust":"always","steeringMode":"all"}`,
 		"auth.json":     `{}`,
 		"mcp.json":      `{"mcpServers":` + mcpServers + `}`,
