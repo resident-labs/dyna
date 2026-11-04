@@ -184,6 +184,10 @@ func TestASteerIsFramedForTheTurnItJoins(t *testing.T) {
 		if !ok || steer.Queue != contract.QueueSteer {
 			t.Fatalf("%s: %+v", what, steer)
 		}
+		// Pi read it: the box reports a steer done before the turn ends, or the turn does not answer it.
+		if _, problem := s.DeliveryDone(ctx, boxCaller(worker), contract.DeliveryDoneRequest{Delivery: steer.Input.Delivery}); problem != nil {
+			t.Fatal(problem)
+		}
 		line, _, _ := strings.Cut(steer.Input.Text, "\n")
 		return line
 	}
