@@ -101,7 +101,9 @@
   function clear() { query = ""; chip = chips?.[0]; }
 </script>
 
-<div class="column" data-page-ready={!!items || failed}>
+<!-- The column is an F6 stop (spec 5.13); F6 hands its focus to the list, or to the first control while the list is not there. -->
+<div class="column" data-page-ready={!!items || failed} data-f6 tabindex="-1"
+  onfocus={event => { if (event.target === event.currentTarget) (scroller ?? event.currentTarget.querySelector<HTMLElement>("input:enabled, button:enabled"))?.focus(); }}>
   <div class="tools">
     <SearchBox bind:value={query} slash label={`Search ${noun[1]}`} placeholder={items?.length ? `Search ${count(items.length)}` : `Search ${noun[1]}`} disabled={!items} ondown={() => void first()} />
     {#if chips}<div class="chips" role="group" aria-label="Filter">{#each chips as each (each.id)}
@@ -143,7 +145,10 @@
 
 <style>
   .column { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 16px 20px 12px 24px; }
+  .column:focus { outline: none; }
+  /* The search spans the list and the chips take the row below, so the toolbar keeps its shape at any count. */
   .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .tools > :global(.search) { flex-basis: 100%; }
   .chips { display: flex; flex-wrap: wrap; gap: 4px; }
   .chip { height: 30px; padding: 0 10px; border: 1px solid var(--firm); border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; }
   .chip[aria-pressed="true"] { border-color: var(--focus); color: var(--text); }
@@ -162,6 +167,8 @@
   .row { position: absolute; left: 6px; right: 6px; display: flex; align-items: center; gap: 12px; padding: 0 8px; border-radius: 6px; cursor: pointer; }
   .row.item:hover { background: var(--hover); }
   .row[aria-selected="true"] { background: var(--selected); }
+  /* On the selected wash an off switch's usual border all but vanishes in light, and the switch reads as disabled. */
+  .row[aria-selected="true"] :global(input[role="switch"]:not(:checked)) { border-color: var(--muted); }
   .list:focus-visible .row.active { outline: 2px solid var(--focus); outline-offset: -2px; }
   .row.grid { display: grid; gap: 10px; }
   .group { left: 0; right: 0; gap: 8px; padding: 0 14px; border-radius: 0; color: var(--muted); font-size: 13px; font-weight: 600; }

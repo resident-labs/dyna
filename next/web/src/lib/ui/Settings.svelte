@@ -14,7 +14,8 @@
   // The Settings page, in the feed's and the sidebar's place. It opens over the app, so the room behind keeps its feed,
   // its position and its draft. A wide page opens the first pane. A phone opens the pane list, and a pane's arrow returns to it.
   // moved tells the app that Settings changed the path itself, as a list page does when it opens an item.
-  let { path, phone, navigate, moved, onmenu, signedout, thishost, element = $bindable(), menu = $bindable() }: { path: string; phone: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void;
+  // counts are the item counts the nav shows beside list panes, from lists the app already holds.
+  let { path, phone, counts, navigate, moved, onmenu, signedout, thishost, element = $bindable(), menu = $bindable() }: { path: string; phone: boolean; counts: Partial<Record<string, number>>; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void;
     moved: () => void; onmenu: (event: MouseEvent) => void; signedout: () => void; thishost: (host?: string) => void; element?: HTMLElement; menu?: HTMLButtonElement } = $props();
 
   // device.list needs admin, so its refusal tells that this device has no Devices pane (spec 7.8).
@@ -66,7 +67,7 @@
   <div class="settings-layout">
   {#if !phone}<aside class="nav"><header class="bar"><strong>Settings</strong></header>
     <nav aria-label="Settings panes">{#each panes as pane (pane.id)}
-      <a href={`/settings/${pane.id}`} onclick={navigate} aria-current={shown === pane ? "page" : undefined}><Icon name={pane.icon} />{pane.label}</a>{/each}</nav></aside>{/if}
+      <a href={`/settings/${pane.id}`} onclick={navigate} aria-current={shown === pane ? "page" : undefined}><Icon name={pane.icon} /><span class="l">{pane.label}</span>{#if counts[pane.id] !== undefined}<span class="n">{counts[pane.id]!.toLocaleString("en")}</span>{/if}</a>{/each}</nav></aside>{/if}
   <div class="pane">
     {#if lost}<Blocked kind="no-page" back={{ href: "/settings", label: "Back to Settings" }} {navigate} />
     {:else if shown?.id === "appearance"}<AppearancePane {bar} />
@@ -78,7 +79,7 @@
     {:else}
       <header class="bar"><button type="button" class="round menu" bind:this={menu} aria-label="Rooms and pages" title="Rooms and pages" onclick={onmenu}><Icon name="menu" /></button><strong>Settings</strong></header>
       <nav class="list" aria-label="Settings panes">{#each panes as pane (pane.id)}
-        <a href={`/settings/${pane.id}`} onclick={navigate}><Icon name={pane.icon} />{pane.label}<Icon name="forwardChevron" /></a>{/each}</nav>
+        <a href={`/settings/${pane.id}`} onclick={navigate}><Icon name={pane.icon} />{pane.label}{#if counts[pane.id] !== undefined}<span class="n">{counts[pane.id]!.toLocaleString("en")}</span>{/if}<Icon name="forwardChevron" /></a>{/each}</nav>
     {/if}
   </div>
   </div>
@@ -96,12 +97,16 @@
   .nav a { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border-radius: 6px; color: var(--muted); font-size: 14px; font-weight: 500; text-decoration: none; }
   .nav a:hover { background: var(--hover); color: var(--text); }
   .nav a[aria-current="page"] { background: var(--selected); color: var(--text); }
+  .nav a .l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nav a .n { margin-left: auto; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
   .pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .round { display: grid; place-items: center; flex: none; width: 40px; height: 40px; margin: 0 -8px 0 -10px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--muted); cursor: pointer; }
   .menu { display: none; }
   .list { padding: 8px; }
   .list a { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 8px; border-radius: 6px; color: var(--text); font-size: 15px; font-weight: 500; text-decoration: none; }
   .list a :global(svg:last-child) { margin-left: auto; color: var(--muted); }
+  .list a .n { margin-left: auto; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .list a .n + :global(svg) { margin-left: 0; }
   @container settings (max-width: 720px) {
     .settings-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
     .nav nav { display: flex; overflow-x: auto; }
