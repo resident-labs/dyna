@@ -1067,6 +1067,7 @@ type DiffSavedRequest struct {
 	Files   int      `json:"files"`            // files its diffs change
 	Capped  bool     `json:"capped,omitempty"` // a section was over the size cap and holds the commit list and stat only
 	Failed  []string `json:"failed,omitempty"` // worktrees that could not be saved, each with its reason; the others are in the file
+	Stale   []string `json:"stale,omitempty"`  // repositories whose fetch failed, each with its reason; their figures come from the box's last fetch and may be stale
 	Error   string   `json:"error,omitempty"`
 }
 type DiffSavedResponse struct{}
@@ -1089,6 +1090,9 @@ func (saved *DiffSavedRequest) CloseNotice(session string) string {
 	}
 	if len(saved.Failed) > 0 {
 		text += " Not saved: " + strings.Join(saved.Failed, "; ") + "."
+	}
+	if len(saved.Stale) > 0 {
+		text += " The remote could not be fetched for " + strings.Join(saved.Stale, "; ") + ", so these figures come from the box's last fetch and may be stale: work pushed or merged since may be counted as unpushed."
 	}
 	return text
 }
