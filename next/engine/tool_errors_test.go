@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/prs/fakegithub"
@@ -67,9 +68,12 @@ func TestPrOpenNamesTheMissingBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.store.ClaimBranch(ctx, record.Repo, session, "pr-worker", nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	s.SetRepositories(&fakeRepos{err: errors.New("no such ref")})
 	_, problem := s.OpSubmit(ctx, sessionCaller(session), contract.OpSubmitRequest{Operation: contract.Operation{Room: record.Room, Kind: "pr.open", Args: contract.PrOpenArgs{Title: "Trial", Base: "main"}}})
-	want := "invalid operation: branch v2/" + string(session) + " not found on owner/repo; head was not given and defaulted to it; head names another branch"
+	want := "invalid operation: branch pr-worker not found on owner/repo; head was not given and defaulted to it; head names another branch"
 	if problem == nil || problem.Code != contract.ErrInvalid || problem.Message != want {
 		t.Fatalf("%+v", problem)
 	}

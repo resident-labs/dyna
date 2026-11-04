@@ -12,10 +12,11 @@ import (
 )
 
 type fakeRunner struct {
-	calls  [][]string
-	fail   string
-	remote string
-	head   string
+	calls    [][]string
+	fail     string
+	remote   string
+	head     string
+	branches string // what for-each-ref prints
 }
 
 func (r *fakeRunner) Run(_ context.Context, _ []string, args ...string) ([]byte, error) {
@@ -33,6 +34,9 @@ func (r *fakeRunner) Run(_ context.Context, _ []string, args ...string) ([]byte,
 	}
 	if len(args) > 2 && args[2] == "ls-remote" {
 		return []byte("ref: refs/heads/new-default\tHEAD\nabc\tHEAD\n"), nil
+	}
+	if len(args) > 2 && args[2] == "for-each-ref" {
+		return []byte(r.branches), nil
 	}
 	if len(args) > 2 && args[2] == "symbolic-ref" {
 		if args[3] == "HEAD" {
@@ -64,7 +68,7 @@ func TestPrepareFetchesBeforePushingCache(t *testing.T) {
 	c := &fakeCache{}
 	dir := t.TempDir()
 	m := &Mirror{Layout: box.Layout{Data: dir, HostData: "/host"}, Token: "secret", Runner: r}
-	result, err := m.Prepare(context.Background(), c, "owner/repo", "ses_1", true)
+	result, err := m.Prepare(context.Background(), c, "owner/repo", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +88,7 @@ func TestPrepareRefreshesDefaultBranch(t *testing.T) {
 	}
 	r := &fakeRunner{}
 	m := &Mirror{Layout: box.Layout{Data: dir, HostData: "/host"}, Token: "secret", Runner: r}
-	result, err := m.Prepare(context.Background(), &fakeCache{}, "owner/repo", "ses_1", true)
+	result, err := m.Prepare(context.Background(), &fakeCache{}, "owner/repo", true)
 	if err != nil || result.Base != "new-default" {
 		t.Fatalf("base %q, error %v", result.Base, err)
 	}
@@ -114,7 +118,7 @@ func TestRefReadsTheRequestedRemoteReference(t *testing.T) {
 
 func TestPrepareRejectsMissingToken(t *testing.T) {
 	m := &Mirror{Layout: box.Layout{Data: t.TempDir(), HostData: "/host"}, Runner: &fakeRunner{}}
-	_, err := m.Prepare(context.Background(), &fakeCache{}, "owner/repo", "ses_1", true)
+	_, err := m.Prepare(context.Background(), &fakeCache{}, "owner/repo", true)
 	var missing MissingTokenError
 	if !errors.As(err, &missing) {
 		t.Fatalf("expected missing-token error, got %v", err)
@@ -125,7 +129,7 @@ func TestPrepareDoesNotPushWhenCloneFails(t *testing.T) {
 	r := &fakeRunner{fail: "clone"}
 	c := &fakeCache{}
 	m := &Mirror{Layout: box.Layout{Data: t.TempDir(), HostData: "/host"}, Token: "secret", Runner: r}
-	_, err := m.Prepare(context.Background(), c, "owner/repo", "ses_1", true)
+	_, err := m.Prepare(context.Background(), c, "owner/repo", true)
 	if err == nil || c.called {
 		t.Fatalf("error %v, cache called %v", err, c.called)
 	}
