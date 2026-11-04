@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { ThinkingLevel } from "../contract.gen.ts";
-  import { providers, replacements, sessionCount, type ProfileModel, type ProfileSummary } from "../profiles.ts";
+  import { countField, providers, ratingKey, replacements, sessionCount, type ProfileModel, type ProfileSummary } from "../profiles.ts";
   import Modal from "./Modal.svelte";
   // A profile's detail on Settings > Profiles (spec 5.13): its fields with each explanation once, Save, and Remove, which
   // first asks where the sessions of a profile in use go. note is what the last save said, until the next edit.
@@ -20,7 +20,6 @@
     target = others[0]?.name ?? "";
     moving = true;
   }
-  const digits = (text: string) => Number(text.replace(/[^0-9]/g, ""));
   const grouped = (n: number | undefined) => n ? n.toLocaleString("en") : "";
   // svelte-ignore state_referenced_locally
   let compactText = $state(grouped(profile.compactTokens)), limitText = $state(grouped(profile.maxConcurrent));
@@ -35,13 +34,13 @@
     { value: "medium", label: "Medium" }, { value: "high", label: "High" }, { value: "xhigh", label: "Very high" },
   ];
   type Rated = (typeof ratings)[number]["key"];
-  // A rating is one slider: the arrows step it, Home and End go to 1 and 10, and Backspace or Delete clears it.
+  // A rating is one slider (ratingKey). The pointer previews the fill up to the step under it.
+  let hover: { key: Rated; value: number } | undefined = $state();
   function rate(event: KeyboardEvent, key: Rated) {
-    const now = draft[key];
-    const next = ({ ArrowRight: now + 1, ArrowUp: now + 1, ArrowLeft: now - 1, ArrowDown: now - 1, Home: 1, End: 10, Backspace: 0, Delete: 0 } as Record<string, number>)[event.key];
+    const next = ratingKey(event.key, draft[key]);
     if (next === undefined) return;
     event.preventDefault();
-    draft[key] = Math.max(0, Math.min(10, next));
+    draft[key] = next;
     edited = true;
   }
   const models_id = $props.id();
@@ -63,11 +62,12 @@
     {#each ratings as item (item.key)}
       <div class="rating">
         <span class="rating-name">{item.name}</span>
-        <div class="steps" role="slider" tabindex="0" aria-label={item.name} aria-valuemin={0} aria-valuemax={10} aria-valuenow={draft[item.key]}
+        <div class="steps" role="slider" onpointerleave={() => { hover = undefined; }} tabindex="0" aria-label={item.name} aria-valuemin={0} aria-valuemax={10} aria-valuenow={draft[item.key]}
           aria-valuetext={draft[item.key] ? String(draft[item.key]) : "Not rated"} onkeydown={event => rate(event, item.key)}>
           {#each Array.from({ length: 10 }, (_, i) => i + 1) as value (value)}
             <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions: the slider takes the keys. -->
-            <span class="step" class:on={value <= draft[item.key]} title={value === draft[item.key] ? "Clear" : String(value)}
+            <span class="step" class:on={value <= draft[item.key]} class:preview={hover?.key === item.key && value <= hover.value}
+              onpointerenter={event => { if (event.pointerType === "mouse") hover = { key: item.key, value }; }} title={value === draft[item.key] ? "Clear" : String(value)}
               onclick={() => { draft[item.key] = value === draft[item.key] ? 0 : value; edited = true; }}></span>
           {/each}
         </div>
@@ -78,12 +78,12 @@
   </div>
   <label class="field"><span class="label">Notes</span><textarea bind:value={draft.description} rows="3"></textarea></label>
   <label class="field"><span class="label">At most at once</span><input class="short" inputmode="numeric" placeholder="No limit" value={limitText}
-    oninput={event => { limitText = event.currentTarget.value; draft.maxConcurrent = digits(limitText); }} onblur={() => { limitText = grouped(draft.maxConcurrent); }} />
+    oninput={event => { limitText = event.currentTarget.value; draft.maxConcurrent = countField(limitText); }} onblur={() => { limitText = grouped(draft.maxConcurrent); }} />
     <span class="help">Workflow workers on this profile at the same time. Empty is no limit.</span></label>
   <label class="field switch"><span class="label">Images</span><input type="checkbox" role="switch" checked={draft.images ?? true} onchange={event => { draft.images = event.currentTarget.checked; }} />
     <span class="help">Whether the model takes images. Off sends it text only.</span></label>
   <label class="field"><span class="label">Compact at</span><input class="short" inputmode="numeric" placeholder="Pi's default" value={compactText}
-    oninput={event => { compactText = event.currentTarget.value; draft.compactTokens = digits(compactText); }} onblur={() => { compactText = grouped(draft.compactTokens); }} />
+    oninput={event => { compactText = event.currentTarget.value; draft.compactTokens = countField(compactText); }} onblur={() => { compactText = grouped(draft.compactTokens); }} />
     <span class="help">Tokens of context before the session compacts.</span></label>
   {#if error}<p role="alert" class="problem">{error}</p>{/if}
   <div class="actions"><button class="btn fill" type="button" disabled={busy || !draft.name.trim() || !draft.model.trim()} onclick={() => { edited = false; save(draft); }}>{isNew ? "Create" : "Save"}</button>
@@ -107,7 +107,7 @@
 <style>
   .editor { display: grid; gap: 18px; }
   .field { display: grid; gap: 6px; min-width: 0; }
-  .label { font-size: 14px; font-weight: 600; }
+  .label { color: var(--text); font-size: 14px; font-weight: 600; }
   .field.switch { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
   .field.switch .help { grid-column: 1 / -1; }
   input:not([role="switch"]), select, textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 14px; padding: 7px 10px; }
@@ -118,10 +118,13 @@
   .help { color: var(--muted); font-size: 12.5px; line-height: 1.35; }
   .rating { display: grid; grid-template-columns: 96px minmax(0, 1fr) 24px; gap: 2px 10px; align-items: center; font-size: 13.5px; }
   .rating > .help { grid-column: 1 / -1; }
-  .steps { display: flex; gap: 3px; padding: 2px; border-radius: 6px; cursor: pointer; }
+  .steps { display: flex; gap: 3px; padding: 0 2px; border-radius: 6px; }
   .steps:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-  .step { flex: 1; height: 16px; border: 1px solid var(--line); border-radius: 4px; background: var(--selected); }
-  .step.on { background: var(--focus); border-color: var(--focus); }
+  /* The step is the hit area, taller than the bar it draws. */
+  .step { flex: 1; padding: 3px 0; cursor: pointer; }
+  .step::after { content: ""; display: block; height: 16px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 4px; background: var(--selected); }
+  .step.preview::after { background: color-mix(in srgb, var(--focus) 45%, var(--selected)); border-color: color-mix(in srgb, var(--focus) 45%, var(--line)); }
+  .step.on::after { background: var(--focus); border-color: var(--focus); }
   .rating-value { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
   .actions { display: flex; align-items: center; gap: 12px; }
   .removal { display: flex; align-items: center; gap: 12px; padding-top: 14px; border-top: 1px solid var(--line); }
@@ -130,5 +133,5 @@
   .move { display: grid; gap: 8px; color: var(--muted); }
   .move select { max-width: 100%; }
   p { margin: 0; }
-  @media (hover: none) { .step { height: 28px; } }
+  @media (hover: none) { .step { padding: 8px 0; } .step::after { height: 22px; } }
 </style>

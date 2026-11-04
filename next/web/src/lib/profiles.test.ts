@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { profileChips, profileColumns, profileForSave, profileLabel, profileLine, profileModels, profileRows, profileText, providerFilter, replacements, sessionCount, slugName, type ProfileSummary } from "./profiles.ts";
+import { countField, profileChips, ratingKey, profileColumns, profileForSave, profileLabel, profileLine, profileModels, profileRows, profileText, providerFilter, replacements, sessionCount, slugName, type ProfileSummary } from "./profiles.ts";
 import type { Account } from "./contract.gen.ts";
 
 test("saving a profile keeps its hidden limit and allowed models", () => {
@@ -61,6 +61,7 @@ const sample = (name: string, more: Partial<ProfileSummary> = {}): ProfileSummar
 test("the chips are All, In use and Not rated, and a profile with any rating is rated", () => {
   assert.deepEqual(profileChips.map(chip => chip.label), ["All", "In use", "Not rated"]);
   const [, inUse, unrated] = profileChips;
+  assert.equal(inUse.test!(sample("a", { inUse: 1 })), true);
   assert.equal(inUse.test!(sample("a", { inUse: 2 })), true);
   assert.equal(inUse.test!(sample("a")), false);
   assert.equal(unrated.test!(sample("a")), true);
@@ -76,6 +77,9 @@ test("every column sorts: the name by its text, the values by number, unset lowe
   assert.deepEqual(order("taste"), ["c", "b", "a"]);
   assert.deepEqual(order("maxConcurrent"), ["a", "b", "c"]);
   assert.deepEqual(order("inUse"), ["a", "c", "b"]);
+  // Descending is the reverse, so an unset value comes last.
+  const down = [...list].sort((a, b) => -profileColumns.find(column => column.id === "maxConcurrent")!.compare!(a, b)).map(profile => profile.name);
+  assert.deepEqual(down, ["c", "b", "a"]);
 });
 
 test("the provider filter keeps one provider's profiles, or every one", () => {
@@ -86,9 +90,31 @@ test("the provider filter keeps one provider's profiles, or every one", () => {
 
 test("a row reads as model and thinking, and a narrow row adds not rated and in use", () => {
   const profile = sample("glm", { model: "openrouter/glm-5.3", thinking: "xhigh", inUse: 3 });
-  assert.equal(profileLine(profile, false), "openrouter/glm-5.3 · very high thinking");
+  assert.equal(profileLine(profile, false), "openrouter/glm-5.3 · very high");
+  assert.equal(profileLine(sample("x", { thinking: "off" }), false), "glm-5.3 · no thinking");
   assert.equal(profileLine(profile, true), "openrouter/glm-5.3 · very high thinking · not rated · 3 in use");
   assert.equal(profileLine(sample("x", { taste: 4 }), true), "glm-5.3 · low thinking");
   // The search finds a profile by its name, its model or its provider as shown.
   assert.match(profileText(profile), /glm.*openrouter\/glm-5\.3.*OpenAI-compatible/);
+});
+
+test("a rating's keys step it within 0 to 10, jump to the ends, and clear it", () => {
+  assert.equal(ratingKey("ArrowRight", 0), 1);
+  assert.equal(ratingKey("ArrowUp", 10), 10);
+  assert.equal(ratingKey("ArrowLeft", 1), 0);
+  assert.equal(ratingKey("ArrowDown", 0), 0);
+  assert.equal(ratingKey("PageUp", 9), 10);
+  assert.equal(ratingKey("PageDown", 2), 0);
+  assert.equal(ratingKey("Home", 6), 1);
+  assert.equal(ratingKey("End", 2), 10);
+  assert.equal(ratingKey("Backspace", 7), 0);
+  assert.equal(ratingKey("Delete", 7), 0);
+  assert.equal(ratingKey("Tab", 7), undefined);
+  assert.equal(ratingKey("5", 7), undefined);
+});
+
+test("a typed count keeps its digits and stays a number the engine takes", () => {
+  assert.equal(countField("1,200"), 1200);
+  assert.equal(countField(""), 0);
+  assert.equal(countField("99999999999999999999"), 2 ** 31 - 1);
 });

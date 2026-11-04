@@ -24,21 +24,30 @@ export const profileChips: Chip<ProfileSummary>[] = [
 const byNumber = (value: (profile: ProfileSummary) => number | undefined) => (a: ProfileSummary, b: ProfileSummary) => (value(a) ?? 0) - (value(b) ?? 0);
 export const profileColumns: Column<ProfileSummary>[] = [
   { id: "name", label: "Name", width: "minmax(0, 1fr)", compare: (a, b) => a.name.localeCompare(b.name) },
-  { id: "taste", label: "Taste", width: "48px", compare: byNumber(p => p.taste) },
-  { id: "diagnostics", label: "Diag.", width: "48px", compare: byNumber(p => p.diagnostics) },
-  { id: "intelligence", label: "Intel.", width: "48px", compare: byNumber(p => p.intelligence) },
-  { id: "cost", label: "Thrift", width: "48px", compare: byNumber(p => p.cost) },
-  { id: "maxConcurrent", label: "At once", width: "60px", compare: byNumber(p => p.maxConcurrent) },
-  { id: "inUse", label: "In use", width: "56px", compare: byNumber(p => p.inUse) },
+  { id: "taste", label: "Taste", width: "44px", compare: byNumber(p => p.taste) },
+  { id: "diagnostics", label: "Diag.", width: "44px", compare: byNumber(p => p.diagnostics) },
+  { id: "intelligence", label: "Intel.", width: "44px", compare: byNumber(p => p.intelligence) },
+  { id: "cost", label: "Thrift", width: "44px", compare: byNumber(p => p.cost) },
+  { id: "maxConcurrent", label: "At once", width: "56px", compare: byNumber(p => p.maxConcurrent) },
+  { id: "inUse", label: "In use", width: "50px", compare: byNumber(p => p.inUse) },
 ];
 export const providerFilter = (provider: ModelProvider | "") => provider ? (profile: ProfileSummary) => profile.provider === provider : undefined;
 export const profileText = (profile: ProfileSummary) => `${profile.name} ${profile.model} ${providers[profile.provider]}`;
-// A row's second line; a narrow row has no columns, so it names what they would have shown.
+// A row's second line. A wide row's columns leave the line little room, so it names the level alone ("no thinking"
+// for off); a narrow row has no columns, so it says "thinking" and names what the columns would have shown.
 export function profileLine(profile: ProfileSummary, compact: boolean): string {
-  const line = `${profile.model} · ${thinking[profile.thinking]}`;
-  if (!compact) return line;
-  return line + (unrated(profile) ? " · not rated" : "") + (profile.inUse ? ` · ${profile.inUse} in use` : "");
+  if (!compact) return `${profile.model} · ${profile.thinking === "off" ? thinking.off : thinking[profile.thinking].replace(/ thinking$/, "")}`;
+  return `${profile.model} · ${thinking[profile.thinking]}` + (unrated(profile) ? " · not rated" : "") + (profile.inUse ? ` · ${profile.inUse} in use` : "");
 }
+
+// A rating is one slider from 0, not rated, to 10: what a key makes it, or undefined for a key it leaves alone.
+export function ratingKey(key: string, now: number): number | undefined {
+  const next = ({ ArrowRight: now + 1, ArrowUp: now + 1, ArrowLeft: now - 1, ArrowDown: now - 1, PageUp: now + 3, PageDown: now - 3, Home: 1, End: 10, Backspace: 0, Delete: 0 } as Record<string, number>)[key];
+  return next === undefined ? undefined : Math.max(0, Math.min(10, next));
+}
+
+// A typed limit or token count: its digits, capped at 2^31 - 1, far past any real one, so a long paste still saves.
+export const countField = (text: string) => Math.min(2 ** 31 - 1, Number(text.replace(/[^0-9]/g, "")));
 
 // Preserve the profile’s other allowed models and hidden limits when the owner edits its model.
 export function profileForSave(draft: ProfileSummary) {
