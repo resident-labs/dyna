@@ -155,7 +155,7 @@ func commands(ctx context.Context, body io.ReadCloser, session contract.SessionI
 			return nil, nil, false, fmt.Errorf("bad command")
 		}
 		ref := fields[2]
-		allowed := ref == "refs/dyna/archive/"+string(session)
+		allowed := false
 		if branch, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
 			var err error
 			allowed, err = CanPushBranch(ctx, rooms, repo, session, branch)

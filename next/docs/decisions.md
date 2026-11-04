@@ -247,7 +247,6 @@ type SessionStarted struct {
 
 type SessionClosed struct {
 	Session SessionID `json:"session"`
-	Archive string    `json:"archive,omitempty"` // refs/dyna/archive/<session>, if any
 	Unheld  []GoalID  `json:"unheld,omitempty"`  // M3: open goals left with no holder, because the parent is root (7.4)
 }
 
@@ -287,7 +286,7 @@ type BoxChanged struct {
 	Host    HostName  `json:"host,omitempty"`
 	From    BoxState  `json:"from"`
 	To      BoxState     `json:"to"`
-	Cause   FailureCause `json:"cause,omitempty"` // a failed box, or a close that could not archive
+	Cause   FailureCause `json:"cause,omitempty"` // a failed box (archive_failed is kept for older events)
 	Reason  string       `json:"reason,omitempty"`
 }
 ```
@@ -561,7 +560,6 @@ Column types follow SQLite. Times are INTEGER Unix milliseconds (`_at`). IDs are
 | M2 | `operations` | schema step 38 treats legacy approved operations as running, because their outcome is unknown; `id` PK, `kind`, `room`, `by_kind`, `by_id`, `class`, `state`, `card` BLOB, `args` BLOB, `args_sha256`, `created_at`, `expires_at`, `decided_by_kind`, `decided_by_id`, `decided_at`, `reason`, `exit_code`, `output_file` |
 | M2 | `grants` | `id` PK, `kind`, `room`, `to_kind`, `to_id`, `mode`, `hosts` JSON, `commands` JSON, `expires_at`, `by_kind`, `by_id`, `created_at`, `revoked_at`, `expired_at` |
 | M2 | `hostexec_runs` | section 6.3 |
-| M2 | `archives` | section 5.9 |
 | M2 | `room_repos`, `repos` | section 7.6 |
 | M2 | `pr_owners` | (`repo`, `number`) PK, `session`, `goal`, `approved_head`, `branch`. M2 opens PRs; M3 approves and merges them (decision 13). |
 | M3 | `subscriptions`, `subscription_events`, `subscription_args` | section 8.5; hooks and the default notice subscription need them |
@@ -632,7 +630,7 @@ const (
 	BoxStarting BoxState = "starting" // container started; waiting for the box agent's hello
 	BoxReady    BoxState = "ready"    // the box agent is connected
 	BoxStopped  BoxState = "stopped"  // the session is dormant; volume and slice kept
-	BoxClosing  BoxState = "closing"  // archive running, children closing
+	BoxClosing  BoxState = "closing"  // diff being saved, children closing
 	BoxDeleted  BoxState = "deleted"  // container, volume and slice removed (end)
 	BoxFailed   BoxState = "failed"   // a step failed; Reason says which
 	BoxLost     BoxState = "lost"     // host unreachable; may return to ready
@@ -656,7 +654,7 @@ type Box struct {
 	Size         BoxSize
 	State        BoxState
 	Want         BoxWant // desired state; the reconciler acts on it (below)
-	DueAt        int64   // Unix ms; the hello deadline, next retry or archive start; 0 for none
+	DueAt        int64   // Unix ms; the hello deadline, next retry or the diff wait; 0 for none
 	Reason       string  // pending, failed and lost only
 	Slice        string  // the systemd slice of this box's budget
 	Updated      time.Time
@@ -703,18 +701,18 @@ The table below lists the transitions. Each row is one observed change, and it e
 | pending | starting | admission fits a box that already has its container |
 | failed | pending | the owner restarts the open session |
 | pending, creating, starting, ready, stopped, failed | closing | the session closes, or its parent closes |
-| closing | deleted | archive pushed or not needed, children deleted, container removed |
+| closing | deleted | diff saved or not needed, children deleted, container removed |
 | creating, starting, ready | failed | create failed (including after an early hello), or `hello` timed out |
 | ready, stopped, closing | lost | the host is unreachable (5.10), or a `ready` box's channel stays down for 60 s on a reachable host |
 | lost | closing | the session closes while its host is unreachable; closing waits for the host or its removal |
-| closing | failed | the host returns without the container, or the owner removes the host; there is no archive |
+| closing | failed | the host returns without the container, or the owner removes the host; there is no diff |
 | lost | ready | the host is back, the container still runs, and the box agent reconnected |
 | lost | stopped | the host is back and the container has exited, or the container exited on a reachable host |
 | lost | failed | the host is back without the container, or the owner removes the host |
 
 **A crash.** When a container exits on a reachable host, its channel drops. After 60 s the box goes `ready` → `lost`, the engine inspects the container, and the box goes `lost` → `stopped`. The volume and the session stay. With `want=run`, the first crash restarts at once and the second waits for the retry delay. The third crash without a completed turn ends in `failed`, and `session.restart` then replaces the box. The box agent exits when Pi exits, so a killed Pi takes this same path and never leaves a live box without a harness. After the restart, the channel resends `TurnStart` for the active turn, Pi resumes its session, and each tool call that started without a result gets the result "interrupted; state unknown" (5.8). Pi never runs that call again.
 
-The owner can close a session in any box state. A close cancels a step in progress first. Removal treats a part that is already gone (forward, container, slice) as done, so a close during `creating` or `starting` removes only what exists. A close while the box is `lost` waits in `closing` until the host returns or the owner removes the host. A box that ends `failed` this way has no archive: work that was not pushed is lost.
+The owner can close a session in any box state. A close cancels a step in progress first. Removal treats a part that is already gone (forward, container, slice) as done, so a close during `creating` or `starting` removes only what exists. A close while the box is `lost` waits in `closing` until the host returns or the owner removes the host. A box that ends `failed` this way has no diff: work that was not pushed is lost.
 
 `BoxState` and `BoxSize` live in `contract`, because events and the API carry them. `Host` and `Box` are engine records.
 
@@ -764,7 +762,7 @@ Every box slice sits under the host slice `dyna.slice`, whose `memory.max` is th
 
 ### 5.6 Repository copy and shared caches (M2)
 
-Repositories, git through the engine and the archive on close (5.6 to 5.9) land early in M2, because the trial needs them (section 11). In M1, a box has no repository, so close has nothing to archive.
+Repositories, git through the engine and the diff saved on close (5.6 to 5.9) land early in M2, because the trial needs them (section 11). In M1, a box has no repository, so close has nothing to save.
 
 Each host keeps one bare cache per repository at `<hostdata>/git/<owner>/<repo>.git`. **Hosts never talk to GitHub and hold no GitHub credentials.** The control plane fetches from GitHub into its own mirror and pushes into the host cache over the master before it creates a box, and from M3 also when it sees the default branch move.
 
@@ -804,7 +802,7 @@ On SIGTERM, the engine blocks new turn dispatches and model calls, and waits up 
 - In M1 the proxy keeps its sign-ins in its own file store, `<data>/cliproxy/auth` (mode 0700). In M3 the engine registers a token store on `store.db` through the SDK's `Store` interface (`List`, `Save`, `Delete`), so no JSON state is left. `store.db` and its backups then hold tokens and stay 0600.
 - Accepted costs: the binary grows by the proxy's dependencies (gin, a Redis client, zeroconf and others), which later patches may trim. A proxy panic stops only the child; the engine restarts it (5.7).
 
-**Git (M2).** The box agent forwards `/git/` from its loopback listener over the box socket, as it does for `/model/`. `origin` is `http://127.0.0.1:7781/git/<owner>/<repo>.git`, so git's own smart-HTTP client works with no remote helper. The engine checks the room's repositories and proxies to GitHub with its own token. Pushes are limited to the session's repository. For a push, it reads the ref commands first and answers a ref the session does not own with a receive-pack `ng` report, without forwarding anything to GitHub. Pushes are allowed only to branches the session owns (`v2/<session>`, `v2/<session>-<topic>` with no slash in the topic, or a PR branch registered to it) and to `refs/dyna/archive/<session>`. Fetches are allowed for the room's repositories.
+**Git (M2).** The box agent forwards `/git/` from its loopback listener over the box socket, as it does for `/model/`. `origin` is `http://127.0.0.1:7781/git/<owner>/<repo>.git`, so git's own smart-HTTP client works with no remote helper. The engine checks the room's repositories and proxies to GitHub with its own token. Pushes are limited to the session's repository. For a push, it reads the ref commands first and answers a ref the session does not own with a receive-pack `ng` report, without forwarding anything to GitHub. Pushes are allowed only to branches the session owns (`v2/<session>`, `v2/<session>-<topic>` with no slash in the topic, or a PR branch registered to it) only. Fetches are allowed for the room's repositories.
 
 **Network.** Boxes have outbound internet for package installs, so they may reach the desktop on the LAN or through the tunnel. The engine's network listeners therefore accept only paired devices, and boxes hold no device keys. The box socket is a box's only way into the engine.
 
@@ -825,20 +823,16 @@ On SIGTERM, the engine blocks new turn dispatches and model calls, and waits up 
 
 **Release skew.** The API is additive. A quiet box stops after 10 minutes and starts the host's current binary on its next wake. The engine does not send an upgrade message.
 
-### 5.9 Close (archive in M2)
+### 5.9 Close
 
-Close writes `want=close` for the whole subtree, or `want=discard` when the owner chooses discard. The reconciler finishes close in durable steps. It closes and deletes each child, deepest first, with its own archive. To keep a child running, move it to another parent first (7.4). Then, for the box itself:
+Close writes `want=close` for the whole subtree, or `want=discard` for a room delete. The reconciler finishes close in durable steps. It closes and deletes each child, deepest first. To keep a child running, move it to another parent first (7.4). Then, for the box itself:
 
 1. Stop the harness and every shell job.
-2. Archive the session's repository, if it has one. Push HEAD and a snapshot of the dirty tree to `refs/dyna/archive/<session>`. The snapshot is a commit of the working tree, with untracked files that are not ignored, made through a temporary index and `commit-tree` (the v1 #1246 method), so the session branch and the index do not change. The ref points at the snapshot, whose first parent is HEAD. Skip this when the tree is clean and HEAD is already on the remote.
+2. Save a diff, if the box is connected and has a repository: one `.diff` in `/box/shared/archives/` with the unpushed commits' log and one diff of the committed, uncommitted and untracked work against the newest commit shared with the remote (spec 5.9). No archive ref and no push.
 3. `podman rm`, delete the volume, stop the slice, and remove the forward and the listener.
 4. Emit `box.changed` to `deleted`, then `session.closed`.
 
-Closing a dormant session starts its box for the archive without admission. Archiving boxes are idle and short-lived, so many closed at once can briefly overcommit their host.
-
-The engine deletes archive refs after 14 days. `dyna session restore <session>` starts a new box from the archive. The box agent retries an archive a few times before it reports a failure. If an archive push still fails, the box stays in `closing` with a reason. If removal fails, the box stays in `closing` with the error as its reason, and the reconciler retries removal after 30 s. A box is never deleted without its archive, except through `dyna session close --discard` (owner only), for a box that cannot start; it deletes the box with no archive.
-
-Table: `archives` (`session`, `repo`, `ref`, `commit_sha`, `created_at`, `expires_at`, PK `(session, repo)`).
+**Decision (2026-11-03, owner).** An archive pushed to the session's `origin` landed in repositories the owner does not own. Dyna keeps no archive ref and no restore: the pushed branches are the session's record, and close writes the diff above for the rest. The write is one try; a failure, a dormant box or a host that is not ready is told to the parent as `no diff was saved` or `not checked, nothing saved`, and close goes on. A close never starts a box and never waits for one. Refs older versions pushed stay where they are and are never swept. `session close --discard` is removed; `room delete --discard` stays as its confirmation.
 
 ### 5.10 Host failure and relocation
 
@@ -1046,7 +1040,7 @@ The owner dropped external members (D-583) on 2026-10-30 under r22: no outside a
 - A room has exactly one root. Every other session has a parent in the same room. No session is a sibling of root.
 - A session that the owner starts goes under root, or under the session that the owner picks.
 - **Pending input at close.** The engine hands pending and unacknowledged deliveries to the parent when a session closes. If the parent already has that event, its own delivery stays and the child's copy is dropped. A post addressed to a closing session fails with `session_closing`.
-- **Close** closes the session and its whole subtree, deepest first, and deletes their boxes after their archives (5.9). The tracked PRs and archive refs of every closed session go to the closing session's parent. Their open goals go to that parent too, unless the parent is root: root holds no goals (7.2), so those goals stay with no holder, and the `session.closed` event lists them for root to assign, as at import (8.3). Root cannot be closed. If its box fails, the owner can replace it with the same session ID, box ID, grants and history. Restart discards the old volume, unpushed work and unacknowledged transcript bytes; the feed and acknowledged transcript stay (5.3).
+- **Close** closes the session and its whole subtree, deepest first, and deletes their boxes after their diffs are saved (5.9). The tracked PRs of every closed session go to the closing session's parent. Their open goals go to that parent too, unless the parent is root: root holds no goals (7.2), so those goals stay with no holder, and the `session.closed` event lists them for root to assign, as at import (8.3). Root cannot be closed. If its box fails, the owner can replace it with the same session ID, box ID, grants and history. Restart discards the old volume, unpushed work and unacknowledged transcript bytes; the feed and acknowledged transcript stay (5.3).
 - **Move**: `session.move{Session, NewParent}` by the owner or a session above both places. The engine refuses a cycle and a move to another room. A move changes only the tree: one update of the parent and one `session.moved` event. It touches no box, because a box does not depend on its place in the tree.
 
 ### 7.5 Reply channels (D-579)
@@ -1512,7 +1506,7 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | local-ci | M3 as GitHub Actions with Dyna's [runner pool](ci-runners.md); act dropped | merges need a CI result |
 | local-issues, github-issues | M3 | 288 open issues keep their D-numbers |
 | hooks | M3 | typed subscriptions, imported |
-| maintenance | daily backups (4.1), 14-day expiry of archive refs (5.9), the 7-day dormant close, and daily host maintenance | A session whose box stayed stopped for 7 days closes through the normal close path, with its archive, if it has no open PR, goal, open child or pending input. Root never closes this way (hour 9 review; v1 `internal/subagent/dormant.go`). A child closes first, so its parent can close on a later pass. Each ready host prunes dangling Podman images and runs `git gc --no-prune` on bare repository caches. The latter preserves objects borrowed by boxes. |
+| maintenance | daily backups (4.1), the 7-day dormant close, and daily host maintenance | A session whose box stayed stopped for 7 days closes through the normal close path, with the diff of its unpushed work, if it has no open PR, goal, open child or pending input. Root never closes this way (hour 9 review; v1 `internal/subagent/dormant.go`). A child closes first, so its parent can close on a later pass. Each ready host prunes dangling Podman images and runs `git gc --no-prune` on bare repository caches. The latter preserves objects borrowed by boxes. |
 | remote-access, connect, device-scopes | M3, right after the box reconciler and before workflows (root, 2026-10-31) | phone access must work on cutover day, and the desktop is a client of the always-on engine (decision 14) |
 | web-push | M3, a port after the Devices page (root, 2026-10-31; 7.8) | a phone client needs alerts; a paired device can use it with no Connect link |
 | settings-accounts, settings-devices | M3 | sign in again and pair devices after the cutover |
@@ -1535,7 +1529,7 @@ Drafted by dyna:code-architectural. Every feature in the v1 library map, with it
 | ci-test-budget, pr-conflict-radar, room-prs | dropped | an Actions step fails slow tests; GitHub shows conflicts and the PR list (decision 13) |
 | session-transfer | moving a session to another model is kept as `session.set_profile`; format conversion stays dropped | one harness, so no session format to convert; Pi's session file keeps its history when the model changes |
 | jobs | dropped | CI runs on Dyna's Actions runner pool; host-specific work uses host exec or a room restricted to a suitable host |
-| worktrees | dropped | the box volume is the worktree; close archives to a ref; each box has its own ports |
+| worktrees | dropped | the box volume is the worktree; close saves a diff of unpushed work; each box has its own ports |
 | load-doctor | dropped | box limits and admission replace it: work that does not fit waits in `pending` |
 | test-slots | dropped | each box has its own limit, and admission bounds how many run |
 | settings-harnesses | dropped | harness versions live in the image; sign-in moves to accounts |
@@ -1644,11 +1638,11 @@ Acceptance:
 
 ### M2: web room view, approvals, host exec
 
-Scope: the ported web room view (feed, DMs, composer, cards and files, session tree, approvals panel, host-exec grants), the tree with child boxes, dormant boxes that stop and wake, reply channels (7.5), operations and approvals, host exec, images from `.dyna/images/`, the `box.pressure` report, the Dyna shell server with secret masking, the transcript stream, computers (5.14), rooms with repositories (7.6), the repository copy, git through the engine and close with archive (5.6 to 5.9), opening a PR through an operation (decision 13), and the shell job view and owner terminal (5.15).
+Scope: the ported web room view (feed, DMs, composer, cards and files, session tree, approvals panel, host-exec grants), the tree with child boxes, dormant boxes that stop and wake, reply channels (7.5), operations and approvals, host exec, images from `.dyna/images/`, the `box.pressure` report, the Dyna shell server with secret masking, the transcript stream, computers (5.14), rooms with repositories (7.6), the repository copy, git through the engine and close with its diff (5.6 to 5.9), opening a PR through an operation (decision 13), and the shell job view and owner terminal (5.15).
 
 The order inside M2:
 
-1. **The trial parts first:** images from `.dyna/images/`, rooms with repositories, the repository copy, git through the engine, close with archive, and computers.
+1. **The trial parts first:** images from `.dyna/images/`, rooms with repositories, the repository copy, git through the engine, close with its diff, and computers.
 2. **Self-hosting trial.** It starts as soon as one box builds and tests dyna and pushes its branch. v2 runs beside v1 with its own data, runtime and SSH control folders (decision 8), in a trial room for the `dyna` repository. While v1 still tracks the same repository, v2 names session branches `v2/<session>`, acts only on PRs that v2 sessions opened, and does not wake on unowned repository events. v1 does not track `v2/` branches. Until operations land, dyna:lead-rewrite starts v2 sessions through the v2 owner socket and opens the PRs for pushed `v2/` branches from v1 (root, 2026-10-30). v1 reviews and merges v2's PRs until the approval flag lands in M3. From then on, v2 sessions do part of the M2 and M3 work, and v1 stays the fallback.
 3. **The rest of M2**, including the web room view, which UI builders check from inside v2 with computers.
 
@@ -1667,7 +1661,7 @@ Acceptance:
 11. manual: a lead and its child run on hermeslab; each has its own top-level slice; closing the lead closes the child first. A dormant session's box stops and starts again on a post.
 12. manual: killing a host's master during a turn does not end the turn, and the box returns to `ready` within 15 s.
 13. manual: an agent in a box serves a web page from inside the box, opens it in its computer, takes a screenshot to a file, and attaches it to a post; the owner watches the same page live on the session page.
-14. unit: the git route refuses a push to a branch that the session does not own. Close archives before it deletes, and stays in `closing` when the archive push fails.
+14. unit: the git route refuses a push to a branch that the session does not own. Close saves a diff before it deletes, and goes on without one when the save fails.
 15. unit: a shell watch gets each job's last output with `Reset`, then only new whole lines, masked, and the agent's own read position does not move. A post of an older generation is dropped, the last watcher leaving sends `ShellWatchStop`, and a session caller is refused (fake box).
 16. unit: the terminal route refuses a session caller and a box that is not ready. Bytes and a resize reach the PTY of a fake target command, its exit sends `TerminalExit`, and closing the socket stops its process group.
 17. manual: in the web app, the owner opens a terminal in a box on hermeslab, runs a command, resizes the pane and closes the tab; no `podman exec` process is left. The owner follows a session's running shell job from its terminal icon.

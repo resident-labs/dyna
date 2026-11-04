@@ -499,14 +499,6 @@ func TestSessionRefreshMapsSessionOrRoom(t *testing.T) {
 		t.Fatalf("refresh help does not tell it from restart: %q", help)
 	}
 }
-func TestSessionCloseDiscard(t *testing.T) {
-	f := &fakeClient{}
-	runCLI(t, f, "session", "close", "s", "--discard")
-	if f.close.Session != "s" || !f.close.Discard {
-		t.Fatalf("%+v", f.close)
-	}
-}
-
 func TestSessionCloseSaysWhatItHandedOver(t *testing.T) {
 	f := &fakeClient{closed: contract.SessionCloseResponse{To: "ses_lead", Handed: []contract.Responsibility{{Kind: contract.ResponsibilityGoal, ID: "g1"}, {Kind: contract.ResponsibilityPR, ID: "o/r#7"}}}}
 	if out := runCLI(t, f, "session", "close", "s"); !strings.Contains(out, "Handed to ses_lead: goal g1, PR o/r#7") {

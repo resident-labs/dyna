@@ -39,7 +39,7 @@ func boxOf(t *testing.T, s *Service, ctx context.Context, sid contract.SessionID
 	return record.Box
 }
 
-func TestEvictDiskArchivesBeforeRemoving(t *testing.T) {
+func TestEvictDiskSavesADiffBeforeRemoving(t *testing.T) {
 	s, h, room, sid, ctx := quietSession(t, 0)
 	id := boxOf(t, s, ctx, sid)
 	passLifecycle(t, s, ctx)
@@ -64,22 +64,15 @@ func TestEvictDiskArchivesBeforeRemoving(t *testing.T) {
 	}
 	passLifecycle(t, s, ctx)
 	passLifecycle(t, s, ctx)
-	if slices.Contains(h.removed, id) {
-		t.Fatal("eviction removed a box before its archive")
-	}
-	if h.starts != 1 || stateOf(t, s, ctx, sid) != contract.BoxClosing {
-		t.Fatalf("eviction must start the box to archive: %d %s", h.starts, stateOf(t, s, ctx, sid))
-	}
-	if _, problem := s.ArchiveDone(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sid}, contract.ArchiveDoneRequest{}); problem != nil {
-		t.Fatal(problem)
-	}
 	passLifecycle(t, s, ctx)
-	passLifecycle(t, s, ctx)
+	if h.starts != 0 {
+		t.Fatalf("eviction started the box %d times: close starts nothing", h.starts)
+	}
 	events, err := s.store.Events(ctx, room, 0, 1000, []contract.EventType{"session.closed"})
 	if err != nil || len(events) != 1 || events[0].Body.(contract.SessionClosed).Reason != contract.SessionCloseDisk {
 		t.Fatalf("closed events %+v: %v", events, err)
 	}
 	if !slices.Contains(h.removed, id) {
-		t.Fatal("box stayed after its archive")
+		t.Fatal("the evicted box stayed")
 	}
 }

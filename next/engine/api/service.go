@@ -118,7 +118,7 @@ type Service interface {
 	TurnActivity(context.Context, contract.Principal, contract.TurnActivityRequest) (contract.TurnActivityResponse, *contract.Error)
 	TurnOutput(context.Context, contract.Principal, contract.TurnOutputRequest) (contract.TurnOutputResponse, *contract.Error)
 	DeliveryDone(context.Context, contract.Principal, contract.DeliveryDoneRequest) (contract.DeliveryDoneResponse, *contract.Error)
-	ArchiveDone(context.Context, contract.Principal, contract.ArchiveDoneRequest) (contract.ArchiveDoneResponse, *contract.Error)
+	DiffSaved(context.Context, contract.Principal, contract.DiffSavedRequest) (contract.DiffSavedResponse, *contract.Error)
 	TranscriptFetch(context.Context, contract.Principal, contract.TranscriptFetchRequest) (contract.TranscriptFetchResponse, *contract.Error)
 	TranscriptAppend(context.Context, contract.Principal, contract.TranscriptAppendRequest) (contract.TranscriptAppendResponse, *contract.Error)
 	TranscriptRead(context.Context, contract.Principal, contract.TranscriptReadRequest) (contract.TranscriptReadResponse, *contract.Error)

@@ -20,7 +20,7 @@ func (s *Service) CloseDormant(ctx context.Context) error {
 	return s.closeIdle(ctx, ids)
 }
 
-// EvictDisk closes the oldest idle leaves of hosts at their disk floor. Close archives first, so work stays in refs.
+// EvictDisk closes the oldest idle leaves of hosts at their disk floor. Close saves a diff of unpushed work first.
 func (s *Service) EvictDisk(ctx context.Context) error {
 	ids, err := s.store.DiskEvictCandidates(ctx, s.now().Add(-diskLowWait))
 	if err != nil {

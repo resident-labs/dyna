@@ -26,10 +26,6 @@ type Repositories struct {
 	Mirror *Mirror
 }
 
-func (r *Repositories) DeleteArchiveRef(ctx context.Context, repo contract.RepoName, ref, commit string) error {
-	return r.Mirror.DeleteArchiveRef(ctx, repo, ref, commit)
-}
-
 func (r *Repositories) Ref(ctx context.Context, repo contract.RepoName, ref string) (string, error) {
 	return r.Mirror.Ref(ctx, repo, ref)
 }

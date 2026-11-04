@@ -153,3 +153,20 @@ func TestTopicBranchPushAuthorization(t *testing.T) {
 		})
 	}
 }
+
+// Close keeps no archive ref, so not even a session's own refs/dyna/archive name is pushed upstream.
+func TestRefusesAPushToAnArchiveRef(t *testing.T) {
+	target, _ := url.Parse("https://github.com")
+	called := false
+	transport := roundTrip(func(*http.Request) (*http.Response, error) {
+		called = true
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("ok"))}, nil
+	})
+	line := strings.Repeat("0", 40) + " " + strings.Repeat("1", 40) + " refs/dyna/archive/ses_1\x00report-status\n"
+	body := fmt.Sprintf("%04x%s0000PACK", len(line)+4, line)
+	w := httptest.NewRecorder()
+	Handler(target, transport, "secret", "ses_1", "room", fakeAccess{allowed: true}).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
+	if called {
+		t.Fatalf("the push went upstream: %s", w.Body.String())
+	}
+}
