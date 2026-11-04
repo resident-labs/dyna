@@ -789,7 +789,7 @@
     </aside>
     {#if watching && !inSettings && section !== "instructions"}{@render computerView(watching)}{/if}
   {/if}
-  {#if inSettings}<Settings {path} phone={phone.current} {navigate} onmenu={event => void showDrawer(true, true, event.detail > 0)} signedout={() => { revoked = true; }} thishost={host => attention.setHost(host)} bind:element={settings} bind:menu={settingsMenu} />{/if}
+  {#if inSettings}<Settings {path} phone={phone.current} {navigate} moved={follow} onmenu={event => void showDrawer(true, true, event.detail > 0)} signedout={() => { revoked = true; }} thishost={host => attention.setHost(host)} bind:element={settings} bind:menu={settingsMenu} />{/if}
 </div>{/if}
 
 <style>
