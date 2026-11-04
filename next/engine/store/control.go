@@ -123,3 +123,12 @@ func (s *Store) PauseRoom(ctx context.Context, room contract.RoomID, paused bool
 		return rows.Err()
 	})
 }
+
+// MarkTurnActive records that a running turn just used a tool. A stall check counts a turn as moving from its latest activity,
+// and a write within a minute of the last one adds nothing, so a busy turn costs one write a minute.
+func (s *Store) MarkTurnActive(ctx context.Context, session contract.SessionID, turn contract.TurnID, at time.Time) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE turns SET active_at=?1 WHERE id=?2 AND session=?3 AND ended_at IS NULL AND active_at<?1-60000", at.UnixMilli(), turn, session)
+		return err
+	})
+}

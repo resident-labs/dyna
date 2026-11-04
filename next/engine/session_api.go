@@ -324,7 +324,7 @@ func (s *Service) SessionResponsibilities(ctx context.Context, caller contract.P
 		return response, failure(err)
 	}
 	if order, err := tree.CloseOrder(session.ID); err == nil {
-		if response.Close, err = s.store.ClosePlan(ctx, order, tree.Parent(session.ID)); err != nil {
+		if response.Close, err = s.store.ClosePlan(ctx, order, tree.Parent(session.ID), tree.Parent(session.ID) == tree.Root()); err != nil {
 			return response, failure(err)
 		}
 	}
@@ -342,7 +342,7 @@ func (s *Service) closeSession(ctx context.Context, session store.Session, disca
 	if err != nil {
 		return plan, forbidden()
 	}
-	if plan, err = s.store.ClosePlan(ctx, order, tree.Parent(session.ID)); err != nil {
+	if plan, err = s.store.ClosePlan(ctx, order, tree.Parent(session.ID), tree.Parent(session.ID) == tree.Root()); err != nil {
 		return plan, failure(err)
 	}
 	if dormant {

@@ -31,7 +31,7 @@ type CheckinSession struct {
 	Box        contract.BoxState
 	BoxChanged time.Time // when the box reached its state
 	Turn       bool      // a turn is running
-	Last       time.Time // when the running turn started, the last turn ended, or the session was created
+	Last       time.Time // when the running turn last used a tool or else started, the last turn ended, or the session was created
 	Failed     bool      // the last turn failed
 	Retrying   bool      // a model retry is scheduled
 	Jobs       int       // background shell jobs still running, each of which wakes the session when it ends

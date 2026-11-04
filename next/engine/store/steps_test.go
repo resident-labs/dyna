@@ -149,6 +149,7 @@ func TestUpgradeCarriesRootApprovesHostexec(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, q := range []string{
+		"ALTER TABLE turns DROP COLUMN active_at",
 		"ALTER TABLE rooms DROP COLUMN root_approves",
 		"ALTER TABLE rooms ADD COLUMN root_approves_hostexec INTEGER NOT NULL DEFAULT 0",
 		"INSERT INTO rooms(id,name,created_at,cpus,mem_bytes,root_approves_hostexec) VALUES ('room_on','on',1,0,0,1),('room_off','off',1,0,0,0)",
