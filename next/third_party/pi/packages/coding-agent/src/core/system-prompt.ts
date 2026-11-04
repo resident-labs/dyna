@@ -28,6 +28,8 @@ export interface BuildSystemPromptOptions {
 	appendSystemPrompt?: string;
 	/** Additional XML-wrapped prompt sections keyed by tag name. */
 	sections?: Record<string, string>;
+	/** Leave out the `docs` section, which points at Pi's own documentation and examples. */
+	noDocs?: boolean;
 	/** Working directory. */
 	cwd: string;
 	/** Pre-loaded context files. */
@@ -44,6 +46,7 @@ export type NormalizedBuildSystemPromptOptions = BuildSystemPromptOptions & {
 	promptGuidelines: string[];
 	appendSystemPrompt: string;
 	sections: Record<string, string>;
+	noDocs: boolean;
 	contextFiles: Array<{ path: string; content: string }>;
 	skills: Skill[];
 };
@@ -73,6 +76,7 @@ export function normalizeBuildSystemPromptOptions(input: BuildSystemPromptOption
 		promptGuidelines: [...(input.promptGuidelines ?? [])],
 		appendSystemPrompt: input.appendSystemPrompt ?? "",
 		sections: { ...(input.sections ?? {}) },
+		noDocs: input.noDocs ?? false,
 		cwd: input.cwd,
 		contextFiles: (input.contextFiles ?? []).map((file) => ({ ...file })),
 		skills: (input.skills ?? []).map((skill) => ({ ...skill })),
@@ -140,6 +144,7 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
 		promptGuidelines,
 		appendSystemPrompt,
 		sections: customSections,
+		noDocs,
 		cwd,
 		contextFiles,
 		skills,
@@ -163,7 +168,8 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
 			visibleTools.length > 0 ? visibleTools.map((name) => `- ${name}: ${toolSnippets[name]}`).join("\n") : "(none)";
 		promptSections.tools = `${tools}\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.`;
 		promptSections.rules = buildRules(declaredTools, toolGuidelines, promptGuidelines);
-		promptSections.docs = `Pi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):
+		if (!noDocs) {
+			promptSections.docs = `Pi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):
 - Main documentation: ${getReadmePath()}
 - Additional docs: ${getDocsPath()}
 - Examples: ${getExamplesPath()} (extensions, custom tools, SDK)
@@ -171,6 +177,7 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
 - When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md), codemode scripts and non-LLM models such as classifiers and image models (docs/codemode.md)
 - When working on pi topics, read the docs and examples, and follow .md cross-references before implementing
 - Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)`;
+		}
 	}
 
 	if (appendSystemPrompt) promptSections.addendum = appendSystemPrompt;
