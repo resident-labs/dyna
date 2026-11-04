@@ -46,8 +46,8 @@ func (s *Store) MoveSession(ctx context.Context, target, parent contract.Session
 	})
 }
 
-// SetRecreated records the new image after the container was created. A notice tells the session once, with its next
-// turn.
+// SetRecreated records the new image after the container was created. A notice tells the session, and wakes it when it holds an
+// open goal.
 func (s *Store) SetRecreated(ctx context.Context, id contract.BoxID, image string, notice *contract.Event) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, "UPDATE boxes SET image=? WHERE id=?", image, id); err != nil {
@@ -56,11 +56,6 @@ func (s *Store) SetRecreated(ctx context.Context, id contract.BoxID, image strin
 		if notice == nil {
 			return nil
 		}
-		seq, err := s.AppendEvent(tx, *notice)
-		if err != nil {
-			return err
-		}
-		to := contract.Principal{Kind: contract.PrincipalSession, Session: notice.Body.(contract.SessionRestarted).Session}
-		return s.InsertDelivery(ctx, tx, seq, notice.Body, contract.Delivery{To: to, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: false})
+		return s.restartNotice(ctx, tx, *notice)
 	})
 }
