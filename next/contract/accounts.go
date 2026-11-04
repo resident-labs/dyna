@@ -184,6 +184,8 @@ type AccountsRenameRequest struct {
 	Label     string    `json:"label"`
 }
 type AccountsRenameResponse struct{}
+
+// Profile is the stored profile. Images nil means true when set; profile.list always fills it.
 type Profile struct {
 	Description   string        `json:"description"`
 	Taste         int           `json:"taste"`

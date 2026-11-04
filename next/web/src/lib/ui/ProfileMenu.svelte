@@ -1,8 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { call } from "../client.ts";
-  import type { ProfileSummary } from "../contract.gen.ts";
-  import { profileLabel, slugName } from "../profiles.ts";
+  import { profileLabel, profileRows, slugName, type ProfileSummary } from "../profiles.ts";
   import Icon from "./Icon.svelte";
   import MenuList from "./MenuList.svelte";
   // A session's profile, and the menu that changes it, with RoomMenu's keys. The row shows the store's profile, which
@@ -18,7 +17,7 @@
   let rows = $derived((profiles ?? []).map(item => ({ name: item.name, shown: profileLabel(item) })));
   async function load() {
     failure = "";
-    await call("profile.list", {}).then(answer => { profiles = answer.profiles ?? []; }, () => { failure = "The profiles did not load."; });
+    await call("profile.list", {}).then(answer => { profiles = profileRows(answer.profiles); }, () => { failure = "The profiles did not load."; });
   }
   onMount(() => { void load(); });
   async function show(next: boolean, refocus = false) {

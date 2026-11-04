@@ -68,6 +68,9 @@ type fakeClient struct {
 	host         contract.HostAddRequest
 	hostLimit    *contract.HostSetLimitsRequest
 	hostSet      *contract.HostSetRequest
+	profiles     []contract.ProfileEntry
+	profileSet   *contract.ProfileSetRequest
+	profileRm    *contract.ProfileRemoveRequest
 	roomSet      *contract.RoomSetRequest
 	hostNoSwap   bool
 	room         contract.RoomCreateRequest

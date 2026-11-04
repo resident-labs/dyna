@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
@@ -39,11 +41,15 @@ type CacheHost interface {
 // Mirror keeps no lock around reads. A clone appears whole, git updates refs atomically, and objects arrive before the
 // refs that name them, so a read during a fetch sees the old state or the new one.
 type Mirror struct {
-	Layout  box.Layout
-	Token   string
-	Runner  Runner
-	fetches shared // by repository
-	pushes  shared // by repository and host
+	Layout box.Layout
+	Token  string
+	Runner Runner
+	// SeedTimeout bounds the fetch of Seed; zero means 10 seconds. Now is the clock for reusing a fetch; nil means time.Now.
+	SeedTimeout time.Duration
+	Now         func() time.Time
+	fetched     sync.Map // RepoName to the time its last fetch from GitHub ended
+	fetches     shared   // by repository
+	pushes      shared   // by repository and host
 }
 
 type cachePush struct {
@@ -52,6 +58,33 @@ type cachePush struct {
 }
 
 const SessionBranchPrefix = "v2/"
+
+// fetchReuse is how long a fetch from GitHub stands for a box start that asks right after it.
+const fetchReuse = 3 * time.Second
+
+// Seed prepares a repository for a session's first box setup, and takes the default branch from GitHub as it is now:
+// the box clones after the image is ready, minutes after the creation step's fetch. The fetch is bounded by
+// SeedTimeout. When GitHub does not answer in time or fails and a mirror exists, the start goes on with the mirror as it
+// stands and the notice says so; otherwise the error is Prepare's.
+func (m *Mirror) Seed(ctx context.Context, host CacheHost, repo contract.RepoName, session contract.SessionID) (contract.BoxRepo, string, error) {
+	timeout := m.SeedTimeout
+	if timeout == 0 {
+		timeout = 10 * time.Second
+	}
+	bound, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	item, err := m.Prepare(bound, host, repo, session, true)
+	var missing MissingTokenError
+	if err == nil || ctx.Err() != nil || errors.As(err, &missing) || !m.Cloned(repo) {
+		return item, "", err
+	}
+	reason := "the fetch failed"
+	if errors.Is(err, context.DeadlineExceeded) {
+		reason = "GitHub did not answer in " + timeout.String()
+	}
+	item, err = m.Prepare(ctx, host, repo, session, false)
+	return item, "Its repository's " + item.Base + " was not refreshed from GitHub at start (" + reason + "); `git fetch origin " + item.Base + "` brings it current.", err
+}
 
 // Prepare optionally fetches and pushes branches before returning the box setup. Callers share fetches and pushes, but
 // each result began after its caller asked and each push began after that caller's fetch ended, so no box starts on
@@ -69,11 +102,22 @@ func (m *Mirror) Prepare(ctx context.Context, host CacheHost, repo contract.Repo
 		return contract.BoxRepo{}, err
 	}
 	if fetch {
-		err := m.fetches.do(ctx, repo, func(ctx context.Context) error {
-			steps := box.NewStepLog("repo " + string(repo))
-			defer steps.Done("fetch")
-			return m.fetch(ctx, repo, path)
-		})
+		now := time.Now
+		if m.Now != nil {
+			now = m.Now
+		}
+		var err error
+		if at, ok := m.fetched.Load(repo); !ok || now().Sub(at.(time.Time)) >= fetchReuse {
+			err = m.fetches.do(ctx, repo, func(ctx context.Context) error {
+				steps := box.NewStepLog("repo " + string(repo))
+				defer steps.Done("fetch")
+				if err := m.fetch(ctx, repo, path); err != nil {
+					return err
+				}
+				m.fetched.Store(repo, now())
+				return nil
+			})
+		}
 		if err != nil {
 			return contract.BoxRepo{}, err
 		}
