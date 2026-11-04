@@ -88,23 +88,27 @@ export function hostLoads(hosts: HostSummary[]): { name: string; reachable: bool
   return [...hosts.filter(h => !h.reachable).map(h => ({ name: h.name, reachable: false, diskLow: diskLow(h), meters: [] })), ...loads].slice(0, 3);
 }
 
-// host.list as machines, now and then every 10 s to match the engine's beat, only while the page is visible. A tick skips while a
-// call is out, so calls never pile up on a slow engine and answers arrive in order. It returns the stop function. shape turns
-// the list into what apply gets: machines by default; Settings > Images reads every host's own runner images, which the
-// merge leaves out.
-export function watchHosts(apply: (hosts: HostSummary[]) => void, fail: () => void, shape: (hosts: HostSummary[]) => HostSummary[] = machines): () => void {
+// A read now and then every 10 s to match the engine's beat, only while the page is visible. A tick skips while a read is
+// out, so reads never pile up on a slow engine and answers arrive in order; a failed one leaves the next to try again. It
+// returns the stop function.
+export function watch<T>(read: () => Promise<T>, apply: (value: T) => void, fail: (reason: unknown) => void): () => void {
   let timer: ReturnType<typeof setInterval> | undefined;
   let loading = false;
   const tick = () => {
     if (loading) return;
     loading = true;
-    void call("host.list", {}).then(list => apply(shape(list.hosts ?? [])), fail).finally(() => { loading = false; });
+    void read().then(apply, fail).finally(() => { loading = false; });
   };
   const sync = () => { clearInterval(timer); if (document.hidden) return; tick(); timer = setInterval(tick, 10_000); };
   sync();
   document.addEventListener("visibilitychange", sync);
   return () => { clearInterval(timer); document.removeEventListener("visibilitychange", sync); };
 }
+
+// host.list as machines, watched. shape turns the list into what apply gets: machines by default; Settings > Images reads
+// every host's own runner images, which the merge leaves out.
+export const watchHosts = (apply: (hosts: HostSummary[]) => void, fail: () => void, shape: (hosts: HostSummary[]) => HostSummary[] = machines) =>
+  watch(() => call("host.list", {}).then(list => shape(list.hosts ?? [])), apply, fail);
 
 // Settings > Hosts (spec 5.13) lists the registered hosts: the control plane alone is no registered host, so it is left
 // out. Hosts the owner added come first, the engine's machine first among them, then pool nodes, where it has no place; each by name, its
