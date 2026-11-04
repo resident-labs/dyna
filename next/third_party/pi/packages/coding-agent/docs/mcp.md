@@ -68,7 +68,7 @@ Both server types support:
 - `timeout`: per-request timeout in seconds (default 60). Progress notifications reset it.
 - `enabled: false`: keep the entry without connecting to it.
 - `exposure` and `toolExposure`: control how tools reach the model (see [Control tool exposure](#control-tool-exposure)).
-- `description`: what the server offers, in a sentence. It lists the server in the system prompt (see [Control tool exposure](#control-tool-exposure)), tool search ranks the server's tools by it, and codemode's `describeNamespace()` returns it. Without it, the first line of the server instructions is used once the server connects.
+- `description`: what the server offers, in a sentence. Tool search ranks the server's tools by it, and codemode's `describeNamespace()` returns it. Without it, the first line of the server instructions is used once the server connects.
 
 Keep personal servers and servers with credentials in the user-level file. Use the project file only for servers the project requires, and only in trusted projects.
 
@@ -97,7 +97,7 @@ Run `pi mcp list` to connect to every enabled server and print its state, tools,
 
 Pi reports configuration errors, failed connections, and required sign-ins once after startup. Server logging notifications are appended to `~/.pi/agent/mcp.log` as `<time> [<server>] <level> <logger>: <message>`. The file moves to `mcp.log.1` after it grows past 5 MB.
 
-Pi connects every enabled server in the background when a session starts. A server's tools appear once it connects; the `codemode` description does not list them, so it does not change when servers connect. The first prompt waits up to 10 seconds only for servers with `direct` tools, which must be declared in its request. Other servers are waited for when they are needed: a codemode script waits for the servers it names (`mcp__<server>`) and, when it calls `searchTools()` or reads `ALL_TOOLS`, for all of them; `tool_search` and the resource tools also wait for all of them. HTTP network errors and transient statuses (408, 429, and 5xx) are retried twice. A dropped connection is shown as disconnected and reconnects on the next call. When a server announces a changed tool list, new tools are added and withdrawn tools become unreachable.
+Pi connects every enabled server in the background when a session starts. A server's tools appear once it connects; the `codemode` description does not list them, so it does not change when servers connect. The first prompt waits up to 10 seconds for every enabled server, so its request declares their `direct` tools and its system prompt names their other tools. A server still connecting after that is waited for when it is needed: a codemode script waits for the servers it names (`mcp__<server>`) and, when it calls `searchTools()` or reads `ALL_TOOLS`, for all of them; `tool_search` and the resource tools also wait for all of them. HTTP network errors and transient statuses (408, 429, and 5xx) are retried twice. A dropped connection is shown as disconnected and reconnects on the next call. When a server announces a changed tool list, new tools are added and withdrawn tools become unreachable.
 
 Stopping a stdio server closes its stdin, sends SIGTERM, then sends SIGKILL to its process group. This also stops servers launched through wrappers such as `npx` or `uvx`.
 
@@ -199,7 +199,7 @@ Each server tool is registered as `mcp__<server>__<tool>`. The server's `exposur
 
 `codemode-deferred` is accepted as an alias for `codemode`.
 
-Servers with `codemode` or `deferred` tools are listed in the `mcp_servers` section of the system prompt, with how their tools are reached and one line from the configured `description` or, once connected, from the server instructions. Pi updates the section when a prompt starts, after waiting for servers with `direct` tools. When it changed, for example because a server connected and its summary became available, Pi appends the new section to the conversation instead of changing tool declarations, so earlier messages stay cached. `describeNamespace()` and the `namespace` option of `searchTools()` accept `mcp__dev-radius`, `mcp__dev_radius`, `dev-radius`, or `dev_radius`.
+Tools with `codemode` or `deferred` exposure that are not declared are named in the `deferred_tools` section of the system prompt, by name only, grouped by namespace, with the `action` enum of a tool's schema after it; a namespace lists at most 80 tools and counts the rest. Pi builds the section only when it builds the system prompt, at the first prompt and at each compaction, so loading a tool with `tool_search` adds only its declaration to the conversation and leaves the system prompt and earlier messages cached; a loaded tool leaves the section at the next compaction. A server's `description` ranks its tools in search and is returned by `describeNamespace()`. `describeNamespace()` and the `namespace` option of `searchTools()` accept `mcp__dev-radius`, `mcp__dev_radius`, `dev-radius`, or `dev_radius`.
 
 Pi activates `codemode` when a server with `codemode` exposure connects. It activates `tool_search` for a server with `deferred` exposure. To make the model see a tool without searching, give it `direct` exposure with `toolExposure`.
 
