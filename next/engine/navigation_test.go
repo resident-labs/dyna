@@ -459,6 +459,10 @@ func TestTranscriptDigestShowsTurnsAndReadsCutTextWhole(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	longPost := strings.Repeat("q", contract.TranscriptStepChars+100)
+	if _, e := s.Post(ctx, caller, contract.PostRequest{Room: r.roomA, Text: longPost, Home: contract.Conversation{Kind: contract.ConversationFeed}}); e != nil {
+		t.Fatal(e)
+	}
 	final := strings.Repeat("f", contract.TranscriptTextChars+100)
 	data := fmt.Sprintf(`{"type":"message","id":"user","message":{"role":"user","deliveryId":"%d"}}
 {"type":"message","id":"a1","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"bash","arguments":{"command":"go test ./engine %s"}}]}}
@@ -473,7 +477,7 @@ func TestTranscriptDigestShowsTurnsAndReadsCutTextWhole(t *testing.T) {
 		t.Fatalf("digest: %+v %v", got, e)
 	}
 	turn := got.Turns[0]
-	if turn.ID != "turn_d" || turn.Outcome != "running" || len(turn.In) != 1 || utf8.RuneCountInString(turn.In[0]) != contract.TranscriptInputChars || len(turn.Steps) != 1 || utf8.RuneCountInString(turn.Steps[0]) > contract.TranscriptStepChars || len(turn.Text) != contract.TranscriptTextChars || len(turn.Cut) != 2 {
+	if turn.ID != "turn_d" || turn.Outcome != "running" || len(turn.In) != 1 || utf8.RuneCountInString(turn.In[0]) != contract.TranscriptInputChars || len(turn.Steps) != 2 || utf8.RuneCountInString(turn.Steps[1]) != contract.TranscriptStepChars || utf8.RuneCountInString(turn.Steps[0]) > contract.TranscriptStepChars || len(turn.Text) != contract.TranscriptTextChars || len(turn.Cut) != 2 {
 		t.Fatalf("turn: %+v", turn)
 	}
 	whole, e := s.TranscriptDigest(ctx, caller, contract.TranscriptDigestRequest{Session: string(caller.Session), Turn: "turn_d", Item: turn.Cut[1]})
@@ -620,5 +624,51 @@ func TestForwardOfACrossRoomPostIsOutsideTextEvenInItsOwnRoom(t *testing.T) {
 	seen, _ := r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Post: sent.Event})
 	if !strings.HasPrefix(seen.Posts[0].Text, `<outside source="room other"`) {
 		t.Fatalf("delivered post: %q", seen.Posts[0].Text)
+	}
+}
+
+func TestSearchSessionGoalsAreCutAndOtherRoomsGoalsAreOutsideText(t *testing.T) {
+	r := newNavRig(t)
+	long := "目標" + strings.Repeat("語", contract.SearchGoalChars+50)
+	for _, room := range []contract.RoomID{r.roomA, r.roomB} {
+		if _, e := r.s.SessionStart(r.ctx, r.owner, contract.SessionStartRequest{Room: room, Name: "goalie-" + string(room[len(room)-3:]), Profile: "test", Goal: long}); e != nil {
+			t.Fatal(e)
+		}
+	}
+	got, e := r.s.SearchSessions(r.ctx, r.a, contract.SearchRequest{Query: "goalie"})
+	if e != nil || len(got.Sessions) != 2 {
+		t.Fatalf("sessions: %+v %v", got, e)
+	}
+	for _, hit := range got.Sessions {
+		goal, wrapped := hit.Goal, strings.HasPrefix(hit.Goal, "<outside")
+		if wrapped {
+			goal = strings.TrimSuffix(strings.SplitN(goal, ">\n", 2)[1], "\n</outside>")
+		}
+		if (hit.Room == "other") != wrapped || utf8.RuneCountInString(goal) != contract.SearchGoalChars || !utf8.ValidString(goal) {
+			t.Fatalf("%s goal: wrapped=%v %d runes", hit.Room, wrapped, utf8.RuneCountInString(goal))
+		}
+		if wrapped && !strings.HasPrefix(hit.Goal, `<outside source="room other" author="`+hit.Name+`">`) {
+			t.Fatalf("wrapper: %.80s", hit.Goal)
+		}
+	}
+}
+
+func TestADeletedRoomIsAnUnknownRoom(t *testing.T) {
+	r := newNavRig(t)
+	gone, e := r.s.RoomCreate(r.ctx, r.owner, contract.RoomCreateRequest{Name: "gone", RootProfile: "test"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Room: "gone"}); e != nil {
+		t.Fatalf("before delete: %v", e)
+	}
+	if _, e = r.s.RoomDelete(r.ctx, r.owner, contract.RoomDeleteRequest{Room: gone.Room, Discard: true}); e != nil {
+		t.Fatal(e)
+	}
+	_, byName := r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Room: "gone"})
+	_, byID := r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Room: string(gone.Room)})
+	_, unknown := r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Room: "never-was"})
+	if byName == nil || byID == nil || byName.Code != contract.ErrInvalid || byID.Code != contract.ErrInvalid || strings.Replace(byName.Message, "gone", "never-was", 1) != unknown.Message {
+		t.Fatalf("deleted %+v / %+v, unknown %+v", byName, byID, unknown)
 	}
 }
