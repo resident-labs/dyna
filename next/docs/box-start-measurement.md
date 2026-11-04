@@ -56,7 +56,7 @@ Measured on pve under the conditions above. **No box-level run exists for any ro
 
 ### Base tag churn
 
-The tag hashes the Containerfile and `pi.tgz`. The same commit packed twice gave a byte-identical tarball, so builds are reproducible. But the tarball held the whole `third_party/pi` tree hash, so a change that shipped nothing still changed it.
+This section records the tag as it was when measured: it hashed the Containerfile and a tarball of the Node Pi fork. The same commit packed twice gave a byte-identical tarball, so builds were reproducible. But the tarball held the whole tree hash, so a change that shipped nothing still changed it. The tag now hashes the Containerfile alone.
 
 Replaying the 13 commits on main that changed a base input since 2026-10-29: all 13 made a new tag. Three of them shipped nothing new. One more returned to content still among the last two tags. So the build id alone takes 13 builds to 10, and keeping two tags takes that to 9. The other 9 are real Pi or recipe changes, and only building ahead helps with those. This counts commits, not hermeslab's deploys, so it does not say which of the nine tags seen there were needless.
 
