@@ -33,11 +33,10 @@
 
   // Appearance is on every device; Devices only on one with admin.
   let panes = $derived(settingsPanes.filter(pane => !pane.admin || admin));
-  let shown = $derived(panes.find(pane => path === `/settings/${pane.id}` || ((pane.id === "accounts" || pane.list) && path.startsWith(`/settings/${pane.id}/`))) ?? (phone ? undefined : panes[0]));
+  let shown = $derived(panes.find(pane => path === `/settings/${pane.id}` || (pane.list && path.startsWith(`/settings/${pane.id}/`))) ?? (phone ? undefined : panes[0]));
   // /settings and its trailing slash open the first pane or the list; any other path has no page.
   // A part that does not decode has no page.
-  let lost = $derived(!/^\/settings\/?$/.test(path) && !panes.some(pane => path === `/settings/${pane.id}` || (pane.list && pathItem(path, `/settings/${pane.id}/`) !== undefined)
-    || (pane.id === "accounts" && (path === "/settings/accounts/add" || ["add/", "account/", "reconnect/"].some(part => pathItem(path, `/settings/accounts/${part}`) !== undefined)))));
+  let lost = $derived(!/^\/settings\/?$/.test(path) && !panes.some(pane => path === `/settings/${pane.id}` || (pane.list && pathItem(path, `/settings/${pane.id}/`) !== undefined)));
 
   // A list page's open item is the path's last part (spec 5.13): a wide page moves it as the list's keys move, in place,
   // and a narrow one opens it as a screen of its own, so Back returns to the list.
@@ -72,7 +71,7 @@
     {#if lost}<Blocked kind="no-page" back={{ href: "/settings", label: "Back to Settings" }} {navigate} />
     {:else if shown?.id === "appearance"}<AppearancePane {bar} />
     {:else if shown?.id === "devices"}<SharingPane {devices} {failed} {reload} {signedout} {bar} />
-    {:else if shown?.id === "accounts"}<AccountsPane {bar} {phone} {signedout} {path} {navigate} />
+    {:else if shown?.id === "accounts"}<AccountsPane {bar} {phone} {signedout} selected={item} onselect={open} onclose={close} />
     {:else if shown?.id === "profiles"}<ProfilesPane {bar} {phone} {signedout} selected={item} onselect={open} onclose={close} />
     {:else if shown?.id === "addons"}<AddonsPane {bar} {admin} {signedout} selected={item} onselect={open} onclose={close} />
     {:else if shown?.id === "approvals"}<ApprovalsPane {bar} {signedout} selected={item} onselect={open} onclose={close} />
