@@ -21,8 +21,8 @@ import (
 	"github.com/resident-labs/dyna/harness/pig/pigtest"
 )
 
-// box is a session with the extension, whose dyna server records each post the engine would receive.
-type box struct {
+// session is a session with the extension, whose dyna server records each post the engine would receive.
+type session struct {
 	harness *pig.Harness
 	model   *pigtest.Model
 	dir     string
@@ -30,9 +30,9 @@ type box struct {
 	posts   []json.RawMessage
 }
 
-func newBox(t *testing.T, script ...[]pigtest.Block) *box {
+func newSession(t *testing.T, script ...[]pigtest.Block) *session {
 	t.Helper()
-	b := &box{model: pigtest.NewModel(script...), dir: t.TempDir()}
+	b := &session{model: pigtest.NewModel(script...), dir: t.TempDir()}
 	dyna, err := dynamcp.New(func(_ context.Context, method contract.Method, body []byte) ([]byte, *contract.Error) {
 		if method != contract.MethodPost {
 			return nil, &contract.Error{Code: contract.ErrInvalid, Message: "unexpected " + string(method)}
@@ -61,7 +61,7 @@ func newBox(t *testing.T, script ...[]pigtest.Block) *box {
 	return b
 }
 
-func (b *box) turn(t *testing.T, text string) contract.TurnEnded {
+func (b *session) turn(t *testing.T, text string) contract.TurnEnded {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -73,7 +73,7 @@ func (b *box) turn(t *testing.T, text string) contract.TurnEnded {
 }
 
 // sent is the nth post the engine received.
-func (b *box) sent(t *testing.T, n int) contract.PostRequest {
+func (b *session) sent(t *testing.T, n int) contract.PostRequest {
 	t.Helper()
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -88,14 +88,14 @@ func (b *box) sent(t *testing.T, n int) contract.PostRequest {
 }
 
 // toolResult is the text of the tool result in the nth request's last message.
-func (b *box) toolResult(t *testing.T, n int) string {
+func (b *session) toolResult(t *testing.T, n int) string {
 	t.Helper()
 	messages := b.model.Requests()[n].Messages
 	return string(messages[len(messages)-1])
 }
 
 func TestAPostWithEndTurnEndsTheTurn(t *testing.T) {
-	b := newBox(t, []pigtest.Block{{Text: "Done."}, {Tool: "mcp__dyna__post", Input: `{"action":"send","text":"the reply","endTurn":true}`}})
+	b := newSession(t, []pigtest.Block{{Text: "Done."}, {Tool: "mcp__dyna__post", Input: `{"action":"send","text":"the reply","endTurn":true}`}})
 	result := b.turn(t, "reply with a post")
 	if result.Final != "" || !reflect.DeepEqual(result.EndPosts, []contract.EventID{"ev_1"}) {
 		t.Fatalf("result %+v", result)
@@ -108,7 +108,7 @@ func TestAPostWithEndTurnEndsTheTurn(t *testing.T) {
 // A script's call never ends the turn, so its post says the turn goes on, and carries the script's own call ID.
 func TestAPostFromAScriptDoesNotEndTheTurn(t *testing.T) {
 	script, _ := json.Marshal(map[string]string{"code": `const r = await tools.mcp__dyna__post({action: "send", text: "progress", endTurn: true}); return JSON.stringify(r.structuredContent);`})
-	b := newBox(t, []pigtest.Block{{Tool: "codemode", Input: string(script)}}, []pigtest.Block{{Text: "finished"}})
+	b := newSession(t, []pigtest.Block{{Tool: "codemode", Input: string(script)}}, []pigtest.Block{{Text: "finished"}})
 	result := b.turn(t, "post from a script")
 	if result.Final != "finished" || result.EndPosts != nil {
 		t.Fatalf("result %+v", result)
@@ -122,7 +122,7 @@ func TestAPostFromAScriptDoesNotEndTheTurn(t *testing.T) {
 }
 
 func TestBashRunsInTheSessionTree(t *testing.T) {
-	b := newBox(t, []pigtest.Block{{Tool: "bash", Input: `{"command":"pwd; exit 3"}`}}, []pigtest.Block{{Text: "ok"}})
+	b := newSession(t, []pigtest.Block{{Tool: "bash", Input: `{"command":"pwd; exit 3"}`}}, []pigtest.Block{{Text: "ok"}})
 	b.turn(t, "where am I")
 	if got := b.toolResult(t, 1); !strings.Contains(got, b.dir) || !strings.Contains(got, ": exit 3]") || strings.Contains(got, `"is_error":true`) {
 		t.Fatalf("tool result %s", got)
@@ -131,7 +131,7 @@ func TestBashRunsInTheSessionTree(t *testing.T) {
 
 // The model reads the end of a long output, and the whole output is in the file the note names.
 func TestALongOutputIsCutToItsEnd(t *testing.T) {
-	b := newBox(t, []pigtest.Block{{Tool: "bash", Input: `{"command":"seq 1 20000"}`}}, []pigtest.Block{{Text: "ok"}})
+	b := newSession(t, []pigtest.Block{{Tool: "bash", Input: `{"command":"seq 1 20000"}`}}, []pigtest.Block{{Text: "ok"}})
 	b.turn(t, "count")
 	got := b.toolResult(t, 1)
 	if strings.Contains(got, `\n1\n2\n`) || !strings.Contains(got, `\n20000\n`) {
@@ -146,7 +146,7 @@ func TestALongOutputIsCutToItsEnd(t *testing.T) {
 }
 
 func TestJobListsTheBackgroundJobs(t *testing.T) {
-	b := newBox(t, []pigtest.Block{{Tool: "bash", Input: `{"command":"echo listed"}`}}, []pigtest.Block{{Tool: "job", Input: `{"action":"list"}`}}, []pigtest.Block{{Text: "ok"}})
+	b := newSession(t, []pigtest.Block{{Tool: "bash", Input: `{"command":"echo listed"}`}}, []pigtest.Block{{Tool: "job", Input: `{"action":"list"}`}}, []pigtest.Block{{Text: "ok"}})
 	b.turn(t, "list")
 	if got := b.toolResult(t, 2); !strings.Contains(got, `\texit 0\techo listed`) {
 		t.Fatalf("tool result %s", got)
