@@ -134,7 +134,7 @@ var methodTable = []MethodEntry{
 	// op.submit checks its own scope by operation kind, so the row names none.
 	method(contract.MethodOpSubmit, "", UserAccess,
 		opAct("hostexec", "request_grant", contract.HostexecGrantArgs{}.OpKind(), typ[contract.HostexecGrantArgs](), "Request host access with a reason. The grant lasts until the session closes. hosts is a list of host names; reason is one line of at most 300 characters.", "hostexec grant"),
-		opAct("pr", "open", contract.PrOpenArgs{}.OpKind(), typ[contract.PrOpenArgs](), "Open a pull request with title and base. Body and draft are optional; omit head to use your session branch v2/<session>, and set head to name another branch. Returns the PR number and url.", "pr open"),
+		opAct("pr", "open", contract.PrOpenArgs{}.OpKind(), typ[contract.PrOpenArgs](), "Open a pull request with title and base. Body and draft are optional; omit head to use your session branch v2/<session>, and set head to name another branch. Returns the PR number and url; the returned operation has no body field because the body was sent to GitHub as written.", "pr open"),
 	),
 	method(contract.MethodOpWithdraw, contract.ScopeOperate, UserAccess,
 		act("op", "withdraw", typ[contract.OpWithdrawRequest](), "Withdraw your pending operation by id.", "op withdraw"),
