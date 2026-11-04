@@ -37,7 +37,7 @@ const (
 
 // GitHubItem is one thing a GitHub feed showed. Detail is the small fact that goes with Action: a label, a milestone, a new
 // title, or the login assigned or asked to review. Text is a comment or a body. Outside marks Actor as anyone but the owner's
-// GitHub account, so Detail and Text are untrusted: they reach a session wrapped (decision 13), and a Run sees this flag.
+// GitHub account, so Detail and Text are outside text: they reach a session wrapped (decision 13), and a Run sees this flag.
 // Session names the owner of a tracked item.
 type GitHubItem struct {
 	Repo    RepoName     `json:"repo"`

@@ -24,6 +24,10 @@ func TestWebSearchUsesStoredKey(t *testing.T) {
 	if problem != nil || len(response.Results) != 1 || response.Results[0].URL != "https://example.org" {
 		t.Fatalf("search: %+v %v", response, problem)
 	}
+	// A result's title and snippet are the page's text, so each names the web and the result's domain.
+	if got := response.Results[0]; got.Title != "<outside source=\"web\" author=\"example.org\">\nExample\n</outside>" || got.Snippet != "<outside source=\"web\" author=\"example.org\">\nResult\n</outside>" {
+		t.Fatalf("result: %+v", got)
+	}
 }
 
 func TestSearchKeysAreOwnerOnly(t *testing.T) {
