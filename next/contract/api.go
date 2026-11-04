@@ -1058,28 +1058,35 @@ type SaveDiff struct {
 // DiffSavedRequest is the box's one report of that step. File is empty when nothing was unpushed or nothing was saved, and Error
 // says why not in the second case.
 type DiffSavedRequest struct {
-	File    string `json:"file,omitempty"`   // as the box sees it, under /box/shared
-	Commits int    `json:"commits"`          // unpushed commits in the file
-	Files   int    `json:"files"`            // files its diffs change
-	Capped  bool   `json:"capped,omitempty"` // a section was over the size cap and holds the commit list and stat only
-	Error   string `json:"error,omitempty"`
+	File    string   `json:"file,omitempty"`   // as the box sees it, under /box/shared
+	Commits int      `json:"commits"`          // unpushed commits in the file
+	Files   int      `json:"files"`            // files its diffs change
+	Capped  bool     `json:"capped,omitempty"` // a section was over the size cap and holds the commit list and stat only
+	Failed  []string `json:"failed,omitempty"` // worktrees that could not be saved, each with its reason; the others are in the file
+	Error   string   `json:"error,omitempty"`
 }
 type DiffSavedResponse struct{}
 
 // CloseNotice tells a closing session's parent what became of its unpushed work. A nil report is a box that was not asked or did
 // not answer.
 func (saved *DiffSavedRequest) CloseNotice(session string) string {
+	var text string
 	switch {
 	case saved == nil:
-		return fmt.Sprintf("Session %s closed; not checked, nothing saved. Its box was not running, so anything it had not pushed is gone.", session)
+		return fmt.Sprintf("Session %s closed; not checked, nothing saved (its box was not running, or did not report in time). Anything it had not pushed is gone.", session)
 	case saved.Error != "":
 		return fmt.Sprintf("Session %s closed; no diff was saved (%s). Anything it had not pushed is gone.", session, saved.Error)
 	case saved.File == "":
 		return fmt.Sprintf("Session %s closed; nothing was unpushed.", session)
 	case saved.Capped:
-		return fmt.Sprintf("Session %s closed; its unpushed work, %d commits and %d changed files, is in %s. A diff over 10 MiB is left out of it, which then holds the commit list and a file summary.", session, saved.Commits, saved.Files, saved.File)
+		text = fmt.Sprintf("Session %s closed; its unpushed work, %d commits and %d changed files, is in %s. A diff over 10 MiB is left out of it, which then holds the commit list and a file summary.", session, saved.Commits, saved.Files, saved.File)
+	default:
+		text = fmt.Sprintf("Session %s closed; its unpushed work, %d commits and %d changed files, is in %s.", session, saved.Commits, saved.Files, saved.File)
 	}
-	return fmt.Sprintf("Session %s closed; its unpushed work, %d commits and %d changed files, is in %s.", session, saved.Commits, saved.Files, saved.File)
+	if len(saved.Failed) > 0 {
+		text += " Not saved: " + strings.Join(saved.Failed, "; ") + "."
+	}
+	return text
 }
 
 // Compact asks a quiet box to compact before it stops, if its context is over OverTokens. Turn is the session's last

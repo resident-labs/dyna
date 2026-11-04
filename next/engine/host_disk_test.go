@@ -39,7 +39,7 @@ func boxOf(t *testing.T, s *Service, ctx context.Context, sid contract.SessionID
 	return record.Box
 }
 
-func TestEvictDiskArchivesBeforeRemoving(t *testing.T) {
+func TestEvictDiskSavesADiffBeforeRemoving(t *testing.T) {
 	s, h, room, sid, ctx := quietSession(t, 0)
 	id := boxOf(t, s, ctx, sid)
 	passLifecycle(t, s, ctx)

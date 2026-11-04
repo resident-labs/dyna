@@ -208,7 +208,7 @@ var methodTable = []MethodEntry{
 		act("session", "refresh", typ[contract.SessionRefreshRequest](), "Mark the running box of session (name or ID), or of every session in room you may manage, to restart once no turn, job or terminal needs it. It keeps its volume, unlike session restart, which discards it. An agent can call it on itself to pick up new tools: it applies at the end of the turn, and the box comes straight back.", "session refresh"),
 	),
 	method(contract.MethodSessionClose, contract.ScopeOperate, UserAccess,
-		act("session", "close", typ[contract.SessionCloseRequest](), "Close session (name or ID). Its unpushed work is saved as a diff in the room's shared folder if its box is running, and lost otherwise.", "session close"),
+		act("session", "close", typ[contract.SessionCloseRequest](), "Close session (name or ID). The close removes its box and volume. If the box is connected and has had turns, it first writes everything unpushed (commits, uncommitted and untracked files, not ignored files) to /box/shared/archives/<name>-<id>.diff; a box that is not connected is removed with nothing saved, and the parent is told which happened.", "session close"),
 	),
 	method(contract.MethodSessionResponsibilities, contract.ScopeRead, UserAccess,
 		act("session", "responsibilities", typ[contract.SessionResponsibilitiesRequest](), "List what session (name or ID) still holds and what closing it would hand to its parent.", "session responsibilities"),
