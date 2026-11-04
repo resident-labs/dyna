@@ -139,6 +139,8 @@ test("Settings lists registered hosts: the Dyna host first, then by name with di
   // The engine's machine comes first wherever its name sorts, and a pool interleaved anywhere sorts after every added host.
   assert.deepEqual(names(hostOrder([host("a"), host("z", { engineHost: true }), host("b", { pool: "p" }), host("c")])), ["z", "a", "c", "b"]);
   assert.deepEqual(names(hostOrder([host("control-plane")])), []);
+  // A pool node is never first for being the engine's machine: pool nodes go by name alone.
+  assert.deepEqual(names(hostOrder([host("z", { pool: "p", engineHost: true }), host("y", { pool: "p" })])), ["y", "z"]);
   // The input is left as it came.
   const input = [host("b"), host("a")];
   hostOrder(input);
@@ -210,9 +212,13 @@ test("the search matches a name in any case, Dyna host for the engine's machine,
   assert.deepEqual(find("STUDIO"), ["studio"]);
 });
 
-test("the engine's machine merges into its registered host and keeps that host's switches, rooms, pool and problem", () => {
-  const plane = host("control-plane", { cpus: 20, memBytes: 31 * gib, agents: undefined, ci: undefined, boxes: 0 });
-  const lab = host("lab", { engineHost: true, cpus: 19, agents: false, ci: true, rooms: ["r1"], problem: "create_failed", runners: 2, execOnly: false });
+test("the engine's machine merges into its registered host: the plane's figures, both workspace counts, the host's switches, rooms, problem and runners, and nothing else of the host that Home's card would show", () => {
+  const plane = host("control-plane", { cpus: 20, memBytes: 31 * gib, diskBytes: 1900 * gib, diskUsed: 1000 * gib, agents: undefined, ci: undefined, boxes: 3 });
+  const lab = host("lab", { engineHost: true, cpus: 19, diskBytes: 800 * gib, diskUsed: 100 * gib, boxes: 2, agents: false, ci: true, rooms: ["r1"], problem: "create_failed", runners: 2,
+    pool: "p", execOnly: true, leftovers: 4, runnerImages: [{ room: "r1", image: "i", reason: "x" }] });
   const [one] = machines([plane, lab]);
-  assert.deepEqual([one.name, one.cpus, one.memBytes, one.agents, one.ci, one.rooms, one.problem, one.runners, one.engineHost], ["lab", 20, 31 * gib, false, true, ["r1"], "create_failed", 2, true]);
+  assert.deepEqual([one.name, one.cpus, one.memBytes, one.diskBytes, one.diskUsed, one.boxes, one.agents, one.ci, one.rooms, one.problem, one.runners, one.engineHost],
+    ["lab", 20, 31 * gib, 1900 * gib, 1000 * gib, 5, false, true, ["r1"], "create_failed", 2, true]);
+  // Home's card stays as it was: no pool line, the plane's own exec-only, leftovers and runner images.
+  assert.deepEqual([one.pool, one.execOnly, one.leftovers, one.runnerImages], [undefined, undefined, undefined, undefined]);
 });

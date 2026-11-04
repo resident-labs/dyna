@@ -34,6 +34,8 @@
 
   // Add: what the host is for, its name and its SSH destination, and the owner's word that only they administer it.
   let creating = $state(false), exec = $state(false), name = $state(""), ssh = $state(""), sole = $state(false);
+  // Each form opened, or left, takes a new ticket, so the answer of an Add from a form since left touches nothing.
+  let formTicket = 0;
   let ready = $derived(!!name.trim() && !!ssh.trim() && (exec || sole));
   // Inside the detail, to hand its panel the focus when what had it is gone.
   let anchor: HTMLElement | undefined = $state();
@@ -51,7 +53,7 @@
     return call("host.list", {}).then(list => apply(machines(list.hosts ?? [])), (reason: unknown) => { if (!gone(reason) && !hosts) failed = true; });
   }
   // Add is a step in history of its own, so Back leaves the empty form as the back arrow does.
-  function popped() { if (creating && !history.state?.creating) { creating = false; problem = ""; } }
+  function popped() { if (creating && !history.state?.creating) { creating = false; formTicket++; problem = ""; } }
   onMount(() => {
     void call("room.list", {}).then(result => { rooms = result.rooms ?? []; }, () => {});
     window.addEventListener("popstate", popped);
@@ -65,18 +67,19 @@
   function start() {
     problem = "";
     // An open host stays in the path under the form, so Back returns to it.
-    if (!creating) { exec = false; name = ""; ssh = ""; sole = false; history.pushState({ creating: true, overList: selected === undefined }, "", location.href); }
+    if (!creating) { formTicket++; exec = false; name = ""; ssh = ""; sole = false; history.pushState({ creating: true, overList: selected === undefined }, "", location.href); }
     creating = true;
     void panel();
   }
   function close() {
     if (!creating) { onclose(); return; }
     if (history.state?.creating) history.back();
-    else { creating = false; problem = ""; }
+    else { creating = false; formTicket++; problem = ""; }
   }
   // A host picked while the form is up takes the form's history step, so none is left behind that Back would land on.
   function select(key: string, open: boolean) {
     if (creating && history.state?.creating) history.replaceState({ fromList: !!history.state.overList }, "", location.href);
+    if (creating) formTicket++;
     creating = false;
     onselect(key, open);
   }
@@ -84,16 +87,16 @@
   // unless the form was left meanwhile.
   async function add() {
     if (busy || !ready) return;
-    const host = name.trim(), address = ssh.trim();
+    const host = name.trim(), address = ssh.trim(), ticket = formTicket;
     busy = true; problem = "";
     await call("host.add", exec ? { name: host, ssh: address, ownerOnlyAdmin: false, agents: false, ci: false } : { name: host, ssh: address, ownerOnlyAdmin: true }).then(async result => {
       await reload();
-      if (!creating) return;
+      if (ticket !== formTicket) return;
       creating = false;
       if (history.state?.creating) history.replaceState({ fromList: !!history.state.overList }, "", location.href);
       noSwap = result.noSwap ? host : undefined;
       if (hosts?.some(each => each.name === host)) { onselect(host, false); void panel(); }
-    }, fail);
+    }, (reason: unknown) => { if (ticket === formTicket) fail(reason); else gone(reason); });
     busy = false;
   }
   // Whether the engine took the change; the list is read again before it settles.
@@ -110,7 +113,7 @@
     problem = "";
     if (h.execOnly && box.checked) {
       const ok = await confirm({ title: `Make ${h.name} a full host?`, message: "Dyna checks Podman, cgroups, FUSE and disk there first, and boxes or CI runners may then run on it.",
-        note: "You confirm that only you administer this machine.", action: "Check and turn on", opener: box, failed: words,
+        note: "You confirm that only you administer this machine.", action: "Check and turn on", danger: false, opener: box, failed: words,
         run: () => call("host.set", { host: h.name, ...request, ownerOnlyAdmin: true }).catch((reason: unknown) => { gone(reason); throw reason; }) });
       if (ok) await reload();
       else box.checked = false;
