@@ -255,7 +255,9 @@ func TestACompactionShowsOnTheActivityLine(t *testing.T) {
 	defer inputWriter.Close()
 	defer outputWriter.Close()
 	labels := make(chan string, 1)
-	h.Activity = func(_ contract.TurnID, label string) { labels <- label }
+	h.Activity = func(_ contract.TurnID, kind contract.ActivityKind, label string) {
+		labels <- string(kind) + ": " + label
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _, _ = h.Start(ctx, "turn_c", []contract.TurnInput{{Delivery: 1, Text: "start"}}, func() {}) }()
@@ -276,7 +278,46 @@ func TestACompactionShowsOnTheActivityLine(t *testing.T) {
 	}
 	select {
 	case label := <-labels:
-		if label != "compacting the conversation" {
+		if label != "compaction: compacting the conversation" {
+			t.Fatalf("label %q", label)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no activity")
+	}
+}
+
+func TestAToolCallShowsAsAToolActivity(t *testing.T) {
+	inputReader, inputWriter := io.Pipe()
+	outputReader, outputWriter := io.Pipe()
+	h := &Harness{stdin: inputWriter, pending: make(map[string]chan event), events: make(chan event, 16), done: make(chan struct{}), stop: make(chan struct{})}
+	go h.read(outputReader)
+	defer inputWriter.Close()
+	defer outputWriter.Close()
+	labels := make(chan string, 1)
+	h.Activity = func(_ contract.TurnID, kind contract.ActivityKind, label string) {
+		labels <- string(kind) + ": " + label
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _, _ = h.Start(ctx, "turn_t", []contract.TurnInput{{Delivery: 1, Text: "start"}}, func() {}) }()
+	line, err := bufio.NewReader(inputReader).ReadBytes('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c command
+	if err := json.Unmarshal(line, &c); err != nil {
+		t.Fatal(err)
+	}
+	encoder := json.NewEncoder(outputWriter)
+	if err := encoder.Encode(event{ID: c.ID, Type: "response", Success: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := encoder.Encode(event{Type: "tool_execution_start", ToolName: "read", Args: json.RawMessage(`{"path":"/a/spec.md"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case label := <-labels:
+		if label != "tool: read spec.md" {
 			t.Fatalf("label %q", label)
 		}
 	case <-time.After(5 * time.Second):

@@ -1,5 +1,5 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
-import type { Event, TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
+import type { ActivityKind, Event, TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
 import { decodeEvent } from "./event.ts";
 import { causes } from "./feed.ts";
 
@@ -76,13 +76,10 @@ export function timelineSegments(turn: string, items: TranscriptItem[]): Timelin
   return segments;
 }
 
-// Dyna: The harness's live activity label while a turn compacts. The engine sends labels as text only, so this is the one string the page compares.
-export const compactingActivity = "compacting the conversation";
-
-// Dyna: A running turn's working line. It reads the session's live activity, as the sidebar does, and names a compaction.
-export function workingLine(started: string, now: number, activity?: string): string {
+// Dyna: A running turn's working line. It reads the kind of the session's live activity, which the sidebar's label comes with, and names a compaction. No kind, as from an older engine, is plain work.
+export function workingLine(started: string, now: number, kind?: ActivityKind): string {
   const time = formatTimelineDuration(now - Date.parse(started));
-  return activity === compactingActivity ? `Compacting the conversation… ${time}` : `Working for ${time}`;
+  return kind === "compaction" ? `Compacting the conversation… ${time}` : `Working for ${time}`;
 }
 
 // Dyna: A compaction is one quiet line in its turn, however it came about.

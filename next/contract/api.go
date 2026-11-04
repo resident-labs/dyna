@@ -273,24 +273,25 @@ type SessionListRequest struct {
 type BoxReason string // The stored reason for the current box state, including admission waits and failures.
 
 type SessionSummary struct {
-	LastRead    int64         `json:"lastRead"`
-	ID          SessionID     `json:"id"`
-	Name        string        `json:"name"`
-	Parent      SessionID     `json:"parent"`
-	Profile     ProfileName   `json:"profile"`
-	Box         BoxID         `json:"box"`
-	BoxState    BoxState      `json:"boxState"`
-	BoxReason   BoxReason     `json:"boxReason,omitempty"`
-	Host        HostName      `json:"host,omitempty"` // the machine holding the live box; empty before placement and once the box is deleted
-	Computer    ComputerState `json:"computer"`
-	Goal        string        `json:"goal"`
-	Turn        TurnID        `json:"turn,omitempty"`        // the running turn; a failed or lost box runs none, whatever it left open
-	Activity    string        `json:"activity,omitempty"`    // the running turn's latest TurnActivity label
-	LastOutcome TurnOutcome   `json:"lastOutcome,omitempty"` // of the last ended turn that was not stopped; a stopped turn neither fails nor succeeds
-	ShellJobs   int           `json:"shellJobs,omitempty"`   // TurnEnded.ShellJobs of the last ended turn
-	HadJobs     bool          `json:"hadJobs"`               // the session has ever run a background shell job, so a finished job stays reachable
-	StartedAt   time.Time     `json:"startedAt"`             // when the session was created
-	LastTurnAt  time.Time     `json:"lastTurnAt,omitzero"`   // when the latest turn ended; empty when no turn has ended
+	LastRead     int64         `json:"lastRead"`
+	ID           SessionID     `json:"id"`
+	Name         string        `json:"name"`
+	Parent       SessionID     `json:"parent"`
+	Profile      ProfileName   `json:"profile"`
+	Box          BoxID         `json:"box"`
+	BoxState     BoxState      `json:"boxState"`
+	BoxReason    BoxReason     `json:"boxReason,omitempty"`
+	Host         HostName      `json:"host,omitempty"` // the machine holding the live box; empty before placement and once the box is deleted
+	Computer     ComputerState `json:"computer"`
+	Goal         string        `json:"goal"`
+	Turn         TurnID        `json:"turn,omitempty"`         // the running turn; a failed or lost box runs none, whatever it left open
+	Activity     string        `json:"activity,omitempty"`     // the running turn's latest TurnActivity label
+	ActivityKind ActivityKind  `json:"activityKind,omitempty"` // the kind of that activity, set with it
+	LastOutcome  TurnOutcome   `json:"lastOutcome,omitempty"`  // of the last ended turn that was not stopped; a stopped turn neither fails nor succeeds
+	ShellJobs    int           `json:"shellJobs,omitempty"`    // TurnEnded.ShellJobs of the last ended turn
+	HadJobs      bool          `json:"hadJobs"`                // the session has ever run a background shell job, so a finished job stays reachable
+	StartedAt    time.Time     `json:"startedAt"`              // when the session was created
+	LastTurnAt   time.Time     `json:"lastTurnAt,omitzero"`    // when the latest turn ended; empty when no turn has ended
 }
 type SessionListResponse struct {
 	Sessions []SessionSummary `json:"sessions"`
@@ -730,8 +731,9 @@ type TurnOutputResponse struct{}
 // TurnActivityRequest reports the running turn's latest tool call. The box agent sends at most
 // one a second. Readers show a label only while its turn runs.
 type TurnActivityRequest struct {
-	Turn  TurnID `json:"turn"`
-	Label string `json:"label"`
+	Turn  TurnID       `json:"turn"`
+	Kind  ActivityKind `json:"kind,omitempty"` // empty from a box agent that predates kinds, which the engine reads as a tool call
+	Label string       `json:"label"`
 }
 type TurnActivityResponse struct{}
 type SessionWorkRequest struct {

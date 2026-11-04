@@ -16,10 +16,10 @@ func TestActivityCoalesces(t *testing.T) {
 	ticks := make(chan time.Time)
 	got := make(chan contract.TurnActivityRequest)
 	a := &activity{}
-	a.set("turn_1", "first")
-	a.set("turn_1", "second")
+	a.set("turn_1", contract.ActivityTool, "first")
+	a.set("turn_1", contract.ActivityTool, "second")
 	secret := "sk-" + strings.Repeat("a", 40)
-	a.set("turn_1", strings.Repeat("x", 60)+" "+secret)
+	a.set("turn_1", contract.ActivityTool, strings.Repeat("x", 60)+" "+secret)
 	go a.run(ctx, ticks, func(_ context.Context, req contract.TurnActivityRequest) error {
 		got <- req
 		return errors.New("disconnected")
