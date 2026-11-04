@@ -18,11 +18,12 @@
   let { path, phone, counts, navigate, moved, onmenu, signedout, thishost, element = $bindable(), menu = $bindable() }: { path: string; phone: boolean; counts: Partial<Record<string, number>>; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void;
     moved: () => void; onmenu: (event: MouseEvent) => void; signedout: () => void; thishost: (host?: string) => void; element?: HTMLElement; menu?: HTMLButtonElement } = $props();
 
-  // device.list needs admin, so its refusal tells that this device has no Devices pane (spec 7.8).
+  // device.list needs admin, so its refusal tells that this device has no Sharing & access pane (spec 7.8). reload
+  // resolves once the list is read or refused.
   let devices: Device[] | undefined = $state.raw();
   let admin = $state(true), failed = $state(false);
   function reload() {
-    call("device.list", {}).then(list => { devices = list.devices ?? []; thishost(devices.find(device => device.current)?.host); admin = true; failed = false; }, (error: unknown) => {
+    return call("device.list", {}).then(list => { devices = list.devices ?? []; thishost(devices.find(device => device.current)?.host); admin = true; failed = false; }, (error: unknown) => {
       if (error instanceof SignedOut) signedout();
       else if (error instanceof APIError && error.detail.code === "forbidden") admin = false;
       // A failed poll keeps the list and the pair card on screen.
@@ -70,7 +71,7 @@
   <div class="pane">
     {#if lost}<Blocked kind="no-page" back={{ href: "/settings", label: "Back to Settings" }} {navigate} />
     {:else if shown?.id === "appearance"}<AppearancePane {bar} />
-    {:else if shown?.id === "devices"}<SharingPane {devices} {failed} {reload} {signedout} {bar} />
+    {:else if shown?.id === "devices"}<SharingPane {bar} {phone} {devices} {failed} {reload} {signedout} selected={item} onselect={open} onclose={close} />
     {:else if shown?.id === "accounts"}<AccountsPane {bar} {phone} {signedout} selected={item} onselect={open} onclose={close} />
     {:else if shown?.id === "profiles"}<ProfilesPane {bar} {phone} {signedout} selected={item} onselect={open} onclose={close} />
     {:else if shown?.id === "addons"}<AddonsPane {bar} {admin} {signedout} selected={item} onselect={open} onclose={close} />
