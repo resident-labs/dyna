@@ -3,8 +3,8 @@ package dynaext
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
