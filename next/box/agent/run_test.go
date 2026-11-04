@@ -36,3 +36,10 @@ func TestPiArgsTurnCodemodeOnAndKeepBash(t *testing.T) {
 		t.Fatalf("bash is excluded in %v", args)
 	}
 }
+
+func TestPiArgsLeavePiDocsOutOfTheSystemPrompt(t *testing.T) {
+	args := piArgs(nil, "dyna.js", "hello", "models.json", "sessions", "mcp.json")
+	if !slices.Contains(args, "--no-docs") {
+		t.Fatalf("missing --no-docs in %v", args)
+	}
+}

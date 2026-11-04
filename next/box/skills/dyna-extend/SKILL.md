@@ -61,3 +61,7 @@ dyna mcp add files -- npx -y @modelcontextprotocol/server-filesystem /box/work
 ```
 
 The server joins Pi's MCP config beside `dyna`. Load its tools with `tool_search`, or call them from `codemode` as `tools.mcp__<name>__<tool>`. Dyna has no store for an MCP server's secrets, so if a server needs a token, tell the owner instead of writing it down.
+
+## Pi's own documentation
+
+Your system prompt leaves out Pi's documentation block. The files stay on disk in the box image: `/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/docs` (`extensions.md`, `skills.md`, `packages.md`, `mcp.md`, `codemode.md` and more), with `README.md` and `examples/` beside it. Read the doc that fits when you build a Pi extension, skill or package.
