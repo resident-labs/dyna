@@ -2,8 +2,11 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,15 +24,15 @@ type restartHostexec struct {
 	started  chan struct{}
 	returned chan struct{}
 	release  chan struct{}
-	follow   func() ([]byte, int, bool, error)
+	follow   func(contract.OpID) ([]byte, int, bool, error)
 	once     sync.Once
 }
 
-func newRestartHostexec(follow func() ([]byte, int, bool, error)) *restartHostexec {
+func newRestartHostexec(follow func(contract.OpID) ([]byte, int, bool, error)) *restartHostexec {
 	return &restartHostexec{started: make(chan struct{}), returned: make(chan struct{}), release: make(chan struct{}), follow: follow}
 }
 
-func (f *restartHostexec) RunHostexec(ctx context.Context, a contract.HostexecRunArgs, _ contract.OpID) ([]byte, int, bool, error) {
+func (f *restartHostexec) RunHostexec(ctx context.Context, a contract.HostexecRunArgs, op contract.OpID) ([]byte, int, bool, error) {
 	f.mu.Lock()
 	f.runs = append(f.runs, a)
 	f.mu.Unlock()
@@ -37,7 +40,7 @@ func (f *restartHostexec) RunHostexec(ctx context.Context, a contract.HostexecRu
 	case a.Collect:
 		return nil, 0, false, nil
 	case a.Attach:
-		return f.follow()
+		return f.follow(op)
 	}
 	close(f.started)
 	defer f.once.Do(func() { close(f.returned) })
@@ -57,7 +60,7 @@ func (f *restartHostexec) StopHostexec(context.Context, contract.HostName, strin
 
 // hostRunThenRestart starts a host run, stops the engine under it (its shutdown context ends, and so does the box's call), and
 // starts it again on the same store. It returns the run's operation ID once the new engine's startup has run.
-func hostRunThenRestart(t *testing.T, s *Service, ctx context.Context, who contract.Principal, runner *restartHostexec) contract.OpID {
+func hostRunThenRestart(t *testing.T, s *Service, ctx context.Context, who contract.Principal, runner *restartHostexec, timeout contract.DurationMS, beforeRestart func()) contract.OpID {
 	t.Helper()
 	kinds := map[contract.OpKind]approve.Entry{"hostexec.run": s.HostexecRunEntry()}
 	s.SetHostexecRunner(runner)
@@ -69,7 +72,7 @@ func hostRunThenRestart(t *testing.T, s *Service, ctx context.Context, who contr
 	call, dropCall := context.WithCancel(ctx)
 	answered := make(chan contract.HostexecRunResponse, 1)
 	go func() {
-		res, _ := s.HostexecRun(call, who, contract.HostexecRunRequest{Host: "host", Command: "make deploy", ClientID: "run-1"})
+		res, _ := s.HostexecRun(call, who, contract.HostexecRunRequest{Host: "host", Command: "make deploy", Timeout: timeout, ClientID: "run-1"})
 		answered <- res
 	}()
 	<-runner.started
@@ -88,6 +91,7 @@ func hostRunThenRestart(t *testing.T, s *Service, ctx context.Context, who contr
 	if stopped, ended := hostexecRow(t, s, record.Operation.ID); stopped != "" || ended {
 		t.Fatalf("after the shutdown the run is marked %q, ended %v", stopped, ended)
 	}
+	beforeRestart()
 	if err := s.ConfigureOperations(ctx, kinds, time.Hour); err != nil {
 		t.Fatal(err)
 	}
@@ -114,8 +118,8 @@ func waitForResult(t *testing.T, s *Service, ctx context.Context, who contract.P
 func TestHostRunSurvivesAnEngineRestart(t *testing.T) {
 	s, _, root, ctx := setupRoot(t)
 	who := contract.Principal{Kind: contract.PrincipalSession, Session: root}
-	runner := newRestartHostexec(func() ([]byte, int, bool, error) { return []byte("all of the output\n"), 7, false, nil })
-	op := hostRunThenRestart(t, s, ctx, who, runner)
+	runner := newRestartHostexec(func(contract.OpID) ([]byte, int, bool, error) { return []byte("all of the output\n"), 7, false, nil })
+	op := hostRunThenRestart(t, s, ctx, who, runner, 0, func() {})
 	got := waitForResult(t, s, ctx, who)
 	if got.State != contract.OpFailed || got.Result.Output != "all of the output\n" || got.Result.ExitCode != 7 || got.Result.Error != "" {
 		t.Fatalf("operation %+v result %+v", got, got.Result)
@@ -132,9 +136,11 @@ func TestHostRunSurvivesAnEngineRestart(t *testing.T) {
 
 // A resume that cannot follow ends with the restart as its cause and names the host and the unit, never a bare context error.
 func TestHostRunThatCannotBeFollowedAfterARestartEndsNamingTheRestart(t *testing.T) {
-	for name, follow := range map[string]func() ([]byte, int, bool, error){
-		"host does not answer": func() ([]byte, int, bool, error) { return nil, 0, false, errors.New("ssh: no route") },
-		"host lost its files":  func() ([]byte, int, bool, error) { return nil, boxhostexec.NoRunStatus, false, nil },
+	for name, follow := range map[string]func(contract.OpID) ([]byte, int, bool, error){
+		"host does not answer": func(contract.OpID) ([]byte, int, bool, error) { return nil, 0, false, errors.New("ssh: no route") },
+		"host lost its files": func(op contract.OpID) ([]byte, int, bool, error) {
+			return []byte(boxhostexec.NoRunOutput(op)), boxhostexec.NoRunStatus, false, nil
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, _, root, ctx := setupRoot(t)
@@ -142,7 +148,7 @@ func TestHostRunThatCannotBeFollowedAfterARestartEndsNamingTheRestart(t *testing
 				return context.WithTimeout(ctx, 300*time.Millisecond)
 			}
 			who := contract.Principal{Kind: contract.PrincipalSession, Session: root}
-			op := hostRunThenRestart(t, s, ctx, who, newRestartHostexec(follow))
+			op := hostRunThenRestart(t, s, ctx, who, newRestartHostexec(follow), 0, func() {})
 			got := waitForResult(t, s, ctx, who)
 			want := "the engine restarted during this host run (deploy); the command may still be running on host as dyna-hostexec-" + string(op) + ".scope"
 			if got.State != contract.OpFailed || got.Result.Cause != contract.CauseEngineRestarted || got.Result.Error != want || got.Result.ExitCode != 0 {
@@ -186,5 +192,107 @@ func TestAnAskedAgainHostRunWaitsForTheRun(t *testing.T) {
 	var wakes int
 	if err := s.store.Read().QueryRow("SELECT count(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_id=? AND e.type='op.ran'", root).Scan(&wakes); err != nil || wakes != 0 {
 		t.Fatalf("wakes %d: %v", wakes, err)
+	}
+}
+
+// A command that exits with the status the host's "no files" answer has, but not with its words, is a command's own exit.
+func TestAResumedCommandThatExitsWithTheNoRunStatusIsItsOwnExit(t *testing.T) {
+	s, _, root, ctx := setupRoot(t)
+	who := contract.Principal{Kind: contract.PrincipalSession, Session: root}
+	runner := newRestartHostexec(func(contract.OpID) ([]byte, int, bool, error) {
+		return []byte("my own words\n"), boxhostexec.NoRunStatus, false, nil
+	})
+	hostRunThenRestart(t, s, ctx, who, runner, 0, func() {})
+	got := waitForResult(t, s, ctx, who)
+	if got.Result.Cause != "" || got.Result.ExitCode != boxhostexec.NoRunStatus || got.Result.Output != "my own words\n" {
+		t.Fatalf("result %+v", got.Result)
+	}
+}
+
+// The follow after a restart is bounded by what is left of the run's time counted from its start, and a call to a host that does
+// not answer is made again until then.
+func TestResumeIsBoundedByTheRunsStartAndAsksTheHostAgain(t *testing.T) {
+	s, _, root, ctx := setupRoot(t)
+	var clock atomic.Int64
+	clock.Store(time.Now().UnixMilli())
+	s.now = func() time.Time { return time.UnixMilli(clock.Load()) }
+	var mu sync.Mutex
+	var bounds []time.Duration
+	s.hostexecTimeout = func(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+		mu.Lock()
+		bounds = append(bounds, d)
+		mu.Unlock()
+		return context.WithTimeout(ctx, 30*time.Second)
+	}
+	who := contract.Principal{Kind: contract.PrincipalSession, Session: root}
+	var asked atomic.Int32
+	runner := newRestartHostexec(func(contract.OpID) ([]byte, int, bool, error) {
+		if asked.Add(1) == 1 {
+			return nil, 0, false, errors.New("ssh: no route")
+		}
+		return []byte("done\n"), 0, false, nil
+	})
+	hostRunThenRestart(t, s, ctx, who, runner, contract.DurationMS(time.Hour.Milliseconds()), func() { clock.Add(10 * time.Minute.Milliseconds()) })
+	got := waitForResult(t, s, ctx, who)
+	if got.Result.Cause != "" || got.Result.Output != "done\n" || asked.Load() != 2 {
+		t.Fatalf("asked %d times, result %+v", asked.Load(), got.Result)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bounds) < 2 || bounds[1] != 50*time.Minute+15*time.Second {
+		t.Fatalf("the follow was bounded by %v", bounds)
+	}
+}
+
+// A host that does not answer until the run's time is up is asked until then, and the end names the restart.
+func TestAHostThatNeverAnswersIsAskedUntilTheRunsTimeIsUp(t *testing.T) {
+	s, _, root, ctx := setupRoot(t)
+	s.hostexecTimeout = func(ctx context.Context, _ time.Duration) (context.Context, context.CancelFunc) {
+		return context.WithTimeout(ctx, 1200*time.Millisecond)
+	}
+	who := contract.Principal{Kind: contract.PrincipalSession, Session: root}
+	runner := newRestartHostexec(func(contract.OpID) ([]byte, int, bool, error) { return nil, 0, false, errors.New("ssh: no route") })
+	hostRunThenRestart(t, s, ctx, who, runner, 0, func() {})
+	got := waitForResult(t, s, ctx, who)
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	var follows int
+	for _, a := range runner.runs {
+		if a.Attach {
+			follows++
+		}
+	}
+	if got.Result.Cause != contract.CauseEngineRestarted || follows < 3 {
+		t.Fatalf("cause %q after %d follows", got.Result.Cause, follows)
+	}
+}
+
+// A grant that ended while the engine was away ends the run as stale, and its command is stopped like a session's stop.
+func TestAResumedRunWhoseGrantEndedIsStaleAndStopped(t *testing.T) {
+	s, _, root, ctx := setupRoot(t)
+	who := contract.Principal{Kind: contract.PrincipalSession, Session: root}
+	runner := newRestartHostexec(func(contract.OpID) ([]byte, int, bool, error) { return []byte("never read\n"), 0, false, nil })
+	op := hostRunThenRestart(t, s, ctx, who, runner, 0, func() {
+		err := s.store.Write(ctx, func(tx *sql.Tx) error {
+			_, err := tx.Exec("UPDATE grants SET revoked_at=? WHERE kind='hostexec'", time.Now().UnixMilli())
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+	got := waitForResult(t, s, ctx, who)
+	if got.Result.Cause != contract.CauseStale || !strings.HasPrefix(got.Result.Error, "stale: ") {
+		t.Fatalf("result %+v", got.Result)
+	}
+	if stopped, _ := hostexecRow(t, s, op); stopped != "stopped" {
+		t.Fatalf("run %q", stopped)
+	}
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	for _, a := range runner.runs {
+		if a.Attach {
+			t.Fatal("a run without a grant was followed")
+		}
 	}
 }

@@ -358,11 +358,12 @@ func (s *Service) run(op contract.Operation, entry Entry, resumed bool) error {
 	}
 
 	result := contract.OpResult{}
-	if err := entry.Check(s.Context, op.Args, op.By); err != nil {
+	if resumed {
+		// A resumed run answers for its own grant: what becomes of a run whose grant is gone is the kind's to say.
+		result = entry.Resume(s.Context, op.ID, op.Args, op.By)
+	} else if err := entry.Check(s.Context, op.Args, op.By); err != nil {
 		result.Error = "stale: " + err.Error()
 		result.Cause = contract.CauseStale
-	} else if resumed {
-		result = entry.Resume(s.Context, op.ID, op.Args, op.By)
 	} else {
 		result = entry.Execute(s.Context, op.ID, op.Args, op.By)
 	}
