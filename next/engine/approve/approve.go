@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -30,7 +31,11 @@ type Entry struct {
 	Card         func(context.Context, contract.OpArgs, contract.Principal) contract.Card
 	Check        func(context.Context, contract.OpArgs, contract.Principal) error
 	Execute      func(context.Context, contract.OpID, contract.OpArgs, contract.Principal) contract.OpResult
-	Decode       func(json.RawMessage) (contract.OpArgs, error)
+	// Resume finishes an operation a previous engine left running when it shut down, as Execute does for a new one. An entry with
+	// it keeps its running operations across a restart: a shutdown during Execute leaves the operation running, and the next start
+	// calls Resume instead of ending it as interrupted.
+	Resume func(context.Context, contract.OpID, contract.OpArgs, contract.Principal) contract.OpResult
+	Decode func(json.RawMessage) (contract.OpArgs, error)
 }
 
 type Service struct {
@@ -41,7 +46,7 @@ type Service struct {
 	Expiry  time.Duration
 	ID      func(string) (string, error)
 	mu      sync.Mutex
-	waiters map[contract.OpID]waiter
+	waiters map[contract.OpID][]*waiter
 }
 
 type waiter struct {
@@ -55,7 +60,7 @@ type runResult struct {
 }
 
 func New(st *store.Store, ctx context.Context, kinds map[contract.OpKind]Entry, now func() time.Time, expiry time.Duration, id func(string) (string, error)) *Service {
-	return &Service{Store: st, Context: ctx, Kinds: kinds, Now: now, Expiry: expiry, ID: id, waiters: make(map[contract.OpID]waiter)}
+	return &Service{Store: st, Context: ctx, Kinds: kinds, Now: now, Expiry: expiry, ID: id, waiters: make(map[contract.OpID][]*waiter)}
 }
 
 func (s *Service) event(room contract.RoomID, from contract.Principal, body contract.EventBody) (contract.Event, error) {
@@ -187,25 +192,48 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 		return op, nil
 	}
 	s.mu.Lock()
-	resultCh := make(chan runResult, 1)
-	s.waiters[op.ID] = waiter{ctx: ctx, done: resultCh}
+	w := &waiter{ctx: ctx, done: make(chan runResult, 1)}
+	s.waiters[op.ID] = append(s.waiters[op.ID], w)
 	s.mu.Unlock()
-	go s.start(op, entry)
+	go s.start(op, entry, false)
+	return s.await(op, w)
+}
+
+// await returns the operation as it ends, or as it is when the waiter's context ends first.
+func (s *Service) await(op contract.Operation, w *waiter) (contract.Operation, error) {
 	select {
-	case result := <-resultCh:
+	case result := <-w.done:
 		return result.op, result.err
-	case <-ctx.Done():
+	case <-w.ctx.Done():
 		s.mu.Lock()
+		defer s.mu.Unlock()
 		select {
-		case result := <-resultCh:
-			s.mu.Unlock()
+		case result := <-w.done:
 			return result.op, result.err
 		default:
 		}
-		delete(s.waiters, op.ID)
-		s.mu.Unlock()
+		s.waiters[op.ID] = slices.DeleteFunc(s.waiters[op.ID], func(other *waiter) bool { return other == w })
 		return op, nil
 	}
+}
+
+// Wait returns an operation as it ends: at once when it has ended, else when it does, or as it is when ctx ends first. It is how
+// a repeated request waits for the operation its earlier request started, whichever engine process runs it.
+func (s *Service) Wait(ctx context.Context, id contract.OpID) (contract.Operation, error) {
+	s.mu.Lock()
+	record, err := s.Store.Operation(ctx, id)
+	if err != nil {
+		s.mu.Unlock()
+		return contract.Operation{}, err
+	}
+	if record.Operation.State != contract.OpApproved && record.Operation.State != contract.OpRunning {
+		s.mu.Unlock()
+		return record.Operation, nil
+	}
+	w := &waiter{ctx: ctx, done: make(chan runResult, 1)}
+	s.waiters[id] = append(s.waiters[id], w)
+	s.mu.Unlock()
+	return s.await(record.Operation, w)
 }
 
 func (s *Service) decodeReplay(record store.StoredOperation, input contract.Operation) (contract.Operation, error) {
@@ -277,7 +305,7 @@ func (s *Service) Decide(ctx context.Context, who contract.Principal, id contrac
 	if state == contract.OpApproved {
 		op.State = state
 		op.Decision = &decision
-		go s.start(op, entry)
+		go s.start(op, entry, false)
 	}
 	return nil
 }
@@ -300,37 +328,50 @@ func (s *Service) Expire(ctx context.Context) error {
 	}
 	return nil
 }
-func (s *Service) start(op contract.Operation, entry Entry) {
-	err := s.run(op, entry)
+
+// start runs an operation, or with resumed set, finishes one a previous engine left running.
+func (s *Service) start(op contract.Operation, entry Entry, resumed bool) {
+	err := s.run(op, entry, resumed)
 	if err == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if w, ok := s.waiters[op.ID]; ok {
+	if ws := s.waiters[op.ID]; len(ws) > 0 {
 		delete(s.waiters, op.ID)
-		w.done <- runResult{op: op, err: err}
+		for _, w := range ws {
+			w.done <- runResult{op: op, err: err}
+		}
 	} else {
 		slog.Error("operation execution failed", "operation", op.ID, "error", err)
 	}
 }
-func (s *Service) run(op contract.Operation, entry Entry) error {
-	changed, err := s.Store.ChangeOperation(s.Context, op.ID, contract.OpApproved, contract.OpRunning, nil, contract.Event{}, nil)
-	if err != nil {
-		return err
-	}
-	if !changed {
-		return fmt.Errorf("operation %s is not approved", op.ID)
+func (s *Service) run(op contract.Operation, entry Entry, resumed bool) error {
+	if !resumed {
+		changed, err := s.Store.ChangeOperation(s.Context, op.ID, contract.OpApproved, contract.OpRunning, nil, contract.Event{}, nil)
+		if err != nil {
+			return err
+		}
+		if !changed {
+			return fmt.Errorf("operation %s is not approved", op.ID)
+		}
 	}
 
 	result := contract.OpResult{}
-	if err := entry.Check(s.Context, op.Args, op.By); err != nil {
+	if resumed {
+		// A resumed run answers for its own grant: what becomes of a run whose grant is gone is the kind's to say.
+		result = entry.Resume(s.Context, op.ID, op.Args, op.By)
+	} else if err := entry.Check(s.Context, op.Args, op.By); err != nil {
 		result.Error = "stale: " + err.Error()
 		result.Cause = contract.CauseStale
 	} else {
 		result = entry.Execute(s.Context, op.ID, op.Args, op.By)
 	}
-	err = s.finish(s.Context, op, result)
+	if entry.Resume != nil && s.Context.Err() != nil {
+		// The engine is shutting down under the run, which goes on elsewhere: the next start resumes it.
+		return nil
+	}
+	err := s.finish(s.Context, op, result)
 	if err != nil {
 		err = s.finish(context.WithoutCancel(s.Context), op, result)
 	}
@@ -347,13 +388,15 @@ func (s *Service) finish(ctx context.Context, op contract.Operation, result cont
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	waiting, present := s.waiters[op.ID]
-	if present && waiting.ctx.Err() != nil {
-		delete(s.waiters, op.ID)
-		present = false
+	var live []*waiter
+	for _, w := range s.waiters[op.ID] {
+		if w.ctx.Err() == nil {
+			live = append(live, w)
+		}
 	}
+	delete(s.waiters, op.ID)
 	var notify []contract.Delivery
-	if !present {
+	if len(live) == 0 {
 		notify = delivery(op.By.Session)
 	}
 	changed, err := s.Store.ChangeOperation(ctx, op.ID, contract.OpRunning, state, &result, event, notify)
@@ -363,11 +406,10 @@ func (s *Service) finish(ctx context.Context, op contract.Operation, result cont
 	if !changed {
 		return fmt.Errorf("operation %s is not claimed", op.ID)
 	}
-	if present {
-		delete(s.waiters, op.ID)
-		op.State = state
-		op.Result = &result
-		waiting.done <- runResult{op: op}
+	op.State = state
+	op.Result = &result
+	for _, w := range live {
+		w.done <- runResult{op: op}
 	}
 	return nil
 }
@@ -377,6 +419,14 @@ func (s *Service) Recover(ctx context.Context) error {
 		return err
 	}
 	for _, record := range running {
+		if entry := s.Kinds[record.Operation.Kind]; entry.Resume != nil {
+			record.Operation.Args, err = entry.Decode(record.Args)
+			if err != nil {
+				return err
+			}
+			go s.start(record.Operation, entry, true)
+			continue
+		}
 		message := "interrupted: outcome unknown"
 		if record.Operation.Kind == "pr.open" {
 			message += "; check whether the PR exists before opening another"
@@ -398,7 +448,7 @@ func (s *Service) Recover(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		go s.start(record.Operation, entry)
+		go s.start(record.Operation, entry, false)
 	}
 	return nil
 }
