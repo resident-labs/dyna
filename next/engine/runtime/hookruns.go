@@ -65,7 +65,7 @@ func (b *Boxes) boot(ctx context.Context, h *podman.Host, spec box.RunSpec, imag
 
 // runImage resolves a Run's image the way a session's is: base, or an image of the room.
 func (b *Boxes) runImage(ctx context.Context, h *podman.Host, spec box.RunSpec) (string, error) {
-	base, err := h.BuildBase(ctx, images.BaseContainerfile, b.PiTarball)
+	base, err := h.BuildBase(ctx, images.BaseContainerfile)
 	if err != nil || spec.Image == box.BaseImage {
 		return base, err
 	}
