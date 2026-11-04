@@ -66,9 +66,9 @@ func (s *Session) Refresh() string {
 	return s.refresh
 }
 
-// MarkRefresh asks this box to restart, and with wake to come straight back once it stops. A box does not report a mark, so unlike
-// the stale flag it outlasts a reconnect, and the first one stands, so a repeat sends no second notice. The caller holds the
-// session lock.
+// MarkRefresh asks this box to restart, and with wake to come straight back once it stops, which a box that is asleep does not
+// need. A box does not report a mark, so unlike the stale flag it outlasts a reconnect, and the first one stands, so a repeat sends
+// no second notice. The caller holds the session lock.
 func (s *Session) MarkRefresh(mark string, wake bool) {
 	if s.refresh == "" {
 		s.refresh = mark
@@ -76,7 +76,7 @@ func (s *Session) MarkRefresh(mark string, wake bool) {
 	s.refreshWake = s.refreshWake || wake
 }
 
-// RefreshWake returns the mark of a box that asked to come straight back, empty if it did not.
+// RefreshWake returns the mark of a box that is to come straight back, empty if it is not.
 func (s *Session) RefreshWake() string {
 	if !s.Lock() {
 		return ""
