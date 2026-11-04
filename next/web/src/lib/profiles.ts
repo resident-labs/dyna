@@ -1,4 +1,5 @@
 import type { Account, ModelProvider, Profile, ProfileEntry, ThinkingLevel } from "./contract.gen.ts";
+import type { Chip, Column } from "./settings-list.ts";
 
 // A profile as the web lists and edits it: profile.list's stored profile with its read-only in-use count beside it
 // flattened in, and the limits an editor may leave unset. profileForSave drops inUse again.
@@ -9,9 +10,44 @@ export const profileRows = (entries: readonly ProfileEntry[] | null): ProfileSum
 // A person reads a profile, not its slugs, as in v1's profileLabels.ts: the slug's words as a name, with SHOWN_AS
 // for those plain capitals get wrong.
 const SHOWN_AS: Record<string, string> = { gpt: "GPT", glm: "GLM", mimo: "MiMo", deepseek: "DeepSeek" };
-const thinking: Record<ThinkingLevel, string> = {
+export const thinking: Record<ThinkingLevel, string> = {
   off: "no thinking", minimal: "minimal thinking", low: "low thinking", medium: "medium thinking", high: "high thinking", xhigh: "very high thinking",
 };
+export const providers: Record<ModelProvider, string> = { anthropic: "Anthropic", openai: "OpenAI-compatible" };
+
+// Settings > Profiles (spec 5.13): its chips, its columns, its provider filter and what a row and the search read.
+export const unrated = (profile: ProfileSummary) => !profile.taste && !profile.diagnostics && !profile.intelligence && !profile.cost;
+export const profileChips: Chip<ProfileSummary>[] = [
+  { id: "all", label: "All" }, { id: "inuse", label: "In use", test: profile => profile.inUse > 0 }, { id: "unrated", label: "Not rated", test: unrated },
+];
+// The values sort as numbers; an unset one is 0, so it sorts lowest.
+const byNumber = (value: (profile: ProfileSummary) => number | undefined) => (a: ProfileSummary, b: ProfileSummary) => (value(a) ?? 0) - (value(b) ?? 0);
+export const profileColumns: Column<ProfileSummary>[] = [
+  { id: "name", label: "Name", width: "minmax(0, 1fr)", compare: (a, b) => a.name.localeCompare(b.name) },
+  { id: "taste", label: "Taste", width: "44px", compare: byNumber(p => p.taste) },
+  { id: "diagnostics", label: "Diag.", width: "44px", compare: byNumber(p => p.diagnostics) },
+  { id: "intelligence", label: "Intel.", width: "44px", compare: byNumber(p => p.intelligence) },
+  { id: "cost", label: "Thrift", width: "44px", compare: byNumber(p => p.cost) },
+  { id: "maxConcurrent", label: "At once", width: "56px", compare: byNumber(p => p.maxConcurrent) },
+  { id: "inUse", label: "In use", width: "50px", compare: byNumber(p => p.inUse) },
+];
+export const providerFilter = (provider: ModelProvider | "") => provider ? (profile: ProfileSummary) => profile.provider === provider : undefined;
+export const profileText = (profile: ProfileSummary) => `${profile.name} ${profile.model} ${providers[profile.provider]}`;
+// A row's second line. A wide row's columns leave the line little room, so it names the level alone ("no thinking"
+// for off); a narrow row has no columns, so it says "thinking" and names what the columns would have shown.
+export function profileLine(profile: ProfileSummary, compact: boolean): string {
+  if (!compact) return `${profile.model} · ${profile.thinking === "off" ? thinking.off : thinking[profile.thinking].replace(/ thinking$/, "")}`;
+  return `${profile.model} · ${thinking[profile.thinking]}` + (unrated(profile) ? " · not rated" : "") + (profile.inUse ? ` · ${profile.inUse} in use` : "");
+}
+
+// A rating is one slider from 0, not rated, to 10: what a key makes it, or undefined for a key it leaves alone.
+export function ratingKey(key: string, now: number): number | undefined {
+  const next = ({ ArrowRight: now + 1, ArrowUp: now + 1, ArrowLeft: now - 1, ArrowDown: now - 1, PageUp: now + 3, PageDown: now - 3, Home: 1, End: 10, Backspace: 0, Delete: 0 } as Record<string, number>)[key];
+  return next === undefined ? undefined : Math.max(0, Math.min(10, next));
+}
+
+// A typed limit or token count: its digits, capped at 2^31 - 1, far past any real one, so a long paste still saves.
+export const countField = (text: string) => Math.min(2 ** 31 - 1, Number(text.replace(/[^0-9]/g, "")));
 
 // Preserve the profile’s other allowed models and hidden limits when the owner edits its model.
 export function profileForSave(draft: ProfileSummary) {
