@@ -132,8 +132,10 @@ return JSON.stringify({ refused: sessions.isError === true, text: sessions.conte
 			t.Errorf("%s stays in the prefix", name)
 		}
 	}
-	if !strings.Contains(first, "mcp_servers") || !strings.Contains(first, "Dyna tools cover") {
-		t.Errorf("the prompt does not say where the dyna tools are")
+	// The deferred_tools section names the dyna tools with their actions, and post, which is declared, not at all.
+	if !strings.Contains(first, "<deferred_tools>") || !strings.Contains(first, "mcp__dyna__:") || !strings.Contains(first, "- session: close, compose_list, list") ||
+		strings.Contains(first, "- post:") || strings.Contains(first, "mcp_servers") {
+		t.Errorf("the prompt does not name the deferred dyna tools")
 	}
 
 	// A script reaches a tool nobody loaded.

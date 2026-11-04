@@ -147,9 +147,12 @@ import { BUILTIN_PATH_PREFIX, createSyntheticSourceInfo, isSyntheticPath, type S
 import {
 	buildSystemPrompt,
 	buildSystemPromptSections,
+	DEFERRED_TOOLS_SECTION,
 	type NormalizedBuildSystemPromptOptions,
 	normalizeBuildSystemPromptOptions,
 	RESERVED_SYSTEM_PROMPT_SECTIONS,
+	renderDeferredToolsSection,
+	type SystemPromptSections,
 } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
@@ -1066,7 +1069,7 @@ export class AgentSession {
 						draft.details,
 						true,
 						draft.usage,
-						buildSystemPromptSections(this._runSystemPromptOptions ?? this._baseSystemPromptOptions),
+						this._headSections(this._runSystemPromptOptions ?? this._baseSystemPromptOptions),
 					);
 					break;
 				}
@@ -1883,12 +1886,40 @@ export class AgentSession {
 	): AgentMessage | undefined {
 		options.selectedTools = this._applyToolLoadout(options.selectedTools).map((tool) => tool.name);
 		options.hiddenTools = [...this._hiddenDeclarations];
-		const sections = buildSystemPromptSections(options);
 		const previous = deliveredSections(this.sessionManager);
 		if (previous === undefined && !getCurrentSystemMessage(messages)) {
-			return { role: "system", content: "", sections, timestamp: Date.now() };
+			return { role: "system", content: "", sections: this._headSections(options), timestamp: Date.now() };
 		}
+		const sections = buildSystemPromptSections(options);
+		// The deferred tools section changes only with a new head, so a tool_search load changes no section.
+		const deferred = previous?.[DEFERRED_TOOLS_SECTION];
+		if (deferred !== undefined) sections[DEFERRED_TOOLS_SECTION] = deferred;
 		return createContextUpdate(previous ?? {}, sections);
+	}
+
+	/**
+	 * Sections of a new head, at the first prompt or a compaction: the prompt and the
+	 * `deferred_tools` section, which names the tools `tool_search` or a codemode script can reach
+	 * and that are not active now. Only a new head rebuilds that section, so loading a tool leaves the
+	 * system prompt as it is and adds only the `toolsAdded` system message.
+	 */
+	private _headSections(options: NormalizedBuildSystemPromptOptions): SystemPromptSections {
+		if (options.forceSystemPrompt !== undefined) return buildSystemPromptSections(options);
+		const active = new Set(this.getActiveToolNames());
+		const deferred = renderDeferredToolsSection(
+			this.getAllTools().flatMap((tool) => {
+				if ((tool.exposure !== "deferred" && tool.exposure !== "codemode") || active.has(tool.name)) return [];
+				// Tool schemas come from extensions and MCP servers; only a string enum counts as actions.
+				const schema = tool.parameters as { properties?: { action?: { enum?: unknown } } };
+				const action = schema.properties?.action?.enum;
+				const actions = Array.isArray(action) ? action.filter((item) => typeof item === "string") : [];
+				return [{ name: tool.name, namespace: tool.namespace?.name, actions }];
+			}),
+			{ toolSearch: active.has("tool_search"), codemode: active.has("codemode") },
+		);
+		return buildSystemPromptSections(
+			deferred ? { ...options, sections: { ...options.sections, [DEFERRED_TOOLS_SECTION]: deferred } } : options,
+		);
 	}
 
 	/**
@@ -2877,7 +2908,7 @@ export class AgentSession {
 			details,
 			false,
 			undefined,
-			buildSystemPromptSections(this._runSystemPromptOptions ?? this._baseSystemPromptOptions),
+			this._headSections(this._runSystemPromptOptions ?? this._baseSystemPromptOptions),
 		);
 		this._refreshFinalizedContext();
 		const entry = this.sessionManager.getEntry(entryId) as CompactionEntry;
@@ -3254,7 +3285,7 @@ export class AgentSession {
 				details,
 				fromExtension,
 				usage,
-				buildSystemPromptSections(this._runSystemPromptOptions ?? this._baseSystemPromptOptions),
+				this._headSections(this._runSystemPromptOptions ?? this._baseSystemPromptOptions),
 			);
 			const newEntries = this.sessionManager.getEntries();
 			this._refreshFinalizedContext();
@@ -3594,7 +3625,7 @@ export class AgentSession {
 				details,
 				fromExtension,
 				usage,
-				buildSystemPromptSections(this._runSystemPromptOptions ?? this._baseSystemPromptOptions),
+				this._headSections(this._runSystemPromptOptions ?? this._baseSystemPromptOptions),
 			);
 			if (transfer) transfer.compacted = true;
 			const newEntries = this.sessionManager.getEntries();
