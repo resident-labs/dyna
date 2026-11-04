@@ -168,3 +168,16 @@ test("labels that end in numbers sort by number, as Claude 9 before Claude 10", 
   const items = accountItems([acct("a", { label: "Claude 10" }), acct("b", { label: "claude 9" }), acct("c", { label: "Claude 2" })], [claude], []);
   assert.deepEqual(items.map(each => each.account.label), ["Claude 2", "claude 9", "Claude 10"]);
 });
+
+test("accounts of providers the catalog does not know stay grouped by provider, after the known ones", () => {
+  const items = accountItems([acct("m1", { provider: "meta", label: "a" }), acct("k1", { provider: "kimi", label: "b" }), acct("c", { label: "z" }),
+    acct("m2", { provider: "meta", label: "c" }), acct("k2", { provider: "kimi", label: "d" })], [claude], []);
+  assert.deepEqual(items.map(each => each.account.id), ["c", "k1", "k2", "m1", "m2"]);
+});
+
+test("a search shows every key provider it matches, past the ten", () => {
+  const keys: AccountProviderInfo[] = Array.from({ length: 12 }, (_, i) => ({ ...deepseek, displayName: `Key ${i}` }));
+  const found = providerChoices([claude, ...keys], "key", false);
+  assert.equal(found.items.length, 12);
+  assert.equal(found.more, 0);
+});
