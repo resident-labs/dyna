@@ -52,7 +52,8 @@ export function stream(
     source.onmessage = message => {
       const event = decodeEvent(JSON.parse(message.data));
       if (event) {
-        if (!room && event.type === "transcript.changed") for (const listener of transcriptListeners) listener(event.body.session);
+        // The owner stream says a transcript grew. A turn's end is no append, so an open thread reads again from the room stream's turn.ended.
+        if (!room && event.type === "transcript.changed" || room && event.type === "turn.ended") for (const listener of transcriptListeners) listener(event.body.session);
         apply(event);
       }
       delay = 500;
