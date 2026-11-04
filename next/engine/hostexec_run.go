@@ -151,11 +151,6 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 				}
 				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
 			}
-			desktop, err := s.store.ExecOnly(ctx, a.Host)
-			if err != nil {
-				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
-			}
-			a.Desktop = desktop
 			started := s.now()
 			runCtx, cancel := s.hostexecTimeout(ctx, time.Duration(a.Timeout)*time.Millisecond+15*time.Second)
 			out, code, truncated, err := s.hostexec.RunHostexec(runCtx, a, op)

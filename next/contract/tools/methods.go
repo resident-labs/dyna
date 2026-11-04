@@ -23,6 +23,7 @@ var methodTable = []MethodEntry{
 	method(contract.MethodAddonList, contract.ScopeRead, OwnerAccess),
 	method(contract.MethodAddonSetEnabled, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodAddonSetRootOnly, contract.ScopeAdmin, OwnerAccess),
+	method(contract.MethodAddonSetHosts, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodArchiveDone, contract.ScopeRead, BoxAccess),
 	method(contract.MethodBoxCompacted, contract.ScopeRead, BoxAccess),
 	method(contract.MethodBoxHello, contract.ScopeRead, BoxAccess),

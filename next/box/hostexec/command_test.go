@@ -19,7 +19,7 @@ func bashOf(t *testing.T, a contract.HostexecRunArgs, op contract.OpID, env ...s
 	if err := os.WriteFile(filepath.Join(bin, "systemd-run"), []byte(fake), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(bin, "systemctl"), []byte("#!/bin/bash\necho DISPLAY=:7\necho WAYLAND_DISPLAY=wayland-1\necho SECRET=no\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(bin, "systemctl"), []byte("#!/bin/bash\n[ -z \"$NO_SESSION\" ] || exit 1\necho DISPLAY=:7\necho WAYLAND_DISPLAY=wayland-1\necho SECRET=no\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	args := RunArgs(a, op)
@@ -44,14 +44,15 @@ func TestRunGetsAnEmptyDynaOut(t *testing.T) {
 	}
 }
 
-func TestDesktopEnvironmentOnlyWhenAsked(t *testing.T) {
+// Every run takes the desktop variables the user's session manager lists, on a full host as on an exec-only one, and only those.
+// A host whose user has no session lists none, and the run keeps its own environment.
+func TestDesktopEnvironmentIsImportedWhenTheHostHasOne(t *testing.T) {
 	a := contract.HostexecRunArgs{Argv: []string{"bash", "-c", `echo "$DISPLAY|$WAYLAND_DISPLAY|$SECRET"`}, Timeout: 1000}
-	if out := bashOf(t, a, "op2", "DISPLAY=:0"); out != ":0||\n" {
-		t.Fatalf("plain run: %q", out)
-	}
-	a.Desktop = true
 	if out := bashOf(t, a, "op3", "DISPLAY=:0"); out != ":7|wayland-1|\n" {
-		t.Fatalf("desktop run: %q", out)
+		t.Fatalf("with a session: %q", out)
+	}
+	if out := bashOf(t, a, "op2", "DISPLAY=:0", "NO_SESSION=1"); out != ":0||\n" {
+		t.Fatalf("without a session: %q", out)
 	}
 }
 
