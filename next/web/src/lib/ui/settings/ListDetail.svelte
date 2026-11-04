@@ -18,9 +18,10 @@
     onselect(key, focus);
     if (!focus) return;
     await tick();
-    // A text field first would put the cursor in it and raise a phone's keyboard, so then the detail itself takes the focus.
+    // A text field first would put the cursor in it and raise a phone's keyboard, and a removal first would scroll the
+    // detail to its end and wait on Enter, so then the detail itself takes the focus.
     const first = side?.querySelector<HTMLElement>(".body :is(input, button, select, textarea, a[href])");
-    (first && !first.matches("textarea, input:not([type=checkbox], [type=radio], [type=button], [type=submit])") ? first : side)?.focus();
+    (first && !first.matches("textarea, input:not([type=checkbox], [type=radio], [type=button], [type=submit]), .danger-zone *") ? first : side)?.focus();
   }
   // A close can land later than its call, as a phone's goes back in history first, and the list is hidden until the
   // detail has gone, so the list takes the focus once open has turned false: after Esc or the arrow, and as well after
