@@ -6,6 +6,19 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+const wantContinue = "Continue the work you were doing: check `git status` and your goal, reinstall anything you need, and keep going until the goal is done or you are blocked. Don't end your turn just to report progress."
+
+// The session-refresh notice is chosen by whether the session holds an open goal, and says the same facts either way.
+func TestBoxRestartedNotice(t *testing.T) {
+	const facts = "Your box restarted on the current version. Files under /box and this conversation are kept."
+	if got := BoxRestartedNotice(false); got != facts {
+		t.Errorf("no goal: %q", got)
+	}
+	if got := BoxRestartedNotice(true); got != facts+" "+wantContinue {
+		t.Errorf("open goal: %q", got)
+	}
+}
+
 func TestRenderDelivery(t *testing.T) {
 	quiet0, quiet1, quiet12, quiet90 := 0, 1, 12, 90
 	tests := []struct {
@@ -15,8 +28,12 @@ func TestRenderDelivery(t *testing.T) {
 	}{
 		{contract.SessionProfileChanged{Profile: "model"}, "Your model is now model.", false},
 		{contract.PostCreated{Text: "hello"}, "hello", false},
-		{contract.SessionRestarted{}, "Your box was replaced. Your conversation is restored. Unpushed work in the old volume is gone.", false},
-		{contract.SessionRestarted{ImageUpdated: true}, "Your box image was updated. Your files and conversation are kept. Anything installed outside /box is gone.", false},
+		{contract.SessionRestarted{}, "Your box was recreated after it failed. This conversation is restored, but the old volume is gone: files under /box that you did not push are lost.", false},
+		{contract.SessionRestarted{OpenGoal: true}, "Your box was recreated after it failed. This conversation is restored, but the old volume is gone: files under /box that you did not push are lost. " + wantContinue, false},
+		{contract.SessionRestarted{ImageUpdated: true}, "Your box restarted on a new image. Files under /box and this conversation are kept; anything installed outside /box is gone.", false},
+		{contract.SessionRestarted{ImageUpdated: true, OpenGoal: true}, "Your box restarted on a new image. Files under /box and this conversation are kept; anything installed outside /box is gone. " + wantContinue, false},
+		{contract.SessionRestarted{Stopped: true}, "Your box restarted after it stopped. Files under /box and this conversation are kept; any process that was running in it is gone.", false},
+		{contract.SessionRestarted{Stopped: true, OpenGoal: true}, "Your box restarted after it stopped. Files under /box and this conversation are kept; any process that was running in it is gone. " + wantContinue, false},
 		{contract.SessionStarted{Goal: "work", Brief: "brief"}, "Goal: work\n\nbrief", false},
 		{contract.PrOpened{URL: "url"}, "PR opened: url", false},
 		{contract.PrMergedEvent{Repo: "o/r", Number: 1, URL: "url"}, "PR o/r#1 merged. url", false},
