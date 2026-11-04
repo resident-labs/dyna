@@ -38,11 +38,11 @@ func navigationCommands(get func() *socketClient) []*cobra.Command {
 	search.PersistentFlags().StringVar(&req.After, "after", "", "A result's next")
 	search.PersistentFlags().IntVar(&req.Limit, "limit", 0, "At most 25")
 
-	var history contract.HistoryRequest
+	var history contract.HistoryReadRequest
 	var around, before, after, post string
 	historyCmd := &cobra.Command{Use: "history", Short: "Read one conversation in time order: any room's feed, or a DM in your own room", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		history.Around, history.Before, history.After, history.Post = contract.EventID(around), contract.EventID(before), contract.EventID(after), contract.EventID(post)
-		result, err := call[contract.HistoryRequest, contract.HistoryResponse](cmd.Context(), get(), contract.MethodHistoryRead, history)
+		result, err := call[contract.HistoryReadRequest, contract.HistoryReadResponse](cmd.Context(), get(), contract.MethodHistoryRead, history)
 		if err != nil {
 			return err
 		}

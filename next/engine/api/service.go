@@ -108,7 +108,7 @@ type Service interface {
 	SearchPosts(context.Context, contract.Principal, contract.SearchRequest) (contract.SearchResponse, *contract.Error)
 	SearchSessions(context.Context, contract.Principal, contract.SearchRequest) (contract.SearchResponse, *contract.Error)
 	SearchRooms(context.Context, contract.Principal, contract.SearchRequest) (contract.SearchResponse, *contract.Error)
-	HistoryRead(context.Context, contract.Principal, contract.HistoryRequest) (contract.HistoryResponse, *contract.Error)
+	HistoryRead(context.Context, contract.Principal, contract.HistoryReadRequest) (contract.HistoryReadResponse, *contract.Error)
 	TranscriptDigest(context.Context, contract.Principal, contract.TranscriptDigestRequest) (contract.TranscriptDigestResponse, *contract.Error)
 	PrList(context.Context, contract.Principal, contract.PrListRequest) (contract.PrListResponse, *contract.Error)
 	PrStatus(context.Context, contract.Principal, contract.PrStatusRequest) (contract.PrStatusResponse, *contract.Error)

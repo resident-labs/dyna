@@ -79,7 +79,7 @@ type SearchResponse struct {
 	Next     string       `json:"next,omitempty"`
 }
 
-type HistoryRequest struct {
+type HistoryReadRequest struct {
 	Room   string  `json:"room,omitempty" desc:"A room name or ID; omit for yours."`
 	DM     string  `json:"dm,omitempty" desc:"A session name or ID: read the owner's DM with it, in your own room."`
 	Around EventID `json:"around,omitempty"`
@@ -100,7 +100,7 @@ type HistoryPost struct {
 	Files   []string  `json:"files,omitempty"` // "report.html (text/html, 14 KB)"
 }
 
-type HistoryResponse struct {
+type HistoryReadResponse struct {
 	Room  string        `json:"room"`
 	Home  string        `json:"home"`
 	Posts []HistoryPost `json:"posts"`
@@ -135,3 +135,13 @@ type TranscriptDigestResponse struct {
 	Chunk      string       `json:"chunk,omitempty"`
 	NextOffset int          `json:"nextOffset,omitempty"`
 }
+
+// The method table names a method's request and response after the method, so each search action has its own.
+type (
+	SearchPostsRequest     SearchRequest
+	SearchSessionsRequest  SearchRequest
+	SearchRoomsRequest     SearchRequest
+	SearchPostsResponse    SearchResponse
+	SearchSessionsResponse SearchResponse
+	SearchRoomsResponse    SearchResponse
+)

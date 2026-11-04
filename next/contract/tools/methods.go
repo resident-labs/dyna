@@ -232,7 +232,7 @@ var methodTable = []MethodEntry{
 		act("search", "rooms", typ[contract.SearchRequest](), "The rooms, with their root and open sessions; query is optional.", "search rooms"),
 	),
 	method(contract.MethodHistoryRead, contract.ScopeRead, UserAccess,
-		act("history", "read", typ[contract.HistoryRequest](), historyHelp, "history"),
+		act("history", "read", typ[contract.HistoryReadRequest](), historyHelp, "history"),
 	),
 	method(contract.MethodTranscriptDigest, contract.ScopeRead, UserAccess,
 		act("transcript", "read", typ[contract.TranscriptDigestRequest](), transcriptHelp, "transcript"),
