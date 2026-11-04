@@ -9,6 +9,7 @@
   import AddonsPane from "./AddonsPane.svelte";
   import ApprovalsPane from "./ApprovalsPane.svelte";
   import HostsPane from "./HostsPane.svelte";
+  import PoolsPane from "./PoolsPane.svelte";
   import ImagesPane from "./ImagesPane.svelte";
   import Icon from "./Icon.svelte";
   import { pathItem, settingsPanes } from "../routes.ts";
@@ -79,6 +80,7 @@
     {:else if shown?.id === "addons"}<AddonsPane {bar} {admin} {signedout} selected={item} onselect={open} onclose={close} />
     {:else if shown?.id === "approvals"}<ApprovalsPane {bar} {signedout} selected={item} onselect={open} onclose={close} />
     {:else if shown?.id === "hosts"}<HostsPane {bar} {phone} {navigate} {signedout} selected={item} onselect={open} onclose={close} />
+    {:else if shown?.id === "pools"}<PoolsPane {bar} {phone} {navigate} {signedout} selected={item} onselect={open} onclose={close} />
     {:else if shown?.id === "images"}<ImagesPane {bar} {signedout} selected={item} onselect={open} onclose={close} />
     {:else}
       <header class="bar"><button type="button" class="round menu" bind:this={menu} aria-label="Rooms and pages" title="Rooms and pages" onclick={onmenu}><Icon name="menu" /></button><strong>Settings</strong></header>

@@ -93,6 +93,26 @@ func (s *Store) RemovePool(ctx context.Context, name string) error {
 	})
 }
 
+// SetPool changes what it is given of a pool's max, per-session switch and idle time. ErrNotFound means no pool has the name.
+func (s *Store) SetPool(ctx context.Context, name string, max *int, perSession *bool, idle *time.Duration) error {
+	var idleMS *int64
+	if idle != nil {
+		ms := idle.Milliseconds()
+		idleMS = &ms
+	}
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "UPDATE pools SET max=COALESCE(?,max), per_session=COALESCE(?,per_session), idle_ms=COALESCE(?,idle_ms) WHERE name=?", max, perSession, idleMS, name)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err == nil && n == 0 {
+			err = ErrNotFound
+		}
+		return err
+	})
+}
+
 func (s *Store) Pools(ctx context.Context) ([]Pool, error) {
 	rows, err := s.Read().QueryContext(ctx, "SELECT name,max,per_session,idle_ms,failures,retry_at,problem,told FROM pools ORDER BY name")
 	if err != nil {
