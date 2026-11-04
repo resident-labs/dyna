@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { ModelProvider, ProfileSummary, ThinkingLevel } from "../contract.gen.ts";
-  import { replacements, sessionCount, type ProfileModel } from "../profiles.ts";
+  import type { ModelProvider, ThinkingLevel } from "../contract.gen.ts";
+  import { replacements, sessionCount, type ProfileModel, type ProfileSummary } from "../profiles.ts";
   import Modal from "./Modal.svelte";
   let { profile, profiles, models, isNew, busy, error, save, cancel, remove }: { profile: ProfileSummary; profiles: ProfileSummary[]; models: ProfileModel[]; isNew: boolean; busy: boolean; error: string; save: (profile: ProfileSummary) => void; cancel: () => void; remove: (replacement?: string) => void } = $props();
   let draft = $state({ ...profile });

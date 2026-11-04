@@ -1741,3 +1741,10 @@ The owner chose to ship without the five-provider evaluation gate. A Claude sani
 
 - **Decision.** `turn.activity`, its request and `SessionSummary` carry a closed `ActivityKind`, `tool`, `compaction` or `model`, beside the label. The harness sets it (Pi's tool start, compaction start and model transfer); the label only words it. The web decides from the kind and never compares label text, so the thread's "Compacting the conversation…" line follows the same live activity as the sidebar.
 - **Old peers.** The field is additive. A report with no kind, from a box agent that predates kinds, is stored as `tool`; an unknown kind is refused at the engine, which owns the set. The web reads a summary or event with no kind as plain work.
+
+### Profile list keeps read-only fields apart (build-lead via root, 2026-11-03)
+
+- **Wrapper, not a nested status.** `profile.list` returns entries `{profile, inUse}`. `profile` is the whole stored `contract.Profile`, so it is a valid `profile.set` body; `inUse` is beside it. A nested `status` inside the profile would have to be accepted and ignored by `profile.set`, which loosens the strict decode. `ProfileSummary` is gone; the web builds its row type (`Profile` plus `inUse`) once in `web/src/lib/profiles.ts`.
+- **`images` is always explicit in the list**, so a set built from it cannot drop `images: false` or turn it on by omission.
+- **`set` merges in the CLI.** `profile.set` stays a whole replacement; `dyna profile set` loads the profile first and sends it back with the given flags applied. The read and write are two calls, so an edit between them is overwritten, which for one owner at a CLI is accepted.
+- **Unknown field is named at the API boundary**: `unknown field "inUse"`, for every method, as the decoder words it. The list of fields the method takes is not added, because a nested field has no short list.
