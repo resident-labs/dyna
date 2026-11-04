@@ -187,12 +187,12 @@ const nothingShown: Shown = { facts: new Set(), names: new Set(), counts: {} };
 
 const DEPTH = 3, LIST = 20, OBJECTS = 10, TEXT = 4000, INLINE = 64, TITLE = 60;
 
-export function shownFacts(info: Pick<WorkflowInfo, "session" | "name" | "repo" | "commit">, steps: WorkflowStep[], merge?: WorkflowMerge | null): Shown {
+export function shownFacts(info: Pick<WorkflowInfo, "branch" | "name" | "repo" | "commit">, steps: WorkflowStep[], merge?: WorkflowMerge | null): Shown {
   const conflicts = merge?.conflicts ?? [];
   const commits = [info.commit, merge?.commit].flatMap(commit => commit ? [commit, shortCommit(commit)] : []);
   const facts = new Set([...commits, info.repo ?? "", merge?.branch ?? "", ...conflicts.map(conflict => conflict.branch ?? "")].filter(Boolean));
   // A worker in its own tree names its branch for its step, so a script's list of what those steps left names them too.
-  const names = new Set([info.name, ...steps.flatMap(step => [step.key, step.name, `v2/${info.session}-${step.key.slice(0, 12)}`]), ...merge?.merged ?? [], ...conflicts.map(conflict => conflict.step)]);
+  const names = new Set([info.name, ...steps.flatMap(step => [step.key, step.name, `${info.branch}-${step.key.slice(0, 12)}`]), ...merge?.merged ?? [], ...conflicts.map(conflict => conflict.step)]);
   return { facts, names, counts: { steps: steps.length, failed: tally(steps).failed, ...merge && { merged: merge.merged?.length ?? 0, conflicts: conflicts.length } } };
 }
 

@@ -201,7 +201,7 @@ func (r crewRepos) Get(ctx context.Context, session contract.SessionID, _ contra
 			return nil, fmt.Errorf("%w: %s", err, out)
 		}
 	}
-	return []contract.BoxRepo{{Name: "owner/repo", Cache: r.cache, Branch: "v2/" + string(session), Base: "main"}}, nil
+	return []contract.BoxRepo{{Name: "owner/repo", Cache: r.cache, Branch: string(session), Base: "main"}}, nil
 }
 
 func (r crewRepos) Seed(ctx context.Context, session contract.SessionID, host contract.HostName) ([]contract.BoxRepo, string, error) {
