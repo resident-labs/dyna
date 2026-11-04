@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -195,5 +196,104 @@ func TestSaveDiffFileIsPrivateAndDoesNotFollowAPlantedLink(t *testing.T) {
 	info, err := os.Stat(got.File)
 	if err != nil || got.Error != "" || info.Mode().Perm() != 0600 || read(t, victim) != "keep" || !strings.Contains(read(t, got.File), "+TOKEN=1") {
 		t.Fatalf("report %+v, stat %v %v, victim %q", got, info, err, read(t, victim))
+	}
+}
+
+// remoteTakes puts the checkout's HEAD on origin's branch the way a merge does, from another clone, so the checkout's own
+// remote-tracking branch stays as old as its last fetch.
+func remoteTakes(t *testing.T, root, origin string) {
+	t.Helper()
+	other := t.TempDir()
+	for _, step := range []struct {
+		dir  string
+		args []string
+	}{
+		{other, []string{"clone", "-q", origin, "."}},
+		{other, []string{"fetch", "-q", filepath.Join(root, "repo"), "HEAD"}},
+		{other, []string{"push", "-q", "origin", "FETCH_HEAD:refs/heads/v2/s"}},
+	} {
+		if _, err := runGit(context.Background(), step.dir, "", step.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A commit the remote got after the box's last fetch is pushed: it is in neither the count nor the file, and what is
+// uncommitted still counts.
+func TestSaveDiffCountsACommitMergedSinceTheLastFetchAsPushed(t *testing.T) {
+	root, origin, repo, git := diffTestRepo(t)
+	dir := filepath.Join(root, "repo")
+	writeFile(t, filepath.Join(dir, "tracked.txt"), "merged on the remote")
+	git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-am", "already merged")
+	remoteTakes(t, root, origin)
+	if git("rev-parse", "origin/v2/s") == git("rev-parse", "HEAD") {
+		t.Fatal("the box's remote-tracking branch is not stale")
+	}
+	writeFile(t, filepath.Join(dir, "new.txt"), "unsaved")
+	got := saveDiff(context.Background(), root, t.TempDir(), "ses_1", "s", []contract.BoxRepo{repo}, runGit)
+	if got.Error != "" || got.Commits != 0 || got.Files != 1 || len(got.Stale) != 0 {
+		t.Fatalf("report %+v, want 0 commits and the 1 untracked file", got)
+	}
+	if text := read(t, got.File); strings.Contains(text, "already merged") || strings.Contains(text, "merged on the remote") || !strings.Contains(text, "+unsaved") {
+		t.Fatalf("the file holds the merged commit or lacks the new file:\n%s", text)
+	}
+}
+
+func TestSaveDiffOfOnlyMergedCommitsWritesNothing(t *testing.T) {
+	root, origin, repo, git := diffTestRepo(t)
+	writeFile(t, filepath.Join(root, "repo", "tracked.txt"), "merged on the remote")
+	git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-am", "already merged")
+	remoteTakes(t, root, origin)
+	got := saveDiff(context.Background(), root, t.TempDir(), "ses_1", "s", []contract.BoxRepo{repo}, runGit)
+	if !reflect.DeepEqual(got, contract.DiffSavedRequest{}) {
+		t.Fatalf("report %+v, want an empty one", got)
+	}
+}
+
+// A fetch that fails or hangs does not hold the close: the old remote branches are used and the figures are said to be stale.
+func TestSaveDiffWhoseFetchHangsFallsBackAndSaysTheFiguresAreStale(t *testing.T) {
+	root, origin, repo, git := diffTestRepo(t)
+	writeFile(t, filepath.Join(root, "repo", "tracked.txt"), "merged on the remote")
+	git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-am", "already merged")
+	remoteTakes(t, root, origin)
+	old := diffFetchLimit
+	diffFetchLimit = 100 * time.Millisecond
+	defer func() { diffFetchLimit = old }()
+	hanging := func(ctx context.Context, dir, index string, args ...string) (string, error) {
+		if args[0] == "fetch" {
+			<-ctx.Done()
+			return "", ctx.Err()
+		}
+		return runGit(ctx, dir, index, args...)
+	}
+	start := time.Now()
+	got := saveDiff(context.Background(), root, t.TempDir(), "ses_1", "s", []contract.BoxRepo{repo}, hanging)
+	if time.Since(start) > 10*time.Second {
+		t.Fatal("the fetch held the close")
+	}
+	if got.Error != "" || got.Commits != 1 || len(got.Stale) != 1 || !strings.Contains(read(t, got.File), "may be stale") || !strings.Contains(got.CloseNotice("s"), "may be stale") {
+		t.Fatalf("report %+v, want the old figures (1 commit) marked stale", got)
+	}
+}
+
+// A branch the remote deleted after its merge is not compared with, though the box's old remote-tracking branch for it is
+// still there: the fetch prunes it, and the base branch, which has the merge, is the base.
+func TestSaveDiffAgainstTheBaseWhenTheRemoteDeletedTheMergedBranch(t *testing.T) {
+	root, origin, repo, git := diffTestRepo(t)
+	repo.Base = "main"
+	writeFile(t, filepath.Join(root, "repo", "tracked.txt"), "merged on the remote")
+	git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-am", "already merged")
+	for _, args := range [][]string{
+		{"fetch", "-q", filepath.Join(root, "repo"), "HEAD"},
+		{"update-ref", "refs/heads/main", "FETCH_HEAD"},
+		{"update-ref", "-d", "refs/heads/v2/s"},
+	} {
+		if _, err := runGit(context.Background(), origin, "", args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := saveDiff(context.Background(), root, t.TempDir(), "ses_1", "s", []contract.BoxRepo{repo}, runGit)
+	if !reflect.DeepEqual(got, contract.DiffSavedRequest{}) {
+		t.Fatalf("report %+v, want an empty one", got)
 	}
 }
