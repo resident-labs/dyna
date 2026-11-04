@@ -52,6 +52,28 @@ describe("buildSystemPrompt", () => {
 			expect(customPrompt.startsWith("You are Exact.\n\n<cwd>")).toBe(true);
 		});
 
+		test("noDocs leaves out only the docs section", () => {
+			const options = {
+				cwd: "/tmp",
+				selectedTools: ["read"],
+				toolSnippets: { read: "Read files" },
+				appendSystemPrompt: "Appended.",
+				contextFiles: [{ path: "/AGENTS.md", content: "Rule." }],
+				skills: [testSkill],
+			};
+			const withDocs = buildSystemPrompt(options);
+			const without = buildSystemPrompt({ ...options, noDocs: true });
+
+			expect(withDocs).toContain("<docs>\nPi documentation");
+			expect(without).not.toContain("<docs>");
+			expect(without).not.toContain("Pi documentation");
+			expect(without).not.toContain("Always read pi .md files");
+			expect(without).toBe(withDocs.replace(/<docs>[\s\S]*?<\/docs>\n\n/, ""));
+			expect(without).toContain("<tools>\n- read: Read files");
+			expect(without).toContain("<rules>");
+			expect(without).toContain("<available_skills>");
+		});
+
 		test("preserves an exact forced prompt without sections", () => {
 			expect(buildSystemPrompt({ forceSystemPrompt: "exact", cwd: "/tmp" })).toBe("exact");
 		});
