@@ -33,10 +33,11 @@ type Model struct {
 
 // Request is the part of a request the tests read.
 type Request struct {
-	Header   http.Header       `json:"-"`
-	System   json.RawMessage   `json:"system"`
-	Tools    []json.RawMessage `json:"tools"`
-	Messages []json.RawMessage `json:"messages"`
+	Header       http.Header       `json:"-"`
+	System       json.RawMessage   `json:"system"`
+	Tools        []json.RawMessage `json:"tools"`
+	Messages     []json.RawMessage `json:"messages"`
+	OutputConfig json.RawMessage   `json:"output_config"`
 }
 
 // NewModel scripts the responses in order.
@@ -99,7 +100,7 @@ func AgentDir(t *testing.T, model *Model, mcpServers string) string {
 		mcpServers = "{}"
 	}
 	for name, content := range map[string]string{
-		"models.json":   `{"providers":{"anthropic":{"baseUrl":"` + server.URL + `","apiKey":"box","models":[{"id":"test-model","api":"anthropic-messages","reasoning":true,"input":["text","image"],"contextWindow":200000,"maxTokens":8000},{"id":"small-model","api":"anthropic-messages","reasoning":true,"input":["text","image"],"contextWindow":30000,"maxTokens":4000}]}}}`,
+		"models.json":   `{"providers":{"anthropic":{"baseUrl":"` + server.URL + `","apiKey":"box","models":[{"id":"test-model","api":"anthropic-messages","reasoning":true,"input":["text","image"],"contextWindow":200000,"maxTokens":8000},{"id":"small-model","api":"anthropic-messages","reasoning":true,"input":["text","image"],"contextWindow":30000,"maxTokens":4000},{"id":"effort-model","api":"anthropic-messages","reasoning":true,"input":["text"],"contextWindow":200000,"maxTokens":8000,"compat":{"forceAdaptiveThinking":true,"supportsMidConvoEffort":true},"thinkingLevelMap":{"off":null,"low":"low","medium":"medium","high":"high"}}]}}}`,
 		"settings.json": `{"defaultProjectTrust":"always","steeringMode":"all"}`,
 		"auth.json":     `{}`,
 		"mcp.json":      `{"mcpServers":` + mcpServers + `}`,
