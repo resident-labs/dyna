@@ -60,6 +60,7 @@ func Extension(c Config) extension.InlineExtension {
 		}
 		// roots maps each call of the turn to the call the model made, which a nested call's post is linked to.
 		roots := map[string]string{}
+		api.OnContext(imageContext())
 		api.OnTurnStart(func(context.Context, extension.TurnStartEvent) error { clear(roots); return nil })
 		api.OnToolCall(func(_ context.Context, e extension.ToolCallEvent) (extension.ToolCallEventResult, error) {
 			call := e.(extension.CustomToolCallEvent)

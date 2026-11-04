@@ -158,16 +158,16 @@ func newest(dir string) (string, error) {
 }
 
 // Start sends the first input as the prompt and queues the rest as steers, which the agent reads before its first
-// model request, so each is its own user message in that request.
+// model request, so each is its own user message in that request. Each message names its delivery in the session file.
 func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput, started func()) (contract.TurnEnded, error) {
 	if len(inputs) == 0 {
 		return contract.TurnEnded{Turn: id}, errors.New("a turn needs at least one input")
 	}
 	return h.run(ctx, id, func(ctx context.Context) error {
 		var queued error
-		err := h.session.Prompt(ctx, inputs[0].Text, &coding.PromptOptions{PreflightResult: func(coding.PromptDisposition) {
+		err := h.session.Prompt(ctx, inputs[0].Text, &coding.PromptOptions{Members: members(inputs[0]), PreflightResult: func(coding.PromptDisposition) {
 			for _, input := range inputs[1:] {
-				if _, err := h.session.Steer(ctx, input.Text, nil, nil); err != nil {
+				if _, err := h.session.Steer(ctx, input.Text, nil, &coding.QueueInputOptions{Members: members(input)}); err != nil {
 					queued = errors.Join(queued, err)
 				}
 			}
@@ -177,9 +177,16 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contra
 	})
 }
 
-func (h *Harness) Continue(_ context.Context, id contract.TurnID, _ func()) (contract.TurnEnded, error) {
-	return contract.TurnEnded{Turn: id}, fmt.Errorf("continue: %w", errors.ErrUnsupported)
+// Continue finishes the turn a stopped box agent left running, from what the session file holds, without sending its
+// inputs again. A tool call that has no result is not run again.
+func (h *Harness) Continue(ctx context.Context, id contract.TurnID, started func()) (contract.TurnEnded, error) {
+	return h.run(ctx, id, func(ctx context.Context) error {
+		return h.session.ContinueRecovered(ctx, coding.ContinueOptions{Interrupted: interrupted, Started: started})
+	})
 }
+
+// interrupted is the result of a tool call that was running when the box agent stopped.
+const interrupted = "interrupted: the session restarted while this call ran, so whether it finished is unknown, and it is not run again. A command it started on another machine can still be running there"
 
 // run sends a turn and returns once the session settles. The send outlives a cancelled ctx, as a Pi process does, and
 // Abort is what stops it.
@@ -207,33 +214,32 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, send func(context
 }
 
 func (h *Harness) Steer(ctx context.Context, input contract.TurnInput) error {
-	_, err := h.session.Steer(ctx, input.Text, nil, nil)
+	_, err := h.session.Steer(ctx, input.Text, nil, &coding.QueueInputOptions{Members: members(input)})
 	return err
 }
 
 func (h *Harness) FollowUp(ctx context.Context, input contract.TurnInput) error {
-	_, err := h.session.FollowUp(ctx, input.Text, nil, nil)
+	_, err := h.session.FollowUp(ctx, input.Text, nil, &coding.QueueInputOptions{Members: members(input)})
 	return err
 }
 
-// TransferModel switches the model and thinking level. The compaction a transfer may need comes with the port of
-// Pi's transfer_model.
-func (h *Harness) TransferModel(ctx context.Context, id contract.TurnID, model contract.ModelChoice, _ int) (harness.ModelTransfer, error) {
-	current := h.session.Model()
-	if current != nil && current.ProviderMeta.ProviderID == string(model.Provider) && current.ID == model.ID && string(h.session.ThinkingLevel()) == string(model.Thinking) {
-		return harness.ModelTransfer{Path: "unchanged"}, nil
-	}
+// TransferModel moves the session to the model, thinking level and compaction trigger. PiG checks the conversation
+// against the model and compacts it on the one that held it first when it must (coding.Session.TransferModel). Abort
+// cancels that compaction, and the model stays.
+func (h *Harness) TransferModel(ctx context.Context, id contract.TurnID, model contract.ModelChoice, compactTokens int) (harness.ModelTransfer, error) {
 	if h.Activity != nil {
 		h.Activity(id, contract.ActivityModel, "changing model")
 	}
 	target, err := coding.BuildModel(string(model.Provider)+"/"+model.ID, h.services)
+	// A model the box cannot use is the agent program's refusal, which fails the turn; TransferModel's own errors do not.
+	if err == nil {
+		err = h.session.CheckModelAuth(target)
+	}
 	if err != nil {
 		return harness.ModelTransfer{}, fmt.Errorf("%w: %v", harness.ErrRefused, err)
 	}
-	if err := h.session.SetModel(target); err != nil {
-		return harness.ModelTransfer{}, err
-	}
-	return harness.ModelTransfer{Path: "switched"}, h.session.SetThinkingLevel(ai.ModelThinkingLevel(model.Thinking))
+	result, err := h.session.TransferModel(ctx, target, coding.ModelTransferOptions{ThinkingLevel: ai.ModelThinkingLevel(model.Thinking), CompactionTriggerTokens: compactTokens})
+	return harness.ModelTransfer{Path: result.Path, Reason: result.Reason, TokensBefore: int64(result.TokensBefore), TokensAfter: int64(result.TokensAfter)}, err
 }
 
 // Compact summarizes the conversation when the session's own measure of its context is over the limit. The session
@@ -256,14 +262,6 @@ func (h *Harness) Compact(ctx context.Context, over int64) (harness.Compaction, 
 
 // SetPromptSections comes with the port of Pi's context updates.
 func (h *Harness) SetPromptSections(context.Context, []contract.ContextSection) error { return nil }
-
-// Recover comes with delivery IDs: until then no turn is found finished, so the runner continues it.
-func (h *Harness) Recover(id contract.TurnID, _ []contract.TurnInput) (contract.TurnEnded, bool, error) {
-	return contract.TurnEnded{Turn: id}, false, nil
-}
-
-// Delivered comes with delivery IDs.
-func (h *Harness) Delivered(context.Context, contract.DeliverySeq) (bool, error) { return false, nil }
 
 func (h *Harness) Abort(ctx context.Context) error { return h.session.Abort(ctx) }
 
