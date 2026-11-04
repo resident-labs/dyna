@@ -36,7 +36,7 @@ func (p Preparer) Path(path string) string {
 }
 
 func (p Preparer) Prepare(ctx context.Context, in tools.PostInput) (contract.PostRequest, []contract.VisualCheck, error) {
-	req := contract.PostRequest{Room: in.Room, Text: in.Text, Mentions: in.Mentions, Home: in.Home, ReplyTo: in.ReplyTo, ClientID: in.ClientID, VisualUpdate: in.VisualUpdate, VisualReply: in.VisualReply}
+	req := contract.PostRequest{Room: in.Room, Text: in.Text, Mentions: in.Mentions, Home: in.Home, ReplyTo: in.ReplyTo, ClientID: in.ClientID, VisualUpdate: in.VisualUpdate, VisualReply: in.VisualReply, Forward: in.Forward}
 	if (in.VisualUpdate != "" || in.AllowNet) && in.HTML == "" {
 		return req, nil, fmt.Errorf("visualUpdate and allowNet need html")
 	}

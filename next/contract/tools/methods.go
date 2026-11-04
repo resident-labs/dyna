@@ -222,6 +222,21 @@ var methodTable = []MethodEntry{
 		act("session", "move", typ[contract.SessionMoveRequest](), "Move session under newParent; each takes a name or ID.", "session move"),
 	),
 	method(contract.MethodSessionSearch, contract.ScopeRead, OwnerAccess),
+	method(contract.MethodSearchPosts, contract.ScopeRead, UserAccess,
+		act("search", "posts", typ[contract.SearchRequest](), "Posts that have every word of query, newest first, each with a snippet. from narrows to an author; pass a result's id to history as around to read it in place.", "search posts"),
+	),
+	method(contract.MethodSearchSessions, contract.ScopeRead, UserAccess,
+		act("search", "sessions", typ[contract.SearchRequest](), "Sessions whose name or goal has the words, open first.", "search sessions"),
+	),
+	method(contract.MethodSearchRooms, contract.ScopeRead, UserAccess,
+		act("search", "rooms", typ[contract.SearchRequest](), "The rooms, with their root and open sessions; query is optional.", "search rooms"),
+	),
+	method(contract.MethodHistoryRead, contract.ScopeRead, UserAccess,
+		act("history", "read", typ[contract.HistoryReadRequest](), historyHelp, "history"),
+	),
+	method(contract.MethodTranscriptDigest, contract.ScopeRead, UserAccess,
+		act("transcript", "read", typ[contract.TranscriptDigestRequest](), transcriptHelp, "transcript"),
+	),
 	method(contract.MethodSessionSetProfile, contract.ScopeOperate, UserAccess,
 		act("session", "set_profile", typ[contract.SessionSetProfileRequest](), "Set profile for session (name or ID).", "session set-profile"),
 	),
@@ -322,3 +337,7 @@ func buildMethodRows(rows []MethodEntry) map[contract.Method]MethodEntry {
 // in method order. Rows without actions are engine-only or not yet served.
 // Callers must not modify the table.
 func Methods() []MethodEntry { return methodTable }
+
+const historyHelp = "Read the posts of one conversation in time order: any room's feed (omit room for yours), or with dm the owner's DM with that session, in your own room only; another room's DM is refused; every DM and steer of your room's sessions is readable by any session of the room. around (a post id) centres the page on that post and takes its room and conversation; otherwise it shows the newest. Text over 800 characters is cut; pass the post id as post to read it whole. Another room's text comes wrapped in <outside>. Pass older as before or newer as after to page; limit is at most 50."
+
+const transcriptHelp = "Read a session's turns, newest first: each turn's inputs, posts and final text, and one line per tool call. Only sessions of your own room, yours included: session is a name in your room or an ID of one; another room's transcript is refused. turn reads one turn. Text over 800 characters is cut; pass turn with item (an id from cut), and offset for the rest, to read it whole. Pass next as before for older turns; limit is at most 5."
