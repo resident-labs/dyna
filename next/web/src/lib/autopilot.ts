@@ -1,11 +1,13 @@
 import type { RoomSetRequest, RoomSummary, RootApproval } from "./contract.gen.ts";
+import type { Chip } from "./settings-list.ts";
 
-// The safeguards a room's root can take over from the owner, in the order the page shows them (spec 3.5).
-export const rootApprovals: readonly { kind: RootApproval; label: string; note: string }[] = [
-  { kind: "hostexec", label: "Root approves host exec", note: "Sessions' host exec requests go to root" },
-  { kind: "addons", label: "Root approves global add-ons", note: "Skills, packages and MCP servers for every room" },
-  { kind: "hosts", label: "Root changes room host rules", note: "Where this room's new boxes may go" },
-  { kind: "pools", label: "Root adds node pools", note: "Pools run scripts that can cost money" },
+// The safeguards a room's root can take over from the owner, in the order the page shows them (spec 3.5). short heads the
+// list's column and names the kind in a narrow row; the label and the note show once, in a room's detail.
+export const rootApprovals: readonly { kind: RootApproval; label: string; short: string; note: string }[] = [
+  { kind: "hostexec", label: "Root approves host exec", short: "Host exec", note: "Sessions' requests to run a command on a host go to this room's root. You can still decide them." },
+  { kind: "addons", label: "Root approves global add-ons", short: "Add-ons", note: "Skills, Pi packages and MCP servers a session asks to add for every room." },
+  { kind: "hosts", label: "Root changes room host rules", short: "Host rules", note: "Which hosts this room's new boxes may go to." },
+  { kind: "pools", label: "Root adds node pools", short: "Pools", note: "New machines from a node pool. Pools run scripts that can cost money." },
 ];
 
 // Whether the owner has turned a kind on for the room. The engine lists the kinds that are on.
@@ -29,3 +31,17 @@ export const autopilotConfirm = (room: RoomSummary) => autopilotOn(room) ? undef
   note: "Node pools run scripts that can cost money.",
   action: "Turn on Autopilot",
 };
+
+const someOn = (room: Pick<RoomSummary, "rootApproves">) => rootApprovals.some(({ kind }) => approvalOn(room, kind));
+
+// The list's chips: every room, Autopilot (all four on), some on, all off.
+export const approvalChips: Chip<RoomSummary>[] = [
+  { id: "all", label: "All" },
+  { id: "autopilot", label: "Autopilot", test: autopilotOn },
+  { id: "some", label: "Some on", test: room => someOn(room) && !autopilotOn(room) },
+  { id: "off", label: "All off", test: room => !someOn(room) },
+];
+
+// What a narrow row says in place of the four switches.
+export const approvalsLine = (room: RoomSummary) => autopilotOn(room) ? "Autopilot"
+  : rootApprovals.filter(({ kind }) => approvalOn(room, kind)).map(item => item.short).join(", ") || "All off";
