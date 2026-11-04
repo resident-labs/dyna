@@ -1,19 +1,15 @@
 # Run the M1 engine
 
-Build the binary and the Pi package together. The engine reads `pi.tgz` from
-the directory that contains its executable. A Go build alone does not create
-this package.
+Build the binary. PiG, the agent harness, is part of it, so there is nothing else to build.
 
 From the repository root, with Go, Node and npm installed:
 
 ```sh
 mkdir -p "$HOME/dyna-m1/bin"
 (cd next && go build -o "$HOME/dyna-m1/bin/dyna" ./cmd/dyna)
-next/third_party/pi/scripts/pi-pack.sh "$HOME/dyna-m1/bin/pi.tgz"
 ```
 
-Keep both files in that directory. Build and test on the configured build node.
-The package script builds the vendored Pi fork and verifies the package.
+Build and test on the configured build node.
 
 Create `$HOME/dyna-m1/profiles.json` with a profile for the model allowed by
 the owner's proxy sign-in. For example:

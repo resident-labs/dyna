@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 FILTER = Path(__file__).with_name("ci-changes.sh")
-NOTHING = {"relay": "false", "next": "false", "web": "false", "next_pi": "false"}
+NOTHING = {"relay": "false", "next": "false", "web": "false"}
 EVERYTHING = dict.fromkeys(NOTHING, "true")
 
 
@@ -34,19 +34,13 @@ class ChangesTest(unittest.TestCase):
         out = subprocess.run(["bash", str(FILTER)], cwd=self.repo, env=env, check=True, capture_output=True, text=True).stdout
         return dict(line.split("=") for line in out.split())
 
-    def pull_request(self, pr_file, main_file=None, large=False):
+    def pull_request(self, pr_file, main_file=None):
         """A merge commit of a PR branch into a main that has moved since the event's base."""
         self.git("init", "-q", "-b", "main")
         self.commit("README.md", "first")
         base = self.git("rev-parse", "HEAD")
         self.git("checkout", "-qb", "pr")
         self.commit(pr_file, "pr")
-        if large:
-            for i in range(2100):
-                path = self.repo / "next/third_party/pi/packages/coding-agent/src" / f"file-{i}.ts"
-                path.write_text("export {}\n")
-            self.git("add", "-A")
-            self.git("commit", "-qm", "large subtree")
         self.git("checkout", "-q", "main")
         if main_file:
             self.commit(main_file, "main moved")
@@ -85,10 +79,6 @@ class ChangesTest(unittest.TestCase):
     def test_shared_vectors_run_relay(self):
         base = self.pull_request("testdata/connect/protocol.json")
         self.assertEqual(self.run_filter("pull_request", base)["relay"], "true")
-
-    def test_pi_change_runs_pi_and_next(self):
-        base = self.pull_request("next/third_party/pi/packages/coding-agent/src/cli.ts", large=True)
-        self.assertEqual(self.run_filter("pull_request", base), NOTHING | {"next": "true", "next_pi": "true"})
 
     def test_webdev_change_runs_next_only(self):
         base = self.pull_request("next/cmd/dyna-webdev/main.go")
