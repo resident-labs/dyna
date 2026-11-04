@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 88
+const schemaVersion = 89
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
@@ -63,6 +63,13 @@ var steps = map[int][]string{
 	},
 	// A running turn records when it last used a tool, so a long turn that keeps working is not a stalled one.
 	87: {`ALTER TABLE turns ADD COLUMN active_at INTEGER NOT NULL DEFAULT 0`},
+	// Close keeps no archive (spec 5.9). A close that was held after failed archives, or was retrying its archive, is now a plain
+	// close: the box is removed with nothing saved, and its retry state is cleared.
+	88: {
+		`UPDATE boxes SET want='close',state='closing',reason='',failures=0,due_at=0 WHERE want='hold'`,
+		`UPDATE boxes SET reason='',failures=0,due_at=0 WHERE want='close' AND state='closing'`,
+		`DROP TABLE IF EXISTS archives`,
+	},
 	81: {
 		`ALTER TABLE hosts ADD COLUMN create_failures INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE hosts ADD COLUMN create_problem TEXT NOT NULL DEFAULT ''`,

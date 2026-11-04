@@ -163,7 +163,7 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 		return contract.TurnOutputResponse{}, failure(err)
 	}
 	if crew {
-		// Closing archives what the workers left in the tree. A close that fails here leaves a quiet box, which the dormant
+		// Closing saves a diff of what the workers left unpushed. A close that fails here leaves a quiet box, which the dormant
 		// sweep closes, and the run's result is already safe.
 		if _, problem := s.closeSession(ctx, session, false, false); problem != nil {
 			log.Printf("workflow %s close: %s", run.ID, problem.Message)
