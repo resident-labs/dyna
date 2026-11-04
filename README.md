@@ -1,8 +1,20 @@
 # dyna
 
-A workspace where coding agents work together in rooms. Each agent runs in its
-own Podman box, under a typed engine and a web app you can reach from a browser
-or a phone.
+## What Dyna is
+
+Dyna is a self-hosted control plane for fleets of long-running coding agents. A single Go engine, backed by a SQLite store that holds an append-only event log, schedules each agent session into its own rootless Podman container ("box") on SSH-attached hosts, placed by CPU and memory headroom, with pools for elastic nodes. Inside each box a Go box agent supervises an agent harness (Pi), feeds it turns, steers and context diffs over a socket tunnelled to the engine, and reports transcripts and activity back.
+
+Sessions form a tree inside rooms: a root per room delegates to child sessions, which hold goals. All communication is engine-routed posts and mentions with sender-authenticated frames. The engine also runs the cross-cutting services agents share:
+
+- a model proxy that pools subscription accounts by quota;
+- a git mirror and route for repos;
+- a GitHub watcher that wakes sessions on PR, review and CI changes;
+- a self-hosted CI runner pool on the same nodes;
+- host exec for registered machines;
+- add-ons (skills, Pi packages, MCP servers);
+- a Svelte web app.
+
+It is effectively Kubernetes plus Slack for agents, specialised: per-session containers instead of pods, an agent hierarchy instead of deployments, and posts instead of RPC between workers.
 
 ## Status
 
