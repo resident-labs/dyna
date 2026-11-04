@@ -1,5 +1,6 @@
 <script lang="ts" generics="T">
-  // The app's only windowing code. Rows have any height and are measured after render.
+  // The windowing for rows of any height, measured after render: the feed, threads and panels. Settings lists, whose rows
+  // have fixed heights, window themselves (settings/ItemList).
   // anchorTo "end" keeps the top visible row in place when rows are added or released at
   // either end; followOnAppend sticks to the bottom only while the reader is already there. A short list sits at the
   // bottom, as chat does, unless align is "top", as for the sessions panel; role names what the rows are.
