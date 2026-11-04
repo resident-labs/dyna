@@ -18,7 +18,7 @@ type responsibilityRule struct {
 	group contract.ResponsibilityGroup
 	// sevenDay keeps the session from the 7-day close.
 	sevenDay bool
-	// eviction keeps it from disk eviction, which skips that wait: close archives the work and hands it on.
+	// eviction keeps it from disk eviction, which skips that wait: close hands the work on.
 	eviction bool
 	// handed moves it to the parent on close. Anything else ends with the session.
 	handed bool

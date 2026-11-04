@@ -76,7 +76,7 @@ export type InstructionsGetRequest = { room?: RoomID; };
 export type InstructionsGetResponse = { text: string; hash: string; savedAt?: string | null; };
 export type InstructionsSetRequest = { room?: RoomID; text: string; base: string; };
 export type InstructionsSetResponse = { hash: string; };
-export type Method = "addon.list" | "addon.set_enabled" | "addon.set_root_only" | "addon.set_hosts" | "box.notice" | "mcp.add" | "mcp.list" | "mcp.remove" | "package.add" | "package.list" | "package.remove" | "skill.list" | "skill.remove" | "skill.save" | "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "proxy.key" | "proxy.usage" | "conversation.read" | "room.list" | "session.list" | "archive.done" | "delivery.done" | "host.add" | "host.set_limits" | "host.set" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.set" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.refresh" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.compacted" | "box.hello" | "computer.changed" | "computer.start" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.job.running" | "shell.output" | "box.stats" | "box.stats.report" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "device.set_host" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "hostexec.stop" | "image.list" | "image.remove" | "image.save" | "image.show" | "issue.list" | "issue.status" | "issue.track" | "issue.untrack" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pool.add" | "pool.list" | "pool.remove" | "room.hosts" | "host.remove" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "session.responsibilities" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled" | "workflow.run" | "workflow.reload" | "workflow.status" | "workflow.step" | "workflow.list" | "workflow.pin" | "workflow.step_start" | "workflow.step_end" | "workflow.step_transcript" | "workflow.set_status";
+export type Method = "addon.list" | "addon.set_enabled" | "addon.set_root_only" | "addon.set_hosts" | "box.notice" | "mcp.add" | "mcp.list" | "mcp.remove" | "package.add" | "package.list" | "package.remove" | "skill.list" | "skill.remove" | "skill.save" | "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "proxy.key" | "proxy.usage" | "conversation.read" | "room.list" | "session.list" | "diff.saved" | "delivery.done" | "host.add" | "host.set_limits" | "host.set" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.set" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.restart" | "session.refresh" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.compacted" | "box.hello" | "computer.changed" | "computer.start" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.job.running" | "shell.output" | "box.stats" | "box.stats.report" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "device.set_host" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "hostexec.stop" | "image.list" | "image.remove" | "image.save" | "image.show" | "issue.list" | "issue.status" | "issue.track" | "issue.untrack" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pool.add" | "pool.list" | "pool.remove" | "room.hosts" | "host.remove" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "session.responsibilities" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled" | "workflow.run" | "workflow.reload" | "workflow.status" | "workflow.step" | "workflow.list" | "workflow.pin" | "workflow.step_start" | "workflow.step_end" | "workflow.step_transcript" | "workflow.set_status";
 export type ErrorCode = "podman_required" | "invalid" | "unknown_action" | "not_found" | "forbidden" | "cross_room_attachment" | "conflict" | "room_limited" | "profile_exists" | "move_busy" | "has_children" | "parent_closing" | "session_closing" | "stale" | "github_quota" | "visual_superseded" | "unavailable" | "reconnect_unavailable" | "models_unavailable" | "store_from_v1" | "store_too_old" | "no_grant" | "command_too_long";
 export type Error = { code: ErrorCode; message: string; visual?: VisualSuperseded | null; limited?: RoomLimited | null; };
 export type VisualSuperseded = { event: EventID; version: number; seq: number; };
@@ -144,7 +144,7 @@ export type ComposeFile = { name: string; level: ComposeLevel; problem?: string;
 export type ComposeListResponse = { files: Array<ComposeFile> | null; };
 export type SessionMoveRequest = { session: SessionID; newParent: SessionID; };
 export type SessionMoveResponse = { };
-export type SessionCloseRequest = { session: SessionID; discard?: boolean; };
+export type SessionCloseRequest = { session: SessionID; };
 export type SessionCloseResponse = { to: SessionID; handed: Array<Responsibility> | null; unheld: Array<GoalID> | null; ended: Array<Responsibility> | null; };
 export type SessionSetProfileRequest = { session: SessionID; profile: ProfileName; };
 export type SessionSetProfileResponse = { };
@@ -214,10 +214,9 @@ export type TerminalResize = { cols: number; rows: number; };
 export type TerminalExit = { exitCode: number; };
 export type ComputerChangedRequest = { to: ComputerState; };
 export type ComputerChangedResponse = { };
-export type Archive = { };
-export type ArchiveDoneRequest = { repo: RepoName; commit: string; skipped: boolean; error?: string; leftOut?: ArchiveLeftOut | null; };
-export type ArchiveLeftOut = { files: number; bytes: number; paths: Array<string> | null; };
-export type ArchiveDoneResponse = { };
+export type SaveDiff = { name: string; };
+export type DiffSavedRequest = { file?: string; commits: number; files: number; capped?: boolean; failed?: Array<string> | null; error?: string; };
+export type DiffSavedResponse = { };
 export type Compact = { turn: TurnID; overTokens: number; };
 export type BoxCompactedRequest = { turn: TurnID; compacted?: boolean; error?: string; tokensBefore?: number; tokensAfter?: number; usage: Usage; };
 export type BoxCompactedResponse = { };
@@ -292,7 +291,7 @@ export type SessionStarted = { session: SessionID; name: string; parent?: Sessio
 export type SessionRestarted = { session: SessionID; imageUpdated?: boolean; };
 export type SessionMoved = { session: SessionID; newParent: SessionID; };
 export type SessionCloseReason = "dormant" | "disk";
-export type SessionClosed = { reason?: SessionCloseReason; session: SessionID; archive?: string; unheld?: Array<GoalID> | null; handed?: Array<Responsibility> | null; };
+export type SessionClosed = { reason?: SessionCloseReason; session: SessionID; unheld?: Array<GoalID> | null; handed?: Array<Responsibility> | null; };
 export type SessionCompacted = { session: SessionID; turn: TurnID; tokensBefore?: number; tokensAfter?: number; usage: Usage; error?: string; };
 export type TurnStarted = { session: SessionID; turn: TurnID; inputs: Array<EventID> | null; };
 export type TurnOutcome = "completed" | "failed" | "stopped";
@@ -614,9 +613,9 @@ export type EventBody =
 ;
 export type OpArgs = AccountsActionArgs | AddonGlobalArgs | HostexecGrantArgs | HostexecRunArgs | PoolAddRequest | PrOpenArgs | RoomHostsRequest;
 export type BoxMessageBody =
-  | { type: "archive"; body: Archive }
   | { type: "box.stats.ask"; body: BoxStatsAsk }
   | { type: "compact"; body: Compact }
+  | { type: "save_diff"; body: SaveDiff }
   | { type: "shell.watch.start"; body: ShellWatchStart }
   | { type: "shell.watch.stop"; body: ShellWatchStop }
   | { type: "turn.start"; body: TurnStart }
@@ -650,7 +649,7 @@ export interface MethodMap {
   "conversation.read": { request: ConversationReadRequest; response: ConversationReadResponse };
   "room.list": { request: RoomListRequest; response: RoomListResponse };
   "session.list": { request: SessionListRequest; response: SessionListResponse };
-  "archive.done": { request: ArchiveDoneRequest; response: ArchiveDoneResponse };
+  "diff.saved": { request: DiffSavedRequest; response: DiffSavedResponse };
   "delivery.done": { request: DeliveryDoneRequest; response: DeliveryDoneResponse };
   "host.add": { request: HostAddRequest; response: HostAddResponse };
   "host.set_limits": { request: HostSetLimitsRequest; response: HostSetLimitsResponse };

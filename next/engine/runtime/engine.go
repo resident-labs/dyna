@@ -367,9 +367,9 @@ func Run(ctx context.Context, cfg Config) error {
 		boxes.BuildAhead(ctx)
 	}()
 	shutdown.join("image builds", buildDone)
-	archiveDone := make(chan struct{})
+	replayDone := make(chan struct{})
 	go func() {
-		defer close(archiveDone)
+		defer close(replayDone)
 		ticks := time.NewTicker(time.Hour)
 		defer ticks.Stop()
 		for {
@@ -378,15 +378,15 @@ func Run(ctx context.Context, cfg Config) error {
 				return
 			case <-ticks.C:
 				passCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-				err := service.ExpireArchives(passCtx)
+				err := service.ExpireReplayKeys(passCtx)
 				cancel()
 				if err != nil && ctx.Err() == nil {
-					log.Printf("archive expiry sweep: %v", err)
+					log.Printf("replay key sweep: %v", err)
 				}
 			}
 		}
 	}()
-	shutdown.join("archive expiry", archiveDone)
+	shutdown.join("replay key expiry", replayDone)
 	ciDone := make(chan struct{})
 	go func() {
 		defer close(ciDone)

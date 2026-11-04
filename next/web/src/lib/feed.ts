@@ -245,7 +245,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       if (home.kind === "feed") deferred.push({ kind: "run", key: `run${event.seq}`, at: event.at, run: event.body });
       continue;
     }
-    // Box lifecycle stays out of the feed; only a failed or lost box, or a close that failed to archive,
+    // Box lifecycle stays out of the feed; only a failed or lost box, or a close that failed to remove its box,
     // shows as a failed row with its cause in the owner's words.
     if (event.type === "box.changed") {
       const { to, cause } = event.body;
