@@ -60,8 +60,7 @@ interface McpServerConfigBase {
 	/** Default: `codemode`. */
 	exposure?: McpExposure;
 	/**
-	 * What the server offers, in a sentence. The `mcp_servers` system prompt section lists the server
-	 * with it, tool search ranks the server's tools by it, and codemode's `describeNamespace()` returns it.
+	 * What the server offers, in a sentence. Tool search ranks the server's tools by it, and codemode's `describeNamespace()` returns it.
 	 */
 	description?: string;
 	/**

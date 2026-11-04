@@ -96,7 +96,8 @@ func New(forward Forward, local Local, preparer post.Preparer) (*Server, error) 
 	return &Server{list: list, names: strings.Join(names, ", "), actions: actions, forward: forward, local: local, pending: make(map[string]context.CancelFunc), preparer: preparer}, nil
 }
 
-// Description names the areas from the same registry as tools/list.
+// Description names the areas from the same registry as tools/list. It ranks the dyna tools in tool_search and answers
+// describeNamespace(); the system prompt names the tools themselves, in deferred_tools.
 func (s *Server) Description() string {
 	return "Dyna tools cover " + s.names + ". A script calls one as tools.mcp__dyna__<name>."
 }

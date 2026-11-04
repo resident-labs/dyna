@@ -294,9 +294,10 @@ function searchAndLoad(
 
 /**
  * The `tool_search` description. It does not list the searchable tools or their namespaces, so it
- * stays the same while tools are registered, for example when MCP servers connect.
+ * stays the same while tools are registered, for example when MCP servers connect; the
+ * `deferred_tools` system prompt section names them.
  */
-export const TOOL_SEARCH_DESCRIPTION = `# Tool discovery\n\nSearches over deferred tool metadata with BM25 and exposes matching tools for the next model call.\n\nSome of the tools, such as tools of MCP servers, may not have been provided to you upfront, and you should use this tool (\`${TOOL_SEARCH_TOOL_NAME}\`) to search for the required tools. For MCP tool discovery, always use \`${TOOL_SEARCH_TOOL_NAME}\`.`;
+export const TOOL_SEARCH_DESCRIPTION = `# Tool discovery\n\nSearches over deferred tool metadata with BM25 and exposes matching tools for the next model call.\n\nThe \`deferred_tools\` section of the system prompt names the tools that are not declared yet, such as tools of MCP servers. Search by a tool's name or by what you need; the matches load for your next call.`;
 
 export function createToolSearchToolDefinition(
 	options: ToolSearchToolOptions = {},

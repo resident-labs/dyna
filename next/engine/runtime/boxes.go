@@ -267,11 +267,16 @@ func (b *Boxes) reportHeartbeat(ctx context.Context, name contract.HostName, ok 
 		return
 	}
 	var free *int64
-	if ok && load.DiskBytes > 0 {
+	// An exec-only host's disk is shown, never stored: warnings, eviction and placement read the store's figures.
+	if ok && load.DiskBytes > 0 && !load.ExecOnly {
 		value := load.DiskBytes - load.DiskUsed
 		free = &value
 	}
-	if err := b.HeartbeatStore.RecordHostHeartbeat(ctx, name, ok, free, load.DiskBytes, now); err != nil {
+	total := load.DiskBytes
+	if load.ExecOnly {
+		total = 0
+	}
+	if err := b.HeartbeatStore.RecordHostHeartbeat(ctx, name, ok, free, total, now); err != nil {
 		log.Printf("host %s: record heartbeat: %v", name, err)
 		return
 	}
@@ -302,8 +307,12 @@ func (b *Boxes) HostLoad(ctx context.Context, hosts []contract.HostSummary) erro
 			h.History = h.History[1:]
 		}
 		// A host's latest sample knows its disk's size, which the stored figures do not, so its warning comes from that.
-		if load.DiskBytes > 0 {
+		if load.DiskBytes > 0 && !h.ExecOnly {
 			h.DiskLow = load.DiskBytes-load.DiskUsed < box.DiskWarn(box.DiskFloor(load.DiskBytes), load.DiskBytes, h.Pool != "")
+		}
+		// An exec-only host has no setup check, so its capacity is what its probe measured.
+		if h.ExecOnly {
+			h.CPUs, h.MemBytes = load.CPUs, load.MemBytes
 		}
 		if h.Name == contract.ControlPlane {
 			h.Reachable, h.CPUs, h.MemBytes = true, goruntime.NumCPU(), load.MemBytes
@@ -324,12 +333,8 @@ func (b *Boxes) record(name contract.HostName, ok bool, sample podman.Load, now 
 	load.Reachable = ok
 	if ok {
 		load.LastSeen = now
-		if sample.ExecOnly {
-			b.loads[name] = state
-			return
-		}
 		load.CPUUsed, load.MemUsed, load.DiskBytes, load.DiskUsed = sample.CPUUsed, sample.MemUsed, sample.DiskBytes, sample.DiskUsed
-		load.MemBytes = sample.MemBytes
+		load.MemBytes, load.CPUs = sample.MemBytes, sample.CPUs
 		minute := now.Truncate(time.Minute)
 		for len(load.History) > 0 && load.History[0].At.Before(minute.Add(-59*time.Minute)) {
 			load.History = load.History[1:]

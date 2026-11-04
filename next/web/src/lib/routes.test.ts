@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pathItem, roomRoute, settingsPanes } from "./routes.ts";
+import { paneCounts, pathItem, roomRoute, settingsPanes } from "./routes.ts";
+
+test("the Settings nav counts the rooms Approvals lists once they load, and nothing else", () => {
+  assert.deepEqual(paneCounts(undefined), {});
+  assert.deepEqual(paneCounts([]), { approvals: 0 });
+  assert.deepEqual(paneCounts([{}, { deleting: false }, { deleting: true }]), { approvals: 2 });
+});
 
 test("room instructions and new-session pages remain room routes", () => {
   assert.equal(roomRoute.exec("/r/studio/instructions")?.[1], "studio");
