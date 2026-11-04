@@ -360,7 +360,7 @@
           {/if}
           {#each shownTimelineGroups(segment.items, !!turn.ended && !expandedTurns[segment.id]) as group (group.id)}
             {#if group.kind === "work"}
-              <TranscriptWorkRow items={group.items} ended={!!turn.ended || stalled} started={turn.started} {now} activity={store.activity.get(session)} {chunks} {session} onmedia={key => openMedia(key, 0)}
+              <TranscriptWorkRow items={group.items} ended={!!turn.ended || stalled} started={turn.started} {now} activity={store.activityKinds.get(session)} {chunks} {session} onmedia={key => openMedia(key, 0)}
                 onopen={() => { if (turn.olderItems) void readContinuation(turn, "older"); }}
                 onload={async (item, part) => { if (!await fetchPart(turn.id, item.id, part)) throw new Error("Part did not load"); }} />
             {:else if group.kind === "posts"}
@@ -375,7 +375,7 @@
         {/each}
         {#if turn.outcome === "failed"}<div class="failure"><span class="slot"><Icon name="warning" size={16} /></span>{turn.cause ? causes[turn.cause] : "The turn failed"}</div>
         {:else if turn.outcome === "stopped"}<p class="muted turn-note">Stopped</p>{/if}
-        {#if !turn.ended && !stalled && !(turn.items ?? []).some(item => timelineItemRunning(item, false))}<p class="muted turn-note"><span class="slot"><span class="spinner" aria-hidden="true"></span></span>{workingLine(turn.started, now, store.activity.get(session))}</p>{/if}
+        {#if !turn.ended && !stalled && !(turn.items ?? []).some(item => timelineItemRunning(item, false))}<p class="muted turn-note"><span class="slot"><span class="spinner" aria-hidden="true"></span></span>{workingLine(turn.started, now, store.activityKinds.get(session))}</p>{/if}
       </article>
     {/each}
     <!-- A question waits at the end of the thread. Once answered, it is part of the input that answer becomes. -->

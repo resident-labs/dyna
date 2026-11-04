@@ -1,7 +1,7 @@
 <!-- Ported from T3 Code (apps/web/src/components/chat/WorkLog.tsx), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE. -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import type { TranscriptItem, TranscriptPart } from "../contract.gen.ts";
+  import type { ActivityKind, TranscriptItem, TranscriptPart } from "../contract.gen.ts";
   import { activeVerb, elapsed, stepTime, titleOf, toolPart, type StepKind } from "../steps.ts";
   import { formatTimelineDuration, summarizeWork, timelineItemRunning, workingLine, workLayout } from "../timeline.ts";
   import Icon, { type IconName } from "./Icon.svelte";
@@ -18,7 +18,7 @@
     ended: boolean;
     started: string;
     now: number;
-    activity?: string;
+    activity?: ActivityKind;
     chunks: Record<string, string>;
     onload: (item: TranscriptItem, part: TranscriptPart) => Promise<void>;
     onopen: () => void;

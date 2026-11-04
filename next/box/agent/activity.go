@@ -15,13 +15,13 @@ type activity struct {
 	latest contract.TurnActivityRequest
 }
 
-func (a *activity) set(turn contract.TurnID, label string) {
+func (a *activity) set(turn contract.TurnID, kind contract.ActivityKind, label string) {
 	label = shell.Mask(label)
 	if r := []rune(label); len(r) > 80 {
 		label = string(r[:79]) + "…"
 	}
 	a.mu.Lock()
-	a.latest = contract.TurnActivityRequest{Turn: turn, Label: label}
+	a.latest = contract.TurnActivityRequest{Turn: turn, Kind: kind, Label: label}
 	a.mu.Unlock()
 }
 

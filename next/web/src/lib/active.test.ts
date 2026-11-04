@@ -25,7 +25,7 @@ test("a label says what the session is doing in the present tense, and only a co
 
 test("failed rooms sort first, the others keep their order by name, and quiet rooms stay apart", async () => {
   const attention = await opened([room("zeta", ["z1", "z2"]), room("beta", ["b1"]), room("alpha", []), room("gamma", ["g1"])]);
-  attention.apply(event(2, "gamma", { type: "turn.activity", body: { session: "g1", turn: "t", label: "edit main.go" } }));
+  attention.apply(event(2, "gamma", { type: "turn.activity", body: { session: "g1", turn: "t", kind: "tool", label: "edit main.go" } }));
   attention.apply(failTurn(3, "zeta", "z3"));
   const { active, quiet } = activeRooms(attention);
   assert.deepEqual(active.map(line => [line.room.id, line.failed, line.words]), [["zeta", 1, "2 working"], ["beta", 0, "1 working"], ["gamma", 0, "editing main.go"]]);

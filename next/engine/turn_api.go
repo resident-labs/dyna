@@ -176,6 +176,12 @@ func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, r
 	if caller.Kind != contract.PrincipalSession {
 		return contract.TurnActivityResponse{}, forbidden()
 	}
+	if req.Kind == "" {
+		req.Kind = contract.ActivityTool // a box agent that predates kinds reports tool calls only
+	}
+	if req.Kind != contract.ActivityTool && req.Kind != contract.ActivityCompaction && req.Kind != contract.ActivityModel {
+		return contract.TurnActivityResponse{}, invalid("activity kind must be tool, compaction or model")
+	}
 	if !utf8.ValidString(req.Label) || strings.ContainsAny(req.Label, "\r\n") || utf8.RuneCountInString(req.Label) > 80 {
 		return contract.TurnActivityResponse{}, invalid("activity label must be one line of at most 80 characters")
 	}
@@ -186,7 +192,7 @@ func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, r
 	if !open {
 		return contract.TurnActivityResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 	}
-	body := contract.TurnActivity{Session: caller.Session, Turn: req.Turn, Label: req.Label}
+	body := contract.TurnActivity{Session: caller.Session, Turn: req.Turn, Kind: req.Kind, Label: req.Label}
 	event, err := s.event(session.Room, caller, body)
 	if err != nil {
 		return contract.TurnActivityResponse{}, failure(err)
