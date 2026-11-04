@@ -24,9 +24,11 @@ type Block struct {
 // Model is an Anthropic Messages endpoint that answers each request with the next scripted response, and keeps every
 // request. With the script used up it answers "script ended".
 type Model struct {
-	mu       sync.Mutex
-	script   [][]Block
-	requests []Request
+	// InputTokens is the input each response reports using; zero reports 10.
+	InputTokens int
+	mu          sync.Mutex
+	script      [][]Block
+	requests    []Request
 }
 
 // Request is the part of a request the tests read.
@@ -49,14 +51,17 @@ func (m *Model) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if len(m.script) > 0 {
 		blocks, m.script = m.script[0], m.script[1:]
 	}
-	n := len(m.requests)
+	n, input := len(m.requests), m.InputTokens
 	m.mu.Unlock()
+	if input == 0 {
+		input = 10
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	send := func(event string, data any) {
 		encoded, _ := json.Marshal(data)
 		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, encoded)
 	}
-	send("message_start", map[string]any{"type": "message_start", "message": map[string]any{"id": fmt.Sprintf("msg_%d", n), "type": "message", "role": "assistant", "model": "test-model", "content": []any{}, "stop_reason": nil, "usage": map[string]int{"input_tokens": 10, "output_tokens": 1}}})
+	send("message_start", map[string]any{"type": "message_start", "message": map[string]any{"id": fmt.Sprintf("msg_%d", n), "type": "message", "role": "assistant", "model": "test-model", "content": []any{}, "stop_reason": nil, "usage": map[string]int{"input_tokens": input, "output_tokens": 1}}})
 	stop := "end_turn"
 	for i, b := range blocks {
 		if b.Tool == "" {
@@ -80,7 +85,8 @@ func (m *Model) Requests() []Request {
 	return append([]Request(nil), m.requests...)
 }
 
-// AgentDir serves the model and writes an agent folder whose anthropic provider is it, with the model test-model, as a
+// AgentDir serves the model and writes an agent folder whose anthropic provider is it, with the models test-model and
+// small-model, whose context window is 30,000 tokens, as a
 // box's loopback models.json does. mcp.json lists the given servers.
 func AgentDir(t *testing.T, model *Model, mcpServers string) string {
 	t.Helper()
@@ -91,7 +97,7 @@ func AgentDir(t *testing.T, model *Model, mcpServers string) string {
 		mcpServers = "{}"
 	}
 	for name, content := range map[string]string{
-		"models.json":   `{"providers":{"anthropic":{"baseUrl":"` + server.URL + `","apiKey":"box","models":[{"id":"test-model","api":"anthropic-messages","reasoning":true,"input":["text"],"contextWindow":200000,"maxTokens":8000}]}}}`,
+		"models.json":   `{"providers":{"anthropic":{"baseUrl":"` + server.URL + `","apiKey":"box","models":[{"id":"test-model","api":"anthropic-messages","reasoning":true,"input":["text","image"],"contextWindow":200000,"maxTokens":8000},{"id":"small-model","api":"anthropic-messages","reasoning":true,"input":["text","image"],"contextWindow":30000,"maxTokens":4000}]}}}`,
 		"settings.json": `{"defaultProjectTrust":"always","steeringMode":"all"}`,
 		"auth.json":     `{}`,
 		"mcp.json":      `{"mcpServers":` + mcpServers + `}`,

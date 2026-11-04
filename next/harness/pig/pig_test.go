@@ -3,6 +3,7 @@ package pig
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,6 +16,7 @@ import (
 	"github.com/MichaelKinsy/PiG/coding/extension"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/harness"
 	"github.com/resident-labs/dyna/harness/pig/pigtest"
 )
 
@@ -190,5 +192,78 @@ func TestOpenContinuesTheNewestSession(t *testing.T) {
 	start(t, second, "and two")
 	if messages := model.Requests()[1].Messages; len(messages) != 3 {
 		t.Fatalf("the second turn sent %d messages: %s", len(messages), messages)
+	}
+}
+
+func TestTransferToTheSameModelIsUnchanged(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "hello"}})
+	h := open(t, model)
+	start(t, h, "hi")
+	var kinds []contract.ActivityKind
+	h.Activity = func(_ contract.TurnID, kind contract.ActivityKind, _ string) { kinds = append(kinds, kind) }
+	result, err := h.TransferModel(context.Background(), "turn_b", contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "test-model", Thinking: contract.ThinkingHigh}, 50_000)
+	if err != nil || result.Path != "unchanged" || result.TokensBefore == 0 || !reflect.DeepEqual(kinds, []contract.ActivityKind{contract.ActivityModel}) {
+		t.Fatalf("%+v %v %v", result, err, kinds)
+	}
+	if level := h.session.ThinkingLevel(); level != "high" {
+		t.Fatalf("thinking %s", level)
+	}
+}
+
+// A provider the box does not have is refused, so the turn fails without a model change.
+func TestTransferToAnUnknownModelIsRefused(t *testing.T) {
+	h := open(t, pigtest.NewModel())
+	_, err := h.TransferModel(context.Background(), "turn_b", contract.ModelChoice{Provider: "no-such-provider", ID: "m", Thinking: contract.ThinkingLow}, 0)
+	if !errors.Is(err, harness.ErrRefused) || h.session.Model().ID != "test-model" {
+		t.Fatalf("err %v on %s", err, h.session.Model().ID)
+	}
+}
+
+// longTurns are three turns that leave 16,000 tokens of context, more than small-model can take, the first two of about
+// 7,500 tokens each, which a summary can replace. The model answers each with "read".
+func longTurns(t *testing.T, model *pigtest.Model, h *Harness) {
+	t.Helper()
+	start(t, h, strings.Repeat("word ", 6_000))
+	start(t, h, strings.Repeat("more ", 6_000))
+	model.InputTokens = 16_000
+	start(t, h, "read this")
+	model.InputTokens = 0
+}
+
+// A conversation too big for the new model is summarized first, and the session moves.
+func TestTransferToASmallerModelCompacts(t *testing.T) {
+	read := []pigtest.Block{{Text: "read"}}
+	model := pigtest.NewModel(read, read, read, []pigtest.Block{{Text: "the summary"}})
+	h := open(t, model)
+	longTurns(t, model, h)
+	result, err := h.TransferModel(context.Background(), "turn_b", contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "small-model", Thinking: contract.ThinkingLow}, 0)
+	if err != nil || result.Path != "compacted" || result.TokensAfter >= result.TokensBefore || h.session.Model().ID != "small-model" {
+		t.Fatalf("%+v %v on %s", result, err, h.session.Model().ID)
+	}
+}
+
+// The compaction trigger is the session's from the transfer on: a conversation over it is summarized.
+func TestTransferAppliesTheCompactionTrigger(t *testing.T) {
+	read := []pigtest.Block{{Text: "read"}}
+	model := pigtest.NewModel(read, read, read, []pigtest.Block{{Text: "the summary"}})
+	h := open(t, model)
+	longTurns(t, model, h)
+	result, err := h.TransferModel(context.Background(), "turn_b", contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "test-model", Thinking: contract.ThinkingLow}, 2_000)
+	if err != nil || result.Path != "compacted" {
+		t.Fatalf("%+v %v", result, err)
+	}
+}
+
+// A stopped transfer leaves the model as it was.
+func TestAStoppedTransferKeepsTheModel(t *testing.T) {
+	read := []pigtest.Block{{Text: "read"}}
+	model := pigtest.NewModel(read, read, read, []pigtest.Block{{Text: "the summary"}})
+	h := open(t, model)
+	longTurns(t, model, h)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := h.TransferModel(ctx, "turn_b", contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "small-model", Thinking: contract.ThinkingLow}, 0)
+	if err != nil || result.Path != "aborted" || h.session.Model().ID != "test-model" {
+		t.Fatalf("%+v %v on %s", result, err, h.session.Model().ID)
 	}
 }
