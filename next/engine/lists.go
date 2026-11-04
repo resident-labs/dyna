@@ -59,6 +59,7 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 		}
 		if session.Turn != "" && activity.Turn == session.Turn {
 			session.Activity = activity.Label
+			session.ActivityKind = activity.Kind
 		}
 	}
 	return result, nil

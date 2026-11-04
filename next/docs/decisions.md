@@ -1742,3 +1742,8 @@ The owner chose to ship without the five-provider evaluation gate. A Claude sani
 
 - **Gap.** `room.set` changed `rooms.root_approves` and told nobody, so a root could not know it might now decide those requests.
 - **A live section, no notice.** A new context section `dyna_room` is for the room's root session only (the typed `Session.Root`), one line per non-default room setting that changes what root may do. Today: `Approvals you decide: host exec, global add-ons`, the kinds that are on, in Settings order, named as Settings names them. It describes and does not prescribe. With every switch off it is not rendered. A flip reaches the root as a changed-section diff at its next turn, like `dyna_children`, and wakes nobody; turning the last switch off removes the section. A later room setting joins by adding one line in the renderer.
+
+### A live activity has a typed kind (review of the thread's compaction line, 2026-11-03)
+
+- **Decision.** `turn.activity`, its request and `SessionSummary` carry a closed `ActivityKind`, `tool`, `compaction` or `model`, beside the label. The harness sets it (Pi's tool start, compaction start and model transfer); the label only words it. The web decides from the kind and never compares label text, so the thread's "Compacting the conversation…" line follows the same live activity as the sidebar.
+- **Old peers.** The field is additive. A report with no kind, from a box agent that predates kinds, is stored as `tool`; an unknown kind is refused at the engine, which owns the set. The web reads a summary or event with no kind as plain work.
