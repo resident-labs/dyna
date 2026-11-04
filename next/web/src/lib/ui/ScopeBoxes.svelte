@@ -14,12 +14,13 @@
 </fieldset>
 
 <style>
-  .boxes { display: flex; flex-wrap: wrap; gap: 6px 14px; min-width: 0; margin: 0; padding: 0; border: 0; font-size: 13px; font-weight: 500; }
+  /* Two even rows of three, so the six never wrap 4 and 2. */
+  .boxes { display: grid; grid-template-columns: repeat(3, max-content); gap: 6px 18px; min-width: 0; margin: 0; padding: 0; border: 0; font-size: 13px; font-weight: 500; }
   label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
   input { appearance: none; display: grid; place-items: center; width: 16px; height: 16px; margin: 0; border: 1px solid var(--firm); border-radius: 4px; background: none; cursor: pointer; }
   input:checked { border-color: var(--focus); background: var(--focus); }
   input:checked::after { content: ""; width: 8px; height: 4px; margin-top: -2px; border: solid var(--bg); border-width: 0 0 2px 2px; transform: rotate(-45deg); }
   input:focus-visible { outline-offset: 2px; }
   input:disabled { cursor: default; }
-  @media (hover: none) { label { min-height: 40px; } }
+  @media (hover: none) { .boxes { row-gap: 0; } label { min-height: 40px; } }
 </style>
