@@ -3,6 +3,7 @@ package pig
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,6 +16,7 @@ import (
 	"github.com/MichaelKinsy/PiG/coding/extension"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/harness"
 	"github.com/resident-labs/dyna/harness/pig/pigtest"
 )
 
@@ -190,5 +192,29 @@ func TestOpenContinuesTheNewestSession(t *testing.T) {
 	start(t, second, "and two")
 	if messages := model.Requests()[1].Messages; len(messages) != 3 {
 		t.Fatalf("the second turn sent %d messages: %s", len(messages), messages)
+	}
+}
+
+func TestTransferToTheSameModelIsUnchanged(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "hello"}})
+	h := open(t, model)
+	start(t, h, "hi")
+	var kinds []contract.ActivityKind
+	h.Activity = func(_ contract.TurnID, kind contract.ActivityKind, _ string) { kinds = append(kinds, kind) }
+	result, err := h.TransferModel(context.Background(), "turn_b", contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "test-model", Thinking: contract.ThinkingHigh}, 50_000)
+	if err != nil || result.Path != "unchanged" || result.TokensBefore == 0 || !reflect.DeepEqual(kinds, []contract.ActivityKind{contract.ActivityModel}) {
+		t.Fatalf("%+v %v %v", result, err, kinds)
+	}
+	if level := h.session.ThinkingLevel(); level != "high" {
+		t.Fatalf("thinking %s", level)
+	}
+}
+
+// A provider the box does not have is refused, so the turn fails without a model change.
+func TestTransferToAnUnknownModelIsRefused(t *testing.T) {
+	h := open(t, pigtest.NewModel())
+	_, err := h.TransferModel(context.Background(), "turn_b", contract.ModelChoice{Provider: "no-such-provider", ID: "m", Thinking: contract.ThinkingLow}, 0)
+	if !errors.Is(err, harness.ErrRefused) || h.session.Model().ID != "test-model" {
+		t.Fatalf("err %v on %s", err, h.session.Model().ID)
 	}
 }
