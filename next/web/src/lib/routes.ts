@@ -3,7 +3,7 @@ export const settingsPanes: readonly { id: string; label: string; icon: "palette
   { id: "appearance", label: "Appearance", icon: "palette", admin: false },
   { id: "devices", label: "Sharing & access", icon: "devices", admin: true },
   { id: "accounts", label: "Accounts", icon: "plug", admin: true },
-  { id: "profiles", label: "Profiles", icon: "tool", admin: true },
+  { id: "profiles", label: "Profiles", icon: "tool", admin: true, list: true },
   { id: "approvals", label: "Approvals", icon: "shield", admin: true, list: true },
   { id: "addons", label: "Skills & tools", icon: "plus", admin: false },
 ];

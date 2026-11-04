@@ -110,3 +110,12 @@ test("PageUp stops at the top, and Enter on a folded group opens it", () => {
   assert.deepEqual(listKey("PageUp", 0, rows, 10), { move: 0 });
   assert.deepEqual(listKey("Enter", 0, rows, 10), { fold: 0 });
 });
+
+test("a page's own filter narrows the list with the search, and the chip counts take it in", () => {
+  const filter = (room: Room) => room.group === "odd";
+  const view = listView(many, { text, key, query: "docs", chip: chips[0], chips, filter, folded: new Set() });
+  const found = many.filter(room => room.name.startsWith("docs") && room.group === "odd");
+  assert.equal(view.shown, found.length);
+  assert.deepEqual(view.counts, { all: found.length, auto: found.filter(room => room.on === 4).length, off: found.filter(room => room.on === 0).length });
+  assert.equal(listView(many, { text, key, query: "", chip: chips[0], filter: () => false, folded: new Set() }).rows.length, 0);
+});

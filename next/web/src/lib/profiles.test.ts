@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { profileForSave, profileLabel, profileModels, profileRows, replacements, sessionCount, slugName, type ProfileSummary } from "./profiles.ts";
+import { profileChips, profileColumns, profileForSave, profileLabel, profileLine, profileModels, profileRows, profileText, providerFilter, replacements, sessionCount, slugName, type ProfileSummary } from "./profiles.ts";
 import type { Account } from "./contract.gen.ts";
 
 test("saving a profile keeps its hidden limit and allowed models", () => {
@@ -54,4 +54,41 @@ test("a listed entry becomes a row, and saving it sends back exactly the listed 
   assert.equal(row.inUse, 2);
   assert.deepEqual(profileForSave(row), stored);
   assert.deepEqual(profileRows(null), []);
+});
+
+const sample = (name: string, more: Partial<ProfileSummary> = {}): ProfileSummary => ({ name, provider: "openai", model: "glm-5.3", description: "", taste: 0, diagnostics: 0, intelligence: 0, cost: 0, inUse: 0, thinking: "low", ...more });
+
+test("the chips are All, In use and Not rated, and a profile with any rating is rated", () => {
+  assert.deepEqual(profileChips.map(chip => chip.label), ["All", "In use", "Not rated"]);
+  const [, inUse, unrated] = profileChips;
+  assert.equal(inUse.test!(sample("a", { inUse: 2 })), true);
+  assert.equal(inUse.test!(sample("a")), false);
+  assert.equal(unrated.test!(sample("a")), true);
+  assert.equal(unrated.test!(sample("a", { cost: 3 })), false);
+});
+
+test("every column sorts: the name by its text, the values by number, unset lowest", () => {
+  assert.deepEqual(profileColumns.map(column => column.label), ["Name", "Taste", "Diag.", "Intel.", "Thrift", "At once", "In use"]);
+  for (const column of profileColumns) assert.ok(column.compare, column.id);
+  const list = [sample("b", { taste: 7, maxConcurrent: 2, inUse: 1 }), sample("a", { taste: 9 }), sample("c", { taste: 0, maxConcurrent: 4 })];
+  const order = (id: string) => [...list].sort(profileColumns.find(column => column.id === id)!.compare!).map(profile => profile.name);
+  assert.deepEqual(order("name"), ["a", "b", "c"]);
+  assert.deepEqual(order("taste"), ["c", "b", "a"]);
+  assert.deepEqual(order("maxConcurrent"), ["a", "b", "c"]);
+  assert.deepEqual(order("inUse"), ["a", "c", "b"]);
+});
+
+test("the provider filter keeps one provider's profiles, or every one", () => {
+  assert.equal(providerFilter(""), undefined);
+  assert.equal(providerFilter("anthropic")!(sample("a", { provider: "anthropic" })), true);
+  assert.equal(providerFilter("anthropic")!(sample("a")), false);
+});
+
+test("a row reads as model and thinking, and a narrow row adds not rated and in use", () => {
+  const profile = sample("glm", { model: "openrouter/glm-5.3", thinking: "xhigh", inUse: 3 });
+  assert.equal(profileLine(profile, false), "openrouter/glm-5.3 · very high thinking");
+  assert.equal(profileLine(profile, true), "openrouter/glm-5.3 · very high thinking · not rated · 3 in use");
+  assert.equal(profileLine(sample("x", { taste: 4 }), true), "glm-5.3 · low thinking");
+  // The search finds a profile by its name, its model or its provider as shown.
+  assert.match(profileText(profile), /glm.*openrouter\/glm-5\.3.*OpenAI-compatible/);
 });

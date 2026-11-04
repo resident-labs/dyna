@@ -11,13 +11,18 @@ export type Row<T> = { kind: "group"; group: Group; count: number; folded: boole
 
 export type ListQuery<T> = {
   text: (item: T) => string; key: (item: T) => string; query: string; chip: Chip<T>; chips?: Chip<T>[];
-  sort?: Sort<T>; group?: (item: T) => Group; folded: ReadonlySet<string>;
+  // A page's own narrowing beside the chips, such as Profiles' provider; it applies with the search.
+  filter?: (item: T) => boolean; sort?: Sort<T>; group?: (item: T) => Group; folded: ReadonlySet<string>;
 };
 
 // The rows to draw, how many items they hold (a folded group's included), and each chip's count over the search's matches.
-export function listView<T>(items: readonly T[], { text, key, query, chip, chips = [], sort, group, folded }: ListQuery<T>): { rows: Row<T>[]; shown: number; counts: Record<string, number> } {
+export function listView<T>(items: readonly T[], { text, key, query, chip, chips = [], filter, sort, group, folded }: ListQuery<T>): { rows: Row<T>[]; shown: number; counts: Record<string, number> } {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const found = words.length ? items.filter(item => { const haystack = text(item).toLowerCase(); return words.every(word => haystack.includes(word)); }) : [...items];
+  const found = words.length || filter ? items.filter(item => {
+    if (filter && !filter(item)) return false;
+    const haystack = text(item).toLowerCase();
+    return words.every(word => haystack.includes(word));
+  }) : [...items];
   const counts = Object.fromEntries(chips.map(each => [each.id, each.test ? found.filter(each.test).length : found.length]));
   const shown = chip.test ? found.filter(chip.test) : found;
   if (sort?.column.compare) { const { compare } = sort.column; shown.sort((a, b) => compare(a, b) * sort.dir); }

@@ -9,12 +9,14 @@
   // items is undefined while loading. row draws an item; compact is a narrow list, where a row drops its columns.
   // selected is the open item's key. The list moves with ↑ ↓ Home End PgUp PgDn; on a wide pane a move opens the row
   // (onselect with open false), and Enter or a click on a narrow one opens it as a screen (open true). onkey takes
-  // any other key for the row the list is on and says whether it used it.
-  let { items, failed = false, retry, key, text, noun, label, chips, columns, sort: start, group, folded: foldedFirst = [], row, tools, empty, selected, drill, onselect, onkey }: {
+  // any other key for the row the list is on and says whether it used it. filter is the page's own narrowing from a
+  // control in tools, such as Profiles' provider; onclear resets that control when the no-results state clears the rest.
+  let { items, failed = false, retry, key, text, noun, label, chips, columns, sort: start, group, folded: foldedFirst = [], row, tools, empty, selected, drill, onselect, onkey, filter, onclear }: {
     items: readonly T[] | undefined; failed?: boolean; retry?: () => void; key: (item: T) => string; text: (item: T) => string;
     noun: [one: string, many: string]; label: string; chips?: Chip<T>[]; columns?: Column<T>[]; sort?: { column: string; dir: 1 | -1 };
     group?: (item: T) => Group; folded?: string[]; row: Snippet<[T, boolean]>; tools?: Snippet; empty?: Snippet;
     selected?: string; drill: boolean; onselect: (key: string, open: boolean) => void; onkey?: (key: string, item: T) => boolean;
+    filter?: (item: T) => boolean; onclear?: () => void;
   } = $props();
   const id = $props.id();
   const head = 34, margin = 200;
@@ -30,7 +32,7 @@
   let compact = $derived(width > 0 && width < (columns ? 500 : 420));
   let rowHeight = $derived(drill ? 60 : 52);
   let tracks = $derived(columns?.map(column => column.width).join(" "));
-  let view = $derived(items && listView(items, { text, key, query, chip: chip ?? { id: "", label: "" }, chips, folded, group,
+  let view = $derived(items && listView(items, { text, key, query, chip: chip ?? { id: "", label: "" }, chips, filter, folded, group,
     sort: sorting && columns?.find(column => column.id === sorting!.column) ? { column: columns.find(column => column.id === sorting!.column)!, dir: sorting.dir } : undefined }));
   let rows = $derived(view?.rows ?? []);
   let layout = $derived(layoutRows(rows, rowHeight, head));
@@ -55,7 +57,7 @@
   // The open item is the row the keys are on.
   $effect.pre(() => { if (selected !== undefined) current = selected; });
   // A new search or chip starts at the top.
-  $effect(() => { void query; void chip; if (scroller) scroller.scrollTop = 0; scrollTop = 0; });
+  $effect(() => { void query; void chip; void filter; if (scroller) scroller.scrollTop = 0; scrollTop = 0; });
 
   function show(index: number) {
     if (!scroller) return;
@@ -98,7 +100,7 @@
     scroller?.focus();
     if (active < 0) { const index = rows.findIndex(each => each.kind === "item"); if (index >= 0) { await tick(); move(index, false); } }
   }
-  function clear() { query = ""; chip = chips?.[0]; }
+  function clear() { query = ""; chip = chips?.[0]; onclear?.(); }
 </script>
 
 <!-- The column is an F6 stop (spec 5.13); F6 hands its focus to the list, or to the first control while the list is not there. -->
@@ -118,7 +120,7 @@
     {#if failed && !items}<div class="state" role="alert">The {noun[1]} did not load. <button type="button" class="retry" onclick={retry}>Try again</button></div>
     {:else if !view}<div class="bones" aria-label={`Loading ${noun[1]}`}>{#each [0, 1, 2, 3, 4] as n (n)}<div class="bone-row"><i class="bone" style:width="24px" style:height="24px"></i><span class="lines"><i class="bone" style:width="{140 + n * 17 % 60}px" style:height="12px"></i><i class="bone" style:width="{220 - n * 23 % 70}px" style:height="10px"></i></span></div>{/each}</div>
     {:else if !items?.length}<div class="state"><span>No {noun[1]} yet.</span>{@render empty?.()}</div>
-    {:else if !rows.length}<div class="state"><span>{query ? `No ${noun[1]} match “${query}”${chip?.test ? ` in ${chip.label}` : ""}.` : `No ${noun[1]} in ${chip?.label}.`}</span><button type="button" class="btn" onclick={clear}>Clear search and filters</button></div>
+    {:else if !rows.length}<div class="state"><span>{query ? `No ${noun[1]} match “${query}”${chip?.test ? ` in ${chip.label}` : ""}.` : chip?.test ? `No ${noun[1]} in ${chip.label}.` : `No ${noun[1]} match the filter.`}</span><button type="button" class="btn" onclick={clear}>Clear search and filters</button></div>
     {:else}
       <div class="list" role="listbox" tabindex="0" aria-label={label} aria-activedescendant={pointed} bind:this={scroller} bind:clientHeight={height}
         onscroll={() => { scrollTop = scroller!.scrollTop; }} onkeydown={keydown}>
