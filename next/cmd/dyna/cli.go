@@ -828,9 +828,8 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	start.Flags().StringVar(&size, "size", "", "Box size for a lead: agent, small, medium or large")
 	start.Flags().BoolVar(&sameHost, "same-host", false, "Place the box on its parent’s host")
 	start.Flags().StringVar(&composeName, "compose", "", "Compose file, by name; without it the file named default, if any")
-	var discard bool
 	closeCmd := &cobra.Command{Use: "close SESSION", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		closed, err := getClient().SessionClose(cmd.Context(), contract.SessionCloseRequest{Session: contract.SessionID(args[0]), Discard: discard})
+		closed, err := getClient().SessionClose(cmd.Context(), contract.SessionCloseRequest{Session: contract.SessionID(args[0])})
 		if err == nil && len(closed.Handed) > 0 {
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Handed to %s: %s\n", closed.To, dynaroom.ResponsibilityNames(closed.Handed))
 		}
@@ -839,7 +838,6 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		}
 		return err
 	}}
-	closeCmd.Flags().BoolVar(&discard, "discard", false, "Close without archiving")
 	restart := &cobra.Command{Use: "restart SESSION", Short: "Replace a failed session box", Long: "Replace a failed session box. The old volume and unpushed work are lost. If the old host is unavailable, its resources may remain there.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := getClient().SessionRestart(cmd.Context(), contract.SessionRestartRequest{Session: contract.SessionID(args[0])})
 		return err

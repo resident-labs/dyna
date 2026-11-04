@@ -9,7 +9,7 @@ import (
 
 // A full owner stream can close while another publisher holds its copied handle.
 func TestConcurrentPublishClosesFullOwnerStream(t *testing.T) {
-	l := New(func(map[contract.SessionID]bool) {})
+	l := New(func(map[contract.SessionID]struct{}) {})
 	_, events := l.Subscribe("", 1)
 	events <- contract.Event{}
 	start := make(chan struct{})
@@ -27,7 +27,7 @@ func TestConcurrentPublishClosesFullOwnerStream(t *testing.T) {
 
 // A full room stream closes when it drops a read position, so the client reconnects and reads the stored position.
 func TestPublishClosesFullRoomStreamOnDroppedRead(t *testing.T) {
-	l := New(func(map[contract.SessionID]bool) {})
+	l := New(func(map[contract.SessionID]struct{}) {})
 	_, events := l.Subscribe("r", 1)
 	events <- contract.Event{}
 	l.Publish("r", contract.Event{Body: contract.ConversationRead{Room: "r", Seq: 10}}, false)
@@ -44,7 +44,7 @@ func TestPublishClosesFullRoomStreamOnDroppedRead(t *testing.T) {
 
 // Concurrent updates reach streams in the same order that room lists use.
 func TestActivityPublicationOrder(t *testing.T) {
-	l := New(func(map[contract.SessionID]bool) {})
+	l := New(func(map[contract.SessionID]struct{}) {})
 	_, events := l.Subscribe("r", 2)
 	start := make(chan struct{})
 	var done sync.WaitGroup

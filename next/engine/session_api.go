@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"slices"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -294,14 +293,11 @@ func (s *Service) managedSession(ctx context.Context, caller contract.Principal,
 }
 
 func (s *Service) SessionClose(ctx context.Context, caller contract.Principal, req contract.SessionCloseRequest) (contract.SessionCloseResponse, *contract.Error) {
-	if req.Discard && caller.Kind != contract.PrincipalOwner {
-		return contract.SessionCloseResponse{}, forbidden()
-	}
 	session, problem := s.managedSession(ctx, caller, req.Session)
 	if problem != nil {
 		return contract.SessionCloseResponse{}, problem
 	}
-	return s.closeSession(ctx, session, req.Discard, false)
+	return s.closeSession(ctx, session, false, false)
 }
 
 // SessionResponsibilities reads a session's list and what a close would do with it now.
@@ -361,19 +357,6 @@ func (s *Service) closeSession(ctx context.Context, session store.Session, disca
 	}
 	if err := s.StopHostexecs(ctx); err != nil {
 		return plan, failure(err)
-	}
-	if !discard {
-		boxes, err := s.store.LifecycleBoxes(ctx)
-		if err != nil {
-			return plan, failure(err)
-		}
-		for _, b := range boxes {
-			if slices.Contains(order, b.Session) && b.Want == store.WantClose && b.State == contract.BoxClosing && b.Reason != "" {
-				if err := s.archiveReason(ctx, session.Room, b.Box, ""); err != nil {
-					return plan, failure(err)
-				}
-			}
-		}
 	}
 	s.reconciler.Kick()
 	return plan, nil

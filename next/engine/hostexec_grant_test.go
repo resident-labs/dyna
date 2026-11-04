@@ -92,7 +92,7 @@ func TestHostexecList(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, problem := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: worker, Discard: true}); problem != nil {
+	if _, problem := s.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: worker}); problem != nil {
 		t.Fatal(problem)
 	}
 	got, problem := s.HostexecList(ctx, owner, contract.HostexecListRequest{})

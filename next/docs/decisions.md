@@ -804,7 +804,7 @@ On SIGTERM, the engine blocks new turn dispatches and model calls, and waits up 
 - In M1 the proxy keeps its sign-ins in its own file store, `<data>/cliproxy/auth` (mode 0700). In M3 the engine registers a token store on `store.db` through the SDK's `Store` interface (`List`, `Save`, `Delete`), so no JSON state is left. `store.db` and its backups then hold tokens and stay 0600.
 - Accepted costs: the binary grows by the proxy's dependencies (gin, a Redis client, zeroconf and others), which later patches may trim. A proxy panic stops only the child; the engine restarts it (5.7).
 
-**Git (M2).** The box agent forwards `/git/` from its loopback listener over the box socket, as it does for `/model/`. `origin` is `http://127.0.0.1:7781/git/<owner>/<repo>.git`, so git's own smart-HTTP client works with no remote helper. The engine checks the room's repositories and proxies to GitHub with its own token. Pushes are limited to the session's repository. For a push, it reads the ref commands first and answers a ref the session does not own with a receive-pack `ng` report, without forwarding anything to GitHub. Pushes are allowed only to branches the session owns (`v2/<session>`, `v2/<session>-<topic>` with no slash in the topic, or a PR branch registered to it) and to `refs/dyna/archive/<session>`. Fetches are allowed for the room's repositories.
+**Git (M2).** The box agent forwards `/git/` from its loopback listener over the box socket, as it does for `/model/`. `origin` is `http://127.0.0.1:7781/git/<owner>/<repo>.git`, so git's own smart-HTTP client works with no remote helper. The engine checks the room's repositories and proxies to GitHub with its own token. Pushes are limited to the session's repository. For a push, it reads the ref commands first and answers a ref the session does not own with a receive-pack `ng` report, without forwarding anything to GitHub. Pushes are allowed only to branches the session owns (`v2/<session>`, `v2/<session>-<topic>` with no slash in the topic, or a PR branch registered to it) only. Fetches are allowed for the room's repositories.
 
 **Network.** Boxes have outbound internet for package installs, so they may reach the desktop on the LAN or through the tunnel. The engine's network listeners therefore accept only paired devices, and boxes hold no device keys. The box socket is a box's only way into the engine.
 
@@ -825,20 +825,16 @@ On SIGTERM, the engine blocks new turn dispatches and model calls, and waits up 
 
 **Release skew.** The API is additive. A quiet box stops after 10 minutes and starts the host's current binary on its next wake. The engine does not send an upgrade message.
 
-### 5.9 Close (archive in M2)
+### 5.9 Close
 
-Close writes `want=close` for the whole subtree, or `want=discard` when the owner chooses discard. The reconciler finishes close in durable steps. It closes and deletes each child, deepest first, with its own archive. To keep a child running, move it to another parent first (7.4). Then, for the box itself:
+Close writes `want=close` for the whole subtree, or `want=discard` for a room delete. The reconciler finishes close in durable steps. It closes and deletes each child, deepest first. To keep a child running, move it to another parent first (7.4). Then, for the box itself:
 
 1. Stop the harness and every shell job.
-2. Archive the session's repository, if it has one. Push HEAD and a snapshot of the dirty tree to `refs/dyna/archive/<session>`. The snapshot is a commit of the working tree, with untracked files that are not ignored, made through a temporary index and `commit-tree` (the v1 #1246 method), so the session branch and the index do not change. The ref points at the snapshot, whose first parent is HEAD. Skip this when the tree is clean and HEAD is already on the remote.
+2. Save a diff, if the box is connected and has a repository: one `.diff` in `/box/shared/archives/` with the unpushed commits' log and one diff of the committed, uncommitted and untracked work against the newest commit shared with the remote (spec 5.9). No archive ref and no push.
 3. `podman rm`, delete the volume, stop the slice, and remove the forward and the listener.
 4. Emit `box.changed` to `deleted`, then `session.closed`.
 
-Closing a dormant session starts its box for the archive without admission. Archiving boxes are idle and short-lived, so many closed at once can briefly overcommit their host.
-
-The engine deletes archive refs after 14 days. `dyna session restore <session>` starts a new box from the archive. The box agent retries an archive a few times before it reports a failure. If an archive push still fails, the box stays in `closing` with a reason. If removal fails, the box stays in `closing` with the error as its reason, and the reconciler retries removal after 30 s. A box is never deleted without its archive, except through `dyna session close --discard` (owner only), for a box that cannot start; it deletes the box with no archive.
-
-Table: `archives` (`session`, `repo`, `ref`, `commit_sha`, `created_at`, `expires_at`, PK `(session, repo)`).
+**Decision (2026-11-03, owner).** An archive pushed to the session's `origin` landed in repositories the owner does not own. Dyna keeps no archive ref and no restore: the pushed branches are the session's record, and close writes the diff above for the rest. The write is one try; a failure, a dormant box or a host that is not ready is told to the parent as `no diff was saved` or `not checked, nothing saved`, and close goes on. A close never starts a box and never waits for one. Refs older versions pushed stay where they are and are never swept. `session close --discard` is removed; `room delete --discard` stays as its confirmation.
 
 ### 5.10 Host failure and relocation
 

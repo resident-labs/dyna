@@ -296,12 +296,12 @@ func (c *Client) Hello(ctx context.Context) (contract.BoxHelloResponse, error) {
 	return result, err
 }
 
-func (c *Client) ArchiveDone(ctx context.Context, result contract.ArchiveDoneRequest) error {
+func (c *Client) DiffSaved(ctx context.Context, result contract.DiffSavedRequest) error {
 	body, err := json.Marshal(result)
 	if err != nil {
 		return err
 	}
-	_, err = c.call(ctx, contract.MethodArchiveDone, body)
+	_, err = c.call(ctx, contract.MethodDiffSaved, body)
 	return err
 }
 
