@@ -33,8 +33,22 @@ func (f *Files) read(room contract.RoomID) ([]contract.Addon, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	var list skills.List
-	return list.Items, true, json.Unmarshal(data, &list)
+	// A skill stored with one "host" is run-on [host].
+	var list struct {
+		Items []struct {
+			contract.Addon
+			Host contract.HostName `json:"host"`
+		} `json:"items"`
+	}
+	err = json.Unmarshal(data, &list)
+	items := make([]contract.Addon, len(list.Items))
+	for i, item := range list.Items {
+		items[i] = item.Addon
+		if item.Host != "" && len(item.Hosts) == 0 {
+			items[i].Hosts = []contract.HostName{item.Host}
+		}
+	}
+	return items, true, err
 }
 
 // write replaces the list atomically, as instructions are saved.
@@ -91,6 +105,10 @@ func (f *Files) put(room contract.RoomID, item contract.Addon) error {
 	// A replacement keeps the mark: only SetRootOnly, the owner's, takes it off.
 	if i := slices.IndexFunc(items, same(item.Kind, item.Name)); i >= 0 {
 		item.RootOnly = item.RootOnly || items[i].RootOnly
+		// A save with no hosts keeps the run-on hosts; only SetHosts clears them.
+		if len(item.Hosts) == 0 {
+			item.Hosts = items[i].Hosts
+		}
 	}
 	return f.write(room, append(slices.DeleteFunc(items, same(item.Kind, item.Name)), item))
 }
@@ -160,6 +178,22 @@ func (f *Files) SetRootOnly(room contract.RoomID, kind contract.AddonKind, name 
 		return ErrMissing
 	}
 	items[i].RootOnly = rootOnly
+	return f.write(room, items)
+}
+
+// SetHosts replaces a skill's run-on hosts.
+func (f *Files) SetHosts(room contract.RoomID, name string, hosts []contract.HostName) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	items, _, err := f.read(room)
+	if err != nil {
+		return err
+	}
+	i := slices.IndexFunc(items, same(contract.AddonSkill, name))
+	if i < 0 {
+		return ErrMissing
+	}
+	items[i].Hosts = hosts
 	return f.write(room, items)
 }
 

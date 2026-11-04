@@ -89,10 +89,11 @@ type PostInput struct {
 
 // SkillSaveInput is what a caller names. A box reads a local path itself, so the engine gets the folder.
 type SkillSaveInput struct {
-	Path     string          `json:"path"`
-	Room     contract.RoomID `json:"room,omitempty"`
-	Global   bool            `json:"global,omitempty"`
-	RootOnly bool            `json:"rootOnly,omitempty" desc:"Only root sessions' boxes get it."`
+	Path     string              `json:"path"`
+	Room     contract.RoomID     `json:"room,omitempty"`
+	Global   bool                `json:"global,omitempty"`
+	RootOnly bool                `json:"rootOnly,omitempty" desc:"Only root sessions' boxes get it."`
+	Hosts    []contract.HostName `json:"hosts,omitempty" desc:"Hosts where the skill's commands run; none keeps what the skill has."`
 }
 
 // ImageSaveInput is what a caller names. A box reads the folder itself, so the engine gets its archive.

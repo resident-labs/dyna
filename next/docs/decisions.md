@@ -1727,6 +1727,7 @@ The owner chose to ship without the five-provider evaluation gate. A Claude sani
 ### Host skills and exec-only hosts (owner, 2026-11-03)
 
 - **Host skills.** `dyna skill save HOST:PATH` copies a skill from a registered host over SSH, owner only, and records the host with the skill. The box agent says on the skill's first lines where its commands run, so agents use the existing `bash` `host` option; there is no new permission. A local folder with a colon needs `./`.
+- **Run-on hosts (owner, 2026-11-03).** Dyna owns a saved skill; `HOST:PATH` is only a way to copy files in. Where its commands run is `hosts` on the stored skill, set with `--host` (repeatable) on save or with `dyna skill set` (`addon.set_hosts`). A re-save keeps them unless `--host` is given. Old single `host` entries read as `[host]`. Every host-exec run imports the desktop session variables the user's manager lists, on full hosts too, so no skill-specific rule is needed.
 - **Exec-only hosts** are an explicit stored flag set by `host add --agents off --ci off`, not derived from the two switches, so an old host with both off stays a disabled full host. They need SSH and bash only, with no admin flag.
 - **8 MiB cap.** A run's output and the files it leaves in `$DYNA_OUT` are each capped at 8 MiB (`hostexec.OutputLimit`). Over the cap, the output is cut and the files are not copied back, and the result says so.
 
