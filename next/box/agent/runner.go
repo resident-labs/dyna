@@ -303,6 +303,13 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 		r.mu.Unlock()
 		stopAttach()
 		r.flushing.Wait()
+		if err == nil {
+			// Pi queues a steer that came after its last check and reads it at its next run. The engine gives it to the next turn
+			// instead, so Pi must not keep it.
+			if clearErr := r.Harness.ClearQueue(ctx); clearErr != nil {
+				log.Printf("clear Pi's queue: %v", clearErr)
+			}
+		}
 		if errors.Is(err, errStopped) {
 			// Pi never saw the inputs, so they wait for the next turn instead of counting as read.
 			result = contract.TurnEnded{Turn: start.Turn, Outcome: contract.TurnOutcome("stopped"), Cause: contract.CauseNotStarted}
@@ -388,6 +395,9 @@ func (r *Runner) steer(ctx context.Context, input contract.TurnSteer) error {
 		r.mu.Unlock()
 		return nil
 	}
+	// The turn waits for the forward before it clears Pi's queue, so the steer cannot land after the clear.
+	r.flushing.Add(1)
+	defer r.flushing.Done()
 	r.mu.Unlock()
 	return r.forward(ctx, input)
 }
@@ -408,6 +418,9 @@ func (r *Runner) forward(ctx context.Context, input contract.TurnSteer) error {
 		r.mu.Lock()
 		delete(r.sent, input.Input.Delivery)
 		r.mu.Unlock()
+	}
+	if errors.Is(err, harness.ErrNoTurn) {
+		return nil // The engine gives a steer the box never reported done to the next turn.
 	}
 	return err
 }

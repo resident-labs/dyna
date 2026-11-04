@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -61,7 +62,8 @@ func (h *harnessFake) Steer(_ context.Context, input contract.TurnInput) error {
 func (h *harnessFake) FollowUp(context.Context, contract.TurnInput) error {
 	panic("unexpected follow-up")
 }
-func (h *harnessFake) Abort(context.Context) error { return nil }
+func (h *harnessFake) Abort(context.Context) error      { return nil }
+func (h *harnessFake) ClearQueue(context.Context) error { return nil }
 func (*harnessFake) Compact(context.Context, int64) (harness.Compaction, error) {
 	return harness.Compaction{}, nil
 }
@@ -275,6 +277,48 @@ func TestRunnerSkipsReplayedSteer(t *testing.T) {
 	sink.mu.Unlock()
 	if count != 2 || !acked || stepped.Load() != 1 {
 		t.Fatalf("steers=%d acked=%v stepped aside=%d", count, acked, stepped.Load())
+	}
+}
+
+// A steer Pi queued after its last check is never read and never reported done, and the run's end clears Pi's queue, so
+// the engine's next turn gives it to Pi once. A steer the harness refuses for having no run is dropped, not an error.
+func TestRunnerClearsWhatNoRequestRead(t *testing.T) {
+	release := make(chan struct{})
+	h := &fakeharness.Harness{Turns: []fakeharness.Turn{{Result: contract.TurnEnded{Outcome: "completed"}, Release: release}}}
+	sink := &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 1)}
+	runner := &Runner{Harness: h, Sink: sink}
+	ctx := context.Background()
+	if err := runner.Handle(ctx, contract.BoxMessage{Body: contract.TurnStart{Turn: "turn_a", Inputs: []contract.TurnInput{{Delivery: 1, Text: "start"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	// Steers forward on the channel, not from the held queue, once Pi took the turn.
+	for holding := true; holding; {
+		runner.mu.Lock()
+		holding = runner.holding
+		runner.mu.Unlock()
+		runtime.Gosched()
+	}
+	if err := runner.Handle(ctx, contract.BoxMessage{Body: contract.TurnSteer{Input: contract.TurnInput{Delivery: 2, Text: "late"}, Queue: contract.QueueSteer}}); err != nil {
+		t.Fatal(err)
+	}
+	h.SteerErr = harness.ErrNoTurn
+	if err := runner.Handle(ctx, contract.BoxMessage{Body: contract.TurnSteer{Input: contract.TurnInput{Delivery: 3, Text: "later"}, Queue: contract.QueueSteer}}); err != nil {
+		t.Fatalf("refused steer: %v", err)
+	}
+	runner.mu.Lock()
+	_, kept := runner.sent[3]
+	runner.mu.Unlock()
+	if kept {
+		t.Fatal("the refused steer counts as sent")
+	}
+	close(release)
+	<-sink.done
+	runner.turns.Wait()
+	sink.mu.Lock()
+	acked := sink.acked
+	sink.mu.Unlock()
+	if !acked[1] || acked[2] || acked[3] || h.Clears != 1 {
+		t.Fatalf("acked=%v clears=%d", acked, h.Clears)
 	}
 }
 
