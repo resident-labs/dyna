@@ -30,6 +30,23 @@ func (r *Repositories) Ref(ctx context.Context, repo contract.RepoName, ref stri
 	return r.Mirror.Ref(ctx, repo, ref)
 }
 
+// Seed is Get for a session's first setup: it refreshes from GitHub first, and the notice says when that did not happen.
+func (r *Repositories) Seed(ctx context.Context, session contract.SessionID, host contract.HostName) ([]contract.BoxRepo, string, error) {
+	selected, err := r.Rooms.Session(ctx, session)
+	if err != nil || selected.Repo == "" {
+		return nil, "", err
+	}
+	cache, err := r.Hosts.CacheHost(ctx, host)
+	if err != nil {
+		return nil, "", err
+	}
+	item, notice, err := r.Mirror.Seed(ctx, cache, selected.Repo, session)
+	if err != nil {
+		return nil, "", err
+	}
+	return []contract.BoxRepo{item}, notice, nil
+}
+
 func (r *Repositories) Get(ctx context.Context, session contract.SessionID, host contract.HostName, fetch bool) ([]contract.BoxRepo, error) {
 	selected, err := r.Rooms.Session(ctx, session)
 	if err != nil {
