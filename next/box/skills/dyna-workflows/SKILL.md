@@ -63,7 +63,7 @@ Reload is for a running run, resume for an ended one. Both go by step key: a has
 
 ## Workers
 
-- Each `agent()` is a new Pi process with the session's instructions, one paragraph on being a worker, its prompt and the schema. It has no memory of other steps, no `args`, no feed and no view of other workers, so paths, branches, rules and earlier output reach it only through the prompt.
+- Each `agent()` is a new PiG session with the session's instructions, one paragraph on being a worker, its prompt and the schema. It has no memory of other steps, no `args`, no feed and no view of other workers, so paths, branches, rules and earlier output reach it only through the prompt.
 - It has the session's tools: files, `bash`, `job`, `codemode`, the `dyna` tools and git with the crew's push rights. Nothing wakes a worker: a `bash` command past 30 seconds becomes a job that it reads with `job output`.
 - With `worktree: true` it gets its own tree and branch from the pinned commit. What it leaves is committed and pushed before the step is stored, and `files` lists what changed, `[]` for nothing. Without it, workers share the main tree, whose uncommitted files a lost box or a resume drops. Two writers editing one place conflict at merge.
 - A worker waits for a box slot, then its profile's `maxConcurrent`; `timeout` starts once it holds both, so a step waiting on its profile holds a box slot. One build runs at a time across `run()` and the workers.
