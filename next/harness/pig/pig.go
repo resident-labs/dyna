@@ -32,7 +32,7 @@ type Config struct {
 	AgentDir     string
 	SessionDir   string
 	Model        contract.ModelChoice
-	Instructions string // appended to the system prompt
+	Instructions string // the system prompt, whole
 	// New starts a session file of its own. Without it the session continues the newest file in SessionDir, as a
 	// restarted box does; a crew's workers share one folder, and none may take another's.
 	New bool
@@ -94,7 +94,9 @@ func Open(ctx context.Context, c Config) (*Harness, error) {
 			ExtensionFactories: extensions,
 			// The first extension to register a tool name keeps it, so the inline ones, Dyna's, load ahead of the packages'.
 			InlineExtensionsFirst: true,
-			AppendSystemPrompt:    []string{c.Instructions},
+			// The engine's text is the whole head: it replaces the preamble, tools and rules, and the empty, non-nil list keeps PiG from reading APPEND_SYSTEM.md.
+			SystemPrompt:       &c.Instructions,
+			AppendSystemPrompt: []string{},
 		},
 	})
 	if err != nil {
