@@ -12,7 +12,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 
 	"github.com/MichaelKinsy/PiG/ai"
 	"github.com/MichaelKinsy/PiG/coding/extension"
@@ -60,6 +62,9 @@ func Extension(c Config) extension.InlineExtension {
 		}
 		// roots maps each call of the turn to the call the model made, which a nested call's post is linked to.
 		roots := map[string]string{}
+		// used holds the tools called since the session started or last compacted, nested calls of a script included.
+		var usedMu sync.Mutex
+		used := map[string]bool{}
 		api.OnContext(imageContext())
 		api.OnTurnStart(func(context.Context, extension.TurnStartEvent) error { clear(roots); return nil })
 		api.OnToolCall(func(_ context.Context, e extension.ToolCallEvent) (extension.ToolCallEventResult, error) {
@@ -72,6 +77,9 @@ func Extension(c Config) extension.InlineExtension {
 				}
 			}
 			roots[call.ToolCallID] = root
+			usedMu.Lock()
+			used[call.ToolName] = true
+			usedMu.Unlock()
 			switch {
 			case strings.HasPrefix(call.ToolName, "mcp__dyna__"):
 				call.Input[contract.ToolCallIDArgument] = root
@@ -79,6 +87,23 @@ func Extension(c Config) extension.InlineExtension {
 				call.Input["limit"] = searchLimit
 			}
 			return extension.ToolCallEventResult{}, nil
+		})
+		// A compaction unloads each tool tool_search could have loaded (exposure deferred or codemode) that nothing called
+		// since the last one; a search loads it again. PiG's compaction head then declares the tools left (dyna patch P11).
+		api.OnSessionBeforeCompact(func(context.Context, extension.SessionBeforeCompactEvent) (extension.SessionBeforeCompactResult, error) {
+			usedMu.Lock()
+			defer usedMu.Unlock()
+			searchable := map[string]bool{}
+			for _, tool := range api.GetAllTools() {
+				searchable[tool.Name] = tool.Exposure == extension.ToolExposureDeferred || tool.Exposure == extension.ToolExposureCodemode
+			}
+			active := api.GetActiveTools()
+			kept := slices.DeleteFunc(slices.Clone(active), func(name string) bool { return searchable[name] && !used[name] })
+			if len(kept) != len(active) {
+				api.SetActiveTools(kept)
+			}
+			clear(used)
+			return extension.SessionBeforeCompactResult{}, nil
 		})
 		postDefinition, err := postTool(c, post, roots)
 		if err != nil {
