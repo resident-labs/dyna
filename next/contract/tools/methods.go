@@ -126,6 +126,8 @@ var methodTable = []MethodEntry{
 	method(contract.MethodPoolRemove, contract.ScopeAdmin, OwnerAccess,
 		act("pool", "remove", typ[contract.PoolRemoveRequest](), "Remove an empty pool that no room names.", "pool remove"),
 	),
+	// Settings > Pools changes a pool; agents and the CLI have no action for it.
+	method(contract.MethodPoolSet, contract.ScopeAdmin, OwnerAccess),
 	// The owner decides; so does a room's root where its room setting allows. The approval service keeps its own check.
 	method(contract.MethodOpDecide, contract.ScopeAdmin, UserAccess,
 		act("op", "decide", typ[contract.OpDecideRequest](), "Decide an operation", "op approve", "op deny"),
