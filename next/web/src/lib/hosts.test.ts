@@ -101,6 +101,20 @@ test("Home names a room's shared folder only past a quarter of its host's disk, 
   assert.deepEqual(largeShared(host(0, [{ room: "a", bytes: quarter }])), []);
 });
 
+test("an exec-only host with figures shows the same three meters and is never low at 99% disk", () => {
+  const gib = 2 ** 30;
+  const execOnly = { name: "omarchy", reachable: true, boxes: 0, cpus: 8, memBytes: 16 * gib, cpuUsed: 2, memUsed: 4 * gib, diskBytes: 1000 * gib, diskUsed: 990 * gib, diskLow: true, execOnly: true, shared: [], history: null };
+  assert.deepEqual(hostMeters(execOnly).map(m => [m.label, m.percent]), [["CPU", 25], ["Memory", 25], ["Disk", 99]]);
+  assert.equal(diskLow(execOnly), false);
+  assert.deepEqual(hostLoads([execOnly]).map(h => [h.name, h.diskLow, h.meters.length]), [["omarchy", false, 2]]);
+  assert.deepEqual(hostLoads([{ ...execOnly, reachable: false }]).map(h => [h.reachable, h.meters.length]), [[false, 0]]);
+});
+
+test("an exec-only host with no figures has no meters, as before", () => {
+  const bare = { name: "omarchy", reachable: true, boxes: 0, cpus: 0, memBytes: 0, cpuUsed: 0, memUsed: 0, diskBytes: 0, diskUsed: 0, diskLow: false, execOnly: true, shared: [], history: null };
+  assert.deepEqual(hostMeters(bare), []);
+});
+
 test("an exec-only host is online or offline and never low on disk", () => {
   const execOnly = { name: "omarchy", reachable: true, boxes: 0, cpus: 0, memBytes: 0, cpuUsed: 0, memUsed: 0, diskBytes: 0, diskUsed: 0, diskLow: true, execOnly: true, shared: [], history: null };
   assert.equal(diskLow(execOnly), false);

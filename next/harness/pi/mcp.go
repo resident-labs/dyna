@@ -12,7 +12,8 @@ const DynaMCPURL = "http://127.0.0.1:7781/dyna/"
 // GitHubMCPURL is where the box agent passes GitHub's read-only MCP server through to the engine.
 const GitHubMCPURL = "http://127.0.0.1:7781/github/"
 
-// GitHubServer is the github server's entry: deferred like dyna's tools, and described so the model knows to search for it.
+// GitHubServer is the github server's entry: deferred like dyna's tools. Pi names its tools in the system prompt's
+// deferred_tools section; the description ranks them in tool_search and answers describeNamespace().
 func GitHubServer() MCPServer {
 	return MCPServer{URL: GitHubMCPURL, Exposure: "deferred", Timeout: 300, Description: "Read-only GitHub through the engine: search code, issues, PRs, commits and repos; read files, branches, tags, releases, PRs with files, diffs and reviews, issues and comments, Actions runs and job logs."}
 }
