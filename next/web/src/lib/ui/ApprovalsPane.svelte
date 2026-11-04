@@ -4,7 +4,7 @@
   import { approvalOn, autopilotConfirm, autopilotOn, autopilotRequest, rootApprovals, switchRequest } from "../autopilot.ts";
   import { confirm } from "../modal.ts";
   import type { RoomSetRequest, RoomSummary } from "../contract.gen.ts";
-  // Settings > Rooms. One card per room with a switch for each safeguard that waits for the owner today. A switch on lets the room's
+  // Settings > Approvals. One card per room with a switch for each safeguard that waits for the owner today. A switch on lets the room's
   // root decide that kind of request; the owner still can. The Autopilot button turns every switch on, or off when all are on.
   let { bar, signedout }: { bar: Snippet<[string, number | undefined, Snippet | undefined]>; signedout: () => void } = $props();
   let rooms: RoomSummary[] = $state.raw([]);
@@ -32,12 +32,12 @@
   }
 </script>
 
-{@render bar("Rooms", loaded ? rooms.length : undefined, undefined)}
+{@render bar("Approvals", loaded ? rooms.length : undefined, undefined)}
 <div class="body" data-page-ready={loaded || failed}>
   {#if failed}<p class="load" role="alert">The rooms did not load. <button type="button" class="retry" onclick={() => { failed = false; void reload(); }}>Try again</button></p>
   {:else if !loaded}<p class="load">Loading rooms…</p>
   {:else}
-    <p class="load">Every switch is off until you turn it on. With one on, the room's root decides that kind of request, and you still can.</p>
+    <p class="load">A switch lets the room's root decide that kind of request, and you still can.</p>
     {#each rooms as room (room.id)}
       <section aria-labelledby={`room-${room.id}`}>
         <header class="scope"><h2 id={`room-${room.id}`}>{room.name}</h2>
