@@ -18,10 +18,10 @@ export function descendants(sessions: SessionStarted[], id: string): string[] {
 
 // What a close costs, naming up to two of the sessions it takes along.
 export function closeNote(names: string[]): string {
-  if (!names.length) return "What it has not pushed is saved as a diff first.";
+  if (!names.length) return "If its box is running, what it has not pushed is saved as a diff first; otherwise it is lost.";
   const shown = names.slice(0, 2);
   const rest = names.length - shown.length;
-  return `Also closes ${rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.join(" and ")}. What they have not pushed is saved as a diff first.`;
+  return `Also closes ${rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.join(" and ")}. If a box is running, what it has not pushed is saved as a diff first; otherwise it is lost.`;
 }
 
 const holdingNames: Record<ResponsibilityKind, string> = {
