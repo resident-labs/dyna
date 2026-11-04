@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { approvalOn, autopilotConfirm, autopilotOn, autopilotRequest, rootApprovals, switchRequest } from "./autopilot.ts";
+import { approvalChips, approvalOn, approvalsLine, autopilotConfirm, autopilotOn, autopilotRequest, rootApprovals, switchRequest } from "./autopilot.ts";
 import type { RoomSummary } from "./contract.gen.ts";
 
 const room = (rootApproves?: RoomSummary["rootApproves"]) => ({ id: "room_a", name: "web", rootApproves }) as RoomSummary;
@@ -36,4 +36,12 @@ test("Autopilot asks, naming all four and the cost of pools, before turning on, 
   for (const item of rootApprovals) assert.ok(ask.message.includes(item.label.replace(/^Root /, "")), item.label);
   assert.match(ask.note, /cost money/);
   assert.equal(autopilotConfirm(room(["hostexec", "addons", "hosts", "pools"])), undefined);
+});
+
+test("the chips split rooms into Autopilot, some on and all off, and a narrow row names what is on", () => {
+  const rooms = [room(["hostexec", "addons", "hosts", "pools"]), room(["addons", "hosts"]), room([]), room()];
+  const counts = approvalChips.map(chip => rooms.filter(chip.test ?? (() => true)).length);
+  assert.deepEqual(approvalChips.map(chip => chip.label), ["All", "Autopilot", "Some on", "All off"]);
+  assert.deepEqual(counts, [4, 1, 1, 2]);
+  assert.deepEqual(rooms.map(approvalsLine), ["Autopilot", "Add-ons, Host rules", "All off", "All off"]);
 });

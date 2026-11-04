@@ -13,8 +13,9 @@
   import type { Device } from "../contract.gen.ts";
   // The Settings page, in the feed's and the sidebar's place. It opens over the app, so the room behind keeps its feed,
   // its position and its draft. A wide page opens the first pane. A phone opens the pane list, and a pane's arrow returns to it.
-  let { path, phone, navigate, onmenu, signedout, thishost, element = $bindable(), menu = $bindable() }: { path: string; phone: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void;
-    onmenu: (event: MouseEvent) => void; signedout: () => void; thishost: (host?: string) => void; element?: HTMLElement; menu?: HTMLButtonElement } = $props();
+  // moved tells the app that Settings changed the path itself, as a list page does when it opens an item.
+  let { path, phone, navigate, moved, onmenu, signedout, thishost, element = $bindable(), menu = $bindable() }: { path: string; phone: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void;
+    moved: () => void; onmenu: (event: MouseEvent) => void; signedout: () => void; thishost: (host?: string) => void; element?: HTMLElement; menu?: HTMLButtonElement } = $props();
 
   // device.list needs admin, so its refusal tells that this device has no Devices pane (spec 7.8).
   let devices: Device[] | undefined = $state.raw();
@@ -31,9 +32,26 @@
 
   // Appearance is on every device; Devices only on one with admin.
   let panes = $derived(settingsPanes.filter(pane => !pane.admin || admin));
-  let shown = $derived(panes.find(pane => path === `/settings/${pane.id}` || (pane.id === "accounts" && path.startsWith("/settings/accounts/"))) ?? (phone ? undefined : panes[0]));
+  let shown = $derived(panes.find(pane => path === `/settings/${pane.id}` || ((pane.id === "accounts" || pane.list) && path.startsWith(`/settings/${pane.id}/`))) ?? (phone ? undefined : panes[0]));
   // /settings and its trailing slash open the first pane or the list; any other path has no page.
-  let lost = $derived(!/^\/settings\/?$/.test(path) && !panes.some(pane => path === `/settings/${pane.id}` || (pane.id === "accounts" && /^\/settings\/accounts\/(?:add(?:\/[^/]+)?|account\/[^/]+|reconnect\/[^/]+)$/.test(path))));
+  let lost = $derived(!/^\/settings\/?$/.test(path) && !panes.some(pane => path === `/settings/${pane.id}` || (pane.list && new RegExp(`^/settings/${pane.id}/[^/]+$`).test(path))
+    || (pane.id === "accounts" && /^\/settings\/accounts\/(?:add(?:\/[^/]+)?|account\/[^/]+|reconnect\/[^/]+)$/.test(path))));
+
+  // A list page's open item is the path's last part (spec 5.13): a wide page moves it as the list's keys move, in place,
+  // and a narrow one opens it as a screen of its own, so Back returns to the list.
+  let item = $derived(shown?.list && path.startsWith(`/settings/${shown.id}/`) ? decodeURIComponent(path.slice(`/settings/${shown.id}/`.length)) : undefined);
+  function open(id: string, screen: boolean) {
+    const href = `/settings/${shown!.id}/${encodeURIComponent(id)}`;
+    if (href === path) return;
+    if (screen) history.pushState({ fromList: true }, "", href);
+    else history.replaceState(history.state, "", href);
+    moved();
+  }
+  function close() {
+    if (history.state?.fromList) { history.back(); return; }
+    history.replaceState(null, "", `/settings/${shown!.id}`);
+    moved();
+  }
   // The tab names the open pane, or Settings on the pane list. Settings owns the title while it is open.
   $effect(() => { document.title = `${lost ? "Not found" : shown?.label ?? "Settings"} · Dyna`; });
 </script>
@@ -55,7 +73,7 @@
     {:else if shown?.id === "accounts"}<AccountsPane {bar} {phone} {signedout} {path} {navigate} />
     {:else if shown?.id === "profiles"}<ProfilesPane {bar} {phone} {signedout} />
     {:else if shown?.id === "addons"}<AddonsPane {bar} {admin} {signedout} />
-    {:else if shown?.id === "approvals"}<ApprovalsPane {bar} {signedout} />
+    {:else if shown?.id === "approvals"}<ApprovalsPane {bar} {signedout} selected={item} onselect={open} onclose={close} />
     {:else}
       <header class="bar"><button type="button" class="round menu" bind:this={menu} aria-label="Rooms and pages" title="Rooms and pages" onclick={onmenu}><Icon name="menu" /></button><strong>Settings</strong></header>
       <nav class="list" aria-label="Settings panes">{#each panes as pane (pane.id)}
