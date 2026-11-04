@@ -1,14 +1,15 @@
 <script lang="ts">
   import { scopes } from "../devices.ts";
   import type { Scope } from "../contract.gen.ts";
-  // The 6 scopes as one row of checkboxes. An empty list grants more than the screen shows, so the last box stays checked.
-  let { value, onchange, disabled = false }: { value: readonly Scope[]; onchange: (next: Scope[]) => void; disabled?: boolean } = $props();
+  // The 6 scopes as one row of checkboxes, for the pair flow; a device's detail lists them with their meanings. An empty
+  // list grants more than the screen shows, so the last box stays checked.
+  let { value, onchange }: { value: readonly Scope[]; onchange: (next: Scope[]) => void } = $props();
   const pick = (scope: Scope, on: boolean) => onchange(scopes.map(item => item.scope).filter(item => item === scope ? on : value.includes(item)));
 </script>
 
 <fieldset class="boxes" aria-label="Access">
-  {#each scopes as { scope, label, about } (scope)}{@const on = value.includes(scope)}
-    <label title={about}><input type="checkbox" checked={on} disabled={disabled || (on && value.length === 1)} onchange={event => pick(scope, event.currentTarget.checked)} />{label}</label>
+  {#each scopes as { scope, label } (scope)}{@const on = value.includes(scope)}
+    <label><input type="checkbox" checked={on} disabled={on && value.length === 1} onchange={event => pick(scope, event.currentTarget.checked)} />{label}</label>
   {/each}
 </fieldset>
 
