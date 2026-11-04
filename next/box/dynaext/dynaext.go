@@ -12,7 +12,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 
 	"github.com/MichaelKinsy/PiG/ai"
 	"github.com/MichaelKinsy/PiG/coding/extension"
@@ -32,9 +34,6 @@ type Config struct {
 }
 
 const (
-	// searchLimit is how many tools a search loads unless the model chose a number. Each loaded tool stays declared
-	// for the rest of the session, and PiG's default of 8 is most of the dyna tools.
-	searchLimit = 3
 	// outputLimit is what the model reads of a long output; the whole output goes to a file.
 	outputLimit = 20 << 10
 	movedNote   = "The job is in the background. You can end your turn and Dyna will wake you when it completes."
@@ -60,6 +59,9 @@ func Extension(c Config) extension.InlineExtension {
 		}
 		// roots maps each call of the turn to the call the model made, which a nested call's post is linked to.
 		roots := map[string]string{}
+		// used holds the tools called since the session started or last compacted, nested calls of a script included.
+		var usedMu sync.Mutex
+		used := map[string]bool{}
 		api.OnContext(imageContext())
 		api.OnTurnStart(func(context.Context, extension.TurnStartEvent) error { clear(roots); return nil })
 		api.OnToolCall(func(_ context.Context, e extension.ToolCallEvent) (extension.ToolCallEventResult, error) {
@@ -72,14 +74,30 @@ func Extension(c Config) extension.InlineExtension {
 				}
 			}
 			roots[call.ToolCallID] = root
-			switch {
-			case strings.HasPrefix(call.ToolName, "mcp__dyna__"):
+			usedMu.Lock()
+			used[call.ToolName] = true
+			usedMu.Unlock()
+			if strings.HasPrefix(call.ToolName, "mcp__dyna__") {
 				call.Input[contract.ToolCallIDArgument] = root
-			case call.ToolName == "tool_search" && call.Input["limit"] == nil:
-				call.Input["limit"] = searchLimit
 			}
 			return extension.ToolCallEventResult{}, nil
 		})
+		// A compaction unloads each tool tool_search could have loaded (exposure deferred or codemode) that nothing called
+		// since the last one; a search loads it again. PiG's compaction head then declares the tools left (dyna patch P11).
+		api.OnSessionBeforeCompact(func(context.Context, extension.SessionBeforeCompactEvent) (extension.SessionBeforeCompactResult, error) {
+			usedMu.Lock()
+			defer usedMu.Unlock()
+			searchable := map[string]bool{}
+			for _, tool := range api.GetAllTools() {
+				searchable[tool.Name] = tool.Exposure == extension.ToolExposureDeferred || tool.Exposure == extension.ToolExposureCodemode
+			}
+			active := api.GetActiveTools()
+			kept := slices.DeleteFunc(slices.Clone(active), func(name string) bool { return searchable[name] && !used[name] })
+			api.SetActiveTools(kept)
+			clear(used)
+			return extension.SessionBeforeCompactResult{}, nil
+		})
+
 		// What a server other than dyna returns is outside text: github's as itself, any other by its name. Its author is each
 		// item's own and unknown here.
 		api.OnToolResult(outsideResult)
