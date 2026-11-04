@@ -16,7 +16,8 @@ type Load struct {
 	CPUUsed                                float64
 	MemBytes, MemUsed, DiskBytes, DiskUsed int64
 	ShareUp                                bool // The host's shared mount is up.
-	ExecOnly                               bool // An exec-only host: the beat says only that it answers, and the rest is zero.
+	CPUs                                   int  // Cores of an exec-only host's whole machine; zero on other hosts and when it printed none.
+	ExecOnly                               bool // An exec-only host: the figures are the whole machine's, for display only.
 }
 
 // LocalDisk reads the disk at path on this machine with the host probe. It returns zeros when the probe fails.
@@ -42,6 +43,15 @@ func parseDisk(out []byte) (bytes, used int64) {
 	return 0, 0
 }
 
+// execOnlyScript prints the whole machine's figures for an exec-only host, which has no dyna.slice and no Dyna data folder. The
+// disk is the home folder's filesystem by plain df: it is only shown, so the btrfs adjustment of diskScript would mislead.
+// A line is missing where the host cannot say it, and the script always succeeds, so such a host is still just online.
+const execOnlyScript = `read -r size avail < <(df -B1 --output=size,avail "${HOME:-/}" 2>/dev/null | awk 'NR == 2 {print $1, $2}'); [ -z "$size" ] || echo "dyna-disk $size $((size - avail))"
+echo "dyna-cpus $(nproc 2>/dev/null)"
+awk '/^cpu / {t = 0; for (i = 2; i <= 9; i++) t += $i; printf "dyna-cpu %.0f %.0f\n", t - $5 - $6, t}' /proc/stat 2>/dev/null
+awk '$1 == "MemTotal:" {t = $2} $1 == "MemAvailable:" {a = $2} END {if (t) printf "dyna-mem %.0f %.0f\n", t * 1024, (t - a) * 1024}' /proc/meminfo 2>/dev/null
+exit 0`
+
 // heartbeatProbe bounds one probe. It includes the wait for the host's gate, and a host under heavy load can take many
 // seconds to start a shell, so it is generous.
 const heartbeatProbe = 20 * time.Second
@@ -57,7 +67,7 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box
 	misses, busy := 0, false
 	seen := make(map[string]*slicePressure)
 	var prevTime time.Time
-	var prevCPU int64
+	var prevCPU, prevBusy, prevTotal int64
 	var load Load
 	for {
 		select {
@@ -69,7 +79,7 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box
 			var out []byte
 			var err error
 			if execOnly {
-				out, err = h.runUnbounded(probeCtx, nil, "bash", "-c", "true")
+				out, err = h.runUnbounded(probeCtx, nil, "bash", "-c", execOnlyScript)
 			} else {
 				out, err = h.runUnbounded(probeCtx, nil, "bash", "-c", heartbeatScript, "dyna", layout.HostData, layout.HostShareMount())
 			}
@@ -95,6 +105,22 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box
 			misses, busy = 0, false
 			if execOnly {
 				load = Load{ExecOnly: true}
+				load.DiskBytes, load.DiskUsed = parseDisk(out)
+				for _, line := range strings.Split(string(out), "\n") {
+					var busy, total int64
+					if n, _ := fmt.Sscanf(line, "dyna-cpus %d", &load.CPUs); n == 1 {
+						continue
+					}
+					if n, _ := fmt.Sscanf(line, "dyna-mem %d %d", &load.MemBytes, &load.MemUsed); n == 2 {
+						continue
+					}
+					if n, _ := fmt.Sscanf(line, "dyna-cpu %d %d", &busy, &total); n == 2 {
+						if prevTotal > 0 && total > prevTotal && busy >= prevBusy {
+							load.CPUUsed = float64(busy-prevBusy) / float64(total-prevTotal) * float64(load.CPUs)
+						}
+						prevBusy, prevTotal = busy, total
+					}
+				}
 				report(true, load)
 				continue
 			}

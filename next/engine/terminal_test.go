@@ -84,3 +84,24 @@ func TestHostListExecOnlyIsNeverDiskLow(t *testing.T) {
 		}
 	}
 }
+
+// Even if the store held a 99% full disk for an exec-only host, host list never calls it low and it takes no agents or CI.
+func TestHostListExecOnlyAt99PercentIsNeitherLowNorPlaceable(t *testing.T) {
+	s, _, _, ctx := setup(t)
+	if err := s.store.AddHost(ctx, box.Host{Name: "omarchy", State: box.HostReady, NoAgents: true, ExecOnly: true, CheckedAt: s.now()}); err != nil {
+		t.Fatal(err)
+	}
+	free := 10 * box.GiB
+	if err := s.store.RecordHostHeartbeat(ctx, "omarchy", true, &free, 1000*box.GiB, s.now()); err != nil {
+		t.Fatal(err)
+	}
+	list, problem := s.HostList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.HostListRequest{})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	for _, h := range list.Hosts {
+		if h.Name == "omarchy" && (h.DiskLow || h.Agents || h.CI) {
+			t.Fatalf("%+v", h)
+		}
+	}
+}
