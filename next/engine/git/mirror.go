@@ -80,7 +80,7 @@ func (m *Mirror) Seed(ctx context.Context, host CacheHost, repo contract.RepoNam
 	}
 	reason := "the fetch failed"
 	if errors.Is(err, context.DeadlineExceeded) {
-		reason = "GitHub did not answer in " + timeout.String()
+		reason = "the refresh did not finish in " + timeout.String()
 	}
 	item, err = m.Prepare(ctx, host, repo, session, false)
 	return item, "Its repository's " + item.Base + " was not refreshed from GitHub at start (" + reason + "); `git fetch origin " + item.Base + "` brings it current.", err
