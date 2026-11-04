@@ -67,7 +67,7 @@ type Decision struct {
 
 type PrOpenArgs struct {
 	Title string `json:"title"`
-	Body  string `json:"body"`
+	Body  string `json:"body,omitempty"` // the returned operation leaves it out, so an absent body is not read as a dropped one
 	Base  string `json:"base"`
 	Head  string `json:"head,omitempty"`
 	Draft bool   `json:"draft"`

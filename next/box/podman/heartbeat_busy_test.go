@@ -3,6 +3,9 @@ package podman
 import (
 	"context"
 	"errors"
+	"os/exec"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,9 +91,9 @@ func TestHeartbeatGoneHostIsUnreachable(t *testing.T) {
 	}
 }
 
-// An exec-only host's heartbeat only runs `true`: no probe script, no load, and the report says exec only.
-func TestHeartbeatExecOnlyAsksOnlyThatTheHostAnswers(t *testing.T) {
-	r := &runner{}
+// An exec-only host's heartbeat runs the whole-machine probe, not the Dyna one, and turns two samples into cores busy, memory and disk.
+func TestHeartbeatExecOnlyReportsWholeMachineFigures(t *testing.T) {
+	r := &runner{body: "dyna-disk 1000 990\ndyna-cpus 8\ndyna-cpu 100 1000\ndyna-mem 16000 4000\n"}
 	h := newTestHost(t, r)
 	h.SetExecOnly(func() bool { return true })
 	ctx, cancel := context.WithCancel(context.Background())
@@ -99,15 +102,45 @@ func TestHeartbeatExecOnlyAsksOnlyThatTheHostAnswers(t *testing.T) {
 	loads := make(chan Load, 4)
 	go h.Heartbeat(ctx, ticks, box.Layout{HostData: "/data"}, func(ok bool, load Load) { loads <- load }, func(string, contract.PressureKind) { t.Error("pressure") })
 	ticks <- time.Unix(1000, 0)
+	<-loads
+	r.body = "dyna-disk 1000 995\ndyna-cpus 8\ndyna-cpu 300 1400\ndyna-mem 16000 5000\n"
+	ticks <- time.Unix(1010, 0)
 	load := <-loads
-	if !load.ExecOnly || load.DiskBytes != 0 || load.MemUsed != 0 {
-		t.Fatalf("load %+v", load)
+	want := Load{ExecOnly: true, CPUs: 8, CPUUsed: 4, MemBytes: 16000, MemUsed: 5000, DiskBytes: 1000, DiskUsed: 995}
+	if load != want {
+		t.Fatalf("load %+v, want %+v", load, want)
 	}
 	for _, call := range r.calls {
 		for _, a := range call {
-			if a == "dyna-disk" || a == "/data" {
+			if strings.Contains(a, "dyna.slice") || a == "/data" {
 				t.Fatalf("full probe ran: %v", call)
 			}
 		}
+	}
+}
+
+// An exec-only host that prints no figures, such as one without /proc, is still online with nothing to show.
+func TestHeartbeatExecOnlyWithoutFiguresIsOnline(t *testing.T) {
+	h := newTestHost(t, &runner{})
+	h.SetExecOnly(func() bool { return true })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ticks := make(chan time.Time)
+	loads := make(chan Load, 1)
+	go h.Heartbeat(ctx, ticks, box.Layout{}, func(ok bool, load Load) { loads <- load }, func(string, contract.PressureKind) {})
+	ticks <- time.Unix(1000, 0)
+	if load := <-loads; load != (Load{ExecOnly: true}) {
+		t.Fatalf("load %+v", load)
+	}
+}
+
+// The exec-only probe itself prints each figure on this machine and exits 0.
+func TestExecOnlyScriptPrintsTheMachinesFigures(t *testing.T) {
+	out, err := exec.Command("bash", "-c", execOnlyScript).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`^dyna-disk \d+ \d+\ndyna-cpus \d+\ndyna-cpu \d+ \d+\ndyna-mem \d+ \d+\n$`).Match(out) {
+		t.Fatalf("probe printed %q", out)
 	}
 }
