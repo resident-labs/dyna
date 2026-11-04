@@ -455,6 +455,7 @@ type HostSummary struct {
 	CI           bool                 `json:"ci,omitempty"`         // the CI pool may start runners on this added host
 	ExecOnly     bool                 `json:"execOnly,omitempty"`   // added exec only: host-exec runs, no boxes or runners
 	Runners      int                  `json:"runners,omitempty"`    // the CI runners on this added host now
+	Rooms        []RoomID             `json:"rooms,omitempty"`      // the rooms this added host serves (host.set_limits); none means every room
 	LastSeen     time.Time            `json:"lastSeen,omitzero"`
 	History      []HostLoadPoint      `json:"history"`
 }
