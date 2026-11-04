@@ -477,7 +477,12 @@ func (s *Service) BoxStopped(ctx context.Context, id contract.SessionID) {
 		log.Printf("session %s: box restart: %v", id, err)
 		return
 	}
-	notice, err := s.engineEvent(session.Room, contract.SessionNotice{Session: id, Text: room.BoxRestartedNotice, ClientID: store.BoxUpdateNoticeID(session.Box, "restarted:"+mark)})
+	openGoal, err := s.store.HasOpenGoal(ctx, id)
+	if err != nil {
+		log.Printf("session %s: box restart: %v", id, err)
+		return
+	}
+	notice, err := s.engineEvent(session.Room, contract.SessionNotice{Session: id, Text: room.BoxRestartedNotice(openGoal), ClientID: store.BoxUpdateNoticeID(session.Box, "restarted:"+mark)})
 	if err == nil {
 		err = s.store.WakeWithNotice(ctx, notice, id)
 	}

@@ -153,11 +153,19 @@ type SessionStarted struct {
 	Workflow bool        `json:"workflow,omitempty"`
 }
 
-// SessionRestarted is a session's box being replaced or updated.
+// SessionRestarted is a session's box being replaced, updated or started again. With neither flag the box was recreated from
+// nothing after it failed.
 type SessionRestarted struct {
 	Session SessionID `json:"session"`
 	// ImageUpdated marks a new container on the same volume, as opposed to a box restarted from nothing.
 	ImageUpdated bool `json:"imageUpdated,omitempty"`
+	// Stopped marks the same container started again after it stopped, as after a host reboot or a crash.
+	Stopped bool `json:"stopped,omitempty"`
+	// OpenGoal is whether the session held an open goal when the engine wrote the notice. The notice then tells it to continue,
+	// and wakes it.
+	OpenGoal bool `json:"openGoal,omitempty"`
+	// ClientID names one box start, so the same restart told twice reaches the session once.
+	ClientID string `json:"clientId,omitempty"`
 }
 
 type SessionMoved struct {
