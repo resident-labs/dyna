@@ -11,6 +11,7 @@ const (
 	ContextHolds    ContextSectionKey = "dyna_holds"
 	ContextProfiles ContextSectionKey = "dyna_profiles"
 	ContextUsage    ContextSectionKey = "dyna_usage"
+	ContextRoom     ContextSectionKey = "dyna_room"
 )
 
 // ContextSnapshotRequest selects one section. An empty section requests all sections.
