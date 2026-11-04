@@ -58,7 +58,23 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		if err != nil {
 			return contract.BoxHelloResponse{}, failure(err)
 		}
-		repos, err = s.repos.Get(ctx, session.ID, current.Host, false)
+		// A session's first setup cuts its branch from the cache, so the cache is made current now, not at box creation.
+		hadTurns, err := s.store.SessionHasTurns(ctx, session.ID)
+		if err != nil {
+			return contract.BoxHelloResponse{}, failure(err)
+		}
+		if hadTurns {
+			repos, err = s.repos.Get(ctx, session.ID, current.Host, false)
+		} else {
+			var stale string
+			repos, stale, err = s.repos.Seed(ctx, session.ID, current.Host)
+			if err == nil && stale != "" {
+				var event contract.Event
+				if event, err = s.engineEvent(session.Room, contract.SessionNotice{Session: session.ID, Text: stale, ClientID: "seed-stale:" + string(session.Box)}); err == nil {
+					err = s.store.SendSessionNotice(ctx, event, session.ID)
+				}
+			}
+		}
 		if err != nil {
 			return contract.BoxHelloResponse{}, failure(err)
 		}
