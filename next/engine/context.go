@@ -21,7 +21,7 @@ const holdsChars = 1000
 // roomChars is the budget of dyna_room.
 const roomChars = 400
 
-// rootApprovalNames name the root-approves kinds as Settings > Rooms does.
+// rootApprovalNames name the root-approves kinds as Settings > Approvals does.
 var rootApprovalNames = map[contract.RootApproval]string{
 	contract.RootApprovesHostexec: "host exec",
 	contract.RootApprovesAddons:   "global add-ons",
