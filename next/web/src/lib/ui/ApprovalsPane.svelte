@@ -96,7 +96,8 @@
 {/snippet}
 
 {#snippet summary()}
-  {#if rooms}<p class="muted">{rooms.length.toLocaleString("en")} {rooms.length === 1 ? "room" : "rooms"} · {count(autopilotOn)} on Autopilot · {count(approvalChips[2].test!)} with some switches on · {count(approvalChips[3].test!)} all off</p>{/if}
+  {#if rooms}<p class="muted"><span class="fact">{rooms.length.toLocaleString("en")} {rooms.length === 1 ? "room" : "rooms"}</span> <span class="fact">· {count(autopilotOn)} on Autopilot</span>
+    <span class="fact">· {count(approvalChips[2].test!)} with some switches on</span> <span class="fact">· {count(approvalChips[3].test!)} all off</span></p>{/if}
 {/snippet}
 
 {#snippet header()}{@render bar("Approvals", rooms?.length, undefined)}{/snippet}
