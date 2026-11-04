@@ -43,7 +43,7 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 			return contract.BoxHelloResponse{}, failure(err)
 		}
 	} else if current.State != contract.BoxReady && current.State != contract.BoxClosing {
-		return contract.BoxHelloResponse{}, invalid("box is not starting, ready, or archiving")
+		return contract.BoxHelloResponse{}, invalid("box is not starting, ready, or closing")
 	}
 	if err := s.store.ForgetShellJobs(ctx, session.ID); err != nil {
 		return contract.BoxHelloResponse{}, failure(err)
