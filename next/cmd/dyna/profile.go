@@ -30,7 +30,7 @@ func profileCommand(getClient func() client) *cobra.Command {
 		}
 		for _, e := range result.Profiles {
 			p := e.Profile
-			fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s %s\t%s\timages %s\t%d in use\n", p.Name, p.Provider, p.Model, p.Thinking, onOff(*p.Images), e.InUse)
+			fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s %s\t%s\timages %s\t%d in use\n", p.Name, p.Provider, p.Model, p.Thinking, onOff(p.Images == nil || *p.Images), e.InUse)
 		}
 		return nil
 	}}
@@ -41,7 +41,7 @@ func profileCommand(getClient func() client) *cobra.Command {
 		}
 		p := e.Profile
 		fmt.Fprintf(cmd.OutOrStdout(), "name: %s\ndescription: %s\nprovider: %s\nmodel: %s\nallowed-models: %s\nthinking: %s\nimages: %s\ntaste: %d\ndiagnostics: %d\nintelligence: %d\ncost: %d\ncompact-tokens: %d\nmax-concurrent: %d\nin-use: %d\n",
-			p.Name, p.Description, p.Provider, p.Model, strings.Join(p.AllowedModels, ","), p.Thinking, onOff(*p.Images), p.Taste, p.Diagnostics, p.Intelligence, p.Cost, p.CompactTokens, p.MaxConcurrent, e.InUse)
+			p.Name, p.Description, p.Provider, p.Model, strings.Join(p.AllowedModels, ","), p.Thinking, onOff(p.Images == nil || *p.Images), p.Taste, p.Diagnostics, p.Intelligence, p.Cost, p.CompactTokens, p.MaxConcurrent, e.InUse)
 		return nil
 	}}
 	var (
@@ -63,35 +63,50 @@ func profileCommand(getClient func() client) *cobra.Command {
 			}
 			p = e.Profile
 		}
-		changed := 0
-		for _, field := range []struct {
-			flag  string
-			apply func() error
-		}{
-			{"description", func() error { p.Description = description; return nil }},
-			{"provider", func() error { p.Provider = contract.ModelProvider(provider); return nil }},
-			{"model", func() error { p.Model = model; return nil }},
-			{"allowed-models", func() error { p.AllowedModels = allowed; return nil }},
-			{"thinking", func() error { p.Thinking = contract.ThinkingLevel(thinking); return nil }},
-			{"images", func() error {
-				on, err := hostSwitch("images", images)
-				p.Images = on
-				return err
-			}},
-			{"taste", func() error { p.Taste = taste; return nil }},
-			{"diagnostics", func() error { p.Diagnostics = diagnostics; return nil }},
-			{"intelligence", func() error { p.Intelligence = intelligence; return nil }},
-			{"cost", func() error { p.Cost = cost; return nil }},
-			{"compact-tokens", func() error { p.CompactTokens = compactTokens; return nil }},
-			{"max-concurrent", func() error { p.MaxConcurrent = maxConcurrent; return nil }},
-		} {
-			if !cmd.Flags().Changed(field.flag) {
-				continue
-			}
-			if err := field.apply(); err != nil {
+		flags := cmd.Flags()
+		changed := flags.NFlag()
+		if create {
+			changed--
+		}
+		if flags.Changed("description") {
+			p.Description = description
+		}
+		if flags.Changed("provider") {
+			p.Provider = contract.ModelProvider(provider)
+		}
+		if flags.Changed("model") {
+			p.Model = model
+		}
+		if flags.Changed("allowed-models") {
+			p.AllowedModels = allowed
+		}
+		if flags.Changed("thinking") {
+			p.Thinking = contract.ThinkingLevel(thinking)
+		}
+		if flags.Changed("images") {
+			on, err := hostSwitch("images", images)
+			if err != nil {
 				return err
 			}
-			changed++
+			p.Images = on
+		}
+		if flags.Changed("taste") {
+			p.Taste = taste
+		}
+		if flags.Changed("diagnostics") {
+			p.Diagnostics = diagnostics
+		}
+		if flags.Changed("intelligence") {
+			p.Intelligence = intelligence
+		}
+		if flags.Changed("cost") {
+			p.Cost = cost
+		}
+		if flags.Changed("compact-tokens") {
+			p.CompactTokens = compactTokens
+		}
+		if flags.Changed("max-concurrent") {
+			p.MaxConcurrent = maxConcurrent
 		}
 		if changed == 0 && !create {
 			return fmt.Errorf("give at least one field to change, such as --thinking")

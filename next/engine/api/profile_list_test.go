@@ -89,6 +89,12 @@ func TestProfileWrites(t *testing.T) {
 	if got := request(a.handler(boxCaller()), "/v1/profile.set", body); got.Code != http.StatusForbidden {
 		t.Fatalf("session: %d", got.Code)
 	}
+	if got := request(a.handler(boxCaller()), "/v1/profile.remove", `{"name":"original"}`); got.Code != http.StatusForbidden {
+		t.Fatalf("session remove: %d", got.Code)
+	}
+	if _, _, err := profiles.Model("original"); err != nil {
+		t.Fatalf("a refused session removed the profile: %v", err)
+	}
 	if got := request(owner, "/v1/profile.set", body); got.Code != http.StatusOK {
 		t.Fatalf("set: %d %s", got.Code, got.Body)
 	}
