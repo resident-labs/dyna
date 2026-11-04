@@ -128,7 +128,7 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	} else {
 		lines = append(lines, "Files: /box/shared is the room's shared folder, the same files in every box of the room.")
 	}
-	lines = append(lines, "Notices: an input that arrives \"as a system notice\" comes from the engine and comes from the engine and states what happened and what it changed; a notice that restarts a session whose box stopped, restarted or was recreated, while it holds an open goal, also says to continue the goal.")
+	lines = append(lines, "Notices: an input that arrives \"as a system notice\" comes from the engine and states what happened and what it changed; a notice that restarts a session whose box stopped, restarted or was recreated, while it holds an open goal, also says to continue the goal.")
 	instructions := strings.Join(lines, "\n")
 	var workflow *contract.BoxWorkflow
 	run, err := s.store.SessionWorkflow(ctx, session.ID)
