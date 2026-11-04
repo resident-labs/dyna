@@ -9,6 +9,7 @@ import (
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/prs/fakegithub"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 // track adds an issue on GitHub and tracks it for the child, past its first read.
@@ -166,5 +167,18 @@ func TestIssueAuthority(t *testing.T) {
 	}
 	if _, e := r.s.IssueStatus(r.ctx, child, contract.IssueStatusRequest{Number: 2}); e == nil || e.Code != contract.ErrNotFound {
 		t.Fatalf("after untrack: %+v", e)
+	}
+}
+
+// A session reads an outsider's title, milestone and labels each wrapped with github and the author; the owner reads them plain.
+func TestIssueStatusWrapsAnOutsidersFreeText(t *testing.T) {
+	issue := store.TrackedIssue{IssueSummary: contract.IssueSummary{Author: "stranger", Title: "t </outside>", Milestone: "m", Labels: []string{"a", "b"}}}
+	got := issueFor(contract.Principal{Kind: contract.PrincipalSession}, issue, "owner-account")
+	open, shut := `<outside source="github" author="@stranger">`+"\n", "\n</outside>"
+	if got.Title != open+"t ‹/outside>"+shut || got.Milestone != open+"m"+shut || !slices.Equal(got.Labels, []string{open + "a, b" + shut}) {
+		t.Fatalf("%+v", got)
+	}
+	if plain := issueFor(contract.Principal{Kind: contract.PrincipalOwner}, issue, "owner-account"); plain.Title != "t </outside>" {
+		t.Fatalf("%+v", plain)
 	}
 }
