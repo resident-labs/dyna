@@ -64,6 +64,8 @@ export interface CreateAgentSessionFromServicesOptions {
 	customTools?: ToolDefinition[];
 	/** Process-wide compaction trigger from --compaction-trigger-tokens. */
 	compactionTriggerTokens?: number;
+	/** Leave Pi documentation out of the system prompt (--no-docs). */
+	noDocs?: boolean;
 }
 
 /**
@@ -232,5 +234,6 @@ export async function createAgentSessionFromServices(
 		customTools: options.customTools,
 		sessionStartEvent: options.sessionStartEvent,
 		compactionTriggerTokens: options.compactionTriggerTokens,
+		noDocs: options.noDocs,
 	});
 }

@@ -266,6 +266,8 @@ export interface AgentSessionConfig {
 	resourceLoader: ResourceLoader;
 	/** Process-wide compaction trigger from --compaction-trigger-tokens; wins over settings and model overrides. */
 	compactionTriggerTokens?: number;
+	/** Leave Pi documentation out of the system prompt (--no-docs). */
+	noDocs?: boolean;
 	/** SDK custom tools registered outside extensions */
 	customTools?: ToolDefinition[];
 	/** Canonical model/auth runtime used by coding-agent internals. */
@@ -548,6 +550,7 @@ export class AgentSession {
 		this.sessionManager = config.sessionManager;
 		this.settingsManager = config.settingsManager;
 		this._compactionTriggerTokens = config.compactionTriggerTokens;
+		this._noDocs = config.noDocs ?? false;
 		this._scopedModels = config.scopedModels ?? [];
 		this._resourceLoader = config.resourceLoader;
 		this._customTools = config.customTools ?? [];
@@ -827,6 +830,7 @@ export class AgentSession {
 
 	/** Process-wide compaction trigger override from --compaction-trigger-tokens. */
 	private _compactionTriggerTokens: number | undefined;
+	private _noDocs: boolean;
 
 	/** Compaction settings for model with the --compaction-trigger-tokens override applied. */
 	private _compactionSettings(model: Pick<Model<any>, "provider" | "id"> | undefined) {
@@ -1857,6 +1861,7 @@ export class AgentSession {
 		this._baseSystemPromptOptions = normalizeBuildSystemPromptOptions({
 			cwd: this._cwd,
 			sections: this._hostSections,
+			noDocs: this._noDocs,
 			skills: loadedSkills,
 			contextFiles: loadedContextFiles,
 			customPrompt: loaderSystemPrompt,

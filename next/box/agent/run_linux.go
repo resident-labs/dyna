@@ -66,13 +66,14 @@ func modelArgs(model contract.ModelChoice, compactTokens int) ([]string, error) 
 	return args, nil
 }
 
-// piArgs appends the fixed Pi flags to the model flags. "+codemode" adds the
+// piArgs appends the fixed Pi flags to the model flags. "--no-docs" leaves Pi's
+// documentation block out of the system prompt. "+codemode" adds the
 // codemode tool to Pi's default tools, so it stays active whatever MCP
 // exposure the servers use. The extension's bash takes the place of Pi's, and
 // "+bash" keeps it active in a resumed session: Pi restores the tools a
 // transcript recorded, and applies these on top.
 func piArgs(args []string, extensionPath, instructions, modelsPath, sessions, mcpPath string) []string {
-	args = append(args, "--extension", extensionPath, "--append-system-prompt", instructions)
+	args = append(args, "--extension", extensionPath, "--append-system-prompt", instructions, "--no-docs")
 	return append(args, "--mode", "rpc", "--models-file", modelsPath, "--session-dir", sessions, "--mcp-config", mcpPath, "--tools", "+codemode,+bash")
 }
 
