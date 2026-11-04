@@ -807,30 +807,25 @@ func (w recordingWorker) Start(ctx context.Context, id contract.TurnID, inputs [
 	return w.fakeWorker.Start(ctx, id, inputs, started)
 }
 
-func TestAForgottenStepFinishesBeforeTheRunEnds(t *testing.T) {
+func TestAForgottenStepEndsWithTheRun(t *testing.T) {
 	h := newCrewHarness(t)
-	gate := make(chan struct{})
-	h.hold = func(ctx context.Context, _ string) error {
-		select {
-		case <-gate:
+	started := make(chan struct{})
+	var cancelled atomic.Bool
+	h.hold = func(ctx context.Context, prompt string) error {
+		if prompt == "wait" {
+			<-started
 			return nil
-		case <-ctx.Done():
-			return ctx.Err()
 		}
+		close(started)
+		<-ctx.Done()
+		cancelled.Store(true)
+		return ctx.Err()
 	}
-	_, ended := h.start(crewMeta + `agent("slow"); return "returned"`)
-	waitFor(t, "the forgotten step to start", func() bool { return h.started.Load() == 1 })
-	select {
-	case turn := <-ended:
-		t.Fatalf("the run ended with its step running: %+v", turn)
-	case <-time.After(200 * time.Millisecond):
+	ended := h.run(crewMeta + `agent("slow"); await agent("wait"); return "returned"`)
+	if ended.Outcome != contract.TurnCompleted || ended.Final != "returned" {
+		t.Fatalf("turn %+v", ended)
 	}
-	close(gate)
-	turn := <-ended
-	if turn.Outcome != contract.TurnCompleted || turn.Final != "returned" {
-		t.Fatalf("turn %+v", turn)
-	}
-	if done := h.journal.steps; len(done) != 1 {
-		t.Fatalf("%d steps in the journal", len(done))
+	if !cancelled.Load() {
+		t.Fatal("the forgotten step was left running past the run")
 	}
 }

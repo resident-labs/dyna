@@ -222,13 +222,14 @@ func Run(ctx context.Context) error {
 		h, files = crew, crew.Files
 	} else {
 		session, err := pig.Open(ctx, pig.Config{
-			Dir:          workdir,
-			AgentDir:     piDir,
-			SessionDir:   sessions,
-			Model:        hello.Model,
-			Instructions: hello.Instructions,
-			Extensions:   []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: workdir, Shell: jobs, Dyna: dynaTools})},
-			Notice:       func(text string) { go notice(text) },
+			Dir:           workdir,
+			AgentDir:      piDir,
+			SessionDir:    sessions,
+			Model:         hello.Model,
+			CompactTokens: hello.CompactTokens,
+			Instructions:  hello.Instructions,
+			Extensions:    []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: workdir, Shell: jobs, Dyna: dynaTools})},
+			Notice:        func(text string) { go notice(text) },
 		})
 		if err != nil {
 			return err
