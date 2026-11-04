@@ -5,8 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -206,5 +209,125 @@ func TestRunShowsAFailedCdInItsOutput(t *testing.T) {
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) || exit.ExitCode() != 254 || !strings.Contains(string(out), "/nonexistent-dir") {
 		t.Fatalf("err %v, out %q", err, out)
+	}
+}
+
+// runIn starts a RunArgs run on its own process group with a fake systemd-run, in tmp as the host's temp directory.
+func runIn(t *testing.T, tmp string, a contract.HostexecRunArgs, op contract.OpID) (*exec.Cmd, *strings.Builder) {
+	t.Helper()
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "systemd-run"), []byte("#!/bin/bash\nwhile [ \"$1\" != -- ]; do shift; done; shift; exec \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	args := RunArgs(a, op)
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin", "TMPDIR=" + tmp}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	out := &strings.Builder{}
+	cmd.Stdout = out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	return cmd, out
+}
+
+// A run whose SSH call is cut (the engine restarted, or the connection dropped) goes on: a later call that follows the same
+// files gets the whole output from the start and the command's own exit status.
+func TestRunSurvivesItsCallAndCanBeFollowed(t *testing.T) {
+	tmp := t.TempDir()
+	a := contract.HostexecRunArgs{Argv: []string{"bash", "-c", `touch "$DYNA_OUT/up"; echo one; sleep 1; echo two; exit 7`}, Timeout: 10000}
+	cmd, _ := runIn(t, tmp, a, "op9")
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if _, err := os.Stat(filepath.Join(tmp, "dyna-out-op9", "up")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the command printed nothing")
+		}
+	}
+	// The runner is in no group or session of the call, which is what a dropped connection ends.
+	pid, err := os.ReadFile(filepath.Join(tmp, "dyna-out-op9.run", "pid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := strconv.Atoi(strings.TrimSpace(string(pid)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if group, err := syscall.Getpgid(runner); err != nil || group == cmd.Process.Pid {
+		ps, _ := exec.Command("bash", "-c", "ps -eo pid,ppid,pgid,sid,stat,cmd | cut -c1-90 | grep -E dyna-runner").CombinedOutput()
+		t.Fatalf("pid %d group %d: %v\n%s", runner, group, err, ps)
+	}
+	// The call is cut as the connection's end cuts it: everything it started in its process group dies.
+	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Wait()
+	a.Attach = true
+	follow, out := runIn(t, tmp, a, "op9")
+	err = follow.Wait()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 7 || out.String() != "one\ntwo\n" {
+		t.Fatalf("follow: %v, output %q", err, out)
+	}
+}
+
+// Following a run the host holds no files for ends with the status that says so, and prints nothing.
+func TestFollowingARunTheHostLacksEndsWithNoRunStatus(t *testing.T) {
+	cmd, out := runIn(t, t.TempDir(), contract.HostexecRunArgs{Argv: []string{"true"}, Timeout: 1000, Attach: true}, "gone")
+	err := cmd.Wait()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != NoRunStatus || out.String() != NoRunOutput("gone") {
+		t.Fatalf("follow: %v, output %q", err, out)
+	}
+}
+
+// A run's output and status sit in a folder only its user can enter, with files only the user can read, whatever the user's umask,
+// and a path someone planted where the folder goes is refused, not followed.
+func TestRunFilesArePrivateToTheirUser(t *testing.T) {
+	tmp := t.TempDir()
+	cmd, _ := runIn(t, tmp, contract.HostexecRunArgs{Argv: []string{"true"}, Timeout: 1000}, "m1")
+	if err := cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(tmp, "dyna-out-m1.run")
+	info, err := os.Stat(dir)
+	if err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("folder %v: %v", info, err)
+	}
+	for _, name := range []string{"log", "pid", "exit"} {
+		if info, err := os.Stat(filepath.Join(dir, name)); err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("%s %v: %v", name, info, err)
+		}
+	}
+
+	target := t.TempDir()
+	if err := os.Symlink(target, filepath.Join(tmp, "dyna-out-m2.run")); err != nil {
+		t.Fatal(err)
+	}
+	cmd, _ = runIn(t, tmp, contract.HostexecRunArgs{Argv: []string{"true"}, Timeout: 1000}, "m2")
+	var exit *exec.ExitError
+	if err := cmd.Wait(); !errors.As(err, &exit) || exit.ExitCode() != 254 {
+		t.Fatalf("a planted link: %v", err)
+	}
+	if left, _ := os.ReadDir(target); len(left) != 0 {
+		t.Fatalf("written through the link: %v", left)
+	}
+}
+
+// Reading back a run's $DYNA_OUT also removes the files its output and status were kept in.
+func TestCollectRemovesTheRunsOutputFiles(t *testing.T) {
+	tmp := t.TempDir()
+	cmd, _ := runIn(t, tmp, contract.HostexecRunArgs{Argv: []string{"true"}, Timeout: 1000}, "c1")
+	if err := cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	collect, _ := runIn(t, tmp, CollectArgs(contract.HostexecRunArgs{}, "c1"), "c1-out")
+	if err := collect.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	left, _ := filepath.Glob(filepath.Join(tmp, "dyna-out-c1*"))
+	if len(left) != 0 {
+		t.Fatalf("left on the host: %v", left)
 	}
 }

@@ -26,6 +26,7 @@ type HostexecRun struct {
 	Scope   string
 	Timeout contract.DurationMS
 	Stopped HostexecStop
+	Started time.Time
 }
 
 // StartHostexec serializes the last grant check with session close.
@@ -110,14 +111,6 @@ func (s *Store) HostexecStops(ctx context.Context, now time.Time) ([]HostexecRun
 	return out, rows.Err()
 }
 
-// RecoverHostexec marks interrupted runs for the lost-unit stop sweep.
-func (s *Store) RecoverHostexec(ctx context.Context, now time.Time) error {
-	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.Exec("UPDATE hostexec_runs SET stopped='lost',lost_at=? WHERE ended_at IS NULL", now.UnixMilli())
-		return err
-	})
-}
-
 // CompleteHostexecStop waits 30 seconds for a remote launch in flight at a master drop.
 // Closed-session runs retain their live runner, which records completion itself.
 func (s *Store) CompleteHostexecStop(ctx context.Context, id contract.OpID, now time.Time) error {
@@ -125,4 +118,16 @@ func (s *Store) CompleteHostexecStop(ctx context.Context, id contract.OpID, now 
 		_, err := tx.Exec("UPDATE hostexec_runs SET ended_at=? WHERE op=? AND ended_at IS NULL AND lost_at IS NOT NULL AND lost_at+30000<=?", now.UnixMilli(), id, now.UnixMilli())
 		return err
 	})
+}
+
+// ReadHostexec is the stored run of an operation, which a restarted engine follows on its host.
+func (s *Store) ReadHostexec(ctx context.Context, id contract.OpID) (HostexecRun, error) {
+	var run HostexecRun
+	var started int64
+	err := s.read.QueryRowContext(ctx, "SELECT op,grant_id,host,scope,timeout_ms,stopped,started_at FROM hostexec_runs WHERE op=?", id).Scan(&run.Op, &run.Grant, &run.Host, &run.Scope, &run.Timeout, &run.Stopped, &started)
+	if errors.Is(err, sql.ErrNoRows) {
+		return HostexecRun{}, ErrNotFound
+	}
+	run.Started = time.UnixMilli(started)
+	return run, err
 }
