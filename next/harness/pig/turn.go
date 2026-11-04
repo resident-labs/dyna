@@ -108,10 +108,12 @@ func (b *endBatch) toolResult(details any, failed bool) {
 
 // apply makes the posts the turn's reply when the batch ended the turn. Text beside the last tool call was working
 // text, so the turn has no final response.
-func (b *endBatch) apply(result *contract.TurnEnded) {
-	if b.calls > 0 && len(b.posts) == b.calls {
-		result.Final, result.EndPosts = "", b.posts
+func (b *endBatch) apply(result *contract.TurnEnded) bool {
+	if b.calls == 0 || len(b.posts) != b.calls {
+		return false
 	}
+	result.Final, result.EndPosts = "", b.posts
+	return true
 }
 
 // replyText builds a turn's final text. A steer is read as soon as the agent stops, inside the same turn, so the next
