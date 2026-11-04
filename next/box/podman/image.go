@@ -6,7 +6,6 @@ import (
 	"cmp"
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,29 +31,16 @@ const warmLimit = 120
 // imagesKept is how many tags of one image stay on a host.
 const imagesKept = 2
 
-// BuildBase builds or reuses the base image from the exact supplied inputs.
-// Generate piTarball with next/third_party/pi/scripts/pi-pack.sh.
-func (h *Host) BuildBase(ctx context.Context, containerfile, piTarball []byte) (string, error) {
-	hash := sha256.New()
-	for _, input := range [][]byte{containerfile, piTarball} {
-		var size [8]byte
-		binary.BigEndian.PutUint64(size[:], uint64(len(input)))
-		hash.Write(size[:])
-		hash.Write(input)
-	}
-	tag := fmt.Sprintf("dyna-base:%x", hash.Sum(nil))
+// BuildBase builds or reuses the base image from the exact Containerfile. Its hash is the tag.
+func (h *Host) BuildBase(ctx context.Context, containerfile []byte) (string, error) {
+	tag := fmt.Sprintf("dyna-base:%x", sha256.Sum256(containerfile))
 	var contextTar bytes.Buffer
 	tw := tar.NewWriter(&contextTar)
-	for _, file := range []struct {
-		name string
-		data []byte
-	}{{"Containerfile", containerfile}, {"pi.tgz", piTarball}} {
-		if err := tw.WriteHeader(&tar.Header{Name: file.name, Mode: 0644, Size: int64(len(file.data))}); err != nil {
-			return "", err
-		}
-		if _, err := tw.Write(file.data); err != nil {
-			return "", err
-		}
+	if err := tw.WriteHeader(&tar.Header{Name: "Containerfile", Mode: 0644, Size: int64(len(containerfile))}); err != nil {
+		return "", err
+	}
+	if _, err := tw.Write(containerfile); err != nil {
+		return "", err
 	}
 	if err := tw.Close(); err != nil {
 		return "", err

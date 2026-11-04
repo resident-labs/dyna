@@ -7,26 +7,26 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/MichaelKinsy/PiG/coding/extension"
 	"github.com/resident-labs/dyna/box"
+
 	"github.com/resident-labs/dyna/box/computer"
+	"github.com/resident-labs/dyna/box/dynaext"
 	"github.com/resident-labs/dyna/box/dynamcp"
 	"github.com/resident-labs/dyna/box/post"
 	"github.com/resident-labs/dyna/box/shell"
 	"github.com/resident-labs/dyna/box/visual"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness"
-	"github.com/resident-labs/dyna/harness/pi"
+	"github.com/resident-labs/dyna/harness/pig"
 )
 
 const (
@@ -36,46 +36,6 @@ const (
 	// buildCacheSocket is the host's compiler cache. dyna-base's sccache reaches it at 127.0.0.1:7781/build-cache.
 	buildCacheSocket = "/run/dyna/build-cache/cache.sock"
 )
-
-//go:embed extension.js
-var extensionSource string
-
-// RenderExtension fills in the values the extension shares with the box agent.
-func RenderExtension() string {
-	return strings.NewReplacer("__DYNA_CALL_ID_ARGUMENT__", contract.ToolCallIDArgument, "__DYNA_MCP_URL__", pi.DynaMCPURL, "__DYNA_SHELL_URL__", shellURL, "__DYNA_ATTACHMENTS__", box.AttachmentFolder).Replace(extensionSource)
-}
-
-func modelArgs(model contract.ModelChoice, compactTokens int) ([]string, error) {
-	switch model.Provider {
-	case contract.ModelProviderAnthropic, contract.ModelProviderOpenAI:
-	default:
-		return nil, fmt.Errorf("unsupported model provider %q", model.Provider)
-	}
-	switch model.Thinking {
-	case contract.ThinkingOff, contract.ThinkingMinimal, contract.ThinkingLow, contract.ThinkingMedium, contract.ThinkingHigh, contract.ThinkingXHigh:
-	default:
-		return nil, fmt.Errorf("unsupported thinking level %q", model.Thinking)
-	}
-	if model.ID == "" {
-		return nil, fmt.Errorf("model ID is empty")
-	}
-	args := []string{"--provider", string(model.Provider), "--model", model.ID, "--thinking", string(model.Thinking)}
-	if compactTokens > 0 {
-		args = append(args, "--compaction-trigger-tokens", strconv.Itoa(compactTokens))
-	}
-	return args, nil
-}
-
-// piArgs appends the fixed Pi flags to the model flags. "--no-docs" leaves Pi's
-// documentation block out of the system prompt. "+codemode" adds the
-// codemode tool to Pi's default tools, so it stays active whatever MCP
-// exposure the servers use. The extension's bash takes the place of Pi's, and
-// "+bash" keeps it active in a resumed session: Pi restores the tools a
-// transcript recorded, and applies these on top.
-func piArgs(args []string, extensionPath, instructions, modelsPath, sessions, mcpPath string) []string {
-	args = append(args, "--extension", extensionPath, "--append-system-prompt", instructions, "--no-docs")
-	return append(args, "--mode", "rpc", "--models-file", modelsPath, "--session-dir", sessions, "--mcp-config", mcpPath, "--tools", "+codemode,+bash")
-}
 
 // boxHarness is what runs a box's turns: the session's Pi, or a crew.
 type boxHarness interface {
@@ -90,6 +50,14 @@ func crewInstructions(name, tree string) string {
 		return text + "Other workers share this box and this working tree: stay within the work your prompt gives you.\n"
 	}
 	return text + "You have your own git worktree at " + tree + " on your own branch, and other workers cannot see it. Work only there. When you end, whatever you left there is committed and pushed for you, except ignored files. Cargo builds share CARGO_TARGET_DIR with the other workers, so reach a binary with cargo run or through that folder, not through ./target.\n"
+}
+
+// workerConfig is what a crew worker opens with, on the box-wide config: its own tree, its profile's model and compaction trigger, its own models.json
+// in folder, and a session file of its own, so that workers sharing the session folder never resume one another's.
+func workerConfig(box pig.Config, profile contract.WorkflowProfile, folder, dir string) pig.Config {
+	box.Dir, box.Model, box.CompactTokens, box.New = dir, profile.Model, profile.CompactTokens, true
+	box.ModelsFile = filepath.Join(folder, "models.json")
+	return box
 }
 
 // Run connects the box, serves its model route, and runs the Pi session.
@@ -166,7 +134,7 @@ func Run(ctx context.Context) error {
 	}
 	// The session's Pi and every crew worker take the same servers. An owner's own server named github comes first.
 	if _, taken := addedServers["github"]; hello.GitHub && !taken {
-		addedServers["github"] = pi.GitHubServer()
+		addedServers["github"] = pig.GitHubServer()
 	}
 	steps.Done("add-ons")
 	notice := func(text string) {
@@ -176,10 +144,6 @@ func Run(ctx context.Context) error {
 	}
 	if text := addonNotice(problems); text != "" {
 		notice(text)
-	}
-	args, err := modelArgs(hello.Model, hello.CompactTokens)
-	if err != nil {
-		return err
 	}
 	sessions := filepath.Join(piDir, "sessions")
 	if err = os.MkdirAll(sessions, 0700); err != nil {
@@ -219,17 +183,13 @@ func Run(ctx context.Context) error {
 		return problem
 	}
 	mux.Handle("/dyna/", dynaTools)
-	err = pi.WriteAgentMCPConfig(mcpPath, dynaTools.Description(), addedServers)
+	err = pig.WriteAgentMCPConfig(mcpPath, dynaTools.Description(), addedServers)
 	if err != nil {
 		return err
 	}
 	server := &http.Server{Handler: mux}
 	defer server.Close()
 	go func() { errs <- server.Serve(listener) }()
-	extensionPath := filepath.Join(piDir, "dyna.js")
-	if err = os.WriteFile(extensionPath, []byte(RenderExtension()), 0600); err != nil {
-		return err
-	}
 	activity := &activity{}
 	transcript := NewTranscript(client, sessions)
 	var h boxHarness
@@ -238,23 +198,14 @@ func Run(ctx context.Context) error {
 	var steered func()        // a crew's script takes no input, so its workers' commands never step aside
 	if hello.Workflow != nil {
 		open := func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string) (crewWorker, error) {
-			args, err := modelArgs(profile.Model, profile.CompactTokens)
-			if err != nil {
-				return nil, err
-			}
-			mcp := filepath.Join(folder, "mcp.json")
-			if err := pi.WriteAgentMCPConfig(mcp, dynaTools.Description(), addedServers); err != nil {
-				return nil, err
-			}
 			tree := dir
 			if dir == workdir {
 				tree = ""
 			}
-			worker, err := pi.Open(ctx, "pi", piArgs(args, extensionPath, hello.Instructions+crewInstructions(hello.Workflow.Name, tree), filepath.Join(folder, "models.json"), sessions, mcp), "", dir)
-			if err != nil {
-				return nil, err
-			}
-			return worker, nil
+			c := workerConfig(pig.Config{AgentDir: piDir, SessionDir: sessions, Notice: func(text string) { go notice(text) }}, profile, folder, dir)
+			c.Instructions = hello.Instructions + crewInstructions(hello.Workflow.Name, tree)
+			c.Extensions = []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: dir, Shell: jobs, Dyna: dynaTools})}
+			return pig.Open(ctx, c)
 		}
 		config := CrewConfig{Workflow: *hello.Workflow, TextOnlyModels: hello.TextOnlyModels, Engine: client, Open: open, Transcript: transcript, Workdir: workdir, Sessions: sessions, State: piDir}
 		if len(hello.Repos) > 0 {
@@ -269,7 +220,16 @@ func Run(ctx context.Context) error {
 		}
 		h, files = crew, crew.Files
 	} else {
-		session, err := pi.Open(ctx, "pi", append(piArgs(args, extensionPath, hello.Instructions, modelsPath, sessions, mcpPath), "--continue"), "", workdir, func(text string) { go notice(text) })
+		session, err := pig.Open(ctx, pig.Config{
+			Dir:           workdir,
+			AgentDir:      piDir,
+			SessionDir:    sessions,
+			Model:         hello.Model,
+			CompactTokens: hello.CompactTokens,
+			Instructions:  hello.Instructions,
+			Extensions:    []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: workdir, Shell: jobs, Dyna: dynaTools})},
+			Notice:        func(text string) { go notice(text) },
+		})
 		if err != nil {
 			return err
 		}
@@ -277,7 +237,7 @@ func Run(ctx context.Context) error {
 		h, files, steered = session, func() []string { return []string{session.SessionFile()} }, jobs.StepAside
 	}
 	defer h.Close()
-	steps.Done("pi start")
+	steps.Done("session start")
 	activityTicks := time.NewTicker(time.Second)
 	defer activityTicks.Stop()
 	go activity.run(ctx, activityTicks.C, client.TurnActivity)

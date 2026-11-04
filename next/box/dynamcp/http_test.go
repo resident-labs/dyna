@@ -104,11 +104,11 @@ func TestActionDecodeIsStrict(t *testing.T) {
 
 // A text block without its text field is invalid MCP, and it failed every later Pi request of the session.
 func TestComputerResultsKeepTheirMCPShape(t *testing.T) {
-	server, err := New(nil, func(_ context.Context, handler tools.BoxHandler, _ []byte) (result, *contract.Error) {
+	server, err := New(nil, func(_ context.Context, handler tools.BoxHandler, _ []byte) (Result, *contract.Error) {
 		if handler == tools.ComputerScreenshot {
-			return result{Content: []content{{Type: "image", Data: "cG5n", MimeType: "image/png"}}}, nil
+			return Result{Content: []Content{{Type: "image", Data: "cG5n", MimeType: "image/png"}}}, nil
 		}
-		return result{Content: []content{{Type: "text", Text: ""}}}, nil // Only text prints anything.
+		return Result{Content: []Content{{Type: "text", Text: ""}}}, nil // Only text prints anything.
 	}, post.Preparer{})
 	if err != nil {
 		t.Fatal(err)
@@ -281,7 +281,7 @@ func TestSkillSaveCarriesTheFolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	save := func(path string) result {
+	save := func(path string) Result {
 		quoted, _ := json.Marshal(path)
 		return server.call(context.Background(), callParams{Name: "skill", Arguments: map[string]json.RawMessage{"action": json.RawMessage(`"save"`), "path": quoted, "global": json.RawMessage("true")}})
 	}
@@ -356,13 +356,13 @@ func TestAnUnknownFieldListsTheFieldsTheActionTakes(t *testing.T) {
 // A relative path starts where Pi's own file tools start, not in the box agent's working directory.
 func TestVisualCheckReadsFromTheWorkingDirectory(t *testing.T) {
 	var files []string
-	local := func(_ context.Context, handler tools.BoxHandler, raw []byte) (result, *contract.Error) {
+	local := func(_ context.Context, handler tools.BoxHandler, raw []byte) (Result, *contract.Error) {
 		var req tools.FileRequest
 		if err := json.Unmarshal(raw, &req); err != nil || handler != tools.VisualCheck {
 			t.Fatalf("%d: %v", handler, err)
 		}
 		files = append(files, req.File)
-		return result{}, nil
+		return Result{}, nil
 	}
 	server, err := New(func(context.Context, contract.Method, []byte) ([]byte, *contract.Error) {
 		t.Fatal("a box tool reached the engine")
