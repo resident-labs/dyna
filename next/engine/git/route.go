@@ -97,11 +97,15 @@ func Handler(upstream *url.URL, transport http.RoundTripper, token string, sessi
 		next := &retrier{next: transport, token: token, repo: repo, session: session, push: r.Method == http.MethodPost && parts[2] == "git-receive-pack", sideband: sideband}
 		next.replayable = r.Method == http.MethodGet || (r.ContentLength >= 0 && r.ContentLength <= replayLimit)
 		if r.Method == http.MethodPost && next.replayable {
-			if next.replay, err = io.ReadAll(r.Body); err != nil {
+			if next.replay, err = io.ReadAll(io.LimitReader(r.Body, replayLimit+1)); err != nil {
 				http.Error(w, "invalid request body", http.StatusBadRequest)
 				return
 			}
-			r.Body = io.NopCloser(bytes.NewReader(next.replay))
+			r.Body = struct {
+				io.Reader
+				io.Closer
+			}{io.MultiReader(bytes.NewReader(next.replay), r.Body), r.Body}
+			next.replayable = len(next.replay) <= replayLimit
 		}
 		(&httputil.ReverseProxy{
 			Transport: next,
@@ -168,8 +172,10 @@ func (u *retrier) RoundTrip(req *http.Request) (*http.Response, error) {
 		text = "GitHub reported " + strconv.Quote(commitRefsError)
 	}
 	text += " (a transient error on its side"
-	if u.push {
+	if u.push && resp.StatusCode == http.StatusOK {
 		text += "; no ref was updated"
+	} else if u.push {
+		text += "; a ref may or may not have been updated, and git ls-remote shows the remote's state"
 	}
 	text += ")"
 	if u.replayable {
@@ -246,7 +252,7 @@ func (u *retrier) line(body []byte) string {
 		text = text[strings.LastIndexFunc(text[:i], func(r rune) bool { return r < ' ' })+1:]
 	}
 	text = strings.TrimLeft(text, " \t\r\n")
-	if i := strings.IndexFunc(text, func(r rune) bool { return r < ' ' }); i >= 0 {
+	if i := strings.IndexFunc(text, func(r rune) bool { return r < ' ' || r == 0x7f }); i >= 0 {
 		text = text[:i]
 	}
 	if u.token != "" {
