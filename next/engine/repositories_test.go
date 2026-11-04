@@ -14,6 +14,11 @@ type fakeRepos struct {
 	size     contract.BoxSizeName
 	deleted  string
 	stale    string // the notice Seed returns
+	taken    map[string]bool
+}
+
+func (r *fakeRepos) Unavailable(context.Context, contract.RepoName) (map[string]bool, error) {
+	return r.taken, r.err
 }
 
 func (r *fakeRepos) DeleteArchiveRef(_ context.Context, _ contract.RepoName, ref, _ string) error {
@@ -33,7 +38,7 @@ func (r *fakeRepos) Get(_ context.Context, _ contract.SessionID, _ contract.Host
 	if fetch {
 		r.prepared = true
 	}
-	return []contract.BoxRepo{{Name: "owner/repo", Cache: "/host/git/owner/repo.git"}}, nil
+	return []contract.BoxRepo{{Name: "owner/repo", Cache: "/host/git/owner/repo.git", Branch: "named-branch"}}, nil
 }
 
 func (r *fakeRepos) Seed(ctx context.Context, session contract.SessionID, host contract.HostName) ([]contract.BoxRepo, string, error) {
