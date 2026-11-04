@@ -199,10 +199,9 @@ func refSafe(s string) bool {
 	return validPart(s) && !strings.HasSuffix(s, ".") && !strings.HasSuffix(s, ".lock") && !strings.Contains(s, "..")
 }
 
-// ValidBranch reports whether name is one the engine records as a branch: refSafe, starting with a letter or digit, and not a
-// protected name.
+// ValidBranch reports whether name is one the engine records as a branch: refSafe and starting with a letter or digit.
 func ValidBranch(name string) bool {
-	return refSafe(name) && name[0] != '.' && name[0] != '-' && name[0] != '_' && name != "main" && name != "master" && name != "HEAD"
+	return refSafe(name) && name[0] != '.' && name[0] != '-' && name[0] != '_'
 }
 
 // CanPushBranch checks the branches recorded as the session's own, those followed by -<topic>, a branch registered to an owned

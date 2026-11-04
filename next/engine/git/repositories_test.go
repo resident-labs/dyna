@@ -67,3 +67,21 @@ func TestCanPushBranchRules(t *testing.T) {
 		t.Error("a session's own recorded branch was refused")
 	}
 }
+
+func TestUnavailableIsTheProtectedNamesTheDefaultAndTheMirrorsBranches(t *testing.T) {
+	access := fakeAccess{allowed: true, name: "main", claimed: &claim{}}
+	runner := &fakeRunner{head: "develop", branches: "refs/heads/release\n"}
+	repos := &Repositories{Rooms: access, Hosts: fakeHosts{&fakeCache{}}, Mirror: &Mirror{Layout: box.Layout{Data: t.TempDir(), HostData: "/host"}, Token: "secret", Runner: runner}}
+	got, err := repos.Unavailable(context.Background(), "owner/repo")
+	want := map[string]bool{"main": true, "master": true, "HEAD": true, "develop": true, "release": true}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("%v, %v", got, err)
+	}
+	// A session named main is asked for as main and told no by the same set, with no remote main to do it.
+	if _, err := repos.Get(context.Background(), "ses_1", "host", true); err != nil {
+		t.Fatal(err)
+	}
+	if access.claimed.wanted != "main" || !reflect.DeepEqual(access.claimed.unavailable, want) {
+		t.Fatalf("claim %+v", access.claimed)
+	}
+}

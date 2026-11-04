@@ -502,7 +502,14 @@ func (s *Service) SessionSetBranch(ctx context.Context, caller contract.Principa
 		return response, invalid("the session has no repository")
 	}
 	if !enginegit.ValidBranch(req.Branch) {
-		return response, invalid("branch must be letters, digits, dots, underscores or hyphens, start with a letter or digit, not end in . or .lock, not hold .., and not be main, master or HEAD")
+		return response, invalid("branch must be letters, digits, dots, underscores or hyphens, start with a letter or digit, not end in . or .lock, not hold ..")
+	}
+	unavailable, err := s.repos.Unavailable(ctx, target.Repo)
+	if err != nil {
+		return response, failure(err)
+	}
+	if unavailable[req.Branch] {
+		return response, invalid("branch " + req.Branch + " is main, master, HEAD, the repository's default branch or a branch on GitHub; no session may have it")
 	}
 	if err := s.store.AddBranch(ctx, target.Repo, target.ID, req.Branch, time.Now()); err != nil {
 		if errors.Is(err, store.ErrBranchTaken) {

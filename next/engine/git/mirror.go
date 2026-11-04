@@ -128,11 +128,21 @@ func (m *Mirror) Prepare(ctx context.Context, host CacheHost, repo contract.Repo
 			return contract.BoxRepo{}, err
 		}
 	}
-	out, err := m.Runner.Run(ctx, nil, "--git-dir", path, "symbolic-ref", "--short", "HEAD")
+	base, err := m.Default(ctx, repo)
 	if err != nil {
 		return contract.BoxRepo{}, err
 	}
-	return contract.BoxRepo{Name: repo, Cache: cache, Base: strings.TrimSpace(string(out))}, nil
+	return contract.BoxRepo{Name: repo, Cache: cache, Base: base}, nil
+}
+
+// Default names the branch the mirror's HEAD is on, which is the repository's default branch.
+func (m *Mirror) Default(ctx context.Context, repo contract.RepoName) (string, error) {
+	path, err := m.Layout.Git(repo)
+	if err != nil {
+		return "", err
+	}
+	out, err := m.Runner.Run(ctx, nil, "--git-dir", path, "symbolic-ref", "--short", "HEAD")
+	return strings.TrimSpace(string(out)), err
 }
 
 // Branches lists the branches the mirror holds, which is what GitHub had at the last fetch.
