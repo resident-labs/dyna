@@ -89,14 +89,16 @@ export function hostLoads(hosts: HostSummary[]): { name: string; reachable: bool
 }
 
 // host.list as machines, now and then every 10 s to match the engine's beat, only while the page is visible. A tick skips while a
-// call is out, so calls never pile up on a slow engine and answers arrive in order. It returns the stop function.
-export function watchHosts(apply: (hosts: HostSummary[]) => void, fail: () => void): () => void {
+// call is out, so calls never pile up on a slow engine and answers arrive in order. It returns the stop function. shape turns
+// the list into what apply gets: machines by default; Settings > Images reads every host's own runner images, which the
+// merge leaves out.
+export function watchHosts(apply: (hosts: HostSummary[]) => void, fail: () => void, shape: (hosts: HostSummary[]) => HostSummary[] = machines): () => void {
   let timer: ReturnType<typeof setInterval> | undefined;
   let loading = false;
   const tick = () => {
     if (loading) return;
     loading = true;
-    void call("host.list", {}).then(list => apply(machines(list.hosts ?? [])), fail).finally(() => { loading = false; });
+    void call("host.list", {}).then(list => apply(shape(list.hosts ?? [])), fail).finally(() => { loading = false; });
   };
   const sync = () => { clearInterval(timer); if (document.hidden) return; tick(); timer = setInterval(tick, 10_000); };
   sync();
