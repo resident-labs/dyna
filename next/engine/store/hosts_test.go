@@ -63,7 +63,7 @@ func TestHostSessionsListLiveBoxesByHost(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("sessions: %+v", got)
 	}
-	list, err := s.SessionList(ctx, "r1")
+	list, err := s.SessionList(ctx, contract.SessionListRequest{Room: "r1"}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

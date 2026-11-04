@@ -107,11 +107,17 @@ func (s *Store) RoomList(ctx context.Context) (contract.RoomListResponse, []Room
 	return contract.RoomListResponse{Rooms: rooms, Seq: seq}, itemsOut, nil
 }
 
-func (s *Store) SessionList(ctx context.Context, room contract.RoomID) (contract.SessionListResponse, error) {
+// SessionList reads a room's open sessions in creation order. A limit above zero cuts the list there, and Next names the session to
+// continue after.
+func (s *Store) SessionList(ctx context.Context, req contract.SessionListRequest, limit int) (contract.SessionListResponse, error) {
 	// The seq is read first, so events after it may repeat what the list shows but never miss a change.
 	var seq int64
-	if err := s.Read().QueryRowContext(ctx, "SELECT COALESCE(MAX(seq),0) FROM events WHERE room=?", room).Scan(&seq); err != nil {
+	if err := s.Read().QueryRowContext(ctx, "SELECT COALESCE(MAX(seq),0) FROM events WHERE room=?", req.Room).Scan(&seq); err != nil {
 		return contract.SessionListResponse{}, err
+	}
+	fetch := -1 // SQLite reads a negative LIMIT as no limit; a limit fetches one extra row to learn whether more follow
+	if limit > 0 {
+		fetch = limit + 1
 	}
 	rows, err := s.Read().QueryContext(ctx, `SELECT s.id,s.name,COALESCE(s.parent,''),s.profile,COALESCE(b.id,''),COALESCE(b.state,''),COALESCE(b.reason,''),CASE WHEN b.state='deleted' THEN '' ELSE COALESCE(b.host,'') END,s.goal,
 		COALESCE((SELECT id FROM turns WHERE session=s.id AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1),''),
@@ -119,7 +125,8 @@ func (s *Store) SessionList(ctx context.Context, room contract.RoomID) (contract
 		s.shell_jobs, COALESCE(c.seq,0), s.created_at,
 		(SELECT ended_at FROM turns WHERE session=s.id AND ended_at IS NOT NULL ORDER BY ended_at DESC LIMIT 1),
 		EXISTS (SELECT 1 FROM shell_jobs j WHERE j.session=s.id)
-		FROM sessions s LEFT JOIN boxes b ON b.session=s.id LEFT JOIN conversation_reads c ON c.room=s.room AND c.conversation='dm:'||s.id WHERE s.room=? AND s.closed_at IS NULL ORDER BY s.created_at,s.id`, room)
+		FROM sessions s LEFT JOIN boxes b ON b.session=s.id LEFT JOIN conversation_reads c ON c.room=s.room AND c.conversation='dm:'||s.id WHERE s.room=?1 AND s.closed_at IS NULL AND (?2='' OR s.parent=?2)
+		AND (?3='' OR (s.created_at,s.id)>(SELECT created_at,id FROM sessions WHERE id=?3)) ORDER BY s.created_at,s.id LIMIT ?4`, req.Room, req.Parent, req.After, fetch)
 	if err != nil {
 		return contract.SessionListResponse{}, err
 	}
@@ -146,5 +153,10 @@ func (s *Store) SessionList(ctx context.Context, room contract.RoomID) (contract
 	if err := rows.Err(); err != nil {
 		return contract.SessionListResponse{}, err
 	}
-	return contract.SessionListResponse{Sessions: sessions, Seq: seq}, nil
+	var next contract.SessionID
+	if limit > 0 && len(sessions) > limit {
+		sessions = sessions[:limit]
+		next = sessions[limit-1].ID
+	}
+	return contract.SessionListResponse{Sessions: sessions, Next: next, Seq: seq}, nil
 }

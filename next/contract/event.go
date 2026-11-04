@@ -334,6 +334,7 @@ const (
 	CauseHarnessFailed       FailureCause = "harness_failed"        // the agent program stopped or could not run the turn
 	CauseSetModelFailed      FailureCause = "set_model_failed"      // the agent program refused the session's new model
 	CauseNotStarted          FailureCause = "not_started"           // on a stopped turn: it stopped before Pi took its inputs, so they stay pending
+	CauseClosed              FailureCause = "closed"                // on a stopped turn: its session was closing, and the close ended the agent program under it
 	CauseRunTimeout          FailureCause = "run_timeout"           // a subscription's Run reached its time limit
 	CauseWorkflowFailed      FailureCause = "workflow_failed"       // a workflow's script threw, or its script host could not run it
 )

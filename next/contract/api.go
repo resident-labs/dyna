@@ -264,6 +264,11 @@ type RoomListResponse struct {
 }
 type SessionListRequest struct {
 	Room RoomID `json:"room"`
+	// Parent narrows the list to the direct children of one session. Limit caps the sessions returned, and After continues
+	// from the session a cut list ended on. A session reading the list without a Limit gets SessionListPage.
+	Parent SessionID `json:"parent,omitempty"`
+	Limit  int       `json:"limit,omitempty"` // 0 means all, or a page for a session
+	After  SessionID `json:"after,omitempty"`
 }
 type BoxReason string // The stored reason for the current box state, including admission waits and failures.
 
@@ -289,6 +294,8 @@ type SessionSummary struct {
 }
 type SessionListResponse struct {
 	Sessions []SessionSummary `json:"sessions"`
+	// Next is set when the list is cut: the session to pass as After for the rest. Empty when nothing more follows.
+	Next SessionID `json:"next,omitempty"`
 	// Seq is the room's newest event when the list was read; live events after it update the list.
 	Seq int64 `json:"seq"`
 }
@@ -557,6 +564,7 @@ type SessionCloseRequest struct {
 type SessionCloseResponse struct {
 	To     SessionID        `json:"to"`     // the parent that takes the work
 	Handed []Responsibility `json:"handed"` // owed work that moves to To
+	Unheld []GoalID         `json:"unheld"` // goals that have no holder after the close, because To is root, which holds none
 	Ended  []Responsibility `json:"ended"`  // what stops or is withdrawn with the close
 }
 
@@ -1132,3 +1140,6 @@ type TranscriptFile struct {
 func (r HostAddRequest) ExecOnly() bool {
 	return r.Agents != nil && !*r.Agents && r.CI != nil && !*r.CI
 }
+
+// SessionListPage is how many sessions a session's list returns when it names no limit.
+const SessionListPage = 25

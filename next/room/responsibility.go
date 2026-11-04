@@ -78,3 +78,12 @@ func ResponsibilityNames(items []contract.Responsibility) string {
 	}
 	return strings.Join(names, ", ")
 }
+
+// GoalNames joins goal IDs for a notice.
+func GoalNames(goals []contract.GoalID) string {
+	names := make([]string, len(goals))
+	for i, goal := range goals {
+		names[i] = string(goal)
+	}
+	return strings.Join(names, ", ")
+}
