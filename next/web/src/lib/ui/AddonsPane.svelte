@@ -1,169 +1,214 @@
 <script lang="ts">
   import { onMount, tick, type Snippet } from "svelte";
   import { APIError, call, SignedOut } from "../client.ts";
-  import { addonDetail, addonKind, addonKinds, addonOrigin, addonScopes, draftReady, emptyDraft, mcpRequest, packageRequest, skillRequest, type AddonDraft } from "../addons.ts";
+  import { addonAdded, addonChips, addonDetail, addonKey, addonKind, addonKinds, addonOrder, addonScope, addonSummary, addonWhere, draftReady, draftScope, emptyDraft,
+    mcpRequest, packageRequest, runOnChoices, skillRequest, type AddonDraft } from "../addons.ts";
+  import { hostLabel } from "../hosts.ts";
   import { confirm } from "../modal.ts";
   import Icon from "./Icon.svelte";
+  import ItemList from "./settings/ItemList.svelte";
+  import ListDetail from "./settings/ListDetail.svelte";
   import type { Addon, AddonKind, RoomSummary } from "../contract.gen.ts";
-  // Settings > Skills & tools. Built-ins, what every room shares and what each room holds, one card per scope. A device without
-  // admin reads this page and changes nothing, since the engine would refuse it.
-  let { bar, admin, signedout }: { bar: Snippet<[string, number | undefined, Snippet | undefined]>; admin: boolean; signedout: () => void } = $props();
-  let items: Addon[] = $state.raw([]), rooms: RoomSummary[] = $state.raw([]);
-  let loaded = $state(false), failed = $state(false), busy = $state(false);
-  let draft: AddonDraft | undefined = $state();
-  let addButton: HTMLButtonElement | undefined = $state();
-  // One failed change, in the engine's words, under the row or the form it belongs to.
-  let problem: { id: string; text: string } | undefined = $state();
-  let scopes = $derived(addonScopes(items, rooms));
-  let added = $derived(items.filter(item => !item.builtIn).length);
-  const rowId = (item: Addon) => `${item.room ?? ""}/${item.kind}/${item.name}`;
-  const where = (item: Addon) => item.room ? { room: item.room } : { global: true };
+  // Settings > Skills & tools (spec 5.13): every skill, Pi package and MCP server, grouped by where it applies, and the
+  // open item's detail, the one place that explains its switches. Add opens an empty form in the detail's place.
+  // addon.list is whole, so the list searches and filters here. A device without admin reads this page and changes
+  // nothing, since the engine would refuse it.
+  let { bar, admin, signedout, selected, onselect, onclose }: {
+    bar: Snippet<[string, number | undefined, Snippet | undefined]>; admin: boolean; signedout: () => void;
+    selected: string | undefined; onselect: (key: string, open: boolean) => void; onclose: () => void;
+  } = $props();
+  let items: Addon[] | undefined = $state.raw(), rooms: RoomSummary[] = $state.raw([]), hosts: string[] = $state.raw([]);
+  let failed = $state(false), busy = $state(false), creating = $state(false);
+  let draft: AddonDraft = $state(emptyDraft());
+  // One failed change, in the engine's words, in the detail it belongs to.
+  let problem = $state("");
+  // Where the focus goes when Add opens the form, and once the added item opens: the first control, not a text field.
+  let kinds: HTMLFieldSetElement | undefined = $state(), switches: HTMLDivElement | undefined = $state();
+  let ordered = $derived(items && addonOrder(items, rooms));
+  let item = $derived(items?.find(each => addonKey(each) === selected));
+  let where = $derived(draftScope(draft.where, rooms));
+  let counts = $derived(addonSummary(items ?? []));
   const words = (error: unknown) => error instanceof APIError ? error.detail.message : "That did not work. Try again.";
+  const fail = (error: unknown) => { if (error instanceof SignedOut) signedout(); else problem = words(error); };
 
+  // Resolves once the list has loaded or failed. The hosts serve only a skill's run-on switches, so without them the page still works.
   function reload() {
-    return Promise.all([call("addon.list", {}), call("room.list", {})]).then(([list, known]) => { items = list.items ?? []; rooms = known.rooms ?? []; loaded = true; failed = false; },
-      (error: unknown) => { if (error instanceof SignedOut) signedout(); else if (!loaded) failed = true; });
+    if (admin) void call("host.list", {}).then(list => { hosts = (list.hosts ?? []).map(host => host.name); }, () => {});
+    return Promise.all([call("addon.list", {}), call("room.list", {})]).then(([list, known]) => { items = list.items ?? []; rooms = known.rooms ?? []; failed = false; },
+      (error: unknown) => { if (error instanceof SignedOut) signedout(); else if (!items) failed = true; });
   }
-  onMount(() => { void reload(); window.addEventListener("focus", reload); return () => window.removeEventListener("focus", reload); });
+  function refresh() { void reload(); }
+  // Add is a step in history of its own, so Back leaves the empty form as the back arrow does.
+  function popped() { if (creating && !history.state?.creating) { creating = false; problem = ""; } }
+  onMount(() => {
+    refresh();
+    window.addEventListener("focus", refresh);
+    window.addEventListener("popstate", popped);
+    return () => { window.removeEventListener("focus", refresh); window.removeEventListener("popstate", popped); };
+  });
+  // The added item takes the focus once the path has opened it, which lands after onselect returns, and the add has
+  // settled, as its switches are disabled until then.
+  let added: string | undefined = $state();
+  $effect(() => { if (added !== undefined && selected === added && switches && !busy) { switches.querySelector("input")?.focus(); added = undefined; } });
+  // Another item, or none, starts without the last one's problem.
+  $effect.pre(() => { void selected; problem = ""; });
 
-  async function act(id: string, run: () => Promise<unknown>, done?: () => void) {
-    busy = true; problem = undefined;
-    await run().then(() => { done?.(); return reload(); }, (error: unknown) => { if (error instanceof SignedOut) signedout(); else problem = { id, text: words(error) }; });
+  // Whether the engine took the change.
+  async function change(run: () => Promise<unknown>) {
+    busy = true; problem = "";
+    const done = await run().then(async () => { await reload(); return true; }, (error: unknown) => { fail(error); return false; });
+    busy = false;
+    return done;
+  }
+  async function start() {
+    problem = "";
+    // An open item stays in the path under the form, so Back returns to it.
+    if (!creating) { draft = emptyDraft(); history.pushState({ creating: true, overList: selected === undefined }, "", location.href); }
+    creating = true;
+    await tick();
+    kinds?.querySelector("input")?.focus();
+  }
+  function close() {
+    if (!creating) { onclose(); return; }
+    if (history.state?.creating) history.back();
+    else { creating = false; problem = ""; }
+  }
+  function select(key: string, open: boolean) { creating = false; onselect(key, open); }
+  async function add() {
+    if (busy || !where || !draftReady(draft, where)) return;
+    const form = draft, scope = where;
+    busy = true; problem = "";
+    await (form.kind === "skill" ? call("skill.save", skillRequest(form, scope)) : form.kind === "package" ? call("package.add", packageRequest(form, scope)) : call("mcp.add", mcpRequest(form, scope)))
+      .then(async ({ item: saved }) => {
+        await reload();
+        creating = false;
+        // The item takes the history step Add made, so Back returns to the list when the form opened over it, and closing
+        // it with an item under the form goes to the list in place, as Settings does for an item opened without the list.
+        if (history.state?.creating) history.replaceState({ fromList: !!history.state.overList }, "", location.href);
+        if (!saved) return;
+        // The new item opens once it is listed; a reload that failed lists it from what the engine returned.
+        if (!items?.some(each => addonKey(each) === addonKey(saved))) items = [...items ?? [], saved];
+        added = addonKey(saved);
+        onselect(added, false);
+      }, fail);
     busy = false;
   }
-  async function closeForm() { draft = undefined; problem = undefined; await tick(); addButton?.focus(); }
-  function add() {
-    if (!draft || !draftReady(draft)) return;
-    const form = draft;
-    void act("form", () => form.kind === "skill" ? call("skill.save", skillRequest(form)) : form.kind === "package" ? call("package.add", packageRequest(form)) : call("mcp.add", mcpRequest(form)), () => void closeForm());
-  }
-  // The shared confirm runs the removal and keeps a refusal in the engine's words. The row is gone after, so focus goes to Add.
+  // The shared confirm runs the removal and keeps a refusal in the engine's words.
   async function remove(item: Addon) {
-    const request = { ...where(item), name: item.name };
-    problem = undefined;
-    const ok = await confirm({ title: `Remove ${item.name}?`, message: item.room ? "Sessions in this room stop getting it at their next box start." : "Sessions in every room stop getting it at their next box start.",
-      action: "Remove", failed: words,
+    const request = { ...item.room ? { room: item.room } : { global: true }, name: item.name };
+    problem = "";
+    const ok = await confirm({ title: `Remove ${item.name}?`, action: "Remove", danger: true, failed: words,
       run: () => (item.kind === "skill" ? call("skill.remove", request) : item.kind === "package" ? call("package.remove", request) : call("mcp.remove", request))
         .catch((error: unknown) => { if (error instanceof SignedOut) signedout(); throw error; }) });
     if (!ok) return;
+    onclose();
     await reload();
-    await tick();
-    addButton?.focus();
   }
-  const toggle = (item: Addon, enabled: boolean) => act(rowId(item), () => call("addon.set_enabled", { kind: item.kind, name: item.name, room: item.room, enabled }));
-  const toggleRoot = (item: Addon, rootOnly: boolean) => act(rowId(item), () => call("addon.set_root_only", { kind: item.kind, name: item.name, room: item.room, rootOnly }));
   const sourceLabel: Record<AddonKind, string> = { skill: "Link", package: "Source", mcp: "URL or command" };
   const sourceHint: Record<AddonKind, string> = {
     skill: "A link to a SKILL.md or a GitHub folder. To save a folder from a box, use dyna skill save.",
     package: "npm:name, git:host/owner/repo or a repository URL. Dyna pins it to one version now.",
     mcp: "A server URL, or one executable with its arguments. No shell reads it.",
   };
+  const fact = (count: number, one: string, many: string) => `${count.toLocaleString("en")} ${count === 1 ? one : many}`;
 </script>
 
-{#snippet action()}{#if admin && !draft}<button type="button" class="btn add" bind:this={addButton} onclick={() => { problem = undefined; draft = emptyDraft(rooms[0]?.id ?? "global"); }}>Add</button>{/if}{/snippet}
-{@render bar("Skills & tools", loaded ? added : undefined, loaded ? action : undefined)}
-<div class="body" data-page-ready={loaded || failed}>
-  {#if failed}<p class="load" role="alert">This list did not load. <button type="button" class="retry" onclick={() => { failed = false; void reload(); }}>Try again</button></p>
-  {:else if !loaded}<div class="list" aria-label="Loading skills and tools">{#each [0, 1, 2] as row (row)}<div class="row"><i class="bone"></i><span class="lines"><i class="bone name"></i><i class="bone line"></i></span></div>{/each}</div>
-  {:else}
-    <p class="load">A change reaches a session at its next box start.{#if !admin}{" "}This device can read this page. Changing it needs Admin access.{/if}</p>
-    {#if draft}
-      <form class="form" aria-label="Add a skill or tool" onsubmit={event => { event.preventDefault(); add(); }}>
-        <fieldset class="kinds"><legend>Kind</legend>
-          {#each addonKinds as { kind, label } (kind)}<label class:on={draft.kind === kind}><input type="radio" name="addon-kind" value={kind} bind:group={draft.kind} disabled={busy} />{label}</label>{/each}
-        </fieldset>
-        <label class="field">Where
-          <select bind:value={draft.scope} disabled={busy}>
-            {#each rooms as room (room.id)}<option value={room.id}>{room.name}</option>{/each}
-            <option value="global">All rooms</option>
-          </select>
-          <span>Pick a room unless every room needs it.</span>
-        </label>
-        {#if draft.kind === "mcp"}<label class="field">Name<input class="mono" bind:value={draft.name} disabled={busy} autocomplete="off" /></label>{/if}
-        <label class="field">{sourceLabel[draft.kind]}<input class="mono" bind:value={draft.source} disabled={busy} autocomplete="off" spellcheck="false" />
-          <span>{sourceHint[draft.kind]}</span></label>
-        {#if problem?.id === "form"}<p class="problem" role="alert">{problem.text}</p>{/if}
-        <span class="choices"><button type="submit" class="btn fill" disabled={busy || !draftReady(draft)}>{busy ? "Adding…" : "Add"}</button>
-          <button type="button" class="btn ghost" disabled={busy} onclick={() => void closeForm()}>Cancel</button></span>
-      </form>
+{#snippet toggle(label: string, checked: boolean, run: (on: boolean) => Promise<unknown>)}
+  <input type="checkbox" role="switch" {checked} disabled={busy} aria-label={label}
+    onchange={event => { const box = event.currentTarget; void change(() => run(box.checked)).then(done => { if (!done) box.checked = !box.checked; }); }} />
+{/snippet}
+
+{#snippet row(item: Addon, _compact: boolean)}{@const kind = addonKind(item.kind)}
+  <span class="icon"><Icon name={kind.icon} size={20} /></span>
+  <span class="lines"><span class="title"><span class="name" title={item.name}>{item.name}</span><span class="badge">{kind.label}</span>{#if item.rootOnly}<span class="badge">Root only</span>{/if}{#if item.disabled}<span class="badge">Off</span>{/if}</span>
+    <span class="line">{addonDetail(item)}</span></span>
+{/snippet}
+
+{#snippet empty()}{#if admin}<button type="button" class="btn" onclick={() => void start()}>Add</button>{/if}{/snippet}
+
+{#snippet list({ drill, select: pick }: { drill: boolean; select: (key: string, open: boolean) => void })}
+  <ItemList items={ordered} {failed} retry={() => { failed = false; refresh(); }} key={addonKey} text={each => `${each.name} ${addonDetail(each)} ${addonWhere(each, rooms)}`}
+    noun={["item", "items"]} label="Skills and tools" chips={addonChips} group={each => ({ id: addonScope(each), title: addonWhere(each, rooms) })} folded={["built-in"]}
+    {row} {empty} selected={creating ? undefined : selected} {drill} onselect={pick} />
+{/snippet}
+
+{#snippet form()}
+  <form class="form" aria-label="Add a skill or tool" onsubmit={event => { event.preventDefault(); void add(); }}>
+    <fieldset class="kinds" bind:this={kinds}><legend>Kind</legend>
+      {#each addonKinds as { kind, label } (kind)}<label class:on={draft.kind === kind}><input type="radio" name="addon-kind" value={kind} bind:group={draft.kind} disabled={busy} />{label}</label>{/each}
+    </fieldset>
+    <label class="field">Where<input list="addon-rooms" bind:value={draft.where} disabled={busy} autocomplete="off" spellcheck="false"
+      placeholder={`All rooms, or search ${fact(rooms.length, "room", "rooms")}`} />
+      <datalist id="addon-rooms"><option value="All rooms"></option>{#each rooms as room (room.id)}<option value={room.name}></option>{/each}</datalist>
+      <span class="help">A room unless every room needs it.</span></label>
+    {#if draft.kind === "mcp"}<label class="field">Name<input class="mono" bind:value={draft.name} disabled={busy} autocomplete="off" spellcheck="false" /></label>{/if}
+    <label class="field">{sourceLabel[draft.kind]}<input class="mono" bind:value={draft.source} disabled={busy} autocomplete="off" spellcheck="false" />
+      <span class="help">{sourceHint[draft.kind]}</span></label>
+    {#if problem}<p class="problem" role="alert">{problem}</p>{/if}
+    <div class="actions"><button type="submit" class="btn fill" disabled={busy || !draftReady(draft, where)}>{busy ? "Adding…" : "Add"}</button></div>
+  </form>
+{/snippet}
+
+{#snippet detail()}
+  {#if creating}{@render form()}
+  {:else if item}{@const kind = addonKind(item.kind)}{@const source = item.kind === "mcp" ? addonDetail(item) : item.source}
+    {@const choices = admin && !item.builtIn && item.kind === "skill" ? runOnChoices(hosts, item.hosts) : []}
+    <dl class="facts"><dt>Kind</dt><dd>{kind.label}</dd><dt>Where</dt><dd>{item.builtIn ? "Every box" : addonWhere(item, rooms)}</dd>
+      {#if item.description}<dt>What</dt><dd>{item.description}</dd>{/if}
+      {#if source}<dt>{item.kind === "mcp" ? "URL or command" : "Source"}</dt><dd class="mono">{source}</dd>{/if}
+      {#if !item.builtIn}<dt>Added</dt><dd>{addonAdded(item, Date.now())}</dd>{/if}
+      {#if item.hosts?.length && !choices.length}<dt>Runs on</dt><dd>{item.hosts.map(hostLabel).join(", ")}</dd>{/if}</dl>
+    {#if item.builtIn}<p class="small muted">Ships with Dyna. Every box has it, and it cannot be turned off.</p>
+    {:else}
+      <p class="small muted">Changes reach a session at its next box start.{#if !item.room}{" "}A room's own item with the same name wins.{/if}</p>
+      {#if admin}{@const open = item}
+        <div class="stack" bind:this={switches}>
+          <label class="set"><span class="name">On</span>{@render toggle(`${item.name} on`, !item.disabled, on => call("addon.set_enabled", { kind: open.kind, name: open.name, room: open.room, enabled: on }))}<span class="help">Off keeps it saved but out of new boxes.</span></label>
+          <label class="set"><span class="name">Root only</span>{@render toggle(`${item.name} root only`, !!item.rootOnly, on => call("addon.set_root_only", { kind: open.kind, name: open.name, room: open.room, rootOnly: on }))}<span class="help">Only the room's root session gets it.</span></label>
+        </div>
+        {#if choices.length}{@const current = item.hosts ?? []}
+          <div class="section"><strong class="head">Runs on</strong><p class="small muted">The hosts where its commands run, through bash with host. The tool it drives must already be there.</p>
+            <div class="stack">{#each choices as host (host)}
+              <label class="set"><span class="name">{hostLabel(host)}</span>{@render toggle(`Runs on ${hostLabel(host)}`, current.includes(host),
+                on => call("addon.set_hosts", { name: open.name, room: open.room, hosts: on ? [...current, host] : current.filter(each => each !== host) }))}</label>{/each}</div></div>
+        {/if}
+        {#if problem}<p class="problem" role="alert">{problem}</p>{/if}
+        <div class="danger-zone"><span class="small muted">Sessions in {item.room ? addonWhere(item, rooms) : "every room"} stop getting it.</span>
+          <button type="button" class="btn danger" aria-haspopup="dialog" disabled={busy} onclick={() => void remove(open)}>Remove</button></div>
+      {:else}<p class="small muted">This device can read this page. Changing it needs Admin access.</p>{/if}
     {/if}
-    {#each scopes as scope (scope.id)}
-      <section aria-labelledby={`addons-${scope.id}`}>
-        <header class="scope"><h2 id={`addons-${scope.id}`}>{scope.title}</h2><span>{scope.items.length ? scope.note : "Nothing added yet."}</span></header>
-        {#if scope.items.length}<div class="list">
-          {#each scope.items as item (rowId(item))}{@const id = rowId(item)}{@const kind = addonKind(item.kind)}
-            <div class="row" class:off={item.disabled}>
-              <Icon name={kind.icon} size={20} />
-              <span class="lines">
-                <span class="title"><span class="name">{item.name}</span><span class="badge">{kind.label}</span>{#if item.rootOnly}<span class="badge">Root only</span>{/if}</span>
-                <span class="line detail">{addonDetail(item)}</span>
-                <span class="line">{addonOrigin(item, Date.now())}</span>
-              </span>
-              {#if admin && !item.builtIn}
-                <span class="acts"><label class="switch"><input type="checkbox" checked={!item.disabled} disabled={busy} aria-label={`Enable ${item.name}`} onchange={event => void toggle(item, event.currentTarget.checked)} />On</label>
-                  <label class="switch"><input type="checkbox" checked={item.rootOnly ?? false} disabled={busy} aria-label={`Root sessions only for ${item.name}`} onchange={event => void toggleRoot(item, event.currentTarget.checked)} />Root only</label>
-                  <button type="button" class="btn ghost" aria-label={`Remove ${item.name}`} aria-haspopup="dialog" disabled={busy} onclick={() => void remove(item)}>Remove</button></span>
-              {:else if item.disabled}<span class="badge">Off</span>{/if}
-            </div>
-            {#if problem?.id === id}<p class="problem" role="alert">{problem.text}</p>{/if}
-          {/each}
-        </div>{/if}
-      </section>
-    {/each}
+  {:else}<p class="muted">That item is gone, or the link is wrong.</p>
   {/if}
-</div>
+{/snippet}
+
+{#snippet summary()}
+  {#if items}<p class="muted"><span class="fact">{counts.builtIn.toLocaleString("en")} built in</span> <span class="fact">· {counts.global.toLocaleString("en")} for all rooms</span>
+    <span class="fact">· {counts.inRooms.toLocaleString("en")} in {fact(counts.rooms, "room", "rooms")}</span></p><p class="small muted">Rooms with nothing added have no group.</p>{/if}
+{/snippet}
+
+{#snippet action()}{#if admin}<button type="button" class="btn add" onclick={() => void start()}><Icon name="plus" size={16} />Add</button>{/if}{/snippet}
+{#snippet header()}{@render bar("Skills & tools", items?.length, action)}{/snippet}
+
+<ListDetail bar={header} label="Skills & tools" title={creating ? "Add" : item?.name ?? "Not found"} open={creating || (!!items && selected !== undefined)} onselect={select} onclose={close} {list} {detail} {summary} />
 
 <style>
-  .body { flex: 1; min-height: 0; display: grid; gap: 20px; align-content: start; width: min(1040px, 100%); padding: 20px 24px; overflow-y: auto; }
-  .add { margin-left: auto; }
-  .load { margin: 0; color: var(--muted); font-size: 14px; }
-  .retry { padding: 0; border: 0; background: none; color: var(--text); font: inherit; text-decoration: underline; cursor: pointer; }
-  section { display: grid; gap: 8px; min-width: 0; }
-  .scope { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; padding: 0 2px; }
-  h2 { margin: 0; font-size: 14px; }
-  .scope span { color: var(--muted); font-size: 13px; }
-  .list, .form { padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
-  .list { display: grid; }
-  .row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 6px 8px; border-radius: 6px; }
-  .row > :global(svg) { color: var(--muted); }
-  .row.off .lines { opacity: 0.6; }
-  .lines { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
-  .title { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; min-width: 0; font-size: 14px; font-weight: 600; }
-  .name { min-width: 0; overflow-wrap: anywhere; }
-  .badge { flex: none; color: var(--muted); font-size: 12px; font-weight: 500; }
-  .line { min-width: 0; color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
-  .detail { color: var(--text); }
-  .acts, .choices { flex: none; display: inline-flex; align-items: center; gap: 4px; }
-  .switch { display: inline-flex; align-items: center; gap: 6px; padding: 0 6px; color: var(--muted); font-size: 13px; font-weight: 500; cursor: pointer; }
-  .switch input { appearance: none; display: grid; place-items: center; width: 16px; height: 16px; margin: 0; border: 1px solid var(--firm); border-radius: 4px; background: none; cursor: pointer; }
-  .switch input:checked { border-color: var(--focus); background: var(--focus); }
-  .switch input:checked::after { content: ""; width: 8px; height: 4px; margin-top: -2px; border: solid var(--bg); border-width: 0 0 2px 2px; transform: rotate(-45deg); }
-  .switch input:focus-visible { outline-offset: 2px; }
-  .switch input:disabled { cursor: default; }
-  .problem { margin: 0; padding: 0 8px 8px 40px; color: var(--danger); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
-  .form { display: grid; gap: 14px; justify-items: start; padding: 14px; }
-  .form .problem { padding: 0; }
+  .add { gap: 6px; margin-left: auto; }
+  .icon { display: grid; flex: none; color: var(--muted); }
+  .head { font-size: 14px; }
+  .problem { margin: 0; color: var(--danger); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+  .mono { font-family: var(--mono); font-size: 13px; }
+  .form { display: grid; gap: 18px; min-width: 0; }
   .kinds { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; margin: 0; padding: 0; border: 0; }
-  legend { padding: 0 0 6px; font-size: 13px; font-weight: 600; }
-  .kinds label { display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border: 1px solid var(--firm); border-radius: 6px; color: var(--muted); font-size: 13px; font-weight: 500; cursor: pointer; }
+  legend { padding: 0 0 6px; font-size: 14px; font-weight: 600; }
+  .kinds label { display: inline-flex; align-items: center; height: 30px; padding: 0 10px; border: 1px solid var(--firm); border-radius: 6px; color: var(--muted); font-size: 13px; font-weight: 500; cursor: pointer; }
+  .kinds label:hover { color: var(--text); }
   .kinds label.on { border-color: var(--focus); color: var(--text); }
   .kinds label:has(:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
   .kinds input { position: absolute; opacity: 0; pointer-events: none; }
-  .field { display: grid; gap: 6px; width: min(560px, 100%); font-size: 13px; font-weight: 600; }
-  .field span { color: var(--muted); font-weight: 400; }
-  .field input, .field select { box-sizing: border-box; width: 100%; height: 36px; padding: 0 10px; border: 1px solid var(--firm); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-weight: 400; }
-  .mono { font-family: var(--mono, monospace); }
-  .bone { display: block; flex: none; width: 20px; height: 20px; border-radius: 6px; background: var(--selected); }
-  .bone.name { width: 140px; height: 12px; margin-bottom: 6px; }
-  .bone.line { width: 240px; height: 10px; }
-  @media (hover: none) { .kinds label { height: 40px; } .switch { min-height: 40px; } }
-  @media (max-width: 640px) {
-    .body { padding: 12px 16px; }
-    .row { flex-wrap: wrap; padding: 6px 8px; }
-    .lines { flex-basis: calc(100% - 32px); }
-    .acts { width: 100%; margin-left: 32px; }
-    .acts .btn { padding: 0 10px; }
-    .switch { padding-left: 0; }
-    .problem { padding-left: 40px; }
-  }
+  .field { display: grid; gap: 6px; min-width: 0; font-size: 14px; font-weight: 600; }
+  .help { color: var(--muted); font-size: 12.5px; font-weight: 400; line-height: 1.35; }
+  .field input { box-sizing: border-box; width: 100%; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 14px; font-weight: 400; }
+  .field input.mono { font-family: var(--mono); font-size: 13px; }
+  .field input:focus { outline: none; border-color: var(--focus); }
+  @media (hover: none) { .kinds label { height: 40px; } .field input { height: 40px; } }
 </style>
