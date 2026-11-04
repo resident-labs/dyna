@@ -229,7 +229,8 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
 	} else {
 		promptSections.preamble =
 			"You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.";
-		const visibleTools = declaredTools.filter((name) => !!toolSnippets[name]);
+		// Sorted by name, so the same set renders the same text whatever order tools were activated in.
+		const visibleTools = declaredTools.filter((name) => !!toolSnippets[name]).sort();
 		const tools =
 			visibleTools.length > 0 ? visibleTools.map((name) => `- ${name}: ${toolSnippets[name]}`).join("\n") : "(none)";
 		promptSections.tools = `${tools}\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.`;

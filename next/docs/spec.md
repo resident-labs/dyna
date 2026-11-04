@@ -749,10 +749,12 @@ The registry generates the server description, which names the areas for search 
 
 At dispatch, the engine renders ordered `Sections []ContextSection{Key, Text}` in `TurnStart`; the box passes them unchanged. Steers send no snapshot update. Caps count four characters per token; overflow ends with `N more: context show`.
 
+Every list in a section, and the `tools` list of Pi's system prompt (sorted by name), keeps a stable order that does not follow activity, so equal state renders equal text and a context update appears only for a real change.
+
 | Section key | Contents | Cap (tokens) |
 |---|---|---|
 | `dyna_goal` | own goal, its done condition and open items | 200 |
-| `dyna_children` | open children, stalest first: profile, state, current item, PR state, and whether it waits for the owner's answer; at most 8 rows | 250 |
+| `dyna_children` | open children, in the order they were started (a child's activity never reorders them, so only a real change makes a diff): profile, state, current item, PR state, and whether it waits for the owner's answer; at most 8 rows | 250 |
 | `dyna_requests` | operations and questions waiting on this session, and its own that wait on others | 150 |
 | `dyna_holds` | one line of plain fact naming what the session still holds, from its list (7.4) without the turn being dispatched, then each open tracked PR's CI, GitHub review and merge state. Issues appear by number only, so it holds no outside text | 250 |
 | `dyna_profiles` | ratings and limits; only for a session that may start children | 300 |
