@@ -76,6 +76,15 @@ export function timelineSegments(turn: string, items: TranscriptItem[]): Timelin
   return segments;
 }
 
+// Dyna: The harness's live activity label while a turn compacts. The engine sends labels as text only, so this is the one string the page compares.
+export const compactingActivity = "compacting the conversation";
+
+// Dyna: A running turn's working line. It reads the session's live activity, as the sidebar does, and names a compaction.
+export function workingLine(started: string, now: number, activity?: string): string {
+  const time = formatTimelineDuration(now - Date.parse(started));
+  return activity === compactingActivity ? `Compacting the conversation… ${time}` : `Working for ${time}`;
+}
+
 // Dyna: A compaction is one quiet line in its turn, however it came about.
 export function compactionNote({ tokens }: Pick<TranscriptItem, "tokens">): string {
   return tokens ? `Compacted the conversation at ${Math.round(tokens / 1000)}k tokens` : "Compacted the conversation";
