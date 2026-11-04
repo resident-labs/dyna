@@ -18,3 +18,27 @@ func TestBoxHelloDescribesContextUpdates(t *testing.T) {
 		t.Fatalf("instructions lack the context update text:\n%s", hello.Instructions)
 	}
 }
+
+func TestBoxHelloSendsTheStaleSeedNoticeOncePerBox(t *testing.T) {
+	s, room, sid, ctx := setup(t)
+	text := "Its repository's main was not refreshed from GitHub at start (the refresh did not finish in 10s); `git fetch origin main` brings it current."
+	s.SetRepositories(&fakeRepos{stale: text})
+	for range 2 {
+		if _, problem := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{}); problem != nil {
+			t.Fatal(problem)
+		}
+	}
+	listed, problem := s.EventsList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.EventsListRequest{Room: room, Types: []contract.EventType{"session.notice"}, Limit: 100})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	var texts []string
+	for _, event := range listed.Events {
+		if body := event.Body.(contract.SessionNotice); body.Session == sid {
+			texts = append(texts, body.Text)
+		}
+	}
+	if len(texts) != 1 || texts[0] != text {
+		t.Fatalf("notices %q, want the one stale notice", texts)
+	}
+}
