@@ -18,48 +18,65 @@
   let failed = $state(false), creating = $state(false), busy = $state(false), error = $state(""), said = $state("");
   let provider: ModelProvider | "" = $state("");
   let profile = $derived(profiles?.find(each => each.name === selected));
-  const blank: ProfileSummary = { inUse: 0, name: "", provider: "openai", model: "", thinking: "medium", description: "", taste: 0, diagnostics: 0, intelligence: 0, cost: 0 };
+  const blank: ProfileSummary = { inUse: 0, name: "", provider: "anthropic", model: "", thinking: "medium", description: "", taste: 0, diagnostics: 0, intelligence: 0, cost: 0 };
 
+  // Resolves once the list has loaded or failed.
   function reload() {
-    void call("profile.list", {}).then(result => { profiles = profileRows(result.profiles); failed = false; },
-      (reason: unknown) => { if (reason instanceof SignedOut) signedout(); else if (!profiles) failed = true; });
     // Without the accounts the owner can still type a model ID.
     void call("accounts.list", {}).then(result => { models = profileModels(result.accounts ?? []); }, () => {});
+    return call("profile.list", {}).then(result => { profiles = profileRows(result.profiles); failed = false; },
+      (reason: unknown) => { if (reason instanceof SignedOut) signedout(); else if (!profiles) failed = true; });
   }
-  onMount(() => { reload(); window.addEventListener("focus", reload); return () => window.removeEventListener("focus", reload); });
+  function refresh() { void reload(); }
+  // New profile is a step in history of its own, so Back leaves the empty editor as the back arrow does.
+  function popped() { if (creating && !history.state?.creating) { creating = false; error = ""; } }
+  onMount(() => {
+    refresh();
+    window.addEventListener("focus", refresh);
+    window.addEventListener("popstate", popped);
+    return () => { window.removeEventListener("focus", refresh); window.removeEventListener("popstate", popped); };
+  });
   // Another profile, or none, starts without the last one's error.
   $effect.pre(() => { void selected; error = ""; said = ""; });
 
   function showError(reason: unknown, action: "save" | "remove") {
     if (reason instanceof SignedOut) signedout();
     else if (reason instanceof APIError && reason.detail.code === "profile_exists") error = "A profile with this name already exists.";
-    else if (reason instanceof APIError && action === "remove" && reason.detail.code === "conflict") { error = "Sessions started using this profile. Remove it again to move them."; reload(); }
+    else if (reason instanceof APIError && action === "remove" && reason.detail.code === "conflict") { error = "Sessions started using this profile. Remove it again to move them."; refresh(); }
     else error = `Could not ${action} this profile. Try again.`;
   }
   async function save(draft: ProfileSummary) {
     if (busy) return;
     busy = true; error = ""; said = "";
     const create = creating, profile = profileForSave(draft);
-    await call("profile.set", { create, profile }).then(() => {
-      reload();
-      if (create) { creating = false; onselect(profile.name, phone); } else said = "Saved.";
+    await call("profile.set", { create, profile }).then(async () => {
+      await reload();
+      if (!create) { said = "Saved."; return; }
+      // The new profile opens once it is listed; a reload that failed lists it from what was saved.
+      if (!profiles?.some(each => each.name === profile.name)) profiles = [...profiles ?? [], { ...profile, inUse: 0 }].sort((a, b) => a.name.localeCompare(b.name));
+      creating = false;
+      // The profile takes the history step New profile made, so Back returns to the list.
+      if (history.state?.creating) history.replaceState({ fromList: true }, "", location.href);
+      onselect(profile.name, false);
     }, (reason: unknown) => showError(reason, "save"));
     busy = false;
   }
   async function remove(name: string, replacement?: string) {
     if (busy) return;
     busy = true; error = "";
-    await call("profile.remove", { name, replacement }).then(() => { onclose(); reload(); }, (reason: unknown) => showError(reason, "remove"));
+    await call("profile.remove", { name, replacement }).then(() => { onclose(); refresh(); }, (reason: unknown) => showError(reason, "remove"));
     busy = false;
   }
   function start() {
     error = ""; said = "";
     if (selected !== undefined) onclose();
+    if (!creating) history.pushState({ ...history.state, creating: true }, "", location.href);
     creating = true;
   }
   function close() {
-    if (creating) { creating = false; error = ""; return; }
-    onclose();
+    if (!creating) { onclose(); return; }
+    if (history.state?.creating) history.back();
+    else { creating = false; error = ""; }
   }
   function select(name: string, open: boolean) { creating = false; onselect(name, open); }
   const value = (n: number | undefined) => n || "–";
@@ -80,8 +97,8 @@
 {#snippet empty()}<button type="button" class="btn" onclick={start}>New profile</button>{/snippet}
 
 {#snippet list({ drill, select: pick }: { drill: boolean; select: (key: string, open: boolean) => void })}
-  <ItemList items={profiles} {failed} retry={() => { failed = false; reload(); }} key={each => each.name} text={profileText} noun={["profile", "profiles"]} label="Profiles"
-    chips={profileChips} columns={profileColumns} sort={{ column: "name", dir: 1 }} filter={providerFilter(provider)} onclear={() => { provider = ""; }}
+  <ItemList items={profiles} {failed} retry={() => { failed = false; refresh(); }} key={each => each.name} text={profileText} noun={["profile", "profiles"]} label="Profiles"
+    chips={profileChips} columns={profileColumns} sort={{ column: "name", dir: 1 }} filter={providerFilter(provider)} filtered={provider ? providers[provider] : undefined} onclear={() => { provider = ""; }}
     {row} {tools} {empty} selected={creating ? undefined : selected} {drill} onselect={pick} />
 {/snippet}
 

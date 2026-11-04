@@ -2,7 +2,7 @@
   import { tick, type Snippet } from "svelte";
   import Icon from "../Icon.svelte";
   import SearchBox from "./SearchBox.svelte";
-  import { layoutRows, listKey, listView, visibleRange, type Chip, type Column, type Group, type Row } from "../../settings-list.ts";
+  import { layoutRows, listKey, listView, noResults, visibleRange, type Chip, type Column, type Group, type Row } from "../../settings-list.ts";
   // The list of a Settings list page (spec 5.13): search, chips with counts, optional sortable columns, rows that fold
   // into groups, and the window: rows have fixed heights, so only those in view and 200 px each way are drawn, about 20
   // at any length. VirtualList is for rows of any height; these need their tops for the keys too.
@@ -10,13 +10,14 @@
   // selected is the open item's key. The list moves with ↑ ↓ Home End PgUp PgDn; on a wide pane a move opens the row
   // (onselect with open false), and Enter or a click on a narrow one opens it as a screen (open true). onkey takes
   // any other key for the row the list is on and says whether it used it. filter is the page's own narrowing from a
-  // control in tools, such as Profiles' provider; onclear resets that control when the no-results state clears the rest.
-  let { items, failed = false, retry, key, text, noun, label, chips, columns, sort: start, group, folded: foldedFirst = [], row, tools, empty, selected, drill, onselect, onkey, filter, onclear }: {
+  // control in tools, such as Profiles' provider, and filtered names it while it narrows the list; onclear resets that
+  // control when the no-results state clears the rest.
+  let { items, failed = false, retry, key, text, noun, label, chips, columns, sort: start, group, folded: foldedFirst = [], row, tools, empty, selected, drill, onselect, onkey, filter, filtered, onclear }: {
     items: readonly T[] | undefined; failed?: boolean; retry?: () => void; key: (item: T) => string; text: (item: T) => string;
     noun: [one: string, many: string]; label: string; chips?: Chip<T>[]; columns?: Column<T>[]; sort?: { column: string; dir: 1 | -1 };
     group?: (item: T) => Group; folded?: string[]; row: Snippet<[T, boolean]>; tools?: Snippet; empty?: Snippet;
     selected?: string; drill: boolean; onselect: (key: string, open: boolean) => void; onkey?: (key: string, item: T) => boolean;
-    filter?: (item: T) => boolean; onclear?: () => void;
+    filter?: (item: T) => boolean; filtered?: string; onclear?: () => void;
   } = $props();
   const id = $props.id();
   const head = 34, margin = 200;
@@ -120,7 +121,7 @@
     {#if failed && !items}<div class="state" role="alert">The {noun[1]} did not load. <button type="button" class="retry" onclick={retry}>Try again</button></div>
     {:else if !view}<div class="bones" aria-label={`Loading ${noun[1]}`}>{#each [0, 1, 2, 3, 4] as n (n)}<div class="bone-row"><i class="bone" style:width="24px" style:height="24px"></i><span class="lines"><i class="bone" style:width="{140 + n * 17 % 60}px" style:height="12px"></i><i class="bone" style:width="{220 - n * 23 % 70}px" style:height="10px"></i></span></div>{/each}</div>
     {:else if !items?.length}<div class="state"><span>No {noun[1]} yet.</span>{@render empty?.()}</div>
-    {:else if !rows.length}<div class="state"><span>{query ? `No ${noun[1]} match “${query}”${chip?.test ? ` in ${chip.label}` : ""}.` : chip?.test ? `No ${noun[1]} in ${chip.label}.` : `No ${noun[1]} match the filter.`}</span><button type="button" class="btn" onclick={clear}>Clear search and filters</button></div>
+    {:else if !rows.length}<div class="state"><span>{noResults(noun[1], query, [chip?.test ? chip.label : "", filter ? filtered ?? "" : ""].filter(Boolean))}</span><button type="button" class="btn" onclick={clear}>Clear search and filters</button></div>
     {:else}
       <div class="list" role="listbox" tabindex="0" aria-label={label} aria-activedescendant={pointed} bind:this={scroller} bind:clientHeight={height}
         onscroll={() => { scrollTop = scroller!.scrollTop; }} onkeydown={keydown}>
