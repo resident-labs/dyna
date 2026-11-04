@@ -18,13 +18,22 @@
     onselect(key, focus);
     if (!focus) return;
     await tick();
-    (side?.querySelector<HTMLElement>(".body :is(input, button, select, textarea, a[href])") ?? side)?.focus();
+    // A text field first would put the cursor in it and raise a phone's keyboard, so then the detail itself takes the focus.
+    const first = side?.querySelector<HTMLElement>(".body :is(input, button, select, textarea, a[href])");
+    (first && !first.matches("textarea, input:not([type=checkbox], [type=radio], [type=button], [type=submit])") ? first : side)?.focus();
   }
-  async function close() {
+  // A close can land later than its call, as a phone's goes back in history first, and the list is hidden until the
+  // detail has gone, so the list takes the focus once open has turned false.
+  let closing = false;
+  function close() {
+    closing = true;
     onclose();
-    await tick();
-    page?.querySelector<HTMLElement>("[role=listbox]")?.focus();
   }
+  $effect(() => {
+    if (open || !closing) return;
+    closing = false;
+    void tick().then(() => page?.querySelector<HTMLElement>("[role=listbox]")?.focus());
+  });
   function keydown(event: KeyboardEvent) {
     if (event.key !== "Escape" || !open || event.defaultPrevented) return;
     event.preventDefault();

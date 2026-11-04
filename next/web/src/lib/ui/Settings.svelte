@@ -60,7 +60,7 @@
 
 {#snippet bar(title: string, count?: number, action?: Snippet)}
   <header class="bar">{#if phone}<a class="round" href="/settings" onclick={navigate} aria-label="Back to Settings" title="Back to Settings"><Icon name="backChevron" /></a>{/if}
-    <strong>{title}</strong>{#if count !== undefined}<span class="count">{count}</span>{/if}{@render action?.()}</header>
+    <strong>{title}</strong>{#if count !== undefined}<span class="count">{count.toLocaleString("en")}</span>{/if}{@render action?.()}</header>
 {/snippet}
 
 <section class="settings" aria-label="Settings" tabindex="-1" bind:this={element}>
@@ -73,7 +73,7 @@
     {:else if shown?.id === "appearance"}<AppearancePane {bar} />
     {:else if shown?.id === "devices"}<SharingPane {devices} {failed} {reload} {signedout} {bar} />
     {:else if shown?.id === "accounts"}<AccountsPane {bar} {phone} {signedout} {path} {navigate} />
-    {:else if shown?.id === "profiles"}<ProfilesPane {bar} {phone} {signedout} />
+    {:else if shown?.id === "profiles"}<ProfilesPane {bar} {phone} {signedout} selected={item} onselect={open} onclose={close} />
     {:else if shown?.id === "addons"}<AddonsPane {bar} {admin} {signedout} />
     {:else if shown?.id === "approvals"}<ApprovalsPane {bar} {signedout} selected={item} onselect={open} onclose={close} />
     {:else}
