@@ -15,9 +15,10 @@ export function paneCounts(rooms: readonly { deleting?: boolean }[] | undefined)
 export const roomRoute = /^\/r\/([^/]+)(?:\/s\/([^/]+)|\/instructions|\/new)?\/?$/;
 export const settingsRoute = /^\/settings(\/|$)/;
 
-// The one part of path after prefix, decoded: a Settings list page's open item. undefined when path does not start with prefix, the part is empty or holds a slash, or its escapes are
-// malformed, so a pasted /settings/approvals/% reads as no item instead of throwing in the page. decodeURIComponent has
-// no form that reports a malformed escape without throwing, hence the catch.
+// The one part of path after prefix, decoded: a Settings list page's open item. undefined when path does not start
+// with prefix, the part is empty or holds a slash, or its escapes are malformed, so a pasted /settings/approvals/% reads
+// as no item instead of throwing in the page. decodeURIComponent has no form that reports a malformed escape without
+// throwing, hence the catch.
 export function pathItem(path: string, prefix: string): string | undefined {
   if (!path.startsWith(prefix)) return undefined;
   const part = path.slice(prefix.length);
