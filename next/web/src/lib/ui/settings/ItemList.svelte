@@ -2,19 +2,22 @@
   import { tick, type Snippet } from "svelte";
   import Icon from "../Icon.svelte";
   import SearchBox from "./SearchBox.svelte";
-  import { layoutRows, listKey, listView, visibleRange, type Chip, type Column, type Group, type Row } from "../../settings-list.ts";
+  import { layoutRows, listKey, listView, noResults, visibleRange, type Chip, type Column, type Group, type Row } from "../../settings-list.ts";
   // The list of a Settings list page (spec 5.13): search, chips with counts, optional sortable columns, rows that fold
   // into groups, and the window: rows have fixed heights, so only those in view and 200 px each way are drawn, about 20
   // at any length. VirtualList is for rows of any height; these need their tops for the keys too.
   // items is undefined while loading. row draws an item; compact is a narrow list, where a row drops its columns.
   // selected is the open item's key. The list moves with ↑ ↓ Home End PgUp PgDn; on a wide pane a move opens the row
   // (onselect with open false), and Enter or a click on a narrow one opens it as a screen (open true). onkey takes
-  // any other key for the row the list is on and says whether it used it.
-  let { items, failed = false, retry, key, text, noun, label, chips, columns, sort: start, group, folded: foldedFirst = [], row, tools, empty, selected, drill, onselect, onkey }: {
+  // any other key for the row the list is on and says whether it used it. filter is the page's own narrowing from a
+  // control in tools, such as Profiles' provider, and filtered names it while it narrows the list; onclear resets that
+  // control when the no-results state clears the rest.
+  let { items, failed = false, retry, key, text, noun, label, chips, columns, sort: start, group, folded: foldedFirst = [], row, tools, empty, selected, drill, onselect, onkey, filter, filtered, onclear }: {
     items: readonly T[] | undefined; failed?: boolean; retry?: () => void; key: (item: T) => string; text: (item: T) => string;
     noun: [one: string, many: string]; label: string; chips?: Chip<T>[]; columns?: Column<T>[]; sort?: { column: string; dir: 1 | -1 };
     group?: (item: T) => Group; folded?: string[]; row: Snippet<[T, boolean]>; tools?: Snippet; empty?: Snippet;
     selected?: string; drill: boolean; onselect: (key: string, open: boolean) => void; onkey?: (key: string, item: T) => boolean;
+    filter?: (item: T) => boolean; filtered?: string; onclear?: () => void;
   } = $props();
   const id = $props.id();
   const head = 34, margin = 200;
@@ -30,7 +33,7 @@
   let compact = $derived(width > 0 && width < (columns ? 500 : 420));
   let rowHeight = $derived(drill ? 60 : 52);
   let tracks = $derived(columns?.map(column => column.width).join(" "));
-  let view = $derived(items && listView(items, { text, key, query, chip: chip ?? { id: "", label: "" }, chips, folded, group,
+  let view = $derived(items && listView(items, { text, key, query, chip: chip ?? { id: "", label: "" }, chips, filter, folded, group,
     sort: sorting && columns?.find(column => column.id === sorting!.column) ? { column: columns.find(column => column.id === sorting!.column)!, dir: sorting.dir } : undefined }));
   let rows = $derived(view?.rows ?? []);
   let layout = $derived(layoutRows(rows, rowHeight, head));
@@ -55,7 +58,7 @@
   // The open item is the row the keys are on.
   $effect.pre(() => { if (selected !== undefined) current = selected; });
   // A new search or chip starts at the top.
-  $effect(() => { void query; void chip; if (scroller) scroller.scrollTop = 0; scrollTop = 0; });
+  $effect(() => { void query; void chip; void filter; if (scroller) scroller.scrollTop = 0; scrollTop = 0; });
 
   function show(index: number) {
     if (!scroller) return;
@@ -98,10 +101,12 @@
     scroller?.focus();
     if (active < 0) { const index = rows.findIndex(each => each.kind === "item"); if (index >= 0) { await tick(); move(index, false); } }
   }
-  function clear() { query = ""; chip = chips?.[0]; }
+  function clear() { query = ""; chip = chips?.[0]; onclear?.(); }
 </script>
 
-<div class="column" data-page-ready={!!items || failed}>
+<!-- The column is an F6 stop (spec 5.13); F6 hands its focus to the list, or to the first control while the list is not there. -->
+<div class="column" data-page-ready={!!items || failed} data-f6 tabindex="-1"
+  onfocus={event => { if (event.target === event.currentTarget) (scroller ?? event.currentTarget.querySelector<HTMLElement>("input:enabled, button:enabled"))?.focus(); }}>
   <div class="tools">
     <SearchBox bind:value={query} slash label={`Search ${noun[1]}`} placeholder={items?.length ? `Search ${count(items.length)}` : `Search ${noun[1]}`} disabled={!items} ondown={() => void first()} />
     {#if chips}<div class="chips" role="group" aria-label="Filter">{#each chips as each (each.id)}
@@ -116,7 +121,7 @@
     {#if failed && !items}<div class="state" role="alert">The {noun[1]} did not load. <button type="button" class="retry" onclick={retry}>Try again</button></div>
     {:else if !view}<div class="bones" aria-label={`Loading ${noun[1]}`}>{#each [0, 1, 2, 3, 4] as n (n)}<div class="bone-row"><i class="bone" style:width="24px" style:height="24px"></i><span class="lines"><i class="bone" style:width="{140 + n * 17 % 60}px" style:height="12px"></i><i class="bone" style:width="{220 - n * 23 % 70}px" style:height="10px"></i></span></div>{/each}</div>
     {:else if !items?.length}<div class="state"><span>No {noun[1]} yet.</span>{@render empty?.()}</div>
-    {:else if !rows.length}<div class="state"><span>{query ? `No ${noun[1]} match “${query}”${chip?.test ? ` in ${chip.label}` : ""}.` : `No ${noun[1]} in ${chip?.label}.`}</span><button type="button" class="btn" onclick={clear}>Clear search and filters</button></div>
+    {:else if !rows.length}<div class="state"><span>{noResults(noun[1], query, [chip?.test ? chip.label : "", filter ? filtered ?? "" : ""].filter(Boolean))}</span><button type="button" class="btn" onclick={clear}>Clear search and filters</button></div>
     {:else}
       <div class="list" role="listbox" tabindex="0" aria-label={label} aria-activedescendant={pointed} bind:this={scroller} bind:clientHeight={height}
         onscroll={() => { scrollTop = scroller!.scrollTop; }} onkeydown={keydown}>
@@ -143,7 +148,10 @@
 
 <style>
   .column { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 16px 20px 12px 24px; }
+  .column:focus { outline: none; }
+  /* The search spans the list and the chips take the row below, so the toolbar keeps its shape at any count. */
   .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .tools > :global(.search) { flex-basis: 100%; }
   .chips { display: flex; flex-wrap: wrap; gap: 4px; }
   .chip { height: 30px; padding: 0 10px; border: 1px solid var(--firm); border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; }
   .chip[aria-pressed="true"] { border-color: var(--focus); color: var(--text); }
@@ -162,11 +170,15 @@
   .row { position: absolute; left: 6px; right: 6px; display: flex; align-items: center; gap: 12px; padding: 0 8px; border-radius: 6px; cursor: pointer; }
   .row.item:hover { background: var(--hover); }
   .row[aria-selected="true"] { background: var(--selected); }
+  /* On the selected wash an off switch's usual border all but vanishes in light, and the switch reads as disabled. */
+  .row[aria-selected="true"] :global(input[role="switch"]:not(:checked)) { border-color: var(--muted); }
   .list:focus-visible .row.active { outline: 2px solid var(--focus); outline-offset: -2px; }
   .row.grid { display: grid; gap: 10px; }
   .group { left: 0; right: 0; gap: 8px; padding: 0 14px; border-radius: 0; color: var(--muted); font-size: 13px; font-weight: 600; }
   .pin .group { background: var(--raised); border-bottom: 1px solid var(--line); }
   .group .n { font-weight: 400; font-variant-numeric: tabular-nums; }
+  /* A long group name, such as a room's, keeps to the head's one line. */
+  .group span:not(.n) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .group :global(svg) { transition: transform 120ms; }
   .group.folded :global(svg) { transform: rotate(-90deg); }
   /* What a page's row draws: two lines of text, and a cell for each column. */

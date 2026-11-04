@@ -51,6 +51,65 @@ export type NormalizedBuildSystemPromptOptions = BuildSystemPromptOptions & {
 	skills: Skill[];
 };
 
+/** Name of the section that names the tools `tool_search` or a codemode script can reach but are not declared. */
+export const DEFERRED_TOOLS_SECTION = "deferred_tools";
+/** Tools listed per namespace, and actions per tool; the rest are counted. */
+export const MAX_DEFERRED_NAMES = 80;
+
+/** A tool for the `deferred_tools` section. `actions` is the `action` enum of its schema, empty without one. */
+export interface DeferredTool {
+	name: string;
+	namespace?: string;
+	actions: readonly string[];
+}
+
+/**
+ * The `deferred_tools` section: the tools not declared yet, by name only, grouped by namespace. A
+ * namespace's line names its tools that take no action; each tool with actions gets its own line
+ * below it. Undefined when nothing is listed or neither `tool_search` nor `codemode` is active.
+ */
+export function renderDeferredToolsSection(
+	tools: readonly DeferredTool[],
+	reach: { toolSearch: boolean; codemode: boolean },
+): string | undefined {
+	if (tools.length === 0 || (!reach.toolSearch && !reach.codemode)) return undefined;
+	const script = "a codemode script calls one as tools.<prefix><name>.";
+	const how = !reach.codemode
+		? "tool_search loads one."
+		: reach.toolSearch
+			? `tool_search loads one, and ${script}`
+			: `A${script.slice(1)}`;
+	// The first MAX_DEFERRED_NAMES names, and a count of the rest.
+	const capped = (names: readonly string[]) =>
+		names.length > MAX_DEFERRED_NAMES
+			? [...names.slice(0, MAX_DEFERRED_NAMES), `+${names.length - MAX_DEFERRED_NAMES} more; tool_search finds them`]
+			: [...names];
+	const groups = new Map<string, DeferredTool[]>();
+	for (const tool of tools) {
+		const prefix = tool.namespace && tool.name.startsWith(`${tool.namespace}__`) ? `${tool.namespace}__` : "";
+		groups.set(prefix, [...(groups.get(prefix) ?? []), tool]);
+	}
+	const lines = [`Tools not declared to you yet, by name prefix, with a tool's actions after it. ${how}`];
+	for (const prefix of [...groups.keys()].sort()) {
+		const sorted = (groups.get(prefix) ?? [])
+			.map((tool) => ({ name: tool.name.slice(prefix.length), actions: tool.actions }))
+			.sort((a, b) => a.name.localeCompare(b.name));
+		// Past the cap the namespace line counts the rest, whether or not they take actions.
+		const listed = capped(sorted.map((tool) => tool.name));
+		const kept = sorted.slice(0, MAX_DEFERRED_NAMES);
+		const plain = [
+			...kept.filter((tool) => tool.actions.length === 0).map((tool) => tool.name),
+			...listed.slice(MAX_DEFERRED_NAMES),
+		].join(", ");
+		if (prefix) lines.push(plain ? `${prefix}: ${plain}` : `${prefix}:`);
+		else if (plain) lines.push(plain);
+		for (const tool of kept) {
+			if (tool.actions.length > 0) lines.push(`- ${tool.name}: ${capped(tool.actions).join(", ")}`);
+		}
+	}
+	return lines.join("\n");
+}
+
 /**
  * Ordered system prompt sections, keyed by name. `preamble` is untagged text; every other
  * section is wrapped in a tag of the same name so the model can match later updates to it.
@@ -59,7 +118,14 @@ export type NormalizedBuildSystemPromptOptions = BuildSystemPromptOptions & {
 export type SystemPromptSections = Record<string, string>;
 
 export const RESERVED_SYSTEM_PROMPT_SECTIONS: ReadonlySet<string> = new Set([
-	"preamble", "tools", "rules", "docs", "addendum", "skills", "cwd",
+	"preamble",
+	"tools",
+	"rules",
+	"docs",
+	"addendum",
+	"skills",
+	"cwd",
+	DEFERRED_TOOLS_SECTION,
 ]);
 const SYSTEM_PROMPT_SECTION_NAME = /^[a-z][a-z0-9_-]*$/;
 /** Normalize prompt input into the mutable, collection-complete shape exposed to extensions. */
@@ -163,7 +229,8 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
 	} else {
 		promptSections.preamble =
 			"You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.";
-		const visibleTools = declaredTools.filter((name) => !!toolSnippets[name]);
+		// Sorted by name, so the same set renders the same text whatever order tools were activated in.
+		const visibleTools = declaredTools.filter((name) => !!toolSnippets[name]).sort();
 		const tools =
 			visibleTools.length > 0 ? visibleTools.map((name) => `- ${name}: ${toolSnippets[name]}`).join("\n") : "(none)";
 		promptSections.tools = `${tools}\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.`;
