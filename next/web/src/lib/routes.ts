@@ -5,7 +5,7 @@ export const settingsPanes: readonly { id: string; label: string; icon: "palette
   { id: "accounts", label: "Accounts", icon: "plug", admin: true },
   { id: "profiles", label: "Profiles", icon: "tool", admin: true, list: true },
   { id: "approvals", label: "Approvals", icon: "shield", admin: true, list: true },
-  { id: "addons", label: "Skills & tools", icon: "plus", admin: false },
+  { id: "addons", label: "Skills & tools", icon: "plus", admin: false, list: true },
 ];
 // The counts beside the Settings panes in the nav (spec 5.13), only from lists the app already holds: Approvals lists
 // the rooms not being deleted. rooms is undefined until they load, and then no pane has a count.
