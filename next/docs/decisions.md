@@ -1747,3 +1747,10 @@ The owner chose to ship without the five-provider evaluation gate. A Claude sani
 - **Decision.** The system prompt of a Dyna box has no `<docs>` section, about 330 tokens that point at Pi's own documentation and tell the agent to read pi `.md` files. The box agent passes `--no-docs`, a Pi fork flag (P14, fork level 15) that leaves out that one section. Nothing else in the prompt changes.
 - **Why a fork flag.** Pi v1.4.0 has no option for it: `--system-prompt` replaces the tools and rules too, and `docs` is a reserved section name an extension cannot remove. The flag is the one place that changes; the box agent has no prompt text of its own to keep in step.
 - **Where the docs are.** They stay at `/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/docs`, and the `dyna-extend` skill, the one place an agent learns about extending Dyna, names that path.
+
+### Profile list keeps read-only fields apart (build-lead via root, 2026-11-03)
+
+- **Wrapper, not a nested status.** `profile.list` returns entries `{profile, inUse}`. `profile` is the whole stored `contract.Profile`, so it is a valid `profile.set` body; `inUse` is beside it. A nested `status` inside the profile would have to be accepted and ignored by `profile.set`, which loosens the strict decode. `ProfileSummary` is gone; the web builds its row type (`Profile` plus `inUse`) once in `web/src/lib/profiles.ts`.
+- **`images` is always explicit in the list**, so a set built from it cannot drop `images: false` or turn it on by omission.
+- **`set` merges in the CLI.** `profile.set` stays a whole replacement; `dyna profile set` loads the profile first and sends it back with the given flags applied. The read and write are two calls, so an edit between them is overwritten, which for one owner at a CLI is accepted.
+- **Unknown field is named at the API boundary**: `unknown field "inUse"`, for every method, as the decoder words it. The list of fields the method takes is not added, because a nested field has no short list.

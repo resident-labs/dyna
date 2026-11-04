@@ -24,7 +24,7 @@ import (
 )
 
 type Profiles interface {
-	List() []contract.ProfileSummary
+	List() []contract.Profile
 	TextOnlyModels() []contract.TextOnlyModel
 	CompactionTokens(contract.ProfileName) int
 	Model(contract.ProfileName) (contract.ModelChoice, []string, error)
@@ -34,6 +34,8 @@ type Profiles interface {
 type Repositories interface {
 	Get(context.Context, contract.SessionID, contract.HostName, bool) ([]contract.BoxRepo, error)
 	Ref(context.Context, contract.RepoName, string) (string, error)
+	// Seed is Get with a bounded refresh from GitHub; the string is a notice for the session when the refresh did not happen.
+	Seed(context.Context, contract.SessionID, contract.HostName) ([]contract.BoxRepo, string, error)
 }
 
 // Usage gives the newest usage reading without waiting on a provider.
