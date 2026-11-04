@@ -34,6 +34,7 @@ test("shows only browser image types as thumbnails, and sizes in B, KB and MB", 
   const file = (media: string) => ({ name: "f", media, bytes: 0, sha256: "" });
   assert.deepEqual(["image/png", "image/webp", "image/svg+xml", "text/plain"].map(media => isImage(file(media))), [true, true, false, false]);
   assert.deepEqual([512, 12_700, 3_250_000].map(fileSize), ["512 B", "12.4 KB", "3.1 MB"]);
+  assert.deepEqual([1024 ** 3 - 1024 * 1024, 1024 ** 3, 5.5 * 1024 ** 3, 2048 * 1024 ** 3].map(fileSize), ["1023.0 MB", "1.0 GB", "5.5 GB", "2048.0 GB"]);
 });
 
 const lead: Principal = { kind: "session", session: "l" };
