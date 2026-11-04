@@ -18,8 +18,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/MichaelKinsy/PiG/coding/extension"
 	"github.com/resident-labs/dyna/box"
+
 	"github.com/resident-labs/dyna/box/computer"
+	"github.com/resident-labs/dyna/box/dynaext"
 	"github.com/resident-labs/dyna/box/dynamcp"
 	"github.com/resident-labs/dyna/box/post"
 	"github.com/resident-labs/dyna/box/shell"
@@ -27,6 +30,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness"
 	"github.com/resident-labs/dyna/harness/pi"
+	"github.com/resident-labs/dyna/harness/pig"
 )
 
 const (
@@ -177,10 +181,6 @@ func Run(ctx context.Context) error {
 	if text := addonNotice(problems); text != "" {
 		notice(text)
 	}
-	args, err := modelArgs(hello.Model, hello.CompactTokens)
-	if err != nil {
-		return err
-	}
 	sessions := filepath.Join(piDir, "sessions")
 	if err = os.MkdirAll(sessions, 0700); err != nil {
 		return err
@@ -269,7 +269,15 @@ func Run(ctx context.Context) error {
 		}
 		h, files = crew, crew.Files
 	} else {
-		session, err := pi.Open(ctx, "pi", append(piArgs(args, extensionPath, hello.Instructions, modelsPath, sessions, mcpPath), "--continue"), "", workdir, func(text string) { go notice(text) })
+		session, err := pig.Open(ctx, pig.Config{
+			Dir:          workdir,
+			AgentDir:     piDir,
+			SessionDir:   sessions,
+			Model:        hello.Model,
+			Instructions: hello.Instructions,
+			Extensions:   []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: workdir, Shell: jobs, Dyna: dynaTools})},
+			Notice:       func(text string) { go notice(text) },
+		})
 		if err != nil {
 			return err
 		}
@@ -277,7 +285,7 @@ func Run(ctx context.Context) error {
 		h, files, steered = session, func() []string { return []string{session.SessionFile()} }, jobs.StepAside
 	}
 	defer h.Close()
-	steps.Done("pi start")
+	steps.Done("session start")
 	activityTicks := time.NewTicker(time.Second)
 	defer activityTicks.Stop()
 	go activity.run(ctx, activityTicks.C, client.TurnActivity)

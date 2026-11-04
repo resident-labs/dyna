@@ -37,7 +37,7 @@ type response struct {
 	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *rpcError       `json:"error,omitempty"`
 }
-type content struct {
+type Content struct {
 	Type     string `json:"type"`
 	Text     string `json:"text,omitempty"`
 	Data     string `json:"data,omitempty"`
@@ -45,19 +45,19 @@ type content struct {
 }
 
 // MarshalJSON keeps "text" on an empty text block, as MCP requires. Actions that print nothing return one.
-func (c content) MarshalJSON() ([]byte, error) {
+func (c Content) MarshalJSON() ([]byte, error) {
 	if c.Type == "text" {
 		return json.Marshal(struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		}{c.Type, c.Text})
 	}
-	type block content
+	type block Content
 	return json.Marshal(block(c))
 }
 
-type result struct {
-	Content           []content       `json:"content"`
+type Result struct {
+	Content           []Content       `json:"content"`
 	IsError           bool            `json:"isError,omitempty"`
 	StructuredContent json.RawMessage `json:"structuredContent,omitempty"`
 }
@@ -71,10 +71,10 @@ type callParams struct {
 
 // Forward makes a single box-socket API request and returns its typed error unchanged.
 type Forward func(context.Context, contract.Method, []byte) ([]byte, *contract.Error)
-type Local func(context.Context, tools.BoxHandler, []byte) (result, *contract.Error)
+type Local func(context.Context, tools.BoxHandler, []byte) (Result, *contract.Error)
 
 type Server struct {
-	list     []tool
+	list     []Tool
 	names    string
 	actions  map[string]map[string]action
 	forward  Forward
@@ -101,14 +101,34 @@ func (s *Server) Description() string {
 	return "Dyna tools cover " + s.names + ". A script calls one as tools.mcp__dyna__<name>."
 }
 
-func marshal[T any](v T) json.RawMessage { data, _ := json.Marshal(v); return data }
-
-func failed(problem contract.Error) result {
-	detail := marshal(problem)
-	return result{Content: []content{{Type: "text", Text: string(detail)}}, IsError: true, StructuredContent: detail}
+// Tool is a tool's declaration as tools/list gives it.
+func (s *Server) Tool(name string) (Tool, bool) {
+	for _, tool := range s.list {
+		if tool.Name == name {
+			return tool, true
+		}
+	}
+	return Tool{}, false
 }
 
-func failure(code contract.ErrorCode, message string) result {
+// Call runs a tool for a caller in the box agent's own process, as tools/call does, with the same time limit.
+func (s *Server) Call(ctx context.Context, name string, arguments map[string]json.RawMessage) Result {
+	ctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	return s.call(ctx, callParams{Name: name, Arguments: arguments})
+}
+
+// callTimeout bounds one call. Longer work returns an operation at once and wakes the session when it ran.
+const callTimeout = 600 * time.Second
+
+func marshal[T any](v T) json.RawMessage { data, _ := json.Marshal(v); return data }
+
+func failed(problem contract.Error) Result {
+	detail := marshal(problem)
+	return Result{Content: []Content{{Type: "text", Text: string(detail)}}, IsError: true, StructuredContent: detail}
+}
+
+func failure(code contract.ErrorCode, message string) Result {
 	return failed(contract.Error{Code: code, Message: message})
 }
 
@@ -125,7 +145,7 @@ func decodeProblem(err error, name string, a action) string {
 	return fmt.Sprintf("unknown field %s; %s takes: %s", field, name, strings.Join(fields, ", "))
 }
 
-func (s *Server) call(ctx context.Context, p callParams) result {
+func (s *Server) call(ctx context.Context, p callParams) Result {
 	verbs, ok := s.actions[p.Name]
 	if !ok {
 		return failure(contract.ErrUnknownAction, "Unknown tool. Valid tools: "+s.names)
@@ -208,7 +228,7 @@ func (s *Server) call(ctx context.Context, p callParams) result {
 			contract.PostResponse
 			Checks []contract.VisualCheck `json:"checks,omitempty"`
 		}{response, checks})
-		return result{Content: []content{{Type: "text", Text: string(output)}}, StructuredContent: output}
+		return Result{Content: []Content{{Type: "text", Text: string(output)}}, StructuredContent: output}
 	}
 
 	if a.method == contract.MethodSkillSave {
@@ -262,7 +282,7 @@ func (s *Server) call(ctx context.Context, p callParams) result {
 	if problem != nil {
 		return failed(*problem)
 	}
-	return result{Content: []content{{Type: "text", Text: string(out)}}, StructuredContent: out}
+	return Result{Content: []Content{{Type: "text", Text: string(out)}}, StructuredContent: out}
 }
 
 func writeEvent[T any](w http.ResponseWriter, value T) {
@@ -285,9 +305,9 @@ func sendProgress(w http.ResponseWriter, token json.RawMessage, count int) {
 	writeEvent(w, notice)
 }
 
-func (s *Server) stream(ctx context.Context, w http.ResponseWriter, p callParams) result {
+func (s *Server) stream(ctx context.Context, w http.ResponseWriter, p callParams) Result {
 	sendProgress(w, p.Meta.ProgressToken, 0)
-	done := make(chan result, 1)
+	done := make(chan Result, 1)
 	go func() { done <- s.call(ctx, p) }()
 	tick := time.NewTicker(30 * time.Second)
 	defer tick.Stop()
@@ -364,7 +384,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		resp.Result = json.RawMessage(`{}`)
 	case "tools/list":
 		resp.Result = marshal(struct {
-			Tools []tool `json:"tools"`
+			Tools []Tool `json:"tools"`
 		}{s.list})
 	case "tools/call":
 		var p callParams
@@ -372,7 +392,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			resp.Error = &rpcError{-32602, "Invalid tool call."}
 			break
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 600*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), callTimeout)
 		s.mu.Lock()
 		s.pending[string(req.ID)] = cancel
 		s.mu.Unlock()
