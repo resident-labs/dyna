@@ -10,7 +10,6 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/prs"
 	"github.com/resident-labs/dyna/engine/store"
-	"github.com/resident-labs/dyna/room"
 )
 
 // issueFor returns an issue for this caller. Free text on an issue by anyone but the owner's account reaches a session wrapped (decision 13).
@@ -20,12 +19,12 @@ func issueFor(caller contract.Principal, i store.TrackedIssue, viewer string) co
 	if caller.Kind != contract.PrincipalSession || writer == "" {
 		return summary
 	}
-	summary.Title = room.WrapExternal(writer, summary.Title)
+	summary.Title = contract.Outside("github", "@"+writer, summary.Title)
 	if summary.Milestone != "" {
-		summary.Milestone = room.WrapExternal(writer, summary.Milestone)
+		summary.Milestone = contract.Outside("github", "@"+writer, summary.Milestone)
 	}
 	if len(summary.Labels) > 0 {
-		summary.Labels = []string{room.WrapExternal(writer, strings.Join(summary.Labels, ", "))}
+		summary.Labels = []string{contract.Outside("github", "@"+writer, strings.Join(summary.Labels, ", "))}
 	}
 	return summary
 }

@@ -154,7 +154,7 @@ const (
 )
 
 // HookFinished ends one Run (spec 8.5) and wakes nobody. Output is the end of what the command wrote, and
-// it is untrusted text.
+// it reaches a session as outside text (decision 13).
 type HookFinished struct {
 	Subscription SubscriptionID `json:"subscription"`
 	Result       HookResult     `json:"result"`
