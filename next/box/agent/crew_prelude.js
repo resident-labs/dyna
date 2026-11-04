@@ -22,8 +22,11 @@
     if (reply.error === undefined) return reply.value;
     throw Object.assign(new Error(reply.error), { failed: true, step: reply.step, reason: reply.error });
   };
+  // Lines reach the box agent one after another in the order the script wrote them, as the sandbox runs calls side by side.
+  let lines = Promise.resolve();
   const emit = (message) => {
-    sendHost({ parent, phase: current, ...message });
+    const line = { parent, phase: current, ...message };
+    lines = lines.then(() => sendHost(line));
   };
   const reasonOf = (error) => error?.reason ?? (String(error?.message ?? error) || "the script threw");
   // An error that no step recorded still counts at the run's end.
@@ -98,6 +101,9 @@
     } catch (error) {
       const report = String(error?.step ? error.message : error?.stack ? error + "\n" + error.stack : error) || "the script threw";
       return { failure: { reason: reasonOf(error), report, step: error?.step ?? "" } };
+    } finally {
+      // The script's last lines reach the journal before its end does.
+      await lines;
     }
   };
 })
