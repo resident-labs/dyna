@@ -402,11 +402,15 @@ func TestPoolSetChangesWhatItNamesAndRefusesTheRest(t *testing.T) {
 	}
 }
 
-// pool.add refuses an idle the step could not read, as pool.set does.
-func TestPoolAddRefusesAnIdlePastADuration(t *testing.T) {
+// pool.add refuses a max below 1 and an idle the step could not read, as pool.set does.
+func TestPoolAddRefusesAMaxBelowOneAndAnIdlePastADuration(t *testing.T) {
 	r := setupPool(t)
 	most := contract.DurationMS((2562047 * time.Hour).Milliseconds())
-	req := contract.PoolAddRequest{Name: "boats", Script: "#!/bin/sh\n", Max: 1, Idle: most + 1}
+	req := contract.PoolAddRequest{Name: "boats", Script: "#!/bin/sh\n", Max: 0, Idle: most}
+	if _, e := r.s.PoolAdd(r.ctx, r.owner, req); e == nil || e.Code != contract.ErrInvalid || e.Message != "a pool needs a max of at least 1" {
+		t.Fatalf("max 0: %v", e)
+	}
+	req.Max, req.Idle = 1, most+1
 	if _, e := r.s.PoolAdd(r.ctx, r.owner, req); e == nil || e.Message != "idle is at most 2562047 hours" {
 		t.Fatalf("past: %v", e)
 	}
