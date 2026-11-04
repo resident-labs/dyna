@@ -204,12 +204,12 @@ func TestAPendingRootOnlyRequestEventIsHiddenFromASessionThatIsNotRoot(t *testin
 
 // A tool is mcp__<server>__<tool>, so a server name with "__" would read as another server.
 func TestAnMCPServerNameHasNoDoubleUnderscore(t *testing.T) {
-	for _, name := range []string{"dyna__x", "github__x", "a__"} {
+	for _, name := range []string{"dyna__x", "github__x", "a__", "dyna_", "_dyna", "github_"} {
 		if problem := checkMCP(name, "https://x.test/mcp", "", nil); problem == nil {
 			t.Fatalf("%s accepted", name)
 		}
 	}
-	if problem := checkMCP("docs_x", "https://x.test/mcp", "", nil); problem != nil {
+	if problem := checkMCP("github_x", "https://x.test/mcp", "", nil); problem != nil {
 		t.Fatal(problem)
 	}
 }
