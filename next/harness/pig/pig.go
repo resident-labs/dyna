@@ -122,7 +122,9 @@ func (h *Harness) start(ctx context.Context, c Config) error {
 		return err
 	}
 	// "+bash" keeps the extension's bash active in a resumed session, which restores the tools its transcript recorded.
-	created, err := coding.CreateAgentSessionFromServices(coding.CreateAgentSessionFromServicesOptions{Services: h.services, SessionManager: manager, Model: model, ThinkingLevel: ai.ModelThinkingLevel(c.Model.Thinking), Tools: []string{"+codemode", "+bash"}, ContextUpdates: true})
+	// A model that marks effort changes mid-conversation still gets the session's effort at the top level, where Pi sends "high"
+	// (the fork's patch P8, as Dyna's Pi fork did).
+	created, err := coding.CreateAgentSessionFromServices(coding.CreateAgentSessionFromServicesOptions{Services: h.services, SessionManager: manager, Model: model, ThinkingLevel: ai.ModelThinkingLevel(c.Model.Thinking), Tools: []string{"+codemode", "+bash"}, ContextUpdates: true, ActiveEffortAtTopLevel: true})
 	if err != nil {
 		return err
 	}
