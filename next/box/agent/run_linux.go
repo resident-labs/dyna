@@ -43,9 +43,9 @@ type boxHarness interface {
 	Done() <-chan struct{}
 }
 
-// crewInstructions follow a session's own instructions in each worker.
-func crewInstructions(name, tree string) string {
-	text := "You are one worker of workflow " + name + ", a process in your session's box, not a session of your own. Your final text is returned to the script as your result: it is a return value, not a message, so it holds the result itself and is not posted. With a schema, it is that JSON alone. Nothing wakes a worker: a command that outlasts bash's wait becomes a job, which job output reads until it ends, and a job waiting for the build lock is normal.\n"
+// crewInstructions is a crew worker's whole prompt: the core every agent shares, which box.hello sends as WorkerInstructions (never the session's own Instructions), and the role of a worker in a crew. The hello has a workflow.
+func crewInstructions(hello contract.BoxHelloResponse, tree string) string {
+	text := hello.WorkerInstructions + "\n\n# Your role: workflow worker\n\n" + "You are one worker of workflow " + hello.Workflow.Name + ", a process in your session's box, not a session of your own. Your final text is returned to the script as your result: it is a return value, not a message, so it holds the result itself and is not posted. With a schema, it is that JSON alone. Nothing wakes a worker: a command that outlasts bash's wait becomes a job, which job output reads until it ends, and a job waiting for the build lock is normal.\n"
 	if tree == "" {
 		return text + "Other workers share this box and this working tree: stay within the work your prompt gives you.\n"
 	}
@@ -203,7 +203,7 @@ func Run(ctx context.Context) error {
 				tree = ""
 			}
 			c := workerConfig(pig.Config{AgentDir: piDir, SessionDir: sessions, Notice: func(text string) { go notice(text) }}, profile, folder, dir)
-			c.Instructions = hello.Instructions + crewInstructions(hello.Workflow.Name, tree)
+			c.Instructions = crewInstructions(hello, tree)
 			c.Extensions = []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: dir, Shell: jobs, Dyna: dynaTools})}
 			return pig.Open(ctx, c)
 		}
