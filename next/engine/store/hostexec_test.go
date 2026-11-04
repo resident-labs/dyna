@@ -10,7 +10,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-func TestRecoverHostexecMarksInterruptedRunsLost(t *testing.T) {
+func TestLostHostexecRunsAreStoppedBySweepAfterTheirGrace(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(1000, 0)
 	s, err := Open(t.TempDir())
@@ -43,7 +43,7 @@ func TestRecoverHostexecMarksInterruptedRunsLost(t *testing.T) {
 		t.Fatal(err)
 	}
 	recovered := now.Add(time.Minute)
-	if err = s.RecoverHostexec(ctx, recovered); err != nil {
+	if _, err = s.FinishHostexec(ctx, "running", recovered, 0, HostexecLost); err != nil {
 		t.Fatal(err)
 	}
 	var stopped string
