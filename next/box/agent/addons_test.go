@@ -199,7 +199,7 @@ func TestLastOutputKeepsTheEnd(t *testing.T) {
 
 func TestAHostSkillSaysWhereItsCommandsRun(t *testing.T) {
 	b := newAddonBox(t)
-	writeBundle(t, b.Bundles[1], []contract.Addon{{Kind: contract.AddonSkill, Name: "hypruse", Host: "omarchy"}, {Kind: contract.AddonSkill, Name: "plain"}}, bundleSkill{"hypruse", "Drive Hyprland"}, bundleSkill{"plain", "Plain"})
+	writeBundle(t, b.Bundles[1], []contract.Addon{{Kind: contract.AddonSkill, Name: "hypruse", Hosts: []contract.HostName{"omarchy", "desktop", "arch"}}, {Kind: contract.AddonSkill, Name: "plain"}}, bundleSkill{"hypruse", "Drive Hyprland"}, bundleSkill{"plain", "Plain"})
 	if _, problems, err := b.apply(context.Background()); err != nil || len(problems) != 0 {
 		t.Fatalf("%v %v", problems, err)
 	}
@@ -208,10 +208,10 @@ func TestAHostSkillSaysWhereItsCommandsRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	meta, err := skills.Parse(data)
-	if err != nil || meta.Name != "hypruse" || meta.Description != "Drive Hyprland · from host omarchy" {
+	if err != nil || meta.Name != "hypruse" || meta.Description != "Drive Hyprland · runs on omarchy, desktop or arch" {
 		t.Fatalf("%+v %v", meta, err)
 	}
-	if !strings.HasSuffix(string(data), "\n---\nThis skill's commands run on host omarchy: use bash with host: \"omarchy\". Files you write to $DYNA_OUT come back to this box.\n") {
+	if !strings.HasSuffix(string(data), "\n---\nThis skill's commands run on a host: omarchy, desktop or arch, through bash with host. The owner's messages say \"on <host>\" when sent from one of them. Files written to $DYNA_OUT come back to this box.\n") {
 		t.Fatalf("%q", data)
 	}
 	plain, err := os.ReadFile(filepath.Join(b.Skills, "plain", skills.File))

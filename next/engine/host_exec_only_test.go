@@ -54,11 +54,11 @@ func runOn(t *testing.T, host contract.HostName, runner *outHostexec, via ...Hos
 	return res.Operation.Result
 }
 
-// A run on an exec-only host imports the desktop environment, and the files it leaves in $DYNA_OUT are stored for the box.
-func TestHostexecOnExecOnlyHostImportsDesktopAndCollectsFiles(t *testing.T) {
+// The files it leaves in $DYNA_OUT are stored for the box.
+func TestHostexecOnExecOnlyHostCollectsFiles(t *testing.T) {
 	runner := &outHostexec{files: []byte("tar bytes")}
 	result := runOn(t, "omarchy", runner)
-	if len(runner.runs) != 2 || !runner.runs[0].Desktop || runner.runs[0].Collect || !runner.runs[1].Collect || runner.runs[1].Desktop {
+	if len(runner.runs) != 2 || runner.runs[0].Collect || !runner.runs[1].Collect {
 		t.Fatalf("runs %+v", runner.runs)
 	}
 	if result.OutFiles == "" || result.Output != "done\n" {
@@ -66,11 +66,11 @@ func TestHostexecOnExecOnlyHostImportsDesktopAndCollectsFiles(t *testing.T) {
 	}
 }
 
-// A host that takes boxes gets no desktop environment, and a run that leaves nothing stores no files.
-func TestHostexecWithoutFilesOrDesktop(t *testing.T) {
+// A run that leaves nothing stores no files.
+func TestHostexecWithoutFiles(t *testing.T) {
 	runner := &outHostexec{}
 	result := runOn(t, "host", runner)
-	if runner.runs[0].Desktop || result.OutFiles != "" {
+	if result.OutFiles != "" {
 		t.Fatalf("runs %+v result %+v", runner.runs, result)
 	}
 }

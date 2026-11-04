@@ -45,9 +45,7 @@ type HostexecRunArgs struct {
 	Cwd     string     `json:"cwd"`
 	Timeout DurationMS `json:"timeout"`
 	Grant   GrantID    `json:"grant"`
-	// Desktop and Collect are set by the engine as it runs, never stored or sent: Desktop imports the user's graphical
-	// session environment (an exec-only host), and Collect is the run that reads back and removes a run's $DYNA_OUT.
-	Desktop bool `json:"-"`
+	// Collect is set by the engine as it runs, never stored or sent: it is the run that reads back and removes a run's $DYNA_OUT.
 	Collect bool `json:"-"`
 }
 
