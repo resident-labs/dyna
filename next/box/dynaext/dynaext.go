@@ -80,6 +80,9 @@ func Extension(c Config) extension.InlineExtension {
 			}
 			return extension.ToolCallEventResult{}, nil
 		})
+		// What a server other than dyna returns is outside text: github's as itself, any other by its name. Its author is each
+		// item's own and unknown here.
+		api.OnToolResult(outsideResult)
 		postDefinition, err := postTool(c, post, roots)
 		if err != nil {
 			return err
@@ -287,4 +290,29 @@ func mcpResult(result dynamcp.Result, d details) (extension.AgentToolResult, err
 		}
 	}
 	return out, err
+}
+
+// outsideResult wraps the text of a tool result from a server other than dyna: github's as itself, any other by its name.
+// A server name has no "__" (checkMCP), so the first one ends it. Images, the error flag and the structured content stay as
+// they are. It wraps a model's direct calls only: a codemode script reads the raw result of its own calls (spec decision 13).
+func outsideResult(_ context.Context, e extension.ToolResultEvent) (extension.ToolResultEventResult, error) {
+	result := e.(extension.CustomToolResultEvent)
+	server, _, found := strings.Cut(strings.TrimPrefix(result.ToolName, "mcp__"), "__")
+	if !found || !strings.HasPrefix(result.ToolName, "mcp__") || server == "dyna" {
+		return extension.ToolResultEventResult{}, nil
+	}
+	source := "mcp " + server
+	if server == "github" {
+		source = server
+	}
+	content := make([]any, len(result.Content))
+	for i, block := range result.Content {
+		content[i] = block
+		// PiG gives a block as the JSON object it is.
+		if fields, ok := block.(map[string]any); ok && fields["type"] == "text" {
+			text, _ := fields["text"].(string)
+			content[i] = map[string]any{"type": "text", "text": contract.Outside(source, "", text)}
+		}
+	}
+	return extension.ToolResultEventResult{Content: content, StructuredContent: result.StructuredContent}, nil
 }
