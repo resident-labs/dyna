@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -16,6 +17,17 @@ const requestChars = 80
 
 // holdsChars is the budget of dyna_holds, which holdsLine also keeps to, so its first line always fits.
 const holdsChars = 1000
+
+// roomChars is the budget of dyna_room.
+const roomChars = 400
+
+// rootApprovalNames name the root-approves kinds as Settings > Rooms does.
+var rootApprovalNames = map[contract.RootApproval]string{
+	contract.RootApprovesHostexec: "host exec",
+	contract.RootApprovesAddons:   "global add-ons",
+	contract.RootApprovesHosts:    "room host rules",
+	contract.RootApprovesPools:    "node pools",
+}
 
 func renderContextSection(key contract.ContextSectionKey, lines []string, maxChars int, full bool, rowLimit int) contract.ContextSection {
 	if full {
@@ -127,7 +139,7 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		return contract.ContextSnapshotResponse{}, forbidden()
 	}
 	switch req.Section {
-	case "", contract.ContextGoal, contract.ContextChildren, contract.ContextRequests, contract.ContextHolds, contract.ContextProfiles, contract.ContextUsage:
+	case "", contract.ContextGoal, contract.ContextChildren, contract.ContextRequests, contract.ContextHolds, contract.ContextProfiles, contract.ContextUsage, contract.ContextRoom:
 	default:
 		return contract.ContextSnapshotResponse{}, invalid("unknown context section")
 	}
@@ -199,6 +211,18 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	if s.usage != nil {
 		add(contract.ContextUsage, usageLines(data.Accounts, s.usage.Latest(), s.now()), usageChars, 0)
 	}
+	// One line per room setting that is not at its default and changes what root may do; a new setting adds its line here.
+	lines = nil
+	var decide []string
+	for _, kind := range contract.AllRootApprovals {
+		if slices.Contains(data.RootApproves, kind) {
+			decide = append(decide, rootApprovalNames[kind])
+		}
+	}
+	if len(decide) > 0 {
+		lines = append(lines, "Approvals you decide: "+strings.Join(decide, ", "))
+	}
+	add(contract.ContextRoom, lines, roomChars, 0)
 	return result, nil
 }
 
