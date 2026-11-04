@@ -274,10 +274,6 @@ func registry(t *testing.T, folder string, hang <-chan struct{}) {
 			_, _ = w.Write([]byte("{}"))
 			return
 		}
-		if r.Method == http.MethodPost { // npm's audit
-			_, _ = w.Write([]byte("{}"))
-			return
-		}
 		if strings.HasSuffix(r.URL.Path, ".tgz") {
 			_, _ = w.Write(tarball.Bytes())
 			return
@@ -348,23 +344,31 @@ func TestAPackageWhoseExtensionFailsToLoadIsAProblemAndStaysOut(t *testing.T) {
 	}
 }
 
-// A registry that does not answer costs the install its timeout, and not the box its start.
+// A package that cannot be installed is a problem that says why.
+func TestAPackageThatFailsToInstallIsAProblemThatSaysWhy(t *testing.T) {
+	registry(t, pigtest.Package(t, ""), nil)
+	b := newAddonBox(t)
+	b.Install = piInstall
+	writeBundle(t, b.Bundles[1], []contract.Addon{{Kind: contract.AddonPackage, Name: "fixture-package", Source: "npm:fixture-package@9.9.9"}})
+	_, problems, err := b.apply(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(problems) != 1 || !strings.Contains(problems[0], "npm:fixture-package@9.9.9") || !strings.Contains(problems[0], "install failed") || !strings.Contains(problems[0], "failed with code") {
+		t.Fatalf("%q", problems)
+	}
+}
+
+// A registry that does not answer costs the install its timeout, and not the box its start; the install ends with its
+// context, and no npm is left running.
 func TestAnInstallThatHangsEndsWithItsContext(t *testing.T) {
 	hang := make(chan struct{})
+	defer close(hang)
 	registry(t, pigtest.Package(t, ""), hang)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	dir := t.TempDir()
-	err := piInstall(ctx, dir, fixturePackage().Source)
+	err := piInstall(ctx, t.TempDir(), fixturePackage().Source)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal(err)
-	}
-	// The abandoned install finishes once the registry answers, so no process outlives the test.
-	close(hang)
-	installed := filepath.Join(dir, "npm", "node_modules", "fixture-package", "package.json")
-	for start := time.Now(); time.Since(start) < 30*time.Second; time.Sleep(100 * time.Millisecond) {
-		if _, err := os.Stat(installed); err == nil {
-			break
-		}
 	}
 }
