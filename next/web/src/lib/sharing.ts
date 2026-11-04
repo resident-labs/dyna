@@ -21,7 +21,7 @@ export function wayName(address: string) {
 export function sharingItems(status: ConnectStatusResponse | undefined, devices: readonly Device[], origin: string, now: number): SharingItem[] {
   const tunnel = status?.tunnel;
   const ways: SharingItem[] = (status?.routes ?? []).filter(route => route !== tunnel)
-    .map(route => ({ kind: "way", key: `way:${new URL(route).host}`, name: wayName(route), address: route, local: isLoopback(new URL(route).hostname), current: route === origin }));
+    .map(route => ({ kind: "way", key: `way:${new URL(route).origin}`, name: wayName(route), address: route, local: isLoopback(new URL(route).hostname), current: route === origin }));
   ways.push({ kind: "connect", key: "connect", name: "Resident Labs Connect", status, current: tunnel === origin });
   return [...ways, ...listed(devices).map(device => ({ kind: "device" as const, key: device.id, device, warning: expiring(device.expiresAt, now) }))];
 }
@@ -46,7 +46,7 @@ export function connectLine(status: ConnectStatusResponse | undefined) {
   if (!status) return "Status did not load";
   if (status.attempt.state === "starting") return "Turning on…";
   if (status.attempt.state === "unlinking") return "Turning off…";
-  if (status.linked) return status.tunnel ?? "On";
+  if (status.linked) return status.tunnel ?? "No address yet";
   return status.attempt.state === "pending" ? "Waiting for your approval" : "Off";
 }
 

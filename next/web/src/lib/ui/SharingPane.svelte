@@ -35,12 +35,12 @@
 
   // Connect's status reads again every 3 seconds while a step is under way.
   let timer: ReturnType<typeof setTimeout> | undefined, stopped = false;
+  // A failed read during a step keeps the last status and tries again on the same beat.
+  const moving = (s: ConnectStatusResponse | undefined) => s?.attempt.state === "pending" || s?.attempt.state === "starting" || s?.attempt.state === "unlinking";
   function refresh() {
     clearTimeout(timer);
-    return call("connect.status", {}).then(result => {
-      status = result; statusFailed = false;
-      if (!stopped && (result.attempt.state === "pending" || result.attempt.state === "starting" || result.attempt.state === "unlinking")) timer = setTimeout(() => void refresh(), 3000);
-    }, (reason: unknown) => { if (!gone(reason)) statusFailed = true; });
+    return call("connect.status", {}).then(result => { status = result; statusFailed = false; }, (reason: unknown) => { if (!gone(reason)) statusFailed = true; })
+      .then(() => { if (!stopped && moving(status)) timer = setTimeout(() => void refresh(), 3000); });
   }
   // Pair a device is a step in history of its own, so Back leaves it as the back arrow does.
   function popped() { if (pairing && !history.state?.creating) pairing = false; }
@@ -102,6 +102,8 @@
   // Each box saves at once. The last checked one cannot be unchecked; Admin off on this browser asks first, as this
   // browser then loses the page. A refusal puts the box back.
   async function setScope(device: Device, scope: Scope, box: HTMLInputElement) {
+    // The boxes stay enabled, so the keys keep their place; a change while one saves is put back.
+    if (busy) { box.checked = !box.checked; return; }
     const next = scopes.map(each => each.scope).filter(each => each === scope ? box.checked : !!device.scopes?.includes(each));
     const run = () => call("device.set_scopes", { id: device.id, scopes: next }).catch((reason: unknown) => { gone(reason); throw reason; });
     problem = "";
@@ -173,7 +175,7 @@
 {#snippet connectDetail(each: ConnectItem)}{@const s = each.status}
   {@render wayFacts(each, s?.tunnel, "Connect")}
   <div class="section"><strong class="head">Connect</strong>
-    <p class="small muted">Opens Dyna from anywhere, signed in with your passkey, through a private tunnel.</p>
+    <p class="small muted lead">Opens Dyna from anywhere, signed in with your passkey, through a private tunnel.</p>
     {#if !s}<p class="problem" role="alert">Connect status did not load. <button type="button" class="retry" onclick={() => void refresh()}>Try again</button></p>
     {:else if s.attempt.state === "starting" || s.attempt.state === "unlinking"}<p>{s.attempt.state === "starting" ? "Turning on Connect…" : "Turning off Connect…"}</p>
     {:else if s.linked}
@@ -182,7 +184,7 @@
     {:else if s.attempt.state === "pending"}{@const link = approvalURL(s.url)}
       <p>Waiting for your approval. Check the code and fingerprint on the approval page, then approve with your passkey.</p>
       <dl class="facts"><dt>Code</dt><dd class="mono">{s.code}</dd><dt>Key fingerprint</dt><dd class="mono">{s.fingerprint}</dd></dl>
-      <div class="actions">{#if link}<a class="btn" href={link} target="_blank" rel="noopener noreferrer">Open approval page ↗</a>{/if}
+      <div class="actions">{#if link}<a class="btn" href={link} target="_blank" rel="noopener noreferrer">Open approval page<Icon name="external" size={14} /></a>{/if}
         <button type="button" class="btn" disabled={busy} onclick={() => void connect(() => call("connect.cancel", {}))}>Cancel</button></div>
     {:else}
       {#if s.attempt.state === "failed" && !problem}<p class="problem" role="alert">Connect could not finish. Try again.</p>{/if}
@@ -199,7 +201,7 @@
     <dt>Expires</dt><dd>{expiry(d.expiresAt, now)}, unless used</dd></dl>
   <fieldset class="section"><legend class="head">Access</legend>
     <div class="scopes">{#each scopes as { scope, label, about } (scope)}{@const on = !!d.scopes?.includes(scope)}
-      <label class="scope"><input type="checkbox" checked={on} disabled={busy || (on && d.scopes?.length === 1)} onchange={event => void setScope(d, scope, event.currentTarget)} />
+      <label class="scope"><input type="checkbox" checked={on} disabled={on && d.scopes?.length === 1} onchange={event => void setScope(d, scope, event.currentTarget)} />
         <span class="name">{label}</span><span class="about">{about}</span></label>{/each}</div></fieldset>
   <label class="field">Host<input class="input host mono" placeholder="none" autocomplete="off" spellcheck="false" bind:value={hostDraft} readonly={hostSaving}
     onblur={() => void saveHost(d)} onkeydown={event => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); void saveHost(d); } }} />
@@ -237,9 +239,11 @@
   .add { margin-left: auto; gap: 4px; }
   .mono { font-family: var(--mono); font-size: 12.5px; }
   .detail { display: grid; gap: 18px; min-width: 0; overflow-wrap: anywhere; }
+  /* Padding, as the detail sets every paragraph's margin. */
+  .lead { padding-bottom: 6px; }
   .head { padding: 0; font-size: 14px; font-weight: 600; }
   fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
-  p { font-size: 13px; }
+  .detail p { font-size: 13px; }
   .problem { color: var(--danger); font-weight: 500; }
   .warn { color: var(--attention); font-weight: 500; }
   .facts .mono { font-size: 12.5px; }
@@ -255,6 +259,6 @@
   .help { color: var(--muted); font-size: 12.5px; font-weight: 400; line-height: 1.35; }
   .input { box-sizing: border-box; width: 100%; min-height: 34px; padding: 0 10px; border: 1px solid var(--firm); border-radius: 6px; background: var(--bg); color: var(--text); font-weight: 400; }
   .input:focus { outline: none; border-color: var(--focus); }
-  a.btn { text-decoration: none; }
+  a.btn { gap: 6px; text-decoration: none; }
   @media (hover: none) { .input { min-height: 40px; } }
 </style>
