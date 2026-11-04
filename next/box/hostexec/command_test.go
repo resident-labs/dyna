@@ -246,7 +246,7 @@ func TestRunSurvivesItsCallAndCanBeFollowed(t *testing.T) {
 		}
 	}
 	// The runner is in no group or session of the call, which is what a dropped connection ends.
-	pid, err := os.ReadFile(filepath.Join(tmp, "dyna-out-op9.pid"))
+	pid, err := os.ReadFile(filepath.Join(tmp, "dyna-out-op9.run", "pid"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,8 +277,41 @@ func TestFollowingARunTheHostLacksEndsWithNoRunStatus(t *testing.T) {
 	cmd, out := runIn(t, t.TempDir(), contract.HostexecRunArgs{Argv: []string{"true"}, Timeout: 1000, Attach: true}, "gone")
 	err := cmd.Wait()
 	var exit *exec.ExitError
-	if !errors.As(err, &exit) || exit.ExitCode() != NoRunStatus || out.Len() != 0 {
+	if !errors.As(err, &exit) || exit.ExitCode() != NoRunStatus || out.String() != NoRunOutput("gone") {
 		t.Fatalf("follow: %v, output %q", err, out)
+	}
+}
+
+// A run's output and status sit in a folder only its user can enter, with files only the user can read, whatever the user's umask,
+// and a path someone planted where the folder goes is refused, not followed.
+func TestRunFilesArePrivateToTheirUser(t *testing.T) {
+	tmp := t.TempDir()
+	cmd, _ := runIn(t, tmp, contract.HostexecRunArgs{Argv: []string{"true"}, Timeout: 1000}, "m1")
+	if err := cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(tmp, "dyna-out-m1.run")
+	info, err := os.Stat(dir)
+	if err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("folder %v: %v", info, err)
+	}
+	for _, name := range []string{"log", "pid", "exit"} {
+		if info, err := os.Stat(filepath.Join(dir, name)); err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("%s %v: %v", name, info, err)
+		}
+	}
+
+	target := t.TempDir()
+	if err := os.Symlink(target, filepath.Join(tmp, "dyna-out-m2.run")); err != nil {
+		t.Fatal(err)
+	}
+	cmd, _ = runIn(t, tmp, contract.HostexecRunArgs{Argv: []string{"true"}, Timeout: 1000}, "m2")
+	var exit *exec.ExitError
+	if err := cmd.Wait(); !errors.As(err, &exit) || exit.ExitCode() != 254 {
+		t.Fatalf("a planted link: %v", err)
+	}
+	if left, _ := os.ReadDir(target); len(left) != 0 {
+		t.Fatalf("written through the link: %v", left)
 	}
 }
 
