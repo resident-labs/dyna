@@ -30,8 +30,6 @@ github.com/IBM/go-sdk-core/v5 v5.23.1 h1:fxLusCG+GlGY1SM7BYAAiiSFhzKUs5zqs0P8knD
 github.com/IBM/go-sdk-core/v5 v5.23.1/go.mod h1:yO+OQpByKDLTvpEcsFFexgzpeR8eRfCFWAYzxkAu4bk=
 github.com/Max-Sum/base32768 v0.0.0-20230304063302-18e6ce5945fd h1:nzE1YQBdx1bq9IlZinHa+HVffy+NmVRoKr+wHN8fpLE=
 github.com/Max-Sum/base32768 v0.0.0-20230304063302-18e6ce5945fd/go.mod h1:C8yoIfvESpM3GD07OCHU7fqI7lhwyZ2Td1rbNbTAhnc=
-github.com/MichaelKinsy/PiG v0.5.3 h1:hEVnVIPQLQK5GAosu7SdOuA1NhaLMK3gyt470Ks0F7c=
-github.com/MichaelKinsy/PiG v0.5.3/go.mod h1:4e/1OyiBWOs+Q/UD04+v+8eUdSSpvXbwDl16F+A8Wps=
 github.com/MichaelKinsy/PiG/extensions/sdk v0.5.3 h1:mgLZchfHrmjoyuKNzP5rpn/D/6hx6ZFoDfwHsqcU8Yo=
 github.com/MichaelKinsy/PiG/extensions/sdk v0.5.3/go.mod h1:4j0XhCW0EPOBWvqYE7XKjTvIAahI7K1VyyW3KpjTKj8=
 github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=
@@ -490,6 +488,8 @@ github.com/relvacode/iso8601 v1.7.0 h1:BXy+V60stMP6cpswc+a93Mq3e65PfXCgDFfhvNNGr
 github.com/relvacode/iso8601 v1.7.0/go.mod h1:FlNp+jz+TXpyRqgmM7tnzHHzBnz776kmAH2h3sZCn0I=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
+github.com/resident-labs/PiG v0.5.4-0.20261104032614-632b94d46429 h1:t059BqdQGjvpoAVNUC346ulyaOkOt07VY/SlCky454Q=
+github.com/resident-labs/PiG v0.5.4-0.20261104032614-632b94d46429/go.mod h1:4e/1OyiBWOs+Q/UD04+v+8eUdSSpvXbwDl16F+A8Wps=
 github.com/rfjakob/eme v1.2.0 h1:8dAHL+WVAw06+7DkRKnRiFp1JL3QjcJEZFqDnndUaSI=
 github.com/rfjakob/eme v1.2.0/go.mod h1:cVvpasglm/G3ngEfcfT/Wt0GwhkuO32pf/poW6Nyk1k=
 github.com/rivo/uniseg v0.4.7 h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=
