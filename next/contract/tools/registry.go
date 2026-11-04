@@ -81,6 +81,7 @@ type PostInput struct {
 	ClientID     string                `json:"clientId,omitempty"`
 	VisualUpdate contract.EventID      `json:"visualUpdate,omitempty"`
 	VisualReply  contract.EventID      `json:"visualReply,omitempty"`
+	Forward      contract.EventID      `json:"forward,omitempty" desc:"A post ID to forward, quoted under Forwarded from <author> · <time>; text is your note and may be empty. Any room's feed post, or a DM post of your own room; a post of another room carries its text and no files."`
 	Paths        []string              `json:"paths,omitempty"`
 	HTML         string                `json:"html,omitempty"`
 	AllowNet     bool                  `json:"allowNet,omitempty"`

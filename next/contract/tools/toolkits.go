@@ -36,6 +36,9 @@ var toolkits = map[string]Toolkit{
 	"subscription": {Name: "subscription", Title: "Subscriptions", Destructive: true},
 	"visual":       {Name: "visual", Title: "Visual checks", Idempotent: true},
 	"web":          {Name: "web", Title: "Web search", Idempotent: true, OpenWorld: true},
+	"search":       {Name: "search", Title: "Search Dyna", Idempotent: true, Description: "Search Dyna. Feed posts, sessions and rooms are searched across rooms; a DM post is found only in your own room. Every action takes room (a name or ID; omit for all rooms, here for yours), limit (at most 25) and after (a result's next, for the rest).", Fields: map[string]string{"query": "1 to 8 words, each a prefix.", "room": "A room name or ID; here is yours; omit for all rooms.", "after": "A result's next.", "limit": "At most 25; default 10."}},
+	"history":      {Name: "history", Title: "Conversations", Idempotent: true},
+	"transcript":   {Name: "transcript", Title: "Transcripts", Idempotent: true},
 	"workflow":     {Name: "workflow", Title: "Workflows", Destructive: true, OpenWorld: true},
 }
 
