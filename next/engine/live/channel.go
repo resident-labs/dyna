@@ -15,7 +15,6 @@ type Channel struct {
 	asked         uint64
 	answers       map[uint64]chan contract.BoxReading
 	shellWatching uint64
-	archiveRetry  bool
 	// The compaction asked of this box before a quiet stop: the last turn it was asked after, whether the box loop still has
 	// to send it, and until when a stop waits for the answer.
 	compactTurn  contract.TurnID
@@ -171,10 +170,3 @@ func (c *Channel) TakeCompact() (contract.TurnID, bool) {
 
 // CompactAnswered ends the wait for a compaction. The caller holds the session lock.
 func (c *Channel) CompactAnswered() { c.compactUntil = time.Time{} }
-
-func (c *Channel) RetryArchive() { c.archiveRetry = true }
-func (c *Channel) TakeArchiveRetry() bool {
-	retry := c.archiveRetry
-	c.archiveRetry = false
-	return retry
-}

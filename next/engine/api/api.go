@@ -412,7 +412,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodTurnOutput, c, a.service.TurnOutput)
 	call(mux, contract.MethodTurnActivity, c, a.service.TurnActivity)
 	call(mux, contract.MethodDeliveryDone, c, a.service.DeliveryDone)
-	call(mux, contract.MethodArchiveDone, c, a.service.ArchiveDone)
+	call(mux, contract.MethodDiffSaved, c, a.service.DiffSaved)
 	call(mux, contract.MethodTranscriptAppend, c, a.service.TranscriptAppend)
 	call(mux, contract.MethodTranscriptFetch, c, a.service.TranscriptFetch)
 	call(mux, contract.MethodTranscriptRead, c, a.service.TranscriptRead)

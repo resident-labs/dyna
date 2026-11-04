@@ -487,7 +487,7 @@ func TestAComposeSessionFromStartToClose(t *testing.T) {
 		t.Fatal("the box never reached its sidecar")
 	}
 
-	if _, problem := service.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: session.ID, Discard: true}); problem != nil {
+	if _, problem := service.SessionClose(ctx, owner, contract.SessionCloseRequest{Session: session.ID}); problem != nil {
 		t.Fatal(problem)
 	}
 	for range 5 {

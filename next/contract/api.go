@@ -40,7 +40,7 @@ const (
 	MethodConversationRead        Method = "conversation.read"
 	MethodRoomList                Method = "room.list"
 	MethodSessionList             Method = "session.list"
-	MethodArchiveDone             Method = "archive.done"
+	MethodDiffSaved               Method = "diff.saved"
 	MethodDeliveryDone            Method = "delivery.done"
 	MethodHostAdd                 Method = "host.add"
 	MethodHostSetLimits           Method = "host.set_limits"
@@ -479,7 +479,7 @@ type RoomCreateResponse struct {
 	Room RoomID `json:"room"`
 }
 
-// RoomDeleteRequest deletes a room and all its data. Discard must be set, as the deletion skips every archive.
+// RoomDeleteRequest deletes a room and all its data. Discard must be set, as the deletion saves nothing of the sessions' unpushed work.
 type RoomDeleteRequest struct {
 	Room    RoomID `json:"room"`
 	Discard bool   `json:"discard"`
@@ -557,7 +557,6 @@ type SessionMoveResponse struct{}
 
 type SessionCloseRequest struct {
 	Session SessionID `json:"session"`
-	Discard bool      `json:"discard,omitempty"`
 }
 
 // SessionCloseResponse says what the close does with what its sessions hold. A close takes the session's subtree along.
@@ -1050,23 +1049,38 @@ type ComputerChangedRequest struct {
 }
 type ComputerChangedResponse struct{}
 
-type Archive struct{}
-
-type ArchiveDoneRequest struct {
-	Repo    RepoName        `json:"repo"`
-	Commit  string          `json:"commit"`
-	Skipped bool            `json:"skipped"`
-	Error   string          `json:"error,omitempty"`
-	LeftOut *ArchiveLeftOut `json:"leftOut,omitempty"`
+// SaveDiff asks a closing box to write what it has not pushed to the room's shared folder, once. Name is the session's name,
+// which the file is named after.
+type SaveDiff struct {
+	Name string `json:"name"`
 }
 
-// ArchiveLeftOut is what an archive did not carry: untracked files too large for it, which go with the volume.
-type ArchiveLeftOut struct {
-	Files int      `json:"files"`
-	Bytes int64    `json:"bytes"`
-	Paths []string `json:"paths"` // the first few
+// DiffSavedRequest is the box's one report of that step. File is empty when nothing was unpushed or nothing was saved, and Error
+// says why not in the second case.
+type DiffSavedRequest struct {
+	File    string `json:"file,omitempty"` // as the box sees it, under /box/shared
+	Commits int    `json:"commits"`        // unpushed commits in the file
+	Files   int    `json:"files"`          // files its diffs change
+	Capped  bool   `json:"capped,omitempty"` // a section was over the size cap and holds the commit list and stat only
+	Error   string `json:"error,omitempty"`
 }
-type ArchiveDoneResponse struct{}
+type DiffSavedResponse struct{}
+
+// CloseNotice tells a closing session's parent what became of its unpushed work. A nil report is a box that was not asked or did
+// not answer.
+func (saved *DiffSavedRequest) CloseNotice(session string) string {
+	switch {
+	case saved == nil:
+		return fmt.Sprintf("Session %s closed; not checked, nothing saved. Its box was not running, so anything it had not pushed is gone.", session)
+	case saved.Error != "":
+		return fmt.Sprintf("Session %s closed; no diff was saved (%s). Anything it had not pushed is gone.", session, saved.Error)
+	case saved.File == "":
+		return fmt.Sprintf("Session %s closed; nothing was unpushed.", session)
+	case saved.Capped:
+		return fmt.Sprintf("Session %s closed; its unpushed work, %d commits and %d changed files, is in %s. A diff over 10 MiB is left out of it, which then holds the commit list and a file summary.", session, saved.Commits, saved.Files, saved.File)
+	}
+	return fmt.Sprintf("Session %s closed; its unpushed work, %d commits and %d changed files, is in %s.", session, saved.Commits, saved.Files, saved.File)
+}
 
 // Compact asks a quiet box to compact before it stops, if its context is over OverTokens. Turn is the session's last
 // turn: it names the quiet period, and comes back in BoxCompactedRequest.
@@ -1111,8 +1125,8 @@ func (ShellWatchStart) isBoxMessageBody()              {}
 func (ShellWatchStop) BoxMessageType() BoxMessageType  { return "shell.watch.stop" }
 func (ShellWatchStop) isBoxMessageBody()               {}
 
-func (Archive) BoxMessageType() BoxMessageType { return "archive" }
-func (Archive) isBoxMessageBody()              {}
+func (SaveDiff) BoxMessageType() BoxMessageType { return "save_diff" }
+func (SaveDiff) isBoxMessageBody()              {}
 
 func (TurnStart) BoxMessageType() BoxMessageType { return "turn.start" }
 func (TurnStart) isBoxMessageBody()              {}
