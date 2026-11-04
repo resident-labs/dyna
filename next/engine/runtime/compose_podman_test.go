@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -348,18 +347,6 @@ func (stackProfiles) Model(contract.ProfileName) (contract.ModelChoice, []string
 	return contract.ModelChoice{}, nil, nil
 }
 
-// baseTag is the tag BuildBase gives these inputs. Tagging a small image with it stands in for dyna-base, which is large.
-func baseTag(pi []byte) string {
-	hash := sha256.New()
-	for _, input := range [][]byte{images.BaseContainerfile, pi} {
-		var size [8]byte
-		binary.BigEndian.PutUint64(size[:], uint64(len(input)))
-		hash.Write(size[:])
-		hash.Write(input)
-	}
-	return fmt.Sprintf("dyna-base:%x", hash.Sum(nil))
-}
-
 // A whole session on real Podman, through the real store, API method, reconciler and box adapter: session.start picks the
 // default file, the reconciler brings the box up beside its sidecar, and close leaves nothing. Only the agent is a stand-in,
 // so the box never says hello, and dyna-base is a small image under its tag. The room's root runs too, as a plain box.
@@ -372,8 +359,11 @@ func TestAComposeSessionFromStartToClose(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
 
-	pi := []byte(fmt.Sprintf("test-%d", time.Now().UnixNano()))
-	tag := baseTag(pi)
+	// The tag BuildBase gives the real Containerfile. A small image under it stands in for dyna-base, which is large.
+	tag := fmt.Sprintf("dyna-base:%x", sha256.Sum256(images.BaseContainerfile))
+	if exec.Command("podman", "image", "exists", tag).Run() == nil {
+		t.Skipf("%s exists, and this test would replace and then remove it", tag)
+	}
 	dir := t.TempDir()
 	file := fmt.Sprintf("FROM %s\nUSER root\nRUN mkdir -p /box && chown 1000:1000 /box\n", base)
 	if err := os.WriteFile(filepath.Join(dir, "Containerfile"), []byte(file), 0600); err != nil {
@@ -419,7 +409,7 @@ func TestAComposeSessionFromStartToClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtimeDir := t.TempDir()
-	b := &Boxes{Store: st, Runtime: runtimeDir, Layout: layout, Version: "v1", PiTarball: pi, Context: ctx, Compose: files, RoomImages: files.Images.(*engineimages.Store),
+	b := &Boxes{Store: st, Runtime: runtimeDir, Layout: layout, Version: "v1", Context: ctx, Compose: files, RoomImages: files.Images.(*engineimages.Store),
 		hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, installed: map[contract.HostName]bool{"host": true}}
 	sum := sha256.Sum256(script)
 	b.binOnce.Do(func() { b.binSum = hex.EncodeToString(sum[:]) })

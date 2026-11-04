@@ -117,7 +117,7 @@ func (aheadEvents) Record(context.Context, contract.RoomID, contract.EventBody) 
 
 func newAheadBoxes(t *testing.T, r *aheadHost, hosts []box.Host, rooms map[contract.RoomID][]contract.RepoName) *Boxes {
 	t.Helper()
-	b := &Boxes{Store: aheadStore{hosts: hosts, rooms: rooms}, PiTarball: []byte("pi"), Mirror: &enginegit.Mirror{Layout: box.Layout{Data: t.TempDir(), HostData: "/host"}, Runner: aheadGit{}}, Images: &engineimages.Builder{Recorder: aheadEvents{}, Now: time.Now}}
+	b := &Boxes{Store: aheadStore{hosts: hosts, rooms: rooms}, Mirror: &enginegit.Mirror{Layout: box.Layout{Data: t.TempDir(), HostData: "/host"}, Runner: aheadGit{}}, Images: &engineimages.Builder{Recorder: aheadEvents{}, Now: time.Now}}
 	b.RoomImages = &engineimages.Store{Layout: b.Mirror.Layout}
 	archive := skills.NewArchive()
 	if err := archive.Add("Containerfile", 0o600, []byte("ARG DYNA_BASE\nFROM ${DYNA_BASE}\n")); err != nil {
@@ -232,7 +232,7 @@ func TestBuildAheadMakesTheTagABoxWillAskFor(t *testing.T) {
 	if !strings.HasPrefix(image.Tag, "dyna-img-toolchain:") || r.count("'-t' '"+image.Tag+"'") == 0 {
 		t.Fatalf("box asks for %s, which was not built ahead: %v", image.Tag, r.commands)
 	}
-	base, err := b.hosts["one"].BuildBase(context.Background(), images.BaseContainerfile, b.PiTarball)
+	base, err := b.hosts["one"].BuildBase(context.Background(), images.BaseContainerfile)
 	if err != nil || r.count("'-t' '"+base+"'") == 0 {
 		t.Fatalf("base %s: %v", base, err)
 	}
