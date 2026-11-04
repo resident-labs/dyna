@@ -67,9 +67,9 @@ test("a close says what it hands over", () => {
 test("a close names what it takes along", () => {
   const item = (session: string, parent?: string): SessionStarted => ({ session, parent, name: session, profile: "p" });
   assert.deepEqual(descendants([item("root"), item("a", "root"), item("b", "a"), item("c", "root")], "root"), ["a", "c", "b"]);
-  assert.equal(closeNote([]), "Its work is archived first.");
-  assert.equal(closeNote(["a", "b"]), "Also closes a and b. Their work is archived first.");
-  assert.equal(closeNote(["a", "b", "c"]), "Also closes a, b and 1 more. Their work is archived first.");
+  assert.equal(closeNote([]), "What it has not pushed is saved as a diff first.");
+  assert.equal(closeNote(["a", "b"]), "Also closes a and b. What they have not pushed is saved as a diff first.");
+  assert.equal(closeNote(["a", "b", "c"]), "Also closes a, b and 1 more. What they have not pushed is saved as a diff first.");
 });
 
 test("tree keeps focus visible and reports urgent folded descendants", () => {
