@@ -45,6 +45,7 @@ type Harness struct {
 	services *coding.AgentSessionServices
 	session  *coding.Session
 	stop     func()
+	sends    sync.WaitGroup // the turns' sends, which Close waits for
 	done     chan struct{}
 	closing  sync.Once
 
@@ -192,7 +193,7 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, send func(context
 	h.turn = t
 	h.mu.Unlock()
 	sent := make(chan error, 1)
-	go func() { sent <- send(context.WithoutCancel(ctx)) }()
+	h.sends.Go(func() { sent <- send(context.WithoutCancel(ctx)) })
 	var err error
 	select {
 	case err = <-sent:
@@ -276,6 +277,7 @@ func (h *Harness) Close() error {
 	h.closing.Do(func() {
 		h.stop()
 		err = h.session.Close()
+		h.sends.Wait()
 		h.services.Close()
 		close(h.done)
 	})

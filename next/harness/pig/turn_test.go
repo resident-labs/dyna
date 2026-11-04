@@ -13,7 +13,7 @@ import (
 )
 
 func assistant(stop ai.StopReason, blocks ...ai.AssistantContentBlock) agent.AgentEvent {
-	return agent.MessageEndEvent{Message: agent.AgentMessage{Assistant: &agent.AssistantMessage{Role: "assistant", Content: blocks, StopReason: stop, ModelID: "m", Usage: &ai.Usage{Input: 1, Output: 2}}}}
+	return agent.MessageEndEvent{Message: agent.AgentMessage{Assistant: &agent.AssistantMessage{Role: "assistant", Content: blocks, StopReason: stop, ModelID: "m", Usage: &ai.Usage{Input: 1, Output: 2, CacheRead: 3, CacheWrite: 4}}}}
 }
 
 func toolResult(id string, details any, failed bool) agent.AgentEvent {
@@ -90,6 +90,20 @@ func TestTurnsThatContinuePastAnEndPost(t *testing.T) {
 	}
 }
 
+// The harness reads the batch itself rather than trust that the agent stopped only after an end batch.
+func TestABatchThatDidNotEndTheTurnReportsNoEndPost(t *testing.T) {
+	for name, events := range map[string][]agent.AgentEvent{
+		"post beside another tool": {twoCalls, endResult, plainResult, settled},
+		"failed post":              {narrated, failedPost, settled},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := replay(events...); got.EndPosts != nil {
+				t.Fatalf("result %+v", got)
+			}
+		})
+	}
+}
+
 func TestStoppedTurnReportsNoEndPost(t *testing.T) {
 	got := replay(narrated, endResult, agent.AgentSettledEvent{Aborted: true})
 	if got.Outcome != contract.TurnStopped || got.EndPosts != nil {
@@ -123,7 +137,7 @@ func TestUsageAddsUpAndNamesTheResponseModel(t *testing.T) {
 	routed := assistant(ai.StopReasonStop, ai.TextContent{Text: "answer"})
 	routed.(agent.MessageEndEvent).Message.Assistant.ResponseModel = "m-2026"
 	got := replay(narrated, plainResult, routed, settled)
-	if got.Usage != (contract.Usage{Model: "m-2026", InputTokens: 2, OutputTokens: 4}) {
+	if got.Usage != (contract.Usage{Model: "m-2026", InputTokens: 2, OutputTokens: 4, CacheReadTokens: 6, CacheWriteTokens: 8}) {
 		t.Fatalf("usage %+v", got.Usage)
 	}
 }
