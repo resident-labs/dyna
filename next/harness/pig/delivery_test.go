@@ -3,6 +3,7 @@ package pig
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -26,11 +27,19 @@ const (
 	recordedFailed   = `{"type":"message","id":"d","message":{"role":"toolResult","toolCallId":"t1","toolName":"mcp__dyna__post","content":[{"type":"text","text":"no"}],"details":{"server":"dyna","tool":"post","endPost":"post_a"},"isError":true,"timestamp":3}}`
 	recordedPlain    = `{"type":"message","id":"e","message":{"role":"toolResult","toolCallId":"t2","toolName":"bash","content":[{"type":"text","text":"ok"}],"details":{},"isError":false,"timestamp":3}}`
 	recordedSteer    = `{"type":"message","id":"f","message":{"role":"user","content":[{"type":"text","text":"more"}],"timestamp":4,"deliveryId":"10"}}`
+	// recordedLabelled is an answer that carries the delivery member of the turn's input, as only a user message should.
+	recordedLabelled = `{"type":"message","id":"g","message":{"role":"assistant","content":[{"type":"text","text":"answer"}],"api":"anthropic-messages","provider":"anthropic","model":"m","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":2,"deliveryId":"9"}}`
 )
 
 func recoverLines(t *testing.T, lines ...string) (contract.TurnEnded, bool) {
 	t.Helper()
-	result, done, err := recoverTurn(strings.NewReader(strings.Join(lines, "\n")+"\n"), "turn_a", 9)
+	return recoverFrom(t, 9, lines...)
+}
+
+// recoverFrom recovers the turn whose first input is the delivery first.
+func recoverFrom(t *testing.T, first contract.DeliverySeq, lines ...string) (contract.TurnEnded, bool) {
+	t.Helper()
+	result, done, err := recoverTurn(strings.NewReader(strings.Join(lines, "\n")+"\n"), "turn_a", first)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,6 +70,7 @@ func TestRecoveryContinuesAnUnfinishedTurn(t *testing.T) {
 		"steered":          {recordedUser, recordedNarrated, recordedEnd, recordedSteer},
 		"answer then more": {recordedUser, recordedAnswer, recordedSteer},
 		"broken line":      {recordedUser, recordedAnswer[:40]},
+		"labelled answer":  {recordedLabelled},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, done := recoverLines(t, lines...); done {
@@ -140,5 +150,42 @@ func TestContinueFinishesATurnLeftRunning(t *testing.T) {
 	sent := requests[len(requests)-1].Messages
 	if len(requests) != 2 || len(sent) != 3 || !strings.Contains(string(sent[2]), "interrupted: the session restarted") {
 		t.Fatalf("%d requests; the last sent %s", len(requests), sent)
+	}
+}
+
+// A turn is found by its own first input: another delivery's answered turn is not it.
+func TestRecoveryFindsTheTurnByItsFirstInput(t *testing.T) {
+	if _, done := recoverFrom(t, 10, recordedUser, recordedAnswer); done {
+		t.Fatal("the turn of delivery 9 finished the turn of delivery 10")
+	}
+	if result, done := recoverFrom(t, 10, recordedUser, recordedAnswer, recordedSteer, recordedAnswer); !done || result.Final != "answer" {
+		t.Fatalf("done=%v result=%+v", done, result)
+	}
+}
+
+// A steer and a follow-up are recorded with their deliveries too.
+func TestSteerAndFollowUpRecordTheirDeliveries(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Tool: "queue", Input: `{}`}}, []pigtest.Block{{Text: "steered"}}, []pigtest.Block{{Text: "followed"}})
+	c := config(t, model, "")
+	var h *Harness
+	c.Extensions = []extension.InlineExtension{extension.NamedInlineExtension{Name: "test-queue", Factory: func(api extension.API) error {
+		api.RegisterTool(extension.ToolDefinition{
+			Name: "queue", Label: "queue", Description: "Queues two inputs.", Parameters: json.RawMessage(`{"type":"object","properties":{}}`),
+			Execute: func(ctx context.Context, _ string, _ json.RawMessage, _ extension.AgentToolUpdateCallback) (extension.AgentToolResult, error) {
+				return extension.AgentToolResult{}, errors.Join(h.Steer(ctx, contract.TurnInput{Delivery: 5, Text: "steer"}), h.FollowUp(ctx, contract.TurnInput{Delivery: 6, Text: "follow"}))
+			},
+		})
+		return nil
+	}}}
+	h, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = h.Close() })
+	start(t, h, "go")
+	for _, seq := range []contract.DeliverySeq{5, 6} {
+		if done, err := h.Delivered(context.Background(), seq); err != nil || !done {
+			t.Errorf("delivery %d: %v %v", seq, done, err)
+		}
 	}
 }

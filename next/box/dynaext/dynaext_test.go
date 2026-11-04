@@ -61,11 +61,16 @@ func newSession(t *testing.T, script ...[]pigtest.Block) *session {
 	return b
 }
 
-func (b *session) turn(t *testing.T, text string) contract.TurnEnded {
+// turn runs a turn with the texts as its inputs, in order.
+func (b *session) turn(t *testing.T, texts ...string) contract.TurnEnded {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	result, err := b.harness.Start(ctx, "turn_a", []contract.TurnInput{{Delivery: 1, Text: text}}, func() {})
+	inputs := make([]contract.TurnInput, len(texts))
+	for i, text := range texts {
+		inputs[i] = contract.TurnInput{Delivery: contract.DeliverySeq(i + 1), Text: text}
+	}
+	result, err := b.harness.Start(ctx, "turn_a", inputs, func() {})
 	if err != nil {
 		t.Fatal(err)
 	}

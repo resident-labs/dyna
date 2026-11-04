@@ -231,6 +231,7 @@ func (h *Harness) TransferModel(ctx context.Context, id contract.TurnID, model c
 		h.Activity(id, contract.ActivityModel, "changing model")
 	}
 	target, err := coding.BuildModel(string(model.Provider)+"/"+model.ID, h.services)
+	// A model the box cannot use is the agent program's refusal, which fails the turn; TransferModel's own errors do not.
 	if err == nil {
 		err = h.session.CheckModelAuth(target)
 	}
