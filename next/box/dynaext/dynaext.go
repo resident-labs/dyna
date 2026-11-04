@@ -34,9 +34,6 @@ type Config struct {
 }
 
 const (
-	// searchLimit is how many tools a search loads unless the model chose a number. Each loaded tool stays declared
-	// for the rest of the session, and PiG's default of 8 is most of the dyna tools.
-	searchLimit = 3
 	// outputLimit is what the model reads of a long output; the whole output goes to a file.
 	outputLimit = 20 << 10
 	movedNote   = "The job is in the background. You can end your turn and Dyna will wake you when it completes."
@@ -80,11 +77,8 @@ func Extension(c Config) extension.InlineExtension {
 			usedMu.Lock()
 			used[call.ToolName] = true
 			usedMu.Unlock()
-			switch {
-			case strings.HasPrefix(call.ToolName, "mcp__dyna__"):
+			if strings.HasPrefix(call.ToolName, "mcp__dyna__") {
 				call.Input[contract.ToolCallIDArgument] = root
-			case call.ToolName == "tool_search" && call.Input["limit"] == nil:
-				call.Input["limit"] = searchLimit
 			}
 			return extension.ToolCallEventResult{}, nil
 		})
