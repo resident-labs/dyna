@@ -308,6 +308,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodSessionAccount, c, a.service.SessionAccount)
 	call(mux, contract.MethodSessionResponsibilities, c, a.service.SessionResponsibilities)
 	call(mux, contract.MethodSessionSetAccount, c, a.service.SessionSetAccount)
+	call(mux, contract.MethodSessionSetBranch, c, a.service.SessionSetBranch)
 	call(mux, contract.MethodSessionRestart, c, a.service.SessionRestart)
 	call(mux, contract.MethodSessionRefresh, c, a.service.SessionRefresh)
 	call(mux, contract.MethodSessionSearch, c, a.service.SessionSearch)

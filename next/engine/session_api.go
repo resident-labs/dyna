@@ -10,6 +10,7 @@ import (
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/compose"
+	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/room"
 )
@@ -484,6 +485,40 @@ func (s *Service) BoxStopped(ctx context.Context, id contract.SessionID) {
 	if err != nil {
 		log.Printf("session %s: box restart: %v", id, err)
 	}
+}
+
+// SessionSetBranch makes branch the session's branch on its repository, which the owner does to move a live session to a new
+// name. The session's earlier branches stay its own, and it gets a notice with the new one. Nothing is pushed or renamed.
+func (s *Service) SessionSetBranch(ctx context.Context, caller contract.Principal, req contract.SessionSetBranchRequest) (contract.SessionSetBranchResponse, *contract.Error) {
+	var response contract.SessionSetBranchResponse
+	if caller.Kind != contract.PrincipalOwner {
+		return response, forbidden()
+	}
+	target, problem := s.resolveSession(ctx, caller, req.Session)
+	if problem != nil {
+		return response, problem
+	}
+	if target.Repo == "" {
+		return response, invalid("the session has no repository")
+	}
+	if !enginegit.ValidBranch(req.Branch) {
+		return response, invalid("branch must be letters, digits, dots, underscores or hyphens, start with a letter or digit, not end in . or .lock, not hold .., and not be main, master or HEAD")
+	}
+	if err := s.store.AddBranch(ctx, target.Repo, target.ID, req.Branch, time.Now()); err != nil {
+		if errors.Is(err, store.ErrBranchTaken) {
+			return response, invalid("another session has that branch")
+		}
+		return response, failure(err)
+	}
+	text := "Your branch is now " + req.Branch + " on " + string(target.Repo) + ". Your earlier branches stay yours: work and PRs on them still push. Nothing was renamed on GitHub; `git branch -m " + req.Branch + "` and push when you move the work."
+	notice, err := s.engineEvent(target.Room, contract.SessionNotice{Session: target.ID, Text: text, ClientID: "set-branch:" + req.Branch})
+	if err == nil {
+		err = s.store.SendSessionNotice(ctx, notice, target.ID)
+	}
+	if err != nil {
+		return response, failure(err)
+	}
+	return response, nil
 }
 
 // SessionSetProfile moves a session to another profile. A failed session wakes to carry its failed input with it.
