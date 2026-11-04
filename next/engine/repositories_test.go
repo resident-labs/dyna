@@ -35,6 +35,11 @@ func (r *fakeRepos) Get(_ context.Context, _ contract.SessionID, _ contract.Host
 	return []contract.BoxRepo{{Name: "owner/repo", Cache: "/host/git/owner/repo.git"}}, nil
 }
 
+func (r *fakeRepos) Seed(ctx context.Context, session contract.SessionID, host contract.HostName) ([]contract.BoxRepo, string, error) {
+	repos, err := r.Get(ctx, session, host, true)
+	return repos, "", err
+}
+
 func (r *fakeRepos) Size(context.Context, contract.RepoName) (contract.BoxSizeName, error) {
 	return r.size, nil
 }
