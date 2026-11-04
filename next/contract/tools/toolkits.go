@@ -27,7 +27,7 @@ var toolkits = map[string]Toolkit{
 	"package":      {Name: "package", Title: "Pi packages", Destructive: true, OpenWorld: true},
 	"pool":         {Name: "pool", Title: "Node pools", Destructive: true, OpenWorld: true},
 	"post":         {Name: "post", Title: "Posts", Destructive: true},
-	"pr":           {Name: "pr", Title: "Pull requests", Destructive: true, OpenWorld: true},
+	"pr":           {Name: "pr", Title: "Pull requests", Destructive: true, OpenWorld: true, Description: prHelp},
 	"question":     {Name: "question", Title: "Questions for the owner"},
 	"room":         {Name: "room", Title: "Rooms", Destructive: true},
 	"session":      {Name: "session", Title: "Sessions", Destructive: true},
@@ -44,3 +44,6 @@ var toolkits = map[string]Toolkit{
 
 // ToolkitFor returns the registered metadata for an area.
 func ToolkitFor(name string) (Toolkit, bool) { row, ok := toolkits[name]; return row, ok }
+
+// prHelp opens the pr tool's description, for every action. It is the one place that says how CI, tracking and merging work.
+const prHelp = "CI is GitHub Actions, from each repository's .github/workflows: tests in a box show a change works there, CI shows it on GitHub. A PR you open is tracked for you, and track adds others. The engine polls tracked PRs and wakes the session that owns one on CI results, reviews, comments, conflicts, merges and closes; dyna_holds lists yours. Opening a PR merges nothing. Boxes have no gh: comments and merges run on a host through host exec, by root or a session granted it, as the room's rules say."

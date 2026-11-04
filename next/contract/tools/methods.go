@@ -161,7 +161,7 @@ var methodTable = []MethodEntry{
 		act("pr", "status", typ[contract.PrStatusRequest](), "Show one tracked PR as of the last poll. Omit repo to use your session repository.", "pr status"),
 	),
 	method(contract.MethodPrTrack, contract.ScopeOperate, UserAccess,
-		act("pr", "track", typ[contract.PrTrackRequest](), "Track a PR you did not open with pr open, such as one on an upstream repository; you are woken when it changes. Its base or head repository must be in your room. Omit repo to use your session repository.", "pr track"),
+		act("pr", "track", typ[contract.PrTrackRequest](), "Track a PR you did not open with pr open, such as one on an upstream repository. Its base or head repository must be in your room. Omit repo to use your session repository.", "pr track"),
 	),
 	method(contract.MethodPrUntrack, contract.ScopeOperate, UserAccess,
 		act("pr", "untrack", typ[contract.PrUntrackRequest](), "Stop tracking a PR. Omit repo to use your session repository.", "pr untrack"),
