@@ -34,11 +34,11 @@ type session struct {
 
 func newSession(t *testing.T, script ...[]pigtest.Block) *session {
 	t.Helper()
-	return newSessionOn(t, "test-model", script...)
+	return newSessionOn(t, "test-model", nil, script...)
 }
 
 // newSessionOn is newSession on the named model of pigtest.AgentDir.
-func newSessionOn(t *testing.T, model string, script ...[]pigtest.Block) *session {
+func newSessionOn(t *testing.T, model string, extra []extension.InlineExtension, script ...[]pigtest.Block) *session {
 	t.Helper()
 	b := &session{model: pigtest.NewModel(script...), dir: t.TempDir()}
 	dyna, err := dynamcp.New(func(_ context.Context, method contract.Method, body []byte) ([]byte, *contract.Error) {
@@ -65,7 +65,7 @@ func newSessionOn(t *testing.T, model string, script ...[]pigtest.Block) *sessio
 		AgentDir:   agentDir,
 		SessionDir: filepath.Join(agentDir, "sessions"),
 		Model:      contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: model, Thinking: contract.ThinkingLow},
-		Extensions: []extension.InlineExtension{Extension(Config{Dir: b.dir, Shell: server, Dyna: dyna})},
+		Extensions: append([]extension.InlineExtension{Extension(Config{Dir: b.dir, Shell: server, Dyna: dyna})}, extra...),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -322,7 +322,7 @@ func TestASearchLoadsThreeToolsUnlessTheModelSaysMore(t *testing.T) {
 // On a route that takes tool changes mid-conversation, the head after a compaction declares what the session has, so
 // the unloaded tool's definition is gone from the request and no removal note stands in its place (dyna patch P11).
 func TestTheHeadAfterACompactionDeclaresOnlyTheToolsLeft(t *testing.T) {
-	b := newSessionOn(t, "tools-model", loadGoalAndRoom(goalCall())...)
+	b := newSessionOn(t, "tools-model", nil, loadGoalAndRoom(goalCall())...)
 	b.turn(t, "hi "+filler)
 	b.turn(t, "more "+filler)
 	b.compact(t)
@@ -389,5 +389,35 @@ func TestAScriptsMCPCallGetsTheRawResult(t *testing.T) {
 	b.turn(t, "script")
 	if got := b.toolResult(t, 1); strings.Contains(got, "<outside") || !strings.Contains(got, `ev_1`) {
 		t.Fatalf("tool result %s", got)
+	}
+}
+
+// An extension's tool with codemode exposure, which tool_search loads too, is unloaded at a compaction like a deferred one.
+func TestACodemodeExposureToolIsUnloadedAtACompaction(t *testing.T) {
+	helper := extension.NamedInlineExtension{Name: "helper", Factory: func(api extension.API) error {
+		api.RegisterTool(extension.ToolDefinition{
+			Name:        "helper",
+			Label:       "helper",
+			Description: "Only reachable from scripts, or loaded by a search.",
+			Parameters:  json.RawMessage(`{"type":"object"}`),
+			Exposure:    extension.ToolExposureCodemode,
+			Execute: func(context.Context, string, json.RawMessage, extension.AgentToolUpdateCallback) (extension.AgentToolResult, error) {
+				return extension.AgentToolResult{}, nil
+			},
+		})
+		return nil
+	}}
+	script := loadGoalAndRoom(goalCall())
+	script[1] = []pigtest.Block{{Tool: "tool_search", Input: `{"query":"helper","limit":1}`}}
+	b := newSessionOn(t, "test-model", []extension.InlineExtension{helper}, script...)
+	b.turn(t, "hi "+filler)
+	if got := b.last(t); !slices.Contains(got, "helper") {
+		t.Fatalf("a search did not load helper: %v", got)
+	}
+	b.turn(t, "more "+filler)
+	b.compact(t)
+	b.turn(t, "again")
+	if got := b.last(t); slices.Contains(got, "helper") || !slices.Contains(got, "mcp__dyna__goal") {
+		t.Fatalf("declared %v", got)
 	}
 }
