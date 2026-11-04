@@ -37,14 +37,19 @@
   let range = $derived(visibleRange(layout.tops, scrollTop, height || 600, margin));
   const rowKey = (each: Row<T>) => each.kind === "item" ? each.key : `group ${each.group.id}`;
   let active = $derived(current === undefined ? -1 : rows.findIndex(each => rowKey(each) === current));
+  // Each row's group head, found once per rows rather than on each scroll.
+  let heads = $derived.by(() => { let last = -1; return group ? rows.map((each, index) => each.kind === "group" ? (last = index) : last) : []; });
   // The group of the first row in view stays at the top while its rows scroll under it.
   let pinned = $derived.by(() => {
     if (!group || scrollTop <= 0) return undefined;
     let first = range.start;
     while (first + 1 < rows.length && layout.tops[first + 1] <= scrollTop) first++;
-    for (let index = first; index >= 0; index--) { const each = rows[index]; if (each.kind === "group") return layout.tops[index] === scrollTop ? undefined : { each, index }; }
-    return undefined;
+    const index = heads[first];
+    return index === undefined || index < 0 || layout.tops[index] === scrollTop ? undefined : { each: rows[index], index };
   });
+  // Only drawn rows can be pointed at. A scroll, a resize or a fold can leave the active row out of the window; then the
+  // listbox points at nothing until the next key, which scrolls the row back in.
+  let pointed = $derived(active >= range.start && active < range.end ? `${id}-${active}` : undefined);
   const count = (n: number) => `${n.toLocaleString("en")} ${n === 1 ? noun[0] : noun[1]}`;
 
   // The open item is the row the keys are on.
@@ -113,7 +118,7 @@
     {:else if !items?.length}<div class="state"><span>No {noun[1]} yet.</span>{@render empty?.()}</div>
     {:else if !rows.length}<div class="state"><span>{query ? `No ${noun[1]} match “${query}”${chip?.test ? ` in ${chip.label}` : ""}.` : `No ${noun[1]} in ${chip?.label}.`}</span><button type="button" class="btn" onclick={clear}>Clear search and filters</button></div>
     {:else}
-      <div class="list" role="listbox" tabindex="0" aria-label={label} aria-activedescendant={active >= 0 ? `${id}-${active}` : undefined} bind:this={scroller} bind:clientHeight={height}
+      <div class="list" role="listbox" tabindex="0" aria-label={label} aria-activedescendant={pointed} bind:this={scroller} bind:clientHeight={height}
         onscroll={() => { scrollTop = scroller!.scrollTop; }} onkeydown={keydown}>
         {#snippet heading(each: Row<T> & { kind: "group" }, index: number, top: number, sticky: boolean)}
           <div class="row group" class:folded={each.folded} class:active={!sticky && index === active} id={sticky ? undefined : `${id}-${index}`} role={sticky ? undefined : "option"} aria-selected={sticky ? undefined : false}

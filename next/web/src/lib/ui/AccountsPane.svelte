@@ -3,6 +3,7 @@
   import { call, SignedOut } from "../client.ts";
   import { accountPath, accountRows, accountState, addProviderError, labelRefusal, parseModelIDs, providerGroup, reconnectPath, refused, reconnectUnavailable } from "../accounts.ts";
   import { balancesText, causeText, visibleWindows } from "../usage.ts";
+  import { pathItem } from "../routes.ts";
   import type { Account, AccountProviderInfo, AccountUsage, AccountsConnectResponse, RoomSummary } from "../contract.gen.ts";
   import StatusPill from "./StatusPill.svelte";
   import Icon from "./Icon.svelte";
@@ -20,15 +21,15 @@
   let body: HTMLDivElement, labelButton: HTMLButtonElement | undefined = $state();
   let labelEditing = $state(false), labelSaving = $state(false), labelDraft = $state(""), labelError = $state("");
   const base = "/settings/accounts";
-  let reconnectRoute = $derived(path.startsWith(reconnectPath("")) ? decodeURIComponent(path.slice(reconnectPath("").length)) : "");
+  let reconnectRoute = $derived(pathItem(path, reconnectPath("")) ?? "");
   let reconnecting = $derived(accounts.find(a => a.id === reconnectRoute));
   let adding = $derived(path === base + "/add" || path.startsWith(base + "/add/") || !!reconnecting);
-  let providerId = $derived(reconnecting?.provider ?? (path.startsWith(base + "/add/") ? decodeURIComponent(path.slice((base + "/add/").length)) : ""));
+  let providerId = $derived(reconnecting?.provider ?? (pathItem(path, base + "/add/") ?? ""));
   let selected = $derived(providers.find(p => p.id === providerId) ?? (!phone && adding && !providerId ? providers[0] : undefined));
   let flow = $derived(useKey ? "key" : selected?.connectFlow);
   let addingProvider = $derived(path === base + "/add/new");
   // A reconnect link for an account that is gone lands on the account view's "not found".
-  let accountId = $derived(path.startsWith(accountPath("")) ? decodeURIComponent(path.slice(accountPath("").length)) : reconnecting ? "" : reconnectRoute);
+  let accountId = $derived(pathItem(path, accountPath("")) ?? (reconnecting ? "" : reconnectRoute));
   $effect(() => { if (reconnecting) label = reconnecting.label; });
   let account = $derived(accounts.find(a => a.id === accountId));
   let accountProvider = $derived(providers.find(p => p.id === account?.provider));

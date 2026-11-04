@@ -35,13 +35,16 @@
     if (ask && !(await confirm(ask))) return;
     await change(room, autopilotRequest(room));
   }
+  // Whether the engine took the change.
   async function change(room: RoomSummary, request: RoomSetRequest) {
     busy = true; problem = undefined;
-    await call("room.set", request).then(reload, (error: unknown) => {
+    const done = await call("room.set", request).then(async () => { await reload(); return true; }, (error: unknown) => {
       if (error instanceof SignedOut) signedout();
       else problem = { id: room.id, text: error instanceof APIError ? error.detail.message : "That did not work. Try again." };
+      return false;
     });
     busy = false;
+    return done;
   }
   function key(pressed: string, room: RoomSummary) {
     const item = rootApprovals[Number(pressed) - 1];
@@ -61,7 +64,7 @@
 
 {#snippet toggle(room: RoomSummary, kind: (typeof rootApprovals)[number]["kind"], label: string, inList: boolean)}
   <input type="checkbox" role="switch" checked={approvalOn(room, kind)} disabled={busy} aria-label={label} tabindex={inList ? -1 : undefined}
-    onchange={event => void change(room, switchRequest(room, kind, event.currentTarget.checked))} />
+    onchange={event => { const box = event.currentTarget; void change(room, switchRequest(room, kind, box.checked)).then(done => { if (!done) box.checked = !box.checked; }); }} />
 {/snippet}
 
 {#snippet row(room: RoomSummary, compact: boolean)}
@@ -88,6 +91,7 @@
     <div class="section"><div class="actions"><button type="button" class="btn" aria-pressed={autopilotOn(room)} disabled={busy} onclick={() => void autopilot(room!)}>Autopilot</button></div>
       <p class="small muted">Turns all four on, or all off when all are on. Turning on asks first.</p></div>
     {#if problem?.id === room.id}<p class="problem" role="alert">{problem.text}</p>{/if}
+  {:else}<p class="muted">That room is gone, or the link is wrong.</p>
   {/if}
 {/snippet}
 
@@ -97,7 +101,7 @@
 
 {#snippet header()}{@render bar("Approvals", rooms?.length, undefined)}{/snippet}
 
-<ListDetail bar={header} label="Approvals" title={room?.name ?? ""} open={!!room} {onselect} {onclose} {list} {detail} {summary} />
+<ListDetail bar={header} label="Approvals" title={room?.name ?? "Not found"} open={!!rooms && selected !== undefined} {onselect} {onclose} {list} {detail} {summary} />
 
 <style>
   .problem { flex-basis: 100%; margin: 0; color: var(--danger); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
