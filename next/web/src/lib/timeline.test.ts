@@ -1,7 +1,7 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.test.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { compactionNote, summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineSegments, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, workLayout } from "./timeline.ts";
+import { workingLine, compactionNote, summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineSegments, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, workLayout } from "./timeline.ts";
 import type { TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
 
 const steer = (id: string, at = ""): TranscriptItem => ({ id: `steer:${id}`, event: id, seq: 6, turn: "t", at, kind: "steer", from: { kind: "owner" } });
@@ -256,4 +256,13 @@ test("a compaction is one line that says how large the conversation was", () => 
   assert.equal(compactionNote({}), "Compacted the conversation");
   const item = { id: "c", turn: "t", kind: "compaction", at: "2026-11-01T00:00:00Z" } as const;
   assert.deepEqual(deriveTimelineGroups([item]), [{ kind: "item", id: "c", item }]);
+});
+
+test("a running turn's working line says it is compacting while its live activity is the compaction", () => {
+  const started = "2026-11-01T00:00:00Z";
+  const now = Date.parse(started) + 109_000;
+  assert.equal(workingLine(started, now, "compaction"), `Compacting the conversation… ${formatTimelineDuration(109_000)}`);
+  assert.equal(workingLine(started, now, "tool"), `Working for ${formatTimelineDuration(109_000)}`);
+  assert.equal(workingLine(started, now), `Working for ${formatTimelineDuration(109_000)}`);
+  assert.equal(compactionNote({ tokens: 153400 }), "Compacted the conversation at 153k tokens");
 });

@@ -1,9 +1,9 @@
 <!-- Ported from T3 Code (apps/web/src/components/chat/WorkLog.tsx), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE. -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import type { TranscriptItem, TranscriptPart } from "../contract.gen.ts";
+  import type { ActivityKind, TranscriptItem, TranscriptPart } from "../contract.gen.ts";
   import { activeVerb, elapsed, stepTime, titleOf, toolPart, type StepKind } from "../steps.ts";
-  import { formatTimelineDuration, summarizeWork, timelineItemRunning, workLayout } from "../timeline.ts";
+  import { formatTimelineDuration, summarizeWork, timelineItemRunning, workingLine, workLayout } from "../timeline.ts";
   import Icon, { type IconName } from "./Icon.svelte";
   import TranscriptIcon from "./TranscriptIcon.svelte";
   import Markdown from "./Markdown.svelte";
@@ -13,11 +13,12 @@
   import RunFields from "./RunFields.svelte";
   import { readMedia } from "../media.ts";
 
-  let { items, ended, started, now, chunks, onload, onopen, session, onmedia }: {
+  let { items, ended, started, now, activity, chunks, onload, onopen, session, onmedia }: {
     items: TranscriptItem[];
     ended: boolean;
     started: string;
     now: number;
+    activity?: ActivityKind;
     chunks: Record<string, string>;
     onload: (item: TranscriptItem, part: TranscriptPart) => Promise<void>;
     onopen: () => void;
@@ -42,7 +43,7 @@
 
   // Dyna keeps thoughts and tools in transcript order. The caller splits at posts and other boundaries.
   let active = $derived(items.some(item => timelineItemRunning(item, ended)));
-  let summary = $derived(active ? `Working for ${formatTimelineDuration(now - Date.parse(started))}` : summarizeWork(items));
+  let summary = $derived(active ? workingLine(started, now, activity) : summarizeWork(items));
   let thoughts = $derived(items.filter(item => item.kind === "thinking"));
   let tools = $derived(items.filter(item => item.kind !== "thinking"));
   // A failed call usually fails its script too, and that is one failure.

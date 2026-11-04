@@ -131,3 +131,39 @@ func TestWorkingTurnIsNotStalled(t *testing.T) {
 	r.pass()
 	r.wantCheckins(r.lead, 1)
 }
+
+func TestActivityKindReachesTheSessionList(t *testing.T) {
+	r := newGoalRig(t)
+	r.turn(r.child, "working on it")
+	r.turn(r.lead, "good")
+	r.notice(r.child)
+	turn := r.begin(r.child)
+	kindOf := func() contract.ActivityKind {
+		page, e := r.s.SessionList(r.ctx, ownerCaller, contract.SessionListRequest{Room: r.room})
+		if e != nil {
+			t.Fatal(e)
+		}
+		for _, session := range page.Sessions {
+			if session.ID == r.child {
+				return session.ActivityKind
+			}
+		}
+		t.Fatal("no child")
+		return ""
+	}
+	for _, tc := range []struct{ kind, want contract.ActivityKind }{
+		{contract.ActivityCompaction, contract.ActivityCompaction},
+		{contract.ActivityModel, contract.ActivityModel},
+		{"", contract.ActivityTool}, // a box agent that predates kinds
+	} {
+		if _, e := r.s.TurnActivity(r.ctx, asSession(r.child), contract.TurnActivityRequest{Turn: turn, Kind: tc.kind, Label: "x"}); e != nil {
+			t.Fatal(e)
+		}
+		if got := kindOf(); got != tc.want {
+			t.Fatalf("kind %q listed as %q, want %q", tc.kind, got, tc.want)
+		}
+	}
+	if _, e := r.s.TurnActivity(r.ctx, asSession(r.child), contract.TurnActivityRequest{Turn: turn, Kind: "dancing", Label: "x"}); e == nil || e.Code != contract.ErrInvalid {
+		t.Fatalf("unknown kind: %+v", e)
+	}
+}

@@ -77,7 +77,9 @@ func TestTransferModelRPC(t *testing.T) {
 	defer inputWriter.Close()
 	defer outputWriter.Close()
 	var labels []string
-	h.Activity = func(_ contract.TurnID, label string) { labels = append(labels, label) }
+	h.Activity = func(_ contract.TurnID, kind contract.ActivityKind, label string) {
+		labels = append(labels, string(kind)+": "+label)
+	}
 	go func() {
 		reader := bufio.NewReader(inputReader)
 		for _, reply := range []string{
@@ -105,7 +107,7 @@ func TestTransferModelRPC(t *testing.T) {
 	if got.Path != "boundary" || got.Reason != "quota exhausted" || got.TokensBefore != 180000 || got.TokensAfter != 4000 {
 		t.Fatalf("transfer: %+v", got)
 	}
-	if len(labels) != 1 || labels[0] != "changing model" {
+	if len(labels) != 1 || labels[0] != "model: changing model" {
 		t.Fatalf("activity: %v", labels)
 	}
 	if _, err := h.TransferModel(context.Background(), "turn_a", model, 150000); !errors.Is(err, harness.ErrRefused) || !strings.Contains(err.Error(), "Model not found") {
