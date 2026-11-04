@@ -154,3 +154,20 @@ func TestPoolSetIsOwnerOnlyAndAgentsPoolToolIsUnchanged(t *testing.T) {
 		t.Fatalf("agents' pool actions: %v", names)
 	}
 }
+
+// The pr toolkit's description is the one place that says how CI, tracking and merging work, so track's help does not repeat the wake.
+func TestPrToolkitDescriptionIsTheHomeOfCIAndTracking(t *testing.T) {
+	meta, ok := ToolkitFor("pr")
+	if !ok {
+		t.Fatal("no pr toolkit")
+	}
+	want := "CI is GitHub Actions, from each repository's .github/workflows: tests in a box show a change works there, CI shows it on GitHub. A PR you open is tracked for you, and track adds others. The engine polls tracked PRs and wakes the session that owns one on CI results, reviews, comments, conflicts, merges and closes; dyna_holds lists yours. Opening a PR merges nothing. Boxes have no gh: comments and merges run on a host through host exec, by root or a session granted it, as the room's rules say."
+	if meta.Description != want {
+		t.Fatalf("pr description:\n%s\nwant:\n%s", meta.Description, want)
+	}
+	for _, a := range AgentActions() {
+		if a.Tool == "pr" && a.Name == "track" && strings.Contains(a.Help, "woken") {
+			t.Fatalf("pr track help repeats the wake: %s", a.Help)
+		}
+	}
+}
