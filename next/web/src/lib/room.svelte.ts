@@ -5,7 +5,7 @@ import { EventWindow } from "./window.svelte.ts";
 import { pendingReason, type PendingReason } from "./event.ts";
 import { boxFailures, countOf, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
 import { prKey } from "./feed.ts";
-import type { BoxState, Conversation, FailureCause, Decision, Event, Goal, OpRequested, OpResult, OpState, PrSummary, Question, SessionStarted, WorkflowInfo, WorkflowStatusLine, WorkflowStep } from "./contract.gen.ts";
+import type { ActivityKind, BoxState, Conversation, FailureCause, Decision, Event, Goal, OpRequested, OpResult, OpState, PrSummary, Question, SessionStarted, WorkflowInfo, WorkflowStatusLine, WorkflowStep } from "./contract.gen.ts";
 
 
 // An operation of the room as the Requests panel shows it: its card, then its decision and run.
@@ -27,6 +27,8 @@ export class RoomStore {
   readonly stopFailed = new SvelteSet<string>();
   // The running turn's latest activity label per session, such as "read spec.md".
   readonly activity = new SvelteMap<string, string>();
+  // The kind of that activity, set and cleared with it. An engine that predates kinds sends none, which reads as a plain activity.
+  readonly activityKinds = new SvelteMap<string, ActivityKind>();
   // The running turn's labels so far, newest last, kept while the page is open: the engine keeps only the latest one,
   // so a page opened mid-turn starts from that. A DM shows them as the turn's steps.
   readonly steps = new SvelteMap<string, string[]>();
@@ -219,7 +221,7 @@ export class RoomStore {
       const reason = pendingReason(session.boxState, session.boxReason);
       if (reason) this.pendingReasons.set(session.id, reason);
       if (session.turn) this.turns.set(session.id, session.turn);
-      if (session.turn && session.activity) { this.activity.set(session.id, session.activity); this.steps.set(session.id, [session.activity]); }
+      if (session.turn && session.activity) { this.activity.set(session.id, session.activity); if (session.activityKind) this.activityKinds.set(session.id, session.activityKind); this.steps.set(session.id, [session.activity]); }
       if (session.lastOutcome === "failed") this.failed.set(session.id, list.seq);
       if (session.computer === "running") this.computers.add(session.id);
       this.shellJobs.set(session.id, session.shellJobs ?? 0);
@@ -297,6 +299,7 @@ export class RoomStore {
     if (event.type === "turn.activity") {
       if (this.turns.get(event.body.session) === event.body.turn) {
         this.activity.set(event.body.session, event.body.label);
+        this.activityKinds.set(event.body.session, event.body.kind);
         const steps = this.steps.get(event.body.session) ?? [];
         if (steps.at(-1) !== event.body.label) this.steps.set(event.body.session, [...steps, event.body.label].slice(-50));
       }
@@ -335,6 +338,7 @@ export class RoomStore {
       case "session.closed":
         this.sessions.delete(event.body.session);
         this.activity.delete(event.body.session);
+        this.activityKinds.delete(event.body.session);
         this.steps.delete(event.body.session);
         void this.readGoals(); // Its goals moved to its parent.
         break;
@@ -382,6 +386,7 @@ export class RoomStore {
       case "turn.started":
         this.turns.set(event.body.session, event.body.turn);
         this.activity.delete(event.body.session);
+        this.activityKinds.delete(event.body.session);
         this.steps.delete(event.body.session);
         break;
       case "turn.ended":
@@ -390,6 +395,7 @@ export class RoomStore {
           this.stopping.delete(event.body.session);
           this.stopFailed.delete(event.body.session);
           this.activity.delete(event.body.session);
+          this.activityKinds.delete(event.body.session);
           this.steps.delete(event.body.session);
         }
         // Only a completed turn clears the failure; a stopped turn did not succeed.

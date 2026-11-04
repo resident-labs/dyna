@@ -503,21 +503,24 @@ test("a session with a finished or running job stays reachable after a fresh loa
 
 test("activity labels follow the running turn and never reach a window", async () => {
   const listed = { lastRead: 0, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "", startedAt: "", hadJobs: false } as const;
-  const server = engine(1, [{ id: "s", ...listed, turn: "t", activity: "read spec.md" }]);
+  const server = engine(1, [{ id: "s", ...listed, turn: "t", activity: "read spec.md", activityKind: "compaction" }]);
   try {
     const room = new RoomStore("r", () => () => {});
     await room.open();
     const feedWindow = room.window(feed);
     await feedWindow.jumpToPresent();
-    const label = (turn: string, text: string) => event(0, { type: "turn.activity", body: { session: "s", turn, label: text } });
+    const label = (turn: string, text: string) => event(0, { type: "turn.activity", body: { session: "s", turn, kind: "tool", label: text } });
     assert.equal(room.activity.get("s"), "read spec.md");
+    assert.equal(room.activityKinds.get("s"), "compaction");
     room.apply(label("t", "ran go test"));
     room.apply(label("old", "stale"));
     room.apply(label("t", "ran go test"));
     assert.equal(room.activity.get("s"), "ran go test");
+    assert.equal(room.activityKinds.get("s"), "tool");
     assert.deepEqual(room.steps.get("s"), ["read spec.md", "ran go test"]);
     room.apply(event(2, { type: "turn.ended", body: { session: "s", turn: "t", outcome: "completed", usage } }));
     assert.equal(room.activity.has("s"), false);
+    assert.equal(room.activityKinds.has("s"), false);
     assert.equal(room.steps.has("s"), false);
     assert.equal(feedWindow.ordered.some(item => item.type === "turn.activity"), false);
   } finally { server.restore(); }
