@@ -112,7 +112,7 @@ test("room.list seeds each room's waiting requests and working sessions, and the
     assert.deepEqual([[...attention.waiting.get("a")!], [...attention.waiting.get("b")!]], [[], ["o2"]]);
     assert.deepEqual([[...attention.working.get("a")!], [...attention.working.get("b")!]], [["s1"], ["s2"]]);
     // Activity has seq 0 and counts for a working session's current turn only.
-    const label = (session: string, turn: string, text: string) => attention.apply(event(0, session === "s1" ? "a" : "b", { type: "turn.activity", body: { session, turn, label: text } }));
+    const label = (session: string, turn: string, text: string) => attention.apply(event(0, session === "s1" ? "a" : "b", { type: "turn.activity", body: { session, turn, kind: "tool", label: text } }));
     label("s1", "t0", "read spec.md");
     label("s2", "t", "edited App.svelte");
     label("s2", "old", "stale");

@@ -227,13 +227,22 @@ type ConversationRead struct {
 	Seq          int64        `json:"seq"`
 }
 
-// TurnActivity is live only. The engine keeps each running turn's latest label in memory and
+// TurnActivity is live only. The engine keeps each running turn's latest label and its kind in memory and
 // never stores this event, so it has seq 0, events.list never returns it, and it does not move a
 // stream's resume point. turn.ended clears it.
+type ActivityKind string // "tool" | "compaction" | "model"
+
+const (
+	ActivityTool       ActivityKind = "tool"       // a tool call; the label names it
+	ActivityCompaction ActivityKind = "compaction" // the conversation is compacting
+	ActivityModel      ActivityKind = "model"      // the model is changing
+)
+
 type TurnActivity struct {
-	Session SessionID `json:"session"`
-	Turn    TurnID    `json:"turn"`
-	Label   string    `json:"label"` // the running tool call, masked, one line of at most 80 characters
+	Session SessionID    `json:"session"`
+	Turn    TurnID       `json:"turn"`
+	Kind    ActivityKind `json:"kind"`  // what the turn is doing; the label only words it
+	Label   string       `json:"label"` // the running tool call, masked, one line of at most 80 characters
 }
 
 // TranscriptChanged is an owner-only live notification; it contains no transcript text.

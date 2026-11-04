@@ -188,7 +188,7 @@ type messageUsage struct {
 var extensionRequest = []byte(`{"type":"extension_ui_request"`)
 
 type Harness struct {
-	Activity       func(contract.TurnID, string)
+	Activity       func(contract.TurnID, contract.ActivityKind, string)
 	notice         []func(string)
 	cmd            *exec.Cmd
 	stdin          io.WriteCloser
@@ -364,12 +364,12 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, typ string, input
 			switch e.Type {
 			case "tool_execution_start":
 				if h.Activity != nil {
-					h.Activity(id, activityLabel(e))
+					h.Activity(id, contract.ActivityTool, activityLabel(e))
 				}
 			case "compaction_start":
 				// A compaction runs a model call with no tool, so the line says so rather than keep the last command.
 				if h.Activity != nil {
-					h.Activity(id, "compacting the conversation")
+					h.Activity(id, contract.ActivityCompaction, "compacting the conversation")
 				}
 			case "message_end":
 				m := e.Message
@@ -431,7 +431,7 @@ func (h *Harness) FollowUp(ctx context.Context, input contract.TurnInput) error 
 // TransferModel sends Pi's transfer_model. Pi decides whether the conversation fits, and compacts first if it does not.
 func (h *Harness) TransferModel(ctx context.Context, id contract.TurnID, model contract.ModelChoice, compactTokens int) (harness.ModelTransfer, error) {
 	if h.Activity != nil {
-		h.Activity(id, "changing model")
+		h.Activity(id, contract.ActivityModel, "changing model")
 	}
 	reply, err := h.requestCommand(ctx, command{Type: "transfer_model", Provider: string(model.Provider), ModelID: model.ID, ThinkingLevel: string(model.Thinking), CompactionTriggerTokens: compactTokens})
 	if err != nil {
