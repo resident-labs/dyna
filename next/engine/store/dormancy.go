@@ -29,6 +29,11 @@ func (s *Store) CanDispatch(ctx context.Context, id contract.SessionID) (bool, e
 	return ok, err
 }
 
+// StoppedSessions lists a room's open sessions whose boxes are asleep, stopped and meant to stay so until an input starts them.
+func (s *Store) StoppedSessions(ctx context.Context, room contract.RoomID) ([]contract.SessionID, error) {
+	return listIDs[contract.SessionID](ctx, s.Read(), `SELECT s.id FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.room=? AND s.closed_at IS NULL AND s.state='open' AND b.want='stop' AND b.state='stopped' ORDER BY s.created_at,s.id`, room)
+}
+
 // RunningSessions lists a room's open sessions whose boxes are up and meant to stay up.
 func (s *Store) RunningSessions(ctx context.Context, room contract.RoomID) ([]contract.SessionID, error) {
 	return listIDs[contract.SessionID](ctx, s.Read(), `SELECT s.id FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.room=? AND s.closed_at IS NULL AND s.state='open' AND b.want='run' AND b.state='ready' ORDER BY s.created_at,s.id`, room)
