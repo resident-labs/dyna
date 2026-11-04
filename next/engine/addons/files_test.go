@@ -202,3 +202,26 @@ func TestAReplacementKeepsTheRootOnlyMark(t *testing.T) {
 		t.Fatal("the owner could not clear it")
 	}
 }
+
+// A skill stored with the old single "host" reads as run-on [host], and the next write keeps it in the new form.
+func TestAStoredSingleHostReadsAsRunOnHosts(t *testing.T) {
+	f := &Files{Layout: box.Layout{Data: t.TempDir()}}
+	path := f.Layout.Addons("")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"items":[{"kind":"skill","name":"hypruse","host":"omarchy"},{"kind":"skill","name":"plain"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	items, err := f.List("")
+	if err != nil || len(items) != 2 || !slices.Equal(items[0].Hosts, []contract.HostName{"omarchy"}) || len(items[1].Hosts) != 0 {
+		t.Fatalf("%+v %v", items, err)
+	}
+	if err := f.SetEnabled("", contract.AddonSkill, "plain", false); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), `"host"`) || !strings.Contains(string(data), `"hosts"`) {
+		t.Fatalf("%s", data)
+	}
+}

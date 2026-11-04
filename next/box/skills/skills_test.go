@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"github.com/resident-labs/dyna/contract"
 	"os"
 	"path/filepath"
 	"strings"
@@ -202,5 +203,18 @@ func TestAFolderNamedLikeHostAndPathNeedsDotSlash(t *testing.T) {
 	}
 	if req, err := Request("./my:skill", dir, "", true); err != nil || len(req.Archive) == 0 || req.Host != "" {
 		t.Fatalf("%+v %v", req, err)
+	}
+}
+
+func TestAnnotateNamesEveryRunOnHost(t *testing.T) {
+	for hosts, want := range map[string]string{"omarchy": "omarchy", "omarchy desktop": "omarchy or desktop", "omarchy desktop arch": "omarchy, desktop or arch"} {
+		var names []contract.HostName
+		for _, h := range strings.Fields(hosts) {
+			names = append(names, contract.HostName(h))
+		}
+		out, err := Annotate([]byte("---\nname: x\ndescription: Does x\n---\nBody\n"), names)
+		if err != nil || !strings.Contains(string(out), "Does x · runs on "+want+"\"") || !strings.Contains(string(out), "run on a host: "+want+", through bash with host.") || !strings.HasSuffix(string(out), "this box.\nBody\n") {
+			t.Fatalf("%q %v", out, err)
+		}
 	}
 }

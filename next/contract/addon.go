@@ -6,6 +6,7 @@ const (
 	MethodAddonList        Method = "addon.list"
 	MethodAddonSetEnabled  Method = "addon.set_enabled"
 	MethodAddonSetRootOnly Method = "addon.set_root_only"
+	MethodAddonSetHosts    Method = "addon.set_hosts"
 	MethodBoxNotice        Method = "box.notice"
 	MethodMCPAdd           Method = "mcp.add"
 	MethodMCPList          Method = "mcp.list"
@@ -39,7 +40,7 @@ type Addon struct {
 	At          *time.Time `json:"at,omitempty"`
 	Description string     `json:"description,omitempty"` // a skill's
 	Source      string     `json:"source,omitempty"`      // a package's pinned source, or the link a skill came from
-	Host        HostName   `json:"host,omitempty"`        // a skill saved from a host: its commands run there
+	Hosts       []HostName `json:"hosts,omitempty"`       // a skill's run-on hosts: where its commands run
 	URL         string     `json:"url,omitempty"`         // an HTTP MCP server's
 	Command     string     `json:"command,omitempty"`     // a stdio MCP server's
 	Args        []string   `json:"args,omitempty"`
@@ -69,13 +70,14 @@ type PackageAddRequest struct {
 
 // SkillSaveRequest carries a gzip tar of a skill's folder, a link for the engine to fetch, or a Host and Path the engine copies over SSH.
 type SkillSaveRequest struct {
-	Archive  []byte   `json:"archive,omitempty"`
-	URL      string   `json:"url,omitempty"`
-	Host     HostName `json:"host,omitempty"` // with Path: the engine copies the folder from this host over SSH, for the owner
-	Path     string   `json:"path,omitempty"`
-	Room     RoomID   `json:"room,omitempty"`
-	Global   bool     `json:"global,omitempty"`
-	RootOnly bool     `json:"rootOnly,omitempty"`
+	Archive  []byte     `json:"archive,omitempty"`
+	URL      string     `json:"url,omitempty"`
+	Host     HostName   `json:"host,omitempty"`  // with Path: the engine copies the folder from this host over SSH, for the owner; it says nothing about where the skill runs
+	Hosts    []HostName `json:"hosts,omitempty"` // the skill's run-on hosts, each a registered host; none keeps what a saved skill has
+	Path     string     `json:"path,omitempty"`
+	Room     RoomID     `json:"room,omitempty"`
+	Global   bool       `json:"global,omitempty"`
+	RootOnly bool       `json:"rootOnly,omitempty"`
 }
 
 // MCPAddRequest names a server by URL or by Command and Args, which are one executable and its arguments, not a shell line.
@@ -134,6 +136,15 @@ type AddonSetRootOnlyRequest struct {
 
 type AddonSetRootOnlyResponse struct{}
 
+// AddonSetHostsRequest replaces a skill's run-on hosts without saving its files again; none clears them. Room is empty for a global one.
+type AddonSetHostsRequest struct {
+	Name  string     `json:"name"`
+	Room  RoomID     `json:"room,omitempty"`
+	Hosts []HostName `json:"hosts"`
+}
+
+type AddonSetHostsResponse struct{}
+
 // BoxNoticeRequest is what a box could not set up, in plain words.
 type BoxNoticeRequest struct {
 	Text string `json:"text"`
@@ -155,17 +166,17 @@ func (SessionNotice) isEventBody()         {}
 // AddonGlobalArgs is a session's global change, which waits for the owner. Bundle is the hash of a skill's archive among the
 // room's files; the other fields are as in the requests.
 type AddonGlobalArgs struct {
-	Remove      bool      `json:"remove,omitempty"`
-	Kind        AddonKind `json:"addon"`
-	Name        string    `json:"name"`
-	Source      string    `json:"source,omitempty"`
-	Host        HostName  `json:"host,omitempty"`
-	Description string    `json:"description,omitempty"`
-	Bundle      string    `json:"bundle,omitempty"`
-	RootOnly    bool      `json:"rootOnly,omitempty"`
-	URL         string    `json:"url,omitempty"`
-	Command     string    `json:"command,omitempty"`
-	Args        []string  `json:"args,omitempty"`
+	Remove      bool       `json:"remove,omitempty"`
+	Kind        AddonKind  `json:"addon"`
+	Name        string     `json:"name"`
+	Source      string     `json:"source,omitempty"`
+	Hosts       []HostName `json:"hosts,omitempty"`
+	Description string     `json:"description,omitempty"`
+	Bundle      string     `json:"bundle,omitempty"`
+	RootOnly    bool       `json:"rootOnly,omitempty"`
+	URL         string     `json:"url,omitempty"`
+	Command     string     `json:"command,omitempty"`
+	Args        []string   `json:"args,omitempty"`
 }
 
 func (AddonGlobalArgs) OpKind() OpKind { return "addon.global" }
