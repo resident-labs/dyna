@@ -17,8 +17,11 @@ import (
 
 type gitRunner func(context.Context, string, string, ...string) (string, error)
 
+// runGit runs Dyna's own git operation in a repository. Dyna's backups and bookkeeping never run the repository's hooks,
+// whatever its hooks folder or core.hooksPath holds, because those guard the owner's and the agent's commands, not Dyna's.
+// A command line -c beats the repository's config, and --no-verify would not reach checkout, merge or worktree hooks.
 func runGit(ctx context.Context, dir, index string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-c", "core.hooksPath=" + os.DevNull}, args...)...)
 	cmd.Dir = dir
 	cmd.WaitDelay = 5 * time.Second // a killed git's helpers can hold the output open
 	if index != "" {
@@ -214,7 +217,7 @@ func archiveRepo(ctx context.Context, root string, session contract.SessionID, r
 				result.Commit, err = git(ctx, dir, index, "-c", "user.name=Dyna Archive", "-c", "user.email=archive@dyna.invalid", "commit-tree", tree, "-p", head, "-m", "archive "+string(session))
 			}
 			if err == nil {
-				_, err = git(ctx, dir, "", "push", "--force", "origin", result.Commit+":refs/dyna/archive/"+string(session))
+				_, err = git(ctx, dir, "", "push", "--no-verify", "--force", "origin", result.Commit+":refs/dyna/archive/"+string(session))
 			}
 		}
 	}
