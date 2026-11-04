@@ -223,24 +223,22 @@ func (h *Harness) FollowUp(ctx context.Context, input contract.TurnInput) error 
 	return err
 }
 
-// TransferModel switches the model and thinking level. The compaction a transfer may need comes with the port of
-// Pi's transfer_model.
-func (h *Harness) TransferModel(ctx context.Context, id contract.TurnID, model contract.ModelChoice, _ int) (harness.ModelTransfer, error) {
-	current := h.session.Model()
-	if current != nil && current.ProviderMeta.ProviderID == string(model.Provider) && current.ID == model.ID && string(h.session.ThinkingLevel()) == string(model.Thinking) {
-		return harness.ModelTransfer{Path: "unchanged"}, nil
-	}
+// TransferModel moves the session to the model, thinking level and compaction trigger. PiG checks the conversation
+// against the model and compacts it on the one that held it first when it must (coding.Session.TransferModel). Abort
+// cancels that compaction, and the model stays.
+func (h *Harness) TransferModel(ctx context.Context, id contract.TurnID, model contract.ModelChoice, compactTokens int) (harness.ModelTransfer, error) {
 	if h.Activity != nil {
 		h.Activity(id, contract.ActivityModel, "changing model")
 	}
 	target, err := coding.BuildModel(string(model.Provider)+"/"+model.ID, h.services)
+	if err == nil {
+		err = h.session.CheckModelAuth(target)
+	}
 	if err != nil {
 		return harness.ModelTransfer{}, fmt.Errorf("%w: %v", harness.ErrRefused, err)
 	}
-	if err := h.session.SetModel(target); err != nil {
-		return harness.ModelTransfer{}, err
-	}
-	return harness.ModelTransfer{Path: "switched"}, h.session.SetThinkingLevel(ai.ModelThinkingLevel(model.Thinking))
+	result, err := h.session.TransferModel(ctx, target, coding.ModelTransferOptions{ThinkingLevel: ai.ModelThinkingLevel(model.Thinking), CompactionTriggerTokens: compactTokens})
+	return harness.ModelTransfer{Path: result.Path, Reason: result.Reason, TokensBefore: int64(result.TokensBefore), TokensAfter: int64(result.TokensAfter)}, err
 }
 
 // Compact summarizes the conversation when the session's own measure of its context is over the limit. The session
