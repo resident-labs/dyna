@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,13 +9,14 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/MichaelKinsy/PiG/coding"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/skills"
@@ -198,29 +198,44 @@ func installedPath(root string, item contract.Addon) string {
 	return root + "/git/" + item.Name
 }
 
-// piInstall has Pi install a source into its own agent folder, then starts Pi there once. Pi exits when an extension fails
-// to load, so this is where a broken package must show, or it would stop every box that loads it.
+// piInstall has PiG install a source into an agent folder of its own, the way it installs a configured package, and
+// then loads the package's extensions there. PiG cannot say which package a failed extension belongs to once more than
+// one is configured, so each source gets its own folder. A package whose extension fails to load must show here, or the
+// session would report it at every box start. PiG's install does not take a context, so a timeout abandons it.
 func piInstall(ctx context.Context, dir, source string) error {
-	pi := func(args ...string) ([]byte, error) {
-		cmd := exec.CommandContext(ctx, "pi", args...)
-		cmd.Env = append(os.Environ(), "PI_CODING_AGENT_DIR="+dir)
-		cmd.WaitDelay = 5 * time.Second // npm can outlive pi and hold its output open
-		return cmd.CombinedOutput()
-	}
-	out, err := pi("install", source)
+	settings, err := json.Marshal(struct {
+		Packages []string `json:"packages"`
+	}{[]string{source}})
 	if err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), settings, 0o600); err != nil {
+		return err
+	}
+	loader := coding.NewDefaultResourceLoader(coding.DefaultResourceLoaderOptions{CWD: dir, AgentDir: dir, NoContextFiles: true})
+	installed := make(chan error, 1)
+	go func() {
+		defer loader.Close()
+		if err := loader.ReloadWith(ctx); err != nil {
+			installed <- fmt.Errorf("install failed: %w", err)
+			return
 		}
-		return fmt.Errorf("install failed: %s", lastOutput(out))
+		var failures []string
+		for _, failed := range loader.GetExtensions().Errors {
+			failures = append(failures, failed.Error)
+		}
+		if len(failures) > 0 {
+			installed <- fmt.Errorf("its extension failed to load: %s", lastOutput([]byte(strings.Join(failures, "; "))))
+			return
+		}
+		installed <- nil
+	}()
+	select {
+	case err := <-installed:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	// Without a model Pi exits right after loading, so only this message says anything.
-	out, _ = pi("--offline", "--mode", "rpc", "--no-session")
-	if _, failure, found := bytes.Cut(out, []byte("Failed to load extension")); found {
-		line, _, _ := bytes.Cut(failure, []byte("\n"))
-		return fmt.Errorf("its extension failed to load:%s", line)
-	}
-	return nil
 }
 
 func lastOutput(out []byte) string {
