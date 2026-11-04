@@ -469,6 +469,8 @@ func (h *Harness) SetPromptSections(ctx context.Context, sections []contract.Con
 
 func (h *Harness) Abort(ctx context.Context) error { return h.send(ctx, "abort", nil, nil) }
 
+func (h *Harness) ClearQueue(ctx context.Context) error { return h.send(ctx, "clear_queue", nil, nil) }
+
 func (h *Harness) SessionFile() string { return h.session }
 
 // Done closes when Pi's RPC stream ends.
