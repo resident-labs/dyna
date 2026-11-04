@@ -201,3 +201,34 @@ func TestMCPResultsAreOutsideTextExceptDynas(t *testing.T) {
 		t.Fatalf("tool results %s", got)
 	}
 }
+
+// Only text blocks change; an image, the structured content and the error flag are left to PiG as they were.
+func TestOutsideResultLeavesImagesStructuredContentAndErrorsAlone(t *testing.T) {
+	image := map[string]any{"type": "image", "data": "AAAA", "mimeType": "image/png"}
+	event := extension.CustomToolResultEvent{ToolName: "mcp__docs__shot", ToolResultEventBase: extension.ToolResultEventBase{
+		Content: []any{map[string]any{"type": "text", "text": "a"}, image}, StructuredContent: json.RawMessage(`{"k":1}`), IsError: true}}
+	got, err := outsideResult(context.Background(), event)
+	if err != nil || got.IsError != nil || string(got.StructuredContent) != `{"k":1}` || len(got.Content) != 2 || !reflect.DeepEqual(got.Content[1], image) {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if want := (map[string]any{"type": "text", "text": "<outside source=\"mcp docs\">\na\n</outside>"}); !reflect.DeepEqual(got.Content[0], want) {
+		t.Fatalf("%+v", got.Content[0])
+	}
+	// A tool of a server whose name merely starts with dyna or github is read by its own name.
+	for tool, source := range map[string]string{"mcp__github-x__t": "mcp github-x", "mcp__dynamo__t": "mcp dynamo"} {
+		event.ToolName = tool
+		if got, _ := outsideResult(context.Background(), event); !strings.Contains(got.Content[0].(map[string]any)["text"].(string), `source="`+source+`"`) {
+			t.Fatalf("%s: %+v", tool, got.Content[0])
+		}
+	}
+}
+
+// The limit: a script that calls a github tool reads the raw result, and the script's own output reaches the model unwrapped.
+func TestAScriptsMCPCallGetsTheRawResult(t *testing.T) {
+	script, _ := json.Marshal(map[string]string{"code": `const r = await tools.mcp__github__post({action: "send", text: "x"}); return r.content[0].text;`})
+	b := newSession(t, []pigtest.Block{{Tool: "codemode", Input: string(script)}}, []pigtest.Block{{Text: "ok"}})
+	b.turn(t, "script")
+	if got := b.toolResult(t, 1); strings.Contains(got, "<outside") || !strings.Contains(got, `ev_1`) {
+		t.Fatalf("tool result %s", got)
+	}
+}

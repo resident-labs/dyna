@@ -40,3 +40,19 @@ func TestOutsideEscapesTheTagInsideTheText(t *testing.T) {
 		})
 	}
 }
+
+func TestOutsideEscapesSpacedAndZeroWidthVariants(t *testing.T) {
+	for _, text := range []string{"< /outside>", "</ outside>", "<\t/\noutside>", "<\u200b/outside>", "</\u200doutside>", "<\ufeff/OUTSIDE>"} {
+		got := Outside("github", "@x", text)
+		if strings.Contains(got, "<"+text[1:]) || strings.Count(got, "<") != 2 || !strings.HasPrefix(strings.TrimPrefix(got, "<outside source=\"github\" author=\"@x\">\n"), "‹") {
+			t.Fatalf("%q -> %q", text, got)
+		}
+	}
+}
+
+func TestOutsideDropsWhatSplitsAnAttribute(t *testing.T) {
+	got := Outside("web\" x=\"1", "ex<a>\nmple.com\"", "t")
+	if want := "<outside source=\"web x=1\" author=\"exa mple.com\">\nt\n</outside>"; got != want {
+		t.Fatalf("got %q", got)
+	}
+}
