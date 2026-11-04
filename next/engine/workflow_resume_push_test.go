@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 	enginegit "github.com/resident-labs/dyna/engine/git"
@@ -47,7 +48,20 @@ func TestAResumedRunOwnsTheBranchesOfItsChainAndNoOthers(t *testing.T) {
 	second, secondCrew := w.resume(first.Run)
 	w.endRun(secondCrew)
 	third, _ := w.resume(second.Run)
-	branch := func(session contract.SessionID, topic string) string { return "v2/" + string(session) + topic }
+	// A crew's branch is its recorded one, which the engine gives at its first box setup; here the test gives it.
+	recorded := map[contract.SessionID]string{}
+	record := func(session contract.SessionID, name string) {
+		t.Helper()
+		got, err := w.store.ClaimBranch(w.ctx, repo, session, name, nil, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		recorded[session] = got
+	}
+	record(first.Session, "first-run")
+	record(second.Session, "second-run")
+	record(third.Session, "third-run")
+	branch := func(session contract.SessionID, topic string) string { return recorded[session] + topic }
 
 	for _, want := range []string{branch(first.Session, ""), branch(first.Session, "-0123456789ab"), branch(first.Session, "-run"), branch(second.Session, "-0123456789ab")} {
 		if !w.canPush(repo, third.Session, want) {
@@ -61,6 +75,8 @@ func TestAResumedRunOwnsTheBranchesOfItsChainAndNoOthers(t *testing.T) {
 	// A resume reaches back along its own chain and nowhere else.
 	other, _ := w.resume(first.Run)
 	unrelated, _ := w.start(w.owner, workflowScript)
+	record(other.Session, "other-run")
+	record(unrelated.Session, "unrelated-run")
 	refused := []struct {
 		name    string
 		repo    contract.RepoName

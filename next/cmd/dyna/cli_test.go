@@ -83,6 +83,7 @@ type fakeClient struct {
 	close        contract.SessionCloseRequest
 	closed       contract.SessionCloseResponse
 	setProfile   contract.SessionSetProfileRequest
+	setBranch    contract.SessionSetBranchRequest
 	restart      contract.SessionRestartRequest
 	refresh      contract.SessionRefreshRequest
 	refreshed    contract.SessionRefreshResponse
@@ -250,6 +251,10 @@ func (f *fakeClient) ComposeList(_ context.Context, q contract.ComposeListReques
 func (f *fakeClient) SessionStart(_ context.Context, q contract.SessionStartRequest) (contract.SessionStartResponse, error) {
 	f.start = q
 	return contract.SessionStartResponse{Session: "ses_1"}, nil
+}
+func (f *fakeClient) SessionSetBranch(_ context.Context, q contract.SessionSetBranchRequest) (contract.SessionSetBranchResponse, error) {
+	f.setBranch = q
+	return contract.SessionSetBranchResponse{}, nil
 }
 func (f *fakeClient) SessionSetProfile(_ context.Context, q contract.SessionSetProfileRequest) (contract.SessionSetProfileResponse, error) {
 	f.setProfile = q
@@ -462,6 +467,13 @@ func TestSessionSetProfileMapsArgs(t *testing.T) {
 	runCLI(t, f, "session", "set-profile", "ses_1", "gpt")
 	if f.setProfile.Session != "ses_1" || f.setProfile.Profile != "gpt" {
 		t.Fatalf("%+v", f.setProfile)
+	}
+}
+func TestSessionSetBranchMapsArgs(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "session", "set-branch", "ses_1", "portizon-wasm")
+	if f.setBranch.Session != "ses_1" || f.setBranch.Branch != "portizon-wasm" {
+		t.Fatalf("%+v", f.setBranch)
 	}
 }
 func TestSessionRestartMapsID(t *testing.T) {

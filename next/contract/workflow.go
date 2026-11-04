@@ -88,6 +88,7 @@ type WorkflowInfo struct {
 	Profiles    []ProfileName `json:"profiles"`
 	Repo        RepoName      `json:"repo,omitempty"`
 	Commit      string        `json:"commit,omitempty"`
+	Branch      string        `json:"branch,omitempty"` // the crew session's recorded branch, which its workers' branches extend
 	Version     int           `json:"version,omitempty"`
 	State       WorkflowState `json:"state"`
 	Result      string        `json:"result,omitempty"`
