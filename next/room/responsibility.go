@@ -28,8 +28,19 @@ func ResponsibilityName(item contract.Responsibility) string {
 	return label + " " + item.ID
 }
 
+// withContinue ends a restart notice with the instruction to carry on when the session holds an open goal, and leaves the facts
+// alone when it does not. This is the owner's exception (2026-11-04) to wording notices as facts.
+func withContinue(facts string, openGoal bool) string {
+	if !openGoal {
+		return facts
+	}
+	return facts + " Continue the work you were doing: check `git status` and your goal, reinstall anything you need, and keep going until the goal is done or you are blocked. Don't end your turn just to report progress."
+}
+
 // BoxRestartedNotice tells a session that asked to restart its own box that it has.
-const BoxRestartedNotice = "Your box restarted on the current version. Your files and conversation are kept."
+func BoxRestartedNotice(openGoal bool) string {
+	return withContinue("Your box restarted on the current version. Files under /box and this conversation are kept.", openGoal)
+}
 
 // BoxUpdateNotice tells a session what holds its box on an old binary. It is empty when nothing outlasts the turn: the box then
 // stops as the turn ends, before anything could read this. A crew's run ends with its turn, so it counts as that turn.

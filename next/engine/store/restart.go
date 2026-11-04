@@ -23,8 +23,7 @@ func (s *Store) WakeWithNotice(ctx context.Context, notice contract.Event, id co
 func (s *Store) sendNotice(ctx context.Context, notice contract.Event, id contract.SessionID, wake bool) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		if body, ok := notice.Body.(contract.SessionNotice); ok && body.ClientID != "" {
-			var sent bool
-			if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events WHERE room=? AND from_kind=? AND from_id='' AND client_id=?)`, notice.Room, notice.From.Kind, body.ClientID).Scan(&sent); err != nil || sent {
+			if sent, err := s.noticeSent(ctx, tx, notice, body.ClientID); err != nil || sent {
 				return err
 			}
 		}
@@ -66,15 +65,49 @@ func (s *Store) RestartSession(ctx context.Context, id contract.SessionID, event
 		if _, err := s.AppendEvent(tx, event); err != nil {
 			return err
 		}
-		seq, err := s.AppendEvent(tx, notice)
-		if err != nil {
-			return err
-		}
-		if err := s.InsertDelivery(ctx, tx, seq, notice.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: id}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: false}); err != nil {
-			return err
-		}
 		restarted = true
-		return nil
+		return s.restartNotice(ctx, tx, notice)
 	})
 	return restarted, err
+}
+
+// noticeSent says whether the engine already wrote a notice with this client ID in the room.
+func (s *Store) noticeSent(ctx context.Context, tx *sql.Tx, notice contract.Event, clientID string) (sent bool, err error) {
+	err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events WHERE room=? AND from_kind=? AND from_id='' AND client_id=?)`, notice.Room, notice.From.Kind, clientID).Scan(&sent)
+	return sent, err
+}
+
+// openGoalSQL asks whether a session holds a goal that is not done.
+const openGoalSQL = `SELECT EXISTS (SELECT 1 FROM goals WHERE session=? AND state='active')`
+
+// HasOpenGoal says whether a session holds a goal that is not done.
+func (s *Store) HasOpenGoal(ctx context.Context, id contract.SessionID) (open bool, err error) {
+	err = s.Read().QueryRowContext(ctx, openGoalSQL, id).Scan(&open)
+	return open, err
+}
+
+// NoticeRestarted tells a session its box started again after it stopped.
+func (s *Store) NoticeRestarted(ctx context.Context, notice contract.Event) error {
+	return s.Write(ctx, func(tx *sql.Tx) error { return s.restartNotice(ctx, tx, notice) })
+}
+
+// restartNotice stores a SessionRestarted notice for its session, once per client ID. The goal state is read in the same
+// transaction and stored in the notice, so the text and the wake agree: with an open goal the notice starts a turn, and without
+// one it waits for the session's next input.
+func (s *Store) restartNotice(ctx context.Context, tx *sql.Tx, notice contract.Event) error {
+	body := notice.Body.(contract.SessionRestarted)
+	if body.ClientID != "" {
+		if sent, err := s.noticeSent(ctx, tx, notice, body.ClientID); err != nil || sent {
+			return err
+		}
+	}
+	if err := tx.QueryRowContext(ctx, openGoalSQL, body.Session).Scan(&body.OpenGoal); err != nil {
+		return err
+	}
+	notice.Body = body
+	seq, err := s.AppendEvent(tx, notice)
+	if err != nil {
+		return err
+	}
+	return s.InsertDelivery(ctx, tx, seq, body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: body.Session}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: body.OpenGoal})
 }
