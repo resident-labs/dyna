@@ -16,13 +16,15 @@ type ContextData struct {
 	PRs      []ContextPR
 	Accounts []ContextAccount
 	Depth    int
+	// RootApproves is the root-approves kinds that are on in the session's room. It is read for the room's root only.
+	RootApproves []contract.RootApproval
 }
 
 // ContextDataForSession reads a bounded number of indexed queries for one snapshot.
 func (s *Store) ContextDataForSession(ctx context.Context, id contract.SessionID) (ContextData, error) {
 	var data ContextData
-	var err error
-	if _, err = s.Session(ctx, id); err != nil {
+	session, err := s.Session(ctx, id)
+	if err != nil {
 		return data, err
 	}
 	if data.Goals, err = s.ContextGoals(ctx, id); err != nil {
@@ -43,7 +45,14 @@ func (s *Store) ContextDataForSession(ctx context.Context, id contract.SessionID
 	if data.Accounts, err = s.ContextAccounts(ctx, id); err != nil {
 		return data, err
 	}
-	data.Depth, err = s.ContextDepth(ctx, id)
+	if data.Depth, err = s.ContextDepth(ctx, id); err != nil || !session.Root {
+		return data, err
+	}
+	var approves string
+	if err = s.Read().QueryRowContext(ctx, "SELECT root_approves FROM rooms WHERE id=?", session.Room).Scan(&approves); err != nil {
+		return data, err
+	}
+	err = json.Unmarshal([]byte(approves), &data.RootApproves)
 	return data, err
 }
 
