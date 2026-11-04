@@ -177,6 +177,8 @@
   .group { left: 0; right: 0; gap: 8px; padding: 0 14px; border-radius: 0; color: var(--muted); font-size: 13px; font-weight: 600; }
   .pin .group { background: var(--raised); border-bottom: 1px solid var(--line); }
   .group .n { font-weight: 400; font-variant-numeric: tabular-nums; }
+  /* A long group name, such as a room's, keeps to the head's one line. */
+  .group span:not(.n) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .group :global(svg) { transition: transform 120ms; }
   .group.folded :global(svg) { transform: rotate(-90deg); }
   /* What a page's row draws: two lines of text, and a cell for each column. */

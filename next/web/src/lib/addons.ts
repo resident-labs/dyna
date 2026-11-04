@@ -50,16 +50,20 @@ export function addonSummary(items: readonly Addon[]) {
 // skill still names that host.list no longer has, so turning one off stays possible.
 export const runOnChoices = (listed: readonly string[], current: readonly string[] | null | undefined) =>
   [...new Set([...listed.filter(name => name !== "control-plane"), ...current ?? []])];
+// A skill's run-on hosts after one switch: a host turned on goes last, as the engine keeps them in the order given.
+export const runOnHosts = (current: readonly string[] | null | undefined, host: string, on: boolean) =>
+  on ? [...(current ?? []).filter(each => each !== host), host] : (current ?? []).filter(each => each !== host);
 
 export type AddonDraft = { kind: AddonKind; where: string; source: string; name: string };
 export const emptyDraft = (): AddonDraft => ({ kind: "skill", where: "", source: "", name: "" });
 
 type Where = { room: string } | { global: true };
-// The scope the typed Where names: All rooms, or a room by its name in any case; undefined until it names one.
+// The scope the typed Where names: All rooms, or a room by its name, which is unique, exactly or else in any case;
+// undefined until it names one.
 export function draftScope(where: string, rooms: readonly RoomSummary[]): Where | undefined {
-  const text = where.trim().toLowerCase();
-  if (text === "all rooms") return { global: true };
-  const room = rooms.find(each => each.name.toLowerCase() === text);
+  const text = where.trim();
+  if (text.toLowerCase() === "all rooms") return { global: true };
+  const room = rooms.find(each => each.name === text) ?? rooms.find(each => each.name.toLowerCase() === text.toLowerCase());
   return room && { room: room.id };
 }
 

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addonAdded, addonChips, addonDetail, addonKey, addonKind, addonOrder, addonSummary, addonWhere, draftReady, draftScope, emptyDraft, mcpRequest, mcpTarget, packageRequest, runOnChoices, skillRequest } from "./addons.ts";
+import { addonAdded, addonChips, addonDetail, addonKey, addonKind, addonOrder, addonSummary, addonWhere, draftReady, draftScope, emptyDraft, mcpRequest, mcpTarget, packageRequest, runOnChoices, runOnHosts, skillRequest } from "./addons.ts";
 import { listView } from "./settings-list.ts";
 import type { Addon, RoomSummary } from "./contract.gen.ts";
 
@@ -35,10 +35,10 @@ test("the list runs built-ins, then all rooms, then each room by name, each keep
 });
 
 test("the chips pick a kind, or the items turned off", () => {
-  const items: Addon[] = [skill, { ...skill, name: "off", disabled: true }, { kind: "package", name: "tools" }, { kind: "mcp", name: "docs", disabled: true }];
+  const items: Addon[] = [skill, { ...skill, name: "off", disabled: true }, { kind: "package", name: "tools" }, { kind: "mcp", name: "docs" }, { kind: "mcp", name: "on", disabled: false }];
   const view = listView(items, { text: item => item.name, key: addonKey, query: "", chip: addonChips[0], chips: addonChips, folded: new Set() });
   assert.deepEqual(addonChips.map(chip => chip.label), ["All", "Skills", "Pi packages", "MCP servers", "Off"]);
-  assert.deepEqual(view.counts, { all: 4, skill: 2, package: 1, mcp: 1, off: 2 });
+  assert.deepEqual(view.counts, { all: 5, skill: 2, package: 1, mcp: 2, off: 1 });
 });
 
 test("each kind says what it is on one line", () => {
@@ -68,9 +68,23 @@ test("a skill's run-on choices are the registered hosts, then any it names that 
   assert.deepEqual(runOnChoices([], undefined), []);
 });
 
+test("a run-on switch adds its host last, or takes it out, and keeps the others' order", () => {
+  assert.deepEqual(runOnHosts(["desktop", "arch"], "omarchy", true), ["desktop", "arch", "omarchy"]);
+  assert.deepEqual(runOnHosts(["desktop", "arch"], "desktop", false), ["arch"]);
+  assert.deepEqual(runOnHosts(["arch"], "arch", true), ["arch"]);
+  assert.deepEqual(runOnHosts(undefined, "arch", true), ["arch"]);
+  assert.deepEqual(runOnHosts(["arch"], "arch", false), []);
+});
+
 test("Where names All rooms or a room, by its name in any case, and nothing until it does", () => {
   assert.deepEqual(draftScope(" all rooms ", rooms), { global: true });
   assert.deepEqual(draftScope("Docs", rooms), { room: "b" });
+  assert.deepEqual(draftScope(" docs ", rooms), { room: "b" });
+  // Names are unique as stored, so two that differ in case both exist, and the exact one wins.
+  const cased = [room("u", "Docs"), room("l", "docs")];
+  assert.deepEqual(draftScope("docs", cased), { room: "l" });
+  assert.deepEqual(draftScope("Docs", cased), { room: "u" });
+  assert.deepEqual(draftScope("DOCS", cased), { room: "u" });
   assert.equal(draftScope("doc", rooms), undefined);
   assert.equal(draftScope("", rooms), undefined);
 });

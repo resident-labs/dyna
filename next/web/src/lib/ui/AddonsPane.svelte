@@ -2,7 +2,7 @@
   import { onMount, tick, type Snippet } from "svelte";
   import { APIError, call, SignedOut } from "../client.ts";
   import { addonAdded, addonChips, addonDetail, addonKey, addonKind, addonKinds, addonOrder, addonScope, addonSummary, addonWhere, draftReady, draftScope, emptyDraft,
-    mcpRequest, packageRequest, runOnChoices, skillRequest, type AddonDraft } from "../addons.ts";
+    mcpRequest, packageRequest, runOnChoices, runOnHosts, skillRequest, type AddonDraft } from "../addons.ts";
   import { hostLabel } from "../hosts.ts";
   import { confirm } from "../modal.ts";
   import Icon from "./Icon.svelte";
@@ -29,13 +29,15 @@
   let where = $derived(draftScope(draft.where, rooms));
   let counts = $derived(addonSummary(items ?? []));
   const words = (error: unknown) => error instanceof APIError ? error.detail.message : "That did not work. Try again.";
-  const fail = (error: unknown) => { if (error instanceof SignedOut) signedout(); else problem = words(error); };
+  // Whether a call failed for a sign-out, which the app takes over; every other failure is the page's to show.
+  function gone(error: unknown) { if (error instanceof SignedOut) signedout(); return error instanceof SignedOut; }
+  const fail = (error: unknown) => { if (!gone(error)) problem = words(error); };
 
   // Resolves once the list has loaded or failed. The hosts serve only a skill's run-on switches, so without them the page still works.
   function reload() {
     if (admin) void call("host.list", {}).then(list => { hosts = (list.hosts ?? []).map(host => host.name); }, () => {});
     return Promise.all([call("addon.list", {}), call("room.list", {})]).then(([list, known]) => { items = list.items ?? []; rooms = known.rooms ?? []; failed = false; },
-      (error: unknown) => { if (error instanceof SignedOut) signedout(); else if (!items) failed = true; });
+      (error: unknown) => { if (!gone(error) && !items) failed = true; });
   }
   function refresh() { void reload(); }
   // Add is a step in history of its own, so Back leaves the empty form as the back arrow does.
@@ -73,7 +75,12 @@
     if (history.state?.creating) history.back();
     else { creating = false; problem = ""; }
   }
-  function select(key: string, open: boolean) { creating = false; onselect(key, open); }
+  // An item picked while the form is up takes the form's history step, so none is left behind that Back would land on.
+  function select(key: string, open: boolean) {
+    if (creating && history.state?.creating) history.replaceState({ fromList: !!history.state.overList }, "", location.href);
+    creating = false;
+    onselect(key, open);
+  }
   async function add() {
     if (busy || !where || !draftReady(draft, where)) return;
     const form = draft, scope = where;
@@ -99,7 +106,7 @@
     problem = "";
     const ok = await confirm({ title: `Remove ${item.name}?`, action: "Remove", danger: true, failed: words,
       run: () => (item.kind === "skill" ? call("skill.remove", request) : item.kind === "package" ? call("package.remove", request) : call("mcp.remove", request))
-        .catch((error: unknown) => { if (error instanceof SignedOut) signedout(); throw error; }) });
+        .catch((error: unknown) => { gone(error); throw error; }) });
     if (!ok) return;
     onclose();
     await reload();
@@ -140,7 +147,7 @@
     <label class="field">Where<input list="addon-rooms" bind:value={draft.where} disabled={busy} autocomplete="off" spellcheck="false"
       placeholder={`All rooms, or search ${fact(rooms.length, "room", "rooms")}`} />
       <datalist id="addon-rooms"><option value="All rooms"></option>{#each rooms as room (room.id)}<option value={room.name}></option>{/each}</datalist>
-      <span class="help">A room unless every room needs it.</span></label>
+      <span class="help">{draft.where.trim() && !where ? `No room named ${draft.where.trim()}.` : "A room unless every room needs it."}</span></label>
     {#if draft.kind === "mcp"}<label class="field">Name<input class="mono" bind:value={draft.name} disabled={busy} autocomplete="off" spellcheck="false" /></label>{/if}
     <label class="field">{sourceLabel[draft.kind]}<input class="mono" bind:value={draft.source} disabled={busy} autocomplete="off" spellcheck="false" />
       <span class="help">{sourceHint[draft.kind]}</span></label>
@@ -167,10 +174,10 @@
           <label class="set"><span class="name">Root only</span>{@render toggle(`${item.name} root only`, !!item.rootOnly, on => call("addon.set_root_only", { kind: open.kind, name: open.name, room: open.room, rootOnly: on }))}<span class="help">Only the room's root session gets it.</span></label>
         </div>
         {#if choices.length}{@const current = item.hosts ?? []}
-          <div class="section"><strong class="head">Runs on</strong><p class="small muted">The hosts where its commands run, through bash with host. The tool it drives must already be there.</p>
+          <div class="section"><strong class="head">Runs on</strong><p class="small muted">Its commands run on these hosts. The tool it drives must already be installed there. With none on, they run in the box.</p>
             <div class="stack">{#each choices as host (host)}
               <label class="set"><span class="name">{hostLabel(host)}</span>{@render toggle(`Runs on ${hostLabel(host)}`, current.includes(host),
-                on => call("addon.set_hosts", { name: open.name, room: open.room, hosts: on ? [...current, host] : current.filter(each => each !== host) }))}</label>{/each}</div></div>
+                on => call("addon.set_hosts", { name: open.name, room: open.room, hosts: runOnHosts(open.hosts, host, on) }))}</label>{/each}</div></div>
         {/if}
         {#if problem}<p class="problem" role="alert">{problem}</p>{/if}
         <div class="danger-zone"><span class="small muted">Sessions in {item.room ? addonWhere(item, rooms) : "every room"} stop getting it.</span>
@@ -186,13 +193,13 @@
     <span class="fact">· {counts.inRooms.toLocaleString("en")} in {fact(counts.rooms, "room", "rooms")}</span></p><p class="small muted">Rooms with nothing added have no group.</p>{/if}
 {/snippet}
 
-{#snippet action()}{#if admin}<button type="button" class="btn add" onclick={() => void start()}><Icon name="plus" size={16} />Add</button>{/if}{/snippet}
+{#snippet action()}{#if admin}<button type="button" class="btn add" onclick={() => void start()}>Add</button>{/if}{/snippet}
 {#snippet header()}{@render bar("Skills & tools", items?.length, action)}{/snippet}
 
 <ListDetail bar={header} label="Skills & tools" title={creating ? "Add" : item?.name ?? "Not found"} open={creating || (!!items && selected !== undefined)} onselect={select} onclose={close} {list} {detail} {summary} />
 
 <style>
-  .add { gap: 6px; margin-left: auto; }
+  .add { margin-left: auto; }
   .icon { display: grid; flex: none; color: var(--muted); }
   .head { font-size: 14px; }
   .problem { margin: 0; color: var(--danger); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
@@ -207,7 +214,7 @@
   .kinds input { position: absolute; opacity: 0; pointer-events: none; }
   .field { display: grid; gap: 6px; min-width: 0; font-size: 14px; font-weight: 600; }
   .help { color: var(--muted); font-size: 12.5px; font-weight: 400; line-height: 1.35; }
-  .field input { box-sizing: border-box; width: 100%; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 14px; font-weight: 400; }
+  .field input { box-sizing: border-box; width: 100%; height: 34px; padding: 0 10px; border: 1px solid var(--firm); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 14px; font-weight: 400; }
   .field input.mono { font-family: var(--mono); font-size: 13px; }
   .field input:focus { outline: none; border-color: var(--focus); }
   @media (hover: none) { .kinds label { height: 40px; } .field input { height: 40px; } }
