@@ -10,7 +10,7 @@ import type { ExtensionAPI, ExtensionFactory } from "../../src/core/extensions/t
 import type { SessionManager } from "../../src/core/session-manager.ts";
 import { createCodemodeExtension } from "../../src/extensions/codemode/index.ts";
 import type { McpExposure, McpServerEntry } from "../../src/extensions/mcp/config.ts";
-import { createMcpExtension, MCP_SERVERS_SECTION } from "../../src/extensions/mcp/index.ts";
+import { createMcpExtension } from "../../src/extensions/mcp/index.ts";
 import { createMcpToolName } from "../../src/extensions/mcp/tools.ts";
 import { createToolSearchExtension } from "../../src/extensions/tool-search/index.ts";
 import { TOOL_SEARCH_DESCRIPTION } from "../../src/extensions/tool-search/tool.ts";
@@ -216,15 +216,10 @@ describe("AgentSession MCP integration", () => {
 			.flatMap((message) => (message.toolsAdded ?? []).map((tool) => tool.name));
 	}
 
-	/** The `mcp_servers` prompt section as the model currently has it. */
-	function serversSection(harness: Harness): string | null | undefined {
-		let section: string | null | undefined;
-		for (const message of harness.session.messages) {
-			if (message.role === "system" && message.sections && MCP_SERVERS_SECTION in message.sections) {
-				section = message.sections[MCP_SERVERS_SECTION];
-			}
-		}
-		return section;
+	/** The `deferred_tools` section of the head. */
+	function deferredSection(harness: Harness): string | undefined {
+		const head = harness.session.messages.find((message): message is SystemMessage => message.role === "system");
+		return head?.sections?.deferred_tools ?? undefined;
 	}
 
 	function nestedToolNames(harness: Harness): string[] {
@@ -629,19 +624,11 @@ return { docs, sameForAliases: aliases.every((alias) => JSON.stringify(alias) ==
 			},
 			sameForAliases: true,
 		});
-		// The system prompt lists the server with its configured description rather than its instructions.
-		expect(serversSection(harness)).toContain("- mcp__docs (codemode): Search the product docs");
-	});
-
-	it("lists servers by the first line of their instructions without a configured description", async () => {
-		const { harness } = await setup("deferred", undefined, { instructions: "Docs search.\nLong guidance." });
-		harness.setResponses([fauxAssistantMessage("done")]);
-
-		await harness.session.prompt("go");
-
-		const section = serversSection(harness);
-		expect(section).toContain("- mcp__docs (tool_search): Docs search.\n");
-		expect(section).not.toContain("Long guidance");
+		// The system prompt names the server's tools, without its description or instructions.
+		const section = deferredSection(harness);
+		expect(section).toContain("\nmcp__docs__: fail, search, shot\n");
+		expect(section).not.toContain("Search the product docs");
+		expect(section).not.toContain("Always search");
 	});
 
 	it("does not activate codemode when autoEnableCodemode is false", async () => {
@@ -788,9 +775,9 @@ return { docs, sameForAliases: aliases.every((alias) => JSON.stringify(alias) ==
 		return { harness, calls, notifications };
 	}
 
-	it("does not hold the first prompt for codemode servers that are still connecting", async () => {
+	it("holds the first prompt for codemode servers only up to startupWaitMs", async () => {
 		// The server never answers `initialize`.
-		const { harness } = await setupSlow({}, Number.POSITIVE_INFINITY);
+		const { harness } = await setupSlow({}, Number.POSITIVE_INFINITY, 20);
 		harness.setResponses([fauxAssistantMessage("ready")]);
 
 		await harness.session.prompt("start");
@@ -809,29 +796,26 @@ return { docs, sameForAliases: aliases.every((alias) => JSON.stringify(alias) ==
 		expect(description()).toBe(before);
 	});
 
-	it("lists a server before it connects and appends its summary with the next prompt", async () => {
+	it("waits for a codemode server before the first prompt and names its tools in the head", async () => {
 		const { harness } = await setupSlow({ instructions: "Slow docs.\nMore." }, 30);
 		harness.setResponses([fauxAssistantMessage("one"), fauxAssistantMessage("two")]);
 
 		await harness.session.prompt("first");
-		await vi.waitFor(() => expect(harness.session.getCallableToolNames()).toContain("mcp__slow__search"));
 		await harness.session.prompt("second");
 
 		const systemMessages = harness.session.messages.filter(
 			(message): message is SystemMessage => message.role === "system",
 		);
 		expect(systemMessages).toHaveLength(1);
-		expect(systemMessages[0].sections?.[MCP_SERVERS_SECTION]).toContain("- mcp__slow (codemode)\n");
-		const update = harness.session.messages.find(
-			(message) => message.role === "custom" && message.customType === "context_update",
-		);
-		expect(update?.role === "custom" && update.content).toContain("- mcp__slow (codemode): Slow docs.");
-		expect(harness.session.messages.indexOf(update!)).toBeGreaterThan(
-			harness.session.messages.findIndex((message) => message.role === "assistant"),
-		);
+		expect(deferredSection(harness)).toContain("\nmcp__slow__: fail, search, shot\n");
+		expect(
+			harness.session.messages.some(
+				(message) => message.role === "custom" && message.customType === "context_update",
+			),
+		).toBe(false);
 	});
 
-	it("waits for servers with direct tools before listing the servers", async () => {
+	it("names only the tools of a direct server that are not direct", async () => {
 		const { harness } = await setupSlow(
 			{ exposure: "direct", toolExposure: { shot: "codemode" }, instructions: "Slow docs." },
 			30,
@@ -840,16 +824,16 @@ return { docs, sameForAliases: aliases.every((alias) => JSON.stringify(alias) ==
 
 		await harness.session.prompt("start");
 
-		expect(serversSection(harness)).toContain("- mcp__slow (codemode): Slow docs.");
+		expect(deferredSection(harness)).toContain("\nmcp__slow__: shot\n");
 	});
 
-	it("leaves servers with only direct tools out of the servers section", async () => {
+	it("has no deferred tools section for a server with only direct tools", async () => {
 		const { harness } = await setupSlow({ exposure: "direct" }, 0);
 		harness.setResponses([fauxAssistantMessage("ready")]);
 
 		await harness.session.prompt("start");
 
-		expect(serversSection(harness)).toBeUndefined();
+		expect(deferredSection(harness)).toBeUndefined();
 	});
 
 	it("waits for the servers a codemode script names", async () => {
@@ -1182,6 +1166,7 @@ describe("AgentSession MCP tools after resume and reload", () => {
 		sessionManager?: SessionManager,
 		extensionFactories: ExtensionFactory[] = [],
 		initializeDelayMs = 0,
+		startupWaitMs?: number,
 	) {
 		const connected: string[] = [];
 		const servers: McpServerEntry[] = [
@@ -1198,6 +1183,7 @@ describe("AgentSession MCP tools after resume and reload", () => {
 					void pair.server.start();
 					return pair.client;
 				},
+				...(startupWaitMs === undefined ? {} : { startupWaitMs }),
 			}),
 		];
 		let extensions = await createTestExtensionsResult(factories);
@@ -1272,8 +1258,8 @@ describe("AgentSession MCP tools after resume and reload", () => {
 		const first = await setup();
 		await loadDocsSearch(first.harness);
 
-		// The first prompt does not wait for servers without direct tools.
-		const second = await setup(first.harness.sessionManager, [], 200);
+		// The first prompt waits for the server only up to startupWaitMs.
+		const second = await setup(first.harness.sessionManager, [], 200, 20);
 		second.harness.setResponses([fauxAssistantMessage("done")]);
 		await second.harness.session.prompt("go");
 		await vi.waitFor(() =>
