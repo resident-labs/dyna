@@ -1,4 +1,4 @@
-package pi
+package pig
 
 import (
 	"bufio"
@@ -251,7 +251,7 @@ func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contrac
 						continue
 					}
 					tool := clipToolName(harness.Mask(call.Name))
-					target := strings.TrimPrefix(activityLabel(event{ToolName: call.Name, Args: json.RawMessage(call.Args)}), call.Name)
+					target := strings.TrimPrefix(activityLabel(call.Name, json.RawMessage(call.Args)), call.Name)
 					target = strings.TrimSpace(harness.Mask(target))
 					if len(target) > 1024 {
 						target = strings.ToValidUTF8(target[:1024], "")
@@ -338,7 +338,7 @@ func TranscriptFindCalls(r io.Reader, ids map[string]bool) error {
 
 // TranscriptStep keeps the Work tab compatible until the thread replaces it.
 func TranscriptStep(item contract.TranscriptItem) contract.TranscriptStep {
-	label := harness.Mask(activityLabel(event{ToolName: item.Tool, Args: json.RawMessage(item.Arguments)}))
+	label := harness.Mask(activityLabel(item.Tool, json.RawMessage(item.Arguments)))
 	if runes := []rune(label); len(runes) > 80 {
 		label = string(runes[:79]) + "…"
 	}

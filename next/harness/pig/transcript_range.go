@@ -1,4 +1,4 @@
-package pi
+package pig
 
 import (
 	"errors"
