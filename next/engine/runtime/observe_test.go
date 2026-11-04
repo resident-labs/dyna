@@ -176,3 +176,45 @@ func TestRestoreToleratesOfflineHost(t *testing.T) {
 		t.Fatalf("forward=%v started=%v", runner.forward, runner.started)
 	}
 }
+
+// An exec-only host's sample reaches the summary as its CPU, memory and disk figures, and its disk is never low, even at 99% used.
+func TestHostLoadShowsExecOnlyFiguresAndNeverDiskLow(t *testing.T) {
+	b := &Boxes{Store: listStore{}}
+	total := 1000 * box.GiB
+	now := time.Now()
+	b.record("omarchy", true, podman.Load{ExecOnly: true, CPUs: 8, CPUUsed: 2.5, MemBytes: 16 * box.GiB, MemUsed: 4 * box.GiB, DiskBytes: total, DiskUsed: total * 99 / 100}, now)
+	hosts := []contract.HostSummary{{Name: "omarchy", ExecOnly: true}, {Name: "full"}}
+	if err := b.HostLoad(context.Background(), hosts); err != nil {
+		t.Fatal(err)
+	}
+	got := hosts[0]
+	if !got.Reachable || got.CPUs != 8 || got.CPUUsed != 2.5 || got.MemBytes != 16*box.GiB || got.MemUsed != 4*box.GiB || got.DiskBytes != total || got.DiskUsed != total*99/100 || got.DiskLow || len(got.History) != 1 {
+		t.Fatalf("summary %+v", got)
+	}
+	if hosts[1].CPUs != 0 {
+		t.Fatalf("a full host took the figures: %+v", hosts[1])
+	}
+	b.record("omarchy", false, podman.Load{}, now.Add(time.Minute))
+	hosts = []contract.HostSummary{{Name: "omarchy", ExecOnly: true}}
+	if err := b.HostLoad(context.Background(), hosts); err != nil {
+		t.Fatal(err)
+	}
+	if hosts[0].Reachable || hosts[0].CPUs != 8 || hosts[0].LastSeen.IsZero() {
+		t.Fatalf("unreachable keeps its last figures: %+v", hosts[0])
+	}
+}
+
+// An exec-only host's disk stays out of the store's heartbeat, so warnings, eviction and placement never see it.
+func TestReportHeartbeatKeepsExecOnlyDiskOutOfTheStore(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	records := &recordingHeartbeats{}
+	b := &Boxes{HeartbeatStore: records, Pressure: engine.New(st, nil, nil, time.Now)}
+	b.reportHeartbeat(context.Background(), "omarchy", true, podman.Load{ExecOnly: true, DiskBytes: 100, DiskUsed: 99}, time.Time{})
+	if len(records.records) != 1 || records.records[0].free != nil || records.records[0].total != 0 || !records.records[0].ok {
+		t.Fatalf("records %+v", records.records)
+	}
+}

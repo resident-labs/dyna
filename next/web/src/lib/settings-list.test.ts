@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { layoutRows, listKey, listView, visibleRange, type Chip, type Column, type Row } from "./settings-list.ts";
+import { layoutRows, listKey, listView, noResults, visibleRange, type Chip, type Column, type Row } from "./settings-list.ts";
 
 type Room = { id: string; name: string; on: number; group: string };
 const text = (room: Room) => room.name;
@@ -109,4 +109,20 @@ test("PageUp stops at the top, and Enter on a folded group opens it", () => {
   assert.deepEqual(listKey("PageUp", 1, rows, 10), { move: 0 });
   assert.deepEqual(listKey("PageUp", 0, rows, 10), { move: 0 });
   assert.deepEqual(listKey("Enter", 0, rows, 10), { fold: 0 });
+});
+
+test("a page's own filter narrows the list with the search, and the chip counts take it in", () => {
+  const filter = (room: Room) => room.group === "odd";
+  const view = listView(many, { text, key, query: "docs", chip: chips[0], chips, filter, folded: new Set() });
+  const found = many.filter(room => room.name.startsWith("docs") && room.group === "odd");
+  assert.equal(view.shown, found.length);
+  assert.deepEqual(view.counts, { all: found.length, auto: found.filter(room => room.on === 4).length, off: found.filter(room => room.on === 0).length });
+  assert.equal(listView(many, { text, key, query: "", chip: chips[0], filter: () => false, folded: new Set() }).rows.length, 0);
+});
+
+test("no results names the search, the chip and the page's filter that narrowed the list", () => {
+  assert.equal(noResults("profiles", "opus", []), "No profiles match “opus”.");
+  assert.equal(noResults("profiles", "opus", ["In use", "Anthropic"]), "No profiles match “opus” in In use, Anthropic.");
+  assert.equal(noResults("profiles", "", ["Anthropic"]), "No profiles in Anthropic.");
+  assert.equal(noResults("profiles", "", []), "No profiles match the filters.");
 });

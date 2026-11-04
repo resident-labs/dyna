@@ -1,26 +1,25 @@
 # Design taste
 
-The rules that every v2 web screen (`next/web`) follows. Builders check a screenshot against them before a PR goes up. Reviewers, dyna:lead-rewrite and root reject a PR that breaks one. Spec 5.13 sets the layout and the review steps; this file sets the look.
+The rules that every v2 web screen (`next/web`) follows. Builders check a screenshot against them before a PR goes up, and reviewers reject a PR that breaks one. Spec 5.13 sets the layout and the review steps; this file sets the look.
 
 Each rule is one line, imperative and checkable on a screenshot. The tag at the end says where it comes from:
 
 - **[owner]**: an owner decision or room rule (r16, r23, r24).
 - **[root]**: root's review notes, 2026-10-30 to 2026-10-31.
-- **[lead]**: dyna:lead-rewrite's design approvals.
+- **[lead]**: the v2 rewrite lead's design approvals.
 - **[v1]**: v1's web app (`web/src`), the bar v2 must beat.
 - **[T3]**: T3 Code (github.com/pingdotgg/t3code, `apps/web/src/index.css` and `components/ui/`), read in code.
 - **[Discord]**, **[Linear]**: their public apps, from use and memory, not from code.
 
 ## Principles
 
-1. Every change is an obvious, tasteful improvement over v1's matching screen. "Different" is not enough. [owner r23]
+1. Every change is an obvious, tasteful improvement over the screen it replaces. "Different" is not enough. [owner r23]
 2. Calm never means bare. Keep or beat v1's bars, cards, meters and headers. [owner r23]
 3. Color means "look here". Everything else is the text color or the muted color. [owner r16]
 4. Dense like Discord and T3 Code: many rows on one screen, few borders, few badges. [Discord] [T3]
 5. Show real data. Never show an empty card, an empty page or a hollow placeholder. [root]
 6. A thing looks clickable only if it is clickable. [root]
-7. Reuse v1's proven parts (fonts, tokens, meters, the ghostty terminal renderer). Do not reuse v1's architecture. [owner r24]
-8. A line budget never justifies a weaker screen. [owner r23]
+7. A line budget never justifies a weaker screen. [owner r23]
 
 ## Tokens
 
@@ -180,37 +179,11 @@ The Profiles and Accounts half-width screenshots exposed missing numbers and ove
 
 ## Process
 
-### Design panel, before each page or component
-
-1. dyna:lead-rewrite (opus, xhigh effort) draws 2 or 3 designs as rendered mockups in v2's own tokens, one batch per page. Each design cites its reference: T3 Code, Discord, Linear or v1. xhigh effort is for this step only. [owner r23]
-   - Start from screenshots of the live screens, in v1 and v2. [lead]
-   - Draw in v2's own tokens and bundled fonts, never in a generic style. [lead]
-   - Render the mockup, look at it, and fix it before you send it. [lead]
-   - Number each change, and give its reason and its reference. [lead]
-2. Two sonnet judges pick one design each, with a short review. A judge may add a mockup of its changes to the design it picks, but never proposes a new design. If the judges disagree, the lead chooses. [owner r23] [lead]
-3. A terra builder builds the chosen design, with the judges' reviews applied. An owner reaction to a design outranks the vote; the judges then review it for fixes only. [owner r23] [root]
-4. The judges review the built page. Repeat steps 1 to 3 until the judges agree that the page is solid. [owner r23]
-5. The PR attaches the mockups, the votes and the reviews. [root]
-6. Judges read `next/docs/spec.md` first and never reopen its settled owner decisions. [owner r25]
-7. Before a winner merges, its PR attaches side-by-side images of the build on the trial with real data next to each mockup, at the same sizes. The PR lists every deliberate difference from the mockups, each with its reason. One of the design judges then confirms that the build matches. [owner, 2026-10-31]
-8. Every mockup also shows a messy state: 100 or more items, long names and long text, many sessions, and old and failed items. Judges fail a design that only works when the page is tidy. [owner, 2026-10-31]
-
-### Each UI PR
-
-1. Read v1's matching screen and its components first. Say in the PR which v1 parts it keeps and why. [owner r24]
-2. Attach the required side-by-side image: v2's view on the left and the most similar T3 Code page on the right, at the same window size and theme. [spec 5.13]
-3. Also take a screenshot of v1's matching screen at the same size and theme. Discord or Linear images may be added, but they never replace the T3 Code image. [owner r23]
-4. Show v2's screen beside them in the PR, in dark and light when the view has both. [owner r23] [spec 5.13]
-5. Check the screenshot against this file before you ask for review. List any rule that you broke on purpose, and give the reason.
-6. The reviewer and the lead reject the PR unless v2 is clearly better than v1. [owner r23]
-7. Every UI PR includes a 390 px screenshot, and every screen works at that width. [owner, #1461]
-8. Before merge, every next/web PR is also checked on the trial with real data, at 1440x900 and at 390 px, through the read-only trial view (`next/web/trial-view.sh`). The images go in the PR's Dyna record, never on GitHub, because they show real data. Crop or blur anything private first. [owner, 2026-10-31]
-9. Also check the build against that messy state on the trial. [owner, 2026-10-31]
+Spec 5.13 sets how a view change is reviewed. Before asking for review, check the screenshots against this file, and list in the PR any rule broken on purpose, with its reason. Screenshots of real data stay in the PR's Dyna record, never on GitHub; crop or blur anything private first.
 
 ### Adding or changing a rule
 
-- Any reviewer, dyna:lead-rewrite or root may propose a rule.
-- A rule goes into this file when two of them agree. The owner's word alone is enough.
+- A reviewer or root may propose a rule. It goes into this file when root agrees, or on the owner's word alone.
 - The PR that adds a rule cites the case: the PR number or post, and what was wrong.
 - Keep each rule to one imperative line that someone can check on a screenshot.
 - When a new rule conflicts with an old one, the PR removes or changes the old one. This file never holds two rules that disagree.

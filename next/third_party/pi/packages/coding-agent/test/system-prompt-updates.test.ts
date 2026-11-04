@@ -12,6 +12,7 @@ import {
 import { getModel } from "@earendil-works/pi-ai/compat";
 import { Type } from "typebox";
 import { describe, expect, test } from "vitest";
+import { createContextUpdate } from "../src/core/context-updates.ts";
 import { DefaultResourceLoader } from "../src/core/resource-loader.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
@@ -89,6 +90,18 @@ describe("system prompt updates", () => {
 		expect(() => buildSystemPromptSections({ cwd: "/tmp", sections: { preamble: "x" } })).toThrow(
 			"Invalid system prompt section name",
 		);
+	});
+
+	test("renders the tools section in one order whatever order the tools were activated in", () => {
+		const toolSnippets = { read: "Read files", bash: "Run commands", tool_search: "Find tools" };
+		const render = (selectedTools: string[]) => buildSystemPromptSections({ cwd: "/tmp", selectedTools, toolSnippets });
+		const before = render(["read", "tool_search", "bash"]);
+		const after = render(["tool_search", "bash", "read"]);
+
+		expect(after.tools).toBe(before.tools);
+		expect(before.tools).toContain("- bash: Run commands\n- read: Read files\n- tool_search: Find tools");
+		// A load that adds no tool and removes none yields no context update.
+		expect(createContextUpdate(before, after)).toBeUndefined();
 	});
 
 	test("a forced prompt is delivered through context updates without changing the head", async () => {
