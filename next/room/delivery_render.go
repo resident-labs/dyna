@@ -16,10 +16,15 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 	case contract.PostCreated:
 		return b.Text, nil
 	case contract.SessionRestarted:
-		if b.ImageUpdated {
-			return "Your box image was updated. Your files and conversation are kept. Anything installed outside /box is gone.", nil
+		switch {
+		case b.ImageUpdated:
+			return withContinue("Your box restarted on a new image. Files under /box and this conversation are kept; anything installed outside /box is gone.", b.OpenGoal), nil
+		case b.Refreshed:
+			return withContinue("Your box restarted on the current version. Files under /box and this conversation are kept.", b.OpenGoal), nil
+		case b.Stopped:
+			return withContinue("Your box restarted after it stopped. Files under /box and this conversation are kept; any process that was running in it is gone.", b.OpenGoal), nil
 		}
-		return "Your box was replaced. Your conversation is restored. Unpushed work in the old volume is gone.", nil
+		return withContinue("Your box was recreated after it failed. This conversation is restored, but the old volume is gone: files under /box that you did not push are lost.", b.OpenGoal), nil
 	case contract.SessionStarted:
 		var parts []string
 		if b.Goal != "" {
