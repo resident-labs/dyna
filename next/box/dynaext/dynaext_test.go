@@ -308,6 +308,15 @@ func TestASearchLoadsThreeToolsUnlessTheModelSaysMore(t *testing.T) {
 	if got := b.toolResult(t, 1); !strings.Contains(got, "Loaded 3 tools") {
 		t.Fatalf("tool result %s", got)
 	}
+	var schema string
+	for _, tool := range b.model.Requests()[0].Tools {
+		if strings.Contains(string(tool), `"name":"tool_search"`) {
+			schema = string(tool)
+		}
+	}
+	if !strings.Contains(schema, "Defaults to 3.") || strings.Contains(schema, "Defaults to 8") {
+		t.Fatalf("tool_search schema: %s", schema)
+	}
 }
 
 // On a route that takes tool changes mid-conversation, the head after a compaction declares what the session has, so
