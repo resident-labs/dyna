@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -215,6 +216,38 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 		}
 		if open, err := s.HasOpenGoal(ctx, id); err != nil || open != want {
 			t.Fatalf("%s: HasOpenGoal %v: %v", id, open, err)
+		}
+	}
+}
+
+// A refresh restart always wakes, records the open goal read in its own transaction, and a closed session's goal is not open.
+func TestRefreshedNoticeWakesAndRecordsTheGoal(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	_, err = s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+INSERT INTO sessions(id,room,name,parent,profile,state,goal,created_at,closed_at) VALUES('work','r','work',NULL,'p','open','',0,NULL),('idle','r','idle',NULL,'p','open','',0,NULL),('gone','r','gone',NULL,'p','open','',0,1);
+INSERT INTO goals(room,number,session,text,done_when,state,created_at,updated_at) VALUES('r',1,'work','g','d','active',0,0),('r',2,'gone','g','d','active',0,0)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, goal := range map[contract.SessionID]bool{"work": true, "idle": false, "gone": false} {
+		notice := contract.Event{ID: contract.EventID("n-" + id), Room: "r", Time: time.UnixMilli(200), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionRestarted{Session: id, Refreshed: true, ClientID: "refresh:" + string(id)}}
+		for range 2 {
+			if err := s.NoticeRestarted(ctx, notice); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var n, wakes int
+		if err := s.Read().QueryRowContext(ctx, `SELECT count(*), coalesce(sum(wake),0) FROM deliveries WHERE to_id=?`, id).Scan(&n, &wakes); err != nil || n != 1 || wakes != 1 {
+			t.Fatalf("%s: deliveries %d wakes %d: %v", id, n, wakes, err)
+		}
+		var body string
+		if err := s.Read().QueryRowContext(ctx, `SELECT CAST(body AS TEXT) FROM events WHERE client_id=?`, "refresh:"+string(id)).Scan(&body); err != nil || strings.Contains(body, `"openGoal":true`) != goal {
+			t.Fatalf("%s: stored %s: %v", id, body, err)
 		}
 	}
 }

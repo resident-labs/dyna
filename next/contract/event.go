@@ -161,6 +161,8 @@ type SessionRestarted struct {
 	ImageUpdated bool `json:"imageUpdated,omitempty"`
 	// Stopped marks the same container started again after it stopped, as after a host reboot or a crash.
 	Stopped bool `json:"stopped,omitempty"`
+	// Refreshed marks a box the session asked to restart on the current binary. That notice always wakes.
+	Refreshed bool `json:"refreshed,omitempty"`
 	// OpenGoal is whether the session held an open goal when the engine wrote the notice. The notice then tells it to continue,
 	// and wakes it.
 	OpenGoal bool `json:"openGoal,omitempty"`

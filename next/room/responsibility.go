@@ -37,11 +37,6 @@ func withContinue(facts string, openGoal bool) string {
 	return facts + " Continue the work you were doing: check `git status` and your goal, reinstall anything you need, and keep going until the goal is done or you are blocked. Don't end your turn just to report progress."
 }
 
-// BoxRestartedNotice tells a session that asked to restart its own box that it has.
-func BoxRestartedNotice(openGoal bool) string {
-	return withContinue("Your box restarted on the current version. Files under /box and this conversation are kept.", openGoal)
-}
-
 // BoxUpdateNotice tells a session what holds its box on an old binary. It is empty when nothing outlasts the turn: the box then
 // stops as the turn ends, before anything could read this. A crew's run ends with its turn, so it counts as that turn.
 func BoxUpdateNotice(held []contract.Responsibility) string {

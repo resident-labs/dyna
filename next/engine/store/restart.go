@@ -77,8 +77,8 @@ func (s *Store) noticeSent(ctx context.Context, tx *sql.Tx, notice contract.Even
 	return sent, err
 }
 
-// openGoalSQL asks whether a session holds a goal that is not done.
-const openGoalSQL = `SELECT EXISTS (SELECT 1 FROM goals WHERE session=? AND state='active')`
+// openGoalSQL asks whether an open session holds a goal that is not done.
+const openGoalSQL = `SELECT EXISTS (SELECT 1 FROM goals g JOIN sessions s ON s.id=g.session WHERE g.session=? AND g.state='active' AND s.closed_at IS NULL)`
 
 // HasOpenGoal says whether a session holds a goal that is not done.
 func (s *Store) HasOpenGoal(ctx context.Context, id contract.SessionID) (open bool, err error) {
@@ -109,5 +109,5 @@ func (s *Store) restartNotice(ctx context.Context, tx *sql.Tx, notice contract.E
 	if err != nil {
 		return err
 	}
-	return s.InsertDelivery(ctx, tx, seq, body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: body.Session}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: body.OpenGoal})
+	return s.InsertDelivery(ctx, tx, seq, body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: body.Session}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: body.OpenGoal || body.Refreshed})
 }

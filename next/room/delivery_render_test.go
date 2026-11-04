@@ -8,14 +8,14 @@ import (
 
 const wantContinue = "Continue the work you were doing: check `git status` and your goal, reinstall anything you need, and keep going until the goal is done or you are blocked. Don't end your turn just to report progress."
 
-// The session-refresh notice is chosen by whether the session holds an open goal, and says the same facts either way.
-func TestBoxRestartedNotice(t *testing.T) {
+// The refresh notice is chosen by the typed open-goal state, and says the same facts either way.
+func TestRefreshedNotice(t *testing.T) {
 	const facts = "Your box restarted on the current version. Files under /box and this conversation are kept."
-	if got := BoxRestartedNotice(false); got != facts {
-		t.Errorf("no goal: %q", got)
-	}
-	if got := BoxRestartedNotice(true); got != facts+" "+wantContinue {
-		t.Errorf("open goal: %q", got)
+	for goal, want := range map[bool]string{false: facts, true: facts + " " + wantContinue} {
+		got, err := RenderDelivery(contract.SessionRestarted{Refreshed: true, OpenGoal: goal})
+		if err != nil || got != want {
+			t.Errorf("goal %v: %q %v", goal, got, err)
+		}
 	}
 }
 
