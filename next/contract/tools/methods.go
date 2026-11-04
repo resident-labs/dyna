@@ -140,7 +140,7 @@ var methodTable = []MethodEntry{
 		act("op", "withdraw", typ[contract.OpWithdrawRequest](), "Withdraw your pending operation by id.", "op withdraw"),
 	),
 	method(contract.MethodPackageAdd, contract.ScopeAdmin, UserAccess,
-		act("package", "add", typ[contract.PackageAddRequest](), "Add a Pi package from an npm, git or URL source, pinned to one version now. It lands in your room; global needs the owner's approval. It reaches a session at its next box start.", "package add"),
+		act("package", "add", typ[contract.PackageAddRequest](), "Add a Pi package from an npm, git or URL source, pinned to one version now. Its extensions (which run on Node), skills and prompts load in every session and crew worker of the room, and your own tools win a name clash. It lands in your room; global needs the owner's approval. It reaches a session at its next box start; one that fails to install or load is left out and the session's notice names it.", "package add"),
 	),
 	method(contract.MethodPackageList, contract.ScopeRead, UserAccess,
 		act("package", "list", typ[contract.AddonListRequest](), "List the Pi packages added globally and to room.", "package list"),
