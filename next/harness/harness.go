@@ -10,6 +10,10 @@ import (
 // ErrRefused marks a command the agent program answered with a refusal, as opposed to a broken connection to it.
 var ErrRefused = errors.New("refused by the agent program")
 
+// ErrNoTurn is what Steer and FollowUp return once the harness's run has ended: no turn is running to take the input.
+// The runner forgets the input, and the engine gives it to the next turn.
+var ErrNoTurn = errors.New("no turn is running to take the input")
+
 // ModelTransfer reports how TransferModel ended. Path is Pi's: unchanged, switched, compacted, boundary or aborted.
 type ModelTransfer struct {
 	Path         string
@@ -46,6 +50,9 @@ type Harness interface {
 	Recover(contract.TurnID, []contract.TurnInput) (contract.TurnEnded, bool, error)
 	Steer(context.Context, contract.TurnInput) error
 	FollowUp(context.Context, contract.TurnInput) error
+	// ClearQueue drops the inputs the agent program still holds queued. The runner calls it once a run has ended, so an
+	// input no request read reaches the model only in the turn the engine gives it to next.
+	ClearQueue(context.Context) error
 	Abort(context.Context) error
 	// Delivered reports only IDs present in the persisted session.
 	Delivered(context.Context, contract.DeliverySeq) (bool, error)

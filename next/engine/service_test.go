@@ -323,6 +323,106 @@ func TestFailedTurnReturnsInputsWithoutWaking(t *testing.T) {
 	}
 }
 
+// A steer that reached the box or Pi after the turn's last model request began was never read. The turn's end must not mark
+// it read: it starts the next turn, once, and a steer the model read starts none.
+func TestSteerNoRequestReadStartsTheNextTurn(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		outcome  contract.TurnOutcome
+		cause    contract.FailureCause
+		done     bool // the box reported the steer done: Pi's session file holds it
+		unread   bool // the box named the steer in unread: its files were still on the way
+		state    string
+		wake     bool
+		nextTurn bool
+	}{
+		{"never read", contract.TurnCompleted, "", false, false, "pending", true, true},
+		{"read", contract.TurnCompleted, "", true, false, "read", true, false},
+		{"files on the way", contract.TurnCompleted, "", false, true, "pending", true, true},
+		{"stopped", contract.TurnStopped, "", false, false, "pending", false, false},
+		{"failed", contract.TurnFailed, contract.CauseModelFailed, false, false, "pending", false, false},
+		{"not started", contract.TurnStopped, contract.CauseNotStarted, false, false, "pending", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, room, session, ctx := setup(t)
+			caller := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+			channelCtx, cancel := context.WithCancel(ctx)
+			channel, problem := testChannel(t, s, channelCtx, caller)
+			if problem != nil {
+				t.Fatal(problem)
+			}
+			start := (<-channel).Body.(contract.TurnStart)
+			if _, problem := s.DeliveryDone(ctx, caller, contract.DeliveryDoneRequest{Delivery: start.Inputs[0].Delivery}); problem != nil {
+				t.Fatal(problem)
+			}
+			if _, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: room, Text: "late", Mentions: []string{"worker"}}); problem != nil {
+				t.Fatal(problem)
+			}
+			steer := (<-channel).Body.(contract.TurnSteer)
+			cancel()
+			for range channel {
+			}
+			if tc.done {
+				if _, problem := s.DeliveryDone(ctx, caller, contract.DeliveryDoneRequest{Delivery: steer.Input.Delivery}); problem != nil {
+					t.Fatal(problem)
+				}
+			}
+			output := contract.TurnOutputRequest{Turn: start.Turn, Outcome: tc.outcome, Cause: tc.cause, Final: "about something else"}
+			if tc.unread {
+				output.Unread = []contract.DeliverySeq{steer.Input.Delivery}
+			}
+			if _, problem := s.TurnOutput(ctx, caller, output); problem != nil {
+				t.Fatal(problem)
+			}
+			var state string
+			var wake bool
+			if err := s.store.Read().QueryRowContext(ctx, "SELECT state,wake FROM deliveries WHERE to_id=? AND seq=?", session, steer.Input.Delivery).Scan(&state, &wake); err != nil {
+				t.Fatal(err)
+			}
+			if state != tc.state || wake != tc.wake {
+				t.Fatalf("steer state=%s wake=%v, want %s %v", state, wake, tc.state, tc.wake)
+			}
+			if state == "pending" {
+				// A done that comes after the turn ended finds nothing to mark, so the next turn still has the steer, and the
+				// box, finding it in Pi's session file, gives Pi nothing twice.
+				if _, problem := s.DeliveryDone(ctx, caller, contract.DeliveryDoneRequest{Delivery: steer.Input.Delivery}); problem == nil {
+					t.Fatal("late done marked a pending delivery")
+				}
+			}
+			event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.TurnStarted{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			turn, inputs, _, err := s.store.Dispatch(ctx, session, "next", event, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !tc.nextTurn {
+				if turn != "" {
+					t.Fatalf("extra turn %q with %+v", turn, inputs)
+				}
+				return
+			}
+			if turn != "next" || len(inputs) != 1 || inputs[0].Seq != steer.Input.Delivery || inputs[0].Queue != nil {
+				t.Fatalf("next turn=%q inputs=%+v", turn, inputs)
+			}
+			if _, problem := s.DeliveryDone(ctx, caller, contract.DeliveryDoneRequest{Delivery: steer.Input.Delivery}); problem != nil {
+				t.Fatal(problem)
+			}
+			if _, problem := s.TurnOutput(ctx, caller, contract.TurnOutputRequest{Turn: turn, Outcome: contract.TurnCompleted, Final: "answered"}); problem != nil {
+				t.Fatal(problem)
+			}
+			event, err = s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.TurnStarted{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if turn, inputs, _, err := s.store.Dispatch(ctx, session, "again", event, false); err != nil || turn != "" {
+				t.Fatalf("a third turn: %q %+v %v", turn, inputs, err)
+			}
+		})
+	}
+}
+
 func TestPostAcrossRooms(t *testing.T) {
 	s, source, _, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}

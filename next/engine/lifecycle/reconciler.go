@@ -14,6 +14,9 @@ import (
 
 const boxDisconnectedReason = "box disconnected"
 
+// containerStoppedReason is the reason of a box whose container was found stopped after it was lost.
+const containerStoppedReason = "container stopped"
+
 type eventFunc func(contract.RoomID, contract.Principal, contract.EventBody) (contract.Event, error)
 
 type activeStep struct {
@@ -277,7 +280,11 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 				return err
 			}
 		} else {
-			next.State, next.Reason = contract.BoxStarting, ""
+			// The reason a stopped container was found stopped stays through the start, which tells the session.
+			next.State = contract.BoxStarting
+			if b.Reason != containerStoppedReason {
+				next.Reason = ""
+			}
 		}
 		if next.State == b.State && next.Reason == b.Reason {
 			continue

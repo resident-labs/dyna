@@ -388,9 +388,10 @@ func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal,
 	return contract.SessionRestartResponse{}, nil
 }
 
-// SessionRefresh marks running boxes stale, so the rule for an old binary applies to them whatever they run. A box that is not
-// running needs nothing, since it starts fresh. The mark lasts until a new box agent says hello. A session may mark itself by
-// name, and it then comes back on its own (BoxStopped), since it might otherwise wait for a message that never comes.
+// SessionRefresh marks running and stopped boxes stale, so the rule for an old binary applies to them whatever they run. A
+// stopped box stays asleep, and its next start, by an input, is the first on the new version; the mark lasts until a new box agent
+// says hello. A running box comes back on its own once its turn ends (BoxStopped), whoever asked, since its session might
+// otherwise wait for a message that never comes.
 func (s *Service) SessionRefresh(ctx context.Context, caller contract.Principal, req contract.SessionRefreshRequest) (contract.SessionRefreshResponse, *contract.Error) {
 	response := contract.SessionRefreshResponse{Marked: []contract.SessionID{}}
 	if (req.Session == "") == (req.Room == "") {
@@ -434,7 +435,12 @@ func (s *Service) SessionRefresh(ctx context.Context, caller contract.Principal,
 	if err != nil {
 		return response, failure(err)
 	}
-	for _, target := range running {
+	asleep, err := s.store.StoppedSessions(ctx, roomID)
+	if err != nil {
+		return response, failure(err)
+	}
+	for i, target := range append(running, asleep...) {
+		wake := i < len(running)
 		if req.Session != "" && target != req.Session || !self && !tree.CanManage(caller, target) {
 			continue
 		}
@@ -449,7 +455,7 @@ func (s *Service) SessionRefresh(ctx context.Context, caller contract.Principal,
 			}
 			return response, problem
 		}
-		handle.MarkRefresh(mark, self)
+		handle.MarkRefresh(mark, wake)
 		if channel := handle.Channel(); channel != nil {
 			channel.Wake()
 		}
@@ -460,7 +466,7 @@ func (s *Service) SessionRefresh(ctx context.Context, caller contract.Principal,
 	return response, nil
 }
 
-// BoxStopped starts a box that asked to restart itself straight back up. Its wake waits for the stop because Dispatch steers a
+// BoxStopped starts a box marked to refresh straight back up. Its wake waits for the stop because Dispatch steers a
 // wake into an open turn, so an earlier one would be read on the old binary and leave nothing to start the box. Held past its
 // turn, the box then needs nothing different. It carries an update notice's ID, so it goes once per mark, however often the box
 // stops before it says hello, and a close does not pass it to the parent.
@@ -478,9 +484,9 @@ func (s *Service) BoxStopped(ctx context.Context, id contract.SessionID) {
 		log.Printf("session %s: box restart: %v", id, err)
 		return
 	}
-	notice, err := s.engineEvent(session.Room, contract.SessionNotice{Session: id, Text: room.BoxRestartedNotice, ClientID: store.BoxUpdateNoticeID(session.Box, "restarted:"+mark)})
+	notice, err := s.engineEvent(session.Room, contract.SessionRestarted{Session: id, Refreshed: true, ClientID: store.BoxUpdateNoticeID(session.Box, "restarted:"+mark)})
 	if err == nil {
-		err = s.store.WakeWithNotice(ctx, notice, id)
+		err = s.store.NoticeRestarted(ctx, notice)
 	}
 	if err != nil {
 		log.Printf("session %s: box restart: %v", id, err)
