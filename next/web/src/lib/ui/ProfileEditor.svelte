@@ -1,9 +1,17 @@
 <script lang="ts">
-  import type { ModelProvider, ThinkingLevel } from "../contract.gen.ts";
-  import { replacements, sessionCount, type ProfileModel, type ProfileSummary } from "../profiles.ts";
+  import { onMount } from "svelte";
+  import type { ThinkingLevel } from "../contract.gen.ts";
+  import { providers, replacements, sessionCount, type ProfileModel, type ProfileSummary } from "../profiles.ts";
   import Modal from "./Modal.svelte";
-  let { profile, profiles, models, isNew, busy, error, save, cancel, remove }: { profile: ProfileSummary; profiles: ProfileSummary[]; models: ProfileModel[]; isNew: boolean; busy: boolean; error: string; save: (profile: ProfileSummary) => void; cancel: () => void; remove: (replacement?: string) => void } = $props();
+  // A profile's detail on Settings > Profiles (spec 5.13): its fields with each explanation once, Save, and Remove, which
+  // first asks where the sessions of a profile in use go. note is what the last save said, until the next edit.
+  let { profile, profiles, models, isNew, busy, error, note, save, remove }: {
+    profile: ProfileSummary; profiles: ProfileSummary[]; models: ProfileModel[]; isNew: boolean; busy: boolean; error: string; note: string;
+    save: (profile: ProfileSummary) => void; remove: (replacement?: string) => void;
+  } = $props();
+  // svelte-ignore state_referenced_locally: the parent keys the editor by profile, so a draft starts once per profile.
   let draft = $state({ ...profile });
+  let edited = $state(false);
   // Removing a profile in use first asks where its sessions go.
   let moving = $state(false), target = $state("");
   let others = $derived(replacements(profiles, profile.name));
@@ -12,46 +20,77 @@
     target = others[0]?.name ?? "";
     moving = true;
   }
-  let compactText = $state((profile.compactTokens ?? 0).toLocaleString(undefined, { numberingSystem: "latn" }));
-  const providers: Record<ModelProvider, string> = { anthropic: "Anthropic", openai: "OpenAI-compatible" };
+  const digits = (text: string) => Number(text.replace(/[^0-9]/g, ""));
+  const grouped = (n: number | undefined) => n ? n.toLocaleString("en") : "";
+  // svelte-ignore state_referenced_locally
+  let compactText = $state(grouped(profile.compactTokens)), limitText = $state(grouped(profile.maxConcurrent));
   const ratings = [
-    { key: "taste", name: "Taste", help: "choosing the solution" },
-    { key: "diagnostics", name: "Diagnostics", help: "finding what is wrong, with few false positives" },
-    { key: "intelligence", name: "Intelligence", help: "hard work with many steps" },
-    { key: "cost", name: "Thrift", help: "higher is cheaper" },
+    { key: "taste", name: "Taste", help: "Choosing the solution." },
+    { key: "diagnostics", name: "Diagnostics", help: "Finding what is wrong, with few false positives." },
+    { key: "intelligence", name: "Intelligence", help: "Hard work with many steps." },
+    { key: "cost", name: "Thrift", help: "Higher is cheaper." },
   ] as const;
   const levels: { value: ThinkingLevel; label: string }[] = [
     { value: "off", label: "Off" }, { value: "minimal", label: "Minimal" }, { value: "low", label: "Low" },
     { value: "medium", label: "Medium" }, { value: "high", label: "High" }, { value: "xhigh", label: "Very high" },
   ];
+  type Rated = (typeof ratings)[number]["key"];
+  // A rating is one slider: the arrows step it, Home and End go to 1 and 10, and Backspace or Delete clears it.
+  function rate(event: KeyboardEvent, key: Rated) {
+    const now = draft[key];
+    const next = ({ ArrowRight: now + 1, ArrowUp: now + 1, ArrowLeft: now - 1, ArrowDown: now - 1, Home: 1, End: 10, Backspace: 0, Delete: 0 } as Record<string, number>)[event.key];
+    if (next === undefined) return;
+    event.preventDefault();
+    draft[key] = Math.max(0, Math.min(10, next));
+    edited = true;
+  }
+  const models_id = $props.id();
+  // A new profile starts at its name.
+  let nameInput: HTMLInputElement | undefined = $state();
+  onMount(() => nameInput?.focus());
 </script>
 
-<div class="editor-container"><div class="editor">
-  {#if isNew}<label class="field"><span>Name</span><input bind:value={draft.name} autocomplete="off" /></label>{/if}
-  <label class="field"><span>Provider</span><select bind:value={draft.provider}>{#each Object.entries(providers) as [value, label]}<option {value}>{label}</option>{/each}</select></label>
-  <label class="field"><span>Model ID</span><input list="profile-models" bind:value={draft.model} autocomplete="off" oninput={() => { const known = models.find(m => m.id === draft.model.trim()); if (known) draft.provider = known.provider; }} /></label>
-  <datalist id="profile-models">{#each models as model (model.id)}<option value={model.id}></option>{/each}</datalist>
-  <label class="field"><span>Thinking</span><select bind:value={draft.thinking}>{#each levels as level}<option value={level.value}>{level.label}</option>{/each}</select></label>
-  <div class="field ratings"><span>Ratings</span><div>
-    {#each ratings as item}
+<!-- svelte-ignore a11y_no_static_element_interactions: any edit hides what the last save said. -->
+<div class="editor" oninput={() => { edited = true; }}>
+  {#if isNew}<label class="field"><span class="label">Name</span><input bind:this={nameInput} bind:value={draft.name} autocomplete="off" spellcheck="false" /></label>
+  {:else}<p class="small muted">{profile.inUse ? `${sessionCount(profile.inUse)} ${profile.inUse === 1 ? "uses" : "use"} it.` : "No session uses it."}</p>{/if}
+  <label class="field"><span class="label">Model</span><input class="mono" list={`${models_id}-models`} bind:value={draft.model} autocomplete="off" spellcheck="false"
+    oninput={() => { const known = models.find(model => model.id === draft.model.trim()); if (known) draft.provider = known.provider; }} /></label>
+  <datalist id={`${models_id}-models`}>{#each models as model (model.id)}<option value={model.id}></option>{/each}</datalist>
+  <label class="field"><span class="label">Provider</span><select bind:value={draft.provider}>{#each Object.entries(providers) as [value, label] (value)}<option {value}>{label}</option>{/each}</select></label>
+  <label class="field"><span class="label">Thinking</span><select bind:value={draft.thinking}>{#each levels as level (level.value)}<option value={level.value}>{level.label}</option>{/each}</select></label>
+  <div class="field"><span class="label">Ratings</span><p class="small muted">1 to 10, higher is better. Agents read the ratings and the notes when they choose a profile.</p>
+    {#each ratings as item (item.key)}
       <div class="rating">
         <span class="rating-name">{item.name}</span>
-        <div class="steps">
-          {#each Array.from({ length: 10 }, (_, i) => i + 1) as value}
-            <button type="button" class:filled={value <= draft[item.key]} aria-label={`${item.name}: ${value}`} aria-pressed={value === draft[item.key]} onclick={() => draft[item.key] = value}
-              onkeydown={(event) => { if (event.key === "Backspace" || event.key === "Delete") { event.preventDefault(); draft[item.key] = 0; } else if (event.key === "ArrowRight" || event.key === "ArrowUp") { event.preventDefault(); draft[item.key] = Math.min(10, draft[item.key] + 1); } else if (event.key === "ArrowLeft" || event.key === "ArrowDown") { event.preventDefault(); draft[item.key] = Math.max(0, draft[item.key] - 1); } }}>{value}</button>
+        <div class="steps" role="slider" tabindex="0" aria-label={item.name} aria-valuemin={0} aria-valuemax={10} aria-valuenow={draft[item.key]}
+          aria-valuetext={draft[item.key] ? String(draft[item.key]) : "Not rated"} onkeydown={event => rate(event, item.key)}>
+          {#each Array.from({ length: 10 }, (_, i) => i + 1) as value (value)}
+            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions: the slider takes the keys. -->
+            <span class="step" class:on={value <= draft[item.key]} title={value === draft[item.key] ? "Clear" : String(value)}
+              onclick={() => { draft[item.key] = value === draft[item.key] ? 0 : value; edited = true; }}></span>
           {/each}
         </div>
-        <span class="rating-value">{#if draft[item.key]}<button type="button" aria-label={`Clear ${item.name} rating`} onclick={() => draft[item.key] = 0}>Clear</button>{:else}Not rated{/if}</span><span class="help">{item.help}</span>
+        <span class="rating-value">{draft[item.key] || "–"}</span>
+        <span class="help">{item.help}</span>
       </div>
     {/each}
-    <p class="help">1 to 10, higher is better. Agents read the ratings and the notes when they choose a profile.</p>
-  </div></div>
-  <label class="field"><span>Notes</span><textarea bind:value={draft.description} rows="3"></textarea></label>
-  <label class="field"><span>Compact at</span><div><input class="numeric" inputmode="numeric" value={compactText} oninput={(event) => { compactText = event.currentTarget.value; draft.compactTokens = Number(compactText.replace(/[^0-9]/g, "")); }} onblur={() => compactText = (draft.compactTokens ?? 0).toLocaleString(undefined, { numberingSystem: "latn" })} /> <span class="help">tokens of context; 0 means Pi's default</span></div></label>
-  {#if error}<p role="alert" class="help">{error}</p>{/if}
-  <div class="actions"><button class="btn fill save" type="button" disabled={busy || !draft.name.trim() || !draft.model.trim()} onclick={() => save(draft)}>Save</button><button class="btn" type="button" disabled={busy} onclick={cancel}>Cancel</button>{#if !isNew}<button class="btn danger remove" type="button" aria-haspopup={profile.inUse ? "dialog" : undefined} disabled={busy} onclick={askToRemove}>Remove</button>{/if}</div>
-</div></div>
+  </div>
+  <label class="field"><span class="label">Notes</span><textarea bind:value={draft.description} rows="3"></textarea></label>
+  <label class="field"><span class="label">At most at once</span><input class="short" inputmode="numeric" placeholder="No limit" value={limitText}
+    oninput={event => { limitText = event.currentTarget.value; draft.maxConcurrent = digits(limitText); }} onblur={() => { limitText = grouped(draft.maxConcurrent); }} />
+    <span class="help">Workflow workers on this profile at the same time. Empty is no limit.</span></label>
+  <label class="field switch"><span class="label">Images</span><input type="checkbox" role="switch" checked={draft.images ?? true} onchange={event => { draft.images = event.currentTarget.checked; }} />
+    <span class="help">Whether the model takes images. Off sends it text only.</span></label>
+  <label class="field"><span class="label">Compact at</span><input class="short" inputmode="numeric" placeholder="Pi's default" value={compactText}
+    oninput={event => { compactText = event.currentTarget.value; draft.compactTokens = digits(compactText); }} onblur={() => { compactText = grouped(draft.compactTokens); }} />
+    <span class="help">Tokens of context before the session compacts.</span></label>
+  {#if error}<p role="alert" class="problem">{error}</p>{/if}
+  <div class="actions"><button class="btn fill" type="button" disabled={busy || !draft.name.trim() || !draft.model.trim()} onclick={() => { edited = false; save(draft); }}>{isNew ? "Create" : "Save"}</button>
+    <span class="small muted" role="status">{edited ? "" : note}</span></div>
+  {#if !isNew}<div class="removal">{#if profile.inUse}<span class="small muted">Its sessions move to a profile you pick.</span>{/if}
+    <button class="btn danger" type="button" aria-haspopup={profile.inUse ? "dialog" : undefined} disabled={busy} onclick={askToRemove}>Remove</button></div>{/if}
+</div>
 {#if moving}
   <Modal title={`Remove ${profile.name}?`} fit {busy} initial="[data-cancel]" onclose={() => { moving = false; }}>
     {#if others.length}
@@ -66,43 +105,30 @@
 {/if}
 
 <style>
-  .editor-container { container-type: inline-size; }
-  .editor { padding: 16px 5%; border-top: 1px solid var(--line); display: grid; gap: 12px; }
-  .field { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; align-items: baseline; color: var(--muted); }
-  input, select, textarea { box-sizing: border-box; width: 100%; max-width: 260px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; padding: 8px 10px; }
-  textarea { max-width: 440px; resize: none; }
-  .numeric { width: 110px; }
-  .rating { display: grid; grid-template-columns: 100px 220px 65px minmax(0, 1fr); align-items: center; gap: 10px; color: var(--text); font-size: 12.5px; margin-bottom: 5px; }
-  .steps { display: flex; gap: 3px; }
-  .steps button { flex: 1; height: 16px; min-width: 0; border: 1px solid var(--line); border-radius: 4px; background: var(--selected); color: var(--muted); padding: 0; cursor: pointer; }
-  .steps button.filled { background: var(--focus); border-color: var(--focus); color: var(--bg); }
-  .rating-value { color: var(--muted); }
-  .rating-value button { border: 1px solid var(--firm); border-radius: 5px; padding: 3px 8px; background: none; color: var(--text); font: inherit; cursor: pointer; }
-  .help { color: var(--muted); font-size: 12.5px; }
-  p.help { margin: 8px 0 0; }
-  .actions { display: flex; gap: 12px; }
-  .actions button.remove { margin-left: auto; }
+  .editor { display: grid; gap: 18px; }
+  .field { display: grid; gap: 6px; min-width: 0; }
+  .label { font-size: 14px; font-weight: 600; }
+  .field.switch { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+  .field.switch .help { grid-column: 1 / -1; }
+  input:not([role="switch"]), select, textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 14px; padding: 7px 10px; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--focus); }
+  input.mono { font-family: var(--mono); font-size: 13px; }
+  .short { max-width: 160px; }
+  textarea { resize: vertical; }
+  .help { color: var(--muted); font-size: 12.5px; line-height: 1.35; }
+  .rating { display: grid; grid-template-columns: 96px minmax(0, 1fr) 24px; gap: 2px 10px; align-items: center; font-size: 13.5px; }
+  .rating > .help { grid-column: 1 / -1; }
+  .steps { display: flex; gap: 3px; padding: 2px; border-radius: 6px; cursor: pointer; }
+  .steps:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+  .step { flex: 1; height: 16px; border: 1px solid var(--line); border-radius: 4px; background: var(--selected); }
+  .step.on { background: var(--focus); border-color: var(--focus); }
+  .rating-value { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+  .actions { display: flex; align-items: center; gap: 12px; }
+  .removal { display: flex; align-items: center; gap: 12px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .removal button { margin-left: auto; }
+  .problem { margin: 0; color: var(--danger); font-size: 13px; font-weight: 500; }
   .move { display: grid; gap: 8px; color: var(--muted); }
   .move select { max-width: 100%; }
-  .problem { margin: 12px 0 0; color: var(--danger); font-size: 13px; }
   p { margin: 0; }
-  .actions button:disabled { opacity: .45; }
-  @container (max-width: 479px) {
-    .numeric + .help { display: block; margin-top: 6px; }
-  }
-  @container (max-width: 900px) {
-    .rating { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-bottom: 16px; }
-    .rating-name { grid-column: 1; grid-row: 1; }
-    .rating-value { grid-column: 2; grid-row: 1; }
-    .rating > .help { grid-column: 1 / -1; grid-row: 2; }
-    .steps { grid-column: 1 / -1; grid-row: 3; }
-    .steps button { height: 40px; }
-  }
-  @container (max-width: 640px) {
-    .editor { padding: 16px 12px; }
-    .actions { flex-wrap: wrap; }
-    .actions button.remove { flex-basis: 100%; }
-    .field { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-    input:not(.numeric), select, textarea { max-width: 100%; }
-  }
+  @media (hover: none) { .step { height: 28px; } }
 </style>
