@@ -105,3 +105,27 @@ func TestHostListExecOnlyAt99PercentIsNeitherLowNorPlaceable(t *testing.T) {
 		}
 	}
 }
+
+// host.list reports the rooms a host serves, as host.set_limits stored them, so Settings > Hosts can show and change
+// them; a host with no limit reports none, which means every room.
+func TestHostListReportsTheRoomsAHostServes(t *testing.T) {
+	s, room, _, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	served := func() []contract.RoomID {
+		t.Helper()
+		list, problem := s.HostList(ctx, owner, contract.HostListRequest{})
+		if problem != nil || len(list.Hosts) != 2 {
+			t.Fatalf("hosts: %+v %v", list, problem)
+		}
+		return list.Hosts[1].Rooms
+	}
+	if got := served(); len(got) != 0 {
+		t.Fatalf("no limit: %v", got)
+	}
+	if _, problem := s.HostSetLimits(ctx, owner, contract.HostSetLimitsRequest{Host: "host", Rooms: []contract.RoomID{room}}); problem != nil {
+		t.Fatal(problem)
+	}
+	if got := served(); len(got) != 1 || got[0] != room {
+		t.Fatalf("limited: %v", got)
+	}
+}
