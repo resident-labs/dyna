@@ -1058,9 +1058,9 @@ type SaveDiff struct {
 // DiffSavedRequest is the box's one report of that step. File is empty when nothing was unpushed or nothing was saved, and Error
 // says why not in the second case.
 type DiffSavedRequest struct {
-	File    string `json:"file,omitempty"` // as the box sees it, under /box/shared
-	Commits int    `json:"commits"`        // unpushed commits in the file
-	Files   int    `json:"files"`          // files its diffs change
+	File    string `json:"file,omitempty"`   // as the box sees it, under /box/shared
+	Commits int    `json:"commits"`          // unpushed commits in the file
+	Files   int    `json:"files"`            // files its diffs change
 	Capped  bool   `json:"capped,omitempty"` // a section was over the size cap and holds the commit list and stat only
 	Error   string `json:"error,omitempty"`
 }
