@@ -237,6 +237,7 @@ func (c *Crew) SetPromptSections(context.Context, []contract.ContextSection) err
 // A script takes no input once it runs. The turn's final reply still answers whoever steered it.
 func (c *Crew) Steer(context.Context, contract.TurnInput) error    { return nil }
 func (c *Crew) FollowUp(context.Context, contract.TurnInput) error { return nil }
+func (c *Crew) ClearQueue(context.Context) error                   { return nil }
 
 // Start runs the script as the session's turn and returns when it settles. A script that throws fails the run; a failed
 // worker only fails its step, which the script may handle.

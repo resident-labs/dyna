@@ -353,6 +353,11 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 					return err
 				}
 			}
+			// A steer the box never reported done reached no model request: it came after the last one began. A completed
+			// turn's keeps its wake and starts the next turn; a stopped turn's waits for the next wake.
+			if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='pending',turn=NULL,queue=NULL,wake=wake AND ? WHERE to_kind=? AND to_id=? AND turn=? AND state='taken' AND queue IS NOT NULL", output.Outcome == contract.TurnCompleted, contract.PrincipalSession, session, output.Turn); err != nil {
+				return err
+			}
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='read' WHERE to_kind=? AND to_id=? AND turn=? AND state='taken'", contract.PrincipalSession, session, output.Turn); err != nil {
 			return err
