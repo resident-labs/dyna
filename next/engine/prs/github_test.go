@@ -198,3 +198,19 @@ func TestBadTokenReportsNoToken(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+func TestReadCountsAReviewBodyVerdictFromTheViewer(t *testing.T) {
+	c, server, _ := client(t)
+	const head = "0123456789abcdef0123456789abcdef01234567"
+	body := "> 🤖 Review by Aria's agent swarm, Dyna, not by Aria.\n**Verdict: Approved at " + head + "**\n"
+	at := time.Date(2026, 11, 3, 10, 0, 0, 0, time.UTC)
+	server.Add(fakegithub.Pull{Repo: "owner/repo", Number: 1, Head: head, Reviews: []fakegithub.Comment{{ID: 1, Author: "owner-account", Body: body, State: "COMMENTED", At: at}}})
+	server.Add(fakegithub.Pull{Repo: "owner/repo", Number: 2, Head: head, Reviews: []fakegithub.Comment{{ID: 2, Author: "someone", Body: body, State: "COMMENTED", At: at}}})
+	pulls, err := c.Read(context.Background(), "owner/repo", []int{1, 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pulls[1].Review != contract.PrApproved || pulls[2].Review != "" {
+		t.Fatalf("reviews %q and %q", pulls[1].Review, pulls[2].Review)
+	}
+}
