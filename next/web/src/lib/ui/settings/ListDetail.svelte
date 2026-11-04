@@ -23,21 +23,18 @@
     (first && !first.matches("textarea, input:not([type=checkbox], [type=radio], [type=button], [type=submit])") ? first : side)?.focus();
   }
   // A close can land later than its call, as a phone's goes back in history first, and the list is hidden until the
-  // detail has gone, so the list takes the focus once open has turned false.
-  let closing = false;
-  function close() {
-    closing = true;
-    onclose();
-  }
+  // detail has gone, so the list takes the focus once open has turned false: after Esc or the arrow, and as well after
+  // a page closes the detail itself, as a removal does, or Back leaves a page's form.
+  let was = false;
   $effect(() => {
-    if (open || !closing) return;
-    closing = false;
-    void tick().then(() => page?.querySelector<HTMLElement>("[role=listbox]")?.focus());
+    const closed = was && !open;
+    was = open;
+    if (closed) void tick().then(() => page?.querySelector<HTMLElement>("[role=listbox]")?.focus());
   });
   function keydown(event: KeyboardEvent) {
     if (event.key !== "Escape" || !open || event.defaultPrevented) return;
     event.preventDefault();
-    void close();
+    onclose();
   }
 </script>
 
@@ -47,8 +44,8 @@
   <div class="split" class:drill class:open>
     <div class="list-side">{@render list({ drill, select })}</div>
     {#if open || !drill}<aside class="detail" aria-label={open ? title : label} tabindex="-1" data-f6 bind:this={side}>
-      {#if open}<header class="bar">{#if drill}<button type="button" class="round" aria-label={`Back to ${label}`} title="Back (Esc)" onclick={() => void close()}><Icon name="backChevron" size={20} /></button>{/if}
-        <strong>{title}</strong>{#if !drill}<button type="button" class="round close" aria-label="Close" title="Close (Esc)" onclick={() => void close()}><Icon name="close" /></button>{/if}</header>
+      {#if open}<header class="bar">{#if drill}<button type="button" class="round" aria-label={`Back to ${label}`} title="Back (Esc)" onclick={onclose}><Icon name="backChevron" size={20} /></button>{/if}
+        <strong>{title}</strong>{#if !drill}<button type="button" class="round close" aria-label="Close" title="Close (Esc)" onclick={onclose}><Icon name="close" /></button>{/if}</header>
         <div class="body">{@render detail()}</div>
       {:else}<header class="bar"><strong class="quiet">{label}</strong></header><div class="body">{@render summary?.()}<p class="small muted">Pick a row to see its settings.</p></div>{/if}
     </aside>{/if}
@@ -66,7 +63,10 @@
   .detail { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--bg); }
   .detail:focus { outline: none; }
   .drill .detail { border-left: 0; }
-  .bar strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; }
+  /* The open item's name is the one place it shows whole, so a long one wraps and the bar grows. */
+  .bar { height: auto; min-height: 52px; padding-block: 6px 5px; }
+  .bar strong { min-width: 0; overflow-wrap: anywhere; font-size: 16px; line-height: 1.3; }
+  .bar .round { align-self: flex-start; }
   .quiet { color: var(--muted); font-weight: 500; }
   .round { display: grid; place-items: center; flex: none; width: 40px; height: 40px; margin: 0 -8px 0 -10px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--muted); cursor: pointer; }
   .round:hover { color: var(--text); }
@@ -91,5 +91,8 @@
   .body :global(.set > :nth-child(2)) { grid-row: 1 / span 2; grid-column: 2; }
   .body :global(.actions) { display: flex; flex-wrap: wrap; gap: 8px; }
   .body :global(.section) { display: grid; gap: 8px; min-width: 0; }
-  @media (max-width: 640px) { .body { padding: 14px 16px 32px; } }
+  /* An item's facts, a label and a value to a line, and its removal at the end, apart, with whom it affects. */
+  .body :global(.facts) { grid-template-columns: 110px minmax(0, 1fr); gap: 6px 12px; font-size: 13.5px; }
+  .body :global(.danger-zone) { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 14px; border-top: 1px solid var(--line); }
+  @media (max-width: 640px) { .body { padding: 14px 16px 32px; } .body :global(.facts) { grid-template-columns: 96px minmax(0, 1fr); } }
 </style>
