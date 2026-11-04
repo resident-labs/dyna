@@ -47,6 +47,9 @@ type HostexecRunArgs struct {
 	Grant   GrantID    `json:"grant"`
 	// Collect is set by the engine as it runs, never stored or sent: it is the run that reads back and removes a run's $DYNA_OUT.
 	Collect bool `json:"-"`
+	// Attach is set by the engine as it resumes a run after a restart, never stored or sent: it follows the files of the run the
+	// host already holds instead of starting the command.
+	Attach bool `json:"-"`
 }
 
 func (HostexecRunArgs) OpKind() OpKind          { return "hostexec.run" }
