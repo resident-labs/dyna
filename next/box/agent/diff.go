@@ -24,11 +24,17 @@ const (
 	diffLimit     = 60 * time.Second
 )
 
+// diffFetchLimit bounds the fetch that brings a repository's remote branches up to date before its worktrees are compared with
+// them. A variable so a test need not wait it out.
+var diffFetchLimit = 15 * time.Second
+
 // saveDiff writes everything the box's worktrees hold that is on no pushed ref to one file in folder: for each worktree
 // the log of its unpushed commits and one diff, from the newest commit the branch shares with its remote branch (the base
 // branch if it was never pushed; with neither, its whole history) to a snapshot of the tree with its uncommitted and
 // untracked files, binaries included. The snapshot is made through a temporary index, so the branch and index do not change.
 // Ignored files are not in it, and a symlink is a link and never followed. A worktree with nothing unpushed has no section.
+// Before that each repository is fetched (pruning) within diffFetchLimit, so a commit the remote has counts as pushed even if the
+// box's last fetch predates it; a fetch that fails or times out leaves the old refs and is reported as possibly stale figures.
 // A worktree that fails gets a section saying why, and the others are kept. With no section the file is not written.
 func saveDiff(ctx context.Context, root, folder string, session contract.SessionID, name string, repos []contract.BoxRepo, git gitRunner) (report contract.DiffSavedRequest) {
 	ctx, cancel := context.WithTimeout(ctx, diffLimit)
@@ -40,6 +46,16 @@ func saveDiff(ctx context.Context, root, folder string, session contract.Session
 	}
 	for _, repo := range repos {
 		dir := filepath.Join(root, string(repo.Name))
+		// The remote branches are as old as the box's last fetch, so work merged since reads as unpushed. Fetch first, pruning the
+		// branches the remote deleted, and on failure compare with what is there and say the figures may be stale.
+		stale := ""
+		fetchCtx, cancelFetch := context.WithTimeout(ctx, diffFetchLimit)
+		_, err := git(fetchCtx, dir, "", "fetch", "--quiet", "--prune", "origin")
+		cancelFetch()
+		if err != nil {
+			stale = fmt.Sprintf("# the remote could not be fetched, so these figures may be stale: %v\n", err)
+			report.Stale = append(report.Stale, fmt.Sprintf("%s: %v", repo.Name, err))
+		}
 		listed, err := git(ctx, dir, "", "worktree", "list", "--porcelain")
 		if err != nil {
 			fail(dir, err)
@@ -123,7 +139,7 @@ func saveDiff(ctx context.Context, root, folder string, session contract.Session
 				if against == "" {
 					where = "with no remote branch to compare with, so its whole history"
 				}
-				fmt.Fprintf(&out, "## %s %s\n# branch %s, %s\n# %s unpushed commits\n\n%s\n\n", repo.Name, tree, branch, where, count, log)
+				fmt.Fprintf(&out, "## %s %s\n# branch %s, %s\n# %s unpushed commits\n%s\n%s\n\n", repo.Name, tree, branch, where, count, stale, log)
 				if len(diff) > diffCap {
 					stat, err := git(ctx, tree, "", "diff", "--stat=200", "--no-renames", base, snapshot)
 					if err != nil {
