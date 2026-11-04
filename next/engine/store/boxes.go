@@ -19,8 +19,6 @@ const (
 	WantStop    BoxWant = "stop"
 	WantClose   BoxWant = "close"
 	WantDiscard BoxWant = "discard"
-	// WantHold is a close that stopped retrying its archive. The box stops and keeps its volume until the next close call.
-	WantHold BoxWant = "hold"
 )
 
 // LifecycleBox combines observed and desired state for reconciliation.

@@ -19,9 +19,9 @@ type Live struct {
 	shellGeneration atomic.Uint64
 	subscribers     map[*Subscription]contract.RoomID
 	wakeMu          sync.Mutex
-	wakePending     map[contract.SessionID]bool
+	wakePending     map[contract.SessionID]struct{}
 	wakeSignal      chan struct{}
-	deliver         func(map[contract.SessionID]bool)
+	deliver         func(map[contract.SessionID]struct{})
 }
 
 // Session is a stable handle. Its mutex guards all its fields.
@@ -48,8 +48,8 @@ type Subscription struct {
 	closed bool
 }
 
-func New(deliver func(map[contract.SessionID]bool)) *Live {
-	return &Live{sessions: make(map[contract.SessionID]*Session), subscribers: make(map[*Subscription]contract.RoomID), wakePending: make(map[contract.SessionID]bool), wakeSignal: make(chan struct{}, 1), deliver: deliver}
+func New(deliver func(map[contract.SessionID]struct{})) *Live {
+	return &Live{sessions: make(map[contract.SessionID]*Session), subscribers: make(map[*Subscription]contract.RoomID), wakePending: make(map[contract.SessionID]struct{}), wakeSignal: make(chan struct{}, 1), deliver: deliver}
 }
 
 func (l *Live) Subscribe(room contract.RoomID, capacity int) (*Subscription, chan contract.Event) {
@@ -176,18 +176,14 @@ func (l *Live) Wake(ids []contract.SessionID, events []contract.Event) {
 	l.wakeMu.Lock()
 	defer l.wakeMu.Unlock()
 	for _, id := range ids {
-		if _, ok := l.wakePending[id]; !ok {
-			l.wakePending[id] = false
-		}
+		l.wakePending[id] = struct{}{}
 	}
 	for _, event := range events {
 		switch body := event.Body.(type) {
 		case contract.TurnEnded:
-			if _, ok := l.wakePending[body.Session]; !ok {
-				l.wakePending[body.Session] = false
-			}
+			l.wakePending[body.Session] = struct{}{}
 		case contract.BoxChanged:
-			l.wakePending[body.Session] = l.wakePending[body.Session] || (body.To == contract.BoxClosing && body.Reason != "")
+			l.wakePending[body.Session] = struct{}{}
 		}
 	}
 	if len(l.wakePending) != 0 {
@@ -208,7 +204,7 @@ func (l *Live) Run(done <-chan struct{}) {
 		}
 		l.wakeMu.Lock()
 		pending := l.wakePending
-		l.wakePending = make(map[contract.SessionID]bool)
+		l.wakePending = make(map[contract.SessionID]struct{})
 		l.wakeMu.Unlock()
 		l.deliver(pending)
 	}
