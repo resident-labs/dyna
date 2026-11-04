@@ -30,15 +30,17 @@ export type Meter = { label: string; text: string; percent: number; busy: boolea
 
 // One card per machine. When the engine runs on a registered host, host.list reports that machine twice: the control
 // plane with whole-machine figures, and the registered host with only dyna.slice's use of its allowance (cores less
-// one, memory less the floor). They merge as the registered host, with its switches, rooms, pool and problem, and
-// whether the engine can reach it, but with the whole-machine figures and shared folders, both sides' workspaces and
-// sessions, and either side's low disk. Until the control plane's first sample, the host stands alone.
+// one, memory less the floor). They merge under the host's name with the whole-machine figures, both sides' workspaces
+// and sessions, either side's low disk, and whether the engine can reach it. The host's runners, switches, rooms and
+// problem come along for Settings; Home's card shows none but the runners. Until the control plane's first sample, the
+// host stands alone.
 export function machines(hosts: HostSummary[]): HostSummary[] {
   const plane = hosts.find(h => h.name === "control-plane");
   const same = hosts.find(h => h.engineHost);
   if (!plane || !same || !hostMeters(plane).length) return hosts;
-  const merged = { ...same, cpus: plane.cpus, memBytes: plane.memBytes, cpuUsed: plane.cpuUsed, memUsed: plane.memUsed, diskBytes: plane.diskBytes, diskUsed: plane.diskUsed,
-    history: plane.history, shared: plane.shared, boxes: plane.boxes + same.boxes, diskLow: diskLow(plane) || diskLow(same), sessions: [...plane.sessions ?? [], ...same.sessions ?? []], engineHost: true };
+  const merged = { ...plane, name: same.name, reachable: same.reachable, lastSeen: same.lastSeen, boxes: plane.boxes + same.boxes, runners: same.runners,
+    agents: same.agents, ci: same.ci, rooms: same.rooms, problem: same.problem,
+    diskLow: diskLow(plane) || diskLow(same), sessions: [...plane.sessions ?? [], ...same.sessions ?? []], engineHost: true };
   return hosts.filter(h => h !== same).map(h => h === plane ? merged : h);
 }
 
@@ -103,10 +105,10 @@ export function watchHosts(apply: (hosts: HostSummary[]) => void, fail: () => vo
 }
 
 // Settings > Hosts (spec 5.13) lists the registered hosts: the control plane alone is no registered host, so it is left
-// out. Hosts the owner added come first, the engine's machine first among them, then pool nodes; each by name, its
+// out. Hosts the owner added come first, the engine's machine first among them, then pool nodes, where it has no place; each by name, its
 // digits as numbers, so node-2 comes before node-10.
 export const hostOrder = (hosts: readonly HostSummary[]): HostSummary[] => hosts.filter(h => h.name !== "control-plane")
-  .sort((a, b) => Number(!!a.pool) - Number(!!b.pool) || Number(!!b.engineHost) - Number(!!a.engineHost) || a.name.localeCompare(b.name, "en", { numeric: true }));
+  .sort((a, b) => Number(!!a.pool) - Number(!!b.pool) || Number(!b.pool && !!b.engineHost) - Number(!a.pool && !!a.engineHost) || a.name.localeCompare(b.name, "en", { numeric: true }));
 
 const added: Group = { id: "own", title: "Added by you" }, pooled: Group = { id: "pool", title: "From pools" };
 export const hostGroup = (h: HostSummary) => h.pool ? pooled : added;
