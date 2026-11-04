@@ -246,7 +246,12 @@ func (s *Store) EndGoal(ctx context.Context, req contract.GoalDoneRequest, event
 			if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM goal_items WHERE room=? AND goal=? AND state=?", event.Room, goal, contract.GoalItemOpen).Scan(&open); err != nil {
 				return err
 			}
-			if open > 0 {
+			if open > 0 && holder == "" {
+				// Nobody holds the goal to settle its items, so ending it settles them.
+				if _, err := tx.ExecContext(ctx, "UPDATE goal_items SET state=?,updated_at=? WHERE room=? AND goal=? AND state=?", contract.GoalItemDropped, event.Time.UnixMilli(), event.Room, goal, contract.GoalItemOpen); err != nil {
+					return err
+				}
+			} else if open > 0 {
 				return &GoalRefusal{Message: fmt.Sprintf("goal %s has %d open items; finish or drop them first", req.Goal, open)}
 			}
 		}
@@ -311,10 +316,11 @@ func (s *Store) GoalJournal(ctx context.Context, room contract.RoomID, goal cont
 	return entries, older, rows.Err()
 }
 
-// ListGoals returns a room's goals with their items, active ones first and the newest of each kind first.
+// ListGoals returns a room's goals with their items, active ones first and the newest of each kind first. Root holds no goals,
+// so listing root's shows the goals that have no holder.
 func (s *Store) ListGoals(ctx context.Context, room contract.RoomID, req contract.GoalListRequest) ([]contract.Goal, error) {
 	rows, err := s.Read().QueryContext(ctx, `SELECT number,COALESCE(session,''),text,done_when,state,summary,created_at,updated_at FROM goals
-		WHERE room=?1 AND (?2 OR state='active') AND (?3='' OR session=?3) ORDER BY state='active' DESC, number DESC LIMIT ?4`, room, req.All, req.Session, goalListLimit)
+		WHERE room=?1 AND (?2 OR state='active') AND (?3='' OR session=?3 OR (session IS NULL AND ?3=(SELECT id FROM sessions WHERE room=?1 AND parent IS NULL))) ORDER BY state='active' DESC, number DESC LIMIT ?4`, room, req.All, req.Session, goalListLimit)
 	if err != nil {
 		return nil, err
 	}

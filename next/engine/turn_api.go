@@ -126,6 +126,11 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 	default:
 		return contract.TurnOutputResponse{}, invalid("invalid turn cause")
 	}
+	// Close stops the agent program under a running turn, so that turn reports the program's end. The session is closing, so
+	// the turn was ended by the close and did not fail.
+	if session.Closing && req.Outcome == contract.TurnFailed && req.Cause == contract.CauseHarnessFailed {
+		req.Outcome, req.Cause, req.Error = contract.TurnStopped, contract.CauseClosed, ""
+	}
 	req.Usage.Model = req.Model
 	run, err := s.store.SessionWorkflow(ctx, session.ID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -189,6 +194,9 @@ func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, r
 	handle, problem := s.createSession(ctx, session.ID)
 	if problem != nil {
 		return contract.TurnActivityResponse{}, problem
+	}
+	if err := s.store.MarkTurnActive(ctx, session.ID, req.Turn, s.now()); err != nil {
+		return contract.TurnActivityResponse{}, failure(err)
 	}
 	if !handle.PublishActivity(session.Room, body, event) {
 		return contract.TurnActivityResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}

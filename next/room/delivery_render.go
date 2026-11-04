@@ -48,11 +48,7 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 			did = append(did, "handed you "+ResponsibilityNames(b.Handed))
 		}
 		if len(b.Unheld) > 0 {
-			goals := make([]string, len(b.Unheld))
-			for i, goal := range b.Unheld {
-				goals[i] = string(goal)
-			}
-			did = append(did, "left goals with no holder: "+strings.Join(goals, ", "))
+			did = append(did, "left goals with no holder, because you are root and root holds no goals: "+GoalNames(b.Unheld)+". goal list with your session shows them; goal done ends them and settles their open items")
 		}
 		return fmt.Sprintf("Session %s closed and %s.", b.Session, strings.Join(did, " and ")), nil
 	case contract.HostDiskLow:
