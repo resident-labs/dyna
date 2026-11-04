@@ -55,6 +55,7 @@ export interface Args {
   useTheme?: string;
   noThemes?: boolean;
   noContextFiles?: boolean;
+  noDocs?: boolean;
   listModels?: string | true;
   json?: boolean;
   offline?: boolean;
@@ -265,6 +266,8 @@ export function parseArgs(args: string[]): Args {
       result.noThemes = true;
     } else if (arg === "--no-context-files" || arg === "-nc") {
       result.noContextFiles = true;
+    } else if (arg === "--no-docs") {
+      result.noDocs = true;
     } else if (arg === "--list-models") {
       // Check if next arg is a search pattern (not a flag or file arg)
       if (
@@ -412,6 +415,7 @@ ${chalk.bold("Options:")}
   --use-theme <name[/name]>      Set the initial interactive theme for this run
   --no-themes                    Disable theme discovery and loading
   --no-context-files, -nc        Disable AGENTS.md and CLAUDE.md discovery and loading
+  --no-docs                      Leave Pi documentation out of the system prompt
   --export <file>                Export session file to HTML and exit
   --list-models [search] [--json] List available models (with optional fuzzy search; --json prints one JSON array)
   --verbose                      Force verbose startup (overrides quietStartup setting)

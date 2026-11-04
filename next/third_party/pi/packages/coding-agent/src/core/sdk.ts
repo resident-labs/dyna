@@ -105,6 +105,8 @@ export interface CreateAgentSessionOptions {
 	sessionStartEvent?: SessionStartEvent;
 	/** Process-wide compaction trigger from --compaction-trigger-tokens; wins over settings and model overrides. */
 	compactionTriggerTokens?: number;
+	/** Leave Pi documentation out of the system prompt (--no-docs). */
+	noDocs?: boolean;
 }
 
 /** Result from createAgentSession */
@@ -470,6 +472,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
 		compactionTriggerTokens: options.compactionTriggerTokens,
+		noDocs: options.noDocs,
 	});
 
 	const extensionsResult = resourceLoader.getExtensions();

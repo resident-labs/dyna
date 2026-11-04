@@ -1741,3 +1741,9 @@ The owner chose to ship without the five-provider evaluation gate. A Claude sani
 
 - **Decision.** `turn.activity`, its request and `SessionSummary` carry a closed `ActivityKind`, `tool`, `compaction` or `model`, beside the label. The harness sets it (Pi's tool start, compaction start and model transfer); the label only words it. The web decides from the kind and never compares label text, so the thread's "Compacting the conversation…" line follows the same live activity as the sidebar.
 - **Old peers.** The field is additive. A report with no kind, from a box agent that predates kinds, is stored as `tool`; an unknown kind is refused at the engine, which owns the set. The web reads a summary or event with no kind as plain work.
+
+### Boxes send no Pi documentation block (owner via root, 2026-11-03)
+
+- **Decision.** The system prompt of a Dyna box has no `<docs>` section, about 330 tokens that point at Pi's own documentation and tell the agent to read pi `.md` files. The box agent passes `--no-docs`, a Pi fork flag (P14, fork level 15) that leaves out that one section. Nothing else in the prompt changes.
+- **Why a fork flag.** Pi v1.4.0 has no option for it: `--system-prompt` replaces the tools and rules too, and `docs` is a reserved section name an extension cannot remove. The flag is the one place that changes; the box agent has no prompt text of its own to keep in step.
+- **Where the docs are.** They stay at `/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/docs`, and the `dyna-extend` skill, the one place an agent learns about extending Dyna, names that path.

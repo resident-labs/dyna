@@ -375,6 +375,13 @@ describe("parseArgs", () => {
 		});
 	});
 
+	describe("--no-docs flag", () => {
+		test("parses --no-docs flag", () => {
+			expect(parseArgs(["--no-docs"]).noDocs).toBe(true);
+			expect(parseArgs([]).noDocs).toBeUndefined();
+		});
+	});
+
 	describe("--no-context-files flag", () => {
 		test("parses --no-context-files flag", () => {
 			const result = parseArgs(["--no-context-files"]);
