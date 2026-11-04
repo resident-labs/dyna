@@ -173,20 +173,25 @@ func (c *Client) HostRun(ctx context.Context, r shell.Run, out io.Writer) (int, 
 	if err != nil {
 		return 0, &contract.Error{Code: contract.ErrInvalid, Message: err.Error()}
 	}
-	data, problem := c.forward(ctx, contract.MethodHostexecRun, body)
-	if problem != nil {
-		return 0, problem
-	}
+	// The run is the engine's and goes on without this call. A call the engine did not answer with a result (the connection
+	// closed, the engine shutting down or away for a deploy) is asked again with the same client ID until it does.
 	var answer contract.HostexecRunResponse
-	if err := json.Unmarshal(data, &answer); err != nil {
-		fmt.Fprintln(out, "host run: invalid answer from the engine:", err)
-		return 1, nil
+	for delay := (backoff{}); answer.Operation.Result == nil; {
+		data, problem := c.forward(ctx, contract.MethodHostexecRun, body)
+		if problem != nil && problem.Code != contract.ErrUnavailable {
+			return 0, problem
+		}
+		if problem == nil {
+			if err := json.Unmarshal(data, &answer); err != nil {
+				fmt.Fprintln(out, "host run: invalid answer from the engine:", err)
+				return 1, nil
+			}
+		}
+		if answer.Operation.Result == nil && !delay.wait(ctx) {
+			return 0, &contract.Error{Code: contract.ErrUnavailable, Message: ctx.Err().Error()}
+		}
 	}
 	result := answer.Operation.Result
-	if result == nil {
-		fmt.Fprintln(out, "host run: the call ended before the command; op.ran wakes the session with its result")
-		return 1, nil
-	}
 	_, _ = io.WriteString(out, result.Output)
 	if result.OutputFile != "" {
 		if err := c.file(ctx, result.OutputFile, out); err != nil {
