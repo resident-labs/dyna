@@ -21,7 +21,29 @@ import (
 const (
 	poolScriptBytes = 64 << 10
 	poolIdle        = 30 * time.Minute
+	// The store reads idle back as a time.Duration, which holds at most about 2562047 hours.
+	poolIdleMost  = 2562047 * time.Hour
+	poolMaxTooLow = "a pool needs a max of at least 1"
 )
+
+// checkIdle refuses an idle time the step could not read. Zero is the default, 30 minutes.
+func checkIdle(idle contract.DurationMS) *contract.Error {
+	switch {
+	case idle < 0:
+		return invalid("idle cannot be negative")
+	case idle > contract.DurationMS(poolIdleMost.Milliseconds()):
+		return invalid(fmt.Sprintf("idle is at most %d hours", int64(poolIdleMost/time.Hour)))
+	}
+	return nil
+}
+
+// idleTime is a checked idle time, zero making the default.
+func idleTime(idle contract.DurationMS) time.Duration {
+	if idle == 0 {
+		return poolIdle
+	}
+	return time.Duration(idle) * time.Millisecond
+}
 
 var poolName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
@@ -34,9 +56,10 @@ func (s *Service) checkPool(ctx context.Context, req contract.PoolAddRequest) *c
 	case len(req.Script) > poolScriptBytes:
 		return invalid(fmt.Sprintf("a pool's script is at most %d KiB", poolScriptBytes>>10))
 	case req.Max < 1:
-		return invalid("a pool needs a max of at least 1")
-	case req.Idle < 0:
-		return invalid("idle cannot be negative")
+		return invalid(poolMaxTooLow)
+	}
+	if problem := checkIdle(req.Idle); problem != nil {
+		return problem
 	}
 	hosts, err := s.store.Hosts(ctx)
 	if err != nil {
@@ -49,12 +72,8 @@ func (s *Service) checkPool(ctx context.Context, req contract.PoolAddRequest) *c
 }
 
 func (s *Service) addPool(ctx context.Context, req contract.PoolAddRequest) error {
-	idle := time.Duration(req.Idle) * time.Millisecond
-	if idle == 0 {
-		idle = poolIdle
-	}
 	// No room names the pool yet, so nothing runs its script before the file is there.
-	if err := s.store.AddPool(ctx, store.Pool{Name: req.Name, Max: req.Max, PerSession: req.PerSession, Idle: idle}); err != nil {
+	if err := s.store.AddPool(ctx, store.Pool{Name: req.Name, Max: req.Max, PerSession: req.PerSession, Idle: idleTime(req.Idle)}); err != nil {
 		return err
 	}
 	path := s.layout.PoolScript(req.Name)
@@ -280,4 +299,34 @@ func (s *Service) HostRemove(ctx context.Context, caller contract.Principal, req
 		return contract.HostRemoveResponse{Failed: failed}, problem
 	}
 	return contract.HostRemoveResponse{Failed: failed}, nil
+}
+
+// PoolSet changes a pool's max, per-session switch or idle time. Only the owner reaches it, and the step reads the pool on its
+// next pass.
+func (s *Service) PoolSet(ctx context.Context, caller contract.Principal, req contract.PoolSetRequest) (contract.PoolSetResponse, *contract.Error) {
+	switch {
+	case caller.Kind != contract.PrincipalOwner:
+		return contract.PoolSetResponse{}, forbidden()
+	case req.Max == nil && req.PerSession == nil && req.Idle == nil:
+		return contract.PoolSetResponse{}, invalid("set max, idle or perSession")
+	case req.Max != nil && *req.Max < 1:
+		return contract.PoolSetResponse{}, invalid(poolMaxTooLow)
+	}
+	var idle *time.Duration
+	if req.Idle != nil {
+		if problem := checkIdle(*req.Idle); problem != nil {
+			return contract.PoolSetResponse{}, problem
+		}
+		checked := idleTime(*req.Idle)
+		idle = &checked
+	}
+	err := s.store.SetPool(ctx, req.Name, req.Max, req.PerSession, idle)
+	if errors.Is(err, store.ErrNotFound) {
+		return contract.PoolSetResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "no pool is named " + req.Name}
+	}
+	if err != nil {
+		return contract.PoolSetResponse{}, failure(err)
+	}
+	s.reconciler.Kick()
+	return contract.PoolSetResponse{}, nil
 }

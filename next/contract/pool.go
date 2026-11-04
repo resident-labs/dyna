@@ -4,6 +4,7 @@ const (
 	MethodPoolAdd    Method = "pool.add"
 	MethodPoolList   Method = "pool.list"
 	MethodPoolRemove Method = "pool.remove"
+	MethodPoolSet    Method = "pool.set"
 	MethodRoomHosts  Method = "room.hosts"
 	MethodHostRemove Method = "host.remove"
 )
@@ -47,6 +48,16 @@ type PoolRemoveRequest struct {
 	Name string `json:"name"`
 }
 type PoolRemoveResponse struct{}
+
+// PoolSetRequest changes a pool's max, per-session switch or idle time; an omitted one stays, and zero idle makes 30 minutes,
+// as at add. Only the owner calls it, from Settings > Pools.
+type PoolSetRequest struct {
+	Name       string      `json:"name"`
+	Max        *int        `json:"max,omitempty"`
+	PerSession *bool       `json:"perSession,omitempty"`
+	Idle       *DurationMS `json:"idle,omitempty"`
+}
+type PoolSetResponse struct{}
 
 // RoomHostsRequest replaces the hosts a room's new boxes may use: host names and at most one pool. No names clears the rule,
 // so they may use any host again. A box already placed stays where it is. A session's request waits for the owner, so this

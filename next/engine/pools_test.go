@@ -315,3 +315,123 @@ func TestARestartMidCreateUndoesItAndKeepsMax(t *testing.T) {
 		t.Fatalf("box %+v", got)
 	}
 }
+
+// pool.set changes only what it names, after one check of every field, and refuses the rest with nothing changed.
+func TestPoolSetChangesWhatItNamesAndRefusesTheRest(t *testing.T) {
+	r := setupPool(t)
+	r.addPool(3, false)
+	most := contract.DurationMS((2562047 * time.Hour).Milliseconds())
+	number, on, off := func(n int) *int { return &n }, true, false
+	idle := func(d contract.DurationMS) *contract.DurationMS { return &d }
+	pool := func() contract.Pool {
+		t.Helper()
+		list, e := r.s.PoolList(r.ctx, r.owner, contract.PoolListRequest{})
+		if e != nil || len(list.Pools) != 1 {
+			t.Fatalf("pool list: %+v %v", list, e)
+		}
+		return list.Pools[0]
+	}
+	set := func(req contract.PoolSetRequest) *contract.Error {
+		t.Helper()
+		_, e := r.s.PoolSet(r.ctx, r.owner, req)
+		return e
+	}
+	thirty := contract.DurationMS((30 * time.Minute).Milliseconds())
+	if got := pool(); got.Max != 3 || got.PerSession || got.Idle != thirty {
+		t.Fatalf("as added: %+v", got)
+	}
+	session := contract.Principal{Kind: contract.PrincipalSession, Session: r.root}
+	if _, e := r.s.PoolSet(r.ctx, session, contract.PoolSetRequest{Name: "boats", Max: number(5)}); e == nil || e.Code != contract.ErrForbidden {
+		t.Fatalf("a session's set: %v", e)
+	}
+	for name, refused := range map[string]struct {
+		req     contract.PoolSetRequest
+		code    contract.ErrorCode
+		message string
+	}{
+		"nothing":   {contract.PoolSetRequest{Name: "boats"}, contract.ErrInvalid, "set max, idle or perSession"},
+		"max 0":     {contract.PoolSetRequest{Name: "boats", Max: number(0), PerSession: &on}, contract.ErrInvalid, "a pool needs a max of at least 1"},
+		"idle -1":   {contract.PoolSetRequest{Name: "boats", Max: number(5), Idle: idle(-1)}, contract.ErrInvalid, "idle cannot be negative"},
+		"idle past": {contract.PoolSetRequest{Name: "boats", Max: number(5), Idle: idle(most + 1)}, contract.ErrInvalid, "idle is at most 2562047 hours"},
+		"no pool":   {contract.PoolSetRequest{Name: "ships", Max: number(5)}, contract.ErrNotFound, "no pool is named ships"},
+	} {
+		if e := set(refused.req); e == nil || e.Code != refused.code || e.Message != refused.message {
+			t.Errorf("%s: %v", name, e)
+		}
+		if got := pool(); got.Max != 3 || got.PerSession || got.Idle != thirty {
+			t.Fatalf("%s changed the pool: %+v", name, got)
+		}
+	}
+	// Each step sets one field to a value unlike the others', and the rest keep theirs.
+	if e := set(contract.PoolSetRequest{Name: "boats", Idle: idle(most)}); e != nil {
+		t.Fatal(e)
+	}
+	if got := pool(); got.Max != 3 || got.PerSession || got.Idle != most {
+		t.Fatalf("the longest idle: %+v", got)
+	}
+	if e := set(contract.PoolSetRequest{Name: "boats", Max: number(1)}); e != nil {
+		t.Fatal(e)
+	}
+	if got := pool(); got.Max != 1 || got.PerSession || got.Idle != most {
+		t.Fatalf("max 1: %+v", got)
+	}
+	if e := set(contract.PoolSetRequest{Name: "boats", Idle: idle(0)}); e != nil {
+		t.Fatal(e)
+	}
+	if got := pool(); got.Max != 1 || got.Idle != thirty {
+		t.Fatalf("zero idle: %+v", got)
+	}
+	if e := set(contract.PoolSetRequest{Name: "boats", Idle: idle(90_000), PerSession: &on}); e != nil {
+		t.Fatal(e)
+	}
+	// pool.list leaves out a per-session pool's idle, and the pool keeps it for a shared pool again.
+	if got := pool(); got.Max != 1 || !got.PerSession || got.Idle != 0 {
+		t.Fatalf("per session: %+v", got)
+	}
+	if e := set(contract.PoolSetRequest{Name: "boats", Max: number(2)}); e != nil {
+		t.Fatal(e)
+	}
+	if got := pool(); got.Max != 2 || !got.PerSession {
+		t.Fatalf("max 2 per session: %+v", got)
+	}
+	if e := set(contract.PoolSetRequest{Name: "boats", PerSession: &off}); e != nil {
+		t.Fatal(e)
+	}
+	if got := pool(); got.Max != 2 || got.PerSession || got.Idle != 90_000 {
+		t.Fatalf("shared again: %+v", got)
+	}
+}
+
+// pool.add refuses an idle the step could not read, as pool.set does.
+func TestPoolAddRefusesAnIdlePastADuration(t *testing.T) {
+	r := setupPool(t)
+	most := contract.DurationMS((2562047 * time.Hour).Milliseconds())
+	req := contract.PoolAddRequest{Name: "boats", Script: "#!/bin/sh\n", Max: 1, Idle: most + 1}
+	if _, e := r.s.PoolAdd(r.ctx, r.owner, req); e == nil || e.Message != "idle is at most 2562047 hours" {
+		t.Fatalf("past: %v", e)
+	}
+	req.Idle = most
+	if _, e := r.s.PoolAdd(r.ctx, r.owner, req); e != nil {
+		t.Fatal(e)
+	}
+}
+
+// The step reads a new max on its next pass: a full per-session pool makes the node a waiting box needs once max allows it.
+func TestPoolSetMaxAppliesOnTheNextPass(t *testing.T) {
+	r := setupPool(t)
+	r.addPool(1, true)
+	r.start("one")
+	r.start("two")
+	r.pass(3)
+	if rows := r.nodeRows(); len(rows) != 1 {
+		t.Fatalf("at max 1: %+v", rows)
+	}
+	two := 2
+	if _, e := r.s.PoolSet(r.ctx, r.owner, contract.PoolSetRequest{Name: "boats", Max: &two}); e != nil {
+		t.Fatal(e)
+	}
+	r.pass(3)
+	if rows := r.nodeRows(); len(rows) != 2 {
+		t.Fatalf("at max 2: %+v", rows)
+	}
+}
