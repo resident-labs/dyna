@@ -24,7 +24,7 @@ export function imageOrder(images: readonly RoomImage[], names: ReadonlyMap<stri
   return [...images].sort((a, b) => {
     const left = room(a), right = room(b);
     if (left === undefined || right === undefined) return Number(left === undefined) - Number(right === undefined) || a.name.localeCompare(b.name, "en", { numeric: true });
-    return left.localeCompare(right) || a.name.localeCompare(b.name, "en", { numeric: true });
+    return left.localeCompare(right, "en") || a.name.localeCompare(b.name, "en", { numeric: true });
   });
 }
 

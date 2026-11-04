@@ -386,7 +386,8 @@ export const isThumb = (file: Attachment, failed: readonly string[]) => isImage(
 
 // A file size as v1 shows it, such as "512 B", "12.4 KB" or "3.1 MB".
 export function fileSize(bytes: number): string {
-  return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB`
+    : bytes < 1024 ** 3 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
 // A long path in an activity label keeps its first folder and its last two parts, so the file name always shows:
