@@ -10,14 +10,19 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/MichaelKinsy/PiG/codemode"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness"
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -39,9 +44,6 @@ const (
 	laneRunes = 80
 )
 
-//go:embed crew_host.js
-var crewHostSource string
-
 // crewEngine is what a crew needs from the box socket.
 type crewEngine interface {
 	WorkflowPin(context.Context, string) error
@@ -52,7 +54,7 @@ type crewEngine interface {
 	WorkflowPost(context.Context, contract.PostRequest) (contract.PostResponse, error)
 }
 
-// crewWorker is one running Pi. harness/pi's Harness is one.
+// crewWorker is one running PiG session. harness/pig's Harness is one.
 type crewWorker interface {
 	Start(context.Context, contract.TurnID, []contract.TurnInput, func()) (contract.TurnEnded, error)
 	SessionFile() string
@@ -71,17 +73,16 @@ type CrewConfig struct {
 	Workdir    string
 	Branch     string // the session's branch, which names the crew's other branches
 	Base       string // the run's pinned commit, when an earlier box reported it
-	Sessions   string // Pi's session folder, which all workers share: each gets its own file there
-	State      string // the agent's own folder, for the host script and the workers' configuration
+	Sessions   string // PiG's session folder, which all workers share: each gets its own file there
+	State      string // the agent's own folder, for the workers' configuration
 }
 
-// Crew runs a workflow in place of a session's Pi: to the runner it is a harness whose one turn is the script. Workers are Pi
-// processes in this box, so the session, its box and its socket stay what they are for any other session. The engine's
+// Crew runs a workflow in place of a session's PiG: to the runner it is a harness whose one turn is the script. Workers are
+// PiG sessions in this process, so the session, its box and its socket stay what they are for any other session. The engine's
 // journal, not this process, holds what has finished. A restarted box runs the script again and stored steps return at once.
 // A reload runs a new version in the same turn, and a step still running here is joined, not started again.
 type Crew struct {
 	config  CrewConfig
-	host    string
 	slots   chan struct{}
 	builds  *buildLock
 	shims   string
@@ -104,9 +105,11 @@ type runningStep struct {
 	reply crewReply
 }
 
-// execution is one run of one version of the script in its own host.
+// execution is one run of one version of the script, in its own VM and the VMs of its children.
 type execution struct {
 	version int
+	ctx     context.Context // ends with the version: a reload, or the end of the run
+	steps   *sync.WaitGroup // the steps its calls started
 	mu      sync.Mutex
 	seen    map[string]int // calls to each step hash
 }
@@ -121,12 +124,7 @@ func (e *execution) number() int {
 
 var _ harness.Harness = (*Crew)(nil)
 
-// NewCrew writes the script host where node can read it.
 func NewCrew(config CrewConfig) (*Crew, error) {
-	host := filepath.Join(config.State, "crew-host.js")
-	if err := os.WriteFile(host, []byte(crewHostSource), 0600); err != nil {
-		return nil, err
-	}
 	if err := os.MkdirAll(filepath.Join(config.State, "workers"), 0700); err != nil {
 		return nil, err
 	}
@@ -135,7 +133,7 @@ func NewCrew(config CrewConfig) (*Crew, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Crew{config: config, host: host, slots: make(chan struct{}, max(config.Workflow.Workers, 1)), builds: builds, shims: shims, reloads: make(chan struct{}, 1),
+	c := &Crew{config: config, slots: make(chan struct{}, max(config.Workflow.Workers, 1)), builds: builds, shims: shims, reloads: make(chan struct{}, 1),
 		workflow: config.Workflow, limits: make(map[contract.ProfileName]chan struct{}), running: make(map[string]*runningStep), taken: make(map[contract.DeliverySeq]bool)}
 	c.addLimits(config.Workflow.Profiles)
 	return c, nil
@@ -280,32 +278,27 @@ func (c *Crew) Start(ctx context.Context, id contract.TurnID, inputs []contract.
 	return result, nil
 }
 
-// crewCall is one line from the script host. Payload and Opts identify a step, with Parent, the enclosing workflow's key. Lane
+// crewCall is one call from a script. Payload and Opts identify a step, with Parent, the enclosing workflow's key. Lane
 // comes out of the script's options before they reach here, so tagging a step with its subject keeps its key.
 type crewCall struct {
-	ID      int64           `json:"id"`
 	Op      string          `json:"op"`
 	Parent  string          `json:"parent"`
 	Phase   string          `json:"phase"`
 	Lane    string          `json:"lane"`
 	Payload json.RawMessage `json:"payload"`
 	Opts    json.RawMessage `json:"opts"`
-	Key     string          `json:"key"`    // workflow_end
-	Value   json.RawMessage `json:"value"`  // end, workflow_end
-	Reason  string          `json:"reason"` // end, workflow_end
 	run     *execution      // the execution that made the call
 }
 
 type crewReply struct {
-	ID     int64  `json:"id"`
 	Value  any    `json:"value,omitempty"`
 	Error  string `json:"error,omitempty"`
 	Step   string `json:"step,omitempty"`
 	stored bool   // the journal had it, so this box may never have run it
 }
 
-// script runs the newest version of the script and serves its calls until it reports an end, which is the only way it
-// succeeds. A reload stops that version's host and runs the next one. Steps keep running across it, and stop with the script.
+// script runs the newest version of the script and serves its calls until it ends. A reload stops that version's VM and runs
+// the next one. Steps keep running across it, and stop with the script.
 func (c *Crew) script(ctx context.Context) (string, error) {
 	work, cancel := context.WithCancel(ctx)
 	var steps sync.WaitGroup
@@ -325,109 +318,148 @@ func (c *Crew) script(ctx context.Context) (string, error) {
 	}
 }
 
-// execute runs one version in its own host and serves its calls, until the script reports an end or a newer version arrives.
-// A step this version started replies to its host, so a stopped host's replies go nowhere.
+// execute runs one version in a VM of its own and serves its calls, until the script ends or a newer version arrives. A step
+// this version started replies to its VM, so a stopped VM's replies go nowhere.
 func (c *Crew) execute(ctx, work context.Context, steps *sync.WaitGroup, workflow contract.BoxWorkflow) (string, bool, error) {
-	calls, hostOut, err := os.Pipe()
-	if err != nil {
-		return "", false, err
-	}
-	defer calls.Close()
-	hostIn, replies, err := os.Pipe()
-	if err != nil {
-		hostOut.Close()
-		return "", false, err
-	}
-	defer replies.Close()
-	var problems tail
-	host := exec.CommandContext(ctx, "node", c.host)
-	host.Dir, host.Stderr, host.ExtraFiles = c.config.Workdir, &problems, []*os.File{hostOut, hostIn}
-	err = host.Start()
-	hostOut.Close()
-	hostIn.Close()
-	if err != nil {
-		return "", false, err
-	}
-	defer func() { _ = host.Process.Kill(); _ = host.Wait() }()
-	var writing sync.Mutex
-	reply := json.NewEncoder(replies)
-	send := func(value any) {
-		writing.Lock()
-		defer writing.Unlock()
-		_ = reply.Encode(value)
-	}
-	args := workflow.Args
-	if args == "" {
-		args = "null"
-	}
-	send(map[string]string{"script": workflow.Script, "args": args})
-	run := &execution{version: workflow.Version, seen: make(map[string]int)}
-	read, stopped := make(chan crewCall), make(chan struct{})
-	defer close(stopped)
-	ended := make(chan struct{})
+	vm, stop := context.WithCancel(ctx)
+	run := &execution{version: workflow.Version, seen: make(map[string]int), ctx: vm, steps: steps}
+	var reloaded atomic.Bool
+	watched := make(chan struct{})
 	go func() {
-		defer close(ended)
-		decoder := json.NewDecoder(calls)
+		defer close(watched)
 		for {
-			var call crewCall
-			if decoder.Decode(&call) != nil {
-				return
-			}
 			select {
-			case read <- call:
-			case <-stopped:
+			case <-c.reloads:
+				c.mu.Lock()
+				newer := c.workflow.Version != workflow.Version
+				c.mu.Unlock()
+				if newer {
+					reloaded.Store(true)
+					stop()
+					return
+				}
+			case <-vm.Done():
 				return
 			}
 		}
 	}()
-	for {
-		var call crewCall
-		select {
-		case <-c.reloads:
-			c.mu.Lock()
-			newer := c.workflow.Version != workflow.Version
-			c.mu.Unlock()
-			if newer {
-				return "", true, nil
-			}
-			continue
-		case <-ended:
-			if ctx.Err() != nil {
-				return "", false, ctx.Err()
-			}
-			return "", false, fmt.Errorf("the script host stopped: %s", strings.TrimSpace(problems.String()))
-		case call = <-read:
-		}
-		call.run = run
-		switch call.Op {
-		case "end":
-			if call.Reason != "" {
-				return "", false, errors.New(call.Reason)
-			}
-			return finalText(call.Value), false, nil
-		case "log", "failed":
-			// Inline, so a script's last lines reach the journal before its end does.
-			info := stepInfo{kind: contract.WorkflowStepLog, detail: finalText(call.Payload)}
-			c.step(work, call, info, func(context.Context, string) stepOutcome {
-				if call.Op == "failed" {
-					return stepOutcome{reason: info.detail}
-				}
-				return stepOutcome{}
-			})
-		case "status":
-			// Not a step, so nothing replays it: a resumed script writes its lines again as it reaches them. The run goes on
-			// without one that did not land.
-			if err := c.config.Engine.WorkflowSetStatus(work, contract.WorkflowSetStatusRequest{Text: finalText(call.Payload)}); err != nil {
-				log.Printf("workflow status: %v", err)
-			}
-		default:
-			steps.Go(func() {
-				out := c.handle(work, call)
-				out.ID = call.ID
-				send(out)
-			})
-		}
+	defer func() { stop(); <-watched }()
+	args := workflow.Args
+	if args == "" {
+		args = "null"
 	}
+	end, err := c.runScript(work, run, workflow.Script, args, "", 0)
+	switch {
+	case reloaded.Load():
+		return "", true, nil
+	case ctx.Err() != nil:
+		return "", false, ctx.Err()
+	case err != nil:
+		return "", false, err
+	case end.Failure != nil:
+		return "", false, errors.New(end.Failure.Report)
+	}
+	return finalText(json.RawMessage(end.Value)), false, nil
+}
+
+// scriptEnd is how a script ended: with its result as JSON text, or with a failure.
+type scriptEnd struct {
+	Value   string         `json:"value"`
+	Failure *scriptFailure `json:"failure"`
+}
+
+// scriptFailure is why a script threw. A parent script reads the Reason, a failed run shows the Report, and Step names the
+// step whose failure it was, if one did.
+type scriptFailure struct {
+	Reason string `json:"reason"`
+	Report string `json:"report"`
+	Step   string `json:"step"`
+}
+
+const (
+	// crewScriptMemory bounds one script's VM. A script holds the results of its steps, which are at most a megabyte each.
+	crewScriptMemory = 256 << 20
+	// crewAPI is the names of the script API, which crew_prelude.js builds and the script's own scope declares.
+	crewAPI = "args, phase, log, console, status, agent, run, merge, post, parallel, pipeline, workflow, Date, Math"
+)
+
+//go:embed crew_prelude.js
+var crewPrelude string
+
+// metaDeclaration is the start of a script's `export const meta`, which the engine reads and the script only needs as a value.
+var metaDeclaration = regexp.MustCompile(`^((?:\s|//[^\n]*\n|/\*[\s\S]*?\*/)*)export\s+const\s+meta\b`)
+
+// runScript runs source in a VM of its own on PiG's codemode sandbox and serves the calls it makes, with args as the script's
+// `args`. A child script, at depth 1, is one level down from the run's own, under the key of the step that started it.
+// It returns an error only when the VM could not finish: the run stopped, or the sandbox failed.
+func (c *Crew) runScript(work context.Context, run *execution, source, args, parent string, depth int) (scriptEnd, error) {
+	// A script waits hours for its workers, so the VM has no deadline: every step has its own timeout, and the run's turn
+	// ends it when it is stopped.
+	sandbox, err := codemode.NewSandbox(codemode.SandboxOptions{TimeoutMs: math.Inf(1), MemoryLimitBytes: crewScriptMemory, Globals: []codemode.Tool{
+		{Name: "dyna.call", Execute: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+			var call crewCall
+			if err := json.Unmarshal(raw, &call); err != nil {
+				return nil, err
+			}
+			call.run = run
+			replied := make(chan crewReply, 1)
+			run.steps.Go(func() { replied <- c.handle(work, call) })
+			select {
+			case reply := <-replied:
+				return json.Marshal(reply)
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}},
+		// Inline and in order, so a script's last lines reach the journal before its end does.
+		{Name: "dyna.send", AwaitsInitiation: true, Execute: func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
+			var call crewCall
+			if err := json.Unmarshal(raw, &call); err != nil {
+				return nil, err
+			}
+			call.run = run
+			switch call.Op {
+			case "log", "failed":
+				info := stepInfo{kind: contract.WorkflowStepLog, detail: finalText(call.Payload)}
+				c.step(work, call, info, func(context.Context, string) stepOutcome {
+					if call.Op == "failed" {
+						return stepOutcome{reason: info.detail}
+					}
+					return stepOutcome{}
+				})
+			case "status":
+				// Not a step, so nothing replays it: a resumed script writes its lines again as it reaches them. The run goes on
+				// without one that did not land.
+				if err := c.config.Engine.WorkflowSetStatus(work, contract.WorkflowSetStatusRequest{Text: finalText(call.Payload)}); err != nil {
+					log.Printf("workflow status: %v", err)
+				}
+			}
+			return nil, nil
+		}},
+	}})
+	if err != nil {
+		return scriptEnd{}, err
+	}
+	defer sandbox.Close()
+	argsLiteral, _ := json.Marshal(args)
+	parentLiteral, _ := json.Marshal(parent)
+	// The script is the body of a function that names the API, with its own block inside, so its declarations may reuse those
+	// names. It starts on the first line, so the line numbers of its errors are its own.
+	code := "async function script({" + crewAPI + "}) {{" + metaDeclaration.ReplaceAllString(source, "${1}const meta") + "\n}}\n" +
+		"return await (" + crewPrelude + ")(dyna.call, dyna.send, " + string(argsLiteral) + ", " + string(parentLiteral) + ", " + strconv.Itoa(depth) + ")(script)"
+	result, err := sandbox.Execute(run.ctx, code, codemode.ExecuteOptions{})
+	if err != nil {
+		return scriptEnd{}, err
+	}
+	if !result.OK {
+		if result.Error.Kind != codemode.ErrorScript {
+			return scriptEnd{}, errors.New(result.Error.Message)
+		}
+		// The script did not parse, so it never ran.
+		return scriptEnd{Failure: &scriptFailure{Reason: result.Error.Message, Report: result.Error.Name + ": " + result.Error.Message}}, nil
+	}
+	var end scriptEnd
+	return end, json.Unmarshal(result.Value, &end)
 }
 
 // finalText is a run's result as a reply reads: a string as it is, anything else as JSON, and no result as nothing.
@@ -451,15 +483,6 @@ func (c *Crew) handle(ctx context.Context, call crewCall) crewReply {
 		return c.postCall(ctx, call)
 	case "workflow":
 		return c.workflowCall(ctx, call)
-	case "workflow_end":
-		end := contract.WorkflowStepEndRequest{Key: call.Key, State: contract.WorkflowStepDone, Result: string(call.Value), Reason: call.Reason}
-		if call.Reason != "" {
-			end.State = contract.WorkflowStepFailed
-		}
-		if err := c.config.Engine.WorkflowStepEnd(ctx, end); err != nil {
-			return crewReply{Error: err.Error()}
-		}
-		return crewReply{}
 	}
 	return crewReply{Error: "unknown script call " + call.Op}
 }
@@ -904,11 +927,12 @@ func (c *Crew) postCall(ctx context.Context, call crewCall) crewReply {
 	})
 }
 
-// workflowCall hands the host a child script from the checkout and its key. It always runs again, so an edited child takes
-// effect, and its own steps find their results under this key.
+// workflowCall runs a child script from the checkout, in a VM of its own, and returns its result. It always runs again, so an
+// edited child takes effect, and its own steps find their results under this key.
 func (c *Crew) workflowCall(ctx context.Context, call crewCall) crewReply {
 	var body struct {
-		Ref string `json:"ref"`
+		Ref  string          `json:"ref"`
+		Args json.RawMessage `json:"args"`
 	}
 	if err := json.Unmarshal(call.Payload, &body); err != nil {
 		return crewReply{Error: "workflow: " + err.Error()}
@@ -929,7 +953,25 @@ func (c *Crew) workflowCall(ctx context.Context, call crewCall) crewReply {
 		}
 		return crewReply{Error: err.Error(), Step: name}
 	}
-	return crewReply{Value: map[string]string{"key": key, "script": string(script)}}
+	end, err := c.runScript(ctx, call.run, string(script), string(body.Args), key, 1)
+	if err != nil {
+		// The VM stopped with the run, or with this version of it, so the step is left open for the next to join.
+		return crewReply{Error: err.Error(), Step: name}
+	}
+	stop := contract.WorkflowStepEndRequest{Key: key, State: contract.WorkflowStepDone, Result: end.Value}
+	if end.Failure != nil {
+		stop.State, stop.Result, stop.Reason = contract.WorkflowStepFailed, "", end.Failure.Reason
+	}
+	if err := c.config.Engine.WorkflowStepEnd(ctx, stop); err != nil {
+		return crewReply{Error: err.Error(), Step: name}
+	}
+	if end.Failure != nil {
+		if end.Failure.Step == "" {
+			end.Failure.Step = body.Ref
+		}
+		return crewReply{Error: end.Failure.Reason, Step: end.Failure.Step}
+	}
+	return crewReply{Value: json.RawMessage(end.Value)}
 }
 
 // tail keeps the last bytes of a stream.
