@@ -19,16 +19,18 @@ import (
 
 // fakeJournal is the engine's side of a crew, kept in memory so that a second Crew can resume from it.
 type fakeJournal struct {
-	mu       sync.Mutex
-	steps    map[string]contract.WorkflowStepEndRequest
-	names    map[string]string
-	files    map[string]string // what each running worker reported
-	lanes    map[string]string
-	phases   map[string]string // each step key to the stage it started in
-	endDelay time.Duration     // how long the journal takes to store a step end
-	posts    []contract.PostRequest
-	lines    []string // status() lines
-	pin      string
+	mu        sync.Mutex
+	steps     map[string]contract.WorkflowStepEndRequest
+	names     map[string]string
+	files     map[string]string // what each running worker reported
+	lanes     map[string]string
+	phases    map[string]string // each step key to the stage it started in
+	endDelay  time.Duration     // how long the journal takes to store a step end
+	slowStart string            // the name of a step whose start the journal takes a while to store
+	started   []string          // step names, in the order their starts were stored
+	posts     []contract.PostRequest
+	lines     []string // status() lines
+	pin       string
 	// by step name, the script version that started each step
 	versions map[string]int
 }
@@ -54,8 +56,12 @@ func (j *fakeJournal) WorkflowPin(_ context.Context, commit string) error {
 }
 
 func (j *fakeJournal) WorkflowStepStart(_ context.Context, req contract.WorkflowStepStartRequest) (contract.WorkflowStepStartResponse, error) {
+	if req.Name == j.slowStart {
+		time.Sleep(300 * time.Millisecond)
+	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	j.started = append(j.started, req.Name)
 	j.names[req.Key] = req.Name
 	j.lanes[req.Key] = req.Lane
 	j.phases[req.Key] = req.Phase
@@ -874,5 +880,14 @@ func TestAScriptThatOutgrowsItsMemoryFails(t *testing.T) {
 	ended := h.run(crewMeta + `const held = []; for (let i = 0; i < 40; i++) held.push('x'.repeat(16 << 20) + i); return held.length`)
 	if ended.Outcome != contract.TurnFailed {
 		t.Fatalf("turn %+v", ended)
+	}
+}
+
+func TestLinesReachTheJournalInTheOrderTheScriptWroteThem(t *testing.T) {
+	h := newCrewHarness(t)
+	h.journal.slowStart = "log: a"
+	h.result(crewMeta + `log('a'); log('b'); return 1`)
+	if !slices.Equal(h.journal.started, []string{"log: a", "log: b"}) {
+		t.Fatalf("lines started in the order %q", h.journal.started)
 	}
 }
