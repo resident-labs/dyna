@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -326,8 +327,8 @@ type Observed struct {
 const pullFields = `number state merged headRefOid headRepository{nameWithOwner} mergeable mergeStateStatus reviewDecision
 latestOpinionatedReviews(first:20,writersOnly:true){nodes{state}}
 commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(first:50){nodes{__typename ...on CheckRun{name conclusion} ...on StatusContext{context state}}}}}}}
-reviews(last:10){nodes{fullDatabaseId state body url author{login}}}
-comments(last:20){nodes{body author{login}}}`
+reviews(last:20){nodes{fullDatabaseId state body url author{login} submittedAt lastEditedAt}}
+comments(last:20){nodes{body author{login} createdAt lastEditedAt}}`
 
 type gqlAuthor struct {
 	Login string `json:"login"`
@@ -374,18 +375,23 @@ type gqlPull struct {
 			Body   string     `json:"body"`
 			URL    string     `json:"url"`
 			Author *gqlAuthor `json:"author"`
+			// SubmittedAt is null for a pending review. LastEditedAt is null for a body never edited.
+			SubmittedAt  *time.Time `json:"submittedAt"`
+			LastEditedAt *time.Time `json:"lastEditedAt"`
 		} `json:"nodes"`
 	} `json:"reviews"`
 	Comments struct {
 		Nodes []struct {
-			Body   string     `json:"body"`
-			Author *gqlAuthor `json:"author"`
+			Body         string     `json:"body"`
+			Author       *gqlAuthor `json:"author"`
+			CreatedAt    time.Time  `json:"createdAt"`
+			LastEditedAt *time.Time `json:"lastEditedAt"`
 		} `json:"nodes"`
 	} `json:"comments"`
 }
 
 // verdictLine is the approval convention for a PR opened by the account that reviews it, which GitHub cannot record as a
-// review: a line in a comment that names the sha it judged.
+// review: a line in a comment, or in the body of a review, that names the sha it judged.
 var verdictLine = regexp.MustCompile(`\A[^\n]*\n\*\*Verdict: (Approved|Changes requested) at ([0-9a-f]{12,40})\*\*[ \t]*(?:\n|$)`)
 
 // graphQL runs one query and returns its repository, which is nil for a query that names none.
@@ -489,7 +495,7 @@ func login(author *gqlAuthor) string {
 	return author.Login
 }
 
-// observed reads one PR's answer. viewer is the token's account, whose marked comments can carry the review (see verdictLine).
+// observed reads one PR's answer. viewer is the token's account, whose marked comments and review bodies can carry the review (see verdictLine).
 func (p gqlPull) observed(viewer string) Observed {
 	seen := Observed{Number: p.Number, State: contract.PrOpen, Head: p.HeadRefOid, CI: contract.PrCINone}
 	if p.Merged {
@@ -529,11 +535,37 @@ func (p gqlPull) observed(viewer string) Observed {
 			}
 		}
 	}
-	// The latest verdict comment at the current head from the viewer's account counts as a review. A request for changes
-	// from GitHub or from a comment stands over an approval.
-	verdict := contract.PrReview("")
+	// The latest verdict at the current head from the viewer's account counts as a review, whether it is an issue comment or the
+	// body of a review (GitHub refuses the author's own approval, so a COMMENTED review carries it). A statement's time is its
+	// last edit, as its current body is what counts. A review's own commit is not compared: the verdict names its sha. A request
+	// for changes from GitHub stands over an approval, and a later verdict replaces an earlier one.
+	type statement struct {
+		body   string
+		author *gqlAuthor
+		at     time.Time
+	}
+	var statements []statement
 	for _, comment := range p.Comments.Nodes {
-		if match := verdictLine.FindStringSubmatch(comment.Body); match != nil && viewer != "" && login(comment.Author) == viewer && agentWrote(comment.Body) && strings.HasPrefix(p.HeadRefOid, match[2]) {
+		at := comment.CreatedAt
+		if comment.LastEditedAt != nil {
+			at = *comment.LastEditedAt
+		}
+		statements = append(statements, statement{comment.Body, comment.Author, at})
+	}
+	for _, review := range p.Reviews.Nodes {
+		if review.SubmittedAt == nil {
+			continue
+		}
+		at := *review.SubmittedAt
+		if review.LastEditedAt != nil {
+			at = *review.LastEditedAt
+		}
+		statements = append(statements, statement{review.Body, review.Author, at})
+	}
+	sort.SliceStable(statements, func(i, j int) bool { return statements[i].at.Before(statements[j].at) })
+	verdict := contract.PrReview("")
+	for _, said := range statements {
+		if match := verdictLine.FindStringSubmatch(said.body); match != nil && viewer != "" && login(said.author) == viewer && agentWrote(said.body) && strings.HasPrefix(p.HeadRefOid, match[2]) {
 			verdict = contract.PrApproved
 			if match[1] != "Approved" {
 				verdict = contract.PrChangesRequested
