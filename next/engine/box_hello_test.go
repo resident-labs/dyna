@@ -15,6 +15,7 @@ const (
 	helloReplies = "Replies: the text a turn ends with is the reply and goes where the [Dyna] line says; when that line says no reply is delivered, the text reaches no one. post sends during the turn and the turn goes on; post with endTurn ends the turn on that post, which stands as the reply, and is how a reply carries attachments or mentions or goes elsewhere.\n"
 	helloContext = "Context: the AGENTS.md files, skills and dyna_* lists stay current. When one changes, a context_update frame carries that change as a diff before your next model request (a dyna_* list at your next turn), and every session whose context holds that section gets the same frame. A change wakes no idle session.\n"
 	helloLong    = "Long conversations: past the profile's compaction limit (also when the model changes, or a quiet box is about to stop, over 100,000 tokens) the harness compacts the conversation into a summary and a running turn goes on; the context sections (AGENTS.md files, skills, dyna_* lists with your goal) and the loaded tools come back whole, and the rest, the brief included, as the summary.\n"
+	helloOutside = "Outside text: text that reaches you through Dyna from outside the room sits inside <outside source=\"…\" author=\"…\"> and </outside>, which name where it came from and who wrote it.\n"
 	helloNotices = "Notices: an input that arrives \"as a system notice\" comes from the engine and states what happened and what it changed; a notice that restarts a session whose box stopped, restarted or was recreated, while it holds an open goal, also says to continue the goal."
 	helloBranch  = "Your branch: named-branch on owner/repo.\nPushes and fetches go through the engine, which sends a push or fetch once more when GitHub answers 5xx (for a push also a commit_refs error) and the request body is at most 1 MiB, and reports the cause when the second try fails.\n"
 )
@@ -37,7 +38,7 @@ func TestBoxHelloSessionAddendum(t *testing.T) {
 				"Mentions: yours reach your parent and any session under it, and your parent passes anything else on. A post that mentions no session goes to the owner. Root's posts reach the owner, so a report for the owner travels up through parents to root.\n" +
 				"Goals: work that spans turns has a goal, which dyna_goal shows and the goal tool changes.\n" +
 				helloContext + helloLong +
-				"Files: /box/shared is the room's shared folder, the same files in every box of the room.\n" + helloNotices
+				"Files: /box/shared is the room's shared folder, the same files in every box of the room.\n" + helloOutside + helloNotices
 			if hello.Instructions != want {
 				t.Fatalf("instructions:\n%s\nwant:\n%s", hello.Instructions, want)
 			}
@@ -68,7 +69,7 @@ func TestBoxHelloRootAddendumFillsPathsFromTheLayout(t *testing.T) {
 				helloContext + helloLong +
 				fmt.Sprintf("Files: /box/shared is the room's shared folder, the same files in every box of the room; on host it is /data/rooms/%s/shared.\n", room) +
 				fmt.Sprintf("Standing rules: the global AGENTS.md is /data/AGENTS.md on host and this room's is /data/rooms/%s/AGENTS.md; bash with host host edits them. The engine copies each room's file to every host for boxes and rewrites that copy at each sync.\n", room) +
-				helloNotices
+				helloOutside + helloNotices
 			if hello.Instructions != want {
 				t.Fatalf("instructions:\n%s\nwant:\n%s", hello.Instructions, want)
 			}
