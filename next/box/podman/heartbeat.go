@@ -107,18 +107,18 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box
 				load = Load{ExecOnly: true}
 				load.DiskBytes, load.DiskUsed = parseDisk(out)
 				for _, line := range strings.Split(string(out), "\n") {
-					var busy, total int64
+					var cpuBusy, total int64
 					if n, _ := fmt.Sscanf(line, "dyna-cpus %d", &load.CPUs); n == 1 {
 						continue
 					}
 					if n, _ := fmt.Sscanf(line, "dyna-mem %d %d", &load.MemBytes, &load.MemUsed); n == 2 {
 						continue
 					}
-					if n, _ := fmt.Sscanf(line, "dyna-cpu %d %d", &busy, &total); n == 2 {
-						if prevTotal > 0 && total > prevTotal && busy >= prevBusy {
-							load.CPUUsed = float64(busy-prevBusy) / float64(total-prevTotal) * float64(load.CPUs)
+					if n, _ := fmt.Sscanf(line, "dyna-cpu %d %d", &cpuBusy, &total); n == 2 {
+						if prevTotal > 0 && total > prevTotal && cpuBusy >= prevBusy {
+							load.CPUUsed = float64(cpuBusy-prevBusy) / float64(total-prevTotal) * float64(load.CPUs)
 						}
-						prevBusy, prevTotal = busy, total
+						prevBusy, prevTotal = cpuBusy, total
 					}
 				}
 				report(true, load)
