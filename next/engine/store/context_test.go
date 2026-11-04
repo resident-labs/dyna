@@ -61,24 +61,43 @@ func TestContextQueryBudget(t *testing.T) {
 	if got := contextQueries.Load(); got != 9 {
 		t.Fatalf("snapshot queries = %d, want 9", got)
 	}
-	rows, err := db.Query(`EXPLAIN QUERY PLAN SELECT started_at FROM turns WHERE session=? ORDER BY started_at DESC LIMIT 1`, "s")
+}
+
+func TestContextChildrenOrderIgnoresActivity(t *testing.T) {
+	s, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
-	var found bool
-	for rows.Next() {
-		var id, parent, unused int
-		var detail string
-		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
-			t.Fatal(err)
-		}
-		found = found || strings.Contains(detail, "turns_session_started_at")
-	}
-	if err := rows.Err(); err != nil {
+	defer s.Close()
+	if err := s.CreateRoom(context.Background(), "r", "r", time.Unix(0, 0)); err != nil {
 		t.Fatal(err)
 	}
-	if !found {
-		t.Fatal("latest turn query did not use its index")
+	if _, err = s.writer.Exec(`INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('root','r','root','p','open','',0);
+		INSERT INTO sessions(id,room,name,profile,state,goal,created_at,parent) VALUES('a','r','a','p','open','',1,'root'),('b','r','b','p','open','',2,'root');
+		INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at) VALUES('ba','a','','agent','ready','','',0,0),('bb','b','','agent','ready','','',0,0)`); err != nil {
+		t.Fatal(err)
+	}
+	names := func() string {
+		children, err := s.ContextChildren(context.Background(), "root")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, c := range children {
+			got = append(got, c.Name)
+		}
+		return strings.Join(got, ",")
+	}
+	if got := names(); got != "a,b" {
+		t.Fatalf("children = %s, want a,b", got)
+	}
+	// The later child's turn starts first, then the earlier child's: neither swaps the rows.
+	for i, session := range []string{"b", "a"} {
+		if _, err = s.writer.Exec(`INSERT INTO turns(id,session,started_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) VALUES(?,?,?,'','m',0,0,0,0)`, "t"+session, session, 10+i); err != nil {
+			t.Fatal(err)
+		}
+		if got := names(); got != "a,b" {
+			t.Fatalf("children after a turn of %s = %s, want a,b", session, got)
+		}
 	}
 }
