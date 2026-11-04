@@ -9,7 +9,7 @@
   import AddonsPane from "./AddonsPane.svelte";
   import ApprovalsPane from "./ApprovalsPane.svelte";
   import Icon from "./Icon.svelte";
-  import { settingsPanes } from "../routes.ts";
+  import { pathItem, settingsPanes } from "../routes.ts";
   import type { Device } from "../contract.gen.ts";
   // The Settings page, in the feed's and the sidebar's place. It opens over the app, so the room behind keeps its feed,
   // its position and its draft. A wide page opens the first pane. A phone opens the pane list, and a pane's arrow returns to it.
@@ -34,12 +34,13 @@
   let panes = $derived(settingsPanes.filter(pane => !pane.admin || admin));
   let shown = $derived(panes.find(pane => path === `/settings/${pane.id}` || ((pane.id === "accounts" || pane.list) && path.startsWith(`/settings/${pane.id}/`))) ?? (phone ? undefined : panes[0]));
   // /settings and its trailing slash open the first pane or the list; any other path has no page.
-  let lost = $derived(!/^\/settings\/?$/.test(path) && !panes.some(pane => path === `/settings/${pane.id}` || (pane.list && new RegExp(`^/settings/${pane.id}/[^/]+$`).test(path))
-    || (pane.id === "accounts" && /^\/settings\/accounts\/(?:add(?:\/[^/]+)?|account\/[^/]+|reconnect\/[^/]+)$/.test(path))));
+  // A part that does not decode has no page.
+  let lost = $derived(!/^\/settings\/?$/.test(path) && !panes.some(pane => path === `/settings/${pane.id}` || (pane.list && pathItem(path, `/settings/${pane.id}/`) !== undefined)
+    || (pane.id === "accounts" && (path === "/settings/accounts/add" || ["add/", "account/", "reconnect/"].some(part => pathItem(path, `/settings/accounts/${part}`) !== undefined)))));
 
   // A list page's open item is the path's last part (spec 5.13): a wide page moves it as the list's keys move, in place,
   // and a narrow one opens it as a screen of its own, so Back returns to the list.
-  let item = $derived(shown?.list && path.startsWith(`/settings/${shown.id}/`) ? decodeURIComponent(path.slice(`/settings/${shown.id}/`.length)) : undefined);
+  let item = $derived(shown?.list && !lost ? pathItem(path, `/settings/${shown.id}/`) : undefined);
   function open(id: string, screen: boolean) {
     const href = `/settings/${shown!.id}/${encodeURIComponent(id)}`;
     if (href === path) return;

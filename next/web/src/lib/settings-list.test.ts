@@ -89,3 +89,24 @@ test("the keys move within the list, open an item and fold a group", () => {
   assert.equal(listKey("ArrowDown", -1, [], 10), undefined);
   assert.equal(listKey("1", 1, rows, 10), undefined);
 });
+
+test("the window holds the rows that reach within margin of the view, exactly", () => {
+  const tens = Array.from({ length: 20 }, (_, i) => i * 10);
+  // View 50 to 70, margin 10: rows from the one that starts at 40 (covers 40 to 50) to the one that starts before 80.
+  assert.deepEqual(visibleRange(tens, 50, 20, 10), { start: 4, end: 8 });
+  // A row that starts exactly on the bottom margin edge is out; one that starts exactly on the top edge is the first.
+  assert.deepEqual(visibleRange(tens, 45, 20, 10), { start: 3, end: 8 });
+  assert.deepEqual(visibleRange(tens, 55, 20, 10), { start: 4, end: 9 });
+  assert.deepEqual(visibleRange(tens, 0, 20, 10), { start: 0, end: 3 });
+  assert.deepEqual(visibleRange([0], 0, 600, 200), { start: 0, end: 1 });
+  // A window larger than the list draws it all; a top past the last row keeps the last row.
+  assert.deepEqual(visibleRange(tens.slice(0, 5), 0, 600, 200), { start: 0, end: 5 });
+  assert.deepEqual(visibleRange(tens, 5000, 20, 10), { start: 19, end: 20 });
+});
+
+test("PageUp stops at the top, and Enter on a folded group opens it", () => {
+  const rows: Row<Room>[] = [{ kind: "group", group: { id: "g", title: "g" }, count: 3, folded: true }, { kind: "item", key: "a", item: many[0] }];
+  assert.deepEqual(listKey("PageUp", 1, rows, 10), { move: 0 });
+  assert.deepEqual(listKey("PageUp", 0, rows, 10), { move: 0 });
+  assert.deepEqual(listKey("Enter", 0, rows, 10), { fold: 0 });
+});
