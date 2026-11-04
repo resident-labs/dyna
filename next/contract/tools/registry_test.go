@@ -136,3 +136,21 @@ func TestPhaseOneActionCoverage(t *testing.T) {
 		}
 	}
 }
+
+// pool.set is the owner's, for Settings > Pools: agents' pool tool keeps add and list, and nothing else of pool.
+func TestPoolSetIsOwnerOnlyAndAgentsPoolToolIsUnchanged(t *testing.T) {
+	for _, row := range Methods() {
+		if row.Method == contract.MethodPoolSet && (row.Access != OwnerAccess || len(row.Actions) != 0) {
+			t.Fatalf("pool.set row: %+v", row)
+		}
+	}
+	var names []string
+	for _, a := range AgentActions() {
+		if a.Tool == "pool" {
+			names = append(names, a.Name)
+		}
+	}
+	if strings.Join(names, " ") != "add list" {
+		t.Fatalf("agents' pool actions: %v", names)
+	}
+}
