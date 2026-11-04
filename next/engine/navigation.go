@@ -72,13 +72,44 @@ func (s *Service) navSearch(ctx context.Context, caller contract.Principal, req 
 	}
 	if req.After != "" {
 		var err error
-		if cursor, err = strconv.ParseInt(req.After, 10, 64); err != nil || cursor <= 0 {
+		if cursor, err = strconv.ParseInt(req.After, 10, 64); err != nil || cursor <= 0 || cursor > 1<<40 {
 			e = invalid("after is a result's next")
 			return
 		}
 	}
 	room, e = s.navRoom(ctx, req.Room, own, owner)
 	return
+}
+
+// clipBytes cuts text to at most max bytes, at a character boundary.
+func clipBytes(text string, max int) (string, bool) {
+	if len(text) <= max {
+		return text, false
+	}
+	for max > 0 && !utf8.RuneStart(text[max]) {
+		max--
+	}
+	return text[:max], true
+}
+
+// fitPage drops hits from the end of a search result until its JSON is at most NavPageBytes, and returns how many it keeps.
+// One hit always stays.
+func fitPage(result *contract.SearchResponse) int {
+	for {
+		encoded, _ := json.Marshal(result)
+		switch {
+		case len(encoded) <= contract.NavPageBytes:
+			return max(len(result.Posts), len(result.Sessions), len(result.Rooms))
+		case len(result.Posts) > 1:
+			result.Posts = result.Posts[:len(result.Posts)-1]
+		case len(result.Sessions) > 1:
+			result.Sessions = result.Sessions[:len(result.Sessions)-1]
+		case len(result.Rooms) > 1:
+			result.Rooms = result.Rooms[:len(result.Rooms)-1]
+		default:
+			return 1
+		}
+	}
 }
 
 func clipRunes(text string, max int) (string, bool) {
@@ -101,21 +132,35 @@ func (s *Service) SearchPosts(ctx context.Context, caller contract.Principal, re
 	if err != nil {
 		return contract.SearchResponse{}, failure(err)
 	}
-	result := contract.SearchResponse{Total: total}
-	if len(hits) > limit {
-		hits = hits[:limit]
-		result.Next = strconv.FormatInt(hits[limit-1].Seq, 10)
+	var ownName string
+	if !owner {
+		if ownName, err = s.store.RoomNameOf(ctx, own); err != nil {
+			return contract.SearchResponse{}, failure(err)
+		}
 	}
+	more := len(hits) > limit
+	hits = hits[:min(len(hits), limit)]
+	result := contract.SearchResponse{Total: total}
 	for _, hit := range hits {
 		out := contract.SearchHit{ID: hit.ID, Room: hit.RoomName, Home: "feed", From: hit.Author, At: hit.At, Files: hit.Files}
 		if hit.DM != "" {
 			out.Home = "dm:" + hit.DM
 		}
+		source, author := hit.RoomName, hit.Author
 		if hit.Source != nil {
 			out.From = hit.Source.SessionName + " in " + string(hit.Source.RoomName)
+			source, author = string(hit.Source.RoomName), hit.Source.SessionName
 		}
 		out.Snippet, _ = clipRunes(hit.Snippet, contract.SearchSnippetChars)
+		// Text of another room, or delivered from one, is outside text to an agent. The owner reads it plain.
+		if !owner && (hit.RoomName != ownName || hit.Source != nil) {
+			out.Snippet = contract.Outside("room "+source, author, out.Snippet)
+		}
 		result.Posts = append(result.Posts, out)
+	}
+	kept := fitPage(&result)
+	if more || kept < len(hits) {
+		result.Next = strconv.FormatInt(hits[kept-1].Seq, 10)
 	}
 	return result, nil
 }
@@ -134,8 +179,8 @@ func (s *Service) SearchSessions(ctx context.Context, caller contract.Principal,
 		hits[i].Goal, _ = clipRunes(hits[i].Goal, contract.SearchGoalChars)
 	}
 	result := contract.SearchResponse{Sessions: hits, Total: total}
-	if int(offset)+limit < total {
-		result.Next = strconv.Itoa(int(offset) + limit)
+	if kept := fitPage(&result); int(offset)+kept < total {
+		result.Next = strconv.Itoa(int(offset) + kept)
 	}
 	return result, nil
 }
@@ -151,8 +196,8 @@ func (s *Service) SearchRooms(ctx context.Context, caller contract.Principal, re
 		return contract.SearchResponse{}, failure(err)
 	}
 	result := contract.SearchResponse{Rooms: hits, Total: total}
-	if int(offset)+limit < total {
-		result.Next = strconv.Itoa(int(offset) + limit)
+	if kept := fitPage(&result); int(offset)+kept < total {
+		result.Next = strconv.Itoa(int(offset) + kept)
 	}
 	return result, nil
 }
@@ -283,10 +328,6 @@ func (s *Service) HistoryRead(ctx context.Context, caller contract.Principal, re
 	if dm != "" {
 		result.Home = "dm:" + names[dm]
 	}
-	textLimit := contract.HistoryTextChars
-	if req.Post != "" {
-		textLimit = contract.HistoryPostBytes
-	}
 	seqs := make([]int64, len(events))
 	for i, event := range events {
 		body := event.Body.(contract.PostCreated)
@@ -294,13 +335,25 @@ func (s *Service) HistoryRead(ctx context.Context, caller contract.Principal, re
 		if event.From.Kind == contract.PrincipalSession {
 			post.From = names[event.From.Session]
 		}
+		source, author := roomName, post.From
 		if body.Source != nil {
 			post.From = body.Source.SessionName + " in " + string(body.Source.RoomName)
 		}
 		for _, mention := range body.Mentions {
 			post.To = append(post.To, names[mention.Session])
 		}
-		post.Text, post.Cut = clipRunes(body.Text, textLimit)
+		if req.Post != "" {
+			post.Text, post.Cut = clipBytes(body.Text, contract.HistoryPostBytes)
+		} else {
+			post.Text, post.Cut = clipRunes(body.Text, contract.HistoryTextChars)
+		}
+		if body.Source != nil {
+			source, author = string(body.Source.RoomName), body.Source.SessionName
+		}
+		// Text of another room, or delivered from one, is outside text to an agent. The owner reads it plain.
+		if !owner && (room != own || body.Source != nil) {
+			post.Text = contract.Outside("room "+source, author, post.Text)
+		}
 		for _, file := range body.Attachments {
 			post.Files = append(post.Files, fmt.Sprintf("%s (%s, %d KB)", file.Name, file.Media, (file.Bytes+1023)/1024))
 		}
