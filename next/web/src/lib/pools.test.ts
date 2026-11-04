@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fieldChange, idleMinutes, poolLine, poolNodes, poolOrder, poolSummary } from "./pools.ts";
+import { enqueue, fieldChange, idleMinutes, poolLine, poolNodes, poolOrder, poolSummary, refusedField, requestFields } from "./pools.ts";
 import type { HostSummary, Pool } from "./contract.gen.ts";
 
 const pool = (name: string, more: Partial<Pool> = {}): Pool => ({ name, max: 4, nodes: 0, idle: 1_800_000, ...more });
@@ -65,6 +65,10 @@ test("Idle time sends minutes as milliseconds when they differ from what the fie
   assert.deepEqual(fieldChange(p, "idle", "1.5"), { name: "boats", idle: 90_000 });
   assert.deepEqual(fieldChange(p, "idle", "0"), { name: "boats", idle: 0 });
   assert.deepEqual(fieldChange(p, "idle", "-1"), { name: "boats", idle: -60_000 });
+  // Above zero is at least 1 ms, as 0 makes 30 minutes; below one minute rounds to the millisecond.
+  assert.deepEqual(fieldChange(p, "idle", "0.000001"), { name: "boats", idle: 1 });
+  assert.deepEqual(fieldChange(p, "idle", "0.00001"), { name: "boats", idle: 1 });
+  assert.deepEqual(fieldChange(p, "idle", "0.0001"), { name: "boats", idle: 6 });
   assert.equal(fieldChange(p, "idle", "30"), undefined);
   assert.equal(fieldChange(p, "idle", ""), undefined);
   assert.equal(fieldChange(p, "idle", "x"), undefined);
@@ -72,4 +76,32 @@ test("Idle time sends minutes as milliseconds when they differ from what the fie
   // 100 ms shows as 0 minutes, so leaving the field as it was keeps it rather than making 30 minutes.
   assert.equal(fieldChange(pool("boats", { idle: 100 }), "idle", "0"), undefined);
   assert.deepEqual(fieldChange(pool("boats", { idle: 100 }), "idle", "1"), { name: "boats", idle: 60_000 });
+});
+
+test("a change made while one saves waits as its pool's one request, the later value winning for each field", () => {
+  assert.deepEqual(enqueue([], { name: "boats", max: 5 }), [{ name: "boats", max: 5 }]);
+  const both = enqueue([{ name: "boats", max: 5 }], { name: "boats", perSession: true });
+  assert.deepEqual(both, [{ name: "boats", max: 5, perSession: true }]);
+  assert.deepEqual(enqueue(both, { name: "boats", max: 7 }), [{ name: "boats", max: 7, perSession: true }]);
+  assert.deepEqual(enqueue(both, { name: "boats", perSession: false }), [{ name: "boats", max: 5, perSession: false }]);
+  // Another pool's waits behind, and a change to the second joins the second.
+  const two = enqueue(both, { name: "ships", idle: 60_000 });
+  assert.deepEqual(two, [{ name: "boats", max: 5, perSession: true }, { name: "ships", idle: 60_000 }]);
+  assert.deepEqual(enqueue(two, { name: "ships", max: 2 }), [{ name: "boats", max: 5, perSession: true }, { name: "ships", idle: 60_000, max: 2 }]);
+  assert.deepEqual(enqueue(two, { name: "boats", idle: 0 }), [{ name: "boats", max: 5, perSession: true, idle: 0 }, { name: "ships", idle: 60_000 }]);
+  // A name holding another is another pool.
+  assert.deepEqual(enqueue([{ name: "boats-2", max: 3 }], { name: "boats", max: 4 }), [{ name: "boats-2", max: 3 }, { name: "boats", max: 4 }]);
+  // The queue it was given stays as it was.
+  assert.deepEqual(both, [{ name: "boats", max: 5, perSession: true }]);
+});
+
+test("a refusal is about the first field the request sets, in the engine's order, max then idle then one per session", () => {
+  assert.equal(refusedField({ name: "boats", max: 0, idle: -1, perSession: true }), "max");
+  assert.equal(refusedField({ name: "boats", idle: -1, perSession: true }), "idle");
+  assert.equal(refusedField({ name: "boats", idle: 0 }), "idle");
+  assert.equal(refusedField({ name: "boats", max: 0 }), "max");
+  assert.equal(refusedField({ name: "boats", perSession: false }), "perSession");
+  assert.deepEqual(requestFields({ name: "boats", max: 0, idle: 0, perSession: false }), ["max", "idle", "perSession"]);
+  assert.deepEqual(requestFields({ name: "boats", idle: 0 }), ["idle"]);
+  assert.deepEqual(requestFields({ name: "boats" }), []);
 });

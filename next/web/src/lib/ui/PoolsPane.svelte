@@ -3,7 +3,7 @@
   import { APIError, call, SignedOut } from "../client.ts";
   import { confirm } from "../modal.ts";
   import { watch, watchHosts } from "../hosts.ts";
-  import { fieldChange, idleMinutes, poolLine, poolNodes, poolOrder, poolSummary } from "../pools.ts";
+  import { enqueue, fieldChange, idleMinutes, poolLine, poolNodes, poolOrder, poolSummary, refusedField, requestFields, type PoolField } from "../pools.ts";
   import type { HostSummary, Pool, PoolSetRequest } from "../contract.gen.ts";
   import Icon from "./Icon.svelte";
   import StatusPill from "./StatusPill.svelte";
@@ -20,8 +20,8 @@
   } = $props();
   let pools: Pool[] | undefined = $state.raw(), hosts: HostSummary[] = $state.raw([]);
   let failed = $state(false), busy = $state(false), creating = $state(false);
-  // A refused change on the open pool, in the engine's words.
-  let problem = $state("");
+  // A refused change on the open pool, in the engine's words, under the field it is about.
+  let problem: { name: string; field: PoolField; text: string } | undefined = $state();
   let items = $derived(pools && poolOrder(pools));
   let item = $derived(items?.find(each => each.name === selected));
   let anchor: HTMLElement | undefined = $state();
@@ -29,10 +29,11 @@
   const words = (reason: unknown) => reason instanceof APIError ? reason.detail.message : "That did not work. Try again.";
   const panel = async () => { await tick(); anchor?.closest<HTMLElement>("aside")?.focus(); };
 
-  // A change reads the list again before it settles; a beat that answers meanwhile may hold the list from before it,
-  // so it is dropped, and the next beat comes 10 s later.
-  const read = () => call("pool.list", {}).then(list => list.pools ?? []);
-  const apply = (list: Pool[]) => { pools = list; failed = false; };
+  // A change reads the list again before it settles; a beat that answers meanwhile, or any read that answers after a
+  // later one started, may hold the list from before it, so it is dropped, and the next beat comes 10 s later.
+  let reads = 0;
+  const read = () => { const ticket = ++reads; return call("pool.list", {}).then(list => ticket === reads ? list.pools ?? [] : undefined); };
+  const apply = (list: Pool[] | undefined) => { if (list) { pools = list; failed = false; } };
   const reload = () => read().then(apply, (reason: unknown) => { if (!gone(reason) && !pools) failed = true; });
   // Add is a step in history of its own, so Back leaves it as the back arrow does.
   function popped() { if (creating && !history.state?.creating) creating = false; }
@@ -44,10 +45,10 @@
     return () => { stopPools(); stopHosts(); window.removeEventListener("popstate", popped); };
   });
   // Another pool, or none, starts without the last one's problem.
-  $effect.pre(() => { void selected; problem = ""; });
+  $effect.pre(() => { void selected; problem = undefined; });
 
   function start() {
-    problem = "";
+    problem = undefined;
     // An open pool stays in the path under Add, so Back returns to it.
     if (!creating) history.pushState({ creating: true, overList: selected === undefined }, "", location.href);
     creating = true;
@@ -65,26 +66,44 @@
     onselect(key, open);
   }
 
-  // Each change saves at once and keeps the focus; the controls stay enabled, so a change while one saves is put back,
-  // as is a refused one, whose words show while its pool is still open.
-  async function save(request: PoolSetRequest, back: () => void) {
-    if (busy) { back(); return; }
-    busy = true; problem = "";
-    const done = await call("pool.set", request).then(async () => { await reload(); return true; }, (reason: unknown) => {
-      if (!gone(reason) && selected === request.name) problem = words(reason);
-      return false;
-    });
+  // Each change saves at once and keeps the focus, and the controls stay enabled: a change made while one saves waits
+  // and joins the others to its pool (enqueue), and goes when that save is done. A refusal shows the engine's words
+  // under the field it is about while its pool is open; that field keeps what was typed, and the request's other fields,
+  // and a refused switch, show the pool's value again.
+  let queue: PoolSetRequest[] = [];
+  // How each waiting or saving field shows its pool's value again, by pool and field.
+  const backs = new Map<string, () => void>();
+  const shown = (name: string) => pools?.find(each => each.name === name);
+  function change(request: PoolSetRequest, field: PoolField, back: () => void) {
+    if (problem?.name === request.name) problem = undefined;
+    backs.set(`${request.name}/${field}`, back);
+    queue = enqueue(queue, request);
+    if (!busy) void drain();
+  }
+  async function drain() {
+    busy = true;
+    while (queue.length) {
+      const [request, ...rest] = queue;
+      queue = rest;
+      const reason = await call("pool.set", request).then(async () => { await reload(); return undefined; }, (reason: unknown) => reason ?? "");
+      const about = refusedField(request);
+      // A field changed again meanwhile waits with its new value, so it is left as it is.
+      for (const field of requestFields(request).filter(field => !queue.some(each => each.name === request.name && each[field] !== undefined))) {
+        if (reason !== undefined && (field !== about || field === "perSession")) backs.get(`${request.name}/${field}`)?.();
+        backs.delete(`${request.name}/${field}`);
+      }
+      if (reason !== undefined && !gone(reason) && selected === request.name) problem = { name: request.name, field: about, text: words(reason) };
+    }
     busy = false;
-    if (!done) back();
   }
   function field(p: Pool, name: "max" | "idle", input: HTMLInputElement) {
-    const shown = name === "max" ? String(p.max) : String(idleMinutes(p.idle ?? 0));
+    const back = () => { const now = shown(p.name); if (now) input.value = name === "max" ? String(now.max) : String(idleMinutes(now.idle ?? 0)); };
     const request = fieldChange(p, name, input.value);
-    if (request) void save(request, () => { input.value = shown; });
-    else input.value = shown;
+    if (request) change(request, name, back);
+    else back();
   }
   async function remove(p: Pool, opener: HTMLElement) {
-    problem = "";
+    problem = undefined;
     const ok = await confirm({ title: `Remove ${p.name}?`, message: "Dyna deletes the pool and its script on the engine host.", action: "Remove", danger: true, opener, failed: words,
       run: () => call("pool.remove", { name: p.name }).catch((reason: unknown) => { gone(reason); throw reason; }) });
     if (!ok) return;
@@ -93,6 +112,7 @@
     onclose();
     await reload();
   }
+  const refused = (p: Pool, field: PoolField) => problem?.name === p.name && problem.field === field;
   const plural = (n: number, one: string, many: string) => `${n.toLocaleString("en")} ${n === 1 ? one : many}`;
 </script>
 
@@ -102,7 +122,7 @@
     <span class="line">{poolLine(p)}</span></span>
 {/snippet}
 
-{#snippet empty()}<button type="button" class="btn" onclick={start}>Add a pool</button>{/snippet}
+{#snippet empty()}<span class="small">A box adds one with the dyna-nodes skill.</span>{/snippet}
 
 {#snippet list({ drill, select: pick }: { drill: boolean; select: (key: string, open: boolean) => void })}
   <ItemList {items} {failed} retry={() => { failed = false; void reload(); }} key={p => p.name} text={p => p.name} noun={["pool", "pools"]} label="Pools"
@@ -118,19 +138,21 @@
   {#if p.problem}<div class="section"><p class="warn">Failing. Boxes that need a node wait, and the pool tries again after a minute, doubling to an hour.</p><p class="reason">{p.problem}</p></div>{/if}
   <div class="section"><strong class="head">Nodes now <span class="n">{p.nodes.toLocaleString("en")}</span></strong>
     {#if nodes.hosts.length}<div class="nodes">{#each nodes.hosts as h (h.name)}<a class="node" href={`/settings/hosts/${encodeURIComponent(h.name)}`} onclick={navigate}>
-      <span class="nname">{h.name}</span>{#if !h.reachable}<StatusPill tone="error" label="Unreachable" />{/if}</a>{/each}</div>{/if}
+      <span class="nname">{h.name}</span>{#if !h.reachable}<StatusPill tone="error" label="Unreachable" />{/if}<span class="go"><Icon name="forwardChevron" size={12} /></span></a>{/each}</div>{/if}
     {#if nodes.creating}<p class="small muted">{plural(nodes.creating, "node", "nodes")} being created</p>{:else if !nodes.hosts.length}<p class="small muted">None. A node comes when a box of a room whose rule names the pool needs one.</p>{/if}</div>
-  <label class="field">At most<input class="input" type="number" min="1" step="1" value={p.max} onchange={event => field(p, "max", event.currentTarget)} />
-    <span class="help">Nodes alive at once, counting those being created. A lower number deletes none; the pool makes no more until it is below it.</span></label>
-  {#if !p.perSession}<label class="field">Idle time<input class="input" type="number" min="0" step="any" value={idleMinutes(p.idle ?? 0)} onchange={event => field(p, "idle", event.currentTarget)} />
-    <span class="help">Minutes a node with no boxes waits before it is deleted. 0 makes the default, 30.</span></label>{/if}
+  <label class="field">At most<input class="input" type="number" min="1" step="1" value={p.max} aria-invalid={refused(p, "max") ? "true" : undefined} onchange={event => field(p, "max", event.currentTarget)} />
+    {@render refusal(p, "max")}<span class="help">Nodes alive at once, counting those being created. A lower number deletes none; the pool makes no more until it is below it.</span></label>
+  {#if !p.perSession}<label class="field">Idle time<input class="input" type="number" min="0" step="any" value={idleMinutes(p.idle ?? 0)} aria-invalid={refused(p, "idle") ? "true" : undefined} onchange={event => field(p, "idle", event.currentTarget)} />
+    {@render refusal(p, "idle")}<span class="help">Minutes a node with no boxes waits before it is deleted. 0 makes the default, 30.</span></label>{/if}
   <div class="stack"><label class="set"><span class="name">One per session</span><input type="checkbox" role="switch" checked={!!p.perSession} aria-label="One per session"
-    onchange={event => { const box = event.currentTarget; void save({ name: p.name, perSession: box.checked }, () => { box.checked = !box.checked; }); }} />
-    <span class="help">Each session gets a node of its own, which goes when its box is gone. Nodes already up keep the shape they were made with.</span></label></div>
-  {#if problem}<p class="problem" role="alert">{problem}</p>{/if}
+    onchange={event => { const box = event.currentTarget; change({ name: p.name, perSession: box.checked }, "perSession", () => { box.checked = !!shown(p.name)?.perSession; }); }} />
+    <span class="help">Each session gets a node of its own, which goes when its box is gone. Nodes already up keep the shape they were made with.</span></label>
+    {@render refusal(p, "perSession")}</div>
   <div class="danger-zone"><span class="small muted">Refused while it has nodes or a room's rule names it.</span>
     <button type="button" class="btn danger" aria-haspopup="dialog" onclick={event => void remove(p, event.currentTarget)}>Remove</button></div>
 {/snippet}
+
+{#snippet refusal(p: Pool, field: PoolField)}{#if refused(p, field)}<span class="problem" role="alert">{problem?.text}</span>{/if}{/snippet}
 
 {#snippet detail()}
   <div class="detail" bind:this={anchor}>
@@ -158,8 +180,10 @@
   .head .n { margin-left: 4px; color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
   .warn { color: var(--attention); font-size: 13px; font-weight: 500; }
   .reason { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); font: 12px/1.5 var(--mono); white-space: pre-wrap; }
-  .problem { color: var(--danger); font-size: 13px; font-weight: 500; }
+  .problem { display: block; color: var(--danger); font-size: 13px; font-weight: 500; }
   .problem::first-letter { text-transform: uppercase; }
+  .input[aria-invalid] { border-color: var(--danger); }
+  .go { display: grid; flex: none; color: var(--muted); }
   code { font-family: var(--mono); font-size: 12px; }
   .nodes { display: grid; }
   .node { display: flex; align-items: center; gap: 10px; min-height: 32px; margin: 0 -8px; padding: 4px 8px; border-radius: 6px; color: var(--text); font-size: 13px; font-weight: 500; text-decoration: none; }
