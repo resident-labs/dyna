@@ -59,7 +59,6 @@ rm -rf "$root/next/web/dist"
 (cd "$root/next/web" && npm ci && npm run build)
 test -s "$root/next/web/dist/index.html"
 (cd "$root/next" && go build -o "$stage/dyna" ./cmd/dyna)
-"$root/next/third_party/pi/scripts/pi-pack.sh" "$stage/pi.tgz"
 strings "$stage/dyna" | grep 'assets/index-' >/dev/null
 if "$dry_run"; then
   trap - ERR
@@ -68,9 +67,7 @@ if "$dry_run"; then
 fi
 step=install
 cp "$stage/dyna" "$bin/dyna.new"
-cp "$stage/pi.tgz" "$bin/pi.new"
 mv "$bin/dyna.new" "$bin/dyna"
-mv "$bin/pi.new" "$bin/pi.tgz"
 step=restart
 systemctl --user restart "$unit"
 systemctl --user is-active --quiet "$unit"

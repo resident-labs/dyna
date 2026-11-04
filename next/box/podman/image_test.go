@@ -48,11 +48,11 @@ func TestBuildBaseSendsTaggedContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tag, err := h.BuildBase(context.Background(), []byte("container"), []byte("pi"))
+	tag, err := h.BuildBase(context.Background(), []byte("container"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = "dyna-base:5e39aec50ee63e9a28cb339d41a69cef7f83a486e64807583b6f72098a0c4af1"
+	const want = "dyna-base:a42d519714d616e9411dbceec4b52808bd6b1ee53e6f6497a281d655357d8b71"
 	if tag != want {
 		t.Fatalf("tag %s", tag)
 	}
@@ -67,15 +67,16 @@ func TestBuildBaseSendsTaggedContext(t *testing.T) {
 		t.Fatal("invalid input frame")
 	}
 	tr := tar.NewReader(bytes.NewReader(r.input[i+1:]))
-	for _, file := range []struct{ name, content string }{{"Containerfile", "container"}, {"pi.tgz", "pi"}} {
-		header, err := tr.Next()
-		if err != nil || header.Name != file.name {
-			t.Fatalf("header %v: %v", header, err)
-		}
-		data, err := io.ReadAll(tr)
-		if err != nil || string(data) != file.content {
-			t.Fatalf("content %q: %v", data, err)
-		}
+	header, err := tr.Next()
+	if err != nil || header.Name != "Containerfile" {
+		t.Fatalf("header %v: %v", header, err)
+	}
+	data, err := io.ReadAll(tr)
+	if err != nil || string(data) != "container" {
+		t.Fatalf("content %q: %v", data, err)
+	}
+	if _, err := tr.Next(); err != io.EOF {
+		t.Fatalf("the context holds more than the Containerfile: %v", err)
 	}
 }
 
@@ -149,13 +150,13 @@ func TestBuildBaseCancellationWhileAnotherBuildRuns(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := h.BuildBase(context.Background(), []byte("container"), []byte("pi"))
+		_, err := h.BuildBase(context.Background(), []byte("container"))
 		done <- err
 	}()
 	<-r.started
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err = h.BuildBase(ctx, []byte("container"), []byte("pi"))
+	_, err = h.BuildBase(ctx, []byte("container"))
 	close(r.release)
 	if firstErr := <-done; firstErr != nil {
 		t.Fatal(firstErr)
@@ -171,7 +172,7 @@ func TestBuildBaseReusesExistingTag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = h.BuildBase(context.Background(), []byte("container"), []byte("pi")); err != nil {
+	if _, err = h.BuildBase(context.Background(), []byte("container")); err != nil {
 		t.Fatal(err)
 	}
 	if len(r.commands) != 1 || !strings.Contains(r.commands[0], "'image' 'exists'") {
