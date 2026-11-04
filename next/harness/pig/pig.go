@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -88,22 +87,9 @@ func Open(ctx context.Context, c Config) (*Harness, error) {
 		ModelRuntime: models,
 		ResourceLoaderOptions: &coding.DefaultResourceLoaderOptions{
 			ExtensionFactories: extensions,
-			// The first extension to register a tool name keeps it, and the loader puts the packages' extensions ahead of the
-			// inline ones, so the inline ones move to the front.
-			ExtensionsOverride: func(loaded coding.LoadExtensionsResult) coding.LoadExtensionsResult {
-				inline := func(e extension.Extension) bool { return strings.HasPrefix(e.Path, "<inline:") }
-				slices.SortStableFunc(loaded.Extensions, func(a, b extension.Extension) int {
-					switch {
-					case inline(a) && !inline(b):
-						return -1
-					case inline(b) && !inline(a):
-						return 1
-					}
-					return 0
-				})
-				return loaded
-			},
-			AppendSystemPrompt: []string{c.Instructions},
+			// The first extension to register a tool name keeps it, so the inline ones, Dyna's, load ahead of the packages'.
+			InlineExtensionsFirst: true,
+			AppendSystemPrompt:    []string{c.Instructions},
 		},
 	})
 	if err != nil {

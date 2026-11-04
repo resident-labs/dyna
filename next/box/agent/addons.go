@@ -201,7 +201,7 @@ func installedPath(root string, item contract.Addon) string {
 // piInstall has PiG install a source into an agent folder of its own, the way it installs a configured package, and
 // then loads the package's extensions there. PiG cannot say which package a failed extension belongs to once more than
 // one is configured, so each source gets its own folder. A package whose extension fails to load must show here, or the
-// session would report it at every box start. PiG's install does not take a context, so a timeout abandons it.
+// session would report it at every box start.
 func piInstall(ctx context.Context, dir, source string) error {
 	settings, err := json.Marshal(struct {
 		Packages []string `json:"packages"`
@@ -213,29 +213,18 @@ func piInstall(ctx context.Context, dir, source string) error {
 		return err
 	}
 	loader := coding.NewDefaultResourceLoader(coding.DefaultResourceLoaderOptions{CWD: dir, AgentDir: dir, NoContextFiles: true})
-	installed := make(chan error, 1)
-	go func() {
-		defer loader.Close()
-		if err := loader.ReloadWith(ctx); err != nil {
-			installed <- fmt.Errorf("install failed: %w", err)
-			return
-		}
-		var failures []string
-		for _, failed := range loader.GetExtensions().Errors {
-			failures = append(failures, failed.Error)
-		}
-		if len(failures) > 0 {
-			installed <- fmt.Errorf("its extension failed to load: %s", lastOutput([]byte(strings.Join(failures, "; "))))
-			return
-		}
-		installed <- nil
-	}()
-	select {
-	case err := <-installed:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
+	defer loader.Close()
+	if err := loader.ReloadWith(ctx); err != nil {
+		return fmt.Errorf("install failed: %w", err)
 	}
+	var failures []string
+	for _, failed := range loader.GetExtensions().Errors {
+		failures = append(failures, failed.Error)
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("its extension failed to load: %s", lastOutput([]byte(strings.Join(failures, "; "))))
+	}
+	return nil
 }
 
 func lastOutput(out []byte) string {
