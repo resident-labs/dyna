@@ -1,17 +1,35 @@
 <script lang="ts">
   import { onMount, type Snippet } from "svelte";
   import { APIError, call, SignedOut } from "../client.ts";
-  import { profileForSave, profileModels, profileRows, slugName, type ProfileModel, type ProfileSummary } from "../profiles.ts";
-  import type { ThinkingLevel } from "../contract.gen.ts";
-  import Icon from "./Icon.svelte";
+  import { profileChips, profileForSave, profileColumns, profileLine, profileModels, profileRows, profileText, providerFilter, providers, unrated, type ProfileModel, type ProfileSummary } from "../profiles.ts";
+  import type { ModelProvider } from "../contract.gen.ts";
+  import ItemList from "./settings/ItemList.svelte";
+  import ListDetail from "./settings/ListDetail.svelte";
   import ProfileEditor from "./ProfileEditor.svelte";
-
-  let { bar, phone, signedout }: { bar: Snippet<[string, number | undefined, Snippet | undefined]>; phone: boolean; signedout: () => void } = $props();
-  let profiles: ProfileSummary[] = $state([]), loaded = $state(false), failed = $state(false);
-  let editing: string | undefined = $state(), creating = $state(false), busy = $state(false), error = $state("");
-  let models: ProfileModel[] = $state([]);
+  // Settings > Profiles (spec 5.13): every profile as a compact row of values, and the open profile's editor beside the
+  // list, the one place that explains the ratings. New profile opens an empty editor in the detail's place.
+  // profile.list is whole, so the list searches, filters and sorts here.
+  let { bar, phone, signedout, selected, onselect, onclose }: {
+    bar: Snippet<[string, number | undefined, Snippet | undefined]>; phone: boolean; signedout: () => void;
+    selected: string | undefined; onselect: (name: string, open: boolean) => void; onclose: () => void;
+  } = $props();
+  let profiles: ProfileSummary[] | undefined = $state.raw();
+  let models: ProfileModel[] = $state.raw([]);
+  let failed = $state(false), creating = $state(false), busy = $state(false), error = $state(""), said = $state("");
+  let provider: ModelProvider | "" = $state("");
+  let profile = $derived(profiles?.find(each => each.name === selected));
   const blank: ProfileSummary = { inUse: 0, name: "", provider: "openai", model: "", thinking: "medium", description: "", taste: 0, diagnostics: 0, intelligence: 0, cost: 0 };
-  function close() { editing = undefined; creating = false; error = ""; }
+
+  function reload() {
+    void call("profile.list", {}).then(result => { profiles = profileRows(result.profiles); failed = false; },
+      (reason: unknown) => { if (reason instanceof SignedOut) signedout(); else if (!profiles) failed = true; });
+    // Without the accounts the owner can still type a model ID.
+    void call("accounts.list", {}).then(result => { models = profileModels(result.accounts ?? []); }, () => {});
+  }
+  onMount(() => { reload(); window.addEventListener("focus", reload); return () => window.removeEventListener("focus", reload); });
+  // Another profile, or none, starts without the last one's error.
+  $effect.pre(() => { void selected; error = ""; said = ""; });
+
   function showError(reason: unknown, action: "save" | "remove") {
     if (reason instanceof SignedOut) signedout();
     else if (reason instanceof APIError && reason.detail.code === "profile_exists") error = "A profile with this name already exists.";
@@ -20,102 +38,74 @@
   }
   async function save(draft: ProfileSummary) {
     if (busy) return;
-    busy = true; error = "";
-    const profile = profileForSave(draft);
-    await call("profile.set", { create: creating, profile }).then(() => { close(); reload(); }, (reason: unknown) => showError(reason, "save"));
+    busy = true; error = ""; said = "";
+    const create = creating, profile = profileForSave(draft);
+    await call("profile.set", { create, profile }).then(() => {
+      reload();
+      if (create) { creating = false; onselect(profile.name, phone); } else said = "Saved.";
+    }, (reason: unknown) => showError(reason, "save"));
     busy = false;
   }
   async function remove(name: string, replacement?: string) {
     if (busy) return;
     busy = true; error = "";
-    await call("profile.remove", { name, replacement }).then(() => { close(); reload(); }, (reason: unknown) => showError(reason, "remove"));
+    await call("profile.remove", { name, replacement }).then(() => { onclose(); reload(); }, (reason: unknown) => showError(reason, "remove"));
     busy = false;
   }
-  const thinking: Record<ThinkingLevel, string> = {
-    off: "no thinking", minimal: "minimal thinking", low: "low thinking", medium: "medium thinking", high: "high thinking", xhigh: "very high thinking",
-  };
-  function reload() {
-    void call("profile.list", {}).then(result => { profiles = profileRows(result.profiles); loaded = true; failed = false; },
-      (error: unknown) => { if (error instanceof SignedOut) signedout(); else if (!loaded) failed = true; });
-    // Without the accounts the owner can still type a model ID.
-    void call("accounts.list", {}).then(result => { models = profileModels(result.accounts ?? []); }, () => {});
+  function start() {
+    error = ""; said = "";
+    if (selected !== undefined) onclose();
+    creating = true;
   }
-  onMount(() => { reload(); window.addEventListener("focus", reload); return () => window.removeEventListener("focus", reload); });
-  const unrated = (p: ProfileSummary) => !p.taste && !p.diagnostics && !p.intelligence && !p.cost;
-  const rating = (n: number) => n || "Not rated";
+  function close() {
+    if (creating) { creating = false; error = ""; return; }
+    onclose();
+  }
+  function select(name: string, open: boolean) { creating = false; onselect(name, open); }
+  const value = (n: number | undefined) => n || "–";
 </script>
 
-{#snippet action()}<button type="button" class="new" onclick={() => { close(); creating = true; }}>{phone ? "New" : "New profile"}</button>{/snippet}
-{#if phone && (editing || creating)}
-  <header class="phone-bar"><button type="button" onclick={close} aria-label="Back to Profiles"><Icon name="backChevron" /></button><strong>{creating ? "New profile" : editing}</strong></header>
-{:else}
-  {@render bar("Profiles", loaded ? profiles.length : undefined, action)}
-{/if}
-<div class="content" data-page-ready={loaded}>
-  {#if phone && creating}
-    <ProfileEditor profile={blank} {profiles} {models} isNew={true} {busy} {error} {save} cancel={close} remove={() => {}} />
-  {:else if phone && editing}
-    {#each profiles.filter(profile => profile.name === editing) as profile (profile.name)}
-      <p class="summary">{slugName(profile.model)} · {thinking[profile.thinking]}</p>
-      <ProfileEditor {profile} {profiles} {models} isNew={false} {busy} {error} {save} cancel={close} remove={replacement => void remove(profile.name, replacement)} />
-    {/each}
-  {:else}
-  {#if failed}<p role="alert">The profiles did not load. <button type="button" onclick={reload}>Try again</button></p>
-  {:else if !loaded}<p class="muted">Loading profiles…</p>
-  {:else}
-    {#if creating}<div class="table"><ProfileEditor profile={blank} {profiles} {models} isNew={true} {busy} {error} {save} cancel={close} remove={() => {}} /></div>{/if}
-    <p class="summary">{profiles.length} {profiles.length === 1 ? "profile" : "profiles"} · {profiles.filter(unrated).length} not rated</p>
-    {#if !profiles.length}<p class="muted">No profiles yet.</p>
-    {:else}<div class="table">
-      <div class="head"><span></span><span>Taste</span><span>Diagnostics</span><span>Intelligence</span><span>Thrift</span><span>Limits</span><span></span></div>
-      {#each profiles as profile (profile.name)}
-        <div class="row">
-          <div class="identity"><strong title={profile.name}>{profile.name}</strong><span>{slugName(profile.model)} · {thinking[profile.thinking]}</span></div>
-          {#if unrated(profile)}
-            <span class="unrated">Not rated · <button type="button" aria-label={`Rate ${profile.name}`} onclick={() => { close(); editing = profile.name; }}>Rate</button></span>
-          {:else}
-            {#each ([["Taste", profile.taste], ["Diagnostics", profile.diagnostics], ["Intelligence", profile.intelligence], ["Thrift", profile.cost]] as const) as [label, value]}
-              <span class="number" class:missing={!value}><span class="rating-label">{label} </span>{rating(value)}</span>
-            {/each}
-          {/if}
-          <span class="limits">{#if profile.maxConcurrent}At most {profile.maxConcurrent} at once{:else}No limit{/if}</span>
-          <button type="button" class="edit" onclick={() => { const name = editing === profile.name ? undefined : profile.name; close(); editing = name; }} aria-label={`Edit ${profile.name}`}>{#if phone}<Icon name="forwardChevron" />{:else}Edit{/if}</button>
-        </div>
-        {#if !phone && editing === profile.name}<ProfileEditor {profile} {profiles} {models} isNew={false} {busy} {error} {save} cancel={close} remove={replacement => void remove(profile.name, replacement)} />{/if}
-      {/each}
-    </div>{/if}
+{#snippet row(profile: ProfileSummary, compact: boolean)}
+  <span class="lines"><span class="title"><span class="name">{profile.name}</span></span><span class="line">{profileLine(profile, compact)}</span></span>
+  {#if !compact}{#each [profile.taste, profile.diagnostics, profile.intelligence, profile.cost] as rating, index (index)}<span class="cell num" class:high={rating >= 9}>{value(rating)}</span>{/each}
+    <span class="cell num">{value(profile.maxConcurrent)}</span><span class="cell num">{value(profile.inUse)}</span>{/if}
+{/snippet}
+
+{#snippet tools()}
+  <select class="provider" aria-label="Provider" bind:value={provider} disabled={!profiles}>
+    <option value="">Every provider</option>{#each Object.entries(providers) as [id, name] (id)}<option value={id}>{name}</option>{/each}
+  </select>
+{/snippet}
+
+{#snippet empty()}<button type="button" class="btn" onclick={start}>New profile</button>{/snippet}
+
+{#snippet list({ drill, select: pick }: { drill: boolean; select: (key: string, open: boolean) => void })}
+  <ItemList items={profiles} {failed} retry={() => { failed = false; reload(); }} key={each => each.name} text={profileText} noun={["profile", "profiles"]} label="Profiles"
+    chips={profileChips} columns={profileColumns} sort={{ column: "name", dir: 1 }} filter={providerFilter(provider)} onclear={() => { provider = ""; }}
+    {row} {tools} {empty} selected={creating ? undefined : selected} {drill} onselect={pick} />
+{/snippet}
+
+{#snippet detail()}
+  {#if creating}{#key "new"}<ProfileEditor profile={blank} profiles={profiles ?? []} {models} isNew {busy} {error} note="" {save} remove={() => {}} />{/key}
+  {:else if profile}{#key profile.name}<ProfileEditor {profile} profiles={profiles ?? []} {models} isNew={false} {busy} {error} note={said} {save} remove={replacement => void remove(profile!.name, replacement)} />{/key}
+  {:else}<p class="muted">That profile is gone, or the link is wrong.</p>
   {/if}
-  {/if}
-</div>
+{/snippet}
+
+{#snippet summary()}
+  {#if profiles}<p class="muted"><span class="fact">{profiles.length.toLocaleString("en")} {profiles.length === 1 ? "profile" : "profiles"}</span>
+    <span class="fact">· {profiles.filter(unrated).length.toLocaleString("en")} not rated</span> <span class="fact">· {profiles.filter(each => each.inUse > 0).length.toLocaleString("en")} in use</span></p>{/if}
+{/snippet}
+
+{#snippet action()}<button type="button" class="btn new" onclick={start}>{phone ? "New" : "New profile"}</button>{/snippet}
+{#snippet header()}{@render bar("Profiles", profiles?.length, action)}{/snippet}
+
+<ListDetail bar={header} label="Profiles" title={creating ? "New profile" : profile?.name ?? "Not found"} open={creating || (!!profiles && selected !== undefined)} onselect={select} onclose={close} {list} {detail} {summary} />
 
 <style>
   .new { margin-left: auto; }
-  .new { border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--text); font: inherit; padding: 8px 12px; cursor: pointer; }
-  .phone-bar { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--line); }
-  .phone-bar button { width: 32px; height: 40px; display: grid; place-items: center; border: 0; color: var(--muted); background: transparent; cursor: pointer; }
-  .content { container-type: inline-size; overflow: auto; padding: 20px 16px 32px; }
-  .summary, .muted { color: var(--muted); margin: 0 8px 16px; }
-  .summary { font-size: 12.5px; }
-  .table { max-width: 1048px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); overflow: hidden; }
-  .head, .row { display: grid; grid-template-columns: minmax(250px, 4fr) repeat(4, minmax(66px, .9fr)) minmax(130px, 2fr) 48px; align-items: center; gap: 10px; padding: 12px 14px; }
-  .head { color: var(--muted); font-size: 12px; padding-top: 8px; padding-bottom: 4px; }
-  .row { border-top: 1px solid var(--line); min-height: 66px; }
-  .identity { min-width: 0; display: flex; flex-direction: column; }
-  .identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .identity span, .number, .limits { color: var(--muted); font-size: 12.5px; }
-  .number { font-variant-numeric: tabular-nums; }
-  .rating-label { display: none; }
-  .unrated { grid-column: span 4; color: var(--muted); font-size: 12.5px; }
-  .unrated button { border: 0; background: none; color: var(--text); font: inherit; padding: 0; cursor: pointer; text-decoration: underline; }
-  .edit { border: 0; background: none; color: var(--muted); cursor: pointer; font: inherit; padding: 8px; }
-  @container (max-width: 800px) {
-    .head { display: none; }
-    .row { position: relative; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; padding: 14px; }
-    .identity { grid-column: 1 / -1; padding-right: 48px; }
-    .edit { position: absolute; right: 14px; top: 10px; }
-    .number { grid-column: span 1; color: var(--text); }
-    .number.missing, .rating-label { color: var(--muted); }
-    .rating-label { display: inline; margin-right: 4px; }
-    .unrated, .limits { grid-column: 1 / -1; }
-  }
+  .provider { height: 30px; padding: 0 8px; border: 1px solid var(--firm); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
+  @media (hover: none) { .provider { height: 36px; } }
+  .num { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .num.high { color: var(--text); font-weight: 600; }
 </style>
