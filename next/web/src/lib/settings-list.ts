@@ -75,3 +75,9 @@ export function listKey(key: string, active: number, rows: readonly Row<unknown>
   if (row.kind === "group" && ((key === "ArrowLeft" && !row.folded) || (key === "ArrowRight" && row.folded))) return { fold: active };
   return undefined;
 }
+
+// What the list says when nothing is left: the search, and the chip and the page's own filter that narrowed it.
+export function noResults(noun: string, query: string, filters: readonly string[]): string {
+  const within = filters.length ? ` in ${filters.join(", ")}` : "";
+  return query ? `No ${noun} match “${query}”${within}.` : `No ${noun}${within || " match the filters"}.`;
+}
