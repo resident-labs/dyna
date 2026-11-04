@@ -65,7 +65,6 @@ type Boxes struct {
 	instructionSynced map[*podman.Host]*instructionHost
 	instructionSums   map[contract.RoomID][sha256.Size]byte // each AGENTS.md as last noted, under instructionsMu
 	Version           string
-	PiTarball         []byte
 	Mirror            *enginegit.Mirror
 	Images            *engineimages.Builder
 	RoomImages        *engineimages.Store
@@ -1314,7 +1313,7 @@ func (b *Boxes) CurrentImage(ctx context.Context, sessionID contract.SessionID, 
 // size of a build ahead skips that.
 func (b *Boxes) image(ctx context.Context, h *podman.Host, host contract.HostName, room contract.RoomID, repo contract.RepoName, composeName string, size contract.BoxSize) (box.Image, error) {
 	steps := box.NewStepLog("host " + string(host))
-	base, err := h.BuildBase(ctx, images.BaseContainerfile, b.PiTarball)
+	base, err := h.BuildBase(ctx, images.BaseContainerfile)
 	if err != nil {
 		return box.Image{}, err
 	}

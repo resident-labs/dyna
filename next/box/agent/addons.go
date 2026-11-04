@@ -21,7 +21,7 @@ import (
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/skills"
 	"github.com/resident-labs/dyna/contract"
-	"github.com/resident-labs/dyna/harness/pi"
+	"github.com/resident-labs/dyna/harness/pig"
 )
 
 // installTimeout bounds what one box start spends on packages it has not cached, so a hung registry costs a notice and not the box.
@@ -60,7 +60,7 @@ type chosenAddon struct {
 
 // apply returns the added MCP servers and, in plain words, each item that failed. Only a box that cannot write its own
 // folders gets an error.
-func (a addonStart) apply(ctx context.Context) (map[string]pi.MCPServer, []string, error) {
+func (a addonStart) apply(ctx context.Context) (map[string]pig.MCPServer, []string, error) {
 	work, err := os.MkdirTemp(filepath.Dir(a.Skills), ".addons-")
 	if err != nil {
 		return nil, nil, err
@@ -84,7 +84,7 @@ func (a addonStart) apply(ctx context.Context) (map[string]pi.MCPServer, []strin
 	if err := skills.Install(a.Skills); err != nil {
 		return nil, nil, err
 	}
-	servers := map[string]pi.MCPServer{}
+	servers := map[string]pig.MCPServer{}
 	var packages []contract.Addon
 	for _, key := range slices.Sorted(maps.Keys(chosen)) {
 		item := chosen[key]
@@ -100,7 +100,7 @@ func (a addonStart) apply(ctx context.Context) (map[string]pi.MCPServer, []strin
 		case contract.AddonPackage:
 			packages = append(packages, item.Addon)
 		case contract.AddonMCP:
-			servers[item.Name] = pi.MCPServer{URL: item.URL, Command: item.Command, Args: item.Args, Exposure: "deferred"}
+			servers[item.Name] = pig.MCPServer{URL: item.URL, Command: item.Command, Args: item.Args, Exposure: "deferred"}
 		}
 	}
 	paths, failed := a.install(ctx, packages)

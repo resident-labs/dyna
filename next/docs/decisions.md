@@ -48,7 +48,7 @@ The owner chose to ship without the five-provider evaluation gate. A Claude sani
 
 - **Decision.** The system prompt of a Dyna box has no `<docs>` section, about 330 tokens that point at Pi's own documentation and tell the agent to read pi `.md` files. The box agent passes `--no-docs`, a Pi fork flag (P14, fork level 15) that leaves out that one section. Nothing else in the prompt changes.
 - **Why a fork flag.** Pi v1.4.0 has no option for it: `--system-prompt` replaces the tools and rules too, and `docs` is a reserved section name an extension cannot remove. The flag is the one place that changes; the box agent has no prompt text of its own to keep in step.
-- **Where the docs are.** They stay at `/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/docs`, and the `dyna-extend` skill, the one place an agent learns about extending Dyna, names that path.
+- **Where the docs are.** This was written for the Node Pi, whose docs stayed on disk in the box image and which the `dyna-extend` skill named. PiG replaced it: it carries no docs bundle, so it builds no `docs` section and no flag is needed, and the box has no Pi or PiG documentation. The `dyna-extend` skill, the one place an agent learns about extending Dyna, now gives the keys of a package's `pi` block itself.
 
 ## Settings list pages share one list and detail (owner, 2026-11-03)
 
