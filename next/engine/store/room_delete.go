@@ -123,7 +123,6 @@ func (s *Store) MarkRoomDeleting(ctx context.Context, room contract.RoomID, even
 			"UPDATE boxes SET want='discard',due_at=0 WHERE want!='discard' AND session IN (SELECT id FROM sessions WHERE room=?1 AND closed_at IS NULL)",
 			"UPDATE hostexec_runs SET stopped='closed' WHERE ended_at IS NULL AND grant_id IN (SELECT id FROM grants WHERE room=?1)",
 			"UPDATE operations SET expires_at=?2 WHERE room=?1 AND state='pending'",
-			"UPDATE archives SET expires_at=?2,retry_at=0 WHERE session IN (SELECT id FROM sessions WHERE room=?1)",
 		} {
 			if _, err := tx.ExecContext(ctx, step, room, now); err != nil {
 				return err
@@ -179,7 +178,6 @@ var deleteRoom = []string{
 	`DELETE FROM goals WHERE room=?1`,
 	`DELETE FROM checkins WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM boxes WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
-	`DELETE FROM archives WHERE ref='' AND session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM sessions WHERE room=?1`,
 	`DELETE FROM room_repos WHERE room=?1`,
 	// A repository another room lists stays, with a default room that exists. One no room lists goes, and with it any PR or issue
