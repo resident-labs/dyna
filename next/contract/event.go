@@ -336,7 +336,7 @@ const (
 	CauseCreateFailed        FailureCause = "create_failed"         // the box could not be created on its host
 	CauseStartFailed         FailureCause = "start_failed"          // the box container could not start on its host
 	CauseNoHello             FailureCause = "no_hello"              // the box agent did not connect in time
-	CauseEngineRestarted     FailureCause = "engine_restarted"      // the engine restarted while it created the box
+	CauseEngineRestarted     FailureCause = "engine_restarted"      // the engine restarted while it created the box, or during a host run it could not follow again
 	CauseRemoveFailed        FailureCause = "remove_failed"         // close could not remove the box
 	CauseArchiveFailed       FailureCause = "archive_failed"        // close could not archive the session's branch (older versions)
 	CauseGrantInactive       FailureCause = "grant_inactive"        // the host-exec grant is no longer active
