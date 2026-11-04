@@ -851,3 +851,10 @@ func (s *Store) SessionHasTurns(ctx context.Context, session contract.SessionID)
 	err := s.Read().QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM turns WHERE session=?)", session).Scan(&has)
 	return has, err
 }
+
+// SessionHasChildren reports whether the session ever started a child, closed or not.
+func (s *Store) SessionHasChildren(ctx context.Context, session contract.SessionID) (bool, error) {
+	var has bool
+	err := s.Read().QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM sessions WHERE parent=?)", session).Scan(&has)
+	return has, err
+}

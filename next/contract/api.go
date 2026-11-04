@@ -698,19 +698,21 @@ type TextOnlyModel struct {
 }
 
 type BoxHelloResponse struct {
-	Room           RoomID           `json:"room"`
-	Root           bool             `json:"root,omitempty"` // the session has no parent, so add-ons marked root-only reach its box
-	GitName        string           `json:"gitName,omitempty"`
-	GitEmail       string           `json:"gitEmail,omitempty"`
-	CompactTokens  int              `json:"compactTokens,omitempty"`
-	Instructions   string           `json:"instructions"`
-	Session        SessionID        `json:"session"`
-	Box            BoxID            `json:"box"`
-	Model          ModelChoice      `json:"model"`
-	TextOnlyModels []TextOnlyModel  `json:"textOnlyModels,omitempty"`
-	Repos          []BoxRepo        `json:"repos,omitempty"`
-	Transcripts    []TranscriptFile `json:"transcripts,omitempty"`
-	Workflow       *BoxWorkflow     `json:"workflow,omitempty"` // a crew's box runs this script and no Pi of its own
+	Room          RoomID `json:"room"`
+	Root          bool   `json:"root,omitempty"` // the session has no parent, so add-ons marked root-only reach its box
+	GitName       string `json:"gitName,omitempty"`
+	GitEmail      string `json:"gitEmail,omitempty"`
+	CompactTokens int    `json:"compactTokens,omitempty"`
+	Instructions  string `json:"instructions"`
+	// WorkerInstructions is the part of the prompt a workflow worker shares with every agent. A crew's box puts it before the crew paragraph.
+	WorkerInstructions string           `json:"workerInstructions,omitempty"`
+	Session            SessionID        `json:"session"`
+	Box                BoxID            `json:"box"`
+	Model              ModelChoice      `json:"model"`
+	TextOnlyModels     []TextOnlyModel  `json:"textOnlyModels,omitempty"`
+	Repos              []BoxRepo        `json:"repos,omitempty"`
+	Transcripts        []TranscriptFile `json:"transcripts,omitempty"`
+	Workflow           *BoxWorkflow     `json:"workflow,omitempty"` // a crew's box runs this script and no Pi of its own
 	// GitHub says the engine serves GitHub's read-only MCP tools at /github/ on the box socket, with its own token.
 	GitHub bool `json:"github,omitempty"`
 }
