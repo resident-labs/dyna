@@ -158,14 +158,14 @@ func (s *Service) SearchRooms(ctx context.Context, caller contract.Principal, re
 }
 
 // HistoryRead reads posts of one conversation. A feed is readable in any room; a DM only in the caller's own room.
-func (s *Service) HistoryRead(ctx context.Context, caller contract.Principal, req contract.HistoryRequest) (contract.HistoryResponse, *contract.Error) {
+func (s *Service) HistoryRead(ctx context.Context, caller contract.Principal, req contract.HistoryReadRequest) (contract.HistoryReadResponse, *contract.Error) {
 	own, owner, e := s.navScope(ctx, caller)
 	if e != nil {
-		return contract.HistoryResponse{}, e
+		return contract.HistoryReadResponse{}, e
 	}
 	limit := req.Limit
 	if limit < 0 || limit > contract.HistoryLimitMax {
-		return contract.HistoryResponse{}, invalid("limit is at most 50")
+		return contract.HistoryReadResponse{}, invalid("limit is at most 50")
 	}
 	if limit == 0 {
 		limit = contract.HistoryLimitDefault
@@ -177,57 +177,57 @@ func (s *Service) HistoryRead(ctx context.Context, caller contract.Principal, re
 		}
 	}
 	if named > 1 {
-		return contract.HistoryResponse{}, invalid("name one of around, before, after and post")
+		return contract.HistoryReadResponse{}, invalid("name one of around, before, after and post")
 	}
 	var room contract.RoomID
 	var dm contract.SessionID
 	var anchor int64
 	if id := cmpOr(req.Post, req.Around); id != "" {
 		if req.Room != "" || req.DM != "" {
-			return contract.HistoryResponse{}, invalid("a post names its own room and conversation")
+			return contract.HistoryReadResponse{}, invalid("a post names its own room and conversation")
 		}
 		place, err := s.store.PostPlaceOf(ctx, id)
 		if errors.Is(err, store.ErrNotFound) {
-			return contract.HistoryResponse{}, invalid("no post " + string(id))
+			return contract.HistoryReadResponse{}, invalid("no post " + string(id))
 		}
 		if err != nil {
-			return contract.HistoryResponse{}, failure(err)
+			return contract.HistoryReadResponse{}, failure(err)
 		}
 		room, dm, anchor = place.Room, place.DM, place.Seq
 		if dm != "" && !owner && room != own {
-			return contract.HistoryResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "a DM can be read only in your own room"}
+			return contract.HistoryReadResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "a DM can be read only in your own room"}
 		}
 	} else {
 		if req.Room == "" && owner {
-			return contract.HistoryResponse{}, invalid("the owner has no room: name one")
+			return contract.HistoryReadResponse{}, invalid("the owner has no room: name one")
 		}
 		room = own
 		if req.Room != "" {
 			var e *contract.Error
 			if room, e = s.navRoom(ctx, req.Room, own, owner); e != nil {
-				return contract.HistoryResponse{}, e
+				return contract.HistoryReadResponse{}, e
 			}
 		}
 		if req.DM != "" {
 			if !owner && room != own {
-				return contract.HistoryResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "a DM can be read only in your own room"}
+				return contract.HistoryReadResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "a DM can be read only in your own room"}
 			}
 			id, err := s.store.SessionInRoom(ctx, room, req.DM)
 			if errors.Is(err, store.ErrNotFound) {
-				return contract.HistoryResponse{}, invalid("no session " + req.DM + " in that room")
+				return contract.HistoryReadResponse{}, invalid("no session " + req.DM + " in that room")
 			}
 			if err != nil {
-				return contract.HistoryResponse{}, failure(err)
+				return contract.HistoryReadResponse{}, failure(err)
 			}
 			dm = id
 		}
 		if cursor := cmpOr(req.Before, req.After); cursor != "" {
 			place, err := s.store.PostPlaceOf(ctx, cursor)
 			if errors.Is(err, store.ErrNotFound) || (err == nil && (place.Room != room || place.DM != dm)) {
-				return contract.HistoryResponse{}, invalid("no post " + string(cursor) + " in this conversation")
+				return contract.HistoryReadResponse{}, invalid("no post " + string(cursor) + " in this conversation")
 			}
 			if err != nil {
-				return contract.HistoryResponse{}, failure(err)
+				return contract.HistoryReadResponse{}, failure(err)
 			}
 			anchor = place.Seq
 		}
@@ -255,7 +255,7 @@ func (s *Service) HistoryRead(ctx context.Context, caller contract.Principal, re
 		events, err = s.store.PostsPage(ctx, room, dm, 0, anchor, limit)
 	}
 	if err != nil {
-		return contract.HistoryResponse{}, failure(err)
+		return contract.HistoryReadResponse{}, failure(err)
 	}
 	ids := map[contract.SessionID]bool{dm: dm != ""}
 	for _, event := range events {
@@ -273,13 +273,13 @@ func (s *Service) HistoryRead(ctx context.Context, caller contract.Principal, re
 		}
 	}))
 	if err != nil {
-		return contract.HistoryResponse{}, failure(err)
+		return contract.HistoryReadResponse{}, failure(err)
 	}
 	roomName, err := s.store.RoomNameOf(ctx, room)
 	if err != nil {
-		return contract.HistoryResponse{}, failure(err)
+		return contract.HistoryReadResponse{}, failure(err)
 	}
-	result := contract.HistoryResponse{Room: roomName, Home: "feed", Posts: []contract.HistoryPost{}}
+	result := contract.HistoryReadResponse{Room: roomName, Home: "feed", Posts: []contract.HistoryPost{}}
 	if dm != "" {
 		result.Home = "dm:" + names[dm]
 	}
@@ -329,12 +329,12 @@ func (s *Service) HistoryRead(ctx context.Context, caller contract.Principal, re
 		return result, nil
 	}
 	if more, err := s.store.PostBeyond(ctx, room, dm, seqs[0], false); err != nil {
-		return contract.HistoryResponse{}, failure(err)
+		return contract.HistoryReadResponse{}, failure(err)
 	} else if more {
 		result.Older = result.Posts[0].ID
 	}
 	if more, err := s.store.PostBeyond(ctx, room, dm, seqs[len(seqs)-1], true); err != nil {
-		return contract.HistoryResponse{}, failure(err)
+		return contract.HistoryReadResponse{}, failure(err)
 	} else if more {
 		result.Newer = result.Posts[len(result.Posts)-1].ID
 	}
