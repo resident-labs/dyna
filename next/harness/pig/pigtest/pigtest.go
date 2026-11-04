@@ -90,7 +90,7 @@ func (m *Model) Requests() []Request {
 }
 
 // AgentDir serves the model and writes an agent folder whose anthropic provider is it, with the models test-model and
-// small-model, whose context window is 30,000 tokens, as a
+// small-model, whose context window is 30,000 tokens, and tools-model, which takes tool changes mid-conversation as a Claude route does, as a
 // box's loopback models.json does. mcp.json lists the given servers.
 func AgentDir(t *testing.T, model *Model, mcpServers string) string {
 	t.Helper()
@@ -101,7 +101,7 @@ func AgentDir(t *testing.T, model *Model, mcpServers string) string {
 		mcpServers = "{}"
 	}
 	for name, content := range map[string]string{
-		"models.json":   `{"providers":{"anthropic":{"baseUrl":"` + server.URL + `","apiKey":"box","models":[{"id":"test-model","api":"anthropic-messages","reasoning":true,"input":["text","image"],"contextWindow":200000,"maxTokens":8000},{"id":"small-model","api":"anthropic-messages","reasoning":true,"input":["text","image"],"contextWindow":30000,"maxTokens":4000},{"id":"effort-model","api":"anthropic-messages","reasoning":true,"input":["text"],"contextWindow":200000,"maxTokens":8000,"compat":{"forceAdaptiveThinking":true,"supportsMidConvoEffort":true},"thinkingLevelMap":{"off":null,"low":"low","medium":"medium","high":"high"}}]}}}`,
+		"models.json":   `{"providers":{"anthropic":{"baseUrl":"` + server.URL + `","apiKey":"box","models":[{"id":"test-model","api":"anthropic-messages","reasoning":true,"input":["text","image"],"contextWindow":200000,"maxTokens":8000},{"id":"small-model","api":"anthropic-messages","reasoning":true,"input":["text","image"],"contextWindow":30000,"maxTokens":4000},{"id":"tools-model","api":"anthropic-messages","reasoning":true,"input":["text"],"contextWindow":200000,"maxTokens":8000,"compat":{"supportsMidConvoSystemMessages":true,"supportsMidConvoToolChanges":true}},{"id":"effort-model","api":"anthropic-messages","reasoning":true,"input":["text"],"contextWindow":200000,"maxTokens":8000,"compat":{"forceAdaptiveThinking":true,"supportsMidConvoEffort":true},"thinkingLevelMap":{"off":null,"low":"low","medium":"medium","high":"high"}}]}}}`,
 		"settings.json": `{"defaultProjectTrust":"always","steeringMode":"all"}`,
 		"auth.json":     `{}`,
 		"mcp.json":      `{"mcpServers":` + mcpServers + `}`,
