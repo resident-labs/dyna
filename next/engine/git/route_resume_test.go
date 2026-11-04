@@ -40,25 +40,25 @@ func pushTo(t *testing.T, rooms RoomRepositories, branch string) (string, bool) 
 }
 
 func TestAResumedSessionPushesTheBranchesOfTheRunItResumes(t *testing.T) {
-	access := resumedAccess{fakeAccess{allowed: true}}
-	for _, branch := range []string{"v2/ses_0", "v2/ses_0-0123456789ab", "v2/ses_0-run"} {
+	access := resumedAccess{routeAccess()}
+	for _, branch := range []string{"earlier", "earlier-0123456789ab", "earlier-run"} {
 		if report, forwarded := pushTo(t, access, branch); !forwarded {
 			t.Errorf("%s: %q", branch, report)
 		}
 	}
-	for _, branch := range []string{"v2/ses_2-0123456789ab", "v2/ses_0/topic", "main"} {
+	for _, branch := range []string{"other-0123456789ab", "earlier/topic", "main"} {
 		if report, forwarded := pushTo(t, access, branch); forwarded || !strings.Contains(report, "ng refs/heads/"+branch) {
 			t.Errorf("%s: forwarded %v, %q", branch, forwarded, report)
 		}
 	}
-	if report, forwarded := pushTo(t, fakeAccess{allowed: true}, "v2/ses_0-0123456789ab"); forwarded || !strings.Contains(report, "not owned by this session") {
+	if report, forwarded := pushTo(t, routeAccess(), "earlier-0123456789ab"); forwarded || !strings.Contains(report, "not owned by this session") {
 		t.Errorf("a session that resumes nothing: forwarded %v, %q", forwarded, report)
 	}
 }
 
 func TestARefusedPushSaysTheRule(t *testing.T) {
-	report, _ := pushTo(t, fakeAccess{allowed: true}, "v2/ses_0-0123456789ab")
-	for _, want := range []string{"not owned by this session", "v2/ses_1,", "v2/ses_1-<topic>", "a workflow run it resumes", "a PR it owns"} {
+	report, _ := pushTo(t, routeAccess(), "earlier-0123456789ab")
+	for _, want := range []string{"not owned by this session", "work,", "work-<topic>", "a workflow run it resumes", "a PR it owns"} {
 		if !strings.Contains(report, want) {
 			t.Errorf("the refusal does not say %q: %q", want, report)
 		}

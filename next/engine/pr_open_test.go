@@ -26,6 +26,10 @@ func prFixture(t *testing.T, handler http.HandlerFunc) (*Service, contract.Sessi
 	if e != nil {
 		t.Fatal(e)
 	}
+	// The engine gives a session its branch at its first box setup; the fixture's session has had that.
+	if _, err := s.store.ClaimBranch(ctx, "owner/repo", child.Session, "pr-worker", nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	endpoint, err := url.Parse(server.URL)
@@ -86,7 +90,10 @@ func TestPrOpenReportsTheDefaultHeadWhenGitHubRefuses(t *testing.T) {
 		}
 		return result.Operation.Result.Error
 	}
-	branch := "v2/" + string(session)
+	branch := "pr-worker"
+	if _, err := s.store.ClaimBranch(ctx, record.Repo, session, branch, nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	if message := open(""); !strings.Contains(message, "head was not given and defaulted to "+branch+"; head names another branch") {
 		t.Fatalf("default head: %q", message)
 	}
@@ -137,7 +144,10 @@ func TestPrOpenSendsEveryFieldToGitHubAndKeepsTheBodyInTheRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	branch := "v2/" + string(session)
+	branch := "pr-worker"
+	if _, err := s.store.ClaimBranch(ctx, record.Repo, session, branch, nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	result, failure := s.OpSubmit(ctx, sessionCaller(session), contract.OpSubmitRequest{Operation: contract.Operation{Room: record.Room, Kind: "pr.open", Args: contract.PrOpenArgs{Title: "Trial", Body: "## What\nthe body", Base: "main", Draft: true}}})
 	if failure != nil || result.Operation.State != contract.OpDone {
 		t.Fatalf("response %+v error %+v", result, failure)

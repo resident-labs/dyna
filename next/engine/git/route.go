@@ -82,8 +82,13 @@ func Handler(upstream *url.URL, transport http.RoundTripper, token string, sessi
 				w.Header().Set("Content-Type", "application/x-git-receive-pack-result")
 				var report bytes.Buffer
 				pkt(&report, "unpack ok\n")
+				rule, err := pushRule(r.Context(), rooms, repo, session)
+				if err != nil {
+					http.Error(w, "repository access unavailable", http.StatusServiceUnavailable)
+					return
+				}
 				for _, ref := range rejected {
-					pkt(&report, "ng "+ref+" "+pushRule(session)+"\n")
+					pkt(&report, "ng "+ref+" "+rule+"\n")
 				}
 				io.WriteString(&report, "0000")
 				if sideband {
@@ -177,17 +182,40 @@ func commands(ctx context.Context, body io.ReadCloser, session contract.SessionI
 	}{io.MultiReader(&prefix, reader), body}, refs, sideband, nil
 }
 
-// pushRule is what a refused push reads: the refusal and the rule that made it.
-func pushRule(session contract.SessionID) string {
-	base := SessionBranchPrefix + string(session)
-	return fmt.Sprintf("not owned by this session: it can push %s, %s-<topic>, those branches of a workflow run it resumes, and the branch of a PR it owns", base, base)
+// pushRule is what a refused push reads: the refusal and the rule that made it, naming the session's branch.
+func pushRule(ctx context.Context, rooms RoomRepositories, repo contract.RepoName, session contract.SessionID) (string, error) {
+	recorded, err := rooms.SessionBranches(ctx, repo, session)
+	if err != nil {
+		return "", err
+	}
+	if len(recorded) == 0 {
+		return "not owned by this session: it has no branch yet, and can push the branch of a PR it owns", nil
+	}
+	return fmt.Sprintf("not owned by this session: it can push %s, %s-<topic>, those branches of a workflow run it resumes, and the branch of a PR it owns", recorded[0], recorded[0]), nil
 }
 
-// CanPushBranch checks a session branch, a branch registered to an owned PR, or a session branch of a run that this session's
-// run resumes. A resumed run is a new session, and it carries on the work on the branches of the runs before it.
+// refSafe is a name or topic of letters, digits, dots, underscores and hyphens that git accepts in a branch name.
+func refSafe(s string) bool {
+	return validPart(s) && !strings.HasSuffix(s, ".") && !strings.HasSuffix(s, ".lock") && !strings.Contains(s, "..")
+}
+
+// ValidBranch reports whether name is one the engine records as a branch: refSafe, starting with a letter or digit, and not a
+// protected name.
+func ValidBranch(name string) bool {
+	return refSafe(name) && name[0] != '.' && name[0] != '-' && name[0] != '_' && name != "main" && name != "master" && name != "HEAD"
+}
+
+// CanPushBranch checks the branches recorded as the session's own, those followed by -<topic>, a branch registered to an owned
+// PR, and the same recorded branches of the runs that this session's run resumes. A resumed run is a new session, and it
+// carries on the work on the branches of the runs before it. A name that another session that is not closed has recorded is
+// never reached through a topic.
 func CanPushBranch(ctx context.Context, rooms RoomRepositories, repo contract.RepoName, session contract.SessionID, branch string) (bool, error) {
-	if sessionBranch(session, branch) {
-		return true, nil
+	own, err := rooms.SessionBranches(ctx, repo, session)
+	if err != nil {
+		return false, err
+	}
+	if match, err := reaches(ctx, rooms, repo, []contract.SessionID{session}, own, branch); match || err != nil {
+		return match, err
 	}
 	if owned, err := rooms.OwnsPRBranch(ctx, repo, session, branch); owned || err != nil {
 		return owned, err
@@ -196,14 +224,27 @@ func CanPushBranch(ctx context.Context, rooms RoomRepositories, repo contract.Re
 	if err != nil {
 		return false, err
 	}
-	return slices.ContainsFunc(resumed, func(earlier contract.SessionID) bool { return sessionBranch(earlier, branch) }), nil
+	for _, earlier := range resumed {
+		recorded, err := rooms.SessionBranches(ctx, repo, earlier)
+		if err != nil {
+			return false, err
+		}
+		if match, err := reaches(ctx, rooms, repo, append([]contract.SessionID{session}, resumed...), recorded, branch); match || err != nil {
+			return match, err
+		}
+	}
+	return false, nil
 }
 
-func sessionBranch(session contract.SessionID, branch string) bool {
-	base := SessionBranchPrefix + string(session)
-	if branch == base {
-		return true
+// reaches reports whether branch is one of recorded or a topic of one, and no session outside sessions has it.
+func reaches(ctx context.Context, rooms RoomRepositories, repo contract.RepoName, sessions []contract.SessionID, recorded []string, branch string) (bool, error) {
+	for _, base := range recorded {
+		topic, ok := strings.CutPrefix(branch, base+"-")
+		if branch != base && !(ok && refSafe(topic)) {
+			continue
+		}
+		holder, err := rooms.BranchHolder(ctx, repo, branch)
+		return holder == "" || slices.Contains(sessions, holder), err
 	}
-	topic, ok := strings.CutPrefix(branch, base+"-")
-	return ok && validPart(topic) && !strings.HasSuffix(topic, ".") && !strings.HasSuffix(topic, ".lock") && !strings.Contains(topic, "..")
+	return false, nil
 }

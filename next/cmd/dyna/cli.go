@@ -66,6 +66,7 @@ type client interface {
 	ComposeList(context.Context, contract.ComposeListRequest) (contract.ComposeListResponse, error)
 	SessionClose(context.Context, contract.SessionCloseRequest) (contract.SessionCloseResponse, error)
 	SessionSetProfile(context.Context, contract.SessionSetProfileRequest) (contract.SessionSetProfileResponse, error)
+	SessionSetBranch(context.Context, contract.SessionSetBranchRequest) (contract.SessionSetBranchResponse, error)
 	SessionRestart(context.Context, contract.SessionRestartRequest) (contract.SessionRestartResponse, error)
 	SessionRefresh(context.Context, contract.SessionRefreshRequest) (contract.SessionRefreshResponse, error)
 	Post(context.Context, contract.PostRequest) (contract.PostResponse, error)
@@ -126,7 +127,7 @@ type requestType interface {
 		contract.IssueListRequest | contract.IssueStatusRequest | contract.IssueTrackRequest | contract.IssueUntrackRequest |
 		contract.QuestionAskRequest | contract.QuestionAnswerRequest | contract.QuestionListRequest |
 		contract.OpWithdrawRequest |
-		contract.SessionMoveRequest |
+		contract.SessionMoveRequest | contract.SessionSetBranchRequest |
 		contract.SessionListRequest |
 		contract.SessionResponsibilitiesRequest |
 		contract.GoalSetRequest | contract.GoalListRequest | contract.GoalItemRequest | contract.GoalDoneRequest | contract.GoalJournalRequest |
@@ -144,7 +145,7 @@ type responseType interface {
 		contract.IssueListResponse | contract.IssueStatusResponse | contract.IssueTrackResponse | contract.IssueUntrackResponse |
 		contract.QuestionAskResponse | contract.QuestionAnswerResponse | contract.QuestionListResponse |
 		contract.OpWithdrawResponse |
-		contract.SessionMoveResponse |
+		contract.SessionMoveResponse | contract.SessionSetBranchResponse |
 		contract.SessionListResponse |
 		contract.SessionResponsibilitiesResponse |
 		contract.GoalSetResponse | contract.GoalListResponse | contract.GoalItemResponse | contract.GoalDoneResponse | contract.GoalJournalResponse |
@@ -307,6 +308,9 @@ func (c *socketClient) ComposeList(ctx context.Context, q contract.ComposeListRe
 }
 func (c *socketClient) SessionStart(ctx context.Context, q contract.SessionStartRequest) (contract.SessionStartResponse, error) {
 	return call[contract.SessionStartRequest, contract.SessionStartResponse](ctx, c, contract.MethodSessionStart, q)
+}
+func (c *socketClient) SessionSetBranch(ctx context.Context, q contract.SessionSetBranchRequest) (contract.SessionSetBranchResponse, error) {
+	return call[contract.SessionSetBranchRequest, contract.SessionSetBranchResponse](ctx, c, contract.MethodSessionSetBranch, q)
 }
 func (c *socketClient) SessionSetProfile(ctx context.Context, q contract.SessionSetProfileRequest) (contract.SessionSetProfileResponse, error) {
 	return call[contract.SessionSetProfileRequest, contract.SessionSetProfileResponse](ctx, c, contract.MethodSessionSetProfile, q)
@@ -886,6 +890,10 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		_, err := getClient().SessionSetProfile(cmd.Context(), contract.SessionSetProfileRequest{Session: contract.SessionID(args[0]), Profile: contract.ProfileName(args[1])})
 		return err
 	}}
+	setBranch := &cobra.Command{Use: "set-branch SESSION BRANCH", Short: "Make BRANCH the session's branch on its repository (owner socket only; renames nothing on GitHub)", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := getClient().SessionSetBranch(cmd.Context(), contract.SessionSetBranchRequest{Session: contract.SessionID(args[0]), Branch: args[1]})
+		return err
+	}}
 	session.AddCommand(&cobra.Command{Use: "list ROOM", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		result, err := getClient().SessionList(cmd.Context(), contract.SessionListRequest{Room: contract.RoomID(args[0])})
 		if err != nil {
@@ -921,7 +929,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	}}
 	composeList.Flags().StringVar(&composeRoom, "room", "", "Room ID")
 	composeList.Flags().StringVar(&composeRepo, "repo", "", "Repository a child would use")
-	session.AddCommand(start, closeCmd, restart, refresh, setProfile, composeList)
+	session.AddCommand(start, closeCmd, restart, refresh, setProfile, setBranch, composeList)
 	root.AddCommand(session)
 	var postRoom, htmlPath, update string
 	var allowNet bool

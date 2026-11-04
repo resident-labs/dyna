@@ -33,7 +33,7 @@ func (r *fakeRepos) Get(_ context.Context, _ contract.SessionID, _ contract.Host
 	if fetch {
 		r.prepared = true
 	}
-	return []contract.BoxRepo{{Name: "owner/repo", Cache: "/host/git/owner/repo.git"}}, nil
+	return []contract.BoxRepo{{Name: "owner/repo", Cache: "/host/git/owner/repo.git", Branch: "named-branch"}}, nil
 }
 
 func (r *fakeRepos) Seed(ctx context.Context, session contract.SessionID, host contract.HostName) ([]contract.BoxRepo, string, error) {
