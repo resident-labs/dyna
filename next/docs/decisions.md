@@ -1737,3 +1737,8 @@ The owner chose to ship without the five-provider evaluation gate. A Claude sani
 - **Owner only to change.** `room.set` is the owner's, and it refuses an unknown kind. Settings > Rooms and `dyna room set --root-approves-KIND on|off` reach it. An Autopilot button turns all four on, or off.
 - **Left out.** CI switches (`repo.ci.set`, `host set --ci`) are direct owner-only calls with no request to decide, and host CI is not per room. Merging approved PRs is not an operation Dyna has (spec 7.6). Neither has a switch.
 - **The root may decide its own request.** When a kind is on, a root's own request in its room waits for a decision like any other, and the root may make it. That already held for `hostexec` and spec 3.5 states it; the owner has the question of whether it should stay.
+
+### Root sees its room's switches in `dyna_room` (owner gap via root, 2026-11-03)
+
+- **Gap.** `room.set` changed `rooms.root_approves` and told nobody, so a root could not know it might now decide those requests.
+- **A live section, no notice.** A new context section `dyna_room` is for the room's root session only (the typed `Session.Root`), one line per non-default room setting that changes what root may do. Today: `Approvals you decide: host exec, global add-ons`, the kinds that are on, in Settings order, named as Settings names them. It describes and does not prescribe. With every switch off it is not rendered. A flip reaches the root as a changed-section diff at its next turn, like `dyna_children`, and wakes nobody; turning the last switch off removes the section. A later room setting joins by adding one line in the renderer.
