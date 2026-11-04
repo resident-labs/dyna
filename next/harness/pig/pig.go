@@ -96,7 +96,7 @@ func (h *Harness) start(ctx context.Context, c Config) error {
 		return err
 	}
 	// "+bash" keeps the extension's bash active in a resumed session, which restores the tools its transcript recorded.
-	created, err := coding.CreateAgentSessionFromServices(coding.CreateAgentSessionFromServicesOptions{Services: h.services, SessionManager: manager, Model: model, ThinkingLevel: ai.ModelThinkingLevel(c.Model.Thinking), Tools: []string{"+codemode", "+bash"}})
+	created, err := coding.CreateAgentSessionFromServices(coding.CreateAgentSessionFromServicesOptions{Services: h.services, SessionManager: manager, Model: model, ThinkingLevel: ai.ModelThinkingLevel(c.Model.Thinking), Tools: []string{"+codemode", "+bash"}, ContextUpdates: true})
 	if err != nil {
 		return err
 	}
@@ -260,8 +260,15 @@ func (h *Harness) Compact(ctx context.Context, over int64) (harness.Compaction, 
 	return compaction, nil
 }
 
-// SetPromptSections comes with the port of Pi's context updates.
-func (h *Harness) SetPromptSections(context.Context, []contract.ContextSection) error { return nil }
+// SetPromptSections sets the turn's context sections, after the ones PiG builds. The first request holds them in its
+// system prompt, and a later change reaches the model as a context update before the next request (dyna patch P5).
+func (h *Harness) SetPromptSections(_ context.Context, sections []contract.ContextSection) error {
+	host := make(ai.OrderedSections, 0, len(sections))
+	for _, section := range sections {
+		host = append(host, ai.PromptSection{Name: string(section.Key), Value: &section.Text})
+	}
+	return h.session.SetHostPromptSections(host)
+}
 
 func (h *Harness) Abort(ctx context.Context) error { return h.session.Abort(ctx) }
 
