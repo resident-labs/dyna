@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"regexp"
 	"runtime/debug"
 	"slices"
@@ -95,15 +94,6 @@ func (s *serviceWithHosts) HostAdd(ctx context.Context, caller contract.Principa
 	return contract.HostAddResponse{NoSwap: noSwap}, nil
 }
 
-func loadPi(executable string) ([]byte, error) {
-	path := filepath.Join(filepath.Dir(executable), "pi.tgz")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read Pi package %s: %w", path, err)
-	}
-	return data, nil
-}
-
 type Config struct {
 	Data, Runtime, HostData, Profiles, Version string
 	ApprovalsExpiry                            time.Duration
@@ -123,10 +113,6 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	executable, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	pi, err := loadPi(executable)
 	if err != nil {
 		return err
 	}
@@ -159,7 +145,7 @@ func Run(ctx context.Context, cfg Config) error {
 	drain := model.NewDrain()
 	boxCtx, stopBoxes := context.WithCancel(ctx)
 	defer stopBoxes()
-	boxes := &Boxes{Store: st, HeartbeatStore: st, Runtime: cfg.Runtime, Layout: layout, Version: cfg.Version, PiTarball: pi, Context: boxCtx}
+	boxes := &Boxes{Store: st, HeartbeatStore: st, Runtime: cfg.Runtime, Layout: layout, Version: cfg.Version, Context: boxCtx}
 	service := engine.New(st, boxes, profiles, time.Now)
 	service.SetLayout(layout)
 	binary, err := boxes.binarySum()
