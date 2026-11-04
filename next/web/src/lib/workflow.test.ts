@@ -202,7 +202,7 @@ test("a result leaves out what the page already shows, whatever the script calle
   const sha = "18b5fa2b8d9825dcdd238bbdcb671334c70eb35b";
   const steps = [step("fix-1"), step("fix-2", { state: "failed" }), step("key-3", { name: "Read the logs" })];
   const merge = { branch: "v2/s-run", commit: sha, merged: ["fix-1"], conflicts: [{ step: "fix-2", branch: "v2/s-2", files: ["f"] }] };
-  const shown = shownFacts({ session: "ses_1", name: "sweep", repo: "a/b", commit: "abc1234" }, steps, merge);
+  const shown = shownFacts({ branch: "v2/ses_1", name: "sweep", repo: "a/b", commit: "abc1234" }, steps, merge);
   assert.deepEqual(jsonFields({ merged: ["fix-1"], steps: [{ step: "fix-1", text: "x", files: ["a"] }, { name: "Read the logs" }], outcome: { branch: "v2/s-run", commit: sha, merged: ["fix-1"], conflicts: [] }, branch: "v2/s-run", head: sha, repo: "a/b", count: 3, summary: "Fixed one" }, shown).map(item => item.label), ["Count", "Summary"]);
   assert.deepEqual(jsonFields({ stepsDone: 3, steps: 3, failed: 1, merged: 1, conflicts: 1 }, shown).map(item => item.label), ["Steps done"]);
   assert.deepEqual(jsonFields({ others: ["fix-1", "something else"] }, shown).map(item => item.label), ["Others"]);
@@ -213,7 +213,7 @@ test("a result leaves out what the page already shows, whatever the script calle
 test("a value is left out for repeating the page, never for its key's name", () => {
   const steps = [step("a1b2c3d4e5f6a7b8c9d0"), step("second", { state: "failed" })];
   const merge = { branch: "v2/ses_1-run", commit: "abc", merged: ["a"], conflicts: [] };
-  const shown = shownFacts({ session: "ses_1", name: "sweep" }, steps, merge);
+  const shown = shownFacts({ branch: "v2/ses_1", name: "sweep" }, steps, merge);
   const unrelated = { steps: ["Wash", "Dry", "Fold"], merged: ["pricing.md and docs.md"], conflicts: ["a Tuesday booking"], failed: ["/pricing", "/careers"] };
   assert.deepEqual(jsonFields(unrelated, shown).map(item => item.label), ["Steps", "Merged", "Conflicts", "Failed"]);
   assert.deepEqual(jsonFields({ steps: [{ branch: "v2/ses_1-a1b2c3d4e5f6", commit: "fed", files: ["a"] }, { name: "second" }] }, shown), [], "a step's own worktree branch names it");

@@ -75,6 +75,7 @@ const (
 	MethodSessionSetProfile       Method = "session.set_profile"
 	MethodSessionAccount          Method = "session.account"
 	MethodSessionSetAccount       Method = "session.set_account"
+	MethodSessionSetBranch        Method = "session.set_branch"
 	MethodSessionRestart          Method = "session.restart"
 	MethodSessionRefresh          Method = "session.refresh"
 	MethodSessionMove             Method = "session.move"
@@ -565,6 +566,14 @@ type SessionSetProfileRequest struct {
 	Profile ProfileName `json:"profile"`
 }
 type SessionSetProfileResponse struct{}
+
+// SessionSetBranchRequest makes Branch the session's branch on its repository, as the owner's way to move a live session to a
+// new name. It adds a record and renames nothing on GitHub. A box cannot call it.
+type SessionSetBranchRequest struct {
+	Session SessionID `json:"session"`
+	Branch  string    `json:"branch"`
+}
+type SessionSetBranchResponse struct{}
 type SessionRestartRequest struct {
 	Session SessionID `json:"session"`
 }
