@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -103,20 +104,20 @@ func (s *Service) WebSearch(ctx context.Context, caller contract.Principal, req 
 	defer cancel()
 	out := contract.WebSearchResponse{Results: []contract.WebSearchResult{}, Attempts: []contract.WebSearchAttempt{}}
 	candidates := make([]searchCandidate, 0, 9)
-	room := contract.RoomID("")
+	roomID := contract.RoomID("")
 	if caller.Kind == contract.PrincipalSession {
 		session, err := s.store.Session(ctx, caller.Session)
 		if err != nil {
 			return out, &contract.Error{Code: contract.ErrForbidden, Message: "search caller unavailable"}
 		}
-		room = session.Room
+		roomID = session.Room
 	}
 	if s.searchProxy != nil {
 		accounts, err := s.store.Accounts(ctx)
 		if err != nil {
 			return out, &contract.Error{Code: contract.ErrUnavailable, Message: "search accounts unavailable"}
 		}
-		eligible, err := s.store.EligibleAccountProxyIDs(ctx, room)
+		eligible, err := s.store.EligibleAccountProxyIDs(ctx, roomID)
 		if err != nil {
 			return out, &contract.Error{Code: contract.ErrUnavailable, Message: "search accounts unavailable"}
 		}
@@ -159,13 +160,18 @@ func (s *Service) WebSearch(ctx context.Context, caller contract.Principal, req 
 	for _, provider := range []websearch.Provider{websearch.Muse{Key: key("muse")}, websearch.Brave{BaseURL: s.searchBraveURL, Key: key("brave")}, websearch.Exa{Key: key("exa")}, websearch.Tavily{Key: key("tavily")}} {
 		candidates = append(candidates, searchCandidate{provider: provider})
 	}
-	out.Attempts = s.orderSearchCandidates(room, candidates, out.Attempts)
+	out.Attempts = s.orderSearchCandidates(roomID, candidates, out.Attempts)
 	for _, candidate := range candidates {
 		results, err := websearch.Attempt(ctx, candidate.provider, websearch.Query{Text: req.Query, Limit: req.Limit})
 		if err == nil {
 			out.Provider = contract.WebSearchProvider(candidate.provider.Name())
 			for _, r := range results {
-				out.Results = append(out.Results, contract.WebSearchResult{Title: r.Title, URL: r.URL, Snippet: r.Snippet, Provider: contract.WebSearchProvider(r.Provider)})
+				// A result's title and snippet are the page's text; the domain names who wrote it.
+				domain := ""
+				if u, err := url.Parse(r.URL); err == nil {
+					domain = u.Hostname()
+				}
+				out.Results = append(out.Results, contract.WebSearchResult{Title: contract.Outside("web", domain, r.Title), URL: r.URL, Snippet: contract.Outside("web", domain, r.Snippet), Provider: contract.WebSearchProvider(r.Provider)})
 			}
 			return out, nil
 		}
@@ -185,7 +191,7 @@ func (s *Service) WebSearch(ctx context.Context, caller contract.Principal, req 
 			} else if len(s.searchFailures) >= 256 {
 				clear(s.searchFailures)
 			}
-			s.searchFailures[string(room)+"/"+candidate.provider.Name()] = s.now().Add(5 * time.Minute)
+			s.searchFailures[string(roomID)+"/"+candidate.provider.Name()] = s.now().Add(5 * time.Minute)
 			s.searchMu.Unlock()
 		}
 		out.Attempts = append(out.Attempts, contract.WebSearchAttempt{Provider: contract.WebSearchProvider(candidate.provider.Name()), Reason: reason, Message: message})

@@ -80,6 +80,29 @@ func Extension(c Config) extension.InlineExtension {
 			}
 			return extension.ToolCallEventResult{}, nil
 		})
+		// What a server other than dyna returns is outside text: github's as itself, any other by its name. Its author is each
+		// item's own and unknown here.
+		api.OnToolResult(func(_ context.Context, e extension.ToolResultEvent) (extension.ToolResultEventResult, error) {
+			result := e.(extension.CustomToolResultEvent)
+			server, _, found := strings.Cut(strings.TrimPrefix(result.ToolName, "mcp__"), "__")
+			if !found || !strings.HasPrefix(result.ToolName, "mcp__") || server == "dyna" {
+				return extension.ToolResultEventResult{}, nil
+			}
+			source := "mcp " + server
+			if server == "github" {
+				source = server
+			}
+			content := make([]any, len(result.Content))
+			for i, block := range result.Content {
+				content[i] = block
+				// PiG gives a block as the JSON object it is.
+				if fields, ok := block.(map[string]any); ok && fields["type"] == "text" {
+					text, _ := fields["text"].(string)
+					content[i] = map[string]any{"type": "text", "text": contract.Outside(source, "", text)}
+				}
+			}
+			return extension.ToolResultEventResult{Content: content, StructuredContent: result.StructuredContent}, nil
+		})
 		postDefinition, err := postTool(c, post, roots)
 		if err != nil {
 			return err
