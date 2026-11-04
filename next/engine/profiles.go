@@ -101,18 +101,14 @@ func validateProfiles(profiles map[contract.ProfileName]profile) error {
 	return nil
 }
 
-func (p *ProfileConfig) List() []contract.ProfileSummary {
+func (p *ProfileConfig) List() []contract.Profile {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	result := make([]contract.ProfileSummary, 0, len(p.entries))
+	result := make([]contract.Profile, 0, len(p.entries))
 	for name, profile := range p.entries {
-		var images *bool
-		if !profile.Images {
-			images = &profile.Images
-		}
-		result = append(result, contract.ProfileSummary{Name: name, Provider: profile.Provider, Model: profile.Model, Images: images, Thinking: profile.Thinking, Description: profile.Description, Taste: profile.Taste, Diagnostics: profile.Diagnostics, Intelligence: profile.Intelligence, Cost: profile.Cost, AllowedModels: slices.Clone(profile.AllowedModels), CompactTokens: profile.CompactTokens, MaxConcurrent: profile.MaxConcurrent})
+		result = append(result, contract.Profile{Name: name, Provider: profile.Provider, Model: profile.Model, Images: &profile.Images, Thinking: profile.Thinking, Description: profile.Description, Taste: profile.Taste, Diagnostics: profile.Diagnostics, Intelligence: profile.Intelligence, Cost: profile.Cost, AllowedModels: slices.Clone(profile.AllowedModels), CompactTokens: profile.CompactTokens, MaxConcurrent: profile.MaxConcurrent})
 	}
-	slices.SortFunc(result, func(a, b contract.ProfileSummary) int { return strings.Compare(string(a.Name), string(b.Name)) })
+	slices.SortFunc(result, func(a, b contract.Profile) int { return strings.Compare(string(a.Name), string(b.Name)) })
 	return result
 }
 
@@ -152,11 +148,12 @@ func (s *Service) ProfileList(ctx context.Context, who contract.Principal, _ con
 	if err != nil {
 		return contract.ProfileListResponse{}, failure(err)
 	}
-	profiles := s.profiles.List()
-	for i := range profiles {
-		profiles[i].InUse = counts[profiles[i].Name]
+	stored := s.profiles.List()
+	entries := make([]contract.ProfileEntry, len(stored))
+	for i, p := range stored {
+		entries[i] = contract.ProfileEntry{Profile: p, InUse: counts[p.Name]}
 	}
-	return contract.ProfileListResponse{Profiles: profiles}, nil
+	return contract.ProfileListResponse{Profiles: entries}, nil
 }
 
 // AllowedModels returns the models a session may call: its profile's, and the ones its last turns ran on. A session

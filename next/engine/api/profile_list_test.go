@@ -62,7 +62,8 @@ func TestProfileListOwnerOnly(t *testing.T) {
 	if err := json.Unmarshal(got.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	want := []contract.ProfileSummary{{Name: "a", Provider: contract.ModelProviderAnthropic, Model: "a-model", AllowedModels: []string{"a-model"}, Thinking: contract.ThinkingLow}, {Name: "z", Provider: contract.ModelProviderOpenAI, Model: "z-model", AllowedModels: []string{"z-model"}, Thinking: contract.ThinkingHigh}}
+	yes := true
+	want := []contract.ProfileEntry{{Profile: contract.Profile{Name: "a", Provider: contract.ModelProviderAnthropic, Model: "a-model", Images: &yes, AllowedModels: []string{"a-model"}, Thinking: contract.ThinkingLow}}, {Profile: contract.Profile{Name: "z", Provider: contract.ModelProviderOpenAI, Model: "z-model", Images: &yes, AllowedModels: []string{"z-model"}, Thinking: contract.ThinkingHigh}}}
 	if !reflect.DeepEqual(result.Profiles, want) {
 		t.Fatalf("profiles: %+v", result.Profiles)
 	}
@@ -147,5 +148,91 @@ func TestProfileWrites(t *testing.T) {
 	}
 	if got := request(owner, "/v1/profile.remove", `{"name":"original"}`); got.Code != http.StatusBadRequest {
 		t.Fatalf("last profile: %d", got.Code)
+	}
+}
+
+func TestProfileListRoundTripsIntoSet(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	stored := `{"a":{"description":"d","taste":3,"diagnostics":4,"intelligence":5,"cost":6,"provider":"openai","model":"m","images":false,"allowedModels":["m","n"],"thinking":"high","compactTokens":9,"maxConcurrent":2},"b":{"provider":"anthropic","model":"b","allowedModels":["b"],"thinking":"low"}}`
+	if err := os.WriteFile(path, []byte(stored), 0600); err != nil {
+		t.Fatal(err)
+	}
+	profiles, err := engine.LoadProfiles(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	a := New(profileService{engine: engine.New(st, nil, profiles, time.Now)}, nil)
+	owner := a.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}})
+	listed := func() contract.ProfileListResponse {
+		got := request(owner, "/v1/profile.list", "{}")
+		var result contract.ProfileListResponse
+		if got.Code != http.StatusOK {
+			t.Fatalf("list: %d %s", got.Code, got.Body)
+		}
+		if err := json.Unmarshal(got.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	before := listed()
+	if before.Profiles[0].Profile.Images == nil || *before.Profiles[0].Profile.Images {
+		t.Fatalf("images false is not listed: %+v", before.Profiles[0].Profile)
+	}
+	if before.Profiles[1].Profile.Images == nil || !*before.Profiles[1].Profile.Images {
+		t.Fatalf("images true is not listed: %+v", before.Profiles[1].Profile)
+	}
+	for _, entry := range before.Profiles {
+		body, err := json.Marshal(contract.ProfileSetRequest{Profile: entry.Profile})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := request(owner, "/v1/profile.set", string(body)); got.Code != http.StatusOK {
+			t.Fatalf("set %s from the list: %d %s", entry.Profile.Name, got.Code, got.Body)
+		}
+	}
+	if after := listed(); !reflect.DeepEqual(after, before) {
+		t.Fatalf("the round trip changed profiles:\nbefore %+v\nafter  %+v", before, after)
+	}
+	// Setting images true must stick after a text-only profile was listed and set back.
+	again, err := engine.LoadProfiles(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := again.List(); !reflect.DeepEqual(got, []contract.Profile{before.Profiles[0].Profile, before.Profiles[1].Profile}) {
+		t.Fatalf("stored: %+v", got)
+	}
+}
+
+func TestProfileSetNamesTheUnknownField(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	if err := os.WriteFile(path, []byte(`{"a":{"provider":"openai","model":"m","allowedModels":["m"],"thinking":"high"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	profiles, err := engine.LoadProfiles(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	a := New(profileService{engine: engine.New(st, nil, profiles, time.Now)}, nil)
+	owner := a.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}})
+	got := request(owner, "/v1/profile.set", `{"profile":{"name":"a","inUse":1,"provider":"openai","model":"m","allowedModels":["m"],"thinking":"high"}}`)
+	if got.Code != http.StatusBadRequest || !strings.Contains(got.Body.String(), `unknown field \"inUse\"`) {
+		t.Fatalf("nested: %d %s", got.Code, got.Body)
+	}
+	got = request(owner, "/v1/profile.remove", `{"name":"a","to":"b"}`)
+	if got.Code != http.StatusBadRequest || !strings.Contains(got.Body.String(), `unknown field \"to\"`) {
+		t.Fatalf("top level: %d %s", got.Code, got.Body)
+	}
+	if got := request(owner, "/v1/profile.remove", `{`); got.Code != http.StatusBadRequest || !strings.Contains(got.Body.String(), "invalid request") {
+		t.Fatalf("malformed: %d %s", got.Code, got.Body)
 	}
 }

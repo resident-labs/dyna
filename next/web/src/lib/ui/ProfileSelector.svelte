@@ -1,9 +1,8 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import type { ProfileSummary } from "../contract.gen.ts";
   import { call } from "../client.ts";
   import Icon from "./Icon.svelte";
-  import { slugName } from "../profiles.ts";
+  import { profileRows, slugName, type ProfileSummary } from "../profiles.ts";
 
   let { value = $bindable(""), label = "Profile" }: { value?: string; label?: string } = $props();
   let profiles: ProfileSummary[] = $state([]);
@@ -24,7 +23,7 @@
     loading = true;
     failure = false;
     await call("profile.list", {}).then(result => {
-      profiles = (result.profiles ?? []).sort((a, b) => b.inUse - a.inUse);
+      profiles = profileRows(result.profiles).sort((a, b) => b.inUse - a.inUse);
       if (!profiles.some(item => item.name === value)) value = profiles[0]?.name ?? "";
     }, () => { failure = true; });
     loading = false;
