@@ -167,7 +167,7 @@ func (s *Service) SearchPosts(ctx context.Context, caller contract.Principal, re
 
 // SearchSessions finds sessions by their name or goal, in every room.
 func (s *Service) SearchSessions(ctx context.Context, caller contract.Principal, req contract.SearchRequest) (contract.SearchResponse, *contract.Error) {
-	words, room, _, _, limit, offset, e := s.navSearch(ctx, caller, req, true)
+	words, room, own, owner, limit, offset, e := s.navSearch(ctx, caller, req, true)
 	if e != nil {
 		return contract.SearchResponse{}, e
 	}
@@ -175,8 +175,18 @@ func (s *Service) SearchSessions(ctx context.Context, caller contract.Principal,
 	if err != nil {
 		return contract.SearchResponse{}, failure(err)
 	}
+	var ownName string
+	if !owner {
+		if ownName, err = s.store.RoomNameOf(ctx, own); err != nil {
+			return contract.SearchResponse{}, failure(err)
+		}
+	}
 	for i := range hits {
 		hits[i].Goal, _ = clipRunes(hits[i].Goal, contract.SearchGoalChars)
+		// A goal is free text of the room it came from: outside text to an agent of another room. Names are not.
+		if !owner && hits[i].Goal != "" && hits[i].Room != ownName {
+			hits[i].Goal = contract.Outside("room "+hits[i].Room, hits[i].Name, hits[i].Goal)
+		}
 	}
 	result := contract.SearchResponse{Sessions: hits, Total: total}
 	if kept := fitPage(&result); int(offset)+kept < total {
