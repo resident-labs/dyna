@@ -53,6 +53,14 @@ func crewInstructions(name, tree string) string {
 	return text + "You have your own git worktree at " + tree + " on your own branch, and other workers cannot see it. Work only there. When you end, whatever you left there is committed and pushed for you, except ignored files. Cargo builds share CARGO_TARGET_DIR with the other workers, so reach a binary with cargo run or through that folder, not through ./target.\n"
 }
 
+// workerConfig is what a crew worker opens with, on the box-wide config: its own tree, its profile's model and compaction trigger, its own models.json
+// in folder, and a session file of its own, so that workers sharing the session folder never resume one another's.
+func workerConfig(box pig.Config, profile contract.WorkflowProfile, folder, dir string) pig.Config {
+	box.Dir, box.Model, box.CompactTokens, box.New = dir, profile.Model, profile.CompactTokens, true
+	box.ModelsFile = filepath.Join(folder, "models.json")
+	return box
+}
+
 // Run connects the box, serves its model route, and runs the Pi session.
 func Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
@@ -195,18 +203,10 @@ func Run(ctx context.Context) error {
 			if dir == workdir {
 				tree = ""
 			}
-			return pig.Open(ctx, pig.Config{
-				Dir:           dir,
-				AgentDir:      piDir,
-				SessionDir:    sessions,
-				Model:         profile.Model,
-				Instructions:  hello.Instructions + crewInstructions(hello.Workflow.Name, tree),
-				New:           true,
-				CompactTokens: profile.CompactTokens,
-				ModelsFile:    filepath.Join(folder, "models.json"),
-				Extensions:    []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: dir, Shell: jobs, Dyna: dynaTools})},
-				Notice:        func(text string) { go notice(text) },
-			})
+			c := workerConfig(pig.Config{AgentDir: piDir, SessionDir: sessions, Notice: func(text string) { go notice(text) }}, profile, folder, dir)
+			c.Instructions = hello.Instructions + crewInstructions(hello.Workflow.Name, tree)
+			c.Extensions = []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: dir, Shell: jobs, Dyna: dynaTools})}
+			return pig.Open(ctx, c)
 		}
 		config := CrewConfig{Workflow: *hello.Workflow, TextOnlyModels: hello.TextOnlyModels, Engine: client, Open: open, Transcript: transcript, Workdir: workdir, Sessions: sessions, State: piDir}
 		if len(hello.Repos) > 0 {
