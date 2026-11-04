@@ -50,9 +50,11 @@
 
   async function remove(image: RoomImage, room: string, opener: HTMLElement) {
     const ok = await confirm({ title: `Remove ${image.name} from ${room}?`,
-      message: image.name === runnerImage ? `The CI jobs of ${room} use the shared runner image.` : `New boxes in ${room} stop using it. Boxes already running keep what they have.`,
+      message: image.name === runnerImage ? `The CI jobs of ${room} will then use the shared runner image.` : `New boxes in ${room} stop using it. Boxes already running keep what they have.`,
       action: "Remove", danger: true, opener, failed: words, run: () => call("image.remove", { name: image.name, room: image.room }).catch((reason: unknown) => { gone(reason); throw reason; }) });
     if (!ok) return;
+    // The engine removed it, so it leaves the list even if the next read fails.
+    images = images?.filter(other => imageKey(other) !== imageKey(image));
     onclose();
     await reload();
   }
@@ -85,7 +87,7 @@
   {:else if showFailed}<div class="section"><p class="small muted" role="alert">The Containerfile did not load.</p>
     <div class="actions"><button type="button" class="btn" onclick={() => read(x)}>Try again</button></div></div>
   {:else}<p class="small muted">Loading the Containerfile…</p>{/if}
-  <div class="danger-zone"><span class="small muted">{x.name === runnerImage ? "The room's jobs use the shared runner image." : "New boxes in this room stop using it."}</span>
+  <div class="danger-zone"><span class="small muted">{x.name === runnerImage ? "The room's jobs will then use the shared runner image." : "New boxes in this room stop using it."}</span>
     <button type="button" class="btn danger" aria-haspopup="dialog" onclick={event => void remove(x, room, event.currentTarget)}>Remove</button></div>
 {/snippet}
 
@@ -95,7 +97,7 @@
 
 {#snippet summary()}
   {#if items}{@const sum = imageSummary(items, hosts)}<p class="muted"><span class="fact">{plural(sum.images, "image", "images")}</span> <span class="fact">in {plural(sum.rooms, "room", "rooms")}</span>
-    {#if sum.failed}<span class="fact">· {plural(sum.failed, "CI runner image", "CI runner images")} failed to build</span>{/if}</p>
+    </p>{#if sum.failed}<p class="muted">{plural(sum.failed, "CI runner image", "CI runner images")} failed to build.</p>{/if}
     <p class="small muted">Rooms with no image have no group.</p>{/if}
 {/snippet}
 
