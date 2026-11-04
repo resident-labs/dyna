@@ -184,7 +184,14 @@ func (s *Service) workflowInfo(ctx context.Context, run store.WorkflowRun) (cont
 		return contract.WorkflowInfo{}, err
 	}
 	_, running, _, err := s.store.WorkflowCounts(ctx, run.ID)
+	if err != nil {
+		return contract.WorkflowInfo{}, err
+	}
+	recorded, err := s.store.SessionBranches(ctx, run.Repo, run.Session)
 	info := contract.WorkflowInfo{Run: run.ID, Room: run.Room, Session: run.Session, Name: run.Name, Description: run.Description, Profiles: run.Profiles, Repo: run.Repo, Commit: run.Commit, Version: run.Version, State: run.State, Result: run.Result, Steps: summary.Steps, Running: running, Failed: summary.Failed, FailedSteps: summary.FailedSteps, Usage: summary.Usage, Started: run.Started, Ended: run.Ended}
+	if len(recorded) > 0 {
+		info.Branch = recorded[0]
+	}
 	if n := len(run.StatusLines); n > 0 {
 		info.Status, info.StatusAt = harness.Mask(run.StatusLines[n-1].Text), run.StatusLines[n-1].At
 	}

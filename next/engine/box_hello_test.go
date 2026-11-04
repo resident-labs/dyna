@@ -42,3 +42,15 @@ func TestBoxHelloSendsTheStaleSeedNoticeOncePerBox(t *testing.T) {
 		t.Fatalf("notices %q, want the one stale notice", texts)
 	}
 }
+
+func TestBoxHelloNamesTheSessionsBranch(t *testing.T) {
+	s, _, _, sid, ctx := quietSession(t, 0)
+	s.SetRepositories(&fakeRepos{})
+	hello, problem := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if want := "\nYour branch: named-branch on owner/repo.\n"; !strings.Contains(hello.Instructions, want) {
+		t.Fatalf("instructions lack %q:\n%s", want, hello.Instructions)
+	}
+}
