@@ -296,3 +296,83 @@ func TestPromptSectionsChangeThroughAContextUpdate(t *testing.T) {
 		t.Fatalf("the messages: %s", last)
 	}
 }
+
+// A worker opens beside the files of the sessions in its folder, and starts one of its own.
+func TestANewSessionNeverContinuesTheNewestFile(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "one"}}, []pigtest.Block{{Text: "two"}})
+	c := config(t, model, "")
+	first, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start(t, first, "remember one")
+	defer first.Close()
+	c.New = true
+	second, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	if second.SessionFile() == first.SessionFile() {
+		t.Fatalf("both sessions write %s", first.SessionFile())
+	}
+	start(t, second, "and two")
+	if messages := model.Requests()[1].Messages; len(messages) != 1 {
+		t.Fatalf("the new session sent %d messages: %s", len(messages), messages)
+	}
+}
+
+// A session compacts at the trigger it opens with, as a worker does at its profile's.
+func TestAConversationOverTheOpeningTriggerIsCompacted(t *testing.T) {
+	read := []pigtest.Block{{Text: "read"}}
+	model := pigtest.NewModel(read, read, read, []pigtest.Block{{Text: "the summary"}}, []pigtest.Block{{Text: "after"}})
+	c := config(t, model, "")
+	c.CompactTokens = 2_000
+	// Compaction keeps the latest 20,000 tokens by default, which is all this conversation holds.
+	if err := os.WriteFile(filepath.Join(c.AgentDir, "settings.json"), []byte(`{"defaultProjectTrust":"always","steeringMode":"all","compaction":{"keepRecentTokens":1000}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	h, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	longTurns(t, model, h)
+	start(t, h, "go on")
+	if n := len(model.Requests()); n != 5 {
+		t.Fatalf("%d requests: the conversation was not summarized before the next turn", n)
+	}
+}
+
+// A session reads its models from the file it is given, so a worker's header reaches the route.
+func TestModelsFileSetsTheHeadersOfEveryRequest(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "hello"}})
+	c := config(t, model, "")
+	data, err := os.ReadFile(filepath.Join(c.AgentDir, "models.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var models struct {
+		Providers map[string]map[string]any `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &models); err != nil {
+		t.Fatal(err)
+	}
+	models.Providers["anthropic"]["headers"] = map[string]string{contract.WorkerHeader: "w1"}
+	if data, err = json.Marshal(models); err != nil {
+		t.Fatal(err)
+	}
+	c.ModelsFile = filepath.Join(t.TempDir(), "models.json")
+	if err := os.WriteFile(c.ModelsFile, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	h, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	start(t, h, "hi")
+	if got := model.Requests()[0].Header.Get(contract.WorkerHeader); got != "w1" {
+		t.Fatalf("the request carried %q", got)
+	}
+}

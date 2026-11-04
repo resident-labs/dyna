@@ -7,14 +7,11 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -40,46 +37,6 @@ const (
 	// buildCacheSocket is the host's compiler cache. dyna-base's sccache reaches it at 127.0.0.1:7781/build-cache.
 	buildCacheSocket = "/run/dyna/build-cache/cache.sock"
 )
-
-//go:embed extension.js
-var extensionSource string
-
-// RenderExtension fills in the values the extension shares with the box agent.
-func RenderExtension() string {
-	return strings.NewReplacer("__DYNA_CALL_ID_ARGUMENT__", contract.ToolCallIDArgument, "__DYNA_MCP_URL__", pi.DynaMCPURL, "__DYNA_SHELL_URL__", shellURL, "__DYNA_ATTACHMENTS__", box.AttachmentFolder).Replace(extensionSource)
-}
-
-func modelArgs(model contract.ModelChoice, compactTokens int) ([]string, error) {
-	switch model.Provider {
-	case contract.ModelProviderAnthropic, contract.ModelProviderOpenAI:
-	default:
-		return nil, fmt.Errorf("unsupported model provider %q", model.Provider)
-	}
-	switch model.Thinking {
-	case contract.ThinkingOff, contract.ThinkingMinimal, contract.ThinkingLow, contract.ThinkingMedium, contract.ThinkingHigh, contract.ThinkingXHigh:
-	default:
-		return nil, fmt.Errorf("unsupported thinking level %q", model.Thinking)
-	}
-	if model.ID == "" {
-		return nil, fmt.Errorf("model ID is empty")
-	}
-	args := []string{"--provider", string(model.Provider), "--model", model.ID, "--thinking", string(model.Thinking)}
-	if compactTokens > 0 {
-		args = append(args, "--compaction-trigger-tokens", strconv.Itoa(compactTokens))
-	}
-	return args, nil
-}
-
-// piArgs appends the fixed Pi flags to the model flags. "--no-docs" leaves Pi's
-// documentation block out of the system prompt. "+codemode" adds the
-// codemode tool to Pi's default tools, so it stays active whatever MCP
-// exposure the servers use. The extension's bash takes the place of Pi's, and
-// "+bash" keeps it active in a resumed session: Pi restores the tools a
-// transcript recorded, and applies these on top.
-func piArgs(args []string, extensionPath, instructions, modelsPath, sessions, mcpPath string) []string {
-	args = append(args, "--extension", extensionPath, "--append-system-prompt", instructions, "--no-docs")
-	return append(args, "--mode", "rpc", "--models-file", modelsPath, "--session-dir", sessions, "--mcp-config", mcpPath, "--tools", "+codemode,+bash")
-}
 
 // boxHarness is what runs a box's turns: the session's Pi, or a crew.
 type boxHarness interface {
@@ -226,10 +183,6 @@ func Run(ctx context.Context) error {
 	server := &http.Server{Handler: mux}
 	defer server.Close()
 	go func() { errs <- server.Serve(listener) }()
-	extensionPath := filepath.Join(piDir, "dyna.js")
-	if err = os.WriteFile(extensionPath, []byte(RenderExtension()), 0600); err != nil {
-		return err
-	}
 	activity := &activity{}
 	transcript := NewTranscript(client, sessions)
 	var h boxHarness
@@ -238,23 +191,22 @@ func Run(ctx context.Context) error {
 	var steered func()        // a crew's script takes no input, so its workers' commands never step aside
 	if hello.Workflow != nil {
 		open := func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string) (crewWorker, error) {
-			args, err := modelArgs(profile.Model, profile.CompactTokens)
-			if err != nil {
-				return nil, err
-			}
-			mcp := filepath.Join(folder, "mcp.json")
-			if err := pi.WriteAgentMCPConfig(mcp, dynaTools.Description(), addedServers); err != nil {
-				return nil, err
-			}
 			tree := dir
 			if dir == workdir {
 				tree = ""
 			}
-			worker, err := pi.Open(ctx, "pi", piArgs(args, extensionPath, hello.Instructions+crewInstructions(hello.Workflow.Name, tree), filepath.Join(folder, "models.json"), sessions, mcp), "", dir)
-			if err != nil {
-				return nil, err
-			}
-			return worker, nil
+			return pig.Open(ctx, pig.Config{
+				Dir:           dir,
+				AgentDir:      piDir,
+				SessionDir:    sessions,
+				Model:         profile.Model,
+				Instructions:  hello.Instructions + crewInstructions(hello.Workflow.Name, tree),
+				New:           true,
+				CompactTokens: profile.CompactTokens,
+				ModelsFile:    filepath.Join(folder, "models.json"),
+				Extensions:    []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: dir, Shell: jobs, Dyna: dynaTools})},
+				Notice:        func(text string) { go notice(text) },
+			})
 		}
 		config := CrewConfig{Workflow: *hello.Workflow, TextOnlyModels: hello.TextOnlyModels, Engine: client, Open: open, Transcript: transcript, Workdir: workdir, Sessions: sessions, State: piDir}
 		if len(hello.Repos) > 0 {

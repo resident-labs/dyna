@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -131,9 +130,6 @@ type crewHarness struct {
 
 func newCrewHarness(t *testing.T) *crewHarness {
 	t.Helper()
-	if _, err := exec.LookPath("node"); err != nil {
-		t.Skip("node runs the script host")
-	}
 	return &crewHarness{t: t, journal: newFakeJournal(), workdir: t.TempDir(), reply: func(prompt, _ string) (contract.TurnEnded, error) {
 		return contract.TurnEnded{Final: "done: " + prompt}, nil
 	}}
@@ -456,11 +452,11 @@ func TestClockAndRandomnessThrow(t *testing.T) {
 	got := h.result(crewMeta + `
 		const blocked = []
 		for (const thunk of [() => Date.now(), () => Math.random(), () => new Date(), () => Date()]) {
-			try { thunk(); blocked.push('allowed') } catch { blocked.push('threw') }
+			try { thunk(); blocked.push("allowed") } catch (error) { blocked.push(error.message) }
 		}
 		return { blocked, fixed: new Date(0).toISOString() }`)
 	result := got.(map[string]any)
-	if fmt.Sprint(result["blocked"]) != "[threw threw threw threw]" || result["fixed"] != "1970-01-01T00:00:00.000Z" {
+	if fmt.Sprint(result["blocked"]) != "[Date.now() would differ when the run resumes. Pass the value in args. Math.random() would differ when the run resumes. Pass the value in args. new Date() would differ when the run resumes. Pass the value in args. class constructors must be invoked with 'new']" || result["fixed"] != "1970-01-01T00:00:00.000Z" {
 		t.Fatalf("result %v", result)
 	}
 }
@@ -809,4 +805,32 @@ type recordingWorker struct {
 func (w recordingWorker) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput, started func()) (contract.TurnEnded, error) {
 	*w.delivery = inputs[0].Delivery
 	return w.fakeWorker.Start(ctx, id, inputs, started)
+}
+
+func TestAForgottenStepFinishesBeforeTheRunEnds(t *testing.T) {
+	h := newCrewHarness(t)
+	gate := make(chan struct{})
+	h.hold = func(ctx context.Context, _ string) error {
+		select {
+		case <-gate:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	_, ended := h.start(crewMeta + `agent("slow"); return "returned"`)
+	waitFor(t, "the forgotten step to start", func() bool { return h.started.Load() == 1 })
+	select {
+	case turn := <-ended:
+		t.Fatalf("the run ended with its step running: %+v", turn)
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(gate)
+	turn := <-ended
+	if turn.Outcome != contract.TurnCompleted || turn.Final != "returned" {
+		t.Fatalf("turn %+v", turn)
+	}
+	if done := h.journal.steps; len(done) != 1 {
+		t.Fatalf("%d steps in the journal", len(done))
+	}
 }

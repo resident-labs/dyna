@@ -31,6 +31,13 @@ type Config struct {
 	SessionDir   string
 	Model        contract.ModelChoice
 	Instructions string // appended to the system prompt
+	// New starts a session file of its own. Without it the session continues the newest file in SessionDir, as a
+	// restarted box does; a crew's workers share one folder, and none may take another's.
+	New bool
+	// CompactTokens is the context size at which the session compacts itself; zero leaves it to the model's window.
+	CompactTokens int
+	// ModelsFile is the models.json the session reads in place of AgentDir's.
+	ModelsFile string
 	// Extensions load ahead of the built-in codemode, tool_search and MCP ones, so a tool of theirs takes the place of a
 	// built-in or MCP tool of its name.
 	Extensions []extension.InlineExtension
@@ -43,6 +50,7 @@ type Harness struct {
 	// Activity hears what the turn is doing: each tool call, and a compaction.
 	Activity func(contract.TurnID, contract.ActivityKind, string)
 	services *coding.AgentSessionServices
+	models   *coding.ModelRuntime // the runtime a ModelsFile made, which the services leave to their owner; nil without one
 	session  *coding.Session
 	stop     func()
 	sends    sync.WaitGroup // the turns' sends, which Close waits for
@@ -62,9 +70,18 @@ func Open(ctx context.Context, c Config) (*Harness, error) {
 		extension.NamedInlineExtension{Name: "tool-search", Replaceable: true, Factory: toolsearch.CreateToolSearchExtensionWith(toolsearch.Options{DeferredToolsSection: true})},
 		extension.NamedInlineExtension{Name: "mcp", Replaceable: true, Factory: mcpext.CreateMcpExtension(mcpext.Options{AgentDir: c.AgentDir, ConfigDirName: ".pi", DeferredToolsSection: true})},
 	)
+	var models *coding.ModelRuntime
+	if c.ModelsFile != "" {
+		file := &c.ModelsFile
+		var err error
+		if models, err = coding.CreateModelRuntime(ctx, coding.CreateModelRuntimeOptions{AuthPath: filepath.Join(c.AgentDir, "auth.json"), ModelsPath: &file}); err != nil {
+			return nil, err
+		}
+	}
 	services, err := coding.CreateAgentSessionServices(coding.CreateAgentSessionServicesOptions{
-		CWD:      c.Dir,
-		AgentDir: c.AgentDir,
+		CWD:          c.Dir,
+		AgentDir:     c.AgentDir,
+		ModelRuntime: models,
 		ResourceLoaderOptions: &coding.DefaultResourceLoaderOptions{
 			NoExtensions:       true,
 			ExtensionFactories: extensions,
@@ -72,14 +89,21 @@ func Open(ctx context.Context, c Config) (*Harness, error) {
 		},
 	})
 	if err != nil {
+		models.Close()
 		return nil, err
 	}
-	h := &Harness{services: services, done: make(chan struct{})}
+	h := &Harness{services: services, models: models, done: make(chan struct{})}
 	if err := h.start(ctx, c); err != nil {
-		services.Close()
+		h.release()
 		return nil, err
 	}
 	return h, nil
+}
+
+// release closes the services, and the model runtime that was made for them.
+func (h *Harness) release() {
+	h.services.Close()
+	h.models.Close()
 }
 
 func (h *Harness) start(ctx context.Context, c Config) error {
@@ -87,9 +111,11 @@ func (h *Harness) start(ctx context.Context, c Config) error {
 	if err != nil {
 		return err
 	}
-	resume, err := newest(c.SessionDir)
-	if err != nil {
-		return err
+	var resume string
+	if !c.New {
+		if resume, err = newest(c.SessionDir); err != nil {
+			return err
+		}
 	}
 	manager, err := coding.SessionManagerFor(h.services, coding.SessionStartOptions{SessionDir: c.SessionDir, ResumePath: resume})
 	if err != nil {
@@ -101,6 +127,7 @@ func (h *Harness) start(ctx context.Context, c Config) error {
 		return err
 	}
 	h.session = created.Session
+	h.session.SetCompactionTriggerTokens(c.CompactTokens)
 	// The listener sees every event, in order, before Prompt returns. Nothing reads the buffered event channel, which
 	// would otherwise fill during a long turn and hold the agent loop.
 	h.session.DiscardEvents()
@@ -283,7 +310,7 @@ func (h *Harness) Close() error {
 		h.stop()
 		err = h.session.Close()
 		h.sends.Wait()
-		h.services.Close()
+		h.release()
 		close(h.done)
 	})
 	return err
