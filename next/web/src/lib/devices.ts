@@ -44,22 +44,23 @@ export function access(granted: readonly Scope[]) {
 }
 
 const minute = 60_000, hour = 60 * minute, day = 24 * hour;
-export function seen(device: Device, now: number) {
-  if (device.current) return "Active now";
-  const gap = now - Date.parse(device.lastSeenAt);
-  if (gap < minute) return "Seen just now";
-  if (gap < hour) return `Seen ${Math.floor(gap / minute)} min ago`;
-  if (gap < day) return `Seen ${Math.floor(gap / hour)} h ago`;
+export function ago(at: string, now: number) {
+  const gap = now - Date.parse(at);
+  if (gap < minute) return "just now";
+  if (gap < hour) return `${Math.floor(gap / minute)} min ago`;
+  if (gap < day) return `${Math.floor(gap / hour)} h ago`;
   const days = Math.floor(gap / day);
-  return `Seen ${days} ${days === 1 ? "day" : "days"} ago`;
+  return `${days} ${days === 1 ? "day" : "days"} ago`;
 }
+export const seen = (device: Device, now: number) => device.current ? "Active now" : `Seen ${ago(device.lastSeenAt, now)}`;
 
-// The warning line once 90% of the 30 days have passed, which is at 3 days left.
-export function expiring(expiresAt: string, now: number) {
+// When a device expires, in whole days; the last day is today.
+export function expiry(expiresAt: string, now: number) {
   const days = Math.ceil((Date.parse(expiresAt) - now) / day);
-  if (days > 3) return undefined;
-  return days <= 1 ? "Expires today" : `Expires in ${days} days`;
+  return days <= 1 ? "today" : `in ${days} days`;
 }
+// The warning once 90% of the 30 days have passed, which is at 3 days left.
+export const expiring = (expiresAt: string, now: number) => Date.parse(expiresAt) - now > 3 * day ? undefined : `Expires ${expiry(expiresAt, now)}`;
 
 export const isPhone = (name: string) => /iphone|ipad|android|pixel|phone|mobile|tablet/i.test(name);
 

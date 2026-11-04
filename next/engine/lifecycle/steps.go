@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -57,7 +58,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		} else if found && status.Running {
 			next.State, next.Reason = contract.BoxReady, ""
 		} else if found {
-			next.State, next.Reason = contract.BoxStopped, "container stopped"
+			next.State, next.Reason = contract.BoxStopped, containerStoppedReason
 			if row.Want == store.WantRun && b.Reason == boxDisconnectedReason {
 				failures++
 				if failures >= 3 {
@@ -202,7 +203,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 				var notice *contract.Event
 				if stale {
 					var event contract.Event
-					event, workErr = r.event(b.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.SessionRestarted{Session: b.Session, ImageUpdated: true})
+					event, workErr = r.event(b.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.SessionRestarted{Session: b.Session, ImageUpdated: true, ClientID: "box-restart:" + string(b.ID) + ":image:" + image.Tag})
 					notice = &event
 				}
 				if workErr == nil {
@@ -212,6 +213,13 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			}
 		} else {
 			workErr = r.boxes.Start(ctx, b.ID)
+			// A container that stopped by itself (a host reboot, a crash) comes back with nothing to run, so the session is told.
+			if workErr == nil && b.Reason == containerStoppedReason {
+				var event contract.Event
+				if event, workErr = r.event(b.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.SessionRestarted{Session: b.Session, Stopped: true, ClientID: "box-restart:" + string(b.ID) + ":stopped:" + strconv.FormatInt(b.Updated.UnixMilli(), 10)}); workErr == nil {
+					workErr = r.store.NoticeRestarted(ctx, event)
+				}
+			}
 		}
 		var missing box.MissingDevice
 		if errors.As(workErr, &missing) {
@@ -230,6 +238,10 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 				cause = contract.CauseStartFailed
 			}
 		} else {
+			// The start that told the session, or the recreate that did, uses up the reason it was found stopped for.
+			if next.Reason == containerStoppedReason {
+				next.Reason = ""
+			}
 			due = r.now().Add(60 * time.Second)
 		}
 	}
