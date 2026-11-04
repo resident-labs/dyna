@@ -2,6 +2,9 @@ package git
 
 import (
 	"context"
+	"regexp"
+	"strings"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
@@ -13,6 +16,9 @@ type RoomRepositories interface {
 	Session(context.Context, contract.SessionID) (store.Session, error)
 	OwnsPRBranch(context.Context, contract.RepoName, contract.SessionID, string) (bool, error)
 	ResumedSessions(context.Context, contract.RepoName, contract.SessionID) ([]contract.SessionID, error)
+	SessionBranches(context.Context, contract.RepoName, contract.SessionID) ([]string, error)
+	BranchHolder(context.Context, contract.RepoName, string) (contract.SessionID, error)
+	ClaimBranch(context.Context, contract.RepoName, contract.SessionID, string, map[string]bool, time.Time) (string, error)
 }
 
 // Hosts supplies the cache connection.
@@ -40,8 +46,11 @@ func (r *Repositories) Seed(ctx context.Context, session contract.SessionID, hos
 	if err != nil {
 		return nil, "", err
 	}
-	item, notice, err := r.Mirror.Seed(ctx, cache, selected.Repo, session)
+	item, notice, err := r.Mirror.Seed(ctx, cache, selected.Repo)
 	if err != nil {
+		return nil, "", err
+	}
+	if item.Branch, err = r.branch(ctx, session, selected); err != nil {
 		return nil, "", err
 	}
 	return []contract.BoxRepo{item}, notice, nil
@@ -59,9 +68,56 @@ func (r *Repositories) Get(ctx context.Context, session contract.SessionID, host
 	if err != nil {
 		return nil, err
 	}
-	item, err := r.Mirror.Prepare(ctx, cache, selected.Repo, session, fetch)
+	item, err := r.Mirror.Prepare(ctx, cache, selected.Repo, fetch)
 	if err != nil {
 		return nil, err
 	}
+	if item.Branch, err = r.branch(ctx, session, selected); err != nil {
+		return nil, err
+	}
 	return []contract.BoxRepo{item}, nil
+}
+
+// Unavailable is the names no session is given on repo: main, master, HEAD, the repository's default branch and every branch
+// the mirror holds. The engine names sessions by it and the owner's set-branch is refused by it. It asks GitHub for nothing.
+func (r *Repositories) Unavailable(ctx context.Context, repo contract.RepoName) (map[string]bool, error) {
+	base, err := r.Mirror.Default(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	remote, err := r.Mirror.Branches(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	unavailable := map[string]bool{"main": true, "master": true, "HEAD": true, base: true}
+	for _, name := range remote {
+		unavailable[name] = true
+	}
+	return unavailable, nil
+}
+
+var dotRun = regexp.MustCompile(`\.{2,}`)
+
+// branch returns the session's recorded branch on its repository, recording its name first if it has none: the session
+// name, made valid for git, with a suffix when the mirror, a protected name or another session has it.
+func (r *Repositories) branch(ctx context.Context, session contract.SessionID, selected store.Session) (string, error) {
+	recorded, err := r.Rooms.SessionBranches(ctx, selected.Repo, session)
+	if err != nil {
+		return "", err
+	}
+	if len(recorded) > 0 {
+		return recorded[0], nil
+	}
+	unavailable, err := r.Unavailable(ctx, selected.Repo)
+	if err != nil {
+		return "", err
+	}
+	wanted := dotRun.ReplaceAllString(selected.Name, "-")
+	if strings.HasSuffix(wanted, ".lock") {
+		wanted = strings.TrimSuffix(wanted, ".lock") + "-lock"
+	}
+	if strings.HasSuffix(wanted, ".") {
+		wanted += "-"
+	}
+	return r.Rooms.ClaimBranch(ctx, selected.Repo, session, wanted, unavailable, time.Now())
 }

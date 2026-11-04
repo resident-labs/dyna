@@ -201,7 +201,7 @@ func (r crewRepos) Get(ctx context.Context, session contract.SessionID, _ contra
 			return nil, fmt.Errorf("%w: %s", err, out)
 		}
 	}
-	return []contract.BoxRepo{{Name: "owner/repo", Cache: r.cache, Branch: "v2/" + string(session), Base: "main"}}, nil
+	return []contract.BoxRepo{{Name: "owner/repo", Cache: r.cache, Branch: string(session), Base: "main"}}, nil
 }
 
 func (r crewRepos) Seed(ctx context.Context, session contract.SessionID, host contract.HostName) ([]contract.BoxRepo, string, error) {
@@ -687,4 +687,8 @@ func TestWorkflowInARealBox(t *testing.T) {
 	if got := count("SELECT COUNT(*) FROM sessions"); got != sessionsBefore+2 {
 		t.Fatalf("%d sessions after two runs, %d before", got, sessionsBefore)
 	}
+}
+
+func (crewRepos) Unavailable(context.Context, contract.RepoName) (map[string]bool, error) {
+	return nil, nil
 }
