@@ -266,9 +266,6 @@ func (r *deleteRig) assertGone(t *testing.T, ctx context.Context, room contract.
 			}
 		}
 		query := fmt.Sprintf("SELECT count(*) FROM %s WHERE %s IN (?%s)", c.table, c.name, strings.Repeat(",?", len(value)-1))
-		if c.table == "archives" {
-			query += " AND ref=''"
-		}
 		if n := r.count(t, ctx, query, value...); n != 0 {
 			t.Errorf("%s.%s keeps %d rows", c.table, c.name, n)
 		}
@@ -355,7 +352,6 @@ func (r *deleteRig) fillRoom(t *testing.T, ctx context.Context, room contract.Ro
 			`INSERT INTO pr_owners(repo,number,session,goal,approved_head) VALUES('owner/only',7,?2,'','')`,
 			`INSERT INTO issue_owners(repo,number,session,url,title,author,state) VALUES('owner/only',8,?2,'','','','open')`,
 			`UPDATE repos SET ci=1 WHERE repo IN ('owner/only','owner/both')`,
-			`INSERT INTO archives(session,repo,ref,commit_sha,created_at,expires_at) VALUES(?2,'owner/only','','',0,99999999)`,
 			`INSERT INTO operations(id,kind,room,by_kind,by_id,class,state,card,args,args_sha256,created_at,expires_at) VALUES('op_delete','hostexec.run',?1,'session',?2,'auto','done','{}','{}',x'01',0,0)`,
 			`INSERT INTO operations(id,kind,room,by_kind,by_id,class,state,card,args,args_sha256,created_at,expires_at) VALUES('op_global','accounts.action',NULL,'session',?2,'owner','done','{}','{}',x'02',0,0)`,
 			`INSERT INTO hostexec_runs(op,grant_id,host,scope,started_at,timeout_ms,ended_at) SELECT 'op_delete',id,'host','scope',0,0,1 FROM grants WHERE room=?1 AND kind='hostexec'`,

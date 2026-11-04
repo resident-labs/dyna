@@ -171,17 +171,6 @@ func TestRootCreationRollsBackAndRootCannotClose(t *testing.T) {
 		t.Fatalf("room persisted: %d %v", count, err)
 	}
 }
-func TestSessionCannotDiscardChild(t *testing.T) {
-	s, room, parent, ctx := setup(t)
-	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	child, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "child", Profile: "test", Parent: parent, Goal: "goal"})
-	if e != nil {
-		t.Fatal(e)
-	}
-	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: parent}, contract.SessionCloseRequest{Session: child.Session, Discard: true}); e == nil || e.Code != contract.ErrForbidden {
-		t.Fatalf("discard: %v", e)
-	}
-}
 
 func TestMentionSteersRunningTurn(t *testing.T) {
 	s, room, session, ctx := setup(t)

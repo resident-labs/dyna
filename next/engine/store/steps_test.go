@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	_ "embed"
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -175,5 +176,54 @@ func TestUpgradeCarriesRootApprovesHostexec(t *testing.T) {
 	}
 	if _, err := s.Read().Exec("SELECT root_approves_hostexec FROM rooms"); err == nil {
 		t.Error("root_approves_hostexec is still there")
+	}
+}
+
+// A box held after failed archives, or mid-archive with a failure recorded, becomes a plain close at the upgrade: it is removed
+// with nothing saved, and the archives table is gone.
+func TestUpgradeTurnsHeldAndRetryingArchivesIntoPlainCloses(t *testing.T) {
+	dir := floorStore(t, nil)
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(dir, "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		"CREATE TABLE archives (session TEXT NOT NULL, repo TEXT NOT NULL, ref TEXT NOT NULL, commit_sha TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, retry_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(session, repo))",
+		"INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES ('r','r',0,0,0)",
+		"INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES ('held','r','held','p','closing','',0),('retry','r','retry','p','closing','',0),('run','r','run','p','open','',0)",
+		"INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at,want,failures,due_at) VALUES ('bh','held','','agent','stopped','archive failed','',0,0,'hold',5,0),('br','retry','','agent','closing','push failed','',0,0,'close',2,99999),('bn','run','','agent','ready','','',0,0,'run',0,0)",
+		"UPDATE meta SET value='88' WHERE key='schema_version'",
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for id, want := range map[string]string{"bh": "close closing  0 0", "br": "close closing  0 0", "bn": "run ready  0 0"} {
+		var want0, state, reason string
+		var failures, due int
+		if err := s.Read().QueryRow("SELECT want,state,reason,failures,due_at FROM boxes WHERE id=?", id).Scan(&want0, &state, &reason, &failures, &due); err != nil {
+			t.Fatal(err)
+		}
+		if got := fmt.Sprintf("%s %s %s %d %d", want0, state, reason, failures, due); got != want {
+			t.Errorf("%s: %q, want %q", id, got, want)
+		}
+	}
+	if _, err := s.Read().Exec("SELECT 1 FROM archives"); err == nil {
+		t.Error("the archives table is still there")
 	}
 }

@@ -176,8 +176,7 @@ const (
 type SessionClosed struct {
 	Reason  SessionCloseReason `json:"reason,omitempty"`
 	Session SessionID          `json:"session"`
-	Archive string             `json:"archive,omitempty"` // refs/dyna/archive/<session>, if any
-	Unheld  []GoalID           `json:"unheld,omitempty"`  // open goals left with no holder, because the parent is root (7.4)
+	Unheld  []GoalID           `json:"unheld,omitempty"` // open goals left with no holder, because the parent is root (7.4)
 	// Handed is the owed work that moved to the parent.
 	Handed []Responsibility `json:"handed,omitempty"`
 }
@@ -320,7 +319,7 @@ const (
 	CauseNoHello             FailureCause = "no_hello"              // the box agent did not connect in time
 	CauseEngineRestarted     FailureCause = "engine_restarted"      // the engine restarted while it created the box
 	CauseRemoveFailed        FailureCause = "remove_failed"         // close could not remove the box
-	CauseArchiveFailed       FailureCause = "archive_failed"        // close could not archive the session's branch
+	CauseArchiveFailed       FailureCause = "archive_failed"        // close could not archive the session's branch (older versions)
 	CauseGrantInactive       FailureCause = "grant_inactive"        // the host-exec grant is no longer active
 	CauseHostLost            FailureCause = "host_lost"             // the host stopped answering during the run
 	CauseHostBusy            FailureCause = "host_busy"             // stored runs only: the host execution limit was full, before host runs had connections of their own

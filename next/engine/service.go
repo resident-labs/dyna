@@ -34,7 +34,6 @@ type Profiles interface {
 type Repositories interface {
 	Get(context.Context, contract.SessionID, contract.HostName, bool) ([]contract.BoxRepo, error)
 	Ref(context.Context, contract.RepoName, string) (string, error)
-	DeleteArchiveRef(context.Context, contract.RepoName, string, string) error
 }
 
 // Usage gives the newest usage reading without waiting on a provider.

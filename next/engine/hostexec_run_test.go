@@ -62,7 +62,7 @@ func TestHostexecSessionCloseStopsAndEndsGrant(t *testing.T) {
 		done <- e
 	}()
 	<-runner.entered
-	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: worker, Discard: true}); e != nil {
+	if _, e := s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: worker}); e != nil {
 		t.Fatal(e)
 	}
 	<-runner.stopCalled
@@ -315,7 +315,7 @@ func TestHostexecApprovalAndSessionCloseRecheck(t *testing.T) {
 	if e != nil || result.Operation.Class != contract.ClassAuto || result.Operation.State != contract.OpDone {
 		t.Fatalf("result %+v error %+v", result, e)
 	}
-	if _, e = s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: worker, Discard: true}); e != nil {
+	if _, e = s.SessionClose(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionCloseRequest{Session: worker}); e != nil {
 		t.Fatal(e)
 	}
 	if err := s.HostexecRunEntry().Check(ctx, result.Operation.Args, principal); err == nil {

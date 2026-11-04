@@ -326,10 +326,15 @@ func Run(ctx context.Context) error {
 				}
 				return nil
 			}
-			if _, ok := message.Body.(contract.Archive); ok {
+			if save, ok := message.Body.(contract.SaveDiff); ok {
 				closing.Store(true)
+				var report *contract.DiffSavedRequest // one try: a retry of the report sends this one again
 				return closeBox(ctx, h, transcript, files, time.After, func(ctx context.Context) error {
-					return archiveAndReport(ctx, "/box/work", hello.Session, hello.Repos, runGit, archiveLimit, time.After, client.ArchiveDone)
+					if report == nil {
+						saved := saveDiff(ctx, "/box/work", diffFolder, hello.Session, save.Name, hello.Repos, runGit)
+						report = &saved
+					}
+					return client.DiffSaved(ctx, *report)
 				})
 			}
 			return runner.Handle(ctx, message)

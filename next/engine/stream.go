@@ -231,15 +231,12 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 		var cause error
 		defer func() { slog.Info("box dispatch stopped", "session", session.ID, "reason", reason, "err", cause) }()
 		replay := true
-		archiveSent := false
+		diffAsked := false
 		var stopSent contract.TurnID
 		reloadSent := 1 // a crew's box says hello with its run's script, and a run starts on version 1
 		for {
 			if !handle.Lock() {
 				return
-			}
-			if channel.TakeArchiveRetry() {
-				archiveSent = false
 			}
 			compactTurn, compact := channel.TakeCompact()
 			shellDesired := handle.ShellWatchGeneration()
@@ -267,13 +264,10 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 				return
 			}
 			if current.State == contract.BoxClosing {
-				if current.Reason != "" {
-					archiveSent = false
-				}
-				if !archiveSent && current.Reason == "" {
+				if !diffAsked {
 					select {
-					case out <- contract.BoxMessage{Body: contract.Archive{}}:
-						archiveSent = true
+					case out <- contract.BoxMessage{Body: contract.SaveDiff{Name: session.Name}}:
+						diffAsked = true
 					case <-ctx.Done():
 						reason, cause = streamCanceled, ctx.Err()
 						return
@@ -474,16 +468,13 @@ func (s *Service) queueWakes(ids []contract.SessionID, events []contract.Event) 
 	}
 }
 
-func (s *Service) deliverWakes(pending map[contract.SessionID]bool) {
-	for id, retry := range pending {
+func (s *Service) deliverWakes(pending map[contract.SessionID]struct{}) {
+	for id := range pending {
 		handle, ok := s.live.LookupSession(id)
 		if !ok || !handle.Lock() {
 			continue
 		}
 		if channel := handle.Channel(); channel != nil {
-			if retry {
-				channel.RetryArchive()
-			}
 			channel.Wake()
 		}
 		handle.Unlock()

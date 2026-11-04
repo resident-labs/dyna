@@ -64,7 +64,7 @@ INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at
 	}
 }
 
-func TestArchiveRetryDoesNotDelayDiscard(t *testing.T) {
+func TestCloseRetryDoesNotDelayDiscard(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(t.TempDir())
 	if err != nil {
@@ -79,17 +79,17 @@ INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at
 	}
 	due := time.UnixMilli(100)
 	event := contract.Event{ID: "retry", Room: "r", Time: due, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{Box: "b", Session: "s", From: contract.BoxClosing, To: contract.BoxClosing, Reason: "failure"}}
-	if err := s.SetArchiveRetry(ctx, "b", WantClose, due, "failure", event); err != nil {
+	if err := s.SetCloseRetry(ctx, "b", WantClose, due, "failure", event); err != nil {
 		t.Fatal(err)
 	}
 	var got int64
 	if err := s.Read().QueryRowContext(ctx, "SELECT due_at FROM boxes WHERE id='b'").Scan(&got); err != nil || got != 100 {
 		t.Fatalf("archive retry = %d: %v", got, err)
 	}
-	if err := s.CompleteArchives(ctx, "s", nil); err != nil {
+	if err := s.RequestRemoval(ctx, "s"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetArchiveRetry(ctx, "b", WantClose, due, "failure", event); err != nil {
+	if err := s.SetCloseRetry(ctx, "b", WantClose, due, "failure", event); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Read().QueryRowContext(ctx, "SELECT due_at FROM boxes WHERE id='b'").Scan(&got); err != nil || got != 0 {
@@ -97,10 +97,10 @@ INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at
 	}
 	event.ID = "remove"
 	event.Body = contract.BoxChanged{Box: "b", Session: "s", From: contract.BoxClosing, To: contract.BoxClosing, Reason: "remove failed"}
-	if err := s.SetArchiveRetry(ctx, "b", WantDiscard, due, "remove failed", event); err != nil {
+	if err := s.SetCloseRetry(ctx, "b", WantDiscard, due, "remove failed", event); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetArchiveRetry(ctx, "b", WantDiscard, due.Add(time.Millisecond), "remove failed", event); err != nil {
+	if err := s.SetCloseRetry(ctx, "b", WantDiscard, due.Add(time.Millisecond), "remove failed", event); err != nil {
 		t.Fatal(err)
 	}
 	var reason string
@@ -140,7 +140,7 @@ INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at
 	}
 }
 
-func TestCloseIntentAndArchiveCompletion(t *testing.T) {
+func TestCloseIntentAndRemovalRequest(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(t.TempDir())
 	if err != nil {
@@ -157,20 +157,18 @@ INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at
 	if err := s.MarkClosing(ctx, "p", false, time.Unix(0, 0)); err != nil {
 		t.Fatal(err)
 	}
-	now := time.Unix(1000, 0)
-	a := Archive{Session: "c", Repo: "repo", Ref: "ref", Commit: "sha", CreatedAt: now, ExpiresAt: now}
-	if err := s.CompleteArchives(ctx, "c", []Archive{a}); err != nil {
+	if err := s.RequestRemoval(ctx, "c"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.MarkClosing(ctx, "p", false, time.Unix(0, 0)); err != nil {
 		t.Fatal(err)
 	}
-	var pw, cw, ps, cs, sha string
-	err = s.Read().QueryRowContext(ctx, `SELECT p.want,c.want,ps.state,cs.state,a.commit_sha FROM boxes p JOIN boxes c ON c.id='bc' JOIN sessions ps ON ps.id='p' JOIN sessions cs ON cs.id='c' JOIN archives a ON a.session='c' WHERE p.id='bp'`).Scan(&pw, &cw, &ps, &cs, &sha)
-	if err != nil || pw != "close" || cw != "discard" || ps != "closing" || cs != "closing" || sha != "sha" {
-		t.Fatalf("intent: %s %s %s %s %s: %v", pw, cw, ps, cs, sha, err)
+	var pw, cw, ps, cs string
+	err = s.Read().QueryRowContext(ctx, `SELECT p.want,c.want,ps.state,cs.state FROM boxes p JOIN boxes c ON c.id='bc' JOIN sessions ps ON ps.id='p' JOIN sessions cs ON cs.id='c' WHERE p.id='bp'`).Scan(&pw, &cw, &ps, &cs)
+	if err != nil || pw != "close" || cw != "discard" || ps != "closing" || cs != "closing" {
+		t.Fatalf("intent: %s %s %s %s: %v", pw, cw, ps, cs, err)
 	}
-	if err := s.CompleteArchives(ctx, "p", nil); err != nil {
+	if err := s.RequestRemoval(ctx, "p"); err != nil {
 		t.Fatal(err)
 	}
 }
