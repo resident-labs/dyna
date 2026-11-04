@@ -13,6 +13,7 @@ type fakeRepos struct {
 	commits  map[contract.RepoName]string
 	size     contract.BoxSizeName
 	deleted  string
+	stale    string // the notice Seed returns
 }
 
 func (r *fakeRepos) DeleteArchiveRef(_ context.Context, _ contract.RepoName, ref, _ string) error {
@@ -37,7 +38,7 @@ func (r *fakeRepos) Get(_ context.Context, _ contract.SessionID, _ contract.Host
 
 func (r *fakeRepos) Seed(ctx context.Context, session contract.SessionID, host contract.HostName) ([]contract.BoxRepo, string, error) {
 	repos, err := r.Get(ctx, session, host, true)
-	return repos, "", err
+	return repos, r.stale, err
 }
 
 func (r *fakeRepos) Size(context.Context, contract.RepoName) (contract.BoxSizeName, error) {
