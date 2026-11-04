@@ -15,9 +15,9 @@ test("an image's key is its room and its name, so two rooms' images of one name 
 });
 
 test("images sort by room name in any case, rooms no longer listed last, then by name with digits as numbers", () => {
-  const items = [image("gone-a", "b"), image("r1", "node-22"), image("r10", "x"), image("gone-b", "a"), image("r1", "Go-1.25"), image("r1", "node-9"), image("r2", "rust"), image("r3", "cuda")];
+  const items = [image("gone-a", "b"), image("r1", "node-22"), image("r10", "x"), image("gone-b", "a"), image("r1", "Go-1.25"), image("r1", "node-9"), image("r2", "rust"), image("r3", "cuda"), image("gone-a", "node-22"), image("gone-b", "node-9")];
   assert.deepEqual(imageOrder(items, names).map(imageKey),
-    ["r3:cuda", "r2:rust", "r10:x", "r1:Go-1.25", "r1:node-9", "r1:node-22", "gone-b:a", "gone-a:b"]);
+    ["r3:cuda", "r2:rust", "r10:x", "r1:Go-1.25", "r1:node-9", "r1:node-22", "gone-b:a", "gone-a:b", "gone-b:node-9", "gone-a:node-22"]);
   // The engine's list is not changed.
   assert.equal(imageKey(items[0]), "gone-a:b");
 });
