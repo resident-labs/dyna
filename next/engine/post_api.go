@@ -68,7 +68,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 			if len(req.Attachments) != 0 {
 				return contract.PostResponse{}, &contract.Error{Code: contract.ErrCrossRoomAttachment, Message: "cross-room posts cannot carry attachments"}
 			}
-			if strings.TrimSpace(req.Text) == "" || len(req.Mentions) != 1 || (req.Mentions[0] != "root" && req.Mentions[0] != "@root") || req.Home.Session != "" || (req.Home.Kind != "" && req.Home.Kind != contract.ConversationFeed) || req.ReplyTo != "" || req.VisualUpdate != "" || req.VisualReply != "" {
+			if strings.TrimSpace(req.Text) == "" || len(req.Mentions) != 1 || (req.Mentions[0] != "root" && req.Mentions[0] != "@root") || req.Home.Session != "" || (req.Home.Kind != "" && req.Home.Kind != contract.ConversationFeed) || req.ReplyTo != "" || req.VisualUpdate != "" || req.VisualReply != "" || req.Forward != "" {
 				return contract.PostResponse{}, forbidden()
 			}
 			source = &contract.PostSource{Room: session.Room}
@@ -90,6 +90,12 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		}
 		if found {
 			return contract.PostResponse{Event: id, Seq: seq}, nil
+		}
+	}
+	if req.Forward != "" {
+		var problem *contract.Error
+		if req, problem = s.forwardQuote(ctx, caller, req); problem != nil {
+			return contract.PostResponse{}, problem
 		}
 	}
 	// A post carries text, files or both.

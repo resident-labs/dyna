@@ -70,6 +70,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(proxyCommand(func() *socketClient { return newClient(socket) }))
 	root.AddCommand(ciEgressCommand())
 	root.AddCommand(shareCommand())
+	root.AddCommand(navigationCommands(func() *socketClient { return newClient(socket) })...)
 	root.AddCommand(buildCacheCommand())
 	addEngine(root)
 	for _, a := range tools.Actions() {
