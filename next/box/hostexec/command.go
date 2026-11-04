@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"github.com/resident-labs/dyna/contract"
+	"strconv"
 )
 
 const OutputLimit = 8 << 20
@@ -37,7 +38,7 @@ func prelude(a contract.HostexecRunArgs, op contract.OpID) string {
 // collectScript prints a tar of the files a run left in $DYNA_OUT, or nothing when there are none, and removes the folder.
 func collectScript(op contract.OpID) string {
 	d := OutDir(op)
-	return `d=` + d + `; rc=0; if [ -n "$(find "$d" -type f -print -quit 2>/dev/null)" ]; then tar -C "$d" -cf - . || rc=3; fi; rm -rf -- "$d" "$d.bin" || rc=3; exit $rc`
+	return `d=` + d + `; rc=0; if [ -n "$(find "$d" -type f -print -quit 2>/dev/null)" ]; then tar -C "$d" -cf - . || rc=3; fi; rm -rf -- "$d" "$d.bin" "$d.log" "$d.pid" "$d.exit" || rc=3; exit $rc`
 }
 
 // CollectArgs is the run that reads back and removes a finished run's $DYNA_OUT.
@@ -50,20 +51,37 @@ func CollectArgs(a contract.HostexecRunArgs, op contract.OpID) contract.Hostexec
 // The user's words travel quoted in DYNA_ARGV, so the command gets exactly the text given.
 const runWords = "eval \"exec env -u DYNA_ARGV `printenv DYNA_ARGV`\""
 
+// runner is what a run's detached process executes, with the unit, the timeout in seconds and the run's file prefix as its words.
+// It keeps the output (merged, at most OutputLimit and a byte) and the exit status in files, so no connection is needed to keep them.
+const runner = `{ systemd-run --quiet --user --scope --unit="$1" -p "RuntimeMaxSec=$2" -p TimeoutStopSec=5 -- bash -c '` + runWords + `'; } 2>&1 | { head -c 8388609 >"$3.log"; cat >/dev/null; }; echo "${PIPESTATUS[0]}" >"$3.exit.tmp" && mv -- "$3.exit.tmp" "$3.exit"`
+
+// follow prints a run's output from its start, until its runner ends, and exits with its status. It needs d, the file prefix.
+const follow = `tail -c +1 -s 0.2 --pid="$(cat "$d.pid")" -f -- "$d.log"; [ -f "$d.exit" ] || { echo '[the runner ended on the host without an exit status]'; exit 255; }; exit "$(cat "$d.exit")"`
+
 func RunArgs(a contract.HostexecRunArgs, op contract.OpID) []string {
 	cwd := a.Cwd
 	if cwd == "" {
 		cwd = "."
 	}
-	script := prelude(a, op) + `cd -- "$1" || exit 254; u=$2; t=$3; shift 3; DYNA_ARGV=$(printf '%q ' "$@") systemd-run --quiet --user --scope --unit="$u" -p "RuntimeMaxSec=$t" -p TimeoutStopSec=5 -- bash -c '` + runWords + `'`
-	if !a.Collect {
-		// The prelude and the cd sit inside the merge, so a failed mkdir or a missing cwd shows in the output like the command's own errors.
+	var script string
+	switch {
+	case a.Attach:
+		script = `d=` + OutDir(op) + `; [ -f "$d.pid" ] || exit ` + strconv.Itoa(NoRunStatus) + `; ` + follow
+	case a.Collect:
 		// A collect run prints an archive: its stderr stays on the ssh stderr channel, since in stdout it would corrupt it.
-		script = "{ " + script + "; } 2>&1"
+		script = `cd -- "$1" || exit 254; u=$2; t=$3; shift 3; DYNA_ARGV=$(printf '%q ' "$@") systemd-run --quiet --user --scope --unit="$u" -p "RuntimeMaxSec=$t" -p TimeoutStopSec=5 -- bash -c '` + runWords + `' | { head -c 8388609; cat >/dev/null; }; exit "${PIPESTATUS[0]}"`
+	default:
+		// The prelude and the cd sit inside the merge, so a failed mkdir or a missing cwd shows in the output like the command's own errors.
+		// The runner is detached (setsid, in a subshell so that its end is reaped and tail's --pid sees it), which is why the call can go away.
+		script = `{ ` + prelude(a, op) + `cd -- "$1" || exit 254; u=$2; t=$3; shift 3; export DYNA_ARGV=$(printf '%q ' "$@"); : >"$d.log"; ( setsid bash -c "$(printf %s ` + base64.StdEncoding.EncodeToString([]byte(runner)) + ` | base64 -d)" dyna-runner "$u" "$t" "$d" </dev/null >/dev/null 2>&1 & echo $! >"$d.pid" ); } 2>&1; ` + follow
 	}
-	args := []string{"bash", "-c", script + ` | { head -c 8388609; cat >/dev/null; }; exit "${PIPESTATUS[0]}"`, "dyna-hostexec", cwd, "dyna-hostexec-" + string(op), fmt.Sprintf("%g", float64(a.Timeout)/1000)}
+	args := []string{"bash", "-c", script, "dyna-hostexec", cwd, "dyna-hostexec-" + string(op), fmt.Sprintf("%g", float64(a.Timeout)/1000)}
 	return append(args, a.Argv...)
 }
+
+// NoRunStatus is the exit status of a call that follows a run the host holds no files for. A command that exits with it at
+// that moment reads the same.
+const NoRunStatus = 253
 
 // MaxQuoted is the most a run's quoted words may take as the value of DYNA_ARGV: one environment string is at most 128 KiB with its name and end byte.
 const MaxQuoted = 128<<10 - len("DYNA_ARGV=") - 1

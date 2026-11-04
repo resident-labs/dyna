@@ -63,9 +63,18 @@ func (s *Service) HostexecRun(ctx context.Context, who contract.Principal, req c
 		return contract.HostexecRunResponse{}, failure(err)
 	}
 	a := contract.HostexecRunArgs{Room: session.Room, Host: req.Host, Argv: []string{"bash", "-c", req.Command}, Cwd: req.Cwd, Timeout: req.Timeout, Grant: grant.ID}
-	op, err := s.approvals.SubmitWithClientID(ctx, who, contract.Operation{Room: session.Room, Args: a}, req.ClientID)
+	op, err := s.approvals.SubmitWithClientID(ctx, who, contract.Operation{Room: session.Room, Kind: a.OpKind(), Args: a}, req.ClientID)
 	if err != nil {
 		return contract.HostexecRunResponse{}, failure(err)
+	}
+	// A request that repeats a client ID gets the run it started, whichever process runs it, and waits for it.
+	if op.Result == nil && ctx.Err() == nil {
+		waited, err := s.approvals.Wait(ctx, op.ID)
+		if err != nil {
+			return contract.HostexecRunResponse{}, failure(err)
+		}
+		waited.Args = op.Args
+		op = waited
 	}
 	return contract.HostexecRunResponse{Operation: op}, nil
 }
@@ -151,58 +160,90 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 				}
 				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
 			}
-			started := s.now()
-			runCtx, cancel := s.hostexecTimeout(ctx, time.Duration(a.Timeout)*time.Millisecond+15*time.Second)
-			out, code, truncated, err := s.hostexec.RunHostexec(runCtx, a, op)
-			cancel()
-			stopped := store.HostexecStop("")
+			return s.finishHostexec(ctx, op, a, s.now(), false)
+		},
+		Resume: func(ctx context.Context, op contract.OpID, args contract.OpArgs, _ contract.Principal) contract.OpResult {
+			a := args.(contract.HostexecRunArgs)
+			run, err := s.store.ReadHostexec(ctx, op)
 			if err != nil {
-				stopped = store.HostexecLost
-			} else if err == nil && (code == 137 || code == 143) && !s.now().Before(started.Add(time.Duration(a.Timeout)*time.Millisecond)) {
-				// A signal-like exit at the deadline is treated as RuntimeMaxSec expiry.
-				stopped = store.HostexecTimeout
+				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
 			}
-			final, e := s.store.FinishHostexec(ctx, op, s.now(), len(out), stopped)
-			if e != nil {
-				return contract.OpResult{Cause: contract.CauseInternal, Error: e.Error()}
-			}
-			result := contract.OpResult{ExitCode: code, Truncated: truncated}
-			if final == store.HostexecStopped {
-				result.Error = "stopped by its session"
-			} else if err != nil {
-				result.Error = err.Error()
-				result.Cause = contract.CauseHostLost
-			}
-			if len(out) > 64<<10 {
-				rest := out[64<<10:]
-				name, _, e := s.saveFile(ctx, a.Room, bytes.NewReader(rest), int64(len(rest)))
-				if e != nil {
-					return contract.OpResult{Cause: contract.CauseInternal, Error: e.Error()}
-				}
-				result.OutputFile = name
-				out = out[:64<<10]
-			}
-			result.Output = strings.ToValidUTF8(string(out), "�")
-			// The folder is read back and removed whatever became of the run, so a stopped or lost run leaves none behind.
-			collectCtx, cancel := s.hostexecTimeout(context.WithoutCancel(ctx), 2*time.Minute+15*time.Second)
-			tar, collectCode, tarTruncated, e := s.hostexec.RunHostexec(collectCtx, boxhostexec.CollectArgs(a, op), op+"-out")
-			cancel()
-			switch {
-			case e != nil || collectCode != 0:
-				result.Output += "\n[$DYNA_OUT could not be read back, and may remain on the host]"
-			case len(tar) == 0:
-			case tarTruncated:
-				result.Output += "\n[files in $DYNA_OUT exceed 8 MiB: not copied back]"
-			default:
-				result.OutFiles, _, e = s.saveFile(ctx, a.Room, bytes.NewReader(tar), int64(len(tar)))
-				if e != nil {
-					return contract.OpResult{Cause: contract.CauseInternal, Error: e.Error()}
-				}
-			}
-			return result
+			return s.finishHostexec(ctx, op, a, run.Started, true)
 		},
 	}
 }
+
+// finishHostexec runs a host run, or with resumed set follows the one a previous engine started, and records its end. A resumed run
+// that the host cannot be asked about is asked again until the run's own time is up. The caller's context ending is the engine
+// shutting down: the run is left as it is, for the next start to follow.
+func (s *Service) finishHostexec(ctx context.Context, op contract.OpID, a contract.HostexecRunArgs, started time.Time, resumed bool) contract.OpResult {
+	runCtx, cancel := s.hostexecTimeout(ctx, started.Add(time.Duration(a.Timeout)*time.Millisecond+15*time.Second).Sub(s.now()))
+	a.Attach = resumed
+	out, code, truncated, err := s.hostexec.RunHostexec(runCtx, a, op)
+	for delay := 500 * time.Millisecond; resumed && err != nil && runCtx.Err() == nil; delay = min(2*delay, 10*time.Second) {
+		select {
+		case <-time.After(delay):
+		case <-runCtx.Done():
+		}
+		out, code, truncated, err = s.hostexec.RunHostexec(runCtx, a, op)
+	}
+	cancel()
+	if ctx.Err() != nil {
+		return contract.OpResult{Cause: contract.CauseInterrupted}
+	}
+	a.Attach = false
+	lost := err != nil || resumed && code == boxhostexec.NoRunStatus
+	stopped := store.HostexecStop("")
+	if lost {
+		stopped = store.HostexecLost
+		code = 0
+	} else if (code == 137 || code == 143) && !s.now().Before(started.Add(time.Duration(a.Timeout)*time.Millisecond)) {
+		// A signal-like exit at the deadline is treated as RuntimeMaxSec expiry.
+		stopped = store.HostexecTimeout
+	}
+	final, e := s.store.FinishHostexec(ctx, op, s.now(), len(out), stopped)
+	if e != nil {
+		return contract.OpResult{Cause: contract.CauseInternal, Error: e.Error()}
+	}
+	result := contract.OpResult{ExitCode: code, Truncated: truncated}
+	if final == store.HostexecStopped {
+		result.Error = "stopped by its session"
+	} else if lost && resumed {
+		result.Error = fmt.Sprintf("the engine restarted during this host run (deploy); the command may still be running on %s as %s", a.Host, "dyna-hostexec-"+string(op)+".scope")
+		result.Cause = contract.CauseEngineRestarted
+	} else if lost {
+		result.Error = err.Error()
+		result.Cause = contract.CauseHostLost
+	}
+	if len(out) > 64<<10 {
+		rest := out[64<<10:]
+		name, _, e := s.saveFile(ctx, a.Room, bytes.NewReader(rest), int64(len(rest)))
+		if e != nil {
+			return contract.OpResult{Cause: contract.CauseInternal, Error: e.Error()}
+		}
+		result.OutputFile = name
+		out = out[:64<<10]
+	}
+	result.Output = strings.ToValidUTF8(string(out), "�")
+	// The folder is read back and removed whatever became of the run, so a stopped or lost run leaves none behind.
+	collectCtx, cancel := s.hostexecTimeout(context.WithoutCancel(ctx), 2*time.Minute+15*time.Second)
+	tar, collectCode, tarTruncated, e := s.hostexec.RunHostexec(collectCtx, boxhostexec.CollectArgs(a, op), op+"-out")
+	cancel()
+	switch {
+	case e != nil || collectCode != 0:
+		result.Output += "\n[$DYNA_OUT could not be read back, and may remain on the host]"
+	case len(tar) == 0:
+	case tarTruncated:
+		result.Output += "\n[files in $DYNA_OUT exceed 8 MiB: not copied back]"
+	default:
+		result.OutFiles, _, e = s.saveFile(ctx, a.Room, bytes.NewReader(tar), int64(len(tar)))
+		if e != nil {
+			return contract.OpResult{Cause: contract.CauseInternal, Error: e.Error()}
+		}
+	}
+	return result
+}
+
 func (s *Service) StopHostexecs(ctx context.Context) error {
 	runs, err := s.store.HostexecStops(ctx, s.now())
 	if err != nil {
