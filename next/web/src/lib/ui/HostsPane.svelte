@@ -173,7 +173,7 @@
   <dl class="facts">{#if h.execOnly || !h.reachable}<dt>State</dt><dd>{#if h.reachable}Online{:else}<StatusPill tone="error" label="Unreachable" />{" · "}{seen ?? "Not seen yet"}{/if}</dd>{/if}
     {#if !h.execOnly}<dt>Workspaces</dt><dd>{h.boxes.toLocaleString("en")} running</dd>{/if}
     {#if h.runners}<dt>CI runners</dt><dd>{h.runners.toLocaleString("en")}</dd>{/if}
-    {#if h.pool}<dt>Pool</dt><dd>{h.pool}</dd>{/if}</dl>
+    {#if h.pool}<dt>Pool</dt><dd><a class="link" href={`/settings/pools/${encodeURIComponent(h.pool)}`} onclick={navigate}>{h.pool}</a></dd>{/if}</dl>
   {#if noSwap === h.name}<p class="warn">This host has no swap, so memory pressure can kill box processes.</p>{/if}
   {#if diskLow(h)}<p class="warn">Low on disk. New boxes and wakes wait here once free space reaches its floor.</p>{/if}
   {#each largeShared(h) as folder (folder.room)}<p class="small muted">Shared folder of {roomName(folder.room)}: {sharedSize(folder.bytes)}</p>{/each}
@@ -254,6 +254,7 @@
   .session:hover { background: var(--hover); }
   .session:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   .quiet { color: var(--muted); font-weight: 400; }
+  .link { color: inherit; }
   .sname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .word { flex: none; color: var(--muted); font-size: 12.5px; }
   @media (hover: none) { .input { min-height: 40px; } .check { min-height: 40px; } .session { min-height: 44px; } }

@@ -27,3 +27,8 @@ test("a list page's item is the one decoded part after its prefix, and a malform
   for (const path of ["/settings/approvals/%", "/settings/approvals/%E0%A4%A", "/settings/approvals/%ZZ", "/settings/approvals/", "/settings/approvals", "/settings/approvals/a/b", "/settings/profiles/a"])
     assert.equal(pathItem(path, prefix), undefined, path);
 });
+
+test("Pools is an admin list page between Hosts and Images, under the line above Hosts", () => {
+  assert.deepEqual(settingsPanes.slice(-3).map(pane => [pane.id, pane.label, pane.icon, pane.admin, !!pane.list, !!pane.sep]),
+    [["hosts", "Hosts", "monitor", true, true, true], ["pools", "Pools", "stack", true, true, false], ["images", "Images", "box", true, true, false]]);
+});
