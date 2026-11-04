@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount, type Snippet } from "svelte";
   import { APIError, call, SignedOut } from "../client.ts";
-  import { profileForSave, profileModels, slugName, type ProfileModel } from "../profiles.ts";
-  import type { ProfileSummary, ThinkingLevel } from "../contract.gen.ts";
+  import { profileForSave, profileModels, profileRows, slugName, type ProfileModel, type ProfileSummary } from "../profiles.ts";
+  import type { ThinkingLevel } from "../contract.gen.ts";
   import Icon from "./Icon.svelte";
   import ProfileEditor from "./ProfileEditor.svelte";
 
@@ -35,7 +35,7 @@
     off: "no thinking", minimal: "minimal thinking", low: "low thinking", medium: "medium thinking", high: "high thinking", xhigh: "very high thinking",
   };
   function reload() {
-    void call("profile.list", {}).then(result => { profiles = result.profiles ?? []; loaded = true; failed = false; },
+    void call("profile.list", {}).then(result => { profiles = profileRows(result.profiles); loaded = true; failed = false; },
       (error: unknown) => { if (error instanceof SignedOut) signedout(); else if (!loaded) failed = true; });
     // Without the accounts the owner can still type a model ID.
     void call("accounts.list", {}).then(result => { models = profileModels(result.accounts ?? []); }, () => {});

@@ -1,4 +1,10 @@
-import type { Account, ModelProvider, ProfileSummary, ThinkingLevel } from "./contract.gen.ts";
+import type { Account, ModelProvider, Profile, ProfileEntry, ThinkingLevel } from "./contract.gen.ts";
+
+// A profile as the web lists and edits it: profile.list's stored profile with its read-only in-use count beside it
+// flattened in, and the limits an editor may leave unset. profileForSave drops inUse again.
+export type ProfileSummary = Omit<Profile, "allowedModels" | "compactTokens" | "maxConcurrent"> & { inUse: number; allowedModels?: string[] | null; compactTokens?: number; maxConcurrent?: number };
+
+export const profileRows = (entries: readonly ProfileEntry[] | null): ProfileSummary[] => (entries ?? []).map(entry => ({ ...entry.profile, inUse: entry.inUse }));
 
 // A person reads a profile, not its slugs, as in v1's profileLabels.ts: the slug's words as a name, with SHOWN_AS
 // for those plain capitals get wrong.
