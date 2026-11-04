@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -33,6 +34,12 @@ type session struct {
 
 func newSession(t *testing.T, script ...[]pigtest.Block) *session {
 	t.Helper()
+	return newSessionOn(t, "test-model", nil, script...)
+}
+
+// newSessionOn is newSession on the named model of pigtest.AgentDir.
+func newSessionOn(t *testing.T, model string, extra []extension.InlineExtension, script ...[]pigtest.Block) *session {
+	t.Helper()
 	b := &session{model: pigtest.NewModel(script...), dir: t.TempDir()}
 	dyna, err := dynamcp.New(func(_ context.Context, method contract.Method, body []byte) ([]byte, *contract.Error) {
 		if method != contract.MethodPost {
@@ -57,8 +64,8 @@ func newSession(t *testing.T, script ...[]pigtest.Block) *session {
 		Dir:        b.dir,
 		AgentDir:   agentDir,
 		SessionDir: filepath.Join(agentDir, "sessions"),
-		Model:      contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "test-model", Thinking: contract.ThinkingLow},
-		Extensions: []extension.InlineExtension{Extension(Config{Dir: b.dir, Shell: server, Dyna: dyna})},
+		Model:      contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: model, Thinking: contract.ThinkingLow},
+		Extensions: append([]extension.InlineExtension{Extension(Config{Dir: b.dir, Shell: server, Dyna: dyna})}, extra...),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -183,6 +190,158 @@ func TestTheHeadNamesTheDynaToolsASearchReaches(t *testing.T) {
 	}
 }
 
+// filler makes a turn big enough for a compaction to have something to summarize before the kept recent turn.
+var filler = strings.Repeat("word ", 20000)
+
+// toolNames is the names of the tools a request declares at its top level.
+func toolNames(t *testing.T, request pigtest.Request) []string {
+	t.Helper()
+	names := make([]string, len(request.Tools))
+	for i, tool := range request.Tools {
+		var named struct{ Name string }
+		if err := json.Unmarshal(tool, &named); err != nil {
+			t.Fatal(err)
+		}
+		names[i] = named.Name
+	}
+	return names
+}
+
+// compact compacts the conversation, as an idle box does.
+func (b *session) compact(t *testing.T) {
+	t.Helper()
+	if got, err := b.harness.Compact(context.Background(), 0); err != nil || !got.Compacted {
+		t.Fatalf("compaction %+v, %v", got, err)
+	}
+}
+
+// last is the names of the tools the latest request declared.
+func (b *session) last(t *testing.T) []string {
+	t.Helper()
+	requests := b.model.Requests()
+	return toolNames(t, requests[len(requests)-1])
+}
+
+// loadGoalAndRoom loads the goal and room tools with one search each, then calls goal in the way the test says.
+func loadGoalAndRoom(call pigtest.Block) [][]pigtest.Block {
+	return [][]pigtest.Block{
+		{{Tool: "tool_search", Input: `{"query":"mcp__dyna__goal","limit":1}`}},
+		{{Tool: "tool_search", Input: `{"query":"mcp__dyna__room","limit":1}`}},
+		{call},
+		{{Text: "ok"}},
+		{{Text: "ok2"}},
+		{{Text: "the summary"}},
+		{{Text: "after"}},
+	}
+}
+
+func goalCall() pigtest.Block {
+	return pigtest.Block{Tool: "mcp__dyna__goal", Input: `{"action":"list"}`}
+}
+
+// A compaction keeps a loaded tool that was called, and unloads one that was not; the base tools stay.
+func TestACompactionUnloadsALoadedToolNothingCalled(t *testing.T) {
+	b := newSession(t, loadGoalAndRoom(goalCall())...)
+	b.turn(t, "hi "+filler)
+	b.turn(t, "more "+filler)
+	b.compact(t)
+	b.turn(t, "again")
+	got := b.last(t)
+	for _, want := range []string{"read", "bash", "edit", "write", "codemode", "job", "mcp__dyna__post", "tool_search", "mcp__dyna__goal"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("%s is not declared after the compaction: %v", want, got)
+		}
+	}
+	if slices.Contains(got, "mcp__dyna__room") {
+		t.Errorf("room, loaded and never called, is still declared: %v", got)
+	}
+}
+
+// A call from a script counts as a use.
+func TestAToolCalledFromAScriptSurvivesACompaction(t *testing.T) {
+	script, _ := json.Marshal(map[string]string{"code": `await tools.mcp__dyna__goal({action: "list"}); return "done";`})
+	b := newSession(t, loadGoalAndRoom(pigtest.Block{Tool: "codemode", Input: string(script)})...)
+	b.turn(t, "hi "+filler)
+	b.turn(t, "more "+filler)
+	b.compact(t)
+	b.turn(t, "again")
+	if got := b.last(t); !slices.Contains(got, "mcp__dyna__goal") || slices.Contains(got, "mcp__dyna__room") {
+		t.Fatalf("declared %v", got)
+	}
+}
+
+// Nothing is unloaded until a compaction.
+func TestNoToolIsUnloadedWithoutACompaction(t *testing.T) {
+	b := newSession(t, loadGoalAndRoom(goalCall())...)
+	b.turn(t, "hi "+filler)
+	b.turn(t, "more "+filler)
+	if got := b.last(t); !slices.Contains(got, "mcp__dyna__room") || !slices.Contains(got, "mcp__dyna__goal") {
+		t.Fatalf("declared %v", got)
+	}
+}
+
+// What counts as used is what was called since the previous compaction: a tool used before the first one is unloaded at
+// the second when the window between them did not call it.
+func TestTheUsedToolsResetAfterEachCompaction(t *testing.T) {
+	script := loadGoalAndRoom(goalCall())
+	script = append(script[:6], []pigtest.Block{{Text: "ok3"}}, []pigtest.Block{{Text: "ok4"}}, []pigtest.Block{{Text: "the second summary"}}, []pigtest.Block{{Text: "after"}})
+	b := newSession(t, script...)
+	b.turn(t, "hi "+filler)
+	b.turn(t, "more "+filler)
+	b.compact(t)
+	b.turn(t, "quiet")
+	b.turn(t, "again "+filler)
+	if got := b.last(t); !slices.Contains(got, "mcp__dyna__goal") {
+		t.Fatalf("goal, used before the first compaction, is unloaded before the second: %v", got)
+	}
+	b.compact(t)
+	b.turn(t, "last")
+	if got := b.last(t); slices.Contains(got, "mcp__dyna__goal") {
+		t.Fatalf("goal, not called since the first compaction, is still declared: %v", got)
+	}
+}
+
+// A search without a limit loads three tools.
+func TestASearchLoadsThreeToolsUnlessTheModelSaysMore(t *testing.T) {
+	b := newSession(t, []pigtest.Block{{Tool: "tool_search", Input: `{"query":"mcp__dyna"}`}}, []pigtest.Block{{Text: "ok"}})
+	b.turn(t, "hi")
+	if got := b.toolResult(t, 1); !strings.Contains(got, "Loaded 3 tools") {
+		t.Fatalf("tool result %s", got)
+	}
+	var schema string
+	for _, tool := range b.model.Requests()[0].Tools {
+		if strings.Contains(string(tool), `"name":"tool_search"`) {
+			schema = string(tool)
+		}
+	}
+	if !strings.Contains(schema, "Defaults to 3.") || strings.Contains(schema, "Defaults to 8") {
+		t.Fatalf("tool_search schema: %s", schema)
+	}
+}
+
+// On a route that takes tool changes mid-conversation, the head after a compaction declares what the session has, so
+// the unloaded tool's definition is gone from the request and no removal note stands in its place (dyna patch P11).
+func TestTheHeadAfterACompactionDeclaresOnlyTheToolsLeft(t *testing.T) {
+	b := newSessionOn(t, "tools-model", nil, loadGoalAndRoom(goalCall())...)
+	b.turn(t, "hi "+filler)
+	b.turn(t, "more "+filler)
+	b.compact(t)
+	b.turn(t, "again")
+	requests := b.model.Requests()
+	last := requests[len(requests)-1]
+	if strings.Contains(string(last.System), "mcp__dyna__room") && !strings.Contains(string(last.System), "deferred_tools") {
+		t.Fatal("room is named outside the deferred tools")
+	}
+	if slices.Contains(toolNames(t, last), "mcp__dyna__room") {
+		t.Fatalf("room is declared at the top level: %v", toolNames(t, last))
+	}
+	for _, message := range last.Messages {
+		if strings.Contains(string(message), "tool_removal") || strings.Contains(string(message), "mcp__dyna__room") {
+			t.Fatalf("the request still carries room: %.300s", message)
+		}
+	}
+}
+
 // A result of the github server and of any other server but dyna sits in the outside wrapper, with no author; dyna's
 // own tools and PiG's are left as they are.
 func TestMCPResultsAreOutsideTextExceptDynas(t *testing.T) {
@@ -230,5 +389,35 @@ func TestAScriptsMCPCallGetsTheRawResult(t *testing.T) {
 	b.turn(t, "script")
 	if got := b.toolResult(t, 1); strings.Contains(got, "<outside") || !strings.Contains(got, `ev_1`) {
 		t.Fatalf("tool result %s", got)
+	}
+}
+
+// An extension's tool with codemode exposure, which tool_search loads too, is unloaded at a compaction like a deferred one.
+func TestACodemodeExposureToolIsUnloadedAtACompaction(t *testing.T) {
+	helper := extension.NamedInlineExtension{Name: "helper", Factory: func(api extension.API) error {
+		api.RegisterTool(extension.ToolDefinition{
+			Name:        "helper",
+			Label:       "helper",
+			Description: "Only reachable from scripts, or loaded by a search.",
+			Parameters:  json.RawMessage(`{"type":"object"}`),
+			Exposure:    extension.ToolExposureCodemode,
+			Execute: func(context.Context, string, json.RawMessage, extension.AgentToolUpdateCallback) (extension.AgentToolResult, error) {
+				return extension.AgentToolResult{}, nil
+			},
+		})
+		return nil
+	}}
+	script := loadGoalAndRoom(goalCall())
+	script[1] = []pigtest.Block{{Tool: "tool_search", Input: `{"query":"helper","limit":1}`}}
+	b := newSessionOn(t, "test-model", []extension.InlineExtension{helper}, script...)
+	b.turn(t, "hi "+filler)
+	if got := b.last(t); !slices.Contains(got, "helper") {
+		t.Fatalf("a search did not load helper: %v", got)
+	}
+	b.turn(t, "more "+filler)
+	b.compact(t)
+	b.turn(t, "again")
+	if got := b.last(t); slices.Contains(got, "helper") || !slices.Contains(got, "mcp__dyna__goal") {
+		t.Fatalf("declared %v", got)
 	}
 }
