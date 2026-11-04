@@ -1,6 +1,6 @@
 // list marks a list page (ui/settings), whose open item is at /settings/<id>/<item>. sep sets a pane apart from the
 // ones above it in the nav with a line, as the machines Dyna runs on are.
-export const settingsPanes: readonly { id: string; label: string; icon: "palette" | "devices" | "plug" | "tool" | "shield" | "plus" | "monitor"; admin: boolean; list?: boolean; sep?: boolean }[] = [
+export const settingsPanes: readonly { id: string; label: string; icon: "palette" | "devices" | "plug" | "tool" | "shield" | "plus" | "monitor" | "box"; admin: boolean; list?: boolean; sep?: boolean }[] = [
   { id: "appearance", label: "Appearance", icon: "palette", admin: false },
   { id: "devices", label: "Sharing & access", icon: "devices", admin: true, list: true },
   { id: "accounts", label: "Accounts", icon: "plug", admin: true, list: true },
@@ -8,6 +8,7 @@ export const settingsPanes: readonly { id: string; label: string; icon: "palette
   { id: "approvals", label: "Approvals", icon: "shield", admin: true, list: true },
   { id: "addons", label: "Skills & tools", icon: "plus", admin: false, list: true },
   { id: "hosts", label: "Hosts", icon: "monitor", admin: true, list: true, sep: true },
+  { id: "images", label: "Images", icon: "box", admin: true, list: true },
 ];
 // The counts beside the Settings panes in the nav (spec 5.13), only from lists the app already holds: Approvals lists
 // the rooms not being deleted. rooms is undefined until they load, and then no pane has a count.
