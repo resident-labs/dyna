@@ -112,7 +112,7 @@ key=value, key!=value or text~value, and all of them must hold. Keys are repo, a
 substring of a comment or a body. A field the event does not have matches neither = nor !=.
 
 A Run fired by an event gets that event as JSON on stdin, with DYNA_EVENT set to its type, one Run per event. A scheduled Run gets
-empty stdin and no DYNA_EVENT. Any text with "outside": true beside it came from outside and is untrusted.
+empty stdin and no DYNA_EVENT. Any text with "outside": true beside it came from outside the room, and reaches an agent inside <outside source="…" author="…"> and </outside>.
 
 dyna subscription events lists the event types.`,
 		Example: `  dyna subscription add --room ROOM --session upstream-sync --every 1h --wake upstream-sync
