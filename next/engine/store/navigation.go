@@ -165,7 +165,7 @@ COALESCE((SELECT max(at) FROM events WHERE room=r.id AND type='post.created' AND
 func (s *Store) ResolveRoom(ctx context.Context, ref string) (contract.RoomID, string, error) {
 	var id contract.RoomID
 	var name string
-	err := s.Read().QueryRowContext(ctx, "SELECT id,name FROM rooms WHERE id=? OR name=? ORDER BY id=? DESC LIMIT 1", ref, ref, ref).Scan(&id, &name)
+	err := s.Read().QueryRowContext(ctx, "SELECT id,name FROM rooms WHERE (id=? OR name=?) AND state='open' ORDER BY id=? DESC LIMIT 1", ref, ref, ref).Scan(&id, &name)
 	return id, name, err
 }
 
