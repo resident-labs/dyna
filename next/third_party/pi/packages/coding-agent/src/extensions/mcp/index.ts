@@ -141,85 +141,6 @@ function configuredExposures(entry: McpServerEntry): Set<McpExposure> {
 	return new Set([exposureOf(entry), ...Object.values(entry.config.toolExposure ?? {})]);
 }
 
-/** Whether some of the server's tools are declared to the model, so the first prompt waits for them. */
-function hasDirectTools(entry: McpServerEntry): boolean {
-	return configuredExposures(entry).has("direct");
-}
-
-/** Whether some of the server's tools are reached through codemode or tool_search. */
-function hasIndirectTools(entry: McpServerEntry): boolean {
-	const exposures = configuredExposures(entry);
-	return exposures.has("codemode") || exposures.has("deferred");
-}
-
-/** Name of the system prompt section that lists the servers whose tools are not declared. */
-export const MCP_SERVERS_SECTION = "mcp_servers";
-/** Characters of a server description in the section, as Codex allows for deferred namespaces. */
-const MAX_SERVER_DESCRIPTION_CHARS = 250;
-/**
- * Characters of the whole section. Descriptions shrink to fit; when the server lines alone do not
- * fit, the last servers are left out and counted in a closing line.
- */
-export const MAX_SERVERS_SECTION_CHARS = 4096;
-
-/** The section's first line. It explains only the ways of reaching tools that the listed servers use. */
-function serversSectionIntro(reaches: ReadonlySet<string>): string {
-	let intro = "MCP servers whose tools are not declared to you.";
-	if (reaches.has("codemode")) intro += " Call the tools of `codemode` servers from codemode scripts.";
-	if (reaches.has("tool_search")) intro += " Load the tools of `tool_search` servers with `tool_search`.";
-	return intro;
-}
-
-function truncate(text: string, max: number): string {
-	if (text.length <= max) return text;
-	return max <= 1 ? "" : `${text.slice(0, max - 1).trimEnd()}…`;
-}
-
-/** What the `mcp_servers` section needs of a server. */
-export interface McpServerListing {
-	entry: McpServerEntry;
-	connection?: { instructions?: string };
-}
-
-/** First line of the configured description, or of the server instructions once connected. */
-function serverSummary(server: McpServerListing): string {
-	const text = server.entry.config.description?.trim() || server.connection?.instructions || "";
-	return (text.split("\n", 1)[0] ?? "").trim();
-}
-
-/**
- * The `mcp_servers` section: every enabled server with codemode or deferred tools, with how its
- * tools are reached and a one-line summary. The model learns of the servers from it, since neither
- * codemode nor tool_search lists them. Undefined when there are no such servers.
- */
-export function renderServersSection(servers: readonly McpServerListing[]): string | undefined {
-	const listed = servers
-		.filter((server) => isEnabled(server) && hasIndirectTools(server.entry))
-		.sort((a, b) => a.entry.name.localeCompare(b.entry.name));
-	if (listed.length === 0) return undefined;
-	const reaches = listed.map((server) =>
-		configuredExposures(server.entry).has("codemode") ? "codemode" : "tool_search",
-	);
-	const intro = serversSectionIntro(new Set(reaches));
-	const heads = listed.map((server, index) => `- ${mcpNamespace(server.entry.name)} (${reaches[index]})`);
-	const omitted = (count: number) =>
-		count > 0 ? [`- … ${count} more server${count === 1 ? "" : "s"}; find their tools with searchTools()`] : [];
-	// Characters of the intro, the first `kept` server lines without descriptions, and the omission line.
-	const size = (kept: number) => [intro, ...heads.slice(0, kept), ...omitted(listed.length - kept)].join("\n").length;
-	let kept = listed.length;
-	while (kept > 0 && size(kept) > MAX_SERVERS_SECTION_CHARS) kept--;
-	// Each description also takes a ": " separator.
-	const perServer =
-		kept === 0
-			? 0
-			: Math.min(MAX_SERVER_DESCRIPTION_CHARS, Math.floor((MAX_SERVERS_SECTION_CHARS - size(kept)) / kept) - 2);
-	const lines = listed.slice(0, kept).map((server, index) => {
-		const summary = perServer > 0 ? truncate(serverSummary(server), perServer) : "";
-		return summary ? `${heads[index]}: ${summary}` : heads[index];
-	});
-	return [intro, ...lines, ...omitted(listed.length - kept)].join("\n");
-}
-
 /**
  * Whether a call that reaches `reach` (see `ToolDefinition.reachesTools`) needs the server: it
  * reaches every tool, or one of its words contains the server's namespace.
@@ -1150,15 +1071,14 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
 				});
 		});
 
-		// The first prompt waits for servers whose tools are declared to the model, so they are declared
-		// in its first request, but not indefinitely: a slow or hanging server must not hold up the
-		// prompt. Other servers are waited for when a script or search needs them (below).
-		const waitForDirectServers = async (ctx: ExtensionContext) => {
+		// The first prompt waits for the servers, so its head declares their direct tools and names the
+		// others in the `deferred_tools` section, but not indefinitely: a slow or hanging server must
+		// not hold up the prompt. Its tools are named from the next compaction, and a script or search
+		// waits for it when it needs it (below).
+		const waitForStartupServers = async (ctx: ExtensionContext) => {
 			if (waitedForStartup) return;
 			waitedForStartup = true;
-			const ready = servers.flatMap((server) =>
-				isEnabled(server) && hasDirectTools(server.entry) && server.ready ? [server.ready] : [],
-			);
+			const ready = servers.flatMap((server) => (isEnabled(server) && server.ready ? [server.ready] : []));
 			if (ready.length === 0) return;
 			let timer: NodeJS.Timeout | undefined;
 			const finished = await Promise.race([
@@ -1173,14 +1093,8 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
 			}
 		};
 
-		// Every prompt lists the servers in the `mcp_servers` section as they are when it starts. Pi
-		// appends the section to the conversation when it changed, for example after a server connected.
-		pi.on("before_agent_start", async (event, ctx) => {
-			await waitForDirectServers(ctx);
-			const { sections } = event.systemPromptOptions;
-			const section = renderServersSection(servers);
-			if (section) sections[MCP_SERVERS_SECTION] = section;
-			else delete sections[MCP_SERVERS_SECTION];
+		pi.on("before_agent_start", async (_event, ctx) => {
+			await waitForStartupServers(ctx);
 		});
 
 		// A tool that reaches other tools (`reachesTools`) waits for the servers it may reach, so their
