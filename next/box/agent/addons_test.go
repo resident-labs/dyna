@@ -1,9 +1,18 @@
 package agent
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"io/fs"
+	"net/http"
+	"net/http/httptest"
+	"time"
+
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/resident-labs/dyna/harness/pig/pigtest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -226,5 +235,140 @@ func TestOnlyARootBoxReadsTheRootOnlyBundles(t *testing.T) {
 	}
 	if got := roomAddons(true).Bundles; len(got) != 4 || !strings.Contains(strings.Join(got, " "), "/run/dyna/root-addons/room/") {
 		t.Fatalf("%v", got)
+	}
+}
+
+// registry serves one npm package, the fixture folder packed as its tarball, as the registry the box's npm talks to.
+func registry(t *testing.T, folder string, hang <-chan struct{}) {
+	t.Helper()
+	var tarball bytes.Buffer
+	zipped := gzip.NewWriter(&tarball)
+	archive := tar.NewWriter(zipped)
+	err := filepath.WalkDir(folder, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		name, err := filepath.Rel(folder, path)
+		if err != nil {
+			return err
+		}
+		if err := archive.WriteHeader(&tar.Header{Name: "package/" + filepath.ToSlash(name), Mode: 0o644, Size: int64(len(data))}); err != nil {
+			return err
+		}
+		_, err = archive.Write(data)
+		return err
+	})
+	if err != nil || archive.Close() != nil || zipped.Close() != nil {
+		t.Fatal(err)
+	}
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hang != nil {
+			<-hang
+		}
+		if r.Method == http.MethodPost { // npm's audit
+			_, _ = w.Write([]byte("{}"))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, ".tgz") {
+			_, _ = w.Write(tarball.Bytes())
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"name":      "fixture-package",
+			"dist-tags": map[string]string{"latest": "1.0.0"},
+			"versions":  map[string]any{"1.0.0": map[string]any{"name": "fixture-package", "version": "1.0.0", "dist": map[string]string{"tarball": server.URL + "/fixture-package/-/fixture-package-1.0.0.tgz"}}},
+		})
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("npm_config_registry", server.URL)
+}
+
+func fixturePackage() contract.Addon {
+	return contract.Addon{Kind: contract.AddonPackage, Name: "fixture-package", Source: "npm:fixture-package@1.0.0"}
+}
+
+// The install goes through PiG, so a box with no pi binary installs a package, and its skill and prompt are there.
+func TestAPackageInstallsWithoutAPiBinary(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "pi-ran")
+	shims := t.TempDir()
+	if err := os.WriteFile(filepath.Join(shims, "pi"), []byte("#!/bin/sh\ntouch "+marker+"\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", shims+string(os.PathListSeparator)+os.Getenv("PATH"))
+	registry(t, pigtest.Package(t, pigtest.ToolExtension("fixture_tool", "ok")), nil)
+	b := newAddonBox(t)
+	b.Install = piInstall
+	writeBundle(t, b.Bundles[1], []contract.Addon{fixturePackage()})
+	_, problems, err := b.apply(context.Background())
+	if err != nil || len(problems) != 0 {
+		t.Fatalf("%v %v", problems, err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the pi binary ran")
+	}
+	_, packages := b.settings(t)
+	if len(packages) != 1 {
+		t.Fatal(packages)
+	}
+	for _, file := range []string{"package.json", "skills/fixture-skill/SKILL.md", "prompts/fixture-prompt.md", "extensions/index.js"} {
+		if _, err := os.Stat(filepath.Join(packages[0], file)); err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+// A package whose extension throws is a problem for the notice, stays out of the settings, and is not cached, so the next
+// box start tries it again.
+func TestAPackageWhoseExtensionFailsToLoadIsAProblemAndStaysOut(t *testing.T) {
+	registry(t, pigtest.Package(t, `throw new Error("no good");`), nil)
+	b := newAddonBox(t)
+	b.Install = piInstall
+	writeBundle(t, b.Bundles[1], []contract.Addon{fixturePackage()})
+	_, problems, err := b.apply(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(problems) != 1 || !strings.Contains(problems[0], "npm:fixture-package@1.0.0") || !strings.Contains(problems[0], "its extension failed to load") || !strings.Contains(problems[0], "no good") {
+		t.Fatalf("%q", problems)
+	}
+	if _, packages := b.settings(t); len(packages) != 0 {
+		t.Fatal(packages)
+	}
+	if entries, err := os.ReadDir(b.Cache); err != nil || len(entries) != 0 {
+		t.Fatalf("%v %v", entries, err)
+	}
+}
+
+// A package that cannot be installed is a problem that says why.
+func TestAPackageThatFailsToInstallIsAProblemThatSaysWhy(t *testing.T) {
+	registry(t, pigtest.Package(t, ""), nil)
+	b := newAddonBox(t)
+	b.Install = piInstall
+	writeBundle(t, b.Bundles[1], []contract.Addon{{Kind: contract.AddonPackage, Name: "fixture-package", Source: "npm:fixture-package@9.9.9"}})
+	_, problems, err := b.apply(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(problems) != 1 || !strings.Contains(problems[0], "npm:fixture-package@9.9.9") || !strings.Contains(problems[0], "install failed") || !strings.Contains(problems[0], "failed with code") {
+		t.Fatalf("%q", problems)
+	}
+}
+
+// A registry that does not answer costs the install its timeout, and not the box its start; the install ends with its
+// context, and no npm is left running.
+func TestAnInstallThatHangsEndsWithItsContext(t *testing.T) {
+	hang := make(chan struct{})
+	defer close(hang)
+	registry(t, pigtest.Package(t, ""), hang)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	err := piInstall(ctx, t.TempDir(), fixturePackage().Source)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
 	}
 }

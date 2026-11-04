@@ -11,7 +11,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/harness"
-	"github.com/resident-labs/dyna/harness/pi"
+	"github.com/resident-labs/dyna/harness/pig"
 	"github.com/resident-labs/dyna/room"
 )
 
@@ -52,7 +52,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 	if err != nil {
 		return response, failure(err)
 	}
-	reader := pi.TranscriptReader{Dir: dir, Acked: make(map[string]int64, len(files))}
+	reader := pig.TranscriptReader{Dir: dir, Acked: make(map[string]int64, len(files))}
 	for _, f := range files {
 		reader.Acked[f.Path] = f.Acked
 	}
@@ -146,11 +146,11 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			skip := req.Cursor
 			if !req.Tail && req.Page != contract.TranscriptPageMandatoryPosts {
 				const maxItems = 256
-				var pageItems []pi.TranscriptItem
+				var pageItems []pig.TranscriptItem
 				seenTotal := 0
 				readerMore := false
 				for _, r := range ranges {
-					var items []pi.TranscriptItem
+					var items []pig.TranscriptItem
 					var seen int
 					var more bool
 					var err error
@@ -220,7 +220,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 						callIDs = append(callIDs, item.CallID)
 					}
 				}
-				itemsByCall := make(map[string]*pi.TranscriptItem, len(pageItems))
+				itemsByCall := make(map[string]*pig.TranscriptItem, len(pageItems))
 				for i := range pageItems {
 					if pageItems[i].CallID != "" {
 						itemsByCall[pageItems[i].CallID] = &pageItems[i]
@@ -343,7 +343,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 		if req.Turn != "" {
 			for _, item := range t.Items {
 				if item.Kind == contract.TranscriptTool || item.Kind == contract.TranscriptPost {
-					response.Steps = append(response.Steps, pi.TranscriptStep(item))
+					response.Steps = append(response.Steps, pig.TranscriptStep(item))
 				}
 			}
 			response.Truncated = t.More
@@ -434,7 +434,7 @@ func transcriptInputBody(input contract.Event) (string, *contract.Conversation, 
 }
 
 // applyTranscriptSteer fills a steer from its event. Pi's record holds the frame the session read, not what the owner wrote.
-func applyTranscriptSteer(item *pi.TranscriptItem, event contract.Event, full bool) error {
+func applyTranscriptSteer(item *pig.TranscriptItem, event contract.Event, full bool) error {
 	value, home, attachments, err := transcriptInputBody(event)
 	if err != nil {
 		return err
@@ -483,7 +483,7 @@ func budgetTranscriptTurn(t *contract.TranscriptTurn, req contract.TranscriptRea
 		data, _ := json.Marshal(items[i])
 		stepBytes := 0
 		if req.Turn != "" && (items[i].Kind == contract.TranscriptTool || items[i].Kind == contract.TranscriptPost) {
-			step, _ := json.Marshal(pi.TranscriptStep(items[i]))
+			step, _ := json.Marshal(pig.TranscriptStep(items[i]))
 			stepBytes = len(step) + 1
 		}
 		if size+len(data)+1 > budget || size+len(data)+1+stepSize+stepBytes > 250<<10 {

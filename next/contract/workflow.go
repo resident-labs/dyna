@@ -188,7 +188,7 @@ type BoxWorkflow struct {
 	Version  int               `json:"version"`
 	Args     string            `json:"args,omitempty"`
 	Profiles []WorkflowProfile `json:"profiles"` // in meta's order: the first is the default
-	Workers  int               `json:"workers"`  // how many Pi processes the box's memory allows at once
+	Workers  int               `json:"workers"`  // how many crew workers the box's memory allows at once
 }
 
 // WorkflowReload hands a crew's box a newer version of its script. The engine sends the run's current version on each channel,

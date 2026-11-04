@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,7 +9,6 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -18,10 +16,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/MichaelKinsy/PiG/coding"
+
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/skills"
 	"github.com/resident-labs/dyna/contract"
-	"github.com/resident-labs/dyna/harness/pi"
+	"github.com/resident-labs/dyna/harness/pig"
 )
 
 // installTimeout bounds what one box start spends on packages it has not cached, so a hung registry costs a notice and not the box.
@@ -60,7 +60,7 @@ type chosenAddon struct {
 
 // apply returns the added MCP servers and, in plain words, each item that failed. Only a box that cannot write its own
 // folders gets an error.
-func (a addonStart) apply(ctx context.Context) (map[string]pi.MCPServer, []string, error) {
+func (a addonStart) apply(ctx context.Context) (map[string]pig.MCPServer, []string, error) {
 	work, err := os.MkdirTemp(filepath.Dir(a.Skills), ".addons-")
 	if err != nil {
 		return nil, nil, err
@@ -84,7 +84,7 @@ func (a addonStart) apply(ctx context.Context) (map[string]pi.MCPServer, []strin
 	if err := skills.Install(a.Skills); err != nil {
 		return nil, nil, err
 	}
-	servers := map[string]pi.MCPServer{}
+	servers := map[string]pig.MCPServer{}
 	var packages []contract.Addon
 	for _, key := range slices.Sorted(maps.Keys(chosen)) {
 		item := chosen[key]
@@ -100,7 +100,7 @@ func (a addonStart) apply(ctx context.Context) (map[string]pi.MCPServer, []strin
 		case contract.AddonPackage:
 			packages = append(packages, item.Addon)
 		case contract.AddonMCP:
-			servers[item.Name] = pi.MCPServer{URL: item.URL, Command: item.Command, Args: item.Args, Exposure: "deferred"}
+			servers[item.Name] = pig.MCPServer{URL: item.URL, Command: item.Command, Args: item.Args, Exposure: "deferred"}
 		}
 	}
 	paths, failed := a.install(ctx, packages)
@@ -198,27 +198,31 @@ func installedPath(root string, item contract.Addon) string {
 	return root + "/git/" + item.Name
 }
 
-// piInstall has Pi install a source into its own agent folder, then starts Pi there once. Pi exits when an extension fails
-// to load, so this is where a broken package must show, or it would stop every box that loads it.
+// piInstall has PiG install a source into an agent folder of its own, the way it installs a configured package, and
+// then loads the package's extensions there. PiG cannot say which package a failed extension belongs to once more than
+// one is configured, so each source gets its own folder. A package whose extension fails to load must show here, or the
+// session would report it at every box start.
 func piInstall(ctx context.Context, dir, source string) error {
-	pi := func(args ...string) ([]byte, error) {
-		cmd := exec.CommandContext(ctx, "pi", args...)
-		cmd.Env = append(os.Environ(), "PI_CODING_AGENT_DIR="+dir)
-		cmd.WaitDelay = 5 * time.Second // npm can outlive pi and hold its output open
-		return cmd.CombinedOutput()
-	}
-	out, err := pi("install", source)
+	settings, err := json.Marshal(struct {
+		Packages []string `json:"packages"`
+	}{[]string{source}})
 	if err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return fmt.Errorf("install failed: %s", lastOutput(out))
+		return err
 	}
-	// Without a model Pi exits right after loading, so only this message says anything.
-	out, _ = pi("--offline", "--mode", "rpc", "--no-session")
-	if _, failure, found := bytes.Cut(out, []byte("Failed to load extension")); found {
-		line, _, _ := bytes.Cut(failure, []byte("\n"))
-		return fmt.Errorf("its extension failed to load:%s", line)
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), settings, 0o600); err != nil {
+		return err
+	}
+	loader := coding.NewDefaultResourceLoader(coding.DefaultResourceLoaderOptions{CWD: dir, AgentDir: dir, NoContextFiles: true})
+	defer loader.Close()
+	if err := loader.ReloadWith(ctx); err != nil {
+		return fmt.Errorf("install failed: %w", err)
+	}
+	var failures []string
+	for _, failed := range loader.GetExtensions().Errors {
+		failures = append(failures, failed.Error)
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("its extension failed to load: %s", lastOutput([]byte(strings.Join(failures, "; "))))
 	}
 	return nil
 }
