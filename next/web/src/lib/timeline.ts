@@ -27,7 +27,7 @@ function eventInput(event: Event): TimelineInput | undefined {
     case "github.pr.opened": return line(`PR opened: ${event.body.url}`);
     case "goal.set": return line(`Goal ${event.body.goal} set: ${event.body.text}`);
     case "session.profile_changed": return line(`Model changed to ${event.body.profile}`);
-    case "session.restarted": return line(event.body.imageUpdated ? "Box image updated" : "Box replaced");
+    case "session.restarted": return line(event.body.imageUpdated ? "Box image updated" : event.body.stopped || event.body.refreshed ? "Box restarted" : "Box replaced");
     case "session.closed": return line(`Session ${event.body.session} closed`);
     case "host.disk_low": return line(`Host ${event.body.host} is low on disk`);
     case "op.decided": case "op.ran": return line(`Operation ${event.body.id}: ${event.body.state}`);

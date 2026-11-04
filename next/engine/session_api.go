@@ -478,9 +478,9 @@ func (s *Service) BoxStopped(ctx context.Context, id contract.SessionID) {
 		log.Printf("session %s: box restart: %v", id, err)
 		return
 	}
-	notice, err := s.engineEvent(session.Room, contract.SessionNotice{Session: id, Text: room.BoxRestartedNotice, ClientID: store.BoxUpdateNoticeID(session.Box, "restarted:"+mark)})
+	notice, err := s.engineEvent(session.Room, contract.SessionRestarted{Session: id, Refreshed: true, ClientID: store.BoxUpdateNoticeID(session.Box, "restarted:"+mark)})
 	if err == nil {
-		err = s.store.WakeWithNotice(ctx, notice, id)
+		err = s.store.NoticeRestarted(ctx, notice)
 	}
 	if err != nil {
 		log.Printf("session %s: box restart: %v", id, err)
