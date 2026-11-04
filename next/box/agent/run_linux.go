@@ -26,7 +26,6 @@ import (
 	"github.com/resident-labs/dyna/box/visual"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness"
-	"github.com/resident-labs/dyna/harness/pi"
 	"github.com/resident-labs/dyna/harness/pig"
 )
 
@@ -135,7 +134,7 @@ func Run(ctx context.Context) error {
 	}
 	// The session's Pi and every crew worker take the same servers. An owner's own server named github comes first.
 	if _, taken := addedServers["github"]; hello.GitHub && !taken {
-		addedServers["github"] = pi.GitHubServer()
+		addedServers["github"] = pig.GitHubServer()
 	}
 	steps.Done("add-ons")
 	notice := func(text string) {
@@ -184,7 +183,7 @@ func Run(ctx context.Context) error {
 		return problem
 	}
 	mux.Handle("/dyna/", dynaTools)
-	err = pi.WriteAgentMCPConfig(mcpPath, dynaTools.Description(), addedServers)
+	err = pig.WriteAgentMCPConfig(mcpPath, dynaTools.Description(), addedServers)
 	if err != nil {
 		return err
 	}
