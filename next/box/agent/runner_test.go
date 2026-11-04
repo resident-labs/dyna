@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness"
@@ -547,4 +548,113 @@ func (h *stopLateHarness) SetPromptSections(context.Context, []contract.ContextS
 	close(h.entered)
 	<-h.sections
 	return nil
+}
+
+// After a failed run the engine gives the steer to the next turn, so the run's end clears Pi's queue whatever the outcome.
+func TestRunnerClearsPiQueueAfterAFailedRun(t *testing.T) {
+	release := make(chan struct{})
+	h := &fakeharness.Harness{Turns: []fakeharness.Turn{{Err: errors.New("pi stream closed"), Release: release}, {Result: contract.TurnEnded{Outcome: "completed"}}}}
+	sink := &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 1)}
+	runner := &Runner{Harness: h, Sink: sink}
+	ctx := context.Background()
+	if err := runner.Handle(ctx, contract.BoxMessage{Body: contract.TurnStart{Turn: "turn_a", Inputs: []contract.TurnInput{{Delivery: 1, Text: "start"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	for holding := true; holding; {
+		runner.mu.Lock()
+		holding = runner.holding
+		runner.mu.Unlock()
+		runtime.Gosched()
+	}
+	late := contract.TurnInput{Delivery: 2, Text: "late"}
+	if err := runner.Handle(ctx, contract.BoxMessage{Body: contract.TurnSteer{Input: late, Queue: contract.QueueSteer}}); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if ended := <-sink.done; ended.Outcome != "failed" {
+		t.Fatalf("outcome %q", ended.Outcome)
+	}
+	runner.turns.Wait()
+	if h.Clears != 1 {
+		t.Fatalf("clears after a failed run = %d", h.Clears)
+	}
+	// The engine's redelivery is the only copy the next turn reads.
+	if err := runner.Handle(ctx, contract.BoxMessage{Body: contract.TurnStart{Turn: "turn_b", Inputs: []contract.TurnInput{{Delivery: 1, Text: "start"}, late}}}); err != nil {
+		t.Fatal(err)
+	}
+	<-sink.done
+	runner.turns.Wait()
+	reads := 0
+	for _, input := range h.Inputs {
+		if input.TurnInput.Delivery == late.Delivery && input.Queue == contract.QueueSteer {
+			reads++
+		}
+	}
+	if reads != 1 || h.Clears != 2 {
+		t.Fatalf("queued steers=%d clears=%d", reads, h.Clears)
+	}
+}
+
+// orderedHarness blocks Steer until released and records whether it had returned when the queue was cleared.
+type orderedHarness struct {
+	fakeharness.Harness
+	entered        chan struct{}
+	releaseSteer   chan struct{}
+	cleared        chan struct{}
+	steerReturned  atomic.Bool
+	clearedBeforeS atomic.Bool
+}
+
+func (h *orderedHarness) Steer(context.Context, contract.TurnInput) error {
+	close(h.entered)
+	<-h.releaseSteer
+	h.steerReturned.Store(true)
+	return nil
+}
+
+func (h *orderedHarness) ClearQueue(context.Context) error {
+	h.clearedBeforeS.Store(!h.steerReturned.Load())
+	close(h.cleared)
+	return nil
+}
+
+// The run's end waits for a steer still in flight, so the steer cannot land after the clear and stay in Pi's queue.
+func TestRunnerClearWaitsForSteerInFlight(t *testing.T) {
+	release := make(chan struct{})
+	h := &orderedHarness{entered: make(chan struct{}), releaseSteer: make(chan struct{}), cleared: make(chan struct{})}
+	h.Turns = []fakeharness.Turn{{Result: contract.TurnEnded{Outcome: "completed"}, Release: release}}
+	sink := &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 1)}
+	runner := &Runner{Harness: h, Sink: sink}
+	ctx := context.Background()
+	if err := runner.Handle(ctx, contract.BoxMessage{Body: contract.TurnStart{Turn: "turn_a", Inputs: []contract.TurnInput{{Delivery: 1, Text: "start"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	for holding := true; holding; {
+		runner.mu.Lock()
+		holding = runner.holding
+		runner.mu.Unlock()
+		runtime.Gosched()
+	}
+	steered := make(chan error, 1)
+	go func() {
+		steered <- runner.Handle(ctx, contract.BoxMessage{Body: contract.TurnSteer{Input: contract.TurnInput{Delivery: 2, Text: "late"}, Queue: contract.QueueSteer}})
+	}()
+	<-h.entered
+	close(release)
+	// Only a clear that did not wait can happen here, while Steer is still blocked.
+	select {
+	case <-h.cleared:
+		t.Fatal("the queue was cleared while a steer was in flight")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(h.releaseSteer)
+	if err := <-steered; err != nil {
+		t.Fatal(err)
+	}
+	<-h.cleared
+	<-sink.done
+	runner.turns.Wait()
+	if h.clearedBeforeS.Load() {
+		t.Fatal("cleared before the steer returned")
+	}
 }
