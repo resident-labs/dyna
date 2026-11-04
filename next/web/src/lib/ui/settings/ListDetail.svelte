@@ -37,7 +37,7 @@
   {#if !drill || !open}{@render bar()}{/if}
   <div class="split" class:drill class:open>
     <div class="list-side">{@render list({ drill, select })}</div>
-    {#if open || !drill}<aside class="detail" aria-label={open ? title : label} tabindex="-1" bind:this={side}>
+    {#if open || !drill}<aside class="detail" aria-label={open ? title : label} tabindex="-1" data-f6 bind:this={side}>
       {#if open}<header class="bar">{#if drill}<button type="button" class="round" aria-label={`Back to ${label}`} title="Back (Esc)" onclick={() => void close()}><Icon name="backChevron" size={20} /></button>{/if}
         <strong>{title}</strong>{#if !drill}<button type="button" class="round close" aria-label="Close" title="Close (Esc)" onclick={() => void close()}><Icon name="close" /></button>{/if}</header>
         <div class="body">{@render detail()}</div>
@@ -68,6 +68,8 @@
   .body :global(p) { margin: 0; }
   .body :global(.small) { font-size: 12.5px; }
   .body :global(.muted) { color: var(--muted); }
+  /* A summary's facts, each "· fact", break between one another and never inside one. */
+  .body :global(.fact) { white-space: nowrap; }
   .body :global(.stack) { display: grid; }
   .body :global(.set) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); background: var(--raised); cursor: pointer; }
   .body :global(.set:first-child) { border-radius: 12px 12px 0 0; }
