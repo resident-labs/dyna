@@ -821,7 +821,13 @@ func TestAForgottenStepEndsWithTheRun(t *testing.T) {
 		cancelled.Store(true)
 		return ctx.Err()
 	}
-	ended := h.run(crewMeta + `agent("slow"); await agent("wait"); return "returned"`)
+	_, out := h.start(crewMeta + `agent("slow"); await agent("wait"); return "returned"`)
+	var ended contract.TurnEnded
+	select {
+	case ended = <-out:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the run waited for the forgotten step")
+	}
 	if ended.Outcome != contract.TurnCompleted || ended.Final != "returned" {
 		t.Fatalf("turn %+v", ended)
 	}
