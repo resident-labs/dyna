@@ -1734,6 +1734,6 @@ The owner chose to ship without the five-provider evaluation gate. A Claude sani
 ### Root-approves switches per room (owner, 2026-11-03)
 
 - **Four kinds, one set.** A room has a set of `RootApproval` kinds (`hostexec`, `addons`, `hosts`, `pools`) in `rooms.root_approves`. Each kind that is on lets the room's root decide that kind's owner-class operation (`hostexec.grant`, `addon.global`, `room.hosts`, `pool.add`) with `op decide`. The owner still can. Each is off by default, and off is the behaviour before the setting existed.
-- **Owner only to change.** `room.set` is the owner's, and it refuses an unknown kind. Settings > Rooms and `dyna room set --root-approves-KIND on|off` reach it. An Autopilot button turns all four on, or off.
+- **Owner only to change.** `room.set` is the owner's, and it refuses an unknown kind. Settings > Approvals and `dyna room set --root-approves-KIND on|off` reach it. An Autopilot button turns all four on, or off.
 - **Left out.** CI switches (`repo.ci.set`, `host set --ci`) are direct owner-only calls with no request to decide, and host CI is not per room. Merging approved PRs is not an operation Dyna has (spec 7.6). Neither has a switch.
 - **The root may decide its own request.** When a kind is on, a root's own request in its room waits for a decision like any other, and the root may make it. That already held for `hostexec` and spec 3.5 states it; the owner has the question of whether it should stay.
