@@ -46,6 +46,61 @@ test("notifies transcript watchers on owner reconnect and changes", () => {
   stop();
 });
 
+const ended = (outcome: string, seq: number) => JSON.stringify({
+  seq, id: "", at: "", from: { kind: "session", id: "s" },
+  type: "turn.ended", body: { session: "s", turn: "t", outcome, usage: { model: "m", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+});
+
+for (const outcome of ["completed", "failed", "stopped"]) {
+  test(`a room stream's ${outcome} turn.ended makes transcript watchers read again`, () => {
+    const calls: (string | undefined)[] = [];
+    const unwatch = watchTranscripts(session => calls.push(session));
+    const sources: EventConnection[] = [];
+    const stop = stream("room", () => 0, () => {}, () => {
+      const source: EventConnection = { onmessage: null, onerror: null, addEventListener() {}, close() {} };
+      sources.push(source);
+      return source;
+    });
+    sources[0].onmessage?.(new MessageEvent("message", { data: ended(outcome, 5) }));
+    assert.deepEqual(calls, ["s"]);
+    unwatch();
+    stop();
+  });
+}
+
+test("the owner stream's turn.ended does not make transcript watchers read twice", () => {
+  const calls: (string | undefined)[] = [];
+  const unwatch = watchTranscripts(session => calls.push(session));
+  const sources: EventConnection[] = [];
+  const stop = stream(undefined, () => 0, () => {}, () => {
+    const source: EventConnection = { onmessage: null, onerror: null, addEventListener() {}, close() {} };
+    sources.push(source);
+    return source;
+  });
+  sources[0].onmessage?.(new MessageEvent("message", { data: ended("completed", 5) }));
+  assert.deepEqual(calls, []);
+  unwatch();
+  stop();
+});
+
+test("a turn.ended replayed after a reconnect makes transcript watchers read again", () => {
+  const calls: (string | undefined)[] = [];
+  const unwatch = watchTranscripts(session => calls.push(session));
+  const sources: EventConnection[] = [];
+  let reconnect = () => {};
+  const stop = stream("room", () => 0, () => {}, () => {
+    const source: EventConnection = { onmessage: null, onerror: null, addEventListener() {}, close() {} };
+    sources.push(source);
+    return source;
+  }, cb => { reconnect = cb; return () => {}; });
+  sources[0].onerror?.(new Event("error"));
+  reconnect();
+  sources[1].onmessage?.(new MessageEvent("message", { data: ended("completed", 7) }));
+  assert.deepEqual(calls, ["s"]);
+  unwatch();
+  stop();
+});
+
 test("opened runs on every connection, the first included", () => {
   const hellos: ((event: MessageEvent<string>) => void)[] = [];
   const sources: EventConnection[] = [];
