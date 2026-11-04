@@ -137,8 +137,18 @@ func TestUpgradeRecordsEarlierSessionsBranches(t *testing.T) {
 	if got, err := s.SessionBranches(ctx, "owner/repo", "ses_with"); err != nil || !reflect.DeepEqual(got, []string{"v2/ses_with"}) {
 		t.Fatalf("session with a repository: %v, %v", got, err)
 	}
-	var rows int
+	var rows, at int
+	if err := s.Read().QueryRow("SELECT count(*), max(created_at) FROM session_branches").Scan(&rows, &at); err != nil || rows != 1 || at != 7 {
+		t.Fatalf("%d rows, created_at %d, %v", rows, at, err)
+	}
+	// Opening again at the current version records nothing twice.
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if s, err = Open(dir); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.Read().QueryRow("SELECT count(*) FROM session_branches").Scan(&rows); err != nil || rows != 1 {
-		t.Fatalf("%d rows, %v", rows, err)
+		t.Fatalf("after a reopen: %d rows, %v", rows, err)
 	}
 }

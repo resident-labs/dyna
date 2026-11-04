@@ -688,3 +688,7 @@ func TestWorkflowInARealBox(t *testing.T) {
 		t.Fatalf("%d sessions after two runs, %d before", got, sessionsBefore)
 	}
 }
+
+func (crewRepos) Unavailable(context.Context, contract.RepoName) (map[string]bool, error) {
+	return nil, nil
+}

@@ -64,3 +64,22 @@ func TestARefusedPushSaysTheRule(t *testing.T) {
 		}
 	}
 }
+
+func TestAResumedSessionPushesAnEarlierRunsBranchWhileThatRunIsLive(t *testing.T) {
+	access := resumedAccess{routeAccess()}
+	access.holders = map[string]contract.SessionID{"earlier": "ses_0", "earlier-0123456789ab": "ses_0"}
+	for _, branch := range []string{"earlier", "earlier-0123456789ab"} {
+		if report, forwarded := pushTo(t, access, branch); !forwarded {
+			t.Errorf("%s: %q", branch, report)
+		}
+	}
+}
+
+func TestASessionWithNoBranchYetIsToldSo(t *testing.T) {
+	access := routeAccess()
+	access.recorded = nil
+	report, forwarded := pushTo(t, access, "anything")
+	if forwarded || !strings.Contains(report, "it has no branch yet, and can push the branch of a PR it owns") {
+		t.Fatalf("forwarded %v, %q", forwarded, report)
+	}
+}

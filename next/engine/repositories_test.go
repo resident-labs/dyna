@@ -14,6 +14,11 @@ type fakeRepos struct {
 	size     contract.BoxSizeName
 	deleted  string
 	stale    string // the notice Seed returns
+	taken    map[string]bool
+}
+
+func (r *fakeRepos) Unavailable(context.Context, contract.RepoName) (map[string]bool, error) {
+	return r.taken, r.err
 }
 
 func (r *fakeRepos) DeleteArchiveRef(_ context.Context, _ contract.RepoName, ref, _ string) error {
