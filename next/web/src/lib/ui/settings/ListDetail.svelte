@@ -63,7 +63,10 @@
   .detail { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--bg); }
   .detail:focus { outline: none; }
   .drill .detail { border-left: 0; }
-  .bar strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; }
+  /* The open item's name is the one place it shows whole, so a long one wraps and the bar grows. */
+  .bar { height: auto; min-height: 52px; padding-block: 6px 5px; }
+  .bar strong { min-width: 0; overflow-wrap: anywhere; font-size: 16px; line-height: 1.3; }
+  .bar .round { align-self: flex-start; }
   .quiet { color: var(--muted); font-weight: 500; }
   .round { display: grid; place-items: center; flex: none; width: 40px; height: 40px; margin: 0 -8px 0 -10px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--muted); cursor: pointer; }
   .round:hover { color: var(--text); }
