@@ -176,7 +176,7 @@ const (
 type SessionClosed struct {
 	Reason  SessionCloseReason `json:"reason,omitempty"`
 	Session SessionID          `json:"session"`
-	Unheld  []GoalID           `json:"unheld,omitempty"`  // open goals left with no holder, because the parent is root (7.4)
+	Unheld  []GoalID           `json:"unheld,omitempty"` // open goals left with no holder, because the parent is root (7.4)
 	// Handed is the owed work that moved to the parent.
 	Handed []Responsibility `json:"handed,omitempty"`
 }
