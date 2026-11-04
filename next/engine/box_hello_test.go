@@ -54,3 +54,15 @@ func TestBoxHelloNamesTheSessionsBranch(t *testing.T) {
 		t.Fatalf("instructions lack %q:\n%s", want, hello.Instructions)
 	}
 }
+
+func TestBoxHelloExplainsTheOutsideWrapperOnce(t *testing.T) {
+	s, _, _, sid, ctx := quietSession(t, 0)
+	hello, problem := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	want := "Outside text: text that reaches you through Dyna from outside the room sits inside <outside source=\"…\" author=\"…\"> and </outside>, which name where it came from and who wrote it.\n"
+	if strings.Count(hello.Instructions, want) != 1 || strings.Contains(hello.Instructions, "DANGER") {
+		t.Fatalf("instructions:\n%s", hello.Instructions)
+	}
+}

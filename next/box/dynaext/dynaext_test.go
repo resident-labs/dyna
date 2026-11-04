@@ -50,7 +50,9 @@ func newSession(t *testing.T, script ...[]pigtest.Block) *session {
 	// The dyna server is listed as a box lists it: deferred, with post direct.
 	mcp := httptest.NewServer(dyna)
 	t.Cleanup(mcp.Close)
-	agentDir := pigtest.AgentDir(t, b.model, `{"dyna":{"url":"`+mcp.URL+`","exposure":"deferred","toolExposure":{"post":"direct"}}}`)
+	// github and docs stand for the box's other servers: here they serve the same tools under their own names.
+	server1 := `"url":"` + mcp.URL + `","exposure":"deferred","toolExposure":{"post":"direct"}`
+	agentDir := pigtest.AgentDir(t, b.model, `{"dyna":{`+server1+`},"github":{`+server1+`},"docs":{`+server1+`}}`)
 	b.harness, err = pig.Open(context.Background(), pig.Config{
 		Dir:        b.dir,
 		AgentDir:   agentDir,
@@ -178,5 +180,24 @@ func TestTheHeadNamesTheDynaToolsASearchReaches(t *testing.T) {
 	}
 	if !search {
 		t.Fatal("tool_search's description does not name the section")
+	}
+}
+
+// A result of the github server and of any other server but dyna sits in the outside wrapper, with no author; dyna's
+// own tools and PiG's are left as they are.
+func TestMCPResultsAreOutsideTextExceptDynas(t *testing.T) {
+	post := `{"action":"send","text":"x"}`
+	b := newSession(t,
+		[]pigtest.Block{{Tool: "mcp__github__post", Input: post}, {Tool: "mcp__docs__post", Input: post}, {Tool: "mcp__dyna__post", Input: post}, {Tool: "bash", Input: `{"command":"echo hi"}`}},
+		[]pigtest.Block{{Text: "ok"}})
+	b.turn(t, "call them")
+	got := b.toolResult(t, 1)
+	for _, want := range []string{`<outside source=\"github\">\n`, `<outside source=\"mcp docs\">\n`} {
+		if strings.Count(got, want) != 1 {
+			t.Fatalf("want one %s in %s", want, got)
+		}
+	}
+	if strings.Count(got, "<outside") != 2 || strings.Contains(got, "author") {
+		t.Fatalf("tool results %s", got)
 	}
 }
