@@ -1,6 +1,7 @@
 <script lang="ts">
   import { roomIsLive } from "./lib/source.ts";
-  import { roomRoute, settingsRoute } from "./lib/routes.ts";
+  import { paneCounts, roomRoute, settingsRoute } from "./lib/routes.ts";
+  import { nextArea } from "./lib/areas.ts";
   import { watchHello, watchStreamState } from "./lib/stream.ts";
   import { watchConnect } from "./lib/connect-watch.ts";
   import { reconnectNotice } from "./lib/reconnect.ts";
@@ -427,12 +428,12 @@
     event.preventDefault();
     if (covered) return;
     // Only areas on screen take part; below 761 px the closed sessions panel has no boxes.
-    // The requests view takes the place of the feed and the composer.
-    const areas = (inSettings ? [rail, settings] : [rail, section ? page : feed, section ? undefined : composer, dock, members, computer])
+    // The requests view takes the place of the feed and the composer. A Settings list page's list and detail are stops
+    // inside the section, marked data-f6; a phone's list behind an open detail is hidden, so it is skipped.
+    const areas = (inSettings ? [rail, settings, ...(settings?.querySelectorAll<HTMLElement>("[data-f6]") ?? [])] : [rail, section ? page : feed, section ? undefined : composer, dock, members, computer])
       .filter(area => area != null)
-      .filter(area => area.getClientRects().length > 0);
-    const index = areas.findIndex(area => area.contains(document.activeElement));
-    areas[(index + (event.shiftKey ? areas.length - 1 : 1)) % areas.length].focus();
+      .filter(area => area.checkVisibility({ visibilityProperty: true }));
+    areas[nextArea(areas, document.activeElement, event.shiftKey)].focus();
   }
   // Up and Down move between the sessions in the tree and its idle folds; Enter opens one.
   // The tree is virtual, so the next row may not be rendered yet: the list scrolls to it first. A held key's presses
@@ -789,7 +790,7 @@
     </aside>
     {#if watching && !inSettings && section !== "instructions"}{@render computerView(watching)}{/if}
   {/if}
-  {#if inSettings}<Settings {path} phone={phone.current} {navigate} moved={follow} onmenu={event => void showDrawer(true, true, event.detail > 0)} signedout={() => { revoked = true; }} thishost={host => attention.setHost(host)} bind:element={settings} bind:menu={settingsMenu} />{/if}
+  {#if inSettings}<Settings {path} phone={phone.current} counts={paneCounts(roomsLoaded ? rooms : undefined)} {navigate} moved={follow} onmenu={event => void showDrawer(true, true, event.detail > 0)} signedout={() => { revoked = true; }} thishost={host => attention.setHost(host)} bind:element={settings} bind:menu={settingsMenu} />{/if}
 </div>{/if}
 
 <style>
