@@ -11,7 +11,6 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/prs"
 	"github.com/resident-labs/dyna/engine/store"
-	"github.com/resident-labs/dyna/room"
 )
 
 // SetPRTracking connects the GitHub reader.
@@ -31,7 +30,7 @@ func textWriter(author, viewer string, meta store.ItemMeta) string {
 func prFor(caller contract.Principal, p store.TrackedPR, viewer string) contract.PrSummary {
 	summary := p.PrSummary
 	if writer := textWriter(summary.Author, viewer, p.Meta); caller.Kind == contract.PrincipalSession && summary.Author != "" && writer != "" {
-		summary.Title = room.WrapExternal(writer, summary.Title)
+		summary.Title = contract.Outside("github", "@"+writer, summary.Title)
 	}
 	return summary
 }
