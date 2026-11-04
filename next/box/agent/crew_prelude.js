@@ -6,13 +6,14 @@
     throw new Error(name + " would differ when the run resumes. Pass the value in args.");
   };
   // The sandbox freezes the built-in globals, so these are what the script sees in their place, not changes to them.
-  class ClockDate extends Date {
+  const RealDate = Date;
+  const ClockDate = class Date extends RealDate {
     constructor(...values) {
       if (values.length === 0) forbidden("new Date()")();
       super(...values);
     }
     static now = forbidden("Date.now()");
-  }
+  };
   const RandomlessMath = Object.create(Math, { random: { value: forbidden("Math.random()") } });
 
   let current = "";
