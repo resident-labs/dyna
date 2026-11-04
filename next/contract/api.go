@@ -601,6 +601,7 @@ type PostRequest struct {
 	ToolCallID   string       `json:"toolCallId,omitempty"`   // Pi transcript call that sent this post
 	VisualUpdate EventID      `json:"visualUpdate,omitempty"` // original visual ID, for a new version
 	VisualReply  EventID      `json:"visualReply,omitempty"`  // visual version this post answers
+	Forward      EventID      `json:"forward,omitempty"`      // a post to quote under "Forwarded from"; Text is the sender's note
 }
 type PostResponse struct {
 	Event EventID `json:"event"`
