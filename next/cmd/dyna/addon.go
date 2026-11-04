@@ -15,6 +15,7 @@ type addonFlags struct {
 	room     string
 	global   bool
 	rootOnly bool
+	hosts    []string
 }
 
 func (f *addonFlags) bind(cmd *cobra.Command) {
@@ -31,6 +32,15 @@ func describeChange(cmd *cobra.Command, result contract.AddonChangeResponse) {
 	if result.Item != nil {
 		fmt.Fprintln(cmd.OutOrStdout(), result.Item.Name, "reaches each session at its next box start")
 	}
+}
+
+// hostNames turns the --host values into host names; the engine checks them against its hosts.
+func hostNames(names []string) []contract.HostName {
+	hosts := make([]contract.HostName, len(names))
+	for i, n := range names {
+		hosts[i] = contract.HostName(n)
+	}
+	return hosts
 }
 
 func describeAddon(item contract.Addon) string {
@@ -56,6 +66,12 @@ func describeAddon(item contract.Addon) string {
 	}
 	if item.RootOnly {
 		state += " (root only)"
+	}
+	for i, h := range item.Hosts {
+		what += map[bool]string{true: " (runs on ", false: ", "}[i == 0] + string(h)
+		if i == len(item.Hosts)-1 {
+			what += ")"
+		}
 	}
 	return strings.Join([]string{item.Name, scope, state, item.By, what}, "\t")
 }
@@ -121,12 +137,21 @@ func addonCommands(get func() *socketClient) []*cobra.Command {
 			return err
 		}
 		req.RootOnly = skillFlags.rootOnly
+		req.Hosts = hostNames(skillFlags.hosts)
 		return change(cmd.Context(), cmd, func(ctx context.Context) (contract.AddonChangeResponse, error) {
 			return call[contract.SkillSaveRequest, contract.AddonChangeResponse](ctx, get(), contract.MethodSkillSave, req)
 		})
 	}}
+	skillSave.Flags().StringArrayVar(&skillFlags.hosts, "host", nil, "a host where the skill's commands run; repeat for several. With none, a saved skill keeps its hosts")
 	skillFlags.bind(skillSave)
-	skill.AddCommand(skillSave, addonList(get, contract.MethodSkillList), addonRemove(get, contract.MethodSkillRemove))
+	var setFlags addonFlags
+	skillSet := &cobra.Command{Use: "set NAME", Short: "Change where a saved skill's commands run, without saving its files again; no --host clears them", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := call[contract.AddonSetHostsRequest, contract.AddonSetHostsResponse](cmd.Context(), get(), contract.MethodAddonSetHosts, contract.AddonSetHostsRequest{Name: args[0], Room: contract.RoomID(setFlags.room), Hosts: hostNames(setFlags.hosts)})
+		return err
+	}}
+	skillSet.Flags().StringArrayVar(&setFlags.hosts, "host", nil, "a host where the skill's commands run; repeat for several")
+	skillSet.Flags().StringVar(&setFlags.room, "room", "", "the room, which a box already knows")
+	skill.AddCommand(skillSave, skillSet, addonList(get, contract.MethodSkillList), addonRemove(get, contract.MethodSkillRemove))
 
 	mcp := &cobra.Command{Use: "mcp", Short: "MCP servers, beside dyna and shell"}
 	var mcpFlags addonFlags

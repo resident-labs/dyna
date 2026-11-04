@@ -84,7 +84,7 @@ func (s *Service) addonChange(ctx context.Context, caller contract.Principal, ta
 
 func (s *Service) applyAddon(ctx context.Context, target addonTarget, change contract.AddonGlobalArgs, archive []byte) (*contract.Addon, error) {
 	at := s.now()
-	item := contract.Addon{Kind: change.Kind, Name: change.Name, Room: target.room, By: target.by, At: &at, Description: change.Description, RootOnly: change.RootOnly, Source: change.Source, Host: change.Host, URL: change.URL, Command: change.Command, Args: change.Args}
+	item := contract.Addon{Kind: change.Kind, Name: change.Name, Room: target.room, By: target.by, At: &at, Description: change.Description, RootOnly: change.RootOnly, Source: change.Source, Hosts: change.Hosts, URL: change.URL, Command: change.Command, Args: change.Args}
 	apply := func() error {
 		switch {
 		case change.Remove:
@@ -175,6 +175,10 @@ func (s *Service) SkillSave(ctx context.Context, caller contract.Principal, req 
 	} else if (req.URL == "") == (len(req.Archive) == 0) {
 		return contract.AddonChangeResponse{}, invalid("give a folder or a link")
 	}
+	hosts, problem := s.registeredHosts(ctx, req.Hosts)
+	if problem != nil {
+		return contract.AddonChangeResponse{}, problem
+	}
 	archive := req.Archive
 	if req.Host != "" {
 		if archive, problem = s.hostSkill(ctx, req.Host, req.Path); problem != nil {
@@ -194,7 +198,7 @@ func (s *Service) SkillSave(ctx context.Context, caller contract.Principal, req 
 	if skills.IsBuiltIn(meta.Name) {
 		return contract.AddonChangeResponse{}, invalid(meta.Name + " is a built-in skill; pick another name")
 	}
-	change := contract.AddonGlobalArgs{Kind: contract.AddonSkill, Name: meta.Name, Description: meta.Description, Source: req.URL, Host: req.Host, RootOnly: req.RootOnly}
+	change := contract.AddonGlobalArgs{Kind: contract.AddonSkill, Name: meta.Name, Description: meta.Description, Source: req.URL, Hosts: hosts, RootOnly: req.RootOnly}
 	if target.ask != "" {
 		if change.Bundle, _, err = s.saveFile(ctx, target.ask, bytes.NewReader(archive), 25<<20); err != nil {
 			return contract.AddonChangeResponse{}, failure(err)
@@ -325,6 +329,50 @@ func (s *Service) AddonSetRootOnly(ctx context.Context, _ contract.Principal, re
 	}
 	s.publishAddons(ctx)
 	return contract.AddonSetRootOnlyResponse{}, nil
+}
+
+// AddonSetHosts is the owner's, like AddonSetRootOnly: it changes a skill's run-on hosts and leaves its files.
+func (s *Service) AddonSetHosts(ctx context.Context, _ contract.Principal, req contract.AddonSetHostsRequest) (contract.AddonSetHostsResponse, *contract.Error) {
+	hosts, problem := s.registeredHosts(ctx, req.Hosts)
+	if problem != nil {
+		return contract.AddonSetHostsResponse{}, problem
+	}
+	apply := func() error { return s.addons.SetHosts(req.Room, req.Name, hosts) }
+	var err error
+	if req.Room == "" {
+		err = apply()
+	} else {
+		err = s.roomWrite(ctx, req.Room, apply)
+	}
+	if errors.Is(err, addons.ErrMissing) {
+		return contract.AddonSetHostsResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "no skill named " + req.Name}
+	}
+	if err != nil {
+		return contract.AddonSetHostsResponse{}, failure(err)
+	}
+	s.publishAddons(ctx)
+	return contract.AddonSetHostsResponse{}, nil
+}
+
+// registeredHosts checks a skill's run-on hosts once, where they arrive: each must be registered, and a name given twice counts once.
+func (s *Service) registeredHosts(ctx context.Context, names []contract.HostName) ([]contract.HostName, *contract.Error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	known, err := s.store.Hosts(ctx)
+	if err != nil {
+		return nil, failure(err)
+	}
+	var hosts []contract.HostName
+	for _, name := range names {
+		if !slices.ContainsFunc(known, func(h box.Host) bool { return h.Name == name }) {
+			return nil, &contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("no host named %s", name)}
+		}
+		if !slices.Contains(hosts, name) {
+			hosts = append(hosts, name)
+		}
+	}
+	return hosts, nil
 }
 
 // AddonGlobal registers a session's global change. A skill's folder stays out of the operation's record, among the room's files.

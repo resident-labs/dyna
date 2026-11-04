@@ -313,9 +313,9 @@ func Request(path, dir string, room contract.RoomID, global bool) (contract.Skil
 	return req, nil
 }
 
-// Annotate marks a skill saved from a host: its description says so in Pi's skills list, and one line after the
+// Annotate marks a skill with run-on hosts: its description says so in Pi's skills list, and one line after the
 // frontmatter tells the agent where the skill's commands run.
-func Annotate(data []byte, host contract.HostName) ([]byte, error) {
+func Annotate(data []byte, hosts []contract.HostName) ([]byte, error) {
 	text := strings.ReplaceAll(strings.TrimPrefix(string(data), "\xef\xbb\xbf"), "\r\n", "\n")
 	front, ok := strings.CutPrefix(text, "---\n")
 	if ok {
@@ -323,6 +323,14 @@ func Annotate(data []byte, host contract.HostName) ([]byte, error) {
 	}
 	if !ok {
 		return nil, errors.New("SKILL.md must start with frontmatter between --- lines")
+	}
+	names := make([]string, len(hosts))
+	for i, h := range hosts {
+		names[i] = string(h)
+	}
+	list := strings.Join(names, ", ")
+	if n := len(names); n > 1 {
+		list = strings.Join(names[:n-1], ", ") + " or " + names[n-1]
 	}
 	body := strings.TrimPrefix(text[len("---\n")+len(front)+len("\n---"):], "\n")
 	var doc yaml.Node
@@ -332,7 +340,7 @@ func Annotate(data []byte, host contract.HostName) ([]byte, error) {
 	fields := doc.Content[0].Content
 	for i := 0; i+1 < len(fields); i += 2 {
 		if fields[i].Value == "description" {
-			fields[i+1].Value = strings.TrimSpace(fields[i+1].Value) + " · from host " + string(host)
+			fields[i+1].Value = strings.TrimSpace(fields[i+1].Value) + " · runs on " + list
 			fields[i+1].Style = yaml.DoubleQuotedStyle
 			fields[i+1].Tag = "!!str"
 		}
@@ -341,7 +349,7 @@ func Annotate(data []byte, host contract.HostName) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	line := fmt.Sprintf("This skill's commands run on host %s: use bash with host: %q. Files you write to $DYNA_OUT come back to this box.", host, string(host))
+	line := "This skill's commands run on a host: " + list + ", through bash with host. The owner's messages say \"on <host>\" when sent from one of them. Files written to $DYNA_OUT come back to this box."
 	return []byte("---\n" + string(out) + "---\n" + line + "\n" + body), nil
 }
 
