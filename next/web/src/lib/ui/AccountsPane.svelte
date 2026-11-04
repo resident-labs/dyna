@@ -7,6 +7,7 @@
   import { confirm } from "../modal.ts";
   import type { Account, AccountProviderInfo, AccountUsage, AccountsConnectResponse, ConnectFlow, RoomSummary } from "../contract.gen.ts";
   import Icon from "./Icon.svelte";
+  import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
   import AccountMeter from "./AccountMeter.svelte";
   import ItemList from "./settings/ItemList.svelte";
@@ -80,8 +81,10 @@
     creating = true;
     void panel();
   }
+  // On a phone the back arrow is the provider form's one way back, so it returns to the providers first.
   function close() {
     cancel();
+    if (creating && phone && picked !== undefined) { choose(undefined); return; }
     if (!creating) { onclose(); return; }
     if (history.state?.creating) history.back();
     else creating = false;
@@ -96,10 +99,11 @@
     cancel(); picked = id; label = ""; secret = ""; useKey = false;
     void panel();
   }
-  // A finished add opens the new account once the list holds it, in Add's history step.
+  // A finished add opens the new account once the list holds it, in Add's history step, unless Add was left meanwhile.
   async function added(id: string | undefined) {
     cancel();
     await reload();
+    if (!creating) return;
     creating = false;
     if (history.state?.creating) history.replaceState({ fromList: !!history.state.overList }, "", location.href);
     if (id && accounts?.some(each => each.id === id)) { onselect(id, false); void panel(); }
@@ -166,8 +170,8 @@
     busy = false;
   }
 
-  // Removing the field blurs it, so this runs after Enter too, and then finds nothing to save. A refused label keeps
-  // the owner's text in the field.
+  // Enter and leaving the field both save, so the blur after an Enter finds nothing new. A refused label keeps the
+  // owner's text in the field.
   async function saveLabel(account: Account) {
     const next = labelDraft.trim();
     if (labelSaving) return;
@@ -210,7 +214,7 @@
 </script>
 
 {#snippet row(each: AccountItem, compact: boolean)}{@const pill = accountPill(each.account)}{@const hint = usageHint(each, loadedAt)}
-  <span class="initial" aria-hidden="true">{initial(each.provider?.displayName ?? each.account.provider)}</span>
+  {@const pname = each.provider?.displayName ?? each.account.provider}<Avatar kind="room" name={pname} label={initial(pname)} size={24} />
   <span class="lines"><span class="title"><span class="name" title={each.name}>{each.name}</span>{#if pill}<StatusPill tone={pill.tone} label={pill.label} />{/if}</span>
     <span class="line">{accountLine(each)}</span></span>
   {#if hint}<span class="hint" class:compact title={hint.bars.map(bar => `${bar.label} ${bar.percent}%`).join(" · ")}>
@@ -256,7 +260,7 @@
   <SearchBox bind:value={query} label="Search providers" placeholder={`Search ${plural(providers.length, "provider", "providers")}`} />
   <div class="provs">
     {#each choices.items as each (each.id + each.displayName)}{@const n = accounts?.filter(a => a.provider === each.id).length ?? 0}
-      <button type="button" class="prov" onclick={() => choose(each.id)}><span class="initial" aria-hidden="true">{initial(each.displayName)}</span><span class="pname">{each.displayName}</span>{#if n}<span class="muted small">{n}</span>{/if}</button>{/each}
+      <button type="button" class="prov" onclick={() => choose(each.id)}><Avatar kind="room" name={each.displayName} label={initial(each.displayName)} size={24} /><span class="pname">{each.displayName}</span>{#if n}<span class="muted small">{n}</span>{/if}</button>{/each}
     {#if choices.more}<button type="button" class="btn ghost more" onclick={() => expanded = true}>Show {choices.more} more</button>{/if}
     {#if !choices.items.length}<p class="small muted">No provider matches “{query.trim()}”.</p>{/if}
     <button type="button" class="prov" onclick={() => choose("new")}><span class="initial" aria-hidden="true">+</span><span class="pname">Add provider</span><span class="muted small">OpenAI-compatible</span></button>
@@ -268,7 +272,7 @@
 {/snippet}
 
 {#snippet addForm()}
-  <button type="button" class="btn ghost back" onclick={() => choose(undefined)}><Icon name="back" size={16} />All providers</button>
+  {#if !phone}<button type="button" class="btn ghost back" onclick={() => choose(undefined)}><Icon name="back" size={16} />All providers</button>{/if}
   {#if picked === "new"}
     <form class="form" onsubmit={event => { event.preventDefault(); void addProvider(); }}>
       <p class="small muted">Any OpenAI-compatible service. Dyna sends model requests to the address you enter.</p>
