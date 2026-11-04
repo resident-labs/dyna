@@ -496,3 +496,75 @@ func TestAPackageThatFailsToLoadIsANoticeAndTheSessionRuns(t *testing.T) {
 		t.Fatalf("the working package's tool did not run: %s", last)
 	}
 }
+
+// The engine's text is the whole head: it starts the system prompt, and PiG's own preamble, tools and rules sections are gone.
+func TestTheSystemPromptStartsWithTheEnginesTextAndHasNoPigSections(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "ok"}})
+	c := config(t, model, "")
+	c.Instructions = "You are a Dyna agent. The rest of the text."
+	// Files PiG would otherwise read: a repository's SYSTEM.md would replace the head, and an APPEND_SYSTEM.md would add to it.
+	if err := os.MkdirAll(filepath.Join(c.Dir, ".pi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []string{filepath.Join(c.Dir, ".pi", "SYSTEM.md"), filepath.Join(c.Dir, ".pi", "APPEND_SYSTEM.md"), filepath.Join(c.AgentDir, "APPEND_SYSTEM.md")} {
+		if err := os.WriteFile(file, []byte("FROM A FILE"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	start(t, h, "hi")
+	var blocks []struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(model.Requests()[0].System, &blocks); err != nil || len(blocks) == 0 {
+		t.Fatalf("system %s: %v", model.Requests()[0].System, err)
+	}
+	system := blocks[0].Text
+	if !strings.HasPrefix(system, "You are a Dyna agent.") {
+		t.Fatalf("the prompt starts: %.200s", system)
+	}
+	for _, gone := range []string{"<tools>", "<rules>", "expert coding assistant", "FROM A FILE"} {
+		if strings.Contains(system, gone) {
+			t.Fatalf("the prompt still holds %q: %s", gone, system)
+		}
+	}
+}
+
+// A session that exists already resumes with a new head. Its system prompt stays as its first request had it, so the cached prefix holds,
+// and the head's change reaches the model as one context update.
+func TestAResumedSessionGetsANewHeadAsOneContextUpdate(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "one"}}, []pigtest.Block{{Text: "two"}})
+	c := config(t, model, "")
+	c.Instructions = "You are ses_test. The old head."
+	first, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start(t, first, "hi")
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	c.Instructions = "You are a Dyna agent. The new head."
+	second, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	start(t, second, "again")
+	requests := model.Requests()
+	var messages []string
+	for _, message := range requests[1].Messages {
+		messages = append(messages, string(message))
+	}
+	last := strings.Join(messages, "\n")
+	if n := strings.Count(last, "[Context update]"); n != 1 || !strings.Contains(last, `Changed section preamble:`) || !strings.Contains(last, `-You are ses_test. The old head.\n+You are a Dyna agent. The new head.`) {
+		t.Fatalf("the messages: %s", last)
+	}
+	if !strings.Contains(string(requests[1].System), "The old head.") {
+		t.Fatalf("the system prompt changed: %s", requests[1].System)
+	}
+}
