@@ -16,18 +16,16 @@
   const RandomlessMath = Object.create(Math, { random: { value: forbidden("Math.random()") } });
 
   let current = "";
-  // Every call and line the script made, awaited or not: the run ends after them, as a forgotten step still finishes.
-  const pending = [];
-  const call = (message) => {
-    const reply = callHost({ parent, phase: current, ...message }).then((reply) => {
-      if (reply.error === undefined) return reply.value;
-      throw Object.assign(new Error(reply.error), { failed: true, step: reply.step, reason: reply.error });
-    });
-    pending.push(reply);
-    return reply;
+  // The lines the script sent that the box agent has not yet taken. A step the script forgot is not here: it ends with the run.
+  const pending = new Set();
+  const call = async (message) => {
+    const reply = await callHost({ parent, phase: current, ...message });
+    if (reply.error === undefined) return reply.value;
+    throw Object.assign(new Error(reply.error), { failed: true, step: reply.step, reason: reply.error });
   };
   const emit = (message) => {
-    pending.push(sendHost({ parent, phase: current, ...message }));
+    const line = sendHost({ parent, phase: current, ...message }).finally(() => pending.delete(line));
+    pending.add(line);
   };
   const reasonOf = (error) => error?.reason ?? (String(error?.message ?? error) || "the script threw");
   // An error that no step recorded still counts at the run's end.
@@ -104,7 +102,7 @@
       return { failure: { reason: reasonOf(error), report, step: error?.step ?? "" } };
     } finally {
       // The script's last lines and steps reach the journal before its end does.
-      await Promise.allSettled(pending);
+      while (pending.size > 0) await Promise.allSettled([...pending]);
     }
   };
 })
