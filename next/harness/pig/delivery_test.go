@@ -12,6 +12,7 @@ import (
 	"github.com/MichaelKinsy/PiG/coding/extension"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/harness"
 	"github.com/resident-labs/dyna/harness/pig/pigtest"
 )
 
@@ -187,5 +188,63 @@ func TestSteerAndFollowUpRecordTheirDeliveries(t *testing.T) {
 		if done, err := h.Delivered(context.Background(), seq); err != nil || !done {
 			t.Errorf("delivery %d: %v %v", seq, done, err)
 		}
+	}
+}
+
+// A steer that reaches the session after its run's last check of the queue, as the turn returns, is read by no request.
+// It is not recorded, so the box hands it back, and the session keeps nothing queued for a later turn, where it would
+// arrive a second time and late.
+func TestASteerTheTurnDidNotReadIsNotKept(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "first"}}, []pigtest.Block{{Text: "second"}})
+	h := open(t, model)
+	start(t, h, "go")
+	if err := h.Steer(context.Background(), contract.TurnInput{Delivery: 7, Text: "late steer"}); !errors.Is(err, harness.ErrNoTurn) {
+		t.Fatalf("a steer after the run: %v", err)
+	}
+	if err := h.FollowUp(context.Background(), contract.TurnInput{Delivery: 9, Text: "late follow-up"}); !errors.Is(err, harness.ErrNoTurn) {
+		t.Fatalf("a follow-up after the run: %v", err)
+	}
+	if done, err := h.Delivered(context.Background(), 7); err != nil || done {
+		t.Fatalf("the late steer is recorded: %v %v", done, err)
+	}
+	start(t, h, "next")
+	if body, _ := json.Marshal(model.Requests()[1].Messages); strings.Contains(string(body), "late steer") {
+		t.Fatalf("the next turn read the late steer from the queue")
+	}
+}
+
+// An input the session queued after the run's last look at its queue, but before the run returned, reaches no request.
+// The run's end drops it, so it is not recorded and the next turn does not read it late.
+func TestAnInputQueuedAsTheRunEndsLeavesWithIt(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "first"}}, []pigtest.Block{{Text: "second"}})
+	h := open(t, model)
+	_, err := h.run(context.Background(), "turn_a", func(ctx context.Context) error {
+		err := h.session.Prompt(ctx, "go", nil)
+		return errors.Join(err, h.Steer(ctx, contract.TurnInput{Delivery: 8, Text: "late steer"}))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done, err := h.Delivered(context.Background(), 8); err != nil || done {
+		t.Fatalf("the late steer is recorded: %v %v", done, err)
+	}
+	start(t, h, "next")
+	if body, _ := json.Marshal(model.Requests()[1].Messages); strings.Contains(string(body), "late steer") {
+		t.Fatalf("the next turn read the late steer from the queue")
+	}
+}
+
+// ClearQueue drops what the session holds queued, so a steer queued during a run that no request read is gone.
+func TestClearQueueDropsAQueuedSteer(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "first"}})
+	h := open(t, model)
+	var left int
+	_, err := h.run(context.Background(), "turn_a", func(ctx context.Context) error {
+		err := errors.Join(h.Steer(ctx, contract.TurnInput{Delivery: 8, Text: "queued"}), h.ClearQueue(ctx))
+		left = h.session.PendingMessageCount()
+		return err
+	})
+	if err != nil || left != 0 {
+		t.Fatalf("%d left queued: %v", left, err)
 	}
 }

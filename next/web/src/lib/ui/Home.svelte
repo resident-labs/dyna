@@ -4,7 +4,7 @@
   import { APIError, call } from "../client.ts";
   import { activeRooms, failedRooms } from "../active.ts";
   import type { Attention } from "../attention.svelte.ts";
-  import { accountPath, reconnectPath } from "../accounts.ts";
+  import { accountPath } from "../accounts.ts";
   import type { AccountUsage, AccountsListResponse, Card, HostSummary, Principal, Question, SessionListResponse } from "../contract.gen.ts";
   import { clause, expiryText, expiryTime, fromNow, requestLine } from "../feed.ts";
   import { diskLow, hostLabel, hostMeters, largeShared, sharedSize, watchHosts } from "../hosts.ts";
@@ -227,7 +227,7 @@
       {#each alerts as { id, title, provider, reconnect }, i (i)}{@const signIn = reconnect && attention.can("admin")}<div class="item account"><Avatar kind="room" name={title} size={28} />
         <span class="lines"><span class="title">{title}</span>
           <span class="line"><StatusPill tone="warning" label="Sign-in expired" />{#if provider}{" · "}{provider}{/if}</span></span>
-        <span class="acts"><a class="open" class:sign-in={signIn} href={signIn ? reconnectPath(id) : accountPath(id)} onclick={navigate}>{signIn ? "Sign in again" : "Open"}</a></span></div>{/each}
+        <span class="acts"><a class="open" class:sign-in={signIn} href={accountPath(id)} onclick={navigate}>{signIn ? "Sign in again" : "Open"}</a></span></div>{/each}
       {#each [...decided] as [id, line] (id)}<p class="decided">{line}</p>{/each}</div>
     </section></div>{/if}
   <!-- Under Needs you, never above it, so Approve stays high. It stands for the column below the column's breakpoint. -->

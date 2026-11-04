@@ -18,11 +18,12 @@
   let { path, phone, counts, navigate, moved, onmenu, signedout, thishost, element = $bindable(), menu = $bindable() }: { path: string; phone: boolean; counts: Partial<Record<string, number>>; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void;
     moved: () => void; onmenu: (event: MouseEvent) => void; signedout: () => void; thishost: (host?: string) => void; element?: HTMLElement; menu?: HTMLButtonElement } = $props();
 
-  // device.list needs admin, so its refusal tells that this device has no Devices pane (spec 7.8).
+  // device.list needs admin, so its refusal tells that this device has no Sharing & access pane (spec 7.8). reload
+  // resolves once the list is read or refused.
   let devices: Device[] | undefined = $state.raw();
   let admin = $state(true), failed = $state(false);
   function reload() {
-    call("device.list", {}).then(list => { devices = list.devices ?? []; thishost(devices.find(device => device.current)?.host); admin = true; failed = false; }, (error: unknown) => {
+    return call("device.list", {}).then(list => { devices = list.devices ?? []; thishost(devices.find(device => device.current)?.host); admin = true; failed = false; }, (error: unknown) => {
       if (error instanceof SignedOut) signedout();
       else if (error instanceof APIError && error.detail.code === "forbidden") admin = false;
       // A failed poll keeps the list and the pair card on screen.
@@ -33,11 +34,10 @@
 
   // Appearance is on every device; Devices only on one with admin.
   let panes = $derived(settingsPanes.filter(pane => !pane.admin || admin));
-  let shown = $derived(panes.find(pane => path === `/settings/${pane.id}` || ((pane.id === "accounts" || pane.list) && path.startsWith(`/settings/${pane.id}/`))) ?? (phone ? undefined : panes[0]));
+  let shown = $derived(panes.find(pane => path === `/settings/${pane.id}` || (pane.list && path.startsWith(`/settings/${pane.id}/`))) ?? (phone ? undefined : panes[0]));
   // /settings and its trailing slash open the first pane or the list; any other path has no page.
   // A part that does not decode has no page.
-  let lost = $derived(!/^\/settings\/?$/.test(path) && !panes.some(pane => path === `/settings/${pane.id}` || (pane.list && pathItem(path, `/settings/${pane.id}/`) !== undefined)
-    || (pane.id === "accounts" && (path === "/settings/accounts/add" || ["add/", "account/", "reconnect/"].some(part => pathItem(path, `/settings/accounts/${part}`) !== undefined)))));
+  let lost = $derived(!/^\/settings\/?$/.test(path) && !panes.some(pane => path === `/settings/${pane.id}` || (pane.list && pathItem(path, `/settings/${pane.id}/`) !== undefined)));
 
   // A list page's open item is the path's last part (spec 5.13): a wide page moves it as the list's keys move, in place,
   // and a narrow one opens it as a screen of its own, so Back returns to the list.
@@ -71,8 +71,8 @@
   <div class="pane">
     {#if lost}<Blocked kind="no-page" back={{ href: "/settings", label: "Back to Settings" }} {navigate} />
     {:else if shown?.id === "appearance"}<AppearancePane {bar} />
-    {:else if shown?.id === "devices"}<SharingPane {devices} {failed} {reload} {signedout} {bar} />
-    {:else if shown?.id === "accounts"}<AccountsPane {bar} {phone} {signedout} {path} {navigate} />
+    {:else if shown?.id === "devices"}<SharingPane {bar} {phone} {devices} {failed} {reload} {signedout} selected={item} onselect={open} onclose={close} />
+    {:else if shown?.id === "accounts"}<AccountsPane {bar} {phone} {signedout} selected={item} onselect={open} onclose={close} />
     {:else if shown?.id === "profiles"}<ProfilesPane {bar} {phone} {signedout} selected={item} onselect={open} onclose={close} />
     {:else if shown?.id === "addons"}<AddonsPane {bar} {admin} {signedout} selected={item} onselect={open} onclose={close} />
     {:else if shown?.id === "approvals"}<ApprovalsPane {bar} {signedout} selected={item} onselect={open} onclose={close} />
