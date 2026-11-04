@@ -267,3 +267,32 @@ func TestAStoppedTransferKeepsTheModel(t *testing.T) {
 		t.Fatalf("%+v %v on %s", result, err, h.session.Model().ID)
 	}
 }
+
+// The first request holds the sections in its system prompt; a change reaches the next turn as a context update and
+// leaves the system prompt as it was, so the cached prefix holds.
+func TestPromptSectionsChangeThroughAContextUpdate(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "one"}}, []pigtest.Block{{Text: "two"}})
+	h := open(t, model)
+	set := func(text string) {
+		t.Helper()
+		if err := h.SetPromptSections(context.Background(), []contract.ContextSection{{Key: contract.ContextGoal, Text: text}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set("g1: first")
+	start(t, h, "hi")
+	set("g1: second")
+	start(t, h, "again")
+	requests := model.Requests()
+	if len(requests) != 2 || !strings.Contains(string(requests[0].System), `<dyna_goal>\ng1: first\n</dyna_goal>`) || string(requests[1].System) != string(requests[0].System) {
+		t.Fatalf("system prompts:\n%s\n%s", requests[0].System, requests[len(requests)-1].System)
+	}
+	var messages []string
+	for _, message := range requests[1].Messages {
+		messages = append(messages, string(message))
+	}
+	last := strings.Join(messages, "\n")
+	if !strings.Contains(last, `[Context update]\nChanged section dyna_goal:`) || !strings.Contains(last, `-g1: first\n+g1: second`) {
+		t.Fatalf("the messages: %s", last)
+	}
+}
