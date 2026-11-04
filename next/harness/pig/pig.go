@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -24,7 +25,9 @@ import (
 )
 
 // Config is what a session runs with. AgentDir holds models.json, settings.json, mcp.json, the skills folder and the
-// global AGENTS.md, as Pi's agent folder does.
+// global AGENTS.md, as Pi's agent folder does. The packages in its settings.json load with their skills, prompt templates
+// and extensions; their extensions run in PiG's subprocess extension host on the system node, started only when a
+// package has one.
 type Config struct {
 	Dir          string // the working directory: a session's checkout, or a worker's tree
 	AgentDir     string
@@ -38,10 +41,11 @@ type Config struct {
 	CompactTokens int
 	// ModelsFile is the models.json the session reads in place of AgentDir's.
 	ModelsFile string
-	// Extensions load ahead of the built-in codemode, tool_search and MCP ones, so a tool of theirs takes the place of a
-	// built-in or MCP tool of its name.
+	// Extensions load ahead of the built-in codemode, tool_search and MCP ones and of the packages' extensions, so a
+	// tool of theirs takes the place of a built-in, MCP or package tool of its name.
 	Extensions []extension.InlineExtension
-	// Notice hears the warnings an extension gives outside a turn, such as an MCP server that did not connect.
+	// Notice hears the warnings an extension gives outside a turn, such as an MCP server that did not connect, and each
+	// package extension that failed to load, which leaves the session running without it.
 	Notice func(string)
 }
 
@@ -83,14 +87,33 @@ func Open(ctx context.Context, c Config) (*Harness, error) {
 		AgentDir:     c.AgentDir,
 		ModelRuntime: models,
 		ResourceLoaderOptions: &coding.DefaultResourceLoaderOptions{
-			NoExtensions:       true,
 			ExtensionFactories: extensions,
+			// The first extension to register a tool name keeps it, and the loader puts the packages' extensions ahead of the
+			// inline ones, so the inline ones move to the front.
+			ExtensionsOverride: func(loaded coding.LoadExtensionsResult) coding.LoadExtensionsResult {
+				inline := func(e extension.Extension) bool { return strings.HasPrefix(e.Path, "<inline:") }
+				slices.SortStableFunc(loaded.Extensions, func(a, b extension.Extension) int {
+					switch {
+					case inline(a) && !inline(b):
+						return -1
+					case inline(b) && !inline(a):
+						return 1
+					}
+					return 0
+				})
+				return loaded
+			},
 			AppendSystemPrompt: []string{c.Instructions},
 		},
 	})
 	if err != nil {
 		models.Close()
 		return nil, err
+	}
+	if c.Notice != nil {
+		for _, failed := range services.ResourceLoader().GetExtensions().Errors {
+			c.Notice(fmt.Sprintf("extension %s failed to load: %s", failed.Path, failed.Error))
+		}
 	}
 	h := &Harness{services: services, models: models, done: make(chan struct{})}
 	if err := h.start(ctx, c); err != nil {

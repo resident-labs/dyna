@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -395,5 +396,103 @@ func TestTheSessionsEffortIsTheTopLevelEffort(t *testing.T) {
 	}
 	if string(request.OutputConfig) != `{"effort":"low"}` {
 		t.Fatalf("output_config %s", request.OutputConfig)
+	}
+}
+
+// openWith opens a session whose agent folder lists the packages.
+func openWith(t *testing.T, model *pigtest.Model, notice func(string), packages []string, extensions ...extension.InlineExtension) *Harness {
+	t.Helper()
+	c := config(t, model, "")
+	pigtest.Packages(t, c.AgentDir, packages...)
+	c.Extensions, c.Notice = extensions, notice
+	h, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = h.Close() })
+	return h
+}
+
+// lastMessage is the newest message of a request: after a tool call, its result.
+func lastMessage(r pigtest.Request) string { return string(r.Messages[len(r.Messages)-1]) }
+
+// A package's extension, skill and prompt template all reach the session.
+func TestAPackageLoadsItsExtensionSkillAndPrompt(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Tool: "fixture_tool", Input: `{}`}}, []pigtest.Block{{Text: "done"}})
+	h := openWith(t, model, nil, []string{pigtest.Package(t, pigtest.ToolExtension("fixture_tool", "from the package"))})
+	start(t, h, "use the tool")
+	requests := model.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("%d requests", len(requests))
+	}
+	if last := lastMessage(requests[1]); !strings.Contains(last, "from the package") {
+		t.Fatalf("the tool did not run: %s", last)
+	}
+	if system := string(requests[0].System); !strings.Contains(system, "fixture-skill") {
+		t.Fatalf("the package's skill is not in the prompt: %s", system)
+	}
+	prompts := h.services.ResourceLoader().GetPrompts().Prompts
+	if len(prompts) != 1 || prompts[0].Name != "fixture-prompt" {
+		t.Fatalf("prompts %+v", prompts)
+	}
+}
+
+// Node is a runtime only packages need, so a box without them starts none.
+func TestABoxWithoutPackagesStartsNoNode(t *testing.T) {
+	real, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	shims, log := t.TempDir(), filepath.Join(t.TempDir(), "starts")
+	script := "#!/bin/sh\necho started >> " + log + "\nexec " + real + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(shims, "node"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", shims+string(os.PathListSeparator)+os.Getenv("PATH"))
+	model := pigtest.NewModel([]pigtest.Block{{Text: "hello"}})
+	start(t, openWith(t, model, nil, nil), "hi")
+	if _, err := os.Stat(log); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("node started (%v)", err)
+	}
+	// The same shim sees the start of a box with a package, so the check above can fail.
+	openWith(t, pigtest.NewModel(), nil, []string{pigtest.Package(t, pigtest.ToolExtension("fixture_tool", "x"))})
+	if _, err := os.Stat(log); err != nil {
+		t.Fatalf("a package started no node: %v", err)
+	}
+}
+
+// Dyna's own extension loads first, so its tool of a name takes the place of a package's.
+func TestDynasToolWinsAClashWithAPackage(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Tool: "clash", Input: `{}`}}, []pigtest.Block{{Text: "done"}})
+	dyna := testTool("clash", extension.AgentToolResult{Content: []ai.ToolResultMessageContent{ai.TextContent{Text: "from dyna"}}})
+	h := openWith(t, model, nil, []string{pigtest.Package(t, pigtest.ToolExtension("clash", "from the package"))}, dyna)
+	start(t, h, "clash")
+	last := lastMessage(model.Requests()[1])
+	if !strings.Contains(last, "from dyna") || strings.Contains(last, "from the package") {
+		t.Fatalf("result %s", last)
+	}
+}
+
+// A package that cannot load is a notice, and the session runs without it and with the others.
+func TestAPackageThatFailsToLoadIsANoticeAndTheSessionRuns(t *testing.T) {
+	notices := make(chan string, 4)
+	broken := pigtest.Package(t, `throw new Error("no good");`)
+	working := pigtest.Package(t, pigtest.ToolExtension("fixture_tool", "from the package"))
+	model := pigtest.NewModel([]pigtest.Block{{Tool: "fixture_tool", Input: `{}`}}, []pigtest.Block{{Text: "done"}})
+	h := openWith(t, model, func(text string) { notices <- text }, []string{broken, working})
+	result := start(t, h, "go")
+	if result.Final != "done" {
+		t.Fatalf("result %+v", result)
+	}
+	select {
+	case text := <-notices:
+		if !strings.Contains(text, broken) || !strings.Contains(text, "no good") {
+			t.Fatalf("notice %q", text)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no notice")
+	}
+	if last := lastMessage(model.Requests()[1]); !strings.Contains(last, "from the package") {
+		t.Fatalf("the working package's tool did not run: %s", last)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 )
@@ -110,4 +111,54 @@ func AgentDir(t *testing.T, model *Model, mcpServers string) string {
 		}
 	}
 	return dir
+}
+
+// Package writes a Pi package in a new folder and returns the folder: a skill named fixture-skill, a prompt template
+// named fixture-prompt, and one extension file holding extension, which a package's `pi` block lists as Pi's does. An empty extension leaves the
+// folder without a file, so the package starts no node.
+func Package(t *testing.T, extension string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "extensions"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"package.json":                  `{"name":"fixture-package","version":"1.0.0","pi":{"extensions":["extensions"],"skills":["skills"],"prompts":["prompts"]}}`,
+		"extensions/index.js":           extension,
+		"skills/fixture-skill/SKILL.md": "---\nname: fixture-skill\ndescription: A skill from the fixture package.\n---\nUse the fixture.\n",
+		"prompts/fixture-prompt.md":     "---\ndescription: A prompt from the fixture package.\n---\nDo the fixture thing.\n",
+	} {
+		if content == "" {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// ToolExtension is an extension that registers one tool, whose result is the given text.
+func ToolExtension(name, result string) string {
+	return `export default function (pi) {
+  pi.registerTool({ name: ` + strconv.Quote(name) + `, label: "fixture", description: "A tool of the fixture package.", parameters: { type: "object", properties: {} },
+    async execute() { return { content: [{ type: "text", text: ` + strconv.Quote(result) + ` }] }; } });
+}
+`
+}
+
+// Packages lists the package folders in the agent folder's settings, as a box start writes them.
+func Packages(t *testing.T, agentDir string, folders ...string) {
+	t.Helper()
+	settings, err := json.Marshal(map[string]any{"defaultProjectTrust": "always", "steeringMode": "all", "packages": folders})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "settings.json"), settings, 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
