@@ -50,7 +50,9 @@ func newSession(t *testing.T, script ...[]pigtest.Block) *session {
 	// The dyna server is listed as a box lists it: deferred, with post direct.
 	mcp := httptest.NewServer(dyna)
 	t.Cleanup(mcp.Close)
-	agentDir := pigtest.AgentDir(t, b.model, `{"dyna":{"url":"`+mcp.URL+`","exposure":"deferred","toolExposure":{"post":"direct"}}}`)
+	// github and docs stand for the box's other servers: here they serve the same tools under their own names.
+	server1 := `"url":"` + mcp.URL + `","exposure":"deferred","toolExposure":{"post":"direct"}`
+	agentDir := pigtest.AgentDir(t, b.model, `{"dyna":{`+server1+`},"github":{`+server1+`},"docs":{`+server1+`}}`)
 	b.harness, err = pig.Open(context.Background(), pig.Config{
 		Dir:        b.dir,
 		AgentDir:   agentDir,
@@ -178,5 +180,55 @@ func TestTheHeadNamesTheDynaToolsASearchReaches(t *testing.T) {
 	}
 	if !search {
 		t.Fatal("tool_search's description does not name the section")
+	}
+}
+
+// A result of the github server and of any other server but dyna sits in the outside wrapper, with no author; dyna's
+// own tools and PiG's are left as they are.
+func TestMCPResultsAreOutsideTextExceptDynas(t *testing.T) {
+	post := `{"action":"send","text":"x"}`
+	b := newSession(t,
+		[]pigtest.Block{{Tool: "mcp__github__post", Input: post}, {Tool: "mcp__docs__post", Input: post}, {Tool: "mcp__dyna__post", Input: post}, {Tool: "bash", Input: `{"command":"echo hi"}`}},
+		[]pigtest.Block{{Text: "ok"}})
+	b.turn(t, "call them")
+	got := b.toolResult(t, 1)
+	for _, want := range []string{`<outside source=\"github\">\n`, `<outside source=\"mcp docs\">\n`} {
+		if strings.Count(got, want) != 1 {
+			t.Fatalf("want one %s in %s", want, got)
+		}
+	}
+	if strings.Count(got, "<outside") != 2 || strings.Contains(got, "author") {
+		t.Fatalf("tool results %s", got)
+	}
+}
+
+// Only text blocks change; an image, the structured content and the error flag are left to PiG as they were.
+func TestOutsideResultLeavesImagesStructuredContentAndErrorsAlone(t *testing.T) {
+	image := map[string]any{"type": "image", "data": "AAAA", "mimeType": "image/png"}
+	event := extension.CustomToolResultEvent{ToolName: "mcp__docs__shot", ToolResultEventBase: extension.ToolResultEventBase{
+		Content: []any{map[string]any{"type": "text", "text": "a"}, image}, StructuredContent: json.RawMessage(`{"k":1}`), IsError: true}}
+	got, err := outsideResult(context.Background(), event)
+	if err != nil || got.IsError != nil || string(got.StructuredContent) != `{"k":1}` || len(got.Content) != 2 || !reflect.DeepEqual(got.Content[1], image) {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if want := (map[string]any{"type": "text", "text": "<outside source=\"mcp docs\">\na\n</outside>"}); !reflect.DeepEqual(got.Content[0], want) {
+		t.Fatalf("%+v", got.Content[0])
+	}
+	// A tool of a server whose name merely starts with dyna or github is read by its own name.
+	for tool, source := range map[string]string{"mcp__github-x__t": "mcp github-x", "mcp__dynamo__t": "mcp dynamo"} {
+		event.ToolName = tool
+		if got, _ := outsideResult(context.Background(), event); !strings.Contains(got.Content[0].(map[string]any)["text"].(string), `source="`+source+`"`) {
+			t.Fatalf("%s: %+v", tool, got.Content[0])
+		}
+	}
+}
+
+// The limit: a script that calls a github tool reads the raw result, and the script's own output reaches the model unwrapped.
+func TestAScriptsMCPCallGetsTheRawResult(t *testing.T) {
+	script, _ := json.Marshal(map[string]string{"code": `const r = await tools.mcp__github__post({action: "send", text: "x"}); return r.content[0].text;`})
+	b := newSession(t, []pigtest.Block{{Tool: "codemode", Input: string(script)}}, []pigtest.Block{{Text: "ok"}})
+	b.turn(t, "script")
+	if got := b.toolResult(t, 1); strings.Contains(got, "<outside") || !strings.Contains(got, `ev_1`) {
+		t.Fatalf("tool result %s", got)
 	}
 }
