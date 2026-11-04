@@ -233,12 +233,12 @@ func TestSearchSessionsAndRooms(t *testing.T) {
 
 func TestHistoryFeedAcrossRoomsDMOnlyInOwnRoom(t *testing.T) {
 	r := newNavRig(t)
-	got, e := r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{Room: "other"})
+	got, e := r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Room: "other"})
 	if e != nil || got.Room != "other" || got.Home != "feed" || len(got.Posts) != 1 || got.Posts[0].ID != r.feedB {
 		t.Fatalf("other feed: %+v %v", got, e)
 	}
 	// Another room's DM is refused every way it can be named.
-	for name, req := range map[string]contract.HistoryRequest{
+	for name, req := range map[string]contract.HistoryReadRequest{
 		"dm":     {Room: "other", DM: string(r.b.Session)},
 		"around": {Around: r.dmB},
 		"post":   {Post: r.dmB},
@@ -247,27 +247,27 @@ func TestHistoryFeedAcrossRoomsDMOnlyInOwnRoom(t *testing.T) {
 			t.Fatalf("%s: %+v", name, e)
 		}
 	}
-	own, e := r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{DM: string(r.a.Session)})
+	own, e := r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{DM: string(r.a.Session)})
 	if e != nil || len(own.Posts) != 1 || own.Posts[0].ID != r.dmA || own.Posts[0].From != "owner" || !strings.HasPrefix(own.Home, "dm:") {
 		t.Fatalf("own dm: %+v %v", own, e)
 	}
-	whole, e := r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{Post: r.dmA})
+	whole, e := r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Post: r.dmA})
 	if e != nil || len(whole.Posts) != 1 {
 		t.Fatalf("own dm post: %+v %v", whole, e)
 	}
-	ownerReads, e := r.s.HistoryRead(r.ctx, r.owner, contract.HistoryRequest{Room: "other", DM: string(r.b.Session)})
+	ownerReads, e := r.s.HistoryRead(r.ctx, r.owner, contract.HistoryReadRequest{Room: "other", DM: string(r.b.Session)})
 	if e != nil || len(ownerReads.Posts) != 1 {
 		t.Fatalf("owner: %+v %v", ownerReads, e)
 	}
-	_, e = r.s.HistoryRead(r.ctx, r.owner, contract.HistoryRequest{})
+	_, e = r.s.HistoryRead(r.ctx, r.owner, contract.HistoryReadRequest{})
 	wantCode(t, e, contract.ErrInvalid)
-	_, e = r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{Post: "ev_missing"})
+	_, e = r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Post: "ev_missing"})
 	wantCode(t, e, contract.ErrInvalid)
-	_, e = r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{Around: "ev_missing"})
+	_, e = r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Around: "ev_missing"})
 	wantCode(t, e, contract.ErrInvalid)
-	_, e = r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{Room: "nowhere"})
+	_, e = r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Room: "nowhere"})
 	wantCode(t, e, contract.ErrInvalid)
-	_, e = r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{DM: "no-such-session"})
+	_, e = r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{DM: "no-such-session"})
 	wantCode(t, e, contract.ErrInvalid)
 }
 
@@ -279,26 +279,26 @@ func TestHistoryPagingLimitsAndCuts(t *testing.T) {
 		ids = append(ids, r.post(t, r.owner, r.roomA, feed, "line "+strings.Repeat("x", i%7)))
 	}
 	for _, tc := range []struct{ limit, want int }{{0, 15}, {50, 50}, {1, 1}} {
-		got, e := r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{Limit: tc.limit})
+		got, e := r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Limit: tc.limit})
 		if e != nil || len(got.Posts) != tc.want || got.Posts[len(got.Posts)-1].ID != ids[59] {
 			t.Fatalf("limit %d: %d posts %v", tc.limit, len(got.Posts), e)
 		}
 	}
-	_, e := r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{Limit: 51})
+	_, e := r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Limit: 51})
 	wantCode(t, e, contract.ErrInvalid)
-	page, _ := r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{Limit: 10})
+	page, _ := r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Limit: 10})
 	if page.Newer != "" || page.Older != page.Posts[0].ID {
 		t.Fatalf("cursors older=%s newer=%s", page.Older, page.Newer)
 	}
-	older, e := r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{Limit: 10, Before: page.Older})
+	older, e := r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Limit: 10, Before: page.Older})
 	if e != nil || older.Posts[len(older.Posts)-1].ID != ids[49] || older.Newer == "" {
 		t.Fatalf("older: %+v %v", older, e)
 	}
-	newer, e := r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{Limit: 10, After: older.Posts[len(older.Posts)-1].ID})
+	newer, e := r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Limit: 10, After: older.Posts[len(older.Posts)-1].ID})
 	if e != nil || newer.Posts[0].ID != ids[50] {
 		t.Fatalf("newer: %+v %v", newer, e)
 	}
-	mid, e := r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{Around: ids[30], Limit: 5})
+	mid, e := r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Around: ids[30], Limit: 5})
 	found := false
 	for _, p := range mid.Posts {
 		found = found || p.ID == ids[30]
@@ -306,26 +306,26 @@ func TestHistoryPagingLimitsAndCuts(t *testing.T) {
 	if e != nil || len(mid.Posts) != 5 || !found || mid.Older == "" || mid.Newer == "" {
 		t.Fatalf("around: %+v %v", mid, e)
 	}
-	first, _ := r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{Around: ids[0], Limit: 3})
+	first, _ := r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Around: ids[0], Limit: 3})
 	if first.Older != "" {
 		t.Fatalf("nothing before the first post: %+v", first)
 	}
-	_, e = r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{Before: "ev_missing"})
+	_, e = r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Before: "ev_missing"})
 	wantCode(t, e, contract.ErrInvalid)
 	long := r.post(t, r.owner, r.roomA, feed, strings.Repeat("y", contract.HistoryTextChars+1))
 	exact := r.post(t, r.owner, r.roomA, feed, strings.Repeat("z", contract.HistoryTextChars))
-	got, _ := r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{Limit: 2})
+	got, _ := r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Limit: 2})
 	if got.Posts[0].ID != long || !got.Posts[0].Cut || len(got.Posts[0].Text) != contract.HistoryTextChars || got.Posts[1].ID != exact || got.Posts[1].Cut {
 		t.Fatalf("cuts: cut=%v len=%d / cut=%v", got.Posts[0].Cut, len(got.Posts[0].Text), got.Posts[1].Cut)
 	}
-	whole, e := r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{Post: long})
+	whole, e := r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Post: long})
 	if e != nil || whole.Posts[0].Cut || len(whole.Posts[0].Text) != contract.HistoryTextChars+1 {
 		t.Fatalf("whole: %v", e)
 	}
 	for i := 0; i < 20; i++ {
 		r.post(t, r.owner, r.roomA, feed, strings.Repeat("w", 700))
 	}
-	big, e := r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{Limit: 50})
+	big, e := r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Limit: 50})
 	if e != nil || len(big.Posts) == 0 || big.Older == "" {
 		t.Fatalf("big: %v", e)
 	}
@@ -385,7 +385,7 @@ func TestPostForwardQuotesOriginalAndWrapsOutsideText(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	got, _ := r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{Post: sent.Event})
+	got, _ := r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Post: sent.Event})
 	text := got.Posts[0].Text
 	if !strings.HasPrefix(text, "> **Forwarded from root in other** · ") || !strings.Contains(text, "UTC\n>\n> <<zebra feed in b>>") || !strings.HasSuffix(text, "\n\nmy note") {
 		t.Fatalf("forwarded text:\n%s", text)
@@ -399,7 +399,7 @@ func TestPostForwardQuotesOriginalAndWrapsOutsideText(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	got, _ = r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{Post: own.Event})
+	got, _ = r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Post: own.Event})
 	if len(wrapped) != 0 || !strings.HasPrefix(got.Posts[0].Text, "> **Forwarded from ") || strings.Contains(got.Posts[0].Text, "<<") || strings.Contains(got.Posts[0].Text, " in room") {
 		t.Fatalf("own room forward: %q wrapped=%v", got.Posts[0].Text, wrapped)
 	}
@@ -438,7 +438,7 @@ func TestPostForwardCarriesFilesOnlyFromOwnRoom(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		got, _ := r.s.HistoryRead(r.ctx, r.a, contract.HistoryRequest{Post: forwarded.Event})
+		got, _ := r.s.HistoryRead(r.ctx, r.a, contract.HistoryReadRequest{Post: forwarded.Event})
 		if len(got.Posts[0].Files) != tc.files {
 			t.Fatalf("room %s: files %v, want %d", tc.room, got.Posts[0].Files, tc.files)
 		}
