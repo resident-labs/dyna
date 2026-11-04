@@ -2,10 +2,12 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -119,5 +121,37 @@ func TestPrOpenResultLeavesOutTheBodyAndSurvivesALateFailure(t *testing.T) {
 	if second.State != contract.OpDone || second.Result.Error != "" || second.Result.PR == nil || second.Result.PR.URL != url ||
 		!strings.Contains(second.Result.Output, url) || !strings.Contains(second.Result.Output, "recording its owner failed") {
 		t.Fatalf("second %+v", second.Result)
+	}
+}
+
+func TestPrOpenSendsEveryFieldToGitHubAndKeepsTheBodyInTheRecord(t *testing.T) {
+	var sent map[string]any
+	s, session, ctx := prFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+			t.Error(err)
+		}
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"number":434}`)
+	})
+	record, err := s.store.Session(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	branch := "v2/" + string(session)
+	result, failure := s.OpSubmit(ctx, sessionCaller(session), contract.OpSubmitRequest{Operation: contract.Operation{Room: record.Room, Kind: "pr.open", Args: contract.PrOpenArgs{Title: "Trial", Body: "## What\nthe body", Base: "main", Draft: true}}})
+	if failure != nil || result.Operation.State != contract.OpDone {
+		t.Fatalf("response %+v error %+v", result, failure)
+	}
+	want := map[string]any{"title": "Trial", "body": "## What\nthe body", "base": "main", "head": branch, "draft": true}
+	if !reflect.DeepEqual(sent, want) {
+		t.Fatalf("GitHub request %v, want %v", sent, want)
+	}
+	echo, err := json.Marshal(result.Operation.Args)
+	if err != nil || strings.Contains(string(echo), `"body"`) {
+		t.Fatalf("returned args %s (%v) show a body field that reads as dropped", echo, err)
+	}
+	stored, err := s.store.Operation(ctx, result.Operation.ID)
+	if err != nil || !strings.Contains(string(stored.Args), "the body") {
+		t.Fatalf("stored args %s (%v) lost the body", stored.Args, err)
 	}
 }
