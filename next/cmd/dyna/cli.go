@@ -88,12 +88,25 @@ type client interface {
 	IssueTrack(context.Context, contract.IssueTrackRequest) (contract.IssueTrackResponse, error)
 	IssueUntrack(context.Context, contract.IssueUntrackRequest) (contract.IssueUntrackResponse, error)
 	HostList(context.Context, contract.HostListRequest) (contract.HostListResponse, error)
+	ProfileList(context.Context, contract.ProfileListRequest) (contract.ProfileListResponse, error)
+	ProfileSet(context.Context, contract.ProfileSetRequest) (contract.ProfileSetResponse, error)
+	ProfileRemove(context.Context, contract.ProfileRemoveRequest) (contract.ProfileRemoveResponse, error)
 }
 
 type socketClient struct{ http *http.Client }
 
 func (c *socketClient) ContextSnapshot(ctx context.Context, req contract.ContextSnapshotRequest) (contract.ContextSnapshotResponse, error) {
 	return call[contract.ContextSnapshotRequest, contract.ContextSnapshotResponse](ctx, c, contract.MethodContextSnapshot, req)
+}
+
+func (c *socketClient) ProfileList(ctx context.Context, q contract.ProfileListRequest) (contract.ProfileListResponse, error) {
+	return call[contract.ProfileListRequest, contract.ProfileListResponse](ctx, c, contract.MethodProfileList, q)
+}
+func (c *socketClient) ProfileSet(ctx context.Context, q contract.ProfileSetRequest) (contract.ProfileSetResponse, error) {
+	return call[contract.ProfileSetRequest, contract.ProfileSetResponse](ctx, c, contract.MethodProfileSet, q)
+}
+func (c *socketClient) ProfileRemove(ctx context.Context, q contract.ProfileRemoveRequest) (contract.ProfileRemoveResponse, error) {
+	return call[contract.ProfileRemoveRequest, contract.ProfileRemoveResponse](ctx, c, contract.MethodProfileRemove, q)
 }
 
 func newClient(socket string) *socketClient {
@@ -103,7 +116,8 @@ func newClient(socket string) *socketClient {
 }
 
 type requestType interface {
-	contract.ProxyKeyRequest | contract.ProxyUsageRequest |
+	contract.ProfileListRequest | contract.ProfileSetRequest | contract.ProfileRemoveRequest |
+		contract.ProxyKeyRequest | contract.ProxyUsageRequest |
 		contract.WorkflowRunRequest | contract.WorkflowReloadRequest | contract.WorkflowStatusRequest | contract.WorkflowListRequest |
 		contract.AddonListRequest | contract.AddonRemoveRequest | contract.ImageSaveRequest | contract.ImageListRequest | contract.ImageShowRequest | contract.ImageRemoveRequest | contract.PackageAddRequest | contract.SkillSaveRequest | contract.AddonSetHostsRequest | contract.MCPAddRequest |
 		contract.SubscriptionAddRequest | contract.SubscriptionListRequest | contract.SubscriptionRemoveRequest | contract.SubscriptionSetEnabledRequest |
@@ -120,7 +134,8 @@ type requestType interface {
 		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.HostexecStopRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostSetLimitsRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomDeleteRequest | contract.RoomRepoAddRequest | contract.RepoCISetRequest | contract.RoomReposRequest | contract.ComposeListRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.SessionRefreshRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.DeviceSetHostRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest | contract.PrListRequest | contract.PrStatusRequest | contract.PrTrackRequest | contract.PrUntrackRequest
 }
 type responseType interface {
-	contract.ProxyKeyResponse | contract.ProxyUsageResponse |
+	contract.ProfileListResponse | contract.ProfileSetResponse | contract.ProfileRemoveResponse |
+		contract.ProxyKeyResponse | contract.ProxyUsageResponse |
 		contract.WorkflowRunResponse | contract.WorkflowReloadResponse | contract.WorkflowStatusResponse | contract.WorkflowListResponse |
 		contract.AddonListResponse | contract.AddonChangeResponse | contract.AddonSetHostsResponse | contract.ImageSaveResponse | contract.ImageListResponse | contract.ImageShowResponse | contract.ImageRemoveResponse |
 		contract.SubscriptionAddResponse | contract.SubscriptionListResponse | contract.SubscriptionRemoveResponse | contract.SubscriptionSetEnabledResponse |
@@ -651,6 +666,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	host.AddCommand(add, setHost, limitHost, list, removeHost)
 	root.AddCommand(host)
 	root.AddCommand(poolCommand(getClient))
+	root.AddCommand(profileCommand(getClient))
 
 	room := &cobra.Command{Use: "room"}
 	for _, paused := range []bool{true, false} {

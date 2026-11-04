@@ -169,24 +169,16 @@ type ConversationReadRequest struct {
 type ConversationReadResponse struct{}
 
 type ProfileListRequest struct{}
-type ProfileSummary struct {
-	InUse         int           `json:"inUse"`
-	Description   string        `json:"description"`
-	Taste         int           `json:"taste"`
-	Diagnostics   int           `json:"diagnostics"`
-	Intelligence  int           `json:"intelligence"`
-	Cost          int           `json:"cost"`
-	Name          ProfileName   `json:"name"`
-	Provider      ModelProvider `json:"provider"`
-	Model         string        `json:"model"`
-	Images        *bool         `json:"images,omitempty"`
-	Thinking      ThinkingLevel `json:"thinking"`
-	AllowedModels []string      `json:"allowedModels,omitempty"`
-	CompactTokens int           `json:"compactTokens,omitempty"`
-	MaxConcurrent int           `json:"maxConcurrent,omitempty"`
+
+// ProfileEntry is one profile of profile.list. Profile is the stored profile whole, so it is a valid profile.set body
+// as listed; the read-only InUse sits beside it, outside what profile.set takes.
+type ProfileEntry struct {
+	Profile Profile `json:"profile"`
+	// InUse counts the open sessions on the profile.
+	InUse int `json:"inUse"`
 }
 type ProfileListResponse struct {
-	Profiles []ProfileSummary `json:"profiles"`
+	Profiles []ProfileEntry `json:"profiles"`
 }
 
 type RoomSetLimitsRequest struct {
