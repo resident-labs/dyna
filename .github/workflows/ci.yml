@@ -27,7 +27,6 @@ jobs:
       relay: ${{ steps.filter.outputs.relay }}
       next: ${{ steps.filter.outputs.next }}
       web: ${{ steps.filter.outputs.web }}
-      next_pi: ${{ steps.filter.outputs.next_pi }}
       self_hosted: ${{ steps.runner.outputs.self_hosted }}
     steps:
       - uses: actions/checkout@v6
@@ -136,34 +135,6 @@ jobs:
           cache-dependency-path: next/web/package-lock.json
       - name: Check, test and build the web app
         run: bash next/scripts/ci.sh next-web
-
-  next-pi:
-    name: next-pi
-    needs: [changes]
-    if: needs.changes.outputs.next_pi == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      NODE_OPTIONS: --experimental-strip-types
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: next/third_party/pi/package-lock.json
-      - name: Build, test and pack v2 Pi
-        env:
-          JUNIT_REPORT_PATH: ${{ runner.temp }}/next-pi-test.xml
-        run: bash next/scripts/ci.sh next-pi
-      - name: Upload v2 Pi test report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: next-pi-test-report
-          path: ${{ runner.temp }}/next-pi-test.xml
-          if-no-files-found: error
-          retention-days: 1
 
   # The Connect relay Cloudflare worker. v2's engine/connect talks to it.
   relay:

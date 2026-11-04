@@ -7,7 +7,7 @@
 # docs-only change would run the Go tests.
 set -euo pipefail
 if [ "${EVENT:-}" != "pull_request" ]; then
-  for k in relay next web next_pi; do echo "$k=true"; done
+  for k in relay next web; do echo "$k=true"; done
   exit 0
 fi
 if git rev-parse -q --verify HEAD^2 >/dev/null; then
@@ -26,4 +26,3 @@ echo "relay=$(has "^relay/|^testdata/connect/")"
 # Go tests read testdata/connect and .dyna/images. The next job also checks install.sh.
 echo "next=$(has "^next/|^testdata/connect/|^\.dyna/images/|^install\.sh$|^\.github/")"
 echo "web=$(has "^next/web/")"
-echo "next_pi=$(has "^next/third_party/pi/")"

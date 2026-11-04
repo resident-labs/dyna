@@ -3,7 +3,7 @@
 set -euo pipefail
 # Paths below are relative to the Go module root, so they stay right when next/* moves to the repository root.
 cd "$(dirname "$0")/.."
-suite=${1:?usage: next/scripts/ci.sh next|next-extras|next-pi|next-web|race}
+suite=${1:?usage: next/scripts/ci.sh next|next-extras|next-web|race}
 export RUNNER_TEMP=${RUNNER_TEMP:-${TMPDIR:-/tmp}}
 case "$suite" in
   next)
@@ -26,23 +26,6 @@ case "$suite" in
     # The vendored CLIProxyAPI is a separate Go module. Its management test runs as its own check,
     # in parallel with next, to keep the next job under its budget.
     (cd third_party/cliproxyapi && go test -count=1 ./internal/api/handlers/management -run '^TestDyna')
-    ;;
-  next-pi)
-    cd third_party/pi
-    export NODE_OPTIONS=--experimental-strip-types
-    npm ci --ignore-scripts
-    bash scripts/pi-hydrate.sh
-    npm run build:offline
-    PI_OFFLINE= node --import ./packages/coding-agent/src/experimental/source-resolver.ts --input-type=module -e '
-      import { ensureTool } from "./packages/coding-agent/src/utils/tools-manager.ts";
-      for (const tool of ["fd", "rg"]) {
-        const path = await ensureTool(tool, ({ message }) => console.log(message));
-        if (!path) throw new Error(`Unable to provision ${tool}`);
-      }
-    '
-    npm test --workspace=@earendil-works/pi-coding-agent -- --maxWorkers="${PI_TEST_WORKERS:-2}" --reporter=default --reporter=junit --outputFile="${JUNIT_REPORT_PATH:-$RUNNER_TEMP/next-pi-test.xml}"
-    npm --prefix packages/ai test -- anthropic-mid-conversation-effort.test.ts
-    PI_PACK_SKIP_BUILD=1 bash scripts/pi-pack.sh "$RUNNER_TEMP/next-pi-fork.tgz"
     ;;
   next-web)
     # next/web is the v2 web app, a Svelte project with its own package.json.
