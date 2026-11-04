@@ -9,13 +9,42 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
 type fakeAccess struct {
-	allowed bool
+	allowed  bool
+	name     string
+	recorded map[contract.SessionID][]string // a session's branches, newest first
+	holders  map[string]contract.SessionID   // the live session that has a branch
+	claimed  *claim
+}
+
+// claim is what the last ClaimBranch asked for.
+type claim struct {
+	wanted      string
+	unavailable map[string]bool
+}
+
+// routeAccess is session ses_1 on branch work, whose run resumes ses_0, which had branch earlier; ses_2 holds work-taken.
+func routeAccess() fakeAccess {
+	return fakeAccess{allowed: true, recorded: map[contract.SessionID][]string{"ses_1": {"work"}, "ses_0": {"earlier"}}, holders: map[string]contract.SessionID{"work-taken": "ses_2"}}
+}
+
+func (a fakeAccess) SessionBranches(_ context.Context, _ contract.RepoName, session contract.SessionID) ([]string, error) {
+	return a.recorded[session], nil
+}
+
+func (a fakeAccess) BranchHolder(_ context.Context, _ contract.RepoName, branch string) (contract.SessionID, error) {
+	return a.holders[branch], nil
+}
+
+func (a fakeAccess) ClaimBranch(_ context.Context, _ contract.RepoName, _ contract.SessionID, wanted string, unavailable map[string]bool, _ time.Time) (string, error) {
+	*a.claimed = claim{wanted, unavailable}
+	return wanted, nil
 }
 
 func (a fakeAccess) RoomRepos(context.Context, contract.RoomID) ([]contract.RoomRepo, error) {
@@ -26,7 +55,7 @@ func (a fakeAccess) RoomRepos(context.Context, contract.RoomID) ([]contract.Room
 }
 
 func (a fakeAccess) Session(context.Context, contract.SessionID) (store.Session, error) {
-	return store.Session{Repo: "owner/repo"}, nil
+	return store.Session{Repo: "owner/repo", Name: a.name}, nil
 }
 
 func (a fakeAccess) OwnsPRBranch(context.Context, contract.RepoName, contract.SessionID, string) (bool, error) {
@@ -44,7 +73,7 @@ func TestOtherRoomRepositoryAllowsFetchButRejectsPush(t *testing.T) {
 		called++
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("ok"))}, nil
 	})
-	handler := Handler(target, transport, "secret", "ses_1", "room", fakeAccess{allowed: true})
+	handler := Handler(target, transport, "secret", "ses_1", "room", routeAccess())
 	fetch := httptest.NewRecorder()
 	handler.ServeHTTP(fetch, httptest.NewRequest("GET", "/git/owner/other.git/info/refs?service=git-upload-pack", nil))
 	advertise := httptest.NewRecorder()
@@ -93,7 +122,7 @@ func TestRejectsUnownedPushBeforeUpstream(t *testing.T) {
 	line := strings.Repeat("0", 40) + " " + strings.Repeat("1", 40) + " refs/heads/main\x00report-status\n"
 	body := &packReader{header: fmt.Sprintf("%04x%s0000", len(line)+4, line)}
 	w := httptest.NewRecorder()
-	Handler(target, transport, "secret", "ses_1", "room", fakeAccess{allowed: true}).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", body))
+	Handler(target, transport, "secret", "ses_1", "room", routeAccess()).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", body))
 	if called || !body.drained || !strings.Contains(w.Body.String(), "ng refs/heads/main not owned by this session") {
 		t.Fatalf("upstream called %v, response %q", called, w.Body.String())
 	}
@@ -104,7 +133,7 @@ func TestRejectsSidebandPushWithSidebandReport(t *testing.T) {
 	line := strings.Repeat("0", 40) + " " + strings.Repeat("1", 40) + " refs/heads/main\x00report-status side-band-64k\n"
 	body := fmt.Sprintf("%04x%s0000PACK", len(line)+4, line)
 	w := httptest.NewRecorder()
-	Handler(target, roundTrip(func(*http.Request) (*http.Response, error) { t.Fatal("upstream called"); return nil, nil }), "secret", "ses_1", "room", fakeAccess{allowed: true}).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
+	Handler(target, roundTrip(func(*http.Request) (*http.Response, error) { t.Fatal("upstream called"); return nil, nil }), "secret", "ses_1", "room", routeAccess()).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
 	if len(w.Body.Bytes()) < 5 || w.Body.Bytes()[4] != 1 || !strings.Contains(w.Body.String(), "ng refs/heads/main") {
 		t.Fatalf("invalid sideband report %q", w.Body.String())
 	}
@@ -112,7 +141,7 @@ func TestRejectsSidebandPushWithSidebandReport(t *testing.T) {
 
 func TestForwardsOwnedPushAndReplacesCredential(t *testing.T) {
 	target, _ := url.Parse("https://github.com")
-	line := strings.Repeat("0", 40) + " " + strings.Repeat("1", 40) + " refs/heads/v2/ses_1\x00report-status\n"
+	line := strings.Repeat("0", 40) + " " + strings.Repeat("1", 40) + " refs/heads/work\x00report-status\n"
 	body := fmt.Sprintf("%04x%s0000PACK", len(line)+4, line)
 	transport := roundTrip(func(r *http.Request) (*http.Response, error) {
 		got, err := io.ReadAll(r.Body)
@@ -125,7 +154,7 @@ func TestForwardsOwnedPushAndReplacesCredential(t *testing.T) {
 	req := httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body))
 	req.Header.Set("Authorization", "bad")
 	w := httptest.NewRecorder()
-	Handler(target, transport, "secret", "ses_1", "room", fakeAccess{allowed: true}).ServeHTTP(w, req)
+	Handler(target, transport, "secret", "ses_1", "room", routeAccess()).ServeHTTP(w, req)
 	if w.Code != 200 {
 		t.Fatalf("status %d", w.Code)
 	}
@@ -136,7 +165,7 @@ func TestTopicBranchPushAuthorization(t *testing.T) {
 	for _, tc := range []struct {
 		branch  string
 		allowed bool
-	}{{"v2/ses_1-topic", true}, {"v2/ses_2", false}, {"v2/ses_1/topic", false}} {
+	}{{"work", true}, {"work-topic", true}, {"other", false}, {"work/topic", false}, {"work-taken", false}, {"work-", false}, {"work-a..b", false}, {"work-a.lock", false}} {
 		t.Run(tc.branch, func(t *testing.T) {
 			called := false
 			transport := roundTrip(func(*http.Request) (*http.Response, error) {
@@ -146,7 +175,7 @@ func TestTopicBranchPushAuthorization(t *testing.T) {
 			line := strings.Repeat("0", 40) + " " + strings.Repeat("1", 40) + " refs/heads/" + tc.branch + "\x00report-status\n"
 			body := fmt.Sprintf("%04x%s0000PACK", len(line)+4, line)
 			w := httptest.NewRecorder()
-			Handler(target, transport, "secret", "ses_1", "room", fakeAccess{allowed: true}).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
+			Handler(target, transport, "secret", "ses_1", "room", routeAccess()).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
 			if called != tc.allowed {
 				t.Fatalf("called %v, response %s", called, w.Body.String())
 			}
@@ -165,7 +194,7 @@ func TestRefusesAPushToAnArchiveRef(t *testing.T) {
 	line := strings.Repeat("0", 40) + " " + strings.Repeat("1", 40) + " refs/dyna/archive/ses_1\x00report-status\n"
 	body := fmt.Sprintf("%04x%s0000PACK", len(line)+4, line)
 	w := httptest.NewRecorder()
-	Handler(target, transport, "secret", "ses_1", "room", fakeAccess{allowed: true}).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
+	Handler(target, transport, "secret", "ses_1", "room", routeAccess()).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
 	if called {
 		t.Fatalf("the push went upstream: %s", w.Body.String())
 	}

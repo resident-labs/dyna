@@ -93,7 +93,7 @@ func newSeedFixture(t *testing.T) *seedFixture {
 	data, hostData := filepath.Join(root, "data"), filepath.Join(root, "host")
 	clock := &atomic.Int64{}
 	mirror := &Mirror{Layout: box.Layout{Data: data, HostData: hostData}, Token: "secret", Runner: github, SeedTimeout: time.Second, Now: func() time.Time { return time.Unix(clock.Load(), 0) }}
-	if _, err := mirror.Prepare(context.Background(), gitCache{t}, "owner/repo", "ses_0", true); err != nil {
+	if _, err := mirror.Prepare(context.Background(), gitCache{t}, "owner/repo", true); err != nil {
 		t.Fatal(err)
 	}
 	runReal(t, work, "commit", "--allow-empty", "-m", "second")
@@ -110,7 +110,7 @@ func (f *seedFixture) cacheMain(t *testing.T) string {
 
 func TestSeedStartsAtRemoteTipWhenMirrorIsBehind(t *testing.T) {
 	f := newSeedFixture(t)
-	item, notice, err := f.mirror.Seed(context.Background(), gitCache{t}, "owner/repo", "ses_1")
+	item, notice, err := f.mirror.Seed(context.Background(), gitCache{t}, "owner/repo")
 	if err != nil || notice != "" || item.Base != "main" {
 		t.Fatalf("item %+v, notice %q, error %v", item, notice, err)
 	}
@@ -123,7 +123,7 @@ func TestSeedFallsBackToMirrorWhenRemoteHangs(t *testing.T) {
 	f := newSeedFixture(t)
 	f.github.hang.Store(true)
 	start := time.Now()
-	item, notice, err := f.mirror.Seed(context.Background(), gitCache{t}, "owner/repo", "ses_1")
+	item, notice, err := f.mirror.Seed(context.Background(), gitCache{t}, "owner/repo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestSeedFallsBackWhenRemoteIsGone(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(f.github.root, "owner")); err != nil {
 		t.Fatal(err)
 	}
-	_, notice, err := f.mirror.Seed(context.Background(), gitCache{t}, "owner/repo", "ses_1")
+	_, notice, err := f.mirror.Seed(context.Background(), gitCache{t}, "owner/repo")
 	if err != nil || !strings.Contains(notice, "not refreshed from GitHub at start") {
 		t.Fatalf("notice %q, error %v", notice, err)
 	}
@@ -157,7 +157,7 @@ func TestSeedStartsTogetherShareFetches(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, notice, err := f.mirror.Seed(context.Background(), gitCache{t}, "owner/repo", "ses_1"); err != nil || notice != "" {
+			if _, notice, err := f.mirror.Seed(context.Background(), gitCache{t}, "owner/repo"); err != nil || notice != "" {
 				t.Errorf("notice %q, error %v", notice, err)
 			}
 		}()
@@ -171,7 +171,7 @@ func TestSeedStartsTogetherShareFetches(t *testing.T) {
 	}
 	// A start right after one that just fetched reuses it.
 	before = f.github.fetches.Load()
-	if _, _, err := f.mirror.Seed(context.Background(), gitCache{t}, "owner/repo", "ses_2"); err != nil || f.github.fetches.Load() != before {
+	if _, _, err := f.mirror.Seed(context.Background(), gitCache{t}, "owner/repo"); err != nil || f.github.fetches.Load() != before {
 		t.Fatalf("fetches %d after the burst, error %v", f.github.fetches.Load()-before, err)
 	}
 }

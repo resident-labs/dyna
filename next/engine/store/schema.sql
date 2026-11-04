@@ -106,3 +106,5 @@ CREATE TABLE local_usage (model TEXT PRIMARY KEY, requests INTEGER NOT NULL, inp
 CREATE TABLE github_feeds (repo TEXT NOT NULL, feed TEXT NOT NULL, etag TEXT NOT NULL, cursor TEXT NOT NULL, PRIMARY KEY(repo, feed));
 CREATE TABLE subscription_where (sub TEXT NOT NULL REFERENCES subscriptions(id), pos INTEGER NOT NULL, clause TEXT NOT NULL, PRIMARY KEY(sub, pos));
 CREATE TABLE subscription_queue (sub TEXT NOT NULL REFERENCES subscriptions(id), seq INTEGER NOT NULL, PRIMARY KEY(sub, seq));
+CREATE TABLE session_branches (repo TEXT NOT NULL, branch TEXT NOT NULL, session TEXT NOT NULL REFERENCES sessions(id), created_at INTEGER NOT NULL, PRIMARY KEY(repo, branch, session));
+CREATE INDEX session_branches_session ON session_branches(session);

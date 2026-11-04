@@ -24,7 +24,14 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 			return store.Session{}, "", approve.ErrForbidden
 		}
 		session, err := s.store.Session(ctx, who.Session)
-		return session, enginegit.SessionBranchPrefix + string(who.Session), err
+		if err != nil {
+			return session, "", err
+		}
+		recorded, err := s.store.SessionBranches(ctx, session.Repo, who.Session)
+		if err != nil || len(recorded) == 0 {
+			return session, "", err
+		}
+		return session, recorded[0], nil
 	}
 	return approve.Entry{
 		Scope: contract.ScopeOperate,
@@ -41,6 +48,9 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 			defaulted := input.Head == ""
 			if !defaulted {
 				head = input.Head
+			}
+			if head == "" {
+				return fmt.Errorf("%w: the session has no branch recorded yet; head was not given", approve.ErrInvalid)
 			}
 			allowed, err := enginegit.CanPushBranch(ctx, s.store, session.Repo, who.Session, head)
 			if err != nil {

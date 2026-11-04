@@ -34,6 +34,8 @@ type Profiles interface {
 type Repositories interface {
 	Get(context.Context, contract.SessionID, contract.HostName, bool) ([]contract.BoxRepo, error)
 	Ref(context.Context, contract.RepoName, string) (string, error)
+	// Unavailable is the branch names no session may have on a repository: protected names, its default and the mirror's.
+	Unavailable(context.Context, contract.RepoName) (map[string]bool, error)
 	// Seed is Get with a bounded refresh from GitHub; the string is a notice for the session when the refresh did not happen.
 	Seed(context.Context, contract.SessionID, contract.HostName) ([]contract.BoxRepo, string, error)
 }
