@@ -156,7 +156,7 @@ func saveDiff(ctx context.Context, root, folder string, session contract.Session
 			}
 			return '_'
 		}, name)+"-"+string(session)+".diff")
-		// The file holds untracked files that are not ignored, so it is private, and the temporary file is made new: a planted
+		// The file holds untracked files that are not ignored, so it asks for 0600 (the share mount ignores modes, spec 5.9), and the temporary file is made new: a planted
 		// link there is removed, never followed.
 		tmp := file + ".tmp"
 		if err := os.Remove(tmp); err != nil && !os.IsNotExist(err) {
