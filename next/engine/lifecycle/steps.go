@@ -219,7 +219,6 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 				if event, workErr = r.event(b.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.SessionRestarted{Session: b.Session, Stopped: true, ClientID: "box-restart:" + string(b.ID) + ":stopped:" + strconv.FormatInt(b.Updated.UnixMilli(), 10)}); workErr == nil {
 					workErr = r.store.NoticeRestarted(ctx, event)
 				}
-				next.Reason = ""
 			}
 		}
 		var missing box.MissingDevice
@@ -239,6 +238,10 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 				cause = contract.CauseStartFailed
 			}
 		} else {
+			// The start that told the session, or the recreate that did, uses up the reason it was found stopped for.
+			if next.Reason == containerStoppedReason {
+				next.Reason = ""
+			}
 			due = r.now().Add(60 * time.Second)
 		}
 	}

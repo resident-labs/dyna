@@ -19,6 +19,8 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		switch {
 		case b.ImageUpdated:
 			return withContinue("Your box restarted on a new image. Files under /box and this conversation are kept; anything installed outside /box is gone.", b.OpenGoal), nil
+		case b.Refreshed:
+			return withContinue("Your box restarted on the current version. Files under /box and this conversation are kept.", b.OpenGoal), nil
 		case b.Stopped:
 			return withContinue("Your box restarted after it stopped. Files under /box and this conversation are kept; any process that was running in it is gone.", b.OpenGoal), nil
 		}

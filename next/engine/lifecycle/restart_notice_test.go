@@ -3,7 +3,9 @@ package lifecycle
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
@@ -12,8 +14,11 @@ import (
 // restartedBoxes is a host whose container is stopped, and whose current image is a new one when image says so.
 type restartedBoxes struct {
 	runningBoxes
-	image string
+	image    string
+	startErr error
 }
+
+func (b restartedBoxes) Start(context.Context, contract.BoxID) error { return b.startErr }
 
 func (restartedBoxes) Inspect(context.Context, contract.BoxID) (box.ContainerStatus, bool, error) {
 	return box.ContainerStatus{}, true, nil
@@ -107,5 +112,68 @@ func TestOneWakePerBoxStart(t *testing.T) {
 	}
 	if wakes := rig.notices(); len(wakes) != 1 || !wakes[0] {
 		t.Fatalf("notices %v", wakes)
+	}
+}
+
+// A start that works uses up the reason the box was found stopped, so the reason does not outlast the start into later states or
+// tell the session again.
+func TestStartClearsTheStoppedReasonAndTellsOnce(t *testing.T) {
+	rig := newHostRig(t)
+	rig.r.boxes = restartedBoxes{image: "image"}
+	rig.stop(true, containerStoppedReason)
+	if b := rig.pass(); b.Reason != "" {
+		t.Fatalf("reason after the start %q", b.Reason)
+	}
+	rig.stop(false, "")
+	rig.pass()
+	if wakes := rig.notices(); len(wakes) != 1 {
+		t.Fatalf("notices %v", wakes)
+	}
+}
+
+// A start that fails again tells nothing and keeps the reason, so the start that works tells once.
+func TestFailedStartTellsNothingUntilOneWorks(t *testing.T) {
+	rig := newHostRig(t)
+	rig.r.boxes = restartedBoxes{image: "image", startErr: errors.New("no")}
+	rig.stop(true, containerStoppedReason)
+	if b := rig.pass(); b.State != contract.BoxStopped || b.Reason != containerStoppedReason {
+		t.Fatalf("after the failed start: %s %q", b.State, b.Reason)
+	}
+	if wakes := rig.notices(); len(wakes) != 0 {
+		t.Fatalf("notices after a failed start %v", wakes)
+	}
+	rig.r.boxes = restartedBoxes{image: "image"}
+	rig.now = rig.now.Add(time.Hour)
+	rig.pass()
+	if wakes := rig.notices(); len(wakes) != 1 || !wakes[0] {
+		t.Fatalf("notices after the start that worked %v", wakes)
+	}
+}
+
+// The same image update reported twice, as when the box is put back on the old image and recreated again, wakes once.
+func TestImageUpdateReportedTwiceWakesOnce(t *testing.T) {
+	rig := newHostRig(t)
+	rig.r.boxes = restartedBoxes{image: "new"}
+	rig.stop(true, "")
+	rig.pass()
+	if err := rig.st.Write(rig.ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE boxes SET state='stopped',image='image',want='run',due_at=0 WHERE id='b'`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rig.pass()
+	if wakes := rig.notices(); len(wakes) != 1 || !wakes[0] {
+		t.Fatalf("notices %v", wakes)
+	}
+}
+
+// A stale image found on a box that was stopped tells of the image, and leaves no stopped reason to tell of a later start.
+func TestStaleImageRecreateClearsTheStoppedReason(t *testing.T) {
+	rig := newHostRig(t)
+	rig.r.boxes = restartedBoxes{image: "new"}
+	rig.stop(true, containerStoppedReason)
+	if b := rig.pass(); b.Reason != "" {
+		t.Fatalf("reason %q", b.Reason)
 	}
 }
