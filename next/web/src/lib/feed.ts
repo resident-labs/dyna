@@ -237,7 +237,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       continue;
     }
     if (event.type === "session.restarted") {
-      if (!event.body.imageUpdated && !event.body.stopped) deferred.push({ kind: "restarted", key: `restart${event.seq}`, session: event.body.session, at: event.at });
+      if (!event.body.imageUpdated && !event.body.stopped && !event.body.refreshed) deferred.push({ kind: "restarted", key: `restart${event.seq}`, session: event.body.session, at: event.at });
       continue;
     }
     // A crew's closed session leaves the sessions panel, so its run leaves a line in the room. A crew has no DM of its own.
@@ -496,7 +496,7 @@ export function workIsBare(events: Event[], name: Name, until?: string): boolean
 // One plain line for an event inside an opened work row.
 export function describe(event: Event, name: Name): string {
   switch (event.type) {
-    case "session.restarted": return event.body.imageUpdated ? `${name(event.body.session)}'s box image was updated.` : event.body.stopped ? `${name(event.body.session)}'s box restarted after it stopped.` : `${name(event.body.session)}'s box was replaced. Unpushed work in the old volume is gone.`;
+    case "session.restarted": return event.body.imageUpdated ? `${name(event.body.session)}'s box image was updated.` : event.body.stopped || event.body.refreshed ?  `${name(event.body.session)}'s box restarted.` : `${name(event.body.session)}'s box was replaced. Unpushed work in the old volume is gone.`;
     case "session.started": return `${name(event.body.session)} started`;
     case "session.closed": return `${name(event.body.session)} closed${event.body.reason ? ` ${closeReasons[event.body.reason]}` : ""}`;
     case "session.compacted": return event.body.error ? `${name(event.body.session)} could not compact its conversation` : `${name(event.body.session)} compacted its conversation`;
