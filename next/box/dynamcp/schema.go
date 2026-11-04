@@ -37,7 +37,7 @@ type annotations struct {
 	Idempotent  bool `json:"idempotentHint"`
 	OpenWorld   bool `json:"openWorldHint"`
 }
-type tool struct {
+type Tool struct {
 	Name        string      `json:"name"`
 	Title       string      `json:"title"`
 	Description string      `json:"description"`
@@ -97,7 +97,7 @@ func requestProperties(a action) map[string]schema {
 	return props
 }
 
-func registry() ([]tool, map[string]map[string]action, error) {
+func registry() ([]Tool, map[string]map[string]action, error) {
 	actions := map[string]map[string]action{}
 	add := func(name, verb string, a action) {
 		if actions[name] == nil {
@@ -121,7 +121,7 @@ func registry() ([]tool, map[string]map[string]action, error) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	var result []tool
+	var result []Tool
 	for _, name := range names {
 		var verbs, help []string
 		metadata, ok := tools.ToolkitFor(name)
@@ -167,7 +167,7 @@ func registry() ([]tool, map[string]map[string]action, error) {
 		if metadata.Description != "" {
 			help = append([]string{metadata.Description}, help...)
 		}
-		result = append(result, tool{Name: name, Title: metadata.Title, Description: strings.Join(help, "\n"), InputSchema: schema{Type: "object", Properties: props, Required: required}, Annotations: annotations{ReadOnly: readOnly, Destructive: metadata.Destructive, Idempotent: metadata.Idempotent, OpenWorld: metadata.OpenWorld}})
+		result = append(result, Tool{Name: name, Title: metadata.Title, Description: strings.Join(help, "\n"), InputSchema: schema{Type: "object", Properties: props, Required: required}, Annotations: annotations{ReadOnly: readOnly, Destructive: metadata.Destructive, Idempotent: metadata.Idempotent, OpenWorld: metadata.OpenWorld}})
 	}
 	return result, actions, nil
 }
