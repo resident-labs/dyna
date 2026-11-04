@@ -7,7 +7,7 @@ import (
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
-	"github.com/resident-labs/dyna/harness/pi"
+	"github.com/resident-labs/dyna/harness/pig"
 )
 
 // TranscriptImage returns the image a read returned. Pi records it in the session file and the engine keeps a copy of
@@ -31,7 +31,7 @@ func (s *Service) TranscriptImage(ctx context.Context, caller contract.Principal
 	if err != nil {
 		return "", nil, failure(err)
 	}
-	reader := pi.TranscriptReader{Dir: s.layout.Transcripts(room, session), Acked: make(map[string]int64, len(files))}
+	reader := pig.TranscriptReader{Dir: s.layout.Transcripts(room, session), Acked: make(map[string]int64, len(files))}
 	for _, f := range files {
 		reader.Acked[f.Path] = f.Acked
 	}

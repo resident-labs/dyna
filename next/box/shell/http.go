@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,6 +31,11 @@ type Listed struct {
 	Host    contract.HostName   `json:"host,omitempty"`
 }
 
+// Jobs is the job list.
+type Jobs struct {
+	Jobs []Listed `json:"jobs"`
+}
+
 // JobCall is one call of the job tool.
 type JobCall struct {
 	Action string              `json:"action"`
@@ -45,26 +51,32 @@ func invalid(message string) refusal {
 	return refusal{contract.Error{Code: contract.ErrInvalid, Message: message}}
 }
 
+// Run is the bash tool: it starts a command and returns when it ends, at the foreground limit, when a message arrives or
+// when ctx ends. A command still running then goes on as a background job.
+func (s *Server) Run(ctx context.Context, run Run) (Result, error) {
+	if strings.TrimSpace(run.Command) == "" {
+		return Result{}, invalid("command is required")
+	}
+	if run.Timeout < 0 || run.Timeout > maxTimeout {
+		return Result{}, invalid(fmt.Sprintf("timeout is in seconds, at most %d", maxTimeout))
+	}
+	j, err := s.run(ctx.Done(), run)
+	if err != nil {
+		return Result{}, err
+	}
+	answer := result(j)
+	answer.MessageArrived = answer.Running && j.aside
+	return answer, nil
+}
+
 // Handler serves the extension over plain JSON. A refused call answers with its typed error.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /run", serve(func(r *http.Request, run Run) (any, error) {
-		if strings.TrimSpace(run.Command) == "" {
-			return nil, invalid("command is required")
-		}
-		if run.Timeout < 0 || run.Timeout > maxTimeout {
-			return nil, invalid(fmt.Sprintf("timeout is in seconds, at most %d", maxTimeout))
-		}
-		j, err := s.run(r.Context().Done(), run)
-		if err != nil {
-			return nil, err
-		}
-		answer := result(j)
-		answer.MessageArrived = answer.Running && j.aside
-		return answer, nil
+		return s.Run(r.Context(), run)
 	}))
 	mux.HandleFunc("POST /job", serve(func(_ *http.Request, call JobCall) (any, error) {
-		return s.jobCall(call)
+		return s.Job(call)
 	}))
 	return mux
 }
@@ -93,17 +105,16 @@ func serve[T any](handle func(*http.Request, T) (any, error)) http.HandlerFunc {
 	}
 }
 
-func (s *Server) jobCall(call JobCall) (any, error) {
+// Job is the job tool. A list answers with Jobs, the other actions with a Result.
+func (s *Server) Job(call JobCall) (any, error) {
 	if call.Action == "list" {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		jobs := []Listed{}
+		jobs := Jobs{Jobs: []Listed{}}
 		for _, j := range s.jobs {
-			jobs = append(jobs, Listed{j.id, j.status(), Mask(j.command), j.host})
+			jobs.Jobs = append(jobs.Jobs, Listed{j.id, j.status(), Mask(j.command), j.host})
 		}
-		return struct {
-			Jobs []Listed `json:"jobs"`
-		}{jobs}, nil
+		return jobs, nil
 	}
 	if call.Action != "output" && call.Action != "stop" {
 		return nil, invalid("action is output, stop or list")

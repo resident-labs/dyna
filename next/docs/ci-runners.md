@@ -163,9 +163,7 @@ ci-runner` gives the ID.
 
 `ci.yml` sends `next`, `next-extras` and `next-web` to the pool. `changes` and
 `pool-watch` stay on GitHub-hosted runners, because they decide things while the
-pool may be down. `relay` needs a container runtime. `next-pi` stays hosted because
-one Pi test rewrites a file with a same-size value and expects the change to show:
-on tmpfs both writes can land in one clock tick, so size and time both match.
+pool may be down. `relay` needs a container runtime. It stays hosted.
 
 The image is not `ubuntu-latest`: it has no Go or Node, an empty `/etc/machine-id`,
 and Podman's default `/dev/shm`. A job installs its own tools, and a test must not

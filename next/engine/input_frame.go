@@ -38,7 +38,7 @@ func (s *Service) framePrincipal(ctx context.Context, viewer contract.SessionID,
 }
 
 // attachedFiles lists a post's files for the box and describes them for the frame. The Pi extension reads "shown to you" in
-// this text to put the image in the model's requests, so box/agent/extension.js changes with it.
+// this text to put the image in the model's requests, so box/dynaext/images.go changes with it.
 func (s *Service) attachedFiles(event contract.Event, post contract.PostCreated) ([]contract.TurnFile, string) {
 	paths := s.layout.BoxAttachments(event.Seq, post.Attachments)
 	files := make([]contract.TurnFile, len(paths))
