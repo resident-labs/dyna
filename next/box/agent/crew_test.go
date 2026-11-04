@@ -19,20 +19,22 @@ import (
 
 // fakeJournal is the engine's side of a crew, kept in memory so that a second Crew can resume from it.
 type fakeJournal struct {
-	mu    sync.Mutex
-	steps map[string]contract.WorkflowStepEndRequest
-	names map[string]string
-	files map[string]string // what each running worker reported
-	lanes map[string]string
-	posts []contract.PostRequest
-	lines []string // status() lines
-	pin   string
+	mu       sync.Mutex
+	steps    map[string]contract.WorkflowStepEndRequest
+	names    map[string]string
+	files    map[string]string // what each running worker reported
+	lanes    map[string]string
+	phases   map[string]string // each step key to the stage it started in
+	endDelay time.Duration     // how long the journal takes to store a step end
+	posts    []contract.PostRequest
+	lines    []string // status() lines
+	pin      string
 	// by step name, the script version that started each step
 	versions map[string]int
 }
 
 func newFakeJournal() *fakeJournal {
-	return &fakeJournal{steps: map[string]contract.WorkflowStepEndRequest{}, names: map[string]string{}, files: map[string]string{}, lanes: map[string]string{}}
+	return &fakeJournal{steps: map[string]contract.WorkflowStepEndRequest{}, names: map[string]string{}, files: map[string]string{}, lanes: map[string]string{}, phases: map[string]string{}}
 }
 
 func (j *fakeJournal) WorkflowSetStatus(_ context.Context, req contract.WorkflowSetStatusRequest) error {
@@ -56,6 +58,7 @@ func (j *fakeJournal) WorkflowStepStart(_ context.Context, req contract.Workflow
 	defer j.mu.Unlock()
 	j.names[req.Key] = req.Name
 	j.lanes[req.Key] = req.Lane
+	j.phases[req.Key] = req.Phase
 	if stored, ok := j.steps[req.Key]; ok && req.Kind != contract.WorkflowStepWorkflow {
 		return contract.WorkflowStepStartResponse{State: stored.State, Result: stored.Result, Reason: stored.Reason}, nil
 	}
@@ -67,6 +70,7 @@ func (j *fakeJournal) WorkflowStepStart(_ context.Context, req contract.Workflow
 }
 
 func (j *fakeJournal) WorkflowStepEnd(_ context.Context, req contract.WorkflowStepEndRequest) error {
+	time.Sleep(j.endDelay)
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.steps[req.Key] = req
@@ -525,7 +529,7 @@ func TestPostIsAStepSoAResumeDoesNotRepeatIt(t *testing.T) {
 		t.Fatalf("%d posts", len(h.journal.posts))
 	}
 	post := h.journal.posts[0]
-	if !slices.Equal(post.Mentions, []string{"@root"}) || !strings.Contains(post.Text, `"files":3`) || len(post.ClientID) != 64 {
+	if !slices.Equal(post.Mentions, []string{"@root"}) || !strings.HasPrefix(post.Text, "halfway") || !strings.Contains(post.Text, `"files":3`) || len(post.ClientID) != 64 {
 		t.Fatalf("post %+v", post)
 	}
 	found := false
@@ -833,5 +837,42 @@ func TestAForgottenStepEndsWithTheRun(t *testing.T) {
 	}
 	if !cancelled.Load() {
 		t.Fatal("the forgotten step was left running past the run")
+	}
+}
+
+func TestTheLastLinesOfAScriptReachTheJournalBeforeItsRunEnds(t *testing.T) {
+	h := newCrewHarness(t)
+	h.journal.endDelay = 300 * time.Millisecond
+	h.result(crewMeta + `log('last words'); return 1`)
+	h.result(crewMeta + `await parallel([() => agent('good'), () => { throw new Error('gave up') }]); return 2`)
+	var logged, failed bool
+	for key, name := range h.journal.names {
+		step := h.journal.steps[key]
+		logged = logged || name == "log: last words" && step.State == contract.WorkflowStepDone
+		failed = failed || strings.HasPrefix(name, "log: parallel[1]") && step.State == contract.WorkflowStepFailed && step.Reason == "parallel[1]: gave up"
+	}
+	if !logged || !failed {
+		t.Fatalf("logged %v, failed %v in %v", logged, failed, h.journal.names)
+	}
+}
+
+func TestPhaseSetsTheStageOfLaterStepsAndAnOptionOverridesIt(t *testing.T) {
+	h := newCrewHarness(t)
+	h.result(crewMeta + `await agent('before'); phase('a'); await agent('first'); await agent('second', { phase: 'b' }); phase('c'); await run('true'); return 1`)
+	phases := map[string]string{}
+	for key, name := range h.journal.names {
+		phases[name] = h.journal.phases[key]
+	}
+	want := map[string]string{"agent: before": "", "agent: first": "a", "agent: second": "b", "run: true": "c"}
+	if fmt.Sprint(phases) != fmt.Sprint(want) {
+		t.Fatalf("phases %v, want %v", phases, want)
+	}
+}
+
+func TestAScriptThatOutgrowsItsMemoryFails(t *testing.T) {
+	h := newCrewHarness(t)
+	ended := h.run(crewMeta + `const held = []; for (let i = 0; i < 40; i++) held.push('x'.repeat(16 << 20) + i); return held.length`)
+	if ended.Outcome != contract.TurnFailed {
+		t.Fatalf("turn %+v", ended)
 	}
 }

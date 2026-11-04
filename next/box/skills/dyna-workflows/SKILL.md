@@ -1,11 +1,11 @@
 ---
 name: dyna-workflows
-description: Use when you write, test or resume a Dyna workflow, or reload a running one, a script that fans work out to Pi workers in one box. It gives every script call's return and failure, reload and resume, worktrees and merge, and what a worker knows.
+description: Use when you write, test or resume a Dyna workflow, or reload a running one, a script that fans work out to workers in one box. It gives every script call's return and failure, reload and resume, worktrees and merge, and what a worker knows.
 ---
 
 # Dyna workflows
 
-A workflow is a script that fans work out to Pi workers in one box. `dyna workflow run FILE [--args JSON] [--resume RUN]`, or the `workflow` tool, starts it as a child session, a crew, and `dyna workflow reload RUN FILE` changes a running one. Only the owner or a room's root starts one. Its end, whether a return, a throw or a stop, reaches whoever started it as a reply, so a run needs no polling.
+A workflow is a script that fans work out to workers in one box. `dyna workflow run FILE [--args JSON] [--resume RUN]`, or the `workflow` tool, starts it as a child session, a crew, and `dyna workflow reload RUN FILE` changes a running one. Only the owner or a room's root starts one. Its end, whether a return, a throw or a stop, reaches whoever started it as a reply, so a run needs no polling.
 
 Every script begins with `export const meta = {...}`: a pure literal (no variables, calls or interpolation) that the engine reads before any box exists.
 
@@ -31,7 +31,7 @@ return { merged: merged.merged, conflicts: merged.conflicts, empty: written.filt
 ## Script globals
 
 - `args`: the request's JSON, already parsed, or `null`. `JSON.parse(args)` throws on an object.
-- `agent(prompt, {profile, schema, label, phase, lane, timeout, worktree})`: one Pi worker. Returns its final text; with `schema`, the parsed value; with `worktree: true`, `{step, text, branch, commit, files}`, or `{step, output, branch, commit, files}` with `schema`, so a schema field is `r.issues`, or `r.output.issues` in a worktree. Throws on an unknown profile, a timeout (seconds, default 5 hours), no final text, or three replies that miss the schema.
+- `agent(prompt, {profile, schema, label, phase, lane, timeout, worktree})`: one worker, a PiG session. Returns its final text; with `schema`, the parsed value; with `worktree: true`, `{step, text, branch, commit, files}`, or `{step, output, branch, commit, files}` with `schema`, so a schema field is `r.issues`, or `r.output.issues` in a worktree. Throws on an unknown profile, a timeout (seconds, default 5 hours), no final text, or three replies that miss the schema.
 - `run(command, {cwd, env, timeout, check, label, phase, lane})`: one command in the main tree, holding the build lock. A string runs in `sh -c`, a list directly. Returns `{code, stdout, stderr, durationMs}`, the last 64 KiB of each stream. `check` defaults to `true`, so a nonzero exit throws `exit code N: <stderr>`; with `check: false` the object carries `code`. A timeout throws either way.
 - `parallel(thunks)`: starts every thunk at once and returns results in input order. It does not throw: a failure becomes `{failed: true, step, reason}`.
 - `pipeline(items, ...stages)`: each item goes through the stages on its own, and a stage gets `(previous, item, index)`. Same failure entries, and a failed item skips its later stages.
@@ -41,7 +41,8 @@ return { merged: merged.merged, conflicts: merged.conflicts, empty: written.filt
 - `phase(title)` sets the stage of later steps, and the `phase` option sets one step's. `lane` names the subject a step is about, as in `{lane: g.id}`. Nothing is read from a step's name: the run page's flowchart has a node per phase and draws each lane's path between them, loops included, and its timeline labels a step by its lane. Without lanes, phases connect in the order they first ran.
 - `status(text)` sets the run's one line of what is happening, shown under its name on the run page and in the Runs list, as in ``status(`Wave 3: ${landed} of ${total} landed`)``. It is not a step: the run keeps the latest line and the 19 before it, and a resumed script writes its lines again as it reaches them. Without one, the page counts steps, as `75 of 76 steps · 1 running`.
 - `log(...values)` and `console.*` write to the run.
-- `Date.now()`, `Math.random()` and `new Date()` with no argument throw, because a rerun has to make the same calls.
+- `Date.now()`, `Math.random()` and `new Date()` with no argument throw, because a rerun has to make the same calls. A bare `Date()` throws the engine's TypeError, and `globalThis.Date.now()` and `globalThis.Math.random()` reach the frozen built-ins, because the guard is for honest scripts, not a boundary.
+- A step the script does not await is cancelled when the script returns, and it fails: a script reads the result of every `agent()` it needs, by awaiting it.
 
 A failed call throws an `Error` with `.step` and `.reason`. An uncaught throw ends the run as `failed`. A script that returns ends `done`, however many steps failed; its value, up to 1 MiB, is the reply.
 
