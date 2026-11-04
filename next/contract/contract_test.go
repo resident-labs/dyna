@@ -142,3 +142,24 @@ func TestBoxMessageRegistry(t *testing.T) {
 		t.Fatal("unknown box message accepted")
 	}
 }
+
+func TestCloseNoticeSaysWhatBecameOfTheWork(t *testing.T) {
+	for _, tc := range []struct {
+		saved *DiffSavedRequest
+		want  []string
+	}{
+		{nil, []string{"not checked, nothing saved", "did not report in time"}},
+		{&DiffSavedRequest{}, []string{"nothing was unpushed"}},
+		{&DiffSavedRequest{Error: "disk full"}, []string{"no diff was saved (disk full)"}},
+		{&DiffSavedRequest{File: "/box/shared/archives/s-1.diff", Commits: 2, Files: 3}, []string{"2 commits and 3 changed files", "/box/shared/archives/s-1.diff"}},
+		{&DiffSavedRequest{File: "/f", Capped: true}, []string{"over 10 MiB"}},
+		{&DiffSavedRequest{File: "/f", Files: 1, Failed: []string{"/w: no such directory"}}, []string{"Not saved: /w: no such directory"}},
+	} {
+		got := tc.saved.CloseNotice("s")
+		for _, w := range tc.want {
+			if !strings.Contains(got, w) {
+				t.Errorf("%+v: %q lacks %q", tc.saved, got, w)
+			}
+		}
+	}
+}

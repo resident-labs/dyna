@@ -27,7 +27,11 @@ func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox, host
 			return err
 		}
 		engine := contract.Principal{Kind: contract.PrincipalEngine}
-		if row.Want == store.WantClose && session.Repo != "" {
+		hadTurns, err := r.store.SessionHasTurns(ctx, row.Session)
+		if err != nil {
+			return err
+		}
+		if row.Want == store.WantClose && session.Repo != "" && hadTurns {
 			// A box that reported its diff sent this notice already, under the same client ID, and a second one is dropped.
 			tree, err := r.store.RoomTree(ctx, session.Room)
 			if err != nil {

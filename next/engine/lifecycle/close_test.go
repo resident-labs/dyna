@@ -183,3 +183,18 @@ func TestCloseRetriesAFailedRemoval(t *testing.T) {
 		t.Fatalf("removes %d", boxes.removes)
 	}
 }
+
+// A session that never had a turn has nothing to lose, so its close says nothing about what was saved.
+func TestCloseOfASessionWithNoTurnsSendsNoNotice(t *testing.T) {
+	st, r, _, _ := newClosingRig(t, contract.BoxStopped, &closeBoxes{})
+	if err := st.Write(context.Background(), func(tx *sql.Tx) error { _, err := tx.Exec("DELETE FROM turns"); return err }); err != nil {
+		t.Fatal(err)
+	}
+	closingPass(t, st, r)
+	if _, s := closingPass(t, st, r); s != "closed" {
+		t.Fatalf("session %s", s)
+	}
+	if notices := closeNotice(t, st); len(notices) != 0 {
+		t.Fatalf("notices %q", notices)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -76,7 +77,7 @@ func TestSaveDiffHoldsUnpushedCommitsDirtyUntrackedAndBinaryWork(t *testing.T) {
 		t.Fatalf("report %+v, want file %s, 1 commit, 4 files (tracked.txt, new.txt, image.bin, link)", got, want)
 	}
 	text := read(t, want)
-	for _, has := range []string{"## repo ", "# 1 unpushed commits", "an unpushed change", "with a body", "+third, uncommitted", "+untracked text", "Binary files /dev/null and b/image.bin differ"} {
+	for _, has := range []string{"## repo ", "# 1 unpushed commits", "an unpushed change", "with a body", "+third, uncommitted", "+untracked text", "GIT binary patch"} {
 		if !strings.Contains(text, has) {
 			t.Errorf("diff lacks %q:\n%s", has, text)
 		}
@@ -96,7 +97,7 @@ func TestSaveDiffWritesNothingWhenEverythingIsPushed(t *testing.T) {
 	writeFile(t, filepath.Join(root, "repo", "ignored.bin"), "ignored files do not count")
 	folder := filepath.Join(t.TempDir(), "archives")
 	got := saveDiff(context.Background(), root, folder, "ses_1", "s", []contract.BoxRepo{repo}, runGit)
-	if got != (contract.DiffSavedRequest{}) {
+	if !reflect.DeepEqual(got, contract.DiffSavedRequest{}) {
 		t.Fatalf("report %+v, want an empty one", got)
 	}
 	if _, err := os.Stat(folder); !os.IsNotExist(err) {
@@ -140,5 +141,59 @@ func TestSaveDiffThatCannotWriteReportsItAndLeavesNoFile(t *testing.T) {
 	got := saveDiff(context.Background(), root, filepath.Join(blocker, "archives"), "ses_1", "s", []contract.BoxRepo{repo}, runGit)
 	if got.Error == "" || got.File != "" {
 		t.Fatalf("report %+v, want an error and no file", got)
+	}
+}
+
+// One worktree that fails is its own section, and the others are still saved and counted.
+func TestSaveDiffKeepsTheGoodWorktreesNextToABrokenOne(t *testing.T) {
+	root, _, repo, git := diffTestRepo(t)
+	repo.Base = "v2/s"
+	gone := filepath.Join(t.TempDir(), "gone")
+	git("worktree", "add", "-b", "v2/s-gone", gone)
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "repo", "main.txt"), "main's file")
+	got := saveDiff(context.Background(), root, t.TempDir(), "ses_1", "s", []contract.BoxRepo{repo}, runGit)
+	text := read(t, got.File)
+	if got.Error != "" || got.Files != 1 || len(got.Failed) != 1 || !strings.Contains(got.Failed[0], gone) || !strings.Contains(text, "+main's file") || !strings.Contains(text, "# not saved: ") {
+		t.Fatalf("report %+v, text:\n%s", got, text)
+	}
+	if notice := got.CloseNotice("s"); !strings.Contains(notice, "Not saved: "+gone) {
+		t.Errorf("the notice does not name the failure: %s", notice)
+	}
+}
+
+// A branch that was never pushed and has no base on the remote is saved whole, not dropped.
+func TestSaveDiffOfABranchWithNoRemoteBranchHoldsItsWholeHistory(t *testing.T) {
+	root, _, repo, git := diffTestRepo(t)
+	git("checkout", "-q", "-b", "local-only")
+	git("update-ref", "-d", "refs/remotes/origin/v2/s")
+	writeFile(t, filepath.Join(root, "repo", "new.txt"), "work")
+	got := saveDiff(context.Background(), root, t.TempDir(), "ses_1", "s", []contract.BoxRepo{repo}, runGit)
+	text := read(t, got.File)
+	if got.Error != "" || got.Commits != 1 || !strings.Contains(text, "no remote branch to compare with") || !strings.Contains(text, "+work") || !strings.Contains(text, "+first") {
+		t.Fatalf("report %+v, text:\n%s", got, text)
+	}
+}
+
+// The file holds untracked files that are not ignored, so only the box's user reads it, and a link planted at the temporary
+// name is not written through.
+func TestSaveDiffFileIsPrivateAndDoesNotFollowAPlantedLink(t *testing.T) {
+	root, _, repo, _ := diffTestRepo(t)
+	writeFile(t, filepath.Join(root, "repo", ".env"), "TOKEN=1")
+	folder := filepath.Join(t.TempDir(), "archives")
+	if err := os.Mkdir(folder, 0700); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(t.TempDir(), "victim")
+	writeFile(t, victim, "keep")
+	if err := os.Symlink(victim, filepath.Join(folder, "s-ses_1.diff.tmp")); err != nil {
+		t.Fatal(err)
+	}
+	got := saveDiff(context.Background(), root, folder, "ses_1", "s", []contract.BoxRepo{repo}, runGit)
+	info, err := os.Stat(got.File)
+	if err != nil || got.Error != "" || info.Mode().Perm() != 0600 || read(t, victim) != "keep" || !strings.Contains(read(t, got.File), "+TOKEN=1") {
+		t.Fatalf("report %+v, stat %v %v, victim %q", got, info, err, read(t, victim))
 	}
 }
