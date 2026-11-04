@@ -376,3 +376,24 @@ func TestModelsFileSetsTheHeadersOfEveryRequest(t *testing.T) {
 		t.Fatalf("the request carried %q", got)
 	}
 }
+
+// A model that marks its effort mid-conversation is still asked for the session's effort at the top level, not "high".
+func TestTheSessionsEffortIsTheTopLevelEffort(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "one"}}, []pigtest.Block{{Text: "two"}})
+	c := config(t, model, "")
+	c.Model.ID = "effort-model"
+	h, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	start(t, h, "one")
+	start(t, h, "two")
+	request := model.Requests()[1]
+	if !strings.Contains(string(request.Messages[len(request.Messages)-1]), `"output_config":{"effort":"low"}`) {
+		t.Fatalf("no effort marker: %s", request.Messages[len(request.Messages)-1])
+	}
+	if string(request.OutputConfig) != `{"effort":"low"}` {
+		t.Fatalf("output_config %s", request.OutputConfig)
+	}
+}
