@@ -411,8 +411,8 @@ func (c *Crew) runScript(work context.Context, run *execution, source, args, par
 				return nil, ctx.Err()
 			}
 		}},
-		// Inline and in order, so a script's last lines reach the journal before its end does.
-		{Name: "dyna.send", AwaitsInitiation: true, Execute: func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
+		// The prelude sends one line at a time, in order, and the run waits for the last.
+		{Name: "dyna.send", Execute: func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			var call crewCall
 			if err := json.Unmarshal(raw, &call); err != nil {
 				return nil, err
