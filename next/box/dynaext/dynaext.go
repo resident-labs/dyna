@@ -93,9 +93,7 @@ func Extension(c Config) extension.InlineExtension {
 			}
 			active := api.GetActiveTools()
 			kept := slices.DeleteFunc(slices.Clone(active), func(name string) bool { return searchable[name] && !used[name] })
-			if len(kept) != len(active) {
-				api.SetActiveTools(kept)
-			}
+			api.SetActiveTools(kept)
 			clear(used)
 			return extension.SessionBeforeCompactResult{}, nil
 		})
