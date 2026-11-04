@@ -80,7 +80,8 @@ func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, e
 }
 
 // Recover finds whether the turn that began with the first input finished before the box agent stopped: a final
-// answer, or a tool batch that ended the turn, recorded after that input.
+// answer, or a tool batch that ended the turn, recorded after that input. Nothing before that input counts, so a file without it
+// holds no finished turn.
 func (h *Harness) Recover(id contract.TurnID, inputs []contract.TurnInput) (contract.TurnEnded, bool, error) {
 	if len(inputs) == 0 {
 		return contract.TurnEnded{Turn: id}, false, errors.New("recovery needs at least one input")
@@ -120,5 +121,5 @@ func recoverTurn(r io.Reader, id contract.TurnID, first contract.DeliverySeq) (c
 		}
 	})
 	ended := t.batch.apply(&t.result)
-	return t.result, found && (answered || ended), err
+	return t.result, answered || ended, err
 }
