@@ -20,7 +20,7 @@
   import TimelineMinimap from "./TimelineMinimap.svelte";
   import PostTarget from "./PostTarget.svelte";
   import QuestionCard from "./QuestionCard.svelte";
-  import { compactionNote, finalTimelineItem, ownPost, postDestination, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief } from "../timeline.ts";
+  import { compactionNote, finalTimelineItem, ownPost, postDestination, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief, workingLine } from "../timeline.ts";
 
   // With step, the thread reads one worker of a crew: its transcript alone, and nothing that was sent to the crew.
   let { hasRoom, session, step, roomName, store, operate, unsent, onunsent, onsettled, onpostlocation, navigate, startingBrief, clock = Date.now }: { hasRoom: (room: RoomID) => boolean; startingBrief?: string; session: string; step?: string; roomName: string; store: RoomStore; operate: boolean; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
@@ -360,7 +360,7 @@
           {/if}
           {#each shownTimelineGroups(segment.items, !!turn.ended && !expandedTurns[segment.id]) as group (group.id)}
             {#if group.kind === "work"}
-              <TranscriptWorkRow items={group.items} ended={!!turn.ended || stalled} started={turn.started} {now} {chunks} {session} onmedia={key => openMedia(key, 0)}
+              <TranscriptWorkRow items={group.items} ended={!!turn.ended || stalled} started={turn.started} {now} activity={store.activity.get(session)} {chunks} {session} onmedia={key => openMedia(key, 0)}
                 onopen={() => { if (turn.olderItems) void readContinuation(turn, "older"); }}
                 onload={async (item, part) => { if (!await fetchPart(turn.id, item.id, part)) throw new Error("Part did not load"); }} />
             {:else if group.kind === "posts"}
@@ -375,7 +375,7 @@
         {/each}
         {#if turn.outcome === "failed"}<div class="failure"><span class="slot"><Icon name="warning" size={16} /></span>{turn.cause ? causes[turn.cause] : "The turn failed"}</div>
         {:else if turn.outcome === "stopped"}<p class="muted turn-note">Stopped</p>{/if}
-        {#if !turn.ended && !stalled && !(turn.items ?? []).some(item => timelineItemRunning(item, false))}<p class="muted turn-note"><span class="slot"><span class="spinner" aria-hidden="true"></span></span>Working for {formatTimelineDuration(now - Date.parse(turn.started))}</p>{/if}
+        {#if !turn.ended && !stalled && !(turn.items ?? []).some(item => timelineItemRunning(item, false))}<p class="muted turn-note"><span class="slot"><span class="spinner" aria-hidden="true"></span></span>{workingLine(turn.started, now, store.activity.get(session))}</p>{/if}
       </article>
     {/each}
     <!-- A question waits at the end of the thread. Once answered, it is part of the input that answer becomes. -->
