@@ -96,6 +96,7 @@ dyna pool list
 - Without `--per-session`, sessions share nodes, and a node destroyed after it has held no box for `--idle`, 30 minutes by default.
 - `dyna room hosts ROOM --only POOL[,HOST...]` keeps a room's new boxes on one pool and these hosts, and the pool grows only for such a room. A box already placed stays where it is. `--clear` removes the rule. A room with no rule may use any host and any shared pool node, but a pool grows only for a room whose rule names it. Clearing a rule frees the room to use shared pool nodes as well as hosts; it does not make a pool grow for the room.
 - From a box, `dyna pool add` and `dyna room hosts` ask the owner, because the script runs on the engine host and costs money.
+- Only the owner changes a pool's `--max`, `--idle` and `--per-session` later, in Settings > Pools; no box command does.
 
 ## Add one machine by hand
 
