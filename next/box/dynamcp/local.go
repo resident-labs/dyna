@@ -22,9 +22,9 @@ var computerActions = map[tools.BoxHandler]computer.Action{
 // BoxTools runs the actions which live in the box instead of the engine.
 func BoxTools(socket string) Local {
 	agent := computer.NewAgent(socket)
-	return func(ctx context.Context, handler tools.BoxHandler, raw []byte) (result, *contract.Error) {
-		fail := func(err error) (result, *contract.Error) {
-			return result{}, &contract.Error{Code: contract.ErrInvalid, Message: err.Error()}
+	return func(ctx context.Context, handler tools.BoxHandler, raw []byte) (Result, *contract.Error) {
+		fail := func(err error) (Result, *contract.Error) {
+			return Result{}, &contract.Error{Code: contract.ErrInvalid, Message: err.Error()}
 		}
 		if handler == tools.VisualCheck {
 			var req tools.FileRequest
@@ -44,7 +44,7 @@ func BoxTools(socket string) Local {
 				return fail(err)
 			}
 			output := marshal(checked.Checks)
-			return result{Content: []content{{Type: "text", Text: string(output)}}, StructuredContent: output}, nil
+			return Result{Content: []Content{{Type: "text", Text: string(output)}}, StructuredContent: output}, nil
 		}
 		action, ok := computerActions[handler]
 		if !ok {
@@ -59,13 +59,13 @@ func BoxTools(socket string) Local {
 		if err != nil {
 			return fail(err)
 		}
-		var parts []content
+		var parts []Content
 		if out.PNG != nil {
-			parts = append(parts, content{Type: "image", Data: base64.StdEncoding.EncodeToString(out.PNG), MimeType: "image/png"})
+			parts = append(parts, Content{Type: "image", Data: base64.StdEncoding.EncodeToString(out.PNG), MimeType: "image/png"})
 		}
 		if out.Text != "" || out.PNG == nil {
-			parts = append(parts, content{Type: "text", Text: out.Text})
+			parts = append(parts, Content{Type: "text", Text: out.Text})
 		}
-		return result{Content: parts}, nil
+		return Result{Content: parts}, nil
 	}
 }

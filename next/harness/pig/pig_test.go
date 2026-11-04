@@ -1,0 +1,194 @@
+package pig
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/MichaelKinsy/PiG/ai"
+	"github.com/MichaelKinsy/PiG/coding/extension"
+
+	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/harness/pig/pigtest"
+)
+
+// config is a session on the model, with the given MCP servers.
+func config(t *testing.T, model *pigtest.Model, mcpServers string) Config {
+	dir := pigtest.AgentDir(t, model, mcpServers)
+	return Config{
+		Dir:          t.TempDir(),
+		AgentDir:     dir,
+		SessionDir:   filepath.Join(dir, "sessions"),
+		Model:        contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "test-model", Thinking: contract.ThinkingLow},
+		Instructions: "You are ses_test.",
+	}
+}
+
+func open(t *testing.T, model *pigtest.Model, extensions ...extension.InlineExtension) *Harness {
+	t.Helper()
+	c := config(t, model, "")
+	c.Extensions = extensions
+	h, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = h.Close() })
+	return h
+}
+
+func start(t *testing.T, h *Harness, texts ...string) contract.TurnEnded {
+	t.Helper()
+	inputs := make([]contract.TurnInput, len(texts))
+	for i, text := range texts {
+		inputs[i] = contract.TurnInput{Delivery: contract.DeliverySeq(i + 1), Text: text}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	started := false
+	result, err := h.Start(ctx, "turn_a", inputs, func() { started = true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !started {
+		t.Fatal("the turn never reported that it started")
+	}
+	return result
+}
+
+// testTool is a tool an extension registers, with a fixed result.
+func testTool(name string, result extension.AgentToolResult) extension.InlineExtension {
+	return extension.NamedInlineExtension{Name: "test-" + name, Factory: func(api extension.API) error {
+		api.RegisterTool(extension.ToolDefinition{
+			Name: name, Label: name, Description: "A test tool.", Parameters: json.RawMessage(`{"type":"object","properties":{}}`),
+			Execute: func(context.Context, string, json.RawMessage, extension.AgentToolUpdateCallback) (extension.AgentToolResult, error) {
+				return result, nil
+			},
+		})
+		return nil
+	}}
+}
+
+func TestATurnAnswersAndRecordsTheSession(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "hello"}})
+	h := open(t, model)
+	result := start(t, h, "say hello")
+	if result.Outcome != contract.TurnCompleted || result.Final != "hello" || result.Usage.Model != "test-model" || result.Usage.InputTokens != 10 || result.Usage.OutputTokens != 5 {
+		t.Fatalf("result %+v", result)
+	}
+	if _, err := os.Stat(h.SessionFile()); err != nil {
+		t.Fatalf("session file: %v", err)
+	}
+}
+
+// The appended instructions reach the model, and nothing points it at documentation that is not in the box.
+func TestTheSystemPromptCarriesTheInstructionsAndNoDocs(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "ok"}})
+	start(t, open(t, model), "hi")
+	system := string(model.Requests()[0].System)
+	if !strings.Contains(system, "You are ses_test.") {
+		t.Fatalf("instructions missing from %s", system)
+	}
+	for _, docs := range []string{"docs/extensions.md", "documentation"} {
+		if strings.Contains(system, docs) {
+			t.Fatalf("the prompt names documentation (%q): %s", docs, system)
+		}
+	}
+}
+
+// Inputs that arrive together are each a user message of the first request.
+func TestEachInputOfABatchIsItsOwnMessageInTheFirstRequest(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "both"}})
+	result := start(t, open(t, model), "first", "second")
+	messages := model.Requests()[0].Messages
+	if len(messages) != 2 || !strings.Contains(string(messages[0]), "first") || !strings.Contains(string(messages[1]), "second") {
+		t.Fatalf("messages %s", messages)
+	}
+	if result.Final != "both" {
+		t.Fatalf("result %+v", result)
+	}
+}
+
+// A tool whose result terminates the batch ends the turn with its post as the reply, and no further request is made.
+func TestAPostThatEndsTheTurn(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "Posting."}, {Tool: "post_test", Input: `{}`}})
+	h := open(t, model, testTool("post_test", extension.AgentToolResult{Content: []ai.ToolResultMessageContent{ai.TextContent{Text: "posted"}}, Details: EndPost{EndPost: "ev_1"}, Terminate: true}))
+	result := start(t, h, "post it")
+	if result.Final != "" || !reflect.DeepEqual(result.EndPosts, []contract.EventID{"ev_1"}) {
+		t.Fatalf("result %+v", result)
+	}
+	if n := len(model.Requests()); n != 1 {
+		t.Fatalf("%d requests after the turn ended", n)
+	}
+}
+
+// A script makes many nested calls, and each publishes an event. The session must not wait for a reader of its event
+// channel, which nothing reads.
+func TestALongScriptDoesNotStallTheSession(t *testing.T) {
+	var calls atomic.Int32
+	counter := extension.NamedInlineExtension{Name: "test-count", Factory: func(api extension.API) error {
+		api.RegisterTool(extension.ToolDefinition{
+			Name: "count", Label: "count", Description: "Counts.", Parameters: json.RawMessage(`{"type":"object","properties":{}}`),
+			Execute: func(context.Context, string, json.RawMessage, extension.AgentToolUpdateCallback) (extension.AgentToolResult, error) {
+				calls.Add(1)
+				return extension.AgentToolResult{Content: []ai.ToolResultMessageContent{ai.TextContent{Text: "1"}}}, nil
+			},
+		})
+		return nil
+	}}
+	script, _ := json.Marshal(map[string]string{"code": "for (let i = 0; i < 200; i++) await tools.count({}); return 'done';"})
+	model := pigtest.NewModel([]pigtest.Block{{Tool: "codemode", Input: string(script)}}, []pigtest.Block{{Text: "finished"}})
+	result := start(t, open(t, model, counter), "count")
+	if result.Final != "finished" || calls.Load() != 200 {
+		t.Fatalf("result %+v after %d calls", result, calls.Load())
+	}
+}
+
+func TestAServerThatDoesNotConnectIsANotice(t *testing.T) {
+	notices := make(chan string, 4)
+	c := config(t, pigtest.NewModel(), `{"gone":{"url":"http://127.0.0.1:1/mcp","exposure":"direct"}}`)
+	c.Notice = func(text string) { notices <- text }
+	h, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	select {
+	case text := <-notices:
+		if !strings.Contains(text, "gone") || strings.Contains(text, "/mcp to fix") {
+			t.Fatalf("notice %q", text)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("no notice")
+	}
+}
+
+// A new box continues the conversation its session folder holds.
+func TestOpenContinuesTheNewestSession(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "one"}}, []pigtest.Block{{Text: "two"}})
+	c := config(t, model, "")
+	first, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start(t, first, "remember one")
+	path := first.SessionFile()
+	_ = first.Close()
+	second, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	if second.SessionFile() != path {
+		t.Fatalf("opened %s, not %s", second.SessionFile(), path)
+	}
+	start(t, second, "and two")
+	if messages := model.Requests()[1].Messages; len(messages) != 3 {
+		t.Fatalf("the second turn sent %d messages: %s", len(messages), messages)
+	}
+}
