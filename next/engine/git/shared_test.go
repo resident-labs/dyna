@@ -89,7 +89,7 @@ func TestSimultaneousStartsShareTwoFetchesAtMost(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := m.Prepare(context.Background(), c, "owner/repo", session, true); err != nil {
+			if _, err := m.Prepare(context.Background(), c, "owner/repo", true); err != nil {
 				t.Error(err)
 			}
 		}()
@@ -120,13 +120,13 @@ func TestACallerNeverTakesAFetchThatBeganBeforeItAsked(t *testing.T) {
 	m := mirrorFor(t, r, "owner/repo")
 	first := make(chan error, 1)
 	go func() {
-		_, err := m.Prepare(context.Background(), c, "owner/repo", "ses_1", true)
+		_, err := m.Prepare(context.Background(), c, "owner/repo", true)
 		first <- err
 	}()
 	started(t, r)
 	late := make(chan error, 1)
 	go func() {
-		_, err := m.Prepare(context.Background(), c, "owner/repo", "ses_2", true)
+		_, err := m.Prepare(context.Background(), c, "owner/repo", true)
 		late <- err
 	}()
 	time.Sleep(20 * time.Millisecond)
@@ -156,13 +156,13 @@ func TestOneRepositoryDoesNotBlockAnother(t *testing.T) {
 	m := mirrorFor(t, r, "owner/slow", "owner/quick")
 	slow := make(chan error, 1)
 	go func() {
-		_, err := m.Prepare(context.Background(), c, "owner/slow", "ses_1", true)
+		_, err := m.Prepare(context.Background(), c, "owner/slow", true)
 		slow <- err
 	}()
 	started(t, r)
 	quick := make(chan error, 1)
 	go func() {
-		_, err := m.Prepare(context.Background(), c, "owner/quick", "ses_2", true)
+		_, err := m.Prepare(context.Background(), c, "owner/quick", true)
 		quick <- err
 	}()
 	started(t, r)
@@ -181,14 +181,14 @@ func TestReadsDoNotWaitForAFetch(t *testing.T) {
 	m := mirrorFor(t, r, "owner/repo")
 	done := make(chan error, 1)
 	go func() {
-		_, err := m.Prepare(context.Background(), c, "owner/repo", "ses_1", true)
+		_, err := m.Prepare(context.Background(), c, "owner/repo", true)
 		done <- err
 	}()
 	started(t, r)
 	// A box's hello reads the mirror this way.
 	read := make(chan error, 1)
 	go func() {
-		_, err := m.Prepare(context.Background(), c, "owner/repo", "ses_2", false)
+		_, err := m.Prepare(context.Background(), c, "owner/repo", false)
 		read <- err
 	}()
 	select {
@@ -211,7 +211,7 @@ func TestEachHostGetsItsOwnPushFromOneFetch(t *testing.T) {
 	m := mirrorFor(t, r, "owner/repo")
 	first := make(chan error, 1)
 	go func() {
-		_, err := m.Prepare(context.Background(), hosts[0], "owner/repo", "ses_1", true)
+		_, err := m.Prepare(context.Background(), hosts[0], "owner/repo", true)
 		first <- err
 	}()
 	started(t, r)
@@ -220,7 +220,7 @@ func TestEachHostGetsItsOwnPushFromOneFetch(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.release <- struct{}{}
-	if _, err := m.Prepare(context.Background(), hosts[1], "owner/repo", "ses_2", true); err != nil {
+	if _, err := m.Prepare(context.Background(), hosts[1], "owner/repo", true); err != nil {
 		t.Fatal(err)
 	}
 	if hosts[0].pushes.Load() != 1 || hosts[1].pushes.Load() != 1 {
@@ -289,9 +289,9 @@ func TestASharedFetchFailureReachesEveryCallerSharingIt(t *testing.T) {
 	r := &failingFetch{}
 	m := mirrorFor(t, r, "owner/repo")
 	s := make(chan error, 2)
-	for _, session := range []contract.SessionID{"ses_1", "ses_2"} {
+	for range 2 {
 		go func() {
-			_, err := m.Prepare(context.Background(), &countingCache{}, "owner/repo", session, true)
+			_, err := m.Prepare(context.Background(), &countingCache{}, "owner/repo", true)
 			s <- err
 		}()
 	}
@@ -311,7 +311,7 @@ func (r *failingFetch) Run(_ context.Context, _ []string, args ...string) ([]byt
 func TestAFailedCloneLeavesNoMirrorForReaders(t *testing.T) {
 	r := &fakeRunner{fail: "clone"}
 	m := &Mirror{Layout: box.Layout{Data: t.TempDir(), HostData: "/host"}, Token: "secret", Runner: r}
-	if _, err := m.Prepare(context.Background(), &countingCache{}, "owner/repo", "ses_1", true); err == nil {
+	if _, err := m.Prepare(context.Background(), &countingCache{}, "owner/repo", true); err == nil {
 		t.Fatal("clone failure ignored")
 	}
 	path, err := m.Layout.Git("owner/repo")

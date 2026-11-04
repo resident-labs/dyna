@@ -57,8 +57,6 @@ type cachePush struct {
 	host CacheHost
 }
 
-const SessionBranchPrefix = "v2/"
-
 // fetchReuse is how long a fetch from GitHub stands for a box start that asks right after it.
 const fetchReuse = 3 * time.Second
 
@@ -66,14 +64,14 @@ const fetchReuse = 3 * time.Second
 // the box clones after the image is ready, minutes after the creation step's fetch. The fetch is bounded by
 // SeedTimeout. When GitHub does not answer in time or fails and a mirror exists, the start goes on with the mirror as it
 // stands and the notice says so; otherwise the error is Prepare's.
-func (m *Mirror) Seed(ctx context.Context, host CacheHost, repo contract.RepoName, session contract.SessionID) (contract.BoxRepo, string, error) {
+func (m *Mirror) Seed(ctx context.Context, host CacheHost, repo contract.RepoName) (contract.BoxRepo, string, error) {
 	timeout := m.SeedTimeout
 	if timeout == 0 {
 		timeout = 10 * time.Second
 	}
 	bound, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	item, err := m.Prepare(bound, host, repo, session, true)
+	item, err := m.Prepare(bound, host, repo, true)
 	var missing MissingTokenError
 	if err == nil || ctx.Err() != nil || errors.As(err, &missing) || !m.Cloned(repo) {
 		return item, "", err
@@ -82,14 +80,14 @@ func (m *Mirror) Seed(ctx context.Context, host CacheHost, repo contract.RepoNam
 	if errors.Is(err, context.DeadlineExceeded) {
 		reason = "the refresh did not finish in " + timeout.String()
 	}
-	item, err = m.Prepare(ctx, host, repo, session, false)
+	item, err = m.Prepare(ctx, host, repo, false)
 	return item, "Its repository's " + item.Base + " was not refreshed from GitHub at start (" + reason + "); `git fetch origin " + item.Base + "` brings it current.", err
 }
 
 // Prepare optionally fetches and pushes branches before returning the box setup. Callers share fetches and pushes, but
 // each result began after its caller asked and each push began after that caller's fetch ended, so no box starts on
 // older refs than it would alone. The token is the engine's own, so sharing grants a caller nothing new.
-func (m *Mirror) Prepare(ctx context.Context, host CacheHost, repo contract.RepoName, session contract.SessionID, fetch bool) (contract.BoxRepo, error) {
+func (m *Mirror) Prepare(ctx context.Context, host CacheHost, repo contract.RepoName, fetch bool) (contract.BoxRepo, error) {
 	if fetch && m.Token == "" {
 		return contract.BoxRepo{}, MissingTokenError{}
 	}
@@ -130,11 +128,38 @@ func (m *Mirror) Prepare(ctx context.Context, host CacheHost, repo contract.Repo
 			return contract.BoxRepo{}, err
 		}
 	}
-	out, err := m.Runner.Run(ctx, nil, "--git-dir", path, "symbolic-ref", "--short", "HEAD")
+	base, err := m.Default(ctx, repo)
 	if err != nil {
 		return contract.BoxRepo{}, err
 	}
-	return contract.BoxRepo{Name: repo, Cache: cache, Branch: SessionBranchPrefix + string(session), Base: strings.TrimSpace(string(out))}, nil
+	return contract.BoxRepo{Name: repo, Cache: cache, Base: base}, nil
+}
+
+// Default names the branch the mirror's HEAD is on, which is the repository's default branch.
+func (m *Mirror) Default(ctx context.Context, repo contract.RepoName) (string, error) {
+	path, err := m.Layout.Git(repo)
+	if err != nil {
+		return "", err
+	}
+	out, err := m.Runner.Run(ctx, nil, "--git-dir", path, "symbolic-ref", "--short", "HEAD")
+	return strings.TrimSpace(string(out)), err
+}
+
+// Branches lists the branches the mirror holds, which is what GitHub had at the last fetch.
+func (m *Mirror) Branches(ctx context.Context, repo contract.RepoName) ([]string, error) {
+	path, err := m.Layout.Git(repo)
+	if err != nil {
+		return nil, err
+	}
+	out, err := m.Runner.Run(ctx, nil, "--git-dir", path, "for-each-ref", "--format=%(refname)", "refs/heads")
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, ref := range strings.Fields(string(out)) {
+		names = append(names, strings.TrimPrefix(ref, "refs/heads/"))
+	}
+	return names, nil
 }
 
 // fetch brings the mirror up to date with GitHub. A first clone goes to one side, so no reader finds a partial mirror

@@ -232,6 +232,11 @@ func (d devService) SessionAccount(_ context.Context, _ contract.Principal, req 
 	return response, nil
 }
 
+// SessionSetBranch has no development data to change.
+func (d devService) SessionSetBranch(context.Context, contract.Principal, contract.SessionSetBranchRequest) (contract.SessionSetBranchResponse, *contract.Error) {
+	return contract.SessionSetBranchResponse{}, nil
+}
+
 // SessionSetAccount keeps a choice in memory.
 func (d devService) SessionSetAccount(_ context.Context, _ contract.Principal, req contract.SessionSetAccountRequest) (contract.SessionSetAccountResponse, *contract.Error) {
 	if req.Account == "" {

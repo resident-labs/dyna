@@ -171,6 +171,7 @@ var deleteRoom = []string{
 	`DELETE FROM workflow_scripts WHERE run IN (SELECT id FROM workflow_runs WHERE room=?1)`,
 	`DELETE FROM workflow_runs WHERE room=?1`,
 	`DELETE FROM shell_jobs WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
+	`DELETE FROM session_branches WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM pr_owners WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM issue_owners WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM goal_journal WHERE room=?1`,

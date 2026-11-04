@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 89
+const schemaVersion = 90
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
@@ -69,6 +69,12 @@ var steps = map[int][]string{
 		`UPDATE boxes SET want='close',state='closing',reason='',failures=0,due_at=0 WHERE want='hold'`,
 		`UPDATE boxes SET reason='',failures=0,due_at=0 WHERE want='close' AND state='closing'`,
 		`DROP TABLE IF EXISTS archives`,
+	},
+	// A session's branch is recorded, not derived from its ID. A session that has a repository keeps the branch it had.
+	89: {
+		`CREATE TABLE session_branches (repo TEXT NOT NULL, branch TEXT NOT NULL, session TEXT NOT NULL REFERENCES sessions(id), created_at INTEGER NOT NULL, PRIMARY KEY(repo, branch, session))`,
+		`CREATE INDEX session_branches_session ON session_branches(session)`,
+		`INSERT INTO session_branches(repo,branch,session,created_at) SELECT repo,'v2/'||id,id,created_at FROM sessions WHERE repo!=''`,
 	},
 	81: {
 		`ALTER TABLE hosts ADD COLUMN create_failures INTEGER NOT NULL DEFAULT 0`,
