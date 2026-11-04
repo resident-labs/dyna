@@ -121,6 +121,20 @@ func (s *Service) HostexecStop(ctx context.Context, who contract.Principal, req 
 	}
 }
 func (s *Service) HostexecRunEntry() approve.Entry {
+	check := func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {
+		a := args.(contract.HostexecRunArgs)
+		grants, err := s.store.ListActiveGrants(ctx, a.Room, who, s.now())
+		if err != nil {
+			return err
+		}
+		for _, grant := range grants {
+			if grant.ID == a.Grant {
+				_, err = hostexec.Match([]contract.Grant{grant}, a.Host, s.now())
+				return err
+			}
+		}
+		return hostexec.ErrNoGrant
+	}
 	return approve.Entry{
 		Scope: contract.ScopeTerminal,
 		Class: func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassAuto },
@@ -132,20 +146,7 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 			}
 			return contract.Card{Title: "asks to run a command", Target: contract.Target{Kind: contract.TargetHost, Name: quoteHostexec(string(a.Host))}, Command: a.Argv, Body: body}
 		},
-		Check: func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {
-			a := args.(contract.HostexecRunArgs)
-			grants, err := s.store.ListActiveGrants(ctx, a.Room, who, s.now())
-			if err != nil {
-				return err
-			}
-			for _, grant := range grants {
-				if grant.ID == a.Grant {
-					_, err = hostexec.Match([]contract.Grant{grant}, a.Host, s.now())
-					return err
-				}
-			}
-			return hostexec.ErrNoGrant
-		},
+		Check: check,
 		Decode: func(data json.RawMessage) (contract.OpArgs, error) {
 			var a contract.HostexecRunArgs
 			err := json.Unmarshal(data, &a)
@@ -162,11 +163,19 @@ func (s *Service) HostexecRunEntry() approve.Entry {
 			}
 			return s.finishHostexec(ctx, op, a, s.now(), false)
 		},
-		Resume: func(ctx context.Context, op contract.OpID, args contract.OpArgs, _ contract.Principal) contract.OpResult {
+		Resume: func(ctx context.Context, op contract.OpID, args contract.OpArgs, who contract.Principal) contract.OpResult {
 			a := args.(contract.HostexecRunArgs)
 			run, err := s.store.ReadHostexec(ctx, op)
 			if err != nil {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
+			}
+			if err := check(ctx, args, who); err != nil {
+				// The grant ended while the engine was away. The command is stopped like a session's stop (the sweep does it), and the
+				// run's folder stays on the host, readable only by its user.
+				if _, _, err := s.store.StopHostexecRun(ctx, op); err != nil {
+					return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
+				}
+				return contract.OpResult{Error: "stale: " + err.Error(), Cause: contract.CauseStale}
 			}
 			return s.finishHostexec(ctx, op, a, run.Started, true)
 		},
@@ -192,7 +201,7 @@ func (s *Service) finishHostexec(ctx context.Context, op contract.OpID, a contra
 		return contract.OpResult{Cause: contract.CauseInterrupted}
 	}
 	a.Attach = false
-	lost := err != nil || resumed && code == boxhostexec.NoRunStatus
+	lost := err != nil || resumed && code == boxhostexec.NoRunStatus && string(out) == boxhostexec.NoRunOutput(op)
 	stopped := store.HostexecStop("")
 	if lost {
 		stopped = store.HostexecLost
