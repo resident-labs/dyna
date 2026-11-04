@@ -31,7 +31,7 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 	}
 	result := contract.HostListResponse{Hosts: []contract.HostSummary{{Name: contract.ControlPlane, Sessions: sessions[contract.ControlPlane], Shared: shared}}}
 	for _, host := range hosts {
-		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, Problem: host.Problem, Sessions: sessions[host.Name], Shared: []contract.RoomShared{}, Pool: host.Pool, Agents: !host.NoAgents, CI: host.CI, ExecOnly: host.ExecOnly, Runners: runners[host.Name], RunnerImages: imageProblems[host.Name], CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.ExecOnly && !host.CheckedAt.IsZero() && host.DiskBytes < box.DiskWarn(host.DiskFloor, host.DiskTotal, host.Pool != ""), EngineHost: host.EngineHost != nil && *host.EngineHost, Leftovers: leftovers[host.Name]})
+		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, Problem: host.Problem, Sessions: sessions[host.Name], Shared: []contract.RoomShared{}, Pool: host.Pool, Agents: !host.NoAgents, CI: host.CI, Rooms: host.Rooms, ExecOnly: host.ExecOnly, Runners: runners[host.Name], RunnerImages: imageProblems[host.Name], CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.ExecOnly && !host.CheckedAt.IsZero() && host.DiskBytes < box.DiskWarn(host.DiskFloor, host.DiskTotal, host.Pool != ""), EngineHost: host.EngineHost != nil && *host.EngineHost, Leftovers: leftovers[host.Name]})
 	}
 	return result, nil
 }

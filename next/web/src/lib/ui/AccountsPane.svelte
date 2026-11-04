@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick, type Snippet } from "svelte";
   import { call, SignedOut } from "../client.ts";
-  import { accountChips, accountItems, accountLine, accountPill, addProviderError, labelRefusal, parseModelIDs, providerChoices, refused, reconnectUnavailable, removalPrompt, roomChoices,
+  import { accountChips, accountItems, accountLine, accountPill, addProviderError, labelRefusal, parseModelIDs, providerChoices, refused, reconnectUnavailable, removalPrompt,
     usageHint, usageNote, type AccountItem } from "../accounts.ts";
   import { balancesText, visibleWindows } from "../usage.ts";
   import { confirm } from "../modal.ts";
@@ -13,6 +13,7 @@
   import ItemList from "./settings/ItemList.svelte";
   import ListDetail from "./settings/ListDetail.svelte";
   import SearchBox from "./settings/SearchBox.svelte";
+  import RoomsServed from "./settings/RoomsServed.svelte";
   // Settings > Accounts (spec 5.13): every model account by provider, a row of values with its usage at a glance, and
   // the open account's detail, the one place that explains its usage, rooms, sign-in and removal. Add an account opens
   // the providers in the detail's place, then the chosen provider's sign-in or key form there. accounts.list is whole,
@@ -42,9 +43,9 @@
   let error = $state(""), redirect = $state(""), copied = $state(false), opened = $state(false), now = $state(Date.now());
   let timer: ReturnType<typeof setTimeout> | undefined, generation = 0;
 
-  // The open account's label field and rooms search.
+  // The open account's label field.
   let saved = $derived(item?.account.label);
-  let labelDraft = $state(""), labelError = $state(""), labelSaving = $state(false), roomQuery = $state("");
+  let labelDraft = $state(""), labelError = $state(""), labelSaving = $state(false);
   // Inside the detail, to hand its panel the focus when what had it is gone.
   let anchor: HTMLElement | undefined = $state();
   const gone = (reason: unknown) => { if (reason instanceof SignedOut) signedout(); return reason instanceof SignedOut; };
@@ -70,8 +71,8 @@
     window.addEventListener("popstate", popped);
     return () => { cancel(); window.removeEventListener("focus", refresh); window.removeEventListener("popstate", popped); };
   });
-  // Another account, or none, starts without the last one's sign-in, problem and rooms search.
-  $effect.pre(() => { void selected; cancel(); problem = ""; roomQuery = ""; });
+  // Another account, or none, starts without the last one's sign-in and problem.
+  $effect.pre(() => { void selected; cancel(); problem = ""; });
   $effect.pre(() => { labelDraft = saved ?? ""; labelError = ""; });
 
   function start() {
@@ -300,7 +301,7 @@
 
 {#snippet account(each: AccountItem)}{@const a = each.account}{@const name = each.provider?.displayName ?? a.provider}{@const note = usageNote(each)}
   {@const windows = a.state === "sign_in_expired" ? [] : visibleWindows(each.usage?.windows ?? [])}{@const balances = a.state === "sign_in_expired" ? [] : each.usage?.balances ?? []}
-  {@const limited = !!a.rooms?.length}{@const picks = roomChoices(rooms, a.rooms ?? [], roomQuery, 60)}{@const others = items?.some(o => o.account.provider === a.provider && o.account.id !== a.id)}
+  {@const others = items?.some(o => o.account.provider === a.provider && o.account.id !== a.id)}
   <p class="small muted">{name} · {connected[each.provider?.connectFlow ?? "key"]}</p>
   <label class="field">Label<input class="input label" aria-invalid={!!labelError} autocomplete="off" bind:value={labelDraft} readonly={labelSaving}
     onblur={() => void saveLabel(a)} onkeydown={event => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); void saveLabel(a); } }} />
@@ -310,17 +311,7 @@
     {#if windows.length}<div class="meters">{#each windows as window (window.name)}<AccountMeter {window} now={loadedAt} />{/each}</div>{/if}
     {#if balances.length}<p class="small">Balance {balancesText(balances)}</p>{/if}</div>
   {#if a.models?.length}<div class="section"><strong class="head">Models</strong><p class="small models">{a.models.join(" · ")}</p></div>{/if}
-  <div class="section"><strong class="head" id="serves-head">Serves</strong>
-    <div class="radios" role="radiogroup" aria-labelledby="serves-head">
-      <label class="opt"><input type="radio" name="serves" checked={!limited} disabled={busy} onchange={event => { const box = event.currentTarget; void setRooms(a, []).then(done => { if (!done) box.checked = false; }); }} />Every room</label>
-      <label class="opt"><input type="radio" name="serves" checked={limited} disabled={busy || !rooms.length} onchange={event => { const box = event.currentTarget; void setRooms(a, [rooms[0].id]).then(done => { if (!done) box.checked = false; }); }} />Only these rooms</label></div>
-    {#if limited}<div class="picker">
-      <SearchBox bind:value={roomQuery} label="Search rooms" placeholder={`Search ${plural(rooms.length, "room", "rooms")}`} />
-      <div class="rooms"><p class="count small muted">{a.rooms?.length ?? 0} of {plural(rooms.length, "room", "rooms")} chosen</p>
-        {#each picks.items as room (room.id)}{@const on = !!a.rooms?.includes(room.id)}
-          <label class="opt"><input type="checkbox" checked={on} disabled={busy || (on && a.rooms?.length === 1)}
-            onchange={event => { const box = event.currentTarget; void setRooms(a, box.checked ? [...a.rooms ?? [], room.id] : (a.rooms ?? []).filter(id => id !== room.id)).then(done => { if (!done) box.checked = !box.checked; }); }} /><span class="rname">{room.name}</span></label>{/each}
-        {#if picks.more}<p class="count small muted">{picks.more.toLocaleString("en")} more: search to narrow</p>{:else if !picks.items.length}<p class="count small muted">No room matches “{roomQuery.trim()}”.</p>{/if}</div></div>{/if}</div>
+  <RoomsServed label="Serves" {rooms} chosen={a.rooms ?? []} {busy} set={ids => setRooms(a, ids)} />
   {#if each.provider?.connectMethod === "oauth"}<div class="section"><strong class="head">Sign-in</strong>
     {#if attempt && reconnect === a.id}{@render waiting(attempt, name)}
     {:else}<div class="actions"><button type="button" class="btn" class:fill={a.state === "sign_in_expired"} disabled={busy} onclick={() => void begin(a)}>Sign in again</button></div>
@@ -379,14 +370,6 @@
   .input:focus { outline: none; border-color: var(--focus); }
   .input[aria-invalid="true"] { border-color: var(--danger); }
   .meters { display: grid; gap: 14px; }
-  .radios { display: flex; flex-wrap: wrap; gap: 4px 18px; }
-  .opt { display: flex; align-items: center; gap: 8px; min-height: 30px; font-size: 14px; cursor: pointer; }
-  .opt:has(input:disabled) { cursor: default; }
-  .opt input { margin: 0; accent-color: var(--focus); cursor: inherit; }
-  .picker { display: grid; gap: 8px; }
-  .rooms { display: grid; max-height: 260px; overflow-y: auto; padding: 4px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
-  .rooms .count { padding: 6px 0; }
-  .rname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .back { justify-self: start; gap: 6px; margin-left: -12px; }
   .provs { display: grid; gap: 2px; }
   .prov { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 8px; border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
@@ -402,5 +385,5 @@
   .badge-step { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--selected); color: var(--muted); font-size: 12px; }
   .badge-step.checked { box-sizing: border-box; border: 1px solid var(--line); background: none; }
   a { color: var(--focus); }
-  @media (hover: none) { .input { min-height: 40px; } .opt { min-height: 40px; } .prov { min-height: 44px; } }
+  @media (hover: none) { .input { min-height: 40px; } .prov { min-height: 44px; } }
 </style>

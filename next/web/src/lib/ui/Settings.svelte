@@ -8,6 +8,7 @@
   import ProfilesPane from "./ProfilesPane.svelte";
   import AddonsPane from "./AddonsPane.svelte";
   import ApprovalsPane from "./ApprovalsPane.svelte";
+  import HostsPane from "./HostsPane.svelte";
   import Icon from "./Icon.svelte";
   import { pathItem, settingsPanes } from "../routes.ts";
   import type { Device } from "../contract.gen.ts";
@@ -67,7 +68,7 @@
   <div class="settings-layout">
   {#if !phone}<aside class="nav"><header class="bar"><strong>Settings</strong></header>
     <nav aria-label="Settings panes">{#each panes as pane (pane.id)}
-      <a href={`/settings/${pane.id}`} onclick={navigate} aria-current={shown === pane ? "page" : undefined}><Icon name={pane.icon} /><span class="l">{pane.label}</span>{#if counts[pane.id] !== undefined}<span class="n">{counts[pane.id]!.toLocaleString("en")}</span>{/if}</a>{/each}</nav></aside>{/if}
+      <a href={`/settings/${pane.id}`} onclick={navigate} class:sep={pane.sep} aria-current={shown === pane ? "page" : undefined}><Icon name={pane.icon} /><span class="l">{pane.label}</span>{#if counts[pane.id] !== undefined}<span class="n">{counts[pane.id]!.toLocaleString("en")}</span>{/if}</a>{/each}</nav></aside>{/if}
   <div class="pane">
     {#if lost}<Blocked kind="no-page" back={{ href: "/settings", label: "Back to Settings" }} {navigate} />
     {:else if shown?.id === "appearance"}<AppearancePane {bar} />
@@ -76,10 +77,11 @@
     {:else if shown?.id === "profiles"}<ProfilesPane {bar} {phone} {signedout} selected={item} onselect={open} onclose={close} />
     {:else if shown?.id === "addons"}<AddonsPane {bar} {admin} {signedout} selected={item} onselect={open} onclose={close} />
     {:else if shown?.id === "approvals"}<ApprovalsPane {bar} {signedout} selected={item} onselect={open} onclose={close} />
+    {:else if shown?.id === "hosts"}<HostsPane {bar} {phone} {navigate} {signedout} selected={item} onselect={open} onclose={close} />
     {:else}
       <header class="bar"><button type="button" class="round menu" bind:this={menu} aria-label="Rooms and pages" title="Rooms and pages" onclick={onmenu}><Icon name="menu" /></button><strong>Settings</strong></header>
       <nav class="list" aria-label="Settings panes">{#each panes as pane (pane.id)}
-        <a href={`/settings/${pane.id}`} onclick={navigate}><Icon name={pane.icon} />{pane.label}{#if counts[pane.id] !== undefined}<span class="n">{counts[pane.id]!.toLocaleString("en")}</span>{/if}<Icon name="forwardChevron" /></a>{/each}</nav>
+        <a href={`/settings/${pane.id}`} onclick={navigate} class:sep={pane.sep}><Icon name={pane.icon} />{pane.label}{#if counts[pane.id] !== undefined}<span class="n">{counts[pane.id]!.toLocaleString("en")}</span>{/if}<Icon name="forwardChevron" /></a>{/each}</nav>
     {/if}
   </div>
   </div>
@@ -97,6 +99,9 @@
   .nav a { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border-radius: 6px; color: var(--muted); font-size: 14px; font-weight: 500; text-decoration: none; }
   .nav a:hover { background: var(--hover); color: var(--text); }
   .nav a[aria-current="page"] { background: var(--selected); color: var(--text); }
+  /* The line sits in the gap above the pane, so the panes keep their places. */
+  .nav a.sep, .list a.sep { position: relative; margin-top: 13px; }
+  .nav a.sep::before, .list a.sep::before { content: ""; position: absolute; top: -8px; right: 10px; left: 10px; border-top: 1px solid var(--line); }
   .nav a .l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .nav a .n { margin-left: auto; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
   .pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
@@ -111,6 +116,8 @@
     .settings-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
     .nav nav { display: flex; overflow-x: auto; }
     .nav a { flex: none; }
+    .nav a.sep { margin-top: 0; }
+    .nav a.sep::before { display: none; }
   }
   @media (max-width: 640px) {
     .settings { left: env(safe-area-inset-left); }

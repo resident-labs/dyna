@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { diskLow, hang, hostLabel, hostLoads, hostMeters, largeShared, lastSeen, machines, onHost, roomSessions } from "./hosts.ts";
+import { diskLow, hang, hostBars, hostChips, hostGroup, hostLabel, hostLine, hostLoads, hostMeters, hostName, hostOrder, hostState, hostText, largeShared, lastSeen, machines, onHost, roomSessions } from "./hosts.ts";
+import { listView } from "./settings-list.ts";
+import type { HostSummary } from "./contract.gen.ts";
 
 test("labels the Dyna host without implying that it runs this browser", () => {
   assert.equal(hostLabel("control-plane"), "Dyna host");
@@ -120,4 +122,103 @@ test("an exec-only host is online or offline and never low on disk", () => {
   assert.equal(diskLow(execOnly), false);
   assert.equal(diskLow({ ...execOnly, execOnly: false }), true);
   assert.equal(hostLoads([execOnly])[0]?.diskLow ?? false, false);
+});
+
+
+const gib = 2 ** 30;
+const now = Date.parse("2026-11-04T12:00:00Z");
+const host = (name: string, over: Partial<HostSummary> = {}): HostSummary => ({ name, reachable: true, boxes: 2, cpus: 10, memBytes: 100 * gib, cpuUsed: 5, memUsed: 50 * gib,
+  diskBytes: 1000 * gib, diskUsed: 500 * gib, diskLow: false, shared: [], history: null, agents: true, ci: true, ...over });
+const names = (hosts: readonly HostSummary[]) => hosts.map(h => h.name);
+const all = hostChips[0];
+
+test("Settings lists registered hosts: the Dyna host first, then by name with digits as numbers, then pool nodes; the control plane alone is left out", () => {
+  const hosts = [host("node-10", { pool: "burst" }), host("Studio"), host("control-plane"), host("node-2", { pool: "burst" }), host("Arch"), host("lab", { engineHost: true }),
+    host("box-10"), host("box-9"), host("gpu-1", { pool: "gpu" }), host("zed")];
+  assert.deepEqual(names(hostOrder(hosts)), ["lab", "Arch", "box-9", "box-10", "Studio", "zed", "gpu-1", "node-2", "node-10"]);
+  // The engine's machine comes first wherever its name sorts, and a pool interleaved anywhere sorts after every added host.
+  assert.deepEqual(names(hostOrder([host("a"), host("z", { engineHost: true }), host("b", { pool: "p" }), host("c")])), ["z", "a", "c", "b"]);
+  assert.deepEqual(names(hostOrder([host("control-plane")])), []);
+  // A pool node is never first for being the engine's machine: pool nodes go by name alone.
+  assert.deepEqual(names(hostOrder([host("z", { pool: "p", engineHost: true }), host("y", { pool: "p" })])), ["y", "z"]);
+  // The input is left as it came.
+  const input = [host("b"), host("a")];
+  hostOrder(input);
+  assert.deepEqual(names(input), ["b", "a"]);
+});
+
+test("a host is added by you or from pools, and the groups come in that order", () => {
+  assert.deepEqual(hostGroup(host("a")), { id: "own", title: "Added by you" });
+  assert.deepEqual(hostGroup(host("a", { pool: "burst" })), { id: "pool", title: "From pools" });
+  assert.deepEqual(hostGroup(host("a", { pool: "" })), { id: "own", title: "Added by you" });
+  const view = listView(hostOrder([host("p", { pool: "x" }), host("a"), host("q", { pool: "y" })]), { text: hostText, key: h => h.name, query: "", chip: all, group: hostGroup, folded: new Set() });
+  assert.deepEqual(view.rows.map(row => row.kind === "group" ? `${row.group.title} ${row.count}` : row.key), ["Added by you 1", "a", "From pools 2", "p", "q"]);
+});
+
+test("the engine's machine is named as the Dyna host; any other keeps its name", () => {
+  assert.equal(hostName(host("hermeslab", { engineHost: true })), "hermeslab (Dyna host)");
+  assert.equal(hostName(host("hermeslab")), "hermeslab");
+});
+
+test("a row's one state: unreachable first, then a host problem, then low disk, which an exec-only host never is", () => {
+  assert.deepEqual(hostState(host("a")), undefined);
+  assert.deepEqual(hostState(host("a", { reachable: false, diskLow: true, problem: "create_failed" })), { tone: "error", label: "Unreachable" });
+  assert.deepEqual(hostState(host("a", { reachable: false, execOnly: true })), { tone: "error", label: "Unreachable" });
+  assert.deepEqual(hostState(host("a", { problem: "create_failed", diskLow: true })), { tone: "warning", label: "Boxes failing" });
+  assert.deepEqual(hostState(host("a", { problem: "share_unavailable" })), { tone: "warning", label: "No shared folder" });
+  assert.deepEqual(hostState(host("a", { diskLow: true })), { tone: "warning", label: "Disk low" });
+  assert.deepEqual(hostState(host("a", { diskLow: true, execOnly: true })), undefined);
+});
+
+test("a row's line: an exec-only host is online or last seen; any other host gives its workspaces, pool, agents off, rooms and last seen", () => {
+  const seen = new Date(now - 4 * 60_000).toISOString();
+  assert.equal(hostLine(host("o", { execOnly: true, boxes: 0 }), now), "Online");
+  assert.equal(hostLine(host("o", { execOnly: true, reachable: false, lastSeen: seen }), now), "Last seen 4 min ago");
+  assert.equal(hostLine(host("o", { execOnly: true, reachable: false }), now), "Not seen yet");
+  assert.equal(hostLine(host("a", { boxes: 1 }), now), "1 workspace");
+  assert.equal(hostLine(host("a", { boxes: 0 }), now), "0 workspaces");
+  assert.equal(hostLine(host("a", { pool: "burst", agents: undefined, rooms: ["r1"] }), now), "2 workspaces · pool burst · agents off · 1 room");
+  assert.equal(hostLine(host("a", { rooms: ["r1", "r2"], reachable: false, lastSeen: seen }), now), "2 workspaces · 2 rooms · Last seen 4 min ago");
+  assert.equal(hostLine(host("a", { rooms: [] }), now), "2 workspaces");
+});
+
+test("a row's bars: CPU, memory and disk of a reachable host that is not exec only, warm from 90%, and no disk bar without a disk figure", () => {
+  assert.deepEqual(hostBars(host("a", { cpuUsed: 9, memUsed: 89.9 * gib, diskUsed: 900 * gib })), [
+    { label: "CPU", percent: 90, busy: true }, { label: "Mem", percent: 90, busy: false }, { label: "Disk", percent: 90, busy: true }]);
+  assert.deepEqual(hostBars(host("a", { diskBytes: 0, diskUsed: 0 })).map(bar => bar.label), ["CPU", "Mem"]);
+  assert.deepEqual(hostBars(host("a", { reachable: false })), []);
+  assert.deepEqual(hostBars(host("a", { execOnly: true })), []);
+  assert.deepEqual(hostBars(host("a", { cpus: 0 })), []);
+});
+
+test("chips: Needs attention takes unreachable hosts, host problems and low disk, never an exec-only host's disk; Exec only takes exec-only hosts", () => {
+  const hosts = [host("ok"), host("down", { reachable: false }), host("stuck", { problem: "share_unavailable" }), host("full", { diskLow: true }),
+    host("exec", { execOnly: true, diskLow: true }), host("exec-down", { execOnly: true, reachable: false })];
+  const ids = hostChips.map(chip => chip.id);
+  assert.deepEqual(ids, ["all", "attention", "exec"]);
+  const view = listView(hosts, { text: hostText, key: h => h.name, query: "", chip: all, chips: hostChips, folded: new Set() });
+  assert.deepEqual(view.counts, { all: 6, attention: 4, exec: 2 });
+  assert.deepEqual(hosts.filter(hostChips[1].test!).map(h => h.name), ["down", "stuck", "full", "exec-down"]);
+  assert.deepEqual(hosts.filter(hostChips[2].test!).map(h => h.name), ["exec", "exec-down"]);
+});
+
+test("the search matches a name in any case, Dyna host for the engine's machine, and the pool", () => {
+  const hosts = [host("Hermeslab", { engineHost: true }), host("studio"), host("node-4", { pool: "hetzner-cx" }), host("dyna-builder")];
+  const find = (query: string) => listView(hosts, { text: hostText, key: h => h.name, query, chip: all, folded: new Set() }).rows.map(row => row.kind === "item" ? row.key : "");
+  assert.deepEqual(find("hermes"), ["Hermeslab"]);
+  assert.deepEqual(find("dyna host"), ["Hermeslab"]);
+  assert.deepEqual(find("dyna"), ["Hermeslab", "dyna-builder"]);
+  assert.deepEqual(find("hetzner"), ["node-4"]);
+  assert.deepEqual(find("STUDIO"), ["studio"]);
+});
+
+test("the engine's machine merges into its registered host: the plane's figures, both workspace counts, the host's switches, rooms, problem and runners, and nothing else of the host that Home's card would show", () => {
+  const plane = host("control-plane", { cpus: 20, memBytes: 31 * gib, diskBytes: 1900 * gib, diskUsed: 1000 * gib, agents: undefined, ci: undefined, boxes: 3 });
+  const lab = host("lab", { engineHost: true, cpus: 19, diskBytes: 800 * gib, diskUsed: 100 * gib, boxes: 2, agents: false, ci: true, rooms: ["r1"], problem: "create_failed", runners: 2,
+    pool: "p", execOnly: true, leftovers: 4, runnerImages: [{ room: "r1", image: "i", reason: "x" }] });
+  const [one] = machines([plane, lab]);
+  assert.deepEqual([one.name, one.cpus, one.memBytes, one.diskBytes, one.diskUsed, one.boxes, one.agents, one.ci, one.rooms, one.problem, one.runners, one.engineHost],
+    ["lab", 20, 31 * gib, 1900 * gib, 1000 * gib, 5, false, true, ["r1"], "create_failed", 2, true]);
+  // Home's card stays as it was: no pool line, the plane's own exec-only, leftovers and runner images.
+  assert.deepEqual([one.pool, one.execOnly, one.leftovers, one.runnerImages], [undefined, undefined, undefined, undefined]);
 });
