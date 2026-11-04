@@ -204,6 +204,11 @@ func (r crewRepos) Get(ctx context.Context, session contract.SessionID, _ contra
 	return []contract.BoxRepo{{Name: "owner/repo", Cache: r.cache, Branch: "v2/" + string(session), Base: "main"}}, nil
 }
 
+func (r crewRepos) Seed(ctx context.Context, session contract.SessionID, host contract.HostName) ([]contract.BoxRepo, string, error) {
+	repos, err := r.Get(ctx, session, host, true)
+	return repos, "", err
+}
+
 func (r crewRepos) Ref(ctx context.Context, _ contract.RepoName, ref string) (string, error) {
 	out, err := exec.CommandContext(ctx, "git", "-C", r.origin, "rev-parse", ref).Output()
 	return strings.TrimSpace(string(out)), err

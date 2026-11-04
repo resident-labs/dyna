@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { profileForSave, profileLabel, profileModels, replacements, sessionCount, slugName } from "./profiles.ts";
-import type { Account, ProfileSummary } from "./contract.gen.ts";
+import { profileForSave, profileLabel, profileModels, profileRows, replacements, sessionCount, slugName, type ProfileSummary } from "./profiles.ts";
+import type { Account } from "./contract.gen.ts";
 
 test("saving a profile keeps its hidden limit and allowed models", () => {
   const draft: ProfileSummary = { inUse: 2, name: " quick ", provider: "openai", model: " next-model ", thinking: "high", description: "Notes", taste: 8, diagnostics: 7, intelligence: 9, cost: 6, allowedModels: ["old-model"], maxConcurrent: 3 };
@@ -46,4 +46,12 @@ test("a profile can choose any model the proxy routes, custom providers included
     { id: "custom-acme/local-one", provider: "openai" },
     { id: "glm-5.3", provider: "openai" },
   ]);
+});
+
+test("a listed entry becomes a row, and saving it sends back exactly the listed profile", () => {
+  const stored = { name: "text", provider: "openai" as const, model: "m", thinking: "low" as const, description: "d", taste: 1, diagnostics: 2, intelligence: 3, cost: 4, images: false, allowedModels: ["m"], compactTokens: 5, maxConcurrent: 6 };
+  const [row] = profileRows([{ profile: stored, inUse: 2 }]);
+  assert.equal(row.inUse, 2);
+  assert.deepEqual(profileForSave(row), stored);
+  assert.deepEqual(profileRows(null), []);
 });

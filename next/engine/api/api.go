@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -80,7 +81,7 @@ func runCall[Req, Res any](mux *http.ServeMux, method contract.Method, fn func(c
 		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&req); err != nil {
-			writeError(w, invalid())
+			writeError(w, badBody(err))
 			return
 		}
 		result, err := fn(r.Context(), req)
@@ -647,7 +648,11 @@ func call[Req, Resp any](mux *http.ServeMux, m contract.Method, c Caller, fn fun
 		var req *Req
 		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20))
 		dec.DisallowUnknownFields()
-		if err := dec.Decode(&req); err != nil || req == nil {
+		if err := dec.Decode(&req); err != nil {
+			writeError(w, badBody(err))
+			return
+		}
+		if req == nil {
 			writeError(w, invalid())
 			return
 		}
@@ -677,6 +682,14 @@ func call[Req, Resp any](mux *http.ServeMux, m contract.Method, c Caller, fn fun
 	})
 }
 
+// badBody refuses a request body. The decode error, if any, names an unknown field the way the dyna tool does, so a
+// client sees which field to drop; any other decode error stays a bare refusal.
+func badBody(decode error) *contract.Error {
+	if field, unknown := strings.CutPrefix(decode.Error(), "json: unknown field "); unknown {
+		return &contract.Error{Code: contract.ErrInvalid, Message: "unknown field " + field}
+	}
+	return invalid()
+}
 func invalid() *contract.Error {
 	return &contract.Error{Code: contract.ErrInvalid, Message: "invalid request"}
 }
