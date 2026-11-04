@@ -33,6 +33,7 @@ type Model struct {
 
 // Request is the part of a request the tests read.
 type Request struct {
+	Header   http.Header       `json:"-"`
 	System   json.RawMessage   `json:"system"`
 	Tools    []json.RawMessage `json:"tools"`
 	Messages []json.RawMessage `json:"messages"`
@@ -45,6 +46,7 @@ func (m *Model) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	var request Request
 	_ = json.Unmarshal(body, &request)
+	request.Header = r.Header
 	m.mu.Lock()
 	m.requests = append(m.requests, request)
 	blocks := []Block{{Text: "script ended"}}

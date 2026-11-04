@@ -128,7 +128,7 @@ type resizeOptions = struct {
 
 // loadImage is the image of one attachment, shrunk to the model's limit, or the note that takes its place.
 func loadImage(path, media string, model *ai.Model) shown {
-	// A failed read or resize names the error by its code, as extension.js does.
+	// A failed read or resize names the error by its code.
 	cannotShow := func(err error) shown {
 		reason := err.Error()
 		if errno := syscall.Errno(0); errors.As(err, &errno) {
