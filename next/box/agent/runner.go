@@ -303,12 +303,10 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 		r.mu.Unlock()
 		stopAttach()
 		r.flushing.Wait()
-		if err == nil {
-			// Pi queues a steer that came after its last check and reads it at its next run. The engine gives it to the next turn
-			// instead, so Pi must not keep it.
-			if clearErr := r.Harness.ClearQueue(ctx); clearErr != nil {
-				log.Printf("clear Pi's queue: %v", clearErr)
-			}
+		// Pi queues a steer that came after its last check and reads it at its next run. The engine gives it to the next turn
+		// instead, after a failed run as well, so Pi must not keep it. A dead Pi only logs.
+		if clearErr := r.Harness.ClearQueue(ctx); clearErr != nil {
+			log.Printf("clear Pi's queue: %v", clearErr)
 		}
 		if errors.Is(err, errStopped) {
 			// Pi never saw the inputs, so they wait for the next turn instead of counting as read.
