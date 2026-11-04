@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { access, cleanCode, expiring, isFullCode, linkCode, listed, pairAddresses, pairLink, seen, showCode, startingScopes, thisBrowser } from "./devices.ts";
+import { access, ago, cleanCode, expiring, expiry, isFullCode, linkCode, listed, pairAddresses, pairLink, seen, showCode, startingScopes, thisBrowser } from "./devices.ts";
 import type { Device } from "./contract.gen.ts";
 
 const device = (id: string, pairedAt: string, more: Partial<Device> = {}): Device =>
@@ -57,6 +57,20 @@ test("the expiry warning starts at 3 days left", () => {
   assert.equal(left(3), "Expires in 3 days");
   assert.equal(left(2), "Expires in 2 days");
   assert.equal(left(0.5), "Expires today");
+});
+
+test("a device's detail says how long ago it paired, and when it expires in whole days, the last one today", () => {
+  assert.equal(ago(new Date(at - 30_000).toISOString(), at), "just now");
+  assert.equal(ago(new Date(at - 60_000).toISOString(), at), "1 min ago");
+  assert.equal(ago(new Date(at - 59 * 60_000).toISOString(), at), "59 min ago");
+  assert.equal(ago(new Date(at - 60 * 60_000).toISOString(), at), "1 h ago");
+  assert.equal(ago(new Date(at - 86_400_000).toISOString(), at), "1 day ago");
+  assert.equal(ago(new Date(at - 9.5 * 86_400_000).toISOString(), at), "9 days ago");
+  const left = (days: number) => expiry(new Date(at + days * 86_400_000).toISOString(), at);
+  assert.equal(left(25), "in 25 days");
+  assert.equal(left(1.2), "in 2 days");
+  assert.equal(left(1), "today");
+  assert.equal(left(0.1), "today");
 });
 
 test("the heading names phones and tablets only, and an iPad that reports as a Mac is found by its touch points", () => {

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -175,5 +176,78 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 	var problem string
 	if err := s.Read().QueryRow("SELECT create_problem FROM hosts WHERE name='h'").Scan(&problem); err != nil || problem != "share_unavailable" {
 		t.Fatalf("problem %q: %v", problem, err)
+	}
+}
+
+// Restarting a failed box wakes its session when the session holds an open goal, and the stored notice says so.
+func TestRestartWakesOnlyForAnOpenGoal(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	_, err = s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+INSERT INTO hosts(name,ssh,state,cpus,mem_bytes,disk_bytes,checked_at) VALUES('h','','ready',1,1,1,0);
+INSERT INTO sessions(id,room,name,parent,profile,state,goal,created_at) VALUES('work','r','work',NULL,'p','open','',0),('idle','r','idle',NULL,'p','open','',0);
+INSERT INTO goals(room,number,session,text,done_when,state,created_at,updated_at) VALUES('r',1,'work','g','d','active',0,0),('r',2,'idle','g','d','done',0,0);
+INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updated_at,want,due_at,failures) VALUES('bw','work','h','image','agent','failed','error','slice',0,0,'stop',100,3),('bi','idle','h','image','agent','failed','error','slice',0,0,'stop',100,3)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[contract.SessionID]bool{"work": true, "idle": false} {
+		event := contract.Event{ID: contract.EventID("restart-" + id), Room: "r", Time: time.UnixMilli(200), From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.BoxChanged{}}
+		notice := contract.Event{ID: contract.EventID("notice-" + id), Room: "r", Time: event.Time, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionRestarted{Session: id}}
+		if ok, err := s.RestartSession(ctx, id, event, notice); err != nil || !ok {
+			t.Fatalf("%s restart: %v %v", id, ok, err)
+		}
+		var wake bool
+		if err := s.Read().QueryRowContext(ctx, `SELECT wake FROM deliveries WHERE to_id=?`, id).Scan(&wake); err != nil || wake != want {
+			t.Fatalf("%s: wake %v, want %v: %v", id, wake, want, err)
+		}
+		stored, err := s.Events(ctx, "r", 0, 10, []contract.EventType{"session.restarted"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range stored {
+			if body := e.Body.(contract.SessionRestarted); body.Session == id && body.OpenGoal != want {
+				t.Fatalf("%s: stored notice %+v", id, body)
+			}
+		}
+		if open, err := s.HasOpenGoal(ctx, id); err != nil || open != want {
+			t.Fatalf("%s: HasOpenGoal %v: %v", id, open, err)
+		}
+	}
+}
+
+// A refresh restart always wakes, records the open goal read in its own transaction, and a closed session's goal is not open.
+func TestRefreshedNoticeWakesAndRecordsTheGoal(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	_, err = s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+INSERT INTO sessions(id,room,name,parent,profile,state,goal,created_at,closed_at) VALUES('work','r','work',NULL,'p','open','',0,NULL),('idle','r','idle',NULL,'p','open','',0,NULL),('gone','r','gone',NULL,'p','open','',0,1);
+INSERT INTO goals(room,number,session,text,done_when,state,created_at,updated_at) VALUES('r',1,'work','g','d','active',0,0),('r',2,'gone','g','d','active',0,0)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, goal := range map[contract.SessionID]bool{"work": true, "idle": false, "gone": false} {
+		notice := contract.Event{ID: contract.EventID("n-" + id), Room: "r", Time: time.UnixMilli(200), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionRestarted{Session: id, Refreshed: true, ClientID: "refresh:" + string(id)}}
+		for range 2 {
+			if err := s.NoticeRestarted(ctx, notice); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var n, wakes int
+		if err := s.Read().QueryRowContext(ctx, `SELECT count(*), coalesce(sum(wake),0) FROM deliveries WHERE to_id=?`, id).Scan(&n, &wakes); err != nil || n != 1 || wakes != 1 {
+			t.Fatalf("%s: deliveries %d wakes %d: %v", id, n, wakes, err)
+		}
+		var body string
+		if err := s.Read().QueryRowContext(ctx, `SELECT CAST(body AS TEXT) FROM events WHERE client_id=?`, "refresh:"+string(id)).Scan(&body); err != nil || strings.Contains(body, `"openGoal":true`) != goal {
+			t.Fatalf("%s: stored %s: %v", id, body, err)
+		}
 	}
 }

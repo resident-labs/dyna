@@ -62,6 +62,11 @@ type Harness struct {
 
 	mu   sync.Mutex
 	turn *turn // the turn running now, nil between turns
+
+	// queue orders inputs against the end of a run: Steer and FollowUp queue only while running, and the run's end clears
+	// the queue. It is not mu, which the session's listener takes while a steer emits its queue update.
+	queue   sync.Mutex
+	running bool
 }
 
 var _ harness.Harness = (*Harness)(nil)
@@ -237,6 +242,9 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, send func(context
 	h.mu.Lock()
 	h.turn = t
 	h.mu.Unlock()
+	h.queue.Lock()
+	h.running = true
+	h.queue.Unlock()
 	sent := make(chan error, 1)
 	h.sends.Go(func() { sent <- send(context.WithoutCancel(ctx)) })
 	var err error
@@ -245,6 +253,12 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, send func(context
 	case <-ctx.Done():
 		err = ctx.Err()
 	}
+	// A run that ended takes no input, however it ended. An input queued after its last look at the queue reaches no
+	// request, so the end of every run drops it, a failed one too, and the runner's ClearQueue then finds nothing.
+	h.queue.Lock()
+	h.running = false
+	h.session.ClearQueue()
+	h.queue.Unlock()
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.turn = nil
@@ -252,13 +266,32 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, send func(context
 }
 
 func (h *Harness) Steer(ctx context.Context, input contract.TurnInput) error {
+	h.queue.Lock()
+	defer h.queue.Unlock()
+	if !h.running {
+		return harness.ErrNoTurn
+	}
 	_, err := h.session.Steer(ctx, input.Text, nil, &coding.QueueInputOptions{Members: members(input)})
 	return err
 }
 
 func (h *Harness) FollowUp(ctx context.Context, input contract.TurnInput) error {
+	h.queue.Lock()
+	defer h.queue.Unlock()
+	if !h.running {
+		return harness.ErrNoTurn
+	}
 	_, err := h.session.FollowUp(ctx, input.Text, nil, &coding.QueueInputOptions{Members: members(input)})
 	return err
+}
+
+// ClearQueue drops the steers and follow-ups the session still holds queued. A queued input is in the session file only
+// once a request read it, so what this drops was not delivered, and the engine gives it to the next turn.
+func (h *Harness) ClearQueue(context.Context) error {
+	h.queue.Lock()
+	defer h.queue.Unlock()
+	h.session.ClearQueue()
+	return nil
 }
 
 // TransferModel moves the session to the model, thinking level and compaction trigger. PiG checks the conversation
