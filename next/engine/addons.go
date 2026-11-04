@@ -133,8 +133,8 @@ func checkMCP(name, link, command string, args []string) *contract.Error {
 	switch {
 	case !mcpName.MatchString(name):
 		return invalid("an MCP server name is 1 to 64 letters, digits, underscores or hyphens")
-	case strings.Contains(name, "__"):
-		return invalid("an MCP server name has no double underscore, which separates it from a tool name")
+	case strings.HasPrefix(name, "_") || strings.HasSuffix(name, "_") || strings.Contains(name, "__"):
+		return invalid("an MCP server name has no underscore at either end and no double underscore, since a tool is named mcp__<server>__<tool>")
 	case name == "dyna":
 		return invalid("dyna is the box's own MCP server")
 	case (link == "") == (command == ""):
