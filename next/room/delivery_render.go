@@ -57,7 +57,7 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		}
 		return fmt.Sprintf("Session %s closed and %s.", b.Session, strings.Join(did, " and ")), nil
 	case contract.HostDiskLow:
-		return fmt.Sprintf("Host %s is low on disk: %d GiB free, %d GiB wanted. At the floor, new boxes wait and the oldest stopped boxes close.", b.Host, b.FreeBytes>>30, b.FloorBytes>>30), nil
+		return fmt.Sprintf("Host %s is low on disk: %d GiB free, %d GiB wanted. At the floor, new boxes wait and the oldest stopped boxes close. Closing a finished session frees its volume.", b.Host, b.FreeBytes>>30, b.FloorBytes>>30), nil
 	case contract.PrOpened:
 		if b.Actor == "" {
 			return fmt.Sprintf("PR opened: %s", b.URL), nil
@@ -340,7 +340,7 @@ func renderFailures(b contract.SessionFailed) string {
 		if failure.Parent != "" {
 			name += " (under " + failure.Parent + ", which cannot take this)"
 		}
-		what := "its turn failed; its input is kept"
+		what := "its turn failed; its input is kept, and its next input starts a new turn"
 		switch failure.Box {
 		case contract.BoxFailed:
 			what = "its box failed; session restart discards unpushed work"
