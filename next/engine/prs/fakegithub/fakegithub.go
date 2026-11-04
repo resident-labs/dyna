@@ -30,7 +30,9 @@ type Comment struct {
 	ID     int64
 	Author string
 	Body   string
-	State  string // reviews only
+	State  string    // reviews only
+	At     time.Time // when a review was submitted or a comment made
+	Edited time.Time // the last edit of the body, if any
 	Inline []Comment
 }
 
@@ -707,6 +709,14 @@ func (s *Server) link(p *Pull) string {
 	return fmt.Sprintf("https://github.com/%s/pull/%d", p.Repo, p.Number)
 }
 
+// edited answers null for a body never edited.
+func edited(at time.Time) any {
+	if at.IsZero() {
+		return nil
+	}
+	return at
+}
+
 func nodes[T any](items []T, node func(T) map[string]any) map[string]any {
 	out := []map[string]any{}
 	for _, item := range items {
@@ -757,7 +767,10 @@ func (s *Server) pullNode(p *Pull) map[string]any {
 		"latestOpinionatedReviews": nodes(p.LatestReviews, func(state string) map[string]any { return map[string]any{"state": state} }),
 		"commits":                  map[string]any{"nodes": []any{map[string]any{"commit": map[string]any{"oid": commit, "statusCheckRollup": rollup}}}},
 		"reviews": nodes(p.Reviews, func(c Comment) map[string]any {
-			return map[string]any{"fullDatabaseId": strconv.FormatInt(c.ID, 10), "state": c.State, "body": c.Body, "url": fmt.Sprintf("%s#%d", link, c.ID), "author": user(c.Author)}
+			return map[string]any{"fullDatabaseId": strconv.FormatInt(c.ID, 10), "state": c.State, "body": c.Body, "url": fmt.Sprintf("%s#%d", link, c.ID), "author": user(c.Author), "submittedAt": c.At, "lastEditedAt": edited(c.Edited)}
+		}),
+		"comments": nodes(p.Comments, func(c Comment) map[string]any {
+			return map[string]any{"body": c.Body, "author": user(c.Author), "createdAt": c.At, "lastEditedAt": edited(c.Edited)}
 		}),
 	}
 }
