@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
@@ -85,5 +86,15 @@ func TestProfileListShowRemove(t *testing.T) {
 	runCLI(t, f, "profile", "remove", "opus", "--replacement", "text")
 	if f.profileRm == nil || f.profileRm.Name != "opus" || f.profileRm.Replacement != "text" {
 		t.Fatalf("%+v", f.profileRm)
+	}
+}
+
+func TestProfileListAndShowTreatMissingImagesAsOn(t *testing.T) {
+	f := &fakeClient{profiles: []contract.ProfileEntry{{Profile: contract.Profile{Name: "old", Provider: contract.ModelProviderOpenAI, Model: "m", Thinking: contract.ThinkingLow}}}}
+	if out := runCLI(t, f, "profile", "list"); out != "old\topenai m\tlow\timages on\t0 in use\n" {
+		t.Fatalf("list: %q", out)
+	}
+	if out := runCLI(t, f, "profile", "show", "old"); !strings.Contains(out, "images: on\n") {
+		t.Fatalf("show: %q", out)
 	}
 }
