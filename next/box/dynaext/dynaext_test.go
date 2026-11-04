@@ -3,6 +3,7 @@ package dynaext
 import (
 	"context"
 	"encoding/json"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -46,7 +47,10 @@ func newSession(t *testing.T, script ...[]pigtest.Block) *session {
 		t.Fatal(err)
 	}
 	server := shell.New(shell.Config{After: time.After})
-	agentDir := pigtest.AgentDir(t, b.model, "")
+	// The dyna server is listed as a box lists it: deferred, with post direct.
+	mcp := httptest.NewServer(dyna)
+	t.Cleanup(mcp.Close)
+	agentDir := pigtest.AgentDir(t, b.model, `{"dyna":{"url":"`+mcp.URL+`","exposure":"deferred","toolExposure":{"post":"direct"}}}`)
 	b.harness, err = pig.Open(context.Background(), pig.Config{
 		Dir:        b.dir,
 		AgentDir:   agentDir,
@@ -155,5 +159,24 @@ func TestJobListsTheBackgroundJobs(t *testing.T) {
 	b.turn(t, "list")
 	if got := b.toolResult(t, 2); !strings.Contains(got, `\texit 0\techo listed`) {
 		t.Fatalf("tool result %s", got)
+	}
+}
+
+// The first request's head names the dyna tools a search or script reaches; tool_search's description points at it,
+// and no servers section is sent.
+func TestTheHeadNamesTheDynaToolsASearchReaches(t *testing.T) {
+	b := newSession(t, []pigtest.Block{{Text: "ok"}})
+	b.turn(t, "hi")
+	request := b.model.Requests()[0]
+	system := string(request.System)
+	if !strings.Contains(system, `<deferred_tools>\nTools not declared to you yet`) || !strings.Contains(system, `\nmcp__dyna__:`) || !strings.Contains(system, `\n- session: `) || strings.Contains(system, "<mcp_servers>") {
+		t.Fatalf("system prompt: %s", system)
+	}
+	var search bool
+	for _, tool := range request.Tools {
+		search = search || strings.Contains(string(tool), "The `deferred_tools` section of the system prompt names the tools")
+	}
+	if !search {
+		t.Fatal("tool_search's description does not name the section")
 	}
 }
