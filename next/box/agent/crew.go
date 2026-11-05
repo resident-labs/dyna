@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/MichaelKinsy/PiG/codemode"
+	"github.com/resident-labs/dyna/box/dynaext"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness"
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -31,7 +32,7 @@ import (
 const (
 	// stepTimeout is how long a worker or command may run when the script sets no timeout, as in v1.
 	stepTimeout = 5 * time.Hour
-	// schemaAttempts is how many replies a worker gets to match its schema.
+	// schemaAttempts is how many submits a schema worker gets.
 	schemaAttempts = 3
 	// stepResultBytes bounds what one step stores. The rest of a long output belongs in a file in the tree.
 	stepResultBytes = 1 << 20
@@ -68,7 +69,7 @@ type CrewConfig struct {
 	Engine         crewEngine
 	// Open starts a worker for a step in dir, its working tree. Folder is the worker's own, for the time it runs, and holds
 	// its model configuration in models.json.
-	Open       func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string) (crewWorker, error)
+	Open       func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string, submit dynaext.Submit) (crewWorker, error)
 	Transcript *Transcript
 	Workdir    string
 	Branch     string // the session's branch, which names the crew's other branches
@@ -537,6 +538,7 @@ func (s stepInfo) name() string {
 type stepOutcome struct {
 	value      any
 	reason     string
+	cause      contract.FailureCause // set for the failures that have a type
 	transcript string
 	usage      contract.Usage
 }
@@ -690,7 +692,7 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 		if schema, err = compileSchema(opts.Schema); err != nil {
 			return stepOutcome{reason: "schema: " + err.Error()}
 		}
-		prompt += "\n\nEnd with only one JSON value that matches this JSON Schema, with no other text:\n" + string(opts.Schema)
+		prompt += "\n\nThis step's result is a JSON file that matches this JSON Schema, which you give to the submit tool:\n" + string(opts.Schema)
 	}
 	c.mu.Lock()
 	profileSlots := c.limits[profile.Name]
@@ -720,7 +722,13 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 	if err := os.WriteFile(filepath.Join(folder, "models.json"), data, 0600); err != nil {
 		return stepOutcome{reason: err.Error()}
 	}
-	worker, err := c.config.Open(ctx, profile, folder, dir)
+	var submitted *submission
+	var submit dynaext.Submit
+	if schema != nil {
+		submitted = &submission{}
+		submit = submitted.judge(schema, dir)
+	}
+	worker, err := c.config.Open(ctx, profile, folder, dir, submit)
 	if err != nil {
 		return stepOutcome{reason: "the worker did not start: " + err.Error()}
 	}
@@ -737,45 +745,111 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 	c.mu.Lock()
 	turn, delivery := c.turn, c.delivery
 	c.mu.Unlock()
-	input := contract.TurnInput{Delivery: delivery, Text: prompt}
-	for attempt := 1; ; attempt++ {
-		ended, err := worker.Start(ctx, turn, []contract.TurnInput{input}, func() {})
-		out.usage.Model = ended.Usage.Model
-		out.usage.InputTokens += ended.Usage.InputTokens
-		out.usage.OutputTokens += ended.Usage.OutputTokens
-		out.usage.CacheReadTokens += ended.Usage.CacheReadTokens
-		out.usage.CacheWriteTokens += ended.Usage.CacheWriteTokens
-		switch {
-		case errors.Is(context.Cause(ctx), context.DeadlineExceeded):
-			out.reason = fmt.Sprintf("timed out after %s", limit)
-			return out
-		case err != nil:
-			out.reason = err.Error()
-			return out
-		case ended.Outcome != contract.TurnCompleted:
-			out.reason = ended.Error
-			if out.reason == "" {
-				out.reason = "the worker's turn " + string(ended.Outcome)
-			}
-			return out
-		case schema == nil && ended.Final == "":
-			out.reason = "the worker ended with no text"
-			return out
-		case schema == nil:
-			out.value = ended.Final
-			return out
+	ended, err := worker.Start(ctx, turn, []contract.TurnInput{{Delivery: delivery, Text: prompt}}, func() {})
+	out.usage = contract.Usage{Model: ended.Usage.Model, InputTokens: ended.Usage.InputTokens, OutputTokens: ended.Usage.OutputTokens, CacheReadTokens: ended.Usage.CacheReadTokens, CacheWriteTokens: ended.Usage.CacheWriteTokens}
+	switch {
+	case errors.Is(context.Cause(ctx), context.DeadlineExceeded):
+		out.reason = fmt.Sprintf("timed out after %s", limit)
+	case err != nil:
+		out.reason = err.Error()
+	case submitted != nil && submitted.accepted:
+		out.value = submitted.value
+	case ended.Outcome != contract.TurnCompleted:
+		out.reason = ended.Error
+		if out.reason == "" {
+			out.reason = "the worker's turn " + string(ended.Outcome)
 		}
-		value, problem := matchSchema(schema, ended.Final)
-		if problem == "" {
-			out.value = value
-			return out
-		}
-		if attempt == schemaAttempts {
-			out.reason = fmt.Sprintf("no reply matched the schema in %d attempts: %s", attempt, problem)
-			return out
-		}
-		input.Text = "That reply does not match the schema: " + problem + "\nReply again with only the JSON value."
+	case submitted != nil && submitted.attempts == 0:
+		out.cause, out.reason = contract.CauseNoSubmit, "the worker ended without submitting a file"
+	case submitted != nil:
+		out.cause, out.reason = contract.CauseNoSubmit, fmt.Sprintf("the worker ended without a valid submit, after %d submits: %s", submitted.attempts, submitted.problem)
+	case ended.Final == "":
+		out.reason = "the worker ended with no text"
+	default:
+		out.value = ended.Final
 	}
+	return out
+}
+
+// submission is what a schema worker's submits come to. judge runs on the worker's tool calls, one at a time.
+type submission struct {
+	mu       sync.Mutex
+	attempts int
+	accepted bool
+	value    any
+	problem  string // the latest submit's
+}
+
+var (
+	errSubmitOutside = errors.New("the path is outside the working folder")
+	errSubmitNotFile = errors.New("the path is not a file")
+)
+
+// judge reads the file a worker names, inside dir, as JSON and checks it against the schema. A valid file is the result and
+// ends the turn; so does the last of the schemaAttempts files, which fails the step. A refused path is no file and does not count.
+func (s *submission) judge(schema *jsonschema.Schema, dir string) dynaext.Submit {
+	return func(path string) (string, bool, error) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		value, problem, refused := readSubmit(schema, dir, path)
+		if refused == nil {
+			s.attempts++
+		}
+		if problem == "" && refused == nil {
+			s.value, s.accepted = value, true
+			return "Submitted: this is the step's result.", true, nil
+		}
+		s.problem = problem
+		if refused != nil {
+			s.problem = refused.Error()
+		}
+		if s.attempts >= schemaAttempts {
+			return fmt.Sprintf("%s\nThat was submit %d of %d, so the step fails.", s.problem, s.attempts, schemaAttempts), true, nil
+		}
+		return problem, false, refused
+	}
+}
+
+// readSubmit reads the file at path inside dir. A path it may not read is refused; a file that is not JSON, or that the
+// schema rejects, comes back as the problem to tell the worker.
+func readSubmit(schema *jsonschema.Schema, dir, path string) (value any, problem string, refused error) {
+	name := path
+	if filepath.IsAbs(path) {
+		rel, err := filepath.Rel(dir, path)
+		if err != nil || !filepath.IsLocal(rel) {
+			return nil, "", errSubmitOutside
+		}
+		name = rel
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, "", err
+	}
+	defer root.Close()
+	// The root refuses ".." and a symlink that leaves it.
+	file, err := root.Open(name)
+	if err != nil {
+		return nil, "", err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, "", err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, "", errSubmitNotFile
+	}
+	if info.Size() > stepResultBytes {
+		return nil, fmt.Sprintf("the file is %d bytes, over the limit of %d", info.Size(), stepResultBytes), nil
+	}
+	value, err = jsonschema.UnmarshalJSON(file)
+	if err != nil {
+		return nil, "it is not JSON: " + err.Error(), nil
+	}
+	if err := schema.Validate(value); err != nil {
+		return nil, err.Error(), nil
+	}
+	return value, "", nil
 }
 
 func compileSchema(raw json.RawMessage) (*jsonschema.Schema, error) {
@@ -788,23 +862,6 @@ func compileSchema(raw json.RawMessage) (*jsonschema.Schema, error) {
 		return nil, err
 	}
 	return compiler.Compile("schema.json")
-}
-
-// matchSchema reads a worker's reply as JSON. Models often fence it, which costs nothing to forgive.
-func matchSchema(schema *jsonschema.Schema, reply string) (any, string) {
-	text := strings.TrimSpace(reply)
-	if strings.HasPrefix(text, "```") {
-		_, text, _ = strings.Cut(text, "\n")
-		text = strings.TrimSuffix(strings.TrimSpace(text), "```")
-	}
-	value, err := jsonschema.UnmarshalJSON(strings.NewReader(text))
-	if err != nil {
-		return nil, "it is not JSON: " + err.Error()
-	}
-	if err := schema.Validate(value); err != nil {
-		return nil, err.Error()
-	}
-	return value, ""
 }
 
 type commandOpts struct {
