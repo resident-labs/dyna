@@ -891,3 +891,25 @@ func TestLinesReachTheJournalInTheOrderTheScriptWroteThem(t *testing.T) {
 		t.Fatalf("lines started in the order %q", h.journal.started)
 	}
 }
+
+func TestLogRendersArraysAndObjectsAsJSON(t *testing.T) {
+	h := newCrewHarness(t)
+	h.result(crewMeta + `
+log('extracted', 503, 'failed', []);
+log([1, 2], {a: 1}, {});
+log({list: [1, {b: null}]}, 'text', true, null, undefined, 1.5);
+log(new Error('boom'));
+const cycle = {}; cycle.self = cycle;
+log('cycle', cycle, 10n, {big: 1n});
+return 1`)
+	want := []string{
+		"log: extracted 503 failed []",
+		"log: [1,2] {\"a\":1} {}",
+		"log: {\"list\":[1,{\"b\":null}]} text true null undefined 1.5",
+		"log: Error: boom",
+		"log: cycle [object Object] 10 {\"big\":\"1\"}",
+	}
+	if !slices.Equal(h.journal.started, want) {
+		t.Fatalf("lines %q, want %q", h.journal.started, want)
+	}
+}
