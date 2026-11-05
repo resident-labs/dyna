@@ -17,7 +17,7 @@ func TestWorkersOpenWithTheirProfileTheirOwnFolderAndTheirOwnSessionFile(t *test
 	model := pigtest.NewModel()
 	agentDir := pigtest.AgentDir(t, model, "")
 	box := pig.Config{AgentDir: agentDir, SessionDir: filepath.Join(agentDir, "sessions"), Instructions: "You are a worker."}
-	profile := contract.WorkflowProfile{Name: "fast", Model: contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "test-model", Thinking: contract.ThinkingLow}, CompactTokens: 150000}
+	profile := contract.WorkflowProfile{Name: "fast", ModelInstructions: "Use spaced prose.", Model: contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "test-model", Thinking: contract.ThinkingLow}, CompactTokens: 150000}
 	folder, dir := t.TempDir(), t.TempDir()
 	models, err := os.ReadFile(filepath.Join(agentDir, "models.json"))
 	if err != nil {
@@ -27,7 +27,7 @@ func TestWorkersOpenWithTheirProfileTheirOwnFolderAndTheirOwnSessionFile(t *test
 		t.Fatal(err)
 	}
 	c := workerConfig(box, profile, folder, dir)
-	if c.Dir != dir || c.Model != profile.Model || c.CompactTokens != 150000 || c.ModelsFile != filepath.Join(folder, "models.json") || !c.New || c.AgentDir != agentDir {
+	if c.ModelInstructions != profile.ModelInstructions || c.Dir != dir || c.Model != profile.Model || c.CompactTokens != 150000 || c.ModelsFile != filepath.Join(folder, "models.json") || !c.New || c.AgentDir != agentDir {
 		t.Fatalf("config %+v", c)
 	}
 	files := map[string]bool{}
