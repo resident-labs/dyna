@@ -97,6 +97,9 @@ const data=page.getByRole("region",{name:"Workflow data"});await data.locator("s
 await data.locator("summary").click();await data.getByRole("button",{name:"Retry"}).click();await data.getByText('"conflicts"',{exact:true}).click();
 await data.locator("summary .index").filter({hasText:/^49$/}).waitFor();assert.equal(await data.locator("summary .index").filter({hasText:/^50$/}).count(),0,"wide collection paged");
 await data.getByRole("button",{name:/Show next 50/}).click();await data.locator("summary .index").filter({hasText:/^99$/}).waitFor();assert.ok(await data.locator("details").count()<110,"no full thousand-item expansion");
+await page.getByRole("button",{name:"Refresh same post"}).click();await page.evaluate(()=>new Promise(requestAnimationFrame));
+assert.equal(await data.getByRole("region",{name:"JSON data tree"}).count(),1,"same file reference survives a refreshed transcript row");assert.equal(requests,2,"refresh does not refetch immutable data");
+assert.equal(await data.locator("summary .index").filter({hasText:/^99$/}).count(),1,"refresh retains expanded paging state");
 const downloading=page.waitForEvent("download");await data.getByRole("button",{name:"Download",exact:true}).click();assert.equal(await readFile(await (await downloading).path(),"utf8"),hugeText,"reference download preserves original bytes for all1000 entries");
 console.log("unrelated data.json mapping and oversized transcript lazy fetch/retry/paging/exact download passed");
 await context.close();await browser.close();

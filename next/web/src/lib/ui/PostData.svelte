@@ -13,7 +13,9 @@
  let copied = $state("");
  let failure = $state("");
  let loading = $state(false);
- $effect(() => { reference; loaded = undefined; raw = undefined; failure = ""; });
+ let referenceHash = $derived(reference?.file.sha256);
+ // A transcript refresh may replace the metadata object for the same immutable file.
+ $effect(() => { referenceHash; loaded = undefined; raw = undefined; failure = ""; });
  function load() {
   if (!reference || loading) return;
   const hash = reference.file.sha256;
