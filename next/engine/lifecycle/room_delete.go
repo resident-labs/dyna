@@ -87,6 +87,9 @@ func (r *Reconciler) launchRoomStep(ctx context.Context, key string, step func(c
 // deleteRoom runs the steps after the boxes are gone. Every step tolerates having run before, so a restart starts it again from the top.
 // A host that is not ready gets a durable debt instead of a wait; a ready host that fails holds the room, with the reason shown.
 func (r *Reconciler) deleteRoom(ctx context.Context, room contract.RoomID, hosts []box.Host) error {
+	if err := r.removeRoomServices(ctx, room); err != nil {
+		return err
+	}
 	if r.roomHosts != nil {
 		for _, host := range hosts {
 			if host.State == box.HostReady {
