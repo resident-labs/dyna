@@ -72,6 +72,12 @@ var AllWorkflowSettings = []WorkflowSettingInfo{
 // DefaultWorkflowTimeout is how long a worker runs when neither the script nor the settings say: 5 hours, in seconds.
 const DefaultWorkflowTimeout = 5 * 60 * 60
 
+// MaxWorkflowTimeout is the longest default timeout the owner may set: 30 days in seconds, far below where seconds as a duration overflow.
+const MaxWorkflowTimeout = 30 * 24 * 60 * 60
+
+// MaxWorkflowCount is the most runs per room or workers per run the owner may set; 0 stays no limit.
+const MaxWorkflowCount = 10000
+
 // WorkflowSettings is the values one scope sets, the global one or a room's. A value that is not set is inherited: a room's
 // from the global scope, and the global scope's from WorkflowDefaults. Profiles that is empty is not set.
 type WorkflowSettings struct {

@@ -899,11 +899,11 @@ A **crew** is one Dyna session with one box. The agents inside it are PiG sessio
 | Setting | Built-in default | Where it holds |
 |---|---|---|
 | `start`: who may start a workflow: `any` session, `leads` (the room's root and sessions that have ever started a child), `root` or `off` | `any` | `workflow.run` |
-| `maxRuns`: the most runs going at once in the room; 0 is no limit | 0 | `workflow.run`, counted inside the transaction that starts the crew, so two starts at the limit let one in |
-| `maxWorkers`: the most workers one run has at once, on top of its box's memory and each profile's `maxConcurrent`; 0 is no limit | 0 | the crew's box, when its box starts (it takes the value its hello carries) |
-| `profiles`: the profiles a script's `meta.profiles` may name; empty is every profile | every profile | `workflow.run`, `workflow.reload` |
+| `maxRuns`: the most runs going at once in the room; 0 is no limit, at most 10000 | 0 | `workflow.run`, counted inside the transaction that starts the crew, so two starts at the limit let one in |
+| `maxWorkers`: the most workers one run has at once, on top of its box's memory and each profile's `maxConcurrent`; 0 is no limit, at most 10000 | 0 | the crew's box, when its box starts (it takes the value its hello carries) |
+| `profiles`: the profiles a script's `meta.profiles` may name; none set is every profile, in the API and in the CLI (`--clear profiles` returns to it; an empty name is refused) | every profile | `workflow.run`, `workflow.reload` |
 | `size`: the box size of a run whose script sets no `meta.size`; empty is the engine's choice | the engine's choice | `workflow.run` |
-| `timeout`: seconds a worker or command may run when `agent()` or `run()` sets no `timeout` | 18000 (5 hours) | the crew's box (its hello and each reload carry it) |
+| `timeout`: seconds a worker or command may run when `agent()` or `run()` sets no `timeout`, from 1 to 2592000 (30 days) | 18000 (5 hours) | the crew's box (its hello and each reload carry it) |
 | `worktree`: `agent()` with `worktree: true` | on | each step's start |
 | `merge`: `merge()` | on | each step's start |
 | `run`: `run()` shell commands | on | each step's start |
