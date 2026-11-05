@@ -211,7 +211,7 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 				return nil
 			}
 			preparing()
-			moved, err := r.Harness.TransferModel(ctx, start.Turn, start.Model, start.CompactTokens)
+			moved, err := r.Harness.TransferModel(ctx, start.Turn, start.Model, start.CompactTokens, start.ModelInstructions)
 			if errors.Is(err, harness.ErrRefused) {
 				cause = contract.CauseSetModelFailed
 			}

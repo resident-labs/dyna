@@ -62,7 +62,7 @@ func TestTextOnlyTransferOnPiG(t *testing.T) {
 	if _, err := h.Start(ctx, "turn_a", []contract.TurnInput{{Delivery: 1, Text: "hello"}}, func() {}); err != nil {
 		t.Fatal(err)
 	}
-	moved, err := h.TransferModel(ctx, "turn_b", contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "text-opus", Thinking: contract.ThinkingXHigh}, 0)
+	moved, err := h.TransferModel(ctx, "turn_b", contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "text-opus", Thinking: contract.ThinkingXHigh}, 0, "")
 	if err != nil || moved.Path != "switched" {
 		t.Fatalf("the transfer took path %q: %v", moved.Path, err)
 	}
