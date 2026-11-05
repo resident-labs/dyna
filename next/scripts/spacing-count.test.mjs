@@ -41,6 +41,14 @@ test('mixed model cohorts, unknown exclusion, timestamps and explicit fresh filt
  assert.equal(data.excluded_time, 1);
  assert.equal(data.excluded_model, 1);
  assert.equal(data.unknown_model_records, 1);
+ const exact = record('exact', []);
+ assert.equal(measureJSONL(jsonl(exact), {after:exact.timestamp}).cohorts[0].assistant_messages, 1);
+ assert.equal(measureJSONL(jsonl(exact), {before:exact.timestamp}).excluded_time, 1);
+ delete exact.timestamp;
+ const missingTime = measureJSONL(jsonl(exact), {after:'2026-11-05T00:00:00Z'});
+ assert.equal(missingTime.unknown_timestamp_records, 1);
+ assert.equal(missingTime.excluded_time, 1);
+ assert.equal(missingTime.cohorts.length, 0);
 });
 
 test('truncated first line opt-in, strict later corruption, no contents in errors', () => {
