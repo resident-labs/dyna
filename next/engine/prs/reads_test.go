@@ -196,3 +196,36 @@ func TestAgentSearchWaitsOnlyForSearch(t *testing.T) {
 		t.Fatalf("during the wait: %v", err)
 	}
 }
+
+// Only a write the githubwrites guard has vouched for gets out of Reads. The vouch does not turn a GraphQL query's check off (a
+// vouched request is the guard's to have checked), and it does not carry from one request to another.
+func TestVouchedWritesLeaveReadsAndNothingElseDoes(t *testing.T) {
+	c, fake, _, client := readsClient(t)
+	base := c.Endpoint.String()
+	vouchedSend := func(method, path, body string) error {
+		request, _ := http.NewRequestWithContext(Vouched(t.Context()), method, base+path, strings.NewReader(body))
+		response, err := client.Do(request)
+		if err == nil {
+			response.Body.Close()
+		}
+		return err
+	}
+	for _, write := range []struct{ method, path, body string }{
+		{http.MethodPatch, "/repos/o/r/issues/1", `{"title":"x"}`},
+		{http.MethodPost, "/repos/o/r/issues", `{"title":"x"}`},
+		{http.MethodPost, "/graphql", `{"query":"mutation($i:CloseIssueInput!){closeIssue(input:$i){clientMutationId}}"}`},
+	} {
+		if err := send(t, client, write.method, base+write.path, write.body); err == nil {
+			t.Errorf("unvouched %s %s got out", write.method, write.path)
+		}
+		if err := vouchedSend(write.method, write.path, write.body); err != nil {
+			t.Errorf("vouched %s %s: %v", write.method, write.path, err)
+		}
+	}
+	if seen := fake.requests(); len(seen) != 3 {
+		t.Fatalf("what reached GitHub: %v", seen)
+	}
+	if IsVouched(t.Context()) {
+		t.Fatal("a context with no vouch is vouched")
+	}
+}

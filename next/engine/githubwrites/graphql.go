@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
@@ -35,11 +36,24 @@ type ref struct {
 	required bool
 }
 
+// enum is an input field that holds an enum value, which must be one of allowed (compared exactly, as GraphQL enums are). A required one
+// that is missing refuses the mutation.
+type enum struct {
+	field    string
+	allowed  []string
+	required bool
+}
+
+// reviewEvents are the events a review may have: a comment or a change request. APPROVE can satisfy a required-review branch
+// protection under the engine's token, which is a way to merge, and merges are never allowed.
+var reviewEvents = []string{"COMMENT", "REQUEST_CHANGES"}
+
 // mutation is one GraphQL mutation a group allows: the exact input fields it may carry, and the node IDs among them.
 type mutation struct {
 	group  contract.GitHubWriteGroup
 	fields []string
 	refs   []ref
+	enums  []enum
 }
 
 // mutations is the allow-list of GraphQL mutations by root field name. A mutation not here is refused, whatever it is.
@@ -52,8 +66,8 @@ var mutations = map[string]mutation{
 	"updateLabel": {group: issues, fields: []string{"id", "name", "color", "description", "clientMutationId"}, refs: []ref{{"id", nodeLabel, true}}},
 
 	"updatePullRequest":             {group: pulls, fields: []string{"pullRequestId", "title", "body", "clientMutationId"}, refs: []ref{{"pullRequestId", nodePullRequest, true}}},
-	"addPullRequestReview":          {group: pulls, fields: []string{"pullRequestId", "commitOID", "body", "event", "clientMutationId"}, refs: []ref{{"pullRequestId", nodePullRequest, true}}},
-	"submitPullRequestReview":       {group: pulls, fields: []string{"pullRequestId", "pullRequestReviewId", "event", "body", "clientMutationId"}, refs: []ref{{"pullRequestReviewId", nodeReview, true}, {"pullRequestId", nodePullRequest, false}}},
+	"addPullRequestReview":          {group: pulls, fields: []string{"pullRequestId", "commitOID", "body", "event", "clientMutationId"}, refs: []ref{{"pullRequestId", nodePullRequest, true}}, enums: []enum{{"event", reviewEvents, false}}},
+	"submitPullRequestReview":       {group: pulls, fields: []string{"pullRequestId", "pullRequestReviewId", "event", "body", "clientMutationId"}, refs: []ref{{"pullRequestReviewId", nodeReview, true}, {"pullRequestId", nodePullRequest, false}}, enums: []enum{{"event", reviewEvents, true}}},
 	"resolveReviewThread":           {group: pulls, fields: []string{"threadId", "clientMutationId"}, refs: []ref{{"threadId", nodeThread, true}}},
 	"unresolveReviewThread":         {group: pulls, fields: []string{"threadId", "clientMutationId"}, refs: []ref{{"threadId", nodeThread, true}}},
 	"addProjectV2ItemById":          {group: projects, fields: []string{"projectId", "contentId", "clientMutationId"}, refs: []ref{{"projectId", nodeProject, true}, {"contentId", nodeContent, true}}},
@@ -99,74 +113,84 @@ func readGraphQL(body []byte) (graphqlBody, *Refusal) {
 
 // checkGraphQL allows a GraphQL request whose every operation is a query, or a mutation that the grant allows. Every operation of
 // the document counts, whichever one operationName selects.
-func (g *Guard) checkGraphQL(request *http.Request, grant contract.GitHubWrites, body []byte) *Refusal {
+func (g *Guard) checkGraphQL(request *http.Request, grant contract.GitHubWrites, body []byte) (mutates bool, refusal *Refusal) {
 	parsed, refusal := readGraphQL(body)
 	if refusal != nil {
-		return refusal
+		return false, refusal
 	}
 	document, parseErr := parser.ParseQuery(&ast.Source{Name: "request", Input: parsed.Query})
 	if parseErr != nil {
-		return refuse(contract.GitHubWriteGraphQLUnparsable, "the GraphQL document does not parse: %s", parseErr)
+		return false, refuse(contract.GitHubWriteGraphQLUnparsable, "the GraphQL document does not parse: %s", parseErr)
 	}
 	var writes []*ast.OperationDefinition
 	for _, operation := range document.Operations {
 		switch operation.Operation {
 		case ast.Subscription:
-			return refuse(contract.GitHubWriteGraphQLSubscription, "a GraphQL subscription is not sent")
+			return false, refuse(contract.GitHubWriteGraphQLSubscription, "a GraphQL subscription is not sent")
 		case ast.Mutation:
 			writes = append(writes, operation)
 		}
 	}
 	if len(writes) == 0 {
-		return nil
+		return false, nil
 	}
 	if !grant.On() {
-		return refuse(contract.GitHubWriteOff, "agents only read GitHub here, and this GraphQL request would write: the room's githubWrites setting is off, so open a PR with pr open, and leave other writes to the owner or a host")
+		return true, refuse(contract.GitHubWriteOff, "agents only read GitHub here, and this GraphQL request would write: the room's githubWrites setting is off, so open a PR with pr open, and leave other writes to the owner or a host")
 	}
 	nodes := map[string]node{}
 	for _, operation := range writes {
 		for _, selection := range operation.SelectionSet {
 			field, ok := selection.(*ast.Field)
 			if !ok || len(field.Directives) != 0 {
-				return refuse(contract.GitHubWriteGraphQLShape, "a mutation's root is plain fields: no fragment and no directive")
+				return false, refuse(contract.GitHubWriteGraphQLShape, "a mutation's root is plain fields: no fragment and no directive")
 			}
 			rule, known := mutations[field.Name]
 			if !known {
-				return refuse(contract.GitHubWriteGraphQLMutation, "the GraphQL mutation %s is not among the GitHub writes a room can allow", field.Name)
+				return false, refuse(contract.GitHubWriteGraphQLMutation, "the GraphQL mutation %s is not among the GitHub writes a room can allow", field.Name)
 			}
 			if !grant.Has(rule.group) {
-				return refuse(contract.GitHubWriteGroupOff, "the GraphQL mutation %s belongs to the %s group, which this room has not turned on", field.Name, rule.group)
+				return false, refuse(contract.GitHubWriteGroupOff, "the GraphQL mutation %s belongs to the %s group, which this room has not turned on", field.Name, rule.group)
 			}
 			if len(field.Arguments) != 1 || field.Arguments[0].Name != "input" || field.Arguments[0].Value.Kind != ast.Variable {
-				return refuse(contract.GitHubWriteGraphQLShape, "the GraphQL mutation %s is sent as %s(input: $variable) and nothing else", field.Name, field.Name)
+				return false, refuse(contract.GitHubWriteGraphQLShape, "the GraphQL mutation %s is sent as %s(input: $variable) and nothing else", field.Name, field.Name)
 			}
 			raw, given := parsed.Variables[field.Arguments[0].Value.Raw]
 			var input map[string]json.RawMessage
 			if !given || json.Unmarshal(raw, &input) != nil || input == nil {
-				return refuse(contract.GitHubWriteGraphQLShape, "the input of %s is a variable whose value the request gives as an object", field.Name)
+				return false, refuse(contract.GitHubWriteGraphQLShape, "the input of %s is a variable whose value the request gives as an object", field.Name)
 			}
 			if !keysWithin(input, rule.fields) {
-				return refuse(contract.GitHubWriteFieldNotAllowed, "the input of %s sets a field outside the ones this room allows (%s)", field.Name, strings.Join(rule.fields, ", "))
+				return false, refuse(contract.GitHubWriteFieldNotAllowed, "the input of %s sets a field outside the ones this room allows (%s)", field.Name, strings.Join(rule.fields, ", "))
+			}
+			for _, each := range rule.enums {
+				value, present := input[each.field]
+				if !present && !each.required {
+					continue
+				}
+				var given string
+				if !present || json.Unmarshal(value, &given) != nil || !slices.Contains(each.allowed, given) {
+					return false, refuse(contract.GitHubWriteReviewEvent, "the %s of %s is one of %s: a review is a comment or a change request, and approving is not available", each.field, field.Name, strings.Join(each.allowed, ", "))
+				}
 			}
 			for _, each := range rule.refs {
 				value, present := input[each.field]
 				if !present {
 					if each.required {
-						return refuse(contract.GitHubWriteGraphQLShape, "the input of %s has no %s, which says which repository it acts on", field.Name, each.field)
+						return false, refuse(contract.GitHubWriteGraphQLShape, "the input of %s has no %s, which says which repository it acts on", field.Name, each.field)
 					}
 					continue
 				}
 				var id string
 				if json.Unmarshal(value, &id) != nil || id == "" {
-					return refuse(contract.GitHubWriteGraphQLShape, "%s of %s is a node ID string", each.field, field.Name)
+					return false, refuse(contract.GitHubWriteGraphQLShape, "%s of %s is a node ID string", each.field, field.Name)
 				}
 				if refusal := g.within(request, grant, nodes, id, each.kind, field.Name); refusal != nil {
-					return refusal
+					return false, refusal
 				}
 			}
 		}
 	}
-	return nil
+	return true, nil
 }
 
 // readBody reads a request body up to a megabyte, which is far over any write, and puts it back. A body of another content type

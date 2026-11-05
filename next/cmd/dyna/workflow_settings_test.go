@@ -43,3 +43,21 @@ func TestWorkflowSetHelpNamesEverySettingWithItsLine(t *testing.T) {
 		}
 	}
 }
+
+// --github-writes is read strictly: one @, no empty element, known groups, owner/name or * for repositories.
+func TestParseGitHubWrites(t *testing.T) {
+	got, err := parseGitHubWrites("issues,projects@acme/app,*")
+	if err != nil || len(got.Groups) != 2 || got.Groups[1] != contract.GitHubWriteProjects || len(got.Repos) != 2 || got.Repos[0] != "acme/app" || got.Repos[1] != "*" {
+		t.Fatalf("a value: %+v %v", got, err)
+	}
+	off, err := parseGitHubWrites("off")
+	if err != nil || off.Groups == nil || len(off.Groups) != 0 || off.Repos == nil || len(off.Repos) != 0 {
+		t.Fatalf("off: %+v %v", off, err)
+	}
+	for _, bad := range []string{"@", "a@", "@b", "issues@", "@acme/app", "issues,@acme/app", ",issues@acme/app", "issues@acme/app,", "issues@acme/app,,acme/lib", "issues@acme/app@acme/lib", "issues@@acme/app",
+		"issues", "issues acme/app", "issues:acme/app", "merge@acme/app", "Issues@acme/app", "issues,,pulls@acme/app", "issues@acme", "issues@acme/", "issues@/app", "issues@acme/app/x", "issues@**", "OFF", "off@acme/app", "issues@acme/app, acme/lib"} {
+		if got, err := parseGitHubWrites(bad); err == nil {
+			t.Errorf("%q was accepted as %+v", bad, got)
+		}
+	}
+}
