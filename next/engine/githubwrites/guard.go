@@ -34,7 +34,11 @@ func (g *Guard) RoundTrip(request *http.Request) (*http.Response, error) {
 		}()
 	}
 	grant := AllowedFrom(request.Context())
-	if !grant.On() {
+	prefix := strings.TrimRight(g.API.Path, "/")
+	// A GraphQL query is a read, which the engine always allows; whether a POST to /graphql is one is known only once its body is
+	// parsed, so that is checked before the setting is.
+	graphQL := request.Method == http.MethodPost && request.URL.Path == prefix+"/graphql" && request.URL.RawQuery == ""
+	if !grant.On() && !graphQL {
 		return nil, refuse(contract.GitHubWriteOff, "agents only read GitHub here, and %s %s would write: this room's githubWrites setting is off, so open a PR with pr open, and leave other writes to the owner or a host", request.Method, request.URL.Path)
 	}
 	if !strings.EqualFold(request.URL.Host, g.API.Host) || request.URL.Scheme != g.API.Scheme || request.URL.User != nil {
@@ -47,13 +51,16 @@ func (g *Guard) RoundTrip(request *http.Request) (*http.Response, error) {
 	if refusal != nil {
 		return nil, refusal
 	}
-	prefix := strings.TrimRight(g.API.Path, "/")
-	if request.Method == http.MethodPost && request.URL.Path == prefix+"/graphql" && request.URL.RawQuery == "" {
-		refusal = g.checkGraphQL(request, grant, body)
-	} else {
-		refusal = g.checkREST(grant, request, prefix, body)
-	}
-	if refusal != nil {
+	if graphQL {
+		mutates, refusal := g.checkGraphQL(request, grant, body)
+		if refusal != nil {
+			return nil, refusal
+		}
+		if !mutates {
+			// A query goes on as the read it is, with no vouch, so the read transport still checks it.
+			return g.Base.RoundTrip(request)
+		}
+	} else if refusal := g.checkREST(grant, request, prefix, body); refusal != nil {
 		return nil, refusal
 	}
 	return g.Base.RoundTrip(request.WithContext(prs.Vouched(request.Context())))

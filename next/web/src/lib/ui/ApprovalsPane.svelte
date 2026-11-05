@@ -4,7 +4,8 @@
   import { approvalChips, approvalOn, approvalsLine, autopilotConfirm, autopilotOn, autopilotRequest, rootApprovals, switchRequest } from "../autopilot.ts";
   import { confirm } from "../modal.ts";
   import type { Column } from "../settings-list.ts";
-  import type { GitHubWriteGroup, RoomSetRequest, RoomSummary } from "../contract.gen.ts";
+  import type { RoomSetRequest, RoomSummary } from "../contract.gen.ts";
+  import { writeGroups, writeLabel, writeOn, writeRequest, writesRepos } from "../githubwrites.ts";
   import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
   import ItemList from "./settings/ItemList.svelte";
@@ -59,17 +60,6 @@
     { id: "name", label: "Room", width: "minmax(0, 1fr)", compare: (a, b) => a.name.localeCompare(b.name) },
     ...rootApprovals.map(({ kind, short }) => ({ id: kind, label: short, width: "64px" })),
   ];
-  // GitHub writes (spec 7.9): each group is a switch over the repositories the room already has set, or all of the room's (*) when it has none.
-  const writeGroups: { group: GitHubWriteGroup; label: string; note: string }[] = [
-    { group: "issues", label: "Issues", note: "Open and edit issues, comment, label and link sub-issues." },
-    { group: "pulls", label: "Pull requests", note: "Comment, review, and edit a PR's title, body and labels. Never merge, close or retarget." },
-    { group: "projects", label: "Projects", note: "Add items to a project and set their fields." },
-  ];
-  const writesRepos = (room: RoomSummary) => room.githubWrites?.repos?.length ? room.githubWrites.repos.join(", ") : "none";
-  const writeOn = (room: RoomSummary, group: GitHubWriteGroup) => (room.githubWrites?.groups ?? []).includes(group);
-  const writeRequest = (room: RoomSummary, group: GitHubWriteGroup, on: boolean): RoomSetRequest => ({ room: room.id, githubWrites: {
-    repos: room.githubWrites?.repos?.length ? room.githubWrites.repos : ["*"],
-    groups: writeGroups.map(each => each.group).filter(each => each === group ? on : writeOn(room, each)) } });
   const count = (test: (room: RoomSummary) => boolean) => rooms?.filter(test).length ?? 0;
 </script>
 
@@ -104,7 +94,7 @@
     <div class="section"><h3 class="small">GitHub writes</h3>
       <p class="small muted">Off until you turn a group on. Lets this room's sessions write to GitHub without a host grant, on {writesRepos(room)}; merging, deleting and everything else stay refused.</p>
       <div class="stack">{#each writeGroups as { group, label, note } (group)}
-        <label class="set"><span class="name">{label}</span><input type="checkbox" role="switch" checked={writeOn(room, group)} disabled={busy} aria-label={`GitHub writes:  in `}
+        <label class="set"><span class="name">{label}</span><input type="checkbox" role="switch" checked={writeOn(room, group)} disabled={busy} aria-label={writeLabel(group, room)}
           onchange={event => { const box = event.currentTarget; void change(room!, writeRequest(room!, group, box.checked)).then(done => { if (!done) box.checked = !box.checked; }); }} /><span class="help">{note}</span></label>{/each}</div></div>
     {#if problem?.id === room.id}<p class="problem" role="alert">{problem.text}</p>{/if}
   {:else}<p class="muted">That room is gone, or the link is wrong.</p>
