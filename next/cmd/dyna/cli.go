@@ -119,7 +119,7 @@ func newClient(socket string) *socketClient {
 type requestType interface {
 	contract.ProfileListRequest | contract.ProfileSetRequest | contract.ProfileRemoveRequest |
 		contract.ProxyKeyRequest | contract.ProxyUsageRequest |
-		contract.WorkflowRunRequest | contract.WorkflowReloadRequest | contract.WorkflowStatusRequest | contract.WorkflowListRequest |
+		contract.WorkflowRunRequest | contract.WorkflowReloadRequest | contract.WorkflowStatusRequest | contract.WorkflowListRequest | contract.WorkflowSettingsRequest | contract.WorkflowSetRequest |
 		contract.AddonListRequest | contract.AddonRemoveRequest | contract.ImageSaveRequest | contract.ImageListRequest | contract.ImageShowRequest | contract.ImageRemoveRequest | contract.PackageAddRequest | contract.SkillSaveRequest | contract.AddonSetHostsRequest | contract.MCPAddRequest |
 		contract.SubscriptionAddRequest | contract.SubscriptionListRequest | contract.SubscriptionRemoveRequest | contract.SubscriptionSetEnabledRequest |
 		contract.WebSearchRequest | contract.WebsearchSetKeyRequest | contract.WebsearchRemoveKeyRequest |
@@ -137,7 +137,7 @@ type requestType interface {
 type responseType interface {
 	contract.ProfileListResponse | contract.ProfileSetResponse | contract.ProfileRemoveResponse |
 		contract.ProxyKeyResponse | contract.ProxyUsageResponse |
-		contract.WorkflowRunResponse | contract.WorkflowReloadResponse | contract.WorkflowStatusResponse | contract.WorkflowListResponse |
+		contract.WorkflowRunResponse | contract.WorkflowReloadResponse | contract.WorkflowStatusResponse | contract.WorkflowListResponse | contract.WorkflowSettingsResponse | contract.WorkflowSetResponse |
 		contract.AddonListResponse | contract.AddonChangeResponse | contract.AddonSetHostsResponse | contract.ImageSaveResponse | contract.ImageListResponse | contract.ImageShowResponse | contract.ImageRemoveResponse |
 		contract.SubscriptionAddResponse | contract.SubscriptionListResponse | contract.SubscriptionRemoveResponse | contract.SubscriptionSetEnabledResponse |
 		contract.WebSearchResponse | contract.WebsearchSetKeyResponse | contract.WebsearchRemoveKeyResponse |

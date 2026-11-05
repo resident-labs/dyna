@@ -21,6 +21,9 @@ const holdsChars = 1000
 // roomChars is the budget of dyna_room.
 const roomChars = 400
 
+// workflowsChars is the budget of dyna_workflows.
+const workflowsChars = 300
+
 // rootApprovalNames name the root-approves kinds as Settings > Approvals does.
 var rootApprovalNames = map[contract.RootApproval]string{
 	contract.RootApprovesHostexec: "host exec",
@@ -139,7 +142,7 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		return contract.ContextSnapshotResponse{}, forbidden()
 	}
 	switch req.Section {
-	case "", contract.ContextGoal, contract.ContextChildren, contract.ContextRequests, contract.ContextHolds, contract.ContextProfiles, contract.ContextUsage, contract.ContextRoom:
+	case "", contract.ContextGoal, contract.ContextChildren, contract.ContextRequests, contract.ContextHolds, contract.ContextProfiles, contract.ContextUsage, contract.ContextRoom, contract.ContextWorkflows:
 	default:
 		return contract.ContextSnapshotResponse{}, invalid("unknown context section")
 	}
@@ -223,6 +226,39 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		lines = append(lines, "Approvals you decide: "+strings.Join(decide, ", "))
 	}
 	add(contract.ContextRoom, lines, roomChars, 0)
+	// What the room's workflow settings change from the defaults, for every session; limits and defaults are named by the refusal that
+	// meets them.
+	session, err := s.store.Session(ctx, caller.Session)
+	if err != nil {
+		return contract.ContextSnapshotResponse{}, failure(err)
+	}
+	effective, err := s.store.WorkflowEffective(ctx, session.Room)
+	if err != nil {
+		return contract.ContextSnapshotResponse{}, failure(err)
+	}
+	lines = nil
+	switch effective.Start {
+	case contract.WorkflowStartLeads:
+		lines = append(lines, "Workflows: started by leads (root and sessions that have started a child)")
+	case contract.WorkflowStartRoot:
+		lines = append(lines, "Workflows: started by root")
+	case contract.WorkflowStartOff:
+		lines = append(lines, "Workflows: no session starts one; the owner does")
+	}
+	var off []string
+	for _, feature := range contract.AllWorkflowFeatures {
+		if !effective.Allows(feature) {
+			name := string(feature)
+			if feature != contract.WorkflowFeatureResume {
+				name += "()"
+			}
+			off = append(off, name)
+		}
+	}
+	if len(off) > 0 {
+		lines = append(lines, "Off: "+strings.Join(off, ", "))
+	}
+	add(contract.ContextWorkflows, lines, workflowsChars, 0)
 	return result, nil
 }
 

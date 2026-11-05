@@ -235,6 +235,9 @@ func id(prefix string, now time.Time) (string, error) {
 }
 
 func failure(err error) *contract.Error {
+	if errors.Is(err, store.ErrWorkflowRunLimit) {
+		return workflowRefusal(contract.WorkflowSettingMaxRuns, err.Error())
+	}
 	code := contract.ErrUnavailable
 	var held *store.HostHeldError
 	var used *store.PoolInUseError
