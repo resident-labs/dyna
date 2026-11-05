@@ -171,3 +171,19 @@ func TestPrToolkitDescriptionIsTheHomeOfCIAndTracking(t *testing.T) {
 		}
 	}
 }
+
+// The workflow settings are the owner's alone, for the CLI and Settings > Workflows; agents' workflow tool has no action for them.
+func TestWorkflowSettingsMethodsAreOwnerOnlyWithNoAgentAction(t *testing.T) {
+	seen := map[contract.Method]bool{}
+	for _, row := range Methods() {
+		if row.Method == contract.MethodWorkflowSet || row.Method == contract.MethodWorkflowSettings {
+			seen[row.Method] = true
+			if row.Access != OwnerAccess || len(row.Actions) != 0 {
+				t.Errorf("%s row: %+v", row.Method, row)
+			}
+		}
+	}
+	if len(seen) != 2 {
+		t.Fatalf("rows found for %v", seen)
+	}
+}

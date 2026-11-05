@@ -116,7 +116,10 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	var workflow *contract.BoxWorkflow
 	run, err := s.store.SessionWorkflow(ctx, session.ID)
 	if err == nil {
-		workflow = s.boxWorkflow(run, current.Size.MemBytes)
+		workflow, err = s.boxWorkflow(ctx, run, current.Size.MemBytes)
+		if err != nil {
+			return contract.BoxHelloResponse{}, failure(err)
+		}
 		for i := range repos {
 			repos[i].Commit = run.Commit
 		}

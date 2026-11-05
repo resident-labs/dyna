@@ -117,6 +117,7 @@ func TestUpgradeRecordsEarlierSessionsBranches(t *testing.T) {
 	}
 	for _, q := range []string{
 		"DROP TABLE session_branches",
+		"DROP TABLE workflow_settings",
 		"ALTER TABLE hosts DROP COLUMN gpus",
 		"ALTER TABLE boxes DROP COLUMN gpu_gib",
 		"ALTER TABLE boxes DROP COLUMN gpu_index",

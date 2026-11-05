@@ -5,7 +5,9 @@ description: Use when you write, test or resume a Dyna workflow, or reload a run
 
 # Dyna workflows
 
-A workflow is a script that fans work out to workers in one box. `dyna workflow run FILE [--args JSON] [--resume RUN]`, or the `workflow` tool, starts it as a child session, a crew, and `dyna workflow reload RUN FILE` changes a running one. Only the owner or a room's root starts one. Its end, whether a return, a throw or a stop, reaches whoever started it as a reply, so a run needs no polling.
+A workflow is a script that fans work out to workers in one box. `dyna workflow run FILE [--args JSON] [--resume RUN]`, or the `workflow` tool, starts it as a child session, a crew, and `dyna workflow reload RUN FILE` changes a running one. Any session starts one unless the owner's workflow settings say otherwise, and a refused call names the setting that refused it. Its end, whether a return, a throw or a stop, reaches whoever started it as a reply, so a run needs no polling.
+
+The owner's workflow settings, per room with a global default, can turn off `agent()` with `worktree`, `merge()`, `run()`, `workflow()`, `post()` and resume, limit the runs going and the workers in a run, allow only some profiles, and set the default box size and timeout. A call a setting refuses throws, or fails the start, naming the setting. The `dyna_workflows` section lists what the room changes from the defaults.
 
 Every script begins with `export const meta = {...}`: a pure literal (no variables, calls or interpolation) that the engine reads before any box exists.
 
@@ -31,7 +33,7 @@ return { merged: merged.merged, conflicts: merged.conflicts, empty: written.filt
 ## Script globals
 
 - `args`: the request's JSON, already parsed, or `null`. `JSON.parse(args)` throws on an object.
-- `agent(prompt, {profile, schema, label, phase, lane, timeout, worktree})`: one worker, a PiG session. Returns its final text; with `schema`, the parsed value; with `worktree: true`, `{step, text, branch, commit, files}`, or `{step, output, branch, commit, files}` with `schema`, so a schema field is `r.issues`, or `r.output.issues` in a worktree. With `schema`, the worker submits a JSON file with its `submit` tool, so a large result lives in the file and the final text is not read. Throws on an unknown profile, a timeout (seconds, default 5 hours), no final text (without `schema`), or no valid submit in three tries (with one).
+- `agent(prompt, {profile, schema, label, phase, lane, timeout, worktree})`: one worker, a PiG session. Returns its final text; with `schema`, the parsed value; with `worktree: true`, `{step, text, branch, commit, files}`, or `{step, output, branch, commit, files}` with `schema`, so a schema field is `r.issues`, or `r.output.issues` in a worktree. With `schema`, the worker submits a JSON file with its `submit` tool, so a large result lives in the file and the final text is not read. Throws on an unknown profile, a timeout (seconds, default 5 hours or the room's default timeout), no final text (without `schema`), or no valid submit in three tries (with one).
 - `run(command, {cwd, env, timeout, check, label, phase, lane})`: one command in the main tree, holding the build lock. A string runs in `sh -c`, a list directly. Returns `{code, stdout, stderr, durationMs}`, the last 64 KiB of each stream. `check` defaults to `true`, so a nonzero exit throws `exit code N: <stderr>`; with `check: false` the object carries `code`. A timeout throws either way.
 - `parallel(thunks)`: starts every thunk at once and returns results in input order. It does not throw: a failure becomes `{failed: true, step, reason}`.
 - `pipeline(items, ...stages)`: each item goes through the stages on its own, and a stage gets `(previous, item, index)`. Same failure entries, and a failed item skips its later stages.
@@ -50,7 +52,7 @@ A failed call throws an `Error` with `.step` and `.reason`. An uncaught throw en
 
 Reload is for a running run, resume for an ended one. Both go by step key: a hash of the step's kind, prompt or command, options other than `lane`, profile and enclosing `workflow()` step, not its order. A key that matches a finished step returns the stored result, so a changed prompt, command or option reruns that step alone, and a kept step takes the lane the script now gives it.
 
-`dyna workflow reload RUN FILE`, or the tool's `reload` action, gives a running run a new script. Only the owner or a room's root reloads one.
+`dyna workflow reload RUN FILE`, or the tool's `reload` action, gives a running run a new script. The starter, a session above it and the owner reload one.
 
 - The same crew, box, main tree, branches and journal carry on. The crew stops the old script and runs the new one from its start.
 - A key whose step is running joins it: the call waits for the worker already at work, and no second one starts. A new key starts a step. A running step the new script does not call runs on until the run ends, and then fails with `the run ended first`.
