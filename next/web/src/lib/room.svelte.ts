@@ -5,7 +5,7 @@ import { EventWindow } from "./window.svelte.ts";
 import { pendingReason, type PendingReason } from "./event.ts";
 import { boxFailures, countOf, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
 import { prKey } from "./feed.ts";
-import type { ActivityKind, BoxState, Conversation, FailureCause, Decision, Event, Goal, OpRequested, OpResult, OpState, PrSummary, Question, SessionStarted, WorkflowInfo, WorkflowStatusLine, WorkflowStep } from "./contract.gen.ts";
+import type { ActivityKind, BoxState, Conversation, FailureCause, Decision, Event, Goal, OpRequested, OpResult, OpState, PrSummary, Question, SessionStarted, SessionWaiting, WorkflowInfo, WorkflowStatusLine, WorkflowStep } from "./contract.gen.ts";
 
 
 // An operation of the room as the Requests panel shows it: its card, then its decision and run.
@@ -46,6 +46,26 @@ export class RoomStore {
   readonly computers = new SvelteSet<string>();
   // Background shell jobs still running, as of each session's last turn end and the jobs that ended since.
   readonly shellJobs = new SvelteMap<string, number>();
+  // Current engine-computed waits; changes reread one room list, never one call per row.
+  readonly backgroundWaits = new SvelteMap<string, SessionWaiting>();
+  private waitsDirty = false;
+  private waitsReading?: Promise<void>;
+  // Tests can await the coalesced reread.
+  get waitingRead(): Promise<void> { return this.waitsReading ?? Promise.resolve(); }
+  private refreshWaits(): void {
+    if (!this.loaded) return;
+    this.waitsDirty = true;
+    if (this.waitsReading || this.closed) return;
+    this.waitsReading = Promise.resolve().then(async () => {
+      while (this.waitsDirty && !this.closed) {
+        this.waitsDirty = false;
+        const list = await call("session.list", { room: this.room }).catch(() => undefined);
+        if (!list || this.closed || this.waitsDirty) continue;
+        this.backgroundWaits.clear();
+        for (const session of list.sessions ?? []) if (session.waiting) this.backgroundWaits.set(session.id, session.waiting);
+      }
+    }).finally(() => { this.waitsReading = undefined; });
+  }
   // "session/job" keys that About subtracts from its running count, because the engine's list can lag.
   readonly endedJobs = new SvelteSet<string>();
   // Sessions with a job to reach: their box keeps a finished job's output.
@@ -152,8 +172,8 @@ export class RoomStore {
   private statusWith(id: string, asking: Set<string>): Status {
     const box = this.boxes.get(id);
     // A box that no host takes for its room waits until the owner changes a host, so it waits for the owner too.
-    const waiting = asking.has(id) || this.pendingReasons.get(id) === "room-host";
-    return statusOf({ broken: box === "failed" || box === "lost", waiting, working: this.turns.has(id), failed: this.unseen(id) });
+    const waiting = asking.has(id) || this.pendingReasons.get(id) === "room-host" || this.backgroundWaits.get(id)?.kind === "owner";
+    return statusOf({ broken: box === "failed" || box === "lost", waiting, working: this.turns.has(id), failed: this.unseen(id), background: this.backgroundWaits.has(id) });
   }
   // The sessions whose requests or questions wait for the owner.
   private asking(): Set<string> {
@@ -171,6 +191,7 @@ export class RoomStore {
       // A conversation.read is not replayed. A read made after load() or during a dropped stream is missed, so each hello rereads.
       this.rereading = this.rereadPositions().catch(() => {});
       void this.readWorkflows();
+      this.refreshWaits();
       for (const page of this.runPages.values()) page.step();
     });
   }
@@ -224,6 +245,7 @@ export class RoomStore {
       if (session.turn && session.activity) { this.activity.set(session.id, session.activity); if (session.activityKind) this.activityKinds.set(session.id, session.activityKind); this.steps.set(session.id, [session.activity]); }
       if (session.lastOutcome === "failed") this.failed.set(session.id, list.seq);
       if (session.computer === "running") this.computers.add(session.id);
+      if (session.waiting) this.backgroundWaits.set(session.id, session.waiting);
       this.shellJobs.set(session.id, session.shellJobs ?? 0);
       if (session.hadJobs || session.shellJobs) this.hadJobs.add(session.id);
     }
@@ -325,6 +347,12 @@ export class RoomStore {
   }
 
   private step(event: Event): void {
+    switch (event.type) {
+      case "session.started": case "session.closed": case "session.moved": case "box.changed":
+      case "turn.started": case "turn.ended": case "shell.job.ended": case "workflow.ended":
+      case "op.requested": case "op.decided": case "op.ran":
+      case "question.asked": case "question.answered": case "question.withdrawn": this.refreshWaits();
+    }
     const ended = event.type === "turn.ended" && this.sessions.get(event.body.session);
     if (event.type === "turn.ended" && ended) this.sessions.set(event.body.session, { ...ended, lastTurnAt: event.at });
     switch (event.type) {

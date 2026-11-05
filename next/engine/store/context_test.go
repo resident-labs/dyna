@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/contract"
 	"modernc.org/sqlite"
 )
 
@@ -98,6 +99,46 @@ func TestContextChildrenOrderIgnoresActivity(t *testing.T) {
 		}
 		if got := names(); got != "a,b" {
 			t.Fatalf("children after a turn of %s = %s, want a,b", session, got)
+		}
+	}
+}
+
+func TestWaitingListUsesThreeQueriesForOneHundredSessions(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	if err = s.CreateRoom(ctx, "r", "r", time.Unix(0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.writer.Exec(`WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<100) INSERT INTO sessions(id,room,name,profile,state,goal,created_at,shell_jobs) SELECT 's'||x,'r','session-'||x,'p','open','',x,1 FROM n`); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("context-count", filepath.Join(dir, "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.read.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s.read = db
+	contextQueries.Store(0)
+	list, err := s.SessionList(ctx, contract.SessionListRequest{Room: "r"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := contextQueries.Load(); got != 3 {
+		t.Fatalf("list uses %d queries, want 3", got)
+	}
+	if len(list.Sessions) != 100 {
+		t.Fatal("missing sessions")
+	}
+	for _, item := range list.Sessions {
+		if item.Waiting == nil || item.Waiting.Kind != contract.WaitJobs {
+			t.Fatalf("wait missing: %+v", item)
 		}
 	}
 }
