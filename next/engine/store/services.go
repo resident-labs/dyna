@@ -305,8 +305,16 @@ func (s *Store) SetServiceSecret(ctx context.Context, id contract.ServiceID, nam
 		if _, err := tx.ExecContext(ctx, `INSERT INTO service_secrets(service,name,value,set_at) VALUES(?,?,?,?) ON CONFLICT(service,name) DO UPDATE SET value=excluded.value,set_at=excluded.set_at`, id, name, value, now.UnixMilli()); err != nil {
 			return err
 		}
-		// A new value reaches the container at the next deploy, so it counts as a new generation.
-		_, err = tx.ExecContext(ctx, `UPDATE services SET generation=generation+1,updated_at=?,rev=rev+1 WHERE id=?`, now.UnixMilli(), id)
+		// A new value reaches the container at the next deploy, so it counts as a new generation. The caller holds admission
+		// through this write: reserve the newest source measurement before another placement can use the disk.
+		estimate := rows[0].ImageEstimate
+		if rows[0].Target == "" {
+			estimate, err = imageEstimate(ctx, tx, rows[0].Room, rows[0].Parts)
+			if err != nil {
+				return err
+			}
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE services SET generation=generation+1,image_estimate=?,updated_at=?,rev=rev+1 WHERE id=?`, estimate, now.UnixMilli(), id)
 		return err
 	})
 }
@@ -527,6 +535,14 @@ func (s *Store) ChangeService(ctx context.Context, id contract.ServiceID, newEve
 		next := old
 		if err := change(&next); err != nil {
 			return ServiceRow{}, err
+		}
+		// Owner generation changes hold admission through SaveService. A successful deploy cleared the prior estimate;
+		// each new source build needs the latest measurement reserved again, not just a local preflight estimate.
+		if next.Generation != old.Generation && next.Target == "" {
+			next.ImageEstimate, err = s.ImageEstimate(ctx, next.Room, next.Parts)
+			if err != nil {
+				return ServiceRow{}, err
+			}
 		}
 		next.Updated = time.Now()
 		saved, err := s.SaveService(ctx, old, next, newEvent)

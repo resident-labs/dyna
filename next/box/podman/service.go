@@ -201,10 +201,16 @@ func (h *Host) ServiceLogs(ctx context.Context, id contract.ServiceID, lines int
 	return string(out), err
 }
 
-// removeService stops the unit and deletes what a service owns. Each step tolerates what is gone.
-const removeService = `systemctl --user stop "$1.service"; rm -f "$HOME/.config/containers/systemd/$1.container"; systemctl --user daemon-reload || exit
-podman rm -f "$1" >/dev/null 2>&1
-for s in $(podman secret ls --format '{{.Name}}' | grep -x "$1-.*"); do podman secret rm "$s" >/dev/null || exit; done
+// removeService stops the unit and deletes what a service owns. Only absent objects are tolerated: other failures keep the
+// removing row or leftover debt so the next pass retries. systemctl stop's status 5 means the unit is not loaded.
+const removeService = `systemctl --user stop "$1.service" || { status=$?; [ "$status" = 5 ] || exit "$status"; }
+rm -f "$HOME/.config/containers/systemd/$1.container" || exit
+systemctl --user daemon-reload || exit
+podman rm -f --ignore "$1" >/dev/null || exit
+secrets=$(podman secret ls --format '{{.Name}}') || exit
+while IFS= read -r s; do
+  case "$s" in "$1"-*) podman secret rm "$s" >/dev/null || exit ;; esac
+done <<<"$secrets"
 podman volume rm -f "$1" >/dev/null || exit`
 
 func (h *Host) RemoveService(ctx context.Context, id contract.ServiceID) error {
