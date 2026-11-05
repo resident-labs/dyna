@@ -81,6 +81,12 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		return fmt.Sprintf("CI on PR %s#%d finished: %s. %s", b.Repo, b.Number, b.Result, b.URL), nil
 	case contract.GitMainUpdated:
 		return fmt.Sprintf("The default branch of %s moved to %s.", b.Repo, b.Head), nil
+	case contract.GitMainCIFinished:
+		text := fmt.Sprintf("CI on %s %s at %s finished: %s.", b.Repo, b.Branch, b.Sha, b.Result)
+		for _, run := range b.Runs {
+			text += fmt.Sprintf("\n%s: %s %s", run.Name, run.Conclusion, run.URL)
+		}
+		return text, nil
 	case contract.NoticePosted:
 		return b.Text, nil
 	case contract.SessionNotice:
