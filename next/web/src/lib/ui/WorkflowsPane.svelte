@@ -2,7 +2,7 @@
   import { onMount, type Snippet } from "svelte";
   import { APIError, call, SignedOut } from "../client.ts";
   import { boxSizes, clearRequest, duration, maxCount, maxTimeout, numberChange, overrides, profileChoices, profilesChange, scopeKey, scopeLine, scopeName, scopeOrder,
-    refusedSetting, serial, setRequest, settingShape, source, starterOrder, starters, valueText, workflowChips, workflowSummary } from "../workflows.ts";
+    refusedSetting, serial, setRequest, settingShape, source, starterOrder, starters, workflowChips, workflowSummary } from "../workflows.ts";
   import type { ProfileName, WorkflowScope, WorkflowSetRequest, WorkflowSetting, WorkflowSettingInfo, WorkflowSettingsResponse } from "../contract.gen.ts";
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
@@ -100,7 +100,7 @@
     <span class="number"><input class="input" type="number" aria-label={label} min={field === "timeout" ? 1 : 0} max={field === "timeout" ? maxTimeout : maxCount} step="1" value={e[field]}
       aria-invalid={refused(scope, field) ? "true" : undefined} onchange={event => type(scope, field, event.currentTarget)} />
       <span class="unit">{field === "timeout" ? duration(e.timeout) : e[field] ? "" : "No limit"}</span></span>
-  {:else if setting === "profiles"}<span class="value">{capital(valueText(e, "profiles"))}</span>
+  {:else if setting === "profiles"}<span class="value">{e.profiles?.length ? plural(e.profiles.length, "profile", "profiles") : "All profiles"}</span>
   {:else}<input type="checkbox" role="switch" aria-label={label} checked={e[setting]}
       onchange={event => { const box = event.currentTarget; change(scope, setting, setRequest(scope, { setting, value: box.checked }), () => { box.checked = now(scope)[setting]; }); }} />
   {/if}
