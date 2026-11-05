@@ -61,7 +61,7 @@ func serviceCommand(getClient func() client) *cobra.Command {
 	set.Flags().StringVar(&disk, "disk", "", "for example 1GiB")
 	set.Flags().Float64Var(&cpus, "cpus", 0, "0.25 to 8")
 	set.Flags().StringArrayVar(&ports, "port", nil, "PORT, PORT/udp or HOSTPORT:PORT/tcp")
-	set.Flags().StringArrayVar(&env, "env", nil, "NAME=value")
+	set.Flags().StringArrayVar(&env, "env", nil, "NAME=value; the value stays in shell history, so a secret goes through `service secret set`")
 	set.Flags().StringArrayVar(&secrets, "secret", nil, "the name of a secret environment variable")
 	set.Flags().StringArrayVar(&health, "health", nil, "the health command's words")
 	list := &cobra.Command{Use: "list [ROOM]", Short: "List services", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
@@ -112,7 +112,7 @@ func serviceCommand(getClient func() client) *cobra.Command {
 		}}
 	}
 	secret := &cobra.Command{Use: "secret", Short: "A service's secrets"}
-	secretSet := &cobra.Command{Use: "set ROOM NAME SECRET", Short: "Set a secret's value, read from stdin; nothing reads it back", Args: cobra.ExactArgs(3), RunE: func(cmd *cobra.Command, args []string) error {
+	secretSet := &cobra.Command{Use: "set ROOM NAME SECRET", Short: "Set a secret's value, read from stdin; nothing reads it back", Long: "The value is read from stdin and is not hidden while typed on a terminal. Pipe it in to keep it off the screen.", Args: cobra.ExactArgs(3), RunE: func(cmd *cobra.Command, args []string) error {
 		value, err := io.ReadAll(cmd.InOrStdin())
 		if err != nil {
 			return err

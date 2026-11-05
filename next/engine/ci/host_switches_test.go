@@ -1,6 +1,7 @@
 package ci
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/box"
@@ -90,6 +91,41 @@ func TestARunnerSkipsAHostWhereASessionBoxWaitsForRoom(t *testing.T) {
 		arch := f.addHost(readyHost("arch", 32*box.GiB))        // pve has more free memory, so it wins unless it is skipped
 		f.store.hosts[1].Rooms = []contract.RoomID{"elsewhere"} // the waiting box cannot go to arch
 		f.store.boxes = tc.boxes
+		f.scale(1)
+		if got := len(f.drivers["pve"].runners); got != tc.onPVE || len(arch.runners) != 1-tc.onPVE {
+			t.Errorf("%s: pve %d, arch %d", tc.name, got, len(arch.runners))
+		}
+	}
+}
+
+// A pending service comes before a runner as a pending box does, on the hosts it could take: its declared host and its room's rule
+// narrow them, so a service that cannot go to a host holds no runner back there.
+func TestARunnerSkipsAHostWhereAServiceWaitsForRoom(t *testing.T) {
+	waiting := func(host contract.HostName, only ...string) store.ServiceRow {
+		parts, err := contract.ServiceSpec{Name: "svc", Image: "ghcr.io/o/r@sha256:" + strings.Repeat("a", 64), CPUs: 1, Host: host}.Parse()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return store.ServiceRow{Service: contract.Service{ID: "svc_1", Room: "r2", Spec: parts.Spec, State: contract.ServicePending, Reason: contract.ServiceNoCPU}, Parts: parts, Only: only}
+	}
+	for _, tc := range []struct {
+		name    string
+		service store.ServiceRow
+		onPVE   int
+	}{
+		{"any host", waiting(""), 0},
+		{"declared host is pve", waiting("pve"), 0},
+		{"declared host is arch, which its room cannot use", waiting("arch"), 1},
+		{"its rule names another host", waiting("", "elsewhere"), 1},
+	} {
+		f := newFixture(0)
+		arch := f.addHost(readyHost("arch", 32*box.GiB))
+		f.store.hosts[1].Rooms = []contract.RoomID{"elsewhere"}
+		f.store.services = []store.ServiceRow{tc.service}
+		notEngine := false
+		for i := range f.store.hosts {
+			f.store.hosts[i].EngineHost = &notEngine
+		}
 		f.scale(1)
 		if got := len(f.drivers["pve"].runners); got != tc.onPVE || len(arch.runners) != 1-tc.onPVE {
 			t.Errorf("%s: pve %d, arch %d", tc.name, got, len(arch.runners))

@@ -49,6 +49,7 @@ func RenderServiceUnit(u box.ServiceUnitSpec) string {
 	line("DropCapability=all")
 	line("NoNewPrivileges=true")
 	line("ReadOnly=true")
+	line("ReadOnlyTmpfs=false")
 	line("Tmpfs=/tmp:rw,size=64m,mode=1777")
 	line("PodmanArgs=--cpus=%s --memory=%s --memory-swap=%s --pids-limit=%d", strconv.FormatFloat(float64(p.CPUMilli)/1000, 'f', -1, 64), memory, memory, p.Pids())
 	for _, port := range p.Ports {

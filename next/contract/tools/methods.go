@@ -207,7 +207,7 @@ var methodTable = []MethodEntry{
 	method(contract.MethodServiceSet, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodServiceList, contract.ScopeRead, OwnerAccess),
 	method(contract.MethodServiceShow, contract.ScopeRead, OwnerAccess),
-	method(contract.MethodServiceLogs, contract.ScopeRead, OwnerAccess),
+	method(contract.MethodServiceLogs, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodServiceRestart, contract.ScopeOperate, OwnerAccess),
 	method(contract.MethodServiceStop, contract.ScopeOperate, OwnerAccess),
 	method(contract.MethodServiceStart, contract.ScopeOperate, OwnerAccess),
