@@ -1,13 +1,12 @@
 import { sourceLabel } from "./source.ts";
-import type { Attachment, BoxState, Card, Conversation, Event, FailureCause, PrChange, PrChanged, PrChangeKind, Principal, PrSummary, SessionCloseReason, WorkflowEnded, PostSource } from "./contract.gen.ts";
+import type { JSONValue, Attachment, BoxState, Card, Conversation, Event, FailureCause, PrChange, PrChanged, PrChangeKind, Principal, PrSummary, SessionCloseReason, WorkflowEnded, PostSource } from "./contract.gen.ts";
 import type { BoxFailure } from "./status.ts";
 import type { PendingReason } from "./event.ts";
 import type { Request } from "./room.svelte.ts";
 import { endCause, failed } from "./jobs.ts";
-import { parsedJson } from "./json.ts";
 
 export type Row =
-  | { kind: "post"; key: string; from: Principal; at: string; text: string; attachments: Attachment[]; first: boolean; to: Principal[]; source?: PostSource | null; target?: string; pending?: Pending }
+  | { kind: "post"; key: string; from: Principal; at: string; text: string; data?: JSONValue; attachments: Attachment[]; first: boolean; to: Principal[]; source?: PostSource | null; target?: string; pending?: Pending }
   | { kind: "restarted"; key: string; session: string; at: string }
   // A plain line for what the owner did to a session or the room; describe gives its words.
   | { kind: "notice"; key: string; event: Event; resumedAt?: string }
@@ -111,9 +110,8 @@ const unshown = new Set<Event["type"]>(["shell.job.running", "workflow.step_chan
 // Pending owner posts follow as post rows, so they group like the posts that replace them.
 // A day row comes before the first row of each local day, so a new day also starts a new name line.
 // With the owner's read position (since), a New row comes before the first later post or failed row by someone else.
-// A crew's reply that is JSON is the caller's data, not a post to read: the run's row and page stand for it. isCrew is the room's
-// list of runs, for a reply whose workflow.ended is outside this window. What the caller receives does not change.
-export function feedRows(events: Event[], home: Conversation, pending: Pending[] = [], since = 0, retainedRequests: ReadonlySet<string> = new Set(), isCrew: (session: string) => boolean = () => false): Row[] {
+// Structured workflow data is separate from text; JSON-looking text remains a normal post.
+export function feedRows(events: Event[], home: Conversation, pending: Pending[] = [], since = 0, retainedRequests: ReadonlySet<string> = new Set()): Row[] {
   const rows: Row[] = [];
   let work: Event[] = [];
   let deferred: Row[] = [];
@@ -153,14 +151,14 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     deferred = [];
   };
   // A post to other people, its mentions or a final reply's target, starts a new run with its own name line.
-  const post = (key: string, seq: number, from: Principal, at: string, text: string, attachments: Attachment[], to: Principal[] = [], pending?: Pending, source?: PostSource | null, target?: string) => {
+  const post = (key: string, seq: number, from: Principal, at: string, text: string, attachments: Attachment[], to: Principal[] = [], pending?: Pending, source?: PostSource | null, target?: string, data?: JSONValue) => {
     flush();
     dated(at);
     fresh(seq, from);
     const previous = rows.at(-1);
     const first = previous?.kind !== "post" || !sameAuthor(previous.from, from) ||
       previous.source?.room !== source?.room || previous.target !== target || previous.to.length !== to.length || previous.to.some((target, i) => !sameAuthor(target, to[i]));
-    rows.push({ kind: "post", key, from, at, text, attachments, first, to, source, target, ...pending && { pending } });
+    rows.push({ kind: "post", key, from, at, text, data, attachments, first, to, source, target, ...pending && { pending } });
   };
   // A post that carried a final reply goes to that reply's target too. The engine records this at the turn's end, later
   // than the post, so the targets are gathered first.
@@ -171,9 +169,6 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       if (posted && reply.target) carried.set(posted, [...carried.get(posted) ?? [], reply.target]);
     }
   }
-  const ended = new Set(events.flatMap(event => event.type === "workflow.ended" ? [event.body.session] : []));
-  const replies = new Set(events.flatMap(event => event.type === "turn.ended" ? (event.body.replies ?? []).flatMap(({ posted }) => posted ? [posted] : []) : []));
-  const crewData = (session: string | undefined, text: string) => !!session && (ended.has(session) || isCrew(session)) && parsedJson(text) !== undefined;
   for (const event of events) {
     // Account alerts are owner-only and never belong to a room feed. Questions show in Needs you, Requests and the session's DM.
     if (event.type === "account.failed" || event.type === "account.quota_low" || event.type === "host.disk_low" || event.type === "question.asked" || event.type === "question.answered" || event.type === "question.withdrawn") continue;
@@ -190,8 +185,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       const replied = (carried.get(event.id) ?? []).filter(target => !mentions.some(mention => sameAuthor(mention, target)));
       if (sameHome(event.body.home, home)) {
         for (const turn of turns.values()) if (turn.session === event.from.session) turn.posted = true;
-        if (replies.has(event.id) && crewData(event.from.session, event.body.text)) continue;
-        post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, event.body.attachments ?? [], [...mentions, ...replied], undefined, event.body.source);
+        post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, event.body.attachments ?? [], [...mentions, ...replied], undefined, event.body.source, undefined, event.body.data);
       }
       continue;
     }
@@ -263,8 +257,8 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
         reply.kind === "final" && !posted && sameHome(reply.home ?? { kind: "feed" }, home));
       const turn = turns.get(event.body.turn);
       turns.delete(event.body.turn);
-      if (event.body.final && answer && !crewData(event.body.session, event.body.final)) {
-        post(`a${event.seq}`, event.seq, { kind: "session", session: event.body.session }, event.at, event.body.final, [], answer.reply.target ? [answer.reply.target] : []);
+      if (event.body.final && answer) {
+        post(`a${event.seq}`, event.seq, { kind: "session", session: event.body.session }, event.at, event.body.final, event.body.attachments ?? [], answer.reply.target ? [answer.reply.target] : [], undefined, undefined, undefined, event.body.data);
       }
       // A failed turn always gets its own row, even after its answer; it never folds into a work row. Its error is the
       // harness's raw text (r8), so the row shows only the owner words for its typed cause.

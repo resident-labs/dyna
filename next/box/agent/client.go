@@ -363,7 +363,7 @@ func (c *Client) TranscriptAppend(ctx context.Context, req contract.TranscriptAp
 
 func (c *Client) TurnOutput(ctx context.Context, result contract.TurnEnded) error {
 	jobs := c.shellJobs()
-	body, err := json.Marshal(contract.TurnOutputRequest{ShellJobs: len(jobs), Jobs: jobs, Turn: result.Turn, Outcome: result.Outcome, Error: result.Error, Cause: result.Cause, Final: result.Final, EndPosts: result.EndPosts, Model: result.Usage.Model, Usage: result.Usage, Unread: result.Unread})
+	body, err := json.Marshal(contract.TurnOutputRequest{ShellJobs: len(jobs), Jobs: jobs, Turn: result.Turn, Outcome: result.Outcome, Error: result.Error, Cause: result.Cause, Final: result.Final, Data: result.Data, EndPosts: result.EndPosts, Model: result.Usage.Model, Usage: result.Usage, Unread: result.Unread})
 	if err != nil {
 		return err
 	}
