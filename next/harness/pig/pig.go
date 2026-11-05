@@ -28,11 +28,12 @@ import (
 // and extensions; their extensions run in PiG's subprocess extension host on the system node, started only when a
 // package has one.
 type Config struct {
-	Dir          string // the working directory: a session's checkout, or a worker's tree
-	AgentDir     string
-	SessionDir   string
-	Model        contract.ModelChoice
-	Instructions string // the system prompt, whole
+	Dir               string // the working directory: a session's checkout, or a worker's tree
+	AgentDir          string
+	SessionDir        string
+	Model             contract.ModelChoice
+	Instructions      string // the invariant system prompt
+	ModelInstructions string // the current model's host prompt section
 	// New starts a session file of its own. Without it the session continues the newest file in SessionDir, as a
 	// restarted box does; a crew's workers share one folder, and none may take another's.
 	New bool
@@ -59,6 +60,9 @@ type Harness struct {
 	sends    sync.WaitGroup // the turns' sends, which Close waits for
 	done     chan struct{}
 	closing  sync.Once
+	// Model guidance and the last snapshot are replaced only between turns.
+	modelInstructions string
+	sections          []contract.ContextSection
 
 	mu   sync.Mutex
 	turn *turn // the turn running now, nil between turns
@@ -108,7 +112,7 @@ func Open(ctx context.Context, c Config) (*Harness, error) {
 			c.Notice(fmt.Sprintf("extension %s failed to load: %s", failed.Path, failed.Error))
 		}
 	}
-	h := &Harness{services: services, models: models, done: make(chan struct{})}
+	h := &Harness{services: services, models: models, done: make(chan struct{}), modelInstructions: c.ModelInstructions}
 	if err := h.start(ctx, c); err != nil {
 		h.release()
 		return nil, err
@@ -161,6 +165,10 @@ func (h *Harness) start(ctx context.Context, c Config) error {
 		ui = notices{UIContext: extension.NoopUIContext, notice: c.Notice}
 	}
 	if err := h.session.BindExtensions(ctx, coding.ExtensionBindings{UIContext: ui}); err != nil {
+		h.stop()
+		return errors.Join(err, h.session.Close())
+	}
+	if err := h.SetPromptSections(ctx, nil); err != nil {
 		h.stop()
 		return errors.Join(err, h.session.Close())
 	}
@@ -299,7 +307,7 @@ func (h *Harness) ClearQueue(context.Context) error {
 // TransferModel moves the session to the model, thinking level and compaction trigger. PiG checks the conversation
 // against the model and compacts it on the one that held it first when it must (coding.Session.TransferModel). Abort
 // cancels that compaction, and the model stays.
-func (h *Harness) TransferModel(ctx context.Context, id contract.TurnID, model contract.ModelChoice, compactTokens int) (harness.ModelTransfer, error) {
+func (h *Harness) TransferModel(ctx context.Context, id contract.TurnID, model contract.ModelChoice, compactTokens int, instructions string) (harness.ModelTransfer, error) {
 	if h.Activity != nil {
 		h.Activity(id, contract.ActivityModel, "changing model")
 	}
@@ -312,6 +320,10 @@ func (h *Harness) TransferModel(ctx context.Context, id contract.TurnID, model c
 		return harness.ModelTransfer{}, fmt.Errorf("%w: %v", harness.ErrRefused, err)
 	}
 	result, err := h.session.TransferModel(ctx, target, coding.ModelTransferOptions{ThinkingLevel: ai.ModelThinkingLevel(model.Thinking), CompactionTriggerTokens: compactTokens})
+	if err == nil && result.Path != harness.TransferAborted {
+		h.modelInstructions = instructions
+		err = h.SetPromptSections(ctx, h.sections)
+	}
 	return harness.ModelTransfer{Path: result.Path, Reason: result.Reason, TokensBefore: int64(result.TokensBefore), TokensAfter: int64(result.TokensAfter)}, err
 }
 
@@ -336,11 +348,18 @@ func (h *Harness) Compact(ctx context.Context, over int64) (harness.Compaction, 
 // SetPromptSections sets the turn's context sections, after the ones PiG builds. The first request holds them in its
 // system prompt, and a later change reaches the model as a context update before the next request (dyna patch P5).
 func (h *Harness) SetPromptSections(_ context.Context, sections []contract.ContextSection) error {
-	host := make(ai.OrderedSections, 0, len(sections))
+	host := make(ai.OrderedSections, 0, len(sections)+1)
+	if h.modelInstructions != "" {
+		host = append(host, ai.PromptSection{Name: "model_instructions", Value: &h.modelInstructions})
+	}
 	for _, section := range sections {
 		host = append(host, ai.PromptSection{Name: string(section.Key), Value: &section.Text})
 	}
-	return h.session.SetHostPromptSections(host)
+	if err := h.session.SetHostPromptSections(host); err != nil {
+		return err
+	}
+	h.sections = append([]contract.ContextSection(nil), sections...)
+	return nil
 }
 
 func (h *Harness) Abort(ctx context.Context) error { return h.session.Abort(ctx) }
