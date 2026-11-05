@@ -33,7 +33,9 @@ func (s *Service) preparePostData(ctx context.Context, room contract.RoomID, dat
 		return nil, nil, err
 	}
 	// A forwarded post already carries its data blob. Do not add a second copy.
-	if !slices.ContainsFunc(files, func(file contract.Attachment) bool { return file.SHA256 == hash && file.Name == "data.json" }) {
+	if !slices.ContainsFunc(files, func(file contract.Attachment) bool {
+		return file.SHA256 == hash && file.Name == "data.json" && file.Media == "application/json"
+	}) {
 		files = append(slices.Clone(files), contract.Attachment{SHA256: hash, Name: "data.json", Media: "application/json", Bytes: n})
 	}
 	return data, files, nil
