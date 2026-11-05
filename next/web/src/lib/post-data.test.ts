@@ -12,6 +12,11 @@ test("encoded byte boundary is inclusive and Unicode is bytes", () => {
  }
  assert.equal(postData("雪🙂").bytes, 9);
  assert.equal(postData("雪".repeat(100)).inline, false);
+ for (const bytes of [299, 300, 301]) {
+  const model=postData("<".repeat(49)+"x".repeat(bytes-296));
+  assert.equal(model.bytes,bytes); assert.equal(model.inline,bytes<=300);
+ }
+ assert.equal(postData("\u2028").bytes,8);
 });
 test("typed summaries distinguish arrays, objects, scalars and null", () => {
  assert.equal(postData({ a: 1, b: 2 }).summary, "2 keys");

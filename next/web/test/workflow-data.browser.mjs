@@ -25,6 +25,9 @@ for (const theme of ["light","carbon"]) for (const width of [1280,390]) {
  await page.screenshot({path:`${out}/${name}-collapsed.png`,fullPage:true});
  // Native disclosure works from the keyboard; only one child page is created at each level.
  await data.locator("summary").first().focus();await page.keyboard.press("Enter");
+ await data.getByText('"groups"',{exact:true}).waitFor();
+ assert.equal(await data.getByText('"0"',{exact:true}).count(),0,"descendant collections stay folded when chip opens");
+ assert.equal(await page.getByText("CONFLICT_SENTINEL",{exact:false}).count(),0,"no recursively expanded conflict content");
  await data.getByText('"groups"',{exact:true}).click();
  await data.getByText('"0"',{exact:true}).click();
  await data.getByText("38 items",{exact:true}).waitFor();
