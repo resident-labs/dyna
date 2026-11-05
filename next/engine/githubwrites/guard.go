@@ -170,7 +170,7 @@ func (g *Guard) within(request *http.Request, grant contract.GitHubWrites, seen 
 			return nil
 		}
 	case nodeItem:
-		if found.Typename == string(kind) && found.Project != nil && found.Project.Owner != nil && grant.AllowsOwner(found.Project.Owner.Login) && found.Content != nil && inRepo(found.Content.Repository) {
+		if found.Typename == string(kind) && found.Project != nil && found.Project.Owner != nil && grant.AllowsOwner(found.Project.Owner.Login) && found.Content != nil && (found.Content.Typename == string(nodeIssue) || found.Content.Typename == string(nodePullRequest)) && inRepo(found.Content.Repository) {
 			return nil
 		}
 	}
