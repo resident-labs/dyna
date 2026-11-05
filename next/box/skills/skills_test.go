@@ -86,7 +86,7 @@ func TestTheWorkflowSkillSaysWhatTheCodeDoes(t *testing.T) {
 		"the run ended first", "needs no polling", "Nothing wakes a worker", "only through the prompt", "one worker per 512 MiB", "holds a box slot",
 		"dry run of one group", "give up in 40 seconds", "still reports done",
 		"Reload is for a running run, resume for an ended one", "`dyna workflow reload RUN FILE`", "no second one starts", "runs on until the run ends",
-		"`meta.name`, `meta.repo` and `meta.size` stay", "the run's models follow the new profiles", "the version that started it",
+		"`meta.name`, `meta.repo`, `meta.size` and `meta.gpu` stay", "the run's models follow the new profiles", "the version that started it",
 		"`status(text)`", "It is not a step", "`75 of 76 steps · 1 running`", "`{lane: g.id}`", "options other than `lane`", "Nothing is read from a step's name",
 	} {
 		if !strings.Contains(text, want) {
