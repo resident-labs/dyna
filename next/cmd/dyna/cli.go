@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -697,11 +698,12 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	limit.Flags().StringVar(&limitMem, "mem", "", "Memory limit; 0 means unlimited")
 	_ = limit.MarkFlagRequired("cpus")
 	_ = limit.MarkFlagRequired("mem")
+	var githubWrites string
 	rootApproves := map[contract.RootApproval]*string{}
 	for _, kind := range contract.AllRootApprovals {
 		rootApproves[kind] = new(string)
 	}
-	setRoom := &cobra.Command{Use: "set ROOM --root-approves-KIND on|off", Short: "Change a room setting", Long: "Change a room setting; a kind left out stays. With --root-approves-KIND on, the room's root decides that kind of its sessions' requests with op approve and op deny, as the owner can, and the owner still can. KIND is hostexec (host exec grants), addons (global skills, packages and MCP servers), hosts (room hosts rules) or pools (pool add). Each is off by default, and the request still waits for a decision.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	setRoom := &cobra.Command{Use: "set ROOM [--root-approves-KIND on|off] [--github-writes GROUPS@REPOS|off]", Short: "Change a room setting", Long: "Change a room setting; a setting left out stays. --github-writes lets the room's sessions make GitHub writes without a host grant: GROUPS are issues, pulls and projects, comma-separated, and REPOS are repositories of the room or *, comma-separated, as in issues,projects@owner/repo; off turns it off. It is off by default, and merges, deletes and everything else stay refused. With --root-approves-KIND on, the room's root decides that kind of its sessions' requests with op approve and op deny, as the owner can, and the owner still can. KIND is hostexec (host exec grants), addons (global skills, packages and MCP servers), hosts (room hosts rules) or pools (pool add). Each is off by default, and the request still waits for a decision.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		req := contract.RoomSetRequest{Room: contract.RoomID(args[0]), RootApproves: map[contract.RootApproval]bool{}}
 		for _, kind := range contract.AllRootApprovals {
 			if *rootApproves[kind] == "" {
@@ -713,8 +715,15 @@ func addCLI(root *cobra.Command, getClient func() client) {
 			}
 			req.RootApproves[kind] = *on
 		}
-		if len(req.RootApproves) == 0 {
-			return fmt.Errorf("set at least one --root-approves-KIND on|off")
+		if githubWrites != "" {
+			writes, err := parseGitHubWrites(githubWrites)
+			if err != nil {
+				return err
+			}
+			req.GitHubWrites = &writes
+		}
+		if len(req.RootApproves) == 0 && req.GitHubWrites == nil {
+			return fmt.Errorf("set at least one --root-approves-KIND on|off or --github-writes")
 		}
 		_, err := getClient().RoomSet(cmd.Context(), req)
 		return err
@@ -722,6 +731,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	for _, kind := range contract.AllRootApprovals {
 		setRoom.Flags().StringVar(rootApproves[kind], "root-approves-"+string(kind), "", "on or off: whether the room's root may decide its sessions' "+string(kind)+" requests")
 	}
+	setRoom.Flags().StringVar(&githubWrites, "github-writes", "", "GROUPS@REPOS (issues,pulls,projects @ repositories of the room or *), or off: the GitHub writes the room's sessions may make")
 	room.AddCommand(limit, setRoom, roomHostsCommand(getClient))
 	var rootProfile string
 	create := &cobra.Command{Use: "create NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
@@ -1341,4 +1351,31 @@ func goalCommand(getClient func() client) *cobra.Command {
 	}}
 	goal.AddCommand(set, list, itemCmd, done, journal)
 	return goal
+}
+
+// parseGitHubWrites reads --github-writes: `off`, or GROUPS@REPOS with one @, both comma-separated lists with no empty element. A
+// group is a known one and a repository is owner/name or *; the engine checks the repositories against the room's.
+func parseGitHubWrites(value string) (contract.GitHubWrites, error) {
+	writes := contract.GitHubWrites{Repos: []contract.RepoName{}, Groups: []contract.GitHubWriteGroup{}}
+	if value == "off" {
+		return writes, nil
+	}
+	groups, repos, found := strings.Cut(value, "@")
+	if !found || strings.Contains(repos, "@") {
+		return writes, fmt.Errorf("--github-writes is GROUPS@REPOS with one @, such as issues,projects@owner/repo, or off; %q is not", value)
+	}
+	for _, group := range strings.Split(groups, ",") {
+		if !slices.Contains(contract.AllGitHubWriteGroups, contract.GitHubWriteGroup(group)) {
+			return writes, fmt.Errorf("--github-writes group %q is not one of %v", group, contract.AllGitHubWriteGroups)
+		}
+		writes.Groups = append(writes.Groups, contract.GitHubWriteGroup(group))
+	}
+	for _, repo := range strings.Split(repos, ",") {
+		owner, name, slash := strings.Cut(repo, "/")
+		if strings.ContainsAny(repo, " \t\r\n") || repo != contract.GitHubWriteAllRepos && (!slash || owner == "" || name == "" || strings.Contains(name, "/")) {
+			return writes, fmt.Errorf("--github-writes repository %q is not owner/name or *", repo)
+		}
+		writes.Repos = append(writes.Repos, contract.RepoName(repo))
+	}
+	return writes, nil
 }

@@ -3,7 +3,7 @@ CREATE TABLE connect_connector (id INTEGER PRIMARY KEY CHECK(id=1), missing INTE
 CREATE TABLE connect_attempt (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL, expires INTEGER NOT NULL);
 CREATE TABLE connect_link_state (id INTEGER PRIMARY KEY CHECK(id=1), epoch INTEGER NOT NULL CHECK(epoch>=0), linked INTEGER NOT NULL CHECK(linked IN (0,1)), generation INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE connect_nonces (nonce TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
-CREATE TABLE rooms (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, cpus INTEGER NOT NULL, mem_bytes INTEGER NOT NULL, paused_at INTEGER, state TEXT NOT NULL DEFAULT 'open', reason TEXT NOT NULL DEFAULT '', only_hosts TEXT NOT NULL DEFAULT '[]', root_approves TEXT NOT NULL DEFAULT '[]');
+CREATE TABLE rooms (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, cpus INTEGER NOT NULL, mem_bytes INTEGER NOT NULL, paused_at INTEGER, state TEXT NOT NULL DEFAULT 'open', reason TEXT NOT NULL DEFAULT '', only_hosts TEXT NOT NULL DEFAULT '[]', root_approves TEXT NOT NULL DEFAULT '[]', github_writes TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE repos (repo TEXT PRIMARY KEY, default_room TEXT NOT NULL REFERENCES rooms(id), main_head TEXT NOT NULL DEFAULT '', ci INTEGER NOT NULL DEFAULT 0, ci_max INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE room_repos (room TEXT NOT NULL REFERENCES rooms(id), repo TEXT NOT NULL REFERENCES repos(repo), is_default INTEGER NOT NULL, PRIMARY KEY(room, repo));
 CREATE UNIQUE INDEX room_repos_default ON room_repos(room) WHERE is_default = 1;

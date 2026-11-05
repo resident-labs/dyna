@@ -1,0 +1,29 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import type { RoomSummary } from "./contract.gen.ts";
+import { writeLabel, writeOn, writeRequest, writesRepos } from "./githubwrites.ts";
+
+const room = (githubWrites?: RoomSummary["githubWrites"]) => ({ id: "room_1", name: "horizon", githubWrites }) as RoomSummary;
+
+test("each switch is labelled by its group and its room", () => {
+  assert.equal(writeLabel("issues", room()), "GitHub writes: Issues in horizon");
+  assert.equal(writeLabel("pulls", room()), "GitHub writes: Pull requests in horizon");
+  assert.equal(writeLabel("projects", room()), "GitHub writes: Projects in horizon");
+  for (const group of ["issues", "pulls", "projects"] as const) assert.doesNotMatch(writeLabel(group, room()), /:\s+in |undefined|\$\{/);
+});
+
+test("a room with nothing set is off, and its repositories read as all of the room's", () => {
+  assert.equal(writeOn(room(), "issues"), false);
+  assert.equal(writeOn(room(null), "pulls"), false);
+  assert.equal(writesRepos(room()), "all of this room's repositories");
+  assert.equal(writesRepos(room({ repos: ["*"], groups: ["issues"] })), "all of this room's repositories");
+  assert.equal(writesRepos(room({ repos: ["a/b", "a/c"], groups: ["issues"] })), "a/b, a/c");
+});
+
+test("turning a group on or off keeps the others and the repositories", () => {
+  assert.deepEqual(writeRequest(room(), "issues", true), { room: "room_1", githubWrites: { repos: ["*"], groups: ["issues"] } });
+  const set = room({ repos: ["a/b"], groups: ["projects", "issues"] });
+  assert.deepEqual(writeRequest(set, "pulls", true), { room: "room_1", githubWrites: { repos: ["a/b"], groups: ["issues", "pulls", "projects"] } });
+  assert.deepEqual(writeRequest(set, "issues", false), { room: "room_1", githubWrites: { repos: ["a/b"], groups: ["projects"] } });
+  assert.deepEqual(writeRequest(room({ repos: ["a/b"], groups: ["issues"] }), "issues", false).githubWrites?.groups, []);
+});

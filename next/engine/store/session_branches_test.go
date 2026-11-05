@@ -121,6 +121,7 @@ func TestUpgradeRecordsEarlierSessionsBranches(t *testing.T) {
 		"ALTER TABLE hosts DROP COLUMN gpus",
 		"ALTER TABLE boxes DROP COLUMN gpu_gib",
 		"ALTER TABLE boxes DROP COLUMN gpu_index",
+		"ALTER TABLE rooms DROP COLUMN github_writes",
 		"INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES ('room','room',1,0,0)",
 		"INSERT INTO sessions(id,room,name,profile,state,goal,created_at,repo) VALUES ('ses_with','room','with','p','ready','',7,'owner/repo'),('ses_without','room','without','p','ready','',8,'')",
 		"UPDATE meta SET value='89' WHERE key='schema_version'",

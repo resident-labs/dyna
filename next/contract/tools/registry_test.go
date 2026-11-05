@@ -2,6 +2,7 @@ package tools
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -205,5 +206,32 @@ func TestWorkflowSettingsMethodsAreOwnerOnlyWithNoAgentAction(t *testing.T) {
 	}
 	if len(seen) != 2 {
 		t.Fatalf("rows found for %v", seen)
+	}
+}
+
+// room.set, which carries rootApproves and githubWrites, is the owner's alone: the room tool agents have keeps log, hosts, pause and
+// repos and never gains set.
+func TestRoomSetIsOwnerOnlyAndAgentsRoomToolIsUnchanged(t *testing.T) {
+	found := false
+	for _, row := range Methods() {
+		if row.Method == contract.MethodRoomSet {
+			found = true
+			if row.Access != OwnerAccess {
+				t.Errorf("room.set row: %+v", row)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no room.set row")
+	}
+	var names []string
+	for _, a := range AgentActions() {
+		if a.Tool == "room" {
+			names = append(names, a.Name)
+		}
+	}
+	slices.Sort(names)
+	if strings.Join(names, " ") != "hosts log pause repos" {
+		t.Fatalf("agents' room actions: %v", names)
 	}
 }
