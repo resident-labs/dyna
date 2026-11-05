@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -84,18 +85,79 @@ func TestReportHeartbeatFreeDisk(t *testing.T) {
 	}
 }
 
-func TestHostLoadJudgesControlPlaneDisk(t *testing.T) {
-	b := &Boxes{Store: listStore{}}
-	total := 1000 * box.GiB
-	for free, low := range map[int64]bool{181 * box.GiB: false, 179 * box.GiB: true} {
-		b.record(contract.ControlPlane, true, podman.Load{DiskBytes: total, DiskUsed: total - free}, time.Now())
-		hosts := []contract.HostSummary{{Name: contract.ControlPlane}}
-		if err := b.HostLoad(context.Background(), hosts); err != nil {
-			t.Fatal(err)
-		}
-		if hosts[0].DiskLow != low {
-			t.Fatalf("free %d: low=%v", free, hosts[0].DiskLow)
-		}
+// The same sample drives the notice, stored host.list flag and live flag consumed by the web.
+func TestDiskNoticeAndHostFlagsAgree(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		total, free int64
+		low         bool
+	}{
+		// Notices truncate GiB: these floors render as 187 and 92, while the old warn levels exceed 281 and 172.
+		{"control-plane report", 1879 * box.GiB, 281 * box.GiB, false},
+		{"desktop report", 929 * box.GiB, 172 * box.GiB, false},
+		{"above", 1000 * box.GiB, 100*box.GiB + 1, false},
+		{"equal", 1000 * box.GiB, 100 * box.GiB, false},
+		{"below", 1000 * box.GiB, 100*box.GiB - 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			st, err := store.Open(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { st.Close() })
+			if err := st.Write(ctx, func(tx *sql.Tx) error {
+				_, err := tx.ExecContext(ctx, `INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+INSERT INTO sessions(id,room,name,parent,profile,state,goal,created_at) VALUES('root','r','root',NULL,'p','open','',0)`)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.AddHost(ctx, box.Host{Name: "h", State: box.HostReady}); err != nil {
+				t.Fatal(err)
+			}
+			service := engine.New(st, nil, nil, time.Now)
+			b := &Boxes{Store: st}
+			at := time.Unix(1000, 0)
+			for _, name := range []contract.HostName{"h", contract.ControlPlane} {
+				if err := st.RecordHostHeartbeat(ctx, name, true, &tc.free, tc.total, at); err != nil {
+					t.Fatal(err)
+				}
+				b.record(name, true, podman.Load{DiskBytes: tc.total, DiskUsed: tc.total - tc.free}, at)
+			}
+			list, problem := service.HostList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.HostListRequest{})
+			if problem != nil {
+				t.Fatal(problem)
+			}
+			if len(list.Hosts) != 2 || list.Hosts[1].DiskLow != tc.low {
+				t.Fatalf("stored host.list: %+v, want low %v", list.Hosts, tc.low)
+			}
+			if err := b.HostLoad(ctx, list.Hosts); err != nil {
+				t.Fatal(err)
+			}
+			for _, host := range list.Hosts {
+				if host.DiskLow != tc.low {
+					t.Fatalf("live %s: low %v, want %v", host.Name, host.DiskLow, tc.low)
+				}
+			}
+			events, err := st.Events(ctx, "r", 0, 100, []contract.EventType{"host.disk_low"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := 0
+			if tc.low {
+				want = 2
+			} // The control-plane data disk and registered host disk have separate samples and crossing keys.
+			if len(events) != want {
+				t.Fatalf("notices: %d, want %d", len(events), want)
+			}
+			for _, event := range events {
+				low := event.Body.(contract.HostDiskLow)
+				if low.FreeBytes != tc.free || low.FloorBytes != box.DiskFloor(tc.total) {
+					t.Fatalf("notice: %+v", low)
+				}
+			}
+		})
 	}
 }
 
