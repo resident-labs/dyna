@@ -110,7 +110,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			if req.Item != "" && req.Item != "input:"+string(input.ID) {
 				continue
 			}
-			value, home, attachments, err := transcriptInputBody(input)
+			value, home, attachments, postData, err := transcriptInputBody(input)
 			if err != nil {
 				return response, failure(err)
 			}
@@ -131,7 +131,8 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			if post, ok := input.Body.(contract.PostCreated); ok {
 				source = post.Source
 			}
-			read := contract.TranscriptInput{Source: source, Home: home, At: input.Time, ID: input.ID, Seq: input.Seq, Room: input.Room, Type: input.Body.EventType(), From: input.From, Text: clipTranscript(value, 512), More: len(value) > 512, Attachments: attachments}
+			read := contract.TranscriptInput{Data: postData, Source: source, Home: home, At: input.Time, ID: input.ID, Seq: input.Seq, Room: input.Room, Type: input.Body.EventType(), From: input.From, Text: clipTranscript(value, 512), More: len(value) > 512, Attachments: attachments}
+			read.Data, read.DataRef = transcriptData(read.Data, read.Attachments)
 			encoded, _ := json.Marshal(read)
 			if inputBytes+len(encoded)+1 > maxTranscriptInputBytes && len(t.Inputs) > 0 {
 				t.More = true
@@ -427,40 +428,51 @@ func applyTranscriptPost(item *contract.TranscriptItem, event contract.Event) {
 	item.More = item.More || len(text) > 4096
 	home := post.Home
 	item.Home = &home
+	item.Data, item.DataRef = transcriptData(post.Data, post.Attachments)
 	item.Attachments = sanitizeTranscriptAttachments(post.Attachments)
 }
 
 // transcriptInputBody returns the masked text of an event a session read, with where it was sent and what it carried.
-func transcriptInputBody(input contract.Event) (string, *contract.Conversation, []contract.Attachment, error) {
-	data, err := json.Marshal(input.Body)
+func transcriptInputBody(input contract.Event) (string, *contract.Conversation, []contract.Attachment, json.RawMessage, error) {
+	body := input.Body
+	var postData json.RawMessage
+	var finalFiles []contract.Attachment
+	if ended, ok := body.(contract.TurnEnded); ok {
+		postData, finalFiles = ended.Data, ended.Attachments
+		ended.Data, ended.Attachments = nil, nil
+		body = ended
+	}
+	data, err := json.Marshal(body)
 	if err != nil {
-		return "", nil, nil, err
+		return "", nil, nil, nil, err
 	}
 	value := string(data)
 	var home *contract.Conversation
-	var attachments []contract.Attachment
+	attachments := sanitizeTranscriptAttachments(finalFiles)
 	if body, ok := input.Body.(contract.PostCreated); ok {
 		value = body.Text
+		postData = body.Data
 		home = &body.Home
 		attachments = sanitizeTranscriptAttachments(body.Attachments)
 	}
 	if body, ok := input.Body.(contract.QuestionAnswered); ok {
 		if value, err = room.RenderDelivery(body); err != nil {
-			return "", nil, nil, err
+			return "", nil, nil, nil, err
 		}
 		home = &contract.Conversation{Kind: contract.ConversationDM, Session: body.Session}
 	}
-	return harness.Mask(value), home, attachments, nil
+	return harness.Mask(value), home, attachments, postData, nil
 }
 
 // applyTranscriptSteer fills a steer from its event. Pi's record holds the frame the session read, not what the owner wrote.
 func applyTranscriptSteer(item *pig.TranscriptItem, event contract.Event, full bool) error {
-	value, home, attachments, err := transcriptInputBody(event)
+	value, home, attachments, postData, err := transcriptInputBody(event)
 	if err != nil {
 		return err
 	}
 	from := event.From
 	item.Event, item.Type, item.Room, item.Seq, item.At, item.From, item.Home, item.Attachments = event.ID, event.Body.EventType(), event.Room, event.Seq, event.Time, &from, home, attachments
+	item.Data, item.DataRef = transcriptData(postData, attachments)
 	item.Text, item.More = value, false
 	if !full {
 		item.Text, item.More = clipTranscript(value, 4096), len(value) > 4096

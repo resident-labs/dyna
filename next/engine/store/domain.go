@@ -310,7 +310,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 				return err
 			}
 			current := event.Body.(contract.TurnEnded)
-			if previous.Session != current.Session || previous.Turn != current.Turn || previous.Outcome != current.Outcome || previous.Final != current.Final || previous.Usage != current.Usage || previous.Error != current.Error {
+			if previous.Session != current.Session || previous.Turn != current.Turn || previous.Outcome != current.Outcome || previous.Final != current.Final || string(previous.Data) != string(current.Data) || previous.Usage != current.Usage || previous.Error != current.Error {
 				return ErrTurnConflict
 			}
 			return nil
@@ -401,6 +401,11 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 		seq, err := s.AppendEvent(tx, event)
 		if err != nil {
 			return err
+		}
+		for _, file := range output.Attachments {
+			if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO event_files(seq,sha256,media) VALUES(?,?,?)", seq, file.SHA256, file.Media); err != nil {
+				return err
+			}
 		}
 		if output.Outcome != contract.TurnStopped && !retrying && owed && output.Final == "" && !slices.ContainsFunc(posts, func(post contract.Event) bool {
 			return post.From.Kind == contract.PrincipalSession && post.From.Session == session
