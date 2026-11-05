@@ -61,6 +61,21 @@ func New(st *store.Store, boxes BoxAdapter, view View, repos Repositories, event
 }
 func (r *Reconciler) SetHostMemory(read func(contract.HostName) int64) { r.hostMemory = read }
 
+// AdmissionHosts reads host reservations with the latest measured memory, which is live runtime state rather than a stored
+// column. API resource changes and reconciler placement use this same view while holding the admission lock.
+func (r *Reconciler) AdmissionHosts(ctx context.Context) ([]box.Host, error) {
+	hosts, err := r.store.Hosts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if r.hostMemory != nil {
+		for i := range hosts {
+			hosts[i].MemUsed = r.hostMemory(hosts[i].Name)
+		}
+	}
+	return hosts, nil
+}
+
 // SetHostRestoring tells the reconciler which hosts have not had their box sockets put back since the engine started. Their
 // boxes cannot reach the engine, so that silence says nothing about them. Heartbeats still report a host that is really gone.
 func (r *Reconciler) SetHostRestoring(read func(contract.HostName) bool) { r.restoring = read }
@@ -163,14 +178,9 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	hosts, err := r.store.Hosts(ctx)
+	hosts, err := r.AdmissionHosts(ctx)
 	if err != nil {
 		return err
-	}
-	if r.hostMemory != nil {
-		for i := range hosts {
-			hosts[i].MemUsed = r.hostMemory(hosts[i].Name)
-		}
 	}
 	pools, err := r.store.Pools(ctx)
 	if err != nil {
