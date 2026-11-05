@@ -32,3 +32,10 @@ test("Pools is an admin list page between Hosts and Images, under the line above
   assert.deepEqual(settingsPanes.slice(-3).map(pane => [pane.id, pane.label, pane.icon, pane.admin, !!pane.list, !!pane.sep]),
     [["hosts", "Hosts", "monitor", true, true, true], ["pools", "Pools", "stack", true, true, false], ["images", "Images", "box", true, true, false]]);
 });
+
+test("Workflows is an admin list page between Approvals and Skills & tools", () => {
+  const at = settingsPanes.findIndex(pane => pane.id === "workflows");
+  assert.deepEqual(settingsPanes.slice(at - 1, at + 2).map(pane => pane.id), ["approvals", "workflows", "addons"]);
+  const pane = settingsPanes[at];
+  assert.deepEqual([pane.label, pane.icon, pane.admin, !!pane.list, !!pane.sep], ["Workflows", "flow", true, true, false]);
+});
