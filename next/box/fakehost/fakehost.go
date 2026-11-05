@@ -43,10 +43,11 @@ type Host struct {
 	Forwards   map[box.Forward]bool
 	Images     map[string]Image
 	Caches     map[string][]string
+	Service    ServiceHost
 }
 
 func New() *Host {
-	return &Host{Slices: map[string]box.Slice{}, Containers: map[contract.BoxID]box.ContainerSpec{}, Volumes: map[contract.BoxID]bool{}, Running: map[contract.BoxID]bool{}, Forwards: map[box.Forward]bool{}, Images: map[string]Image{}, Caches: map[string][]string{}}
+	return &Host{Slices: map[string]box.Slice{}, Containers: map[contract.BoxID]box.ContainerSpec{}, Volumes: map[contract.BoxID]bool{}, Running: map[contract.BoxID]bool{}, Forwards: map[box.Forward]bool{}, Images: map[string]Image{}, Caches: map[string][]string{}, Service: ServiceHost{Fail: map[Call]error{}, Files: map[contract.ServiceID]string{}, Units: map[contract.ServiceID]box.ServiceUnit{}, Secrets: map[string][]byte{}, Sizes: map[string]int64{}}}
 }
 func (h *Host) call(c Call) error {
 	h.Calls = append(h.Calls, c)

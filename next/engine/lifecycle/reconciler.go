@@ -48,6 +48,7 @@ type Reconciler struct {
 	hosts         map[contract.HostName]int
 	fresh         map[contract.BoxID]bool
 	disconnected  map[contract.BoxID]time.Time
+	svc           *serviceState // nil until SetServices
 	wg            sync.WaitGroup
 	pass          sync.Mutex
 }
@@ -59,6 +60,21 @@ func New(st *store.Store, boxes BoxAdapter, view View, repos Repositories, event
 	}, kick: make(chan struct{}, 1), roomSteps: make(map[string]bool), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool), disconnected: make(map[contract.BoxID]time.Time), idle: make(map[contract.HostName]time.Time), audited: make(map[string]time.Time)}
 }
 func (r *Reconciler) SetHostMemory(read func(contract.HostName) int64) { r.hostMemory = read }
+
+// AdmissionHosts reads host reservations with the latest measured memory, which is live runtime state rather than a stored
+// column. API resource changes and reconciler placement use this same view while holding the admission lock.
+func (r *Reconciler) AdmissionHosts(ctx context.Context) ([]box.Host, error) {
+	hosts, err := r.store.Hosts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if r.hostMemory != nil {
+		for i := range hosts {
+			hosts[i].MemUsed = r.hostMemory(hosts[i].Name)
+		}
+	}
+	return hosts, nil
+}
 
 // SetHostRestoring tells the reconciler which hosts have not had their box sockets put back since the engine started. Their
 // boxes cannot reach the engine, so that silence says nothing about them. Heartbeats still report a host that is really gone.
@@ -150,6 +166,8 @@ func (r *Reconciler) change(ctx context.Context, old, next box.Box, due time.Tim
 func (r *Reconciler) Pass(ctx context.Context) error {
 	r.pass.Lock()
 	defer r.pass.Unlock()
+	unlock := r.store.LockAdmission()
+	defer unlock()
 	if err := r.store.WakeModelRetries(ctx, r.now()); err != nil {
 		return err
 	}
@@ -160,16 +178,15 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	hosts, err := r.store.Hosts(ctx)
+	hosts, err := r.AdmissionHosts(ctx)
 	if err != nil {
 		return err
 	}
-	if r.hostMemory != nil {
-		for i := range hosts {
-			hosts[i].MemUsed = r.hostMemory(hosts[i].Name)
-		}
-	}
 	pools, err := r.store.Pools(ctx)
+	if err != nil {
+		return err
+	}
+	holds, err := r.store.ServiceHolds(ctx)
 	if err != nil {
 		return err
 	}
@@ -257,15 +274,11 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			continue
 		}
 		placement := box.Placement{}
-		cpus, memory := b.Size.CPUs, b.Size.MemBytes
-		for _, placed := range all {
-			if placed.ID == b.ID || placed.Room != b.Room || placed.State == contract.BoxPending || placed.State == contract.BoxStopped || placed.State == contract.BoxFailed || placed.State == contract.BoxDeleted {
-				continue
-			}
-			cpus += placed.Size.CPUs
-			memory += placed.Size.MemBytes
-		}
-		if row.Limits.CPUs > 0 && cpus > 4*row.Limits.CPUs || row.Limits.MemBytes > 0 && memory > 4*row.Limits.MemBytes {
+		// A service counts at 1x against the room's limits, which is four quarters of a box's size.
+		cpuMilli, memory := box.RoomQuarters(b.Room, all, holds, b.ID, "")
+		cpuMilli += int64(b.Size.CPUs) * 1000
+		memory += b.Size.MemBytes
+		if row.Limits.CPUs > 0 && cpuMilli > 4000*int64(row.Limits.CPUs) || row.Limits.MemBytes > 0 && memory > 4*row.Limits.MemBytes {
 			placement.Reason = box.PendingRoomLimit
 		} else {
 			placement = box.Admit(hosts, all, b, row.Only...)
@@ -354,6 +367,9 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 		}
 	}
 	if err := r.poolPass(ctx, pools, slices.Concat(rows, runnerRows), all); err != nil {
+		return err
+	}
+	if err := r.servicePass(ctx, hosts, all); err != nil {
 		return err
 	}
 	return r.roomPass(ctx, hosts)
