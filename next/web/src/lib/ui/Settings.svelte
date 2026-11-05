@@ -8,6 +8,7 @@
   import ProfilesPane from "./ProfilesPane.svelte";
   import AddonsPane from "./AddonsPane.svelte";
   import ApprovalsPane from "./ApprovalsPane.svelte";
+  import WorkflowsPane from "./WorkflowsPane.svelte";
   import HostsPane from "./HostsPane.svelte";
   import PoolsPane from "./PoolsPane.svelte";
   import ImagesPane from "./ImagesPane.svelte";
@@ -79,6 +80,7 @@
     {:else if shown?.id === "profiles"}<ProfilesPane {bar} {phone} {signedout} selected={item} onselect={open} onclose={close} />
     {:else if shown?.id === "addons"}<AddonsPane {bar} {admin} {signedout} selected={item} onselect={open} onclose={close} />
     {:else if shown?.id === "approvals"}<ApprovalsPane {bar} {signedout} selected={item} onselect={open} onclose={close} />
+    {:else if shown?.id === "workflows"}<WorkflowsPane {bar} {signedout} selected={item} onselect={open} onclose={close} />
     {:else if shown?.id === "hosts"}<HostsPane {bar} {phone} {navigate} {signedout} selected={item} onselect={open} onclose={close} />
     {:else if shown?.id === "pools"}<PoolsPane {bar} {phone} {navigate} {signedout} selected={item} onselect={open} onclose={close} />
     {:else if shown?.id === "images"}<ImagesPane {bar} {signedout} selected={item} onselect={open} onclose={close} />
