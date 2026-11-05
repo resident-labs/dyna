@@ -137,6 +137,7 @@ type Server struct {
 	sentETags      []string
 	tokens         []string
 	sizes          []int
+	headSizes      []int
 }
 
 func key(repo contract.RepoName, number int) string { return fmt.Sprintf("%s#%d", repo, number) }
@@ -476,6 +477,13 @@ func (s *Server) Counts() (graphql, rest, notModified int) {
 	return s.graphql, s.rest, s.notModified
 }
 
+// HeadQuerySizes lists how many default-branch commits each commit-rollup query asked for.
+func (s *Server) HeadQuerySizes() []int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]int(nil), s.headSizes...)
+}
+
 // SentETags lists each If-None-Match it received.
 func (s *Server) SentETags() []string {
 	s.mu.Lock()
@@ -489,6 +497,8 @@ func (s *Server) QuerySizes() []int {
 	defer s.mu.Unlock()
 	return append([]int(nil), s.sizes...)
 }
+
+var headAlias = regexp.MustCompile(`h(\d+):object\(oid:\$h\d+\)`)
 
 var alias = regexp.MustCompile(`pr(\d+):pullRequest\(number:(\d+)\)`)
 
@@ -794,7 +804,19 @@ func (s *Server) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 	}
 	repo := contract.RepoName(input.Variables["owner"] + "/" + input.Variables["name"])
 	if oid := input.Variables["oid"]; oid != "" {
+		s.headSizes = append(s.headSizes, 1)
 		if err := json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"viewer": user(s.viewer), "repository": map[string]any{"object": s.commitNode(repo, oid)}}}); err != nil {
+			s.t.Error(err)
+		}
+		return
+	}
+	if heads := headAlias.FindAllStringSubmatch(input.Query, -1); len(heads) > 0 {
+		s.headSizes = append(s.headSizes, len(heads))
+		repository := map[string]any{}
+		for _, match := range heads {
+			repository["h"+match[1]] = s.commitNode(repo, input.Variables["h"+match[1]])
+		}
+		if err := json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"viewer": user(s.viewer), "repository": repository}}); err != nil {
 			s.t.Error(err)
 		}
 		return
@@ -835,6 +857,9 @@ func (s *Server) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// pageSize is the most checks GitHub returns in one contexts page.
+const pageSize = 100
+
 // Check is one check run in a commit's rollup.
 type Check struct {
 	Name       string
@@ -847,6 +872,7 @@ type Check struct {
 type Commit struct {
 	Rollup string
 	Checks []Check
+	Total  int // the rollup's totalCount when it holds more checks than Checks lists, else len(Checks)
 }
 
 // SetCommit sets a commit's rollup, replacing what it said.
@@ -864,9 +890,16 @@ func (s *Server) commitNode(repo contract.RepoName, sha string) any {
 	}
 	var rollup any
 	if commit.Rollup != "" {
-		rollup = map[string]any{"state": commit.Rollup, "contexts": nodes(commit.Checks, func(c Check) map[string]any {
+		checks := commit.Checks
+		total := max(commit.Total, len(checks))
+		if len(checks) > pageSize {
+			checks = checks[:pageSize]
+		}
+		contexts := nodes(checks, func(c Check) map[string]any {
 			return map[string]any{"__typename": "CheckRun", "name": c.Name, "conclusion": c.Conclusion, "detailsUrl": c.URL}
-		})}
+		})
+		contexts["totalCount"] = total
+		rollup = map[string]any{"state": commit.Rollup, "contexts": contexts}
 	}
 	return map[string]any{"oid": sha, "statusCheckRollup": rollup}
 }
