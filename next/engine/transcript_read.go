@@ -17,6 +17,12 @@ import (
 
 const maxTranscriptCallPosts = 8
 
+// A turn's inputs come at most 50 and 48 KiB of encoded inputs to a page, whichever is reached first.
+const (
+	maxTranscriptInputs     = 50
+	maxTranscriptInputBytes = 48 << 10
+)
+
 // TranscriptRead reads the acknowledged prefix without holding the writer or service lock.
 func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal, req contract.TranscriptReadRequest) (contract.TranscriptReadResponse, *contract.Error) {
 	response := contract.TranscriptReadResponse{Steps: []contract.TranscriptStep{}, Turns: []contract.TranscriptTurn{}}
@@ -96,6 +102,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			applyWorkerTurn(&t, worker, w.Started)
 		}
 		after := req.AfterItem == ""
+		inputBytes := 0
 		for _, input := range w.Inputs {
 			if req.Item == "" && (req.Page != "" || req.Tail) {
 				break
@@ -116,7 +123,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 				}
 				continue
 			}
-			if len(t.Inputs) == 8 {
+			if len(t.Inputs) == maxTranscriptInputs {
 				t.More = true
 				break
 			}
@@ -124,18 +131,21 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			if post, ok := input.Body.(contract.PostCreated); ok {
 				source = post.Source
 			}
-			t.Inputs = append(t.Inputs, contract.TranscriptInput{Source: source, Home: home, At: input.Time, ID: input.ID, Seq: input.Seq, Room: input.Room, Type: input.Body.EventType(), From: input.From, Text: clipTranscript(value, 512), More: len(value) > 512, Attachments: attachments})
-			// Reserve room for turn metadata and cursor fields before adding items.
-			encoded, _ := json.Marshal(t)
-			if len(encoded) > 170<<10 && len(t.Inputs) > 1 {
-				t.Inputs = t.Inputs[:len(t.Inputs)-1]
+			read := contract.TranscriptInput{Source: source, Home: home, At: input.Time, ID: input.ID, Seq: input.Seq, Room: input.Room, Type: input.Body.EventType(), From: input.From, Text: clipTranscript(value, 512), More: len(value) > 512, Attachments: attachments}
+			encoded, _ := json.Marshal(read)
+			if inputBytes+len(encoded)+1 > maxTranscriptInputBytes && len(t.Inputs) > 0 {
 				t.More = true
 				break
 			}
+			inputBytes += len(encoded) + 1
+			t.Inputs = append(t.Inputs, read)
 			t.After = "input:" + string(input.ID)
 		}
+		// The turn's first page carries its items with the inputs. A page that continues the inputs carries only inputs.
 		if !t.More {
 			t.After = ""
+		}
+		if req.AfterItem == "" || req.Item != "" {
 			ranges, err := s.store.TranscriptTurnRanges(ctx, req.Session, t.ID)
 			if err != nil {
 				return response, failure(err)
@@ -143,54 +153,56 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			if req.Step != "" {
 				ranges = slices.DeleteFunc(ranges, func(r store.TranscriptTurnRange) bool { return r.Path != worker.Step.Transcript })
 			}
+			// Every request reads the window of items, because a post's index is where it falls among them.
+			wantItems := !req.Tail && req.Page != contract.TranscriptPageMandatoryPosts
 			skip := req.Cursor
-			if !req.Tail && req.Page != contract.TranscriptPageMandatoryPosts {
-				const maxItems = 256
-				var pageItems []pig.TranscriptItem
-				seenTotal := 0
-				readerMore := false
-				for _, r := range ranges {
-					var items []pig.TranscriptItem
-					var seen int
-					var more bool
-					var err error
-					if req.Item == "" && req.Page == "" {
-						items, seen, more, err = reader.ReadRecent(r.Path, r.Start, r.End, deliveries, maxItems)
-					} else {
-						items, seen, more, err = reader.Read(r.Path, r.Start, r.End, deliveries, req.Item, skip, max(0, maxItems-len(pageItems)))
-					}
-					if err != nil {
-						return response, failure(err)
-					}
-					for i := range items {
-						items[i].Index += seenTotal
-					}
-					seenTotal += seen
-					if skip > seen {
-						skip -= seen
-					} else {
-						skip = 0
-					}
-					pageItems = append(pageItems, items...)
-					if len(pageItems) > maxItems {
-						latestText := -1
-						for i := range pageItems {
-							if pageItems[i].Kind == contract.TranscriptText {
-								latestText = i
-							}
-						}
-						drop := len(pageItems) - maxItems
-						if latestText >= 0 && latestText < drop {
-							pinned := pageItems[latestText]
-							pageItems = pageItems[drop:]
-							pageItems[0] = pinned
-						} else {
-							pageItems = pageItems[drop:]
-						}
-						more = true
-					}
-					readerMore = readerMore || more
+			const maxItems = 256
+			var pageItems []pig.TranscriptItem
+			seenTotal := 0
+			readerMore := false
+			for _, r := range ranges {
+				var items []pig.TranscriptItem
+				var seen int
+				var more bool
+				var err error
+				if req.Item == "" && (req.Page == "" || !wantItems) {
+					items, seen, more, err = reader.ReadRecent(r.Path, r.Start, r.End, deliveries, maxItems)
+				} else {
+					items, seen, more, err = reader.Read(r.Path, r.Start, r.End, deliveries, req.Item, skip, max(0, maxItems-len(pageItems)))
 				}
+				if err != nil {
+					return response, failure(err)
+				}
+				for i := range items {
+					items[i].Index += seenTotal
+				}
+				seenTotal += seen
+				if skip > seen {
+					skip -= seen
+				} else {
+					skip = 0
+				}
+				pageItems = append(pageItems, items...)
+				if len(pageItems) > maxItems {
+					latestText := -1
+					for i := range pageItems {
+						if pageItems[i].Kind == contract.TranscriptText {
+							latestText = i
+						}
+					}
+					drop := len(pageItems) - maxItems
+					if latestText >= 0 && latestText < drop {
+						pinned := pageItems[latestText]
+						pageItems = pageItems[drop:]
+						pageItems[0] = pinned
+					} else {
+						pageItems = pageItems[drop:]
+					}
+					more = true
+				}
+				readerMore = readerMore || more
+			}
+			if wantItems {
 				if readerMore && req.Item == "" {
 					if req.Page == contract.TranscriptPageMandatoryItems {
 						t.MandatoryItems, t.NextMandatory = true, req.Cursor+len(pageItems)
@@ -301,7 +313,15 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 				}
 				for i := len(posts) - 1; i >= 0; i-- {
 					post := posts[i]
-					item := contract.TranscriptItem{ID: string(post.ID), Index: 1<<30 + int(post.Seq), Turn: t.ID, At: post.Time}
+					// The post's place among the items: before the first one that began after it was sent, or after all of them.
+					index := seenTotal
+					for _, item := range pageItems {
+						if post.Time.Before(item.At) {
+							index = item.Index
+							break
+						}
+					}
+					item := contract.TranscriptItem{ID: string(post.ID), Index: index, Turn: t.ID, At: post.Time}
 					applyTranscriptPost(&item, post)
 					t.Items = append(t.Items, item)
 				}
