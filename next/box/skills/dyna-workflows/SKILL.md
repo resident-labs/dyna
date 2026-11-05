@@ -56,7 +56,7 @@ Reload is for a running run, resume for an ended one. Both go by step key: a has
 
 - The same crew, box, main tree, branches and journal carry on. The crew stops the old script and runs the new one from its start.
 - A key whose step is running joins it: the call waits for the worker already at work, and no second one starts. A new key starts a step. A running step the new script does not call runs on until the run ends, and then fails with `the run ended first`.
-- `meta.name`, `meta.repo` and `meta.size` stay as the run has them, and a reload that changes one is refused. `profiles` and `description` may change, and the run's models follow the new profiles.
+- `meta.name`, `meta.repo`, `meta.size` and `meta.gpu` stay as the run has them, and a reload that changes one is refused. `profiles` and `description` may change, and the run's models follow the new profiles.
 - The run keeps every version of its script, and each step records the version that started it.
 
 `--resume RUN` names an ended run of the same room and repository. A resume is a new session, possibly on another host, with the same pinned commit.

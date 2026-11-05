@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { diskLow, hang, hostBars, hostChips, hostGroup, hostLabel, hostLine, hostLoads, hostMeters, hostName, hostOrder, hostState, hostText, largeShared, lastSeen, machines, onHost, roomSessions } from "./hosts.ts";
+import { diskLow, hang, hostBars, gpuLine, hostChips, hostGroup, hostLabel, hostLine, hostLoads, hostMeters, hostName, hostOrder, hostState, hostText, largeShared, lastSeen, machines, onHost, roomSessions } from "./hosts.ts";
 import { listView } from "./settings-list.ts";
 import type { HostSummary } from "./contract.gen.ts";
 
@@ -221,4 +221,15 @@ test("the engine's machine merges into its registered host: the plane's figures,
     ["lab", 20, 31 * gib, 1900 * gib, 1000 * gib, 5, false, true, ["r1"], "create_failed", 2, true]);
   // Home's card stays as it was: no pool line, the plane's own exec-only, leftovers and runner images.
   assert.deepEqual([one.pool, one.execOnly, one.leftovers, one.runnerImages], [undefined, undefined, undefined, undefined]);
+});
+
+test("a host with GPUs gets a tile of the VRAM asked of its cards, and the list's bars stay at three", () => {
+  const gib = 2 ** 30;
+  const h = { name: "gpu", reachable: true, boxes: 1, cpus: 8, memBytes: 32 * gib, cpuUsed: 1, memUsed: 8 * gib, diskBytes: 500 * gib, diskUsed: 100 * gib, diskLow: false, shared: [], history: null,
+    gpus: [{ index: 0, name: "RTX 3090 Ti", memBytes: 24 * gib, requestedBytes: 6 * gib }, { index: 1, name: "GTX 1050 Ti", memBytes: 4 * gib }] };
+  assert.deepEqual(hostMeters(h).slice(3).map(({ label, text, percent, busy }) => ({ label, text, percent, busy })), [{ label: "GPU asked", text: "6.0 of 28 GB", percent: 21, busy: false }]);
+  assert.equal(hostMeters({ ...h, gpus: [] }).length, 3);
+  assert.equal(hostBars(h).length, 3);
+  assert.equal(gpuLine(h.gpus[0]), "RTX 3090 Ti, 6.0 of 24 GB asked");
+  assert.equal(gpuLine(h.gpus[1]), "GTX 1050 Ti, 0.0 of 4 GB asked");
 });

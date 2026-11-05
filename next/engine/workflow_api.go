@@ -9,6 +9,7 @@ import (
 	"log"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
@@ -117,7 +118,7 @@ func (s *Service) WorkflowRun(ctx context.Context, caller contract.Principal, re
 		return response, invalid("meta.name must be letters, digits, dots, underscores or hyphens, at most 57 of them, and start with a letter or digit")
 	}
 	run := store.WorkflowRun{ID: contract.WorkflowRunID(runID), Room: roomID, Name: meta.Name, Description: meta.Description, Script: req.Script, Args: req.Args, Profiles: meta.Profiles, Repo: repo, Resume: req.Resume, MaxRuns: effective.MaxRuns}
-	started, problem := s.startSession(ctx, caller, contract.SessionStartRequest{Room: roomID, Name: name, Profile: meta.Profiles[0], Repo: repo, Size: cmp.Or(meta.Size, effective.Size), Brief: "Run workflow " + meta.Name + ".", ClientID: req.ClientID}, "", &run)
+	started, problem := s.startSession(ctx, caller, contract.SessionStartRequest{Room: roomID, Name: name, Profile: meta.Profiles[0], Repo: repo, Size: cmp.Or(meta.Size, effective.Size), GPU: meta.GPU, Brief: "Run workflow " + meta.Name + ".", ClientID: req.ClientID}, "", &run)
 	if problem != nil {
 		return response, problem
 	}
@@ -166,7 +167,7 @@ func (s *Service) WorkflowReload(ctx context.Context, caller contract.Principal,
 	if err != nil {
 		return response, failure(err)
 	}
-	for _, field := range []struct{ name, now, was string }{{"name", meta.Name, run.Name}, {"repo", string(repo), string(run.Repo)}, {"size", string(meta.Size), string(current.Size)}} {
+	for _, field := range []struct{ name, now, was string }{{"name", meta.Name, run.Name}, {"repo", string(repo), string(run.Repo)}, {"size", string(meta.Size), string(current.Size)}, {"gpu", strconv.Itoa(int(meta.GPU)), strconv.Itoa(int(current.GPU))}} {
 		if field.now != field.was {
 			return response, invalid(fmt.Sprintf("a reload keeps the run's meta.%s, which is %s, and this script has %s; a different %s needs a new run", field.name, metaText(field.was), metaText(field.now), field.name))
 		}

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"slices"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
@@ -24,6 +25,10 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 	if problem != nil {
 		return contract.HostListResponse{}, problem
 	}
+	boxes, err := s.store.Boxes(ctx)
+	if err != nil {
+		return contract.HostListResponse{}, failure(err)
+	}
 	runners := s.reconciler.RunnerCounts()
 	var imageProblems map[contract.HostName][]contract.RunnerImageProblem
 	if s.runnerImageProblems != nil {
@@ -31,7 +36,18 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 	}
 	result := contract.HostListResponse{Hosts: []contract.HostSummary{{Name: contract.ControlPlane, Sessions: sessions[contract.ControlPlane], Shared: shared}}}
 	for _, host := range hosts {
-		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, Problem: host.Problem, Sessions: sessions[host.Name], Shared: []contract.RoomShared{}, Pool: host.Pool, Agents: !host.NoAgents, CI: host.CI, Rooms: host.Rooms, ExecOnly: host.ExecOnly, Runners: runners[host.Name], RunnerImages: imageProblems[host.Name], CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.ExecOnly && !host.CheckedAt.IsZero() && host.DiskBytes < box.DiskWarn(host.DiskFloor, host.DiskTotal, host.Pool != ""), EngineHost: host.EngineHost != nil && *host.EngineHost, Leftovers: leftovers[host.Name]})
+		var cards []contract.GPU
+		if len(host.GPUs) > 0 {
+			cards = slices.Clone(host.GPUs)
+		}
+		for i := range cards {
+			for _, b := range boxes {
+				if b.Host == host.Name && b.GPUCard == cards[i].Index && b.HoldsGPU() {
+					cards[i].RequestedBytes += int64(b.GPU) * box.GiB
+				}
+			}
+		}
+		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, Problem: host.Problem, Sessions: sessions[host.Name], Shared: []contract.RoomShared{}, Pool: host.Pool, Agents: !host.NoAgents, CI: host.CI, Rooms: host.Rooms, ExecOnly: host.ExecOnly, Runners: runners[host.Name], RunnerImages: imageProblems[host.Name], CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.ExecOnly && !host.CheckedAt.IsZero() && host.DiskBytes < box.DiskWarn(host.DiskFloor, host.DiskTotal, host.Pool != ""), EngineHost: host.EngineHost != nil && *host.EngineHost, Leftovers: leftovers[host.Name], GPUs: cards})
 	}
 	return result, nil
 }
