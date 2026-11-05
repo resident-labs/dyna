@@ -17,6 +17,7 @@ case "$suite" in
         exit 1
       fi
     fi
+    node --test scripts/spacing-count.test.mjs
     go vet ./...
     go test -count=1 -timeout 3m ./...
     # Join the vendored management handler and engine over private RPC.

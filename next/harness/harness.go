@@ -41,7 +41,8 @@ type Harness interface {
 	// TransferModel moves the session to a model, thinking level and compaction trigger (0: Pi's default) before a
 	// turn's prompt. It may summarize the conversation, so it can take minutes; Abort cancels it. ErrRefused means the
 	// agent program refused the model. A failed summary is no error: Pi reports it in the transfer and still switches.
-	TransferModel(context.Context, contract.TurnID, contract.ModelChoice, int) (ModelTransfer, error)
+	// The final argument replaces the model-specific prompt part only if the model transfer succeeds.
+	TransferModel(context.Context, contract.TurnID, contract.ModelChoice, int, string) (ModelTransfer, error)
 	// Compact summarizes the conversation between turns if its context is over the given size, as the agent program measures
 	// it. It can take minutes; Abort cancels it. A turn must wait for it to return.
 	Compact(context.Context, int64) (Compaction, error)

@@ -716,6 +716,8 @@ type BoxHelloResponse struct {
 	GitEmail      string `json:"gitEmail,omitempty"`
 	CompactTokens int    `json:"compactTokens,omitempty"`
 	Instructions  string `json:"instructions"`
+	// ModelInstructions is the model-specific prompt part, replaced with the model at a turn boundary.
+	ModelInstructions string `json:"modelInstructions,omitempty"`
 	// WorkerInstructions is the part of the prompt a workflow worker shares with every agent. A crew's box puts it before the crew paragraph.
 	WorkerInstructions string           `json:"workerInstructions,omitempty"`
 	Session            SessionID        `json:"session"`
@@ -1004,10 +1006,11 @@ type TurnFile struct {
 	Bytes  int64  `json:"bytes"`
 }
 type TurnStart struct {
-	Sections []ContextSection `json:"sections"`
-	Turn     TurnID           `json:"turn"`
-	Inputs   []TurnInput      `json:"inputs"`
-	Model    ModelChoice      `json:"model"` // the session profile's model when the turn was dispatched
+	Sections          []ContextSection `json:"sections"`
+	Turn              TurnID           `json:"turn"`
+	Inputs            []TurnInput      `json:"inputs"`
+	Model             ModelChoice      `json:"model"` // the session profile's model when the turn was dispatched
+	ModelInstructions string           `json:"modelInstructions,omitempty"`
 	// CompactTokens is the profile's compaction trigger, which applies with Model. 0: Pi's default.
 	CompactTokens int `json:"compactTokens,omitempty"`
 }

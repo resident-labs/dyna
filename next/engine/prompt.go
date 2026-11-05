@@ -137,6 +137,14 @@ Your brief is your task, end to end. You do it, verify it and report the result,
 // promptCore is the part every agent shares, a workflow worker included: the intro, how work goes, working on your own and the tools.
 var promptCore = strings.Join([]string{promptIntro, promptHow, promptAutonomy, promptTools}, "\n\n")
 
+// modelInstructions is separate from the fixed startup prompt so a model transfer can replace or remove it.
+func modelInstructions(model contract.ModelChoice) string {
+	if model.Provider == contract.ModelProviderOpenAI && (model.ID == "gpt-6.1" || strings.HasPrefix(model.ID, "gpt-6.1-")) {
+		return "Write normal spaced prose, with spaces between words and around numbers and IDs; do not compress wording in posts, briefs or files. Keep code and IDs themselves intact."
+	}
+	return ""
+}
+
 // promptVars holds what a session's prompt takes from the engine: its role and names, its branch when it has a repository, and, for root, where
 // the files are on the engine host.
 type promptVars struct {
