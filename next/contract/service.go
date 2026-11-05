@@ -157,7 +157,7 @@ func (s ServiceSpec) Parse() (ServiceParts, error) {
 	if len(s.Health) > 0 && s.Health[0] == "" {
 		return p, fmt.Errorf("health must start with a command")
 	}
-	if s.Data != "" && (!strings.HasPrefix(s.Data, "/") || s.Data == "/" || hasControl(s.Data) || strings.ContainsAny(s.Data, ":,\"% ")) {
+	if s.Data != "" && (!strings.HasPrefix(s.Data, "/") || s.Data == "/" || hasControl(s.Data) || strings.ContainsAny(s.Data, ":,\"% \\$=")) {
 		return p, fmt.Errorf("data must be an absolute path with no space, colon, comma, quote or %%")
 	}
 	taken := map[string]bool{}

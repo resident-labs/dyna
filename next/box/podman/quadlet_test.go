@@ -23,21 +23,47 @@ func quadletSpec(t *testing.T) box.ServiceUnitSpec {
 	return box.ServiceUnitSpec{ID: "svc_1", Room: "room_1", Parts: parts, Image: parts.Digest}
 }
 
-func TestServiceQuadletGolden(t *testing.T) {
-	got := RenderServiceUnit(quadletSpec(t))
-	want, err := os.ReadFile("testdata/service.container")
-	if err != nil {
-		t.Fatal(err)
+// quadletVariants are goldens beside the main one: a room image with on-failure restart and no data volume, and values that would
+// break out of a line or a word if they were not escaped.
+func quadletVariants(t *testing.T) map[string]box.ServiceUnitSpec {
+	t.Helper()
+	parse := func(spec contract.ServiceSpec) contract.ServiceParts {
+		parts, err := spec.Parse()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return parts
 	}
-	if got != string(want) {
-		t.Fatalf("quadlet differs from testdata/service.container:\n%s", got)
+	return map[string]box.ServiceUnitSpec{
+		"service.container":    quadletSpec(t),
+		"room-image.container": {ID: "svc_2", Room: "room_1", Image: "localhost/dyna-img-app:1", Parts: parse(contract.ServiceSpec{Name: "app", Image: "app", Restart: contract.ServiceRestartOnFailure})},
+		"hostile.container": {ID: "svc_3", Room: "room_1", Image: "localhost/dyna-img-app:1", Parts: parse(contract.ServiceSpec{Name: "app", Image: "app",
+			Env: map[string]string{"A": "x\" Exec=/bin/sh", "B": "${HOME} %h \\"}, Command: []string{"run", "a b", "$X", "%n"}})},
+	}
+}
+
+func TestServiceQuadletGolden(t *testing.T) {
+	for name, spec := range quadletVariants(t) {
+		got := RenderServiceUnit(spec)
+		if os.Getenv("GEN") != "" {
+			if err := os.WriteFile("testdata/"+name, []byte(got), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		want, err := os.ReadFile("testdata/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != string(want) {
+			t.Errorf("quadlet differs from testdata/%s:\n%s", name, got)
+		}
 	}
 }
 
 // Each isolation promise of 5.18 is a line of the quadlet, and no line grants more.
 func TestServiceQuadletIsolationLines(t *testing.T) {
 	file := RenderServiceUnit(quadletSpec(t))
-	for _, line := range []string{"UserNS=nomap", "Network=pasta:--no-map-gw", "DropCapability=all", "NoNewPrivileges=true", "ReadOnly=true", "Slice=dyna-svc.slice"} {
+	for _, line := range []string{"UserNS=nomap", "Network=pasta:--no-map-gw", "DropCapability=all", "NoNewPrivileges=true", "ReadOnly=true", "ReadOnlyTmpfs=false", "Slice=dyna-svc.slice"} {
 		if !strings.Contains(file, "\n"+line+"\n") {
 			t.Errorf("no line %q", line)
 		}

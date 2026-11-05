@@ -117,7 +117,14 @@ func (r *Reconciler) servicePass(ctx context.Context, hosts []box.Host, boxes []
 	for _, h := range hosts {
 		byName[h.Name] = h
 	}
-	for _, row := range rows {
+	for _, h := range hosts {
+		if h.State == box.HostReady && !h.ExecOnly {
+			name := h.Name
+			r.launchRoomStep(ctx, "service leftovers "+string(name), func(ctx context.Context) error { return r.repayServiceLeftovers(ctx, name) })
+		}
+	}
+	for i := range rows {
+		row := rows[i]
 		if row.Host == "" {
 			if row.Want == contract.ServiceWantRemove {
 				if err := r.store.DeleteService(ctx, row, false); err != nil {
@@ -128,7 +135,7 @@ func (r *Reconciler) servicePass(ctx context.Context, hosts []box.Host, boxes []
 			if row.State == contract.ServiceFailed {
 				continue
 			}
-			if err := r.placeService(ctx, row, hosts, boxes, rows); err != nil {
+			if err := r.placeService(ctx, &rows[i], hosts, boxes, rows); err != nil {
 				return err
 			}
 			continue
@@ -142,13 +149,13 @@ func (r *Reconciler) servicePass(ctx context.Context, hosts []box.Host, boxes []
 	return nil
 }
 
-func (r *Reconciler) placeService(ctx context.Context, row store.ServiceRow, hosts []box.Host, boxes []box.Box, all []store.ServiceRow) error {
+// placeService places one service. A placement is added to the snapshot at once, to hosts as a hold and to all as the row's host, so
+// the next service of the same pass is judged with it: the quarter cap and the port rule hold across one pass.
+func (r *Reconciler) placeService(ctx context.Context, rowp *store.ServiceRow, hosts []box.Host, boxes []box.Box, all []store.ServiceRow) error {
+	row := *rowp
 	only, err := r.store.RoomOnly(ctx, row.Room)
 	if err != nil {
 		return err
-	}
-	if row.Spec.Host != "" {
-		only = []string{string(row.Spec.Host)}
 	}
 	estimate, err := r.store.ImageEstimate(ctx, row.Spec.Image)
 	if err != nil {
@@ -165,6 +172,12 @@ func (r *Reconciler) placeService(ctx context.Context, row store.ServiceRow, hos
 			next.State, next.Reason = contract.ServicePending, contract.ServicePortTaken
 		} else {
 			next.Host, next.Placed = placement.Host, r.now()
+			for i := range hosts {
+				if hosts[i].Name == placement.Host {
+					hosts[i].Services = append(slices.Clone(hosts[i].Services), box.ServiceHold{ID: row.ID, Room: row.Room, CPUMilli: row.CPUMilli, MemBytes: row.MemBytes, DiskBytes: row.DiskBytes})
+				}
+			}
+			rowp.Host = placement.Host
 			next.State, next.Reason = contract.ServicePending, ""
 		}
 	} else {
@@ -190,12 +203,6 @@ func disjointPorts(a, b []contract.PortBinding) bool {
 
 // serviceStep carries one placed service one step toward what it declares. The reconciler runs at most one per service.
 func (r *Reconciler) serviceStep(ctx context.Context, row store.ServiceRow, host box.Host) error {
-	if host.EngineHost != nil && *host.EngineHost {
-		next := row
-		next.State, next.Reason = contract.ServicePending, contract.ServiceRoomHost
-		_, _, err := r.saveService(ctx, row, next)
-		return err
-	}
 	if host.State != box.HostReady {
 		// A host that is gone takes its services' state with it, and nothing moves them: a removal is owed instead.
 		if row.Want == contract.ServiceWantRemove {
@@ -230,6 +237,13 @@ func (r *Reconciler) serviceStep(ctx context.Context, row store.ServiceRow, host
 			return fmt.Errorf("service %s: remove: %w", row.ID, err)
 		}
 		return r.store.DeleteService(ctx, row, false)
+	}
+	if host.EngineHost == nil || *host.EngineHost {
+		// The engine's own host, or one not known not to be: nothing of a service is started there. A removal above still reaches it.
+		next := row
+		next.State, next.Reason = contract.ServicePending, contract.ServiceRoomHost
+		_, _, err := r.saveService(ctx, row, next)
+		return err
 	}
 	check, issues, err := r.serviceHostCheck(ctx, host.Name, driver)
 	if err != nil {
@@ -326,18 +340,6 @@ func (r *Reconciler) syncServiceHost(ctx context.Context, host contract.HostName
 			}
 		}
 	}
-	debts, err := r.store.ServiceLeftovers(ctx, host)
-	if err != nil {
-		return err
-	}
-	for _, id := range debts {
-		if err := driver.RemoveService(ctx, id); err != nil {
-			return fmt.Errorf("host %s: remove service %s: %w", host, id, err)
-		}
-		if err := r.store.ForgetServiceLeftover(ctx, host, id); err != nil {
-			return err
-		}
-	}
 	r.svc.mu.Lock()
 	r.svc.synced[host] = true
 	r.svc.mu.Unlock()
@@ -346,7 +348,24 @@ func (r *Reconciler) syncServiceHost(ctx context.Context, host contract.HostName
 
 // rewriteService puts a service's quadlet file back as its row says and starts the unit.
 func (r *Reconciler) rewriteService(ctx context.Context, row store.ServiceRow, driver box.ServiceDriver) error {
-	if _, err := driver.WriteServiceUnit(ctx, box.ServiceUnitSpec{ID: row.ID, Room: row.Room, Parts: row.Parts, Image: row.ImageRef}); err != nil {
+	// What runs is what the last good deploy wrote, and not a newer declaration that is waiting or failed, so the file and its hash
+	// stay the same until a deploy succeeds.
+	parts := row.Parts
+	if row.Live != nil {
+		parts = *row.Live
+	}
+	values, err := r.store.ServiceSecretValues(ctx, row.ID)
+	if err != nil {
+		return err
+	}
+	for _, name := range parts.Spec.Secrets {
+		if value, ok := values[name]; ok {
+			if err := driver.WriteServiceSecret(ctx, row.ID, name, value); err != nil {
+				return fmt.Errorf("service %s: write secret %s: %w", row.ID, name, err)
+			}
+		}
+	}
+	if _, err := driver.WriteServiceUnit(ctx, box.ServiceUnitSpec{ID: row.ID, Room: row.Room, Parts: parts, Image: row.ImageRef}); err != nil {
 		return fmt.Errorf("service %s: write unit: %w", row.ID, err)
 	}
 	if row.Want == contract.ServiceWantRun {
@@ -482,7 +501,12 @@ func (r *Reconciler) runDeploy(ctx context.Context, row *store.ServiceRow, drive
 	}
 	size, err := driver.ImageSize(ctx, ref)
 	if err != nil {
-		return fmt.Errorf("service %s: image size: %w", row.ID, err)
+		// The image is not on the host: pulled and built ones were just made, so this is a kept image that is gone.
+		reason := contract.ServiceImageBuild
+		if row.Parts.Digest != "" || row.Target != "" {
+			reason = contract.ServiceImagePull
+		}
+		return &deployFailure{reason, err.Error()}
 	}
 	row.ImageBytes = size
 	if *row, ok, err = step(contract.ServicePhaseUnit); err != nil || !ok {
@@ -544,6 +568,8 @@ func (r *Reconciler) runDeploy(ctx context.Context, row *store.ServiceRow, drive
 	if row.ImageRef != "" && row.ImageRef != ref {
 		next.Previous = row.ImageRef
 	}
+	live := row.Parts
+	next.Live = &live
 	next.ImageRef, next.Target, next.UnitSHA, next.Deployed = ref, "", sha, row.Generation
 	next.State, next.Reason, next.Cause, next.Detail, next.LastState = contract.ServiceRunning, "", "", "", ""
 	*row, _, err = r.saveService(ctx, *row, next)
@@ -750,4 +776,39 @@ func (r *Reconciler) ServiceHostStatus(host contract.HostName) *contract.Service
 		return nil
 	}
 	return &contract.ServiceHostStatus{Issues: cached.check.Issues, LowestPort: cached.check.LowestPort}
+}
+
+// repayServiceLeftovers removes from a host what services removed while it was away left there. It runs on every pass for a ready
+// host, so a host that comes back is cleaned at once and not at the next engine start.
+func (r *Reconciler) repayServiceLeftovers(ctx context.Context, host contract.HostName) error {
+	debts, err := r.store.ServiceLeftovers(ctx, host)
+	if err != nil || len(debts) == 0 {
+		return err
+	}
+	driver, err := r.svc.hosts.ServiceDriver(ctx, host)
+	if err != nil {
+		return err
+	}
+	for _, id := range debts {
+		if err := driver.RemoveService(ctx, id); err != nil {
+			return fmt.Errorf("host %s: remove service %s: %w", host, id, err)
+		}
+		if err := r.store.ForgetServiceLeftover(ctx, host, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// removeServiceFromHost removes a service's unit, secrets and volume from its host, as far as the host answers. A failure is logged,
+// since the service's row goes on regardless and its removal is owed instead.
+func (r *Reconciler) removeServiceFromHost(ctx context.Context, row store.ServiceRow) {
+	driver, err := r.svc.hosts.ServiceDriver(ctx, row.Host)
+	if err == nil {
+		err = driver.RemoveService(ctx, row.ID)
+	}
+	if err != nil {
+		log.Printf("host %s: discard service %s: %v", row.Host, row.ID, err)
+		_ = r.store.AddServiceLeftover(ctx, row.Host, row.Room, row.ID)
+	}
 }
