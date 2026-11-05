@@ -140,7 +140,7 @@ type job struct {
 	finished      bool
 	ended         time.Time
 	background    bool
-	aside         bool // the foreground wait ended because a message arrived for the session
+	aside         *contract.Interrupt // the sender whose message ended the foreground wait
 	stopped       bool
 	timedOut      int  // the timeout in seconds, when it stopped the job
 	skipping      bool // inside a line that was cut; drop it to its newline
@@ -266,7 +266,7 @@ type Config struct {
 type Server struct {
 	cfg      Config
 	closed   chan struct{}
-	aside    chan struct{} // closes when a message arrives for the session, and StepAside replaces it
+	aside    *interruption // closes on a message; StepAside replaces it for later commands
 	mu       sync.Mutex
 	jobs     []*job
 	viewNext int
@@ -286,16 +286,22 @@ func New(cfg Config) *Server {
 	if cfg.now == nil {
 		cfg.now = time.Now
 	}
-	return &Server{cfg: cfg, closed: make(chan struct{}), aside: make(chan struct{})}
+	return &Server{cfg: cfg, closed: make(chan struct{}), aside: &interruption{done: make(chan struct{})}}
 }
 
-// StepAside ends the foreground wait of every command running in the foreground, as its limit would, so the call returns
-// and Pi reads the message that arrived. A job already in the background is unaffected.
-func (s *Server) StepAside() {
+type interruption struct {
+	done   chan struct{}
+	sender contract.Interrupt
+}
+
+// StepAside ends every foreground wait, so Pi reads the queued message.
+// A job already in the background is unaffected.
+func (s *Server) StepAside(sender contract.Interrupt) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	close(s.aside)
-	s.aside = make(chan struct{})
+	s.aside.sender = sender
+	close(s.aside.done)
+	s.aside = &interruption{done: make(chan struct{})}
 }
 
 func (s *Server) find(id contract.ShellJobID) (*job, bool) {
@@ -343,6 +349,9 @@ func (s *Server) startHost(r Run, out io.Writer) *hostProcess {
 // run starts a command and waits up to the foreground limit, or until a message arrives. A job still running then continues
 // in the background.
 func (s *Server) run(cancel <-chan struct{}, r Run) (*job, error) {
+	s.mu.Lock()
+	aside := s.aside
+	s.mu.Unlock()
 	j := &job{id: s.cfg.newID(), command: r.Command, host: r.Host, started: s.cfg.now(), now: s.cfg.now, owner: -1, done: make(chan struct{})}
 	j.description = Mask(r.Description)
 	var proc process
@@ -357,7 +366,6 @@ func (s *Server) run(cancel <-chan struct{}, r Run) (*job, error) {
 	j.proc = proc
 	s.mu.Lock()
 	s.jobs = append(s.dropOldFinished(), j)
-	aside := s.aside
 	s.mu.Unlock()
 	go func() {
 		code, signal := proc.Wait()
@@ -391,13 +399,16 @@ func (s *Server) run(cancel <-chan struct{}, r Run) (*job, error) {
 		}
 		return j, nil
 	case <-s.cfg.After(foregroundLimit):
-	case <-aside:
+	case <-aside.done:
 		stepped = true
 	case <-cancel:
 	}
 	j.mu.Lock()
 	j.background = !j.finished
-	j.aside = stepped && j.background
+	if stepped && j.background {
+		sender := aside.sender
+		j.aside = &sender
+	}
 	watch := j.background && s.cfg.Running != nil
 	j.mu.Unlock()
 	if watch {

@@ -114,11 +114,11 @@ func TestAMessageMovesAForegroundCommandToTheBackground(t *testing.T) {
 		answered <- body
 	}()
 	<-r.timers // the command waits in the foreground
-	r.server.StepAside()
+	r.server.StepAside(contract.Interrupt{Kind: contract.InterruptOwner})
 	if body := <-answered; !strings.Contains(body, `"running":true`) || !strings.Contains(body, `"message_arrived":true`) || !strings.Contains(body, "building") {
 		t.Fatalf("run = %s", body)
 	}
-	r.server.StepAside()
+	r.server.StepAside(contract.Interrupt{Kind: contract.InterruptOwner})
 	if running := r.server.Running(); len(running) != 1 {
 		t.Fatalf("running = %v, want the moved job", running)
 	}
@@ -131,7 +131,7 @@ func TestAMessageMovesAForegroundCommandToTheBackground(t *testing.T) {
 // A message before a command starts does not cut its wait, and a command that reaches its limit says nothing of a message.
 func TestALaterCommandWaitsItsFullLimit(t *testing.T) {
 	r := newRig("", syscall.SIGKILL)
-	r.server.StepAside()
+	r.server.StepAside(contract.Interrupt{Kind: contract.InterruptOwner})
 	answered := make(chan string)
 	go func() {
 		_, body := call(t, r.server.Handler(), "/run", `{"command":"make"}`)
@@ -733,4 +733,31 @@ func TestJobEndAndDescription(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestInterruptDuringProcessStartIsNotLost(t *testing.T) {
+	r := newRig("", syscall.SIGKILL)
+	entered, release := make(chan struct{}), make(chan struct{})
+	start := r.server.cfg.start
+	r.server.cfg.start = func(a, b, c string, w io.Writer) (process, error) {
+		close(entered)
+		<-release
+		return start(a, b, c, w)
+	}
+	done := make(chan Result, 1)
+	go func() { answer, _ := r.server.Run(context.Background(), Run{Command: "make"}); done <- answer }()
+	<-entered
+	sender := contract.Interrupt{Kind: contract.InterruptParent, Name: "lead"}
+	r.server.StepAside(sender)
+	close(release)
+	select {
+	case got := <-done:
+		if got.Interrupt == nil || *got.Interrupt != sender || !got.MessageArrived {
+			t.Fatalf("lost interrupt: %+v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("foreground never stepped aside")
+	}
+	r.proc.exit <- 0
+	<-r.reports
 }
