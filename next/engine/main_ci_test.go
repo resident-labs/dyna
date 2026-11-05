@@ -204,10 +204,11 @@ func TestMainCIFinishedHeadWithNoChecksSettlesTenMinutesAfterItsOwnFirstRead(t *
 		t.Fatalf("both heads are still inside the grace, queried %v", sizes)
 	}
 	r.after(t, time.Minute)
+	r.after(t, time.Minute)
 	if sizes := r.github.HeadQuerySizes(); sizes[len(sizes)-1] != 1 {
-		t.Fatalf("A is 10 minutes old and B 4, so only B is read, queried %v", sizes)
+		t.Fatalf("A settled at 10 minutes of its own age and B is 5, so only B is read, queried %v", sizes)
 	}
-	r.after(t, 6*time.Minute)
+	r.after(t, 5*time.Minute)
 	r.github.SetCommit("owner/repo", "A", checksPassed)
 	if queries := r.after(t, time.Minute); queries != 0 {
 		t.Fatalf("both heads are settled and cost %d queries", queries)

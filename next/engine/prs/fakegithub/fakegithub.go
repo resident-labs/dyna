@@ -803,13 +803,6 @@ func (s *Server) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	repo := contract.RepoName(input.Variables["owner"] + "/" + input.Variables["name"])
-	if oid := input.Variables["oid"]; oid != "" {
-		s.headSizes = append(s.headSizes, 1)
-		if err := json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"viewer": user(s.viewer), "repository": map[string]any{"object": s.commitNode(repo, oid)}}}); err != nil {
-			s.t.Error(err)
-		}
-		return
-	}
 	if heads := headAlias.FindAllStringSubmatch(input.Query, -1); len(heads) > 0 {
 		s.headSizes = append(s.headSizes, len(heads))
 		repository := map[string]any{}
