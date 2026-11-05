@@ -2,9 +2,10 @@
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
   import Markdown from "./Markdown.svelte";
+  import PostData from "./PostData.svelte";
   import PostAttachments from "./PostAttachments.svelte";
   import PostTarget from "./PostTarget.svelte";
-  import { clock, formatTime, fullTime, type Row } from "../feed.ts";
+  import { visibleAttachments, clock, formatTime, fullTime, type Row } from "../feed.ts";
   import type { Attachment, EventID, VisualCard } from "../contract.gen.ts";
   import { hue } from "../identity.ts";
   import { beginSwipe, moveSwipe, releaseSwipe, ignoredSwipeTarget, type Swipe } from "../swipe.ts";
@@ -13,6 +14,7 @@
   let { row, linked = true, last = false, author, to, root, room, navigate, onretry, ondiscard, onforward, swipeDisabled = false, belowNew = false, newest, visualEvent, onmedia }: {
     room: string; linked?: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; row: Extract<Row, { kind: "post" }>; last?: boolean; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; belowNew?: boolean; newest: Map<string, VisualCard>; visualEvent: EventID | undefined; onmedia: (position: number) => void;
   } = $props();
+  let shownAttachments = $derived(visibleAttachments(row.attachments, row.dataAttachment));
   let distance = $state(0), dragging = $state(false), ready = $state(false);
   function swipe(node: HTMLElement) {
     let state: Swipe | null = null, id = -1, suppress = 0;
@@ -21,7 +23,7 @@
     function reset() { state = null; dragging = false; distance = 0; ready = false; }
     function start(event: TouchEvent) {
       reset();
-      if (event.touches.length !== 1 || !onforward || swipeDisabled || (!row.text.trim() && !row.attachments.length)) return;
+      if (event.touches.length !== 1 || !onforward || swipeDisabled || (!row.text.trim() && !row.attachments.length && row.data === undefined)) return;
       const touch = event.touches[0], target = event.target;
       if (!(target instanceof Element)) return;
       state = beginSwipe(touch.clientX, touch.clientY, performance.now(), matchMedia("(pointer: coarse)").matches,
@@ -45,7 +47,7 @@
     function end(event: TouchEvent) {
       if (!state) return;
       const touch = [...event.changedTouches].find(item => item.identifier === id);
-      const forward = touch && canForwardPost(!!row.pending, swipeDisabled, row.text, row.attachments.length) && event.touches.length === 0 && releaseSwipe(state, touch.clientX);
+      const forward = touch && canForwardPost(!!row.pending, swipeDisabled, row.text, row.attachments.length, row.data !== undefined) && event.touches.length === 0 && releaseSwipe(state, touch.clientX);
       if (state.dragging) { suppress = Date.now() + 500; if (event.cancelable) event.preventDefault(); }
       reset();
       if (forward) delayedForward.start(() => {
@@ -138,7 +140,8 @@
     <time class="follow-time" datetime={row.at} title={fullTime(row.at)}>{clock(row.at)}</time>
   {/if}
   <Markdown text={row.text} />
-  <PostAttachments {onmedia} attachments={row.attachments} {newest} event={visualEvent} at={row.at} />
+  {#if row.data !== undefined}<PostData value={row.data} />{/if}
+  <PostAttachments onmedia={position => onmedia(shownAttachments[position].position)} attachments={shownAttachments.map(({ file }) => file)} {newest} event={visualEvent} at={row.at} />
   {#if row.pending?.failed}{@const id = row.pending.id}<p class="unsent" role="alert">Not sent
     <button type="button" onclick={() => onretry(id)}>Retry</button><button type="button" onclick={() => ondiscard(id)}>Discard</button></p>{/if}
 </article>

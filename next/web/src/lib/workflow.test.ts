@@ -296,21 +296,21 @@ test("a run that ended leaves one row in the room feed and none in a DM, between
   assert.equal(feedRows([decoded, late], { kind: "feed" }).filter(row => row.kind === "day").length, 2);
 });
 
-test("a crew's JSON reply shows no post, and its text reply and everyone else's JSON still do", () => {
+test("workflow text is never heuristically hidden or retyped, even if it looks like JSON", () => {
   const base = { from: { kind: "session" as const, session: "crew" }, at: "2026-01-01T00:00:03Z" };
   const reply = { reply: { kind: "final" as const, target: { kind: "owner" as const } } };
   const turn = (seq: number, session: string, final: string, posted?: string): Event => ({ seq, id: `t${seq}`, ...base, type: "turn.ended", body: { session, turn: "t", outcome: "completed", final, usage, replies: [{ ...reply, posted }] } });
   const ended = (seq: number): Event => ({ seq, id: `e${seq}`, ...base, type: "workflow.ended", body: { run: "wf", session: "crew", name: "sweep", state: "done", steps: 3, failed: 0, usage } });
-  const posts = (events: Event[], isCrew?: (session: string) => boolean) => feedRows(events, { kind: "feed" }, [], 0, new Set(), isCrew).flatMap(row => row.kind === "post" ? [row.text] : row.kind === "run" ? ["run row"] : []);
+  const posts = (events: Event[]) => feedRows(events, { kind: "feed" }, [], 0, new Set()).flatMap(row => row.kind === "post" ? [row.text] : row.kind === "run" ? ["run row"] : []);
   const json = `{"merged":{"branch":"v2/x"},"steps":[]}`;
-  assert.deepEqual(posts([turn(1, "crew", json), ended(2)]), ["run row"]);
-  assert.deepEqual(posts([turn(1, "crew", `["a","b"]`), ended(2)]), ["run row"]);
+  assert.deepEqual(posts([turn(1, "crew", json), ended(2)]), [json, "run row"]);
+  assert.deepEqual(posts([turn(1, "crew", `["a","b"]`), ended(2)]), [`["a","b"]`, "run row"]);
   assert.deepEqual(posts([turn(1, "crew", "All done"), ended(2)]), ["All done", "run row"]);
   assert.deepEqual(posts([turn(1, "crew", "42"), ended(2)]), ["42", "run row"]);
   assert.deepEqual(posts([turn(1, "root", json)]), [json], "only a crew's");
-  assert.deepEqual(posts([turn(1, "crew", json)], session => session === "crew"), [], "its end outside the window");
+  assert.deepEqual(posts([turn(1, "crew", json)]), [json], "no inference from an absent run event");
   const post: Event = { seq: 1, id: "p1", ...base, type: "post.created", body: { text: json, home: { kind: "feed" } } };
-  assert.deepEqual(posts([post, turn(2, "crew", json, "p1"), ended(3)]), ["run row"], "a post that carried the reply");
+  assert.deepEqual(posts([post, turn(2, "crew", json, "p1"), ended(3)]), [json, "run row"], "a post that carried the reply");
   assert.deepEqual(posts([post, ended(3)]), [json, "run row"], "a post of its own is the script's to make");
 });
 

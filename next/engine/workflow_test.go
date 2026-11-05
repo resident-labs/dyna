@@ -199,7 +199,7 @@ func TestAStepSaysWhetherItHoldsMoreThanItsRow(t *testing.T) {
 		{"two-lines", contract.WorkflowStepLog, "log: first", "first\nsecond", "null", true},
 		{"clipped", contract.WorkflowStepLog, "log: " + long[:80], long, "null", true},
 		{"post", contract.WorkflowStepPost, "post: hello", "hello", `{"seq":9}`, false},
-		{"post-data", contract.WorkflowStepPost, "post: hello", "hello\n\n```json\n{}\n```", `{"seq":9}`, true},
+		{"post-data", contract.WorkflowStepPost, "post: hello", "hello", `{"seq":9}`, false},
 		{"quiet", contract.WorkflowStepCommand, "run: npm ci", "npm ci", `{"code":0,"stdout":"","stderr":"","durationMs":4}`, false},
 		{"output", contract.WorkflowStepCommand, "run: npm ci", "npm ci", `{"code":0,"stdout":"ok","stderr":"","durationMs":4}`, true},
 		{"errors", contract.WorkflowStepCommand, "run: npm ci", "npm ci", `{"code":0,"stdout":"","stderr":"warn","durationMs":4}`, true},

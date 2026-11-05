@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"mime"
 	"os"
@@ -65,7 +66,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 			if tree.Root() != caller.Session {
 				return contract.PostResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "report the problem to your room's root with post @root"}
 			}
-			if len(req.Attachments) != 0 {
+			if len(req.Attachments) != 0 || len(req.Data) != 0 {
 				return contract.PostResponse{}, &contract.Error{Code: contract.ErrCrossRoomAttachment, Message: "cross-room posts cannot carry attachments"}
 			}
 			if strings.TrimSpace(req.Text) == "" || len(req.Mentions) != 1 || (req.Mentions[0] != "root" && req.Mentions[0] != "@root") || req.Home.Session != "" || (req.Home.Kind != "" && req.Home.Kind != contract.ConversationFeed) || req.ReplyTo != "" || req.VisualUpdate != "" || req.VisualReply != "" || req.Forward != "" {
@@ -99,9 +100,18 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		}
 	}
 	// A post carries text, files or both.
-	if strings.TrimSpace(req.Text) == "" && len(req.Attachments) == 0 {
+	if strings.TrimSpace(req.Text) == "" && len(req.Attachments) == 0 && len(req.Data) == 0 {
 		return contract.PostResponse{}, invalid("post text or a file is required")
 	}
+	data, files, index, dataErr := s.preparePostData(ctx, req.Room, req.Data, req.Attachments)
+	if dataErr != nil {
+		var syntax *json.SyntaxError
+		if errors.As(dataErr, &syntax) || errors.Is(dataErr, errPostDataUTF8) {
+			return contract.PostResponse{}, invalid(dataErr.Error())
+		}
+		return contract.PostResponse{}, failure(dataErr)
+	}
+	req.Data, req.Attachments, req.DataAttachment = data, files, index
 	if len(req.Attachments) > 16 {
 		return contract.PostResponse{}, invalid("too many attachments")
 	}
@@ -255,7 +265,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	if surface == contract.SurfaceDM {
 		recipients = append(recipients, room.Recipient{Session: req.Home.Session, Explicit: true})
 	}
-	event, err := s.event(req.Room, caller, contract.PostCreated{Source: source, Text: req.Text, Mentions: mentions, Home: req.Home, ReplyTo: req.ReplyTo, Attachments: req.Attachments, ClientID: req.ClientID, ToolCallID: req.ToolCallID})
+	event, err := s.event(req.Room, caller, contract.PostCreated{Source: source, Text: req.Text, Data: req.Data, DataAttachment: req.DataAttachment, Mentions: mentions, Home: req.Home, ReplyTo: req.ReplyTo, Attachments: req.Attachments, ClientID: req.ClientID, ToolCallID: req.ToolCallID})
 	if err != nil {
 		return contract.PostResponse{}, failure(err)
 	}
