@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 94
+const schemaVersion = 95
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
@@ -88,6 +88,12 @@ var steps = map[int][]string{
 	92: {`ALTER TABLE rooms ADD COLUMN github_writes TEXT NOT NULL DEFAULT '{}'`},
 	// The default-branch head whose CI git.main_ci_finished has settled (spec 7.7). A head a store already holds starts settled, so enabling the event reports nothing from before it.
 	93: {`ALTER TABLE repos ADD COLUMN ci_settled TEXT NOT NULL DEFAULT ''`, `UPDATE repos SET ci_settled=main_head`},
+	// The recent default-branch heads of each repository and whether git.main_ci_finished has settled each (spec 7.7), in place of repos.ci_settled. A head a store already holds starts settled, so nothing from before the list is reported.
+	94: {
+		`CREATE TABLE repo_heads (repo TEXT NOT NULL REFERENCES repos(repo), seq INTEGER PRIMARY KEY AUTOINCREMENT, sha TEXT NOT NULL, seen_at INTEGER NOT NULL, settled INTEGER NOT NULL DEFAULT 0, UNIQUE(repo, sha))`,
+		`INSERT INTO repo_heads(repo,sha,seen_at,settled) SELECT repo,main_head,0,1 FROM repos WHERE main_head<>''`,
+		`ALTER TABLE repos DROP COLUMN ci_settled`,
+	},
 	81: {
 		`ALTER TABLE hosts ADD COLUMN create_failures INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE hosts ADD COLUMN create_problem TEXT NOT NULL DEFAULT ''`,

@@ -20,21 +20,14 @@ const (
 	ciGrace = 10 * time.Minute
 )
 
-// headSeen is a default-branch head and when a pass first read it.
-type headSeen struct {
-	Head string
-	At   time.Time
-}
-
 // Poller reads the feeds of each repository a room lists or a tracked PR or issue sits on (spec 7.7).
 type Poller struct {
 	Store  *store.Store
 	GitHub *Client
 	Now    func() time.Time
 
-	last     map[contract.RepoName]time.Time // when each repository was last read
-	failed   map[contract.RepoName]string    // the last error logged for each, so a repository that stays broken logs once
-	headSeen map[contract.RepoName]headSeen  // the default-branch head each repository showed and when this engine first read it, for the grace of a head with no checks yet
+	last   map[contract.RepoName]time.Time // when each repository was last read
+	failed map[contract.RepoName]string    // the last error logged for each, so a repository that stays broken logs once
 }
 
 // Run runs a pass on each tick until ctx ends.
@@ -54,7 +47,7 @@ func (p *Poller) Run(ctx context.Context, ticks <-chan time.Time) {
 // due lists the repositories to read now. That is every one of them, until the quota runs low.
 func (p *Poller) due(repos map[contract.RepoName]bool) []contract.RepoName {
 	if p.last == nil {
-		p.last, p.failed, p.headSeen = map[contract.RepoName]time.Time{}, map[contract.RepoName]string{}, map[contract.RepoName]headSeen{}
+		p.last, p.failed = map[contract.RepoName]time.Time{}, map[contract.RepoName]string{}
 	}
 	now := p.Now()
 	_, low := p.GitHub.Low()
@@ -144,22 +137,28 @@ func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls [
 	if listed && probe.Main != "" && probe.Main != stored.Head {
 		pass.Heads = append(pass.Heads, store.RepoHead{Repo: repo, Head: probe.Main})
 	}
-	// The CI of the newest head, read while it is not settled (spec 7.7). A repository whose first head is not stored yet has none to read.
-	head := stored.Head
-	if probe.Main != "" {
-		head = probe.Main
+	// The CI of every head of the recent list that is not settled, in one query with an alias for each (spec 7.7). A repository whose first head is not stored yet has none to read.
+	unsettled := stored.Unsettled
+	if probe.Main != "" && probe.Main != stored.Head {
+		// The write that adds the new head prunes the list to its newest store.HeadsKept, so the oldest head past that is not read.
+		unsettled = append(slices.Clone(unsettled), store.ListedHead{Sha: probe.Main, SeenAt: now})
+		unsettled = unsettled[max(0, len(unsettled)-store.HeadsKept):]
 	}
-	if listed && stored.Head != "" && probe.Branch != "" && head != stored.CISettled {
-		if p.headSeen[repo].Head != head {
-			p.headSeen[repo] = headSeen{Head: head, At: now}
+	if listed && stored.Head != "" && probe.Branch != "" && len(unsettled) > 0 {
+		shas := make([]string, len(unsettled))
+		for i, head := range unsettled {
+			shas[i] = head.Sha
 		}
-		ci, err := p.GitHub.CommitCI(ctx, repo, head)
+		reads, err := p.GitHub.CommitsCI(ctx, repo, shas)
 		if err != nil {
 			return pass, err
 		}
-		// A head with no checks may be one GitHub has not started them for, so none settles it only after the grace.
-		if ci.Result == contract.PrCISuccess || ci.Result == contract.PrCIFailure || ci.Result == contract.PrCINone && !now.Before(p.headSeen[repo].At.Add(ciGrace)) {
-			pass.MainCIs = append(pass.MainCIs, store.MainCI{Repo: repo, Branch: probe.Branch, Head: head, Result: ci.Result, Runs: ci.Runs})
+		for _, head := range unsettled {
+			ci := reads[head.Sha]
+			// A head with no checks may be one GitHub has not started them for, so none settles it only after the grace from its own first read.
+			if ci.Result == contract.PrCISuccess || ci.Result == contract.PrCIFailure || ci.Result == contract.PrCINone && !now.Before(head.SeenAt.Add(ciGrace)) {
+				pass.MainCIs = append(pass.MainCIs, store.MainCI{Repo: repo, Branch: probe.Branch, Head: head.Sha, Result: ci.Result, Runs: ci.Runs, RunsTruncated: ci.Truncated})
+			}
 		}
 	}
 	pass.Feeds = probe.Feeds
@@ -188,7 +187,7 @@ func (p *Poller) Pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	heads, err := p.Store.RepoHeads(ctx)
+	heads, err := p.Store.RepoHeads(ctx, p.Now())
 	if err != nil {
 		return err
 	}
