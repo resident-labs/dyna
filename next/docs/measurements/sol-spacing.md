@@ -84,6 +84,7 @@ Focused commands: `go test ./engine -run '^TestSolSpacingUses' -count=1`, `go te
 - `go generate ./contract` ran, and rerunning left the generated contract unchanged. Prompt golden files are unchanged.
 - Web check and all 488 web tests passed on Node 24.22.2; Svelte reports 0 errors and 26 warnings in existing files. The web build passed (Vite reports its existing large-chunk warning).
 - All five offline measurement fixture tests passed, deterministic remeasurement matched the committed JSON byte-for-byte, and `bash -n scripts/ci.sh` plus `git diff --check` passed.
+- An independent local Sol review found no blocking issues, checked the actual PiG schema and reran baseline reproduction. Its extra compacting-transfer/snapshot and resumed-session add/remove probes were incorporated as regression tests and passed with `-race`. This is not a substitute for the room's independent PR approval on the final head.
 
 ## Fresh post-deploy follow-up (pending)
 
