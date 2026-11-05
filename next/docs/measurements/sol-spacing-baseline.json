@@ -1,0 +1,173 @@
+{
+  "heuristic_version": 1,
+  "filters": {
+    "model": null,
+    "after": null,
+    "before": null
+  },
+  "files": [
+    {
+      "path": "/box/shared/frl/fork-lead.jsonl",
+      "bytes": 4000000,
+      "sha256": "b8693c37cdd2fe586c8df7c0419ce50984764cc0963ae1fc5127f742e4f8b60e",
+      "assistant_records": 127,
+      "non_assistant_records": 200,
+      "duplicate_records": 0,
+      "skipped_initial_line": 1,
+      "unknown_model_records": 0,
+      "unknown_timestamp_records": 0,
+      "excluded_model": 0,
+      "excluded_time": 0,
+      "invalid_argument_json": 0,
+      "cohorts": [
+        {
+          "provider": "anthropic",
+          "model": "claude-sonnet-5-5",
+          "assistant_messages": 76,
+          "first_timestamp": "2026-11-05T14:20:53.959Z",
+          "last_timestamp": "2026-11-05T15:18:36.901Z",
+          "text": {
+            "characters": 4111,
+            "letter_to_digit": 20,
+            "digit_to_letter": 18,
+            "lower_to_upper": 2,
+            "sites": 40,
+            "sites_per_10000_characters": 97.2999
+          },
+          "tool_arguments": {
+            "characters": 35450,
+            "letter_to_digit": 467,
+            "digit_to_letter": 405,
+            "lower_to_upper": 45,
+            "sites": 917,
+            "sites_per_10000_characters": 258.6742
+          }
+        },
+        {
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "assistant_messages": 51,
+          "first_timestamp": "2026-11-05T15:24:04.776Z",
+          "last_timestamp": "2026-11-05T15:42:29.648Z",
+          "text": {
+            "characters": 141,
+            "letter_to_digit": 0,
+            "digit_to_letter": 0,
+            "lower_to_upper": 0,
+            "sites": 0,
+            "sites_per_10000_characters": 0
+          },
+          "tool_arguments": {
+            "characters": 38132,
+            "letter_to_digit": 306,
+            "digit_to_letter": 256,
+            "lower_to_upper": 58,
+            "sites": 620,
+            "sites_per_10000_characters": 162.5931
+          }
+        }
+      ]
+    },
+    {
+      "path": "/box/shared/frl/fork-review.jsonl",
+      "bytes": 4000000,
+      "sha256": "e13765af255dedfc09a1162d1e419cd58380afc6b3c3764ad69779c06d5908a3",
+      "assistant_records": 104,
+      "non_assistant_records": 190,
+      "duplicate_records": 0,
+      "skipped_initial_line": 1,
+      "unknown_model_records": 0,
+      "unknown_timestamp_records": 0,
+      "excluded_model": 0,
+      "excluded_time": 0,
+      "invalid_argument_json": 0,
+      "cohorts": [
+        {
+          "provider": "anthropic",
+          "model": "claude-opus-5-5",
+          "assistant_messages": 49,
+          "first_timestamp": "2026-11-05T14:57:59.083Z",
+          "last_timestamp": "2026-11-05T15:15:35.244Z",
+          "text": {
+            "characters": 5177,
+            "letter_to_digit": 22,
+            "digit_to_letter": 18,
+            "lower_to_upper": 1,
+            "sites": 41,
+            "sites_per_10000_characters": 79.1964
+          },
+          "tool_arguments": {
+            "characters": 30869,
+            "letter_to_digit": 391,
+            "digit_to_letter": 391,
+            "lower_to_upper": 143,
+            "sites": 925,
+            "sites_per_10000_characters": 299.6534
+          }
+        },
+        {
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "assistant_messages": 55,
+          "first_timestamp": "2026-11-05T15:18:34.451Z",
+          "last_timestamp": "2026-11-05T15:42:30.398Z",
+          "text": {
+            "characters": 1847,
+            "letter_to_digit": 1,
+            "digit_to_letter": 1,
+            "lower_to_upper": 0,
+            "sites": 2,
+            "sites_per_10000_characters": 10.8284
+          },
+          "tool_arguments": {
+            "characters": 48497,
+            "letter_to_digit": 591,
+            "digit_to_letter": 564,
+            "lower_to_upper": 54,
+            "sites": 1209,
+            "sites_per_10000_characters": 249.2938
+          }
+        }
+      ]
+    },
+    {
+      "path": "/box/shared/frl/particle-followup.jsonl",
+      "bytes": 523969,
+      "sha256": "bb5111ed17a95804ca26d431f31dc4944ddae392d55a1289e3d48e7cf740d7b6",
+      "assistant_records": 25,
+      "non_assistant_records": 60,
+      "duplicate_records": 0,
+      "skipped_initial_line": 0,
+      "unknown_model_records": 0,
+      "unknown_timestamp_records": 0,
+      "excluded_model": 0,
+      "excluded_time": 0,
+      "invalid_argument_json": 0,
+      "cohorts": [
+        {
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "assistant_messages": 25,
+          "first_timestamp": "2026-11-05T15:36:22.654Z",
+          "last_timestamp": "2026-11-05T15:42:31.116Z",
+          "text": {
+            "characters": 0,
+            "letter_to_digit": 0,
+            "digit_to_letter": 0,
+            "lower_to_upper": 0,
+            "sites": 0,
+            "sites_per_10000_characters": null
+          },
+          "tool_arguments": {
+            "characters": 23619,
+            "letter_to_digit": 73,
+            "digit_to_letter": 26,
+            "lower_to_upper": 63,
+            "sites": 162,
+            "sites_per_10000_characters": 68.5888
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -33,12 +33,13 @@ type Input struct {
 
 // Harness records inputs and runs the supplied turns in order.
 type Harness struct {
-	mu       sync.Mutex
-	Turns    []Turn
-	Inputs   []Input
-	OnTool   func(ToolCall)
-	Models   []contract.ModelChoice // each TransferModel call, in order
-	Triggers []int                  // the compaction trigger of each TransferModel call
+	mu           sync.Mutex
+	Turns        []Turn
+	Inputs       []Input
+	OnTool       func(ToolCall)
+	Models       []contract.ModelChoice // each TransferModel call, in order
+	Instructions []string               // the model instructions of each transfer
+	Triggers     []int                  // the compaction trigger of each TransferModel call
 	// Transfer stands in for Pi's transfer, if set. It can block to hold a transfer open.
 	Transfer func(context.Context) (harness.ModelTransfer, error)
 	// CompactFunc stands in for Pi's compaction, if set. It can block to hold one open, and it gets the size asked for.
@@ -90,10 +91,11 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contra
 	return result, turn.Err
 }
 
-func (h *Harness) TransferModel(ctx context.Context, _ contract.TurnID, model contract.ModelChoice, compactTokens int) (harness.ModelTransfer, error) {
+func (h *Harness) TransferModel(ctx context.Context, _ contract.TurnID, model contract.ModelChoice, compactTokens int, instructions string) (harness.ModelTransfer, error) {
 	h.mu.Lock()
 	h.Models = append(h.Models, model)
 	h.Triggers = append(h.Triggers, compactTokens)
+	h.Instructions = append(h.Instructions, instructions)
 	transfer := h.Transfer
 	h.mu.Unlock()
 	if transfer != nil {
