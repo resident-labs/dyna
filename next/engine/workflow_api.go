@@ -1,12 +1,14 @@
 package engine
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
@@ -33,18 +35,6 @@ func (s *Service) workflowRoom(ctx context.Context, caller contract.Principal, r
 		return "", invalid("room is required")
 	}
 	return room, s.roomAccess(ctx, caller, room)
-}
-
-// workflowOwner allows the owner and a room's root, who start and reload workflows.
-func (s *Service) workflowOwner(ctx context.Context, caller contract.Principal, roomID contract.RoomID, doing string) *contract.Error {
-	tree, err := s.store.RoomTree(ctx, roomID)
-	if err != nil {
-		return failure(err)
-	}
-	if caller.Kind == contract.PrincipalSession && caller.Session != tree.Root() {
-		return &contract.Error{Code: contract.ErrForbidden, Message: "only the owner or a room's root can " + doing + " a workflow"}
-	}
-	return nil
 }
 
 // workflowScript reads a script's meta, with its profiles and its repository among the room's.
@@ -80,8 +70,15 @@ func (s *Service) WorkflowRun(ctx context.Context, caller contract.Principal, re
 	if problem != nil {
 		return response, problem
 	}
-	if problem := s.workflowOwner(ctx, caller, roomID, "start"); problem != nil {
+	effective, err := s.store.WorkflowEffective(ctx, roomID)
+	if err != nil {
+		return response, failure(err)
+	}
+	if problem := s.workflowStarters(ctx, caller, roomID, effective); problem != nil {
 		return response, problem
+	}
+	if req.Resume != "" && !effective.Resume {
+		return response, workflowRefusal(contract.WorkflowSetting(contract.WorkflowFeatureResume), "starting a run with resume is turned off in this room")
 	}
 	if len(req.ClientID) > 64 {
 		return response, invalid("clientId is longer than 64 characters")
@@ -91,6 +88,9 @@ func (s *Service) WorkflowRun(ctx context.Context, caller contract.Principal, re
 	}
 	meta, repo, problem := s.workflowScript(ctx, roomID, req.Script)
 	if problem != nil {
+		return response, problem
+	}
+	if problem := workflowProfiles(effective, meta.Profiles); problem != nil {
 		return response, problem
 	}
 	if req.Resume != "" {
@@ -116,8 +116,8 @@ func (s *Service) WorkflowRun(ctx context.Context, caller contract.Principal, re
 	if !mentionName.MatchString(name) {
 		return response, invalid("meta.name must be letters, digits, dots, underscores or hyphens, at most 57 of them, and start with a letter or digit")
 	}
-	run := store.WorkflowRun{ID: contract.WorkflowRunID(runID), Room: roomID, Name: meta.Name, Description: meta.Description, Script: req.Script, Args: req.Args, Profiles: meta.Profiles, Repo: repo, Resume: req.Resume}
-	started, problem := s.startSession(ctx, caller, contract.SessionStartRequest{Room: roomID, Name: name, Profile: meta.Profiles[0], Repo: repo, Size: meta.Size, Brief: "Run workflow " + meta.Name + ".", ClientID: req.ClientID}, "", &run)
+	run := store.WorkflowRun{ID: contract.WorkflowRunID(runID), Room: roomID, Name: meta.Name, Description: meta.Description, Script: req.Script, Args: req.Args, Profiles: meta.Profiles, Repo: repo, Resume: req.Resume, MaxRuns: effective.MaxRuns}
+	started, problem := s.startSession(ctx, caller, contract.SessionStartRequest{Room: roomID, Name: name, Profile: meta.Profiles[0], Repo: repo, Size: cmp.Or(meta.Size, effective.Size), Brief: "Run workflow " + meta.Name + ".", ClientID: req.ClientID}, "", &run)
 	if problem != nil {
 		return response, problem
 	}
@@ -140,8 +140,12 @@ func (s *Service) WorkflowReload(ctx context.Context, caller contract.Principal,
 	if problem := s.roomAccess(ctx, caller, run.Room); problem != nil {
 		return response, problem
 	}
-	if problem := s.workflowOwner(ctx, caller, run.Room, "reload"); problem != nil {
-		return response, problem
+	tree, err := s.store.RoomTree(ctx, run.Room)
+	if err != nil {
+		return response, failure(err)
+	}
+	if !tree.CanManage(caller, run.Session) {
+		return response, &contract.Error{Code: contract.ErrForbidden, Message: "only the owner, the session that started a workflow or a session above it reloads it"}
 	}
 	ended := &contract.Error{Code: contract.ErrConflict, Message: "run " + string(run.ID) + " has ended; reload is for a running run, and run with resume starts a new one from an ended run"}
 	if run.State != contract.WorkflowRunning {
@@ -149,6 +153,13 @@ func (s *Service) WorkflowReload(ctx context.Context, caller contract.Principal,
 	}
 	meta, repo, problem := s.workflowScript(ctx, run.Room, req.Script)
 	if problem != nil {
+		return response, problem
+	}
+	effective, err := s.store.WorkflowEffective(ctx, run.Room)
+	if err != nil {
+		return response, failure(err)
+	}
+	if problem := workflowProfiles(effective, meta.Profiles); problem != nil {
 		return response, problem
 	}
 	current, err := parseWorkflowMeta(run.Script)
@@ -327,6 +338,18 @@ func (s *Service) WorkflowStepStart(ctx context.Context, caller contract.Princip
 	if req.Key == "" || run.State != contract.WorkflowRunning {
 		return contract.WorkflowStepStartResponse{}, invalid("no running run for this step")
 	}
+	if req.Feature != "" {
+		if !slices.Contains(contract.AllWorkflowFeatures, req.Feature) || req.Feature == contract.WorkflowFeatureResume {
+			return contract.WorkflowStepStartResponse{}, invalid("invalid step feature")
+		}
+		effective, err := s.store.WorkflowEffective(ctx, run.Room)
+		if err != nil {
+			return contract.WorkflowStepStartResponse{}, failure(err)
+		}
+		if !effective.Allows(req.Feature) {
+			return contract.WorkflowStepStartResponse{}, workflowRefusal(contract.WorkflowSetting(req.Feature), string(req.Feature)+" is turned off in this room's workflows")
+		}
+	}
 	stored, err := s.store.StartWorkflowStep(ctx, run.ID, req, s.now())
 	if err != nil {
 		return contract.WorkflowStepStartResponse{}, failure(err)
@@ -413,9 +436,18 @@ func (s *Service) publishStep(ctx context.Context, run store.WorkflowRun, key st
 }
 
 // boxWorkflow is what a hello tells a crew's box. A profile removed since the run started is left out, so a call to it fails.
-func (s *Service) boxWorkflow(run store.WorkflowRun, memory int64) *contract.BoxWorkflow {
+// The room's workflow settings narrow its workers and set its default timeout.
+func (s *Service) boxWorkflow(ctx context.Context, run store.WorkflowRun, memory int64) (*contract.BoxWorkflow, error) {
+	effective, err := s.store.WorkflowEffective(ctx, run.Room)
+	if err != nil {
+		return nil, err
+	}
+	workers := int(max(memory/workerMemory, 1))
+	if effective.MaxWorkers > 0 {
+		workers = min(workers, effective.MaxWorkers)
+	}
 	summaries := s.profiles.List()
-	workflow := &contract.BoxWorkflow{Run: run.ID, Name: run.Name, Script: run.Script, Version: run.Version, Args: run.Args, Workers: int(max(memory/workerMemory, 1))}
+	workflow := &contract.BoxWorkflow{Run: run.ID, Name: run.Name, Script: run.Script, Version: run.Version, Args: run.Args, Workers: workers, Timeout: effective.Timeout}
 	for _, name := range run.Profiles {
 		model, _, err := s.profiles.Model(name)
 		if err != nil {
@@ -429,7 +461,7 @@ func (s *Service) boxWorkflow(run store.WorkflowRun, memory int64) *contract.Box
 		}
 		workflow.Profiles = append(workflow.Profiles, profile)
 	}
-	return workflow
+	return workflow, nil
 }
 
 // workflowSummary closes a run's journal, failing what its script left running, and totals it.

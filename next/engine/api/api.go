@@ -276,6 +276,8 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodPoolList, c, a.service.PoolList)
 	call(mux, contract.MethodPoolRemove, c, a.service.PoolRemove)
 	call(mux, contract.MethodPoolSet, c, a.service.PoolSet)
+	call(mux, contract.MethodWorkflowSettings, c, a.service.WorkflowSettings)
+	call(mux, contract.MethodWorkflowSet, c, a.service.WorkflowSet)
 	call(mux, contract.MethodRoomHosts, c, a.service.RoomHosts)
 	call(mux, contract.MethodProfileList, c, a.service.ProfileList)
 	call(mux, contract.MethodProfileSet, c, a.service.ProfileSet)
