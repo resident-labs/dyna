@@ -159,7 +159,8 @@
   .flip { display: contents; }
   .flip > * { cursor: pointer; }
   .flip > input { grid-row: 1 / span 2; grid-column: 2; }
-  .set > .more { grid-row: auto; grid-column: 1 / -1; }
+  /* Doubled to outrank ListDetail's .body .set > :nth-child(2), which would put the foot beside the switch. */
+  .set > .more.more { grid-row: auto; grid-column: 1 / -1; }
   .foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 4px; }
   .reset { height: 26px; margin-left: -12px; padding: 0 12px; font-size: 12.5px; }
   .problem { flex-basis: 100%; color: var(--danger); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
