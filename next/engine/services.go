@@ -19,7 +19,7 @@ func serviceFailure(err error) *contract.Error {
 	switch {
 	case errors.As(err, &taken):
 		return &contract.Error{Code: contract.ErrPortTaken, Message: err.Error()}
-	case errors.Is(err, store.ErrServiceHostFixed), errors.Is(err, lifecycle.ErrNoPrevious), errors.Is(err, lifecycle.ErrNotPlaced), errors.Is(err, lifecycle.ErrServiceEngineHost):
+	case errors.Is(err, store.ErrServiceHostFixed), errors.Is(err, lifecycle.ErrNoPrevious), errors.Is(err, lifecycle.ErrNotPlaced), errors.Is(err, lifecycle.ErrServiceEngineHost), errors.Is(err, lifecycle.ErrServiceRemoving):
 		return &contract.Error{Code: contract.ErrConflict, Message: err.Error()}
 	}
 	return failure(err)
@@ -42,13 +42,16 @@ func (s *Service) ServiceSet(ctx context.Context, who contract.Principal, req co
 	if err != nil {
 		return contract.ServiceSetResponse{}, invalid(err.Error())
 	}
-	unlock := s.store.LockAdmission()
+	unlock, err := s.reconciler.LockServiceDeclaration(ctx, req.Room, parts.Spec.Name)
+	if err != nil {
+		return contract.ServiceSetResponse{}, failure(err)
+	}
 	defer unlock()
 	limits, err := s.store.RoomLimits(ctx, req.Room)
 	if err != nil {
 		return contract.ServiceSetResponse{}, failure(err)
 	}
-	hosts, err := s.store.Hosts(ctx)
+	hosts, err := s.reconciler.AdmissionHosts(ctx)
 	if err != nil {
 		return contract.ServiceSetResponse{}, failure(err)
 	}
@@ -83,7 +86,7 @@ func (s *Service) ServiceSet(ctx context.Context, who contract.Principal, req co
 		if err != nil {
 			return contract.ServiceSetResponse{}, failure(err)
 		}
-		estimate, err := s.store.ImageEstimate(ctx, parts.Spec.Image)
+		estimate, err := s.store.ImageEstimate(ctx, req.Room, parts)
 		if err != nil {
 			return contract.ServiceSetResponse{}, failure(err)
 		}
@@ -236,6 +239,11 @@ func (s *Service) ServiceSecretSet(ctx context.Context, who contract.Principal, 
 	if who.Kind != contract.PrincipalOwner {
 		return contract.ServiceSecretSetResponse{}, forbidden()
 	}
+	unlock, err := s.reconciler.LockServiceDeclaration(ctx, req.Room, req.Name)
+	if err != nil {
+		return contract.ServiceSecretSetResponse{}, failure(err)
+	}
+	defer unlock()
 	row, problem := s.serviceNamed(ctx, contract.ServiceRef{Room: req.Room, Name: req.Name})
 	if problem != nil {
 		return contract.ServiceSecretSetResponse{}, problem

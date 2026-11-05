@@ -101,6 +101,7 @@ var steps = map[int][]string{
 		`CREATE INDEX services_host ON services(host) WHERE host IS NOT NULL`,
 		`CREATE TABLE service_secrets (service TEXT NOT NULL REFERENCES services(id), name TEXT NOT NULL, value BLOB NOT NULL, set_at INTEGER NOT NULL, PRIMARY KEY(service, name))`,
 		`CREATE TABLE service_leftovers (host TEXT NOT NULL REFERENCES hosts(name), room TEXT NOT NULL, service TEXT NOT NULL, PRIMARY KEY(host, service))`,
+		`CREATE TABLE service_image_sizes (room TEXT NOT NULL, source TEXT NOT NULL, bytes INTEGER NOT NULL, measured_at INTEGER NOT NULL, PRIMARY KEY(room, source))`,
 	},
 	81: {
 		`ALTER TABLE hosts ADD COLUMN create_failures INTEGER NOT NULL DEFAULT 0`,

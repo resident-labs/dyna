@@ -760,3 +760,69 @@ func TestSuccessfulServiceShrinkReleasesOldResourcesAndPorts(t *testing.T) {
 		t.Fatalf("old resources/port still held: %+v", row.Service)
 	}
 }
+
+// A pass can read want=run just before stop takes the exclusive owner-action gate, then enter its host step afterward. That
+// queued step must use the row after the gate, not restart from its old stopped/want=run snapshot and lose the final CAS.
+func TestQueuedServiceStepReadsTheLatestIntentAfterEnteringHostWork(t *testing.T) {
+	rig := newServiceRig(t)
+	rig.declare(web())
+	row := rig.settle()
+	if _, err := rig.r.StopService(rig.ctx, row.ID); err != nil {
+		t.Fatal(err)
+	}
+	row = rig.settle()
+	stale, err := rig.r.StartService(rig.ctx, row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.r.StopService(rig.ctx, row.ID); err != nil {
+		t.Fatal(err)
+	}
+	hosts, err := rig.st.Hosts(rig.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarts := count(rig.host.Calls, fakehost.RestartService)
+	if err := rig.r.serviceStep(rig.ctx, stale, hosts[0]); err != nil {
+		t.Fatal(err)
+	}
+	current := rig.row()
+	if count(rig.host.Calls, fakehost.RestartService) != restarts || current.Want != contract.ServiceWantStop || rig.host.Service.Units[row.ID].State != box.UnitStopped {
+		t.Fatalf("queued step used stale intent: row=%+v unit=%+v", current.Service, rig.host.Service.Units[row.ID])
+	}
+}
+
+func TestStaleDirectRestartRefusesRemovalBeforeStartingTheUnit(t *testing.T) {
+	rig := newServiceRig(t)
+	rig.declare(web())
+	row := rig.settle()
+	if err := rig.r.RemoveService(rig.ctx, row.ID); err != nil {
+		t.Fatal(err)
+	}
+	restarts := count(rig.host.Calls, fakehost.RestartService)
+	if _, err := rig.r.RestartServiceUnit(rig.ctx, row); !errors.Is(err, ErrServiceRemoving) {
+		t.Fatalf("stale restart: %v", err)
+	}
+	if count(rig.host.Calls, fakehost.RestartService) != restarts {
+		t.Fatal("a rejected restart still started a removing unit")
+	}
+}
+
+func TestStoppedServiceIsStoppedAgainIfItsUnitComesBackRunning(t *testing.T) {
+	rig := newServiceRig(t)
+	rig.declare(web())
+	row := rig.settle()
+	if _, err := rig.r.StopService(rig.ctx, row.ID); err != nil {
+		t.Fatal(err)
+	}
+	row = rig.settle()
+	// WantedBy=default.target can start the unit after a host reboot. The heartbeat, rather than the old row state, is current.
+	if err := rig.host.RestartService(rig.ctx, row.ID); err != nil {
+		t.Fatal(err)
+	}
+	rig.r.ObserveServices([]box.ServiceUnit{rig.host.Service.Units[row.ID]})
+	row = rig.settle()
+	if row.Want != contract.ServiceWantStop || row.State != contract.ServiceStopped || rig.host.Service.Units[row.ID].State != box.UnitStopped {
+		t.Fatalf("stopped row hid a running unit: %+v unit=%+v", row.Service, rig.host.Service.Units[row.ID])
+	}
+}
