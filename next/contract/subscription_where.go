@@ -15,7 +15,7 @@ type EventFields struct {
 	Author string
 	Actor  string
 	Label  string
-	Kind   string // one PrChangeKind of a change, such as pushed
+	Kind   string // one PrChangeKind of a change, such as pushed, or the result of a default-branch CI
 	Text   string
 }
 
@@ -76,6 +76,8 @@ func Fields(body EventBody) []EventFields {
 		out = append(out, EventFields{Repo: b.Repo, Number: b.Number})
 	case GitMainUpdated:
 		out = append(out, EventFields{Repo: b.Repo})
+	case GitMainCIFinished:
+		out = append(out, EventFields{Repo: b.Repo, Kind: string(b.Result)})
 	case PrChanged:
 		for _, change := range b.Changes {
 			out = append(out, changeFields(EventFields{Repo: change.PR.Repo, Number: change.PR.Number, Author: change.PR.Author}, change.Kinds, change.Actions, change.Comments)...)

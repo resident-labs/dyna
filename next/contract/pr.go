@@ -172,10 +172,28 @@ type GitMainUpdated struct {
 	Head string   `json:"head"`
 }
 
-func (CIFinished) EventType() EventType     { return "github.ci.finished" }
-func (CIFinished) isEventBody()             {}
-func (GitMainUpdated) EventType() EventType { return "git.main_updated" }
-func (GitMainUpdated) isEventBody()         {}
+// CIRun is one check run or status in a commit's rollup, as GitHub names it. Conclusion is GitHub's own word for how it ended, empty while it runs.
+type CIRun struct {
+	Name       string `json:"name"`
+	Conclusion string `json:"conclusion"`
+	URL        string `json:"url"`
+}
+
+// GitMainCIFinished is the CI of a default-branch head finishing, once per head, with repo, branch, sha, result and runs; where kind is success or failure. It states a head no tracked PR owns, which github.ci.finished never does.
+type GitMainCIFinished struct {
+	Repo   RepoName `json:"repo"`
+	Branch string   `json:"branch"`
+	Sha    string   `json:"sha"`
+	Result PrCI     `json:"result"`
+	Runs   []CIRun  `json:"runs"`
+}
+
+func (CIFinished) EventType() EventType        { return "github.ci.finished" }
+func (CIFinished) isEventBody()                {}
+func (GitMainUpdated) EventType() EventType    { return "git.main_updated" }
+func (GitMainUpdated) isEventBody()            {}
+func (GitMainCIFinished) EventType() EventType { return "git.main_ci_finished" }
+func (GitMainCIFinished) isEventBody()         {}
 
 // Waking reports whether any change is news to someone: the owner, or a subscriber, who also hears pushes.
 func (b PrChanged) Waking() bool {
