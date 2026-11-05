@@ -215,6 +215,7 @@ func (b *Boxes) cache(name contract.HostName, h *podman.Host) {
 		last = slices.ContainsFunc(hosts, func(record box.Host) bool { return record.Name == name && record.ExecOnly })
 		return last
 	})
+	h.SetServices(func() []contract.ServiceID { return b.Pressure.Reconciler().ServiceIDs(ctx, name) })
 	ticker := time.NewTicker(10 * time.Second)
 	go func() {
 		defer ticker.Stop()
@@ -226,6 +227,9 @@ func (b *Boxes) cache(name contract.HostName, h *podman.Host) {
 				}
 			}
 			b.record(name, ok, load, now)
+			if ok {
+				b.Pressure.Reconciler().ObserveServices(load.Services)
+			}
 			b.reportHeartbeat(ctx, name, ok, load, now)
 			if ok && !load.ExecOnly && !load.ShareUp && b.recovered(name) {
 				b.repairShare(ctx, name)

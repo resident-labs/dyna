@@ -203,6 +203,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `workflow_settings` | the owner's workflow settings (9.2): one row for the global default (room `''`) and one for each room that overrides it; the `settings` column holds the JSON of the values that scope sets, so a value it leaves out is inherited |
 | `services` | a service's declaration and observed state (5.18) |
 | `service_secrets` | the owner's secret values for a service, write-only (5.18) |
+| `service_leftovers` | a removed service that a host offline at the time still holds, removed when the host returns (5.18) |
 
 ### 4.3 Data on disk
 
@@ -597,10 +598,11 @@ Env names and secret names are `[A-Za-z_][A-Za-z0-9_]*`; a name is in `env` or i
 | `secret_missing` | a declared secret has no value | `pending` until it is set |
 | `image_build` | the room image build exits non-zero | `failed`, or `running` with `rolled_back` on an update |
 | `image_pull` | `podman pull <digest>` exits non-zero | as `image_build` |
+| `unit_failed` | writing a Podman secret or the quadlet file failed at the `unit` step | `failed`, or rolled back |
 | `start_failed` | the unit does not reach active in time | `failed`, or rolled back |
 | `health_failed` | the health gate times out | rolled back |
 | `crash_loop` | systemd gave up at the start limit (5 in 10 minutes) | `crashing`; one `service.failed` event per episode; `restart` clears it |
-| `rolled_back` | an update failed and the previous image runs again; `cause` is `health_failed`, `start_failed`, `image_build` or `image_pull` | `running` |
+| `rolled_back` | an update failed and the previous image runs again; `cause` is the reason of the step that failed: `image_build`, `image_pull`, `port_in_use`, `port_privileged`, `unit_failed`, `start_failed` or `health_failed` | `running` |
 | `host_unreachable`, `host_removed` | 5.10 | `unreachable`, `failed` |
 
 **Admission.** Services are counted at 1x and come off the top, before boxes and runners (5.5). With `C` the host's CPUs and `M` its schedulable memory, and `S` the sums of the services on it, the box and runner sums are held to `4·(C−S_cpu)`, `4·(M−S_mem)` and, for runners, `2·(C−S_cpu)` and `1·(M−S_mem)`; free disk after box requests and the services' `disk` plus `image_bytes` stays above the floor. A new service fits a host when: its CPU and memory plus the services already there stay within `C/4` and `M/4`; the box and runner load already counted still fits after the cut; the disk rule holds with its disk and an image estimate (the newest measured size of that image on any host, or 1 GiB); the measured-memory rule holds; and the host is ready, not exec only, not the engine's host and allowed by the room's rule, with no `agents` or `ci` switch needed. When the load already counted does not fit, the service waits `pending` with `cpu` or `memory`, and the CI runner skip rule (5.1) applies to it as it does to a pending box. Boxes are never stopped to make room. A stopped service keeps its reservation. Services also count against the room's limits at 1x. `box.AdmitService` decides a service; `box.Admit` reads the same reservations from the host snapshot, so every placement counts them.
