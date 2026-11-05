@@ -280,7 +280,7 @@ func (c *Crew) Start(ctx context.Context, id contract.TurnID, inputs []contract.
 		if json.Unmarshal([]byte(final), &text) == nil && final != "null" {
 			result.Final = text
 		} else {
-			result.Final, result.Data = final, json.RawMessage(final)
+			result.Final, result.Data = final, contract.JSONData(final)
 		}
 	}
 	return result, nil
@@ -990,7 +990,7 @@ func (c *Crew) postCall(ctx context.Context, call crewCall) crewReply {
 		if refused != nil {
 			return stepOutcome{reason: "post: " + refused.Error()}
 		}
-		sent, err := c.config.Engine.WorkflowPost(ctx, contract.PostRequest{Text: text, Data: body.Data, Mentions: mentions, ClientID: key})
+		sent, err := c.config.Engine.WorkflowPost(ctx, contract.PostRequest{Text: text, Data: contract.JSONData(body.Data), Mentions: mentions, ClientID: key})
 		if err != nil {
 			return stepOutcome{reason: err.Error()}
 		}

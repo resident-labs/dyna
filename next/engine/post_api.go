@@ -106,7 +106,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	data, files, index, dataErr := s.preparePostData(ctx, req.Room, req.Data, req.Attachments)
 	if dataErr != nil {
 		var syntax *json.SyntaxError
-		if errors.As(dataErr, &syntax) {
+		if errors.As(dataErr, &syntax) || errors.Is(dataErr, errPostDataUTF8) {
 			return contract.PostResponse{}, invalid(dataErr.Error())
 		}
 		return contract.PostResponse{}, failure(dataErr)

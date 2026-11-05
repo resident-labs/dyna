@@ -1,12 +1,12 @@
 import { sourceLabel } from "./source.ts";
-import type { JSONValue, Attachment, BoxState, Card, Conversation, Event, FailureCause, PrChange, PrChanged, PrChangeKind, Principal, PrSummary, SessionCloseReason, WorkflowEnded, PostSource } from "./contract.gen.ts";
+import type { JSONData, Attachment, BoxState, Card, Conversation, Event, FailureCause, PrChange, PrChanged, PrChangeKind, Principal, PrSummary, SessionCloseReason, WorkflowEnded, PostSource } from "./contract.gen.ts";
 import type { BoxFailure } from "./status.ts";
 import type { PendingReason } from "./event.ts";
 import type { Request } from "./room.svelte.ts";
 import { endCause, failed } from "./jobs.ts";
 
 export type Row =
-  | { kind: "post"; key: string; from: Principal; at: string; text: string; data?: JSONValue; dataAttachment?: number | null; attachments: Attachment[]; first: boolean; to: Principal[]; source?: PostSource | null; target?: string; pending?: Pending }
+  | { kind: "post"; key: string; from: Principal; at: string; text: string; data?: JSONData; dataAttachment?: number | null; attachments: Attachment[]; first: boolean; to: Principal[]; source?: PostSource | null; target?: string; pending?: Pending }
   | { kind: "restarted"; key: string; session: string; at: string }
   // A plain line for what the owner did to a session or the room; describe gives its words.
   | { kind: "notice"; key: string; event: Event; resumedAt?: string }
@@ -20,7 +20,7 @@ export type Row =
   | { kind: "new"; key: string };
 
 // An owner's post the engine has not confirmed yet, with its mentions as sessions.
-export type Pending = { id: number; at: string; text: string; data?: JSONValue; attachments: Attachment[]; to: Principal[]; failed: boolean };
+export type Pending = { id: number; at: string; text: string; data?: JSONData; attachments: Attachment[]; to: Principal[]; failed: boolean };
 
 type Name = (session: string) => string;
 
@@ -151,7 +151,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     deferred = [];
   };
   // A post to other people, its mentions or a final reply's target, starts a new run with its own name line.
-  const post = (key: string, seq: number, from: Principal, at: string, text: string, attachments: Attachment[], to: Principal[] = [], pending?: Pending, source?: PostSource | null, target?: string, data?: JSONValue, dataAttachment?: number | null) => {
+  const post = (key: string, seq: number, from: Principal, at: string, text: string, attachments: Attachment[], to: Principal[] = [], pending?: Pending, source?: PostSource | null, target?: string, data?: JSONData, dataAttachment?: number | null) => {
     flush();
     dated(at);
     fresh(seq, from);
@@ -329,7 +329,7 @@ export function formatTime(value: string): string {
 }
 
 // A post the owner forwards, as the composer holds it until a send or a remove.
-export type Quote = { author: string; at: string; text: string; data?: JSONValue; attachments: Attachment[] };
+export type Quote = { author: string; at: string; text: string; data?: JSONData; attachments: Attachment[] };
 
 // As in v1, a forward quotes the post above the owner's words. It travels as a markdown blockquote, so the feed
 // draws it as a quote and the session that reads the post sees the quoted text. The empty quoted line keeps the
@@ -551,6 +551,6 @@ export const expiryText = (expires: string | undefined, now: number): string => 
 
 // The owning post boundary identifies its data file by attachment position, not a guessed filename.
 // Keep original positions so a remaining file still opens the correct item in the media viewer.
-export function feedAttachments(attachments: Attachment[], associated?: number | null) {
+export function visibleAttachments(attachments: Attachment[], associated?: number | null) {
   return attachments.map((file, position) => ({ file, position })).filter(({ position }) => position !== associated);
 }
