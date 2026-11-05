@@ -26,6 +26,9 @@ type restoreStore struct {
 	boxes []box.Box
 }
 
+func (restoreStore) Services(context.Context, contract.RoomID) ([]store.ServiceRow, error) {
+	return nil, nil
+}
 func (s restoreStore) Hosts(context.Context) ([]box.Host, error)                  { return s.hosts, nil }
 func (s restoreStore) Boxes(context.Context) ([]box.Box, error)                   { return s.boxes, nil }
 func (restoreStore) SetEngineHost(context.Context, contract.HostName, bool) error { return nil }
