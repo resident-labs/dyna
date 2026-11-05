@@ -40,7 +40,7 @@ func (h *harnessFake) Start(_ context.Context, id contract.TurnID, inputs []cont
 	<-h.release
 	return contract.TurnEnded{Turn: id, Outcome: contract.TurnOutcome("completed")}, nil
 }
-func (h *harnessFake) TransferModel(context.Context, contract.TurnID, contract.ModelChoice, int) (harness.ModelTransfer, error) {
+func (h *harnessFake) TransferModel(context.Context, contract.TurnID, contract.ModelChoice, int, string) (harness.ModelTransfer, error) {
 	return harness.ModelTransfer{Path: "switched"}, nil
 }
 func (h *harnessFake) SetPromptSections(context.Context, []contract.ContextSection) error { return nil }
@@ -324,7 +324,7 @@ func TestRunnerClearsWhatNoRequestRead(t *testing.T) {
 }
 
 func turnStart(i int, model contract.ModelChoice, compactTokens int) contract.BoxMessage {
-	return contract.BoxMessage{Body: contract.TurnStart{Turn: contract.TurnID(fmt.Sprint("turn_", i)), Inputs: []contract.TurnInput{{Delivery: contract.DeliverySeq(i + 1)}}, Model: model, CompactTokens: compactTokens}}
+	return contract.BoxMessage{Body: contract.TurnStart{Turn: contract.TurnID(fmt.Sprint("turn_", i)), Inputs: []contract.TurnInput{{Delivery: contract.DeliverySeq(i + 1)}}, Model: model, CompactTokens: compactTokens, ModelInstructions: "Instructions for " + model.ID}}
 }
 
 var (
@@ -353,6 +353,9 @@ func TestRunnerTransfersOnFirstTurnAndOnEachChange(t *testing.T) {
 	}
 	if want := []contract.ModelChoice{modelA, modelB, modelB}; !reflect.DeepEqual(h.Models, want) {
 		t.Fatalf("transfers: %+v", h.Models)
+	}
+	if want := []string{"Instructions for a", "Instructions for b", "Instructions for b"}; !reflect.DeepEqual(h.Instructions, want) {
+		t.Fatalf("model instructions: %+v", h.Instructions)
 	}
 	if want := []int{0, 0, 150000}; !reflect.DeepEqual(h.Triggers, want) {
 		t.Fatalf("triggers: %+v", h.Triggers)
