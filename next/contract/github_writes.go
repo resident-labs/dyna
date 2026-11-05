@@ -9,7 +9,7 @@ import (
 type GitHubWriteGroup string
 
 const (
-	GitHubWriteIssues   GitHubWriteGroup = "issues"   // create and edit issues, comments, labels, sub-issues
+	GitHubWriteIssues   GitHubWriteGroup = "issues"   // create and edit issues, comments, labels
 	GitHubWritePulls    GitHubWriteGroup = "pulls"    // PR comments, reviews, and edits of a PR's title, body and labels
 	GitHubWriteProjects GitHubWriteGroup = "projects" // add items to a project and set an item's fields
 )
@@ -73,6 +73,7 @@ const (
 	GitHubWriteGraphQLMutation     GitHubWriteReason = "graphql_mutation_not_allowed" // a mutation outside the table
 	GitHubWriteGraphQLShape        GitHubWriteReason = "graphql_shape"                // a mutation not written as field(input: $variable)
 	GitHubWriteGraphQLUnresolved   GitHubWriteReason = "graphql_unresolved"           // a node ID GitHub did not resolve to a repository
+	GitHubWriteReviewEvent         GitHubWriteReason = "review_event_not_allowed"     // a review event other than COMMENT or REQUEST_CHANGES, such as APPROVE
 )
 
 // GitHubWritesRefused is the cause of a call that the githubWrites setting refused.

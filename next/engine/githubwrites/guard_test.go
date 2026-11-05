@@ -8,19 +8,22 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/prs"
 )
 
 // upstream stands in for GitHub behind the guard: it keeps what reached it and answers a node lookup from its table.
 type upstream struct {
-	mu    sync.Mutex
-	sent  []string
-	nodes map[string]string // node ID to the JSON of its node object
-	prs   map[string]bool   // "owner/repo#n" that are PRs
+	mu      sync.Mutex
+	sent    []string
+	vouched []bool            // for each write that reached GitHub, whether the guard vouched for it
+	nodes   map[string]string // node ID to the JSON of its node object
+	prs     map[string]bool   // "owner/repo#n" that are PRs
 }
 
 func (u *upstream) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -51,6 +54,7 @@ func (u *upstream) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	u.mu.Lock()
 	u.sent = append(u.sent, r.Method+" "+r.URL.Path)
+	u.vouched = append(u.vouched, prs.IsVouched(r.Context()))
 	u.mu.Unlock()
 	return reply(`{}`)
 }
@@ -67,6 +71,7 @@ func newGuard() (*Guard, *upstream) {
 		"P_other":  `{"__typename":"ProjectV2","owner":{"login":"stranger"}}`,
 		"IT_ok":    `{"__typename":"ProjectV2Item","project":{"owner":{"login":"acme"}},"content":{"__typename":"Issue","repository":{"nameWithOwner":"acme/app"}}}`,
 		"IT_other": `{"__typename":"ProjectV2Item","project":{"owner":{"login":"acme"}},"content":{"__typename":"Issue","repository":{"nameWithOwner":"acme/secret"}}}`,
+		"PRR_ok":   `{"__typename":"PullRequestReview","repository":{"nameWithOwner":"acme/app"}}`,
 		"IT_draft": `{"__typename":"ProjectV2Item","project":{"owner":{"login":"acme"}},"content":null}`,
 	}, prs: map[string]bool{"acme/app#7": true}}
 	return &Guard{Base: up, API: &url.URL{Scheme: "https", Host: "api.github.com"}}, up
@@ -153,7 +158,6 @@ func TestEachGroupAllowsItsOwnWritesOnly(t *testing.T) {
 		{name: "issue create", method: "POST", path: "/repos/acme/app/issues", body: `{"title":"x","labels":["a"]}`, group: contract.GitHubWriteIssues},
 		{name: "issue edit", method: "PATCH", path: "/repos/acme/app/issues/3", body: `{"title":"y","state":"closed"}`, group: contract.GitHubWriteIssues},
 		{name: "issue comment", method: "POST", path: "/repos/acme/app/issues/3/comments", body: `{"body":"x"}`, group: contract.GitHubWriteIssues},
-		{name: "sub-issue", method: "POST", path: "/repos/acme/app/issues/3/sub_issues", body: `{"sub_issue_id":5}`, group: contract.GitHubWriteIssues},
 		{name: "create issue graphql", query: `mutation($i:CreateIssueInput!){createIssue(input:$i){issue{id}}}`, variables: `{"i":{"repositoryId":"R_ok","title":"x"}}`, group: contract.GitHubWriteIssues},
 		{name: "update pr", method: "PATCH", path: "/repos/acme/app/pulls/7", body: `{"title":"y","body":"z"}`, group: contract.GitHubWritePulls},
 		{name: "pr review comment", method: "POST", path: "/repos/acme/app/pulls/7/comments", body: `{"body":"x","in_reply_to":4}`, group: contract.GitHubWritePulls},
@@ -412,5 +416,105 @@ func TestGraphQLShapes(t *testing.T) {
 	expect(t, "an unknown mutation", graphql(t, g, grant, `mutation($a:X!){transferRepository(input:$a){clientMutationId}}`, vars), contract.GitHubWriteGraphQLMutation)
 	if len(up.sent) != 2 {
 		t.Fatalf("what reached GitHub: %v", up.sent)
+	}
+}
+
+// A GraphQL query is a read: it passes with the setting off, and without the guard's vouch, so the read transport still checks it.
+// A mutation is refused with the setting off, and when it is allowed it is vouched for.
+func TestGraphQLQueriesPassWithWritesOff(t *testing.T) {
+	g, up := newGuard()
+	off := contract.GitHubWrites{}
+	query := `query($o:String!){repository(owner:$o,name:"r"){discussions(first:1){nodes{id}}}}`
+	expect(t, "query, setting off", graphql(t, g, off, query, `{"o":"acme"}`), "")
+	expect(t, "query, setting on", graphql(t, g, grantOf("acme/app", everyGroup...), query, `{"o":"acme"}`), "")
+	expect(t, "mutation, setting off", graphql(t, g, off, `mutation($i:CloseIssueInput!){closeIssue(input:$i){clientMutationId}}`, `{"i":{"issueId":"I_ok"}}`), contract.GitHubWriteOff)
+	expect(t, "query beside a mutation, setting off", graphql(t, g, off, `query{viewer{login}} mutation($i:CloseIssueInput!){closeIssue(input:$i){clientMutationId}}`, `{"i":{"issueId":"I_ok"}}`), contract.GitHubWriteOff)
+	expect(t, "subscription, setting off", graphql(t, g, off, `subscription{x}`, `{}`), contract.GitHubWriteGraphQLSubscription)
+	expect(t, "unparsable, setting off", graphql(t, g, off, `query{{{`, `{}`), contract.GitHubWriteGraphQLUnparsable)
+	expect(t, "allowed mutation", graphql(t, g, grantOf("acme/app", everyGroup...), `mutation($i:CloseIssueInput!){closeIssue(input:$i){clientMutationId}}`, `{"i":{"issueId":"I_ok"}}`), "")
+	if !slices.Equal(up.sent, []string{"POST /graphql", "POST /graphql", "POST /graphql"}) || !slices.Equal(up.vouched, []bool{false, false, true}) {
+		t.Fatalf("what reached GitHub: %v, vouched %v (queries unvouched, the mutation vouched)", up.sent, up.vouched)
+	}
+}
+
+// The sub-issue routes take the global ID of the issue to add, which names no repository, so they are not allowed at all: an
+// issues grant on one repository cannot re-parent an issue of another.
+func TestSubIssueRoutesAreRefused(t *testing.T) {
+	g, up := newGuard()
+	grant := grantOf("acme/app", everyGroup...)
+	expect(t, "add", rest(t, g, grant, "POST", "/repos/acme/app/issues/3/sub_issues", `{"sub_issue_id":99,"replace_parent":true}`), contract.GitHubWriteRouteNotAllowed)
+	expect(t, "reprioritize", rest(t, g, grant, "PATCH", "/repos/acme/app/issues/3/sub_issues/priority", `{"sub_issue_id":99,"after_id":1}`), contract.GitHubWriteRouteNotAllowed)
+	expect(t, "createIssue with a parent of another repo", graphql(t, g, grant, `mutation($i:CreateIssueInput!){createIssue(input:$i){issue{id}}}`, `{"i":{"repositoryId":"R_ok","title":"x","parentIssueId":"I_other"}}`), contract.GitHubWriteRepoNotAllowed)
+	if len(up.sent) != 0 {
+		t.Fatalf("reached GitHub: %v", up.sent)
+	}
+}
+
+// A review under pulls is a comment or a change request. APPROVE can satisfy a required-review protection under the engine's
+// token, which is a way to merge, so it is refused on every path that creates or submits a review.
+func TestReviewsCannotApprove(t *testing.T) {
+	g, up := newGuard()
+	grant := grantOf("acme/app", contract.GitHubWritePulls)
+	add := func(input string) contract.GitHubWriteReason {
+		return graphql(t, g, grant, `mutation($i:AddPullRequestReviewInput!){addPullRequestReview(input:$i){pullRequestReview{id}}}`, `{"i":`+input+`}`)
+	}
+	submit := func(input string) contract.GitHubWriteReason {
+		return graphql(t, g, grant, `mutation($i:SubmitPullRequestReviewInput!){submitPullRequestReview(input:$i){pullRequestReview{id}}}`, `{"i":`+input+`}`)
+	}
+	const refused = contract.GitHubWriteReviewEvent
+	// GraphQL, create: the event is in the input variable.
+	expect(t, "add APPROVE", add(`{"pullRequestId":"PR_ok","event":"APPROVE"}`), refused)
+	expect(t, "add lowercase approve", add(`{"pullRequestId":"PR_ok","event":"approve"}`), refused)
+	expect(t, "add lowercase comment", add(`{"pullRequestId":"PR_ok","event":"comment"}`), refused)
+	expect(t, "add DISMISS", add(`{"pullRequestId":"PR_ok","event":"DISMISS"}`), refused)
+	expect(t, "add null event", add(`{"pullRequestId":"PR_ok","event":null}`), refused)
+	expect(t, "add event that is not a string", add(`{"pullRequestId":"PR_ok","event":["APPROVE"]}`), refused)
+	expect(t, "add APPROVE with a body", add(`{"pullRequestId":"PR_ok","event":"APPROVE","body":"lgtm"}`), refused)
+	// GraphQL, submit: a pending review needs an event, and it is not APPROVE.
+	expect(t, "submit APPROVE", submit(`{"pullRequestId":"PR_ok","pullRequestReviewId":"PRR_ok","event":"APPROVE"}`), refused)
+	expect(t, "submit with no event", submit(`{"pullRequestId":"PR_ok","pullRequestReviewId":"PRR_ok"}`), refused)
+	expect(t, "submit null event", submit(`{"pullRequestReviewId":"PRR_ok","event":null}`), refused)
+	// The event on the document itself, in place of the variable, is not a shape the guard reads.
+	expect(t, "inline input", graphql(t, g, grant, `mutation{addPullRequestReview(input:{pullRequestId:"PR_ok",event:APPROVE}){clientMutationId}}`, `{}`), contract.GitHubWriteGraphQLShape)
+	// REST: no review route is allowed, so no event reaches GitHub on one, whatever it is.
+	for _, event := range []string{"APPROVE", "COMMENT", "REQUEST_CHANGES", ""} {
+		body := `{"event":"` + event + `"}`
+		if event == "" {
+			body = `{}`
+		}
+		expect(t, "REST create "+event, rest(t, g, grant, "POST", "/repos/acme/app/pulls/7/reviews", body), contract.GitHubWriteRouteNotAllowed)
+		expect(t, "REST submit "+event, rest(t, g, grant, "POST", "/repos/acme/app/pulls/7/reviews/12/events", body), contract.GitHubWriteRouteNotAllowed)
+	}
+	expect(t, "REST dismiss", rest(t, g, grant, "PUT", "/repos/acme/app/pulls/7/reviews/12/dismissals", `{"message":"x"}`), contract.GitHubWriteRouteNotAllowed)
+	expect(t, "REST delete pending", rest(t, g, grant, "DELETE", "/repos/acme/app/pulls/7/reviews/12", ``), contract.GitHubWriteRouteNotAllowed)
+	expect(t, "GraphQL dismiss", graphql(t, g, grant, `mutation($i:X!){dismissPullRequestReview(input:$i){clientMutationId}}`, `{"i":{"pullRequestReviewId":"PRR_ok","message":"x"}}`), contract.GitHubWriteGraphQLMutation)
+	expect(t, "GraphQL delete pending", graphql(t, g, grant, `mutation($i:X!){deletePullRequestReview(input:$i){clientMutationId}}`, `{"i":{"pullRequestReviewId":"PRR_ok"}}`), contract.GitHubWriteGraphQLMutation)
+	if len(up.sent) != 0 {
+		t.Fatalf("a review that approves or deletes reached GitHub: %v", up.sent)
+	}
+	// What is allowed still passes: a comment, a change request, a pending review (no event) and its submission.
+	expect(t, "add COMMENT", add(`{"pullRequestId":"PR_ok","event":"COMMENT","body":"x"}`), "")
+	expect(t, "add REQUEST_CHANGES", add(`{"pullRequestId":"PR_ok","event":"REQUEST_CHANGES","body":"x"}`), "")
+	expect(t, "add pending", add(`{"pullRequestId":"PR_ok"}`), "")
+	expect(t, "submit COMMENT", submit(`{"pullRequestId":"PR_ok","pullRequestReviewId":"PRR_ok","event":"COMMENT"}`), "")
+	expect(t, "submit REQUEST_CHANGES", submit(`{"pullRequestId":"PR_ok","pullRequestReviewId":"PRR_ok","event":"REQUEST_CHANGES","body":"x"}`), "")
+	if len(up.sent) != 5 {
+		t.Fatalf("allowed reviews that reached GitHub: %v", up.sent)
+	}
+}
+
+// Repositories match without case, as GitHub names them: whichever spelling the grant, the path or GitHub's node answers has.
+func TestRepositoryMatchIgnoresCase(t *testing.T) {
+	g, up := newGuard()
+	up.nodes["R_cased"] = `{"__typename":"Repository","nameWithOwner":"ACME/APP"}`
+	up.nodes["I_cased"] = `{"__typename":"Issue","repository":{"nameWithOwner":"Acme/App"}}`
+	for _, spelling := range []string{"acme/app", "ACME/APP", "Acme/App"} {
+		grant := grantOf(spelling, everyGroup...)
+		for _, path := range []string{"/repos/acme/app/issues", "/repos/ACME/APP/issues", "/repos/Acme/aPP/issues"} {
+			expect(t, spelling+" grant, "+path, rest(t, g, grant, "POST", path, `{"title":"x"}`), "")
+		}
+		expect(t, spelling+" grant, node answer", graphql(t, g, grant, `mutation($i:CreateIssueInput!){createIssue(input:$i){issue{id}}}`, `{"i":{"repositoryId":"R_cased","title":"x"}}`), "")
+		expect(t, spelling+" grant, issue node", graphql(t, g, grant, `mutation($i:CloseIssueInput!){closeIssue(input:$i){clientMutationId}}`, `{"i":{"issueId":"I_cased"}}`), "")
+		expect(t, spelling+" grant, other repo", rest(t, g, grant, "POST", "/repos/acme/apple/issues", `{"title":"x"}`), contract.GitHubWriteRepoNotAllowed)
 	}
 }

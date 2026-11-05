@@ -29,8 +29,6 @@ var routes = []route{
 	{method: http.MethodPatch, path: "repos/{owner}/{repo}/issues/comments/{number}", group: issues},
 	{method: http.MethodPost, path: "repos/{owner}/{repo}/issues/{number}/labels", group: issues},
 	{method: http.MethodPut, path: "repos/{owner}/{repo}/issues/{number}/labels", group: issues},
-	{method: http.MethodPost, path: "repos/{owner}/{repo}/issues/{number}/sub_issues", group: issues},
-	{method: http.MethodPatch, path: "repos/{owner}/{repo}/issues/{number}/sub_issues/priority", group: issues},
 
 	{method: http.MethodPatch, path: "repos/{owner}/{repo}/pulls/{number}", group: pulls, fields: []string{"title", "body"}},
 	{method: http.MethodPatch, path: "repos/{owner}/{repo}/issues/{number}", group: pulls, fields: []string{"labels"}},

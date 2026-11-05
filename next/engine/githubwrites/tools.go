@@ -36,9 +36,6 @@ var Tools = []Tool{
 		issues: "It edits comments of issues of the allowed repositories.",
 		pulls:  "It edits comments of PRs of the allowed repositories.",
 	}},
-	{"sub_issue_write", map[contract.GitHubWriteGroup]string{
-		issues: "'add' and 'reprioritize' work; 'remove' sends a DELETE, which is never allowed.",
-	}},
 	{"label_write", map[contract.GitHubWriteGroup]string{
 		issues: "'create' and 'update' work; 'delete' is never allowed.",
 	}},
@@ -49,7 +46,7 @@ var Tools = []Tool{
 		pulls: "It replies to review comments of PRs of the allowed repositories.",
 	}},
 	{"pull_request_review_write", map[contract.GitHubWriteGroup]string{
-		pulls: "'create', 'submit_pending', 'resolve_thread' and 'unresolve_thread' work; 'delete_pending' is never allowed.",
+		pulls: "'create', 'submit_pending', 'resolve_thread' and 'unresolve_thread' work. A review is a comment or a change request: the event APPROVE is refused, and 'submit_pending' needs the event COMMENT or REQUEST_CHANGES. 'delete_pending' and dismissing a review are never allowed.",
 	}},
 	{"projects_write", map[contract.GitHubWriteGroup]string{
 		projects: "'add_project_item', 'update_project_item' and 'update_project_items' work on projects owned by the owner of an allowed repository, and an added item must be an issue or PR of an allowed repository. Creating or deleting projects, items, views, status updates and iteration fields is never allowed.",
