@@ -684,7 +684,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		return nil
 	}}
 	removeHost.Flags().BoolVar(&discardBoxes, "discard-boxes", false, "Fail every box on the host and delete its volume; work not pushed is lost")
-	host.AddCommand(add, setHost, limitHost, list, removeHost)
+	host.AddCommand(add, setHost, limitHost, list, removeHost, relocateEngineCommand())
 	root.AddCommand(host)
 	root.AddCommand(poolCommand(getClient))
 	root.AddCommand(serviceCommand(getClient))
