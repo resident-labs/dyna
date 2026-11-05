@@ -264,6 +264,15 @@ func TestWriteToolsFollowTheRoomsGroups(t *testing.T) {
 			t.Errorf("%s is offered with every group on", never)
 		}
 	}
+	// The listed descriptions say that labels are created and edited: issue_write creates a label it does not know by name.
+	for name, said := range map[string]string{"issue_write": "created as a new label", "label_write": "creates and edits labels"} {
+		if tools[name] == nil || !strings.Contains(tools[name].Description, said) {
+			t.Errorf("%s has no %q in its description", name, said)
+		}
+	}
+	if only := list(contract.GitHubWrites{Repos: []contract.RepoName{"o/r"}, Groups: []contract.GitHubWriteGroup{contract.GitHubWriteIssues}})["issue_write"]; only == nil || !strings.Contains(only.Description, "created as a new label") {
+		t.Errorf("issue_write under issues alone has no label creation in its description")
+	}
 	edit := tools["update_pull_request"]
 	if edit == nil {
 		t.Fatal("pulls offers no update_pull_request")

@@ -59,6 +59,7 @@ type Store struct {
 	done          chan struct{}
 	checkDone     chan struct{}
 	mu            sync.Mutex
+	unreadable    sync.Map // rooms whose stored githubWrites did not decode, which room.list has logged
 	dispatchMu    sync.RWMutex
 	draining      bool
 	errMu         sync.Mutex
