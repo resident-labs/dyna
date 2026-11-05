@@ -20,11 +20,17 @@ const repo contract.RepoName = "owner/repo"
 const large = contract.BoxSizeLarge
 
 type fakeStore struct {
-	repos    []store.CIRepo
-	hosts    []box.Host
-	boxes    []store.LifecycleBox
-	pools    []store.Pool
-	services []store.ServiceRow
+	admission sync.Mutex
+	repos     []store.CIRepo
+	hosts     []box.Host
+	boxes     []store.LifecycleBox
+	pools     []store.Pool
+	services  []store.ServiceRow
+}
+
+func (s *fakeStore) LockAdmission() func() {
+	s.admission.Lock()
+	return s.admission.Unlock
 }
 
 func (s *fakeStore) Services(context.Context, contract.RoomID) ([]store.ServiceRow, error) {

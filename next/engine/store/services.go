@@ -31,7 +31,9 @@ type ServiceRow struct {
 	contract.Service
 	Parts      contract.ServiceParts
 	ImageBytes int64
-	UnitSHA    string
+	// ImageEstimate holds pre-pull/build disk until a successful deploy replaces it with the measured ImageBytes.
+	ImageEstimate int64
+	UnitSHA       string
 	// Target is the image reference to deploy instead of building the source, which a rollback sets. A deploy clears it.
 	Target string
 	// Only is the room's hosts rule, read with the row for a caller that judges placement.
@@ -44,7 +46,26 @@ type ServiceRow struct {
 	Placed  time.Time
 }
 
-const serviceColumns = `id,room,spec,generation,host,cpu_milli,mem_bytes,disk_bytes,image_bytes,want,state,reason,cause,detail,last_state,deployed_generation,image_ref,previous_ref,target_ref,deployed_spec,unit_sha,restarts,since,updated_at,placed_at,rev`
+// Reservation is the resources and ports this service must hold until its desired declaration has successfully replaced the
+// live one. The declarations are not merged: only admission uses this projection, never the unit renderer. A failed shrink or
+// port change must not free resources or ports that the restored unit still uses.
+func (row ServiceRow) Reservation() contract.ServiceParts {
+	parts := row.Parts
+	if row.Live != nil {
+		parts.CPUMilli = max(parts.CPUMilli, row.Live.CPUMilli)
+		parts.MemBytes = max(parts.MemBytes, row.Live.MemBytes)
+		parts.DiskBytes = max(parts.DiskBytes, row.Live.DiskBytes)
+		parts.Ports = slices.Clone(parts.Ports)
+		for _, port := range row.Live.Ports {
+			if !slices.Contains(parts.Ports, port) {
+				parts.Ports = append(parts.Ports, port)
+			}
+		}
+	}
+	return parts
+}
+
+const serviceColumns = `id,room,spec,generation,host,cpu_milli,mem_bytes,disk_bytes,image_bytes,image_estimate,want,state,reason,cause,detail,last_state,deployed_generation,image_ref,previous_ref,target_ref,deployed_spec,unit_sha,restarts,since,updated_at,placed_at,rev`
 
 type scanner interface{ Scan(...any) error }
 
@@ -54,7 +75,7 @@ func scanService(r scanner) (ServiceRow, error) {
 	var live string
 	var host sql.NullString
 	var since, updated, placed int64
-	err := r.Scan(&row.ID, &row.Room, &spec, &row.Generation, &host, &row.CPUMilli, &row.MemBytes, &row.DiskBytes, &row.ImageBytes, &row.Want, &row.State, &row.Reason, &row.Cause, &row.Detail, &row.LastState, &row.Deployed, &row.ImageRef, &row.Previous, &row.Target, &live, &row.UnitSHA, &row.Restarts, &since, &updated, &placed, &row.Rev)
+	err := r.Scan(&row.ID, &row.Room, &spec, &row.Generation, &host, &row.CPUMilli, &row.MemBytes, &row.DiskBytes, &row.ImageBytes, &row.ImageEstimate, &row.Want, &row.State, &row.Reason, &row.Cause, &row.Detail, &row.LastState, &row.Deployed, &row.ImageRef, &row.Previous, &row.Target, &live, &row.UnitSHA, &row.Restarts, &since, &updated, &placed, &row.Rev)
 	if err != nil {
 		return row, err
 	}
@@ -160,7 +181,8 @@ func secretStatus(ctx context.Context, q sqlQuery, row ServiceRow) ([]contract.S
 }
 
 // SetService declares a service, or changes the declaration of the room's service of that name: the generation goes up and the
-// reservation follows the declaration. A placed service keeps its host, and a host port another service of the host holds is refused.
+// reservation covers both the desired and live declarations. A placed service keeps its host, and a host port another service of
+// the host holds is refused.
 func (s *Store) SetService(ctx context.Context, room contract.RoomID, parts contract.ServiceParts, id contract.ServiceID, by contract.Principal, now time.Time, newEvent func(contract.RoomID, contract.EventBody) (contract.Event, error)) (ServiceRow, error) {
 	spec, err := json.Marshal(parts.Spec)
 	if err != nil {
@@ -169,6 +191,15 @@ func (s *Store) SetService(ctx context.Context, room contract.RoomID, parts cont
 	var out ServiceRow
 	err = s.Write(ctx, func(tx *sql.Tx) error {
 		existing, err := queryServices(ctx, tx, "room=? AND want!='remove' AND json_extract(spec,'$.name')=?", room, parts.Spec.Name)
+		if err != nil {
+			return err
+		}
+		candidate := ServiceRow{Parts: parts}
+		if len(existing) > 0 {
+			candidate.Live = existing[0].Live
+		}
+		reservation := candidate.Reservation()
+		estimate, err := imageEstimate(ctx, tx, parts.Spec.Image)
 		if err != nil {
 			return err
 		}
@@ -188,8 +219,8 @@ func (s *Store) SetService(ctx context.Context, room contract.RoomID, parts cont
 				if len(existing) > 0 && other.ID == existing[0].ID {
 					continue
 				}
-				for _, mine := range parts.Ports {
-					for _, theirs := range other.Parts.Ports {
+				for _, mine := range reservation.Ports {
+					for _, theirs := range other.Reservation().Ports {
 						if mine.Host == theirs.Host && mine.Proto == theirs.Proto {
 							return &PortTakenError{Port: mine, Service: other.Spec.Name}
 						}
@@ -203,8 +234,8 @@ func (s *Store) SetService(ctx context.Context, room contract.RoomID, parts cont
 				id, room, parts.Spec.Name, spec, parts.CPUMilli, parts.MemBytes, parts.DiskBytes, contract.ServiceWantRun, contract.ServicePending, now.UnixMilli(), by.Kind, principalID(by))
 		} else {
 			id, from = existing[0].ID, existing[0].State
-			_, err = tx.ExecContext(ctx, `UPDATE services SET spec=?,generation=generation+1,target_ref='',cpu_milli=?,mem_bytes=?,disk_bytes=?,updated_at=?,rev=rev+1,state=CASE WHEN state='failed' THEN 'pending' ELSE state END,reason=CASE WHEN state='failed' THEN '' ELSE reason END WHERE id=?`,
-				spec, parts.CPUMilli, parts.MemBytes, parts.DiskBytes, now.UnixMilli(), id)
+			_, err = tx.ExecContext(ctx, `UPDATE services SET spec=?,generation=generation+1,target_ref='',cpu_milli=?,mem_bytes=?,disk_bytes=?,image_estimate=?,updated_at=?,rev=rev+1,state=CASE WHEN state='failed' THEN 'pending' ELSE state END,reason=CASE WHEN state='failed' THEN '' ELSE reason END WHERE id=?`,
+				spec, reservation.CPUMilli, reservation.MemBytes, reservation.DiskBytes, estimate, now.UnixMilli(), id)
 			if err == nil {
 				// A secret the declaration dropped goes with it.
 				_, err = tx.ExecContext(ctx, `DELETE FROM service_secrets WHERE service=? AND name NOT IN (SELECT value FROM json_each(?))`, id, mustJSON(parts.Spec.Secrets))
@@ -313,8 +344,9 @@ func (s *Store) SaveService(ctx context.Context, old, next ServiceRow, newEvent 
 			}
 			live = string(text)
 		}
-		result, err := tx.ExecContext(ctx, `UPDATE services SET generation=?,host=?,image_bytes=?,want=?,state=?,reason=?,cause=?,detail=?,last_state=?,deployed_generation=?,image_ref=?,previous_ref=?,target_ref=?,deployed_spec=?,unit_sha=?,restarts=?,since=?,placed_at=?,updated_at=?,rev=rev+1 WHERE id=? AND rev=?`,
-			next.Generation, host, next.ImageBytes, next.Want, next.State, next.Reason, next.Cause, next.Detail, next.LastState, next.Deployed, next.ImageRef, next.Previous, next.Target, live, next.UnitSHA, next.Restarts, since, placed, next.Updated.UnixMilli(), old.ID, old.Rev)
+		reservation := next.Reservation()
+		result, err := tx.ExecContext(ctx, `UPDATE services SET cpu_milli=?,mem_bytes=?,disk_bytes=?,generation=?,host=?,image_bytes=?,image_estimate=?,want=?,state=?,reason=?,cause=?,detail=?,last_state=?,deployed_generation=?,image_ref=?,previous_ref=?,target_ref=?,deployed_spec=?,unit_sha=?,restarts=?,since=?,placed_at=?,updated_at=?,rev=rev+1 WHERE id=? AND rev=?`,
+			reservation.CPUMilli, reservation.MemBytes, reservation.DiskBytes, next.Generation, host, next.ImageBytes, next.ImageEstimate, next.Want, next.State, next.Reason, next.Cause, next.Detail, next.LastState, next.Deployed, next.ImageRef, next.Previous, next.Target, live, next.UnitSHA, next.Restarts, since, placed, next.Updated.UnixMilli(), old.ID, old.Rev)
 		if err != nil {
 			return err
 		}
@@ -386,7 +418,7 @@ func (s *Store) ForgetServiceLeftover(ctx context.Context, host contract.HostNam
 
 // ServiceHolds lists what each placed service reserves, for admission and for the room's limits.
 func serviceHolds(ctx context.Context, q sqlQuery) ([]box.ServiceHold, []contract.HostName, error) {
-	rows, err := q.QueryContext(ctx, "SELECT id,room,host,cpu_milli,mem_bytes,disk_bytes+image_bytes FROM services WHERE host IS NOT NULL ORDER BY id")
+	rows, err := q.QueryContext(ctx, "SELECT id,room,host,cpu_milli,mem_bytes,disk_bytes+max(image_bytes,image_estimate) FROM services WHERE host IS NOT NULL ORDER BY id")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -412,8 +444,12 @@ func (s *Store) ServiceHolds(ctx context.Context) ([]box.ServiceHold, error) {
 
 // ImageEstimate is the newest measured size of an image on any host, or contract.ServiceImageEstimate for one never measured.
 func (s *Store) ImageEstimate(ctx context.Context, source string) (int64, error) {
+	return imageEstimate(ctx, s.Read(), source)
+}
+
+func imageEstimate(ctx context.Context, q sqlQuery, source string) (int64, error) {
 	var size int64
-	err := s.Read().QueryRowContext(ctx, "SELECT image_bytes FROM services WHERE image_bytes>0 AND json_extract(spec,'$.image')=? ORDER BY updated_at DESC LIMIT 1", source).Scan(&size)
+	err := q.QueryRowContext(ctx, "SELECT image_bytes FROM services WHERE image_bytes>0 AND json_extract(spec,'$.image')=? ORDER BY updated_at DESC LIMIT 1", source).Scan(&size)
 	if err == sql.ErrNoRows {
 		return contract.ServiceImageEstimate, nil
 	}

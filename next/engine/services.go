@@ -19,7 +19,7 @@ func serviceFailure(err error) *contract.Error {
 	switch {
 	case errors.As(err, &taken):
 		return &contract.Error{Code: contract.ErrPortTaken, Message: err.Error()}
-	case errors.Is(err, store.ErrServiceHostFixed), errors.Is(err, lifecycle.ErrNoPrevious), errors.Is(err, lifecycle.ErrNotPlaced):
+	case errors.Is(err, store.ErrServiceHostFixed), errors.Is(err, lifecycle.ErrNoPrevious), errors.Is(err, lifecycle.ErrNotPlaced), errors.Is(err, lifecycle.ErrServiceEngineHost):
 		return &contract.Error{Code: contract.ErrConflict, Message: err.Error()}
 	}
 	return failure(err)
@@ -42,7 +42,10 @@ func (s *Service) ServiceSet(ctx context.Context, who contract.Principal, req co
 	if err != nil {
 		return contract.ServiceSetResponse{}, invalid(err.Error())
 	}
-	if _, err := s.store.RoomLimits(ctx, req.Room); err != nil {
+	unlock := s.store.LockAdmission()
+	defer unlock()
+	limits, err := s.store.RoomLimits(ctx, req.Room)
+	if err != nil {
 		return contract.ServiceSetResponse{}, failure(err)
 	}
 	hosts, err := s.store.Hosts(ctx)
@@ -71,9 +74,24 @@ func (s *Service) ServiceSet(ctx context.Context, who contract.Principal, req co
 		if err != nil {
 			return contract.ServiceSetResponse{}, failure(err)
 		}
-		fitted := parts
+		boxes = append(boxes, s.reconciler.RunnerBoxes()...)
+		candidate := existing
+		candidate.Parts = parts
+		fitted := candidate.Reservation()
 		fitted.Spec.Host = existing.Host
-		if p := box.AdmitService(hosts, boxes, box.ServiceRequest{ID: existing.ID, Room: req.Room, Parts: fitted, ImageEstimate: existing.ImageBytes}); p.Host == "" {
+		holds, err := s.store.ServiceHolds(ctx)
+		if err != nil {
+			return contract.ServiceSetResponse{}, failure(err)
+		}
+		estimate, err := s.store.ImageEstimate(ctx, parts.Spec.Image)
+		if err != nil {
+			return contract.ServiceSetResponse{}, failure(err)
+		}
+		request := box.ServiceRequest{ID: existing.ID, Room: req.Room, Parts: fitted, ImageEstimate: max(existing.ImageBytes, estimate)}
+		if !box.ServiceFitsRoom(request, limits, boxes, holds) {
+			return contract.ServiceSetResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "the change exceeds the room's CPU or memory limit"}
+		}
+		if p := box.AdmitService(hosts, boxes, request); p.Host == "" {
 			return contract.ServiceSetResponse{}, &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("the change does not fit host %s (%s)", existing.Host, p.Reason)}
 		}
 	}

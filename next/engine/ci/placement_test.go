@@ -3,6 +3,7 @@ package ci
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -108,7 +109,7 @@ func TestANodeWithARunnerIsNotDrainedAndADrainedHostTakesNone(t *testing.T) {
 	if err := f.pool.Hold("pve", func() error { f.store.hosts[0].State = box.HostDraining; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.pool.claim(context.Background(), runnerBox("late", "pve", box.Box{}.Size)); err == nil {
+	if err := f.pool.claim(context.Background(), runnerBox("late", "pve", box.Box{}.Size), ""); err == nil {
 		t.Fatal("claimed a runner on a draining host")
 	}
 }
@@ -150,5 +151,22 @@ func TestBuildAheadDoesNotHoldThePoolLock(t *testing.T) {
 	f.stop() // the build outlives the tick and finishes
 	if f.pool.images[imageKey{"pve", ""}] != "image" || f.drivers["pve"].builds != 1 {
 		t.Fatalf("images %v, builds %d", f.pool.images, f.drivers["pve"].builds)
+	}
+}
+
+// Image preparation/SSH happens between the survey and claim. A newly committed service reservation in that interval must
+// be seen before another runner is published, otherwise the old survey and the service update spend the same memory twice.
+func TestRunnerClaimRechecksServiceReservationsAfterItsSurvey(t *testing.T) {
+	f := newFixture(0)
+	size, _ := box.Size(contract.BoxSizeLarge)
+	for i := range 3 {
+		f.pool.placed = append(f.pool.placed, runnerBox(fmt.Sprintf("existing-%d", i), "pve", size))
+	}
+	f.store.hosts[0].Services = []box.ServiceHold{{ID: "svc_1", CPUMilli: 1000, MemBytes: 16 * box.GiB}}
+	if err := f.pool.claim(context.Background(), runnerBox("new", "pve", size), ""); err == nil {
+		t.Fatal("runner claimed capacity already reserved by a service since the survey")
+	}
+	if len(f.pool.placed) != 3 {
+		t.Fatalf("refused runner was published: %+v", f.pool.placed)
 	}
 }
