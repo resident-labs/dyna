@@ -2,6 +2,9 @@ package engine
 
 import (
 	"encoding/json"
+	"fmt"
+	"github.com/resident-labs/dyna/engine/store"
+	"slices"
 	"testing"
 	"time"
 
@@ -43,7 +46,13 @@ func mainRig(t *testing.T) *prRig {
 // next moves a minute on and passes, and returns the GraphQL queries the pass made.
 func (r *prRig) next(t *testing.T) int {
 	t.Helper()
-	r.clock.add(time.Minute)
+	return r.after(t, time.Minute)
+}
+
+// after moves the clock on, passes, and returns the GraphQL queries the pass made.
+func (r *prRig) after(t *testing.T, d time.Duration) int {
+	t.Helper()
+	r.clock.add(d)
 	before, _, _ := r.github.Counts()
 	r.pass(t)
 	after, _, _ := r.github.Counts()
@@ -100,19 +109,270 @@ func TestMainCIFinishedFailureHasTheFailedRun(t *testing.T) {
 	}
 }
 
-func TestMainCIFinishedIsForTheNewestHeadOnly(t *testing.T) {
+var (
+	checksPassed  = fakegithub.Commit{Rollup: "SUCCESS", Checks: []fakegithub.Check{{Name: "build", Conclusion: "SUCCESS", URL: "https://x/build"}}}
+	checksRunning = fakegithub.Commit{Rollup: "PENDING", Checks: []fakegithub.Check{{Name: "build"}}}
+)
+
+// moveMain makes sha the head of owner/repo, with the CI GitHub shows for it.
+func (r *prRig) moveMain(repo contract.RepoName, sha string, commit fakegithub.Commit) {
+	r.github.SetMain(repo, sha)
+	r.github.SetCommit(repo, sha, commit)
+}
+
+// toldShas lists the sha of each git.main_ci_finished so far, oldest first.
+func (r *prRig) toldShas(t *testing.T) []string {
+	t.Helper()
+	var shas []string
+	for _, event := range r.mainCIs(t) {
+		shas = append(shas, event.Sha)
+	}
+	return shas
+}
+
+func requireShas(t *testing.T, got []string, want ...string) {
+	t.Helper()
+	if !slices.Equal(got, want) {
+		t.Fatalf("told shas %v, want %v", got, want)
+	}
+}
+
+// The sequence of a busy repository: each head is replaced by the next before its CI is done.
+func TestMainCIFinishedFiresForAHeadAfterTheBranchMovedOn(t *testing.T) {
 	r := mainRig(t)
-	r.github.SetMain("owner/repo", "m1")
-	r.github.SetCommit("owner/repo", "m1", fakegithub.Commit{Rollup: "PENDING", Checks: []fakegithub.Check{{Name: "build"}}})
+	r.moveMain("owner/repo", "A", checksRunning)
+	r.after(t, 0)
+	r.moveMain("owner/repo", "B", checksRunning)
+	r.after(t, 6*time.Minute)
+	requireShas(t, r.toldShas(t))
+	r.moveMain("owner/repo", "C", checksRunning)
+	r.github.SetCommit("owner/repo", "A", checksPassed)
+	r.after(t, 6*time.Minute)
+	requireShas(t, r.toldShas(t), "A")
 	r.next(t)
-	r.github.SetMain("owner/repo", "m2")
-	r.github.SetCommit("owner/repo", "m2", fakegithub.Commit{Rollup: "SUCCESS", Checks: []fakegithub.Check{{Name: "build", Conclusion: "SUCCESS"}}})
+	requireShas(t, r.toldShas(t), "A")
+	r.connect()
 	r.next(t)
-	r.github.SetCommit("owner/repo", "m1", fakegithub.Commit{Rollup: "SUCCESS", Checks: []fakegithub.Check{{Name: "build", Conclusion: "SUCCESS"}}})
+	requireShas(t, r.toldShas(t), "A")
+	r.github.SetCommit("owner/repo", "B", checksPassed)
+	r.next(t)
+	requireShas(t, r.toldShas(t), "A", "B")
+	r.connect()
+	r.next(t)
+	r.github.SetCommit("owner/repo", "C", checksPassed)
+	r.next(t)
+	r.connect()
+	r.next(t)
+	requireShas(t, r.toldShas(t), "A", "B", "C")
+}
+
+func TestMainCIFinishedKeepsTheOrderTheHeadsWereSeenIn(t *testing.T) {
+	r := mainRig(t)
+	for _, sha := range []string{"A", "B", "C"} {
+		r.moveMain("owner/repo", sha, checksRunning)
+		r.next(t)
+	}
+	r.github.SetCommit("owner/repo", "C", checksPassed)
+	r.github.SetCommit("owner/repo", "A", checksPassed)
+	r.github.SetCommit("owner/repo", "B", checksPassed)
+	r.next(t)
+	requireShas(t, r.toldShas(t), "A", "B", "C")
+}
+
+func TestMainCIFinishedFailureOfAHeadTheBranchMovedOnFrom(t *testing.T) {
+	r := mainRig(t)
+	r.moveMain("owner/repo", "A", checksRunning)
+	r.next(t)
+	r.moveMain("owner/repo", "B", checksRunning)
+	r.github.SetCommit("owner/repo", "A", fakegithub.Commit{Rollup: "FAILURE", Checks: []fakegithub.Check{{Name: "test", Conclusion: "FAILURE", URL: "https://x/test"}}})
 	r.next(t)
 	got := r.mainCIs(t)
-	if len(got) != 1 || got[0].Sha != "m2" {
-		t.Fatalf("got %+v, want one event for m2", got)
+	if len(got) != 1 || got[0].Sha != "A" || got[0].Result != contract.PrCIFailure || len(got[0].Runs) != 1 || got[0].Runs[0].Conclusion != "FAILURE" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestMainCIFinishedHeadWithNoChecksSettlesTenMinutesAfterItsOwnFirstRead(t *testing.T) {
+	r := mainRig(t)
+	r.moveMain("owner/repo", "A", fakegithub.Commit{})
+	r.after(t, 0)
+	r.moveMain("owner/repo", "B", fakegithub.Commit{})
+	r.after(t, 6*time.Minute)
+	r.connect()
+	r.after(t, 3*time.Minute)
+	if sizes := r.github.HeadQuerySizes(); sizes[len(sizes)-1] != 2 {
+		t.Fatalf("both heads are still inside the grace, queried %v", sizes)
+	}
+	r.after(t, time.Minute)
+	if sizes := r.github.HeadQuerySizes(); sizes[len(sizes)-1] != 1 {
+		t.Fatalf("A is 10 minutes old and B 4, so only B is read, queried %v", sizes)
+	}
+	r.after(t, 6*time.Minute)
+	r.github.SetCommit("owner/repo", "A", checksPassed)
+	if queries := r.after(t, time.Minute); queries != 0 {
+		t.Fatalf("both heads are settled and cost %d queries", queries)
+	}
+	requireShas(t, r.toldShas(t))
+}
+
+func TestMainCIFinishedDropsAHeadPastTheListWithNoEvent(t *testing.T) {
+	r := mainRig(t)
+	var heads []string
+	for i := 0; i < 21; i++ {
+		heads = append(heads, fmt.Sprintf("h%02d", i))
+		r.moveMain("owner/repo", heads[i], checksRunning)
+		r.next(t)
+	}
+	if sizes := r.github.HeadQuerySizes(); sizes[len(sizes)-1] != 20 {
+		t.Fatalf("the list holds the newest 20 heads, the last query asked %d", sizes[len(sizes)-1])
+	}
+	for _, sha := range heads {
+		r.github.SetCommit("owner/repo", sha, checksPassed)
+	}
+	r.next(t)
+	r.connect()
+	r.next(t)
+	requireShas(t, r.toldShas(t), heads[1:]...)
+}
+
+func TestMainCIFinishedDropsAHeadPastTwoHoursWithNoEvent(t *testing.T) {
+	r := mainRig(t)
+	r.moveMain("owner/repo", "A", checksRunning)
+	r.next(t)
+	if queries := r.after(t, 2*time.Hour); queries != 0 {
+		t.Fatalf("a head past two hours cost %d queries", queries)
+	}
+	r.moveMain("owner/repo", "B", checksRunning)
+	r.next(t)
+	r.github.SetCommit("owner/repo", "A", checksPassed)
+	r.next(t)
+	r.connect()
+	r.next(t)
+	requireShas(t, r.toldShas(t))
+}
+
+// Passing a sha the list does not hold, or one already settled, writes nothing: this is the store's own guard.
+func TestMainCIFinishedStoreSettlesAListedHeadOnce(t *testing.T) {
+	r := mainRig(t)
+	r.moveMain("owner/repo", "A", checksRunning)
+	r.next(t)
+	settle := func(sha string) {
+		pass := store.GitHubPass{MainCIs: []store.MainCI{{Repo: "owner/repo", Branch: "main", Head: sha, Result: contract.PrCISuccess}}}
+		if err := r.s.store.ApplyPRPoll(r.ctx, pass, r.clock.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settle("never-listed")
+	requireShas(t, r.toldShas(t))
+	settle("A")
+	settle("A")
+	requireShas(t, r.toldShas(t), "A")
+}
+
+func TestMainCIFinishedDoesNotReportAHeadFromBeforeTheList(t *testing.T) {
+	r := mainRig(t)
+	r.github.SetCommit("owner/repo", "base", checksPassed)
+	for i := 0; i < 3; i++ {
+		if queries := r.next(t); queries != 0 {
+			t.Fatalf("the stored head cost %d queries", queries)
+		}
+	}
+	requireShas(t, r.toldShas(t))
+}
+
+func TestMainCIFinishedPollsOnlyTheUnsettledHeadsInOneQueryForARepository(t *testing.T) {
+	r := newPRRig(t)
+	if err := r.s.store.AddRoomRepo(r.ctx, r.room, "owner/other", false); err != nil {
+		t.Fatal(err)
+	}
+	r.pass(t)
+	for _, repo := range []contract.RepoName{"owner/repo", "owner/other"} {
+		r.moveMain(repo, "A", checksRunning)
+	}
+	r.next(t)
+	for _, repo := range []contract.RepoName{"owner/repo", "owner/other"} {
+		r.moveMain(repo, "B", checksRunning)
+	}
+	before := len(r.github.HeadQuerySizes())
+	if queries := r.next(t); queries != 2 {
+		t.Fatalf("two repositories made %d queries, want one each", queries)
+	}
+	if sizes := r.github.HeadQuerySizes()[before:]; !slices.Equal(sizes, []int{2, 2}) {
+		t.Fatalf("each query asks its repository's unsettled heads, got %v", sizes)
+	}
+	r.github.SetCommit("owner/repo", "A", checksPassed)
+	r.github.SetCommit("owner/other", "A", checksPassed)
+	r.next(t)
+	before = len(r.github.HeadQuerySizes())
+	r.next(t)
+	if sizes := r.github.HeadQuerySizes()[before:]; !slices.Equal(sizes, []int{1, 1}) {
+		t.Fatalf("settled heads are not asked again, got %v", sizes)
+	}
+	r.github.SetCommit("owner/repo", "B", checksPassed)
+	r.github.SetCommit("owner/other", "B", checksPassed)
+	r.next(t)
+	if queries := r.next(t); queries != 0 {
+		t.Fatalf("every head settled and a pass cost %d queries", queries)
+	}
+}
+
+func TestMainCIFinishedMarksRunsPastTheFirstHundredTruncated(t *testing.T) {
+	r := mainRig(t)
+	var checks []fakegithub.Check
+	for i := 0; i < 150; i++ {
+		checks = append(checks, fakegithub.Check{Name: fmt.Sprintf("check-%d", i), Conclusion: "SUCCESS"})
+	}
+	r.moveMain("owner/repo", "A", fakegithub.Commit{Rollup: "SUCCESS", Checks: checks})
+	r.next(t)
+	r.moveMain("owner/repo", "B", checksPassed)
+	r.next(t)
+	rows, err := r.s.store.Read().QueryContext(r.ctx, "SELECT body FROM events WHERE type='git.main_ci_finished' ORDER BY seq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	type told struct {
+		Sha           string
+		Result        contract.PrCI
+		Runs          []contract.CIRun
+		RunsTruncated bool
+	}
+	var got []told
+	for rows.Next() {
+		var data []byte
+		var body told
+		if err := rows.Scan(&data); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(data, &body); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, body)
+	}
+	if len(got) != 2 || got[0].Sha != "A" || got[0].Result != contract.PrCISuccess || len(got[0].Runs) != 100 || !got[0].RunsTruncated {
+		t.Fatalf("a head with 150 checks: %d events, first %s %s with %d runs, truncated %t", len(got), got[0].Sha, got[0].Result, len(got[0].Runs), got[0].RunsTruncated)
+	}
+	if got[1].Sha != "B" || got[1].RunsTruncated || len(got[1].Runs) != 1 {
+		t.Fatalf("a head with one check: %+v", got[1])
+	}
+}
+
+func TestMainCIFinishedNeverSettlesOnARollupThatIsNotTerminal(t *testing.T) {
+	for name, commit := range map[string]fakegithub.Commit{
+		"pending with one check done": {Rollup: "PENDING", Checks: []fakegithub.Check{{Name: "lint", Conclusion: "SUCCESS"}, {Name: "test"}}},
+		"expected":                    {Rollup: "EXPECTED", Checks: []fakegithub.Check{{Name: "lint", Conclusion: "SUCCESS"}}},
+		"pending, queued only":        {Rollup: "PENDING", Checks: []fakegithub.Check{{Name: "test"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := mainRig(t)
+			r.moveMain("owner/repo", "A", commit)
+			for i := 0; i < 15; i++ {
+				if queries := r.next(t); queries != 1 {
+					t.Fatalf("pass %d made %d queries, want 1", i, queries)
+				}
+			}
+			requireShas(t, r.toldShas(t))
+		})
 	}
 }
 
