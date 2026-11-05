@@ -27,7 +27,7 @@ func TestAnEmptyRollupIsNoChecksNotAPass(t *testing.T) {
 	}{
 		"no rollup":                  {`null`, contract.PrCINone},
 		"success with no checks":     {`{"state":"SUCCESS","contexts":{"nodes":[]}}`, contract.PrCINone},
-		"success with a check":       {`{"state":"SUCCESS","contexts":{"nodes":[{"__typename":"CheckRun","name":"lint","conclusion":"SUCCESS"}]}}`, contract.PrCISuccess},
+		"success with a check":       {`{"state":"SUCCESS","contexts":{"nodes":[{"__typename":"CheckRun","name":"lint","status":"COMPLETED","conclusion":"SUCCESS"}]}}`, contract.PrCISuccess},
 		"pending with no checks yet": {`{"state":"PENDING","contexts":{"nodes":[]}}`, contract.PrCIPending},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -39,7 +39,7 @@ func TestAnEmptyRollupIsNoChecksNotAPass(t *testing.T) {
 }
 
 func TestARollupOfAnEarlierHeadIsPendingForTheNewOne(t *testing.T) {
-	pull := pullJSON(t, `{"state":"SUCCESS","contexts":{"nodes":[{"__typename":"CheckRun","name":"lint","conclusion":"SUCCESS"}]}}`, "null", "")
+	pull := pullJSON(t, `{"state":"SUCCESS","contexts":{"nodes":[{"__typename":"CheckRun","name":"lint","status":"COMPLETED","conclusion":"SUCCESS"}]}}`, "null", "")
 	pull.Commits.Nodes[0].Commit.OID = "deadbeef"
 	if got := pull.observed("me"); got.CI != contract.PrCIPending {
 		t.Fatalf("CI %q for a head whose own checks have not reported", got.CI)
