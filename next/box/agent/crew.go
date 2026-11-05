@@ -223,7 +223,7 @@ func (c *Crew) Continue(ctx context.Context, id contract.TurnID, started func())
 	return c.Start(ctx, id, nil, started)
 }
 
-func (c *Crew) TransferModel(context.Context, contract.TurnID, contract.ModelChoice, int) (harness.ModelTransfer, error) {
+func (c *Crew) TransferModel(context.Context, contract.TurnID, contract.ModelChoice, int, string) (harness.ModelTransfer, error) {
 	return harness.ModelTransfer{Path: "unchanged"}, nil
 }
 
