@@ -50,6 +50,8 @@ type MainCI struct {
 	Head   string
 	Result contract.PrCI
 	Runs   []contract.CIRun
+	// RunsTruncated is true when the rollup holds more checks than Runs lists.
+	RunsTruncated bool
 }
 
 // RepoHead is a repository's default branch head.
@@ -88,15 +90,28 @@ func (s *Store) queryPRs(ctx context.Context, query string, args ...any) ([]Trac
 	return out, rows.Err()
 }
 
-// RepoState is what is stored of a repository's default branch: its head, and the head whose CI is settled (spec 7.7). Both are empty until a poll reads a head.
-type RepoState struct {
-	Head      string
-	CISettled string
+// A repository's list of recent heads keeps the newest HeadsKept and none first read HeadsWithin or longer ago (spec 7.7). A head past either is
+// pruned when a head is added and is not read before, and an unsettled one goes with no event.
+const (
+	HeadsKept   = 20
+	HeadsWithin = 2 * time.Hour
+)
+
+// ListedHead is a default-branch head of the recent list, with when a pass first read it.
+type ListedHead struct {
+	Sha    string
+	SeenAt time.Time
 }
 
-// RepoHeads lists every repository a room lists, with its stored state.
-func (s *Store) RepoHeads(ctx context.Context) (map[contract.RepoName]RepoState, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT repo,main_head,ci_settled FROM repos")
+// RepoState is what is stored of a repository's default branch (spec 7.7): its head, which is empty until a poll reads one, and the heads in its recent list whose CI is not settled, oldest first.
+type RepoState struct {
+	Head      string
+	Unsettled []ListedHead
+}
+
+// RepoHeads lists every repository a room lists, with its stored state. A head past the list's bounds at now is not unsettled, as it is dropped.
+func (s *Store) RepoHeads(ctx context.Context, now time.Time) (map[contract.RepoName]RepoState, error) {
+	rows, err := s.Read().QueryContext(ctx, "SELECT repo,main_head FROM repos")
 	if err != nil {
 		return nil, err
 	}
@@ -105,12 +120,32 @@ func (s *Store) RepoHeads(ctx context.Context) (map[contract.RepoName]RepoState,
 	for rows.Next() {
 		var repo contract.RepoName
 		var state RepoState
-		if err := rows.Scan(&repo, &state.Head, &state.CISettled); err != nil {
+		if err := rows.Scan(&repo, &state.Head); err != nil {
 			return nil, err
 		}
 		heads[repo] = state
 	}
-	return heads, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	listed, err := s.Read().QueryContext(ctx, `SELECT repo,sha,seen_at FROM repo_heads h WHERE settled=0 AND seen_at>? AND seq IN (SELECT seq FROM repo_heads WHERE repo=h.repo ORDER BY seq DESC LIMIT ?) ORDER BY seq`, now.Add(-HeadsWithin).UnixMilli(), HeadsKept)
+	if err != nil {
+		return nil, err
+	}
+	defer listed.Close()
+	for listed.Next() {
+		var repo contract.RepoName
+		var head ListedHead
+		var seenAt int64
+		if err := listed.Scan(&repo, &head.Sha, &seenAt); err != nil {
+			return nil, err
+		}
+		head.SeenAt = time.UnixMilli(seenAt)
+		state := heads[repo]
+		state.Unsettled = append(state.Unsettled, head)
+		heads[repo] = state
+	}
+	return heads, listed.Err()
 }
 
 // TrackedPRs lists every tracked PR. A merged or closed one is read no more, but a feed can still reopen it.
@@ -268,9 +303,15 @@ func (s *Store) moveRepoHead(ctx context.Context, tx *sql.Tx, head RepoHead, at 
 	if _, err := tx.ExecContext(ctx, "UPDATE repos SET main_head=? WHERE repo=?", head.Head, head.Repo); err != nil {
 		return err
 	}
-	if previous == "" {
-		_, err := tx.ExecContext(ctx, "UPDATE repos SET ci_settled=? WHERE repo=?", head.Head, head.Repo)
+	// The first head ever read starts settled, so enabling git.main_ci_finished reports nothing from before it. A later one waits for its CI, and the list is pruned with it.
+	if _, err := tx.ExecContext(ctx, "INSERT INTO repo_heads(repo,sha,seen_at,settled) VALUES(?,?,?,?) ON CONFLICT(repo,sha) DO NOTHING", head.Repo, head.Head, at.UnixMilli(), previous == ""); err != nil {
 		return err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM repo_heads WHERE repo=?1 AND (seen_at<=?2 OR seq NOT IN (SELECT seq FROM repo_heads WHERE repo=?1 ORDER BY seq DESC LIMIT ?3))", head.Repo, at.Add(-HeadsWithin).UnixMilli(), HeadsKept); err != nil {
+		return err
+	}
+	if previous == "" {
+		return nil
 	}
 	body := contract.GitMainUpdated{Repo: head.Repo, Head: head.Head}
 	seq, err := s.appendEngineEvent(tx, room, at, body)
@@ -438,17 +479,17 @@ func (s *Store) ApplyPRPoll(ctx context.Context, pass GitHubPass, at time.Time) 
 				return err
 			}
 		}
-		// A head is settled once: the update changes the row only for a head not yet settled, so only that pass writes its event.
+		// A head is settled once: the update changes the row only for a listed head not yet settled, so only that pass writes its event, and a pruned head has none.
 		for _, ci := range pass.MainCIs {
 			var room contract.RoomID
-			err := tx.QueryRowContext(ctx, "UPDATE repos SET ci_settled=? WHERE repo=? AND ci_settled<>? RETURNING default_room", ci.Head, ci.Repo, ci.Head).Scan(&room)
+			err := tx.QueryRowContext(ctx, "UPDATE repo_heads SET settled=1 WHERE repo=?1 AND sha=?2 AND settled=0 RETURNING (SELECT default_room FROM repos WHERE repo=?1)", ci.Repo, ci.Head).Scan(&room)
 			if errors.Is(err, sql.ErrNoRows) || err == nil && ci.Result == contract.PrCINone {
 				continue
 			}
 			if err != nil {
 				return err
 			}
-			if _, err := s.appendEngineEvent(tx, room, at, contract.GitMainCIFinished{Repo: ci.Repo, Branch: ci.Branch, Sha: ci.Head, Result: ci.Result, Runs: ci.Runs}); err != nil {
+			if _, err := s.appendEngineEvent(tx, room, at, contract.GitMainCIFinished{Repo: ci.Repo, Branch: ci.Branch, Sha: ci.Head, Result: ci.Result, Runs: ci.Runs, RunsTruncated: ci.RunsTruncated}); err != nil {
 				return err
 			}
 		}
