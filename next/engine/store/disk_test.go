@@ -349,3 +349,27 @@ func TestDiskWarningNeedsReachableSample(t *testing.T) {
 		t.Fatalf("events %v wakes %v", events, wakes)
 	}
 }
+
+func TestDiskWarningRecoveryRequiresFullGap(t *testing.T) {
+	ctx := context.Background()
+	s := diskStore(t)
+	at := time.Unix(1000, 0)
+	for i, step := range []struct {
+		free    int64
+		elapsed time.Duration
+		alerts  int
+	}{
+		{99 * box.GiB, 0, 1},
+		{110 * box.GiB, time.Hour - time.Millisecond, 1},
+		{99 * box.GiB, time.Hour, 1},  // The early recovery did not rearm the crossing.
+		{110 * box.GiB, time.Hour, 1}, // Exactly one hour is enough to rearm.
+		{99 * box.GiB, time.Hour + time.Millisecond, 2},
+	} {
+		if err := s.RecordHostHeartbeat(ctx, "h", true, &step.free, 1000*box.GiB, at.Add(step.elapsed)); err != nil {
+			t.Fatal(err)
+		}
+		if events, _ := diskAlerts(t, s); events["r1"] != step.alerts || events["r2"] != step.alerts {
+			t.Fatalf("step %d: %v, want %d", i, events, step.alerts)
+		}
+	}
+}
