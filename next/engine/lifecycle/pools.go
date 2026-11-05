@@ -441,6 +441,10 @@ func (r *Reconciler) discardHost(ctx context.Context, name contract.HostName) ([
 	r.pass.Lock() // A pass places boxes from its own reading of the hosts.
 	hosts, err := r.store.Hosts(ctx)
 	reachable := slices.ContainsFunc(hosts, func(h box.Host) bool { return h.Name == name && h.State == box.HostReady })
+	var services []store.ServiceRow
+	if err == nil && r.svc != nil {
+		services, err = r.store.Services(ctx, "")
+	}
 	var boxes []store.LifecycleBox
 	if err == nil {
 		boxes, err = r.store.DiscardHostBoxes(ctx, name, func(room contract.RoomID, body contract.EventBody) (contract.Event, error) {
@@ -450,6 +454,14 @@ func (r *Reconciler) discardHost(ctx context.Context, name contract.HostName) ([
 	r.pass.Unlock()
 	if err != nil {
 		return nil, err
+	}
+	if reachable {
+		// The services of a host that answers are taken off it as its boxes are, then fail with it.
+		for _, row := range services {
+			if row.Host == name {
+				r.removeServiceFromHost(ctx, row)
+			}
+		}
 	}
 	failed := []contract.SessionID{}
 	for _, b := range boxes {

@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"slices"
@@ -38,6 +39,7 @@ type serviceRig struct {
 func newServiceRig(t *testing.T) *serviceRig {
 	t.Helper()
 	rig := &serviceRig{hostRig: newHostRig(t), host: fakehost.New()}
+	rig.sql("UPDATE hosts SET engine_host=0")
 	rig.host.Service.Check = box.ServiceHostCheck{LowestPort: 443}
 	inner := rig.r.event
 	rig.r.event = func(room contract.RoomID, from contract.Principal, body contract.EventBody) (contract.Event, error) {
@@ -309,4 +311,208 @@ func count(calls []fakehost.Call, c fakehost.Call) int {
 		}
 	}
 	return n
+}
+
+func (rig *serviceRig) sql(q string, args ...any) {
+	rig.t.Helper()
+	if err := rig.st.Write(rig.ctx, func(tx *sql.Tx) error { _, err := tx.Exec(q, args...); return err }); err != nil {
+		rig.t.Fatal(err)
+	}
+}
+
+func (rig *serviceRig) rows() map[contract.ServiceName]store.ServiceRow {
+	rig.t.Helper()
+	rows, err := rig.st.Services(rig.ctx, "r")
+	if err != nil {
+		rig.t.Fatal(err)
+	}
+	out := map[contract.ServiceName]store.ServiceRow{}
+	for _, row := range rows {
+		out[row.Spec.Name] = row
+	}
+	return out
+}
+
+// After an engine start the engine-host flag is NULL until the host check refills it. Nothing is placed or started meanwhile.
+func TestServiceWaitsWhileTheEngineHostFlagIsUnknown(t *testing.T) {
+	rig := newServiceRig(t)
+	rig.sql("UPDATE hosts SET engine_host=NULL")
+	rig.declare(web())
+	rig.settle()
+	if row := rig.row(); row.Host != "" || row.State != contract.ServicePending || count(rig.host.Calls, fakehost.RestartService) != 0 {
+		t.Fatalf("service %+v", row.Service)
+	}
+	// And one placed before the flag was cleared starts nothing either.
+	rig.sql("UPDATE hosts SET engine_host=0")
+	rig.settle()
+	rig.sql("UPDATE hosts SET engine_host=NULL")
+	update := web()
+	update.Image = digestImage2
+	rig.declare(update)
+	rig.host.Calls = nil
+	rig.settle()
+	if count(rig.host.Calls, fakehost.RestartService) != 0 || count(rig.host.Calls, fakehost.WriteServiceUnit) != 0 {
+		t.Fatal("a deploy ran on a host that may be the engine's")
+	}
+}
+
+// Two services placed in one pass are judged with each other: the quarter cap and the port rule hold across the pass.
+func TestServicesPlacedInOnePassCountAgainstEachOther(t *testing.T) {
+	rig := newServiceRig(t)
+	rig.sql("UPDATE hosts SET cpus=47")
+	eight := func(name contract.ServiceName, port contract.ServicePort) contract.ServiceSpec {
+		return contract.ServiceSpec{Name: name, Image: digestImage, CPUs: 8, Ports: []contract.ServicePort{port}}
+	}
+	rig.declare(eight("a", "8001"))
+	rig.declare(eight("b", "8002"))
+	rig.settle()
+	rows := rig.rows()
+	placed := 0
+	for _, row := range rows {
+		if row.Host != "" {
+			placed++
+		}
+	}
+	if placed != 1 {
+		t.Fatalf("%d of two 8-CPU services placed on a 47-CPU host (cap 11.75), want 1: %+v", placed, rows)
+	}
+	for _, row := range rows {
+		if row.Host == "" && row.Reason != contract.ServiceNoCPU {
+			t.Fatalf("waiting service %+v", row.Service)
+		}
+	}
+}
+
+func TestServicesWithOnePortArePlacedOnePerHostInOnePass(t *testing.T) {
+	rig := newServiceRig(t)
+	one := func(name contract.ServiceName) contract.ServiceSpec {
+		return contract.ServiceSpec{Name: name, Image: digestImage, Ports: []contract.ServicePort{"8001"}}
+	}
+	rig.declare(one("a"))
+	rig.declare(one("b"))
+	rig.settle()
+	placed := 0
+	for _, row := range rig.rows() {
+		if row.Host != "" {
+			placed++
+		} else if row.Reason != contract.ServicePortTaken {
+			t.Fatalf("waiting service %+v", row.Service)
+		}
+	}
+	if placed != 1 {
+		t.Fatalf("%d placed, want 1", placed)
+	}
+}
+
+// A failed update leaves the old image running with the old declaration, so the unit file and its hash are the old ones and an
+// engine restart finds the matching hash and restarts nothing.
+func TestRolledBackUpdateKeepsTheLiveUnitAcrossAnEngineRestart(t *testing.T) {
+	rig := newServiceRig(t)
+	spec := web()
+	spec.Health = []string{"/bin/true"}
+	rig.declare(spec)
+	live := rig.settle()
+	rig.host.Service.Health = func(_ contract.ServiceID, file string) error {
+		if strings.Contains(file, "bbbbbbbb") {
+			return errors.New("unhealthy")
+		}
+		return nil
+	}
+	spec.Image = digestImage2
+	spec.Env = map[string]string{"NEW": "1"}
+	rig.declare(spec)
+	row := rig.settle()
+	if row.Reason != contract.ServiceRolledBack || row.UnitSHA != live.UnitSHA {
+		t.Fatalf("service %+v unit %s, live %s", row.Service, row.UnitSHA, live.UnitSHA)
+	}
+	if strings.Contains(rig.host.Service.Files[row.ID], "NEW") {
+		t.Fatal("the rolled back unit holds the new declaration")
+	}
+	rig.r.SetServices(serviceHosts{rig.host}, rig.r.svc.timings)
+	restarts, writes := count(rig.host.Calls, fakehost.RestartService), count(rig.host.Calls, fakehost.WriteServiceUnit)
+	rig.settle()
+	rig.settle()
+	if count(rig.host.Calls, fakehost.RestartService) != restarts || count(rig.host.Calls, fakehost.WriteServiceUnit) != writes {
+		t.Fatal("an engine restart rewrote or restarted the rolled back service")
+	}
+}
+
+// A host that answers again after a removal was owed is cleaned on the next pass, not at the next engine start.
+func TestLeftoversAreRepaidWhenTheHostReturns(t *testing.T) {
+	rig := newServiceRig(t)
+	row := rig.declare(web())
+	rig.settle()
+	rig.setHost(box.HostUnreachable)
+	if err := rig.r.RemoveService(rig.ctx, row.ID); err != nil {
+		t.Fatal(err)
+	}
+	rig.settle()
+	if len(rig.host.Service.Files) == 0 {
+		t.Fatal("the host's files went while it was away")
+	}
+	rig.setHost(box.HostReady)
+	rig.settle()
+	if len(rig.host.Service.Files) != 0 {
+		t.Fatal("the owed removal was not repaid after the host returned")
+	}
+}
+
+// A service on a host that became the engine's can still be removed.
+func TestServiceOnAHostThatBecameTheEngineHostIsStillRemoved(t *testing.T) {
+	rig := newServiceRig(t)
+	row := rig.declare(web())
+	rig.settle()
+	rig.sql("UPDATE hosts SET engine_host=1")
+	if err := rig.r.RemoveService(rig.ctx, row.ID); err != nil {
+		t.Fatal(err)
+	}
+	rig.settle()
+	if rows := rig.rows(); len(rows) != 0 || len(rig.host.Service.Files) != 0 {
+		t.Fatalf("rows %+v files %d", rows, len(rig.host.Service.Files))
+	}
+}
+
+// A missing kept image is a typed failure of the step, not a plain error that leaves the service deploying.
+func TestMissingImageOnDeployIsTyped(t *testing.T) {
+	rig := newServiceRig(t)
+	rig.host.Service.Fail[fakehost.ImageSize] = errors.New("no such image")
+	rig.declare(web())
+	if row := rig.settle(); row.State != contract.ServiceFailed || row.Reason != contract.ServiceImagePull {
+		t.Fatalf("service %+v", row.Service)
+	}
+}
+
+// Lost podman secrets are written again with the unit.
+func TestRewriteRestoresLostSecrets(t *testing.T) {
+	rig := newServiceRig(t)
+	spec := web()
+	spec.Secrets = []string{"TOKEN"}
+	row := rig.declare(spec)
+	row = rig.settle()
+	if err := rig.st.SetServiceSecret(rig.ctx, row.ID, "TOKEN", []byte("v1"), rig.now); err != nil {
+		t.Fatal(err)
+	}
+	rig.settle()
+	name := box.ServiceSecretName(row.ID, "TOKEN")
+	delete(rig.host.Service.Secrets, name)
+	delete(rig.host.Service.Files, row.ID)
+	rig.r.SetServices(serviceHosts{rig.host}, rig.r.svc.timings)
+	rig.settle()
+	if string(rig.host.Service.Secrets[name]) != "v1" {
+		t.Fatal("the secret was not written again with the unit")
+	}
+}
+
+// A host removed with --discard-boxes that still answers has its services taken off it, and their rows fail with it.
+func TestDiscardingAHostRemovesItsServicesFromIt(t *testing.T) {
+	rig := newServiceRig(t)
+	rig.declare(web())
+	rig.settle()
+	rig.sql("DELETE FROM boxes")
+	if _, err := rig.r.RemoveHost(rig.ctx, "h", true); err != nil {
+		t.Fatal(err)
+	}
+	if len(rig.host.Service.Files) != 0 || count(rig.host.Calls, fakehost.RemoveService) == 0 {
+		t.Fatalf("the host kept %d service files", len(rig.host.Service.Files))
+	}
 }

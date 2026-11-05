@@ -235,3 +235,12 @@ func TestRoomSetIsOwnerOnlyAndAgentsRoomToolIsUnchanged(t *testing.T) {
 		t.Fatalf("agents' room actions: %v", names)
 	}
 }
+
+// service.logs is not masked until the agent tool lands, so it needs the admin scope.
+func TestServiceLogsNeedAdminScope(t *testing.T) {
+	for _, row := range Methods() {
+		if row.Method == contract.MethodServiceLogs && row.Scope != contract.ScopeAdmin {
+			t.Fatalf("service.logs scope %s", row.Scope)
+		}
+	}
+}

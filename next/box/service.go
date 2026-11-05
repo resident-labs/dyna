@@ -62,10 +62,11 @@ func (h Host) serviceLoad(except contract.ServiceID) (cpuMilli, mem, disk int64)
 	return cpuMilli, mem, disk
 }
 
-// takesService says whether a host may hold a service: ready, not exec only, not the engine's host, not a pool's node (it
+// takesService says whether a host may hold a service: ready, not exec only, not the engine's host (a host whose flag is not
+// known yet, as after an engine start, is refused),  not a pool's node (it
 // is disposable and a service stays for good), and in the room's rule and the host's own room list. It needs no agents or ci switch.
 func takesService(h Host, room contract.RoomID, only []string) bool {
-	if h.State != HostReady || h.ExecOnly || h.Pool != "" || h.EngineHost != nil && *h.EngineHost {
+	if h.State != HostReady || h.ExecOnly || h.Pool != "" || h.EngineHost == nil || *h.EngineHost {
 		return false
 	}
 	if len(h.Rooms) > 0 && !slices.Contains(h.Rooms, room) {
@@ -77,13 +78,13 @@ func takesService(h Host, room contract.RoomID, only []string) bool {
 // AdmitService places a service (spec 5.18). A service fits a host when its CPU and memory with those of the services already
 // there stay within a quarter of the host, when the box and runner load already counted still fits what is left after it, when
 // the disk rule holds with its disk and its image, and when the measured memory is below 80%. Of the hosts that fit it takes
-// the one with the most headroom. A service that is already placed (Host set on a hold) is judged on that host alone.
+// the one with the most headroom. A declared host is a further rule, inside the room's: the service goes there or nowhere. A service that is already placed (Host set on a hold) is judged on that host alone.
 func AdmitService(hosts []Host, boxes []Box, request ServiceRequest, only ...string) Placement {
 	reason := PendingNoReadyHost
 	var chosen contract.HostName
 	var best float64
 	for _, h := range hosts {
-		if !takesService(h, request.Room, only) {
+		if !takesService(h, request.Room, only) || request.Parts.Spec.Host != "" && request.Parts.Spec.Host != h.Name {
 			if h.State == HostReady && reason == PendingNoReadyHost {
 				reason = PendingRoomHost
 			}

@@ -2,6 +2,7 @@ package box
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -181,4 +182,37 @@ func TestServicesComeOffTheTopOfBoxMemory(t *testing.T) {
 	if p := Admit([]Host{h}, nil, request); p.Host != h.Name {
 		t.Fatalf("without the service %+v, want a placement", p)
 	}
+}
+
+// ResetEngineHosts clears the engine-host flag at every engine start. A host whose flag is unknown may be the engine's own.
+func TestServiceNeverGoesOnAHostWhoseEngineFlagIsUnknown(t *testing.T) {
+	h := ovh()
+	h.EngineHost = nil
+	request := ServiceRequest{ID: "svc_a", Room: "r", Parts: oneCPUService(t)}
+	if p := AdmitService([]Host{h}, nil, request); p.Host != "" {
+		t.Fatalf("placed on %s with the engine flag unknown", p.Host)
+	}
+}
+
+// A declared host narrows the room's rule and never replaces it.
+func TestServiceHostIsInsideTheRoomRule(t *testing.T) {
+	a, b := ovh(), ovh()
+	a.Name, b.Name = "a", "b"
+	request := ServiceRequest{ID: "svc_a", Room: "r", Parts: oneCPUService(t)}
+	request.Parts.Spec.Host = "b"
+	if p := AdmitService([]Host{a, b}, nil, request); p.Host != "b" {
+		t.Fatalf("placement %+v, want b", p)
+	}
+	if p := AdmitService([]Host{a, b}, nil, request, "a"); p.Host != "" || p.Reason != PendingRoomHost {
+		t.Fatalf("placement %+v, want room_host pending for a host outside the rule", p)
+	}
+}
+
+func oneCPUService(t *testing.T) contract.ServiceParts {
+	t.Helper()
+	parts, err := contract.ServiceSpec{Name: "web", Image: "ghcr.io/o/r@sha256:" + strings.Repeat("a", 64), CPUs: 1, Memory: "512MiB"}.Parse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parts
 }

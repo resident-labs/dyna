@@ -978,7 +978,7 @@ func waitsForRoom(h box.Host, view survey) bool {
 		if row.Host != "" && row.Host != h.Name {
 			continue
 		}
-		if box.AdmitService([]box.Host{h}, view.boxes, box.ServiceRequest{ID: row.ID, Room: row.Room, Parts: row.Parts, ImageEstimate: row.ImageBytes}).Host == h.Name {
+		if box.AdmitService([]box.Host{h}, view.boxes, box.ServiceRequest{ID: row.ID, Room: row.Room, Parts: row.Parts, ImageEstimate: row.ImageBytes}, row.Only...).Host == h.Name {
 			return true
 		}
 	}

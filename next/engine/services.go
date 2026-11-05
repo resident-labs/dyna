@@ -3,8 +3,11 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/store"
@@ -42,10 +45,37 @@ func (s *Service) ServiceSet(ctx context.Context, who contract.Principal, req co
 	if _, err := s.store.RoomLimits(ctx, req.Room); err != nil {
 		return contract.ServiceSetResponse{}, failure(err)
 	}
+	hosts, err := s.store.Hosts(ctx)
+	if err != nil {
+		return contract.ServiceSetResponse{}, failure(err)
+	}
+	if parts.Spec.Host != "" {
+		// A declared host is one of the room's: it exists and the room's hosts rule allows it.
+		only, err := s.store.RoomOnly(ctx, req.Room)
+		if err != nil {
+			return contract.ServiceSetResponse{}, failure(err)
+		}
+		if !slices.ContainsFunc(hosts, func(h box.Host) bool { return h.Name == parts.Spec.Host }) {
+			return contract.ServiceSetResponse{}, invalid("no host is named " + string(parts.Spec.Host))
+		}
+		if len(only) > 0 && !slices.Contains(only, string(parts.Spec.Host)) {
+			return contract.ServiceSetResponse{}, invalid("host " + string(parts.Spec.Host) + " is outside the room's hosts rule")
+		}
+	}
 	// A host port below the host's lowest unprivileged port is refused when the host's last check is known.
 	host := parts.Spec.Host
 	if existing, err := s.store.ServiceNamed(ctx, req.Room, parts.Spec.Name); err == nil && existing.Host != "" {
 		host = existing.Host
+		// A change of a placed service is judged by admission as a new placement is, with the service's own reservation set aside.
+		boxes, err := s.store.Boxes(ctx)
+		if err != nil {
+			return contract.ServiceSetResponse{}, failure(err)
+		}
+		fitted := parts
+		fitted.Spec.Host = existing.Host
+		if p := box.AdmitService(hosts, boxes, box.ServiceRequest{ID: existing.ID, Room: req.Room, Parts: fitted, ImageEstimate: existing.ImageBytes}); p.Host == "" {
+			return contract.ServiceSetResponse{}, &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("the change does not fit host %s (%s)", existing.Host, p.Reason)}
+		}
 	}
 	if status := s.reconciler.ServiceHostStatus(host); status != nil {
 		for _, port := range parts.Ports {

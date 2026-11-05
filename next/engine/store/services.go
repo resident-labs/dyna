@@ -33,22 +33,28 @@ type ServiceRow struct {
 	ImageBytes int64
 	UnitSHA    string
 	// Target is the image reference to deploy instead of building the source, which a rollback sets. A deploy clears it.
-	Target  string
+	Target string
+	// Only is the room's hosts rule, read with the row for a caller that judges placement.
+	Only []string
+	// Live is the declaration the running unit was written from. A rollback and a rewrite render it, so the unit and its hash stay
+	// what the last good deploy made them while a newer declaration waits. Nil before the first deploy.
+	Live    *contract.ServiceParts
 	Rev     int64
 	Updated time.Time
 	Placed  time.Time
 }
 
-const serviceColumns = `id,room,spec,generation,host,cpu_milli,mem_bytes,disk_bytes,image_bytes,want,state,reason,cause,detail,last_state,deployed_generation,image_ref,previous_ref,target_ref,unit_sha,restarts,since,updated_at,placed_at,rev`
+const serviceColumns = `id,room,spec,generation,host,cpu_milli,mem_bytes,disk_bytes,image_bytes,want,state,reason,cause,detail,last_state,deployed_generation,image_ref,previous_ref,target_ref,deployed_spec,unit_sha,restarts,since,updated_at,placed_at,rev`
 
 type scanner interface{ Scan(...any) error }
 
 func scanService(r scanner) (ServiceRow, error) {
 	var row ServiceRow
 	var spec []byte
+	var live string
 	var host sql.NullString
 	var since, updated, placed int64
-	err := r.Scan(&row.ID, &row.Room, &spec, &row.Generation, &host, &row.CPUMilli, &row.MemBytes, &row.DiskBytes, &row.ImageBytes, &row.Want, &row.State, &row.Reason, &row.Cause, &row.Detail, &row.LastState, &row.Deployed, &row.ImageRef, &row.Previous, &row.Target, &row.UnitSHA, &row.Restarts, &since, &updated, &placed, &row.Rev)
+	err := r.Scan(&row.ID, &row.Room, &spec, &row.Generation, &host, &row.CPUMilli, &row.MemBytes, &row.DiskBytes, &row.ImageBytes, &row.Want, &row.State, &row.Reason, &row.Cause, &row.Detail, &row.LastState, &row.Deployed, &row.ImageRef, &row.Previous, &row.Target, &live, &row.UnitSHA, &row.Restarts, &since, &updated, &placed, &row.Rev)
 	if err != nil {
 		return row, err
 	}
@@ -58,6 +64,17 @@ func scanService(r scanner) (ServiceRow, error) {
 	// The stored declaration was validated at set, so parsing it again only rebuilds the typed values.
 	if row.Parts, err = row.Spec.Parse(); err != nil {
 		return row, err
+	}
+	if live != "" {
+		var liveSpec contract.ServiceSpec
+		if err := json.Unmarshal([]byte(live), &liveSpec); err != nil {
+			return row, err
+		}
+		parts, err := liveSpec.Parse()
+		if err != nil {
+			return row, err
+		}
+		row.Live = &parts
 	}
 	row.Host = contract.HostName(host.String)
 	if since != 0 {
@@ -99,6 +116,9 @@ func (s *Store) Services(ctx context.Context, room contract.RoomID) ([]ServiceRo
 	}
 	for i := range rows {
 		if rows[i].Secrets, err = secretStatus(ctx, s.Read(), rows[i]); err != nil {
+			return nil, err
+		}
+		if rows[i].Only, err = s.RoomOnly(ctx, rows[i].Room); err != nil {
 			return nil, err
 		}
 	}
@@ -160,7 +180,7 @@ func (s *Store) SetService(ctx context.Context, room contract.RoomID, parts cont
 			host = existing[0].Host
 		}
 		if host != "" {
-			others, err := queryServices(ctx, tx, "host=? AND want!='remove'", host)
+			others, err := queryServices(ctx, tx, "(host=?1 OR json_extract(spec,'$.host')=?1) AND want!='remove'", host)
 			if err != nil {
 				return err
 			}
@@ -285,8 +305,16 @@ func (s *Store) SaveService(ctx context.Context, old, next ServiceRow, newEvent 
 		if !next.Since.IsZero() {
 			since = next.Since.UnixMilli()
 		}
-		result, err := tx.ExecContext(ctx, `UPDATE services SET generation=?,host=?,image_bytes=?,want=?,state=?,reason=?,cause=?,detail=?,last_state=?,deployed_generation=?,image_ref=?,previous_ref=?,target_ref=?,unit_sha=?,restarts=?,since=?,placed_at=?,updated_at=?,rev=rev+1 WHERE id=? AND rev=?`,
-			next.Generation, host, next.ImageBytes, next.Want, next.State, next.Reason, next.Cause, next.Detail, next.LastState, next.Deployed, next.ImageRef, next.Previous, next.Target, next.UnitSHA, next.Restarts, since, placed, next.Updated.UnixMilli(), old.ID, old.Rev)
+		live := ""
+		if next.Live != nil {
+			text, err := json.Marshal(next.Live.Spec)
+			if err != nil {
+				return err
+			}
+			live = string(text)
+		}
+		result, err := tx.ExecContext(ctx, `UPDATE services SET generation=?,host=?,image_bytes=?,want=?,state=?,reason=?,cause=?,detail=?,last_state=?,deployed_generation=?,image_ref=?,previous_ref=?,target_ref=?,deployed_spec=?,unit_sha=?,restarts=?,since=?,placed_at=?,updated_at=?,rev=rev+1 WHERE id=? AND rev=?`,
+			next.Generation, host, next.ImageBytes, next.Want, next.State, next.Reason, next.Cause, next.Detail, next.LastState, next.Deployed, next.ImageRef, next.Previous, next.Target, live, next.UnitSHA, next.Restarts, since, placed, next.Updated.UnixMilli(), old.ID, old.Rev)
 		if err != nil {
 			return err
 		}
@@ -444,4 +472,12 @@ func (s *Store) ChangeService(ctx context.Context, id contract.ServiceID, newEve
 			return ServiceRow{}, ctx.Err()
 		}
 	}
+}
+
+// AddServiceLeftover records that a host may still hold what a service left.
+func (s *Store) AddServiceLeftover(ctx context.Context, host contract.HostName, room contract.RoomID, id contract.ServiceID) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO service_leftovers(host,room,service) VALUES(?,?,?)", host, room, id)
+		return err
+	})
 }

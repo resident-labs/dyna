@@ -13,6 +13,7 @@ Network=pasta:--no-map-gw
 DropCapability=all
 NoNewPrivileges=true
 ReadOnly=true
+ReadOnlyTmpfs=false
 Tmpfs=/tmp:rw,size=64m,mode=1777
 PodmanArgs=--cpus=1.5 --memory=536870912 --memory-swap=536870912 --pids-limit=768
 PublishPort=443:443/tcp

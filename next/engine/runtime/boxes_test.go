@@ -3,7 +3,9 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"github.com/resident-labs/dyna/engine/store"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -153,5 +155,27 @@ func TestHostLookupDoesNotLockHeartbeat(t *testing.T) {
 	<-done
 	if !locked {
 		t.Fatal("host lookup holds heartbeat lock during store I/O")
+	}
+}
+
+type servicesStore struct {
+	boxStore
+	rows []store.ServiceRow
+}
+
+func (s servicesStore) Services(context.Context, contract.RoomID) ([]store.ServiceRow, error) {
+	return s.rows, nil
+}
+
+// Pruning keeps the newest two tags of each image family, and a service's image shares a family with box images, so what a
+// service runs and what it can roll back to are named in the keep list.
+func TestPruneKeepsTheImagesServicesRunAndRollBackTo(t *testing.T) {
+	mine := func(ref, previous string, host contract.HostName) store.ServiceRow {
+		return store.ServiceRow{Service: contract.Service{Host: host, ImageRef: ref, Previous: previous}}
+	}
+	b := &Boxes{Store: servicesStore{rows: []store.ServiceRow{mine("dyna-img-app:3", "dyna-img-app:2", "h"), mine("dyna-img-other:9", "", "elsewhere")}}}
+	got, err := b.serviceImages(context.Background(), "h")
+	if err != nil || !slices.Contains(got, "dyna-img-app:3") || !slices.Contains(got, "dyna-img-app:2") || slices.Contains(got, "dyna-img-other:9") {
+		t.Fatalf("keep %v, %v", got, err)
 	}
 }
