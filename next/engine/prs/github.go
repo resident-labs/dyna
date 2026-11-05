@@ -326,7 +326,7 @@ type Observed struct {
 // pullFields is everything a read asks per PR.
 const pullFields = `number state merged headRefOid headRepository{nameWithOwner} mergeable mergeStateStatus reviewDecision
 latestOpinionatedReviews(first:20,writersOnly:true){nodes{state}}
-commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(first:50){nodes{__typename ...on CheckRun{name conclusion} ...on StatusContext{context state}}}}}}}
+commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(first:50){totalCount nodes{__typename ...on CheckRun{name status conclusion} ...on StatusContext{context state}}}}}}}
 reviews(last:20){nodes{fullDatabaseId state body url author{login} submittedAt lastEditedAt}}
 comments(last:20){nodes{body author{login} createdAt lastEditedAt}}`
 
@@ -352,46 +352,52 @@ type gqlRollup struct {
 	} `json:"contexts"`
 }
 
-// ciRule says what decides a rollup's CI.
+// ciRule says how a rollup that cannot be proven all terminal is read. Both rules settle a rollup whose contexts one read lists only when every one is terminal (spec 8.5).
 type ciRule int
 
 const (
-	// ciByRollupState follows GitHub's own rollup state, as a tracked PR's CI does: a cancelled check is a failed one.
-	ciByRollupState ciRule = iota
-	// ciByEveryContext is a default-branch head's rule (spec 8.5): pending until every context is terminal, whatever the rollup state, and a cancelled run alone is not a failure.
-	ciByEveryContext
+	// ciMainHead is a default-branch head's rule: a rollup with more contexts than one read lists, or none, settles only when its state is SUCCESS, else it stays pending until the head leaves the list of recent heads.
+	ciMainHead ciRule = iota
+	// ciPullHead is a tracked PR's head rule: a PR has no list of recent heads to fall off, so a rollup with more contexts than one read lists, or none, follows GitHub's rollup state, in which a cancelled check is a failed one.
+	ciPullHead
 )
 
 // rollupCI reads what a rollup says of CI: success or failure when GitHub has finished, pending while it runs, and none for no rollup or the empty success
-// GitHub reports before any check has run. The rule says whether the rollup state or every context decides. It names the checks that failed, for the rollup state only.
+// GitHub reports before any check has run. Whatever the rollup state says, a rollup settles only when every context it lists is terminal; a cancelled run alone is not
+// a failure, and a rollup of cancelled runs only is. The rule says what a rollup with none or more contexts than were read follows. It names the checks that failed.
 func rollupCI(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string) {
 	if rollup == nil || rollup.State == "SUCCESS" && len(rollup.Contexts.Nodes) == 0 {
 		return contract.PrCINone, nil
 	}
-	if rule == ciByEveryContext {
-		// More contexts than one read lists cannot be proven all terminal: only a rollup that itself succeeded settles. No context at all is not CI yet.
-		if len(rollup.Contexts.Nodes) == 0 || rollup.Contexts.TotalCount > len(rollup.Contexts.Nodes) {
-			if rollup.State == "SUCCESS" {
-				return contract.PrCISuccess, nil
-			}
-			return contract.PrCIPending, nil
-		}
-		ci, cancelled := contract.PrCISuccess, 0
+	var failed []string
+	if len(rollup.Contexts.Nodes) > 0 && rollup.Contexts.TotalCount <= len(rollup.Contexts.Nodes) {
+		ci, cancelled := contract.PrCISuccess, []string{}
 		for _, check := range rollup.Contexts.Nodes {
+			name := check.Name
+			if check.Type == "StatusContext" {
+				name = check.Context
+			}
 			switch {
 			case check.Type == "StatusContext" && (check.State == "PENDING" || check.State == "EXPECTED"), check.Type != "StatusContext" && check.Status != "COMPLETED":
 				return contract.PrCIPending, nil
 			case check.Type == "StatusContext" && check.State == "SUCCESS", check.Conclusion == "SUCCESS" || check.Conclusion == "SKIPPED" || check.Conclusion == "NEUTRAL":
 			case check.Conclusion == "CANCELLED":
-				cancelled++
+				cancelled = append(cancelled, name)
 			default:
 				ci = contract.PrCIFailure
+				failed = append(failed, name)
 			}
 		}
-		if cancelled == len(rollup.Contexts.Nodes) {
-			ci = contract.PrCIFailure
+		if len(cancelled) == len(rollup.Contexts.Nodes) {
+			ci, failed = contract.PrCIFailure, cancelled
 		}
-		return ci, nil
+		return ci, failed
+	}
+	if rule == ciMainHead {
+		if rollup.State == "SUCCESS" {
+			return contract.PrCISuccess, nil
+		}
+		return contract.PrCIPending, nil
 	}
 	ci := contract.PrCIPending
 	switch rollup.State {
@@ -400,7 +406,6 @@ func rollupCI(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string) {
 	case "FAILURE", "ERROR":
 		ci = contract.PrCIFailure
 	}
-	var failed []string
 	for _, check := range rollup.Contexts.Nodes {
 		switch {
 		case check.Conclusion == "FAILURE" || check.Conclusion == "TIMED_OUT" || check.Conclusion == "STARTUP_FAILURE" || check.Conclusion == "CANCELLED":
@@ -648,7 +653,7 @@ func (p gqlPull) observed(viewer string) Observed {
 	if len(p.Commits.Nodes) > 0 && p.Commits.Nodes[0].Commit.OID != p.HeadRefOid {
 		seen.CI = contract.PrCIPending
 	} else if len(p.Commits.Nodes) > 0 {
-		seen.CI, seen.FailedChecks = rollupCI(p.Commits.Nodes[0].Commit.StatusCheckRollup, ciByRollupState)
+		seen.CI, seen.FailedChecks = rollupCI(p.Commits.Nodes[0].Commit.StatusCheckRollup, ciPullHead)
 	}
 	for _, review := range p.Reviews.Nodes {
 		if review.State == "PENDING" {
@@ -700,7 +705,7 @@ func (c *Client) CommitsCI(ctx context.Context, repo contract.RepoName, shas []s
 				return nil, fmt.Errorf("GitHub answer: %w", err)
 			}
 		}
-		result, _ := rollupCI(commit.StatusCheckRollup, ciByEveryContext)
+		result, _ := rollupCI(commit.StatusCheckRollup, ciMainHead)
 		read := CommitCI{Result: result}
 		if rollup := commit.StatusCheckRollup; rollup != nil {
 			read.Truncated = rollup.Contexts.TotalCount > len(rollup.Contexts.Nodes)
