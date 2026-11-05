@@ -161,6 +161,9 @@ func TestUpgradeCarriesRootApprovesHostexec(t *testing.T) {
 		"ALTER TABLE boxes DROP COLUMN gpu_gib",
 		"ALTER TABLE boxes DROP COLUMN gpu_index",
 		"ALTER TABLE rooms DROP COLUMN github_writes",
+		"DROP TABLE service_leftovers",
+		"DROP TABLE service_secrets",
+		"DROP TABLE services",
 		"DROP TABLE repo_heads",
 		"UPDATE meta SET value='86' WHERE key='schema_version'",
 	} {
@@ -213,6 +216,9 @@ func TestUpgradeTurnsHeldAndRetryingArchivesIntoPlainCloses(t *testing.T) {
 		"ALTER TABLE boxes DROP COLUMN gpu_gib",
 		"ALTER TABLE boxes DROP COLUMN gpu_index",
 		"ALTER TABLE rooms DROP COLUMN github_writes",
+		"DROP TABLE service_leftovers",
+		"DROP TABLE service_secrets",
+		"DROP TABLE services",
 		"DROP TABLE repo_heads",
 		"UPDATE meta SET value='88' WHERE key='schema_version'",
 	} {
