@@ -127,10 +127,11 @@ const (
 )
 
 type Error struct {
-	Code    ErrorCode         `json:"code"`
-	Message string            `json:"message"`
-	Visual  *VisualSuperseded `json:"visual,omitempty"`
-	Limited *RoomLimited      `json:"limited,omitempty"`
+	Code     ErrorCode         `json:"code"`
+	Message  string            `json:"message"`
+	Visual   *VisualSuperseded `json:"visual,omitempty"`
+	Limited  *RoomLimited      `json:"limited,omitempty"`
+	Workflow *WorkflowRefused  `json:"workflow,omitempty"`
 }
 
 // errorBytes bounds what ReadError reads of a refusal.

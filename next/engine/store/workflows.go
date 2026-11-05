@@ -32,6 +32,7 @@ type WorkflowRun struct {
 	State       contract.WorkflowState
 	Result      string
 	Resume      contract.WorkflowRunID
+	MaxRuns     int // the most runs going in the room, counted when this one starts; 0 is no limit
 	Version     int
 	StatusLines []contract.WorkflowStatusLine // the script's latest status() lines, oldest first
 	Started     time.Time
@@ -65,6 +66,15 @@ func scanWorkflow(row interface{ Scan(...any) error }) (WorkflowRun, error) {
 // finished steps, so an unchanged step finds its result. Failed steps stay behind and run again, and a workflow step always
 // runs again so that its script is read afresh. The kept steps cost this run nothing, so they carry no usage.
 func insertWorkflow(ctx context.Context, tx *sql.Tx, session contract.SessionID, run WorkflowRun, at time.Time) error {
+	if run.MaxRuns > 0 {
+		var going int
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM workflow_runs WHERE room=? AND state=?", run.Room, contract.WorkflowRunning).Scan(&going); err != nil {
+			return err
+		}
+		if going >= run.MaxRuns {
+			return ErrWorkflowRunLimit
+		}
+	}
 	profiles, err := json.Marshal(run.Profiles)
 	if err != nil {
 		return err
