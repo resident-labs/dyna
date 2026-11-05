@@ -87,7 +87,7 @@ func TestTheWorkflowSkillSaysWhatTheCodeDoes(t *testing.T) {
 		"dry run of one group", "give up in 40 seconds", "still reports done",
 		"Reload is for a running run, resume for an ended one", "`dyna workflow reload RUN FILE`", "no second one starts", "runs on until the run ends",
 		"`meta.name`, `meta.repo`, `meta.size` and `meta.gpu` stay", "the run's models follow the new profiles", "the version that started it",
-		"`status(text)`", "It is not a step", "`75 of 76 steps · 1 running`", "`{lane: g.id}`", "options other than `lane`", "Nothing is read from a step's name",
+		"the worker submits a JSON file with its `submit` tool", "`status(text)`", "It is not a step", "`75 of 76 steps · 1 running`", "`{lane: g.id}`", "options other than `lane`", "Nothing is read from a step's name",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the skill does not say %q", want)

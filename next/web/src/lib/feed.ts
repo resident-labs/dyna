@@ -78,6 +78,7 @@ export const causes: Record<FailureCause, string> = {
   setup_failed: "Its workspace could not set up the repository",
   model_failed: "The model provider refused or failed the request",
   output_limit: "The reply reached the model's output limit",
+  no_submit: "A schema step's worker ended without a valid submit",
   harness_failed: "The agent program stopped unexpectedly",
   set_model_failed: "The session could not switch to its new model",
   not_started: "It stopped before it began",
