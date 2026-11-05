@@ -360,7 +360,9 @@ test("the events for subscribers stay out of the feed, as the github.pr.changed 
   const closed = decodeEvent(event(2, { type: "github.pr.closed", body: { repo: "o/r", number: 8, session: "builder", url: "u" } }));
   const ci = decodeEvent(event(3, { type: "github.ci.finished", body: { repo: "o/r", number: 9, session: "builder", url: "u", head: "h", result: "failure" } }));
   const main = decodeEvent(event(4, { type: "git.main_updated", body: { repo: "o/r", head: "h" } }));
-  assert.ok(merged && closed && ci && main);
+  const mainCI = decodeEvent(event(5, { type: "git.main_ci_finished", body: { repo: "o/r", branch: "main", sha: "h", result: "success", runs: [{ name: "build", conclusion: "SUCCESS", url: "u" }] } }));
+  assert.ok(merged && closed && ci && main && mainCI);
   assert.equal(subject(main), undefined);
-  assert.equal(feedRows([merged, closed, ci, main], { kind: "feed" }).filter(row => row.kind === "work").length, 0);
+  assert.equal(subject(mainCI), undefined);
+  assert.equal(feedRows([merged, closed, ci, main, mainCI], { kind: "feed" }).filter(row => row.kind === "work").length, 0);
 });

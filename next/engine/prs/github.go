@@ -334,6 +334,47 @@ type gqlAuthor struct {
 	Login string `json:"login"`
 }
 
+// gqlRollup is a commit's check rollup: GitHub's own state and each check run or status in it.
+type gqlRollup struct {
+	State    string `json:"state"`
+	Contexts struct {
+		Nodes []struct {
+			Type       string `json:"__typename"`
+			Name       string `json:"name"`
+			Conclusion string `json:"conclusion"`
+			DetailsURL string `json:"detailsUrl"`
+			Context    string `json:"context"`
+			State      string `json:"state"`
+			TargetURL  string `json:"targetUrl"`
+		} `json:"nodes"`
+	} `json:"contexts"`
+}
+
+// rollupCI reads what a rollup says of CI, the same for a PR's head and a default branch's: success or failure when GitHub has finished,
+// pending while it runs, and none for no rollup or the empty success GitHub reports before any check has run. It names the checks that failed.
+func rollupCI(rollup *gqlRollup) (contract.PrCI, []string) {
+	if rollup == nil || rollup.State == "SUCCESS" && len(rollup.Contexts.Nodes) == 0 {
+		return contract.PrCINone, nil
+	}
+	ci := contract.PrCIPending
+	switch rollup.State {
+	case "SUCCESS":
+		ci = contract.PrCISuccess
+	case "FAILURE", "ERROR":
+		ci = contract.PrCIFailure
+	}
+	var failed []string
+	for _, check := range rollup.Contexts.Nodes {
+		switch {
+		case check.Conclusion == "FAILURE" || check.Conclusion == "TIMED_OUT" || check.Conclusion == "STARTUP_FAILURE" || check.Conclusion == "CANCELLED":
+			failed = append(failed, check.Name)
+		case check.State == "FAILURE" || check.State == "ERROR":
+			failed = append(failed, check.Context)
+		}
+	}
+	return ci, failed
+}
+
 type gqlPull struct {
 	Number         int    `json:"number"`
 	State          string `json:"state"`
@@ -353,18 +394,8 @@ type gqlPull struct {
 	Commits struct {
 		Nodes []struct {
 			Commit struct {
-				OID               string `json:"oid"`
-				StatusCheckRollup *struct {
-					State    string `json:"state"`
-					Contexts struct {
-						Nodes []struct {
-							Name       string `json:"name"`
-							Conclusion string `json:"conclusion"`
-							Context    string `json:"context"`
-							State      string `json:"state"`
-						} `json:"nodes"`
-					} `json:"contexts"`
-				} `json:"statusCheckRollup"`
+				OID               string     `json:"oid"`
+				StatusCheckRollup *gqlRollup `json:"statusCheckRollup"`
 			} `json:"commit"`
 		} `json:"nodes"`
 	} `json:"commits"`
@@ -579,24 +610,8 @@ func (p gqlPull) observed(viewer string) Observed {
 	// of another commit than the head is an earlier push's, and the head's own checks have not reported yet.
 	if len(p.Commits.Nodes) > 0 && p.Commits.Nodes[0].Commit.OID != p.HeadRefOid {
 		seen.CI = contract.PrCIPending
-	} else if len(p.Commits.Nodes) > 0 && p.Commits.Nodes[0].Commit.StatusCheckRollup != nil && (p.Commits.Nodes[0].Commit.StatusCheckRollup.State != "SUCCESS" || len(p.Commits.Nodes[0].Commit.StatusCheckRollup.Contexts.Nodes) > 0) {
-		rollup := p.Commits.Nodes[0].Commit.StatusCheckRollup
-		switch rollup.State {
-		case "SUCCESS":
-			seen.CI = contract.PrCISuccess
-		case "FAILURE", "ERROR":
-			seen.CI = contract.PrCIFailure
-		default:
-			seen.CI = contract.PrCIPending
-		}
-		for _, check := range rollup.Contexts.Nodes {
-			switch {
-			case check.Conclusion == "FAILURE" || check.Conclusion == "TIMED_OUT" || check.Conclusion == "STARTUP_FAILURE" || check.Conclusion == "CANCELLED":
-				seen.FailedChecks = append(seen.FailedChecks, check.Name)
-			case check.State == "FAILURE" || check.State == "ERROR":
-				seen.FailedChecks = append(seen.FailedChecks, check.Context)
-			}
-		}
+	} else if len(p.Commits.Nodes) > 0 {
+		seen.CI, seen.FailedChecks = rollupCI(p.Commits.Nodes[0].Commit.StatusCheckRollup)
 	}
 	for _, review := range p.Reviews.Nodes {
 		if review.State == "PENDING" {
@@ -607,4 +622,43 @@ func (p gqlPull) observed(viewer string) Observed {
 		seen.Reviews = append(seen.Reviews, Review{ID: id, Author: login(review.Author), Body: review.Body, URL: review.URL})
 	}
 	return seen
+}
+
+// CommitCI is a commit's CI as its rollup shows it.
+type CommitCI struct {
+	Result contract.PrCI
+	Runs   []contract.CIRun
+}
+
+// CommitCI reads one commit's check rollup in one query, for a default-branch head. A commit GitHub does not know has no CI.
+func (c *Client) CommitCI(ctx context.Context, repo contract.RepoName, sha string) (CommitCI, error) {
+	owner, name, ok := strings.Cut(string(repo), "/")
+	if !ok || !ValidRepo(repo) {
+		return CommitCI{}, fmt.Errorf("invalid repository %q", repo)
+	}
+	query := "query($owner:String!,$name:String!,$oid:GitObjectID!){viewer{login} repository(owner:$owner,name:$name){object(oid:$oid){...on Commit{statusCheckRollup{state contexts(first:50){nodes{__typename ...on CheckRun{name conclusion detailsUrl} ...on StatusContext{context state targetUrl}}}}}}}}"
+	repository, err := c.graphQL(ctx, query, map[string]string{"owner": owner, "name": name, "oid": sha})
+	if err != nil {
+		return CommitCI{}, err
+	}
+	var commit struct {
+		StatusCheckRollup *gqlRollup `json:"statusCheckRollup"`
+	}
+	if raw := repository["object"]; raw != nil && string(raw) != "null" {
+		if err := json.Unmarshal(raw, &commit); err != nil {
+			return CommitCI{}, fmt.Errorf("GitHub answer: %w", err)
+		}
+	}
+	result, _ := rollupCI(commit.StatusCheckRollup)
+	read := CommitCI{Result: result}
+	if commit.StatusCheckRollup != nil {
+		for _, check := range commit.StatusCheckRollup.Contexts.Nodes {
+			run := contract.CIRun{Name: check.Name, Conclusion: check.Conclusion, URL: check.DetailsURL}
+			if check.Type == "StatusContext" {
+				run = contract.CIRun{Name: check.Context, Conclusion: check.State, URL: check.TargetURL}
+			}
+			read.Runs = append(read.Runs, run)
+		}
+	}
+	return read, nil
 }
