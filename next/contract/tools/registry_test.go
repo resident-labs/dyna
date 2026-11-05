@@ -172,6 +172,26 @@ func TestPrToolkitDescriptionIsTheHomeOfCIAndTracking(t *testing.T) {
 	}
 }
 
+// The session tool's help is the one home of the fact that an ancestor acts on sessions under it at any depth.
+func TestSessionActionsSayAnyDepth(t *testing.T) {
+	seen := 0
+	for _, a := range AgentActions() {
+		if a.Tool != "session" {
+			continue
+		}
+		switch a.Name {
+		case "close", "move", "stop", "restart", "set_profile", "refresh":
+			seen++
+			if !strings.Contains(a.Help, "any session under you at any depth") {
+				t.Errorf("session %s help does not say any depth: %s", a.Name, a.Help)
+			}
+		}
+	}
+	if seen != 6 {
+		t.Fatalf("checked %d session actions, want 6", seen)
+	}
+}
+
 // The workflow settings are the owner's alone, for the CLI and Settings > Workflows; agents' workflow tool has no action for them.
 func TestWorkflowSettingsMethodsAreOwnerOnlyWithNoAgentAction(t *testing.T) {
 	seen := map[contract.Method]bool{}
