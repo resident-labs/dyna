@@ -28,6 +28,9 @@ func TestDeletingARoomRemovesItsWorkflowSettings(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if _, err := s.writer.ExecContext(ctx, "UPDATE rooms SET state='deleting' WHERE id=?", room); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.DeleteRoom(ctx, room); err != nil {
 		t.Fatal(err)
 	}
