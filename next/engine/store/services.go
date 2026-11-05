@@ -146,6 +146,18 @@ func (s *Store) Services(ctx context.Context, room contract.RoomID) ([]ServiceRo
 	return rows, nil
 }
 
+// Service reads one service by its stable ID, including one being removed.
+func (s *Store) Service(ctx context.Context, id contract.ServiceID) (ServiceRow, error) {
+	rows, err := queryServices(ctx, s.Read(), "id=?", id)
+	if err != nil {
+		return ServiceRow{}, err
+	}
+	if len(rows) == 0 {
+		return ServiceRow{}, ErrNotFound
+	}
+	return rows[0], nil
+}
+
 // ServiceNamed finds a room's service that is not being removed.
 func (s *Store) ServiceNamed(ctx context.Context, room contract.RoomID, name contract.ServiceName) (ServiceRow, error) {
 	rows, err := queryServices(ctx, s.Read(), "room=? AND want!='remove' AND json_extract(spec,'$.name')=?", room, name)
@@ -199,7 +211,7 @@ func (s *Store) SetService(ctx context.Context, room contract.RoomID, parts cont
 			candidate.Live = existing[0].Live
 		}
 		reservation := candidate.Reservation()
-		estimate, err := imageEstimate(ctx, tx, parts.Spec.Image)
+		estimate, err := imageEstimate(ctx, tx, room, parts)
 		if err != nil {
 			return err
 		}
@@ -442,18 +454,35 @@ func (s *Store) ServiceHolds(ctx context.Context) ([]box.ServiceHold, error) {
 	return holds, err
 }
 
-// ImageEstimate is the newest measured size of an image on any host, or contract.ServiceImageEstimate for one never measured.
-func (s *Store) ImageEstimate(ctx context.Context, source string) (int64, error) {
-	return imageEstimate(ctx, s.Read(), source)
+// ImageEstimate is the newest measured size of this image on any host, or contract.ServiceImageEstimate for one never measured.
+// A room image belongs to its room; a registry digest is the same image across rooms. Measurements belong to an image source,
+// never a service's desired declaration, which may already name a newer image that has not been measured.
+func (s *Store) ImageEstimate(ctx context.Context, room contract.RoomID, parts contract.ServiceParts) (int64, error) {
+	return imageEstimate(ctx, s.Read(), room, parts)
 }
 
-func imageEstimate(ctx context.Context, q sqlQuery, source string) (int64, error) {
+func imageEstimate(ctx context.Context, q sqlQuery, room contract.RoomID, parts contract.ServiceParts) (int64, error) {
+	if parts.Digest != "" {
+		room = ""
+	}
 	var size int64
-	err := q.QueryRowContext(ctx, "SELECT image_bytes FROM services WHERE image_bytes>0 AND json_extract(spec,'$.image')=? ORDER BY updated_at DESC LIMIT 1", source).Scan(&size)
+	err := q.QueryRowContext(ctx, "SELECT bytes FROM service_image_sizes WHERE room=? AND source=?", room, parts.Spec.Image).Scan(&size)
 	if err == sql.ErrNoRows {
 		return contract.ServiceImageEstimate, nil
 	}
 	return size, err
+}
+
+// RecordServiceImage records a completed pull/build's exact measurement, separately from the service's reservation (which may
+// still cover a larger live image). A later failed health gate or declaration change does not change the measured image's identity.
+func (s *Store) RecordServiceImage(ctx context.Context, room contract.RoomID, parts contract.ServiceParts, size int64, now time.Time) error {
+	if parts.Digest != "" {
+		room = ""
+	}
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO service_image_sizes(room,source,bytes,measured_at) VALUES(?,?,?,?) ON CONFLICT(room,source) DO UPDATE SET bytes=excluded.bytes,measured_at=excluded.measured_at WHERE excluded.measured_at>=service_image_sizes.measured_at`, room, parts.Spec.Image, size, now.UnixMilli())
+		return err
+	})
 }
 
 // RoomServices lists every service of a room, including those being removed, so the room delete waits for the last.

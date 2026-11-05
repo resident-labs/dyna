@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,7 +21,7 @@ type pausedServiceWork struct {
 	box.ServiceDriver
 	at, release chan struct{}
 	restart     bool
-	once        sync.Once
+	paused      atomic.Bool
 	mu          sync.Mutex
 	ops         []string
 }
@@ -32,10 +33,10 @@ func (d *pausedServiceWork) record(op string) {
 }
 
 func (d *pausedServiceWork) pause() {
-	d.once.Do(func() {
+	if d.paused.CompareAndSwap(false, true) {
 		close(d.at)
 		<-d.release
-	})
+	}
 }
 
 func (d *pausedServiceWork) WriteServiceUnit(ctx context.Context, spec box.ServiceUnitSpec) (string, error) {
@@ -114,8 +115,8 @@ func TestDiscardWaitsForServiceHostWorkBeforeRemoving(t *testing.T) {
 			case <-time.After(3 * time.Second):
 				t.Fatal("service never reached its host side-effect barrier")
 			}
-			// With the host call paused, its worker must own a read lock. This also makes the later failed TryRLock
-			// unambiguously a queued cleanup writer, rather than a cleanup that was merely scheduled first.
+			// With the host call paused, its worker must own the gate: a read lock for serviceStep, or an exclusive lock
+			// for direct restart. A later failed TryRLock detects queued cleanup for readers; restart also checks durable drain.
 			if work.TryLock() {
 				work.Unlock()
 				release()
@@ -146,9 +147,18 @@ func TestDiscardWaitsForServiceHostWorkBeforeRemoving(t *testing.T) {
 				default:
 				}
 				if !work.TryRLock() {
-					break
+					// Direct restart itself holds an exclusive gate. In that case a denied read alone does not prove discard
+					// has committed its drain; require the durable drain before releasing the paused host call.
+					hosts, err := rig.st.Hosts(rig.ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if len(hosts) == 1 && hosts[0].State == box.HostDraining {
+						break
+					}
+				} else {
+					work.RUnlock()
 				}
-				work.RUnlock()
 				runtime.Gosched()
 			}
 			// The drain committed before waiting for I/O. Admission stays shut while that I/O finishes.

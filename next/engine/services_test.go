@@ -209,7 +209,7 @@ func awaitServiceAdmissionCompetitor(t *testing.T, secondAtWrite <-chan struct{}
 		default:
 		}
 		stack := string(buf[:runtime.Stack(buf, true)])
-		if strings.Contains(stack, "(*Store).LockAdmission") {
+		if strings.Contains(stack, "(*Store).LockAdmission") || strings.Contains(stack, "(*Reconciler).LockServiceDeclaration") {
 			return
 		}
 		runtime.Gosched()
@@ -258,7 +258,7 @@ func TestConcurrentPlacedServiceUpsizesCannotBothSpendTheSameCapacity(t *testing
 	}
 }
 
-type admissionServiceHosts struct{ host *fakehost.Host }
+type admissionServiceHosts struct{ host box.ServiceDriver }
 
 func (s admissionServiceHosts) ServiceDriver(context.Context, contract.HostName) (box.ServiceDriver, error) {
 	return s.host, nil

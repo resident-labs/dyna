@@ -160,7 +160,7 @@ func (r *Reconciler) placeService(ctx context.Context, rowp *store.ServiceRow, h
 	if err != nil {
 		return err
 	}
-	estimate, err := r.store.ImageEstimate(ctx, row.Spec.Image)
+	estimate, err := r.store.ImageEstimate(ctx, row.Room, row.Parts)
 	if err != nil {
 		return err
 	}
@@ -231,23 +231,25 @@ func (r *Reconciler) serviceHostWork(host contract.HostName) *sync.RWMutex {
 
 // currentServiceHost checks placement after entering the host's work gate. A queued step or owner call may still hold the
 // pre-discard snapshot. The host must not be draining or removed, and the row must still belong to it, even if the name was re-added.
-func (r *Reconciler) currentServiceHost(ctx context.Context, row store.ServiceRow) (box.Host, bool, error) {
+func (r *Reconciler) currentServiceHost(ctx context.Context, row store.ServiceRow) (box.Host, store.ServiceRow, bool, error) {
 	hosts, err := r.store.Hosts(ctx)
 	if err != nil {
-		return box.Host{}, false, err
+		return box.Host{}, store.ServiceRow{}, false, err
 	}
 	for _, host := range hosts {
 		if host.Name != row.Host || host.State == box.HostDraining || host.State == box.HostRemoved {
 			continue
 		}
-		rows, err := r.store.RoomServices(ctx, row.Room)
-		if err != nil {
-			return box.Host{}, false, err
+		current, err := r.store.Service(ctx, row.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return box.Host{}, store.ServiceRow{}, false, nil
 		}
-		placed := slices.ContainsFunc(rows, func(current store.ServiceRow) bool { return current.ID == row.ID && current.Host == row.Host })
-		return host, placed, nil
+		if err != nil {
+			return box.Host{}, store.ServiceRow{}, false, err
+		}
+		return host, current, current.Host == row.Host, nil
 	}
-	return box.Host{}, false, nil
+	return box.Host{}, store.ServiceRow{}, false, nil
 }
 
 // serviceStep carries one placed service one step toward what it declares. The reconciler runs at most one per service.
@@ -256,10 +258,11 @@ func (r *Reconciler) serviceStep(ctx context.Context, row store.ServiceRow, host
 	work.RLock()
 	defer work.RUnlock()
 	// A host can drain after this check, but its cleanup cannot pass this worker.
-	host, placed, err := r.currentServiceHost(ctx, row)
+	host, current, placed, err := r.currentServiceHost(ctx, row)
 	if err != nil || !placed {
 		return err
 	}
+	row = current // an owner action may have changed intent or generation while this queued step waited at the gate
 	if host.State != box.HostReady {
 		// A host that is gone takes its services' state with it, and nothing moves them: a removal is owed instead.
 		if row.Want == contract.ServiceWantRemove {
@@ -435,10 +438,19 @@ func (r *Reconciler) rewriteService(ctx context.Context, row store.ServiceRow, d
 
 func (r *Reconciler) stopService(ctx context.Context, row store.ServiceRow, driver box.ServiceDriver) error {
 	if row.State == contract.ServiceStopped {
-		return nil
+		r.svc.mu.Lock()
+		unit, seen := r.svc.units[row.ID]
+		r.svc.mu.Unlock()
+		if !seen || unit.State == box.UnitStopped || unit.State == box.UnitAbsent {
+			return nil
+		}
+		// A reboot can start WantedBy=default.target units. The heartbeat supersedes the old stopped row.
 	}
 	if err := driver.StopService(ctx, row.ID); err != nil {
 		return fmt.Errorf("service %s: stop: %w", row.ID, err)
+	}
+	if row.State == contract.ServiceStopped {
+		return nil
 	}
 	next := row
 	next.State, next.Reason, next.Cause = contract.ServiceStopped, "", ""
@@ -586,6 +598,11 @@ func (r *Reconciler) runDeploy(ctx context.Context, row *store.ServiceRow, drive
 			reason = contract.ServiceImagePull
 		}
 		return &deployFailure{reason, err.Error()}
+	}
+	if row.Target == "" {
+		if err := r.store.RecordServiceImage(ctx, row.Room, row.Parts, size, r.now()); err != nil {
+			return err
+		}
 	}
 	row.ImageBytes = max(row.ImageBytes, size)
 	if *row, ok, err = step(contract.ServicePhaseUnit); err != nil || !ok {
@@ -764,6 +781,9 @@ var ErrNotPlaced = errors.New("the service has no host yet")
 // ErrServiceEngineHost refuses a direct restart until the host is known not to run the engine.
 var ErrServiceEngineHost = errors.New("the service's host runs the engine or has not yet been checked not to")
 
+// ErrServiceRemoving refuses an owner intent whose service began removal after the caller resolved its ID.
+var ErrServiceRemoving = errors.New("the service is being removed")
+
 // reopen lets a failed service try again: a new generation, an update, a start or a restart ends the failure.
 func reopen(row *store.ServiceRow) {
 	if row.State == contract.ServiceFailed {
@@ -810,9 +830,63 @@ func (r *Reconciler) RollbackService(ctx context.Context, id contract.ServiceID)
 }
 
 func (r *Reconciler) changeService(ctx context.Context, id contract.ServiceID, change func(*store.ServiceRow) error) (store.ServiceRow, error) {
-	row, err := r.store.ChangeService(ctx, id, r.serviceEvent, change)
+	current, err := r.store.Service(ctx, id)
+	if err != nil {
+		return current, err
+	}
+	unlock, err := r.LockServiceDeclaration(ctx, current.Room, current.Spec.Name)
+	if err != nil {
+		return current, err
+	}
+	defer unlock()
+	row, err := r.store.ChangeService(ctx, id, r.serviceEvent, func(current *store.ServiceRow) error {
+		if current.Want == contract.ServiceWantRemove {
+			return ErrServiceRemoving
+		}
+		return change(current)
+	})
 	r.Kick()
 	return row, err
+}
+
+// LockServiceDeclaration waits for host work before changing a declaration, then holds admission through its reservation write.
+// A worker already past its CAS may still start the previous desired generation, so dropping that generation's resources before
+// it finishes would under-reserve the host. Never wait for host work while holding admission: Pass launches workers under it.
+// Placement is re-read after both locks, including when the first read had no host and a pass placed it meanwhile.
+func (r *Reconciler) LockServiceDeclaration(ctx context.Context, room contract.RoomID, name contract.ServiceName) (func(), error) {
+	for {
+		row, err := r.store.ServiceNamed(ctx, room, name)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+		var work *sync.RWMutex
+		if r.svc != nil && row.Host != "" {
+			work = r.serviceHostWork(row.Host)
+			work.Lock()
+		}
+		unlock := r.store.LockAdmission()
+		current, err := r.store.ServiceNamed(ctx, room, name)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			unlock()
+			if work != nil {
+				work.Unlock()
+			}
+			return nil, err
+		}
+		if current.Host != row.Host {
+			unlock()
+			if work != nil {
+				work.Unlock()
+			}
+			continue
+		}
+		return func() {
+			unlock()
+			if work != nil {
+				work.Unlock()
+			}
+		}, nil
+	}
 }
 
 // RestartServiceUnit restarts the unit of a placed service and ends a crash loop: the unit's start limit is reset first.
@@ -821,14 +895,18 @@ func (r *Reconciler) RestartServiceUnit(ctx context.Context, row store.ServiceRo
 		return row, ErrNotPlaced
 	}
 	work := r.serviceHostWork(row.Host)
-	work.RLock()
-	defer work.RUnlock()
-	host, placed, err := r.currentServiceHost(ctx, row)
+	work.Lock()
+	defer work.Unlock()
+	host, current, placed, err := r.currentServiceHost(ctx, row)
 	if err != nil {
 		return row, err
 	}
 	if !placed {
 		return row, ErrNotPlaced
+	}
+	row = current
+	if row.Want == contract.ServiceWantRemove {
+		return row, ErrServiceRemoving
 	}
 	if host.EngineHost == nil || *host.EngineHost {
 		return row, ErrServiceEngineHost
@@ -840,9 +918,9 @@ func (r *Reconciler) RestartServiceUnit(ctx context.Context, row store.ServiceRo
 	if err := driver.RestartService(ctx, row.ID); err != nil {
 		return row, fmt.Errorf("service %s: restart: %w", row.ID, err)
 	}
-	return r.changeService(ctx, row.ID, func(next *store.ServiceRow) error {
+	updated, err := r.store.ChangeService(ctx, row.ID, r.serviceEvent, func(next *store.ServiceRow) error {
 		if next.Want == contract.ServiceWantRemove {
-			return ErrNotPlaced
+			return ErrServiceRemoving
 		}
 		next.Want = contract.ServiceWantRun
 		if next.State == contract.ServiceStopped {
@@ -853,6 +931,8 @@ func (r *Reconciler) RestartServiceUnit(ctx context.Context, row store.ServiceRo
 		}
 		return nil
 	})
+	r.Kick()
+	return updated, err
 }
 
 // ServiceLogs reads a placed service's journal.
