@@ -342,6 +342,7 @@ type gqlRollup struct {
 		Nodes      []struct {
 			Type       string `json:"__typename"`
 			Name       string `json:"name"`
+			Status     string `json:"status"`
 			Conclusion string `json:"conclusion"`
 			DetailsURL string `json:"detailsUrl"`
 			Context    string `json:"context"`
@@ -351,11 +352,46 @@ type gqlRollup struct {
 	} `json:"contexts"`
 }
 
-// rollupCI reads what a rollup says of CI, the same for a PR's head and a default branch's: success or failure when GitHub has finished,
-// pending while it runs, and none for no rollup or the empty success GitHub reports before any check has run. It names the checks that failed.
-func rollupCI(rollup *gqlRollup) (contract.PrCI, []string) {
+// ciRule says what decides a rollup's CI.
+type ciRule int
+
+const (
+	// ciByRollupState follows GitHub's own rollup state, as a tracked PR's CI does: a cancelled check is a failed one.
+	ciByRollupState ciRule = iota
+	// ciByEveryContext is a default-branch head's rule (spec 8.5): pending until every context is terminal, whatever the rollup state, and a cancelled run alone is not a failure.
+	ciByEveryContext
+)
+
+// rollupCI reads what a rollup says of CI: success or failure when GitHub has finished, pending while it runs, and none for no rollup or the empty success
+// GitHub reports before any check has run. The rule says whether the rollup state or every context decides. It names the checks that failed, for the rollup state only.
+func rollupCI(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string) {
 	if rollup == nil || rollup.State == "SUCCESS" && len(rollup.Contexts.Nodes) == 0 {
 		return contract.PrCINone, nil
+	}
+	if rule == ciByEveryContext {
+		// More contexts than one read lists cannot be proven all terminal: only a rollup that itself succeeded settles. No context at all is not CI yet.
+		if len(rollup.Contexts.Nodes) == 0 || rollup.Contexts.TotalCount > len(rollup.Contexts.Nodes) {
+			if rollup.State == "SUCCESS" {
+				return contract.PrCISuccess, nil
+			}
+			return contract.PrCIPending, nil
+		}
+		ci, cancelled := contract.PrCISuccess, 0
+		for _, check := range rollup.Contexts.Nodes {
+			switch {
+			case check.Type == "StatusContext" && (check.State == "PENDING" || check.State == "EXPECTED"), check.Type != "StatusContext" && check.Status != "COMPLETED":
+				return contract.PrCIPending, nil
+			case check.Type == "StatusContext" && check.State == "SUCCESS", check.Conclusion == "SUCCESS" || check.Conclusion == "SKIPPED" || check.Conclusion == "NEUTRAL":
+			case check.Conclusion == "CANCELLED":
+				cancelled++
+			default:
+				ci = contract.PrCIFailure
+			}
+		}
+		if cancelled == len(rollup.Contexts.Nodes) {
+			ci = contract.PrCIFailure
+		}
+		return ci, nil
 	}
 	ci := contract.PrCIPending
 	switch rollup.State {
@@ -612,7 +648,7 @@ func (p gqlPull) observed(viewer string) Observed {
 	if len(p.Commits.Nodes) > 0 && p.Commits.Nodes[0].Commit.OID != p.HeadRefOid {
 		seen.CI = contract.PrCIPending
 	} else if len(p.Commits.Nodes) > 0 {
-		seen.CI, seen.FailedChecks = rollupCI(p.Commits.Nodes[0].Commit.StatusCheckRollup)
+		seen.CI, seen.FailedChecks = rollupCI(p.Commits.Nodes[0].Commit.StatusCheckRollup, ciByRollupState)
 	}
 	for _, review := range p.Reviews.Nodes {
 		if review.State == "PENDING" {
@@ -649,7 +685,7 @@ func (c *Client) CommitsCI(ctx context.Context, repo contract.RepoName, shas []s
 		fields += fmt.Sprintf(" h%d:object(oid:$h%d){...ci}", i, i)
 	}
 	query := "query($owner:String!,$name:String!" + declared + "){viewer{login} repository(owner:$owner,name:$name){" + fields + "}}" +
-		fmt.Sprintf(" fragment ci on Commit{statusCheckRollup{state contexts(first:%d){totalCount nodes{__typename ...on CheckRun{name conclusion detailsUrl} ...on StatusContext{context state targetUrl}}}}}", ciRunsRead)
+		fmt.Sprintf(" fragment ci on Commit{statusCheckRollup{state contexts(first:%d){totalCount nodes{__typename ...on CheckRun{name status conclusion detailsUrl} ...on StatusContext{context state targetUrl}}}}}", ciRunsRead)
 	repository, err := c.graphQL(ctx, query, variables)
 	if err != nil {
 		return nil, err
@@ -664,7 +700,7 @@ func (c *Client) CommitsCI(ctx context.Context, repo contract.RepoName, shas []s
 				return nil, fmt.Errorf("GitHub answer: %w", err)
 			}
 		}
-		result, _ := rollupCI(commit.StatusCheckRollup)
+		result, _ := rollupCI(commit.StatusCheckRollup, ciByEveryContext)
 		read := CommitCI{Result: result}
 		if rollup := commit.StatusCheckRollup; rollup != nil {
 			read.Truncated = rollup.Contexts.TotalCount > len(rollup.Contexts.Nodes)
