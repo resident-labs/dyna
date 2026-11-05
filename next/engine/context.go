@@ -173,7 +173,9 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		if c.Item != "" {
 			line += ", " + contextLine(c.Item, 80)
 		}
-		if c.Asking {
+		if c.Waiting != nil {
+			line += ", waiting: " + c.Waiting.Label()
+		} else if c.Asking {
 			line += ", waiting for the owner's answer"
 		}
 		lines = append(lines, line)
