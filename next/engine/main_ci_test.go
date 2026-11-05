@@ -361,7 +361,7 @@ func TestMainCIFinishedMarksRunsPastTheFirstHundredTruncated(t *testing.T) {
 func TestMainCIFinishedNeverSettlesOnARollupThatIsNotTerminal(t *testing.T) {
 	for name, commit := range map[string]fakegithub.Commit{
 		"pending with one check done": {Rollup: "PENDING", Checks: []fakegithub.Check{{Name: "lint", Conclusion: "SUCCESS"}, {Name: "test"}}},
-		"expected":                    {Rollup: "EXPECTED", Checks: []fakegithub.Check{{Name: "lint", Conclusion: "SUCCESS"}}},
+		"expected status":             {Rollup: "EXPECTED", Checks: []fakegithub.Check{{Name: "lint", Conclusion: "SUCCESS"}, {Name: "required", Conclusion: "EXPECTED", StatusContext: true}}},
 		"pending, queued only":        {Rollup: "PENDING", Checks: []fakegithub.Check{{Name: "test"}}},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -427,6 +427,130 @@ func TestMainCIFinishedCoversARepositoryThatIsNotTheRoomDefault(t *testing.T) {
 	r.next(t)
 	got := r.mainCIs(t)
 	if len(got) != 1 || got[0].Repo != "owner/other" || got[0].Sha != "o1" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+// f319701's mix: a cancelled check turns the rollup FAILURE while other checks still run.
+var (
+	mixRunning   = fakegithub.Commit{Rollup: "FAILURE", Checks: []fakegithub.Check{{Name: "verify"}, {Name: "build linux", Status: "QUEUED"}, {Name: "build macos", Status: "WAITING"}, {Name: "build macos-x64", Status: "COMPLETED", Conclusion: "CANCELLED"}, {Name: "lint", Conclusion: "SUCCESS"}}}
+	mixFinished  = fakegithub.Commit{Rollup: "FAILURE", Checks: []fakegithub.Check{{Name: "verify", Conclusion: "SUCCESS"}, {Name: "build linux", Conclusion: "SUCCESS"}, {Name: "build macos", Conclusion: "SKIPPED"}, {Name: "build macos-x64", Conclusion: "CANCELLED"}, {Name: "lint", Conclusion: "NEUTRAL"}}}
+	mixFailedRun = fakegithub.Commit{Rollup: "FAILURE", Checks: []fakegithub.Check{{Name: "verify", Conclusion: "FAILURE"}, {Name: "build linux", Conclusion: "SUCCESS"}, {Name: "build macos", Conclusion: "SUCCESS"}, {Name: "build macos-x64", Conclusion: "CANCELLED"}, {Name: "lint", Conclusion: "SUCCESS"}}}
+)
+
+func TestMainCIFinishedWaitsForEveryContextAndIgnoresACancelledRun(t *testing.T) {
+	r := mainRig(t)
+	r.moveMain("owner/repo", "f319701", mixRunning)
+	for i := 0; i < 3; i++ {
+		r.next(t)
+	}
+	requireShas(t, r.toldShas(t))
+	r.github.SetCommit("owner/repo", "f319701", mixFinished)
+	r.next(t)
+	got := r.mainCIs(t)
+	if len(got) != 1 || got[0].Result != contract.PrCISuccess {
+		t.Fatalf("every check done and the cancelled one ignored: %+v", got)
+	}
+	if !slices.Contains(got[0].Runs, contract.CIRun{Name: "build macos-x64", Conclusion: "CANCELLED"}) {
+		t.Fatalf("the cancelled run is not listed: %+v", got[0].Runs)
+	}
+	r.next(t)
+	requireShas(t, r.toldShas(t), "f319701")
+}
+
+func TestMainCIFinishedFailureWaitsForTheOtherContextsToFinish(t *testing.T) {
+	r := mainRig(t)
+	running := fakegithub.Commit{Rollup: "FAILURE", Checks: []fakegithub.Check{{Name: "verify", Conclusion: "FAILURE"}, {Name: "build linux", Status: "IN_PROGRESS"}, {Name: "build macos-x64", Conclusion: "CANCELLED"}}}
+	r.moveMain("owner/repo", "A", running)
+	for i := 0; i < 3; i++ {
+		r.next(t)
+	}
+	requireShas(t, r.toldShas(t))
+	r.github.SetCommit("owner/repo", "A", mixFailedRun)
+	r.next(t)
+	got := r.mainCIs(t)
+	if len(got) != 1 || got[0].Result != contract.PrCIFailure {
+		t.Fatalf("a failed run once all finished: %+v", got)
+	}
+}
+
+func TestMainCIFinishedWithEveryContextCancelledIsAFailure(t *testing.T) {
+	r := mainRig(t)
+	r.moveMain("owner/repo", "A", fakegithub.Commit{Rollup: "FAILURE", Checks: []fakegithub.Check{{Name: "build", Conclusion: "CANCELLED"}, {Name: "test", Conclusion: "CANCELLED"}}})
+	r.next(t)
+	got := r.mainCIs(t)
+	if len(got) != 1 || got[0].Result != contract.PrCIFailure || len(got[0].Runs) != 2 || got[0].Runs[0].Conclusion != "CANCELLED" {
+		t.Fatalf("nothing ran and passed: %+v", got)
+	}
+}
+
+func TestMainCIFinishedEveryFailingConclusionIsAFailure(t *testing.T) {
+	for _, conclusion := range []string{"FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED", "STALE"} {
+		t.Run(conclusion, func(t *testing.T) {
+			r := mainRig(t)
+			r.moveMain("owner/repo", "A", fakegithub.Commit{Rollup: "FAILURE", Checks: []fakegithub.Check{{Name: "build", Conclusion: "SUCCESS"}, {Name: "test", Conclusion: conclusion}}})
+			r.next(t)
+			if got := r.mainCIs(t); len(got) != 1 || got[0].Result != contract.PrCIFailure {
+				t.Fatalf("got %+v", got)
+			}
+		})
+	}
+	for _, state := range []string{"FAILURE", "ERROR"} {
+		t.Run("status "+state, func(t *testing.T) {
+			r := mainRig(t)
+			r.moveMain("owner/repo", "A", fakegithub.Commit{Rollup: "FAILURE", Checks: []fakegithub.Check{{Name: "build", Conclusion: "SUCCESS"}, {Name: "ci/external", Conclusion: state, StatusContext: true}}})
+			r.next(t)
+			if got := r.mainCIs(t); len(got) != 1 || got[0].Result != contract.PrCIFailure {
+				t.Fatalf("got %+v", got)
+			}
+		})
+	}
+}
+
+func TestMainCIFinishedPendingStatusContextHoldsTheHead(t *testing.T) {
+	r := mainRig(t)
+	r.moveMain("owner/repo", "A", fakegithub.Commit{Rollup: "SUCCESS", Checks: []fakegithub.Check{{Name: "build", Conclusion: "SUCCESS"}, {Name: "ci/external", Conclusion: "PENDING", StatusContext: true}}})
+	for i := 0; i < 3; i++ {
+		r.next(t)
+	}
+	requireShas(t, r.toldShas(t))
+	r.github.SetCommit("owner/repo", "A", fakegithub.Commit{Rollup: "SUCCESS", Checks: []fakegithub.Check{{Name: "build", Conclusion: "SUCCESS"}, {Name: "ci/external", Conclusion: "SUCCESS", StatusContext: true}}})
+	r.next(t)
+	got := r.mainCIs(t)
+	if len(got) != 1 || got[0].Result != contract.PrCISuccess || !slices.Contains(got[0].Runs, contract.CIRun{Name: "ci/external", Conclusion: "SUCCESS"}) {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestMainCIFinishedDecidesFromTheContextsAndNotTheRollupState(t *testing.T) {
+	r := mainRig(t)
+	r.moveMain("owner/repo", "A", fakegithub.Commit{Rollup: "PENDING", Checks: []fakegithub.Check{{Name: "build", Conclusion: "SUCCESS"}, {Name: "test", Conclusion: "SUCCESS"}}})
+	r.next(t)
+	if got := r.mainCIs(t); len(got) != 1 || got[0].Result != contract.PrCISuccess {
+		t.Fatalf("every context completed under a rollup not yet updated: %+v", got)
+	}
+}
+
+func TestMainCIFinishedTruncatedReadSettlesOnlyOnARollupThatSucceeded(t *testing.T) {
+	var checks []fakegithub.Check
+	for i := 0; i < 150; i++ {
+		checks = append(checks, fakegithub.Check{Name: fmt.Sprintf("check-%d", i), Conclusion: "SUCCESS"})
+	}
+	for _, rollup := range []string{"FAILURE", "PENDING", "ERROR"} {
+		t.Run(rollup, func(t *testing.T) {
+			r := mainRig(t)
+			r.moveMain("owner/repo", "A", fakegithub.Commit{Rollup: rollup, Checks: checks})
+			for i := 0; i < 15; i++ {
+				r.next(t)
+			}
+			requireShas(t, r.toldShas(t))
+		})
+	}
+	r := mainRig(t)
+	r.moveMain("owner/repo", "A", fakegithub.Commit{Rollup: "SUCCESS", Checks: checks})
+	r.next(t)
+	got := r.mainCIs(t)
+	if len(got) != 1 || got[0].Result != contract.PrCISuccess || !got[0].RunsTruncated {
 		t.Fatalf("got %+v", got)
 	}
 }

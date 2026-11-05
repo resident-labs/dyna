@@ -853,11 +853,14 @@ func (s *Server) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 // pageSize is the most checks GitHub returns in one contexts page.
 const pageSize = 100
 
-// Check is one check run in a commit's rollup.
+// Check is one check run in a commit's rollup, or one status context when StatusContext is set, where Conclusion is the context's state.
+// A check run with no Status is COMPLETED when it has a Conclusion and IN_PROGRESS when it has none, as GitHub reports it.
 type Check struct {
-	Name       string
-	Conclusion string
-	URL        string
+	Name          string
+	Conclusion    string
+	Status        string
+	StatusContext bool
+	URL           string
 }
 
 // Commit is what GitHub says of a commit's checks. An empty Rollup answers a null rollup, as a commit with no CI does, and no Checks
@@ -889,7 +892,17 @@ func (s *Server) commitNode(repo contract.RepoName, sha string) any {
 			checks = checks[:pageSize]
 		}
 		contexts := nodes(checks, func(c Check) map[string]any {
-			return map[string]any{"__typename": "CheckRun", "name": c.Name, "conclusion": c.Conclusion, "detailsUrl": c.URL}
+			if c.StatusContext {
+				return map[string]any{"__typename": "StatusContext", "context": c.Name, "state": c.Conclusion, "targetUrl": c.URL}
+			}
+			status := c.Status
+			if status == "" {
+				status = "IN_PROGRESS"
+				if c.Conclusion != "" {
+					status = "COMPLETED"
+				}
+			}
+			return map[string]any{"__typename": "CheckRun", "name": c.Name, "status": status, "conclusion": c.Conclusion, "detailsUrl": c.URL}
 		})
 		contexts["totalCount"] = total
 		rollup = map[string]any{"state": commit.Rollup, "contexts": contexts}
