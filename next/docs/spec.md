@@ -593,7 +593,7 @@ The engine derives identity from the connection (3.7), never from the caller. Th
 
 ### 7.2 Root is a position, not a role
 
-Root is the parentless session. Ancestors control descendants; room grants `ask-owner` and `hostexec` give extra powers. A default subscription wakes root for engine notices and the default branch moving. Root holds no goals. It has a room-creation prompt template. v1's dual address, root seat, service flag, `NeedsRoot` routing and engine-as-root have no v2 equivalent.
+Root is the parentless session. An ancestor controls every session under it at any depth, not only its children: it can stop, close, restart, refresh, set the profile of and move such a session, and a move's new parent is the ancestor itself or another session under it. Room grants `ask-owner` and `hostexec` give extra powers. A default subscription wakes root for engine notices and the default branch moving. Root holds no goals. It has a room-creation prompt template. v1's dual address, root seat, service flag, `NeedsRoot` routing and engine-as-root have no v2 equivalent.
 
 ### 7.3 External members (dropped for now)
 
