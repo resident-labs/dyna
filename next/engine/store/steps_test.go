@@ -164,6 +164,7 @@ func TestUpgradeCarriesRootApprovesHostexec(t *testing.T) {
 		"DROP TABLE service_leftovers",
 		"DROP TABLE service_secrets",
 		"DROP TABLE services",
+		"DROP TABLE service_image_sizes",
 		"DROP TABLE repo_heads",
 		"UPDATE meta SET value='86' WHERE key='schema_version'",
 	} {
@@ -219,6 +220,7 @@ func TestUpgradeTurnsHeldAndRetryingArchivesIntoPlainCloses(t *testing.T) {
 		"DROP TABLE service_leftovers",
 		"DROP TABLE service_secrets",
 		"DROP TABLE services",
+		"DROP TABLE service_image_sizes",
 		"DROP TABLE repo_heads",
 		"UPDATE meta SET value='88' WHERE key='schema_version'",
 	} {
