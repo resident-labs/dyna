@@ -96,3 +96,14 @@ func TestTranscriptMarkerNameIsMaskedAndBounded(t *testing.T) {
 		t.Fatalf("items=%+v err=%v", items, err)
 	}
 }
+
+func TestTranscriptMarkerNameHidesSecrets(t *testing.T) {
+	data := `{"type":"message","id":"u1","message":{"role":"user","deliveryId":"1"}}
+{"type":"message","id":"a1","message":{"role":"assistant","content":[],"diagnostics":[{"type":"x","error":{"name":"failed ghp_abcdefghijklmnopqrstuvwxyz0123"}}]}}
+{"type":"context_edit","id":"e1","targetId":"a1","replacement":null}
+`
+	items, _, _, err := ReadTranscript(strings.NewReader(data), attemptDeliveries, "x", "", 0, 64)
+	if err != nil || len(items) != 1 || strings.Contains(items[0].ErrorName, "ghp_") {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+}
