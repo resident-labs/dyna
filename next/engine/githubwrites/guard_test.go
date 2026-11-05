@@ -24,6 +24,7 @@ type upstream struct {
 	vouched []bool            // for each write that reached GitHub, whether the guard vouched for it
 	nodes   map[string]string // node ID to the JSON of its node object
 	prs     map[string]bool   // "owner/repo#n" that are PRs
+	reads   map[string]string // path of a GET to the JSON it answers, ahead of every other answer
 }
 
 func (u *upstream) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -44,6 +45,12 @@ func (u *upstream) RoundTrip(r *http.Request) (*http.Response, error) {
 			return reply(`{"data":{"node":null}}`)
 		}
 		return reply(`{"data":{"node":` + node + `}}`)
+	}
+	if body, ok := u.reads[r.URL.Path]; ok && r.Method == http.MethodGet {
+		return reply(body)
+	}
+	if r.Method == http.MethodGet && (strings.Contains(r.URL.Path, "/comments/") || strings.HasPrefix(r.URL.Path, "/orgs/") || strings.HasPrefix(r.URL.Path, "/users/")) {
+		return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{}`)), Header: http.Header{}}, nil
 	}
 	if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/issues/") && u.prs != nil {
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/repos/"), "/")
@@ -73,7 +80,21 @@ func newGuard() (*Guard, *upstream) {
 		"IT_other": `{"__typename":"ProjectV2Item","project":{"owner":{"login":"acme"}},"content":{"__typename":"Issue","repository":{"nameWithOwner":"acme/secret"}}}`,
 		"PRR_ok":   `{"__typename":"PullRequestReview","repository":{"nameWithOwner":"acme/app"}}`,
 		"IT_draft": `{"__typename":"ProjectV2Item","project":{"owner":{"login":"acme"}},"content":null}`,
-	}, prs: map[string]bool{"acme/app#7": true}}
+		"M_ok":     `{"__typename":"Milestone","repository":{"nameWithOwner":"acme/app"}}`,
+		"M_other":  `{"__typename":"Milestone","repository":{"nameWithOwner":"acme/secret"}}`,
+		"L_ok":     `{"__typename":"Label","repository":{"nameWithOwner":"acme/app"}}`,
+		"L_other":  `{"__typename":"Label","repository":{"nameWithOwner":"acme/secret"}}`,
+	}, prs: map[string]bool{"acme/app#7": true}, reads: map[string]string{
+		"/repos/acme/app/issues/comments/3": `{"issue_url":"https://api.github.com/repos/acme/app/issues/3"}`,
+		"/repos/acme/app/issues/comments/4": `{"issue_url":"https://api.github.com/repos/acme/secret/issues/3"}`,
+		"/repos/acme/app/issues/comments/5": `{"issue_url":"https://evil.example/repos/acme/app/issues/3"}`,
+		"/repos/acme/app/issues/comments/6": `{}`,
+		"/repos/acme/app/issues/comments/7": `{"issue_url":"https://api.github.com/repos/ACME/App/issues/3"}`,
+		"/orgs/acme/projectsV2/4/items/9":   `{"content":{"repository_url":"https://api.github.com/repos/acme/app"}}`,
+		"/orgs/acme/projectsV2/4/items/10":  `{"content":{"repository_url":"https://api.github.com/repos/acme/secret"}}`,
+		"/orgs/acme/projectsV2/4/items/11":  `{"content":null}`,
+		"/users/acme/projectsV2/4/items/9":  `{"content":{"repository_url":"https://api.github.com/repos/acme/app"}}`,
+	}}
 	return &Guard{Base: up, API: &url.URL{Scheme: "https", Host: "api.github.com"}}, up
 }
 
@@ -516,5 +537,68 @@ func TestRepositoryMatchIgnoresCase(t *testing.T) {
 		expect(t, spelling+" grant, node answer", graphql(t, g, grant, `mutation($i:CreateIssueInput!){createIssue(input:$i){issue{id}}}`, `{"i":{"repositoryId":"R_cased","title":"x"}}`), "")
 		expect(t, spelling+" grant, issue node", graphql(t, g, grant, `mutation($i:CloseIssueInput!){closeIssue(input:$i){clientMutationId}}`, `{"i":{"issueId":"I_cased"}}`), "")
 		expect(t, spelling+" grant, other repo", rest(t, g, grant, "POST", "/repos/acme/apple/issues", `{"title":"x"}`), contract.GitHubWriteRepoNotAllowed)
+	}
+}
+
+// A comment is named by a number that says no repository, so the guard reads the comment and requires its issue to be in the
+// repository of the path: a comment of another repository is refused whichever group edits it, and so is an answer that names no
+// repository, another host or no answer.
+func TestCommentEditNeedsTheCommentInTheAllowedRepository(t *testing.T) {
+	for _, only := range []contract.GitHubWriteGroup{contract.GitHubWriteIssues, contract.GitHubWritePulls} {
+		g, up := newGuard()
+		grant := grantOf("acme/app", only)
+		const body = `{"body":"x"}`
+		expect(t, string(only)+": a comment of the repository", rest(t, g, grant, "PATCH", "/repos/acme/app/issues/comments/3", body), "")
+		expect(t, string(only)+": the repository spelled otherwise by GitHub", rest(t, g, grant, "PATCH", "/repos/acme/app/issues/comments/7", body), "")
+		expect(t, string(only)+": a comment of another repository", rest(t, g, grant, "PATCH", "/repos/acme/app/issues/comments/4", body), contract.GitHubWriteRepoNotAllowed)
+		expect(t, string(only)+": an issue url on another host", rest(t, g, grant, "PATCH", "/repos/acme/app/issues/comments/5", body), contract.GitHubWriteIDUnresolved)
+		expect(t, string(only)+": an answer with no issue url", rest(t, g, grant, "PATCH", "/repos/acme/app/issues/comments/6", body), contract.GitHubWriteIDUnresolved)
+		expect(t, string(only)+": a comment GitHub does not answer for", rest(t, g, grant, "PATCH", "/repos/acme/app/issues/comments/8", body), contract.GitHubWriteIDUnresolved)
+		if len(up.sent) != 2 {
+			t.Fatalf("%s: reached GitHub: %v", only, up.sent)
+		}
+	}
+}
+
+// A REST project item update names its item by a number, so the guard reads the item and requires its content to be an issue or
+// PR of an allowed repository, the rule the GraphQL field update has; a draft item has none.
+func TestProjectItemUpdateNeedsItsContentInTheAllowedRepository(t *testing.T) {
+	g, up := newGuard()
+	grant := grantOf("acme/app", contract.GitHubWriteProjects)
+	const body = `{"fields":[{"id":1,"value":"x"}]}`
+	expect(t, "org item of the repository", rest(t, g, grant, "PATCH", "/orgs/acme/projectsV2/4/items/9", body), "")
+	expect(t, "user item of the repository", rest(t, g, grant, "PATCH", "/users/acme/projectsV2/4/items/9", body), "")
+	expect(t, "item of another repository", rest(t, g, grant, "PATCH", "/orgs/acme/projectsV2/4/items/10", body), contract.GitHubWriteRepoNotAllowed)
+	expect(t, "draft item", rest(t, g, grant, "PATCH", "/orgs/acme/projectsV2/4/items/11", body), contract.GitHubWriteRepoNotAllowed)
+	expect(t, "item GitHub does not answer for", rest(t, g, grant, "PATCH", "/orgs/acme/projectsV2/4/items/12", body), contract.GitHubWriteIDUnresolved)
+	if len(up.sent) != 2 {
+		t.Fatalf("reached GitHub: %v", up.sent)
+	}
+}
+
+// createIssue takes ids of a repository's milestone and labels, which must be of an allowed repository like repositoryId; an
+// assignee is a user and belongs to none; an issue type belongs to an organization and is not accepted.
+func TestCreateIssueIDsAreOfAllowedRepositories(t *testing.T) {
+	g, up := newGuard()
+	grant := grantOf("acme/app", contract.GitHubWriteIssues)
+	const query = `mutation($i:CreateIssueInput!){createIssue(input:$i){issue{id}}}`
+	create := func(fields string) contract.GitHubWriteReason {
+		return graphql(t, g, grant, query, `{"i":{"repositoryId":"R_ok","title":"x",`+fields+`}}`)
+	}
+	expect(t, "milestone of the repository", create(`"milestoneId":"M_ok"`), "")
+	expect(t, "labels of the repository", create(`"labelIds":["L_ok","L_ok"]`), "")
+	expect(t, "no labels", create(`"labelIds":[]`), "")
+	expect(t, "assignees", create(`"assigneeIds":["U_anyone"]`), "")
+	expect(t, "milestone of another repository", create(`"milestoneId":"M_other"`), contract.GitHubWriteRepoNotAllowed)
+	expect(t, "an issue id as the milestone", create(`"milestoneId":"I_ok"`), contract.GitHubWriteRepoNotAllowed)
+	expect(t, "a label of another repository", create(`"labelIds":["L_ok","L_other"]`), contract.GitHubWriteRepoNotAllowed)
+	expect(t, "a milestone id as a label", create(`"labelIds":["M_ok"]`), contract.GitHubWriteRepoNotAllowed)
+	expect(t, "labels that are one string", create(`"labelIds":"L_ok"`), contract.GitHubWriteGraphQLShape)
+	expect(t, "an empty label id", create(`"labelIds":[""]`), contract.GitHubWriteGraphQLShape)
+	expect(t, "a label that is not a string", create(`"labelIds":[7]`), contract.GitHubWriteGraphQLShape)
+	expect(t, "an unknown label", create(`"labelIds":["L_nope"]`), contract.GitHubWriteGraphQLUnresolved)
+	expect(t, "an issue type", create(`"issueTypeId":"IT_any"`), contract.GitHubWriteFieldNotAllowed)
+	if len(up.sent) != 4 {
+		t.Fatalf("reached GitHub: %v", up.sent)
 	}
 }
