@@ -108,12 +108,18 @@ func TestWorkflowPostDataValues(t *testing.T) {
 }
 
 // The actual recipient Client downloads from the engine's authenticated file route over its Unix socket,
-// to the exact /box/attachments path named in the input. No shared-directory shortcuts or metadata-only proof.
+// to the exact path named in the input, under an isolated recipient root. The root mapping is test-only: CI hosts
+// need not have a writable /box. No shared-directory shortcuts or metadata-only proof.
 func proveDataDownload(t *testing.T, s *Service, ctx context.Context, room contract.RoomID, recipient contract.SessionID, input contract.TurnInput, want []byte) {
 	t.Helper()
 	if len(input.Files) != 1 {
 		t.Fatalf("want one recipient file: %+v", input.Files)
 	}
+	// Model the recipient box's root mount without requiring root permissions on a CI host.
+	logical := input.Files[0].Path
+	input.Files = append([]contract.TurnFile(nil), input.Files...)
+	input.Files[0].Path = filepath.Join(t.TempDir(), strings.TrimPrefix(logical, "/"))
+	input.Text = strings.ReplaceAll(input.Text, logical, input.Files[0].Path)
 	file := input.Files[0]
 	if _, err := os.Stat(file.Path); !os.IsNotExist(err) {
 		t.Fatalf("recipient path already exists: %s %v", file.Path, err)
@@ -143,7 +149,7 @@ func proveDataDownload(t *testing.T, s *Service, ctx context.Context, room contr
 	if err != nil || info.Mode().Perm()&0022 != 0 {
 		t.Fatalf("unsafe recipient file: %v %v", info, err)
 	}
-	t.Logf("recipient has %s, %d exact bytes; authenticated download and replay passed", file.Path, len(want))
+	t.Logf("recipient has %s (logical %s), %d exact bytes; authenticated download and replay passed", file.Path, logical, len(want))
 }
 
 func TestWorkflowFinalDataDelivery(t *testing.T) {
@@ -295,5 +301,23 @@ func TestWorkflowDataAttachmentNameCollision(t *testing.T) {
 	text := s.deliveryData(e, "summary")
 	if !strings.Contains(text, fmt.Sprintf("data: /box/attachments/%d/data-2.json", sent.Seq)) {
 		t.Fatalf("wrong actual path: %s", text)
+	}
+}
+
+func TestWorkflowDataAttachmentContentWithWrongMedia(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	s.SetLayout(box.Layout{Data: t.TempDir()})
+	raw := json.RawMessage(`{"value":"` + strings.Repeat("x", 1100) + `"}`)
+	other := uploadFile(t, s, room, "data.json", "text/plain", string(raw))
+	sent, p := s.Post(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.PostRequest{Room: room, Text: "summary", Data: raw, Attachments: []contract.Attachment{other}})
+	if p != nil {
+		t.Fatal(p)
+	}
+	e, err := s.store.Event(ctx, sent.Seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.deliveryData(e, "summary"); !strings.Contains(got, fmt.Sprintf("data: /box/attachments/%d/data-2.json", sent.Seq)) {
+		t.Fatalf("data with wrong media reused: %s", got)
 	}
 }
