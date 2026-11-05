@@ -20,7 +20,7 @@
   import TimelineMinimap from "./TimelineMinimap.svelte";
   import PostTarget from "./PostTarget.svelte";
   import QuestionCard from "./QuestionCard.svelte";
-  import { compactionNote, finalTimelineItem, ownPost, postDestination, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief, workingLine } from "../timeline.ts";
+  import { attemptFailedNote, compactionNote, engineEventsNote, finalTimelineItem, foldInputRuns, ownPost, postDestination, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief, workingLine } from "../timeline.ts";
 
   // With step, the thread reads one worker of a crew: its transcript alone, and nothing that was sent to the crew.
   let { hasRoom, session, step, roomName, store, operate, unsent, onunsent, onsettled, onpostlocation, navigate, startingBrief, clock = Date.now }: { hasRoom: (room: RoomID) => boolean; startingBrief?: string; session: string; step?: string; roomName: string; store: RoomStore; operate: boolean; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
@@ -226,7 +226,8 @@
   // Dyna: Text can exceed the page budget; load its full content without a disclosure.
   $effect(() => {
     for (const turn of turns) {
-      for (const input of turn.inputs ?? []) {
+      // A folded run of engine events shows no text, so only the inputs shown as rows load whole.
+      for (const { input } of foldInputRuns(turn.inputs ?? []).filter(run => run.kind === "input")) {
         const key = "input:" + input.id + "/text";
         if (input.more && chunks[key] === undefined && !chunkFailed[key]) void fetchPart(turn.id, "input:" + input.id, "text");
       }
@@ -350,7 +351,10 @@
       {@const segments = timelineSegments(turn.id, turn.items ?? [])}
       {@render dayMark(turn.started, turns[index - 1]?.started)}
       <article data-turn={turn.id} class:ended={turn.ended || stalled}>
-        {#each turn.inputs ?? [] as input (input.id)}{@render inputRow(turn, input.id, "input:" + input.id, input)}{/each}
+        {#each foldInputRuns(turn.inputs ?? []) as run (run.kind === "input" ? run.input.id : run.id)}
+          {#if run.kind === "input"}{@render inputRow(turn, run.input.id, "input:" + run.input.id, run.input)}
+          {:else}<p class="muted turn-note input-line" title={formatTime(run.from)}><span class="slot"><Icon name="inbox" size={14} /></span><span>{engineEventsNote(run)}</span></p>{/if}
+        {/each}
         {#each segments as segment, position (segment.id)}
           {@const hasWork = (!position && !!turn.olderItems) || segment.items.some(item => item.kind === "tool" || item.kind === "thinking")}
           {#each segment.steers as steer (steer.id)}{@render inputRow(turn, steer.id, steer.id, steerInput(steer))}{/each}
@@ -369,6 +373,7 @@
               {/each}
             {:else if group.item.kind === "text" || group.item.kind === "post"}
               {@render postItem(turn, group.item)}
+            {:else if group.item.kind === "attempt_failed"}<p class="muted turn-note"><span class="slot"><Icon name="warning" size={14} /></span>{attemptFailedNote(group.item)}</p>
             {:else if group.item.kind === "compaction"}<p class="muted turn-note">{compactionNote(group.item)}</p>
             {:else if group.item.kind === "too_large"}<p class="muted">This item is too large to show.</p>{/if}
           {/each}

@@ -1,7 +1,7 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.test.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { workingLine, compactionNote, summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineSegments, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, workLayout } from "./timeline.ts";
+import { workingLine, compactionNote, summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineSegments, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, workLayout, foldInputRuns, engineEventsNote, attemptFailedNote } from "./timeline.ts";
 import type { TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
 
 const steer = (id: string, at = ""): TranscriptItem => ({ id: `steer:${id}`, event: id, seq: 6, turn: "t", at, kind: "steer", from: { kind: "owner" } });
@@ -265,4 +265,38 @@ test("a running turn's working line says it is compacting while its live activit
   assert.equal(workingLine(started, now, "tool"), `Working for ${formatTimelineDuration(109_000)}`);
   assert.equal(workingLine(started, now), `Working for ${formatTimelineDuration(109_000)}`);
   assert.equal(compactionNote({ tokens: 153400 }), "Compacted the conversation at 153k tokens");
+});
+
+test("a post stands before the item that began after it, and posts of one index go in the order sent", () => {
+  const tool = (id: string, index: number): TranscriptItem => ({ id, turn: "t", at: "", kind: "tool", index });
+  const post = (id: string, index: number, seq: number): TranscriptItem => ({ id, event: id, seq, turn: "t", at: "", kind: "post", index });
+  const items = [post("late", 4, 9), tool("c", 3), post("b2", 1, 6), tool("a", 0), post("b1", 1, 5), tool("b", 1), post("mid", 3, 8)];
+  assert.deepEqual(mergeTimelineItems([], items).map(item => item.id), ["a", "b1", "b2", "b", "mid", "c", "late"]);
+  assert.deepEqual(mergeTimelineItems(items.slice(0, 3), items.slice(3)).map(item => item.id), ["a", "b1", "b2", "b", "mid", "c", "late"]);
+});
+
+const github = (id: string, at: string, text = "{}"): TranscriptInput => ({ id, seq: Number(id.replace(/\D/g, "")), at, room: "r", type: "github.pr.changed", from: { kind: "engine" }, text });
+const owner = (id: string, text: string): TranscriptInput => ({ id, seq: Number(id.replace(/\D/g, "")), at: "2026-11-01T10:00:00Z", room: "r", type: "post.created", from: { kind: "owner" }, text });
+
+test("a run of engine events folds into one row with its count and span, and a single one stays a line", () => {
+  const inputs = [owner("a1", "start"), github("e2", "2026-11-01T09:00:00Z"), { ...github("e3", "2026-11-01T09:30:00Z"), type: "github.ci.finished" }, github("e4", "2026-11-01T10:15:00Z"), owner("a5", "review please"), github("e6", "2026-11-01T11:00:00Z")];
+  const runs = foldInputRuns(inputs);
+  assert.deepEqual(runs.map(run => run.kind === "input" ? run.input.id : run.count), ["a1", 3, "a5", "e6"]);
+  const folded = runs[1];
+  assert.ok(folded.kind === "events");
+  assert.equal(folded.from, "2026-11-01T09:00:00Z");
+  assert.equal(folded.to, "2026-11-01T10:15:00Z");
+  assert.match(engineEventsNote(folded), /^3 engine events, /);
+});
+
+test("engine events are told by their type and never by their text", () => {
+  const talk = owner("a1", "github.pr.changed github.pr.changed");
+  assert.deepEqual(foldInputRuns([talk, { ...talk, id: "a2", seq: 2 }]).map(run => run.kind), ["input", "input"]);
+  assert.equal(foldInputRuns([{ ...github("e1", ""), type: "git.main_updated" }, { ...github("e2", ""), type: "github.mention" }])[0].kind, "events");
+  assert.deepEqual(foldInputRuns([github("e1", ""), { ...github("e2", ""), type: "turn.ended" }]).map(run => run.kind), ["input", "input"]);
+});
+
+test("a failed attempt is one muted line that names the failure when Pi did", () => {
+  assert.equal(attemptFailedNote({ errorName: "SocketError" }), "Attempt failed (SocketError), retried");
+  assert.equal(attemptFailedNote({}), "Attempt failed, retried");
 });
