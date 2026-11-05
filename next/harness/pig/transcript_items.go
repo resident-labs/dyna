@@ -2,6 +2,7 @@ package pig
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -33,15 +34,22 @@ func transcriptImageMedia(media string) bool {
 }
 
 // ReadTranscript decodes complete Pi records and masks their content.
-func ReadTranscript(r io.Reader, deliveries map[contract.DeliverySeq]contract.TurnID, source, fullItem string, skip, limit int) ([]TranscriptItem, int, bool, error) {
+func ReadTranscript(r io.ReadSeeker, deliveries map[contract.DeliverySeq]contract.TurnID, source, fullItem string, skip, limit int) ([]TranscriptItem, int, bool, error) {
 	return readTranscript(r, deliveries, source, fullItem, skip, limit, 16<<20)
 }
 
-func readTranscript(r io.Reader, deliveries map[contract.DeliverySeq]contract.TurnID, source, fullItem string, skip, limit int, maxRecord int64) ([]TranscriptItem, int, bool, error) {
+func readTranscript(r io.ReadSeeker, deliveries map[contract.DeliverySeq]contract.TurnID, source, fullItem string, skip, limit int, maxRecord int64) ([]TranscriptItem, int, bool, error) {
 	return readTranscriptMode(r, deliveries, nil, source, fullItem, skip, limit, maxRecord, false)
 }
 
-func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contract.TurnID, steers map[contract.DeliverySeq]bool, source, fullItem string, skip, limit int, maxRecord int64, recent bool) ([]TranscriptItem, int, bool, error) {
+func readTranscriptMode(r io.ReadSeeker, deliveries map[contract.DeliverySeq]contract.TurnID, steers map[contract.DeliverySeq]bool, source, fullItem string, skip, limit int, maxRecord int64, recent bool) ([]TranscriptItem, int, bool, error) {
+	removed, err := transcriptRemovedMessages(r)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return nil, 0, false, err
+	}
 	reader := bufio.NewReaderSize(r, 64<<10)
 	var items []*TranscriptItem
 	seen := 0
@@ -127,6 +135,7 @@ func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contrac
 				Role, DeliveryID, ToolCallID string
 				IsError                      bool
 				Content                      json.RawMessage
+				Diagnostics                  []struct{ Error struct{ Name string } }
 				Details                      struct {
 					Diff  string
 					Calls []struct {
@@ -162,7 +171,21 @@ func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contrac
 			}
 			continue
 		}
-		if m.Role == "assistant" && turn != "" {
+		if m.Role == "assistant" && turn != "" && removed[entry.ID] {
+			// Pi dropped this attempt from the model's context, so the thread shows that it failed and nothing it said.
+			marker := TranscriptItem{TranscriptItem: contract.TranscriptItem{ID: transcriptItemID(entry.ID), Turn: turn, Kind: contract.TranscriptAttemptFailed, At: entry.Timestamp}}
+			for _, diagnostic := range m.Diagnostics {
+				if diagnostic.Error.Name != "" {
+					marker.ErrorName = diagnostic.Error.Name
+					break
+				}
+			}
+			name := harness.Mask(marker.ErrorName)
+			marker.ErrorName = strings.ToValidUTF8(name[:min(64, len(name))], "")
+			if keep(&marker) {
+				items = append(items, &marker)
+			}
+		} else if m.Role == "assistant" && turn != "" {
 			var blocks []struct {
 				Type, ID, Name, Text, Thinking string
 				Arguments                      json.RawMessage
@@ -174,8 +197,14 @@ func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contrac
 				item := TranscriptItem{TranscriptItem: contract.TranscriptItem{ID: transcriptItemID(entry.ID + ":" + strconv.Itoa(n)), Turn: turn, At: entry.Timestamp}}
 				switch b.Type {
 				case "text":
+					if b.Text == "" {
+						continue
+					}
 					item.Kind, item.Text = contract.TranscriptText, harness.Mask(b.Text)
 				case "thinking":
+					if b.Thinking == "" {
+						continue
+					}
 					item.Kind, item.Text = contract.TranscriptThinking, harness.Mask(b.Thinking)
 				case "toolCall":
 					item.Kind, item.ID, item.Tool, item.Arguments = contract.TranscriptTool, transcriptItemID(b.ID), clipToolName(harness.Mask(b.Name)), harness.Mask(string(b.Arguments))
@@ -283,6 +312,35 @@ func readTranscriptMode(r io.Reader, deliveries map[contract.DeliverySeq]contrac
 				item.Output = strings.ToValidUTF8(item.Output[:1024], "")
 				item.More = true
 			}
+		}
+	}
+}
+
+// transcriptRemovedMessages finds the entries Pi's context_edit records omit from the model's context, with no replacement.
+// An edit follows the entry it removes, so a reader that builds items as it goes cannot know; this pass reads the range first.
+func transcriptRemovedMessages(r io.Reader) (map[string]bool, error) {
+	reader := bufio.NewReaderSize(r, 64<<10)
+	removed := map[string]bool{}
+	for {
+		line, err := reader.ReadSlice('\n')
+		for err == bufio.ErrBufferFull { // an edit record is a few hundred bytes, so a longer line is no edit
+			line = nil
+			_, err = reader.ReadSlice('\n')
+		}
+		if bytes.Contains(line, []byte("\"context_edit\"")) {
+			var edit struct {
+				Type, TargetID string
+				Replacement    *struct{ Content json.RawMessage }
+			}
+			if json.Unmarshal(line, &edit) == nil && edit.Type == "context_edit" && edit.Replacement == nil {
+				removed[edit.TargetID] = true
+			}
+		}
+		if err == io.EOF {
+			return removed, nil
+		}
+		if err != nil {
+			return nil, err
 		}
 	}
 }
