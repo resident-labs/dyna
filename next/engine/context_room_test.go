@@ -1,6 +1,9 @@
 package engine
 
 import (
+	"context"
+	"database/sql"
+	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
@@ -55,5 +58,50 @@ func TestContextRoomSection(t *testing.T) {
 	set(map[contract.RootApproval]bool{contract.RootApprovesHostexec: false, contract.RootApprovesAddons: false, contract.RootApprovesHosts: false, contract.RootApprovesPools: false})
 	if text, ok := section(r.root); ok {
 		t.Fatalf("all off again, root has %q", text)
+	}
+}
+
+func TestContextChildrenAndWebListUseTheSameWait(t *testing.T) {
+	r := newGrantRig(t)
+	ctx := context.Background()
+	setJobs := func(n int) {
+		t.Helper()
+		if err := r.s.store.Write(ctx, func(tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, "UPDATE sessions SET shell_jobs=? WHERE id=?", n, r.worker.Session)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snapshot := func() string {
+		t.Helper()
+		res, problem := r.s.ContextSnapshot(ctx, r.root, contract.ContextSnapshotRequest{Section: contract.ContextChildren})
+		if problem != nil {
+			t.Fatal(problem)
+		}
+		for _, sec := range res.Sections {
+			if sec.Key == contract.ContextChildren {
+				return sec.Text
+			}
+		}
+		return ""
+	}
+	setJobs(2)
+	list, problem := r.s.SessionList(ctx, r.owner, contract.SessionListRequest{Room: r.room})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	var wait *contract.SessionWaiting
+	for _, item := range list.Sessions {
+		if item.ID == r.worker.Session {
+			wait = item.Waiting
+		}
+	}
+	if wait == nil || wait.Kind != contract.WaitJobs || !strings.Contains(snapshot(), "waiting: "+wait.Label()) {
+		t.Fatalf("context/list differ: %+v %s", wait, snapshot())
+	}
+	setJobs(0)
+	if got := snapshot(); strings.Contains(got, "waiting:") {
+		t.Fatalf("wait did not clear: %s", got)
 	}
 }

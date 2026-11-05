@@ -19,8 +19,9 @@ type Result struct {
 	Running  bool                `json:"running"`
 	Status   string              `json:"status"`
 	ExitCode *int                `json:"exit_code,omitempty"`
-	// MessageArrived marks a bash call that returned early because the owner sent the session a message.
-	MessageArrived bool `json:"message_arrived,omitempty"`
+	// Interrupt names the engine-checked sender that ended the foreground wait.
+	Interrupt      *contract.Interrupt `json:"interrupt,omitempty"`
+	MessageArrived bool                `json:"message_arrived,omitempty"`
 }
 
 // Listed is one row of the job list.
@@ -65,7 +66,8 @@ func (s *Server) Run(ctx context.Context, run Run) (Result, error) {
 		return Result{}, err
 	}
 	answer := result(j)
-	answer.MessageArrived = answer.Running && j.aside
+	answer.MessageArrived = answer.Running && j.aside != nil
+	answer.Interrupt = j.aside
 	return answer, nil
 }
 
