@@ -175,3 +175,43 @@ func TestPostsFromAShellHaveTheirPlaceAmongTheItems(t *testing.T) {
 	}
 	check("posts page", posts.Turns[0].Items)
 }
+
+// A turn with more items than a page keeps the indexes of its newest window, for a posts page as for the first page.
+func TestPostsPageIndexesPostsAgainstTheNewestWindowOfALongTurn(t *testing.T) {
+	s, ctx, caller := transcriptCaller(t)
+	delivery := startTranscriptTurn(t, s, ctx, caller, 0, nil)
+	session, err := s.store.Session(ctx, caller.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		for id, at := range map[string]time.Duration{"early": 0, "late": time.Hour} {
+			event := contract.Event{ID: contract.EventID(id), Room: session.Room, From: caller, Time: base.Add(at), Body: contract.PostCreated{Text: id, Turn: "turn_a", Home: contract.Conversation{Kind: contract.ConversationFeed}}}
+			if _, err := s.store.AppendEvent(tx, event); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data := fmt.Sprintf(`{"type":"message","id":"u","timestamp":"2025-12-31T23:59:00Z","message":{"role":"user","deliveryId":"%d"}}`+"\n", delivery)
+	for i := 0; i < 300; i++ {
+		data += fmt.Sprintf(`{"type":"message","id":"t%d","timestamp":"2026-01-01T00:%02d:%02dZ","message":{"role":"assistant","content":[{"type":"toolCall","id":"c%d","name":"read","arguments":{}}]}}`+"\n", i, i/60+1, i%60, i)
+	}
+	if _, problem := appendTranscript(s, ctx, caller, "a.jsonl", 0, data); problem != nil {
+		t.Fatal(problem)
+	}
+	page, problem := s.TranscriptRead(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.TranscriptReadRequest{Session: caller.Session, Turn: "turn_a", Page: contract.TranscriptPageMandatoryPosts, Cursor: 1 << 20})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	got := map[string]int{}
+	for _, item := range page.Turns[0].Items {
+		got[item.Text] = item.Index
+	}
+	if got["early"] != 44 || got["late"] != 300 {
+		t.Fatalf("indexes %v, want early at the window's first item, 44, and late after all 300 items", got)
+	}
+}
