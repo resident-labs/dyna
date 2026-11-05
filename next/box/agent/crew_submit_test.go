@@ -141,3 +141,20 @@ func TestSubmitRefusesPathsOutsideTheFolder(t *testing.T) {
 		t.Fatalf("%d refused, result %v", refused.Load(), got)
 	}
 }
+
+// A file over the step's result limit comes back as a problem for the worker, and one exactly at the limit is read.
+func TestSubmitReadsAFileUpToTheResultLimitOnly(t *testing.T) {
+	schema, err := compileSchema([]byte(`{"type":"object","required":["count"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	const head, tail = `{"count":1,"pad":"`, `"}`
+	for size, wantProblem := range map[int]bool{stepResultBytes: false, stepResultBytes + 1: true} {
+		write(t, dir, "out.json", head+strings.Repeat("x", size-len(head)-len(tail))+tail)
+		value, problem, refused := readSubmit(schema, dir, "out.json")
+		if refused != nil || (problem != "") != wantProblem || (value == nil) != wantProblem {
+			t.Errorf("%d bytes: value %v, problem %q, refused %v", size, value != nil, problem, refused)
+		}
+	}
+}
