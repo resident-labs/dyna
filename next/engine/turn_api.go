@@ -173,7 +173,13 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 		return contract.TurnOutputResponse{}, failure(err)
 	}
 	crew := err == nil && endsWorkflow(req)
+	if !crew && len(req.Data) > 0 {
+		return contract.TurnOutputResponse{}, invalid("structured result data is only for a workflow")
+	}
 	result := req.Final
+	if len(req.Data) > 0 {
+		result = string(req.Data)
+	}
 	if req.Outcome == contract.TurnFailed {
 		result = req.Error // A run that threw has no value, and the journal must say why once its box is gone.
 	}
@@ -183,7 +189,7 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 			return contract.TurnOutputResponse{}, failure(err)
 		}
 	}
-	event, err := s.event(session.Room, caller, contract.TurnEnded{Session: session.ID, Turn: req.Turn, Outcome: req.Outcome, Final: req.Final, Usage: req.Usage, Error: req.Error, Cause: req.Cause, ShellJobs: req.ShellJobs, Jobs: req.Jobs})
+	event, err := s.event(session.Room, caller, contract.TurnEnded{Session: session.ID, Turn: req.Turn, Outcome: req.Outcome, Final: req.Final, Data: req.Data, DataAttachment: req.DataAttachment, Attachments: req.Attachments, Usage: req.Usage, Error: req.Error, Cause: req.Cause, ShellJobs: req.ShellJobs, Jobs: req.Jobs})
 	if err != nil {
 		return contract.TurnOutputResponse{}, failure(err)
 	}

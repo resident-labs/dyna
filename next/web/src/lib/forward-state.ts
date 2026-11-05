@@ -15,6 +15,6 @@ export function undoForward(state: ForwardState): ForwardState {
 }
 
 // Pending and failed posts may move slightly, but never forward.
-export function canForwardPost(pending: boolean, waiting: boolean, text: string, files: number): boolean {
-  return !pending && !waiting && (!!text.trim() || files > 0);
+export function canForwardPost(pending: boolean, waiting: boolean, text: string, files: number, data = false): boolean {
+  return !pending && !waiting && (!!text.trim() || files > 0 || data);
 }

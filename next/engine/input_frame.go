@@ -39,11 +39,11 @@ func (s *Service) framePrincipal(ctx context.Context, viewer contract.SessionID,
 
 // attachedFiles lists a post's files for the box and describes them for the frame. The Pi extension reads "shown to you" in
 // this text to put the image in the model's requests, so box/dynaext/images.go changes with it.
-func (s *Service) attachedFiles(event contract.Event, post contract.PostCreated) ([]contract.TurnFile, string) {
-	paths := s.layout.BoxAttachments(event.Seq, post.Attachments)
+func (s *Service) attachedFiles(event contract.Event, attachments []contract.Attachment) ([]contract.TurnFile, string) {
+	paths := s.layout.BoxAttachments(event.Seq, attachments)
 	files := make([]contract.TurnFile, len(paths))
 	described := make([]string, len(paths))
-	for i, file := range post.Attachments {
+	for i, file := range attachments {
 		files[i] = contract.TurnFile{Path: paths[i], SHA256: file.SHA256, Bytes: file.Bytes}
 		media, detail := file.Media, ""
 		// The bytes decide: a provider refuses an image that is not what its label says, and goes on refusing the conversation.
@@ -134,9 +134,16 @@ func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, eve
 		frame += fmt.Sprintf(" For %s, which can't receive (%s).", name, delivery.Why)
 	}
 	var files []contract.TurnFile
-	if post, ok := event.Body.(contract.PostCreated); ok && len(post.Attachments) > 0 {
+	var attachments []contract.Attachment
+	switch body := event.Body.(type) {
+	case contract.PostCreated:
+		attachments = body.Attachments
+	case contract.TurnEnded:
+		attachments = body.Attachments
+	}
+	if len(attachments) > 0 {
 		var described string
-		files, described = s.attachedFiles(event, post)
+		files, described = s.attachedFiles(event, attachments)
 		frame += " Attached: " + described + "."
 	}
 	switch delivery.Reply.Kind {
