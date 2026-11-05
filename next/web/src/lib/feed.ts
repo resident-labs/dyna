@@ -6,7 +6,7 @@ import type { Request } from "./room.svelte.ts";
 import { endCause, failed } from "./jobs.ts";
 
 export type Row =
-  | { kind: "post"; key: string; from: Principal; at: string; text: string; data?: JSONValue; attachments: Attachment[]; first: boolean; to: Principal[]; source?: PostSource | null; target?: string; pending?: Pending }
+  | { kind: "post"; key: string; from: Principal; at: string; text: string; data?: JSONValue; dataAttachment?: number | null; attachments: Attachment[]; first: boolean; to: Principal[]; source?: PostSource | null; target?: string; pending?: Pending }
   | { kind: "restarted"; key: string; session: string; at: string }
   // A plain line for what the owner did to a session or the room; describe gives its words.
   | { kind: "notice"; key: string; event: Event; resumedAt?: string }
@@ -20,7 +20,7 @@ export type Row =
   | { kind: "new"; key: string };
 
 // An owner's post the engine has not confirmed yet, with its mentions as sessions.
-export type Pending = { id: number; at: string; text: string; attachments: Attachment[]; to: Principal[]; failed: boolean };
+export type Pending = { id: number; at: string; text: string; data?: JSONValue; attachments: Attachment[]; to: Principal[]; failed: boolean };
 
 type Name = (session: string) => string;
 
@@ -151,14 +151,14 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     deferred = [];
   };
   // A post to other people, its mentions or a final reply's target, starts a new run with its own name line.
-  const post = (key: string, seq: number, from: Principal, at: string, text: string, attachments: Attachment[], to: Principal[] = [], pending?: Pending, source?: PostSource | null, target?: string, data?: JSONValue) => {
+  const post = (key: string, seq: number, from: Principal, at: string, text: string, attachments: Attachment[], to: Principal[] = [], pending?: Pending, source?: PostSource | null, target?: string, data?: JSONValue, dataAttachment?: number | null) => {
     flush();
     dated(at);
     fresh(seq, from);
     const previous = rows.at(-1);
     const first = previous?.kind !== "post" || !sameAuthor(previous.from, from) ||
       previous.source?.room !== source?.room || previous.target !== target || previous.to.length !== to.length || previous.to.some((target, i) => !sameAuthor(target, to[i]));
-    rows.push({ kind: "post", key, from, at, text, data, attachments, first, to, source, target, ...pending && { pending } });
+    rows.push({ kind: "post", key, from, at, text, data, dataAttachment, attachments, first, to, source, target, ...pending && { pending } });
   };
   // A post that carried a final reply goes to that reply's target too. The engine records this at the turn's end, later
   // than the post, so the targets are gathered first.
@@ -185,7 +185,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       const replied = (carried.get(event.id) ?? []).filter(target => !mentions.some(mention => sameAuthor(mention, target)));
       if (sameHome(event.body.home, home)) {
         for (const turn of turns.values()) if (turn.session === event.from.session) turn.posted = true;
-        post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, event.body.attachments ?? [], [...mentions, ...replied], undefined, event.body.source, undefined, event.body.data);
+        post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, event.body.attachments ?? [], [...mentions, ...replied], undefined, event.body.source, undefined, event.body.data, event.body.dataAttachment);
       }
       continue;
     }
@@ -258,7 +258,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       const turn = turns.get(event.body.turn);
       turns.delete(event.body.turn);
       if (event.body.final && answer) {
-        post(`a${event.seq}`, event.seq, { kind: "session", session: event.body.session }, event.at, event.body.final, event.body.attachments ?? [], answer.reply.target ? [answer.reply.target] : [], undefined, undefined, undefined, event.body.data);
+        post(`a${event.seq}`, event.seq, { kind: "session", session: event.body.session }, event.at, event.body.final, event.body.attachments ?? [], answer.reply.target ? [answer.reply.target] : [], undefined, undefined, undefined, event.body.data, event.body.dataAttachment);
       }
       // A failed turn always gets its own row, even after its answer; it never folds into a work row. Its error is the
       // harness's raw text (r8), so the row shows only the owner words for its typed cause.
@@ -282,7 +282,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     if (event.type === "github.pr.opened" && !event.body.session) continue;
     if (!unshown.has(event.type)) work.push(event);
   }
-  for (const sent of pending) post(`n${sent.id}`, 0, { kind: "owner" }, sent.at, sent.text, sent.attachments, sent.to, sent);
+  for (const sent of pending) post(`n${sent.id}`, 0, { kind: "owner" }, sent.at, sent.text, sent.attachments, sent.to, sent, undefined, undefined, sent.data);
   flush();
   return rows;
 }
@@ -329,7 +329,7 @@ export function formatTime(value: string): string {
 }
 
 // A post the owner forwards, as the composer holds it until a send or a remove.
-export type Quote = { author: string; at: string; text: string; attachments: Attachment[] };
+export type Quote = { author: string; at: string; text: string; data?: JSONValue; attachments: Attachment[] };
 
 // As in v1, a forward quotes the post above the owner's words. It travels as a markdown blockquote, so the feed
 // draws it as a quote and the session that reads the post sees the quoted text. The empty quoted line keeps the
@@ -548,3 +548,9 @@ export function describe(event: Event, name: Name): string {
 export const expiryTime = (expires: string | undefined): number => expires ? Date.parse(expires) : Infinity;
 export const byExpiry = (a: { expires?: string }, b: { expires?: string }): number => Math.sign(expiryTime(a.expires) - expiryTime(b.expires)) || 0;
 export const expiryText = (expires: string | undefined, now: number): string => expires ? "Expires " + fromNow(expires, now) : "Waits for a decision";
+
+// The owning post boundary identifies its data file by attachment position, not a guessed filename.
+// Keep original positions so a remaining file still opens the correct item in the media viewer.
+export function feedAttachments(attachments: Attachment[], associated?: number | null) {
+  return attachments.map((file, position) => ({ file, position })).filter(({ position }) => position !== associated);
+}

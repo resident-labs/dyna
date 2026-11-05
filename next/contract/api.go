@@ -602,18 +602,19 @@ type SessionRefreshResponse struct {
 	Marked []SessionID `json:"marked"`
 }
 type PostRequest struct {
-	Data         json.RawMessage `json:"data,omitempty"`
-	Room         RoomID          `json:"room"`
-	Text         string          `json:"text"`
-	Mentions     []string        `json:"mentions,omitempty"`
-	Home         Conversation    `json:"home,omitempty"`
-	ReplyTo      EventID         `json:"replyTo,omitempty"`
-	Attachments  []Attachment    `json:"attachments,omitempty"`
-	ClientID     string          `json:"clientId,omitempty"`     // at most 64 characters; a repeat from the same author in a room returns the first post
-	ToolCallID   string          `json:"toolCallId,omitempty"`   // Pi transcript call that sent this post
-	VisualUpdate EventID         `json:"visualUpdate,omitempty"` // original visual ID, for a new version
-	VisualReply  EventID         `json:"visualReply,omitempty"`  // visual version this post answers
-	Forward      EventID         `json:"forward,omitempty"`      // a post to quote under "Forwarded from"; Text is the sender's note
+	DataAttachment *int            `json:"-"` // filled by the owning post boundary, never trusted from a caller
+	Data           json.RawMessage `json:"data,omitempty"`
+	Room           RoomID          `json:"room"`
+	Text           string          `json:"text"`
+	Mentions       []string        `json:"mentions,omitempty"`
+	Home           Conversation    `json:"home,omitempty"`
+	ReplyTo        EventID         `json:"replyTo,omitempty"`
+	Attachments    []Attachment    `json:"attachments,omitempty"`
+	ClientID       string          `json:"clientId,omitempty"`     // at most 64 characters; a repeat from the same author in a room returns the first post
+	ToolCallID     string          `json:"toolCallId,omitempty"`   // Pi transcript call that sent this post
+	VisualUpdate   EventID         `json:"visualUpdate,omitempty"` // original visual ID, for a new version
+	VisualReply    EventID         `json:"visualReply,omitempty"`  // visual version this post answers
+	Forward        EventID         `json:"forward,omitempty"`      // a post to quote under "Forwarded from"; Text is the sender's note
 }
 type PostResponse struct {
 	Event EventID `json:"event"`
@@ -731,18 +732,19 @@ type BoxHelloResponse struct {
 	GitHub bool `json:"github,omitempty"`
 }
 type TurnOutputRequest struct {
-	Data        json.RawMessage `json:"data,omitempty"`
-	Attachments []Attachment    `json:"-"`
-	ShellJobs   int             `json:"shellJobs"`
-	Jobs        []ShellJobID    `json:"jobs,omitempty"` // the jobs ShellJobs counts
-	Error       string          `json:"error,omitempty"`
-	Cause       FailureCause    `json:"cause,omitempty"`
-	Turn        TurnID          `json:"turn"`
-	Outcome     TurnOutcome     `json:"outcome"`
-	Final       string          `json:"final,omitempty"`
-	EndPosts    []EventID       `json:"endPosts,omitempty"` // the posts that ended the turn; a completed turn with these has no final text
-	Model       string          `json:"model"`
-	Usage       Usage           `json:"usage"`
+	DataAttachment *int            `json:"-"`
+	Data           json.RawMessage `json:"data,omitempty"`
+	Attachments    []Attachment    `json:"-"`
+	ShellJobs      int             `json:"shellJobs"`
+	Jobs           []ShellJobID    `json:"jobs,omitempty"` // the jobs ShellJobs counts
+	Error          string          `json:"error,omitempty"`
+	Cause          FailureCause    `json:"cause,omitempty"`
+	Turn           TurnID          `json:"turn"`
+	Outcome        TurnOutcome     `json:"outcome"`
+	Final          string          `json:"final,omitempty"`
+	EndPosts       []EventID       `json:"endPosts,omitempty"` // the posts that ended the turn; a completed turn with these has no final text
+	Model          string          `json:"model"`
+	Usage          Usage           `json:"usage"`
 	// Unread names inputs the turn ended without giving to Pi, because their files were still on the way. The next turn takes them.
 	Unread []DeliverySeq `json:"unread,omitempty"`
 }
