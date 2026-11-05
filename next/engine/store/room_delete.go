@@ -181,6 +181,7 @@ var deleteRoom = []string{
 	`DELETE FROM boxes WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM sessions WHERE room=?1`,
 	`DELETE FROM room_repos WHERE room=?1`,
+	`DELETE FROM workflow_settings WHERE room=?1`,
 	// A repository another room lists stays, with a default room that exists. One no room lists goes, and with it any PR or issue
 	// a session of another room holds there, since no room watches that repository any more. Its CI setting goes with its row, which stops its runners as --off would.
 	`UPDATE repos SET default_room=(SELECT MIN(room) FROM room_repos WHERE repo=repos.repo) WHERE default_room=?1 AND EXISTS (SELECT 1 FROM room_repos WHERE repo=repos.repo)`,

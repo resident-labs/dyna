@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	_ "embed"
@@ -515,6 +516,7 @@ func (c *Crew) stepKey(call crewCall, profile contract.ProfileName) string {
 
 type stepInfo struct {
 	kind    contract.WorkflowStepKind
+	feature contract.WorkflowFeature // the switch that gates this step, or none
 	label   string
 	phase   string
 	profile contract.ProfileName
@@ -580,7 +582,7 @@ func (c *Crew) journal(ctx context.Context, call crewCall, key, name string, inf
 	if runes := []rune(lane); len(runes) > laneRunes {
 		lane = string(runes[:laneRunes])
 	}
-	stored, err := c.config.Engine.WorkflowStepStart(ctx, contract.WorkflowStepStartRequest{Key: key, Parent: call.Parent, Kind: info.kind, Name: name, Phase: info.phase, Lane: lane, Profile: info.profile, Detail: detail, Version: call.run.number()})
+	stored, err := c.config.Engine.WorkflowStepStart(ctx, contract.WorkflowStepStartRequest{Key: key, Parent: call.Parent, Kind: info.kind, Name: name, Phase: info.phase, Lane: lane, Profile: info.profile, Detail: detail, Version: call.run.number(), Feature: info.feature})
 	if err != nil {
 		return crewReply{Error: err.Error(), Step: name}
 	}
@@ -649,6 +651,9 @@ func (c *Crew) agentCall(ctx context.Context, call crewCall) crewReply {
 		}
 	}
 	info := stepInfo{kind: contract.WorkflowStepAgent, label: opts.Label, phase: opts.Phase, profile: opts.Profile, detail: prompt}
+	if opts.Worktree {
+		info.feature = contract.WorkflowFeatureWorktree
+	}
 	if profile != nil {
 		info.profile = profile.Name
 	}
@@ -702,10 +707,7 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 		}
 		defer release()
 	}
-	limit := stepTimeout
-	if opts.Timeout > 0 {
-		limit = time.Duration(opts.Timeout) * time.Second
-	}
+	limit := c.timeout(opts.Timeout)
 	ctx, cancel := c.builds.timeout(ctx, limit)
 	defer cancel()
 	folder := filepath.Join(c.config.State, "workers", key)
@@ -837,7 +839,7 @@ func (c *Crew) commandCall(ctx context.Context, call crewCall) crewReply {
 	if script != "" {
 		detail = script
 	}
-	info := stepInfo{kind: contract.WorkflowStepCommand, label: opts.Label, phase: opts.Phase, detail: detail}
+	info := stepInfo{kind: contract.WorkflowStepCommand, feature: contract.WorkflowFeatureRun, label: opts.Label, phase: opts.Phase, detail: detail}
 	return c.step(ctx, call, info, func(ctx context.Context, _ string) stepOutcome {
 		if refused != nil {
 			return stepOutcome{reason: "run options: " + refused.Error()}
@@ -855,11 +857,20 @@ func (c *Crew) commandCall(ctx context.Context, call crewCall) crewReply {
 	})
 }
 
-func (c *Crew) command(ctx context.Context, argv []string, opts commandOpts) stepOutcome {
-	limit := stepTimeout
-	if opts.Timeout > 0 {
-		limit = time.Duration(opts.Timeout) * time.Second
+// timeout is how long a worker or command may run: what the script asked for in seconds, else the room's default for workflows,
+// else stepTimeout when the engine sent none.
+func (c *Crew) timeout(seconds int) time.Duration {
+	c.mu.Lock()
+	inherited := c.workflow.Timeout
+	c.mu.Unlock()
+	if seconds = cmp.Or(seconds, inherited); seconds > 0 {
+		return time.Duration(seconds) * time.Second
 	}
+	return stepTimeout
+}
+
+func (c *Crew) command(ctx context.Context, argv []string, opts commandOpts) stepOutcome {
+	limit := c.timeout(opts.Timeout)
 	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
@@ -916,7 +927,7 @@ func (c *Crew) postCall(ctx context.Context, call crewCall) crewReply {
 	if len(body.Data) > 0 {
 		text += "\n\n```json\n" + string(body.Data) + "\n```"
 	}
-	return c.step(ctx, call, stepInfo{kind: contract.WorkflowStepPost, detail: text}, func(ctx context.Context, key string) stepOutcome {
+	return c.step(ctx, call, stepInfo{kind: contract.WorkflowStepPost, feature: contract.WorkflowFeaturePost, detail: text}, func(ctx context.Context, key string) stepOutcome {
 		if refused != nil {
 			return stepOutcome{reason: "post: " + refused.Error()}
 		}
@@ -942,9 +953,9 @@ func (c *Crew) workflowCall(ctx context.Context, call crewCall) crewReply {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(c.config.Workdir, path)
 	}
-	info := stepInfo{kind: contract.WorkflowStepWorkflow, detail: body.Ref}
+	info := stepInfo{kind: contract.WorkflowStepWorkflow, feature: contract.WorkflowFeatureWorkflow, detail: body.Ref}
 	key, name := c.stepKey(call, ""), info.name()
-	if _, err := c.config.Engine.WorkflowStepStart(ctx, contract.WorkflowStepStartRequest{Key: key, Parent: call.Parent, Kind: info.kind, Name: name, Phase: call.Phase, Detail: body.Ref, Version: call.run.number()}); err != nil {
+	if _, err := c.config.Engine.WorkflowStepStart(ctx, contract.WorkflowStepStartRequest{Key: key, Parent: call.Parent, Kind: info.kind, Name: name, Phase: call.Phase, Detail: body.Ref, Version: call.run.number(), Feature: info.feature}); err != nil {
 		return crewReply{Error: err.Error(), Step: name}
 	}
 	script, err := os.ReadFile(path)

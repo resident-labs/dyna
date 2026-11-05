@@ -188,7 +188,8 @@ type BoxWorkflow struct {
 	Version  int               `json:"version"`
 	Args     string            `json:"args,omitempty"`
 	Profiles []WorkflowProfile `json:"profiles"` // in meta's order: the first is the default
-	Workers  int               `json:"workers"`  // how many crew workers the box's memory allows at once
+	Workers  int               `json:"workers"`  // how many crew workers may run at once: the box's memory allows some, and the maxWorkers setting may allow fewer
+	Timeout  int               `json:"timeout"`  // seconds an agent() worker may run when the script sets no timeout: the timeout setting
 }
 
 // WorkflowReload hands a crew's box a newer version of its script. The engine sends the run's current version on each channel,
@@ -226,6 +227,8 @@ type WorkflowStepStartRequest struct {
 	Profile ProfileName      `json:"profile,omitempty"`
 	Detail  string           `json:"detail"`
 	Version int              `json:"version,omitempty"`
+	// Feature names the feature the call uses, so the settings can turn it off: worktree for agent() with a worktree, merge, run, workflow and post. Empty for a step that no switch gates.
+	Feature WorkflowFeature `json:"feature,omitempty"`
 }
 
 // WorkflowStepStartResponse carries the stored outcome. An empty State means the step has none and is now running.
