@@ -32,6 +32,10 @@ func TestWhereMatchesExactly(t *testing.T) {
 		{"kind of a push", []string{"kind=pushed", "repo=o/r"}, PrChanged{Changes: []PrChange{{PR: PrSummary{Repo: "o/r"}, Kinds: []PrChangeKind{PrChangeCIPassed, PrChangePushed}}}}, true},
 		{"another kind", []string{"kind=pushed"}, PrChanged{Changes: []PrChange{{PR: PrSummary{Repo: "o/r"}, Kinds: []PrChangeKind{PrChangeCIPassed}}}}, false},
 		{"kind on an event with none", []string{"kind=pushed"}, opened, false},
+		{"kind is the result of a default-branch CI", []string{"kind=success", "repo=o/r"}, GitMainCIFinished{Repo: "o/r", Branch: "main", Sha: "abc", Result: PrCISuccess}, true},
+		{"another result", []string{"kind=success"}, GitMainCIFinished{Repo: "o/r", Result: PrCIFailure}, false},
+		{"not the failure", []string{"kind!=failure"}, GitMainCIFinished{Repo: "o/r", Result: PrCISuccess}, true},
+		{"another repo's default-branch CI", []string{"repo=x/y"}, GitMainCIFinished{Repo: "o/r", Result: PrCISuccess}, false},
 		{"a value holding an equals sign", []string{"text~a=b"}, PrOpened{Text: "x a=b y"}, true},
 	} {
 		if got := MatchesWhere(test.where, test.body); got != test.want {
@@ -75,7 +79,7 @@ func TestWhereRefusesWhatItCannotMean(t *testing.T) {
 }
 
 func TestEverySubscribableEventHasItsDescription(t *testing.T) {
-	for _, kind := range []EventType{"github.pr.opened", "github.pr.merged", "github.pr.closed", "github.pr.changed", "github.issue.opened", "github.issue.changed", "github.issue.closed", "github.ci.finished", "github.comment", "github.label", "github.mention", "git.main_updated", "notice.posted"} {
+	for _, kind := range []EventType{"github.pr.opened", "github.pr.merged", "github.pr.closed", "github.pr.changed", "github.issue.opened", "github.issue.changed", "github.issue.closed", "github.ci.finished", "github.comment", "github.label", "github.mention", "git.main_updated", "git.main_ci_finished", "notice.posted"} {
 		if EventDoc(kind) == "" {
 			t.Errorf("%s has no description", kind)
 		}

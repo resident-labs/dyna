@@ -123,6 +123,7 @@ type Server struct {
 	nextID         int64
 	holding        bool
 	mains          map[contract.RepoName]string
+	commits        map[string]*Commit
 	pulls          map[string]*Pull
 	issues         map[string]*Issue
 	items          map[contract.RepoName][]*listed
@@ -144,7 +145,7 @@ func key(repo contract.RepoName, number int) string { return fmt.Sprintf("%s#%d"
 func New(t *testing.T) *Server {
 	t.Helper()
 	s := &Server{t: t, viewer: "owner-account", limit: 5000, remaining: 5000, reset: time.Unix(1<<31, 0), clock: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), nextID: 1000,
-		mains: map[contract.RepoName]string{}, pulls: map[string]*Pull{}, issues: map[string]*Issue{}, items: map[contract.RepoName][]*listed{}, events: map[contract.RepoName][]*event{},
+		mains: map[contract.RepoName]string{}, commits: map[string]*Commit{}, pulls: map[string]*Pull{}, issues: map[string]*Issue{}, items: map[contract.RepoName][]*listed{}, events: map[contract.RepoName][]*event{},
 		comments: map[contract.RepoName][]*comment{}, reviewComments: map[contract.RepoName][]*comment{}, hidden: map[contract.RepoName]bool{}}
 	s.Server = httptest.NewServer(s)
 	t.Cleanup(s.Close)
@@ -792,6 +793,12 @@ func (s *Server) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	repo := contract.RepoName(input.Variables["owner"] + "/" + input.Variables["name"])
+	if oid := input.Variables["oid"]; oid != "" {
+		if err := json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"viewer": user(s.viewer), "repository": map[string]any{"object": s.commitNode(repo, oid)}}}); err != nil {
+			s.t.Error(err)
+		}
+		return
+	}
 	repository := map[string]any{}
 	var failures []map[string]any
 	asked := alias.FindAllStringSubmatch(input.Query, -1)
@@ -826,4 +833,40 @@ func (s *Server) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(body); err != nil {
 		s.t.Error(err)
 	}
+}
+
+// Check is one check run in a commit's rollup.
+type Check struct {
+	Name       string
+	Conclusion string
+	URL        string
+}
+
+// Commit is what GitHub says of a commit's checks. An empty Rollup answers a null rollup, as a commit with no CI does, and no Checks
+// with a Rollup of SUCCESS is the empty success GitHub reports before any check has run.
+type Commit struct {
+	Rollup string
+	Checks []Check
+}
+
+// SetCommit sets a commit's rollup, replacing what it said.
+func (s *Server) SetCommit(repo contract.RepoName, sha string, commit Commit) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.commits[string(repo)+"@"+sha] = &commit
+}
+
+// commitNode answers the object query of a default-branch commit, which is null for a commit it does not know.
+func (s *Server) commitNode(repo contract.RepoName, sha string) any {
+	commit := s.commits[string(repo)+"@"+sha]
+	if commit == nil {
+		return nil
+	}
+	var rollup any
+	if commit.Rollup != "" {
+		rollup = map[string]any{"state": commit.Rollup, "contexts": nodes(commit.Checks, func(c Check) map[string]any {
+			return map[string]any{"__typename": "CheckRun", "name": c.Name, "conclusion": c.Conclusion, "detailsUrl": c.URL}
+		})}
+	}
+	return map[string]any{"oid": sha, "statusCheckRollup": rollup}
 }

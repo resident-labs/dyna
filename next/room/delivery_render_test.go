@@ -40,6 +40,7 @@ func TestRenderDelivery(t *testing.T) {
 		{contract.PrClosedEvent{Repo: "o/r", Number: 1, URL: "url"}, "PR o/r#1 closed without merging. url", false},
 		{contract.CIFinished{Repo: "o/r", Number: 1, URL: "url", Result: contract.PrCIFailure}, "CI on PR o/r#1 finished: failure. url", false},
 		{contract.GitMainUpdated{Repo: "o/r", Head: "abc"}, "The default branch of o/r moved to abc.", false},
+		{contract.GitMainCIFinished{Repo: "o/r", Branch: "main", Sha: "abc", Result: contract.PrCIFailure, Runs: []contract.CIRun{{Name: "build", Conclusion: "FAILURE", URL: "u"}}}, "CI on o/r main at abc finished: failure.\nbuild: FAILURE u", false},
 		{contract.OpDecided{ID: "op_1", State: contract.OpDenied, Decision: contract.Decision{Reason: "not needed"}}, "Operation op_1: denied. not needed", false},
 		{contract.OpRan{ID: "op_2", State: contract.OpFailed, Result: contract.OpResult{Error: "failed", Output: "details"}}, "Operation op_2: failed. failed\ndetails", false},
 		{contract.TurnEnded{Final: "done"}, "done", false},
