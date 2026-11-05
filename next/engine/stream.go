@@ -408,7 +408,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					}
 				}
 				select {
-				case out <- contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: start, Model: model, CompactTokens: s.profiles.CompactionTokens(profile), Sections: sections}}:
+				case out <- contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: start, Model: model, ModelInstructions: modelInstructions(model), CompactTokens: s.profiles.CompactionTokens(profile), Sections: sections}}:
 				case <-ctx.Done():
 					reason, cause = streamCanceled, ctx.Err()
 					return
