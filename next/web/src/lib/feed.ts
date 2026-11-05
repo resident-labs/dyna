@@ -103,7 +103,7 @@ export function subject(event: Event): string | undefined {
 // Events with no row. Goals show in About and the session list; failures show on the box and turn events they report.
 // A pull request's rows come from github.pr.changed. The typed PR events, issue events, feed items, git.main_updated and git.main_ci_finished exist for subscribers and sessions.
 // A running job's status is for the session that owns the job.
-const unshown = new Set<Event["type"]>(["shell.job.running", "workflow.step_changed", "workflow.status_changed", "session.profile_changed", "transcript.changed", "session.failed", "goal.set", "goal.item_changed", "goal.ended", "checkin.due", "github.pr.merged", "github.pr.closed", "github.ci.finished", "git.main_updated", "git.main_ci_finished", "github.issue.opened", "github.comment", "github.label", "github.mention", "github.issue.changed", "github.issue.closed"]);
+const unshown = new Set<Event["type"]>(["shell.job.running", "workflow.step_changed", "workflow.status_changed", "session.profile_changed", "transcript.changed", "session.failed", "goal.set", "goal.item_changed", "goal.ended", "checkin.due", "github.pr.merged", "github.pr.closed", "github.ci.finished", "git.main_updated", "git.main_ci_finished", "github.issue.opened", "github.comment", "github.label", "github.mention", "github.issue.changed", "github.issue.closed", "service.changed", "service.failed"]);
 
 // Builds the rows of one conversation. Posts and final answers become post rows, a
 // failed turn and a request are each their own row, and all other events between them fold into one work row.
@@ -317,6 +317,7 @@ export const eventGroups: Record<Event["type"], string> = {
   "hook.finished": "subscription runs", "hook.due": "subscription wakes", "notice.posted": "notices", "session.notice": "box notices",
   "shell.job.ended": "jobs finished", "shell.job.running": "job status", "grant.expired": "host grants expired",
   "host.disk_low": "disk warnings", "conversation.read": "read positions", "workflow.ended": "workflow runs", "workflow.step_changed": "workflow steps", "workflow.status_changed": "workflow status lines",
+  "service.changed": "service changes", "service.failed": "service failures",
   "session.failed": "failure notices", "goal.set": "goals set", "goal.item_changed": "goal items changed", "goal.ended": "goals ended", "checkin.due": "check-ins",
 };
 
@@ -525,6 +526,7 @@ export function describe(event: Event, name: Name): string {
     case "image.failed": return `Image for ${event.body.repo} failed`;
     case "github.pr.opened": return `${name(event.body.session ?? "")} opened pull request ${event.body.repo}#${event.body.number}`;
     case "github.pr.changed": return wakingChanges(event.body).map(changeLine).join(" · ");
+    case "service.changed": case "service.failed": return "";
     case "github.pr.merged": case "github.pr.closed": case "github.ci.finished": case "git.main_updated": case "git.main_ci_finished": case "github.issue.opened": case "github.comment": case "github.label": case "github.mention": case "github.issue.changed": case "github.issue.closed": return ""; // feedRows shows no row for them.
     case "grant.expired": return "A host execution grant expired";
     // The owner reads this feed; a room's root may also pause it.

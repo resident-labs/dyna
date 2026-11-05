@@ -48,6 +48,7 @@ type Reconciler struct {
 	hosts         map[contract.HostName]int
 	fresh         map[contract.BoxID]bool
 	disconnected  map[contract.BoxID]time.Time
+	svc           *serviceState // nil until SetServices
 	wg            sync.WaitGroup
 	pass          sync.Mutex
 }
@@ -173,6 +174,10 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	holds, err := r.store.ServiceHolds(ctx)
+	if err != nil {
+		return err
+	}
 	hostState := make(map[contract.HostName]box.HostState, len(hosts))
 	for _, host := range hosts {
 		hostState[host.Name] = host.State
@@ -257,15 +262,11 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			continue
 		}
 		placement := box.Placement{}
-		cpus, memory := b.Size.CPUs, b.Size.MemBytes
-		for _, placed := range all {
-			if placed.ID == b.ID || placed.Room != b.Room || placed.State == contract.BoxPending || placed.State == contract.BoxStopped || placed.State == contract.BoxFailed || placed.State == contract.BoxDeleted {
-				continue
-			}
-			cpus += placed.Size.CPUs
-			memory += placed.Size.MemBytes
-		}
-		if row.Limits.CPUs > 0 && cpus > 4*row.Limits.CPUs || row.Limits.MemBytes > 0 && memory > 4*row.Limits.MemBytes {
+		// A service counts at 1x against the room's limits, which is four quarters of a box's size.
+		cpuMilli, memory := box.RoomQuarters(b.Room, all, holds, b.ID, "")
+		cpuMilli += int64(b.Size.CPUs) * 1000
+		memory += b.Size.MemBytes
+		if row.Limits.CPUs > 0 && cpuMilli > 4000*int64(row.Limits.CPUs) || row.Limits.MemBytes > 0 && memory > 4*row.Limits.MemBytes {
 			placement.Reason = box.PendingRoomLimit
 		} else {
 			placement = box.Admit(hosts, all, b, row.Only...)
@@ -354,6 +355,9 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 		}
 	}
 	if err := r.poolPass(ctx, pools, slices.Concat(rows, runnerRows), all); err != nil {
+		return err
+	}
+	if err := r.servicePass(ctx, hosts, all); err != nil {
 		return err
 	}
 	return r.roomPass(ctx, hosts)
