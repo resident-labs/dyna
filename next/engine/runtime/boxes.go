@@ -316,9 +316,9 @@ func (b *Boxes) HostLoad(ctx context.Context, hosts []contract.HostSummary) erro
 		for len(h.History) > 0 && h.History[0].At.Before(cutoff) {
 			h.History = h.History[1:]
 		}
-		// A host's latest sample knows its disk's size, which the stored figures do not, so its warning comes from that.
+		// A live sample uses the same floor rule as the stored heartbeat and its notice.
 		if load.DiskBytes > 0 && !h.ExecOnly {
-			h.DiskLow = load.DiskBytes-load.DiskUsed < box.DiskWarn(box.DiskFloor(load.DiskBytes), load.DiskBytes, h.Pool != "")
+			h.DiskLow = box.DiskLow(load.DiskBytes-load.DiskUsed, box.DiskFloor(load.DiskBytes))
 		}
 		// An exec-only host has no setup check, so its capacity is what its probe measured.
 		if h.ExecOnly {
