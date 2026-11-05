@@ -37,12 +37,27 @@ func (u *upstream) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	if r.Method == http.MethodPost && strings.Contains(string(data), "node(id:$id)") {
 		var asked struct {
+			Query     string
 			Variables struct{ ID string }
 		}
 		_ = json.Unmarshal(data, &asked)
 		node, ok := u.nodes[asked.Variables.ID]
 		if !ok {
 			return reply(`{"data":{"node":null}}`)
+		}
+		// GitHub answers a union member's fields only when the query has a fragment on that member, so an item's content keeps
+		// its repository only when the query asks for it on the content's own type.
+		var item struct {
+			Content map[string]any `json:"content"`
+		}
+		_ = json.Unmarshal([]byte(node), &item)
+		_, askedContent, _ := strings.Cut(asked.Query, "content{")
+		if item.Content != nil && !strings.Contains(askedContent, "... on "+item.Content["__typename"].(string)+"{repository{nameWithOwner}}") {
+			var whole map[string]any
+			_ = json.Unmarshal([]byte(node), &whole)
+			delete(whole["content"].(map[string]any), "repository")
+			stripped, _ := json.Marshal(whole)
+			node = string(stripped)
 		}
 		return reply(`{"data":{"node":` + node + `}}`)
 	}
@@ -68,32 +83,41 @@ func (u *upstream) RoundTrip(r *http.Request) (*http.Response, error) {
 
 func newGuard() (*Guard, *upstream) {
 	up := &upstream{nodes: map[string]string{
-		"R_ok":     `{"__typename":"Repository","nameWithOwner":"acme/app"}`,
-		"R_other":  `{"__typename":"Repository","nameWithOwner":"acme/secret"}`,
-		"I_ok":     `{"__typename":"Issue","repository":{"nameWithOwner":"acme/app"}}`,
-		"I_other":  `{"__typename":"Issue","repository":{"nameWithOwner":"acme/secret"}}`,
-		"PR_ok":    `{"__typename":"PullRequest","repository":{"nameWithOwner":"acme/app"}}`,
-		"PR_other": `{"__typename":"PullRequest","repository":{"nameWithOwner":"acme/secret"}}`,
-		"P_ok":     `{"__typename":"ProjectV2","owner":{"login":"acme"}}`,
-		"P_other":  `{"__typename":"ProjectV2","owner":{"login":"stranger"}}`,
-		"IT_ok":    `{"__typename":"ProjectV2Item","project":{"owner":{"login":"acme"}},"content":{"__typename":"Issue","repository":{"nameWithOwner":"acme/app"}}}`,
-		"IT_other": `{"__typename":"ProjectV2Item","project":{"owner":{"login":"acme"}},"content":{"__typename":"Issue","repository":{"nameWithOwner":"acme/secret"}}}`,
-		"PRR_ok":   `{"__typename":"PullRequestReview","repository":{"nameWithOwner":"acme/app"}}`,
-		"IT_draft": `{"__typename":"ProjectV2Item","project":{"owner":{"login":"acme"}},"content":null}`,
-		"M_ok":     `{"__typename":"Milestone","repository":{"nameWithOwner":"acme/app"}}`,
-		"M_other":  `{"__typename":"Milestone","repository":{"nameWithOwner":"acme/secret"}}`,
-		"L_ok":     `{"__typename":"Label","repository":{"nameWithOwner":"acme/app"}}`,
-		"L_other":  `{"__typename":"Label","repository":{"nameWithOwner":"acme/secret"}}`,
+		"R_ok":        `{"__typename":"Repository","nameWithOwner":"acme/app"}`,
+		"R_other":     `{"__typename":"Repository","nameWithOwner":"acme/secret"}`,
+		"I_ok":        `{"__typename":"Issue","repository":{"nameWithOwner":"acme/app"}}`,
+		"I_other":     `{"__typename":"Issue","repository":{"nameWithOwner":"acme/secret"}}`,
+		"PR_ok":       `{"__typename":"PullRequest","repository":{"nameWithOwner":"acme/app"}}`,
+		"PR_other":    `{"__typename":"PullRequest","repository":{"nameWithOwner":"acme/secret"}}`,
+		"P_ok":        `{"__typename":"ProjectV2","owner":{"login":"acme"}}`,
+		"P_other":     `{"__typename":"ProjectV2","owner":{"login":"stranger"}}`,
+		"IT_ok":       `{"__typename":"ProjectV2Item","project":{"owner":{"login":"acme"}},"content":{"__typename":"Issue","repository":{"nameWithOwner":"acme/app"}}}`,
+		"IT_other":    `{"__typename":"ProjectV2Item","project":{"owner":{"login":"acme"}},"content":{"__typename":"Issue","repository":{"nameWithOwner":"acme/secret"}}}`,
+		"PRR_ok":      `{"__typename":"PullRequestReview","repository":{"nameWithOwner":"acme/app"}}`,
+		"IT_draft":    `{"__typename":"ProjectV2Item","project":{"owner":{"login":"acme"}},"content":{"__typename":"DraftIssue"}}`,
+		"IT_pr":       `{"__typename":"ProjectV2Item","project":{"owner":{"login":"acme"}},"content":{"__typename":"PullRequest","repository":{"nameWithOwner":"ACME/App"}}}`,
+		"IT_pr_other": `{"__typename":"ProjectV2Item","project":{"owner":{"login":"acme"}},"content":{"__typename":"PullRequest","repository":{"nameWithOwner":"acme/secret"}}}`,
+		"IT_unknown":  `{"__typename":"ProjectV2Item","project":{"owner":{"login":"acme"}},"content":{"__typename":"Discussion","repository":{"nameWithOwner":"acme/app"}}}`,
+
+		"M_ok":    `{"__typename":"Milestone","repository":{"nameWithOwner":"acme/app"}}`,
+		"M_other": `{"__typename":"Milestone","repository":{"nameWithOwner":"acme/secret"}}`,
+		"L_ok":    `{"__typename":"Label","repository":{"nameWithOwner":"acme/app"}}`,
+		"L_other": `{"__typename":"Label","repository":{"nameWithOwner":"acme/secret"}}`,
 	}, prs: map[string]bool{"acme/app#7": true}, reads: map[string]string{
 		"/repos/acme/app/issues/comments/3": `{"issue_url":"https://api.github.com/repos/acme/app/issues/3"}`,
 		"/repos/acme/app/issues/comments/4": `{"issue_url":"https://api.github.com/repos/acme/secret/issues/3"}`,
 		"/repos/acme/app/issues/comments/5": `{"issue_url":"https://evil.example/repos/acme/app/issues/3"}`,
 		"/repos/acme/app/issues/comments/6": `{}`,
 		"/repos/acme/app/issues/comments/7": `{"issue_url":"https://api.github.com/repos/ACME/App/issues/3"}`,
-		"/orgs/acme/projectsV2/4/items/9":   `{"content":{"repository_url":"https://api.github.com/repos/acme/app"}}`,
-		"/orgs/acme/projectsV2/4/items/10":  `{"content":{"repository_url":"https://api.github.com/repos/acme/secret"}}`,
-		"/orgs/acme/projectsV2/4/items/11":  `{"content":null}`,
-		"/users/acme/projectsV2/4/items/9":  `{"content":{"repository_url":"https://api.github.com/repos/acme/app"}}`,
+		"/orgs/acme/projectsV2/4/items/9":   `{"content_type":"Issue","content":{"repository_url":"https://api.github.com/repos/acme/app"}}`,
+		"/orgs/acme/projectsV2/4/items/10":  `{"content_type":"Issue","content":{"repository_url":"https://api.github.com/repos/acme/secret"}}`,
+		"/orgs/acme/projectsV2/4/items/11":  `{"content_type":"DraftIssue","content":null}`,
+		"/orgs/acme/projectsV2/4/items/13":  `{"content_type":"PullRequest","content":{"url":"https://api.github.com/repos/ACME/App/pulls/5","issue_url":"https://api.github.com/repos/acme/app/issues/5"}}`,
+		"/orgs/acme/projectsV2/4/items/14":  `{"content_type":"PullRequest","content":{"url":"https://api.github.com/repos/acme/secret/pulls/5"}}`,
+		"/orgs/acme/projectsV2/4/items/15":  `{"content_type":"Discussion","content":{"repository_url":"https://api.github.com/repos/acme/app","url":"https://api.github.com/repos/acme/app/pulls/5"}}`,
+		"/orgs/acme/projectsV2/4/items/16":  `{"content_type":"PullRequest","content":{}}`,
+		"/orgs/acme/projectsV2/4/items/17":  `{"content_type":"Issue","content":{"url":"https://api.github.com/repos/acme/app/pulls/5"}}`,
+		"/users/acme/projectsV2/4/items/9":  `{"content_type":"Issue","content":{"repository_url":"https://api.github.com/repos/acme/app"}}`,
 	}}
 	return &Guard{Base: up, API: &url.URL{Scheme: "https", Host: "api.github.com"}}, up
 }
@@ -571,6 +595,30 @@ func TestProjectItemUpdateNeedsItsContentInTheAllowedRepository(t *testing.T) {
 	expect(t, "item of another repository", rest(t, g, grant, "PATCH", "/orgs/acme/projectsV2/4/items/10", body), contract.GitHubWriteRepoNotAllowed)
 	expect(t, "draft item", rest(t, g, grant, "PATCH", "/orgs/acme/projectsV2/4/items/11", body), contract.GitHubWriteRepoNotAllowed)
 	expect(t, "item GitHub does not answer for", rest(t, g, grant, "PATCH", "/orgs/acme/projectsV2/4/items/12", body), contract.GitHubWriteIDUnresolved)
+	expect(t, "PR item of the repository, named by another case", rest(t, g, grant, "PATCH", "/orgs/acme/projectsV2/4/items/13", body), "")
+	expect(t, "PR item of another repository", rest(t, g, grant, "PATCH", "/orgs/acme/projectsV2/4/items/14", body), contract.GitHubWriteRepoNotAllowed)
+	expect(t, "content type that is none of the three", rest(t, g, grant, "PATCH", "/orgs/acme/projectsV2/4/items/15", body), contract.GitHubWriteIDUnresolved)
+	expect(t, "PR item that names no repository", rest(t, g, grant, "PATCH", "/orgs/acme/projectsV2/4/items/16", body), contract.GitHubWriteIDUnresolved)
+	expect(t, "issue item that names no repository", rest(t, g, grant, "PATCH", "/orgs/acme/projectsV2/4/items/17", body), contract.GitHubWriteIDUnresolved)
+	if len(up.sent) != 3 {
+		t.Fatalf("reached GitHub: %v", up.sent)
+	}
+}
+
+// A GraphQL project item's content is the union Issue | PullRequest | DraftIssue, read by its __typename: an issue or a PR in an
+// allowed repository passes, one in another repository is refused, a draft or any other type is refused.
+func TestGraphQLProjectItemContentIsAnIssueOrPullRequestOfAnAllowedRepository(t *testing.T) {
+	g, up := newGuard()
+	grant := grantOf("acme/app", contract.GitHubWriteProjects)
+	set := func(item string) contract.GitHubWriteReason {
+		return graphql(t, g, grant, `mutation($i:UpdateProjectV2ItemFieldValueInput!){updateProjectV2ItemFieldValue(input:$i){clientMutationId}}`, `{"i":{"projectId":"P_ok","itemId":"`+item+`","fieldId":"F","value":{}}}`)
+	}
+	expect(t, "issue item of the repository", set("IT_ok"), "")
+	expect(t, "PR item of the repository", set("IT_pr"), "")
+	expect(t, "issue item of another repository", set("IT_other"), contract.GitHubWriteRepoNotAllowed)
+	expect(t, "PR item of another repository", set("IT_pr_other"), contract.GitHubWriteRepoNotAllowed)
+	expect(t, "draft item", set("IT_draft"), contract.GitHubWriteRepoNotAllowed)
+	expect(t, "content of a type that is none of the three", set("IT_unknown"), contract.GitHubWriteRepoNotAllowed)
 	if len(up.sent) != 2 {
 		t.Fatalf("reached GitHub: %v", up.sent)
 	}
