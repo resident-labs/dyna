@@ -245,19 +245,19 @@ func TestRunnerWaitsForStartBeforeReadingSteer(t *testing.T) {
 }
 
 // A replayed steer reaches neither Pi nor the job server again: only the steer Pi queued lets a foreground command step aside,
-// and only the owner's. A session's message waits for the call to end.
+// and only with an engine-checked sender interrupt. Unrelated session messages wait for the call to end.
 func TestRunnerSkipsReplayedSteer(t *testing.T) {
 	h := &harnessFake{started: make(chan struct{}), release: make(chan struct{}), delivered: make(map[contract.DeliverySeq]bool)}
 	sink := &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 1)}
 	var stepped atomic.Int32
-	runner := &Runner{Harness: h, Sink: sink, Steered: func() { stepped.Add(1) }}
+	runner := &Runner{Harness: h, Sink: sink, Steered: func(contract.Interrupt) { stepped.Add(1) }}
 	ctx := context.Background()
 	if err := runner.Handle(ctx, contract.BoxMessage{Body: contract.TurnStart{Turn: "turn_a", Inputs: []contract.TurnInput{{Delivery: 1, Text: "start"}}}}); err != nil {
 		t.Fatal(err)
 	}
 	<-h.started
 	owner := contract.ReplyChannel{Kind: contract.ReplyFinal, Target: contract.Principal{Kind: contract.PrincipalOwner}}
-	steer := contract.BoxMessage{Body: contract.TurnSteer{Input: contract.TurnInput{Delivery: 2, Text: "update", Reply: owner}, Queue: contract.QueueSteer}}
+	steer := contract.BoxMessage{Body: contract.TurnSteer{Input: contract.TurnInput{Delivery: 2, Text: "update", Reply: owner}, Queue: contract.QueueSteer, Interrupt: &contract.Interrupt{Kind: contract.InterruptOwner}}}
 	if err := runner.Handle(ctx, steer); err != nil {
 		t.Fatal(err)
 	}
@@ -656,5 +656,43 @@ func TestRunnerClearWaitsForSteerInFlight(t *testing.T) {
 	runner.turns.Wait()
 	if h.clearedBeforeS.Load() {
 		t.Fatal("cleared before the steer returned")
+	}
+}
+
+type interruptHarness struct {
+	harnessFake
+	err error
+}
+
+func (h *interruptHarness) Steer(context.Context, contract.TurnInput) error    { return h.err }
+func (h *interruptHarness) FollowUp(context.Context, contract.TurnInput) error { return h.err }
+func TestRunnerInterruptIsTypedAndOnlyAfterSuccessfulSteer(t *testing.T) {
+	h := &interruptHarness{}
+	var got []contract.Interrupt
+	r := &Runner{Harness: h, Steered: func(i contract.Interrupt) { got = append(got, i) }}
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	for _, tc := range []struct {
+		name      string
+		interrupt *contract.Interrupt
+		reply     contract.Principal
+		queue     contract.TurnQueue
+		err       error
+		want      int
+	}{
+		{"owner reply alone", nil, owner, contract.QueueSteer, nil, 0},
+		{"parent with no owner reply", &contract.Interrupt{Kind: contract.InterruptParent, Name: "lead"}, contract.Principal{}, contract.QueueSteer, nil, 1},
+		{"grandparent", &contract.Interrupt{Kind: contract.InterruptAncestor, Name: "root"}, contract.Principal{}, contract.QueueSteer, nil, 1},
+		{"followup remains followup", &contract.Interrupt{Kind: contract.InterruptOwner}, owner, contract.QueueFollowUp, nil, 0},
+		{"failed delivery", &contract.Interrupt{Kind: contract.InterruptOwner}, owner, contract.QueueSteer, errors.New("failed"), 0},
+		{"ended turn", &contract.Interrupt{Kind: contract.InterruptOwner}, owner, contract.QueueSteer, harness.ErrNoTurn, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got = nil
+			h.err = tc.err
+			_ = r.forward(context.Background(), contract.TurnSteer{Input: contract.TurnInput{Reply: contract.ReplyChannel{Target: tc.reply}}, Queue: tc.queue, Interrupt: tc.interrupt})
+			if len(got) != tc.want {
+				t.Fatalf("interrupts %+v", got)
+			}
+		})
 	}
 }
