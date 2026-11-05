@@ -168,3 +168,17 @@ func TestServicesCountAtOneTimesAgainstRoomLimits(t *testing.T) {
 		t.Fatalf("skipping the service itself: %d", cpu)
 	}
 }
+
+// The memory budget drops with a service's memory as the CPU budget does: 4 x (121.7 - 30) GiB of boxes, not 4 x 121.7.
+func TestServicesComeOffTheTopOfBoxMemory(t *testing.T) {
+	h := ovh()
+	h.Services = []ServiceHold{{ID: "svc_a", Room: "x", CPUMilli: 1000, MemBytes: 30 * GiB}}
+	request := Box{ID: "box_big", Room: "r", Size: contract.BoxSize{Name: contract.BoxSizeSmall, CPUs: 1, MemBytes: 400 * GiB}, State: contract.BoxPending}
+	if p := Admit([]Host{h}, nil, request); p.Host != "" || p.Reason != PendingMemory {
+		t.Fatalf("placement %+v, want memory pending", p)
+	}
+	h.Services = nil
+	if p := Admit([]Host{h}, nil, request); p.Host != h.Name {
+		t.Fatalf("without the service %+v, want a placement", p)
+	}
+}
