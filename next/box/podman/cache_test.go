@@ -67,10 +67,16 @@ func TestCreateContainerVulkanEnvironment(t *testing.T) {
 printf '%s\000' "$@" > ` + quote(argsFile) + `
 export VK_ICD_FILENAMES=` + quote(lavapipe) + `
 export IMAGE_OTHER=keep-me
+# Podman removes defaults before applying explicit --env values.
+for arg in "$@"; do
+    case "$arg" in
+        --unsetenv=*) unset "${arg#--unsetenv=}" ;;
+        image) break ;;
+    esac
+done
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --env) export "$2"; shift ;;
-        --unsetenv=*) unset "${1#--unsetenv=}" ;;
         image) break ;;
     esac
     shift
