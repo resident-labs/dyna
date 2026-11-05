@@ -52,7 +52,9 @@ type Pull struct {
 	LatestReviews  []string
 	Rollup         string
 	FailedChecks   []string
-	NoChecks       bool   // the rollup holds no check
+	NoChecks       bool    // the rollup holds no check
+	Checks         []Check // the rollup's contexts, instead of FailedChecks and the passing build check; Total is its totalCount when it holds more than these
+	Total          int
 	RollupHead     string // the commit the rollup is of, when it is not Head, as GitHub can answer for a push it has not caught up with
 	Reviews        []Comment
 	Comments       []Comment
@@ -760,13 +762,18 @@ func (s *Server) pullNode(p *Pull) map[string]any {
 		decision = p.ReviewDecision
 	}
 	if p.Rollup != "" {
-		checks := nodes(p.FailedChecks, func(name string) map[string]any {
-			return map[string]any{"__typename": "CheckRun", "name": name, "conclusion": "FAILURE"}
-		})
-		if !p.NoChecks {
-			checks["nodes"] = append(checks["nodes"].([]map[string]any), map[string]any{"__typename": "CheckRun", "name": "build", "conclusion": "SUCCESS"})
+		checks := p.Checks
+		if checks == nil && !p.NoChecks {
+			checks = []Check{{Name: "build", Conclusion: "SUCCESS"}}
 		}
-		rollup = map[string]any{"state": p.Rollup, "contexts": checks}
+		failing := []Check{}
+		for _, name := range p.FailedChecks {
+			failing = append(failing, Check{Name: name, Conclusion: "FAILURE"})
+		}
+		checks = append(failing, checks...)
+		contexts := nodes(checks, checkNode)
+		contexts["totalCount"] = max(p.Total, len(checks))
+		rollup = map[string]any{"state": p.Rollup, "contexts": contexts}
 	}
 	commit := p.Head
 	if p.RollupHead != "" {
@@ -891,21 +898,24 @@ func (s *Server) commitNode(repo contract.RepoName, sha string) any {
 		if len(checks) > pageSize {
 			checks = checks[:pageSize]
 		}
-		contexts := nodes(checks, func(c Check) map[string]any {
-			if c.StatusContext {
-				return map[string]any{"__typename": "StatusContext", "context": c.Name, "state": c.Conclusion, "targetUrl": c.URL}
-			}
-			status := c.Status
-			if status == "" {
-				status = "IN_PROGRESS"
-				if c.Conclusion != "" {
-					status = "COMPLETED"
-				}
-			}
-			return map[string]any{"__typename": "CheckRun", "name": c.Name, "status": status, "conclusion": c.Conclusion, "detailsUrl": c.URL}
-		})
+		contexts := nodes(checks, checkNode)
 		contexts["totalCount"] = total
 		rollup = map[string]any{"state": commit.Rollup, "contexts": contexts}
 	}
 	return map[string]any{"oid": sha, "statusCheckRollup": rollup}
+}
+
+// checkNode is one context of a rollup as GraphQL answers it.
+func checkNode(c Check) map[string]any {
+	if c.StatusContext {
+		return map[string]any{"__typename": "StatusContext", "context": c.Name, "state": c.Conclusion, "targetUrl": c.URL}
+	}
+	status := c.Status
+	if status == "" {
+		status = "IN_PROGRESS"
+		if c.Conclusion != "" {
+			status = "COMPLETED"
+		}
+	}
+	return map[string]any{"__typename": "CheckRun", "name": c.Name, "status": status, "conclusion": c.Conclusion, "detailsUrl": c.URL}
 }
