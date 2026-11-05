@@ -146,7 +146,7 @@ func (s *Store) RecordHostHeartbeat(ctx context.Context, name contract.HostName,
 		floor := box.DiskFloor(diskTotal)
 		var low int64
 		if reachable && freeDisk != nil {
-			if err := s.warnDisk(ctx, tx, name, *freeDisk, floor, diskTotal, at); err != nil {
+			if err := s.warnDisk(ctx, tx, name, *freeDisk, floor, at); err != nil {
 				return err
 			}
 			if *freeDisk <= floor {
@@ -165,23 +165,21 @@ func (s *Store) RecordHostHeartbeat(ctx context.Context, name contract.HostName,
 	})
 }
 
-// warnDisk alerts room roots once per low spell. A spell ends a tenth above the warn level and diskAlertGap after its alert, so a host that hovers stays quiet.
-func (s *Store) warnDisk(ctx context.Context, tx *sql.Tx, name contract.HostName, free, floor, total int64, at time.Time) error {
-	var pool string
+// warnDisk alerts room roots once per low spell. A spell ends a tenth above the floor and diskAlertGap after its alert, so a host that hovers stays quiet.
+func (s *Store) warnDisk(ctx context.Context, tx *sql.Tx, name contract.HostName, free, floor int64, at time.Time) error {
 	var execOnly bool
-	if err := tx.QueryRowContext(ctx, "SELECT pool, exec_only FROM hosts WHERE name=?", name).Scan(&pool, &execOnly); err != nil && err != sql.ErrNoRows {
+	if err := tx.QueryRowContext(ctx, "SELECT exec_only FROM hosts WHERE name=?", name).Scan(&execOnly); err != nil && err != sql.ErrNoRows {
 		return err
 	}
 	// An exec-only host has no disk figures to warn about.
 	if execOnly {
 		return nil
 	}
-	warn := box.DiskWarn(floor, total, pool != "")
-	if free >= warn+warn/10 {
+	if free >= floor+floor/10 {
 		_, err := tx.ExecContext(ctx, "DELETE FROM disk_warnings WHERE host=? AND at<=?", name, at.Add(-diskAlertGap).UnixMilli())
 		return err
 	}
-	if free >= warn {
+	if !box.DiskLow(free, floor) {
 		return nil
 	}
 	result, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO disk_warnings(host,at) VALUES(?,?)", name, at.UnixMilli())
