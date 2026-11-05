@@ -16,6 +16,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/contract/tools"
 	"github.com/resident-labs/dyna/engine/connect"
+	"github.com/resident-labs/dyna/engine/githubwrites"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
@@ -54,10 +55,21 @@ func (a *API) SetGitHubRead(route http.Handler) { a.github = route }
 
 // githubTools serves GitHub's read-only MCP tools to a box. The service holds them, because a box's hello says whether they are
 // there; a service without them, such as a test's, has none.
-func (a *API) githubTools(w http.ResponseWriter, r *http.Request) {
+func (a *API) githubTools(c Caller, w http.ResponseWriter, r *http.Request) {
 	if held, ok := a.service.(interface{ GitHubTools() http.Handler }); ok {
 		if tools := held.GitHubTools(); tools != nil {
-			tools.ServeHTTP(w, r)
+			// The room is the socket's: the engine fixed it when it opened this socket for the box, and the request has no say.
+			var grant contract.GitHubWrites
+			if writes, ok := a.service.(interface {
+				GitHubWritesOf(context.Context, contract.RoomID) (contract.GitHubWrites, error)
+			}); ok {
+				var err error
+				if grant, err = writes.GitHubWritesOf(r.Context(), c.Room); err != nil {
+					writeError(w, &contract.Error{Code: contract.ErrUnavailable, Message: "the room's githubWrites setting could not be read"})
+					return
+				}
+			}
+			tools.ServeHTTP(w, r.WithContext(githubwrites.WithAllowed(r.Context(), grant)))
 			return
 		}
 	}
@@ -563,7 +575,7 @@ func (a *API) handler(c Caller) http.Handler {
 		mux.HandleFunc("/model/", func(w http.ResponseWriter, r *http.Request) { a.model(c).ServeHTTP(w, r) })
 	}
 	if box(c) {
-		mux.HandleFunc("/github/", a.githubTools)
+		mux.HandleFunc("/github/", func(w http.ResponseWriter, r *http.Request) { a.githubTools(c, w, r) })
 	}
 	// Never on the web listener, which Connect carries off the host.
 	if owner(c) && !c.Web && a.localModel != nil {

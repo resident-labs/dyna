@@ -127,11 +127,12 @@ const (
 )
 
 type Error struct {
-	Code     ErrorCode         `json:"code"`
-	Message  string            `json:"message"`
-	Visual   *VisualSuperseded `json:"visual,omitempty"`
-	Limited  *RoomLimited      `json:"limited,omitempty"`
-	Workflow *WorkflowRefused  `json:"workflow,omitempty"`
+	Code         ErrorCode            `json:"code"`
+	Message      string               `json:"message"`
+	Visual       *VisualSuperseded    `json:"visual,omitempty"`
+	Limited      *RoomLimited         `json:"limited,omitempty"`
+	Workflow     *WorkflowRefused     `json:"workflow,omitempty"`
+	GitHubWrites *GitHubWritesRefused `json:"githubWrites,omitempty"`
 }
 
 // errorBytes bounds what ReadError reads of a refusal.
@@ -198,6 +199,9 @@ type RoomSetLimitsResponse struct{}
 type RoomSetRequest struct {
 	Room         RoomID                `json:"room"`
 	RootApproves map[RootApproval]bool `json:"rootApproves,omitempty"`
+	// GitHubWrites sets the room's githubWrites setting whole (spec 7.9): the groups to allow on repositories of the room, or `*`. No groups
+	// turns it off. Nil leaves it as it is.
+	GitHubWrites *GitHubWrites `json:"githubWrites,omitempty"`
 }
 
 // RootApproval names the owner-class operations a room's root may also decide, when the owner allows it for the room.
@@ -237,6 +241,8 @@ type RoomSummary struct {
 	Waiting  []OpID    `json:"waiting"` // pending owner-class operations, which the owner decides, and the root for the kinds RootApproves names
 	// RootApproves lists the kinds the room's root may decide.
 	RootApproves []RootApproval `json:"rootApproves,omitempty"`
+	// GitHubWrites is the room's githubWrites setting, as the owner set it; nil when it is off.
+	GitHubWrites *GitHubWrites `json:"githubWrites,omitempty"`
 	// Questions are those the owner has not answered.
 	Questions []QuestionID `json:"questions,omitempty"`
 	Working   []SessionID  `json:"working"`  // open sessions with a running turn

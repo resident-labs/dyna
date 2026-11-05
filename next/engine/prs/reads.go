@@ -2,6 +2,7 @@ package prs
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -83,6 +84,12 @@ func (c *Client) resource(request *http.Request) string {
 	return "core"
 }
 
+// Vouched marks a request context as one the engine has itself checked as an allowed write, which Reads then lets out. Only code
+// in the engine process can set it: a box sends requests only to the MCP server, which builds its own.
+func Vouched(ctx context.Context) context.Context { return context.WithValue(ctx, vouchedKey{}, true) }
+
+type vouchedKey struct{}
+
 // readOnly refuses anything but a read. A GraphQL query is a POST, so its document is read here and put back.
 func readOnly(request *http.Request, resource string) (*http.Request, error) {
 	refuse := func() (*http.Request, error) {
@@ -92,7 +99,7 @@ func readOnly(request *http.Request, resource string) (*http.Request, error) {
 		return nil, fmt.Errorf("agents only read GitHub here, and %s %s would write: open a PR with pr open, and leave other writes to the owner or a host", request.Method, request.URL.Path)
 	}
 	switch {
-	case request.Method == http.MethodGet || request.Method == http.MethodHead:
+	case request.Method == http.MethodGet || request.Method == http.MethodHead || request.Context().Value(vouchedKey{}) == true:
 		return request, nil
 	case request.Method != http.MethodPost || resource != "graphql" || request.Body == nil:
 		return refuse()

@@ -225,13 +225,29 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	if len(decide) > 0 {
 		lines = append(lines, "Approvals you decide: "+strings.Join(decide, ", "))
 	}
-	add(contract.ContextRoom, lines, roomChars, 0)
-	// What the room's workflow settings change from the defaults, for every session; limits and defaults are named by the refusal that
-	// meets them.
 	session, err := s.store.Session(ctx, caller.Session)
 	if err != nil {
 		return contract.ContextSnapshotResponse{}, failure(err)
 	}
+	// What the room allows every session, when it is on: the GitHub writes of its githubWrites setting (spec 7.9).
+	granted, err := s.GitHubWritesOf(ctx, session.Room)
+	if err != nil {
+		return contract.ContextSnapshotResponse{}, failure(err)
+	}
+	if granted.On() {
+		groups := make([]string, len(granted.Groups))
+		for i, group := range granted.Groups {
+			groups[i] = string(group)
+		}
+		repos := make([]string, len(granted.Repos))
+		for i, repo := range granted.Repos {
+			repos[i] = string(repo)
+		}
+		lines = append(lines, "GitHub writes: "+strings.Join(groups, ", ")+" on "+strings.Join(repos, ", "))
+	}
+	add(contract.ContextRoom, lines, roomChars, 0)
+	// What the room's workflow settings change from the defaults, for every session; limits and defaults are named by the refusal that
+	// meets them.
 	effective, err := s.store.WorkflowEffective(ctx, session.Room)
 	if err != nil {
 		return contract.ContextSnapshotResponse{}, failure(err)
