@@ -202,7 +202,7 @@ func TestTransferToTheSameModelIsUnchanged(t *testing.T) {
 	start(t, h, "hi")
 	var kinds []contract.ActivityKind
 	h.Activity = func(_ contract.TurnID, kind contract.ActivityKind, _ string) { kinds = append(kinds, kind) }
-	result, err := h.TransferModel(context.Background(), "turn_b", contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "test-model", Thinking: contract.ThinkingHigh}, 50_000)
+	result, err := h.TransferModel(context.Background(), "turn_b", contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "test-model", Thinking: contract.ThinkingHigh}, 50_000, "")
 	if err != nil || result.Path != "unchanged" || result.TokensBefore == 0 || !reflect.DeepEqual(kinds, []contract.ActivityKind{contract.ActivityModel}) {
 		t.Fatalf("%+v %v %v", result, err, kinds)
 	}
@@ -214,7 +214,7 @@ func TestTransferToTheSameModelIsUnchanged(t *testing.T) {
 // A provider the box does not have is refused, so the turn fails without a model change.
 func TestTransferToAnUnknownModelIsRefused(t *testing.T) {
 	h := open(t, pigtest.NewModel())
-	_, err := h.TransferModel(context.Background(), "turn_b", contract.ModelChoice{Provider: "no-such-provider", ID: "m", Thinking: contract.ThinkingLow}, 0)
+	_, err := h.TransferModel(context.Background(), "turn_b", contract.ModelChoice{Provider: "no-such-provider", ID: "m", Thinking: contract.ThinkingLow}, 0, "")
 	if !errors.Is(err, harness.ErrRefused) || h.session.Model().ID != "test-model" {
 		t.Fatalf("err %v on %s", err, h.session.Model().ID)
 	}
@@ -237,7 +237,7 @@ func TestTransferToASmallerModelCompacts(t *testing.T) {
 	model := pigtest.NewModel(read, read, read, []pigtest.Block{{Text: "the summary"}})
 	h := open(t, model)
 	longTurns(t, model, h)
-	result, err := h.TransferModel(context.Background(), "turn_b", contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "small-model", Thinking: contract.ThinkingLow}, 0)
+	result, err := h.TransferModel(context.Background(), "turn_b", contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "small-model", Thinking: contract.ThinkingLow}, 0, "")
 	if err != nil || result.Path != "compacted" || result.TokensAfter >= result.TokensBefore || h.session.Model().ID != "small-model" {
 		t.Fatalf("%+v %v on %s", result, err, h.session.Model().ID)
 	}
@@ -249,7 +249,7 @@ func TestTransferAppliesTheCompactionTrigger(t *testing.T) {
 	model := pigtest.NewModel(read, read, read, []pigtest.Block{{Text: "the summary"}})
 	h := open(t, model)
 	longTurns(t, model, h)
-	result, err := h.TransferModel(context.Background(), "turn_b", contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "test-model", Thinking: contract.ThinkingLow}, 2_000)
+	result, err := h.TransferModel(context.Background(), "turn_b", contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "test-model", Thinking: contract.ThinkingLow}, 2_000, "")
 	if err != nil || result.Path != "compacted" {
 		t.Fatalf("%+v %v", result, err)
 	}
@@ -263,7 +263,7 @@ func TestAStoppedTransferKeepsTheModel(t *testing.T) {
 	longTurns(t, model, h)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	result, err := h.TransferModel(ctx, "turn_b", contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "small-model", Thinking: contract.ThinkingLow}, 0)
+	result, err := h.TransferModel(ctx, "turn_b", contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "small-model", Thinking: contract.ThinkingLow}, 0, "")
 	if err != nil || result.Path != "aborted" || h.session.Model().ID != "test-model" {
 		t.Fatalf("%+v %v on %s", result, err, h.session.Model().ID)
 	}

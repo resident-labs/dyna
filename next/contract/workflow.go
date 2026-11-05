@@ -203,10 +203,11 @@ func (WorkflowReload) isBoxMessageBody()              {}
 
 // WorkflowProfile is one profile of meta.profiles, as a worker needs it.
 type WorkflowProfile struct {
-	Name          ProfileName `json:"name"`
-	Model         ModelChoice `json:"model"`
-	CompactTokens int         `json:"compactTokens,omitempty"`
-	MaxConcurrent int         `json:"maxConcurrent,omitempty"`
+	Name              ProfileName `json:"name"`
+	Model             ModelChoice `json:"model"`
+	CompactTokens     int         `json:"compactTokens,omitempty"`
+	MaxConcurrent     int         `json:"maxConcurrent,omitempty"`
+	ModelInstructions string      `json:"modelInstructions,omitempty"`
 }
 
 // WorkflowPinRequest reports the commit the crew's checkout started on. The first report stands.
