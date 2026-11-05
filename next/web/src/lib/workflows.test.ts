@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { refusedSetting, clearRequest, duration, numberChange, overrides, profileChoices, profilesChange, scopeKey, scopeLine, scopeName, scopeOrder, serial, setRequest, source,
+import { fieldText, limits, refusedSetting, clearRequest, duration, numberChange, overrides, profileChoices, profilesChange, scopeKey, scopeLine, scopeName, scopeOrder, serial, setRequest, source,
   valueText, workflowChips, workflowSummary } from "./workflows.ts";
+import { MaxWorkflowCount, MaxWorkflowTimeout, MinWorkflowCount, MinWorkflowTimeout } from "./contract.gen.ts";
 import type { WorkflowEffective, WorkflowScope, WorkflowSetting, WorkflowSettings } from "./contract.gen.ts";
 
 // The engine's built-in defaults (contract.WorkflowDefaults) and its order of the settings (contract.AllWorkflowSettings).
@@ -65,9 +66,9 @@ test("a timeout reads in the largest whole unit", () => {
 test("a row names the values its scope sets, or that a room uses the global default, or that it is the built-in default", () => {
   assert.equal(scopeLine(room("r", "a"), order), "Uses global");
   assert.equal(scopeLine(global(), order), "Built-in defaults");
-  assert.equal(scopeLine(room("r", "a", { worktree: false, maxRuns: 3 }, { worktree: false, maxRuns: 3 }), order), "Runs at once 3 · Worktrees off");
-  assert.equal(scopeLine(global({ start: "root", timeout: 3600 }, { start: "root", timeout: 3600 }), order), "Who may start root only · Worker timeout 1 hour");
-  assert.equal(scopeLine(room("r", "a", { profiles: ["fast"] }, { profiles: ["fast"] }), order), "Profiles fast");
+  assert.equal(scopeLine(room("r", "a", { worktree: false, maxRuns: 3 }, { worktree: false, maxRuns: 3 }), order), "Runs at once: 3 · Worktrees: off");
+  assert.equal(scopeLine(global({ start: "root", timeout: 3600 }, { start: "root", timeout: 3600 }), order), "Who may start: root only · Worker timeout: 1 hour");
+  assert.equal(scopeLine(room("r", "a", { profiles: ["fast"] }, { profiles: ["fast"] }), order), "Profiles: fast");
 });
 
 test("Overrides counts the rooms that set a value and Uses global the rooms that set none; the global default is in neither", () => {
@@ -112,8 +113,13 @@ test("a number field sends a whole number unlike the value in force, the caps le
   assert.deepEqual(numberChange(r, "maxRuns", "-1"), { room: "r1", set: { maxRuns: -1 } });
   assert.deepEqual(numberChange(global(), "timeout", "2592001"), { set: { timeout: 2592001 } });
   assert.deepEqual(numberChange(global(), "maxWorkers", "12"), { set: { maxWorkers: 12 } });
-  for (const text of ["3", "03", "", "  ", "2.5", "abc", "Infinity", "1e400"]) assert.equal(numberChange(r, "maxRuns", text), undefined, text);
-  assert.equal(numberChange(global(), "timeout", "18000"), undefined);
+  for (const text of ["", "  ", "2.5", "abc", "Infinity", "1e400"]) assert.equal(numberChange(r, "maxRuns", text), undefined, text);
+  // The room inherits 3: typing 3 pins it on the room, as a switch does; a room that sets 3 already sends nothing.
+  assert.deepEqual(numberChange(r, "maxRuns", "03"), { room: "r1", set: { maxRuns: 3 } });
+  const own = room("r1", "a", { maxRuns: 3 }, { maxRuns: 3 });
+  for (const text of ["3", "03"]) assert.equal(numberChange(own, "maxRuns", text), undefined, text);
+  assert.deepEqual(numberChange(global(), "timeout", "18000"), { set: { timeout: 18000 } });
+  assert.equal(numberChange(global({ timeout: 18000 }), "timeout", "18000"), undefined);
 });
 
 test("Profiles start from the profiles in force, every one when none is set, and the last one unticked returns to inheriting", () => {
@@ -158,4 +164,22 @@ test("a refusal shows under the setting the engine names, else the one the reque
   assert.equal(refusedSetting({ set: { start: "off" } }, "start"), "start");
   assert.equal(refusedSetting({ set: { maxRuns: 2 } }, "profiles"), "profiles");
   assert.equal(refusedSetting({ set: {} }), undefined);
+});
+
+test("the fields' bounds are the contract's caps, which workflow.set holds values to", () => {
+  assert.deepEqual(limits, { maxRuns: [MinWorkflowCount, MaxWorkflowCount], maxWorkers: [MinWorkflowCount, MaxWorkflowCount], timeout: [MinWorkflowTimeout, MaxWorkflowTimeout] });
+  assert.deepEqual([MinWorkflowCount, MaxWorkflowCount, MinWorkflowTimeout, MaxWorkflowTimeout], [0, 10000, 1, 2592000]);
+});
+
+test("a number field shows what was typed while its refusal shows, and the value in force once the refusal is gone", () => {
+  const r = room("r1", "a", {}, { timeout: 7200 });
+  const refused = { key: "r1", setting: "timeout" as const, text: "timeout is a number of seconds, from 1 to 2592000", typed: "9999999" };
+  assert.equal(fieldText(r, "timeout", refused), "9999999");
+  assert.equal(fieldText(r, "timeout", undefined), "7200");
+  // Another setting's refusal, or another scope's, leaves this field at the value in force.
+  assert.equal(fieldText(r, "timeout", { ...refused, setting: "maxRuns" }), "7200");
+  assert.equal(fieldText(r, "maxRuns", refused), "0");
+  assert.equal(fieldText(global({}, { timeout: 60 }), "timeout", refused), "60");
+  // A refusal of a select or switch has nothing typed.
+  assert.equal(fieldText(r, "timeout", { key: "r1", setting: "timeout", text: "no" }), "7200");
 });
