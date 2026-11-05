@@ -114,3 +114,12 @@ func (ServiceChanged) isEventBody()         {}
 
 func (ServiceFailure) EventType() EventType { return "service.failed" }
 func (ServiceFailure) isEventBody()         {}
+
+type (
+	ServiceRestartResponse  = ServiceActionResponse
+	ServiceStopResponse     = ServiceActionResponse
+	ServiceStartResponse    = ServiceActionResponse
+	ServiceUpdateResponse   = ServiceActionResponse
+	ServiceRollbackResponse = ServiceActionResponse
+	ServiceRemoveResponse   = ServiceActionResponse
+)
