@@ -3,44 +3,49 @@ package engine
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/resident-labs/dyna/contract"
 )
 
 const postDataInlineBytes = 1024
 
-// preparePostData owns JSON validation/encoding and persists large values before any delivery can reference them.
-// Compact preserves number spellings and UTF-8, removes insignificant whitespace, and adds no newline.
-func (s *Service) preparePostData(ctx context.Context, room contract.RoomID, data json.RawMessage, files []contract.Attachment) (json.RawMessage, []contract.Attachment, *int, error) {
+var errPostDataUTF8 = errors.New("post data is not valid UTF-8")
+
+// preparePostData owns validation/encoding and persists large values before delivery references them.
+// JSONData is encoded text on the wire; its inner JSON is validated here, without decoding numbers.
+func (s *Service) preparePostData(ctx context.Context, room contract.RoomID, data contract.JSONData, files []contract.Attachment) (contract.JSONData, []contract.Attachment, *int, error) {
 	if len(data) == 0 {
-		return nil, files, nil, nil
+		return "", files, nil, nil
+	}
+	if !utf8.ValidString(string(data)) {
+		return "", nil, nil, errPostDataUTF8
 	}
 	var encoded bytes.Buffer
-	if err := json.Compact(&encoded, data); err != nil {
-		return nil, nil, nil, fmt.Errorf("invalid post data: %w", err)
+	if err := json.Compact(&encoded, []byte(data)); err != nil {
+		return "", nil, nil, fmt.Errorf("invalid post data: %w", err)
 	}
-	data, _ = json.Marshal(json.RawMessage(encoded.Bytes())) // Match the stored event encoding (HTML-sensitive characters are escaped).
+	canonical, _ := json.Marshal(json.RawMessage(encoded.Bytes())) // HTML-safe, retaining number and string token spellings.
+	data = contract.JSONData(canonical)
 	if len(data) <= postDataInlineBytes {
 		return data, files, nil, nil
 	}
-	hash, n, err := s.saveFile(ctx, room, bytes.NewReader(data), int64(len(data)))
+	hash, n, err := s.saveFile(ctx, room, strings.NewReader(string(data)), int64(len(data)))
 	if err != nil {
-		return nil, nil, nil, err
+		return "", nil, nil, err
 	}
-	// This exact content is validated JSON, even if an existing copy was uploaded as plain text.
-	// Normalize matching media before event_files records the hash's first media type.
+	// Exact matching content is validated JSON, even if an existing copy was uploaded as plain text.
 	files = slices.Clone(files)
 	for i := range files {
 		if files[i].SHA256 == hash {
 			files[i].Media = "application/json"
 		}
 	}
-	// A forwarded post already carries its data blob. Do not add a second copy.
 	index := slices.IndexFunc(files, func(file contract.Attachment) bool {
 		return file.SHA256 == hash && file.Name == "data.json" && file.Media == "application/json"
 	})
@@ -51,9 +56,9 @@ func (s *Service) preparePostData(ctx context.Context, room contract.RoomID, dat
 	return data, files, &index, nil
 }
 
-// deliveryData adds only typed data; JSON-looking text is never inspected.
+// deliveryData adds only explicitly encoded data; post text is not inspected.
 func (s *Service) deliveryData(event contract.Event, text string) string {
-	var data json.RawMessage
+	var data contract.JSONData
 	var attachments []contract.Attachment
 	var index *int
 	switch body := event.Body.(type) {
@@ -70,47 +75,45 @@ func (s *Service) deliveryData(event contract.Event, text string) string {
 		if index != nil {
 			return text + fmt.Sprintf("\n\ndata: %s (%s)", paths[*index], fileSize(attachments[*index].Bytes))
 		}
-		// Persisted data always has its blob. Never turn a corrupt/old event into an unbounded input.
 		return text + "\n\ndata: attachment unavailable"
 	}
 	var pretty bytes.Buffer
-	_ = json.Indent(&pretty, data, "", "  ") // The owning boundary already validated this value.
+	_ = json.Indent(&pretty, []byte(data), "", "  ") // Validated by the owning boundary.
 	return text + "\n\ndata:\n" + pretty.String()
 }
 
-// transcriptData bounds the JSON carried inside a transcript page. The complete blob remains on the existing
-// authenticated file route; a typed reference lets the web fetch it on expansion rather than lose an oversized post.
-func transcriptData(data json.RawMessage, files []contract.Attachment) (json.RawMessage, *contract.PostDataRef) {
-	if len(data) <= 32<<10 {
+// transcriptData uses the constructor's associated file index, not a filename or content-hash guess.
+func transcriptData(data contract.JSONData, files []contract.Attachment, associated *int) (contract.JSONData, *contract.PostDataRef) {
+	if len(data) <= 32<<10 || associated == nil {
 		return data, nil
 	}
-	if i := dataAttachment(data, files); i >= 0 {
-		file := files[i]
-		var value any
-		decoder := json.NewDecoder(bytes.NewReader(data))
-		decoder.UseNumber()
-		_ = decoder.Decode(&value) // Already validated and encoded by the post boundary.
-		summary := "null"
-		switch v := value.(type) {
-		case map[string]any:
-			summary = fmt.Sprintf("%d keys", len(v))
-		case []any:
-			summary = fmt.Sprintf("%d items", len(v))
-		case string:
-			summary = "string"
-		case bool:
-			summary = "boolean"
-		case json.Number:
-			summary = "number"
+	file := files[*associated]
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.UseNumber()
+	token, _ := decoder.Token() // Canonical JSON is already validated.
+	summary := "null"
+	switch value := token.(type) {
+	case json.Delim:
+		count := 0
+		for decoder.More() {
+			if value == '{' {
+				_, _ = decoder.Token()
+			}
+			var child json.RawMessage
+			_ = decoder.Decode(&child) // Skip a child without recursively materializing a Go value.
+			count++
 		}
-		return nil, &contract.PostDataRef{File: file, Summary: summary}
+		noun := "items"
+		if value == '{' {
+			noun = "keys"
+		}
+		summary = fmt.Sprintf("%d %s", count, noun)
+	case string:
+		summary = "string"
+	case bool:
+		summary = "boolean"
+	case json.Number:
+		summary = "number"
 	}
-	return data, nil
-}
-
-// Names alone do not identify generated data: a post may already have an unrelated data.json attachment.
-func dataAttachment(data json.RawMessage, files []contract.Attachment) int {
-	hash := sha256.Sum256(data)
-	sum := hex.EncodeToString(hash[:])
-	return slices.IndexFunc(files, func(file contract.Attachment) bool { return file.SHA256 == sum && file.Media == "application/json" })
+	return "", &contract.PostDataRef{File: file, Summary: summary}
 }
