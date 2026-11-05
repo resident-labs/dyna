@@ -31,7 +31,13 @@ type Config struct {
 	Dir   string // where a relative cwd starts: the session's checkout, or a worker's tree
 	Shell *shell.Server
 	Dyna  *dynamcp.Server
+	// Submit judges the file a schema step's worker names; the tool is declared only when it is set.
+	Submit Submit
 }
+
+// Submit checks the JSON file at path. Its text goes back to the worker, end says the worker's turn is over, and an error is a
+// refusal of the path.
+type Submit func(path string) (text string, end bool, err error)
 
 const (
 	// outputLimit is what the model reads of a long output; the whole output goes to a file.
@@ -113,8 +119,34 @@ func Extension(c Config) extension.InlineExtension {
 		api.RegisterTool(job(c))
 		api.RegisterTool(postDefinition)
 		api.RegisterTool(visualDefinition)
+		if c.Submit != nil {
+			api.RegisterTool(submit(c.Submit))
+		}
 		return nil
 	}}
+}
+
+func submit(judge Submit) extension.ToolDefinition {
+	return extension.ToolDefinition{
+		Name:          "submit",
+		Label:         "submit",
+		Description:   "Submits this step's result: the JSON file at path, checked against the step's JSON Schema. The tool is declared because the step has a schema, and the result goes through it, not through the final text, which is not read. path is in your working folder or worktree, and a path outside it, a symlink out, a missing file or a folder is refused with an error. A valid file is the step's result and ends your turn. An invalid file (not JSON, or schema errors) comes back here with its errors, to fix in the file before submitting again; the third invalid submit fails the step, and so does ending the turn without a valid one. A large result is built up in the file over several calls: write a first part, then append or edit item by item. Or a script generates it from data already on disk, rather than one long call writing it out.",
+		PromptSnippet: "Submit the JSON file that is this step's result",
+		Parameters:    json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}`),
+		Execute: func(_ context.Context, _ string, params json.RawMessage, _ extension.AgentToolUpdateCallback) (extension.AgentToolResult, error) {
+			var call struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal(params, &call); err != nil {
+				return extension.AgentToolResult{}, err
+			}
+			text, end, err := judge(call.Path)
+			if err != nil {
+				return extension.AgentToolResult{}, err
+			}
+			return extension.AgentToolResult{Content: []ai.ToolResultMessageContent{ai.TextContent{Text: text}}, Terminate: end}, nil
+		},
+	}
 }
 
 func bash(c Config, roots map[string]string) extension.ToolDefinition {

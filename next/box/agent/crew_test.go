@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/box/dynaext"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -99,17 +100,22 @@ func (j *fakeJournal) WorkflowPost(_ context.Context, req contract.PostRequest) 
 
 // fakeWorker answers as reply says. It stands in for a Pi process.
 type fakeWorker struct {
-	reply func(prompt string, model string) (contract.TurnEnded, error)
-	model string
-	file  string
-	act   func(dir, prompt string) // what the worker does to its tree before it answers
-	hold  func(ctx context.Context, prompt string) error
-	dir   string
+	reply  func(prompt string, model string) (contract.TurnEnded, error)
+	model  string
+	file   string
+	act    func(dir, prompt string) // what the worker does to its tree before it answers
+	hold   func(ctx context.Context, prompt string) error
+	dir    string
+	work   func(dir string, submit dynaext.Submit) // what a schema worker does with its submit tool
+	submit dynaext.Submit
 }
 
 func (w *fakeWorker) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput, _ func()) (contract.TurnEnded, error) {
 	if w.act != nil {
 		w.act(w.dir, inputs[0].Text)
+	}
+	if w.work != nil && w.submit != nil {
+		w.work(w.dir, w.submit)
 	}
 	if w.hold != nil {
 		if err := w.hold(ctx, inputs[0].Text); err != nil {
@@ -128,6 +134,9 @@ func (w *fakeWorker) Close() error        { return nil }
 
 type crewHarness struct {
 	t       *testing.T
+	work    func(dir string, submit dynaext.Submit)
+	mu      sync.Mutex
+	submits []bool // whether each opened worker had the submit tool
 	journal *fakeJournal
 	started atomic.Int32
 	reply   func(prompt, model string) (contract.TurnEnded, error)
@@ -165,13 +174,16 @@ func (h *crewHarness) start(script string, profiles ...contract.WorkflowProfile)
 	crew, err := NewCrew(CrewConfig{
 		Workflow: contract.BoxWorkflow{Run: "wf_1", Name: "test", Script: script, Version: 1, Args: `{"topic":"bounds"}`, Profiles: profiles, Workers: 16},
 		Engine:   h.journal,
-		Open: func(_ context.Context, profile contract.WorkflowProfile, folder, dir string) (crewWorker, error) {
+		Open: func(_ context.Context, profile contract.WorkflowProfile, folder, dir string, submit dynaext.Submit) (crewWorker, error) {
 			data, err := os.ReadFile(filepath.Join(folder, "models.json"))
 			if err != nil || !strings.Contains(string(data), contract.WorkerHeader) {
 				h.t.Errorf("worker configuration %s: %v", data, err)
 			}
 			h.started.Add(1)
-			return &fakeWorker{reply: h.reply, act: h.act, hold: h.hold, dir: dir, model: profile.Model.ID, file: filepath.Join(sessions, fmt.Sprintf("w%d.jsonl", opened.Add(1)))}, nil
+			h.mu.Lock()
+			h.submits = append(h.submits, submit != nil)
+			h.mu.Unlock()
+			return &fakeWorker{reply: h.reply, act: h.act, work: h.work, submit: submit, hold: h.hold, dir: dir, model: profile.Model.ID, file: filepath.Join(sessions, fmt.Sprintf("w%d.jsonl", opened.Add(1)))}, nil
 		},
 		Transcript: NewTranscript(&transcriptEngine{}, sessions),
 		Workdir:    h.workdir,
@@ -584,30 +596,6 @@ await post('@root', 'g1 written', null); status('g1 written'); return a`
 	}
 }
 
-func TestASchemaGetsThreeAttempts(t *testing.T) {
-	h := newCrewHarness(t)
-	var prompts []string
-	var mu sync.Mutex
-	replies := []string{"not json", `{"count": "many"}`, "```json\n{\"count\": 3}\n```"}
-	h.reply = func(prompt, _ string) (contract.TurnEnded, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		prompts = append(prompts, prompt)
-		return contract.TurnEnded{Final: replies[len(prompts)-1]}, nil
-	}
-	schema := `{ schema: { type: 'object', required: ['count'], properties: { count: { type: 'number' } } } }`
-	got := h.result(crewMeta + `return await agent('count them', ` + schema + `)`).(map[string]any)
-	if got["count"] != float64(3) || len(prompts) != 3 || !strings.Contains(prompts[0], "JSON Schema") || !strings.Contains(prompts[1], "does not match") {
-		t.Fatalf("%v from %q", got, prompts)
-	}
-	h = newCrewHarness(t)
-	h.reply = func(string, string) (contract.TurnEnded, error) { return contract.TurnEnded{Final: "never json"}, nil }
-	ended := h.run(crewMeta + `return await agent('count them', ` + schema + `)`)
-	if ended.Outcome != contract.TurnFailed || !strings.Contains(ended.Error, "3 attempts") {
-		t.Fatalf("turn %+v", ended)
-	}
-}
-
 func TestAProfileLimitBoundsItsWorkers(t *testing.T) {
 	h := newCrewHarness(t)
 	var running, peak atomic.Int32
@@ -635,7 +623,7 @@ func TestStoppingARunStoresNothing(t *testing.T) {
 	}
 	state, sessions := t.TempDir(), t.TempDir()
 	crew, err := NewCrew(CrewConfig{Workflow: contract.BoxWorkflow{Script: crewMeta + `return await agent('long')`, Profiles: []contract.WorkflowProfile{{Name: "fast"}}, Workers: 1}, Engine: h.journal, Transcript: NewTranscript(&transcriptEngine{}, sessions), Workdir: h.workdir, Sessions: sessions, State: state,
-		Open: func(context.Context, contract.WorkflowProfile, string, string) (crewWorker, error) {
+		Open: func(context.Context, contract.WorkflowProfile, string, string, dynaext.Submit) (crewWorker, error) {
 			return &fakeWorker{reply: h.reply, file: filepath.Join(sessions, "w.jsonl")}, nil
 		}})
 	if err != nil {
@@ -668,7 +656,7 @@ func TestAReconnectDoesNotRestartTheScript(t *testing.T) {
 	}
 	state, sessions := t.TempDir(), t.TempDir()
 	crew, err := NewCrew(CrewConfig{Workflow: contract.BoxWorkflow{Script: crewMeta + `return await agent('long')`, Profiles: []contract.WorkflowProfile{{Name: "fast"}}, Workers: 1}, Engine: h.journal, Transcript: NewTranscript(&transcriptEngine{}, sessions), Workdir: h.workdir, Sessions: sessions, State: state,
-		Open: func(context.Context, contract.WorkflowProfile, string, string) (crewWorker, error) {
+		Open: func(context.Context, contract.WorkflowProfile, string, string, dynaext.Submit) (crewWorker, error) {
 			h.started.Add(1)
 			return &fakeWorker{reply: h.reply, file: filepath.Join(sessions, "w.jsonl")}, nil
 		}})
@@ -788,7 +776,7 @@ func TestARecoveredCrewFilesItsWorkersUnderItsTurn(t *testing.T) {
 	sessions := t.TempDir()
 	var delivery contract.DeliverySeq
 	crew, err := NewCrew(CrewConfig{Workflow: contract.BoxWorkflow{Script: crewMeta + `return await agent('one')`, Profiles: []contract.WorkflowProfile{{Name: "fast"}}, Workers: 1}, Engine: h.journal, Transcript: NewTranscript(&transcriptEngine{}, sessions), Workdir: h.workdir, Sessions: sessions, State: t.TempDir(),
-		Open: func(context.Context, contract.WorkflowProfile, string, string) (crewWorker, error) {
+		Open: func(context.Context, contract.WorkflowProfile, string, string, dynaext.Submit) (crewWorker, error) {
 			return recordingWorker{fakeWorker: &fakeWorker{reply: h.reply, file: filepath.Join(sessions, "w.jsonl")}, delivery: &delivery}, nil
 		}})
 	if err != nil {

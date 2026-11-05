@@ -349,6 +349,7 @@ const (
 	CauseSetupFailed         FailureCause = "setup_failed"          // the box could not set up the session's repository before the turn
 	CauseModelFailed         FailureCause = "model_failed"          // the model provider refused or failed the request
 	CauseOutputLimit         FailureCause = "output_limit"          // the reply reached the model's output limit
+	CauseNoSubmit            FailureCause = "no_submit"             // a schema step's worker ended without a valid submit
 	CauseHarnessFailed       FailureCause = "harness_failed"        // the agent program stopped or could not run the turn
 	CauseSetModelFailed      FailureCause = "set_model_failed"      // the agent program refused the session's new model
 	CauseNotStarted          FailureCause = "not_started"           // on a stopped turn: it stopped before Pi took its inputs, so they stay pending
