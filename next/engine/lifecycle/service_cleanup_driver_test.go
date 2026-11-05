@@ -1,4 +1,4 @@
-package podman
+package lifecycle_test
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/box"
+	"github.com/resident-labs/dyna/box/podman/podmantest"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/store"
@@ -46,7 +47,7 @@ func TestRemoveServiceCleanupErrorsKeepLifecycleRetryState(t *testing.T) {
 				path = "offline_leftover"
 			}
 			t.Run(failure+"/"+path, func(t *testing.T) {
-				fixture := newServiceCleanupFixture(t)
+				fixture := podmantest.NewServiceCleanup(t)
 				ctx := context.Background()
 				now := time.Unix(100000, 0)
 				dir := t.TempDir()
@@ -76,7 +77,7 @@ func TestRemoveServiceCleanupErrorsKeepLifecycleRetryState(t *testing.T) {
 							return event(room, body)
 						},
 						func() time.Time { return now })
-					r.SetServices(cleanupServiceHosts{fixture.host}, lifecycle.DefaultServiceTimings)
+					r.SetServices(cleanupServiceHosts{fixture.Host}, lifecycle.DefaultServiceTimings)
 					return r
 				}
 				r := newReconciler()
@@ -128,7 +129,7 @@ func TestRemoveServiceCleanupErrorsKeepLifecycleRetryState(t *testing.T) {
 					}
 				}
 
-				failureFile := filepath.Join(fixture.home, failure)
+				failureFile := filepath.Join(fixture.Home, failure)
 				if err := os.WriteFile(failureFile, nil, 0o600); err != nil {
 					t.Fatal(err)
 				}
@@ -161,7 +162,7 @@ func TestRemoveServiceCleanupErrorsKeepLifecycleRetryState(t *testing.T) {
 					}
 				}
 				assertRetryState()
-				calls, err := os.ReadFile(filepath.Join(fixture.home, "calls"))
+				calls, err := os.ReadFile(filepath.Join(fixture.Home, "calls"))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -173,9 +174,9 @@ func TestRemoveServiceCleanupErrorsKeepLifecycleRetryState(t *testing.T) {
 				if !strings.Contains(string(calls), command) {
 					t.Fatalf("cleanup never reached failing command %q:\n%s", command, calls)
 				}
-				remaining := filepath.Join(fixture.home, "secrets", box.ServiceSecretName(id, "TOKEN"))
+				remaining := filepath.Join(fixture.Home, "secrets", box.ServiceSecretName(id, "TOKEN"))
 				if failure == "container-remove-error" {
-					remaining = filepath.Join(fixture.home, "containers", box.ServiceName(id))
+					remaining = filepath.Join(fixture.Home, "containers", box.ServiceName(id))
 				}
 				if _, err := os.Stat(remaining); err != nil {
 					t.Fatalf("failure stub did not leave its host object for retry: %v", err)
@@ -208,12 +209,12 @@ func TestRemoveServiceCleanupErrorsKeepLifecycleRetryState(t *testing.T) {
 				if err != nil || len(debts) != 0 {
 					t.Fatalf("successful retry left cleanup debt: %v, %v", debts, err)
 				}
-				for _, path := range fixture.removed {
+				for _, path := range fixture.Removed {
 					if _, err := os.Stat(path); !os.IsNotExist(err) {
 						t.Errorf("successful retry left host object %s: %v", path, err)
 					}
 				}
-				for _, path := range fixture.kept {
+				for _, path := range fixture.Kept {
 					if _, err := os.Stat(path); err != nil {
 						t.Errorf("cleanup affected unrelated host object %s: %v", path, err)
 					}
