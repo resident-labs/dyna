@@ -126,6 +126,7 @@
   {#if quote}<div class="quote"><p class="label"><Icon name="forward" size={14} /><span>Forwarding a post from <strong>{quote.author}</strong></span>
     <button type="button" aria-label="Remove forwarded post" title="Remove forwarded post" onclick={() => { onunquote(); element?.focus(); }}><Icon name="close" size={14} /></button></p>
     <div class="quoted"><Markdown text={quote.text} /></div>
+    {#if quote.data !== undefined}<p class="files">Structured data included</p>{/if}
     {#if quote.attachments.length}<p class="files">{count(quote.attachments.length, "file")}: {quote.attachments.map(file => file.name).join(", ")}</p>{/if}
     {#if replacement}<p class="replaced" aria-live="polite"><span>Replaced the post from {replacement.author}.</span><button type="button" onclick={onundo}><Icon name="undo" size={14} />Undo</button></p>{/if}</div>{/if}
   {#if files.items.length}

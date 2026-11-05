@@ -307,7 +307,7 @@
     // Mentions come from the owner's own words only, so an @name inside a forwarded post wakes nobody.
     const post = dm ? { text, mentions: [] } : parseMentions(text, store.sessions.values());
     // A forward carries the post's files; the engine keeps each file once, by hash, for every conversation.
-    const request: PostRequest = { room, text: quote ? quoted(quote, post.text) : post.text, mentions: post.mentions.length ? post.mentions : undefined,
+    const request: PostRequest = { room, data: quote?.data, text: quote ? quoted(quote, post.text) : post.text, mentions: post.mentions.length ? post.mentions : undefined,
       home: dm ? { kind: "dm", session: dm } : undefined, attachments: attachments.length ? attachments : undefined };
     if (dm && dm === session) void thread?.send(request);
     else if (dm) void call("post", request).catch(() => keep(request));

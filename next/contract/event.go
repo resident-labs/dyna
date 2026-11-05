@@ -80,16 +80,17 @@ type PostSent struct {
 
 // PostCreated is a post in a room.
 type PostCreated struct {
-	Source      *PostSource     `json:"source,omitempty"` // immutable identity for a cross-room post
-	Text        string          `json:"text"`
-	Data        json.RawMessage `json:"data,omitempty"`
-	Turn        TurnID          `json:"turn,omitempty"`
-	Mentions    []Principal     `json:"mentions,omitempty"`
-	Home        Conversation    `json:"home"` // feed or a DM
-	ReplyTo     EventID         `json:"replyTo,omitempty"`
-	Attachments []Attachment    `json:"attachments,omitempty"`
-	ClientID    string          `json:"clientId,omitempty"` // the sender's PostRequest.ClientID, so a pending row is replaced exactly
-	ToolCallID  string          `json:"toolCallId,omitempty"`
+	DataAttachment *int            `json:"dataAttachment,omitempty"` // index of the associated JSON file; other attachments remain visible
+	Source         *PostSource     `json:"source,omitempty"`         // immutable identity for a cross-room post
+	Text           string          `json:"text"`
+	Data           json.RawMessage `json:"data,omitempty"`
+	Turn           TurnID          `json:"turn,omitempty"`
+	Mentions       []Principal     `json:"mentions,omitempty"`
+	Home           Conversation    `json:"home"` // feed or a DM
+	ReplyTo        EventID         `json:"replyTo,omitempty"`
+	Attachments    []Attachment    `json:"attachments,omitempty"`
+	ClientID       string          `json:"clientId,omitempty"` // the sender's PostRequest.ClientID, so a pending row is replaced exactly
+	ToolCallID     string          `json:"toolCallId,omitempty"`
 	// Hook names the subscription whose Run wrote this post. The engine sends it, but the text is the script's.
 	Hook SubscriptionID `json:"hook,omitempty"`
 }
@@ -216,16 +217,17 @@ type TurnOutcome string // "completed" | "failed" | "stopped"
 
 // TurnEnded is a session's turn ending.
 type TurnEnded struct {
-	Data        json.RawMessage `json:"data,omitempty"`
-	Attachments []Attachment    `json:"attachments,omitempty"`
-	Session     SessionID       `json:"session"`
-	Turn        TurnID          `json:"turn"`
-	Outcome     TurnOutcome     `json:"outcome"`
-	Final       string          `json:"final,omitempty"`   // the final response
-	Replies     []FinalReply    `json:"replies,omitempty"` // where Final was delivered
-	Usage       Usage           `json:"usage"`
-	Error       string          `json:"error,omitempty"` // failed only
-	Cause       FailureCause    `json:"cause,omitempty"` // failed only
+	DataAttachment *int            `json:"dataAttachment,omitempty"`
+	Data           json.RawMessage `json:"data,omitempty"`
+	Attachments    []Attachment    `json:"attachments,omitempty"`
+	Session        SessionID       `json:"session"`
+	Turn           TurnID          `json:"turn"`
+	Outcome        TurnOutcome     `json:"outcome"`
+	Final          string          `json:"final,omitempty"`   // the final response
+	Replies        []FinalReply    `json:"replies,omitempty"` // where Final was delivered
+	Usage          Usage           `json:"usage"`
+	Error          string          `json:"error,omitempty"` // failed only
+	Cause          FailureCause    `json:"cause,omitempty"` // failed only
 	// ShellJobs counts the background shell jobs still running when the turn ended. Each job's
 	// end wakes the session, so the next turn.ended carries the new count.
 	ShellJobs int `json:"shellJobs,omitempty"`
