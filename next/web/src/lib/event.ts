@@ -26,7 +26,7 @@ const card = object({
   command: optional(nullable(array(string))),
 });
 const state = oneOf("pending", "approved", "denied", "expired", "withdrawn", "done", "failed");
-const cause = optional(oneOf("run_timeout", "create_failed", "start_failed", "no_hello", "engine_restarted", "remove_failed", "archive_failed", "grant_inactive", "host_lost", "host_busy", "github_failed", "stale", "interrupted", "internal", "setup_failed", "model_failed", "output_limit", "harness_failed", "set_model_failed", "not_started", "closed", "workflow_failed", "nested_device_missing", "kvm_device_missing"));
+const cause = optional(oneOf("run_timeout", "create_failed", "start_failed", "no_hello", "engine_restarted", "remove_failed", "archive_failed", "grant_inactive", "host_lost", "host_busy", "github_failed", "stale", "interrupted", "internal", "setup_failed", "model_failed", "output_limit", "no_submit", "harness_failed", "set_model_failed", "not_started", "closed", "workflow_failed", "nested_device_missing", "kvm_device_missing"));
 // How a shell job ended.
 const jobEnd = object({ kind: oneOf("exit", "signal", "stopped"), code: optional(number), signal: optional(string) });
 const boxState = oneOf("pending", "creating", "starting", "ready", "stopped", "closing", "deleted", "failed", "lost");
