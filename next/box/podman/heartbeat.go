@@ -14,7 +14,17 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+type ProbeOutcome uint8
+
+const (
+	ProbeUnknown ProbeOutcome = iota
+	ProbeGood
+	ProbeFailed
+)
+
 type Load struct {
+	Probe                                  ProbeOutcome
+	Health                                 contract.HostHealth
 	CPUUsed                                float64
 	MemBytes, MemUsed, DiskBytes, DiskUsed int64
 	ShareUp                                bool            // The host's shared mount is up.
@@ -63,11 +73,12 @@ const heartbeatProbe = 20 * time.Second
 const masterCheck = 5 * time.Second
 
 // Heartbeat reports load on each good tick and reports unreachable after three misses in a row.
-// A probe that fails while the SSH master is alive is not a miss: the master's keepalives still get answers, so the host is up,
-// only too busy to run the probe in time. A host that is really gone stops answering them, and the master ends.
+// A failed probe counts toward scheduling degradation even when the master is alive. Reachability is separate:
+// only a dead master counts toward unreachable, so busy probes cannot disrupt running boxes.
 // Each good probe also reads the dyna budget slices and calls onPressure once per episode. The caller owns the ticks.
 func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box.Layout, report func(reachable bool, load Load), onPressure func(slice string, kind contract.PressureKind)) {
 	misses, busy, beats := 0, false, 0
+	failures := 0
 	seen := make(map[string]*slicePressure)
 	var prevTime time.Time
 	var prevCPU, prevBusy, prevTotal int64
@@ -95,21 +106,28 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box
 				if ctx.Err() != nil {
 					return
 				}
+				failures++
+				load.Probe, load.GPUs = ProbeFailed, nil
+				if failures >= box.ProbeFailureLimit {
+					load.Health = contract.HostDegraded
+				}
 				if h.answering(ctx) {
 					if !busy {
 						log.Printf("host %s: heartbeat probe failed, but its SSH master is alive: %v", h.destination, err)
 					}
 					busy, misses = true, 0
+					report(true, load)
 					continue
 				}
 				busy = false
 				misses++
-				if misses >= 3 {
+				if misses >= box.ProbeFailureLimit {
 					report(false, load)
 				}
 				continue
 			}
-			misses, busy = 0, false
+			misses, busy, failures = 0, false, 0
+			load.Health, load.Probe = contract.HostHealthy, ProbeGood
 			load.GPUs = nil
 			if probe == "gpu" && !execOnly {
 				gpus := parseGPUs(out)
@@ -117,7 +135,7 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box
 			}
 			beats++
 			if execOnly {
-				load = Load{ExecOnly: true}
+				load = Load{ExecOnly: true, Health: contract.HostHealthy, Probe: ProbeGood}
 				load.DiskBytes, load.DiskUsed = parseDisk(out)
 				for _, line := range strings.Split(string(out), "\n") {
 					var cpuBusy, total int64

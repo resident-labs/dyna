@@ -288,7 +288,7 @@
   // A DM's running turn, which the composer can stop.
   const stopOf = (running: string | undefined) => {
     const current = store;
-    if (!running || !current?.running(running)) return undefined;
+    if (!running || !current || (!current.running(running) && !current.starting(running))) return undefined;
     return { stopping: current.stopping.has(running), failed: current.stopFailed.has(running), run: () => current.stop(running) };
   };
   let stop = $derived(stopOf(session));
@@ -476,7 +476,7 @@
       case "background": { const wait = store?.backgroundWaits.get(id); return wait ? `Waiting · ${waitingLabel(wait)}` : "Waiting"; }
       case "working": { const label = store?.activity.get(id); return label ? `Working · ${activityLabel(label)}` : "Working"; }
       case "failed": return broken ? boxReason(broken) : turnReason(cause);
-      default: return reason ? waits[reason] : starting(id) ? "Starting" : store?.boxes.get(id) === "stopped" ? "Asleep" : "";
+      default: return reason ? waits[reason] : starting(id) ? store?.startLine(id) ?? "Starting" : store?.boxes.get(id) === "stopped" ? "Asleep" : "";
     }
   };
   // A row's line: what needs the owner, else what the session works on. A crew has no row: Runs lists its run.

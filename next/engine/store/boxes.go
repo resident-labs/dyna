@@ -110,7 +110,7 @@ func (s *Store) TransitionBox(ctx context.Context, b box.Box, to contract.BoxSta
 		if next.Host != "" {
 			host = &next.Host
 		}
-		result, err := tx.ExecContext(ctx, "UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,updated_at=?,due_at=CASE WHEN ?='ready' THEN 0 ELSE due_at END WHERE id=? AND state=? AND (?!='ready' OR ? NOT IN ('creating','starting') OR due_at=0 OR due_at>?) AND (?!='lost' OR ?!='ready' OR EXISTS (SELECT 1 FROM hosts WHERE name=boxes.host AND state!='unreachable' AND state!='removed'))", host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, event.Time.UnixMilli(), next.State, next.ID, b.State, next.State, b.State, event.Time.UnixMilli(), b.State, next.State)
+		result, err := tx.ExecContext(ctx, "UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,updated_at=?,due_at=CASE WHEN ?='ready' THEN 0 ELSE due_at END WHERE id=? AND state=? AND (want='run' OR ?!='ready') AND (?!='ready' OR ? NOT IN ('creating','starting') OR due_at=0 OR due_at>?) AND (?!='lost' OR ?!='ready' OR EXISTS (SELECT 1 FROM hosts WHERE name=boxes.host AND state!='unreachable' AND state!='removed'))", host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, event.Time.UnixMilli(), next.State, next.ID, b.State, next.State, next.State, b.State, event.Time.UnixMilli(), b.State, next.State)
 		if err != nil {
 			return err
 		}
@@ -164,9 +164,9 @@ func (s *Store) SetBoxLifecycle(ctx context.Context, old, next box.Box, due time
 		if next.Host != "" {
 			host = &next.Host
 		}
-		admission := (old.State == contract.BoxPending || old.State == contract.BoxStopped) && next.State != contract.BoxClosing
+		admission := (old.State == contract.BoxPending || old.State == contract.BoxStopped) && next.State != contract.BoxClosing && next.State != contract.BoxStopped
 		// created_at is the allocation time for disk accounting, not the waiter's enqueue time.
-		result, err := tx.ExecContext(ctx, `UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,gpu_index=?,created_at=CASE WHEN state='pending' AND ?='creating' AND image='' THEN ? ELSE created_at END,updated_at=?,due_at=?,failures=?,create_generation=CASE WHEN ?='creating' THEN coalesce((SELECT create_generation FROM hosts WHERE name=?),0) ELSE create_generation END WHERE id=? AND state=? AND (NOT ? OR (want='run' AND due_at<=?)) AND (?!='creating' OR image!='' OR EXISTS (SELECT 1 FROM hosts WHERE name=? AND create_problem='')) AND (?!='lost' OR ?='closing' OR EXISTS (SELECT 1 FROM hosts WHERE name=boxes.host AND state='ready')) AND (?!='lost' OR ?!='ready' OR want IN ('run','stop'))`, host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, next.GPUCard, next.State, event.Time.UnixMilli(), event.Time.UnixMilli(), dueMS, failures, next.State, host, old.ID, old.State, admission, event.Time.UnixMilli(), next.State, host, old.State, next.State, old.State, next.State)
+		result, err := tx.ExecContext(ctx, `UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,gpu_index=?,created_at=CASE WHEN state='pending' AND ?='creating' AND image='' THEN ? ELSE created_at END,updated_at=?,due_at=?,failures=?,create_generation=CASE WHEN ?='creating' THEN coalesce((SELECT create_generation FROM hosts WHERE name=?),0) ELSE create_generation END WHERE id=? AND state=? AND (? NOT IN ('starting','ready') OR want='run') AND (NOT ? OR (want='run' AND due_at<=?)) AND (?!='creating' OR image!='' OR EXISTS (SELECT 1 FROM hosts WHERE name=? AND create_problem='')) AND (?!='lost' OR ?='closing' OR EXISTS (SELECT 1 FROM hosts WHERE name=boxes.host AND state='ready')) AND (?!='lost' OR ?!='ready' OR want IN ('run','stop'))`, host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, next.GPUCard, next.State, event.Time.UnixMilli(), event.Time.UnixMilli(), dueMS, failures, next.State, host, old.ID, old.State, next.State, admission, event.Time.UnixMilli(), next.State, host, old.State, next.State, old.State, next.State)
 		if err != nil {
 			return err
 		}
@@ -256,7 +256,7 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 			dueMS = due.UnixMilli()
 		}
 		// A completed turn after an early hello may have reset the current failure count.
-		result, err := tx.ExecContext(ctx, `UPDATE boxes SET failed_create=CASE WHEN ?='failed' AND ?!='' THEN 1 ELSE 0 END,image=?,state=?,reason=?,due_at=?,created_at=CASE WHEN ?='' THEN ? ELSE created_at END,failures=CASE WHEN ?='ready' THEN failures ELSE ? END WHERE id=? AND state=?`, to, failure, image, to, reason, dueMS, failure, event.Time.UnixMilli(), state, failures, b.ID, state)
+		result, err := tx.ExecContext(ctx, `UPDATE boxes SET failed_create=CASE WHEN ?='failed' AND ?!='' THEN 1 ELSE 0 END,image=?,state=?,reason=?,due_at=?,created_at=CASE WHEN ?='' THEN ? ELSE created_at END,failures=CASE WHEN ?='ready' THEN failures ELSE ? END WHERE id=? AND state=? AND want='run'`, to, failure, image, to, reason, dueMS, failure, event.Time.UnixMilli(), state, failures, b.ID, state)
 		if err != nil {
 			return err
 		}

@@ -25,7 +25,7 @@ type Builder struct {
 	Recorder Recorder
 	Now      func() time.Time
 	mu       sync.Mutex
-	locks    map[contract.HostName]*sync.Mutex
+	locks    map[contract.HostName]chan struct{}
 }
 
 // Build serializes a host's build checks and records their outcome: a new image or a failure. An image that already
@@ -34,16 +34,20 @@ func (b *Builder) Build(ctx context.Context, host Host, room contract.RoomID, ho
 	tag := Tag(name, base, tree)
 	b.mu.Lock()
 	if b.locks == nil {
-		b.locks = make(map[contract.HostName]*sync.Mutex)
+		b.locks = make(map[contract.HostName]chan struct{})
 	}
 	lock := b.locks[hostName]
 	if lock == nil {
-		lock = &sync.Mutex{}
+		lock = make(chan struct{}, 1)
 		b.locks[hostName] = lock
 	}
 	b.mu.Unlock()
-	lock.Lock()
-	defer lock.Unlock()
+	select {
+	case lock <- struct{}{}:
+		defer func() { <-lock }()
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
 	start := b.Now()
 	built, err := host.Build(ctx, tag, base, data)
 	var body contract.EventBody

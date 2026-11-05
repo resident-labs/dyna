@@ -27,6 +27,7 @@ type activeStep struct {
 
 type Reconciler struct {
 	hostMemory    func(contract.HostName) int64
+	hostHealth    func(contract.HostName) contract.HostHealth
 	restoring     func(contract.HostName) bool
 	store         *store.Store
 	boxes         BoxAdapter
@@ -55,10 +56,13 @@ type Reconciler struct {
 func New(st *store.Store, boxes BoxAdapter, view View, repos Repositories, event func(contract.RoomID, contract.Principal, contract.EventBody) (contract.Event, error), now func() time.Time) *Reconciler {
 	st.SetTerminals(func(id contract.SessionID) bool { return view.OpenTerminal(id) })
 	return &Reconciler{store: st, boxes: boxes, view: view, repos: repos, event: event, now: now, createContext: func(ctx context.Context) (context.Context, context.CancelFunc) {
-		return context.WithTimeout(ctx, 15*time.Minute)
+		return context.WithTimeout(ctx, box.StartPreparationBudget)
 	}, kick: make(chan struct{}, 1), roomSteps: make(map[string]bool), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool), disconnected: make(map[contract.BoxID]time.Time), idle: make(map[contract.HostName]time.Time), audited: make(map[string]time.Time)}
 }
 func (r *Reconciler) SetHostMemory(read func(contract.HostName) int64) { r.hostMemory = read }
+func (r *Reconciler) SetHostHealth(read func(contract.HostName) contract.HostHealth) {
+	r.hostHealth = read
+}
 
 // SetHostRestoring tells the reconciler which hosts have not had their box sockets put back since the engine started. Their
 // boxes cannot reach the engine, so that silence says nothing about them. Heartbeats still report a host that is really gone.
@@ -114,6 +118,11 @@ func (r *Reconciler) Run(ctx context.Context, ticks <-chan time.Time) {
 	}
 }
 func (r *Reconciler) Wait() { r.wg.Wait() }
+
+// CancelStart requests cancellation without waiting for bounded remote termination and cleanup. The durable want=stop
+// fences admission and hello before this call; the active step remains owned and joined by the reconciler.
+func (r *Reconciler) CancelStart(id contract.BoxID) { r.cancel(id); r.Kick() }
+
 func (r *Reconciler) Cancel(id contract.BoxID) {
 	r.pass.Lock()
 	done := r.cancel(id)
@@ -163,6 +172,11 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	hosts, err := r.store.Hosts(ctx)
 	if err != nil {
 		return err
+	}
+	if r.hostHealth != nil {
+		for i := range hosts {
+			hosts[i].Health = r.hostHealth(hosts[i].Name)
+		}
 	}
 	if r.hostMemory != nil {
 		for i := range hosts {
@@ -250,6 +264,18 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 				if err := r.closePass(ctx, row, hostState[row.Host]); err != nil {
 					return err
 				}
+			}
+			continue
+		}
+		if row.Want == store.WantStop && (b.State == contract.BoxPending || b.State == contract.BoxCreating || b.State == contract.BoxStarting) {
+			r.mu.Lock()
+			active := r.active[b.ID]
+			if active != nil {
+				active.cancel()
+			}
+			r.mu.Unlock()
+			if active == nil {
+				r.launch(ctx, row)
 			}
 			continue
 		}

@@ -275,6 +275,7 @@ type SessionListRequest struct {
 type BoxReason string // The stored reason for the current box state, including admission waits and failures.
 
 type SessionSummary struct {
+	Start        *BoxStartStatus `json:"start,omitempty"`
 	LastRead     int64           `json:"lastRead"`
 	ID           SessionID       `json:"id"`
 	Name         string          `json:"name"`
@@ -420,10 +421,11 @@ type RoomShared struct {
 
 // HostSession is a session whose live box a host holds, whatever that box's state.
 type HostSession struct {
-	Room     RoomID    `json:"room"`
-	ID       SessionID `json:"id"`
-	Name     string    `json:"name"`
-	BoxState BoxState  `json:"boxState"`
+	Start    *BoxStartStatus `json:"start,omitempty"`
+	Room     RoomID          `json:"room"`
+	ID       SessionID       `json:"id"`
+	Name     string          `json:"name"`
+	BoxState BoxState        `json:"boxState"`
 }
 
 // HostProblem identifies a durable admission problem independently of reachability.
@@ -444,6 +446,7 @@ type RunnerImageProblem struct {
 }
 
 type HostSummary struct {
+	Health       HostHealth           `json:"health,omitempty"`
 	Problem      HostProblem          `json:"problem,omitempty"`
 	RunnerImages []RunnerImageProblem `json:"runnerImages,omitempty"` // runner images that failed to build here
 	Sessions     []HostSession        `json:"sessions,omitempty"`     // in rooms the caller can read

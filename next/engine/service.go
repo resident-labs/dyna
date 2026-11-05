@@ -61,6 +61,7 @@ type Service struct {
 	boxes             lifecycle.BoxAdapter
 	reconciler        *lifecycle.Reconciler
 	binary            string
+	startStatus       func(contract.BoxID) *contract.BoxStartStatus
 	profiles          Profiles
 	repos             Repositories
 	compose           *compose.Files
@@ -130,6 +131,10 @@ func (s *Service) lookupSession(id contract.SessionID) (*live.Session, bool) {
 		return nil, false
 	}
 	return handle, true
+}
+
+func (s *Service) SetStartStatus(read func(contract.BoxID) *contract.BoxStartStatus) {
+	s.startStatus = read
 }
 
 func New(st *store.Store, boxes lifecycle.BoxAdapter, profiles Profiles, now func() time.Time) *Service {

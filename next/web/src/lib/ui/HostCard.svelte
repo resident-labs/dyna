@@ -1,6 +1,7 @@
 <script lang="ts">
   import { MediaQuery } from "svelte/reactivity";
   import type { HostSummary } from "../contract.gen.ts";
+  import { startLabel } from "../start.ts";
   import { boxWords, count } from "../feed.ts";
   import { diskLow, hang, hostLabel, hostMeters, largeShared, lastSeen, roomSessions, sharedSize } from "../hosts.ts";
   import Avatar from "./Avatar.svelte";
@@ -33,7 +34,7 @@
 
 <section class="card" aria-label={hostLabel(host.name)}>
   <h3>{hostLabel(host.name)}
-    <span class="aside state">{#if diskLow(host)}<StatusPill tone="warning" label="Disk low" />{/if}
+    <span class="aside state">{#if host.reachable && host.health === "degraded"}<StatusPill tone="warning" label="Degraded" />{/if}{#if diskLow(host)}<StatusPill tone="warning" label="Disk low" />{/if}
       {#if !host.reachable}<StatusPill tone="error" label="Unreachable" />
       {:else if host.execOnly}Online
       {:else if listed}<button type="button" class="count" bind:this={button} popovertarget={`sessions-${host.name}`} aria-haspopup="dialog" aria-expanded={open}>{count(host.boxes, "workspace")}</button>
@@ -54,7 +55,7 @@
             <p class="room"><Avatar kind="room" name={group.name} size={16} />{group.name}</p>
             {#each group.sessions as session (session.id)}
               <a class="row" class:quiet={session.boxState === "stopped"} href={`/r/${encodeURIComponent(group.room)}/s/${encodeURIComponent(session.id)}`} onclick={navigate}>
-                <span class="name">{session.name}</span>{#if session.boxState !== "ready"}<span class="word">{boxWords[session.boxState]}</span>{/if}</a>
+                <span class="name">{session.name}</span>{#if session.boxState !== "ready"}<span class="word">{session.start ? startLabel(session.start, host.name, now) : boxWords[session.boxState]}</span>{/if}</a>
             {/each}
           {/each}
         </div>

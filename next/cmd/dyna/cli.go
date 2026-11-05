@@ -627,6 +627,9 @@ func addCLI(root *cobra.Command, getClient func() client) {
 			} else if h.DiskLow {
 				state = "low"
 			}
+			if h.Health == contract.HostDegraded {
+				state += "\tdegraded; no new boxes or runners"
+			}
 			if h.Problem == contract.HostProblemCreateFailed {
 				state += "\tbox creation failed; clear with host set --clear-create-problem"
 			}

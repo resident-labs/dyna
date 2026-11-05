@@ -13,7 +13,7 @@
     onclose: (refocus: boolean) => void; onclosed: (sessions: string[]) => void;
   } = $props();
   type Entry = { key: string; label: string };
-  const labels: Record<SessionAction, string> = { move: "Move under…", stop: "Stop turn", restart: "Restart box…", close: "Close session…" };
+  const labels: Record<SessionAction, string> = { move: "Move under…", stop: "Stop", restart: "Restart box…", close: "Close session…" };
   let step: "actions" | "move" = $state("actions");
   let busy = $state(false), failure = $state("");
   let root: HTMLDivElement;
@@ -26,7 +26,7 @@
   // A session may move under any session in its room except itself and its descendants. The engine checks the same rule.
   let view: { label: string; items: Entry[]; note?: string } = $derived.by(() => {
     if (step === "move") return { label: `Move ${name} under`, items: sessions.filter(item => item.session !== session && !under.includes(item.session)).map(item => ({ key: item.session, label: item.name })), note: failure };
-    const actions = sessionActions(open?.parent, store.running(session) && !store.stopping.has(session), store.boxes.get(session));
+    const actions = sessionActions(open?.parent, (store.running(session) || store.starting(session)) && !store.stopping.has(session), store.boxes.get(session));
     return { label: `Actions for ${name}`, items: actions.map(key => ({ key, label: labels[key] })) };
   });
   // The menu closes first, and its props go with it, so these read what they need now.

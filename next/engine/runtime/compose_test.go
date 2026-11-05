@@ -109,7 +109,7 @@ func (r *stackRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte, 
 	case r.fail != "" && strings.Contains(command, r.fail):
 		status = 125
 	case strings.Contains(command, "dyna-probe"):
-		body = "sum\n"
+		body = strings.Repeat("a", 64) + "\n"
 	case strings.Contains(command, "label=dyna.stack="):
 		body = `[{"Names":["dyna-sidecar-box_1-db"],"Labels":{"dyna.stack.order":"0","dyna.stack.wait":"0"},"State":"running"}]`
 	}
@@ -167,7 +167,7 @@ func creatingBoxes(t *testing.T, r *stackRunner) (*Boxes, lifecycle.BoxSpec) {
 		t.Fatal(err)
 	}
 	b := &Boxes{Store: composeStore{}, Compose: files, RoomImages: files.Images.(*engineimages.Store), Sockets: sockets, Runtime: runtimeDir, Version: "v1", Layout: box.Layout{HostData: "/host"}, hosts: map[contract.HostName]*podman.Host{"host": host}}
-	b.binOnce.Do(func() { b.binSum = "sum" })
+	b.binOnce.Do(func() { b.binSum = strings.Repeat("a", 64) })
 	size, _ := box.Size(contract.BoxSizeAgent)
 	return b, lifecycle.BoxSpec{Box: "box_1", Session: "ses_1", Room: "room_1", Host: "host", Slice: "dyna-box_1.slice", Size: size}
 }

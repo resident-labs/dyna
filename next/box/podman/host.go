@@ -2,7 +2,10 @@
 package podman
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,12 +30,19 @@ type Runner interface {
 }
 type ExecRunner struct{}
 
-func (ExecRunner) Run(ctx context.Context, in []byte, args ...string) ([]byte, error) {
+func (r ExecRunner) Run(ctx context.Context, in []byte, args ...string) ([]byte, error) {
+	return r.RunProgress(ctx, in, nil, args...)
+}
+
+func (ExecRunner) RunProgress(ctx context.Context, in []byte, progress func(int), args ...string) ([]byte, error) {
 	c := exec.CommandContext(ctx, args[0], args[1:]...)
 	// A killed SSH can leave descendants holding its output pipes. Bound the
 	// copy goroutines too, not just the lifetime of the direct child.
 	c.WaitDelay = 2 * time.Second
-	c.Stdin = strings.NewReader(string(in))
+	c.Stdin = bytes.NewReader(in)
+	if progress != nil {
+		c.Stdin = &progressReader{Reader: bytes.NewReader(in), skip: len("DYNA-IN ") + 20 + 1, progress: progress}
+	}
 	out, err := c.Output()
 	// ssh says why it failed only on stderr; without it an error reads "exit status 255".
 	var exit *exec.ExitError
@@ -407,13 +417,38 @@ func (h *Host) executeInput(ctx context.Context, input []byte, argv ...string) (
 func (h *Host) executeOver(ctx context.Context, ssh []string, input []byte, argv ...string) ([]byte, error) {
 	// Do not retry a mutation after an uncertain reply; reconcile containers instead.
 	parts := []string{"bash", "-c", frameScript, "dyna-frame"}
+	var token string
+	if bounded, _ := ctx.Value(remoteCancelKey{}).(bool); bounded {
+		nonce := make([]byte, 16)
+		if _, err := rand.Read(nonce); err != nil {
+			return nil, err
+		}
+		token = hex.EncodeToString(nonce)
+		parts = []string{"bash", "-c", cancellableFrameScript, "dyna-frame", token}
+	}
 	parts = append(parts, argv...)
 	for i := range parts {
 		parts[i] = quote(parts[i])
 	}
 	args := append(ssh, h.destination, strings.Join(parts, " "))
 	frame := append([]byte(fmt.Sprintf("DYNA-IN %020d\n", len(input))), input...)
-	out, sshErr := h.runner.Run(ctx, frame, args...)
+	var out []byte
+	var sshErr error
+	progress, _ := ctx.Value(byteProgressKey{}).(func(int))
+	if streaming, ok := h.runner.(ProgressRunner); ok && progress != nil && len(input) > 0 {
+		out, sshErr = streaming.RunProgress(ctx, frame, progress, args...)
+	} else {
+		out, sshErr = h.runner.Run(ctx, frame, args...)
+	}
+	if token != "" && ctx.Err() != nil {
+		cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), box.StartCleanupBudget)
+		defer stop()
+		cancelArgs := append(h.direct(), h.destination, "bash -c "+quote(cancelRemoteScript)+" dyna-cancel "+quote(token))
+		if _, err := h.runner.Run(cleanup, nil, cancelArgs...); err != nil {
+			return nil, fmt.Errorf("remote start cancellation unconfirmed: %w", err)
+		}
+		return nil, ctx.Err()
+	}
 	body, status, err := parseReply(out)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", err, sshErr)
