@@ -10,6 +10,9 @@ import (
 // admission counts and nothing enforces (5.5).
 type GPUGiB int
 
+// MaxGPUGiB is the largest request that decodes: 1 PiB, far above any card, and small enough that GiB as bytes fits an int64.
+const MaxGPUGiB = 1 << 20
+
 func (g *GPUGiB) UnmarshalJSON(data []byte) error {
 	switch text := string(data); text {
 	case "true":
@@ -18,8 +21,8 @@ func (g *GPUGiB) UnmarshalJSON(data []byte) error {
 		*g = 0
 	default:
 		n, err := strconv.Atoi(text)
-		if err != nil || n < 0 {
-			return fmt.Errorf("gpu is a whole number of GiB, or true for 1 GiB: %s", text)
+		if err != nil || n < 0 || n > MaxGPUGiB {
+			return fmt.Errorf("gpu is a whole number of GiB up to %d, or true for 1 GiB: %s", MaxGPUGiB, text)
 		}
 		*g = GPUGiB(n)
 	}
