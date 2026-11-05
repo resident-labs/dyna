@@ -46,3 +46,18 @@ func TestWorkflowReloadKeepsTheRunsGPU(t *testing.T) {
 		t.Fatalf("a reload that keeps gpu: %v", problem)
 	}
 }
+
+func TestWorkflowMetaGPUThatWouldOverflowBytesIsRefused(t *testing.T) {
+	w := setupWorkflow(t)
+	if err := w.store.AddHost(w.ctx, box.Host{Name: "gpu", State: box.HostReady, CPUs: 8, MemBytes: 32 * box.GiB, DiskBytes: 100 * box.GiB, CheckedAt: w.now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.store.SetHostGPUs(w.ctx, "gpu", []contract.GPU{{Index: 0, Name: "RTX", MemBytes: 24 * box.GiB}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"17179869184", "9223372036"} {
+		if _, problem := w.WorkflowRun(w.ctx, w.owner, contract.WorkflowRunRequest{Room: w.room, Script: "export const meta = { name: 'sweep', profiles: ['fast'], gpu: " + n + " }\nreturn 1\n"}); problem == nil {
+			t.Errorf("gpu %s was accepted", n)
+		}
+	}
+}

@@ -180,8 +180,8 @@ const gpuProbeEvery = 30
 // gpuScript prints the cards CDI offers and what nvidia-smi says of them, when the beat's third argument is gpu. Either tool may be
 // missing, and a host without a card prints nothing.
 const gpuScript = `if [ "$3" = gpu ]; then
-nvidia-ctk cdi list 2>/dev/null | sed -n 's|^nvidia.com/gpu=\([0-9][0-9]*\)$|dyna-gpu-cdi \1|p'
-nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader,nounits 2>/dev/null | sed 's|^|dyna-gpu |'
+timeout 5 nvidia-ctk cdi list 2>/dev/null | sed -n 's|^nvidia.com/gpu=\([0-9][0-9]*\)$|dyna-gpu-cdi \1|p'
+timeout 5 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader,nounits 2>/dev/null | sed 's|^|dyna-gpu |'
 fi
 `
 
@@ -196,14 +196,15 @@ func parseGPUs(out []byte) []contract.GPU {
 				offered[index] = true
 			}
 		} else if text, ok := strings.CutPrefix(line, "dyna-gpu "); ok {
+			// The name may hold ", ": the index is the first field and the memory the last.
 			fields := strings.Split(text, ", ")
-			if len(fields) != 3 {
+			if len(fields) < 3 {
 				continue
 			}
 			index, indexErr := strconv.Atoi(fields[0])
-			mib, memErr := strconv.ParseInt(fields[2], 10, 64)
+			mib, memErr := strconv.ParseInt(fields[len(fields)-1], 10, 64)
 			if indexErr == nil && memErr == nil {
-				reported[index] = contract.GPU{Index: index, Name: fields[1], MemBytes: mib << 20}
+				reported[index] = contract.GPU{Index: index, Name: strings.Join(fields[1:len(fields)-1], ", "), MemBytes: mib << 20}
 			}
 		}
 	}

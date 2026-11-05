@@ -109,3 +109,40 @@ func TestAGPUBoxWaitsForAHostNotForANode(t *testing.T) {
 		t.Fatalf("a box with no GPU waits for %q", got)
 	}
 }
+
+// recreatedBoxes records the card a recreate is given.
+type recreatedBoxes struct {
+	restartedBoxes
+	card **int
+}
+
+func (b recreatedBoxes) Inspect(context.Context, contract.BoxID) (box.ContainerStatus, bool, error) {
+	return box.ContainerStatus{}, false, nil
+}
+
+func (b recreatedBoxes) Recreate(_ context.Context, spec BoxSpec, _ string) error {
+	*b.card = spec.GPUCard
+	return nil
+}
+
+func TestRecreateGivesAGPUBoxItsCardAndOthersNone(t *testing.T) {
+	for _, gib := range []int{4, 0} {
+		rig := newHostRig(t)
+		if err := rig.st.SetHostGPUs(rig.ctx, "h", []contract.GPU{{Index: 0, Name: "a", MemBytes: 24 * box.GiB}, {Index: 1, Name: "b", MemBytes: 24 * box.GiB}}); err != nil {
+			t.Fatal(err)
+		}
+		var got *int
+		rig.r.boxes = recreatedBoxes{restartedBoxes: restartedBoxes{image: "new"}, card: &got}
+		q := fmt.Sprintf(`UPDATE boxes SET state='stopped',want='run',gpu_gib=%d,gpu_index=1 WHERE id='b'`, gib)
+		if err := rig.st.Write(rig.ctx, func(tx *sql.Tx) error { _, err := tx.Exec(q); return err }); err != nil {
+			t.Fatal(err)
+		}
+		rig.pass()
+		if gib > 0 && (got == nil || *got != 1) {
+			t.Errorf("a GPU box was recreated with card %v; want 1", got)
+		}
+		if gib == 0 && got != nil {
+			t.Errorf("a box without a GPU was recreated with card %d", *got)
+		}
+	}
+}
