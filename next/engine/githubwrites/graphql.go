@@ -23,6 +23,7 @@ const (
 	nodeReview      nodeKind = "PullRequestReview"
 	nodeThread      nodeKind = "PullRequestReviewThread"
 	nodeLabel       nodeKind = "Label"
+	nodeMilestone   nodeKind = "Milestone"
 	nodeProject     nodeKind = "ProjectV2"
 	nodeItem        nodeKind = "ProjectV2Item"
 	nodeContent     nodeKind = "IssueOrPullRequest" // an Issue or a PullRequest
@@ -53,13 +54,15 @@ type mutation struct {
 	group  contract.GitHubWriteGroup
 	fields []string
 	refs   []ref
+	lists  []ref // input fields that hold a list of node IDs, each of which must be what kind says; a missing one is fine
 	enums  []enum
 }
 
 // mutations is the allow-list of GraphQL mutations by root field name. A mutation not here is refused, whatever it is.
 var mutations = map[string]mutation{
-	"createIssue": {group: issues, fields: []string{"repositoryId", "title", "body", "assigneeIds", "milestoneId", "labelIds", "issueTypeId", "parentIssueId", "clientMutationId"},
-		refs: []ref{{"repositoryId", nodeRepository, true}, {"parentIssueId", nodeIssue, false}}},
+	"createIssue": {group: issues, fields: []string{"repositoryId", "title", "body", "assigneeIds", "milestoneId", "labelIds", "parentIssueId", "clientMutationId"},
+		refs:  []ref{{"repositoryId", nodeRepository, true}, {"parentIssueId", nodeIssue, false}, {"milestoneId", nodeMilestone, false}},
+		lists: []ref{{"labelIds", nodeLabel, false}}},
 	"closeIssue":  {group: issues, fields: []string{"issueId", "stateReason", "duplicateIssueId", "clientMutationId"}, refs: []ref{{"issueId", nodeIssue, true}, {"duplicateIssueId", nodeIssue, false}}},
 	"reopenIssue": {group: issues, fields: []string{"issueId", "clientMutationId"}, refs: []ref{{"issueId", nodeIssue, true}}},
 	"createLabel": {group: issues, fields: []string{"repositoryId", "name", "color", "description", "clientMutationId"}, refs: []ref{{"repositoryId", nodeRepository, true}}},
@@ -186,6 +189,21 @@ func (g *Guard) checkGraphQL(request *http.Request, grant contract.GitHubWrites,
 				}
 				if refusal := g.within(request, grant, nodes, id, each.kind, field.Name); refusal != nil {
 					return false, refusal
+				}
+			}
+			for _, each := range rule.lists {
+				value, present := input[each.field]
+				if !present {
+					continue
+				}
+				var ids []string
+				if json.Unmarshal(value, &ids) != nil || slices.Contains(ids, "") {
+					return false, refuse(contract.GitHubWriteGraphQLShape, "%s of %s is a list of node ID strings", each.field, field.Name)
+				}
+				for _, id := range ids {
+					if refusal := g.within(request, grant, nodes, id, each.kind, field.Name); refusal != nil {
+						return false, refusal
+					}
 				}
 			}
 		}

@@ -122,6 +122,7 @@ const nodeQuery = `query($id:ID!){node(id:$id){__typename
  ... on Issue{repository{nameWithOwner}}
  ... on PullRequest{repository{nameWithOwner}}
  ... on Label{repository{nameWithOwner}}
+ ... on Milestone{repository{nameWithOwner}}
  ... on PullRequestReview{repository{nameWithOwner}}
  ... on PullRequestReviewThread{repository{nameWithOwner}}
  ... on ProjectV2{owner{... on User{login} ... on Organization{login}}}
@@ -156,7 +157,7 @@ func (g *Guard) within(request *http.Request, grant contract.GitHubWrites, seen 
 		if found.Typename == string(kind) && grant.Allows(found.Name) {
 			return nil
 		}
-	case nodeIssue, nodePullRequest, nodeReview, nodeThread, nodeLabel:
+	case nodeIssue, nodePullRequest, nodeReview, nodeThread, nodeLabel, nodeMilestone:
 		if found.Typename == string(kind) && inRepo(found.Repository) {
 			return nil
 		}

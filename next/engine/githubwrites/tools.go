@@ -25,8 +25,8 @@ const (
 // Tools lists the write tools a room's groups can register. Every other upstream write tool stays unregistered.
 var Tools = []Tool{
 	{"issue_write", map[contract.GitHubWriteGroup]string{
-		issues: "It creates and edits issues of the allowed repositories; clearing an issue field value sends a DELETE, which is never allowed.",
-		pulls:  "With only pulls on it sets the labels of an issue or PR and nothing else: creating an issue and every other field are refused.",
+		issues: "It creates and edits issues of the allowed repositories; a label name that does not exist yet is created as a new label; clearing an issue field value sends a DELETE, which is never allowed.",
+		pulls:  "With only pulls on it sets the labels of an issue or PR and nothing else (a label name that does not exist yet is created as a new label): creating an issue and every other field are refused.",
 	}},
 	{"add_issue_comment", map[contract.GitHubWriteGroup]string{
 		issues: "It comments on issues of the allowed repositories.",
@@ -37,7 +37,7 @@ var Tools = []Tool{
 		pulls:  "It edits comments of PRs of the allowed repositories.",
 	}},
 	{"label_write", map[contract.GitHubWriteGroup]string{
-		issues: "'create' and 'update' work; 'delete' is never allowed.",
+		issues: "It creates and edits labels of the allowed repositories ('create' and 'update'); 'delete' is never allowed.",
 	}},
 	{"update_pull_request", map[contract.GitHubWriteGroup]string{
 		pulls: "It edits a PR's title and body only: base, state, draft, reviewers and maintainer_can_modify are refused, so a PR is not retargeted, closed, reopened, marked draft or merged through it.",

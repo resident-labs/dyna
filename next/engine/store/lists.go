@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -41,7 +42,11 @@ func (s *Store) RoomList(ctx context.Context) (contract.RoomListResponse, []Room
 		}
 		var granted contract.GitHubWrites
 		if err := json.Unmarshal([]byte(writes), &granted); err != nil {
-			return contract.RoomListResponse{}, nil, err
+			// A stored value that does not decode is that room's alone: it is off here, and its tools get no writes.
+			if _, logged := s.unreadable.LoadOrStore(room.ID, true); !logged {
+				log.Printf("room %s: stored githubWrites does not decode, so room.list shows it off: %v", room.ID, err)
+			}
+			granted = contract.GitHubWrites{}
 		}
 		if granted.On() {
 			room.GitHubWrites = &granted
