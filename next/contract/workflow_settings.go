@@ -35,7 +35,7 @@ const (
 // AllWorkflowFeatures lists the switches in the order the settings show them.
 var AllWorkflowFeatures = []WorkflowFeature{WorkflowFeatureWorktree, WorkflowFeatureMerge, WorkflowFeatureRun, WorkflowFeatureWorkflow, WorkflowFeaturePost, WorkflowFeatureResume}
 
-// WorkflowSetting names one workflow setting: the ones below, and each WorkflowFeature.
+// WorkflowSetting names one workflow setting: the ones below, and each WorkflowFeature, whose setting has the feature's name.
 type WorkflowSetting string
 
 const (
@@ -45,6 +45,13 @@ const (
 	WorkflowSettingProfiles   WorkflowSetting = "profiles"
 	WorkflowSettingSize       WorkflowSetting = "size"
 	WorkflowSettingTimeout    WorkflowSetting = "timeout"
+	// The switches, spelled out so the generated web type names every setting the engine returns and takes.
+	WorkflowSettingWorktree WorkflowSetting = "worktree"
+	WorkflowSettingMerge    WorkflowSetting = "merge"
+	WorkflowSettingRun      WorkflowSetting = "run"
+	WorkflowSettingWorkflow WorkflowSetting = "workflow"
+	WorkflowSettingPost     WorkflowSetting = "post"
+	WorkflowSettingResume   WorkflowSetting = "resume"
 )
 
 // WorkflowSettingInfo is a setting with its one line of help, which the CLI and Settings share.
@@ -61,12 +68,12 @@ var AllWorkflowSettings = []WorkflowSettingInfo{
 	{WorkflowSettingProfiles, "The profiles a script's meta.profiles may name; none set means every profile."},
 	{WorkflowSettingSize, "The box size of a run whose script sets no meta.size; none set means the engine's choice."},
 	{WorkflowSettingTimeout, "Seconds a worker or command may run when agent() or run() sets no timeout."},
-	{WorkflowSetting(WorkflowFeatureWorktree), "On or off: agent() with worktree: true, a worker in its own git worktree and branch."},
-	{WorkflowSetting(WorkflowFeatureMerge), "On or off: merge(), which merges worktree results into one run branch."},
-	{WorkflowSetting(WorkflowFeatureRun), "On or off: run(), shell commands in the run's box."},
-	{WorkflowSetting(WorkflowFeatureWorkflow), "On or off: workflow(), a script that starts another script."},
-	{WorkflowSetting(WorkflowFeaturePost), "On or off: post(), a message from the run to its parent."},
-	{WorkflowSetting(WorkflowFeatureResume), "On or off: starting a run with resume, which keeps an ended run's finished steps."},
+	{WorkflowSettingWorktree, "On or off: agent() with worktree: true, a worker in its own git worktree and branch."},
+	{WorkflowSettingMerge, "On or off: merge(), which merges worktree results into one run branch."},
+	{WorkflowSettingRun, "On or off: run(), shell commands in the run's box."},
+	{WorkflowSettingWorkflow, "On or off: workflow(), a script that starts another script."},
+	{WorkflowSettingPost, "On or off: post(), a message from the run to its parent."},
+	{WorkflowSettingResume, "On or off: starting a run with resume, which keeps an ended run's finished steps."},
 }
 
 // DefaultWorkflowTimeout is how long a worker runs when neither the script nor the settings say: 5 hours, in seconds.
