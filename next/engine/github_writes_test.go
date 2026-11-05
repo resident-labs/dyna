@@ -3,6 +3,7 @@ package engine
 import (
 	"database/sql"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
