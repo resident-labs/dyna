@@ -202,10 +202,10 @@ func (h *Host) ServiceLogs(ctx context.Context, id contract.ServiceID, lines int
 }
 
 // removeService stops the unit and deletes what a service owns. Each step tolerates what is gone.
-const removeService = `systemctl --user stop "$2.service"; rm -f "$HOME/.config/containers/systemd/$2.container"; systemctl --user daemon-reload || exit
-podman rm -f "$2" >/dev/null 2>&1
-for s in $(podman secret ls --format '{{.Name}}' | grep -x "$2-.*"); do podman secret rm "$s" >/dev/null || exit; done
-podman volume rm -f "$2" >/dev/null || exit`
+const removeService = `systemctl --user stop "$1.service"; rm -f "$HOME/.config/containers/systemd/$1.container"; systemctl --user daemon-reload || exit
+podman rm -f "$1" >/dev/null 2>&1
+for s in $(podman secret ls --format '{{.Name}}' | grep -x "$1-.*"); do podman secret rm "$s" >/dev/null || exit; done
+podman volume rm -f "$1" >/dev/null || exit`
 
 func (h *Host) RemoveService(ctx context.Context, id contract.ServiceID) error {
 	_, err := h.runUnbounded(ctx, nil, "bash", "-c", removeService, "dyna", box.ServiceName(id))

@@ -36,7 +36,8 @@ type serviceState struct {
 	timings ServiceTimings
 	units   map[contract.ServiceID]box.ServiceUnit // from the last heartbeat that named them
 	checks  map[contract.HostName]serviceCheck
-	synced  map[contract.HostName]bool // the host's quadlet files were compared with the rows since the engine started
+	synced  map[contract.HostName]bool          // the host's quadlet files were compared with the rows since the engine started
+	work    map[contract.HostName]*sync.RWMutex // readers do host work; discard waits for them before cleanup
 }
 
 type serviceCheck struct {
@@ -46,7 +47,7 @@ type serviceCheck struct {
 
 // SetServices turns on services before the reconciler runs.
 func (r *Reconciler) SetServices(hosts ServiceHosts, timings ServiceTimings) {
-	r.svc = &serviceState{hosts: hosts, timings: timings, units: map[contract.ServiceID]box.ServiceUnit{}, checks: map[contract.HostName]serviceCheck{}, synced: map[contract.HostName]bool{}}
+	r.svc = &serviceState{hosts: hosts, timings: timings, units: map[contract.ServiceID]box.ServiceUnit{}, checks: map[contract.HostName]serviceCheck{}, synced: map[contract.HostName]bool{}, work: map[contract.HostName]*sync.RWMutex{}}
 }
 
 // ObserveServices takes the service states of a host's heartbeat.
@@ -90,6 +91,8 @@ func (r *Reconciler) saveService(ctx context.Context, old, next store.ServiceRow
 	if old.State != next.State {
 		next.Since = next.Updated
 	}
+	reservation := next.Reservation()
+	next.CPUMilli, next.MemBytes, next.DiskBytes = reservation.CPUMilli, reservation.MemBytes, reservation.DiskBytes
 	saved, err := r.store.SaveService(ctx, old, next, r.serviceEvent, extra...)
 	if saved {
 		next.Rev = old.Rev + 1
@@ -101,7 +104,7 @@ func (r *Reconciler) saveService(ctx context.Context, old, next store.ServiceRow
 // pendingServiceReasons maps what admission says to what a service shows. Each admission reason has its own.
 var pendingServiceReasons = map[box.PendingReason]contract.ServiceReason{
 	box.PendingCPU: contract.ServiceNoCPU, box.PendingMemory: contract.ServiceNoMemory, box.PendingDisk: contract.ServiceNoDisk,
-	box.PendingRoomHost: contract.ServiceRoomHost, box.PendingNoReadyHost: contract.ServiceRoomHost,
+	box.PendingRoomHost: contract.ServiceRoomHost, box.PendingNoReadyHost: contract.ServiceRoomHost, box.PendingRoomLimit: contract.ServiceRoomLimit,
 }
 
 // servicePass places the services that have no host and starts one step for each placed service.
@@ -161,20 +164,32 @@ func (r *Reconciler) placeService(ctx context.Context, rowp *store.ServiceRow, h
 	if err != nil {
 		return err
 	}
-	placement := box.AdmitService(hosts, boxes, box.ServiceRequest{ID: row.ID, Room: row.Room, Parts: row.Parts, ImageEstimate: estimate}, only...)
+	limits, err := r.store.RoomLimits(ctx, row.Room)
+	if err != nil {
+		return err
+	}
+	holds, err := r.store.ServiceHolds(ctx)
+	if err != nil {
+		return err
+	}
+	request := box.ServiceRequest{ID: row.ID, Room: row.Room, Parts: row.Reservation(), ImageEstimate: estimate}
+	placement := box.Placement{Reason: box.PendingRoomLimit}
+	if box.ServiceFitsRoom(request, limits, boxes, holds) {
+		placement = box.AdmitService(hosts, boxes, request, only...)
+	}
 	next := row
 	if placement.Host != "" {
 		// A host port another service of that host holds keeps this one waiting, as a clash at set would have refused it.
 		taken := slices.ContainsFunc(all, func(other store.ServiceRow) bool {
-			return other.ID != row.ID && other.Host == placement.Host && other.Want != contract.ServiceWantRemove && !disjointPorts(other.Parts.Ports, row.Parts.Ports)
+			return other.ID != row.ID && other.Host == placement.Host && other.Want != contract.ServiceWantRemove && !disjointPorts(other.Reservation().Ports, row.Reservation().Ports)
 		})
 		if taken {
 			next.State, next.Reason = contract.ServicePending, contract.ServicePortTaken
 		} else {
-			next.Host, next.Placed = placement.Host, r.now()
+			next.Host, next.Placed, next.ImageEstimate = placement.Host, r.now(), estimate
 			for i := range hosts {
 				if hosts[i].Name == placement.Host {
-					hosts[i].Services = append(slices.Clone(hosts[i].Services), box.ServiceHold{ID: row.ID, Room: row.Room, CPUMilli: row.CPUMilli, MemBytes: row.MemBytes, DiskBytes: row.DiskBytes})
+					hosts[i].Services = append(slices.Clone(hosts[i].Services), box.ServiceHold{ID: row.ID, Room: row.Room, CPUMilli: row.CPUMilli, MemBytes: row.MemBytes, DiskBytes: row.DiskBytes + max(row.ImageBytes, estimate)})
 				}
 			}
 			rowp.Host = placement.Host
@@ -201,8 +216,50 @@ func disjointPorts(a, b []contract.PortBinding) bool {
 	})
 }
 
+// serviceHostWork returns the gate shared by all operations that can write or start services on this host. Never hold svc.mu
+// while acquiring the gate: a worker takes the gate before reading the service caches.
+func (r *Reconciler) serviceHostWork(host contract.HostName) *sync.RWMutex {
+	r.svc.mu.Lock()
+	defer r.svc.mu.Unlock()
+	work := r.svc.work[host]
+	if work == nil {
+		work = &sync.RWMutex{}
+		r.svc.work[host] = work
+	}
+	return work
+}
+
+// currentServiceHost checks placement after entering the host's work gate. A queued step or owner call may still hold the
+// pre-discard snapshot. The host must not be draining or removed, and the row must still belong to it, even if the name was re-added.
+func (r *Reconciler) currentServiceHost(ctx context.Context, row store.ServiceRow) (box.Host, bool, error) {
+	hosts, err := r.store.Hosts(ctx)
+	if err != nil {
+		return box.Host{}, false, err
+	}
+	for _, host := range hosts {
+		if host.Name != row.Host || host.State == box.HostDraining || host.State == box.HostRemoved {
+			continue
+		}
+		rows, err := r.store.RoomServices(ctx, row.Room)
+		if err != nil {
+			return box.Host{}, false, err
+		}
+		placed := slices.ContainsFunc(rows, func(current store.ServiceRow) bool { return current.ID == row.ID && current.Host == row.Host })
+		return host, placed, nil
+	}
+	return box.Host{}, false, nil
+}
+
 // serviceStep carries one placed service one step toward what it declares. The reconciler runs at most one per service.
 func (r *Reconciler) serviceStep(ctx context.Context, row store.ServiceRow, host box.Host) error {
+	work := r.serviceHostWork(row.Host)
+	work.RLock()
+	defer work.RUnlock()
+	// A host can drain after this check, but its cleanup cannot pass this worker.
+	host, placed, err := r.currentServiceHost(ctx, row)
+	if err != nil || !placed {
+		return err
+	}
 	if host.State != box.HostReady {
 		// A host that is gone takes its services' state with it, and nothing moves them: a removal is owed instead.
 		if row.Want == contract.ServiceWantRemove {
@@ -441,6 +498,28 @@ func (f *deployFailure) Error() string { return string(f.reason) + ": " + f.deta
 // deployService runs the steps of 5.18 for a generation: image, unit, start and health. A failure leaves the previous version
 // running again if there was one, and the service failed if not.
 func (r *Reconciler) deployService(ctx context.Context, row store.ServiceRow, driver box.ServiceDriver, check box.ServiceHostCheck) error {
+	hosts, err := r.store.Hosts(ctx)
+	if err != nil {
+		return err
+	}
+	boxes, err := r.store.Boxes(ctx)
+	if err != nil {
+		return err
+	}
+	i := slices.IndexFunc(hosts, func(h box.Host) bool { return h.Name == row.Host })
+	if i < 0 {
+		return nil
+	}
+	request := box.ServiceRequest{ID: row.ID, Room: row.Room, Parts: row.Reservation(), ImageEstimate: max(row.ImageBytes, row.ImageEstimate)}
+	if row.Target == "" && !box.ServiceFitsDisk(hosts[i], boxes, request) {
+		next := row
+		next.State, next.Reason = contract.ServicePending, contract.ServiceNoDisk
+		if next.State == row.State && next.Reason == row.Reason {
+			return nil
+		}
+		_, _, err := r.saveService(ctx, row, next)
+		return err
+	}
 	values, err := r.store.ServiceSecretValues(ctx, row.ID)
 	if err != nil {
 		return err
@@ -508,7 +587,7 @@ func (r *Reconciler) runDeploy(ctx context.Context, row *store.ServiceRow, drive
 		}
 		return &deployFailure{reason, err.Error()}
 	}
-	row.ImageBytes = size
+	row.ImageBytes = max(row.ImageBytes, size)
 	if *row, ok, err = step(contract.ServicePhaseUnit); err != nil || !ok {
 		return err
 	}
@@ -527,7 +606,7 @@ func (r *Reconciler) runDeploy(ctx context.Context, row *store.ServiceRow, drive
 	}
 	for _, port := range row.Parts.Ports {
 		heldByService := slices.ContainsFunc(services, func(s store.ServiceRow) bool {
-			return s.Host == row.Host && s.Deployed > 0 && !disjointPorts(s.Parts.Ports, []contract.PortBinding{port})
+			return s.Host == row.Host && s.Deployed > 0 && !disjointPorts(s.Reservation().Ports, []contract.PortBinding{port})
 		})
 		if !heldByService && slices.ContainsFunc(listening, func(l contract.PortBinding) bool { return l.Host == port.Host && l.Proto == port.Proto }) {
 			return &deployFailure{contract.ServicePortInUse, fmt.Sprintf("host port %d/%s is held by a process that is not a Dyna service", port.Host, port.Proto)}
@@ -570,6 +649,7 @@ func (r *Reconciler) runDeploy(ctx context.Context, row *store.ServiceRow, drive
 	}
 	live := row.Parts
 	next.Live = &live
+	next.ImageBytes, next.ImageEstimate = size, 0
 	next.ImageRef, next.Target, next.UnitSHA, next.Deployed = ref, "", sha, row.Generation
 	next.State, next.Reason, next.Cause, next.Detail, next.LastState = contract.ServiceRunning, "", "", "", ""
 	*row, _, err = r.saveService(ctx, *row, next)
@@ -681,6 +761,9 @@ var ErrNoPrevious = errors.New("the service has no previous image to roll back t
 // ErrNotPlaced says a service has no host yet, so nothing runs to act on.
 var ErrNotPlaced = errors.New("the service has no host yet")
 
+// ErrServiceEngineHost refuses a direct restart until the host is known not to run the engine.
+var ErrServiceEngineHost = errors.New("the service's host runs the engine or has not yet been checked not to")
+
 // reopen lets a failed service try again: a new generation, an update, a start or a restart ends the failure.
 func reopen(row *store.ServiceRow) {
 	if row.State == contract.ServiceFailed {
@@ -737,6 +820,19 @@ func (r *Reconciler) RestartServiceUnit(ctx context.Context, row store.ServiceRo
 	if row.Host == "" {
 		return row, ErrNotPlaced
 	}
+	work := r.serviceHostWork(row.Host)
+	work.RLock()
+	defer work.RUnlock()
+	host, placed, err := r.currentServiceHost(ctx, row)
+	if err != nil {
+		return row, err
+	}
+	if !placed {
+		return row, ErrNotPlaced
+	}
+	if host.EngineHost == nil || *host.EngineHost {
+		return row, ErrServiceEngineHost
+	}
 	driver, err := r.svc.hosts.ServiceDriver(ctx, row.Host)
 	if err != nil {
 		return row, err
@@ -745,7 +841,14 @@ func (r *Reconciler) RestartServiceUnit(ctx context.Context, row store.ServiceRo
 		return row, fmt.Errorf("service %s: restart: %w", row.ID, err)
 	}
 	return r.changeService(ctx, row.ID, func(next *store.ServiceRow) error {
-		if next.State == contract.ServiceCrashing {
+		if next.Want == contract.ServiceWantRemove {
+			return ErrNotPlaced
+		}
+		next.Want = contract.ServiceWantRun
+		if next.State == contract.ServiceStopped {
+			next.State = contract.ServiceRunning
+		}
+		if next.State == contract.ServiceCrashing || next.State == contract.ServiceRunning {
 			next.Reason = ""
 		}
 		return nil

@@ -75,6 +75,7 @@ type Scaleset interface {
 
 // Store reads the settings and the placement inputs.
 type Store interface {
+	LockAdmission() func()
 	CIRepos(context.Context) ([]store.CIRepo, error)
 	Hosts(context.Context) ([]box.Host, error)
 	LifecycleBoxes(context.Context) ([]store.LifecycleBox, error)
@@ -417,7 +418,10 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 		}
 		s.hosts[host.Name] = &surveyed{host: host, driver: driver, runners: runners, egress: egress}
 	}
-	// A host that did not answer still holds what it held, as far as the node pools know.
+	// A host that did not answer still holds what it held, as far as the node pools know. Publishing a new runner snapshot is
+	// serialized with service and box admission, just as claiming a runner is.
+	unlock := p.Store.LockAdmission()
+	defer unlock()
 	p.shown.Lock()
 	placed := slices.DeleteFunc(p.placed, func(b box.Box) bool { return !slices.Contains(unanswered, b.Host) })
 	for _, host := range s.hosts {
@@ -570,7 +574,7 @@ func (p *Pool) start(ctx context.Context, key scaleSet, host *surveyed, size con
 		return "", err
 	}
 	name := namePrefix + string(host.host.Name) + "-" + hex.EncodeToString(raw[:])
-	if err := p.claim(ctx, runnerBox(name, host.host.Name, size)); err != nil {
+	if err := p.claim(ctx, runnerBox(name, host.host.Name, size), host.host.Box); err != nil {
 		return "", err
 	}
 	id, config, err := p.Sets.JIT(ctx, key.repo, SetName(key.size), name)
@@ -978,7 +982,7 @@ func waitsForRoom(h box.Host, view survey) bool {
 		if row.Host != "" && row.Host != h.Name {
 			continue
 		}
-		if box.AdmitService([]box.Host{h}, view.boxes, box.ServiceRequest{ID: row.ID, Room: row.Room, Parts: row.Parts, ImageEstimate: row.ImageBytes}, row.Only...).Host == h.Name {
+		if box.AdmitService([]box.Host{h}, view.boxes, box.ServiceRequest{ID: row.ID, Room: row.Room, Parts: row.Reservation(), ImageEstimate: max(row.ImageBytes, row.ImageEstimate)}, row.Only...).Host == h.Name {
 			return true
 		}
 	}

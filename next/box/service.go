@@ -94,8 +94,8 @@ func AdmitService(hosts []Host, boxes []Box, request ServiceRequest, only ...str
 			reason = PendingMemory
 			continue
 		}
-		cpu, runnerCPU, mem, runnerMem, disk := hostLoad(h, boxes, "")
-		serviceCPU, serviceMem, serviceDisk := h.serviceLoad(request.ID)
+		cpu, runnerCPU, mem, runnerMem, _ := hostLoad(h, boxes, "")
+		serviceCPU, serviceMem, _ := h.serviceLoad(request.ID)
 		cpuTotal, memTotal := int64(h.CPUs)*1000, h.MemBytes
 		cpuLeft, memLeft := cpuTotal-serviceCPU-request.Parts.CPUMilli, memTotal-serviceMem-request.Parts.MemBytes
 		if serviceCPU+request.Parts.CPUMilli > cpuTotal/4 || int64(cpu)*1000 > 4*cpuLeft || int64(runnerCPU)*1000 > 2*cpuLeft {
@@ -106,7 +106,7 @@ func AdmitService(hosts []Host, boxes []Box, request ServiceRequest, only ...str
 			reason = PendingMemory
 			continue
 		}
-		if disk-serviceDisk-request.Parts.DiskBytes-request.ImageEstimate < h.DiskFloor {
+		if !ServiceFitsDisk(h, boxes, request) {
 			reason = PendingDisk
 			continue
 		}
@@ -119,6 +119,14 @@ func AdmitService(hosts []Host, boxes []Box, request ServiceRequest, only ...str
 		return Placement{Reason: reason}
 	}
 	return Placement{Host: chosen}
+}
+
+// ServiceFitsDisk checks the latest host disk figure against other reservations and this service's data and image. It is also
+// checked before a placed service pulls or builds, since disk may have filled since placement. Its own hold is replaced, not added.
+func ServiceFitsDisk(host Host, boxes []Box, request ServiceRequest) bool {
+	_, _, _, _, disk := hostLoad(host, boxes, "")
+	_, _, held := host.serviceLoad(request.ID)
+	return disk-held-request.Parts.DiskBytes-request.ImageEstimate >= host.DiskFloor
 }
 
 // RoomQuarters is what a room's placed boxes and services count against its limits, in thousandths of a CPU and in bytes, as
@@ -139,6 +147,15 @@ func RoomQuarters(room contract.RoomID, boxes []Box, holds []ServiceHold, skipBo
 		}
 	}
 	return cpuMilli, mem
+}
+
+// ServiceFitsRoom judges a service against the room's CPU and memory budgets. Services count at 1x and active boxes at a quarter;
+// the request replaces its own hold, rather than counting twice on an update. Hosts do not restrict a room's accounting.
+func ServiceFitsRoom(request ServiceRequest, limits contract.RoomLimits, boxes []Box, holds []ServiceHold) bool {
+	cpu, memory := RoomQuarters(request.Room, boxes, holds, "", request.ID)
+	cpu += 4 * request.Parts.CPUMilli
+	memory += 4 * request.Parts.MemBytes
+	return (limits.CPUs == 0 || cpu <= 4000*int64(limits.CPUs)) && (limits.MemBytes == 0 || memory <= 4*limits.MemBytes)
 }
 
 // ServiceUnitState is what a host's systemd says of a service's unit, read once at the host boundary.

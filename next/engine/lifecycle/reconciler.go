@@ -151,6 +151,8 @@ func (r *Reconciler) change(ctx context.Context, old, next box.Box, due time.Tim
 func (r *Reconciler) Pass(ctx context.Context) error {
 	r.pass.Lock()
 	defer r.pass.Unlock()
+	unlock := r.store.LockAdmission()
+	defer unlock()
 	if err := r.store.WakeModelRetries(ctx, r.now()); err != nil {
 		return err
 	}

@@ -14,6 +14,7 @@ DropCapability=all
 NoNewPrivileges=true
 ReadOnly=true
 ReadOnlyTmpfs=false
+PodmanArgs=--image-volume=ignore
 Tmpfs=/tmp:rw,size=64m,mode=1777
 PodmanArgs=--cpus=1 --memory=536870912 --memory-swap=536870912 --pids-limit=512
 Environment="A=x\" Exec=/bin/sh"

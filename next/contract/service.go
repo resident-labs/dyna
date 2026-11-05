@@ -48,6 +48,7 @@ const (
 	ServiceNoMemory         ServiceReason  = "memory"
 	ServiceNoDisk           ServiceReason  = "disk"
 	ServiceRoomHost         ServiceReason  = "room-host"
+	ServiceRoomLimit        ServiceReason  = "room-limit"
 	ServiceHostCheck        ServiceReason  = "service_host"
 	ServicePortTaken        ServiceReason  = "port_taken"
 	ServicePortInUse        ServiceReason  = "port_in_use"

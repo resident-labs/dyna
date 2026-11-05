@@ -59,7 +59,8 @@ type Store struct {
 	done          chan struct{}
 	checkDone     chan struct{}
 	mu            sync.Mutex
-	unreadable    sync.Map // rooms whose stored githubWrites did not decode, which room.list has logged
+	admission     sync.Mutex // capacity reads through reservation writes: boxes, services and runner claims
+	unreadable    sync.Map   // rooms whose stored githubWrites did not decode, which room.list has logged
 	dispatchMu    sync.RWMutex
 	draining      bool
 	errMu         sync.Mutex
@@ -72,6 +73,14 @@ type Store struct {
 	wake          func([]contract.SessionID, []contract.Event)
 	subMu         sync.Mutex
 	subs          map[chan contract.Event]struct{}
+}
+
+// LockAdmission serializes a capacity decision with its reservation write across boxes, services and CI runners. The returned
+// function releases the lock. It is acquired before the CI pool's shown lock, never during a store write; a reconciler pass
+// acquires its pass lock first. Host I/O is outside this lock, and work holding it must not join asynchronous host steps.
+func (s *Store) LockAdmission() func() {
+	s.admission.Lock()
+	return s.admission.Unlock
 }
 
 // Open creates or opens a store in dir.
