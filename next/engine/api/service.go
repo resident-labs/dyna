@@ -69,6 +69,8 @@ type Service interface {
 	PoolList(context.Context, contract.Principal, contract.PoolListRequest) (contract.PoolListResponse, *contract.Error)
 	PoolRemove(context.Context, contract.Principal, contract.PoolRemoveRequest) (contract.PoolRemoveResponse, *contract.Error)
 	PoolSet(context.Context, contract.Principal, contract.PoolSetRequest) (contract.PoolSetResponse, *contract.Error)
+	WorkflowSettings(context.Context, contract.Principal, contract.WorkflowSettingsRequest) (contract.WorkflowSettingsResponse, *contract.Error)
+	WorkflowSet(context.Context, contract.Principal, contract.WorkflowSetRequest) (contract.WorkflowSetResponse, *contract.Error)
 	RoomHosts(context.Context, contract.Principal, contract.RoomHostsRequest) (contract.RoomHostsResponse, *contract.Error)
 	AccountsSetLimits(context.Context, contract.Principal, contract.AccountsSetLimitsRequest) (contract.AccountsSetLimitsResponse, *contract.Error)
 	AccountsRemove(context.Context, contract.Principal, contract.AccountsRemoveRequest) (contract.AccountsRemoveResponse, *contract.Error)

@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 91
+const schemaVersion = 92
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
@@ -82,6 +82,8 @@ var steps = map[int][]string{
 		`ALTER TABLE boxes ADD COLUMN gpu_gib INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE boxes ADD COLUMN gpu_index INTEGER NOT NULL DEFAULT 0`,
 	},
+	// The owner's workflow settings: one row for the global scope (room '') and one for each room that overrides it.
+	91: {`CREATE TABLE workflow_settings (room TEXT PRIMARY KEY, settings TEXT NOT NULL)`},
 	81: {
 		`ALTER TABLE hosts ADD COLUMN create_failures INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE hosts ADD COLUMN create_problem TEXT NOT NULL DEFAULT ''`,

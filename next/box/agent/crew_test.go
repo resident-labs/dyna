@@ -25,10 +25,12 @@ type fakeJournal struct {
 	names     map[string]string
 	files     map[string]string // what each running worker reported
 	lanes     map[string]string
-	phases    map[string]string // each step key to the stage it started in
-	endDelay  time.Duration     // how long the journal takes to store a step end
-	slowStart string            // the name of a step whose start the journal takes a while to store
-	started   []string          // step names, in the order their starts were stored
+	phases    map[string]string                   // each step key to the stage it started in
+	endDelay  time.Duration                       // how long the journal takes to store a step end
+	slowStart string                              // the name of a step whose start the journal takes a while to store
+	started   []string                            // step names, in the order their starts were stored
+	features  map[string]contract.WorkflowFeature // step names to the switch each named
+	refuse    map[contract.WorkflowFeature]error  // a feature the engine's settings turn off
 	posts     []contract.PostRequest
 	lines     []string // status() lines
 	pin       string
@@ -37,7 +39,7 @@ type fakeJournal struct {
 }
 
 func newFakeJournal() *fakeJournal {
-	return &fakeJournal{steps: map[string]contract.WorkflowStepEndRequest{}, names: map[string]string{}, files: map[string]string{}, lanes: map[string]string{}, phases: map[string]string{}}
+	return &fakeJournal{features: map[string]contract.WorkflowFeature{}, steps: map[string]contract.WorkflowStepEndRequest{}, names: map[string]string{}, files: map[string]string{}, lanes: map[string]string{}, phases: map[string]string{}}
 }
 
 func (j *fakeJournal) WorkflowSetStatus(_ context.Context, req contract.WorkflowSetStatusRequest) error {
@@ -57,12 +59,16 @@ func (j *fakeJournal) WorkflowPin(_ context.Context, commit string) error {
 }
 
 func (j *fakeJournal) WorkflowStepStart(_ context.Context, req contract.WorkflowStepStartRequest) (contract.WorkflowStepStartResponse, error) {
+	if err := j.refuse[req.Feature]; err != nil {
+		return contract.WorkflowStepStartResponse{}, err
+	}
 	if req.Name == j.slowStart {
 		time.Sleep(300 * time.Millisecond)
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.started = append(j.started, req.Name)
+	j.features[req.Name] = req.Feature
 	j.names[req.Key] = req.Name
 	j.lanes[req.Key] = req.Lane
 	j.phases[req.Key] = req.Phase
@@ -133,6 +139,7 @@ func (w *fakeWorker) SessionFile() string { return w.file }
 func (w *fakeWorker) Close() error        { return nil }
 
 type crewHarness struct {
+	timeout int // the room's default step timeout in seconds, as the engine sends it
 	t       *testing.T
 	work    func(dir string, submit dynaext.Submit)
 	mu      sync.Mutex
@@ -172,7 +179,7 @@ func (h *crewHarness) start(script string, profiles ...contract.WorkflowProfile)
 	state, sessions := h.t.TempDir(), h.t.TempDir()
 	var opened atomic.Int32
 	crew, err := NewCrew(CrewConfig{
-		Workflow: contract.BoxWorkflow{Run: "wf_1", Name: "test", Script: script, Version: 1, Args: `{"topic":"bounds"}`, Profiles: profiles, Workers: 16},
+		Workflow: contract.BoxWorkflow{Run: "wf_1", Name: "test", Script: script, Version: 1, Args: `{"topic":"bounds"}`, Profiles: profiles, Workers: 16, Timeout: h.timeout},
 		Engine:   h.journal,
 		Open: func(_ context.Context, profile contract.WorkflowProfile, folder, dir string, submit dynaext.Submit) (crewWorker, error) {
 			data, err := os.ReadFile(filepath.Join(folder, "models.json"))
