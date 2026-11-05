@@ -380,6 +380,7 @@ type Probe struct {
 	Items  []contract.GitHubItem // oldest first
 	Seen   map[int]*FeedItem     // each item the issues feed listed anew, as it last stood
 	Feeds  []store.GitHubFeed    // the rows that moved
+	Branch string                // the default branch's name, as far as the feed knows it
 	Main   string                // the default branch's head, when this pass read one
 	Moved  bool                  // the default branch moved
 	Resync bool                  // a feed lost its place or has none, so anything may have happened unseen
@@ -403,12 +404,14 @@ func (c *Client) Probe(ctx context.Context, repo contract.RepoName, rows map[str
 		}
 		fresh = append(fresh, read.fresh...)
 	}
+	probe.Branch = rows[feedMain].Cursor.Branch
 	if !c.restingFor(string(repo) + " " + feedMain) {
 		was := rows[feedMain]
 		row, err := c.main(ctx, repo, was)
 		if err != nil {
 			return probe, err
 		}
+		probe.Branch = row.Cursor.Branch
 		if row.ETag != was.ETag || row.Cursor.Branch != was.Cursor.Branch {
 			probe.Feeds = append(probe.Feeds, row)
 		}

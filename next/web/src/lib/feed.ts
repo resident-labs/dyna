@@ -92,7 +92,7 @@ const sameAuthor = (a: Principal, b: Principal) => a.kind === b.kind && a.sessio
 // The session an event is about; events without one belong to the room feed only.
 export function subject(event: Event): string | undefined {
   switch (event.type) {
-    case "post.sent": case "git.main_updated": case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": case "session.failed": case "goal.set": case "goal.item_changed": case "goal.ended": case "checkin.due": return undefined;
+    case "post.sent": case "git.main_updated": case "git.main_ci_finished": case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": case "session.failed": case "goal.set": case "goal.item_changed": case "goal.ended": case "checkin.due": return undefined;
     case "hook.finished": case "hook.due": case "notice.posted": case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": return undefined;
     case "op.requested": return event.body.by.session;
     case "op.decided": case "op.ran": return event.from.session;
@@ -101,9 +101,9 @@ export function subject(event: Event): string | undefined {
 }
 
 // Events with no row. Goals show in About and the session list; failures show on the box and turn events they report.
-// A pull request's rows come from github.pr.changed. The typed PR events, issue events, feed items and git.main_updated exist for subscribers and sessions.
+// A pull request's rows come from github.pr.changed. The typed PR events, issue events, feed items, git.main_updated and git.main_ci_finished exist for subscribers and sessions.
 // A running job's status is for the session that owns the job.
-const unshown = new Set<Event["type"]>(["shell.job.running", "workflow.step_changed", "workflow.status_changed", "session.profile_changed", "transcript.changed", "session.failed", "goal.set", "goal.item_changed", "goal.ended", "checkin.due", "github.pr.merged", "github.pr.closed", "github.ci.finished", "git.main_updated", "github.issue.opened", "github.comment", "github.label", "github.mention", "github.issue.changed", "github.issue.closed"]);
+const unshown = new Set<Event["type"]>(["shell.job.running", "workflow.step_changed", "workflow.status_changed", "session.profile_changed", "transcript.changed", "session.failed", "goal.set", "goal.item_changed", "goal.ended", "checkin.due", "github.pr.merged", "github.pr.closed", "github.ci.finished", "git.main_updated", "git.main_ci_finished", "github.issue.opened", "github.comment", "github.label", "github.mention", "github.issue.changed", "github.issue.closed"]);
 
 // Builds the rows of one conversation. Posts and final answers become post rows, a
 // failed turn and a request are each their own row, and all other events between them fold into one work row.
@@ -313,7 +313,7 @@ export const eventGroups: Record<Event["type"], string> = {
   "op.requested": "requests", "op.decided": "requests decided", "op.ran": "requests run",
   "question.asked": "questions", "question.answered": "questions answered", "question.withdrawn": "questions withdrawn",
   "image.built": "images built", "image.failed": "image builds failed", "github.pr.opened": "pull requests opened", "github.pr.changed": "pull request updates",
-  "github.pr.merged": "pull requests merged", "github.pr.closed": "pull requests closed", "github.ci.finished": "CI results", "git.main_updated": "default branch moves", "github.issue.opened": "issues opened", "github.comment": "GitHub comments", "github.label": "GitHub labels", "github.mention": "GitHub mentions", "github.issue.changed": "issue updates", "github.issue.closed": "issues closed",
+  "github.pr.merged": "pull requests merged", "github.pr.closed": "pull requests closed", "github.ci.finished": "CI results", "git.main_updated": "default branch moves", "git.main_ci_finished": "default branch CI results", "github.issue.opened": "issues opened", "github.comment": "GitHub comments", "github.label": "GitHub labels", "github.mention": "GitHub mentions", "github.issue.changed": "issue updates", "github.issue.closed": "issues closed",
   "hook.finished": "subscription runs", "hook.due": "subscription wakes", "notice.posted": "notices", "session.notice": "box notices",
   "shell.job.ended": "jobs finished", "shell.job.running": "job status", "grant.expired": "host grants expired",
   "host.disk_low": "disk warnings", "conversation.read": "read positions", "workflow.ended": "workflow runs", "workflow.step_changed": "workflow steps", "workflow.status_changed": "workflow status lines",
@@ -525,7 +525,7 @@ export function describe(event: Event, name: Name): string {
     case "image.failed": return `Image for ${event.body.repo} failed`;
     case "github.pr.opened": return `${name(event.body.session ?? "")} opened pull request ${event.body.repo}#${event.body.number}`;
     case "github.pr.changed": return wakingChanges(event.body).map(changeLine).join(" · ");
-    case "github.pr.merged": case "github.pr.closed": case "github.ci.finished": case "git.main_updated": case "github.issue.opened": case "github.comment": case "github.label": case "github.mention": case "github.issue.changed": case "github.issue.closed": return ""; // feedRows shows no row for them.
+    case "github.pr.merged": case "github.pr.closed": case "github.ci.finished": case "git.main_updated": case "git.main_ci_finished": case "github.issue.opened": case "github.comment": case "github.label": case "github.mention": case "github.issue.changed": case "github.issue.closed": return ""; // feedRows shows no row for them.
     case "grant.expired": return "A host execution grant expired";
     // The owner reads this feed; a room's root may also pause it.
     case "room.paused": case "room.resumed": return `${event.from.session ? name(event.from.session) : "You"} ${event.type === "room.paused" ? "paused" : "resumed"} the room`;

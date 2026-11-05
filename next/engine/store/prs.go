@@ -43,6 +43,15 @@ type PRUpdate struct {
 	Change      *contract.PrChange
 }
 
+// MainCI is the settled CI of a repository's default-branch head. A Result of none settles a head that has no CI and tells nobody; success and failure settle it and become one git.main_ci_finished.
+type MainCI struct {
+	Repo   contract.RepoName
+	Branch string
+	Head   string
+	Result contract.PrCI
+	Runs   []contract.CIRun
+}
+
 // RepoHead is a repository's default branch head.
 type RepoHead struct {
 	Repo contract.RepoName
@@ -79,21 +88,27 @@ func (s *Store) queryPRs(ctx context.Context, query string, args ...any) ([]Trac
 	return out, rows.Err()
 }
 
-// RepoHeads lists every repository a room lists, with its stored head, empty until a poll reads it.
-func (s *Store) RepoHeads(ctx context.Context) (map[contract.RepoName]string, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT repo,main_head FROM repos")
+// RepoState is what is stored of a repository's default branch: its head, and the head whose CI is settled (spec 7.7). Both are empty until a poll reads a head.
+type RepoState struct {
+	Head      string
+	CISettled string
+}
+
+// RepoHeads lists every repository a room lists, with its stored state.
+func (s *Store) RepoHeads(ctx context.Context) (map[contract.RepoName]RepoState, error) {
+	rows, err := s.Read().QueryContext(ctx, "SELECT repo,main_head,ci_settled FROM repos")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	heads := map[contract.RepoName]string{}
+	heads := map[contract.RepoName]RepoState{}
 	for rows.Next() {
 		var repo contract.RepoName
-		var head string
-		if err := rows.Scan(&repo, &head); err != nil {
+		var state RepoState
+		if err := rows.Scan(&repo, &state.Head, &state.CISettled); err != nil {
 			return nil, err
 		}
-		heads[repo] = head
+		heads[repo] = state
 	}
 	return heads, rows.Err()
 }
@@ -254,7 +269,8 @@ func (s *Store) moveRepoHead(ctx context.Context, tx *sql.Tx, head RepoHead, at 
 		return err
 	}
 	if previous == "" {
-		return nil
+		_, err := tx.ExecContext(ctx, "UPDATE repos SET ci_settled=? WHERE repo=?", head.Head, head.Repo)
+		return err
 	}
 	body := contract.GitMainUpdated{Repo: head.Repo, Head: head.Head}
 	seq, err := s.appendEngineEvent(tx, room, at, body)
@@ -288,11 +304,12 @@ func (s *Store) moveRepoHead(ctx context.Context, tx *sql.Tx, head RepoHead, at 
 
 // GitHubPass is what one pass found, across every repository it read.
 type GitHubPass struct {
-	PRs    []PRUpdate
-	Issues []IssueUpdate
-	Heads  []RepoHead
-	Feeds  []GitHubFeed          // cursors that moved
-	Items  []contract.GitHubItem // what no session tracks
+	PRs     []PRUpdate
+	Issues  []IssueUpdate
+	Heads   []RepoHead
+	MainCIs []MainCI
+	Feeds   []GitHubFeed          // cursors that moved
+	Items   []contract.GitHubItem // what no session tracks
 }
 
 // ApplyPRPoll writes one pass and its events in one transaction with the cursors that found them, so a restart can neither
@@ -418,6 +435,20 @@ func (s *Store) ApplyPRPoll(ctx context.Context, pass GitHubPass, at time.Time) 
 		}
 		for _, head := range pass.Heads {
 			if err := s.moveRepoHead(ctx, tx, head, at); err != nil {
+				return err
+			}
+		}
+		// A head is settled once: the update changes the row only for a head not yet settled, so only that pass writes its event.
+		for _, ci := range pass.MainCIs {
+			var room contract.RoomID
+			err := tx.QueryRowContext(ctx, "UPDATE repos SET ci_settled=? WHERE repo=? AND ci_settled<>? RETURNING default_room", ci.Head, ci.Repo, ci.Head).Scan(&room)
+			if errors.Is(err, sql.ErrNoRows) || err == nil && ci.Result == contract.PrCINone {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if _, err := s.appendEngineEvent(tx, room, at, contract.GitMainCIFinished{Repo: ci.Repo, Branch: ci.Branch, Sha: ci.Head, Result: ci.Result, Runs: ci.Runs}); err != nil {
 				return err
 			}
 		}

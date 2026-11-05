@@ -484,6 +484,8 @@ export type PrChange = { pr: PrSummary; kinds?: Array<PrChangeKind> | null; fail
 export type PrChanged = { session: SessionID; changes: Array<PrChange> | null; issues?: Array<IssueChange> | null; };
 export type CIFinished = { repo: RepoName; number: number; session: SessionID; url: string; head: string; result: PrCI; };
 export type GitMainUpdated = { repo: RepoName; head: string; };
+export type CIRun = { name: string; conclusion: string; url: string; };
+export type GitMainCIFinished = { repo: RepoName; branch: string; sha: string; result: PrCI; runs: Array<CIRun> | null; };
 export type ProxyKeyRequest = { reset?: boolean; };
 export type ProxyKeyResponse = { key: string; };
 export type ProxyUsageRequest = { };
@@ -598,6 +600,7 @@ export type EventBody =
   | { type: "computer.changed"; body: ComputerChanged }
   | { type: "connect.connector"; body: ConnectConnector }
   | { type: "conversation.read"; body: ConversationRead }
+  | { type: "git.main_ci_finished"; body: GitMainCIFinished }
   | { type: "git.main_updated"; body: GitMainUpdated }
   | { type: "github.ci.finished"; body: CIFinished }
   | { type: "github.comment"; body: GitHubComment }
