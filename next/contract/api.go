@@ -122,6 +122,8 @@ const (
 	ErrModelsUnavailable    ErrorCode = "models_unavailable"
 	ErrStoreFromV1          ErrorCode = "store_from_v1"
 	ErrStoreTooOld          ErrorCode = "store_too_old"
+	ErrNoGPU                ErrorCode = "no_gpu"        // a session start asked for a GPU and no host reports one
+	ErrGPUTooLarge          ErrorCode = "gpu_too_large" // the request exceeds what the largest card can give a box
 )
 
 type Error struct {
@@ -457,6 +459,7 @@ type HostSummary struct {
 	ExecOnly     bool                 `json:"execOnly,omitempty"`   // added exec only: host-exec runs, no boxes or runners
 	Runners      int                  `json:"runners,omitempty"`    // the CI runners on this added host now
 	Rooms        []RoomID             `json:"rooms,omitempty"`      // the rooms this added host serves (host.set_limits); none means every room
+	GPUs         []GPU                `json:"gpus,omitempty"`       // its cards, each with the VRAM boxes have requested of it
 	LastSeen     time.Time            `json:"lastSeen,omitzero"`
 	History      []HostLoadPoint      `json:"history"`
 }
@@ -515,6 +518,7 @@ type SessionStartRequest struct {
 	Brief    string      `json:"brief,omitempty"`
 	Size     BoxSizeName `json:"size,omitempty"`
 	SameHost bool        `json:"sameHost,omitempty"`
+	GPU      GPUGiB      `json:"gpu,omitempty" desc:"GiB of GPU memory the box needs on one card; true means 1. The session waits for a host with a card that has that much unclaimed. GPU memory is not limited per box, so a box that uses more makes other boxes on the card fail their CUDA allocations, and nothing stops it. Fails with no_gpu when no host reports a GPU and gpu_too_large when no card is big enough."`
 	Compose  string      `json:"compose,omitempty"`
 }
 type SessionStartResponse struct {

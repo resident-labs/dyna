@@ -94,9 +94,10 @@ func poolDelay(failures int) time.Duration {
 	return min(time.Minute<<min(failures-1, 6), time.Hour)
 }
 
-// poolWait says what a new box waits for. In a room whose rule names a pool, that is a node.
+// poolWait says what a new box waits for. In a room whose rule names a pool, that is a node, unless the box asked for a GPU, which
+// a new node does not bring.
 func poolWait(row store.LifecycleBox, reason box.PendingReason, pools []store.Pool) box.PendingReason {
-	if row.Host != "" || reason == box.PendingRoomLimit || reason == box.PendingInvalidSize {
+	if row.Host != "" || row.GPU > 0 || reason == box.PendingRoomLimit || reason == box.PendingInvalidSize {
 		return reason
 	}
 	for _, pool := range pools {

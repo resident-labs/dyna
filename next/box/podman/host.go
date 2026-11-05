@@ -485,6 +485,9 @@ func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
 	for _, l := range c.Labels {
 		args = append(args, "--label", l.Key+"="+l.Value)
 	}
+	if c.GPUCard != nil {
+		args = append(args, "--device", fmt.Sprintf("nvidia.com/gpu=%d", *c.GPUCard))
+	}
 	args = append(args, c.Image, "--", "/opt/dyna/bin/current/dyna", "box-agent")
 	var checks string
 	for _, need := range c.Needs {
