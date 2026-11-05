@@ -148,32 +148,20 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 			reason = PendingMemory
 			continue
 		}
-		cpu, runnerCPU, mem, runnerMem, disk := 0, 0, int64(0), int64(0), h.DiskBytes
-		for _, b := range boxes {
-			if b.Host != h.Name || b.ID == request.ID || b.State == contract.BoxDeleted || b.State == contract.BoxFailed {
-				continue
-			}
-			if (b.State != contract.BoxPending && b.Image == "") || (!b.PlacedAt.Before(h.CheckedAt) && !(b.State == contract.BoxPending && b.Image == "")) {
-				disk -= diskRequest(b.Size.Name)
-			}
-			if b.State != contract.BoxStopped && b.State != contract.BoxPending {
-				cpu += b.Size.CPUs
-				mem += b.Size.MemBytes
-				if b.Image == RunnerImage {
-					runnerCPU += b.Size.CPUs
-					runnerMem += b.Size.MemBytes
-				}
-			}
-		}
+		cpu, runnerCPU, mem, runnerMem, disk := hostLoad(h, boxes, request.ID)
+		serviceCPU, serviceMem, serviceDisk := h.serviceLoad("")
+		disk -= serviceDisk
+		// Services come off the top at 1x, so the budgets below are what is left of the host.
+		cpuBudget, memBudget := int64(h.CPUs)*1000-serviceCPU, h.MemBytes-serviceMem
 		// A session box idles most of the time, so a host takes four times its CPUs of them. A CI runner is busy for its whole
 		// job but uses about half its CPUs on average, between links, tests and waits, so a host takes twice its CPUs of
 		// runners. At four times, hosts ran at two to six times their CPUs and jobs took two to three times as long; at once,
 		// they sat half idle. Runners fit in real memory at 1x because a busy compile peaks near its limit.
-		if cpu+request.Size.CPUs > 4*h.CPUs || request.Image == RunnerImage && runnerCPU+request.Size.CPUs > 2*h.CPUs {
+		if int64(cpu+request.Size.CPUs)*1000 > 4*cpuBudget || request.Image == RunnerImage && int64(runnerCPU+request.Size.CPUs)*1000 > 2*cpuBudget {
 			reason = PendingCPU
 			continue
 		}
-		if mem+request.Size.MemBytes > 4*h.MemBytes || request.Image == RunnerImage && runnerMem+request.Size.MemBytes > h.MemBytes {
+		if mem+request.Size.MemBytes > 4*memBudget || request.Image == RunnerImage && runnerMem+request.Size.MemBytes > memBudget {
 			reason = PendingMemory
 			continue
 		}
@@ -187,8 +175,8 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 			continue
 		}
 		// Earlier capacity guards reject hosts with zero CPUs or memory.
-		cpuFree := float64(4*h.CPUs-cpu-request.Size.CPUs) / float64(4*h.CPUs)
-		memFree := float64(4*h.MemBytes-mem-request.Size.MemBytes) / float64(4*h.MemBytes)
+		cpuFree := float64(4*cpuBudget-int64(cpu+request.Size.CPUs)*1000) / float64(4*cpuBudget)
+		memFree := float64(4*memBudget-mem-request.Size.MemBytes) / float64(4*memBudget)
 		headroom := min(cpuFree, memFree)
 		if chosen == "" || headroom > best || (headroom == best && h.Name < chosen) {
 			chosen, best, card = h.Name, headroom, hostCard

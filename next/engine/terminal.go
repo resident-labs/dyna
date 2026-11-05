@@ -30,6 +30,10 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 		return contract.HostListResponse{}, failure(err)
 	}
 	runners := s.reconciler.RunnerCounts()
+	services, err := s.hostServices(ctx)
+	if err != nil {
+		return contract.HostListResponse{}, failure(err)
+	}
 	var imageProblems map[contract.HostName][]contract.RunnerImageProblem
 	if s.runnerImageProblems != nil {
 		imageProblems = s.runnerImageProblems()
@@ -47,7 +51,7 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 				}
 			}
 		}
-		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, Problem: host.Problem, Sessions: sessions[host.Name], Shared: []contract.RoomShared{}, Pool: host.Pool, Agents: !host.NoAgents, CI: host.CI, Rooms: host.Rooms, ExecOnly: host.ExecOnly, Runners: runners[host.Name], RunnerImages: imageProblems[host.Name], CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.ExecOnly && !host.CheckedAt.IsZero() && box.DiskLow(host.DiskBytes, host.DiskFloor), EngineHost: host.EngineHost != nil && *host.EngineHost, Leftovers: leftovers[host.Name], GPUs: cards})
+		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, Problem: host.Problem, Sessions: sessions[host.Name], Shared: []contract.RoomShared{}, Pool: host.Pool, Agents: !host.NoAgents, CI: host.CI, Rooms: host.Rooms, ExecOnly: host.ExecOnly, Runners: runners[host.Name], RunnerImages: imageProblems[host.Name], CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.ExecOnly && !host.CheckedAt.IsZero() && box.DiskLow(host.DiskBytes, host.DiskFloor), EngineHost: host.EngineHost != nil && *host.EngineHost, Leftovers: leftovers[host.Name], GPUs: cards, Services: services[host.Name], ServiceHost: s.reconciler.ServiceHostStatus(host.Name)})
 	}
 	return result, nil
 }
