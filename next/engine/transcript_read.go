@@ -156,9 +156,6 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			// Every request reads the window of items, because a post's index is where it falls among them.
 			wantItems := !req.Tail && req.Page != contract.TranscriptPageMandatoryPosts
 			skip := req.Cursor
-			if !wantItems {
-				skip = 0
-			}
 			const maxItems = 256
 			var pageItems []pig.TranscriptItem
 			seenTotal := 0
