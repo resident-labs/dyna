@@ -159,6 +159,7 @@ func TestUpgradeCarriesRootApprovesHostexec(t *testing.T) {
 		"ALTER TABLE hosts DROP COLUMN gpus",
 		"ALTER TABLE boxes DROP COLUMN gpu_gib",
 		"ALTER TABLE boxes DROP COLUMN gpu_index",
+		"ALTER TABLE rooms DROP COLUMN github_writes",
 		"UPDATE meta SET value='86' WHERE key='schema_version'",
 	} {
 		if _, err := db.Exec(q); err != nil {
@@ -209,6 +210,7 @@ func TestUpgradeTurnsHeldAndRetryingArchivesIntoPlainCloses(t *testing.T) {
 		"ALTER TABLE hosts DROP COLUMN gpus",
 		"ALTER TABLE boxes DROP COLUMN gpu_gib",
 		"ALTER TABLE boxes DROP COLUMN gpu_index",
+		"ALTER TABLE rooms DROP COLUMN github_writes",
 		"UPDATE meta SET value='88' WHERE key='schema_version'",
 	} {
 		if _, err := db.Exec(q); err != nil {

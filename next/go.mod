@@ -13,11 +13,13 @@ require (
 	github.com/gin-gonic/gin v1.10.1
 	github.com/github/github-mcp-server/v2 v2.0.2
 	github.com/google/go-github/v92 v92.0.0
+	github.com/google/jsonschema-go v0.4.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/rclone/rclone v1.75.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.1
 	github.com/shurcooL/githubv4 v0.0.0-20260209031235-2402fdf4a9ed
 	github.com/spf13/cobra v1.10.2
+	github.com/vektah/gqlparser/v2 v2.5.64
 	golang.org/x/crypto v0.57.0
 	golang.org/x/net v0.60.0
 	golang.org/x/sync v0.23.0
@@ -55,7 +57,6 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/gofrs/flock v0.13.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
-	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/gopherjs/gopherjs v1.21.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/hanwen/go-fuse/v2 v2.10.1 // indirect
