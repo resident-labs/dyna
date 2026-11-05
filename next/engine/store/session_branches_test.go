@@ -125,6 +125,7 @@ func TestUpgradeRecordsEarlierSessionsBranches(t *testing.T) {
 		"DROP TABLE service_leftovers",
 		"DROP TABLE service_secrets",
 		"DROP TABLE services",
+		"DROP TABLE service_image_sizes",
 		"DROP TABLE repo_heads",
 		"INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES ('room','room',1,0,0)",
 		"INSERT INTO sessions(id,room,name,profile,state,goal,created_at,repo) VALUES ('ses_with','room','with','p','ready','',7,'owner/repo'),('ses_without','room','without','p','ready','',8,'')",
