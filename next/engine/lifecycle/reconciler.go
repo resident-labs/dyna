@@ -273,7 +273,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 		next := b
 		if placement.Reason != "" {
 			next.State, next.Reason = contract.BoxPending, string(poolWait(row, placement.Reason, pools))
-		} else if b.Image == "" {
+		} else if next.GPUCard = placement.Card; b.Image == "" {
 			next.State, next.Reason, next.Host = contract.BoxCreating, "", placement.Host
 			next.Slice, err = box.SliceName(b.ID)
 			if err != nil {

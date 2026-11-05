@@ -107,7 +107,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		}
 		if workErr == nil {
 			phase = contract.CreatePhaseBox
-			next.Image, workErr = r.boxes.Create(createCtx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: b.Slice, Size: b.Size, Repos: sources})
+			next.Image, workErr = r.boxes.Create(createCtx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: b.Slice, Size: b.Size, Repos: sources, GPUCard: b.GPUDevice()})
 			steps.Done("create")
 		}
 		// A deadline or cancellation says nothing about the host, whatever step it cut short.
@@ -197,7 +197,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 				sources, workErr = repos.Get(ctx, b.Session, b.Host, false)
 			}
 			if workErr == nil {
-				workErr = r.boxes.Recreate(ctx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: b.Slice, Size: b.Size, Repos: sources, Needs: image.Needs, Stack: image.Stack}, image.Tag)
+				workErr = r.boxes.Recreate(ctx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: b.Slice, Size: b.Size, Repos: sources, Needs: image.Needs, Stack: image.Stack, GPUCard: b.GPUDevice()}, image.Tag)
 			}
 			if workErr == nil {
 				var notice *contract.Event
