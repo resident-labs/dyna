@@ -197,14 +197,14 @@ func Run(ctx context.Context) error {
 	var files func() []string // the session files to keep sending
 	var steered func()        // a crew's script takes no input, so its workers' commands never step aside
 	if hello.Workflow != nil {
-		open := func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string) (crewWorker, error) {
+		open := func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string, submit dynaext.Submit) (crewWorker, error) {
 			tree := dir
 			if dir == workdir {
 				tree = ""
 			}
 			c := workerConfig(pig.Config{AgentDir: piDir, SessionDir: sessions, Notice: func(text string) { go notice(text) }}, profile, folder, dir)
 			c.Instructions = crewInstructions(hello, tree)
-			c.Extensions = []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: dir, Shell: jobs, Dyna: dynaTools})}
+			c.Extensions = []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: dir, Shell: jobs, Dyna: dynaTools, Submit: submit})}
 			return pig.Open(ctx, c)
 		}
 		config := CrewConfig{Workflow: *hello.Workflow, TextOnlyModels: hello.TextOnlyModels, Engine: client, Open: open, Transcript: transcript, Workdir: workdir, Sessions: sessions, State: piDir}
