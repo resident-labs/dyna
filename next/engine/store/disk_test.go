@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -58,21 +59,22 @@ func diskAlerts(t *testing.T, s *Store) (events map[contract.RoomID]int, wakes m
 func TestDiskWarnWakesRoomRootsOncePerSpell(t *testing.T) {
 	ctx := context.Background()
 	s := diskStore(t)
-	const total = 1000 * box.GiB // Floor 100 GiB, warn 180 GiB, spell ends at 198 GiB.
+	const total = 1000 * box.GiB // Floor 100 GiB, spell ends at 110 GiB.
 	for i, step := range []struct {
 		free   int64
 		alerts int
 	}{
 		{500 * box.GiB, 0},
-		{180 * box.GiB, 0},
-		{179 * box.GiB, 1},
-		{178 * box.GiB, 1},
-		{181 * box.GiB, 1},
-		{179 * box.GiB, 1}, // Hovering at the warn level stays quiet.
-		{197 * box.GiB, 1},
-		{179 * box.GiB, 1},
-		{198 * box.GiB, 1},
-		{179 * box.GiB, 2},
+		{100*box.GiB + 1, 0},
+		{100 * box.GiB, 0},
+		{100*box.GiB - 1, 1},
+		{98 * box.GiB, 1},
+		{101 * box.GiB, 1},
+		{99 * box.GiB, 1}, // Hovering at the floor stays quiet.
+		{110*box.GiB - 1, 1},
+		{99 * box.GiB, 1},
+		{110 * box.GiB, 1},
+		{99 * box.GiB, 2},
 	} {
 		if err := s.RecordHostHeartbeat(ctx, "h", true, &step.free, total, time.Unix(int64(i)*3600, 0)); err != nil {
 			t.Fatal(err)
@@ -87,7 +89,7 @@ func TestDiskWarnWakesRoomRootsOncePerSpell(t *testing.T) {
 		t.Fatal(err)
 	}
 	low, ok := list[0].Body.(contract.HostDiskLow)
-	if !ok || low.Host != "h" || low.FreeBytes != 179*box.GiB || low.FloorBytes != 100*box.GiB {
+	if !ok || low.Host != "h" || low.FreeBytes != 100*box.GiB-1 || low.FloorBytes != 100*box.GiB {
 		t.Fatalf("event: %#v", list[0].Body)
 	}
 	var want string
@@ -224,23 +226,25 @@ func TestDiskLowSinceNeedsAnUnbrokenRun(t *testing.T) {
 	}
 }
 
-// A pool node warns at its floor, and a hand-added host at floor plus headroom, from the stored total.
+// A pool node and a hand-added host both warn strictly below the same floor.
 func TestDiskWarnPoolNodeWarnsAtFloor(t *testing.T) {
 	ctx := context.Background()
 	s := diskStore(t)
 	if _, err := s.writer.Exec(`INSERT INTO hosts(name,ssh,state,cpus,mem_bytes,disk_bytes,checked_at,pool) VALUES('node','','ready',1,1,0,0,'boats')`); err != nil {
 		t.Fatal(err)
 	}
-	const total = 146 * box.GiB // Floor 20 GiB; a hand-added host warns at 56.5 GiB.
+	const total = 146 * box.GiB // Floor 20 GiB for both hosts.
 	for i, step := range []struct {
 		host   contract.HostName
 		free   int64
 		alerts int
 	}{
 		{"node", 50 * box.GiB, 0},
-		{"node", 21 * box.GiB, 0},
+		{"node", 20 * box.GiB, 0},
 		{"node", 19 * box.GiB, 1},
-		{"h", 50 * box.GiB, 2},
+		{"h", 50 * box.GiB, 1},
+		{"h", 20 * box.GiB, 1},
+		{"h", 19 * box.GiB, 2},
 	} {
 		if err := s.RecordHostHeartbeat(ctx, step.host, true, &step.free, total, time.Unix(int64(i)*3600, 0)); err != nil {
 			t.Fatal(err)
@@ -271,5 +275,101 @@ func TestDiskWarnSkipsExecOnlyHost(t *testing.T) {
 	events, wakes := diskAlerts(t, s)
 	if events["r1"] != 0 || events["r2"] != 0 || wakes["root1"] != 0 || wakes["root2"] != 0 {
 		t.Fatalf("events %v wakes %v", events, wakes)
+	}
+}
+
+// A continuously low host stays quiet through missed probes, time passing and a real store reopen.
+func TestDiskWarningPersistsAcrossRestart(t *testing.T) {
+	ctx := context.Background()
+	s := diskStore(t)
+	dir := filepath.Dir(s.lock.Name())
+	const total = 1000 * box.GiB
+	free := 99 * box.GiB
+	at := time.Unix(1000, 0)
+	for i := range 30 {
+		if err := s.RecordHostHeartbeat(ctx, "h", true, &free, total, at.Add(time.Duration(i)*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	s, err = Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	if err := s.ResetEngineHosts(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Neither a missing sample nor unreachable figures clear the persistent crossing.
+	high := 500 * box.GiB
+	for _, step := range []struct {
+		reachable bool
+		free      *int64
+	}{{true, nil}, {false, &high}, {true, &free}, {true, &free}} {
+		at = at.Add(48 * time.Hour)
+		if err := s.RecordHostHeartbeat(ctx, "h", step.reachable, step.free, total, at); err != nil {
+			t.Fatal(err)
+		}
+		if events, wakes := diskAlerts(t, s); events["r1"] != 1 || events["r2"] != 1 || wakes["root1"] != 1 || wakes["root2"] != 1 {
+			t.Fatalf("events %v wakes %v", events, wakes)
+		}
+	}
+	// A real recovery after the gap, then a new crossing, sends exactly one new notice.
+	for i, value := range []int64{110 * box.GiB, free, free} {
+		at = at.Add(time.Second)
+		if err := s.RecordHostHeartbeat(ctx, "h", true, &value, total, at); err != nil {
+			t.Fatal(err)
+		}
+		want := 2
+		if i == 0 {
+			want = 1
+		}
+		if events, _ := diskAlerts(t, s); events["r1"] != want || events["r2"] != want {
+			t.Fatalf("recovery step %d: %v", i, events)
+		}
+	}
+}
+
+func TestDiskWarningNeedsReachableSample(t *testing.T) {
+	ctx := context.Background()
+	s := diskStore(t)
+	low := int64(0)
+	for _, step := range []struct {
+		reachable bool
+		free      *int64
+	}{{true, nil}, {false, &low}, {false, nil}} {
+		if err := s.RecordHostHeartbeat(ctx, "h", step.reachable, step.free, 1000*box.GiB, time.Unix(1, 0)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if events, wakes := diskAlerts(t, s); events["r1"] != 0 || events["r2"] != 0 || len(wakes) != 0 {
+		t.Fatalf("events %v wakes %v", events, wakes)
+	}
+}
+
+func TestDiskWarningRecoveryRequiresFullGap(t *testing.T) {
+	ctx := context.Background()
+	s := diskStore(t)
+	at := time.Unix(1000, 0)
+	for i, step := range []struct {
+		free    int64
+		elapsed time.Duration
+		alerts  int
+	}{
+		{99 * box.GiB, 0, 1},
+		{110 * box.GiB, time.Hour - time.Millisecond, 1},
+		{99 * box.GiB, time.Hour, 1},  // The early recovery did not rearm the crossing.
+		{110 * box.GiB, time.Hour, 1}, // Exactly one hour is enough to rearm.
+		{99 * box.GiB, time.Hour + time.Millisecond, 2},
+	} {
+		if err := s.RecordHostHeartbeat(ctx, "h", true, &step.free, 1000*box.GiB, at.Add(step.elapsed)); err != nil {
+			t.Fatal(err)
+		}
+		if events, _ := diskAlerts(t, s); events["r1"] != step.alerts || events["r2"] != step.alerts {
+			t.Fatalf("step %d: %v, want %d", i, events, step.alerts)
+		}
 	}
 }
