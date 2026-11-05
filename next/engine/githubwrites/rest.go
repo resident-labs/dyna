@@ -140,9 +140,11 @@ func (g *Guard) checkREST(grant contract.GitHubWrites, request *http.Request, pr
 	}
 	if enabled[0].comment || enabled[0].item {
 		var answer struct {
-			IssueURL string `json:"issue_url"`
-			Content  *struct {
+			IssueURL    string `json:"issue_url"`
+			ContentType string `json:"content_type"`
+			Content     *struct {
 				RepositoryURL string `json:"repository_url"`
+				URL           string `json:"url"`
 			} `json:"content"`
 		}
 		target := *g.API
@@ -152,10 +154,16 @@ func (g *Guard) checkREST(grant contract.GitHubWrites, request *http.Request, pr
 		}
 		pointed := answer.IssueURL
 		if enabled[0].item {
-			if answer.Content == nil {
+			switch {
+			case answer.ContentType == "DraftIssue":
 				return refuse(contract.GitHubWriteRepoNotAllowed, "%s is an item with no issue or PR, so no allowed repository holds it", what)
+			case answer.Content != nil && answer.ContentType == "Issue":
+				pointed = answer.Content.RepositoryURL
+			case answer.Content != nil && answer.ContentType == "PullRequest":
+				pointed = answer.Content.URL
+			default:
+				return refuse(contract.GitHubWriteIDUnresolved, "%s is an item whose content type is neither an issue, a PR nor a draft", what)
 			}
-			pointed = answer.Content.RepositoryURL
 		}
 		named, ok := strings.CutPrefix(pointed, g.API.Scheme+"://"+g.API.Host+prefix+"/repos/")
 		parts := strings.Split(named, "/")
