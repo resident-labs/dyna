@@ -5,12 +5,12 @@
   // A count is the number alone in the tone's color, with no circle (spec 5.13); its parent names it.
   // Working's dot has a still, soft halo, as in the chosen room mockup (note 6); nothing moves.
   let { tone, label, title = label, dot = false, triangle = false, word = false, count }: {
-    tone: "warning" | "error" | "blocked" | "failed" | "working"; label: string; title?: string; dot?: boolean; triangle?: boolean; word?: boolean; count?: number;
+    tone: "warning" | "error" | "blocked" | "failed" | "working" | "background"; label: string; title?: string; dot?: boolean; triangle?: boolean; word?: boolean; count?: number;
   } = $props();
   let error = $derived(tone === "error" || tone === "blocked" || tone === "failed");
 </script>
 {#if count !== undefined}<span class="count" class:error aria-hidden="true">{count > 99 ? "99+" : count}</span>
-{:else}<span class="status" class:dot class:word class:error class:working={tone === "working"} {title} role={dot ? "img" : undefined}
+{:else}<span class="status" class:dot class:word class:error class:working={tone === "working"} class:background={tone === "background"} {title} role={dot ? "img" : undefined}
   aria-label={dot ? title : undefined}>{#if triangle}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3 2 20h20zM12 10v4M12 17h.01" /></svg>{:else if !word}<i></i>{/if}{#if !dot}{label}{/if}</span>{/if}
 <style>
   .status { display: inline-flex; align-items: center; gap: 5px; flex: none; color: var(--attention); opacity: 0.9;
@@ -19,6 +19,8 @@
   .word { display: inline; }
   .error { color: var(--danger); }
   .working { color: var(--success); }
+  .background { color: var(--muted); }
+  .background i { background: currentColor; }
   .count { flex: none; color: var(--attention); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .count.error { color: var(--danger); }
   i { width: 6px; height: 6px; border-radius: 50%; background: var(--attention-fill); }

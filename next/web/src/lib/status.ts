@@ -1,17 +1,17 @@
 import { call } from "./client.ts";
-import type { Event, FailureCause } from "./contract.gen.ts";
+import type { Event, FailureCause, SessionWaiting } from "./contract.gen.ts";
 
 // One status per session, in one priority order, so the room header and the session panel count the same way. A box
 // that failed or was lost comes first, since approving a request does not repair it. Then what waits for the owner,
 // then a running turn: a new turn moves on from an earlier failed turn the owner has not seen yet, which comes next.
 // A session that waits for the owner is waiting, not working.
-export type Status = "waiting" | "failed" | "working" | "idle";
+export type Status = "waiting" | "failed" | "working" | "background" | "idle";
 
 // The priority order as a number for sorting: 0 is the most urgent.
-export const urgency = (status: Status): number => ["failed", "waiting", "working", "idle"].indexOf(status);
+export const urgency = (status: Status): number => ["failed", "waiting", "working", "background", "idle"].indexOf(status);
 
-export const statusOf = ({ broken, waiting, working, failed }: { broken: boolean; waiting: boolean; working: boolean; failed: boolean }): Status =>
-  broken ? "failed" : waiting ? "waiting" : working ? "working" : failed ? "failed" : "idle";
+export const statusOf = ({ broken, waiting, working, failed, background = false }: { broken: boolean; waiting: boolean; working: boolean; failed: boolean; background?: boolean }): Status =>
+  broken ? "failed" : waiting ? "waiting" : working ? "working" : failed ? "failed" : background ? "background" : "idle";
 
 // A box that needs the owner. A failed box keeps its open turn, since session.restart resumes it, so an open turn does not mean work.
 export type BoxFailure = { box: "failed" | "lost"; cause?: FailureCause; at?: string };
@@ -48,10 +48,20 @@ export async function turnFailures(room: string, beforeSeq: number, sessions: It
   return placed;
 }
 
+// Labels render the engine's typed reason, never activity or message text.
+export function waitingLabel(wait: SessionWaiting): string {
+  switch (wait.kind) {
+    case "owner": return "the owner";
+    case "jobs": return `${wait.count} ${wait.count === 1 ? "job" : "jobs"}`;
+    case "children": return wait.count === 1 ? `child ${wait.name}` : `${wait.count} children`;
+    case "workflow": return wait.count === 1 ? `workflow ${wait.name}` : `${wait.count} workflows`;
+  }
+}
+
 export type Counts = Record<Status, number> & { sessions: number };
 
 export function countOf(all: Iterable<Status>): Counts {
-  const counts: Counts = { sessions: 0, waiting: 0, failed: 0, working: 0, idle: 0 };
+  const counts: Counts = { sessions: 0, waiting: 0, failed: 0, working: 0, background: 0, idle: 0 };
   for (const status of all) { counts.sessions++; counts[status]++; }
   return counts;
 }

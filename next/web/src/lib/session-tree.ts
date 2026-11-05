@@ -78,7 +78,7 @@ export function sessionActions(parent: string | undefined, stoppable: boolean, b
 
 type Summary = { size: number; top: Status; quiet: boolean; inside: Status };
 
-const folds: Record<Status, string> = { waiting: "A folded session waits for you", failed: "A folded session failed", working: "A folded session is working", idle: "" };
+const folds: Record<Status, string> = { waiting: "A folded session waits for you", failed: "A folded session failed", working: "A folded session is working", background: "A folded session waits on background work", idle: "" };
 
 // Index the tree once, then aggregate each subtree before emitting visible rows.
 export function sessionTree(sessions: SessionStarted[], own: Map<string, Status>, starting: (id: string) => boolean,

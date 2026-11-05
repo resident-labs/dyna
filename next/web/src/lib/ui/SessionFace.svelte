@@ -5,8 +5,8 @@
   // A session's avatar with its one status as a dot on the corner, as Discord marks presence. mark names the dot when
   // it stands for more than this session; otherwise the words beside the face say the status and the dot is hidden from readers.
   let { name, root, dot, mark, size = 28 }: { name: string; root: boolean; dot: Status; mark?: string; size?: number } = $props();
-  const tones = { waiting: "warning", failed: "failed", working: "working" } as const;
-  const words = { waiting: "Waiting", failed: "Failed", working: "Working" };
+  const tones = { waiting: "warning", failed: "failed", working: "working", background: "background" } as const;
+  const words = { waiting: "Waiting", failed: "Failed", working: "Working", background: "Waiting on background work" };
 </script>
 
 <span class="face"><Avatar kind="session" {name} {root} {size} />

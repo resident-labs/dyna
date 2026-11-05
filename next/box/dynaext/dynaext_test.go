@@ -25,11 +25,13 @@ import (
 
 // session is a session with the extension, whose dyna server records each post the engine would receive.
 type session struct {
-	harness *pig.Harness
-	model   *pigtest.Model
-	dir     string
-	mu      sync.Mutex
-	posts   []json.RawMessage
+	harness    *pig.Harness
+	model      *pigtest.Model
+	dir        string
+	mu         sync.Mutex
+	posts      []json.RawMessage
+	interrupts *Interrupts
+	shell      *shell.Server
 }
 
 func newSession(t *testing.T, script ...[]pigtest.Block) *session {
@@ -44,8 +46,12 @@ func newSessionOn(t *testing.T, model string, extra []extension.InlineExtension,
 
 // newSessionSubmit is newSessionOn for a schema step's worker, which has the submit tool when judge is set.
 func newSessionSubmit(t *testing.T, model string, extra []extension.InlineExtension, judge Submit, script ...[]pigtest.Block) *session {
+	return newSessionShell(t, model, extra, judge, shell.Config{After: time.After}, script...)
+}
+
+func newSessionShell(t *testing.T, model string, extra []extension.InlineExtension, judge Submit, config shell.Config, script ...[]pigtest.Block) *session {
 	t.Helper()
-	b := &session{model: pigtest.NewModel(script...), dir: t.TempDir()}
+	b := &session{model: pigtest.NewModel(script...), dir: t.TempDir(), interrupts: NewInterrupts()}
 	dyna, err := dynamcp.New(func(_ context.Context, method contract.Method, body []byte) ([]byte, *contract.Error) {
 		if method != contract.MethodPost {
 			return nil, &contract.Error{Code: contract.ErrInvalid, Message: "unexpected " + string(method)}
@@ -58,7 +64,9 @@ func newSessionSubmit(t *testing.T, model string, extra []extension.InlineExtens
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := shell.New(shell.Config{After: time.After})
+	server := shell.New(config)
+	b.shell = server
+	t.Cleanup(func() { server.Close() })
 	// The dyna server is listed as a box lists it: deferred, with post direct.
 	mcp := httptest.NewServer(dyna)
 	t.Cleanup(mcp.Close)
@@ -70,7 +78,7 @@ func newSessionSubmit(t *testing.T, model string, extra []extension.InlineExtens
 		AgentDir:   agentDir,
 		SessionDir: filepath.Join(agentDir, "sessions"),
 		Model:      contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: model, Thinking: contract.ThinkingLow},
-		Extensions: append([]extension.InlineExtension{Extension(Config{Dir: b.dir, Shell: server, Dyna: dyna, Submit: judge})}, extra...),
+		Extensions: append([]extension.InlineExtension{Extension(Config{Dir: b.dir, Shell: server, Dyna: dyna, Submit: judge, Interrupts: b.interrupts})}, extra...),
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -106,6 +106,15 @@ func (s *Store) readCheckinRoom(ctx context.Context, tx *sql.Tx, id contract.Roo
 		bySession[sessions[i].ID] = &sessions[i]
 		ids[i] = sessions[i].ID
 	}
+	waits, err := sessionWaits(ctx, tx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, session := range bySession {
+		if waits[session.ID] != nil {
+			session.Pending = true
+		}
+	}
 	held, err := s.responsibilities(ctx, tx, ids, nil) // No terminal moves a goal, so a check-in does not ask.
 	if err != nil {
 		return nil, nil, err

@@ -13,7 +13,7 @@
   } = $props();
   // A name whose hue sits next to its status color would read as status, so it shows in the text color instead.
   const statusHues = { waiting: 70, failed: 25, working: 150 };
-  let quiet = $derived([state, dot].some(status => status !== "idle" && Math.abs(((hue(name) - statusHues[status] + 540) % 360) - 180) < 30));
+  let quiet = $derived([state, dot].some(status => status !== "idle" && status !== "background" && Math.abs(((hue(name) - statusHues[status] + 540) % 360) - 180) < 30));
 </script>
 
 <SessionFace {name} {root} {dot} {mark} />

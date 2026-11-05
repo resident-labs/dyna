@@ -193,9 +193,9 @@ func Run(ctx context.Context) error {
 	activity := &activity{}
 	transcript := NewTranscript(client, sessions)
 	var h boxHarness
-	var crew *Crew            // a crew's box runs a script, which a reload replaces
-	var files func() []string // the session files to keep sending
-	var steered func()        // a crew's script takes no input, so its workers' commands never step aside
+	var crew *Crew                       // a crew's box runs a script, which a reload replaces
+	var files func() []string            // the session files to keep sending
+	var steered func(contract.Interrupt) // a crew's script takes no input, so its workers' commands never step aside
 	if hello.Workflow != nil {
 		open := func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string, submit dynaext.Submit) (crewWorker, error) {
 			tree := dir
@@ -220,6 +220,7 @@ func Run(ctx context.Context) error {
 		}
 		h, files = crew, crew.Files
 	} else {
+		interrupts := dynaext.NewInterrupts()
 		session, err := pig.Open(ctx, pig.Config{
 			Dir:           workdir,
 			AgentDir:      piDir,
@@ -227,14 +228,14 @@ func Run(ctx context.Context) error {
 			Model:         hello.Model,
 			CompactTokens: hello.CompactTokens,
 			Instructions:  hello.Instructions,
-			Extensions:    []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: workdir, Shell: jobs, Dyna: dynaTools})},
+			Extensions:    []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: workdir, Shell: jobs, Dyna: dynaTools, Interrupts: interrupts})},
 			Notice:        func(text string) { go notice(text) },
 		})
 		if err != nil {
 			return err
 		}
 		session.Activity = activity.set
-		h, files, steered = session, func() []string { return []string{session.SessionFile()} }, jobs.StepAside
+		h, files, steered = session, func() []string { return []string{session.SessionFile()} }, func(sender contract.Interrupt) { jobs.StepAside(sender); interrupts.Send(sender) }
 	}
 	defer h.Close()
 	steps.Done("session start")
