@@ -18,6 +18,7 @@ type BoxSpec struct {
 	Repos   []contract.BoxRepo
 	Needs   []box.Need
 	Stack   *box.Stack
+	GPUCard *int // the card the box was assigned, nil when it asked for none
 }
 
 type BoxAdapter interface {

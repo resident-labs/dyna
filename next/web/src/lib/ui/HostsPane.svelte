@@ -3,7 +3,7 @@
   import { APIError, call, SignedOut } from "../client.ts";
   import { confirm } from "../modal.ts";
   import { boxWords } from "../feed.ts";
-  import { diskLow, hostBars, hostChips, hostGroup, hostLine, hostMeters, hostName, hostOrder, hostState, hostText, largeShared, lastSeen, machines, roomSessions, sharedSize,
+  import { diskLow, gpuLine, hostBars, hostChips, hostGroup, hostLine, hostMeters, hostName, hostOrder, hostState, hostText, largeShared, lastSeen, machines, roomSessions, sharedSize,
     watchHosts } from "../hosts.ts";
   import type { HostProblem, HostSummary, RoomSummary } from "../contract.gen.ts";
   import Avatar from "./Avatar.svelte";
@@ -172,6 +172,7 @@
   {#if meters.length && (h.reachable || seen)}<div class="tiles" class:dimmed={!h.reachable}>{#each meters as meter (meter.label)}<MeterTile {meter} />{/each}</div>{/if}
   <dl class="facts">{#if h.execOnly || !h.reachable}<dt>State</dt><dd>{#if h.reachable}Online{:else}<StatusPill tone="error" label="Unreachable" />{" · "}{seen ?? "Not seen yet"}{/if}</dd>{/if}
     {#if !h.execOnly}<dt>Workspaces</dt><dd>{h.boxes.toLocaleString("en")} running</dd>{/if}
+    {#each h.gpus ?? [] as gpu (gpu.index)}<dt>GPU {gpu.index}</dt><dd>{gpuLine(gpu)}</dd>{/each}
     {#if h.runners}<dt>CI runners</dt><dd>{h.runners.toLocaleString("en")}</dd>{/if}
     {#if h.pool}<dt>Pool</dt><dd><a class="link" href={`/settings/pools/${encodeURIComponent(h.pool)}`} onclick={navigate}>{h.pool}</a></dd>{/if}</dl>
   {#if noSwap === h.name}<p class="warn">This host has no swap, so memory pressure can kill box processes.</p>{/if}

@@ -58,6 +58,26 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	if _, ok := box.Size(req.Size); req.Size != "" && !ok {
 		return contract.SessionStartResponse{}, invalid("unknown size")
 	}
+	if req.GPU > 0 {
+		hosts, err := s.store.Hosts(ctx)
+		if err != nil {
+			return contract.SessionStartResponse{}, failure(err)
+		}
+		var largest int64
+		cards := 0
+		for _, h := range hosts {
+			for _, g := range h.GPUs {
+				cards++
+				largest = max(largest, box.GPUUsable(g))
+			}
+		}
+		if cards == 0 {
+			return contract.SessionStartResponse{}, &contract.Error{Code: contract.ErrNoGPU, Message: "no host reports a GPU"}
+		}
+		if int64(req.GPU)*box.GiB > largest {
+			return contract.SessionStartResponse{}, &contract.Error{Code: contract.ErrGPUTooLarge, Message: fmt.Sprintf("the largest card has %d GiB for boxes after its reserve, and the request is %d GiB", largest/box.GiB, req.GPU)}
+		}
+	}
 	if _, _, err := s.profiles.Model(req.Profile); err != nil {
 		if roomName != "" {
 			return contract.SessionStartResponse{}, invalid("unknown profile")
@@ -114,7 +134,7 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 			return contract.SessionStartResponse{}, problem
 		}
 	}
-	session := store.Session{ID: contract.SessionID(sid), Room: req.Room, Name: req.Name, Repo: repo, Profile: req.Profile, Box: contract.BoxID(bid), NewRoomName: roomName, Compose: composeName, Workflow: run}
+	session := store.Session{ID: contract.SessionID(sid), Room: req.Room, Name: req.Name, Repo: repo, Profile: req.Profile, Box: contract.BoxID(bid), NewRoomName: roomName, Compose: composeName, GPU: req.GPU, Workflow: run}
 	event, err := s.event(req.Room, caller, contract.SessionStarted{Session: session.ID, Name: req.Name, Parent: parent, Profile: req.Profile, Goal: req.Goal, DoneWhen: req.DoneWhen, Brief: req.Brief, Workflow: run != nil})
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)

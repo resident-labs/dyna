@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -307,7 +308,7 @@ func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
 }
 
 func (s *Store) hosts(ctx context.Context, where string) ([]box.Host, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT h.name, h.ssh, h.state, h.cpus, h.mem_bytes, h.disk_bytes, h.disk_floor, h.disk_total, h.checked_at, h.maintained_at, h.engine_host, h.pool, h.box, h.agents, h.ci, h.create_problem, h.exec_only, hr.room FROM hosts h LEFT JOIN host_rooms hr ON hr.host=h.name WHERE `+where+` ORDER BY h.name,hr.room`)
+	rows, err := s.Read().QueryContext(ctx, `SELECT h.name, h.ssh, h.state, h.cpus, h.mem_bytes, h.disk_bytes, h.disk_floor, h.disk_total, h.checked_at, h.maintained_at, h.engine_host, h.pool, h.box, h.agents, h.ci, h.create_problem, h.exec_only, h.gpus, hr.room FROM hosts h LEFT JOIN host_rooms hr ON hr.host=h.name WHERE `+where+` ORDER BY h.name,hr.room`)
 	if err != nil {
 		return nil, err
 	}
@@ -318,11 +319,15 @@ func (s *Store) hosts(ctx context.Context, where string) ([]box.Host, error) {
 		var checked, maintained int64
 		var room sql.NullString
 		var agents bool
-		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &h.DiskFloor, &h.DiskTotal, &checked, &maintained, &h.EngineHost, &h.Pool, &h.Box, &agents, &h.CI, &h.Problem, &h.ExecOnly, &room); err != nil {
+		var gpus string
+		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &h.DiskFloor, &h.DiskTotal, &checked, &maintained, &h.EngineHost, &h.Pool, &h.Box, &agents, &h.CI, &h.Problem, &h.ExecOnly, &gpus, &room); err != nil {
 			return nil, err
 		}
 		if len(hosts) == 0 || hosts[len(hosts)-1].Name != h.Name {
 			h.NoAgents = !agents
+			if err := json.Unmarshal([]byte(gpus), &h.GPUs); err != nil {
+				return nil, err
+			}
 			h.CheckedAt = time.UnixMilli(checked)
 			if maintained != 0 {
 				h.MaintainedAt = time.UnixMilli(maintained)
@@ -365,6 +370,21 @@ func (s *Store) ExecOnly(ctx context.Context, name contract.HostName) (bool, err
 func (s *Store) SetHostChecked(ctx context.Context, h box.Host) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "UPDATE hosts SET exec_only=0, cpus=?, mem_bytes=?, disk_bytes=?, checked_at=?, engine_host=?, create_problem=? WHERE name=?", h.CPUs, h.MemBytes, h.DiskBytes, h.CheckedAt.UnixMilli(), h.EngineHost, h.Problem, h.Name)
+		return err
+	})
+}
+
+// SetHostGPUs records the cards a host's latest probe found.
+func (s *Store) SetHostGPUs(ctx context.Context, host contract.HostName, gpus []contract.GPU) error {
+	if gpus == nil {
+		gpus = []contract.GPU{}
+	}
+	text, err := json.Marshal(gpus)
+	if err != nil {
+		return err
+	}
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE hosts SET gpus=? WHERE name=?", text, host)
 		return err
 	})
 }

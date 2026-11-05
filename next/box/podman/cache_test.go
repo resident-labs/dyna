@@ -42,3 +42,22 @@ func TestCreateContainerCreatesWritableMount(t *testing.T) {
 		t.Fatal(cmd)
 	}
 }
+
+func TestCreateContainerGetsOnlyItsGPUCard(t *testing.T) {
+	card := 1
+	for _, tc := range []struct {
+		name string
+		card *int
+		want bool
+	}{{"with a card", &card, true}, {"without", nil, false}} {
+		r := &runner{}
+		h := newTestHost(t, r)
+		if err := h.CreateContainer(context.Background(), box.ContainerSpec{Box: "a", Image: "image", GPUCard: tc.card}); err != nil {
+			t.Fatal(err)
+		}
+		cmd := r.calls[len(r.calls)-1][len(r.calls[len(r.calls)-1])-1]
+		if has := strings.Contains(cmd, "'--device' 'nvidia.com/gpu=1' 'image'"); has != tc.want || strings.Count(cmd, "nvidia.com") > 1 || !tc.want && strings.Contains(cmd, "nvidia") {
+			t.Fatalf("%s: %s", tc.name, cmd)
+		}
+	}
+}

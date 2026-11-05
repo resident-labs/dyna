@@ -21,11 +21,16 @@ const (
 	// A room's pool brings its next node, so its boxes wait for that rather than for a host.
 	PendingPoolNode   PendingReason = "pool-node"
 	PendingPoolFailed PendingReason = "pool-failed"
+	// PendingGPU says every card on the ready hosts is taken, up to its reserve, and PendingNoGPU that no ready host has one.
+	PendingGPU   PendingReason = "gpu"
+	PendingNoGPU PendingReason = "no-gpu"
 )
 
 type Placement struct {
 	Host   contract.HostName
 	Reason PendingReason
+	// Card is the GPU assigned on Host to a box that asked for one.
+	Card int
 }
 
 func SliceName(id contract.BoxID) (string, error) {
@@ -107,6 +112,7 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 	reason := PendingNoReadyHost
 	var chosen contract.HostName
 	var best float64
+	var card int
 	for _, h := range hosts {
 		// A create quarantine blocks new boxes, including retries, not wakes or CI runners.
 		if h.State != HostReady || (existing != nil && h.Name != existing.Host) || (h.Problem != "" && request.Image != RunnerImage && (existing == nil || existing.State == contract.BoxPending && existing.Image == "")) {
@@ -117,6 +123,37 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 				reason = PendingRoomHost
 			}
 			continue
+		}
+		// A card takes a request while its memory, less a tenth in reserve and the requests of the boxes holding it, covers it. A box
+		// whose container exists keeps the card that container was made for.
+		hostCard := 0
+		if request.GPU > 0 {
+			if len(h.GPUs) == 0 {
+				if reason == PendingNoReadyHost {
+					reason = PendingNoGPU
+				}
+				continue
+			}
+			hostCard = -1
+			for _, g := range h.GPUs {
+				if existing != nil && existing.Image != "" && g.Index != existing.GPUCard {
+					continue
+				}
+				left := GPUUsable(g)
+				for _, b := range boxes {
+					if b.Host == h.Name && b.ID != request.ID && b.GPUCard == g.Index && b.HoldsGPU() {
+						left -= int64(b.GPU) * GiB
+					}
+				}
+				if left >= int64(request.GPU)*GiB {
+					hostCard = g.Index
+					break
+				}
+			}
+			if hostCard < 0 {
+				reason = PendingGPU
+				continue
+			}
 		}
 		if h.MemUsed >= h.MemBytes-h.MemBytes/5 {
 			reason = PendingMemory
@@ -165,11 +202,14 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 		memFree := float64(4*h.MemBytes-mem-request.Size.MemBytes) / float64(4*h.MemBytes)
 		headroom := min(cpuFree, memFree)
 		if chosen == "" || headroom > best || (headroom == best && h.Name < chosen) {
-			chosen, best = h.Name, headroom
+			chosen, best, card = h.Name, headroom, hostCard
 		}
 	}
 	if chosen == "" {
 		return Placement{Reason: reason}
 	}
-	return Placement{Host: chosen}
+	return Placement{Host: chosen, Card: card}
 }
+
+// GPUUsable is the VRAM of a card that boxes may ask for: its memory less a tenth kept in reserve for the host's own use.
+func GPUUsable(g contract.GPU) int64 { return g.MemBytes - g.MemBytes/10 }

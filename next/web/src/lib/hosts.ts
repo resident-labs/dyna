@@ -1,5 +1,5 @@
 import { call } from "./client.ts";
-import type { HostProblem, HostSummary, RoomShared } from "./contract.gen.ts";
+import type { GPU, HostProblem, HostSummary, RoomShared } from "./contract.gen.ts";
 import { count } from "./feed.ts";
 import type { Chip, Group } from "./settings-list.ts";
 
@@ -52,14 +52,19 @@ export const fixed = (n: number) => n >= 100 ? whole(n) : n.toFixed(1);
 export const meter = (label: string, used: number, limit: number, text: string): Meter =>
   ({ label, text, percent: Math.min(100, Math.round(used / limit * 100)), busy: used >= 0.9 * limit });
 
+// A GPU's line in Settings: its name, the VRAM boxes asked of it and its total. Asked VRAM is a claim, not a measure of use.
+export const gpuLine = (g: GPU) => `${g.name}, ${fixed(gb(g.requestedBytes ?? 0))} of ${whole(gb(g.memBytes))} GB asked`;
+
 // A host's CPU, memory and disk meters, "3.1 of 16 cores", "9.8 of 31 GB" and "412 GB free"; none while it reports
-// no capacity, and no disk tile without a disk figure.
+// no capacity, and no disk tile without a disk figure. A host with GPUs adds one tile for the VRAM asked of all its cards.
 export function hostMeters(h: HostSummary): Meter[] {
   if (!h.cpus || !h.memBytes) return [];
+  const asked = (h.gpus ?? []).reduce((sum, g) => sum + (g.requestedBytes ?? 0), 0), vram = (h.gpus ?? []).reduce((sum, g) => sum + g.memBytes, 0);
   return [
     meter("CPU", h.cpuUsed, h.cpus, `${fixed(h.cpuUsed)} of ${whole(h.cpus)} cores`),
     meter("Memory", h.memUsed, h.memBytes, `${fixed(gb(h.memUsed))} of ${whole(gb(h.memBytes))} GB`),
     ...h.diskBytes ? [meter("Disk", h.diskUsed, h.diskBytes, `${whole(gb(h.diskBytes - h.diskUsed))} GB free`)] : [],
+    ...vram ? [meter("GPU asked", asked, vram, `${fixed(gb(asked))} of ${whole(gb(vram))} GB`)] : [],
   ];
 }
 
@@ -141,7 +146,7 @@ export function hostLine(h: HostSummary, now: number): string {
 
 // A row's short bars, Home's meters at a glance: none for a host whose figures are old or that places nothing.
 export const hostBars = (h: HostSummary): { label: string; percent: number; busy: boolean }[] => h.reachable && !h.execOnly
-  ? hostMeters(h).map(({ percent, busy }, index) => ({ label: ["CPU", "Mem", "Disk"][index], percent, busy })) : [];
+  ? hostMeters(h).slice(0, 3).map(({ percent, busy }, index) => ({ label: ["CPU", "Mem", "Disk"][index], percent, busy })) : [];
 
 export const hostChips: Chip<HostSummary>[] = [
   { id: "all", label: "All" },

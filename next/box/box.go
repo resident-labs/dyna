@@ -53,6 +53,7 @@ type Host struct {
 	ExecOnly  bool // added with agents and ci off: host-exec runs only, checked by SSH and bash, never a box or runner
 	CheckedAt time.Time
 	Pool      string         // the pool that holds this node
+	GPUs      []contract.GPU // the cards its CDI spec offers, from the latest probe
 	Box       contract.BoxID // the one box a per-session node serves
 }
 type Box struct {
@@ -68,6 +69,10 @@ type Box struct {
 	Updated time.Time
 	// PlacedAt records when this allocation began, for disk accounting.
 	PlacedAt time.Time
+	// GPU is the VRAM the box asked of a card (5.5), 0 for none. GPUCard is the card it was assigned on Host, meaningful while GPU
+	// is above 0 and Host is set, and kept while the box lives there.
+	GPU     contract.GPUGiB
+	GPUCard int
 }
 
 type TransitionError struct{ From, To contract.BoxState }
@@ -131,4 +136,17 @@ func diskRequest(name contract.BoxSizeName) int64 {
 		return 80 * GiB
 	}
 	return 0
+}
+
+func (b Box) GPUDevice() *int {
+	if b.GPU == 0 {
+		return nil
+	}
+	return &b.GPUCard
+}
+
+// HoldsGPU says the box takes VRAM on its card now: it asked for a GPU and its container can run. A box that waits, has stopped,
+// failed or been deleted holds none.
+func (b Box) HoldsGPU() bool {
+	return b.GPU > 0 && b.State != contract.BoxPending && b.State != contract.BoxStopped && b.State != contract.BoxFailed && b.State != contract.BoxDeleted
 }
