@@ -323,12 +323,11 @@ func transcriptRemovedMessages(r io.Reader) (map[string]bool, error) {
 	removed := map[string]bool{}
 	for {
 		line, err := reader.ReadSlice('\n')
-		oversized := false
-		for err == bufio.ErrBufferFull {
-			oversized = true // an edit record is a few hundred bytes
+		for err == bufio.ErrBufferFull { // an edit record is a few hundred bytes, so a longer line is no edit
+			line = nil
 			_, err = reader.ReadSlice('\n')
 		}
-		if !oversized && bytes.Contains(line, []byte("\"context_edit\"")) {
+		if bytes.Contains(line, []byte("\"context_edit\"")) {
 			var edit struct {
 				Type, TargetID string
 				Replacement    *struct{ Content json.RawMessage }
