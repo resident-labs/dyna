@@ -12,6 +12,7 @@ type binaryRunner struct {
 	args   []string
 	input  []byte
 	output string
+	inputs [][]byte
 }
 
 func (r *binaryRunner) Run(_ context.Context, input []byte, args ...string) ([]byte, error) {
@@ -22,16 +23,21 @@ func (r *binaryRunner) Run(_ context.Context, input []byte, args ...string) ([]b
 	}
 	r.args = args
 	r.input = input
-	return []byte(fmt.Sprintf("%sDYNA-END %020d 000\n", r.output, len(r.output))), nil
+	r.inputs = append(r.inputs, input)
+	output := r.output
+	if strings.Contains(args[len(args)-1], "command -v zstd") {
+		output = "gzip\n"
+	}
+	return []byte(fmt.Sprintf("%sDYNA-END %020d 000\n", output, len(output))), nil
 }
 
 func TestInstallBinarySkipsBytesWhenHostHasSum(t *testing.T) {
-	read := func() ([]byte, error) { return []byte("binary"), nil }
+	read := func(BinaryEncoding) ([]byte, error) { return []byte("binary"), nil }
 	for _, tc := range []struct {
 		name, hostSum string
 		sentBytes     bool
 	}{
-		{name: "same sum", hostSum: "abc\n"},
+		{name: "same sum", hostSum: strings.Repeat("a", 64) + "\n"},
 		{name: "other sum", hostSum: "def\n", sentBytes: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -40,26 +46,30 @@ func TestInstallBinarySkipsBytesWhenHostHasSum(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := h.InstallBinary(context.Background(), "/data/bin", "v1", "abc", read); err != nil {
+			if err := h.InstallBinary(context.Background(), "/data/bin", "v1", strings.Repeat("a", 64), read); err != nil {
 				t.Fatal(err)
 			}
 			command := r.args[len(r.args)-1]
-			if tc.sentBytes {
-				if !strings.Contains(command, "'dyna-install' '/data/bin' 'v1'") || string(r.input) != "DYNA-IN 00000000000000000006\nbinary" {
-					t.Fatalf("command %q input %q", command, r.input)
+			payloads := 0
+			for _, in := range r.inputs {
+				if len(in) > len("DYNA-IN ")+20+1 {
+					payloads++
 				}
-				return
 			}
-			if !strings.Contains(command, "'dyna-link' '/data/bin' 'v1'") || string(r.input) != "DYNA-IN 00000000000000000000\n" {
-				t.Fatalf("command %q input %q", command, r.input)
+			if (payloads > 0) != tc.sentBytes {
+				t.Fatalf("payloads %d, want send %v", payloads, tc.sentBytes)
 			}
+			if !strings.Contains(command, "'dyna-link' '/data/bin' '"+strings.Repeat("a", 64)+"'") {
+				t.Fatalf("activation: %s", command)
+			}
+
 		})
 	}
 	h, err := New("user@host", t.TempDir(), "host", &binaryRunner{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.InstallBinary(context.Background(), "/data/bin", "../escape", "abc", read); err == nil {
+	if err := h.InstallBinary(context.Background(), "/data/bin", "../escape", strings.Repeat("a", 64), read); err == nil {
 		t.Fatal("accepted invalid version")
 	}
 }
@@ -77,6 +87,9 @@ func (r *concurrentInstallRunner) Run(_ context.Context, _ []byte, args ...strin
 	}
 	command := args[len(args)-1]
 	if !strings.Contains(command, "'dyna-install'") {
+		if strings.Contains(command, "command -v zstd") {
+			return []byte("gzip\nDYNA-END 00000000000000000005 000\n"), nil
+		}
 		return []byte("DYNA-END 00000000000000000000 000\n"), nil
 	}
 	r.commands <- command
@@ -91,13 +104,15 @@ func TestConcurrentInstallsUsePrivateTemporaryLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	done := make(chan error, 2)
-	read := func() ([]byte, error) { return []byte("binary"), nil }
+	read := func(BinaryEncoding) ([]byte, error) { return []byte("binary"), nil }
 	for _, version := range []string{"v1", "v2"} {
-		go func() { done <- h.InstallBinary(context.Background(), "/data/bin", version, "abc", read) }()
+		go func() {
+			done <- h.InstallBinary(context.Background(), "/data/bin", version, strings.Repeat("a", 64), read)
+		}()
 	}
 	for range 2 {
 		command := <-r.commands
-		if !strings.Contains(command, "mktemp -d .current.XXXXXX") || !strings.Contains(command, `"$linkdir/current" current`) || !strings.Contains(command, `rm -rf -- "$linkdir"`) {
+		if !strings.Contains(command, `mktemp "$dir/.dyna.XXXXXX"`) || !strings.Contains(command, `rm -f -- "$tmp"`) || strings.Contains(command, "current") {
 			t.Errorf("unsafe temporary link: %s", command)
 		}
 	}

@@ -14,16 +14,17 @@ type blockedCreate struct {
 	entered chan struct{}
 }
 
-func (b blockedCreate) Create(ctx context.Context, _ BoxSpec) (string, error) {
+func (b blockedCreate) Get(ctx context.Context, _ contract.SessionID, _ contract.HostName, _ bool) ([]contract.BoxRepo, error) {
 	b.entered <- struct{}{}
 	<-ctx.Done()
-	return "", box.RuntimeCreateError{Err: ctx.Err()}
+	return nil, box.RuntimeCreateError{Err: ctx.Err()}
 }
 
 func TestCreateDeadlineAndShutdown(t *testing.T) {
 	rig := newHostRig(t)
 	boxes := blockedCreate{entered: make(chan struct{})}
 	rig.r.boxes = boxes
+	rig.r.repos = boxes
 	triggers := make(chan context.CancelCauseFunc)
 	rig.r.createContext = func(ctx context.Context) (context.Context, context.CancelFunc) {
 		child, cancel := context.WithCancelCause(ctx)

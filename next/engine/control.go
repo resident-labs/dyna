@@ -12,6 +12,15 @@ func (s *Service) SessionStop(ctx context.Context, caller contract.Principal, re
 	if problem != nil {
 		return contract.SessionStopResponse{}, problem
 	}
+	id, accepted, err := s.store.RequestStartStop(ctx, target.ID, s.now())
+	if err != nil {
+		return contract.SessionStopResponse{}, failure(err)
+	}
+	if accepted {
+		s.reconciler.CancelStart(id)
+		s.reconciler.Kick()
+		return contract.SessionStopResponse{Stopping: true}, nil
+	}
 	stopping, err := s.store.RequestTurnStop(ctx, target.ID, s.now())
 	if err != nil {
 		return contract.SessionStopResponse{}, failure(err)

@@ -78,7 +78,15 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		if r.view.OpenTerminal(b.Session) {
 			return r.store.WakeTerminal(ctx, b.ID)
 		}
-		workErr = r.boxes.Stop(ctx, b.ID)
+		stopCtx, cancelStop := context.WithTimeout(ctx, box.StartStepBudget)
+		defer cancelStop()
+		if b.Image == "" {
+			if b.Host != "" {
+				workErr = r.boxes.Remove(stopCtx, b.ID)
+			}
+		} else {
+			workErr = r.boxes.Stop(stopCtx, b.ID)
+		}
 		if workErr == nil {
 			next.State = contract.BoxStopped
 		} else {
@@ -105,18 +113,26 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			sources, workErr = repos.Get(createCtx, b.Session, b.Host, true)
 			steps.Done("repositories")
 		}
+		if workErr == nil && createCtx.Err() != nil {
+			workErr = createCtx.Err()
+		}
 		if workErr == nil {
+			cancelCreate()
 			phase = contract.CreatePhaseBox
-			next.Image, workErr = r.boxes.Create(createCtx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: b.Slice, Size: b.Size, Repos: sources, GPUCard: b.GPUDevice()})
+			next.Image, workErr = r.boxes.Create(ctx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: b.Slice, Size: b.Size, Repos: sources, GPUCard: b.GPUDevice()})
 			steps.Done("create")
 		}
 		// A deadline or cancellation says nothing about the host, whatever step it cut short.
 		createCause := context.Cause(createCtx)
+		if phase == contract.CreatePhaseBox {
+			createCause = nil
+		}
 		cut := errors.Is(createCause, context.DeadlineExceeded) || errors.Is(createCause, context.Canceled)
 		var runtimeErr box.RuntimeCreateError
+		var stepTimeout box.StepTimeout
 		var shareErr box.ShareDown
 		// A mount that is only down for now counts as any host failure; one that cannot ever come up is quarantined at once below.
-		runtimeFailure = !cut && (errors.As(workErr, &runtimeErr) || errors.As(workErr, &shareErr) && !shareErr.Permanent)
+		runtimeFailure = !cut && (errors.As(workErr, &stepTimeout) || errors.As(workErr, &runtimeErr) || errors.As(workErr, &shareErr) && !shareErr.Permanent)
 		if workErr != nil {
 			createPhase = phase
 			log.Printf("box %s: creation failed in %s: %v", b.ID, phase, workErr)
@@ -137,6 +153,9 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			if failures >= 3 {
 				next.State, next.Reason = contract.BoxFailed, string(contract.CauseCreateFailed)
 				cause = contract.CauseCreateFailed
+				if errors.As(workErr, &stepTimeout) {
+					next.Reason = stepTimeout.Error()
+				}
 				var stack box.StackError
 				if errors.As(workErr, &stack) {
 					next.Reason = stack.Error()

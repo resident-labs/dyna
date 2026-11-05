@@ -90,6 +90,7 @@ type Pool struct {
 	Sets   Scaleset
 	// Memory reads a host's latest memory use, as the box reconciler does.
 	Memory func(contract.HostName) int64
+	Health func(contract.HostName) contract.HostHealth
 	Now    func() time.Time
 	// Kick tells the node pools that the runners waiting for a node changed.
 	Kick func()
@@ -393,7 +394,10 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 		if host.Pool != "" {
 			s.nodes[host.Pool]++
 		}
-		if host.State != box.HostReady {
+		if p.Health != nil {
+			host.Health = p.Health(host.Name)
+		}
+		if host.State != box.HostReady || host.Health == contract.HostDegraded {
 			continue
 		}
 		if p.Memory != nil {

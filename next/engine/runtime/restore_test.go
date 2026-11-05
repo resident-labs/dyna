@@ -51,7 +51,7 @@ type slowHost struct {
 }
 
 func newSlowHost(upload time.Duration) *slowHost {
-	return &slowHost{upload: upload, sum: "sum", sockets: make(map[string]bool), master: make(map[string]bool)}
+	return &slowHost{upload: upload, sum: strings.Repeat("a", 64), sockets: make(map[string]bool), master: make(map[string]bool)}
 }
 
 // restart is what stopping the engine does to a host: its master dies, and sockets stay as dead files.
@@ -110,6 +110,9 @@ func (r *slowHost) Run(ctx context.Context, input []byte, args ...string) ([]byt
 	if strings.Contains(command, "'/etc/machine-id'") {
 		id := strings.Repeat("a", 32)
 		return []byte(fmt.Sprintf("%sDYNA-END %020d %03d\n", id, len(id), 0)), nil
+	}
+	if strings.Contains(command, "command -v zstd") {
+		return []byte("gzip\nDYNA-END 00000000000000000005 000\n"), nil
 	}
 	if strings.Contains(command, "'dyna-probe'") {
 		return []byte(fmt.Sprintf("%sDYNA-END %020d %03d\n", r.installed, len(r.installed), 0)), nil
@@ -352,7 +355,7 @@ func TestInspectDoesNotWaitForTheBinary(t *testing.T) {
 	if err := os.WriteFile(b.machineIDFile, []byte(strings.Repeat("b", 32)), 0600); err != nil {
 		t.Fatal(err)
 	}
-	b.binOnce.Do(func() { b.binSum = "sum" })
+	b.binOnce.Do(func() { b.binSum = strings.Repeat("a", 64) })
 	ctx, stop := context.WithTimeout(ctx, 5*time.Second)
 	defer stop()
 	_, _, _ = b.Inspect(ctx, "box_a")
@@ -422,7 +425,7 @@ func TestInstallSendsTheBinaryOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := &Boxes{Layout: box.Layout{Data: t.TempDir(), HostData: "/host"}, Version: "v2"}
-	b.binOnce.Do(func() { b.binSum = "sum" })
+	b.binOnce.Do(func() { b.binSum = strings.Repeat("a", 64) })
 	var wg sync.WaitGroup
 	for range 3 {
 		wg.Go(func() {

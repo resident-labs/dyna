@@ -5,6 +5,8 @@ import { EventWindow } from "./window.svelte.ts";
 import { pendingReason, type PendingReason } from "./event.ts";
 import { boxFailures, countOf, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
 import { prKey } from "./feed.ts";
+import { startLabel } from "./start.ts";
+import type { BoxStartStatus } from "./contract.gen.ts";
 import type { ActivityKind, BoxState, Conversation, FailureCause, Decision, Event, Goal, OpRequested, OpResult, OpState, PrSummary, Question, SessionStarted, SessionWaiting, WorkflowInfo, WorkflowStatusLine, WorkflowStep } from "./contract.gen.ts";
 
 
@@ -19,6 +21,11 @@ const readKey = (conversation: Conversation) => conversation.kind === "dm" ? con
 export class RoomStore {
   readonly sessions = new SvelteMap<string, SessionStarted & { startedAt: string; lastTurnAt?: string }>();
   readonly boxes = new SvelteMap<string, BoxState>();
+  readonly starts = new SvelteMap<string, BoxStartStatus>();
+  startNow = Date.now();
+  private startTimer?: ReturnType<typeof setInterval>;
+  starting(id: string): boolean { return ["pending", "creating", "starting"].includes(this.boxes.get(id) ?? ""); }
+  startLine(id: string): string { this.subscribe(); return startLabel(this.starts.get(id), this.hosts.get(id), this.startNow); }
   // The machine holding each session's live box. A session without one has no entry.
   readonly hosts = new SvelteMap<string, string>();
   readonly turns = new SvelteMap<string, string>();
@@ -62,7 +69,11 @@ export class RoomStore {
         const list = await call("session.list", { room: this.room }).catch(() => undefined);
         if (!list || this.closed || this.waitsDirty) continue;
         this.backgroundWaits.clear();
-        for (const session of list.sessions ?? []) if (session.waiting) this.backgroundWaits.set(session.id, session.waiting);
+        this.starts.clear();
+        for (const session of list.sessions ?? []) {
+          if (session.waiting) this.backgroundWaits.set(session.id, session.waiting);
+          if (session.start && this.starting(session.id)) this.starts.set(session.id, session.start);
+        }
       }
     }).finally(() => { this.waitsReading = undefined; });
   }
@@ -148,7 +159,7 @@ export class RoomStore {
   // The turn may end before the answer comes, so only a turn still running counts as stopping.
   stop(id: string): void {
     this.stopFailed.delete(id);
-    void call("session.stop", { session: id }).then(({ stopping }) => { if (stopping && this.turns.has(id)) this.stopping.add(id); },
+    void call("session.stop", { session: id }).then(({ stopping }) => { if (stopping && (this.turns.has(id) || this.starting(id))) this.stopping.add(id); },
       () => { this.stopFailed.add(id); });
   }
 
@@ -226,6 +237,12 @@ export class RoomStore {
     // The feed position must be known before failed jobs are classified against it.
     await this.readFeed();
     this.head = list.seq;
+    this.startTimer = setInterval(() => {
+      if ([...this.boxes.values()].some(state => state === "creating" || state === "starting")) {
+        this.startNow = Date.now(); this.changed(); this.refreshWaits();
+      }
+    }, 10_000);
+    this.startTimer.unref?.();
     void this.readGoals();
     // Before the room is ready, so a crew's page opens as a run from the start.
     await this.readWorkflows();
@@ -237,6 +254,7 @@ export class RoomStore {
       this.names.set(session.id, session.name);
       this.noteRead({ kind: "dm", session: session.id }, session.lastRead);
       this.boxes.set(session.id, session.boxState);
+      if (session.start) this.starts.set(session.id, session.start);
       this.noteHost(session.id, session.boxState, session.host);
       if (session.boxState === "failed" || session.boxState === "lost") this.boxFailures.set(session.id, { box: session.boxState });
       const reason = pendingReason(session.boxState, session.boxReason);
@@ -300,7 +318,7 @@ export class RoomStore {
     for (const session of list.sessions ?? []) if (session.turn) this.turns.set(session.id, session.turn);
   }
 
-  close(): void { this.closed = true; this.stopStream(); }
+  close(): void { this.closed = true; clearInterval(this.startTimer); this.stopStream(); }
 
   // Opens a window on one conversation; the view that opened it calls leave when it goes.
   window(home: Conversation): EventWindow {
@@ -392,6 +410,8 @@ export class RoomStore {
       case "box.changed": {
         const { session, to, cause } = event.body, reason = pendingReason(to, event.body.reason);
         this.boxes.set(session, to);
+        if (to !== "creating" && to !== "starting") this.starts.delete(session);
+        if (!["pending", "creating", "starting"].includes(to)) this.stopping.delete(session);
         // Placing or moving a box changes its host, and a deleted box keeps naming the one it left.
         this.noteHost(session, to, event.body.host);
         if (to === "failed" || to === "lost") this.boxFailures.set(session, { box: to, cause: cause ?? this.boxFailures.get(session)?.cause, at: event.at });

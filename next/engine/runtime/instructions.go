@@ -3,9 +3,9 @@ package runtime
 import (
 	"context"
 	"errors"
+	"github.com/resident-labs/dyna/box"
 	"log"
 	"os"
-	"sync"
 
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
@@ -14,7 +14,7 @@ import (
 type instructionVersion struct{ generation, saves uint64 }
 
 type instructionHost struct {
-	mu      sync.Mutex
+	gate    chan struct{}
 	version instructionVersion
 }
 
@@ -48,8 +48,8 @@ func (b *Boxes) publishInstructions(ctx context.Context) {
 
 // settle waits out a copy already running, which could still write into a deleted room's folder. Any later copy skips that room.
 func (s *instructionHost) settle() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.gate <- struct{}{}
+	defer func() { <-s.gate }()
 }
 
 func (b *Boxes) instructionState(h *podman.Host) *instructionHost {
@@ -60,7 +60,7 @@ func (b *Boxes) instructionState(h *podman.Host) *instructionHost {
 	}
 	state := b.instructionSynced[h]
 	if state == nil {
-		state = &instructionHost{}
+		state = &instructionHost{gate: make(chan struct{}, 1)}
 		b.instructionSynced[h] = state
 	}
 	return state
@@ -70,9 +70,15 @@ func (b *Boxes) syncInstructions(ctx context.Context, h *podman.Host) error {
 	if b.Layout.Data == "" {
 		return nil
 	}
+	ctx, cancel := context.WithTimeout(ctx, box.StartPreparationBudget)
+	defer cancel()
 	state := b.instructionState(h)
-	state.mu.Lock()
-	defer state.mu.Unlock()
+	select {
+	case state.gate <- struct{}{}:
+		defer func() { <-state.gate }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	version := instructionVersion{h.Generation(), b.instructionSaves.Load()}
 	if version.generation != 0 && state.version == version {
 		return nil

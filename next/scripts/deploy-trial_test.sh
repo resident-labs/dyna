@@ -18,6 +18,18 @@ cat > "$tmp/tools/go" <<'SH'
 #!/usr/bin/env bash
 printf '%s' "${FAKE_BINARY:-assets/index-app.js}" > "$3"
 SH
+cat > "$tmp/tools/systemd-run" <<'SH'
+#!/usr/bin/env bash
+echo 'stage hosts' >> "$TEST_LOG"
+while (($#)); do
+ if [[ $1 == --report-dir ]]; then
+  report=$2
+  if [[ ${FAKE_STAGE_SLOW:-0} == 1 ]]; then echo arch > "$report/pending"; else touch "$report/done"; fi
+  break
+ fi
+ shift
+done
+SH
 cat > "$tmp/tools/systemctl" <<'SH'
 #!/usr/bin/env bash
 echo "$*" >> "$TEST_LOG"
@@ -43,6 +55,8 @@ grep -q 'fix forward on main' "$tmp/out"
 test "$(<"$tmp/install/failed-next")" = tree123
 test "$(grep -c restart "$TEST_LOG")" = 1
 test "$(ls "$tmp/install/bin")" = dyna
+[[ $(head -1 "$TEST_LOG") == 'stage hosts' ]]
+test -s "$(find "$tmp/install/staging" -name dyna | head -1)"
 "$script" "${args[@]}" >"$tmp/out" 2>&1 && { echo 'Failed tree was accepted' >&2; exit 1; }
 grep -q 'already failed' "$tmp/out"
 test "$(grep -c restart "$TEST_LOG")" = 1
@@ -53,3 +67,11 @@ FAKE_BINARY=empty "$script" "${args[@]}" --dry-run >"$tmp/out" 2>&1 && { echo 'D
 test "$(<"$tmp/install/failed-next")" = old-tree
 "$script" "${args[@]}" --dry-run >"$tmp/out" 2>&1
 grep -q 'Dry run passed' "$tmp/out"
+# A capped deploy leaves its independent helper's artifact outside stage/ pruning.
+rm -f "$tmp/install/failed-next" "$tmp/install/deployed-next"
+find "$tmp/install/staging" -name done -delete
+FAKE_STAGE_SLOW=1 "$script" "${args[@]}" --stage-wait 0 >"$tmp/out" 2>&1
+grep -q 'copies continue' "$tmp/out"
+grep -q 'arch' "$tmp/out"
+test -s "$(find "$tmp/install/staging" -name dyna | head -1)"
+test "$(grep -c restart "$TEST_LOG")" = 2
