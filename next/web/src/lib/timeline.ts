@@ -1,7 +1,7 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 import type { ActivityKind, Event, TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
 import { decodeEvent } from "./event.ts";
-import { causes } from "./feed.ts";
+import { causes, formatTime } from "./feed.ts";
 
 export function pendingStartBrief(brief: string | undefined, turns: TranscriptTurn[]): string | undefined {
   return brief && !turns.some(turn => turn.inputs?.some(input => input.type === "session.started")) ? brief : undefined;
@@ -86,6 +86,27 @@ export function workingLine(started: string, now: number, kind?: ActivityKind): 
 export function compactionNote({ tokens }: Pick<TranscriptItem, "tokens">): string {
   return tokens ? `Compacted the conversation at ${Math.round(tokens / 1000)}k tokens` : "Compacted the conversation";
 }
+
+// Dyna: A failed attempt is one quiet line. The harness names the failure when it recorded one.
+export function attemptFailedNote({ errorName }: Pick<TranscriptItem, "errorName">): string {
+  return errorName ? `Attempt failed (${errorName}), retried` : "Attempt failed, retried";
+}
+
+// Dyna: A long turn can read hundreds of GitHub and git events. Two or more in a row are one row with their count and span.
+export type InputRun = { kind: "input"; input: TranscriptInput } | { kind: "events"; id: string; count: number; from: string; to: string };
+const engineEvent = (input: TranscriptInput) => input.type.startsWith("github.") || input.type.startsWith("git.");
+export function foldInputRuns(inputs: TranscriptInput[]): InputRun[] {
+  const runs: InputRun[] = [];
+  for (let start = 0; start < inputs.length;) {
+    let end = start + 1;
+    if (engineEvent(inputs[start])) while (end < inputs.length && engineEvent(inputs[end])) end++;
+    if (end - start > 1) runs.push({ kind: "events", id: "events:" + inputs[start].id, count: end - start, from: inputs[start].at, to: inputs[end - 1].at });
+    else runs.push({ kind: "input", input: inputs[start] });
+    start = end;
+  }
+  return runs;
+}
+export const engineEventsNote = ({ count, from, to }: { count: number; from: string; to: string }): string => `${count} engine events, ${formatTime(from)} to ${formatTime(to)}`;
 
 // Dyna: A segment runs from its steer to the next one or the turn's end. The first keeps the whole turn's time.
 export function segmentDuration(segments: TimelineSegment[], index: number, started: string, ended: string): number {
@@ -200,13 +221,15 @@ export function summarizeWork(items: TranscriptItem[]): string {
   return sentence.length < 3 ? sentence.join(" and ") : `${sentence.slice(0, -1).join(", ")}, and ${sentence.at(-1)}`;
 }
 
-// Dyna: Continuations can repeat tools and their posts in a separate page.
+// Dyna: Continuations can repeat tools and their posts in a separate page. A post's index is the index of the first item that
+// began after it was sent, so at an equal index it stands before the item, and posts of one index go in the order sent.
+
 export function mergeTimelineItems(existing: TranscriptItem[], incoming: TranscriptItem[]): TranscriptItem[] {
   const byId = new Map(existing.map(item => [item.id, item]));
   for (const item of incoming) byId.set(item.id, item);
   const items = [...byId.values()];
   const nested = new Set(items.flatMap(item => (item.posts ?? []).map(post => post.event || post.id)));
-  return items.filter(item => item.kind !== "post" || !nested.has(item.event || item.id)).sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  return items.filter(item => item.kind !== "post" || !nested.has(item.event || item.id)).sort((a, b) => (a.index ?? 0) - (b.index ?? 0) || Number(b.kind === "post") - Number(a.kind === "post") || (a.seq ?? 0) - (b.seq ?? 0));
 }
 
 // Dyna: A refresh can race an in-flight input continuation.

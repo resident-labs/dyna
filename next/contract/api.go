@@ -818,6 +818,8 @@ const (
 	TranscriptSteer    TranscriptItemKind = "steer" // a message a running turn read, at the place it read it
 	// TranscriptCompaction marks where Pi summarized the conversation, whatever asked it to. Tokens is the context size before.
 	TranscriptCompaction TranscriptItemKind = "compaction"
+	// TranscriptAttemptFailed stands where a model call failed and Pi dropped its message from the model's context. ErrorName is the name of the failure Pi recorded, when it recorded one.
+	TranscriptAttemptFailed TranscriptItemKind = "attempt_failed"
 )
 
 type TranscriptCallStatus string
@@ -862,6 +864,7 @@ type TranscriptItem struct {
 	Home         *Conversation           `json:"home,omitempty"`
 	Bytes        int64                   `json:"bytes,omitempty"`
 	Tokens       int64                   `json:"tokens,omitempty"`
+	ErrorName    string                  `json:"errorName,omitempty"` // an attempt_failed item's failure, such as SocketError
 	Attachments  []Attachment            `json:"attachments,omitempty"`
 	Image        *TranscriptImage        `json:"image,omitempty"`
 	Posts        []TranscriptItem        `json:"posts,omitempty"`
