@@ -5,10 +5,11 @@
  import { setSessionLabels } from "../src/lib/ui/Avatar.svelte";
  import { setMentionLinks } from "../src/lib/ui/Markdown.svelte";
  import type { Row } from "../src/lib/feed.ts";
- import type { JSONValue } from "../src/lib/contract.gen.ts";
+ import type { JSONValue, PostDataRef } from "../src/lib/contract.gen.ts";
  const query = new URLSearchParams(location.search);
  const referenceOnly = query.has("reference"), unrelated = query.has("unrelated");
  let opened = $state<number | undefined>(undefined);
+ let reference = $state<PostDataRef>({file:{sha256:"b".repeat(64),name:"data.json",media:"application/json",bytes:250000},summary:"1 keys"});
  setSessionLabels(() => new Map());
  setMentionLinks(() => ({ room: "horizon", sessions: new Map(), open: event => event.preventDefault() }));
  const conflicts = Array.from({ length: 38 }, (_, i) => ({ file: `next/engine/groups/conflict-${i + 1}.go`, reason: i === 0 ? "CONFLICT_SENTINEL · both branches changed the recipient's delivery" : "Both branches edited this file; resolve before merging.", "0": "Object keys stay quoted" }));
@@ -29,7 +30,7 @@
  };
 </script>
 <main><header><h1>Room feed</h1><span>Workflow data · component fixture</span></header>
- {#if referenceOnly}<PostData reference={{file:{sha256:"b".repeat(64),name:"data.json",media:"application/json",bytes:250000},summary:"1 keys"}} />{:else}
+ {#if referenceOnly}<PostData {reference} /><button type="button" onclick={() => { reference = {...reference,file:{...reference.file}}; }}>Refresh same post</button>{:else}
  {#each values as [text,value],i}<PostRow row={row(text,value,i)} author="newest-green-sync-0b9hbj" to="upstream-sync" room="horizon" root={false} navigate={event=>event.preventDefault()} onretry={()=>{}} ondiscard={()=>{}} newest={new Map()} visualEvent={undefined} onmedia={position => { opened = position; }} />{/each}{/if}
  {#if unrelated}<output aria-label="Opened attachment">{opened ?? "none"}</output>{/if}
 </main>
