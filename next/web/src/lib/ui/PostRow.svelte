@@ -2,6 +2,7 @@
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
   import Markdown from "./Markdown.svelte";
+  import PostData from "./PostData.svelte";
   import PostAttachments from "./PostAttachments.svelte";
   import PostTarget from "./PostTarget.svelte";
   import { clock, formatTime, fullTime, type Row } from "../feed.ts";
@@ -138,6 +139,7 @@
     <time class="follow-time" datetime={row.at} title={fullTime(row.at)}>{clock(row.at)}</time>
   {/if}
   <Markdown text={row.text} />
+  {#if row.data !== undefined}<PostData value={row.data} />{/if}
   <PostAttachments {onmedia} attachments={row.attachments} {newest} event={visualEvent} at={row.at} />
   {#if row.pending?.failed}{@const id = row.pending.id}<p class="unsent" role="alert">Not sent
     <button type="button" onclick={() => onretry(id)}>Retry</button><button type="button" onclick={() => ondiscard(id)}>Discard</button></p>{/if}

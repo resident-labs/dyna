@@ -80,7 +80,7 @@
   // finished, and the failure ends the DM, as a DM's read leaves box events out.
   const retainedRequests = new SvelteSet<string>();
   $effect(() => { for (const request of store.requests.values()) retainedRequests.add(request.id); });
-  let rows = $derived(feedRows(view.ordered, home, pending, since, retainedRequests, session => store.workflows.has(session)));
+  let rows = $derived(feedRows(view.ordered, home, pending, since, retainedRequests));
   // The post right under the New line; its bar stays inside the row, clear of the New label.
   // The last post of a run takes half the gap to the next run, so a hover or tint sits evenly on the words.
   let lastPosts = $derived(new Set(rows.flatMap((row, index) => {

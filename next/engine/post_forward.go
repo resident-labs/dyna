@@ -60,6 +60,7 @@ func (s *Service) forwardQuote(ctx context.Context, caller contract.Principal, r
 	}
 	req.Text = quote
 	if place.Room == req.Room {
+		req.Data = body.Data
 		for _, file := range body.Attachments {
 			file.Visual = nil
 			req.Attachments = append(req.Attachments, file)

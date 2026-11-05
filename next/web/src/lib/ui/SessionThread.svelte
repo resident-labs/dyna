@@ -12,6 +12,7 @@
   import Avatar from "./Avatar.svelte";
   import CollapsibleBody from "./CollapsibleBody.svelte";
   import Markdown from "./Markdown.svelte";
+  import PostData from "./PostData.svelte";
   import PostAttachments from "./PostAttachments.svelte";
   import MediaViewer from "./MediaViewer.svelte";
   import { conversationMedia, readMedia, type MediaItem, type MediaRow } from "../media.ts";
@@ -266,8 +267,9 @@
   const pendingKey = (id: number) => `pending:${id}`;
 </script>
 
-{#snippet message(key: string, text: string, attachments: Attachment[] | null | undefined, event?: string, at?: string)}
+{#snippet message(key: string, text: string, attachments: Attachment[] | null | undefined, event?: string, at?: string, data?: import("../contract.gen.ts").JSONValue, dataRef?: import("../contract.gen.ts").PostDataRef | null)}
   <Markdown rhythm="thread" {text} />
+  {#if data !== undefined || dataRef}{#key dataRef?.file.sha256}<PostData value={data} reference={dataRef} />{/key}{/if}
   {#if attachments?.length}<PostAttachments onmedia={position => openMedia(key, position)} {attachments} {newest} {event} {at} />{/if}
 {/snippet}
 
@@ -297,7 +299,7 @@
   {@const to = item.kind === "post" ? postDestination(item, session, store.room, roomName, id => sender("session", id)) : undefined}
   {#snippet destination()}<div class="post-destination"><PostTarget to={to!} onjump={item.room && item.seq ? () => onpostlocation(item.room!, item.seq!) : undefined} /></div>{/snippet}
   {#snippet content()}
-    {@render message(item.id, chunks[item.id + "/text"] ?? item.text ?? "", item.attachments, item.event ?? item.id, item.at)}
+    {@render message(item.id, chunks[item.id + "/text"] ?? item.text ?? "", item.attachments, item.event ?? item.id, item.at, item.data, item.dataRef)}
     {@render textRetry(turn, item.id)}
   {/snippet}
   {#snippet body()}{#if to}{@render destination()}{/if}{@render content()}{/snippet}
@@ -315,7 +317,7 @@
 {#snippet inputRow(turn: TranscriptTurn, key: string, part: string, input: TranscriptInput)}
   {@const shown = timelineInput(input, chunks[part + "/text"])}
   {#snippet body()}
-    {@render message(key, shown.text, input.attachments, input.id, input.at)}
+    {@render message(key, shown.text, input.attachments, input.id, input.at, input.data, input.dataRef)}
     {@render textRetry(turn, part)}
   {/snippet}
   {#if shown.kind !== "message"}
@@ -387,7 +389,7 @@
     {#each asking as question (question.id)}<div class="question"><QuestionCard {question} name={sender("session", session)} root={!store.sessions.get(session)?.parent} {operate} /></div>{/each}
     {#if waitingSince}{@render dayMark(waitingSince, turns.at(-1)?.started)}{/if}
     {#each queuedPosts as post (post.id)}
-      {#snippet body()}{@render message(post.id, post.body.text, post.body.attachments, post.id, post.at)}{/snippet}
+      {#snippet body()}{@render message(post.id, post.body.text, post.body.attachments, post.id, post.at, post.body.data)}{/snippet}
       {#snippet queued()}<p class="owner-note queued">Queued</p>{/snippet}
       {#if post.from.kind === "owner"}{@render ownerMessage(post.id, post.at, false, body, closed ? undefined : queued)}
       {:else if post.from.kind === "session" && post.from.session === session}<div class="agent-message" data-media-key={post.id}>{@render body()}</div>

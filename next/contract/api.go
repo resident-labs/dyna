@@ -602,17 +602,18 @@ type SessionRefreshResponse struct {
 	Marked []SessionID `json:"marked"`
 }
 type PostRequest struct {
-	Room         RoomID       `json:"room"`
-	Text         string       `json:"text"`
-	Mentions     []string     `json:"mentions,omitempty"`
-	Home         Conversation `json:"home,omitempty"`
-	ReplyTo      EventID      `json:"replyTo,omitempty"`
-	Attachments  []Attachment `json:"attachments,omitempty"`
-	ClientID     string       `json:"clientId,omitempty"`     // at most 64 characters; a repeat from the same author in a room returns the first post
-	ToolCallID   string       `json:"toolCallId,omitempty"`   // Pi transcript call that sent this post
-	VisualUpdate EventID      `json:"visualUpdate,omitempty"` // original visual ID, for a new version
-	VisualReply  EventID      `json:"visualReply,omitempty"`  // visual version this post answers
-	Forward      EventID      `json:"forward,omitempty"`      // a post to quote under "Forwarded from"; Text is the sender's note
+	Data         json.RawMessage `json:"data,omitempty"`
+	Room         RoomID          `json:"room"`
+	Text         string          `json:"text"`
+	Mentions     []string        `json:"mentions,omitempty"`
+	Home         Conversation    `json:"home,omitempty"`
+	ReplyTo      EventID         `json:"replyTo,omitempty"`
+	Attachments  []Attachment    `json:"attachments,omitempty"`
+	ClientID     string          `json:"clientId,omitempty"`     // at most 64 characters; a repeat from the same author in a room returns the first post
+	ToolCallID   string          `json:"toolCallId,omitempty"`   // Pi transcript call that sent this post
+	VisualUpdate EventID         `json:"visualUpdate,omitempty"` // original visual ID, for a new version
+	VisualReply  EventID         `json:"visualReply,omitempty"`  // visual version this post answers
+	Forward      EventID         `json:"forward,omitempty"`      // a post to quote under "Forwarded from"; Text is the sender's note
 }
 type PostResponse struct {
 	Event EventID `json:"event"`
@@ -728,16 +729,18 @@ type BoxHelloResponse struct {
 	GitHub bool `json:"github,omitempty"`
 }
 type TurnOutputRequest struct {
-	ShellJobs int          `json:"shellJobs"`
-	Jobs      []ShellJobID `json:"jobs,omitempty"` // the jobs ShellJobs counts
-	Error     string       `json:"error,omitempty"`
-	Cause     FailureCause `json:"cause,omitempty"`
-	Turn      TurnID       `json:"turn"`
-	Outcome   TurnOutcome  `json:"outcome"`
-	Final     string       `json:"final,omitempty"`
-	EndPosts  []EventID    `json:"endPosts,omitempty"` // the posts that ended the turn; a completed turn with these has no final text
-	Model     string       `json:"model"`
-	Usage     Usage        `json:"usage"`
+	Data        json.RawMessage `json:"data,omitempty"`
+	Attachments []Attachment    `json:"-"`
+	ShellJobs   int             `json:"shellJobs"`
+	Jobs        []ShellJobID    `json:"jobs,omitempty"` // the jobs ShellJobs counts
+	Error       string          `json:"error,omitempty"`
+	Cause       FailureCause    `json:"cause,omitempty"`
+	Turn        TurnID          `json:"turn"`
+	Outcome     TurnOutcome     `json:"outcome"`
+	Final       string          `json:"final,omitempty"`
+	EndPosts    []EventID       `json:"endPosts,omitempty"` // the posts that ended the turn; a completed turn with these has no final text
+	Model       string          `json:"model"`
+	Usage       Usage           `json:"usage"`
 	// Unread names inputs the turn ended without giving to Pi, because their files were still on the way. The next turn takes them.
 	Unread []DeliverySeq `json:"unread,omitempty"`
 }
@@ -837,7 +840,15 @@ type TranscriptCall struct {
 	Error      string               `json:"error,omitempty"`
 }
 
+// PostDataRef keeps oversized transcript values readable without defeating transcript page budgets.
+type PostDataRef struct {
+	File    Attachment `json:"file"`
+	Summary string     `json:"summary"`
+}
+
 type TranscriptItem struct {
+	DataRef      *PostDataRef            `json:"dataRef,omitempty"`
+	Data         json.RawMessage         `json:"data,omitempty"`
 	ID           string                  `json:"id"`
 	Index        int                     `json:"index,omitempty"`
 	Turn         TurnID                  `json:"turn"`
@@ -883,17 +894,19 @@ type TranscriptPostLocation struct {
 	Seq  int64  `json:"seq"`
 }
 type TranscriptInput struct {
-	Source      *PostSource   `json:"source,omitempty"`
-	Home        *Conversation `json:"home,omitempty"`
-	At          time.Time     `json:"at"`
-	ID          EventID       `json:"id"`
-	Seq         int64         `json:"seq"`
-	Room        RoomID        `json:"room"`
-	Type        EventType     `json:"type"`
-	From        Principal     `json:"from"`
-	Text        string        `json:"text"`
-	More        bool          `json:"more,omitempty"`
-	Attachments []Attachment  `json:"attachments,omitempty"`
+	DataRef     *PostDataRef    `json:"dataRef,omitempty"`
+	Data        json.RawMessage `json:"data,omitempty"`
+	Source      *PostSource     `json:"source,omitempty"`
+	Home        *Conversation   `json:"home,omitempty"`
+	At          time.Time       `json:"at"`
+	ID          EventID         `json:"id"`
+	Seq         int64           `json:"seq"`
+	Room        RoomID          `json:"room"`
+	Type        EventType       `json:"type"`
+	From        Principal       `json:"from"`
+	Text        string          `json:"text"`
+	More        bool            `json:"more,omitempty"`
+	Attachments []Attachment    `json:"attachments,omitempty"`
 }
 type TranscriptTurn struct {
 	ID                TurnID            `json:"id"`
