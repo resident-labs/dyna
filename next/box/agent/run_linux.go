@@ -56,6 +56,7 @@ func crewInstructions(hello contract.BoxHelloResponse, tree string) string {
 // in folder, and a session file of its own, so that workers sharing the session folder never resume one another's.
 func workerConfig(box pig.Config, profile contract.WorkflowProfile, folder, dir string) pig.Config {
 	box.Dir, box.Model, box.CompactTokens, box.New = dir, profile.Model, profile.CompactTokens, true
+	box.ModelInstructions = profile.ModelInstructions
 	box.ModelsFile = filepath.Join(folder, "models.json")
 	return box
 }
@@ -222,14 +223,15 @@ func Run(ctx context.Context) error {
 	} else {
 		interrupts := dynaext.NewInterrupts()
 		session, err := pig.Open(ctx, pig.Config{
-			Dir:           workdir,
-			AgentDir:      piDir,
-			SessionDir:    sessions,
-			Model:         hello.Model,
-			CompactTokens: hello.CompactTokens,
-			Instructions:  hello.Instructions,
-			Extensions:    []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: workdir, Shell: jobs, Dyna: dynaTools, Interrupts: interrupts})},
-			Notice:        func(text string) { go notice(text) },
+			Dir:               workdir,
+			AgentDir:          piDir,
+			SessionDir:        sessions,
+			Model:             hello.Model,
+			CompactTokens:     hello.CompactTokens,
+			Instructions:      hello.Instructions,
+			ModelInstructions: hello.ModelInstructions,
+			Extensions:        []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: workdir, Shell: jobs, Dyna: dynaTools, Interrupts: interrupts})},
+			Notice:            func(text string) { go notice(text) },
 		})
 		if err != nil {
 			return err

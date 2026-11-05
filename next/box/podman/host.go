@@ -486,7 +486,8 @@ func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
 		args = append(args, "--label", l.Key+"="+l.Value)
 	}
 	if c.GPUCard != nil {
-		args = append(args, "--device", fmt.Sprintf("nvidia.com/gpu=%d", *c.GPUCard))
+		// Let Vulkan discover CDI's vendor ICDs instead of an image's forced software ICD.
+		args = append(args, "--unsetenv=VK_ICD_FILENAMES", "--device", fmt.Sprintf("nvidia.com/gpu=%d", *c.GPUCard))
 	}
 	args = append(args, c.Image, "--", "/opt/dyna/bin/current/dyna", "box-agent")
 	var checks string
