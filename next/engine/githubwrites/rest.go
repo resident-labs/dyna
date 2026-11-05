@@ -19,6 +19,8 @@ type route struct {
 	fields  []string
 	project bool // {owner} owns a project and no repository, so the grant is checked by owner
 	notPR   bool // with no field list, a PATCH is allowed on an issue and, beyond labels, not on a PR (the issues API reaches a PR by its number)
+	comment bool // {number} names a comment, and the comment's issue must be in the allowed repository of the path
+	item    bool // the last {number} names a project item, and the item's content must be in an allowed repository
 }
 
 // routes is the allow-list of REST writes. A write that matches none of these is refused, whatever it is.
@@ -26,7 +28,7 @@ var routes = []route{
 	{method: http.MethodPost, path: "repos/{owner}/{repo}/issues", group: issues},
 	{method: http.MethodPatch, path: "repos/{owner}/{repo}/issues/{number}", group: issues, notPR: true},
 	{method: http.MethodPost, path: "repos/{owner}/{repo}/issues/{number}/comments", group: issues},
-	{method: http.MethodPatch, path: "repos/{owner}/{repo}/issues/comments/{number}", group: issues},
+	{method: http.MethodPatch, path: "repos/{owner}/{repo}/issues/comments/{number}", group: issues, comment: true},
 	{method: http.MethodPost, path: "repos/{owner}/{repo}/issues/{number}/labels", group: issues},
 	{method: http.MethodPut, path: "repos/{owner}/{repo}/issues/{number}/labels", group: issues},
 
@@ -35,11 +37,11 @@ var routes = []route{
 	{method: http.MethodPost, path: "repos/{owner}/{repo}/issues/{number}/labels", group: pulls},
 	{method: http.MethodPut, path: "repos/{owner}/{repo}/issues/{number}/labels", group: pulls},
 	{method: http.MethodPost, path: "repos/{owner}/{repo}/issues/{number}/comments", group: pulls},
-	{method: http.MethodPatch, path: "repos/{owner}/{repo}/issues/comments/{number}", group: pulls},
+	{method: http.MethodPatch, path: "repos/{owner}/{repo}/issues/comments/{number}", group: pulls, comment: true},
 	{method: http.MethodPost, path: "repos/{owner}/{repo}/pulls/{number}/comments", group: pulls},
 
-	{method: http.MethodPatch, path: "orgs/{owner}/projectsV2/{number}/items/{number}", group: projects, fields: []string{"fields"}, project: true},
-	{method: http.MethodPatch, path: "users/{owner}/projectsV2/{number}/items/{number}", group: projects, fields: []string{"fields"}, project: true},
+	{method: http.MethodPatch, path: "orgs/{owner}/projectsV2/{number}/items/{number}", group: projects, fields: []string{"fields"}, project: true, item: true},
+	{method: http.MethodPatch, path: "users/{owner}/projectsV2/{number}/items/{number}", group: projects, fields: []string{"fields"}, project: true, item: true},
 }
 
 var (
@@ -135,6 +137,34 @@ func (g *Guard) checkREST(grant contract.GitHubWrites, request *http.Request, pr
 		}
 	} else if !grant.Allows(found.owner + "/" + found.repo) {
 		return refuse(contract.GitHubWriteRepoNotAllowed, "%s is on %s/%s, which is not among the repositories this room allows", what, found.owner, found.repo)
+	}
+	if enabled[0].comment || enabled[0].item {
+		var answer struct {
+			IssueURL string `json:"issue_url"`
+			Content  *struct {
+				RepositoryURL string `json:"repository_url"`
+			} `json:"content"`
+		}
+		target := *g.API
+		target.Path = prefix + "/" + strings.Join(segments, "/")
+		if !g.ask(request, http.MethodGet, target.String(), nil, &answer) {
+			return refuse(contract.GitHubWriteIDUnresolved, "%s names its target by a number, and GitHub did not answer for it", what)
+		}
+		pointed := answer.IssueURL
+		if enabled[0].item {
+			if answer.Content == nil {
+				return refuse(contract.GitHubWriteRepoNotAllowed, "%s is an item with no issue or PR, so no allowed repository holds it", what)
+			}
+			pointed = answer.Content.RepositoryURL
+		}
+		named, ok := strings.CutPrefix(pointed, g.API.Scheme+"://"+g.API.Host+prefix+"/repos/")
+		parts := strings.Split(named, "/")
+		if !ok || len(parts) < 2 {
+			return refuse(contract.GitHubWriteIDUnresolved, "%s names its target by a number, and GitHub's answer names no repository of the API host", what)
+		}
+		if !grant.Allows(parts[0] + "/" + parts[1]) {
+			return refuse(contract.GitHubWriteRepoNotAllowed, "%s names a target in %s/%s, which is not among the repositories this room allows", what, parts[0], parts[1])
+		}
 	}
 	if !json.Valid(body) {
 		return refuse(contract.GitHubWriteBodyUnreadable, "the body of %s is not one JSON value", what)

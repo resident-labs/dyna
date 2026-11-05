@@ -73,6 +73,7 @@ const (
 	GitHubWriteGraphQLMutation     GitHubWriteReason = "graphql_mutation_not_allowed" // a mutation outside the table
 	GitHubWriteGraphQLShape        GitHubWriteReason = "graphql_shape"                // a mutation not written as field(input: $variable)
 	GitHubWriteGraphQLUnresolved   GitHubWriteReason = "graphql_unresolved"           // a node ID GitHub did not resolve to a repository
+	GitHubWriteIDUnresolved        GitHubWriteReason = "id_unresolved"                // a REST id (a comment, a project item) GitHub did not resolve to an allowed repository
 	GitHubWriteReviewEvent         GitHubWriteReason = "review_event_not_allowed"     // a review event other than COMMENT or REQUEST_CHANGES, such as APPROVE
 )
 
