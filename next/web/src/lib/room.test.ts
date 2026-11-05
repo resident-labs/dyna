@@ -534,18 +534,18 @@ test("a session counts once: a broken box, then waiting, then a running turn, th
   store.apply(event(4, { type: "turn.started", body: { session: "b", turn: "t2", inputs: [] } }));
   store.apply(event(5, { type: "op.requested", body: { id: "o", kind: "hostexec", by: { kind: "session", session: "a" }, class: "owner",
     card: { title: "Run", target: { kind: "host", name: "h" } }, expires: "" } }));
-  assert.deepEqual([store.status("a"), store.counts], ["waiting", { sessions: 2, waiting: 1, failed: 0, working: 1, idle: 0 }]);
+  assert.deepEqual([store.status("a"), store.counts], ["waiting", { sessions: 2, waiting: 1, failed: 0, working: 1, background: 0, idle: 0 }]);
   // Approving does not repair a box that was lost, so the failure shows while the request still waits.
   store.apply(event(6, { type: "box.changed", body: { box: "x", session: "a", to: "lost" } }));
-  assert.deepEqual(store.counts, { sessions: 2, waiting: 0, failed: 1, working: 1, idle: 0 });
+  assert.deepEqual(store.counts, { sessions: 2, waiting: 0, failed: 1, working: 1, background: 0, idle: 0 });
   store.apply(event(7, { type: "box.changed", body: { box: "x", session: "a", to: "ready" } }));
   store.apply(event(8, { type: "op.decided", body: { id: "o", state: "approved", decision: { by: { kind: "owner" }, approved: true, at: "" } } }));
-  assert.deepEqual(store.counts, { sessions: 2, waiting: 0, failed: 0, working: 2, idle: 0 });
+  assert.deepEqual(store.counts, { sessions: 2, waiting: 0, failed: 0, working: 2, background: 0, idle: 0 });
   // A failed turn shows until seen, but a new turn moves on from it.
   store.apply(event(9, { type: "turn.ended", body: { session: "b", turn: "t2", outcome: "failed", usage } }));
-  assert.deepEqual(store.counts, { sessions: 2, waiting: 0, failed: 1, working: 1, idle: 0 });
+  assert.deepEqual(store.counts, { sessions: 2, waiting: 0, failed: 1, working: 1, background: 0, idle: 0 });
   store.apply(event(10, { type: "turn.started", body: { session: "b", turn: "t3", inputs: [] } }));
-  assert.deepEqual(store.counts, { sessions: 2, waiting: 0, failed: 0, working: 2, idle: 0 });
+  assert.deepEqual(store.counts, { sessions: 2, waiting: 0, failed: 0, working: 2, background: 0, idle: 0 });
 });
 
 test("tracked PRs come from pr.list, then github.pr.changed, and an older list never undoes an event", async () => {
@@ -716,4 +716,37 @@ test("a closed crew past the list asks for itself once, and a plain session stay
     assert.deepEqual(calls, ["plain", "old"]);
     assert.deepEqual([store.workflows.has("plain"), store.workflows.get("old")?.state, store.names.get("old")], [false, "done", "old-run"]);
   } finally { globalThis.fetch = original; }
+});
+
+test("typed engine waits load and refresh once for a batch, clear, and never override a running turn", async () => {
+  const original = globalThis.fetch;
+  let waiting: SessionSummary["waiting"] = { kind: "jobs", count: 2 };
+  let reads = 0;
+  const summary: SessionSummary = { id: "a", name: "Builder", parent: "", profile: "sol", box: "b", boxState: "ready", computer: "stopped", goal: "", lastRead: 0, hadJobs: true, startedAt: "" };
+  globalThis.fetch = input => {
+    if (String(input).endsWith("session.list")) { reads++; return Promise.resolve(new Response(JSON.stringify({ sessions: [{ ...summary, waiting }], seq: 0 }))); }
+    return Promise.resolve(new Response(JSON.stringify({ rooms: [], operations: [], questions: [], runs: [], seq: 0 })));
+  };
+  const store = new RoomStore("r", () => () => {});
+  try {
+    await store.open();
+    assert.equal(store.status("a"), "background");
+    assert.deepEqual(store.backgroundWaits.get("a"), waiting);
+    const before = reads;
+    waiting = undefined;
+    store.apply(event(1, { type: "shell.job.ended", body: { session: "a", job: "j1", end: { kind: "exit", code: 0 }, tail: "" } }));
+    store.apply(event(2, { type: "shell.job.ended", body: { session: "a", job: "j2", end: { kind: "exit", code: 0 }, tail: "" } }));
+    await store.waitingRead;
+    assert.equal(reads, before + 1);
+    assert.equal(store.status("a"), "idle");
+    waiting = { kind: "children", count: 1, name: "services-core" };
+    store.apply(event(3, { type: "turn.started", body: { session: "a", turn: "t", inputs: [] } }));
+    await store.waitingRead;
+    assert.equal(store.status("a"), "working");
+    store.apply(event(4, { type: "question.asked", body: { id: "q", session: "a", text: "help" } }));
+    assert.equal(store.status("a"), "waiting");
+    store.apply(event(5, { type: "box.changed", body: { box: "b", session: "a", to: "lost" } }));
+    assert.equal(store.status("a"), "failed");
+    await store.waitingRead;
+  } finally { store.close(); globalThis.fetch = original; }
 });

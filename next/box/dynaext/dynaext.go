@@ -32,7 +32,8 @@ type Config struct {
 	Shell *shell.Server
 	Dyna  *dynamcp.Server
 	// Submit judges the file a schema step's worker names; the tool is declared only when it is set.
-	Submit Submit
+	Submit     Submit
+	Interrupts *Interrupts
 }
 
 // Submit checks the JSON file at path. Its text goes back to the worker, end says the worker's turn is over, and an error is a
@@ -43,14 +44,14 @@ const (
 	// outputLimit is what the model reads of a long output; the whole output goes to a file.
 	outputLimit = 20 << 10
 	movedNote   = "The job is in the background. You can end your turn and Dyna will wake you when it completes."
-	steppedNote = "The owner sent you a message, so this command moved to the background, where it keeps running. Read the message now. job output reads its new output, and Dyna will wake you when it completes."
+	steppedNote = " sent you a message, so this command moved to the background, where it keeps running. job output reads its new output, and Dyna will wake you when it completes."
 	// abortedNote is bash's answer when the turn was stopped during the call. The job server keeps a command that had
 	// started, in the background, whether it runs in the box or on a host.
 	abortedNote = "The turn was stopped while this call ran, so its answer was dropped. A command that had started keeps running in the background; job list shows it, and Dyna will wake you when it completes."
 )
 
 // jobSchema is what bash and job give a script. A script reads the whole output here, and the model reads the text.
-var jobSchema = json.RawMessage(`{"type":"object","properties":{"output":{"type":"string"},"job":{"type":"string"},"running":{"type":"boolean"},"status":{"type":"string"},"exit_code":{"type":"number"},"message_arrived":{"type":"boolean"},"jobs":{"type":"array","items":{}}},"additionalProperties":false}`)
+var jobSchema = json.RawMessage(`{"type":"object","properties":{"output":{"type":"string"},"job":{"type":"string"},"running":{"type":"boolean"},"status":{"type":"string"},"exit_code":{"type":"number"},"message_arrived":{"type":"boolean"},"interrupt":{"type":"object","properties":{"kind":{"type":"string"},"name":{"type":"string"}}},"jobs":{"type":"array","items":{}}},"additionalProperties":false}`)
 
 // resultSchema is the result schema PiG gives every MCP tool, so a script sees one shape.
 var resultSchema = json.RawMessage(`{"type":"object","properties":{"content":{"type":"array","items":{}},"structuredContent":{},"isError":{"type":"boolean"}},"required":["content"],"additionalProperties":true}`)
@@ -115,6 +116,11 @@ func Extension(c Config) extension.InlineExtension {
 		if err != nil {
 			return err
 		}
+		interrupts := c.Interrupts
+		if interrupts == nil {
+			interrupts = NewInterrupts()
+		}
+		api.RegisterTool(codemodeTool(interrupts, api.GetSettings))
 		api.RegisterTool(bash(c, roots))
 		api.RegisterTool(job(c))
 		api.RegisterTool(postDefinition)
@@ -153,7 +159,7 @@ func bash(c Config, roots map[string]string) extension.ToolDefinition {
 	return extension.ToolDefinition{
 		Name:          "bash",
 		Label:         "bash",
-		Description:   "Run a bash command. It runs in the foreground for up to 30 s, then keeps running in the background as a job.\njob output returns only text printed since the last read, and is empty when a job printed nothing.\nThe command runs as bash -c, so its text is in the process list. pkill -f with a pattern from that text also matches this shell and ends the job with SIGTERM.\nhost runs the command on that machine instead of this box, under your host grant. A host run goes on through an engine restart (a deploy) or a dropped connection, and its output and exit code still reach the job; if the restarted engine cannot follow it, the job ends with a failure that names the restart, the host and the unit.",
+		Description:   "Run a bash command. It runs in the foreground for up to 30 s, then keeps running in the background as a job. A message from the owner or an agent above moves a foreground command to the background.\njob output returns only text printed since the last read, and is empty when a job printed nothing.\nThe command runs as bash -c, so its text is in the process list. pkill -f with a pattern from that text also matches this shell and ends the job with SIGTERM.\nhost runs the command on that machine instead of this box, under your host grant. A host run goes on through an engine restart (a deploy) or a dropped connection, and its output and exit code still reach the job; if the restarted engine cannot follow it, the job ends with a failure that names the restart, the host and the unit.",
 		PromptSnippet: "Run bash commands, here or on a host",
 		Parameters:    json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"},"description":{"type":"string","description":"What the command is for, as its title in the Jobs list"},"cwd":{"type":"string"},"host":{"type":"string"},"timeout":{"type":"integer","description":"Seconds before the command is stopped, at most 7200. A host run stops at 600 by default"}},"required":["command"]}`),
 		OutputSchema:  jobSchema,
@@ -183,7 +189,7 @@ func job(c Config) extension.ToolDefinition {
 	return extension.ToolDefinition{
 		Name:          "job",
 		Label:         "job",
-		Description:   "Background jobs that bash started.\noutput: read a job's new output.\nstop: stop a job and its whole process group.\nlist: list the jobs.",
+		Description:   "Background jobs that bash started, including foreground commands moved aside by a message from the owner or an agent above. Dyna wakes the session when a background job completes.\noutput: read a job's new output.\nstop: stop a job and its whole process group.\nlist: list the jobs.",
 		PromptSnippet: "Read, stop or list background jobs",
 		Parameters:    json.RawMessage(`{"type":"object","properties":{"action":{"type":"string","enum":["output","stop","list"]},"job":{"type":"string"}},"required":["action"]}`),
 		OutputSchema:  jobSchema,
@@ -218,7 +224,7 @@ func jobResult(answer shell.Result, moved bool) (extension.AgentToolResult, erro
 	state := fmt.Sprintf("[job %s: %s]", answer.Job, answer.Status)
 	switch {
 	case answer.Running && moved && answer.MessageArrived:
-		state = fmt.Sprintf("[job %s] %s", answer.Job, steppedNote)
+		state = fmt.Sprintf("[job %s] %s%s", answer.Job, answer.Interrupt.Sender(), steppedNote)
 	case answer.Running && moved:
 		state = fmt.Sprintf("[job %s] %s", answer.Job, movedNote)
 	case answer.Running:
