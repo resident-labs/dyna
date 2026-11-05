@@ -139,7 +139,7 @@ export function decodeShellOutput(value: unknown): ShellJobOutput | undefined {
 
 // Why a pending box waits: the reasons admission names (next/box/admission.go). A box reason, in box.changed or
 // session.list, is free text for other states and for a create that will retry, so any other text gives no reason.
-const pendingReasons = ["cpu", "memory", "disk", "room-limit", "no-ready-host", "room-host", "invalid-size", "pool-node", "pool-failed"] as const;
+const pendingReasons = ["cpu", "memory", "disk", "room-limit", "no-ready-host", "room-host", "invalid-size", "pool-node", "pool-failed", "gpu", "no-gpu"] as const;
 export type PendingReason = typeof pendingReasons[number];
 export const pendingReason = (to: BoxState, reason?: string): PendingReason | undefined =>
   to === "pending" ? pendingReasons.find(item => item === reason) : undefined;
