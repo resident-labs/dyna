@@ -163,11 +163,15 @@ func TestOnlyTheOwnerReadsAndChangesWorkflowSettings(t *testing.T) {
 func TestAWorkflowSettingIsCheckedWhenItIsSet(t *testing.T) {
 	r := newSettingsRig(t)
 	negative, tooShort := -1, 0
+	overCount, overTimeout := contract.MaxWorkflowCount+1, contract.MaxWorkflowTimeout+1
 	for name, request := range map[string]contract.WorkflowSetRequest{
 		"a starter":              {Set: contract.WorkflowSettings{Start: "nobody"}},
 		"a negative run limit":   {Set: contract.WorkflowSettings{MaxRuns: &negative}},
 		"a negative worker cap":  {Set: contract.WorkflowSettings{MaxWorkers: &negative}},
 		"a timeout under 1s":     {Set: contract.WorkflowSettings{Timeout: &tooShort}},
+		"too many runs":          {Set: contract.WorkflowSettings{MaxRuns: &overCount}},
+		"too many workers":       {Set: contract.WorkflowSettings{MaxWorkers: &overCount}},
+		"a timeout over the cap": {Set: contract.WorkflowSettings{Timeout: &overTimeout}},
 		"an unknown size":        {Set: contract.WorkflowSettings{Size: "huge"}},
 		"an unknown profile":     {Set: contract.WorkflowSettings{Profiles: []contract.ProfileName{"nope"}}},
 		"a setting in both":      {Set: contract.WorkflowSettings{Start: contract.WorkflowStartRoot}, Clear: []contract.WorkflowSetting{contract.WorkflowSettingStart}},
@@ -179,6 +183,12 @@ func TestAWorkflowSettingIsCheckedWhenItIsSet(t *testing.T) {
 			t.Fatalf("%s: %+v", name, problem)
 		}
 	}
+	// The caps themselves are allowed, and the room-level values read back.
+	atCount, atTimeout := contract.MaxWorkflowCount, contract.MaxWorkflowTimeout
+	if _, problem := r.WorkflowSet(r.ctx, r.owner, contract.WorkflowSetRequest{Room: r.other, Set: contract.WorkflowSettings{MaxRuns: &atCount, MaxWorkers: &atCount, Timeout: &atTimeout}}); problem != nil {
+		t.Fatalf("the caps themselves: %+v", problem)
+	}
+	r.set(r.other, contract.WorkflowSettings{}, contract.WorkflowSettingMaxRuns, contract.WorkflowSettingMaxWorkers, contract.WorkflowSettingTimeout)
 	got, problem := r.WorkflowSettings(r.ctx, r.owner, contract.WorkflowSettingsRequest{})
 	if problem != nil || !reflect.DeepEqual(got.Global.Effective, contract.WorkflowDefaults) || len(got.Rooms) != 2 {
 		t.Fatalf("a refused change left %+v: %+v", got.Global, problem)
