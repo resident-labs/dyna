@@ -165,6 +165,14 @@ func (s *Store) SessionList(ctx context.Context, req contract.SessionListRequest
 	if err := rows.Err(); err != nil {
 		return contract.SessionListResponse{}, err
 	}
+	rows.Close()
+	waits, err := sessionWaits(ctx, s.Read(), req.Room)
+	if err != nil {
+		return contract.SessionListResponse{}, err
+	}
+	for i := range sessions {
+		sessions[i].Waiting = waits[sessions[i].ID]
+	}
 	var next contract.SessionID
 	if limit > 0 && len(sessions) > limit {
 		sessions = sessions[:limit]
