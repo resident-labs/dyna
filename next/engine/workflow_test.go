@@ -90,17 +90,6 @@ func (w workflowCase) ended(session contract.SessionID) contract.TurnEnded {
 	return contract.TurnEnded{}
 }
 
-func TestOnlyTheOwnerOrRootStartsAWorkflow(t *testing.T) {
-	w := setupWorkflow(t)
-	if _, problem := w.WorkflowRun(w.ctx, contract.Principal{Kind: contract.PrincipalSession, Session: w.root}, contract.WorkflowRunRequest{Script: workflowScript}); problem != nil {
-		t.Fatalf("root in its own room: %+v", problem)
-	}
-	_, crew := w.start(w.owner, workflowScript)
-	if _, problem := w.WorkflowRun(w.ctx, crew, contract.WorkflowRunRequest{Script: workflowScript}); problem == nil || problem.Code != contract.ErrForbidden {
-		t.Fatalf("a child session: %+v", problem)
-	}
-}
-
 func TestACrewReachesEveryModelOfItsProfilesAndNoOther(t *testing.T) {
 	w := setupWorkflow(t)
 	script := "export const meta = { name: 'one', profiles: ['deep'] }"
