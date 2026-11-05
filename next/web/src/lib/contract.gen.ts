@@ -310,7 +310,7 @@ export type ComputerState = "running" | "stopped";
 export type ComputerChanged = { session: SessionID; to: ComputerState; };
 export type BoxChanged = { box: BoxID; session: SessionID; host?: HostName; from?: BoxState; to: BoxState; cause?: FailureCause; phase?: CreatePhase; reason?: string; };
 export type CreatePhase = "remove_old" | "repository" | "box";
-export type FailureCause = "nested_device_missing" | "kvm_device_missing" | "create_failed" | "start_failed" | "no_hello" | "engine_restarted" | "remove_failed" | "archive_failed" | "grant_inactive" | "host_lost" | "host_busy" | "github_failed" | "stale" | "interrupted" | "internal" | "setup_failed" | "model_failed" | "output_limit" | "harness_failed" | "set_model_failed" | "not_started" | "closed" | "run_timeout" | "workflow_failed";
+export type FailureCause = "nested_device_missing" | "kvm_device_missing" | "create_failed" | "start_failed" | "no_hello" | "engine_restarted" | "remove_failed" | "archive_failed" | "grant_inactive" | "host_lost" | "host_busy" | "github_failed" | "stale" | "interrupted" | "internal" | "setup_failed" | "model_failed" | "output_limit" | "no_submit" | "harness_failed" | "set_model_failed" | "not_started" | "closed" | "run_timeout" | "workflow_failed";
 export type PressureKind = "high" | "max";
 export type HostDiskLow = { host: HostName; freeBytes: number; floorBytes: number; };
 export type BoxPressure = { box: BoxID; kind: PressureKind; };
@@ -579,7 +579,7 @@ export type WorkflowStepChanged = { run: WorkflowRunID; session: SessionID; step
 export type WorkflowStatusChanged = { run: WorkflowRunID; session: SessionID; status: string; };
 export type WorkflowStarters = "any" | "leads" | "root" | "off";
 export type WorkflowFeature = "worktree" | "merge" | "run" | "workflow" | "post" | "resume";
-export type WorkflowSetting = "start" | "maxRuns" | "maxWorkers" | "profiles" | "size" | "timeout";
+export type WorkflowSetting = "start" | "maxRuns" | "maxWorkers" | "profiles" | "size" | "timeout" | "worktree" | "merge" | "run" | "workflow" | "post" | "resume";
 export type WorkflowSettingInfo = { setting: WorkflowSetting; help: string; };
 export type WorkflowSettings = { start?: WorkflowStarters; maxRuns?: number | null; maxWorkers?: number | null; profiles?: Array<ProfileName> | null; size?: BoxSizeName; timeout?: number | null; worktree?: boolean | null; merge?: boolean | null; run?: boolean | null; workflow?: boolean | null; post?: boolean | null; resume?: boolean | null; };
 export type WorkflowEffective = { start: WorkflowStarters; maxRuns: number; maxWorkers: number; profiles?: Array<ProfileName> | null; size?: BoxSizeName; timeout: number; worktree: boolean; merge: boolean; run: boolean; workflow: boolean; post: boolean; resume: boolean; };
@@ -663,6 +663,30 @@ export type BoxMessageBody =
   | { type: "turn.stop"; body: TurnStop }
   | { type: "workflow.reload"; body: WorkflowReload }
 ;
+export const SessionListPage = 25;
+export const MaxGPUGiB = 1048576;
+export const NavPageBytes = 8192;
+export const SearchLimitDefault = 10;
+export const SearchLimitMax = 25;
+export const SearchSnippetChars = 240;
+export const SearchGoalChars = 200;
+export const HistoryLimitDefault = 15;
+export const HistoryLimitMax = 50;
+export const HistoryTextChars = 800;
+export const HistoryPostBytes = 32768;
+export const TranscriptLimitDef = 2;
+export const TranscriptLimitMax = 5;
+export const TranscriptTextChars = 800;
+export const TranscriptInputChars = 300;
+export const TranscriptStepChars = 160;
+export const SearchWordsMax = 8;
+export const SearchQueryCharsMax = 200;
+export const TranscriptChunkBytes = 8192;
+export const DefaultWorkflowTimeout = 18000;
+export const MaxWorkflowTimeout = 2592000;
+export const MinWorkflowTimeout = 1;
+export const MinWorkflowCount = 0;
+export const MaxWorkflowCount = 10000;
 export interface MethodMap {
   "addon.list": { request: AddonListRequest; response: AddonListResponse };
   "addon.set_enabled": { request: AddonSetEnabledRequest; response: AddonSetEnabledResponse };
