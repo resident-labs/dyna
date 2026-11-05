@@ -338,7 +338,8 @@ type gqlAuthor struct {
 type gqlRollup struct {
 	State    string `json:"state"`
 	Contexts struct {
-		Nodes []struct {
+		TotalCount int `json:"totalCount"`
+		Nodes      []struct {
 			Type       string `json:"__typename"`
 			Name       string `json:"name"`
 			Conclusion string `json:"conclusion"`
@@ -624,41 +625,58 @@ func (p gqlPull) observed(viewer string) Observed {
 	return seen
 }
 
-// CommitCI is a commit's CI as its rollup shows it.
+// CommitCI is a commit's CI as its rollup shows it. Runs lists the first ciRunsRead checks, and Truncated says the rollup holds more.
 type CommitCI struct {
-	Result contract.PrCI
-	Runs   []contract.CIRun
+	Result    contract.PrCI
+	Runs      []contract.CIRun
+	Truncated bool
 }
 
-// CommitCI reads one commit's check rollup in one query, for a default-branch head. A commit GitHub does not know has no CI.
-func (c *Client) CommitCI(ctx context.Context, repo contract.RepoName, sha string) (CommitCI, error) {
+// ciRunsRead is how many checks of a rollup one read lists, the most GitHub gives a page. A rollup with more is marked truncated and not paged, which would cost a query for each page.
+const ciRunsRead = 100
+
+// CommitsCI reads the check rollups of several default-branch commits in one query, one alias for each. A commit GitHub does not know has no CI.
+func (c *Client) CommitsCI(ctx context.Context, repo contract.RepoName, shas []string) (map[string]CommitCI, error) {
 	owner, name, ok := strings.Cut(string(repo), "/")
 	if !ok || !ValidRepo(repo) {
-		return CommitCI{}, fmt.Errorf("invalid repository %q", repo)
+		return nil, fmt.Errorf("invalid repository %q", repo)
 	}
-	query := "query($owner:String!,$name:String!,$oid:GitObjectID!){viewer{login} repository(owner:$owner,name:$name){object(oid:$oid){...on Commit{statusCheckRollup{state contexts(first:50){nodes{__typename ...on CheckRun{name conclusion detailsUrl} ...on StatusContext{context state targetUrl}}}}}}}}"
-	repository, err := c.graphQL(ctx, query, map[string]string{"owner": owner, "name": name, "oid": sha})
+	variables := map[string]string{"owner": owner, "name": name}
+	declared, fields := "", ""
+	for i, sha := range shas {
+		variables[fmt.Sprintf("h%d", i)] = sha
+		declared += fmt.Sprintf(",$h%d:GitObjectID!", i)
+		fields += fmt.Sprintf(" h%d:object(oid:$h%d){...ci}", i, i)
+	}
+	query := "query($owner:String!,$name:String!" + declared + "){viewer{login} repository(owner:$owner,name:$name){" + fields + "}}" +
+		fmt.Sprintf(" fragment ci on Commit{statusCheckRollup{state contexts(first:%d){totalCount nodes{__typename ...on CheckRun{name conclusion detailsUrl} ...on StatusContext{context state targetUrl}}}}}", ciRunsRead)
+	repository, err := c.graphQL(ctx, query, variables)
 	if err != nil {
-		return CommitCI{}, err
+		return nil, err
 	}
-	var commit struct {
-		StatusCheckRollup *gqlRollup `json:"statusCheckRollup"`
-	}
-	if raw := repository["object"]; raw != nil && string(raw) != "null" {
-		if err := json.Unmarshal(raw, &commit); err != nil {
-			return CommitCI{}, fmt.Errorf("GitHub answer: %w", err)
+	reads := make(map[string]CommitCI, len(shas))
+	for i, sha := range shas {
+		var commit struct {
+			StatusCheckRollup *gqlRollup `json:"statusCheckRollup"`
 		}
-	}
-	result, _ := rollupCI(commit.StatusCheckRollup)
-	read := CommitCI{Result: result}
-	if commit.StatusCheckRollup != nil {
-		for _, check := range commit.StatusCheckRollup.Contexts.Nodes {
-			run := contract.CIRun{Name: check.Name, Conclusion: check.Conclusion, URL: check.DetailsURL}
-			if check.Type == "StatusContext" {
-				run = contract.CIRun{Name: check.Context, Conclusion: check.State, URL: check.TargetURL}
+		if raw := repository[fmt.Sprintf("h%d", i)]; raw != nil && string(raw) != "null" {
+			if err := json.Unmarshal(raw, &commit); err != nil {
+				return nil, fmt.Errorf("GitHub answer: %w", err)
 			}
-			read.Runs = append(read.Runs, run)
 		}
+		result, _ := rollupCI(commit.StatusCheckRollup)
+		read := CommitCI{Result: result}
+		if rollup := commit.StatusCheckRollup; rollup != nil {
+			read.Truncated = rollup.Contexts.TotalCount > len(rollup.Contexts.Nodes)
+			for _, check := range rollup.Contexts.Nodes {
+				run := contract.CIRun{Name: check.Name, Conclusion: check.Conclusion, URL: check.DetailsURL}
+				if check.Type == "StatusContext" {
+					run = contract.CIRun{Name: check.Context, Conclusion: check.State, URL: check.TargetURL}
+				}
+				read.Runs = append(read.Runs, run)
+			}
+		}
+		reads[sha] = read
 	}
-	return read, nil
+	return reads, nil
 }

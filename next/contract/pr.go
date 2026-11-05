@@ -179,13 +179,15 @@ type CIRun struct {
 	URL        string `json:"url"`
 }
 
-// GitMainCIFinished is the CI of a default-branch head finishing, once per head, with repo, branch, sha, result and runs; where kind is success or failure. It states a head no tracked PR owns, which github.ci.finished never does.
+// GitMainCIFinished is the CI of a default-branch head finishing, once per head sha even after the branch moved on, with repo, branch, sha, result and runs; where kind is success or failure. It states a head no tracked PR owns, which github.ci.finished never does.
 type GitMainCIFinished struct {
 	Repo   RepoName `json:"repo"`
 	Branch string   `json:"branch"`
 	Sha    string   `json:"sha"`
 	Result PrCI     `json:"result"`
 	Runs   []CIRun  `json:"runs"`
+	// RunsTruncated is true when the head's rollup holds more checks than Runs lists, which are its first 100. Result still comes from the whole rollup.
+	RunsTruncated bool `json:"runsTruncated,omitempty"`
 }
 
 func (CIFinished) EventType() EventType        { return "github.ci.finished" }

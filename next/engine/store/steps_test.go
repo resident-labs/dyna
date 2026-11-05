@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"testing"
 
@@ -160,7 +161,7 @@ func TestUpgradeCarriesRootApprovesHostexec(t *testing.T) {
 		"ALTER TABLE boxes DROP COLUMN gpu_gib",
 		"ALTER TABLE boxes DROP COLUMN gpu_index",
 		"ALTER TABLE rooms DROP COLUMN github_writes",
-		"ALTER TABLE repos DROP COLUMN ci_settled",
+		"DROP TABLE repo_heads",
 		"UPDATE meta SET value='86' WHERE key='schema_version'",
 	} {
 		if _, err := db.Exec(q); err != nil {
@@ -212,7 +213,7 @@ func TestUpgradeTurnsHeldAndRetryingArchivesIntoPlainCloses(t *testing.T) {
 		"ALTER TABLE boxes DROP COLUMN gpu_gib",
 		"ALTER TABLE boxes DROP COLUMN gpu_index",
 		"ALTER TABLE rooms DROP COLUMN github_writes",
-		"ALTER TABLE repos DROP COLUMN ci_settled",
+		"DROP TABLE repo_heads",
 		"UPDATE meta SET value='88' WHERE key='schema_version'",
 	} {
 		if _, err := db.Exec(q); err != nil {
@@ -242,22 +243,37 @@ func TestUpgradeTurnsHeldAndRetryingArchivesIntoPlainCloses(t *testing.T) {
 	}
 }
 
-// TestUpgradeSettlesTheHeadAStoreHolds keeps the first git.main_ci_finished from reporting a head that was already there: a repository
-// that had read a head starts with it settled, and one that had read none has nothing settled.
-func TestUpgradeSettlesTheHeadAStoreHolds(t *testing.T) {
-	s, err := Open(floorStore(t, func(db *sql.DB) {
-		if _, err := db.Exec("INSERT INTO repos(repo,default_room,main_head) VALUES ('o/read','room_x','abc'),('o/unread','room_x','')"); err != nil {
+// TestUpgradeSeedsTheHeadListWithTheStoredHeadSettled keeps git.main_ci_finished from reporting any head from before the list: the head a
+// repository had read is listed settled, whatever ci_settled said of it, and a repository that had read none has an empty list.
+func TestUpgradeSeedsTheHeadListWithTheStoredHeadSettled(t *testing.T) {
+	dir := floorStore(t, func(db *sql.DB) {
+		if _, err := db.Exec("INSERT INTO repos(repo,default_room,main_head) VALUES ('o/busy','room_x','newest'),('o/unread','room_x','')"); err != nil {
 			t.Fatal(err)
 		}
-	}))
+	})
+	s, err := Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	for repo, want := range map[string]string{"o/read": "abc", "o/unread": ""} {
-		var settled string
-		if err := s.Read().QueryRow("SELECT ci_settled FROM repos WHERE repo=?", repo).Scan(&settled); err != nil || settled != want {
-			t.Errorf("%s: settled %q, want %q: %v", repo, settled, want, err)
+	rows, err := s.Read().Query("SELECT repo,sha,settled FROM repo_heads ORDER BY repo,seq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var repo, sha string
+		var settled bool
+		if err := rows.Scan(&repo, &sha, &settled); err != nil {
+			t.Fatal(err)
 		}
+		got = append(got, fmt.Sprintf("%s %s %t", repo, sha, settled))
+	}
+	if want := []string{"o/busy newest true"}; !slices.Equal(got, want) {
+		t.Fatalf("seeded %v, want %v", got, want)
+	}
+	if _, err := s.Read().Exec("SELECT ci_settled FROM repos"); err == nil {
+		t.Error("repos.ci_settled is still there")
 	}
 }
