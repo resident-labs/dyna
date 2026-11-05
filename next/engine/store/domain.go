@@ -39,10 +39,11 @@ type Session struct {
 	Profile     contract.ProfileName
 	Box         contract.BoxID
 	CloseReason contract.SessionCloseReason
-	NewRoomName string // nonempty only for a new room root
-	Compose     string // the compose file this session chose when it started, or ""
-	Root        bool   // read back only: the session has no parent
-	Closing     bool   // read back only: the session is closing
+	NewRoomName string          // nonempty only for a new room root
+	Compose     string          // the compose file this session chose when it started, or ""
+	GPU         contract.GPUGiB // the VRAM its box asks of a card (5.5); set to start, not read back
+	Root        bool            // read back only: the session has no parent
+	Closing     bool            // read back only: the session is closing
 	// Workflow makes the new session a crew. It is set only to start one: Session does not read it back.
 	Workflow *WorkflowRun
 }
@@ -173,7 +174,7 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 				return err
 			}
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)", session.Box, session.ID, host, "", size, contract.BoxPending, reason, "", event.Time.UnixMilli(), event.Time.UnixMilli())
+		_, err = tx.ExecContext(ctx, "INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updated_at,gpu_gib) VALUES(?,?,?,?,?,?,?,?,?,?,?)", session.Box, session.ID, host, "", size, contract.BoxPending, reason, "", event.Time.UnixMilli(), event.Time.UnixMilli(), session.GPU)
 		if err != nil {
 			return err
 		}

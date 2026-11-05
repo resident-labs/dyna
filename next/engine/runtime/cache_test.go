@@ -57,3 +57,15 @@ func TestContainerBuildsWhereARunnerOfItsRepositoryDoes(t *testing.T) {
 		t.Fatalf("cargo env: %#v", cargo)
 	}
 }
+
+func TestContainerCarriesTheAssignedGPUCard(t *testing.T) {
+	b := &Boxes{Layout: box.Layout{HostData: "/host"}}
+	card := 1
+	_, c := b.container(lifecycle.BoxSpec{GPUCard: &card}, "image", box.Mount{})
+	if c.GPUCard == nil || *c.GPUCard != 1 {
+		t.Fatalf("card %v", c.GPUCard)
+	}
+	if _, c := b.container(lifecycle.BoxSpec{}, "image", box.Mount{}); c.GPUCard != nil {
+		t.Fatalf("a box with no GPU got card %d", *c.GPUCard)
+	}
+}

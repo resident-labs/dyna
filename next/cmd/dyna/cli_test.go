@@ -820,3 +820,11 @@ func TestDeviceSetHostMapsFlag(t *testing.T) {
 		t.Fatal("device set accepted a missing --host")
 	}
 }
+
+func TestSessionStartPassesGPUGiB(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "session", "start", "--room", "r", "--name", "n", "--profile", "p", "--gpu", "8")
+	if f.start.GPU != 8 {
+		t.Fatalf("%+v", f.start)
+	}
+}

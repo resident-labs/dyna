@@ -155,6 +155,9 @@ func TestUpgradeCarriesRootApprovesHostexec(t *testing.T) {
 		"ALTER TABLE rooms ADD COLUMN root_approves_hostexec INTEGER NOT NULL DEFAULT 0",
 		"INSERT INTO rooms(id,name,created_at,cpus,mem_bytes,root_approves_hostexec) VALUES ('room_on','on',1,0,0,1),('room_off','off',1,0,0,0)",
 		"DROP TABLE session_branches",
+		"ALTER TABLE hosts DROP COLUMN gpus",
+		"ALTER TABLE boxes DROP COLUMN gpu_gib",
+		"ALTER TABLE boxes DROP COLUMN gpu_index",
 		"UPDATE meta SET value='86' WHERE key='schema_version'",
 	} {
 		if _, err := db.Exec(q); err != nil {
@@ -201,6 +204,9 @@ func TestUpgradeTurnsHeldAndRetryingArchivesIntoPlainCloses(t *testing.T) {
 		"INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES ('held','r','held','p','closing','',0),('retry','r','retry','p','closing','',0),('run','r','run','p','open','',0)",
 		"INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at,want,failures,due_at) VALUES ('bh','held','','agent','stopped','archive failed','',0,0,'hold',5,0),('br','retry','','agent','closing','push failed','',0,0,'close',2,99999),('bn','run','','agent','ready','','',0,0,'run',0,0)",
 		"DROP TABLE session_branches",
+		"ALTER TABLE hosts DROP COLUMN gpus",
+		"ALTER TABLE boxes DROP COLUMN gpu_gib",
+		"ALTER TABLE boxes DROP COLUMN gpu_index",
 		"UPDATE meta SET value='88' WHERE key='schema_version'",
 	} {
 		if _, err := db.Exec(q); err != nil {
