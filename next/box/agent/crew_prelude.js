@@ -41,7 +41,19 @@
     return { opts: rest, lane: lane === undefined || lane === null ? "" : String(lane) };
   };
 
-  const log = (...values) => emit({ op: "log", payload: values.join(" ") });
+  // Strings stay as they are and arrays and objects are JSON, as console.log shows them. A BigInt inside one becomes a string and
+  // a cycle, which JSON cannot hold, falls back to String().
+  const log = (...values) => {
+    const line = values.map((value) => {
+      if (typeof value !== "object" || value === null || value instanceof Error) return String(value);
+      try {
+        return JSON.stringify(value, (_, inner) => (typeof inner === "bigint" ? String(inner) : inner));
+      } catch {
+        return String(value);
+      }
+    });
+    emit({ op: "log", payload: line.join(" ") });
+  };
   const api = {
     args: JSON.parse(argsText),
     phase: (title) => {
