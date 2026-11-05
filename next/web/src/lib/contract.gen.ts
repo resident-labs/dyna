@@ -76,9 +76,9 @@ export type InstructionsGetRequest = { room?: RoomID; };
 export type InstructionsGetResponse = { text: string; hash: string; savedAt?: string | null; };
 export type InstructionsSetRequest = { room?: RoomID; text: string; base: string; };
 export type InstructionsSetResponse = { hash: string; };
-export type Method = "addon.list" | "addon.set_enabled" | "addon.set_root_only" | "addon.set_hosts" | "box.notice" | "mcp.add" | "mcp.list" | "mcp.remove" | "package.add" | "package.list" | "package.remove" | "skill.list" | "skill.remove" | "skill.save" | "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "proxy.key" | "proxy.usage" | "conversation.read" | "room.list" | "session.list" | "diff.saved" | "delivery.done" | "host.add" | "host.set_limits" | "host.set" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.set" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.set_branch" | "session.restart" | "session.refresh" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.compacted" | "box.hello" | "computer.changed" | "computer.start" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.job.running" | "shell.output" | "box.stats" | "box.stats.report" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "device.set_host" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "hostexec.stop" | "image.list" | "image.remove" | "image.save" | "image.show" | "issue.list" | "issue.status" | "issue.track" | "issue.untrack" | "search.posts" | "search.sessions" | "search.rooms" | "history.read" | "transcript.digest" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pool.add" | "pool.list" | "pool.remove" | "pool.set" | "room.hosts" | "host.remove" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "session.responsibilities" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled" | "workflow.run" | "workflow.reload" | "workflow.status" | "workflow.step" | "workflow.list" | "workflow.pin" | "workflow.step_start" | "workflow.step_end" | "workflow.step_transcript" | "workflow.set_status";
+export type Method = "addon.list" | "addon.set_enabled" | "addon.set_root_only" | "addon.set_hosts" | "box.notice" | "mcp.add" | "mcp.list" | "mcp.remove" | "package.add" | "package.list" | "package.remove" | "skill.list" | "skill.remove" | "skill.save" | "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "proxy.key" | "proxy.usage" | "conversation.read" | "room.list" | "session.list" | "diff.saved" | "delivery.done" | "host.add" | "host.set_limits" | "host.set" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.set" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.set_branch" | "session.restart" | "session.refresh" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.compacted" | "box.hello" | "computer.changed" | "computer.start" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.job.running" | "shell.output" | "box.stats" | "box.stats.report" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "device.set_host" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "hostexec.stop" | "image.list" | "image.remove" | "image.save" | "image.show" | "issue.list" | "issue.status" | "issue.track" | "issue.untrack" | "search.posts" | "search.sessions" | "search.rooms" | "history.read" | "transcript.digest" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pool.add" | "pool.list" | "pool.remove" | "pool.set" | "room.hosts" | "host.remove" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "session.responsibilities" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled" | "workflow.run" | "workflow.reload" | "workflow.status" | "workflow.step" | "workflow.list" | "workflow.pin" | "workflow.step_start" | "workflow.step_end" | "workflow.step_transcript" | "workflow.set_status" | "workflow.settings" | "workflow.set";
 export type ErrorCode = "podman_required" | "invalid" | "unknown_action" | "not_found" | "forbidden" | "cross_room_attachment" | "conflict" | "room_limited" | "profile_exists" | "move_busy" | "has_children" | "parent_closing" | "session_closing" | "stale" | "github_quota" | "visual_superseded" | "unavailable" | "reconnect_unavailable" | "models_unavailable" | "store_from_v1" | "store_too_old" | "no_grant" | "command_too_long";
-export type Error = { code: ErrorCode; message: string; visual?: VisualSuperseded | null; limited?: RoomLimited | null; };
+export type Error = { code: ErrorCode; message: string; visual?: VisualSuperseded | null; limited?: RoomLimited | null; workflow?: WorkflowRefused | null; };
 export type VisualSuperseded = { event: EventID; version: number; seq: number; };
 export type RoomLimited = { accounts?: Array<AccountID> | null; hosts?: Array<HostName> | null; };
 export type ConversationReadRequest = { room: RoomID; conversation: Conversation; seq: number; };
@@ -247,7 +247,7 @@ export type ConnectUnlinkResponse = { };
 export type ConnectConnector = { missing: boolean; };
 export type ConnectAttemptState = "idle" | "starting" | "pending" | "linked" | "unlinking" | "canceled" | "failed";
 export type ConnectAttempt = { state: ConnectAttemptState; expires: number; };
-export type ContextSectionKey = "dyna_goal" | "dyna_children" | "dyna_requests" | "dyna_holds" | "dyna_profiles" | "dyna_usage" | "dyna_room";
+export type ContextSectionKey = "dyna_goal" | "dyna_children" | "dyna_requests" | "dyna_holds" | "dyna_profiles" | "dyna_usage" | "dyna_room" | "dyna_workflows";
 export type ContextSnapshotRequest = { section?: ContextSectionKey; };
 export type ContextSnapshotResponse = { sections: Array<ContextSection> | null; };
 export type ContextSection = { key: ContextSectionKey; text: string; };
@@ -555,12 +555,12 @@ export type WorkflowMerge = { branch: string; commit: string; merged: Array<stri
 export type WorkflowConflict = { step: string; branch?: string; files: Array<string> | null; reason?: string; };
 export type WorkflowListRequest = { room?: RoomID; };
 export type WorkflowListResponse = { runs: Array<WorkflowInfo> | null; };
-export type BoxWorkflow = { run: WorkflowRunID; name: string; script: string; version: number; args?: string; profiles: Array<WorkflowProfile> | null; workers: number; };
+export type BoxWorkflow = { run: WorkflowRunID; name: string; script: string; version: number; args?: string; profiles: Array<WorkflowProfile> | null; workers: number; timeout: number; };
 export type WorkflowReload = { workflow: BoxWorkflow; };
 export type WorkflowProfile = { name: ProfileName; model: ModelChoice; compactTokens?: number; maxConcurrent?: number; };
 export type WorkflowPinRequest = { commit: string; };
 export type WorkflowPinResponse = { };
-export type WorkflowStepStartRequest = { key: string; parent?: string; kind: WorkflowStepKind; name: string; phase?: string; lane?: string; profile?: ProfileName; detail: string; version?: number; };
+export type WorkflowStepStartRequest = { key: string; parent?: string; kind: WorkflowStepKind; name: string; phase?: string; lane?: string; profile?: ProfileName; detail: string; version?: number; feature?: WorkflowFeature; };
 export type WorkflowStepStartResponse = { state?: WorkflowStepState; result?: string; reason?: string; };
 export type WorkflowStepEndRequest = { key: string; state: WorkflowStepState; result?: string; reason?: string; transcript?: string; usage: Usage; };
 export type WorkflowStepEndResponse = { };
@@ -571,6 +571,18 @@ export type WorkflowSetStatusResponse = { };
 export type WorkflowEnded = { run: WorkflowRunID; session: SessionID; name: string; state: WorkflowState; steps?: number; failed: number; failedSteps?: Array<string> | null; usage: Usage; };
 export type WorkflowStepChanged = { run: WorkflowRunID; session: SessionID; step: WorkflowStep; steps: number; running: number; failed: number; };
 export type WorkflowStatusChanged = { run: WorkflowRunID; session: SessionID; status: string; };
+export type WorkflowStarters = "any" | "leads" | "root" | "off";
+export type WorkflowFeature = "worktree" | "merge" | "run" | "workflow" | "post" | "resume";
+export type WorkflowSetting = "start" | "maxRuns" | "maxWorkers" | "profiles" | "size" | "timeout";
+export type WorkflowSettingInfo = { setting: WorkflowSetting; help: string; };
+export type WorkflowSettings = { start?: WorkflowStarters; maxRuns?: number | null; maxWorkers?: number | null; profiles?: Array<ProfileName> | null; size?: BoxSizeName; timeout?: number | null; worktree?: boolean | null; merge?: boolean | null; run?: boolean | null; workflow?: boolean | null; post?: boolean | null; resume?: boolean | null; };
+export type WorkflowEffective = { start: WorkflowStarters; maxRuns: number; maxWorkers: number; profiles?: Array<ProfileName> | null; size?: BoxSizeName; timeout: number; worktree: boolean; merge: boolean; run: boolean; workflow: boolean; post: boolean; resume: boolean; };
+export type WorkflowRefused = { setting: WorkflowSetting; };
+export type WorkflowSettingsRequest = { room?: RoomID; };
+export type WorkflowScope = { room?: RoomID; name?: string; set: WorkflowSettings; effective: WorkflowEffective; };
+export type WorkflowSettingsResponse = { settings: Array<WorkflowSettingInfo> | null; defaults: WorkflowEffective; global: WorkflowScope; rooms: Array<WorkflowScope> | null; };
+export type WorkflowSetRequest = { room?: RoomID; set: WorkflowSettings; clear?: Array<WorkflowSetting> | null; };
+export type WorkflowSetResponse = { };
 export type EventBody =
   | { type: "account.failed"; body: AccountFailed }
   | { type: "account.quota_low"; body: AccountQuotaLow }
@@ -793,4 +805,6 @@ export interface MethodMap {
   "workflow.step_end": { request: WorkflowStepEndRequest; response: WorkflowStepEndResponse };
   "workflow.step_transcript": { request: WorkflowStepTranscriptRequest; response: WorkflowStepTranscriptResponse };
   "workflow.set_status": { request: WorkflowSetStatusRequest; response: WorkflowSetStatusResponse };
+  "workflow.settings": { request: WorkflowSettingsRequest; response: WorkflowSettingsResponse };
+  "workflow.set": { request: WorkflowSetRequest; response: WorkflowSetResponse };
 }

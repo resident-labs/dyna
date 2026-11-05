@@ -5,13 +5,14 @@ const MethodContextSnapshot Method = "context.snapshot"
 type ContextSectionKey string
 
 const (
-	ContextGoal     ContextSectionKey = "dyna_goal"
-	ContextChildren ContextSectionKey = "dyna_children"
-	ContextRequests ContextSectionKey = "dyna_requests"
-	ContextHolds    ContextSectionKey = "dyna_holds"
-	ContextProfiles ContextSectionKey = "dyna_profiles"
-	ContextUsage    ContextSectionKey = "dyna_usage"
-	ContextRoom     ContextSectionKey = "dyna_room"
+	ContextGoal      ContextSectionKey = "dyna_goal"
+	ContextChildren  ContextSectionKey = "dyna_children"
+	ContextRequests  ContextSectionKey = "dyna_requests"
+	ContextHolds     ContextSectionKey = "dyna_holds"
+	ContextProfiles  ContextSectionKey = "dyna_profiles"
+	ContextUsage     ContextSectionKey = "dyna_usage"
+	ContextRoom      ContextSectionKey = "dyna_room"
+	ContextWorkflows ContextSectionKey = "dyna_workflows"
 )
 
 // ContextSnapshotRequest selects one section. An empty section requests all sections.

@@ -192,7 +192,7 @@ func (c *Crew) mergeCall(ctx context.Context, call crewCall) crewReply {
 			refused = notResults
 		}
 	}
-	info := stepInfo{kind: contract.WorkflowStepCommand, label: opts.Label, phase: opts.Phase, detail: "merge " + strings.Join(names, ", ")}
+	info := stepInfo{kind: contract.WorkflowStepCommand, feature: contract.WorkflowFeatureMerge, label: opts.Label, phase: opts.Phase, detail: "merge " + strings.Join(names, ", ")}
 	reply := c.restore(ctx, call, c.step(ctx, call, info, func(ctx context.Context, key string) stepOutcome {
 		if refused != nil {
 			return stepOutcome{reason: "merge: " + refused.Error()}
