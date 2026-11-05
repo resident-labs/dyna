@@ -80,7 +80,7 @@ const bodies: Record<string, Check> = {
   "github.pr.closed": githubAction,
   "github.ci.finished": object({ repo: string, number: number, session: string, url: string, head: string, result: oneOf("", "none", "pending", "success", "failure") }),
   "git.main_updated": object({ repo: string, head: string }),
-  "git.main_ci_finished": object({ repo: string, branch: string, sha: string, result: oneOf("success", "failure"), runs: nullable(array(object({ name: string, conclusion: string, url: string }))) }),
+  "git.main_ci_finished": object({ repo: string, branch: string, sha: string, result: oneOf("success", "failure"), runs: nullable(array(object({ name: string, conclusion: string, url: string }))), runsTruncated: optional(boolean) }),
   "github.issue.opened": githubAction,
   "github.comment": githubAction,
   "github.label": githubAction,

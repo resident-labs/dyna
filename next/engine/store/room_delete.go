@@ -187,6 +187,7 @@ var deleteRoom = []string{
 	`UPDATE repos SET default_room=(SELECT MIN(room) FROM room_repos WHERE repo=repos.repo) WHERE default_room=?1 AND EXISTS (SELECT 1 FROM room_repos WHERE repo=repos.repo)`,
 	`DELETE FROM pr_owners WHERE repo IN (SELECT repo FROM repos WHERE default_room=?1)`,
 	`DELETE FROM issue_owners WHERE repo IN (SELECT repo FROM repos WHERE default_room=?1)`,
+	`DELETE FROM repo_heads WHERE repo IN (SELECT repo FROM repos WHERE default_room=?1)`,
 	`DELETE FROM repos WHERE default_room=?1`,
 	`DELETE FROM host_rooms WHERE room=?1`,
 	`DELETE FROM room_shared WHERE room=?1`,
