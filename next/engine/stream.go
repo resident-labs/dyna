@@ -364,7 +364,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					reason, cause = streamFrameFailed, err
 					return
 				}
-				input := contract.TurnInput{Delivery: delivery.Seq, Surface: delivery.Surface, Reply: delivery.Reply, Text: frame + "\n" + quotedDynaMarker.ReplaceAllString(text, "${1}[quoted]"), Files: files}
+				input := contract.TurnInput{Delivery: delivery.Seq, Surface: delivery.Surface, Reply: delivery.Reply, Text: frame + "\n" + quotedDynaMarker.ReplaceAllString(s.deliveryData(event, text), "${1}[quoted]"), Files: files}
 				if delivery.Queue == nil {
 					start = append(start, input)
 				} else {

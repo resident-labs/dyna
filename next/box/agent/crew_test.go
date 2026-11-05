@@ -554,7 +554,7 @@ func TestPostIsAStepSoAResumeDoesNotRepeatIt(t *testing.T) {
 		t.Fatalf("%d posts", len(h.journal.posts))
 	}
 	post := h.journal.posts[0]
-	if !slices.Equal(post.Mentions, []string{"@root"}) || !strings.HasPrefix(post.Text, "halfway") || !strings.Contains(post.Text, `"files":3`) || len(post.ClientID) != 64 {
+	if !slices.Equal(post.Mentions, []string{"@root"}) || !strings.HasPrefix(post.Text, "halfway") || string(post.Data) != `{"files":3}` || strings.Contains(post.Text, `"files":3`) || len(post.ClientID) != 64 {
 		t.Fatalf("post %+v", post)
 	}
 	found := false
@@ -906,5 +906,24 @@ return 1`)
 	}
 	if !slices.Equal(h.journal.started, want) {
 		t.Fatalf("lines %q, want %q", h.journal.started, want)
+	}
+}
+
+func TestCrewPreservesTypedResultAndDoesNotRetypeStrings(t *testing.T) {
+	for _, value := range []string{`null`, `42`, `true`, `[]`, `{"groups":[]}`, `"{\"looks\":\"json\"}"`, `"null"`} {
+		t.Run(value, func(t *testing.T) {
+			h := newCrewHarness(t)
+			ended := h.run(crewMeta + "return " + value)
+			if ended.Outcome != contract.TurnCompleted {
+				t.Fatal(ended)
+			}
+			if value[0] == '"' {
+				if len(ended.Data) != 0 {
+					t.Fatalf("string retyped: %+v", ended)
+				}
+			} else if string(ended.Data) != value {
+				t.Fatalf("typed result lost: %+v", ended)
+			}
+		})
 	}
 }

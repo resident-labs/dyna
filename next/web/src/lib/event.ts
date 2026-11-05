@@ -34,6 +34,7 @@ const visual = object({ id: string, version: number, title: string, height: numb
   shots: nullable(array(object({ width: number, file: string }))), checks: nullable(array(object({
     name: oneOf("renders", "console", "widths", "contrast", "network"), status: oneOf("pass", "warn", "fail", "skip"), detail: optional(string),
   }))) });
+const attachment = object({ name: string, media: string, bytes: number, sha256: string, visual: optional(nullable(visual)) });
 const prChangeKind = oneOf("ci_failed", "ci_passed", "changes_requested", "approved", "conflict", "merged", "closed", "comment", "metadata", "pushed");
 const changeComments = optional(nullable(array(object({ author: string, body: string, url: string, outside: boolean }))));
 const names = optional(nullable(array(string)));
@@ -49,8 +50,8 @@ const bodies: Record<string, Check> = {
   "account.failed": object({ accountId: string, reason: oneOf("sign_in_rejected", "refresh_failed") }),
   "account.quota_low": object({ accountId: string, window: string, remainingPercent: number, floor: number }),
   "post.sent": object({ text: string, target: object({ room: string, roomName: string, sessionName: string }) }),
-  "post.created": object({ text: string, home: conversation, source: optional(nullable(object({ room: string, roomName: string, sessionName: string }))), turn: optional(string), mentions: optional(nullable(array(principal))), replyTo: optional(string), clientId: optional(string),
-    attachments: optional(nullable(array(object({ name: string, media: string, bytes: number, sha256: string, visual: optional(nullable(visual)) })))) }),
+  "post.created": object({ data: optional(string), dataAttachment: optional(nullable(number)), text: string, home: conversation, source: optional(nullable(object({ room: string, roomName: string, sessionName: string }))), turn: optional(string), mentions: optional(nullable(array(principal))), replyTo: optional(string), clientId: optional(string),
+    attachments: optional(nullable(array(attachment))) }),
   "session.restarted": object({ session: string, imageUpdated: optional(boolean), stopped: optional(boolean), refreshed: optional(boolean), openGoal: optional(boolean), clientId: optional(string) }),
   "session.started": object({ session: string, name: string, parent: optional(string), profile: string, goal: optional(string), doneWhen: optional(string), brief: optional(string), workflow: optional(boolean) }),
   "session.moved": object({ session: string, newParent: string }),
@@ -59,7 +60,7 @@ const bodies: Record<string, Check> = {
   "computer.changed": object({ session: string, to: computerState }),
   "box.changed": object({ box: string, session: string, host: optional(string), from: optional(boxState), to: boxState, cause, reason: optional(string) }),
   "turn.started": object({ session: string, turn: string, inputs: nullable(array(string)) }),
-  "turn.ended": object({ session: string, turn: string, outcome: oneOf("completed", "failed", "stopped"), final: optional(string),
+  "turn.ended": object({ data: optional(string), dataAttachment: optional(nullable(number)), session: string, turn: string, outcome: oneOf("completed", "failed", "stopped"), final: optional(string), attachments: optional(nullable(array(attachment))),
     replies: optional(nullable(array(object({ reply, posted: optional(string) })))), usage, error: optional(string), cause, shellJobs: optional(number) }),
   "conversation.read": object({ room: string, conversation, seq: number }),
   "turn.activity": object({ session: string, turn: string, label: string }),

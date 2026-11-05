@@ -276,7 +276,12 @@ func (c *Crew) Start(ctx context.Context, id contract.TurnID, inputs []contract.
 	case len(final) > stepResultBytes:
 		result.Outcome, result.Error, result.Cause = contract.TurnFailed, fmt.Sprintf("the result is %d bytes, over the limit of %d", len(final), stepResultBytes), contract.CauseWorkflowFailed
 	default:
-		result.Final = final
+		var text string
+		if json.Unmarshal([]byte(final), &text) == nil && final != "null" {
+			result.Final = text
+		} else {
+			result.Final, result.Data = final, contract.JSONData(final)
+		}
 	}
 	return result, nil
 }
@@ -362,7 +367,7 @@ func (c *Crew) execute(ctx, work context.Context, steps *sync.WaitGroup, workflo
 	case end.Failure != nil:
 		return "", false, errors.New(end.Failure.Report)
 	}
-	return finalText(json.RawMessage(end.Value)), false, nil
+	return end.Value, false, nil
 }
 
 // scriptEnd is how a script ended: with its result as JSON text, or with a failure.
@@ -981,14 +986,11 @@ func (c *Crew) postCall(ctx context.Context, call crewCall) crewReply {
 		}
 	}
 	text := body.Text
-	if len(body.Data) > 0 {
-		text += "\n\n```json\n" + string(body.Data) + "\n```"
-	}
 	return c.step(ctx, call, stepInfo{kind: contract.WorkflowStepPost, feature: contract.WorkflowFeaturePost, detail: text}, func(ctx context.Context, key string) stepOutcome {
 		if refused != nil {
 			return stepOutcome{reason: "post: " + refused.Error()}
 		}
-		sent, err := c.config.Engine.WorkflowPost(ctx, contract.PostRequest{Text: text, Mentions: mentions, ClientID: key})
+		sent, err := c.config.Engine.WorkflowPost(ctx, contract.PostRequest{Text: text, Data: contract.JSONData(body.Data), Mentions: mentions, ClientID: key})
 		if err != nil {
 			return stepOutcome{reason: err.Error()}
 		}
