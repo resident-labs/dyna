@@ -22,7 +22,7 @@ func TestWorkflowSetReadsTypedValues(t *testing.T) {
 	if len(got.Named()) != len(contract.AllWorkflowSettings) {
 		t.Fatalf("named %v of %d settings", got.Named(), len(contract.AllWorkflowSettings))
 	}
-	for _, bad := range []string{"colour=red", "start", "maxRuns=many", "post=maybe"} {
+	for _, bad := range []string{"colour=red", "start", "maxRuns=many", "post=maybe", "profiles=", "profiles=fast,"} {
 		if _, err := parseWorkflowSettings([]string{bad}); err == nil {
 			t.Errorf("%q was accepted", bad)
 		}

@@ -103,6 +103,9 @@ func parseWorkflowSettings(pairs []string) (contract.WorkflowSettings, error) {
 			set.Start = contract.WorkflowStarters(value)
 		case contract.WorkflowSettingProfiles:
 			for _, profile := range strings.Split(value, ",") {
+				if profile == "" {
+					return set, fmt.Errorf("profiles takes names separated by commas; --clear profiles allows every profile")
+				}
 				set.Profiles = append(set.Profiles, contract.ProfileName(profile))
 			}
 		case contract.WorkflowSettingSize:

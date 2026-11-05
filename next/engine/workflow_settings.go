@@ -124,12 +124,12 @@ func (s *Service) WorkflowSet(ctx context.Context, caller contract.Principal, re
 		return response, invalid(fmt.Sprintf("start is %q; it is one of %v", set.Start, contract.AllWorkflowStarters))
 	}
 	for name, value := range map[contract.WorkflowSetting]*int{contract.WorkflowSettingMaxRuns: set.MaxRuns, contract.WorkflowSettingMaxWorkers: set.MaxWorkers} {
-		if value != nil && *value < 0 {
-			return response, invalid(string(name) + " is 0 for no limit, or a count")
+		if value != nil && (*value < 0 || *value > contract.MaxWorkflowCount) {
+			return response, invalid(fmt.Sprintf("%s is 0 for no limit, or a count up to %d", name, contract.MaxWorkflowCount))
 		}
 	}
-	if set.Timeout != nil && *set.Timeout < 1 {
-		return response, invalid("timeout is a number of seconds, at least 1")
+	if set.Timeout != nil && (*set.Timeout < 1 || *set.Timeout > contract.MaxWorkflowTimeout) {
+		return response, invalid(fmt.Sprintf("timeout is a number of seconds, from 1 to %d", contract.MaxWorkflowTimeout))
 	}
 	if _, ok := box.Size(set.Size); set.Size != "" && !ok {
 		return response, invalid(fmt.Sprintf("size %q is not a box size", set.Size))
