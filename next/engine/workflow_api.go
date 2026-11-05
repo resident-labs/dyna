@@ -495,15 +495,15 @@ func (s *Service) workflowOutput(ctx context.Context, run store.WorkflowRun, req
 		req.Cause = "" // A stop before the script began still ends the run, so its input has no later turn to wait for.
 	}
 	if state == contract.WorkflowDone && len(req.Data) > 0 {
-		data, files, err := s.preparePostData(ctx, run.Room, req.Data, nil)
+		data, files, index, err := s.preparePostData(ctx, run.Room, req.Data, nil)
 		if err != nil {
 			return summary, err
 		}
-		req.Data, req.Attachments = data, files
+		req.Data, req.Attachments, req.DataAttachment = data, files, index
 		req.Final = "Workflow " + run.Name + " finished."
 	}
 	if state != contract.WorkflowDone {
-		req.Data, req.Attachments = nil, nil
+		req.Data, req.Attachments, req.DataAttachment = nil, nil, nil
 	}
 	failed := ""
 	if summary.Failed > 0 {

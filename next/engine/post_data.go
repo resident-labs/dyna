@@ -16,48 +16,59 @@ const postDataInlineBytes = 1024
 
 // preparePostData owns JSON validation/encoding and persists large values before any delivery can reference them.
 // Compact preserves number spellings and UTF-8, removes insignificant whitespace, and adds no newline.
-func (s *Service) preparePostData(ctx context.Context, room contract.RoomID, data json.RawMessage, files []contract.Attachment) (json.RawMessage, []contract.Attachment, error) {
+func (s *Service) preparePostData(ctx context.Context, room contract.RoomID, data json.RawMessage, files []contract.Attachment) (json.RawMessage, []contract.Attachment, *int, error) {
 	if len(data) == 0 {
-		return nil, files, nil
+		return nil, files, nil, nil
 	}
 	var encoded bytes.Buffer
 	if err := json.Compact(&encoded, data); err != nil {
-		return nil, nil, fmt.Errorf("invalid post data: %w", err)
+		return nil, nil, nil, fmt.Errorf("invalid post data: %w", err)
 	}
 	data, _ = json.Marshal(json.RawMessage(encoded.Bytes())) // Match the stored event encoding (HTML-sensitive characters are escaped).
 	if len(data) <= postDataInlineBytes {
-		return data, files, nil
+		return data, files, nil, nil
 	}
 	hash, n, err := s.saveFile(ctx, room, bytes.NewReader(data), int64(len(data)))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
+	}
+	// This exact content is validated JSON, even if an existing copy was uploaded as plain text.
+	// Normalize matching media before event_files records the hash's first media type.
+	files = slices.Clone(files)
+	for i := range files {
+		if files[i].SHA256 == hash {
+			files[i].Media = "application/json"
+		}
 	}
 	// A forwarded post already carries its data blob. Do not add a second copy.
-	if !slices.ContainsFunc(files, func(file contract.Attachment) bool {
+	index := slices.IndexFunc(files, func(file contract.Attachment) bool {
 		return file.SHA256 == hash && file.Name == "data.json" && file.Media == "application/json"
-	}) {
-		files = append(slices.Clone(files), contract.Attachment{SHA256: hash, Name: "data.json", Media: "application/json", Bytes: n})
+	})
+	if index < 0 {
+		index = len(files)
+		files = append(files, contract.Attachment{SHA256: hash, Name: "data.json", Media: "application/json", Bytes: n})
 	}
-	return data, files, nil
+	return data, files, &index, nil
 }
 
 // deliveryData adds only typed data; JSON-looking text is never inspected.
 func (s *Service) deliveryData(event contract.Event, text string) string {
 	var data json.RawMessage
 	var attachments []contract.Attachment
+	var index *int
 	switch body := event.Body.(type) {
 	case contract.PostCreated:
-		data, attachments = body.Data, body.Attachments
+		data, attachments, index = body.Data, body.Attachments, body.DataAttachment
 	case contract.TurnEnded:
-		data, attachments = body.Data, body.Attachments
+		data, attachments, index = body.Data, body.Attachments, body.DataAttachment
 	}
 	if len(data) == 0 {
 		return text
 	}
 	if len(data) > postDataInlineBytes {
 		paths := s.layout.BoxAttachments(event.Seq, attachments)
-		if i := dataAttachment(data, attachments); i >= 0 {
-			return text + fmt.Sprintf("\n\ndata: %s (%s)", paths[i], fileSize(attachments[i].Bytes))
+		if index != nil {
+			return text + fmt.Sprintf("\n\ndata: %s (%s)", paths[*index], fileSize(attachments[*index].Bytes))
 		}
 		// Persisted data always has its blob. Never turn a corrupt/old event into an unbounded input.
 		return text + "\n\ndata: attachment unavailable"

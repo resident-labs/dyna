@@ -15,3 +15,13 @@ test("replace and Undo restore the previous post; failed posts never forward", (
   assert.equal(canForwardPost(false, false, "", 0), false);
   assert.equal(canForwardPost(false, false, "", 1), true);
 });
+
+test("data-only forwards remain eligible and preserve complete data through replace/Undo", () => {
+ const first = {author:"crew",at:"1",text:"",attachments:[],data:null};
+ const second = {author:"crew",at:"2",text:"summary",attachments:[],data:{groups:[{conflicts:["a.go","b.go"]}]}};
+ const next=replaceForward({quote:first},second);
+ assert.deepEqual(next.quote?.data,second.data);
+ assert.equal(undoForward(next).quote?.data,null);
+ assert.equal(canForwardPost(false,false,"",0,true),true);
+ assert.equal(canForwardPost(true,false,"",0,true),false);
+});

@@ -396,7 +396,7 @@
       {:else}{@render inbound(post.id, post.from, post.at, body, !!post.body.attachments?.length, post.body.source)}{/if}
     {/each}
     {#each pendingPosts as post (post.id)}
-      {#snippet body()}{@render message(pendingKey(post.id), post.request.text, post.request.attachments)}{/snippet}
+      {#snippet body()}{@render message(pendingKey(post.id), post.request.text, post.request.attachments, undefined, post.at, post.request.data)}{/snippet}
       {#snippet unsent()}<p class="owner-note unsent" role="alert">Not sent<button class="retry" onclick={() => void view.retry(post.id)}>Retry</button><button class="retry" onclick={() => view.discard(post.id)}>Discard</button></p>{/snippet}
       {@render ownerMessage(pendingKey(post.id), undefined, !post.failed, body, post.failed ? unsent : undefined)}
     {/each}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,6 +46,12 @@ func TestWorkflowPostDataBoundary(t *testing.T) {
 			_ = json.Unmarshal(wire, &body)
 			if string(body["data"]) != data {
 				t.Fatalf("data lost: %s", wire)
+			}
+			if size > 1024 && string(body["dataAttachment"]) != "0" {
+				t.Fatalf("typed data attachment identity missing: %s", body["dataAttachment"])
+			}
+			if size <= 1024 && len(body["dataAttachment"]) != 0 {
+				t.Fatal("inline data unexpectedly associated with a file")
 			}
 			post := event.Body.(contract.PostCreated)
 			if post.Text != "summary" {
@@ -175,6 +182,25 @@ func TestWorkflowFinalDataDelivery(t *testing.T) {
 			if _, p := w.TurnOutput(w.ctx, crew, output); p != nil {
 				t.Fatalf("final retry: %v", p)
 			}
+			events, problem := w.EventsList(w.ctx, w.owner, contract.EventsListRequest{Room: w.room, Limit: 100})
+			if problem != nil {
+				t.Fatal(problem)
+			}
+			finals := 0
+			for _, event := range events.Events {
+				if ended, ok := event.Body.(contract.TurnEnded); ok && ended.Session == crew.Session {
+					finals++
+					if size > 1024 && (ended.DataAttachment == nil || *ended.DataAttachment != 0) {
+						t.Fatal("final file identity missing")
+					}
+					if size <= 1024 && ended.DataAttachment != nil {
+						t.Fatal("inline final unexpectedly associated with a file")
+					}
+				}
+			}
+			if finals != 1 {
+				t.Fatalf("final retry stored %d replies", finals)
+			}
 			ch, p := testChannel(t, w.Service, w.ctx, caller)
 			if p != nil {
 				t.Fatal(p)
@@ -233,6 +259,9 @@ func TestWorkflowPostDataContractsAndForward(t *testing.T) {
 			t.Fatal(err)
 		}
 		f := e.Body.(contract.PostCreated)
+		if (f.DataAttachment == nil) != (post.DataAttachment == nil) || f.DataAttachment != nil && *f.DataAttachment != *post.DataAttachment {
+			t.Fatal("forward changed data file identity")
+		}
 		if string(f.Data) != string(post.Data) || len(f.Attachments) != len(post.Attachments) {
 			t.Fatalf("forward data/files lost or duplicated: %+v", f)
 		}
@@ -317,7 +346,16 @@ func TestWorkflowDataAttachmentContentWithWrongMedia(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := s.deliveryData(e, "summary"); !strings.Contains(got, fmt.Sprintf("data: /box/attachments/%d/data-2.json", sent.Seq)) {
-		t.Fatalf("data with wrong media reused: %s", got)
+	if got := s.deliveryData(e, "summary"); !strings.Contains(got, fmt.Sprintf("data: /box/attachments/%d/data.json", sent.Seq)) {
+		t.Fatalf("existing data file not safely reused: %s", got)
+	}
+	post := e.Body.(contract.PostCreated)
+	if len(post.Attachments) != 1 || post.Attachments[0].Media != "application/json" {
+		t.Fatalf("data duplicated or wrong media: %+v", post.Attachments)
+	}
+	response := httptest.NewRecorder()
+	s.Files(contract.Principal{Kind: contract.PrincipalSession, Session: worker}, room).ServeHTTP(response, httptest.NewRequest("GET", "/v1/files/"+other.SHA256, nil))
+	if response.Code != 200 || response.Header().Get("Content-Type") != "application/json" || response.Body.String() != string(raw) {
+		t.Fatalf("JSON download: status=%d media=%s bytes=%d", response.Code, response.Header().Get("Content-Type"), response.Body.Len())
 	}
 }

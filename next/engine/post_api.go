@@ -103,7 +103,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	if strings.TrimSpace(req.Text) == "" && len(req.Attachments) == 0 && len(req.Data) == 0 {
 		return contract.PostResponse{}, invalid("post text or a file is required")
 	}
-	data, files, dataErr := s.preparePostData(ctx, req.Room, req.Data, req.Attachments)
+	data, files, index, dataErr := s.preparePostData(ctx, req.Room, req.Data, req.Attachments)
 	if dataErr != nil {
 		var syntax *json.SyntaxError
 		if errors.As(dataErr, &syntax) {
@@ -111,7 +111,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		}
 		return contract.PostResponse{}, failure(dataErr)
 	}
-	req.Data, req.Attachments = data, files
+	req.Data, req.Attachments, req.DataAttachment = data, files, index
 	if len(req.Attachments) > 16 {
 		return contract.PostResponse{}, invalid("too many attachments")
 	}
@@ -265,7 +265,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	if surface == contract.SurfaceDM {
 		recipients = append(recipients, room.Recipient{Session: req.Home.Session, Explicit: true})
 	}
-	event, err := s.event(req.Room, caller, contract.PostCreated{Source: source, Text: req.Text, Data: req.Data, Mentions: mentions, Home: req.Home, ReplyTo: req.ReplyTo, Attachments: req.Attachments, ClientID: req.ClientID, ToolCallID: req.ToolCallID})
+	event, err := s.event(req.Room, caller, contract.PostCreated{Source: source, Text: req.Text, Data: req.Data, DataAttachment: req.DataAttachment, Mentions: mentions, Home: req.Home, ReplyTo: req.ReplyTo, Attachments: req.Attachments, ClientID: req.ClientID, ToolCallID: req.ToolCallID})
 	if err != nil {
 		return contract.PostResponse{}, failure(err)
 	}
