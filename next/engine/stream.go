@@ -302,8 +302,13 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					return
 				}
 				if run.State == contract.WorkflowRunning && run.Version != reloadSent {
+					workflow, err := s.boxWorkflow(ctx, run, current.Size.MemBytes)
+					if err != nil {
+						reason, cause = streamWorkflowReadFailed, err
+						return
+					}
 					select {
-					case out <- contract.BoxMessage{Body: contract.WorkflowReload{Workflow: *s.boxWorkflow(run, current.Size.MemBytes)}}:
+					case out <- contract.BoxMessage{Body: contract.WorkflowReload{Workflow: *workflow}}:
 						reloadSent = run.Version
 					case <-ctx.Done():
 						reason, cause = streamCanceled, ctx.Err()
