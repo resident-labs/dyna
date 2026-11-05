@@ -368,7 +368,15 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 				if delivery.Queue == nil {
 					start = append(start, input)
 				} else {
-					steer = append(steer, contract.TurnSteer{Input: input, Queue: *delivery.Queue})
+					var interrupt *contract.Interrupt
+					if *delivery.Queue == contract.QueueSteer {
+						interrupt, err = s.inputInterrupt(ctx, session.ID, event, delivery.Surface)
+						if err != nil {
+							reason, cause = streamFrameFailed, err
+							return
+						}
+					}
+					steer = append(steer, contract.TurnSteer{Input: input, Queue: *delivery.Queue, Interrupt: interrupt})
 				}
 			}
 			if len(start) != 0 {
