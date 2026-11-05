@@ -659,6 +659,30 @@ export type BoxMessageBody =
   | { type: "turn.stop"; body: TurnStop }
   | { type: "workflow.reload"; body: WorkflowReload }
 ;
+export const SessionListPage = 25;
+export const MaxGPUGiB = 1048576;
+export const NavPageBytes = 8192;
+export const SearchLimitDefault = 10;
+export const SearchLimitMax = 25;
+export const SearchSnippetChars = 240;
+export const SearchGoalChars = 200;
+export const HistoryLimitDefault = 15;
+export const HistoryLimitMax = 50;
+export const HistoryTextChars = 800;
+export const HistoryPostBytes = 32768;
+export const TranscriptLimitDef = 2;
+export const TranscriptLimitMax = 5;
+export const TranscriptTextChars = 800;
+export const TranscriptInputChars = 300;
+export const TranscriptStepChars = 160;
+export const SearchWordsMax = 8;
+export const SearchQueryCharsMax = 200;
+export const TranscriptChunkBytes = 8192;
+export const DefaultWorkflowTimeout = 18000;
+export const MaxWorkflowTimeout = 2592000;
+export const MinWorkflowTimeout = 1;
+export const MinWorkflowCount = 0;
+export const MaxWorkflowCount = 10000;
 export interface MethodMap {
   "addon.list": { request: AddonListRequest; response: AddonListResponse };
   "addon.set_enabled": { request: AddonSetEnabledRequest; response: AddonSetEnabledResponse };
