@@ -64,6 +64,7 @@ type ContextGoal struct {
 	Items    []string
 }
 type ContextChild struct {
+	Waiting *contract.SessionWaiting
 	Name    string
 	Profile contract.ProfileName
 	State   contract.BoxState
@@ -123,17 +124,18 @@ func (s *Store) ContextGoals(ctx context.Context, id contract.SessionID) ([]Cont
 // ContextChildren lists the open children in the order they were created, so a child's activity never reorders the list
 // and a snapshot changes only when its set or a row does.
 func (s *Store) ContextChildren(ctx context.Context, id contract.SessionID) ([]ContextChild, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT s.id,s.name,s.profile,b.state,COALESCE((SELECT COALESCE((SELECT i.text FROM goal_items i WHERE i.room=g.room AND i.goal=g.number AND i.state='open' ORDER BY i.number LIMIT 1),g.text) FROM goals g WHERE g.session=s.id AND g.state='active' ORDER BY g.number LIMIT 1),'') FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.parent=? AND s.closed_at IS NULL ORDER BY s.created_at,s.id`, id)
+	rows, err := s.Read().QueryContext(ctx, `SELECT s.id,s.room,s.name,s.profile,b.state,COALESCE((SELECT COALESCE((SELECT i.text FROM goal_items i WHERE i.room=g.room AND i.goal=g.number AND i.state='open' ORDER BY i.number LIMIT 1),g.text) FROM goals g WHERE g.session=s.id AND g.state='active' ORDER BY g.number LIMIT 1),'') FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.parent=? AND s.closed_at IS NULL ORDER BY s.created_at,s.id`, id)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []ContextChild
 	var ids []contract.SessionID
+	var room contract.RoomID
 	for rows.Next() {
 		var c ContextChild
 		var child contract.SessionID
-		if err := rows.Scan(&child, &c.Name, &c.Profile, &c.State, &c.Item); err != nil {
+		if err := rows.Scan(&child, &room, &c.Name, &c.Profile, &c.State, &c.Item); err != nil {
 			return nil, err
 		}
 		out, ids = append(out, c), append(ids, child)
@@ -146,7 +148,15 @@ func (s *Store) ContextChildren(ctx context.Context, id contract.SessionID) ([]C
 	if err != nil {
 		return nil, err
 	}
+	waits := map[contract.SessionID]*contract.SessionWaiting{}
+	if len(out) > 0 {
+		waits, err = sessionWaits(ctx, s.Read(), room)
+		if err != nil {
+			return nil, err
+		}
+	}
 	for i := range out {
+		out[i].Waiting = waits[ids[i]]
 		out[i].Asking = held[ids[i]].Count(contract.ResponsibilityQuestion) > 0
 	}
 	return out, nil

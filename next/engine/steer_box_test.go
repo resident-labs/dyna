@@ -56,7 +56,7 @@ func TestMessagesJoinARunningTurnInARealBox(t *testing.T) {
 	}
 	after := bodies[1]
 	result := provider.lastOf(provider.results(t))
-	moved := regexp.MustCompile(`\[job (job_[0-9a-f]+)\] The owner sent you a message, so this command moved to the background, where it keeps running\. Read the message now\. job output reads its new output, and Dyna will wake you when it completes\.$`).FindStringSubmatch(result.Text)
+	moved := regexp.MustCompile(`\[job (job_[0-9a-f]+)\] The owner sent you a message, so this command moved to the background, where it keeps running\. job output reads its new output, and Dyna will wake you when it completes\.$`).FindStringSubmatch(result.Text)
 	if result.IsError || moved == nil {
 		t.Fatalf("the moved command: %+v", result)
 	}

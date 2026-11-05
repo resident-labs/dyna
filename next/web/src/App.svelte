@@ -8,6 +8,7 @@
   import { FormDrafts } from "./lib/form-drafts.ts";
   import { ComposerDrafts } from "./lib/composer-drafts.ts";
   import { tick, untrack } from "svelte";
+  import { waitingLabel, sessionCountsLine } from "./lib/status.ts";
   import { RoomStore } from "./lib/room.svelte.ts";
   import { ForwardExpiry } from "./lib/forward-clock.ts";
   import { replaceForward, sameForward, undoForward } from "./lib/forward-state.ts";
@@ -472,6 +473,7 @@
     const broken = store?.boxFailures.get(id), cause = store?.causes.get(id), reason = store?.pendingReasons.get(id);
     switch (store?.status(id)) {
       case "waiting": return reason === "room-host" ? waits[reason] : store?.pendingQuestions(id).length ? "Waiting for your answer" : "Waiting for your approval";
+      case "background": { const wait = store?.backgroundWaits.get(id); return wait ? `Waiting · ${waitingLabel(wait)}` : "Waiting"; }
       case "working": { const label = store?.activity.get(id); return label ? `Working · ${activityLabel(label)}` : "Working"; }
       case "failed": return broken ? boxReason(broken) : turnReason(cause);
       default: return reason ? waits[reason] : starting(id) ? "Starting" : store?.boxes.get(id) === "stopped" ? "Asleep" : "";
@@ -486,9 +488,9 @@
   };
   // A DM's header says only the status word; the live line and About say what the session does. A failed session has
   // no live line, so the header gives its reason.
-  const stateWords = { waiting: "Waiting", failed: "Failed", working: "Working" };
+  const stateWords = { waiting: "Waiting", failed: "Failed", working: "Working", background: "Waiting" };
   let shown = $derived(session ? store?.status(session) ?? "idle" : "idle");
-  let word = $derived(session ? (shown === "idle" ? status(session) : shown === "failed" ? `Failed · ${status(session)}` : stateWords[shown]) : "");
+  let word = $derived(session ? (shown === "idle" || shown === "background" ? status(session) : shown === "failed" ? `Failed · ${status(session)}` : stateWords[shown]) : "");
   // The right panel opens on About in a DM and on Sessions in a room, and remembers the last choice per conversation.
   const tabs = new SvelteMap<string, "sessions" | "about">();
   // Below 761 px the sessions panel is hidden; a header button opens it over the feed.
@@ -596,9 +598,6 @@
     .map(item => { const state = store?.status(item.session);
       return { name: item.name, root: !item.parent, status: state === "idle" ? "" : state === "failed" ? `Failed · ${status(item.session)}` : status(item.session) }; })
     .sort((a, b) => Number(b.root) - Number(a.root) || a.name.localeCompare(b.name)));
-  // The panel's header counts, and the room header's below 761 px where the panel is hidden.
-  // One count source (status.ts): a session that waits for the owner is waiting, not working.
-  let working = $derived(store?.counts.working ?? 0);
   let title = $derived(lost ? "Not found" : !room ? "Home" : session ? store?.names.get(session) ?? "Session" : roomName);
   // Each fact shows once: profile, state and trouble live on the session's row. A closed session has no row.
   let closed = $derived(!!session && !!store?.ready && !store.sessions.has(session));
@@ -705,7 +704,7 @@
       {:else if room}<span class="hash"><Icon name="room" /></span>{/if}
       {#if session && !closed}<Avatar kind="session" name={title} root={!store?.sessions.get(session)?.parent} size={24} />{/if}
       <span class="heading"><strong title={title}>{title}</strong>
-        {#if closed && !missing}<span class="count">closed</span>{:else if shown === "idle" && word && !missing}<span class="count word" title={word === "Asleep" ? "Wakes on your next message" : word}>{word}</span>{/if}
+        {#if closed && !missing}<span class="count">closed</span>{:else if (shown === "idle" || shown === "background") && word && !missing}<span class="count word" title={word === "Asleep" ? "Wakes on your next message" : word}>{word}</span>{/if}
         {#if store?.ready && !session}<span class="count narrow">{count(store.members.length, "session")}</span>{/if}</span>
       {#if store && !unavailable}
         {#if session}<span class="session-spacer"></span>{/if}
@@ -756,7 +755,7 @@
       {#if session && !closed}<header class="bar tabs">
         <button type="button" aria-pressed={!about} onclick={() => tabs.set(key, "sessions")}>Sessions</button>
         <button type="button" aria-pressed={about} onclick={() => tabs.set(key, "about")}>About</button></header>
-      {:else}<header class="bar"><strong>Sessions</strong>{#if store?.ready}<span class="count">{store.members.length + (working ? ` · ${working} working` : "")}</span>{/if}{#if attention.can("operate")}<button type="button" class="tool" title="New session" aria-label="New session" onclick={() => openNew("session")}><Icon name="plus" /></button>{/if}</header>{/if}
+      {:else}<header class="bar"><span class="session-summary"><strong>Sessions{#if store?.ready} <span class="count">{store.members.length}</span>{/if}</strong>{#if store?.ready}<span class="count">{sessionCountsLine(store.counts)}</span>{/if}</span>{#if attention.can("operate")}<button type="button" class="tool" title="New session" aria-label="New session" onclick={() => openNew("session")}><Icon name="plus" /></button>{/if}</header>{/if}
       <!-- A long tree renders only its visible rows, through the feed's shared list (spec: long lists are virtual). -->
       {#if about && session && store}<AboutPanel {store} room={room} {session} switchable={attention.can("operate")} shown={panelShown} navigate={openSession} onclosed={() => openLocation(room!)} />
       {:else if tree.length}<div class="tree"><VirtualList bind:this={sessionList} items={tree} key={treeKey}
@@ -802,8 +801,11 @@
   .reload-notice button { margin-left: 4px; padding: 8px 4px; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
   /* Two-line rows around the 28 px avatar, as in the chosen mockup: the name, then what the session does. */
   a.member { min-height: 48px; color: var(--text); text-decoration: none; }
-  /* The panel's header matches the room header: a 16 px title with its muted counts beside it. */
+  /* The title keeps the total; the second line separates work, background waits and owner-needed sessions. */
   aside.members > header strong { font-size: 16px; }
+  .session-summary { display: grid; min-width: 0; gap: 1px; }
+  .session-summary > .count { font-size: 12.5px; }
+  .session-summary strong > .count { margin-left: 6px; font-weight: 400; }
   /* The header's face rings its dot in the header's color. */
   main > header { --ring: var(--bg); }
   .feed:has(> :global(.blocked)) > :global(:not(.blocked)) { display: none; }
