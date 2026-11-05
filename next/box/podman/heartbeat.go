@@ -27,10 +27,11 @@ type Load struct {
 	Health                                 contract.HostHealth
 	CPUUsed                                float64
 	MemBytes, MemUsed, DiskBytes, DiskUsed int64
-	ShareUp                                bool            // The host's shared mount is up.
-	CPUs                                   int             // Cores of an exec-only host's whole machine; zero on other hosts and when it printed none.
-	ExecOnly                               bool            // An exec-only host: the figures are the whole machine's, for display only.
-	GPUs                                   *[]contract.GPU // The cards the host has, when this beat probed for them: none is a probe that found none.
+	Services                               []box.ServiceUnit // The state of each service the host was asked about.
+	ShareUp                                bool              // The host's shared mount is up.
+	CPUs                                   int               // Cores of an exec-only host's whole machine; zero on other hosts and when it printed none.
+	ExecOnly                               bool              // An exec-only host: the figures are the whole machine's, for display only.
+	GPUs                                   *[]contract.GPU   // The cards the host has, when this beat probed for them: none is a probe that found none.
 }
 
 // LocalDisk reads the disk at path on this machine with the host probe. It returns zeros when the probe fails.
@@ -99,7 +100,15 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box
 			if execOnly {
 				out, err = h.runUnbounded(probeCtx, nil, "bash", "-c", execOnlyScript)
 			} else {
-				out, err = h.runUnbounded(probeCtx, nil, "bash", "-c", heartbeatScript, "dyna", layout.HostData, layout.HostShareMount(), probe)
+				var ids []contract.ServiceID
+				if h.services != nil {
+					ids = h.services()
+				}
+				args := []string{"bash", "-c", heartbeatScript, "dyna", layout.HostData, layout.HostShareMount(), probe}
+				for _, id := range ids {
+					args = append(args, string(id))
+				}
+				out, err = h.runUnbounded(probeCtx, nil, args...)
 			}
 			cancel()
 			if err != nil {
@@ -158,9 +167,18 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box
 			load.ExecOnly = false
 			load.DiskBytes, load.DiskUsed = parseDisk(out)
 			load.ShareUp = false
+			load.Services = nil
 			for _, line := range strings.Split(string(out), "\n") {
 				if line == shareUpLine {
 					load.ShareUp = true
+				}
+				if fields := strings.Fields(line); len(fields) > 2 && fields[0] == "dyna-svc" {
+					unit, err := parseServiceUnit(contract.ServiceID(fields[1]), fields[2:])
+					if err != nil {
+						log.Printf("host %s: %v", h.destination, err)
+						continue
+					}
+					load.Services = append(load.Services, unit)
 				}
 				if strings.HasPrefix(line, "dyna-load ") {
 					var used, current int64

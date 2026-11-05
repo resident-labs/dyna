@@ -53,6 +53,17 @@ type client interface {
 	HostRemove(context.Context, contract.HostRemoveRequest) (contract.HostRemoveResponse, error)
 	PoolAdd(context.Context, contract.PoolAddRequest) (contract.PoolAddResponse, error)
 	PoolList(context.Context, contract.PoolListRequest) (contract.PoolListResponse, error)
+	ServiceSet(context.Context, contract.ServiceSetRequest) (contract.ServiceSetResponse, error)
+	ServiceList(context.Context, contract.ServiceListRequest) (contract.ServiceListResponse, error)
+	ServiceShow(context.Context, contract.ServiceRef) (contract.ServiceShowResponse, error)
+	ServiceLogs(context.Context, contract.ServiceLogsRequest) (contract.ServiceLogsResponse, error)
+	ServiceRestart(context.Context, contract.ServiceRef) (contract.ServiceActionResponse, error)
+	ServiceStop(context.Context, contract.ServiceRef) (contract.ServiceActionResponse, error)
+	ServiceStart(context.Context, contract.ServiceRef) (contract.ServiceActionResponse, error)
+	ServiceUpdate(context.Context, contract.ServiceRef) (contract.ServiceActionResponse, error)
+	ServiceRollback(context.Context, contract.ServiceRef) (contract.ServiceActionResponse, error)
+	ServiceRemove(context.Context, contract.ServiceRef) (contract.ServiceActionResponse, error)
+	ServiceSecretSet(context.Context, contract.ServiceSecretSetRequest) (contract.ServiceSecretSetResponse, error)
 	PoolRemove(context.Context, contract.PoolRemoveRequest) (contract.PoolRemoveResponse, error)
 	RoomHosts(context.Context, contract.RoomHostsRequest) (contract.RoomHostsResponse, error)
 	RoomSetLimits(context.Context, contract.RoomSetLimitsRequest) (contract.RoomSetLimitsResponse, error)
@@ -132,6 +143,7 @@ type requestType interface {
 		contract.SessionListRequest |
 		contract.SessionResponsibilitiesRequest |
 		contract.GoalSetRequest | contract.GoalListRequest | contract.GoalItemRequest | contract.GoalDoneRequest | contract.GoalJournalRequest |
+		contract.ServiceSetRequest | contract.ServiceListRequest | contract.ServiceRef | contract.ServiceLogsRequest | contract.ServiceSecretSetRequest |
 		contract.PoolAddRequest | contract.PoolListRequest | contract.PoolRemoveRequest | contract.RoomHostsRequest | contract.HostRemoveRequest | contract.HostSetRequest | contract.RoomSetRequest |
 		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.HostexecStopRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostSetLimitsRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomDeleteRequest | contract.RoomRepoAddRequest | contract.RepoCISetRequest | contract.RoomReposRequest | contract.ComposeListRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.SessionRefreshRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.DeviceSetHostRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest | contract.PrListRequest | contract.PrStatusRequest | contract.PrTrackRequest | contract.PrUntrackRequest | contract.SearchRequest | contract.HistoryReadRequest | contract.TranscriptDigestRequest
 }
@@ -150,6 +162,7 @@ type responseType interface {
 		contract.SessionListResponse |
 		contract.SessionResponsibilitiesResponse |
 		contract.GoalSetResponse | contract.GoalListResponse | contract.GoalItemResponse | contract.GoalDoneResponse | contract.GoalJournalResponse |
+		contract.ServiceSetResponse | contract.ServiceListResponse | contract.ServiceShowResponse | contract.ServiceLogsResponse | contract.ServiceActionResponse | contract.ServiceSecretSetResponse |
 		contract.PoolAddResponse | contract.PoolListResponse | contract.PoolRemoveResponse | contract.RoomHostsResponse | contract.HostRemoveResponse | contract.HostSetResponse | contract.RoomSetResponse |
 		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.HostexecStopResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.HostSetLimitsResponse | contract.HostListResponse | contract.RoomCreateResponse | contract.RoomDeleteResponse | contract.RoomRepoAddResponse | contract.RepoCISetResponse | contract.RoomReposResponse | contract.ComposeListResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.SessionRefreshResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.DeviceSetHostResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse | contract.PrListResponse | contract.PrStatusResponse | contract.PrTrackResponse | contract.PrUntrackResponse | contract.SearchResponse | contract.HistoryReadResponse | contract.TranscriptDigestResponse
 }
@@ -674,6 +687,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	host.AddCommand(add, setHost, limitHost, list, removeHost)
 	root.AddCommand(host)
 	root.AddCommand(poolCommand(getClient))
+	root.AddCommand(serviceCommand(getClient))
 	root.AddCommand(profileCommand(getClient))
 
 	room := &cobra.Command{Use: "room"}
@@ -1381,4 +1395,48 @@ func parseGitHubWrites(value string) (contract.GitHubWrites, error) {
 		writes.Repos = append(writes.Repos, contract.RepoName(repo))
 	}
 	return writes, nil
+}
+
+func (c *socketClient) ServiceSet(ctx context.Context, q contract.ServiceSetRequest) (contract.ServiceSetResponse, error) {
+	return call[contract.ServiceSetRequest, contract.ServiceSetResponse](ctx, c, contract.MethodServiceSet, q)
+}
+
+func (c *socketClient) ServiceList(ctx context.Context, q contract.ServiceListRequest) (contract.ServiceListResponse, error) {
+	return call[contract.ServiceListRequest, contract.ServiceListResponse](ctx, c, contract.MethodServiceList, q)
+}
+
+func (c *socketClient) ServiceShow(ctx context.Context, q contract.ServiceRef) (contract.ServiceShowResponse, error) {
+	return call[contract.ServiceRef, contract.ServiceShowResponse](ctx, c, contract.MethodServiceShow, q)
+}
+
+func (c *socketClient) ServiceLogs(ctx context.Context, q contract.ServiceLogsRequest) (contract.ServiceLogsResponse, error) {
+	return call[contract.ServiceLogsRequest, contract.ServiceLogsResponse](ctx, c, contract.MethodServiceLogs, q)
+}
+
+func (c *socketClient) ServiceRestart(ctx context.Context, q contract.ServiceRef) (contract.ServiceActionResponse, error) {
+	return call[contract.ServiceRef, contract.ServiceActionResponse](ctx, c, contract.MethodServiceRestart, q)
+}
+
+func (c *socketClient) ServiceStop(ctx context.Context, q contract.ServiceRef) (contract.ServiceActionResponse, error) {
+	return call[contract.ServiceRef, contract.ServiceActionResponse](ctx, c, contract.MethodServiceStop, q)
+}
+
+func (c *socketClient) ServiceStart(ctx context.Context, q contract.ServiceRef) (contract.ServiceActionResponse, error) {
+	return call[contract.ServiceRef, contract.ServiceActionResponse](ctx, c, contract.MethodServiceStart, q)
+}
+
+func (c *socketClient) ServiceUpdate(ctx context.Context, q contract.ServiceRef) (contract.ServiceActionResponse, error) {
+	return call[contract.ServiceRef, contract.ServiceActionResponse](ctx, c, contract.MethodServiceUpdate, q)
+}
+
+func (c *socketClient) ServiceRollback(ctx context.Context, q contract.ServiceRef) (contract.ServiceActionResponse, error) {
+	return call[contract.ServiceRef, contract.ServiceActionResponse](ctx, c, contract.MethodServiceRollback, q)
+}
+
+func (c *socketClient) ServiceRemove(ctx context.Context, q contract.ServiceRef) (contract.ServiceActionResponse, error) {
+	return call[contract.ServiceRef, contract.ServiceActionResponse](ctx, c, contract.MethodServiceRemove, q)
+}
+
+func (c *socketClient) ServiceSecretSet(ctx context.Context, q contract.ServiceSecretSetRequest) (contract.ServiceSecretSetResponse, error) {
+	return call[contract.ServiceSecretSetRequest, contract.ServiceSecretSetResponse](ctx, c, contract.MethodServiceSecretSet, q)
 }

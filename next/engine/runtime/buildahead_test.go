@@ -32,6 +32,9 @@ type aheadStore struct {
 }
 
 func (s aheadStore) Hosts(context.Context) ([]box.Host, error) { return s.hosts, nil }
+func (aheadStore) Services(context.Context, contract.RoomID) ([]store.ServiceRow, error) {
+	return nil, nil
+}
 func (aheadStore) PinWorkflowImage(context.Context, contract.SessionID, string) (string, error) {
 	return "", nil
 }

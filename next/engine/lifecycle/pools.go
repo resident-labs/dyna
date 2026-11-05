@@ -63,6 +63,13 @@ func (r *Reconciler) runnerView() ([]box.Box, []store.LifecycleBox) {
 	return placed, rows
 }
 
+// RunnerBoxes returns the runner reservations for an admission decision. The caller holds the store's admission lock until its
+// reservation is written, so a CI claim cannot spend the same capacity after this read.
+func (r *Reconciler) RunnerBoxes() []box.Box {
+	placed, _ := r.runnerView()
+	return placed
+}
+
 // RunnerCounts says how many CI runners each host has now, as admission counts them.
 func (r *Reconciler) RunnerCounts() map[contract.HostName]int {
 	placed, _ := r.runnerView()
@@ -439,17 +446,37 @@ const discardVolumeWait = 2 * time.Minute
 // returned.
 func (r *Reconciler) discardHost(ctx context.Context, name contract.HostName) ([]contract.SessionID, error) {
 	r.pass.Lock() // A pass places boxes from its own reading of the hosts.
+	unlock := r.store.LockAdmission()
 	hosts, err := r.store.Hosts(ctx)
 	reachable := slices.ContainsFunc(hosts, func(h box.Host) bool { return h.Name == name && h.State == box.HostReady })
+	var services []store.ServiceRow
+	if err == nil && r.svc != nil {
+		services, err = r.store.Services(ctx, "")
+	}
 	var boxes []store.LifecycleBox
 	if err == nil {
 		boxes, err = r.store.DiscardHostBoxes(ctx, name, func(room contract.RoomID, body contract.EventBody) (contract.Event, error) {
 			return r.event(room, contract.Principal{Kind: contract.PrincipalEngine}, body)
 		})
 	}
+	unlock()
 	r.pass.Unlock()
 	if err != nil {
 		return nil, err
+	}
+	if r.svc != nil {
+		// Admission is closed before waiting, and neither pass nor admission is held while a worker finishes. Cleanup must be
+		// last: a deploy, rewrite or direct restart already past its revision check may still write or start a unit after drain.
+		work := r.serviceHostWork(name)
+		work.Lock()
+		if reachable {
+			for _, row := range services {
+				if row.Host == name {
+					r.removeServiceFromHost(ctx, row)
+				}
+			}
+		}
+		work.Unlock()
 	}
 	failed := []contract.SessionID{}
 	for _, b := range boxes {

@@ -84,6 +84,7 @@ func (e *HostHeldError) Error() string {
 // Without boxes, only what is not a box counts, for a removal that discards the boxes.
 func hostHeld(ctx context.Context, tx *sql.Tx, host contract.HostName, boxes bool) error {
 	held, err := listIDs[string](ctx, tx, `SELECT 'session '||s.name||' ('||b.state||')' FROM boxes b JOIN sessions s ON s.id=b.session WHERE ?2 AND b.host=?1 AND b.state!='deleted'
+		UNION ALL SELECT 'service '||json_extract(spec,'$.name') FROM services WHERE ?2 AND host=?1 AND NOT (state='failed' AND reason='host_removed')
 		UNION ALL SELECT 'a subscription run' FROM subscription_runs WHERE host=?1
 		UNION ALL SELECT 'the --only rule of room '||r.id FROM rooms r, json_each(r.only_hosts) j WHERE j.value=?1`, host, boxes)
 	if err != nil {
@@ -124,6 +125,8 @@ func (s *Store) RemoveHost(ctx context.Context, host contract.HostName) error {
 			"DELETE FROM host_rooms WHERE host=?1",
 			"DELETE FROM host_labels WHERE host=?1",
 			"DELETE FROM room_leftovers WHERE host=?1",
+			"DELETE FROM service_leftovers WHERE host=?1",
+			"UPDATE services SET host=NULL WHERE host=?1",
 			"DELETE FROM disk_warnings WHERE host=?1",
 			"DELETE FROM hosts WHERE name=?1",
 		} {
@@ -336,7 +339,21 @@ func (s *Store) hosts(ctx context.Context, where string) ([]box.Host, error) {
 			hosts[len(hosts)-1].Rooms = append(hosts[len(hosts)-1].Rooms, contract.RoomID(room.String))
 		}
 	}
-	return hosts, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	holds, owners, err := serviceHolds(ctx, s.Read())
+	if err != nil {
+		return nil, err
+	}
+	for i, hold := range holds {
+		for j := range hosts {
+			if hosts[j].Name == owners[i] {
+				hosts[j].Services = append(hosts[j].Services, hold)
+			}
+		}
+	}
+	return hosts, nil
 }
 
 // ResetEngineHosts discards comparisons and low-disk spells from a previous engine process. Its samples may be long stale.

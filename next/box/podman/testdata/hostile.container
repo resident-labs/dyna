@@ -1,0 +1,29 @@
+[Unit]
+Description=Dyna service app of room room_1
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Container]
+ContainerName=dyna-svc-svc_3
+Image=localhost/dyna-img-app:1
+Pull=never
+Label=dyna.service=svc_3
+UserNS=nomap
+Network=pasta:--no-map-gw
+DropCapability=all
+NoNewPrivileges=true
+ReadOnly=true
+ReadOnlyTmpfs=false
+PodmanArgs=--image-volume=ignore
+Tmpfs=/tmp:rw,size=64m,mode=1777
+PodmanArgs=--cpus=1 --memory=536870912 --memory-swap=536870912 --pids-limit=512
+Environment="A=x\" Exec=/bin/sh"
+Environment="B=$${HOME} %%h \\"
+Exec="run" "a b" "$$X" "%%n"
+
+[Service]
+Slice=dyna-svc.slice
+Restart=always
+
+[Install]
+WantedBy=default.target

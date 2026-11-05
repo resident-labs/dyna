@@ -83,6 +83,8 @@ const bodies: Record<string, Check> = {
   "git.main_updated": object({ repo: string, head: string }),
   "git.main_ci_finished": object({ repo: string, branch: string, sha: string, result: oneOf("success", "failure"), runs: nullable(array(object({ name: string, conclusion: string, url: string }))), runsTruncated: optional(boolean) }),
   "github.issue.opened": githubAction,
+  "service.changed": object({ service: string, name: string, host: optional(string), from: optional(string), to: string, reason: optional(string), cause: optional(string) }),
+  "service.failed": object({ service: string, name: string, host: optional(string), reason: string, cause: optional(string), detail: optional(string) }),
   "github.comment": githubAction,
   "github.label": githubAction,
   "github.mention": githubAction,

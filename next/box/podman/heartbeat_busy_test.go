@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -107,7 +108,7 @@ func TestHeartbeatExecOnlyReportsWholeMachineFigures(t *testing.T) {
 	ticks <- time.Unix(1010, 0)
 	load := <-loads
 	want := Load{Probe: ProbeGood, Health: contract.HostHealthy, ExecOnly: true, CPUs: 8, CPUUsed: 4, MemBytes: 16000, MemUsed: 5000, DiskBytes: 1000, DiskUsed: 995}
-	if load != want {
+	if !reflect.DeepEqual(load, want) {
 		t.Fatalf("load %+v, want %+v", load, want)
 	}
 	for _, call := range r.calls {
@@ -129,7 +130,7 @@ func TestHeartbeatExecOnlyWithoutFiguresIsOnline(t *testing.T) {
 	loads := make(chan Load, 1)
 	go h.Heartbeat(ctx, ticks, box.Layout{}, func(ok bool, load Load) { loads <- load }, func(string, contract.PressureKind) {})
 	ticks <- time.Unix(1000, 0)
-	if load := <-loads; load != (Load{Probe: ProbeGood, Health: contract.HostHealthy, ExecOnly: true}) {
+	if load := <-loads; !reflect.DeepEqual(load, Load{Probe: ProbeGood, Health: contract.HostHealthy, ExecOnly: true}) {
 		t.Fatalf("load %+v", load)
 	}
 }

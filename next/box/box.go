@@ -56,6 +56,8 @@ type Host struct {
 	Pool      string         // the pool that holds this node
 	GPUs      []contract.GPU // the cards its CDI spec offers, from the latest probe
 	Box       contract.BoxID // the one box a per-session node serves
+	// Services are the services placed here, which admission counts first (5.5, 5.18).
+	Services []ServiceHold
 }
 type Box struct {
 	ID      contract.BoxID

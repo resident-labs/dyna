@@ -69,7 +69,7 @@ func (s *Store) DiscardHostBoxes(ctx context.Context, host contract.HostName, ne
 			}
 			boxes[i].State, boxes[i].Reason, boxes[i].Updated = contract.BoxFailed, HostRemovedReason, event.Time
 		}
-		return nil
+		return s.failServices(ctx, tx, host, newEvent)
 	})
 	return boxes, err
 }

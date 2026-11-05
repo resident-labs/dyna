@@ -52,7 +52,9 @@ func (p *Pool) Hold(host contract.HostName, drain func() error) error {
 
 // claim records a runner on its host before it starts, once the host is still open to runners. A host drains in Hold, so
 // either the drain sees this runner or this sees the drain.
-func (p *Pool) claim(ctx context.Context, runner box.Box) error {
+func (p *Pool) claim(ctx context.Context, runner box.Box, assigned contract.BoxID) error {
+	unlock := p.Store.LockAdmission()
+	defer unlock()
 	p.shown.Lock()
 	defer p.shown.Unlock()
 	hosts, err := p.Store.Hosts(ctx)
@@ -61,6 +63,30 @@ func (p *Pool) claim(ctx context.Context, runner box.Box) error {
 	}
 	if !slices.ContainsFunc(box.RunnerHosts(hosts), func(h box.Host) bool { return h.Name == runner.Host }) {
 		return fmt.Errorf("host %s no longer takes runners", runner.Host)
+	}
+	// A survey precedes SSH and image preparation; a service update or box placement may have reserved more since it. Recheck
+	// the current reservations before publishing this claim, under the same admission lock those writers hold.
+	rows, err := p.Store.LifecycleBoxes(ctx)
+	if err != nil {
+		return err
+	}
+	boxes := slices.Clone(p.placed)
+	for _, row := range rows {
+		boxes = append(boxes, row.Box)
+	}
+	if p.Memory != nil {
+		for i := range hosts {
+			hosts[i].MemUsed = p.Memory(hosts[i].Name)
+		}
+	}
+	hosts = slices.DeleteFunc(box.RunnerHosts(hosts), func(h box.Host) bool { return h.Name != runner.Host })
+	request := runner
+	if assigned != "" {
+		// A per-job node is assigned to the waiting job's ID, not the random name of its eventual runner.
+		request.ID = assigned
+	}
+	if placement := box.Admit(hosts, boxes, request); placement.Host == "" {
+		return fmt.Errorf("host %s no longer fits the runner (%s)", runner.Host, placement.Reason)
 	}
 	p.placed = append(p.placed, runner)
 	return nil
