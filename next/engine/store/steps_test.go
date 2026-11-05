@@ -161,7 +161,7 @@ func TestUpgradeCarriesRootApprovesHostexec(t *testing.T) {
 		"ALTER TABLE boxes DROP COLUMN gpu_gib",
 		"ALTER TABLE boxes DROP COLUMN gpu_index",
 		"ALTER TABLE rooms DROP COLUMN github_writes",
-		"ALTER TABLE repos DROP COLUMN ci_settled",
+		"DROP TABLE repo_heads",
 		"UPDATE meta SET value='86' WHERE key='schema_version'",
 	} {
 		if _, err := db.Exec(q); err != nil {
@@ -213,7 +213,7 @@ func TestUpgradeTurnsHeldAndRetryingArchivesIntoPlainCloses(t *testing.T) {
 		"ALTER TABLE boxes DROP COLUMN gpu_gib",
 		"ALTER TABLE boxes DROP COLUMN gpu_index",
 		"ALTER TABLE rooms DROP COLUMN github_writes",
-		"ALTER TABLE repos DROP COLUMN ci_settled",
+		"DROP TABLE repo_heads",
 		"UPDATE meta SET value='88' WHERE key='schema_version'",
 	} {
 		if _, err := db.Exec(q); err != nil {
@@ -240,26 +240,6 @@ func TestUpgradeTurnsHeldAndRetryingArchivesIntoPlainCloses(t *testing.T) {
 	}
 	if _, err := s.Read().Exec("SELECT 1 FROM archives"); err == nil {
 		t.Error("the archives table is still there")
-	}
-}
-
-// TestUpgradeSettlesTheHeadAStoreHolds keeps the first git.main_ci_finished from reporting a head that was already there: a repository
-// that had read a head starts with it settled, and one that had read none has nothing settled.
-func TestUpgradeSettlesTheHeadAStoreHolds(t *testing.T) {
-	s, err := Open(floorStore(t, func(db *sql.DB) {
-		if _, err := db.Exec("INSERT INTO repos(repo,default_room,main_head) VALUES ('o/read','room_x','abc'),('o/unread','room_x','')"); err != nil {
-			t.Fatal(err)
-		}
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-	for repo, want := range map[string]string{"o/read": "abc", "o/unread": ""} {
-		var settled string
-		if err := s.Read().QueryRow("SELECT ci_settled FROM repos WHERE repo=?", repo).Scan(&settled); err != nil || settled != want {
-			t.Errorf("%s: settled %q, want %q: %v", repo, settled, want, err)
-		}
 	}
 }
 
