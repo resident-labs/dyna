@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -48,7 +49,15 @@ type heartbeatRecord struct {
 	free  *int64
 	total int64
 }
-type recordingHeartbeats struct{ records []heartbeatRecord }
+type recordingHeartbeats struct {
+	records []heartbeatRecord
+	gpus    [][]contract.GPU
+}
+
+func (r *recordingHeartbeats) SetHostGPUs(_ context.Context, _ contract.HostName, gpus []contract.GPU) error {
+	r.gpus = append(r.gpus, gpus)
+	return nil
+}
 
 func (r *recordingHeartbeats) RecordHostHeartbeat(_ context.Context, _ contract.HostName, ok bool, free *int64, total int64, _ time.Time) error {
 	r.records = append(r.records, heartbeatRecord{ok: ok, free: free, total: total})
@@ -216,5 +225,24 @@ func TestReportHeartbeatKeepsExecOnlyDiskOutOfTheStore(t *testing.T) {
 	b.reportHeartbeat(context.Background(), "omarchy", true, podman.Load{ExecOnly: true, DiskBytes: 100, DiskUsed: 99}, time.Time{})
 	if len(records.records) != 1 || records.records[0].free != nil || records.records[0].total != 0 || !records.records[0].ok {
 		t.Fatalf("records %+v", records.records)
+	}
+}
+
+func TestReportHeartbeatStoresGPUsOnlyWhenProbed(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	records := &recordingHeartbeats{}
+	b := &Boxes{HeartbeatStore: records, Pressure: engine.New(st, nil, nil, time.Now)}
+	cards := []contract.GPU{{Index: 0, Name: "RTX", MemBytes: 1 << 30}}
+	none := []contract.GPU{}
+	b.reportHeartbeat(context.Background(), "host", true, podman.Load{}, time.Time{})
+	b.reportHeartbeat(context.Background(), "host", true, podman.Load{GPUs: &cards}, time.Time{})
+	b.reportHeartbeat(context.Background(), "host", true, podman.Load{GPUs: &none}, time.Time{})
+	b.reportHeartbeat(context.Background(), "host", false, podman.Load{GPUs: &cards}, time.Time{})
+	if !reflect.DeepEqual(records.gpus, [][]contract.GPU{cards, none}) {
+		t.Fatalf("stored GPUs %+v, want the two probes of a reachable host", records.gpus)
 	}
 }

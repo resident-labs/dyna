@@ -19,6 +19,7 @@ type workflowMeta struct {
 	Profiles    []contract.ProfileName `json:"profiles"`
 	Size        contract.BoxSizeName   `json:"size"`
 	Repo        contract.RepoName      `json:"repo"`
+	GPU         contract.GPUGiB        `json:"gpu"`
 }
 
 var (

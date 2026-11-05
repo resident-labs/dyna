@@ -49,6 +49,7 @@ export const waits: Record<PendingReason, string> = {
   cpu: "Waiting for CPU", memory: "Waiting for memory", disk: "Waiting for disk space", "room-limit": "Room limit",
   "no-ready-host": "Waiting for a host", "room-host": "No host takes this room", "invalid-size": "Unknown box size",
   "pool-node": "Waiting for a node", "pool-failed": "The pool could not add a node",
+  gpu: "Waiting for GPU memory", "no-gpu": "No host has a GPU",
 };
 
 // A box's failed row, in the feed and at the end of a DM. A stopped box with a cause may still start, so it has not failed.

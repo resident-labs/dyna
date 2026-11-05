@@ -34,6 +34,8 @@ type ContainerSpec struct {
 	Pod string
 	// Volumes are its named compose volumes.
 	Volumes []Volume
+	// GPUCard is the one card the container gets, as the device nvidia.com/gpu=<index>, or nil for none.
+	GPUCard *int
 }
 
 // ContainerLayout identifies the mount layout created by the current engine.
