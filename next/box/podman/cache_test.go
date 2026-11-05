@@ -2,6 +2,8 @@ package podman
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -43,21 +45,78 @@ func TestCreateContainerCreatesWritableMount(t *testing.T) {
 	}
 }
 
-func TestCreateContainerGetsOnlyItsGPUCard(t *testing.T) {
-	card := 1
+// Exercise the driver's SSH framing and shell quoting with a fake Podman. The fake
+// models image ENV and Podman's --env/--unsetenv on a real process environment;
+// it does not stand in for an integration test with Podman and a CDI GPU.
+func TestCreateContainerVulkanEnvironment(t *testing.T) {
+	zero, other := 0, 3
 	for _, tc := range []struct {
-		name string
-		card *int
-		want bool
-	}{{"with a card", &card, true}, {"without", nil, false}} {
-		r := &runner{}
-		h := newTestHost(t, r)
-		if err := h.CreateContainer(context.Background(), box.ContainerSpec{Box: "a", Image: "image", GPUCard: tc.card}); err != nil {
-			t.Fatal(err)
-		}
-		cmd := r.calls[len(r.calls)-1][len(r.calls[len(r.calls)-1])-1]
-		if has := strings.Contains(cmd, "'--device' 'nvidia.com/gpu=1' 'image'"); has != tc.want || strings.Count(cmd, "nvidia.com") > 1 || !tc.want && strings.Contains(cmd, "nvidia") {
-			t.Fatalf("%s: %s", tc.name, cmd)
-		}
+		name   string
+		card   *int
+		device string
+	}{
+		{"without GPU", nil, ""},
+		{"GPU zero", &zero, "nvidia.com/gpu=0"},
+		{"GPU nonzero", &other, "nvidia.com/gpu=3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			argsFile, envFile := filepath.Join(dir, "args"), filepath.Join(dir, "env")
+			const lavapipe = "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"
+			tools := fakeTools(t, map[string]string{"podman": `
+printf '%s\000' "$@" > ` + quote(argsFile) + `
+export VK_ICD_FILENAMES=` + quote(lavapipe) + `
+export IMAGE_OTHER=keep-me
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --env) export "$2"; shift ;;
+        --unsetenv=*) unset "${1#--unsetenv=}" ;;
+        image) break ;;
+    esac
+    shift
+done
+env -0 > ` + quote(envFile)})
+			h, err := New("user@host", t.TempDir(), "host", localShell{path: tools + ":" + os.Getenv("PATH")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			const value = "value with spaces and 'quotes'"
+			if err := h.CreateContainer(context.Background(), box.ContainerSpec{Box: "a", Image: "image", GPUCard: tc.card, Env: []box.EnvVar{{Name: "BOX_OTHER", Value: value}}}); err != nil {
+				t.Fatal(err)
+			}
+			args, err := os.ReadFile(argsFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantArgs := []string{"--cgroup-manager=systemd", "create", "--name", "a", boxUserNS,
+				"--user", "1000:1000", "--label", "dyna.box=a", "--cgroup-parent=", "--cgroupns=private",
+				"--systemd=always", "--stop-signal", "SIGTERM", "--entrypoint", "/usr/bin/tini",
+				"--tmpfs", "/run/dyna:mode=1777", "--env", "HOME=/box/home", "--env", "PI_CODING_AGENT_DIR=/box/pi",
+				"--volume", "dyna-box-a:/box", "--env", "BOX_OTHER=" + value}
+			if tc.card != nil {
+				wantArgs = append(wantArgs, "--unsetenv=VK_ICD_FILENAMES", "--device", tc.device)
+			}
+			wantArgs = append(wantArgs, "image", "--", "/opt/dyna/bin/current/dyna", "box-agent")
+			if got := strings.Split(strings.TrimSuffix(string(args), "\x00"), "\x00"); !reflect.DeepEqual(got, wantArgs) {
+				t.Errorf("Podman argv = %q, want %q", got, wantArgs)
+			}
+			env, err := os.ReadFile(envFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			vars := map[string]string{}
+			for _, entry := range strings.Split(string(env), "\x00") {
+				if name, value, ok := strings.Cut(entry, "="); ok {
+					vars[name] = value
+				}
+			}
+			icd, present := vars["VK_ICD_FILENAMES"]
+			if tc.card != nil && present || tc.card == nil && (!present || icd != lavapipe) {
+				t.Errorf("VK_ICD_FILENAMES = %q (present %t), GPU = %v", icd, present, tc.card)
+			}
+			if vars["IMAGE_OTHER"] != "keep-me" || vars["BOX_OTHER"] != value || vars["HOME"] != "/box/home" || vars["PI_CODING_AGENT_DIR"] != "/box/pi" {
+				t.Errorf("unrelated environment changed: %v", vars)
+			}
+		})
 	}
 }
