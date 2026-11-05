@@ -61,6 +61,30 @@ The two sentences live once in `engine/prompt.go`, selected by OpenAI provider p
 
 Fail-first evidence is in `/box/shared/frl/sol-spacing-red.log`, `sol-spacing-transfer-red.log`, `sol-spacing-box-red.log` and `spacing-count-red.log`. The engine tests failed for absent guidance on positive model IDs; real PiG requests failed for missing startup guidance; box tests failed for missing workflow/turn propagation. The script fixture test initially failed because the module did not exist. Passing fixtures include known bad examples, normal prose/numbers, documented ID/code false positives, nested and serialized arguments, escaping, mixed-model filtering, unknown models, truncation, duplicate IDs and text precedence.
 
+### Mutation checks
+
+Each mutation was applied in an isolated detached worktree of the implementation, tested, then restored. All seven were killed by a failing assertion (not a claimed hypothetical check). Logs are `/box/shared/frl/mutation-<name>.log`.
+
+| Mutation name | Change | Failing check |
+|---|---|---|
+| line-absent | Return an empty string instead of the two prompt sentences | Engine positive model cases: hello, turn and workflow lack guidance |
+| overbroad-matching | Use `strings.HasPrefix(model.ID, "gpt-6.1")` without provider/family delimiter | Engine rejects `gpt-6.10-sol` and Anthropic `gpt-6.1-sol` |
+| no-turn-propagation | Remove `ModelInstructions` from dispatched `TurnStart` | Engine positive cases lack turn guidance |
+| no-runner-propagation | Pass an empty instruction string to `TransferModel` | Runner's recorded model instructions differ |
+| no-worker-propagation | Clear `workerConfig`'s profile instruction | Worker config assertion fails |
+| no-transfer-guidance-update | Leave the old guidance on successful transfer | Real PiG request lacks the removal update |
+| counter-no-letter-digit-detection | Disable letter→digit detection | Synthetic example, nested argument and text precedence counts differ |
+
+Focused commands: `go test ./engine -run '^TestSolSpacingUses' -count=1`, `go test ./box/agent -run '^TestRunnerTransfersOnFirstTurn' -count=1`, `go test ./box/agent -run '^TestWorkersOpenWithTheir' -count=1`, `go test ./harness/pig -run '^TestModelInstructions' -count=1` and `node --test scripts/spacing-count.test.mjs` (from `next/`). Unmutated versions pass.
+
+### Validation
+
+- `go test -race` passed for each touched package, invoked separately: `./contract`, `./harness`, `./harness/fakeharness`, `./harness/pig`, `./box/agent`, `./engine`. The first full engine race run hit Go's default 10-minute suite timeout while initializing an unrelated subscription test; the complete retry `GOMAXPROCS=2 go test -race -timeout 20m ./engine -count=1` passed in 523.998 seconds. The targeted final engine guidance test also passed with `-race`.
+- `GOMAXPROCS=2 go test -count=1 -timeout 3m ./...`, `go build ./...` and `go vet ./...` passed. The first broad test run failed existing Podman namespace tests because this disposable box lacked `fusermount3`; installing the genuine Debian bookworm fuse3 utility under the home directory and rerunning with it on PATH resolved that environment failure, without repository changes.
+- `go generate ./contract` ran, and rerunning left the generated contract unchanged. Prompt golden files are unchanged.
+- Web check and all 488 web tests passed on Node 24.22.2; Svelte reports 0 errors and 26 warnings in existing files. The web build passed (Vite reports its existing large-chunk warning).
+- All five offline measurement fixture tests passed, deterministic remeasurement matched the committed JSON byte-for-byte, and `bash -n scripts/ci.sh` plus `git diff --check` passed.
+
 ## Fresh post-deploy follow-up (pending)
 
 After deployment, allow a few hours of **fresh Sol output**, not a rerun on these old excerpts. Record the deployment SHA/time, box-agent version, first request that actually carries `model_instructions` (fresh/restarted/refreshed box or verified context update), and collection window. Old running boxes do not gain new harness code from an engine deploy alone. Exclude turns/requests already in flight before the verified prompt boundary. Keep each session's first applicable prompt timestamp as its own lower bound, rather than treating deployment time alone as proof of the new prompt cohort.
