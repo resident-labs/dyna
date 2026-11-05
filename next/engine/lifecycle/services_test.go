@@ -78,7 +78,11 @@ func (rig *serviceRig) settle() store.ServiceRow {
 	for range 6 {
 		rig.pass()
 	}
-	return rig.row()
+	rows, err := rig.st.Services(rig.ctx, "r")
+	if err != nil || len(rows) == 0 {
+		return store.ServiceRow{}
+	}
+	return rows[0]
 }
 
 func web() contract.ServiceSpec {
