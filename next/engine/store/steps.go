@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 95
+const schemaVersion = 96
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
@@ -93,6 +93,15 @@ var steps = map[int][]string{
 		`CREATE TABLE repo_heads (repo TEXT NOT NULL REFERENCES repos(repo), seq INTEGER PRIMARY KEY AUTOINCREMENT, sha TEXT NOT NULL, seen_at INTEGER NOT NULL, settled INTEGER NOT NULL DEFAULT 0, UNIQUE(repo, sha))`,
 		`INSERT INTO repo_heads(repo,sha,seen_at,settled) SELECT repo,main_head,0,1 FROM repos WHERE main_head<>''`,
 		`ALTER TABLE repos DROP COLUMN ci_settled`,
+	},
+	// Services (spec 5.18): a long-running container on a host, its write-only secrets, and what a host that was offline still holds of a removed one.
+	95: {
+		`CREATE TABLE services (id TEXT PRIMARY KEY, room TEXT NOT NULL REFERENCES rooms(id), name TEXT NOT NULL, spec BLOB NOT NULL, generation INTEGER NOT NULL, host TEXT REFERENCES hosts(name), cpu_milli INTEGER NOT NULL, mem_bytes INTEGER NOT NULL, disk_bytes INTEGER NOT NULL, image_bytes INTEGER NOT NULL DEFAULT 0, image_estimate INTEGER NOT NULL DEFAULT 0, want TEXT NOT NULL, state TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', cause TEXT NOT NULL DEFAULT '', detail TEXT NOT NULL DEFAULT '', last_state TEXT NOT NULL DEFAULT '', deployed_generation INTEGER NOT NULL DEFAULT 0, image_ref TEXT NOT NULL DEFAULT '', previous_ref TEXT NOT NULL DEFAULT '', target_ref TEXT NOT NULL DEFAULT '', deployed_spec TEXT NOT NULL DEFAULT '', unit_sha TEXT NOT NULL DEFAULT '', restarts INTEGER NOT NULL DEFAULT 0, since INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL, placed_at INTEGER NOT NULL DEFAULT 0, rev INTEGER NOT NULL DEFAULT 0, by_kind TEXT NOT NULL, by_id TEXT NOT NULL)`,
+		`CREATE UNIQUE INDEX services_room_name ON services(room, name) WHERE want != 'remove'`,
+		`CREATE INDEX services_host ON services(host) WHERE host IS NOT NULL`,
+		`CREATE TABLE service_secrets (service TEXT NOT NULL REFERENCES services(id), name TEXT NOT NULL, value BLOB NOT NULL, set_at INTEGER NOT NULL, PRIMARY KEY(service, name))`,
+		`CREATE TABLE service_leftovers (host TEXT NOT NULL REFERENCES hosts(name), room TEXT NOT NULL, service TEXT NOT NULL, PRIMARY KEY(host, service))`,
+		`CREATE TABLE service_image_sizes (room TEXT NOT NULL, source TEXT NOT NULL, bytes INTEGER NOT NULL, measured_at INTEGER NOT NULL, PRIMARY KEY(room, source))`,
 	},
 	81: {
 		`ALTER TABLE hosts ADD COLUMN create_failures INTEGER NOT NULL DEFAULT 0`,

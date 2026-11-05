@@ -462,14 +462,16 @@ type HostSummary struct {
 	DiskBytes    int64                `json:"diskBytes"`
 	DiskUsed     int64                `json:"diskUsed"`
 	DiskLow      bool                 `json:"diskLow"`
-	EngineHost   bool                 `json:"engineHost,omitempty"` // this added host is the machine the engine runs on
-	Pool         string               `json:"pool,omitempty"`       // the pool that holds this node
-	Agents       bool                 `json:"agents,omitempty"`     // new session boxes may land on this added host
-	CI           bool                 `json:"ci,omitempty"`         // the CI pool may start runners on this added host
-	ExecOnly     bool                 `json:"execOnly,omitempty"`   // added exec only: host-exec runs, no boxes or runners
-	Runners      int                  `json:"runners,omitempty"`    // the CI runners on this added host now
-	Rooms        []RoomID             `json:"rooms,omitempty"`      // the rooms this added host serves (host.set_limits); none means every room
-	GPUs         []GPU                `json:"gpus,omitempty"`       // its cards, each with the VRAM boxes have requested of it
+	EngineHost   bool                 `json:"engineHost,omitempty"`  // this added host is the machine the engine runs on
+	Pool         string               `json:"pool,omitempty"`        // the pool that holds this node
+	Agents       bool                 `json:"agents,omitempty"`      // new session boxes may land on this added host
+	CI           bool                 `json:"ci,omitempty"`          // the CI pool may start runners on this added host
+	ExecOnly     bool                 `json:"execOnly,omitempty"`    // added exec only: host-exec runs, no boxes or runners
+	Runners      int                  `json:"runners,omitempty"`     // the CI runners on this added host now
+	Rooms        []RoomID             `json:"rooms,omitempty"`       // the rooms this added host serves (host.set_limits); none means every room
+	GPUs         []GPU                `json:"gpus,omitempty"`        // its cards, each with the VRAM boxes have requested of it
+	Services     []HostService        `json:"services,omitempty"`    // the services placed here (5.18)
+	ServiceHost  *ServiceHostStatus   `json:"serviceHost,omitempty"` // its latest service host check, once it has one
 	LastSeen     time.Time            `json:"lastSeen,omitzero"`
 	History      []HostLoadPoint      `json:"history"`
 }

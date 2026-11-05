@@ -1,0 +1,26 @@
+[Unit]
+Description=Dyna service app of room room_1
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Container]
+ContainerName=dyna-svc-svc_2
+Image=localhost/dyna-img-app:1
+Pull=never
+Label=dyna.service=svc_2
+UserNS=nomap
+Network=pasta:--no-map-gw
+DropCapability=all
+NoNewPrivileges=true
+ReadOnly=true
+ReadOnlyTmpfs=false
+PodmanArgs=--image-volume=ignore
+Tmpfs=/tmp:rw,size=64m,mode=1777
+PodmanArgs=--cpus=1 --memory=536870912 --memory-swap=536870912 --pids-limit=512
+
+[Service]
+Slice=dyna-svc.slice
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

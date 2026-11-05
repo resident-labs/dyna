@@ -116,10 +116,13 @@ type fakeClient struct {
 	roomDelete    contract.RoomDeleteRequest
 	roomDeleteErr error
 
-	hostRemove contract.HostRemoveRequest
-	poolAdd    contract.PoolAddRequest
-	poolRemove contract.PoolRemoveRequest
-	roomHosts  contract.RoomHostsRequest
+	hostRemove    contract.HostRemoveRequest
+	poolAdd       contract.PoolAddRequest
+	poolRemove    contract.PoolRemoveRequest
+	serviceSet    contract.ServiceSetRequest
+	serviceSecret contract.ServiceSecretSetRequest
+	serviceAction string
+	roomHosts     contract.RoomHostsRequest
 }
 
 func (f *fakeClient) DevicePair(_ context.Context, q contract.DevicePairRequest) (contract.DevicePairResponse, error) {
@@ -827,4 +830,41 @@ func TestSessionStartPassesGPUGiB(t *testing.T) {
 	if f.start.GPU != 8 {
 		t.Fatalf("%+v", f.start)
 	}
+}
+
+func (f *fakeClient) ServiceSet(_ context.Context, q contract.ServiceSetRequest) (contract.ServiceSetResponse, error) {
+	f.serviceSet = q
+	return contract.ServiceSetResponse{}, nil
+}
+func (f *fakeClient) ServiceList(context.Context, contract.ServiceListRequest) (contract.ServiceListResponse, error) {
+	return contract.ServiceListResponse{}, nil
+}
+func (f *fakeClient) ServiceShow(context.Context, contract.ServiceRef) (contract.ServiceShowResponse, error) {
+	return contract.ServiceShowResponse{}, nil
+}
+func (f *fakeClient) ServiceLogs(context.Context, contract.ServiceLogsRequest) (contract.ServiceLogsResponse, error) {
+	return contract.ServiceLogsResponse{}, nil
+}
+func (f *fakeClient) ServiceRestart(_ context.Context, q contract.ServiceRef) (contract.ServiceActionResponse, error) {
+	f.serviceAction = "restart " + string(q.Name)
+	return contract.ServiceActionResponse{}, nil
+}
+func (f *fakeClient) ServiceStop(context.Context, contract.ServiceRef) (contract.ServiceActionResponse, error) {
+	return contract.ServiceActionResponse{}, nil
+}
+func (f *fakeClient) ServiceStart(context.Context, contract.ServiceRef) (contract.ServiceActionResponse, error) {
+	return contract.ServiceActionResponse{}, nil
+}
+func (f *fakeClient) ServiceUpdate(context.Context, contract.ServiceRef) (contract.ServiceActionResponse, error) {
+	return contract.ServiceActionResponse{}, nil
+}
+func (f *fakeClient) ServiceRollback(context.Context, contract.ServiceRef) (contract.ServiceActionResponse, error) {
+	return contract.ServiceActionResponse{}, nil
+}
+func (f *fakeClient) ServiceRemove(context.Context, contract.ServiceRef) (contract.ServiceActionResponse, error) {
+	return contract.ServiceActionResponse{}, nil
+}
+func (f *fakeClient) ServiceSecretSet(_ context.Context, q contract.ServiceSecretSetRequest) (contract.ServiceSecretSetResponse, error) {
+	f.serviceSecret = q
+	return contract.ServiceSecretSetResponse{}, nil
 }

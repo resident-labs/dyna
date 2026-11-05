@@ -75,10 +75,12 @@ type Scaleset interface {
 
 // Store reads the settings and the placement inputs.
 type Store interface {
+	LockAdmission() func()
 	CIRepos(context.Context) ([]store.CIRepo, error)
 	Hosts(context.Context) ([]box.Host, error)
 	LifecycleBoxes(context.Context) ([]store.LifecycleBox, error)
 	Pools(context.Context) ([]store.Pool, error)
+	Services(context.Context, contract.RoomID) ([]store.ServiceRow, error)
 }
 
 // Pool owns the listeners. Tick and every scale share mu, so one placement at a time sees the runners of the one before it.
@@ -330,6 +332,7 @@ type survey struct {
 	hosts    map[contract.HostName]*surveyed
 	boxes    []box.Box
 	rows     []store.LifecycleBox
+	services []store.ServiceRow
 	pools    []store.Pool
 	nodes    map[string]int // each pool's nodes
 	failures []error
@@ -383,6 +386,9 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 	if s.rows, err = p.Store.LifecycleBoxes(ctx); err != nil {
 		return s, err
 	}
+	if s.services, err = p.Store.Services(ctx, ""); err != nil {
+		return s, err
+	}
 	for _, row := range s.rows {
 		s.boxes = append(s.boxes, row.Box)
 	}
@@ -416,7 +422,10 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 		}
 		s.hosts[host.Name] = &surveyed{host: host, driver: driver, runners: runners, egress: egress}
 	}
-	// A host that did not answer still holds what it held, as far as the node pools know.
+	// A host that did not answer still holds what it held, as far as the node pools know. Publishing a new runner snapshot is
+	// serialized with service and box admission, just as claiming a runner is.
+	unlock := p.Store.LockAdmission()
+	defer unlock()
 	p.shown.Lock()
 	placed := slices.DeleteFunc(p.placed, func(b box.Box) bool { return !slices.Contains(unanswered, b.Host) })
 	for _, host := range s.hosts {
@@ -569,7 +578,7 @@ func (p *Pool) start(ctx context.Context, key scaleSet, host *surveyed, size con
 		return "", err
 	}
 	name := namePrefix + string(host.host.Name) + "-" + hex.EncodeToString(raw[:])
-	if err := p.claim(ctx, runnerBox(name, host.host.Name, size)); err != nil {
+	if err := p.claim(ctx, runnerBox(name, host.host.Name, size), host.host.Box); err != nil {
 		return "", err
 	}
 	id, config, err := p.Sets.JIT(ctx, key.repo, SetName(key.size), name)
@@ -965,11 +974,22 @@ func (p *Pool) reap(ctx context.Context, repo contract.RepoName, alive map[strin
 	return nil
 }
 
-// waitsForRoom says whether a session box that waits for CPU or memory would take the host if its runners were gone. Such a
+// waitsForRoom says whether a session box or a service that waits for CPU or memory would take the host if its runners were gone. Such a
 // box comes before a runner: a runner started in each slot that frees up would keep it waiting. A box that fits nowhere, that
 // its room's rule keeps off the host, or that other boxes keep out is not waiting on runners and holds none back. The
 // snapshot holds no runners, so Admit sees the host as it is without them.
 func waitsForRoom(h box.Host, view survey) bool {
+	for _, row := range view.services {
+		if row.State != contract.ServicePending || (row.Reason != contract.ServiceNoCPU && row.Reason != contract.ServiceNoMemory) {
+			continue
+		}
+		if row.Host != "" && row.Host != h.Name {
+			continue
+		}
+		if box.AdmitService([]box.Host{h}, view.boxes, box.ServiceRequest{ID: row.ID, Room: row.Room, Parts: row.Reservation(), ImageEstimate: max(row.ImageBytes, row.ImageEstimate)}, row.Only...).Host == h.Name {
+			return true
+		}
+	}
 	for _, row := range view.rows {
 		if row.State != contract.BoxPending || row.Image == box.RunnerImage || (row.Reason != string(box.PendingCPU) && row.Reason != string(box.PendingMemory)) {
 			continue

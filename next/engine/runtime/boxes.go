@@ -42,6 +42,7 @@ type boxStore interface {
 	Session(context.Context, contract.SessionID) (store.Session, error)
 	Box(context.Context, contract.BoxID) (box.Box, error)
 	Boxes(context.Context) ([]box.Box, error)
+	Services(context.Context, contract.RoomID) ([]store.ServiceRow, error)
 	OpenRooms(context.Context) ([]contract.RoomID, error)
 	RoomRepos(context.Context, contract.RoomID) ([]contract.RoomRepo, error)
 	ActiveRuns(context.Context) ([]store.HookRun, error)
@@ -276,6 +277,7 @@ func (b *Boxes) cache(name contract.HostName, h *podman.Host) {
 		last = slices.ContainsFunc(hosts, func(record box.Host) bool { return record.Name == name && record.ExecOnly })
 		return last
 	})
+	h.SetServices(func() []contract.ServiceID { return b.Pressure.Reconciler().ServiceIDs(ctx, name) })
 	ticker := time.NewTicker(10 * time.Second)
 	go func() {
 		defer ticker.Stop()
@@ -287,6 +289,9 @@ func (b *Boxes) cache(name contract.HostName, h *podman.Host) {
 				}
 			}
 			b.record(name, ok, load, now)
+			if ok {
+				b.Pressure.Reconciler().ObserveServices(load.Services)
+			}
 			b.reportHeartbeat(ctx, name, ok, load, now)
 			if ok && load.Probe == podman.ProbeGood && !load.ExecOnly && !load.ShareUp && b.recovered(name) {
 				b.repairShare(ctx, name)
@@ -599,11 +604,31 @@ func (b *Boxes) prepareImages(ctx context.Context, h *podman.Host, name contract
 		keep = append(keep, image.Tag)
 	}
 	keep = append(keep, b.prepareCompose(ctx, h, name, rooms)...)
+	// A service's running image and the one before it stay: a rollback needs the previous one, and box images share the families
+	// that pruning thins to the newest two.
+	kept, err := b.serviceImages(ctx, name)
+	if err != nil {
+		log.Printf("host %s: build ahead: services: %v", name, err)
+		return
+	}
+	keep = append(keep, kept...)
 	steps.Done("build ahead")
 	if err := h.PruneImages(ctx, keep); err != nil {
 		log.Printf("host %s: prune images: %v", name, err)
 	}
 	steps.Done("prune images")
+}
+
+// serviceImages lists the image references the services on a host run or can roll back to.
+func (b *Boxes) serviceImages(ctx context.Context, host contract.HostName) ([]string, error) {
+	services, err := b.Store.Services(ctx, "")
+	var refs []string
+	for _, row := range services {
+		if row.Host == host {
+			refs = append(refs, row.ImageRef, row.Previous)
+		}
+	}
+	return refs, err
 }
 
 // prepareCompose builds and pulls what the compose files in reach of this host's rooms name, and returns the tags. A file
