@@ -926,7 +926,7 @@ A **crew** is one Dyna session with one box. The agents inside it are PiG sessio
 | `run(command, opts)` | runs a string in `sh -c`, or a list directly, in the box, under the build lock because builds must not fan out. It returns `{code, stdout, stderr, durationMs}`, 64 KiB of each stream, and throws on a nonzero exit unless `check: false`. Options: `cwd`, `env`, `timeout`, `check`, `label`, `phase`, `lane` |
 | `merge(results, opts)` | merges worktree steps in order into one run branch and pushes it, with plain git and no model. It returns `{branch, commit, merged, conflicts}` and a conflict does not throw. Options: `base` (default the pinned commit), `label`, `phase` |
 | `post(to, text, data, opts)` | posts as the crew to its parent, once however often the script replays. A crew reports only to its parent, the session that started it or root when the owner did, so `to` is `parent` or that session's name or ID, and the engine refuses any other. Options: `lane` |
-| `phase(title)`, `log(message)`, `args` | set the stage of later steps, add a line to the journal, and read `--args` |
+| `phase(title)`, `log(...values)`, `args` | set the stage of later steps, add a line to the journal, and read `--args`. `log` joins its values with spaces: strings as they are, arrays and objects as JSON (`[]`, `{"a":1}`), as `console.log` shows them |
 | `status(text)` | sets the run's one-line status, which the run page shows under its name and the Runs list beside it (`workflow.set_status`) |
 
 `parallel` and `pipeline` turn a failure into an entry `{failed: true, step, reason}`, and a failed pipeline item skips its later stages. An error no step recorded joins the journal there too, so the run's end counts it. There is no silent `null`.
