@@ -31,6 +31,7 @@ export const settingShape: Record<WorkflowSetting, { label: string; kind: Settin
   post: { label: "Posts to the parent", kind: "switch" },
   resume: { label: "Resume", kind: "switch" },
 };
+const settingNames: readonly WorkflowSetting[] = ["start", "maxRuns", "maxWorkers", "profiles", "size", "timeout", "worktree", "merge", "run", "workflow", "post", "resume"];
 export const starters: Record<WorkflowStarters, string> = { any: "any session", leads: "leads", root: "root only", off: "off" };
 export const starterOrder: readonly WorkflowStarters[] = ["any", "leads", "root", "off"];
 export const boxSizes: readonly BoxSizeName[] = ["agent", "small", "medium", "large", "xlarge"];
@@ -109,6 +110,12 @@ export function setRequest(scope: WorkflowScope, change: WorkflowChange): Workfl
 // Use global, or Use default on the global default: the setting inherits again.
 export const clearRequest = (scope: WorkflowScope, setting: WorkflowSetting): WorkflowSetRequest => scoped(scope, { set: {}, clear: [setting] });
 
+// The setting a refused workflow.set is about: the engine's typed cause when it names one, else the one setting the
+// request sets or clears, as the page sends one at a time.
+export function refusedSetting(request: WorkflowSetRequest, cause?: WorkflowSetting): WorkflowSetting | undefined {
+  return cause ?? request.clear?.[0] ?? settingNames.find(setting => isSet(request.set, setting));
+}
+
 // The workflow.set for a number field's text, or undefined when it holds no whole number or the value in force, so the
 // field is put back. The engine holds the caps and refuses past them in its words.
 export function numberChange(scope: WorkflowScope, setting: "maxRuns" | "maxWorkers" | "timeout", text: string): WorkflowSetRequest | undefined {
@@ -134,13 +141,13 @@ export function profileChoices(listed: readonly ProfileName[], effective: Workfl
   return [...listed, ...now.filter(each => !listed.includes(each))].map(name => ({ name, on: !now.length || now.includes(name) }));
 }
 
-// Runs tasks one at a time in the order they come, each after the last has settled, whether it worked or not; pending
+// Runs tasks one at a time in the order they come, each after the last has settled (last never rejects); pending
 // counts those not settled yet, so a read that lands meanwhile can be dropped.
 export function serial() {
   let last: Promise<unknown> = Promise.resolve(), waiting = 0;
   const run = <T>(task: () => Promise<T>): Promise<T> => {
     waiting++;
-    const next = last.then(task, task);
+    const next = last.then(task);
     last = next.then(() => { waiting--; }, () => { waiting--; });
     return next;
   };
