@@ -63,7 +63,7 @@ func TestServiceQuadletGolden(t *testing.T) {
 // Each isolation promise of 5.18 is a line of the quadlet, and no line grants more.
 func TestServiceQuadletIsolationLines(t *testing.T) {
 	file := RenderServiceUnit(quadletSpec(t))
-	for _, line := range []string{"UserNS=nomap", "Network=pasta:--no-map-gw", "DropCapability=all", "NoNewPrivileges=true", "ReadOnly=true", "ReadOnlyTmpfs=false", "Slice=dyna-svc.slice"} {
+	for _, line := range []string{"UserNS=nomap", "Network=pasta:--no-map-gw", "DropCapability=all", "NoNewPrivileges=true", "ReadOnly=true", "ReadOnlyTmpfs=false", "PodmanArgs=--image-volume=ignore", "Slice=dyna-svc.slice"} {
 		if !strings.Contains(file, "\n"+line+"\n") {
 			t.Errorf("no line %q", line)
 		}

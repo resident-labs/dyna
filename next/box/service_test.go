@@ -216,3 +216,27 @@ func oneCPUService(t *testing.T) contract.ServiceParts {
 	}
 	return parts
 }
+
+func TestServiceRoomBudgetCountsBoxesAtAQuarterAndServicesWhole(t *testing.T) {
+	request := ServiceRequest{ID: "svc_self", Room: "r", Parts: oneCPUService(t)}
+	boxes := []Box{
+		{ID: "running", Room: "r", State: contract.BoxReady, Size: contract.BoxSize{CPUs: 4, MemBytes: 2 << 30}},
+		{ID: "stopped", Room: "r", State: contract.BoxStopped, Size: contract.BoxSize{CPUs: 100, MemBytes: 100 << 30}},
+		{ID: "other-room", Room: "other", State: contract.BoxReady, Size: contract.BoxSize{CPUs: 100, MemBytes: 100 << 30}},
+	}
+	holds := []ServiceHold{
+		{ID: "svc_self", Room: "r", CPUMilli: 8000, MemBytes: 16 << 30}, // replaced by the new request
+		{ID: "svc_other", Room: "r", CPUMilli: 1000, MemBytes: 512 << 20},
+		{ID: "svc_other_room", Room: "other", CPUMilli: 8000, MemBytes: 16 << 30},
+	}
+	if !ServiceFitsRoom(request, contract.RoomLimits{CPUs: 3, MemBytes: 1536 << 20}, boxes, holds) {
+		t.Fatal("one box-quarter plus two whole services fits exactly")
+	}
+	request.Parts.CPUMilli = 2000
+	if ServiceFitsRoom(request, contract.RoomLimits{CPUs: 3}, boxes, holds) {
+		t.Fatal("room CPU limit omitted its existing box or service")
+	}
+	if ServiceFitsRoom(request, contract.RoomLimits{MemBytes: 1280 << 20}, boxes, holds) {
+		t.Fatal("room memory limit omitted its existing box or service")
+	}
+}

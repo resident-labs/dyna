@@ -516,3 +516,247 @@ func TestDiscardingAHostRemovesItsServicesFromIt(t *testing.T) {
 		t.Fatalf("the host kept %d service files", len(rig.host.Service.Files))
 	}
 }
+
+// The owner-facing restart bypasses the normal step, but must not bypass its engine-host exclusion. The host flag is read at
+// restart time, not from the earlier placement, and unknown after ResetEngineHosts is just as unsafe as known engine host.
+func TestDirectServiceRestartRefusesTheEngineHostAndUnknownHosts(t *testing.T) {
+	for _, flag := range []string{"NULL", "1", "0"} {
+		t.Run(flag, func(t *testing.T) {
+			rig := newServiceRig(t)
+			rig.declare(web())
+			row := rig.settle()
+			rig.sql("UPDATE hosts SET engine_host=" + flag)
+			before := count(rig.host.Calls, fakehost.RestartService)
+			_, err := rig.r.RestartServiceUnit(rig.ctx, row)
+			if flag == "0" {
+				if err != nil || count(rig.host.Calls, fakehost.RestartService) != before+1 {
+					t.Fatalf("safe host restart: %v, calls %v", err, rig.host.Calls)
+				}
+				return
+			}
+			if err == nil || count(rig.host.Calls, fakehost.RestartService) != before {
+				t.Fatalf("unsafe host restart: %v, calls %v", err, rig.host.Calls)
+			}
+			if after := rig.row(); after.Rev != row.Rev {
+				t.Fatalf("refused restart changed row: before %+v, after %+v", row, after)
+			}
+		})
+	}
+}
+
+func TestServicePlacementCountsRoomBudgetsAtOneTimes(t *testing.T) {
+	for _, tc := range []struct {
+		name, budget string
+		cpus         float64
+		memory       contract.ServiceSize
+	}{
+		{"cpu", "cpus=1", 8, "512MiB"},
+		{"memory", "mem_bytes=1073741824", 1, "2GiB"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newServiceRig(t)
+			rig.sql("UPDATE rooms SET " + tc.budget)
+			spec := web()
+			spec.CPUs, spec.Memory = tc.cpus, tc.memory
+			rig.declare(spec)
+			row := rig.settle()
+			if row.Host != "" || string(row.Reason) != "room-limit" {
+				t.Fatalf("room budget ignored: %+v", row.Service)
+			}
+		})
+	}
+}
+
+func TestServicesPlacedInOnePassShareTheirRoomBudget(t *testing.T) {
+	rig := newServiceRig(t)
+	rig.sql("UPDATE rooms SET cpus=3,mem_bytes=4294967296")
+	for _, name := range []contract.ServiceName{"a", "b"} {
+		spec := web()
+		spec.Name, spec.CPUs = name, 2
+		spec.Ports = nil
+		rig.declare(spec)
+	}
+	rig.settle()
+	placed := 0
+	for _, row := range rig.rows() {
+		if row.Host != "" {
+			placed++
+		} else if string(row.Reason) != "room-limit" {
+			t.Fatalf("wrong wait: %+v", row.Service)
+		}
+	}
+	if placed != 1 {
+		t.Fatalf("%d services placed within a room's 3-CPU budget, want 1", placed)
+	}
+}
+
+func TestFailedShrinkKeepsTheLiveResourcesAndPortsReserved(t *testing.T) {
+	rig := newServiceRig(t)
+	rig.sql("UPDATE hosts SET cpus=47,mem_bytes=51539607552") // service cap 11.75 CPU and 12 GiB
+	spec := web()
+	spec.CPUs, spec.Memory, spec.Disk = 8, "8GiB", "8GiB"
+	spec.Ports = []contract.ServicePort{"8080"}
+	spec.Health = []string{"/bin/true"}
+	rig.declare(spec)
+	live := rig.settle()
+	rig.host.Service.Health = func(_ contract.ServiceID, file string) error {
+		if strings.Contains(file, "bbbbbbbb") {
+			return errors.New("unhealthy")
+		}
+		return nil
+	}
+	spec.Image, spec.CPUs, spec.Memory, spec.Disk = digestImage2, .25, "512MiB", "1GiB"
+	spec.Ports = []contract.ServicePort{"8081"}
+	pending := rig.declare(spec)
+	if pending.CPUMilli != 8000 || pending.MemBytes != 8<<30 || pending.DiskBytes != 8<<30 {
+		t.Errorf("in-flight shrink dropped live reservation: %+v", pending.Service)
+	}
+	row := rig.settle()
+	if row.Reason != contract.ServiceRolledBack || row.CPUMilli != 8000 || row.MemBytes != 8<<30 || row.DiskBytes != 8<<30 || row.UnitSHA != live.UnitSHA {
+		t.Errorf("rollback dropped live reservation: %+v", row.Service)
+	}
+	if row.Parts.CPUMilli != 250 || row.Parts.Ports[0].Host != 8081 {
+		t.Errorf("rollback lost desired declaration: %+v", row.Service)
+	}
+	for _, port := range []contract.ServicePort{"8080", "8081"} {
+		other := web()
+		other.Name, other.Ports = contract.ServiceName("port"+string(port)), []contract.ServicePort{port}
+		parts, err := other.Parse()
+		if err != nil {
+			t.Fatal(err)
+		}
+		// With the host named, a conflict is refused at set even before admission.
+		parts.Spec.Host = "h"
+		_, err = rig.st.SetService(rig.ctx, "r", parts, contract.ServiceID("svc_"+string(port)), contract.Principal{Kind: contract.PrincipalOwner}, rig.now, rig.r.serviceEvent)
+		var taken *store.PortTakenError
+		if !errors.As(err, &taken) {
+			t.Errorf("live/desired port %s not held: %v", port, err)
+		}
+	}
+	for _, tc := range []struct {
+		name contract.ServiceName
+		cpus float64
+		mem  contract.ServiceSize
+	}{
+		{"cpu", 8, "512MiB"}, {"memory", .25, "8GiB"},
+	} {
+		other := web()
+		other.Name, other.CPUs, other.Memory, other.Ports = tc.name, tc.cpus, tc.mem, nil
+		rig.declare(other)
+	}
+	rig.settle()
+	for _, name := range []contract.ServiceName{"cpu", "memory"} {
+		if row := rig.rows()[name]; row.Host != "" {
+			t.Errorf("live reservation ignored for %s: %+v", name, row.Service)
+		}
+	}
+}
+
+func TestRestartingAStoppedServiceChangesItsIntentToRun(t *testing.T) {
+	rig := newServiceRig(t)
+	rig.declare(web())
+	row := rig.settle()
+	if _, err := rig.r.StopService(rig.ctx, row.ID); err != nil {
+		t.Fatal(err)
+	}
+	row = rig.settle()
+	if row.State != contract.ServiceStopped {
+		t.Fatalf("not stopped: %+v", row.Service)
+	}
+	if _, err := rig.r.RestartServiceUnit(rig.ctx, row); err != nil {
+		t.Fatal(err)
+	}
+	row = rig.settle()
+	if row.Want != contract.ServiceWantRun || row.State != contract.ServiceRunning || rig.host.Service.Units[row.ID].State != box.UnitRunning {
+		t.Fatalf("restart left intent/state inconsistent with running unit: %+v unit=%+v", row.Service, rig.host.Service.Units[row.ID])
+	}
+}
+
+func TestServicePlacementHoldsItsImageEstimateInThePassAndTheStore(t *testing.T) {
+	rig := newServiceRig(t)
+	rig.sql("UPDATE hosts SET disk_floor=0,disk_bytes=1610612736") // 1.5 GiB: only one unknown 1 GiB image fits
+	rig.sql("UPDATE boxes SET state='deleted'")
+	for i, image := range []string{digestImage, digestImage2} {
+		rig.declare(contract.ServiceSpec{Name: contract.ServiceName(fmt.Sprintf("svc%d", i)), Image: image, Disk: "0GiB"})
+	}
+	hosts, err := rig.st.Hosts(rig.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	boxes, err := rig.st.Boxes(rig.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rig.r.servicePass(rig.ctx, hosts, boxes); err != nil {
+		t.Fatal(err)
+	}
+	rig.r.Wait()
+	placed := 0
+	for _, row := range rig.rows() {
+		if row.Host != "" {
+			placed++
+		}
+	}
+	if placed != 1 {
+		t.Errorf("placed %d unknown 1GiB images with only 1.5GiB available", placed)
+	}
+	holds, err := rig.st.ServiceHolds(rig.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(holds) != 1 || holds[0].DiskBytes != contract.ServiceImageEstimate {
+		t.Errorf("image estimate not persisted as a disk hold: %+v", holds)
+	}
+}
+
+func TestServiceDeployRechecksCurrentDiskBeforePullingOrBuilding(t *testing.T) {
+	for _, image := range []string{digestImage, "app"} {
+		t.Run(image, func(t *testing.T) {
+			rig := newServiceRig(t)
+			rig.sql("UPDATE boxes SET state='deleted'")
+			rig.sql("UPDATE hosts SET disk_floor=0,disk_bytes=2147483648")
+			row := rig.declare(contract.ServiceSpec{Name: "web", Image: image, Disk: "0GiB"})
+			hosts, err := rig.st.Hosts(rig.ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := rig.r.servicePass(rig.ctx, hosts, nil); err != nil {
+				t.Fatal(err)
+			}
+			rig.r.Wait()                                     // placed only; no deploy launched in this pass
+			rig.sql("UPDATE hosts SET disk_bytes=536870912") // shrinks below the reserved estimate before the image phase
+			row = rig.settle()
+			if row.State != contract.ServicePending || row.Reason != contract.ServiceNoDisk || row.Deployed != 0 || count(rig.host.Calls, fakehost.PullService) != 0 || count(rig.host.Calls, fakehost.ImageSize) != 0 {
+				t.Fatalf("full-disk deploy was not held before the image step: %+v calls=%v", row.Service, rig.host.Calls)
+			}
+			rig.sql("UPDATE hosts SET disk_bytes=2147483648")
+			if row = rig.settle(); row.State != contract.ServiceRunning {
+				t.Fatalf("no retry after disk returned: %+v", row.Service)
+			}
+		})
+	}
+}
+
+func TestSuccessfulServiceShrinkReleasesOldResourcesAndPorts(t *testing.T) {
+	rig := newServiceRig(t)
+	spec := web()
+	spec.CPUs, spec.Memory, spec.Disk = 8, "8GiB", "8GiB"
+	spec.Ports = []contract.ServicePort{"8080"}
+	rig.declare(spec)
+	rig.settle()
+	spec.CPUs, spec.Memory, spec.Disk, spec.Ports, spec.Image = .25, "512MiB", "0GiB", []contract.ServicePort{"8081"}, digestImage2
+	rig.declare(spec)
+	row := rig.settle()
+	if row.CPUMilli != 250 || row.MemBytes != 512<<20 || row.DiskBytes != 0 || row.Reason != "" || row.ImageRef != digestImage2 {
+		t.Fatalf("successful shrink did not replace the hold: %+v", row.Service)
+	}
+	if row.Live == nil || row.Live.Ports[0].Host != 8081 {
+		t.Fatalf("live declaration not replaced: %+v", row.Live)
+	}
+	other := contract.ServiceSpec{Name: "oldport", Image: digestImage, CPUs: 8, Ports: []contract.ServicePort{"8080"}, Host: "h"}
+	rig.declare(other)
+	rig.settle()
+	if row := rig.rows()["oldport"]; row.State != contract.ServiceRunning {
+		t.Fatalf("old resources/port still held: %+v", row.Service)
+	}
+}
