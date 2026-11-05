@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clearRequest, duration, numberChange, overrides, profileChoices, profilesChange, scopeKey, scopeLine, scopeName, scopeOrder, serial, setRequest, source,
+import { refusedSetting, clearRequest, duration, numberChange, overrides, profileChoices, profilesChange, scopeKey, scopeLine, scopeName, scopeOrder, serial, setRequest, source,
   valueText, workflowChips, workflowSummary } from "./workflows.ts";
 import type { WorkflowEffective, WorkflowScope, WorkflowSetting, WorkflowSettings } from "./contract.gen.ts";
 
@@ -147,4 +147,15 @@ test("changes go one at a time in the order they were made, and a refused one do
   assert.equal(await second, "b");
   assert.deepEqual(seen, ["start a", "end a", "start b", "end b"]);
   assert.equal(run.pending(), 0);
+});
+
+test("a refusal shows under the setting the engine names, else the one the request sets or clears", () => {
+  assert.equal(refusedSetting({ room: "r1", set: { maxRuns: 10001 } }), "maxRuns");
+  assert.equal(refusedSetting({ set: { timeout: 0 } }), "timeout");
+  assert.equal(refusedSetting({ set: { worktree: false } }), "worktree");
+  assert.equal(refusedSetting({ set: { profiles: ["gone"] } }), "profiles");
+  assert.equal(refusedSetting({ room: "r1", set: {}, clear: ["size"] }), "size");
+  assert.equal(refusedSetting({ set: { start: "off" } }, "start"), "start");
+  assert.equal(refusedSetting({ set: { maxRuns: 2 } }, "profiles"), "profiles");
+  assert.equal(refusedSetting({ set: {} }), undefined);
 });

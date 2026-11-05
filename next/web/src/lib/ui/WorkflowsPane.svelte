@@ -2,7 +2,7 @@
   import { onMount, type Snippet } from "svelte";
   import { APIError, call, SignedOut } from "../client.ts";
   import { boxSizes, clearRequest, duration, maxCount, maxTimeout, numberChange, overrides, profileChoices, profilesChange, scopeKey, scopeLine, scopeName, scopeOrder,
-    serial, setRequest, settingShape, source, starterOrder, starters, valueText, workflowChips, workflowSummary } from "../workflows.ts";
+    refusedSetting, serial, setRequest, settingShape, source, starterOrder, starters, valueText, workflowChips, workflowSummary } from "../workflows.ts";
   import type { ProfileName, WorkflowScope, WorkflowSetRequest, WorkflowSetting, WorkflowSettingInfo, WorkflowSettingsResponse } from "../contract.gen.ts";
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
@@ -53,7 +53,8 @@
     if (problem?.key === key) problem = undefined;
     void queue(async () => { await call("workflow.set", request); return read(); }).then(answer => { if (answer) { settings = answer; failed = false; } }, (reason: unknown) => {
       back?.();
-      if (!gone(reason) && selected === key) problem = { key, setting, text: words(reason) };
+      const about = refusedSetting(request, reason instanceof APIError ? reason.detail.workflow?.setting : undefined) ?? setting;
+      if (!gone(reason) && selected === key) problem = { key, setting: about, text: words(reason) };
     });
   }
   const now = (scope: WorkflowScope) => items?.find(each => scopeKey(each) === scopeKey(scope))?.effective ?? scope.effective;
