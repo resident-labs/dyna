@@ -60,6 +60,12 @@ export function waitingLabel(wait: SessionWaiting): string {
 
 export type Counts = Record<Status, number> & { sessions: number };
 
+// Each session already has one highest-priority status. Background work and
+// owner-needed sessions are separate counts, never two meanings of "waiting".
+export function sessionCountsLine(counts: Counts): string {
+  return [counts.working && `${counts.working} working`, counts.background && `${counts.background} waiting`, counts.waiting && `${counts.waiting} ${counts.waiting === 1 ? "needs" : "need"} you`].filter(Boolean).join(" · ");
+}
+
 export function countOf(all: Iterable<Status>): Counts {
   const counts: Counts = { sessions: 0, waiting: 0, failed: 0, working: 0, background: 0, idle: 0 };
   for (const status of all) { counts.sessions++; counts[status]++; }
