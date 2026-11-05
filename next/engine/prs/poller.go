@@ -20,14 +20,21 @@ const (
 	ciGrace = 10 * time.Minute
 )
 
+// headSeen is a default-branch head and when a pass first read it.
+type headSeen struct {
+	Head string
+	At   time.Time
+}
+
 // Poller reads the feeds of each repository a room lists or a tracked PR or issue sits on (spec 7.7).
 type Poller struct {
 	Store  *store.Store
 	GitHub *Client
 	Now    func() time.Time
 
-	last   map[contract.RepoName]time.Time // when each repository was last read
-	failed map[contract.RepoName]string    // the last error logged for each, so a repository that stays broken logs once
+	last     map[contract.RepoName]time.Time // when each repository was last read
+	failed   map[contract.RepoName]string    // the last error logged for each, so a repository that stays broken logs once
+	headSeen map[contract.RepoName]headSeen  // the default-branch head each repository showed and when this engine first read it, for the grace of a head with no checks yet
 }
 
 // Run runs a pass on each tick until ctx ends.
@@ -47,7 +54,7 @@ func (p *Poller) Run(ctx context.Context, ticks <-chan time.Time) {
 // due lists the repositories to read now. That is every one of them, until the quota runs low.
 func (p *Poller) due(repos map[contract.RepoName]bool) []contract.RepoName {
 	if p.last == nil {
-		p.last, p.failed = map[contract.RepoName]time.Time{}, map[contract.RepoName]string{}
+		p.last, p.failed, p.headSeen = map[contract.RepoName]time.Time{}, map[contract.RepoName]string{}, map[contract.RepoName]headSeen{}
 	}
 	now := p.Now()
 	_, low := p.GitHub.Low()
@@ -75,7 +82,7 @@ func reopens(items []contract.GitHubItem) bool {
 
 // repository reads one repository's feeds and works out what they mean. A failure anywhere keeps its cursors unmoved, so the
 // next pass reads the same news again.
-func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls []store.TrackedPR, issues []store.TrackedIssue, heads map[contract.RepoName]string, feeds map[string]store.GitHubFeed) (store.GitHubPass, error) {
+func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls []store.TrackedPR, issues []store.TrackedIssue, heads map[contract.RepoName]store.RepoState, feeds map[string]store.GitHubFeed) (store.GitHubPass, error) {
 	var pass store.GitHubPass
 	probe, err := p.GitHub.Probe(ctx, repo, feeds)
 	if err != nil {
@@ -133,8 +140,27 @@ func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls [
 			pass.Items = append(pass.Items, item)
 		}
 	}
-	if stored, listed := heads[repo]; listed && probe.Main != "" && probe.Main != stored {
+	stored, listed := heads[repo]
+	if listed && probe.Main != "" && probe.Main != stored.Head {
 		pass.Heads = append(pass.Heads, store.RepoHead{Repo: repo, Head: probe.Main})
+	}
+	// The CI of the newest head, read while it is not settled (spec 7.7). A repository whose first head is not stored yet has none to read.
+	head := stored.Head
+	if probe.Main != "" {
+		head = probe.Main
+	}
+	if listed && stored.Head != "" && probe.Branch != "" && head != stored.CISettled {
+		if p.headSeen[repo].Head != head {
+			p.headSeen[repo] = headSeen{Head: head, At: now}
+		}
+		ci, err := p.GitHub.CommitCI(ctx, repo, head)
+		if err != nil {
+			return pass, err
+		}
+		// A head with no checks may be one GitHub has not started them for, so none settles it only after the grace.
+		if ci.Result == contract.PrCISuccess || ci.Result == contract.PrCIFailure || ci.Result == contract.PrCINone && !now.Before(p.headSeen[repo].At.Add(ciGrace)) {
+			pass.MainCIs = append(pass.MainCIs, store.MainCI{Repo: repo, Branch: probe.Branch, Head: head, Result: ci.Result, Runs: ci.Runs})
+		}
 	}
 	pass.Feeds = probe.Feeds
 	return pass, nil
@@ -204,10 +230,11 @@ func (p *Poller) Pass(ctx context.Context) error {
 		pass.PRs = append(pass.PRs, found.PRs...)
 		pass.Issues = append(pass.Issues, found.Issues...)
 		pass.Heads = append(pass.Heads, found.Heads...)
+		pass.MainCIs = append(pass.MainCIs, found.MainCIs...)
 		pass.Feeds = append(pass.Feeds, found.Feeds...)
 		pass.Items = append(pass.Items, found.Items...)
 	}
-	if len(pass.PRs)+len(pass.Issues)+len(pass.Heads)+len(pass.Feeds)+len(pass.Items) == 0 {
+	if len(pass.PRs)+len(pass.Issues)+len(pass.Heads)+len(pass.MainCIs)+len(pass.Feeds)+len(pass.Items) == 0 {
 		return nil
 	}
 	return p.Store.ApplyPRPoll(ctx, pass, p.Now())
