@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 92
+const schemaVersion = 93
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
@@ -84,6 +84,8 @@ var steps = map[int][]string{
 	},
 	// The owner's workflow settings: one row for the global scope (room '') and one for each room that overrides it.
 	91: {`CREATE TABLE workflow_settings (room TEXT PRIMARY KEY, settings TEXT NOT NULL)`},
+	// A room's githubWrites setting (spec 7.9), JSON; `{}` is off.
+	92: {`ALTER TABLE rooms ADD COLUMN github_writes TEXT NOT NULL DEFAULT '{}'`},
 	81: {
 		`ALTER TABLE hosts ADD COLUMN create_failures INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE hosts ADD COLUMN create_problem TEXT NOT NULL DEFAULT ''`,

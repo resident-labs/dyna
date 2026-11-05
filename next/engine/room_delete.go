@@ -76,18 +76,35 @@ func (s *Service) HostSet(ctx context.Context, caller contract.Principal, req co
 // RoomSet changes a room's settings. Only the owner does, and an unset one stays.
 func (s *Service) RoomSet(ctx context.Context, caller contract.Principal, req contract.RoomSetRequest) (contract.RoomSetResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalOwner {
+		if req.GitHubWrites != nil {
+			return contract.RoomSetResponse{}, githubWritesRefusal(contract.ErrForbidden, contract.GitHubWriteOwnerOnly, "only the owner changes a room's githubWrites setting")
+		}
 		return contract.RoomSetResponse{}, forbidden()
 	}
-	if len(req.RootApproves) == 0 {
-		return contract.RoomSetResponse{}, invalid("set rootApproves")
+	if len(req.RootApproves) == 0 && req.GitHubWrites == nil {
+		return contract.RoomSetResponse{}, invalid("set rootApproves or githubWrites")
 	}
 	for kind := range req.RootApproves {
 		if !slices.Contains(contract.AllRootApprovals, kind) {
 			return contract.RoomSetResponse{}, invalid(fmt.Sprintf("rootApproves has no kind %q; the kinds are %v", kind, contract.AllRootApprovals))
 		}
 	}
-	if err := s.store.SetRoomRootApproves(ctx, req.Room, req.RootApproves); err != nil {
-		return contract.RoomSetResponse{}, failure(err)
+	var writes contract.GitHubWrites
+	if req.GitHubWrites != nil {
+		var refusal *contract.Error
+		if writes, refusal = s.checkedGitHubWrites(ctx, req.Room, *req.GitHubWrites); refusal != nil {
+			return contract.RoomSetResponse{}, refusal
+		}
+	}
+	if len(req.RootApproves) > 0 {
+		if err := s.store.SetRoomRootApproves(ctx, req.Room, req.RootApproves); err != nil {
+			return contract.RoomSetResponse{}, failure(err)
+		}
+	}
+	if req.GitHubWrites != nil {
+		if err := s.store.SetRoomGitHubWrites(ctx, req.Room, writes); err != nil {
+			return contract.RoomSetResponse{}, failure(err)
+		}
 	}
 	return contract.RoomSetResponse{}, nil
 }

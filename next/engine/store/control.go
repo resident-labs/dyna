@@ -132,3 +132,36 @@ func (s *Store) MarkTurnActive(ctx context.Context, session contract.SessionID, 
 		return err
 	})
 }
+
+// RoomGitHubWrites reads a room's githubWrites setting as stored: its repos may hold `*`. A room with none set has no groups.
+func (s *Store) RoomGitHubWrites(ctx context.Context, room contract.RoomID) (contract.GitHubWrites, error) {
+	var stored string
+	var writes contract.GitHubWrites
+	if err := s.Read().QueryRowContext(ctx, "SELECT github_writes FROM rooms WHERE id=?", room).Scan(&stored); err != nil {
+		return writes, err
+	}
+	return writes, json.Unmarshal([]byte(stored), &writes)
+}
+
+// SetRoomGitHubWrites replaces an open room's githubWrites setting with values the engine has checked. A setting with no groups
+// is stored as off.
+func (s *Store) SetRoomGitHubWrites(ctx context.Context, room contract.RoomID, writes contract.GitHubWrites) error {
+	stored := []byte("{}")
+	if writes.On() {
+		var err error
+		if stored, err = json.Marshal(writes); err != nil {
+			return err
+		}
+	}
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "UPDATE rooms SET github_writes=? WHERE id=? AND state='open'", string(stored), room)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err == nil && n == 0 {
+			return ErrRoomNotFound
+		}
+		return err
+	})
+}

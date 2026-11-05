@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/githubwrites"
 	"github.com/resident-labs/dyna/engine/prs"
 )
 
@@ -201,5 +203,80 @@ func TestLowQuotaSaysWhen(t *testing.T) {
 	}
 	if _, low := pulls.Low(); low {
 		t.Fatal("the feeds slowed at 30%")
+	}
+}
+
+// The tools a box is offered are the reads and the write tools of the groups its room has on, and a PR edit's schema has no
+// argument the transport refuses.
+func TestWriteToolsFollowTheRoomsGroups(t *testing.T) {
+	ctx := context.Background()
+	handler, err := Handler(ctx, "engine-token", http.DefaultTransport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var grant contract.GitHubWrites
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler.ServeHTTP(w, r.WithContext(githubwrites.WithAllowed(r.Context(), grant)))
+	}))
+	t.Cleanup(server.Close)
+	list := func(g contract.GitHubWrites) map[string]*mcp.Tool {
+		grant = g
+		session, err := mcp.NewClient(&mcp.Implementation{Name: "pi", Version: "test"}, nil).Connect(ctx, &mcp.StreamableClientTransport{Endpoint: server.URL}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer session.Close()
+		listed, err := session.ListTools(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tools := map[string]*mcp.Tool{}
+		for _, tool := range listed.Tools {
+			tools[tool.Name] = tool
+		}
+		return tools
+	}
+	writes := func(tools map[string]*mcp.Tool) []string {
+		var names []string
+		for name, tool := range tools {
+			if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {
+				names = append(names, name)
+			}
+		}
+		slices.Sort(names)
+		return names
+	}
+	if got := writes(list(contract.GitHubWrites{})); len(got) != 0 {
+		t.Fatalf("setting off offers %v", got)
+	}
+	for _, group := range []contract.GitHubWriteGroup{contract.GitHubWriteIssues, contract.GitHubWritePulls, contract.GitHubWriteProjects} {
+		grant := contract.GitHubWrites{Repos: []contract.RepoName{"o/r"}, Groups: []contract.GitHubWriteGroup{group}}
+		want := githubwrites.ToolNames(grant)
+		slices.Sort(want)
+		if got := writes(list(grant)); !slices.Equal(got, want) || len(want) == 0 {
+			t.Errorf("%s offers %v, want %v", group, got, want)
+		}
+	}
+	all := contract.GitHubWrites{Repos: []contract.RepoName{"o/r"}, Groups: []contract.GitHubWriteGroup{contract.GitHubWriteIssues, contract.GitHubWritePulls, contract.GitHubWriteProjects}}
+	tools := list(all)
+	for _, never := range []string{"merge_pull_request", "create_or_update_file", "push_files", "delete_file", "create_branch", "actions_run_trigger", "create_pull_request", "create_repository_ruleset"} {
+		if tools[never] != nil {
+			t.Errorf("%s is offered with every group on", never)
+		}
+	}
+	edit := tools["update_pull_request"]
+	if edit == nil {
+		t.Fatal("pulls offers no update_pull_request")
+	}
+	properties := edit.InputSchema.(map[string]any)["properties"].(map[string]any)
+	for _, param := range githubwrites.StrippedParams["update_pull_request"] {
+		if _, ok := properties[param]; ok {
+			t.Errorf("update_pull_request offers %s", param)
+		}
+	}
+	for _, param := range []string{"title", "body"} {
+		if _, ok := properties[param]; !ok {
+			t.Errorf("update_pull_request lacks %s", param)
+		}
 	}
 }
