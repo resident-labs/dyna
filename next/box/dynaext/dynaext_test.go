@@ -39,6 +39,11 @@ func newSession(t *testing.T, script ...[]pigtest.Block) *session {
 
 // newSessionOn is newSession on the named model of pigtest.AgentDir.
 func newSessionOn(t *testing.T, model string, extra []extension.InlineExtension, script ...[]pigtest.Block) *session {
+	return newSessionSubmit(t, model, extra, nil, script...)
+}
+
+// newSessionSubmit is newSessionOn for a schema step's worker, which has the submit tool when judge is set.
+func newSessionSubmit(t *testing.T, model string, extra []extension.InlineExtension, judge Submit, script ...[]pigtest.Block) *session {
 	t.Helper()
 	b := &session{model: pigtest.NewModel(script...), dir: t.TempDir()}
 	dyna, err := dynamcp.New(func(_ context.Context, method contract.Method, body []byte) ([]byte, *contract.Error) {
@@ -65,7 +70,7 @@ func newSessionOn(t *testing.T, model string, extra []extension.InlineExtension,
 		AgentDir:   agentDir,
 		SessionDir: filepath.Join(agentDir, "sessions"),
 		Model:      contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: model, Thinking: contract.ThinkingLow},
-		Extensions: append([]extension.InlineExtension{Extension(Config{Dir: b.dir, Shell: server, Dyna: dyna})}, extra...),
+		Extensions: append([]extension.InlineExtension{Extension(Config{Dir: b.dir, Shell: server, Dyna: dyna, Submit: judge})}, extra...),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -419,5 +424,37 @@ func TestACodemodeExposureToolIsUnloadedAtACompaction(t *testing.T) {
 	b.turn(t, "again")
 	if got := b.last(t); slices.Contains(got, "helper") || !slices.Contains(got, "mcp__dyna__goal") {
 		t.Fatalf("declared %v", got)
+	}
+}
+
+// A schema step's worker is declared the submit tool directly, a valid submit ends its turn with no further request, and an
+// invalid one goes back as the result so the turn goes on. A worker without a schema has no such tool.
+func TestSubmitIsDeclaredOnlyForASchemaWorkerAndAValidOneEndsTheTurn(t *testing.T) {
+	plain := newSession(t, []pigtest.Block{{Text: "ok"}})
+	plain.turn(t, "hi")
+	if names := toolNames(t, plain.model.Requests()[0]); slices.Contains(names, "submit") {
+		t.Fatalf("a worker without a schema has %v", names)
+	}
+	var paths []string
+	judge := func(path string) (string, bool, error) {
+		paths = append(paths, path)
+		if len(paths) == 1 {
+			return "schema errors: count", false, nil
+		}
+		return "Submitted.", true, nil
+	}
+	b := newSessionSubmit(t, "test-model", nil, judge,
+		[]pigtest.Block{{Tool: "submit", Input: `{"path":"out.json"}`}},
+		[]pigtest.Block{{Tool: "submit", Input: `{"path":"out.json"}`}},
+		[]pigtest.Block{{Text: "never asked"}})
+	result := b.turn(t, "write it")
+	if names := toolNames(t, b.model.Requests()[0]); !slices.Contains(names, "submit") {
+		t.Fatalf("a schema worker has %v", names)
+	}
+	if got := b.toolResult(t, 1); !strings.Contains(got, "schema errors: count") {
+		t.Fatalf("the invalid submit's result %s", got)
+	}
+	if len(b.model.Requests()) != 2 || len(paths) != 2 || result.Outcome != contract.TurnCompleted {
+		t.Fatalf("%d requests, paths %v, result %+v", len(b.model.Requests()), paths, result)
 	}
 }
