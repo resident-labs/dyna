@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,9 +17,10 @@ import (
 type Load struct {
 	CPUUsed                                float64
 	MemBytes, MemUsed, DiskBytes, DiskUsed int64
-	ShareUp                                bool // The host's shared mount is up.
-	CPUs                                   int  // Cores of an exec-only host's whole machine; zero on other hosts and when it printed none.
-	ExecOnly                               bool // An exec-only host: the figures are the whole machine's, for display only.
+	ShareUp                                bool            // The host's shared mount is up.
+	CPUs                                   int             // Cores of an exec-only host's whole machine; zero on other hosts and when it printed none.
+	ExecOnly                               bool            // An exec-only host: the figures are the whole machine's, for display only.
+	GPUs                                   *[]contract.GPU // The cards the host has, when this beat probed for them: none is a probe that found none.
 }
 
 // LocalDisk reads the disk at path on this machine with the host probe. It returns zeros when the probe fails.
@@ -64,7 +67,7 @@ const masterCheck = 5 * time.Second
 // only too busy to run the probe in time. A host that is really gone stops answering them, and the master ends.
 // Each good probe also reads the dyna budget slices and calls onPressure once per episode. The caller owns the ticks.
 func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box.Layout, report func(reachable bool, load Load), onPressure func(slice string, kind contract.PressureKind)) {
-	misses, busy := 0, false
+	misses, busy, beats := 0, false, 0
 	seen := make(map[string]*slicePressure)
 	var prevTime time.Time
 	var prevCPU, prevBusy, prevTotal int64
@@ -76,12 +79,16 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box
 		case now := <-ticks:
 			probeCtx, cancel := context.WithTimeout(ctx, heartbeatProbe)
 			execOnly := h.execOnly != nil && h.execOnly()
+			probe := "-"
+			if beats%gpuProbeEvery == 0 {
+				probe = "gpu"
+			}
 			var out []byte
 			var err error
 			if execOnly {
 				out, err = h.runUnbounded(probeCtx, nil, "bash", "-c", execOnlyScript)
 			} else {
-				out, err = h.runUnbounded(probeCtx, nil, "bash", "-c", heartbeatScript, "dyna", layout.HostData, layout.HostShareMount())
+				out, err = h.runUnbounded(probeCtx, nil, "bash", "-c", heartbeatScript, "dyna", layout.HostData, layout.HostShareMount(), probe)
 			}
 			cancel()
 			if err != nil {
@@ -103,6 +110,12 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box
 				continue
 			}
 			misses, busy = 0, false
+			load.GPUs = nil
+			if probe == "gpu" && !execOnly {
+				gpus := parseGPUs(out)
+				load.GPUs = &gpus
+			}
+			beats++
 			if execOnly {
 				load = Load{ExecOnly: true}
 				load.DiskBytes, load.DiskUsed = parseDisk(out)
@@ -159,4 +172,49 @@ func (h *Host) answering(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, masterCheck)
 	defer cancel()
 	return h.control(ctx, "check") == nil
+}
+
+// gpuProbeEvery is how many good beats pass between GPU probes, the first beat included: about five minutes at 10 s a beat.
+const gpuProbeEvery = 30
+
+// gpuScript prints the cards CDI offers and what nvidia-smi says of them, when the beat's third argument is gpu. Either tool may be
+// missing, and a host without a card prints nothing.
+const gpuScript = `if [ "$3" = gpu ]; then
+nvidia-ctk cdi list 2>/dev/null | sed -n 's|^nvidia.com/gpu=\([0-9][0-9]*\)$|dyna-gpu-cdi \1|p'
+nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader,nounits 2>/dev/null | sed 's|^|dyna-gpu |'
+fi
+`
+
+// parseGPUs reads gpuScript's output. A card counts when CDI lists it, so a container can have it; nvidia-smi gives its name and
+// memory, and a card it does not report has memory 0, which no request fits.
+func parseGPUs(out []byte) []contract.GPU {
+	offered := map[int]bool{}
+	reported := map[int]contract.GPU{}
+	for _, line := range strings.Split(string(out), "\n") {
+		if text, ok := strings.CutPrefix(line, "dyna-gpu-cdi "); ok {
+			if index, err := strconv.Atoi(text); err == nil {
+				offered[index] = true
+			}
+		} else if text, ok := strings.CutPrefix(line, "dyna-gpu "); ok {
+			fields := strings.Split(text, ", ")
+			if len(fields) != 3 {
+				continue
+			}
+			index, indexErr := strconv.Atoi(fields[0])
+			mib, memErr := strconv.ParseInt(fields[2], 10, 64)
+			if indexErr == nil && memErr == nil {
+				reported[index] = contract.GPU{Index: index, Name: fields[1], MemBytes: mib << 20}
+			}
+		}
+	}
+	var gpus []contract.GPU
+	for index := range offered {
+		card, ok := reported[index]
+		if !ok {
+			card = contract.GPU{Index: index}
+		}
+		gpus = append(gpus, card)
+	}
+	slices.SortFunc(gpus, func(a, b contract.GPU) int { return a.Index - b.Index })
+	return gpus
 }

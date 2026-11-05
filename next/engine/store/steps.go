@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 90
+const schemaVersion = 91
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
@@ -75,6 +75,12 @@ var steps = map[int][]string{
 		`CREATE TABLE session_branches (repo TEXT NOT NULL, branch TEXT NOT NULL, session TEXT NOT NULL REFERENCES sessions(id), created_at INTEGER NOT NULL, PRIMARY KEY(repo, branch, session))`,
 		`CREATE INDEX session_branches_session ON session_branches(session)`,
 		`INSERT INTO session_branches(repo,branch,session,created_at) SELECT repo,'v2/'||id,id,created_at FROM sessions WHERE repo!=''`,
+	},
+	// A host reports its GPUs, and a box keeps the VRAM it asked of a card and the card it was given.
+	90: {
+		`ALTER TABLE hosts ADD COLUMN gpus TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE boxes ADD COLUMN gpu_gib INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE boxes ADD COLUMN gpu_index INTEGER NOT NULL DEFAULT 0`,
 	},
 	81: {
 		`ALTER TABLE hosts ADD COLUMN create_failures INTEGER NOT NULL DEFAULT 0`,

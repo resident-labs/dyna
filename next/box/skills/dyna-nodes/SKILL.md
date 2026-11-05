@@ -142,3 +142,14 @@ CI runners go where boxes go, through the same admission, and balance by themsel
 - A room's rule holds its repository's runners too, and a job no host takes waits for a node of the pool the rule names.
 
 To change this, a root asks the owner with the owner op: `dyna host set NAME --ci on|off` for one host, and `dyna room hosts ROOM --only ...` or `--clear` for a room's rule. Check `dyna host list` first.
+
+## A host with a GPU
+
+A host offers its cards to boxes once its NVIDIA Container Toolkit is set up, which is a one-time step on that host, as the user that runs Podman:
+
+```
+sudo apt install nvidia-container-toolkit   # or the distribution's package; the NVIDIA driver is already there
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+```
+
+Dyna reads the cards from `nvidia-ctk cdi list` and their names and memory from `nvidia-smi`, on the first good heartbeat and about every five minutes after, so a new card shows within minutes. Settings > Hosts lists each card with its memory and the VRAM boxes asked of it. The spec file, `/etc/cdi/nvidia.yaml`, names the cards by index and goes stale when the driver or the cards change, so the same `nvidia-ctk cdi generate` runs again after either. A node pool does not bring GPUs: a box that asks for one waits for a host that has a card.

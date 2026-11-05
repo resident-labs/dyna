@@ -830,8 +830,9 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	}})
 	var roomID, name, profile, goal, doneWhen, brief, sessionRepo, parent, size, composeName string
 	var sameHost bool
+	var gpu int
 	start := &cobra.Command{Use: "start", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		r, err := getClient().SessionStart(cmd.Context(), contract.SessionStartRequest{Room: contract.RoomID(roomID), Name: name, Parent: contract.SessionID(parent), Repo: contract.RepoName(sessionRepo), Profile: contract.ProfileName(profile), Goal: goal, DoneWhen: doneWhen, Brief: brief, Size: contract.BoxSizeName(size), SameHost: sameHost, Compose: composeName})
+		r, err := getClient().SessionStart(cmd.Context(), contract.SessionStartRequest{Room: contract.RoomID(roomID), Name: name, Parent: contract.SessionID(parent), Repo: contract.RepoName(sessionRepo), Profile: contract.ProfileName(profile), Goal: goal, DoneWhen: doneWhen, Brief: brief, Size: contract.BoxSizeName(size), SameHost: sameHost, Compose: composeName, GPU: contract.GPUGiB(gpu)})
 		if err == nil {
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), r.Session)
 		}
@@ -848,6 +849,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	start.Flags().StringVar(&size, "size", "", "Box size for a lead: agent, small, medium or large")
 	start.Flags().BoolVar(&sameHost, "same-host", false, "Place the box on its parent’s host")
 	start.Flags().StringVar(&composeName, "compose", "", "Compose file, by name; without it the file named default, if any")
+	start.Flags().IntVar(&gpu, "gpu", 0, "GiB of GPU memory the box asks for on a host card; 0 asks for none")
 	closeCmd := &cobra.Command{Use: "close SESSION", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		closed, err := getClient().SessionClose(cmd.Context(), contract.SessionCloseRequest{Session: contract.SessionID(args[0])})
 		if err == nil && len(closed.Handed) > 0 {
