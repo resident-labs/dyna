@@ -25,7 +25,7 @@ func TestWorkflowPostDataBoundary(t *testing.T) {
 			s.SetLayout(box.Layout{Data: t.TempDir()})
 			data := `"` + strings.Repeat("x", size-2) + `"`
 			var req contract.PostRequest
-			if err := json.Unmarshal([]byte(fmt.Sprintf(`{"room":%q,"text":"summary","mentions":["root"],"clientId":"stable","data":%s}`, room, data)), &req); err != nil {
+			if err := json.Unmarshal([]byte(fmt.Sprintf(`{"room":%q,"text":"summary","mentions":["root"],"clientId":"stable","data":%q}`, room, data)), &req); err != nil {
 				t.Fatal(err)
 			}
 			caller := contract.Principal{Kind: contract.PrincipalSession, Session: worker}
@@ -44,7 +44,9 @@ func TestWorkflowPostDataBoundary(t *testing.T) {
 			wire, _ := json.Marshal(event.Body)
 			var body map[string]json.RawMessage
 			_ = json.Unmarshal(wire, &body)
-			if string(body["data"]) != data {
+			var encodedData string
+			_ = json.Unmarshal(body["data"], &encodedData)
+			if encodedData != data {
 				t.Fatalf("data lost: %s", wire)
 			}
 			if size > 1024 && string(body["dataAttachment"]) != "0" {
@@ -92,7 +94,7 @@ func TestWorkflowPostDataValues(t *testing.T) {
 			s, room, worker, ctx := setup(t)
 			s.SetLayout(box.Layout{Data: t.TempDir()})
 			var req contract.PostRequest
-			_ = json.Unmarshal([]byte(fmt.Sprintf(`{"room":%q,"text":"text","data":%s}`, room, data)), &req)
+			_ = json.Unmarshal([]byte(fmt.Sprintf(`{"room":%q,"text":"text","data":%q}`, room, data)), &req)
 			sent, p := s.Post(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, req)
 			if p != nil {
 				t.Fatal(p)
@@ -106,7 +108,9 @@ func TestWorkflowPostDataValues(t *testing.T) {
 			_ = json.Unmarshal(wire, &body)
 			var want, got any
 			_ = json.Unmarshal([]byte(data), &want)
-			_ = json.Unmarshal(body["data"], &got)
+			var encodedData string
+			_ = json.Unmarshal(body["data"], &encodedData)
+			_ = json.Unmarshal([]byte(encodedData), &got)
 			if len(body["data"]) == 0 || fmt.Sprint(got) != fmt.Sprint(want) {
 				t.Fatalf("value lost: %s", wire)
 			}
@@ -172,7 +176,7 @@ func TestWorkflowFinalDataDelivery(t *testing.T) {
 				t.Fatalf("fixture bytes %d", len(data))
 			}
 			var output contract.TurnOutputRequest
-			wire := fmt.Sprintf(`{"turn":%q,"outcome":"completed","final":%q,"data":%s}`, turn.Turn, data, data)
+			wire := fmt.Sprintf(`{"turn":%q,"outcome":"completed","final":%q,"data":%q}`, turn.Turn, data, data)
 			if err := json.Unmarshal([]byte(wire), &output); err != nil {
 				t.Fatal(err)
 			}
@@ -227,7 +231,7 @@ func TestWorkflowPostDataContractsAndForward(t *testing.T) {
 	s.SetLayout(box.Layout{Data: t.TempDir()})
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: worker}
 	for _, raw := range []json.RawMessage{nil, json.RawMessage(`null`), json.RawMessage(`[1,{"conflicts":["雪🙂"]}]`), json.RawMessage(`{"groups":[{"conflicts":["` + strings.Repeat("雪🙂", 170) + `"]}]}`)} {
-		req := contract.PostRequest{Room: room, Text: "text\n```json\n{not typed}\n```", Data: raw}
+		req := contract.PostRequest{Room: room, Text: "text\n```json\n{not typed}\n```", Data: contract.JSONData(raw)}
 		sent, p := s.Post(ctx, caller, req)
 		if p != nil {
 			t.Fatal(p)
@@ -242,8 +246,8 @@ func TestWorkflowPostDataContractsAndForward(t *testing.T) {
 		}
 		item := contract.TranscriptItem{}
 		applyTranscriptPost(&item, event)
-		text, _, files, data, err := transcriptInputBody(event)
-		if err != nil || text != req.Text || string(data) != string(post.Data) || string(item.Data) != string(post.Data) || len(files) != len(post.Attachments) {
+		text, _, files, data, associated, err := transcriptInputBody(event)
+		if err != nil || text != req.Text || string(data) != string(post.Data) || string(item.Data) != string(post.Data) || len(files) != len(post.Attachments) || (associated == nil) != (post.DataAttachment == nil) {
 			t.Fatalf("transcript data lost: %+v %s %v", item, data, err)
 		}
 		listed, p := s.EventsList(ctx, caller, contract.EventsListRequest{Room: room, Event: sent.Event, Limit: 1})
@@ -266,7 +270,7 @@ func TestWorkflowPostDataContractsAndForward(t *testing.T) {
 			t.Fatalf("forward data/files lost or duplicated: %+v", f)
 		}
 	}
-	if _, p := s.Post(ctx, caller, contract.PostRequest{Room: room, Text: "invalid", Data: json.RawMessage(`not json`)}); p == nil {
+	if _, p := s.Post(ctx, caller, contract.PostRequest{Room: room, Text: "invalid", Data: contract.JSONData(`not json`)}); p == nil {
 		t.Fatal("invalid raw data accepted")
 	}
 }
@@ -275,7 +279,7 @@ func TestWorkflowHugeTranscriptDataHasReadableReference(t *testing.T) {
 	s, room, worker, ctx := setup(t)
 	s.SetLayout(box.Layout{Data: t.TempDir()})
 	raw := json.RawMessage(`{"conflicts":["` + strings.Repeat("雪", 100000) + `"]}`)
-	sent, p := s.Post(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.PostRequest{Room: room, Text: "summary", Data: raw})
+	sent, p := s.Post(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.PostRequest{Room: room, Text: "summary", Data: contract.JSONData(raw)})
 	if p != nil {
 		t.Fatal(p)
 	}
@@ -304,7 +308,7 @@ func TestWorkflowDataNullFinalJournal(t *testing.T) {
 	w.SetLayout(box.Layout{Data: t.TempDir()})
 	started, crew := w.start(w.owner, workflowScript)
 	turn := w.turn(crew)
-	if _, p := w.TurnOutput(w.ctx, crew, contract.TurnOutputRequest{Turn: turn.Turn, Outcome: contract.TurnCompleted, Data: json.RawMessage(`null`)}); p != nil {
+	if _, p := w.TurnOutput(w.ctx, crew, contract.TurnOutputRequest{Turn: turn.Turn, Outcome: contract.TurnCompleted, Data: contract.JSONData(`null`)}); p != nil {
 		t.Fatal(p)
 	}
 	status, p := w.WorkflowStatus(w.ctx, w.owner, contract.WorkflowStatusRequest{Run: started.Run})
@@ -319,7 +323,7 @@ func TestWorkflowDataAttachmentNameCollision(t *testing.T) {
 	other := uploadFile(t, s, room, "data.json", "application/json", `{"unrelated":true}`)
 	raw := json.RawMessage(`{"conflicts":["` + strings.Repeat("x", 1100) + `"]}`)
 	caller := contract.Principal{Kind: contract.PrincipalSession, Session: worker}
-	sent, p := s.Post(ctx, caller, contract.PostRequest{Room: room, Text: "summary", Data: raw, Attachments: []contract.Attachment{other}})
+	sent, p := s.Post(ctx, caller, contract.PostRequest{Room: room, Text: "summary", Data: contract.JSONData(raw), Attachments: []contract.Attachment{other}})
 	if p != nil {
 		t.Fatal(p)
 	}
@@ -338,7 +342,7 @@ func TestWorkflowDataAttachmentContentWithWrongMedia(t *testing.T) {
 	s.SetLayout(box.Layout{Data: t.TempDir()})
 	raw := json.RawMessage(`{"value":"` + strings.Repeat("x", 1100) + `"}`)
 	other := uploadFile(t, s, room, "data.json", "text/plain", string(raw))
-	sent, p := s.Post(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.PostRequest{Room: room, Text: "summary", Data: raw, Attachments: []contract.Attachment{other}})
+	sent, p := s.Post(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.PostRequest{Room: room, Text: "summary", Data: contract.JSONData(raw), Attachments: []contract.Attachment{other}})
 	if p != nil {
 		t.Fatal(p)
 	}

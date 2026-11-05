@@ -503,7 +503,7 @@ func (s *Service) workflowOutput(ctx context.Context, run store.WorkflowRun, req
 		req.Final = "Workflow " + run.Name + " finished."
 	}
 	if state != contract.WorkflowDone {
-		req.Data, req.Attachments, req.DataAttachment = nil, nil, nil
+		req.Data, req.Attachments, req.DataAttachment = "", nil, nil
 	}
 	failed := ""
 	if summary.Failed > 0 {

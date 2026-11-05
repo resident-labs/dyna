@@ -5,7 +5,7 @@
   import PostData from "./PostData.svelte";
   import PostAttachments from "./PostAttachments.svelte";
   import PostTarget from "./PostTarget.svelte";
-  import { feedAttachments, clock, formatTime, fullTime, type Row } from "../feed.ts";
+  import { visibleAttachments, clock, formatTime, fullTime, type Row } from "../feed.ts";
   import type { Attachment, EventID, VisualCard } from "../contract.gen.ts";
   import { hue } from "../identity.ts";
   import { beginSwipe, moveSwipe, releaseSwipe, ignoredSwipeTarget, type Swipe } from "../swipe.ts";
@@ -14,7 +14,7 @@
   let { row, linked = true, last = false, author, to, root, room, navigate, onretry, ondiscard, onforward, swipeDisabled = false, belowNew = false, newest, visualEvent, onmedia }: {
     room: string; linked?: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; row: Extract<Row, { kind: "post" }>; last?: boolean; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; belowNew?: boolean; newest: Map<string, VisualCard>; visualEvent: EventID | undefined; onmedia: (position: number) => void;
   } = $props();
-  let shownAttachments = $derived(feedAttachments(row.attachments, row.dataAttachment));
+  let shownAttachments = $derived(visibleAttachments(row.attachments, row.dataAttachment));
   let distance = $state(0), dragging = $state(false), ready = $state(false);
   function swipe(node: HTMLElement) {
     let state: Swipe | null = null, id = -1, suppress = 0;

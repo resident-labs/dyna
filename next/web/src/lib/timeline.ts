@@ -56,7 +56,7 @@ export const timelineInputText = (input: TranscriptInput, full?: string): string
 
 // Dyna: A steer is an input that a running turn read, so it reads as one.
 export function steerInput(item: TranscriptItem): TranscriptInput {
-  return { id: item.event ?? item.id, seq: item.seq ?? 0, room: item.room ?? "", at: item.at, from: item.from ?? { kind: "engine" }, type: item.type ?? "post.created", text: item.text ?? "", more: item.more, data: item.data, dataRef: item.dataRef, attachments: item.attachments };
+  return { id: item.event ?? item.id, seq: item.seq ?? 0, room: item.room ?? "", at: item.at, from: item.from ?? { kind: "engine" }, type: item.type ?? "post.created", text: item.text ?? "", more: item.more, data: item.data, dataRef: item.dataRef, dataAttachment: item.dataAttachment, attachments: item.attachments };
 }
 
 import { stepTitle, titleOf, type StepKind } from "./steps.ts";
