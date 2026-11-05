@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/format"
 	"go/parser"
 	"go/token"
@@ -278,6 +279,28 @@ func (m *BoxMessage) UnmarshalJSON(data []byte) error {
 		fmt.Fprintf(&ts, "  | { type: %q; body: %s }\n", b.kind, b.name)
 	}
 	ts.WriteString(";\n")
+	// The untyped integer constants, such as the caps workflow.set holds values to, so the web takes them from here.
+	numbers := map[string]constant.Value{}
+	for _, d := range decls {
+		gd, ok := d.(*ast.GenDecl)
+		if !ok || gd.Tok != token.CONST {
+			continue
+		}
+		for _, sp := range gd.Specs {
+			v := sp.(*ast.ValueSpec)
+			if v.Type != nil || len(v.Values) != len(v.Names) {
+				continue
+			}
+			for i, n := range v.Names {
+				value := constantValue(v.Values[i], numbers)
+				if !ast.IsExported(n.Name) || value == nil || value.Kind() != constant.Int {
+					continue
+				}
+				numbers[n.Name] = value
+				fmt.Fprintf(&ts, "export const %s = %s;\n", n.Name, value.ExactString())
+			}
+		}
+	}
 	ts.WriteString("export interface MethodMap {\n")
 	for _, d := range decls {
 		gd, ok := d.(*ast.GenDecl)
@@ -308,6 +331,36 @@ func (m *BoxMessage) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(output, "../web/src/lib/contract.gen.ts"), ts.Bytes(), 0644)
+}
+
+// constantValue is an untyped constant expression of literals, earlier constants, parentheses and arithmetic, or nil.
+func constantValue(e ast.Expr, known map[string]constant.Value) constant.Value {
+	switch x := e.(type) {
+	case *ast.BasicLit:
+		if x.Kind == token.INT {
+			return constant.MakeFromLiteral(x.Value, x.Kind, 0)
+		}
+	case *ast.Ident:
+		return known[x.Name]
+	case *ast.ParenExpr:
+		return constantValue(x.X, known)
+	case *ast.BinaryExpr:
+		a, b := constantValue(x.X, known), constantValue(x.Y, known)
+		if a == nil || b == nil {
+			return nil
+		}
+		switch x.Op {
+		case token.SHL, token.SHR:
+			shift, ok := constant.Uint64Val(b)
+			if !ok {
+				return nil
+			}
+			return constant.Shift(a, x.Op, uint(shift))
+		case token.ADD, token.SUB, token.MUL:
+			return constant.BinaryOp(a, x.Op, b)
+		}
+	}
+	return nil
 }
 
 // eventDoc is the first sentence of a type's doc comment, without the name it opens with.

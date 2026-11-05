@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount, type Snippet } from "svelte";
   import { APIError, call, SignedOut } from "../client.ts";
-  import { boxSizes, clearRequest, duration, maxCount, maxTimeout, numberChange, overrides, profileChoices, profilesChange, scopeKey, scopeLine, scopeName, scopeOrder,
-    refusedSetting, serial, setRequest, settingShape, source, starterOrder, starters, workflowChips, workflowSummary } from "../workflows.ts";
+  import { boxSizes, clearRequest, duration, fieldText, limits, numberChange, overrides, profileChoices, profilesChange, scopeKey, scopeLine, scopeName, scopeOrder,
+    refusedSetting, serial, setRequest, settingShape, source, starterOrder, starters, workflowChips, workflowSummary, type NumberSetting, type Refusal } from "../workflows.ts";
   import type { ProfileName, WorkflowScope, WorkflowSetRequest, WorkflowSetting, WorkflowSettingInfo, WorkflowSettingsResponse } from "../contract.gen.ts";
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
@@ -19,8 +19,8 @@
   let settings: WorkflowSettingsResponse | undefined = $state.raw();
   let listed: ProfileName[] = $state.raw([]);
   let failed = $state(false);
-  // A refused change on the open scope, in the engine's words, under the setting it was about.
-  let problem: { key: string; setting: WorkflowSetting; text: string } | undefined = $state();
+  // A refused change on the open scope, in the engine's words, under the setting it was about, with a number field's text.
+  let problem: Refusal | undefined = $state();
   let order = $derived((settings?.settings ?? []).map(info => info.setting));
   let items = $derived(settings && scopeOrder(settings.global, settings.rooms ?? []));
   let item = $derived(items?.find(each => scopeKey(each) === selected));
@@ -46,22 +46,25 @@
   $effect.pre(() => { void selected; problem = undefined; });
 
   // Saves at once and keeps the focus; no control is disabled. A refusal shows under its setting while its scope is
-  // open; back shows the value in force again, and a number field has none, so it keeps what was typed.
-  function change(scope: WorkflowScope, setting: WorkflowSetting, request: WorkflowSetRequest | undefined, back?: () => void) {
+  // open; back shows the value in force again, and a number field keeps what was typed (typed) until the refusal goes,
+  // with the next change on the scope or another scope opened (fieldText). A change saved whose read then fails shows no
+  // refusal: the control keeps the value it was given, and the next read brings the rest.
+  function change(scope: WorkflowScope, setting: WorkflowSetting, request: WorkflowSetRequest | undefined, back?: () => void, typed?: string) {
     const key = scopeKey(scope);
     if (!request) { back?.(); return; }
     if (problem?.key === key) problem = undefined;
-    void queue(async () => { await call("workflow.set", request); return read(); }).then(answer => { if (answer) { settings = answer; failed = false; } }, (reason: unknown) => {
+    void queue(async () => { await call("workflow.set", request); return read().catch(() => undefined); }).then(answer => { if (answer) { settings = answer; failed = false; } }, (reason: unknown) => {
       back?.();
       const about = refusedSetting(request, reason instanceof APIError ? reason.detail.workflow?.setting : undefined) ?? setting;
-      if (!gone(reason) && selected === key) problem = { key, setting: about, text: words(reason) };
+      if (!gone(reason) && selected === key) problem = { key, setting: about, text: words(reason), typed: about === setting ? typed : undefined };
     });
   }
   const now = (scope: WorkflowScope) => items?.find(each => scopeKey(each) === scopeKey(scope))?.effective ?? scope.effective;
   function pickStarter(scope: WorkflowScope, select: HTMLSelectElement) {
     const value = starterOrder.find(each => each === select.value);
     const back = () => { select.value = now(scope).start; };
-    change(scope, "start", value && value !== scope.effective.start ? setRequest(scope, { setting: "start", value }) : undefined, back);
+    // A value the room inherits is set on it, as a typed number or a switch is; the value it sets already is not sent again.
+    change(scope, "start", value && !(source(scope, "start") === "here" && value === scope.effective.start) ? setRequest(scope, { setting: "start", value }) : undefined, back);
   }
   function pickSize(scope: WorkflowScope, select: HTMLSelectElement) {
     const value = boxSizes.find(each => each === select.value);
@@ -69,10 +72,10 @@
     // The engine's choice is no value: it is the unset size, so choosing it returns the size to inheriting.
     change(scope, "size", value ? setRequest(scope, { setting: "size", value }) : source(scope, "size") === "here" ? clearRequest(scope, "size") : undefined, back);
   }
-  function type(scope: WorkflowScope, setting: "maxRuns" | "maxWorkers" | "timeout", input: HTMLInputElement) {
+  function type(scope: WorkflowScope, setting: NumberSetting, input: HTMLInputElement) {
     const request = numberChange(scope, setting, input.value);
-    if (request) change(scope, setting, request);
-    else input.value = String(scope.effective[setting]);
+    if (request) change(scope, setting, request, undefined, input.value);
+    else input.value = fieldText(scope, setting, undefined);
   }
   const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
   const refused = (scope: WorkflowScope, setting: WorkflowSetting) => problem?.key === scopeKey(scope) && problem.setting === setting;
@@ -87,7 +90,7 @@
 {/snippet}
 
 {#snippet list({ drill, select }: { drill: boolean; select: (key: string, open: boolean) => void })}
-  <ItemList {items} {failed} retry={() => { failed = false; void reload(); }} key={scopeKey} text={scope => scope.room ? scopeName(scope) : ""} noun={["scope", "scopes"]} label="Workflow settings"
+  <ItemList {items} {failed} retry={() => { failed = false; void reload(); }} key={scopeKey} text={scope => scope.room ? scopeName(scope) : ""} noun={["entry", "entries"]} label="Workflow settings"
     {chips} {row} {selected} {drill} onselect={select} />
 {/snippet}
 
@@ -97,9 +100,9 @@
   {:else if setting === "size"}<select class="input" aria-label={label} value={e.size ?? ""} onchange={event => pickSize(scope, event.currentTarget)}>
       <option value="">Engine's choice</option>{#each boxSizes as value (value)}<option {value}>{capital(value)}</option>{/each}</select>
   {:else if setting === "maxRuns" || setting === "maxWorkers" || setting === "timeout"}{@const field = setting}
-    <span class="number"><input class="input" type="number" aria-label={label} min={field === "timeout" ? 1 : 0} max={field === "timeout" ? maxTimeout : maxCount} step="1" value={e[field]}
+    <span class="number"><input class="input" type="number" aria-label={label} min={limits[field][0]} max={limits[field][1]} step="1" value={fieldText(scope, field, problem)}
       aria-invalid={refused(scope, field) ? "true" : undefined} onchange={event => type(scope, field, event.currentTarget)} />
-      <span class="unit">{field === "timeout" ? duration(e.timeout) : e[field] ? "" : "No limit"}</span></span>
+      <span class="unit">{refused(scope, field) ? "" : field === "timeout" ? duration(e.timeout) : e[field] ? "" : "No limit"}</span></span>
   {:else if setting === "profiles"}<span class="value">{e.profiles?.length ? plural(e.profiles.length, "profile", "profiles") : "All profiles"}</span>
   {:else}<input type="checkbox" role="switch" aria-label={label} checked={e[setting]}
       onchange={event => { const box = event.currentTarget; change(scope, setting, setRequest(scope, { setting, value: box.checked }), () => { box.checked = now(scope)[setting]; }); }} />
@@ -108,9 +111,15 @@
 
 {#snippet setting(scope: WorkflowScope, info: WorkflowSettingInfo)}{@const where = source(scope, info.setting)}
   <div class="set">
-    <span class="name">{settingShape[info.setting].label} <span class="from" class:here={where === "here"}>{from[where]}</span></span>
-    {@render control(scope, info.setting)}
-    <span class="help">{info.help}</span>
+    {#if settingShape[info.setting].kind === "switch"}
+      <!-- The whole row flips the switch, as the other pages' switch rows do; Use global sits outside the label. -->
+      <label class="flip"><span class="name">{settingShape[info.setting].label} <span class="from" class:here={where === "here"}>{from[where]}</span></span>
+        {@render control(scope, info.setting)}<span class="help">{info.help}</span></label>
+    {:else}
+      <span class="name">{settingShape[info.setting].label} <span class="from" class:here={where === "here"}>{from[where]}</span></span>
+      {@render control(scope, info.setting)}
+      <span class="help">{info.help}</span>
+    {/if}
     {#if info.setting === "profiles"}<span class="more boxes" role="group" aria-label="Profiles">{#each profileChoices(listed, scope.effective) as choice (choice.name)}
       <label class="pick"><input type="checkbox" checked={choice.on}
         onchange={event => { const box = event.currentTarget; change(scope, "profiles", profilesChange(scope, listed, choice.name, box.checked), () => { box.checked = profileChoices(listed, now(scope)).find(each => each.name === choice.name)?.on ?? false; }); }} />{choice.name}</label>{/each}</span>{/if}
@@ -131,8 +140,8 @@
 {/snippet}
 
 {#snippet summary()}
-  {#if items}{@const sum = workflowSummary(items, order)}<p class="muted"><span class="fact">{plural(sum.rooms, "room", "rooms")}</span> <span class="fact">· {sum.overriding.toLocaleString("en")} with overrides</span>
-    <span class="fact">· the global default sets {plural(sum.global, "value", "values")}</span></p>{/if}
+  {#if items}{@const sum = workflowSummary(items, order)}<p class="muted"><span class="fact">{plural(sum.rooms, "room", "rooms")} ·</span> <span class="fact">{sum.overriding.toLocaleString("en")} with overrides ·</span>
+    <span class="fact">the global default sets {plural(sum.global, "value", "values")}</span></p>{/if}
 {/snippet}
 
 {#snippet header()}{@render bar("Workflows", items?.length, undefined)}{/snippet}
@@ -146,6 +155,11 @@
   .from { margin-left: 4px; color: var(--muted); font-size: 12px; font-weight: 400; }
   .from.here { color: var(--text); font-weight: 500; }
   .more { grid-column: 1 / -1; }
+  /* A switch row's label lays its parts out in the row's grid; the foot is the row's second child then, so it is placed again. */
+  .flip { display: contents; }
+  .flip > * { cursor: pointer; }
+  .flip > input { grid-row: 1 / span 2; grid-column: 2; }
+  .set > .more { grid-row: auto; grid-column: 1 / -1; }
   .foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 4px; }
   .reset { height: 26px; margin-left: -12px; padding: 0 12px; font-size: 12.5px; }
   .problem { flex-basis: 100%; color: var(--danger); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
@@ -163,4 +177,5 @@
   .input:focus { outline: none; border-color: var(--focus); }
   .input[aria-invalid] { border-color: var(--danger); }
   @media (hover: none) { .input { min-height: 40px; } .pick { min-height: 40px; } }
+  @media (hover: none), (max-width: 640px) { .reset { height: 40px; } }
 </style>

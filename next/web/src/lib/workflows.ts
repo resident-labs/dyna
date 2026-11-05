@@ -1,3 +1,4 @@
+import { MaxWorkflowCount, MaxWorkflowTimeout, MinWorkflowCount, MinWorkflowTimeout } from "./contract.gen.ts";
 import type { BoxSizeName, ProfileName, WorkflowEffective, WorkflowFeature, WorkflowScope, WorkflowSetRequest, WorkflowSetting, WorkflowSettings, WorkflowStarters } from "./contract.gen.ts";
 import type { Chip } from "./settings-list.ts";
 
@@ -35,8 +36,11 @@ const settingNames: readonly WorkflowSetting[] = ["start", "maxRuns", "maxWorker
 export const starters: Record<WorkflowStarters, string> = { any: "any session", leads: "leads", root: "root only", off: "off" };
 export const starterOrder: readonly WorkflowStarters[] = ["any", "leads", "root", "off"];
 export const boxSizes: readonly BoxSizeName[] = ["agent", "small", "medium", "large", "xlarge"];
-// The caps workflow.set holds them to (contract.MaxWorkflowCount, contract.MaxWorkflowTimeout), for the fields' hints.
-export const maxCount = 10000, maxTimeout = 30 * 24 * 60 * 60;
+// The bounds workflow.set holds each number to, from the contract, for the fields' min and max.
+export const limits: Record<NumberSetting, [min: number, max: number]> = {
+  maxRuns: [MinWorkflowCount, MaxWorkflowCount], maxWorkers: [MinWorkflowCount, MaxWorkflowCount], timeout: [MinWorkflowTimeout, MaxWorkflowTimeout],
+};
+export type NumberSetting = "maxRuns" | "maxWorkers" | "timeout";
 
 // Whether a scope sets a value: off and 0 are values, and an empty list, as the engine reads it, is none.
 function isSet(set: WorkflowSettings, setting: WorkflowSetting): boolean {
@@ -73,7 +77,7 @@ export function valueText(effective: WorkflowEffective, setting: WorkflowSetting
 export function scopeLine(scope: WorkflowScope, order: readonly WorkflowSetting[]): string {
   const own = overrides(scope, order);
   if (!own.length) return scope.room ? "Uses global" : "Built-in defaults";
-  return own.map(setting => `${settingShape[setting].label} ${valueText(scope.effective, setting)}`).join(" · ");
+  return own.map(setting => `${settingShape[setting].label}: ${valueText(scope.effective, setting)}`).join(" · ");
 }
 
 export const workflowChips = (order: readonly WorkflowSetting[]): Chip<WorkflowScope>[] => [
@@ -116,13 +120,20 @@ export function refusedSetting(request: WorkflowSetRequest, cause?: WorkflowSett
   return cause ?? request.clear?.[0] ?? settingNames.find(setting => isSet(request.set, setting));
 }
 
-// The workflow.set for a number field's text, or undefined when it holds no whole number or the value in force, so the
-// field is put back. The engine holds the caps and refuses past them in its words.
-export function numberChange(scope: WorkflowScope, setting: "maxRuns" | "maxWorkers" | "timeout", text: string): WorkflowSetRequest | undefined {
+// The workflow.set for a number field's text, or undefined when it holds no whole number or the value the scope already
+// sets, so the field is put back. An inherited value typed again is sent, which sets it on the scope, as a switch does.
+// The engine holds the caps and refuses past them in its words.
+export function numberChange(scope: WorkflowScope, setting: NumberSetting, text: string): WorkflowSetRequest | undefined {
   const n = text.trim() === "" ? NaN : Number(text);
-  if (!Number.isSafeInteger(n) || n === scope.effective[setting]) return undefined;
+  if (!Number.isSafeInteger(n) || (isSet(scope.set, setting) && n === scope.effective[setting])) return undefined;
   return setRequest(scope, { setting, value: n });
 }
+
+export type Refusal = { key: string; setting: WorkflowSetting; text: string; typed?: string };
+// What a number field shows: what was typed while its refusal shows, else the value in force, so a refused number goes
+// once its refusal does.
+export const fieldText = (scope: WorkflowScope, setting: NumberSetting, problem: Refusal | undefined) =>
+  problem?.key === scopeKey(scope) && problem.setting === setting && problem.typed !== undefined ? problem.typed : String(scope.effective[setting]);
 
 // The profiles in force with one ticked or unticked, in profile.list's order, a set profile it no longer lists after
 // them; every listed profile is in force when none is set. Unticking the last returns a set value to inheriting, as an
