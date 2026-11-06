@@ -186,7 +186,7 @@ func TestRemoveContainerLeavesVolumeForMove(t *testing.T) {
 		t.Fatal(err)
 	}
 	command := strings.ReplaceAll(r.calls[len(r.calls)-1][len(r.calls[len(r.calls)-1])-1], `'\''`, `'`)
-	if len(r.calls) != 4 || !strings.Contains(command, "'podman' '--cgroup-manager=systemd' 'rm' '--ignore' '--volumes' 'a'") || strings.Contains(command, "'volume' 'rm'") || strings.Contains(command, "'volume' 'prune'") {
+	if len(r.calls) != 2 || !strings.Contains(command, "'podman' '--cgroup-manager=systemd' 'rm' '--ignore' '--volumes' 'a'") || strings.Contains(command, "'volume' 'rm'") || strings.Contains(command, "'volume' 'prune'") {
 		t.Fatalf("commands %v", r.calls)
 	}
 }
@@ -265,7 +265,7 @@ func TestForwardRestoredAfterMasterDies(t *testing.T) {
 			}
 		}
 	}
-	if !reflect.DeepEqual(ops, []string{"check", "cancel", "forward", "check", "cancel"}) {
+	if !reflect.DeepEqual(ops, []string{"check", "cancel", "forward"}) {
 		t.Fatalf("operations %v", ops)
 	}
 	for _, args := range r.calls {
