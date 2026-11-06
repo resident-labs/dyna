@@ -490,8 +490,8 @@ github.com/relvacode/iso8601 v1.7.0 h1:BXy+V60stMP6cpswc+a93Mq3e65PfXCgDFfhvNNGr
 github.com/relvacode/iso8601 v1.7.0/go.mod h1:FlNp+jz+TXpyRqgmM7tnzHHzBnz776kmAH2h3sZCn0I=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
-github.com/resident-labs/PiG v0.5.4-0.20261105150040-30282328b7f3 h1:awtg8VXddB7T1AVbU1v+vUyeBEF9thPai2CRqTmo/Jo=
-github.com/resident-labs/PiG v0.5.4-0.20261105150040-30282328b7f3/go.mod h1:4e/1OyiBWOs+Q/UD04+v+8eUdSSpvXbwDl16F+A8Wps=
+github.com/resident-labs/PiG v0.5.4-0.20261105235355-c7e6d8b9405b h1:9SOreCj/951DCsFTrIbmaRFyBw2+/xcsDdQysouSxbk=
+github.com/resident-labs/PiG v0.5.4-0.20261105235355-c7e6d8b9405b/go.mod h1:4e/1OyiBWOs+Q/UD04+v+8eUdSSpvXbwDl16F+A8Wps=
 github.com/rfjakob/eme v1.2.0 h1:8dAHL+WVAw06+7DkRKnRiFp1JL3QjcJEZFqDnndUaSI=
 github.com/rfjakob/eme v1.2.0/go.mod h1:cVvpasglm/G3ngEfcfT/Wt0GwhkuO32pf/poW6Nyk1k=
 github.com/rivo/uniseg v0.4.7 h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=
