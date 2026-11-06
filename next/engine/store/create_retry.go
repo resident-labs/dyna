@@ -48,8 +48,9 @@ func allocationRetryEligibility(ctx context.Context, tx *sql.Tx, id contract.Box
 
 // A quarantine can detach only allocations known to be unpinned and unused. The same eligibility boundary owns ordinary
 // waiting creates and a terminal failure's retry; sameHost must not disappear when some other allocation fails.
+// A consumed retry keeps its selected second host even if that host is quarantined; it may never become a third placement.
 func detachWaitingCreates(ctx context.Context, tx *sql.Tx, host contract.HostName) error {
-	rows, err := tx.QueryContext(ctx, `SELECT b.id,s.room,b.slice FROM boxes b JOIN sessions s ON s.id=b.session WHERE b.host=? AND b.state='pending' AND b.image=''`, host)
+	rows, err := tx.QueryContext(ctx, `SELECT b.id,s.room,b.slice FROM boxes b JOIN sessions s ON s.id=b.session WHERE b.host=? AND b.state='pending' AND b.image='' AND b.create_retry_host=''`, host)
 	if err != nil {
 		return err
 	}
