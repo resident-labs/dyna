@@ -3,6 +3,7 @@ package githubwrites
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -66,11 +67,12 @@ func (g *Guard) RoundTrip(request *http.Request) (*http.Response, error) {
 	return g.Base.RoundTrip(request.WithContext(prs.Vouched(request.Context())))
 }
 
-// ask sends a read the guard needs, with the credentials of the request it checks, and decodes the JSON answer.
-func (g *Guard) ask(request *http.Request, method, target string, body []byte, into any) bool {
+// ask sends a read the guard needs, with the credentials of the request it checks, and decodes the JSON answer. A failed lookup
+// keeps its cause: the read transport can refuse locally, and GitHub can return a non-200 status or an unreadable answer.
+func (g *Guard) ask(request *http.Request, method, target string, body []byte, into any) error {
 	asked, err := http.NewRequestWithContext(request.Context(), method, target, bytes.NewReader(body))
 	if err != nil {
-		return false
+		return fmt.Errorf("GitHub lookup request could not be built: %w", err)
 	}
 	for _, name := range []string{"Authorization", "User-Agent"} {
 		asked.Header.Set(name, request.Header.Get(name))
@@ -80,11 +82,20 @@ func (g *Guard) ask(request *http.Request, method, target string, body []byte, i
 	}
 	response, err := g.Base.RoundTrip(asked)
 	if err != nil {
-		return false
+		return fmt.Errorf("GitHub lookup transport failed or refused the request: %w", err)
 	}
 	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("GitHub lookup returned HTTP %d %s", response.StatusCode, http.StatusText(response.StatusCode))
+	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
-	return err == nil && response.StatusCode == http.StatusOK && json.Unmarshal(data, into) == nil
+	if err != nil {
+		return fmt.Errorf("GitHub lookup response could not be read: %w", err)
+	}
+	if err := json.Unmarshal(data, into); err != nil {
+		return fmt.Errorf("GitHub lookup returned invalid JSON: %w", err)
+	}
+	return nil
 }
 
 // isPullRequest says whether an issue number of a repository is a PR, which the issues API reaches by the same number. A lookup
@@ -95,7 +106,7 @@ func (g *Guard) isPullRequest(request *http.Request, at matched) bool {
 	}
 	target := *g.API
 	target.Path = strings.TrimRight(g.API.Path, "/") + "/repos/" + at.owner + "/" + at.repo + "/issues/" + at.number
-	return !g.ask(request, http.MethodGet, target.String(), nil, &issue) || issue.PullRequest != nil
+	return g.ask(request, http.MethodGet, target.String(), nil, &issue) != nil || issue.PullRequest != nil
 }
 
 // node is what the guard learns of a GraphQL node ID before it lets a mutation name it.
@@ -138,11 +149,21 @@ func (g *Guard) within(request *http.Request, grant contract.GitHubWrites, seen 
 			Data struct {
 				Node *node `json:"node"`
 			} `json:"data"`
+			Errors []struct {
+				Message string `json:"message"`
+			} `json:"errors"`
 		}
 		query, _ := json.Marshal(map[string]any{"query": nodeQuery, "variables": map[string]string{"id": id}})
 		target := *request.URL
-		if !g.ask(request, http.MethodPost, target.String(), query, &answer) || answer.Data.Node == nil {
-			return refuse(contract.GitHubWriteGraphQLUnresolved, "the node ID given to %s did not resolve to an object of a repository the engine could look up", mutationName)
+		if err := g.ask(request, http.MethodPost, target.String(), query, &answer); err != nil {
+			return refuse(contract.GitHubWriteGraphQLUnresolved, "the node ID given to %s did not resolve to an object of a repository the engine could look up: %s", mutationName, err)
+		}
+		if answer.Data.Node == nil {
+			detail := "GitHub returned no node"
+			if len(answer.Errors) != 0 {
+				detail = fmt.Sprintf("GitHub returned GraphQL error: %.512s", answer.Errors[0].Message)
+			}
+			return refuse(contract.GitHubWriteGraphQLUnresolved, "the node ID given to %s did not resolve to an object of a repository the engine could look up: %s", mutationName, detail)
 		}
 		found = *answer.Data.Node
 		seen[id] = found
