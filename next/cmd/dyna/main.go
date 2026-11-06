@@ -71,7 +71,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(ciEgressCommand())
 	root.AddCommand(shareCommand())
 	root.AddCommand(navigationCommands(func() *socketClient { return newClient(socket) })...)
-	root.AddCommand(buildCacheCommand())
+	root.AddCommand(buildCacheCommand(), stageBinaryCommand())
 	addEngine(root)
 	for _, a := range tools.Actions() {
 		for _, binding := range a.CLI {

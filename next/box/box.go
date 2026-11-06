@@ -33,6 +33,7 @@ const (
 )
 
 type Host struct {
+	Health              contract.HostHealth // process-local scheduling health; independent of reachability
 	EngineHost          *bool
 	Name                contract.HostName
 	SSH                 string

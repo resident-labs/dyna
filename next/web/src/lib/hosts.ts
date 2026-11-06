@@ -39,7 +39,7 @@ export function machines(hosts: HostSummary[]): HostSummary[] {
   const same = hosts.find(h => h.engineHost);
   if (!plane || !same || !hostMeters(plane).length) return hosts;
   const merged = { ...plane, name: same.name, reachable: same.reachable, lastSeen: same.lastSeen, boxes: plane.boxes + same.boxes, runners: same.runners,
-    agents: same.agents, ci: same.ci, rooms: same.rooms, problem: same.problem,
+    agents: same.agents, ci: same.ci, rooms: same.rooms, problem: same.problem, health: same.health,
     diskLow: diskLow(plane) || diskLow(same), sessions: [...plane.sessions ?? [], ...same.sessions ?? []], engineHost: true };
   return hosts.filter(h => h !== same).map(h => h === plane ? merged : h);
 }
@@ -132,6 +132,7 @@ const problems: Record<HostProblem, string> = { create_failed: "Boxes failing", 
 // A row's one state, the most pressing: a host the engine cannot reach, then a host problem, then low disk.
 export function hostState(h: HostSummary): { tone: "error" | "warning"; label: string } | undefined {
   if (!h.reachable) return { tone: "error", label: "Unreachable" };
+  if (h.health === "degraded") return { tone: "warning", label: "Degraded" };
   if (h.problem) return { tone: "warning", label: problems[h.problem] };
   return diskLow(h) ? { tone: "warning", label: "Disk low" } : undefined;
 }
@@ -150,7 +151,7 @@ export const hostBars = (h: HostSummary): { label: string; percent: number; busy
 
 export const hostChips: Chip<HostSummary>[] = [
   { id: "all", label: "All" },
-  { id: "attention", label: "Needs attention", test: h => !h.reachable || !!h.problem || diskLow(h) },
+  { id: "attention", label: "Needs attention", test: h => !h.reachable || h.health === "degraded" || !!h.problem || diskLow(h) },
   { id: "exec", label: "Exec only", test: h => !!h.execOnly },
 ];
 

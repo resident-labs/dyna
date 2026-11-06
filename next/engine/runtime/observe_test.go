@@ -206,7 +206,7 @@ func (r *offlineRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte
 	}
 	body := ""
 	if strings.Contains(command, "dyna-probe") {
-		body = "sum\n"
+		body = strings.Repeat("a", 64) + "\n"
 	}
 	return []byte(fmt.Sprintf("%sDYNA-END %020d 000\n", body, len(body))), nil
 }
@@ -226,7 +226,7 @@ func TestRestoreToleratesOfflineHost(t *testing.T) {
 	sockets := api.NewSockets(api.New(&serviceWithHosts{Service: engine.New(st, nil, nil, time.Now)}, nil), runtimeDir, uint32(os.Getuid()), nil)
 	t.Cleanup(func() { _ = sockets.Close() })
 	b := &Boxes{Store: offlineRestoreStore{}, Sockets: sockets, Runtime: runtimeDir, Layout: box.Layout{HostData: filepath.Join(runtimeDir, "host")}, Version: "v1", hosts: map[contract.HostName]*podman.Host{"h": host}}
-	b.binOnce.Do(func() { b.binSum = "sum" })
+	b.binOnce.Do(func() { b.binSum = strings.Repeat("a", 64) })
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() { cancel(); b.WaitRecovered() }()
 	if err := b.Restore(ctx); err != nil {
