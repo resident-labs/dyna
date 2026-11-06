@@ -1,6 +1,6 @@
 import { Marked, type Token, type TokenizerAndRendererExtension, type Tokens } from "marked";
 import { mentionName, mentionStart } from "./mentions.ts";
-import { filesURL, sharedPaths } from "./shared.ts";
+import { sharedURL, sharedPaths } from "./shared.ts";
 
 // A candidate @name passes through parsing and sanitizing as text between two Unicode noncharacters. Parse removes those
 // from the source, so no author can write one. Parsing knows no room and its result is cached by text, so showMentions
@@ -92,7 +92,7 @@ export function showPaths(html: string, room: string): string {
       replacement.append(text.slice(end, match.start));
       const link = document.createElement("a");
       link.textContent = match.text;
-      link.href = filesURL(room, match.path);
+      link.href = sharedURL(room, match.path);
       link.dataset.sharedPath = match.path;
       replacement.append(link);
       end = match.start + match.text.length;
