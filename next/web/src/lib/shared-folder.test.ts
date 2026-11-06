@@ -20,8 +20,9 @@ test("Show in folder waits for the panel before revealing the target", async () 
       current: () => ({ sharedItems, folderTarget }),
       navigate: value => { key = value; },
     };
-  `)((handler: typeof showFolder) => { showFolder = handler; }, (open: boolean) => {
+  `)((handler: typeof showFolder) => { showFolder = handler; }, (open: boolean, _tapped: boolean, options?: { focus?: boolean }) => {
     assert.equal(open, true);
+    assert.equal(options?.focus, false, "the selected row, not the sheet, will take focus");
     opened = true;
     return opening;
   }, tabs) as {

@@ -100,9 +100,9 @@
     virtualizer.scrollToEnd();
   }
 
-  // Scrolls a row into the window and waits for it to render, so a caller can focus it.
-  export async function reveal(index: number): Promise<void> {
-    virtualizer.scrollToIndex(index);
+  // Scrolls a row into the window. Rows that take focus can do so in their mount attachment.
+  export async function reveal(index: number, align: "auto" | "center" = "auto"): Promise<void> {
+    virtualizer.scrollToIndex(index, { align });
     await new Promise(requestAnimationFrame);
     await tick();
   }
