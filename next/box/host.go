@@ -132,7 +132,7 @@ type RunStatus struct {
 
 type HostDriver interface {
 	BoxEpoch(context.Context, contract.BoxID) (uint64, error)
-	RemoveBox(context.Context, contract.BoxID, uint64, bool) error
+	RemoveBox(context.Context, contract.BoxID, uint64, bool, string) error
 	EnsureSlice(context.Context, Slice) error
 	RemoveSlice(context.Context, string) error
 	CreateContainer(context.Context, ContainerSpec) error

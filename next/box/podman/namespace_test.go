@@ -106,7 +106,7 @@ func TestNamespaceEpochSupersedesWholeWorkspaceAndStackDelete(t *testing.T) {
 		}
 	}
 	calls := waitNamespaceFile(t, filepath.Join(root, "calls"))
-	err = h.RemoveBox(ctx, "b", before, true)
+	err = h.RemoveBox(ctx, "b", before, true, "")
 	var superseded NamespaceSuperseded
 	if !errors.As(err, &superseded) {
 		t.Fatalf("stale delete: %v", err)
@@ -120,7 +120,7 @@ func TestNamespaceEpochSupersedesWholeWorkspaceAndStackDelete(t *testing.T) {
 			t.Fatalf("lost %s work: %v", dir, err)
 		}
 	}
-	if err := h.RemoveBox(ctx, "b", now, true); err != nil {
+	if err := h.RemoveBox(ctx, "b", now, true, ""); err != nil {
 		t.Fatal(err)
 	}
 	for _, dir := range []string{"workspace", "stack"} {
@@ -166,7 +166,7 @@ func TestNamespaceOldPreLockCommandCannotDeleteNewCreation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- old.RemoveBox(WithRemoteCancellation(ctx), "b", epoch, true) }()
+	go func() { done <- old.RemoveBox(WithRemoteCancellation(ctx), "b", epoch, true, "") }()
 	release := filepath.Join(root, "old-release")
 	defer os.WriteFile(release, nil, 0600)
 	waitNamespaceFile(t, filepath.Join(root, "old-entered"))
@@ -215,7 +215,7 @@ func TestNamespaceMutatingChildInheritsLockAfterWrapperDeath(t *testing.T) {
 	release := filepath.Join(root, "release-child")
 	defer os.WriteFile(release, nil, 0600)
 	done := make(chan error, 1)
-	go func() { done <- h.RemoveBox(ctx, "b", epoch, true) }()
+	go func() { done <- h.RemoveBox(ctx, "b", epoch, true, "") }()
 	waitNamespaceFile(t, filepath.Join(root, "child-entered"))
 	for _, name := range []string{"body-pid", "lock-pid"} {
 		raw := waitNamespaceFile(t, filepath.Join(root, name))

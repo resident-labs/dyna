@@ -15,12 +15,15 @@ type recordedCleanup struct {
 }
 
 func (h *recordedCleanup) BoxEpoch(context.Context, contract.BoxID) (uint64, error) { return 0, nil }
-func (h *recordedCleanup) RemoveBox(ctx context.Context, id contract.BoxID, _ uint64, volumes bool) error {
+func (h *recordedCleanup) RemoveBox(ctx context.Context, id contract.BoxID, _ uint64, volumes bool, slice string) error {
 	_ = h.RemovePod(ctx, id)
 	_ = h.RemoveContainer(ctx, id)
 	if volumes {
 		_ = h.RemoveVolume(ctx, id)
 		_ = h.RemoveStackVolumes(ctx, id)
+	}
+	if slice != "" {
+		_ = h.RemoveSlice(ctx, slice)
 	}
 	return nil
 }
@@ -61,8 +64,8 @@ func TestCreateCleanupRunsAfterCreationContextEnds(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	h := &recordedCleanup{}
-	cleanupCreate(ctx, h, lifecycle.BoxSpec{}, box.Forward{}, true, true, true, true)
-	want := []string{"pod:live", "container", "forward", "slice"}
+	cleanupCreate(ctx, h, lifecycle.BoxSpec{Slice: "dyna-b.slice"}, box.Forward{}, true, true, true, true)
+	want := []string{"pod:live", "container", "slice", "forward"}
 	if len(h.removed) != len(want) {
 		t.Fatalf("removed %v, want %v", h.removed, want)
 	}
