@@ -149,7 +149,7 @@ func (g *Guard) checkREST(grant contract.GitHubWrites, request *http.Request, pr
 		}
 		target := *g.API
 		target.Path = prefix + "/" + strings.Join(segments, "/")
-		if !g.ask(request, http.MethodGet, target.String(), nil, &answer) {
+		if g.ask(request, http.MethodGet, target.String(), nil, &answer) != nil {
 			return refuse(contract.GitHubWriteIDUnresolved, "%s names its target by a number, and GitHub did not answer for it", what)
 		}
 		pointed := answer.IssueURL
