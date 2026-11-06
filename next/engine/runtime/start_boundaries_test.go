@@ -1,8 +1,14 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"go/ast"
+	"go/format"
+	"go/parser"
+	"go/token"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,6 +19,42 @@ import (
 	"github.com/resident-labs/dyna/engine/images"
 	"github.com/resident-labs/dyna/engine/lifecycle"
 )
+
+// A bounded final stage must not add another cancellation decision after success:
+// that would invoke failed-create cleanup where main publishes a successful box.
+func TestCreateKeepsMainSuccessBoundaryAfterContainerStart(t *testing.T) {
+	set := token.NewFileSet()
+	file, err := parser.ParseFile(set, "boxes.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, declaration := range file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Name.Name != "Create" {
+			continue
+		}
+		found := false
+		var tail []string
+		for _, statement := range function.Body.List {
+			var source bytes.Buffer
+			if err := format.Node(&source, set, statement); err != nil {
+				t.Fatal(err)
+			}
+			if source.String() == `steps.Done("container start")` {
+				found = true
+				continue
+			}
+			if found {
+				tail = append(tail, source.String())
+			}
+		}
+		if got := strings.Join(tail, "\n"); !found || got != "ok = true\nreturn image.Tag, nil" {
+			t.Fatalf("post-start success boundary must remain main's, got:\n%s", got)
+		}
+		return
+	}
+	t.Fatal("Boxes.Create not found")
+}
 
 type occupiedImageHost struct {
 	entered, release chan struct{}
