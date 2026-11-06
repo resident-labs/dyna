@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -59,9 +60,88 @@ func TestContextQueryBudget(t *testing.T) {
 	if _, err = s.ContextDataForSession(context.Background(), "s"); err != nil {
 		t.Fatal(err)
 	}
-	if got := contextQueries.Load(); got != 9 {
-		t.Fatalf("snapshot queries = %d, want 9", got)
+	if got := contextQueries.Load(); got != 10 {
+		t.Fatalf("snapshot queries = %d, want 10", got)
 	}
+}
+
+func TestContextContacts(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := t.Context()
+	for _, room := range []contract.RoomID{"r", "other"} {
+		if err := s.CreateRoom(ctx, room, string(room), time.Unix(0, 0)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.writer.Exec(`INSERT INTO sessions(id,room,name,profile,state,goal,created_at,parent,closed_at) VALUES
+		('root','r','root','sol','open','',0,NULL,NULL),
+		('other-root','other','other-root','grok','open','',0,NULL,NULL),
+		('parent','r','build-lead','sol','open','',1,'root',NULL),
+		('uncle','r','uncle','grok','open','',2,'root',NULL),
+		('self','r','self','sol','open','',5,'parent',NULL),
+		('closed','r','closed','sol','closed','',1,'parent',10),
+		('first','r','first','grok','open','',2,'parent',NULL),
+		('tie-b','r','tie-b','sol','open','',3,'parent',NULL),
+		('tie-a','r','tie-a','terra','open','',3,'parent',NULL),
+		('niece','r','niece','sol','open','',4,'first',NULL),
+		('child','r','child','sol','open','',6,'self',NULL);
+		INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at) VALUES('b','self','','agent','ready','','',0,0)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range []contract.SessionID{"root", "other-root"} {
+		got, err := s.ContextContacts(ctx, root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Parent != nil || len(got.Siblings) != 0 {
+			t.Fatalf("root contacts = %+v, want none", got)
+		}
+	}
+	want := ContextContacts{
+		Parent: &ContextContact{Name: "build-lead", Profile: "sol"},
+		Siblings: []ContextContact{
+			{Name: "first", Profile: "grok"},
+			{Name: "tie-a", Profile: "terra"},
+			{Name: "tie-b", Profile: "sol"},
+		},
+	}
+	check := func(want ContextContacts) {
+		t.Helper()
+		got, err := s.ContextContacts(ctx, "self")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("contacts = %+v, want %+v", got, want)
+		}
+		data, err := s.ContextDataForSession(ctx, "self")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(data.Contacts, want) {
+			t.Fatalf("snapshot contacts = %+v, want %+v", data.Contacts, want)
+		}
+	}
+	check(want)
+	if _, err := s.writer.Exec(`UPDATE sessions SET profile='terra' WHERE id='parent'; UPDATE sessions SET profile='grok' WHERE id='tie-b'; UPDATE sessions SET closed_at=20 WHERE id='first'`); err != nil {
+		t.Fatal(err)
+	}
+	want.Parent.Profile = "terra"
+	want.Siblings = []ContextContact{{Name: "tie-a", Profile: "terra"}, {Name: "tie-b", Profile: "grok"}}
+	check(want)
+	if _, err := s.writer.Exec(`INSERT INTO sessions(id,room,name,profile,state,goal,created_at,parent) VALUES('new','r','new','sol','open','',7,'parent')`); err != nil {
+		t.Fatal(err)
+	}
+	want.Siblings = append(want.Siblings, ContextContact{Name: "new", Profile: "sol"})
+	check(want)
+	if _, err := s.writer.Exec(`UPDATE sessions SET parent='uncle' WHERE id='self'`); err != nil {
+		t.Fatal(err)
+	}
+	check(ContextContacts{Parent: &ContextContact{Name: "uncle", Profile: "grok"}})
 }
 
 func TestContextChildrenOrderIgnoresActivity(t *testing.T) {
