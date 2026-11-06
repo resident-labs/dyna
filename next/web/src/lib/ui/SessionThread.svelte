@@ -267,8 +267,8 @@
   const pendingKey = (id: number) => `pending:${id}`;
 </script>
 
-{#snippet message(key: string, text: string, attachments: Attachment[] | null | undefined, event?: string, at?: string, data?: import("../contract.gen.ts").JSONData, dataRef?: import("../contract.gen.ts").PostDataRef | null, dataAttachment?: number | null)}
-  <Markdown rhythm="thread" {text} />
+{#snippet message(key: string, text: string, attachments: Attachment[] | null | undefined, event?: string, at?: string, data?: import("../contract.gen.ts").JSONData, dataRef?: import("../contract.gen.ts").PostDataRef | null, dataAttachment?: number | null, from: Principal = { kind: "session", session })}
+  <Markdown rhythm="thread" {text} source={{ key, from, at: at ?? "" }} />
   {#if data !== undefined || dataRef}{#key dataRef?.file.sha256}<PostData value={data} reference={dataRef} />{/key}{/if}
   {@const shownAttachments = visibleAttachments(attachments ?? [],dataAttachment)}
   {#if shownAttachments.length}<PostAttachments onmedia={position => openMedia(key, shownAttachments[position].position)} attachments={shownAttachments.map(({file})=>file)} {newest} {event} {at} />{/if}
@@ -300,7 +300,7 @@
   {@const to = item.kind === "post" ? postDestination(item, session, store.room, roomName, id => sender("session", id)) : undefined}
   {#snippet destination()}<div class="post-destination"><PostTarget to={to!} onjump={item.room && item.seq ? () => onpostlocation(item.room!, item.seq!) : undefined} /></div>{/snippet}
   {#snippet content()}
-    {@render message(item.id, chunks[item.id + "/text"] ?? item.text ?? "", item.attachments, item.event ?? item.id, item.at, item.data, item.dataRef, item.dataAttachment)}
+    {@render message(item.id, chunks[item.id + "/text"] ?? item.text ?? "", item.attachments, item.event ?? item.id, item.at, item.data, item.dataRef, item.dataAttachment, item.from ?? { kind: "session", session })}
     {@render textRetry(turn, item.id)}
   {/snippet}
   {#snippet body()}{#if to}{@render destination()}{/if}{@render content()}{/snippet}
@@ -318,7 +318,7 @@
 {#snippet inputRow(turn: TranscriptTurn, key: string, part: string, input: TranscriptInput)}
   {@const shown = timelineInput(input, chunks[part + "/text"])}
   {#snippet body()}
-    {@render message(key, shown.text, input.attachments, input.id, input.at, input.data, input.dataRef, input.dataAttachment)}
+    {@render message(key, shown.text, input.attachments, input.id, input.at, input.data, input.dataRef, input.dataAttachment, input.from)}
     {@render textRetry(turn, part)}
   {/snippet}
   {#if shown.kind !== "message"}
@@ -390,14 +390,14 @@
     {#each asking as question (question.id)}<div class="question"><QuestionCard {question} name={sender("session", session)} root={!store.sessions.get(session)?.parent} {operate} /></div>{/each}
     {#if waitingSince}{@render dayMark(waitingSince, turns.at(-1)?.started)}{/if}
     {#each queuedPosts as post (post.id)}
-      {#snippet body()}{@render message(post.id, post.body.text, post.body.attachments, post.id, post.at, post.body.data, undefined, post.body.dataAttachment)}{/snippet}
+      {#snippet body()}{@render message(post.id, post.body.text, post.body.attachments, post.id, post.at, post.body.data, undefined, post.body.dataAttachment, post.from)}{/snippet}
       {#snippet queued()}<p class="owner-note queued">Queued</p>{/snippet}
       {#if post.from.kind === "owner"}{@render ownerMessage(post.id, post.at, false, body, closed ? undefined : queued)}
       {:else if post.from.kind === "session" && post.from.session === session}<div class="agent-message" data-media-key={post.id}>{@render body()}</div>
       {:else}{@render inbound(post.id, post.from, post.at, body, !!post.body.attachments?.length, post.body.source)}{/if}
     {/each}
     {#each pendingPosts as post (post.id)}
-      {#snippet body()}{@render message(pendingKey(post.id), post.request.text, post.request.attachments, undefined, post.at, post.request.data)}{/snippet}
+      {#snippet body()}{@render message(pendingKey(post.id), post.request.text, post.request.attachments, undefined, post.at, post.request.data, undefined, undefined, { kind: "owner" })}{/snippet}
       {#snippet unsent()}<p class="owner-note unsent" role="alert">Not sent<button class="retry" onclick={() => void view.retry(post.id)}>Retry</button><button class="retry" onclick={() => view.discard(post.id)}>Discard</button></p>{/snippet}
       {@render ownerMessage(pendingKey(post.id), undefined, !post.failed, body, post.failed ? unsent : undefined)}
     {/each}

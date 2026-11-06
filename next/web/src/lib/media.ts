@@ -3,7 +3,7 @@ import type { Attachment, Principal, TranscriptImage } from "./contract.gen.ts";
 import { fileSize } from "./feed.ts";
 
 // Every attachment is media. src is set when the bytes are not a room file, as for a read's image.
-export type MediaItem = { file: Attachment; src?: string; key: string; position: number; from: Principal; at: string; event?: string; room?: string };
+export type MediaItem = { file: Attachment; src?: string; sharedPath?: string; key: string; position: number; from: Principal; at: string; event?: string; room?: string };
 
 export type MediaRow = { key: string; from: Principal; at: string; event?: string; room?: string; src?: string; attachments: Attachment[] };
 

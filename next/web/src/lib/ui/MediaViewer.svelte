@@ -2,8 +2,8 @@
   import { onMount } from "svelte";
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
-  import MediaFile from "./MediaFile.svelte";
-  import MediaText from "./MediaText.svelte";
+  import MediaContent from "./MediaContent.svelte";
+  import { filesURL, parentPath, sharedURL } from "../shared.ts";
   import VisualCardMedia from "./VisualCardMedia.svelte";
   import type { VisualVersion } from "../visual.ts";
   import { call } from "../client.ts";
@@ -16,6 +16,7 @@
     items: MediaItem[]; initial: number; name: (session: string) => string;
     root: (session?: string) => boolean; room: string; loadVisual: (item: MediaItem) => Promise<VisualVersion[]>; onclose: () => void; onjump: (key: string) => void;
   } = $props();
+  let imageFailed = $state(false);
   let selected = $state(items[initial]), view = $state<View>(FIT), menu = $state(false), rendered = $state(true);
   let dialog: HTMLDialogElement, stage: HTMLDivElement, closer: HTMLButtonElement;
   let natural = $state<Size>({ width: 0, height: 0 }), box = $state<Size>({ width: 0, height: 0 });
@@ -34,6 +35,8 @@
     return () => { active = false; };
   });
   let src = $derived(mediaSrc(item));
+  let folder = $derived(item.sharedPath !== undefined ? filesURL(item.room ?? room, item.sharedPath) : undefined);
+  let download = $derived(item.sharedPath !== undefined ? sharedURL(item.room ?? room, item.sharedPath, true) : src);
   let original = $derived(item.file.visual ? undefined : src);
   let fit = $derived(natural.width && natural.height ? Math.min(1, box.width / natural.width, box.height / natural.height) : 1);
   let content = $derived({ width: natural.width * fit, height: natural.height * fit });
@@ -42,7 +45,7 @@
   let distance = 0, start: Point | undefined, moved = 0, lastTap = 0, background = false, outside = false;
   const local = (x: number, y: number) => { const r = stage.getBoundingClientRect(); return { x: x - r.left - r.width / 2, y: y - r.top - r.height / 2 }; };
   function zoom(factor: number, at: Point = { x: 0, y: 0 }) { view = zoomAt(view, factor, at, box, content); }
-  function move(n: number) { background = false; if (!items.length) return; selected = items[found < 0 ? (n > 0 ? 0 : items.length - 1) : (found + n + items.length) % items.length]; view = FIT; natural = { width: 0, height: 0 }; menu = false; rendered = true; }
+  function move(n: number) { background = false; if (!items.length) return; imageFailed = false; selected = items[found < 0 ? (n > 0 ? 0 : items.length - 1) : (found + n + items.length) % items.length]; view = FIT; natural = { width: 0, height: 0 }; menu = false; rendered = true; }
   function key(e: KeyboardEvent) {
     if (e.target instanceof HTMLVideoElement || e.target instanceof HTMLIFrameElement) return;
     const step = mediaStep(e.key, items.length, e.target instanceof HTMLElement && e.target.scrollWidth > e.target.clientWidth);
@@ -117,38 +120,23 @@
           <button aria-label="Zoom out" title="Zoom out" onclick={() => zoom(1/1.5)}><Icon name="minus" /></button><button class="fit" disabled={view.scale === 1} onclick={() => view = FIT}>Fit</button><button aria-label="Zoom in" title="Zoom in" onclick={() => zoom(1.5)}><Icon name="plus" /></button>
         </div>
       {/if}
-      <a class="tool" href={src} download={item.file.name} aria-label="Download" title="Download"><Icon name="download" /></a>
+      <a class="tool" href={download} download={item.file.name} aria-label="Download" title="Download"><Icon name="download" /></a>
       <a class="tool desktop" href={src} target="_blank" rel="noopener" aria-label="Open original" title="Open original"><Icon name="external" /></a>
       {/if}
+      {#if folder}<a class="tool desktop" href={folder} title="Show in folder" aria-label="Show in folder"><Icon name="folder" /></a>{/if}
       <div class="more phone"><button class="tool" aria-label="More options" aria-expanded={menu} onclick={() => menu = !menu}><Icon name="more" /></button>
-        {#if menu}<div class="menu">{#if original}<a href={original} target="_blank" rel="noopener">Open original</a>{/if}<button onclick={() => { onjump(item.key); dialog.close(); }}>Jump to post</button></div>{/if}
+        {#if menu}<div class="menu">{#if folder}<a href={folder}>Show in folder</a>{/if}{#if original}<a href={original} target="_blank" rel="noopener">Open original</a>{/if}<button onclick={() => { onjump(item.key); dialog.close(); }}>Jump to post</button></div>{/if}
       </div>
       <button class="tool" aria-label="Close" title="Close" onclick={() => dialog.close()} bind:this={closer}><Icon name="close" /></button>
     </header>
     <div class="stage" class:media-gesture={gestures} bind:this={stage} use:wheel onpointerdown={down} onpointermove={drag} onpointerup={up} onpointercancel={up} onclick={e => { if (background && e.target === stage && moved < 8) dialog.close(); }} role="presentation">
-      {#if item.file.visual && rendered}
-        <div class="visual-stage">{#if visualFailed}<div class="visual-error">The card did not load. <button onclick={() => visualAttempt++}>Retry</button></div>
-        {:else if versions.length}{#key item.key + ":" + item.file.visual.version}<VisualCardMedia {versions} selected={item.file.visual.version} room={item.room ?? room} send={async (text, event) => { await call("post", { room: item.room ?? room, text, visualReply: event }); }} />{/key}{/if}</div>
-      {:else if kind === "video"}
-        {#key src}<video {src} controls preload="metadata" autoplay></video>{/key}
-      {:else if kind === "image"}
-        <img {src} alt={item.file.name} draggable="false" onload={event => { if (event.currentTarget instanceof HTMLImageElement) natural = { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }; }}
+      <MediaContent {item} {rendered}>
+        {#snippet visual()}        <div class="visual-stage">{#if visualFailed}<div class="visual-error">The card did not load. <button onclick={() => visualAttempt++}>Retry</button></div>
+        {:else if versions.length && item.file.visual}{#key item.key + ":" + item.file.visual.version}<VisualCardMedia {versions} selected={item.file.visual.version} room={item.room ?? room} send={async (text, event) => { await call("post", { room: item.room ?? room, text, visualReply: event }); }} />{/key}{/if}</div>{/snippet}
+        {#snippet image()}{#if imageFailed}<div class="visual-error">The file did not load. {#if folder}<a href={filesURL(item.room ?? room, parentPath(item.sharedPath!))}>Show in folder</a>{/if}</div>{:else}        <img {src} alt={item.file.name} draggable="false" onerror={() => imageFailed = true} onload={event => { if (event.currentTarget instanceof HTMLImageElement) natural = { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }; }}
           style:width={natural.width ? `${content.width}px` : undefined} style:height={natural.height ? `${content.height}px` : undefined}
-          style:transform="translate({view.x}px, {view.y}px) scale({view.scale})" />
-      {:else if (kind === "html" || kind === "svg") && rendered}
-        <!-- As a visual card's frame, on the file route, which serves the file sandboxed. -->
-        {#key src}
-          <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-          <iframe class:drawing={kind === "svg"} tabindex={kind === "svg" ? -1 : undefined} {src} title={item.file.name} sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
-        {/key}
-      {:else if kind === "pdf" && navigator.pdfViewerEnabled}
-        <!-- The browser's viewer refuses a sandbox attribute. The file route's own sandbox header still applies to anything that is not a PDF. -->
-        {#key src}<iframe {src} title={item.file.name} referrerpolicy="no-referrer"></iframe>{/key}
-      {:else if kind === "file" || kind === "pdf"}
-        <MediaFile file={item.file} {src} reason="No preview for this file." />
-      {:else}
-        {#key src}<MediaText file={item.file} {src} {kind} {rendered} />{/key}
-      {/if}
+          style:transform="translate({view.x}px, {view.y}px) scale({view.scale})" />{/if}{/snippet}
+      </MediaContent>
     </div>
     {#if !item.file.visual || items.length > 1}<footer><span class="name">{#if !item.file.visual}{item.file.name}{/if}</span>{#if !item.file.visual}<span class="count">{" · "}{fileSize(item.file.bytes)}</span>{/if}{#if items.length > 1}<span class="count">{#if !item.file.visual}{" · "}{/if}{index + 1} of {items.length}</span>{/if}</footer>{/if}
   </div>
@@ -178,12 +166,9 @@
   button:disabled { opacity: .45; cursor: default; }
   .stage { position: relative; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: center; min-height: 0; overflow: hidden; background: var(--sidebar); }
   .stage.media-gesture { touch-action: none; user-select: none; }
-  img, video { display: block; object-fit: contain; }
-  video { max-width: 100%; max-height: 100%; }
+  img { display: block; object-fit: contain; }
   img { transform-origin: center; }
-  iframe { display: block; width: 100%; height: 100%; border: 0; }
   /* A drawing has no page of its own: without the scheme the browser paints a white one behind it in a dark theme. It takes no focus, so Escape keeps working. */
-  iframe.drawing { color-scheme: light; pointer-events: none; }
   .visual-stage { width: 100%; height: 100%; overflow: hidden; }
   .visual-error { padding: 24px; color: var(--muted); font-size: 13px; }
   .visual-error button { text-decoration: underline; }
