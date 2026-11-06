@@ -228,7 +228,7 @@ func jobResult(answer shell.Result, moved bool) (extension.AgentToolResult, erro
 	case answer.Running && moved:
 		state = fmt.Sprintf("[job %s] %s", answer.Job, movedNote)
 	case answer.Running:
-		state = fmt.Sprintf("[job %s is still running after 30 s. Dyna wakes you when it ends, so end the turn unless other work remains.]", answer.Job)
+		state = fmt.Sprintf("[job %s is still running. Do not check it again: Dyna wakes you with its result when it ends. Do other work now, or end your turn.]", answer.Job)
 	}
 	return textResult(strings.TrimLeft(strings.TrimRight(answer.Output, " \t\r\n")+"\n"+state, " \t\r\n"), answer)
 }
