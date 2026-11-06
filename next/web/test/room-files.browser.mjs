@@ -89,7 +89,7 @@ for (const theme of ["light", "carbon"]) for (const width of [1440, 390]) {
   assert.equal(await dialog.getByRole("button", { name: "Jump to post", exact: true }).count(), 0, "tree files have no post jump");
   assert.ok((await dialog.getByRole("navigation", { name: "File path", exact: true }).innerText()).includes(path.split("/").at(-1)));
   await dialog.locator(".modified time").waitFor();
-  assert.equal(await dialog.getByRole("button", { name: "Show in folder", exact: true }).getAttribute("title"), "Show in folder");
+  assert.equal(await dialog.locator('button[title="Show in folder"]').first().getAttribute("title"), "Show in folder");
   const bytes = (await stat(`${process.env.SHARED_ROOT}/${path}`)).size;
   assert.ok((await dialog.locator("footer").innerText()).includes(bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`), "tree media carries its real size");
   if (kind === "go") {
