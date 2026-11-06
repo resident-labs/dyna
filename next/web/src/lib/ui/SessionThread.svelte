@@ -265,6 +265,9 @@
   const sender = (kind: string, id?: string) => kind === "owner" ? "you" : id ? store.names.get(id) ?? "Session" : "Dyna";
   const sameDay = (a: string, b: string) => new Date(a).toDateString() === new Date(b).toDateString();
   const pendingKey = (id: number) => `pending:${id}`;
+  export function jumpMedia(key: string) {
+    scroller.querySelector<HTMLElement>(`[data-media-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "center" });
+  }
 </script>
 
 {#snippet message(key: string, text: string, attachments: Attachment[] | null | undefined, event?: string, at?: string, data?: import("../contract.gen.ts").JSONData, dataRef?: import("../contract.gen.ts").PostDataRef | null, dataAttachment?: number | null, from: Principal = { kind: "session", session })}
@@ -337,7 +340,7 @@
   {#if !before || !sameDay(before, at)}<p class="day">{dayLabel(at, clock())}</p>{/if}
 {/snippet}
 
-{#if mediaIndex !== undefined}<MediaViewer room={store.room} {loadVisual} items={media} initial={mediaIndex} name={mediaName} root={mediaRoot} onclose={() => mediaIndex = undefined} onjump={key => scroller.querySelector<HTMLElement>(`[data-media-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "center" })} />{/if}
+{#if mediaIndex !== undefined}<MediaViewer room={store.room} {loadVisual} items={media} initial={mediaIndex} name={mediaName} root={mediaRoot} onclose={() => mediaIndex = undefined} onjump={jumpMedia} />{/if}
 
 <div class="thread-frame" bind:clientWidth={frameWidth}>
 {#if frameWidth >= 880 && !step}<TimelineMinimap turns={minimapTurns} current={currentTurn} onselect={(id) => scroller.querySelector<HTMLElement>(`article[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" })} />{/if}

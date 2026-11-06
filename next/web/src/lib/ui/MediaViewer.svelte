@@ -58,7 +58,7 @@
   }
   function down(e: PointerEvent) {
     background = false;
-    if (!gestures || e.target instanceof HTMLVideoElement) return;
+    if (!gestures || imageFailed || e.target instanceof HTMLVideoElement) return;
     background = e.target === stage;
     stage.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size === 1) { start = { x: e.clientX, y: e.clientY }; moved = 0; }
