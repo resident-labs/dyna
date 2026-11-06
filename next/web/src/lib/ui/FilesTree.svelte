@@ -13,8 +13,8 @@
   const listings = new SvelteMap<string, SharedEntry[]>(), expanded = new SvelteSet<string>(), failures = new SvelteSet<string>();
   const pending = new Map<string, Promise<SharedEntry[] | undefined>>();
   let rows = $derived(sharedRows(listings, expanded, failures));
-  let selected = $state("");
-  let list: VirtualList<SharedRow> | undefined = $state(), tree: HTMLDivElement;
+  let selected = $state(""), focusTarget = $state("");
+  let list: VirtualList<SharedRow> | undefined = $state();
   let menu = $state<{ path: string; anchor: DOMRect; trigger: HTMLButtonElement; dir: boolean }>();
   let menuRoot = $state<HTMLDivElement>();
   let held: { timer: ReturnType<typeof setTimeout>; x: number; y: number } | undefined;
@@ -63,12 +63,11 @@
       if (entry.dir) { expanded.add(parent); await load(parent); }
     }
     selected = parent;
+    // Focus when the virtual row mounts, not before the scroll event renders its window.
+    focusTarget = parent;
     await tick();
     const index = rows.findIndex(row => row.kind === "entry" && row.path === parent);
-    if (index >= 0) {
-      await list?.reveal(index);
-      tree.querySelector<HTMLButtonElement>(`button[data-shared-row="${CSS.escape(parent)}"]`)?.focus();
-    }
+    if (index >= 0) await list?.reveal(index, "center");
   }
   $effect(() => { const request = target; if (request) void untrack(() => reveal(request.path)); });
   function showMenu(event: MouseEvent, row: Extract<SharedRow, { kind: "entry" }>) {
@@ -103,14 +102,14 @@
 </script>
 
 <svelte:window onpointerdown={event => { if (menu && event.target instanceof Node && !menuRoot?.contains(event.target) && !menu.trigger.contains(event.target)) closeMenu(false); }} />
-<div class="files-tree" bind:this={tree}>
+<div class="files-tree">
   <VirtualList bind:this={list} items={rows} key={sharedRowKey} label="Room files" role="group" align="top" estimate={30}>
     {#snippet row(row: SharedRow)}
       {@const depth = Math.min(row.depth, 6)}
       {#if row.kind === "entry"}
         <div class="row" style:--depth={depth} class:selected={selected === row.path} title={`/box/shared/${row.path}`}>
           {#if row.entry.dir}<button type="button" class="fold" style:left={`${6 + depth * 16}px`} aria-expanded={expanded.has(row.path)} aria-label={`${expanded.has(row.path) ? "Collapse" : "Expand"} ${row.entry.name}`} onclick={() => void toggle(row.path)}><Icon name="chevron" size={12} /></button>{/if}
-          <button type="button" class="file" style:padding-left={`${30 + depth * 16}px`} data-shared-row={row.path} aria-pressed={selected === row.path} onclick={() => open(row)} oncontextmenu={event => showMenu(event, row)} onpointerdown={event => press(event, row)} onpointermove={drift} onpointerup={release} onpointercancel={release}>
+          <button type="button" class="file" style:padding-left={`${30 + depth * 16}px`} data-shared-row={row.path} aria-pressed={selected === row.path} {@attach node => { if (focusTarget === row.path) { node.focus({ preventScroll: true }); focusTarget = ""; } }} onclick={() => open(row)} oncontextmenu={event => showMenu(event, row)} onpointerdown={event => press(event, row)} onpointermove={drift} onpointerup={release} onpointercancel={release}>
             <Icon name={row.entry.dir ? "folder" : "file"} /><span class="name">{row.entry.name}</span>{#if !row.entry.dir}<span class="size">{fileSize(row.entry.size)}</span>{/if}
           </button>
         </div>
