@@ -92,7 +92,7 @@ func open(dir string, floor int, commit string, checkpointRun func() error) (*St
 		return nil, err
 	}
 	layout := box.Layout{Data: dir}
-	lock, err := os.OpenFile(layout.StoreLock(), os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := lockStore(layout)
 	if err != nil {
 		return nil, err
 	}
@@ -102,12 +102,6 @@ func open(dir string, floor int, commit string, checkpointRun func() error) (*St
 			_ = lock.Close()
 		}
 	}()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return nil, errors.New("data folder is in use by another engine")
-		}
-		return nil, err
-	}
 	path := layout.Store()
 	_, err = os.Stat(path)
 	fresh := errors.Is(err, os.ErrNotExist)
@@ -167,6 +161,22 @@ func open(dir string, floor int, commit string, checkpointRun func() error) (*St
 	go s.writeLoop()
 	go s.checkLoop(path)
 	return s, nil
+}
+
+// lockStore excludes all engine writers, including offline owner commands. The lock file must never be unlinked.
+func lockStore(layout box.Layout) (*os.File, error) {
+	lock, err := os.OpenFile(layout.StoreLock(), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = lock.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, errors.New("data folder is in use by another engine")
+		}
+		return nil, err
+	}
+	return lock, nil
 }
 
 // initialize publishes only a complete database. A crash before publication
