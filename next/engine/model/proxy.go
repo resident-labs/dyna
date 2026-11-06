@@ -72,7 +72,9 @@ func NewProxy(dir, authDir, managementKey string) (*Proxy, error) {
 			_ = listener.Close()
 		}
 	}()
-	cfg, err := config.ParseConfigBytes([]byte("{}"))
+	// Codex requests get no injected image_generation tool: a session's tools are Dyna's own, and the injected tool's
+	// settings can fail a turn at the model call ("Complexity 'medium' is not supported"). The Image API endpoints stay.
+	cfg, err := config.ParseConfigBytes([]byte("disable-image-generation: chat\n"))
 	if err != nil {
 		return nil, err
 	}
