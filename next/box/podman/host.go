@@ -274,6 +274,13 @@ func (h *Host) RemoveForward(ctx context.Context, f box.Forward) error {
 	if err := validateForward(f); err != nil {
 		return err
 	}
+	if f.Box != "" {
+		_, err := h.namespaceDelete(ctx, f.Box, "bash", "-c", `rm -f -- "$1" && { [ ! -d "$2" ] || rmdir -- "$2"; }`, "dyna", f.HostPath, filepath.Dir(f.HostPath))
+		if err == nil {
+			h.forgetBoxForwards(f.Box)
+		}
+		return err
+	}
 	if err := h.lock(ctx); err != nil {
 		return err
 	}
@@ -288,11 +295,22 @@ func (h *Host) RemoveForward(ctx context.Context, f box.Forward) error {
 		delete(h.forwards, f)
 		delete(h.bound, f)
 	}
-	if f.Box != "" {
-		_, err := h.execute(ctx, "bash", "-c", `rm -f -- "$1" && { [ ! -d "$2" ] || rmdir -- "$2"; }`, "dyna", f.HostPath, filepath.Dir(f.HostPath))
-		return err
-	}
 	return nil
+}
+
+// A box deletion already unlinked the endpoint inside its host epoch fence.
+// Do not cancel its SSH registration afterwards: sshd's delayed cancellation
+// can unlink a replacement's endpoint. The next bind replaces that inert
+// registration. This local bookkeeping cannot reinterpret a completed result.
+func (h *Host) forgetBoxForwards(id contract.BoxID) {
+	h.gate <- struct{}{}
+	defer h.unlock()
+	for f := range h.forwards {
+		if f.Box == id {
+			delete(h.forwards, f)
+			delete(h.bound, f)
+		}
+	}
 }
 
 const frameScript = `set -u

@@ -755,6 +755,10 @@ func (b *Boxes) RemoveLeftoverBox(ctx context.Context, name contract.HostName, i
 	}
 	ctx = podman.WithRemoteCancellation(ctx)
 	removed, err := b.removeBoxVolumes(ctx, name, h, box.Box{ID: id, Slice: slice})
+	var superseded box.NamespaceSuperseded
+	if errors.As(err, &superseded) {
+		return lifecycle.LeftoverComplete, nil
+	}
 	if err != nil {
 		return lifecycle.LeftoverDeferred, err
 	}
@@ -985,10 +989,10 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 }
 
 // cleanupCreate removes what a failed creation made, on its own bounded context: the creation context is often the reason it failed.
-func cleanupCreate(ctx context.Context, h box.HostDriver, spec lifecycle.BoxSpec, forward box.Forward, stacked, created, forwarded, sliced bool) {
+func cleanupCreate(ctx context.Context, h box.HostDriver, spec lifecycle.BoxSpec, _ box.Forward, stacked, created, forwarded, sliced bool) {
 	ctx, cancel := startCleanupContext(ctx)
 	defer cancel()
-	if stacked || created || sliced {
+	if stacked || created || sliced || forwarded {
 		epoch, err := h.BoxEpoch(ctx, spec.Box)
 		if err == nil {
 			slice := ""
@@ -1001,9 +1005,6 @@ func cleanupCreate(ctx context.Context, h box.HostDriver, spec lifecycle.BoxSpec
 				return
 			}
 		}
-	}
-	if forwarded {
-		_ = h.RemoveForward(ctx, forward)
 	}
 }
 
@@ -1401,6 +1402,10 @@ func (b *Boxes) Remove(ctx context.Context, id contract.BoxID) error {
 		return err
 	}
 	if _, err := b.removeBoxVolumes(ctx, record.Host, h, record); err != nil {
+		var superseded box.NamespaceSuperseded
+		if errors.As(err, &superseded) {
+			return nil
+		}
 		return err
 	}
 	return b.Sockets.RemoveBox(id)
@@ -1452,10 +1457,7 @@ func removeHostBox(ctx context.Context, h box.HostDriver, record box.Box, forwar
 	}
 	return removeHostBoxAtEpoch(ctx, h, record, forward, epoch, removeVolumes)
 }
-func removeHostBoxAtEpoch(ctx context.Context, h box.HostDriver, record box.Box, forward box.Forward, epoch uint64, removeVolumes bool) error {
-	if err := h.RemoveForward(ctx, forward); err != nil {
-		return err
-	}
+func removeHostBoxAtEpoch(ctx context.Context, h box.HostDriver, record box.Box, _ box.Forward, epoch uint64, removeVolumes bool) error {
 	return h.RemoveBox(ctx, record.ID, epoch, removeVolumes, record.Slice)
 }
 

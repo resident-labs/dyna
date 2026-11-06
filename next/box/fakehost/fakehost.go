@@ -126,7 +126,17 @@ func (h *Host) RemoveBox(ctx context.Context, id contract.BoxID, _ uint64, volum
 		}
 	}
 	if slice != "" {
-		return h.RemoveSlice(ctx, slice)
+		if err := h.RemoveSlice(ctx, slice); err != nil {
+			return err
+		}
+	}
+	if err := h.call(RemoveForward); err != nil {
+		return err
+	}
+	for f := range h.Forwards {
+		if f.Box == id {
+			delete(h.Forwards, f)
+		}
 	}
 	return nil
 }
