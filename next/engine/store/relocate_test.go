@@ -250,6 +250,9 @@ func TestRelocateEngineRefusesWithoutWrites(t *testing.T) {
 			if err == nil {
 				t.Fatal("wanted relocation refusal")
 			}
+			if (kind == "old-schema" || kind == "new-schema") && !strings.Contains(err.Error(), fmt.Sprintf("requires dyna-v2 schema %d;", schemaVersion)) {
+				t.Fatalf("schema refusal must name this binary's current schema %d: %v", schemaVersion, err)
+			}
 			if kind == "rollback" && !strings.Contains(err.Error(), "injected update failure") {
 				t.Fatalf("did not exercise second-update rollback: %v", err)
 			}
