@@ -78,7 +78,7 @@ func (r codecRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte, e
 func TestBinaryCodecNegotiationAndMissingTools(t *testing.T) {
 	for _, codec := range []string{"zstd", "gzip", ""} {
 		t.Run(codec, func(t *testing.T) {
-			h, err := New("user@host", t.TempDir(), "host", codecRunner{codec: codec})
+			h, err := New("user@host", t.TempDir(), "host", codecRunner{codec: codec}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -132,7 +132,7 @@ DYNA_TEST_ZSTD_DECODER=1 exec ` + quote(executable) + ` -test.run=^TestBinaryZst
 			}
 			tools := fakeTools(t, map[string]string{"zstd": script})
 			t.Setenv("PATH", tools+":"+os.Getenv("PATH"))
-			h, err := New("user@host", t.TempDir(), "host", &localBinaryRunner{})
+			h, err := New("user@host", t.TempDir(), "host", &localBinaryRunner{}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}

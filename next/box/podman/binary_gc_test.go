@@ -23,18 +23,13 @@ type binaryGCRunner struct {
 }
 
 func (r *binaryGCRunner) Run(ctx context.Context, in []byte, args ...string) ([]byte, error) {
-	for _, arg := range args {
-		if arg == "-M" || arg == "-O" {
-			return nil, nil
-		}
-	}
 	command := args[len(args)-1]
 	if r.beforeDelete != nil && strings.Contains(command, "'dyna-prune-binaries'") {
 		r.beforeDelete()
 	}
 	args = append([]string(nil), args...)
 	args[len(args)-1] = "export PATH=" + quote(r.path+":"+os.Getenv("PATH")) + "; export GC_FIXTURE=" + quote(r.fixture) + "; " + command
-	return (ExecRunner{}).Run(ctx, in, "bash", "-c", args[len(args)-1])
+	return (nativeShellRunner{}).Run(ctx, in, args...)
 }
 
 type binaryGCRig struct {
@@ -103,7 +98,7 @@ fi
 	}
 	rig.r = &binaryGCRunner{path: path, fixture: rig.fixture}
 	var err error
-	rig.h, err = New("user@host", t.TempDir(), "host", rig.r)
+	rig.h, err = New("user@host", t.TempDir(), "host", rig.r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -428,6 +423,61 @@ func TestPruneBinariesLeavesNonObjectsSymlinksAndActiveStages(t *testing.T) {
 	r.exists(false, r.middle)
 	if _, err := os.Stat(filepath.Join(outside, "dyna")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPruneBinariesCancellationCannotLeaveALateDeleter(t *testing.T) {
+	r := newBinaryGCRig(t)
+	r.write(filepath.Join(r.r.path, "flock"), []byte("#!/bin/bash\ntouch \"$GC_FIXTURE/lock-wait\"\nexec /usr/bin/flock \"$@\"\n"))
+	if err := os.Chmod(filepath.Join(r.r.path, "flock"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(filepath.Join(r.bin, ".activation.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	entered := make(chan struct{})
+	r.r.beforeDelete = func() { close(entered) }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- r.h.PruneBinaries(ctx, r.bin, r.wanted) }()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("did not reach delete phase")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(filepath.Join(r.fixture, "lock-wait")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("remote prune did not try to lock")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("cancelled prune succeeded")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("remote prune was not joined")
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	r.allPresent()
+	if _, err := os.Stat(filepath.Join(r.fixture, "locked-read")); !os.IsNotExist(err) {
+		t.Fatalf("cancelled command escaped lock: %v", err)
 	}
 }
 

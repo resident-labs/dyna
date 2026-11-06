@@ -110,24 +110,31 @@ func (h *Host) stackStep(ctx context.Context, what string, argv ...string) error
 
 // CreateStack creates a box's compose volumes, its pod and its sidecars, all stopped. A volume that exists stays as it is,
 // so a swap keeps its data. A stack with no sidecars needs no pod.
-func (h *Host) CreateStack(ctx context.Context, id contract.BoxID, slice string, s *box.Stack) error {
+func stackCommand(what string, args ...string) string {
+	return "if output=$(" + shellCommand(args...) + " 2>&1); then printf '%s' \"$output\"; else printf '%s: %s\\n' " + quote(what) + " \"$output\" >&2; exit 253; fi"
+}
+
+func stackCommands(id contract.BoxID, slice string, s *box.Stack) string {
+	var commands []string
 	for _, name := range s.VolumeNames() {
-		if err := h.stackStep(ctx, "create volume "+name, "podman", "volume", "create", "--ignore", "--label", stackLabel+"="+string(id), stackVolumeName(id, name)); err != nil {
-			return err
+		commands = append(commands, stackCommand("create volume "+name, "podman", "volume", "create", "--ignore", "--label", stackLabel+"="+string(id), stackVolumeName(id, name)))
+	}
+	if len(s.Sidecars) > 0 {
+		commands = append(commands, stackCommand("create pod", podArgs(id, slice, s)...))
+		for i, sidecar := range s.Sidecars {
+			commands = append(commands, stackCommand("create sidecar "+sidecar.Name, sidecarArgs(id, slice, i, sidecar)...))
 		}
 	}
-	if len(s.Sidecars) == 0 {
-		return nil
+	return strings.Join(commands, "\n")
+}
+
+func (h *Host) CreateStack(ctx context.Context, id contract.BoxID, slice string, s *box.Stack) error {
+	_, err := h.namespace(ctx, id, "create", "bash", "-c", "set -eu\n"+stackCommands(id, slice, s), "dyna-create-stack")
+	var exit remoteExit
+	if errors.As(err, &exit) && exit == 253 {
+		return box.StackError{Reason: err.Error()}
 	}
-	if err := h.stackStep(ctx, "create pod", podArgs(id, slice, s)...); err != nil {
-		return err
-	}
-	for i, sidecar := range s.Sidecars {
-		if err := h.stackStep(ctx, "create sidecar "+sidecar.Name, sidecarArgs(id, slice, i, sidecar)...); err != nil {
-			return err
-		}
-	}
-	return nil
+	return err
 }
 
 type stackContainer struct {
@@ -165,7 +172,7 @@ func (h *Host) StartSidecars(ctx context.Context, id contract.BoxID) error {
 	}
 	for _, sidecar := range sidecars {
 		name := sidecar.Names[0]
-		if err := h.stackStep(ctx, "start sidecar "+name, "podman", "--cgroup-manager=systemd", "start", name); err != nil {
+		if _, err := h.namespace(ctx, id, "use", "podman", "--cgroup-manager=systemd", "start", name); err != nil {
 			return err
 		}
 		if wait, _ := strconv.Atoi(sidecar.Labels[waitLabel]); wait > 0 {
@@ -211,20 +218,18 @@ func (h *Host) awaitHealthy(ctx context.Context, name string, wait time.Duration
 
 // StopPod stops a box's pod, sidecars and all. A box without one needs nothing.
 func (h *Host) StopPod(ctx context.Context, id contract.BoxID) error {
-	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "pod", "stop", "--ignore", box.PodName(id))
+	_, err := h.namespaceDelete(ctx, id, "podman", "--cgroup-manager=systemd", "pod", "stop", "--ignore", box.PodName(id))
 	return err
 }
 
 // RemovePod removes a box's pod and every container in it, the box too, and keeps the volumes.
 func (h *Host) RemovePod(ctx context.Context, id contract.BoxID) error {
-	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "pod", "rm", "--force", "--ignore", "--time", "0", box.PodName(id))
-	return err
+	return h.removeBoxNow(ctx, id, false)
 }
 
-// RemoveStackVolumes removes a box's compose volumes. It comes after RemovePod, because prune leaves a volume in use.
+// RemoveStackVolumes removes the whole unused namespace under the same lock.
 func (h *Host) RemoveStackVolumes(ctx context.Context, id contract.BoxID) error {
-	_, err := h.run(ctx, "podman", "volume", "prune", "--force", "--filter", "label="+stackLabel+"="+string(id))
-	return err
+	return h.removeBoxNow(ctx, id, true)
 }
 
 // PullImage fetches a sidecar's image and warms it, as Build does for a box image. It uses no sign-in the host may hold: a

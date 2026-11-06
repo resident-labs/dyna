@@ -261,7 +261,7 @@
   // A row's menu of actions. A right click or the Menu key opens it at the pointer, and the row's More button opens it
   // under the button. It closes with its session, and a button that opened it toggles it.
   let acting: { session: string; anchor: DOMRect; side: "start" | "end"; trigger: HTMLElement } | undefined = $state();
-  const canAct = (id: string, parent?: string) => attention.can("operate") && sessionActions(parent, !!store?.running(id) && !store.stopping.has(id), store?.boxes.get(id)).length > 0;
+  const canAct = (id: string, parent?: string) => attention.can("operate") && sessionActions(parent, !!(store?.running(id) || store?.starting(id)) && !store?.stopping.has(id), store?.boxes.get(id)).length > 0;
   function act(event: MouseEvent & { currentTarget: HTMLElement }, id: string, parent: string | undefined, anchor: DOMRect, side: "start" | "end") {
     if (!canAct(id, parent)) return;
     event.preventDefault();
@@ -325,7 +325,7 @@
   // A DM's running turn, which the composer can stop.
   const stopOf = (running: string | undefined) => {
     const current = store;
-    if (!running || !current?.running(running)) return undefined;
+    if (!running || !current || (!current.running(running) && !current.starting(running))) return undefined;
     return { stopping: current.stopping.has(running), failed: current.stopFailed.has(running), run: () => current.stop(running) };
   };
   let stop = $derived(stopOf(session));

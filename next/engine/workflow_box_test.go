@@ -283,7 +283,7 @@ func newRealCrew(t *testing.T, files map[string]string) *realCrew {
 	if out, err := exec.Command("cp", binary, filepath.Join(bin, "dyna")).CombinedOutput(); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
-	if c.host, err = podman.New("local", c.runtime, "h", localRunner{}); err != nil {
+	if c.host, err = podman.New("local", c.runtime, "h", localRunner{}, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {

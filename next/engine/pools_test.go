@@ -91,6 +91,10 @@ func (b *nodeBoxes) Create(ctx context.Context, spec BoxSpec) (string, error) {
 	return "image", nil
 }
 
+func (b *nodeBoxes) DiscardHostBox(ctx context.Context, old box.Box) error {
+	return b.Remove(ctx, old.ID)
+}
+
 func (b *nodeBoxes) Remove(ctx context.Context, id contract.BoxID) error {
 	b.nodes.mu.Lock()
 	defer b.nodes.mu.Unlock()

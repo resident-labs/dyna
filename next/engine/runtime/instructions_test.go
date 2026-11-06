@@ -78,7 +78,7 @@ func TestInstructionsRepairAfterOfflineSave(t *testing.T) {
 		t.Fatal(err)
 	}
 	transport := &instructionTransport{}
-	host, err := podman.New("user@host", t.TempDir(), "host", transport)
+	host, err := podman.New("user@host", t.TempDir(), "host", transport, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestAddonsMirrorBesideInstructions(t *testing.T) {
 	ctx := context.Background()
 	layout := box.Layout{Data: t.TempDir(), HostData: t.TempDir()}
 	files := &addons.Files{Layout: layout}
-	host, err := podman.New("user@host", t.TempDir(), "host", &instructionTransport{})
+	host, err := podman.New("user@host", t.TempDir(), "host", &instructionTransport{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestInstructionsSkipARoomBeingDeleted(t *testing.T) {
 	if err := os.WriteFile(layout.Instructions(""), []byte("global"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	host, err := podman.New("user@host", t.TempDir(), "host", &instructionTransport{})
+	host, err := podman.New("user@host", t.TempDir(), "host", &instructionTransport{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestResumeRepairsInstructionsBeforeStarting(t *testing.T) {
 		t.Fatal(err)
 	}
 	transport := &instructionTransport{offline: true}
-	host, err := podman.New("user@host", t.TempDir(), "host", transport)
+	host, err := podman.New("user@host", t.TempDir(), "host", transport, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,7 +371,7 @@ func TestSaveThenResumeRepairsBeforeDelayedPublish(t *testing.T) {
 		t.Fatal(err)
 	}
 	transport := &instructionTransport{}
-	host, err := podman.New("user@host", t.TempDir(), "host", transport)
+	host, err := podman.New("user@host", t.TempDir(), "host", transport, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,8 +467,8 @@ type recordHostStore struct {
 
 func (s recordHostStore) AddHost(_ context.Context, h box.Host) error { *s.added = h; return nil }
 
-// An exec-only host is checked by running bash alone, and nothing is installed or synced there.
-func TestAddExecOnlyHostNeedsOnlyBash(t *testing.T) {
+// An exec-only host checks the shell and pgrep cancellation prerequisite; nothing is installed or synced there.
+func TestAddExecOnlyHostNeedsShellAndPgrep(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var commands []string
@@ -478,7 +478,7 @@ func TestAddExecOnlyHostNeedsOnlyBash(t *testing.T) {
 	if _, err := b.AddHost(ctx, contract.HostAddRequest{Name: "omarchy", SSH: "ari@omarchy", Agents: &off, CI: &off}); err != nil {
 		t.Fatal(err)
 	}
-	if len(commands) != 1 || !strings.Contains(commands[0], "true") {
+	if len(commands) != 1 || !strings.Contains(commands[0], "command -v pgrep") {
 		t.Fatalf("commands %q", commands)
 	}
 	if !added.ExecOnly || added.State != box.HostReady || added.EngineHost == nil {

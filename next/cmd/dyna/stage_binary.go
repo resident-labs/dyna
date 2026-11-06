@@ -83,7 +83,7 @@ func stageBinaryCommand() *cobra.Command {
 				defer wg.Done()
 				start := time.Now()
 				hostHash := sha256.Sum256([]byte(record.Name))
-				h, err := podman.New(record.SSH, runtimeDir, "stage-"+sum[:12]+"-"+hex.EncodeToString(hostHash[:16]), nil)
+				h, err := podman.New(record.SSH, runtimeDir, "stage-"+sum[:12]+"-"+hex.EncodeToString(hostHash[:16]), nil, hostData)
 				if err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "stage %s: %v\n", record.Name, err)
 					return

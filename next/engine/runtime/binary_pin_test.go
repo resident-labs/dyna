@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,7 +24,7 @@ import (
 
 type nativePinnedRunner struct {
 	entered, release, finished string
-	noSystemd                  bool
+	failCancel, noSystemd      bool
 }
 
 func (r *nativePinnedRunner) Run(ctx context.Context, in []byte, args ...string) ([]byte, error) {
@@ -33,6 +34,9 @@ func (r *nativePinnedRunner) Run(ctx context.Context, in []byte, args ...string)
 		}
 	}
 	command := args[len(args)-1]
+	if strings.Contains(command, "dyna-cancel") && r.failCancel {
+		return nil, errors.New("independent cancellation unavailable")
+	}
 	if r.entered != "" && strings.Contains(command, "'dyna-link'") {
 		prefix := fmt.Sprintf(": > %q; while [ ! -f %q ]; do sleep 0.01; done; ", r.entered, r.release)
 		command = strings.Replace(command, `exec 9> .activation.lock`, prefix+`exec 9> .activation.lock`, 1)
@@ -114,14 +118,14 @@ printf '%s' "$!" > "$PIN_PID"
 			_ = syscall.Kill(-pid, syscall.SIGKILL)
 		}
 	})
-	h, err := podman.New("user@host", t.TempDir(), "host", &nativePinnedRunner{})
+	h, err := podman.New("user@host", t.TempDir(), "host", &nativePinnedRunner{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := h.ActivateBinary(context.Background(), bin, newSum); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.StartContainer(context.Background(), "b"); err != nil {
+	if err := h.StartContainer(podman.WithRemoteCancellation(context.Background()), "b"); err != nil {
 		t.Fatal(err)
 	}
 	// Start has acknowledged tini, but its child has not resolved the executable yet.
@@ -157,10 +161,10 @@ func TestOneHostSurveyConvergesAfterUnconfirmedActivationAndRepeatedSHAABA(t *te
 			oldSum, newSum := stagePinnedFixture(t, bin, []byte("old-engine")), stagePinnedFixture(t, bin, []byte("new-engine"))
 			var old []*nativePinnedRunner
 			for i := 0; i < oldRequests; i++ {
-				r := &nativePinnedRunner{entered: filepath.Join(tools, fmt.Sprintf("entered-%d", i)), release: filepath.Join(tools, fmt.Sprintf("release-%d", i)), finished: filepath.Join(tools, fmt.Sprintf("done-%d", i))}
+				r := &nativePinnedRunner{entered: filepath.Join(tools, fmt.Sprintf("entered-%d", i)), release: filepath.Join(tools, fmt.Sprintf("release-%d", i)), finished: filepath.Join(tools, fmt.Sprintf("done-%d", i)), failCancel: true}
 				old = append(old, r)
 				t.Cleanup(func() { _ = os.WriteFile(r.release, nil, 0600) })
-				h, err := podman.New("user@host", t.TempDir(), "host", r)
+				h, err := podman.New("user@host", t.TempDir(), "host", r, t.TempDir())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -170,11 +174,12 @@ func TestOneHostSurveyConvergesAfterUnconfirmedActivationAndRepeatedSHAABA(t *te
 				go func() { done <- h.ActivateBinary(ctx, bin, oldSum) }()
 				waitPinnedFile(t, r.entered)
 				cancel()
-				if err := <-done; err == nil {
-					t.Fatalf("lost activation transport unexpectedly succeeded: %v", err)
+				var unconfirmed podman.RemoteCancellationUnconfirmed
+				if err := <-done; !errors.As(err, &unconfirmed) {
+					t.Fatalf("activation cancellation was not unconfirmed: %v", err)
 				}
 			}
-			newest, err := podman.New("user@host", t.TempDir(), "host", &nativePinnedRunner{noSystemd: true})
+			newest, err := podman.New("user@host", t.TempDir(), "host", &nativePinnedRunner{noSystemd: true}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -35,10 +35,21 @@ type BoxAdapter interface {
 	Recreate(context.Context, BoxSpec, string) error
 }
 
+// LeftoverCleanup describes confirmed physical work, never deletion permission.
+type LeftoverCleanup uint8
+
+const (
+	LeftoverDeferred          LeftoverCleanup = iota // active current resources were not touched
+	LeftoverContainersRemoved                        // runnable resources are gone; named work remains
+	LeftoverComplete                                 // runnable resources and named volumes are confirmed gone
+)
+
 // RoomHosts removes what a deleted room left on hosts. Each removal is idempotent.
 type RoomHosts interface {
 	RemoveRoom(context.Context, contract.HostName, contract.RoomID) error
-	RemoveLeftoverBox(context.Context, contract.HostName, contract.BoxID, string) error
+	// RemoveLeftoverBox distinguishes deferred work from confirmed container-only
+	// cleanup. Only complete removal permits retiring the durable debt.
+	RemoveLeftoverBox(context.Context, contract.HostName, contract.BoxID, string) (LeftoverCleanup, error)
 	// ForgetBox drops the engine's side of a box left on an offline host.
 	ForgetBox(contract.BoxID) error
 }

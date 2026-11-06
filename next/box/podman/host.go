@@ -4,6 +4,8 @@ package podman
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -54,6 +57,8 @@ func (ExecRunner) RunProgress(ctx context.Context, in []byte, progress func(int)
 const masterStart = 2 * time.Minute
 
 type Host struct {
+	pendingMu           sync.Mutex
+	pendingCancels      map[string]struct{}
 	buildGate           chan struct{}
 	shortGate           chan struct{}
 	stopGate            chan struct{}
@@ -61,6 +66,7 @@ type Host struct {
 	dialSetup           time.Duration
 	gate                chan struct{}
 	destination, socket string
+	dataDir             string
 	runner              Runner
 	forwards            map[box.Forward]struct{} // every forward this host should have
 	bound               map[box.Forward]struct{} // those the current master holds; a retry starts from here
@@ -73,8 +79,8 @@ type Host struct {
 }
 
 // New returns one driver per host. runtime is Dyna v2's private runtime directory.
-func New(destination, runtime, hostKey string, runner Runner) (*Host, error) {
-	if destination == "" || strings.HasPrefix(destination, "-") || hostKey == "" || filepath.Base(hostKey) != hostKey {
+func New(destination, runtime, hostKey string, runner Runner, hostData string) (*Host, error) {
+	if destination == "" || strings.HasPrefix(destination, "-") || hostKey == "" || filepath.Base(hostKey) != hostKey || !filepath.IsAbs(hostData) {
 		return nil, errors.New("invalid SSH host")
 	}
 	if runner == nil {
@@ -100,7 +106,7 @@ func New(destination, runtime, hostKey string, runner Runner) (*Host, error) {
 	if !ok || !info.IsDir() || info.Mode().Perm() != 0700 || stat.Uid != uint32(os.Getuid()) {
 		return nil, errors.New("insecure SSH control socket directory")
 	}
-	return &Host{gate: make(chan struct{}, 1), buildGate: make(chan struct{}, 1), shortGate: make(chan struct{}, 5), stopGate: make(chan struct{}, 1), dialGate: make(chan struct{}, hostexecDialing), dialSetup: hostexecSetup, destination: destination, socket: socket, runner: runner, forwards: make(map[box.Forward]struct{}), bound: make(map[box.Forward]struct{})}, nil
+	return &Host{dataDir: hostData, pendingCancels: make(map[string]struct{}), gate: make(chan struct{}, 1), buildGate: make(chan struct{}, 1), shortGate: make(chan struct{}, 5), stopGate: make(chan struct{}, 1), dialGate: make(chan struct{}, hostexecDialing), dialSetup: hostexecSetup, destination: destination, socket: socket, runner: runner, forwards: make(map[box.Forward]struct{}), bound: make(map[box.Forward]struct{})}, nil
 }
 
 // Generation changes each time the SSH master and its forwards are restored.
@@ -268,6 +274,13 @@ func (h *Host) RemoveForward(ctx context.Context, f box.Forward) error {
 	if err := validateForward(f); err != nil {
 		return err
 	}
+	if f.Box != "" {
+		_, err := h.namespaceDelete(ctx, f.Box, "bash", "-c", `rm -f -- "$1" && { [ ! -d "$2" ] || rmdir -- "$2"; }`, "dyna", f.HostPath, filepath.Dir(f.HostPath))
+		if err == nil {
+			h.forgetBoxForwards(f.Box)
+		}
+		return err
+	}
 	if err := h.lock(ctx); err != nil {
 		return err
 	}
@@ -282,11 +295,22 @@ func (h *Host) RemoveForward(ctx context.Context, f box.Forward) error {
 		delete(h.forwards, f)
 		delete(h.bound, f)
 	}
-	if f.Box != "" {
-		_, err := h.execute(ctx, "bash", "-c", `rm -f -- "$1" && { [ ! -d "$2" ] || rmdir -- "$2"; }`, "dyna", f.HostPath, filepath.Dir(f.HostPath))
-		return err
-	}
 	return nil
+}
+
+// A box deletion already unlinked the endpoint inside its host epoch fence.
+// Do not cancel its SSH registration afterwards: sshd's delayed cancellation
+// can unlink a replacement's endpoint. The next bind replaces that inert
+// registration. This local bookkeeping cannot reinterpret a completed result.
+func (h *Host) forgetBoxForwards(id contract.BoxID) {
+	h.gate <- struct{}{}
+	defer h.unlock()
+	for f := range h.forwards {
+		if f.Box == id {
+			delete(h.forwards, f)
+			delete(h.bound, f)
+		}
+	}
 }
 
 const frameScript = `set -u
@@ -414,8 +438,24 @@ func (h *Host) executeInput(ctx context.Context, input []byte, argv ...string) (
 	return h.executeOver(ctx, h.base(), input, argv...)
 }
 func (h *Host) executeOver(ctx context.Context, ssh []string, input []byte, argv ...string) ([]byte, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	// A previous uncertain command must be cancelled before a later operation can claim cleanup succeeded.
+	if err := h.joinPending(ctx); err != nil {
+		return nil, err
+	}
 	// Do not retry a mutation after an uncertain reply; reconcile containers instead.
 	parts := []string{"bash", "-c", frameScript, "dyna-frame"}
+	var token string
+	if bounded, _ := ctx.Value(remoteCancelKey{}).(bool); bounded {
+		nonce := make([]byte, 16)
+		if _, err := rand.Read(nonce); err != nil {
+			return nil, err
+		}
+		token = hex.EncodeToString(nonce)
+		parts = []string{"setsid", "--wait", "bash", "-c", cancellableFrameScript, "dyna-frame", token}
+	}
 	parts = append(parts, argv...)
 	for i := range parts {
 		parts[i] = quote(parts[i])
@@ -430,9 +470,33 @@ func (h *Host) executeOver(ctx context.Context, ssh []string, input []byte, argv
 	} else {
 		out, sshErr = h.runner.Run(ctx, frame, args...)
 	}
-	body, status, err := parseReply(out)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", err, sshErr)
+	body, status, replyErr := parseReply(out)
+	// A complete frame is the operation's confirmed result, even if the
+	// caller's context or SSH exit raced its trailer. Only a missing/invalid
+	// trailer leaves a remote mutation to cancel and join.
+	if token != "" && replyErr != nil {
+		h.pendingMu.Lock()
+		h.pendingCancels[token] = struct{}{}
+		h.pendingMu.Unlock()
+		deadline := time.Now().Add(box.StartCleanupBudget)
+		if limit, ok := ctx.Value(remoteCancelDeadlineKey{}).(time.Time); ok && limit.Before(deadline) {
+			deadline = limit
+		}
+		cleanup, stop := context.WithDeadline(context.WithoutCancel(ctx), deadline)
+		defer stop()
+		if err := h.cancelRemote(cleanup, token); err != nil {
+			return nil, err
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if replyErr != nil {
+			return nil, fmt.Errorf("%w: %v", replyErr, sshErr)
+		}
+		return nil, sshErr
+	}
+	if replyErr != nil {
+		return nil, fmt.Errorf("%w: %v", replyErr, sshErr)
 	}
 	if status != 0 {
 		return body, commandFailed{exit: remoteExit(status), tail: outputTail(body)}
@@ -456,28 +520,32 @@ func (h *Host) RemoveRoom(ctx context.Context, dir string) error {
 	return err
 }
 
-func (h *Host) EnsureSlice(ctx context.Context, s box.Slice) error {
-	if _, err := h.run(ctx, "systemctl", "--user", "start", s.Name); err != nil {
-		var exit remoteExit
-		if !errors.As(err, &exit) {
-			return err
-		}
+func sliceBoxID(name string) (contract.BoxID, error) {
+	if filepath.Base(name) != name || !strings.HasPrefix(name, "dyna-") || !strings.HasSuffix(name, ".slice") || name == "dyna-.slice" {
+		return "", errors.New("invalid slice name")
 	}
-	_, err := h.run(ctx, "systemctl", "--user", "set-property", "--runtime", s.Name,
+	return contract.BoxID(strings.TrimSuffix(strings.TrimPrefix(name, "dyna-"), ".slice")), nil
+}
+func (h *Host) EnsureSlice(ctx context.Context, s box.Slice) error {
+	id, err := sliceBoxID(s.Name)
+	if err != nil {
+		return err
+	}
+	script := `systemctl --user start "$1" || true
+exec systemctl --user set-property --runtime "$@"`
+	_, err = h.namespace(ctx, id, "use", "bash", "-c", script, "dyna-ensure-slice", s.Name,
 		fmt.Sprintf("CPUQuota=%d%%", s.CPUs*100), fmt.Sprintf("MemoryHigh=%d", s.MemHigh), fmt.Sprintf("MemoryMax=%d", s.MemMax), fmt.Sprintf("TasksMax=%d", s.Pids))
 	return err
 }
 func (h *Host) RemoveSlice(ctx context.Context, name string) error {
-	if filepath.Base(name) != name || !strings.HasSuffix(name, ".slice") {
-		return errors.New("invalid slice name")
-	}
-	if _, err := h.run(ctx, "bash", "-c", `systemctl --user stop "$1" || [ "$(systemctl --user show "$1" -p LoadState --value)" = not-found ]`, "dyna", name); err != nil {
+	id, err := sliceBoxID(name)
+	if err != nil {
 		return err
 	}
-	_, err := h.run(ctx, "bash", "-c", `test -n "$XDG_RUNTIME_DIR" && rm -rf -- "$XDG_RUNTIME_DIR/systemd/user.control/$1.d" && systemctl --user daemon-reload`, "dyna", name)
+	_, err = h.namespaceDelete(ctx, id, "bash", "-c", "set -eu\n"+removeSliceScript, "dyna-remove-slice", string(id), name)
 	return err
 }
-func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
+func (h *Host) containerCommand(ctx context.Context, c box.ContainerSpec) ([]string, error) {
 	userns := []string{boxUserNS}
 	if c.Pod != "" {
 		// The pod sets the mapping, and Podman refuses --userns beside --pod.
@@ -494,7 +562,7 @@ func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
 			binaryRoot = m.HostPath
 		}
 		if err := h.makeMountFolder(ctx, m); err != nil {
-			return err
+			return nil, err
 		}
 		v := m.HostPath + ":" + m.BoxPath
 		if m.ReadOnly {
@@ -531,12 +599,22 @@ func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
 		// The collector uses this lock too: a pin becomes a container reference before it can be pruned.
 		args = append([]string{"bash", "-c", pinCreateScript, "dyna-pin-create", binaryRoot}, args...)
 	}
-	if checks == "" {
-		_, err := h.run(ctx, args...)
-		return imageFailure(err)
+	if checks != "" {
+		args = append([]string{"bash", "-c", checks + `exec "$@"`, "dyna-devices"}, args...)
 	}
-	command := append([]string{"bash", "-c", checks + `exec "$@"`, "dyna-devices"}, args...)
-	out, err := h.run(ctx, command...)
+	return args, nil
+}
+
+func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
+	args, err := h.containerCommand(ctx, c)
+	if err != nil {
+		return err
+	}
+	out, err := h.namespace(ctx, c.Box, "create", args...)
+	return containerFailure(out, err)
+}
+
+func containerFailure(out []byte, err error) error {
 	var exit remoteExit
 	if errors.As(err, &exit) && exit == 254 {
 		switch string(out) {
@@ -567,25 +645,21 @@ func imageFailure(err error) error {
 	return err
 }
 func (h *Host) StartContainer(ctx context.Context, id contract.BoxID) error {
-	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "start", string(id))
+	_, err := h.namespace(ctx, id, "use", "podman", "--cgroup-manager=systemd", "start", string(id))
 	return err
 }
 func (h *Host) StopContainer(ctx context.Context, id contract.BoxID) error {
-	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "stop", "--ignore", string(id))
+	_, err := h.namespaceDelete(ctx, id, "podman", "--cgroup-manager=systemd", "stop", "--ignore", string(id))
 	return err
 }
 func (h *Host) RemoveContainer(ctx context.Context, id contract.BoxID) error {
-	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "rm", "--ignore", "--volumes", string(id))
-	return err
+	return h.removeBoxNow(ctx, id, false)
 }
+
+// RemoveVolume removes the whole unused namespace, not just its workspace.
+// All destructive paths use the same atomic container/pod/workspace/stack body.
 func (h *Host) RemoveVolume(ctx context.Context, id contract.BoxID) error {
-	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "volume", "rm", "dyna-box-"+string(id))
-	// Podman documents status 1 as a missing volume, and 2 or 125 as errors.
-	var exit remoteExit
-	if errors.As(err, &exit) && exit == 1 {
-		return nil
-	}
-	return err
+	return h.removeBoxNow(ctx, id, true)
 }
 
 // HoldsBox says whether this host has a box's container or its volume. Each exists command exits 1 for one that is missing.

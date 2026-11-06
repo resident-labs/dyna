@@ -68,7 +68,7 @@ esac
 	t.Setenv("RECREATE_CONTAINER", containerDir)
 	t.Setenv("RECREATE_LOG", log)
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
-	h, err := podman.New("user@host", t.TempDir(), "arch", &nativePinnedRunner{})
+	h, err := podman.New("user@host", t.TempDir(), "arch", &nativePinnedRunner{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

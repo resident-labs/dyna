@@ -34,6 +34,7 @@ import (
 )
 
 type boxStore interface {
+	Done() <-chan struct{}
 	Hosts(context.Context) ([]box.Host, error)
 	AddHost(context.Context, box.Host) error
 	SetHostChecked(context.Context, box.Host) error
@@ -41,6 +42,8 @@ type boxStore interface {
 	SetEngineHost(context.Context, contract.HostName, bool) error
 	Session(context.Context, contract.SessionID) (store.Session, error)
 	Box(context.Context, contract.BoxID) (box.Box, error)
+	CanRemoveBoxVolumes(context.Context, contract.BoxID) (bool, error)
+	RemoveBoxVolumes(context.Context, contract.BoxID, contract.HostName, func(context.Context) error) (bool, error)
 	Boxes(context.Context) ([]box.Box, error)
 	Services(context.Context, contract.RoomID) ([]store.ServiceRow, error)
 	OpenRooms(context.Context) ([]contract.RoomID, error)
@@ -111,9 +114,7 @@ type cpuTimes struct {
 	busy, total uint64
 }
 
-// installBinary installs the engine on a host. It hashes the executable once and reads its bytes only if the host differs.
-// One runs at a time on a host, so boxes that race after a deploy send the bytes once: three copies at once over a relay took
-// minutes where one takes 40 seconds.
+// installBinary shares one progress-aware operation per host, with subscriber-owned cancellation.
 func (b *Boxes) installBinary(ctx context.Context, h *podman.Host) error {
 	if _, err := b.binarySum(); err != nil {
 		return err
@@ -533,7 +534,7 @@ func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host,
 	for _, record := range hosts {
 		if record.Name == name {
 			// Nothing here touches the network: a slow host must not hold up a caller that wants another one.
-			h, err := podman.New(record.SSH, b.Runtime, string(name), nil)
+			h, err := podman.New(record.SSH, b.Runtime, string(name), nil, b.Layout.HostData)
 			if err != nil {
 				return nil, err
 			}
@@ -729,17 +730,42 @@ func (b *Boxes) RemoveRoom(ctx context.Context, name contract.HostName, room con
 	if err != nil {
 		return err
 	}
-	b.instructionState(h).settle()
-	return h.RemoveRoom(ctx, dir)
-}
-
-// RemoveLeftoverBox removes a box that an offline host still held when its room was deleted. The box has no row any more.
-func (b *Boxes) RemoveLeftoverBox(ctx context.Context, name contract.HostName, id contract.BoxID, slice string) error {
-	h, err := b.host(ctx, name)
-	if err != nil {
+	if err := b.instructionState(h).settle(ctx); err != nil {
 		return err
 	}
-	return removeHostBox(ctx, h, box.Box{ID: id, Slice: slice}, b.forward(id))
+	return h.RemoveRoom(podman.WithRemoteCancellation(ctx), dir)
+}
+
+// RemoveLeftoverBox cleans runnable resources without treating ordinary failure
+// debt as permission to erase named work. Incomplete debt remains discoverable by
+// an explicit owner restart, close/discard or room deletion.
+func (b *Boxes) RemoveLeftoverBox(ctx context.Context, name contract.HostName, id contract.BoxID, slice string) (lifecycle.LeftoverCleanup, error) {
+	record, err := b.Store.Box(ctx, id)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return lifecycle.LeftoverDeferred, err
+	}
+	// These names now belong to an active current incarnation. Do not touch it,
+	// and do not claim that its retained volumes were deleted.
+	if err == nil && record.Host == name && record.State != contract.BoxFailed && record.State != contract.BoxDeleted {
+		return lifecycle.LeftoverDeferred, nil
+	}
+	h, err := b.host(ctx, name)
+	if err != nil {
+		return lifecycle.LeftoverDeferred, err
+	}
+	ctx = podman.WithRemoteCancellation(ctx)
+	removed, err := b.removeBoxVolumes(ctx, name, h, box.Box{ID: id, Slice: slice})
+	var superseded box.NamespaceSuperseded
+	if errors.As(err, &superseded) {
+		return lifecycle.LeftoverComplete, nil
+	}
+	if err != nil {
+		return lifecycle.LeftoverDeferred, err
+	}
+	if removed {
+		return lifecycle.LeftoverComplete, nil
+	}
+	return lifecycle.LeftoverContainersRemoved, nil
 }
 
 // ForgetBox closes the engine's socket for a box that its offline host still holds.
@@ -750,11 +776,11 @@ func (b *Boxes) CacheHost(ctx context.Context, name contract.HostName) (enginegi
 }
 
 func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool, error) {
-	h, err := podman.New(req.SSH, b.Runtime, string(req.Name), b.hostRunner)
+	h, err := podman.New(req.SSH, b.Runtime, string(req.Name), b.hostRunner, b.Layout.HostData)
 	if err != nil {
 		return false, err
 	}
-	// An exec-only host needs SSH and bash. Nothing is installed there and no box or runner is ever placed there.
+	// An exec-only host passes the base host checks. Nothing is installed there and no box or runner is ever placed there.
 	if req.ExecOnly() {
 		if err := h.CheckExec(ctx); err != nil {
 			return false, fmt.Errorf("host check %s: %w", podman.CheckExec, err)
@@ -781,7 +807,7 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool,
 
 // joinHost brings a pool's new machine in the way AddHost brings in the owner's, and leaves recording it to the pool step.
 func (b *Boxes) joinHost(ctx context.Context, name contract.HostName, ssh string) (box.Host, error) {
-	h, err := podman.New(ssh, b.Runtime, string(name), b.hostRunner)
+	h, err := podman.New(ssh, b.Runtime, string(name), b.hostRunner, b.Layout.HostData)
 	if err != nil {
 		return box.Host{}, err
 	}
@@ -920,24 +946,21 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	steps.Done("image")
 	spec.Needs, spec.Stack = image.Needs, image.Stack
 	slice, c := b.container(spec, image.Tag, shared)
+	sliced = true
 	if err = run(contract.StartSlice, func(ctx context.Context) error { return h.EnsureSlice(ctx, slice) }); err != nil {
 		return "", box.RuntimeCreateError{Err: err}
 	}
 	sliced = true
 	steps.Done("slice")
+	forwarded = true
 	if err = run(contract.StartForward, func(ctx context.Context) error { return h.AddForward(ctx, forward) }); err != nil {
 		return "", box.RuntimeCreateError{Err: err}
 	}
 	forwarded = true
 	steps.Done("forward")
-	if spec.Stack != nil {
-		stacked = true
-		if err = run(contract.StartStack, func(ctx context.Context) error { return h.CreateStack(ctx, spec.Box, spec.Slice, spec.Stack) }); err != nil {
-			return "", err
-		}
-		steps.Done("compose stack")
-	}
-	if err = run(contract.StartCreate, func(ctx context.Context) error { return h.CreateContainer(ctx, c) }); err != nil {
+	stacked = spec.Stack != nil
+	created = true
+	if err = run(contract.StartCreate, func(ctx context.Context) error { return h.CreateBox(ctx, c, spec.Stack, false) }); err != nil {
 		var missing box.MissingDevice
 		if errors.As(err, &missing) {
 			missing.Host = string(spec.Host)
@@ -965,26 +988,23 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	return image.Tag, nil
 }
 
-// createCleanupTimeout bounds cleanup of a failed creation, which must run even after the creation deadline expired.
-const createCleanupTimeout = 30 * time.Second
-
 // cleanupCreate removes what a failed creation made, on its own bounded context: the creation context is often the reason it failed.
-func cleanupCreate(ctx context.Context, h box.HostDriver, spec lifecycle.BoxSpec, forward box.Forward, stacked, created, forwarded, sliced bool) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), createCleanupTimeout)
+func cleanupCreate(ctx context.Context, h box.HostDriver, spec lifecycle.BoxSpec, _ box.Forward, stacked, created, forwarded, sliced bool) {
+	ctx, cancel := startCleanupContext(ctx)
 	defer cancel()
-	if stacked {
-		_ = h.RemovePod(ctx, spec.Box)
-		_ = h.RemoveStackVolumes(ctx, spec.Box)
-	}
-	if created {
-		_ = h.RemoveContainer(ctx, spec.Box)
-		_ = h.RemoveVolume(ctx, spec.Box)
-	}
-	if forwarded {
-		_ = h.RemoveForward(ctx, forward)
-	}
-	if sliced {
-		_ = h.RemoveSlice(ctx, spec.Slice)
+	if stacked || created || sliced || forwarded {
+		epoch, err := h.BoxEpoch(ctx, spec.Box)
+		if err == nil {
+			slice := ""
+			if sliced {
+				slice = spec.Slice
+			}
+			err = h.RemoveBox(ctx, spec.Box, epoch, false, slice)
+			var superseded box.NamespaceSuperseded
+			if errors.As(err, &superseded) {
+				return
+			}
+		}
 	}
 }
 
@@ -1210,7 +1230,7 @@ func (b *Boxes) restoreHost(ctx context.Context, name contract.HostName) error {
 	return nil
 }
 
-// installHost puts this engine's binary on a host once per engine run, for a box about to start.
+// installHost stages once, but verifies and repairs activation before each start; immutable pins make later link drift harmless.
 func (b *Boxes) installHost(ctx context.Context, name contract.HostName) error {
 	b.mu.Lock()
 	installed := b.installed[name]
@@ -1351,17 +1371,25 @@ func closingLeftovers(ctx context.Context, host interface {
 
 // Stop stops a box and, once it is down, the rest of its pod.
 func (b *Boxes) Stop(ctx context.Context, id contract.BoxID) error {
+	ctx = podman.WithRemoteCancellation(ctx)
 	host, err := b.containerHost(ctx, id)
 	if err != nil {
 		return err
 	}
-	if err := host.StopContainer(ctx, id); err != nil {
+	epoch, err := host.BoxEpoch(ctx, id)
+	if err != nil {
 		return err
 	}
-	return host.StopPod(ctx, id)
+	err = host.StopBox(ctx, id, epoch)
+	var superseded box.NamespaceSuperseded
+	if errors.As(err, &superseded) {
+		return nil
+	}
+	return err
 }
 
 func (b *Boxes) Remove(ctx context.Context, id contract.BoxID) error {
+	ctx = podman.WithRemoteCancellation(ctx)
 	record, err := b.Store.Box(ctx, id)
 	if err != nil {
 		return err
@@ -1373,38 +1401,65 @@ func (b *Boxes) Remove(ctx context.Context, id contract.BoxID) error {
 	if err != nil {
 		return err
 	}
-	forward := b.forward(id)
-	if err := removeHostBox(ctx, h, record, forward); err != nil {
+	if _, err := b.removeBoxVolumes(ctx, record.Host, h, record); err != nil {
+		var superseded box.NamespaceSuperseded
+		if errors.As(err, &superseded) {
+			return nil
+		}
 		return err
 	}
 	return b.Sockets.RemoveBox(id)
 }
 
-// removeHostBox cleans up every host resource, including a partial creation.
-func removeHostBox(ctx context.Context, h box.HostDriver, record box.Box, forward box.Forward) error {
-	if err := h.StopContainer(ctx, record.ID); err != nil {
+// RemoveFailedBox is the synchronous destructive half of authorized SessionRestart.
+// Its caller owns the process-local fence and checked the failed snapshot. Never
+// resolve the row again here: a quarantined old host must be cleaned before detach.
+func (b *Boxes) RemoveFailedBox(ctx context.Context, old box.Box) error {
+	if old.Host == "" {
+		return nil // never assigned, or explicitly detached by host removal
+	}
+	hosts, err := b.Store.Hosts(ctx)
+	if err != nil {
 		return err
 	}
-	if err := h.RemoveForward(ctx, forward); err != nil {
+	if !slices.ContainsFunc(hosts, func(h box.Host) bool { return h.Name == old.Host && h.State == box.HostReady }) {
+		return fmt.Errorf("old host %s is unavailable; failed box was not reset", old.Host)
+	}
+	return b.DiscardHostBox(ctx, old)
+}
+
+// DiscardHostBox removes captured names under explicit destructive owner authority:
+// host discard has closed admission and failed its boxes; SessionRestart wraps this
+// operation with its failed-snapshot fence and available-host check. Never use it
+// for ordinary Stop/recovery. The host-discard caller keeps its bounded best-effort
+// semantics and may abandon the host after an error; restart instead retains debt.
+func (b *Boxes) DiscardHostBox(ctx context.Context, old box.Box) error {
+	generation := b.Sockets.BoxGeneration(old.ID)
+	ctx = podman.WithRemoteCancellation(ctx)
+	h, err := b.host(ctx, old.Host)
+	if err != nil {
 		return err
 	}
-	if err := h.RemoveContainer(ctx, record.ID); err != nil {
+	if err := removeHostBox(ctx, h, old, b.forward(old.ID), true); err != nil {
+		var superseded box.NamespaceSuperseded
+		if errors.As(err, &superseded) {
+			return nil
+		}
 		return err
 	}
-	if err := h.RemovePod(ctx, record.ID); err != nil {
+	return b.Sockets.RemoveBoxAtGeneration(old.ID, generation)
+}
+
+// removeHostBox removes runnable resources. Named work requires explicit deletion permission from its owner.
+func removeHostBox(ctx context.Context, h box.HostDriver, record box.Box, forward box.Forward, removeVolumes bool) error {
+	epoch, err := h.BoxEpoch(ctx, record.ID)
+	if err != nil {
 		return err
 	}
-	if err := h.RemoveVolume(ctx, record.ID); err != nil {
-		return err
-	}
-	if err := h.RemoveStackVolumes(ctx, record.ID); err != nil {
-		return err
-	}
-	// A box closed before it was created never got a slice, so there is none to remove.
-	if record.Slice == "" {
-		return nil
-	}
-	return h.RemoveSlice(ctx, record.Slice)
+	return removeHostBoxAtEpoch(ctx, h, record, forward, epoch, removeVolumes)
+}
+func removeHostBoxAtEpoch(ctx context.Context, h box.HostDriver, record box.Box, _ box.Forward, epoch uint64, removeVolumes bool) error {
+	return h.RemoveBox(ctx, record.ID, epoch, removeVolumes, record.Slice)
 }
 
 type scopeRunner interface {
@@ -1601,6 +1656,16 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image stri
 		return err
 	}
 	steps.Done("instructions")
+	ok := false
+	defer func() {
+		if !ok {
+			cleanup, stop := startCleanupContext(ctx)
+			defer stop()
+			if epoch, err := h.BoxEpoch(cleanup, spec.Box); err == nil {
+				_ = h.StopBox(cleanup, spec.Box, epoch)
+			}
+		}
+	}()
 	if err := run(contract.StartBuildCache, func(ctx context.Context) error { b.startBuildCache(ctx, spec.Host, h); return nil }); err != nil {
 		return err
 	}
@@ -1620,31 +1685,12 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image stri
 		return err
 	}
 	spec.Root = session.Root
-	if err := run(contract.StartCreate, func(ctx context.Context) error { return h.StopContainer(ctx, spec.Box) }); err != nil {
-		return err
-	}
-	if err := run(contract.StartCreate, func(ctx context.Context) error { return h.RemoveContainer(ctx, spec.Box) }); err != nil {
-		return err
-	}
-	if spec.Stack != nil {
-		// The pod goes whole: its sidecars follow the box to new images, and its volumes stay.
-		if err := run(contract.StartStack, func(ctx context.Context) error { return h.RemovePod(ctx, spec.Box) }); err != nil {
-			return err
-		}
-	}
-	steps.Done("remove old container")
 	slice, c := b.container(spec, image, shared)
 	if err := run(contract.StartSlice, func(ctx context.Context) error { return h.EnsureSlice(ctx, slice) }); err != nil {
 		return err
 	}
 	steps.Done("slice")
-	if spec.Stack != nil {
-		if err := run(contract.StartStack, func(ctx context.Context) error { return h.CreateStack(ctx, spec.Box, spec.Slice, spec.Stack) }); err != nil {
-			return err
-		}
-		steps.Done("compose stack")
-	}
-	if err := run(contract.StartCreate, func(ctx context.Context) error { return h.CreateContainer(ctx, c) }); err != nil {
+	if err := run(contract.StartCreate, func(ctx context.Context) error { return h.CreateBox(ctx, c, spec.Stack, true) }); err != nil {
 		var missing box.MissingDevice
 		if errors.As(err, &missing) {
 			missing.Host = string(spec.Host)
@@ -1663,6 +1709,7 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image stri
 		return err
 	}
 	steps.Done("container start")
+	ok = true
 	return nil
 }
 

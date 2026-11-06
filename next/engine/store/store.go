@@ -69,10 +69,13 @@ type Store struct {
 	currentTx     *sql.Tx
 	pending       []contract.Event
 	wakePending   []contract.SessionID
-	terminals     atomic.Pointer[func(contract.SessionID) bool]
-	wake          func([]contract.SessionID, []contract.Event)
-	subMu         sync.Mutex
-	subs          map[chan contract.Event]struct{}
+	// volumeRemovals owns physical namespaces while removal or its remote join is outstanding.
+	// Access only in Write, alongside admission/readiness/dispatch. No write spans host I/O.
+	volumeRemovals map[contract.BoxID]map[*boxVolumeRemoval]struct{}
+	terminals      atomic.Pointer[func(contract.SessionID) bool]
+	wake           func([]contract.SessionID, []contract.Event)
+	subMu          sync.Mutex
+	subs           map[chan contract.Event]struct{}
 }
 
 // LockAdmission serializes a capacity decision with its reservation write across boxes, services and CI runners. The returned

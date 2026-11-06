@@ -6,11 +6,13 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 96
+const schemaVersion = 97
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
+	// A nonempty original host consumes one safe other-host create retry, including across restarts.
+	96: {`ALTER TABLE boxes ADD COLUMN create_retry_host TEXT NOT NULL DEFAULT ''`},
 	// shell.job.ended lost exitCode: End says how a job ended. Bodies decode strictly, and they stay BLOBs.
 	73: {`UPDATE events SET body=CAST(json_remove(CAST(body AS TEXT),'$.exitCode') AS BLOB) WHERE type='shell.job.ended' AND json_type(CAST(body AS TEXT),'$.exitCode') IS NOT NULL`},
 	// A resumed run owns the branches of the run it resumes, so a run keeps which run that is.
