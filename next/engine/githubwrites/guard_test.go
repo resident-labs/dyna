@@ -255,7 +255,7 @@ func TestMergesAndDeletesAreNeverAllowed(t *testing.T) {
 	} {
 		expect(t, name, got, contract.GitHubWriteRouteNotAllowed)
 	}
-	for _, mutation := range []string{"mergePullRequest", "enablePullRequestAutoMerge", "enqueuePullRequest", "disablePullRequestAutoMerge", "deleteIssue", "deleteLabel", "deletePullRequestReview", "deleteProjectV2Item", "deleteProjectV2", "deleteRef", "createRef", "updateRef", "createCommitOnBranch", "addStar", "deleteIssueComment", "closePullRequest", "reopenPullRequest", "convertPullRequestToDraft", "markPullRequestReadyForReview", "requestReviews", "updateRepository", "createRelease", "mergeBranch", "updateBranchProtectionRule"} {
+	for _, mutation := range []string{"mergePullRequest", "enablePullRequestAutoMerge", "enqueuePullRequest", "disablePullRequestAutoMerge", "deleteIssue", "deleteLabel", "deletePullRequestReview", "deleteProjectV2Item", "deleteProjectV2", "deleteRef", "createRef", "updateRef", "createCommitOnBranch", "addStar", "deleteIssueComment", "closePullRequest", "reopenPullRequest", "requestReviews", "updateRepository", "createRelease", "mergeBranch", "updateBranchProtectionRule"} {
 		got := graphql(t, g, grant, `mutation($i:X!){`+mutation+`(input:$i){clientMutationId}}`, `{"i":{"pullRequestId":"PR_ok"}}`)
 		expect(t, mutation, got, contract.GitHubWriteGraphQLMutation)
 	}
@@ -284,8 +284,8 @@ func TestOtherRepositoriesAreRefused(t *testing.T) {
 	}
 }
 
-// A PR edit through pulls changes title, body and labels, and cannot change the base branch, the state, the draft state or the
-// reviewers, on REST or GraphQL.
+// A PR edit through pulls changes title, body, labels and the draft state (GraphQL only), and cannot change the base branch, the
+// state or the reviewers, on REST or GraphQL.
 func TestPullEditCannotRetargetOrClose(t *testing.T) {
 	g, up := newGuard()
 	grant := grantOf("acme/app", contract.GitHubWritePulls)
@@ -323,7 +323,10 @@ func TestPullEditCannotRetargetOrClose(t *testing.T) {
 	expect(t, "labels route", rest(t, g, grant, "POST", "/repos/acme/app/issues/7/labels", `{"labels":["a"]}`), "")
 	expect(t, "labels by PATCH on the issue", rest(t, g, grant, "PATCH", "/repos/acme/app/issues/7", `{"labels":["a"]}`), "")
 	expect(t, "updatePullRequest title and body", graphql(t, g, grant, `mutation($i:UpdatePullRequestInput!){updatePullRequest(input:$i){clientMutationId}}`, `{"i":{"pullRequestId":"PR_ok","title":"x","body":"y"}}`), "")
-	if len(up.sent) != 5 {
+	expect(t, "ready for review", graphql(t, g, grant, `mutation($i:MarkPullRequestReadyForReviewInput!){markPullRequestReadyForReview(input:$i){clientMutationId}}`, `{"i":{"pullRequestId":"PR_ok"}}`), "")
+	expect(t, "convert to draft", graphql(t, g, grant, `mutation($i:ConvertPullRequestToDraftInput!){convertPullRequestToDraft(input:$i){clientMutationId}}`, `{"i":{"pullRequestId":"PR_ok"}}`), "")
+	expect(t, "ready for review with an extra field", graphql(t, g, grant, `mutation($i:MarkPullRequestReadyForReviewInput!){markPullRequestReadyForReview(input:$i){clientMutationId}}`, `{"i":{"pullRequestId":"PR_ok","title":"x"}}`), contract.GitHubWriteFieldNotAllowed)
+	if len(up.sent) != 7 {
 		t.Fatalf("allowed edits that reached GitHub: %v", up.sent)
 	}
 }
