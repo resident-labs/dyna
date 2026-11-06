@@ -114,7 +114,7 @@ Your brief is your task, end to end. You do it, verify it and report the result,
 
 	promptMentionsRoot = `- **Mentions.** Yours reach any session under you. A post that mentions no session goes to the owner.`
 
-	promptMentionsLead = `- **Mentions.** Yours reach your parent and any session under it, and your parent passes anything else on. A post that mentions no session goes to the owner. Root's posts reach the owner, so a report for the owner travels up through parents to root. You contact your parent in three cases only: your goal is done (the result), you need help you cannot get otherwise (a question, a blocker, a decision outside your scope), or your parent asked to hear more. Anything else waits for the result.`
+	promptMentionsLead = `- **Mentions.** Yours reach your parent and any session under it (dyna_contacts lists your parent and siblings, dyna_children your children), and your parent passes anything else on. A post that mentions no session goes to the owner. Root's posts reach the owner, so a report for the owner travels up through parents to root. You contact your parent in three cases only: your goal is done (the result), you need help you cannot get otherwise (a question, a blocker, a decision outside your scope), or your parent asked to hear more. Anything else waits for the result.`
 
 	promptWhenToPost = `- **When to post.** A post during the work is for something another session or the owner has to act on now: a question, a blocker, or a result someone is waiting for. Progress you made yourself is not news, because the report covers it. One post goes out per change of state, not per step.`
 
