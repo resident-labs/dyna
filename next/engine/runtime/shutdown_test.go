@@ -2,11 +2,49 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/resident-labs/dyna/engine/store"
 )
+
+// Exercise the registrations in Run itself, not a test-only copy of the stack.
+// Missing profiles stop startup immediately after the engine start is recorded.
+// The cleanup context is already canceled by shutdown.run, so the stop write
+// must use its own context and complete before the store's cleanup.
+func TestRunRecordsEngineStopBeforeStoreCloses(t *testing.T) {
+	t.Setenv("GH_TOKEN", "")
+	data := t.TempDir()
+	before := time.Now().UnixMilli()
+	err := Run(context.Background(), Config{Data: data, Profiles: filepath.Join(data, "missing-profiles.json"), Version: "test-build"})
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Run should stop at missing profiles, got %v", err)
+	}
+	after := time.Now().UnixMilli()
+	st, err := store.Open(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	var build string
+	var started int64
+	var stopped sql.NullInt64
+	if err := st.Read().QueryRow("SELECT json_extract(value,'$.build'),json_extract(value,'$.started_at'),json_extract(value,'$.stopped_at') FROM meta WHERE key='engine_state'").Scan(&build, &started, &stopped); err != nil {
+		t.Fatal(err)
+	}
+	if !stopped.Valid {
+		t.Fatal("engine stop was not recorded before the store closed")
+	}
+	if build != "test-build" || started < before || stopped.Int64 < started || stopped.Int64 > after {
+		t.Fatalf("engine state build=%q started=%d stopped=%v, run interval %d..%d", build, started, stopped, before, after)
+	}
+}
 
 func TestEngineShutdown(t *testing.T) {
 	// This exercises Run's entire shutdown stack, not an independent wait

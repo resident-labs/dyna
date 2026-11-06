@@ -125,6 +125,27 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := st.ResetEngineHosts(ctx); err != nil {
 		return fmt.Errorf("reset host identity: %w", err)
 	}
+	build := cfg.Version
+	if cfg.Version == "dev" {
+		if info, ok := debug.ReadBuildInfo(); ok {
+			for _, setting := range info.Settings {
+				if setting.Key == "vcs.revision" {
+					build = setting.Value
+				}
+			}
+		}
+	}
+	if err := st.RecordEngineStart(ctx, build, time.Now()); err != nil {
+		return fmt.Errorf("record engine start: %w", err)
+	}
+	// Final cleanup runs in reverse registration order: record the stop before closing the store.
+	shutdown.cleanup("engine stop", func() {
+		ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+		defer cancel()
+		if err := st.RecordEngineStop(ctx, time.Now()); err != nil {
+			log.Printf("shutdown: record engine stop: %v", err)
+		}
+	})
 	profiles, err := engine.LoadProfiles(cfg.Profiles)
 	if err != nil {
 		return err
@@ -244,16 +265,7 @@ func Run(ctx context.Context, cfg Config) error {
 		}))
 	})
 	apiServer.SetLocalModelRoute(drain.Wrap(proxy.Local(st)))
-	apiServer.Build = cfg.Version
-	if cfg.Version == "dev" {
-		if info, ok := debug.ReadBuildInfo(); ok {
-			for _, setting := range info.Settings {
-				if setting.Key == "vcs.revision" {
-					apiServer.Build = setting.Value
-				}
-			}
-		}
-	}
+	apiServer.Build = build
 	apiServer.SetGitHubRead(enginegit.ReadOnly(&url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport, token))
 	apiServer.SetFilesRoute(func(c api.Caller) http.Handler { return service.Files(c.Principal, c.Room) })
 	apiServer.SetSharedRoute(func(c api.Caller) http.Handler { return service.Shared(c.Principal) })

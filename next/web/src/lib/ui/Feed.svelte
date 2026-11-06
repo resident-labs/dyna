@@ -7,6 +7,7 @@
   import MediaViewer from "./MediaViewer.svelte";
   import { conversationMedia, type MediaItem, type MediaRow } from "../media.ts";
   import BoxRestart from "./BoxRestart.svelte";
+  import EngineRestartNotice from "./EngineRestartNotice.svelte";
   import FailedTurnRow from "./FailedTurnRow.svelte";
   import WorkRow from "./WorkRow.svelte";
   import Icon from "./Icon.svelte";
@@ -234,7 +235,7 @@
     {#snippet row(item: Item)}
       {#if item.kind === "post"}<div class:ring={item.key === `p${ring}`}><PostRow linked={!item.source || hasRoom(item.source.room)} last={lastPosts.has(item.key)} room={store.room} {navigate} onmedia={position => openMedia(item.key, position)} row={item} belowNew={item.key === belowNew} {newest} visualEvent={visualEvents.get(item.key)} author={item.source ? sourceLabel(item.source) : author(item.from)} to={home.kind === "dm" ? undefined : item.target ?? item.to.map(author).join(", ")} root={root(item.from.session)}
         onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} swipeDisabled={waiting?.at === item.at && waiting.author === author(item.from)} onforward={operate ? () => onforward({ author: item.source ? sourceLabel(item.source) : author(item.from), at: item.at, text: item.text, data: item.data, attachments: visibleAttachments(item.attachments, item.dataAttachment).map(({ file }) => file) }) : undefined} /></div>
-      {:else if item.kind === "notice"}<p class="divider"><span>{describe(item.event, name)}{#if item.resumedAt}{" "}for {Math.round((Date.parse(item.resumedAt) - Date.parse(item.event.at)) / 60_000) < 1 ? "under a minute" : `${Math.round((Date.parse(item.resumedAt) - Date.parse(item.event.at)) / 60_000)} min`}{/if} · <time datetime={item.event.at}>{formatTime(item.event.at)}</time></span></p>
+      {:else if item.kind === "notice"}<p class="divider"><span>{#if item.event.type === "engine.restarted"}<EngineRestartNotice event={item.event.body} />{:else}{describe(item.event, name)}{/if}{#if item.resumedAt}{" "}for {Math.round((Date.parse(item.resumedAt) - Date.parse(item.event.at)) / 60_000) < 1 ? "under a minute" : `${Math.round((Date.parse(item.resumedAt) - Date.parse(item.event.at)) / 60_000)} min`}{/if} · <time datetime={item.event.at}>{formatTime(item.event.at)}</time></span></p>
       {:else if item.kind === "restarted"}<div class="restart-warning"><span class="restart-mark"><StatusPill tone="warning" label="Box replaced" dot triangle /></span><p>{name(item.session)}'s box was replaced. Unpushed work in the old volume is gone. <time datetime={item.at}>{formatTime(item.at)}</time></p></div>
       {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} root={root(item.session)}
         onseen={item.label === "Turn failed" ? () => store.see(home, item.seq) : undefined}>

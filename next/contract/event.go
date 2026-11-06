@@ -383,6 +383,17 @@ const (
 	PressureMax  PressureKind = "max"
 )
 
+// EngineRestarted reports a new engine process to every open root. DownMillis is zero when unknown.
+type EngineRestarted struct {
+	Build         string `json:"build"`
+	PreviousBuild string `json:"previousBuild"`
+	DownMillis    int64  `json:"downMillis"`
+	Clean         bool   `json:"clean"`
+}
+
+func (EngineRestarted) EventType() EventType { return "engine.restarted" }
+func (EngineRestarted) isEventBody()         {}
+
 // HostDiskLow is a host running low on disk.
 type HostDiskLow struct {
 	Host       HostName `json:"host"`
