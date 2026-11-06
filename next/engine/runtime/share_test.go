@@ -62,7 +62,7 @@ func shareBoxes(t *testing.T, r podman.Runner, hosts []box.Host) *Boxes {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
-	h, err := podman.New("user@host", dir, "host", r)
+	h, err := podman.New("user@host", dir, "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

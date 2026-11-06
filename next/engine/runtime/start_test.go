@@ -110,7 +110,7 @@ func (r *sharedTransferRunner) RunProgress(ctx context.Context, in []byte, progr
 func TestSharedTransferProgressAndSubscriberStop(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := &sharedTransferRunner{release: make(chan struct{}), entered: make(chan struct{})}
-		host, err := podman.New("user@host", t.TempDir(), "arch", r)
+		host, err := podman.New("user@host", t.TempDir(), "arch", r, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -169,7 +169,7 @@ func (cachedActivationTimeoutRunner) Run(ctx context.Context, _ []byte, args ...
 }
 func TestCachedStartStillBoundsActivationAndNamesItsTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		h, err := podman.New("user@host", t.TempDir(), "arch", cachedActivationTimeoutRunner{})
+		h, err := podman.New("user@host", t.TempDir(), "arch", cachedActivationTimeoutRunner{}, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -42,7 +42,7 @@ func TestInstallBinarySkipsBytesWhenHostHasSum(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := &binaryRunner{output: tc.hostSum}
-			h, err := New("user@host", t.TempDir(), "host", r)
+			h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -65,7 +65,7 @@ func TestInstallBinarySkipsBytesWhenHostHasSum(t *testing.T) {
 
 		})
 	}
-	h, err := New("user@host", t.TempDir(), "host", &binaryRunner{})
+	h, err := New("user@host", t.TempDir(), "host", &binaryRunner{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func (r *concurrentInstallRunner) Run(_ context.Context, _ []byte, args ...strin
 
 func TestConcurrentInstallsUsePrivateOwnedTemporaries(t *testing.T) {
 	r := &concurrentInstallRunner{commands: make(chan string, 2), release: make(chan struct{})}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestConcurrentInstallsUsePrivateOwnedTemporaries(t *testing.T) {
 func TestHostArchitectureCheck(t *testing.T) {
 	machine := map[string]string{"amd64": "x86_64", "arm64": "aarch64"}[runtime.GOARCH]
 	r := &binaryRunner{output: machine + "\n"}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

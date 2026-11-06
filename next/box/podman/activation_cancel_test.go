@@ -55,7 +55,7 @@ printf '%s' "$input" | ` + realHash + `
 		return s
 	}
 	oldSum, newSum := sum("old-engine"), sum("new-engine")
-	h, err := New("user@host", t.TempDir(), "host", remoteDetachedSSH{})
+	h, err := New("user@host", t.TempDir(), "host", remoteDetachedSSH{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestBrokenZstdFallsBackToGzip(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", tools+":"+os.Getenv("PATH"))
-	h, err := New("user@host", t.TempDir(), "host", &localBinaryRunner{})
+	h, err := New("user@host", t.TempDir(), "host", &localBinaryRunner{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

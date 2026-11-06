@@ -36,7 +36,8 @@ func TestRetainedDebtCacheDoesNotCoverRestartedIncarnation(t *testing.T) {
 		t.Fatal(problem)
 	}
 	// Model admission of the fresh incarnation on old, then use real FinishCreate
-	// to record another terminal create failure and its automatic other-host debt.
+	// to record another terminal create failure. Restart is not first-create
+	// proof, so it must not grant automatic retry or create retry debt.
 	// No intervening Pass observed SessionRestart's temporary absence of old debt.
 	f.exec(t, `UPDATE boxes SET host='old',state='creating',want='run',image='',reason='',updated_at=updated_at+1 WHERE id='b'; UPDATE hosts SET state='unreachable' WHERE name='new'`)
 	fresh, err := f.st.Box(ctx, "b")
@@ -46,12 +47,20 @@ func TestRetainedDebtCacheDoesNotCoverRestartedIncarnation(t *testing.T) {
 	if err := f.st.FinishCreate(ctx, fresh, "", "new creation failed", f.now, 3, contract.Event{ID: "independent-new-create-failed", Room: "r", Time: f.now.Add(time.Second), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{Cause: contract.CauseCreateFailed, Phase: contract.CreatePhaseBox}}, true); err != nil {
 		t.Fatal(err)
 	}
+	if after, err := f.st.Box(ctx, "b"); err != nil || after.State != contract.BoxFailed || after.Host != "old" {
+		t.Fatalf("restart unexpectedly granted retry: %+v %v", after, err)
+	}
+	// Record that failed incarnation's captured-host cleanup debt through the
+	// real Store boundary. No intervening Pass observed the old debt's absence.
+	if err := f.st.AddBoxLeftover(ctx, "old", "r", "b", ""); err != nil {
+		t.Fatal(err)
+	}
 	before, err := os.ReadFile(f.log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The new automatic retry detached the current host, so old is genuinely
-	// eligible for runnable-resource cleanup, not an active-current no-op.
+	// A failed current incarnation is eligible for runnable-resource cleanup,
+	// unlike an active-current no-op; both named volumes remain protected.
 	pass()
 	after, err := os.ReadFile(f.log)
 	if err != nil {

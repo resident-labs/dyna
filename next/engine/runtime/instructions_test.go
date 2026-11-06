@@ -78,7 +78,7 @@ func TestInstructionsRepairAfterOfflineSave(t *testing.T) {
 		t.Fatal(err)
 	}
 	transport := &instructionTransport{}
-	host, err := podman.New("user@host", t.TempDir(), "host", transport)
+	host, err := podman.New("user@host", t.TempDir(), "host", transport, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestAddonsMirrorBesideInstructions(t *testing.T) {
 	ctx := context.Background()
 	layout := box.Layout{Data: t.TempDir(), HostData: t.TempDir()}
 	files := &addons.Files{Layout: layout}
-	host, err := podman.New("user@host", t.TempDir(), "host", &instructionTransport{})
+	host, err := podman.New("user@host", t.TempDir(), "host", &instructionTransport{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestInstructionsSkipARoomBeingDeleted(t *testing.T) {
 	if err := os.WriteFile(layout.Instructions(""), []byte("global"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	host, err := podman.New("user@host", t.TempDir(), "host", &instructionTransport{})
+	host, err := podman.New("user@host", t.TempDir(), "host", &instructionTransport{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestResumeRepairsInstructionsBeforeStarting(t *testing.T) {
 		t.Fatal(err)
 	}
 	transport := &instructionTransport{offline: true}
-	host, err := podman.New("user@host", t.TempDir(), "host", transport)
+	host, err := podman.New("user@host", t.TempDir(), "host", transport, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,7 +371,7 @@ func TestSaveThenResumeRepairsBeforeDelayedPublish(t *testing.T) {
 		t.Fatal(err)
 	}
 	transport := &instructionTransport{}
-	host, err := podman.New("user@host", t.TempDir(), "host", transport)
+	host, err := podman.New("user@host", t.TempDir(), "host", transport, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

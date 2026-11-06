@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,7 +27,7 @@ func TestSameHostStartUsesTypedPlacementAndKeepsVisibleFailure(t *testing.T) {
 	b, _ := r.s.Box(r.ctx, "b-fresh")
 	r.finishAllocation(b, contract.CauseCreateFailed, "original visible failure", "")
 	after, _ := r.s.Box(r.ctx, b.ID)
-	if after.State != contract.BoxFailed || after.Host != "arch" || after.Reason != "original visible failure" {
+	if after.State != contract.BoxFailed || after.Host != "arch" || !strings.Contains(after.Reason, "original visible failure; automatic other-host retry skipped: initial sameHost placement") {
 		t.Fatalf("sameHost failure changed or moved: %+v", after)
 	}
 }
@@ -83,13 +84,13 @@ func TestLegacyTypedPlacementControlsRetryWithoutAnAffinityMigration(t *testing.
 			r.finishAllocation(b, contract.CauseCreateFailed, "original visible failure", "")
 			result, _ := r.s.Box(r.ctx, b.ID)
 			want := contract.BoxFailed
-			if scenario == "unbound" || scenario == "owner restart" {
+			if scenario == "unbound" {
 				want = contract.BoxPending
 			}
 			if result.State != want {
 				t.Fatalf("legacy %s placement: %+v", scenario, result)
 			}
-			if want == contract.BoxFailed && (result.Host != "arch" || result.Reason != "original visible failure") {
+			if want == contract.BoxFailed && (result.Host != "arch" || !strings.HasPrefix(result.Reason, "original visible failure; automatic other-host retry skipped:")) {
 				t.Fatalf("legacy failure changed: %+v", result)
 			}
 		})

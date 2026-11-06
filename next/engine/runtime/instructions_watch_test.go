@@ -14,7 +14,7 @@ import (
 func watchedBoxes(t *testing.T) (*Boxes, *instructionTransport) {
 	t.Helper()
 	transport := &instructionTransport{}
-	host, err := podman.New("user@host", t.TempDir(), "host", transport)
+	host, err := podman.New("user@host", t.TempDir(), "host", transport, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -65,7 +65,7 @@ esac
 	t.Setenv("REMOTE_RESOURCE", resource)
 	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0600) })
 	r := &remoteCancelUnavailable{fail: true}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

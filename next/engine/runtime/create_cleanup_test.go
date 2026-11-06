@@ -14,6 +14,16 @@ type recordedCleanup struct {
 	removed []string
 }
 
+func (h *recordedCleanup) BoxEpoch(context.Context, contract.BoxID) (uint64, error) { return 0, nil }
+func (h *recordedCleanup) RemoveBox(ctx context.Context, id contract.BoxID, _ uint64, volumes bool) error {
+	_ = h.RemovePod(ctx, id)
+	_ = h.RemoveContainer(ctx, id)
+	if volumes {
+		_ = h.RemoveVolume(ctx, id)
+		_ = h.RemoveStackVolumes(ctx, id)
+	}
+	return nil
+}
 func (h *recordedCleanup) RemovePod(ctx context.Context, _ contract.BoxID) error {
 	h.removed = append(h.removed, "pod:"+errText(ctx.Err()))
 	return nil

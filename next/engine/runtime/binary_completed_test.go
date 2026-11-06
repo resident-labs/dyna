@@ -49,7 +49,7 @@ func TestBinaryCompletedActivationPreservesSuccess(t *testing.T) {
 		t.Run(fmt.Sprintf("cached=%t", cached), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				runner := &binaryCompletionRunner{}
-				host, err := podman.New("user@host", t.TempDir(), "h", runner)
+				host, err := podman.New("user@host", t.TempDir(), "h", runner, t.TempDir())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -76,7 +76,7 @@ func TestBinaryActivationFailureRetainsIdleCauseAndBudget(t *testing.T) {
 		t.Run(fmt.Sprintf("cached=%t", cached), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				runner := &binaryCompletionRunner{failed: true}
-				host, err := podman.New("user@host", t.TempDir(), "h", runner)
+				host, err := podman.New("user@host", t.TempDir(), "h", runner, t.TempDir())
 				if err != nil {
 					t.Fatal(err)
 				}

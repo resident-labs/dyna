@@ -9,13 +9,15 @@ import (
 
 func TestRetryAndStopShareWholeHistoryUnusedProof(t *testing.T) {
 	for _, scenario := range []struct {
-		name                                  string
-		known, ready, turn, restarted, unused bool
+		name                                             string
+		known, ready, turn, restarted, recovered, unused bool
 	}{
 		{name: "first-create", known: true, unused: true},
 		{name: "unknown"},
 		{name: "ever-ready", known: true, ready: true},
 		{name: "old-turn-no-ready-event", known: true, turn: true},
+		{name: "never-ready-owner-restart", known: true, restarted: true},
+		{name: "recovery-without-ready-event", known: true, recovered: true},
 		{name: "ready-before-owner-allocation", known: true, ready: true, restarted: true},
 		{name: "turn-before-owner-allocation", known: true, turn: true, restarted: true},
 	} {
@@ -33,6 +35,11 @@ func TestRetryAndStopShareWholeHistoryUnusedProof(t *testing.T) {
 				}
 				if scenario.turn {
 					if _, err := tx.Exec(`INSERT INTO turns(id,session,started_at,ended_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) VALUES('past-turn',?,?,?,'completed','p',0,0,0,0)`, b.Session, r.now.Add(-time.Hour).UnixMilli(), r.now.Add(-time.Minute).UnixMilli()); err != nil {
+						return err
+					}
+				}
+				if scenario.recovered {
+					if _, err := r.s.AppendEvent(tx, contract.Event{ID: "recovery", Room: "r", Time: r.now, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{Box: b.ID, Session: b.Session, From: contract.BoxStopped, To: contract.BoxStarting}}); err != nil {
 						return err
 					}
 				}

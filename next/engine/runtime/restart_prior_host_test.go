@@ -39,7 +39,7 @@ func (f *restartFixture) priorHost(t *testing.T) (workspace, stack, log, fail st
 	}
 	f.exec(t, `INSERT INTO hosts(name,ssh,state,cpus,mem_bytes,disk_bytes,checked_at,maintained_at) SELECT 'prior','',state,cpus,mem_bytes,disk_bytes,checked_at,maintained_at FROM hosts WHERE name='old';
 INSERT INTO room_leftovers(host,room,box,slice) VALUES('prior','r','b','')`)
-	h, err := podman.New("user@prior", t.TempDir(), "prior", priorRestartRunner{workspace, stack, log, fail})
+	h, err := podman.New("user@prior", t.TempDir(), "prior", priorRestartRunner{workspace, stack, log, fail}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

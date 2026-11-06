@@ -19,7 +19,7 @@ func TestBuildCacheStartsOnlyWhenItIsNotRunning(t *testing.T) {
 	h, err := New("user@host", t.TempDir(), "host", localShell{path: fakeTools(t, map[string]string{
 		"systemctl":   "[ -e " + state + " ]",
 		"systemd-run": `echo "$*" >> ` + log + "\ntouch " + state,
-	}) + ":" + os.Getenv("PATH")})
+	}) + ":" + os.Getenv("PATH")}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

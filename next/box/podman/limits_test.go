@@ -107,7 +107,7 @@ func (r *maxSessionsRunner) Run(ctx context.Context, _ []byte, args ...string) (
 func TestHostexecLeavesTheMastersSessions(t *testing.T) {
 	const runs = 20 // twice MaxSessions, so they could not all fit on the master
 	r := &maxSessionsRunner{entered: make(chan string, runs+8), release: make(chan struct{}), stopRelease: make(chan struct{})}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func (r *dialRunner) Run(ctx context.Context, _ []byte, _ ...string) ([]byte, er
 
 func TestHostexecBoundsConnectionsBeingOpened(t *testing.T) {
 	r := &dialRunner{entered: make(chan struct{}, 16), release: make(chan struct{})}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestHostexecBoundsConnectionsBeingOpened(t *testing.T) {
 	}
 
 	// Once its handshake's time has passed, a running command holds no slot, so running commands have no limit.
-	quick, err := New("user@host", t.TempDir(), "host", r)
+	quick, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestHostexecConnectionSharesNoMaster(t *testing.T) {
 
 func TestShortCommandsLeaveHeartbeatAndHostexecUnblocked(t *testing.T) {
 	r := &limitRunner{entered: make(chan struct{}, 9), release: make(chan struct{})}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
