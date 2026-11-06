@@ -234,10 +234,13 @@
     }, () => {});
   });
   setSharedFolder(path => {
+    const conversation = key;
     sharedItems = [];
-    tabs.set(key, "files");
-    folderTarget = { path, conversation: key, request: (folderTarget?.request ?? 0) + 1 };
-    void showPanel(true);
+    tabs.set(conversation, "files");
+    // Reveal after the sheet is visible; a hidden virtual list has no viewport to scroll.
+    void showPanel(true).then(() => {
+      folderTarget = { path, conversation, request: (folderTarget?.request ?? 0) + 1 };
+    });
   });
   setMentionLinks(() => ({ room: store?.room ?? "", sessions: mentioned, open: go }));
   // A link to a DM closes a phone's panel. When wide, the link may leave with the list as About opens, and focus goes to the panel.
