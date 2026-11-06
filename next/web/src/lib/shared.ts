@@ -8,11 +8,11 @@ export const [sharedFolder, setSharedFolder] = createContext<(path: string) => v
 export const parentPath = (path: string) => path.split("/").slice(0, -1).join("/");
 
 // The viewer already recognizes source extensions; only rendered formats need a declared MIME type.
-export function sharedMedia(room: string, path: string, source: MessageSource, bytes?: number): MediaItem {
+export function sharedMedia(room: string, path: string, source: MessageSource, bytes?: number, modified?: string): MediaItem {
   const name = path.split("/").at(-1) ?? path;
   const extension = name.split(".").at(-1)?.toLowerCase() ?? "";
   const media = ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif", bmp: "image/bmp", ico: "image/x-icon", svg: "image/svg+xml", html: "text/html", htm: "text/html", pdf: "application/pdf", mp4: "video/mp4", webm: "video/webm" } as Record<string, string>)[extension] ?? "application/octet-stream";
-  return { ...source, room, position: 0, src: sharedURL(room, path), file: { name, media, bytes: bytes ?? 0, sha256: "" }, sharedPath: path, sizeKnown: bytes !== undefined };
+  return { ...source, room, position: 0, src: sharedURL(room, path), file: { name, media, bytes: bytes ?? 0, sha256: "" }, sharedPath: path, sizeKnown: bytes !== undefined, ...(modified ? { modified } : {}) };
 }
 
 // The total in a Range response is the file's size, not its one-byte Content-Length.
