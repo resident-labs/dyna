@@ -234,10 +234,13 @@
     }, () => {});
   });
   setSharedFolder(path => {
+    const conversation = key;
     sharedItems = [];
-    tabs.set(key, "files");
-    folderTarget = { path, conversation: key, request: (folderTarget?.request ?? 0) + 1 };
-    void showPanel(true);
+    tabs.set(conversation, "files");
+    // Reveal after the sheet is visible; the file row takes focus once it renders, not the sheet.
+    void showPanel(true, false, { focus: false }).then(() => {
+      folderTarget = { path, conversation, request: (folderTarget?.request ?? 0) + 1 };
+    });
   });
   setMentionLinks(() => ({ room: store?.room ?? "", sessions: mentioned, open: go }));
   // A link to a DM closes a phone's panel. When wide, the link may leave with the list as About opens, and focus goes to the panel.
@@ -620,11 +623,12 @@
   let toggle: HTMLButtonElement | undefined = $state();
   // As the drawer does: after a tap, focus moves with no ring. Focus waits for the update, which takes inert off main
   // when a phone's sheet closes.
-  async function showPanel(open: boolean, tapped = false) {
+  async function showPanel(open: boolean, tapped = false, { focus = true }: { focus?: boolean } = {}) {
     const held = members?.contains(document.activeElement);
     if (wide.current) tucked = !open; else panel = open;
     if (!open) sheetFull = false;
     await tick();
+    if (!focus) return;
     // Home's strip leaves with its last active room, and then the menu button takes focus.
     if (open) members?.focus({ focusVisible: !tapped }); else if (held) { if (toggle?.isConnected) toggle.focus({ focusVisible: !tapped }); else if (session) roomMenu?.focus({ focusVisible: !tapped }); else menuButton?.focus({ focusVisible: !tapped }); }
   }
