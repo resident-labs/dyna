@@ -143,14 +143,22 @@ type listening struct {
 // Run keeps the listeners until ctx ends. Runners outlive the engine: a job in progress finishes, and the next listener
 // counts its container.
 func (p *Pool) Run(ctx context.Context, ticks <-chan time.Time) {
+	ctx, cancel := context.WithCancel(ctx)
 	var group sync.WaitGroup
+	defer func() {
+		cancel()
+		group.Wait()
+	}()
 	for {
 		if err := p.Tick(ctx, &group); err != nil && ctx.Err() == nil {
+			if errors.Is(err, errNoGitHubCredential) {
+				log.Print("CI pool off: no GitHub credential")
+				return
+			}
 			log.Printf("ci pool: %v", err)
 		}
 		select {
 		case <-ctx.Done():
-			group.Wait()
 			return
 		case <-ticks:
 		}
