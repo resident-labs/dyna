@@ -24,7 +24,7 @@ function answer(method) {
     case "question.list": return { questions: [] };
     case "goal.list": return { goals: [] };
     case "pr.list": return { prs: [] };
-    case "host.list": return { hosts: [] };
+    case "host.list": return { hosts: [{ name: "build-server", reachable: true, cpus: 8, cpuUsed: 1.5, memBytes: 16 * 2 ** 30, memUsed: 5 * 2 ** 30, boxes: 1 }] };
     case "accounts.list": case "accounts.quota": return { accounts: [] };
     default: return {};
   }
@@ -74,34 +74,43 @@ try {
     // Cache the tree, then hide the phone sheet before opening the linked file.
     if (width === 390) await page.locator("button.panel-toggle").click();
     await panel.getByRole("button", { name: "Files", exact: true }).click();
+    await panel.locator("a.hosts").waitFor();
     const scroll = page.locator(".files-tree .virtual");
     await page.locator('button[data-shared-row="note-000.md"]').waitFor();
     assert.equal(await page.locator(`button[data-shared-row="${target}"]`).count(), 0, "target starts outside virtual window");
     if (width === 390) await panel.press("Escape");
     assert.equal(await panel.isVisible(), width !== 390);
-    await link.click();
-    const dialog = page.getByRole("dialog", { name: "Media viewer", exact: true });
-    await dialog.getByRole("region", { name: target, exact: true }).waitFor();
-    if (width === 390) await dialog.getByRole("button", { name: "More options", exact: true }).click();
-    await dialog.getByRole("button", { name: "Show in folder", exact: true }).filter({ visible: true }).click();
-    await dialog.waitFor({ state: "detached" });
-    // Do not use locator.click/scrollIntoViewIfNeeded here: those would repair the broken scroll for the app.
-    await page.waitForFunction(target => {
-      const row = document.querySelector(`button[data-shared-row="${target}"]`);
-      const viewport = document.querySelector(".files-tree .virtual");
-      if (!row || !viewport) return false;
-      const bounds = row.getBoundingClientRect(), view = viewport.getBoundingClientRect();
-      return view.height > 0 && bounds.top >= view.top && bounds.bottom <= view.bottom &&
-        row.getAttribute("aria-pressed") === "true";
-    }, target, { timeout: 5000 });
-    assert.ok(await scroll.evaluate(node => node.scrollTop > 0), "Show in folder scrolls to the offscreen target");
-    assert.equal(await panel.getByRole("button", { name: "Files", exact: true }).getAttribute("aria-pressed"), "true");
-    await page.evaluate(() => document.fonts.ready);
-    await page.screenshot({ path: `${output}/show-in-folder-${width}.png` });
+    for (const source of [link, page.locator(`button[data-shared-row="${target}"]`)]) {
+      await source.click();
+      const dialog = page.getByRole("dialog", { name: "Media viewer", exact: true });
+      await dialog.getByRole("region", { name: target, exact: true }).waitFor();
+      if (width === 390) await dialog.getByRole("button", { name: "More options", exact: true }).click();
+      await panel.evaluate(node => node.addEventListener("focus", () => { node.dataset.focusedDuringReveal = "true"; }, { once: true }));
+      await dialog.getByRole("button", { name: "Show in folder", exact: true }).filter({ visible: true }).click();
+      await dialog.waitFor({ state: "detached" });
+      // Do not use locator.click/scrollIntoViewIfNeeded here: those would repair the broken scroll for the app.
+      await page.waitForFunction(target => {
+        const row = document.querySelector(`button[data-shared-row="${target}"]`);
+        const viewport = document.querySelector(".files-tree .virtual");
+        if (!row || !viewport) return false;
+        const bounds = row.getBoundingClientRect(), view = viewport.getBoundingClientRect();
+        const middle = (bounds.top + bounds.bottom) / 2;
+        return view.height > 0 && Math.abs(middle - (view.top + view.bottom) / 2) <= 1 &&
+          row.getAttribute("aria-pressed") === "true" && document.activeElement === row &&
+          row.contains(document.elementFromPoint(bounds.x + bounds.width / 2, middle));
+      }, target, { timeout: 5000 });
+      assert.ok(await scroll.evaluate(node => node.scrollTop > 0), "Show in folder scrolls to the offscreen target");
+      assert.equal(await panel.getByRole("button", { name: "Files", exact: true }).getAttribute("aria-pressed"), "true");
+      await page.evaluate(() => document.fonts.ready);
+      assert.equal(await panel.getAttribute("data-focused-during-reveal"), null, "focus moves directly to the row, never the sheet");
+      assert.equal(await panel.evaluate(node => node.matches(":focus-visible")), false, "the sheet does not retain a focus ring");
+    }
+    await page.waitForFunction(() => getComputedStyle(document.getElementById("app")).filter === "none");
+    await page.screenshot({ path: `${output}/show-in-folder-centered-${width}.png` });
     assert.deepEqual(errors, []);
     await context.close();
   }
-  console.log("PASS: Show in folder reveals and selects an offscreen file at 390 and 1440 px.");
+  console.log("PASS: Show in folder centers, selects and focuses an offscreen file above the host footer at 390 and 1440 px.");
 } finally {
   await browser.close();
   server.closeAllConnections();
