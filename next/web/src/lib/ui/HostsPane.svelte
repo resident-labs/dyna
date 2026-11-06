@@ -2,6 +2,7 @@
   import { onMount, tick, type Snippet } from "svelte";
   import { APIError, call, SignedOut } from "../client.ts";
   import { confirm } from "../modal.ts";
+  import { startLabel } from "../start.ts";
   import { boxWords } from "../feed.ts";
   import { diskLow, gpuLine, hostBars, hostChips, hostGroup, hostLine, hostMeters, hostName, hostOrder, hostState, hostText, largeShared, lastSeen, machines, roomSessions, sharedSize,
     watchHosts } from "../hosts.ts";
@@ -171,6 +172,7 @@
   {#if h.execOnly}<p class="small muted">Exec only: nothing is placed here, and only host exec uses it. Its check needs SSH and bash; turning Agents or CI on runs the full host check first.</p>{/if}
   {#if meters.length && (h.reachable || seen)}<div class="tiles" class:dimmed={!h.reachable}>{#each meters as meter (meter.label)}<MeterTile {meter} />{/each}</div>{/if}
   <dl class="facts">{#if h.execOnly || !h.reachable}<dt>State</dt><dd>{#if h.reachable}Online{:else}<StatusPill tone="error" label="Unreachable" />{" · "}{seen ?? "Not seen yet"}{/if}</dd>{/if}
+    {#if h.health === "degraded"}<dt>Scheduling</dt><dd><StatusPill tone="warning" label="Degraded" /> · No new boxes or runners until a good probe</dd>{/if}
     {#if !h.execOnly}<dt>Workspaces</dt><dd>{h.boxes.toLocaleString("en")} running</dd>{/if}
     {#each h.gpus ?? [] as gpu (gpu.index)}<dt>GPU {gpu.index}</dt><dd>{gpuLine(gpu)}</dd>{/each}
     {#if h.runners}<dt>CI runners</dt><dd>{h.runners.toLocaleString("en")}</dd>{/if}
@@ -190,7 +192,7 @@
     <div class="sessions">{#each groups as group (group.room)}
       <p class="room"><Avatar kind="room" name={group.name} size={16} />{group.name}</p>
       {#each group.sessions as session (session.id)}<a class="session" class:quiet={session.boxState === "stopped"} href={`/r/${encodeURIComponent(group.room)}/s/${encodeURIComponent(session.id)}`} onclick={navigate}>
-        <span class="sname">{session.name}</span>{#if session.boxState !== "ready"}<span class="word">{boxWords[session.boxState]}</span>{/if}</a>{/each}{/each}</div></div>{/if}
+        <span class="sname">{session.name}</span>{#if session.boxState !== "ready"}<span class="word">{session.start ? startLabel(session.start, h.name, now) : boxWords[session.boxState]}</span>{/if}</a>{/each}{/each}</div></div>{/if}
   {#if problem}<p class="problem" role="alert">{problem}</p>{/if}
   <div class="danger-zone"><span class="small muted">{h.pool ? "Its pool's script takes it back. " : ""}Refused while {h.execOnly ? "a Run or a room's rule" : "a box, a CI runner, a Run or a room's rule"} uses it.</span>
     <button type="button" class="btn danger" aria-haspopup="dialog" disabled={busy} onclick={event => void remove(h, event.currentTarget)}>Remove</button></div>

@@ -107,7 +107,7 @@ func TestHeartbeatExecOnlyReportsWholeMachineFigures(t *testing.T) {
 	r.body = "dyna-disk 1000 995\ndyna-cpus 8\ndyna-cpu 300 1400\ndyna-mem 16000 5000\n"
 	ticks <- time.Unix(1010, 0)
 	load := <-loads
-	want := Load{ExecOnly: true, CPUs: 8, CPUUsed: 4, MemBytes: 16000, MemUsed: 5000, DiskBytes: 1000, DiskUsed: 995}
+	want := Load{Probe: ProbeGood, Health: contract.HostHealthy, ExecOnly: true, CPUs: 8, CPUUsed: 4, MemBytes: 16000, MemUsed: 5000, DiskBytes: 1000, DiskUsed: 995}
 	if !reflect.DeepEqual(load, want) {
 		t.Fatalf("load %+v, want %+v", load, want)
 	}
@@ -130,7 +130,7 @@ func TestHeartbeatExecOnlyWithoutFiguresIsOnline(t *testing.T) {
 	loads := make(chan Load, 1)
 	go h.Heartbeat(ctx, ticks, box.Layout{}, func(ok bool, load Load) { loads <- load }, func(string, contract.PressureKind) {})
 	ticks <- time.Unix(1000, 0)
-	if load := <-loads; !reflect.DeepEqual(load, Load{ExecOnly: true}) {
+	if load := <-loads; !reflect.DeepEqual(load, Load{Probe: ProbeGood, Health: contract.HostHealthy, ExecOnly: true}) {
 		t.Fatalf("load %+v", load)
 	}
 }

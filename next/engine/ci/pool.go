@@ -92,6 +92,7 @@ type Pool struct {
 	Sets   Scaleset
 	// Memory reads a host's latest memory use, as the box reconciler does.
 	Memory func(contract.HostName) int64
+	Health func(contract.HostName) contract.HostHealth
 	Now    func() time.Time
 	// Kick tells the node pools that the runners waiting for a node changed.
 	Kick func()
@@ -398,6 +399,9 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 	for _, host := range hosts {
 		if host.Pool != "" {
 			s.nodes[host.Pool]++
+		}
+		if p.Health != nil {
+			host.Health = p.Health(host.Name)
 		}
 		if host.State != box.HostReady {
 			continue
@@ -759,7 +763,7 @@ func (p *Pool) prepare(ctx context.Context, host *surveyed, layer *box.RunnerLay
 // image the host already has, so a host that has them is ready within moments.
 func (p *Pool) buildAhead(ctx context.Context, host *surveyed, layers map[contract.RepoName]*box.RunnerLayer, group *sync.WaitGroup) {
 	name := host.host.Name
-	if !host.host.CI || p.building[name] {
+	if !host.host.CI || host.host.Health == contract.HostDegraded || p.building[name] {
 		return
 	}
 	var want []*box.RunnerLayer

@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	engineimages "github.com/resident-labs/dyna/engine/images"
@@ -160,13 +159,7 @@ func TestComposeStackOnRealPodman(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(data) })
 	// This agent notes what it found when it started, then idles.
-	agent := filepath.Join(data, "bin", "current", "dyna")
-	if err := os.MkdirAll(filepath.Dir(agent), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(agent, []byte("#!/bin/sh\ncp /image-name /box/woke-on\ncat /shared/ready > /box/sidecar-was-ready\nexec sleep 300\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
+	binarySum := stagePinnedFixture(t, filepath.Join(data, "bin"), []byte("#!/bin/sh\ncp /image-name /box/woke-on\ncat /shared/ready > /box/sidecar-was-ready\nexec sleep 300\n"))
 	if err := os.MkdirAll(filepath.Join(data, "sock", string(id)), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -177,6 +170,7 @@ func TestComposeStackOnRealPodman(t *testing.T) {
 	}
 	b := &Boxes{hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, installed: map[contract.HostName]bool{"host": true}, Store: stackStore{id: id, session: "ses_stack"}, Runtime: t.TempDir()}
 	b.Layout.HostData = data
+	b.binOnce.Do(func() { b.binSum = binarySum })
 	slice, err := box.SliceName(id)
 	if err != nil {
 		t.Fatal(err)
@@ -379,13 +373,7 @@ func TestAComposeSessionFromStartToClose(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(data) })
 	hostData := filepath.Join(data, "host")
 	script := []byte("#!/bin/sh\nexec sleep 300\n")
-	agent := filepath.Join(hostData, "bin", "v1", "dyna")
-	if err := os.MkdirAll(filepath.Dir(agent), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(agent, script, 0755); err != nil {
-		t.Fatal(err)
-	}
+	binarySum := stagePinnedFixture(t, filepath.Join(hostData, "bin"), script)
 
 	st, err := store.Open(filepath.Join(data, "store"))
 	if err != nil {
@@ -411,8 +399,8 @@ func TestAComposeSessionFromStartToClose(t *testing.T) {
 	runtimeDir := t.TempDir()
 	b := &Boxes{Store: st, Runtime: runtimeDir, Layout: layout, Version: "v1", Context: ctx, Compose: files, RoomImages: files.Images.(*engineimages.Store),
 		hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, installed: map[contract.HostName]bool{"host": true}}
-	sum := sha256.Sum256(script)
-	b.binOnce.Do(func() { b.binSum = hex.EncodeToString(sum[:]) })
+	b.binOnce.Do(func() { b.binSum = binarySum })
+	b.binCacheOnce.Do(func() { b.binCache = podman.NewBinaryCache(func() ([]byte, error) { return script, nil }) })
 	service := engine.New(st, b, stackProfiles{}, time.Now)
 	service.SetCompose(files)
 	sockets := api.NewSockets(api.New(&serviceWithHosts{Service: service}, nil), runtimeDir, uint32(os.Getuid()), nil)

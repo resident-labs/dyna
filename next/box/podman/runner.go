@@ -121,7 +121,7 @@ func roomRunnerRepo(room contract.RoomID) string {
 	return runnerLayerRepoPrefix + strings.ToLower(string(room))
 }
 
-func egressArgs(image, bin string) []string {
+func egressArgs(image, bin, sum string) []string {
 	// A runner with no proxy holds its slot until its time limit, so a crashed proxy restarts by itself.
 	return []string{"podman", "--cgroup-manager=systemd", "run", "--detach", "--replace", "--restart=always", "--name", egressName,
 		"--label", ciLabel + "=egress", "--cgroup-parent=" + runnerSlice,
@@ -129,16 +129,17 @@ func egressArgs(image, bin string) []string {
 		"--network=host", "--read-only", "--cap-drop=all", "--security-opt=no-new-privileges", "--user", "1001:1001",
 		"--cpus=4", "--memory=1g", "--memory-swap=1g", "--pids-limit=512",
 		"--volume", egressName + ":" + egressMount,
-		"--volume", bin + ":/opt/dyna/bin:ro",
+		"--volume", filepath.Join(bin, sum) + ":/opt/dyna/bin/current:ro",
 		"--entrypoint", "/opt/dyna/bin/current/dyna", image, "ci-egress", "--dir", egressMount}
 }
 
 // EnsureEgress starts the proxy that runners share on this host.
-func (h *Host) EnsureEgress(ctx context.Context, image, bin string) error {
-	if !filepath.IsAbs(bin) {
-		return errors.New("invalid binary folder")
+func (h *Host) EnsureEgress(ctx context.Context, image, bin, sum string) error {
+	if err := binaryPath(bin, sum); err != nil {
+		return err
 	}
-	if _, err := h.run(ctx, egressArgs(image, bin)...); err != nil {
+	args := append([]string{"bash", "-c", pinCreateScript, "dyna-pin-create", bin}, egressArgs(image, bin, sum)...)
+	if _, err := h.run(ctx, args...); err != nil {
 		return err
 	}
 	// A runner's mount needs its slot's directory, which the proxy makes as it starts.

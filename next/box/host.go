@@ -45,6 +45,8 @@ type ContainerStatus struct {
 	Box         contract.BoxID
 	Running     bool
 	StaleLayout bool
+	// Binary is the immutable engine checksum bound into the container; empty means an older unpinned layout.
+	Binary string
 	// Stack is the Hash of the stack the container was made for.
 	Stack string
 }
