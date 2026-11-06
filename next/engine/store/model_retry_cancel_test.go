@@ -62,7 +62,11 @@ func TestModelRetryCancellation(t *testing.T) {
 			}
 			if phase != "closing" {
 				var timer int64
-				if err := s.Read().QueryRow("SELECT model_retry_at FROM sessions WHERE id='child'").Scan(&timer); err != nil || timer != 0 {
+				want := int64(-1)
+				if phase == "running" {
+					want = 0
+				}
+				if err := s.Read().QueryRow("SELECT model_retry_at FROM sessions WHERE id='child'").Scan(&timer); err != nil || timer != want {
 					t.Fatalf("%s retained timer %d: %v", phase, timer, err)
 				}
 			}
