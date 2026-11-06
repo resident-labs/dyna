@@ -12,12 +12,28 @@ import (
 )
 
 // removeBoxVolumes owns the whole physical volume phase, not a cached permission
-// read before stopping a container. Both RPCs run before readiness can resume.
-func (b *Boxes) removeBoxVolumes(ctx context.Context, name contract.HostName, h *podman.Host, id contract.BoxID) (bool, error) {
-	return b.Store.RemoveBoxVolumes(ctx, id, name, func(ctx context.Context) error {
-		err := h.RemoveVolume(ctx, id)
-		if err == nil {
-			err = h.RemoveStackVolumes(ctx, id)
+// read before stopping a container. Once the fresh proof claims named work,
+// container, pod, workspace and stack deletion run in one locked host command.
+func (b *Boxes) removeBoxVolumes(ctx context.Context, name contract.HostName, h *podman.Host, record box.Box) (bool, error) {
+	id := record.ID
+	epoch, err := h.BoxEpoch(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	// Preserve the actual Stop boundary: a wake/ready/turn before this join
+	// completes must be visible to the fresh proof, not inherit a prior boolean.
+	if err := h.StopBox(ctx, id, epoch); err != nil {
+		var superseded podman.NamespaceSuperseded
+		if errors.As(err, &superseded) {
+			return true, nil
+		}
+		return false, err
+	}
+	removed, err := b.Store.RemoveBoxVolumes(ctx, id, name, func(ctx context.Context) error {
+		err := removeHostBoxAtEpoch(ctx, h, record, b.forward(id), epoch, true)
+		var superseded podman.NamespaceSuperseded
+		if errors.As(err, &superseded) {
+			return nil
 		}
 		var uncertain podman.RemoteCancellationUnconfirmed
 		if !errors.As(err, &uncertain) {
@@ -49,11 +65,11 @@ func (b *Boxes) removeBoxVolumes(ctx context.Context, name contract.HostName, h 
 				delay = time.Second
 			}
 			for keeper.Err() == nil {
-				// Every Host command first joins all pending remote groups. Stop is
-				// idempotent even when removal already succeeded, and creates no work.
+				// Every Host command first joins all pending remote groups. Read
+				// only: a keeper must never stop a newer host epoch.
 				deadline := time.Now().Add(box.StartCleanupBudget)
 				work, stop := context.WithDeadline(keeper, deadline.Add(-box.StartCleanupBudget/2))
-				joinErr := h.StopContainer(podman.WithRemoteCancellationDeadline(work, deadline), id)
+				_, joinErr := h.BoxEpoch(podman.WithRemoteCancellationDeadline(work, deadline), id)
 				stop()
 				if joinErr == nil {
 					close(joined)
@@ -72,4 +88,15 @@ func (b *Boxes) removeBoxVolumes(ctx context.Context, name contract.HostName, h 
 		}()
 		return store.VolumeRemovalPending{Err: err, Joined: joined, Retired: retired}
 	})
+	if err != nil || removed {
+		return removed, err
+	}
+	// Policy refused named-volume deletion. Remove runnable resources only, with
+	// the SAME captured epoch; never refresh an old deletion's authority.
+	err = removeHostBoxAtEpoch(ctx, h, record, b.forward(id), epoch, false)
+	var superseded podman.NamespaceSuperseded
+	if errors.As(err, &superseded) {
+		return true, nil
+	}
+	return false, err
 }

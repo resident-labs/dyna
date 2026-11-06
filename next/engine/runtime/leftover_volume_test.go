@@ -69,7 +69,7 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 			}
 			sockets := api.NewSockets(nil, t.TempDir(), uint32(os.Getuid()), nil)
 			defer sockets.Close()
-			h, err := podman.New("user@host", t.TempDir(), "h", &nativePinnedRunner{})
+			h, err := podman.New("user@host", t.TempDir(), "h", &nativePinnedRunner{}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}

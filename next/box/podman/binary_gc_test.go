@@ -98,7 +98,7 @@ fi
 	}
 	rig.r = &binaryGCRunner{path: path, fixture: rig.fixture}
 	var err error
-	rig.h, err = New("user@host", t.TempDir(), "host", rig.r)
+	rig.h, err = New("user@host", t.TempDir(), "host", rig.r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

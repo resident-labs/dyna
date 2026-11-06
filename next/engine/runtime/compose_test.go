@@ -76,7 +76,7 @@ func TestTeardownRemovesTheStack(t *testing.T) {
 	for _, call := range h.Calls {
 		order = append(order, string(call))
 	}
-	want := "stop-container remove-forward remove-container remove-pod remove-volume remove-stack-volumes remove-slice"
+	want := "remove-forward stop-container remove-container remove-pod remove-volume remove-stack-volumes remove-slice"
 	if got := strings.Join(order, " "); got != want {
 		t.Fatalf("got %s", got)
 	}
@@ -102,10 +102,12 @@ func (r *stackRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte, 
 	if slices.Contains(args, "-O") || slices.Contains(args, "-M") {
 		return nil, nil
 	}
-	command := args[len(args)-1]
+	command := strings.ReplaceAll(args[len(args)-1], `'\''`, `'`)
 	r.commands = append(r.commands, command)
 	body, status := "", 0
 	switch {
+	case strings.HasSuffix(command, "'read'"):
+		body = "0\n"
 	case r.fail != "" && strings.Contains(command, r.fail):
 		status = 125
 	case strings.Contains(command, "dyna-probe"):
@@ -146,7 +148,7 @@ func (composeStore) Session(context.Context, contract.SessionID) (store.Session,
 func creatingBoxes(t *testing.T, r *stackRunner) (*Boxes, lifecycle.BoxSpec) {
 	t.Helper()
 	runtimeDir := t.TempDir()
-	host, err := podman.New("user@host", runtimeDir, "host", r)
+	host, err := podman.New("user@host", runtimeDir, "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +274,7 @@ func (r *listingRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte
 func TestABoxStartsItsSidecarsUnlessItIsClosing(t *testing.T) {
 	for state, want := range map[contract.BoxState]bool{contract.BoxStopped: true, contract.BoxClosing: false} {
 		r := &listingRunner{}
-		host, err := podman.New("user@host", t.TempDir(), "host", r)
+		host, err := podman.New("user@host", t.TempDir(), "host", r, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}

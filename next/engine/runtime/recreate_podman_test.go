@@ -73,7 +73,7 @@ func TestRecreateMovesAStoppedBoxToANewImageAndKeepsItsVolume(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	host, err := podman.New("local@host", t.TempDir(), "local", localHost{})
+	host, err := podman.New("local@host", t.TempDir(), "local", localHost{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -48,7 +48,7 @@ func TestHostCheckRequiresPgrep(t *testing.T) {
 				}
 			}
 			t.Setenv("PATH", tools)
-			h, err := New("owner@host", t.TempDir(), "h", nativeShellRunner{})
+			h, err := New("owner@host", t.TempDir(), "h", nativeShellRunner{}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -61,7 +61,7 @@ func TestHostCheckRequiresPgrep(t *testing.T) {
 				t.Fatalf("missing pgrep must fail visibly, got %v", err)
 			}
 			// Box hosts must run the same prerequisite, not just exec-only hosts.
-			h, err = New("owner@host", t.TempDir(), "h", prerequisiteCheckRunner{})
+			h, err = New("owner@host", t.TempDir(), "h", prerequisiteCheckRunner{}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}

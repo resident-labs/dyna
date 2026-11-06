@@ -75,7 +75,7 @@ func TestInstructionWaitAndSettleRespectCancellation(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer s.Close()
-			h, err := podman.New("owner@host", t.TempDir(), "h", nil)
+			h, err := podman.New("owner@host", t.TempDir(), "h", nil, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -136,7 +136,7 @@ func TestCleanupReservesJoinTimeInsideOneTotalBudget(t *testing.T) {
 		t.Fatal("cleanup inherited canceled start")
 	}
 	runner := &cleanupDeadlineRunner{}
-	h, err := podman.New("owner@host", t.TempDir(), "h", runner)
+	h, err := podman.New("owner@host", t.TempDir(), "h", runner, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

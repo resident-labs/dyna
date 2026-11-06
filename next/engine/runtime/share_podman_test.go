@@ -50,7 +50,7 @@ func TestSharedFolderReachesARealBoxThroughItsMount(t *testing.T) {
 	wrapper := "#!/bin/sh\nif [ \"$1\" = share ]; then exec " + binary + " \"$@\"; fi\nexec sleep 1000\n"
 	binarySum := stagePinnedFixture(t, layout.HostBin(), []byte(wrapper))
 	forwards := &sshForwards{}
-	host, err := podman.New("local", runtimeDir, "h", forwards)
+	host, err := podman.New("local", runtimeDir, "h", forwards, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

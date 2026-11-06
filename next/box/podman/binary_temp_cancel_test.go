@@ -47,7 +47,7 @@ func TestCanceledBinaryOperationsRemovePrivateTemporaries(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			h, err := New("owner@host", t.TempDir(), "h", temporaryBinaryRunner{})
+			h, err := New("owner@host", t.TempDir(), "h", temporaryBinaryRunner{}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}

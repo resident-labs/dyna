@@ -57,7 +57,7 @@ func TestEngineStartupDiscardsCopiedHostIdentityBeforeProfiles(t *testing.T) {
 func TestDestinationEngineRestoresExistingFUSEForward(t *testing.T) {
 	r := &shareHost{}
 	b := shareBoxes(t, r, engineHosts("host"))
-	h, err := podman.New("pip@100.106.214.124", b.Runtime, "host", r)
+	h, err := podman.New("pip@100.106.214.124", b.Runtime, "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestDestinationEngineShareSocketRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	r := &sshForwards{}
 	b := &Boxes{Store: restoreStore{hosts: engineHosts("host")}, Layout: box.Layout{Data: t.TempDir(), HostData: t.TempDir()}, Runtime: t.TempDir()}
-	h, err := podman.New("pip@100.106.214.124", b.Runtime, "host", r)
+	h, err := podman.New("pip@100.106.214.124", b.Runtime, "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestEngineMachineIdentityDoesNotComeFromCopiedData(t *testing.T) {
 				t.Fatal(err)
 			}
 			b := &Boxes{Layout: box.Layout{Data: data, HostData: data}, machineIDFile: machine}
-			h, err := podman.New("pip@remote", t.TempDir(), "host", admissionTransport{})
+			h, err := podman.New("pip@remote", t.TempDir(), "host", admissionTransport{}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}

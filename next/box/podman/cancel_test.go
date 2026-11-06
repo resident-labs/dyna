@@ -25,7 +25,7 @@ func (nativeShellRunner) Run(ctx context.Context, in []byte, args ...string) ([]
 	return (ExecRunner{}).Run(ctx, in, "bash", "-c", args[len(args)-1])
 }
 func TestCancelledStartKillsRemoteProcessBeforeCleanup(t *testing.T) {
-	h, err := New("user@host", t.TempDir(), "host", nativeShellRunner{})
+	h, err := New("user@host", t.TempDir(), "host", nativeShellRunner{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestUnconfirmedCancellationFencesSubsequentCleanup(t *testing.T) {
 			if ownerCancel {
 				runner.cancel = cancel
 			}
-			h, err := New("user@host", t.TempDir(), "host", runner)
+			h, err := New("user@host", t.TempDir(), "host", runner, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}

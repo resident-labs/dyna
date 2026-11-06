@@ -44,7 +44,7 @@ func (r *imageRunner) Run(_ context.Context, input []byte, args ...string) ([]by
 
 func TestBuildBaseSendsTaggedContext(t *testing.T) {
 	r := &imageRunner{missing: true}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestBuildBaseSendsTaggedContext(t *testing.T) {
 
 func TestBuildPassesBaseTag(t *testing.T) {
 	r := &imageRunner{missing: true}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func (r *buildFailureRunner) Run(ctx context.Context, input []byte, args ...stri
 func TestBuildFailureReturnsOutputTail(t *testing.T) {
 	output := []byte(strings.Repeat("a", 5000) + strings.Repeat("b", 4096))
 	r := &buildFailureRunner{imageRunner: imageRunner{missing: true}, output: output}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func (r *blockedImageRunner) Run(_ context.Context, _ []byte, args ...string) ([
 
 func TestBuildBaseCancellationWhileAnotherBuildRuns(t *testing.T) {
 	r := &blockedImageRunner{started: make(chan struct{}), release: make(chan struct{})}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestBuildBaseCancellationWhileAnotherBuildRuns(t *testing.T) {
 
 func TestBuildBaseReusesExistingTag(t *testing.T) {
 	r := &imageRunner{}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestBoxesAndWarmsUseOneMapping(t *testing.T) {
 // timeout exits 124 when it stops a warm. The image is whole, so a box can still use it.
 func TestAWarmThatMissesItsLimitLeavesTheImageUsable(t *testing.T) {
 	r := &imageRunner{missing: true, warmExit: 124}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func TestAWarmThatMissesItsLimitLeavesTheImageUsable(t *testing.T) {
 
 func TestReusedImageIsNotWarmedAgain(t *testing.T) {
 	r := &imageRunner{}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestReusedImageIsNotWarmedAgain(t *testing.T) {
 
 func TestRunnerImagesAreNotWarmed(t *testing.T) {
 	r := &imageRunner{missing: true}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestPruneKeepsTheNewestTwoTagsOfEachImage(t *testing.T) {
 		{"Names":["docker.io/library/node:22"],"Created":1},
 		{"Names":null,"Created":1}
 	]`}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestPruneKeepsTheNewestTwoTagsOfEachImage(t *testing.T) {
 
 func TestPruneKeepsAnOldTagThatIsCurrentAgain(t *testing.T) {
 	r := &pruneRunner{images: `[{"Names":["localhost/dyna-base:c"],"Created":30},{"Names":["localhost/dyna-base:b"],"Created":20},{"Names":["localhost/dyna-base:a"],"Created":10}]`}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +303,7 @@ func TestPruneKeepsAnOldTagThatIsCurrentAgain(t *testing.T) {
 
 func TestPruneLeavesAnImageInUseAndCarriesOn(t *testing.T) {
 	r := &pruneRunner{used: map[string]bool{"localhost/dyna-base:a": true}, images: `[{"Names":["localhost/dyna-base:d"],"Created":40},{"Names":["localhost/dyna-base:c"],"Created":30},{"Names":["localhost/dyna-base:b"],"Created":20},{"Names":["localhost/dyna-base:a"],"Created":10}]`}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

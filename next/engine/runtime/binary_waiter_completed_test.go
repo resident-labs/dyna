@@ -48,7 +48,7 @@ func (r *completedWaiterRunner) Run(ctx context.Context, _ []byte, args ...strin
 func newCompletedWaiter(t *testing.T, result string) (*Boxes, *podman.Host, *completedWaiterRunner, func()) {
 	t.Helper()
 	runner := &completedWaiterRunner{sum: strings.Repeat("a", 64), entered: make(chan context.Context), release: make(chan struct{}), result: result}
-	host, err := podman.New("owner@host", t.TempDir(), "h", runner)
+	host, err := podman.New("owner@host", t.TempDir(), "h", runner, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

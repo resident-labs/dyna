@@ -35,7 +35,7 @@ func (r *maintenanceRunner) Run(_ context.Context, _ []byte, args ...string) ([]
 }
 func TestRemoveRoomRunsInTheUserNamespace(t *testing.T) {
 	r := &maintenanceRunner{}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestRemoveRoomRunsInTheUserNamespace(t *testing.T) {
 
 func TestMaintenanceCommands(t *testing.T) {
 	r := &maintenanceRunner{}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestMaintainCompactsACache(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(bin, "podman"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	h, err := New("user@host", t.TempDir(), "host", localShell{path: bin + ":" + os.Getenv("PATH")})
+	h, err := New("user@host", t.TempDir(), "host", localShell{path: bin + ":" + os.Getenv("PATH")}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -201,7 +201,7 @@ func startEngine(t *testing.T, ctx context.Context, r podman.Runner, st restoreS
 	t.Cleanup(func() { _ = b.Sockets.Close() })
 	b.hosts = make(map[contract.HostName]*podman.Host)
 	for _, host := range st.hosts {
-		h, err := podman.New("user@host", dir, string(host.Name), r)
+		h, err := podman.New("user@host", dir, string(host.Name), r, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -354,7 +354,7 @@ func TestInspectDoesNotWaitForTheBinary(t *testing.T) {
 	defer cancel()
 	r := newSlowHost(time.Hour)
 	st := restoreFixture("box_a")
-	host, err := podman.New("user@host", t.TempDir(), "arch", r)
+	host, err := podman.New("user@host", t.TempDir(), "arch", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,7 +431,7 @@ func TestBuildAheadWaitsForAHostThatIsDown(t *testing.T) {
 // took over two minutes.
 func TestInstallSendsTheBinaryOnce(t *testing.T) {
 	r := newSlowHost(10 * time.Millisecond)
-	host, err := podman.New("user@host", t.TempDir(), "arch", r)
+	host, err := podman.New("user@host", t.TempDir(), "arch", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -37,7 +37,10 @@ func (r *missingContainerRunner) Run(_ context.Context, _ []byte, args ...string
 			return nil, nil
 		}
 	}
-	command := args[len(args)-1]
+	command := strings.ReplaceAll(args[len(args)-1], `'\''`, `'`)
+	if strings.HasSuffix(command, "'read'") {
+		return []byte("0\nDYNA-END 00000000000000000002 000\n"), nil
+	}
 	status := 0
 	if strings.Contains(command, "'podman' '--cgroup-manager=systemd' 'stop'") {
 		r.stopSeen = true
@@ -45,7 +48,10 @@ func (r *missingContainerRunner) Run(_ context.Context, _ []byte, args ...string
 			status = 125
 		}
 	}
-	if strings.Contains(command, "'volume' 'rm'") {
+	// The whole-command body tolerates Podman's missing-workspace status 1
+	// and still executes stack prune. Simulate its resulting success, not the
+	// inner Podman exit as if it were the enclosing script's status.
+	if strings.Contains(command, "'volume' 'rm'") && !strings.Contains(command, "status=$?") {
 		status = 1
 	}
 	return []byte(fmt.Sprintf("DYNA-END %020d %03d\n", 0, status)), nil
@@ -53,7 +59,7 @@ func (r *missingContainerRunner) Run(_ context.Context, _ []byte, args ...string
 
 func TestRemoveHostBoxWithMissingContainer(t *testing.T) {
 	runner := &missingContainerRunner{}
-	host, err := podman.New("user@host", t.TempDir(), "host", runner)
+	host, err := podman.New("user@host", t.TempDir(), "host", runner, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

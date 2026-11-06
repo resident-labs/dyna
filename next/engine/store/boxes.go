@@ -269,8 +269,15 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 			failures = 0
 			due = time.Time{}
 		}
-		if terminalCreateFailure && !retry && retryHost == "" && (!safeState || eligibility == createRetryUsed) {
-			reason = failure + "; automatic other-host retry unsafe: allocation already started or has session work"
+		if terminalCreateFailure && !retry && retryHost == "" {
+			switch {
+			case !safeState || eligibility == createRetryUsed:
+				reason = failure + "; automatic other-host retry unsafe: allocation already started or has session work"
+			case eligibility == createRetrySameHost:
+				reason = failure + "; automatic other-host retry skipped: initial sameHost placement"
+			default:
+				reason = failure + "; automatic other-host retry skipped: first-create provenance unknown"
+			}
 		}
 		if to != state {
 			_, body, err := box.Transition(b, to, reason, event.Time)

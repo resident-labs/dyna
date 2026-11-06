@@ -58,7 +58,7 @@ type pressureReport struct {
 func driveHeartbeat(t *testing.T, bodies []string, at []time.Time) []pressureReport {
 	t.Helper()
 	runner := &seqRunner{bodies: bodies, drained: make(chan struct{})}
-	h, err := New("user@host", t.TempDir(), "host", runner)
+	h, err := New("user@host", t.TempDir(), "host", runner, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestHeartbeatEpisodes(t *testing.T) {
 
 func TestHeartbeatReportsLoad(t *testing.T) {
 	runner := &seqRunner{bodies: []string{"dyna-disk 1000 400\ndyna-load 100 1000000\n", "dyna-load 250 16000000\n"}, drained: make(chan struct{})}
-	h, err := New("user@host", t.TempDir(), "host", runner)
+	h, err := New("user@host", t.TempDir(), "host", runner, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -112,7 +112,7 @@ func TestHeartbeatSchedulingThresholdKeepsSeparateReachabilityGrace(t *testing.T
 				synctest.Test(t, func(t *testing.T) {
 					runner := &healthProbeRunner{}
 					runner.state.Store(&healthProbeState{})
-					h, err := New("user@host", t.TempDir(), "h", runner)
+					h, err := New("user@host", t.TempDir(), "h", runner, t.TempDir())
 					if err != nil {
 						t.Fatal(err)
 					}

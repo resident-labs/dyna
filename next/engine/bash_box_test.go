@@ -313,7 +313,7 @@ func newToolBox(t *testing.T, profiles Profiles, provider *toolUpstream) *toolBo
 	if out, err := exec.Command("cp", binary, filepath.Join(bin, "dyna")).CombinedOutput(); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
-	host, err := podman.New("local", runtimeDir, "h", localRunner{})
+	host, err := podman.New("local", runtimeDir, "h", localRunner{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

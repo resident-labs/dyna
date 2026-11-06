@@ -34,12 +34,17 @@ func TestFailedCommandWithNoOutputSaysOnlyItsStatus(t *testing.T) {
 
 // Callers that compare statuses still see them through the output.
 func TestFailedCommandKeepsItsStatusForCallers(t *testing.T) {
-	h := newTestHost(t, &runner{body: "Error: no such volume\n", status: 1})
+	tools := fakeTools(t, map[string]string{"podman": `case " $* " in *' volume rm '*) echo 'Error: no such volume' >&2; exit 1;; esac
+exit 0`})
+	h, err := New("user@host", t.TempDir(), "host", localShell{path: tools + ":" + os.Getenv("PATH")}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := h.RemoveVolume(context.Background(), "box_1"); err != nil {
 		t.Fatalf("a missing volume is not an error: %v", err)
 	}
 	h = newTestHost(t, &runner{body: "mountpoint: not a mount point\n", status: 253})
-	err := h.makeMountFolder(context.Background(), box.Mount{HostPath: "/host/share/rooms/r/shared", OnMount: "/host/share/rooms"})
+	err = h.makeMountFolder(context.Background(), box.Mount{HostPath: "/host/share/rooms/r/shared", OnMount: "/host/share/rooms"})
 	var down box.ShareDown
 	if !errors.As(err, &down) {
 		t.Fatalf("err = %v", err)
@@ -91,7 +96,7 @@ func TestHoldsBox(t *testing.T) {
 "volume exists dyna-box-box_1") ` + c.volume + ` ;;
 *) exit 2 ;;
 esac`})
-			h, err := New("user@host", t.TempDir(), "host", localShell{path: tools + ":" + os.Getenv("PATH")})
+			h, err := New("user@host", t.TempDir(), "host", localShell{path: tools + ":" + os.Getenv("PATH")}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}
