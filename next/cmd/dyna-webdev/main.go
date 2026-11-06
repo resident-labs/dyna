@@ -626,6 +626,7 @@ func main() {
 	a := api.New(devService{Service: svc, empty: *fixture == "empty", renames: &devRenames{labels: map[contract.AccountID]string{}}}, nil)
 	a.SetConnectOperations(devConnect{empty: *fixture == "empty"})
 	a.SetFilesRoute(func(c api.Caller) http.Handler { return devFiles(svc.Files(c.Principal, c.Room)) })
+	a.SetSharedRoute(func(c api.Caller) http.Handler { return svc.Shared(c.Principal) })
 	app, err := fs.Sub(web.Dist, "dist")
 	fatal(err)
 	webServer, err := api.NewWeb(a, *listen, app, time.Now, st)
