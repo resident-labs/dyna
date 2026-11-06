@@ -41,10 +41,11 @@ test("Root and owner are exact from/to predicates at arbitrary depth in both fil
   }
 });
 
-test("Leads adds known MAX(sender, ALL recipients) depth at most 2, and All never filters", () => {
+test("Leads adds known MAX(sender, ALL recipients) depth at most 1, and All never filters", () => {
   const cases: [string, string[], boolean][] = [
-    ["lead", [], true], ["lead", ["lead-b"], true], ["worker", ["lead"], true],
-    ["lead", ["worker"], true], ["worker", ["worker", "lead-b"], true],
+    ["lead", [], true], ["lead", ["lead-b"], true], ["worker", ["lead"], false],
+    ["lead", ["worker"], false], ["worker", ["worker", "lead-b"], false],
+    ["lead", ["lead-b", "worker"], false],
     ["deep", ["lead"], false], ["lead", ["deep"], false], ["deeper", [], false],
     ["lead", ["lead-b", "deep", "worker"], false], ["deep", ["deeper", "lead"], false],
   ];
@@ -70,7 +71,7 @@ test("unknown ancestry fails open in Leads, even with a known deep participant, 
 
 test("activity stays visible, hidden posts leave no dividers and name lines remain correct", () => {
   const activity: Event = { seq: 2, id: "work", at: "2026-11-06T10:01:00Z", from: { kind: "engine" }, type: "session.started", body: { session: "deeper", parent: "deep", name: "builder", profile: "sol" } };
-  const hidden = post(1, session("deep"), [session("lead")]);
+  const hidden = post(1, session("worker"), [session("lead")]);
   assert.deepEqual(feedRows([hidden], { kind: "feed" }, [], 1, new Set(), { mode: "leads", depths }), []);
   for (const mode of ["root", "leads", "all"] as const) {
     const rows = feedRows([hidden, activity], { kind: "feed" }, [], 0, new Set(), { mode, depths });
