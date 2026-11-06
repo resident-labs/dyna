@@ -17,6 +17,8 @@ import (
 // organization's own groups stay out of it, so no organization setting changes.
 const defaultRunnerGroup = 1
 
+var errNoGitHubCredential = errors.New("no GitHub credential")
+
 // Sets adapts the actions/scaleset client, the one file that imports it. It
 // registers at repository level: an organization-level set would need the
 // organization's runner group to allow public repositories.
@@ -44,6 +46,11 @@ func (s *Sets) open(ctx context.Context, repo contract.RepoName, name string) (*
 	key := namedSet{repo, name}
 	if found := s.sets[key]; found != nil {
 		return found, nil
+	}
+	// The PAT constructor accepts an empty token, but the first API call then
+	// falls back to GitHub App auth with nil credentials and panics.
+	if s.Token == "" {
+		return nil, errNoGitHubCredential
 	}
 	client, err := scaleset.NewClientWithPersonalAccessToken(scaleset.NewClientWithPersonalAccessTokenConfig{
 		GitHubConfigURL:     "https://github.com/" + string(repo),
