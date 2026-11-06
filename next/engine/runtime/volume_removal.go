@@ -25,14 +25,16 @@ func (b *Boxes) removeBoxVolumes(ctx context.Context, name contract.HostName, h 
 	if err := h.StopBox(ctx, id, epoch); err != nil {
 		var superseded podman.NamespaceSuperseded
 		if errors.As(err, &superseded) {
-			return true, nil
+			return true, err
 		}
 		return false, err
 	}
+	supersededDelete := false
 	removed, err := b.Store.RemoveBoxVolumes(ctx, id, name, func(ctx context.Context) error {
 		err := removeHostBoxAtEpoch(ctx, h, record, b.forward(id), epoch, true)
 		var superseded podman.NamespaceSuperseded
 		if errors.As(err, &superseded) {
+			supersededDelete = true
 			return nil
 		}
 		var uncertain podman.RemoteCancellationUnconfirmed
@@ -88,6 +90,9 @@ func (b *Boxes) removeBoxVolumes(ctx context.Context, name contract.HostName, h 
 		}()
 		return store.VolumeRemovalPending{Err: err, Joined: joined, Retired: retired}
 	})
+	if supersededDelete {
+		return true, box.NamespaceSuperseded{Box: id}
+	}
 	if err != nil || removed {
 		return removed, err
 	}
@@ -96,7 +101,7 @@ func (b *Boxes) removeBoxVolumes(ctx context.Context, name contract.HostName, h 
 	err = removeHostBoxAtEpoch(ctx, h, record, b.forward(id), epoch, false)
 	var superseded podman.NamespaceSuperseded
 	if errors.As(err, &superseded) {
-		return true, nil
+		return true, err
 	}
 	return false, err
 }

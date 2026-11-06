@@ -25,6 +25,7 @@ func (h *recordedCleanup) RemoveBox(ctx context.Context, id contract.BoxID, _ ui
 	if slice != "" {
 		_ = h.RemoveSlice(ctx, slice)
 	}
+	_ = h.RemoveForward(ctx, box.Forward{Box: id})
 	return nil
 }
 func (h *recordedCleanup) RemovePod(ctx context.Context, _ contract.BoxID) error {

@@ -76,7 +76,7 @@ func TestTeardownRemovesTheStack(t *testing.T) {
 	for _, call := range h.Calls {
 		order = append(order, string(call))
 	}
-	want := "remove-forward stop-container remove-container remove-pod remove-volume remove-stack-volumes remove-slice"
+	want := "stop-container remove-container remove-pod remove-volume remove-stack-volumes remove-slice remove-forward"
 	if got := strings.Join(order, " "); got != want {
 		t.Fatalf("got %s", got)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -56,7 +57,21 @@ esac
 
 func (h *Host) namespace(ctx context.Context, id contract.BoxID, mode string, command ...string) ([]byte, error) {
 	args := []string{"bash", "-c", namespaceScript, "dyna-box-namespace", h.dataDir, string(id), mode}
-	out, err := h.run(ctx, append(args, command...)...)
+	var out []byte
+	var err error
+	if mode == "read" || mode == "delete" {
+		// Restoring the mux's forwards can unlink a box socket. Read/delete must
+		// reach the host epoch check without that implicit mutation as well.
+		select {
+		case h.shortGate <- struct{}{}:
+			defer func() { <-h.shortGate }()
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		out, err = h.executeOver(ctx, h.direct(), nil, append(args, command...)...)
+	} else {
+		out, err = h.run(ctx, append(args, command...)...)
+	}
 	var exit remoteExit
 	if errors.As(err, &exit) {
 		switch exit {
@@ -168,6 +183,11 @@ func (h *Host) RemoveBox(ctx context.Context, id contract.BoxID, epoch uint64, v
 	if slice != "" {
 		script += "\n" + removeSliceScript
 	}
+	socket := (box.Layout{HostData: h.dataDir}).HostSocket(id)
+	script += "\n" + shellCommand("rm", "-f", "--", socket) + "\n" + "[ ! -d " + quote(filepath.Dir(socket)) + " ] || " + shellCommand("rmdir", "--", filepath.Dir(socket))
 	_, err := h.namespace(ctx, id, "delete", "--expect-epoch", strconv.FormatUint(epoch, 10), "bash", "-c", script, "dyna-remove-box", string(id), slice)
+	if err == nil {
+		h.forgetBoxForwards(id)
+	}
 	return err
 }
