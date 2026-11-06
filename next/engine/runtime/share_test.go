@@ -132,16 +132,13 @@ func TestARestartGivesARunningMountItsSocketBack(t *testing.T) {
 	}
 }
 
-func TestTheEngineHostNeedsNoSocketForTheMount(t *testing.T) {
+func TestTheEngineHostRestoresTheSocketForAnyExistingMount(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	r := newSlowHost(0)
 	st := restoreStore{hosts: engineHosts("arch"), boxes: []box.Box{{ID: "box_a", Session: "ses_box_a", Host: "arch", State: contract.BoxReady}}}
 	b := startEngine(t, ctx, r, st)
 	defer func() { cancel(); b.WaitRecovered() }()
-	eventually(t, "the box's socket", func() bool { return r.restored("box_a") })
-	if r.restored("share.sock") {
-		t.Fatal("the engine host got the mount's socket")
-	}
+	eventually(t, "the box and existing mount's sockets", func() bool { return r.restored("box_a", "share.sock") })
 }
 
 func TestSharedSizesAddUpEachRoomsFolder(t *testing.T) {
