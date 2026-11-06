@@ -157,7 +157,7 @@ func (b *Boxes) installBinary(ctx context.Context, h *podman.Host) error {
 				}
 			})
 			job.err = h.InstallBinary(progress, b.Layout.HostBin(), b.Version, b.binSum, b.compressedBinary)
-			if errors.Is(context.Cause(idle), podman.ErrTransferIdle) {
+			if job.err != nil && errors.Is(context.Cause(idle), podman.ErrTransferIdle) {
 				job.err = errors.Join(podman.ErrTransferIdle, job.err)
 			}
 			close(job.done)
@@ -1226,7 +1226,7 @@ func (b *Boxes) installHost(ctx context.Context, name contract.HostName) error {
 		step, cancel := context.WithTimeout(ctx, box.StartStepBudget)
 		defer cancel()
 		err = host.ActivateBinary(step, b.Layout.HostBin(), wanted)
-		if ctx.Err() == nil && errors.Is(step.Err(), context.DeadlineExceeded) {
+		if err != nil && ctx.Err() == nil && errors.Is(step.Err(), context.DeadlineExceeded) {
 			return errors.Join(podman.ErrTransferIdle, err)
 		}
 		return err
