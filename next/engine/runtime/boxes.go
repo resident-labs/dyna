@@ -1434,6 +1434,7 @@ func (b *Boxes) RemoveFailedBox(ctx context.Context, old box.Box) error {
 // for ordinary Stop/recovery. The host-discard caller keeps its bounded best-effort
 // semantics and may abandon the host after an error; restart instead retains debt.
 func (b *Boxes) DiscardHostBox(ctx context.Context, old box.Box) error {
+	generation := b.Sockets.BoxGeneration(old.ID)
 	ctx = podman.WithRemoteCancellation(ctx)
 	h, err := b.host(ctx, old.Host)
 	if err != nil {
@@ -1446,7 +1447,7 @@ func (b *Boxes) DiscardHostBox(ctx context.Context, old box.Box) error {
 		}
 		return err
 	}
-	return b.Sockets.RemoveBox(old.ID)
+	return b.Sockets.RemoveBoxAtGeneration(old.ID, generation)
 }
 
 // removeHostBox removes runnable resources. Named work requires explicit deletion permission from its owner.
