@@ -21,6 +21,7 @@
   import TimelineMinimap from "./TimelineMinimap.svelte";
   import PostTarget from "./PostTarget.svelte";
   import QuestionCard from "./QuestionCard.svelte";
+  import EngineRestartNotice from "./EngineRestartNotice.svelte";
   import { attemptFailedNote, compactionNote, engineEventsNote, finalTimelineItem, foldInputRuns, ownPost, postDestination, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief, workingLine } from "../timeline.ts";
 
   // With step, the thread reads one worker of a crew: its transcript alone, and nothing that was sent to the crew.
@@ -329,7 +330,7 @@
     <div class="muted turn-note input-line" class:failure={shown.kind === "failed"} title={formatTime(input.at)}>
       <span class="slot"><Icon name={shown.kind === "failed" ? "warning" : "inbox"} size={14} /></span>
       {#if name}<span class="agent-sender">{#if !input.source || hasRoom(input.source.room)}<a href={`/r/${encodeURIComponent(input.source?.room ?? store.room)}/s/${encodeURIComponent(input.from.session ?? "")}`} onclick={navigate} style:--hue={hue(name)}>{name}</a>{:else}<strong class={input.from.kind} style:--hue={hue(name)}>{name}</strong>{/if}</span>{/if}
-      <span>{shown.text}</span>
+      <span>{#if shown.restart}<EngineRestartNotice event={shown.restart} />{:else}{shown.text}{/if}</span>
     </div>
     {@render textRetry(turn, part)}
   {:else if input.from.kind === "owner"}{@render ownerMessage(key, input.at, false, body)}

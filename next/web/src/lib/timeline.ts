@@ -1,5 +1,6 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
-import type { ActivityKind, Event, TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
+import type { ActivityKind, EngineRestarted, Event, TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
+import { engineRestartText } from "./engine-restarted.ts";
 import { decodeEvent } from "./event.ts";
 import { causes, formatTime } from "./feed.ts";
 
@@ -8,7 +9,7 @@ export function pendingStartBrief(brief: string | undefined, turns: TranscriptTu
 }
 
 // Dyna: Someone's words are a message. An engine notice is one plain line, as T3 Code shows a notification, never a post.
-export type TimelineInput = { kind: "message" | "line" | "failed"; text: string };
+export type TimelineInput = { kind: "message" | "line" | "failed"; text: string; restart?: EngineRestarted };
 const line = (text: string): TimelineInput => ({ kind: "line", text });
 
 function eventInput(event: Event): TimelineInput | undefined {
@@ -29,6 +30,7 @@ function eventInput(event: Event): TimelineInput | undefined {
     case "session.profile_changed": return line(`Model changed to ${event.body.profile}`);
     case "session.restarted": return line(event.body.imageUpdated ? "Box image updated" : event.body.stopped || event.body.refreshed ? "Box restarted" : "Box replaced");
     case "session.closed": return line(`Session ${event.body.session} closed`);
+    case "engine.restarted": return { ...line(engineRestartText(event.body)), restart: event.body };
     case "host.disk_low": return line(`Host ${event.body.host} is low on disk`);
     case "op.decided": case "op.ran": return line(`Operation ${event.body.id}: ${event.body.state}`);
     case "hook.due": return line(`Subscription ${event.body.subscription} is due`);
