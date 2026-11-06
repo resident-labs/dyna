@@ -93,6 +93,12 @@ func decodeEventBody(t EventType, data json.RawMessage) (EventBody, error) {
 			return nil, err
 		}
 		return v, nil
+	case "engine.restarted":
+		var v EngineRestarted
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case "git.main_ci_finished":
 		var v GitMainCIFinished
 		if err := json.Unmarshal(data, &v); err != nil {
@@ -524,7 +530,7 @@ func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs, error) {
 	}
 }
 
-var eventBodyTypes = []EventType{"account.failed", "account.quota_low", "box.changed", "box.pressure", "checkin.due", "computer.changed", "connect.connector", "conversation.read", "git.main_ci_finished", "git.main_updated", "github.ci.finished", "github.comment", "github.issue.changed", "github.issue.closed", "github.issue.opened", "github.label", "github.mention", "github.pr.changed", "github.pr.closed", "github.pr.merged", "github.pr.opened", "goal.ended", "goal.item_changed", "goal.set", "grant.expired", "hook.due", "hook.finished", "host.disk_low", "host.switches_changed", "image.built", "image.failed", "notice.posted", "op.decided", "op.ran", "op.requested", "post.created", "post.sent", "question.answered", "question.asked", "question.withdrawn", "room.deleted", "room.deleting", "room.limits_changed", "room.paused", "room.resumed", "service.changed", "service.failed", "session.closed", "session.compacted", "session.failed", "session.moved", "session.notice", "session.profile_changed", "session.restarted", "session.started", "shell.job.ended", "shell.job.running", "transcript.changed", "turn.activity", "turn.ended", "turn.started", "workflow.ended", "workflow.status_changed", "workflow.step_changed"}
+var eventBodyTypes = []EventType{"account.failed", "account.quota_low", "box.changed", "box.pressure", "checkin.due", "computer.changed", "connect.connector", "conversation.read", "engine.restarted", "git.main_ci_finished", "git.main_updated", "github.ci.finished", "github.comment", "github.issue.changed", "github.issue.closed", "github.issue.opened", "github.label", "github.mention", "github.pr.changed", "github.pr.closed", "github.pr.merged", "github.pr.opened", "goal.ended", "goal.item_changed", "goal.set", "grant.expired", "hook.due", "hook.finished", "host.disk_low", "host.switches_changed", "image.built", "image.failed", "notice.posted", "op.decided", "op.ran", "op.requested", "post.created", "post.sent", "question.answered", "question.asked", "question.withdrawn", "room.deleted", "room.deleting", "room.limits_changed", "room.paused", "room.resumed", "service.changed", "service.failed", "session.closed", "session.compacted", "session.failed", "session.moved", "session.notice", "session.profile_changed", "session.restarted", "session.started", "shell.job.ended", "shell.job.running", "transcript.changed", "turn.activity", "turn.ended", "turn.started", "workflow.ended", "workflow.status_changed", "workflow.step_changed"}
 
 func (m BoxMessage) MarshalJSON() ([]byte, error) {
 	if m.Body == nil {
@@ -622,6 +628,7 @@ var eventDocs = map[EventType]string{"account.failed": "",
 	"computer.changed":        "",
 	"connect.connector":       "reports a missing or restored tunnel connector",
 	"conversation.read":       "",
+	"engine.restarted":        "reports a new engine process to every open root",
 	"git.main_ci_finished":    "the CI of a default-branch head finishing, once per head sha even after the branch moved on, with repo, branch, sha, result and runs; where kind is success or failure",
 	"git.main_updated":        "a repository's default branch moving",
 	"github.ci.finished":      "one CI result on a tracked PR's head",
