@@ -7,6 +7,7 @@ type ContextSectionKey string
 const (
 	ContextGoal      ContextSectionKey = "dyna_goal"
 	ContextChildren  ContextSectionKey = "dyna_children"
+	ContextContacts  ContextSectionKey = "dyna_contacts"
 	ContextRequests  ContextSectionKey = "dyna_requests"
 	ContextHolds     ContextSectionKey = "dyna_holds"
 	ContextProfiles  ContextSectionKey = "dyna_profiles"
