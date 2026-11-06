@@ -142,7 +142,7 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		return contract.ContextSnapshotResponse{}, forbidden()
 	}
 	switch req.Section {
-	case "", contract.ContextGoal, contract.ContextChildren, contract.ContextRequests, contract.ContextHolds, contract.ContextProfiles, contract.ContextUsage, contract.ContextRoom, contract.ContextWorkflows:
+	case "", contract.ContextGoal, contract.ContextChildren, contract.ContextContacts, contract.ContextRequests, contract.ContextHolds, contract.ContextProfiles, contract.ContextUsage, contract.ContextRoom, contract.ContextWorkflows:
 	default:
 		return contract.ContextSnapshotResponse{}, invalid("unknown context section")
 	}
@@ -186,6 +186,22 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		lines = append(lines, line)
 	}
 	add(contract.ContextChildren, lines, 1000, 8)
+	lines = nil
+	if parent := data.Contacts.Parent; parent != nil {
+		lines = append(lines, fmt.Sprintf("parent: %s (%s)", parent.Name, parent.Profile))
+	}
+	var siblings []string
+	for _, sibling := range data.Contacts.Siblings[:min(20, len(data.Contacts.Siblings))] {
+		siblings = append(siblings, fmt.Sprintf("%s (%s)", sibling.Name, sibling.Profile))
+	}
+	if more := len(data.Contacts.Siblings) - len(siblings); more > 0 {
+		siblings = append(siblings, fmt.Sprintf("and %d more (session list)", more))
+	}
+	if len(siblings) > 0 {
+		lines = append(lines, "siblings: "+strings.Join(siblings, ", "))
+	}
+	// The budget fits a parent and 20 siblings even at the name and profile length limits.
+	add(contract.ContextContacts, lines, 3000, 0)
 	lines = nil
 	for _, r := range data.Requests {
 		line := fmt.Sprintf("%s: %s, waiting", r.ID, r.Kind)

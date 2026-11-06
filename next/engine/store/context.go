@@ -11,6 +11,7 @@ import (
 type ContextData struct {
 	Goals    []ContextGoal
 	Children []ContextChild
+	Contacts ContextContacts
 	Requests []ContextRequest
 	Held     Held
 	PRs      []ContextPR
@@ -31,6 +32,9 @@ func (s *Store) ContextDataForSession(ctx context.Context, id contract.SessionID
 		return data, err
 	}
 	if data.Children, err = s.ContextChildren(ctx, id); err != nil {
+		return data, err
+	}
+	if data.Contacts, err = s.ContextContacts(ctx, id); err != nil {
 		return data, err
 	}
 	if data.Requests, err = s.ContextRequests(ctx, id); err != nil {
@@ -71,6 +75,17 @@ type ContextChild struct {
 	State   contract.BoxState
 	Asking  bool   // it waits for the owner's answer, so it is not finished
 	Item    string // what it works on now: its oldest goal's first open item, or that goal
+}
+
+// ContextContact holds only a session's name and profile, so activity never changes its contact entry.
+type ContextContact struct {
+	Name    string
+	Profile contract.ProfileName
+}
+
+type ContextContacts struct {
+	Parent   *ContextContact
+	Siblings []ContextContact
 }
 
 // ContextRequest is one of the session's operations, or a question with its text.
@@ -161,6 +176,34 @@ func (s *Store) ContextChildren(ctx context.Context, id contract.SessionID) ([]C
 		out[i].Asking = held[ids[i]].Count(contract.ResponsibilityQuestion) > 0
 	}
 	return out, nil
+}
+
+// ContextContacts lists the parent and open siblings in creation order. Roots have neither.
+func (s *Store) ContextContacts(ctx context.Context, id contract.SessionID) (ContextContacts, error) {
+	var out ContextContacts
+	var parentID contract.SessionID
+	var parent ContextContact
+	err := s.Read().QueryRowContext(ctx, `SELECT p.id,p.name,p.profile FROM sessions s JOIN sessions p ON p.id=s.parent WHERE s.id=?`, id).Scan(&parentID, &parent.Name, &parent.Profile)
+	if err == sql.ErrNoRows {
+		return out, nil
+	}
+	if err != nil {
+		return out, err
+	}
+	out.Parent = &parent
+	rows, err := s.Read().QueryContext(ctx, `SELECT name,profile FROM sessions WHERE parent=? AND id<>? AND closed_at IS NULL ORDER BY created_at,id`, parentID, id)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var sibling ContextContact
+		if err := rows.Scan(&sibling.Name, &sibling.Profile); err != nil {
+			return out, err
+		}
+		out.Siblings = append(out.Siblings, sibling)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) ContextRequests(ctx context.Context, id contract.SessionID) ([]ContextRequest, error) {
