@@ -127,8 +127,36 @@ func (s *Server) Job(call JobCall) (any, error) {
 	}
 	if call.Action == "stop" {
 		s.stop(j)
+		return result(j), nil
 	}
-	return result(j), nil
+	return s.awaitOutput(j), nil
+}
+
+// awaitOutput returns a job's new output. A running job with nothing new is waited on for up to outputWait, until it
+// prints a line, ends, or a message arrives for the session, so reading a quiet job in a loop costs one call per wait
+// and not one per model request.
+func (s *Server) awaitOutput(j *job) Result {
+	s.mu.Lock()
+	aside := s.aside
+	s.mu.Unlock()
+	limit := s.cfg.After(outputWait)
+	for {
+		out := result(j)
+		if out.Output != "" || !out.Running {
+			return out
+		}
+		select {
+		case <-j.done:
+		case <-aside.done:
+			out.MessageArrived = true
+			sender := aside.sender
+			out.Interrupt = &sender
+			return out
+		case <-limit:
+			return out
+		case <-s.cfg.After(outputPoll):
+		}
+	}
 }
 
 var jobID = regexp.MustCompile(`^job_[0-9a-f]{12}$`)
