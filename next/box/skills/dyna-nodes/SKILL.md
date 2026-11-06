@@ -24,7 +24,11 @@ pool.sh list               # prints a JSON list of names it still has
 
 The script runs on the engine host as the owner's user, with a timeout of 15 minutes for `create` and 5 minutes for the others, and with no secrets from Dyna. It gets `PATH`, `HOME`, `USER`, `LANG` and `XDG_RUNTIME_DIR`, and it reads what credentials it needs the way the owner's own commands do. Keep it under 64 KiB. No box can reach it.
 
-A new node must pass Dyna's host check, so the script must prepare it, or start from a ready image:
+## Host prerequisites
+
+Every host, including an exec-only host, needs SSH access to an account with bash and procps `pgrep` on its command path. Dyna uses `pgrep` to confirm process-group termination when canceling remote work.
+
+A node that runs boxes or CI must also pass the full host check, so the script must prepare these additional requirements, or start from a ready image:
 
 - rootless Podman 5 or later with the systemd cgroup manager, and delegated `cpu`, `memory` and `pids` controllers
 - FUSE, with `user_allow_other` in `/etc/fuse.conf`
@@ -106,7 +110,7 @@ Only the owner adds a host, so from a box the call asks the owner.
 dyna host add NAME --ssh user@addr --owner-only-admin
 ```
 
-- `--ssh` is `user@host`, with no port. `--owner-only-admin` confirms that only the owner administers the machine. A host that runs boxes or CI runners needs it, and `host add` refuses without it. A host added `--agents off --ci off` is exec only, takes host-exec runs and nothing else, and needs neither the flag nor the list above: its check asks for SSH and bash.
+- `--ssh` is `user@host`, with no port. `--owner-only-admin` confirms that only the owner administers the machine. A host that runs boxes or CI runners needs it, and `host add` refuses without it. A host added `--agents off --ci off` is exec only, takes host-exec runs and nothing else, and needs neither the flag nor the additional box/CI requirements: it passes the base host checks described above.
 - For any other host the check needs what the pool nodes need, from rootless Podman 5 down to the free disk, and it reports each item. FUSE is not checked on the host the engine runs on.
 - The engine runs plain `ssh user@addr` as its own user and names no key, so the engine user's ssh config picks the key per host (on hermeslab, entries point at `~/.ssh/dyna-engine_ed25519`); a machine with no entry uses the engine user's default keys or agent. The public key of whichever applies has to be in `authorized_keys` of `user` on the machine, as a plain key with no forced command. Dyna takes the machine's host key on first contact and keeps it in a list of its own, apart from the owner's `known_hosts`.
 

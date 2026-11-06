@@ -756,12 +756,16 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 	var profile contract.ProfileName
 	var paused bool
 	err = s.Write(ctx, func(tx *sql.Tx) error {
-		err := tx.QueryRowContext(ctx, `SELECT s.profile,r.paused_at IS NOT NULL FROM sessions s JOIN boxes b ON b.session=s.id JOIN rooms r ON r.id=s.room WHERE s.id=? AND s.state='open' AND s.closed_at IS NULL AND b.want='run' AND b.state='ready'`, session).Scan(&profile, &paused)
+		var boxID contract.BoxID
+		err := tx.QueryRowContext(ctx, `SELECT b.id,s.profile,r.paused_at IS NOT NULL FROM sessions s JOIN boxes b ON b.session=s.id JOIN rooms r ON r.id=s.room WHERE s.id=? AND s.state='open' AND s.closed_at IS NULL AND b.want='run' AND b.state='ready'`, session).Scan(&boxID, &profile, &paused)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return err
+		}
+		if s.volumeRemovals[boxID] != nil {
+			return nil
 		}
 		err = tx.QueryRowContext(ctx, "SELECT id FROM turns WHERE session=? AND ended_at IS NULL", session).Scan(&active)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {

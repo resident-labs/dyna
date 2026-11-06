@@ -24,13 +24,14 @@ const (
 // LifecycleBox combines observed and desired state for reconciliation.
 type LifecycleBox struct {
 	box.Box
-	Want     BoxWant
-	DueAt    time.Time
-	Failures int
-	Paused   bool
-	Deleting bool
-	Limits   contract.RoomLimits
-	Only     []string // its room's rule
+	Want      BoxWant
+	DueAt     time.Time
+	Failures  int
+	RetryHost contract.HostName // nonempty consumes the one-other-host budget and excludes this first failed host
+	Paused    bool
+	Deleting  bool
+	Limits    contract.RoomLimits
+	Only      []string // its room's rule
 }
 
 func (s *Store) Boxes(ctx context.Context) ([]box.Box, error) {
@@ -50,7 +51,7 @@ func (s *Store) LifecycleBoxes(ctx context.Context) ([]LifecycleBox, error) {
 }
 
 func (s *Store) lifecycleBoxes(ctx context.Context, activeOnly bool) ([]LifecycleBox, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT id,session,host,image,size,state,reason,slice,created_at,updated_at,want,due_at,failures,gpu_gib,gpu_index,(SELECT room FROM sessions WHERE id=boxes.session),(SELECT r.cpus FROM rooms r JOIN sessions s ON s.room=r.id WHERE s.id=boxes.session),(SELECT r.mem_bytes FROM rooms r JOIN sessions s ON s.room=r.id WHERE s.id=boxes.session),EXISTS(SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND r.paused_at IS NOT NULL),EXISTS(SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND r.state='deleting'),(SELECT r.only_hosts FROM rooms r JOIN sessions s ON s.room=r.id WHERE s.id=boxes.session) FROM boxes WHERE NOT ? OR NOT (state='deleted' AND EXISTS (SELECT 1 FROM sessions WHERE sessions.id=boxes.session AND sessions.closed_at IS NOT NULL)) ORDER BY (SELECT created_at FROM sessions WHERE id=boxes.session),id", activeOnly)
+	rows, err := s.Read().QueryContext(ctx, "SELECT id,session,host,image,size,state,reason,slice,created_at,updated_at,want,due_at,failures,create_retry_host,gpu_gib,gpu_index,(SELECT room FROM sessions WHERE id=boxes.session),(SELECT r.cpus FROM rooms r JOIN sessions s ON s.room=r.id WHERE s.id=boxes.session),(SELECT r.mem_bytes FROM rooms r JOIN sessions s ON s.room=r.id WHERE s.id=boxes.session),EXISTS(SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND r.paused_at IS NOT NULL),EXISTS(SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND r.state='deleting'),(SELECT r.only_hosts FROM rooms r JOIN sessions s ON s.room=r.id WHERE s.id=boxes.session) FROM boxes WHERE NOT ? OR NOT (state='deleted' AND EXISTS (SELECT 1 FROM sessions WHERE sessions.id=boxes.session AND sessions.closed_at IS NOT NULL)) ORDER BY (SELECT created_at FROM sessions WHERE id=boxes.session),id", activeOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +63,7 @@ func (s *Store) lifecycleBoxes(ctx context.Context, activeOnly bool) ([]Lifecycl
 		var size contract.BoxSizeName
 		var created, updated, due int64
 		var only string
-		if err := rows.Scan(&b.ID, &b.Session, &host, &b.Image, &size, &b.State, &b.Reason, &b.Slice, &created, &updated, &b.Want, &due, &b.Failures, &b.GPU, &b.GPUCard, &b.Room, &b.Limits.CPUs, &b.Limits.MemBytes, &b.Paused, &b.Deleting, &only); err != nil {
+		if err := rows.Scan(&b.ID, &b.Session, &host, &b.Image, &size, &b.State, &b.Reason, &b.Slice, &created, &updated, &b.Want, &due, &b.Failures, &b.RetryHost, &b.GPU, &b.GPUCard, &b.Room, &b.Limits.CPUs, &b.Limits.MemBytes, &b.Paused, &b.Deleting, &only); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(only), &b.Only); err != nil {
@@ -106,11 +107,15 @@ func (s *Store) TransitionBox(ctx context.Context, b box.Box, to contract.BoxSta
 	body.Cause = event.Body.(contract.BoxChanged).Cause
 	event.Body = body
 	err = s.Write(ctx, func(tx *sql.Tx) error {
+		admission := (b.State == contract.BoxPending || b.State == contract.BoxStopped) && (next.State == contract.BoxCreating || next.State == contract.BoxStarting)
+		if s.volumeRemovals[b.ID] != nil && (admission || next.State == contract.BoxReady) {
+			return sql.ErrNoRows
+		}
 		var host *contract.HostName
 		if next.Host != "" {
 			host = &next.Host
 		}
-		result, err := tx.ExecContext(ctx, "UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,updated_at=?,due_at=CASE WHEN ?='ready' THEN 0 ELSE due_at END WHERE id=? AND state=? AND (?!='ready' OR ? NOT IN ('creating','starting') OR due_at=0 OR due_at>?) AND (?!='lost' OR ?!='ready' OR EXISTS (SELECT 1 FROM hosts WHERE name=boxes.host AND state!='unreachable' AND state!='removed'))", host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, event.Time.UnixMilli(), next.State, next.ID, b.State, next.State, b.State, event.Time.UnixMilli(), b.State, next.State)
+		result, err := tx.ExecContext(ctx, "UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,updated_at=?,due_at=CASE WHEN ?='ready' THEN 0 ELSE due_at END WHERE id=? AND state=? AND (want='run' OR ?!='ready') AND (?!='ready' OR ? NOT IN ('creating','starting') OR due_at=0 OR due_at>?) AND (?!='lost' OR ?!='ready' OR EXISTS (SELECT 1 FROM hosts WHERE name=boxes.host AND state!='unreachable' AND state!='removed'))", host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, event.Time.UnixMilli(), next.State, next.ID, b.State, next.State, next.State, b.State, event.Time.UnixMilli(), b.State, next.State)
 		if err != nil {
 			return err
 		}
@@ -164,10 +169,13 @@ func (s *Store) SetBoxLifecycle(ctx context.Context, old, next box.Box, due time
 		if next.Host != "" {
 			host = &next.Host
 		}
-		admission := (old.State == contract.BoxPending || old.State == contract.BoxStopped) && next.State != contract.BoxClosing
+		admission := (old.State == contract.BoxPending || old.State == contract.BoxStopped) && next.State != contract.BoxClosing && next.State != contract.BoxStopped
+		if s.volumeRemovals[old.ID] != nil && (admission || next.State == contract.BoxReady) {
+			return nil
+		}
 		// created_at is the allocation time for disk accounting, not the waiter's enqueue time.
-		// A box channel can request a stop after the reconciler read want=run. Its expected disconnect is not loss.
-		result, err := tx.ExecContext(ctx, `UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,gpu_index=?,created_at=CASE WHEN state='pending' AND ?='creating' AND image='' THEN ? ELSE created_at END,updated_at=?,due_at=?,failures=?,create_generation=CASE WHEN ?='creating' THEN coalesce((SELECT create_generation FROM hosts WHERE name=?),0) ELSE create_generation END WHERE id=? AND state=? AND (NOT ? OR (want='run' AND due_at<=?)) AND (?!='creating' OR image!='' OR EXISTS (SELECT 1 FROM hosts WHERE name=? AND create_problem='')) AND (?!='lost' OR ?='closing' OR EXISTS (SELECT 1 FROM hosts WHERE name=boxes.host AND state='ready')) AND (?!='lost' OR ?!='ready' OR want IN ('run','stop')) AND (?!='ready' OR ?!='lost' OR want!='stop')`, host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, next.GPUCard, next.State, event.Time.UnixMilli(), event.Time.UnixMilli(), dueMS, failures, next.State, host, old.ID, old.State, admission, event.Time.UnixMilli(), next.State, host, old.State, next.State, old.State, next.State, old.State, next.State)
+		// A stored Stop is not host loss, even when an old run snapshot races it.
+		result, err := tx.ExecContext(ctx, `UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,gpu_index=?,created_at=CASE WHEN state='pending' AND ?='creating' AND image='' THEN ? ELSE created_at END,updated_at=?,due_at=?,failures=?,create_generation=CASE WHEN ?='creating' THEN coalesce((SELECT create_generation FROM hosts WHERE name=?),0) ELSE create_generation END WHERE id=? AND state=? AND (? NOT IN ('starting','ready') OR want='run') AND (NOT ? OR (want='run' AND due_at<=?)) AND (?!='creating' OR image!='' OR EXISTS (SELECT 1 FROM hosts WHERE name=? AND create_problem='')) AND (?!='lost' OR ?='closing' OR EXISTS (SELECT 1 FROM hosts WHERE name=boxes.host AND state='ready')) AND (?!='lost' OR ?!='ready' OR want IN ('run','stop')) AND (?!='ready' OR ?!='lost' OR want!='stop')`, host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, next.GPUCard, next.State, event.Time.UnixMilli(), event.Time.UnixMilli(), dueMS, failures, next.State, host, old.ID, old.State, next.State, admission, event.Time.UnixMilli(), next.State, host, old.State, next.State, old.State, next.State, old.State, next.State)
 		if err != nil {
 			return err
 		}
@@ -199,11 +207,7 @@ func (s *Store) QuarantineShare(ctx context.Context, b box.Box) error {
 		if n, err := result.RowsAffected(); err != nil || n == 0 {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO room_leftovers(host,room,box,slice) SELECT b.host,s.room,b.id,b.slice FROM boxes b JOIN sessions s ON s.id=b.session WHERE b.host=?1 AND b.state='pending' AND b.image=''`, b.Host); err != nil {
-			return err
-		}
-		_, err = tx.ExecContext(ctx, `UPDATE boxes SET host=NULL WHERE host=?1 AND state='pending' AND image=''`, b.Host)
-		return err
+		return detachWaitingCreates(ctx, tx, b.Host)
 	})
 }
 
@@ -215,13 +219,15 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 	}
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		var state contract.BoxState
-		if err := tx.QueryRowContext(ctx, `SELECT state FROM boxes WHERE id=?`, b.ID).Scan(&state); err != nil {
+		var savedHost, retryHost contract.HostName
+		var savedImage string
+		if err := tx.QueryRowContext(ctx, `SELECT state,coalesce(host,''),image,create_retry_host FROM boxes WHERE id=?`, b.ID).Scan(&state, &savedHost, &savedImage, &retryHost); err != nil {
 			if err == sql.ErrNoRows {
 				return nil
 			}
 			return err
 		}
-		if state != contract.BoxCreating && state != contract.BoxStarting && state != contract.BoxReady {
+		if savedHost != b.Host || state != contract.BoxCreating && state != contract.BoxStarting && state != contract.BoxReady {
 			return nil
 		}
 		b.State = state
@@ -241,12 +247,40 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 		} else if state == contract.BoxCreating {
 			to = contract.BoxStarting
 		}
+		if to == contract.BoxFailed && cause == "" {
+			cause = contract.CauseCreateFailed
+		}
+		if failure != "" && savedImage != "" {
+			image = savedImage
+		}
+		terminalCreateFailure := to == contract.BoxFailed && cause == contract.CauseCreateFailed
+		safeState := savedHost != "" && state == contract.BoxCreating && savedImage == ""
+		eligibility := createRetryUnknown
+		if terminalCreateFailure && retryHost == "" && safeState {
+			var err error
+			eligibility, err = allocationRetryEligibility(ctx, tx, b.ID, event.Room)
+			if err != nil {
+				return err
+			}
+		}
+		retry := terminalCreateFailure && retryHost == "" && safeState && eligibility == createRetryUnbound
+		if retry {
+			to, reason, image = contract.BoxPending, string(box.PendingOtherHostRetry), ""
+			failures = 0
+			due = time.Time{}
+		}
+		if terminalCreateFailure && !retry && retryHost == "" && (!safeState || eligibility == createRetryUsed) {
+			reason = failure + "; automatic other-host retry unsafe: allocation already started or has session work"
+		}
 		if to != state {
 			_, body, err := box.Transition(b, to, reason, event.Time)
 			if err != nil {
 				return err
 			}
-			body.Cause, body.Phase = finished.Cause, finished.Phase
+			body.Cause, body.Phase = cause, finished.Phase
+			if retry {
+				body.Cause, body.Host = "", ""
+			}
 			if to == contract.BoxFailed && body.Cause == "" {
 				body.Cause = contract.CauseCreateFailed
 			}
@@ -257,7 +291,7 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 			dueMS = due.UnixMilli()
 		}
 		// A completed turn after an early hello may have reset the current failure count.
-		result, err := tx.ExecContext(ctx, `UPDATE boxes SET failed_create=CASE WHEN ?='failed' AND ?!='' THEN 1 ELSE 0 END,image=?,state=?,reason=?,due_at=?,created_at=CASE WHEN ?='' THEN ? ELSE created_at END,failures=CASE WHEN ?='ready' THEN failures ELSE ? END WHERE id=? AND state=?`, to, failure, image, to, reason, dueMS, failure, event.Time.UnixMilli(), state, failures, b.ID, state)
+		result, err := tx.ExecContext(ctx, `UPDATE boxes SET host=CASE WHEN ? THEN NULL ELSE host END,create_retry_host=CASE WHEN ? THEN ? ELSE create_retry_host END,failed_create=CASE WHEN ?='failed' AND ?!='' THEN 1 ELSE 0 END,image=?,state=?,reason=?,due_at=?,created_at=CASE WHEN ?='' THEN ? ELSE created_at END,failures=CASE WHEN ?='ready' THEN failures ELSE ? END WHERE id=? AND state=? AND want='run'`, retry, retry, b.Host, to, failure, image, to, reason, dueMS, failure, event.Time.UnixMilli(), state, failures, b.ID, state)
 		if err != nil {
 			return err
 		}
@@ -265,9 +299,15 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 		if err != nil || n == 0 {
 			return err
 		}
+		if retry {
+			_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO room_leftovers(host,room,box,slice) SELECT ?,s.room,b.id,b.slice FROM boxes b JOIN sessions s ON s.id=b.session WHERE b.id=?`, b.Host, b.ID)
+			if err != nil {
+				return err
+			}
+		}
 		// Count completed failed creations, not their retry attempts. The generation fences
 		// a result that was already in flight when the owner cleared the problem.
-		if failure == "" || to == contract.BoxFailed && cause == contract.CauseCreateFailed && runtimeFailure {
+		if failure == "" || terminalCreateFailure && runtimeFailure {
 			_, err = tx.ExecContext(ctx, `UPDATE hosts SET
 				create_failures=CASE WHEN ?='' THEN 0 ELSE create_failures+1 END,
 				create_problem=CASE WHEN ?='' THEN CASE WHEN create_problem='create_failed' THEN '' ELSE create_problem END WHEN create_failures+1>=3 THEN 'create_failed' ELSE create_problem END
@@ -276,12 +316,14 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 				return err
 			}
 			if failure != "" {
-				// A host that just stopped taking boxes keeps no waiting box that has built nothing: they place elsewhere.
-				if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO room_leftovers(host,room,box,slice) SELECT b.host,s.room,b.id,b.slice FROM boxes b JOIN sessions s ON s.id=b.session JOIN hosts h ON h.name=b.host WHERE b.host=?1 AND b.state='pending' AND b.image='' AND h.create_problem!=''`, b.Host); err != nil {
+				var quarantined bool
+				if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM hosts WHERE name=? AND create_problem!='')`, b.Host).Scan(&quarantined); err != nil {
 					return err
 				}
-				if _, err := tx.ExecContext(ctx, `UPDATE boxes SET host=NULL WHERE host=?1 AND state='pending' AND image='' AND EXISTS (SELECT 1 FROM hosts h WHERE h.name=?1 AND h.create_problem!='')`, b.Host); err != nil {
-					return err
+				if quarantined {
+					if err := detachWaitingCreates(ctx, tx, b.Host); err != nil {
+						return err
+					}
 				}
 			}
 		}

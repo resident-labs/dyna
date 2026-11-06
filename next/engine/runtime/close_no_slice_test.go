@@ -17,7 +17,7 @@ func TestRemoveHostBoxWithoutASlice(t *testing.T) {
 	}
 	record := box.Box{ID: "box_1"}
 	forward := box.Forward{Box: record.ID, HostPath: "/host/sock/box_1/engine.sock", EnginePath: "/runtime/boxes/box_1.sock"}
-	if err := removeHostBox(context.Background(), host, record, forward); err != nil {
+	if err := removeHostBox(context.Background(), host, record, forward, true); err != nil {
 		t.Fatalf("cleanup of a box with no slice failed: %v", err)
 	}
 }

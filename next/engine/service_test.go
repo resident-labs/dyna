@@ -42,6 +42,8 @@ func (fakeBoxes) Recreate(context.Context, BoxSpec, string) error { return nil }
 
 func (fakeBoxes) Create(context.Context, BoxSpec) (string, error) { return "image", nil }
 func (fakeBoxes) Remove(context.Context, contract.BoxID) error    { return nil }
+func (fakeBoxes) RemoveFailedBox(context.Context, box.Box) error  { return nil }
+func (fakeBoxes) DiscardHostBox(context.Context, box.Box) error   { return nil }
 func (fakeBoxes) Start(context.Context, contract.BoxID) error     { return nil }
 func (fakeBoxes) Stop(context.Context, contract.BoxID) error      { return nil }
 

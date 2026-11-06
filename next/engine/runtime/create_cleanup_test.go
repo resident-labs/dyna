@@ -52,7 +52,7 @@ func TestCreateCleanupRunsAfterCreationContextEnds(t *testing.T) {
 	cancel()
 	h := &recordedCleanup{}
 	cleanupCreate(ctx, h, lifecycle.BoxSpec{}, box.Forward{}, true, true, true, true)
-	want := []string{"pod:live", "stack", "container", "volume", "forward", "slice"}
+	want := []string{"pod:live", "container", "forward", "slice"}
 	if len(h.removed) != len(want) {
 		t.Fatalf("removed %v, want %v", h.removed, want)
 	}

@@ -162,6 +162,9 @@ func (cachedActivationTimeoutRunner) Run(ctx context.Context, _ []byte, args ...
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
+	if strings.Contains(command, "dyna-cancel") {
+		return nil, nil
+	}
 	return []byte("DYNA-END 00000000000000000000 000\n"), nil
 }
 func TestCachedStartStillBoundsActivationAndNamesItsTimeout(t *testing.T) {

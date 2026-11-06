@@ -4,6 +4,8 @@ package podman
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -54,6 +57,8 @@ func (ExecRunner) RunProgress(ctx context.Context, in []byte, progress func(int)
 const masterStart = 2 * time.Minute
 
 type Host struct {
+	pendingMu           sync.Mutex
+	pendingCancels      map[string]struct{}
 	buildGate           chan struct{}
 	shortGate           chan struct{}
 	stopGate            chan struct{}
@@ -100,7 +105,7 @@ func New(destination, runtime, hostKey string, runner Runner) (*Host, error) {
 	if !ok || !info.IsDir() || info.Mode().Perm() != 0700 || stat.Uid != uint32(os.Getuid()) {
 		return nil, errors.New("insecure SSH control socket directory")
 	}
-	return &Host{gate: make(chan struct{}, 1), buildGate: make(chan struct{}, 1), shortGate: make(chan struct{}, 5), stopGate: make(chan struct{}, 1), dialGate: make(chan struct{}, hostexecDialing), dialSetup: hostexecSetup, destination: destination, socket: socket, runner: runner, forwards: make(map[box.Forward]struct{}), bound: make(map[box.Forward]struct{})}, nil
+	return &Host{pendingCancels: make(map[string]struct{}), gate: make(chan struct{}, 1), buildGate: make(chan struct{}, 1), shortGate: make(chan struct{}, 5), stopGate: make(chan struct{}, 1), dialGate: make(chan struct{}, hostexecDialing), dialSetup: hostexecSetup, destination: destination, socket: socket, runner: runner, forwards: make(map[box.Forward]struct{}), bound: make(map[box.Forward]struct{})}, nil
 }
 
 // Generation changes each time the SSH master and its forwards are restored.
@@ -414,8 +419,24 @@ func (h *Host) executeInput(ctx context.Context, input []byte, argv ...string) (
 	return h.executeOver(ctx, h.base(), input, argv...)
 }
 func (h *Host) executeOver(ctx context.Context, ssh []string, input []byte, argv ...string) ([]byte, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	// A previous uncertain command must be cancelled before a later operation can claim cleanup succeeded.
+	if err := h.joinPending(ctx); err != nil {
+		return nil, err
+	}
 	// Do not retry a mutation after an uncertain reply; reconcile containers instead.
 	parts := []string{"bash", "-c", frameScript, "dyna-frame"}
+	var token string
+	if bounded, _ := ctx.Value(remoteCancelKey{}).(bool); bounded {
+		nonce := make([]byte, 16)
+		if _, err := rand.Read(nonce); err != nil {
+			return nil, err
+		}
+		token = hex.EncodeToString(nonce)
+		parts = []string{"setsid", "--wait", "bash", "-c", cancellableFrameScript, "dyna-frame", token}
+	}
 	parts = append(parts, argv...)
 	for i := range parts {
 		parts[i] = quote(parts[i])
@@ -430,9 +451,30 @@ func (h *Host) executeOver(ctx context.Context, ssh []string, input []byte, argv
 	} else {
 		out, sshErr = h.runner.Run(ctx, frame, args...)
 	}
-	body, status, err := parseReply(out)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", err, sshErr)
+	body, status, replyErr := parseReply(out)
+	if token != "" && (ctx.Err() != nil || sshErr != nil || replyErr != nil) {
+		h.pendingMu.Lock()
+		h.pendingCancels[token] = struct{}{}
+		h.pendingMu.Unlock()
+		deadline := time.Now().Add(box.StartCleanupBudget)
+		if limit, ok := ctx.Value(remoteCancelDeadlineKey{}).(time.Time); ok && limit.Before(deadline) {
+			deadline = limit
+		}
+		cleanup, stop := context.WithDeadline(context.WithoutCancel(ctx), deadline)
+		defer stop()
+		if err := h.cancelRemote(cleanup, token); err != nil {
+			return nil, err
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if replyErr != nil {
+			return nil, fmt.Errorf("%w: %v", replyErr, sshErr)
+		}
+		return nil, sshErr
+	}
+	if replyErr != nil {
+		return nil, fmt.Errorf("%w: %v", replyErr, sshErr)
 	}
 	if status != 0 {
 		return body, commandFailed{exit: remoteExit(status), tail: outputTail(body)}
