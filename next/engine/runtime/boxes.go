@@ -956,9 +956,6 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 		return "", box.RuntimeCreateError{Err: err}
 	}
 	steps.Done("container start")
-	if ctx.Err() != nil {
-		return "", ctx.Err()
-	}
 	ok = true
 	return image.Tag, nil
 }
