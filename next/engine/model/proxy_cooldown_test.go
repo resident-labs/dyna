@@ -3,7 +3,6 @@ package model
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +14,8 @@ import (
 	"time"
 
 	"github.com/MichaelKinsy/PiG/ai"
+	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
@@ -145,11 +146,15 @@ func TestProxySingleCodexCredentialCooldownPolicy(t *testing.T) {
 
 	t.Run("original request retries with PiG backoff then later request succeeds", func(t *testing.T) {
 		var calls atomic.Int32
-		attemptTimes := make(chan time.Time, 3)
+		attemptTimes := make(chan time.Time, 6)
+		errorHints := make(chan string, 2)
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			n := calls.Add(1)
 			attemptTimes <- time.Now()
-			if n == 1 {
+			if n == 1 || n == 4 {
+				if n == 4 {
+					w.Header().Set("Retry-After", "1")
+				}
 				w.WriteHeader(503)
 				_, _ = io.WriteString(w, `{"error":{"type":"server_error","code":"server_error","message":"upstream temporarily unavailable"}}`)
 				return
@@ -159,9 +164,10 @@ func TestProxySingleCodexCredentialCooldownPolicy(t *testing.T) {
 		}))
 		defer upstream.Close()
 		manager := newCooldownTestManager(t, cfg, upstream.URL)
-		// This local adapter stands in for CLIProxyAPI's wire handler; Dyna's
-		// real model route and Unix socket lead into the real auth manager.
-		// PiG's real openai-responses provider owns the retry and delay.
+		// A thin HTTP adapter calls the real CLIProxyAPI execution/error handlers.
+		// Dyna's real route and Unix socket lead into the real auth manager;
+		// only its executor and the upstream are fixtures. PiG owns retries.
+		base := handlers.NewBaseAPIHandlers(&cfg.SDKConfig, manager)
 		adapter := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Header.Get("Authorization") != "Bearer "+p.clientKey || r.URL.Path != "/v1/responses" {
 				t.Error("Dyna route did not replace credentials and path")
@@ -174,19 +180,16 @@ func TestProxySingleCodexCredentialCooldownPolicy(t *testing.T) {
 				w.WriteHeader(400)
 				return
 			}
-			resp, err := manager.Execute(r.Context(), []string{"codex"}, executor.Request{Model: "gpt-5.1-codex", Payload: payload}, executor.Options{})
-			if err != nil {
-				var status interface{ StatusCode() int }
-				code := 500
-				if errors.As(err, &status) {
-					code = status.StatusCode()
-				}
-				w.WriteHeader(code)
-				_, _ = io.WriteString(w, err.Error())
+			resp, _, problem := base.ExecuteWithAuthManager(r.Context(), "openai-response", "gpt-5.1-codex", payload, "")
+			if problem != nil {
+				c, _ := gin.CreateTestContext(w)
+				c.Request = r
+				base.WriteErrorResponse(c, problem)
+				errorHints <- c.Writer.Header().Get("Retry-After")
 				return
 			}
 			w.Header().Set("Content-Type", "text/event-stream")
-			_, _ = w.Write(resp.Payload)
+			_, _ = w.Write(resp)
 		})
 		server := &http.Server{Handler: adapter}
 		go func() { _ = server.Serve(p.Listener) }()
@@ -196,8 +199,8 @@ func TestProxySingleCodexCredentialCooldownPolicy(t *testing.T) {
 		provider := ai.NewOpenAIResponsesProvider(ai.OpenAIResponsesConfig{BaseURL: downstream.URL + "/model/v1", APIKey: "fixture", Model: "gpt-5.1-codex"})
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		for i := 0; i < 2; i++ {
-			stream, err := provider.Stream(ctx, ai.NormalizeContext(ai.Context{Messages: []ai.Message{ai.UserMessage{Content: ai.UserContentBlocks{ai.TextContent{Text: "hi"}}}}}), ai.StreamOptions{MaxRetries: new(1), MaxRetryDelayMs: new(1000)})
+		for i := 0; i < 4; i++ {
+			stream, err := provider.Stream(ctx, ai.NormalizeContext(ai.Context{Messages: []ai.Message{ai.UserMessage{Content: ai.UserContentBlocks{ai.TextContent{Text: "hi"}}}}}), ai.StreamOptions{MaxRetries: new(1), MaxRetryDelayMs: new(2000)})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -208,8 +211,29 @@ func TestProxySingleCodexCredentialCooldownPolicy(t *testing.T) {
 			}
 		}
 		first, second := <-attemptTimes, <-attemptTimes
-		if calls.Load() != 3 || second.Sub(first) < 50*time.Millisecond {
-			t.Fatalf("calls=%d retry backoff=%s", calls.Load(), second.Sub(first))
+		<-attemptTimes // later independent successful request, with no cooldown outage
+		hintedFirst, hintedSecond := <-attemptTimes, <-attemptTimes
+		<-attemptTimes // another independent success after the hinted retry
+		noHint, hint := <-errorHints, <-errorHints
+		t.Logf("generated config retry rounds=%d; credential transient cooldown=%d; downstream Retry-After values=%q,%q; PiG retry delays=%s,%s", cfg.RequestRetry, cfg.TransientErrorCooldownSeconds, noHint, hint, second.Sub(first), hintedSecond.Sub(hintedFirst))
+		if calls.Load() != 6 || second.Sub(first) < 50*time.Millisecond || hint != "1" || hintedSecond.Sub(hintedFirst) < 900*time.Millisecond {
+			t.Fatalf("calls=%d backoff=%s hinted backoff=%s header=%q", calls.Load(), second.Sub(first), hintedSecond.Sub(hintedFirst), hint)
+		}
+	})
+
+	t.Run("credential-level 401 stays cooled", func(t *testing.T) {
+		var calls atomic.Int32
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { calls.Add(1); w.WriteHeader(200) }))
+		defer upstream.Close()
+		manager := newCooldownTestManager(t, cfg, upstream.URL)
+		manager.MarkResult(context.Background(), coreauth.Result{AuthID: "only-codex", Error: &coreauth.Error{HTTPStatus: 401, Message: "invalid authentication"}})
+		auth, _ := manager.GetByID("only-codex")
+		if !auth.NextRetryAfter.After(time.Now()) {
+			t.Fatalf("credential 401 has no cooldown: %+v", auth)
+		}
+		_, err := manager.Execute(context.Background(), []string{"codex"}, executor.Request{Model: "gpt-5.1-codex"}, executor.Options{})
+		if err == nil || calls.Load() != 0 {
+			t.Fatalf("credential 401 was selectable: %v calls=%d", err, calls.Load())
 		}
 	})
 
@@ -269,9 +293,9 @@ func newCooldownTestManager(t *testing.T, cfg *config.Config, upstream string) *
 	t.Helper()
 	manager := coreauth.NewManager(nil, nil, nil)
 	manager.SetConfig(cfg)
-	// A zero manager retry budget isolates requests and leaves short retries to
-	// PiG. The service installs these same config setters in applyRetryConfig.
-	manager.SetRetryConfig(0, 0, 1)
+	// Match generated service configuration (currently zero additional rounds);
+	// PiG owns the short per-request backoff.
+	manager.SetRetryConfig(cfg.RequestRetry, time.Duration(cfg.MaxRetryInterval)*time.Second, cfg.MaxRetryCredentials)
 	manager.RegisterExecutor(cooldownHTTPExecutor{url: upstream})
 	cliproxy.GlobalModelRegistry().RegisterClient("only-codex", "codex", []*cliproxy.ModelInfo{{ID: "gpt-5.1-codex"}})
 	t.Cleanup(func() { cliproxy.GlobalModelRegistry().UnregisterClient("only-codex") })
