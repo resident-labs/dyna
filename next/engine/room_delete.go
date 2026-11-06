@@ -66,7 +66,9 @@ func (s *Service) HostSet(ctx context.Context, caller contract.Principal, req co
 			return contract.HostSetResponse{}, invalid(err.Error())
 		}
 	}
-	if err := s.store.SetHostSwitches(ctx, req.Host, req.Agents, req.CI, req.ClearCreateProblem); err != nil {
+	if err := s.store.SetHostSwitches(ctx, req.Host, req.Agents, req.CI, req.ClearCreateProblem, func(room contract.RoomID, body contract.EventBody) (contract.Event, error) {
+		return s.event(room, caller, body)
+	}); err != nil {
 		return contract.HostSetResponse{}, failure(err)
 	}
 	s.reconciler.Kick()

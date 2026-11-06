@@ -8,7 +8,7 @@ import (
 
 // host.set is the owner's, needs a switch, and host.list shows both.
 func TestHostSetTurnsSwitchesForTheOwner(t *testing.T) {
-	s, _, worker, ctx := setup(t)
+	s, room, worker, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	off, on := false, true
 	if _, problem := s.HostSet(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.HostSetRequest{Host: "host", Agents: &off}); problem == nil || problem.Code != contract.ErrForbidden {
@@ -19,6 +19,9 @@ func TestHostSetTurnsSwitchesForTheOwner(t *testing.T) {
 	}
 	if _, problem := s.HostSet(ctx, owner, contract.HostSetRequest{Host: "missing", CI: &on}); problem == nil || problem.Code != contract.ErrNotFound {
 		t.Fatalf("unknown host: %v", problem)
+	}
+	if events, err := s.store.Events(ctx, room, 0, 100, []contract.EventType{"host.switches_changed"}); err != nil || len(events) != 0 {
+		t.Fatalf("refused calls wrote an audit: %+v %v", events, err)
 	}
 	switches := func() (bool, bool) {
 		t.Helper()
