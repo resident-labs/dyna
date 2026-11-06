@@ -27,12 +27,13 @@ func markFailureTold(ctx context.Context, tx *sql.Tx, session contract.SessionID
 
 // modelRetrying includes the due retry waiting for dispatch and the running
 // retry. Dispatch clears the deadline, and EndTurn settles the counter/timer.
-const modelRetrying = `(s.model_retry_at>0 OR (s.model_retries>0 AND EXISTS (SELECT 1 FROM turns WHERE session=s.id AND ended_at IS NULL)))`
+const modelRetrying = `(s.model_retry_at>0 OR (EXISTS (SELECT 1 FROM turns WHERE session=s.id AND ended_at IS NULL) AND (s.model_retry_at<0 OR ` + legacyModelRetryPending + `)))`
 
 // failureKey is the terminal failure a session is in now. Attempt events stay
-// factual, but a retrying model failure is not yet a failure to tell its parent.
-// A stopped turn neither fails nor recovers; a box failure always takes priority.
-const failureKey = `CASE WHEN b.state IN ('failed','lost') THEN 'box' WHEN ` + modelRetrying + ` THEN '' WHEN (SELECT outcome FROM turns WHERE session=s.id AND ended_at IS NOT NULL AND outcome!='stopped' ORDER BY ended_at DESC LIMIT 1)='failed' THEN 'turn' ELSE '' END`
+// factual, but a deferred model failure is not a failure to tell its parent,
+// even after Stop cancels its timer. A stopped turn neither fails nor recovers;
+// genuine exhaustion/non-model failures settle deferral, and a box failure wins.
+const failureKey = `CASE WHEN b.state IN ('failed','lost') THEN 'box' WHEN s.model_retry_at!=0 OR ` + modelRetrying + ` THEN '' WHEN (SELECT outcome FROM turns WHERE session=s.id AND ended_at IS NOT NULL AND outcome!='stopped' ORDER BY ended_at DESC LIMIT 1)='failed' THEN 'turn' ELSE '' END`
 
 // failureRooms lists the rooms with a failure nobody has heard of, or a recovery not yet recorded. A box back from a told
 // failure for less than room.FailureSettle has not recovered yet, so it does not bring its room here on every tick.
