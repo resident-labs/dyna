@@ -19,7 +19,7 @@ func (s *Store) RequestTurnStop(ctx context.Context, session contract.SessionID,
 		if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET wake=0 WHERE to_kind='session' AND to_id=? AND state='pending' AND EXISTS (SELECT 1 FROM sessions WHERE id=? AND model_retry_at>0)", session, session); err != nil {
 			return err
 		}
-		cancelled, err := tx.ExecContext(ctx, "UPDATE sessions SET model_retry_at=0 WHERE id=? AND model_retry_at>0", session)
+		cancelled, err := tx.ExecContext(ctx, "UPDATE sessions SET model_retry_at=-1 WHERE id=? AND model_retry_at>0", session)
 		if err != nil {
 			return err
 		}

@@ -238,15 +238,31 @@ func TestProxySingleCodexCredentialCooldownPolicy(t *testing.T) {
 	})
 
 	for _, cooldown := range []int{-1, 0} {
-		for _, status := range []int{403, 429} {
-			t.Run(fmt.Sprintf("in-flight 503 after %d cooldown setting %d", status, cooldown), func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			status int
+			model  bool
+		}{
+			{"model 401", 401, true}, {"credential 401", 401, false},
+			{"model 403", 403, true},
+			{"model quota 429", 429, true},
+			{"insufficient balance 402", 402, true},
+		} {
+			t.Run(fmt.Sprintf("in-flight 503 after %s cooldown setting %d", tc.name, cooldown), func(t *testing.T) {
 				coreauth.SetTransientErrorCooldownSeconds(cooldown)
 				defer coreauth.SetTransientErrorCooldownSeconds(-1)
 				started, release := make(chan struct{}), make(chan struct{})
 				var calls atomic.Int32
+				message := "legitimate auth/quota failure"
+				if tc.status == 402 {
+					message = "insufficient balance"
+				}
 				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					if calls.Add(1) != 1 {
-						w.WriteHeader(200)
+						// A persistent auth failure is returned by the next real request,
+						// rather than manufactured by another MarkResult call.
+						w.WriteHeader(tc.status)
+						_, _ = fmt.Fprintf(w, `{"error":{"message":%q}}`, message)
 						return
 					}
 					close(started)
@@ -256,33 +272,57 @@ func TestProxySingleCodexCredentialCooldownPolicy(t *testing.T) {
 				}))
 				defer upstream.Close()
 				manager := newCooldownTestManager(t, cfg, upstream.URL)
+				snapshot := func(label string) time.Time {
+					t.Helper()
+					a, _ := manager.GetByID("only-codex")
+					deadline, unavailable, quota := a.NextRetryAfter, a.Unavailable, a.Quota
+					if tc.model {
+						state := a.ModelStates["gpt-5.1-codex"]
+						if state == nil {
+							t.Fatal("missing model cooldown state")
+						}
+						deadline, unavailable, quota = state.NextRetryAfter, state.Unavailable, state.Quota
+					}
+					t.Logf("%s: next_retry_after=%s remaining=%s quota=%+v unavailable=%v", label, deadline, time.Until(deadline), quota, unavailable)
+					return deadline
+				}
 				done := make(chan error, 1)
 				go func() {
 					_, err := manager.Execute(context.Background(), []string{"codex"}, executor.Request{Model: "gpt-5.1-codex"}, executor.Options{})
 					done <- err
 				}()
-				<-started
-				manager.MarkResult(context.Background(), coreauth.Result{AuthID: "only-codex", Model: "gpt-5.1-codex", Error: &coreauth.Error{HTTPStatus: status, Message: "legitimate auth/quota failure"}})
-				before, _ := manager.GetByID("only-codex")
-				beforeState := before.ModelStates["gpt-5.1-codex"]
-				t.Logf("before 503: next_retry_after=%s remaining=%s quota=%+v unavailable=%v", beforeState.NextRetryAfter, time.Until(beforeState.NextRetryAfter), beforeState.Quota, beforeState.Unavailable)
+				select {
+				case <-started:
+				case err := <-done:
+					t.Fatalf("request never reached fixture upstream: %v", err)
+				}
+				model := ""
+				if tc.model {
+					model = "gpt-5.1-codex"
+				}
+				manager.MarkResult(context.Background(), coreauth.Result{AuthID: "only-codex", Model: model, Error: &coreauth.Error{HTTPStatus: tc.status, Message: message}})
+				if !snapshot("before 503").After(time.Now()) {
+					t.Error("concurrent failure never established its cooldown")
+				}
 				close(release)
 				if err := <-done; err == nil {
 					t.Fatal("late upstream failure disappeared")
 				}
-				after, _ := manager.GetByID("only-codex")
-				afterState := after.ModelStates["gpt-5.1-codex"]
-				t.Logf("after 503: next_retry_after=%s remaining=%s quota=%+v unavailable=%v", afterState.NextRetryAfter, time.Until(afterState.NextRetryAfter), afterState.Quota, afterState.Unavailable)
+				after := snapshot("after 503")
 				_, err := manager.Execute(context.Background(), []string{"codex"}, executor.Request{Model: "gpt-5.1-codex"}, executor.Options{})
-				if status == 403 && cooldown == -1 {
-					// Accepted pinned-library limitation, not a desired guarantee:
-					// disabled transient cooling clears a concurrent model 403 gate.
-					// The default-config control below preserves its ~30 minute gate.
-					if err != nil || calls.Load() != 2 || !afterState.NextRetryAfter.IsZero() {
-						t.Fatalf("403 characterization changed: %v calls=%d state=%+v", err, calls.Load(), afterState)
+				if cooldown == -1 && (tc.status == 401 || tc.status == 403) {
+					// Accepted pinned limitation: a late 5xx clears a concurrent 401/403
+					// cooldown; the next persistent 401/403 sets it again.
+					if err == nil || calls.Load() != 2 || !after.IsZero() {
+						t.Fatalf("auth characterization changed: %v calls=%d deadline=%s", err, calls.Load(), after)
+					}
+					snapshot("after repeated auth failure")
+					_, err = manager.Execute(context.Background(), []string{"codex"}, executor.Request{Model: "gpt-5.1-codex"}, executor.Options{})
+					if err == nil || calls.Load() != 2 {
+						t.Fatalf("next %d did not restore cooling: %v calls=%d", tc.status, err, calls.Load())
 					}
 				} else if err == nil || calls.Load() != 1 {
-					t.Fatalf("late 503 cleared %d cooldown: %v calls=%d", status, err, calls.Load())
+					t.Fatalf("late 503 cleared %s cooldown: %v calls=%d", tc.name, err, calls.Load())
 				}
 			})
 		}
