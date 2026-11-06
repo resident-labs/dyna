@@ -89,7 +89,8 @@ checksum-verified, atomic staging primitive. Staging never switches `current` or
 starts new agents; the new engine activates its own checksum later.
 
 Deploy waits at most 20 minutes, logs per-host elapsed times and lists missed
-hosts. At the cap it restarts while the unit continues for up to 24 hours. The
+hosts. At the cap it restarts while a still-active unit continues for up to 24 hours.
+An inactive helper is reported as incomplete, not as continuing. The
 helper executable and reports live under `<prefix>/staging/<binary-sha>/`, outside
 the pruned build `stage/` tree. `pending`, `done` and `staging.log` record its
 progress. Keep that artifact while its unit is alive; these retained artifacts are
