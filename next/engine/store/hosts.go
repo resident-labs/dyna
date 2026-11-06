@@ -125,6 +125,9 @@ func hostHeld(ctx context.Context, tx *sql.Tx, host contract.HostName, boxes boo
 // DrainHost stops admission to a host that holds nothing, in one write with that check, so no box can land on it afterwards.
 func (s *Store) DrainHost(ctx context.Context, host contract.HostName) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		if err := s.volumeRemovalHostHeld(host); err != nil {
+			return err
+		}
 		if err := hostHeld(ctx, tx, host, true); err != nil {
 			return err
 		}
@@ -143,6 +146,9 @@ func (s *Store) DrainHost(ctx context.Context, host contract.HostName) error {
 // RemoveHost deletes a host that holds nothing. Its deleted boxes let go of it, and what it still owed a deleted room goes with it.
 func (s *Store) RemoveHost(ctx context.Context, host contract.HostName) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		if err := s.volumeRemovalHostHeld(host); err != nil {
+			return err
+		}
 		if err := hostHeld(ctx, tx, host, true); err != nil {
 			return err
 		}

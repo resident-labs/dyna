@@ -177,7 +177,7 @@ func TestComposeStackOnRealPodman(t *testing.T) {
 	}
 	spec := lifecycle.BoxSpec{Box: id, Room: "room", Host: "host", Slice: slice, Size: contract.BoxSize{CPUs: 1, MemBytes: 1 << 30, Pids: 512}}
 	forward := b.forward(id)
-	t.Cleanup(func() { _ = removeHostBox(context.Background(), host, box.Box{ID: id, Slice: slice}, forward) })
+	t.Cleanup(func() { _ = removeHostBox(context.Background(), host, box.Box{ID: id, Slice: slice}, forward, true) })
 
 	stack := func(generation string) *box.Stack {
 		t.Helper()
@@ -314,7 +314,7 @@ func TestComposeStackOnRealPodman(t *testing.T) {
 	}
 
 	t.Log("teardown leaves nothing behind")
-	if err := removeHostBox(ctx, host, box.Box{ID: id, Slice: slice}, forward); err != nil {
+	if err := removeHostBox(ctx, host, box.Box{ID: id, Slice: slice}, forward, true); err != nil {
 		t.Fatal(err)
 	}
 	for _, listing := range [][]string{

@@ -74,11 +74,48 @@ func (s *Store) DiscardHostBoxes(ctx context.Context, host contract.HostName, ne
 	return boxes, err
 }
 
-// ReleaseHostBoxes lets go of a host for its failed and deleted boxes, so its removal or a node's retirement can go on. A
-// failed box with no host starts on any host when its session is restarted.
+// ReleaseHostBoxes completes explicit gone-for-good discard after DiscardHostBoxes
+// closed admission. It releases that host's failed/deleted boxes AND prior-host
+// debts, then retires only the physical operations captured by that committed
+// release. Plain removal or a reachability change is not abandonment authority.
 func (s *Store) ReleaseHostBoxes(ctx context.Context, host contract.HostName) error {
-	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "UPDATE boxes SET host=NULL WHERE host=? AND state IN ('failed','deleted')", host)
+	abandoned := make(map[contract.BoxID][]*boxVolumeRemoval)
+	if err := s.Write(ctx, func(tx *sql.Tx) error {
+		var draining bool
+		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM hosts WHERE name=? AND state='draining')", host).Scan(&draining); err != nil {
+			return err
+		}
+		if !draining {
+			return fmt.Errorf("host %s is not being discarded", host)
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE boxes SET host=NULL WHERE host=? AND state IN ('failed','deleted')", host); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM room_leftovers WHERE host=?", host); err != nil {
+			return err
+		}
+		for id, claims := range s.volumeRemovals {
+			for claim := range claims {
+				if claim.host == host {
+					abandoned[id] = append(abandoned[id], claim)
+				}
+			}
+		}
+		return nil
+	}); err != nil {
 		return err
+	}
+	// The release above must COMMIT before ownership can end. This second short
+	// write is in the same call and performs no host I/O. Exact operation pointers
+	// exclude any new claims that arrived after the committed release snapshot.
+	return s.Write(context.WithoutCancel(ctx), func(tx *sql.Tx) error {
+		for id, claims := range abandoned {
+			for _, claim := range claims {
+				if err := s.retireBoxVolumeRemoval(context.WithoutCancel(ctx), tx, id, claim); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	})
 }

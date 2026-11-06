@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"slices"
 	"sync"
@@ -44,7 +45,9 @@ type Reconciler struct {
 	runners       Runners
 	idle          map[contract.HostName]time.Time // when each shared node last held a box, as this engine saw
 	audited       map[string]time.Time            // when each pool last ran list
-	roomSteps     map[string]bool
+	roomSteps     map[string]chan struct{}
+	quiesced      map[contract.BoxID]bool // process-local owner restart fences; never deletion authority
+	retained      map[store.Leftover]bool // completed container-only work, not volume deletion permission
 	active        map[contract.BoxID]*activeStep
 	hosts         map[contract.HostName]int
 	fresh         map[contract.BoxID]bool
@@ -57,8 +60,8 @@ type Reconciler struct {
 func New(st *store.Store, boxes BoxAdapter, view View, repos Repositories, event func(contract.RoomID, contract.Principal, contract.EventBody) (contract.Event, error), now func() time.Time) *Reconciler {
 	st.SetTerminals(func(id contract.SessionID) bool { return view.OpenTerminal(id) })
 	return &Reconciler{store: st, boxes: boxes, view: view, repos: repos, event: event, now: now, createContext: func(ctx context.Context) (context.Context, context.CancelFunc) {
-		return context.WithTimeout(ctx, 15*time.Minute)
-	}, kick: make(chan struct{}, 1), roomSteps: make(map[string]bool), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool), disconnected: make(map[contract.BoxID]time.Time), idle: make(map[contract.HostName]time.Time), audited: make(map[string]time.Time)}
+		return context.WithTimeout(ctx, box.StartPreparationBudget)
+	}, kick: make(chan struct{}, 1), roomSteps: make(map[string]chan struct{}), quiesced: make(map[contract.BoxID]bool), retained: make(map[store.Leftover]bool), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool), disconnected: make(map[contract.BoxID]time.Time), idle: make(map[contract.HostName]time.Time), audited: make(map[string]time.Time)}
 }
 func (r *Reconciler) SetHostHealth(read func(contract.HostName) contract.HostHealth) {
 	r.hostHealth = read
@@ -140,6 +143,18 @@ func (r *Reconciler) Run(ctx context.Context, ticks <-chan time.Time) {
 	}
 }
 func (r *Reconciler) Wait() { r.wg.Wait() }
+
+// CancelStart cancels only pending run work, never cleanup already owned by stop or close. The durable want=stop
+// fences admission and hello before this call; the active step remains owned and joined by the reconciler.
+func (r *Reconciler) CancelStart(id contract.BoxID) {
+	r.mu.Lock()
+	if step := r.active[id]; step != nil && step.want == store.WantRun {
+		step.cancel()
+	}
+	r.mu.Unlock()
+	r.Kick()
+}
+
 func (r *Reconciler) Cancel(id contract.BoxID) {
 	r.pass.Lock()
 	done := r.cancel(id)
@@ -192,6 +207,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	pools, err := r.store.Pools(ctx)
 	if err != nil {
 		return err
@@ -234,6 +250,9 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	all = append(all, runners...)
 	for i, row := range rows {
 		b := row.Box
+		if r.quiesced[b.ID] {
+			continue
+		}
 		// A requested stop takes the agent channel down before the host finishes stopping the box.
 		// The stored intent survives an engine restart; that expected silence is not host loss.
 		if b.State != contract.BoxReady || row.Want == store.WantStop {
@@ -282,6 +301,18 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 			}
 			continue
 		}
+		if row.Want == store.WantStop && (b.State == contract.BoxPending || b.State == contract.BoxCreating || b.State == contract.BoxStarting) {
+			r.mu.Lock()
+			active := r.active[b.ID]
+			if active != nil && active.want != row.Want {
+				active.cancel()
+			}
+			r.mu.Unlock()
+			if active == nil && (row.DueAt.IsZero() || !row.DueAt.After(r.now())) {
+				r.launch(ctx, row)
+			}
+			continue
+		}
 		if row.Paused || row.Want != store.WantRun || (b.State != contract.BoxPending && b.State != contract.BoxStopped) || (!row.DueAt.IsZero() && row.DueAt.After(r.now())) {
 			continue
 		}
@@ -293,11 +324,26 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 		if row.Limits.CPUs > 0 && cpuMilli > 4000*int64(row.Limits.CPUs) || row.Limits.MemBytes > 0 && memory > 4*row.Limits.MemBytes {
 			placement.Reason = box.PendingRoomLimit
 		} else {
-			placement = box.Admit(hosts, all, b, row.Only...)
+			eligible := hosts
+			if row.RetryHost != "" && b.Image == "" {
+				eligible = make([]box.Host, 0, len(hosts))
+				for _, host := range hosts {
+					if host.Name != row.RetryHost {
+						eligible = append(eligible, host)
+					}
+				}
+			}
+			placement = box.Admit(eligible, all, b, row.Only...)
 		}
 		next := b
+		var admissionCause contract.FailureCause
 		if placement.Reason != "" {
 			next.State, next.Reason = contract.BoxPending, string(poolWait(row, placement.Reason, pools))
+			if row.RetryHost != "" && b.Image == "" {
+				next.State = contract.BoxFailed
+				next.Reason = fmt.Sprintf("creation failed on %s; no other eligible host for the one retry (%s)", row.RetryHost, placement.Reason)
+				admissionCause = contract.CauseCreateFailed
+			}
 		} else if next.GPUCard = placement.Card; b.Image == "" {
 			next.State, next.Reason, next.Host = contract.BoxCreating, "", placement.Host
 			next.Slice, err = box.SliceName(b.ID)
@@ -314,7 +360,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 		if next.State == b.State && next.Reason == b.Reason {
 			continue
 		}
-		changed, err := r.change(ctx, b, next, time.Time{}, row.Failures, "", "", false)
+		changed, err := r.change(ctx, b, next, time.Time{}, row.Failures, admissionCause, "", false)
 		if err != nil {
 			return err
 		}
@@ -331,7 +377,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	}
 	var ready, outdated []contract.SessionID
 	for _, row := range rows {
-		if row.Want != store.WantRun || row.Box.State != contract.BoxReady {
+		if r.quiesced[row.ID] || row.Want != store.WantRun || row.Box.State != contract.BoxReady {
 			continue
 		}
 		if r.view.Stale(row.Box.Session) {
@@ -359,6 +405,9 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 		}
 	}
 	for _, row := range rows {
+		if r.quiesced[row.ID] {
+			continue
+		}
 		if row.Box.State == contract.BoxLost && hostState[row.Host] == box.HostReady && row.Want != store.WantClose && row.Want != store.WantDiscard {
 			if row.DueAt.IsZero() || !row.DueAt.After(r.now()) {
 				r.launch(ctx, row)
@@ -391,6 +440,15 @@ func (r *Reconciler) launch(ctx context.Context, row store.LifecycleBox) {
 	if r.active[row.ID] != nil || r.hosts[row.Host] >= 4 {
 		r.mu.Unlock()
 		return
+	}
+	// Starting fresh runtime work invalidates only this host's old completion.
+	// Do this before launching: FinishCreate can insert identical debt before roomPass.
+	if row.Want == store.WantRun && (row.State == contract.BoxPending || row.State == contract.BoxCreating || row.State == contract.BoxStarting) {
+		for debt := range r.retained {
+			if debt.Box == row.ID && debt.Host == row.Host {
+				delete(r.retained, debt)
+			}
+		}
 	}
 	stepCtx, cancel := context.WithCancel(ctx)
 	step := &activeStep{cancel: cancel, want: row.Want, done: make(chan struct{})}

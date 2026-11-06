@@ -45,6 +45,14 @@ type Usage interface {
 	Latest() []contract.AccountUsage
 }
 
+// restartClaim is process-local serialization, including a monotonic completion
+// time so an API call delayed in authorization cannot act on a newer failed box.
+// It is neither durable state nor deletion permission.
+type restartClaim struct {
+	sync.Mutex
+	completed time.Time
+}
+
 type Service struct {
 	// profileMoved runs after sessions change model, so their account choices can follow.
 	profileMoved      func(context.Context, []store.Session, contract.ProfileName)
@@ -78,6 +86,7 @@ type Service struct {
 	now               func() time.Time
 	live              *live.Live
 	readMu            sync.Mutex // preserves commit and live broadcast order
+	restarts          sync.Map   // BoxID -> *restartClaim; completion fences delayed API callers too
 	// transcriptMu serializes appends, so each offset check and write runs alone.
 	transcriptMu        sync.Mutex
 	layout              box.Layout

@@ -159,7 +159,7 @@ export class RoomStore {
   // The turn may end before the answer comes, so only a turn still running counts as stopping.
   stop(id: string): void {
     this.stopFailed.delete(id);
-    void call("session.stop", { session: id }).then(({ stopping }) => { if (stopping && this.turns.has(id)) this.stopping.add(id); },
+    void call("session.stop", { session: id }).then(({ stopping }) => { if (stopping && (this.turns.has(id) || this.starting(id))) this.stopping.add(id); },
       () => { this.stopFailed.add(id); });
   }
 
@@ -411,6 +411,7 @@ export class RoomStore {
         const { session, to, cause } = event.body, reason = pendingReason(to, event.body.reason);
         this.boxes.set(session, to);
         if (to !== "creating" && to !== "starting") this.starts.delete(session);
+        if (!["pending", "creating", "starting"].includes(to)) this.stopping.delete(session);
         // Placing or moving a box changes its host, and a deleted box keeps naming the one it left.
         this.noteHost(session, to, event.body.host);
         if (to === "failed" || to === "lost") this.boxFailures.set(session, { box: to, cause: cause ?? this.boxFailures.get(session)?.cause, at: event.at });

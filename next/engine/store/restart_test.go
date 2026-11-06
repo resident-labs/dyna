@@ -25,9 +25,12 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.writer.Exec("UPDATE boxes SET create_retry_host='bad' WHERE id='b'"); err != nil {
+		t.Fatal(err)
+	}
 	event := contract.Event{ID: "e", Room: "r", Time: time.UnixMilli(200), From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.BoxChanged{}}
 	notice := contract.Event{ID: "n", Room: "r", Time: event.Time, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionRestarted{Session: "s"}}
-	if ok, err := s.RestartSession(ctx, "s", event, notice); err != nil || !ok {
+	if ok, err := s.RestartSession(ctx, restartSnapshot(t, s, "s"), event, notice); err != nil || !ok {
 		t.Fatalf("restart: %v %v", ok, err)
 	}
 	rows, err := s.LifecycleBoxes(ctx)
@@ -38,12 +41,12 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rows[0].Host != "" {
-		t.Fatalf("restart retained quarantined host %q", rows[0].Host)
+	if rows[0].Host != "" || rows[0].RetryHost != "" {
+		t.Fatalf("restart retained host or used retry budget: %+v", rows[0])
 	}
 	leftovers, err := s.Leftovers(ctx, "bad")
-	if err != nil || len(leftovers) != 1 || leftovers[0].Box != "b" || leftovers[0].Slice != "slice" {
-		t.Fatalf("old host cleanup: %+v %v", leftovers, err)
+	if err != nil || len(leftovers) != 0 {
+		t.Fatalf("completed cleanup left stale debt: %+v %v", leftovers, err)
 	}
 	if got := box.Admit(hosts, []box.Box{rows[0].Box}, rows[0].Box); got.Host != "good" {
 		t.Fatalf("placement: %+v", got)
@@ -67,7 +70,7 @@ func TestRestartFailedSessions(t *testing.T) {
 	for _, id := range []contract.SessionID{"root", "child"} {
 		event := contract.Event{ID: contract.EventID("restart-" + id), Room: "r", Time: time.UnixMilli(200), From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.BoxChanged{}}
 		notice := contract.Event{ID: contract.EventID("notice-" + id), Room: "r", Time: event.Time, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionRestarted{Session: id}}
-		ok, err := s.RestartSession(ctx, id, event, notice)
+		ok, err := s.RestartSession(ctx, restartSnapshot(t, s, id), event, notice)
 		if err != nil || !ok {
 			t.Fatalf("%s restart: %v %v", id, ok, err)
 		}
@@ -82,7 +85,7 @@ func TestRestartFailedSessions(t *testing.T) {
 		if err != nil || len(dm) != 1 {
 			t.Fatalf("restart DM %v: %v", dm, err)
 		}
-		ok, err = s.RestartSession(ctx, id, event, notice)
+		ok, err = s.RestartSession(ctx, restartSnapshot(t, s, id), event, notice)
 		if err != nil || ok {
 			t.Fatalf("%s repeated restart: %v %v", id, ok, err)
 		}
@@ -120,6 +123,12 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 		t.Fatal(err)
 	}
 	size, _ := box.Size(contract.BoxSizeAgent)
+	if err := s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := s.AppendEvent(tx, contract.Event{ID: "waiting-initial", Room: "r", Time: time.UnixMilli(1), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{Box: "waiting", Session: "w", To: contract.BoxPending}})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.QuarantineShare(ctx, box.Box{ID: "built", Session: "f", Host: "other", Image: "image", Size: size}); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +150,7 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 	}
 	event := contract.Event{ID: "e", Room: "r", Time: time.UnixMilli(200), From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.BoxChanged{}}
 	notice := contract.Event{ID: "n", Room: "r", Time: event.Time, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionRestarted{Session: "s"}}
-	if ok, err := s.RestartSession(ctx, "s", event, notice); err != nil || !ok {
+	if ok, err := s.RestartSession(ctx, restartSnapshot(t, s, "s"), event, notice); err != nil || !ok {
 		t.Fatalf("restart: %v %v", ok, err)
 	}
 	var host sql.NullString
@@ -198,7 +207,7 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 	for id, want := range map[contract.SessionID]bool{"work": true, "idle": false} {
 		event := contract.Event{ID: contract.EventID("restart-" + id), Room: "r", Time: time.UnixMilli(200), From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.BoxChanged{}}
 		notice := contract.Event{ID: contract.EventID("notice-" + id), Room: "r", Time: event.Time, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionRestarted{Session: id}}
-		if ok, err := s.RestartSession(ctx, id, event, notice); err != nil || !ok {
+		if ok, err := s.RestartSession(ctx, restartSnapshot(t, s, id), event, notice); err != nil || !ok {
 			t.Fatalf("%s restart: %v %v", id, ok, err)
 		}
 		var wake bool
@@ -250,4 +259,18 @@ INSERT INTO goals(room,number,session,text,done_when,state,created_at,updated_at
 			t.Fatalf("%s: stored %s: %v", id, body, err)
 		}
 	}
+}
+
+// Store tests exercise only the post-cleanup commit; API/runtime tests own deletion.
+func restartSnapshot(t *testing.T, s *Store, id contract.SessionID) box.Box {
+	t.Helper()
+	session, err := s.Session(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.Box(context.Background(), session.Box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

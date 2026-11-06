@@ -138,6 +138,7 @@ func (h *Host) EnsureEgress(ctx context.Context, image, bin, sum string) error {
 	if err := binaryPath(bin, sum); err != nil {
 		return err
 	}
+	ctx = WithRemoteCancellation(ctx)
 	args := append([]string{"bash", "-c", pinCreateScript, "dyna-pin-create", bin}, egressArgs(image, bin, sum)...)
 	if _, err := h.run(ctx, args...); err != nil {
 		return err

@@ -29,7 +29,7 @@ const (
 	CheckHostSlice CheckName = "host slice"
 	CheckForward   CheckName = "stream-local forwarding"
 	CheckShare     CheckName = "FUSE for the shared folder"
-	CheckExec      CheckName = "SSH and bash"
+	CheckExec      CheckName = "SSH, bash and procps pgrep"
 )
 
 // RequiredError reports a missing or unsupported rootless Podman installation.
@@ -97,6 +97,7 @@ func (h *Host) Check(ctx context.Context, o CheckOptions) CheckResult {
 		add(CheckPaths, fmt.Errorf("host data and runtime paths must be absolute"))
 		return result
 	}
+	add(CheckExec, h.CheckExec(ctx))
 	add(CheckArch, h.checkArch(ctx))
 	_, err := h.run(ctx, "bash", "-c", `test "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs && test "$(systemctl show "user@$(id -u).service" -p Delegate --value)" = yes && cg=$(systemctl show "user@$(id -u).service" -p ControlGroup --value) && for c in cpu memory pids; do grep -qw "$c" "/sys/fs/cgroup$cg/cgroup.controllers" || exit 1; done`)
 	add(CheckCgroup, err)
@@ -224,8 +225,9 @@ func (h *Host) checkForward(ctx context.Context, o CheckOptions) error {
 	return nil
 }
 
-// CheckExec is the whole check of an exec-only host: it answers over SSH and runs bash.
+// CheckExec verifies the SSH shell and cancellation prerequisite for every host.
+// It is the whole check of an exec-only host.
 func (h *Host) CheckExec(ctx context.Context) error {
-	_, err := h.run(ctx, "bash", "-c", "true")
+	_, err := h.run(ctx, "bash", "-c", `command -v pgrep >/dev/null || { echo "pgrep is missing: install procps" >&2; exit 1; }`)
 	return err
 }

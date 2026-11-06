@@ -177,3 +177,52 @@ func TestStaleImageRecreateClearsTheStoppedReason(t *testing.T) {
 		t.Fatalf("reason %q", b.Reason)
 	}
 }
+
+type binaryStaleView struct{ *channelView }
+
+func (binaryStaleView) Stale(contract.SessionID) bool { return true }
+
+type binaryStaleBoxes struct {
+	restartedBoxes
+	recreated, stopped int
+}
+
+func (*binaryStaleBoxes) Inspect(context.Context, contract.BoxID) (box.ContainerStatus, bool, error) {
+	return box.ContainerStatus{StaleLayout: true, Binary: "old"}, true, nil
+}
+func (b *binaryStaleBoxes) Recreate(context.Context, BoxSpec, string) error {
+	b.recreated++
+	return nil
+}
+func (b *binaryStaleBoxes) Stop(context.Context, contract.BoxID) error { b.stopped++; return nil }
+
+func TestStaleBinaryPinWaitsForTheTurnThenUsesExistingRecreation(t *testing.T) {
+	rig := newHostRig(t)
+	runtime := &binaryStaleBoxes{restartedBoxes: restartedBoxes{image: "image"}}
+	rig.r.boxes = runtime
+	rig.r.view = binaryStaleView{rig.view}
+	if err := rig.st.Write(rig.ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("INSERT INTO turns(id,session,started_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) VALUES('active','s',?,'','m',0,0,0,0)", rig.now.UnixMilli())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if after := rig.pass(); after.State != contract.BoxReady || runtime.stopped != 0 || runtime.recreated != 0 {
+		t.Fatalf("stale pin interrupted an active turn: %+v, stops=%d recreates=%d", after, runtime.stopped, runtime.recreated)
+	}
+	if err := rig.st.Write(rig.ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE turns SET ended_at=?,outcome='completed' WHERE id='active'", rig.now.UnixMilli())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if after := rig.pass(); after.State != contract.BoxStopped || runtime.recreated != 0 {
+		t.Fatalf("idle stale pin did not stop without premature recreation: %+v, recreates=%d", after, runtime.recreated)
+	}
+	// The next ordinary wake requests a start, which already owns stale-layout recreation.
+	rig.stop(false, "")
+	after := rig.pass()
+	if runtime.stopped != 1 || runtime.recreated != 1 || after.State != contract.BoxStarting || after.Image != "image" {
+		t.Fatalf("stale binary did not use the normal stop/recreate point: %+v, stops=%d recreates=%d", after, runtime.stopped, runtime.recreated)
+	}
+}
