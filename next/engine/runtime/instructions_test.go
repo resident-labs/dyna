@@ -226,6 +226,8 @@ func TestResumeRepairsInstructionsBeforeStarting(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := &Boxes{Store: instructionStore{}, Layout: box.Layout{Data: data, HostData: remote}, hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, installed: map[contract.HostName]bool{"host": true}}
+	binarySum := stagePinnedFixture(t, b.Layout.HostBin(), []byte("fixture executable"))
+	b.binOnce.Do(func() { b.binSum = binarySum })
 	if err := b.Start(ctx, "box"); err == nil {
 		t.Fatal("started with offline host")
 	}
@@ -268,7 +270,7 @@ func (admissionTransport) Run(ctx context.Context, input []byte, args ...string)
 	case strings.Contains(command, "_NPROCESSORS_ONLN"):
 		body = "8 17179869184 17179869184 107374182400"
 	case strings.Contains(command, "dyna-probe"):
-		body = "test-sum"
+		body = strings.Repeat("a", 64)
 	case strings.Contains(command, "SwapTotal:"):
 		body = "0"
 	case strings.Contains(command, "'curl'"):
@@ -299,7 +301,7 @@ func TestAddHostCopiesPreviouslySavedInstructions(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := &Boxes{Store: addHostStore{}, Runtime: t.TempDir(), Layout: box.Layout{Data: data, HostData: remote}, Version: "dev", Context: ctx, hostRunner: admissionTransport{}, machineIDFile: machineID}
-	b.binOnce.Do(func() { b.binSum = "test-sum" })
+	b.binOnce.Do(func() { b.binSum = strings.Repeat("a", 64) })
 	if _, err := b.AddHost(ctx, contract.HostAddRequest{Name: "host", SSH: "user@host", OwnerOnlyAdmin: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +320,7 @@ func TestANodeJoinsAndLeavesLikeAHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := &Boxes{Store: addHostStore{}, Runtime: t.TempDir(), Layout: box.Layout{Data: data, HostData: remote}, Version: "dev", Context: ctx, hostRunner: admissionTransport{}, machineIDFile: machineID}
-	b.binOnce.Do(func() { b.binSum = "test-sum" })
+	b.binOnce.Do(func() { b.binSum = strings.Repeat("a", 64) })
 	record, err := poolHosts{boxes: b}.Join(ctx, "boats-1", "ssh://pip@host:22")
 	if err != nil {
 		t.Fatal(err)
@@ -376,6 +378,8 @@ func TestSaveThenResumeRepairsBeforeDelayedPublish(t *testing.T) {
 	delayed := delayedInstructionStore{entered: make(chan struct{}), release: make(chan struct{}), once: &sync.Once{}}
 	defer close(delayed.release)
 	b := &Boxes{Store: delayed, Layout: box.Layout{Data: data, HostData: remote}, hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, installed: map[contract.HostName]bool{"host": true}}
+	binarySum := stagePinnedFixture(t, b.Layout.HostBin(), []byte("fixture executable"))
+	b.binOnce.Do(func() { b.binSum = binarySum })
 	if err := b.syncInstructions(ctx, host); err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +432,7 @@ func TestANodeWhoseSharedFolderCannotMountJoinsWithoutSessionBoxes(t *testing.T)
 		t.Fatal(err)
 	}
 	b := &Boxes{Store: addHostStore{}, Runtime: t.TempDir(), Layout: box.Layout{Data: t.TempDir(), HostData: t.TempDir()}, Version: "dev", Context: ctx, hostRunner: shareFailTransport{}, machineIDFile: machineID}
-	b.binOnce.Do(func() { b.binSum = "test-sum" })
+	b.binOnce.Do(func() { b.binSum = strings.Repeat("a", 64) })
 	record, err := poolHosts{boxes: b}.Join(ctx, "boats-1", "ssh://pip@host:22")
 	if err != nil {
 		t.Fatal(err)

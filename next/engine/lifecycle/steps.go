@@ -106,12 +106,16 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			steps.Done("repositories")
 		}
 		if workErr == nil {
+			cancelCreate()
 			phase = contract.CreatePhaseBox
-			next.Image, workErr = r.boxes.Create(createCtx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: b.Slice, Size: b.Size, Repos: sources, GPUCard: b.GPUDevice()})
+			next.Image, workErr = r.boxes.Create(ctx, BoxSpec{Box: b.ID, Session: b.Session, Room: b.Room, Host: b.Host, Slice: b.Slice, Size: b.Size, Repos: sources, GPUCard: b.GPUDevice()})
 			steps.Done("create")
 		}
 		// A deadline or cancellation says nothing about the host, whatever step it cut short.
 		createCause := context.Cause(createCtx)
+		if phase == contract.CreatePhaseBox {
+			createCause = context.Cause(ctx)
+		}
 		cut := errors.Is(createCause, context.DeadlineExceeded) || errors.Is(createCause, context.Canceled)
 		var runtimeErr box.RuntimeCreateError
 		var shareErr box.ShareDown
@@ -137,6 +141,10 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			if failures >= 3 {
 				next.State, next.Reason = contract.BoxFailed, string(contract.CauseCreateFailed)
 				cause = contract.CauseCreateFailed
+				var stepTimeout box.StepTimeout
+				if errors.As(workErr, &stepTimeout) {
+					next.Reason = stepTimeout.Error()
+				}
 				var stack box.StackError
 				if errors.As(workErr, &stack) {
 					next.Reason = stack.Error()

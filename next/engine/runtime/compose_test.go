@@ -30,7 +30,7 @@ func stackSpec(stack *box.Stack) lifecycle.BoxSpec {
 func TestABoxWithNoStackIsUnchanged(t *testing.T) {
 	b := &Boxes{Layout: box.Layout{Data: "/data", HostData: "/host"}}
 	_, plain := b.container(stackSpec(nil), "image", box.Mount{})
-	if plain.Pod != "" || plain.Volumes != nil || len(plain.Labels) != 1 {
+	if plain.Pod != "" || plain.Volumes != nil || len(plain.Labels) != 2 {
 		t.Fatalf("%+v", plain)
 	}
 }
@@ -109,7 +109,7 @@ func (r *stackRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte, 
 	case r.fail != "" && strings.Contains(command, r.fail):
 		status = 125
 	case strings.Contains(command, "dyna-probe"):
-		body = "sum\n"
+		body = strings.Repeat("a", 64) + "\n"
 	case strings.Contains(command, "label=dyna.stack="):
 		body = `[{"Names":["dyna-sidecar-box_1-db"],"Labels":{"dyna.stack.order":"0","dyna.stack.wait":"0"},"State":"running"}]`
 	}
@@ -167,7 +167,7 @@ func creatingBoxes(t *testing.T, r *stackRunner) (*Boxes, lifecycle.BoxSpec) {
 		t.Fatal(err)
 	}
 	b := &Boxes{Store: composeStore{}, Compose: files, RoomImages: files.Images.(*engineimages.Store), Sockets: sockets, Runtime: runtimeDir, Version: "v1", Layout: box.Layout{HostData: "/host"}, hosts: map[contract.HostName]*podman.Host{"host": host}}
-	b.binOnce.Do(func() { b.binSum = "sum" })
+	b.binOnce.Do(func() { b.binSum = strings.Repeat("a", 64) })
 	size, _ := box.Size(contract.BoxSizeAgent)
 	return b, lifecycle.BoxSpec{Box: "box_1", Session: "ses_1", Room: "room_1", Host: "host", Slice: "dyna-box_1.slice", Size: size}
 }
@@ -260,7 +260,8 @@ func TestABoxStartsItsSidecarsUnlessItIsClosing(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		b := &Boxes{hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, installed: map[contract.HostName]bool{"host": true}, Store: closingStore{state: state}}
+		b := &Boxes{hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, installed: map[contract.HostName]bool{"host": true}, Store: closingStore{state: state}, Layout: box.Layout{HostData: "/host"}}
+		b.binOnce.Do(func() { b.binSum = strings.Repeat("a", 64) })
 		if err := b.Start(context.Background(), "box_1"); err != nil {
 			t.Fatal(err)
 		}
