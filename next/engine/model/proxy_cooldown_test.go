@@ -9,17 +9,26 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/MichaelKinsy/PiG/ai"
-
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 )
+
+type cooldownHTTPError struct {
+	base       *coreauth.Error
+	retryAfter *time.Duration
+}
+
+func (e cooldownHTTPError) Error() string              { return e.base.Error() }
+func (e cooldownHTTPError) Unwrap() error              { return e.base }
+func (e cooldownHTTPError) RetryAfter() *time.Duration { return e.retryAfter }
 
 // cooldownHTTPExecutor is a fixture, not the Codex wire translator. It forwards
 // to a local fake upstream and returns its status/body through the real manager's
@@ -50,7 +59,16 @@ func (e cooldownHTTPExecutor) Execute(ctx context.Context, _ *coreauth.Auth, inp
 		if resp.Header.Get("X-Fixture-Capacity") != "" {
 			code = coreauth.ErrorCodeTransientRateLimit
 		}
-		return executor.Response{}, &coreauth.Error{Code: code, Message: string(body), HTTPStatus: resp.StatusCode}
+		var retryAfter *time.Duration
+		if hint := resp.Header.Get("Retry-After"); hint != "" {
+			seconds, err := strconv.Atoi(hint)
+			if err != nil {
+				return executor.Response{}, err
+			}
+			delay := time.Duration(seconds) * time.Second
+			retryAfter = &delay
+		}
+		return executor.Response{}, cooldownHTTPError{base: &coreauth.Error{Code: code, Message: string(body), HTTPStatus: resp.StatusCode}, retryAfter: retryAfter}
 	}
 	return executor.Response{Payload: body}, nil
 }
@@ -76,16 +94,20 @@ func TestProxySingleCodexCredentialCooldownPolicy(t *testing.T) {
 		name           string
 		status         int
 		capacity, cool bool
+		hint           string
 	}{
-		{"server_error", 500, false, false},
-		{"bad_gateway", 502, false, false},
-		{"unavailable", 503, false, false},
-		{"timeout", 504, false, false},
-		{"other_5xx", 599, false, false},
-		{"unauthorized", 401, false, true},
-		{"forbidden", 403, false, true},
-		{"quota", 429, false, true},
-		{"capacity_without_retry_hint", 429, true, false},
+		{"server_error", 500, false, false, ""},
+		{"bad_gateway", 502, false, false, ""},
+		{"unavailable", 503, false, false, ""},
+		{"timeout", 504, false, false, ""},
+		{"other_5xx", 599, false, false, ""},
+		{"unauthorized", 401, false, true, ""},
+		{"forbidden", 403, false, true, ""},
+		{"quota", 429, false, true, ""},
+		{"capacity_without_retry_hint", 429, true, false, ""},
+		{"quota_with_positive_hint", 429, false, true, "2"},
+		{"capacity_with_positive_hint", 429, true, false, "2"},
+		{"unavailable_with_positive_hint", 503, false, false, "2"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -95,6 +117,7 @@ func TestProxySingleCodexCredentialCooldownPolicy(t *testing.T) {
 					if tc.capacity {
 						w.Header().Set("X-Fixture-Capacity", "true")
 					}
+					w.Header().Set("Retry-After", tc.hint)
 					w.WriteHeader(tc.status)
 					_, _ = io.WriteString(w, `{"error":{"type":"server_error","message":"transient fixture failure"}}`)
 					return
