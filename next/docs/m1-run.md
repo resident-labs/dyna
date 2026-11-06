@@ -59,7 +59,10 @@ auth directory.
 
 Run `next/scripts/deploy-trial.sh --dry-run` on the trial host to build and
 check the pair without installing it. The script accepts `--prefix`, `--node-bin`,
-`--socket`, `--unit`, `--web-url` and `--web-host` for other installations.
+`--socket`, `--unit`, `--web-url`, `--web-host`, `--data`, `--host-data` and
+`--stage-wait` for other installations. `--stage-wait` is seconds from 0 to 1200,
+defaulting to 1200. Paths are configuration, not derived from a systemd ExecStart
+or a particular machine's name.
 
 To deploy, SSH to the trial host and run the script from a clean checkout of
 the commit you want. It needs Go and the Node in `--node-bin` on that host, and
@@ -69,6 +72,49 @@ it restarts the trial's user service:
 git fetch origin && git checkout --detach origin/main
 next/scripts/deploy-trial.sh
 ```
+
+### Host binary staging
+
+Before restarting the engine, deploy runs an independent user unit to stage the
+new executable on the ready, non-exec-only hosts in a read-only snapshot. The
+snapshot is taken before compression or transfers. The helper does not open the
+engine store, migrate it or take its lock. Newly added or newly ready hosts after
+that snapshot use the new engine's ordinary installation path instead.
+
+A host that already has the exact uncompressed SHA receives no payload. A cold
+host must decode a small canary: working zstd is preferred, with gzip as the
+existing-host fallback. Neither tool gives a typed failure instead of publishing
+an unverified executable. The engine and helper share the same content-addressed,
+checksum-verified, atomic staging primitive. Staging never switches `current` or
+starts new agents; the new engine activates its own checksum later.
+
+Deploy waits at most 20 minutes, logs per-host elapsed times and lists missed
+hosts. At the cap it restarts while the unit continues for up to 24 hours. The
+helper executable and reports live under `<prefix>/staging/<binary-sha>/`, outside
+the pruned build `stage/` tree. `pending`, `done` and `staging.log` record its
+progress. Keep that artifact while its unit is alive; these retained artifacts are
+not automatically pruned by deploy. Multiple engine subscribers share one host
+transfer. An independent helper and the new engine may both copy the same SHA
+after the wait cap; this accepted duplicate traffic has no interprocess lease,
+and private verified temporary files prevent partial publication or an older
+stager changing the active version.
+
+The current trial installation uses these explicit paths:
+
+| Purpose | Path | Configuration |
+| --- | --- | --- |
+| Engine data | `/home/pip/.local/share/dyna-next` | `--data` (default `$HOME/.local/share/dyna-next`) |
+| Host data | `/home/pip/.local/share/dyna-next-host` | `--host-data` (default `$HOME/.local/share/dyna-next-host`) |
+| Engine runtime | `/run/user/1001/dyna-next` | `XDG_RUNTIME_DIR`; deploy's default owner socket lives here |
+| Installed binary | `/home/pip/.local/opt/dyna-next/bin/dyna` | `--prefix` (default `$HOME/.local/opt/dyna-next`) |
+
+Staging uses a separate private SSH runtime directory under `XDG_RUNTIME_DIR`
+(or `/run/user/$(id -u)`), so an engine restart does not close its SSH masters.
+The hidden `stage-host-binaries` helper accepts absolute `--data`, `--host-data`,
+`--runtime` and `--report-dir` paths when invoked directly. Match the engine's
+actual data and host-data configuration on either side of an engine relocation.
+This does not move the engine, change host identity, or change any node's network.
+Service-active and web-200 checks still run after restart.
 
 The trial never rolls back. Fix failures forward on main. An older binary
 cannot open a store after a schema step.
