@@ -873,6 +873,8 @@
     .session-bar .tool { display: none; }
     .heading { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 1.25; }
     .heading .count { font-size: 12.5px; }
+    /* Sessions already has its count; leave room for the feed filter on a phone. */
+    .heading .narrow { display: none; }
     /* The header keeps its width for the room's name: the faces and the count already say who works. */
     .scrim { position: fixed; inset: 0; z-index: 2; padding: 0; border: 0; background: var(--scrim); }
   }
