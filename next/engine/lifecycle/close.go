@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -85,6 +86,10 @@ func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox, host
 
 func (r *Reconciler) closeStep(ctx context.Context, row store.LifecycleBox) error {
 	err := r.boxes.Remove(ctx, row.ID)
+	var superseded box.NamespaceSuperseded
+	if errors.As(err, &superseded) {
+		err = nil
+	}
 	if err == nil {
 		next := row.Box
 		next.State, next.Reason = contract.BoxDeleted, ""

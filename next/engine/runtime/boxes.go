@@ -988,17 +988,22 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 func cleanupCreate(ctx context.Context, h box.HostDriver, spec lifecycle.BoxSpec, forward box.Forward, stacked, created, forwarded, sliced bool) {
 	ctx, cancel := startCleanupContext(ctx)
 	defer cancel()
-	if stacked || created {
+	if stacked || created || sliced {
 		epoch, err := h.BoxEpoch(ctx, spec.Box)
 		if err == nil {
-			_ = h.RemoveBox(ctx, spec.Box, epoch, false)
+			slice := ""
+			if sliced {
+				slice = spec.Slice
+			}
+			err = h.RemoveBox(ctx, spec.Box, epoch, false, slice)
+			var superseded box.NamespaceSuperseded
+			if errors.As(err, &superseded) {
+				return
+			}
 		}
 	}
 	if forwarded {
 		_ = h.RemoveForward(ctx, forward)
-	}
-	if sliced {
-		_ = h.RemoveSlice(ctx, spec.Slice)
 	}
 }
 
@@ -1370,10 +1375,16 @@ func (b *Boxes) Stop(ctx context.Context, id contract.BoxID) error {
 	if err != nil {
 		return err
 	}
-	if err := host.StopContainer(ctx, id); err != nil {
+	epoch, err := host.BoxEpoch(ctx, id)
+	if err != nil {
 		return err
 	}
-	return host.StopPod(ctx, id)
+	err = host.StopBox(ctx, id, epoch)
+	var superseded box.NamespaceSuperseded
+	if errors.As(err, &superseded) {
+		return nil
+	}
+	return err
 }
 
 func (b *Boxes) Remove(ctx context.Context, id contract.BoxID) error {
@@ -1424,6 +1435,10 @@ func (b *Boxes) DiscardHostBox(ctx context.Context, old box.Box) error {
 		return err
 	}
 	if err := removeHostBox(ctx, h, old, b.forward(old.ID), true); err != nil {
+		var superseded box.NamespaceSuperseded
+		if errors.As(err, &superseded) {
+			return nil
+		}
 		return err
 	}
 	return b.Sockets.RemoveBox(old.ID)
@@ -1441,13 +1456,7 @@ func removeHostBoxAtEpoch(ctx context.Context, h box.HostDriver, record box.Box,
 	if err := h.RemoveForward(ctx, forward); err != nil {
 		return err
 	}
-	if err := h.RemoveBox(ctx, record.ID, epoch, removeVolumes); err != nil {
-		return err
-	}
-	if record.Slice == "" {
-		return nil
-	}
-	return h.RemoveSlice(ctx, record.Slice)
+	return h.RemoveBox(ctx, record.ID, epoch, removeVolumes, record.Slice)
 }
 
 type scopeRunner interface {
@@ -1649,8 +1658,9 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image stri
 		if !ok {
 			cleanup, stop := startCleanupContext(ctx)
 			defer stop()
-			_ = h.StopContainer(cleanup, spec.Box)
-			_ = h.StopPod(cleanup, spec.Box)
+			if epoch, err := h.BoxEpoch(cleanup, spec.Box); err == nil {
+				_ = h.StopBox(cleanup, spec.Box, epoch)
+			}
 		}
 	}()
 	if err := run(contract.StartBuildCache, func(ctx context.Context) error { b.startBuildCache(ctx, spec.Host, h); return nil }); err != nil {
