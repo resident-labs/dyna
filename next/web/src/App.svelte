@@ -230,7 +230,7 @@
     void fetch(item.src!, { headers: { Range: "bytes=0-0" } }).then(response => {
       const bytes = sharedFileSize(response);
       void response.body?.cancel();
-      if (sharedJump && sharedItems[0]?.key === item.key && sharedItems[0]?.src === item.src && bytes !== undefined) sharedItems = [{ ...item, sizeKnown: true, file: { ...item.file, bytes } }];
+      if (sharedJump && sharedItems[0]?.key === item.key && sharedItems[0]?.src === item.src && bytes !== undefined) sharedItems = [{ ...item, sizeKnown: true, modified: response.headers.get("Last-Modified") ?? undefined, file: { ...item.file, bytes } }];
     }, () => {});
   });
   setSharedFolder(path => {
@@ -791,7 +791,7 @@
     <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} aria-label="Sessions" tabindex="-1" role={panel && phone.current && !covered ? "dialog" : undefined} aria-modal={(panel && phone.current && !covered) || undefined} bind:this={members} inert={drawer || covered || inSettings}>
       {#if phone.current}{@render sheetHandle("sessions")}{/if}
       <header class="bar tabs" aria-label="Panel tabs">
-        <button type="button" aria-pressed={selectedTab === "sessions"} onclick={() => tabs.set(key, "sessions")}>Sessions{#if !session && store?.ready} <span class="count">{store.members.length}</span>{/if}</button>
+        <button type="button" aria-pressed={selectedTab === "sessions"} onclick={() => tabs.set(key, "sessions")}>Sessions{#if !session && store?.ready}{" "}<span class="count">{store.members.length}</span>{/if}</button>
         {#if session && !closed}<button type="button" aria-pressed={about} onclick={() => tabs.set(key, "about")}>About</button>{/if}
         <button type="button" aria-pressed={selectedTab === "files"} onclick={() => tabs.set(key, "files")}>Files</button>
         {#if !session && selectedTab === "sessions" && attention.can("operate")}<button type="button" class="tool" title="New session" aria-label="New session" onclick={() => openNew("session")}><Icon name="plus" /></button>{/if}

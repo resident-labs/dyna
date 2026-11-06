@@ -110,7 +110,12 @@
         <Avatar kind={item.from.kind} name={author} root={root(item.from.session)} size={24} />
         <span class="identity"><strong>{author}</strong><time datetime={item.at}>{formatTime(item.at)}</time></span>
       {/snippet}
-      {#if item.from.session}<a class="sender" href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.from.session)}`}>{@render identity()}</a>
+      {#if item.sharedPath !== undefined}
+        <div class="shared-identity">
+          <nav aria-label="File path" title={item.sharedPath}>{#each item.sharedPath.split("/") as part, index}{#if index}<span class="separator">/</span>{/if}<span class="segment" class:filename={index === item.sharedPath.split("/").length - 1}>{part}</span>{/each}</nav>
+          {#if item.modified}<span class="modified">modified <time datetime={new Date(item.modified).toISOString()}>{formatTime(item.modified)}</time></span>{/if}
+        </div>
+      {:else if item.from.session}<a class="sender" href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.from.session)}`}>{@render identity()}</a>
       {:else}<div class="sender">{@render identity()}</div>{/if}
       {#if onjump}<button class="jump desktop" onclick={() => { onjump?.(item.key); dialog.close(); }}>Jump to post</button>{/if}
       <div class="spacer"></div>
@@ -126,7 +131,7 @@
       {/if}
       {#if folder !== undefined}<button class="tool desktop" onclick={() => showFolder(folder!)} title="Show in folder" aria-label="Show in folder"><Icon name="folder" /></button>{/if}
       <div class="more phone"><button class="tool" aria-label="More options" aria-expanded={menu} onclick={() => menu = !menu}><Icon name="more" /></button>
-        {#if menu}<div class="menu">{#if folder !== undefined}<button onclick={() => showFolder(folder!)}>Show in folder</button>{/if}{#if original}<a href={original} target="_blank" rel="noopener">Open original</a>{/if}{#if onjump}<button onclick={() => { onjump?.(item.key); dialog.close(); }}>Jump to post</button>{/if}</div>{/if}
+        {#if menu}<div class="menu">{#if folder !== undefined}<button title="Show in folder" onclick={() => showFolder(folder!)}>Show in folder</button>{/if}{#if original}<a href={original} target="_blank" rel="noopener">Open original</a>{/if}{#if onjump}<button onclick={() => { onjump?.(item.key); dialog.close(); }}>Jump to post</button>{/if}</div>{/if}
       </div>
       <button class="tool" aria-label="Close" title="Close" onclick={() => dialog.close()} bind:this={closer}><Icon name="close" /></button>
     </header>
@@ -154,6 +159,12 @@
   .sender { display: flex; align-items: center; gap: 8px; min-width: 0; color: inherit; text-decoration: none; } a.sender:hover strong { text-decoration: underline; }
   .identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   time { flex: none; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .shared-identity { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .shared-identity nav { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .segment { overflow: hidden; text-overflow: ellipsis; }
+  .segment.filename { color: var(--text); font-weight: 500; }
+  .separator, .modified { flex: none; color: var(--muted); }
+  .modified { font-size: 12.5px; white-space: nowrap; }
   .spacer { flex: 1; }
   button, a { color: inherit; font: inherit; cursor: pointer; }
   button { padding: 0; border: 0; background: none; }
@@ -198,6 +209,8 @@
     .desktop { display: none; } .phone { display: block; }
     .tool { width: 40px; height: 40px; }
     .identity { display: grid; gap: 0; } .identity time { font-size: 11px; }
+    .shared-identity { display: grid; gap: 0; }
+    .modified, .modified time { font-size: 11px; }
     .more { position: relative; }
     .menu { position: absolute; right: 0; top: 44px; min-width: 150px; padding: 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); box-shadow: 0 8px 24px var(--shadow-lg); }
     .menu a, .menu button { display: block; width: 100%; padding: 12px; border-radius: 4px; font-size: 13px; text-align: left; text-decoration: none; }

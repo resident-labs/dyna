@@ -47,7 +47,7 @@
     if (row.entry.dir) { void toggle(row.path); return; }
     const items = (listings.get(row.parent) ?? []).filter(entry => !entry.dir).map(entry => {
       const path = sharedChild(row.parent, entry.name);
-      return sharedMedia(room, path, { key: `shared:${path}`, from: { kind: "owner" }, at: entry.modified }, entry.size);
+      return sharedMedia(room, path, { key: `shared:${path}`, from: { kind: "owner" }, at: entry.modified }, entry.size, entry.modified);
     });
     onopen(items, items.findIndex(item => item.sharedPath === row.path));
   }
@@ -104,7 +104,7 @@
 
 <svelte:window onpointerdown={event => { if (menu && event.target instanceof Node && !menuRoot?.contains(event.target) && !menu.trigger.contains(event.target)) closeMenu(false); }} />
 <div class="files-tree" bind:this={tree}>
-  <VirtualList bind:this={list} items={rows} key={sharedRowKey} label="Room files" role="group" align="top" estimate={48}>
+  <VirtualList bind:this={list} items={rows} key={sharedRowKey} label="Room files" role="group" align="top" estimate={30}>
     {#snippet row(row: SharedRow)}
       {@const depth = Math.min(row.depth, 6)}
       {#if row.kind === "entry"}
@@ -127,7 +127,7 @@
   .files-tree { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
   .files-tree :global(.virtual) { flex: 1; min-height: 0; }
   .row { position: relative; display: flex; align-items: center; }
-  .file { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: 48px; padding: 0 12px; border: 0; background: none; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+  .file { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: 30px; padding: 0 12px; border: 0; background: none; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
   .file:hover { background: var(--hover); }
   .row.selected { background: var(--selected); }
   .file :global(svg) { flex: none; color: var(--muted); }
@@ -138,7 +138,7 @@
   .fold:hover { color: var(--text); }
   .file:focus-visible, .state:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   .fold:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
-  .state { display: block; width: 100%; min-height: 48px; padding: 16px 12px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12.5px; text-align: left; }
+  .state { display: block; width: 100%; min-height: 30px; padding: 6px 12px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12.5px; text-align: left; }
   button.state { cursor: pointer; }
-  @media (hover: none) { .fold { width: 24px; min-height: 44px; } }
+  @media (hover: none) { .fold { width: 24px; min-height: 30px; } }
 </style>

@@ -36,7 +36,7 @@ async function find(page, path) {
  await scroll.evaluate(node => node.scrollTop = 0);
  for (let attempt = 0; attempt < 150; attempt++) {
   if (await row(page, path).count()) { await row(page, path).scrollIntoViewIfNeeded(); return row(page, path); }
-  await scroll.evaluate(node => node.scrollTop += 240);
+  await scroll.evaluate(node => { node.scrollTop = node.scrollTop + node.clientHeight >= node.scrollHeight - 2 ? 0 : node.scrollTop + 240; });
   await page.waitForTimeout(30);
  }
  throw new Error("File row not found: " + path);
@@ -46,7 +46,7 @@ async function showFiles(page, width) {
  await page.locator("aside.members").getByRole("button", { name: "Files", exact: true }).click();
  await page.getByRole("group", { name: "Room files", exact: true }).waitFor();
 }
-for (const theme of ["carbon", "light"]) for (const width of [1440, 390]) {
+for (const theme of ["light", "carbon"]) for (const width of [1440, 390]) {
  const context = await browser.newContext({ storageState: state, viewport: { width, height: 1000 }, hasTouch: width === 390, permissions: ["clipboard-read", "clipboard-write"] });
  const page = await context.newPage();
  page.on("pageerror", error => errors.push(String(error)));
@@ -64,6 +64,8 @@ for (const theme of ["carbon", "light"]) for (const width of [1440, 390]) {
  assert.equal(await page.getByRole("link", { name: "Files", exact: true }).count(), 0, "no Files header icon or route");
  await showFiles(page, width);
  assert.equal(new URL(page.url()).pathname, `/r/${room}`);
+ assert.equal(await page.locator("aside.members").getByRole("button", { name: /^Sessions/ }).first().innerText(), "Sessions 1");
+ assert.equal(await (await find(page, "design")).evaluate(node => node.getBoundingClientRect().height), 30, "compact file rows");
  await (await find(page, "design")).click();
  await (await find(page, "design/pig-spike")).click();
  await find(page, go);
@@ -83,6 +85,11 @@ for (const theme of ["carbon", "light"]) for (const width of [1440, 390]) {
   const dialog = page.getByRole("dialog", { name: "Media viewer", exact: true });
   await dialog.waitFor();
   await dialog.getByRole("region", { name: path.split("/").at(-1), exact: true }).waitFor();
+  assert.equal(await dialog.locator("header .avatar").count(), 0, "shared files are not attributed to the owner");
+  assert.equal(await dialog.getByRole("button", { name: "Jump to post", exact: true }).count(), 0, "tree files have no post jump");
+  assert.ok((await dialog.getByRole("navigation", { name: "File path", exact: true }).innerText()).includes(path.split("/").at(-1)));
+  await dialog.locator(".modified time").waitFor();
+  assert.equal(await dialog.getByRole("button", { name: "Show in folder", exact: true }).getAttribute("title"), "Show in folder");
   const bytes = (await stat(`${process.env.SHARED_ROOT}/${path}`)).size;
   assert.ok((await dialog.locator("footer").innerText()).includes(bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`), "tree media carries its real size");
   if (kind === "go") {
@@ -123,12 +130,14 @@ for (const theme of ["carbon", "light"]) for (const width of [1440, 390]) {
  const dialog = page.getByRole("dialog", { name: "Media viewer", exact: true });
  await dialog.getByRole("region", { name: "room-files.md", exact: true }).waitFor();
  await page.waitForFunction(() => document.querySelector(".media-viewer footer .count")?.textContent.includes("KB"));
+ await dialog.locator(".modified time").waitFor();
+ assert.equal(await dialog.locator("header .avatar").count(), 0);
  if (width === 390) await dialog.getByRole("button", { name: "More options", exact: true }).click();
  await dialog.getByRole("button", { name: "Show in folder", exact: true }).filter({ visible: true }).click();
  await dialog.waitFor({ state: "detached" });
  await row(page, md).waitFor();
  assert.equal(await row(page, md).getAttribute("aria-pressed"), "true");
- assert.equal(await row(page, md).evaluate(node => document.activeElement === node), true);
+ await page.waitForFunction(path => document.activeElement?.getAttribute("data-shared-row") === path, md);
  // Per-conversation tab memory survives in-app back and forward navigation.
  const panel = page.locator("aside.members");
  await panel.getByRole("button", { name: /^Sessions/ }).first().click();
