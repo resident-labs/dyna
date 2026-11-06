@@ -16,7 +16,10 @@ import (
 )
 
 // Execute the actual remote shell, not a fake that always accepts its checksum.
-type localBinaryRunner struct{ sent int }
+type localBinaryRunner struct {
+	sent      int
+	forceGzip bool
+}
 
 func (r *localBinaryRunner) Run(ctx context.Context, in []byte, args ...string) ([]byte, error) {
 	for _, arg := range args {
@@ -25,6 +28,9 @@ func (r *localBinaryRunner) Run(ctx context.Context, in []byte, args ...string) 
 		}
 	}
 	r.sent += len(in)
+	if r.forceGzip && strings.Contains(args[len(args)-1], "command -v zstd") {
+		return []byte("gzip\nDYNA-END 00000000000000000005 000\n"), nil
+	}
 	cmd := exec.CommandContext(ctx, "bash", "-c", args[len(args)-1])
 	cmd.Stdin = bytes.NewReader(in)
 	out, err := cmd.CombinedOutput()
@@ -47,7 +53,7 @@ func packedBinary(t *testing.T, raw []byte) []byte {
 }
 
 func TestInstallRejectsCorruptBytesBeforePublishing(t *testing.T) {
-	r := &localBinaryRunner{}
+	r := &localBinaryRunner{forceGzip: true}
 	h, err := New("user@host", t.TempDir(), "host", r)
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +83,7 @@ func TestConcurrentSameSHAStagesPublishOnlyCompleteObjects(t *testing.T) {
 	release := make(chan struct{})
 	done := make(chan error, 2)
 	for range 2 {
-		h, err := New("user@host", t.TempDir(), "host", &localBinaryRunner{})
+		h, err := New("user@host", t.TempDir(), "host", &localBinaryRunner{forceGzip: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -113,11 +119,11 @@ func TestLateOldStagerCannotDowngradeNewActivation(t *testing.T) {
 	newHash := sha256.Sum256(newRaw)
 	oldSum := hex.EncodeToString(oldHash[:])
 	newSum := hex.EncodeToString(newHash[:])
-	old, err := New("user@host", t.TempDir(), "old", &localBinaryRunner{})
+	old, err := New("user@host", t.TempDir(), "old", &localBinaryRunner{forceGzip: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	newer, err := New("user@host", t.TempDir(), "new", &localBinaryRunner{})
+	newer, err := New("user@host", t.TempDir(), "new", &localBinaryRunner{forceGzip: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +160,7 @@ func TestLateOldStagerCannotDowngradeNewActivation(t *testing.T) {
 func TestPartialOrWrongCompressedObjectDoesNotReplaceCurrent(t *testing.T) {
 	for _, kind := range []string{"truncated gzip", "wrong checksum"} {
 		t.Run(kind, func(t *testing.T) {
-			h, err := New("user@host", t.TempDir(), "host", &localBinaryRunner{})
+			h, err := New("user@host", t.TempDir(), "host", &localBinaryRunner{forceGzip: true})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -186,7 +192,7 @@ func TestPartialOrWrongCompressedObjectDoesNotReplaceCurrent(t *testing.T) {
 }
 
 func TestCompressedStageDoesNotActivate(t *testing.T) {
-	r := &localBinaryRunner{}
+	r := &localBinaryRunner{forceGzip: true}
 	h, err := New("user@host", t.TempDir(), "host", r)
 	if err != nil {
 		t.Fatal(err)

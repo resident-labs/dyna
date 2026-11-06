@@ -48,11 +48,16 @@ func (b *Boxes) startStep(ctx context.Context, spec lifecycle.BoxSpec, step cont
 	}
 	if step == contract.StartBinary {
 		err := work(ctx)
+		var unconfirmed podman.RemoteCancellationUnconfirmed
 		if errors.Is(err, podman.ErrTransferIdle) {
-			return box.StepTimeout{Host: spec.Host, Step: step}
+			timeout := box.StepTimeout{Host: spec.Host, Step: step}
+			if errors.As(err, &unconfirmed) {
+				timeout.Err = unconfirmed
+			}
+			return timeout
 		}
 		var missing podman.BinaryDecompressorMissing
-		if errors.As(err, &missing) {
+		if errors.As(err, &missing) || errors.As(err, &unconfirmed) {
 			return box.RuntimeCreateError{Err: err}
 		}
 		return err
@@ -66,14 +71,31 @@ func (b *Boxes) startStep(ctx context.Context, spec lifecycle.BoxSpec, step cont
 	err := work(podman.WithRemoteCancellation(child))
 	if ctx.Err() == nil && errors.Is(child.Err(), context.DeadlineExceeded) {
 		if step == contract.StartImage {
-			return box.ImageCreateError{Err: child.Err()}
+			return box.ImageCreateError{Err: errors.Join(child.Err(), err)}
 		}
-		return box.StepTimeout{Host: spec.Host, Step: step}
+		timeout := box.StepTimeout{Host: spec.Host, Step: step}
+		var unconfirmed podman.RemoteCancellationUnconfirmed
+		if errors.As(err, &unconfirmed) {
+			timeout.Err = unconfirmed
+		}
+		return timeout
 	}
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return errors.Join(ctx.Err(), err)
+	}
+	var unconfirmed podman.RemoteCancellationUnconfirmed
+	if errors.As(err, &unconfirmed) {
+		return box.RuntimeCreateError{Err: err}
 	}
 	return err
+}
+
+// Leave half the cleanup budget for independently killing/joining an uncertain remote frame, without extending the
+// overall deadline. Work has no parent cancellation, since cleanup is owned even after the original start is stopped.
+func startCleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	deadline := time.Now().Add(box.StartCleanupBudget)
+	work, cancel := context.WithDeadline(context.WithoutCancel(ctx), deadline.Add(-box.StartCleanupBudget/2))
+	return podman.WithRemoteCancellationDeadline(work, deadline), cancel
 }
 
 // Keep podman's cancellation contract visible at this boundary: startStep does not orphan an unjoined goroutine to enforce a

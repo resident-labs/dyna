@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"slices"
 	"sync"
@@ -308,11 +309,26 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 		if row.Limits.CPUs > 0 && cpuMilli > 4000*int64(row.Limits.CPUs) || row.Limits.MemBytes > 0 && memory > 4*row.Limits.MemBytes {
 			placement.Reason = box.PendingRoomLimit
 		} else {
-			placement = box.Admit(hosts, all, b, row.Only...)
+			eligible := hosts
+			if row.RetryHost != "" && b.Image == "" {
+				eligible = make([]box.Host, 0, len(hosts))
+				for _, host := range hosts {
+					if host.Name != row.RetryHost {
+						eligible = append(eligible, host)
+					}
+				}
+			}
+			placement = box.Admit(eligible, all, b, row.Only...)
 		}
 		next := b
+		var admissionCause contract.FailureCause
 		if placement.Reason != "" {
 			next.State, next.Reason = contract.BoxPending, string(poolWait(row, placement.Reason, pools))
+			if row.RetryHost != "" && b.Image == "" {
+				next.State = contract.BoxFailed
+				next.Reason = fmt.Sprintf("creation failed on %s; no other eligible host for the one retry (%s)", row.RetryHost, placement.Reason)
+				admissionCause = contract.CauseCreateFailed
+			}
 		} else if next.GPUCard = placement.Card; b.Image == "" {
 			next.State, next.Reason, next.Host = contract.BoxCreating, "", placement.Host
 			next.Slice, err = box.SliceName(b.ID)
@@ -329,7 +345,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 		if next.State == b.State && next.Reason == b.Reason {
 			continue
 		}
-		changed, err := r.change(ctx, b, next, time.Time{}, row.Failures, "", "", false)
+		changed, err := r.change(ctx, b, next, time.Time{}, row.Failures, admissionCause, "", false)
 		if err != nil {
 			return err
 		}

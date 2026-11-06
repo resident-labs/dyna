@@ -97,7 +97,7 @@ func (r *concurrentInstallRunner) Run(_ context.Context, _ []byte, args ...strin
 	return []byte("DYNA-END 00000000000000000000 000\n"), nil
 }
 
-func TestConcurrentInstallsUsePrivateTemporaryLinks(t *testing.T) {
+func TestConcurrentInstallsUsePrivateOwnedTemporaries(t *testing.T) {
 	r := &concurrentInstallRunner{commands: make(chan string, 2), release: make(chan struct{})}
 	h, err := New("user@host", t.TempDir(), "host", r)
 	if err != nil {
@@ -110,11 +110,13 @@ func TestConcurrentInstallsUsePrivateTemporaryLinks(t *testing.T) {
 			done <- h.InstallBinary(context.Background(), "/data/bin", version, strings.Repeat("a", 64), read)
 		}()
 	}
+	previous := ""
 	for range 2 {
 		command := <-r.commands
-		if !strings.Contains(command, `mktemp "$dir/.dyna.XXXXXX"`) || !strings.Contains(command, `rm -f -- "$tmp"`) || strings.Contains(command, "current") {
-			t.Errorf("unsafe temporary link: %s", command)
+		if command == previous || !strings.Contains(command, `temporary="$dir/.dyna.${DYNA_START_DIR##*/}"`) || !strings.Contains(command, `rm -rf -- "$temporary"`) || strings.Contains(command, "current") {
+			t.Errorf("unsafe private temporary: %s", command)
 		}
+		previous = command
 	}
 	close(r.release)
 	for range 2 {

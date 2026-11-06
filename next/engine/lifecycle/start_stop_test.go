@@ -38,7 +38,7 @@ func TestTypedHostStepTimeoutCountsCreateFailure(t *testing.T) {
 		t.Fatalf("host failures %d: %v", count, err)
 	}
 	rows, _ = rig.st.LifecycleBoxes(rig.ctx)
-	if rows[0].State != contract.BoxFailed || rows[0].Reason != (box.StepTimeout{Host: "h", Step: contract.StartCreate}).Error() {
+	if rows[0].State != contract.BoxFailed || rows[0].Host != "h" || rows[0].RetryHost != "" || rows[0].Reason != (box.StepTimeout{Host: "h", Step: contract.StartCreate}).Error() {
 		t.Fatalf("typed failure not visible: %+v", rows[0])
 	}
 }

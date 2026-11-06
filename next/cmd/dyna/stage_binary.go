@@ -31,6 +31,7 @@ func stageBinaryCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		snapshotAt := time.Now()
 		executable, err := os.Executable()
 		if err != nil {
 			return err
@@ -71,7 +72,7 @@ func stageBinaryCommand() *cobra.Command {
 		if err := savePending(); err != nil {
 			return err
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Staging %s: %d raw bytes; ready-host snapshot %s; %d hosts\n", sum, rawBytes, time.Now().UTC().Format(time.RFC3339), len(hosts))
+		fmt.Fprintf(cmd.OutOrStdout(), "Staging %s: %d raw bytes; ready-host snapshot %s; %d hosts\n", sum, rawBytes, snapshotAt.UTC().Format(time.RFC3339), len(hosts))
 		// A node offline for a whole day cannot keep an abandoned deploy helper forever. The 20-minute deploy wait is separate.
 		ctx, cancel := context.WithTimeout(cmd.Context(), 24*time.Hour)
 		defer cancel()
@@ -81,7 +82,8 @@ func stageBinaryCommand() *cobra.Command {
 			go func() {
 				defer wg.Done()
 				start := time.Now()
-				h, err := podman.New(record.SSH, runtimeDir, "stage-"+sum[:12]+"-"+string(record.Name), nil)
+				hostHash := sha256.Sum256([]byte(record.Name))
+				h, err := podman.New(record.SSH, runtimeDir, "stage-"+sum[:12]+"-"+hex.EncodeToString(hostHash[:16]), nil)
 				if err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "stage %s: %v\n", record.Name, err)
 					return

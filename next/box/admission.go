@@ -10,14 +10,15 @@ import (
 type PendingReason string
 
 const (
-	PendingCreateRetry PendingReason = "create-retry"
-	PendingNoReadyHost PendingReason = "no-ready-host"
-	PendingCPU         PendingReason = "cpu"
-	PendingMemory      PendingReason = "memory"
-	PendingDisk        PendingReason = "disk"
-	PendingRoomHost    PendingReason = "room-host"
-	PendingRoomLimit   PendingReason = "room-limit"
-	PendingInvalidSize PendingReason = "invalid-size"
+	PendingCreateRetry    PendingReason = "create-retry"
+	PendingOtherHostRetry PendingReason = "other-host-create-retry"
+	PendingNoReadyHost    PendingReason = "no-ready-host"
+	PendingCPU            PendingReason = "cpu"
+	PendingMemory         PendingReason = "memory"
+	PendingDisk           PendingReason = "disk"
+	PendingRoomHost       PendingReason = "room-host"
+	PendingRoomLimit      PendingReason = "room-limit"
+	PendingInvalidSize    PendingReason = "invalid-size"
 	// A room's pool brings its next node, so its boxes wait for that rather than for a host.
 	PendingPoolNode   PendingReason = "pool-node"
 	PendingPoolFailed PendingReason = "pool-failed"

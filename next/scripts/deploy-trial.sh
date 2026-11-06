@@ -32,6 +32,7 @@ while (($#)); do
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
+[[ $stage_wait =~ ^(0|[1-9][0-9]{0,3})$ ]] && ((stage_wait <= 1200)) || { echo 'stage-wait must be seconds from 0 to 1200' >&2; exit 2; }
 root=$(git rev-parse --show-toplevel)
 sha=$(git -C "$root" rev-parse --short=12 HEAD)
 tree=$(git -C "$root" rev-parse HEAD:next)
@@ -74,7 +75,6 @@ fi
 # The independent unit owns this immutable artifact until it finishes. Never prune staging/ with stage/.
 # Its ready-host snapshot is read-only, so a new binary cannot migrate the live old engine's store.
 step='stage hosts'
-[[ $stage_wait =~ ^(0|[1-9][0-9]{0,3})$ ]] && ((stage_wait <= 1200)) || { echo 'stage-wait must be seconds from 0 to 1200' >&2; exit 2; }
 sum=$(sha256sum "$stage/dyna" | cut -d ' ' -f 1)
 artifact="$prefix/staging/$sum"
 mkdir -p "$artifact"
@@ -87,7 +87,11 @@ systemd-run --user --collect --unit="$stage_unit" \
 waited=0
 while [[ ! -f $artifact/done && $waited -lt $stage_wait ]]; do sleep 1; waited=$((waited + 1)); done
 if [[ ! -f $artifact/done ]]; then
-  echo "Host staging reached ${stage_wait}s wait cap; copies continue in $stage_unit."
+  if systemctl --user is-active --quiet "$stage_unit"; then
+    echo "Host staging reached ${stage_wait}s wait cap; copies continue in $stage_unit."
+  else
+    echo "Host staging is incomplete and $stage_unit is not active; see its log."
+  fi
   if [[ -f $artifact/pending ]]; then echo 'Not staged:'; cat "$artifact/pending"; else echo 'Ready-host snapshot not yet available; see staging log.'; fi
 fi
 if [[ -f $artifact/staging.log ]]; then cat "$artifact/staging.log"; fi

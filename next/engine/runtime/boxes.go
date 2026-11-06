@@ -154,7 +154,7 @@ func (b *Boxes) installBinary(ctx context.Context, h *podman.Host) error {
 			})
 			job.err = h.InstallBinary(progress, b.Layout.HostBin(), b.Version, b.binSum, b.compressedBinary)
 			if errors.Is(context.Cause(idle), podman.ErrTransferIdle) {
-				job.err = podman.ErrTransferIdle
+				job.err = errors.Join(podman.ErrTransferIdle, job.err)
 			}
 			close(job.done)
 		}()
@@ -707,8 +707,10 @@ func (b *Boxes) RemoveRoom(ctx context.Context, name contract.HostName, room con
 	if err != nil {
 		return err
 	}
-	b.instructionState(h).settle()
-	return h.RemoveRoom(ctx, dir)
+	if err := b.instructionState(h).settle(ctx); err != nil {
+		return err
+	}
+	return h.RemoveRoom(podman.WithRemoteCancellation(ctx), dir)
 }
 
 // RemoveLeftoverBox removes a box that an offline host still held when its room was deleted. The box has no row any more.
@@ -717,7 +719,7 @@ func (b *Boxes) RemoveLeftoverBox(ctx context.Context, name contract.HostName, i
 	if err != nil {
 		return err
 	}
-	return removeHostBox(ctx, h, box.Box{ID: id, Slice: slice}, b.forward(id))
+	return removeHostBox(podman.WithRemoteCancellation(ctx), h, box.Box{ID: id, Slice: slice}, b.forward(id))
 }
 
 // ForgetBox closes the engine's socket for a box that its offline host still holds.
@@ -949,20 +951,15 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	return image.Tag, nil
 }
 
-// createCleanupTimeout bounds cleanup of a failed creation, which must run even after the creation deadline expired.
-const createCleanupTimeout = box.StartCleanupBudget
-
 // cleanupCreate removes what a failed creation made, on its own bounded context: the creation context is often the reason it failed.
 func cleanupCreate(ctx context.Context, h box.HostDriver, spec lifecycle.BoxSpec, forward box.Forward, stacked, created, forwarded, sliced bool) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), createCleanupTimeout)
+	ctx, cancel := startCleanupContext(ctx)
 	defer cancel()
 	if stacked {
 		_ = h.RemovePod(ctx, spec.Box)
-		_ = h.RemoveStackVolumes(ctx, spec.Box)
 	}
 	if created {
 		_ = h.RemoveContainer(ctx, spec.Box)
-		_ = h.RemoveVolume(ctx, spec.Box)
 	}
 	if forwarded {
 		_ = h.RemoveForward(ctx, forward)
@@ -1320,6 +1317,7 @@ func closingLeftovers(ctx context.Context, host interface {
 
 // Stop stops a box and, once it is down, the rest of its pod.
 func (b *Boxes) Stop(ctx context.Context, id contract.BoxID) error {
+	ctx = podman.WithRemoteCancellation(ctx)
 	host, err := b.containerHost(ctx, id)
 	if err != nil {
 		return err
@@ -1331,6 +1329,7 @@ func (b *Boxes) Stop(ctx context.Context, id contract.BoxID) error {
 }
 
 func (b *Boxes) Remove(ctx context.Context, id contract.BoxID) error {
+	ctx = podman.WithRemoteCancellation(ctx)
 	record, err := b.Store.Box(ctx, id)
 	if err != nil {
 		return err
@@ -1573,7 +1572,7 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image stri
 	ok := false
 	defer func() {
 		if !ok {
-			cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), box.StartCleanupBudget)
+			cleanup, stop := startCleanupContext(ctx)
 			defer stop()
 			_ = h.StopContainer(cleanup, spec.Box)
 			_ = h.StopPod(cleanup, spec.Box)

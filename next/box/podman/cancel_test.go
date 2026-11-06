@@ -2,6 +2,7 @@ package podman
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -70,5 +71,70 @@ func TestCancelledStartKillsRemoteProcessBeforeCleanup(t *testing.T) {
 	}
 	if _, err := os.Stat(late); !os.IsNotExist(err) {
 		t.Fatalf("late resource: %v", err)
+	}
+}
+
+type cancellationDebtRunner struct {
+	t                 *testing.T
+	cancel            context.CancelFunc
+	first, confirm    bool
+	commands, cancels int
+}
+
+func (r *cancellationDebtRunner) Run(ctx context.Context, _ []byte, args ...string) ([]byte, error) {
+	for _, arg := range args {
+		if arg == "-O" || arg == "-M" {
+			return nil, nil
+		}
+	}
+	command := args[len(args)-1]
+	if strings.Contains(command, "dyna-cancel") {
+		r.cancels++
+		if ctx.Err() != nil {
+			r.t.Fatal("independent cancellation inherited cancelled context")
+		}
+		if !r.confirm {
+			return nil, errors.New("independent SSH unavailable")
+		}
+		return nil, nil
+	}
+	r.commands++
+	if r.first {
+		r.first = false
+		if r.cancel != nil {
+			r.cancel()
+		}
+		return nil, errors.New("uncertain SSH reply")
+	}
+	return []byte("DYNA-END 00000000000000000000 000\n"), nil
+}
+func TestUnconfirmedCancellationFencesSubsequentCleanup(t *testing.T) {
+	for _, ownerCancel := range []bool{false, true} {
+		t.Run(strconv.FormatBool(ownerCancel), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			runner := &cancellationDebtRunner{t: t, first: true}
+			if ownerCancel {
+				runner.cancel = cancel
+			}
+			h, err := New("user@host", t.TempDir(), "host", runner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = h.run(WithRemoteCancellation(ctx), "true")
+			var unconfirmed RemoteCancellationUnconfirmed
+			if !errors.As(err, &unconfirmed) || len(h.pendingCancels) != 1 {
+				t.Fatalf("unconfirmed cancellation lost: %v, debts %d", err, len(h.pendingCancels))
+			}
+			commands := runner.commands
+			_, err = h.run(context.Background(), "true")
+			if !errors.As(err, &unconfirmed) || runner.commands != commands {
+				t.Fatalf("cleanup passed unknown work: %v, commands %d -> %d", err, commands, runner.commands)
+			}
+			runner.confirm = true
+			if _, err := h.run(context.Background(), "true"); err != nil || len(h.pendingCancels) != 0 || runner.commands != commands+1 {
+				t.Fatalf("confirmed cleanup did not resume: %v, debts %d, commands %d", err, len(h.pendingCancels), runner.commands)
+			}
+		})
 	}
 }
