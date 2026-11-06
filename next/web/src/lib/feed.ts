@@ -1,4 +1,5 @@
 import { sourceLabel } from "./source.ts";
+import { showsPost, type FeedDepthFilter } from "./feed-depth.ts";
 import type { JSONData, Attachment, BoxState, Card, Conversation, Event, FailureCause, PrChange, PrChanged, PrChangeKind, Principal, PrSummary, SessionCloseReason, WorkflowEnded, PostSource } from "./contract.gen.ts";
 import type { BoxFailure } from "./status.ts";
 import type { PendingReason } from "./event.ts";
@@ -112,7 +113,7 @@ const unshown = new Set<Event["type"]>(["shell.job.running", "workflow.step_chan
 // A day row comes before the first row of each local day, so a new day also starts a new name line.
 // With the owner's read position (since), a New row comes before the first later post or failed row by someone else.
 // Structured workflow data is separate from text; JSON-looking text remains a normal post.
-export function feedRows(events: Event[], home: Conversation, pending: Pending[] = [], since = 0, retainedRequests: ReadonlySet<string> = new Set()): Row[] {
+export function feedRows(events: Event[], home: Conversation, pending: Pending[] = [], since = 0, retainedRequests: ReadonlySet<string> = new Set(), depth?: FeedDepthFilter): Row[] {
   const rows: Row[] = [];
   let work: Event[] = [];
   let deferred: Row[] = [];
@@ -153,6 +154,8 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
   };
   // A post to other people, its mentions or a final reply's target, starts a new run with its own name line.
   const post = (key: string, seq: number, from: Principal, at: string, text: string, attachments: Attachment[], to: Principal[] = [], pending?: Pending, source?: PostSource | null, target?: string, data?: JSONData, dataAttachment?: number | null) => {
+    // Filter only posts, before grouping and dividers. Activity and other non-post rows always remain.
+    if (home.kind === "feed" && !showsPost(from, to, depth)) return;
     flush();
     dated(at);
     fresh(seq, from);
@@ -254,12 +257,13 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     }
     if (event.type === "turn.ended") {
       // A final reply that no post of the session already carried is the session's answer here.
-      const answer = event.body.final && (event.body.replies ?? []).find(({ reply, posted }) =>
+      const answers = (event.body.replies ?? []).filter(({ reply, posted }) =>
         reply.kind === "final" && !posted && sameHome(reply.home ?? { kind: "feed" }, home));
+      const answer = !!event.body.final && answers.length > 0;
       const turn = turns.get(event.body.turn);
       turns.delete(event.body.turn);
       if (event.body.final && answer) {
-        post(`a${event.seq}`, event.seq, { kind: "session", session: event.body.session }, event.at, event.body.final, event.body.attachments ?? [], answer.reply.target ? [answer.reply.target] : [], undefined, undefined, undefined, event.body.data, event.body.dataAttachment);
+        post(`a${event.seq}`, event.seq, { kind: "session", session: event.body.session }, event.at, event.body.final, event.body.attachments ?? [], answers.flatMap(({ reply }) => reply.target ? [reply.target] : []), undefined, undefined, undefined, event.body.data, event.body.dataAttachment);
       }
       // A failed turn always gets its own row, even after its answer; it never folds into a work row. Its error is the
       // harness's raw text (r8), so the row shows only the owner words for its typed cause.

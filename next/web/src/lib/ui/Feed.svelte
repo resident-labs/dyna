@@ -16,10 +16,12 @@
   import { runCounts, runWords } from "../workflow.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import { sourceLabel } from "../source.ts";
+  import type { FeedDepthFilter } from "../feed-depth.ts";
   import type { Conversation, PostRequest, Principal, RoomID } from "../contract.gen.ts";
 
   // unsent holds the app's failed sends of this conversation; see EventWindow.onunsent.
-  let { store, hasRoom, home, navigate, admin, operate, intro, unsent, onunsent, onsettled, onforward, waiting, onclosed, onjobs, target, ontarget, element = $bindable() }: {
+  let { store, hasRoom, home, navigate, admin, operate, intro, unsent, onunsent, onsettled, onforward, waiting, onclosed, onjobs, target, ontarget, depth, element = $bindable() }: {
+    depth?: FeedDepthFilter;
     store: RoomStore; hasRoom: (room: RoomID) => boolean; home: Conversation; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; admin: boolean; operate: boolean; intro: Snippet<[boolean]>; unsent: PostRequest[];
     onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onforward: (quote: Quote) => void; waiting?: Quote; onclosed: () => void; onjobs: (session: string) => void; target?: number; ontarget: () => void; element?: HTMLDivElement;
   } = $props();
@@ -80,7 +82,7 @@
   // finished, and the failure ends the DM, as a DM's read leaves box events out.
   const retainedRequests = new SvelteSet<string>();
   $effect(() => { for (const request of store.requests.values()) retainedRequests.add(request.id); });
-  let rows = $derived(feedRows(view.ordered, home, pending, since, retainedRequests));
+  let rows = $derived(feedRows(view.ordered, home, pending, since, retainedRequests, depth));
   // The post right under the New line; its bar stays inside the row, clear of the New label.
   // The last post of a run takes half the gap to the next run, so a hover or tint sits evenly on the words.
   let lastPosts = $derived(new Set(rows.flatMap((row, index) => {
