@@ -129,6 +129,26 @@ test("splits activity at midnight and caps failures", () => {
   assert.deepEqual(dayRows(events, { kind: "feed" }).map(row => row.kind), []);
 });
 
+test("host switch changes are plain room-log notices with only the changed switches", () => {
+  const raw = { seq: 1, id: "1", at: "", room: "r", from: { kind: "owner", device: "web-device" }, type: "host.switches_changed" };
+  for (const [body, line] of [
+    [{ host: "build", ci: true }, "You set host build: ci on"],
+    [{ host: "build", agents: false }, "You set host build: agents off"],
+    [{ host: "build", agents: true, ci: false }, "You set host build: agents on, ci off"],
+  ] as const) {
+    const changed = decodeEvent({ ...raw, body });
+    assert.ok(changed);
+    assert.equal(subject(changed), undefined);
+    const rows = feedRows([changed], { kind: "feed" });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].kind, "notice");
+    assert.equal(describe(changed, id => id), line);
+    assert.deepEqual(feedRows([changed], { kind: "dm", session: "worker" }), []);
+  }
+  assert.equal(decodeEvent({ ...raw, body: { host: "build", ci: "on" } }), undefined);
+  assert.equal(decodeEvent({ ...raw, body: { ci: true } }), undefined);
+});
+
 test("a room limit change is one plain line, and zero means no limit", () => {
   const limits = (seq: number, cpus: number, memBytes: number) => event(seq, { type: "room.limits_changed", body: { cpus, memBytes } }, { kind: "owner" });
   const rows = feedRows([limits(1, 8, 16 * 2 ** 30), limits(2, 1, 0), limits(3, 0, 1.5 * 2 ** 30), limits(4, 0, 10 * 2 ** 20), limits(5, 0, 0)], { kind: "feed" });
