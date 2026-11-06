@@ -113,6 +113,8 @@
   .markdown :global(code) { font: 13px var(--mono); font-variant-ligatures: none; }
   .markdown :global(blockquote) { padding-left: 10px; border-left: 2px solid var(--line); color: var(--muted); }
   .markdown :global(a) { color: var(--focus); }
+  .markdown :global(a[data-shared-path]) { font: inherit; text-decoration: none; }
+  .markdown :global(a[data-shared-path]:hover) { text-decoration: underline; }
   /* A name in the text, as in Discord: its session's color on a soft tint. It stays inline, so it wraps with the text and never changes a line's height. */
   .markdown :global(a[data-mention]) { padding: 0 2px; border-radius: 6px; background: oklch(var(--id-face) var(--hue) / var(--id-alpha)); color: oklch(var(--id-name) var(--hue)); font-weight: 600; text-decoration: none; box-decoration-break: clone; }
   .markdown :global(a[data-mention]:focus-visible) { outline: 2px solid var(--focus); outline-offset: 0; }

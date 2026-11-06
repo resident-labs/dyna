@@ -1,6 +1,6 @@
 <script lang="ts">
   import { roomIsLive } from "./lib/source.ts";
-  import { paneCounts, filesPath, roomRoute, settingsRoute } from "./lib/routes.ts";
+  import { paneCounts, roomRoute, settingsRoute } from "./lib/routes.ts";
   import { nextArea } from "./lib/areas.ts";
   import { watchHello, watchStreamState } from "./lib/stream.ts";
   import { watchConnect } from "./lib/connect-watch.ts";
@@ -32,9 +32,10 @@
   import Icon from "./lib/ui/Icon.svelte";
   import Avatar, { setSessionLabels } from "./lib/ui/Avatar.svelte";
   import { setMentionLinks, setPathLinks } from "./lib/ui/Markdown.svelte";
-  import RoomFiles from "./lib/ui/RoomFiles.svelte";
+  import FilesTree from "./lib/ui/FilesTree.svelte";
   import MediaViewer from "./lib/ui/MediaViewer.svelte";
-  import { sharedMedia } from "./lib/shared.ts";
+  import { sharedMedia, sharedFileSize, setSharedFolder } from "./lib/shared.ts";
+  import { panelTab, type PanelTab } from "./lib/panel-tabs.ts";
   import type { MediaItem } from "./lib/media.ts";
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
   import { boxReason, count, quoted, turnReason, waits, type Quote } from "./lib/feed.ts";
@@ -142,14 +143,14 @@
     if (/^\/r\/[^/]+/.test(path)) firstRoom = false;
     if (inSettings) return;
     behind = path;
-    section = /\/r\/[^/]+\/files(?:\/|$)/.test(path) ? "files" : /\/instructions\/?$/.test(path) ? "instructions" : /\/r\/[^/]+\/new\/?$/.test(path) ? "new-session" : /^\/rooms\/new\/?$/.test(path) ? "new-room" : undefined;
+    section = /\/instructions\/?$/.test(path) ? "instructions" : /\/r\/[^/]+\/new\/?$/.test(path) ? "new-session" : /^\/rooms\/new\/?$/.test(path) ? "new-room" : undefined;
   }
   window.addEventListener("popstate", follow);
   function dismissRequests(event: MouseEvent) {
     if (section === "requests" && event.target instanceof Node && !page?.contains(event.target) && !requestsButton?.contains(event.target)) section = undefined;
   }
   // The requests view shows in place of the conversation until Back, Escape or the control that opened it.
-  let section: "files" | "requests" | "instructions" | "new-session" | "new-room" | undefined = $state(/\/r\/[^/]+\/files(?:\/|$)/.test(behind) ? "files" : /\/instructions\/?$/.test(behind) ? "instructions" : /\/r\/[^/]+\/new\/?$/.test(behind) ? "new-session" : /^\/rooms\/new\/?$/.test(behind) ? "new-room" : undefined);
+  let section: "requests" | "instructions" | "new-session" | "new-room" | undefined = $state(/\/instructions\/?$/.test(behind) ? "instructions" : /\/r\/[^/]+\/new\/?$/.test(behind) ? "new-session" : /^\/rooms\/new\/?$/.test(behind) ? "new-room" : undefined);
   let requestsButton: HTMLButtonElement | undefined = $state();
   function openInstructions() {
     history.pushState({ instructionsBack: behind }, "", `/r/${encodeURIComponent(room!)}/instructions`);
@@ -162,7 +163,7 @@
     follow();
   }
   async function closeSection(tapped = false) {
-    if (section === "files" || section === "instructions" || section === "new-session" || section === "new-room") {
+    if (section === "instructions" || section === "new-session" || section === "new-room") {
       if (history.state?.instructionsBack) history.back();
       else { history.replaceState(null, "", room ? `/r/${encodeURIComponent(room)}` : "/"); follow(); }
       return;
@@ -219,8 +220,25 @@
     follow();
   }
   let mentioned = $derived(store ? mentionTargets(store.names, store.sessions) : new Map<string, string>());
-  let sharedItem = $state<MediaItem>();
-  setPathLinks((path, source) => { if (room) sharedItem = sharedMedia(room, path, source); });
+  let sharedItems = $state<MediaItem[]>([]), sharedInitial = $state(0), sharedJump = $state(false);
+  let folderTarget = $state<{ path: string; conversation: string; request: number }>();
+  setPathLinks((path, source) => {
+    if (!room) return;
+    const item = sharedMedia(room, path, source);
+    sharedInitial = 0; sharedJump = true; sharedItems = [item];
+    // A message has no tree metadata. The one-byte Range response supplies its real size.
+    void fetch(item.src!, { headers: { Range: "bytes=0-0" } }).then(response => {
+      const bytes = sharedFileSize(response);
+      void response.body?.cancel();
+      if (sharedJump && sharedItems[0]?.key === item.key && sharedItems[0]?.src === item.src && bytes !== undefined) sharedItems = [{ ...item, sizeKnown: true, file: { ...item.file, bytes } }];
+    }, () => {});
+  });
+  setSharedFolder(path => {
+    sharedItems = [];
+    tabs.set(key, "files");
+    folderTarget = { path, conversation: key, request: (folderTarget?.request ?? 0) + 1 };
+    void showPanel(true);
+  });
   setMentionLinks(() => ({ room: store?.room ?? "", sessions: mentioned, open: go }));
   // A link to a DM closes a phone's panel. When wide, the link may leave with the list as About opens, and focus goes to the panel.
   function openSession(event: MouseEvent & { currentTarget: HTMLAnchorElement }) {
@@ -438,9 +456,10 @@
       }
       goKey = event.key.toLowerCase() === "g" ? event.timeStamp : 0;
     }
+    if (event.key === "Escape" && document.querySelector(".media-viewer[open]")) return;
     if (event.key === "Escape" && drawer) void showDrawer(false);
     else if (event.key === "Escape" && panel && !wide.current) void showPanel(false);
-    else if (event.key === "Escape" && section && !inSettings && !document.querySelector(".media-viewer[open]")) void closeSection();
+    else if (event.key === "Escape" && section && !inSettings) void closeSection();
     if (event.key !== "F6") return;
     event.preventDefault();
     if (covered) return;
@@ -508,7 +527,7 @@
   let shown = $derived(session ? store?.status(session) ?? "idle" : "idle");
   let word = $derived(session ? (shown === "idle" || shown === "background" ? status(session) : shown === "failed" ? `Failed · ${status(session)}` : stateWords[shown]) : "");
   // The right panel opens on About in a DM and on Sessions in a room, and remembers the last choice per conversation.
-  const tabs = new SvelteMap<string, "sessions" | "about">();
+  const tabs = new SvelteMap<string, PanelTab>();
   // Below 761 px the sessions panel is hidden; a header button opens it over the feed.
   // Opening moves focus into the panel; closing returns it to the button if the panel held it.
   let panel = $state(false);
@@ -567,7 +586,7 @@
   // close (Escape) shows the ring; a tap open focuses the dialog itself, and no ring follows a tap either way.
   const phone = new MediaQuery("max-width: 640px");
   // The full-screen computer covers everything else, so nothing behind it takes focus.
-  let covered = $derived(!!watching && computerFull && !inSettings && section !== "instructions" && section !== "files");
+  let covered = $derived(!!watching && computerFull && !inSettings && section !== "instructions");
   let drawer = $state(false);
   let menuButton: HTMLButtonElement | undefined = $state();
   async function showDrawer(open: boolean, refocus = true, tapped = false) {
@@ -622,7 +641,8 @@
   // A crew's page is its run, and a crew takes no messages. A closed crew past workflow.list's newest runs says so when asked.
   let crew = $derived(!!session && !!store?.workflows.has(session));
   $effect(() => { if (closed && session && !crew) void store?.readWorkflow(session); });
-  let about = $derived(!!session && !closed && (tabs.get(key) ?? "about") === "about");
+  let selectedTab = $derived(panelTab(tabs, key, !!session && !closed));
+  let about = $derived(selectedTab === "about");
   // room.list gives the feed's read position. Opening a session's DM shows the owner its failure, which clears the mark.
   // This device was revoked while its page stayed open.
   let revoked = $state(false);
@@ -637,7 +657,7 @@
   });
   // The tab names the page only. Counts stay out: a count in the title would act as an unread badge (spec 5.13).
   // An open Instructions or Requests section names the tab too. Settings names its own open pane, so this effect leaves Settings alone.
-  const sectionNames: Record<string, string> = { files: "Files", instructions: "Instructions", requests: "Requests", "new-session": "New session", "new-room": "New room" };
+  const sectionNames: Record<string, string> = { instructions: "Instructions", requests: "Requests", "new-session": "New session", "new-room": "New room" };
   let tabTitle = $derived(sectionNames[section ?? ""] ? `${title} · ${sectionNames[section ?? ""]}` : title);
   $effect(() => { if (!inSettings) document.title = `${tabTitle} · Dyna`; });
 </script>
@@ -710,7 +730,6 @@
     {#if dropping}<p class="drop-label">Drop files to attach</p>{/if}
     {#if (section === "new-room" || firstRoom)}<NewRoom {rooms} first={firstRoom} onclose={() => void closeSection()} oncreated={id => { void attention.created(id).then(() => { firstRoom = false; openLocation(id); }); }} />
     {:else if section === "new-session" && room && store && store.ready}<NewSession {room} {roomName} sessions={store.members} onclose={() => void closeSection()} onstarted={(id, brief) => { startingBriefs[id] = brief; openLocation(room!, id); }} />
-    {:else if section === "files" && room && store && !unavailable}{#key room}<RoomFiles {room} path={filesPath(behind)} {navigate} onclose={() => void closeSection()} />{/key}
     {:else if section === "instructions" && room && store && !unavailable}<Instructions {room} {roomName} rooms={rooms.length} sessions={store.sessions.size} onclose={() => void closeSection()} />
     {:else}
     <header class="bar" class:session-bar={!!session}>{#if room && session && phone.current}<a class="menu-toggle" href={"/r/" + encodeURIComponent(room)} aria-label={`Back to ${roomName}`} title={`Back to ${roomName}`}
@@ -762,21 +781,24 @@
       {:else}<p class="readonly" role="status">This device can read the room but not post in it.</p>{/if}
     {/if}
     {/if}
-    <div class="terminal-holder" hidden={section === "instructions" || section === "files"}>
+    <div class="terminal-holder" hidden={section === "instructions"}>
       <TermDock bind:this={terminals} terminal={attention.can("terminal")} bind:element={dock} onempty={() => composer?.focus()} phone={phone.current} strip={!!room && !session && !unavailable}
         sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
     </div>
   </main>
-  {#if sharedItem && room}<MediaViewer items={[sharedItem]} initial={0} {room} name={id => store?.names.get(id) ?? "Session"} root={id => !!id && !store?.sessions.get(id)?.parent} loadVisual={async () => []} onclose={() => sharedItem = undefined} onjump={key => { if (session) thread?.jumpMedia(key); else view?.jumpMedia(key); }} />{/if}
+  {#if sharedItems.length && room}<MediaViewer items={sharedItems} initial={sharedInitial} {room} name={id => store?.names.get(id) ?? "Session"} root={id => !!id && !store?.sessions.get(id)?.parent} loadVisual={async () => []} onclose={() => sharedItems = []} onjump={sharedJump ? key => { if (session) thread?.jumpMedia(key); else view?.jumpMedia(key); } : undefined} />{/if}
   {#if room}
     <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} aria-label="Sessions" tabindex="-1" role={panel && phone.current && !covered ? "dialog" : undefined} aria-modal={(panel && phone.current && !covered) || undefined} bind:this={members} inert={drawer || covered || inSettings}>
       {#if phone.current}{@render sheetHandle("sessions")}{/if}
-      {#if session && !closed}<header class="bar tabs">
-        <button type="button" aria-pressed={!about} onclick={() => tabs.set(key, "sessions")}>Sessions</button>
-        <button type="button" aria-pressed={about} onclick={() => tabs.set(key, "about")}>About</button></header>
-      {:else}<header class="bar"><span class="session-summary"><strong>Sessions{#if store?.ready} <span class="count">{store.members.length}</span>{/if}</strong>{#if store?.ready}<span class="count">{sessionCountsLine(store.counts)}</span>{/if}</span>{#if attention.can("operate")}<button type="button" class="tool" title="New session" aria-label="New session" onclick={() => openNew("session")}><Icon name="plus" /></button>{/if}</header>{/if}
+      <header class="bar tabs" aria-label="Panel tabs">
+        <button type="button" aria-pressed={selectedTab === "sessions"} onclick={() => tabs.set(key, "sessions")}>Sessions{#if !session && store?.ready} <span class="count">{store.members.length}</span>{/if}</button>
+        {#if session && !closed}<button type="button" aria-pressed={about} onclick={() => tabs.set(key, "about")}>About</button>{/if}
+        <button type="button" aria-pressed={selectedTab === "files"} onclick={() => tabs.set(key, "files")}>Files</button>
+        {#if !session && selectedTab === "sessions" && attention.can("operate")}<button type="button" class="tool" title="New session" aria-label="New session" onclick={() => openNew("session")}><Icon name="plus" /></button>{/if}
+      </header>
       <!-- A long tree renders only its visible rows, through the feed's shared list (spec: long lists are virtual). -->
-      {#if about && session && store}<AboutPanel {store} room={room} {session} switchable={attention.can("operate")} shown={panelShown} navigate={openSession} onclosed={() => openLocation(room!)} />
+      {#if selectedTab === "files"}{#key room}<FilesTree {room} target={folderTarget?.conversation === key ? folderTarget : undefined} onopen={(items, initial) => { sharedItems = items; sharedInitial = initial; sharedJump = false; }} />{/key}
+      {:else if about && session && store}<AboutPanel {store} room={room} {session} switchable={attention.can("operate")} shown={panelShown} navigate={openSession} onclosed={() => openLocation(room!)} />
       {:else if tree.length}<div class="tree"><VirtualList bind:this={sessionList} items={tree} key={treeKey}
         label="Session list" role="group" align="top" estimate={48}>
         {#snippet row(entry: TreeRow)}
@@ -822,9 +844,6 @@
   a.member { min-height: 48px; color: var(--text); text-decoration: none; }
   /* The title keeps the total; the second line separates work, background waits and owner-needed sessions. */
   aside.members > header strong { font-size: 16px; }
-  .session-summary { display: grid; min-width: 0; gap: 1px; }
-  .session-summary > .count { font-size: 12.5px; }
-  .session-summary strong > .count { margin-left: 6px; font-weight: 400; }
   /* The header's face rings its dot in the header's color. */
   main > header { --ring: var(--bg); }
   .feed:has(> :global(.blocked)) > :global(:not(.blocked)) { display: none; }
@@ -852,9 +871,9 @@
   .paused span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .paused button { flex: none; }
   .readonly { flex: none; margin: 0; padding: 12px 16px 14px 30px; color: var(--muted); font-size: 12.5px; }
-  .shell.open.tucked, .shell.open:has(:global(:is(.instructions, .room-files))) { grid-template-columns: 64px 1fr; }
-  .shell.open:has(:global(:is(.instructions, .room-files))) aside.members { display: none; }
-  @media (max-width: 640px) { .shell.open:has(:global(:is(.instructions, .room-files))) { grid-template-columns: minmax(0, 1fr); } }
+  .shell.open.tucked, .shell.open:has(:global(.instructions)) { grid-template-columns: 64px 1fr; }
+  .shell.open:has(:global(.instructions)) aside.members { display: none; }
+  @media (max-width: 640px) { .shell.open:has(:global(.instructions)) { grid-template-columns: minmax(0, 1fr); } }
   .shell.tucked > aside.members { display: none; }
   .narrow, .menu-toggle { display: none; }
   @media (max-width: 760px) { .narrow { display: inline; } }

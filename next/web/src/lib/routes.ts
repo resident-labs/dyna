@@ -17,17 +17,7 @@ export const settingsPanes: readonly { id: string; label: string; icon: "palette
 export function paneCounts(rooms: readonly { deleting?: boolean }[] | undefined): Partial<Record<string, number>> {
   return rooms ? { approvals: rooms.filter(room => !room.deleting).length } : {};
 }
-export const roomRoute = /^\/r\/([^/]+)(?:\/s\/([^/]+)|\/instructions|\/files(?:\/.*)?|\/new)?\/?$/;
-// Decode each file path segment separately; malformed escapes stay a not-found route.
-export function filesPath(path: string): string | undefined {
-  const match = /^\/r\/[^/]+\/files(?:\/(.*))?$/.exec(path);
-  if (!match) return undefined;
-  try {
-    const parts = (match[1] ?? "").split("/").filter(Boolean).map(decodeURIComponent);
-    if (parts.some(part => part === "." || part === ".." || part.includes("/") || part.includes("\\"))) return undefined;
-    return parts.join("/");
-  } catch { return undefined; }
-}
+export const roomRoute = /^\/r\/([^/]+)(?:\/s\/([^/]+)|\/instructions|\/new)?\/?$/;
 export const settingsRoute = /^\/settings(\/|$)/;
 
 // The one part of path after prefix, decoded: a Settings list page's open item. undefined when path does not start

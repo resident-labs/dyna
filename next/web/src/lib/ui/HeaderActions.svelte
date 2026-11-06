@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { filesURL } from "../shared.ts";
   import { requestsFor } from "../request-groups.ts";
   import { roomRuns } from "../workflow.ts";
   import type { Attention } from "../attention.svelte.ts";
@@ -39,7 +38,6 @@
 <div class="actions" class:session={!!session}>
   <JobsTool bind:this={jobsTool} {sessions} {allSessions} {phone} {onopen} />
   {#if anyRuns}<RunsTool bind:this={runsTool} running={runs.running} past={runs.past} room={store.room} {session} {phone} {navigate} />{/if}
-  <a class="requests files" href={filesURL(store.room)} onclick={navigate} title="Files" aria-label="Files"><Icon name="folder" /></a>
   <button type="button" class="requests" class:waiting={waiting > 0} bind:this={requestsButton} aria-pressed={requestsOpen}
     aria-label={waiting ? `${waiting} requests wait for you` : "Requests"} title="Requests" onclick={onrequests}>
     <Icon name="inbox" />{#if waiting}<StatusPill tone="warning" label="Waiting" count={waiting} />{/if}
@@ -59,7 +57,6 @@
 <style>
   .actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
   .requests { display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
-  .files { text-decoration: none; }
   .requests:hover, .requests[aria-pressed="true"] { background: var(--hover); color: var(--text); }
   @media (min-width: 761px) { .requests.waiting { margin-right: 4px; } }
   .panel-toggle { display: flex; align-items: center; gap: 8px; }
