@@ -1181,15 +1181,11 @@ func (b *Boxes) restoreHost(ctx context.Context, name contract.HostName) error {
 	if err != nil {
 		return err
 	}
-	engineHost, err := b.onEngineHost(ctx, name)
-	if err != nil {
-		return err
-	}
 	var failed []error
-	if !engineHost {
-		if err := host.AddForward(ctx, b.shareForward()); err != nil {
-			failed = append(failed, fmt.Errorf("shared folder: %w", err))
-		}
+	// A relocated engine host can still have boxes bound to its preexisting FUSE mount.
+	// Restore its socket too; new boxes on that host still bind the central folder directly.
+	if err := host.AddForward(ctx, b.shareForward()); err != nil {
+		failed = append(failed, fmt.Errorf("shared folder: %w", err))
 	}
 	for _, record := range records {
 		if record.Host != name || record.State == contract.BoxDeleted || record.State == contract.BoxFailed {
