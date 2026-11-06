@@ -28,7 +28,7 @@ func fakeTools(t *testing.T, tools map[string]string) string {
 // A host with no mount must keep the plain folder under it empty: a box there would write where no other host can see.
 func TestAFolderOnADownMountIsNotMade(t *testing.T) {
 	folder := filepath.Join(t.TempDir(), "room", "shared")
-	h, err := New("user@host", t.TempDir(), "host", localShell{path: fakeTools(t, map[string]string{"mountpoint": "exit 1"}) + ":" + os.Getenv("PATH")})
+	h, err := New("user@host", t.TempDir(), "host", localShell{path: fakeTools(t, map[string]string{"mountpoint": "exit 1"}) + ":" + os.Getenv("PATH")}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestAFolderOnADownMountIsNotMade(t *testing.T) {
 
 func TestAFolderOnAnUpMountIsMade(t *testing.T) {
 	folder := filepath.Join(t.TempDir(), "room", "shared")
-	h, err := New("user@host", t.TempDir(), "host", localShell{path: fakeTools(t, map[string]string{"mountpoint": "exit 0"}) + ":" + os.Getenv("PATH")})
+	h, err := New("user@host", t.TempDir(), "host", localShell{path: fakeTools(t, map[string]string{"mountpoint": "exit 0"}) + ":" + os.Getenv("PATH")}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestAFolderOnAnUpMountIsMade(t *testing.T) {
 }
 
 func TestStartRunRefusesADownMount(t *testing.T) {
-	h, err := New("user@host", t.TempDir(), "host", localShell{path: fakeTools(t, map[string]string{"mountpoint": "exit 1", "podman": "echo started a box >&2; exit 1"}) + ":" + os.Getenv("PATH")})
+	h, err := New("user@host", t.TempDir(), "host", localShell{path: fakeTools(t, map[string]string{"mountpoint": "exit 1", "podman": "echo started a box >&2; exit 1"}) + ":" + os.Getenv("PATH")}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestShareNeedsSaysWhatAHostLacks(t *testing.T) {
 
 func TestCheckReportsAHostWithoutFUSE(t *testing.T) {
 	body := "fusermount3 is missing: install fuse3"
-	h, err := New("user@host", t.TempDir(), "host", &runner{body: body, status: 1})
+	h, err := New("user@host", t.TempDir(), "host", &runner{body: body, status: 1}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestCheckReportsAHostWithoutFUSE(t *testing.T) {
 
 func TestEnsureShareSaysWhyItFailed(t *testing.T) {
 	body := "the mount did not come up\ndetail"
-	h, err := New("user@host", t.TempDir(), "host", &runner{body: body, status: 1})
+	h, err := New("user@host", t.TempDir(), "host", &runner{body: body, status: 1}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestEnsureShareSaysWhyItFailed(t *testing.T) {
 
 func TestHeartbeatSaysWhetherTheMountIsUp(t *testing.T) {
 	r := &seqRunner{bodies: []string{"dyna-share up\ndyna-load 1 1\n", "dyna-load 1 2\n"}, drained: make(chan struct{})}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestEnsureShareStartsAMountWhereThereIsNone(t *testing.T) {
 
 func TestEnsureShareTellsAPermanentFailureFromATransientOne(t *testing.T) {
 	for status, permanent := range map[int]bool{1: false, 2: true} {
-		h, err := New("user@host", t.TempDir(), "host", &runner{body: "why", status: status})
+		h, err := New("user@host", t.TempDir(), "host", &runner{body: "why", status: status}, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}

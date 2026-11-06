@@ -92,7 +92,7 @@ func TestRealImagesWarmAndPrune(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	h, err := New("local", t.TempDir(), "host", hereShell{})
+	h, err := New("local", t.TempDir(), "host", hereShell{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

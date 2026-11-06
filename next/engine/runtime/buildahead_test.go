@@ -137,7 +137,7 @@ func newAheadBoxes(t *testing.T, r *aheadHost, hosts []box.Host, rooms map[contr
 	}
 	b.hosts = make(map[contract.HostName]*podman.Host)
 	for _, host := range hosts {
-		h, err := podman.New("user@host", t.TempDir(), string(host.Name), r)
+		h, err := podman.New("user@host", t.TempDir(), string(host.Name), r, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -24,7 +24,7 @@ func (r *instructionRunner) Run(ctx context.Context, input []byte, args ...strin
 
 func TestSyncInstructionRepairsRemoteContent(t *testing.T) {
 	r := &instructionRunner{}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

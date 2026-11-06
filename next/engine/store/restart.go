@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
@@ -35,15 +34,55 @@ func (s *Store) sendNotice(ctx context.Context, notice contract.Event, id contra
 	})
 }
 
-// RestartSession resets a failed box for admission and publishes its transition.
-func (s *Store) RestartSession(ctx context.Context, id contract.SessionID, event, notice contract.Event) (bool, error) {
+// restartSnapshotSQL fences close and any change to the failed incarnation observed
+// by the authorized caller before joining runtime work. No event grants deletion.
+const restartSnapshotSQL = `SELECT EXISTS (SELECT 1 FROM boxes b JOIN sessions s ON s.id=b.session JOIN rooms r ON r.id=s.room WHERE b.id=? AND b.session=? AND coalesce(b.host,'')=? AND b.image=? AND b.updated_at=? AND b.reason=? AND b.slice=? AND b.created_at=? AND b.state='failed' AND b.want IN ('run','stop') AND s.state='open' AND s.closed_at IS NULL AND r.state!='deleting')`
+
+func (s *Store) CanRestartSession(ctx context.Context, old box.Box) (current bool, err error) {
+	if old.State != contract.BoxFailed {
+		return false, nil
+	}
+	err = s.Read().QueryRowContext(ctx, restartSnapshotSQL, old.ID, old.Session, old.Host, old.Image, old.Updated.UnixMilli(), old.Reason, old.Slice, old.PlacedAt.UnixMilli()).Scan(&current)
+	return current, err
+}
+
+// BoxLeftovers lists all known old allocations, including prior retry hosts.
+// Their volume records remain until explicit destructive cleanup confirms them.
+func (s *Store) BoxLeftovers(ctx context.Context, id contract.BoxID) ([]Leftover, error) {
+	rows, err := s.Read().QueryContext(ctx, `SELECT host,room,box,slice FROM room_leftovers WHERE box=? ORDER BY host,room`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var leftovers []Leftover
+	for rows.Next() {
+		var l Leftover
+		if err := rows.Scan(&l.Host, &l.Room, &l.Box, &l.Slice); err != nil {
+			return nil, err
+		}
+		leftovers = append(leftovers, l)
+	}
+	return leftovers, rows.Err()
+}
+
+// RestartSession commits a reset only after the API has synchronously removed the
+// old host resources. This is persistence, not runtime deletion authorization.
+func (s *Store) RestartSession(ctx context.Context, old box.Box, event, notice contract.Event) (bool, error) {
+	if old.State != contract.BoxFailed {
+		return false, nil
+	}
 	var restarted bool
 	err := s.Write(ctx, func(tx *sql.Tx) error {
-		b := box.Box{Session: id, State: contract.BoxFailed}
-		err := tx.QueryRowContext(ctx, `SELECT b.id,coalesce((SELECT h.name FROM hosts h WHERE h.name=b.host AND h.state='ready' AND h.create_problem=''),'') FROM boxes b JOIN sessions s ON s.id=b.session WHERE s.id=? AND s.state='open' AND s.closed_at IS NULL AND b.state='failed'`, id).Scan(&b.ID, &b.Host)
-		if errors.Is(err, sql.ErrNoRows) {
+		if s.volumeRemovals[old.ID] != nil {
 			return nil
 		}
+		var current bool
+		if err := tx.QueryRowContext(ctx, restartSnapshotSQL, old.ID, old.Session, old.Host, old.Image, old.Updated.UnixMilli(), old.Reason, old.Slice, old.PlacedAt.UnixMilli()).Scan(&current); err != nil || !current {
+			return err
+		}
+		b := old
+		// Deletion has completed on the OLD host, even if admission must detach it.
+		err := tx.QueryRowContext(ctx, `SELECT coalesce((SELECT name FROM hosts WHERE name=? AND state='ready' AND create_problem=''),'')`, old.Host).Scan(&b.Host)
 		if err != nil {
 			return err
 		}
@@ -53,12 +92,14 @@ func (s *Store) RestartSession(ctx context.Context, id contract.SessionID, event
 		}
 		body.Cause = event.Body.(contract.BoxChanged).Cause
 		event.Body = body
-		// Record the old host's partial resources before detaching its quarantined box.
-		_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO room_leftovers(host,room,box,slice) SELECT b.host,s.room,b.id,b.slice FROM boxes b JOIN sessions s ON s.id=b.session JOIN hosts h ON h.name=b.host WHERE b.id=? AND h.create_problem!=''`, b.ID)
-		if err != nil {
+		// Every known host must have confirmed destructive cleanup before reset.
+		// The API retires each record only after that host succeeds; a newly
+		// discovered debt fences this commit instead of silently forgetting it.
+		var debts bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM room_leftovers WHERE box=?)`, old.ID).Scan(&debts); err != nil || debts {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE boxes SET state='pending',want='run',failures=0,due_at=0,image='',host=CASE WHEN EXISTS (SELECT 1 FROM hosts h WHERE h.name=boxes.host AND h.state='ready' AND h.create_problem='') THEN host ELSE NULL END,reason='',updated_at=? WHERE id=? AND state='failed'`, event.Time.UnixMilli(), b.ID)
+		_, err = tx.ExecContext(ctx, `UPDATE boxes SET state='pending',want='run',create_retry_host='',failures=0,due_at=0,image='',host=CASE WHEN EXISTS (SELECT 1 FROM hosts h WHERE h.name=boxes.host AND h.state='ready' AND h.create_problem='') THEN host ELSE NULL END,reason='',updated_at=? WHERE id=? AND state='failed'`, event.Time.UnixMilli(), b.ID)
 		if err != nil {
 			return err
 		}

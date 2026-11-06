@@ -37,6 +37,7 @@ func (e BinaryDecompressorMissing) Error() string {
 // StageBinary sends a compressed payload only if the host lacks these exact bytes. It never changes current.
 // The driver selects zstd when available, otherwise gzip, before requesting cached bytes. Private temporaries allow races.
 func (h *Host) StageBinary(ctx context.Context, bin, sum string, read func(BinaryEncoding) ([]byte, error)) error {
+	ctx = WithRemoteCancellation(ctx)
 	if err := binaryPath(bin, sum); err != nil {
 		return err
 	}
@@ -75,7 +76,9 @@ exec 9> "$1/.activation.lock"
 flock -x 9
 dir="$1/$2"
 mkdir -p -- "$dir"
-temporary=$(mktemp -d "$dir/.dyna.XXXXXX")
+temporary="$dir/.dyna.${DYNA_START_DIR##*/}"
+printf '%s\0' "$temporary" >> "$DYNA_START_DIR/temps"
+mkdir -m 700 -- "$temporary"
 trap 'rm -rf -- "$temporary"' EXIT HUP INT TERM
 "$3" -dc > "$temporary/dyna"
 test "$(sha256sum < "$temporary/dyna" | cut -d ' ' -f 1)" = "$2"
@@ -90,6 +93,7 @@ const pinCreateScript = `set -eu; exec 9> "$1/.activation.lock"; flock -x 9; shi
 
 // ActivateBinary verifies the staged object before atomically switching current. Only the engine calls this after restart.
 func (h *Host) ActivateBinary(ctx context.Context, bin, sum string) error {
+	ctx = WithRemoteCancellation(ctx)
 	if err := binaryPath(bin, sum); err != nil {
 		return err
 	}
@@ -98,7 +102,9 @@ cd -- "$1"
 exec 9> .activation.lock
 flock -x 9
 test "$(sha256sum < "$2/dyna" | cut -d ' ' -f 1)" = "$2"
-linkdir=$(mktemp -d .current.XXXXXX)
+linkdir="$PWD/.current.${DYNA_START_DIR##*/}"
+printf '%s\0' "$linkdir" >> "$DYNA_START_DIR/temps"
+mkdir -m 700 -- "$linkdir"
 trap 'rm -rf -- "$linkdir"' EXIT HUP INT TERM
 ln -s -- "$2" "$linkdir/current"
 mv -Tf -- "$linkdir/current" current`, "dyna-link", bin, sum)

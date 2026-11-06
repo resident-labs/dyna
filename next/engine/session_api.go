@@ -11,6 +11,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/compose"
 	enginegit "github.com/resident-labs/dyna/engine/git"
+	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/room"
 )
@@ -383,11 +384,89 @@ func (s *Service) closeSession(ctx context.Context, session store.Session, disca
 	return plan, nil
 }
 
-// SessionRestart retries an open session whose box has failed.
+// SessionRestart synchronously discards a failed box's old host resources before
+// resetting the same row. Failure retains its metadata for an explicit retry.
 func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal, req contract.SessionRestartRequest) (contract.SessionRestartResponse, *contract.Error) {
+	entered := time.Now() // monotonic process-local API ordering, not the stored event clock
 	session, problem := s.managedSession(ctx, caller, req.Session)
 	if problem != nil {
 		return contract.SessionRestartResponse{}, problem
+	}
+	value, _ := s.restarts.LoadOrStore(session.Box, new(restartClaim))
+	claim := value.(*restartClaim)
+	if !claim.TryLock() {
+		return contract.SessionRestartResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "box restart is already in progress"}
+	}
+	defer claim.Unlock()
+	conflict := &contract.Error{Code: contract.ErrConflict, Message: "session is closing or its failed box changed"}
+	if claim.completed.After(entered) {
+		return contract.SessionRestartResponse{}, conflict
+	}
+	old, err := s.store.Box(ctx, session.Box)
+	if err != nil {
+		return contract.SessionRestartResponse{}, failure(err)
+	}
+	if old.State != contract.BoxFailed {
+		return contract.SessionRestartResponse{}, conflict
+	}
+	current, err := s.store.CanRestartSession(ctx, old)
+	if err != nil {
+		return contract.SessionRestartResponse{}, failure(err)
+	}
+	if !current {
+		return contract.SessionRestartResponse{}, conflict
+	}
+	// The claim is process-local, not a stored lifecycle/deletion permission.
+	// Bound both joins and I/O; an uncertain result never resets the row.
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	release, claimed, err := s.reconciler.QuiesceRestart(ctx, old)
+	if err != nil {
+		return contract.SessionRestartResponse{}, failure(err)
+	}
+	if !claimed {
+		return contract.SessionRestartResponse{}, conflict
+	}
+	defer release()
+	current, err = s.store.CanRestartSession(ctx, old)
+	if err != nil {
+		return contract.SessionRestartResponse{}, failure(err)
+	}
+	if !current {
+		return contract.SessionRestartResponse{}, conflict
+	}
+	remover, ok := s.boxes.(lifecycle.FailedBoxRemover)
+	if !ok {
+		return contract.SessionRestartResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "runtime cannot remove failed box resources"}
+	}
+	debts, err := s.store.BoxLeftovers(ctx, old.ID)
+	if err != nil {
+		return contract.SessionRestartResponse{}, failure(err)
+	}
+	targets := []box.Box{old}
+	known := map[contract.HostName]bool{old.Host: true}
+	for _, debt := range debts {
+		if !known[debt.Host] {
+			targets = append(targets, box.Box{ID: old.ID, Session: old.Session, Host: debt.Host, Slice: debt.Slice, State: contract.BoxFailed})
+			known[debt.Host] = true
+		}
+	}
+	for _, target := range targets {
+		if err := remover.RemoveFailedBox(ctx, target); err != nil {
+			return contract.SessionRestartResponse{}, failure(fmt.Errorf("restart cleanup on host %s: %w", target.Host, err))
+		}
+		if err := ctx.Err(); err != nil {
+			return contract.SessionRestartResponse{}, failure(fmt.Errorf("restart cleanup on host %s: %w", target.Host, err))
+		}
+		// Confirmed physical deletion and debt retirement are not rolled back if
+		// a later host fails. Every unconfirmed host remains known for retry.
+		for _, debt := range debts {
+			if debt.Host == target.Host {
+				if err := s.store.ForgetLeftover(ctx, debt); err != nil {
+					return contract.SessionRestartResponse{}, failure(fmt.Errorf("retire restart cleanup on host %s: %w", target.Host, err))
+				}
+			}
+		}
 	}
 	event, err := s.event(session.Room, caller, contract.BoxChanged{})
 	if err != nil {
@@ -397,13 +476,14 @@ func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal,
 	if err != nil {
 		return contract.SessionRestartResponse{}, failure(err)
 	}
-	restarted, err := s.store.RestartSession(ctx, session.ID, event, notice)
+	restarted, err := s.store.RestartSession(ctx, old, event, notice)
 	if err != nil {
 		return contract.SessionRestartResponse{}, failure(err)
 	}
 	if !restarted {
 		return contract.SessionRestartResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "session is closing or its box has not failed"}
 	}
+	claim.completed = time.Now()
 	s.reconciler.Kick()
 	return contract.SessionRestartResponse{}, nil
 }

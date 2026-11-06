@@ -67,6 +67,11 @@ type socket struct {
 	path     string
 }
 
+// BoxSocketGeneration is an opaque process-local listener identity. Keeping the
+// entry alive makes replacement distinguishable without a counter or stored epoch.
+// An absent listener is a generation too: it cannot retire a later registration.
+type BoxSocketGeneration struct{ entry *socket }
+
 // Sockets owns listener lifetimes and revokes existing connections on removal.
 type Sockets struct {
 	mu      sync.Mutex
@@ -233,6 +238,26 @@ func closeSocket(s *socket) error {
 		return nil
 	}
 	return serverErr
+}
+
+// BoxGeneration captures only the listener currently registered for this ID.
+func (s *Sockets) BoxGeneration(id contract.BoxID) BoxSocketGeneration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return BoxSocketGeneration{entry: s.boxes[id]}
+}
+
+// RemoveBoxAtGeneration retires a discard caller's original listener, never a
+// replacement registered while that caller waited for host I/O.
+func (s *Sockets) RemoveBoxAtGeneration(id contract.BoxID, generation BoxSocketGeneration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok := s.boxes[id]
+	if !ok || entry != generation.entry {
+		return nil
+	}
+	delete(s.boxes, id)
+	return closeSocket(entry)
 }
 
 func (s *Sockets) RemoveBox(id contract.BoxID) error {

@@ -320,6 +320,17 @@ func execCLI(f *fakeClient, args ...string) (string, error) {
 	err := root.Execute()
 	return out.String(), err
 }
+func TestHostHelpUsesBaseChecksWithoutExclusivePrerequisites(t *testing.T) {
+	for _, sub := range []string{"add", "set"} {
+		t.Run(sub, func(t *testing.T) {
+			out := runCLI(t, &fakeClient{}, "host", sub, "--help")
+			if !strings.Contains(out, "base host checks") || strings.Contains(out, "just SSH and bash") || strings.Contains(out, "SSH and bash check alone") {
+				t.Fatalf("host help misstates exec-only checks: %s", out)
+			}
+		})
+	}
+}
+
 func TestHostAddMapsFlags(t *testing.T) {
 	f := &fakeClient{}
 	runCLI(t, f, "host", "add", "h", "--ssh", "u@h", "--owner-only-admin")
@@ -489,8 +500,8 @@ func TestSessionRestartMapsID(t *testing.T) {
 		t.Fatal("restart accepted a missing session")
 	}
 	help := runCLI(t, f, "session", "restart", "--help")
-	if !strings.Contains(help, "old volume and unpushed work are lost") || !strings.Contains(help, "old host is unavailable") {
-		t.Fatalf("restart help does not explain data loss and orphaned resources: %q", help)
+	if !strings.Contains(help, "old volume and unpushed work are lost") || !strings.Contains(help, "any known host is unavailable") || !strings.Contains(help, "box stays failed for an explicit retry") || !strings.Contains(help, "Deletion may already be partial") || !strings.Contains(help, "every known current or prior host") {
+		t.Fatalf("restart help does not explain data loss, cleanup failure and partial deletion: %q", help)
 	}
 }
 func TestSessionRefreshMapsSessionOrRoom(t *testing.T) {

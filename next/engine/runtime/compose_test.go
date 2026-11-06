@@ -69,14 +69,14 @@ func TestEveryVariableDynaSetsIsReserved(t *testing.T) {
 
 func TestTeardownRemovesTheStack(t *testing.T) {
 	h := fakehost.New()
-	if err := removeHostBox(context.Background(), h, box.Box{ID: "box_1", Slice: "dyna-box_1.slice"}, box.Forward{}); err != nil {
+	if err := removeHostBox(context.Background(), h, box.Box{ID: "box_1", Slice: "dyna-box_1.slice"}, box.Forward{}, true); err != nil {
 		t.Fatal(err)
 	}
 	var order []string
 	for _, call := range h.Calls {
 		order = append(order, string(call))
 	}
-	want := "stop-container remove-forward remove-container remove-pod remove-volume remove-stack-volumes remove-slice"
+	want := "stop-container remove-container remove-pod remove-volume remove-stack-volumes remove-slice remove-forward"
 	if got := strings.Join(order, " "); got != want {
 		t.Fatalf("got %s", got)
 	}
@@ -102,10 +102,12 @@ func (r *stackRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte, 
 	if slices.Contains(args, "-O") || slices.Contains(args, "-M") {
 		return nil, nil
 	}
-	command := args[len(args)-1]
+	command := strings.ReplaceAll(args[len(args)-1], `'\''`, `'`)
 	r.commands = append(r.commands, command)
 	body, status := "", 0
 	switch {
+	case strings.HasSuffix(command, "'read'"):
+		body = "0\n"
 	case r.fail != "" && strings.Contains(command, r.fail):
 		status = 125
 	case strings.Contains(command, "dyna-probe"):
@@ -146,7 +148,7 @@ func (composeStore) Session(context.Context, contract.SessionID) (store.Session,
 func creatingBoxes(t *testing.T, r *stackRunner) (*Boxes, lifecycle.BoxSpec) {
 	t.Helper()
 	runtimeDir := t.TempDir()
-	host, err := podman.New("user@host", runtimeDir, "host", r)
+	host, err := podman.New("user@host", runtimeDir, "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +193,7 @@ func TestCreateBringsUpSidecarsBeforeTheBox(t *testing.T) {
 	}
 }
 
-func TestCreateLeavesNothingWhenASidecarWillNotStart(t *testing.T) {
+func TestCreateKeepsVolumesWhenASidecarWillNotStart(t *testing.T) {
 	r := &stackRunner{fail: "'start' 'dyna-sidecar-box_1-db'"}
 	b, spec := creatingBoxes(t, r)
 	if _, err := b.Create(context.Background(), spec); err == nil {
@@ -200,8 +202,24 @@ func TestCreateLeavesNothingWhenASidecarWillNotStart(t *testing.T) {
 	if slices.ContainsFunc(r.commands, func(command string) bool { return strings.Contains(command, "'start' 'box_1'") }) {
 		t.Fatalf("the box started without its sidecar: %v", r.commands)
 	}
-	for _, step := range []string{"'pod' 'rm'", "'volume' 'prune'", "'rm' '--ignore' '--volumes' 'box_1'", "'volume' 'rm' 'dyna-box-box_1'"} {
+	for _, step := range []string{"'pod' 'rm'", "'rm' '--ignore' '--volumes' 'box_1'"} {
 		r.index(t, step)
+	}
+}
+
+// Start can have succeeded before its reply is lost, including an early hello and session work. Container cleanup is safe,
+// but never remove the workspace or stack data after attempting start; lifecycle decides whether relocation is safe.
+func TestCreatePreservesVolumesAfterUncertainContainerStart(t *testing.T) {
+	r := &stackRunner{fail: "'start' 'box_1'"}
+	b, spec := creatingBoxes(t, r)
+	if _, err := b.Create(context.Background(), spec); err == nil {
+		t.Fatal("uncertain start succeeded")
+	}
+	r.index(t, "'rm' '--ignore' '--volumes' 'box_1'")
+	for _, command := range r.commands {
+		if strings.Contains(command, "'volume' 'prune'") || strings.Contains(command, "'volume' 'rm' 'dyna-box-box_1'") {
+			t.Fatalf("potentially used volume removed: %s", command)
+		}
 	}
 }
 
@@ -256,7 +274,7 @@ func (r *listingRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte
 func TestABoxStartsItsSidecarsUnlessItIsClosing(t *testing.T) {
 	for state, want := range map[contract.BoxState]bool{contract.BoxStopped: true, contract.BoxClosing: false} {
 		r := &listingRunner{}
-		host, err := podman.New("user@host", t.TempDir(), "host", r)
+		host, err := podman.New("user@host", t.TempDir(), "host", r, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}

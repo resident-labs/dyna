@@ -82,7 +82,7 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 env -0 > ` + quote(envFile)})
-			h, err := New("user@host", t.TempDir(), "host", localShell{path: tools + ":" + os.Getenv("PATH")})
+			h, err := New("user@host", t.TempDir(), "host", localShell{path: tools + ":" + os.Getenv("PATH")}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}

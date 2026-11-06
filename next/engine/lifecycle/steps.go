@@ -78,7 +78,26 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		if r.view.OpenTerminal(b.Session) {
 			return r.store.WakeTerminal(ctx, b.ID)
 		}
-		workErr = r.boxes.Stop(ctx, b.ID)
+		stopCtx, cancelStop := context.WithTimeout(ctx, box.StartStepBudget)
+		defer cancelStop()
+		removeVolumes, err := r.store.CanRemoveBoxVolumes(stopCtx, b.ID)
+		if err != nil {
+			return err
+		}
+		if removeVolumes || b.Image == "" {
+			if b.Host != "" {
+				workErr = r.boxes.Remove(stopCtx, b.ID)
+			}
+			if workErr == nil {
+				next.Image = ""
+			}
+		} else {
+			workErr = r.boxes.Stop(stopCtx, b.ID)
+		}
+		var superseded box.NamespaceSuperseded
+		if errors.As(workErr, &superseded) {
+			workErr = nil
+		}
 		if workErr == nil {
 			next.State = contract.BoxStopped
 		} else {
@@ -118,9 +137,10 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		}
 		cut := errors.Is(createCause, context.DeadlineExceeded) || errors.Is(createCause, context.Canceled)
 		var runtimeErr box.RuntimeCreateError
+		var stepTimeout box.StepTimeout
 		var shareErr box.ShareDown
 		// A mount that is only down for now counts as any host failure; one that cannot ever come up is quarantined at once below.
-		runtimeFailure = !cut && (errors.As(workErr, &runtimeErr) || errors.As(workErr, &shareErr) && !shareErr.Permanent)
+		runtimeFailure = !cut && (errors.As(workErr, &stepTimeout) || errors.As(workErr, &runtimeErr) || errors.As(workErr, &shareErr) && !shareErr.Permanent)
 		if workErr != nil {
 			createPhase = phase
 			log.Printf("box %s: creation failed in %s: %v", b.ID, phase, workErr)
@@ -141,7 +161,6 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			if failures >= 3 {
 				next.State, next.Reason = contract.BoxFailed, string(contract.CauseCreateFailed)
 				cause = contract.CauseCreateFailed
-				var stepTimeout box.StepTimeout
 				if errors.As(workErr, &stepTimeout) {
 					next.Reason = stepTimeout.Error()
 				}
@@ -259,6 +278,9 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		}
 		// A successful stop is an observed fact even if close cancelled it.
 		ctx = context.WithoutCancel(ctx)
+	}
+	if row.Want == store.WantStop && b.State != contract.BoxLost && workErr != nil {
+		return errors.Join(r.store.RetryStartStop(ctx, row, due, failures), workErr)
 	}
 	changed, err := r.change(ctx, b, next, due, failures, cause, createPhase, runtimeFailure)
 	var shareDown box.ShareDown
