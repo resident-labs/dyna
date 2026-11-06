@@ -55,18 +55,44 @@ func (s *Store) SetHostRooms(ctx context.Context, host contract.HostName, rooms 
 }
 
 // SetHostSwitches turns a host's agents switch, its CI switch or both; nil leaves one as it is. Boxes and runners already on
-// the host stay.
-func (s *Store) SetHostSwitches(ctx context.Context, host contract.HostName, agents, ci *bool, clearCreateProblem bool) error {
+// the host stay. The actual switch changes and their audit in every existing room commit together.
+func (s *Store) SetHostSwitches(ctx context.Context, host contract.HostName, agents, ci *bool, clearCreateProblem bool, newEvent func(contract.RoomID, contract.EventBody) (contract.Event, error)) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, "UPDATE hosts SET agents=coalesce(?2,agents), ci=coalesce(?3,ci), create_failures=CASE WHEN ?4 THEN 0 ELSE create_failures END, create_problem=CASE WHEN ?4 THEN '' ELSE create_problem END, create_generation=create_generation+CASE WHEN ?4 THEN 1 ELSE 0 END WHERE name=?1", host, agents, ci, clearCreateProblem)
+		var oldAgents, oldCI bool
+		err := tx.QueryRowContext(ctx, "SELECT agents,ci FROM hosts WHERE name=?", host).Scan(&oldAgents, &oldCI)
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("host %s: %w", host, ErrNotFound)
+		}
 		if err != nil {
 			return err
 		}
-		n, err := result.RowsAffected()
-		if err == nil && n == 0 {
-			err = fmt.Errorf("host %s: %w", host, ErrNotFound)
+		body := contract.HostSwitchesChanged{Host: host}
+		if agents != nil && *agents != oldAgents {
+			body.Agents = agents
 		}
-		return err
+		if ci != nil && *ci != oldCI {
+			body.CI = ci
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE hosts SET agents=coalesce(?2,agents), ci=coalesce(?3,ci), create_failures=CASE WHEN ?4 THEN 0 ELSE create_failures END, create_problem=CASE WHEN ?4 THEN '' ELSE create_problem END, create_generation=create_generation+CASE WHEN ?4 THEN 1 ELSE 0 END WHERE name=?1", host, agents, ci, clearCreateProblem); err != nil {
+			return err
+		}
+		if body.Agents == nil && body.CI == nil {
+			return nil
+		}
+		rooms, err := listIDs[contract.RoomID](ctx, tx, "SELECT id FROM rooms ORDER BY id")
+		if err != nil {
+			return err
+		}
+		for _, room := range rooms {
+			event, err := newEvent(room, body)
+			if err != nil {
+				return err
+			}
+			if _, err := s.AppendEvent(tx, event); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 
