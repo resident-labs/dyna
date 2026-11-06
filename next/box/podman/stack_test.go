@@ -28,7 +28,7 @@ func (r *quoteRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte, 
 	if slices.Contains(args, "-O") {
 		return nil, nil
 	}
-	command := args[len(args)-1]
+	command := strings.ReplaceAll(args[len(args)-1], `'\''`, `'`)
 	r.commands = append(r.commands, command)
 	for i := range r.replies {
 		reply := &r.replies[i]
@@ -36,6 +36,9 @@ func (r *quoteRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte, 
 			reply.times--
 			return []byte(fmt.Sprintf("%sDYNA-END %020d %03d\n", reply.body, len(reply.body), reply.status)), nil
 		}
+	}
+	if strings.HasSuffix(command, "'read'") {
+		return []byte("0\nDYNA-END 00000000000000000002 000\n"), nil
 	}
 	return []byte("DYNA-END 00000000000000000000 000\n"), nil
 }
@@ -115,7 +118,7 @@ func TestHealthCommandSuitsPodmansParser(t *testing.T) {
 
 func TestStackBoxJoinsThePod(t *testing.T) {
 	r := &quoteRunner{}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +141,7 @@ func TestSidecarsStartInOrderAndWaitForHealth(t *testing.T) {
 		{match: "'healthcheck' 'run' 'first'", status: 1, times: 1},
 		{match: "'ps' '--all'", body: `[{"Names":["first"],"Labels":{"dyna.stack.order":"0"},"State":"running"},{"Names":["second"],"Labels":{"dyna.stack.order":"1"},"State":"running"}]`, times: 1},
 	}}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +163,7 @@ func TestSidecarThatDiedIsAnError(t *testing.T) {
 		{match: "'ps' '--all'", body: `[{"Names":["db"],"Labels":{"dyna.stack.order":"0","dyna.stack.wait":"0"},"State":"created"}]`, times: 1},
 		{match: "'ps' '--all'", body: `[{"Names":["db"],"Labels":{"dyna.stack.order":"0"},"State":"exited","ExitCode":3}]`, times: 1},
 	}}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,8 +175,8 @@ func TestSidecarThatDiedIsAnError(t *testing.T) {
 }
 
 func TestAFailedPodSaysWhy(t *testing.T) {
-	r := &quoteRunner{replies: []stackReply{{match: "'pod' 'create'", body: "Failed to set up tap device in namespace\n", status: 125, times: 1}}}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	r := &quoteRunner{replies: []stackReply{{match: "'pod' 'create'", body: "create pod: Failed to set up tap device in namespace\n", status: 253, times: 1}}}
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +189,7 @@ func TestAFailedPodSaysWhy(t *testing.T) {
 
 func TestUnhealthySidecarTimesOut(t *testing.T) {
 	r := &quoteRunner{replies: []stackReply{{match: "'healthcheck'", status: 1, times: 1 << 30}}}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +202,7 @@ func TestUnhealthySidecarTimesOut(t *testing.T) {
 
 func TestPullUsesNoSignInAndWarms(t *testing.T) {
 	r := &quoteRunner{replies: []stackReply{{match: "'image' 'exists'", status: 1, times: 1}}}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +218,7 @@ func TestPullUsesNoSignInAndWarms(t *testing.T) {
 
 func TestPullSkipsAnImageTheHostHas(t *testing.T) {
 	r := &quoteRunner{}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +232,7 @@ func TestPullSkipsAnImageTheHostHas(t *testing.T) {
 
 func TestListContainersReadsTheStackHash(t *testing.T) {
 	r := &quoteRunner{replies: []stackReply{{match: "'ps' '--all'", body: `[{"Labels":{"dyna.box":"box_1","dyna.stack.hash":"abc"},"State":"running"}]`, times: 1}}}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

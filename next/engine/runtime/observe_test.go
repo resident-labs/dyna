@@ -214,7 +214,7 @@ func (r *offlineRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte
 func TestRestoreToleratesOfflineHost(t *testing.T) {
 	runtimeDir := t.TempDir()
 	runner := &offlineRunner{offline: true}
-	host, err := podman.New("user@host", runtimeDir, "h", runner)
+	host, err := podman.New("user@host", runtimeDir, "h", runner, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

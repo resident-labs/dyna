@@ -170,7 +170,7 @@ func TestRealRunInASmallBox(t *testing.T) {
 	runtimeDir := filepath.Join(data, "rt")
 	sockets := api.NewSockets(server, runtimeDir, uint32(os.Getuid()), nil)
 	defer sockets.Close()
-	host, err := podman.New("local", runtimeDir, "h", &sshForwards{})
+	host, err := podman.New("local", runtimeDir, "h", &sshForwards{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

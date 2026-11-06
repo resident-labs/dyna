@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/box"
@@ -81,7 +82,7 @@ func TestCreateDeadlineAndShutdown(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := rows[0]
-	if b.State != contract.BoxFailed || b.Failures != 3 || b.Reason != string(contract.CauseCreateFailed) {
+	if b.State != contract.BoxFailed || b.Failures != 3 || !strings.HasPrefix(b.Reason, string(contract.CauseCreateFailed)) {
 		t.Fatalf("deadline: state=%s failures=%d reason=%q", b.State, b.Failures, b.Reason)
 	}
 	// A deadline that cut a step short says nothing about the host, even when the step failed as a runtime step.

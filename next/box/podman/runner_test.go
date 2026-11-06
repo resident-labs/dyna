@@ -47,7 +47,7 @@ func newFrameHost(t *testing.T) (*Host, *frameRunner) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
-	h, err := New("user@pve", dir, "pve", runner)
+	h, err := New("user@pve", dir, "pve", runner, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

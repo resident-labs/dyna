@@ -437,6 +437,12 @@ func (r *Reconciler) RemoveHost(ctx context.Context, name contract.HostName, dis
 	return failed, r.store.RemoveHost(ctx, name)
 }
 
+// HostBoxDiscarder is the explicit destructive boundary for owner-authorized
+// gone-for-good host removal. Ordinary Remove cannot inherit that authority.
+type HostBoxDiscarder interface {
+	DiscardHostBox(context.Context, box.Box) error
+}
+
 // discardVolumeWait bounds the removal of one box's container and volume on a host that answers.
 const discardVolumeWait = 2 * time.Minute
 
@@ -479,6 +485,7 @@ func (r *Reconciler) discardHost(ctx context.Context, name contract.HostName) ([
 		work.Unlock()
 	}
 	failed := []contract.SessionID{}
+	discarder, canDiscard := r.boxes.(HostBoxDiscarder)
 	for _, b := range boxes {
 		if b.Want != store.WantDiscard {
 			failed = append(failed, b.Session)
@@ -486,7 +493,12 @@ func (r *Reconciler) discardHost(ctx context.Context, name contract.HostName) ([
 		removed := false
 		if reachable {
 			removeCtx, cancel := context.WithTimeout(ctx, discardVolumeWait)
-			err := r.boxes.Remove(removeCtx, b.ID)
+			var err error
+			if canDiscard {
+				err = discarder.DiscardHostBox(removeCtx, b.Box)
+			} else {
+				err = fmt.Errorf("runtime cannot discard host box resources")
+			}
 			cancel()
 			if err != nil {
 				log.Printf("host %s: discard box %s: %v", name, b.ID, err)

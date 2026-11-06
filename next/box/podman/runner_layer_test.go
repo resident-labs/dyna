@@ -29,7 +29,7 @@ func TestRunnerArgsNameTheEntrypointAndUserBeforeTheImage(t *testing.T) {
 
 func TestARoomLayerBuildsOnTheSharedRunnerImage(t *testing.T) {
 	r := &imageRunner{missing: true}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestARoomLayerBuildsOnTheSharedRunnerImage(t *testing.T) {
 }
 
 func TestARunnerLayerWithAnUnsafeNameIsRefused(t *testing.T) {
-	h, err := New("user@host", t.TempDir(), "host", &imageRunner{})
+	h, err := New("user@host", t.TempDir(), "host", &imageRunner{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestARunnerLayerWithAnUnsafeNameIsRefused(t *testing.T) {
 // image and the layers of the rooms named stay.
 func TestPruneRunnerLayersRemovesTheLayersOfOtherRooms(t *testing.T) {
 	r := &pruneRunner{images: "localhost/dyna-ci-runner:h\nlocalhost/dyna-ci-room-room_1:a-b\nlocalhost/dyna-ci-room-gone:c-d\nlocalhost/dyna-base:x\n"}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -24,6 +24,7 @@ func (h *Host) PruneBinaries(ctx context.Context, bin, wanted string) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, box.StartStepBudget)
 	defer cancel()
+	ctx = WithRemoteCancellation(ctx)
 	out, err := h.run(ctx, "bash", "-c", binaryObjectsScript, "dyna-binary-objects", bin)
 	if err != nil {
 		return err
@@ -200,8 +201,8 @@ shift
 cd -P -- "$bin"
 exec 9> .activation.lock
 flock -x 9
-inventory=$(mktemp -d .binary-mounts.XXXXXX)
-trap 'rm -rf -- "$inventory"' EXIT HUP INT TERM
+inventory="$DYNA_START_DIR/binary-mounts"
+mkdir -m 700 -- "$inventory"
 ids=$(podman ps --all --no-trunc --format '{{.ID}}')
 declare -A seen=() keep=()
 keep_all=0

@@ -42,7 +42,7 @@ func TestInstallBinarySkipsBytesWhenHostHasSum(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := &binaryRunner{output: tc.hostSum}
-			h, err := New("user@host", t.TempDir(), "host", r)
+			h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -65,7 +65,7 @@ func TestInstallBinarySkipsBytesWhenHostHasSum(t *testing.T) {
 
 		})
 	}
-	h, err := New("user@host", t.TempDir(), "host", &binaryRunner{})
+	h, err := New("user@host", t.TempDir(), "host", &binaryRunner{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,9 +97,9 @@ func (r *concurrentInstallRunner) Run(_ context.Context, _ []byte, args ...strin
 	return []byte("DYNA-END 00000000000000000000 000\n"), nil
 }
 
-func TestConcurrentInstallsUsePrivateTemporaries(t *testing.T) {
+func TestConcurrentInstallsUsePrivateOwnedTemporaries(t *testing.T) {
 	r := &concurrentInstallRunner{commands: make(chan string, 2), release: make(chan struct{})}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,11 +110,13 @@ func TestConcurrentInstallsUsePrivateTemporaries(t *testing.T) {
 			done <- h.InstallBinary(context.Background(), "/data/bin", version, strings.Repeat("a", 64), read)
 		}()
 	}
+	previous := ""
 	for range 2 {
 		command := <-r.commands
-		if !strings.Contains(command, `temporary=$(mktemp -d "$dir/.dyna.XXXXXX")`) || !strings.Contains(command, `rm -rf -- "$temporary"`) || strings.Contains(command, "current") {
+		if command == previous || !strings.Contains(command, `temporary="$dir/.dyna.${DYNA_START_DIR##*/}"`) || !strings.Contains(command, `rm -rf -- "$temporary"`) || strings.Contains(command, "current") {
 			t.Errorf("unsafe private temporary: %s", command)
 		}
+		previous = command
 	}
 	close(r.release)
 	for range 2 {
@@ -127,7 +129,7 @@ func TestConcurrentInstallsUsePrivateTemporaries(t *testing.T) {
 func TestHostArchitectureCheck(t *testing.T) {
 	machine := map[string]string{"amd64": "x86_64", "arm64": "aarch64"}[runtime.GOARCH]
 	r := &binaryRunner{output: machine + "\n"}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -558,7 +558,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	var hostRooms []string
 	var admin bool
 	var addAgents, addCI string
-	add := &cobra.Command{Use: "add NAME", Long: "Add a host. With --agents off and --ci off the host is exec only: it needs just SSH and bash, takes host-exec runs, and never has a box or runner. With --agents on (the default) new session boxes may land on it; with --ci on (the default, except on the host the engine runs on) the CI pool may start runners there, placed as boxes are.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	add := &cobra.Command{Use: "add NAME", Long: "Add a host. With --agents off and --ci off the host is exec only: it passes the base host checks, takes host-exec runs, and never has a box or runner. With --agents on (the default) new session boxes may land on it; with --ci on (the default, except on the host the engine runs on) the CI pool may start runners there, placed as boxes are.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		rooms := make([]contract.RoomID, len(hostRooms))
 		for i, room := range hostRooms {
 			rooms[i] = contract.RoomID(room)
@@ -587,7 +587,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	var setAgents, setCI string
 	var setAdmin bool
 	var clearCreateProblem bool
-	setHost := &cobra.Command{Use: "set NAME [--agents on|off] [--ci on|off]", Short: "Turn a host's agents and CI switches", Long: "Turn a host's two switches. With agents off no new session box lands on the host; its room list still says which rooms it serves while agents are on. With ci off the CI pool starts no new runner there, and runners come back when ci is on again. Both off disables the host and keeps it registered. A host added exec only (`host add --agents off --ci off`) stays exec only, with an SSH and bash check alone, whatever its switches say. Turning agents or ci on for an exec-only host runs the full host check first, which needs --owner-only-admin as host add does. Boxes and runners already on the host stay until they stop, and a stopped box there waits until agents are on again.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	setHost := &cobra.Command{Use: "set NAME [--agents on|off] [--ci on|off]", Short: "Turn a host's agents and CI switches", Long: "Turn a host's two switches. With agents off no new session box lands on the host; its room list still says which rooms it serves while agents are on. With ci off the CI pool starts no new runner there, and runners come back when ci is on again. Both off disables the host and keeps it registered. A host added exec only (`host add --agents off --ci off`) passes the base host checks, without box or CI setup. Turning agents or ci on for an exec-only host runs the full host check first, which needs --owner-only-admin as host add does. Boxes and runners already on the host stay until they stop, and a stopped box there waits until agents are on again.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		req := contract.HostSetRequest{Host: contract.HostName(args[0]), ClearCreateProblem: clearCreateProblem, OwnerOnlyAdmin: setAdmin}
 		var err error
 		if cmd.Flags().Changed("agents") {
@@ -887,7 +887,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		}
 		return err
 	}}
-	restart := &cobra.Command{Use: "restart SESSION", Short: "Replace a failed session box", Long: "Replace a failed session box. The old volume and unpushed work are lost. If the old host is unavailable, its resources may remain there.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	restart := &cobra.Command{Use: "restart SESSION", Short: "Replace a failed session box", Long: "Replace a failed session box. The old volume and unpushed work are lost. Removes the container and workspace/stack volumes on every known current or prior host before resetting the box. If cleanup fails or any known host is unavailable, the box stays failed for an explicit retry naming that host. Deletion may already be partial; it is not rolled back.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := getClient().SessionRestart(cmd.Context(), contract.SessionRestartRequest{Session: contract.SessionID(args[0])})
 		return err
 	}}

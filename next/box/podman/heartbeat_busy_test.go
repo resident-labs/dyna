@@ -23,7 +23,7 @@ func (goneRunner) Run(context.Context, []byte, ...string) ([]byte, error) {
 
 func goneHost(t *testing.T) *Host {
 	t.Helper()
-	h, err := New("user@host", t.TempDir(), "host", goneRunner{})
+	h, err := New("user@host", t.TempDir(), "host", goneRunner{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
