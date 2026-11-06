@@ -182,6 +182,11 @@ func (b *Boxes) installBinary(ctx context.Context, h *podman.Host) error {
 	b.mu.Unlock()
 	if last {
 		<-job.done
+		// Joining can confirm a successful frame after the subscriber's signal.
+		// Only the last waiter has joined; other canceled subscribers must leave promptly.
+		if job.err == nil {
+			err = nil
+		}
 		b.mu.Lock()
 		if b.installs[h] == job {
 			delete(b.installs, h)
