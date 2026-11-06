@@ -94,13 +94,14 @@ try {
   await page.reload(); await select.waitFor(); assert.equal(await select.inputValue(), "root"); await count(3);
   await page.locator('nav[aria-label="Rooms"] a[href="/r/room-b"]').click();
   await page.waitForURL("**/r/room-b"); assert.equal(await select.inputValue(), "all", "new room defaults independently"); await count(8);
-  await select.selectOption("leads"); await count(7);
-  await page.reload(); await select.waitFor(); assert.equal(await select.inputValue(), "leads"); await count(7);
+  await select.selectOption("leads"); await count(6);
+  await page.reload(); await select.waitFor(); assert.equal(await select.inputValue(), "leads"); await count(6);
   await page.locator('nav[aria-label="Rooms"] a[href="/r/room-a"]').click();
   await page.waitForURL("**/r/room-a"); assert.equal(await select.inputValue(), "root"); await count(3);
   await select.focus(); await page.keyboard.press("Home"); await page.keyboard.press("ArrowDown"); await page.keyboard.press("Enter");
-  assert.equal(await select.inputValue(), "leads", "native keyboard selection works"); await count(7);
+  assert.equal(await select.inputValue(), "leads", "native keyboard selection works"); await count(6);
   assert.equal(await page.getByText("The change is ready for independent review.", { exact: true }).count(), 1);
+  assert.equal(await page.getByText("The focused tests are passing.", { exact: true }).count(), 0, "depth 2 builder to depth 1 build-lead hidden in Leads");
   assert.equal(await page.getByText("I checked the remaining edge cases.", { exact: true }).count(), 0, "known deep-to-worker hidden in Leads");
   assert.equal(await page.getByText("Historical update from a closed session.", { exact: true }).count(), 1, "unknown plus known deep fails open");
   assert.equal(await page.getByText("Keep going with the browser checks.", { exact: true }).count(), 1, "root to deep stays visible");
@@ -109,7 +110,7 @@ try {
   // One representative screenshot is attached to the PR; the remaining sizes/themes are preserved as evidence.
   for (const theme of ["carbon", "light"]) for (const width of [1280, 390]) {
     await page.evaluate(theme => { localStorage.setItem("dyna.theme", theme); }, theme);
-    await page.setViewportSize({ width, height: 1000 }); await page.reload(); await select.waitFor(); await count(7);
+    await page.setViewportSize({ width, height: 1000 }); await page.reload(); await select.waitFor(); await count(6);
     await page.evaluate(() => document.fonts.ready);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "no horizontal overflow");
     assert.ok(await page.locator("main > header .heading strong").evaluate(node => node.clientWidth >= node.scrollWidth), "short room title remains readable beside filter");

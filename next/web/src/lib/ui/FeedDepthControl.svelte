@@ -3,7 +3,7 @@
   let { value, onchange }: { value: FeedDepth; onchange: (value: FeedDepth) => void } = $props();
 </script>
 
-<label class="feed-depth" title="Root: posts from or to this room's root or you. Leads: those posts plus conversations through depth 2. All: every post. Activity stays visible.">
+<label class="feed-depth" title="Root: posts from or to this room's root or you. Leads: those posts plus conversations through depth 1. All: every post. Activity stays visible.">
   <span>Show:</span>
   <select aria-label="Feed visibility" {value} onchange={event => onchange(event.currentTarget.value as FeedDepth)}>
     <option value="root">Root</option>

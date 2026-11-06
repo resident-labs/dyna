@@ -34,7 +34,7 @@ export function showsPost(from: Principal, to: Principal[], filter?: FeedDepthFi
     if (depth === undefined) return true;
     maximum = Math.max(maximum, depth);
   }
-  return maximum <= 2;
+  return maximum <= 1;
 }
 
 const prefix = "dyna.feed-depth:";
