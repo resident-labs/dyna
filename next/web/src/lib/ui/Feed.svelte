@@ -146,6 +146,10 @@
   });
   const toggle = (key: string) => { list?.hold(); if (!opened.delete(key)) opened.add(key); };
   let list: VirtualList<Item> | undefined = $state();
+  export function jumpMedia(key: string) {
+    const index = items.findIndex(item => item.key === key);
+    if (index >= 0) void list?.reveal(index);
+  }
   // Measured row heights keep the deferred correction small when new rows first enter the view.
   // Rows above the reader are measured as they arrive, so a close estimate keeps the view from jumping. A reading-width
   // line holds about 95 characters. Visual cards and images are the tall rows.
@@ -219,7 +223,7 @@
 
 <svelte:window onkeydown={event => { if (event.key === "Escape" && !event.defaultPrevented) clearNew(); }} />
 
-{#if mediaIndex !== undefined}<MediaViewer room={store.room} {loadVisual} items={media} initial={mediaIndex} {name} {root} onclose={() => mediaIndex = undefined} onjump={key => { const index = items.findIndex(item => item.key === key); if (index >= 0) void list?.reveal(index); }} />{/if}
+{#if mediaIndex !== undefined}<MediaViewer room={store.room} {loadVisual} items={media} initial={mediaIndex} {name} {root} onclose={() => mediaIndex = undefined} onjump={jumpMedia} />{/if}
 
 {#if short && view.hasOlder}
   <button type="button" class="jump" onclick={older}>Show older posts</button>

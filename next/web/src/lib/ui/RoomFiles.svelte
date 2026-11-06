@@ -57,7 +57,7 @@
   function copy() { void navigator.clipboard.writeText(`/box/shared/${path ?? ""}`).then(() => copied = true); }
 </script>
 
-<div class="room-files" class:reading={!!file}>
+<div class="room-files" class:reading={!!file || missing}>
   <header class="bar">
     <button class="tool" title="Back to room" aria-label="Back to room" onclick={onclose}><Icon name="back" /></button><strong>Files</strong>
     <span class="location">/box/shared</span>
@@ -97,7 +97,7 @@
       {@const full = childPath(parent, entry.name)}
       <div class="row" class:selected={path === full} style:padding-left={`${12 + depth * 16}px`} title={new Date(entry.modified).toLocaleString()}>
         {#if entry.dir}<button class="disclose" aria-label={`${expanded.has(full) ? "Collapse" : "Expand"} ${entry.name}`} aria-expanded={expanded.has(full)} onclick={() => void toggle(full)}><Icon name={expanded.has(full) ? "chevron" : "forwardChevron"} size={12} /></button>{:else}<span class="indent"></span>{/if}
-        <a href={filesURL(room, full)} onclick={navigate} aria-current={path === full ? "page" : undefined}><Icon name={entry.dir ? "folder" : "file"} /><span class="name">{entry.name}</span><span class="size">{entry.dir ? "" : fileSize(entry.size)}</span></a>
+        <a href={filesURL(room, full)} onclick={navigate} aria-current={path === full ? "page" : undefined}><Icon name={entry.dir ? "folder" : "file"} /><span class="name">{entry.name}</span><span class="size">{fileSize(entry.size)}</span></a>
       </div>
       {#if entry.dir && expanded.has(full)}{@render branch(full, depth + 1)}{/if}
     {/each}
@@ -109,7 +109,7 @@
   {:else if !listings.has(parent)}<p class="state">Loading…</p>
   {:else if !listings.get(parent)!.length}<p class="state">This folder is empty.</p>
   {:else}{#each listings.get(parent)! as entry}
-    <a class="listed" href={filesURL(room, childPath(parent, entry.name))} onclick={navigate} title={new Date(entry.modified).toLocaleString()}><Icon name={entry.dir ? "folder" : "file"} /><span class="name">{entry.name}</span><span class="size">{entry.dir ? "" : fileSize(entry.size)}</span></a>
+    <a class="listed" href={filesURL(room, childPath(parent, entry.name))} onclick={navigate} title={new Date(entry.modified).toLocaleString()}><Icon name={entry.dir ? "folder" : "file"} /><span class="name">{entry.name}</span><span class="size">{fileSize(entry.size)}</span></a>
   {/each}{/if}
 {/snippet}
 

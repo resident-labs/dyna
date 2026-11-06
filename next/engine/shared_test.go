@@ -33,7 +33,7 @@ func TestSharedFolder(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(shared, "z-dir"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	for name, content := range map[string]string{"b.txt": "0123456789", "a.html": "<h1>hello</h1>", "c.svg": "<svg/>", "large.txt": ""} {
+	for name, content := range map[string]string{"b.txt": "0123456789", "a.html": "<h1>hello</h1>", "c.svg": "<svg/>", "large.txt": "", "evil.xhtml": `<html xmlns="http://www.w3.org/1999/xhtml"><script src="/v1/rooms/room/shared/file?path=evil.js"></script></html>`, "evil.js": `fetch('/v1/room.list')`} {
 		if err := os.WriteFile(filepath.Join(shared, name), []byte(content), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -103,14 +103,14 @@ func TestSharedFolder(t *testing.T) {
 			t.Fatal("missing modified")
 		}
 	}
-	if !reflect.DeepEqual(names, []string{"inner-dir", "z-dir", "a.html", "b.txt", "c.svg", "inner.txt", "large.txt"}) {
+	if !reflect.DeepEqual(names, []string{"inner-dir", "z-dir", "a.html", "b.txt", "c.svg", "evil.js", "evil.xhtml", "inner.txt", "large.txt"}) {
 		t.Fatal(names)
 	}
 	rec = request(handler, "room", "file", "b.txt", "&range")
 	if rec.Code != 206 || rec.Body.String() != "2345" {
 		t.Fatalf("range: %d %s", rec.Code, rec.Body.String())
 	}
-	for _, path := range []string{"a.html", "c.svg"} {
+	for _, path := range []string{"a.html", "c.svg", "evil.xhtml", "evil.js"} {
 		rec := request(handler, "room", "file", path, "")
 		if rec.Header().Get("Content-Security-Policy") != "sandbox" || rec.Header().Get("X-Content-Type-Options") != "nosniff" {
 			t.Fatal(rec.Header())
