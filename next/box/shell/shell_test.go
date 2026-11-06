@@ -295,7 +295,15 @@ func TestHandlerListsReadsAndStopsJobs(t *testing.T) {
 	if _, body := call(t, r.server.Handler(), "/job", `{"action":"list"}`); !strings.Contains(body, `"job":"job_1"`) || !strings.Contains(body, `"command":"sleep 99"`) {
 		t.Fatalf("list = %s", body)
 	}
-	if _, body := call(t, r.server.Handler(), "/job", `{"action":"output","job":"job_1"}`); !strings.Contains(body, `"output":""`) {
+	// A quiet running job is waited on until the output wait passes.
+	read := make(chan string, 1)
+	go func() {
+		_, body := call(t, r.server.Handler(), "/job", `{"action":"output","job":"job_1"}`)
+		read <- body
+	}()
+	(<-r.timers).fire <- time.Now() // outputWait
+	<-r.timers                      // the outputPoll it was waiting beside
+	if body := <-read; !strings.Contains(body, `"output":""`) || !strings.Contains(body, `"running":true`) {
 		t.Fatalf("a call's own read leaves nothing unread: %s", body)
 	}
 	if _, body := call(t, r.server.Handler(), "/job", `{"action":"stop","job":"job_1"}`); !strings.Contains(body, `"status":"stopped"`) {
@@ -760,4 +768,54 @@ func TestInterruptDuringProcessStartIsNotLost(t *testing.T) {
 	}
 	r.proc.exit <- 0
 	<-r.reports
+}
+
+func TestJobOutputWaitsForAQuietJobAndReturnsOnItsEnd(t *testing.T) {
+	r := newRig("", syscall.SIGTERM)
+	finish := make(chan string, 1)
+	go func() {
+		_, body := call(t, r.server.Handler(), "/run", `{"command":"sleep 99"}`)
+		finish <- body
+	}()
+	(<-r.timers).fire <- time.Now()
+	<-finish
+	read := make(chan string, 1)
+	go func() {
+		_, body := call(t, r.server.Handler(), "/job", `{"action":"output","job":"job_1"}`)
+		read <- body
+	}()
+	<-r.timers // outputWait, never fired
+	poll := <-r.timers
+	select {
+	case body := <-read:
+		t.Fatalf("output returned before the job ended or the wait passed: %s", body)
+	case <-time.After(50 * time.Millisecond):
+	}
+	r.proc.exit <- 0
+	poll.fire <- time.Now()
+	if body := <-read; !strings.Contains(body, `"running":false`) {
+		t.Fatalf("output after the job ended = %s", body)
+	}
+}
+
+func TestJobOutputReturnsAtOnceWhenAMessageArrives(t *testing.T) {
+	r := newRig("", syscall.SIGTERM)
+	finish := make(chan string, 1)
+	go func() {
+		_, body := call(t, r.server.Handler(), "/run", `{"command":"sleep 99"}`)
+		finish <- body
+	}()
+	(<-r.timers).fire <- time.Now()
+	<-finish
+	read := make(chan string, 1)
+	go func() {
+		_, body := call(t, r.server.Handler(), "/job", `{"action":"output","job":"job_1"}`)
+		read <- body
+	}()
+	<-r.timers
+	<-r.timers
+	r.server.StepAside(contract.Interrupt{Kind: contract.InterruptOwner})
+	if body := <-read; !strings.Contains(body, `"message_arrived":true`) {
+		t.Fatalf("output when a message arrived = %s", body)
+	}
 }

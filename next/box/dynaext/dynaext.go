@@ -189,7 +189,7 @@ func job(c Config) extension.ToolDefinition {
 	return extension.ToolDefinition{
 		Name:          "job",
 		Label:         "job",
-		Description:   "Background jobs that bash started, including foreground commands moved aside by a message from the owner or an agent above. Dyna wakes the session when a background job completes.\noutput: read a job's new output.\nstop: stop a job and its whole process group.\nlist: list the jobs.",
+		Description:   "Background jobs that bash started, including foreground commands moved aside by a message from the owner or an agent above. Dyna wakes the session when a background job completes.\noutput: read a job's new output; when a running job has printed nothing new, it waits up to 30 s for a line, the job's end or a message.\nstop: stop a job and its whole process group.\nlist: list the jobs.",
 		PromptSnippet: "Read, stop or list background jobs",
 		Parameters:    json.RawMessage(`{"type":"object","properties":{"action":{"type":"string","enum":["output","stop","list"]},"job":{"type":"string"}},"required":["action"]}`),
 		OutputSchema:  jobSchema,
@@ -227,6 +227,8 @@ func jobResult(answer shell.Result, moved bool) (extension.AgentToolResult, erro
 		state = fmt.Sprintf("[job %s] %s%s", answer.Job, answer.Interrupt.Sender(), steppedNote)
 	case answer.Running && moved:
 		state = fmt.Sprintf("[job %s] %s", answer.Job, movedNote)
+	case answer.Running && strings.TrimSpace(answer.Output) == "":
+		state = fmt.Sprintf("[job %s is still running and printed nothing new in 30 s. Dyna wakes you when it ends, so end the turn unless other work remains.]", answer.Job)
 	case answer.Running:
 		state = fmt.Sprintf("[job %s is running in the background]", answer.Job)
 	}
