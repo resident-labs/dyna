@@ -440,7 +440,7 @@
     }
     if (event.key === "Escape" && drawer) void showDrawer(false);
     else if (event.key === "Escape" && panel && !wide.current) void showPanel(false);
-    else if (event.key === "Escape" && section && !inSettings) void closeSection();
+    else if (event.key === "Escape" && section && !inSettings && !document.querySelector(".media-viewer[open]")) void closeSection();
     if (event.key !== "F6") return;
     event.preventDefault();
     if (covered) return;
@@ -767,7 +767,7 @@
         sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
     </div>
   </main>
-  {#if sharedItem && room}<MediaViewer items={[sharedItem]} initial={0} {room} name={id => store?.names.get(id) ?? "Session"} root={id => !!id && !store?.sessions.get(id)?.parent} loadVisual={async () => []} onclose={() => sharedItem = undefined} onjump={key => document.querySelector<HTMLElement>(`[data-media-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "center" })} />{/if}
+  {#if sharedItem && room}<MediaViewer items={[sharedItem]} initial={0} {room} name={id => store?.names.get(id) ?? "Session"} root={id => !!id && !store?.sessions.get(id)?.parent} loadVisual={async () => []} onclose={() => sharedItem = undefined} onjump={key => { if (session) thread?.jumpMedia(key); else view?.jumpMedia(key); }} />{/if}
   {#if room}
     <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} aria-label="Sessions" tabindex="-1" role={panel && phone.current && !covered ? "dialog" : undefined} aria-modal={(panel && phone.current && !covered) || undefined} bind:this={members} inert={drawer || covered || inSettings}>
       {#if phone.current}{@render sheetHandle("sessions")}{/if}
@@ -853,8 +853,8 @@
   .paused button { flex: none; }
   .readonly { flex: none; margin: 0; padding: 12px 16px 14px 30px; color: var(--muted); font-size: 12.5px; }
   .shell.open.tucked, .shell.open:has(:global(:is(.instructions, .room-files))) { grid-template-columns: 64px 1fr; }
-  .shell.open:has(:global(.instructions)) aside.members { display: none; }
-  @media (max-width: 640px) { .shell.open:has(:global(.instructions)) { grid-template-columns: minmax(0, 1fr); } }
+  .shell.open:has(:global(:is(.instructions, .room-files))) aside.members { display: none; }
+  @media (max-width: 640px) { .shell.open:has(:global(:is(.instructions, .room-files))) { grid-template-columns: minmax(0, 1fr); } }
   .shell.tucked > aside.members { display: none; }
   .narrow, .menu-toggle { display: none; }
   @media (max-width: 760px) { .narrow { display: inline; } }

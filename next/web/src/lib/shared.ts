@@ -15,7 +15,7 @@ export function sharedMedia(room: string, path: string, source: MessageSource, b
 }
 
 export function sharedPaths(text: string): { start: number; text: string; path: string }[] {
-  return [...text.matchAll(/\/box\/shared\/[^\s`\]\[)\}>"']+/g)].flatMap(match => {
+  return [...text.matchAll(/\/box\/shared\/[^\s`\])\}>"']+/g)].flatMap(match => {
     const value = match[0].replace(/[.,:;]+$/, "");
     return value.length > 12 ? [{ start: match.index!, text: value, path: value.slice(12) }] : [];
   });

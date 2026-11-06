@@ -7,6 +7,7 @@ import { mediaKind } from "./media.ts";
 test("shared paths trim punctuation and closing quotes and brackets, ignoring private paths", () => {
   assert.deepEqual(sharedPaths('Read /box/shared/design/note.md.,:; and `/box/shared/a.go` or "/box/shared/b.png") /box/work/private /box/home/private').map(match => match.path), ["design/note.md", "a.go", "b.png"]);
   assert.equal(sharedPaths("/box/shared/").length, 0);
+  assert.equal(sharedPaths("`/box/shared/design/draft[old.md`")[0].path, "design/draft[old.md");
 });
 
 test("Files routes preserve nested paths and encoded characters", () => {

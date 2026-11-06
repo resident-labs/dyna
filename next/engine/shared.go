@@ -102,15 +102,15 @@ func (s *Service) Shared(caller contract.Principal) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
+		// Shared files are untrusted documents, including XHTML and other active types.
+		// Match the attachment route's sandbox even when opened as an original.
+		w.Header().Set("Content-Security-Policy", "sandbox")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		media := mime.TypeByExtension(strings.ToLower(filepath.Ext(info.Name())))
 		if media == "" {
 			media = "application/octet-stream"
 		}
 		w.Header().Set("Content-Type", media)
-		if strings.HasPrefix(media, "text/html") || strings.HasPrefix(media, "image/svg+xml") {
-			w.Header().Set("Content-Security-Policy", "sandbox")
-		}
 		if r.URL.Query().Get("download") == "1" {
 			w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": info.Name()}))
 		}
