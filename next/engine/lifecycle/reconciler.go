@@ -234,7 +234,9 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	all = append(all, runners...)
 	for i, row := range rows {
 		b := row.Box
-		if b.State != contract.BoxReady {
+		// A requested stop takes the agent channel down before the host finishes stopping the box.
+		// The stored intent survives an engine restart; that expected silence is not host loss.
+		if b.State != contract.BoxReady || row.Want == store.WantStop {
 			delete(r.disconnected, b.ID)
 		} else {
 			// A box whose agent still holds its channel is running and reaches the engine, whatever the heartbeat says: a
