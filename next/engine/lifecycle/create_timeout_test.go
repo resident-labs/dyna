@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"testing"
 
@@ -88,6 +89,48 @@ func TestCreateDeadlineAndShutdown(t *testing.T) {
 	var hostFailures int
 	if err := rig.st.Read().QueryRow("SELECT create_failures FROM hosts WHERE name=?", b.Host).Scan(&hostFailures); err != nil || hostFailures != 0 {
 		t.Fatalf("deadline counted against host: %d %v", hostFailures, err)
+	}
+}
+
+type releasedPreparationCreate struct {
+	runningBoxes
+	preparation context.Context
+}
+
+func (b *releasedPreparationCreate) Get(ctx context.Context, _ contract.SessionID, _ contract.HostName, _ bool) ([]contract.BoxRepo, error) {
+	b.preparation = ctx
+	return nil, nil
+}
+func (b *releasedPreparationCreate) Create(ctx context.Context, _ BoxSpec) (string, error) {
+	if b.preparation == nil || !errors.Is(b.preparation.Err(), context.Canceled) {
+		return "", errors.New("preparation still owns a timer during runtime create")
+	}
+	if _, bounded := ctx.Deadline(); bounded || ctx.Err() != nil {
+		return "", errors.New("runtime create inherited the preparation deadline or cancellation")
+	}
+	return "prepared-image", nil
+}
+func TestPreparationBoundIsReleasedBeforeRuntimeCreate(t *testing.T) {
+	rig := newHostRig(t)
+	boxes := &releasedPreparationCreate{}
+	rig.r.boxes = boxes
+	rig.r.repos = boxes
+	if err := rig.st.Write(rig.ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE boxes SET state='creating',image='',failures=0 WHERE id='b'")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := rig.st.LifecycleBoxes(rig.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rig.r.step(rig.ctx, rows[0]); err != nil {
+		t.Fatal(err)
+	}
+	b, err := rig.st.Box(rig.ctx, "b")
+	if err != nil || b.State != contract.BoxStarting || b.Image != "prepared-image" {
+		t.Fatalf("runtime create remained under the global preparation bound: %+v, %v", b, err)
 	}
 }
 

@@ -13,7 +13,8 @@ func TestTransferIdleUsesByteEventsNotWallTime(t *testing.T) {
 		progress := make(chan struct{}, 1)
 		ctx, stop := IdleContext(context.Background(), 3*time.Minute, progress)
 		defer stop()
-		for range 5 {
+		// Eighteen minutes exceeds the former whole-create deadline while remaining below each idle budget.
+		for range 9 {
 			time.Sleep(2 * time.Minute)
 			progress <- struct{}{}
 			synctest.Wait()

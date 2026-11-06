@@ -92,8 +92,8 @@ func (r *sharedTransferRunner) RunProgress(ctx context.Context, in []byte, progr
 		return nil, ctx.Err()
 	case <-r.release:
 	}
-	// More than three minutes wall-clock, but each real payload consumption advances the idle clock.
-	for range 4 {
+	// Eighteen minutes exceeds the old whole-create deadline; payload consumption keeps the idle clock alive.
+	for range 9 {
 		time.Sleep(2 * time.Minute)
 		progress(1024)
 	}
