@@ -65,7 +65,7 @@ func (r *slowHost) restart() {
 	r.master = make(map[string]bool)
 }
 
-func (r *slowHost) Run(ctx context.Context, input []byte, args ...string) ([]byte, error) {
+func (r *slowHost) Run(ctx context.Context, _ []byte, args ...string) ([]byte, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if slices.Contains(args, "-M") {
@@ -125,7 +125,7 @@ func (r *slowHost) Run(ctx context.Context, input []byte, args ...string) ([]byt
 		path := strings.Trim(fields[len(fields)-1], "'")
 		delete(r.sockets, path)
 	}
-	if len(input) > 100 {
+	if strings.Contains(command, "'dyna-install'") {
 		r.uploads++
 		upload := r.upload
 		r.mu.Unlock()
@@ -192,6 +192,11 @@ func startEngine(t *testing.T, ctx context.Context, r podman.Runner, st restoreS
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = state.Close() })
+	// These are transport-order tests, not CPU benchmarks of a large instrumented test executable.
+	b.binOnce.Do(func() { b.binSum = strings.Repeat("a", 64) })
+	b.binCacheOnce.Do(func() {
+		b.binCache = podman.NewBinaryCache(func() ([]byte, error) { return []byte("fixture executable"), nil })
+	})
 	b.Sockets = api.NewSockets(api.New(&serviceWithHosts{Service: engine.New(state, nil, nil, time.Now)}, nil), dir, uint32(os.Getuid()), nil)
 	t.Cleanup(func() { _ = b.Sockets.Close() })
 	b.hosts = make(map[contract.HostName]*podman.Host)
@@ -359,6 +364,9 @@ func TestInspectDoesNotWaitForTheBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.binOnce.Do(func() { b.binSum = strings.Repeat("a", 64) })
+	b.binCacheOnce.Do(func() {
+		b.binCache = podman.NewBinaryCache(func() ([]byte, error) { return []byte("fixture executable"), nil })
+	})
 	ctx, stop := context.WithTimeout(ctx, 5*time.Second)
 	defer stop()
 	_, _, _ = b.Inspect(ctx, "box_a")
@@ -429,6 +437,9 @@ func TestInstallSendsTheBinaryOnce(t *testing.T) {
 	}
 	b := &Boxes{Layout: box.Layout{Data: t.TempDir(), HostData: "/host"}, Version: "v2"}
 	b.binOnce.Do(func() { b.binSum = strings.Repeat("a", 64) })
+	b.binCacheOnce.Do(func() {
+		b.binCache = podman.NewBinaryCache(func() ([]byte, error) { return []byte("fixture executable"), nil })
+	})
 	var wg sync.WaitGroup
 	for range 3 {
 		wg.Go(func() {
