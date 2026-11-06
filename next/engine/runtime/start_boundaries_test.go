@@ -18,43 +18,8 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/images"
 	"github.com/resident-labs/dyna/engine/lifecycle"
+	"github.com/resident-labs/dyna/engine/store"
 )
-
-// A bounded final stage must not add another cancellation decision after success:
-// that would invoke failed-create cleanup where main publishes a successful box.
-func TestCreateKeepsMainSuccessBoundaryAfterContainerStart(t *testing.T) {
-	set := token.NewFileSet()
-	file, err := parser.ParseFile(set, "boxes.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, declaration := range file.Decls {
-		function, ok := declaration.(*ast.FuncDecl)
-		if !ok || function.Name.Name != "Create" {
-			continue
-		}
-		found := false
-		var tail []string
-		for _, statement := range function.Body.List {
-			var source bytes.Buffer
-			if err := format.Node(&source, set, statement); err != nil {
-				t.Fatal(err)
-			}
-			if source.String() == `steps.Done("container start")` {
-				found = true
-				continue
-			}
-			if found {
-				tail = append(tail, source.String())
-			}
-		}
-		if got := strings.Join(tail, "\n"); !found || got != "ok = true\nreturn image.Tag, nil" {
-			t.Fatalf("post-start success boundary must remain main's, got:\n%s", got)
-		}
-		return
-	}
-	t.Fatal("Boxes.Create not found")
-}
 
 type occupiedImageHost struct {
 	entered, release chan struct{}
@@ -102,26 +67,119 @@ func TestImagePreparationDeadlineIncludesWaitingForAnotherBuild(t *testing.T) {
 		t.Fatalf("gate expiry: budget %s, calls %d, error %v", budget, host.calls.Load(), err)
 	}
 }
+func TestInstructionWaitAndSettleRespectCancellation(t *testing.T) {
+	for _, operation := range []string{"sync", "settle"} {
+		t.Run(operation, func(t *testing.T) {
+			s, err := store.Open(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			h, err := podman.New("owner@host", t.TempDir(), "h", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := &instructionHost{gate: make(chan struct{}, 1)}
+			state.gate <- struct{}{}
+			b := &Boxes{Store: s, Layout: box.Layout{Data: t.TempDir()}, instructionSynced: map[*podman.Host]*instructionHost{h: state}}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			done := make(chan struct{})
+			var result error
+			go func() {
+				defer close(done)
+				if operation == "sync" {
+					result = b.syncInstructions(ctx, h)
+				} else {
+					result = state.settle(ctx)
+				}
+			}()
+			defer func() { <-state.gate; <-done }()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("canceled instruction gate waiter was not released")
+			}
+			if !errors.Is(result, context.Canceled) {
+				t.Fatalf("canceled %s: %v", operation, result)
+			}
+		})
+	}
+}
 
-func TestInstructionStartWaitRespectsCancellation(t *testing.T) {
-	h, err := podman.New("owner@host", t.TempDir(), "h", nil)
+type cleanupDeadlineRunner struct {
+	work, joined time.Time
+	joins        int
+}
+
+func (r *cleanupDeadlineRunner) Run(ctx context.Context, _ []byte, args ...string) ([]byte, error) {
+	for _, a := range args {
+		if a == "-M" || a == "-O" {
+			return nil, nil
+		}
+	}
+	deadline, _ := ctx.Deadline()
+	if strings.Contains(args[len(args)-1], "dyna-cancel") {
+		r.joined = deadline
+		r.joins++
+		return nil, nil
+	}
+	r.work = deadline
+	return nil, errors.New("uncertain cleanup reply")
+}
+func TestCleanupReservesJoinTimeInsideOneTotalBudget(t *testing.T) {
+	parent, cancelParent := context.WithCancel(context.Background())
+	cancelParent()
+	ctx, cancel := startCleanupContext(parent)
+	defer cancel()
+	if ctx.Err() != nil {
+		t.Fatal("cleanup inherited canceled start")
+	}
+	runner := &cleanupDeadlineRunner{}
+	h, err := podman.New("owner@host", t.TempDir(), "h", runner)
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := &instructionHost{gate: make(chan struct{}, 1)}
-	state.gate <- struct{}{}
-	defer func() { <-state.gate }()
-	b := &Boxes{Layout: box.Layout{Data: t.TempDir()}, instructionSynced: map[*podman.Host]*instructionHost{h: state}}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	done := make(chan error, 1)
-	go func() { done <- b.syncInstructions(ctx, h) }()
-	select {
-	case err := <-done:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("instruction wait: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("canceled startup did not leave instruction gate")
+	if err := h.RemoveContainer(ctx, "b"); err == nil {
+		t.Fatal("uncertain reply became success")
 	}
+	if runner.joins != 1 || runner.work.IsZero() || runner.joined.Sub(runner.work) != box.StartCleanupBudget/2 {
+		t.Fatalf("cleanup lost its total budget: work=%v join=%v joins=%d", runner.work, runner.joined, runner.joins)
+	}
+}
+
+// A bounded final stage must not add another cancellation decision after success:
+// that would invoke failed-create cleanup where main publishes a successful box.
+func TestCreateKeepsMainSuccessBoundaryAfterContainerStart(t *testing.T) {
+	set := token.NewFileSet()
+	file, err := parser.ParseFile(set, "boxes.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, declaration := range file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Name.Name != "Create" {
+			continue
+		}
+		found := false
+		var tail []string
+		for _, statement := range function.Body.List {
+			var source bytes.Buffer
+			if err := format.Node(&source, set, statement); err != nil {
+				t.Fatal(err)
+			}
+			if source.String() == `steps.Done("container start")` {
+				found = true
+				continue
+			}
+			if found {
+				tail = append(tail, source.String())
+			}
+		}
+		if got := strings.Join(tail, "\n"); !found || got != "ok = true\nreturn image.Tag, nil" {
+			t.Fatalf("post-start success boundary must remain main's, got:\n%s", got)
+		}
+		return
+	}
+	t.Fatal("Boxes.Create not found")
 }

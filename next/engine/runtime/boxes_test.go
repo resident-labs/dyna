@@ -59,7 +59,7 @@ func TestRemoveHostBoxWithMissingContainer(t *testing.T) {
 	}
 	record := box.Box{ID: "box_1", Slice: "dyna-test.slice"}
 	forward := box.Forward{Box: record.ID, HostPath: "/host/sock/box_1/engine.sock", EnginePath: "/runtime/boxes/box_1.sock"}
-	if err := removeHostBox(context.Background(), host, record, forward); err != nil {
+	if err := removeHostBox(context.Background(), host, record, forward, true); err != nil {
 		t.Fatal(err)
 	}
 	if !runner.stopSeen {
@@ -89,7 +89,7 @@ func TestRemoveHostBoxCleansPartialCreation(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := removeHostBox(ctx, host, record, forward); err != nil {
+			if err := removeHostBox(ctx, host, record, forward, true); err != nil {
 				t.Fatal(err)
 			}
 			if len(host.Slices) != 0 || len(host.Forwards) != 0 || len(host.Containers) != 0 || len(host.Volumes) != 0 {

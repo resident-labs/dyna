@@ -467,8 +467,8 @@ type recordHostStore struct {
 
 func (s recordHostStore) AddHost(_ context.Context, h box.Host) error { *s.added = h; return nil }
 
-// An exec-only host is checked by running bash alone, and nothing is installed or synced there.
-func TestAddExecOnlyHostNeedsOnlyBash(t *testing.T) {
+// An exec-only host checks the shell and pgrep cancellation prerequisite; nothing is installed or synced there.
+func TestAddExecOnlyHostNeedsShellAndPgrep(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var commands []string
@@ -478,7 +478,7 @@ func TestAddExecOnlyHostNeedsOnlyBash(t *testing.T) {
 	if _, err := b.AddHost(ctx, contract.HostAddRequest{Name: "omarchy", SSH: "ari@omarchy", Agents: &off, CI: &off}); err != nil {
 		t.Fatal(err)
 	}
-	if len(commands) != 1 || !strings.Contains(commands[0], "true") {
+	if len(commands) != 1 || !strings.Contains(commands[0], "command -v pgrep") {
 		t.Fatalf("commands %q", commands)
 	}
 	if !added.ExecOnly || added.State != box.HostReady || added.EngineHost == nil {

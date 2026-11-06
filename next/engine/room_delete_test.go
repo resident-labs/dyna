@@ -87,8 +87,9 @@ func (h *fakeRoomHosts) record(name string) error {
 func (h *fakeRoomHosts) RemoveRoom(_ context.Context, host contract.HostName, room contract.RoomID) error {
 	return h.record(fmt.Sprintf("room %s %s", host, room))
 }
-func (h *fakeRoomHosts) RemoveLeftoverBox(_ context.Context, host contract.HostName, id contract.BoxID, slice string) error {
-	return h.record(fmt.Sprintf("box %s %s %s", host, id, slice))
+func (h *fakeRoomHosts) RemoveLeftoverBox(_ context.Context, host contract.HostName, id contract.BoxID, slice string) (lifecycle.LeftoverCleanup, error) {
+	err := h.record(fmt.Sprintf("box %s %s %s", host, id, slice))
+	return lifecycle.LeftoverComplete, err
 }
 func (h *fakeRoomHosts) ForgetBox(id contract.BoxID) error {
 	h.mu.Lock()
