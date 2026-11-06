@@ -55,11 +55,14 @@ func (r *runner) Run(_ context.Context, _ []byte, args ...string) ([]byte, error
 	if r.missingFrame {
 		return []byte("partial"), nil
 	}
+	if strings.HasSuffix(args[len(args)-1], "'read'") {
+		return []byte("0\nDYNA-END 00000000000000000002 000\n"), nil
+	}
 	return []byte(fmt.Sprintf("%sDYNA-END %020d %03d\n", r.body, len(r.body), r.status)), nil
 }
 func newTestHost(t *testing.T, r *runner) *Host {
 	t.Helper()
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +174,7 @@ func TestStopContainerIgnoresMissing(t *testing.T) {
 	if err := h.StopContainer(context.Background(), "a"); err != nil {
 		t.Fatal(err)
 	}
-	args := r.calls[1]
+	args := r.calls[len(r.calls)-1]
 	if !strings.HasSuffix(args[len(args)-1], "'podman' '--cgroup-manager=systemd' 'stop' '--ignore' 'a'") {
 		t.Fatalf("command %v", args)
 	}
@@ -182,7 +185,8 @@ func TestRemoveContainerLeavesVolumeForMove(t *testing.T) {
 	if err := h.RemoveContainer(context.Background(), "a"); err != nil {
 		t.Fatal(err)
 	}
-	if len(r.calls) != 2 || !strings.HasSuffix(r.calls[1][len(r.calls[1])-1], "'podman' '--cgroup-manager=systemd' 'rm' '--ignore' '--volumes' 'a'") {
+	command := strings.ReplaceAll(r.calls[len(r.calls)-1][len(r.calls[len(r.calls)-1])-1], `'\''`, `'`)
+	if len(r.calls) != 4 || !strings.Contains(command, "'podman' '--cgroup-manager=systemd' 'rm' '--ignore' '--volumes' 'a'") || strings.Contains(command, "'volume' 'rm'") || strings.Contains(command, "'volume' 'prune'") {
 		t.Fatalf("commands %v", r.calls)
 	}
 }
@@ -215,14 +219,15 @@ func TestANewMachinesKeyStaysOutOfTheOwnersList(t *testing.T) {
 	}
 }
 
-func TestRemoveVolumeAcceptsMissingVolume(t *testing.T) {
-	r := &runner{status: 1}
+func TestRemoveVolumeUsesWholeNamespaceBody(t *testing.T) {
+	r := &runner{}
 	h := newTestHost(t, r)
 	if err := h.RemoveVolume(context.Background(), "a"); err != nil {
 		t.Fatal(err)
 	}
-	args := r.calls[1]
-	if !strings.HasSuffix(args[len(args)-1], "'podman' '--cgroup-manager=systemd' 'volume' 'rm' 'dyna-box-a'") {
+	args := r.calls[len(r.calls)-1]
+	command := strings.ReplaceAll(args[len(args)-1], `'\''`, `'`)
+	if !strings.Contains(command, "'podman' '--cgroup-manager=systemd' 'volume' 'rm' 'dyna-box-a'") || !strings.Contains(command, "'volume' 'prune'") || !strings.Contains(command, "'pod' 'rm'") || !strings.Contains(command, "status=$?") {
 		t.Fatalf("command %v", args)
 	}
 }
@@ -339,7 +344,7 @@ func TestRetriedForwardCancelsBeforeRemovingTheSocket(t *testing.T) {
 func TestCancelledCheckLeavesForwardsAlone(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &cancelledCheck{}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +397,7 @@ func (r *failingForward) Run(ctx context.Context, in []byte, args ...string) ([]
 // did, and leave those boxes connected, or a short deadline never gets to the end of the list.
 func TestRestoreKeepsForwardsAcrossTries(t *testing.T) {
 	r := &failingForward{}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,7 +472,7 @@ func (r *resetRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte, 
 }
 func TestFirstUseReplacesStaleMaster(t *testing.T) {
 	r := &resetRunner{}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -505,7 +510,7 @@ func (r *blockingRunner) Run(ctx context.Context, _ []byte, args ...string) ([]b
 }
 func TestHeartbeatRunsDuringHostCommand(t *testing.T) {
 	r := &blockingRunner{entered: make(chan struct{}), release: make(chan struct{}), second: make(chan struct{})}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

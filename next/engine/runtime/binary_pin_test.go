@@ -39,7 +39,7 @@ func (r *nativePinnedRunner) Run(ctx context.Context, in []byte, args ...string)
 	}
 	if r.entered != "" && strings.Contains(command, "'dyna-link'") {
 		prefix := fmt.Sprintf(": > %q; while [ ! -f %q ]; do sleep 0.01; done; ", r.entered, r.release)
-		command = strings.Replace(command, `test "$(sha256sum`, prefix+`test "$(sha256sum`, 1)
+		command = strings.Replace(command, `exec 9> .activation.lock`, prefix+`exec 9> .activation.lock`, 1)
 		command += fmt.Sprintf("; status=$?; : > %q; exit $status", r.finished)
 	}
 	if r.noSystemd && strings.Contains(command, "dyna-binary %s") {
@@ -118,7 +118,7 @@ printf '%s' "$!" > "$PIN_PID"
 			_ = syscall.Kill(-pid, syscall.SIGKILL)
 		}
 	})
-	h, err := podman.New("user@host", t.TempDir(), "host", &nativePinnedRunner{})
+	h, err := podman.New("user@host", t.TempDir(), "host", &nativePinnedRunner{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestOneHostSurveyConvergesAfterUnconfirmedActivationAndRepeatedSHAABA(t *te
 				r := &nativePinnedRunner{entered: filepath.Join(tools, fmt.Sprintf("entered-%d", i)), release: filepath.Join(tools, fmt.Sprintf("release-%d", i)), finished: filepath.Join(tools, fmt.Sprintf("done-%d", i)), failCancel: true}
 				old = append(old, r)
 				t.Cleanup(func() { _ = os.WriteFile(r.release, nil, 0600) })
-				h, err := podman.New("user@host", t.TempDir(), "host", r)
+				h, err := podman.New("user@host", t.TempDir(), "host", r, t.TempDir())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -179,7 +179,7 @@ func TestOneHostSurveyConvergesAfterUnconfirmedActivationAndRepeatedSHAABA(t *te
 					t.Fatalf("activation cancellation was not unconfirmed: %v", err)
 				}
 			}
-			newest, err := podman.New("user@host", t.TempDir(), "host", &nativePinnedRunner{noSystemd: true})
+			newest, err := podman.New("user@host", t.TempDir(), "host", &nativePinnedRunner{noSystemd: true}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}

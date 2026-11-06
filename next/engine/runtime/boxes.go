@@ -534,7 +534,7 @@ func (b *Boxes) host(ctx context.Context, name contract.HostName) (*podman.Host,
 	for _, record := range hosts {
 		if record.Name == name {
 			// Nothing here touches the network: a slow host must not hold up a caller that wants another one.
-			h, err := podman.New(record.SSH, b.Runtime, string(name), nil)
+			h, err := podman.New(record.SSH, b.Runtime, string(name), nil, b.Layout.HostData)
 			if err != nil {
 				return nil, err
 			}
@@ -754,10 +754,7 @@ func (b *Boxes) RemoveLeftoverBox(ctx context.Context, name contract.HostName, i
 		return lifecycle.LeftoverDeferred, err
 	}
 	ctx = podman.WithRemoteCancellation(ctx)
-	if err := removeHostBox(ctx, h, box.Box{ID: id, Slice: slice}, b.forward(id), false); err != nil {
-		return lifecycle.LeftoverDeferred, err
-	}
-	removed, err := b.removeBoxVolumes(ctx, name, h, id)
+	removed, err := b.removeBoxVolumes(ctx, name, h, box.Box{ID: id, Slice: slice})
 	if err != nil {
 		return lifecycle.LeftoverDeferred, err
 	}
@@ -775,7 +772,7 @@ func (b *Boxes) CacheHost(ctx context.Context, name contract.HostName) (enginegi
 }
 
 func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool, error) {
-	h, err := podman.New(req.SSH, b.Runtime, string(req.Name), b.hostRunner)
+	h, err := podman.New(req.SSH, b.Runtime, string(req.Name), b.hostRunner, b.Layout.HostData)
 	if err != nil {
 		return false, err
 	}
@@ -806,7 +803,7 @@ func (b *Boxes) AddHost(ctx context.Context, req contract.HostAddRequest) (bool,
 
 // joinHost brings a pool's new machine in the way AddHost brings in the owner's, and leaves recording it to the pool step.
 func (b *Boxes) joinHost(ctx context.Context, name contract.HostName, ssh string) (box.Host, error) {
-	h, err := podman.New(ssh, b.Runtime, string(name), b.hostRunner)
+	h, err := podman.New(ssh, b.Runtime, string(name), b.hostRunner, b.Layout.HostData)
 	if err != nil {
 		return box.Host{}, err
 	}
@@ -957,15 +954,9 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	}
 	forwarded = true
 	steps.Done("forward")
-	if spec.Stack != nil {
-		stacked = true
-		if err = run(contract.StartStack, func(ctx context.Context) error { return h.CreateStack(ctx, spec.Box, spec.Slice, spec.Stack) }); err != nil {
-			return "", err
-		}
-		steps.Done("compose stack")
-	}
+	stacked = spec.Stack != nil
 	created = true
-	if err = run(contract.StartCreate, func(ctx context.Context) error { return h.CreateContainer(ctx, c) }); err != nil {
+	if err = run(contract.StartCreate, func(ctx context.Context) error { return h.CreateBox(ctx, c, spec.Stack, false) }); err != nil {
 		var missing box.MissingDevice
 		if errors.As(err, &missing) {
 			missing.Host = string(spec.Host)
@@ -997,11 +988,11 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 func cleanupCreate(ctx context.Context, h box.HostDriver, spec lifecycle.BoxSpec, forward box.Forward, stacked, created, forwarded, sliced bool) {
 	ctx, cancel := startCleanupContext(ctx)
 	defer cancel()
-	if stacked {
-		_ = h.RemovePod(ctx, spec.Box)
-	}
-	if created {
-		_ = h.RemoveContainer(ctx, spec.Box)
+	if stacked || created {
+		epoch, err := h.BoxEpoch(ctx, spec.Box)
+		if err == nil {
+			_ = h.RemoveBox(ctx, spec.Box, epoch, false)
+		}
 	}
 	if forwarded {
 		_ = h.RemoveForward(ctx, forward)
@@ -1398,11 +1389,7 @@ func (b *Boxes) Remove(ctx context.Context, id contract.BoxID) error {
 	if err != nil {
 		return err
 	}
-	forward := b.forward(id)
-	if err := removeHostBox(ctx, h, record, forward, false); err != nil {
-		return err
-	}
-	if _, err := b.removeBoxVolumes(ctx, record.Host, h, id); err != nil {
+	if _, err := b.removeBoxVolumes(ctx, record.Host, h, record); err != nil {
 		return err
 	}
 	return b.Sockets.RemoveBox(id)
@@ -1444,27 +1431,19 @@ func (b *Boxes) DiscardHostBox(ctx context.Context, old box.Box) error {
 
 // removeHostBox removes runnable resources. Named work requires explicit deletion permission from its owner.
 func removeHostBox(ctx context.Context, h box.HostDriver, record box.Box, forward box.Forward, removeVolumes bool) error {
-	if err := h.StopContainer(ctx, record.ID); err != nil {
+	epoch, err := h.BoxEpoch(ctx, record.ID)
+	if err != nil {
 		return err
 	}
+	return removeHostBoxAtEpoch(ctx, h, record, forward, epoch, removeVolumes)
+}
+func removeHostBoxAtEpoch(ctx context.Context, h box.HostDriver, record box.Box, forward box.Forward, epoch uint64, removeVolumes bool) error {
 	if err := h.RemoveForward(ctx, forward); err != nil {
 		return err
 	}
-	if err := h.RemoveContainer(ctx, record.ID); err != nil {
+	if err := h.RemoveBox(ctx, record.ID, epoch, removeVolumes); err != nil {
 		return err
 	}
-	if err := h.RemovePod(ctx, record.ID); err != nil {
-		return err
-	}
-	if removeVolumes {
-		if err := h.RemoveVolume(ctx, record.ID); err != nil {
-			return err
-		}
-		if err := h.RemoveStackVolumes(ctx, record.ID); err != nil {
-			return err
-		}
-	}
-	// A box closed before it was created never got a slice, so there is none to remove.
 	if record.Slice == "" {
 		return nil
 	}
@@ -1693,31 +1672,12 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image stri
 		return err
 	}
 	spec.Root = session.Root
-	if err := run(contract.StartCreate, func(ctx context.Context) error { return h.StopContainer(ctx, spec.Box) }); err != nil {
-		return err
-	}
-	if err := run(contract.StartCreate, func(ctx context.Context) error { return h.RemoveContainer(ctx, spec.Box) }); err != nil {
-		return err
-	}
-	if spec.Stack != nil {
-		// The pod goes whole: its sidecars follow the box to new images, and its volumes stay.
-		if err := run(contract.StartStack, func(ctx context.Context) error { return h.RemovePod(ctx, spec.Box) }); err != nil {
-			return err
-		}
-	}
-	steps.Done("remove old container")
 	slice, c := b.container(spec, image, shared)
 	if err := run(contract.StartSlice, func(ctx context.Context) error { return h.EnsureSlice(ctx, slice) }); err != nil {
 		return err
 	}
 	steps.Done("slice")
-	if spec.Stack != nil {
-		if err := run(contract.StartStack, func(ctx context.Context) error { return h.CreateStack(ctx, spec.Box, spec.Slice, spec.Stack) }); err != nil {
-			return err
-		}
-		steps.Done("compose stack")
-	}
-	if err := run(contract.StartCreate, func(ctx context.Context) error { return h.CreateContainer(ctx, c) }); err != nil {
+	if err := run(contract.StartCreate, func(ctx context.Context) error { return h.CreateBox(ctx, c, spec.Stack, true) }); err != nil {
 		var missing box.MissingDevice
 		if errors.As(err, &missing) {
 			missing.Host = string(spec.Host)

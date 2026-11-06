@@ -110,11 +110,11 @@ INSERT INTO room_leftovers(host,room,box,slice) VALUES('old','r','b','');`, f.no
 	}
 	sockets := api.NewSockets(nil, t.TempDir(), uint32(os.Getuid()), nil)
 	t.Cleanup(func() { sockets.Close() })
-	h, err := podman.New("user@host", t.TempDir(), "old", &nativePinnedRunner{})
+	h, err := podman.New("user@host", t.TempDir(), "old", &nativePinnedRunner{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	newHost, err := podman.New("user@new-host", t.TempDir(), "new", unexpectedRestartHost{})
+	newHost, err := podman.New("user@new-host", t.TempDir(), "new", unexpectedRestartHost{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

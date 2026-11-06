@@ -107,7 +107,7 @@ func (r *recordRunner) Run(_ context.Context, stdin []byte, args ...string) ([]b
 // and logs, hold the secret's name only.
 func TestSecretValueTravelsOnStdinNeverInArgv(t *testing.T) {
 	r := &recordRunner{}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

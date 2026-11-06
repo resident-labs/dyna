@@ -66,6 +66,7 @@ type Host struct {
 	dialSetup           time.Duration
 	gate                chan struct{}
 	destination, socket string
+	dataDir             string
 	runner              Runner
 	forwards            map[box.Forward]struct{} // every forward this host should have
 	bound               map[box.Forward]struct{} // those the current master holds; a retry starts from here
@@ -78,8 +79,8 @@ type Host struct {
 }
 
 // New returns one driver per host. runtime is Dyna v2's private runtime directory.
-func New(destination, runtime, hostKey string, runner Runner) (*Host, error) {
-	if destination == "" || strings.HasPrefix(destination, "-") || hostKey == "" || filepath.Base(hostKey) != hostKey {
+func New(destination, runtime, hostKey string, runner Runner, hostData string) (*Host, error) {
+	if destination == "" || strings.HasPrefix(destination, "-") || hostKey == "" || filepath.Base(hostKey) != hostKey || !filepath.IsAbs(hostData) {
 		return nil, errors.New("invalid SSH host")
 	}
 	if runner == nil {
@@ -105,7 +106,7 @@ func New(destination, runtime, hostKey string, runner Runner) (*Host, error) {
 	if !ok || !info.IsDir() || info.Mode().Perm() != 0700 || stat.Uid != uint32(os.Getuid()) {
 		return nil, errors.New("insecure SSH control socket directory")
 	}
-	return &Host{pendingCancels: make(map[string]struct{}), gate: make(chan struct{}, 1), buildGate: make(chan struct{}, 1), shortGate: make(chan struct{}, 5), stopGate: make(chan struct{}, 1), dialGate: make(chan struct{}, hostexecDialing), dialSetup: hostexecSetup, destination: destination, socket: socket, runner: runner, forwards: make(map[box.Forward]struct{}), bound: make(map[box.Forward]struct{})}, nil
+	return &Host{dataDir: hostData, pendingCancels: make(map[string]struct{}), gate: make(chan struct{}, 1), buildGate: make(chan struct{}, 1), shortGate: make(chan struct{}, 5), stopGate: make(chan struct{}, 1), dialGate: make(chan struct{}, hostexecDialing), dialSetup: hostexecSetup, destination: destination, socket: socket, runner: runner, forwards: make(map[box.Forward]struct{}), bound: make(map[box.Forward]struct{})}, nil
 }
 
 // Generation changes each time the SSH master and its forwards are restored.
@@ -452,7 +453,10 @@ func (h *Host) executeOver(ctx context.Context, ssh []string, input []byte, argv
 		out, sshErr = h.runner.Run(ctx, frame, args...)
 	}
 	body, status, replyErr := parseReply(out)
-	if token != "" && (ctx.Err() != nil || sshErr != nil || replyErr != nil) {
+	// A complete frame is the operation's confirmed result, even if the
+	// caller's context or SSH exit raced its trailer. Only a missing/invalid
+	// trailer leaves a remote mutation to cancel and join.
+	if token != "" && replyErr != nil {
 		h.pendingMu.Lock()
 		h.pendingCancels[token] = struct{}{}
 		h.pendingMu.Unlock()
@@ -519,7 +523,7 @@ func (h *Host) RemoveSlice(ctx context.Context, name string) error {
 	_, err := h.run(ctx, "bash", "-c", `test -n "$XDG_RUNTIME_DIR" && rm -rf -- "$XDG_RUNTIME_DIR/systemd/user.control/$1.d" && systemctl --user daemon-reload`, "dyna", name)
 	return err
 }
-func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
+func (h *Host) containerCommand(ctx context.Context, c box.ContainerSpec) ([]string, error) {
 	userns := []string{boxUserNS}
 	if c.Pod != "" {
 		// The pod sets the mapping, and Podman refuses --userns beside --pod.
@@ -536,7 +540,7 @@ func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
 			binaryRoot = m.HostPath
 		}
 		if err := h.makeMountFolder(ctx, m); err != nil {
-			return err
+			return nil, err
 		}
 		v := m.HostPath + ":" + m.BoxPath
 		if m.ReadOnly {
@@ -573,12 +577,22 @@ func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
 		// The collector uses this lock too: a pin becomes a container reference before it can be pruned.
 		args = append([]string{"bash", "-c", pinCreateScript, "dyna-pin-create", binaryRoot}, args...)
 	}
-	if checks == "" {
-		_, err := h.run(ctx, args...)
-		return imageFailure(err)
+	if checks != "" {
+		args = append([]string{"bash", "-c", checks + `exec "$@"`, "dyna-devices"}, args...)
 	}
-	command := append([]string{"bash", "-c", checks + `exec "$@"`, "dyna-devices"}, args...)
-	out, err := h.run(ctx, command...)
+	return args, nil
+}
+
+func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
+	args, err := h.containerCommand(ctx, c)
+	if err != nil {
+		return err
+	}
+	out, err := h.namespace(ctx, c.Box, "create", args...)
+	return containerFailure(out, err)
+}
+
+func containerFailure(out []byte, err error) error {
 	var exit remoteExit
 	if errors.As(err, &exit) && exit == 254 {
 		switch string(out) {
@@ -609,25 +623,21 @@ func imageFailure(err error) error {
 	return err
 }
 func (h *Host) StartContainer(ctx context.Context, id contract.BoxID) error {
-	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "start", string(id))
+	_, err := h.namespace(ctx, id, "use", "podman", "--cgroup-manager=systemd", "start", string(id))
 	return err
 }
 func (h *Host) StopContainer(ctx context.Context, id contract.BoxID) error {
-	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "stop", "--ignore", string(id))
+	_, err := h.namespaceDelete(ctx, id, "podman", "--cgroup-manager=systemd", "stop", "--ignore", string(id))
 	return err
 }
 func (h *Host) RemoveContainer(ctx context.Context, id contract.BoxID) error {
-	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "rm", "--ignore", "--volumes", string(id))
-	return err
+	return h.removeBoxNow(ctx, id, false)
 }
+
+// RemoveVolume removes the whole unused namespace, not just its workspace.
+// All destructive paths use the same atomic container/pod/workspace/stack body.
 func (h *Host) RemoveVolume(ctx context.Context, id contract.BoxID) error {
-	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "volume", "rm", "dyna-box-"+string(id))
-	// Podman documents status 1 as a missing volume, and 2 or 125 as errors.
-	var exit remoteExit
-	if errors.As(err, &exit) && exit == 1 {
-		return nil
-	}
-	return err
+	return h.removeBoxNow(ctx, id, true)
 }
 
 // HoldsBox says whether this host has a box's container or its volume. Each exists command exits 1 for one that is missing.

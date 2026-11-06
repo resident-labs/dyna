@@ -70,7 +70,7 @@ func TestExplicitGoneHostDiscardRetiresOnlyItsNativeVolumeOwner(t *testing.T) {
 			entered, release := stopVolumeGate(t, f, "rm")
 			t.Setenv("STOP_VOLUME_SCOPE", targetWork)
 			runner.fail.Store(true)
-			h, err := podman.New("user@gone-host", t.TempDir(), string(target), runner)
+			h, err := podman.New("user@gone-host", t.TempDir(), string(target), runner, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}

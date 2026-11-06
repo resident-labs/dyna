@@ -118,7 +118,7 @@ func TestRealSSHForwardReconnect(t *testing.T) {
 	if err := os.WriteFile(sshConfig, []byte(contents), 0600); err != nil {
 		t.Fatal(err)
 	}
-	h, err := New("test", dir, "host", configuredSSH{sshConfig})
+	h, err := New("test", dir, "host", configuredSSH{sshConfig}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

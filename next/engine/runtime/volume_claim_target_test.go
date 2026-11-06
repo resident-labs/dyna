@@ -43,7 +43,7 @@ func TestHostDiscardPreventsLateStopVolumeOwnership(t *testing.T) {
 				f.exec(t, `UPDATE boxes SET state='failed' WHERE id='b'; DELETE FROM room_leftovers WHERE host='old'`)
 				f.svc.Reconciler().SetRoomHosts(f.runtime)
 			}
-			h, err := podman.New("user@local-fixture", t.TempDir(), string(target), runner)
+			h, err := podman.New("user@local-fixture", t.TempDir(), string(target), runner, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}

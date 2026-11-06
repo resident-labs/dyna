@@ -221,7 +221,7 @@ func TestUnconfirmedVolumeRemovalKeepsFenceAfterBoundedCaller(t *testing.T) {
 			entered, release := stopVolumeGate(t, f, "rm")
 			runner := &volumeCancelRunner{}
 			runner.fail.Store(true)
-			h, err := podman.New("user@host", t.TempDir(), string(target), runner)
+			h, err := podman.New("user@host", t.TempDir(), string(target), runner, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}

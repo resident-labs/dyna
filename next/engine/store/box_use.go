@@ -20,17 +20,20 @@ const (
 // Initial typed placement proves the beginning of the box's history. Missing legacy/import history is
 // unknown, never permission to relocate or destroy work. Image and mutable placement times prove nothing.
 func boxUseEvidence(ctx context.Context, tx *sql.Tx, id contract.BoxID, room contract.RoomID) (boxUse, error) {
-	var known, used bool
+	var known, used, laterCreate bool
 	err := tx.QueryRowContext(ctx, `SELECT
  EXISTS(SELECT 1 FROM events WHERE room=? AND type='box.changed' AND json_extract(CAST(body AS TEXT),'$.box')=? AND json_extract(CAST(body AS TEXT),'$.to')='pending' AND coalesce(json_extract(CAST(body AS TEXT),'$.from'),'')=''),
- EXISTS(SELECT 1 FROM events WHERE room=? AND type='box.changed' AND json_extract(CAST(body AS TEXT),'$.box')=? AND json_extract(CAST(body AS TEXT),'$.to')='ready') OR EXISTS(SELECT 1 FROM turns WHERE session=(SELECT session FROM boxes WHERE id=?))`, room, id, room, id, id).Scan(&known, &used)
+ EXISTS(SELECT 1 FROM events WHERE room=? AND type='box.changed' AND json_extract(CAST(body AS TEXT),'$.box')=? AND json_extract(CAST(body AS TEXT),'$.to')='ready') OR EXISTS(SELECT 1 FROM turns WHERE session=(SELECT session FROM boxes WHERE id=?)),
+ EXISTS(SELECT 1 FROM events WHERE room=? AND type='box.changed' AND json_extract(CAST(body AS TEXT),'$.box')=? AND (json_extract(CAST(body AS TEXT),'$.to') IN ('stopped','lost') OR json_extract(CAST(body AS TEXT),'$.from') IN ('stopped','lost') OR (json_extract(CAST(body AS TEXT),'$.from')='failed' AND json_extract(CAST(body AS TEXT),'$.to')='pending')))`, room, id, room, id, id, room, id).Scan(&known, &used, &laterCreate)
 	if err != nil {
 		return boxUseUnknown, err
 	}
 	if used {
 		return boxUsed, nil
 	}
-	if known {
+	// A typed restart/recovery boundary is not positive first-create proof,
+	// regardless of who requested it. Owner provenance only ends affinity.
+	if known && !laterCreate {
 		return boxUnused, nil
 	}
 	return boxUseUnknown, nil

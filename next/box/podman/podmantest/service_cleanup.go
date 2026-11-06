@@ -125,7 +125,7 @@ esac
 		}
 	}
 	var err error
-	f.Host, err = podman.New("user@host", t.TempDir(), "host", localPayloadRunner{})
+	f.Host, err = podman.New("user@host", t.TempDir(), "host", localPayloadRunner{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

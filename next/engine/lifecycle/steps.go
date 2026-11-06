@@ -120,9 +120,6 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			sources, workErr = repos.Get(createCtx, b.Session, b.Host, true)
 			steps.Done("repositories")
 		}
-		if workErr == nil && createCtx.Err() != nil {
-			workErr = createCtx.Err()
-		}
 		if workErr == nil {
 			cancelCreate()
 			phase = contract.CreatePhaseBox

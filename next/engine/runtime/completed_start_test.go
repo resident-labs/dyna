@@ -36,7 +36,7 @@ func TestCreateCompletedStartKeepsMainCleanupBoundary(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	runner := &completedStartRunner{base: base, cancel: cancel}
-	host, err := podman.New("user@host", t.TempDir(), "host", runner)
+	host, err := podman.New("user@host", t.TempDir(), "host", runner, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

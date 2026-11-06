@@ -54,7 +54,7 @@ func packedBinary(t *testing.T, raw []byte) []byte {
 
 func TestInstallRejectsCorruptBytesBeforePublishing(t *testing.T) {
 	r := &localBinaryRunner{forceGzip: true}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestConcurrentSameSHAStagesPublishOnlyCompleteObjects(t *testing.T) {
 	release := make(chan struct{})
 	done := make(chan error, 2)
 	for range 2 {
-		h, err := New("user@host", t.TempDir(), "host", &localBinaryRunner{forceGzip: true})
+		h, err := New("user@host", t.TempDir(), "host", &localBinaryRunner{forceGzip: true}, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -119,11 +119,11 @@ func TestLateOldStagerCannotDowngradeNewActivation(t *testing.T) {
 	newHash := sha256.Sum256(newRaw)
 	oldSum := hex.EncodeToString(oldHash[:])
 	newSum := hex.EncodeToString(newHash[:])
-	old, err := New("user@host", t.TempDir(), "old", &localBinaryRunner{forceGzip: true})
+	old, err := New("user@host", t.TempDir(), "old", &localBinaryRunner{forceGzip: true}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	newer, err := New("user@host", t.TempDir(), "new", &localBinaryRunner{forceGzip: true})
+	newer, err := New("user@host", t.TempDir(), "new", &localBinaryRunner{forceGzip: true}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestLateOldStagerCannotDowngradeNewActivation(t *testing.T) {
 func TestPartialOrWrongCompressedObjectDoesNotReplaceCurrent(t *testing.T) {
 	for _, kind := range []string{"truncated gzip", "wrong checksum"} {
 		t.Run(kind, func(t *testing.T) {
-			h, err := New("user@host", t.TempDir(), "host", &localBinaryRunner{forceGzip: true})
+			h, err := New("user@host", t.TempDir(), "host", &localBinaryRunner{forceGzip: true}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -193,7 +193,7 @@ func TestPartialOrWrongCompressedObjectDoesNotReplaceCurrent(t *testing.T) {
 
 func TestCompressedStageDoesNotActivate(t *testing.T) {
 	r := &localBinaryRunner{forceGzip: true}
-	h, err := New("user@host", t.TempDir(), "host", r)
+	h, err := New("user@host", t.TempDir(), "host", r, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

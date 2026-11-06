@@ -11,6 +11,7 @@ import (
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 // Gate only the driver's roomPass query, not database/sql's pool mutex. This
@@ -32,10 +33,16 @@ func (c *cacheRoomPassGate) Done() <-chan struct{} {
 	return c.Context.Done()
 }
 
-type expiredCachePreparation struct{ runningBoxes }
+type failedCacheCreation struct {
+	runningBoxes
+	st *store.Store
+}
 
-func (expiredCachePreparation) Remove(ctx context.Context, _ contract.BoxID) error {
-	return ctx.Err()
+func (f failedCacheCreation) Create(ctx context.Context, spec BoxSpec) (string, error) {
+	if err := f.st.AddBoxLeftover(ctx, spec.Host, spec.Room, spec.Box, spec.Slice); err != nil {
+		return "", err
+	}
+	return "", box.RuntimeCreateError{Err: context.DeadlineExceeded}
 }
 
 func TestRetainedCacheCannotHideDebtFromSamePassNewCreate(t *testing.T) {
@@ -84,12 +91,13 @@ func TestRetainedCacheCannotHideDebtFromSamePassNewCreate(t *testing.T) {
 	if ok, err := rig.st.RestartSession(rig.ctx, old, event, notice); err != nil || !ok {
 		t.Fatalf("reset: %v %v", ok, err)
 	}
-	// A preparation timeout terminates the first creation directly (failures=3),
-	// so FinishCreate can insert same-host debt in the first post-reset Pass.
-	rig.r.boxes = expiredCachePreparation{}
-	rig.r.createContext = func(ctx context.Context) (context.Context, context.CancelFunc) {
-		return context.WithDeadline(ctx, time.Now().Add(-time.Second))
+	// Restart is not first-create proof and must not grant an automatic retry.
+	// Record actual captured-host debt in the new failing worker instead. The
+	// same-Pass scheduling and identical-key cache assertions below stay intact.
+	if err := rig.st.Write(rig.ctx, func(tx *sql.Tx) error { _, err := tx.Exec("UPDATE boxes SET failures=2 WHERE id='b'"); return err }); err != nil {
+		t.Fatal(err)
 	}
+	rig.r.boxes = failedCacheCreation{st: rig.st}
 	gate := &cacheRoomPassGate{Context: rig.ctx, entered: make(chan struct{}), release: make(chan struct{})}
 	var release sync.Once
 	t.Cleanup(func() { release.Do(func() { close(gate.release) }); rig.r.Wait() })

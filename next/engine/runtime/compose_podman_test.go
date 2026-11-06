@@ -164,7 +164,7 @@ func TestComposeStackOnRealPodman(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	host, err := podman.New("local@host", t.TempDir(), "local", localHost{})
+	host, err := podman.New("local@host", t.TempDir(), "local", localHost{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,7 +383,7 @@ func TestAComposeSessionFromStartToClose(t *testing.T) {
 	if err := st.AddHost(ctx, box.Host{Name: "host", State: box.HostReady, CPUs: 32, MemBytes: 64 * box.GiB, DiskBytes: 1000 * box.GiB, DiskFloor: box.GiB, CheckedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	host, err := podman.New("local@host", t.TempDir(), "local", localHost{})
+	host, err := podman.New("local@host", t.TempDir(), "local", localHost{}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
