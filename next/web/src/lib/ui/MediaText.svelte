@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { highlight } from "../highlight.ts";
+  import DOMPurify from "dompurify";
   import Markdown from "./Markdown.svelte";
   import MediaFile from "./MediaFile.svelte";
   import { parseTable, previewNote, readPreview, tableDelimiter, type MediaKind, type Preview } from "../media.ts";
   import type { Attachment } from "../contract.gen.ts";
   // The viewer's modes that read the file's text: markdown, a table, plain text, and every mode's source.
-  let { file, src, kind, rendered }: { file: Attachment; src: string; kind: MediaKind; rendered: boolean } = $props();
+  let { file, src, kind, rendered, onfolder }: { file: Attachment; src: string; kind: MediaKind; rendered: boolean; onfolder?: () => void } = $props();
   // undefined while it loads; null when the bytes are not text.
   let preview = $state<Preview | null>();
   let failed = $state(false), attempt = $state(0);
@@ -18,10 +20,18 @@
   let delimiter = $derived(tableDelimiter(file));
   let table = $derived(rendered && kind === "table" && delimiter && preview ? parseTable(preview.text, delimiter, preview.truncated) : undefined);
   let note = $derived(preview ? previewNote(file, preview, table) : "");
+  let highlighted = $state("");
+  $effect(() => {
+    const text = preview?.text;
+    let active = true;
+    highlighted = "";
+    if (text) void highlight(text, file.name.split(".").at(-1) ?? "").then(html => { if (active) highlighted = DOMPurify.sanitize(html); });
+    return () => { active = false; };
+  });
   let columns = $derived(Array.from({ length: table?.width ?? 0 }, (_, column) => column));
 </script>
 
-{#if failed}<div class="state">The file did not load. <button onclick={() => attempt++}>Retry</button></div>
+{#if failed}<div class="state">The file did not load. <button onclick={() => attempt++}>Retry</button>{#if onfolder} · <button onclick={onfolder}>Show in folder</button>{/if}</div>
 {:else if preview === null}<MediaFile {file} {src} reason="This file is not text, so it has no preview." />
 {:else if preview === undefined}<div class="state">Loading…</div>
 {:else if !preview.text}<div class="state">This file is empty.</div>
@@ -42,13 +52,13 @@
       <div class="scroll" tabindex="0" role="region" aria-label={file.name}><div class="page"><Markdown rhythm="thread" text={preview.text} mentions={false} /></div></div>
     {:else}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-      <pre class="scroll" tabindex="0" role="region" aria-label={file.name}>{preview.text}</pre>
+      <pre class="scroll" tabindex="0" role="region" aria-label={file.name}>{#if highlighted}{@html highlighted}{:else}{preview.text}{/if}</pre>
     {/if}
   </div>
 {/if}
 
 <style>
-  .reader { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; background: var(--bg); }
+  .reader { tab-size: 4; display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; background: var(--bg); }
   .note { flex: none; margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--raised); color: var(--muted); font-size: 12.5px; }
   .scroll { flex: 1; min-height: 0; margin: 0; overflow: auto; }
   .scroll:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
