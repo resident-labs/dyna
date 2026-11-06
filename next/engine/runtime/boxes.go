@@ -79,15 +79,21 @@ type Boxes struct {
 	mu                sync.Mutex
 	hosts             map[contract.HostName]*podman.Host
 	restored          map[contract.HostName]bool   // forwards back in this process
-	installed         map[contract.HostName]bool   // binary current in this process
+	installed         map[contract.HostName]bool   // immutable binary staged in this process; current can still drift
 	shareProblems     map[contract.HostName]string // the last reason each host's mount could not come up
 	recoveries        map[contract.HostName]*recovery
 	recovering        sync.WaitGroup
 	retryDelay        time.Duration // retryDelay is the first wait between recovery tries; zero means restoreRetryMin.
 	loads             map[contract.HostName]hostLoad
 	beats             map[contract.HostName]context.CancelFunc // each host's heartbeat
+	heartbeatTicks    <-chan time.Time                         // nil uses the normal ticker; tests can drive one complete survey.
 	cpuPrev           *cpuTimes                                // cpuPrev is the last /proc/stat sample of this machine, nil before the first.
-	installs          map[*podman.Host]chan struct{}
+	installs          map[*podman.Host]*binaryInstall
+	binaryRepairs     map[*podman.Host]bool
+	starts            map[contract.BoxID]contract.BoxStartStatus
+	stepContext       func(context.Context, time.Duration) (context.Context, context.CancelFunc)
+	binCacheOnce      sync.Once
+	binCache          *podman.BinaryCache
 	binOnce           sync.Once
 	binSum            string
 	binErr            error
@@ -114,21 +120,80 @@ func (b *Boxes) installBinary(ctx context.Context, h *podman.Host) error {
 	}
 	b.mu.Lock()
 	if b.installs == nil {
-		b.installs = make(map[*podman.Host]chan struct{})
+		b.installs = make(map[*podman.Host]*binaryInstall)
 	}
-	gate := b.installs[h]
-	if gate == nil {
-		gate = make(chan struct{}, 1)
-		b.installs[h] = gate
+	job := b.installs[h]
+	if job != nil && job.closing {
+		b.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-job.done:
+		}
+		b.mu.Lock()
+		if b.installs[h] == job {
+			delete(b.installs, h)
+		}
+		b.mu.Unlock()
+		return b.installBinary(ctx, h)
+	}
+	if job == nil {
+		parent := b.Context
+		if parent == nil {
+			parent = context.WithoutCancel(ctx)
+		}
+		work, cancel := context.WithCancel(parent)
+		job = &binaryInstall{done: make(chan struct{}), cancel: cancel, progress: make(chan struct{}, 1)}
+		b.installs[h] = job
+		go func() {
+			idle, stop := podman.IdleContext(work, box.StartStepBudget, job.progress)
+			defer stop()
+			progress := podman.WithByteProgress(idle, func(n int) {
+				if n > 0 {
+					select {
+					case job.progress <- struct{}{}:
+					default:
+					}
+				}
+			})
+			job.err = h.InstallBinary(progress, b.Layout.HostBin(), b.Version, b.binSum, b.compressedBinary)
+			if errors.Is(context.Cause(idle), podman.ErrTransferIdle) {
+				job.err = errors.Join(podman.ErrTransferIdle, job.err)
+			}
+			close(job.done)
+		}()
+	}
+	job.refs++
+	b.mu.Unlock()
+	var err error
+	select {
+	case <-job.done:
+		err = job.err
+	case <-ctx.Done():
+		err = ctx.Err()
+	}
+	b.mu.Lock()
+	job.refs--
+	last := job.refs == 0
+	if last {
+		job.closing = true
+		job.cancel()
 	}
 	b.mu.Unlock()
-	select {
-	case gate <- struct{}{}:
-		defer func() { <-gate }()
-	case <-ctx.Done():
-		return ctx.Err()
+	if last {
+		<-job.done
+		b.mu.Lock()
+		if b.installs[h] == job {
+			delete(b.installs, h)
+		}
+		b.mu.Unlock()
 	}
-	return h.InstallBinary(ctx, b.Layout.HostBin(), b.Version, b.binSum, readExecutable)
+	return err
+}
+
+func (b *Boxes) compressedBinary(encoding podman.BinaryEncoding) ([]byte, error) {
+	b.binCacheOnce.Do(func() { b.binCache = podman.NewBinaryCache(readExecutable) })
+	return b.binCache.Bytes(encoding)
 }
 
 func (b *Boxes) binarySum() (string, error) {
@@ -156,11 +221,14 @@ func (h ciHost) EnsureEgress(ctx context.Context, image string) error {
 	if err := h.boxes.installBinary(ctx, h.Host); err != nil {
 		return err
 	}
-	return h.Host.EnsureEgress(ctx, image, h.boxes.Layout.HostBin())
+	return h.Host.EnsureEgress(ctx, image, h.boxes.Layout.HostBin(), h.boxes.binSum)
 }
 
 // StartRunner gives the runner the host's cache, the one its boxes mount at /box/cache, and their compiler cache.
 func (h ciHost) StartRunner(ctx context.Context, spec box.RunnerSpec) error {
+	if err := h.boxes.installBinary(ctx, h.Host); err != nil {
+		return err
+	}
 	h.boxes.startBuildCache(ctx, h.name, h.Host)
 	spec.Cache, spec.BuildCache = h.boxes.Layout.HostCache(), h.boxes.Layout.HostBuildCacheSocketFolder()
 	return h.Host.StartRunner(ctx, spec)
@@ -218,11 +286,17 @@ func (b *Boxes) cache(name contract.HostName, h *podman.Host) {
 	})
 	h.SetServices(func() []contract.ServiceID { return b.Pressure.Reconciler().ServiceIDs(ctx, name) })
 	ticker := time.NewTicker(10 * time.Second)
+	ticks := ticker.C
+	if b.heartbeatTicks != nil {
+		ticker.Stop()
+		ticks = b.heartbeatTicks
+	}
 	go func() {
 		defer ticker.Stop()
-		h.Heartbeat(ctx, ticker.C, b.Layout, func(ok bool, load podman.Load) {
+		h.Heartbeat(ctx, ticks, b.Layout, func(ok bool, load podman.Load) {
 			now := time.Now()
-			if ok && !load.ExecOnly {
+			if ok && load.Probe == podman.ProbeGood && !load.ExecOnly {
+				b.repairBinary(ctx, h, load.ActiveBinary)
 				if err := b.syncInstructions(ctx, h); err != nil {
 					log.Printf("host %s: instructions: %v", name, err)
 				}
@@ -232,7 +306,7 @@ func (b *Boxes) cache(name contract.HostName, h *podman.Host) {
 				b.Pressure.Reconciler().ObserveServices(load.Services)
 			}
 			b.reportHeartbeat(ctx, name, ok, load, now)
-			if ok && !load.ExecOnly && !load.ShareUp && b.recovered(name) {
+			if ok && load.Probe == podman.ProbeGood && !load.ExecOnly && !load.ShareUp && b.recovered(name) {
 				b.repairShare(ctx, name)
 			}
 		}, b.pressure(name))
@@ -273,7 +347,7 @@ func (b *Boxes) reportHeartbeat(ctx context.Context, name contract.HostName, ok 
 	}
 	var free *int64
 	// An exec-only host's disk is shown, never stored: warnings, eviction and placement read the store's figures.
-	if ok && load.DiskBytes > 0 && !load.ExecOnly {
+	if ok && load.Probe != podman.ProbeFailed && load.DiskBytes > 0 && !load.ExecOnly {
 		value := load.DiskBytes - load.DiskUsed
 		free = &value
 	}
@@ -285,7 +359,7 @@ func (b *Boxes) reportHeartbeat(ctx context.Context, name contract.HostName, ok 
 		log.Printf("host %s: record heartbeat: %v", name, err)
 		return
 	}
-	if ok && load.GPUs != nil {
+	if ok && load.Probe != podman.ProbeFailed && load.GPUs != nil {
 		if err := b.HeartbeatStore.SetHostGPUs(ctx, name, *load.GPUs); err != nil {
 			log.Printf("host %s: record GPUs: %v", name, err)
 		}
@@ -306,9 +380,24 @@ func (b *Boxes) HostLoad(ctx context.Context, hosts []contract.HostSummary) erro
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	starts := make(map[contract.SessionID]contract.BoxStartStatus)
+	for _, record := range records {
+		if record.State == contract.BoxCreating || record.State == contract.BoxStarting {
+			if start, ok := b.starts[record.ID]; ok {
+				starts[record.Session] = start
+			}
+		}
+	}
 	for i := range hosts {
 		h := &hosts[i]
 		load := b.loads[h.Name].summary
+		h.Health = load.Health
+		for j := range h.Sessions {
+			if start, ok := starts[h.Sessions[j].ID]; ok {
+				copy := start
+				h.Sessions[j].Start = &copy
+			}
+		}
 		h.Reachable, h.CPUUsed, h.MemUsed, h.Boxes = load.Reachable, load.CPUUsed, load.MemUsed, counts[h.Name]
 		h.DiskBytes, h.DiskUsed, h.LastSeen = load.DiskBytes, load.DiskUsed, load.LastSeen
 		h.History = append([]contract.HostLoadPoint{}, load.History...)
@@ -341,7 +430,10 @@ func (b *Boxes) record(name contract.HostName, ok bool, sample podman.Load, now 
 	state := b.loads[name]
 	load := &state.summary
 	load.Reachable = ok
-	if ok {
+	if sample.Probe != podman.ProbeUnknown {
+		load.Health = sample.Health
+	}
+	if ok && sample.Probe != podman.ProbeFailed {
 		load.LastSeen = now
 		load.CPUUsed, load.MemUsed, load.DiskBytes, load.DiskUsed = sample.CPUUsed, sample.MemUsed, sample.DiskBytes, sample.DiskUsed
 		load.MemBytes, load.CPUs = sample.MemBytes, sample.CPUs
@@ -467,7 +559,11 @@ func (b *Boxes) MaintainHost(ctx context.Context, name contract.HostName) error 
 	}
 	b.prepareImages(ctx, h, name)
 	b.sweepRuns(ctx, name, h)
-	return h.Maintain(ctx, b.Layout)
+	wanted, err := b.binarySum()
+	if err != nil {
+		return err
+	}
+	return h.Maintain(ctx, b.Layout, wanted)
 }
 
 // BuildAhead prepares every ready host's images when the engine starts, which is when a deploy changes dyna-base.
@@ -758,12 +854,16 @@ func (b *Boxes) forward(id contract.BoxID) box.Forward {
 }
 
 func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, error) {
+	defer func() { b.mu.Lock(); delete(b.starts, spec.Box); b.mu.Unlock() }()
+	run := func(step contract.StartStep, work func(context.Context) error) error {
+		return b.startStep(ctx, spec, step, work)
+	}
 	steps := box.NewStepLog("box " + string(spec.Box))
 	h, err := b.host(ctx, spec.Host)
 	if err != nil {
 		return "", err
 	}
-	if err := b.syncInstructions(ctx, h); err != nil {
+	if err := run(contract.StartInstructions, func(ctx context.Context) error { return b.syncInstructions(ctx, h) }); err != nil {
 		return "", err
 	}
 	steps.Done("instructions")
@@ -785,42 +885,54 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 		cleanupCreate(ctx, h, spec, forward, stacked, created, forwarded, sliced)
 		_ = b.Sockets.RemoveBox(spec.Box)
 	}()
-	if err = b.installBinary(ctx, h); err != nil {
+	if err = run(contract.StartBinary, func(ctx context.Context) error { return b.installBinary(ctx, h) }); err != nil {
 		return "", err
 	}
 	steps.Done("binary")
-	b.startBuildCache(ctx, spec.Host, h)
+	if err = run(contract.StartBuildCache, func(ctx context.Context) error { b.startBuildCache(ctx, spec.Host, h); return nil }); err != nil {
+		return "", err
+	}
 	steps.Done("build cache")
-	shared, err := b.sharedMount(ctx, spec.Host, spec.Room)
+	var shared box.Mount
+	err = run(contract.StartShared, func(ctx context.Context) error {
+		var e error
+		shared, e = b.sharedMount(ctx, spec.Host, spec.Room)
+		return e
+	})
 	if err != nil {
 		return "", err
 	}
 	steps.Done("shared folder")
-	image, err := b.CurrentImage(ctx, spec.Session, spec.Host)
+	var image box.Image
+	err = run(contract.StartImage, func(ctx context.Context) error {
+		var e error
+		image, e = b.CurrentImage(ctx, spec.Session, spec.Host)
+		return e
+	})
 	if err != nil {
 		return "", err
 	}
 	steps.Done("image")
 	spec.Needs, spec.Stack = image.Needs, image.Stack
 	slice, c := b.container(spec, image.Tag, shared)
-	if err = h.EnsureSlice(ctx, slice); err != nil {
+	if err = run(contract.StartSlice, func(ctx context.Context) error { return h.EnsureSlice(ctx, slice) }); err != nil {
 		return "", box.RuntimeCreateError{Err: err}
 	}
 	sliced = true
 	steps.Done("slice")
-	if err = h.AddForward(ctx, forward); err != nil {
+	if err = run(contract.StartForward, func(ctx context.Context) error { return h.AddForward(ctx, forward) }); err != nil {
 		return "", box.RuntimeCreateError{Err: err}
 	}
 	forwarded = true
 	steps.Done("forward")
 	if spec.Stack != nil {
 		stacked = true
-		if err = h.CreateStack(ctx, spec.Box, spec.Slice, spec.Stack); err != nil {
+		if err = run(contract.StartStack, func(ctx context.Context) error { return h.CreateStack(ctx, spec.Box, spec.Slice, spec.Stack) }); err != nil {
 			return "", err
 		}
 		steps.Done("compose stack")
 	}
-	if err = h.CreateContainer(ctx, c); err != nil {
+	if err = run(contract.StartCreate, func(ctx context.Context) error { return h.CreateContainer(ctx, c) }); err != nil {
 		var missing box.MissingDevice
 		if errors.As(err, &missing) {
 			missing.Host = string(spec.Host)
@@ -835,15 +947,18 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	created = true
 	steps.Done("container create")
 	if spec.Stack != nil {
-		if err = h.StartSidecars(ctx, spec.Box); err != nil {
+		if err = run(contract.StartSidecars, func(ctx context.Context) error { return h.StartSidecars(ctx, spec.Box) }); err != nil {
 			return "", err
 		}
 		steps.Done("sidecars")
 	}
-	if err = h.StartContainer(ctx, spec.Box); err != nil {
+	if err = run(contract.StartContainer, func(ctx context.Context) error { return h.StartContainer(ctx, spec.Box) }); err != nil {
 		return "", box.RuntimeCreateError{Err: err}
 	}
 	steps.Done("container start")
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
 	ok = true
 	return image.Tag, nil
 }
@@ -1102,11 +1217,21 @@ func (b *Boxes) installHost(ctx context.Context, name contract.HostName) error {
 	b.mu.Lock()
 	installed := b.installed[name]
 	b.mu.Unlock()
-	if installed {
-		return nil
-	}
 	host, err := b.host(ctx, name)
 	if err != nil {
+		return err
+	}
+	if installed {
+		wanted, err := b.binarySum()
+		if err != nil {
+			return err
+		}
+		step, cancel := context.WithTimeout(ctx, box.StartStepBudget)
+		defer cancel()
+		err = host.ActivateBinary(step, b.Layout.HostBin(), wanted)
+		if ctx.Err() == nil && errors.Is(step.Err(), context.DeadlineExceeded) {
+			return errors.Join(podman.ErrTransferIdle, err)
+		}
 		return err
 	}
 	if err := b.installBinary(ctx, host); err != nil {
@@ -1133,11 +1258,22 @@ func (b *Boxes) containerHost(ctx context.Context, id contract.BoxID) (*podman.H
 }
 
 func (b *Boxes) Inspect(ctx context.Context, id contract.BoxID) (box.ContainerStatus, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, box.StartStepBudget)
+	defer cancel()
 	host, err := b.containerHost(ctx, id)
 	if err != nil {
 		return box.ContainerStatus{}, false, err
 	}
-	return inspectContainer(ctx, host, id)
+	status, found, err := inspectContainer(ctx, host, id)
+	if err != nil || !found {
+		return status, found, err
+	}
+	wanted, err := b.binarySum()
+	if err != nil {
+		return box.ContainerStatus{}, false, err
+	}
+	status.StaleLayout = status.StaleLayout || status.Binary != wanted
+	return status, true, nil
 }
 
 func inspectContainer(ctx context.Context, host box.HostDriver, id contract.BoxID) (box.ContainerStatus, bool, error) {
@@ -1161,7 +1297,13 @@ func (b *Boxes) Start(ctx context.Context, id contract.BoxID) error {
 	if record.State == contract.BoxClosing && record.Host == "" {
 		return box.NothingOnHost{Box: string(id)}
 	}
-	host, err := b.containerHost(ctx, id)
+	spec := lifecycle.BoxSpec{Box: id, Host: record.Host}
+	defer func() { b.mu.Lock(); delete(b.starts, id); b.mu.Unlock() }()
+	run := func(step contract.StartStep, work func(context.Context) error) error {
+		return b.startStep(ctx, spec, step, work)
+	}
+	var host *podman.Host
+	err = run(contract.StartForward, func(ctx context.Context) error { var e error; host, e = b.containerHost(ctx, id); return e })
 	if err != nil {
 		return err
 	}
@@ -1170,10 +1312,10 @@ func (b *Boxes) Start(ctx context.Context, id contract.BoxID) error {
 			return err
 		}
 	}
-	if err := b.syncInstructions(ctx, host); err != nil {
+	if err := run(contract.StartInstructions, func(ctx context.Context) error { return b.syncInstructions(ctx, host) }); err != nil {
 		return err
 	}
-	if err := b.installHost(ctx, record.Host); err != nil {
+	if err := run(contract.StartBinary, func(ctx context.Context) error { return b.installHost(ctx, record.Host) }); err != nil {
 		return err
 	}
 	session, err := b.Store.Session(ctx, record.Session)
@@ -1182,17 +1324,19 @@ func (b *Boxes) Start(ctx context.Context, id contract.BoxID) error {
 	}
 	// A closing box starts only to archive, so neither a host's mount nor a broken sidecar can hold up its close.
 	if record.State != contract.BoxClosing {
-		if _, err := b.shareReady(ctx, record.Host); err != nil {
+		if err := run(contract.StartShared, func(ctx context.Context) error { _, e := b.shareReady(ctx, record.Host); return e }); err != nil {
 			return err
 		}
-		b.startBuildCache(ctx, record.Host, host)
+		if err := run(contract.StartBuildCache, func(ctx context.Context) error { b.startBuildCache(ctx, record.Host, host); return nil }); err != nil {
+			return err
+		}
 		if session.Compose != "" {
-			if err := host.StartSidecars(ctx, id); err != nil {
+			if err := run(contract.StartSidecars, func(ctx context.Context) error { return host.StartSidecars(ctx, id) }); err != nil {
 				return err
 			}
 		}
 	}
-	return host.StartContainer(ctx, id)
+	return run(contract.StartContainer, func(ctx context.Context) error { return host.StartContainer(ctx, id) })
 }
 
 // closingLeftovers refuses to start a closing box that has neither container nor volume on its host, as when its create never
@@ -1307,6 +1451,8 @@ func (b *Boxes) RunHostexec(ctx context.Context, a contract.HostexecRunArgs, op 
 	return r.RunHostexec(ctx, a, op)
 }
 func (b *Boxes) CurrentImage(ctx context.Context, sessionID contract.SessionID, host contract.HostName) (box.Image, error) {
+	ctx, cancel := context.WithTimeout(ctx, box.StartPreparationBudget)
+	defer cancel()
 	h, err := b.host(ctx, host)
 	if err != nil {
 		return box.Image{}, err
@@ -1343,6 +1489,8 @@ func (b *Boxes) CurrentImage(ctx context.Context, sessionID contract.SessionID, 
 // compose name brings its file, which chooses the image and adds the sidecars; size checks the file's limits, and the zero
 // size of a build ahead skips that.
 func (b *Boxes) image(ctx context.Context, h *podman.Host, host contract.HostName, room contract.RoomID, repo contract.RepoName, composeName string, size contract.BoxSize) (box.Image, error) {
+	ctx, cancel := context.WithTimeout(ctx, box.StartPreparationBudget)
+	defer cancel()
 	steps := box.NewStepLog("host " + string(host))
 	base, err := h.BuildBase(ctx, images.BaseContainerfile)
 	if err != nil {
@@ -1436,24 +1584,35 @@ func (b *Boxes) StopHostexec(ctx context.Context, host contract.HostName, scope 
 
 // Recreate replaces a container without touching its volume.
 func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image string) error {
+	defer func() { b.mu.Lock(); delete(b.starts, spec.Box); b.mu.Unlock() }()
+	run := func(step contract.StartStep, work func(context.Context) error) error {
+		return b.startStep(ctx, spec, step, work)
+	}
 	steps := box.NewStepLog("box " + string(spec.Box))
-	if err := b.restoreHost(ctx, spec.Host); err != nil {
+	if err := run(contract.StartForward, func(ctx context.Context) error { return b.restoreHost(ctx, spec.Host) }); err != nil {
 		return err
 	}
-	if err := b.installHost(ctx, spec.Host); err != nil {
+	if err := run(contract.StartBinary, func(ctx context.Context) error { return b.installHost(ctx, spec.Host) }); err != nil {
 		return err
 	}
 	h, err := b.host(ctx, spec.Host)
 	if err != nil {
 		return err
 	}
-	if err := b.syncInstructions(ctx, h); err != nil {
+	if err := run(contract.StartInstructions, func(ctx context.Context) error { return b.syncInstructions(ctx, h) }); err != nil {
 		return err
 	}
 	steps.Done("instructions")
-	b.startBuildCache(ctx, spec.Host, h)
+	if err := run(contract.StartBuildCache, func(ctx context.Context) error { b.startBuildCache(ctx, spec.Host, h); return nil }); err != nil {
+		return err
+	}
 	steps.Done("build cache")
-	shared, err := b.sharedMount(ctx, spec.Host, spec.Room)
+	var shared box.Mount
+	err = run(contract.StartShared, func(ctx context.Context) error {
+		var e error
+		shared, e = b.sharedMount(ctx, spec.Host, spec.Room)
+		return e
+	})
 	if err != nil {
 		return err
 	}
@@ -1463,31 +1622,31 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image stri
 		return err
 	}
 	spec.Root = session.Root
-	if err := h.StopContainer(ctx, spec.Box); err != nil {
+	if err := run(contract.StartCreate, func(ctx context.Context) error { return h.StopContainer(ctx, spec.Box) }); err != nil {
 		return err
 	}
-	if err := h.RemoveContainer(ctx, spec.Box); err != nil {
+	if err := run(contract.StartCreate, func(ctx context.Context) error { return h.RemoveContainer(ctx, spec.Box) }); err != nil {
 		return err
 	}
 	if spec.Stack != nil {
 		// The pod goes whole: its sidecars follow the box to new images, and its volumes stay.
-		if err := h.RemovePod(ctx, spec.Box); err != nil {
+		if err := run(contract.StartStack, func(ctx context.Context) error { return h.RemovePod(ctx, spec.Box) }); err != nil {
 			return err
 		}
 	}
 	steps.Done("remove old container")
 	slice, c := b.container(spec, image, shared)
-	if err := h.EnsureSlice(ctx, slice); err != nil {
+	if err := run(contract.StartSlice, func(ctx context.Context) error { return h.EnsureSlice(ctx, slice) }); err != nil {
 		return err
 	}
 	steps.Done("slice")
 	if spec.Stack != nil {
-		if err := h.CreateStack(ctx, spec.Box, spec.Slice, spec.Stack); err != nil {
+		if err := run(contract.StartStack, func(ctx context.Context) error { return h.CreateStack(ctx, spec.Box, spec.Slice, spec.Stack) }); err != nil {
 			return err
 		}
 		steps.Done("compose stack")
 	}
-	if err := h.CreateContainer(ctx, c); err != nil {
+	if err := run(contract.StartCreate, func(ctx context.Context) error { return h.CreateContainer(ctx, c) }); err != nil {
 		var missing box.MissingDevice
 		if errors.As(err, &missing) {
 			missing.Host = string(spec.Host)
@@ -1497,12 +1656,12 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image stri
 	}
 	steps.Done("container create")
 	if spec.Stack != nil {
-		if err := h.StartSidecars(ctx, spec.Box); err != nil {
+		if err := run(contract.StartSidecars, func(ctx context.Context) error { return h.StartSidecars(ctx, spec.Box) }); err != nil {
 			return err
 		}
 		steps.Done("sidecars")
 	}
-	if err := h.StartContainer(ctx, spec.Box); err != nil {
+	if err := run(contract.StartContainer, func(ctx context.Context) error { return h.StartContainer(ctx, spec.Box) }); err != nil {
 		return err
 	}
 	steps.Done("container start")
@@ -1512,9 +1671,9 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image stri
 func (b *Boxes) container(spec lifecycle.BoxSpec, image string, shared box.Mount) (box.Slice, box.ContainerSpec) {
 	size := spec.Size
 	slice := box.Slice{Name: spec.Slice, CPUs: size.CPUs, MemHigh: size.MemBytes, MemMax: size.MemBytes * 3 / 2, Pids: size.Pids}
-	c := box.ContainerSpec{Box: spec.Box, Image: image, Slice: spec.Slice, Needs: spec.Needs, GPUCard: spec.GPUCard, Labels: []box.Label{{Key: "dyna.layout", Value: box.ContainerLayout}}, Mounts: []box.Mount{
+	c := box.ContainerSpec{Box: spec.Box, Image: image, Slice: spec.Slice, Needs: spec.Needs, GPUCard: spec.GPUCard, Labels: []box.Label{{Key: "dyna.layout", Value: box.ContainerLayout}, {Key: "dyna.binary", Value: b.binSum}}, Mounts: []box.Mount{
 		{HostPath: b.Layout.HostSocketFolder(spec.Box), BoxPath: "/run/dyna/engine", ReadOnly: true},
-		{HostPath: b.Layout.HostBin(), BoxPath: "/opt/dyna/bin", ReadOnly: true},
+		{HostPath: filepath.Join(b.Layout.HostBin(), b.binSum), BoxPath: "/opt/dyna/bin/current", ReadOnly: true},
 		{HostPath: b.Layout.HostCache(), BoxPath: "/box/cache"},
 		{HostPath: b.Layout.HostBuildCacheSocketFolder(), BoxPath: "/run/dyna/build-cache", ReadOnly: true, MakeDir: true},
 		shared,

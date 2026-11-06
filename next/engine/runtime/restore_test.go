@@ -54,7 +54,7 @@ type slowHost struct {
 }
 
 func newSlowHost(upload time.Duration) *slowHost {
-	return &slowHost{upload: upload, sum: "sum", sockets: make(map[string]bool), master: make(map[string]bool)}
+	return &slowHost{upload: upload, sum: strings.Repeat("a", 64), sockets: make(map[string]bool), master: make(map[string]bool)}
 }
 
 // restart is what stopping the engine does to a host: its master dies, and sockets stay as dead files.
@@ -65,7 +65,7 @@ func (r *slowHost) restart() {
 	r.master = make(map[string]bool)
 }
 
-func (r *slowHost) Run(ctx context.Context, input []byte, args ...string) ([]byte, error) {
+func (r *slowHost) Run(ctx context.Context, _ []byte, args ...string) ([]byte, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if slices.Contains(args, "-M") {
@@ -114,6 +114,9 @@ func (r *slowHost) Run(ctx context.Context, input []byte, args ...string) ([]byt
 		id := strings.Repeat("a", 32)
 		return []byte(fmt.Sprintf("%sDYNA-END %020d %03d\n", id, len(id), 0)), nil
 	}
+	if strings.Contains(command, "command -v zstd") {
+		return []byte("gzip\nDYNA-END 00000000000000000005 000\n"), nil
+	}
 	if strings.Contains(command, "'dyna-probe'") {
 		return []byte(fmt.Sprintf("%sDYNA-END %020d %03d\n", r.installed, len(r.installed), 0)), nil
 	}
@@ -122,7 +125,7 @@ func (r *slowHost) Run(ctx context.Context, input []byte, args ...string) ([]byt
 		path := strings.Trim(fields[len(fields)-1], "'")
 		delete(r.sockets, path)
 	}
-	if len(input) > 100 {
+	if strings.Contains(command, "'dyna-install'") {
 		r.uploads++
 		upload := r.upload
 		r.mu.Unlock()
@@ -189,6 +192,11 @@ func startEngine(t *testing.T, ctx context.Context, r podman.Runner, st restoreS
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = state.Close() })
+	// These are transport-order tests, not CPU benchmarks of a large instrumented test executable.
+	b.binOnce.Do(func() { b.binSum = strings.Repeat("a", 64) })
+	b.binCacheOnce.Do(func() {
+		b.binCache = podman.NewBinaryCache(func() ([]byte, error) { return []byte("fixture executable"), nil })
+	})
 	b.Sockets = api.NewSockets(api.New(&serviceWithHosts{Service: engine.New(state, nil, nil, time.Now)}, nil), dir, uint32(os.Getuid()), nil)
 	t.Cleanup(func() { _ = b.Sockets.Close() })
 	b.hosts = make(map[contract.HostName]*podman.Host)
@@ -355,7 +363,10 @@ func TestInspectDoesNotWaitForTheBinary(t *testing.T) {
 	if err := os.WriteFile(b.machineIDFile, []byte(strings.Repeat("b", 32)), 0600); err != nil {
 		t.Fatal(err)
 	}
-	b.binOnce.Do(func() { b.binSum = "sum" })
+	b.binOnce.Do(func() { b.binSum = strings.Repeat("a", 64) })
+	b.binCacheOnce.Do(func() {
+		b.binCache = podman.NewBinaryCache(func() ([]byte, error) { return []byte("fixture executable"), nil })
+	})
 	ctx, stop := context.WithTimeout(ctx, 5*time.Second)
 	defer stop()
 	_, _, _ = b.Inspect(ctx, "box_a")
@@ -425,7 +436,10 @@ func TestInstallSendsTheBinaryOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := &Boxes{Layout: box.Layout{Data: t.TempDir(), HostData: "/host"}, Version: "v2"}
-	b.binOnce.Do(func() { b.binSum = "sum" })
+	b.binOnce.Do(func() { b.binSum = strings.Repeat("a", 64) })
+	b.binCacheOnce.Do(func() {
+		b.binCache = podman.NewBinaryCache(func() ([]byte, error) { return []byte("fixture executable"), nil })
+	})
 	var wg sync.WaitGroup
 	for range 3 {
 		wg.Go(func() {

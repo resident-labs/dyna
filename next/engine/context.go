@@ -170,6 +170,11 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	lines = nil
 	for _, c := range data.Children {
 		line := fmt.Sprintf("%s: %s, %s", c.Name, c.Profile, c.State)
+		if s.startStatus != nil && (c.State == contract.BoxCreating || c.State == contract.BoxStarting) {
+			if start := s.startStatus(c.Box); start != nil {
+				line += ", " + start.Label(s.now())
+			}
+		}
 		if c.Item != "" {
 			line += ", " + contextLine(c.Item, 80)
 		}

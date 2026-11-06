@@ -66,7 +66,9 @@ func shareBoxes(t *testing.T, r podman.Runner, hosts []box.Host) *Boxes {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Boxes{Store: restoreStore{hosts: hosts}, Runtime: dir, Layout: box.Layout{Data: "/data", HostData: "/host"}, hosts: map[contract.HostName]*podman.Host{"host": h}, installed: map[contract.HostName]bool{"host": true}}
+	b := &Boxes{Store: restoreStore{hosts: hosts}, Runtime: dir, Layout: box.Layout{Data: "/data", HostData: "/host"}, hosts: map[contract.HostName]*podman.Host{"host": h}, installed: map[contract.HostName]bool{"host": true}}
+	b.binOnce.Do(func() { b.binSum = strings.Repeat("a", 64) })
+	return b
 }
 
 func TestABoxOnAnotherHostBindsOnlyItsRoomThroughTheMount(t *testing.T) {
