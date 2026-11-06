@@ -132,17 +132,20 @@ func (s *Server) Job(call JobCall) (any, error) {
 	return s.awaitOutput(j), nil
 }
 
-// awaitOutput returns a job's new output. A running job with nothing new is waited on for up to outputWait, until it
-// prints a line, ends, or a message arrives for the session, so reading a quiet job in a loop costs one call per wait
-// and not one per model request.
+// awaitOutput returns a running job's output after waiting up to outputWait, gathering every line printed meanwhile. It
+// returns early only when the job ends or a message arrives for the session, so reading a job in a loop costs one model call
+// per wait, however much the job prints.
 func (s *Server) awaitOutput(j *job) Result {
 	s.mu.Lock()
 	aside := s.aside
 	s.mu.Unlock()
 	limit := s.cfg.After(outputWait)
+	var text strings.Builder
 	for {
 		out := result(j)
-		if out.Output != "" || !out.Running {
+		text.WriteString(out.Output)
+		out.Output = text.String()
+		if !out.Running {
 			return out
 		}
 		select {
