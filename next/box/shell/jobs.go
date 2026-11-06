@@ -23,14 +23,17 @@ import (
 
 const (
 	foregroundLimit = 30 * time.Second
-	stopGrace       = 5 * time.Second
-	outputLimit     = 1 << 20 // output kept per job; the buffer trims back to it at twice this size
-	tailLimit       = 2000
-	keepFinished    = 20
-	retryStart      = time.Second
-	retryMax        = 30 * time.Second
-	statusLines     = 5    // output lines in a running job's status
-	maxTimeout      = 7200 // seconds, as for a host run
+	// outputWait bounds how long job output waits on a quiet running job, checking every outputPoll.
+	outputWait   = 30 * time.Second
+	outputPoll   = time.Second
+	stopGrace    = 5 * time.Second
+	outputLimit  = 1 << 20 // output kept per job; the buffer trims back to it at twice this size
+	tailLimit    = 2000
+	keepFinished = 20
+	retryStart   = time.Second
+	retryMax     = 30 * time.Second
+	statusLines  = 5    // output lines in a running job's status
+	maxTimeout   = 7200 // seconds, as for a host run
 )
 
 // nextMark is the running time at which a job reports next: 15 and 30 minutes, then each hour.
