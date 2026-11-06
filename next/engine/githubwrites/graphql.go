@@ -69,6 +69,8 @@ var mutations = map[string]mutation{
 	"updateLabel": {group: issues, fields: []string{"id", "name", "color", "description", "clientMutationId"}, refs: []ref{{"id", nodeLabel, true}}},
 
 	"updatePullRequest":             {group: pulls, fields: []string{"pullRequestId", "title", "body", "clientMutationId"}, refs: []ref{{"pullRequestId", nodePullRequest, true}}},
+	"markPullRequestReadyForReview": {group: pulls, fields: []string{"pullRequestId", "clientMutationId"}, refs: []ref{{"pullRequestId", nodePullRequest, true}}},
+	"convertPullRequestToDraft":     {group: pulls, fields: []string{"pullRequestId", "clientMutationId"}, refs: []ref{{"pullRequestId", nodePullRequest, true}}},
 	"addPullRequestReview":          {group: pulls, fields: []string{"pullRequestId", "commitOID", "body", "event", "clientMutationId"}, refs: []ref{{"pullRequestId", nodePullRequest, true}}, enums: []enum{{"event", reviewEvents, false}}},
 	"submitPullRequestReview":       {group: pulls, fields: []string{"pullRequestId", "pullRequestReviewId", "event", "body", "clientMutationId"}, refs: []ref{{"pullRequestReviewId", nodeReview, true}, {"pullRequestId", nodePullRequest, false}}, enums: []enum{{"event", reviewEvents, true}}},
 	"resolveReviewThread":           {group: pulls, fields: []string{"threadId", "clientMutationId"}, refs: []ref{{"threadId", nodeThread, true}}},
