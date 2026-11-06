@@ -4,6 +4,7 @@
  import PostData from "../src/lib/ui/PostData.svelte";
  import { postData } from "../src/lib/post-data.ts";
  import { setSessionLabels } from "../src/lib/ui/Avatar.svelte";
+ import { setSharedFolder } from "../src/lib/shared.ts";
  import { setMentionLinks, setPathLinks } from "../src/lib/ui/Markdown.svelte";
  import type { Row } from "../src/lib/feed.ts";
  import type { JSONValue, PostDataRef } from "../src/lib/contract.gen.ts";
@@ -19,6 +20,7 @@
  let reference = $state<PostDataRef>({file:{sha256:"b".repeat(64),name:"data.json",media:"application/json",bytes:250000},summary:"1 keys"});
  setSessionLabels(() => new Map());
  setPathLinks(() => {});
+ setSharedFolder(() => {});
  setMentionLinks(() => ({ room: "horizon", sessions: new Map(), open: event => event.preventDefault() }));
  const conflicts = Array.from({ length: 38 }, (_, i) => ({ file: `next/engine/groups/conflict-${i + 1}.go`, reason: i === 0 ? "CONFLICT_SENTINEL · both branches changed the recipient's delivery" : "Both branches edited this file; resolve before merging.", "0": "Object keys stay quoted" }));
  const data = { groups: [{ name: "upstream-sync", branch: "newest-green-sync-0b9hbj", conflicts }, { name: "services", conflicts: [] }], merged: 9, status: "Needs conflict resolution" };

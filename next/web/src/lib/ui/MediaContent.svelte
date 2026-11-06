@@ -3,10 +3,11 @@
   import MediaText from "./MediaText.svelte";
   import MediaFile from "./MediaFile.svelte";
   import { mediaKind, mediaSrc, type MediaItem } from "../media.ts";
-  import { filesURL, parentPath } from "../shared.ts";
+  import { sharedFolder, parentPath } from "../shared.ts";
   let { item, rendered, image, visual }: { item: MediaItem; rendered: boolean; image?: Snippet; visual?: Snippet } = $props();
+  const showFolder = sharedFolder();
   let src = $derived(mediaSrc(item)), kind = $derived(mediaKind(item.file));
-  let folder = $derived(item.sharedPath !== undefined ? filesURL(item.room!, parentPath(item.sharedPath)) : undefined);
+  let folder = $derived(item.sharedPath !== undefined ? parentPath(item.sharedPath) : undefined);
   let failed = $state(false), loading = $state(false);
   $effect(() => {
     failed = false; loading = false;
@@ -23,7 +24,7 @@
   });
 </script>
       {#if loading}<div class="error">Loading…</div>
-      {:else if failed}<div class="error">The file did not load. {#if folder}<a href={folder}>Show in folder</a>{/if}</div>
+      {:else if failed}<div class="error">The file did not load. {#if folder !== undefined}<button onclick={() => showFolder(folder!)}>Show in folder</button>{/if}</div>
       {:else if item.file.visual && rendered}
         {@render visual?.()}
       {:else if kind === "video"}
@@ -42,12 +43,12 @@
       {:else if kind === "file" || kind === "pdf"}
         <MediaFile file={item.file} {src} reason="No preview for this file." />
       {:else}
-        {#key src}<MediaText file={item.file} {src} {kind} {rendered} {folder} />{/key}
+        {#key src}<MediaText file={item.file} {src} {kind} {rendered} onfolder={folder !== undefined ? () => showFolder(folder!) : undefined} />{/key}
       {/if}
 <style>
   img, video { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
   iframe { display: block; width: 100%; height: 100%; border: 0; }
   iframe.drawing { color-scheme: light; pointer-events: none; }
   .error { padding: 24px; color: var(--muted); font-size: 13px; }
-  .error a { color: var(--focus); }
+  .error button { padding: 0; border: 0; background: none; color: var(--focus); font: inherit; text-decoration: underline; cursor: pointer; }
 </style>

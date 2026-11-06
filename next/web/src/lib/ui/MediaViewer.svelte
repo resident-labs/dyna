@@ -3,7 +3,7 @@
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
   import MediaContent from "./MediaContent.svelte";
-  import { filesURL, parentPath, sharedURL } from "../shared.ts";
+  import { sharedFolder, parentPath, sharedURL } from "../shared.ts";
   import VisualCardMedia from "./VisualCardMedia.svelte";
   import type { VisualVersion } from "../visual.ts";
   import { call } from "../client.ts";
@@ -14,8 +14,9 @@
 
   let { items, initial, name, root, room, loadVisual, onclose, onjump }: {
     items: MediaItem[]; initial: number; name: (session: string) => string;
-    root: (session?: string) => boolean; room: string; loadVisual: (item: MediaItem) => Promise<VisualVersion[]>; onclose: () => void; onjump: (key: string) => void;
+    root: (session?: string) => boolean; room: string; loadVisual: (item: MediaItem) => Promise<VisualVersion[]>; onclose: () => void; onjump?: (key: string) => void;
   } = $props();
+  const showFolder = sharedFolder();
   let imageFailed = $state(false);
   let selected = $state(items[initial]), view = $state<View>(FIT), menu = $state(false), rendered = $state(true);
   let dialog: HTMLDialogElement, stage: HTMLDivElement, closer: HTMLButtonElement;
@@ -35,7 +36,7 @@
     return () => { active = false; };
   });
   let src = $derived(mediaSrc(item));
-  let folder = $derived(item.sharedPath !== undefined ? filesURL(item.room ?? room, item.sharedPath) : undefined);
+  let folder = $derived(item.sharedPath !== undefined ? item.sharedPath : undefined);
   let download = $derived(item.sharedPath !== undefined ? sharedURL(item.room ?? room, item.sharedPath, true) : src);
   let original = $derived(item.file.visual ? undefined : src);
   let fit = $derived(natural.width && natural.height ? Math.min(1, box.width / natural.width, box.height / natural.height) : 1);
@@ -102,7 +103,7 @@
 <svelte:window onkeydown={key} />
 
 <!-- The dialog is the whole window and shows the app behind it; anything outside the panel closes it. -->
-<dialog class="media-viewer" bind:this={dialog} aria-label="Media viewer" onclose={onclose} onpointerdown={e => { outside = e.target === dialog; }} onclick={e => { if (outside && e.target === dialog) dialog.close(); }}>
+<dialog class="media-viewer" class:shared={item.sharedPath !== undefined} bind:this={dialog} aria-label="Media viewer" onclose={onclose} onpointerdown={e => { outside = e.target === dialog; }} onclick={e => { if (outside && e.target === dialog) dialog.close(); }}>
   <div class="panel">
     <header>
       {#snippet identity()}
@@ -111,7 +112,7 @@
       {/snippet}
       {#if item.from.session}<a class="sender" href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(item.from.session)}`}>{@render identity()}</a>
       {:else}<div class="sender">{@render identity()}</div>{/if}
-      <button class="jump desktop" onclick={() => { onjump(item.key); dialog.close(); }}>Jump to post</button>
+      {#if onjump}<button class="jump desktop" onclick={() => { onjump?.(item.key); dialog.close(); }}>Jump to post</button>{/if}
       <div class="spacer"></div>
       {#if hasSource(kind)}<button class="tool" aria-pressed={!rendered} aria-label={sourceToggle(kind, rendered)} title={sourceToggle(kind, rendered)} onclick={() => rendered = !rendered}><Icon name={rendered ? "code" : "eye"} /></button>{/if}
       {#if !item.file.visual}
@@ -123,9 +124,9 @@
       <a class="tool" href={download} download={item.file.name} aria-label="Download" title="Download"><Icon name="download" /></a>
       <a class="tool desktop" href={src} target="_blank" rel="noopener" aria-label="Open original" title="Open original"><Icon name="external" /></a>
       {/if}
-      {#if folder}<a class="tool desktop" href={folder} title="Show in folder" aria-label="Show in folder"><Icon name="folder" /></a>{/if}
+      {#if folder !== undefined}<button class="tool desktop" onclick={() => showFolder(folder!)} title="Show in folder" aria-label="Show in folder"><Icon name="folder" /></button>{/if}
       <div class="more phone"><button class="tool" aria-label="More options" aria-expanded={menu} onclick={() => menu = !menu}><Icon name="more" /></button>
-        {#if menu}<div class="menu">{#if folder}<a href={folder}>Show in folder</a>{/if}{#if original}<a href={original} target="_blank" rel="noopener">Open original</a>{/if}<button onclick={() => { onjump(item.key); dialog.close(); }}>Jump to post</button></div>{/if}
+        {#if menu}<div class="menu">{#if folder !== undefined}<button onclick={() => showFolder(folder!)}>Show in folder</button>{/if}{#if original}<a href={original} target="_blank" rel="noopener">Open original</a>{/if}{#if onjump}<button onclick={() => { onjump?.(item.key); dialog.close(); }}>Jump to post</button>{/if}</div>{/if}
       </div>
       <button class="tool" aria-label="Close" title="Close" onclick={() => dialog.close()} bind:this={closer}><Icon name="close" /></button>
     </header>
@@ -133,12 +134,12 @@
       <MediaContent {item} {rendered}>
         {#snippet visual()}        <div class="visual-stage">{#if visualFailed}<div class="visual-error">The card did not load. <button onclick={() => visualAttempt++}>Retry</button></div>
         {:else if versions.length && item.file.visual}{#key item.key + ":" + item.file.visual.version}<VisualCardMedia {versions} selected={item.file.visual.version} room={item.room ?? room} send={async (text, event) => { await call("post", { room: item.room ?? room, text, visualReply: event }); }} />{/key}{/if}</div>{/snippet}
-        {#snippet image()}{#if imageFailed}<div class="visual-error">The file did not load. {#if folder}<a href={filesURL(item.room ?? room, parentPath(item.sharedPath!))}>Show in folder</a>{/if}</div>{:else}        <img {src} alt={item.file.name} draggable="false" onerror={() => imageFailed = true} onload={event => { if (event.currentTarget instanceof HTMLImageElement) natural = { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }; }}
+        {#snippet image()}{#if imageFailed}<div class="visual-error">The file did not load. {#if folder !== undefined}<button onclick={() => showFolder(parentPath(folder!))}>Show in folder</button>{/if}</div>{:else}        <img {src} alt={item.file.name} draggable="false" onerror={() => imageFailed = true} onload={event => { if (event.currentTarget instanceof HTMLImageElement) natural = { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }; }}
           style:width={natural.width ? `${content.width}px` : undefined} style:height={natural.height ? `${content.height}px` : undefined}
           style:transform="translate({view.x}px, {view.y}px) scale({view.scale})" />{/if}{/snippet}
       </MediaContent>
     </div>
-    {#if !item.file.visual || items.length > 1}<footer><span class="name">{#if !item.file.visual}{item.file.name}{/if}</span>{#if !item.file.visual}<span class="count">{" · "}{fileSize(item.file.bytes)}</span>{/if}{#if items.length > 1}<span class="count">{#if !item.file.visual}{" · "}{/if}{index + 1} of {items.length}</span>{/if}</footer>{/if}
+    {#if !item.file.visual || items.length > 1}<footer><span class="name">{#if !item.file.visual}{item.file.name}{/if}</span>{#if !item.file.visual && item.sizeKnown !== false}<span class="count">{" · "}{fileSize(item.file.bytes)}</span>{/if}{#if items.length > 1}<span class="count">{#if !item.file.visual}{" · "}{/if}{index + 1} of {items.length}</span>{/if}</footer>{/if}
   </div>
   {#if items.length > 1}<button class="arrow previous" aria-label="Previous media" title="Previous" onclick={() => move(-1)}><Icon name="backChevron" size={20} /></button><button class="arrow following" aria-label="Next media" title="Next" onclick={() => move(1)}><Icon name="forwardChevron" size={20} /></button>{/if}
 </dialog>
@@ -189,6 +190,8 @@
   @keyframes rise { from { opacity: 0; transform: translateY(8px) scale(.99); } }
   /* A phone keeps a margin of the app on every side, so the viewer still reads as a sheet. The arrows move into the footer. */
   @media (max-width: 640px) {
+    dialog.shared[open] { padding: 0; }
+    dialog.shared .panel { border-radius: 0; width: 100%; height: 100%; }
     dialog[open] { padding: calc(12px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom)); }
     .panel { width: 100%; height: 100%; border-radius: 12px; }
     header { gap: 4px; height: 52px; padding: 0 4px 0 12px; }

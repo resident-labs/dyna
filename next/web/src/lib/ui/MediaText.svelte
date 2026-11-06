@@ -6,7 +6,7 @@
   import { parseTable, previewNote, readPreview, tableDelimiter, type MediaKind, type Preview } from "../media.ts";
   import type { Attachment } from "../contract.gen.ts";
   // The viewer's modes that read the file's text: markdown, a table, plain text, and every mode's source.
-  let { file, src, kind, rendered, folder }: { file: Attachment; src: string; kind: MediaKind; rendered: boolean; folder?: string } = $props();
+  let { file, src, kind, rendered, onfolder }: { file: Attachment; src: string; kind: MediaKind; rendered: boolean; onfolder?: () => void } = $props();
   // undefined while it loads; null when the bytes are not text.
   let preview = $state<Preview | null>();
   let failed = $state(false), attempt = $state(0);
@@ -31,7 +31,7 @@
   let columns = $derived(Array.from({ length: table?.width ?? 0 }, (_, column) => column));
 </script>
 
-{#if failed}<div class="state">The file did not load. <button onclick={() => attempt++}>Retry</button>{#if folder} · <a href={folder}>Show in folder</a>{/if}</div>
+{#if failed}<div class="state">The file did not load. <button onclick={() => attempt++}>Retry</button>{#if onfolder} · <button onclick={onfolder}>Show in folder</button>{/if}</div>
 {:else if preview === null}<MediaFile {file} {src} reason="This file is not text, so it has no preview." />
 {:else if preview === undefined}<div class="state">Loading…</div>
 {:else if !preview.text}<div class="state">This file is empty.</div>
@@ -58,7 +58,7 @@
 {/if}
 
 <style>
-  .reader { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; background: var(--bg); }
+  .reader { tab-size: 4; display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; background: var(--bg); }
   .note { flex: none; margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--raised); color: var(--muted); font-size: 12.5px; }
   .scroll { flex: 1; min-height: 0; margin: 0; overflow: auto; }
   .scroll:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
@@ -71,7 +71,6 @@
   th { position: sticky; top: 0; background: var(--raised); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
   tbody tr:hover { background: var(--hover); }
   .state { padding: 24px; color: var(--muted); font-size: 13px; }
-  .state a { color: var(--focus); }
   .state button { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
   @media (max-width: 640px) { .page { padding: 16px; } pre { padding: 12px; } }
 </style>
