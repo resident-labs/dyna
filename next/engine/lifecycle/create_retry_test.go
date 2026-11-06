@@ -170,3 +170,38 @@ func TestStoppedBeforeCreateCanWake(t *testing.T) {
 		t.Fatalf("never-created box did not wake: %+v", b)
 	}
 }
+
+type failEveryRetryHost struct {
+	runningBoxes
+	hosts []contract.HostName
+}
+
+func (b *failEveryRetryHost) Create(ctx context.Context, spec BoxSpec) (string, error) {
+	b.hosts = append(b.hosts, spec.Host)
+	return "", box.StepTimeout{Host: spec.Host, Step: contract.StartBinary}
+}
+
+func TestQuarantineCannotGiveRetryAThirdHost(t *testing.T) {
+	rig := prepareOtherHostRetry(t, &otherHostBoxes{})
+	boxes := &failEveryRetryHost{}
+	rig.r.boxes = boxes
+	rig.pass()           // Terminal failure on original h, queues its one retry.
+	second := rig.pass() // First nonterminal create error on spare.
+	if second.Host != "spare" || second.State != contract.BoxPending {
+		t.Fatalf("unexpected second allocation: %+v", second)
+	}
+	if err := rig.st.QuarantineShare(rig.ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	if err := rig.st.Write(rig.ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO hosts(name,ssh,state,cpus,mem_bytes,disk_bytes,checked_at,maintained_at) SELECT 'third',ssh,state,cpus,mem_bytes,disk_bytes,checked_at,maintained_at FROM hosts WHERE name='h'`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rig.now = rig.now.Add(31 * time.Second)
+	after := rig.pass()
+	if len(boxes.hosts) != 2 || after.Host != "spare" || after.State != contract.BoxFailed {
+		t.Fatalf("one-other-host budget did not terminate on its selected second host: %v; final box %+v", boxes.hosts, after)
+	}
+}
