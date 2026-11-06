@@ -41,16 +41,14 @@ func TestSharedFolderReachesARealBoxThroughItsMount(t *testing.T) {
 	t.Cleanup(func() { _ = exec.Command("podman", "unshare", "rm", "-rf", data).Run() })
 	layout := box.Layout{Data: filepath.Join(data, "data"), HostData: filepath.Join(data, "host")}
 	runtimeDir := filepath.Join(data, "rt")
-	for _, dir := range []string{layout.Rooms(), runtimeDir, filepath.Dir(layout.HostBinary()), layout.HostCache()} {
+	for _, dir := range []string{layout.Rooms(), runtimeDir, layout.HostBin(), layout.HostCache()} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// A box's agent stays out of this: only the mount needs the real binary.
 	wrapper := "#!/bin/sh\nif [ \"$1\" = share ]; then exec " + binary + " \"$@\"; fi\nexec sleep 1000\n"
-	if err := os.WriteFile(layout.HostBinary(), []byte(wrapper), 0755); err != nil {
-		t.Fatal(err)
-	}
+	binarySum := stagePinnedFixture(t, layout.HostBin(), []byte(wrapper))
 	forwards := &sshForwards{}
 	host, err := podman.New("local", runtimeDir, "h", forwards)
 	if err != nil {
@@ -59,6 +57,7 @@ func TestSharedFolderReachesARealBoxThroughItsMount(t *testing.T) {
 	no := false
 	b := &Boxes{Store: restoreStore{hosts: []box.Host{{Name: "h", State: box.HostReady, EngineHost: &no}}}, Layout: layout, Runtime: runtimeDir, Context: ctx,
 		hosts: map[contract.HostName]*podman.Host{"h": host}, restored: map[contract.HostName]bool{"h": true}, installed: map[contract.HostName]bool{"h": true}}
+	b.binOnce.Do(func() { b.binSum = binarySum })
 	serve := func() {
 		t.Helper()
 		if err := podman.EnsureShareServer(ctx, binary, layout.Rooms(), b.shareSocket()); err != nil {

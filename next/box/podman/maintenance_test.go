@@ -14,7 +14,10 @@ import (
 	"github.com/resident-labs/dyna/box"
 )
 
-type maintenanceRunner struct{ command string }
+type maintenanceRunner struct {
+	command  string
+	commands []string
+}
 
 func (r *maintenanceRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte, error) {
 	for _, a := range args {
@@ -23,6 +26,11 @@ func (r *maintenanceRunner) Run(_ context.Context, _ []byte, args ...string) ([]
 		}
 	}
 	r.command = args[len(args)-1]
+	r.commands = append(r.commands, r.command)
+	if strings.Contains(r.command, "'dyna-binary-objects'") {
+		body := "/data/bin\x00"
+		return []byte(fmt.Sprintf("%sDYNA-END %020d 000\n", body, len(body))), nil
+	}
 	return []byte(fmt.Sprintf("DYNA-END %020d %03d\n", 0, 0)), nil
 }
 func TestRemoveRoomRunsInTheUserNamespace(t *testing.T) {
@@ -45,16 +53,17 @@ func TestMaintenanceCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Maintain(context.Background(), box.Layout{HostData: "/data"}); err != nil {
+	if err := h.Maintain(context.Background(), box.Layout{HostData: "/data"}, strings.Repeat("a", 64)); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"podman image prune -f", "git -C", "gc --no-prune", "'dyna-maintain' '/data/git'"} {
-		if !strings.Contains(r.command, expected) {
-			t.Fatalf("missing %q in %s", expected, r.command)
+	commands := strings.Join(r.commands, "\n")
+	for _, expected := range []string{"podman image prune -f", "git -C", "gc --no-prune", "'dyna-maintain' '/data/git'", "'dyna-binary-objects' '/data/bin'"} {
+		if !strings.Contains(commands, expected) {
+			t.Fatalf("missing %q in %s", expected, commands)
 		}
 	}
-	if strings.Contains(r.command, "prune -a") {
-		t.Fatalf("unsafe prune: %s", r.command)
+	if strings.Contains(commands, "prune -a") {
+		t.Fatalf("unsafe prune: %s", commands)
 	}
 }
 
@@ -89,7 +98,7 @@ func TestMaintainCompactsACache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Maintain(context.Background(), layout); err != nil {
+	if err := h.Maintain(context.Background(), layout, strings.Repeat("a", 64)); err != nil {
 		t.Fatal(err)
 	}
 }
