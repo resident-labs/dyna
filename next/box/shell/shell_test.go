@@ -819,3 +819,41 @@ func TestJobOutputReturnsAtOnceWhenAMessageArrives(t *testing.T) {
 		t.Fatalf("output when a message arrived = %s", body)
 	}
 }
+
+func TestJobOutputGathersLinesUntilTheWaitPasses(t *testing.T) {
+	r := newRig("", syscall.SIGTERM)
+	var w io.Writer
+	r.server.cfg.start = func(_, _, _ string, out io.Writer) (process, error) {
+		w = out
+		return r.proc, nil
+	}
+	finish := make(chan string, 1)
+	go func() {
+		_, body := call(t, r.server.Handler(), "/run", `{"command":"cargo build"}`)
+		finish <- body
+	}()
+	(<-r.timers).fire <- time.Now()
+	<-finish
+	read := make(chan string, 1)
+	go func() {
+		_, body := call(t, r.server.Handler(), "/job", `{"action":"output","job":"job_1"}`)
+		read <- body
+	}()
+	wait := <-r.timers
+	poll := <-r.timers
+	_, _ = io.WriteString(w, "Compiling a\n")
+	poll.fire <- time.Now()
+	poll = <-r.timers
+	select {
+	case body := <-read:
+		t.Fatalf("output returned on a new line before the wait passed: %s", body)
+	case <-time.After(50 * time.Millisecond):
+	}
+	_, _ = io.WriteString(w, "Compiling b\n")
+	poll.fire <- time.Now()
+	<-r.timers
+	wait.fire <- time.Now()
+	if body := <-read; !strings.Contains(body, "Compiling a") || !strings.Contains(body, "Compiling b") || !strings.Contains(body, `"running":true`) {
+		t.Fatalf("output after the wait = %s", body)
+	}
+}
