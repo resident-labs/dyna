@@ -55,8 +55,8 @@ func TestModelFailureRetries(t *testing.T) {
 	}
 	// A timer that becomes due while this new turn runs cannot wake it again.
 	var oldTimer int64
-	if err := s.Read().QueryRowContext(ctx, "SELECT model_retry_at FROM sessions WHERE id='s'").Scan(&oldTimer); err != nil || oldTimer != 0 {
-		t.Fatalf("manual dispatch kept timer: %d %v", oldTimer, err)
+	if err := s.Read().QueryRowContext(ctx, "SELECT model_retry_at FROM sessions WHERE id='s'").Scan(&oldTimer); err != nil || oldTimer != -1 {
+		t.Fatalf("manual dispatch did not retain unscheduled deferral: %d %v", oldTimer, err)
 	}
 	due := now.Add(5 * time.Minute)
 	if err := s.WakeModelRetries(ctx, due); err != nil {

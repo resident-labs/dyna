@@ -315,7 +315,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			}
 			return nil
 		}
-		retrying := false
+		deferred := false
 		if output.Outcome == contract.TurnCompleted {
 			if _, err := tx.ExecContext(ctx, "UPDATE boxes SET failures=0 WHERE session=?", session); err != nil {
 				return err
@@ -325,24 +325,35 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			}
 		} else if output.Outcome == contract.TurnFailed && output.Cause == contract.CauseModelFailed {
 			var retries int
-			if err := tx.QueryRowContext(ctx, "SELECT model_retries FROM sessions WHERE id=?", session).Scan(&retries); err != nil {
+			var cancelled bool
+			if err := tx.QueryRowContext(ctx, "SELECT model_retries,state!='open' OR EXISTS (SELECT 1 FROM turns WHERE id=? AND stop_requested_at IS NOT NULL) FROM sessions WHERE id=?", output.Turn, session).Scan(&retries, &cancelled); err != nil {
 				return err
 			}
 			var retryAt int64
-			if retries < 8 {
+			// Cancellation ends the retry, not the attempt's non-terminal status.
+			deferred = cancelled
+			if cancelled {
+				retryAt = -1
+			}
+			if retries < 8 && !cancelled {
 				delay := 5 * time.Minute * time.Duration(1<<retries)
 				if delay > time.Hour {
 					delay = time.Hour
 				}
 				retryAt = event.Time.Add(delay).UnixMilli()
 				retries++
-				retrying = true
+				deferred = true
 			}
 			if _, err := tx.ExecContext(ctx, "UPDATE sessions SET model_retry_at=?,model_retries=? WHERE id=?", retryAt, retries, session); err != nil {
 				return err
 			}
-		} else if _, err := tx.ExecContext(ctx, "UPDATE sessions SET model_retry_at=0 WHERE id=?", session); err != nil {
-			return err
+		} else {
+			// Legacy active retries had a zero timer. Recover their deferral from
+			// event facts, not the counter alone: owner work after exhaustion or
+			// a non-model failure must remain terminal when stopped.
+			if err := tx.QueryRowContext(ctx, `UPDATE sessions AS s SET model_retry_at=CASE WHEN ? THEN 0 WHEN model_retry_at!=0 OR `+legacyModelRetryPending+` THEN -1 ELSE 0 END WHERE id=? RETURNING model_retry_at<0`, output.Outcome == contract.TurnFailed, session).Scan(&deferred); err != nil {
+				return err
+			}
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE sessions SET shell_jobs=MAX(0,?) WHERE id=?", output.ShellJobs, session); err != nil {
 			return err
@@ -392,8 +403,10 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			replyPosts = nil
 		}
 		body.Replies = room.FinalReplies(inputs, replyPosts, endIDs)
-		// A turn the close ended has nothing to answer with, and the closing session's notice tells its parent.
-		if output.Cause == contract.CauseClosed {
+		// A deferred model failure has not settled the input's reply channel.
+		// Terminal outcomes deliver failure; posts already sent by tools remain sent.
+		// A turn the close ended is answered by the closing session's notice.
+		if deferred || output.Cause == contract.CauseClosed {
 			body.Replies = nil
 		}
 		owed := slices.ContainsFunc(inputs, func(d contract.Delivery) bool { return d.Reply.Kind == contract.ReplyFinal })
@@ -407,7 +420,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 				return err
 			}
 		}
-		if output.Outcome != contract.TurnStopped && !retrying && owed && output.Final == "" && !slices.ContainsFunc(posts, func(post contract.Event) bool {
+		if output.Outcome != contract.TurnStopped && !deferred && owed && output.Final == "" && !slices.ContainsFunc(posts, func(post contract.Event) bool {
 			return post.From.Kind == contract.PrincipalSession && post.From.Session == session
 		}) {
 			if err := markSilent(ctx, tx, session, output.Turn); err != nil {
@@ -807,7 +820,7 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 					return nil
 				}
 			}
-			if _, err := tx.ExecContext(ctx, "UPDATE sessions SET model_retry_at=0 WHERE id=?", session); err != nil {
+			if _, err := tx.ExecContext(ctx, "UPDATE sessions SET model_retry_at=CASE WHEN model_retry_at!=0 THEN -1 ELSE 0 END WHERE id=?", session); err != nil {
 				return err
 			}
 			var ids []contract.EventID

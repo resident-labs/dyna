@@ -14,12 +14,26 @@ import (
 func (s *Store) RequestTurnStop(ctx context.Context, session contract.SessionID, now time.Time) (bool, error) {
 	var stopping bool
 	err := s.Write(ctx, func(tx *sql.Tx) error {
+		// A quiet session can be between attempts, including a due retry
+		// queued for a box. Stop cancels that wake as well as an active turn.
+		if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET wake=0 WHERE to_kind='session' AND to_id=? AND state='pending' AND EXISTS (SELECT 1 FROM sessions WHERE id=? AND model_retry_at>0)", session, session); err != nil {
+			return err
+		}
+		cancelled, err := tx.ExecContext(ctx, "UPDATE sessions SET model_retry_at=-1 WHERE id=? AND model_retry_at>0", session)
+		if err != nil {
+			return err
+		}
+		n, err := cancelled.RowsAffected()
+		if err != nil {
+			return err
+		}
+		stopping = n > 0
 		result, err := tx.ExecContext(ctx, "UPDATE turns SET stop_requested_at=COALESCE(stop_requested_at,?) WHERE session=? AND ended_at IS NULL", now.UnixMilli(), session)
 		if err != nil {
 			return err
 		}
-		n, err := result.RowsAffected()
-		stopping = n > 0
+		n, err = result.RowsAffected()
+		stopping = stopping || n > 0
 		if stopping {
 			s.wakePending = append(s.wakePending, session)
 		}

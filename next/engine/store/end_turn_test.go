@@ -183,6 +183,10 @@ func TestEndPostsIgnoreOtherRoom(t *testing.T) {
 func TestFailedTurnIgnoresEndPosts(t *testing.T) {
 	channel := contract.ReplyChannel{Kind: contract.ReplyFinal, Target: endTurnParent, Home: endTurnFeed}
 	s, post := endTurnFixture(t, []contract.ReplyChannel{channel}, contract.PostCreated{Text: "report", Home: endTurnDM})
+	// A failure only answers its input after the model retries are exhausted.
+	if _, err := s.writer.Exec("UPDATE sessions SET model_retries=8 WHERE id='child'"); err != nil {
+		t.Fatal(err)
+	}
 	body, _ := endChildTurn(t, s, contract.TurnOutputRequest{Outcome: contract.TurnFailed, Cause: contract.CauseModelFailed, EndPosts: []contract.EventID{post.ID}})
 	if len(body.Replies) != 1 || body.Replies[0].Posted != "" {
 		t.Fatalf("turn %+v", body)

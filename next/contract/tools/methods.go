@@ -262,7 +262,7 @@ var methodTable = []MethodEntry{
 		act("session", "compose_list", typ[contract.ComposeListRequest](), "List the compose files a child session in room can start with. Omit repo to use the caller's.", "session compose-list"),
 	),
 	method(contract.MethodSessionStop, contract.ScopeOperate, UserAccess,
-		act("session", "stop", typ[contract.SessionStopRequest](), "Stop the running turn of session (name or ID), any session under you at any depth.", "session stop"),
+		act("session", "stop", typ[contract.SessionStopRequest](), "Stop the running turn or pending model retry of session (name or ID), any session under you at any depth. Cancelling a retry does not report its model attempts as a terminal failure.", "session stop"),
 	),
 	method(contract.MethodSessionWork, contract.ScopeRead, OwnerAccess),
 	method(contract.MethodShellJobEnded, contract.ScopeRead, BoxAccess),
