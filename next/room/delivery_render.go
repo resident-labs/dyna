@@ -56,6 +56,15 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 			did = append(did, "left goals with no holder, because you are root and root holds no goals: "+GoalNames(b.Unheld)+". goal list with your session shows them; goal done ends them and settles their open items")
 		}
 		return fmt.Sprintf("Session %s closed and %s.", b.Session, strings.Join(did, " and ")), nil
+	case contract.EngineRestarted:
+		build, previous := b.Build[:min(12, len(b.Build))], b.PreviousBuild[:min(12, len(b.PreviousBuild))]
+		if !b.Clean {
+			return fmt.Sprintf("Dyna restarted on build %s after an unclean stop (was %s).", build, previous), nil
+		}
+		if b.Build != b.PreviousBuild {
+			return fmt.Sprintf("Dyna restarted on build %s (was %s); it was down %d s.", build, previous, b.DownMillis/1000), nil
+		}
+		return fmt.Sprintf("Dyna restarted on build %s; it was down %d s.", build, b.DownMillis/1000), nil
 	case contract.HostDiskLow:
 		return fmt.Sprintf("Host %s is low on disk: %d GiB free, %d GiB wanted. At the floor, new boxes wait and the oldest stopped boxes close. Closing a finished session frees its volume.", b.Host, b.FreeBytes>>30, b.FloorBytes>>30), nil
 	case contract.PrOpened:

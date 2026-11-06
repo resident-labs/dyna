@@ -315,6 +315,7 @@ export type BoxChanged = { box: BoxID; session: SessionID; host?: HostName; from
 export type CreatePhase = "remove_old" | "repository" | "box";
 export type FailureCause = "nested_device_missing" | "kvm_device_missing" | "create_failed" | "start_failed" | "no_hello" | "engine_restarted" | "remove_failed" | "archive_failed" | "grant_inactive" | "host_lost" | "host_busy" | "github_failed" | "stale" | "interrupted" | "internal" | "setup_failed" | "model_failed" | "output_limit" | "no_submit" | "harness_failed" | "set_model_failed" | "not_started" | "closed" | "run_timeout" | "workflow_failed";
 export type PressureKind = "high" | "max";
+export type EngineRestarted = { build: string; previousBuild: string; downMillis: number; clean: boolean; };
 export type HostDiskLow = { host: HostName; freeBytes: number; floorBytes: number; };
 export type BoxPressure = { box: BoxID; kind: PressureKind; };
 export type ImageBuilt = { host: HostName; repo: RepoName; name: string; tag: string; seconds: number; };
@@ -654,6 +655,7 @@ export type EventBody =
   | { type: "computer.changed"; body: ComputerChanged }
   | { type: "connect.connector"; body: ConnectConnector }
   | { type: "conversation.read"; body: ConversationRead }
+  | { type: "engine.restarted"; body: EngineRestarted }
   | { type: "git.main_ci_finished"; body: GitMainCIFinished }
   | { type: "git.main_updated"; body: GitMainUpdated }
   | { type: "github.ci.finished"; body: CIFinished }

@@ -74,6 +74,7 @@ const bodies: Record<string, Check> = {
   "shell.job.ended": object({ session: string, job: string, tail: string, description: optional(string), end: jobEnd }),
   "shell.job.running": object({ session: string, job: string, ranMinutes: number, tail: string, description: optional(string), quietMinutes: optional(number) }),
   "box.pressure": object({ box: string, kind: oneOf("high", "max") }),
+  "engine.restarted": object({ build: string, previousBuild: string, downMillis: number, clean: boolean }),
   "host.disk_low": object({ host: string, freeBytes: number, floorBytes: number }),
   "host.switches_changed": object({ host: string, agents: optional(boolean), ci: optional(boolean) }),
   "grant.expired": object({ grant: string }),

@@ -221,8 +221,8 @@ func (s *Store) warnDisk(ctx context.Context, tx *sql.Tx, name contract.HostName
 	return s.alertRoots(ctx, tx, contract.HostDiskLow{Host: name, FreeBytes: free, FloorBytes: floor}, at)
 }
 
-// alertRoots posts the event in every room and wakes its root, which can close finished work.
-func (s *Store) alertRoots(ctx context.Context, tx *sql.Tx, body contract.HostDiskLow, at time.Time) error {
+// alertRoots posts an engine event in every room with an open root and wakes that root.
+func (s *Store) alertRoots(ctx context.Context, tx *sql.Tx, body contract.EventBody, at time.Time) error {
 	rows, err := tx.QueryContext(ctx, "SELECT id,room FROM sessions WHERE parent IS NULL AND state='open' AND closed_at IS NULL")
 	if err != nil {
 		return err
