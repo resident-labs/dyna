@@ -159,7 +159,7 @@
         <label class="kind"><input type="radio" name="host-kind" value={false} bind:group={exec} disabled={busy} /><span class="name">Boxes and CI runners</span>
           <span class="help">Dyna checks Podman, cgroups, FUSE and disk before the host is ready.</span></label>
         <label class="kind"><input type="radio" name="host-kind" value={true} bind:group={exec} disabled={busy} /><span class="name">Exec only</span>
-          <span class="help">Nothing is placed here; only host exec uses it. Dyna runs the base host checks.</span></label></div></fieldset>
+          <span class="help">Nothing is placed here; only host exec uses it. Dyna checks SSH and bash.</span></label></div></fieldset>
     <label class="field">Name<input class="input mono" bind:value={name} placeholder="studio" disabled={busy} autocomplete="off" spellcheck="false" /></label>
     <label class="field">SSH<input class="input mono" bind:value={ssh} placeholder="user@192.168.1.20" disabled={busy} autocomplete="off" spellcheck="false" /></label>
     {#if !exec}<label class="check"><input type="checkbox" bind:checked={sole} disabled={busy} />Only I administer this machine</label>{/if}
@@ -169,7 +169,7 @@
 {/snippet}
 
 {#snippet host(h: HostSummary)}{@const meters = hostMeters(h)}{@const seen = h.reachable ? undefined : lastSeen(h, now)}{@const groups = roomSessions(h, roomName)}
-  {#if h.execOnly}<p class="small muted">Exec only: nothing is placed here, and only host exec uses it. It passes the base host checks; turning Agents or CI on runs the full host check first.</p>{/if}
+  {#if h.execOnly}<p class="small muted">Exec only: nothing is placed here, and only host exec uses it. Its check needs SSH and bash; turning Agents or CI on runs the full host check first.</p>{/if}
   {#if meters.length && (h.reachable || seen)}<div class="tiles" class:dimmed={!h.reachable}>{#each meters as meter (meter.label)}<MeterTile {meter} />{/each}</div>{/if}
   <dl class="facts">{#if h.execOnly || !h.reachable}<dt>State</dt><dd>{#if h.reachable}Online{:else}<StatusPill tone="error" label="Unreachable" />{" · "}{seen ?? "Not seen yet"}{/if}</dd>{/if}
     {#if h.health === "degraded"}<dt>Scheduling</dt><dd><StatusPill tone="warning" label="Degraded" /> · No new boxes or runners until a good probe</dd>{/if}
