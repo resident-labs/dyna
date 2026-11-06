@@ -27,6 +27,7 @@ type activeStep struct {
 
 type Reconciler struct {
 	hostMemory    func(contract.HostName) int64
+	hostHealth    func(contract.HostName) contract.HostHealth
 	restoring     func(contract.HostName) bool
 	store         *store.Store
 	boxes         BoxAdapter
@@ -59,6 +60,10 @@ func New(st *store.Store, boxes BoxAdapter, view View, repos Repositories, event
 		return context.WithTimeout(ctx, 15*time.Minute)
 	}, kick: make(chan struct{}, 1), roomSteps: make(map[string]bool), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool), disconnected: make(map[contract.BoxID]time.Time), idle: make(map[contract.HostName]time.Time), audited: make(map[string]time.Time)}
 }
+func (r *Reconciler) SetHostHealth(read func(contract.HostName) contract.HostHealth) {
+	r.hostHealth = read
+}
+
 func (r *Reconciler) SetHostMemory(read func(contract.HostName) int64) { r.hostMemory = read }
 
 // AdmissionHosts reads host reservations with the latest measured memory, which is live runtime state rather than a stored
@@ -67,6 +72,11 @@ func (r *Reconciler) AdmissionHosts(ctx context.Context) ([]box.Host, error) {
 	hosts, err := r.store.Hosts(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if r.hostHealth != nil {
+		for i := range hosts {
+			hosts[i].Health = r.hostHealth(hosts[i].Name)
+		}
 	}
 	if r.hostMemory != nil {
 		for i := range hosts {

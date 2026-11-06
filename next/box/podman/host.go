@@ -2,6 +2,7 @@
 package podman
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -27,12 +28,19 @@ type Runner interface {
 }
 type ExecRunner struct{}
 
-func (ExecRunner) Run(ctx context.Context, in []byte, args ...string) ([]byte, error) {
+func (r ExecRunner) Run(ctx context.Context, in []byte, args ...string) ([]byte, error) {
+	return r.RunProgress(ctx, in, nil, args...)
+}
+
+func (ExecRunner) RunProgress(ctx context.Context, in []byte, progress func(int), args ...string) ([]byte, error) {
 	c := exec.CommandContext(ctx, args[0], args[1:]...)
 	// A killed SSH can leave descendants holding its output pipes. Bound the
 	// copy goroutines too, not just the lifetime of the direct child.
 	c.WaitDelay = 2 * time.Second
-	c.Stdin = strings.NewReader(string(in))
+	c.Stdin = bytes.NewReader(in)
+	if progress != nil {
+		c.Stdin = &progressReader{Reader: bytes.NewReader(in), skip: len("DYNA-IN ") + 20 + 1, progress: progress}
+	}
 	out, err := c.Output()
 	// ssh says why it failed only on stderr; without it an error reads "exit status 255".
 	var exit *exec.ExitError
@@ -414,7 +422,14 @@ func (h *Host) executeOver(ctx context.Context, ssh []string, input []byte, argv
 	}
 	args := append(ssh, h.destination, strings.Join(parts, " "))
 	frame := append([]byte(fmt.Sprintf("DYNA-IN %020d\n", len(input))), input...)
-	out, sshErr := h.runner.Run(ctx, frame, args...)
+	var out []byte
+	var sshErr error
+	progress, _ := ctx.Value(byteProgressKey{}).(func(int))
+	if streaming, ok := h.runner.(ProgressRunner); ok && progress != nil && len(input) > 0 {
+		out, sshErr = streaming.RunProgress(ctx, frame, progress, args...)
+	} else {
+		out, sshErr = h.runner.Run(ctx, frame, args...)
+	}
 	body, status, err := parseReply(out)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", err, sshErr)
@@ -426,9 +441,12 @@ func (h *Host) executeOver(ctx context.Context, ssh []string, input []byte, argv
 }
 
 // Maintain removes dangling images and compacts caches without deleting borrowed objects.
-func (h *Host) Maintain(ctx context.Context, layout box.Layout) error {
+func (h *Host) Maintain(ctx context.Context, layout box.Layout, wanted string) error {
 	_, err := h.runUnbounded(ctx, nil, "bash", "-c", `podman image prune -f >/dev/null || exit; for repo in "$1"/*/*.git; do [ -d "$repo" ] || continue; git -C "$repo" gc --no-prune >/dev/null || exit; done`, "dyna-maintain", layout.HostGitRoot())
-	return err
+	if err != nil {
+		return err
+	}
+	return h.PruneBinaries(ctx, layout.HostBin(), wanted)
 }
 
 // RemoveRoom deletes a room's folder. It runs in the user namespace, since a box can leave read-only folders and files
@@ -467,7 +485,14 @@ func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
 	}
 	args := append([]string{"podman", "--cgroup-manager=systemd", "create", "--name", string(c.Box)}, userns...)
 	args = append(args, "--user", "1000:1000", "--label", "dyna.box="+string(c.Box), "--cgroup-parent="+c.Slice, "--cgroupns=private", "--systemd=always", "--stop-signal", "SIGTERM", "--entrypoint", "/usr/bin/tini", "--tmpfs", "/run/dyna:mode=1777", "--env", "HOME=/box/home", "--env", "PI_CODING_AGENT_DIR=/box/pi", "--volume", "dyna-box-"+string(c.Box)+":/box")
+	var binaryRoot string
 	for _, m := range c.Mounts {
+		if m.BoxPath == "/opt/dyna/bin/current" {
+			binaryRoot = filepath.Dir(m.HostPath)
+		}
+		if m.BoxPath == "/opt/dyna/bin" {
+			binaryRoot = m.HostPath
+		}
 		if err := h.makeMountFolder(ctx, m); err != nil {
 			return err
 		}
@@ -501,6 +526,10 @@ func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
 			checks += "test -c /dev/kvm || { printf kvm; exit 254; }; "
 			args = append(args[:len(args)-4], append([]string{"--device", "/dev/kvm", "--group-add", "keep-groups"}, args[len(args)-4:]...)...)
 		}
+	}
+	if binaryRoot != "" {
+		// The collector uses this lock too: a pin becomes a container reference before it can be pruned.
+		args = append([]string{"bash", "-c", pinCreateScript, "dyna-pin-create", binaryRoot}, args...)
 	}
 	if checks == "" {
 		_, err := h.run(ctx, args...)
@@ -582,7 +611,7 @@ func (h *Host) ListContainers(ctx context.Context) ([]box.ContainerStatus, error
 	}
 	out := make([]box.ContainerStatus, 0, len(records))
 	for _, r := range records {
-		out = append(out, box.ContainerStatus{Box: contract.BoxID(r.Labels["dyna.box"]), Running: r.State == "running", StaleLayout: r.Labels["dyna.layout"] != box.ContainerLayout, Stack: r.Labels[StackHashLabel]})
+		out = append(out, box.ContainerStatus{Box: contract.BoxID(r.Labels["dyna.box"]), Running: r.State == "running", StaleLayout: r.Labels["dyna.layout"] != box.ContainerLayout, Binary: r.Labels["dyna.binary"], Stack: r.Labels[StackHashLabel]})
 	}
 	return out, nil
 }

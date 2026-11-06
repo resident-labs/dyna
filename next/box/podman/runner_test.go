@@ -126,8 +126,9 @@ func TestStartRunnerRefusesUnsafeInput(t *testing.T) {
 }
 
 func TestEgressAloneHasHostNetworkAndNoCapabilities(t *testing.T) {
-	args := strings.Join(egressArgs("image", "/data/bin"), " ")
-	for _, want := range []string{"--network=host", "--read-only", "--cap-drop=all", "--security-opt=no-new-privileges", "--user 1001:1001", "/data/bin:/opt/dyna/bin:ro", "ci-egress --dir /run/dyna-egress"} {
+	sum := strings.Repeat("a", 64)
+	args := strings.Join(egressArgs("image", "/data/bin", sum), " ")
+	for _, want := range []string{"--network=host", "--read-only", "--cap-drop=all", "--security-opt=no-new-privileges", "--user 1001:1001", "/data/bin/" + sum + ":/opt/dyna/bin/current:ro", "ci-egress --dir /run/dyna-egress"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("args miss %q: %s", want, args)
 		}

@@ -65,7 +65,7 @@ const RunnerImage = "runner"
 func RunnerHosts(hosts []Host) []Host {
 	var open []Host
 	for _, h := range hosts {
-		if h.State == HostReady && h.CI {
+		if h.State == HostReady && h.Health != contract.HostDegraded && h.CI {
 			h.Rooms, h.NoAgents = nil, false
 			open = append(open, h)
 		}
@@ -104,7 +104,7 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 	var card int
 	for _, h := range hosts {
 		// A create quarantine blocks new boxes, including retries, not wakes or CI runners.
-		if h.State != HostReady || (existing != nil && h.Name != existing.Host) || (h.Problem != "" && request.Image != RunnerImage && (existing == nil || existing.State == contract.BoxPending && existing.Image == "")) {
+		if h.State != HostReady || h.Health == contract.HostDegraded && (existing == nil || existing.Image == "") || (existing != nil && h.Name != existing.Host) || (h.Problem != "" && request.Image != RunnerImage && (existing == nil || existing.State == contract.BoxPending && existing.Image == "")) {
 			continue
 		}
 		if !h.Serves(request.Room) || existing == nil && !takes(h, request.ID, only) {

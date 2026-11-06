@@ -68,13 +68,7 @@ func TestRecreateMovesAStoppedBoxToANewImageAndKeepsItsVolume(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(data) })
 	// The volume mounts of the real spec. This agent records which image it woke on.
-	agent := filepath.Join(data, "bin", "current", "dyna")
-	if err := os.MkdirAll(filepath.Dir(agent), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(agent, []byte("#!/bin/sh\ncp /image-name /box/woke-on\nexec sleep 300\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
+	binarySum := stagePinnedFixture(t, filepath.Join(data, "bin"), []byte("#!/bin/sh\ncp /image-name /box/woke-on\nexec sleep 300\n"))
 	if err := os.MkdirAll(filepath.Join(data, "sock", string(id)), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -85,6 +79,7 @@ func TestRecreateMovesAStoppedBoxToANewImageAndKeepsItsVolume(t *testing.T) {
 	}
 	b := &Boxes{Store: restoreStore{hosts: engineHosts("host")}, hosts: map[contract.HostName]*podman.Host{"host": host}, restored: map[contract.HostName]bool{"host": true}, installed: map[contract.HostName]bool{"host": true}}
 	b.Layout.Data, b.Layout.HostData = data, data
+	b.binOnce.Do(func() { b.binSum = binarySum })
 	slice := "dyna-swap-test-" + strings.TrimPrefix(string(id), "box_swap_test_") + ".slice"
 	spec := lifecycle.BoxSpec{Box: id, Room: "room", Host: "host", Slice: slice, Size: contract.BoxSize{CPUs: 1, MemBytes: 1 << 30, Pids: 512}}
 	t.Cleanup(func() {

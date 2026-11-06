@@ -68,7 +68,7 @@ func TestHeartbeatProbesGPUsOnTheFirstBeatAndEveryThirtieth(t *testing.T) {
 	}
 	probes := 0
 	for _, call := range r.calls {
-		if strings.HasSuffix(call[len(call)-1], " 'gpu'") {
+		if strings.Contains(call[len(call)-1], " 'gpu' '/data/bin/current/dyna'") {
 			probes++
 		}
 	}
