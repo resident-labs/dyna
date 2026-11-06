@@ -18,6 +18,8 @@
   import Settings from "./lib/ui/Settings.svelte";
   import { linkCode } from "./lib/devices.ts";
   import Feed from "./lib/ui/Feed.svelte";
+  import FeedDepthControl from "./lib/ui/FeedDepthControl.svelte";
+  import { loadFeedDepth, saveFeedDepth, sessionDepths, type FeedDepth } from "./lib/feed-depth.ts";
   import SessionThread from "./lib/ui/SessionThread.svelte";
   import WorkflowRun from "./lib/ui/WorkflowRun.svelte";
   import StatusPill from "./lib/ui/StatusPill.svelte";
@@ -180,6 +182,14 @@
   });
   // Derived, not set in the effect below: the room's views render with the store of the room they show.
   let store = $derived(room ? new RoomStore(room) : undefined);
+  const chosenDepths = new SvelteMap<string, FeedDepth>();
+  let feedDepth = $derived(room ? chosenDepths.get(room) ?? loadFeedDepth(room, () => localStorage) : "all");
+  let depths = $derived(sessionDepths([...store?.sessions.values() ?? []]));
+  function chooseDepth(value: FeedDepth) {
+    if (!room) return;
+    chosenDepths.set(room, value);
+    saveFeedDepth(room, value, () => localStorage);
+  }
   // The same rule per room for its open sessions.
   let sessionInitials = $derived(distinctInitials([...store?.names.values() ?? []]));
   setSessionLabels(() => sessionInitials);
@@ -707,6 +717,7 @@
         {#if closed && !missing}<span class="count">closed</span>{:else if (shown === "idle" || shown === "background") && word && !missing}<span class="count word" title={word === "Asleep" ? "Wakes on your next message" : word}>{word}</span>{/if}
         {#if store?.ready && !session}<span class="count narrow">{count(store.members.length, "session")}</span>{/if}</span>
       {#if store && !unavailable}
+        {#if !session}<FeedDepthControl value={feedDepth} onchange={chooseDepth} />{/if}
         {#if session}<span class="session-spacer"></span>{/if}
         {#if session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title={terminals?.hasShell(session) ? "Show this session's terminal" : "Open a terminal in this session's box"} aria-pressed={terminals?.hasShell(session) ?? false} onclick={() => terminals?.shell(session, title, !store?.sessions.get(session)?.parent)}><Icon name="terminal" /></button>{/if}
         {#if session && !closed && attention.can("computers") && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Computer" title={watching === session ? "Show this session's computer" : "Open this session's computer"} aria-pressed={watching === session} onclick={event => watch(session, event.currentTarget)}><Icon name="monitor" /></button>{/if}
@@ -727,7 +738,7 @@
       {:else if !room}<Home {attention} {initials} loaded={roomsLoaded} {navigate} onrequests={() => { section = "requests"; }} covered={inSettings} />
       {:else if unavailable === "unreachable"}<Blocked kind="unreachable" onretry={reopen} />
       {:else if store && !unavailable}
-        {#if session}{#key session}{#if crew}<WorkflowRun {store} {hasRoom} {session} {roomName} {navigate} operate={attention.can("operate")} onpostlocation={(room, seq) => openLocation(room, undefined, seq)} />{:else}<SessionThread bind:this={thread} {store} {hasRoom} {session} {roomName} {navigate} operate={attention.can("operate")} startingBrief={startingBriefs[session]} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle} onpostlocation={(room, seq) => openLocation(room, undefined, seq)} />{/if}{/key}{:else}{#key key}<Feed bind:this={view} {store} {hasRoom} {home} {navigate} admin={attention.can("admin")} operate={attention.can("operate") && !closed} waiting={quotes[key]} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
+        {#if session}{#key session}{#if crew}<WorkflowRun {store} {hasRoom} {session} {roomName} {navigate} operate={attention.can("operate")} onpostlocation={(room, seq) => openLocation(room, undefined, seq)} />{:else}<SessionThread bind:this={thread} {store} {hasRoom} {session} {roomName} {navigate} operate={attention.can("operate")} startingBrief={startingBriefs[session]} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle} onpostlocation={(room, seq) => openLocation(room, undefined, seq)} />{/if}{/key}{:else}{#key key}<Feed bind:this={view} depth={{ mode: feedDepth, depths }} {store} {hasRoom} {home} {navigate} admin={attention.can("admin")} operate={attention.can("operate") && !closed} waiting={quotes[key]} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
           onforward={forward} onclosed={() => composer?.focus()} onjobs={item => void jobsTool?.show(item)}
           />{/key}{/if}
         <!-- The open thread or feed stays mounted behind the error, as it tells the page the session has no history. -->
