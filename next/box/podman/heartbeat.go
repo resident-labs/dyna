@@ -133,6 +133,10 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box
 				misses++
 				if misses >= box.ProbeFailureLimit {
 					report(false, load)
+				} else if failures == box.ProbeFailureLimit {
+					// Publish the scheduling threshold even while the independent dead-master
+					// grace still retains reachability. The failed probe supplies no new metrics.
+					report(true, load)
 				}
 				continue
 			}
