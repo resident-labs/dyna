@@ -60,7 +60,7 @@ func (s *Store) RoomList(ctx context.Context) (contract.RoomListResponse, []Room
 		return contract.RoomListResponse{}, nil, err
 	}
 	rows.Close()
-	failed, err := s.Read().QueryContext(ctx, `SELECT s.room,COUNT(*) FILTER (WHERE (SELECT outcome FROM turns WHERE session=s.id AND ended_at IS NOT NULL AND outcome!='stopped' ORDER BY ended_at DESC LIMIT 1)='failed' OR EXISTS (SELECT 1 FROM boxes b WHERE b.session=s.id AND b.state IN ('failed','lost'))),COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM boxes b WHERE b.session=s.id AND b.state='pending' AND b.reason='room-host')) FROM sessions s WHERE s.closed_at IS NULL GROUP BY s.room`)
+	failed, err := s.Read().QueryContext(ctx, `SELECT s.room,COUNT(*) FILTER (WHERE `+failureKey+`!=''),COUNT(*) FILTER (WHERE b.state='pending' AND b.reason='room-host') FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.closed_at IS NULL GROUP BY s.room`)
 	if err != nil {
 		return contract.RoomListResponse{}, nil, err
 	}

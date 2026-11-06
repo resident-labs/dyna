@@ -25,8 +25,14 @@ func markFailureTold(ctx context.Context, tx *sql.Tx, session contract.SessionID
 	return err
 }
 
-// failureKey is the failure a session is in now: room.FailureBox, room.FailureTurn or nothing. A stopped turn neither fails nor recovers.
-const failureKey = `CASE WHEN b.state IN ('failed','lost') THEN 'box' WHEN (SELECT outcome FROM turns WHERE session=s.id AND ended_at IS NOT NULL AND outcome!='stopped' ORDER BY ended_at DESC LIMIT 1)='failed' THEN 'turn' ELSE '' END`
+// modelRetrying includes the due retry waiting for dispatch and the running
+// retry. Dispatch clears the deadline, and EndTurn settles the counter/timer.
+const modelRetrying = `(s.model_retry_at>0 OR (s.model_retries>0 AND EXISTS (SELECT 1 FROM turns WHERE session=s.id AND ended_at IS NULL)))`
+
+// failureKey is the terminal failure a session is in now. Attempt events stay
+// factual, but a retrying model failure is not yet a failure to tell its parent.
+// A stopped turn neither fails nor recovers; a box failure always takes priority.
+const failureKey = `CASE WHEN b.state IN ('failed','lost') THEN 'box' WHEN ` + modelRetrying + ` THEN '' WHEN (SELECT outcome FROM turns WHERE session=s.id AND ended_at IS NOT NULL AND outcome!='stopped' ORDER BY ended_at DESC LIMIT 1)='failed' THEN 'turn' ELSE '' END`
 
 // failureRooms lists the rooms with a failure nobody has heard of, or a recovery not yet recorded. A box back from a told
 // failure for less than room.FailureSettle has not recovered yet, so it does not bring its room here on every tick.
@@ -42,7 +48,7 @@ func checkinRooms(ctx context.Context, q sqlQuery) ([]contract.RoomID, error) {
 		WHERE g.state='active' AND g.session IS NOT NULL AND r.paused_at IS NULL AND r.state='open' ORDER BY r.id`)
 }
 
-const checkinFacts = `SELECT s.id,COALESCE(s.parent,''),s.name,s.state='closing',s.created_at,s.model_retry_at>0,b.state,b.updated_at,
+const checkinFacts = `SELECT s.id,COALESCE(s.parent,''),s.name,s.state='closing',s.created_at,` + modelRetrying + `,b.state,b.updated_at,
 	COALESCE(t.id,''),MAX(COALESCE(t.started_at,0),COALESCE(t.active_at,0)),COALESCE(t.ended_at,0),COALESCE(t.outcome,''),
 	EXISTS (SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=s.id AND d.wake=1 AND d.state='pending')
 		OR EXISTS (SELECT 1 FROM operations o WHERE o.by_kind='session' AND o.by_id=s.id AND o.state IN ('approved','running')),

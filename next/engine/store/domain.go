@@ -325,11 +325,12 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			}
 		} else if output.Outcome == contract.TurnFailed && output.Cause == contract.CauseModelFailed {
 			var retries int
-			if err := tx.QueryRowContext(ctx, "SELECT model_retries FROM sessions WHERE id=?", session).Scan(&retries); err != nil {
+			var cancelled bool
+			if err := tx.QueryRowContext(ctx, "SELECT model_retries,state!='open' OR EXISTS (SELECT 1 FROM turns WHERE id=? AND stop_requested_at IS NOT NULL) FROM sessions WHERE id=?", output.Turn, session).Scan(&retries, &cancelled); err != nil {
 				return err
 			}
 			var retryAt int64
-			if retries < 8 {
+			if retries < 8 && !cancelled {
 				delay := 5 * time.Minute * time.Duration(1<<retries)
 				if delay > time.Hour {
 					delay = time.Hour
@@ -392,8 +393,10 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			replyPosts = nil
 		}
 		body.Replies = room.FinalReplies(inputs, replyPosts, endIDs)
-		// A turn the close ended has nothing to answer with, and the closing session's notice tells its parent.
-		if output.Cause == contract.CauseClosed {
+		// A retry has not settled the input's reply channel. Only exhaustion
+		// delivers a failure; posts already sent by tools remain sent.
+		// A turn the close ended is answered by the closing session's notice.
+		if retrying || output.Cause == contract.CauseClosed {
 			body.Replies = nil
 		}
 		owed := slices.ContainsFunc(inputs, func(d contract.Delivery) bool { return d.Reply.Kind == contract.ReplyFinal })

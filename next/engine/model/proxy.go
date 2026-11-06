@@ -79,6 +79,10 @@ func NewProxy(dir, authDir, managementKey string) (*Proxy, error) {
 		return nil, err
 	}
 	cfg.AuthDir = authDir
+	// A transient upstream failure is not evidence that the account is unusable.
+	// Keep auth and quota cooling, but let PiG retry on the same sole credential.
+	// Pinned limitation (accepted): a late 5xx can clear a concurrent model-scoped 403 cooldown, but not quota 429.
+	cfg.TransientErrorCooldownSeconds = -1
 	// An owner-added provider's models keep its prefix, so its name for a model never
 	// routes a built-in model's requests to the owner's address.
 	cfg.ForceModelPrefix = true
