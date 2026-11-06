@@ -91,6 +91,7 @@ const sameAuthor = (a: Principal, b: Principal) => a.kind === b.kind && a.sessio
 // The session an event is about; events without one belong to the room feed only.
 export function subject(event: Event): string | undefined {
   switch (event.type) {
+    case "host.switches_changed": return undefined;
     case "post.sent": case "git.main_updated": case "git.main_ci_finished": case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": case "session.failed": case "goal.set": case "goal.item_changed": case "goal.ended": case "checkin.due": return undefined;
     case "service.changed": case "service.failed": case "hook.finished": case "hook.due": case "notice.posted": case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": return undefined;
     case "op.requested": return event.body.by.session;
@@ -219,7 +220,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       // A job without an open turn stays in the work buffer below.
     }
     if (home.kind === "dm" && session !== home.session) continue;
-    if (event.type === "room.paused" || event.type === "room.resumed" || event.type === "room.limits_changed" || event.type === "room.deleting") {
+    if (event.type === "room.paused" || event.type === "room.resumed" || event.type === "room.limits_changed" || event.type === "host.switches_changed" || event.type === "room.deleting") {
       const previous = deferred.at(-1);
       if (event.type === "room.resumed" && previous?.kind === "notice" && previous.event.type === "room.paused" && sameAuthor(previous.event.from, event.from) && Date.parse(event.at) - Date.parse(previous.event.at) <= 300_000) previous.resumedAt = event.at;
       else deferred.push({ kind: "notice", key: `n${event.seq}`, event });
@@ -310,7 +311,7 @@ export const eventGroups: Record<Event["type"], string> = {
   "github.pr.merged": "pull requests merged", "github.pr.closed": "pull requests closed", "github.ci.finished": "CI results", "git.main_updated": "default branch moves", "git.main_ci_finished": "default branch CI results", "github.issue.opened": "issues opened", "github.comment": "GitHub comments", "github.label": "GitHub labels", "github.mention": "GitHub mentions", "github.issue.changed": "issue updates", "github.issue.closed": "issues closed",
   "hook.finished": "subscription runs", "hook.due": "subscription wakes", "notice.posted": "notices", "session.notice": "box notices",
   "shell.job.ended": "jobs finished", "shell.job.running": "job status", "grant.expired": "host grants expired",
-  "host.disk_low": "disk warnings", "conversation.read": "read positions", "workflow.ended": "workflow runs", "workflow.step_changed": "workflow steps", "workflow.status_changed": "workflow status lines",
+  "host.switches_changed": "host switch changes", "host.disk_low": "disk warnings", "conversation.read": "read positions", "workflow.ended": "workflow runs", "workflow.step_changed": "workflow steps", "workflow.status_changed": "workflow status lines",
   "service.changed": "service changes", "service.failed": "service failures",
   "session.failed": "failure notices", "goal.set": "goals set", "goal.item_changed": "goal items changed", "goal.ended": "goals ended", "checkin.due": "check-ins",
 };
@@ -525,6 +526,11 @@ export function describe(event: Event, name: Name): string {
     case "grant.expired": return "A host execution grant expired";
     // The owner reads this feed; a room's root may also pause it.
     case "room.paused": case "room.resumed": return `${event.from.session ? name(event.from.session) : "You"} ${event.type === "room.paused" ? "paused" : "resumed"} the room`;
+    case "host.switches_changed": {
+      const { host, agents, ci } = event.body;
+      const switches = [agents === undefined ? "" : `agents ${agents ? "on" : "off"}`, ci === undefined ? "" : `ci ${ci ? "on" : "off"}`].filter(Boolean);
+      return `You set host ${host}: ${switches.join(", ")}`;
+    }
     case "room.deleting": return "You deleted the room";
     case "room.deleted": return "";
     // Only the owner sets room limits. Zero means no limit. GB and MB count 2^30 and 2^20 bytes, as the Home meters do;

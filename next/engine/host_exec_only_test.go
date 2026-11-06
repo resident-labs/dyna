@@ -85,7 +85,7 @@ func TestHostexecOutFilesOverTheCap(t *testing.T) {
 
 // Turning agents or ci on for an exec-only host runs the full check first, and a failed check leaves the host exec only.
 func TestHostSetPromotesAnExecOnlyHost(t *testing.T) {
-	s, _, _, ctx := setup(t)
+	s, room, _, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	if err := s.store.AddHost(ctx, box.Host{Name: "omarchy", State: box.HostReady, NoAgents: true, ExecOnly: true, CheckedAt: s.now()}); err != nil {
 		t.Fatal(err)
@@ -106,6 +106,9 @@ func TestHostSetPromotesAnExecOnlyHost(t *testing.T) {
 	}
 	if only, _ := s.store.ExecOnly(ctx, "omarchy"); !only {
 		t.Fatal("a failed check changed the host")
+	}
+	if events, err := s.store.Events(ctx, room, 0, 100, []contract.EventType{"host.switches_changed"}); err != nil || len(events) != 0 {
+		t.Fatalf("a failed promotion wrote an audit: %+v %v", events, err)
 	}
 	fail = nil
 	if _, problem := s.HostSet(ctx, owner, contract.HostSetRequest{Host: "omarchy", Agents: &on, OwnerOnlyAdmin: true}); problem != nil {
