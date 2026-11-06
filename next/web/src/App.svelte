@@ -257,7 +257,8 @@
   // more idle siblings fold into one "N idle" row that opens in place, so a room of 100 sessions shows its work first.
   const folded = new SvelteSet<string>();
   const openIdle = new SvelteSet<string>();
-  const treeKey = (entry: TreeRow) => entry.kind === "idle" ? `idle ${entry.key}` : entry.session.session;
+  type SessionListRow = TreeRow | { kind: "new-session" };
+  const treeKey = (entry: SessionListRow) => entry.kind === "new-session" ? "new-session" : entry.kind === "idle" ? `idle ${entry.key}` : entry.session.session;
   // A row's menu of actions. A right click or the Menu key opens it at the pointer, and the row's More button opens it
   // under the button. It closes with its session, and a button that opened it toggles it.
   let acting: { session: string; anchor: DOMRect; side: "start" | "end"; trigger: HTMLElement } | undefined = $state();
@@ -274,9 +275,10 @@
     if (refocus && trigger?.isConnected) trigger.focus();
   }
   $effect.pre(() => { if (acting && !store?.sessions.has(acting.session)) acting = undefined; });
-  let sessionList: VirtualList<TreeRow> | undefined = $state();
+  let sessionList: VirtualList<SessionListRow> | undefined = $state();
   const starting = (id: string) => { const box = store?.boxes.get(id); return box === "pending" || box === "creating" || box === "starting"; };
   let tree = $derived(sessionTree(store?.members ?? [], store?.statuses() ?? new Map(), starting, session, folded, openIdle));
+  let sessionRows: SessionListRow[] = $derived(attention.can("operate") ? [...tree, { kind: "new-session" }] : tree);
   // Left folds a parent's subtree and Right opens it, on its row or its chevron.
   function fold(event: KeyboardEvent, id: string) {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -491,10 +493,10 @@
   async function walkTree(event: KeyboardEvent & { currentTarget: HTMLElement }) {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp" || !members) return;
     event.preventDefault();
-    const index = walkingTo ?? tree.findIndex(entry => treeKey(entry) === event.currentTarget.dataset.key);
-    const next = Math.max(0, Math.min(tree.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
+    const index = walkingTo ?? sessionRows.findIndex(entry => treeKey(entry) === event.currentTarget.dataset.key);
+    const next = Math.max(0, Math.min(sessionRows.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
     // The tree can change while the list scrolls, so the row is found again by its key, never by its old index.
-    const key = treeKey(tree[next]);
+    const key = treeKey(sessionRows[next]);
     const target = () => members?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`);
     walkingTo = next;
     if (!target()) await sessionList?.reveal(next);
@@ -798,15 +800,18 @@
         <button type="button" aria-pressed={selectedTab === "sessions"} onclick={() => tabs.set(key, "sessions")}>Sessions{#if !session && store?.ready}{" "}<span class="count">{store.members.length}</span>{/if}</button>
         {#if session && !closed}<button type="button" aria-pressed={about} onclick={() => tabs.set(key, "about")}>About</button>{/if}
         <button type="button" aria-pressed={selectedTab === "files"} onclick={() => tabs.set(key, "files")}>Files</button>
-        {#if !session && selectedTab === "sessions" && attention.can("operate")}<button type="button" class="tool" title="New session" aria-label="New session" onclick={() => openNew("session")}><Icon name="plus" /></button>{/if}
       </header>
       <!-- A long tree renders only its visible rows, through the feed's shared list (spec: long lists are virtual). -->
       {#if selectedTab === "files"}{#key room}<FilesTree {room} target={folderTarget?.conversation === key ? folderTarget : undefined} onopen={(items, initial) => { sharedItems = items; sharedInitial = initial; sharedJump = false; }} />{/key}
       {:else if about && session && store}<AboutPanel {store} room={room} {session} switchable={attention.can("operate")} shown={panelShown} navigate={openSession} onclosed={() => openLocation(room!)} />
-      {:else if tree.length}<div class="tree"><VirtualList bind:this={sessionList} items={tree} key={treeKey}
+      {:else if store?.ready}
+      {#if !tree.length}<p class="hint">No sessions yet.</p>{/if}
+      <div class="tree"><VirtualList bind:this={sessionList} items={sessionRows} key={treeKey}
         label="Session list" role="group" align="top" estimate={48}>
-        {#snippet row(entry: TreeRow)}
-        {#if entry.kind === "idle"}<button type="button" class="idle" data-key={treeKey(entry)} aria-expanded={entry.open} style:--depth={entry.depth} style:padding-left="{6 + entry.depth * 20}px" onkeydown={walkTree}
+        {#snippet row(entry: SessionListRow)}
+        {#if entry.kind === "new-session"}<button type="button" class="new-session" data-key={treeKey(entry)} onkeydown={walkTree}
+          onclick={() => openNew("session")}><Icon name="plus" size={14} />New session</button>
+        {:else if entry.kind === "idle"}<button type="button" class="idle" data-key={treeKey(entry)} aria-expanded={entry.open} style:--depth={entry.depth} style:padding-left="{6 + entry.depth * 20}px" onkeydown={walkTree}
           onclick={() => { if (!openIdle.delete(entry.key)) openIdle.add(entry.key); }}><Icon name="chevron" size={12} />{count(entry.count, "idle session")}</button>
         {:else}{@const { session: item, depth, parent, hidden, state, dot, mark } = entry}
         <div class="row" style:--depth={depth}>{#if parent}<button type="button" class="fold" aria-expanded={!hidden} style:left="{6 + depth * 20}px"
@@ -826,7 +831,7 @@
           {#if canAct(item.session, item.parent)}<button type="button" class="watch" class:open={acting?.session === item.session} aria-haspopup="menu" aria-expanded={acting?.session === item.session}
             aria-label={`Actions for ${item.name}`} title="Actions" onclick={event => act(event, item.session, item.parent, event.currentTarget.getBoundingClientRect(), "end")}><Icon name="more" /></button>{/if}</div>{/if}
         {/snippet}</VirtualList></div>
-      {:else}<p class="hint">No sessions yet.</p>{/if}
+      {/if}
       {#if acting && store}{#key acting}<SessionActions {store} {...acting} onclose={stopActing}
         onclosed={ids => { stopActing(false); if (session && ids.includes(session)) openLocation(room!); }} />{/key}{/if}
       <!-- The foot polls hosts, so it mounts only while the panel shows; a phone's closed panel polls nothing. -->
@@ -928,6 +933,10 @@
   .pages .count, .pages :global(.count) { position: static; margin-left: auto; }
   a.member[aria-current="page"] { background: var(--selected); }
   .tree { flex: 1; min-height: 0; }
+  .new-session { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 10px; width: 100%; height: 48px; padding: 0 16px 0 34px;
+    color: var(--muted); font-size: 13px; cursor: pointer; }
+  @media (hover: hover) { .new-session:hover { background: var(--hover); color: var(--text); } }
+  .new-session:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   .row { position: relative; display: flex; align-items: center; }
   /* Each level indents 20 px, and a guide drops from each owner's avatar center (48 px plus 20 per level) through the
      rows under it, idle folds included, so a deep row shows whose it is. It draws over hover and selection. */
