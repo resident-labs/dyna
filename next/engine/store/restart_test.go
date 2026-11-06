@@ -25,6 +25,9 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.writer.Exec("UPDATE boxes SET create_retry_host='bad' WHERE id='b'"); err != nil {
+		t.Fatal(err)
+	}
 	event := contract.Event{ID: "e", Room: "r", Time: time.UnixMilli(200), From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.BoxChanged{}}
 	notice := contract.Event{ID: "n", Room: "r", Time: event.Time, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionRestarted{Session: "s"}}
 	if ok, err := s.RestartSession(ctx, "s", event, notice); err != nil || !ok {
@@ -38,8 +41,8 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rows[0].Host != "" {
-		t.Fatalf("restart retained quarantined host %q", rows[0].Host)
+	if rows[0].Host != "" || rows[0].RetryHost != "" {
+		t.Fatalf("restart retained host or used retry budget: %+v", rows[0])
 	}
 	leftovers, err := s.Leftovers(ctx, "bad")
 	if err != nil || len(leftovers) != 1 || leftovers[0].Box != "b" || leftovers[0].Slice != "slice" {
@@ -120,6 +123,12 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 		t.Fatal(err)
 	}
 	size, _ := box.Size(contract.BoxSizeAgent)
+	if err := s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := s.AppendEvent(tx, contract.Event{ID: "waiting-initial", Room: "r", Time: time.UnixMilli(1), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{Box: "waiting", Session: "w", To: contract.BoxPending}})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.QuarantineShare(ctx, box.Box{ID: "built", Session: "f", Host: "other", Image: "image", Size: size}); err != nil {
 		t.Fatal(err)
 	}

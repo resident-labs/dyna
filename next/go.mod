@@ -14,6 +14,7 @@ require (
 	github.com/github/github-mcp-server/v2 v2.0.2
 	github.com/google/go-github/v92 v92.0.0
 	github.com/google/jsonschema-go v0.4.3
+	github.com/klauspost/compress v1.19.2
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/rclone/rclone v1.75.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.1
@@ -134,7 +135,6 @@ require (
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/libp2p/zeroconf/v2 v2.2.0 // indirect

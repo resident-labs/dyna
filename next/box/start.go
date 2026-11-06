@@ -17,8 +17,14 @@ const (
 type StepTimeout struct {
 	Host contract.HostName
 	Step contract.StartStep
+	Err  error
 }
 
+func (e StepTimeout) Unwrap() error { return e.Err }
 func (e StepTimeout) Error() string {
-	return fmt.Sprintf("host %s: start step %s exceeded its idle/deadline budget", e.Host, e.Step)
+	message := fmt.Sprintf("host %s: start step %s exceeded its idle/deadline budget", e.Host, e.Step)
+	if e.Err != nil {
+		return message + ": " + e.Err.Error()
+	}
+	return message
 }

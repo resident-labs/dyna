@@ -21,6 +21,7 @@ SH
 cat > "$tmp/tools/systemd-run" <<'SH'
 #!/usr/bin/env bash
 echo 'stage hosts' >> "$TEST_LOG"
+[[ ${FAKE_UNIT_COLLISION:-0} == 0 ]] || exit 1
 while (($#)); do
  if [[ $1 == --report-dir ]]; then
   report=$2
@@ -33,6 +34,7 @@ SH
 cat > "$tmp/tools/systemctl" <<'SH'
 #!/usr/bin/env bash
 echo "$*" >> "$TEST_LOG"
+if [[ ${FAKE_STAGE_STOPPED:-0} == 1 && $* == *is-active*dyna-stage-* ]]; then exit 3; fi
 SH
 cat > "$tmp/tools/curl" <<'SH'
 #!/usr/bin/env bash
@@ -45,6 +47,10 @@ SH
 chmod +x "$tmp/tools/"*
 export PATH="$tmp/tools:$PATH"
 args=(--prefix "$tmp/install" --node-bin "$tmp/tools" --socket "$tmp/socket")
+"$script" "${args[@]}" --stage-wait 1201 >"$tmp/out" 2>&1 && { echo 'Oversized staging wait was accepted' >&2; exit 1; }
+grep -q 'stage-wait must be' "$tmp/out"
+test ! -e "$TEST_LOG"
+test ! -d "$TEST_ROOT/next/web/dist"
 echo tree123 > "$tmp/install/deployed-next"
 "$script" "${args[@]}" >"$tmp/out" 2>&1
 grep -q 'No next/ change' "$tmp/out"
@@ -75,3 +81,16 @@ grep -q 'copies continue' "$tmp/out"
 grep -q 'arch' "$tmp/out"
 test -s "$(find "$tmp/install/staging" -name dyna | head -1)"
 test "$(grep -c restart "$TEST_LOG")" = 2
+# A stopped helper cannot be described as continuing. The incomplete snapshot remains visible.
+rm -f "$tmp/install/deployed-next"
+FAKE_STAGE_SLOW=1 FAKE_STAGE_STOPPED=1 "$script" "${args[@]}" --stage-wait 0 >"$tmp/out" 2>&1
+grep -q 'not active' "$tmp/out"
+! grep -q 'copies continue' "$tmp/out"
+grep -q arch "$tmp/out"
+# If the independent unit cannot be started (including a unit-name collision), never install or restart.
+rm -f "$tmp/install/deployed-next"
+before=$(sha256sum "$tmp/install/bin/dyna")
+FAKE_UNIT_COLLISION=1 "$script" "${args[@]}" --stage-wait 0 >"$tmp/out" 2>&1 && { echo 'Unit launch failure was accepted' >&2; exit 1; }
+[[ $before == "$(sha256sum "$tmp/install/bin/dyna")" ]]
+grep -q 'Nothing was installed' "$tmp/out"
+test "$(grep -c restart "$TEST_LOG")" = 3

@@ -191,7 +191,7 @@ func TestCreateBringsUpSidecarsBeforeTheBox(t *testing.T) {
 	}
 }
 
-func TestCreateLeavesNothingWhenASidecarWillNotStart(t *testing.T) {
+func TestCreateKeepsVolumesWhenASidecarWillNotStart(t *testing.T) {
 	r := &stackRunner{fail: "'start' 'dyna-sidecar-box_1-db'"}
 	b, spec := creatingBoxes(t, r)
 	if _, err := b.Create(context.Background(), spec); err == nil {
@@ -200,8 +200,24 @@ func TestCreateLeavesNothingWhenASidecarWillNotStart(t *testing.T) {
 	if slices.ContainsFunc(r.commands, func(command string) bool { return strings.Contains(command, "'start' 'box_1'") }) {
 		t.Fatalf("the box started without its sidecar: %v", r.commands)
 	}
-	for _, step := range []string{"'pod' 'rm'", "'volume' 'prune'", "'rm' '--ignore' '--volumes' 'box_1'", "'volume' 'rm' 'dyna-box-box_1'"} {
+	for _, step := range []string{"'pod' 'rm'", "'rm' '--ignore' '--volumes' 'box_1'"} {
 		r.index(t, step)
+	}
+}
+
+// Start can have succeeded before its reply is lost, including an early hello and session work. Container cleanup is safe,
+// but never remove the workspace or stack data after attempting start; lifecycle decides whether relocation is safe.
+func TestCreatePreservesVolumesAfterUncertainContainerStart(t *testing.T) {
+	r := &stackRunner{fail: "'start' 'box_1'"}
+	b, spec := creatingBoxes(t, r)
+	if _, err := b.Create(context.Background(), spec); err == nil {
+		t.Fatal("uncertain start succeeded")
+	}
+	r.index(t, "'rm' '--ignore' '--volumes' 'box_1'")
+	for _, command := range r.commands {
+		if strings.Contains(command, "'volume' 'prune'") || strings.Contains(command, "'volume' 'rm' 'dyna-box-box_1'") {
+			t.Fatalf("potentially used volume removed: %s", command)
+		}
 	}
 }
 

@@ -3,10 +3,10 @@ package runtime
 import (
 	"context"
 	"errors"
-	"github.com/resident-labs/dyna/box"
 	"log"
 	"os"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
 )
@@ -47,9 +47,14 @@ func (b *Boxes) publishInstructions(ctx context.Context) {
 }
 
 // settle waits out a copy already running, which could still write into a deleted room's folder. Any later copy skips that room.
-func (s *instructionHost) settle() {
-	s.gate <- struct{}{}
-	defer func() { <-s.gate }()
+func (s *instructionHost) settle(ctx context.Context) error {
+	select {
+	case s.gate <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	<-s.gate
+	return nil
 }
 
 func (b *Boxes) instructionState(h *podman.Host) *instructionHost {

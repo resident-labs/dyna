@@ -403,7 +403,7 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 		if p.Health != nil {
 			host.Health = p.Health(host.Name)
 		}
-		if host.State != box.HostReady || host.Health == contract.HostDegraded {
+		if host.State != box.HostReady {
 			continue
 		}
 		if p.Memory != nil {
@@ -763,7 +763,7 @@ func (p *Pool) prepare(ctx context.Context, host *surveyed, layer *box.RunnerLay
 // image the host already has, so a host that has them is ready within moments.
 func (p *Pool) buildAhead(ctx context.Context, host *surveyed, layers map[contract.RepoName]*box.RunnerLayer, group *sync.WaitGroup) {
 	name := host.host.Name
-	if !host.host.CI || p.building[name] {
+	if !host.host.CI || host.host.Health == contract.HostDegraded || p.building[name] {
 		return
 	}
 	var want []*box.RunnerLayer

@@ -58,7 +58,7 @@ func (s *Store) RestartSession(ctx context.Context, id contract.SessionID, event
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE boxes SET state='pending',want='run',failures=0,due_at=0,image='',host=CASE WHEN EXISTS (SELECT 1 FROM hosts h WHERE h.name=boxes.host AND h.state='ready' AND h.create_problem='') THEN host ELSE NULL END,reason='',updated_at=? WHERE id=? AND state='failed'`, event.Time.UnixMilli(), b.ID)
+		_, err = tx.ExecContext(ctx, `UPDATE boxes SET state='pending',want='run',create_retry_host='',failures=0,due_at=0,image='',host=CASE WHEN EXISTS (SELECT 1 FROM hosts h WHERE h.name=boxes.host AND h.state='ready' AND h.create_problem='') THEN host ELSE NULL END,reason='',updated_at=? WHERE id=? AND state='failed'`, event.Time.UnixMilli(), b.ID)
 		if err != nil {
 			return err
 		}
