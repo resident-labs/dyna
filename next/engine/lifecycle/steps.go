@@ -94,6 +94,10 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		} else {
 			workErr = r.boxes.Stop(stopCtx, b.ID)
 		}
+		var superseded box.NamespaceSuperseded
+		if errors.As(workErr, &superseded) {
+			workErr = nil
+		}
 		if workErr == nil {
 			next.State = contract.BoxStopped
 		} else {

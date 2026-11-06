@@ -13,6 +13,14 @@ const (
 	ProbeFailureLimit      = 3
 )
 
+// NamespaceSuperseded completes an old host operation without retry or failure:
+// a newer creation/use owns its names. This is a host result, not engine state.
+type NamespaceSuperseded struct{ Box contract.BoxID }
+
+func (e NamespaceSuperseded) Error() string {
+	return "box " + string(e.Box) + ": deletion superseded by a newer host epoch"
+}
+
 // StepTimeout is a host setup failure, unlike an outer shutdown, owner cancellation or repository deadline.
 type StepTimeout struct {
 	Host contract.HostName

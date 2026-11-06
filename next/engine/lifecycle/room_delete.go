@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 
@@ -160,6 +161,10 @@ func (r *Reconciler) repay(ctx context.Context, leftovers []store.Leftover) erro
 			cleanup, err = r.roomHosts.RemoveLeftoverBox(ctx, l.Host, l.Box, l.Slice)
 		} else {
 			err = r.roomHosts.RemoveRoom(ctx, l.Host, l.Room)
+		}
+		var superseded box.NamespaceSuperseded
+		if errors.As(err, &superseded) {
+			cleanup, err = LeftoverComplete, nil
 		}
 		if err != nil {
 			return fmt.Errorf("host %s: leftovers of room %s: %w", l.Host, l.Room, err)

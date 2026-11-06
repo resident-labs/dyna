@@ -502,25 +502,29 @@ func (h *Host) RemoveRoom(ctx context.Context, dir string) error {
 	return err
 }
 
-func (h *Host) EnsureSlice(ctx context.Context, s box.Slice) error {
-	if _, err := h.run(ctx, "systemctl", "--user", "start", s.Name); err != nil {
-		var exit remoteExit
-		if !errors.As(err, &exit) {
-			return err
-		}
+func sliceBoxID(name string) (contract.BoxID, error) {
+	if filepath.Base(name) != name || !strings.HasPrefix(name, "dyna-") || !strings.HasSuffix(name, ".slice") || name == "dyna-.slice" {
+		return "", errors.New("invalid slice name")
 	}
-	_, err := h.run(ctx, "systemctl", "--user", "set-property", "--runtime", s.Name,
+	return contract.BoxID(strings.TrimSuffix(strings.TrimPrefix(name, "dyna-"), ".slice")), nil
+}
+func (h *Host) EnsureSlice(ctx context.Context, s box.Slice) error {
+	id, err := sliceBoxID(s.Name)
+	if err != nil {
+		return err
+	}
+	script := `systemctl --user start "$1" || true
+exec systemctl --user set-property --runtime "$@"`
+	_, err = h.namespace(ctx, id, "use", "bash", "-c", script, "dyna-ensure-slice", s.Name,
 		fmt.Sprintf("CPUQuota=%d%%", s.CPUs*100), fmt.Sprintf("MemoryHigh=%d", s.MemHigh), fmt.Sprintf("MemoryMax=%d", s.MemMax), fmt.Sprintf("TasksMax=%d", s.Pids))
 	return err
 }
 func (h *Host) RemoveSlice(ctx context.Context, name string) error {
-	if filepath.Base(name) != name || !strings.HasSuffix(name, ".slice") {
-		return errors.New("invalid slice name")
-	}
-	if _, err := h.run(ctx, "bash", "-c", `systemctl --user stop "$1" || [ "$(systemctl --user show "$1" -p LoadState --value)" = not-found ]`, "dyna", name); err != nil {
+	id, err := sliceBoxID(name)
+	if err != nil {
 		return err
 	}
-	_, err := h.run(ctx, "bash", "-c", `test -n "$XDG_RUNTIME_DIR" && rm -rf -- "$XDG_RUNTIME_DIR/systemd/user.control/$1.d" && systemctl --user daemon-reload`, "dyna", name)
+	_, err = h.namespaceDelete(ctx, id, "bash", "-c", "set -eu\n"+removeSliceScript, "dyna-remove-slice", string(id), name)
 	return err
 }
 func (h *Host) containerCommand(ctx context.Context, c box.ContainerSpec) ([]string, error) {

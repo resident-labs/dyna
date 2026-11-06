@@ -13,11 +13,7 @@ import (
 
 // NamespaceSuperseded means a newer creation owns these names. The old deleter
 // is complete, not retryable; it must not acquire the new epoch and try again.
-type NamespaceSuperseded struct{ Box contract.BoxID }
-
-func (e NamespaceSuperseded) Error() string {
-	return "box " + string(e.Box) + ": deletion superseded by a newer host epoch"
-}
+type NamespaceSuperseded = box.NamespaceSuperseded
 
 // NamespaceUncertain retains ownership when the bounded host lock or epoch
 // cannot be read. It does not mean that the namespace is absent.
@@ -141,7 +137,8 @@ func removeVolumesCommand(id contract.BoxID) string {
 // destructive body repeats this stop under its own whole-command lock, carrying
 // the original epoch throughout; no delete or create is split across locks.
 func (h *Host) StopBox(ctx context.Context, id contract.BoxID, epoch uint64) error {
-	_, err := h.namespace(ctx, id, "delete", "--expect-epoch", strconv.FormatUint(epoch, 10), "podman", "--cgroup-manager=systemd", "stop", "--ignore", string(id))
+	script := "set -eu\n" + shellCommand("podman", "--cgroup-manager=systemd", "stop", "--ignore", string(id)) + "\n" + shellCommand("podman", "--cgroup-manager=systemd", "pod", "stop", "--ignore", box.PodName(id))
+	_, err := h.namespace(ctx, id, "delete", "--expect-epoch", strconv.FormatUint(epoch, 10), "bash", "-c", script, "dyna-stop-box")
 	return err
 }
 
@@ -150,16 +147,27 @@ func (h *Host) removeBoxNow(ctx context.Context, id contract.BoxID, volumes bool
 	if err != nil {
 		return err
 	}
-	return h.RemoveBox(ctx, id, epoch, volumes)
+	return h.RemoveBox(ctx, id, epoch, volumes, "")
 }
 
 // RemoveBox performs the entire destructive body in one host command under one
 // stable lock. Absence of the workspace alone never skips the stack removal.
-func (h *Host) RemoveBox(ctx context.Context, id contract.BoxID, epoch uint64, volumes bool) error {
+const removeSliceScript = `systemctl --user stop "$2" || [ "$(systemctl --user show "$2" -p LoadState --value)" = not-found ]
+test -n "$XDG_RUNTIME_DIR" && rm -rf -- "$XDG_RUNTIME_DIR/systemd/user.control/$2.d" && systemctl --user daemon-reload`
+
+func (h *Host) RemoveBox(ctx context.Context, id contract.BoxID, epoch uint64, volumes bool, slice string) error {
+	if slice != "" {
+		if _, err := sliceBoxID(slice); err != nil {
+			return err
+		}
+	}
 	script := "set -eu\n" + removeContainersCommand(id)
 	if volumes {
 		script += "\n" + removeVolumesCommand(id)
 	}
-	_, err := h.namespace(ctx, id, "delete", "--expect-epoch", strconv.FormatUint(epoch, 10), "bash", "-c", script, "dyna-remove-box", string(id))
+	if slice != "" {
+		script += "\n" + removeSliceScript
+	}
+	_, err := h.namespace(ctx, id, "delete", "--expect-epoch", strconv.FormatUint(epoch, 10), "bash", "-c", script, "dyna-remove-box", string(id), slice)
 	return err
 }

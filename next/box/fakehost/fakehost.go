@@ -107,7 +107,7 @@ func (h *Host) RemoveVolume(_ context.Context, id contract.BoxID) error {
 	return nil
 }
 func (h *Host) BoxEpoch(context.Context, contract.BoxID) (uint64, error) { return 0, nil }
-func (h *Host) RemoveBox(ctx context.Context, id contract.BoxID, _ uint64, volumes bool) error {
+func (h *Host) RemoveBox(ctx context.Context, id contract.BoxID, _ uint64, volumes bool, slice string) error {
 	if err := h.StopContainer(ctx, id); err != nil {
 		return err
 	}
@@ -121,7 +121,12 @@ func (h *Host) RemoveBox(ctx context.Context, id contract.BoxID, _ uint64, volum
 		if err := h.RemoveVolume(ctx, id); err != nil {
 			return err
 		}
-		return h.RemoveStackVolumes(ctx, id)
+		if err := h.RemoveStackVolumes(ctx, id); err != nil {
+			return err
+		}
+	}
+	if slice != "" {
+		return h.RemoveSlice(ctx, slice)
 	}
 	return nil
 }
