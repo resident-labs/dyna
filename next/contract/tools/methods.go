@@ -80,7 +80,7 @@ var methodTable = []MethodEntry{
 		act("host", "limit", typ[contract.HostSetLimitsRequest](), "Set the rooms a host serves; no rooms means every room", "host limit"),
 	),
 	method(contract.MethodHostSet, contract.ScopeAdmin, OwnerAccess,
-		act("host", "set", typ[contract.HostSetRequest](), "Turn a host's agents switch (new session boxes) or ci switch (CI runners) on or off; an omitted one stays. What already runs there stays until it stops.", "host set"),
+		act("host", "set", typ[contract.HostSetRequest](), "Turn a host's agents switch (new session boxes) or ci switch (CI runners) on or off; an omitted one stays. What already runs there stays until it stops. Actual switch changes are audited as host.switches_changed in every existing room's log; an unchanged call writes no switch event and the audit does not wake sessions.", "host set"),
 	),
 	method(contract.MethodRoomSet, contract.ScopeAdmin, OwnerAccess,
 		act("room", "set", typ[contract.RoomSetRequest](), "Change a room setting; an omitted one stays. rootApproves maps a kind to on or off, and a kind that is on lets the room's root decide its sessions' requests of that kind as the owner can: hostexec (host exec grants), addons (global skills, packages and MCP servers), hosts (room hosts rules), pools (pool add). Each is off by default. githubWrites {repos, groups} lets the room's sessions make GitHub writes without a host grant: groups are issues, pulls and projects, repos are repositories of the room or *; empty groups turn it off. It is off by default; merges, deletes and all else stay refused.", "room set"),

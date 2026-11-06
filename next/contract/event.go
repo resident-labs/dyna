@@ -34,6 +34,17 @@ type RoomLimitsChanged struct {
 func (RoomLimitsChanged) EventType() EventType { return "room.limits_changed" }
 func (RoomLimitsChanged) isEventBody()         {}
 
+// HostSwitchesChanged audits an owner's host.set in each room, without waking sessions.
+// Only switches whose stored values changed are present; From names the owner.
+type HostSwitchesChanged struct {
+	Host   HostName `json:"host"`
+	Agents *bool    `json:"agents,omitempty"`
+	CI     *bool    `json:"ci,omitempty"`
+}
+
+func (HostSwitchesChanged) EventType() EventType { return "host.switches_changed" }
+func (HostSwitchesChanged) isEventBody()         {}
+
 type RoomPaused struct{}
 type RoomResumed struct{}
 

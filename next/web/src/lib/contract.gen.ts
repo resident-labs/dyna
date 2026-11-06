@@ -277,6 +277,7 @@ export type StreamHello = { build: string; };
 export type EventType = string;
 export type Event = { seq: number; id: EventID; at: string; room?: RoomID; from: Principal } & EventBody;
 export type RoomLimitsChanged = { cpus: number; memBytes: number; };
+export type HostSwitchesChanged = { host: HostName; agents?: boolean | null; ci?: boolean | null; };
 export type RoomPaused = { };
 export type RoomResumed = { };
 export type RoomDeleting = { };
@@ -673,6 +674,7 @@ export type EventBody =
   | { type: "hook.due"; body: HookDue }
   | { type: "hook.finished"; body: HookFinished }
   | { type: "host.disk_low"; body: HostDiskLow }
+  | { type: "host.switches_changed"; body: HostSwitchesChanged }
   | { type: "image.built"; body: ImageBuilt }
   | { type: "image.failed"; body: ImageFailed }
   | { type: "notice.posted"; body: NoticePosted }
