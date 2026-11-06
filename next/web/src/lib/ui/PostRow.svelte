@@ -139,7 +139,7 @@
   {:else}
     <time class="follow-time" datetime={row.at} title={fullTime(row.at)}>{clock(row.at)}</time>
   {/if}
-  <Markdown text={row.text} />
+  <Markdown text={row.text} source={row} />
   {#if row.data !== undefined}<PostData value={row.data} />{/if}
   <PostAttachments onmedia={position => onmedia(shownAttachments[position].position)} attachments={shownAttachments.map(({ file }) => file)} {newest} event={visualEvent} at={row.at} />
   {#if row.pending?.failed}{@const id = row.pending.id}<p class="unsent" role="alert">Not sent

@@ -84,7 +84,7 @@
   <div class="thought" class:open class:folds>
     <span class="slot"><TranscriptIcon kind="thinking" /></span>
     <div class="thought-text" {@attach !whole && measureCut(item)}>
-      <Markdown text={(chunks[key(item, "text")] ?? item.text) || "Thought"} />
+      <Markdown text={(chunks[key(item, "text")] ?? item.text) || "Thought"} source={{ key: item.id, from: { kind: "session", session }, at: item.at }} />
       {#if missing}<button disabled={loading[key(item, "text")]} onclick={() => void load(item, "text")}>{failures[key(item, "text")] ? "Could not load thought. Try again" : "Show all"}</button>{/if}
     </div>
     {#if open}<span class="time">{stepTime({ started: item.at, ended: item.ended })}</span>{/if}
