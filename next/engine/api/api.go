@@ -29,6 +29,7 @@ type API struct {
 	github     http.Handler
 	web        *Web
 	files      func(Caller) http.Handler
+	shared     func(Caller) http.Handler
 	connect    ConnectOperations
 }
 
@@ -45,7 +46,8 @@ func New(service Service, model func(Caller) http.Handler) *API {
 	return &API{service: service, model: model}
 }
 
-func (a *API) SetFilesRoute(route func(Caller) http.Handler) { a.files = route }
+func (a *API) SetFilesRoute(route func(Caller) http.Handler)  { a.files = route }
+func (a *API) SetSharedRoute(route func(Caller) http.Handler) { a.shared = route }
 
 // SetLocalModelRoute configures the owner socket's model route before opening sockets.
 func (a *API) SetLocalModelRoute(route http.Handler) { a.localModel = route }
@@ -578,6 +580,18 @@ func (a *API) handler(c Caller) http.Handler {
 		})
 		mux.Handle("/v1/files", files)
 		mux.Handle("/v1/files/", files)
+	}
+	if a.shared != nil {
+		shared := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			caller := requestCaller(r.Context(), c)
+			if !owner(caller) || !hasScope(caller, contract.ScopeRead) {
+				writeError(w, forbidden())
+				return
+			}
+			a.shared(caller).ServeHTTP(w, r)
+		})
+		mux.Handle("GET /v1/rooms/{room}/shared/tree", shared)
+		mux.Handle("GET /v1/rooms/{room}/shared/file", shared)
 	}
 	if box(c) && a.git != nil {
 		mux.Handle("/git/", a.git(c))

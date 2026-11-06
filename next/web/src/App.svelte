@@ -31,7 +31,12 @@
   import VirtualList from "./lib/ui/VirtualList.svelte";
   import Icon from "./lib/ui/Icon.svelte";
   import Avatar, { setSessionLabels } from "./lib/ui/Avatar.svelte";
-  import { setMentionLinks } from "./lib/ui/Markdown.svelte";
+  import { setMentionLinks, setPathLinks } from "./lib/ui/Markdown.svelte";
+  import FilesTree from "./lib/ui/FilesTree.svelte";
+  import MediaViewer from "./lib/ui/MediaViewer.svelte";
+  import { sharedMedia, sharedFileSize, setSharedFolder } from "./lib/shared.ts";
+  import { panelTab, type PanelTab } from "./lib/panel-tabs.ts";
+  import type { MediaItem } from "./lib/media.ts";
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
   import { boxReason, count, quoted, turnReason, waits, type Quote } from "./lib/feed.ts";
   import { sessionActions, sessionTree, type TreeRow } from "./lib/session-tree.ts";
@@ -215,6 +220,25 @@
     follow();
   }
   let mentioned = $derived(store ? mentionTargets(store.names, store.sessions) : new Map<string, string>());
+  let sharedItems = $state<MediaItem[]>([]), sharedInitial = $state(0), sharedJump = $state(false);
+  let folderTarget = $state<{ path: string; conversation: string; request: number }>();
+  setPathLinks((path, source) => {
+    if (!room) return;
+    const item = sharedMedia(room, path, source);
+    sharedInitial = 0; sharedJump = true; sharedItems = [item];
+    // A message has no tree metadata. The one-byte Range response supplies its real size.
+    void fetch(item.src!, { headers: { Range: "bytes=0-0" } }).then(response => {
+      const bytes = sharedFileSize(response);
+      void response.body?.cancel();
+      if (sharedJump && sharedItems[0]?.key === item.key && sharedItems[0]?.src === item.src && bytes !== undefined) sharedItems = [{ ...item, sizeKnown: true, modified: response.headers.get("Last-Modified") ?? undefined, file: { ...item.file, bytes } }];
+    }, () => {});
+  });
+  setSharedFolder(path => {
+    sharedItems = [];
+    tabs.set(key, "files");
+    folderTarget = { path, conversation: key, request: (folderTarget?.request ?? 0) + 1 };
+    void showPanel(true);
+  });
   setMentionLinks(() => ({ room: store?.room ?? "", sessions: mentioned, open: go }));
   // A link to a DM closes a phone's panel. When wide, the link may leave with the list as About opens, and focus goes to the panel.
   function openSession(event: MouseEvent & { currentTarget: HTMLAnchorElement }) {
@@ -432,6 +456,7 @@
       }
       goKey = event.key.toLowerCase() === "g" ? event.timeStamp : 0;
     }
+    if (event.key === "Escape" && document.querySelector(".media-viewer[open]")) return;
     if (event.key === "Escape" && drawer) void showDrawer(false);
     else if (event.key === "Escape" && panel && !wide.current) void showPanel(false);
     else if (event.key === "Escape" && section && !inSettings) void closeSection();
@@ -502,7 +527,7 @@
   let shown = $derived(session ? store?.status(session) ?? "idle" : "idle");
   let word = $derived(session ? (shown === "idle" || shown === "background" ? status(session) : shown === "failed" ? `Failed · ${status(session)}` : stateWords[shown]) : "");
   // The right panel opens on About in a DM and on Sessions in a room, and remembers the last choice per conversation.
-  const tabs = new SvelteMap<string, "sessions" | "about">();
+  const tabs = new SvelteMap<string, PanelTab>();
   // Below 761 px the sessions panel is hidden; a header button opens it over the feed.
   // Opening moves focus into the panel; closing returns it to the button if the panel held it.
   let panel = $state(false);
@@ -616,7 +641,8 @@
   // A crew's page is its run, and a crew takes no messages. A closed crew past workflow.list's newest runs says so when asked.
   let crew = $derived(!!session && !!store?.workflows.has(session));
   $effect(() => { if (closed && session && !crew) void store?.readWorkflow(session); });
-  let about = $derived(!!session && !closed && (tabs.get(key) ?? "about") === "about");
+  let selectedTab = $derived(panelTab(tabs, key, !!session && !closed));
+  let about = $derived(selectedTab === "about");
   // room.list gives the feed's read position. Opening a session's DM shows the owner its failure, which clears the mark.
   // This device was revoked while its page stayed open.
   let revoked = $state(false);
@@ -760,15 +786,19 @@
         sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
     </div>
   </main>
+  {#if sharedItems.length && room}<MediaViewer items={sharedItems} initial={sharedInitial} {room} name={id => store?.names.get(id) ?? "Session"} root={id => !!id && !store?.sessions.get(id)?.parent} loadVisual={async () => []} onclose={() => sharedItems = []} onjump={sharedJump ? key => { if (session) thread?.jumpMedia(key); else view?.jumpMedia(key); } : undefined} />{/if}
   {#if room}
     <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} aria-label="Sessions" tabindex="-1" role={panel && phone.current && !covered ? "dialog" : undefined} aria-modal={(panel && phone.current && !covered) || undefined} bind:this={members} inert={drawer || covered || inSettings}>
       {#if phone.current}{@render sheetHandle("sessions")}{/if}
-      {#if session && !closed}<header class="bar tabs">
-        <button type="button" aria-pressed={!about} onclick={() => tabs.set(key, "sessions")}>Sessions</button>
-        <button type="button" aria-pressed={about} onclick={() => tabs.set(key, "about")}>About</button></header>
-      {:else}<header class="bar"><span class="session-summary"><strong>Sessions{#if store?.ready} <span class="count">{store.members.length}</span>{/if}</strong>{#if store?.ready}<span class="count">{sessionCountsLine(store.counts)}</span>{/if}</span>{#if attention.can("operate")}<button type="button" class="tool" title="New session" aria-label="New session" onclick={() => openNew("session")}><Icon name="plus" /></button>{/if}</header>{/if}
+      <header class="bar tabs" aria-label="Panel tabs">
+        <button type="button" aria-pressed={selectedTab === "sessions"} onclick={() => tabs.set(key, "sessions")}>Sessions{#if !session && store?.ready}{" "}<span class="count">{store.members.length}</span>{/if}</button>
+        {#if session && !closed}<button type="button" aria-pressed={about} onclick={() => tabs.set(key, "about")}>About</button>{/if}
+        <button type="button" aria-pressed={selectedTab === "files"} onclick={() => tabs.set(key, "files")}>Files</button>
+        {#if !session && selectedTab === "sessions" && attention.can("operate")}<button type="button" class="tool" title="New session" aria-label="New session" onclick={() => openNew("session")}><Icon name="plus" /></button>{/if}
+      </header>
       <!-- A long tree renders only its visible rows, through the feed's shared list (spec: long lists are virtual). -->
-      {#if about && session && store}<AboutPanel {store} room={room} {session} switchable={attention.can("operate")} shown={panelShown} navigate={openSession} onclosed={() => openLocation(room!)} />
+      {#if selectedTab === "files"}{#key room}<FilesTree {room} target={folderTarget?.conversation === key ? folderTarget : undefined} onopen={(items, initial) => { sharedItems = items; sharedInitial = initial; sharedJump = false; }} />{/key}
+      {:else if about && session && store}<AboutPanel {store} room={room} {session} switchable={attention.can("operate")} shown={panelShown} navigate={openSession} onclosed={() => openLocation(room!)} />
       {:else if tree.length}<div class="tree"><VirtualList bind:this={sessionList} items={tree} key={treeKey}
         label="Session list" role="group" align="top" estimate={48}>
         {#snippet row(entry: TreeRow)}
@@ -814,9 +844,6 @@
   a.member { min-height: 48px; color: var(--text); text-decoration: none; }
   /* The title keeps the total; the second line separates work, background waits and owner-needed sessions. */
   aside.members > header strong { font-size: 16px; }
-  .session-summary { display: grid; min-width: 0; gap: 1px; }
-  .session-summary > .count { font-size: 12.5px; }
-  .session-summary strong > .count { margin-left: 6px; font-weight: 400; }
   /* The header's face rings its dot in the header's color. */
   main > header { --ring: var(--bg); }
   .feed:has(> :global(.blocked)) > :global(:not(.blocked)) { display: none; }
