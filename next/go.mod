@@ -197,4 +197,4 @@ require (
 replace github.com/router-for-me/CLIProxyAPI/v8 => ./third_party/cliproxyapi
 
 // Dyna's PiG fork: v0.5.3 with the patches PATCHES.md in that repository lists (docs/spec.md decision 4).
-replace github.com/MichaelKinsy/PiG => github.com/resident-labs/PiG v0.5.4-0.20261105150040-30282328b7f3
+replace github.com/MichaelKinsy/PiG => github.com/resident-labs/PiG v0.5.4-0.20261105235355-c7e6d8b9405b
