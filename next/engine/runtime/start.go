@@ -67,6 +67,11 @@ func (b *Boxes) startStep(ctx context.Context, spec lifecycle.BoxSpec, step cont
 	child, cancel := bound(ctx, budget)
 	defer cancel()
 	err := work(child)
+	// A context signal can race a confirmed result while it unwinds. As with the
+	// direct calls on main, success stays success; classify only a returned error.
+	if err == nil {
+		return nil
+	}
 	if ctx.Err() != nil {
 		return errors.Join(ctx.Err(), err)
 	}
