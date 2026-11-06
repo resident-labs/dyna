@@ -1,5 +1,6 @@
 import { Marked, type Token, type TokenizerAndRendererExtension, type Tokens } from "marked";
 import { mentionName, mentionStart } from "./mentions.ts";
+import { filesURL, sharedPaths } from "./shared.ts";
 
 // A candidate @name passes through parsing and sanitizing as text between two Unicode noncharacters. Parse removes those
 // from the source, so no author can write one. Parsing knows no room and its result is cached by text, so showMentions
@@ -72,6 +73,34 @@ export function renderOnce(render: (text: string) => string): (text: string) => 
     }
     return parts;
   };
+}
+
+// Link only text nodes after sanitizing, including inline code but never code blocks or links.
+export function showPaths(html: string, room: string): string {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+  for (const node of nodes) {
+    if (node.parentElement?.closest("pre, a, script, style")) continue;
+    const text = node.data, matches = sharedPaths(text);
+    if (!matches.length) continue;
+    const replacement = document.createDocumentFragment();
+    let end = 0;
+    for (const match of matches) {
+      replacement.append(text.slice(end, match.start));
+      const link = document.createElement("a");
+      link.textContent = match.text;
+      link.href = filesURL(room, match.path);
+      link.dataset.sharedPath = match.path;
+      replacement.append(link);
+      end = match.start + match.text.length;
+    }
+    replacement.append(text.slice(end));
+    node.replaceWith(replacement);
+  }
+  return template.innerHTML;
 }
 
 // Joins a rendered text for one room: the name of a session links to it, and any other name stays plain text. This runs

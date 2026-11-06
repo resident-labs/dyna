@@ -1,6 +1,6 @@
 <script lang="ts">
   import { roomIsLive } from "./lib/source.ts";
-  import { paneCounts, roomRoute, settingsRoute } from "./lib/routes.ts";
+  import { paneCounts, filesPath, roomRoute, settingsRoute } from "./lib/routes.ts";
   import { nextArea } from "./lib/areas.ts";
   import { watchHello, watchStreamState } from "./lib/stream.ts";
   import { watchConnect } from "./lib/connect-watch.ts";
@@ -31,7 +31,11 @@
   import VirtualList from "./lib/ui/VirtualList.svelte";
   import Icon from "./lib/ui/Icon.svelte";
   import Avatar, { setSessionLabels } from "./lib/ui/Avatar.svelte";
-  import { setMentionLinks } from "./lib/ui/Markdown.svelte";
+  import { setMentionLinks, setPathLinks } from "./lib/ui/Markdown.svelte";
+  import RoomFiles from "./lib/ui/RoomFiles.svelte";
+  import MediaViewer from "./lib/ui/MediaViewer.svelte";
+  import { sharedMedia } from "./lib/shared.ts";
+  import type { MediaItem } from "./lib/media.ts";
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
   import { boxReason, count, quoted, turnReason, waits, type Quote } from "./lib/feed.ts";
   import { sessionActions, sessionTree, type TreeRow } from "./lib/session-tree.ts";
@@ -138,14 +142,14 @@
     if (/^\/r\/[^/]+/.test(path)) firstRoom = false;
     if (inSettings) return;
     behind = path;
-    section = /\/instructions\/?$/.test(path) ? "instructions" : /\/r\/[^/]+\/new\/?$/.test(path) ? "new-session" : /^\/rooms\/new\/?$/.test(path) ? "new-room" : undefined;
+    section = /\/r\/[^/]+\/files(?:\/|$)/.test(path) ? "files" : /\/instructions\/?$/.test(path) ? "instructions" : /\/r\/[^/]+\/new\/?$/.test(path) ? "new-session" : /^\/rooms\/new\/?$/.test(path) ? "new-room" : undefined;
   }
   window.addEventListener("popstate", follow);
   function dismissRequests(event: MouseEvent) {
     if (section === "requests" && event.target instanceof Node && !page?.contains(event.target) && !requestsButton?.contains(event.target)) section = undefined;
   }
   // The requests view shows in place of the conversation until Back, Escape or the control that opened it.
-  let section: "requests" | "instructions" | "new-session" | "new-room" | undefined = $state(/\/instructions\/?$/.test(behind) ? "instructions" : /\/r\/[^/]+\/new\/?$/.test(behind) ? "new-session" : /^\/rooms\/new\/?$/.test(behind) ? "new-room" : undefined);
+  let section: "files" | "requests" | "instructions" | "new-session" | "new-room" | undefined = $state(/\/r\/[^/]+\/files(?:\/|$)/.test(behind) ? "files" : /\/instructions\/?$/.test(behind) ? "instructions" : /\/r\/[^/]+\/new\/?$/.test(behind) ? "new-session" : /^\/rooms\/new\/?$/.test(behind) ? "new-room" : undefined);
   let requestsButton: HTMLButtonElement | undefined = $state();
   function openInstructions() {
     history.pushState({ instructionsBack: behind }, "", `/r/${encodeURIComponent(room!)}/instructions`);
@@ -158,7 +162,7 @@
     follow();
   }
   async function closeSection(tapped = false) {
-    if (section === "instructions" || section === "new-session" || section === "new-room") {
+    if (section === "files" || section === "instructions" || section === "new-session" || section === "new-room") {
       if (history.state?.instructionsBack) history.back();
       else { history.replaceState(null, "", room ? `/r/${encodeURIComponent(room)}` : "/"); follow(); }
       return;
@@ -215,6 +219,8 @@
     follow();
   }
   let mentioned = $derived(store ? mentionTargets(store.names, store.sessions) : new Map<string, string>());
+  let sharedItem = $state<MediaItem>();
+  setPathLinks((path, source) => { if (room) sharedItem = sharedMedia(room, path, source); });
   setMentionLinks(() => ({ room: store?.room ?? "", sessions: mentioned, open: go }));
   // A link to a DM closes a phone's panel. When wide, the link may leave with the list as About opens, and focus goes to the panel.
   function openSession(event: MouseEvent & { currentTarget: HTMLAnchorElement }) {
@@ -561,7 +567,7 @@
   // close (Escape) shows the ring; a tap open focuses the dialog itself, and no ring follows a tap either way.
   const phone = new MediaQuery("max-width: 640px");
   // The full-screen computer covers everything else, so nothing behind it takes focus.
-  let covered = $derived(!!watching && computerFull && !inSettings && section !== "instructions");
+  let covered = $derived(!!watching && computerFull && !inSettings && section !== "instructions" && section !== "files");
   let drawer = $state(false);
   let menuButton: HTMLButtonElement | undefined = $state();
   async function showDrawer(open: boolean, refocus = true, tapped = false) {
@@ -631,7 +637,7 @@
   });
   // The tab names the page only. Counts stay out: a count in the title would act as an unread badge (spec 5.13).
   // An open Instructions or Requests section names the tab too. Settings names its own open pane, so this effect leaves Settings alone.
-  const sectionNames: Record<string, string> = { instructions: "Instructions", requests: "Requests", "new-session": "New session", "new-room": "New room" };
+  const sectionNames: Record<string, string> = { files: "Files", instructions: "Instructions", requests: "Requests", "new-session": "New session", "new-room": "New room" };
   let tabTitle = $derived(sectionNames[section ?? ""] ? `${title} · ${sectionNames[section ?? ""]}` : title);
   $effect(() => { if (!inSettings) document.title = `${tabTitle} · Dyna`; });
 </script>
@@ -704,6 +710,7 @@
     {#if dropping}<p class="drop-label">Drop files to attach</p>{/if}
     {#if (section === "new-room" || firstRoom)}<NewRoom {rooms} first={firstRoom} onclose={() => void closeSection()} oncreated={id => { void attention.created(id).then(() => { firstRoom = false; openLocation(id); }); }} />
     {:else if section === "new-session" && room && store && store.ready}<NewSession {room} {roomName} sessions={store.members} onclose={() => void closeSection()} onstarted={(id, brief) => { startingBriefs[id] = brief; openLocation(room!, id); }} />
+    {:else if section === "files" && room && store && !unavailable}{#key room}<RoomFiles {room} path={filesPath(behind)} {navigate} onclose={() => void closeSection()} />{/key}
     {:else if section === "instructions" && room && store && !unavailable}<Instructions {room} {roomName} rooms={rooms.length} sessions={store.sessions.size} onclose={() => void closeSection()} />
     {:else}
     <header class="bar" class:session-bar={!!session}>{#if room && session && phone.current}<a class="menu-toggle" href={"/r/" + encodeURIComponent(room)} aria-label={`Back to ${roomName}`} title={`Back to ${roomName}`}
@@ -755,11 +762,12 @@
       {:else}<p class="readonly" role="status">This device can read the room but not post in it.</p>{/if}
     {/if}
     {/if}
-    <div class="terminal-holder" hidden={section === "instructions"}>
+    <div class="terminal-holder" hidden={section === "instructions" || section === "files"}>
       <TermDock bind:this={terminals} terminal={attention.can("terminal")} bind:element={dock} onempty={() => composer?.focus()} phone={phone.current} strip={!!room && !session && !unavailable}
         sessions={[...store?.sessions.values() ?? []].filter(item => store?.boxes.get(item.session) === "ready").map(item => ({ id: item.session, name: item.name, root: !item.parent }))} />
     </div>
   </main>
+  {#if sharedItem && room}<MediaViewer items={[sharedItem]} initial={0} {room} name={id => store?.names.get(id) ?? "Session"} root={id => !!id && !store?.sessions.get(id)?.parent} loadVisual={async () => []} onclose={() => sharedItem = undefined} onjump={key => document.querySelector<HTMLElement>(`[data-media-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "center" })} />{/if}
   {#if room}
     <aside class="members" id="sessions" class:shown={panel} class:full={sheetFull} aria-label="Sessions" tabindex="-1" role={panel && phone.current && !covered ? "dialog" : undefined} aria-modal={(panel && phone.current && !covered) || undefined} bind:this={members} inert={drawer || covered || inSettings}>
       {#if phone.current}{@render sheetHandle("sessions")}{/if}
@@ -844,7 +852,7 @@
   .paused span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .paused button { flex: none; }
   .readonly { flex: none; margin: 0; padding: 12px 16px 14px 30px; color: var(--muted); font-size: 12.5px; }
-  .shell.open.tucked, .shell.open:has(:global(.instructions)) { grid-template-columns: 64px 1fr; }
+  .shell.open.tucked, .shell.open:has(:global(:is(.instructions, .room-files))) { grid-template-columns: 64px 1fr; }
   .shell.open:has(:global(.instructions)) aside.members { display: none; }
   @media (max-width: 640px) { .shell.open:has(:global(.instructions)) { grid-template-columns: minmax(0, 1fr); } }
   .shell.tucked > aside.members { display: none; }

@@ -1,13 +1,15 @@
 <script lang="ts" module>
   import { createContext } from "svelte";
   import DOMPurify from "dompurify";
-  import { parse, renderOnce, showMentions } from "../markdown.ts";
+  import { parse, renderOnce, showMentions, showPaths } from "../markdown.ts";
   import { withCopyButtons } from "../codeCopy.ts";
   import { highlight } from "../highlight.ts";
   import { hue } from "../identity.ts";
   import { paths } from "./Icon.svelte";
   // The open room's sessions as id by name, and how a link to one opens: inside the app, like any session link.
   export type MentionLinks = { room: string; sessions: ReadonlyMap<string, string>; open: (event: MouseEvent, href: string) => void };
+  import type { MessageSource } from "../shared.ts";
+  export const [pathLinks, setPathLinks] = createContext<(path: string, source: MessageSource) => void>();
   export const [mentionLinks, setMentionLinks] = createContext<() => MentionLinks>();
   // Links in posts open in a new tab without access to this page.
   DOMPurify.addHook("afterSanitizeAttributes", node => {
@@ -17,7 +19,7 @@
     }
   });
   // Markdown from any author is sanitized before it reaches the page. Parse turns each image into a link, so no img appears.
-  const render = renderOnce(text => withCopyButtons(DOMPurify.sanitize(parse(text), { FORBID_TAGS: ["img"], FORBID_ATTR: ["data-mention"] }), paths.copy));
+  const render = renderOnce(text => withCopyButtons(DOMPurify.sanitize(parse(text), { FORBID_TAGS: ["img"], FORBID_ATTR: ["data-mention", "data-shared-path"] }), paths.copy));
   // One listener covers every code block and name. A check confirms a successful copy in place.
   const resets = new WeakMap<HTMLButtonElement, ReturnType<typeof setTimeout>>();
   function flash(button: HTMLButtonElement, copied: boolean) {
@@ -29,8 +31,11 @@
       button.setAttribute("aria-label", "Copy code");
     }, 1500));
   }
-  function clicks(node: HTMLElement, links: () => MentionLinks) {
+  function clicks(node: HTMLElement, options: { links: () => MentionLinks; openPath: (path: string) => void }) {
+    const { links, openPath } = options;
     const onClick = (event: MouseEvent) => {
+      const path = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>("a[data-shared-path]") : null;
+      if (path && !event.button && !event.metaKey && !event.ctrlKey && !event.shiftKey) { event.preventDefault(); openPath(path.dataset.sharedPath!); return; }
       const mention = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>("a[data-mention]") : null;
       if (mention) { links().open(event, mention.href); return; }
       const button = event.target instanceof Element ? event.target.closest("button.code-copy") : null;
@@ -48,11 +53,13 @@
 
 <script lang="ts">
   // A file's text is not chat, so a preview turns mentions off.
-  let { text, rhythm, mentions = true }: { text: string; rhythm?: "thread"; mentions?: boolean } = $props();
+  let { text, rhythm, mentions = true, source }: { text: string; rhythm?: "thread"; mentions?: boolean; source?: MessageSource } = $props();
   const links = mentionLinks();
+  const openPath = pathLinks();
   let parts = $derived(render(text));
   // A text with no @name never reads the room, so a change in its sessions passes it by.
-  let html = $derived(parts.length === 1 ? parts[0] : showMentions(parts, links().room, mentions ? links().sessions : new Map()));
+  let mentioned = $derived(parts.length === 1 ? parts[0] : showMentions(parts, links().room, mentions ? links().sessions : new Map()));
+  let html = $derived(source ? showPaths(mentioned, links().room) : mentioned);
   let container: HTMLDivElement;
   $effect(() => {
     html;
@@ -69,7 +76,7 @@
   });
 </script>
 
-<div class="markdown" class:thread={rhythm === "thread"} bind:this={container} use:clicks={links}>{@html html}</div>
+<div class="markdown" class:thread={rhythm === "thread"} bind:this={container} use:clicks={{ links, openPath: path => { if (source) openPath(path, source); } }}>{@html html}</div>
 
 <style>
   .markdown { overflow-wrap: anywhere; line-height: 1.45; }
