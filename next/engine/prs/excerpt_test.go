@@ -70,6 +70,7 @@ func TestShortenPreservesMarkdown(t *testing.T) {
 		"Use `a < b && c > d`, `Vec<T>`, and ``<img src=\"x\">``.",
 		"```html\n<!-- example -->\n<img src=\"example\">\n```",
 		"~~~html\n<p>example</p>\n~~~",
+		"    <p>indented code</p>\n\t<!-- also code -->",
 		"Compare a < b and c > d; <https://example.com> and <dev@example.com>.",
 		"  indented text\nnext line\n\n- list\n  continuation",
 	} {
