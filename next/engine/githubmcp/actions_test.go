@@ -2,6 +2,7 @@ package githubmcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +24,12 @@ func TestActionsToolCalls(t *testing.T) {
 				if r.Method == "GET" {
 					fmt.Fprint(w, `{"head_branch":"work","head_repository":{"full_name":"o/r"}}`)
 					return
+				}
+				if method == "run_workflow" {
+					var body struct{ Ref string }
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Ref != "refs/heads/work" {
+						t.Errorf("dispatch was not pinned to a branch: %+v, %v", body, err)
+					}
 				}
 				writes.Add(1)
 				w.WriteHeader(http.StatusNoContent)

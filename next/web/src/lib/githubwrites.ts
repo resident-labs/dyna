@@ -4,7 +4,7 @@ import type { GitHubWriteGroup, RoomSetRequest, RoomSummary } from "./contract.g
 // of the room's (*) when it has none set yet.
 export const writeGroups: { group: GitHubWriteGroup; label: string; note: string }[] = [
   { group: "issues", label: "Issues", note: "Open and edit issues, comment, and label." },
-  { group: "pulls", label: "Pull requests", note: "Comment, review without approving, and edit a PR's title, body and labels. Never merge, approve, close or retarget." },
+  { group: "pulls", label: "Pull requests", note: "Comment, review without approving, and edit a PR's title, body and labels; mark it ready or draft; close, reopen or retarget PRs a session or those below it own. Never merge or approve." },
   { group: "projects", label: "Projects", note: "Add items to a project and set their fields." },
   { group: "actions", label: "Actions", note: "Dispatch, re-run and cancel runs on branches the session may push." },
 ];
