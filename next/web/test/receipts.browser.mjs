@@ -34,7 +34,9 @@ function events(room) {
 }
 const rooms = ["room-a", "room-b"].map((id, i) => ({ id, name: i ? "horizon" : "dyna", paused: false, created: at, lastRead: 100, waiting: [], questions: [], working: [], failed: 0, hostless: 0 }));
 let delivered = false;
+let closedMode;
 function answer(method, request) {
+ if (method === "events.list" && request.receiptSeqs && closedMode) return { receipts: Object.fromEntries(request.receiptSeqs.map(seq => [seq, seq > 2 ? [] : [{ session: "room-a-root", name: "root", state: closedMode === "queued" ? "pending" : closedMode, closed: closedMode !== "queued" }]])) };
  if (method === "events.list" && request.receiptSeqs) return { receipts: Object.fromEntries(request.receiptSeqs.map(seq => [seq, seq > 2 ? [] : [{ session: "room-a-root", name: "root", state: delivered ? "taken" : "pending", ...(!delivered && seq === 2 && { batchDeadline: "2026-11-07T12:01:00Z" }) }, { session: "room-a-build-lead", name: "build-lead", state: "read" }]])) };
   switch (method) {
     case "room.list": return { rooms, seq: 10 };
@@ -79,6 +81,26 @@ try {
  const page = await context.newPage();
  await page.addInitScript(() => { Date.now = () => Date.parse('2026-11-07T12:00:20Z'); });
  const errors = []; page.on('pageerror', e => errors.push(String(e)));
+ // A queued message whose only recipients close unread is not a delivery.
+ closedMode = 'queued';
+ await page.setViewportSize({ width: 390, height: 900 });
+ await page.goto(`${base}/r/room-a`);
+ await page.locator('.receipt').first().waitFor();
+ assert.equal(await page.locator('.receipt > span:not(.tooltip)').first().textContent(), 'Queued');
+ const queuedColor = await page.locator('.receipt').first().evaluate(el => getComputedStyle(el).color);
+ closedMode = 'closed';
+ await page.getByText('Not delivered · recipient closed', { exact: true }).first().waitFor();
+ assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'closed-only label fits narrow feed');
+ assert.equal(await page.locator('.receipt svg').count(), 0, 'closed-only has no check');
+ assert.equal(await page.locator('.receipt.fresh').count(), 0, 'Queued to closed-only never animates');
+ assert.match(await page.locator('.receipt .tooltip').first().textContent(), /root: closed/);
+ assert.equal(await page.locator('.receipt').first().evaluate(el => getComputedStyle(el).color), queuedColor, 'same muted style as Queued');
+ closedMode = 'read';
+ await page.reload();
+ await page.locator('.receipt svg').first().waitFor();
+ assert.equal(await page.locator('.receipt.fresh').count(), 0, 'closed-read mount is a real quiet delivery');
+ assert.match(await page.locator('.receipt .tooltip').first().textContent(), /root: closed/);
+ closedMode = undefined;
  for (const theme of ['light', 'carbon']) for (const width of [1440, 390]) {
   delivered = false;
   await page.setViewportSize({ width, height: 900 });
@@ -110,6 +132,6 @@ try {
  delivered = true; await page.locator('.receipt.fresh').first().waitFor();
  assert.equal(await page.locator('.receipt svg path').first().evaluate(el => getComputedStyle(el).animationName), 'none');
  assert.deepEqual(errors, []);
- console.log('PASS: real App feed owner/agent, aggregation, countdown, 200 ms draw, quiet settling, reload, reduced motion; eight screenshots. Deterministic API fixtures, not live delivery proof.');
+ console.log('PASS: real App closed-only Queued transition without check/animation, closed-read delivery, owner/agent, aggregation, countdown, 200 ms draw, quiet settling, reload, reduced motion; eight screenshots. Deterministic API fixtures, not live delivery proof.');
  await context.close();
 } finally { await browser.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }

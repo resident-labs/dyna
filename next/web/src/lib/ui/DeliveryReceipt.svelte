@@ -11,7 +11,10 @@
  $effect(() => {
   if (!receipts.length) return;
   const label = summary.label;
-  if (previous === 'Queued' && label === 'Delivered') {
+  if (label !== 'Delivered') {
+   fresh = false;
+   clearTimeout(settle);
+  } else if (previous === 'Queued') {
    fresh = true;
    clearTimeout(settle);
    settle = setTimeout(() => { fresh = false; }, 3200);
@@ -26,7 +29,7 @@
 {#if receipts.length}
  <button type="button" class="receipt" class:fresh aria-label={summary.details}>
   {#if summary.label === 'Delivered'}<svg class:draw={fresh} width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3 8 3 3 7-7" /></svg>{/if}
-  {#if summary.label === 'Queued' || fresh}<span>{summary.label}</span>{/if}
+  {#if summary.label !== 'Delivered' || fresh}<span>{summary.label}</span>{/if}
   {#if summary.label === 'Queued' && summary.seconds}<span class="countdown">· in {summary.seconds} s</span>{/if}
   <span class="tooltip" role="tooltip">{summary.details}</span>
  </button>
