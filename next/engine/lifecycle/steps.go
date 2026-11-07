@@ -260,7 +260,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			next.State = contract.BoxStopped
 			failures++
 			due = r.retryAt(failures)
-			if failures >= 3 {
+			if failures == 2 {
 				next.Reason = workErr.Error()
 				cause = contract.CauseStartFailed
 			}
