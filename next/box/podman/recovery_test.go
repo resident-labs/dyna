@@ -18,6 +18,7 @@ func TestRemovingRecovery(t *testing.T) {
 		{"removing", "removing", "removing", true},
 		{"inspect-removing", "exited", "removing", true},
 		{"store-missing", "exited", "missing", true},
+		{"store-not-known", "exited", "not-known", true},
 		{"running", "running", "missing", false},
 		{"paused", "paused", "missing", false},
 		{"unknown", "exited", "unknown", false},
@@ -44,6 +45,7 @@ case "$1" in
  [ "$2 $3" = '--type container' ] || { echo 'Error: no such object: "b"' >&2; exit 125; }
  case "$REC_INSPECT" in
  missing) echo 'Error: no container with name or ID "b" found: no such container' >&2; exit 125;;
+ not-known) echo 'Error: container b not known' >&2; exit 125;;
  unknown) echo 'Error: database broken' >&2; exit 125;;
  transport) exit 255;;
  *) echo "$REC_INSPECT";; esac;;
