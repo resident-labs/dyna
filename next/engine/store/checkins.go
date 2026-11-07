@@ -62,7 +62,8 @@ const checkinFacts = `SELECT s.id,COALESCE(s.parent,''),s.name,s.state='closing'
 	LEFT JOIN checkins c ON c.session=s.id
 	WHERE s.room=? AND s.closed_at IS NULL ORDER BY s.created_at,s.id`
 
-const checkinGoals = `SELECT g.session,g.number,g.text,g.updated_at,(SELECT COUNT(*) FROM goal_items i WHERE i.room=g.room AND i.goal=g.number AND i.state='open')
+const checkinGoals = `SELECT g.session,g.number,g.text,g.updated_at,(SELECT COUNT(*) FROM goal_items i WHERE i.room=g.room AND i.goal=g.number AND i.state='open'),
+	(SELECT COUNT(*) FROM goal_items i WHERE i.room=g.room AND i.goal=g.number)
 	FROM goals g WHERE g.room=? AND g.state='active' AND g.session IS NOT NULL ORDER BY g.number`
 
 // readCheckinRoom loads the planner's facts about one room. A goal that moved since the stall was told starts the stall over.
@@ -140,16 +141,18 @@ func (s *Store) readCheckinRoom(ctx context.Context, tx *sql.Tx, id contract.Roo
 		var holder contract.SessionID
 		var number, updated int64
 		var text string
-		var open int
-		if err := goals.Scan(&holder, &number, &text, &updated, &open); err != nil {
+		var open, total int
+		if err := goals.Scan(&holder, &number, &text, &updated, &open, &total); err != nil {
 			return nil, nil, err
 		}
 		s := bySession[holder]
 		if s == nil {
 			continue
 		}
-		if s.Goal == "" {
-			s.Goal, s.Text, s.Open = goalID(number), text, open
+		// Report the oldest goal that still needs attention, so a settled standing
+		// goal cannot hide another held goal's work. Keep the first if all are settled.
+		if s.Goal == "" || s.Total > 0 && s.Open == 0 && (total == 0 || open > 0) {
+			s.Goal, s.Text, s.Open, s.Total = goalID(number), text, open, total
 		}
 		if at := time.UnixMilli(updated); at.After(s.Progress) {
 			s.Progress = at

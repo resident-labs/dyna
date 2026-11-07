@@ -239,6 +239,73 @@ func TestStalledChildReachesParentThenRootAndStops(t *testing.T) {
 	r.wantCheckins(r.lead, 1)
 }
 
+func TestSettledGoalChecklistDoesNotStall(t *testing.T) {
+	r := newGoalRig(t)
+	for i, state := range []contract.GoalItemState{contract.GoalItemDone, contract.GoalItemDropped} {
+		if _, e := r.s.GoalItem(r.ctx, asSession(r.child), contract.GoalItemRequest{Goal: "g1", Text: "settled step"}); e != nil {
+			t.Fatal(e)
+		}
+		if _, e := r.s.GoalItem(r.ctx, asSession(r.child), contract.GoalItemRequest{Goal: "g1", Item: i + 1, State: state}); e != nil {
+			t.Fatal(e)
+		}
+	}
+	r.turn(r.child, "all current steps settled; waiting for new input")
+	r.turn(r.lead, "noted")
+	r.advance(room.CheckinIdle + time.Minute)
+	r.pass()
+	r.wantCheckins(r.lead, 0)
+	r.wantCheckins(r.root, 0)
+
+	// A standing goal stays active, and adding real work restores check-ins.
+	if _, e := r.s.GoalItem(r.ctx, asSession(r.child), contract.GoalItemRequest{Goal: "g1", Text: "new work"}); e != nil {
+		t.Fatal(e)
+	}
+	r.advance(room.CheckinIdle + time.Minute)
+	r.pass()
+	r.wantCheckins(r.lead, 1)
+	if got := r.checkins(r.lead)[0].Children; len(got) != 1 || got[0].Session != r.child || got[0].Open != 1 {
+		t.Fatalf("report %+v", got)
+	}
+}
+
+func TestSettledGoalDoesNotHideAnotherHeldGoal(t *testing.T) {
+	for _, openItem := range []bool{false, true} {
+		t.Run(map[bool]string{false: "zero items", true: "open item"}[openItem], func(t *testing.T) {
+			r := newGoalRig(t)
+			caller := asSession(r.child)
+			if _, e := r.s.GoalItem(r.ctx, caller, contract.GoalItemRequest{Goal: "g1", Text: "finished", State: contract.GoalItemDone}); e != nil {
+				t.Fatal(e)
+			}
+			second, e := r.s.GoalSet(r.ctx, caller, contract.GoalSetRequest{Text: "other work", DoneWhen: "shipped"})
+			if e != nil {
+				t.Fatal(e)
+			}
+			if openItem {
+				if _, e := r.s.GoalItem(r.ctx, caller, contract.GoalItemRequest{Goal: second.Goal, Text: "remaining"}); e != nil {
+					t.Fatal(e)
+				}
+			}
+			r.turn(r.child, "work remains on the second goal")
+			r.turn(r.lead, "noted")
+			r.advance(room.CheckinIdle + time.Minute)
+			r.pass()
+			r.wantCheckins(r.lead, 1)
+			if got := r.checkins(r.lead)[0].Children; len(got) != 1 || got[0].Goal != second.Goal {
+				t.Fatalf("report %+v", got)
+			}
+		})
+	}
+}
+
+func TestZeroItemGoalStillStalls(t *testing.T) {
+	r := newGoalRig(t)
+	r.turn(r.child, "work remains despite no checklist")
+	r.turn(r.lead, "noted")
+	r.advance(room.CheckinIdle + time.Minute)
+	r.pass()
+	r.wantCheckins(r.lead, 1)
+}
+
 func TestRestartKeepsTheClocks(t *testing.T) {
 	r := newGoalRig(t)
 	r.turn(r.child, "working on it")
