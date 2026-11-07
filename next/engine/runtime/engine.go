@@ -28,6 +28,7 @@ import (
 	"github.com/resident-labs/dyna/engine/connect"
 	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/githubmcp"
+	"github.com/resident-labs/dyna/engine/githubwrites"
 	"github.com/resident-labs/dyna/engine/images"
 	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/model"
@@ -214,7 +215,9 @@ func Run(ctx context.Context, cfg Config) error {
 	if token != "" {
 		// Agents' GitHub reads spend the feeds' quota through pulls, which keeps the feeds' share.
 		// Without them boxes list no github server, and the engine still starts.
-		if tools, err := githubmcp.Handler(ctx, token, pulls.Reads(http.DefaultTransport)); err != nil {
+		if tools, err := githubmcp.Handler(ctx, token, pulls.Reads(http.DefaultTransport), func(ctx context.Context, repo contract.RepoName, number int) (bool, error) {
+			return st.OwnsPR(ctx, repo, githubwrites.SessionFrom(ctx), number)
+		}); err != nil {
 			log.Printf("GitHub tools for boxes: %v", err)
 		} else {
 			service.SetGitHubTools(tools)

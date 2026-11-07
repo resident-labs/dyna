@@ -87,7 +87,7 @@ func newGuard() (*Guard, *upstream) {
 		"R_other":     `{"__typename":"Repository","nameWithOwner":"acme/secret"}`,
 		"I_ok":        `{"__typename":"Issue","repository":{"nameWithOwner":"acme/app"}}`,
 		"I_other":     `{"__typename":"Issue","repository":{"nameWithOwner":"acme/secret"}}`,
-		"PR_ok":       `{"__typename":"PullRequest","repository":{"nameWithOwner":"acme/app"}}`,
+		"PR_ok":       `{"number":7,"__typename":"PullRequest","repository":{"nameWithOwner":"acme/app"}}`,
 		"PR_other":    `{"__typename":"PullRequest","repository":{"nameWithOwner":"acme/secret"}}`,
 		"P_ok":        `{"__typename":"ProjectV2","owner":{"login":"acme"}}`,
 		"P_other":     `{"__typename":"ProjectV2","owner":{"login":"stranger"}}`,
@@ -237,6 +237,7 @@ func TestEachGroupAllowsItsOwnWritesOnly(t *testing.T) {
 // Merging in every form, and deletes, are refused with every group on.
 func TestMergesAndDeletesAreNeverAllowed(t *testing.T) {
 	g, up := newGuard()
+	g.Owns = func(context.Context, contract.RepoName, int) (bool, error) { return true, nil }
 	grant := grantOf("acme/app", everyGroup...)
 	for name, got := range map[string]contract.GitHubWriteReason{
 		"merge":                rest(t, g, grant, "PUT", "/repos/acme/app/pulls/7/merge", `{}`),
@@ -255,7 +256,7 @@ func TestMergesAndDeletesAreNeverAllowed(t *testing.T) {
 	} {
 		expect(t, name, got, contract.GitHubWriteRouteNotAllowed)
 	}
-	for _, mutation := range []string{"mergePullRequest", "enablePullRequestAutoMerge", "enqueuePullRequest", "disablePullRequestAutoMerge", "deleteIssue", "deleteLabel", "deletePullRequestReview", "deleteProjectV2Item", "deleteProjectV2", "deleteRef", "createRef", "updateRef", "createCommitOnBranch", "addStar", "deleteIssueComment", "closePullRequest", "reopenPullRequest", "requestReviews", "updateRepository", "createRelease", "mergeBranch", "updateBranchProtectionRule"} {
+	for _, mutation := range []string{"mergePullRequest", "enablePullRequestAutoMerge", "enqueuePullRequest", "disablePullRequestAutoMerge", "deleteIssue", "deleteLabel", "deletePullRequestReview", "deleteProjectV2Item", "deleteProjectV2", "deleteRef", "createRef", "updateRef", "createCommitOnBranch", "addStar", "deleteIssueComment", "requestReviews", "updateRepository", "createRelease", "mergeBranch", "updateBranchProtectionRule"} {
 		got := graphql(t, g, grant, `mutation($i:X!){`+mutation+`(input:$i){clientMutationId}}`, `{"i":{"pullRequestId":"PR_ok"}}`)
 		expect(t, mutation, got, contract.GitHubWriteGraphQLMutation)
 	}
@@ -284,20 +285,18 @@ func TestOtherRepositoriesAreRefused(t *testing.T) {
 	}
 }
 
-// A PR edit through pulls changes title, body, labels and the draft state (GraphQL only), and cannot change the base branch, the
-// state or the reviewers, on REST or GraphQL.
-func TestPullEditCannotRetargetOrClose(t *testing.T) {
+// Even the PR owner cannot edit sensitive fields or bypass the PR guard through the issues route.
+func TestPullEditSensitiveFieldsRemainRefused(t *testing.T) {
 	g, up := newGuard()
+	g.Owns = func(context.Context, contract.RepoName, int) (bool, error) { return true, nil }
 	grant := grantOf("acme/app", contract.GitHubWritePulls)
 	const pr = "/repos/acme/app/pulls/7"
 	for name, body := range map[string]string{
-		"base":                  `{"base":"release"}`,
-		"state closed":          `{"state":"closed"}`,
-		"title with state":      `{"title":"x","state":"closed"}`,
 		"draft":                 `{"draft":true}`,
+		"invalid state":         `{"state":"merged"}`,
+		"null state":            `{"state":null}`,
 		"reviewers":             `{"reviewers":["a"]}`,
 		"maintainer_can_modify": `{"maintainer_can_modify":false}`,
-		"title with base":       `{"title":"x","base":"release"}`,
 		"case variant":          `{"Title":"x"}`,
 		"an unknown field":      `{"title":"x","assignees":["a"]}`,
 		"not an object":         `["title"]`,
@@ -307,14 +306,12 @@ func TestPullEditCannotRetargetOrClose(t *testing.T) {
 	expect(t, "PATCH the PR's issue with state", rest(t, g, grant, "PATCH", "/repos/acme/app/issues/7", `{"state":"closed"}`), contract.GitHubWriteFieldNotAllowed)
 	expect(t, "PATCH the PR's issue with assignees", rest(t, g, grant, "PATCH", "/repos/acme/app/issues/7", `{"labels":["a"],"assignees":["x"]}`), contract.GitHubWriteFieldNotAllowed)
 	for name, vars := range map[string]string{
-		"baseRefName":         `{"i":{"pullRequestId":"PR_ok","baseRefName":"release"}}`,
 		"state":               `{"i":{"pullRequestId":"PR_ok","state":"CLOSED"}}`,
 		"title and state":     `{"i":{"pullRequestId":"PR_ok","title":"x","state":"CLOSED"}}`,
 		"maintainerCanModify": `{"i":{"pullRequestId":"PR_ok","maintainerCanModify":false}}`,
 	} {
 		expect(t, "updatePullRequest "+name, graphql(t, g, grant, `mutation($i:UpdatePullRequestInput!){updatePullRequest(input:$i){clientMutationId}}`, vars), contract.GitHubWriteFieldNotAllowed)
 	}
-	expect(t, "closePullRequest", graphql(t, g, grant, `mutation($i:ClosePullRequestInput!){closePullRequest(input:$i){clientMutationId}}`, `{"i":{"pullRequestId":"PR_ok"}}`), contract.GitHubWriteGraphQLMutation)
 	if len(up.sent) != 0 {
 		t.Fatalf("a PR was changed beyond its title, body and labels: %v", up.sent)
 	}
@@ -651,5 +648,84 @@ func TestCreateIssueIDsAreOfAllowedRepositories(t *testing.T) {
 	expect(t, "an issue type", create(`"issueTypeId":"IT_any"`), contract.GitHubWriteFieldNotAllowed)
 	if len(up.sent) != 4 {
 		t.Fatalf("reached GitHub: %v", up.sent)
+	}
+}
+
+func TestOwnedPullLifecycle(t *testing.T) {
+	for _, owner := range []bool{true, false} {
+		for _, granted := range []bool{true, false} {
+			g, _ := newGuard()
+			g.Owns = func(ctx context.Context, repo contract.RepoName, number int) (bool, error) {
+				if repo != "acme/app" || number != 7 {
+					t.Fatalf("untrusted target: %s %d", repo, number)
+				}
+				return owner, nil
+			}
+			grant := grantOf("acme/app", contract.GitHubWriteIssues)
+			if granted {
+				grant.Groups = append(grant.Groups, contract.GitHubWritePulls)
+			}
+			var want contract.GitHubWriteReason
+			if !owner {
+				want = "pr_not_owned"
+			}
+			if !granted {
+				want = contract.GitHubWriteGroupOff
+			}
+			for _, body := range []string{`{"state":"closed"}`, `{"state":"open"}`, `{"base":"release"}`, `{"title":"x","body":"y","base":"release","state":"closed"}`} {
+				expect(t, body, rest(t, g, grant, "PATCH", "/repos/acme/app/pulls/7", body), want)
+			}
+			for _, name := range []string{"closePullRequest", "reopenPullRequest", "updatePullRequest"} {
+				input := `{"i":{"pullRequestId":"PR_ok","clientMutationId":"x"}}`
+				if name == "updatePullRequest" {
+					input = `{"i":{"pullRequestId":"PR_ok","baseRefName":"release","title":"x"}}`
+				}
+				expect(t, name, graphql(t, g, grant, "mutation($i:X!){"+name+"(input:$i){clientMutationId}}", input), want)
+			}
+		}
+	}
+}
+
+func TestPullOwnershipLookupFailsClosed(t *testing.T) {
+	sentinel := errors.New("store unavailable")
+	for _, graphqlRequest := range []bool{false, true} {
+		for _, missing := range []bool{false, true} {
+			g, up := newGuard()
+			if !missing {
+				g.Owns = func(context.Context, contract.RepoName, int) (bool, error) { return false, sentinel }
+			}
+			body := `{"state":"closed"}`
+			method, target := "PATCH", "https://api.github.com/repos/acme/app/pulls/7"
+			if graphqlRequest {
+				method, target = "POST", "https://api.github.com/graphql"
+				body = `{"query":"mutation($i:X!){closePullRequest(input:$i){clientMutationId}}","variables":{"i":{"pullRequestId":"PR_ok"}}}`
+			}
+			req, _ := http.NewRequestWithContext(WithAllowed(context.Background(), grantOf("acme/app", pulls)), method, target, strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			_, err := g.RoundTrip(req)
+			if missing {
+				var refusal *Refusal
+				if !errors.As(err, &refusal) || refusal.Reason != contract.GitHubWritePRNotOwned || refusal.Detail != "only the session that owns this PR can close, reopen or retarget it" {
+					t.Fatalf("missing hook: %v", err)
+				}
+			} else if !errors.Is(err, sentinel) {
+				t.Fatalf("lost store error: %v", err)
+			}
+			if len(up.sent) != 0 {
+				t.Fatalf("write escaped: %v", up.sent)
+			}
+		}
+	}
+}
+
+func TestPullLifecycleWithWritesOff(t *testing.T) {
+	g, _ := newGuard()
+	g.Owns = func(context.Context, contract.RepoName, int) (bool, error) {
+		t.Fatal("ownership checked without grant")
+		return true, nil
+	}
+	expect(t, "REST", rest(t, g, contract.GitHubWrites{}, "PATCH", "/repos/acme/app/pulls/7", `{"state":"closed","base":"main"}`), contract.GitHubWriteOff)
+	for _, name := range []string{"closePullRequest", "reopenPullRequest", "updatePullRequest"} {
+		expect(t, name, graphql(t, g, contract.GitHubWrites{}, "mutation($i:X!){"+name+"(input:$i){clientMutationId}}", `{"i":{"pullRequestId":"PR_ok","baseRefName":"main"}}`), contract.GitHubWriteOff)
 	}
 }
