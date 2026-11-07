@@ -51,13 +51,13 @@ func TestRootCrossRoomPost(t *testing.T) {
 		t.Fatalf("delivery: %s %v %v", kind, wake, err)
 	}
 	frame, _, err := s.inputFrame(ctx, target, events[0], contract.Delivery{Surface: contract.SurfaceFeed, Reply: contract.ReplyChannel{Kind: contract.ReplyPost}})
-	if err != nil || !strings.Contains(frame, "From room:root") {
+	if err != nil || !strings.HasPrefix(frame, "[Dyna] From your sibling room:root, in the room feed.") {
 		t.Fatalf("frame: %s %v", frame, err)
 	}
 	// A pending delivery remains readable even after its sender is gone.
 	events[0].From.Session = "deleted-session"
 	frame, _, err = s.inputFrame(ctx, target, events[0], contract.Delivery{Surface: contract.SurfaceFeed, Reply: contract.ReplyChannel{Kind: contract.ReplyPost}})
-	if err != nil || !strings.Contains(frame, "From room:root") {
+	if err != nil || !strings.HasPrefix(frame, "[Dyna] From your sibling room:root, in the room feed.") {
 		t.Fatalf("deleted sender frame: %s %v", frame, err)
 	}
 	for _, bad := range []contract.PostRequest{
