@@ -434,6 +434,7 @@ func (s *Store) fire(ctx context.Context, tx *sql.Tx, sub Subscription, event co
 		return err
 	}
 	if delivered {
+		s.wakePending = append(s.wakePending, sub.Wake)
 		_, err := tx.ExecContext(ctx, "UPDATE deliveries SET immediate=1 WHERE to_kind='session' AND to_id=? AND seq=?", sub.Wake, event.Seq)
 		return err
 	}

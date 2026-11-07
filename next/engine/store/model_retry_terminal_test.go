@@ -109,7 +109,7 @@ func TestModelRetryDefersTerminalFailure(t *testing.T) {
 			}
 			// A new successful turn clears both the finite counter and the failure view.
 			post.ID = "new-work"
-			post.Time = now.Add(time.Second)
+			post.Time = now.Add(time.Minute)
 			if _, err := s.Post(ctx, post, []contract.Delivery{{To: who, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}}); err != nil {
 				t.Fatal(err)
 			}

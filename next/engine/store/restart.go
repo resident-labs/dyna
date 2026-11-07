@@ -107,7 +107,14 @@ func (s *Store) RestartSession(ctx context.Context, old box.Box, event, notice c
 			return err
 		}
 		restarted = true
-		return s.restartNotice(ctx, tx, notice)
+		if err := s.restartNotice(ctx, tx, notice); err != nil {
+			return err
+		}
+		if event.From.Kind == contract.PrincipalOwner {
+			_, err := tx.ExecContext(ctx, "UPDATE deliveries SET immediate=1 WHERE to_kind='session' AND to_id=? AND seq=(SELECT seq FROM events WHERE id=?)", old.Session, notice.ID)
+			return err
+		}
+		return nil
 	})
 	return restarted, err
 }

@@ -490,11 +490,27 @@ func (s *Store) InsertDelivery(ctx context.Context, tx *sql.Tx, seq int64, body 
 	}
 	// Persist urgency at the trusted boundary, never from input text.
 	var immediate bool
-	if err := tx.QueryRowContext(ctx, "SELECT from_kind='owner' AND type IN ('post.created','session.restarted') FROM events WHERE seq=?", seq).Scan(&immediate); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT from_kind='owner' AND type='post.created' FROM events WHERE seq=?", seq).Scan(&immediate); err != nil {
 		return err
 	}
 	if !immediate {
 		switch body := body.(type) {
+		case contract.PostCreated:
+			// Non-null common parents identify siblings. Roots are siblings
+			// only across rooms, never merely because both parent fields are null.
+			if err := tx.QueryRowContext(ctx, `WITH RECURSIVE ancestors(id) AS (
+ SELECT parent FROM sessions WHERE id=?1 AND parent IS NOT NULL
+ UNION SELECT s.parent FROM sessions s JOIN ancestors a ON s.id=a.id WHERE s.parent IS NOT NULL)
+ SELECT EXISTS (SELECT 1 FROM events e JOIN sessions sender ON sender.id=e.from_id
+ JOIN sessions recipient ON recipient.id=?1
+ JOIN rooms sr ON sr.id=sender.room JOIN rooms rr ON rr.id=recipient.room
+ WHERE e.seq=?2 AND e.from_kind='session' AND sender.state='open' AND sender.closed_at IS NULL
+ AND recipient.state='open' AND recipient.closed_at IS NULL AND sr.state!='deleting' AND rr.state!='deleting'
+ AND ((sender.room=recipient.room AND (sender.id IN (SELECT id FROM ancestors)
+ OR (sender.parent IS NOT NULL AND sender.parent=recipient.parent)))
+ OR (sender.room!=recipient.room AND sender.parent IS NULL AND recipient.parent IS NULL)))`, d.To.Session, seq).Scan(&immediate); err != nil {
+				return err
+			}
 		case contract.ShellJobEnded:
 			if body.Session == d.To.Session {
 				if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events e JOIN shell_jobs j ON j.session=e.from_id AND j.job=? WHERE e.seq=? AND e.from_kind='session' AND e.from_id=?)`, body.Job, seq, d.To.Session).Scan(&immediate); err != nil {

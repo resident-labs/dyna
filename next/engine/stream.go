@@ -452,7 +452,12 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 			}
 			// One timer belongs to this connected stream, not each delivery.
 			// Reconnect derives its deadline from the same committed turn end.
-			if !deadline.After(s.now()) {
+			if !deadline.IsZero() && !deadline.After(s.now()) {
+				// Dispatch used started.Time. If the window ended while that
+				// transaction ran, retry now rather than dropping the last kick.
+				if started.Time.Before(deadline) {
+					continue
+				}
 				deadline = time.Time{}
 			}
 			if !deadline.Equal(batchAt) {

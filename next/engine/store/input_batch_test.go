@@ -4,12 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"github.com/resident-labs/dyna/contract"
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestInputBatchProvenance(t *testing.T) {
-	for _, mode := range []string{"agent", "owner", "job", "foreign-job", "forged-job", "question", "foreign-question", "forged-question", "quiet", "never", "retry"} {
+	for _, mode := range []string{"agent", "owner", "job", "foreign-job", "forged-job", "question", "foreign-question", "forged-question", "quiet", "never", "retry", "subscription-event", "subscription-scheduled", "subscription-command", "sibling", "parent", "ancestor", "cross-root", "below", "cross-nonroot"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := context.Background()
 			dir := t.TempDir()
@@ -25,6 +26,24 @@ func TestInputBatchProvenance(t *testing.T) {
  INSERT INTO turns(id,session,started_at,ended_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) VALUES('old','s',1,1000000,'completed','',0,0,0,0);
  INSERT INTO shell_jobs(session,job) VALUES('s','job');
  INSERT INTO questions(id,room,session,text,state,asked_at) VALUES('q','r','s','question','answered',0);`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch mode {
+			case "sibling":
+				_, err = s.writer.Exec("INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('p','r','p','p','open','',0); UPDATE sessions SET parent='p' WHERE id IN ('s','other')")
+			case "parent":
+				_, err = s.writer.Exec("UPDATE sessions SET parent='other' WHERE id='s'")
+			case "ancestor":
+				_, err = s.writer.Exec("INSERT INTO sessions(id,room,name,profile,state,goal,created_at,parent) VALUES('p','r','p','p','open','',0,'other'); UPDATE sessions SET parent='p' WHERE id='s'")
+			case "below":
+				_, err = s.writer.Exec("UPDATE sessions SET parent='s' WHERE id='other'")
+			case "cross-root", "cross-nonroot":
+				_, err = s.writer.Exec("INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r2','r2',0,0,0); UPDATE sessions SET room='r2' WHERE id='other'")
+				if mode == "cross-nonroot" {
+					_, err = s.writer.Exec("INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('p','r2','p','p','open','',0); UPDATE sessions SET parent='p' WHERE id='other'")
+				}
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -65,7 +84,7 @@ func TestInputBatchProvenance(t *testing.T) {
 					t.Fatal(err)
 				}
 				immediate = true
-			case "retry":
+			case "retry", "subscription-event", "subscription-scheduled", "sibling", "parent", "ancestor", "cross-root":
 				immediate = true
 			}
 			ev := contract.Event{ID: "input", Room: "r", Time: now, From: from, Body: body}
@@ -78,6 +97,34 @@ func TestInputBatchProvenance(t *testing.T) {
 			})
 			if err != nil {
 				t.Fatal(err)
+			}
+			if strings.HasPrefix(mode, "subscription-") {
+				sub := Subscription{Subscription: contract.Subscription{ID: "sub", Scope: contract.ScopeSession, Session: "s", Wake: "s"}, Period: time.Minute, DueAt: now}
+				if _, err = s.writer.Exec("INSERT INTO subscriptions(id,scope,session,every_ms,wake_kind,wake_id,run_image,run_size,created_at,due_at) VALUES('sub','session','s',60000,'session','s','','',0,?)", now.UnixMilli()); err != nil {
+					t.Fatal(err)
+				}
+				if mode == "subscription-scheduled" {
+					e := contract.Event{ID: "scheduled", Room: "r", Time: now, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.HookDue{Subscription: "sub"}}
+					if err = s.FireScheduledWake(ctx, sub, e); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					if mode == "subscription-command" {
+						sub.Wake = ""
+					}
+					if err = s.Write(ctx, func(tx *sql.Tx) error {
+						if err := tx.QueryRowContext(ctx, "SELECT seq FROM events WHERE id='input'").Scan(&ev.Seq); err != nil {
+							return err
+						}
+						return s.fire(ctx, tx, sub, ev)
+					}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				// Removing the hook must not erase how its delivery was chosen.
+				if _, err = s.writer.Exec("DELETE FROM subscription_queue; DELETE FROM subscriptions"); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if mode == "retry" {
 				if _, err = s.writer.Exec("UPDATE sessions SET model_retry_at=? WHERE id='s'", now.UnixMilli()); err != nil {
