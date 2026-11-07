@@ -358,9 +358,9 @@ func pushRule(ctx context.Context, rooms RoomRepositories, repo contract.RepoNam
 		return "", err
 	}
 	if len(recorded) == 0 {
-		return "not owned by this session: it has no branch yet, and can push the branch of a PR it owns, or an open PR owned by a session in its parent's team (its own team for root) or above it", nil
+		return "not owned by this session: it has no branch yet, and can push the branch of an open PR it owns, or an open PR owned by a session in its parent's team (its own team for root) or above it", nil
 	}
-	return fmt.Sprintf("not owned by this session: it can push %s, %s-<topic>, those branches of a workflow run it resumes, and the branch of a PR it owns, or an open PR owned by a session in its parent's team (its own team for root) or above it", recorded[0], recorded[0]), nil
+	return fmt.Sprintf("not owned by this session: it can push %s, %s-<topic>, those branches of a workflow run it resumes, and the branch of an open PR it owns, or an open PR owned by a session in its parent's team (its own team for root) or above it", recorded[0], recorded[0]), nil
 }
 
 // refSafe is a name or topic of letters, digits, dots, underscores and hyphens that git accepts in a branch name.

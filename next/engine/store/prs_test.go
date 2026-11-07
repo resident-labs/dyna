@@ -200,7 +200,7 @@ func TestOwnsPRUsesRecordedSessionOnly(t *testing.T) {
 }
 
 // Open PR push rights cover the parent team and ancestors, not unrelated trees.
-// Closed PR rights stay limited to the exact owner.
+// Closed PRs grant no push rights, even to their owner.
 func TestOwnsPRBranchFollowsAncestors(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(t.TempDir())
@@ -224,7 +224,7 @@ func TestOwnsPRBranchFollowsAncestors(t *testing.T) {
 	}{
 		{"w", "cousin-pr", true}, {"sibling", "mine", true}, {"ww", "cousin-pr", false}, {"lead", "cousin-pr", true}, {"peer", "cousin-pr", false}, {"unknown", "feature", false}, {"w", "closed-pr", false}, {"lead", "closed-pr", false},
 		{"lead", "feature", true}, {"w", "feature", true}, {"ww", "feature", true}, {"peer", "feature", false},
-		{"w", "done", false}, {"lead", "done", true}, {"w", "mine", true}, {"lead", "mine", true}, {"peer", "mine", false}, {"ww", "mine", true}, {"", "feature", false},
+		{"w", "done", false}, {"lead", "done", false}, {"w", "mine", true}, {"lead", "mine", true}, {"peer", "mine", false}, {"ww", "mine", true}, {"", "feature", false},
 	} {
 		if got, err := s.OwnsPRBranch(ctx, "o/r", tt.session, tt.branch); err != nil || got != tt.want {
 			t.Errorf("%+v: %v %v", tt, got, err)
