@@ -214,6 +214,19 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 		if err := s.Read().QueryRowContext(ctx, `SELECT wake FROM deliveries WHERE to_id=?`, id).Scan(&wake); err != nil || wake != want {
 			t.Fatalf("%s: wake %v, want %v: %v", id, wake, want, err)
 		}
+		var immediate bool
+		if err := s.Read().QueryRowContext(ctx, `SELECT immediate FROM deliveries WHERE to_id=?`, id).Scan(&immediate); err != nil || !immediate {
+			t.Fatalf("owner restart urgency %v: %v", immediate, err)
+		}
+		if want {
+			if _, err := s.writer.Exec(`UPDATE boxes SET state='ready' WHERE session=?; INSERT INTO turns(id,session,started_at,ended_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) VALUES('prior',?,0,100,'completed','',0,0,0,0)`, id, id); err != nil {
+				t.Fatal(err)
+			}
+			started := contract.Event{ID: "restart-start", Room: "r", Time: event.Time, From: contract.Principal{Kind: contract.PrincipalEngine}}
+			if turn, _, _, err := s.Dispatch(ctx, id, "resumed", started, false); err != nil || turn != "resumed" {
+				t.Fatalf("owner restart held: %q %v", turn, err)
+			}
+		}
 		stored, err := s.Events(ctx, "r", 0, 10, []contract.EventType{"session.restarted"})
 		if err != nil {
 			t.Fatal(err)

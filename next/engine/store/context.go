@@ -77,8 +77,10 @@ type ContextChild struct {
 	Item    string // what it works on now: its oldest goal's first open item, or that goal
 }
 
-// ContextContact holds only a session's name and profile, so activity never changes its contact entry.
+// ContextContact holds only a session's identity and profile, so activity never changes its contact entry.
+// Room is set for cross-room siblings only.
 type ContextContact struct {
+	Room    contract.RoomName
 	Name    string
 	Profile contract.ProfileName
 }
@@ -178,27 +180,32 @@ func (s *Store) ContextChildren(ctx context.Context, id contract.SessionID) ([]C
 	return out, nil
 }
 
-// ContextContacts lists the parent and open siblings in creation order. Roots have neither.
+// ContextContacts lists the parent and open siblings in creation order.
+// A root's siblings are the open roots of other open rooms.
 func (s *Store) ContextContacts(ctx context.Context, id contract.SessionID) (ContextContacts, error) {
 	var out ContextContacts
 	var parentID contract.SessionID
 	var parent ContextContact
 	err := s.Read().QueryRowContext(ctx, `SELECT p.id,p.name,p.profile FROM sessions s JOIN sessions p ON p.id=s.parent WHERE s.id=?`, id).Scan(&parentID, &parent.Name, &parent.Profile)
-	if err == sql.ErrNoRows {
-		return out, nil
-	}
-	if err != nil {
+	if err != nil && err != sql.ErrNoRows {
 		return out, err
 	}
-	out.Parent = &parent
-	rows, err := s.Read().QueryContext(ctx, `SELECT name,profile FROM sessions WHERE parent=? AND id<>? AND closed_at IS NULL ORDER BY created_at,id`, parentID, id)
+	query := `SELECT '',name,profile FROM sessions WHERE parent=? AND id<>? AND closed_at IS NULL ORDER BY created_at,id`
+	args := []any{parentID, id}
+	if err == sql.ErrNoRows {
+		query = `SELECT r.name,s.name,s.profile FROM sessions s JOIN rooms r ON r.id=s.room JOIN sessions viewer ON viewer.id=? WHERE viewer.parent IS NULL AND s.parent IS NULL AND s.room<>viewer.room AND s.state='open' AND s.closed_at IS NULL AND r.state='open' ORDER BY s.created_at,s.id`
+		args = []any{id}
+	} else {
+		out.Parent = &parent
+	}
+	rows, err := s.Read().QueryContext(ctx, query, args...)
 	if err != nil {
 		return out, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var sibling ContextContact
-		if err := rows.Scan(&sibling.Name, &sibling.Profile); err != nil {
+		if err := rows.Scan(&sibling.Room, &sibling.Name, &sibling.Profile); err != nil {
 			return out, err
 		}
 		out.Siblings = append(out.Siblings, sibling)

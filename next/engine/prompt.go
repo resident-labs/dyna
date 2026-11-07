@@ -173,7 +173,7 @@ func sessionPrompt(v promptVars) string {
 	case roleLead:
 		role = promptRoleLead
 	}
-	communication := promptCommunicationHeading + "\n" + strings.Join([]string{inputs, promptReplies, mentions, promptWhenToPost, promptWhatToWrite, promptOutsideText}, "\n")
+	communication := promptCommunicationHeading + "\n" + strings.Join([]string{inputs, "Inputs within a minute of a turn's end batch into the next turn, except owner, sibling and ancestor posts, own job ends and question answers, and subscription wakes.", promptReplies, mentions, promptWhenToPost, promptWhatToWrite, promptOutsideText}, "\n")
 	across := []string{promptContext, promptCompaction, promptNotices}
 	var session []string
 	if v.Role == roleRoot {

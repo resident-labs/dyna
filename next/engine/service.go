@@ -84,6 +84,7 @@ type Service struct {
 	hookPoke          chan struct{}
 	hookStarts        hookStarts
 	now               func() time.Time
+	batchTimer        func(time.Duration) (<-chan time.Time, func())
 	live              *live.Live
 	readMu            sync.Mutex // preserves commit and live broadcast order
 	restarts          sync.Map   // BoxID -> *restartClaim; completion fences delayed API callers too

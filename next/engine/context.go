@@ -193,11 +193,24 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		lines = append(lines, fmt.Sprintf("parent: %s (%s)", parent.Name, parent.Profile))
 	}
 	var siblings []string
-	for _, sibling := range data.Contacts.Siblings[:min(20, len(data.Contacts.Siblings))] {
-		siblings = append(siblings, fmt.Sprintf("%s (%s)", sibling.Name, sibling.Profile))
+	rootSiblings := len(data.Contacts.Siblings) > 0 && data.Contacts.Siblings[0].Room != ""
+	siblingLimit := min(20, len(data.Contacts.Siblings))
+	if rootSiblings && req.Section == contract.ContextContacts {
+		siblingLimit = len(data.Contacts.Siblings)
+	}
+	for _, sibling := range data.Contacts.Siblings[:siblingLimit] {
+		name := sibling.Name
+		if sibling.Room != "" {
+			name = string(sibling.Room) + ":" + name
+		}
+		siblings = append(siblings, fmt.Sprintf("%s (%s)", name, sibling.Profile))
 	}
 	if more := len(data.Contacts.Siblings) - len(siblings); more > 0 {
-		siblings = append(siblings, fmt.Sprintf("and %d more (session list)", more))
+		discover := "session list"
+		if rootSiblings {
+			discover = "context show dyna_contacts"
+		}
+		siblings = append(siblings, fmt.Sprintf("and %d more (%s)", more, discover))
 	}
 	if len(siblings) > 0 {
 		lines = append(lines, "siblings: "+strings.Join(siblings, ", "))

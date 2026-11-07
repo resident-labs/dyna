@@ -38,7 +38,7 @@ func TestCrossRoomDeliverySurvivesSourceDeletion(t *testing.T) {
 				t.Fatalf("events: %v %v", events, err)
 			}
 			frame, _, err := r.s.inputFrame(ctx, targetRoot, events[0], contract.Delivery{Surface: input.Surface, Reply: input.Reply})
-			if err != nil || !strings.Contains(frame, "From source:root") || input.Reply.Kind != contract.ReplyPost {
+			if err != nil || !strings.HasPrefix(frame, "[Dyna] From your sibling source:root, in the room feed.") || input.Reply.Kind != contract.ReplyPost {
 				t.Fatalf("replay %v: %s %v %+v", replay, frame, err, input)
 			}
 		}
