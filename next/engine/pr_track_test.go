@@ -370,3 +370,79 @@ func TestSubscribersHearAPushWithBeforeAndAfter(t *testing.T) {
 		t.Fatalf("a bare push woke the PR's owner: %+v", owner)
 	}
 }
+
+func TestTrackPRRecoversOnlyRecordedSubtreeHeads(t *testing.T) {
+	for _, tc := range []struct {
+		name, relation, headRepo, headRef string
+		closed, want                      bool
+	}{
+		{"own", "own", "owner/repo", "feature", false, true},
+		{"descendant", "descendant", "owner/repo", "feature", false, true},
+		{"closed descendant and case variant", "descendant", "OWNER/REPO", "feature", true, true},
+		{"sibling", "sibling", "owner/repo", "feature", false, false},
+		{"ancestor", "ancestor", "owner/repo", "feature", false, false},
+		{"unrelated recorded", "unrelated", "owner/repo", "feature", false, false},
+		{"unrecorded", "none", "owner/repo", "feature", false, false},
+		{"fork", "own", "fork/repo", "feature", false, false},
+		{"empty ref", "own", "owner/repo", "", false, false},
+		{"sha is not ref", "own", "owner/repo", "commit-sha", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newPRRig(t)
+			recorder := r.child
+			switch tc.relation {
+			case "descendant", "sibling":
+				parent := r.child
+				if tc.relation == "sibling" {
+					parent = r.root
+				}
+				started, e := r.s.SessionStart(r.ctx, prOwner, contract.SessionStartRequest{Room: r.room, Parent: parent, Name: "branch-recorder", Profile: "test", Goal: "goal", Repo: "owner/repo"})
+				if e != nil {
+					t.Fatal(e)
+				}
+				recorder = started.Session
+			case "ancestor":
+				recorder = r.root
+			case "unrelated":
+				other, e := r.s.RoomCreate(r.ctx, prOwner, contract.RoomCreateRequest{Name: "other-room", RootProfile: "test"})
+				if e != nil {
+					t.Fatal(e)
+				}
+				sessions, e := r.s.SessionList(r.ctx, prOwner, contract.SessionListRequest{Room: other.Room})
+				if e != nil || len(sessions.Sessions) == 0 {
+					t.Fatalf("sessions %+v: %v", sessions, e)
+				}
+				recorder = sessions.Sessions[0].ID
+			}
+			if tc.relation != "none" {
+				if err := r.s.store.AddBranch(r.ctx, "owner/repo", recorder, "feature", r.clock.Now()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.closed {
+				if _, e := r.s.SessionClose(r.ctx, prOwner, contract.SessionCloseRequest{Session: recorder}); e != nil {
+					t.Fatal(e)
+				}
+			}
+			r.github.Add(fakegithub.Pull{Repo: "owner/repo", Number: 27, HeadRepo: contract.RepoName(tc.headRepo), HeadBranch: tc.headRef, Head: "commit-sha"})
+			if _, e := r.s.PrTrack(r.ctx, sessionCaller(r.child), contract.PrTrackRequest{Number: 27}); e != nil {
+				t.Fatal(e)
+			}
+			var branch string
+			if err := r.s.store.Read().QueryRowContext(r.ctx, "SELECT branch FROM pr_owners WHERE number=27").Scan(&branch); err != nil {
+				t.Fatal(err)
+			}
+			if (branch != "") != tc.want || (tc.want && branch != "feature") {
+				t.Fatalf("recorded branch %q, want right %v", branch, tc.want)
+			}
+			// Polling must not create a grant that tracking refused.
+			if err := r.poll.Pass(r.ctx); err != nil {
+				t.Fatal(err)
+			}
+			var after string
+			if err := r.s.store.Read().QueryRowContext(r.ctx, "SELECT branch FROM pr_owners WHERE number=27").Scan(&after); err != nil || after != branch {
+				t.Fatalf("poll branch %q, previous %q: %v", after, branch, err)
+			}
+		})
+	}
+}
