@@ -60,8 +60,8 @@ func TestContextQueryBudget(t *testing.T) {
 	if _, err = s.ContextDataForSession(context.Background(), "s"); err != nil {
 		t.Fatal(err)
 	}
-	if got := contextQueries.Load(); got != 10 {
-		t.Fatalf("snapshot queries = %d, want 10", got)
+	if got := contextQueries.Load(); got != 11 {
+		t.Fatalf("snapshot queries = %d, want 11", got)
 	}
 }
 
@@ -92,13 +92,17 @@ func TestContextContacts(t *testing.T) {
 		INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at) VALUES('b','self','','agent','ready','','',0,0)`); err != nil {
 		t.Fatal(err)
 	}
-	for _, root := range []contract.SessionID{"root", "other-root"} {
+	for root, sibling := range map[contract.SessionID]ContextContact{
+		"root":       {Room: "other", Name: "other-root", Profile: "grok"},
+		"other-root": {Room: "r", Name: "root", Profile: "sol"},
+	} {
 		got, err := s.ContextContacts(ctx, root)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Parent != nil || len(got.Siblings) != 0 {
-			t.Fatalf("root contacts = %+v, want none", got)
+		want := ContextContacts{Siblings: []ContextContact{sibling}}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("root contacts = %+v, want %+v", got, want)
 		}
 	}
 	want := ContextContacts{
