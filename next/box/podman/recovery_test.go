@@ -19,7 +19,15 @@ func TestRemovingRecovery(t *testing.T) {
 		{"inspect-removing", "exited", "removing", true},
 		{"store-missing", "exited", "missing", true},
 		{"typed-inspect-missing", "exited", "typed-missing", true},
+		{"live-v6-missing", "exited", "live-missing", true},
+		{"live-v6-extra-output", "exited", "live-extra-output", false},
+		{"live-v6-extra-error", "exited", "live-extra-error", false},
 		{"store-not-known", "exited", "not-known", true},
+		{"storage-orphan", "exited", "storage-orphan", true},
+		{"storage-wrong-id", "exited", "storage-wrong-id", false},
+		{"storage-extra-error", "exited", "storage-extra-error", false},
+		{"storage-multiline", "exited", "storage-multiline", false},
+		{"ps-short-id", "short-id", "storage-orphan", false},
 		{"running", "running", "missing", false},
 		{"paused", "paused", "missing", false},
 		{"unknown", "exited", "unknown", false},
@@ -47,6 +55,8 @@ func TestRemovingRecovery(t *testing.T) {
 				t.Setenv("REC_STATE", tc.state)
 				t.Setenv("REC_INSPECT", tc.inspect)
 				t.Setenv("REC_OP", tc.name)
+				t.Setenv("REC_ID", strings.Repeat("a", 64))
+				t.Setenv("REC_OTHER_ID", strings.Repeat("b", 64))
 				t.Setenv("PATH", tools+":"+os.Getenv("PATH"))
 				script := `#!/bin/bash
 set -eu
@@ -62,6 +72,13 @@ case "$1" in
  missing) echo 'Error: no container with name or ID "b" found: no such container' >&2; exit 125;;
  not-known) echo 'Error: container b not known' >&2; exit 125;;
  typed-missing) echo 'Error: no such container "b"' >&2; exit 125;;
+ live-missing) printf '[]\n'; echo 'Error: no such container "b"' >&2; exit 125;;
+ storage-orphan) printf '[]\n'; printf 'Error: getting container from store "%s": container not known\n' "$REC_ID" >&2; exit 125;;
+ storage-wrong-id) printf '[]\n'; printf 'Error: getting container from store "%s": container not known\n' "$REC_OTHER_ID" >&2; exit 125;;
+ storage-extra-error) printf '[]\n'; printf 'Error: getting container from store "%s": container not known: extra\n' "$REC_ID" >&2; exit 125;;
+ storage-multiline) printf '[]\n'; printf 'Error: getting container from store "%s": container not known\nextra\n' "$REC_ID" >&2; exit 125;;
+ live-extra-output) printf '[]\nextra\n'; echo 'Error: no such container "b"' >&2; exit 125;;
+ live-extra-error) printf '[]\n'; printf 'Error: no such container "b"\nextra\n' >&2; exit 125;;
  typed-unrelated-name) echo 'Error: no such container "neighbor"' >&2; exit 125;;
  typed-extra-diagnostic) echo 'Error: no such container "b": database broken' >&2; exit 125;;
  typed-multiline) printf 'Error: no such container "b"\nError: database broken\n' >&2; exit 125;;
@@ -74,8 +91,11 @@ case "$1" in
  transport) exit 255;;
  *) echo "$REC_INSPECT";; esac;;
  ps) [ "$REC_STATE" != transport ] || exit 255
- if [ "$REC_STATE" = multiple ]; then printf 'b|removing\nb-other|removing\n'; exit 0; fi
- if [ "$REC_STATE" = other ]; then echo 'b-other|removing'; else echo "b|$REC_STATE"; fi;;
+ if [[ "$*" != *'{{.ID}}'* ]]; then echo "b|$REC_STATE"; exit 0; fi
+ [[ " $* " == *' --no-trunc '* ]] || exit 96
+ if [ "$REC_STATE" = short-id ]; then echo 'b|exited|aaaa'; exit 0; fi
+ if [ "$REC_STATE" = multiple ]; then printf 'b|removing|%s\nb-other|removing|%s\n' "$REC_ID" "$REC_OTHER_ID"; exit 0; fi
+ if [ "$REC_STATE" = other ]; then echo "b-other|removing|$REC_ID"; else echo "b|$REC_STATE|$REC_ID"; fi;;
  rm)
  [ "$*" = 'rm -f b' ] || exit 91
  test -s "$NS_ROOT/locks/box-b.epoch" || exit 93
