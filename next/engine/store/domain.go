@@ -358,17 +358,18 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 		if _, err := tx.ExecContext(ctx, "UPDATE sessions SET shell_jobs=MAX(0,?) WHERE id=?", output.ShellJobs, session); err != nil {
 			return err
 		}
-		// A failed turn hands back every input below, without waking. These inputs still wake the session.
+		// Unconsumed steers never reached a model request. Keep their wake even
+		// when the turn stops or fails: Stop cancels only the work present when
+		// requested, not new inputs that arrive while the turn is ending.
+		if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='pending',turn=NULL,queue=NULL WHERE to_kind=? AND to_id=? AND turn=? AND state='taken' AND queue IS NOT NULL", contract.PrincipalSession, session, output.Turn); err != nil {
+			return err
+		}
+		// A failed turn hands back its consumed inputs below, without waking.
 		if output.Outcome != contract.TurnFailed && output.Cause != contract.CauseNotStarted {
 			for _, seq := range output.Unread {
 				if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='pending',turn=NULL,queue=NULL WHERE to_kind=? AND to_id=? AND seq=? AND turn=? AND state='taken'", contract.PrincipalSession, session, seq, output.Turn); err != nil {
 					return err
 				}
-			}
-			// A steer the box never reported done reached no model request: it came after the last one began. A completed
-			// turn's keeps its wake and starts the next turn; a stopped turn's waits for the next wake.
-			if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='pending',turn=NULL,queue=NULL,wake=wake AND ? WHERE to_kind=? AND to_id=? AND turn=? AND state='taken' AND queue IS NOT NULL", output.Outcome == contract.TurnCompleted, contract.PrincipalSession, session, output.Turn); err != nil {
-				return err
 			}
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='read' WHERE to_kind=? AND to_id=? AND turn=? AND state='taken'", contract.PrincipalSession, session, output.Turn); err != nil {
