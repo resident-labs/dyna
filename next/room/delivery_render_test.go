@@ -151,3 +151,10 @@ func TestFailedTurnNoticeSaysWhatHappensToItsInput(t *testing.T) {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
+
+func TestBoxDeliveryDoesNotCallHealthyTransitionsStartFailures(t *testing.T) {
+	text, err := RenderDelivery(contract.BoxChanged{Box: "b", Host: "h", From: contract.BoxStarting, To: contract.BoxReady})
+	if err != nil || !strings.Contains(text, "ready") || strings.Contains(text, "could not start") || strings.Contains(text, "after two failures") {
+		t.Fatalf("healthy box delivery: %q, %v", text, err)
+	}
+}

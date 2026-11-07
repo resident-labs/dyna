@@ -22,6 +22,11 @@ func TestRemovingRecovery(t *testing.T) {
 		{"running", "running", "missing", false},
 		{"paused", "paused", "missing", false},
 		{"unknown", "exited", "unknown", false},
+		{"ambiguous-storage", "exited", "ambiguous-storage", false},
+		{"unrelated-name", "exited", "unrelated-name", false},
+		{"extra-diagnostic", "exited", "extra-diagnostic", false},
+		{"multiline-diagnostic", "exited", "multiline-diagnostic", false},
+		{"blank-extra-line", "exited", "blank-extra-line", false},
 		{"transport", "exited", "transport", false},
 		{"operation-transport", "removing", "removing", false},
 		{"operation-unknown", "removing", "removing", false},
@@ -53,6 +58,11 @@ case "$1" in
  missing) echo 'Error: no container with name or ID "b" found: no such container' >&2; exit 125;;
  not-known) echo 'Error: container b not known' >&2; exit 125;;
  unknown) echo 'Error: database broken' >&2; exit 125;;
+ ambiguous-storage) echo 'Error: container storage driver not known' >&2; exit 125;;
+ unrelated-name) echo 'Error: no container with name or ID "neighbor" found: no such container' >&2; exit 125;;
+ extra-diagnostic) echo 'Error: container b not known: database broken' >&2; exit 125;;
+ multiline-diagnostic) printf 'Error: container b not known\nError: database broken\n' >&2; exit 125;;
+ blank-extra-line) printf 'Error: container b not known\n\n' >&2; exit 125;;
  transport) exit 255;;
  *) echo "$REC_INSPECT";; esac;;
  ps) [ "$REC_STATE" != transport ] || exit 255

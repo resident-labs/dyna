@@ -28,13 +28,17 @@ const recoverRemoving = `recover_removing() {
   *) return 1;;
  esac
  status=0
- inspected=$(podman --cgroup-manager=systemd inspect --type container --format '{{.State.Status}}' "$id" 2>&1) || status=$?
+ # The sentinel retains trailing newlines so an extra diagnostic line, even
+ # an empty one, cannot disappear during command substitution.
+ inspected=$(podman --cgroup-manager=systemd inspect --type container --format '{{.State.Status}}' "$id" 2>&1; result=$?; printf x; exit "$result") || status=$?
+ inspected=${inspected%x}
+ inspected=${inspected%$'\n'}
  if [ "$status" = 0 ]; then
   [ "$inspected" = removing ] || return 1
  else
   case "$status" in 1|125) ;; *) return 1;; esac
   case "$inspected" in
-   *container*'not known'*|*'no such container'*) ;;
+   "Error: container $id not known"|"Error: no container with name or ID \"$id\" found: no such container") ;;
    *) return 1;;
   esac
  fi
