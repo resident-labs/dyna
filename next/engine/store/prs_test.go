@@ -199,8 +199,8 @@ func TestOwnsPRUsesRecordedSessionOnly(t *testing.T) {
 	}
 }
 
-// A session pushes the branch of an open PR that it or one of its ancestors owns, so a lead's worker can update the PR the
-// lead inherited. A sibling, a parent of the PR's owner's child, or a closed PR's branch gives no push.
+// A session pushes the branch of an open PR that it, one of its ancestors or one of its descendants owns: a lead's worker
+// updates the PR the lead holds, and a lead fixes its child's PR. A peer, or a relative's closed PR, gives no push.
 func TestOwnsPRBranchFollowsAncestors(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(t.TempDir())
@@ -223,7 +223,7 @@ func TestOwnsPRBranchFollowsAncestors(t *testing.T) {
 		want    bool
 	}{
 		{"lead", "feature", true}, {"w", "feature", true}, {"ww", "feature", true}, {"peer", "feature", false},
-		{"w", "done", false}, {"lead", "done", true}, {"w", "mine", true}, {"lead", "mine", false}, {"", "feature", false},
+		{"w", "done", false}, {"lead", "done", true}, {"w", "mine", true}, {"lead", "mine", true}, {"peer", "mine", false}, {"ww", "mine", true}, {"", "feature", false},
 	} {
 		if got, err := s.OwnsPRBranch(ctx, "o/r", tt.session, tt.branch); err != nil || got != tt.want {
 			t.Errorf("%+v: %v %v", tt, got, err)
