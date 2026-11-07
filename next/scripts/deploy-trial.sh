@@ -156,28 +156,39 @@ while (!target) {
 console.log(`Box lifecycle smoke selected: ${JSON.stringify(target)}`);
 const response = call("session.refresh", { session: target.session });
 console.log(`Box lifecycle smoke refresh response: ${JSON.stringify(response)}`);
-if (response.marked.includes(target.session)) {
+const marked = response.marked.includes(target.session);
+if (marked) {
   console.log("Box lifecycle smoke accepted explicit refresh");
 } else {
   // StopStale can set want=stop while the public snapshot still says ready.
   // Observe that update instead; never issue a second refresh or accept the snapshot.
   console.log("Box lifecycle smoke refresh did not mark target; waiting for a lifecycle transition");
 }
-// A persisted ready transition after selection proves completion even if polling
-// misses the stop, whether explicitly refreshed or already updating.
-// A still-ready pre-refresh snapshot alone is not success.
+// A persisted ready transition after selection plus current ready proves completion.
+// An unmarked target may instead finish its stale-stop without a wake: its persisted
+// ready -> stopped transition exercises the stop path, including the namespace lock.
+// A still-ready pre-refresh snapshot alone is never success.
 let returnedReady = false;
 for (;;) {
   journal();
   const page = call("events.list", { room: target.room, afterSeq: target.seq, limit: 100,
     types: ["box.changed"] });
+  let stopped = false;
   for (const event of page.events ?? []) {
     const b = event.body;
     if (b.session === target.session && b.box === target.box && b.to === "ready" && b.from !== "ready") {
       returnedReady = true;
     }
+    if (!marked && b.session === target.session && b.box === target.box && b.from === "ready" && b.to === "stopped") {
+      stopped = true;
+    }
   }
   target.seq = page.next;
+  if (stopped) {
+    journal();
+    console.log(`Box lifecycle smoke passed: ${target.box} stopped after unmarked refresh`);
+    break;
+  }
   if (returnedReady) {
     const sessions = call("session.list", { room: target.room }).sessions;
     if (sessions.some(s => s.id === target.session && s.box === target.box && s.boxState === "ready")) {
