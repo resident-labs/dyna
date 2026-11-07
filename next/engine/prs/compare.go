@@ -10,6 +10,9 @@ import (
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/text"
 )
 
 const (
@@ -269,32 +272,41 @@ func CompareIssue(row store.TrackedIssue, items []contract.GitHubItem, listed *F
 	return update, true
 }
 
-// excerptMarkup recognizes HTML, not angle-bracket comparisons, email addresses or
-// Markdown autolinks. Code spans, fences and indented code keep their markup.
-var excerptMarkup = regexp.MustCompile("(?m:^(?: {4}|\\t)[^\\n]*)|(?s:<!--.*?-->|</?[A-Za-z][A-Za-z0-9-]*(?:[ \\t\\r\\n]+(?:\"[^\"]*\"|'[^']*'|[^'\">])*)?/?>)|`+|~{3,}")
+// Only apply this inside Markdown HTML nodes, never to code or other Markdown.
+var excerptMarkup = regexp.MustCompile("(?s)<!--.*?-->|</?[A-Za-z][A-Za-z0-9-]*(?:[ \\t\\r\\n]+(?:\"[^\"]*\"|'[^']*'|[^'\">])*)?/?>")
 
 // shorten prepares only notification excerpts; GitHub source bodies stay untouched.
-func shorten(text string) string {
+func shorten(body string) string {
+	// Use Markdown's block and delimiter rules to locate HTML. In particular, an
+	// indented HTML child is not a code block, and a fence closes only on its own
+	// line. Keep the original source rather than rendering the parsed Markdown.
+	source := []byte(body)
+	document := goldmark.DefaultParser().Parse(text.NewReader(source))
 	var clean strings.Builder
-	for rest := text; rest != ""; {
-		loc := excerptMarkup.FindStringIndex(rest)
-		if loc == nil {
-			clean.WriteString(rest)
-			break
+	cursor := 0
+	_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
 		}
-		clean.WriteString(rest[:loc[0]])
-		token := rest[loc[0]:loc[1]]
-		rest = rest[loc[1]:]
-		if token[0] == ' ' || token[0] == '\t' {
-			clean.WriteString(token)
-		} else if token[0] == '`' || token[0] == '~' {
-			clean.WriteString(token)
-			if end := strings.Index(rest, token); end >= 0 {
-				clean.WriteString(rest[:end+len(token)])
-				rest = rest[end+len(token):]
-			}
+		var segments *text.Segments
+		switch node := node.(type) {
+		case *ast.RawHTML:
+			segments = node.Segments
+		case *ast.HTMLBlock:
+			segments = node.Lines()
+		default:
+			return ast.WalkContinue, nil
 		}
-	}
+		start, stop := segments.At(0).Start, segments.At(segments.Len()-1).Stop
+		if block, ok := node.(*ast.HTMLBlock); ok && block.HasClosure() {
+			stop = block.ClosureLine.Stop
+		}
+		clean.Write(source[cursor:start])
+		clean.WriteString(excerptMarkup.ReplaceAllString(string(source[start:stop]), ""))
+		cursor = stop
+		return ast.WalkSkipChildren, nil
+	})
+	clean.Write(source[cursor:])
 	// Collapse blank runs without flattening Markdown paragraphs or indentation.
 	lines := strings.Split(clean.String(), "\n")
 	kept := lines[:0]
@@ -310,9 +322,9 @@ func shorten(text string) string {
 		kept = append(kept, line)
 		blank = false
 	}
-	text = strings.Join(kept, "\n")
-	if utf8.RuneCountInString(text) <= maxCommentText {
-		return text
+	result := strings.Join(kept, "\n")
+	if utf8.RuneCountInString(result) <= maxCommentText {
+		return result
 	}
-	return string([]rune(text)[:maxCommentText]) + "…"
+	return string([]rune(result)[:maxCommentText]) + "…"
 }
