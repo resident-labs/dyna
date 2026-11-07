@@ -59,6 +59,7 @@ const (
 	GitHubWriteRepoNotInRoom GitHubWriteReason = "repo_not_in_room" // a repository the room does not list
 	GitHubWriteUnknownGroup  GitHubWriteReason = "unknown_group"    // a group that does not exist
 	// Refusals of a request to GitHub.
+	GitHubWritePRNotOwned          GitHubWriteReason = "pr_not_owned"                 // the caller does not own the PR
 	GitHubWriteOff                 GitHubWriteReason = "writes_off"                   // the room allows no write
 	GitHubWriteGroupOff            GitHubWriteReason = "group_off"                    // the write belongs to a group that is off
 	GitHubWriteRouteNotAllowed     GitHubWriteReason = "route_not_allowed"            // a REST method and path outside the table

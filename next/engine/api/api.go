@@ -71,7 +71,7 @@ func (a *API) githubTools(c Caller, w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-			tools.ServeHTTP(w, r.WithContext(githubwrites.WithAllowed(r.Context(), grant)))
+			tools.ServeHTTP(w, r.WithContext(githubwrites.WithSession(githubwrites.WithAllowed(r.Context(), grant), c.Principal.Session)))
 			return
 		}
 	}

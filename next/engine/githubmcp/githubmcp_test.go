@@ -2,6 +2,7 @@ package githubmcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -81,7 +82,7 @@ func connect(t *testing.T) (*mcp.ClientSession, *fakeGitHub, *toFake, *prs.Clien
 	target, _ := url.Parse(github.URL)
 	rewrite := &toFake{target: target}
 	pulls := &prs.Client{Token: "engine-token", Endpoint: &url.URL{Scheme: "https", Host: "api.github.com"}, Transport: rewrite, Now: time.Now}
-	handler, err := Handler(ctx, "engine-token", pulls.Reads(rewrite))
+	handler, err := Handler(ctx, "engine-token", pulls.Reads(rewrite), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +211,7 @@ func TestLowQuotaSaysWhen(t *testing.T) {
 // argument the transport refuses.
 func TestWriteToolsFollowTheRoomsGroups(t *testing.T) {
 	ctx := context.Background()
-	handler, err := Handler(ctx, "engine-token", http.DefaultTransport)
+	handler, err := Handler(ctx, "engine-token", http.DefaultTransport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,9 +284,91 @@ func TestWriteToolsFollowTheRoomsGroups(t *testing.T) {
 			t.Errorf("update_pull_request offers %s", param)
 		}
 	}
-	for _, param := range []string{"title", "body"} {
+	for _, param := range []string{"title", "body", "state", "base"} {
 		if _, ok := properties[param]; !ok {
 			t.Errorf("update_pull_request lacks %s", param)
 		}
+	}
+}
+
+func TestOwnedPullLifecycleThroughMCP(t *testing.T) {
+	for _, caller := range []contract.SessionID{"owner", "sibling"} {
+		t.Run(string(caller), func(t *testing.T) {
+			ctx := context.Background()
+			var mu sync.Mutex
+			var patches []map[string]any
+			fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != "Bearer engine-token" {
+					t.Error("missing engine token")
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path != "/repos/o/r/pulls/7" {
+					t.Errorf("unexpected route: %s", r.URL.Path)
+				}
+				if r.Method == "PATCH" {
+					var body map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Error(err)
+					}
+					mu.Lock()
+					patches = append(patches, body)
+					mu.Unlock()
+				} else if r.Method != "GET" {
+					t.Errorf("unexpected method: %s", r.Method)
+				}
+				fmt.Fprint(w, `{"id":7,"number":7,"node_id":"PR_7","title":"title","state":"open"}`)
+			}))
+			defer fake.Close()
+			target, _ := url.Parse(fake.URL)
+			handler, err := Handler(ctx, "engine-token", &toFake{target: target}, func(ctx context.Context, repo contract.RepoName, number int) (bool, error) {
+				if repo != "o/r" || number != 7 {
+					t.Errorf("ownership target: %s %d", repo, number)
+				}
+				return githubwrites.SessionFrom(ctx) == "owner", nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			grant := contract.GitHubWrites{Repos: []contract.RepoName{"o/r"}, Groups: []contract.GitHubWriteGroup{contract.GitHubWritePulls}}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				handler.ServeHTTP(w, r.WithContext(githubwrites.WithSession(githubwrites.WithAllowed(r.Context(), grant), caller)))
+			}))
+			defer server.Close()
+			session, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil).Connect(ctx, &mcp.StreamableClientTransport{Endpoint: server.URL}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer session.Close()
+			if _, err := session.ListTools(ctx, nil); err != nil {
+				t.Fatal(err)
+			}
+			for key, value := range map[string]string{"state": "closed", "base": "release"} {
+				values := []string{value}
+				if key == "state" {
+					values = append(values, "open")
+				}
+				for _, value := range values {
+					result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "update_pull_request", Arguments: map[string]any{"owner": "o", "repo": "r", "pullNumber": 7, key: value}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if caller == "owner" && result.IsError {
+						t.Fatalf("owner %s=%s: %s", key, value, text(result))
+					}
+					if caller != "owner" && (!result.IsError || !strings.Contains(text(result), "pr_not_owned")) {
+						t.Fatalf("sibling: %s", text(result))
+					}
+				}
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			want := 0
+			if caller == "owner" {
+				want = 3
+			}
+			if len(patches) != want {
+				t.Fatalf("patches = %v", patches)
+			}
+		})
 	}
 }

@@ -2,6 +2,7 @@ package githubwrites
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +20,8 @@ import (
 // then it is vouched for, which is the only way Base lets a write out. Redirects arrive here as new requests and are checked
 // again.
 type Guard struct {
+	// Owns checks the recorded PR owner against the trusted session on the context.
+	Owns func(context.Context, contract.RepoName, int) (bool, error)
 	Base http.RoundTripper
 	API  *url.URL // GitHub's REST API; its path is the prefix of every REST route, and its host the only one writes go to
 }
@@ -111,6 +114,7 @@ func (g *Guard) isPullRequest(request *http.Request, at matched) bool {
 
 // node is what the guard learns of a GraphQL node ID before it lets a mutation name it.
 type node struct {
+	Number     int    `json:"number"`
 	Typename   string `json:"__typename"`
 	Name       string `json:"nameWithOwner"`
 	Repository *struct {
@@ -131,7 +135,7 @@ type node struct {
 const nodeQuery = `query($id:ID!){node(id:$id){__typename
  ... on Repository{nameWithOwner}
  ... on Issue{repository{nameWithOwner}}
- ... on PullRequest{repository{nameWithOwner}}
+ ... on PullRequest{number repository{nameWithOwner}}
  ... on Label{repository{nameWithOwner}}
  ... on Milestone{repository{nameWithOwner}}
  ... on PullRequestReview{repository{nameWithOwner}}
@@ -196,4 +200,18 @@ func (g *Guard) within(request *http.Request, grant contract.GitHubWrites, seen 
 		}
 	}
 	return refuse(contract.GitHubWriteRepoNotAllowed, "the node ID given to %s is not a %s of a repository (or a project of an owner) this room allows", mutationName, kind)
+}
+
+// requireOwner fails closed when the ownership lookup is unavailable, preserving store errors.
+func (g *Guard) requireOwner(ctx context.Context, repo contract.RepoName, number int) error {
+	if g.Owns != nil {
+		owns, err := g.Owns(ctx, repo, number)
+		if err != nil {
+			return fmt.Errorf("read PR ownership: %w", err)
+		}
+		if owns {
+			return nil
+		}
+	}
+	return refuse(contract.GitHubWritePRNotOwned, "only the session that owns this PR can close, reopen or retarget it")
 }
