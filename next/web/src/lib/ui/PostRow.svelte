@@ -1,5 +1,7 @@
 <script lang="ts">
   import Avatar from "./Avatar.svelte";
+ import DeliveryReceipt from './DeliveryReceipt.svelte';
+ import type { PostReceipt } from '../contract.gen.ts';
   import Icon from "./Icon.svelte";
   import Markdown from "./Markdown.svelte";
   import PostData from "./PostData.svelte";
@@ -11,8 +13,8 @@
   import { beginSwipe, moveSwipe, releaseSwipe, ignoredSwipeTarget, type Swipe } from "../swipe.ts";
   import { canForwardPost } from "../forward-state.ts";
   import { SwipeForward } from "../swipe-forward.ts";
-  let { row, linked = true, last = false, author, to, root, room, navigate, onretry, ondiscard, onforward, swipeDisabled = false, belowNew = false, newest, visualEvent, onmedia }: {
-    room: string; linked?: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; row: Extract<Row, { kind: "post" }>; last?: boolean; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; belowNew?: boolean; newest: Map<string, VisualCard>; visualEvent: EventID | undefined; onmedia: (position: number) => void;
+  let { receipts = [], row, linked = true, last = false, author, to, root, room, navigate, onretry, ondiscard, onforward, swipeDisabled = false, belowNew = false, newest, visualEvent, onmedia }: {
+    receipts?: PostReceipt[]; room: string; linked?: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; row: Extract<Row, { kind: "post" }>; last?: boolean; author: string; to?: string; root: boolean; onretry: (id: number) => void; ondiscard: (id: number) => void; onforward?: () => void; swipeDisabled?: boolean; belowNew?: boolean; newest: Map<string, VisualCard>; visualEvent: EventID | undefined; onmedia: (position: number) => void;
   } = $props();
   let shownAttachments = $derived(visibleAttachments(row.attachments, row.dataAttachment));
   let distance = $state(0), dragging = $state(false), ready = $state(false);
@@ -142,6 +144,7 @@
   <Markdown text={row.text} source={row} />
   {#if row.data !== undefined}<PostData value={row.data} />{/if}
   <PostAttachments onmedia={position => onmedia(shownAttachments[position].position)} attachments={shownAttachments.map(({ file }) => file)} {newest} event={visualEvent} at={row.at} />
+  <DeliveryReceipt {receipts} />
   {#if row.pending?.failed}{@const id = row.pending.id}<p class="unsent" role="alert">Not sent
     <button type="button" onclick={() => onretry(id)}>Retry</button><button type="button" onclick={() => ondiscard(id)}>Discard</button></p>{/if}
 </article>
