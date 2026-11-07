@@ -223,7 +223,7 @@ func job(c Config) extension.ToolDefinition {
 func jobResult(answer shell.Result, moved bool) (extension.AgentToolResult, error) {
 	state := fmt.Sprintf("[job %s: %s]", answer.Job, answer.Status)
 	switch {
-	case answer.Running && moved && answer.MessageArrived:
+	case answer.Running && answer.MessageArrived:
 		state = fmt.Sprintf("[job %s] %s%s", answer.Job, answer.Interrupt.Sender(), steppedNote)
 	case answer.Running && moved:
 		state = fmt.Sprintf("[job %s] %s", answer.Job, movedNote)
