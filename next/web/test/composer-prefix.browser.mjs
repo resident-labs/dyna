@@ -88,12 +88,25 @@ try {
     await input.waitFor(); await input.fill("!");
     await page.getByRole("listbox", { name: "Profiles" }).waitFor();
     assert.equal(await input.getAttribute("aria-expanded"), "true");
+    await page.getByText(dm ? "Switch this session to…" : "Start a new session with…", { exact: true }).waitFor({ timeout: 2000 });
+    assert.equal(await page.getByRole("button", { name: "Send", exact: true }).isDisabled(), true);
     await page.evaluate(() => document.fonts.ready);
     await page.screenshot({ path: output + "/" + (dm ? "dm" : "room") + "-" + width + "-dark.png", fullPage: true });
     await input.press("ArrowDown"); await input.press("Tab");
     assert.equal(await input.inputValue(), "!terra ");
+    await page.getByText(dm ? "Switch to terra" : "New terra session", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Send", exact: true }).isEnabled(), dm);
+    if (!dm) await page.getByText("Add what the new session should do", { exact: true }).waitFor();
+    await input.fill("!terra Do the work");
+    await page.getByText(dm ? "Switch to terra" : "New terra session", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Send", exact: true }).isEnabled(), true);
     await input.fill("!"); await input.press("Escape");
     assert.equal(await input.getAttribute("aria-expanded"), "false");
+    for (const plain of ["normal text", "!!sol", "! text", "/sol task"]) {
+      await input.fill(plain);
+      assert.equal(await page.getByText(dm ? "Switch this session to…" : "Start a new session with…", { exact: true }).count(), 0);
+      assert.equal(await page.getByRole("button", { name: "Send", exact: true }).isEnabled(), true);
+    }
   }
   await page.goto(base + "/r/room-a"); await input.waitFor();
   await input.fill("!missing task"); assert.equal(await page.getByRole("button", { name: "Send", exact: true }).isDisabled(), true);

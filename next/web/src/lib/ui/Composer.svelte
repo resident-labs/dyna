@@ -46,6 +46,12 @@
   onMount(() => { void loadProfiles(); });
   let prefix = $derived(commandContext ? parsePrefix(value, commands) : undefined);
   let problem = $derived(prefix && !profilesLoaded ? commandError || "Loading profiles…" : commandContext ? commandProblem(value, commands, commandContext.dm) : "");
+  // Context is a hint, not a validation failure: valid commands keep Send available.
+  let commandHint = $derived(prefix && commandContext
+    ? prefix.command
+      ? commandContext.dm ? `Switch to ${prefix.command.name}` : `New ${prefix.command.name} session`
+      : commandContext.dm ? "Switch this session to…" : "Start a new session with…"
+    : "");
   async function submit() {
     if (!canSend) return;
     note = "";
@@ -65,7 +71,7 @@
   let forwarded = $derived(quote?.attachments.length ?? 0);
   let over = $derived(files.items.length + forwarded - maxFiles);
   let empty = $derived(!value.trim() && !quote && !files.items.length);
-  let canSend = $derived(!commandBusy && !problem && !files.busy && over <= 0 && !empty);
+  let canSend = $derived(!commandBusy && !problem && (!prefix || !!prefix.command) && !files.busy && over <= 0 && !empty);
   const extension = (name: string) => /\.([A-Za-z0-9]{1,6})$/.exec(name)?.[1].toUpperCase() ?? "FILE";
   // v1's order (attach.ts pastedFiles): the files, else file items, else an image from the async clipboard. Files win over
   // text, since Finder also puts the file name in text/plain; WebKitGTK may leave both empty for a screenshot.
@@ -191,10 +197,11 @@
   {#if preview}<Modal title={preview.name} wide onclose={() => { preview = undefined; }}><img class="preview" src={preview.url} alt={preview.name} /></Modal>{/if}
   {#if note || over > 0}<p class="note" class:over={over > 0} role="status">{over > 0 ? `A post can carry ${maxFiles} files; remove ${over} to send.` : note}</p>{/if}
   {#if stop?.failed && empty}<p class="note" role="status">The stop did not reach the engine. Try again.</p>{/if}
+  {#if commandHint}<p class="note" id="{id}-command" role="status">{commandHint}</p>{/if}
   {#if problem || commandError}<p class="note" id="{id}-problem" role="status">{problem || commandError}</p>{/if}
   <div class="inputline">
   {#if prefix?.name && !prefix.command}<div class="underlay" aria-hidden="true"><div style:transform={"translateY(-" + scrollTop + "px)"}><span>{prefix.trigger}{prefix.name}</span>{value.slice(prefix.name.length + 1)}</div></div>{/if}
-  <textarea disabled={commandBusy} aria-invalid={!!problem} aria-describedby={problem || commandError ? `${id}-problem` : undefined} rows="2" aria-label="Message" bind:this={element} bind:value onkeydown={keydown} onpaste={paste} {placeholder}
+  <textarea disabled={commandBusy} aria-invalid={!!problem} aria-describedby={commandHint || problem || commandError ? [commandHint ? `${id}-command` : "", problem || commandError ? `${id}-problem` : ""].filter(Boolean).join(" ") : undefined} rows="2" aria-label="Message" bind:this={element} bind:value onkeydown={keydown} onpaste={paste} {placeholder}
     onscroll={() => { scrollTop = element?.scrollTop ?? 0; }} oninput={() => { dismissed = -1; track(); }} onclick={track} onkeyup={track} onblur={() => { dismissed = prefix ? 0 : token?.start ?? -1; }} onfocus={() => { dismissed = -1; if (!profilesLoaded) void loadProfiles(); }}
     role="combobox" aria-autocomplete="list" aria-expanded={matches.length > 0} aria-controls={matches.length ? `${id}-list` : undefined}
     aria-activedescendant={matches.length ? `${id}-${pick}` : undefined}></textarea>
