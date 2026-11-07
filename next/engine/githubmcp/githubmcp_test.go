@@ -82,7 +82,7 @@ func connect(t *testing.T) (*mcp.ClientSession, *fakeGitHub, *toFake, *prs.Clien
 	target, _ := url.Parse(github.URL)
 	rewrite := &toFake{target: target}
 	pulls := &prs.Client{Token: "engine-token", Endpoint: &url.URL{Scheme: "https", Host: "api.github.com"}, Transport: rewrite, Now: time.Now}
-	handler, err := Handler(ctx, "engine-token", pulls.Reads(rewrite), nil)
+	handler, err := Handler(ctx, "engine-token", pulls.Reads(rewrite), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestLowQuotaSaysWhen(t *testing.T) {
 // argument the transport refuses.
 func TestWriteToolsFollowTheRoomsGroups(t *testing.T) {
 	ctx := context.Background()
-	handler, err := Handler(ctx, "engine-token", http.DefaultTransport, nil)
+	handler, err := Handler(ctx, "engine-token", http.DefaultTransport, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,20 +250,36 @@ func TestWriteToolsFollowTheRoomsGroups(t *testing.T) {
 	if got := writes(list(contract.GitHubWrites{})); len(got) != 0 {
 		t.Fatalf("setting off offers %v", got)
 	}
-	for _, group := range []contract.GitHubWriteGroup{contract.GitHubWriteIssues, contract.GitHubWritePulls, contract.GitHubWriteProjects} {
+	for _, group := range contract.AllGitHubWriteGroups {
 		grant := contract.GitHubWrites{Repos: []contract.RepoName{"o/r"}, Groups: []contract.GitHubWriteGroup{group}}
+		listed := list(grant)
+		if (listed["actions_run_trigger"] != nil) != (group == contract.GitHubWriteActions) {
+			t.Errorf("Actions exposure for group %s", group)
+		}
 		want := githubwrites.ToolNames(grant)
 		slices.Sort(want)
-		if got := writes(list(grant)); !slices.Equal(got, want) || len(want) == 0 {
+		if got := writes(listed); !slices.Equal(got, want) || len(want) == 0 {
 			t.Errorf("%s offers %v, want %v", group, got, want)
 		}
 	}
-	all := contract.GitHubWrites{Repos: []contract.RepoName{"o/r"}, Groups: []contract.GitHubWriteGroup{contract.GitHubWriteIssues, contract.GitHubWritePulls, contract.GitHubWriteProjects}}
+	all := contract.GitHubWrites{Repos: []contract.RepoName{"o/r"}, Groups: contract.AllGitHubWriteGroups}
 	tools := list(all)
-	for _, never := range []string{"merge_pull_request", "create_or_update_file", "push_files", "delete_file", "create_branch", "actions_run_trigger", "create_pull_request", "create_repository_ruleset"} {
+	for _, never := range []string{"merge_pull_request", "create_or_update_file", "push_files", "delete_file", "create_branch", "create_pull_request", "create_repository_ruleset"} {
 		if tools[never] != nil {
 			t.Errorf("%s is offered with every group on", never)
 		}
+	}
+	if tool := tools["actions_run_trigger"]; tool == nil || !strings.Contains(tool.Description, githubwrites.Note(all, "actions_run_trigger")) {
+		t.Fatal("Actions tool note missing")
+	}
+	actionProperties := tools["actions_run_trigger"].InputSchema.(map[string]any)["properties"].(map[string]any)
+	for _, param := range []string{"method", "owner", "repo", "workflow_id", "ref", "inputs", "run_id"} {
+		if actionProperties[param] == nil {
+			t.Errorf("Actions schema lacks %s", param)
+		}
+	}
+	if actionProperties["session"] != nil {
+		t.Fatal("Actions schema accepts caller identity")
 	}
 	// The listed descriptions say that labels are created and edited: issue_write creates a label it does not know by name.
 	for name, said := range map[string]string{"issue_write": "created as a new label", "label_write": "creates and edits labels"} {
@@ -325,7 +341,7 @@ func TestOwnedPullLifecycleThroughMCP(t *testing.T) {
 					t.Errorf("ownership target: %s %d", repo, number)
 				}
 				return githubwrites.SessionFrom(ctx) == "owner", nil
-			})
+			}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

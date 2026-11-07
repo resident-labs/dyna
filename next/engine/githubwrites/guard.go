@@ -20,6 +20,8 @@ import (
 // then it is vouched for, which is the only way Base lets a write out. Redirects arrive here as new requests and are checked
 // again.
 type Guard struct {
+	// CanPush checks the existing push rule with the trusted caller on the context.
+	CanPush func(context.Context, contract.RepoName, string) (bool, error)
 	// Owns checks the recorded PR owner against the trusted session on the context.
 	Owns func(context.Context, contract.RepoName, int) (bool, error)
 	Base http.RoundTripper
@@ -48,12 +50,22 @@ func (g *Guard) RoundTrip(request *http.Request) (*http.Response, error) {
 	if !strings.EqualFold(request.URL.Host, g.API.Host) || request.URL.Scheme != g.API.Scheme || request.URL.User != nil {
 		return nil, refuse(contract.GitHubWriteRouteNotAllowed, "%s %s is not on GitHub's API host", request.Method, request.URL.Path)
 	}
-	if kind, _, err := mime.ParseMediaType(request.Header.Get("Content-Type")); err != nil || kind != "application/json" {
+	// Upstream sends bodyless POSTs for these run operations, without Content-Type.
+	segments, canonical := segmentsOf(request, prefix)
+	bodylessRun := canonical && request.Method == http.MethodPost && len(segments) == 7 &&
+		segments[0] == "repos" && segments[3] == "actions" && segments[4] == "runs" && numberPart.MatchString(segments[5]) &&
+		(segments[6] == "rerun" || segments[6] == "rerun-failed-jobs" || segments[6] == "cancel") &&
+		(request.Body == nil || request.Body == http.NoBody)
+	if kind, _, err := mime.ParseMediaType(request.Header.Get("Content-Type")); !bodylessRun && (err != nil || kind != "application/json") {
 		return nil, refuse(contract.GitHubWriteContentType, "%s %s has the content type %q; GitHub writes are sent as application/json", request.Method, request.URL.Path, request.Header.Get("Content-Type"))
 	}
-	body, request, refusal := readBody(request)
-	if refusal != nil {
-		return nil, refusal
+	body := []byte("{}")
+	if !bodylessRun {
+		var refusal *Refusal
+		body, request, refusal = readBody(request)
+		if refusal != nil {
+			return nil, refusal
+		}
 	}
 	if graphQL {
 		mutates, refusal := g.checkGraphQL(request, grant, body)
