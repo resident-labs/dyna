@@ -200,7 +200,7 @@ func (g *Guard) checkGraphQL(request *http.Request, grant contract.GitHubWrites,
 					if found.Number <= 0 {
 						return false, refuse(contract.GitHubWriteGraphQLUnresolved, "GitHub returned no PR number")
 					}
-					if err := g.requireOwner(request.Context(), contract.RepoName(strings.ToLower(found.Repository.Name)), found.Number); err != nil {
+					if err := g.requireOwner(request.Context(), contract.RepoName(found.Repository.Name), found.Number); err != nil {
 						return false, err
 					}
 				}

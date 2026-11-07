@@ -203,7 +203,7 @@ func (g *Guard) checkREST(grant contract.GitHubWrites, request *http.Request, pr
 					if err != nil {
 						return err
 					}
-					return g.requireOwner(request.Context(), contract.RepoName(strings.ToLower(found.owner+"/"+found.repo)), number)
+					return g.requireOwner(request.Context(), contract.RepoName(found.owner+"/"+found.repo), number)
 				}
 			}
 			return nil
