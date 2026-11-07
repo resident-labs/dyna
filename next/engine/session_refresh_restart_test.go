@@ -30,8 +30,8 @@ func refreshedNotices(t *testing.T, s *Service, ctx context.Context, sid contrac
 }
 
 // StopStale leaves a ready snapshot with want=stop until the lifecycle worker
-// stops the old binary. Refresh cannot mark it, but its update can still supply
-// the persisted ready transition required by the deploy smoke.
+// stops the old binary. Refresh cannot mark it, but its persisted ready -> stopped
+// transition supplies the deploy smoke's unmarked-target evidence without a wake.
 func TestRefreshDuringStaleStopObservesUpdate(t *testing.T) {
 	s, host, room, sid, ctx := staleSession(t)
 	_, disconnect := connectBox(t, s, ctx, sid, oldBinary)
@@ -58,20 +58,16 @@ func TestRefreshDuringStaleStopObservesUpdate(t *testing.T) {
 	if host.stops != 1 || stateOf(t, s, ctx, sid) != contract.BoxStopped {
 		t.Fatal("stale box did not stop")
 	}
-	wakeSession(t, s, ctx, room, sid)
 	passLifecycle(t, s, ctx)
-	if host.starts != 1 || stateOf(t, s, ctx, sid) != contract.BoxStarting {
-		t.Fatal("updated box did not start")
-	}
-	if _, problem := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{}); problem != nil {
-		t.Fatal(problem)
+	if host.starts != 0 || boxWant(t, s, ctx, sid) != "stop" {
+		t.Fatal("idle stale-stopped box should remain asleep without a wake")
 	}
 	var transitions int
-	if err := s.store.Read().QueryRowContext(ctx, `SELECT count(*) FROM events WHERE room=? AND seq>? AND type='box.changed' AND json_extract(CAST(body AS TEXT),'$.session')=? AND json_extract(CAST(body AS TEXT),'$.box')=? AND json_extract(CAST(body AS TEXT),'$.to')='ready' AND json_extract(CAST(body AS TEXT),'$.from')!='ready'`, room, page.Seq, sid, box).Scan(&transitions); err != nil {
+	if err := s.store.Read().QueryRowContext(ctx, `SELECT count(*) FROM events WHERE room=? AND seq>? AND type='box.changed' AND json_extract(CAST(body AS TEXT),'$.session')=? AND json_extract(CAST(body AS TEXT),'$.box')=? AND json_extract(CAST(body AS TEXT),'$.to')='stopped' AND json_extract(CAST(body AS TEXT),'$.from')='ready'`, room, page.Seq, sid, box).Scan(&transitions); err != nil {
 		t.Fatal(err)
 	}
-	if transitions != 1 || stateOf(t, s, ctx, sid) != contract.BoxReady {
-		t.Fatalf("ready transitions=%d state=%s", transitions, stateOf(t, s, ctx, sid))
+	if transitions != 1 || stateOf(t, s, ctx, sid) != contract.BoxStopped {
+		t.Fatalf("stop transitions=%d state=%s", transitions, stateOf(t, s, ctx, sid))
 	}
 }
 
