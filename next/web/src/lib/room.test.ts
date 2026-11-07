@@ -383,7 +383,7 @@ test("rereading gives the feed and each DM their newest read positions", async (
   } finally { server.restore(); }
 });
 
-test("initial hello keeps loaded positions; reconnect repairs reads made while the stream is down", async () => {
+test("initial hello repairs the subscription gap; reconnect repairs reads made while the stream is down", async () => {
   const listed = { lastRead: 2, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "", startedAt: "", hadJobs: false } as const;
   const sessions: SessionSummary[] = [{ id: "s", ...listed }];
   const server = engine(0, sessions);
@@ -405,7 +405,7 @@ test("initial hello keeps loaded positions; reconnect repairs reads made while t
     sessions[0] = { ...sessions[0], lastRead: 4 };
     hellos[0](new MessageEvent("hello", { data: '{"build":"b"}' }));
     await room.rereading;
-    assert.deepEqual([room.readAt(feed), room.readAt(dm)], [0, 2]);
+    assert.deepEqual([room.readAt(feed), room.readAt(dm)], [5, 4]);
     server.state.feedRead = 9;
     sources[0].onerror?.(new Event("error"));
     reconnect();
@@ -753,7 +753,7 @@ test("typed engine waits load and refresh once for a batch, clear, and never ove
   } finally { store.close(); globalThis.fetch = original; }
 });
 
-test("one owner loads workflows, waits and positions; only reconnect rereads them", async () => {
+test("one owner loads workflows and waits; first hello repairs only positions", async () => {
   const original = globalThis.fetch;
   const counts = new Map<string, number>();
   let hello: (reconnect?: boolean) => void = () => {};
@@ -769,12 +769,12 @@ test("one owner loads workflows, waits and positions; only reconnect rereads the
     assert.deepEqual(reads(), [1, 1, 1]);
     hello();
     await room.rereading; await room.waitingRead;
-    assert.deepEqual(reads(), [1, 1, 1]);
+    assert.deepEqual(reads(), [1, 2, 2]);
     hello(true);
     await room.rereading; await room.waitingRead;
     // Reconnect preserves both the position repair and the coalesced wait refresh.
-    assert.deepEqual(reads(), [2, 2, 3]);
+    assert.deepEqual(reads(), [2, 3, 4]);
     room.close(); hello(true);
-    assert.deepEqual(reads(), [2, 2, 3]);
+    assert.deepEqual(reads(), [2, 3, 4]);
   } finally { room.close(); globalThis.fetch = original; }
 });
