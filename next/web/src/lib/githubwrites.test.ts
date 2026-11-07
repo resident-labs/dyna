@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { RoomSummary } from "./contract.gen.ts";
-import { writeLabel, writeOn, writeRequest, writesRepos } from "./githubwrites.ts";
+import { writeGroups, writeLabel, writeOn, writeRequest, writesRepos } from "./githubwrites.ts";
 
 const room = (githubWrites?: RoomSummary["githubWrites"]) => ({ id: "room_1", name: "horizon", githubWrites }) as RoomSummary;
 
@@ -33,4 +33,8 @@ test("Actions is opt-in and preserves existing groups", () => {
   assert.equal(writeLabel("actions", room()), "GitHub writes: Actions in horizon");
   const existing = room({ repos: ["a/b"], groups: ["issues", "pulls", "projects"] });
   assert.deepEqual(writeRequest(existing, "actions", true).githubWrites, { repos: ["a/b"], groups: ["issues", "pulls", "projects", "actions"] });
+});
+
+test("Pull requests help describes inherited ownership and lifecycle writes", () => {
+  assert.equal(writeGroups.find(each => each.group === "pulls")?.note, "Comment, review without approving, and edit a PR's title, body and labels; mark it ready or draft; close, reopen or retarget PRs a session or those below it own. Never merge or approve.");
 });
