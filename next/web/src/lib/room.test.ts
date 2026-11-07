@@ -383,7 +383,7 @@ test("rereading gives the feed and each DM their newest read positions", async (
   } finally { server.restore(); }
 });
 
-test("a read made before the first hello, or while the stream is down, reaches the store", async () => {
+test("initial hello repairs the subscription gap; reconnect repairs reads made while the stream is down", async () => {
   const listed = { lastRead: 2, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "", startedAt: "", hadJobs: false } as const;
   const sessions: SessionSummary[] = [{ id: "s", ...listed }];
   const server = engine(0, sessions);
@@ -637,7 +637,7 @@ test("a box that returns reads back the open turn session.list left out", async 
 test("step rows reach only the open run page, and the run's end and a new connection make it read again", async () => {
   const original = globalThis.fetch;
   const asked: string[] = [];
-  let hello = () => {};
+  let hello: (reconnect?: boolean) => void = () => {};
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const method = String(input).split("/").at(-1) ?? "";
     asked.push(method);
@@ -676,7 +676,9 @@ test("step rows reach only the open run page, and the run's end and a new connec
     store.apply(event(8, { type: "session.started", body: { session: "crew2", name: "crew-2", profile: "p", workflow: true } }));
     store.apply(event(9, { type: "session.started", body: { session: "s2", name: "worker", profile: "p" } }));
     assert.deepEqual(store.members.map(item => item.session), ["s2"]);
-    hello();
+    hello(); // Initial hello does not reread the open page.
+    assert.deepEqual(seen, [step, undefined]);
+    hello(true); // Reconnect repairs its status.
     assert.deepEqual(seen, [step, undefined, undefined]);
     stop();
     store.apply({ seq: 0, id: "s2", at: "", from: { kind: "engine" }, type: "workflow.step_changed", body: { run: "wf", session: "crew", step, steps: 1, running: 1, failed: 0 } });
@@ -749,4 +751,30 @@ test("typed engine waits load and refresh once for a batch, clear, and never ove
     assert.equal(store.status("a"), "failed");
     await store.waitingRead;
   } finally { store.close(); globalThis.fetch = original; }
+});
+
+test("one owner loads workflows and waits; first hello repairs only positions", async () => {
+  const original = globalThis.fetch;
+  const counts = new Map<string, number>();
+  let hello: (reconnect?: boolean) => void = () => {};
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const method = String(input).split("/").at(-1) ?? "";
+    counts.set(method, (counts.get(method) ?? 0) + 1);
+    return new Response(JSON.stringify(method === "session.list" ? { sessions: [], seq: 0 } : {}));
+  }) as typeof fetch;
+  const room = new RoomStore("r", (_room, _after, _apply, _factory, _schedule, opened) => { hello = opened!; return () => {}; });
+  try {
+    await room.open();
+    const reads = () => ["workflow.list", "room.list", "session.list"].map(method => counts.get(method));
+    assert.deepEqual(reads(), [1, 1, 1]);
+    hello();
+    await room.rereading; await room.waitingRead;
+    assert.deepEqual(reads(), [1, 2, 2]);
+    hello(true);
+    await room.rereading; await room.waitingRead;
+    // Reconnect preserves both the position repair and the coalesced wait refresh.
+    assert.deepEqual(reads(), [2, 3, 4]);
+    room.close(); hello(true);
+    assert.deepEqual(reads(), [2, 3, 4]);
+  } finally { room.close(); globalThis.fetch = original; }
 });

@@ -126,6 +126,59 @@ func (s *Store) WorkflowRuns(ctx context.Context, room contract.RoomID) ([]Workf
 	return runs, rows.Err()
 }
 
+// WorkflowList reads lightweight headers and journal totals in one statement, without scripts or results.
+// Branch is the crew's first recorded branch, with rowid breaking timestamp ties.
+func (s *Store) WorkflowList(ctx context.Context, room contract.RoomID) ([]contract.WorkflowInfo, error) {
+	rows, err := s.Read().QueryContext(ctx, `WITH runs AS (
+ SELECT id,room,session,name,description,profiles,repo,commit_sha,version,state,status_lines,started_at,ended_at
+ FROM workflow_runs WHERE room=? ORDER BY started_at DESC,id DESC LIMIT 100
+ ), steps AS (
+ SELECT w.run,w.state,w.name,w.started_at,w.input_tokens,w.output_tokens,w.cache_read_tokens,w.cache_write_tokens, row_number() OVER (PARTITION BY w.run,w.state ORDER BY w.started_at,w.rowid) AS ordinal
+ FROM workflow_steps w JOIN runs r ON r.id=w.run
+ ), totals AS (
+ SELECT run,COUNT(*) AS steps,SUM(state='running') AS running,SUM(state='failed') AS failed,
+ json_group_array(name ORDER BY started_at,ordinal) FILTER (WHERE state='failed' AND ordinal<=20) AS names,
+ SUM(input_tokens) AS input,SUM(output_tokens) AS output,SUM(cache_read_tokens) AS cache_read,SUM(cache_write_tokens) AS cache_write
+ FROM steps GROUP BY run
+ ) SELECT r.id,r.room,r.session,r.name,r.description,r.profiles,r.repo,r.commit_sha,r.version,r.state,r.status_lines,r.started_at,r.ended_at,
+ COALESCE((SELECT branch FROM session_branches b WHERE b.repo=r.repo AND b.session=r.session ORDER BY created_at,rowid LIMIT 1),''),
+ COALESCE(t.steps,0),COALESCE(t.running,0),COALESCE(t.failed,0),COALESCE(t.names,'[]'),
+ COALESCE(t.input,0),COALESCE(t.output,0),COALESCE(t.cache_read,0),COALESCE(t.cache_write,0)
+ FROM runs r LEFT JOIN totals t ON t.run=r.id ORDER BY r.started_at DESC,r.id DESC`, room)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	runs := []contract.WorkflowInfo{}
+	for rows.Next() {
+		var run contract.WorkflowInfo
+		var profiles, lines, names string
+		var started, ended int64
+		if err := rows.Scan(&run.Run, &run.Room, &run.Session, &run.Name, &run.Description, &profiles, &run.Repo, &run.Commit, &run.Version, &run.State, &lines, &started, &ended, &run.Branch, &run.Steps, &run.Running, &run.Failed, &names, &run.Usage.InputTokens, &run.Usage.OutputTokens, &run.Usage.CacheReadTokens, &run.Usage.CacheWriteTokens); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(profiles), &run.Profiles); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(names), &run.FailedSteps); err != nil {
+			return nil, err
+		}
+		var status []contract.WorkflowStatusLine
+		if err := json.Unmarshal([]byte(lines), &status); err != nil {
+			return nil, err
+		}
+		if len(status) > 0 {
+			run.Status, run.StatusAt = status[len(status)-1].Text, status[len(status)-1].At
+		}
+		run.Started = time.UnixMilli(started).UTC()
+		if ended != 0 {
+			run.Ended = time.UnixMilli(ended).UTC()
+		}
+		runs = append(runs, run)
+	}
+	return runs, rows.Err()
+}
+
 // ResumedSessions lists the crews of the runs that session's run resumes, through any chain of resumes, in its room and on repo.
 // Any other session has none. A link that leaves the room or the repository ends the chain.
 func (s *Store) ResumedSessions(ctx context.Context, repo contract.RepoName, session contract.SessionID) ([]contract.SessionID, error) {

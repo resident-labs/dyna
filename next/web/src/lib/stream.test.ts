@@ -101,22 +101,22 @@ test("a turn.ended replayed after a reconnect makes transcript watchers read aga
   stop();
 });
 
-test("opened runs on every connection, the first included", () => {
+for (const failBeforeHello of [false, true]) test(`opened marks retries, including failure before hello: ${failBeforeHello}`, () => {
   const hellos: ((event: MessageEvent<string>) => void)[] = [];
   const sources: EventConnection[] = [];
   let reconnect = () => {};
-  let opens = 0;
+  const opens: (boolean | undefined)[] = [];
   const stop = stream("room", () => 0, () => {}, () => {
     const source: EventConnection = { onmessage: null, onerror: null, addEventListener(_type, cb) { hellos.push(cb); }, close() {} };
     sources.push(source);
     return source;
-  }, cb => { reconnect = cb; return () => {}; }, () => { opens++; });
-  hellos[0](new MessageEvent("hello", { data: '{"build":"b"}' }));
-  assert.equal(opens, 1);
+  }, cb => { reconnect = cb; return () => {}; }, retry => { opens.push(retry); });
+  if (!failBeforeHello) hellos[0](new MessageEvent("hello", { data: '{"build":"b"}' }));
+  assert.deepEqual(opens, failBeforeHello ? [] : [false]);
   sources[0].onerror?.(new Event("error"));
   reconnect();
   hellos[1](new MessageEvent("hello", { data: '{"build":"b"}' }));
-  assert.equal(opens, 2);
+  assert.deepEqual(opens, failBeforeHello ? [true] : [false, true]);
   stop();
 });
 
