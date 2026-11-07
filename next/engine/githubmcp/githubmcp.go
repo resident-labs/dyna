@@ -45,7 +45,7 @@ const contentWindow = 5000
 // server for each set of groups, made when a room first needs it, and each is stateless, so it answers every box of any room with
 // that set. Each request to GitHub takes the token here and goes through the githubwrites guard, which lets a read through to reads
 // (it spends the engine's GitHub quota) and a write only if the room's setting allows exactly that write.
-func Handler(ctx context.Context, token string, reads http.RoundTripper, owns func(context.Context, contract.RepoName, int) (bool, error)) (http.Handler, error) {
+func Handler(ctx context.Context, token string, reads http.RoundTripper, owns func(context.Context, contract.RepoName, int) (bool, error), canPush func(context.Context, contract.RepoName, string) (bool, error)) (http.Handler, error) {
 	host, err := utils.NewAPIHost("")
 	if err != nil {
 		return nil, err
@@ -55,7 +55,7 @@ func Handler(ctx context.Context, token string, reads http.RoundTripper, owns fu
 	graphQLURL, _ := host.GraphqlURL(ctx)
 	rawURL, _ := host.RawURL(ctx)
 	version := upstreamVersion()
-	guard := &githubwrites.Guard{Base: reads, API: restURL, Owns: owns}
+	guard := &githubwrites.Guard{Base: reads, API: restURL, Owns: owns, CanPush: canPush}
 	// The token goes only to GitHub's own hosts, so a redirect elsewhere does not carry it.
 	allowed := []string{restURL.Host, uploadURL.Host, graphQLURL.Host, rawURL.Host}
 	signed := func(next http.RoundTripper) *http.Client {

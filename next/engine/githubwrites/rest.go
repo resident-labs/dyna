@@ -27,6 +27,10 @@ type route struct {
 
 // routes is the allow-list of REST writes. A write that matches none of these is refused, whatever it is.
 var routes = []route{
+	{method: http.MethodPost, path: "repos/{owner}/{repo}/actions/workflows/{workflow}/dispatches", group: contract.GitHubWriteActions},
+	{method: http.MethodPost, path: "repos/{owner}/{repo}/actions/runs/{number}/rerun", group: contract.GitHubWriteActions},
+	{method: http.MethodPost, path: "repos/{owner}/{repo}/actions/runs/{number}/rerun-failed-jobs", group: contract.GitHubWriteActions},
+	{method: http.MethodPost, path: "repos/{owner}/{repo}/actions/runs/{number}/cancel", group: contract.GitHubWriteActions},
 	{method: http.MethodPost, path: "repos/{owner}/{repo}/issues", group: issues},
 	{method: http.MethodPatch, path: "repos/{owner}/{repo}/issues/{number}", group: issues, notPR: true},
 	{method: http.MethodPost, path: "repos/{owner}/{repo}/issues/{number}/comments", group: issues},
@@ -65,6 +69,11 @@ func (r route) match(segments []string) (matched, bool) {
 		switch want {
 		case "{owner}":
 			found.owner = segments[i]
+		case "{workflow}":
+			if !namePart.MatchString(segments[i]) || segments[i] == "." || segments[i] == ".." {
+				return matched{}, false
+			}
+			continue
 		case "{repo}":
 			found.repo = segments[i]
 		case "{number}":
@@ -139,6 +148,9 @@ func (g *Guard) checkREST(grant contract.GitHubWrites, request *http.Request, pr
 		}
 	} else if !grant.Allows(found.owner + "/" + found.repo) {
 		return refuse(contract.GitHubWriteRepoNotAllowed, "%s is on %s/%s, which is not among the repositories this room allows", what, found.owner, found.repo)
+	}
+	if enabled[0].group == contract.GitHubWriteActions {
+		return g.checkActions(request, found, segments, prefix, body)
 	}
 	if enabled[0].comment || enabled[0].item {
 		var answer struct {
