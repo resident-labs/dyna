@@ -1,6 +1,7 @@
 package room
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
@@ -149,5 +150,12 @@ func TestFailedTurnNoticeSaysWhatHappensToItsInput(t *testing.T) {
 	got := renderFailures(contract.SessionFailed{Failures: []contract.SessionFailure{{Name: "writer", Cause: contract.CauseModelFailed}}})
 	if want := "Sessions failed:\n- writer: its turn failed; its input is kept, and its next input starts a new turn (model_failed)"; got != want {
 		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestBoxDeliveryDoesNotCallHealthyTransitionsStartFailures(t *testing.T) {
+	text, err := RenderDelivery(contract.BoxChanged{Box: "b", Host: "h", From: contract.BoxStarting, To: contract.BoxReady})
+	if err != nil || !strings.Contains(text, "ready") || strings.Contains(text, "could not start") || strings.Contains(text, "after two failures") {
+		t.Fatalf("healthy box delivery: %q, %v", text, err)
 	}
 }
