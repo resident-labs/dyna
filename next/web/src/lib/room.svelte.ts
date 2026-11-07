@@ -198,11 +198,10 @@ export class RoomStore {
     this.changed();
     if (this.closed || !this.loaded) return;
     void this.loadPRs();
-    let connected = false;
-    this.stopStream = this.connect(this.room, () => this.head, event => this.apply(event), undefined, undefined, () => {
+    this.stopStream = this.connect(this.room, () => this.head, event => this.apply(event), undefined, undefined, (reconnect = false) => {
       if (this.closed) return;
-      // load owns the initial reads. Only a reconnect repairs state missed while the stream was down.
-      if (!connected) { connected = true; return; }
+      // load owns the initial reads. A failed first attempt also needs repair when its retry opens.
+      if (!reconnect) return;
       this.rereading = this.rereadPositions().catch(() => {});
       void this.readWorkflows();
       this.refreshWaits();
