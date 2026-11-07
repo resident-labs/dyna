@@ -4,6 +4,14 @@ script=$(cd "$(dirname "$0")" && pwd)/deploy-trial.sh
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 export TEST_ROOT="$tmp/repo" TEST_LOG="$tmp/log"
+export TEST_REAL_NODE=$(command -v node)
+export TEST_REFRESH="$tmp/refreshed" TEST_CLOCK="$tmp/clock.cjs"
+cat > "$TEST_CLOCK" <<'JS'
+if (process.env.FAKE_TIMEOUT === "1") {
+  let now = 0;
+  Date.now = () => (now += 5000);
+}
+JS
 mkdir -p "$TEST_ROOT/next/web" "$tmp/tools" "$tmp/install/bin"
 printf old > "$tmp/install/bin/dyna"
 cat > "$tmp/tools/git" <<'SH'
@@ -35,14 +43,49 @@ cat > "$tmp/tools/systemctl" <<'SH'
 #!/usr/bin/env bash
 echo "$*" >> "$TEST_LOG"
 if [[ ${FAKE_STAGE_STOPPED:-0} == 1 && $* == *is-active*dyna-stage-* ]]; then exit 3; fi
+if [[ $* == *InvocationID* ]]; then echo 0123456789abcdef0123456789abcdef; fi
 SH
 cat > "$tmp/tools/curl" <<'SH'
 #!/usr/bin/env bash
-if [[ $* == *room.list* ]]; then echo '{"rooms":[{"id":"room-1"}]}'; else echo "${FAKE_STATUS:-200}"; fi
+echo "curl $*" >> "$TEST_LOG"
+case "$*" in
+ *room.list*) echo '{"rooms":[{"id":"room-1"}]}' ;;
+ *session.list*)
+   if [[ ${FAKE_NO_IDLE:-0} == 1 ]]; then
+     echo '{"sessions":[{"id":"busy","box":"busy-box","boxState":"ready","turn":"turn-1","computer":"stopped"}],"seq":10}'
+   else
+     echo '{"sessions":[{"id":"busy","box":"busy-box","boxState":"ready","turn":"turn-1","computer":"stopped"},{"id":"terminal","box":"terminal-box","boxState":"ready","computer":"running"},{"id":"idle","box":"box-1","boxState":"ready","computer":"stopped","shellJobs":1}],"seq":10}'
+   fi ;;
+ *session.refresh*)
+   [[ $* == *'{"session":"idle"}'* && $* != *'"room"'* ]] || exit 1
+   touch "$TEST_REFRESH"
+   echo '{"marked":["idle"]}' ;;
+ *events.list*)
+   if [[ ${FAKE_NO_RETURN:-0} == 1 ]]; then echo '{"events":[],"next":10}'
+   else echo '{"events":[{"seq":11,"body":{"type":"box.changed","session":"idle","box":"box-1","from":"starting","to":"ready"}}],"next":11}'; fi ;;
+ *) echo "${FAKE_STATUS:-200}" ;;
+esac
 SH
 cat > "$tmp/tools/node" <<'SH'
 #!/usr/bin/env bash
+if [[ $1 == - ]]; then exec "$TEST_REAL_NODE" --require "$TEST_CLOCK" "$@"; fi
 cat >/dev/null; echo room-1
+SH
+cat > "$tmp/tools/journalctl" <<'SH'
+#!/usr/bin/env bash
+echo "journalctl $*" >> "$TEST_LOG"
+[[ $* == *'_SYSTEMD_INVOCATION_ID=0123456789abcdef0123456789abcdef'* ]] || exit 1
+if [[ -f $TEST_REFRESH ]]; then
+  case "${FAKE_JOURNAL:-clean}" in
+    fence) printf '%s\n' 'box box-1: host namespace uncertain: namespace flock held by conmon: exit status 252' 'lifecycle step box-1: namespace fence: exit status 252' ;;
+    namespace) echo 'box box-1: host namespace uncertain: conmon exit status 252' ;;
+    lifecycle) echo 'lifecycle step box-1: failed to start' ;;
+  esac
+fi
+SH
+cat > "$tmp/tools/sleep" <<'SH'
+#!/usr/bin/env bash
+exit 0
 SH
 chmod +x "$tmp/tools/"*
 export PATH="$tmp/tools:$PATH"
@@ -94,3 +137,35 @@ FAKE_UNIT_COLLISION=1 "$script" "${args[@]}" --stage-wait 0 >"$tmp/out" 2>&1 && 
 [[ $before == "$(sha256sum "$tmp/install/bin/dyna")" ]]
 grep -q 'Nothing was installed' "$tmp/out"
 test "$(grep -c restart "$TEST_LOG")" = 3
+# Clean journal plus a ready transition succeeds, and only the idle session is refreshed.
+# Its last turn's shellJobs count is historical, not a reason to treat it as busy.
+rm -f "$tmp/install/failed-next" "$tmp/install/deployed-next" "$TEST_REFRESH"
+"$script" "${args[@]}" >"$tmp/out" 2>&1
+grep -q 'Box lifecycle smoke passed: box-1 returned ready' "$tmp/out"
+test "$(<"$tmp/install/deployed-next")" = tree123
+test -f "$TEST_REFRESH"
+# #2161: conmon retains the namespace flock (252), lifecycle errors follow,
+# and the refreshed box never returns ready. Active service and HTTP 200 are insufficient.
+rm -f "$tmp/install/deployed-next" "$TEST_REFRESH"
+FAKE_JOURNAL=fence FAKE_NO_RETURN=1 "$script" "${args[@]}" >"$tmp/out" 2>&1 && { echo 'Namespace fence was accepted' >&2; exit 1; }
+grep -q 'host namespace uncertain.*conmon.*252' "$tmp/out"
+grep -q 'lifecycle step box-1' "$tmp/out"
+grep -q 'failed: box lifecycle smoke.*fix forward' "$tmp/out"
+test "$(<"$tmp/install/failed-next")" = tree123
+test ! -f "$tmp/install/deployed-next"
+# Either journal signature suffices; no idle box and no completed step also fail.
+for scenario in namespace lifecycle no-idle timeout; do
+  rm -f "$tmp/install/failed-next" "$tmp/install/deployed-next" "$TEST_REFRESH"
+  case "$scenario" in
+    namespace) flags=(FAKE_JOURNAL=namespace); expected='host namespace uncertain' ;;
+    lifecycle) flags=(FAKE_JOURNAL=lifecycle); expected='lifecycle step box-1' ;;
+    no-idle) flags=(FAKE_NO_IDLE=1); expected='no idle ready session' ;;
+    timeout) flags=(FAKE_NO_RETURN=1 FAKE_TIMEOUT=1); expected='timed out after 180 seconds' ;;
+  esac
+  env "${flags[@]}" "$script" "${args[@]}" >"$tmp/out" 2>&1 && { echo "$scenario was accepted" >&2; exit 1; }
+  grep -q "$expected" "$tmp/out"
+  test "$(<"$tmp/install/failed-next")" = tree123
+  test ! -f "$tmp/install/deployed-next"
+  if [[ $scenario == no-idle ]]; then test ! -f "$TEST_REFRESH"; fi
+done
+echo 'deploy-trial tests passed'

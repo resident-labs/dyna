@@ -109,9 +109,79 @@ for path in / "/r/$room"; do
   status=$(curl --silent --show-error --retry 30 --retry-delay 1 --retry-all-errors --max-time 5 -o /dev/null -w '%{http_code}' -H "Host: $web_host" "$web_url$path")
   [[ $status == 200 ]]
 done
+step='box lifecycle smoke'
+# Scope the journal to this systemd invocation, not older processes in the unit.
+invocation=$(systemctl --user show "$unit" --property=InvocationID --value)
+[[ $invocation =~ ^[a-fA-F0-9]{32}$ ]]
+node - "$socket" "$invocation" <<'JS'
+const { execFileSync } = require("node:child_process");
+const [socket, invocation] = process.argv.slice(2);
+const deadline = Date.now() + 180_000;
+function run(command, args) {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error("Box lifecycle smoke timed out after 180 seconds");
+  return execFileSync(command, args, { encoding: "utf8", timeout: Math.min(5000, remaining) });
+}
+function call(method, body) {
+  return JSON.parse(run("curl", ["--fail", "--silent", "--show-error", "--max-time", "5",
+    "--unix-socket", socket, "-H", "Content-Type: application/json", "-d", JSON.stringify(body),
+    `http://localhost/v1/${method}`]));
+}
+function journal() {
+  const log = run("journalctl", ["--user", "--no-pager", "--output=cat", `_SYSTEMD_INVOCATION_ID=${invocation}`]);
+  if (/host namespace uncertain|lifecycle step /.test(log)) {
+    process.stderr.write(log);
+    throw new Error("Box lifecycle smoke found a namespace fence or lifecycle error");
+  }
+}
+journal();
+let target;
+for (const room of call("room.list", {}).rooms) {
+  let after;
+  do {
+    const page = call("session.list", { room: room.id, ...(after ? { after } : {}) });
+    const session = page.sessions.find(s => s.box && s.boxState === "ready" && !s.turn &&
+      s.computer === "stopped");
+    if (session) {
+      target = { room: room.id, session: session.id, box: session.box, seq: page.seq };
+      break;
+    }
+    after = page.next;
+  } while (after);
+  if (target) break;
+}
+if (!target) throw new Error("Box lifecycle smoke found no idle ready session");
+const marked = call("session.refresh", { session: target.session }).marked;
+if (!marked.includes(target.session)) throw new Error("Box lifecycle smoke did not mark its session");
+// A persisted ready transition proves completion even if polling misses the stop.
+// A still-ready pre-refresh snapshot alone is not success.
+let returnedReady = false;
+for (;;) {
+  journal();
+  const page = call("events.list", { room: target.room, afterSeq: target.seq, limit: 100,
+    types: ["box.changed"] });
+  for (const event of page.events) {
+    const b = event.body;
+    if (b.session === target.session && b.box === target.box && b.to === "ready" && b.from !== "ready") {
+      returnedReady = true;
+    }
+  }
+  target.seq = page.next;
+  if (returnedReady) {
+    const sessions = call("session.list", { room: target.room }).sessions;
+    if (sessions.some(s => s.id === target.session && s.box === target.box && s.boxState === "ready")) {
+      journal();
+      console.log(`Box lifecycle smoke passed: ${target.box} returned ready`);
+      break;
+    }
+  }
+  // The deadline is shared by journal reads, API calls and waiting.
+  run("sleep", ["1"]);
+}
+JS
 step='record deploy'
 printf '%s\n' "$tree" > "$prefix/deployed-next"
 rm -f "$prefix/failed-next"
 find "$prefix/stage" -mindepth 1 -maxdepth 1 -type d ! -name "$sha" -exec rm -rf -- {} +
 trap - ERR
-echo "Deployed $sha; service and web checks passed."
+echo "Deployed $sha; service, web and box lifecycle checks passed."
