@@ -100,6 +100,8 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		return b.Text, nil
 	case contract.SessionNotice:
 		return b.Text, nil
+	case contract.BoxChanged:
+		return fmt.Sprintf("Your workspace could not start on %s after two failures. Dyna is still retrying. Start error: %s", b.Host, b.Reason), nil
 	case contract.HookDue:
 		return fmt.Sprintf("Subscription %s is due.", b.Subscription), nil
 	case contract.HookFinished:

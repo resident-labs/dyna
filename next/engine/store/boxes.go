@@ -185,9 +185,17 @@ func (s *Store) SetBoxLifecycle(ctx context.Context, old, next box.Box, due time
 		}
 		updated = true
 		if changed {
-			_, err = s.AppendEvent(tx, event)
+			seq, err := s.AppendEvent(tx, event)
+			if err != nil {
+				return err
+			}
+			if event.Body.(contract.BoxChanged).Cause == contract.CauseStartFailed && failures == 2 {
+				// Keep retrying. The session reads the actual start error on its next turn,
+				// from the same durable event the owner sees, without a second feed notice.
+				return s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: old.Session}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}})
+			}
 		}
-		return err
+		return nil
 	})
 	return updated, err
 }

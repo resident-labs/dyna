@@ -26,7 +26,7 @@ export type Pending = { id: number; at: string; text: string; data?: JSONData; a
 
 type Name = (session: string) => string;
 
-// Why a box or a request failed, in the owner's words. The engine's reason and error texts are raw (r8), so they never show.
+// Why a box or a request failed, in the owner's words. Repeated start failures in the feed include the actual error.
 // Why a failed or lost box stopped, to follow "Failed". A box's cause is known from its event; without it, the state says what it can.
 export const boxReason = ({ box, cause }: BoxFailure): string => {
   const reason = cause ? causes[cause] : box === "lost" ? "stopped unexpectedly" : "could not start";
@@ -54,9 +54,9 @@ export const waits: Record<PendingReason, string> = {
 };
 
 // A box's failed row, in the feed and at the end of a DM. A stopped box with a cause may still start, so it has not failed.
-export const boxRow = (box: BoxState, cause?: FailureCause) => ({
+export const boxRow = (box: BoxState, cause?: FailureCause, reason?: string) => ({
   label: cause === "remove_failed" || cause === "archive_failed" ? "Could not close" as const : box === "lost" ? "Stopped unexpectedly" as const : box === "failed" ? "Failed" as const : "Could not start" as const,
-  cause: cause ? causes[cause] : box === "failed" ? "Could not start" : "",
+  cause: cause === "start_failed" && reason ? reason : cause ? causes[cause] : box === "failed" ? "Could not start" : "",
 });
 
 export const causes: Record<FailureCause, string> = {
@@ -252,7 +252,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       const { to, cause } = event.body;
       // A lost box that then fails has said why already.
       if ((to === "failed" || to === "lost" || cause) && !(to === "failed" && event.body.from === "lost")) {
-        deferred.push({ kind: "failed", key: `f${event.seq}`, seq: event.seq, session: event.body.session, at: event.at, ...boxRow(to, cause) });
+        deferred.push({ kind: "failed", key: `f${event.seq}`, seq: event.seq, session: event.body.session, at: event.at, ...boxRow(to, cause, event.body.reason) });
       }
       continue;
     }
