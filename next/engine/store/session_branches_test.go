@@ -121,7 +121,7 @@ func TestUpgradeRecordsEarlierSessionsBranches(t *testing.T) {
 		"ALTER TABLE hosts DROP COLUMN gpus",
 		"ALTER TABLE boxes DROP COLUMN gpu_gib",
 		"ALTER TABLE boxes DROP COLUMN gpu_index",
-		"ALTER TABLE pr_owners DROP COLUMN stack",
+		"DROP TABLE pr_stack_layers", "ALTER TABLE pr_owners DROP COLUMN stack",
 		"ALTER TABLE pr_owners DROP COLUMN position",
 		"ALTER TABLE hosts DROP COLUMN ci_scale", "ALTER TABLE boxes DROP COLUMN create_retry_host",
 		"ALTER TABLE rooms DROP COLUMN github_writes",

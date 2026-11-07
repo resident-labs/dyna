@@ -43,6 +43,7 @@ CREATE TABLE event_files (seq INTEGER NOT NULL REFERENCES events(seq), sha256 TE
 CREATE TABLE visuals (id TEXT PRIMARY KEY, room TEXT NOT NULL, author_kind TEXT NOT NULL, author_id TEXT NOT NULL, version INTEGER NOT NULL);
 CREATE TABLE room_leftovers (host TEXT NOT NULL REFERENCES hosts(name), room TEXT NOT NULL, box TEXT NOT NULL, slice TEXT NOT NULL, PRIMARY KEY(host, room, box));
 CREATE TABLE pr_owners (repo TEXT NOT NULL, number INTEGER NOT NULL, session TEXT NOT NULL REFERENCES sessions(id), goal TEXT NOT NULL, approved_head TEXT NOT NULL, branch TEXT NOT NULL DEFAULT '', head_repo TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '', title TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '', draft INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'open', head TEXT NOT NULL DEFAULT '', review TEXT NOT NULL DEFAULT '', ci TEXT NOT NULL DEFAULT '', merge TEXT NOT NULL DEFAULT '', ci_told TEXT NOT NULL DEFAULT '', seen_reviews INTEGER NOT NULL DEFAULT 0, own_wake_at INTEGER NOT NULL DEFAULT 0, baseline INTEGER NOT NULL DEFAULT 1, meta TEXT NOT NULL DEFAULT '', meta_wake_at INTEGER NOT NULL DEFAULT 0, stack INTEGER, position INTEGER, PRIMARY KEY(repo, number));
+CREATE TABLE pr_stack_layers (repo TEXT NOT NULL COLLATE NOCASE, number INTEGER NOT NULL, stack INTEGER NOT NULL, position INTEGER NOT NULL, size INTEGER NOT NULL, PRIMARY KEY(repo, number));
 
 CREATE INDEX turns_session_ended ON turns(session, ended_at);
 CREATE INDEX turns_session_started ON turns(session, started_seq);
