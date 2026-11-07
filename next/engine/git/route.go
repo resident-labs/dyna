@@ -358,9 +358,9 @@ func pushRule(ctx context.Context, rooms RoomRepositories, repo contract.RepoNam
 		return "", err
 	}
 	if len(recorded) == 0 {
-		return "not owned by this session: it has no branch yet, and can push the branch of a PR it or a session above or below it owns", nil
+		return "not owned by this session: it has no branch yet, and can push the branch of an open PR it owns, or an open PR owned by a session in its parent's team (its own team for root) or above it", nil
 	}
-	return fmt.Sprintf("not owned by this session: it can push %s, %s-<topic>, those branches of a workflow run it resumes, and the branch of a PR it or a session above or below it owns", recorded[0], recorded[0]), nil
+	return fmt.Sprintf("not owned by this session: it can push %s, %s-<topic>, those branches of a workflow run it resumes, and the branch of an open PR it owns, or an open PR owned by a session in its parent's team (its own team for root) or above it", recorded[0], recorded[0]), nil
 }
 
 // refSafe is a name or topic of letters, digits, dots, underscores and hyphens that git accepts in a branch name.
@@ -373,8 +373,8 @@ func ValidBranch(name string) bool {
 	return refSafe(name) && name[0] != '.' && name[0] != '-' && name[0] != '_'
 }
 
-// CanPushBranch checks the branches recorded as the session's own, those followed by -<topic>, a branch registered to an owned
-// PR, and the same recorded branches of the runs that this session's run resumes. A resumed run is a new session, and it
+// CanPushBranch checks the branches recorded as the session's own, those followed by -<topic>, PR branches
+// allowed by OwnsPRBranch, and the same recorded branches of the runs that this session's run resumes. A resumed run is a new session, and it
 // carries on the work on the branches of the runs before it. A name that another session that is not closed has recorded is
 // never reached through a topic.
 func CanPushBranch(ctx context.Context, rooms RoomRepositories, repo contract.RepoName, session contract.SessionID, branch string) (bool, error) {
