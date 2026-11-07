@@ -26,6 +26,13 @@ func TestTimestampMigrationHistoricalZero(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
+	var indexSQL string
+	if err = s.Read().QueryRow("SELECT sql FROM sqlite_master WHERE name='deliveries_open'").Scan(&indexSQL); err != nil {
+		t.Fatal(err)
+	}
+	if indexSQL != steps[100][0] {
+		t.Fatalf("timestamp migration changed open-delivery index: %s", indexSQL)
+	}
 	var model int64
 	if err = s.Read().QueryRow("SELECT model_sent_at FROM turns WHERE id='old'").Scan(&model); err != nil {
 		t.Fatal(err)
