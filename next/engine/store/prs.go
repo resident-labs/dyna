@@ -60,7 +60,7 @@ type RepoHead struct {
 	Head string
 }
 
-const prColumns = `p.repo,p.number,p.url,p.title,p.author,p.session,p.draft,p.state,p.head,p.review,p.ci,p.merge,s.room,p.head_repo,p.baseline,p.ci_told,p.seen_reviews,p.own_wake_at,p.meta,p.meta_wake_at,coalesce(p.stack,0),coalesce(p.position,0),(SELECT count(*) FROM pr_owners layers WHERE layers.repo=p.repo COLLATE NOCASE AND layers.stack=p.stack) FROM pr_owners p JOIN sessions s ON s.id=p.session`
+const prColumns = `p.repo,p.number,p.url,p.title,p.author,p.session,p.draft,p.state,p.head,p.review,p.ci,p.merge,s.room,p.head_repo,p.baseline,p.ci_told,p.seen_reviews,p.own_wake_at,p.meta,p.meta_wake_at,coalesce(l.stack,p.stack,0),coalesce(l.position,p.position,0),coalesce(l.size,0) FROM pr_owners p JOIN sessions s ON s.id=p.session LEFT JOIN pr_stack_layers l ON l.repo=p.repo COLLATE NOCASE AND l.number=p.number`
 
 func scanPR(row interface{ Scan(...any) error }) (TrackedPR, error) {
 	var p TrackedPR
@@ -222,11 +222,11 @@ func (s *Store) TrackPR(ctx context.Context, pr TrackedPR) error {
 		if exists {
 			pr.Repo = recorded
 		}
-		result, err := tx.ExecContext(ctx, `INSERT INTO pr_owners(repo,number,session,goal,approved_head,head_repo,url,title,author,draft,state,head,meta) VALUES(?,?,?,'','',?,?,?,?,?,?,?,?)
+		result, err := tx.ExecContext(ctx, `INSERT INTO pr_owners(repo,number,session,goal,approved_head,head_repo,url,title,author,draft,state,head,meta,stack,position) VALUES(?,?,?,'','',?,?,?,?,?,?,?,?,(SELECT stack FROM pr_stack_layers WHERE repo=? COLLATE NOCASE AND number=?),(SELECT position FROM pr_stack_layers WHERE repo=? COLLATE NOCASE AND number=?))
 ON CONFLICT(repo,number) DO UPDATE SET branch=CASE WHEN session=excluded.session THEN branch ELSE '' END,session=excluded.session,approved_head='',
 head_repo=excluded.head_repo,url=excluded.url,title=excluded.title,author=excluded.author,draft=excluded.draft,state=excluded.state,head=excluded.head,
-review='',ci='',merge='',ci_told='',seen_reviews=0,own_wake_at=0,meta=excluded.meta,meta_wake_at=0,baseline=1 WHERE state<>'open'`,
-			pr.Repo, pr.Number, pr.Session, pr.HeadRepo, pr.URL, pr.Title, pr.Author, pr.Draft, pr.State, pr.Head, meta)
+stack=excluded.stack,position=excluded.position,review='',ci='',merge='',ci_told='',seen_reviews=0,own_wake_at=0,meta=excluded.meta,meta_wake_at=0,baseline=1 WHERE state<>'open'`,
+			pr.Repo, pr.Number, pr.Session, pr.HeadRepo, pr.URL, pr.Title, pr.Author, pr.Draft, pr.State, pr.Head, meta, pr.Repo, pr.Number, pr.Repo, pr.Number)
 		if err != nil {
 			return err
 		}

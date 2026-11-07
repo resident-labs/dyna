@@ -21,7 +21,7 @@ func checkPRStack(ctx context.Context, q sqlQuery, repo contract.RepoName, prs [
 		var count int
 		var owner contract.SessionID
 		var available bool
-		err = q.QueryRowContext(ctx, `SELECT count(*),coalesce(min(p.session),''),coalesce(min(p.state='open' AND p.stack IS NULL AND s.closed_at IS NULL AND s.state!='closing' AND s.room=?),0) FROM pr_owners p JOIN sessions s ON s.id=p.session WHERE p.repo=? COLLATE NOCASE AND p.number=?`, room, repo, n).Scan(&count, &owner, &available)
+		err = q.QueryRowContext(ctx, `SELECT count(*),coalesce(min(p.session),''),coalesce(min(p.state='open' AND p.stack IS NULL AND NOT EXISTS(SELECT 1 FROM pr_stack_layers l WHERE l.repo=p.repo COLLATE NOCASE AND l.number=p.number) AND s.closed_at IS NULL AND s.state!='closing' AND s.room=?),0) FROM pr_owners p JOIN sessions s ON s.id=p.session WHERE p.repo=? COLLATE NOCASE AND p.number=?`, room, repo, n).Scan(&count, &owner, &available)
 		if err != nil {
 			return err
 		}
@@ -39,6 +39,10 @@ func (s *Store) RecordPRStack(ctx context.Context, repo contract.RepoName, prs [
 			return err
 		}
 		for i, n := range prs {
+			// Immutable membership survives untracking a layer; a PR number can never join a second stack.
+			if _, err := tx.ExecContext(ctx, "INSERT INTO pr_stack_layers(repo,number,stack,position,size) VALUES(?,?,?,?,?)", repo, n, stack, i+1, len(prs)); err != nil {
+				return err
+			}
 			result, err := tx.ExecContext(ctx, `UPDATE pr_owners SET stack=?,position=? WHERE repo=? COLLATE NOCASE AND number=? AND stack IS NULL`, stack, i+1, repo, n)
 			if err != nil {
 				return err
