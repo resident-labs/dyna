@@ -155,3 +155,41 @@ func TestTrackPRKeepsAnOpenOwnerAndRetakesAFinishedRow(t *testing.T) {
 		t.Fatalf("a new owner inherited the branch: %v %v", owns, err)
 	}
 }
+
+func TestOwnsPRUsesRecordedSessionOnly(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.CreateRoom(ctx, "room", "room", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.writer.ExecContext(ctx, "INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES ('owner','room','owner','p','ready','',0),('sibling','room','sibling','p','ready','',0)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.TrackPR(ctx, TrackedPR{PrSummary: contract.PrSummary{Repo: "Acme/App", Number: 7, Session: "owner", State: "closed"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		repo    contract.RepoName
+		session contract.SessionID
+		number  int
+		want    bool
+	}{
+		{"acme/app", "owner", 7, true}, {"ACME/APP", "owner", 7, true}, {"acme/app", "sibling", 7, false}, {"acme/app", "", 7, false}, {"acme/other", "owner", 7, false}, {"acme/app", "owner", 8, false},
+	} {
+		got, err := s.OwnsPR(ctx, tt.repo, tt.session, tt.number)
+		if err != nil || got != tt.want {
+			t.Errorf("%+v: %v %v", tt, got, err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.OwnsPR(ctx, "acme/app", "owner", 7); err == nil {
+		t.Fatal("closed store hid error")
+	}
+}

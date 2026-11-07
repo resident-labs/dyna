@@ -33,7 +33,7 @@ func liveGitHub(t *testing.T, s *Service) (owner, repo string, pulls *prs.Client
 	}
 	owner, repo, _ = strings.Cut(name, "/")
 	pulls = &prs.Client{Token: token, Endpoint: &url.URL{Scheme: "https", Host: "api.github.com"}, Transport: http.DefaultTransport, Now: time.Now}
-	tools, err := githubmcp.Handler(context.Background(), token, pulls.Reads(http.DefaultTransport))
+	tools, err := githubmcp.Handler(context.Background(), token, pulls.Reads(http.DefaultTransport), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

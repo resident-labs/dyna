@@ -40,7 +40,7 @@ var Tools = []Tool{
 		issues: "It creates and edits labels of the allowed repositories ('create' and 'update'); 'delete' is never allowed.",
 	}},
 	{"update_pull_request", map[contract.GitHubWriteGroup]string{
-		pulls: "It edits a PR's title and body, and its draft flag (draft false marks it ready for review, true converts it to a draft): base, state, reviewers and maintainer_can_modify are refused, so a PR is not retargeted, closed, reopened or merged through it.",
+		pulls: "It edits a PR's title, body and draft flag; the session that owns the PR may also close, reopen or change its base. Merges, reviewers and maintainer_can_modify are refused.",
 	}},
 	{"add_reply_to_pull_request_comment", map[contract.GitHubWriteGroup]string{
 		pulls: "It replies to review comments of PRs of the allowed repositories.",
@@ -55,7 +55,7 @@ var Tools = []Tool{
 
 // StrippedParams are the arguments a tool's listed schema leaves out, because the transport refuses them.
 var StrippedParams = map[string][]string{
-	"update_pull_request": {"state", "base", "reviewers", "maintainer_can_modify"},
+	"update_pull_request": {"reviewers", "maintainer_can_modify"},
 }
 
 // ToolNames lists the write tools a grant's groups register.

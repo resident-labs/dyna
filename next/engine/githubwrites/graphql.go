@@ -60,6 +60,8 @@ type mutation struct {
 
 // mutations is the allow-list of GraphQL mutations by root field name. A mutation not here is refused, whatever it is.
 var mutations = map[string]mutation{
+	"closePullRequest":  {group: pulls, fields: []string{"pullRequestId", "clientMutationId"}, refs: []ref{{"pullRequestId", nodePullRequest, true}}},
+	"reopenPullRequest": {group: pulls, fields: []string{"pullRequestId", "clientMutationId"}, refs: []ref{{"pullRequestId", nodePullRequest, true}}},
 	"createIssue": {group: issues, fields: []string{"repositoryId", "title", "body", "assigneeIds", "milestoneId", "labelIds", "parentIssueId", "clientMutationId"},
 		refs:  []ref{{"repositoryId", nodeRepository, true}, {"parentIssueId", nodeIssue, false}, {"milestoneId", nodeMilestone, false}},
 		lists: []ref{{"labelIds", nodeLabel, false}}},
@@ -68,7 +70,7 @@ var mutations = map[string]mutation{
 	"createLabel": {group: issues, fields: []string{"repositoryId", "name", "color", "description", "clientMutationId"}, refs: []ref{{"repositoryId", nodeRepository, true}}},
 	"updateLabel": {group: issues, fields: []string{"id", "name", "color", "description", "clientMutationId"}, refs: []ref{{"id", nodeLabel, true}}},
 
-	"updatePullRequest":             {group: pulls, fields: []string{"pullRequestId", "title", "body", "clientMutationId"}, refs: []ref{{"pullRequestId", nodePullRequest, true}}},
+	"updatePullRequest":             {group: pulls, fields: []string{"pullRequestId", "title", "body", "baseRefName", "clientMutationId"}, refs: []ref{{"pullRequestId", nodePullRequest, true}}},
 	"markPullRequestReadyForReview": {group: pulls, fields: []string{"pullRequestId", "clientMutationId"}, refs: []ref{{"pullRequestId", nodePullRequest, true}}},
 	"convertPullRequestToDraft":     {group: pulls, fields: []string{"pullRequestId", "clientMutationId"}, refs: []ref{{"pullRequestId", nodePullRequest, true}}},
 	"addPullRequestReview":          {group: pulls, fields: []string{"pullRequestId", "commitOID", "body", "event", "clientMutationId"}, refs: []ref{{"pullRequestId", nodePullRequest, true}}, enums: []enum{{"event", reviewEvents, false}}},
@@ -118,7 +120,7 @@ func readGraphQL(body []byte) (graphqlBody, *Refusal) {
 
 // checkGraphQL allows a GraphQL request whose every operation is a query, or a mutation that the grant allows. Every operation of
 // the document counts, whichever one operationName selects.
-func (g *Guard) checkGraphQL(request *http.Request, grant contract.GitHubWrites, body []byte) (mutates bool, refusal *Refusal) {
+func (g *Guard) checkGraphQL(request *http.Request, grant contract.GitHubWrites, body []byte) (mutates bool, err error) {
 	parsed, refusal := readGraphQL(body)
 	if refusal != nil {
 		return false, refusal
@@ -191,6 +193,16 @@ func (g *Guard) checkGraphQL(request *http.Request, grant contract.GitHubWrites,
 				}
 				if refusal := g.within(request, grant, nodes, id, each.kind, field.Name); refusal != nil {
 					return false, refusal
+				}
+				_, retarget := input["baseRefName"]
+				if field.Name == "closePullRequest" || field.Name == "reopenPullRequest" || (field.Name == "updatePullRequest" && retarget) {
+					found := nodes[id]
+					if found.Number <= 0 {
+						return false, refuse(contract.GitHubWriteGraphQLUnresolved, "GitHub returned no PR number")
+					}
+					if err := g.requireOwner(request.Context(), contract.RepoName(found.Repository.Name), found.Number); err != nil {
+						return false, err
+					}
 				}
 			}
 			for _, each := range rule.lists {

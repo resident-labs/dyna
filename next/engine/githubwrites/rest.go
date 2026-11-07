@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
@@ -20,6 +21,7 @@ type route struct {
 	project bool // {owner} owns a project and no repository, so the grant is checked by owner
 	notPR   bool // with no field list, a PATCH is allowed on an issue and, beyond labels, not on a PR (the issues API reaches a PR by its number)
 	comment bool // {number} names a comment, and the comment's issue must be in the allowed repository of the path
+	ownEdit bool // lifecycle fields require the PR owner
 	item    bool // the last {number} names a project item, and the item's content must be in an allowed repository
 }
 
@@ -32,7 +34,7 @@ var routes = []route{
 	{method: http.MethodPost, path: "repos/{owner}/{repo}/issues/{number}/labels", group: issues},
 	{method: http.MethodPut, path: "repos/{owner}/{repo}/issues/{number}/labels", group: issues},
 
-	{method: http.MethodPatch, path: "repos/{owner}/{repo}/pulls/{number}", group: pulls, fields: []string{"title", "body"}},
+	{method: http.MethodPatch, path: "repos/{owner}/{repo}/pulls/{number}", group: pulls, ownEdit: true, fields: []string{"title", "body", "state", "base"}},
 	{method: http.MethodPatch, path: "repos/{owner}/{repo}/issues/{number}", group: pulls, fields: []string{"labels"}},
 	{method: http.MethodPost, path: "repos/{owner}/{repo}/issues/{number}/labels", group: pulls},
 	{method: http.MethodPut, path: "repos/{owner}/{repo}/issues/{number}/labels", group: pulls},
@@ -106,7 +108,7 @@ func segmentsOf(request *http.Request, prefix string) ([]string, bool) {
 
 // checkREST allows a REST write that matches a route of a group the grant has on, on a repository (or project owner) it allows,
 // with body keys the route lists. body is the request's JSON, read once by the caller.
-func (g *Guard) checkREST(grant contract.GitHubWrites, request *http.Request, prefix string, body []byte) *Refusal {
+func (g *Guard) checkREST(grant contract.GitHubWrites, request *http.Request, prefix string, body []byte) error {
 	what := request.Method + " " + request.URL.Path
 	segments, canonical := segmentsOf(request, prefix)
 	if !canonical {
@@ -187,6 +189,23 @@ func (g *Guard) checkREST(grant contract.GitHubWrites, request *http.Request, pr
 			return nil
 		}
 		if asObject && keysWithin(keys, each.fields) {
+			if each.ownEdit {
+				state, hasState := keys["state"]
+				_, hasBase := keys["base"]
+				if hasState {
+					var value string
+					if json.Unmarshal(state, &value) != nil || (value != "open" && value != "closed") {
+						return refuse(contract.GitHubWriteFieldNotAllowed, "a PR state is open or closed")
+					}
+				}
+				if hasState || hasBase {
+					number, err := strconv.Atoi(found.number)
+					if err != nil {
+						return err
+					}
+					return g.requireOwner(request.Context(), contract.RepoName(found.owner+"/"+found.repo), number)
+				}
+			}
 			return nil
 		}
 	}

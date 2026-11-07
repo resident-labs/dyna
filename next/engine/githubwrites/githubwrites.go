@@ -24,6 +24,19 @@ func AllowedFrom(ctx context.Context) contract.GitHubWrites {
 	return grant
 }
 
+type sessionKey struct{}
+
+// WithSession records the trusted box socket caller, never a tool argument.
+func WithSession(ctx context.Context, session contract.SessionID) context.Context {
+	return context.WithValue(ctx, sessionKey{}, session)
+}
+
+// SessionFrom returns the box caller, or empty when none is recorded.
+func SessionFrom(ctx context.Context) contract.SessionID {
+	session, _ := ctx.Value(sessionKey{}).(contract.SessionID)
+	return session
+}
+
 // Refusal is a request the githubWrites setting refused. Reason is the typed cause; Detail says what was refused and why.
 type Refusal struct {
 	Reason contract.GitHubWriteReason
