@@ -76,6 +76,12 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		}
 	} else if e := s.roomAccess(ctx, caller, req.Room); e != nil {
 		return contract.PostResponse{}, e
+	} else if req.Room == "" {
+		return contract.PostResponse{}, invalid("room is required")
+	} else if err := s.store.RoomExists(ctx, req.Room); errors.Is(err, store.ErrNotFound) {
+		return contract.PostResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "room not found"}
+	} else if err != nil {
+		return contract.PostResponse{}, failure(err)
 	}
 	if len(req.ToolCallID) > 4096 || (req.ToolCallID != "" && caller.Kind != contract.PrincipalSession) {
 		return contract.PostResponse{}, invalid("invalid tool call ID")
