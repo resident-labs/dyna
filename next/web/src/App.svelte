@@ -63,7 +63,7 @@
   import { distinctInitials } from "./lib/identity.ts";
   import { computerPlace, fitted, type Rect } from "./lib/float.ts";
   import { pinPage } from "./lib/viewport.ts";
-  import type { Conversation, PostRequest, RoomID } from "./lib/contract.gen.ts";
+  import type { Attachment, Conversation, PostRequest, RoomID } from "./lib/contract.gen.ts";
   // A pairing link leaves the address bar and history at once, whatever this browser's state. Only a signed-out page uses it.
   const move = new URLSearchParams(location.hash.slice(1));
   const moveData = move.has("route") ? move : new URLSearchParams(sessionStorage.getItem("dyna-connect-move") ?? "");
@@ -291,6 +291,18 @@
   let drafts: Record<string, string> = $state({});
   // A draft that is not in memory yet comes from localStorage, so a reload keeps the text. Composer and send both read it this way.
   const savedDrafts = new ComposerDrafts(() => localStorage);
+  // Revisions survive Composer remounts, including an edit back to the same text.
+  const draftRevisions = new Map<string, number>();
+  function editDraft(to: string, text: string) {
+    draftRevisions.set(to, (draftRevisions.get(to) ?? 0) + 1);
+    drafts[to] = text;
+    savedDrafts.save(to, text);
+  }
+  function clearDraft(to: string) {
+    draftRevisions.set(to, (draftRevisions.get(to) ?? 0) + 1);
+    drafts[to] = "";
+    savedDrafts.clear(to);
+  }
   let unsent: Record<string, PostRequest[]> = $state.raw({});
   const keyOf = (request: PostRequest) => `${request.room}/${request.home?.session ?? ""}`;
   const keep = (request: PostRequest) => { unsent = { ...unsent, [keyOf(request)]: [...unsent[keyOf(request)] ?? [], request] }; };
@@ -336,37 +348,65 @@
   // directly, and a post that does not send waits as a failed row in that DM for Retry.
   function commandContext(dm = session): CommandContext {
     const targetRoom = room!, current = store!, destination = { room: targetRoom, store: current, thread, view }, to = targetRoom + "/" + (dm ?? "");
+    // Capture at invocation, not when this render's context is created. No post or clear after an API wait reads a newer draft.
+    function capture() {
+      const draft = files(to);
+      return { revision: draftRevisions.get(to) ?? 0, quote: quotes[to], draft,
+        fileIds: draft.items.map(item => item.id), attachments: [...draft.ready] };
+    }
+    let submitted: ReturnType<typeof capture>;
+    function clearOwnedText() {
+      if ((draftRevisions.get(to) ?? 0) === submitted.revision) clearDraft(to);
+    }
     return {
       dm: !!dm,
       start: async (profile, brief) => {
+        submitted = capture();
         const result = await call("session.start", { clientId: crypto.randomUUID(), room: targetRoom, profile, brief,
           name: sessionName(brief, [...current.sessions.values()].map(item => item.name)) });
         startingBriefs[result.session] = brief;
         openLocation(targetRoom, result.session);
       },
-      switchProfile: async profile => { await call("session.set_profile", { session: dm!, profile }); },
-      send: text => send(dm, text, destination),
-      clear: () => { drafts[to] = ""; savedDrafts.clear(to); },
+      switchProfile: async profile => {
+        submitted = capture();
+        await call("session.set_profile", { session: dm!, profile });
+      },
+      send: text => {
+        const { quote, draft, fileIds, attachments } = submitted;
+        clearOwnedText();
+        for (const id of fileIds) draft.remove(id);
+        if (quotes[to] === quote) {
+          quotes[to] = undefined;
+          expiry.clear(to);
+          replaced[to] = undefined;
+        }
+        deliver(dm, text, quote, [...quote?.attachments ?? [], ...attachments], destination);
+      },
+      // Room starts and switch-only commands consume text, never files or a quote.
+      clear: clearOwnedText,
     };
   }
-  function send(dm = session, overrideText?: string, destination = { room, store, thread, view }) {
-    const { room: targetRoom, store: targetStore, thread: targetThread, view: targetView } = destination;
-    if (!targetStore || !targetRoom) return;
-    const to = `${targetRoom}/${dm ?? ""}`;
-    const text = overrideText ?? savedDrafts.draft(to, drafts[to]), quote = quotes[to], draft = files(to);
+  function send(dm = session) {
+    if (!store || !room) return;
+    const to = room + "/" + (dm ?? "");
+    const text = savedDrafts.draft(to, drafts[to]), quote = quotes[to], draft = files(to);
     if (draft.busy || (!text.trim() && !quote && !draft.items.length)) return;
     const attachments = [...quote?.attachments ?? [], ...draft.take()];
-    drafts[to] = "";
-    savedDrafts.clear(to);
+    clearDraft(to);
     quotes[to] = undefined;
     if (to === key) clearReplacement();
+    deliver(dm, text, quote, attachments, { room, store, thread, view });
+  }
+  function deliver(dm: string | undefined, text: string, quote: Quote | undefined, attachments: Attachment[],
+    destination: { room: string; store: RoomStore; thread: SessionThread | undefined; view: Feed | undefined }) {
+    const { room: targetRoom, store: targetStore, thread: targetThread, view: targetView } = destination;
     // The engine refuses mentions on a DM post; in the feed, @names of open sessions become mentions.
     // Mentions come from the owner's own words only, so an @name inside a forwarded post wakes nobody.
     const post = dm ? { text, mentions: [] } : parseMentions(text, targetStore.sessions.values());
     // A forward carries the post's files; the engine keeps each file once, by hash, for every conversation.
     const request: PostRequest = { room: targetRoom, data: quote?.data, text: quote ? quoted(quote, post.text) : post.text, mentions: post.mentions.length ? post.mentions : undefined,
       home: dm ? { kind: "dm", session: dm } : undefined, attachments: attachments.length ? attachments : undefined };
-    if (dm && dm === session && targetRoom === room) void targetThread?.send(request);
+    if (dm && dm === session && targetRoom === room && targetThread && targetThread === thread) void targetThread.send(request);
     else if (dm) void call("post", request).catch(() => keep(request));
     else void targetView?.send(request);
   }
@@ -701,7 +741,7 @@
     bind:full={computerFull} bind:rect bind:element={computer} start={() => call("computer.start", { session: id }).then(() => undefined)}
     onfit={(ratio, chrome) => { if (!places.has(id)) places.set(id, rect = fitted(rect, ratio, chrome, (feed?.getBoundingClientRect().bottom ?? window.innerHeight) - 16)); }}
     onclose={tapped => void stopWatching(tapped)}>
-    {#snippet chat()}{#if attention.can("operate")}<Composer bind:value={() => savedDrafts.draft(to, drafts[to]),text => { drafts[to] = text; savedDrafts.save(to, text); }} onsend={() => send(id)} commandContext={commandContext(id)} thread
+    {#snippet chat()}{#if attention.can("operate")}<Composer bind:value={() => savedDrafts.draft(to, drafts[to]),text => { editDraft(to, text); }} onsend={() => send(id)} commandContext={commandContext(id)} thread
       placeholder={"Message " + (store?.names.get(id) ?? "Session")} quote={quotes[to]} onundo={() => {}} onunquote={() => { quotes[to] = undefined; }} files={files(to)} stop={stopOf(id)} />{/if}{/snippet}
   </ComputerView>{/key}
 {/snippet}
@@ -799,7 +839,7 @@
       {:else if paused || pauseFailed === room}<p class="paused" role="status"><span>{pauseFailed === room ? "The room did not change." : "Room paused. No session starts a new turn."}</span>
         {#if attention.can("operate")}<button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button>{/if}</p>{/if}
       {#if crew}<!-- The run page has the stop. -->
-      {:else if attention.can("operate")}<Composer bind:this={composerBox} bind:element={composer} bind:value={() => savedDrafts.draft(key, drafts[key]),text => { drafts[key] = text; savedDrafts.save(key, text); clearReplacement(); }} onsend={() => send()} commandContext={commandContext()} thread={!!session} placeholder={"Message " + title} host={attention.host()}
+      {:else if attention.can("operate")}<Composer bind:this={composerBox} bind:element={composer} bind:value={() => savedDrafts.draft(key, drafts[key]),text => { editDraft(key, text); clearReplacement(); }} onsend={() => send()} commandContext={commandContext()} thread={!!session} placeholder={"Message " + title} host={attention.host()}
         quote={quotes[key]} replacement={replaced[key]} onundo={() => { quotes[key] = undoForward({ quote: quotes[key], previous: replaced[key] }).quote; clearReplacement(); }} onunquote={() => { quotes[key] = undefined; clearReplacement(); }} sessions={mentions} files={files(key)} {stop} />
       {:else}<p class="readonly" role="status">This device can read the room but not post in it.</p>{/if}
     {/if}
