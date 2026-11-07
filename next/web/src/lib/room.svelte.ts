@@ -198,8 +198,11 @@ export class RoomStore {
     this.changed();
     if (this.closed || !this.loaded) return;
     void this.loadPRs();
+    let connected = false;
     this.stopStream = this.connect(this.room, () => this.head, event => this.apply(event), undefined, undefined, () => {
-      // A conversation.read is not replayed. A read made after load() or during a dropped stream is missed, so each hello rereads.
+      if (this.closed) return;
+      // load owns the initial reads. Only a reconnect repairs state missed while the stream was down.
+      if (!connected) { connected = true; return; }
       this.rereading = this.rereadPositions().catch(() => {});
       void this.readWorkflows();
       this.refreshWaits();

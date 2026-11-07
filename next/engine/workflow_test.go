@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"slices"
 	"strings"
 	"testing"
@@ -332,5 +333,27 @@ func TestAStepChangeIsLiveAndQuiet(t *testing.T) {
 	}
 	if status, problem := w.WorkflowStatus(w.ctx, w.owner, contract.WorkflowStatusRequest{Session: crew.Session}); problem != nil || strings.Contains(status.Steps[0].Reason, "hunter2") {
 		t.Fatalf("status %+v, %+v", status, problem)
+	}
+}
+
+func TestWorkflowListOmitsResultButStatusKeepsIt(t *testing.T) {
+	w := setupWorkflow(t)
+	started, _ := w.start(w.owner, workflowScript)
+	if err := w.store.Write(w.ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(w.ctx, "UPDATE workflow_runs SET state='done',result=? WHERE id=?", strings.Repeat("result", 10000), started.Run)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	list, problem := w.WorkflowList(w.ctx, w.owner, contract.WorkflowListRequest{Room: w.room})
+	if problem != nil || len(list.Runs) != 1 {
+		t.Fatalf("%+v %+v", list, problem)
+	}
+	if list.Runs[0].Result != "" {
+		t.Fatal("list includes full result")
+	}
+	status, problem := w.WorkflowStatus(w.ctx, w.owner, contract.WorkflowStatusRequest{Run: started.Run})
+	if problem != nil || status.Run.Result != strings.Repeat("result", 10000) {
+		t.Fatalf("status lost result: %v", problem)
 	}
 }
