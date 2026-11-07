@@ -24,7 +24,7 @@ const (
 
 // Tools lists the write tools a room's groups can register. Every other upstream write tool stays unregistered.
 var Tools = []Tool{
-	{"actions_run_trigger", map[contract.GitHubWriteGroup]string{contract.GitHubWriteActions: "Runs, re-runs and cancels Actions runs on branches this session may push (its own branch, its `-topic` branches, and branches of PRs it owns). Deleting logs, approving runs and runs from forks are refused."}},
+	{"actions_run_trigger", map[contract.GitHubWriteGroup]string{contract.GitHubWriteActions: "Runs, re-runs and cancels Actions runs on branches this session may push: its recorded branches and `-topic` branches, resumed workflow branches, branches of PRs it owns, and open PR branches owned by ancestors or anyone in its parent's subtree (its own subtree for root). Deleting logs, approving runs and runs from forks are refused."}},
 	{"issue_write", map[contract.GitHubWriteGroup]string{
 		issues: "It creates and edits issues of the allowed repositories; a label name that does not exist yet is created as a new label; clearing an issue field value sends a DELETE, which is never allowed.",
 		pulls:  "With only pulls on it sets the labels of an issue or PR and nothing else (a label name that does not exist yet is created as a new label): creating an issue and every other field are refused.",

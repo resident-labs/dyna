@@ -58,7 +58,7 @@ func TestAResumedSessionPushesTheBranchesOfTheRunItResumes(t *testing.T) {
 
 func TestARefusedPushSaysTheRule(t *testing.T) {
 	report, _ := pushTo(t, routeAccess(), "earlier-0123456789ab")
-	for _, want := range []string{"not owned by this session", "work,", "work-<topic>", "a workflow run it resumes", "a PR it or a session above or below it owns"} {
+	for _, want := range []string{"not owned by this session", "work,", "work-<topic>", "a workflow run it resumes", "a PR it owns, or an open PR owned by a session in its parent's team (its own team for root) or above it"} {
 		if !strings.Contains(report, want) {
 			t.Errorf("the refusal does not say %q: %q", want, report)
 		}
@@ -79,7 +79,7 @@ func TestASessionWithNoBranchYetIsToldSo(t *testing.T) {
 	access := routeAccess()
 	access.recorded = nil
 	report, forwarded := pushTo(t, access, "anything")
-	if forwarded || !strings.Contains(report, "it has no branch yet, and can push the branch of a PR it or a session above or below it owns") {
+	if forwarded || !strings.Contains(report, "it has no branch yet, and can push the branch of a PR it owns, or an open PR owned by a session in its parent's team (its own team for root) or above it") {
 		t.Fatalf("forwarded %v, %q", forwarded, report)
 	}
 }
