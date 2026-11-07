@@ -29,6 +29,52 @@ func refreshedNotices(t *testing.T, s *Service, ctx context.Context, sid contrac
 	return wakes, openGoals
 }
 
+// StopStale leaves a ready snapshot with want=stop until the lifecycle worker
+// stops the old binary. Refresh cannot mark it, but its update can still supply
+// the persisted ready transition required by the deploy smoke.
+func TestRefreshDuringStaleStopObservesUpdate(t *testing.T) {
+	s, host, room, sid, ctx := staleSession(t)
+	_, disconnect := connectBox(t, s, ctx, sid, oldBinary)
+	waitWant(t, s, ctx, sid, "stop")
+	page, problem := s.SessionList(ctx, refreshOwner, contract.SessionListRequest{Room: room})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	var box contract.BoxID
+	for _, session := range page.Sessions {
+		if session.ID == sid && session.BoxState == contract.BoxReady && session.Turn == "" && session.Computer == contract.ComputerStopped {
+			box = session.Box
+		}
+	}
+	if box == "" {
+		t.Fatal("stale-stop window not visible as an idle ready session")
+	}
+	response, problem := s.SessionRefresh(ctx, refreshOwner, contract.SessionRefreshRequest{Session: sid})
+	if problem != nil || len(response.Marked) != 0 {
+		t.Fatalf("marked=%v: %v", response.Marked, problem)
+	}
+	passLifecycle(t, s, ctx)
+	disconnect()
+	if host.stops != 1 || stateOf(t, s, ctx, sid) != contract.BoxStopped {
+		t.Fatal("stale box did not stop")
+	}
+	wakeSession(t, s, ctx, room, sid)
+	passLifecycle(t, s, ctx)
+	if host.starts != 1 || stateOf(t, s, ctx, sid) != contract.BoxStarting {
+		t.Fatal("updated box did not start")
+	}
+	if _, problem := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{}); problem != nil {
+		t.Fatal(problem)
+	}
+	var transitions int
+	if err := s.store.Read().QueryRowContext(ctx, `SELECT count(*) FROM events WHERE room=? AND seq>? AND type='box.changed' AND json_extract(CAST(body AS TEXT),'$.session')=? AND json_extract(CAST(body AS TEXT),'$.box')=? AND json_extract(CAST(body AS TEXT),'$.to')='ready' AND json_extract(CAST(body AS TEXT),'$.from')!='ready'`, room, page.Seq, sid, box).Scan(&transitions); err != nil {
+		t.Fatal(err)
+	}
+	if transitions != 1 || stateOf(t, s, ctx, sid) != contract.BoxReady {
+		t.Fatalf("ready transitions=%d state=%s", transitions, stateOf(t, s, ctx, sid))
+	}
+}
+
 // A refresh while a turn runs stops the box once the turn ends, and the engine starts it again by itself, whoever asked: one
 // notice for that start, which wakes the session whether or not it holds a goal, and says to continue only with an open goal.
 func TestRefreshRestartsTheBoxAfterItsTurn(t *testing.T) {

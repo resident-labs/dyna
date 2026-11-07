@@ -51,7 +51,9 @@ echo "curl $*" >> "$TEST_LOG"
 case "$*" in
  *room.list*) echo '{"rooms":[{"id":"room-1"}]}' ;;
  *session.list*)
-   if [[ ${FAKE_NO_IDLE:-0} == 1 ]]; then
+   if [[ ${FAKE_NOT_CURRENT:-0} == 1 && -f $TEST_REFRESH ]]; then
+     echo '{"sessions":[{"id":"idle","box":"box-1","boxState":"starting","computer":"stopped"}],"seq":11}'
+   elif [[ ${FAKE_NO_IDLE:-0} == 1 ]]; then
      echo '{"sessions":[{"id":"busy","box":"busy-box","boxState":"ready","turn":"turn-1","computer":"stopped"}],"seq":10}'
    else
      echo '{"sessions":[{"id":"busy","box":"busy-box","boxState":"ready","turn":"turn-1","computer":"stopped"},{"id":"terminal","box":"terminal-box","boxState":"ready","computer":"running"},{"id":"idle","box":"box-1","boxState":"ready","computer":"stopped","shellJobs":1}],"seq":10}'
@@ -60,7 +62,9 @@ case "$*" in
    [[ $* == *'{"session":"idle"}'* && $* != *'"room"'* ]] || exit 1
    touch "$TEST_REFRESH"
    echo 0 > "$TEST_EVENTS"
-   echo '{"marked":["idle"]}' ;;
+   if [[ ${FAKE_REFRESH_ERROR:-0} == 1 ]]; then exit 22; fi
+   if [[ ${FAKE_UNMARKED:-0} == 1 ]]; then echo '{"marked":[]}'
+   else echo '{"marked":["idle"]}'; fi ;;
  *events.list*)
    polls=$(( $(<"$TEST_EVENTS") + 1 ))
    echo "$polls" > "$TEST_EVENTS"
@@ -156,6 +160,18 @@ grep -q 'Box lifecycle smoke passed: box-1 returned ready' "$tmp/out"
 test "$(<"$TEST_EVENTS")" = 2
 test "$(<"$tmp/install/deployed-next")" = tree123
 test ! -f "$tmp/install/failed-next"
+# StopStale can leave want=stop while session.list still says ready (covered by
+# TestRefreshDuringStaleStopObservesUpdate in the engine). An unmarked refresh
+# must observe the update's persisted ready transition, not refresh again.
+rm -f "$tmp/install/deployed-next" "$TEST_REFRESH"
+: > "$TEST_LOG"
+FAKE_UNMARKED=1 FAKE_NULL_EVENTS=first "$script" "${args[@]}" >"$tmp/out" 2>&1
+grep -q 'refresh did not mark target; waiting for a lifecycle transition' "$tmp/out"
+grep -q 'refresh response: {"marked":\[\]}' "$tmp/out"
+grep -q 'Box lifecycle smoke passed: box-1 returned ready' "$tmp/out"
+test "$(grep -c 'curl .*session.refresh' "$TEST_LOG")" = 1
+test "$(<"$TEST_EVENTS")" = 2
+test "$(<"$tmp/install/deployed-next")" = tree123
 # #2161: conmon retains the namespace flock (252), lifecycle errors follow,
 # and the refreshed box never returns ready. Active service and HTTP 200 are insufficient.
 rm -f "$tmp/install/deployed-next" "$TEST_REFRESH"
@@ -166,12 +182,16 @@ grep -q 'failed: box lifecycle smoke.*fix forward' "$tmp/out"
 test "$(<"$tmp/install/failed-next")" = tree123
 test ! -f "$tmp/install/deployed-next"
 # Either journal signature suffices; no idle box and no completed step also fail.
-for scenario in namespace lifecycle no-idle timeout null-timeout; do
+for scenario in namespace lifecycle no-idle timeout null-timeout unmarked-timeout unmarked-fence not-current refresh-error; do
   rm -f "$tmp/install/failed-next" "$tmp/install/deployed-next" "$TEST_REFRESH"
   case "$scenario" in
     namespace) flags=(FAKE_JOURNAL=namespace); expected='host namespace uncertain' ;;
     lifecycle) flags=(FAKE_JOURNAL=lifecycle); expected='lifecycle step box-1' ;;
-    no-idle) flags=(FAKE_NO_IDLE=1); expected='no idle ready session' ;;
+    no-idle) flags=(FAKE_NO_IDLE=1 FAKE_TIMEOUT=1); expected='timed out after 180 seconds' ;;
+    unmarked-timeout) flags=(FAKE_UNMARKED=1 FAKE_NO_RETURN=1 FAKE_TIMEOUT=1); expected='timed out after 180 seconds' ;;
+    unmarked-fence) flags=(FAKE_UNMARKED=1 FAKE_JOURNAL=fence); expected='namespace fence or lifecycle error' ;;
+    not-current) flags=(FAKE_UNMARKED=1 FAKE_NOT_CURRENT=1 FAKE_TIMEOUT=1); expected='timed out after 180 seconds' ;;
+    refresh-error) flags=(FAKE_REFRESH_ERROR=1); expected='Command failed: curl' ;;
     timeout) flags=(FAKE_NO_RETURN=1 FAKE_TIMEOUT=1); expected='timed out after 180 seconds' ;;
     null-timeout) flags=(FAKE_NULL_EVENTS=always FAKE_TIMEOUT=1); expected='timed out after 180 seconds' ;;
   esac
@@ -180,6 +200,11 @@ for scenario in namespace lifecycle no-idle timeout null-timeout; do
   test "$(<"$tmp/install/failed-next")" = tree123
   test ! -f "$tmp/install/deployed-next"
   if [[ $scenario == no-idle ]]; then test ! -f "$TEST_REFRESH"; fi
+  if [[ $scenario == unmarked-timeout ]]; then
+    test "$(<"$TEST_EVENTS")" -gt 1
+    grep -q 'refresh did not mark target; waiting for a lifecycle transition' "$tmp/out"
+    ! grep -q 'Box lifecycle smoke passed' "$tmp/out"
+  fi
   if [[ $scenario == null-timeout ]]; then
     test "$(<"$TEST_EVENTS")" -gt 1
     grep -q 'failed: box lifecycle smoke.*fix forward' "$tmp/out"
