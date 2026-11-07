@@ -64,55 +64,56 @@ func (f *fakeClient) GoalJournal(context.Context, contract.GoalJournalRequest) (
 }
 
 type fakeClient struct {
-	goalSet      contract.GoalSetRequest
-	goalDone     contract.GoalDoneRequest
-	host         contract.HostAddRequest
-	hostLimit    *contract.HostSetLimitsRequest
-	hostSet      *contract.HostSetRequest
-	profiles     []contract.ProfileEntry
-	profileSet   *contract.ProfileSetRequest
-	profileRm    *contract.ProfileRemoveRequest
-	roomSet      *contract.RoomSetRequest
-	hostNoSwap   bool
-	room         contract.RoomCreateRequest
-	limits       contract.RoomSetLimitsRequest
-	repoAdd      contract.RoomRepoAddRequest
-	repoCI       contract.RepoCISetRequest
-	repoList     contract.RoomReposRequest
-	start        contract.SessionStartRequest
-	composeList  contract.ComposeListRequest
-	close        contract.SessionCloseRequest
-	closed       contract.SessionCloseResponse
-	setProfile   contract.SessionSetProfileRequest
-	setBranch    contract.SessionSetBranchRequest
-	restart      contract.SessionRestartRequest
-	refresh      contract.SessionRefreshRequest
-	refreshed    contract.SessionRefreshResponse
-	post         contract.PostRequest
-	events       []contract.Event
-	after        int64
-	opList       contract.OpListRequest
-	opDecide     contract.OpDecideRequest
-	ops          []contract.Operation
-	submit       contract.OpSubmitRequest
-	submitResp   contract.OpSubmitResponse
-	uploads      []string
-	hostexecResp contract.HostexecRunResponse
-	hostexecReq  contract.HostexecRunRequest
-	devicePair   contract.DevicePairRequest
-	devices      []contract.Device
-	deviceRevoke contract.DeviceRevokeRequest
-	deviceScopes contract.DeviceSetScopesRequest
-	deviceHost   contract.DeviceSetHostRequest
-	prList       contract.PrListRequest
-	prStatus     contract.PrStatusRequest
-	prTrack      contract.PrTrackRequest
-	prUntrack    contract.PrUntrackRequest
-	issueList    contract.IssueListRequest
-	issueStatus  contract.IssueStatusRequest
-	issueTrack   contract.IssueTrackRequest
-	issueUntrack contract.IssueUntrackRequest
-	hosts        []contract.HostSummary
+	goalSet        contract.GoalSetRequest
+	goalDone       contract.GoalDoneRequest
+	host           contract.HostAddRequest
+	hostLimit      *contract.HostSetLimitsRequest
+	hostSet        *contract.HostSetRequest
+	profiles       []contract.ProfileEntry
+	profileSet     *contract.ProfileSetRequest
+	profileRm      *contract.ProfileRemoveRequest
+	roomSet        *contract.RoomSetRequest
+	hostNoSwap     bool
+	room           contract.RoomCreateRequest
+	limits         contract.RoomSetLimitsRequest
+	repoAdd        contract.RoomRepoAddRequest
+	repoCI         contract.RepoCISetRequest
+	repoList       contract.RoomReposRequest
+	start          contract.SessionStartRequest
+	composeList    contract.ComposeListRequest
+	close          contract.SessionCloseRequest
+	closed         contract.SessionCloseResponse
+	setProfile     contract.SessionSetProfileRequest
+	setBranch      contract.SessionSetBranchRequest
+	restart        contract.SessionRestartRequest
+	refresh        contract.SessionRefreshRequest
+	refreshed      contract.SessionRefreshResponse
+	post           contract.PostRequest
+	events         []contract.Event
+	after          int64
+	opList         contract.OpListRequest
+	opDecide       contract.OpDecideRequest
+	ops            []contract.Operation
+	submit         contract.OpSubmitRequest
+	submitResp     contract.OpSubmitResponse
+	uploads        []string
+	hostexecResp   contract.HostexecRunResponse
+	hostexecReq    contract.HostexecRunRequest
+	devicePair     contract.DevicePairRequest
+	devices        []contract.Device
+	deviceRevoke   contract.DeviceRevokeRequest
+	deviceScopes   contract.DeviceSetScopesRequest
+	deviceHost     contract.DeviceSetHostRequest
+	prList         contract.PrListRequest
+	prStatus       contract.PrStatusRequest
+	prStatusResult *contract.PrSummary
+	prTrack        contract.PrTrackRequest
+	prUntrack      contract.PrUntrackRequest
+	issueList      contract.IssueListRequest
+	issueStatus    contract.IssueStatusRequest
+	issueTrack     contract.IssueTrackRequest
+	issueUntrack   contract.IssueUntrackRequest
+	hosts          []contract.HostSummary
 
 	roomDelete    contract.RoomDeleteRequest
 	roomDeleteErr error
@@ -143,6 +144,9 @@ func (f *fakeClient) PrList(_ context.Context, q contract.PrListRequest) (contra
 }
 func (f *fakeClient) PrStatus(_ context.Context, q contract.PrStatusRequest) (contract.PrStatusResponse, error) {
 	f.prStatus = q
+	if f.prStatusResult != nil {
+		return contract.PrStatusResponse{PR: *f.prStatusResult}, nil
+	}
 	return contract.PrStatusResponse{PR: contract.PrSummary{Repo: q.Repo, Number: q.Number, Stack: 50, Position: 2, StackSize: 2, State: contract.PrMerged}}, nil
 }
 func (f *fakeClient) PrTrack(_ context.Context, q contract.PrTrackRequest) (contract.PrTrackResponse, error) {
@@ -905,5 +909,13 @@ func TestPrStackCommand(t *testing.T) {
 		if _, err := execCLI(&fakeClient{}, args...); err == nil {
 			t.Fatalf("accepted %v", args)
 		}
+	}
+}
+
+func TestPrStatusCancelledNames(t *testing.T) {
+	f := &fakeClient{prStatusResult: &contract.PrSummary{Repo: "o/r", Number: 1807, CI: contract.PrCICancelled, CancelledChecks: []string{"verify", "pool-watch"}}}
+	out := runCLI(t, f, "pr", "status", "1807", "--repo", "o/r")
+	if !strings.Contains(out, "CI cancelled: verify, pool-watch") || strings.Contains(out, "ci=success") {
+		t.Fatal(out)
 	}
 }

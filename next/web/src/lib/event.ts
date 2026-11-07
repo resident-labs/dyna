@@ -35,7 +35,7 @@ const visual = object({ id: string, version: number, title: string, height: numb
     name: oneOf("renders", "console", "widths", "contrast", "network"), status: oneOf("pass", "warn", "fail", "skip"), detail: optional(string),
   }))) });
 const attachment = object({ name: string, media: string, bytes: number, sha256: string, visual: optional(nullable(visual)) });
-const prChangeKind = oneOf("ci_failed", "ci_passed", "changes_requested", "approved", "conflict", "merged", "closed", "comment", "metadata", "pushed");
+const prChangeKind = oneOf("ci_failed", "ci_cancelled", "ci_passed", "changes_requested", "approved", "conflict", "merged", "closed", "comment", "metadata", "pushed");
 const changeComments = optional(nullable(array(object({ author: string, body: string, url: string, outside: boolean }))));
 const names = optional(nullable(array(string)));
 // A stored event from before the feeds holds only repo, number, session and url.
@@ -44,7 +44,7 @@ const actions = optional(nullable(array(githubAction)));
 const issueChanges = nullable(array(object({ issue: object({ repo: string, number: number, url: string, title: string, author: string, session: string, state: oneOf("open", "closed"), labels: names, assignees: names, milestone: optional(string) }),
   kinds: optional(nullable(array(prChangeKind))), outside: boolean, comments: changeComments, moreComments: optional(number), actions })));
 const prSummary = object({ repo: string, number: number, url: string, title: string, author: string, session: string, draft: boolean, state: oneOf("open", "merged", "closed"), head: string,
-  review: oneOf("", "approved", "changes_requested", "review_required"), ci: oneOf("", "none", "pending", "success", "failure"), merge: oneOf("", "clean", "blocked", "behind", "conflict") });
+  review: oneOf("", "approved", "changes_requested", "review_required"), cancelledChecks: optional(array(string)), ci: oneOf("", "none", "pending", "success", "failure", "cancelled"), merge: oneOf("", "clean", "blocked", "behind", "conflict") });
 const bodies: Record<string, Check> = {
   "connect.connector": object({ missing: boolean }),
   "account.failed": object({ accountId: string, reason: oneOf("sign_in_rejected", "refresh_failed") }),
@@ -81,9 +81,9 @@ const bodies: Record<string, Check> = {
   "github.pr.opened": githubAction,
   "github.pr.merged": githubAction,
   "github.pr.closed": githubAction,
-  "github.ci.finished": object({ repo: string, number: number, session: string, url: string, head: string, result: oneOf("", "none", "pending", "success", "failure") }),
+  "github.ci.finished": object({ repo: string, number: number, session: string, url: string, head: string, result: oneOf("", "none", "pending", "success", "failure", "cancelled") }),
   "git.main_updated": object({ repo: string, head: string }),
-  "git.main_ci_finished": object({ repo: string, branch: string, sha: string, result: oneOf("success", "failure"), runs: nullable(array(object({ name: string, conclusion: string, url: string }))), runsTruncated: optional(boolean) }),
+  "git.main_ci_finished": object({ repo: string, branch: string, sha: string, result: oneOf("success", "failure", "cancelled"), runs: nullable(array(object({ name: string, conclusion: string, url: string }))), runsTruncated: optional(boolean) }),
   "github.issue.opened": githubAction,
   "service.changed": object({ service: string, name: string, host: optional(string), from: optional(string), to: string, reason: optional(string), cause: optional(string) }),
   "service.failed": object({ service: string, name: string, host: optional(string), reason: string, cause: optional(string), detail: optional(string) }),
