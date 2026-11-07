@@ -29,7 +29,7 @@ const recoverRemoving = `recover_removing() {
   *) return 1;;
  esac
  status=0
- inspected=$(podman --cgroup-manager=systemd inspect --format '{{.State.Status}}' "$id" 2>&1) || status=$?
+ inspected=$(podman --cgroup-manager=systemd inspect --type container --format '{{.State.Status}}' "$id" 2>&1) || status=$?
  if [ "$status" = 0 ]; then
   [ "$state" = removing ] && [ "$inspected" = removing ] || return 1
  else
