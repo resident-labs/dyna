@@ -41,7 +41,7 @@ export function parsePrefix(value: string, commands: readonly Command[]) {
 export function commandProblem(value: string, commands: readonly Command[], dm: boolean) {
   const prefix = parsePrefix(value, commands);
   if (!prefix) return "";
-  if (!prefix.command) return prefix.name ? `No profile named ${prefix.name}` : "Choose a profile";
+  if (!prefix.command) return prefix.name ? `No profile named ${prefix.name}` : "";
   return !dm && !prefix.text ? "Add what the new session should do" : "";
 }
 export function sessionName(brief: string, taken: Iterable<string>) {
