@@ -94,6 +94,7 @@ func TestOwnerHostSwitchAuditEntryPaths(t *testing.T) {
 				t.Fatal(err)
 			}
 			on, off := true, false
+			two := 2
 			var want []map[string]any
 			for _, step := range []struct {
 				args []string
@@ -102,6 +103,8 @@ func TestOwnerHostSwitchAuditEntryPaths(t *testing.T) {
 			}{
 				{[]string{"--ci", "on"}, contract.HostSetRequest{CI: &on}, map[string]any{"host": "build", "ci": true}},
 				{[]string{"--ci", "on"}, contract.HostSetRequest{CI: &on}, nil},
+				{[]string{"--ci-scale", "2"}, contract.HostSetRequest{CIScale: &two}, map[string]any{"host": "build", "ciScale": float64(2)}},
+				{[]string{"--ci-scale", "2"}, contract.HostSetRequest{CIScale: &two}, nil},
 				{[]string{"--agents", "off", "--ci", "on"}, contract.HostSetRequest{Agents: &off, CI: &on}, map[string]any{"host": "build", "agents": false}},
 				{[]string{"--agents", "on", "--ci", "off"}, contract.HostSetRequest{Agents: &on, CI: &off}, map[string]any{"host": "build", "agents": true, "ci": false}},
 				{[]string{"--clear-create-problem"}, contract.HostSetRequest{ClearCreateProblem: true}, nil},
@@ -149,6 +152,18 @@ func TestOwnerHostSwitchAuditEntryPaths(t *testing.T) {
 						}
 					}
 				}
+			}
+			for _, value := range []string{"0", "5", "-1"} {
+				root := &cobra.Command{Use: "dyna", SilenceUsage: true, SilenceErrors: true}
+				addCLI(root, func() client { return c })
+				root.SetArgs([]string{"host", "set", "build", "--ci-scale", value})
+				if err := root.Execute(); err == nil {
+					t.Fatalf("CLI accepted ci-scale %s", value)
+				}
+			}
+			hosts, err := st.Hosts(ctx)
+			if err != nil || len(hosts) != 1 || hosts[0].CIScale != 2 {
+				t.Fatalf("stored capacity after refused CLI calls: %+v %v", hosts, err)
 			}
 			// The CLI room log replays the typed event, including the owner, without connection secrets.
 			log := cli("room", "log", "r1")
