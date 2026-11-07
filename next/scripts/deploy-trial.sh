@@ -141,7 +141,7 @@ for (const room of call("room.list", {}).rooms) {
   do {
     const page = call("session.list", { room: room.id, ...(after ? { after } : {}) });
     const session = page.sessions.find(s => s.box && s.boxState === "ready" && !s.turn &&
-      !s.shellJobs && s.computer === "stopped");
+      s.computer === "stopped");
     if (session) {
       target = { room: room.id, session: session.id, box: session.box, seq: page.seq };
       break;

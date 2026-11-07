@@ -54,7 +54,7 @@ case "$*" in
    if [[ ${FAKE_NO_IDLE:-0} == 1 ]]; then
      echo '{"sessions":[{"id":"busy","box":"busy-box","boxState":"ready","turn":"turn-1","computer":"stopped"}],"seq":10}'
    else
-     echo '{"sessions":[{"id":"busy","box":"busy-box","boxState":"ready","turn":"turn-1","computer":"stopped"},{"id":"jobs","box":"jobs-box","boxState":"ready","shellJobs":1,"computer":"stopped"},{"id":"terminal","box":"terminal-box","boxState":"ready","computer":"running"},{"id":"idle","box":"box-1","boxState":"ready","computer":"stopped"}],"seq":10}'
+     echo '{"sessions":[{"id":"busy","box":"busy-box","boxState":"ready","turn":"turn-1","computer":"stopped"},{"id":"terminal","box":"terminal-box","boxState":"ready","computer":"running"},{"id":"idle","box":"box-1","boxState":"ready","computer":"stopped","shellJobs":1}],"seq":10}'
    fi ;;
  *session.refresh*)
    [[ $* == *'{"session":"idle"}'* && $* != *'"room"'* ]] || exit 1
@@ -138,6 +138,7 @@ FAKE_UNIT_COLLISION=1 "$script" "${args[@]}" --stage-wait 0 >"$tmp/out" 2>&1 && 
 grep -q 'Nothing was installed' "$tmp/out"
 test "$(grep -c restart "$TEST_LOG")" = 3
 # Clean journal plus a ready transition succeeds, and only the idle session is refreshed.
+# Its last turn's shellJobs count is historical, not a reason to treat it as busy.
 rm -f "$tmp/install/failed-next" "$tmp/install/deployed-next" "$TEST_REFRESH"
 "$script" "${args[@]}" >"$tmp/out" 2>&1
 grep -q 'Box lifecycle smoke passed: box-1 returned ready' "$tmp/out"
