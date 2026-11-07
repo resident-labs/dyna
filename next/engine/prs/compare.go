@@ -270,8 +270,8 @@ func CompareIssue(row store.TrackedIssue, items []contract.GitHubItem, listed *F
 }
 
 // excerptMarkup recognizes HTML, not angle-bracket comparisons, email addresses or
-// Markdown autolinks. Backtick spans and fenced code are copied verbatim.
-var excerptMarkup = regexp.MustCompile("(?s)<!--.*?-->|</?[A-Za-z][A-Za-z0-9-]*(?:[ \\t\\r\\n]+(?:\"[^\"]*\"|'[^']*'|[^'\">])*)?/?>|`+|~{3,}")
+// Markdown autolinks. Code spans, fences and indented code keep their markup.
+var excerptMarkup = regexp.MustCompile("(?m:^(?: {4}|\\t)[^\\n]*)|(?s:<!--.*?-->|</?[A-Za-z][A-Za-z0-9-]*(?:[ \\t\\r\\n]+(?:\"[^\"]*\"|'[^']*'|[^'\">])*)?/?>)|`+|~{3,}")
 
 // shorten prepares only notification excerpts; GitHub source bodies stay untouched.
 func shorten(text string) string {
@@ -285,7 +285,9 @@ func shorten(text string) string {
 		clean.WriteString(rest[:loc[0]])
 		token := rest[loc[0]:loc[1]]
 		rest = rest[loc[1]:]
-		if token[0] == '`' || token[0] == '~' {
+		if token[0] == ' ' || token[0] == '\t' {
+			clean.WriteString(token)
+		} else if token[0] == '`' || token[0] == '~' {
 			clean.WriteString(token)
 			if end := strings.Index(rest, token); end >= 0 {
 				clean.WriteString(rest[:end+len(token)])
