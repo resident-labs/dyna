@@ -92,7 +92,7 @@ INSERT INTO sessions(id,room,name,parent,profile,state,goal,created_at,closed_at
 				if err := rows.Scan(&to, &surface, &reply, &wake); err != nil {
 					t.Fatal(err)
 				}
-				if surface != string(contract.SurfaceEngine) || reply != string(contract.ReplyNone) || !wake {
+				if surface != string(contract.SurfaceEngine) || reply != string(contract.ReplyNone) || wake {
 					t.Fatalf("delivery to %s: surface=%s reply=%s wake=%v", to, surface, reply, wake)
 				}
 				recipients = append(recipients, to)

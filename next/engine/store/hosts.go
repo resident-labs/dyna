@@ -228,11 +228,12 @@ func (s *Store) warnDisk(ctx context.Context, tx *sql.Tx, name contract.HostName
 	if n, err := result.RowsAffected(); err != nil || n == 0 {
 		return err
 	}
-	return s.alertRoots(ctx, tx, contract.HostDiskLow{Host: name, FreeBytes: free, FloorBytes: floor}, at)
+	return s.alertRoots(ctx, tx, contract.HostDiskLow{Host: name, FreeBytes: free, FloorBytes: floor}, at, true)
 }
 
-// alertRoots posts an engine event in every room with an open root and wakes that root.
-func (s *Store) alertRoots(ctx context.Context, tx *sql.Tx, body contract.EventBody, at time.Time) error {
+// alertRoots posts an engine event in every room with an open root. wake starts a turn for it; without wake the root reads it
+// with its next input.
+func (s *Store) alertRoots(ctx context.Context, tx *sql.Tx, body contract.EventBody, at time.Time, wake bool) error {
 	rows, err := tx.QueryContext(ctx, "SELECT id,room FROM sessions WHERE parent IS NULL AND state='open' AND closed_at IS NULL")
 	if err != nil {
 		return err
@@ -259,7 +260,7 @@ func (s *Store) alertRoots(ctx context.Context, tx *sql.Tx, body contract.EventB
 		if err != nil {
 			return err
 		}
-		if err := s.InsertDelivery(ctx, tx, seq, body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: root.ID}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}); err != nil {
+		if err := s.InsertDelivery(ctx, tx, seq, body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: root.ID}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: wake}); err != nil {
 			return err
 		}
 	}
