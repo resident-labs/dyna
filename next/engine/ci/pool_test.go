@@ -196,7 +196,7 @@ type fixture struct {
 }
 
 func readyHost(name contract.HostName, memory int64) box.Host {
-	return box.Host{Name: name, State: box.HostReady, CI: true, CPUs: 64, MemBytes: memory, DiskBytes: 100 * box.GiB, DiskFloor: 20 * box.GiB, CheckedAt: time.Unix(1, 0)}
+	return box.Host{Name: name, State: box.HostReady, CI: true, CIScale: 1, CPUs: 64, MemBytes: memory, DiskBytes: 100 * box.GiB, DiskFloor: 20 * box.GiB, CheckedAt: time.Unix(1, 0)}
 }
 
 // newFixture turns the repository on with max as its bound, beside one host with ci on.

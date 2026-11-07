@@ -54,8 +54,11 @@ func (s *Service) HostSet(ctx context.Context, caller contract.Principal, req co
 	if caller.Kind != contract.PrincipalOwner {
 		return contract.HostSetResponse{}, forbidden()
 	}
-	if req.Agents == nil && req.CI == nil && !req.ClearCreateProblem {
-		return contract.HostSetResponse{}, invalid("set agents, ci or clear the create problem")
+	if req.Agents == nil && req.CI == nil && req.CIScale == nil && !req.ClearCreateProblem {
+		return contract.HostSetResponse{}, invalid("set agents, ci, ciScale or clear the create problem")
+	}
+	if req.CIScale != nil && (*req.CIScale < 1 || *req.CIScale > 4) {
+		return contract.HostSetResponse{}, invalid("ciScale must be between 1 and 4")
 	}
 	execOnly, err := s.store.ExecOnly(ctx, req.Host)
 	if err != nil {
@@ -66,7 +69,7 @@ func (s *Service) HostSet(ctx context.Context, caller contract.Principal, req co
 			return contract.HostSetResponse{}, invalid(err.Error())
 		}
 	}
-	if err := s.store.SetHostSwitches(ctx, req.Host, req.Agents, req.CI, req.ClearCreateProblem, func(room contract.RoomID, body contract.EventBody) (contract.Event, error) {
+	if err := s.store.SetHostSwitches(ctx, req.Host, req.Agents, req.CI, req.CIScale, req.ClearCreateProblem, func(room contract.RoomID, body contract.EventBody) (contract.Event, error) {
 		return s.event(room, caller, body)
 	}); err != nil {
 		return contract.HostSetResponse{}, failure(err)
