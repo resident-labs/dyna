@@ -100,3 +100,16 @@ esac
 		}
 	}
 }
+
+// Warm reconciliation uses ListContainers, not inspect. A Removing record must
+// select Recreate even when its image, layout and binary labels are current.
+func TestRemovingSelectsWarmRecreate(t *testing.T) {
+	r := &runner{body: `[{"Labels":{"dyna.box":"b","dyna.layout":"` + box.ContainerLayout + `"},"State":"removing"},{"Labels":{"dyna.box":"healthy","dyna.layout":"` + box.ContainerLayout + `"},"State":"running"}]`}
+	statuses, err := newTestHost(t, r).ListContainers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statuses) != 2 || !statuses[0].StaleLayout || statuses[0].Running || statuses[1].StaleLayout || !statuses[1].Running {
+		t.Fatalf("warm reconciliation statuses: %+v", statuses)
+	}
+}
