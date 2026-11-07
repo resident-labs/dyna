@@ -140,7 +140,7 @@ func TestInputBatchProvenance(t *testing.T) {
 				}
 			}
 			if strings.HasPrefix(mode, "legacy-") {
-				if _, err = s.writer.Exec("DROP INDEX deliveries_open; ALTER TABLE deliveries DROP COLUMN immediate; UPDATE meta SET value='99' WHERE key='schema_version'"); err != nil {
+				if _, err = s.writer.Exec("DROP INDEX deliveries_open; ALTER TABLE deliveries DROP COLUMN taken_at; ALTER TABLE turns DROP COLUMN model_sent_at; ALTER TABLE deliveries DROP COLUMN immediate; UPDATE meta SET value='99' WHERE key='schema_version'"); err != nil {
 					t.Fatal(err)
 				}
 			}

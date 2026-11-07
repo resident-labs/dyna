@@ -912,7 +912,7 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 					q := contract.QueueSteer
 					queue = &q
 				}
-				_, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='taken',turn=?,queue=? WHERE to_kind=? AND to_id=? AND seq=? AND state IN ('pending','taken')", active, queue, contract.PrincipalSession, session, v.input.Seq)
+				_, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='taken',turn=?,queue=?,taken_at=? WHERE to_kind=? AND to_id=? AND seq=? AND state IN ('pending','taken')", active, queue, started.Time.UnixMilli(), contract.PrincipalSession, session, v.input.Seq)
 				if err != nil {
 					return err
 				}

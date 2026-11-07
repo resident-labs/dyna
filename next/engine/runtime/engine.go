@@ -266,7 +266,9 @@ func Run(ctx context.Context, cfg Config) error {
 			if err != nil {
 				pinned = ""
 			}
-			proxy.Handler(string(session.ID), allowed, eligible, pinned, crew).ServeHTTP(w, r)
+			proxy.Handler(string(session.ID), allowed, eligible, pinned, crew, func(ctx context.Context) error {
+				return st.MarkTurnModelSent(ctx, session.ID, time.Now())
+			}).ServeHTTP(w, r)
 		}))
 	})
 	apiServer.SetLocalModelRoute(drain.Wrap(proxy.Local(st)))

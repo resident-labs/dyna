@@ -371,6 +371,8 @@ The server and every mount outlive the engine, so an engine restart stops neithe
 
 ### 5.7 Box socket, model route and git
 
+**Delivery and model handoff measurements.** `deliveries.taken_at` records the engine's Unix millisecond timestamp when an input becomes taken, for new turns and steers; reconnect replay does not replace it. `turns.model_sent_at` is the first time the engine handed a model request for this turn to its model proxy. The handoff follows the engine's model and account-eligibility policy checks; a later rejection by the child proxy still counts. It is not provider authentication completion, provider send time or first response time. Subsequent requests, retries, heartbeats and reconnects do not overwrite the first handoff. Local owner proxy calls do not belong to a session turn. Both columns default to zero for unobserved requests and historical rows; `active_at` remains the separate throttled heartbeat. A steer can be taken after its turn's first model handoff, so that relation can be negative. No activity call, tool or UI exposes these SQL measurement fields.
+
 Each box receives only its own forwarded Unix socket. The engine derives session identity from that listener; no token is sent. The engine restores forwards after master failure, and the box agent retries and buffers output. Standing instructions mount read-only.
 
 A profile may set `images: false` for its text-only models. At hello, the box receives the deduplicated model IDs from all such profiles and registers them with PiG, including every crew worker, so PiG substitutes image placeholders even after a profile switch. A box reads this list at hello; refresh running sessions after changing it.
