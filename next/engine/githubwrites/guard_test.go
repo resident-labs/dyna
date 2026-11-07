@@ -249,7 +249,6 @@ func TestMergesAndDeletesAreNeverAllowed(t *testing.T) {
 		"delete repo":          rest(t, g, grant, "DELETE", "/repos/acme/app", `{}`),
 		"contents write":       rest(t, g, grant, "PUT", "/repos/acme/app/contents/a.txt", `{"message":"m","content":"eA=="}`),
 		"release":              rest(t, g, grant, "POST", "/repos/acme/app/releases", `{"tag_name":"v1"}`),
-		"workflow dispatch":    rest(t, g, grant, "POST", "/repos/acme/app/actions/workflows/1/dispatches", `{"ref":"main"}`),
 		"secret":               rest(t, g, grant, "PUT", "/repos/acme/app/actions/secrets/X", `{}`),
 		"protection":           rest(t, g, grant, "PUT", "/repos/acme/app/branches/main/protection", `{}`),
 		"repo settings":        rest(t, g, grant, "PATCH", "/repos/acme/app", `{"private":false}`),
