@@ -326,7 +326,7 @@ var methodTable = []MethodEntry{
 	method(contract.MethodWorkflowSettings, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodWorkflowSet, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodWorkflowStatus, contract.ScopeRead, UserAccess,
-		act("workflow", "status", typ[contract.WorkflowStatusRequest](), "Show one run, including its result, status lines and step journal. Individual step output is read with workflow.step.", "workflow status"),
+		act("workflow", "status", typ[contract.WorkflowStatusRequest](), "Show one run, including its result, status lines and step journal. Individual step output is available to the owner through workflow.step.", "workflow status"),
 	),
 	method(contract.MethodWorkflowStep, contract.ScopeRead, OwnerAccess),
 	method(contract.MethodWorkflowStepEnd, contract.ScopeRead, BoxAccess),
