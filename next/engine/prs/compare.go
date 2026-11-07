@@ -2,6 +2,7 @@ package prs
 
 import (
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -268,7 +269,46 @@ func CompareIssue(row store.TrackedIssue, items []contract.GitHubItem, listed *F
 	return update, true
 }
 
+// excerptMarkup recognizes HTML, not angle-bracket comparisons, email addresses or
+// Markdown autolinks. Backtick spans and fenced code are copied verbatim.
+var excerptMarkup = regexp.MustCompile("(?s)<!--.*?-->|</?[A-Za-z][A-Za-z0-9-]*(?:[ \\t\\r\\n]+(?:\"[^\"]*\"|'[^']*'|[^'\">])*)?/?>|`+|~{3,}")
+
+// shorten prepares only notification excerpts; GitHub source bodies stay untouched.
 func shorten(text string) string {
+	var clean strings.Builder
+	for rest := text; rest != ""; {
+		loc := excerptMarkup.FindStringIndex(rest)
+		if loc == nil {
+			clean.WriteString(rest)
+			break
+		}
+		clean.WriteString(rest[:loc[0]])
+		token := rest[loc[0]:loc[1]]
+		rest = rest[loc[1]:]
+		if token[0] == '`' || token[0] == '~' {
+			clean.WriteString(token)
+			if end := strings.Index(rest, token); end >= 0 {
+				clean.WriteString(rest[:end+len(token)])
+				rest = rest[end+len(token):]
+			}
+		}
+	}
+	// Collapse blank runs without flattening Markdown paragraphs or indentation.
+	lines := strings.Split(clean.String(), "\n")
+	kept := lines[:0]
+	blank := false
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			blank = len(kept) > 0
+			continue
+		}
+		if blank {
+			kept = append(kept, "")
+		}
+		kept = append(kept, line)
+		blank = false
+	}
+	text = strings.Join(kept, "\n")
 	if utf8.RuneCountInString(text) <= maxCommentText {
 		return text
 	}
