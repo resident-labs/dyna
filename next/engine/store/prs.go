@@ -43,7 +43,7 @@ type PRUpdate struct {
 	Change      *contract.PrChange
 }
 
-// MainCI is the settled CI of a repository's default-branch head. A Result of none settles a head that has no CI and tells nobody; success and failure settle it and become one git.main_ci_finished.
+// MainCI is the settled CI of a repository's default-branch head. A Result of none settles a head that has no CI and tells nobody; success, failure and cancelled settle it and become one git.main_ci_finished.
 type MainCI struct {
 	Repo   contract.RepoName
 	Branch string

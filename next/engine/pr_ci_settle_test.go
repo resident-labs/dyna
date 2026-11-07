@@ -82,6 +82,13 @@ func TestPRCIWaitsForEveryContextAndReportsCancellation(t *testing.T) {
 		t.Fatalf("every check done and cancellation reported: %+v", got)
 	}
 	r.requireCI(t, contract.PrCICancelled)
+	if r.ciWakes(t, contract.PrChangeCICancelled) != 1 || r.ciWakes(t, contract.PrChangeCIFailed) != 0 || r.ciWakes(t, contract.PrChangeCIPassed) != 0 {
+		t.Fatal("cancellation must wake once, never as failure or pass")
+	}
+	status, fail := r.s.PrStatus(r.ctx, sessionCaller(r.child), contract.PrStatusRequest{Repo: "owner/repo", Number: 1})
+	if fail != nil || !slices.Equal(status.PR.CancelledChecks, []string{"build macos-x64"}) {
+		t.Fatalf("persisted status: %+v %v", status, fail)
+	}
 }
 
 func TestPRCIFailureWakesTheOwnerOnceWhenEveryContextIsDone(t *testing.T) {

@@ -162,7 +162,7 @@ type PrChanged struct {
 func (PrChanged) EventType() EventType { return "github.pr.changed" }
 func (PrChanged) isEventBody()         {}
 
-// CIFinished is one CI result on a tracked PR's head. It states what github.pr.changed told the owner, for anyone else who subscribes. Result is success or failure.
+// CIFinished is one CI result on a tracked PR's head. It states what github.pr.changed told the owner, for anyone else who subscribes. Result is success, failure or cancelled.
 type CIFinished struct {
 	Repo    RepoName  `json:"repo"`
 	Number  int       `json:"number"`

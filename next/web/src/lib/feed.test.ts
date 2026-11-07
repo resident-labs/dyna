@@ -374,6 +374,10 @@ test("a malformed PR update is skipped", () => {
 
 test("a tracked PR's words mark only what needs someone", () => {
   assert.deepEqual(prWords(summary), []);
+  assert.deepEqual(prWords({ ...summary, ci: "cancelled", cancelledChecks: ["verify", "pool-watch"] }), [{ label: "CI cancelled: verify, pool-watch", tone: "warning" }]);
+  const cancelled = decodeEvent(event(1, { type: "github.pr.changed", body: { session: "builder", changes: [{ pr: { ...summary, ci: "cancelled", cancelledChecks: ["verify"] }, kinds: ["ci_cancelled"], outside: false }] } }));
+  assert.ok(cancelled);
+  assert.ok(decodeEvent(event(2, { type: "git.main_ci_finished", body: { repo: "o/r", branch: "main", sha: "h", result: "cancelled", runs: [] } })));
   assert.deepEqual(prWords({ ...summary, ci: "success", review: "approved" }), [{ label: "CI passed" }, { label: "Approved" }]);
   assert.deepEqual(prWords({ ...summary, ci: "failure", review: "changes_requested", merge: "conflict" }),
     [{ label: "CI failed", tone: "failed" }, { label: "Changes requested", tone: "warning" }, { label: "Conflict", tone: "failed" }]);

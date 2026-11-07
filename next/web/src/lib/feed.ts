@@ -430,7 +430,7 @@ export function prWords(pr: PrSummary): { label: string; tone?: "failed" | "warn
   if (pr.state === "merged") return [{ label: "Merged" }];
   if (pr.state === "closed") return [{ label: "Closed" }];
   const words: { label: string; tone?: "failed" | "warning" }[] = [];
-  if (pr.ci === "cancelled") words.push({ label: "CI cancelled", tone: "warning" });
+  if (pr.ci === "cancelled") words.push({ label: pr.cancelledChecks?.length ? `CI cancelled: ${pr.cancelledChecks.join(", ")}` : "CI cancelled", tone: "warning" });
   else if (pr.ci === "failure") words.push({ label: "CI failed", tone: "failed" });
   else if (pr.ci === "pending") words.push({ label: "CI running" });
   else if (pr.ci === "success") words.push({ label: "CI passed" });

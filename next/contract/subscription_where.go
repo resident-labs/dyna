@@ -73,7 +73,7 @@ func Fields(body EventBody) []EventFields {
 	case interface{ Item() GitHubItem }:
 		out = append(out, itemFields(b.Item()))
 	case CIFinished:
-		out = append(out, EventFields{Repo: b.Repo, Number: b.Number})
+		out = append(out, EventFields{Repo: b.Repo, Number: b.Number, Kind: string(b.Result)})
 	case GitMainUpdated:
 		out = append(out, EventFields{Repo: b.Repo})
 	case GitMainCIFinished:
