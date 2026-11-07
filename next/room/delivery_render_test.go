@@ -1,6 +1,7 @@
 package room
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
