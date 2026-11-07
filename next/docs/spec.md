@@ -163,6 +163,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `room_leftovers` |
 | `session_branches` |
 | `pr_owners` |
+| `pr_stack_layers` |
 | `issue_owners` |
 | `github_feeds` |
 | `goals` |
