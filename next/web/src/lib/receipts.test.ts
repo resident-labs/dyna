@@ -12,3 +12,19 @@ test('all recipients must take delivery; countdown is future only', () => {
  assert.equal(receiptSummary([taken, { ...taken, state: 'read' }], now).label, 'Delivered');
  assert.equal(receiptSummary([{ ...pending, batchDeadline: undefined }], now).seconds, undefined);
 });
+test('closed explicit recipients are tooltip context, not queued deliveries', () => {
+ const now = Date.parse('2026-11-07T12:00:20Z');
+ const closed = { session: 'a', name: 'former', state: 'closed', closed: true };
+ const live = { session: 'b', name: 'live', state: 'pending', batchDeadline: '2026-11-07T12:01:00Z' };
+ assert.equal(receiptSummary([closed, live], now).label, 'Queued');
+ assert.equal(receiptSummary([closed, live], now).seconds, 40);
+ assert.match(receiptSummary([closed, live], now).details, /former: closed/);
+ for (const state of ['taken', 'read']) {
+  assert.equal(receiptSummary([closed, { ...live, state }], now).label, 'Delivered');
+ }
+ assert.equal(receiptSummary([closed], now).label, 'Delivered');
+ assert.equal(receiptSummary([{ ...closed, state: 'read' }], now).label, 'Delivered');
+ assert.match(receiptSummary([{ ...closed, state: 'read' }], now).details, /former: closed/);
+ assert.equal(receiptSummary([{ ...live, closed: true }], now).label, 'Delivered');
+ assert.equal(receiptSummary([{ ...live, closed: true }], now).seconds, undefined);
+});

@@ -667,7 +667,7 @@ type PostSearchResponse struct {
 }
 type EventsListRequest struct {
 	// ReceiptSeqs reads current delivery receipts for feed posts in this room instead of log events.
-	ReceiptSeqs []int64     `json:"receiptSeqs,omitempty" desc:"Read delivery receipts for up to 100 feed post sequence numbers in this room. Pending is queued; taken/read means delivered into a turn, not model completion. batchDeadline is present only during an active batch wait."`
+	ReceiptSeqs []int64     `json:"receiptSeqs,omitempty" desc:"Read delivery receipts for up to 100 feed post sequence numbers in this room. Pending is queued; taken/read means delivered into a turn, not model completion. batchDeadline is present only during an active batch wait. Closed explicit mentions with discarded unread deliveries have state closed and do not count toward delivery; closed implicit recipients without delivery rows are omitted."`
 	Event       EventID     `json:"event,omitempty"` // return this room event by ID
 	Room        RoomID      `json:"room"`
 	AfterSeq    int64       `json:"afterSeq"`
@@ -677,7 +677,12 @@ type EventsListRequest struct {
 	// Home, a DM, keeps only events whose home is that DM: its posts and the turns that answered in it.
 	Home *Conversation `json:"home,omitempty" desc:"home narrows the log to one owner DM: {kind: dm, session: ses_…}."`
 }
+
+// PostReceipt preserves delivery state for existing rows. State "closed" means
+// an explicitly mentioned recipient closed and its unread delivery was discarded;
+// it is tooltip context only, not an outstanding or completed delivery.
 type PostReceipt struct {
+	Closed        bool       `json:"closed,omitempty"`
 	Session       SessionID  `json:"session"`
 	Name          string     `json:"name"`
 	State         string     `json:"state"`

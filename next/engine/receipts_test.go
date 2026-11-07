@@ -46,4 +46,14 @@ func TestFeedReceiptReadSecurity(t *testing.T) {
 	if p != nil || len(got.Receipts) != 0 {
 		t.Fatalf("DM receipt %+v %v", got, p)
 	}
+	foreign, p := s.Post(ctx, owner, contract.PostRequest{Room: other.Room, Home: feedHome, Text: "foreign"})
+	if p != nil {
+		t.Fatal(p)
+	}
+	for _, caller := range []contract.Principal{owner, boxCaller(worker)} {
+		got, p = s.EventsList(ctx, caller, contract.EventsListRequest{Room: r, ReceiptSeqs: []int64{post.Seq, private.Seq, foreign.Seq, -1, 99999999}})
+		if p != nil || len(got.Receipts) != 1 || len(got.Receipts[post.Seq]) != 1 {
+			t.Fatalf("mixed feed, DM and foreign lookup: %+v %v", got, p)
+		}
+	}
 }

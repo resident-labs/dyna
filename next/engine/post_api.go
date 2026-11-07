@@ -316,6 +316,12 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 		if len(req.ReceiptSeqs) > 100 || req.Event != "" || req.Home != nil || req.AfterSeq != 0 || req.BeforeSeq != 0 || len(req.Types) > 0 {
 			return contract.EventsListResponse{}, invalid("invalid receipt lookup")
 		}
+		// roomAccess above established this room for a session caller. Authorize
+		// historical recipients by their durable room, never the live Session API.
+		var recipientRoom contract.RoomID
+		if caller.Kind != contract.PrincipalOwner {
+			recipientRoom = req.Room
+		}
 		receipts := map[int64][]contract.PostReceipt{}
 		for _, seq := range req.ReceiptSeqs {
 			event, err := s.store.Event(ctx, seq)
@@ -329,18 +335,12 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 			if !ok || event.Room != req.Room || body.Home.Kind != contract.ConversationFeed {
 				continue
 			}
-			entries, err := s.store.PostReceipts(ctx, seq, s.now())
+			entries, err := s.store.PostReceipts(ctx, seq, recipientRoom, s.now())
 			if err != nil {
 				return contract.EventsListResponse{}, failure(err)
 			}
-			for _, entry := range entries {
-				recipient, err := s.store.Session(ctx, entry.Session)
-				if err != nil {
-					return contract.EventsListResponse{}, failure(err)
-				}
-				if s.roomAccess(ctx, caller, recipient.Room) == nil {
-					receipts[seq] = append(receipts[seq], entry)
-				}
+			if len(entries) > 0 {
+				receipts[seq] = append(receipts[seq], entries...)
 			}
 		}
 		return contract.EventsListResponse{Receipts: receipts}, nil
