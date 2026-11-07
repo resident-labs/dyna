@@ -158,15 +158,22 @@ func (s *Store) RoomPRs(ctx context.Context, room contract.RoomID, all bool) ([]
 	return s.queryPRs(ctx, `SELECT `+prColumns+` WHERE (?1='' OR s.room=?1) AND (?2 OR p.state='open') ORDER BY p.state='open' DESC,p.repo,p.number DESC LIMIT 500`, room, all)
 }
 
-// PR reads one tracked PR.
+// PR reads one tracked PR by its case-insensitive GitHub identity, refusing ambiguous legacy rows.
 func (s *Store) PR(ctx context.Context, repo contract.RepoName, number int) (TrackedPR, error) {
-	return scanPR(s.Read().QueryRowContext(ctx, `SELECT `+prColumns+` WHERE p.repo=? AND p.number=?`, repo, number))
+	return scanPR(s.Read().QueryRowContext(ctx, `SELECT `+prColumns+` WHERE p.repo=? COLLATE NOCASE AND p.number=? AND (SELECT count(*) FROM pr_owners WHERE repo=? COLLATE NOCASE AND number=?)=1`, repo, number, repo, number))
 }
 
 // RecordPROpen makes session the owner of a PR and appends its event and deliveries in one transaction.
 // The goal and approved head start empty. A new PR has no baseline: everything the poll sees on it is news.
 func (s *Store) RecordPROpen(ctx context.Context, repo contract.RepoName, number int, session contract.SessionID, branch, title, url string, event contract.Event, deliveries []contract.Delivery) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, exists, err := prClaimRepo(ctx, tx, repo, number)
+		if err != nil {
+			return err
+		}
+		if exists {
+			return ErrPRTracked
+		}
 		result, err := tx.ExecContext(ctx, "WITH RECURSIVE ancestors(id,parent,closed_at,depth) AS (SELECT id,parent,closed_at,0 FROM sessions WHERE id=? UNION ALL SELECT s.id,s.parent,s.closed_at,a.depth+1 FROM sessions s JOIN ancestors a ON s.id=a.parent) INSERT INTO pr_owners(repo,number,session,goal,approved_head,branch,head_repo,title,url,baseline) SELECT ?,?,id,'','',?,?,?,?,0 FROM ancestors WHERE closed_at IS NULL ORDER BY depth LIMIT 1", session, repo, number, branch, repo, title, url)
 		if err != nil {
 			return err
@@ -208,6 +215,13 @@ func (s *Store) TrackPR(ctx context.Context, pr TrackedPR) error {
 		return err
 	}
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		recorded, exists, err := prClaimRepo(ctx, tx, pr.Repo, pr.Number)
+		if err != nil {
+			return err
+		}
+		if exists {
+			pr.Repo = recorded
+		}
 		result, err := tx.ExecContext(ctx, `INSERT INTO pr_owners(repo,number,session,goal,approved_head,head_repo,url,title,author,draft,state,head,meta) VALUES(?,?,?,'','',?,?,?,?,?,?,?,?)
 ON CONFLICT(repo,number) DO UPDATE SET branch=CASE WHEN session=excluded.session THEN branch ELSE '' END,session=excluded.session,approved_head='',
 head_repo=excluded.head_repo,url=excluded.url,title=excluded.title,author=excluded.author,draft=excluded.draft,state=excluded.state,head=excluded.head,
@@ -505,4 +519,28 @@ func (s *Store) OwnsPRBranch(ctx context.Context, repo contract.RepoName, sessio
 	var found bool
 	err := s.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM pr_owners WHERE repo=? AND session=? AND branch=?)", repo, session, branch).Scan(&found)
 	return found, err
+}
+
+// OwnsPR reports whether exactly one recorded PR has this identity and its owner is this session, including closed PRs.
+// GitHub repository names are case-insensitive; recorded names preserve their supplied spelling.
+func (s *Store) OwnsPR(ctx context.Context, repo contract.RepoName, session contract.SessionID, number int) (bool, error) {
+	var found bool
+	err := s.Read().QueryRowContext(ctx, "SELECT count(*)=1 AND coalesce(min(session)=?,0) FROM pr_owners WHERE repo=? COLLATE NOCASE AND number=?", session, repo, number).Scan(&found)
+	return found, err
+}
+
+// prClaimRepo resolves a GitHub PR identity inside the serialized write transaction.
+// Preserve the existing spelling so a claim uses the existing primary key. Historical
+// case-collisions are ambiguous even when their sessions match; never pick a winner.
+func prClaimRepo(ctx context.Context, tx *sql.Tx, repo contract.RepoName, number int) (contract.RepoName, bool, error) {
+	var count int
+	var recorded contract.RepoName
+	err := tx.QueryRowContext(ctx, "SELECT count(*),coalesce(min(repo),'') FROM pr_owners WHERE repo=? COLLATE NOCASE AND number=?", repo, number).Scan(&count, &recorded)
+	if err != nil {
+		return "", false, err
+	}
+	if count > 1 {
+		return "", false, ErrPRTracked
+	}
+	return recorded, count == 1, nil
 }
