@@ -585,9 +585,10 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	add.Flags().StringVar(&addAgents, "agents", "on", "on or off: whether new session boxes may land on this host")
 	add.Flags().StringVar(&addCI, "ci", "", "on or off: whether the CI pool may start runners on this host (default on, off on the engine's own host)")
 	var setAgents, setCI string
+	var setScale int
 	var setAdmin bool
 	var clearCreateProblem bool
-	setHost := &cobra.Command{Use: "set NAME [--agents on|off] [--ci on|off]", Short: "Turn a host's agents and CI switches", Long: "Turn a host's two switches. With agents off no new session box lands on the host; its room list still says which rooms it serves while agents are on. With ci off the CI pool starts no new runner there, and runners come back when ci is on again. Both off disables the host and keeps it registered. A host added exec only (`host add --agents off --ci off`) passes the base host checks, without box or CI setup. Turning agents or ci on for an exec-only host runs the full host check first, which needs --owner-only-admin as host add does. Boxes and runners already on the host stay until they stop, and a stopped box there waits until agents are on again.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	setHost := &cobra.Command{Use: "set NAME [--agents on|off] [--ci on|off] [--ci-scale 1-4]", Short: "Turn a host's agents and CI switches", Long: "Turn a host's two switches. With agents off no new session box lands on the host; its room list still says which rooms it serves while agents are on. With ci off the CI pool starts no new runner there, and runners come back when ci is on again. Both off disables the host and keeps it registered. A host added exec only (`host add --agents off --ci off`) passes the base host checks, without box or CI setup. Turning agents or ci on for an exec-only host runs the full host check first, which needs --owner-only-admin as host add does. Boxes and runners already on the host stay until they stop, and a stopped box there waits until agents are on again.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		req := contract.HostSetRequest{Host: contract.HostName(args[0]), ClearCreateProblem: clearCreateProblem, OwnerOnlyAdmin: setAdmin}
 		var err error
 		if cmd.Flags().Changed("agents") {
@@ -600,12 +601,16 @@ func addCLI(root *cobra.Command, getClient func() client) {
 				return err
 			}
 		}
-		if req.Agents == nil && req.CI == nil && !req.ClearCreateProblem {
-			return fmt.Errorf("pass --agents, --ci or --clear-create-problem")
+		if cmd.Flags().Changed("ci-scale") {
+			req.CIScale = &setScale
+		}
+		if req.Agents == nil && req.CI == nil && req.CIScale == nil && !req.ClearCreateProblem {
+			return fmt.Errorf("pass --agents, --ci, --ci-scale or --clear-create-problem")
 		}
 		_, err = getClient().HostSet(cmd.Context(), req)
 		return err
 	}}
+	setHost.Flags().IntVar(&setScale, "ci-scale", 1, "CI reservation capacity multiplier, 1–4 (default 1); real memory guard and 16-runner cap still apply")
 	setHost.Flags().BoolVar(&setAdmin, "owner-only-admin", false, "Confirm that only the owner administers the machine; turning agents or ci on for an exec-only host needs it")
 	setHost.Flags().BoolVar(&clearCreateProblem, "clear-create-problem", false, "Clear the host's create-failure quarantine")
 	setHost.Flags().StringVar(&setAgents, "agents", "", "on or off: whether new session boxes may land on this host")
