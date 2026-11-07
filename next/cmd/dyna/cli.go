@@ -1187,6 +1187,9 @@ func addCLI(root *cobra.Command, getClient func() client) {
 			stack = fmt.Sprintf("\tstack #%d %d/%d", p.Stack, p.Position, p.StackSize)
 		}
 		_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s#%d\t%s\tci=%s\treview=%s\tmerge=%s\t%s%s\n", p.Repo, p.Number, p.State, p.CI, p.Review, p.Merge, p.URL, stack)
+		if err == nil && p.CI == contract.PrCICancelled {
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), "CI cancelled: "+strings.Join(p.CancelledChecks, ", "))
+		}
 		return err
 	}
 	prList := &cobra.Command{Use: "list", Args: cobra.NoArgs, Short: "List tracked pull requests", RunE: func(cmd *cobra.Command, _ []string) error {

@@ -32,11 +32,12 @@ const (
 type PrCI string
 
 const (
-	PrCIUnread  PrCI = "" // no read has found it yet
-	PrCINone    PrCI = "none"
-	PrCIPending PrCI = "pending"
-	PrCISuccess PrCI = "success"
-	PrCIFailure PrCI = "failure"
+	PrCIUnread    PrCI = "" // no read has found it yet
+	PrCINone      PrCI = "none"
+	PrCIPending   PrCI = "pending"
+	PrCISuccess   PrCI = "success"
+	PrCIFailure   PrCI = "failure"
+	PrCICancelled PrCI = "cancelled"
 )
 
 // PrMerge is whether GitHub could merge the PR.
@@ -55,6 +56,7 @@ type PrChangeKind string
 
 const (
 	PrChangeCIFailed         PrChangeKind = "ci_failed"
+	PrChangeCICancelled      PrChangeKind = "ci_cancelled"
 	PrChangeCIPassed         PrChangeKind = "ci_passed"
 	PrChangeChangesRequested PrChangeKind = "changes_requested"
 	PrChangeApproved         PrChangeKind = "approved"
@@ -74,21 +76,22 @@ type PrPush struct {
 
 // PrSummary is what Dyna last read about a tracked PR. Repo is the PR's base repository, which may not be a room repository.
 type PrSummary struct {
-	Stack     int       `json:"stack,omitempty"`
-	Position  int       `json:"position,omitempty"`
-	StackSize int       `json:"stackSize,omitempty"`
-	Repo      RepoName  `json:"repo"`
-	Number    int       `json:"number"`
-	URL       string    `json:"url"`
-	Title     string    `json:"title"`
-	Author    string    `json:"author"`
-	Session   SessionID `json:"session"`
-	Draft     bool      `json:"draft"`
-	State     PrState   `json:"state"`
-	Head      string    `json:"head"`
-	Review    PrReview  `json:"review"`
-	CI        PrCI      `json:"ci"`
-	Merge     PrMerge   `json:"merge"`
+	CancelledChecks []string  `json:"cancelledChecks,omitempty"` // cancelled check names when CI is cancelled
+	Stack           int       `json:"stack,omitempty"`
+	Position        int       `json:"position,omitempty"`
+	StackSize       int       `json:"stackSize,omitempty"`
+	Repo            RepoName  `json:"repo"`
+	Number          int       `json:"number"`
+	URL             string    `json:"url"`
+	Title           string    `json:"title"`
+	Author          string    `json:"author"`
+	Session         SessionID `json:"session"`
+	Draft           bool      `json:"draft"`
+	State           PrState   `json:"state"`
+	Head            string    `json:"head"`
+	Review          PrReview  `json:"review"`
+	CI              PrCI      `json:"ci"`
+	Merge           PrMerge   `json:"merge"`
 }
 
 type PrListRequest struct {
@@ -159,7 +162,7 @@ type PrChanged struct {
 func (PrChanged) EventType() EventType { return "github.pr.changed" }
 func (PrChanged) isEventBody()         {}
 
-// CIFinished is one CI result on a tracked PR's head. It states what github.pr.changed told the owner, for anyone else who subscribes. Result is success or failure.
+// CIFinished is one CI result on a tracked PR's head. It states what github.pr.changed told the owner, for anyone else who subscribes. Result is success, failure or cancelled.
 type CIFinished struct {
 	Repo    RepoName  `json:"repo"`
 	Number  int       `json:"number"`
@@ -182,7 +185,7 @@ type CIRun struct {
 	URL        string `json:"url"`
 }
 
-// GitMainCIFinished is the CI of a default-branch head finishing, once per head sha even after the branch moved on, with repo, branch, sha, result and runs; where kind is success or failure. It states a head no tracked PR owns, which github.ci.finished never does.
+// GitMainCIFinished is the CI of a default-branch head finishing, once per head sha even after the branch moved on, with repo, branch, sha, result and runs; where kind is success, failure or cancelled. It states a head no tracked PR owns, which github.ci.finished never does.
 type GitMainCIFinished struct {
 	Repo   RepoName `json:"repo"`
 	Branch string   `json:"branch"`

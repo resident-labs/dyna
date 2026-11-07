@@ -18,14 +18,15 @@ var ErrIssueTracked = errors.New("another session tracks this issue")
 // Recheck means GitHub had not worked out mergeability on the last read, and HeadAt is when that read saw a new head, in Unix
 // milliseconds.
 type ItemMeta struct {
-	Labels    []string              `json:"labels,omitempty"`
-	Assignees []string              `json:"assignees,omitempty"`
-	Milestone string                `json:"milestone,omitempty"`
-	Body      string                `json:"body,omitempty"`
-	EditedBy  string                `json:"editedBy,omitempty"`
-	Waiting   []contract.GitHubItem `json:"waiting,omitempty"`
-	Recheck   bool                  `json:"recheck,omitempty"`
-	HeadAt    int64                 `json:"headAt,omitempty"`
+	CancelledChecks []string              `json:"cancelledChecks,omitempty"`
+	Labels          []string              `json:"labels,omitempty"`
+	Assignees       []string              `json:"assignees,omitempty"`
+	Milestone       string                `json:"milestone,omitempty"`
+	Body            string                `json:"body,omitempty"`
+	EditedBy        string                `json:"editedBy,omitempty"`
+	Waiting         []contract.GitHubItem `json:"waiting,omitempty"`
+	Recheck         bool                  `json:"recheck,omitempty"`
+	HeadAt          int64                 `json:"headAt,omitempty"`
 }
 
 func decodeMeta(text string) (ItemMeta, error) {

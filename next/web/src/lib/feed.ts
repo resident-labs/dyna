@@ -414,7 +414,7 @@ const list = (parts: string[]) => parts.length < 2 ? parts.join("") : `${parts.s
 const closeReasons: Record<SessionCloseReason, string> = { dormant: "after 7 quiet days", disk: "to free disk" };
 
 const changeWords: Record<PrChangeKind, string> = {
-  ci_failed: "CI failed", ci_passed: "CI passed", changes_requested: "changes requested", approved: "approved",
+  ci_failed: "CI failed", ci_cancelled: "CI cancelled", ci_passed: "CI passed", changes_requested: "changes requested", approved: "approved",
   conflict: "conflicts with its base", merged: "merged", closed: "closed without merging", comment: "new comments", metadata: "details changed", pushed: "pushed",
 };
 
@@ -430,7 +430,8 @@ export function prWords(pr: PrSummary): { label: string; tone?: "failed" | "warn
   if (pr.state === "merged") return [{ label: "Merged" }];
   if (pr.state === "closed") return [{ label: "Closed" }];
   const words: { label: string; tone?: "failed" | "warning" }[] = [];
-  if (pr.ci === "failure") words.push({ label: "CI failed", tone: "failed" });
+  if (pr.ci === "cancelled") words.push({ label: pr.cancelledChecks?.length ? `CI cancelled: ${pr.cancelledChecks.join(", ")}` : "CI cancelled", tone: "warning" });
+  else if (pr.ci === "failure") words.push({ label: "CI failed", tone: "failed" });
   else if (pr.ci === "pending") words.push({ label: "CI running" });
   else if (pr.ci === "success") words.push({ label: "CI passed" });
   if (pr.review === "changes_requested") words.push({ label: "Changes requested", tone: "warning" });

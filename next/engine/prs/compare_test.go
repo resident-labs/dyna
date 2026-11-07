@@ -289,3 +289,22 @@ func TestABodyEditIsToldByItsHash(t *testing.T) {
 		t.Fatalf("a first hash told an edit: %+v", first.Change)
 	}
 }
+
+func TestCancelledNamesSurviveReopenAndClearOnNextHead(t *testing.T) {
+	row := tracked(func(r *store.TrackedPR) {
+		r.State = contract.PrClosed
+		r.CI = contract.PrCICancelled
+		r.CancelledChecks = []string{"verify", "pool-watch"}
+		r.Meta.CancelledChecks = r.CancelledChecks
+		r.CITold = "a:cancelled"
+	})
+	reopened, _ := ComparePR(row, []contract.GitHubItem{{Action: contract.GitHubReopened}}, nil, nil, "me", at)
+	if reopened.PR.State != contract.PrOpen || !slices.Equal(reopened.PR.CancelledChecks, row.CancelledChecks) || !slices.Equal(reopened.Meta.CancelledChecks, row.CancelledChecks) {
+		t.Fatalf("reopen lost names: %+v", reopened)
+	}
+	row.PrSummary, row.Meta = reopened.PR, reopened.Meta
+	next, _ := ComparePR(row, nil, nil, observed(func(o *Observed) { o.Head = "b"; o.CI = contract.PrCIPending }), "me", at)
+	if next.PR.CancelledChecks != nil || next.Meta.CancelledChecks != nil {
+		t.Fatalf("next head retained old names: %+v", next)
+	}
+}
