@@ -44,6 +44,7 @@ type CheckinSession struct {
 	Goal     contract.GoalID
 	Text     string
 	Open     int
+	Total    int       // all checklist items, including done and dropped
 	Progress time.Time // the newest change to any goal it holds
 	Silent   bool      // its last turn ended with an open goal and no reply
 
@@ -133,6 +134,9 @@ func PlanCheckins(sessions []CheckinSession, now time.Time) []CheckinPlan {
 	for _, s := range sessions {
 		if s.Goal == "" || s.Closing || busyBelow[s.ID] || s.Failure != "" && s.Failure != s.FailureTold {
 			continue // A failure goes out as its own notice, first.
+		}
+		if s.Total > 0 && s.Open == 0 {
+			continue // A settled checklist waits for new work; no checklist still needs attention.
 		}
 		state, reason, since, moving := s.stillness(now)
 		if moving {
