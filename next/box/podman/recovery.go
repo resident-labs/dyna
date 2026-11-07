@@ -38,7 +38,7 @@ const recoverRemoving = `recover_removing() {
  else
   case "$status" in 1|125) ;; *) return 1;; esac
   case "$inspected" in
-   "Error: container $id not known"|"Error: no container with name or ID \"$id\" found: no such container") ;;
+   "Error: container $id not known"|"Error: no container with name or ID \"$id\" found: no such container"|"Error: no such container \"$id\"") ;;
    *) return 1;;
   esac
  fi

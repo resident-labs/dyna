@@ -18,12 +18,16 @@ func TestRemovingRecovery(t *testing.T) {
 		{"removing", "removing", "removing", true},
 		{"inspect-removing", "exited", "removing", true},
 		{"store-missing", "exited", "missing", true},
+		{"typed-inspect-missing", "exited", "typed-missing", true},
 		{"store-not-known", "exited", "not-known", true},
 		{"running", "running", "missing", false},
 		{"paused", "paused", "missing", false},
 		{"unknown", "exited", "unknown", false},
 		{"ambiguous-storage", "exited", "ambiguous-storage", false},
 		{"unrelated-name", "exited", "unrelated-name", false},
+		{"typed-unrelated-name", "exited", "typed-unrelated-name", false},
+		{"typed-extra-diagnostic", "exited", "typed-extra-diagnostic", false},
+		{"typed-multiline", "exited", "typed-multiline", false},
 		{"extra-diagnostic", "exited", "extra-diagnostic", false},
 		{"multiline-diagnostic", "exited", "multiline-diagnostic", false},
 		{"blank-extra-line", "exited", "blank-extra-line", false},
@@ -57,6 +61,10 @@ case "$1" in
  case "$REC_INSPECT" in
  missing) echo 'Error: no container with name or ID "b" found: no such container' >&2; exit 125;;
  not-known) echo 'Error: container b not known' >&2; exit 125;;
+ typed-missing) echo 'Error: no such container "b"' >&2; exit 125;;
+ typed-unrelated-name) echo 'Error: no such container "neighbor"' >&2; exit 125;;
+ typed-extra-diagnostic) echo 'Error: no such container "b": database broken' >&2; exit 125;;
+ typed-multiline) printf 'Error: no such container "b"\nError: database broken\n' >&2; exit 125;;
  unknown) echo 'Error: database broken' >&2; exit 125;;
  ambiguous-storage) echo 'Error: container storage driver not known' >&2; exit 125;;
  unrelated-name) echo 'Error: no container with name or ID "neighbor" found: no such container' >&2; exit 125;;
