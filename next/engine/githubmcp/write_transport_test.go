@@ -148,7 +148,7 @@ func TestPullDraftStateThroughRealTransport(t *testing.T) {
 			target, _ := url.Parse(fake.URL)
 			rewrite := &toFake{target: target}
 			pulls := &prs.Client{Token: "engine-token", Endpoint: &url.URL{Scheme: "https", Host: "api.github.com"}, Transport: rewrite, Now: time.Now}
-			handler, err := Handler(context.Background(), "engine-token", pulls.Reads(rewrite), nil)
+			handler, err := Handler(context.Background(), "engine-token", pulls.Reads(rewrite), nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

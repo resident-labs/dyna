@@ -217,6 +217,8 @@ func Run(ctx context.Context, cfg Config) error {
 		// Without them boxes list no github server, and the engine still starts.
 		if tools, err := githubmcp.Handler(ctx, token, pulls.Reads(http.DefaultTransport), func(ctx context.Context, repo contract.RepoName, number int) (bool, error) {
 			return st.OwnsPR(ctx, repo, githubwrites.SessionFrom(ctx), number)
+		}, func(ctx context.Context, repo contract.RepoName, branch string) (bool, error) {
+			return enginegit.CanPushBranch(ctx, st, repo, githubwrites.SessionFrom(ctx), branch)
 		}); err != nil {
 			log.Printf("GitHub tools for boxes: %v", err)
 		} else {

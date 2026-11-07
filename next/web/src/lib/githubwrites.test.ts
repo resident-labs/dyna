@@ -9,7 +9,7 @@ test("each switch is labelled by its group and its room", () => {
   assert.equal(writeLabel("issues", room()), "GitHub writes: Issues in horizon");
   assert.equal(writeLabel("pulls", room()), "GitHub writes: Pull requests in horizon");
   assert.equal(writeLabel("projects", room()), "GitHub writes: Projects in horizon");
-  for (const group of ["issues", "pulls", "projects"] as const) assert.doesNotMatch(writeLabel(group, room()), /:\s+in |undefined|\$\{/);
+  for (const group of ["issues", "pulls", "projects", "actions"] as const) assert.doesNotMatch(writeLabel(group, room()), /:\s+in |undefined|\$\{/);
 });
 
 test("a room with nothing set is off, and its repositories read as all of the room's", () => {
@@ -26,4 +26,11 @@ test("turning a group on or off keeps the others and the repositories", () => {
   assert.deepEqual(writeRequest(set, "pulls", true), { room: "room_1", githubWrites: { repos: ["a/b"], groups: ["issues", "pulls", "projects"] } });
   assert.deepEqual(writeRequest(set, "issues", false), { room: "room_1", githubWrites: { repos: ["a/b"], groups: ["projects"] } });
   assert.deepEqual(writeRequest(room({ repos: ["a/b"], groups: ["issues"] }), "issues", false).githubWrites?.groups, []);
+});
+
+test("Actions is opt-in and preserves existing groups", () => {
+  assert.equal(writeOn(room(), "actions"), false);
+  assert.equal(writeLabel("actions", room()), "GitHub writes: Actions in horizon");
+  const existing = room({ repos: ["a/b"], groups: ["issues", "pulls", "projects"] });
+  assert.deepEqual(writeRequest(existing, "actions", true).githubWrites, { repos: ["a/b"], groups: ["issues", "pulls", "projects", "actions"] });
 });

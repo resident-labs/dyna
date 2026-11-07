@@ -9,13 +9,14 @@ import (
 type GitHubWriteGroup string
 
 const (
+	GitHubWriteActions  GitHubWriteGroup = "actions"  // dispatch, rerun and cancel on pushable branches
 	GitHubWriteIssues   GitHubWriteGroup = "issues"   // create and edit issues, comments, labels
 	GitHubWritePulls    GitHubWriteGroup = "pulls"    // PR comments, reviews, and edits of a PR's title, body and labels
 	GitHubWriteProjects GitHubWriteGroup = "projects" // add items to a project and set an item's fields
 )
 
 // AllGitHubWriteGroups lists the groups in the order the settings and the stored value show them.
-var AllGitHubWriteGroups = []GitHubWriteGroup{GitHubWriteIssues, GitHubWritePulls, GitHubWriteProjects}
+var AllGitHubWriteGroups = []GitHubWriteGroup{GitHubWriteIssues, GitHubWritePulls, GitHubWriteProjects, GitHubWriteActions}
 
 // GitHubWriteAllRepos stands in a setting's repos for every repository the room lists when a request is made.
 const GitHubWriteAllRepos = "*"
@@ -59,6 +60,7 @@ const (
 	GitHubWriteRepoNotInRoom GitHubWriteReason = "repo_not_in_room" // a repository the room does not list
 	GitHubWriteUnknownGroup  GitHubWriteReason = "unknown_group"    // a group that does not exist
 	// Refusals of a request to GitHub.
+	GitHubWriteBranchNotAllowed    GitHubWriteReason = "branch_not_allowed"           // the caller cannot push the branch
 	GitHubWritePRNotOwned          GitHubWriteReason = "pr_not_owned"                 // the caller does not own the PR
 	GitHubWriteOff                 GitHubWriteReason = "writes_off"                   // the room allows no write
 	GitHubWriteGroupOff            GitHubWriteReason = "group_off"                    // the write belongs to a group that is off
