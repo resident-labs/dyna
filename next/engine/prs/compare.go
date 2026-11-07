@@ -2,6 +2,7 @@ package prs
 
 import (
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -9,6 +10,9 @@ import (
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/text"
 )
 
 const (
@@ -268,9 +272,95 @@ func CompareIssue(row store.TrackedIssue, items []contract.GitHubItem, listed *F
 	return update, true
 }
 
-func shorten(text string) string {
-	if utf8.RuneCountInString(text) <= maxCommentText {
-		return text
+// Only apply this inside Markdown HTML nodes, never to code or other Markdown.
+var excerptMarkup = regexp.MustCompile("(?s)<!--.*?-->|</?[A-Za-z][A-Za-z0-9-]*(?:[ \\t\\r\\n]+(?:\"[^\"]*\"|'[^']*'|[^'\">])*)?/?>")
+
+// shorten prepares only notification excerpts; GitHub source bodies stay untouched.
+func shorten(body string) string {
+	// Use Markdown's block and delimiter rules to locate HTML. In particular, an
+	// indented HTML child is not a code block, and a fence closes only on its own
+	// line. Keep the original source rather than rendering the parsed Markdown.
+	source := []byte(body)
+	document := goldmark.DefaultParser().Parse(text.NewReader(source))
+	var clean strings.Builder
+	cursor := 0
+	_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		var lines *text.Segments
+		var closure text.Segment
+		switch node := node.(type) {
+		case *ast.RawHTML:
+			lines = node.Segments
+		case *ast.HTMLBlock:
+			lines = node.Lines()
+			closure = node.ClosureLine
+		default:
+			return ast.WalkContinue, nil
+		}
+		segments := make([]text.Segment, 0, lines.Len()+1)
+		for i := 0; i < lines.Len(); i++ {
+			segments = append(segments, lines.At(i))
+		}
+		if closure.Stop > closure.Start {
+			segments = append(segments, closure)
+		}
+		// Container markers (for example, > in a quote) live between the HTML
+		// segments, not inside the HTML. Match on the logical HTML, then map the
+		// removed ranges back to each segment while copying container syntax intact.
+		var html strings.Builder
+		for _, segment := range segments {
+			html.Write(source[segment.Start:segment.Stop])
+		}
+		matches := excerptMarkup.FindAllStringIndex(html.String(), -1)
+		offset, matchIndex := 0, 0
+		for _, segment := range segments {
+			clean.Write(source[cursor:segment.Start])
+			length := segment.Stop - segment.Start
+			copied := 0
+			for matchIndex < len(matches) && matches[matchIndex][0] < offset+length {
+				match := matches[matchIndex]
+				start, stop := max(match[0]-offset, copied), min(match[1]-offset, length)
+				clean.Write(source[segment.Start+copied : segment.Start+start])
+				// Keep line boundaries so the next segment's container marker does not
+				// move into the preceding line's text when multiline HTML is removed.
+				for _, b := range source[segment.Start+start : segment.Start+stop] {
+					if b == '\n' {
+						clean.WriteByte('\n')
+					}
+				}
+				copied = stop
+				if match[1] > offset+length {
+					break
+				}
+				matchIndex++
+			}
+			clean.Write(source[segment.Start+copied : segment.Stop])
+			cursor = segment.Stop
+			offset += length
+		}
+		return ast.WalkSkipChildren, nil
+	})
+	clean.Write(source[cursor:])
+	// Collapse blank runs without flattening Markdown paragraphs or indentation.
+	lines := strings.Split(clean.String(), "\n")
+	kept := lines[:0]
+	blank := false
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			blank = len(kept) > 0
+			continue
+		}
+		if blank {
+			kept = append(kept, "")
+		}
+		kept = append(kept, line)
+		blank = false
 	}
-	return string([]rune(text)[:maxCommentText]) + "…"
+	result := strings.Join(kept, "\n")
+	if utf8.RuneCountInString(result) <= maxCommentText {
+		return result
+	}
+	return string([]rune(result)[:maxCommentText]) + "…"
 }
