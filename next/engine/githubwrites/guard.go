@@ -213,5 +213,5 @@ func (g *Guard) requireOwner(ctx context.Context, repo contract.RepoName, number
 			return nil
 		}
 	}
-	return refuse(contract.GitHubWritePRNotOwned, "only the session that owns this PR can close, reopen or retarget it")
+	return refuse(contract.GitHubWritePRNotOwned, "only the session that owns this PR, or a session above it, can close, reopen or retarget it")
 }

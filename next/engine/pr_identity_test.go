@@ -22,10 +22,7 @@ func TestPrTrackCaseVariantCannotClaimExistingPR(t *testing.T) {
 	if e == nil {
 		t.Fatal("case-variant tracking claimed another session's open PR")
 	}
-	for _, id := range []contract.SessionID{r.child, r.root} {
-		owns, err := r.s.store.OwnsPR(r.ctx, "owner/repo", id, 7)
-		if err != nil || owns != (id == r.child) {
-			t.Fatalf("%s owns=%v err=%v", id, owns, err)
-		}
+	if pr, err := r.s.store.PR(r.ctx, "owner/repo", 7); err != nil || pr.Session != r.child {
+		t.Fatalf("recorded owner %s err=%v, want %s", pr.Session, err, r.child)
 	}
 }
