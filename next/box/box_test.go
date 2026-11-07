@@ -152,7 +152,7 @@ func TestRunnerAdmissionFitsRealMemory(t *testing.T) {
 		{"larger host fits both runners", 16 * box.GiB, box.Placement{Host: "host"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			host := box.Host{Name: "host", State: box.HostReady, CPUs: 7, MemBytes: tc.memory, DiskBytes: 200 * box.GiB}
+			host := box.Host{Name: "host", State: box.HostReady, CPUs: 7, CIScale: 1, MemBytes: tc.memory, DiskBytes: 200 * box.GiB}
 			placed := box.Box{ID: "old", Host: host.Name, Image: box.RunnerImage, Size: size, State: contract.BoxReady}
 			if got := box.Admit([]box.Host{host}, []box.Box{placed}, request); got != tc.want {
 				t.Fatalf("got %+v, want %+v", got, tc.want)

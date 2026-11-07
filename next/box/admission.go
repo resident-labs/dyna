@@ -158,7 +158,7 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 		// job but uses about half its CPUs on average, between links, tests and waits, so a host takes twice its CPUs of
 		// runners. At four times, hosts ran at two to six times their CPUs and jobs took two to three times as long; at once,
 		// they sat half idle. CI capacity scales reservations, with real memory as the backstop.
-		scale := int64(max(1, h.CIScale))
+		scale := int64(h.CIScale)
 		totalCPUScale := int64(4)
 		// The shared 4x ceiling must not truncate 3x/4x CI capacity. Session requests keep that ceiling.
 		if request.Image == RunnerImage {

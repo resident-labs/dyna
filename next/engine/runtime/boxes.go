@@ -854,7 +854,7 @@ func (b *Boxes) setUpHost(ctx context.Context, h *podman.Host, name contract.Hos
 	if err := b.syncInstructions(ctx, h); err != nil {
 		return box.Host{}, false, err
 	}
-	return box.Host{EngineHost: &same, Name: name, SSH: ssh, State: box.HostReady, Problem: problem, CPUs: check.CPUs, MemBytes: check.MemBytes, DiskBytes: check.DiskBytes, CheckedAt: time.Now()}, check.NoSwap, nil
+	return box.Host{EngineHost: &same, Name: name, SSH: ssh, State: box.HostReady, Problem: problem, CIScale: 1, CPUs: check.CPUs, MemBytes: check.MemBytes, DiskBytes: check.DiskBytes, CheckedAt: time.Now()}, check.NoSwap, nil
 }
 
 // adopt starts a recorded host's heartbeat.

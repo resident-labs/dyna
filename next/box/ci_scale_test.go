@@ -52,12 +52,12 @@ func TestCIScaleAdmission(t *testing.T) {
 }
 
 func TestCIScaleCPUBudget(t *testing.T) {
-	for _, scale := range []int{0, 1, 2, 3, 4} {
+	for _, scale := range []int{1, 2, 3, 4} {
 		h := box.Host{Name: "h", State: box.HostReady, CPUs: 8, MemBytes: 1024 * box.GiB, DiskBytes: 10000 * box.GiB, CIScale: scale}
 		size, _ := box.Size(contract.BoxSizeLarge)
 		req := box.Box{ID: "new", Image: box.RunnerImage, Size: size}
 		var running []box.Box
-		for i := 0; i < 2*max(1, scale); i++ {
+		for i := 0; i < 2*scale; i++ {
 			if got := box.Admit([]box.Host{h}, running, req); got.Host != "h" {
 				t.Fatalf("scale %d runner %d: %+v", scale, i, got)
 			}
