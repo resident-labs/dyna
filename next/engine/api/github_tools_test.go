@@ -72,12 +72,16 @@ func TestGitHubToolsGetTheSocketsRoomWrites(t *testing.T) {
 	}}
 	service.tools = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = append(seen, githubwrites.AllowedFrom(r.Context()))
+		if caller := githubwrites.SessionFrom(r.Context()); caller != "ses" {
+			t.Errorf("socket caller = %q", caller)
+		}
 	})
 	call := func(room contract.RoomID) {
 		server := httptest.NewServer(New(service, nil).handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalSession, Session: "ses"}, Box: "box", Room: room}))
 		defer server.Close()
-		request, _ := http.NewRequest("POST", server.URL+"/github/?room=room_a", strings.NewReader(`{"room":"room_a"}`))
+		request, _ := http.NewRequest("POST", server.URL+"/github/?room=room_a", strings.NewReader(`{"room":"room_a","session":"other"}`))
 		request.Header.Set("X-Dyna-Room", "room_a")
+		request.Header.Set("X-Dyna-Session", "other")
 		response, err := http.DefaultClient.Do(request)
 		if err != nil {
 			t.Fatal(err)
