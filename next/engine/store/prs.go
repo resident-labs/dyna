@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -20,8 +21,11 @@ var ErrPRTracked = errors.New("another session tracks this pull request")
 // account and a metadata change last woke a session, in Unix milliseconds.
 type TrackedPR struct {
 	contract.PrSummary
-	Room        contract.RoomID
-	HeadRepo    contract.RepoName
+	Room     contract.RoomID
+	HeadRepo contract.RepoName
+	// HeadBranch is the fetched GitHub head.ref used only when tracking. It is not a push right
+	// until TrackPR matches it against the tracking session's recorded branches or its descendants'.
+	HeadBranch  string
 	Baseline    bool
 	CITold      string
 	SeenReviews int64
@@ -208,8 +212,9 @@ func (s *Store) RecordPROpen(ctx context.Context, repo contract.RepoName, number
 	})
 }
 
-// TrackPR adds a PR with a baseline, so what it already shows wakes nobody. It records no branch, because a branch
-// in pr_owners is a push right (OwnsPRBranch) and tracking is only reading. A merged or closed row can be tracked again.
+// TrackPR adds a PR with a baseline, so what it already shows wakes nobody. A same-repository head can
+// recover a push right only from a branch recorded for this session or its descendants (including closed ones).
+// A merged or closed row can be tracked again.
 func (s *Store) TrackPR(ctx context.Context, pr TrackedPR) error {
 	meta, err := encodeMeta(pr.Meta)
 	if err != nil {
@@ -223,11 +228,27 @@ func (s *Store) TrackPR(ctx context.Context, pr TrackedPR) error {
 		if exists {
 			pr.Repo = recorded
 		}
-		result, err := tx.ExecContext(ctx, `INSERT INTO pr_owners(repo,number,session,goal,approved_head,head_repo,url,title,author,draft,state,head,meta,stack,position) VALUES(?,?,?,'','',?,?,?,?,?,?,?,?,(SELECT stack FROM pr_stack_layers WHERE repo=? COLLATE NOCASE AND number=?),(SELECT position FROM pr_stack_layers WHERE repo=? COLLATE NOCASE AND number=?))
-ON CONFLICT(repo,number) DO UPDATE SET branch=CASE WHEN session=excluded.session THEN branch ELSE '' END,session=excluded.session,approved_head='',
+		branch := ""
+		if pr.HeadBranch != "" && strings.EqualFold(string(pr.HeadRepo), string(pr.Repo)) {
+			// This is narrower than team push access: a sibling's or ancestor's branch cannot be claimed by tracking.
+			var recorded bool
+			err := tx.QueryRowContext(ctx, `WITH RECURSIVE descendants(id,room) AS (
+ SELECT id,room FROM sessions WHERE id=?
+ UNION ALL SELECT s.id,s.room FROM sessions s JOIN descendants d ON s.parent=d.id AND s.room=d.room
+ ) SELECT EXISTS(SELECT 1 FROM session_branches b JOIN descendants d ON d.id=b.session
+ WHERE b.repo=? COLLATE NOCASE AND b.branch=?)`, pr.Session, pr.Repo, pr.HeadBranch).Scan(&recorded)
+			if err != nil {
+				return err
+			}
+			if recorded {
+				branch = pr.HeadBranch
+			}
+		}
+		result, err := tx.ExecContext(ctx, `INSERT INTO pr_owners(repo,number,session,goal,approved_head,branch,head_repo,url,title,author,draft,state,head,meta,stack,position) VALUES(?,?,?,'','',?,?,?,?,?,?,?,?,?,(SELECT stack FROM pr_stack_layers WHERE repo=? COLLATE NOCASE AND number=?),(SELECT position FROM pr_stack_layers WHERE repo=? COLLATE NOCASE AND number=?))
+ON CONFLICT(repo,number) DO UPDATE SET branch=CASE WHEN session=excluded.session AND branch<>'' THEN branch ELSE excluded.branch END,session=excluded.session,approved_head='',
 head_repo=excluded.head_repo,url=excluded.url,title=excluded.title,author=excluded.author,draft=excluded.draft,state=excluded.state,head=excluded.head,
 stack=excluded.stack,position=excluded.position,review='',ci='',merge='',ci_told='',seen_reviews=0,own_wake_at=0,meta=excluded.meta,meta_wake_at=0,baseline=1 WHERE state<>'open'`,
-			pr.Repo, pr.Number, pr.Session, pr.HeadRepo, pr.URL, pr.Title, pr.Author, pr.Draft, pr.State, pr.Head, meta, pr.Repo, pr.Number, pr.Repo, pr.Number)
+			pr.Repo, pr.Number, pr.Session, branch, pr.HeadRepo, pr.URL, pr.Title, pr.Author, pr.Draft, pr.State, pr.Head, meta, pr.Repo, pr.Number, pr.Repo, pr.Number)
 		if err != nil {
 			return err
 		}
