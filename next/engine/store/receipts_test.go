@@ -30,7 +30,7 @@ func TestPostReceiptsDerivedWait(t *testing.T) {
 	}
 	check := func(want string, wait bool) {
 		t.Helper()
-		rs, err := s.PostReceipts(ctx, seq, now)
+		rs, err := s.PostReceipts(ctx, seq, "", now)
 		if err != nil || len(rs) != 1 {
 			t.Fatalf("%+v %v", rs, err)
 		}
@@ -51,7 +51,7 @@ func TestPostReceiptsDerivedWait(t *testing.T) {
 	if _, err = s.writer.Exec("UPDATE boxes SET state='ready'"); err != nil {
 		t.Fatal(err)
 	}
-	rs, err := s.PostReceipts(ctx, seq, now.Add(time.Minute))
+	rs, err := s.PostReceipts(ctx, seq, "", now.Add(time.Minute))
 	if err != nil || rs[0].BatchDeadline != nil {
 		t.Fatalf("expired %+v %v", rs, err)
 	}
