@@ -1,7 +1,9 @@
 package githubwrites
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -50,6 +52,17 @@ func (g *Guard) checkActions(request *http.Request, found matched, segments []st
 	allowed, err := g.CanPush(request.Context(), repo, branch)
 	if err != nil || !allowed {
 		return refuse(contract.GitHubWriteBranchNotAllowed, "Actions branch %q is not pushable by this session (lookup error: %v)", branch, err)
+	}
+	if segments[4] == "workflows" {
+		// Pin the forwarded ref to heads: a bare name can also name a tag on GitHub.
+		keys["ref"], _ = json.Marshal("refs/heads/" + branch)
+		normalized, err := json.Marshal(keys)
+		if err != nil {
+			return refuse(contract.GitHubWriteBodyUnreadable, "workflow dispatch body could not be encoded: %v", err)
+		}
+		request.Body = io.NopCloser(bytes.NewReader(normalized))
+		request.ContentLength = int64(len(normalized))
+		request.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(normalized)), nil }
 	}
 	return nil
 }
