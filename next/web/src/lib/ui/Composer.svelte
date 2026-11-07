@@ -4,8 +4,11 @@
 </script>
 
 <script lang="ts">
-  import { tick } from "svelte";
+  import { onMount, tick } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
+  import { call } from "../client.ts";
+  import { profileRows } from "../profiles.ts";
+  import { profileCommands, parsePrefix, commandProblem, type Command, type CommandContext } from "../composer-commands.ts";
   import Icon from "./Icon.svelte";
   import Avatar from "./Avatar.svelte";
   import Markdown from "./Markdown.svelte";
@@ -24,11 +27,43 @@
   // Files wait above the text as chips, as in v1's tray; the paperclip, a paste or the picker adds them.
   // While a DM's session runs a turn, an empty draft's Send becomes a square Stop, as in T3 Code; a draft keeps Send, which
   // steers the turn.
-  let { value = $bindable(""), placeholder, onsend, quote, replacement, onundo, onunquote, sessions = [], files, stop, thread = false, host, element = $bindable() }: {
+  let { value = $bindable(""), placeholder, onsend, commandContext, quote, replacement, onundo, onunquote, sessions = [], files, stop, thread = false, host, element = $bindable() }: {
+    commandContext?: CommandContext;
     value?: string; placeholder: string; onsend: () => void; quote?: Quote; replacement?: Quote; onundo: () => void; onunquote: () => void; sessions?: Mentionable[]; files: FileDraft;
     stop?: { stopping: boolean; failed: boolean; run: () => void }; thread?: boolean; host?: string;
     element?: HTMLTextAreaElement;
   } = $props();
+  let commands: Command[] = $state([]);
+  let commandBusy = $state(false), commandError = $state("");
+  let profilesLoaded = $state(false);
+  async function loadProfiles() {
+    await call("profile.list", {}).then(result => {
+      commands = profileCommands(profileRows(result.profiles).sort((a, b) => b.inUse - a.inUse));
+      profilesLoaded = true;
+      commandError = "";
+    }, () => { commandError = "The profiles did not load. Focus the message to retry."; });
+  }
+  onMount(() => { void loadProfiles(); });
+  let prefix = $derived(commandContext ? parsePrefix(value, commands) : undefined);
+  let problem = $derived(prefix && !profilesLoaded ? commandError || "Loading profiles…" : commandContext ? commandProblem(value, commands, commandContext.dm) : "");
+  // Context is a hint, not a validation failure: valid commands keep Send available.
+  let commandHint = $derived(prefix && commandContext
+    ? prefix.command
+      ? commandContext.dm ? `Switch to ${prefix.command.name}` : `New ${prefix.command.name} session`
+      : commandContext.dm ? "Switch this session to…" : "Start a new session with…"
+    : "");
+  async function submit() {
+    if (!canSend) return;
+    note = "";
+    commandError = "";
+    if (!prefix?.command || !commandContext) { onsend(); return; }
+    commandBusy = true;
+    const context = commandContext;
+    await prefix.command.run(prefix.text, context).catch((error: unknown) => {
+      commandError = context.dm ? "The profile did not change. Try again." : error instanceof Error ? error.message : "The session could not start. Try again.";
+    });
+    commandBusy = false;
+  }
   let picker: HTMLInputElement | undefined = $state();
   // The line that names a refused file and why shows until the next add or send.
   let note = $state("");
@@ -36,7 +71,7 @@
   let forwarded = $derived(quote?.attachments.length ?? 0);
   let over = $derived(files.items.length + forwarded - maxFiles);
   let empty = $derived(!value.trim() && !quote && !files.items.length);
-  let canSend = $derived(!files.busy && over <= 0 && !empty);
+  let canSend = $derived(!commandBusy && !problem && (!prefix || !!prefix.command) && !files.busy && over <= 0 && !empty);
   const extension = (name: string) => /\.([A-Za-z0-9]{1,6})$/.exec(name)?.[1].toUpperCase() ?? "FILE";
   // v1's order (attach.ts pastedFiles): the files, else file items, else an image from the async clipboard. Files win over
   // text, since Finder also puts the file name in text/plain; WebKitGTK may leave both empty for a screenshot.
@@ -69,17 +104,33 @@
   const openPreview = (url: string, name: string) => { preview = { url, name }; };
   const id = $props.id();
   const touch = new MediaQuery("pointer: coarse");
-  let caret = $state(0);
+  let caret = $state(0), scrollTop = $state(0);
   // Escape closes the list until the next typed character, as in v1.
   let dismissed = $state(-1);
   let pick = $state(0);
   let token = $derived(sessions.length ? mentionToken(value, caret) : undefined);
-  let matches = $derived(token && token.start !== dismissed
+  let mentionMatches = $derived(token && token.start !== dismissed
     ? sessions.filter(session => session.name.toLowerCase().startsWith(token.query.toLowerCase())).slice(0, 8) : []);
+  let commandMatches = $derived(prefix && dismissed !== 0 && caret <= prefix.name.length + 1 && !/\s/.test(value.slice(0, caret))
+    ? commands.filter(command => command.trigger === prefix.trigger && command.name.startsWith(prefix.name)) : []);
+  let matches = $derived(commandMatches.length ? commandMatches.map(command => ({ name: command.name, root: false, status: command.detail })) : mentionMatches);
   // A new query or a shorter list starts at the first row, so pick never points past the end.
-  $effect(() => { void token?.query; void matches.length; pick = 0; });
+  $effect(() => { void token?.query; void prefix?.name; void matches.length; pick = 0; });
+  $effect(() => {
+    const selected = matches.length ? `${id}-${pick}` : undefined;
+    if (selected) void tick().then(() => document.getElementById(selected)?.scrollIntoView({ block: "nearest" }));
+  });
   const track = () => { caret = element?.selectionStart ?? 0; };
   async function complete(name: string) {
+    if (commandMatches.length) {
+      const command = commandMatches.find(command => command.name === name)!;
+      value = command.complete() + (prefix?.text ?? "");
+      caret = command.complete().length;
+      dismissed = 0;
+      await tick();
+      element?.setSelectionRange(caret, caret);
+      return;
+    }
     if (!token) return;
     // The pick replaces the whole word, also the part after the caret, and adds a space only when none follows.
     const rest = value.slice(caret).replace(/^[A-Za-z0-9._:-]*/, "");
@@ -101,22 +152,22 @@
     } else if (event.key === "Escape" && (matches.length || quote)) {
       // The open list closes first, then the forwarded post goes.
       event.stopPropagation();
-      if (matches.length) dismissed = token?.start ?? -1; else onunquote();
+      if (matches.length) dismissed = prefix ? 0 : token?.start ?? -1; else onunquote();
     } else if (event.key === "Enter" && !event.shiftKey && !touch.current) {
       event.preventDefault();
-      if (canSend) { note = ""; onsend(); }
+      void submit();
     }
   }
 </script>
 
 <div class="composer" class:thread {@attach holdDrags}>
   {#if matches.length}
-    <div class="mentions" id="{id}-list" role="listbox" aria-label="Sessions">
-      <p class="head" aria-hidden="true">Sessions</p>
+    <div class="mentions" class:profiles={commandMatches.length > 0} id="{id}-list" role="listbox" aria-label={commandMatches.length ? "Profiles" : "Sessions"}>
+      <p class="head" aria-hidden="true">{commandMatches.length ? "Profiles" : "Sessions"}</p>
       {#each matches as session, i (session.name)}
         <button type="button" id="{id}-{i}" class="option" class:active={i === pick} role="option" aria-selected={i === pick} tabindex="-1"
           onmousedown={event => event.preventDefault()} onmousemove={() => { pick = i; }} onclick={() => void complete(session.name)}>
-          <Avatar kind="session" name={session.name} root={session.root} size={24} />
+          {#if !commandMatches.length}<Avatar kind="session" name={session.name} root={session.root} size={24} />{/if}
           <span class="name" style:--hue={hue(session.name)}>{session.name}</span>
           {#if session.status}<span class="status">{session.status}</span>{/if}
         </button>
@@ -146,9 +197,12 @@
   {#if preview}<Modal title={preview.name} wide onclose={() => { preview = undefined; }}><img class="preview" src={preview.url} alt={preview.name} /></Modal>{/if}
   {#if note || over > 0}<p class="note" class:over={over > 0} role="status">{over > 0 ? `A post can carry ${maxFiles} files; remove ${over} to send.` : note}</p>{/if}
   {#if stop?.failed && empty}<p class="note" role="status">The stop did not reach the engine. Try again.</p>{/if}
+  {#if commandHint}<p class="note" id="{id}-command" role="status">{commandHint}</p>{/if}
+  {#if problem || commandError}<p class="note" id="{id}-problem" role="status">{problem || commandError}</p>{/if}
   <div class="inputline">
-  <textarea rows="2" aria-label="Message" bind:this={element} bind:value onkeydown={keydown} onpaste={paste} {placeholder}
-    oninput={() => { dismissed = -1; track(); }} onclick={track} onkeyup={track} onblur={() => { dismissed = token?.start ?? -1; }} onfocus={() => { dismissed = -1; }}
+  {#if prefix?.name && !prefix.command}<div class="underlay" aria-hidden="true"><div style:transform={"translateY(-" + scrollTop + "px)"}><span>{prefix.trigger}{prefix.name}</span>{value.slice(prefix.name.length + 1)}</div></div>{/if}
+  <textarea disabled={commandBusy} aria-invalid={!!problem} aria-describedby={commandHint || problem || commandError ? [commandHint ? `${id}-command` : "", problem || commandError ? `${id}-problem` : ""].filter(Boolean).join(" ") : undefined} rows="2" aria-label="Message" bind:this={element} bind:value onkeydown={keydown} onpaste={paste} {placeholder}
+    onscroll={() => { scrollTop = element?.scrollTop ?? 0; }} oninput={() => { dismissed = -1; track(); }} onclick={track} onkeyup={track} onblur={() => { dismissed = prefix ? 0 : token?.start ?? -1; }} onfocus={() => { dismissed = -1; if (!profilesLoaded) void loadProfiles(); }}
     role="combobox" aria-autocomplete="list" aria-expanded={matches.length > 0} aria-controls={matches.length ? `${id}-list` : undefined}
     aria-activedescendant={matches.length ? `${id}-${pick}` : undefined}></textarea>
   </div>
@@ -159,7 +213,7 @@
     {#if host}<span class="host">on {host}</span>{/if}
     {#if stop && empty}<button type="button" class="send stop" aria-label={stop.stopping ? "Stopping" : "Stop"} title={stop.stopping ? "Stopping" : "Stop"} disabled={stop.stopping}
       onclick={event => { stop.run(); if (!event.detail) element?.focus(); }}><Icon name="stop" /></button>
-    {:else}<button type="button" class="send" aria-label="Send" title="Send" disabled={!canSend} onclick={() => { note = ""; onsend(); element?.focus(); }}><Icon name="send" /></button>{/if}
+    {:else}<button type="button" class="send" aria-label="Send" title="Send" disabled={!canSend} onclick={() => { void submit(); element?.focus(); }}><Icon name="send" /></button>{/if}
   </div>
 </div>
 
@@ -170,7 +224,9 @@
   .composer:has(textarea:focus-visible) { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
   /* A raised card over the feed at the box's top left, as Discord's mention list; v1's list spans the whole box. */
   .mentions { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 2; width: min(320px, 100%); padding: 4px;
-    background: var(--raised); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 24px var(--shadow-md); }
+    background: var(--raised); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 24px var(--shadow-md); max-height: 45vh; overflow-y: auto; }
+  .mentions.profiles { width: min(460px, 100%); }
+  .profiles .status { white-space: normal; }
   .head { margin: 0; padding: 4px 8px 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
   .option { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 0 8px; border-radius: 6px; cursor: pointer; }
   .option.active { background: var(--selected); }
@@ -193,7 +249,9 @@
   .quoted :global(:is(p, ul, ol, pre, blockquote)) { margin: 0; }
   .quoted :global(:is(h1, h2, h3, h4, h5, h6)) { margin: 0; font-size: inherit; }
   .files { margin: 4px 0 0; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .inputline { display: contents; }
+  .inputline { display: block; position: relative; }
+  .underlay { position: absolute; inset: 0; overflow: hidden; pointer-events: none; white-space: pre-wrap; overflow-wrap: break-word; color: transparent; }
+  .underlay span { text-decoration: underline wavy var(--danger); text-underline-offset: 4px; }
   textarea { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; resize: none; field-sizing: content; min-height: 3em; max-height: 40vh; overflow-y: auto; overscroll-behavior: contain; }
   /* iOS zooms into a field under 16 px when it takes focus. */
   @media (pointer: coarse) { textarea { font-size: 16px; } }
@@ -236,6 +294,7 @@
     .note.over { grid-row: 5; margin: 4px 0 0; }
     .inputline { display: flex; align-items: center; gap: 6px; min-width: 0; grid-column: 2; grid-row: 4; }
     textarea::placeholder { white-space: nowrap; text-overflow: ellipsis; }
+    .underlay { padding: 8px 0; font-size: 16px; }
     textarea { min-width: 0; flex: 1; min-height: 40px; padding: 8px 0; }
     .actions { display: contents; }
     .actions .attach { grid-column: 1; grid-row: 4; }
