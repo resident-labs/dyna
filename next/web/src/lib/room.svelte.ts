@@ -198,9 +198,13 @@ export class RoomStore {
     this.changed();
     if (this.closed || !this.loaded) return;
     void this.loadPRs();
-    this.stopStream = this.connect(this.room, () => this.head, event => this.apply(event), undefined, undefined, () => {
-      // A conversation.read is not replayed. A read made after load() or during a dropped stream is missed, so each hello rereads.
+    this.stopStream = this.connect(this.room, () => this.head, event => this.apply(event), undefined, undefined, (reconnect = false) => {
+      if (this.closed) return;
+      // Positions are live-only: another device may read between load's snapshots
+      // and subscription. Repair that gap on every hello, including the first.
       this.rereading = this.rereadPositions().catch(() => {});
+      // load owns workflows and waits; persisted changes replay after head.
+      if (!reconnect) return;
       void this.readWorkflows();
       this.refreshWaits();
       for (const page of this.runPages.values()) page.step();
@@ -245,7 +249,8 @@ export class RoomStore {
     this.startTimer.unref?.();
     void this.readGoals();
     // Before the room is ready, so a crew's page opens as a run from the start.
-    await this.readWorkflows();
+    // A failed optional list must not leave a healthy connection empty forever.
+    if (!await this.readWorkflows() && !this.closed) await this.readWorkflows();
     for (const session of list.sessions ?? []) {
       this.sessions.set(session.id, {
         session: session.id, name: session.name, parent: session.parent || undefined,
@@ -284,9 +289,11 @@ export class RoomStore {
     if (!this.names.has(run.session)) this.names.set(run.session, run.name);
   }
 
-  private async readWorkflows(): Promise<void> {
+  private async readWorkflows(): Promise<boolean> {
     const list = await call("workflow.list", { room: this.room }).catch(() => undefined);
-    for (const run of list?.runs ?? []) this.noteRun(run);
+    if (!list || this.closed) return false;
+    for (const run of list.runs ?? []) this.noteRun(run);
+    return true;
   }
 
   // workflow.list holds a room's newest runs, so a closed session asks for itself once. Most sessions have no run.
