@@ -285,18 +285,14 @@ func (s *Service) WorkflowList(ctx context.Context, caller contract.Principal, r
 	if problem != nil {
 		return contract.WorkflowListResponse{}, problem
 	}
-	runs, err := s.store.WorkflowRuns(ctx, roomID)
+	runs, err := s.store.WorkflowList(ctx, roomID)
 	if err != nil {
 		return contract.WorkflowListResponse{}, failure(err)
 	}
-	response := contract.WorkflowListResponse{Runs: make([]contract.WorkflowInfo, 0, len(runs))}
-	for _, run := range runs {
-		info, err := s.workflowInfo(ctx, run)
-		if err != nil {
-			return contract.WorkflowListResponse{}, failure(err)
-		}
-		response.Runs = append(response.Runs, info)
+	for i := range runs {
+		runs[i].Status = harness.Mask(runs[i].Status)
 	}
+	response := contract.WorkflowListResponse{Runs: runs}
 	return response, nil
 }
 

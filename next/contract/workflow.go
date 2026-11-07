@@ -77,7 +77,8 @@ type WorkflowReloadResponse struct {
 }
 
 // WorkflowInfo is one run. Steps counts its journal, Running and Failed count its running and failed steps, and FailedSteps
-// names the failed, at most 20. Result is the script's return value, or why it threw. Version is the script version it runs, 1
+// names the failed, at most 20. Result is the script's return value, or why it threw; only status includes it, never list.
+// List's Branch is the first recorded branch; status retains the most recent recorded branch. Version is the script version it runs, 1
 // until a reload. Status is the script's latest status() line, empty when it wrote none.
 type WorkflowInfo struct {
 	Run         WorkflowRunID `json:"run"`
@@ -175,6 +176,8 @@ type WorkflowConflict struct {
 type WorkflowListRequest struct {
 	Room RoomID `json:"room,omitempty"`
 }
+
+// WorkflowListResponse contains lightweight summaries, without results or per-step detail.
 type WorkflowListResponse struct {
 	Runs []WorkflowInfo `json:"runs"`
 }
