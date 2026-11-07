@@ -134,26 +134,37 @@ function journal() {
     throw new Error("Box lifecycle smoke found a namespace fence or lifecycle error");
   }
 }
-journal();
 let target;
-for (const room of call("room.list", {}).rooms) {
-  let after;
-  do {
-    const page = call("session.list", { room: room.id, ...(after ? { after } : {}) });
-    const session = page.sessions.find(s => s.box && s.boxState === "ready" && !s.turn &&
-      s.computer === "stopped");
-    if (session) {
-      target = { room: room.id, session: session.id, box: session.box, seq: page.seq };
-      break;
-    }
-    after = page.next;
-  } while (after);
-  if (target) break;
+while (!target) {
+  journal();
+  for (const room of call("room.list", {}).rooms) {
+    let after;
+    do {
+      const page = call("session.list", { room: room.id, ...(after ? { after } : {}) });
+      const session = page.sessions.find(s => s.box && s.boxState === "ready" && !s.turn &&
+        s.computer === "stopped");
+      if (session) {
+        target = { room: room.id, session: session.id, box: session.box, seq: page.seq };
+        break;
+      }
+      after = page.next;
+    } while (after);
+    if (target) break;
+  }
+  if (!target) run("sleep", ["1"]);
 }
-if (!target) throw new Error("Box lifecycle smoke found no idle ready session");
-const marked = call("session.refresh", { session: target.session }).marked;
-if (!marked.includes(target.session)) throw new Error("Box lifecycle smoke did not mark its session");
-// A persisted ready transition proves completion even if polling misses the stop.
+console.log(`Box lifecycle smoke selected: ${JSON.stringify(target)}`);
+const response = call("session.refresh", { session: target.session });
+console.log(`Box lifecycle smoke refresh response: ${JSON.stringify(response)}`);
+if (response.marked.includes(target.session)) {
+  console.log("Box lifecycle smoke accepted explicit refresh");
+} else {
+  // StopStale can set want=stop while the public snapshot still says ready.
+  // Observe that update instead; never issue a second refresh or accept the snapshot.
+  console.log("Box lifecycle smoke refresh did not mark target; waiting for a lifecycle transition");
+}
+// A persisted ready transition after selection proves completion even if polling
+// misses the stop, whether explicitly refreshed or already updating.
 // A still-ready pre-refresh snapshot alone is not success.
 let returnedReady = false;
 for (;;) {
