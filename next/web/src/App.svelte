@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { sessionName, type CommandContext } from "./lib/composer-commands.ts";
   import { roomIsLive } from "./lib/source.ts";
   import { paneCounts, roomRoute, settingsRoute } from "./lib/routes.ts";
   import { nextArea } from "./lib/areas.ts";
@@ -333,10 +334,26 @@
   let stop = $derived(stopOf(session));
   // Sends the draft of the open conversation, or of dm's DM from the computer's chat bar. A DM that is not open sends
   // directly, and a post that does not send waits as a failed row in that DM for Retry.
-  function send(dm = session) {
-    if (!store || !room) return;
-    const to = `${room}/${dm ?? ""}`;
-    const text = savedDrafts.draft(to, drafts[to]), quote = quotes[to], draft = files(to);
+  function commandContext(dm = session): CommandContext {
+    const targetRoom = room!, current = store!, destination = { room: targetRoom, store: current, thread, view }, to = targetRoom + "/" + (dm ?? "");
+    return {
+      dm: !!dm,
+      start: async (profile, brief) => {
+        const result = await call("session.start", { clientId: crypto.randomUUID(), room: targetRoom, profile, brief,
+          name: sessionName(brief, [...current.sessions.values()].map(item => item.name)) });
+        startingBriefs[result.session] = brief;
+        openLocation(targetRoom, result.session);
+      },
+      switchProfile: async profile => { await call("session.set_profile", { session: dm!, profile }); },
+      send: text => send(dm, text, destination),
+      clear: () => { drafts[to] = ""; savedDrafts.clear(to); },
+    };
+  }
+  function send(dm = session, overrideText?: string, destination = { room, store, thread, view }) {
+    const { room: targetRoom, store: targetStore, thread: targetThread, view: targetView } = destination;
+    if (!targetStore || !targetRoom) return;
+    const to = `${targetRoom}/${dm ?? ""}`;
+    const text = overrideText ?? savedDrafts.draft(to, drafts[to]), quote = quotes[to], draft = files(to);
     if (draft.busy || (!text.trim() && !quote && !draft.items.length)) return;
     const attachments = [...quote?.attachments ?? [], ...draft.take()];
     drafts[to] = "";
@@ -345,13 +362,13 @@
     if (to === key) clearReplacement();
     // The engine refuses mentions on a DM post; in the feed, @names of open sessions become mentions.
     // Mentions come from the owner's own words only, so an @name inside a forwarded post wakes nobody.
-    const post = dm ? { text, mentions: [] } : parseMentions(text, store.sessions.values());
+    const post = dm ? { text, mentions: [] } : parseMentions(text, targetStore.sessions.values());
     // A forward carries the post's files; the engine keeps each file once, by hash, for every conversation.
-    const request: PostRequest = { room, data: quote?.data, text: quote ? quoted(quote, post.text) : post.text, mentions: post.mentions.length ? post.mentions : undefined,
+    const request: PostRequest = { room: targetRoom, data: quote?.data, text: quote ? quoted(quote, post.text) : post.text, mentions: post.mentions.length ? post.mentions : undefined,
       home: dm ? { kind: "dm", session: dm } : undefined, attachments: attachments.length ? attachments : undefined };
-    if (dm && dm === session) void thread?.send(request);
+    if (dm && dm === session && targetRoom === room) void targetThread?.send(request);
     else if (dm) void call("post", request).catch(() => keep(request));
-    else void view?.send(request);
+    else void targetView?.send(request);
   }
   let view: Feed | undefined = $state();
   let thread: SessionThread | undefined = $state();
@@ -684,7 +701,7 @@
     bind:full={computerFull} bind:rect bind:element={computer} start={() => call("computer.start", { session: id }).then(() => undefined)}
     onfit={(ratio, chrome) => { if (!places.has(id)) places.set(id, rect = fitted(rect, ratio, chrome, (feed?.getBoundingClientRect().bottom ?? window.innerHeight) - 16)); }}
     onclose={tapped => void stopWatching(tapped)}>
-    {#snippet chat()}{#if attention.can("operate")}<Composer bind:value={() => savedDrafts.draft(to, drafts[to]),text => { drafts[to] = text; savedDrafts.save(to, text); }} onsend={() => send(id)} thread
+    {#snippet chat()}{#if attention.can("operate")}<Composer bind:value={() => savedDrafts.draft(to, drafts[to]),text => { drafts[to] = text; savedDrafts.save(to, text); }} onsend={() => send(id)} commandContext={commandContext(id)} thread
       placeholder={"Message " + (store?.names.get(id) ?? "Session")} quote={quotes[to]} onundo={() => {}} onunquote={() => { quotes[to] = undefined; }} files={files(to)} stop={stopOf(id)} />{/if}{/snippet}
   </ComputerView>{/key}
 {/snippet}
@@ -782,7 +799,7 @@
       {:else if paused || pauseFailed === room}<p class="paused" role="status"><span>{pauseFailed === room ? "The room did not change." : "Room paused. No session starts a new turn."}</span>
         {#if attention.can("operate")}<button type="button" class="retry" onclick={pause}>{pauseFailed === room ? "Try again" : "Resume"}</button>{/if}</p>{/if}
       {#if crew}<!-- The run page has the stop. -->
-      {:else if attention.can("operate")}<Composer bind:this={composerBox} bind:element={composer} bind:value={() => savedDrafts.draft(key, drafts[key]),text => { drafts[key] = text; savedDrafts.save(key, text); clearReplacement(); }} onsend={send} thread={!!session} placeholder={"Message " + title} host={attention.host()}
+      {:else if attention.can("operate")}<Composer bind:this={composerBox} bind:element={composer} bind:value={() => savedDrafts.draft(key, drafts[key]),text => { drafts[key] = text; savedDrafts.save(key, text); clearReplacement(); }} onsend={() => send()} commandContext={commandContext()} thread={!!session} placeholder={"Message " + title} host={attention.host()}
         quote={quotes[key]} replacement={replaced[key]} onundo={() => { quotes[key] = undoForward({ quote: quotes[key], previous: replaced[key] }).quote; clearReplacement(); }} onunquote={() => { quotes[key] = undefined; clearReplacement(); }} sessions={mentions} files={files(key)} {stop} />
       {:else}<p class="readonly" role="status">This device can read the room but not post in it.</p>{/if}
     {/if}
