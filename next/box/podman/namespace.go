@@ -30,6 +30,10 @@ func (e NamespaceUncertain) Unwrap() error { return e.Err }
 
 // FD 8 is intentionally inherited by every mutating child. In particular, do
 // not use flock --close or close this descriptor at a nested exec boundary.
+// A completed command explicitly unlocks the shared description: Podman can
+// leave conmon holding FD 8 after its synchronous command returns. Without
+// this unlock, that daemon fences the box for its entire lifetime. Do not use
+// an EXIT trap: interrupted wrappers must retain the lock in surviving work.
 // Both files live outside all container, workspace, stack and room trees.
 const namespaceScript = `set -eu
 root=$1; id=$2; mode=$3; shift 3
@@ -53,7 +57,10 @@ case "$mode" in
  use) epoch=$((epoch + 1)); printf '%s\n' "$epoch" > "$epoch_file";;
  *) exit 251;;
 esac
-"$@"`
+status=0
+"$@" || status=$?
+flock -u 8
+exit "$status"`
 
 func (h *Host) namespace(ctx context.Context, id contract.BoxID, mode string, command ...string) ([]byte, error) {
 	args := []string{"bash", "-c", namespaceScript, "dyna-box-namespace", h.dataDir, string(id), mode}
