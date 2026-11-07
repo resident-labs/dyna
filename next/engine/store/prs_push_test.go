@@ -72,7 +72,7 @@ func TestPRTeamPushRoute(t *testing.T) {
 		{"aa", "bb-pr", false},  // cousin outside caller's parent team
 		{"root", "bb-pr", true}, // parentless root keeps its whole subtree
 		{"aa", "root-pr", true}, // distant ancestor
-		{"a", "closed-pr", false}, {"root", "closed-pr", false},
+		{"a", "closed-pr", false}, {"root", "closed-pr", false}, {"b", "closed-pr", false},
 		{"root", "foreign-pr", false}, {"foreign", "bb-pr", false},
 		{"missing", "bb-pr", false}, {"", "bb-pr", false},
 	} {
@@ -101,6 +101,13 @@ func TestPRTeamPushRoute(t *testing.T) {
 				t.Errorf("expected branch refusal, got %d: %s", w.Code, w.Body.String())
 			}
 		})
+	}
+	// A closed PR grants no right, but a recorded session branch remains pushable independently.
+	if err := s.AddBranch(ctx, "o/r", "b", "closed-pr", time.Unix(2, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if allowed, err := gitroute.CanPushBranch(ctx, s, "o/r", "b", "closed-pr"); err != nil || !allowed {
+		t.Fatalf("recorded branch right = %v, %v", allowed, err)
 	}
 	// Push access must not grant PR lifecycle ownership.
 	if owns, err := s.OwnsPR(ctx, "o/r", "a", 1); err != nil || owns {
