@@ -705,7 +705,7 @@ func TestPullOwnershipLookupFailsClosed(t *testing.T) {
 			_, err := g.RoundTrip(req)
 			if missing {
 				var refusal *Refusal
-				if !errors.As(err, &refusal) || refusal.Reason != contract.GitHubWritePRNotOwned || refusal.Detail != "only the session that owns this PR can close, reopen or retarget it" {
+				if !errors.As(err, &refusal) || refusal.Reason != contract.GitHubWritePRNotOwned || refusal.Detail != "only the session that owns this PR, or a session above it, can close, reopen or retarget it" {
 					t.Fatalf("missing hook: %v", err)
 				}
 			} else if !errors.Is(err, sentinel) {

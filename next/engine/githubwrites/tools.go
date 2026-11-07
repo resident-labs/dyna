@@ -40,7 +40,7 @@ var Tools = []Tool{
 		issues: "It creates and edits labels of the allowed repositories ('create' and 'update'); 'delete' is never allowed.",
 	}},
 	{"update_pull_request", map[contract.GitHubWriteGroup]string{
-		pulls: "It edits a PR's title, body and draft flag; the session that owns the PR may also close, reopen or change its base. Merges, reviewers and maintainer_can_modify are refused.",
+		pulls: "It edits a PR's title, body and draft flag; the session that owns the PR, or a session above it, may also close, reopen or change its base. Merges, reviewers and maintainer_can_modify are refused.",
 	}},
 	{"add_reply_to_pull_request_comment", map[contract.GitHubWriteGroup]string{
 		pulls: "It replies to review comments of PRs of the allowed repositories.",
