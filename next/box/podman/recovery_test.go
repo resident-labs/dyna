@@ -40,8 +40,9 @@ printf '%s\n' "$*" >> "$NS_ROOT/recovery-calls"
 [ "${1:-}" != --cgroup-manager=systemd ] || shift
 case "$1" in
  inspect)
+ [ "$2 $3" = '--type container' ] || { echo 'Error: no such object: "b"' >&2; exit 125; }
  case "$REC_INSPECT" in
- missing) echo 'Error: container b not known' >&2; exit 125;;
+ missing) echo 'Error: no container with name or ID "b" found: no such container' >&2; exit 125;;
  unknown) echo 'Error: database broken' >&2; exit 125;;
  transport) exit 255;;
  *) echo "$REC_INSPECT";; esac;;
