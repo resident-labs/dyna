@@ -268,6 +268,35 @@ func TestSettledGoalChecklistDoesNotStall(t *testing.T) {
 	}
 }
 
+func TestSettledGoalDoesNotHideAnotherHeldGoal(t *testing.T) {
+	for _, openItem := range []bool{false, true} {
+		t.Run(map[bool]string{false: "zero items", true: "open item"}[openItem], func(t *testing.T) {
+			r := newGoalRig(t)
+			caller := asSession(r.child)
+			if _, e := r.s.GoalItem(r.ctx, caller, contract.GoalItemRequest{Goal: "g1", Text: "finished", State: contract.GoalItemDone}); e != nil {
+				t.Fatal(e)
+			}
+			second, e := r.s.GoalSet(r.ctx, caller, contract.GoalSetRequest{Text: "other work", DoneWhen: "shipped"})
+			if e != nil {
+				t.Fatal(e)
+			}
+			if openItem {
+				if _, e := r.s.GoalItem(r.ctx, caller, contract.GoalItemRequest{Goal: second.Goal, Text: "remaining"}); e != nil {
+					t.Fatal(e)
+				}
+			}
+			r.turn(r.child, "work remains on the second goal")
+			r.turn(r.lead, "noted")
+			r.advance(room.CheckinIdle + time.Minute)
+			r.pass()
+			r.wantCheckins(r.lead, 1)
+			if got := r.checkins(r.lead)[0].Children; len(got) != 1 || got[0].Goal != second.Goal {
+				t.Fatalf("report %+v", got)
+			}
+		})
+	}
+}
+
 func TestZeroItemGoalStillStalls(t *testing.T) {
 	r := newGoalRig(t)
 	r.turn(r.child, "work remains despite no checklist")

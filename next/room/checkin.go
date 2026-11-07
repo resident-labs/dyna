@@ -40,7 +40,8 @@ type CheckinSession struct {
 	Blocked    bool      // one of those questions left it nothing safe to do, so only the answer will move it
 	Waiting    time.Time // when its oldest undecided operation was asked; zero for none
 
-	// A session with no goal reports nothing. Goal is its oldest active goal.
+	// A session with no goal reports nothing. Goal is its oldest active goal with
+	// an open item or no checklist, or its oldest active goal if all are settled.
 	Goal     contract.GoalID
 	Text     string
 	Open     int

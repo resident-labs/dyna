@@ -149,7 +149,9 @@ func (s *Store) readCheckinRoom(ctx context.Context, tx *sql.Tx, id contract.Roo
 		if s == nil {
 			continue
 		}
-		if s.Goal == "" {
+		// Report the oldest goal that still needs attention, so a settled standing
+		// goal cannot hide another held goal's work. Keep the first if all are settled.
+		if s.Goal == "" || s.Total > 0 && s.Open == 0 && (total == 0 || open > 0) {
 			s.Goal, s.Text, s.Open, s.Total = goalID(number), text, open, total
 		}
 		if at := time.UnixMilli(updated); at.After(s.Progress) {
