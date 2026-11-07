@@ -22,9 +22,10 @@ test('closed explicit recipients are tooltip context, not queued deliveries', ()
  for (const state of ['taken', 'read']) {
   assert.equal(receiptSummary([closed, { ...live, state }], now).label, 'Delivered');
  }
- assert.equal(receiptSummary([closed], now).label, 'Delivered');
+ assert.equal(receiptSummary([closed], now).label, 'Not delivered · recipient closed');
+ assert.equal(receiptSummary([closed, { ...closed, session: 'c', name: 'also closed' }], now).label, 'Not delivered · recipient closed');
  assert.equal(receiptSummary([{ ...closed, state: 'read' }], now).label, 'Delivered');
  assert.match(receiptSummary([{ ...closed, state: 'read' }], now).details, /former: closed/);
- assert.equal(receiptSummary([{ ...live, closed: true }], now).label, 'Delivered');
+ assert.equal(receiptSummary([{ ...live, closed: true }], now).label, 'Not delivered · recipient closed');
  assert.equal(receiptSummary([{ ...live, closed: true }], now).seconds, undefined);
 });
