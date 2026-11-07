@@ -514,14 +514,17 @@ func (s *Store) ApplyPRPoll(ctx context.Context, pass GitHubPass, at time.Time) 
 	})
 }
 
-// OwnsPRBranch reports whether a session owns a PR on this branch.
+// OwnsPRBranch reports whether a session owns a PR on this branch, or one of its ancestors owns an open one, so a lead's
+// worker can update the PR the lead holds.
 func (s *Store) OwnsPRBranch(ctx context.Context, repo contract.RepoName, session contract.SessionID, branch string) (bool, error) {
 	var found bool
-	err := s.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM pr_owners WHERE repo=? AND session=? AND branch=?)", repo, session, branch).Scan(&found)
+	err := s.Read().QueryRowContext(ctx, `WITH RECURSIVE up(id) AS (SELECT parent FROM sessions WHERE id=? AND parent IS NOT NULL UNION SELECT s.parent FROM sessions s JOIN up ON s.id=up.id WHERE s.parent IS NOT NULL)
+SELECT ?<>'' AND (EXISTS(SELECT 1 FROM pr_owners WHERE repo=? AND session=? AND branch=?)
+ OR EXISTS(SELECT 1 FROM pr_owners WHERE repo=? AND branch=? AND state='open' AND session IN (SELECT id FROM up)))`, session, session, repo, session, branch, repo, branch).Scan(&found)
 	return found, err
 }
 
-// OwnsPR reports whether exactly one recorded PR has this identity and its owner is this session, including closed PRs.
+// OwnsPR reports whether exactly one recorded PR has this identity and its owner is this session or a descendant of it, including closed PRs.
 // GitHub repository names are case-insensitive; recorded names preserve their supplied spelling.
 func (s *Store) OwnsPR(ctx context.Context, repo contract.RepoName, session contract.SessionID, number int) (bool, error) {
 	var found bool

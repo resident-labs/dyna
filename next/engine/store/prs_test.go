@@ -198,3 +198,35 @@ func TestOwnsPRUsesRecordedSessionOnly(t *testing.T) {
 		t.Fatal("closed store hid error")
 	}
 }
+
+// A session pushes the branch of an open PR that it or one of its ancestors owns, so a lead's worker can update the PR the
+// lead inherited. A sibling, a parent of the PR's owner's child, or a closed PR's branch gives no push.
+func TestOwnsPRBranchFollowsAncestors(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.CreateRoom(ctx, "room", "room", time.Unix(1, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.writer.ExecContext(ctx, "INSERT INTO sessions(id,room,name,parent,profile,state,goal,created_at) VALUES ('lead','room','lead',NULL,'p','ready','',0),('w','room','w','lead','p','ready','',0),('ww','room','ww','w','p','ready','',0),('peer','room','peer',NULL,'p','ready','',0)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.writer.ExecContext(ctx, "INSERT INTO pr_owners(repo,number,session,goal,approved_head,head_repo,url,title,author,draft,state,head,meta,branch) VALUES ('o/r',1,'lead','','','o/r','u','t','x',0,'open','h','{}','feature'),('o/r',2,'lead','','','o/r','u','t','x',0,'merged','h','{}','done'),('o/r',3,'w','','','o/r','u','t','x',0,'open','h','{}','mine')"); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		session contract.SessionID
+		branch  string
+		want    bool
+	}{
+		{"lead", "feature", true}, {"w", "feature", true}, {"ww", "feature", true}, {"peer", "feature", false},
+		{"w", "done", false}, {"lead", "done", true}, {"w", "mine", true}, {"lead", "mine", false}, {"", "feature", false},
+	} {
+		if got, err := s.OwnsPRBranch(ctx, "o/r", tt.session, tt.branch); err != nil || got != tt.want {
+			t.Errorf("%+v: %v %v", tt, got, err)
+		}
+	}
+}
