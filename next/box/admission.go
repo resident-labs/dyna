@@ -157,12 +157,18 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 		// A session box idles most of the time, so a host takes four times its CPUs of them. A CI runner is busy for its whole
 		// job but uses about half its CPUs on average, between links, tests and waits, so a host takes twice its CPUs of
 		// runners. At four times, hosts ran at two to six times their CPUs and jobs took two to three times as long; at once,
-		// they sat half idle. Runners fit in real memory at 1x because a busy compile peaks near its limit.
-		if int64(cpu+request.Size.CPUs)*1000 > 4*cpuBudget || request.Image == RunnerImage && int64(runnerCPU+request.Size.CPUs)*1000 > 2*cpuBudget {
+		// they sat half idle. CI capacity scales reservations, with real memory as the backstop.
+		scale := int64(max(1, h.CIScale))
+		totalCPUScale := int64(4)
+		// The shared 4x ceiling must not truncate 3x/4x CI capacity. Session requests keep that ceiling.
+		if request.Image == RunnerImage {
+			totalCPUScale = max(totalCPUScale, 2*scale)
+		}
+		if int64(cpu+request.Size.CPUs)*1000 > totalCPUScale*cpuBudget || request.Image == RunnerImage && int64(runnerCPU+request.Size.CPUs)*1000 > 2*scale*cpuBudget {
 			reason = PendingCPU
 			continue
 		}
-		if mem+request.Size.MemBytes > 4*memBudget || request.Image == RunnerImage && runnerMem+request.Size.MemBytes > memBudget {
+		if mem+request.Size.MemBytes > 4*memBudget || request.Image == RunnerImage && runnerMem+request.Size.MemBytes > scale*memBudget {
 			reason = PendingMemory
 			continue
 		}

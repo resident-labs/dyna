@@ -51,6 +51,7 @@ type Host struct {
 	// runners there. Rooms decides which rooms the host serves while agents are on.
 	NoAgents  bool
 	CI        bool
+	CIScale   int  // Runner reservation multiplier; zero means the default 1 on newly probed hosts.
 	ExecOnly  bool // added with agents and ci off: host-exec runs only, base host checks, never a box or runner
 	CheckedAt time.Time
 	Pool      string         // the pool that holds this node

@@ -13,6 +13,19 @@ goes is Dyna's scheduler, act, trial suites and report parsing: GitHub runs the
 workflow and reports the result. v1's node queue becomes admission, and its
 free-disk rule becomes the disk floor boxes use.
 
+## Host capacity
+
+Each host stores `ciScale`, an integer from 1 to 4, default 1. The owner sets it
+with `dyna host set NAME --ci-scale N` or the Hosts pane’s CI capacity select
+(shown while CI is on). Actual changes are audited with the host switches in
+every existing room; an unchanged save writes no event.
+
+Runner reservations have a CPU budget of `2 * ciScale` times the host CPU budget
+and a memory budget of `ciScale` times its RAM budget, after services. Session
+box budgets do not change. Real memory at or above 80 percent still refuses new
+placements, and the hard cap stays 16 runners per host. Raising capacity changes
+reservation admission, not a runner container’s resource limits.
+
 ## Turn it on
 
 The pool does nothing until both of these are true: the repository is on at the

@@ -398,11 +398,12 @@ type HostSetLimitsResponse struct{}
 // lands on the host, and with CI off the CI pool starts no runner there, though a repository still names it. Both off
 // disables the host and keeps it registered, as before. A host added exec only (HostAddRequest.ExecOnly) stays exec only
 // whatever its switches say until agents or ci is turned on, which runs the full host check first and ends exec only. What
-// already runs there stays until it stops.
+// already runs there stays until it stops. CIScale sets runner reservation capacity from 1 to 4; nil leaves it as it is.
 type HostSetRequest struct {
 	Host               HostName `json:"host"`
 	Agents             *bool    `json:"agents,omitempty"`
 	CI                 *bool    `json:"ci,omitempty"`
+	CIScale            *int     `json:"ciScale,omitempty"`
 	ClearCreateProblem bool     `json:"clearCreateProblem,omitempty"`
 	OwnerOnlyAdmin     bool     `json:"ownerOnlyAdmin,omitempty"` // for an exec-only host that agents or ci turn into a full one: the owner confirms exclusive administration, as host add does
 }
@@ -462,9 +463,10 @@ type HostSummary struct {
 	DiskBytes    int64                `json:"diskBytes"`
 	DiskUsed     int64                `json:"diskUsed"`
 	DiskLow      bool                 `json:"diskLow"`
-	EngineHost   bool                 `json:"engineHost,omitempty"`  // this added host is the machine the engine runs on
-	Pool         string               `json:"pool,omitempty"`        // the pool that holds this node
-	Agents       bool                 `json:"agents,omitempty"`      // new session boxes may land on this added host
+	EngineHost   bool                 `json:"engineHost,omitempty"` // this added host is the machine the engine runs on
+	Pool         string               `json:"pool,omitempty"`       // the pool that holds this node
+	Agents       bool                 `json:"agents,omitempty"`     // new session boxes may land on this added host
+	CIScale      int                  `json:"ciScale,omitempty"`
 	CI           bool                 `json:"ci,omitempty"`          // the CI pool may start runners on this added host
 	ExecOnly     bool                 `json:"execOnly,omitempty"`    // added exec only: host-exec runs, no boxes or runners
 	Runners      int                  `json:"runners,omitempty"`     // the CI runners on this added host now
