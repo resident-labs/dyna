@@ -648,13 +648,14 @@ func (h *Host) StartContainer(ctx context.Context, id contract.BoxID) error {
 	// A warm start has no creation spec. If recovery removes an orphan, retain
 	// this failure: the next reconciliation observes absence and recreates it
 	// with the workspace and stack volumes intact.
-	script := recoverRemoving + `status=0
-podman --cgroup-manager=systemd start "$1" || status=$?
-if [ "$status" != 0 ]; then
- recover_removing "$1" || true
+	script := recoverRemoving + `id=$1; shift
+status=0
+"$@" || status=$?
+if [ "$status" = 125 ]; then
+ recover_removing "$id" || true
 fi
 exit "$status"`
-	_, err := h.namespace(ctx, id, "use", "bash", "-c", script, "dyna-recover-start", string(id))
+	_, err := h.namespace(ctx, id, "use", "bash", "-c", script, "dyna-recover-start", string(id), "podman", "--cgroup-manager=systemd", "start", string(id))
 	return err
 }
 func (h *Host) StopContainer(ctx context.Context, id contract.BoxID) error {
