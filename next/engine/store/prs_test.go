@@ -166,7 +166,11 @@ func TestOwnsPRUsesRecordedSessionOnly(t *testing.T) {
 	if err := s.CreateRoom(ctx, "room", "room", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.writer.ExecContext(ctx, "INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES ('owner','room','owner','p','ready','',0),('sibling','room','sibling','p','ready','',0)")
+	_, err = s.writer.ExecContext(ctx, "INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES ('lead','room','lead','p','ready','',0),('sibling','room','sibling','p','ready','',0)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.writer.ExecContext(ctx, "INSERT INTO sessions(id,room,parent,name,profile,state,goal,created_at) VALUES ('mid','room','lead','mid','p','ready','',0),('owner','room','mid','owner','p','ready','',0),('child','room','owner','child','p','ready','',0)")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +183,8 @@ func TestOwnsPRUsesRecordedSessionOnly(t *testing.T) {
 		number  int
 		want    bool
 	}{
-		{"acme/app", "owner", 7, true}, {"ACME/APP", "owner", 7, true}, {"acme/app", "sibling", 7, false}, {"acme/app", "", 7, false}, {"acme/other", "owner", 7, false}, {"acme/app", "owner", 8, false},
+		{"acme/app", "owner", 7, true}, {"ACME/APP", "owner", 7, true}, {"acme/app", "sibling", 7, false},
+		{"acme/app", "mid", 7, true}, {"acme/app", "lead", 7, true}, {"acme/app", "child", 7, false}, {"acme/app", "", 7, false}, {"acme/other", "owner", 7, false}, {"acme/app", "owner", 8, false},
 	} {
 		got, err := s.OwnsPR(ctx, tt.repo, tt.session, tt.number)
 		if err != nil || got != tt.want {

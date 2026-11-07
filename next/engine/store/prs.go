@@ -525,7 +525,10 @@ func (s *Store) OwnsPRBranch(ctx context.Context, repo contract.RepoName, sessio
 // GitHub repository names are case-insensitive; recorded names preserve their supplied spelling.
 func (s *Store) OwnsPR(ctx context.Context, repo contract.RepoName, session contract.SessionID, number int) (bool, error) {
 	var found bool
-	err := s.Read().QueryRowContext(ctx, "SELECT count(*)=1 AND coalesce(min(session)=?,0) FROM pr_owners WHERE repo=? COLLATE NOCASE AND number=?", session, repo, number).Scan(&found)
+	// The owner's ancestors manage it too, as a parent manages its children; an ambiguous identity still answers no.
+	err := s.Read().QueryRowContext(ctx, `WITH owner AS (SELECT CASE WHEN count(*)=1 THEN min(session) END AS id FROM pr_owners WHERE repo=? COLLATE NOCASE AND number=?),
+up(id) AS (SELECT id FROM owner WHERE id IS NOT NULL UNION SELECT s.parent FROM sessions s JOIN up ON s.id=up.id WHERE s.parent IS NOT NULL)
+SELECT ?<>'' AND EXISTS(SELECT 1 FROM up WHERE id=?)`, repo, number, session, session).Scan(&found)
 	return found, err
 }
 
