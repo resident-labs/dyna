@@ -16,6 +16,7 @@ func TestRemovingRecovery(t *testing.T) {
 		recover              bool
 	}{
 		{"removing", "removing", "removing", true},
+		{"inspect-removing", "exited", "removing", true},
 		{"store-missing", "exited", "missing", true},
 		{"running", "running", "missing", false},
 		{"paused", "paused", "missing", false},
