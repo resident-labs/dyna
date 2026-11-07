@@ -5,7 +5,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 export TEST_ROOT="$tmp/repo" TEST_LOG="$tmp/log"
 export TEST_REAL_NODE=$(command -v node)
-export TEST_REFRESH="$tmp/refreshed" TEST_CLOCK="$tmp/clock.cjs"
+export TEST_REFRESH="$tmp/refreshed" TEST_CLOCK="$tmp/clock.cjs" TEST_EVENTS="$tmp/events-polls"
 cat > "$TEST_CLOCK" <<'JS'
 if (process.env.FAKE_TIMEOUT === "1") {
   let now = 0;
@@ -59,9 +59,14 @@ case "$*" in
  *session.refresh*)
    [[ $* == *'{"session":"idle"}'* && $* != *'"room"'* ]] || exit 1
    touch "$TEST_REFRESH"
+   echo 0 > "$TEST_EVENTS"
    echo '{"marked":["idle"]}' ;;
  *events.list*)
-   if [[ ${FAKE_NO_RETURN:-0} == 1 ]]; then echo '{"events":[],"next":10}'
+   polls=$(( $(<"$TEST_EVENTS") + 1 ))
+   echo "$polls" > "$TEST_EVENTS"
+   if [[ ${FAKE_NULL_EVENTS:-} == always || ( ${FAKE_NULL_EVENTS:-} == first && $polls == 1 ) ]]; then
+     echo '{"events":null,"names":{},"next":10}'
+   elif [[ ${FAKE_NO_RETURN:-0} == 1 ]]; then echo '{"events":[],"next":10}'
    else echo '{"events":[{"seq":11,"body":{"type":"box.changed","session":"idle","box":"box-1","from":"starting","to":"ready"}}],"next":11}'; fi ;;
  *) echo "${FAKE_STATUS:-200}" ;;
 esac
@@ -144,6 +149,13 @@ rm -f "$tmp/install/failed-next" "$tmp/install/deployed-next" "$TEST_REFRESH"
 grep -q 'Box lifecycle smoke passed: box-1 returned ready' "$tmp/out"
 test "$(<"$tmp/install/deployed-next")" = tree123
 test -f "$TEST_REFRESH"
+# Empty event pages are null in the live API. Wait through one, then require the ready event.
+rm -f "$tmp/install/deployed-next" "$TEST_REFRESH"
+FAKE_NULL_EVENTS=first "$script" "${args[@]}" >"$tmp/out" 2>&1
+grep -q 'Box lifecycle smoke passed: box-1 returned ready' "$tmp/out"
+test "$(<"$TEST_EVENTS")" = 2
+test "$(<"$tmp/install/deployed-next")" = tree123
+test ! -f "$tmp/install/failed-next"
 # #2161: conmon retains the namespace flock (252), lifecycle errors follow,
 # and the refreshed box never returns ready. Active service and HTTP 200 are insufficient.
 rm -f "$tmp/install/deployed-next" "$TEST_REFRESH"
@@ -154,18 +166,23 @@ grep -q 'failed: box lifecycle smoke.*fix forward' "$tmp/out"
 test "$(<"$tmp/install/failed-next")" = tree123
 test ! -f "$tmp/install/deployed-next"
 # Either journal signature suffices; no idle box and no completed step also fail.
-for scenario in namespace lifecycle no-idle timeout; do
+for scenario in namespace lifecycle no-idle timeout null-timeout; do
   rm -f "$tmp/install/failed-next" "$tmp/install/deployed-next" "$TEST_REFRESH"
   case "$scenario" in
     namespace) flags=(FAKE_JOURNAL=namespace); expected='host namespace uncertain' ;;
     lifecycle) flags=(FAKE_JOURNAL=lifecycle); expected='lifecycle step box-1' ;;
     no-idle) flags=(FAKE_NO_IDLE=1); expected='no idle ready session' ;;
     timeout) flags=(FAKE_NO_RETURN=1 FAKE_TIMEOUT=1); expected='timed out after 180 seconds' ;;
+    null-timeout) flags=(FAKE_NULL_EVENTS=always FAKE_TIMEOUT=1); expected='timed out after 180 seconds' ;;
   esac
   env "${flags[@]}" "$script" "${args[@]}" >"$tmp/out" 2>&1 && { echo "$scenario was accepted" >&2; exit 1; }
   grep -q "$expected" "$tmp/out"
   test "$(<"$tmp/install/failed-next")" = tree123
   test ! -f "$tmp/install/deployed-next"
   if [[ $scenario == no-idle ]]; then test ! -f "$TEST_REFRESH"; fi
+  if [[ $scenario == null-timeout ]]; then
+    test "$(<"$TEST_EVENTS")" -gt 1
+    grep -q 'failed: box lifecycle smoke.*fix forward' "$tmp/out"
+  fi
 done
 echo 'deploy-trial tests passed'
