@@ -288,22 +288,58 @@ func shorten(body string) string {
 		if !entering {
 			return ast.WalkContinue, nil
 		}
-		var segments *text.Segments
+		var lines *text.Segments
+		var closure text.Segment
 		switch node := node.(type) {
 		case *ast.RawHTML:
-			segments = node.Segments
+			lines = node.Segments
 		case *ast.HTMLBlock:
-			segments = node.Lines()
+			lines = node.Lines()
+			closure = node.ClosureLine
 		default:
 			return ast.WalkContinue, nil
 		}
-		start, stop := segments.At(0).Start, segments.At(segments.Len()-1).Stop
-		if block, ok := node.(*ast.HTMLBlock); ok && block.HasClosure() {
-			stop = block.ClosureLine.Stop
+		segments := make([]text.Segment, 0, lines.Len()+1)
+		for i := 0; i < lines.Len(); i++ {
+			segments = append(segments, lines.At(i))
 		}
-		clean.Write(source[cursor:start])
-		clean.WriteString(excerptMarkup.ReplaceAllString(string(source[start:stop]), ""))
-		cursor = stop
+		if closure.Stop > closure.Start {
+			segments = append(segments, closure)
+		}
+		// Container markers (for example, > in a quote) live between the HTML
+		// segments, not inside the HTML. Match on the logical HTML, then map the
+		// removed ranges back to each segment while copying container syntax intact.
+		var html strings.Builder
+		for _, segment := range segments {
+			html.Write(source[segment.Start:segment.Stop])
+		}
+		matches := excerptMarkup.FindAllStringIndex(html.String(), -1)
+		offset, matchIndex := 0, 0
+		for _, segment := range segments {
+			clean.Write(source[cursor:segment.Start])
+			length := segment.Stop - segment.Start
+			copied := 0
+			for matchIndex < len(matches) && matches[matchIndex][0] < offset+length {
+				match := matches[matchIndex]
+				start, stop := max(match[0]-offset, copied), min(match[1]-offset, length)
+				clean.Write(source[segment.Start+copied : segment.Start+start])
+				// Keep line boundaries so the next segment's container marker does not
+				// move into the preceding line's text when multiline HTML is removed.
+				for _, b := range source[segment.Start+start : segment.Start+stop] {
+					if b == '\n' {
+						clean.WriteByte('\n')
+					}
+				}
+				copied = stop
+				if match[1] > offset+length {
+					break
+				}
+				matchIndex++
+			}
+			clean.Write(source[segment.Start+copied : segment.Stop])
+			cursor = segment.Stop
+			offset += length
+		}
 		return ast.WalkSkipChildren, nil
 	})
 	clean.Write(source[cursor:])
