@@ -231,3 +231,45 @@ func TestOwnsPRBranchFollowsAncestors(t *testing.T) {
 		}
 	}
 }
+
+func TestTrackPRRetakePreservesKnownBranchAndRecoversOnlyTrustedRef(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.CreateRoom(ctx, "room", "room", time.Unix(1, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.writer.ExecContext(ctx, `INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('s','room','s','p','ready','',0)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddBranch(ctx, "Owner/Repo", "s", "feature", time.Unix(1, 0)); err != nil {
+		t.Fatal(err)
+	}
+	for i, headRepo := range []contract.RepoName{"", "fork/repo", "OWNER/REPO"} {
+		pr := TrackedPR{HeadRepo: headRepo, HeadBranch: "feature", PrSummary: contract.PrSummary{Repo: "owner/repo", Number: i + 1, Session: "s", State: contract.PrOpen}}
+		if err := s.TrackPR(ctx, pr); err != nil {
+			t.Fatal(err)
+		}
+		var branch string
+		if err := s.Read().QueryRowContext(ctx, "SELECT branch FROM pr_owners WHERE number=?", i+1).Scan(&branch); err != nil {
+			t.Fatal(err)
+		}
+		if (branch == "feature") != (i == 2) {
+			t.Fatalf("head repo %q gave branch %q", headRepo, branch)
+		}
+	}
+	// Retaking a finished row as the same owner keeps a previously recorded nonempty branch.
+	if _, err := s.writer.ExecContext(ctx, "UPDATE pr_owners SET state='closed' WHERE number=3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.TrackPR(ctx, TrackedPR{PrSummary: contract.PrSummary{Repo: "OWNER/REPO", Number: 3, Session: "s", State: contract.PrOpen}}); err != nil {
+		t.Fatal(err)
+	}
+	var branch string
+	if err := s.Read().QueryRowContext(ctx, "SELECT branch FROM pr_owners WHERE number=3").Scan(&branch); err != nil || branch != "feature" {
+		t.Fatalf("branch %q: %v", branch, err)
+	}
+}

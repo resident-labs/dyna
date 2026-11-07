@@ -204,16 +204,17 @@ func (c *Client) cached(ctx context.Context, path string) ([]byte, error) {
 
 // Pull is a PR as one REST read gives it, when a PR is first tracked.
 type Pull struct {
-	Repo     contract.RepoName
-	HeadRepo contract.RepoName
-	Number   int
-	URL      string
-	Title    string
-	Author   string
-	Draft    bool
-	State    contract.PrState
-	Head     string
-	Meta     store.ItemMeta
+	Repo       contract.RepoName
+	HeadRepo   contract.RepoName
+	HeadBranch string // GitHub head.ref, not the commit SHA in Head.
+	Number     int
+	URL        string
+	Title      string
+	Author     string
+	Draft      bool
+	State      contract.PrState
+	Head       string
+	Meta       store.ItemMeta
 }
 
 // Pull reads one PR.
@@ -230,6 +231,7 @@ func (c *Client) Pull(ctx context.Context, repo contract.RepoName, number int) (
 		Merged bool `json:"merged"`
 		Head   struct {
 			SHA  string `json:"sha"`
+			Ref  string `json:"ref"`
 			Repo *struct {
 				FullName contract.RepoName `json:"full_name"`
 			} `json:"repo"`
@@ -247,7 +249,7 @@ func (c *Client) Pull(ctx context.Context, repo contract.RepoName, number int) (
 		return Pull{}, errors.New("GitHub answer has no such pull request")
 	}
 	item := payload.feedItem()
-	pull := Pull{Repo: payload.Base.Repo.FullName, Number: number, URL: item.URL, Title: item.Title, Author: item.Author, Draft: item.Draft, State: contract.PrOpen, Head: payload.Head.SHA, Meta: item.Meta}
+	pull := Pull{Repo: payload.Base.Repo.FullName, Number: number, URL: item.URL, Title: item.Title, Author: item.Author, Draft: item.Draft, State: contract.PrOpen, Head: payload.Head.SHA, HeadBranch: payload.Head.Ref, Meta: item.Meta}
 	if payload.Head.Repo != nil {
 		pull.HeadRepo = payload.Head.Repo.FullName
 	}
