@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"mime"
@@ -79,7 +78,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		return contract.PostResponse{}, e
 	} else if req.Room == "" {
 		return contract.PostResponse{}, invalid("room is required")
-	} else if err := s.store.RoomExists(ctx, req.Room); errors.Is(err, sql.ErrNoRows) {
+	} else if err := s.store.RoomExists(ctx, req.Room); errors.Is(err, store.ErrNotFound) {
 		return contract.PostResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "room not found"}
 	} else if err != nil {
 		return contract.PostResponse{}, failure(err)
