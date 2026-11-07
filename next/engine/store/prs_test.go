@@ -199,8 +199,8 @@ func TestOwnsPRUsesRecordedSessionOnly(t *testing.T) {
 	}
 }
 
-// A session pushes the branch of an open PR that it, one of its ancestors or one of its descendants owns: a lead's worker
-// updates the PR the lead holds, and a lead fixes its child's PR. A peer, or a relative's closed PR, gives no push.
+// Open PR push rights cover the parent team and ancestors, not unrelated trees.
+// Closed PRs grant no push rights, even to their owner.
 func TestOwnsPRBranchFollowsAncestors(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(t.TempDir())
@@ -211,10 +211,10 @@ func TestOwnsPRBranchFollowsAncestors(t *testing.T) {
 	if err := s.CreateRoom(ctx, "room", "room", time.Unix(1, 0)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.writer.ExecContext(ctx, "INSERT INTO sessions(id,room,name,parent,profile,state,goal,created_at) VALUES ('lead','room','lead',NULL,'p','ready','',0),('w','room','w','lead','p','ready','',0),('ww','room','ww','w','p','ready','',0),('peer','room','peer',NULL,'p','ready','',0)"); err != nil {
+	if _, err = s.writer.ExecContext(ctx, "INSERT INTO sessions(id,room,name,parent,profile,state,goal,created_at) VALUES ('lead','room','lead',NULL,'p','ready','',0),('w','room','w','lead','p','ready','',0),('ww','room','ww','w','p','ready','',0),('peer','room','peer',NULL,'p','ready','',0),('sibling','room','sibling','lead','p','ready','',0),('cousin','room','cousin','sibling','p','ready','',0)"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.writer.ExecContext(ctx, "INSERT INTO pr_owners(repo,number,session,goal,approved_head,head_repo,url,title,author,draft,state,head,meta,branch) VALUES ('o/r',1,'lead','','','o/r','u','t','x',0,'open','h','{}','feature'),('o/r',2,'lead','','','o/r','u','t','x',0,'merged','h','{}','done'),('o/r',3,'w','','','o/r','u','t','x',0,'open','h','{}','mine')"); err != nil {
+	if _, err = s.writer.ExecContext(ctx, "INSERT INTO pr_owners(repo,number,session,goal,approved_head,head_repo,url,title,author,draft,state,head,meta,branch) VALUES ('o/r',1,'lead','','','o/r','u','t','x',0,'open','h','{}','feature'),('o/r',2,'lead','','','o/r','u','t','x',0,'merged','h','{}','done'),('o/r',3,'w','','','o/r','u','t','x',0,'open','h','{}','mine'),('o/r',4,'cousin','','','o/r','u','t','x',0,'open','h','{}','cousin-pr'),('o/r',5,'sibling','','','o/r','u','t','x',0,'closed','h','{}','closed-pr')"); err != nil {
 		t.Fatal(err)
 	}
 	for _, tt := range []struct {
@@ -222,8 +222,9 @@ func TestOwnsPRBranchFollowsAncestors(t *testing.T) {
 		branch  string
 		want    bool
 	}{
+		{"w", "cousin-pr", true}, {"sibling", "mine", true}, {"ww", "cousin-pr", false}, {"lead", "cousin-pr", true}, {"peer", "cousin-pr", false}, {"unknown", "feature", false}, {"w", "closed-pr", false}, {"lead", "closed-pr", false},
 		{"lead", "feature", true}, {"w", "feature", true}, {"ww", "feature", true}, {"peer", "feature", false},
-		{"w", "done", false}, {"lead", "done", true}, {"w", "mine", true}, {"lead", "mine", true}, {"peer", "mine", false}, {"ww", "mine", true}, {"", "feature", false},
+		{"w", "done", false}, {"lead", "done", false}, {"w", "mine", true}, {"lead", "mine", true}, {"peer", "mine", false}, {"ww", "mine", true}, {"", "feature", false},
 	} {
 		if got, err := s.OwnsPRBranch(ctx, "o/r", tt.session, tt.branch); err != nil || got != tt.want {
 			t.Errorf("%+v: %v %v", tt, got, err)
