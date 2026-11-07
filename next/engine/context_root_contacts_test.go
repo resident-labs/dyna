@@ -12,7 +12,7 @@ import (
 func TestContextRootContacts(t *testing.T) {
 	r := newGrantRig(t)
 	ctx := t.Context()
-	var names []string
+	var names, fullNames []string
 	profile := strings.Repeat("p", 40)
 	if err := r.s.store.Write(ctx, func(tx *sql.Tx) error {
 		for i := range 25 {
@@ -22,6 +22,9 @@ func TestContextRootContacts(t *testing.T) {
 			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES(?,?,'root',?,'open','secret goal',?)`, room, room, profile, i); err != nil {
 				return err
+			}
+			if i < 23 {
+				fullNames = append(fullNames, fmt.Sprintf("%s:root (%s)", room, profile))
 			}
 			if i < 20 {
 				names = append(names, fmt.Sprintf("%s:root (%s)", room, profile))
@@ -41,7 +44,7 @@ func TestContextRootContacts(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	names = append(names, "and 3 more (session list)")
+	names = append(names, "and 3 more (context show dyna_contacts)")
 	want := "siblings: " + strings.Join(names, ", ")
 	for _, section := range []contract.ContextSectionKey{"", contract.ContextContacts} {
 		res, problem := r.s.ContextSnapshot(ctx, r.root, contract.ContextSnapshotRequest{Section: section})
@@ -53,6 +56,9 @@ func TestContextRootContacts(t *testing.T) {
 			if sec.Key == contract.ContextContacts {
 				got = sec.Text
 			}
+		}
+		if section == contract.ContextContacts {
+			want = "siblings: " + strings.Join(fullNames, ", ")
 		}
 		if got != want {
 			t.Fatalf("root contacts = %q, want %q", got, want)

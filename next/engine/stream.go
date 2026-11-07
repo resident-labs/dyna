@@ -472,6 +472,10 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 			}
 			select {
 			case <-batch:
+				// A monotonic timer can expire before the persisted wall-clock
+				// deadline after a clock correction. Forget its consumed identity
+				// so a still-future deadline gets a fresh scheduled kick.
+				batch, batchAt = nil, time.Time{}
 			case <-channel.WakeSignal():
 			case <-ctx.Done():
 				reason, cause = streamCanceled, ctx.Err()
