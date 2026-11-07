@@ -85,10 +85,10 @@ func TestPendingOwnerAtStoppedCompletionReconnect(t *testing.T) {
 	cancel()
 	for range channel {
 	}
-	if _, problem := s.SessionStop(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStopRequest{Session: worker}); problem != nil {
+	if _, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: room, Home: contract.Conversation{Kind: contract.ConversationDM, Session: worker}, Text: "pending during stop"}); problem != nil {
 		t.Fatal(problem)
 	}
-	if _, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: room, Home: contract.Conversation{Kind: contract.ConversationDM, Session: worker}, Text: "pending during stop"}); problem != nil {
+	if _, problem := s.SessionStop(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionStopRequest{Session: worker}); problem != nil {
 		t.Fatal(problem)
 	}
 	if _, problem := s.TurnOutput(ctx, caller, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnStopped}); problem != nil {
