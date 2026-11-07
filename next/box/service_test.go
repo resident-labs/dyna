@@ -12,7 +12,7 @@ import (
 // ovh-rise5 as the design assumes it: 48 threads less one, and the memory total less the 4 GiB floor.
 func ovh() Host {
 	engine := false
-	return Host{Name: "ovh-rise5", State: HostReady, EngineHost: &engine, CI: true, CPUs: 47, MemBytes: 1217 * GiB / 10, DiskBytes: 800 * GiB, DiskFloor: 89 * GiB, CheckedAt: time.Unix(1, 0)}
+	return Host{Name: "ovh-rise5", State: HostReady, EngineHost: &engine, CI: true, CIScale: 1, CPUs: 47, MemBytes: 1217 * GiB / 10, DiskBytes: 800 * GiB, DiskFloor: 89 * GiB, CheckedAt: time.Unix(1, 0)}
 }
 
 var largeRunner = contract.BoxSize{Name: contract.BoxSizeLarge, CPUs: 8, MemBytes: 16 * GiB}
