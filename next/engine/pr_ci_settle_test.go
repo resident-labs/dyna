@@ -160,13 +160,13 @@ func TestPRCIWithNoContextKeepsItsRules(t *testing.T) {
 	}
 }
 
-// A PR has no list of recent heads to fall off, so a rollup with more contexts than one read lists follows the rollup state instead of staying pending for good.
-func TestPRCITruncatedReadFollowsTheRollupState(t *testing.T) {
+// Unread contexts cannot be proven terminal, regardless of the rollup state.
+func TestPRCITruncatedReadStaysPending(t *testing.T) {
 	var checks []fakegithub.Check
 	for i := 0; i < 50; i++ {
 		checks = append(checks, fakegithub.Check{Name: fmt.Sprintf("check-%d", i), Conclusion: "SUCCESS"})
 	}
-	for rollup, want := range map[string]contract.PrCI{"SUCCESS": contract.PrCISuccess, "FAILURE": contract.PrCIFailure, "PENDING": contract.PrCIPending} {
+	for rollup, want := range map[string]contract.PrCI{"SUCCESS": contract.PrCIPending, "FAILURE": contract.PrCIPending, "PENDING": contract.PrCIPending} {
 		t.Run(rollup, func(t *testing.T) {
 			r := newPRRig(t)
 			r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1, Rollup: rollup, Checks: checks, Total: 120})

@@ -326,7 +326,7 @@ type Observed struct {
 // pullFields is everything a read asks per PR.
 const pullFields = `number state merged headRefOid headRepository{nameWithOwner} mergeable mergeStateStatus reviewDecision
 latestOpinionatedReviews(first:20,writersOnly:true){nodes{state}}
-commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(first:50){totalCount nodes{__typename ...on CheckRun{name status conclusion} ...on StatusContext{context state}}}}}}}
+commits(last:1){nodes{commit{oid ` + suiteFields + ` statusCheckRollup{state contexts(first:50){totalCount pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion} ...on StatusContext{context state}}}}}}}
 reviews(last:20){nodes{fullDatabaseId state body url author{login} submittedAt lastEditedAt}}
 comments(last:20){nodes{body author{login} createdAt lastEditedAt}}`
 
@@ -339,7 +339,10 @@ type gqlRollup struct {
 	State    string `json:"state"`
 	Contexts struct {
 		TotalCount int `json:"totalCount"`
-		Nodes      []struct {
+		PageInfo   struct {
+			HasNextPage bool `json:"hasNextPage"`
+		} `json:"pageInfo"`
+		Nodes []struct {
 			Type       string `json:"__typename"`
 			Name       string `json:"name"`
 			Status     string `json:"status"`
@@ -352,19 +355,62 @@ type gqlRollup struct {
 	} `json:"contexts"`
 }
 
-// ciRule says how a rollup that cannot be proven all terminal is read. Both rules settle a rollup whose contexts one read lists only when every one is terminal (spec 8.5).
+// suiteFields includes the run count without listing runs: a needs-gated run may
+// not exist yet even when every currently visible context has finished.
+const suiteFields = "checkSuites(first:100){totalCount pageInfo{hasNextPage} nodes{status conclusion app{slug} createdAt checkRuns{totalCount}}}"
+
+type gqlSuites struct {
+	TotalCount int `json:"totalCount"`
+	PageInfo   struct {
+		HasNextPage bool `json:"hasNextPage"`
+	} `json:"pageInfo"`
+	Nodes []struct {
+		Status     string `json:"status"`
+		Conclusion string `json:"conclusion"`
+		App        struct {
+			Slug string `json:"slug"`
+		} `json:"app"`
+		CreatedAt time.Time `json:"createdAt"`
+		CheckRuns struct {
+			TotalCount int `json:"totalCount"`
+		} `json:"checkRuns"`
+	} `json:"nodes"`
+}
+
+// summarizeCI is shared by tracked PRs and main heads. Never settle from a
+// partial list, or while a suite can still create needs-gated runs. GitHub apps
+// sometimes leave ghost suites queued with no runs; only those older than ten
+// minutes can be ignored. Suite conclusions do not replace context semantics.
+func summarizeCI(rollup *gqlRollup, suites gqlSuites, rule ciRule, now time.Time) (contract.PrCI, []string) {
+	if suites.PageInfo.HasNextPage || suites.TotalCount > len(suites.Nodes) {
+		return contract.PrCIPending, nil
+	}
+	for _, suite := range suites.Nodes {
+		if suite.Status != "COMPLETED" && !(suite.CheckRuns.TotalCount == 0 && !suite.CreatedAt.IsZero() && now.Sub(suite.CreatedAt) > 10*time.Minute) {
+			return contract.PrCIPending, nil
+		}
+	}
+	if rollup != nil && (rollup.Contexts.PageInfo.HasNextPage || rollup.Contexts.TotalCount > len(rollup.Contexts.Nodes)) {
+		return contract.PrCIPending, nil
+	}
+	return rollupCI(rollup, rule)
+}
+
+// ciRule preserves the PR/main distinction for empty rollups. summarizeCI first
+// holds incomplete suites and truncated context lists pending.
 type ciRule int
 
 const (
-	// ciMainHead is a default-branch head's rule: a rollup with more contexts than one read lists, or none, settles only when its state is SUCCESS, else it stays pending until the head leaves the list of recent heads.
+	// ciMainHead keeps an empty non-success rollup pending until the head leaves the recent-head list.
 	ciMainHead ciRule = iota
-	// ciPullHead is a tracked PR's head rule: a PR has no list of recent heads to fall off, so a rollup with more contexts than one read lists, or none, follows GitHub's rollup state, in which a cancelled check is a failed one.
+	// ciPullHead follows GitHub's state for an empty non-success rollup.
 	ciPullHead
 )
 
 // rollupCI reads what a rollup says of CI: success or failure when GitHub has finished, pending while it runs, and none for no rollup or the empty success
 // GitHub reports before any check has run. Whatever the rollup state says, a rollup settles only when every context it lists is terminal; a cancelled run alone is not
-// a failure, and a rollup of cancelled runs only is. The rule says what a rollup with none or more contexts than were read follows. It names the checks that failed.
+// a failure, and a rollup of cancelled runs only is. summarizeCI excludes truncated reads before this is called.
+// The rule preserves how an empty rollup is read. It names the checks that failed.
 func rollupCI(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string) {
 	if rollup == nil || rollup.State == "SUCCESS" && len(rollup.Contexts.Nodes) == 0 {
 		return contract.PrCINone, nil
@@ -437,6 +483,7 @@ type gqlPull struct {
 		Nodes []struct {
 			Commit struct {
 				OID               string     `json:"oid"`
+				CheckSuites       gqlSuites  `json:"checkSuites"`
 				StatusCheckRollup *gqlRollup `json:"statusCheckRollup"`
 			} `json:"commit"`
 		} `json:"nodes"`
@@ -555,7 +602,7 @@ func (c *Client) Read(ctx context.Context, repo contract.RepoName, numbers []int
 		if err := json.Unmarshal(raw, &pull); err != nil {
 			return nil, fmt.Errorf("GitHub answer: %w", err)
 		}
-		seen := pull.observed(c.Viewer())
+		seen := pull.observed(c.Viewer(), c.Now())
 		pulls[number] = &seen
 	}
 	return pulls, nil
@@ -569,7 +616,7 @@ func login(author *gqlAuthor) string {
 }
 
 // observed reads one PR's answer. viewer is the token's account, whose marked comments and review bodies can carry the review (see verdictLine).
-func (p gqlPull) observed(viewer string) Observed {
+func (p gqlPull) observed(viewer string, now time.Time) Observed {
 	seen := Observed{Number: p.Number, State: contract.PrOpen, Head: p.HeadRefOid, CI: contract.PrCINone}
 	if p.Merged {
 		seen.State = contract.PrMerged
@@ -653,7 +700,7 @@ func (p gqlPull) observed(viewer string) Observed {
 	if len(p.Commits.Nodes) > 0 && p.Commits.Nodes[0].Commit.OID != p.HeadRefOid {
 		seen.CI = contract.PrCIPending
 	} else if len(p.Commits.Nodes) > 0 {
-		seen.CI, seen.FailedChecks = rollupCI(p.Commits.Nodes[0].Commit.StatusCheckRollup, ciPullHead)
+		seen.CI, seen.FailedChecks = summarizeCI(p.Commits.Nodes[0].Commit.StatusCheckRollup, p.Commits.Nodes[0].Commit.CheckSuites, ciPullHead, now)
 	}
 	for _, review := range p.Reviews.Nodes {
 		if review.State == "PENDING" {
@@ -690,7 +737,7 @@ func (c *Client) CommitsCI(ctx context.Context, repo contract.RepoName, shas []s
 		fields += fmt.Sprintf(" h%d:object(oid:$h%d){...ci}", i, i)
 	}
 	query := "query($owner:String!,$name:String!" + declared + "){viewer{login} repository(owner:$owner,name:$name){" + fields + "}}" +
-		fmt.Sprintf(" fragment ci on Commit{statusCheckRollup{state contexts(first:%d){totalCount nodes{__typename ...on CheckRun{name status conclusion detailsUrl} ...on StatusContext{context state targetUrl}}}}}", ciRunsRead)
+		fmt.Sprintf(" fragment ci on Commit{"+suiteFields+" statusCheckRollup{state contexts(first:%d){totalCount pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion detailsUrl} ...on StatusContext{context state targetUrl}}}}}", ciRunsRead)
 	repository, err := c.graphQL(ctx, query, variables)
 	if err != nil {
 		return nil, err
@@ -698,6 +745,7 @@ func (c *Client) CommitsCI(ctx context.Context, repo contract.RepoName, shas []s
 	reads := make(map[string]CommitCI, len(shas))
 	for i, sha := range shas {
 		var commit struct {
+			CheckSuites       gqlSuites  `json:"checkSuites"`
 			StatusCheckRollup *gqlRollup `json:"statusCheckRollup"`
 		}
 		if raw := repository[fmt.Sprintf("h%d", i)]; raw != nil && string(raw) != "null" {
@@ -705,10 +753,10 @@ func (c *Client) CommitsCI(ctx context.Context, repo contract.RepoName, shas []s
 				return nil, fmt.Errorf("GitHub answer: %w", err)
 			}
 		}
-		result, _ := rollupCI(commit.StatusCheckRollup, ciMainHead)
+		result, _ := summarizeCI(commit.StatusCheckRollup, commit.CheckSuites, ciMainHead, c.Now())
 		read := CommitCI{Result: result}
 		if rollup := commit.StatusCheckRollup; rollup != nil {
-			read.Truncated = rollup.Contexts.TotalCount > len(rollup.Contexts.Nodes)
+			read.Truncated = rollup.Contexts.PageInfo.HasNextPage || rollup.Contexts.TotalCount > len(rollup.Contexts.Nodes)
 			for _, check := range rollup.Contexts.Nodes {
 				run := contract.CIRun{Name: check.Name, Conclusion: check.Conclusion, URL: check.DetailsURL}
 				if check.Type == "StatusContext" {
