@@ -14,8 +14,8 @@ func TestWhereMatchesExactly(t *testing.T) {
 	}{
 		{"main cancellation", []string{"kind=cancelled"}, GitMainCIFinished{Result: PrCICancelled}, true},
 		{"main cancellation never success", []string{"kind=success"}, GitMainCIFinished{Result: PrCICancelled}, false},
-		{"PR cancellation", []string{"kind=cancelled"}, PrCIFinished{Result: PrCICancelled}, true},
-		{"PR cancellation never success", []string{"kind=success"}, PrCIFinished{Result: PrCICancelled}, false},
+		{"PR cancellation", []string{"kind=cancelled"}, CIFinished{Result: PrCICancelled}, true},
+		{"PR cancellation never success", []string{"kind=success"}, CIFinished{Result: PrCICancelled}, false},
 		{"changed cancellation", []string{"kind=ci_cancelled"}, PrChanged{Changes: []PrChange{{Kinds: []PrChangeKind{PrChangeCICancelled}}}}, true},
 		{"nothing to meet", nil, opened, true},
 		{"author", []string{"author=lev"}, opened, true},
