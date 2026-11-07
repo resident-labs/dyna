@@ -66,7 +66,7 @@ func (n *scriptNodes) Join(_ context.Context, name contract.HostName, ssh string
 		return box.Host{}, n.joinErr
 	}
 	n.machines[name] = fakehost.New()
-	return box.Host{Name: name, SSH: ssh, State: box.HostReady, CPUs: 8, MemBytes: n.memory, DiskBytes: 200 * box.GiB, CheckedAt: time.Unix(1000, 0)}, nil
+	return box.Host{Name: name, SSH: ssh, State: box.HostReady, CIScale: 1, CPUs: 8, MemBytes: n.memory, DiskBytes: 200 * box.GiB, CheckedAt: time.Unix(1000, 0)}, nil
 }
 
 func (n *scriptNodes) Leave(_ context.Context, name contract.HostName) {

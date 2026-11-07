@@ -196,7 +196,7 @@
       <select aria-label="CI capacity" value={h.ciScale ?? 1} disabled={busy} onchange={event => void setScale(h, event.currentTarget)}>
         {#each [1, 2, 3, 4] as scale}<option value={scale}>{scale}x</option>{/each}
       </select>
-      <span class="help">Runner reservation capacity. Real memory pressure still stops new runners.</span></label>{/if}</div>
+      <span class="help">How many runners this host may hold, as a multiple of its size. Real memory over 80% still stops new runners.</span></label>{/if}</div>
   {#if !h.execOnly}<RoomsServed label="Rooms it serves" {rooms} chosen={h.rooms ?? []} {busy} set={ids => change(() => call("host.set_limits", { host: h.name, rooms: ids }))} />{/if}
   {#if groups.length}<div class="section"><strong class="head">Sessions</strong>
     <div class="sessions">{#each groups as group (group.room)}
