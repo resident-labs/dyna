@@ -610,7 +610,7 @@ func (h *Host) CreateContainer(ctx context.Context, c box.ContainerSpec) error {
 	if err != nil {
 		return err
 	}
-	out, err := h.namespace(ctx, c.Box, "create", args...)
+	out, err := h.namespace(ctx, c.Box, "create", recoverCreateCommand(c.Box, args)...)
 	return containerFailure(out, err)
 }
 
@@ -645,7 +645,16 @@ func imageFailure(err error) error {
 	return err
 }
 func (h *Host) StartContainer(ctx context.Context, id contract.BoxID) error {
-	_, err := h.namespace(ctx, id, "use", "podman", "--cgroup-manager=systemd", "start", string(id))
+	// A warm start has no creation spec. If recovery removes an orphan, retain
+	// this failure: the next reconciliation observes absence and recreates it
+	// with the workspace and stack volumes intact.
+	script := recoverRemoving + `status=0
+podman --cgroup-manager=systemd start "$1" || status=$?
+if [ "$status" != 0 ]; then
+ recover_removing "$1" || true
+fi
+exit "$status"`
+	_, err := h.namespace(ctx, id, "use", "bash", "-c", script, "dyna-recover-start", string(id))
 	return err
 }
 func (h *Host) StopContainer(ctx context.Context, id contract.BoxID) error {
@@ -685,7 +694,7 @@ func (h *Host) ListContainers(ctx context.Context) ([]box.ContainerStatus, error
 	}
 	out := make([]box.ContainerStatus, 0, len(records))
 	for _, r := range records {
-		out = append(out, box.ContainerStatus{Box: contract.BoxID(r.Labels["dyna.box"]), Running: r.State == "running", StaleLayout: r.Labels["dyna.layout"] != box.ContainerLayout, Binary: r.Labels["dyna.binary"], Stack: r.Labels[StackHashLabel]})
+		out = append(out, box.ContainerStatus{Box: contract.BoxID(r.Labels["dyna.box"]), Running: r.State == "running", StaleLayout: r.Labels["dyna.layout"] != box.ContainerLayout || r.State == "removing", Binary: r.Labels["dyna.binary"], Stack: r.Labels[StackHashLabel]})
 	}
 	return out, nil
 }
