@@ -81,17 +81,18 @@ func TestInputBatchFramedDeadline(t *testing.T) {
 				}
 			}
 			if strings.HasPrefix(mode, "peer-") {
-				workerSession, err := s.store.Session(ctx, worker)
-				if err != nil {
+				var parent contract.SessionID
+				if err := s.store.Read().QueryRowContext(ctx, "SELECT parent FROM sessions WHERE id=?", worker).Scan(&parent); err != nil {
 					t.Fatal(err)
 				}
-				donor := workerSession.Parent
+				donor := parent
+				var err error
 				err = s.store.Write(ctx, func(tx *sql.Tx) error {
 					if mode == "peer-sibling" {
 						donor = "peer"
-						_, err = tx.ExecContext(ctx, "INSERT INTO sessions(id,room,name,profile,state,goal,created_at,parent) VALUES('peer',?,'peer','test','open','',0,?)", room, workerSession.Parent)
+						_, err = tx.ExecContext(ctx, "INSERT INTO sessions(id,room,name,profile,state,goal,created_at,parent) VALUES('peer',?,'peer','test','open','',0,?)", room, parent)
 					} else if mode == "peer-ancestor" {
-						_, err = tx.ExecContext(ctx, "INSERT INTO sessions(id,room,name,profile,state,goal,created_at,parent) VALUES('middle',?,'middle','test','open','',0,?)", room, workerSession.Parent)
+						_, err = tx.ExecContext(ctx, "INSERT INTO sessions(id,room,name,profile,state,goal,created_at,parent) VALUES('middle',?,'middle','test','open','',0,?)", room, parent)
 						if err == nil {
 							_, err = tx.ExecContext(ctx, "UPDATE sessions SET parent='middle' WHERE id=?", worker)
 						}

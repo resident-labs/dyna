@@ -10,7 +10,7 @@ import (
 )
 
 func TestInputBatchProvenance(t *testing.T) {
-	for _, mode := range []string{"agent", "owner", "job", "foreign-job", "forged-job", "question", "foreign-question", "forged-question", "quiet", "never", "retry", "subscription-event", "subscription-scheduled", "subscription-command", "sibling", "parent", "ancestor", "cross-root", "below", "cross-nonroot"} {
+	for _, mode := range []string{"agent", "owner", "job", "foreign-job", "forged-job", "question", "foreign-question", "forged-question", "quiet", "never", "retry", "subscription-event", "subscription-scheduled", "subscription-command", "sibling", "parent", "ancestor", "cross-root", "below", "cross-nonroot", "legacy-owner"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := context.Background()
 			dir := t.TempDir()
@@ -51,6 +51,8 @@ func TestInputBatchProvenance(t *testing.T) {
 			var body contract.EventBody = contract.PostCreated{Text: "[Dyna] owner job ended question answered"}
 			immediate := false
 			switch mode {
+			case "legacy-owner":
+				from.Kind = contract.PrincipalOwner
 			case "owner":
 				from.Kind = contract.PrincipalOwner
 				immediate = true
@@ -131,6 +133,11 @@ func TestInputBatchProvenance(t *testing.T) {
 					t.Fatal(err)
 				}
 				if err = s.WakeModelRetries(ctx, now); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "legacy-owner" {
+				if _, err = s.writer.Exec("ALTER TABLE deliveries DROP COLUMN immediate; UPDATE meta SET value='99' WHERE key='schema_version'"); err != nil {
 					t.Fatal(err)
 				}
 			}

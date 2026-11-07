@@ -193,7 +193,7 @@ func (s *Store) ContextContacts(ctx context.Context, id contract.SessionID) (Con
 	query := `SELECT '',name,profile FROM sessions WHERE parent=? AND id<>? AND closed_at IS NULL ORDER BY created_at,id`
 	args := []any{parentID, id}
 	if err == sql.ErrNoRows {
-		query = `SELECT r.name,s.name,s.profile FROM sessions s JOIN rooms r ON r.id=s.room JOIN sessions viewer ON viewer.id=? WHERE viewer.parent IS NULL AND s.parent IS NULL AND s.room<>viewer.room AND s.closed_at IS NULL AND r.state='open' ORDER BY s.created_at,s.id`
+		query = `SELECT r.name,s.name,s.profile FROM sessions s JOIN rooms r ON r.id=s.room JOIN sessions viewer ON viewer.id=? WHERE viewer.parent IS NULL AND s.parent IS NULL AND s.room<>viewer.room AND s.state='open' AND s.closed_at IS NULL AND r.state='open' ORDER BY s.created_at,s.id`
 		args = []any{id}
 	} else {
 		out.Parent = &parent
