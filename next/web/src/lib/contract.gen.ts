@@ -445,8 +445,10 @@ export type Target = { kind: TargetKind; name: string; };
 export type Change = { field: ChangeField; old: string; new: string; };
 export type Decision = { by: Principal; approved: boolean; reason?: string; at: string; };
 export type PrOpenArgs = { title: string; body?: string; base: string; head?: string; draft: boolean; };
+export type PrStackArgs = { prs: Array<number> | null; };
+export type PrStackResult = { stack: number; url: string; };
 export type PrOpenResult = { number: number; url: string; };
-export type OpResult = { pr?: PrOpenResult | null; exitCode: number; cause?: FailureCause; error?: string; output?: string; truncated?: boolean; outputFile?: string; outFiles?: string; };
+export type OpResult = { stack?: PrStackResult | null; pr?: PrOpenResult | null; exitCode: number; cause?: FailureCause; error?: string; output?: string; truncated?: boolean; outputFile?: string; outFiles?: string; };
 export type OpSubmitRequest = { clientId?: string; operation: Operation; };
 export type OpSubmitResponse = { operation: Operation; };
 export type OpDecideRequest = { id: OpID; approve: boolean; reason?: string; };
@@ -477,7 +479,7 @@ export type PrCI = "" | "none" | "pending" | "success" | "failure";
 export type PrMerge = "" | "clean" | "blocked" | "behind" | "conflict";
 export type PrChangeKind = "ci_failed" | "ci_passed" | "changes_requested" | "approved" | "conflict" | "merged" | "closed" | "comment" | "metadata" | "pushed";
 export type PrPush = { before: string; after: string; };
-export type PrSummary = { repo: RepoName; number: number; url: string; title: string; author: string; session: SessionID; draft: boolean; state: PrState; head: string; review: PrReview; ci: PrCI; merge: PrMerge; };
+export type PrSummary = { stack?: number; position?: number; stackSize?: number; repo: RepoName; number: number; url: string; title: string; author: string; session: SessionID; draft: boolean; state: PrState; head: string; review: PrReview; ci: PrCI; merge: PrMerge; };
 export type PrListRequest = { room?: RoomID; all?: boolean; };
 export type PrListResponse = { prs: Array<PrSummary> | null; };
 export type PrStatusRequest = { repo?: RepoName; number: number; };
@@ -713,7 +715,7 @@ export type EventBody =
   | { type: "workflow.status_changed"; body: WorkflowStatusChanged }
   | { type: "workflow.step_changed"; body: WorkflowStepChanged }
 ;
-export type OpArgs = AccountsActionArgs | AddonGlobalArgs | HostexecGrantArgs | HostexecRunArgs | PoolAddRequest | PrOpenArgs | RoomHostsRequest;
+export type OpArgs = AccountsActionArgs | AddonGlobalArgs | HostexecGrantArgs | HostexecRunArgs | PoolAddRequest | PrOpenArgs | PrStackArgs | RoomHostsRequest;
 export type BoxMessageBody =
   | { type: "box.stats.ask"; body: BoxStatsAsk }
   | { type: "compact"; body: Compact }

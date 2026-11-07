@@ -1182,7 +1182,11 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		return number, nil
 	}
 	printPR := func(cmd *cobra.Command, p contract.PrSummary) error {
-		_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s#%d\t%s\tci=%s\treview=%s\tmerge=%s\t%s\n", p.Repo, p.Number, p.State, p.CI, p.Review, p.Merge, p.URL)
+		stack := ""
+		if p.Stack > 0 {
+			stack = fmt.Sprintf("\tstack #%d %d/%d", p.Stack, p.Position, p.StackSize)
+		}
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s#%d\t%s\tci=%s\treview=%s\tmerge=%s\t%s%s\n", p.Repo, p.Number, p.State, p.CI, p.Review, p.Merge, p.URL, stack)
 		return err
 	}
 	prList := &cobra.Command{Use: "list", Args: cobra.NoArgs, Short: "List tracked pull requests", RunE: func(cmd *cobra.Command, _ []string) error {
@@ -1234,7 +1238,30 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	for _, command := range []*cobra.Command{prStatus, prTrack, prUntrack} {
 		command.Flags().StringVar(&prRepo, "repo", "", "Base repository as owner/name (default: the session's repository)")
 	}
-	pr.AddCommand(prOpen, prList, prStatus, prTrack, prUntrack)
+	prStack := &cobra.Command{Use: "stack NUMBER NUMBER...", Args: cobra.RangeArgs(2, 20), Short: "Create a GitHub stack, bottom first", RunE: func(cmd *cobra.Command, args []string) error {
+		prs := make([]int, len(args))
+		for i, arg := range args {
+			n, err := prNumber(arg)
+			if err != nil {
+				return err
+			}
+			prs[i] = n
+		}
+		r, err := getClient().OpSubmit(cmd.Context(), contract.OpSubmitRequest{Operation: contract.Operation{Kind: "pr.stack", Args: contract.PrStackArgs{PRs: prs}}})
+		if err != nil {
+			return err
+		}
+		res := r.Operation.Result
+		if res == nil {
+			return fmt.Errorf("pr stack %s has no result yet (state %s)", r.Operation.ID, r.Operation.State)
+		}
+		if res.Error != "" || res.ExitCode != 0 {
+			return fmt.Errorf("pr stack %s failed (exit code %d): %s", r.Operation.ID, res.ExitCode, res.Error)
+		}
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), res.Output)
+		return err
+	}}
+	pr.AddCommand(prOpen, prList, prStatus, prTrack, prUntrack, prStack)
 	root.AddCommand(pr)
 	root.AddCommand(issueCommand(getClient))
 }
