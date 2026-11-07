@@ -756,6 +756,14 @@ type FeedInput struct {
 	Why      string
 }
 
+// Keep open lookups separate from replay so ordinary polls never scan history.
+const dispatchHasInputs = `SELECT EXISTS (SELECT 1 FROM deliveries WHERE to_kind=?1 AND to_id=?2 AND state IN ('pending','taken'))
+ OR CASE WHEN ?3 THEN EXISTS (SELECT 1 FROM deliveries WHERE to_kind=?1 AND to_id=?2 AND state='read' AND queue IS NULL) ELSE 0 END`
+
+const dispatchProjection = `SELECT d.seq,d.surface,d.state,d.queue,e.id,d.turn,d.reply_kind,d.reply_target_kind,d.reply_target_id,d.reply_home,d.reply_to,d.wake,COALESCE(d.meant_for,''),d.meant_why,d.immediate FROM deliveries d JOIN events e ON e.seq=d.seq `
+const dispatchInputs = dispatchProjection + `WHERE d.to_kind=?1 AND d.to_id=?2 AND d.state IN ('pending','taken')
+ UNION ALL ` + dispatchProjection + `WHERE ?4 AND d.to_kind=?1 AND d.to_id=?2 AND d.state='read' AND d.turn=?3 AND d.queue IS NULL ORDER BY d.seq`
+
 // Dispatch atomically assigns pending inputs to the active turn, or starts one.
 // replay includes previously taken inputs for a new channel connection.
 // Dispatch also returns the session's profile, read in the same transaction as its inputs.
@@ -785,7 +793,7 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 		return "", nil, "", nil
 	}
 	var hasDeliveries bool
-	err := s.Read().QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM deliveries WHERE to_kind=? AND to_id=? AND (state IN ('pending','taken') OR (state='read' AND queue IS NULL AND ?)))`, contract.PrincipalSession, session, replay).Scan(&hasDeliveries)
+	err := s.Read().QueryRowContext(ctx, dispatchHasInputs, contract.PrincipalSession, session, replay).Scan(&hasDeliveries)
 	if err != nil || !hasDeliveries {
 		return "", nil, "", err
 	}
@@ -809,7 +817,7 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, "SELECT d.seq,d.surface,d.state,d.queue,e.id,d.turn,d.reply_kind,d.reply_target_kind,d.reply_target_id,d.reply_home,d.reply_to,d.wake,COALESCE(d.meant_for,''),d.meant_why,d.immediate FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_kind=? AND d.to_id=? AND (d.state IN ('pending','taken') OR (d.state='read' AND d.turn=? AND d.queue IS NULL AND ?)) ORDER BY d.seq", contract.PrincipalSession, session, active, replay)
+		rows, err := tx.QueryContext(ctx, dispatchInputs, contract.PrincipalSession, session, active, replay)
 		if err != nil {
 			return err
 		}
