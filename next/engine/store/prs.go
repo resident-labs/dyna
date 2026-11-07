@@ -60,12 +60,12 @@ type RepoHead struct {
 	Head string
 }
 
-const prColumns = `p.repo,p.number,p.url,p.title,p.author,p.session,p.draft,p.state,p.head,p.review,p.ci,p.merge,s.room,p.head_repo,p.baseline,p.ci_told,p.seen_reviews,p.own_wake_at,p.meta,p.meta_wake_at FROM pr_owners p JOIN sessions s ON s.id=p.session`
+const prColumns = `p.repo,p.number,p.url,p.title,p.author,p.session,p.draft,p.state,p.head,p.review,p.ci,p.merge,s.room,p.head_repo,p.baseline,p.ci_told,p.seen_reviews,p.own_wake_at,p.meta,p.meta_wake_at,coalesce(p.stack,0),coalesce(p.position,0),(SELECT count(*) FROM pr_owners layers WHERE layers.repo=p.repo COLLATE NOCASE AND layers.stack=p.stack) FROM pr_owners p JOIN sessions s ON s.id=p.session`
 
 func scanPR(row interface{ Scan(...any) error }) (TrackedPR, error) {
 	var p TrackedPR
 	var meta string
-	err := row.Scan(&p.Repo, &p.Number, &p.URL, &p.Title, &p.Author, &p.Session, &p.Draft, &p.State, &p.Head, &p.Review, &p.CI, &p.Merge, &p.Room, &p.HeadRepo, &p.Baseline, &p.CITold, &p.SeenReviews, &p.OwnWakeAt, &meta, &p.MetaWakeAt)
+	err := row.Scan(&p.Repo, &p.Number, &p.URL, &p.Title, &p.Author, &p.Session, &p.Draft, &p.State, &p.Head, &p.Review, &p.CI, &p.Merge, &p.Room, &p.HeadRepo, &p.Baseline, &p.CITold, &p.SeenReviews, &p.OwnWakeAt, &meta, &p.MetaWakeAt, &p.Stack, &p.Position, &p.StackSize)
 	if err != nil {
 		return p, err
 	}
