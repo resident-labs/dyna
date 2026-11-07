@@ -49,7 +49,8 @@ func (s *Store) RecordEngineStart(ctx context.Context, build string, now time.Ti
 		if event.Clean {
 			event.DownMillis = now.UnixMilli() - *state.StoppedAt
 		}
-		return s.alertRoots(ctx, tx, event, now)
+		// A restart needs no action, so it waits for the root's next input and does not start a turn.
+		return s.alertRoots(ctx, tx, event, now, false)
 	})
 }
 
