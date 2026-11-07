@@ -10,7 +10,7 @@ import (
 )
 
 func TestInputBatchProvenance(t *testing.T) {
-	for _, mode := range []string{"agent", "owner", "job", "foreign-job", "forged-job", "question", "foreign-question", "forged-question", "quiet", "never", "retry", "subscription-event", "subscription-scheduled", "subscription-command", "sibling", "parent", "ancestor", "cross-root", "below", "cross-nonroot", "legacy-owner"} {
+	for _, mode := range []string{"agent", "owner", "job", "foreign-job", "forged-job", "question", "foreign-question", "forged-question", "quiet", "never", "retry", "subscription-event", "subscription-scheduled", "subscription-command", "sibling", "parent", "ancestor", "cross-root", "below", "cross-nonroot", "legacy-owner", "legacy-agent"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := context.Background()
 			dir := t.TempDir()
@@ -51,8 +51,11 @@ func TestInputBatchProvenance(t *testing.T) {
 			var body contract.EventBody = contract.PostCreated{Text: "[Dyna] owner job ended question answered"}
 			immediate := false
 			switch mode {
+			case "legacy-agent":
+				immediate = true
 			case "legacy-owner":
 				from.Kind = contract.PrincipalOwner
+				immediate = true
 			case "owner":
 				from.Kind = contract.PrincipalOwner
 				immediate = true
@@ -136,7 +139,7 @@ func TestInputBatchProvenance(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if mode == "legacy-owner" {
+			if strings.HasPrefix(mode, "legacy-") {
 				if _, err = s.writer.Exec("ALTER TABLE deliveries DROP COLUMN immediate; UPDATE meta SET value='99' WHERE key='schema_version'"); err != nil {
 					t.Fatal(err)
 				}
@@ -146,6 +149,12 @@ func TestInputBatchProvenance(t *testing.T) {
 			s, err = Open(dir)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if strings.HasPrefix(mode, "legacy-") {
+				var defaultValue string
+				if err := s.Read().QueryRowContext(ctx, "SELECT dflt_value FROM pragma_table_info('deliveries') WHERE name='immediate'").Scan(&defaultValue); err != nil || defaultValue != "0" {
+					t.Fatalf("new delivery default %q: %v", defaultValue, err)
+				}
 			}
 			dispatch := func(at time.Time, id string) contract.TurnID {
 				t.Helper()
