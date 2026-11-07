@@ -6,11 +6,14 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 100
+const schemaVersion = 101
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
+	// SQLite needs this exact IN predicate in callers; state='pending' alone
+	// does not prove that a query can use this partial index.
+	100: {`CREATE INDEX deliveries_open ON deliveries(to_kind,to_id,seq) WHERE state IN ('pending','taken')`},
 	// Work already queued before batching was introduced keeps its existing timing.
 	99: {`ALTER TABLE deliveries ADD COLUMN immediate INTEGER NOT NULL DEFAULT 0`, `UPDATE deliveries SET immediate=1 WHERE state IN ('pending','taken')`},
 	98: {`ALTER TABLE pr_owners ADD COLUMN stack INTEGER`, `ALTER TABLE pr_owners ADD COLUMN position INTEGER`, `CREATE TABLE pr_stack_layers (repo TEXT NOT NULL COLLATE NOCASE, number INTEGER NOT NULL, stack INTEGER NOT NULL, position INTEGER NOT NULL, size INTEGER NOT NULL, PRIMARY KEY(repo, number))`},
