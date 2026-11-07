@@ -50,6 +50,8 @@ type Pull struct {
 	MergeState     string
 	ReviewDecision string
 	LatestReviews  []string
+	Suites         []Suite
+	SuiteTotal     int
 	Rollup         string
 	FailedChecks   []string
 	NoChecks       bool    // the rollup holds no check
@@ -783,7 +785,7 @@ func (s *Server) pullNode(p *Pull) map[string]any {
 		"number": p.Number, "state": p.State, "merged": p.State == "MERGED",
 		"headRefOid": p.Head, "headRepository": map[string]string{"nameWithOwner": string(p.HeadRepo)}, "mergeable": p.Mergeable, "mergeStateStatus": p.MergeState, "reviewDecision": decision,
 		"latestOpinionatedReviews": nodes(p.LatestReviews, func(state string) map[string]any { return map[string]any{"state": state} }),
-		"commits":                  map[string]any{"nodes": []any{map[string]any{"commit": map[string]any{"oid": commit, "statusCheckRollup": rollup}}}},
+		"commits":                  map[string]any{"nodes": []any{map[string]any{"commit": map[string]any{"oid": commit, "checkSuites": suiteNodes(p.Suites, p.SuiteTotal), "statusCheckRollup": rollup}}}},
 		"reviews": nodes(p.Reviews, func(c Comment) map[string]any {
 			return map[string]any{"fullDatabaseId": strconv.FormatInt(c.ID, 10), "state": c.State, "body": c.Body, "url": fmt.Sprintf("%s#%d", link, c.ID), "author": user(c.Author), "submittedAt": c.At, "lastEditedAt": edited(c.Edited)}
 		}),
@@ -870,12 +872,35 @@ type Check struct {
 	URL           string
 }
 
+// Suite is one app's check suite, including runs that have not appeared in the rollup yet.
+type Suite struct {
+	Status     string
+	Conclusion string
+	App        string
+	CreatedAt  time.Time
+	Runs       int
+}
+
+func suiteNodes(suites []Suite, total int) any {
+	total = max(total, len(suites))
+	if len(suites) > pageSize {
+		suites = suites[:pageSize]
+	}
+	result := nodes(suites, func(s Suite) map[string]any {
+		return map[string]any{"status": s.Status, "conclusion": s.Conclusion, "app": map[string]any{"slug": s.App}, "createdAt": s.CreatedAt, "checkRuns": map[string]any{"totalCount": s.Runs}}
+	})
+	result["totalCount"] = total
+	return result
+}
+
 // Commit is what GitHub says of a commit's checks. An empty Rollup answers a null rollup, as a commit with no CI does, and no Checks
 // with a Rollup of SUCCESS is the empty success GitHub reports before any check has run.
 type Commit struct {
-	Rollup string
-	Checks []Check
-	Total  int // the rollup's totalCount when it holds more checks than Checks lists, else len(Checks)
+	Suites     []Suite
+	SuiteTotal int
+	Rollup     string
+	Checks     []Check
+	Total      int // the rollup's totalCount when it holds more checks than Checks lists, else len(Checks)
 }
 
 // SetCommit sets a commit's rollup, replacing what it said.
@@ -902,7 +927,7 @@ func (s *Server) commitNode(repo contract.RepoName, sha string) any {
 		contexts["totalCount"] = total
 		rollup = map[string]any{"state": commit.Rollup, "contexts": contexts}
 	}
-	return map[string]any{"oid": sha, "statusCheckRollup": rollup}
+	return map[string]any{"oid": sha, "checkSuites": suiteNodes(commit.Suites, commit.SuiteTotal), "statusCheckRollup": rollup}
 }
 
 // checkNode is one context of a rollup as GraphQL answers it.

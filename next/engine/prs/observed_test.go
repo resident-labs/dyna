@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -31,7 +32,7 @@ func TestAnEmptyRollupIsNoChecksNotAPass(t *testing.T) {
 		"pending with no checks yet": {`{"state":"PENDING","contexts":{"nodes":[]}}`, contract.PrCIPending},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if got := pullJSON(t, test.rollup, "null", "").observed("me"); got.CI != test.want {
+			if got := pullJSON(t, test.rollup, "null", "").observed("me", time.Time{}); got.CI != test.want {
 				t.Fatalf("CI %q, want %q", got.CI, test.want)
 			}
 		})
@@ -41,7 +42,7 @@ func TestAnEmptyRollupIsNoChecksNotAPass(t *testing.T) {
 func TestARollupOfAnEarlierHeadIsPendingForTheNewOne(t *testing.T) {
 	pull := pullJSON(t, `{"state":"SUCCESS","contexts":{"nodes":[{"__typename":"CheckRun","name":"lint","status":"COMPLETED","conclusion":"SUCCESS"}]}}`, "null", "")
 	pull.Commits.Nodes[0].Commit.OID = "deadbeef"
-	if got := pull.observed("me"); got.CI != contract.PrCIPending {
+	if got := pull.observed("me", time.Time{}); got.CI != contract.PrCIPending {
 		t.Fatalf("CI %q for a head whose own checks have not reported", got.CI)
 	}
 }
@@ -71,7 +72,7 @@ func TestAVerdictCommentAtTheHeadFromTheViewerIsTheReview(t *testing.T) {
 		"a GitHub approval stands":      {`"APPROVED"`, "", contract.PrApproved},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if got := pullJSON(t, `null`, test.decision, test.comments).observed("me"); got.Review != test.want {
+			if got := pullJSON(t, `null`, test.decision, test.comments).observed("me", time.Time{}); got.Review != test.want {
 				t.Fatalf("review %q, want %q", got.Review, test.want)
 			}
 		})
@@ -112,7 +113,7 @@ func TestAVerdictInAReviewBodyIsTheReviewToo(t *testing.T) {
 			if err := json.Unmarshal([]byte(`{"nodes":[`+test.reviews+`]}`), &pull.Reviews); err != nil {
 				t.Fatal(err)
 			}
-			if got := pull.observed("me"); got.Review != test.want {
+			if got := pull.observed("me", time.Time{}); got.Review != test.want {
 				t.Fatalf("review %q, want %q", got.Review, test.want)
 			}
 		})
@@ -122,7 +123,7 @@ func TestAVerdictInAReviewBodyIsTheReviewToo(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"nodes":[`+review("me", "COMMENTED", approved, quote(1), "null")+`]}`), &pull.Reviews); err != nil {
 		t.Fatal(err)
 	}
-	if got := pull.observed("me"); got.Review != contract.PrChangesRequested {
+	if got := pull.observed("me", time.Time{}); got.Review != contract.PrChangesRequested {
 		t.Fatalf("review %q over GitHub's request", got.Review)
 	}
 }

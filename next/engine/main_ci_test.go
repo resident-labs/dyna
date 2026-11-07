@@ -317,7 +317,7 @@ func TestMainCIFinishedPollsOnlyTheUnsettledHeadsInOneQueryForARepository(t *tes
 	}
 }
 
-func TestMainCIFinishedMarksRunsPastTheFirstHundredTruncated(t *testing.T) {
+func TestMainCIFinishedDoesNotSettleUnreadContexts(t *testing.T) {
 	r := mainRig(t)
 	var checks []fakegithub.Check
 	for i := 0; i < 150; i++ {
@@ -325,37 +325,10 @@ func TestMainCIFinishedMarksRunsPastTheFirstHundredTruncated(t *testing.T) {
 	}
 	r.moveMain("owner/repo", "A", fakegithub.Commit{Rollup: "SUCCESS", Checks: checks})
 	r.next(t)
+	requireShas(t, r.toldShas(t))
 	r.moveMain("owner/repo", "B", checksPassed)
 	r.next(t)
-	rows, err := r.s.store.Read().QueryContext(r.ctx, "SELECT body FROM events WHERE type='git.main_ci_finished' ORDER BY seq")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	type told struct {
-		Sha           string
-		Result        contract.PrCI
-		Runs          []contract.CIRun
-		RunsTruncated bool
-	}
-	var got []told
-	for rows.Next() {
-		var data []byte
-		var body told
-		if err := rows.Scan(&data); err != nil {
-			t.Fatal(err)
-		}
-		if err := json.Unmarshal(data, &body); err != nil {
-			t.Fatal(err)
-		}
-		got = append(got, body)
-	}
-	if len(got) != 2 || got[0].Sha != "A" || got[0].Result != contract.PrCISuccess || len(got[0].Runs) != 100 || !got[0].RunsTruncated {
-		t.Fatalf("a head with 150 checks: %d events, first %s %s with %d runs, truncated %t", len(got), got[0].Sha, got[0].Result, len(got[0].Runs), got[0].RunsTruncated)
-	}
-	if got[1].Sha != "B" || got[1].RunsTruncated || len(got[1].Runs) != 1 {
-		t.Fatalf("a head with one check: %+v", got[1])
-	}
+	requireShas(t, r.toldShas(t), "B")
 }
 
 func TestMainCIFinishedNeverSettlesOnARollupThatIsNotTerminal(t *testing.T) {
@@ -531,12 +504,12 @@ func TestMainCIFinishedDecidesFromTheContextsAndNotTheRollupState(t *testing.T) 
 	}
 }
 
-func TestMainCIFinishedTruncatedReadSettlesOnlyOnARollupThatSucceeded(t *testing.T) {
+func TestMainCIFinishedTruncatedReadStaysPendingRegardlessOfRollup(t *testing.T) {
 	var checks []fakegithub.Check
 	for i := 0; i < 150; i++ {
 		checks = append(checks, fakegithub.Check{Name: fmt.Sprintf("check-%d", i), Conclusion: "SUCCESS"})
 	}
-	for _, rollup := range []string{"FAILURE", "PENDING", "ERROR"} {
+	for _, rollup := range []string{"SUCCESS", "FAILURE", "PENDING", "ERROR"} {
 		t.Run(rollup, func(t *testing.T) {
 			r := mainRig(t)
 			r.moveMain("owner/repo", "A", fakegithub.Commit{Rollup: rollup, Checks: checks})
@@ -545,12 +518,5 @@ func TestMainCIFinishedTruncatedReadSettlesOnlyOnARollupThatSucceeded(t *testing
 			}
 			requireShas(t, r.toldShas(t))
 		})
-	}
-	r := mainRig(t)
-	r.moveMain("owner/repo", "A", fakegithub.Commit{Rollup: "SUCCESS", Checks: checks})
-	r.next(t)
-	got := r.mainCIs(t)
-	if len(got) != 1 || got[0].Result != contract.PrCISuccess || !got[0].RunsTruncated {
-		t.Fatalf("got %+v", got)
 	}
 }
