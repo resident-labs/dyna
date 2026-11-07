@@ -24,7 +24,7 @@ func TestCIScaleStoreMigrationAndPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range []string{"ALTER TABLE hosts DROP COLUMN ci_scale", "UPDATE meta SET value='97' WHERE key='schema_version'"} {
+	for _, q := range []string{"DROP TABLE pr_stack_layers", "ALTER TABLE pr_owners DROP COLUMN stack", "ALTER TABLE pr_owners DROP COLUMN position", "ALTER TABLE hosts DROP COLUMN ci_scale", "UPDATE meta SET value='97' WHERE key='schema_version'"} {
 		if _, err = db.Exec(q); err != nil {
 			t.Fatal(err)
 		}

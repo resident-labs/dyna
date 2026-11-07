@@ -74,18 +74,21 @@ type PrPush struct {
 
 // PrSummary is what Dyna last read about a tracked PR. Repo is the PR's base repository, which may not be a room repository.
 type PrSummary struct {
-	Repo    RepoName  `json:"repo"`
-	Number  int       `json:"number"`
-	URL     string    `json:"url"`
-	Title   string    `json:"title"`
-	Author  string    `json:"author"`
-	Session SessionID `json:"session"`
-	Draft   bool      `json:"draft"`
-	State   PrState   `json:"state"`
-	Head    string    `json:"head"`
-	Review  PrReview  `json:"review"`
-	CI      PrCI      `json:"ci"`
-	Merge   PrMerge   `json:"merge"`
+	Stack     int       `json:"stack,omitempty"`
+	Position  int       `json:"position,omitempty"`
+	StackSize int       `json:"stackSize,omitempty"`
+	Repo      RepoName  `json:"repo"`
+	Number    int       `json:"number"`
+	URL       string    `json:"url"`
+	Title     string    `json:"title"`
+	Author    string    `json:"author"`
+	Session   SessionID `json:"session"`
+	Draft     bool      `json:"draft"`
+	State     PrState   `json:"state"`
+	Head      string    `json:"head"`
+	Review    PrReview  `json:"review"`
+	CI        PrCI      `json:"ci"`
+	Merge     PrMerge   `json:"merge"`
 }
 
 type PrListRequest struct {
