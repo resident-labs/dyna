@@ -228,16 +228,16 @@ func TestCISkill(t *testing.T) {
 		t.Fatal(err)
 	}
 	meta, err := Parse(data)
-	if err != nil || meta.Name != "dyna-ci" || meta.Description != "Use when you write, debug or speed up a GitHub Actions workflow for a repository whose CI runs on Dyna's self-hosted runners" {
+	if err != nil || meta.Name != "dyna-ci" || meta.Description != "Use when you write, debug or speed up a GitHub Actions workflow, whether its jobs run on Dyna's self-hosted runners or on GitHub-hosted ones" {
 		t.Fatalf("%+v %v", meta, err)
 	}
 	text := string(data)
-	for _, want := range []string{"dyna-medium", "6 hours", "CARGO_INCREMENTAL=0", "RUSTC_WRAPPER", "ci_scale", "DYNA_CI_BASE", "public", "fork", "job step status"} {
+	for _, want := range []string{"dyna-medium", "6 hours", "CARGO_INCREMENTAL=0", "RUSTC_WRAPPER", "ci_scale", "DYNA_CI_BASE", "public", "fork", "job step status", "Jobs on GitHub-hosted runners", "Swatinem/rust-cache", "[profile.ci]", "inherits = \"dev\"", "incremental = false", "debug = 0", "github.event.pull_request.head.repo.fork", "cargo test --profile ci", "available CPU and memory headroom"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q", want)
 		}
 	}
-	if strings.Count(text, "\n") > 120 {
-		t.Fatal("skill exceeds 120 lines")
+	if strings.Count(text, "\n") > 90 {
+		t.Fatal("skill exceeds 90 lines")
 	}
 }
