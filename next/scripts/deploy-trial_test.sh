@@ -70,6 +70,8 @@ case "$*" in
    echo "$polls" > "$TEST_EVENTS"
    if [[ ${FAKE_NULL_EVENTS:-} == always || ( ${FAKE_NULL_EVENTS:-} == first && $polls == 1 ) ]]; then
      echo '{"events":null,"names":{},"next":10}'
+   elif [[ ${FAKE_STOPPED:-0} == 1 ]]; then
+     echo '{"events":[{"seq":11,"body":{"type":"box.changed","session":"idle","box":"box-1","from":"ready","to":"stopped"}}],"next":11}'
    elif [[ ${FAKE_NO_RETURN:-0} == 1 ]]; then echo '{"events":[],"next":10}'
    else echo '{"events":[{"seq":11,"body":{"type":"box.changed","session":"idle","box":"box-1","from":"starting","to":"ready"}}],"next":11}'; fi ;;
  *) echo "${FAKE_STATUS:-200}" ;;
@@ -84,7 +86,7 @@ cat > "$tmp/tools/journalctl" <<'SH'
 #!/usr/bin/env bash
 echo "journalctl $*" >> "$TEST_LOG"
 [[ $* == *'_SYSTEMD_INVOCATION_ID=0123456789abcdef0123456789abcdef'* ]] || exit 1
-if [[ -f $TEST_REFRESH ]]; then
+if [[ -f $TEST_REFRESH && ( ${FAKE_JOURNAL_AFTER_EVENT:-0} == 0 || $(<"$TEST_EVENTS") -gt 0 ) ]]; then
   case "${FAKE_JOURNAL:-clean}" in
     fence) printf '%s\n' 'box box-1: host namespace uncertain: namespace flock held by conmon: exit status 252' 'lifecycle step box-1: namespace fence: exit status 252' ;;
     namespace) echo 'box box-1: host namespace uncertain: conmon exit status 252' ;;
@@ -172,6 +174,14 @@ grep -q 'Box lifecycle smoke passed: box-1 returned ready' "$tmp/out"
 test "$(grep -c 'curl .*session.refresh' "$TEST_LOG")" = 1
 test "$(<"$TEST_EVENTS")" = 2
 test "$(<"$tmp/install/deployed-next")" = tree123
+# An idle stale-stop need not wake again: its persisted ready -> stopped
+# transition exercises the stop path. This is allowed only for an unmarked target.
+rm -f "$tmp/install/deployed-next" "$TEST_REFRESH"
+: > "$TEST_LOG"
+FAKE_UNMARKED=1 FAKE_STOPPED=1 FAKE_TIMEOUT=1 "$script" "${args[@]}" >"$tmp/out" 2>&1
+grep -q 'Box lifecycle smoke passed: box-1 stopped after unmarked refresh' "$tmp/out"
+test "$(grep -c 'curl .*session.refresh' "$TEST_LOG")" = 1
+test "$(<"$tmp/install/deployed-next")" = tree123
 # #2161: conmon retains the namespace flock (252), lifecycle errors follow,
 # and the refreshed box never returns ready. Active service and HTTP 200 are insufficient.
 rm -f "$tmp/install/deployed-next" "$TEST_REFRESH"
@@ -182,7 +192,7 @@ grep -q 'failed: box lifecycle smoke.*fix forward' "$tmp/out"
 test "$(<"$tmp/install/failed-next")" = tree123
 test ! -f "$tmp/install/deployed-next"
 # Either journal signature suffices; no idle box and no completed step also fail.
-for scenario in namespace lifecycle no-idle timeout null-timeout unmarked-timeout unmarked-fence not-current refresh-error; do
+for scenario in namespace lifecycle no-idle timeout null-timeout unmarked-timeout unmarked-fence marked-stopped stopped-fence stopped-lifecycle not-current refresh-error; do
   rm -f "$tmp/install/failed-next" "$tmp/install/deployed-next" "$TEST_REFRESH"
   case "$scenario" in
     namespace) flags=(FAKE_JOURNAL=namespace); expected='host namespace uncertain' ;;
@@ -190,6 +200,9 @@ for scenario in namespace lifecycle no-idle timeout null-timeout unmarked-timeou
     no-idle) flags=(FAKE_NO_IDLE=1 FAKE_TIMEOUT=1); expected='timed out after 180 seconds' ;;
     unmarked-timeout) flags=(FAKE_UNMARKED=1 FAKE_NO_RETURN=1 FAKE_TIMEOUT=1); expected='timed out after 180 seconds' ;;
     unmarked-fence) flags=(FAKE_UNMARKED=1 FAKE_JOURNAL=fence); expected='namespace fence or lifecycle error' ;;
+    marked-stopped) flags=(FAKE_STOPPED=1 FAKE_TIMEOUT=1); expected='timed out after 180 seconds' ;;
+    stopped-fence) flags=(FAKE_UNMARKED=1 FAKE_STOPPED=1 FAKE_JOURNAL=fence FAKE_JOURNAL_AFTER_EVENT=1); expected='namespace fence or lifecycle error' ;;
+    stopped-lifecycle) flags=(FAKE_UNMARKED=1 FAKE_STOPPED=1 FAKE_JOURNAL=lifecycle FAKE_JOURNAL_AFTER_EVENT=1); expected='namespace fence or lifecycle error' ;;
     not-current) flags=(FAKE_UNMARKED=1 FAKE_NOT_CURRENT=1 FAKE_TIMEOUT=1); expected='timed out after 180 seconds' ;;
     refresh-error) flags=(FAKE_REFRESH_ERROR=1); expected='Command failed: curl' ;;
     timeout) flags=(FAKE_NO_RETURN=1 FAKE_TIMEOUT=1); expected='timed out after 180 seconds' ;;
