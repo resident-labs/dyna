@@ -508,8 +508,9 @@ func (s *Store) OwnsPRBranch(ctx context.Context, repo contract.RepoName, sessio
 }
 
 // OwnsPR reports whether the recorded PR owner is this session, including closed PRs.
+// GitHub repository names are case-insensitive; recorded names preserve their supplied spelling.
 func (s *Store) OwnsPR(ctx context.Context, repo contract.RepoName, session contract.SessionID, number int) (bool, error) {
 	var found bool
-	err := s.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM pr_owners WHERE repo=? AND session=? AND number=?)", repo, session, number).Scan(&found)
+	err := s.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM pr_owners WHERE repo=? COLLATE NOCASE AND session=? AND number=?)", repo, session, number).Scan(&found)
 	return found, err
 }

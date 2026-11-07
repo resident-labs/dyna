@@ -170,7 +170,7 @@ func TestOwnsPRUsesRecordedSessionOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.TrackPR(ctx, TrackedPR{PrSummary: contract.PrSummary{Repo: "acme/app", Number: 7, Session: "owner", State: "closed"}}); err != nil {
+	if err := s.TrackPR(ctx, TrackedPR{PrSummary: contract.PrSummary{Repo: "Acme/App", Number: 7, Session: "owner", State: "closed"}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, tt := range []struct {
@@ -179,7 +179,7 @@ func TestOwnsPRUsesRecordedSessionOnly(t *testing.T) {
 		number  int
 		want    bool
 	}{
-		{"acme/app", "owner", 7, true}, {"acme/app", "sibling", 7, false}, {"acme/app", "", 7, false}, {"acme/other", "owner", 7, false}, {"acme/app", "owner", 8, false},
+		{"acme/app", "owner", 7, true}, {"ACME/APP", "owner", 7, true}, {"acme/app", "sibling", 7, false}, {"acme/app", "", 7, false}, {"acme/other", "owner", 7, false}, {"acme/app", "owner", 8, false},
 	} {
 		got, err := s.OwnsPR(ctx, tt.repo, tt.session, tt.number)
 		if err != nil || got != tt.want {
