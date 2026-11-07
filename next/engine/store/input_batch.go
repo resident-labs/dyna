@@ -29,8 +29,8 @@ func (s *Store) InputBatchDeadline(ctx context.Context, session contract.Session
 	var ended sql.NullInt64
 	err := s.Read().QueryRowContext(ctx, `SELECT MAX(t.ended_at) FROM turns t WHERE t.session=?1
  AND NOT EXISTS (SELECT 1 FROM turns WHERE session=?1 AND ended_at IS NULL)
- AND EXISTS (SELECT 1 FROM deliveries WHERE to_kind='session' AND to_id=?1 AND state='pending' AND wake=1)
- AND NOT EXISTS (SELECT 1 FROM deliveries WHERE to_kind='session' AND to_id=?1 AND state='pending' AND wake=1 AND immediate=1)`, session).Scan(&ended)
+ AND EXISTS (SELECT 1 FROM deliveries WHERE to_kind='session' AND to_id=?1 AND state='pending' AND state IN ('pending','taken') AND wake=1)
+ AND NOT EXISTS (SELECT 1 FROM deliveries WHERE to_kind='session' AND to_id=?1 AND state='pending' AND state IN ('pending','taken') AND wake=1 AND immediate=1)`, session).Scan(&ended)
 	if err != nil || !ended.Valid {
 		return time.Time{}, err
 	}
