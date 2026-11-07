@@ -23,6 +23,8 @@ func TestRemovingRecovery(t *testing.T) {
 		{"paused", "paused", "missing", false},
 		{"unknown", "exited", "unknown", false},
 		{"transport", "exited", "transport", false},
+		{"operation-transport", "removing", "removing", false},
+		{"operation-unknown", "removing", "removing", false},
 		{"wrong-name", "other", "missing", false},
 		{"ps-transport", "transport", "missing", false},
 		{"multiple-names", "multiple", "missing", false},
@@ -35,11 +37,15 @@ func TestRemovingRecovery(t *testing.T) {
 				tools := t.TempDir()
 				t.Setenv("REC_STATE", tc.state)
 				t.Setenv("REC_INSPECT", tc.inspect)
+				t.Setenv("REC_OP", tc.name)
 				t.Setenv("PATH", tools+":"+os.Getenv("PATH"))
 				script := `#!/bin/bash
 set -eu
 printf '%s\n' "$*" >> "$NS_ROOT/recovery-calls"
 [ "${1:-}" != --cgroup-manager=systemd ] || shift
+case "$1" in start|stop|create)
+ case "$REC_OP" in operation-transport) exit 255;; operation-unknown) exit 1;; esac;;
+esac
 case "$1" in
  inspect)
  [ "$2 $3" = '--type container' ] || { echo 'Error: no such object: "b"' >&2; exit 125; }
