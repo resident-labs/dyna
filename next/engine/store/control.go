@@ -14,9 +14,9 @@ import (
 func (s *Store) RequestTurnStop(ctx context.Context, session contract.SessionID, now time.Time) (bool, error) {
 	var stopping bool
 	err := s.Write(ctx, func(tx *sql.Tx) error {
-		// A quiet session can be between attempts, including a due retry
-		// queued for a box. Stop cancels that wake as well as an active turn.
-		if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET wake=0 WHERE to_kind='session' AND to_id=? AND state='pending' AND EXISTS (SELECT 1 FROM sessions WHERE id=? AND model_retry_at>0)", session, session); err != nil {
+		// Cancel pending non-owner work, including due retries queued for a box.
+		// Owner posts retain their wake, whether pending or assigned as steers.
+		if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET wake=0 WHERE to_kind='session' AND to_id=? AND state='pending' AND NOT EXISTS (SELECT 1 FROM events e WHERE e.seq=deliveries.seq AND e.from_kind='owner' AND e.type='post.created')", session); err != nil {
 			return err
 		}
 		cancelled, err := tx.ExecContext(ctx, "UPDATE sessions SET model_retry_at=-1 WHERE id=? AND model_retry_at>0", session)
@@ -28,6 +28,12 @@ func (s *Store) RequestTurnStop(ctx context.Context, session contract.SessionID,
 			return err
 		}
 		stopping = n > 0
+		// Stop cancels existing non-owner work, not owner messages. Fence that
+		// cancellation here: inputs arriving later must keep their wake even
+		// while the old turn is still ending.
+		if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET wake=0 WHERE to_kind='session' AND to_id=? AND state='taken' AND queue IS NOT NULL AND NOT EXISTS (SELECT 1 FROM events e WHERE e.seq=deliveries.seq AND e.from_kind='owner' AND e.type='post.created') AND turn IN (SELECT id FROM turns WHERE session=? AND ended_at IS NULL)", session, session); err != nil {
+			return err
+		}
 		result, err := tx.ExecContext(ctx, "UPDATE turns SET stop_requested_at=COALESCE(stop_requested_at,?) WHERE session=? AND ended_at IS NULL", now.UnixMilli(), session)
 		if err != nil {
 			return err
