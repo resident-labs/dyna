@@ -160,7 +160,7 @@ for (;;) {
   journal();
   const page = call("events.list", { room: target.room, afterSeq: target.seq, limit: 100,
     types: ["box.changed"] });
-  for (const event of page.events) {
+  for (const event of page.events ?? []) {
     const b = event.body;
     if (b.session === target.session && b.box === target.box && b.to === "ready" && b.from !== "ready") {
       returnedReady = true;
