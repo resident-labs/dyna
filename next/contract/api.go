@@ -666,19 +666,34 @@ type PostSearchResponse struct {
 	Total int                  `json:"total"`
 }
 type EventsListRequest struct {
-	Event     EventID     `json:"event,omitempty"` // return this room event by ID
-	Room      RoomID      `json:"room"`
-	AfterSeq  int64       `json:"afterSeq"`
-	BeforeSeq int64       `json:"beforeSeq,omitempty"`
-	Limit     int         `json:"limit"`
-	Types     []EventType `json:"types,omitempty"`
+	// ReceiptSeqs reads current delivery receipts for feed posts in this room instead of log events.
+	ReceiptSeqs []int64     `json:"receiptSeqs,omitempty" desc:"Read delivery receipts for up to 100 feed post sequence numbers in this room. Pending is queued; taken/read means delivered into a turn, not model completion. batchDeadline is present only during an active batch wait. Closed explicit mentions with discarded unread deliveries have state closed and do not count toward delivery; closed implicit recipients without delivery rows are omitted."`
+	Event       EventID     `json:"event,omitempty"` // return this room event by ID
+	Room        RoomID      `json:"room"`
+	AfterSeq    int64       `json:"afterSeq"`
+	BeforeSeq   int64       `json:"beforeSeq,omitempty"`
+	Limit       int         `json:"limit"`
+	Types       []EventType `json:"types,omitempty"`
 	// Home, a DM, keeps only events whose home is that DM: its posts and the turns that answered in it.
 	Home *Conversation `json:"home,omitempty" desc:"home narrows the log to one owner DM: {kind: dm, session: ses_…}."`
 }
+
+// PostReceipt preserves delivery state for existing rows. State "closed" means
+// an explicitly mentioned recipient closed and its unread delivery was discarded;
+// it is tooltip context only, not an outstanding or completed delivery.
+type PostReceipt struct {
+	Closed        bool       `json:"closed,omitempty"`
+	Session       SessionID  `json:"session"`
+	Name          string     `json:"name"`
+	State         string     `json:"state"`
+	BatchDeadline *time.Time `json:"batchDeadline,omitempty"`
+}
+
 type EventsListResponse struct {
-	Events []Event              `json:"events"`
-	Names  map[SessionID]string `json:"names"`
-	Next   int64                `json:"next"`
+	Receipts map[int64][]PostReceipt `json:"receipts,omitempty"`
+	Events   []Event                 `json:"events"`
+	Names    map[SessionID]string    `json:"names"`
+	Next     int64                   `json:"next"`
 }
 type BoxHelloRequest struct{}
 type ModelProvider string
