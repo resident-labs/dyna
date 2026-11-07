@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack, type Snippet } from "svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
+  import type { PostReceipt } from '../contract.gen.ts';
   import { APIError, call } from "../client.ts";
   import VirtualList from "./VirtualList.svelte";
   import PostRow from "./PostRow.svelte";
@@ -84,6 +85,25 @@
   const retainedRequests = new SvelteSet<string>();
   $effect(() => { for (const request of store.requests.values()) retainedRequests.add(request.id); });
   let rows = $derived(feedRows(view.ordered, home, pending, since, retainedRequests, depth));
+  const receipts = new SvelteMap<number, PostReceipt[]>();
+  // Read snapshots, not synthetic delivery events. Poll only unresolved posts and
+  // stop when this feed leaves; the countdown itself runs locally.
+  $effect(() => {
+    if (home.kind !== 'feed') return;
+    const seqs = rows.filter(row => row.kind === 'post' && !row.pending).map(row => Number(row.key.slice(1)));
+    let stopped = false, timer: ReturnType<typeof setTimeout>;
+    async function refresh() {
+      const pending = seqs.filter(seq => !receipts.has(seq) || receipts.get(seq)!.some(r => r.state === 'pending'));
+      for (let i = 0; i < pending.length && !stopped; i += 100) {
+        const page = await call('events.list', { room: store.room, afterSeq: 0, limit: 100, receiptSeqs: pending.slice(i, i + 100) }).catch(() => undefined);
+        if (stopped || !page) break;
+        for (const seq of pending.slice(i, i + 100)) receipts.set(seq, page.receipts?.[seq] ?? []);
+      }
+      if (!stopped) timer = setTimeout(() => void refresh(), 3000);
+    }
+    untrack(() => { void refresh(); });
+    return () => { stopped = true; clearTimeout(timer); };
+  });
   // The post right under the New line; its bar stays inside the row, clear of the New label.
   // The last post of a run takes half the gap to the next run, so a hover or tint sits evenly on the words.
   let lastPosts = $derived(new Set(rows.flatMap((row, index) => {
@@ -233,7 +253,7 @@
   <VirtualList bind:this={list} {items} key={item => item.key} label="Feed" {estimate} follow={view.atPresent} bind:element
     onstart={() => void view.loadOlder(() => list?.scrollSettled() ?? Promise.resolve())} onend={() => void view.loadNewer()} onbottom={shown => { if (shown) markRead(); }}>
     {#snippet row(item: Item)}
-      {#if item.kind === "post"}<div class:ring={item.key === `p${ring}`}><PostRow linked={!item.source || hasRoom(item.source.room)} last={lastPosts.has(item.key)} room={store.room} {navigate} onmedia={position => openMedia(item.key, position)} row={item} belowNew={item.key === belowNew} {newest} visualEvent={visualEvents.get(item.key)} author={item.source ? sourceLabel(item.source) : author(item.from)} to={home.kind === "dm" ? undefined : item.target ?? item.to.map(author).join(", ")} root={root(item.from.session)}
+      {#if item.kind === "post"}<div class:ring={item.key === `p${ring}`}><PostRow receipts={receipts.get(Number(item.key.slice(1))) ?? []} linked={!item.source || hasRoom(item.source.room)} last={lastPosts.has(item.key)} room={store.room} {navigate} onmedia={position => openMedia(item.key, position)} row={item} belowNew={item.key === belowNew} {newest} visualEvent={visualEvents.get(item.key)} author={item.source ? sourceLabel(item.source) : author(item.from)} to={home.kind === "dm" ? undefined : item.target ?? item.to.map(author).join(", ")} root={root(item.from.session)}
         onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} swipeDisabled={waiting?.at === item.at && waiting.author === author(item.from)} onforward={operate ? () => onforward({ author: item.source ? sourceLabel(item.source) : author(item.from), at: item.at, text: item.text, data: item.data, attachments: visibleAttachments(item.attachments, item.dataAttachment).map(({ file }) => file) }) : undefined} /></div>
       {:else if item.kind === "notice"}<p class="divider"><span>{#if item.event.type === "engine.restarted"}<EngineRestartNotice event={item.event.body} />{:else}{describe(item.event, name)}{/if}{#if item.resumedAt}{" "}for {Math.round((Date.parse(item.resumedAt) - Date.parse(item.event.at)) / 60_000) < 1 ? "under a minute" : `${Math.round((Date.parse(item.resumedAt) - Date.parse(item.event.at)) / 60_000)} min`}{/if} · <time datetime={item.event.at}>{formatTime(item.event.at)}</time></span></p>
       {:else if item.kind === "restarted"}<div class="restart-warning"><span class="restart-mark"><StatusPill tone="warning" label="Box replaced" dot triangle /></span><p>{name(item.session)}'s box was replaced. Unpushed work in the old volume is gone. <time datetime={item.at}>{formatTime(item.at)}</time></p></div>

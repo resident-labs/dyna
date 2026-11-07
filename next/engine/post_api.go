@@ -312,6 +312,39 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 	if e := s.roomAccess(ctx, caller, req.Room); e != nil {
 		return contract.EventsListResponse{}, e
 	}
+	if len(req.ReceiptSeqs) > 0 {
+		if len(req.ReceiptSeqs) > 100 || req.Event != "" || req.Home != nil || req.AfterSeq != 0 || req.BeforeSeq != 0 || len(req.Types) > 0 {
+			return contract.EventsListResponse{}, invalid("invalid receipt lookup")
+		}
+		receipts := map[int64][]contract.PostReceipt{}
+		for _, seq := range req.ReceiptSeqs {
+			event, err := s.store.Event(ctx, seq)
+			if errors.Is(err, store.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return contract.EventsListResponse{}, failure(err)
+			}
+			body, ok := event.Body.(contract.PostCreated)
+			if !ok || event.Room != req.Room || body.Home.Kind != contract.ConversationFeed {
+				continue
+			}
+			entries, err := s.store.PostReceipts(ctx, seq, s.now())
+			if err != nil {
+				return contract.EventsListResponse{}, failure(err)
+			}
+			for _, entry := range entries {
+				recipient, err := s.store.Session(ctx, entry.Session)
+				if err != nil {
+					return contract.EventsListResponse{}, failure(err)
+				}
+				if s.roomAccess(ctx, caller, recipient.Room) == nil {
+					receipts[seq] = append(receipts[seq], entry)
+				}
+			}
+		}
+		return contract.EventsListResponse{Receipts: receipts}, nil
+	}
 	if req.Limit == 0 {
 		req.Limit = 100
 	}
