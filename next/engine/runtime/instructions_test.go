@@ -328,6 +328,17 @@ func TestANodeJoinsAndLeavesLikeAHost(t *testing.T) {
 	if record.State != box.HostReady || record.SSH != "ssh://pip@host:22" || record.CPUs == 0 || record.EngineHost == nil {
 		t.Fatalf("%+v", record)
 	}
+	// createNode admits the joining node before FinishPoolNode persists it. Its probe result must
+	// already carry the default CI capacity, rather than relying on Store.Hosts to fill it in.
+	record.Pool, record.CI, record.DiskFloor = "boats", true, box.DiskFloor(record.DiskBytes)
+	size, _ := box.Size(contract.BoxSizeSmall)
+	runner := box.Box{ID: "fresh-runner", Room: "room", Image: box.RunnerImage, Size: size}
+	if placed := box.Admit(box.RunnerHosts([]box.Host{record}), nil, runner, "boats"); placed.Host != record.Name {
+		t.Fatalf("fresh pool node rejected its runner before persistence: %+v (ciScale %d)", placed, record.CIScale)
+	}
+	if record.CIScale != 1 {
+		t.Fatalf("new probe capacity: %d", record.CIScale)
+	}
 	b.mu.Lock()
 	joined := b.hosts["boats-1"] != nil && b.beats["boats-1"] != nil
 	b.mu.Unlock()

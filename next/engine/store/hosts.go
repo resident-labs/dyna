@@ -54,12 +54,13 @@ func (s *Store) SetHostRooms(ctx context.Context, host contract.HostName, rooms 
 	})
 }
 
-// SetHostSwitches turns a host's agents switch, its CI switch or both; nil leaves one as it is. Boxes and runners already on
+// SetHostSwitches changes a host's agents switch, CI switch or CI capacity; nil leaves one as it is. Boxes and runners already on
 // the host stay. The actual switch changes and their audit in every existing room commit together.
-func (s *Store) SetHostSwitches(ctx context.Context, host contract.HostName, agents, ci *bool, clearCreateProblem bool, newEvent func(contract.RoomID, contract.EventBody) (contract.Event, error)) error {
+func (s *Store) SetHostSwitches(ctx context.Context, host contract.HostName, agents, ci *bool, ciScale *int, clearCreateProblem bool, newEvent func(contract.RoomID, contract.EventBody) (contract.Event, error)) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		var oldAgents, oldCI bool
-		err := tx.QueryRowContext(ctx, "SELECT agents,ci FROM hosts WHERE name=?", host).Scan(&oldAgents, &oldCI)
+		var oldScale int
+		err := tx.QueryRowContext(ctx, "SELECT agents,ci,ci_scale FROM hosts WHERE name=?", host).Scan(&oldAgents, &oldCI, &oldScale)
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("host %s: %w", host, ErrNotFound)
 		}
@@ -67,16 +68,19 @@ func (s *Store) SetHostSwitches(ctx context.Context, host contract.HostName, age
 			return err
 		}
 		body := contract.HostSwitchesChanged{Host: host}
+		if ciScale != nil && *ciScale != oldScale {
+			body.CIScale = ciScale
+		}
 		if agents != nil && *agents != oldAgents {
 			body.Agents = agents
 		}
 		if ci != nil && *ci != oldCI {
 			body.CI = ci
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE hosts SET agents=coalesce(?2,agents), ci=coalesce(?3,ci), create_failures=CASE WHEN ?4 THEN 0 ELSE create_failures END, create_problem=CASE WHEN ?4 THEN '' ELSE create_problem END, create_generation=create_generation+CASE WHEN ?4 THEN 1 ELSE 0 END WHERE name=?1", host, agents, ci, clearCreateProblem); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE hosts SET agents=coalesce(?2,agents), ci=coalesce(?3,ci), ci_scale=coalesce(?5,ci_scale), create_failures=CASE WHEN ?4 THEN 0 ELSE create_failures END, create_problem=CASE WHEN ?4 THEN '' ELSE create_problem END, create_generation=create_generation+CASE WHEN ?4 THEN 1 ELSE 0 END WHERE name=?1", host, agents, ci, clearCreateProblem, ciScale); err != nil {
 			return err
 		}
-		if body.Agents == nil && body.CI == nil {
+		if body.Agents == nil && body.CI == nil && body.CIScale == nil {
 			return nil
 		}
 		rooms, err := listIDs[contract.RoomID](ctx, tx, "SELECT id FROM rooms ORDER BY id")
@@ -341,7 +345,7 @@ func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
 }
 
 func (s *Store) hosts(ctx context.Context, where string) ([]box.Host, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT h.name, h.ssh, h.state, h.cpus, h.mem_bytes, h.disk_bytes, h.disk_floor, h.disk_total, h.checked_at, h.maintained_at, h.engine_host, h.pool, h.box, h.agents, h.ci, h.create_problem, h.exec_only, h.gpus, hr.room FROM hosts h LEFT JOIN host_rooms hr ON hr.host=h.name WHERE `+where+` ORDER BY h.name,hr.room`)
+	rows, err := s.Read().QueryContext(ctx, `SELECT h.name, h.ssh, h.state, h.cpus, h.mem_bytes, h.disk_bytes, h.disk_floor, h.disk_total, h.checked_at, h.maintained_at, h.engine_host, h.pool, h.box, h.agents, h.ci, h.ci_scale, h.create_problem, h.exec_only, h.gpus, hr.room FROM hosts h LEFT JOIN host_rooms hr ON hr.host=h.name WHERE `+where+` ORDER BY h.name,hr.room`)
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +357,7 @@ func (s *Store) hosts(ctx context.Context, where string) ([]box.Host, error) {
 		var room sql.NullString
 		var agents bool
 		var gpus string
-		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &h.DiskFloor, &h.DiskTotal, &checked, &maintained, &h.EngineHost, &h.Pool, &h.Box, &agents, &h.CI, &h.Problem, &h.ExecOnly, &gpus, &room); err != nil {
+		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &h.DiskFloor, &h.DiskTotal, &checked, &maintained, &h.EngineHost, &h.Pool, &h.Box, &agents, &h.CI, &h.CIScale, &h.Problem, &h.ExecOnly, &gpus, &room); err != nil {
 			return nil, err
 		}
 		if len(hosts) == 0 || hosts[len(hosts)-1].Name != h.Name {
