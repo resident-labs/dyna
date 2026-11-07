@@ -430,10 +430,19 @@ func (s *Store) fire(ctx context.Context, tx *sql.Tx, sub Subscription, event co
 		return err
 	}
 	var delivered bool
-	if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM deliveries WHERE to_kind=? AND to_id=? AND seq=?)", contract.PrincipalSession, sub.Wake, event.Seq).Scan(&delivered); err != nil || delivered {
+	if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM deliveries WHERE to_kind=? AND to_id=? AND seq=?)", contract.PrincipalSession, sub.Wake, event.Seq).Scan(&delivered); err != nil {
 		return err
 	}
-	return s.InsertDelivery(ctx, tx, event.Seq, event.Body, contract.Delivery{To: wakePrincipal(sub), Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
+	if delivered {
+		s.wakePending = append(s.wakePending, sub.Wake)
+		_, err := tx.ExecContext(ctx, "UPDATE deliveries SET immediate=1 WHERE to_kind='session' AND to_id=? AND seq=?", sub.Wake, event.Seq)
+		return err
+	}
+	if err := s.InsertDelivery(ctx, tx, event.Seq, event.Body, contract.Delivery{To: wakePrincipal(sub), Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, "UPDATE deliveries SET immediate=1 WHERE to_kind='session' AND to_id=? AND seq=?", sub.Wake, event.Seq)
+	return err
 }
 
 // DueSubscriptions lists what can fire now: due, enabled, past any backoff, with no Run in progress and in a
@@ -481,6 +490,9 @@ func (s *Store) FireScheduledWake(ctx context.Context, sub Subscription, event c
 			return err
 		}
 		if err := s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: wakePrincipal(sub), Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET immediate=1 WHERE to_kind='session' AND to_id=? AND seq=?", sub.Wake, seq); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, "UPDATE subscriptions SET last_seq=?,last_at=? WHERE id=?", seq, event.Time.UnixMilli(), sub.ID)

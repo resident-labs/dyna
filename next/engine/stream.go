@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"regexp"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/live"
@@ -227,6 +228,14 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 			<-pumpDone
 			close(out)
 		}()
+		var batch <-chan time.Time
+		var batchAt time.Time
+		var stopBatch func()
+		defer func() {
+			if stopBatch != nil {
+				stopBatch()
+			}
+		}()
 		var reason streamStopReason
 		var cause error
 		defer func() { slog.Info("box dispatch stopped", "session", session.ID, "reason", reason, "err", cause) }()
@@ -436,9 +445,38 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					return
 				}
 			}
+			deadline, err := s.store.InputBatchDeadline(ctx, session.ID)
+			if err != nil {
+				reason, cause = streamDispatchFailed, err
+				return
+			}
+			// One timer belongs to this connected stream, not each delivery.
+			// Reconnect derives its deadline from the same committed turn end.
+			if !deadline.IsZero() && !deadline.After(s.now()) {
+				// Dispatch used started.Time. If the window ended while that
+				// transaction ran, retry now rather than dropping the last kick.
+				if started.Time.Before(deadline) {
+					continue
+				}
+				deadline = time.Time{}
+			}
+			if !deadline.Equal(batchAt) {
+				if stopBatch != nil {
+					stopBatch()
+					stopBatch = nil
+				}
+				batch, batchAt = nil, deadline
+				if !deadline.IsZero() {
+					batch, stopBatch = s.inputBatchTimer(deadline.Sub(s.now()))
+				}
+			}
 			select {
+			case <-batch:
+				// A monotonic timer can expire before the persisted wall-clock
+				// deadline after a clock correction. Forget its consumed identity
+				// so a still-future deadline gets a fresh scheduled kick.
+				batch, batchAt = nil, time.Time{}
 			case <-channel.WakeSignal():
-				continue
 			case <-ctx.Done():
 				reason, cause = streamCanceled, ctx.Err()
 				return

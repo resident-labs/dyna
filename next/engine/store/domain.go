@@ -488,7 +488,44 @@ func (s *Store) InsertDelivery(ctx context.Context, tx *sql.Tx, seq int64, body 
 	if d.Reply.Home.Kind == contract.ConversationDM {
 		home += ":" + string(d.Reply.Home.Session)
 	}
-	_, err := tx.ExecContext(ctx, "INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state,meant_for,meant_why) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", d.To.Kind, d.To.Session, seq, d.Surface, d.Reply.Kind, d.Reply.Target.Kind, d.Reply.Target.Session, home, d.Reply.ReplyTo, d.Wake, "pending", nullText(d.MeantFor), d.Why)
+	// Persist urgency at the trusted boundary, never from input text.
+	var immediate bool
+	if err := tx.QueryRowContext(ctx, "SELECT from_kind='owner' AND type='post.created' FROM events WHERE seq=?", seq).Scan(&immediate); err != nil {
+		return err
+	}
+	if !immediate {
+		switch body := body.(type) {
+		case contract.PostCreated:
+			// Non-null common parents identify siblings. Roots are siblings
+			// only across rooms, never merely because both parent fields are null.
+			if err := tx.QueryRowContext(ctx, `WITH RECURSIVE ancestors(id) AS (
+ SELECT parent FROM sessions WHERE id=?1 AND parent IS NOT NULL
+ UNION SELECT s.parent FROM sessions s JOIN ancestors a ON s.id=a.id WHERE s.parent IS NOT NULL)
+ SELECT EXISTS (SELECT 1 FROM events e JOIN sessions sender ON sender.id=e.from_id
+ JOIN sessions recipient ON recipient.id=?1
+ JOIN rooms sr ON sr.id=sender.room JOIN rooms rr ON rr.id=recipient.room
+ WHERE e.seq=?2 AND e.from_kind='session' AND sender.state='open' AND sender.closed_at IS NULL
+ AND recipient.state='open' AND recipient.closed_at IS NULL AND sr.state!='deleting' AND rr.state!='deleting'
+ AND ((sender.room=recipient.room AND (sender.id IN (SELECT id FROM ancestors)
+ OR (sender.parent IS NOT NULL AND sender.parent=recipient.parent)))
+ OR (sender.room!=recipient.room AND sender.parent IS NULL AND recipient.parent IS NULL)))`, d.To.Session, seq).Scan(&immediate); err != nil {
+				return err
+			}
+		case contract.ShellJobEnded:
+			if body.Session == d.To.Session {
+				if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events e JOIN shell_jobs j ON j.session=e.from_id AND j.job=? WHERE e.seq=? AND e.from_kind='session' AND e.from_id=?)`, body.Job, seq, d.To.Session).Scan(&immediate); err != nil {
+					return err
+				}
+			}
+		case contract.QuestionAnswered:
+			if body.Session == d.To.Session {
+				if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM questions q JOIN events e ON e.seq=? WHERE q.id=? AND q.session=? AND q.state='answered' AND e.from_kind IN ('owner','engine'))`, seq, body.ID, d.To.Session).Scan(&immediate); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	_, err := tx.ExecContext(ctx, "INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state,meant_for,meant_why,immediate) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", d.To.Kind, d.To.Session, seq, d.Surface, d.Reply.Kind, d.Reply.Target.Kind, d.Reply.Target.Session, home, d.Reply.ReplyTo, d.Wake, "pending", nullText(d.MeantFor), d.Why, immediate)
 	if err != nil {
 		return err
 	}
@@ -772,23 +809,24 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, "SELECT d.seq,d.surface,d.state,d.queue,e.id,d.turn,d.reply_kind,d.reply_target_kind,d.reply_target_id,d.reply_home,d.reply_to,d.wake,COALESCE(d.meant_for,''),d.meant_why FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_kind=? AND d.to_id=? AND (d.state IN ('pending','taken') OR (d.state='read' AND d.turn=? AND d.queue IS NULL AND ?)) ORDER BY d.seq", contract.PrincipalSession, session, active, replay)
+		rows, err := tx.QueryContext(ctx, "SELECT d.seq,d.surface,d.state,d.queue,e.id,d.turn,d.reply_kind,d.reply_target_kind,d.reply_target_id,d.reply_home,d.reply_to,d.wake,COALESCE(d.meant_for,''),d.meant_why,d.immediate FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_kind=? AND d.to_id=? AND (d.state IN ('pending','taken') OR (d.state='read' AND d.turn=? AND d.queue IS NULL AND ?)) ORDER BY d.seq", contract.PrincipalSession, session, active, replay)
 		if err != nil {
 			return err
 		}
 		type item struct {
-			input FeedInput
-			state string
-			queue sql.NullString
-			event contract.EventID
-			turn  sql.NullString
-			home  string
-			wake  bool
+			input     FeedInput
+			state     string
+			queue     sql.NullString
+			event     contract.EventID
+			turn      sql.NullString
+			home      string
+			wake      bool
+			immediate bool
 		}
 		var items []item
 		for rows.Next() {
 			var v item
-			if err := rows.Scan(&v.input.Seq, &v.input.Surface, &v.state, &v.queue, &v.event, &v.turn, &v.input.Reply.Kind, &v.input.Reply.Target.Kind, &v.input.Reply.Target.Session, &v.home, &v.input.Reply.ReplyTo, &v.wake, &v.input.MeantFor, &v.input.Why); err != nil {
+			if err := rows.Scan(&v.input.Seq, &v.input.Surface, &v.state, &v.queue, &v.event, &v.turn, &v.input.Reply.Kind, &v.input.Reply.Target.Kind, &v.input.Reply.Target.Session, &v.home, &v.input.Reply.ReplyTo, &v.wake, &v.input.MeantFor, &v.input.Why, &v.immediate); err != nil {
 				rows.Close()
 				return err
 			}
@@ -805,6 +843,19 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 			return err
 		}
 		if active == "" {
+			var immediate bool
+			for _, item := range items {
+				immediate = immediate || (item.wake && item.immediate)
+			}
+			if !immediate {
+				deadline, err := batchDeadline(ctx, tx, session)
+				if err != nil {
+					return err
+				}
+				if deadline.After(started.Time) {
+					return nil
+				}
+			}
 			for _, item := range items {
 				if item.wake {
 					active = turn

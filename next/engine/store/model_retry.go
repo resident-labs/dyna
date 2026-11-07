@@ -55,7 +55,7 @@ func (s *Store) WakeModelRetries(ctx context.Context, now time.Time) error {
 		for _, id := range ids {
 			// Keep the deadline until Dispatch consumes the wake. The failure
 			// remains retrying even if the box cannot start immediately.
-			result, err := tx.ExecContext(ctx, "UPDATE deliveries SET wake=1 WHERE to_kind='session' AND to_id=? AND state='pending'", id)
+			result, err := tx.ExecContext(ctx, "UPDATE deliveries SET wake=1,immediate=1 WHERE to_kind='session' AND to_id=? AND state='pending'", id)
 			if err != nil {
 				return err
 			}

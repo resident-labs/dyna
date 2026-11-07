@@ -87,7 +87,7 @@ func fileSize(bytes int64) string {
 func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, event contract.Event, delivery contract.Delivery) (string, []contract.TurnFile, error) {
 	var sender string
 	if post, ok := event.Body.(contract.PostCreated); ok && post.Source != nil {
-		sender = fmt.Sprintf("%s:%s", post.Source.RoomName, post.Source.SessionName)
+		sender = fmt.Sprintf("your sibling %s:%s", post.Source.RoomName, post.Source.SessionName)
 	} else {
 		var err error
 		sender, err = s.framePrincipal(ctx, viewer, event.From)
