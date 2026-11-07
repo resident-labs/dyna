@@ -17,7 +17,7 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
-// PrOpen registers the one PR write Dyna makes.
+// PrOpen registers pull request creation.
 func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTripper) approve.Entry {
 	lookup := func(ctx context.Context, who contract.Principal) (store.Session, string, error) {
 		if who.Kind != contract.PrincipalSession {

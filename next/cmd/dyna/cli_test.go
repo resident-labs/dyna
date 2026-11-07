@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -138,11 +139,11 @@ func (f *fakeClient) DeviceRevoke(_ context.Context, q contract.DeviceRevokeRequ
 }
 func (f *fakeClient) PrList(_ context.Context, q contract.PrListRequest) (contract.PrListResponse, error) {
 	f.prList = q
-	return contract.PrListResponse{PRs: []contract.PrSummary{{Repo: "owner/repo", Number: 7, State: contract.PrOpen, CI: contract.PrCIFailure, URL: "https://github.com/owner/repo/pull/7"}}}, nil
+	return contract.PrListResponse{PRs: []contract.PrSummary{{Repo: "owner/repo", Number: 7, Stack: 50, Position: 1, StackSize: 2, State: contract.PrOpen, CI: contract.PrCIFailure, URL: "https://github.com/owner/repo/pull/7"}}}, nil
 }
 func (f *fakeClient) PrStatus(_ context.Context, q contract.PrStatusRequest) (contract.PrStatusResponse, error) {
 	f.prStatus = q
-	return contract.PrStatusResponse{PR: contract.PrSummary{Repo: q.Repo, Number: q.Number, State: contract.PrMerged}}, nil
+	return contract.PrStatusResponse{PR: contract.PrSummary{Repo: q.Repo, Number: q.Number, Stack: 50, Position: 2, StackSize: 2, State: contract.PrMerged}}, nil
 }
 func (f *fakeClient) PrTrack(_ context.Context, q contract.PrTrackRequest) (contract.PrTrackResponse, error) {
 	f.prTrack = q
@@ -878,4 +879,31 @@ func (f *fakeClient) ServiceRemove(context.Context, contract.ServiceRef) (contra
 func (f *fakeClient) ServiceSecretSet(_ context.Context, q contract.ServiceSecretSetRequest) (contract.ServiceSecretSetResponse, error) {
 	f.serviceSecret = q
 	return contract.ServiceSecretSetResponse{}, nil
+}
+
+func TestPrStackListStatusRendering(t *testing.T) {
+	for _, args := range [][]string{{"pr", "list"}, {"pr", "status", "12", "--repo", "owner/repo"}} {
+		out := runCLI(t, &fakeClient{}, args...)
+		position := "1/2"
+		if args[1] == "status" {
+			position = "2/2"
+		}
+		if !strings.Contains(out, "stack #50 "+position) {
+			t.Fatalf("missing stack: %q", out)
+		}
+	}
+}
+
+func TestPrStackCommand(t *testing.T) {
+	f := &fakeClient{submitResp: contract.OpSubmitResponse{Operation: contract.Operation{State: contract.OpDone, Result: &contract.OpResult{Output: "stack #50 created"}}}}
+	out := runCLI(t, f, "pr", "stack", "1", "2")
+	args, ok := f.submit.Operation.Args.(contract.PrStackArgs)
+	if !ok || f.submit.Operation.Kind != "pr.stack" || fmt.Sprint(args.PRs) != "[1 2]" || !strings.Contains(out, "stack #50") {
+		t.Fatalf("%+v %q", f.submit, out)
+	}
+	for _, args := range [][]string{{"pr", "stack", "1"}, {"pr", "stack", "one", "2"}} {
+		if _, err := execCLI(&fakeClient{}, args...); err == nil {
+			t.Fatalf("accepted %v", args)
+		}
+	}
 }

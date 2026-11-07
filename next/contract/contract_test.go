@@ -163,3 +163,15 @@ func TestCloseNoticeSaysWhatBecameOfTheWork(t *testing.T) {
 		}
 	}
 }
+
+func TestPrStackArgumentsRoundTrip(t *testing.T) {
+	input := OpSubmitRequest{Operation: Operation{Room: "room", Kind: "pr.stack", Args: PrStackArgs{PRs: []int{1, 2}}}}
+	data, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output OpSubmitRequest
+	if err := json.Unmarshal(data, &output); err != nil || !reflect.DeepEqual(input, output) {
+		t.Fatalf("output %+v error %v", output, err)
+	}
+}

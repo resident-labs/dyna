@@ -118,3 +118,25 @@ func TestAPropertySomeActionsTakeNamesThem(t *testing.T) {
 	}
 	t.Fatal("no pr tool")
 }
+
+func TestPrStackActionAndGuidance(t *testing.T) {
+	list, actions, err := registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actions["pr"]["stack"].op != "pr.stack" {
+		t.Fatal("stack is not an operation")
+	}
+	want := "stack: make a GitHub stack from open PRs, bottom first; each PR's base is the PR below it, and you own each or are an ancestor of its owner. A stack can't change after creation. Merging it is root's."
+	for _, tool := range list {
+		if tool.Name == "pr" {
+			for _, line := range strings.Split(tool.Description, "\n") {
+				if line == want {
+					return
+				}
+			}
+			t.Fatalf("stack guidance missing: %s", tool.Description)
+		}
+	}
+	t.Fatal("pr tool missing")
+}

@@ -6,11 +6,12 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 98
+const schemaVersion = 99
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
+	98: {`ALTER TABLE pr_owners ADD COLUMN stack INTEGER`, `ALTER TABLE pr_owners ADD COLUMN position INTEGER`, `CREATE TABLE pr_stack_layers (repo TEXT NOT NULL COLLATE NOCASE, number INTEGER NOT NULL, stack INTEGER NOT NULL, position INTEGER NOT NULL, size INTEGER NOT NULL, PRIMARY KEY(repo, number))`},
 	97: {`ALTER TABLE hosts ADD COLUMN ci_scale INTEGER NOT NULL DEFAULT 1 CHECK(ci_scale BETWEEN 1 AND 4)`},
 	// A nonempty original host consumes one safe other-host create retry, including across restarts.
 	96: {`ALTER TABLE boxes ADD COLUMN create_retry_host TEXT NOT NULL DEFAULT ''`},
