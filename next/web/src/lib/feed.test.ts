@@ -167,6 +167,12 @@ test("keeps box changes out of the feed except a failed or lost box or a failed 
     ["Failed", "Its workspace did not connect in time"], ["Could not close", "Dyna could not save the session's branch"], ["Could not start", "Its workspace did not connect in time"]]);
 });
 
+test("a repeated start failure shows its actual error and falls back when absent", () => {
+  const box = (seq: number, reason?: string) => event(seq, { type: "box.changed", body: { box: "b", session: "l", to: "stopped", cause: "start_failed", reason } });
+  const rows = feedRows([box(1, "podman start: container is being removed"), box(2), box(3, "")], { kind: "feed" });
+  assert.deepEqual(rows.map(row => row.kind === "failed" && row.cause), ["podman start: container is being removed", "Its workspace could not start on the host", "Its workspace could not start on the host"]);
+});
+
 test("a failed turn with a final reply keeps its failed row", () => {
   const ended = event(1, { type: "turn.ended", body: { session: "l", turn: "t", outcome: "failed", final: "Partial", usage, error: "Broke",
     cause: "model_failed", replies: [{ reply: { kind: "final", target: { kind: "owner" } } }] } });

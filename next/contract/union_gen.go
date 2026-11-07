@@ -622,7 +622,7 @@ var boxMessageTypes = []BoxMessageType{"box.stats.ask", "compact", "save_diff", 
 
 var eventDocs = map[EventType]string{"account.failed": "",
 	"account.quota_low":       "",
-	"box.changed":             "",
+	"box.changed":             "a workspace changing state or reporting a lifecycle failure, with its session, host, cause and reason",
 	"box.pressure":            "reports memory pressure in a box",
 	"checkin.due":             "a report of sessions that hold open goals with nothing moving them",
 	"computer.changed":        "",

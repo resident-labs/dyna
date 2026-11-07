@@ -323,6 +323,7 @@ type ComputerChanged struct {
 	To      ComputerState `json:"to"`
 }
 
+// BoxChanged is a workspace changing state or reporting a lifecycle failure, with its session, host, cause and reason.
 type BoxChanged struct {
 	Box     BoxID        `json:"box"`
 	Session SessionID    `json:"session"`

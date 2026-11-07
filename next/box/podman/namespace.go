@@ -135,7 +135,7 @@ func (h *Host) CreateBox(ctx context.Context, c box.ContainerSpec, stack *box.St
 	if stack != nil {
 		script += "(set -eu\n" + stackCommands(c.Box, c.Slice, stack) + "\n) || exit 253\n"
 	}
-	script += shellCommand(args...)
+	script += shellCommand(recoverCreateCommand(c.Box, args)...)
 	out, err := h.namespace(ctx, c.Box, "create", "bash", "-c", script, "dyna-create-box", string(c.Box))
 	var exit remoteExit
 	if errors.As(err, &exit) && exit == 253 {
@@ -146,8 +146,10 @@ func (h *Host) CreateBox(ctx context.Context, c box.ContainerSpec, stack *box.St
 
 func removeContainersCommand(id contract.BoxID) string {
 	return strings.Join([]string{
-		shellCommand("podman", "--cgroup-manager=systemd", "stop", "--ignore", string(id)),
-		shellCommand("podman", "--cgroup-manager=systemd", "rm", "--ignore", "--volumes", string(id)),
+		recoverRemoving,
+		"if " + shellCommand("podman", "--cgroup-manager=systemd", "stop", "--ignore", string(id)) + "; then\n" +
+			shellCommand("podman", "--cgroup-manager=systemd", "rm", "--ignore", "--volumes", string(id)) + " || { status=$?; test \"$status\" = 125 && recover_removing " + quote(string(id)) + " || exit \"$status\"; }\n" +
+			"else status=$?; test \"$status\" = 125 && recover_removing " + quote(string(id)) + " || exit \"$status\"; fi",
 		shellCommand("podman", "--cgroup-manager=systemd", "pod", "rm", "--force", "--ignore", "--time", "0", box.PodName(id)),
 	}, "\n")
 }
