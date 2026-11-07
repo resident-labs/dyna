@@ -70,6 +70,7 @@ func scanPR(row interface{ Scan(...any) error }) (TrackedPR, error) {
 		return p, err
 	}
 	p.Meta, err = decodeMeta(meta)
+	p.CancelledChecks = p.Meta.CancelledChecks
 	return p, err
 }
 
@@ -285,7 +286,7 @@ func prEvents(change contract.PrChange) []contract.EventBody {
 		case contract.PrChangeMerged, contract.PrChangeClosed:
 			item.Action = contract.GitHubAction(kind)
 			bodies = append(bodies, acted(change.Actions, item).Event())
-		case contract.PrChangeCIFailed, contract.PrChangeCIPassed:
+		case contract.PrChangeCIFailed, contract.PrChangeCIPassed, contract.PrChangeCICancelled:
 			bodies = append(bodies, contract.CIFinished{Repo: pr.Repo, Number: pr.Number, Session: pr.Session, URL: pr.URL, Head: pr.Head, Result: pr.CI})
 		}
 	}

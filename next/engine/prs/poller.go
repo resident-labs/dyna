@@ -156,7 +156,7 @@ func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls [
 		for _, head := range unsettled {
 			ci := reads[head.Sha]
 			// A head with no checks may be one GitHub has not started them for, so none settles it only after the grace from its own first read.
-			if ci.Result == contract.PrCISuccess || ci.Result == contract.PrCIFailure || ci.Result == contract.PrCINone && !now.Before(head.SeenAt.Add(ciGrace)) {
+			if ci.Result == contract.PrCISuccess || ci.Result == contract.PrCIFailure || ci.Result == contract.PrCICancelled || ci.Result == contract.PrCINone && !now.Before(head.SeenAt.Add(ciGrace)) {
 				pass.MainCIs = append(pass.MainCIs, store.MainCI{Repo: repo, Branch: probe.Branch, Head: head.Sha, Result: ci.Result, Runs: ci.Runs, RunsTruncated: ci.Truncated})
 			}
 		}

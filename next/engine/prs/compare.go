@@ -146,6 +146,11 @@ func ComparePR(row store.TrackedPR, items []contract.GitHubItem, listed *FeedIte
 	var failed []string
 	if seen != nil {
 		next.State, next.Head, next.Review, next.CI = seen.State, seen.Head, seen.Review, seen.CI
+		next.CancelledChecks = nil
+		if seen.CI == contract.PrCICancelled {
+			next.CancelledChecks = seen.FailedChecks[:min(len(seen.FailedChecks), maxChecks)]
+		}
+		meta.CancelledChecks = next.CancelledChecks
 		update.HeadRepo = seen.HeadRepo
 		// GitHub works mergeability out on demand, and until then the last answer stands.
 		if seen.Merge != "" {
@@ -184,9 +189,11 @@ func ComparePR(row store.TrackedPR, items []contract.GitHubItem, listed *FeedIte
 	case next.State == contract.PrOpen && seen != nil:
 		// A result is news once per head, so a rerun that ends the same way stays quiet.
 		told := seen.Head + ":" + string(seen.CI)
-		if (seen.CI == contract.PrCISuccess || seen.CI == contract.PrCIFailure) && told != row.CITold {
+		if (seen.CI == contract.PrCISuccess || seen.CI == contract.PrCIFailure || seen.CI == contract.PrCICancelled) && told != row.CITold {
 			update.CITold = told
-			if seen.CI == contract.PrCIFailure {
+			if seen.CI == contract.PrCICancelled {
+				kinds = append(kinds, contract.PrChangeCICancelled)
+			} else if seen.CI == contract.PrCIFailure {
 				kinds = append(kinds, contract.PrChangeCIFailed)
 				failed = seen.FailedChecks[:min(len(seen.FailedChecks), maxChecks)]
 			} else {
@@ -211,7 +218,7 @@ func ComparePR(row store.TrackedPR, items []contract.GitHubItem, listed *FeedIte
 		return update, true
 	}
 	found, tell := settle(items, &update.Meta, len(kinds), next.State == contract.PrOpen, row.OwnWakeAt, &update.MetaWakeAt, now)
-	if next == row.PrSummary && update.HeadRepo == row.HeadRepo && update.CITold == row.CITold && !tell {
+	if reflect.DeepEqual(next, row.PrSummary) && update.HeadRepo == row.HeadRepo && update.CITold == row.CITold && !tell {
 		return update, update.SeenReviews != row.SeenReviews || !reflect.DeepEqual(update.Meta, row.Meta)
 	}
 	change := contract.PrChange{PR: next, Kinds: found.kinds(kinds), FailedChecks: failed, Outside: next.Author != viewer && update.HeadRepo != row.Repo, Actions: found.actions}

@@ -63,7 +63,7 @@ func (r *prRig) setChecks(rollup string, checks ...fakegithub.Check) {
 	r.github.Edit("owner/repo", 1, func(p *fakegithub.Pull) { p.Rollup, p.Checks, p.FailedChecks = rollup, checks, nil })
 }
 
-func TestPRCIWaitsForEveryContextAndIgnoresACancelledRun(t *testing.T) {
+func TestPRCIWaitsForEveryContextAndReportsCancellation(t *testing.T) {
 	r := newPRRig(t)
 	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1, Rollup: "FAILURE", Checks: []fakegithub.Check{
 		{Name: "verify"}, {Name: "build linux", Status: "QUEUED"}, {Name: "build macos-x64", Conclusion: "CANCELLED"}, {Name: "lint", Conclusion: "SUCCESS"}}})
@@ -78,10 +78,10 @@ func TestPRCIWaitsForEveryContextAndIgnoresACancelledRun(t *testing.T) {
 	r.pass(t)
 	r.pass(t)
 	got := r.ciFinished(t)
-	if len(got) != 1 || got[0].Result != contract.PrCISuccess {
-		t.Fatalf("every check done and the cancelled one ignored: %+v", got)
+	if len(got) != 1 || got[0].Result != contract.PrCICancelled {
+		t.Fatalf("every check done and cancellation reported: %+v", got)
 	}
-	r.requireCI(t, contract.PrCISuccess)
+	r.requireCI(t, contract.PrCICancelled)
 }
 
 func TestPRCIFailureWakesTheOwnerOnceWhenEveryContextIsDone(t *testing.T) {
@@ -112,11 +112,11 @@ func TestPRCIFailureWakesTheOwnerOnceWhenEveryContextIsDone(t *testing.T) {
 	r.requireCI(t, contract.PrCIFailure)
 }
 
-func TestPRCIWithEveryContextCancelledIsAFailure(t *testing.T) {
+func TestPRCIWithEveryContextCancelledIsCancelled(t *testing.T) {
 	r := newPRRig(t)
 	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1, Rollup: "FAILURE", Checks: []fakegithub.Check{{Name: "build", Conclusion: "CANCELLED"}, {Name: "test", Conclusion: "CANCELLED"}}})
 	r.pass(t)
-	if got := r.ciFinished(t); len(got) != 1 || got[0].Result != contract.PrCIFailure || r.ciWakes(t, contract.PrChangeCIFailed) != 1 {
+	if got := r.ciFinished(t); len(got) != 1 || got[0].Result != contract.PrCICancelled || r.ciWakes(t, contract.PrChangeCICancelled) != 1 {
 		t.Fatalf("nothing ran and passed: %+v", got)
 	}
 }

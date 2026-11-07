@@ -1,0 +1,74 @@
+{
+  "state": "FAILURE",
+  "contexts": {
+    "nodes": [
+      {
+        "__typename": "CheckRun",
+        "name": "changes",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS"
+      },
+      {
+        "__typename": "CheckRun",
+        "name": "nightly-dispatch",
+        "status": "COMPLETED",
+        "conclusion": "SKIPPED"
+      },
+      {
+        "__typename": "CheckRun",
+        "name": "prepared-output-check",
+        "status": "COMPLETED",
+        "conclusion": "SKIPPED"
+      },
+      {
+        "__typename": "CheckRun",
+        "name": "vanilla-parity",
+        "status": "COMPLETED",
+        "conclusion": "SKIPPED"
+      },
+      {
+        "__typename": "CheckRun",
+        "name": "launcher",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS"
+      },
+      {
+        "__typename": "CheckRun",
+        "name": "lint",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS"
+      },
+      {
+        "__typename": "CheckRun",
+        "name": "verify",
+        "status": "COMPLETED",
+        "conclusion": "CANCELLED"
+      },
+      {
+        "__typename": "CheckRun",
+        "name": "pool-watch",
+        "status": "COMPLETED",
+        "conclusion": "CANCELLED"
+      },
+      {
+        "__typename": "CheckRun",
+        "name": "wasm-bench",
+        "status": "COMPLETED",
+        "conclusion": "SKIPPED"
+      },
+      {
+        "__typename": "CheckRun",
+        "name": "ignored-tests",
+        "status": "COMPLETED",
+        "conclusion": "SKIPPED"
+      },
+      {
+        "__typename": "CheckRun",
+        "name": "ignored-tests-shards",
+        "status": "COMPLETED",
+        "conclusion": "SKIPPED"
+      }
+    ],
+    "totalCount": 11
+  }
+}

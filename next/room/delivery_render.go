@@ -147,6 +147,7 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 
 var prChangeWords = map[contract.PrChangeKind]string{
 	contract.PrChangeCIFailed:         "CI failed",
+	contract.PrChangeCICancelled:      "CI cancelled",
 	contract.PrChangeCIPassed:         "CI passed",
 	contract.PrChangeChangesRequested: "changes requested",
 	contract.PrChangeApproved:         "approved",
@@ -291,9 +292,16 @@ func renderPRChanged(b contract.PrChanged) string {
 		}
 		lines := changeHead("PR", change.PR.Repo, change.PR.Number, change.PR.URL, prChangeWords, change.Kinds, change.Actions)
 		if change.PR.Head != "" && slices.ContainsFunc(change.Kinds, func(kind contract.PrChangeKind) bool {
-			return kind == contract.PrChangeCIFailed || kind == contract.PrChangeCIPassed
+			return kind == contract.PrChangeCICancelled || kind == contract.PrChangeCIFailed || kind == contract.PrChangeCIPassed
 		}) {
 			lines = append(lines, "The checks ran on "+change.PR.Head+".")
+		}
+		if len(change.PR.CancelledChecks) > 0 {
+			checks := strings.Join(change.PR.CancelledChecks, ", ")
+			if change.Outside {
+				checks = contract.Outside("github", "@"+change.PR.Author, checks)
+			}
+			lines = append(lines, "CI cancelled: "+checks)
 		}
 		if len(change.FailedChecks) > 0 {
 			checks := strings.Join(change.FailedChecks, ", ")
