@@ -32,16 +32,16 @@ func TestParseRefusesWhatPiWouldNotLoad(t *testing.T) {
 
 func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
 	items := BuiltIn()
-	if len(items) != 5 || items[0].Name != "dyna-extend" || items[0].Description != "Use when you need to add a skill or mcp server to dyna" || !items[0].BuiltIn {
+	if len(items) != 6 || items[1].Name != "dyna-extend" || items[1].Description != "Use when you need to add a skill or mcp server to dyna" || !items[1].BuiltIn {
 		t.Fatalf("%+v", items)
 	}
 	if !IsBuiltIn("dyna-extend") || IsBuiltIn("other") {
 		t.Fatal("IsBuiltIn")
 	}
-	if images := items[1]; images.Name != "dyna-images" || !strings.HasPrefix(images.Description, "Use when your box lacks a tool") {
+	if images := items[2]; images.Name != "dyna-images" || !strings.HasPrefix(images.Description, "Use when your box lacks a tool") {
 		t.Fatalf("%+v", images)
 	}
-	nodes := items[3]
+	nodes := items[4]
 	if nodes.Name != "dyna-nodes" || nodes.Description != "Use when you need to add nodes to Dyna, or a room needs its own or disposable machines" {
 		t.Fatalf("%+v", nodes)
 	}
@@ -216,5 +216,28 @@ func TestAnnotateNamesEveryRunOnHost(t *testing.T) {
 		if err != nil || !strings.Contains(string(out), "Does x · runs on "+want+"\"") || !strings.Contains(string(out), "run on a host: "+want+", through bash with host.") || !strings.HasSuffix(string(out), "this box.\nBody\n") {
 			t.Fatalf("%q %v", out, err)
 		}
+	}
+}
+
+func TestCISkill(t *testing.T) {
+	if !IsBuiltIn("dyna-ci") {
+		t.Fatal("CI skill is not discoverable")
+	}
+	data, err := builtIn.ReadFile("dyna-ci/" + File)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := Parse(data)
+	if err != nil || meta.Name != "dyna-ci" || meta.Description != "Use when you write, debug or speed up a GitHub Actions workflow, whether its jobs run on Dyna's self-hosted runners or on GitHub-hosted ones" {
+		t.Fatalf("%+v %v", meta, err)
+	}
+	text := string(data)
+	for _, want := range []string{"dyna-medium", "6 hours", "CARGO_INCREMENTAL=0", "RUSTC_WRAPPER", "ci_scale", "DYNA_CI_BASE", "public", "fork", "job step status", "Jobs on GitHub-hosted runners", "Swatinem/rust-cache", "[profile.ci]", "inherits = \"dev\"", "incremental = false", "debug = 0", "github.event.pull_request.head.repo.fork", "cargo test --profile ci", "available CPU and memory headroom"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Count(text, "\n") > 90 {
+		t.Fatal("skill exceeds 90 lines")
 	}
 }
