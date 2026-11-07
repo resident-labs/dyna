@@ -40,10 +40,12 @@ type CheckinSession struct {
 	Blocked    bool      // one of those questions left it nothing safe to do, so only the answer will move it
 	Waiting    time.Time // when its oldest undecided operation was asked; zero for none
 
-	// A session with no goal reports nothing. Goal is its oldest active goal.
+	// A session with no goal reports nothing. Goal is its oldest active goal with
+	// an open item or no checklist, or its oldest active goal if all are settled.
 	Goal     contract.GoalID
 	Text     string
 	Open     int
+	Total    int       // all checklist items, including done and dropped
 	Progress time.Time // the newest change to any goal it holds
 	Silent   bool      // its last turn ended with an open goal and no reply
 
@@ -133,6 +135,9 @@ func PlanCheckins(sessions []CheckinSession, now time.Time) []CheckinPlan {
 	for _, s := range sessions {
 		if s.Goal == "" || s.Closing || busyBelow[s.ID] || s.Failure != "" && s.Failure != s.FailureTold {
 			continue // A failure goes out as its own notice, first.
+		}
+		if s.Total > 0 && s.Open == 0 {
+			continue // A settled checklist waits for new work; no checklist still needs attention.
 		}
 		state, reason, since, moving := s.stillness(now)
 		if moving {

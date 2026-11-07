@@ -41,6 +41,12 @@ func TestPlanCheckins(t *testing.T) {
 	}{
 		{"idle goes to the parent", func([]CheckinSession) {}, []contract.SessionID{"lead"}},
 		{"no goal", func(s []CheckinSession) { childOf(s).Goal = "" }, nil},
+		{"settled checklist", func(s []CheckinSession) { childOf(s).Total = 2 }, nil},
+		{"one open item", func(s []CheckinSession) { c := childOf(s); c.Total, c.Open = 3, 1 }, []contract.SessionID{"lead"}},
+		{"blocked with real work", func(s []CheckinSession) {
+			c := childOf(s)
+			c.Total, c.Open, c.Waiting = 3, 1, ago(time.Hour)
+		}, []contract.SessionID{"lead"}},
 		{"closing", func(s []CheckinSession) { childOf(s).Closing = true }, nil},
 		{"not idle long enough", func(s []CheckinSession) { childOf(s).Last = ago(CheckinIdle - time.Second) }, nil},
 		{"recent goal progress", func(s []CheckinSession) { childOf(s).Progress = ago(time.Minute) }, nil},
