@@ -2,8 +2,10 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,6 +16,8 @@ import (
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
+	enginegit "github.com/resident-labs/dyna/engine/git"
+	"github.com/resident-labs/dyna/engine/prs"
 )
 
 func prFixture(t *testing.T, handler http.HandlerFunc) (*Service, contract.SessionID, context.Context) {
@@ -37,6 +41,7 @@ func prFixture(t *testing.T, handler http.HandlerFunc) (*Service, contract.Sessi
 		t.Fatal(err)
 	}
 	s.SetRepositories(&fakeRepos{})
+	s.SetPRTracking(&prs.Client{Token: "secret-token", Endpoint: endpoint, Transport: server.Client().Transport, Now: time.Now})
 	if err := s.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"pr.open": s.PrOpen("secret-token", endpoint, server.Client().Transport)}, 24*time.Hour); err != nil {
 		t.Fatal(err)
 	}
@@ -163,5 +168,76 @@ func TestPrOpenSendsEveryFieldToGitHubAndKeepsTheBodyInTheRecord(t *testing.T) {
 	stored, err := s.store.Operation(ctx, result.Operation.ID)
 	if err != nil || !strings.Contains(string(stored.Args), "the body") {
 		t.Fatalf("stored args %s (%v) lost the body", stored.Args, err)
+	}
+}
+
+type prPushTransport func(*http.Request) (*http.Response, error)
+
+func (f prPushTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestDraftOpenCloseParentPush(t *testing.T) {
+	for _, retrack := range []bool{false, true} {
+		t.Run(fmt.Sprint("retrack=", retrack), func(t *testing.T) {
+			s, child, ctx := prFixture(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					fmt.Fprint(w, `{"number":435,"state":"open","draft":true,"head":{"ref":"pr-worker","sha":"commit-sha","repo":{"full_name":"owner/repo"}},"base":{"repo":{"full_name":"owner/repo"}}}`)
+					return
+				}
+				var input contract.PrOpenArgs
+				if err := json.NewDecoder(r.Body).Decode(&input); err != nil || !input.Draft || input.Head != "pr-worker" {
+					t.Errorf("request: %+v, %v", input, err)
+				}
+				w.WriteHeader(http.StatusCreated)
+				fmt.Fprint(w, `{"number":435,"state":"open","draft":true,"head":{"ref":"pr-worker"}}`)
+			})
+			record, err := s.store.Session(ctx, child)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var parent contract.SessionID
+			if err := s.store.Read().QueryRowContext(ctx, "SELECT parent FROM sessions WHERE id=?", child).Scan(&parent); err != nil {
+				t.Fatal(err)
+			}
+			result, failure := s.OpSubmit(ctx, sessionCaller(child), contract.OpSubmitRequest{Operation: contract.Operation{Room: record.Room, Kind: "pr.open", Args: contract.PrOpenArgs{Title: "Draft", Base: "main", Draft: true}}})
+			if failure != nil || result.Operation.State != contract.OpDone || strings.Contains(result.Operation.Result.Output, "failed") {
+				t.Fatalf("%+v %v", result, failure)
+			}
+			if retrack {
+				if _, e := s.PrUntrack(ctx, sessionCaller(child), contract.PrUntrackRequest{Number: 435}); e != nil {
+					t.Fatal(e)
+				}
+			}
+			if _, e := s.SessionClose(ctx, sessionCaller(parent), contract.SessionCloseRequest{Session: child}); e != nil {
+				t.Fatal(e)
+			}
+			if retrack {
+				if _, e := s.PrTrack(ctx, sessionCaller(parent), contract.PrTrackRequest{Repo: record.Repo, Number: 435}); e != nil {
+					t.Fatal(e)
+				}
+			}
+			if allowed, err := enginegit.CanPushBranch(ctx, s.store, record.Repo, parent, "pr-worker"); err != nil || !allowed {
+				t.Fatalf("parent push: %v %v", allowed, err)
+			}
+			// setup creates the root before the repository is attached; give it the same selected repository as the worker.
+			if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+				_, err := tx.ExecContext(ctx, "UPDATE sessions SET repo=? WHERE id=?", record.Repo, parent)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			forwarded := false
+			transport := prPushTransport(func(*http.Request) (*http.Response, error) {
+				forwarded = true
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("ok"))}, nil
+			})
+			target, _ := url.Parse("https://github.com")
+			line := strings.Repeat("0", 40) + " " + strings.Repeat("1", 40) + " refs/heads/pr-worker\x00report-status\n"
+			body := fmt.Sprintf("%04x%s0000PACK", len(line)+4, line)
+			w := httptest.NewRecorder()
+			enginegit.Handler(target, transport, "secret", parent, record.Room, s.store).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
+			if !forwarded {
+				t.Fatalf("receive-pack rejected parent: %d %s", w.Code, w.Body.String())
+			}
+		})
 	}
 }

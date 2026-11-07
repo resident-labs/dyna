@@ -205,7 +205,7 @@ func (s *Service) PrTrack(ctx context.Context, caller contract.Principal, req co
 			return contract.PrTrackResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "neither repository of this pull request is in your room; the owner can track it for you"}
 		}
 	}
-	row := store.TrackedPR{HeadRepo: pull.HeadRepo, Meta: pull.Meta, PrSummary: contract.PrSummary{Repo: pull.Repo, Number: req.Number, URL: pull.URL, Title: pull.Title, Author: pull.Author, Session: owner.ID, Draft: pull.Draft, State: pull.State, Head: pull.Head}}
+	row := store.TrackedPR{HeadRepo: pull.HeadRepo, HeadBranch: pull.HeadBranch, Meta: pull.Meta, PrSummary: contract.PrSummary{Repo: pull.Repo, Number: req.Number, URL: pull.URL, Title: pull.Title, Author: pull.Author, Session: owner.ID, Draft: pull.Draft, State: pull.State, Head: pull.Head}}
 	if err := s.store.TrackPR(ctx, row); err != nil {
 		// The holder is named only to a caller who may see the PR, which is one of its own room.
 		if held, e := s.trackedPR(ctx, caller, pull.Repo, req.Number); errors.Is(err, store.ErrPRTracked) && e == nil {

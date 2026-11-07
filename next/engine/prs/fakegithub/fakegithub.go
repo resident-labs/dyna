@@ -46,6 +46,7 @@ type Pull struct {
 	State          string // OPEN, CLOSED or MERGED
 	Head           string
 	HeadRepo       contract.RepoName
+	HeadBranch     string
 	Mergeable      string
 	MergeState     string
 	ReviewDecision string
@@ -701,7 +702,7 @@ func (s *Server) serveREST(w http.ResponseWriter, r *http.Request) {
 			state = "closed"
 		}
 		s.answer(w, r, metaNode(map[string]any{"number": pull.Number, "html_url": s.link(pull), "title": pull.Title, "draft": pull.Draft, "state": state, "merged": pull.State == "MERGED", "user": user(pull.Author),
-			"head": map[string]any{"sha": pull.Head, "repo": map[string]string{"full_name": string(pull.HeadRepo)}}, "base": map[string]any{"repo": map[string]string{"full_name": string(pull.Repo)}}}, pull.Meta))
+			"head": map[string]any{"sha": pull.Head, "ref": pull.HeadBranch, "repo": map[string]string{"full_name": string(pull.HeadRepo)}}, "base": map[string]any{"repo": map[string]string{"full_name": string(pull.Repo)}}}, pull.Meta))
 	case len(parts) == 5 && parts[3] == "issues":
 		number, err := strconv.Atoi(parts[4])
 		if err != nil {
