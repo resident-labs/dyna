@@ -137,15 +137,7 @@ Runners run rootless as user 1001, so files they wrote belong to IDs that Podman
 
 ## CI capacity
 
-CI runners go where boxes go, through the same admission, and balance by themselves, so a root rarely needs to change a switch:
-
-- A host takes runners when its `ci` switch is on. New hosts start with it on, except the host the engine runs on, so a host the owner adds takes CI with no flag. Hosts added before this keep the switch they had; turn it on with `dyna host set NAME --ci on`.
-- A runner starts on the ready host with the most free memory, up to its memory and twice its CPUs, so a busy host takes fewer.
-- Session boxes come first: no runner starts on a host where a session box that runners are keeping out waits for CPU or memory.
-- A room with no rule may use shared pool nodes for runners and boxes. A rule restricts both to what it names.
-- A room's rule holds its repository's runners too, and a job no host takes waits for a node of the pool the rule names.
-
-To change this, a root asks the owner with the owner op: `dyna host set NAME --ci on|off` for one host, and `dyna room hosts ROOM --only ...` or `--clear` for a room's rule. Check `dyna host list` first.
+See the dyna-ci skill for runner placement, capacity and room host rules.
 
 ## A host with a GPU
 
