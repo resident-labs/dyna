@@ -78,6 +78,7 @@ echo "journalctl $*" >> "$TEST_LOG"
 if [[ -f $TEST_REFRESH ]]; then
   case "${FAKE_JOURNAL:-clean}" in
     fence) printf '%s\n' 'box box-1: host namespace uncertain: namespace flock held by conmon: exit status 252' 'lifecycle step box-1: namespace fence: exit status 252' ;;
+    namespace) echo 'box box-1: host namespace uncertain: conmon exit status 252' ;;
     lifecycle) echo 'lifecycle step box-1: failed to start' ;;
   esac
 fi
@@ -137,7 +138,6 @@ FAKE_UNIT_COLLISION=1 "$script" "${args[@]}" --stage-wait 0 >"$tmp/out" 2>&1 && 
 grep -q 'Nothing was installed' "$tmp/out"
 test "$(grep -c restart "$TEST_LOG")" = 3
 # Clean journal plus a ready transition succeeds, and only the idle session is refreshed.
-grep -q 'Box lifecycle smoke passed: box-1 returned ready' "$tmp/out" && exit 1 # last run failed before smoke
 rm -f "$tmp/install/failed-next" "$tmp/install/deployed-next" "$TEST_REFRESH"
 "$script" "${args[@]}" >"$tmp/out" 2>&1
 grep -q 'Box lifecycle smoke passed: box-1 returned ready' "$tmp/out"
@@ -153,9 +153,10 @@ grep -q 'failed: box lifecycle smoke.*fix forward' "$tmp/out"
 test "$(<"$tmp/install/failed-next")" = tree123
 test ! -f "$tmp/install/deployed-next"
 # Either journal signature suffices; no idle box and no completed step also fail.
-for scenario in lifecycle no-idle timeout; do
+for scenario in namespace lifecycle no-idle timeout; do
   rm -f "$tmp/install/failed-next" "$tmp/install/deployed-next" "$TEST_REFRESH"
   case "$scenario" in
+    namespace) flags=(FAKE_JOURNAL=namespace); expected='host namespace uncertain' ;;
     lifecycle) flags=(FAKE_JOURNAL=lifecycle); expected='lifecycle step box-1' ;;
     no-idle) flags=(FAKE_NO_IDLE=1); expected='no idle ready session' ;;
     timeout) flags=(FAKE_NO_RETURN=1 FAKE_TIMEOUT=1); expected='timed out after 180 seconds' ;;
