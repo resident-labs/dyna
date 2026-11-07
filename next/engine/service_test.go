@@ -341,9 +341,9 @@ func TestSteerNoRequestReadStartsTheNextTurn(t *testing.T) {
 		{"never read", contract.TurnCompleted, "", false, false, "pending", true, true},
 		{"read", contract.TurnCompleted, "", true, false, "read", true, false},
 		{"files on the way", contract.TurnCompleted, "", false, true, "pending", true, true},
-		{"stopped", contract.TurnStopped, "", false, false, "pending", false, false},
-		{"failed", contract.TurnFailed, contract.CauseModelFailed, false, false, "pending", false, false},
-		{"not started", contract.TurnStopped, contract.CauseNotStarted, false, false, "pending", false, false},
+		{"stopped", contract.TurnStopped, "", false, false, "pending", true, true},
+		{"failed", contract.TurnFailed, contract.CauseModelFailed, false, false, "pending", true, true},
+		{"not started", contract.TurnStopped, contract.CauseNotStarted, false, false, "pending", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, room, session, ctx := setup(t)
@@ -405,7 +405,11 @@ func TestSteerNoRequestReadStartsTheNextTurn(t *testing.T) {
 				}
 				return
 			}
-			if turn != "next" || len(inputs) != 1 || inputs[0].Seq != steer.Input.Delivery || inputs[0].Queue != nil {
+			wantInputs := 1
+			if tc.outcome == contract.TurnFailed || tc.cause == contract.CauseNotStarted {
+				wantInputs++ // the failed attempt's original input is returned without a wake
+			}
+			if turn != "next" || len(inputs) != wantInputs || inputs[len(inputs)-1].Seq != steer.Input.Delivery || inputs[len(inputs)-1].Queue != nil {
 				t.Fatalf("next turn=%q inputs=%+v", turn, inputs)
 			}
 			if _, problem := s.DeliveryDone(ctx, caller, contract.DeliveryDoneRequest{Delivery: steer.Input.Delivery}); problem != nil {
