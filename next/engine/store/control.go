@@ -185,3 +185,12 @@ func (s *Store) SetRoomGitHubWrites(ctx context.Context, room contract.RoomID, w
 		return err
 	})
 }
+
+// MarkTurnModelSent records the first engine handoff to its model proxy for the active turn.
+// A later rejection by the child proxy still counts. It is not the provider send or first response.
+func (s *Store) MarkTurnModelSent(ctx context.Context, session contract.SessionID, at time.Time) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE turns SET model_sent_at=? WHERE session=? AND ended_at IS NULL AND model_sent_at=0", at.UnixMilli(), session)
+		return err
+	})
+}

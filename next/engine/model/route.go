@@ -29,8 +29,8 @@ type RouteError struct {
 // socket is the proxy listener; clientKey never leaves the engine. pinnedID is the
 // credential the owner chose for this session, or empty for Automatic. It comes from the
 // store, never from the request. crew says the session's workers each keep their own account.
-func Handler(socket string, clientKey, sessionID string, allowedModels, eligibleIDs []string, pinnedID string, crew bool) http.Handler {
-	return handler(unixClient(socket), clientKey, sessionID, allowedModels, eligibleIDs, pinnedID, crew)
+func Handler(socket string, clientKey, sessionID string, allowedModels, eligibleIDs []string, pinnedID string, crew bool, sent ...func(context.Context) error) http.Handler {
+	return handler(unixClient(socket), clientKey, sessionID, allowedModels, eligibleIDs, pinnedID, crew, sent...)
 }
 
 func unixClient(socket string) *http.Client {
@@ -39,7 +39,7 @@ func unixClient(socket string) *http.Client {
 	}}, Timeout: 30 * time.Second}
 }
 
-func handler(client *http.Client, clientKey, sessionID string, allowedModels, eligibleIDs []string, pinnedID string, crew bool) http.Handler {
+func handler(client *http.Client, clientKey, sessionID string, allowedModels, eligibleIDs []string, pinnedID string, crew bool, sent ...func(context.Context) error) http.Handler {
 	allowed := make(map[string]struct{}, len(allowedModels))
 	for _, name := range allowedModels {
 		allowed[name] = struct{}{}
@@ -48,7 +48,7 @@ func handler(client *http.Client, clientKey, sessionID string, allowedModels, el
 		_, ok := allowed[model]
 		return ok
 	}
-	return serve(client, clientKey, sessionID, boxRoutes, allow, eligibleIDs, pinnedID, crew)
+	return serve(client, clientKey, sessionID, boxRoutes, allow, eligibleIDs, pinnedID, crew, sent...)
 }
 
 // boxRoutes maps each path to its method. A box needs only what Pi sends.
@@ -60,7 +60,7 @@ var boxRoutes = map[string]string{
 
 // serve applies the policy every caller shares: it checks the model in a POST, then
 // replaces the caller's credentials and affinity headers with the engine's.
-func serve(client *http.Client, clientKey, affinityID string, routes map[string]string, allow func(string) bool, eligibleIDs []string, pinnedID string, crew bool) http.Handler {
+func serve(client *http.Client, clientKey, affinityID string, routes map[string]string, allow func(string) bool, eligibleIDs []string, pinnedID string, crew bool, sent ...func(context.Context) error) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: "cliproxy"})
 	proxy.Transport = client.Transport
 	proxy.FlushInterval = -1
@@ -109,6 +109,12 @@ func serve(client *http.Client, clientKey, affinityID string, routes map[string]
 		r.Header.Set("Authorization", "Bearer "+clientKey)
 		r.Header.Set("X-Api-Key", clientKey)
 		r.Header.Set("X-Claude-Code-Session-Id", affinity)
+		if len(sent) != 0 {
+			if err := sent[0](r.Context()); err != nil {
+				refuse(w, http.StatusServiceUnavailable, "model_handoff_unavailable", "Could not record model handoff.")
+				return
+			}
+		}
 		proxy.ServeHTTP(w, r)
 	})
 }
