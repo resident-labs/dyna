@@ -515,12 +515,12 @@ func (s *Store) ApplyPRPoll(ctx context.Context, pass GitHubPass, at time.Time) 
 	})
 }
 
-// OwnsPRBranch reports whether a session owns a PR on this branch, or a session above or below it owns an open one, so a
-// lead's worker can update the PR the lead holds and a lead can fix its child's PR.
+// OwnsPRBranch reports whether a session owns a PR on this branch, or an ancestor or a session
+// in its parent's subtree owns an open one. A session with no parent uses its own subtree.
 func (s *Store) OwnsPRBranch(ctx context.Context, repo contract.RepoName, session contract.SessionID, branch string) (bool, error) {
 	var found bool
 	err := s.Read().QueryRowContext(ctx, `WITH RECURSIVE up(id) AS (SELECT parent FROM sessions WHERE id=? AND parent IS NOT NULL UNION SELECT s.parent FROM sessions s JOIN up ON s.id=up.id WHERE s.parent IS NOT NULL),
-down(id) AS (SELECT id FROM sessions WHERE parent=? UNION SELECT s.id FROM sessions s JOIN down ON s.parent=down.id)
+down(id) AS (SELECT coalesce(parent,id) FROM sessions WHERE id=? UNION SELECT s.id FROM sessions s JOIN down ON s.parent=down.id)
 SELECT ?<>'' AND (EXISTS(SELECT 1 FROM pr_owners WHERE repo=? AND session=? AND branch=?)
  OR EXISTS(SELECT 1 FROM pr_owners WHERE repo=? AND branch=? AND state='open' AND session IN (SELECT id FROM up UNION SELECT id FROM down)))`, session, session, session, repo, session, branch, repo, branch).Scan(&found)
 	return found, err
