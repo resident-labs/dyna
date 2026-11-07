@@ -76,20 +76,32 @@ type PrOpenArgs struct {
 func (PrOpenArgs) OpKind() OpKind { return "pr.open" }
 func (PrOpenArgs) isOpArgs()      {}
 
+type PrStackArgs struct {
+	PRs []int `json:"prs"`
+}
+
+func (PrStackArgs) OpKind() OpKind { return "pr.stack" }
+func (PrStackArgs) isOpArgs()      {}
+
+type PrStackResult struct {
+	Stack int    `json:"stack"`
+	URL   string `json:"url"`
+}
 type PrOpenResult struct {
 	Number int    `json:"number"`
 	URL    string `json:"url"`
 }
 
 type OpResult struct {
-	PR         *PrOpenResult `json:"pr,omitempty"`
-	ExitCode   int           `json:"exitCode"`
-	Cause      FailureCause  `json:"cause,omitempty"` // set with Error
-	Error      string        `json:"error,omitempty"`
-	Output     string        `json:"output,omitempty"` // up to 64 KiB inline
-	Truncated  bool          `json:"truncated,omitempty"`
-	OutputFile string        `json:"outputFile,omitempty"` // the rest, by hash
-	OutFiles   string        `json:"outFiles,omitempty"`   // a host run's $DYNA_OUT files as a tar, by hash
+	Stack      *PrStackResult `json:"stack,omitempty"`
+	PR         *PrOpenResult  `json:"pr,omitempty"`
+	ExitCode   int            `json:"exitCode"`
+	Cause      FailureCause   `json:"cause,omitempty"` // set with Error
+	Error      string         `json:"error,omitempty"`
+	Output     string         `json:"output,omitempty"` // up to 64 KiB inline
+	Truncated  bool           `json:"truncated,omitempty"`
+	OutputFile string         `json:"outputFile,omitempty"` // the rest, by hash
+	OutFiles   string         `json:"outFiles,omitempty"`   // a host run's $DYNA_OUT files as a tar, by hash
 }
 
 const (
