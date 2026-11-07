@@ -194,7 +194,11 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	}
 	var siblings []string
 	for _, sibling := range data.Contacts.Siblings[:min(20, len(data.Contacts.Siblings))] {
-		siblings = append(siblings, fmt.Sprintf("%s (%s)", sibling.Name, sibling.Profile))
+		name := sibling.Name
+		if sibling.Room != "" {
+			name = string(sibling.Room) + ":" + name
+		}
+		siblings = append(siblings, fmt.Sprintf("%s (%s)", name, sibling.Profile))
 	}
 	if more := len(data.Contacts.Siblings) - len(siblings); more > 0 {
 		siblings = append(siblings, fmt.Sprintf("and %d more (session list)", more))
