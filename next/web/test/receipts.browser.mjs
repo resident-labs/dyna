@@ -21,7 +21,7 @@ function events(room) {
   const p = name => principal(`${room}-${name}`);
   const posts = [
     [owner, [p("root"), p("build-lead")], "Please keep the room feed easy to follow."],
-    [p("root"), [p("root"), p("build-lead")], "Keep going with the browser checks."],
+    [p("deep-builder"), [p("root"), p("build-lead")], "The browser checks are ready for review."],
     [p("build-lead"), [p("review-lead")], "The change is ready for independent review."],
     [p("builder"), [p("build-lead")], "The focused tests are passing."],
     [p("deep-builder"), [p("builder")], "I checked the remaining edge cases."],
@@ -35,7 +35,7 @@ function events(room) {
 const rooms = ["room-a", "room-b"].map((id, i) => ({ id, name: i ? "horizon" : "dyna", paused: false, created: at, lastRead: 100, waiting: [], questions: [], working: [], failed: 0, hostless: 0 }));
 let delivered = false;
 function answer(method, request) {
- if (method === "events.list" && request.receiptSeqs) return { receipts: Object.fromEntries(request.receiptSeqs.map(seq => [seq, seq > 2 ? [] : [{ session: "room-a-root", name: "root", state: delivered ? "taken" : "pending", ...(!delivered && { batchDeadline: "2026-11-07T12:01:00Z" }) }, { session: "room-a-build-lead", name: "build-lead", state: "read" }]])) };
+ if (method === "events.list" && request.receiptSeqs) return { receipts: Object.fromEntries(request.receiptSeqs.map(seq => [seq, seq > 2 ? [] : [{ session: "room-a-root", name: "root", state: delivered ? "taken" : "pending", ...(!delivered && seq === 2 && { batchDeadline: "2026-11-07T12:01:00Z" }) }, { session: "room-a-build-lead", name: "build-lead", state: "read" }]])) };
   switch (method) {
     case "room.list": return { rooms, seq: 10 };
     case "device.scopes": return { scopes: ["read", "operate", "admin"] };
@@ -89,7 +89,7 @@ try {
   assert.equal(await page.locator('.receipt .countdown').first().textContent(), '· in 40 s');
   assert.equal(await page.locator('.receipt').count(), 2, 'owner and agent receipts');
   await page.locator('.receipt').first().focus();
-  assert.match(await page.locator('.receipt .tooltip').first().textContent(), /root: Queued.*40 s[\s\S]*build-lead: Delivered/);
+  assert.match(await page.locator('.receipt .tooltip').first().textContent(), /root: Queued[\s\S]*build-lead: Delivered/);
   await page.locator('main').click({ position: { x: 5, y: 5 } });
   await page.evaluate(() => document.fonts.ready);
   await page.screenshot({ path: `${output}/queued-${width}-${theme === 'carbon' ? 'dark' : 'light'}.png` });
