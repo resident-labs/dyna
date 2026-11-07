@@ -270,6 +270,39 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		}
 		lines = append(lines, "GitHub writes: "+strings.Join(groups, ", ")+" on "+strings.Join(repos, ", "))
 	}
+	ciRepos, err := s.store.CIRepos(ctx)
+	if err != nil {
+		return contract.ContextSnapshotResponse{}, failure(err)
+	}
+	var runners []string
+	for _, repo := range ciRepos {
+		if repo.Room == session.Room {
+			runners = append(runners, string(repo.Repo))
+		}
+	}
+	if len(runners) > 0 {
+		const prefix, suffix = "Dyna CI runners: ", " (dyna-ci skill)"
+		names := strings.Join(runners, ", ")
+		if req.Section == "" {
+			budget := roomChars - len(prefix) - len(suffix)
+			if len(lines) > 0 {
+				budget -= len(fmt.Sprintf("\n%d more: context show", len(lines)))
+			}
+			if utf8.RuneCountInString(names) > budget {
+				kept := 0
+				for kept < len(runners) && utf8.RuneCountInString(strings.Join(runners[:kept+1], ", ")+", …") <= budget {
+					kept++
+				}
+				names = strings.Join(runners[:kept], ", ")
+				if kept > 0 {
+					names += ", "
+				}
+				names += "…"
+			}
+		}
+		// Put the CI line first so even a long list of settings leaves the skill discoverable.
+		lines = append([]string{prefix + names + suffix}, lines...)
+	}
 	add(contract.ContextRoom, lines, roomChars, 0)
 	// What the room's workflow settings change from the defaults, for every session; limits and defaults are named by the refusal that
 	// meets them.
