@@ -1,9 +1,9 @@
 ---
 name: dyna-ci
-description: Use when you write, debug or speed up a GitHub Actions workflow for a repository whose CI runs on Dyna's self-hosted runners
+description: Use when you write, debug or speed up a GitHub Actions workflow, whether its jobs run on Dyna's self-hosted runners or on GitHub-hosted ones
 ---
 
-# Dyna CI runners
+# GitHub Actions CI
 
 ## Route a job
 
@@ -27,9 +27,36 @@ Cargo compiles through `RUSTC_WRAPPER=sccache`. It reads and writes the host's s
 
 sccache skips incremental compiles. Set `CARGO_INCREMENTAL=0` in a workflow for its own crates to hit the cache. Dependencies benefit without that change. Cache keys include compiler paths, the working directory and `CARGO_` variables: keep the fixed `CARGO_HOME` and `CARGO_TARGET_DIR` above to share entries with boxes. Changing them or adding `CARGO_` variables can cause misses. Identical source alone does not guarantee a hit across different checkout paths or toolchains.
 
+Use a separate Cargo CI profile on either runner, keeping local `dev` builds unchanged. `debug = 0` reduces build artifacts; `debug = "line-tables-only"` keeps filename/line backtraces instead. `incremental = false` makes the sccache advice structural. Run `cargo test --profile ci`:
+```toml
+[profile.ci]
+inherits = "dev"
+debug = 0
+incremental = false
+```
+
+## Jobs on GitHub-hosted runners
+
+For public repositories whose jobs cannot use Dyna runners, including fork PRs, use `ubuntu-latest`. GitHub-hosted jobs have fresh machines, not Dyna's persistent `/build` or provided sccache configuration. Cache Cargo dependencies and build output with an action keyed by `Cargo.lock` and the toolchain, such as `Swatinem/rust-cache` (which includes those keys). Select the Rust toolchain before restoring its cache.
+
+On Dyna, do not add `actions/cache` for `target`: persistent `/build` mounts and host sccache already cover it; uploading and restoring artifacts through the proxy can cost more time than it saves. Keep runner-specific setup in separate conditional steps. For a repository with Dyna CI enabled, this job routes fork PRs to GitHub and other events to Dyna; add a GitHub-hosted fallback for disabled or unavailable Dyna CI as needed:
+```yaml
+jobs:
+  rust:
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'dyna-medium' }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - if: runner.environment == 'github-hosted'
+        uses: Swatinem/rust-cache@v2
+      - if: runner.environment == 'self-hosted'
+        run: sccache --show-stats
+      - run: cargo test --profile ci
+```
+
 ## Capacity
 
-Check `dyna host list` before requesting a change. Ready hosts with `ci` on take runners through the same admission as boxes; placement prefers hosts with the image ready and then free memory. A session box waiting for CPU or memory takes priority over new runners. A repository's runner maximum, host slot limit and room host rules also bound placement.
+Check `dyna host list` before requesting a change. Ready hosts with `ci` on take runners through the same admission as boxes; placement prefers hosts with the image ready and then available CPU and memory headroom. A session box waiting for CPU or memory takes priority over new runners. A repository's runner maximum, host slot limit and room host rules also bound placement.
 
 The owner's host `ci` switch controls new runners, not ones already running. `dyna host set NAME --ci on|off` changes it. New hosts normally have CI on except the engine host; existing hosts retain their switch. These changes are owner-only.
 
