@@ -148,8 +148,8 @@ func removeContainersCommand(id contract.BoxID) string {
 	return strings.Join([]string{
 		recoverRemoving,
 		"if " + shellCommand("podman", "--cgroup-manager=systemd", "stop", "--ignore", string(id)) + "; then\n" +
-			shellCommand("podman", "--cgroup-manager=systemd", "rm", "--ignore", "--volumes", string(id)) + " || { status=$?; recover_removing " + quote(string(id)) + " || exit \"$status\"; }\n" +
-			"else status=$?; recover_removing " + quote(string(id)) + " || exit \"$status\"; fi",
+			shellCommand("podman", "--cgroup-manager=systemd", "rm", "--ignore", "--volumes", string(id)) + " || { status=$?; test \"$status\" = 125 && recover_removing " + quote(string(id)) + " || exit \"$status\"; }\n" +
+			"else status=$?; test \"$status\" = 125 && recover_removing " + quote(string(id)) + " || exit \"$status\"; fi",
 		shellCommand("podman", "--cgroup-manager=systemd", "pod", "rm", "--force", "--ignore", "--time", "0", box.PodName(id)),
 	}, "\n")
 }
