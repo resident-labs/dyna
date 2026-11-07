@@ -60,31 +60,31 @@ func TestHostSwitchesTurnEachOnItsOwn(t *testing.T) {
 		t.Fatalf("as added: %+v", h)
 	}
 	on, off := true, false
-	if err := s.SetHostSwitches(ctx, "plain", nil, &on, false, hostSwitchEvent); err != nil {
+	if err := s.SetHostSwitches(ctx, "plain", nil, &on, nil, false, hostSwitchEvent); err != nil {
 		t.Fatal(err)
 	}
 	if h := hostSwitches(t, s, "plain"); h.NoAgents || !h.CI {
 		t.Fatalf("ci alone on: %+v", h)
 	}
-	if err := s.SetHostSwitches(ctx, "plain", &off, nil, false, hostSwitchEvent); err != nil {
+	if err := s.SetHostSwitches(ctx, "plain", &off, nil, nil, false, hostSwitchEvent); err != nil {
 		t.Fatal(err)
 	}
 	if h := hostSwitches(t, s, "plain"); !h.NoAgents || !h.CI {
 		t.Fatalf("agents alone off: %+v", h)
 	}
-	if err := s.SetHostSwitches(ctx, "plain", &off, &off, false, hostSwitchEvent); err != nil {
+	if err := s.SetHostSwitches(ctx, "plain", &off, &off, nil, false, hostSwitchEvent); err != nil {
 		t.Fatal(err)
 	}
 	if h := hostSwitches(t, s, "plain"); !h.NoAgents || h.CI {
 		t.Fatalf("both off: %+v", h)
 	}
-	if err := s.SetHostSwitches(ctx, "ci", &on, nil, false, hostSwitchEvent); err != nil {
+	if err := s.SetHostSwitches(ctx, "ci", &on, nil, nil, false, hostSwitchEvent); err != nil {
 		t.Fatal(err)
 	}
 	if h := hostSwitches(t, s, "ci"); h.NoAgents || !h.CI {
 		t.Fatalf("agents back on: %+v", h)
 	}
-	if err := s.SetHostSwitches(ctx, "missing", &on, nil, false, hostSwitchEvent); !errors.Is(err, ErrNotFound) {
+	if err := s.SetHostSwitches(ctx, "missing", &on, nil, nil, false, hostSwitchEvent); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown host: %v", err)
 	}
 }
@@ -104,7 +104,7 @@ func TestBothSwitchesOffKeepsTheHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	off := false
-	if err := s.SetHostSwitches(ctx, "h", &off, &off, false, hostSwitchEvent); err != nil {
+	if err := s.SetHostSwitches(ctx, "h", &off, &off, nil, false, hostSwitchEvent); err != nil {
 		t.Fatal(err)
 	}
 	h := hostSwitches(t, s, "h")
@@ -143,7 +143,7 @@ func TestHostSwitchAuditCommitsWithTheUpdate(t *testing.T) {
 	live, cancel := s.Subscribe()
 	defer cancel()
 	on, off := true, false
-	if err := s.SetHostSwitches(ctx, "h", &off, &on, true, hostSwitchEvent); err == nil {
+	if err := s.SetHostSwitches(ctx, "h", &off, &on, nil, true, hostSwitchEvent); err == nil {
 		t.Fatal("switches committed despite a refused audit")
 	}
 	var agents, ci bool
@@ -173,7 +173,7 @@ func TestHostSwitchAuditCommitsWithTheUpdate(t *testing.T) {
 	if _, err := s.writer.Exec("DROP TRIGGER reject_switch_audit"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetHostSwitches(ctx, "h", &off, &on, true, hostSwitchEvent); err != nil {
+	if err := s.SetHostSwitches(ctx, "h", &off, &on, nil, true, hostSwitchEvent); err != nil {
 		t.Fatal(err)
 	}
 	read()
@@ -194,7 +194,7 @@ func TestHostSwitchAuditCommitsWithTheUpdate(t *testing.T) {
 	// Serialized concurrent retries see the stored values and emit no duplicate audit.
 	results := make(chan error, 8)
 	for range 8 {
-		go func() { results <- s.SetHostSwitches(ctx, "h", &off, &on, false, hostSwitchEvent) }()
+		go func() { results <- s.SetHostSwitches(ctx, "h", &off, &on, nil, false, hostSwitchEvent) }()
 	}
 	for range 8 {
 		if err := <-results; err != nil {

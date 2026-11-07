@@ -99,7 +99,7 @@ func TestCreateQuarantine(t *testing.T) {
 	if _, err := s.writer.Exec("UPDATE boxes SET state='creating',host='h',create_retry_host='' WHERE id='b'"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetHostSwitches(ctx, "h", nil, nil, true, hostSwitchEvent); err != nil {
+	if err := s.SetHostSwitches(ctx, "h", nil, nil, nil, true, hostSwitchEvent); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.FinishCreate(ctx, b, "", "failure", time.Time{}, 3, event(4), true); err != nil {

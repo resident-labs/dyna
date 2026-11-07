@@ -63,7 +63,7 @@ func TestLegacyTypedPlacementControlsRetryWithoutAnAffinityMigration(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, query := range []string{"ALTER TABLE boxes DROP COLUMN create_retry_host", "UPDATE meta SET value='96' WHERE key='schema_version'"} {
+			for _, query := range []string{"ALTER TABLE hosts DROP COLUMN ci_scale", "ALTER TABLE boxes DROP COLUMN create_retry_host", "UPDATE meta SET value='96' WHERE key='schema_version'"} {
 				if _, err := db.Exec(query); err != nil {
 					t.Fatal(err)
 				}

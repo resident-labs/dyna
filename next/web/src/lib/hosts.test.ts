@@ -37,6 +37,12 @@ test("a popover hangs under its button, right edges lined up, and over it when t
   assert.equal(hang({ top: 60, right: 700, bottom: 80 }, 1000, 300), "top: 86px; right: 300px; max-height: min(560px, 70vh, 198px)");
 });
 
+test("a merged engine-host card keeps its registered CI capacity", () => {
+  const plane = { ...machine, name: "control-plane", cpus: 8, memBytes: 8 };
+  const registered = { ...machine, engineHost: true, ci: true, ciScale: 3 };
+  assert.equal(machines([plane, registered])[0].ciScale, 3);
+});
+
 test("a merged card keeps the sessions both sides report, and an unmerged host keeps its own", () => {
   const session = (id: string) => ({ room: "r", id, name: id, boxState: "ready" as const });
   const plane = { ...machine, name: "control-plane", boxes: 0, sessions: null };

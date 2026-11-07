@@ -122,6 +122,11 @@
     }
     if (!await change(() => call("host.set", { host: h.name, ...request }))) box.checked = !box.checked;
   }
+  async function setScale(h: HostSummary, select: HTMLSelectElement) {
+    const before = String(h.ciScale ?? 1);
+    if (busy) { select.value = before; return; }
+    if (!await change(() => call("host.set", { host: h.name, ciScale: Number(select.value) }))) select.value = before;
+  }
   async function remove(h: HostSummary, opener: HTMLElement) {
     problem = "";
     const ok = await confirm({ title: `Remove ${h.name}?`, message: h.pool ? `Pool ${h.pool} takes the node back through its script.` : "Dyna drops its connection to the machine. You can add it again later.",
@@ -186,7 +191,12 @@
     <label class="set"><span class="name">Agents</span><input type="checkbox" role="switch" checked={!!h.agents} aria-label="Agents" onchange={event => void setSwitch(h, { agents: event.currentTarget.checked }, event.currentTarget)} />
       <span class="help">New session boxes may land here. Off: boxes already here stay until they stop.</span></label>
     <label class="set"><span class="name">CI</span><input type="checkbox" role="switch" checked={!!h.ci} aria-label="CI" onchange={event => void setSwitch(h, { ci: event.currentTarget.checked }, event.currentTarget)} />
-      <span class="help">The CI pool may start runners here. Off: running jobs finish.</span></label></div>
+      <span class="help">The CI pool may start runners here. Off: running jobs finish.</span></label>
+    {#if h.ci}<label class="set"><span class="name">CI capacity</span>
+      <select aria-label="CI capacity" value={h.ciScale ?? 1} disabled={busy} onchange={event => void setScale(h, event.currentTarget)}>
+        {#each [1, 2, 3, 4] as scale}<option value={scale}>{scale}x</option>{/each}
+      </select>
+      <span class="help">Runner reservation capacity. Real memory pressure still stops new runners.</span></label>{/if}</div>
   {#if !h.execOnly}<RoomsServed label="Rooms it serves" {rooms} chosen={h.rooms ?? []} {busy} set={ids => change(() => call("host.set_limits", { host: h.name, rooms: ids }))} />{/if}
   {#if groups.length}<div class="section"><strong class="head">Sessions</strong>
     <div class="sessions">{#each groups as group (group.room)}
@@ -217,6 +227,8 @@
 <ListDetail bar={header} label="Hosts" title={creating ? "Add a host" : item ? hostName(item) : "Not found"} open={creating || (!!items && selected !== undefined)} onselect={select} onclose={close} {list} {detail} {summary} />
 
 <style>
+  select { width: auto; min-height: 30px; padding: 3px 5px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--text); font: inherit; cursor: pointer; }
+  @media (hover: none) { select { min-height: 44px; } }
   .add { margin-left: auto; gap: 4px; }
   .icon { display: grid; flex: none; color: var(--muted); }
   /* A row's load: a short bar each for CPU, memory and disk, warm as Home's tiles are. */
