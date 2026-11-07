@@ -159,3 +159,10 @@ func TestBoxDeliveryDoesNotCallHealthyTransitionsStartFailures(t *testing.T) {
 		t.Fatalf("healthy box delivery: %q, %v", text, err)
 	}
 }
+
+func TestCancelledNoticeNames(t *testing.T) {
+	got := renderPRChanged(contract.PrChanged{Changes: []contract.PrChange{{PR: contract.PrSummary{Repo: "o/r", Number: 1807, Head: "abc", CI: contract.PrCICancelled, CancelledChecks: []string{"verify", "pool-watch"}}, Kinds: []contract.PrChangeKind{contract.PrChangeCICancelled}}}})
+	if !strings.Contains(got, "CI cancelled: verify, pool-watch") || strings.Contains(got, "CI passed") || strings.Contains(got, "Failed checks") {
+		t.Fatal(got)
+	}
+}

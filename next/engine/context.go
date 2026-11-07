@@ -73,6 +73,8 @@ func prLine(p store.ContextPR) string {
 	switch p.CI {
 	case contract.PrCISuccess:
 		parts = append(parts, "CI passed")
+	case contract.PrCICancelled:
+		parts = append(parts, "CI cancelled")
 	case contract.PrCIFailure:
 		parts = append(parts, "CI failed")
 	case contract.PrCIPending:

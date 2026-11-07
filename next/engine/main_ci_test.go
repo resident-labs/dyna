@@ -411,7 +411,7 @@ var (
 	mixFailedRun = fakegithub.Commit{Rollup: "FAILURE", Checks: []fakegithub.Check{{Name: "verify", Conclusion: "FAILURE"}, {Name: "build linux", Conclusion: "SUCCESS"}, {Name: "build macos", Conclusion: "SUCCESS"}, {Name: "build macos-x64", Conclusion: "CANCELLED"}, {Name: "lint", Conclusion: "SUCCESS"}}}
 )
 
-func TestMainCIFinishedWaitsForEveryContextAndIgnoresACancelledRun(t *testing.T) {
+func TestMainCIFinishedWaitsForEveryContextAndReportsCancellation(t *testing.T) {
 	r := mainRig(t)
 	r.moveMain("owner/repo", "f319701", mixRunning)
 	for i := 0; i < 3; i++ {
@@ -421,8 +421,8 @@ func TestMainCIFinishedWaitsForEveryContextAndIgnoresACancelledRun(t *testing.T)
 	r.github.SetCommit("owner/repo", "f319701", mixFinished)
 	r.next(t)
 	got := r.mainCIs(t)
-	if len(got) != 1 || got[0].Result != contract.PrCISuccess {
-		t.Fatalf("every check done and the cancelled one ignored: %+v", got)
+	if len(got) != 1 || got[0].Result != contract.PrCICancelled {
+		t.Fatalf("every check done and cancellation reported: %+v", got)
 	}
 	if !slices.Contains(got[0].Runs, contract.CIRun{Name: "build macos-x64", Conclusion: "CANCELLED"}) {
 		t.Fatalf("the cancelled run is not listed: %+v", got[0].Runs)
@@ -447,12 +447,12 @@ func TestMainCIFinishedFailureWaitsForTheOtherContextsToFinish(t *testing.T) {
 	}
 }
 
-func TestMainCIFinishedWithEveryContextCancelledIsAFailure(t *testing.T) {
+func TestMainCIFinishedWithEveryContextCancelledIsCancelled(t *testing.T) {
 	r := mainRig(t)
 	r.moveMain("owner/repo", "A", fakegithub.Commit{Rollup: "FAILURE", Checks: []fakegithub.Check{{Name: "build", Conclusion: "CANCELLED"}, {Name: "test", Conclusion: "CANCELLED"}}})
 	r.next(t)
 	got := r.mainCIs(t)
-	if len(got) != 1 || got[0].Result != contract.PrCIFailure || len(got[0].Runs) != 2 || got[0].Runs[0].Conclusion != "CANCELLED" {
+	if len(got) != 1 || got[0].Result != contract.PrCICancelled || len(got[0].Runs) != 2 || got[0].Runs[0].Conclusion != "CANCELLED" {
 		t.Fatalf("nothing ran and passed: %+v", got)
 	}
 }

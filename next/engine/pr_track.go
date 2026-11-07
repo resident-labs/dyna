@@ -32,6 +32,12 @@ func prFor(caller contract.Principal, p store.TrackedPR, viewer string) contract
 	if writer := textWriter(summary.Author, viewer, p.Meta); caller.Kind == contract.PrincipalSession && summary.Author != "" && writer != "" {
 		summary.Title = contract.Outside("github", "@"+writer, summary.Title)
 	}
+	if caller.Kind == contract.PrincipalSession && p.HeadRepo != p.Repo && summary.Author != viewer {
+		summary.CancelledChecks = append([]string(nil), summary.CancelledChecks...)
+		for i, name := range summary.CancelledChecks {
+			summary.CancelledChecks[i] = contract.Outside("github", "@"+summary.Author, name)
+		}
+	}
 	return summary
 }
 

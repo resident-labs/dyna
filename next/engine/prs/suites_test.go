@@ -22,6 +22,7 @@ func TestNeedsGatedSuiteSequence(t *testing.T) {
 		want   contract.PrCI
 	}{
 		{"early green", "IN_PROGRESS", checks, contract.PrCIPending},
+		{"cancelled early job, gated jobs absent", "IN_PROGRESS", append(checks, fakegithub.Check{Name: "cancelled early", Conclusion: "CANCELLED"}), contract.PrCIPending},
 		{"lint gated", "IN_PROGRESS", append(checks, fakegithub.Check{Name: "lint", Conclusion: "SUCCESS"}), contract.PrCIPending},
 		{"verify finished", "COMPLETED", append(checks, fakegithub.Check{Name: "lint", Conclusion: "SUCCESS"}, fakegithub.Check{Name: "verify", Conclusion: "SUCCESS"}), contract.PrCISuccess},
 	} {

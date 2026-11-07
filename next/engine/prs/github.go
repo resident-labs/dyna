@@ -407,9 +407,9 @@ const (
 	ciPullHead
 )
 
-// rollupCI reads what a rollup says of CI: success or failure when GitHub has finished, pending while it runs, and none for no rollup or the empty success
+// rollupCI reads what a rollup says of CI: success, failure or cancelled when GitHub has finished, pending while it runs, and none for no rollup or the empty success
 // GitHub reports before any check has run. Whatever the rollup state says, a rollup settles only when every context it lists is terminal; a cancelled run alone is not
-// a failure, and a rollup of cancelled runs only is. summarizeCI excludes truncated reads before this is called.
+// a failure. Any cancellation without a failure is cancelled, never success. summarizeCI excludes truncated reads before this is called.
 // The rule preserves how an empty rollup is read. It names the checks that failed.
 func rollupCI(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string) {
 	if rollup == nil || rollup.State == "SUCCESS" && len(rollup.Contexts.Nodes) == 0 {
@@ -434,8 +434,8 @@ func rollupCI(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string) {
 				failed = append(failed, name)
 			}
 		}
-		if len(cancelled) == len(rollup.Contexts.Nodes) {
-			ci, failed = contract.PrCIFailure, cancelled
+		if ci != contract.PrCIFailure && len(cancelled) > 0 {
+			ci, failed = contract.PrCICancelled, cancelled
 		}
 		return ci, failed
 	}
