@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -274,5 +275,44 @@ func TestNamespaceCreateHasBoundedLockWaitAndNoFallback(t *testing.T) {
 	}
 	if err := h.CreateBox(context.Background(), box.ContainerSpec{Box: "b", Image: "new"}, nil, false); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Podman's conmon daemon inherits FD 8 even after podman start returns. The
+// completed command must release that shared lock without waiting for conmon.
+func TestNamespaceCompletedCommandReleasesInheritedLock(t *testing.T) {
+	for _, status := range []string{"0", "42"} {
+		t.Run(status, func(t *testing.T) {
+			root := t.TempDir()
+			pidFile := filepath.Join(root, "daemon-pid")
+			body := `sleep 60 </dev/null >/dev/null 2>&1 &
+printf '%s\n' "$!" > "$1"
+exit "$2"`
+			cmd := exec.Command("bash", "-c", namespaceScript, "dyna-box-namespace", root, "b", "use", "bash", "-c", body, "daemon-fixture", pidFile, status)
+			out, err := cmd.CombinedOutput()
+			raw := waitNamespaceFile(t, pidFile)
+			pid, parseErr := strconv.Atoi(strings.TrimSpace(string(raw)))
+			if parseErr != nil {
+				t.Fatal(parseErr)
+			}
+			t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+			if status == "0" && err != nil {
+				t.Fatalf("namespace command failed: %v: %s", err, out)
+			}
+			if status != "0" {
+				var exited *exec.ExitError
+				if !errors.As(err, &exited) || exited.ExitCode() != 42 {
+					t.Fatalf("lost command exit status: %v: %s", err, out)
+				}
+			}
+			fd, err := os.OpenFile(filepath.Join(root, "locks", "box-b.lock"), os.O_RDWR, 0600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer fd.Close()
+			if err := syscall.Flock(int(fd.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+				t.Fatalf("completed command left namespace locked by its daemon: %v", err)
+			}
+		})
 	}
 }
