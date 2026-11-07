@@ -98,10 +98,12 @@ func TestCancelledModelRetryIsNotTerminal(t *testing.T) {
 					post("old-work", contract.ReplyNone)
 					dispatch(100)
 					finish(100, contract.TurnFailed, contract.CauseModelFailed)
+					now = now.Add(time.Minute)
 					post("recovery-work", contract.ReplyNone)
 					dispatch(101)
 					finish(101, contract.TurnCompleted, "")
 				}
+				now = now.Add(time.Minute)
 				post("work", reply)
 				dispatch(0)
 				finish(0, contract.TurnFailed, contract.CauseModelFailed)
@@ -117,7 +119,7 @@ func TestCancelledModelRetryIsNotTerminal(t *testing.T) {
 						t.Fatalf("exhausted stop: %v %v", stopping, err)
 					}
 					terminal("Stop must not conceal true exhaustion", 1)
-					now = now.Add(time.Second)
+					now = now.Add(time.Minute)
 					post("work-after-exhaustion", contract.ReplyNone)
 					dispatch(9)
 					terminal("new active work does not hide exhaustion", 1)
@@ -194,12 +196,12 @@ func TestCancelledModelRetryIsNotTerminal(t *testing.T) {
 					t.Fatalf("attempt event changed: %d %v", facts, err)
 				}
 				if phase == "non-model failure after cancellation" {
-					now = now.Add(time.Second)
+					now = now.Add(time.Minute)
 					post("new-work", reply)
 					dispatch(2)
 					finish(2, contract.TurnFailed, contract.CauseHarnessFailed)
 					terminal("genuine non-model failure", 1)
-					now = now.Add(time.Second)
+					now = now.Add(time.Minute)
 					post("work-after-harness-failure", contract.ReplyNone)
 					dispatch(3)
 					terminal("new active work does not hide non-model failure", 1)

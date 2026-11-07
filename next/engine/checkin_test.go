@@ -103,6 +103,11 @@ func (r *goalRig) exec(query string, args ...any) {
 // begin dispatches a session's waiting inputs into a new turn, which stays open.
 func (r *goalRig) begin(session contract.SessionID) contract.TurnID {
 	r.t.Helper()
+	if deadline, err := r.st.InputBatchDeadline(r.ctx, session); err != nil {
+		r.t.Fatal(err)
+	} else if deadline.After(r.now()) {
+		r.advance(deadline.Sub(r.now()))
+	}
 	r.turns++
 	id := contract.TurnID("turn_" + string(rune('a'+r.turns)))
 	started, err := r.s.event(r.room, contract.Principal{Kind: contract.PrincipalEngine}, contract.TurnStarted{})
@@ -199,7 +204,7 @@ func TestStalledChildReachesParentThenRootAndStops(t *testing.T) {
 	r.turn(r.child, "working on it")
 	r.turn(r.lead, "good")
 
-	r.advance(room.CheckinIdle - time.Minute)
+	r.advance(room.CheckinIdle - 2*time.Minute)
 	r.pass()
 	r.wantCheckins(r.lead, 0)
 
