@@ -729,3 +729,40 @@ func TestPullLifecycleWithWritesOff(t *testing.T) {
 		expect(t, name, graphql(t, g, contract.GitHubWrites{}, "mutation($i:X!){"+name+"(input:$i){clientMutationId}}", `{"i":{"pullRequestId":"PR_ok","baseRefName":"main"}}`), contract.GitHubWriteOff)
 	}
 }
+
+func TestPullOwnershipUsesContextCaller(t *testing.T) {
+	for _, caller := range []contract.SessionID{"owner", "sibling", ""} {
+		for _, graph := range []bool{false, true} {
+			g, up := newGuard()
+			// This is the runtime hook's rule: only the recorded session matches, never a tool argument.
+			g.Owns = func(ctx context.Context, _ contract.RepoName, _ int) (bool, error) {
+				return SessionFrom(ctx) == "owner", nil
+			}
+			ctx := WithAllowed(context.Background(), grantOf("acme/app", pulls))
+			if caller != "" {
+				ctx = WithSession(ctx, caller)
+			}
+			method, target, body := "PATCH", "https://api.github.com/repos/acme/app/pulls/7", `{"state":"closed"}`
+			if graph {
+				method, target, body = "POST", "https://api.github.com/graphql", `{"query":"mutation($i:X!){closePullRequest(input:$i){clientMutationId}}","variables":{"session":"owner","i":{"pullRequestId":"PR_ok"}}}`
+			}
+			request, _ := http.NewRequestWithContext(ctx, method, target, strings.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			response, err := g.RoundTrip(request)
+			if caller == "owner" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				response.Body.Close()
+			} else {
+				var refusal *Refusal
+				if !errors.As(err, &refusal) || refusal.Reason != contract.GitHubWritePRNotOwned {
+					t.Fatalf("caller %q: %v", caller, err)
+				}
+				if len(up.sent) != 0 {
+					t.Fatalf("caller %q escaped: %v", caller, up.sent)
+				}
+			}
+		}
+	}
+}
