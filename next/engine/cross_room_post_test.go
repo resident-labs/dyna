@@ -84,3 +84,18 @@ func TestRootCrossRoomPost(t *testing.T) {
 		t.Fatalf("worker: %v", p)
 	}
 }
+
+// An owner post names its room: with none, or one that does not exist, nothing is stored and the caller hears why.
+func TestOwnerPostWithoutRoomIsRefused(t *testing.T) {
+	s, _, _, ctx := setupRoot(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	for _, room := range []contract.RoomID{"", "room_missing"} {
+		if _, problem := s.Post(ctx, owner, contract.PostRequest{Room: room, Text: "hello", Mentions: []string{"root"}}); problem == nil || problem.Code != contract.ErrInvalid && problem.Code != contract.ErrNotFound {
+			t.Fatalf("room %q: %+v", room, problem)
+		}
+	}
+	var stored int
+	if err := s.store.Read().QueryRow("SELECT count(*) FROM events WHERE room='' OR room='room_missing'").Scan(&stored); err != nil || stored != 0 {
+		t.Fatalf("stored %d err %v", stored, err)
+	}
+}
