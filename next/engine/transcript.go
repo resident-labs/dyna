@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"os"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/resident-labs/dyna/engine/store"
 	"path/filepath"
@@ -72,8 +75,19 @@ func (s *Service) TranscriptAppend(ctx context.Context, caller contract.Principa
 		return contract.TranscriptAppendResponse{}, failure(err)
 	}
 
-	if err := s.indexTranscript(ctx, caller.Session, req.Path, file, acked, end); err != nil {
+	var failed []contract.ToolFailed
+	if err := s.indexTranscript(ctx, caller.Session, req.Path, file, acked, end, &failed); err != nil {
 		return contract.TranscriptAppendResponse{}, failure(err)
+	}
+	// The bytes are stored, so a failure here is logged: refusing the append would send them, and the events, again.
+	for _, body := range failed {
+		event, err := s.event(room, caller, body)
+		if err == nil {
+			err = s.store.RecordEvent(ctx, event)
+		}
+		if err != nil {
+			log.Printf("transcript %s: record tool.failed: %v", caller.Session, err)
+		}
 	}
 	turns, err := s.store.TranscriptTurnsIntersecting(ctx, caller.Session, req.Path, acked, end)
 	if err != nil {
@@ -134,7 +148,7 @@ func (s *Service) TranscriptFetch(ctx context.Context, caller contract.Principal
 
 // indexTranscript records complete user records and the file acknowledgment in one transaction.
 // Each append revisits only the record the last one split.
-func (s *Service) indexTranscript(ctx context.Context, session contract.SessionID, path string, file *os.File, acked, end int64) error {
+func (s *Service) indexTranscript(ctx context.Context, session contract.SessionID, path string, file *os.File, acked, end int64, failed *[]contract.ToolFailed) error {
 	start := int64(0)
 	if acked > 0 {
 		const window = 16 << 20
@@ -183,6 +197,9 @@ func (s *Service) indexTranscript(ctx context.Context, session contract.SessionI
 		if oversized {
 			continue
 		}
+		if bytes.Contains(line, []byte(`"toolCall"`)) || bytes.Contains(line, []byte(`"isError":true`)) {
+			s.noteToolCalls(session, line, failed)
+		}
 		var entry struct {
 			Type    string `json:"type"`
 			Message struct {
@@ -200,5 +217,70 @@ func (s *Service) indexTranscript(ctx context.Context, session contract.SessionI
 		if turn := deliveries[contract.DeliverySeq(id)]; turn != "" {
 			starts = append(starts, store.TranscriptTurnStart{Turn: turn, Start: recordStart})
 		}
+	}
+}
+
+// seenCall is a tool call waiting for its result, kept so a failure can name its arguments and model.
+type seenCall struct{ model, args string }
+
+// maxSeenCalls bounds the calls a session keeps waiting; results that succeed are not read, so the map is cleared when full.
+const maxSeenCalls = 256
+
+// noteToolCalls remembers an assistant record's tool calls and turns a failed tool result into a tool.failed body. A record
+// older than ten minutes is a transcript sent again, as after a rewind, and reports nothing. The caller holds transcriptMu.
+func (s *Service) noteToolCalls(session contract.SessionID, line []byte, failed *[]contract.ToolFailed) {
+	var entry struct {
+		Type      string    `json:"type"`
+		Timestamp time.Time `json:"timestamp"`
+		Message   struct {
+			Role       string `json:"role"`
+			Model      string `json:"model"`
+			ToolCallID string `json:"toolCallId"`
+			ToolName   string `json:"toolName"`
+			IsError    bool   `json:"isError"`
+			Content    []struct {
+				Type      string          `json:"type"`
+				Text      string          `json:"text"`
+				ID        string          `json:"id"`
+				Arguments json.RawMessage `json:"arguments"`
+			} `json:"content"`
+		} `json:"message"`
+	}
+	if json.Unmarshal(line, &entry) != nil || entry.Type != "message" {
+		return
+	}
+	message := entry.Message
+	calls := s.toolCalls[session]
+	switch {
+	case message.Role == "assistant":
+		for _, part := range message.Content {
+			if part.Type != "toolCall" {
+				continue
+			}
+			if calls == nil {
+				if s.toolCalls == nil {
+					s.toolCalls = map[contract.SessionID]map[string]seenCall{}
+				}
+				calls = map[string]seenCall{}
+				s.toolCalls[session] = calls
+			}
+			if len(calls) >= maxSeenCalls {
+				clear(calls)
+			}
+			calls[part.ID] = seenCall{model: message.Model, args: excerpt(string(part.Arguments), 600)}
+		}
+	case message.Role == "toolResult" && message.IsError:
+		call := calls[message.ToolCallID]
+		delete(calls, message.ToolCallID)
+		if s.now().Sub(entry.Timestamp) > 10*time.Minute {
+			return
+		}
+		var text []string
+		for _, part := range message.Content {
+			if part.Type == "text" {
+				text = append(text, part.Text)
+			}
+		}
+		*failed = append(*failed, contract.ToolFailed{Session: session, Tool: message.ToolName, Model: call.model, Args: call.args, Error: excerpt(strings.Join(text, " "), 600)})
 	}
 }

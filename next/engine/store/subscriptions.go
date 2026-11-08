@@ -422,6 +422,11 @@ func (s *Store) DispatchEvents(ctx context.Context, limit int) (int, error) {
 
 // fire wakes a target on an event, or queues the event for a Run of its own. Runs of a subscription go one at a time.
 func (s *Store) fire(ctx context.Context, tx *sql.Tx, sub Subscription, event contract.Event) error {
+	// A digest gathers its events for the next tick of its schedule.
+	if sub.Period > 0 && len(sub.On) > 0 {
+		_, err := tx.ExecContext(ctx, "INSERT INTO subscription_queue(sub,seq) SELECT ?1,?2 WHERE (SELECT count(*) FROM subscription_queue WHERE sub=?1)<?3", sub.ID, event.Seq, maxQueuedRuns)
+		return err
+	}
 	if sub.Wake == "" {
 		if _, err := tx.ExecContext(ctx, "INSERT INTO subscription_queue(sub,seq) SELECT ?1,?2 WHERE (SELECT count(*) FROM subscription_queue WHERE sub=?1)<?3", sub.ID, event.Seq, maxQueuedRuns); err != nil {
 			return err
@@ -485,6 +490,73 @@ func (s *Store) FireScheduledWake(ctx context.Context, sub Subscription, event c
 		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM deliveries WHERE to_kind=? AND to_id=? AND seq=? AND state='pending')", contract.PrincipalSession, sub.Wake, sub.LastSeq).Scan(&waiting); err != nil || waiting {
 			return err
 		}
+		seq, err := s.AppendEvent(tx, event)
+		if err != nil {
+			return err
+		}
+		if err := s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: wakePrincipal(sub), Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET immediate=1 WHERE to_kind='session' AND to_id=? AND seq=?", sub.Wake, seq); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "UPDATE subscriptions SET last_seq=?,last_at=? WHERE id=?", seq, event.Time.UnixMilli(), sub.ID)
+		return err
+	})
+}
+
+// digestListed is how many events a digest renders in full; the rest it counts.
+const digestListed = 50
+
+// FireDigest delivers a digest's wake with the events gathered since the last one, and moves the schedule. A tick with
+// none delivers nothing, and one whose last digest is still untaken keeps what gathered for the next.
+func (s *Store) FireDigest(ctx context.Context, sub Subscription, event contract.Event) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "UPDATE subscriptions SET due_at=? WHERE id=? AND enabled=1 AND due_at=?", nextDue(sub, event.Time), sub.ID, millis(sub.DueAt))
+		if err != nil {
+			return err
+		}
+		if n, err := result.RowsAffected(); err != nil || n == 0 {
+			return err
+		}
+		var waiting bool
+		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM deliveries WHERE to_kind=? AND to_id=? AND seq=? AND state='pending')", contract.PrincipalSession, sub.Wake, sub.LastSeq).Scan(&waiting); err != nil || waiting {
+			return err
+		}
+		rows, err := tx.QueryContext(ctx, "SELECT e.seq,e.id,e.at,e.room,e.type,e.from_kind,e.from_id,e.body FROM subscription_queue q JOIN events e ON e.seq=q.seq WHERE q.sub=? ORDER BY q.seq", sub.ID)
+		if err != nil {
+			return err
+		}
+		digest := contract.HookDigest{Subscription: sub.ID}
+		for rows.Next() {
+			gathered, err := scanEvent(rows)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			text, err := room.RenderDelivery(gathered.Body)
+			switch {
+			case err != nil:
+			case len(digest.Events) == digestListed:
+				digest.More++
+			case gathered.Room != "" && sub.Scope == contract.ScopeMachine:
+				digest.Events = append(digest.Events, "In room "+string(gathered.Room)+": "+text)
+			default:
+				digest.Events = append(digest.Events, text)
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM subscription_queue WHERE sub=?", sub.ID); err != nil {
+			return err
+		}
+		if len(digest.Events) == 0 {
+			return nil
+		}
+		event.Body = digest
 		seq, err := s.AppendEvent(tx, event)
 		if err != nil {
 			return err

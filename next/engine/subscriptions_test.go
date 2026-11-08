@@ -176,8 +176,8 @@ func TestSubscriptionShapeRefusals(t *testing.T) {
 	run := &contract.RunSpec{Command: []string{"true"}, Image: "base", Size: contract.BoxSizeSmall}
 	base := contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: room}
 	for name, change := range map[string]func(*contract.SubscriptionAddRequest){
-		"both triggers": func(r *contract.SubscriptionAddRequest) {
-			r.Every, r.On, r.Wake = every, []contract.EventType{"post.created"}, wake
+		"digest that runs": func(r *contract.SubscriptionAddRequest) {
+			r.Every, r.On, r.Run = every, []contract.EventType{"post.created"}, run
 		},
 		"no trigger":    func(r *contract.SubscriptionAddRequest) { r.Wake = wake },
 		"both actions":  func(r *contract.SubscriptionAddRequest) { r.Every, r.Wake, r.Run = every, wake, run },
@@ -993,5 +993,50 @@ func TestHookPost(t *testing.T) {
 	}
 	if _, problem := s.HookPost(ctx, sub, "", contract.PostRequest{Text: "x"}); problem == nil {
 		t.Error("a machine Run posted")
+	}
+}
+
+func TestDigestWakesOnceWithWhatGathered(t *testing.T) {
+	s, room, root, ctx := setupRoot(t)
+	_, c := withRuns(t, s)
+	worker := contract.Principal{Kind: contract.PrincipalSession, Session: "ses_worker"}
+	addSubscription(t, s, ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: room, On: []contract.EventType{"tool.failed"}, Every: "15m", Wake: string(root)})
+	before := pendingWakes(t, s, ctx, root)
+	for _, tool := range []string{"read", "edit"} {
+		event, err := s.event(room, worker, contract.ToolFailed{Session: "ses_worker", Tool: tool, Error: "no such file"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.store.RecordEvent(ctx, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pass(t, s, ctx)
+	if got := pendingWakes(t, s, ctx, root); got != before {
+		t.Fatalf("woke before the tick: %d then %d", before, got)
+	}
+	c.add(15 * time.Minute)
+	pass(t, s, ctx)
+	digests := eventsOf[contract.HookDigest](t, s, ctx, room)
+	if len(digests) != 1 || len(digests[0].Events) != 2 || !strings.Contains(digests[0].Events[1], "Tool call edit failed") {
+		t.Fatalf("digests: %+v", digests)
+	}
+	if got := pendingWakes(t, s, ctx, root); got != before+1 {
+		t.Fatalf("wakes: %d then %d", before, got)
+	}
+	// A tick with nothing gathered says nothing.
+	c.add(15 * time.Minute)
+	pass(t, s, ctx)
+	if got := eventsOf[contract.HookDigest](t, s, ctx, room); len(got) != 1 {
+		t.Fatalf("an empty tick delivered: %+v", got)
+	}
+}
+
+func TestDigestNeedsWake(t *testing.T) {
+	s, room, _, ctx := setupRoot(t)
+	req := runRequest(room)
+	req.On = []contract.EventType{"tool.failed"}
+	if _, problem := s.SubscriptionAdd(ctx, ownerCaller, req); problem == nil || !strings.Contains(problem.Message, "set wake, not run") {
+		t.Fatalf("%+v", problem)
 	}
 }

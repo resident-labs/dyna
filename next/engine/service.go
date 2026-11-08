@@ -90,6 +90,7 @@ type Service struct {
 	restarts          sync.Map   // BoxID -> *restartClaim; completion fences delayed API callers too
 	// transcriptMu serializes appends, so each offset check and write runs alone.
 	transcriptMu        sync.Mutex
+	toolCalls           map[contract.SessionID]map[string]seenCall // under transcriptMu
 	layout              box.Layout
 	roomData            sync.RWMutex // writers of a room folder share it; removing one takes it alone
 	instructionsMu      sync.Mutex
