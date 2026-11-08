@@ -8,7 +8,7 @@ import (
 )
 
 // Pi answered "Tool ... not found" to these three shapes of drift on live Opus turns, for example mcp__human_write,
-// mcp__mcp__device_juice__spirit_write and mcp__dyna__dilemma_edit.
+// mcp__mcp__device_juice__spirit_write and mcp__dyna__dilemma_edit, and later maid_bash with mcp__ dropped as well.
 func TestClaudeMCPAliasRestoresALostServer(t *testing.T) {
 	body := []byte(`{"tools":[{"name":"read","input_schema":{"type":"object"}},{"name":"write","input_schema":{"type":"object"}},{"name":"mcp__dyna__session","input_schema":{"type":"object"}}]}`)
 	remapped, reverseMap := remapOAuthToolNamesWithOptions(body, claudeMCPAliasOptions{secret: "lost-server-caller"})
@@ -19,7 +19,7 @@ func TestClaudeMCPAliasRestoresALostServer(t *testing.T) {
 	}
 	tool := parts.toolID + "_" + parts.semantic
 
-	for _, drifted := range []string{"mcp__" + tool, "mcp__" + alias, "mcp__dyna__" + tool} {
+	for _, drifted := range []string{"mcp__" + tool, "mcp__" + alias, "mcp__dyna__" + tool, tool} {
 		response := []byte(fmt.Sprintf(`{"content":[{"type":"tool_use","id":"toolu_1","name":%q,"input":{}}]}`, drifted))
 		restored, err := reverseRemapOAuthToolNames(response, reverseMap)
 		if err != nil {

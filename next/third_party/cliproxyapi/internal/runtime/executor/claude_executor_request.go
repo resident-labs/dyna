@@ -2405,14 +2405,12 @@ func recordPassthroughMCPTools(recordRename func(original, renamed string), forw
 }
 
 // restoreLostServer recovers an alias whose virtual server the model dropped, doubled or
-// swapped for a real one: mcp__human_write, mcp__mcp__<server>__human_write and
-// mcp__dyna__human_write all keep the keyed tool ID with its semantic suffix, and aliases
-// sharing a virtual server are unique in exactly that component.
+// swapped for a real one: mcp__human_write, mcp__mcp__<server>__human_write,
+// mcp__dyna__human_write and human_write, with mcp__ dropped too, all keep the keyed tool ID
+// with its semantic suffix, and aliases sharing a virtual server are unique in exactly that
+// component.
 func (resolver claudeMCPAliasResolver) restoreLostServer(name string) (string, bool) {
-	rest, ok := strings.CutPrefix(name, "mcp__")
-	if !ok {
-		return "", false
-	}
+	rest := strings.TrimPrefix(name, "mcp__")
 	if separator := strings.LastIndex(rest, "__"); separator >= 0 {
 		rest = rest[separator+2:]
 	}
