@@ -111,6 +111,25 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		return text, nil
 	case contract.HookDue:
 		return fmt.Sprintf("Subscription %s is due.", b.Subscription), nil
+	case contract.HookDigest:
+		text := fmt.Sprintf("Subscription %s gathered %d events since its last digest.", b.Subscription, len(b.Events)+b.More)
+		for _, event := range b.Events {
+			text += "\n\n" + event
+		}
+		if b.More > 0 {
+			text += fmt.Sprintf("\n\n%d more are in the room logs (room log).", b.More)
+		}
+		return text, nil
+	case contract.ToolFailed:
+		text := fmt.Sprintf("Tool call %s failed in session %s", b.Tool, b.Session)
+		if b.Model != "" {
+			text += " (" + b.Model + ")"
+		}
+		text += "."
+		if b.Args != "" {
+			text += "\nArguments: " + contract.Outside("tool call", "", b.Args)
+		}
+		return text + "\nError: " + contract.Outside("tool result", "", b.Error), nil
 	case contract.HookFinished:
 		return fmt.Sprintf("Subscription %s finished: %s, exit code %d. Last output:\n%s", b.Subscription, b.Result, b.ExitCode, contract.Outside("subscription "+string(b.Subscription), "", b.Output)), nil
 	case contract.OpDecided:

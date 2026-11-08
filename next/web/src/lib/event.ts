@@ -96,6 +96,8 @@ const bodies: Record<string, Check> = {
   "github.issue.closed": githubAction,
   "hook.finished": object({ subscription: string, result: oneOf("passed", "failed", "stopped"), exitCode: number, cause, output: optional(string), failures: optional(number), retryAt: optional(string) }),
   "hook.due": object({ subscription: string }),
+  "hook.digest": object({ subscription: string, events: nullable(array(string)), more: optional(number) }),
+  "tool.failed": object({ session: string, tool: string, model: optional(string), args: optional(string), error: string }),
   "notice.posted": object({ text: string }),
   "session.notice": object({ session: string, text: string }),
   "room.paused": object({}),
