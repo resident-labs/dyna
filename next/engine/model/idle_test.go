@@ -32,6 +32,10 @@ func TestStreamWireIdle(t *testing.T) {
 				if mode == "ended" {
 					return
 				}
+				if mode == "body" {
+					_, _ = io.WriteString(w, "data: first event\n\n")
+					w.(http.Flusher).Flush()
+				}
 				if mode == "keepalive" {
 					for range 15 {
 						_, _ = io.WriteString(w, ": ping\n\n")
