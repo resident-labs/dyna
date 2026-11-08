@@ -374,6 +374,8 @@ test("rereading gives the feed and each DM their newest read positions", async (
   server.state.feedRead = 5;
   try {
     const room = new RoomStore("r", () => () => {});
+    // The app shell owns the initial room list and forwards its feed position.
+    room.noteRead(feed, server.state.feedRead);
     await room.open();
     assert.deepEqual([room.readAt(feed), room.readAt(dm)], [5, 2]);
     server.state.feedRead = 8;
@@ -765,16 +767,17 @@ test("one owner loads workflows and waits; first hello repairs only positions", 
   const room = new RoomStore("r", (_room, _after, _apply, _factory, _schedule, opened) => { hello = opened!; return () => {}; });
   try {
     await room.open();
-    const reads = () => ["workflow.list", "room.list", "session.list"].map(method => counts.get(method));
-    assert.deepEqual(reads(), [1, 1, 1]);
+    const reads = () => ["workflow.list", "room.list", "session.list"].map(method => counts.get(method) ?? 0);
+    assert.deepEqual(reads(), [1, 0, 1]);
     hello();
     await room.rereading; await room.waitingRead;
-    assert.deepEqual(reads(), [1, 2, 2]);
+    assert.deepEqual(reads(), [1, 1, 2]);
     hello(true);
     await room.rereading; await room.waitingRead;
     // Reconnect preserves both the position repair and the coalesced wait refresh.
-    assert.deepEqual(reads(), [2, 3, 4]);
+    assert.deepEqual(reads(), [2, 2, 4]);
+    assert.equal(counts.get("pr.list"), 1);
     room.close(); hello(true);
-    assert.deepEqual(reads(), [2, 3, 4]);
+    assert.deepEqual(reads(), [2, 2, 4]);
   } finally { room.close(); globalThis.fetch = original; }
 });
