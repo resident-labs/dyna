@@ -60,7 +60,7 @@ const bodies: Record<string, Check> = {
   "computer.changed": object({ session: string, to: computerState }),
   "box.changed": object({ box: string, session: string, host: optional(string), from: optional(boxState), to: boxState, cause, reason: optional(string) }),
   "turn.started": object({ session: string, turn: string, inputs: nullable(array(string)) }),
-  "turn.ended": object({ data: optional(string), dataAttachment: optional(nullable(number)), session: string, turn: string, outcome: oneOf("completed", "failed", "stopped"), final: optional(string), attachments: optional(nullable(array(attachment))),
+  "turn.ended": object({ data: optional(string), dataAttachment: optional(nullable(number)), session: string, turn: string, outcome: oneOf("completed", "failed", "stopped", "closed"), final: optional(string), attachments: optional(nullable(array(attachment))),
     replies: optional(nullable(array(object({ reply, posted: optional(string) })))), usage, error: optional(string), cause, shellJobs: optional(number) }),
   "conversation.read": object({ room: string, conversation, seq: number }),
   "turn.activity": object({ session: string, turn: string, label: string }),

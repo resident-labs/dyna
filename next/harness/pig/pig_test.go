@@ -203,7 +203,7 @@ func TestTransferToTheSameModelIsUnchanged(t *testing.T) {
 	var kinds []contract.ActivityKind
 	h.Activity = func(_ contract.TurnID, kind contract.ActivityKind, _ string) { kinds = append(kinds, kind) }
 	result, err := h.TransferModel(context.Background(), "turn_b", contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "test-model", Thinking: contract.ThinkingHigh}, 50_000, "")
-	if err != nil || result.Path != "unchanged" || result.TokensBefore == 0 || !reflect.DeepEqual(kinds, []contract.ActivityKind{contract.ActivityModel}) {
+	if err != nil || result.Path != "unchanged" || result.TokensBefore == 0 || !reflect.DeepEqual(kinds, []contract.ActivityKind{contract.ActivityModelWait}) {
 		t.Fatalf("%+v %v %v", result, err, kinds)
 	}
 	if level := h.session.ThinkingLevel(); level != "high" {
@@ -237,7 +237,12 @@ func TestTransferToASmallerModelCompacts(t *testing.T) {
 	model := pigtest.NewModel(read, read, read, []pigtest.Block{{Text: "the summary"}})
 	h := open(t, model)
 	longTurns(t, model, h)
+	var kinds []contract.ActivityKind
+	h.Activity = func(_ contract.TurnID, kind contract.ActivityKind, _ string) { kinds = append(kinds, kind) }
 	result, err := h.TransferModel(context.Background(), "turn_b", contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "small-model", Thinking: contract.ThinkingLow}, 0, "")
+	if !reflect.DeepEqual(kinds, []contract.ActivityKind{contract.ActivityModel, contract.ActivityCompaction}) {
+		t.Fatalf("transfer activity: %v", kinds)
+	}
 	if err != nil || result.Path != "compacted" || result.TokensAfter >= result.TokensBefore || h.session.Model().ID != "small-model" {
 		t.Fatalf("%+v %v on %s", result, err, h.session.Model().ID)
 	}
