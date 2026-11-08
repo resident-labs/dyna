@@ -281,6 +281,15 @@ func (s *Service) noteToolCalls(session contract.SessionID, line []byte, failed 
 				text = append(text, part.Text)
 			}
 		}
-		*failed = append(*failed, contract.ToolFailed{Session: session, Tool: message.ToolName, Model: call.model, Args: call.args, Error: excerpt(strings.Join(text, " "), 600)})
+		*failed = append(*failed, contract.ToolFailed{Session: session, Tool: message.ToolName, Model: call.model, Args: call.args, Error: headTail(strings.Join(strings.Fields(strings.Join(text, " ")), " "), 300)})
 	}
+}
+
+// headTail keeps the first and last n runes of a long error: codemode prints the script's output first and its error last.
+func headTail(text string, n int) string {
+	runes := []rune(text)
+	if len(runes) <= 2*n {
+		return text
+	}
+	return string(runes[:n]) + " … " + string(runes[len(runes)-n:])
 }
