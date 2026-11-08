@@ -485,10 +485,10 @@ func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal,
 	}
 	for _, target := range targets {
 		if err := remover.RemoveFailedBox(ctx, target); err != nil {
-			return contract.SessionRestartResponse{}, failure(fmt.Errorf("restart cleanup on host %s: %w", target.Host, err))
+			return contract.SessionRestartResponse{}, failure(fmt.Errorf("restart cleanup on host %s: %w; the session stays failed, so call restart again once that host answers", target.Host, err))
 		}
 		if err := ctx.Err(); err != nil {
-			return contract.SessionRestartResponse{}, failure(fmt.Errorf("restart cleanup on host %s: %w", target.Host, err))
+			return contract.SessionRestartResponse{}, failure(fmt.Errorf("restart cleanup on host %s: %w; the session stays failed, so call restart again once that host answers", target.Host, err))
 		}
 		// Confirmed physical deletion and debt retirement are not rolled back if
 		// a later host fails. Every unconfirmed host remains known for retry.
