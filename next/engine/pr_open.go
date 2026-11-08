@@ -66,7 +66,7 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 				if defaulted {
 					return fmt.Errorf("%w: branch %s not found on %s; head was not given and defaulted to it; head names another branch", approve.ErrInvalid, head, session.Repo)
 				}
-				return fmt.Errorf("%w: branch %s not found on %s", approve.ErrInvalid, head, session.Repo)
+				return fmt.Errorf("%w: branch %s not found on %s; push it first", approve.ErrInvalid, head, session.Repo)
 			}
 			return nil
 		},
