@@ -77,6 +77,10 @@ func TestPrOpenNamesTheMissingBranch(t *testing.T) {
 	if problem == nil || problem.Code != contract.ErrInvalid || problem.Message != want {
 		t.Fatalf("%+v", problem)
 	}
+	_, problem = s.OpSubmit(ctx, sessionCaller(session), contract.OpSubmitRequest{Operation: contract.Operation{Room: record.Room, Kind: "pr.open", Args: contract.PrOpenArgs{Title: "Trial"}}})
+	if want := "invalid operation: base is required, such as main"; problem == nil || problem.Code != contract.ErrInvalid || problem.Message != want {
+		t.Fatalf("missing base: %+v", problem)
+	}
 }
 
 func TestIssueTrackNamesARepositoryOutsideTheRoom(t *testing.T) {

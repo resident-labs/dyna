@@ -109,6 +109,7 @@ func Handler(ctx context.Context, token string, reads http.RoundTripper, owns fu
 			switch schema, _ := tool.InputSchema.(*jsonschema.Schema); tool.Name {
 			case "actions_list":
 				tools[i].AddHandlerMiddleware(func(any) inventory.ToolHandlerMiddleware { return flattenJobs })
+				tool.Description += "\nlist_workflow_jobs returns {total_count, jobs: [...]}; jobs is the list itself."
 			case "projects_write":
 				// issue_number resolves only issues; agents passed a PR's number and got "Could not resolve to an Issue".
 				tool.Description += "\nupdate_project_item's issue_number finds issues only. For a pull request, pass item_id or node_id: add_project_item returns them, and projects_list list_project_items shows them."
