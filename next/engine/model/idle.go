@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const streamIdleTimeout = 120 * time.Second
+const streamIdleTimeout = 300 * time.Second
 
 // idleConn measures wire silence, including the wait for response headers. Every
 // successful read (including SSE comments) buys another full idle interval.
