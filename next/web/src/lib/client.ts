@@ -31,7 +31,25 @@ export async function redeemPair(code: string, name: string): Promise<PairResult
   return response?.ok ? "paired" : response?.status === 410 ? "ended" : response?.status === 403 ? "wrong" : "unreachable";
 }
 
+// Reads that change nothing. Identical ones in flight at once share one request, as a page opening asks for the same lists
+// from several components; each caller gets its own copy of the answer, so no caller sees another's changes.
+const sharedReads = new Set<string>(["room.list", "session.list", "profile.list", "host.list", "session.account", "session.responsibilities", "box.stats", "device.scopes", "op.list", "pr.list", "goal.list", "question.list", "workflow.list", "subscription.list", "conversation.read", "events.list", "transcript.read"]);
+const inFlight = new Map<string, Promise<unknown>>();
+
 export async function call<M extends keyof MethodMap>(
+  method: M, request: MethodMap[M]["request"],
+): Promise<MethodMap[M]["response"]> {
+  if (!sharedReads.has(method)) return send(method, request);
+  const key = `${method} ${JSON.stringify(request)}`;
+  let shared = inFlight.get(key);
+  if (!shared) {
+    shared = send(method, request).finally(() => inFlight.delete(key));
+    inFlight.set(key, shared);
+  }
+  return structuredClone(await shared) as MethodMap[M]["response"];
+}
+
+async function send<M extends keyof MethodMap>(
   method: M, request: MethodMap[M]["request"],
 ): Promise<MethodMap[M]["response"]> {
   const response = await fetch(`/v1/${method}`, {
