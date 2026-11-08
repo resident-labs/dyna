@@ -78,8 +78,9 @@ func TestAttachNotesAFileItCannotGet(t *testing.T) {
 		}
 		fmt.Fprint(w, "wrong")
 	})
+	saved := socketWait
 	socketWait = time.Millisecond
-	t.Cleanup(func() { socketWait = 5 * time.Minute })
+	t.Cleanup(func() { socketWait = saved })
 	got, err := client.Attach(context.Background(), contract.TurnInput{Text: "[Dyna] Frame.\nbody\nmore", Files: []contract.TurnFile{gone, wrong}})
 	if err != nil {
 		t.Fatal(err)

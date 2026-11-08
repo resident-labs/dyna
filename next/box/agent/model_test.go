@@ -197,3 +197,52 @@ func TestModelRouteStopsWaitingWithItsRequest(t *testing.T) {
 		t.Fatal("a cancelled request kept waiting")
 	}
 }
+
+func TestHoldingBudgetCancelsHungAttempt(t *testing.T) {
+	saved := socketWait
+	socketWait = 30 * time.Millisecond
+	defer func() { socketWait = saved }()
+	req := httptest.NewRequest("POST", "http://dyna/model/v1/messages", strings.NewReader("{}"))
+	done := make(chan error, 1)
+	go func() {
+		_, err := (holding{transportFunc(func(r *http.Request) (*http.Response, error) { <-r.Context().Done(); return nil, r.Context().Err() })}).RoundTrip(req)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("missing timeout")
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("budget did not cancel in-flight attempt")
+	}
+}
+
+func TestHoldingHeadersReleaseBudget(t *testing.T) {
+	saved := socketWait
+	socketWait = 30 * time.Millisecond
+	defer func() { socketWait = saved }()
+	var attempt context.Context
+	req := httptest.NewRequest("POST", "http://dyna/model/v1/messages", strings.NewReader("{}"))
+	response, err := (holding{transportFunc(func(r *http.Request) (*http.Response, error) {
+		attempt = r.Context()
+		return &http.Response{Body: io.NopCloser(strings.NewReader("healthy"))}, nil
+	})}).RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(60 * time.Millisecond)
+	if attempt.Err() != nil {
+		t.Fatal("total hold deadline killed a healthy stream")
+	}
+	response.Body.Close()
+	if attempt.Err() == nil {
+		t.Fatal("body close leaked attempt context")
+	}
+}
+
+func TestModelHoldRuntimeDefault(t *testing.T) {
+	if socketWait != 120*time.Second {
+		t.Fatal(socketWait)
+	}
+}

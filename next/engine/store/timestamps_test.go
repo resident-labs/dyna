@@ -204,7 +204,7 @@ func TestForcedSessionClosePreservesStampHistoryAndBoundsKeys(t *testing.T) {
 	}
 	var at int64
 	var ended sql.NullInt64
-	if err := s.Read().QueryRow("SELECT model_sent_at,ended_at FROM turns WHERE id='turn'").Scan(&at, &ended); err != nil || at != 123 || ended.Valid {
+	if err := s.Read().QueryRow("SELECT model_sent_at,ended_at FROM turns WHERE id='turn'").Scan(&at, &ended); err != nil || at != 123 || !ended.Valid || ended.Int64 != event.Time.UnixMilli() {
 		t.Fatalf("close changed retained turn: stamp=%d ended=%v err=%v", at, ended, err)
 	}
 	s.stamped.Range(func(_, _ any) bool { t.Error("closed turn recached"); return false })

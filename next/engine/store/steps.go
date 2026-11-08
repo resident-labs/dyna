@@ -6,11 +6,12 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 102
+const schemaVersion = 103
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
+	102: {`UPDATE turns SET ended_at=(SELECT closed_at FROM sessions WHERE id=turns.session),outcome='closed' WHERE ended_at IS NULL AND session IN (SELECT id FROM sessions WHERE state='closed' AND closed_at IS NOT NULL)`},
 	// SQLite needs this exact IN predicate in callers; state='pending' alone
 	// does not prove that a query can use this partial index.
 	100: {`CREATE INDEX deliveries_open ON deliveries(to_kind,to_id,seq) WHERE state IN ('pending','taken')`},
