@@ -14,6 +14,7 @@ import (
 
 // Result is what a call says about one job. Its field names are what codemode scripts read.
 type Result struct {
+	Repeated bool                `json:"-"` // the turn's reader already answered running for this job
 	Output   string              `json:"output"`
 	Job      contract.ShellJobID `json:"job"`
 	Running  bool                `json:"running"`
@@ -60,6 +61,9 @@ func (s *Server) Run(ctx context.Context, run Run) (Result, error) {
 	}
 	if run.Timeout < 0 || run.Timeout > maxTimeout {
 		return Result{}, invalid(fmt.Sprintf("timeout is in seconds, at most %d", maxTimeout))
+	}
+	if waitOnly(run.Command) {
+		return Result{}, invalid("sleep only waits. End your turn: Dyna wakes you when a child reports, a job ends or CI finishes.")
 	}
 	j, err := s.run(ctx.Done(), run)
 	if err != nil {
