@@ -68,7 +68,7 @@ func BoxUpdateNotice(held []contract.Responsibility) string {
 		end = "end"
 		list = strings.Join(names[:len(names)-1], ", ") + " and " + list
 	}
-	return fmt.Sprintf("An update is ready for your box. It applies when %s %s. Your files and conversation are kept.", list, end)
+	return fmt.Sprintf("An update is ready for your box. It applies when %s %s. Your files and conversation are kept; finished jobs are not, so a job's output after that is only what its end notice shows.", list, end)
 }
 
 // ResponsibilityNames words several items as one list.

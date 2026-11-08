@@ -12,7 +12,7 @@ import (
 const (
 	oldBinary, newBinary = "old-sum", "new-sum"
 	testJob              = contract.ShellJobID("job_7f3b")
-	heldByJob            = "An update is ready for your box. It applies when job_7f3b ends. Your files and conversation are kept."
+	heldByJob            = "An update is ready for your box. It applies when job_7f3b ends. Your files and conversation are kept; finished jobs are not, so a job's output after that is only what its end notice shows."
 	loopSettles          = 100 * time.Millisecond // for a box loop that must do nothing: long enough that it would have
 )
 
