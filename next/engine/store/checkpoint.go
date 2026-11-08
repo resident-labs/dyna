@@ -7,6 +7,7 @@ import (
 
 const checkpointBytes = 64 << 20
 const checkpointInterval = 30 * time.Second
+const modelStampRetention = 10 * time.Minute
 
 // checkpoint runs independently from the writer. The callback is injectable
 // so a unit test can hold a checkpoint open while a write completes.
@@ -17,10 +18,14 @@ func (s *Store) checkLoop(path string) {
 	last := time.Now()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	stamps := time.NewTicker(modelStampRetention)
+	defer stamps.Stop()
 	for {
 		select {
 		case <-s.stop:
 			return
+		case <-stamps.C:
+			s.clearModelStamps()
 		case <-ticker.C:
 			info, err := os.Stat(path + "-wal")
 			if err != nil {

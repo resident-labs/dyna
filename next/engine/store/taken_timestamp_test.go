@@ -51,7 +51,7 @@ func TestTakenTimestamps(t *testing.T) {
 			t.Fatalf("taken=%d want %d", taken, dispatched.UnixMilli())
 		}
 		if i == 0 {
-			if e := s.MarkTurnModelSent(ctx, "s", dispatched.Add(time.Millisecond)); e != nil {
+			if e := s.MarkTurnModelSent(ctx, "s", turn, dispatched.Add(time.Millisecond)); e != nil {
 				t.Fatal(e)
 			}
 		}

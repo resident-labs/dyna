@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log"
 	"slices"
 	"time"
 
@@ -186,11 +187,57 @@ func (s *Store) SetRoomGitHubWrites(ctx context.Context, room contract.RoomID, w
 	})
 }
 
-// MarkTurnModelSent records the first engine handoff to its model proxy for the active turn.
-// A later rejection by the child proxy still counts. It is not the provider send or first response.
-func (s *Store) MarkTurnModelSent(ctx context.Context, session contract.SessionID, at time.Time) error {
-	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "UPDATE turns SET model_sent_at=? WHERE session=? AND ended_at IS NULL AND model_sent_at=0", at.UnixMilli(), session)
-		return err
+// MarkTurnModelSent records the first engine handoff, including child rejection,
+// not provider send or response. The model route runs this with engine lifetime
+// context outside the forwarding path. Concurrent first attempts may both write;
+// the conditional update preserves the first timestamp. Maps are cleared every
+// ten minutes: a clear may cost one extra conditional update, never a new stamp.
+func (s *Store) MarkTurnModelSent(ctx context.Context, session contract.SessionID, turn contract.TurnID, at time.Time) error {
+	if turn == "" {
+		return nil
+	}
+	if _, ok := s.stamped.Load(turn); ok {
+		return nil
+	}
+	stamped := false
+	err := s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "UPDATE turns SET model_sent_at=? WHERE id=? AND session=? AND ended_at IS NULL AND model_sent_at=0 AND EXISTS (SELECT 1 FROM sessions WHERE id=? AND closed_at IS NULL)", at.UnixMilli(), turn, session, session)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		stamped = n != 0
+		if !stamped {
+			// Zero matches only warm the cache when the same active turn is already
+			// persisted, not when a delayed request names a closed or ended turn.
+			var persisted int64
+			err := tx.QueryRowContext(ctx, "SELECT t.model_sent_at FROM turns t JOIN sessions s ON s.id=t.session WHERE t.id=? AND t.session=? AND t.ended_at IS NULL AND s.closed_at IS NULL", turn, session).Scan(&persisted)
+			if err == sql.ErrNoRows {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			stamped = persisted != 0
+		}
+		return nil
 	})
+	if err != nil {
+		if _, logged := s.logged.LoadOrStore(turn, true); !logged {
+			log.Printf("model handoff: stamp turn %s: %v", turn, err)
+		}
+	} else if stamped {
+		s.stamped.Store(turn, true)
+	}
+	return err
+}
+
+// clearModelStamps bounds late publication racing terminal cleanup. Turn IDs are
+// never reused, so stale keys are harmless until this periodic clear.
+func (s *Store) clearModelStamps() {
+	s.stamped.Clear()
+	s.logged.Clear()
 }
