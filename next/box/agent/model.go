@@ -23,18 +23,21 @@ var socketWait = 120 * time.Second
 // Pi's retries and fail a turn the restart should not touch. ReverseProxy streams responses immediately, including server-sent
 // events.
 func ModelRoute(socket string) http.Handler {
+	// net/http may finish a canceled dial after RoundTrip returns. Capture the
+	// budget at construction so that detached dial never reads a mutable seam.
+	wait := socketWait
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return dialWaiting(ctx, socket)
+			return dialWaiting(ctx, socket, wait)
 		},
 		DisableKeepAlives: true,
 	}
-	return modelRoute(holding{transport})
+	return modelRoute(holding{next: transport, wait: wait})
 }
 
 // dialWaiting waits for the socket. A request that could not dial sent nothing, whatever its route.
-func dialWaiting(ctx context.Context, socket string) (net.Conn, error) {
-	ctx, cancel := context.WithTimeout(ctx, socketWait)
+func dialWaiting(ctx context.Context, socket string, wait time.Duration) (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	var delay backoff
 	for {
@@ -48,7 +51,10 @@ func dialWaiting(ctx context.Context, socket string) (net.Conn, error) {
 // holding sends a model call again when its connection closes before any response headers. The engine's drain holds new calls
 // without sending them on, and closes the socket on them as it exits, so such a call reached no provider. A model call is kept in
 // memory for this; git's requests stream, so only a failed dial sends one again. A call that fails after its headers stays failed.
-type holding struct{ next http.RoundTripper }
+type holding struct {
+	next http.RoundTripper
+	wait time.Duration
+}
 
 func (h holding) RoundTrip(req *http.Request) (*http.Response, error) {
 	if !strings.HasPrefix(req.URL.Path, "/model/") {
@@ -63,7 +69,7 @@ func (h holding) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, err
 		}
 	}
-	waiting, cancel := context.WithTimeout(req.Context(), socketWait)
+	waiting, cancel := context.WithTimeout(req.Context(), h.wait)
 	defer cancel()
 	var delay backoff
 	for {
