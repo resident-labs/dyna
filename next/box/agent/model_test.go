@@ -197,3 +197,64 @@ func TestModelRouteStopsWaitingWithItsRequest(t *testing.T) {
 		t.Fatal("a cancelled request kept waiting")
 	}
 }
+
+func TestHoldingBudgetCancelsHungAttempt(t *testing.T) {
+	req := httptest.NewRequest("POST", "http://dyna/model/v1/messages", strings.NewReader("{}"))
+	done := make(chan error, 1)
+	go func() {
+		_, err := (holding{next: transportFunc(func(r *http.Request) (*http.Response, error) { <-r.Context().Done(); return nil, r.Context().Err() }), wait: 30 * time.Millisecond}).RoundTrip(req)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("missing timeout")
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("budget did not cancel in-flight attempt")
+	}
+}
+
+func TestHoldingHeadersReleaseBudget(t *testing.T) {
+	var attempt context.Context
+	req := httptest.NewRequest("POST", "http://dyna/model/v1/messages", strings.NewReader("{}"))
+	response, err := (holding{next: transportFunc(func(r *http.Request) (*http.Response, error) {
+		attempt = r.Context()
+		return &http.Response{Body: io.NopCloser(strings.NewReader("healthy"))}, nil
+	}), wait: 30 * time.Millisecond}).RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(60 * time.Millisecond)
+	if attempt.Err() != nil {
+		t.Fatal("total hold deadline killed a healthy stream")
+	}
+	response.Body.Close()
+	if attempt.Err() == nil {
+		t.Fatal("body close leaked attempt context")
+	}
+}
+
+func TestModelHoldRuntimeDefault(t *testing.T) {
+	if socketWait != 120*time.Second {
+		t.Fatal(socketWait)
+	}
+}
+
+// A transport owns its budget even when a later route/test changes the default.
+// In particular, an asynchronous dial must not consult the shared seam.
+func TestModelRouteCapturesWaitBudget(t *testing.T) {
+	saved := socketWait
+	defer func() { socketWait = saved }()
+	socketWait = 20 * time.Millisecond
+	route := ModelRoute(filepath.Join(t.TempDir(), "engine.sock"))
+	socketWait = time.Hour
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	req := httptest.NewRequest("POST", "http://localhost/v1/messages", strings.NewReader("{}")).WithContext(ctx)
+	start := time.Now()
+	route.ServeHTTP(httptest.NewRecorder(), req)
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("route read a later default instead of its captured budget: %s", elapsed)
+	}
+}
