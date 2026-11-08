@@ -138,21 +138,27 @@ function journal() {
 const skip = (process.env.DEPLOY_SMOKE_SKIP || "").split(",").filter(Boolean);
 let target;
 while (!target) {
+  let fallback;
   journal();
   for (const room of call("room.list", {}).rooms) {
     let after;
     do {
       const page = call("session.list", { room: room.id, ...(after ? { after } : {}) });
-      const session = page.sessions.find(s => s.box && s.boxState === "ready" && !s.turn &&
+      const ready = page.sessions.filter(s => s.box && s.boxState === "ready" && !s.turn &&
         s.computer === "stopped" && !skip.includes(s.id));
-      if (session) {
+      // A box refreshes only after its background jobs end. shellJobs counts the jobs left running at the last turn's
+      // end and may be stale, so it ranks candidates rather than excluding them.
+      const session = ready.find(s => !s.shellJobs) ?? ready[0];
+      if (session && !session.shellJobs) {
         target = { room: room.id, session: session.id, box: session.box, seq: page.seq };
         break;
       }
+      fallback ??= session && { room: room.id, session: session.id, box: session.box, seq: page.seq };
       after = page.next;
     } while (after);
     if (target) break;
   }
+  target ??= fallback;
   if (!target) run("sleep", ["1"]);
 }
 console.log(`Box lifecycle smoke selected: ${JSON.stringify(target)}`);
