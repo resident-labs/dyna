@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -115,5 +116,16 @@ func TestTranscriptRecordsFailedToolCalls(t *testing.T) {
 	want := contract.ToolFailed{Session: caller.Session, Tool: "read", Model: "gpt-x", Args: `{"path":"gone.md"}`, Error: "ENOENT: gone.md"}
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestHeadTailKeepsTheEndOfALongError(t *testing.T) {
+	long := strings.Repeat("o", 900) + " Script error: SyntaxError"
+	got := headTail(long, 300)
+	if !strings.HasSuffix(got, "Script error: SyntaxError") || !strings.HasPrefix(got, "ooo") || len([]rune(got)) != 603 {
+		t.Fatalf("%d %q", len([]rune(got)), got)
+	}
+	if headTail("short", 300) != "short" {
+		t.Fatal("short changed")
 	}
 }
