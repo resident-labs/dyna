@@ -273,6 +273,42 @@ type TurnActivity struct {
 	Label   string       `json:"label"` // the running tool call, masked, one line of at most 80 characters
 }
 
+// TurnDraft is live only, like TurnActivity: the model's output of the running turn as it streams, before the transcript
+// holds it. The engine keeps the current draft in memory, never stores this event (seq 0) and sends it only to owner streams
+// that watch the session (GET /v1/events?watch=), so it reaches no agent. A stream that starts watching gets the buffered
+// draft first, as one TurnDraft whose parts start at 0.
+type TurnDraft struct {
+	Session SessionID `json:"session"`
+	Turn    TurnID    `json:"turn"`
+	Draft   Draft     `json:"draft"`
+}
+
+// DraftKind says which model call a draft is: a reply of the turn, or a compaction's summary.
+type DraftKind string // "reply" | "compaction"
+
+const (
+	DraftReply      DraftKind = "reply"
+	DraftCompaction DraftKind = "compaction"
+)
+
+// Draft is one change to a running turn's draft. Message counts the turn's model calls from 1: a higher one starts a new
+// draft, which replaces the last. Started is when the call started, to the millisecond on the box's clock. The transcript
+// writes the finished call later, so a transcript item of the turn at or after Started takes the draft's place.
+type Draft struct {
+	Message   int        `json:"message"`
+	Kind      DraftKind  `json:"kind"`
+	Reasoning *DraftEdit `json:"reasoning,omitempty"` // the reasoning text the provider streamed, if any
+	Text      *DraftEdit `json:"text,omitempty"`
+	Started   time.Time  `json:"started"`
+}
+
+// DraftEdit replaces a draft part from From on, counted in UTF-16 code units as a browser counts them, with Text.
+// From is the part's length when the edit only appends; it is less when masking changed text already sent.
+type DraftEdit struct {
+	From int    `json:"from"`
+	Text string `json:"text"`
+}
+
 // TranscriptChanged is an owner-only live notification; it contains no transcript text.
 type TranscriptChanged struct {
 	Session SessionID `json:"session"`
@@ -492,6 +528,9 @@ func (TranscriptChanged) isEventBody()         {}
 
 func (TurnActivity) EventType() EventType { return "turn.activity" }
 func (TurnActivity) isEventBody()         {}
+
+func (TurnDraft) EventType() EventType { return "turn.draft" }
+func (TurnDraft) isEventBody()         {}
 
 func (ShellJobEnded) EventType() EventType   { return "shell.job.ended" }
 func (ShellJobEnded) isEventBody()           {}

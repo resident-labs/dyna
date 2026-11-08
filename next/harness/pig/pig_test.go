@@ -573,3 +573,53 @@ func TestAResumedSessionGetsANewHeadAsOneContextUpdate(t *testing.T) {
 		t.Fatalf("the system prompt changed: %s", requests[1].System)
 	}
 }
+
+// A turn streams each model call's start and text, and the transcript writes the finished call at or after that start,
+// which is how a viewer knows the transcript item has taken the draft's place.
+func TestATurnStreamsItsTextAsADraftTheTranscriptReplaces(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "Reading."}, {Tool: "read", Input: `{"path":"missing"}`}}, []pigtest.Block{{Text: "hello"}})
+	h := open(t, model)
+	var drafts []Draft
+	h.Draft = func(id contract.TurnID, d Draft) {
+		if id != "turn_a" {
+			t.Errorf("draft of turn %s", id)
+		}
+		drafts = append(drafts, d)
+	}
+	start(t, h, "say hello")
+	var starts []time.Time
+	var texts []string
+	for _, d := range drafts {
+		if !d.Started.IsZero() {
+			if d.Kind != contract.DraftReply {
+				t.Fatalf("draft kind %q", d.Kind)
+			}
+			starts = append(starts, d.Started)
+			texts = append(texts, "")
+		}
+		if d.Text != "" {
+			texts[len(texts)-1] += d.Text
+		}
+	}
+	if !reflect.DeepEqual(texts, []string{"Reading.", "hello"}) {
+		t.Fatalf("drafts %+v", drafts)
+	}
+	file, err := os.Open(h.SessionFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	items, _, _, err := ReadTranscript(file, map[contract.DeliverySeq]contract.TurnID{1: "turn_a"}, "x", "", 0, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var landed []time.Time
+	for _, item := range items {
+		if item.Kind == contract.TranscriptText {
+			landed = append(landed, item.At)
+		}
+	}
+	if len(landed) != 2 || landed[0].Before(starts[0]) || !landed[0].Before(starts[1]) || landed[1].Before(starts[1]) {
+		t.Fatalf("draft starts %v, text items at %v", starts, landed)
+	}
+}

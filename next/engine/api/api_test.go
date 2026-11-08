@@ -72,7 +72,7 @@ func boxCaller() Caller {
 
 type helloService struct{ *fakeService }
 
-func (helloService) Events(context.Context, contract.Principal, contract.RoomID, int64) (<-chan contract.Event, *contract.Error) {
+func (helloService) Events(context.Context, contract.Principal, contract.RoomID, int64, contract.SessionID) (<-chan contract.Event, *contract.Error) {
 	ch := make(chan contract.Event)
 	close(ch)
 	return ch, nil
@@ -317,7 +317,7 @@ type streamService struct {
 	after int64
 }
 
-func (s *streamService) Events(_ context.Context, _ contract.Principal, _ contract.RoomID, after int64) (<-chan contract.Event, *contract.Error) {
+func (s *streamService) Events(_ context.Context, _ contract.Principal, _ contract.RoomID, after int64, _ contract.SessionID) (<-chan contract.Event, *contract.Error) {
 	s.after = after
 	ch := make(chan contract.Event)
 	close(ch)

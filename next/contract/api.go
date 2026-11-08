@@ -774,12 +774,14 @@ type TurnOutputRequest struct {
 }
 type TurnOutputResponse struct{}
 
-// TurnActivityRequest reports the running turn's latest tool call. The box agent sends at most
-// one a second. Readers show a label only while its turn runs.
+// TurnActivityRequest reports the running turn's latest tool call. The box agent sends a label at most
+// one a second. Readers show a label only while its turn runs. Draft carries the model output streamed since the last
+// request, at most one every 250 ms unless 2 KB waits; a request with a draft and no kind carries no label.
 type TurnActivityRequest struct {
 	Turn  TurnID       `json:"turn"`
 	Kind  ActivityKind `json:"kind,omitempty"` // empty from a box agent that predates kinds, which the engine reads as a tool call
 	Label string       `json:"label"`
+	Draft *Draft       `json:"draft,omitempty"`
 }
 type TurnActivityResponse struct{}
 type SessionWorkRequest struct {

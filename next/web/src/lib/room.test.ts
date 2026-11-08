@@ -781,3 +781,67 @@ test("one owner loads workflows and waits; first hello repairs only positions", 
     assert.deepEqual(reads(), [2, 2, 4]);
   } finally { room.close(); globalThis.fetch = original; }
 });
+
+test("a watched session's draft follows its running call, replaces on a new call and never reaches a window", async () => {
+  const listed = { lastRead: 0, name: "Agent", parent: "", profile: "p", box: "b", boxState: "ready", computer: "stopped", goal: "", startedAt: "", hadJobs: false } as const;
+  const server = engine(1, [{ id: "s", ...listed, turn: "t" }]);
+  try {
+    const room = new RoomStore("r", () => () => {});
+    await room.open();
+    const feedWindow = room.window(feed);
+    await feedWindow.jumpToPresent();
+    const draft = (turn: string, message: number, kind: "reply" | "compaction", text?: { from: number; text: string }, reasoning?: { from: number; text: string }) =>
+      event(0, { type: "turn.draft", body: { session: "s", turn, draft: { message, kind, started: "2027-01-01T00:00:00Z", text, reasoning } } });
+    room.apply(draft("t", 1, "reply", { from: 0, text: "Héllo 👋 " }));
+    room.apply(draft("t", 1, "reply", { from: 9, text: "world" }, { from: 0, text: "thinking" }));
+    assert.deepEqual(room.drafts.get("s"), { turn: "t", message: 1, kind: "reply", started: "2027-01-01T00:00:00Z", text: "Héllo 👋 world", reasoning: "thinking" });
+    // A mask that changed sent text edits from where it differs.
+    room.apply(draft("t", 1, "reply", { from: 6, text: "[masked] " }));
+    assert.equal(room.drafts.get("s")?.text, "Héllo [masked] ");
+    // Another turn's draft, or an earlier call's, is stale; a new call starts over.
+    room.apply(draft("old", 5, "reply", { from: 0, text: "stale" }));
+    room.apply(draft("t", 2, "compaction", { from: 0, text: "## Summary" }));
+    room.apply(draft("t", 1, "reply", { from: 15, text: "late" }));
+    assert.deepEqual(room.drafts.get("s"), { turn: "t", message: 2, kind: "compaction", started: "2027-01-01T00:00:00Z", text: "## Summary", reasoning: "" });
+    assert.equal(feedWindow.ordered.some(item => item.type === "turn.draft"), false);
+    room.apply(event(2, { type: "turn.ended", body: { session: "s", turn: "t", outcome: "completed", usage } }));
+    room.apply(draft("t", 3, "reply", { from: 0, text: "after the end" }));
+    assert.equal(room.drafts.get("s")?.message, 2, "a turn that ended takes no draft");
+    room.apply(event(3, { type: "turn.started", body: { session: "s", turn: "u", inputs: [] } }));
+    assert.equal(room.drafts.has("s"), false);
+  } finally { server.restore(); }
+});
+
+test("the room stream watches the newest open thread's session, reconnecting once per move and not at all for a step", async () => {
+  const server = engine(1, []);
+  try {
+    const urls: string[] = [];
+    const connect: typeof stream = (room, after, apply, factory, schedule, opened, watch) => { urls.push(watch ?? ""); return () => {}; };
+    const room = new RoomStore("r", connect);
+    await room.open();
+    assert.deepEqual(urls, [""]);
+    const stopA = room.watch("a");
+    await Promise.resolve();
+    assert.deepEqual(urls, ["", "a"]);
+    // Moving from a to b closes one thread and opens the other in the same tick: one reconnect.
+    stopA();
+    const stopB = room.watch("b");
+    await Promise.resolve();
+    assert.deepEqual(urls, ["", "a", "b"]);
+    room.apply(event(0, { type: "turn.draft", body: { session: "b", turn: "t", draft: { message: 1, kind: "reply", started: "" } } }));
+    stopB();
+    await Promise.resolve();
+    // With no thread open, the stream watches nothing, so the drafts stop.
+    assert.deepEqual(urls, ["", "a", "b", ""]);
+    assert.equal(room.drafts.size, 0);
+  } finally { server.restore(); }
+});
+
+test("the stream asks the engine for a watched session's drafts on a room stream only", () => {
+  const urls: string[] = [];
+  const factory = (url: string): EventConnection => { urls.push(url); return { onmessage: null, onerror: null, addEventListener() {}, close() {} }; };
+  stream("r", () => 4, () => {}, factory, undefined, undefined, "s")();
+  stream(undefined, () => 4, () => {}, factory, undefined, undefined, "s")();
+  stream("r", () => 4, () => {}, factory)();
+  assert.deepEqual(urls, ["/v1/events?room=r&after=4&watch=s", "/v1/events?after=4", "/v1/events?room=r&after=4"]);
+});

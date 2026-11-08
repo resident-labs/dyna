@@ -13,7 +13,7 @@ import (
 	"github.com/resident-labs/dyna/room"
 )
 
-func (s *Service) Events(ctx context.Context, caller contract.Principal, room contract.RoomID, after int64) (<-chan contract.Event, *contract.Error) {
+func (s *Service) Events(ctx context.Context, caller contract.Principal, room contract.RoomID, after int64, watch contract.SessionID) (<-chan contract.Event, *contract.Error) {
 	if room == "" && caller.Kind != contract.PrincipalOwner {
 		return nil, forbidden()
 	}
@@ -22,8 +22,33 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 			return nil, e
 		}
 	}
+	// Only the owner watches a session: its drafts must reach no agent, and a session's own stream never carries them.
+	var running contract.TurnID
+	if watch != "" {
+		if caller.Kind != contract.PrincipalOwner || room == "" {
+			return nil, forbidden()
+		}
+		watched, open, err := s.store.OpenSession(ctx, watch)
+		if err != nil {
+			return nil, failure(err)
+		}
+		// A session that closed has no draft, and its page still needs the room's stream.
+		if !open || watched.Room != room {
+			watch = ""
+		}
+		running = watched.Turn
+	}
 	sub, cancel := s.store.Subscribe()
-	subscription, liveEvents := s.live.Subscribe(room, 16)
+	var subscription *live.Subscription
+	var liveEvents chan contract.Event
+	if watch == "" {
+		subscription, liveEvents = s.live.Subscribe(room, 16)
+	} else {
+		subscription, liveEvents = s.live.SubscribeWatching(room, 64, watch, running, func(body contract.TurnDraft) contract.Event {
+			event, _ := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, body)
+			return event
+		})
+	}
 	out := make(chan contract.Event)
 	go func() {
 		defer close(out)
