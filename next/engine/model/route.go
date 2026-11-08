@@ -110,10 +110,9 @@ func serve(client *http.Client, clientKey, affinityID string, routes map[string]
 		r.Header.Set("X-Api-Key", clientKey)
 		r.Header.Set("X-Claude-Code-Session-Id", affinity)
 		if len(sent) != 0 {
-			if err := sent[0](r.Context()); err != nil {
-				refuse(w, http.StatusServiceUnavailable, "model_handoff_unavailable", "Could not record model handoff.")
-				return
-			}
+			// The recorder owns once-per-turn error logging. Telemetry must never
+			// refuse an otherwise valid model request.
+			_ = sent[0](r.Context())
 		}
 		proxy.ServeHTTP(w, r)
 	})

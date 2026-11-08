@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -40,5 +41,17 @@ func TestModelHandoffBoundary(t *testing.T) {
 		if sent != tc.want {
 			t.Fatalf("%s %s: sent=%d want=%d", tc.method, tc.path, sent, tc.want)
 		}
+	}
+}
+
+func TestModelHandoffFailureStillForwards(t *testing.T) {
+	calls := 0
+	up := unixServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; w.WriteHeader(http.StatusAccepted) }))
+	defer up.Close()
+	route := Handler(up.Listener.Addr().String(), "key", "trusted-session", []string{"allowed"}, []string{"account"}, "", false, func(context.Context) error { return errors.New("store failed") })
+	w := httptest.NewRecorder()
+	route.ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed"}`)))
+	if w.Code != http.StatusAccepted || calls != 1 {
+		t.Fatalf("status=%d upstream=%d", w.Code, calls)
 	}
 }

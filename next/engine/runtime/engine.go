@@ -266,8 +266,11 @@ func Run(ctx context.Context, cfg Config) error {
 			if err != nil {
 				pinned = ""
 			}
-			proxy.Handler(string(session.ID), allowed, eligible, pinned, crew, func(ctx context.Context) error {
-				return st.MarkTurnModelSent(ctx, session.ID, time.Now())
+			proxy.Handler(string(session.ID), allowed, eligible, pinned, crew, func(_ context.Context) error {
+				// Capture handoff time now; recording uses engine, not request, lifetime.
+				at := time.Now()
+				go st.MarkTurnModelSent(ctx, session.ID, session.Turn, at)
+				return nil
 			}).ServeHTTP(w, r)
 		}))
 	})

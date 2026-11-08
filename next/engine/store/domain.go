@@ -33,6 +33,7 @@ var ErrParentHostAbsent = errors.New("sameHost requires a parent with an assigne
 // Session describes the stored session and its box.
 type Session struct {
 	ID          contract.SessionID
+	Turn        contract.TurnID // read back only: active turn captured with session identity
 	Room        contract.RoomID
 	Name        string
 	Repo        contract.RepoName
@@ -209,7 +210,13 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 
 // CloseSession ends a session and hands what its list owes to the parent, in one write.
 func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event contract.Event) error {
-	return s.Write(ctx, func(tx *sql.Tx) error {
+	var turns []contract.TurnID
+	err := s.Write(ctx, func(tx *sql.Tx) error {
+		var err error
+		turns, err = listIDs[contract.TurnID](ctx, tx, "SELECT id FROM turns WHERE session=? AND ended_at IS NULL", id)
+		if err != nil {
+			return err
+		}
 		held, err := s.responsibilities(ctx, tx, []contract.SessionID{id}, nil) // A terminal ends with the box, so it needs no asking.
 		if err != nil {
 			return err
@@ -268,6 +275,13 @@ func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event c
 		}
 		return s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: parent}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
 	})
+	if err == nil {
+		for _, turn := range turns {
+			s.stamped.Delete(turn)
+			s.logged.Delete(turn)
+		}
+	}
+	return err
 }
 
 func (s *Store) DeliveryDone(ctx context.Context, session contract.SessionID, seq contract.DeliverySeq) error {
@@ -290,7 +304,7 @@ func (s *Store) DeliveryDone(ctx context.Context, session contract.SessionID, se
 var ErrTurnConflict = errors.New("turn output differs from the committed result")
 
 func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output contract.TurnOutputRequest, event contract.Event, also ...func(*sql.Tx) error) error {
-	return s.Write(ctx, func(tx *sql.Tx) error {
+	err := s.Write(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, "UPDATE turns SET ended_at=?,outcome=?,model=?,input_tokens=?,output_tokens=?,cache_read_tokens=?,cache_write_tokens=?,sections=NULL WHERE id=? AND session=? AND ended_at IS NULL", event.Time.UnixMilli(), output.Outcome, output.Model, output.Usage.InputTokens, output.Usage.OutputTokens, output.Usage.CacheReadTokens, output.Usage.CacheWriteTokens, output.Turn, session)
 		if err != nil {
 			return err
@@ -459,11 +473,16 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 		}
 		return nil
 	})
+	if err == nil {
+		s.stamped.Delete(output.Turn)
+		s.logged.Delete(output.Turn)
+	}
+	return err
 }
 
 func (s *Store) Session(ctx context.Context, id contract.SessionID) (Session, error) {
 	var session Session
-	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.repo,s.profile,b.id,s.close_reason,s.compose,s.parent IS NULL,s.state='closing' FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL", id).Scan(&session.ID, &session.Room, &session.Name, &session.Repo, &session.Profile, &session.Box, &session.CloseReason, &session.Compose, &session.Root, &session.Closing)
+	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.repo,s.profile,b.id,s.close_reason,s.compose,s.parent IS NULL,s.state='closing',COALESCE((SELECT id FROM turns WHERE session=s.id AND ended_at IS NULL),'') FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL", id).Scan(&session.ID, &session.Room, &session.Name, &session.Repo, &session.Profile, &session.Box, &session.CloseReason, &session.Compose, &session.Root, &session.Closing, &session.Turn)
 	return session, err
 }
 
