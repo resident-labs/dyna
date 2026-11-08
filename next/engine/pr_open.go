@@ -57,10 +57,15 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 				return err
 			}
 			if !allowed {
-				return approve.ErrForbidden
+				return fmt.Errorf("%w: branch %s is not recorded for this session or a session under it", approve.ErrForbidden, head)
 			}
-			if session.Repo == "" || strings.TrimSpace(input.Title) == "" || strings.TrimSpace(input.Base) == "" {
-				return approve.ErrInvalid
+			switch {
+			case session.Repo == "":
+				return fmt.Errorf("%w: the session has no repository", approve.ErrInvalid)
+			case strings.TrimSpace(input.Title) == "":
+				return fmt.Errorf("%w: title is required", approve.ErrInvalid)
+			case strings.TrimSpace(input.Base) == "":
+				return fmt.Errorf("%w: base is required, such as main", approve.ErrInvalid)
 			}
 			if _, err := s.repos.Ref(ctx, session.Repo, "refs/heads/"+head); err != nil {
 				if defaulted {
