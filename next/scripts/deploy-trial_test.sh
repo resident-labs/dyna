@@ -55,6 +55,8 @@ case "$*" in
  *session.list*)
    if [[ ${FAKE_NOT_CURRENT:-0} == 1 && -f $TEST_REFRESH ]]; then
      echo '{"sessions":[{"id":"idle","box":"box-1","boxState":"starting","computer":"stopped"}],"seq":11}'
+   elif [[ ${FAKE_JOBS_FIRST:-0} == 1 ]]; then
+     echo '{"sessions":[{"id":"jobs","box":"jobs-box","boxState":"ready","computer":"stopped","shellJobs":2},{"id":"idle","box":"box-1","boxState":"ready","computer":"stopped"}],"seq":10}'
    elif [[ ${FAKE_NO_IDLE:-0} == 1 ]]; then
      echo '{"sessions":[{"id":"busy","box":"busy-box","boxState":"ready","turn":"turn-1","computer":"stopped"}],"seq":10}'
    else
@@ -157,6 +159,10 @@ rm -f "$tmp/install/failed-next" "$tmp/install/deployed-next" "$TEST_REFRESH"
 grep -q 'Box lifecycle smoke passed: box-1 returned ready' "$tmp/out"
 test "$(<"$tmp/install/deployed-next")" = tree123
 test -f "$TEST_REFRESH"
+# A ready session with no jobs left running wins over one listed first that has some (refresh refuses any but idle).
+rm -f "$tmp/install/deployed-next" "$TEST_REFRESH"
+FAKE_JOBS_FIRST=1 "$script" "${args[@]}" >"$tmp/out" 2>&1
+grep -q 'Box lifecycle smoke passed: box-1 returned ready' "$tmp/out"
 # Empty event pages are null in the live API. Wait through one, then require the ready event.
 rm -f "$tmp/install/deployed-next" "$TEST_REFRESH"
 FAKE_NULL_EVENTS=first "$script" "${args[@]}" >"$tmp/out" 2>&1
