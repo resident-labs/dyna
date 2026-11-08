@@ -1040,3 +1040,23 @@ func TestDigestNeedsWake(t *testing.T) {
 		t.Fatalf("%+v", problem)
 	}
 }
+
+func TestMachineDigestIsRecordedInTheWokenSessionsRoom(t *testing.T) {
+	s, room, root, ctx := setupRoot(t)
+	_, c := withRuns(t, s)
+	worker := contract.Principal{Kind: contract.PrincipalSession, Session: "ses_worker"}
+	addSubscription(t, s, ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeMachine, On: []contract.EventType{"tool.failed"}, Every: "15m", Wake: string(root)})
+	event, err := s.event(room, worker, contract.ToolFailed{Session: "ses_worker", Tool: "read", Error: "no such file"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.RecordEvent(ctx, event); err != nil {
+		t.Fatal(err)
+	}
+	pass(t, s, ctx)
+	c.add(15 * time.Minute)
+	pass(t, s, ctx)
+	if digests := eventsOf[contract.HookDigest](t, s, ctx, room); len(digests) != 1 || !strings.HasPrefix(digests[0].Events[0], "In room "+string(room)) {
+		t.Fatalf("digests in the room: %+v", digests)
+	}
+}
