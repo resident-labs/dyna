@@ -210,7 +210,7 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 
 // CloseSession ends a session and hands what its list owes to the parent, in one write.
 func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event contract.Event) error {
-	return s.Write(ctx, func(tx *sql.Tx) error {
+	err := s.Write(ctx, func(tx *sql.Tx) error {
 		held, err := s.responsibilities(ctx, tx, []contract.SessionID{id}, nil) // A terminal ends with the box, so it needs no asking.
 		if err != nil {
 			return err
@@ -269,6 +269,18 @@ func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event c
 		}
 		return s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: parent}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
 	})
+	if err == nil {
+		s.modelSentMu.Lock()
+		defer s.modelSentMu.Unlock()
+		// Forced close can bypass EndTurn when the box cannot report its output.
+		// Remove only telemetry memory; leave retained turn history unchanged.
+		for turn, state := range s.modelSent {
+			if state.session == id {
+				delete(s.modelSent, turn)
+			}
+		}
+	}
+	return err
 }
 
 func (s *Store) DeliveryDone(ctx context.Context, session contract.SessionID, seq contract.DeliverySeq) error {
@@ -291,8 +303,6 @@ func (s *Store) DeliveryDone(ctx context.Context, session contract.SessionID, se
 var ErrTurnConflict = errors.New("turn output differs from the committed result")
 
 func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output contract.TurnOutputRequest, event contract.Event, also ...func(*sql.Tx) error) error {
-	s.modelSentMu.Lock()
-	defer s.modelSentMu.Unlock()
 	err := s.Write(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, "UPDATE turns SET ended_at=?,outcome=?,model=?,input_tokens=?,output_tokens=?,cache_read_tokens=?,cache_write_tokens=?,sections=NULL WHERE id=? AND session=? AND ended_at IS NULL", event.Time.UnixMilli(), output.Outcome, output.Model, output.Usage.InputTokens, output.Usage.OutputTokens, output.Usage.CacheReadTokens, output.Usage.CacheWriteTokens, output.Turn, session)
 		if err != nil {
@@ -463,7 +473,9 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 		return nil
 	})
 	if err == nil {
+		s.modelSentMu.Lock()
 		delete(s.modelSent, output.Turn)
+		s.modelSentMu.Unlock()
 	}
 	return err
 }
