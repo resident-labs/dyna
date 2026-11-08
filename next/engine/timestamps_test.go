@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -41,7 +42,9 @@ func TestFramedModelHandoffTimestamps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The fake reads the request before answering, as the real proxy does; answering first races the route's write.
 	proxy := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: done\n\n"))
 	})}
@@ -183,7 +186,11 @@ func TestStoreStampFailureStillForwardsModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	var calls atomic.Int64
-	proxy := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.WriteHeader(http.StatusAccepted) })}
+	proxy := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		calls.Add(1)
+		w.WriteHeader(http.StatusAccepted)
+	})}
 	go proxy.Serve(listener)
 	defer proxy.Close()
 	route := model.Handler(socket, "key", string(worker), []string{"allowed"}, []string{"account"}, "", false, func(ctx context.Context) error { return s.store.MarkTurnModelSent(ctx, worker, first.Turn, time.Now()) })

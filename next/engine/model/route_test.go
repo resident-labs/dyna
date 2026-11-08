@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	"io"
 	"net"
 	"net/http"
@@ -168,9 +169,19 @@ func TestProxyConfig(t *testing.T) {
 	}
 }
 
+// unixServer serves handler on a unix socket. It reads each request's body whole before the handler runs: a handler that
+// answered without reading it let the server close the connection while the proxy was still writing, and the proxy answered
+// 502 (broken pipe) about once in 500 runs.
 func unixServer(t *testing.T, handler http.Handler) *httptest.Server {
 	t.Helper()
-	up := httptest.NewUnstartedServer(handler)
+	up := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("reading the request: %v", err)
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		handler.ServeHTTP(w, r)
+	}))
 	_ = up.Listener.Close()
 	listener, err := net.Listen("unix", filepath.Join(t.TempDir(), "up.sock"))
 	if err != nil {

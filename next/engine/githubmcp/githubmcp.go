@@ -110,6 +110,8 @@ func Handler(ctx context.Context, token string, reads http.RoundTripper, owns fu
 			case "actions_list":
 				tools[i].AddHandlerMiddleware(func(any) inventory.ToolHandlerMiddleware { return flattenJobs })
 			case "projects_write":
+				// issue_number resolves only issues; agents passed a PR's number and got "Could not resolve to an Issue".
+				tool.Description += "\nupdate_project_item's issue_number finds issues only. For a pull request, pass item_id or node_id: add_project_item returns them, and projects_list list_project_items shows them."
 				// Some models (grok) send {} for a oneOf object. The advertised field lists its keys plainly; the handler still
 				// requires id or name, not both, and a value.
 				if schema == nil {
