@@ -4,10 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"log"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -189,84 +187,57 @@ func (s *Store) SetRoomGitHubWrites(ctx context.Context, room contract.RoomID, w
 	})
 }
 
-type modelStamp struct {
-	mu      sync.Mutex // only requests for this turn wait for its stamp attempt
-	session contract.SessionID
-	active  bool // validated as an open session and active turn
-	stamped bool
-	logged  bool
-}
-
-// MarkTurnModelSent records the first engine handoff to its model proxy, including
-// child rejection, not provider send or response. Identity is captured by the engine
-// before routing, never read from model request headers. Successful turns bypass
-// all database access; failed writes are retried and logged once per active turn.
+// MarkTurnModelSent records the first engine handoff, including child rejection,
+// not provider send or response. The model route runs this with engine lifetime
+// context outside the forwarding path. Concurrent first attempts may both write;
+// the conditional update preserves the first timestamp. Maps are cleared every
+// ten minutes: a clear may cost one extra conditional update, never a new stamp.
 func (s *Store) MarkTurnModelSent(ctx context.Context, session contract.SessionID, turn contract.TurnID, at time.Time) error {
 	if turn == "" {
 		return nil
 	}
-
-	s.modelSentMu.Lock()
-	state := s.modelSent[turn]
-	if state == nil {
-		if s.modelSent == nil {
-			s.modelSent = make(map[contract.TurnID]*modelStamp)
-		}
-		state = &modelStamp{session: session}
-		s.modelSent[turn] = state
-	}
-	s.modelSentMu.Unlock()
-	if state.session != session {
+	if _, ok := s.stamped.Load(turn); ok {
 		return nil
 	}
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	if state.stamped {
-		return nil
-	}
-	if !state.active {
-		// Do not retain delayed requests for ended turns. Terminal lifecycle
-		// cleanup removes the entry after commit. This query rejects delayed requests.
-		var persisted int64
-		err := s.Read().QueryRowContext(ctx, "SELECT t.model_sent_at FROM turns t JOIN sessions s ON s.id=t.session WHERE t.id=? AND t.session=? AND t.ended_at IS NULL AND s.closed_at IS NULL", turn, session).Scan(&persisted)
-		if err != nil {
-			// Entries are never reinserted after cleanup. Retire only this pointer:
-			// an old in-flight request must not erase a newer entry for the same key.
-			s.modelSentMu.Lock()
-			if s.modelSent[turn] == state {
-				delete(s.modelSent, turn)
-			}
-			s.modelSentMu.Unlock()
-		}
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
-			s.modelSentReadError.Do(func() { log.Printf("model handoff: read turn %s: %v", turn, err) })
-			return err
-		}
-		state.active = true
-		state.stamped = persisted != 0
-		if state.stamped {
-			return nil
-		}
-	}
-	var updated int64
+	stamped := false
 	err := s.Write(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, "UPDATE turns SET model_sent_at=? WHERE id=? AND session=? AND ended_at IS NULL AND model_sent_at=0 AND EXISTS (SELECT 1 FROM sessions WHERE id=? AND closed_at IS NULL)", at.UnixMilli(), turn, session, session)
 		if err != nil {
 			return err
 		}
-		updated, err = result.RowsAffected()
-		return err
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		stamped = n != 0
+		if !stamped {
+			// Zero matches only warm the cache when the same active turn is already
+			// persisted, not when a delayed request names a closed or ended turn.
+			var persisted int64
+			err := tx.QueryRowContext(ctx, "SELECT t.model_sent_at FROM turns t JOIN sessions s ON s.id=t.session WHERE t.id=? AND t.session=? AND t.ended_at IS NULL AND s.closed_at IS NULL", turn, session).Scan(&persisted)
+			if err == sql.ErrNoRows {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			stamped = persisted != 0
+		}
+		return nil
 	})
 	if err != nil {
-		if !state.logged {
+		if _, logged := s.logged.LoadOrStore(turn, true); !logged {
 			log.Printf("model handoff: stamp turn %s: %v", turn, err)
-			state.logged = true
 		}
-	} else {
-		state.stamped = updated != 0
+	} else if stamped {
+		s.stamped.Store(turn, true)
 	}
 	return err
+}
+
+// clearModelStamps bounds late publication racing terminal cleanup. Turn IDs are
+// never reused, so stale keys are harmless until this periodic clear.
+func (s *Store) clearModelStamps() {
+	s.stamped.Clear()
+	s.logged.Clear()
 }

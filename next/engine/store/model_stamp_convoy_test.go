@@ -137,3 +137,66 @@ func TestWarmModelRouteBypassesUnrelatedWriterWaits(t *testing.T) {
 		})
 	}
 }
+
+func TestColdModelHandoffDoesNotWaitForStampWriter(t *testing.T) {
+	s, _ := stampConvoyStore(t)
+	ctx := context.Background()
+	entered, release, writerDone := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() { writerDone <- s.Write(ctx, func(*sql.Tx) error { close(entered); <-release; return nil }) }()
+	<-entered
+	socketDir, err := os.MkdirTemp("", "stamp-cold-")
+	if err != nil {
+		close(release)
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(socketDir)
+	listener, err := net.Listen("unix", filepath.Join(socketDir, "up.sock"))
+	if err != nil {
+		close(release)
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusAccepted) })}
+	go server.Serve(listener)
+	defer server.Close()
+	recorded := make(chan error, 1)
+	// Match runtime: the task uses engine lifetime, not the HTTP request context.
+	route := model.Handler(listener.Addr().String(), "key", "s", []string{"allowed"}, []string{"account"}, "", false, func(_ context.Context) error {
+		go func() { recorded <- s.MarkTurnModelSent(ctx, "s", "t", time.UnixMilli(123)) }()
+		return nil
+	})
+	requestCtx, cancelRequest := context.WithCancel(ctx)
+	defer cancelRequest()
+	done := make(chan int, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		route.ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed"}`)).WithContext(requestCtx))
+		done <- w.Code
+	}()
+	completed := false
+	select {
+	case code := <-done:
+		completed = true
+		if code != http.StatusAccepted {
+			t.Errorf("status=%d", code)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Error("cold model request waited for telemetry writer")
+	}
+	cancelRequest() // Request lifetime must not cancel the queued engine stamp.
+	close(release)
+	if err := <-writerDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-recorded; err != nil {
+		t.Fatal(err)
+	}
+	var stamp int64
+	if err := s.Read().QueryRow("SELECT model_sent_at FROM turns WHERE id='t'").Scan(&stamp); err != nil || stamp != 123 {
+		t.Fatalf("stamp=%d err=%v", stamp, err)
+	}
+	if !completed {
+		if code := <-done; code != http.StatusAccepted {
+			t.Errorf("status after writer release=%d", code)
+		}
+	}
+}
