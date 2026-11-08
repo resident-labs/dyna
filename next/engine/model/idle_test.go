@@ -12,7 +12,7 @@ import (
 )
 
 func TestStreamWireIdle(t *testing.T) {
-	if streamIdleTimeout != 120*time.Second {
+	if streamIdleTimeout != 300*time.Second {
 		t.Fatal(streamIdleTimeout)
 	}
 	for _, mode := range []string{"headers", "body", "keepalive", "cancel", "ended"} {
