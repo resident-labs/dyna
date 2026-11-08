@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -53,6 +54,37 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		}
 	}
 
+	if req.Host != "" {
+		if req.SameHost {
+			return contract.SessionStartResponse{}, invalid("host and sameHost cannot be used together")
+		}
+		hosts, err := s.store.Hosts(ctx)
+		if err != nil {
+			return contract.SessionStartResponse{}, failure(err)
+		}
+		index := slices.IndexFunc(hosts, func(h box.Host) bool { return h.Name == req.Host })
+		if index < 0 || hosts[index].State == box.HostRemoved {
+			return contract.SessionStartResponse{}, invalid("unknown host: " + string(req.Host))
+		}
+		host := hosts[index]
+		if host.ExecOnly {
+			return contract.SessionStartResponse{}, invalid("host is exec-only: " + string(req.Host))
+		}
+		if host.NoAgents {
+			return contract.SessionStartResponse{}, invalid("host has agents disabled: " + string(req.Host))
+		}
+		only, err := s.store.RoomOnly(ctx, req.Room)
+		if err != nil {
+			return contract.SessionStartResponse{}, failure(err)
+		}
+		target := string(host.Name)
+		if host.Pool != "" {
+			target = host.Pool
+		}
+		if !host.Serves(req.Room) || host.Box != "" || len(only) > 0 && !slices.Contains(only, target) {
+			return contract.SessionStartResponse{}, invalid("host is outside the room host rule: " + string(req.Host))
+		}
+	}
 	if req.Name == "" || req.Profile == "" {
 		return contract.SessionStartResponse{}, invalid("name and profile are required")
 	}
@@ -179,7 +211,7 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	var response contract.SessionStartResponse
 	problem := s.withProfile(req.Profile, func() *contract.Error {
 		var err error
-		response, err = s.store.StartSession(ctx, session, parent, sizeName, req.Goal, event, initial, "", req.SameHost, req.ClientID, s.maxDepth)
+		response, err = s.store.StartSession(ctx, session, parent, sizeName, req.Goal, event, initial, "", req.SameHost, req.Host, req.ClientID, s.maxDepth)
 		if err != nil {
 			var treeErr *store.TreeError
 			if errors.As(err, &treeErr) {

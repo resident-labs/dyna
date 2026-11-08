@@ -73,7 +73,7 @@ func sessionReplay(ctx context.Context, q sqlQuery, caller contract.Principal, c
 	return response, err
 }
 
-func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, size contract.BoxSizeName, goal string, event, boxEvent contract.Event, reason string, sameHost bool, clientID string, maxDepth int) (contract.SessionStartResponse, error) {
+func (s *Store) StartSession(ctx context.Context, session Session, parent contract.SessionID, size contract.BoxSizeName, goal string, event, boxEvent contract.Event, reason string, sameHost bool, pinnedHost contract.HostName, clientID string, maxDepth int) (contract.SessionStartResponse, error) {
 	response := contract.SessionStartResponse{Session: session.ID, Box: session.Box}
 	err := s.Write(ctx, func(tx *sql.Tx) error {
 		if err := refuseNewWork(ctx, tx, session.Room); err != nil {
@@ -111,6 +111,9 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 			}
 		}
 		var host *contract.HostName
+		if pinnedHost != "" {
+			host = &pinnedHost
+		}
 		if sameHost {
 			if parent == "" {
 				return ErrParentHostAbsent

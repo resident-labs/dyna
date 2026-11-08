@@ -45,7 +45,7 @@ INSERT INTO hosts(name,ssh,state,cpus,mem_bytes,disk_bytes,checked_at) VALUES('h
 	at := time.Unix(10, 0)
 	event := contract.Event{ID: "e", Room: "r", Time: at, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionStarted{}}
 	boxEvent := contract.Event{ID: "be", Room: "r", Time: at, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{}}
-	if _, err := s.StartSession(ctx, Session{ID: "s", Room: "r", Name: "s", Profile: "p", Box: "b", GPU: 4}, "", contract.BoxSizeAgent, "", event, boxEvent, "", false, "", 0); err != nil {
+	if _, err := s.StartSession(ctx, Session{ID: "s", Room: "r", Name: "s", Profile: "p", Box: "b", GPU: 4}, "", contract.BoxSizeAgent, "", event, boxEvent, "", false, "", "", 0); err != nil {
 		t.Fatal(err)
 	}
 	boxes, err := s.Boxes(ctx)
