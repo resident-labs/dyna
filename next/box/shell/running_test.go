@@ -42,6 +42,12 @@ func (r *statusRig) move(by time.Duration) {
 
 func newStatusRig(t *testing.T) (*statusRig, io.Writer, *job) {
 	t.Helper()
+	return newStatusRigWith(t, nil)
+}
+
+// newStatusRigWith calls setup on the rig before the job starts.
+func newStatusRigWith(t *testing.T, setup func(*statusRig)) (*statusRig, io.Writer, *job) {
+	t.Helper()
 	r := &statusRig{
 		proc:     &fakeProc{exit: make(chan int, 1), signals: make(chan syscall.Signal, 4), killOn: syscall.SIGTERM},
 		out:      make(chan io.Writer, 1),
@@ -67,6 +73,9 @@ func newStatusRig(t *testing.T) (*statusRig, io.Writer, *job) {
 			return r.proc, nil
 		},
 	})
+	if setup != nil {
+		setup(r)
+	}
 	t.Cleanup(func() {
 		select {
 		case r.proc.exit <- 0:
@@ -105,18 +114,26 @@ func (r *statusRig) status(t *testing.T) contract.ShellJobRunningRequest {
 	}
 }
 
-// reach moves the clock to the next mark, as the timer asks, and takes the status.
+// reach ticks the clock until the job reports, and takes the status.
 func (r *statusRig) reach(t *testing.T) contract.ShellJobRunningRequest {
 	t.Helper()
 	w := r.nextWait(t)
-	r.move(w.wait)
-	w.fire <- time.Time{}
-	return r.status(t)
+	for {
+		r.move(w.wait)
+		w.fire <- time.Time{}
+		select {
+		case req := <-r.statuses:
+			return req
+		case w = <-r.waits:
+		case <-time.After(5 * time.Second):
+			t.Fatal("no status")
+		}
+	}
 }
 
-func TestRunningJobReportsAt15And30And60ThenEvery60(t *testing.T) {
+func TestRunningJobReportsAt5And15And30And60ThenEvery60(t *testing.T) {
 	r, _, _ := newStatusRig(t)
-	for _, minutes := range []int{15, 30, 60, 120, 180, 240} {
+	for _, minutes := range []int{5, 15, 30, 60, 120, 180, 240} {
 		if got := r.reach(t); got.RanMinutes != minutes {
 			t.Fatalf("status at %d minutes, want %d", got.RanMinutes, minutes)
 		}
@@ -125,7 +142,8 @@ func TestRunningJobReportsAt15And30And60ThenEvery60(t *testing.T) {
 
 func TestNextMarkFromAnyRunningTime(t *testing.T) {
 	for ran, want := range map[time.Duration]time.Duration{
-		30 * time.Second: 15 * time.Minute,
+		30 * time.Second: 5 * time.Minute,
+		5 * time.Minute:  15 * time.Minute,
 		15 * time.Minute: 30 * time.Minute,
 		29 * time.Minute: 30 * time.Minute,
 		30 * time.Minute: time.Hour,
@@ -142,21 +160,18 @@ func TestNextMarkFromAnyRunningTime(t *testing.T) {
 func TestStatusStatesTimesAndLastLines(t *testing.T) {
 	r, out, _ := newStatusRig(t)
 	var lines []string
-	for i := 1; i <= 8; i++ {
+	for i := 1; i <= 23; i++ {
 		lines = append(lines, fmt.Sprintf("line %d\n", i))
 	}
-	w := r.nextWait(t)
-	r.move(3 * time.Minute)
+	r.move(time.Minute)
 	if _, err := io.WriteString(out, strings.Join(lines, "")); err != nil {
 		t.Fatal(err)
 	}
-	r.move(w.wait - 3*time.Minute)
-	w.fire <- time.Time{}
-	got := r.status(t) // written three minutes in, so twelve minutes quiet at the mark
-	if got.Job != "job_1" || got.Description != "Build" || got.QuietMinutes == nil || *got.QuietMinutes != 12 {
+	got := r.reach(t) // written a minute in, so four minutes quiet at the five-minute mark
+	if got.Job != "job_1" || got.Description != "Build" || got.QuietMinutes == nil || *got.QuietMinutes != 4 {
 		t.Fatalf("status %+v", got)
 	}
-	if want := "line 4\nline 5\nline 6\nline 7\nline 8"; got.Tail != want {
+	if want := strings.TrimSuffix(strings.Join(lines[3:], ""), "\n"); got.Tail != want {
 		t.Fatalf("tail=%q, want %q", got.Tail, want)
 	}
 }
@@ -190,11 +205,11 @@ func TestStatusMasksAndHoldsBackAnUnfinishedLine(t *testing.T) {
 
 func TestLongOutputKeepsItsNewestBytesInTheStatus(t *testing.T) {
 	r, out, _ := newStatusRig(t)
-	if _, err := io.WriteString(out, strings.Repeat("é", tailLimit)+"\n"); err != nil {
+	if _, err := io.WriteString(out, strings.Repeat("é", statusTail)+"\n"); err != nil {
 		t.Fatal(err)
 	}
 	got := r.reach(t)
-	if len(got.Tail) > tailLimit || strings.ContainsRune(got.Tail, '�') || !strings.HasSuffix(got.Tail, "é") {
+	if len(got.Tail) > statusTail || strings.ContainsRune(got.Tail, '�') || !strings.HasSuffix(got.Tail, "é") {
 		t.Fatalf("%d bytes, ends %q", len(got.Tail), got.Tail[len(got.Tail)-8:])
 	}
 }
@@ -264,5 +279,113 @@ func TestForegroundJobHasNoStatus(t *testing.T) {
 	}
 	if len(statuses) != 0 {
 		t.Fatal("a foreground job sent a status")
+	}
+}
+
+// groupRig runs a job whose process group the test samples by hand: busy reports whether its one process used CPU since the
+// last sample.
+func groupRig(t *testing.T, busy *bool) (*statusRig, io.Writer, *job) {
+	t.Helper()
+	cpu := time.Duration(0)
+	return newStatusRigWith(t, func(r *statusRig) {
+		r.proc.group = 7
+		r.server.cfg.sample = func(group int) map[int]procSample {
+			if group != 7 {
+				t.Errorf("sampled group %d", group)
+			}
+			if *busy {
+				cpu += time.Second
+			}
+			return map[int]procSample{8: {command: "rustc --crate-name horizon_client", cpu: cpu}}
+		}
+	})
+}
+
+// tick moves the clock one tick and returns the status it brought, if any.
+func (r *statusRig) tick(t *testing.T) *contract.ShellJobRunningRequest {
+	t.Helper()
+	w := r.nextWait(t)
+	r.move(w.wait)
+	w.fire <- time.Time{}
+	select {
+	case req := <-r.statuses:
+		return &req
+	case w := <-r.waits:
+		r.waits <- w
+		return nil
+	case <-time.After(5 * time.Second):
+		t.Fatal("the watcher neither reported nor ticked again")
+		return nil
+	}
+}
+
+func TestStatusListsTheJobsProcesses(t *testing.T) {
+	busy := true
+	r, _, _ := groupRig(t, &busy)
+	got := r.reach(t)
+	if got.RanMinutes != 5 || got.IdleMinutes != nil || got.Processes != "rustc --crate-name horizon_client (5s CPU, busy)" {
+		t.Fatalf("status %+v", got)
+	}
+}
+
+// Five minutes with no output and no CPU use, reads or writes report the job once; activity and another quiet stretch report
+// it again.
+func TestIdleJobReportsOnceUntilItIsActiveAgain(t *testing.T) {
+	busy := true
+	r, out, _ := groupRig(t, &busy)
+	if got := r.reach(t); got.IdleMinutes != nil { // the five-minute mark, busy throughout
+		t.Fatalf("busy job reported idle: %+v", got)
+	}
+	busy = false
+	for range 4 {
+		if got := r.tick(t); got != nil {
+			t.Fatalf("status before five idle minutes: %+v", got)
+		}
+	}
+	got := r.tick(t)
+	if got == nil || got.IdleMinutes == nil || *got.IdleMinutes != 5 || got.Processes != "rustc --crate-name horizon_client (5s CPU, idle)" {
+		t.Fatalf("status %+v, want idle for 5 minutes", got)
+	}
+	for range 3 {
+		if got := r.tick(t); got != nil {
+			t.Fatalf("second idle status: %+v", got)
+		}
+	}
+	if _, err := io.WriteString(out, "progress\n"); err != nil {
+		t.Fatal(err)
+	}
+	for range 4 {
+		if got := r.tick(t); got != nil && got.IdleMinutes != nil {
+			t.Fatalf("idle status within five minutes of output: %+v", got)
+		}
+	}
+	if got := r.reach(t); got.IdleMinutes == nil {
+		t.Fatalf("status %+v, want idle again", got)
+	}
+}
+
+// A job with no processes here, as on a host, is never reported idle.
+func TestJobWithoutProcessesIsNeverIdle(t *testing.T) {
+	r, _, _ := newStatusRig(t)
+	for range 3 {
+		if got := r.reach(t); got.IdleMinutes != nil || got.Processes != "" {
+			t.Fatalf("status %+v", got)
+		}
+	}
+}
+
+func TestCompareGroupListsBusiestFirstAndCapsTheList(t *testing.T) {
+	prev := map[int]procSample{1: {command: "make", cpu: time.Second}}
+	cur := map[int]procSample{1: {command: "make", cpu: time.Second}}
+	for pid := 2; pid < 12; pid++ {
+		cur[pid] = procSample{command: "cc", cpu: time.Duration(pid) * time.Second}
+	}
+	list, active := compareGroup(prev, cur)
+	lines := strings.Split(list, "\n")
+	if !active || len(lines) != listedProcs+1 || lines[0] != "cc (11s CPU, busy)" || lines[listedProcs] != "and 3 more" {
+		t.Fatalf("active=%v list:\n%s", active, list)
+	}
+	if _, active := compareGroup(cur, cur); active {
+		t.Fatal("an unchanged group counts as active")
 	}
 }
