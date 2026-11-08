@@ -77,9 +77,8 @@ type Store struct {
 	subMu          sync.Mutex
 	subs           map[chan contract.Event]struct{}
 
-	modelSentMu        sync.Mutex // short map access only; never held across SQL or writer waits
-	modelSent          map[contract.TurnID]*modelStamp
-	modelSentReadError sync.Once // bounds logging when even the active-turn read is unavailable
+	stamped sync.Map // turn IDs whose first model handoff is persisted
+	logged  sync.Map // turn IDs whose stamp failure was logged
 }
 
 // LockAdmission serializes a capacity decision with its reservation write across boxes, services and CI runners. The returned
