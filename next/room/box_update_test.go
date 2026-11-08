@@ -14,7 +14,7 @@ func TestBoxUpdateNoticeNamesWhatOutlastsTheTurn(t *testing.T) {
 	terminal := contract.Responsibility{Kind: contract.ResponsibilityTerminal}
 	crew := contract.Responsibility{Kind: contract.ResponsibilityWorkflow, ID: "wf_a"}
 	goal := contract.Responsibility{Kind: contract.ResponsibilityGoal, ID: "g1"}
-	const before, after = "An update is ready for your box. It applies when ", ". Your files and conversation are kept."
+	const before, after = "An update is ready for your box. It applies when ", ". Your files and conversation are kept; finished jobs are not, so a job's output after that is only what its end notice shows."
 	for _, tc := range []struct {
 		held []contract.Responsibility
 		want string
