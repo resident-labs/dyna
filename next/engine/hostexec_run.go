@@ -57,7 +57,7 @@ func (s *Service) HostexecRun(ctx context.Context, who contract.Principal, req c
 	}
 	grant, err := s.matchHostexec(ctx, session.Room, who, req.Host)
 	if errors.Is(err, hostexec.ErrNoGrant) {
-		return contract.HostexecRunResponse{}, &contract.Error{Code: contract.ErrNoGrant, Message: "no matching host-exec grant"}
+		return contract.HostexecRunResponse{}, &contract.Error{Code: contract.ErrNoGrant, Message: fmt.Sprintf("no host-exec grant for %s; ask with hostexec request_grant, then run it again once approved", req.Host)}
 	}
 	if err != nil {
 		return contract.HostexecRunResponse{}, failure(err)
