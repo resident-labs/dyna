@@ -268,7 +268,7 @@ func (s *Service) mayUntrack(ctx context.Context, caller contract.Principal, id 
 		return failure(err)
 	}
 	if !tree.CanManage(caller, owner) {
-		return forbidden()
+		return &contract.Error{Code: contract.ErrForbidden, Message: fmt.Sprintf("session %s tracks it, and it is not under you; only it, a session above it or the owner untracks it", owner)}
 	}
 	return nil
 }
