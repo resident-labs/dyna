@@ -175,3 +175,18 @@ func TestActivityLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestOrdinaryTurnWaitsForModelAfterTools(t *testing.T) {
+	var kinds []contract.ActivityKind
+	var labels []string
+	turn := newTurn("turn", func(_ contract.TurnID, kind contract.ActivityKind, label string) {
+		kinds = append(kinds, kind)
+		labels = append(labels, label)
+	})
+	turn.event(agent.TurnStartEvent{})
+	turn.event(agent.ToolExecutionStartEvent{ToolName: "read", Args: json.RawMessage(`{"path":"file"}`)})
+	turn.event(agent.TurnStartEvent{})
+	if !reflect.DeepEqual(kinds, []contract.ActivityKind{contract.ActivityModelWait, contract.ActivityTool, contract.ActivityModelWait}) || labels[0] != "waiting for model" || labels[2] != "waiting for model" {
+		t.Fatalf("activity %v %v", kinds, labels)
+	}
+}
