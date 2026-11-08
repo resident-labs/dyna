@@ -255,6 +255,7 @@
     {#snippet row(item: Item)}
       {#if item.kind === "post"}<div class:ring={item.key === `p${ring}`}><PostRow receipts={receipts.get(Number(item.key.slice(1))) ?? []} linked={!item.source || hasRoom(item.source.room)} last={lastPosts.has(item.key)} room={store.room} {navigate} onmedia={position => openMedia(item.key, position)} row={item} belowNew={item.key === belowNew} {newest} visualEvent={visualEvents.get(item.key)} author={item.source ? sourceLabel(item.source) : author(item.from)} to={home.kind === "dm" ? undefined : item.target ?? item.to.map(author).join(", ")} root={root(item.from.session)}
         onretry={id => void view.retry(id)} ondiscard={id => view.discard(id)} swipeDisabled={waiting?.at === item.at && waiting.author === author(item.from)} onforward={operate ? () => onforward({ author: item.source ? sourceLabel(item.source) : author(item.from), at: item.at, text: item.text, data: item.data, attachments: visibleAttachments(item.attachments, item.dataAttachment).map(({ file }) => file) }) : undefined} /></div>
+      {:else if item.kind === "notice" && item.event.type === "hook.digest"}<details class="digest"><summary class="divider"><span>{describe(item.event, name)} · <time datetime={item.event.at}>{formatTime(item.event.at)}</time></span></summary>{#each item.event.body.events ?? [] as text}<pre>{text}</pre>{/each}{#if item.event.body.more}<pre>and {item.event.body.more} more</pre>{/if}</details>
       {:else if item.kind === "notice"}<p class="divider"><span>{#if item.event.type === "engine.restarted"}<EngineRestartNotice event={item.event.body} />{:else}{describe(item.event, name)}{/if}{#if item.resumedAt}{" "}for {Math.round((Date.parse(item.resumedAt) - Date.parse(item.event.at)) / 60_000) < 1 ? "under a minute" : `${Math.round((Date.parse(item.resumedAt) - Date.parse(item.event.at)) / 60_000)} min`}{/if} · <time datetime={item.event.at}>{formatTime(item.event.at)}</time></span></p>
       {:else if item.kind === "restarted"}<div class="restart-warning"><span class="restart-mark"><StatusPill tone="warning" label="Box replaced" dot triangle /></span><p>{name(item.session)}'s box was replaced. Unpushed work in the old volume is gone. <time datetime={item.at}>{formatTime(item.at)}</time></p></div>
       {:else if item.kind === "failed"}<FailedTurnRow row={item} author={name(item.session)} root={root(item.session)}
@@ -318,6 +319,11 @@
   .restart-warning time { white-space: nowrap; font-size: 12.5px; }
   .more-failures button:focus-visible { outline: 2px solid var(--focus); }
   .divider { margin: 12px 16px; display: flex; align-items: center; gap: 8px; color: var(--muted); text-align: center; font-size: 12.5px; }
+  .digest summary { cursor: pointer; list-style: none; }
+  .digest summary::-webkit-details-marker { display: none; }
+  .digest summary span::after { content: " ▸"; }
+  .digest[open] summary span::after { content: " ▾"; }
+  .digest pre { margin: 8px 16px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
   .divider::before, .divider::after { content: ""; flex: 1; min-width: 12px; border-top: 1px solid var(--line); }
   /* The first unread row, as in Discord and v1: a danger hairline with a small label at its right end. */
   .new { margin: 8px 16px 4px; display: flex; align-items: center; gap: 8px; color: var(--danger); font-size: 11px; font-weight: 600; line-height: 1.25; }

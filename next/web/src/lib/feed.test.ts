@@ -412,3 +412,13 @@ test("work that started before midnight and ends after a later post adds no seco
   const keys = rows.map(row => row.key);
   assert.equal(new Set(keys).size, keys.length, keys.join(" "));
 });
+
+test("a digest is one feed row naming its count; failed tool calls get none of their own", () => {
+  const engine = { kind: "engine" } as const;
+  const digest = event(1, { type: "hook.digest", body: { subscription: "sub_a", events: ["one", "two"], more: 3 } }, engine);
+  const failed = event(2, { type: "tool.failed", body: { session: "s", tool: "read", error: "gone" } }, engine);
+  const rows = feedRows([digest, failed], { kind: "feed" });
+  assert.deepEqual(rows.flatMap(row => row.kind === "notice" ? [describe(row.event, id => id)] : []), ["Digest of 5 events from subscription sub_a"]);
+  assert.equal(rows.length, 1);
+  assert.deepEqual(feedRows([digest], { kind: "dm", session: "s" }), []);
+});
