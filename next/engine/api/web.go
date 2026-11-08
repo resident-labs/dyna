@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -44,6 +43,7 @@ type Web struct {
 	connect     ConnectSessions
 	app         fs.FS
 	api         *API
+	gzipped     gzipCache
 }
 
 type DeviceStore interface {
@@ -395,7 +395,7 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 			})
 			handler = w.mux
 		}
-		handler.ServeHTTP(out, r.WithContext(ctx))
+		withGzip(out, r, func(out http.ResponseWriter) { handler.ServeHTTP(out, r.WithContext(ctx)) })
 		return
 	}
 	if r.Method != http.MethodGet {
@@ -414,7 +414,7 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 		http.NotFound(out, r)
 		return
 	}
-	http.ServeContent(out, r, path, time.Time{}, bytes.NewReader(data))
+	w.serveApp(out, r, path, data)
 }
 
 func (w *Web) Listen() (net.Listener, error) {
