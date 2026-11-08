@@ -238,8 +238,8 @@ export class RoomStore {
     // op.list reads after the seq, so an operation it misses arrives as a live event.
     const listed = await call("op.list", { room: this.room });
     const asked = await call("question.list", { room: this.room });
-    // The feed position must be known before failed jobs are classified against it.
-    await this.readFeed();
+    // The shell owns the initial room list and forwards its feed position via
+    // noteRead. Status reads that monotonic position even if it arrives after load.
     this.head = list.seq;
     this.startTimer = setInterval(() => {
       if ([...this.boxes.values()].some(state => state === "creating" || state === "starting")) {
