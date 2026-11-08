@@ -389,7 +389,7 @@ func TestOwnedPullLifecycleThroughMCP(t *testing.T) {
 	}
 }
 
-// The job list's nesting is named in actions_list, and projects_write's updated_field lists its keys without oneOf, which some
+// projects_write's updated_field lists its keys without oneOf, which some
 // models answer with {}.
 func TestListedToolsSpellOutTrickyShapes(t *testing.T) {
 	ctx := context.Background()
@@ -415,11 +415,6 @@ func TestListedToolsSpellOutTrickyShapes(t *testing.T) {
 	for _, tool := range listed.Tools {
 		schema, _ := json.Marshal(tool.InputSchema)
 		switch tool.Name {
-		case "actions_list":
-			seen++
-			if !strings.Contains(tool.Description, ".jobs.jobs") {
-				t.Errorf("actions_list description: %s", tool.Description)
-			}
 		case "projects_write":
 			seen++
 			var parsed struct {
@@ -437,7 +432,28 @@ func TestListedToolsSpellOutTrickyShapes(t *testing.T) {
 			}
 		}
 	}
-	if seen != 2 {
-		t.Fatalf("found %d of actions_list and projects_write", seen)
+	if seen != 1 {
+		t.Fatalf("found %d projects_write", seen)
+	}
+}
+
+// list_workflow_jobs answers GitHub's own shape, {"total_count", "jobs": [...]}, not upstream's extra {"jobs": ...} around it,
+// which is the text that Pi's protocol version gets. Other answers pass through as they are.
+func TestWorkflowJobsAreNotNested(t *testing.T) {
+	for in, want := range map[string]string{
+		`{"jobs":{"total_count":1,"jobs":[{"name":"next"}]}}`:         `{"total_count":1,"jobs":[{"name":"next"}]}`,
+		`{"total_count":2,"workflow_runs":[]}`:                        `{"total_count":2,"workflow_runs":[]}`,
+		`{"method":"list_workflow_jobs","workflow_jobs":{"jobs":[]}}`: `{"method":"list_workflow_jobs","workflow_jobs":{"jobs":[]}}`,
+		`{"jobs":[]}`: `{"jobs":[]}`,
+	} {
+		upstream := func(any) mcp.ToolHandler {
+			return func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: in}}}, nil
+			}
+		}
+		result, err := flattenJobs(upstream)(nil)(context.Background(), &mcp.CallToolRequest{})
+		if err != nil || text(result) != want {
+			t.Errorf("%s gave %s, %v; want %s", in, text(result), err, want)
+		}
 	}
 }
