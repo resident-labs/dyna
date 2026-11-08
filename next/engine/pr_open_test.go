@@ -74,8 +74,8 @@ func TestPrOpenRejectsUnownedHead(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, failure := s.OpSubmit(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session}, contract.OpSubmitRequest{Operation: contract.Operation{Room: record.Room, Kind: "pr.open", Args: contract.PrOpenArgs{Title: "Trial", Base: "main", Head: "v2/another"}}})
-	if failure == nil {
-		t.Fatal("unowned head was accepted")
+	if failure == nil || failure.Code != contract.ErrForbidden || !strings.Contains(failure.Message, "push to pr-worker, or to a name that starts with pr-worker-") {
+		t.Fatalf("unowned head: %+v", failure)
 	}
 }
 
