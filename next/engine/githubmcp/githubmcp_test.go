@@ -417,6 +417,9 @@ func TestListedToolsSpellOutTrickyShapes(t *testing.T) {
 		switch tool.Name {
 		case "projects_write":
 			seen++
+			if !strings.Contains(tool.Description, "For a pull request, pass item_id or node_id") {
+				t.Errorf("projects_write description: %s", tool.Description)
+			}
 			var parsed struct {
 				Properties map[string]struct {
 					OneOf      []any          `json:"oneOf"`
