@@ -201,6 +201,12 @@ func decodeEventBody(t EventType, data json.RawMessage) (EventBody, error) {
 			return nil, err
 		}
 		return v, nil
+	case "hook.digest":
+		var v HookDigest
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case "hook.due":
 		var v HookDue
 		if err := json.Unmarshal(data, &v); err != nil {
@@ -393,6 +399,12 @@ func decodeEventBody(t EventType, data json.RawMessage) (EventBody, error) {
 			return nil, err
 		}
 		return v, nil
+	case "tool.failed":
+		var v ToolFailed
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case "transcript.changed":
 		var v TranscriptChanged
 		if err := json.Unmarshal(data, &v); err != nil {
@@ -538,7 +550,7 @@ func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs, error) {
 	}
 }
 
-var eventBodyTypes = []EventType{"account.failed", "account.quota_low", "box.changed", "box.pressure", "checkin.due", "computer.changed", "connect.connector", "conversation.read", "engine.restarted", "git.main_ci_finished", "git.main_updated", "github.ci.finished", "github.comment", "github.issue.changed", "github.issue.closed", "github.issue.opened", "github.label", "github.mention", "github.pr.changed", "github.pr.closed", "github.pr.merged", "github.pr.opened", "goal.ended", "goal.item_changed", "goal.set", "grant.expired", "hook.due", "hook.finished", "host.disk_low", "host.switches_changed", "image.built", "image.failed", "notice.posted", "op.decided", "op.ran", "op.requested", "post.created", "post.sent", "question.answered", "question.asked", "question.withdrawn", "room.deleted", "room.deleting", "room.limits_changed", "room.paused", "room.resumed", "service.changed", "service.failed", "session.closed", "session.compacted", "session.failed", "session.moved", "session.notice", "session.profile_changed", "session.restarted", "session.started", "shell.job.ended", "shell.job.running", "transcript.changed", "turn.activity", "turn.ended", "turn.started", "workflow.ended", "workflow.status_changed", "workflow.step_changed"}
+var eventBodyTypes = []EventType{"account.failed", "account.quota_low", "box.changed", "box.pressure", "checkin.due", "computer.changed", "connect.connector", "conversation.read", "engine.restarted", "git.main_ci_finished", "git.main_updated", "github.ci.finished", "github.comment", "github.issue.changed", "github.issue.closed", "github.issue.opened", "github.label", "github.mention", "github.pr.changed", "github.pr.closed", "github.pr.merged", "github.pr.opened", "goal.ended", "goal.item_changed", "goal.set", "grant.expired", "hook.digest", "hook.due", "hook.finished", "host.disk_low", "host.switches_changed", "image.built", "image.failed", "notice.posted", "op.decided", "op.ran", "op.requested", "post.created", "post.sent", "question.answered", "question.asked", "question.withdrawn", "room.deleted", "room.deleting", "room.limits_changed", "room.paused", "room.resumed", "service.changed", "service.failed", "session.closed", "session.compacted", "session.failed", "session.moved", "session.notice", "session.profile_changed", "session.restarted", "session.started", "shell.job.ended", "shell.job.running", "tool.failed", "transcript.changed", "turn.activity", "turn.ended", "turn.started", "workflow.ended", "workflow.status_changed", "workflow.step_changed"}
 
 func (m BoxMessage) MarshalJSON() ([]byte, error) {
 	if m.Body == nil {
@@ -654,6 +666,7 @@ var eventDocs = map[EventType]string{"account.failed": "",
 	"goal.item_changed":       "",
 	"goal.set":                "records a new goal, an edit or a new holder",
 	"grant.expired":           "",
+	"hook.digest":             "what a digest's Wake delivers: the events its on matched since the last one, each rendered as a wake would be",
 	"hook.due":                "what a scheduled Wake delivers, since a schedule has no event of its own",
 	"hook.finished":           "ends one Run (spec 8.5) and wakes nobody",
 	"host.disk_low":           "a host running low on disk",
@@ -686,6 +699,7 @@ var eventDocs = map[EventType]string{"account.failed": "",
 	"session.started":         "a session starting, with its goal and brief",
 	"shell.job.ended":         "reports a background shell job that ended",
 	"shell.job.running":       "reports a background shell job still running",
+	"tool.failed":             "records one tool call a session's transcript shows failing",
 	"transcript.changed":      "an owner-only live notification; it contains no transcript text",
 	"turn.activity":           "",
 	"turn.ended":              "a session's turn ending",

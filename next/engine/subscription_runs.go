@@ -149,6 +149,14 @@ func (s *Service) fireDue(ctx context.Context) error {
 	}
 	var failures []error
 	for _, sub := range due {
+		if sub.Wake != "" && len(sub.On) > 0 {
+			event, err := s.event(sub.Room, engineSender, contract.HookDigest{Subscription: sub.ID})
+			if err == nil {
+				err = s.store.FireDigest(ctx, sub, event)
+			}
+			failures = append(failures, err)
+			continue
+		}
 		if sub.Wake != "" {
 			event, err := s.event(sub.Room, engineSender, contract.HookDue{Subscription: sub.ID})
 			if err == nil {

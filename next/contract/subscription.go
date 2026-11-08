@@ -57,9 +57,9 @@ type SubscriptionAddRequest struct {
 	Scope   SubscriptionScope `json:"scope" desc:"What the subscription belongs to: session, room or machine. A session's subscription ends when the session closes. Room scope is root's, and machine scope is the owner's."`
 	Room    RoomID            `json:"room,omitempty" desc:"A room_… ID, from your instructions. Omitted, it is your own room."`
 	Session string            `json:"session,omitempty" desc:"With scope session, the session it belongs to: a name in the room, such as upstream-sync, or a ses_… ID."`
-	On      []EventType       `json:"on,omitempty" desc:"Event types that fire it, such as github.pr.opened; dyna subscription events lists them. Give on or every."`
+	On      []EventType       `json:"on,omitempty" desc:"Event types that fire it, such as github.pr.opened; dyna subscription events lists them. Give on, every, or both for a digest: with both, the matching events gather and each every that has any wakes once with all of them."`
 	Where   []string          `json:"where,omitempty" desc:"Filters on github.* and git.* events in on: key=value, key!=value or text~value, with key repo, author, actor, label, kind or number. kind is a change kind of github.pr.changed or github.issue.changed, such as pushed, ci_failed, ci_cancelled or merged; on github.ci.finished and git.main_ci_finished it is the result: success, failure or cancelled. All must hold."`
-	Every   Duration          `json:"every,omitempty" desc:"A schedule, as a duration string such as 1h, 15m or 90s, of at least 1m. Give on or every."`
+	Every   Duration          `json:"every,omitempty" desc:"A schedule, as a duration string such as 1h, 15m or 90s, of at least 1m. Give on, every, or both for a digest, which needs wake."`
 	Wake    string            `json:"wake,omitempty" desc:"The session to wake: a name in the room, such as upstream-sync, or a ses_… ID. Give wake or run."`
 	Run     *RunSpec          `json:"run,omitempty" desc:"A command for a small box: command, image (base, or an image folder of the room's default repository), size (small or agent), and optional host and files. Owner or root only. Give wake or run."`
 }
@@ -170,6 +170,13 @@ type HookDue struct {
 	Subscription SubscriptionID `json:"subscription"`
 }
 
+// HookDigest is what a digest's Wake delivers: the events its on matched since the last one, each rendered as a wake would be.
+type HookDigest struct {
+	Subscription SubscriptionID `json:"subscription"`
+	Events       []string       `json:"events"`
+	More         int            `json:"more,omitempty"` // events gathered past the ones listed
+}
+
 // NoticePosted is an engine notice to a room, which the default subscription wakes root on.
 type NoticePosted struct {
 	Text string `json:"text"`
@@ -179,5 +186,7 @@ func (HookFinished) EventType() EventType { return "hook.finished" }
 func (HookFinished) isEventBody()         {}
 func (HookDue) EventType() EventType      { return "hook.due" }
 func (HookDue) isEventBody()              {}
+func (HookDigest) EventType() EventType   { return "hook.digest" }
+func (HookDigest) isEventBody()           {}
 func (NoticePosted) EventType() EventType { return "notice.posted" }
 func (NoticePosted) isEventBody()         {}

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
@@ -89,5 +90,30 @@ func TestTranscriptAppendRewindsABoxWhoseCopyIsGone(t *testing.T) {
 				t.Fatalf("fetch = %q, %v", fetched.Bytes, e)
 			}
 		})
+	}
+}
+
+func TestTranscriptRecordsFailedToolCalls(t *testing.T) {
+	s, ctx, caller := transcriptCaller(t)
+	now := s.now().UTC().Format(time.RFC3339Nano)
+	old := s.now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	call := `{"type":"message","timestamp":"` + now + `","message":{"role":"assistant","model":"gpt-x","content":[{"type":"toolCall","id":"c1","name":"read","arguments":{"path":"gone.md"}}]}}` + "\n"
+	result := `{"type":"message","timestamp":"` + now + `","message":{"role":"toolResult","toolCallId":"c1","toolName":"read","isError":true,"content":[{"type":"text","text":"ENOENT: gone.md"}]}}` + "\n"
+	stale := `{"type":"message","timestamp":"` + old + `","message":{"role":"toolResult","toolCallId":"c0","toolName":"bash","isError":true,"content":[{"type":"text","text":"old"}]}}` + "\n"
+	// The call and its result arrive in separate appends, as they do while a tool runs.
+	if _, e := appendTranscript(s, ctx, caller, "s.jsonl", 0, stale+call); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := appendTranscript(s, ctx, caller, "s.jsonl", int64(len(stale+call)), result); e != nil {
+		t.Fatal(e)
+	}
+	session, err := s.store.Session(ctx, caller.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := eventsOf[contract.ToolFailed](t, s, ctx, session.Room)
+	want := contract.ToolFailed{Session: caller.Session, Tool: "read", Model: "gpt-x", Args: `{"path":"gone.md"}`, Error: "ENOENT: gone.md"}
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("got %+v, want %+v", got, want)
 	}
 }

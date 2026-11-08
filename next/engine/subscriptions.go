@@ -69,11 +69,14 @@ func checkEvery(every contract.Duration) (time.Duration, *contract.Error) {
 }
 
 func checkSubscriptionShape(req contract.SubscriptionAddRequest) *contract.Error {
-	if (len(req.On) > 0) == (req.Every != "") {
-		return invalid("set exactly one of on and every")
+	if len(req.On) == 0 && req.Every == "" {
+		return invalid("set on, every, or both for a digest")
 	}
 	if (req.Wake != "") == (req.Run != nil) {
 		return invalid("set exactly one of wake and run")
+	}
+	if len(req.On) > 0 && req.Every != "" && req.Run != nil {
+		return invalid("a digest (on and every together) wakes a session; set wake, not run")
 	}
 	if req.Every != "" {
 		if _, problem := checkEvery(req.Every); problem != nil {
@@ -94,7 +97,7 @@ func checkSubscriptionShape(req contract.SubscriptionAddRequest) *contract.Error
 			return invalid(err.Error())
 		}
 	}
-	if len(req.Where) > 0 && (req.Every != "" || slices.ContainsFunc(req.On, func(kind contract.EventType) bool {
+	if len(req.Where) > 0 && (len(req.On) == 0 || slices.ContainsFunc(req.On, func(kind contract.EventType) bool {
 		return !strings.HasPrefix(string(kind), "github.") && !strings.HasPrefix(string(kind), "git.")
 	})) {
 		return invalid("where filters github.* and git.* events: dyna subscription events lists them")
