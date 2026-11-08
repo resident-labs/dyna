@@ -51,8 +51,8 @@ func TestHostListShowsBothSwitches(t *testing.T) {
 		{Name: "worker", DiskBytes: 100 << 30, DiskUsed: 10 << 30, Agents: true},
 	}}
 	out := runCLI(t, f, "host", "list")
-	want := "control-plane\t40 GiB\t100 GiB\tok\n" +
-		"pve\t10 GiB\t100 GiB\tok\tagents off\tci on\n" +
+	want := "control-plane\t40 GiB\t100 GiB\tok\tengine machine: host exec and room folders only\n" +
+		"pve\t10 GiB\t100 GiB\tok\tagents off\tci on (scale 0, 0 runners now)\n" +
 		"worker\t10 GiB\t100 GiB\tok\tagents on\tci off\n"
 	if out != want {
 		t.Fatalf("output=%q", out)

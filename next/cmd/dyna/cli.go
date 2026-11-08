@@ -630,10 +630,17 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	}}
 	limitHost.Flags().StringSliceVar(&limitRooms, "room", nil, "Room ID this host serves (repeatable)")
 	limitHost.Flags().BoolVar(&limitAll, "all", false, "Serve every room")
-	list := &cobra.Command{Use: "list", Args: cobra.NoArgs, Short: "Show each host's disk use", RunE: func(cmd *cobra.Command, _ []string) error {
+	list := &cobra.Command{Use: "list", Args: cobra.NoArgs, Short: "Show each host's disk use, switches, CI scale and runners", RunE: func(cmd *cobra.Command, _ []string) error {
 		r, err := getClient().HostList(cmd.Context(), contract.HostListRequest{})
 		if err != nil {
 			return err
+		}
+		// The control plane is the engine's own machine, which is usually also an added host; it places no boxes or runners.
+		engine := ""
+		for _, h := range r.Hosts {
+			if h.EngineHost {
+				engine = string(h.Name)
+			}
 		}
 		for _, h := range r.Hosts {
 			state, used, total := "ok", humanize.IBytes(uint64(h.DiskUsed)), humanize.IBytes(uint64(h.DiskBytes))
@@ -665,8 +672,19 @@ func addCLI(root *cobra.Command, getClient func() client) {
 			}
 			if h.ExecOnly {
 				state += "\texec only"
-			} else if h.Name != contract.ControlPlane {
+			} else if h.Name == contract.ControlPlane {
+				state += "\tengine machine: host exec and room folders only"
+				if engine != "" {
+					state += "; same machine as " + engine
+				}
+			} else {
 				state += "\tagents " + onOff(h.Agents) + "\tci " + onOff(h.CI)
+				if h.CI {
+					state += fmt.Sprintf(" (scale %d, %d runners now)", h.CIScale, h.Runners)
+				}
+				if h.EngineHost {
+					state += "\tengine host"
+				}
 			}
 			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n", h.Name, used, total, state); err != nil {
 				return err
