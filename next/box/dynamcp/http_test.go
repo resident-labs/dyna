@@ -25,7 +25,7 @@ func TestStreamCancellationAndTypedErrors(t *testing.T) {
 			t.Errorf("method = %s", method)
 		}
 		var request contract.SessionStartRequest
-		if err := json.Unmarshal(body, &request); err != nil || request.ClientID != "retry" {
+		if err := json.Unmarshal(body, &request); err != nil || request.ClientID != "retry" || request.Host != "named" {
 			t.Errorf("session replay key: %+v, %v", request, err)
 		}
 		close(started)
@@ -35,7 +35,7 @@ func TestStreamCancellationAndTypedErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/dyna/", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"session","arguments":{"action":"start","room":"r","name":"n","profile":"p","clientId":"retry"},"_meta":{"progressToken":"token"}}}`))
+	req := httptest.NewRequest(http.MethodPost, "/dyna/", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"session","arguments":{"action":"start","room":"r","name":"n","profile":"p","clientId":"retry","host":"named"},"_meta":{"progressToken":"token"}}}`))
 	req.Header.Set("Accept", "text/event-stream")
 	w := httptest.NewRecorder()
 	done := make(chan struct{})

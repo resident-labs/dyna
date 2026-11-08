@@ -532,6 +532,7 @@ type SessionStartRequest struct {
 	Brief    string      `json:"brief,omitempty"`
 	Size     BoxSizeName `json:"size,omitempty"`
 	SameHost bool        `json:"sameHost,omitempty"`
+	Host     HostName    `json:"host,omitempty"`
 	GPU      GPUGiB      `json:"gpu,omitempty" desc:"GiB of GPU memory the box needs on one card; true means 1. The session waits for a host with a card that has that much unclaimed. GPU memory is not limited per box, so a box that uses more makes other boxes on the card fail their CUDA allocations, and nothing stops it. Fails with no_gpu when no host reports a GPU and gpu_too_large when no card is big enough."`
 	Compose  string      `json:"compose,omitempty"`
 }

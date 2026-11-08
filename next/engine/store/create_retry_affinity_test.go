@@ -17,7 +17,7 @@ func TestSameHostStartUsesTypedPlacementAndKeepsVisibleFailure(t *testing.T) {
 	pending := event
 	pending.ID = "same-host-pending"
 	pending.Body = contract.BoxChanged{Box: "b-fresh", Session: "fresh", To: contract.BoxPending}
-	_, err := r.s.StartSession(r.ctx, Session{ID: "fresh", Room: "r", Name: "fresh", Profile: "p", Box: "b-fresh"}, "worker", contract.BoxSizeAgent, "", event, pending, "", true, "", 10)
+	_, err := r.s.StartSession(r.ctx, Session{ID: "fresh", Room: "r", Name: "fresh", Profile: "p", Box: "b-fresh"}, "worker", contract.BoxSizeAgent, "", event, pending, "", true, "", "", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestSameHostStartUsesTypedPlacementAndKeepsVisibleFailure(t *testing.T) {
 	b, _ := r.s.Box(r.ctx, "b-fresh")
 	r.finishAllocation(b, contract.CauseCreateFailed, "original visible failure", "")
 	after, _ := r.s.Box(r.ctx, b.ID)
-	if after.State != contract.BoxFailed || after.Host != "arch" || !strings.Contains(after.Reason, "original visible failure; automatic other-host retry skipped: initial sameHost placement") {
+	if after.State != contract.BoxFailed || after.Host != "arch" || !strings.Contains(after.Reason, "original visible failure; automatic other-host retry skipped: initial pinned placement") {
 		t.Fatalf("sameHost failure changed or moved: %+v", after)
 	}
 }

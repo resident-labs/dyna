@@ -13,12 +13,12 @@ type createRetryEligibility uint8
 const (
 	createRetryUnknown createRetryEligibility = iota
 	createRetryUnbound
-	createRetrySameHost
+	createRetryPinned
 	createRetryUsed
 )
 
 // allocationRetryEligibility reads structured provenance, never a human reason. StartSession writes an initial pending
-// BoxChanged in the box's transaction and assigns its Host only for sameHost. An explicit owner restart ends that initial
+// BoxChanged in the box's transaction and assigns its Host only for pinned placement (sameHost or an explicit host). An explicit owner restart ends that initial
 // affinity. Events survive as long as the room's boxes; absent legacy/import provenance is unknown, not permission to move.
 // Its unused proof is shared with volume cleanup and covers the box's whole recorded history, never image or created_at.
 func allocationRetryEligibility(ctx context.Context, tx *sql.Tx, id contract.BoxID, room contract.RoomID) (createRetryEligibility, error) {
@@ -32,7 +32,7 @@ func allocationRetryEligibility(ctx context.Context, tx *sql.Tx, id contract.Box
 		return createRetryUnknown, err
 	}
 	if !restarted && host != "" {
-		return createRetrySameHost, nil
+		return createRetryPinned, nil
 	}
 	proof, err := boxUseEvidence(ctx, tx, id, room)
 	if err != nil {
@@ -49,7 +49,7 @@ func allocationRetryEligibility(ctx context.Context, tx *sql.Tx, id contract.Box
 }
 
 // A quarantine can detach only allocations known to be unpinned and unused. The same eligibility boundary owns ordinary
-// waiting creates and a terminal failure's retry; sameHost must not disappear when some other allocation fails.
+// waiting creates and a terminal failure's retry; pinned placement must not disappear when some other allocation fails.
 // A consumed retry keeps its selected second host even if that host is quarantined; it may never become a third placement.
 func detachWaitingCreates(ctx context.Context, tx *sql.Tx, host contract.HostName) error {
 	rows, err := tx.QueryContext(ctx, `SELECT b.id,s.room,b.slice FROM boxes b JOIN sessions s ON s.id=b.session WHERE b.host=? AND b.state='pending' AND b.image='' AND b.create_retry_host=''`, host)
