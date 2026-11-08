@@ -461,6 +461,16 @@ func (h *scripted) Start(ctx context.Context, id contract.TurnID, inputs []contr
 		result = contract.TurnEnded{Outcome: contract.TurnFailed, Error: "Scripted development failure", Cause: contract.CauseModelFailed}
 	}
 	h.Turns = []fakeharness.Turn{{Result: result}}
+	// A [stream] turn streams a reply's reasoning and text live, and a [compact] turn a compaction's summary, then each runs
+	// until it is stopped, so the thread's live output can be seen.
+	if reply, compact := marked(text, "[stream]"), marked(text, "[compact]"); reply || compact {
+		h.Turns[0].Release = make(chan struct{})
+		begin := started
+		started = func() {
+			begin()
+			go streamDraft(ctx, h.box, id, compact)
+		}
+	}
 	// A [wait] turn runs until it is stopped, so the working state and its activity labels can be seen. A [lost] turn
 	// loses its box after those labels: the turn stays open, and the reconciler marks the box lost, then failed.
 	if lost := marked(text, "[lost]"); lost || marked(text, "[wait]") {
@@ -482,6 +492,53 @@ func (h *scripted) Start(ctx context.Context, id contract.TurnID, inputs []contr
 		}
 	}
 	return h.Harness.Start(ctx, id, inputs, started)
+}
+
+// devReasoning, devReply and devSummary are what [stream] and [compact] turns stream, a few words every 250 ms.
+const (
+	devReasoning = "**Checking the stream path.** The box already sees text deltas from PiG, so the question is only where the engine keeps them. Keeping them in memory means a page that opens late still starts from what was written so far."
+	devReply     = "I traced the slow turn. The model call itself is fine: it has been streaming for six minutes on a 240k-token context, which is normal at high reasoning.\n\nWhat made it look frozen:\n\n1. The thread only showed finished transcript items.\n2. The working line said `waiting for model` with no other sign of progress.\n\nI'll keep the change small: the box batches the text every 250 ms, the engine keeps the current draft in memory, and only a page that has this session open receives it."
+	devSummary   = "## Goal\nStream a session's model output live into its thread in the web UI, so long model calls and compactions are visibly progressing.\n\n## Progress\n- Read how the activity label reaches the web: box `Activity` callbacks, `turn.activity`, the room store and `workingLine`.\n- Wrote the design in `/box/shared/design/dm-streaming.md` and posted it to root.\n- Built the box buffer: masked, held-back last word, 250 ms ticks with a 2 KB early send.\n\n## Next\n- Engine: keep the draft in memory and send it only to streams that watch the session.\n- Web: show it under the working line and hand over to the transcript item without a flicker."
+)
+
+func streamDraft(ctx context.Context, client *agent.Client, id contract.TurnID, compact bool) {
+	kind, parts := contract.DraftReply, []struct {
+		reasoning bool
+		text      string
+	}{{true, devReasoning}, {false, devReply}}
+	if compact {
+		kind = contract.DraftCompaction
+		parts = parts[:0]
+		parts = append(parts, struct {
+			reasoning bool
+			text      string
+		}{false, devSummary})
+		_ = client.TurnActivity(ctx, contract.TurnActivityRequest{Turn: id, Kind: contract.ActivityCompaction, Label: "compacting the conversation"})
+	} else {
+		_ = client.TurnActivity(ctx, contract.TurnActivityRequest{Turn: id, Kind: contract.ActivityModelWait, Label: "waiting for model"})
+	}
+	started := time.Now().Truncate(time.Millisecond)
+	for _, part := range parts {
+		words := strings.SplitAfter(part.text, " ")
+		sent := 0
+		for len(words) > 0 {
+			n := min(len(words), 3)
+			chunk := strings.Join(words[:n], "")
+			words = words[n:]
+			edit := &contract.DraftEdit{From: sent, Text: chunk}
+			sent += len([]rune(chunk)) // the dev texts are all in the Basic Multilingual Plane
+			draft := contract.Draft{Message: 1, Kind: kind, Started: started}
+			if part.reasoning {
+				draft.Reasoning = edit
+			} else {
+				draft.Text = edit
+			}
+			if client.TurnActivity(ctx, contract.TurnActivityRequest{Turn: id, Draft: &draft}) != nil {
+				return
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
+	}
 }
 
 type boxes struct {

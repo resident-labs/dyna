@@ -185,7 +185,8 @@ type Service interface {
 	HookTrackIssue(context.Context, contract.RoomID, string, contract.IssueTrackRequest) (contract.IssueTrackResponse, *contract.Error)
 	// Events atomically subscribes after seq, including committed events not yet
 	// delivered. The producer closes the channel when ctx ends.
-	Events(context.Context, contract.Principal, contract.RoomID, int64) (<-chan contract.Event, *contract.Error)
+	// Events streams a room's events, or the owner's. A watched session adds its live drafts (TurnDraft), for the owner only.
+	Events(context.Context, contract.Principal, contract.RoomID, int64, contract.SessionID) (<-chan contract.Event, *contract.Error)
 	// BoxChannel subscribes atomically and first emits the current durable
 	// delivery and turn state. Reconnects repeat unfinished work.
 	BoxChannel(context.Context, contract.Principal, string) (<-chan contract.BoxMessage, *contract.Error)

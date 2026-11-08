@@ -7,11 +7,20 @@ import { boxFailures, countOf, statusOf, turnFailures, type BoxFailure, type Cou
 import { prKey } from "./feed.ts";
 import { startLabel } from "./start.ts";
 import type { BoxStartStatus } from "./contract.gen.ts";
+import type { DraftEdit, DraftKind } from "./contract.gen.ts";
 import type { ActivityKind, BoxState, Conversation, FailureCause, Decision, Event, Goal, OpRequested, OpResult, OpState, PrSummary, Question, SessionStarted, SessionWaiting, WorkflowInfo, WorkflowStatusLine, WorkflowStep } from "./contract.gen.ts";
 
 
 // An operation of the room as the Requests panel shows it: its card, then its decision and run.
 export type Request = OpRequested & { state: OpState; decision?: Decision; result?: OpResult };
+
+// One model call's output so far: a reply, or a compaction's summary. started is when the call started, on the box's clock.
+export type LiveDraft = { turn: string; message: number; kind: DraftKind; started: string; text: string; reasoning: string };
+
+// An edit replaces a part from its UTF-16 offset on, as JavaScript strings count.
+export function applyDraftEdit(part: string, edit?: DraftEdit | null): string {
+  return edit ? part.slice(0, edit.from) + edit.text : part;
+}
 
 // A read position's key: "" for the feed, the session id for its DM.
 const readKey = (conversation: Conversation) => conversation.kind === "dm" ? conversation.session ?? "" : "";
@@ -36,6 +45,13 @@ export class RoomStore {
   readonly activity = new SvelteMap<string, string>();
   // The kind of that activity, set and cleared with it. An engine that predates kinds sends none, which reads as a plain activity.
   readonly activityKinds = new SvelteMap<string, ActivityKind>();
+  // The running model call's output per watched session, as the engine streams it: never stored, and only for the
+  // sessions an open thread watches. A new call of the turn replaces it; the thread hides it once the transcript has the call.
+  readonly drafts = new SvelteMap<string, LiveDraft>();
+  // The threads open on each session, oldest first; the stream watches the newest one's session.
+  private readonly watchers: string[] = [];
+  private watching?: string;
+  private rewatching = false;
   // The running turn's labels so far, newest last, kept while the page is open: the engine keeps only the latest one,
   // so a page opened mid-turn starts from that. A DM shows them as the turn's steps.
   readonly steps = new SvelteMap<string, string[]>();
@@ -198,7 +214,14 @@ export class RoomStore {
     this.changed();
     if (this.closed || !this.loaded) return;
     void this.loadPRs();
-    this.stopStream = this.connect(this.room, () => this.head, event => this.apply(event), undefined, undefined, (reconnect = false) => {
+    this.stopStream = this.listen();
+  }
+
+  // The room stream, watching the session of the newest open thread, if any.
+  private listen(): () => void {
+    this.watching = this.watchers.at(-1);
+    const watch = this.watching;
+    return this.connect(this.room, () => this.head, event => this.apply(event), undefined, undefined, (reconnect = false) => {
       if (this.closed) return;
       // Positions are live-only: another device may read between load's snapshots
       // and subscription. Repair that gap on every hello, including the first.
@@ -208,6 +231,30 @@ export class RoomStore {
       void this.readWorkflows();
       this.refreshWaits();
       for (const page of this.runPages.values()) page.step();
+    }, watch);
+  }
+
+  // An open thread watches its session, so the stream carries that session's live output; the returned function stops.
+  // Moving from one thread to another reconnects once, after both changed.
+  watch(session: string): () => void {
+    this.watchers.push(session);
+    this.rewatch();
+    return () => {
+      const index = this.watchers.lastIndexOf(session);
+      if (index >= 0) this.watchers.splice(index, 1);
+      if (!this.watchers.includes(session)) this.drafts.delete(session);
+      this.rewatch();
+    };
+  }
+
+  private rewatch(): void {
+    if (this.rewatching) return;
+    this.rewatching = true;
+    queueMicrotask(() => {
+      this.rewatching = false;
+      if (this.closed || !this.loaded || this.watchers.at(-1) === this.watching) return;
+      this.stopStream();
+      this.stopStream = this.listen();
     });
   }
 
@@ -352,6 +399,15 @@ export class RoomStore {
       }
       return;
     }
+    // A draft has seq 0 too. It reaches only the watched session's thread; an edit of an earlier call, or of a turn that is
+    // not running, is stale.
+    if (event.type === "turn.draft") {
+      const { session, turn, draft } = event.body, current = this.drafts.get(session);
+      if (this.turns.get(session) !== turn || current?.turn === turn && current.message > draft.message) return;
+      const base = current?.turn === turn && current.message === draft.message ? current : { turn, message: draft.message, kind: draft.kind, started: draft.started, text: "", reasoning: "" };
+      this.drafts.set(session, { ...base, text: applyDraftEdit(base.text, draft.text), reasoning: applyDraftEdit(base.reasoning, draft.reasoning) });
+      return;
+    }
     // A step row and a status line have seq 0 too. They reach an open run page and the run's counts and line, never a window.
     if (event.type === "workflow.step_changed") {
       const { session, step, steps, running, failed } = event.body, run = this.workflows.get(session);
@@ -390,6 +446,7 @@ export class RoomStore {
         break;
       case "session.closed":
         this.sessions.delete(event.body.session);
+        this.drafts.delete(event.body.session);
         this.activity.delete(event.body.session);
         this.activityKinds.delete(event.body.session);
         this.steps.delete(event.body.session);
@@ -440,6 +497,7 @@ export class RoomStore {
         break;
       case "turn.started":
         this.turns.set(event.body.session, event.body.turn);
+        this.drafts.delete(event.body.session);
         this.activity.delete(event.body.session);
         this.activityKinds.delete(event.body.session);
         this.steps.delete(event.body.session);

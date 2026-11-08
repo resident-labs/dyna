@@ -105,7 +105,7 @@ export function subject(event: Event): string | undefined {
 // Events with no row. Goals show in About and the session list; failures show on the box and turn events they report.
 // A pull request's rows come from github.pr.changed. The typed PR events, issue events, feed items, git.main_updated and git.main_ci_finished exist for subscribers and sessions.
 // A running job's status is for the session that owns the job.
-const unshown = new Set<Event["type"]>(["shell.job.running", "workflow.step_changed", "workflow.status_changed", "session.profile_changed", "transcript.changed", "session.failed", "goal.set", "goal.item_changed", "goal.ended", "checkin.due", "github.pr.merged", "github.pr.closed", "github.ci.finished", "git.main_updated", "git.main_ci_finished", "github.issue.opened", "github.comment", "github.label", "github.mention", "github.issue.changed", "github.issue.closed", "service.changed", "service.failed"]);
+const unshown = new Set<Event["type"]>(["shell.job.running", "turn.draft", "workflow.step_changed", "workflow.status_changed", "session.profile_changed", "transcript.changed", "session.failed", "goal.set", "goal.item_changed", "goal.ended", "checkin.due", "github.pr.merged", "github.pr.closed", "github.ci.finished", "git.main_updated", "git.main_ci_finished", "github.issue.opened", "github.comment", "github.label", "github.mention", "github.issue.changed", "github.issue.closed", "service.changed", "service.failed"]);
 
 // Builds the rows of one conversation. Posts and final answers become post rows, a
 // failed turn and a request are each their own row, and all other events between them fold into one work row.
@@ -307,7 +307,7 @@ export const eventGroups: Record<Event["type"], string> = {
   "connect.connector": "Connect connector changes", "account.failed": "account failures", "account.quota_low": "account quota alerts",
   "post.sent": "sent posts", "post.created": "posts", "session.started": "sessions started", "session.closed": "sessions closed", "session.compacted": "compactions",
   "session.restarted": "boxes replaced", "session.moved": "sessions moved", "session.profile_changed": "profiles changed",
-  "turn.started": "turns started", "turn.ended": "turns ended", "turn.activity": "turn updates", "transcript.changed": "transcript updates",
+  "turn.started": "turns started", "turn.ended": "turns ended", "turn.activity": "turn updates", "turn.draft": "live model output", "transcript.changed": "transcript updates",
   "computer.changed": "computer changes", "box.changed": "box changes", "box.pressure": "memory warnings",
   "room.paused": "pauses", "room.resumed": "resumes", "room.limits_changed": "room limits changed", "room.deleting": "room deletions", "room.deleted": "room deletions",
   "op.requested": "requests", "op.decided": "requests decided", "op.ran": "requests run",
@@ -515,6 +515,7 @@ export function describe(event: Event, name: Name): string {
     // Live only: the room store keeps it out of every feed window.
     case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "host.disk_low": case "conversation.read": return "";
     case "turn.activity": return event.body.label;
+    case "turn.draft": return "";
     case "shell.job.running": return "";
     case "shell.job.ended": {
       const who = name(event.body.session), job = event.body.description ? `job "${event.body.description}"` : "job";

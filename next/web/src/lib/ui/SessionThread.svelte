@@ -7,7 +7,8 @@
   import { watchTranscripts } from "../stream.ts";
   import { sourceLabel } from "../source.ts";
   import type { Attachment, Principal, RoomID, PostRequest, TranscriptInput, TranscriptItem, TranscriptPart, TranscriptReadResponse, TranscriptTurn, TranscriptPage } from "../contract.gen.ts";
-  import type { RoomStore } from "../room.svelte.ts";
+  import type { LiveDraft, RoomStore } from "../room.svelte.ts";
+  import TranscriptIcon from "./TranscriptIcon.svelte";
   import Icon from "./Icon.svelte";
   import Avatar from "./Avatar.svelte";
   import CollapsibleBody from "./CollapsibleBody.svelte";
@@ -22,7 +23,7 @@
   import PostTarget from "./PostTarget.svelte";
   import QuestionCard from "./QuestionCard.svelte";
   import EngineRestartNotice from "./EngineRestartNotice.svelte";
-  import { attemptFailedNote, compactionNote, engineEventsNote, finalTimelineItem, foldInputRuns, ownPost, postDestination, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief, workingLine } from "../timeline.ts";
+  import { attemptFailedNote, compactionNote, engineEventsNote, finalTimelineItem, foldInputRuns, ownPost, postDestination, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, shownDraft, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief, workingLine } from "../timeline.ts";
 
   // With step, the thread reads one worker of a crew: its transcript alone, and nothing that was sent to the crew.
   let { hasRoom, session, step, roomName, store, operate, unsent, onunsent, onsettled, onpostlocation, navigate, startingBrief, clock = Date.now }: { hasRoom: (room: RoomID) => boolean; startingBrief?: string; session: string; step?: string; roomName: string; store: RoomStore; operate: boolean; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
@@ -53,6 +54,16 @@
     const timer = setInterval(() => { now = clock(); }, 1000);
     return () => clearInterval(timer);
   });
+  // The running call's live output, until the transcript holds the call.
+  let draft = $derived(step || stalled ? undefined : shownDraft(store.drafts.get(session), turns));
+  // A long reasoning or summary shows its newest lines; the fade marks that more is above.
+  let clipped: Record<string, boolean> = $state({});
+  const measureTail = (key: string) => (node: HTMLElement) => {
+    const observer = new ResizeObserver(() => { clipped[key] = node.scrollHeight > node.clientHeight + 1; });
+    observer.observe(node);
+    if (node.firstElementChild) observer.observe(node.firstElementChild);
+    return () => observer.disconnect();
+  };
   let loading = $state(false), failed = $state(false);
   let pending = false;
   let scroller: HTMLDivElement, content: HTMLDivElement;
@@ -142,11 +153,12 @@
   onMount(() => {
     document.addEventListener("visibilitychange", markRead);
     const stop = watchTranscripts(id => { if (!id || id === session) void load(); });
+    const unwatch = step ? () => {} : store.watch(session);
     const sizes = new ResizeObserver(resized);
     sizes.observe(scroller);
     sizes.observe(content);
     void load();
-    return () => { destroyed = true; cancelAnimationFrame(positionFrame); stop(); sizes.disconnect(); document.removeEventListener("visibilitychange", markRead); };
+    return () => { destroyed = true; cancelAnimationFrame(positionFrame); stop(); unwatch(); sizes.disconnect(); document.removeEventListener("visibilitychange", markRead); };
   });
   const paging = new Set<string>();
   type PageKind = "items" | "posts" | "older";
@@ -337,6 +349,26 @@
   {:else}{@render inbound(key, input.from, input.at, body, !!input.attachments?.length, input.source)}{/if}
 {/snippet}
 
+<!-- The model's output as it streams. A reply sits where its transcript items will land; reasoning shows its newest lines. -->
+{#snippet liveReply(live: LiveDraft)}
+  {#if live.reasoning}
+    <div class="draft-thought">
+      <span class="slot"><TranscriptIcon kind="thinking" /></span>
+      <div class="draft-tail" class:clipped={clipped.reasoning} {@attach measureTail("reasoning")}><Markdown text={live.reasoning} /></div>
+    </div>
+  {/if}
+  {#if live.text}<div class="agent-message" data-draft><Markdown rhythm="thread" text={live.text} source={{ key: "draft", from: { kind: "session", session }, at: live.started }} /></div>{/if}
+{/snippet}
+
+<!-- A compaction's summary as it is written, under the line that says the conversation is compacting. -->
+{#snippet liveSummary(live: LiveDraft)}
+  {#if live.text || live.reasoning}
+    <div class="draft-summary" data-draft>
+      <div class="draft-tail" class:clipped={clipped.summary} {@attach measureTail("summary")}><Markdown text={live.text || live.reasoning} /></div>
+    </div>
+  {/if}
+{/snippet}
+
 {#snippet dayMark(at: string, before?: string)}
   {#if !before || !sameDay(before, at)}<p class="day">{dayLabel(at, clock())}</p>{/if}
 {/snippet}
@@ -387,7 +419,9 @@
         {/each}
         {#if turn.outcome === "failed"}<div class="failure"><span class="slot"><Icon name="warning" size={16} /></span>{turn.cause ? causes[turn.cause] : "The turn failed"}</div>
         {:else if turn.outcome === "stopped"}<p class="muted turn-note">Stopped</p>{/if}
+        {#if draft?.turn === turn.id && draft.kind === "reply"}{@render liveReply(draft)}{/if}
         {#if !turn.ended && !stalled && !(turn.items ?? []).some(item => timelineItemRunning(item, false))}<p class="muted turn-note"><span class="slot"><span class="spinner" aria-hidden="true"></span></span>{workingLine(turn.started, now, store.activityKinds.get(session))}</p>{/if}
+        {#if draft?.turn === turn.id && draft.kind === "compaction"}{@render liveSummary(draft)}{/if}
       </article>
     {/each}
     <!-- A question waits at the end of the thread. Once answered, it is part of the input that answer becomes. -->
@@ -454,6 +488,13 @@
   .spinner { width: 12px; height: 12px; border: 1.5px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .muted { color: var(--muted); }
+  /* Live output reads like the rows it becomes: reasoning like a thought, a summary as quiet text under its line. */
+  .draft-thought { display: flex; align-items: flex-start; gap: 6px; color: var(--muted); font-size: 14px; line-height: 1.625; }
+  .draft-thought .draft-tail { flex: 1; padding: 2px 0; }
+  .draft-summary { margin-left: 30px; padding-left: 12px; border-left: 2px solid var(--line); color: var(--muted); font-size: 13.5px; line-height: 1.55; }
+  /* The newest lines stay in view: the column grows from the bottom, so what overflows is the oldest text. */
+  .draft-tail { display: flex; flex-direction: column-reverse; min-width: 0; max-height: 10lh; overflow: hidden; }
+  .draft-tail.clipped { mask-image: linear-gradient(to bottom, transparent, var(--text) 3lh); }
   .empty { margin: 0; text-align: center; }
   p { overflow-wrap: anywhere; line-height: 1.45; }
   /* A fast load shows nothing; a slow one shows the shape of the thread. */

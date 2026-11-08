@@ -39,6 +39,7 @@ type Session struct {
 	computer      *computerState
 	shell         *shellWatch
 	terminals     int
+	draft         *draft
 }
 
 // Subscription uses mu to serialize sends with close.
@@ -46,6 +47,7 @@ type Subscription struct {
 	mu     sync.Mutex
 	ch     chan contract.Event
 	closed bool
+	watch  contract.SessionID // the session whose drafts this stream carries; set before it is published
 }
 
 func New(deliver func(map[contract.SessionID]struct{})) *Live {
@@ -77,6 +79,10 @@ func (l *Live) Publish(room contract.RoomID, event contract.Event, ownerOnly boo
 		}
 	}
 	l.mu.Unlock()
+	l.send(targets, event)
+}
+
+func (l *Live) send(targets []*Subscription, event contract.Event) {
 	for _, sub := range targets {
 		sub.mu.Lock()
 		if !sub.closed {

@@ -23,7 +23,8 @@ function reportStreamState(up: boolean) { for (const listener of streamStateList
 let onHello: (hello: StreamHello) => void = () => {};
 export function watchHello(listener: (hello: StreamHello) => void): void { onHello = listener; }
 
-// Without a room, the owner stream carries the attention events of every room.
+// Without a room, the owner stream carries the attention events of every room. A room stream that watches a session also
+// carries that session's live model output (turn.draft).
 export function stream(
   room: string | undefined, after: () => number, apply: (event: Event) => void,
   factory: EventFactory = url => new EventSource(url),
@@ -32,6 +33,7 @@ export function stream(
     return () => clearTimeout(id);
   },
   opened: (reconnect?: boolean) => void = () => {},
+  watch?: string,
 ): () => void {
   let source: EventConnection;
   let cancel = () => {};
@@ -41,7 +43,7 @@ export function stream(
   function connect() {
     const reconnect = attempted;
     attempted = true;
-    source = factory(`/v1/events?${new URLSearchParams({ ...(room && { room }), after: String(after()) })}`);
+    source = factory(`/v1/events?${new URLSearchParams({ ...(room && { room }), after: String(after()), ...(room && watch && { watch }) })}`);
     source.addEventListener("hello", message => {
       // Each connection may have missed events the server does not replay, such as read positions.
       opened(reconnect);

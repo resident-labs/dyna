@@ -257,3 +257,12 @@ export function formatTimelineDuration(durationMs: number): string {
   if (seconds > 0) parts.push(`${seconds}s`);
   return parts.join(" ");
 }
+
+// Dyna: A running model call's live output shows until the transcript holds the call. The call's entry is written after
+// it started, so any item of its turn at or after that start replaces it, in the same render; an ended turn shows none.
+export function shownDraft<D extends { turn: string; started: string }>(draft: D | undefined, turns: Pick<TranscriptTurn, "id" | "ended" | "items">[]): D | undefined {
+  const running = draft && turns.find(turn => turn.id === draft.turn);
+  if (!draft || !running || running.ended) return undefined;
+  const started = Date.parse(draft.started);
+  return (running.items ?? []).some(item => Date.parse(item.at) >= started) ? undefined : draft;
+}

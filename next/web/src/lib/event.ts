@@ -45,6 +45,8 @@ const issueChanges = nullable(array(object({ issue: object({ repo: string, numbe
   kinds: optional(nullable(array(prChangeKind))), outside: boolean, comments: changeComments, moreComments: optional(number), actions })));
 const prSummary = object({ repo: string, number: number, url: string, title: string, author: string, session: string, draft: boolean, state: oneOf("open", "merged", "closed"), head: string,
   review: oneOf("", "approved", "changes_requested", "review_required"), cancelledChecks: optional(array(string)), ci: oneOf("", "none", "pending", "success", "failure", "cancelled"), merge: oneOf("", "clean", "blocked", "behind", "conflict") });
+// A draft edit replaces its part from a UTF-16 offset on.
+const draftEdit = object({ from: value => Number.isSafeInteger(value) && Number(value) >= 0, text: string });
 const bodies: Record<string, Check> = {
   "connect.connector": object({ missing: boolean }),
   "account.failed": object({ accountId: string, reason: oneOf("sign_in_rejected", "refresh_failed") }),
@@ -64,6 +66,7 @@ const bodies: Record<string, Check> = {
     replies: optional(nullable(array(object({ reply, posted: optional(string) })))), usage, error: optional(string), cause, shellJobs: optional(number) }),
   "conversation.read": object({ room: string, conversation, seq: number }),
   "turn.activity": object({ session: string, turn: string, label: string }),
+  "turn.draft": object({ session: string, turn: string, draft: object({ message: number, kind: oneOf("reply", "compaction"), started: string, text: optional(nullable(draftEdit)), reasoning: optional(nullable(draftEdit)) }) }),
   "transcript.changed": object({ session: string, turn: string }),
   "op.requested": object({ id: string, kind: string, by: principal, class: oneOf("auto", "owner"), card, expires: optional(string) }),
   "op.decided": object({ id: string, state, decision: object({ by: principal, approved: boolean, reason: optional(string), at: string }) }),
@@ -127,7 +130,7 @@ export function decodeEvent(value: unknown): Event | undefined {
   const record = value as Record<string, unknown>;
   const body = typeof record.type === "string" && Object.hasOwn(bodies, record.type) ? bodies[record.type] : undefined;
   // Live-only events are never stored and have seq 0.
-  if (!Number.isSafeInteger(record.seq) || Number(record.seq) < (record.type === "turn.activity" || record.type === "conversation.read" || record.type === "transcript.changed" || record.type === "workflow.step_changed" || record.type === "workflow.status_changed" ? 0 : 1) || !string(record.id) ||
+  if (!Number.isSafeInteger(record.seq) || Number(record.seq) < (record.type === "turn.activity" || record.type === "turn.draft" || record.type === "conversation.read" || record.type === "transcript.changed" || record.type === "workflow.step_changed" || record.type === "workflow.status_changed" ? 0 : 1) || !string(record.id) ||
       !string(record.at) || !optional(string)(record.room) || !principal(record.from) || !body?.(record.body)) {
     return skip(value);
   }

@@ -191,7 +191,7 @@ func Run(ctx context.Context) error {
 	server := &http.Server{Handler: mux}
 	defer server.Close()
 	go func() { errs <- server.Serve(listener) }()
-	activity := &activity{}
+	activity := newActivity()
 	transcript := NewTranscript(client, sessions)
 	var h boxHarness
 	var crew *Crew                       // a crew's box runs a script, which a reload replaces
@@ -237,11 +237,12 @@ func Run(ctx context.Context) error {
 			return err
 		}
 		session.Activity = activity.set
+		session.Draft = activity.output
 		h, files, steered = session, func() []string { return []string{session.SessionFile()} }, func(sender contract.Interrupt) { jobs.StepAside(sender); interrupts.Send(sender) }
 	}
 	defer h.Close()
 	steps.Done("session start")
-	activityTicks := time.NewTicker(time.Second)
+	activityTicks := time.NewTicker(draftTick)
 	defer activityTicks.Stop()
 	go activity.run(ctx, activityTicks.C, client.TurnActivity)
 	transcript.syncLogged(ctx, files()...)
