@@ -124,13 +124,21 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		return b.Final, nil
 	case contract.ShellJobRunning:
 		text := fmt.Sprintf("Your shell job %s has been running for %s.", jobName(b.Job, b.Description), jobTime(b.RanMinutes))
+		if b.IdleMinutes != nil {
+			text += fmt.Sprintf(" For %s it has written nothing and its processes have used no CPU and read or written nothing: it may be stuck.", jobTime(*b.IdleMinutes))
+		}
 		switch {
 		case b.QuietMinutes == nil:
-			return text + " It has written no output.", nil
+			text += " It has written no output."
 		case b.Tail == "":
-			return fmt.Sprintf("%s Last output %s ago.", text, jobTime(*b.QuietMinutes)), nil
+			text += fmt.Sprintf(" Last output %s ago.", jobTime(*b.QuietMinutes))
+		default:
+			text += fmt.Sprintf(" Last output %s ago:\n%s", jobTime(*b.QuietMinutes), b.Tail)
 		}
-		return fmt.Sprintf("%s Last output %s ago:\n%s", text, jobTime(*b.QuietMinutes), b.Tail), nil
+		if b.Processes != "" {
+			text += "\nIts processes:\n" + b.Processes
+		}
+		return text, nil
 	case contract.ShellJobEnded:
 		result := jobExit(b.End.Code)
 		switch b.End.Kind {

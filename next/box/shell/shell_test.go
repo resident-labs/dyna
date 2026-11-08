@@ -22,10 +22,12 @@ type fakeProc struct {
 	stopCode int
 	killOn   syscall.Signal // the signal that ends the process
 	orphan   bool           // SIGTERM ends the leader, but a child survives until SIGKILL
+	group    int            // its process group; 0, as for a host run, has no processes to sample
 }
 
 func (p *fakeProc) Wait() (int, string) { return <-p.exit, p.signal }
 func (p *fakeProc) GroupAlive() bool    { return p.orphan }
+func (p *fakeProc) Group() int          { return p.group }
 func (p *fakeProc) Signal(sig syscall.Signal) {
 	p.signals <- sig
 	if sig == syscall.SIGTERM && p.orphan {
