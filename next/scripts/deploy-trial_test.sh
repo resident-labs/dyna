@@ -5,6 +5,8 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 export TEST_ROOT="$tmp/repo" TEST_LOG="$tmp/log"
 export TEST_REAL_NODE=$(command -v node)
+# The session running the deploy is ready and idle but skipped: its box would refresh only after the deploy ends.
+export DEPLOY_SMOKE_SKIP=deployer
 export TEST_REFRESH="$tmp/refreshed" TEST_CLOCK="$tmp/clock.cjs" TEST_EVENTS="$tmp/events-polls"
 cat > "$TEST_CLOCK" <<'JS'
 if (process.env.FAKE_TIMEOUT === "1") {
@@ -56,7 +58,7 @@ case "$*" in
    elif [[ ${FAKE_NO_IDLE:-0} == 1 ]]; then
      echo '{"sessions":[{"id":"busy","box":"busy-box","boxState":"ready","turn":"turn-1","computer":"stopped"}],"seq":10}'
    else
-     echo '{"sessions":[{"id":"busy","box":"busy-box","boxState":"ready","turn":"turn-1","computer":"stopped"},{"id":"terminal","box":"terminal-box","boxState":"ready","computer":"running"},{"id":"idle","box":"box-1","boxState":"ready","computer":"stopped","shellJobs":1}],"seq":10}'
+     echo '{"sessions":[{"id":"busy","box":"busy-box","boxState":"ready","turn":"turn-1","computer":"stopped"},{"id":"terminal","box":"terminal-box","boxState":"ready","computer":"running"},{"id":"deployer","box":"deployer-box","boxState":"ready","computer":"stopped"},{"id":"idle","box":"box-1","boxState":"ready","computer":"stopped","shellJobs":1}],"seq":10}'
    fi ;;
  *session.refresh*)
    [[ $* == *'{"session":"idle"}'* && $* != *'"room"'* ]] || exit 1
