@@ -505,7 +505,7 @@ func TestSessionRestartMapsID(t *testing.T) {
 		t.Fatal("restart accepted a missing session")
 	}
 	help := runCLI(t, f, "session", "restart", "--help")
-	if !strings.Contains(help, "old volume and unpushed work are lost") || !strings.Contains(help, "any known host is unavailable") || !strings.Contains(help, "box stays failed for an explicit retry") || !strings.Contains(help, "Deletion may already be partial") || !strings.Contains(help, "every known current or prior host") {
+	if !strings.Contains(help, "old volume and unpushed work are lost") || !strings.Contains(help, "box stays failed and the error names the host") || !strings.Contains(help, "run restart again once that host answers") || !strings.Contains(help, "Deletion may already be partial") || !strings.Contains(help, "every known current or prior host") {
 		t.Fatalf("restart help does not explain data loss, cleanup failure and partial deletion: %q", help)
 	}
 }
