@@ -57,7 +57,14 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 				return err
 			}
 			if !allowed {
-				return fmt.Errorf("%w: branch %s is not recorded for this session or a session under it", approve.ErrForbidden, head)
+				own, err := s.store.SessionBranches(ctx, session.Repo, who.Session)
+				if err != nil {
+					return err
+				}
+				if len(own) == 0 {
+					return fmt.Errorf("%w: branch %s is not recorded for this session or a session under it, and this session has no branch on %s; a session's branch is recorded when its box is set up with the repository, so open the PR from a session that has one", approve.ErrForbidden, head, session.Repo)
+				}
+				return fmt.Errorf("%w: branch %s is not recorded for this session or a session under it; push to %s, or to a name that starts with %s-, and open the PR from that", approve.ErrForbidden, head, strings.Join(own, " or "), own[0])
 			}
 			switch {
 			case session.Repo == "":
