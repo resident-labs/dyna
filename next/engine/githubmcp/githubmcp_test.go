@@ -446,14 +446,41 @@ func TestWorkflowJobsAreNotNested(t *testing.T) {
 		`{"method":"list_workflow_jobs","workflow_jobs":{"jobs":[]}}`: `{"method":"list_workflow_jobs","workflow_jobs":{"jobs":[]}}`,
 		`{"jobs":[]}`: `{"jobs":[]}`,
 	} {
-		upstream := func(any) mcp.ToolHandler {
-			return func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: in}}}, nil
-			}
+		upstream := func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: in}}}, nil
 		}
-		result, err := flattenJobs(upstream)(nil)(context.Background(), &mcp.CallToolRequest{})
+		result, err := flattenJobs(upstream)(context.Background(), &mcp.CallToolRequest{})
 		if err != nil || text(result) != want {
 			t.Errorf("%s gave %s, %v; want %s", in, text(result), err, want)
 		}
+	}
+}
+
+// Through the server, as Pi calls it: an older protocol gets the handler's text, which must come out flat.
+func TestWorkflowJobsAreFlatThroughTheServer(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"total_count":1,"jobs":[{"id":5,"name":"next","status":"completed","conclusion":"failure"}]}`)
+	}))
+	defer fake.Close()
+	target, _ := url.Parse(fake.URL)
+	ctx := context.Background()
+	handler, err := Handler(ctx, "fixture-token", &toFake{target: target}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	session, err := mcp.NewClient(&mcp.Implementation{Name: "pi", Version: "test"}, nil).Connect(ctx, &mcp.StreamableClientTransport{Endpoint: server.URL}, &mcp.ClientSessionOptions{ProtocolVersion: "2025-06-18"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "actions_list", Arguments: map[string]any{"method": "list_workflow_jobs", "owner": "o", "repo": "r", "resource_id": "7"}})
+	if err != nil || result.IsError {
+		t.Fatalf("call: %+v, %v", result, err)
+	}
+	if body := text(result); !strings.HasPrefix(body, `{"total_count":1,"jobs":[{`) {
+		t.Fatalf("result %s", body)
 	}
 }
