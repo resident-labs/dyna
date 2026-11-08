@@ -134,6 +134,8 @@ function journal() {
     throw new Error("Box lifecycle smoke found a namespace fence or lifecycle error");
   }
 }
+// A box refreshes only once its jobs end, so the session whose host job runs this deploy names itself in DEPLOY_SMOKE_SKIP.
+const skip = (process.env.DEPLOY_SMOKE_SKIP || "").split(",").filter(Boolean);
 let target;
 while (!target) {
   journal();
@@ -142,7 +144,7 @@ while (!target) {
     do {
       const page = call("session.list", { room: room.id, ...(after ? { after } : {}) });
       const session = page.sessions.find(s => s.box && s.boxState === "ready" && !s.turn &&
-        s.computer === "stopped");
+        s.computer === "stopped" && !skip.includes(s.id));
       if (session) {
         target = { room: room.id, session: session.id, box: session.box, seq: page.seq };
         break;
