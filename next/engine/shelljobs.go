@@ -45,7 +45,7 @@ func (s *Service) ShellJobRunning(ctx context.Context, caller contract.Principal
 	if err != nil {
 		return contract.ShellJobRunningResponse{}, failure(err)
 	}
-	event, err := s.event(session.Room, caller, contract.ShellJobRunning{Session: session.ID, Job: req.Job, Description: req.Description, RanMinutes: req.RanMinutes, QuietMinutes: req.QuietMinutes, Tail: req.Tail})
+	event, err := s.event(session.Room, caller, contract.ShellJobRunning{Session: session.ID, Job: req.Job, Description: req.Description, RanMinutes: req.RanMinutes, QuietMinutes: req.QuietMinutes, Tail: req.Tail, IdleMinutes: req.IdleMinutes, Processes: req.Processes})
 	if err != nil {
 		return contract.ShellJobRunningResponse{}, failure(err)
 	}

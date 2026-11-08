@@ -1017,6 +1017,8 @@ type ShellJobRunningRequest struct {
 	RanMinutes   int        `json:"ranMinutes"`
 	QuietMinutes *int       `json:"quietMinutes,omitempty"` // since the last output; absent before any
 	Tail         string     `json:"tail"`                   // the last whole lines of output, masked
+	IdleMinutes  *int       `json:"idleMinutes,omitempty"`  // set once the job has had no output, CPU use, reads or writes for this long
+	Processes    string     `json:"processes,omitempty"`    // its processes, busiest first, one a line, masked; empty for a job on a host
 }
 type ShellJobRunningResponse struct{}
 type TurnInput struct {

@@ -32,13 +32,18 @@ const (
 	keepFinished = 20
 	retryStart   = time.Second
 	retryMax     = 30 * time.Second
-	statusLines  = 5    // output lines in a running job's status
+	statusLines  = 20   // output lines in a running job's status
+	statusTail   = 4000 // bytes of output in a running job's status
 	maxTimeout   = 7200 // seconds, as for a host run
+	// watchTick is how often a background job's processes are sampled, and idleAfter how long a job may go without output,
+	// CPU use, reads or writes before its session is told.
+	watchTick = time.Minute
+	idleAfter = 5 * time.Minute
 )
 
-// nextMark is the running time at which a job reports next: 15 and 30 minutes, then each hour.
+// nextMark is the running time at which a job reports next: 5, 15 and 30 minutes, then each hour.
 func nextMark(ran time.Duration) time.Duration {
-	for _, mark := range []time.Duration{15 * time.Minute, 30 * time.Minute} {
+	for _, mark := range []time.Duration{5 * time.Minute, 15 * time.Minute, 30 * time.Minute} {
 		if ran < mark {
 			return mark
 		}
@@ -51,6 +56,7 @@ type process interface {
 	Wait() (int, string)
 	Signal(syscall.Signal)
 	GroupAlive() bool // whether any process of the group is left, after the leader exited
+	Group() int       // its process group in this box, or 0 when it runs elsewhere
 }
 
 type execProcess struct{ cmd *exec.Cmd }
@@ -82,6 +88,8 @@ func (p *execProcess) Wait() (int, string) {
 
 func (p *execProcess) GroupAlive() bool { return syscall.Kill(-p.cmd.Process.Pid, 0) == nil }
 
+func (p *execProcess) Group() int { return p.cmd.Process.Pid }
+
 func (p *execProcess) Signal(sig syscall.Signal) { _ = syscall.Kill(-p.cmd.Process.Pid, sig) }
 
 // hostProcess is one command on a host. The engine runs it and answers when it ends. A signal asks the engine to stop it,
@@ -103,6 +111,8 @@ func (p *hostProcess) Wait() (int, string) {
 }
 
 func (p *hostProcess) GroupAlive() bool { return false }
+
+func (p *hostProcess) Group() int { return 0 }
 
 func (p *hostProcess) Signal(sig syscall.Signal) {
 	p.stopOnce.Do(func() {
@@ -211,7 +221,7 @@ func (j *job) running(now time.Time) (contract.ShellJobRunningRequest, bool) {
 		// A token may continue in the next write, so a running job releases whole lines only.
 		lines := strings.Split(strings.TrimRight(Mask(string(j.output[:bytes.LastIndexByte(j.output, '\n')+1])), "\n"), "\n")
 		text := strings.Join(lines[max(0, len(lines)-statusLines):], "\n")
-		req.Tail = strings.ToValidUTF8(text[max(0, len(text)-tailLimit):], "")
+		req.Tail = strings.ToValidUTF8(text[max(0, len(text)-statusTail):], "")
 	}
 	return req, true
 }
@@ -252,7 +262,8 @@ func timeoutNote(seconds int) string { return fmt.Sprintf("stopped after its %d 
 type Config struct {
 	After  func(time.Duration) <-chan time.Time      // the clock
 	Report func(contract.ShellJobEndedRequest) error // called when a background job ends; retried until it succeeds
-	// Running is called at each mark of a background job's running time. A failed call is not retried: the next mark says more.
+	// Running is called at each mark of a background job's running time, and once when it goes idle. A failed call is not
+	// retried: the next one says more.
 	Running func(contract.ShellJobRunningRequest) error
 	// Host runs a command on a host through the engine and returns its exit code. All its output comes as the run ends.
 	// Ending the context ends only the call.
@@ -260,9 +271,10 @@ type Config struct {
 	// HostStop asks the engine to stop the run that Host started with that client ID.
 	HostStop func(ctx context.Context, clientID string) error
 
-	newID func() contract.ShellJobID
-	start func(command, cwd, callID string, out io.Writer) (process, error)
-	now   func() time.Time // the clock for a job's start and end
+	newID  func() contract.ShellJobID
+	start  func(command, cwd, callID string, out io.Writer) (process, error)
+	now    func() time.Time             // the clock for a job's start and end
+	sample func(int) map[int]procSample // the processes of a group, by pid
 }
 
 // Server owns the box's jobs. They outlive any Pi process.
@@ -288,6 +300,9 @@ func New(cfg Config) *Server {
 	}
 	if cfg.now == nil {
 		cfg.now = time.Now
+	}
+	if cfg.sample == nil {
+		cfg.sample = readGroup
 	}
 	return &Server{cfg: cfg, closed: make(chan struct{}), aside: &interruption{done: make(chan struct{})}}
 }
@@ -447,20 +462,54 @@ func (s *Server) forget(j *job) {
 	s.jobs = slices.DeleteFunc(s.jobs, func(other *job) bool { return other == j })
 }
 
-// watch reports a background job at each mark of its running time, until it ends or is stopped.
+// watch samples a background job's processes each tick until it ends or is stopped. It reports the job at each mark of its
+// running time, and once when the job has had no output and its processes no CPU use, reads or writes for idleAfter; after
+// that, only activity followed by another idle stretch reports again. A job on a host has no processes here and is never
+// idle.
 func (s *Server) watch(j *job) {
+	group := j.proc.Group()
+	var procs map[int]procSample
+	active, idleSent := j.started, false
+	mark := nextMark(s.cfg.now().Sub(j.started))
 	for {
-		ran := s.cfg.now().Sub(j.started)
 		select {
-		case <-s.cfg.After(nextMark(ran) - ran):
+		case <-s.cfg.After(watchTick):
 		case <-j.done:
 			return
 		case <-s.closed:
 			return
 		}
-		req, running := j.running(s.cfg.now())
+		now := s.cfg.now()
+		var list string
+		if group > 0 {
+			cur := s.cfg.sample(group)
+			var busy bool
+			if list, busy = compareGroup(procs, cur); busy {
+				active, idleSent = now, false
+			}
+			procs = cur
+		}
+		j.mu.Lock()
+		if j.lastOutput.After(active) {
+			active, idleSent = j.lastOutput, false
+		}
+		j.mu.Unlock()
+		ran := now.Sub(j.started)
+		idle := group > 0 && !idleSent && now.Sub(active) >= idleAfter
+		if !idle && ran < mark {
+			continue
+		}
+		req, running := j.running(now)
 		if !running {
 			return
+		}
+		req.Processes = Mask(list)
+		if idle {
+			minutes := int(now.Sub(active) / time.Minute)
+			req.IdleMinutes, idleSent = &minutes, true
+		}
+		if ran >= mark {
+			mark = nextMark(ran)
 		}
 		if err := s.cfg.Running(req); err != nil {
 			log.Printf("shell job %s: status: %v", j.id, err)
