@@ -175,7 +175,7 @@ export type TextOnlyModel = { provider: ModelProvider; model: string; };
 export type BoxHelloResponse = { room: RoomID; root?: boolean; gitName?: string; gitEmail?: string; compactTokens?: number; instructions: string; modelInstructions?: string; workerInstructions?: string; session: SessionID; box: BoxID; model: ModelChoice; textOnlyModels?: Array<TextOnlyModel> | null; repos?: Array<BoxRepo> | null; transcripts?: Array<TranscriptFile> | null; workflow?: BoxWorkflow | null; github?: boolean; };
 export type TurnOutputRequest = { data?: JSONData; shellJobs: number; jobs?: Array<ShellJobID> | null; error?: string; cause?: FailureCause; turn: TurnID; outcome: TurnOutcome; final?: string; endPosts?: Array<EventID> | null; model: string; usage: Usage; unread?: Array<DeliverySeq> | null; };
 export type TurnOutputResponse = { };
-export type TurnActivityRequest = { turn: TurnID; kind?: ActivityKind; label: string; };
+export type TurnActivityRequest = { turn: TurnID; kind?: ActivityKind; label: string; draft?: Draft | null; };
 export type TurnActivityResponse = { };
 export type SessionWorkRequest = { session: SessionID; before?: TurnID; limit?: number; };
 export type SessionWorkTurn = { started: Event; ended?: Event | null; inputs: Array<Event> | null; posts: Array<Event> | null; };
@@ -305,6 +305,10 @@ export type TurnEnded = { dataAttachment?: number | null; data?: JSONData; attac
 export type ConversationRead = { room: RoomID; conversation: Conversation; seq: number; };
 export type ActivityKind = "tool" | "compaction" | "model" | "model_wait";
 export type TurnActivity = { session: SessionID; turn: TurnID; kind: ActivityKind; label: string; };
+export type TurnDraft = { session: SessionID; turn: TurnID; draft: Draft; };
+export type DraftKind = "reply" | "compaction";
+export type Draft = { message: number; kind: DraftKind; reasoning?: DraftEdit | null; text?: DraftEdit | null; started: string; };
+export type DraftEdit = { from: number; text: string; };
 export type TranscriptChanged = { session: SessionID; turn: TurnID; };
 export type FinalReply = { reply: ReplyChannel; posted?: EventID; };
 export type Usage = { model: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; };
@@ -710,6 +714,7 @@ export type EventBody =
   | { type: "shell.job.running"; body: ShellJobRunning }
   | { type: "transcript.changed"; body: TranscriptChanged }
   | { type: "turn.activity"; body: TurnActivity }
+  | { type: "turn.draft"; body: TurnDraft }
   | { type: "turn.ended"; body: TurnEnded }
   | { type: "turn.started"; body: TurnStarted }
   | { type: "workflow.ended"; body: WorkflowEnded }

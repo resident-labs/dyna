@@ -53,6 +53,9 @@ type Config struct {
 type Harness struct {
 	// Activity hears what the turn is doing: each tool call, and a compaction.
 	Activity func(contract.TurnID, contract.ActivityKind, string)
+	// Draft hears the model's output as it streams: each model call's start and its text and reasoning deltas. It runs on
+	// the session's event goroutine, so it must not block.
+	Draft    func(contract.TurnID, Draft)
 	services *coding.AgentSessionServices
 	models   *coding.ModelRuntime // the runtime a ModelsFile made, which the services leave to their owner; nil without one
 	session  *coding.Session
@@ -254,6 +257,9 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, send func(context
 		activity = h.Activity
 	}
 	t := newTurn(id, activity)
+	if h.Draft != nil {
+		t.draft = h.Draft
+	}
 	h.mu.Lock()
 	h.turn = t
 	h.mu.Unlock()
@@ -330,6 +336,9 @@ func (h *Harness) TransferModel(ctx context.Context, id contract.TurnID, model c
 		stop := h.session.Subscribe(func(e agent.AgentEvent) {
 			if _, ok := e.(agent.CompactionStartEvent); ok {
 				h.Activity(id, contract.ActivityCompaction, "compacting the conversation")
+				if h.Draft != nil {
+					h.Draft(id, Draft{Kind: contract.DraftCompaction, Started: draftStart()})
+				}
 			}
 		})
 		defer stop()

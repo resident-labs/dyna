@@ -204,6 +204,9 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 	if err != nil {
 		return contract.TurnOutputResponse{}, failure(err)
 	}
+	if handle, ok := s.live.LookupSession(session.ID); ok {
+		handle.ClearDraft(req.Turn)
+	}
 	if crew {
 		// Closing saves a diff of what the workers left unpushed. A close that fails here leaves a quiet box, which the dormant
 		// sweep closes, and the run's result is already safe.
@@ -218,14 +221,19 @@ func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, r
 	if caller.Kind != contract.PrincipalSession {
 		return contract.TurnActivityResponse{}, forbidden()
 	}
-	if req.Kind == "" {
+	// A draft with no kind comes alone: the box had output to send and no new label.
+	label := req.Kind != "" || req.Draft == nil
+	if req.Kind == "" && label {
 		req.Kind = contract.ActivityTool // a box agent that predates kinds reports tool calls only
 	}
-	if req.Kind != contract.ActivityTool && req.Kind != contract.ActivityCompaction && req.Kind != contract.ActivityModel && req.Kind != contract.ActivityModelWait {
+	if label && req.Kind != contract.ActivityTool && req.Kind != contract.ActivityCompaction && req.Kind != contract.ActivityModel && req.Kind != contract.ActivityModelWait {
 		return contract.TurnActivityResponse{}, invalid("activity kind must be tool, compaction or model")
 	}
 	if !utf8.ValidString(req.Label) || strings.ContainsAny(req.Label, "\r\n") || utf8.RuneCountInString(req.Label) > 80 {
 		return contract.TurnActivityResponse{}, invalid("activity label must be one line of at most 80 characters")
+	}
+	if d := req.Draft; d != nil && (d.Message < 1 || d.Kind != contract.DraftReply && d.Kind != contract.DraftCompaction || !validDraftEdit(d.Text) || !validDraftEdit(d.Reasoning)) {
+		return contract.TurnActivityResponse{}, invalid("draft must name its call and carry edits of at most 64 KiB of UTF-8 text")
 	}
 	session, open, err := s.store.OpenSession(ctx, caller.Session)
 	if err != nil {
@@ -234,14 +242,28 @@ func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, r
 	if !open {
 		return contract.TurnActivityResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 	}
+	handle, problem := s.createSession(ctx, session.ID)
+	if problem != nil {
+		return contract.TurnActivityResponse{}, problem
+	}
+	// A draft lives in memory and goes only to the owner's streams that watch the session; nothing of it is stored. A draft
+	// of a turn that is no longer running is dropped, so a box never retries it.
+	if req.Draft != nil && req.Turn == session.Turn {
+		event, err := s.event(session.Room, caller, contract.TurnDraft{Session: caller.Session, Turn: req.Turn, Draft: *req.Draft})
+		if err != nil {
+			return contract.TurnActivityResponse{}, failure(err)
+		}
+		if !handle.PublishDraft(req.Turn, *req.Draft, event) {
+			return contract.TurnActivityResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
+		}
+	}
+	if !label {
+		return contract.TurnActivityResponse{}, nil
+	}
 	body := contract.TurnActivity{Session: caller.Session, Turn: req.Turn, Kind: req.Kind, Label: req.Label}
 	event, err := s.event(session.Room, caller, body)
 	if err != nil {
 		return contract.TurnActivityResponse{}, failure(err)
-	}
-	handle, problem := s.createSession(ctx, session.ID)
-	if problem != nil {
-		return contract.TurnActivityResponse{}, problem
 	}
 	if err := s.store.MarkTurnActive(ctx, session.ID, req.Turn, s.now()); err != nil {
 		return contract.TurnActivityResponse{}, failure(err)
@@ -250,6 +272,11 @@ func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, r
 		return contract.TurnActivityResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 	}
 	return contract.TurnActivityResponse{}, nil
+}
+
+// validDraftEdit holds an edit to one box send: UTF-8 text of at most 64 KiB, from an offset in the part.
+func validDraftEdit(edit *contract.DraftEdit) bool {
+	return edit == nil || edit.From >= 0 && len(edit.Text) <= 64<<10 && utf8.ValidString(edit.Text)
 }
 
 func (s *Service) ConversationRead(ctx context.Context, caller contract.Principal, req contract.ConversationReadRequest) (contract.ConversationReadResponse, *contract.Error) {

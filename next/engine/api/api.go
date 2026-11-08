@@ -478,7 +478,7 @@ func (a *API) handler(c Caller) http.Handler {
 			}
 			after = n
 		}
-		ch, err := a.service.Events(r.Context(), c.Principal, room, after)
+		ch, err := a.service.Events(r.Context(), c.Principal, room, after, contract.SessionID(r.URL.Query().Get("watch")))
 		if err != nil {
 			writeError(w, err)
 			return

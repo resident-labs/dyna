@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/MichaelKinsy/PiG/agent"
 	"github.com/MichaelKinsy/PiG/ai"
@@ -16,17 +17,38 @@ type EndPost struct {
 	EndPost contract.EventID `json:"endPost,omitempty"`
 }
 
+// Draft is a piece of a model call's output as it streams. Started is set when a call starts, a reply or a compaction's
+// summary as Kind says, and the deltas that follow belong to it: Text, and Reasoning when the provider streams reasoning text.
+type Draft struct {
+	Kind      contract.DraftKind
+	Started   time.Time
+	Text      string
+	Reasoning string
+}
+
+// draftDelta reads a streamed text or reasoning delta. Tool call arguments are not shown.
+func draftDelta(e ai.AssistantMessageEvent) (Draft, bool) {
+	switch e := e.(type) {
+	case ai.TextDeltaEvent:
+		return Draft{Text: e.Delta}, e.Delta != ""
+	case ai.ThinkingDeltaEvent:
+		return Draft{Reasoning: e.Delta}, e.Delta != ""
+	}
+	return Draft{}, false
+}
+
 // turn is what a session's events build up while one turn runs.
 type turn struct {
 	id       contract.TurnID
 	activity func(contract.TurnID, contract.ActivityKind, string)
+	draft    func(contract.TurnID, Draft)
 	result   contract.TurnEnded
 	batch    endBatch
 	reply    replyText
 }
 
 func newTurn(id contract.TurnID, activity func(contract.TurnID, contract.ActivityKind, string)) *turn {
-	return &turn{id: id, activity: activity, result: contract.TurnEnded{Turn: id, Outcome: contract.TurnCompleted}}
+	return &turn{id: id, activity: activity, draft: func(contract.TurnID, Draft) {}, result: contract.TurnEnded{Turn: id, Outcome: contract.TurnCompleted}}
 }
 
 func (t *turn) event(e agent.AgentEvent) {
@@ -35,9 +57,18 @@ func (t *turn) event(e agent.AgentEvent) {
 		t.activity(t.id, contract.ActivityModelWait, "waiting for model")
 	case agent.ToolExecutionStartEvent:
 		t.activity(t.id, contract.ActivityTool, activityLabel(e.ToolName, e.Args))
+	case agent.MessageStartEvent:
+		if e.Message.Assistant != nil {
+			t.draft(t.id, Draft{Kind: contract.DraftReply, Started: draftStart()})
+		}
+	case agent.MessageUpdateEvent:
+		if d, ok := draftDelta(e.AssistantMessageEvent); ok {
+			t.draft(t.id, d)
+		}
 	case agent.CompactionStartEvent:
 		// A compaction runs a model call with no tool, so the line says so rather than keep the last command.
 		t.activity(t.id, contract.ActivityCompaction, "compacting the conversation")
+		t.draft(t.id, Draft{Kind: contract.DraftCompaction, Started: draftStart()})
 	case agent.MessageEndEvent:
 		t.message(e.Message)
 	case agent.AgentSettledEvent:
@@ -180,3 +211,6 @@ func activityLabel(tool string, raw json.RawMessage) string {
 	label, _, _ = strings.Cut(label, "\n")
 	return strings.ReplaceAll(label, "\r", " ")
 }
+
+// draftStart is a model call's start to the millisecond, as the transcript times the entries written after it.
+func draftStart() time.Time { return time.Now().Truncate(time.Millisecond) }
