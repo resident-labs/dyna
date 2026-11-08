@@ -70,7 +70,13 @@ func Extension(c Config) extension.InlineExtension {
 		var usedMu sync.Mutex
 		used := map[string]bool{}
 		api.OnContext(imageContext())
+		reader := &shell.OutputReader{}
 		api.OnTurnStart(func(context.Context, extension.TurnStartEvent) error { clear(roots); return nil })
+		// PiG's turn_start is each model request; agent_start owns the whole input run.
+		api.OnAgentStart(func(context.Context, extension.AgentStartEvent) error {
+			reader.Reset()
+			return nil
+		})
 		api.OnToolCall(func(_ context.Context, e extension.ToolCallEvent) (extension.ToolCallEventResult, error) {
 			call := e.(extension.CustomToolCallEvent)
 			root := call.ToolCallID
@@ -122,7 +128,7 @@ func Extension(c Config) extension.InlineExtension {
 		}
 		api.RegisterTool(codemodeTool(interrupts, api.GetSettings))
 		api.RegisterTool(bash(c, roots))
-		api.RegisterTool(job(c))
+		api.RegisterTool(job(c, reader))
 		api.RegisterTool(postDefinition)
 		api.RegisterTool(visualDefinition)
 		if c.Submit != nil {
@@ -159,7 +165,7 @@ func bash(c Config, roots map[string]string) extension.ToolDefinition {
 	return extension.ToolDefinition{
 		Name:          "bash",
 		Label:         "bash",
-		Description:   "Run a bash command. It runs in the foreground for up to 30 s, then keeps running in the background as a job. A message from the owner or an agent above moves a foreground command to the background.\njob output returns only text printed since the last read, and is empty when a job printed nothing.\nThe command runs as bash -c, so its text is in the process list. pkill -f with a pattern from that text also matches this shell and ends the job with SIGTERM.\nhost runs the command on that machine instead of this box, under your host grant. A host run goes on through an engine restart (a deploy) or a dropped connection, and its output and exit code still reach the job; if the restarted engine cannot follow it, the job ends with a failure that names the restart, the host and the unit.",
+		Description:   "Run a bash command. A command that only sleeps, optionally followed by a bare echo or true, is refused. It runs in the foreground for up to 30 s, then keeps running in the background as a job. A message from the owner or an agent above moves a foreground command to the background.\njob output returns only text printed since the last read, and is empty when a job printed nothing.\nThe command runs as bash -c, so its text is in the process list. pkill -f with a pattern from that text also matches this shell and ends the job with SIGTERM.\nhost runs the command on that machine instead of this box, under your host grant. A host run goes on through an engine restart (a deploy) or a dropped connection, and its output and exit code still reach the job; if the restarted engine cannot follow it, the job ends with a failure that names the restart, the host and the unit.",
 		PromptSnippet: "Run bash commands, here or on a host",
 		Parameters:    json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"},"description":{"type":"string","description":"What the command is for, as its title in the Jobs list"},"cwd":{"type":"string"},"host":{"type":"string"},"timeout":{"type":"integer","description":"Seconds before the command is stopped, at most 7200. A host run stops at 600 by default"}},"required":["command"]}`),
 		OutputSchema:  jobSchema,
@@ -185,11 +191,11 @@ func bash(c Config, roots map[string]string) extension.ToolDefinition {
 	}
 }
 
-func job(c Config) extension.ToolDefinition {
+func job(c Config, reader *shell.OutputReader) extension.ToolDefinition {
 	return extension.ToolDefinition{
 		Name:          "job",
 		Label:         "job",
-		Description:   "Background jobs that bash started, including foreground commands moved aside by a message from the owner or an agent above. Dyna wakes the session when a background job completes.\noutput: read a job's new output. On a running job it waits up to 30 s and returns everything printed meanwhile, earlier only when the job ends or a message arrives.\nstop: stop a job and its whole process group.\nlist: list the jobs.",
+		Description:   "Background jobs that bash started, including foreground commands moved aside by a message from the owner or an agent above. Dyna wakes the session when a background job completes.\noutput: read a job's new output. On a running job it waits up to 30 s and returns everything printed meanwhile, earlier only when the job ends or a message arrives. After a job answered still running this turn, another output call for it returns immediately with a reminder to end the turn; it does not consume output. The first check of the next turn waits normally, and finished results are always returned.\nstop: stop a job and its whole process group.\nlist: list the jobs.",
 		PromptSnippet: "Read, stop or list background jobs",
 		Parameters:    json.RawMessage(`{"type":"object","properties":{"action":{"type":"string","enum":["output","stop","list"]},"job":{"type":"string"}},"required":["action"]}`),
 		OutputSchema:  jobSchema,
@@ -198,7 +204,7 @@ func job(c Config) extension.ToolDefinition {
 			if err := json.Unmarshal(params, &call); err != nil {
 				return extension.AgentToolResult{}, err
 			}
-			answer, err := c.Shell.Job(call)
+			answer, err := reader.Job(c.Shell, call)
 			if err != nil {
 				return extension.AgentToolResult{}, err
 			}
@@ -223,6 +229,10 @@ func job(c Config) extension.ToolDefinition {
 func jobResult(answer shell.Result, moved bool) (extension.AgentToolResult, error) {
 	state := fmt.Sprintf("[job %s: %s]", answer.Job, answer.Status)
 	switch {
+	case answer.Repeated:
+		state = fmt.Sprintf("[job %s is still running; you already checked it this turn. End your turn: Dyna wakes you when it ends.]", answer.Job)
+		answer.Output = state
+		return textResult(state, answer)
 	case answer.Running && answer.MessageArrived:
 		state = fmt.Sprintf("[job %s] %s%s", answer.Job, answer.Interrupt.Sender(), steppedNote)
 	case answer.Running && moved:
