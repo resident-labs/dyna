@@ -3,7 +3,9 @@
 package githubmcp
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"log/slog"
@@ -106,8 +108,7 @@ func Handler(ctx context.Context, token string, reads http.RoundTripper, owns fu
 			}
 			switch schema, _ := tool.InputSchema.(*jsonschema.Schema); tool.Name {
 			case "actions_list":
-				// Agents read the job list as .jobs and fail; upstream nests it one level deeper.
-				tool.Description += "\nlist_workflow_jobs returns {\"jobs\": {\"total_count\": n, \"jobs\": [...]}}: the array is .jobs.jobs."
+				tools[i].HandlerFunc = flattenJobs(tools[i].HandlerFunc)
 			case "projects_write":
 				// Some models (grok) send {} for a oneOf object. The advertised field lists its keys plainly; the handler still
 				// requires id or name, not both, and a value.
@@ -167,6 +168,33 @@ func Handler(ctx context.Context, token string, reads http.RoundTripper, owns fu
 }
 
 // upstreamVersion is the github-mcp-server version this binary was built with.
+// flattenJobs wraps actions_list so list_workflow_jobs answers {"total_count": n, "jobs": [...]}, as GitHub's API and the
+// tool's other methods do. Upstream wraps that object in one more {"jobs": ...}, and agents reading .jobs as the array failed.
+func flattenJobs(next inventory.HandlerFunc) inventory.HandlerFunc {
+	return func(deps any) mcp.ToolHandler {
+		handle := next(deps)
+		return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			result, err := handle(ctx, req)
+			if err != nil || result == nil || result.IsError || len(result.Content) != 1 {
+				return result, err
+			}
+			text, ok := result.Content[0].(*mcp.TextContent)
+			if !ok {
+				return result, err
+			}
+			var outer map[string]json.RawMessage
+			if json.Unmarshal([]byte(text.Text), &outer) != nil || len(outer) != 1 || outer["jobs"] == nil || !bytes.HasPrefix(bytes.TrimSpace(outer["jobs"]), []byte("{")) {
+				return result, err
+			}
+			flat := *text
+			flat.Text = string(outer["jobs"])
+			copied := *result
+			copied.Content = []mcp.Content{&flat}
+			return &copied, nil
+		}
+	}
+}
+
 func upstreamVersion() string {
 	if info, ok := debug.ReadBuildInfo(); ok {
 		for _, dep := range info.Deps {
