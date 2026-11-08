@@ -70,7 +70,7 @@ func TestATimeoutStopsAForegroundCommandLikeJobStop(t *testing.T) {
 	r := newClockRig("waiting\n")
 	answered := make(chan string)
 	go func() {
-		_, body := call(t, r.server.Handler(), "/run", `{"command":"sleep 600","timeout":20}`)
+		_, body := call(t, r.server.Handler(), "/run", `{"command":"make","timeout":20}`)
 		answered <- body
 	}()
 	r.fire(t, 20*time.Second)

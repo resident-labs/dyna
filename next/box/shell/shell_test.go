@@ -172,7 +172,7 @@ func TestStopKillsTheGroupAfterTheGracePeriod(t *testing.T) {
 	r := newRig("", syscall.SIGKILL) // the process ignores SIGTERM
 	done := make(chan *job)
 	go func() {
-		j, _ := r.server.run(nil, Run{Command: "sleep 99"})
+		j, _ := r.server.run(nil, Run{Command: "make"})
 		done <- j
 	}()
 	(<-r.timers).fire <- time.Time{}
@@ -196,7 +196,7 @@ func TestCloseKillsEveryJobGroup(t *testing.T) {
 	r := newRig("", syscall.SIGKILL)
 	done := make(chan *job)
 	go func() {
-		j, _ := r.server.run(nil, Run{Command: "sleep 99"})
+		j, _ := r.server.run(nil, Run{Command: "make"})
 		done <- j
 	}()
 	(<-r.timers).fire <- time.Time{}
@@ -285,14 +285,14 @@ func TestHandlerListsReadsAndStopsJobs(t *testing.T) {
 	r := newRig("line\n", syscall.SIGTERM)
 	finish := make(chan string, 1)
 	go func() {
-		_, body := call(t, r.server.Handler(), "/run", `{"command":"sleep 99"}`)
+		_, body := call(t, r.server.Handler(), "/run", `{"command":"make"}`)
 		finish <- body
 	}()
 	(<-r.timers).fire <- time.Now()
 	if body := <-finish; !strings.Contains(body, `"running":true`) || !strings.Contains(body, `"status":"running"`) {
 		t.Fatalf("run = %s", body)
 	}
-	if _, body := call(t, r.server.Handler(), "/job", `{"action":"list"}`); !strings.Contains(body, `"job":"job_1"`) || !strings.Contains(body, `"command":"sleep 99"`) {
+	if _, body := call(t, r.server.Handler(), "/job", `{"action":"list"}`); !strings.Contains(body, `"job":"job_1"`) || !strings.Contains(body, `"command":"make"`) {
 		t.Fatalf("list = %s", body)
 	}
 	// A quiet running job is waited on until the output wait passes.
@@ -366,7 +366,7 @@ func TestSlowHostCommandMovesToBackgroundAndReportsItsEnd(t *testing.T) {
 	})
 	finish := make(chan string, 1)
 	go func() {
-		_, body := call(t, r.server.Handler(), "/run", `{"command":"sleep 99","host":"h"}`)
+		_, body := call(t, r.server.Handler(), "/run", `{"command":"make","host":"h"}`)
 		finish <- body
 	}()
 	(<-r.timers).fire <- time.Now()
@@ -559,7 +559,7 @@ func TestStopKillsAChildThatOutlivesTheLeader(t *testing.T) {
 	r.proc.orphan = true
 	done := make(chan *job)
 	go func() {
-		j, _ := r.server.run(nil, Run{Command: "sleep 99 &"})
+		j, _ := r.server.run(nil, Run{Command: "make &"})
 		done <- j
 	}()
 	(<-r.timers).fire <- time.Time{}
@@ -774,7 +774,7 @@ func TestJobOutputWaitsForAQuietJobAndReturnsOnItsEnd(t *testing.T) {
 	r := newRig("", syscall.SIGTERM)
 	finish := make(chan string, 1)
 	go func() {
-		_, body := call(t, r.server.Handler(), "/run", `{"command":"sleep 99"}`)
+		_, body := call(t, r.server.Handler(), "/run", `{"command":"make"}`)
 		finish <- body
 	}()
 	(<-r.timers).fire <- time.Now()
@@ -802,7 +802,7 @@ func TestJobOutputReturnsAtOnceWhenAMessageArrives(t *testing.T) {
 	r := newRig("", syscall.SIGTERM)
 	finish := make(chan string, 1)
 	go func() {
-		_, body := call(t, r.server.Handler(), "/run", `{"command":"sleep 99"}`)
+		_, body := call(t, r.server.Handler(), "/run", `{"command":"make"}`)
 		finish <- body
 	}()
 	(<-r.timers).fire <- time.Now()
