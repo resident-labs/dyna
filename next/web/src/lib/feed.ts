@@ -180,8 +180,8 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     // Account alerts are owner-only and never belong to a room feed. Questions show in Needs you, Requests and the session's DM.
     if (event.type === "account.failed" || event.type === "account.quota_low" || event.type === "host.disk_low" || event.type === "question.asked" || event.type === "question.answered" || event.type === "question.withdrawn") continue;
     // A schedule that does its job quietly says nothing. A failure and any post of its own still show.
-    // Failed tool calls reach the feed only through a digest subscription's session.
-    if (event.type === "hook.due" || event.type === "hook.digest" || event.type === "tool.failed" || event.type === "hook.finished" && event.body.result !== "failed") continue;
+    // Failed tool calls reach the feed only as a digest's row.
+    if (event.type === "hook.due" || event.type === "tool.failed" || event.type === "hook.finished" && event.body.result !== "failed") continue;
     const firstAt = work[0]?.at ?? (deferred[0]?.kind === "notice" ? deferred[0].event.at : deferred[0]?.kind === "failed" || deferred[0]?.kind === "request" || deferred[0]?.kind === "restarted" || deferred[0]?.kind === "run" ? deferred[0].at : undefined);
     if (firstAt && new Date(firstAt).toDateString() !== new Date(event.at).toDateString()) flush();
     if (event.type === "post.sent") {
@@ -227,7 +227,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       // A job without an open turn stays in the work buffer below.
     }
     if (home.kind === "dm" && session !== home.session) continue;
-    if (event.type === "engine.restarted" || event.type === "room.paused" || event.type === "room.resumed" || event.type === "room.limits_changed" || event.type === "host.switches_changed" || event.type === "room.deleting") {
+    if (event.type === "engine.restarted" || event.type === "room.paused" || event.type === "room.resumed" || event.type === "room.limits_changed" || event.type === "host.switches_changed" || event.type === "room.deleting" || event.type === "hook.digest") {
       const previous = deferred.at(-1);
       if (event.type === "room.resumed" && previous?.kind === "notice" && previous.event.type === "room.paused" && sameAuthor(previous.event.from, event.from) && Date.parse(event.at) - Date.parse(previous.event.at) <= 300_000) previous.resumedAt = event.at;
       else deferred.push({ kind: "notice", key: `n${event.seq}`, event });
@@ -559,7 +559,10 @@ export function describe(event: Event, name: Name): string {
     case "post.sent": case "post.created": return event.body.text;
     case "hook.finished": return `A subscription's run ${event.body.result}: ${event.body.cause ? causes[event.body.cause] : `exit code ${event.body.exitCode}`}`;
     case "hook.due": return "A subscription woke a session";
-    case "hook.digest": return "A subscription woke a session with a digest";
+    case "hook.digest": {
+      const count = (event.body.events?.length ?? 0) + (event.body.more ?? 0);
+      return `Digest of ${count} ${count === 1 ? "event" : "events"} from subscription ${event.body.subscription}`;
+    }
     case "tool.failed": return `${name(event.body.session)}'s ${event.body.tool} call failed`;
     case "notice.posted": case "session.notice": return event.body.text;
   }
