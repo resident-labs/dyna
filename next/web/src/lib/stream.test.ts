@@ -51,7 +51,7 @@ const ended = (outcome: string, seq: number) => JSON.stringify({
   type: "turn.ended", body: { session: "s", turn: "t", outcome, usage: { model: "m", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } },
 });
 
-for (const outcome of ["completed", "failed", "stopped"]) {
+for (const outcome of ["completed", "failed", "stopped", "closed"]) {
   test(`a room stream's ${outcome} turn.ended makes transcript watchers read again`, () => {
     const calls: (string | undefined)[] = [];
     const unwatch = watchTranscripts(session => calls.push(session));

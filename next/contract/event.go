@@ -222,7 +222,7 @@ type TurnStarted struct {
 	Inputs  []EventID `json:"inputs"` // the deliveries this turn takes
 }
 
-type TurnOutcome string // "completed" | "failed" | "stopped"
+type TurnOutcome string // "completed" | "failed" | "stopped" | "closed"
 
 // TurnEnded is a session's turn ending.
 type TurnEnded struct {
@@ -257,12 +257,13 @@ type ConversationRead struct {
 // TurnActivity is live only. The engine keeps each running turn's latest label and its kind in memory and
 // never stores this event, so it has seq 0, events.list never returns it, and it does not move a
 // stream's resume point. turn.ended clears it.
-type ActivityKind string // "tool" | "compaction" | "model"
+type ActivityKind string // "tool" | "compaction" | "model" | "model_wait"
 
 const (
 	ActivityTool       ActivityKind = "tool"       // a tool call; the label names it
 	ActivityCompaction ActivityKind = "compaction" // the conversation is compacting
 	ActivityModel      ActivityKind = "model"      // the model is changing
+	ActivityModelWait  ActivityKind = "model_wait" // waiting for a model response
 )
 
 type TurnActivity struct {
@@ -516,6 +517,7 @@ const (
 	TurnCompleted TurnOutcome = "completed"
 	TurnFailed    TurnOutcome = "failed"
 	TurnStopped   TurnOutcome = "stopped"
+	TurnClosed    TurnOutcome = "closed"
 )
 
 func (ConversationRead) EventType() EventType { return "conversation.read" }

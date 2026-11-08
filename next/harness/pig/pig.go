@@ -107,6 +107,11 @@ func Open(ctx context.Context, c Config) (*Harness, error) {
 		models.Close()
 		return nil, err
 	}
+	if err := boundModelRetries(services.SettingsManager()); err != nil {
+		services.Close()
+		models.Close()
+		return nil, err
+	}
 	if c.Notice != nil {
 		for _, failed := range services.ResourceLoader().GetExtensions().Errors {
 			c.Notice(fmt.Sprintf("extension %s failed to load: %s", failed.Path, failed.Error))
@@ -308,9 +313,6 @@ func (h *Harness) ClearQueue(context.Context) error {
 // against the model and compacts it on the one that held it first when it must (coding.Session.TransferModel). Abort
 // cancels that compaction, and the model stays.
 func (h *Harness) TransferModel(ctx context.Context, id contract.TurnID, model contract.ModelChoice, compactTokens int, instructions string) (harness.ModelTransfer, error) {
-	if h.Activity != nil {
-		h.Activity(id, contract.ActivityModel, "changing model")
-	}
 	target, err := coding.BuildModel(string(model.Provider)+"/"+model.ID, h.services)
 	// A model the box cannot use is the agent program's refusal, which fails the turn; TransferModel's own errors do not.
 	if err == nil {
@@ -318,6 +320,19 @@ func (h *Harness) TransferModel(ctx context.Context, id contract.TurnID, model c
 	}
 	if err != nil {
 		return harness.ModelTransfer{}, fmt.Errorf("%w: %v", harness.ErrRefused, err)
+	}
+	if h.Activity != nil {
+		if ai.ModelsAreEqual(h.session.Model(), target) {
+			h.Activity(id, contract.ActivityModelWait, "waiting for model")
+		} else {
+			h.Activity(id, contract.ActivityModel, "changing model")
+		}
+		stop := h.session.Subscribe(func(e agent.AgentEvent) {
+			if _, ok := e.(agent.CompactionStartEvent); ok {
+				h.Activity(id, contract.ActivityCompaction, "compacting the conversation")
+			}
+		})
+		defer stop()
 	}
 	result, err := h.session.TransferModel(ctx, target, coding.ModelTransferOptions{ThinkingLevel: ai.ModelThinkingLevel(model.Thinking), CompactionTriggerTokens: compactTokens})
 	if err == nil && result.Path != harness.TransferAborted {

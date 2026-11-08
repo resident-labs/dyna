@@ -154,6 +154,7 @@ func TestActivityKindReachesTheSessionList(t *testing.T) {
 	for _, tc := range []struct{ kind, want contract.ActivityKind }{
 		{contract.ActivityCompaction, contract.ActivityCompaction},
 		{contract.ActivityModel, contract.ActivityModel},
+		{contract.ActivityModelWait, contract.ActivityModelWait},
 		{"", contract.ActivityTool}, // a box agent that predates kinds
 	} {
 		if _, e := r.s.TurnActivity(r.ctx, asSession(r.child), contract.TurnActivityRequest{Turn: turn, Kind: tc.kind, Label: "x"}); e != nil {

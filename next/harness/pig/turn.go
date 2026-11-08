@@ -31,6 +31,8 @@ func newTurn(id contract.TurnID, activity func(contract.TurnID, contract.Activit
 
 func (t *turn) event(e agent.AgentEvent) {
 	switch e := e.(type) {
+	case agent.TurnStartEvent:
+		t.activity(t.id, contract.ActivityModelWait, "waiting for model")
 	case agent.ToolExecutionStartEvent:
 		t.activity(t.id, contract.ActivityTool, activityLabel(e.ToolName, e.Args))
 	case agent.CompactionStartEvent:

@@ -81,7 +81,9 @@ export function timelineSegments(turn: string, items: TranscriptItem[]): Timelin
 // Dyna: A running turn's working line. It reads the kind of the session's live activity, which the sidebar's label comes with, and names a compaction. No kind, as from an older engine, is plain work.
 export function workingLine(started: string, now: number, kind?: ActivityKind): string {
   const time = formatTimelineDuration(now - Date.parse(started));
-  return kind === "compaction" ? `Compacting the conversation… ${time}` : `Working for ${time}`;
+  if (kind === "compaction") return `Compacting the conversation… ${time}`;
+  if (kind === "model_wait") return `waiting for model · ${time}`;
+  return `Working for ${time}`;
 }
 
 // Dyna: A compaction is one quiet line in its turn, however it came about.

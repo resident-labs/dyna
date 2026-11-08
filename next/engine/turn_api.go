@@ -221,7 +221,7 @@ func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, r
 	if req.Kind == "" {
 		req.Kind = contract.ActivityTool // a box agent that predates kinds reports tool calls only
 	}
-	if req.Kind != contract.ActivityTool && req.Kind != contract.ActivityCompaction && req.Kind != contract.ActivityModel {
+	if req.Kind != contract.ActivityTool && req.Kind != contract.ActivityCompaction && req.Kind != contract.ActivityModel && req.Kind != contract.ActivityModelWait {
 		return contract.TurnActivityResponse{}, invalid("activity kind must be tool, compaction or model")
 	}
 	if !utf8.ValidString(req.Label) || strings.ContainsAny(req.Label, "\r\n") || utf8.RuneCountInString(req.Label) > 80 {

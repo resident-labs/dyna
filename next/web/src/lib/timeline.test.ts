@@ -262,6 +262,7 @@ test("a running turn's working line says it is compacting while its live activit
   const started = "2026-11-01T00:00:00Z";
   const now = Date.parse(started) + 109_000;
   assert.equal(workingLine(started, now, "compaction"), `Compacting the conversation… ${formatTimelineDuration(109_000)}`);
+  assert.equal(workingLine(started, now, "model_wait"), `waiting for model · ${formatTimelineDuration(109_000)}`);
   assert.equal(workingLine(started, now, "tool"), `Working for ${formatTimelineDuration(109_000)}`);
   assert.equal(workingLine(started, now), `Working for ${formatTimelineDuration(109_000)}`);
   assert.equal(compactionNote({ tokens: 153400 }), "Compacted the conversation at 153k tokens");

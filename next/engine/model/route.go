@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -34,9 +33,7 @@ func Handler(socket string, clientKey, sessionID string, allowedModels, eligible
 }
 
 func unixClient(socket string) *http.Client {
-	return &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
-	}}, Timeout: 30 * time.Second}
+	return &http.Client{Transport: idleTransport(socket, streamIdleTimeout), Timeout: 30 * time.Second}
 }
 
 func handler(client *http.Client, clientKey, sessionID string, allowedModels, eligibleIDs []string, pinnedID string, crew bool, sent ...func(context.Context) error) http.Handler {
