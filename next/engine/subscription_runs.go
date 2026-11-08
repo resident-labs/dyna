@@ -149,8 +149,18 @@ func (s *Service) fireDue(ctx context.Context) error {
 	}
 	var failures []error
 	for _, sub := range due {
+		// A machine subscription has no room; its wake is recorded in the woken session's, so that room's feed shows it.
+		room := sub.Room
+		if room == "" && sub.Wake != "" {
+			woken, err := s.store.Session(ctx, sub.Wake)
+			if err != nil {
+				failures = append(failures, err)
+				continue
+			}
+			room = woken.Room
+		}
 		if sub.Wake != "" && len(sub.On) > 0 {
-			event, err := s.event(sub.Room, engineSender, contract.HookDigest{Subscription: sub.ID})
+			event, err := s.event(room, engineSender, contract.HookDigest{Subscription: sub.ID})
 			if err == nil {
 				err = s.store.FireDigest(ctx, sub, event)
 			}
@@ -158,7 +168,7 @@ func (s *Service) fireDue(ctx context.Context) error {
 			continue
 		}
 		if sub.Wake != "" {
-			event, err := s.event(sub.Room, engineSender, contract.HookDue{Subscription: sub.ID})
+			event, err := s.event(room, engineSender, contract.HookDue{Subscription: sub.ID})
 			if err == nil {
 				err = s.store.FireScheduledWake(ctx, sub, event)
 			}
