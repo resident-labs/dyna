@@ -3,6 +3,8 @@ package store
 import (
 	"bytes"
 	"context"
+	"database/sql"
+	"fmt"
 	"github.com/resident-labs/dyna/contract"
 	"log"
 	"strings"
@@ -177,5 +179,96 @@ func TestModelStampRetryConcurrentAndTurnCleanup(t *testing.T) {
 	}
 	if err := s.Read().QueryRow("SELECT model_sent_at FROM turns WHERE id='turn'").Scan(&at); err != nil || at != 200 {
 		t.Fatalf("old at=%d err=%v", at, err)
+	}
+}
+
+func TestForcedSessionCloseCleansModelStamp(t *testing.T) {
+	for _, stampFails := range []bool{false, true} {
+		t.Run(fmt.Sprint("stampFails=", stampFails), func(t *testing.T) {
+			s, _ := endTurnFixture(t, []contract.ReplyChannel{{Kind: contract.ReplyNone}}, contract.PostCreated{Text: "done", Home: endTurnFeed})
+			ctx := context.Background()
+			if stampFails {
+				if _, err := s.writer.Exec(`CREATE TRIGGER fail_stamp BEFORE UPDATE OF model_sent_at ON turns BEGIN SELECT RAISE(ABORT, 'stamp unavailable'); END`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := s.MarkTurnModelSent(ctx, "child", "turn", time.UnixMilli(123))
+			if (err != nil) != stampFails {
+				t.Fatalf("stamp error=%v", err)
+			}
+			// Match lifecycle.closePass: a disconnected/discarded box reaches deleted
+			// without TurnOutput/EndTurn, then CloseSession commits the forced close.
+			if err := s.Write(ctx, func(tx *sql.Tx) error {
+				_, err := tx.Exec("UPDATE sessions SET state='closing' WHERE id='child'; UPDATE boxes SET state='deleted' WHERE session='child'")
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			event := contract.Event{ID: "forced-close", Time: time.Unix(1001, 0), Room: "room", From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionClosed{Session: "child", Reason: "discard"}}
+			canceled, cancel := context.WithCancel(ctx)
+			cancel()
+			if err := s.CloseSession(canceled, "child", event); err == nil {
+				t.Fatal("expected canceled close")
+			}
+			if len(s.modelSent) != 1 {
+				t.Fatal("failed close removed live stamp state")
+			}
+			var wg sync.WaitGroup
+			for i := 0; i < 20; i++ {
+				wg.Add(1)
+				go func() { defer wg.Done(); _ = s.MarkTurnModelSent(ctx, "child", "turn", time.UnixMilli(124)) }()
+			}
+			if err := s.CloseSession(ctx, "child", event); err != nil {
+				t.Fatal(err)
+			}
+			wg.Wait()
+			if len(s.modelSent) != 0 {
+				t.Fatalf("forced close retained turn memory: %+v", s.modelSent)
+			}
+			for i := 0; i < 3; i++ {
+				if err := s.MarkTurnModelSent(ctx, "child", "turn", time.UnixMilli(999)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if len(s.modelSent) != 0 {
+				t.Fatal("delayed request recreated closed session state")
+			}
+			var at int64
+			var ended sql.NullInt64
+			if err := s.Read().QueryRow("SELECT model_sent_at,ended_at FROM turns WHERE id='turn'").Scan(&at, &ended); err != nil {
+				t.Fatal(err)
+			}
+			want := int64(123)
+			if stampFails {
+				want = 0
+			}
+			if at != want || ended.Valid {
+				t.Fatalf("close changed turn history: stamp=%d ended=%v", at, ended)
+			}
+		})
+	}
+}
+
+func TestZeroRowModelStampIsNotCached(t *testing.T) {
+	s, _ := endTurnFixture(t, []contract.ReplyChannel{{Kind: contract.ReplyNone}}, contract.PostCreated{Text: "done", Home: endTurnFeed})
+	if _, err := s.writer.Exec("CREATE TRIGGER ignore_stamp BEFORE UPDATE OF model_sent_at ON turns BEGIN SELECT RAISE(IGNORE); END"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := s.MarkTurnModelSent(ctx, "child", "turn", time.UnixMilli(123)); err != nil {
+		t.Fatal(err)
+	}
+	if s.modelSent["turn"].stamped {
+		t.Fatal("zero-row update cached as persisted stamp")
+	}
+	if _, err := s.writer.Exec("DROP TRIGGER ignore_stamp"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkTurnModelSent(ctx, "child", "turn", time.UnixMilli(456)); err != nil {
+		t.Fatal(err)
+	}
+	var at int64
+	if err := s.Read().QueryRow("SELECT model_sent_at FROM turns WHERE id='turn'").Scan(&at); err != nil || at != 456 {
+		t.Fatalf("at=%d err=%v", at, err)
 	}
 }

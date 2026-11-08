@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -189,7 +190,9 @@ func (s *Store) SetRoomGitHubWrites(ctx context.Context, room contract.RoomID, w
 }
 
 type modelStamp struct {
+	mu      sync.Mutex // only requests for this turn wait for its stamp attempt
 	session contract.SessionID
+	active  bool // validated as an open session and active turn
 	stamped bool
 	logged  bool
 }
@@ -202,20 +205,39 @@ func (s *Store) MarkTurnModelSent(ctx context.Context, session contract.SessionI
 	if turn == "" {
 		return nil
 	}
+
 	s.modelSentMu.Lock()
-	defer s.modelSentMu.Unlock()
-	state, exists := s.modelSent[turn]
-	if exists && state.session != session {
+	state := s.modelSent[turn]
+	if state == nil {
+		if s.modelSent == nil {
+			s.modelSent = make(map[contract.TurnID]*modelStamp)
+		}
+		state = &modelStamp{session: session}
+		s.modelSent[turn] = state
+	}
+	s.modelSentMu.Unlock()
+	if state.session != session {
 		return nil
 	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
 	if state.stamped {
 		return nil
 	}
-	if !exists {
-		// Do not retain delayed requests for ended turns. EndTurn holds the same
-		// lock through commit and removal, so an old request cannot recreate an entry.
+	if !state.active {
+		// Do not retain delayed requests for ended turns. Terminal lifecycle
+		// cleanup removes the entry after commit. This query rejects delayed requests.
 		var persisted int64
-		err := s.Read().QueryRowContext(ctx, "SELECT model_sent_at FROM turns WHERE id=? AND session=? AND ended_at IS NULL", turn, session).Scan(&persisted)
+		err := s.Read().QueryRowContext(ctx, "SELECT t.model_sent_at FROM turns t JOIN sessions s ON s.id=t.session WHERE t.id=? AND t.session=? AND t.ended_at IS NULL AND s.closed_at IS NULL", turn, session).Scan(&persisted)
+		if err != nil {
+			// Entries are never reinserted after cleanup. Retire only this pointer:
+			// an old in-flight request must not erase a newer entry for the same key.
+			s.modelSentMu.Lock()
+			if s.modelSent[turn] == state {
+				delete(s.modelSent, turn)
+			}
+			s.modelSentMu.Unlock()
+		}
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -223,17 +245,19 @@ func (s *Store) MarkTurnModelSent(ctx context.Context, session contract.SessionI
 			s.modelSentReadError.Do(func() { log.Printf("model handoff: read turn %s: %v", turn, err) })
 			return err
 		}
-		if s.modelSent == nil {
-			s.modelSent = make(map[contract.TurnID]modelStamp)
-		}
-		state = modelStamp{session: session, stamped: persisted != 0}
-		s.modelSent[turn] = state
+		state.active = true
+		state.stamped = persisted != 0
 		if state.stamped {
 			return nil
 		}
 	}
+	var updated int64
 	err := s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "UPDATE turns SET model_sent_at=? WHERE id=? AND session=? AND ended_at IS NULL AND model_sent_at=0", at.UnixMilli(), turn, session)
+		result, err := tx.ExecContext(ctx, "UPDATE turns SET model_sent_at=? WHERE id=? AND session=? AND ended_at IS NULL AND model_sent_at=0 AND EXISTS (SELECT 1 FROM sessions WHERE id=? AND closed_at IS NULL)", at.UnixMilli(), turn, session, session)
+		if err != nil {
+			return err
+		}
+		updated, err = result.RowsAffected()
 		return err
 	})
 	if err != nil {
@@ -242,8 +266,7 @@ func (s *Store) MarkTurnModelSent(ctx context.Context, session contract.SessionI
 			state.logged = true
 		}
 	} else {
-		state.stamped = true
+		state.stamped = updated != 0
 	}
-	s.modelSent[turn] = state
 	return err
 }
