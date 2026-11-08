@@ -273,6 +273,15 @@ type TurnActivity struct {
 	Label   string       `json:"label"` // the running tool call, masked, one line of at most 80 characters
 }
 
+// ToolFailed records one tool call a session's transcript shows failing. Error and args are cut short and can hold outside text.
+type ToolFailed struct {
+	Session SessionID `json:"session"`
+	Tool    string    `json:"tool"`
+	Model   string    `json:"model,omitempty"`
+	Args    string    `json:"args,omitempty"` // the call's arguments as JSON, when the call was seen
+	Error   string    `json:"error"`
+}
+
 // TranscriptChanged is an owner-only live notification; it contains no transcript text.
 type TranscriptChanged struct {
 	Session SessionID `json:"session"`
@@ -482,6 +491,9 @@ func (SessionClosed) EventType() EventType    { return "session.closed" }
 func (SessionClosed) isEventBody()            {}
 func (SessionCompacted) EventType() EventType { return "session.compacted" }
 func (SessionCompacted) isEventBody()         {}
+
+func (ToolFailed) EventType() EventType { return "tool.failed" }
+func (ToolFailed) isEventBody()         {}
 
 func (TurnStarted) EventType() EventType { return "turn.started" }
 func (TurnStarted) isEventBody()         {}

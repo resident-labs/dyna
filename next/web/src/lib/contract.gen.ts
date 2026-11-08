@@ -305,6 +305,7 @@ export type TurnEnded = { dataAttachment?: number | null; data?: JSONData; attac
 export type ConversationRead = { room: RoomID; conversation: Conversation; seq: number; };
 export type ActivityKind = "tool" | "compaction" | "model" | "model_wait";
 export type TurnActivity = { session: SessionID; turn: TurnID; kind: ActivityKind; label: string; };
+export type ToolFailed = { session: SessionID; tool: string; model?: string; args?: string; error: string; };
 export type TranscriptChanged = { session: SessionID; turn: TurnID; };
 export type FinalReply = { reply: ReplyChannel; posted?: EventID; };
 export type Usage = { model: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; };
@@ -589,6 +590,7 @@ export type SubscriptionSetEnabledResponse = { };
 export type HookResult = "passed" | "failed" | "stopped";
 export type HookFinished = { subscription: SubscriptionID; result: HookResult; exitCode: number; cause?: FailureCause; output?: string; failures?: number; retryAt?: string | null; };
 export type HookDue = { subscription: SubscriptionID; };
+export type HookDigest = { subscription: SubscriptionID; events: Array<string> | null; more?: number; };
 export type NoticePosted = { text: string; };
 export type EventFields = { };
 export type SessionWaiting = { kind: WaitKind; count: number; name?: string; };
@@ -676,6 +678,7 @@ export type EventBody =
   | { type: "goal.item_changed"; body: GoalItemChanged }
   | { type: "goal.set"; body: GoalSet }
   | { type: "grant.expired"; body: GrantExpired }
+  | { type: "hook.digest"; body: HookDigest }
   | { type: "hook.due"; body: HookDue }
   | { type: "hook.finished"; body: HookFinished }
   | { type: "host.disk_low"; body: HostDiskLow }
@@ -708,6 +711,7 @@ export type EventBody =
   | { type: "session.started"; body: SessionStarted }
   | { type: "shell.job.ended"; body: ShellJobEnded }
   | { type: "shell.job.running"; body: ShellJobRunning }
+  | { type: "tool.failed"; body: ToolFailed }
   | { type: "transcript.changed"; body: TranscriptChanged }
   | { type: "turn.activity"; body: TurnActivity }
   | { type: "turn.ended"; body: TurnEnded }

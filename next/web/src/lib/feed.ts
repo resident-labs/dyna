@@ -95,7 +95,7 @@ export function subject(event: Event): string | undefined {
   switch (event.type) {
     case "host.switches_changed": case "engine.restarted": return undefined;
     case "post.sent": case "git.main_updated": case "git.main_ci_finished": case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": case "session.failed": case "goal.set": case "goal.item_changed": case "goal.ended": case "checkin.due": return undefined;
-    case "service.changed": case "service.failed": case "hook.finished": case "hook.due": case "notice.posted": case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": return undefined;
+    case "service.changed": case "service.failed": case "hook.finished": case "hook.due": case "hook.digest": case "notice.posted": case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": return undefined;
     case "op.requested": return event.body.by.session;
     case "op.decided": case "op.ran": return event.from.session;
     default: return event.body.session;
@@ -180,7 +180,8 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     // Account alerts are owner-only and never belong to a room feed. Questions show in Needs you, Requests and the session's DM.
     if (event.type === "account.failed" || event.type === "account.quota_low" || event.type === "host.disk_low" || event.type === "question.asked" || event.type === "question.answered" || event.type === "question.withdrawn") continue;
     // A schedule that does its job quietly says nothing. A failure and any post of its own still show.
-    if (event.type === "hook.due" || event.type === "hook.finished" && event.body.result !== "failed") continue;
+    // Failed tool calls reach the feed only through a digest subscription's session.
+    if (event.type === "hook.due" || event.type === "hook.digest" || event.type === "tool.failed" || event.type === "hook.finished" && event.body.result !== "failed") continue;
     const firstAt = work[0]?.at ?? (deferred[0]?.kind === "notice" ? deferred[0].event.at : deferred[0]?.kind === "failed" || deferred[0]?.kind === "request" || deferred[0]?.kind === "restarted" || deferred[0]?.kind === "run" ? deferred[0].at : undefined);
     if (firstAt && new Date(firstAt).toDateString() !== new Date(event.at).toDateString()) flush();
     if (event.type === "post.sent") {
@@ -316,7 +317,7 @@ export const eventGroups: Record<Event["type"], string> = {
   "question.asked": "questions", "question.answered": "questions answered", "question.withdrawn": "questions withdrawn",
   "image.built": "images built", "image.failed": "image builds failed", "github.pr.opened": "pull requests opened", "github.pr.changed": "pull request updates",
   "github.pr.merged": "pull requests merged", "github.pr.closed": "pull requests closed", "github.ci.finished": "CI results", "git.main_updated": "default branch moves", "git.main_ci_finished": "default branch CI results", "github.issue.opened": "issues opened", "github.comment": "GitHub comments", "github.label": "GitHub labels", "github.mention": "GitHub mentions", "github.issue.changed": "issue updates", "github.issue.closed": "issues closed",
-  "hook.finished": "subscription runs", "hook.due": "subscription wakes", "notice.posted": "notices", "session.notice": "box notices",
+  "hook.finished": "subscription runs", "hook.due": "subscription wakes", "hook.digest": "subscription digests", "tool.failed": "failed tool calls", "notice.posted": "notices", "session.notice": "box notices",
   "shell.job.ended": "jobs finished", "shell.job.running": "job status", "grant.expired": "host grants expired",
   "host.switches_changed": "host switch changes", "host.disk_low": "disk warnings", "conversation.read": "read positions", "workflow.ended": "workflow runs", "workflow.step_changed": "workflow steps", "workflow.status_changed": "workflow status lines",
   "engine.restarted": "engine restarts",
@@ -558,6 +559,8 @@ export function describe(event: Event, name: Name): string {
     case "post.sent": case "post.created": return event.body.text;
     case "hook.finished": return `A subscription's run ${event.body.result}: ${event.body.cause ? causes[event.body.cause] : `exit code ${event.body.exitCode}`}`;
     case "hook.due": return "A subscription woke a session";
+    case "hook.digest": return "A subscription woke a session with a digest";
+    case "tool.failed": return `${name(event.body.session)}'s ${event.body.tool} call failed`;
     case "notice.posted": case "session.notice": return event.body.text;
   }
 }
