@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -16,6 +17,9 @@ import (
 )
 
 var ErrParentClosing = errors.New("parent session is closing")
+
+// ErrNameTaken is a session start whose name an open session in the room already has.
+var ErrNameTaken = errors.New("session name taken")
 var ErrSessionClosing = errors.New("session is closing")
 var ErrVisualForbidden = errors.New("visual belongs to another room or author")
 var ErrVisualNoAuthor = errors.New("visual has no session author")
@@ -145,6 +149,13 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 		var parentID *contract.SessionID
 		if parent != "" {
 			parentID = &parent
+		}
+		var taken contract.SessionID
+		switch err := tx.QueryRowContext(ctx, "SELECT id FROM sessions WHERE room=? AND name=? AND closed_at IS NULL", session.Room, session.Name).Scan(&taken); {
+		case err == nil:
+			return fmt.Errorf("%w: session %s (%s) is already open in this room; send it the work, close it first, or start this one under another name", ErrNameTaken, session.Name, taken)
+		case !errors.Is(err, sql.ErrNoRows):
+			return err
 		}
 		_, err := tx.ExecContext(ctx, "INSERT INTO sessions(id,room,name,parent,repo,profile,state,goal,created_at,compose) VALUES(?,?,?,?,?,?,?,?,?,?)", session.ID, session.Room, session.Name, parentID, session.Repo, session.Profile, "open", goal, event.Time.UnixMilli(), session.Compose)
 		if err != nil {

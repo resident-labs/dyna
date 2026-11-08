@@ -269,7 +269,7 @@ func failure(err error) *contract.Error {
 		code = contract.ErrSessionClosing
 	} else if errors.Is(err, store.ErrParentClosing) {
 		code = contract.ErrParentClosing
-	} else if errors.Is(err, store.ErrPoolExists) || errors.As(err, &held) || errors.As(err, &used) {
+	} else if errors.Is(err, store.ErrPoolExists) || errors.Is(err, store.ErrNameTaken) || errors.As(err, &held) || errors.As(err, &used) {
 		code = contract.ErrConflict
 	} else if errors.Is(err, store.ErrTurnConflict) || errors.Is(err, store.ErrRoomDeleting) || errors.Is(err, store.ErrQuestionNotWaiting) || errors.Is(err, store.ErrPRTracked) || errors.Is(err, store.ErrIssueTracked) {
 		code = contract.ErrConflict
