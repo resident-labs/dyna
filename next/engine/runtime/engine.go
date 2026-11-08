@@ -267,7 +267,7 @@ func Run(ctx context.Context, cfg Config) error {
 				pinned = ""
 			}
 			proxy.Handler(string(session.ID), allowed, eligible, pinned, crew, func(ctx context.Context) error {
-				return st.MarkTurnModelSent(ctx, session.ID, time.Now())
+				return st.MarkTurnModelSent(ctx, session.ID, session.Turn, time.Now())
 			}).ServeHTTP(w, r)
 		}))
 	})

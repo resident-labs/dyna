@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"log"
 	"slices"
 	"time"
 
@@ -186,11 +188,62 @@ func (s *Store) SetRoomGitHubWrites(ctx context.Context, room contract.RoomID, w
 	})
 }
 
-// MarkTurnModelSent records the first engine handoff to its model proxy for the active turn.
-// A later rejection by the child proxy still counts. It is not the provider send or first response.
-func (s *Store) MarkTurnModelSent(ctx context.Context, session contract.SessionID, at time.Time) error {
-	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "UPDATE turns SET model_sent_at=? WHERE session=? AND ended_at IS NULL AND model_sent_at=0", at.UnixMilli(), session)
+type modelStamp struct {
+	session contract.SessionID
+	stamped bool
+	logged  bool
+}
+
+// MarkTurnModelSent records the first engine handoff to its model proxy, including
+// child rejection, not provider send or response. Identity is captured by the engine
+// before routing, never read from model request headers. Successful turns bypass
+// all database access; failed writes are retried and logged once per active turn.
+func (s *Store) MarkTurnModelSent(ctx context.Context, session contract.SessionID, turn contract.TurnID, at time.Time) error {
+	if turn == "" {
+		return nil
+	}
+	s.modelSentMu.Lock()
+	defer s.modelSentMu.Unlock()
+	state, exists := s.modelSent[turn]
+	if exists && state.session != session {
+		return nil
+	}
+	if state.stamped {
+		return nil
+	}
+	if !exists {
+		// Do not retain delayed requests for ended turns. EndTurn holds the same
+		// lock through commit and removal, so an old request cannot recreate an entry.
+		var persisted int64
+		err := s.Read().QueryRowContext(ctx, "SELECT model_sent_at FROM turns WHERE id=? AND session=? AND ended_at IS NULL", turn, session).Scan(&persisted)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			s.modelSentReadError.Do(func() { log.Printf("model handoff: read turn %s: %v", turn, err) })
+			return err
+		}
+		if s.modelSent == nil {
+			s.modelSent = make(map[contract.TurnID]modelStamp)
+		}
+		state = modelStamp{session: session, stamped: persisted != 0}
+		s.modelSent[turn] = state
+		if state.stamped {
+			return nil
+		}
+	}
+	err := s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE turns SET model_sent_at=? WHERE id=? AND session=? AND ended_at IS NULL AND model_sent_at=0", at.UnixMilli(), turn, session)
 		return err
 	})
+	if err != nil {
+		if !state.logged {
+			log.Printf("model handoff: stamp turn %s: %v", turn, err)
+			state.logged = true
+		}
+	} else {
+		state.stamped = true
+	}
+	s.modelSent[turn] = state
+	return err
 }
