@@ -120,13 +120,15 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
   let deferred: Row[] = [];
   const turns = new Map<string, { session: string; at: string; posted: boolean; significant: boolean; events: Event[] }>();
   const turnRequests = new Map<string, string>();
-  let today = "";
+  // Rows are in seq order, and a work row placed after a post can have begun the day before it, so a day row comes only at the
+  // first row of a day not shown yet: a day row never repeats, and its key stays unique.
+  const days = new Set<string>();
   const requests = new Map<string, Extract<Row, { kind: "request" }>>();
   const decided = new Set(events.flatMap(event => event.type === "op.decided" ? [event.body.id] : []));
   const dated = (at: string) => {
     const day = new Date(at).toDateString();
-    if (day !== today) rows.push({ kind: "day", key: `d${day}`, at });
-    today = day;
+    if (!days.has(day)) rows.push({ kind: "day", key: `d${day}`, at });
+    days.add(day);
   };
   let unread = since > 0;
   const fresh = (seq: number, from: Principal) => {
