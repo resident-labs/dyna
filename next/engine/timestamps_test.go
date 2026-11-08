@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -46,7 +47,7 @@ func TestFramedModelHandoffTimestamps(t *testing.T) {
 	})}
 	go proxy.Serve(listener)
 	defer proxy.Close()
-	route := model.Handler(socket, "key", string(worker), []string{"allowed"}, []string{"account"}, "", false, func(ctx context.Context) error { return s.store.MarkTurnModelSent(ctx, worker, time.Now()) })
+	route := model.Handler(socket, "key", string(worker), []string{"allowed"}, []string{"account"}, "", false, func(ctx context.Context) error { return s.store.MarkTurnModelSent(ctx, worker, first.Turn, time.Now()) })
 	request := func() {
 		t.Helper()
 		w := httptest.NewRecorder()
@@ -160,5 +161,44 @@ func TestFramedModelHandoffTimestamps(t *testing.T) {
 	for name, values := range map[string][]int64{"post_taken": postTaken, "taken_model_sent": takenSent, "start_model_sent": startSent, "steer_post_taken": steerPostTaken, "steer_first_sent_minus_taken": steerRelation} {
 		sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
 		t.Logf("%s n=%d p50=%d ms p95=%d ms", name, len(values), values[len(values)/2], values[len(values)*95/100])
+	}
+}
+
+func TestStoreStampFailureStillForwardsModel(t *testing.T) {
+	s, _, worker, ctx := setup(t)
+	ch, problem := testChannel(t, s, ctx, boxCaller(worker))
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	first := (<-ch).Body.(contract.TurnStart)
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`CREATE TRIGGER fail_model_stamp BEFORE UPDATE OF model_sent_at ON turns BEGIN SELECT RAISE(ABORT, 'test stamp failure'); END`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(t.TempDir(), "proxy.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int64
+	proxy := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.WriteHeader(http.StatusAccepted) })}
+	go proxy.Serve(listener)
+	defer proxy.Close()
+	route := model.Handler(socket, "key", string(worker), []string{"allowed"}, []string{"account"}, "", false, func(ctx context.Context) error { return s.store.MarkTurnModelSent(ctx, worker, first.Turn, time.Now()) })
+	for i := 0; i < 3; i++ {
+		w := httptest.NewRecorder()
+		route.ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed"}`)))
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("status=%d", w.Code)
+		}
+	}
+	if calls.Load() != 3 {
+		t.Fatalf("forwarded=%d", calls.Load())
+	}
+	var sent int64
+	if err := s.store.Read().QueryRow("SELECT model_sent_at FROM turns WHERE id=?", first.Turn).Scan(&sent); err != nil || sent != 0 {
+		t.Fatalf("sent=%d err=%v", sent, err)
 	}
 }

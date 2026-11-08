@@ -76,6 +76,10 @@ type Store struct {
 	wake           func([]contract.SessionID, []contract.Event)
 	subMu          sync.Mutex
 	subs           map[chan contract.Event]struct{}
+
+	modelSentMu        sync.Mutex // serializes stamp attempts with turn-end cleanup
+	modelSent          map[contract.TurnID]modelStamp
+	modelSentReadError sync.Once // bounds logging when even the active-turn read is unavailable
 }
 
 // LockAdmission serializes a capacity decision with its reservation write across boxes, services and CI runners. The returned
