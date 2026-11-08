@@ -261,11 +261,16 @@ func (d devService) HostList(ctx context.Context, p contract.Principal, req cont
 		}
 	}
 	// gpu-box stopped answering 4 min ago, so Home shows its last figures dimmed.
-	list.Hosts = append(list.Hosts, contract.HostSummary{Name: "gpu-box", CPUs: 32, MemBytes: 128 * box.GiB, CPUUsed: 6.5, MemUsed: 41 * box.GiB,
+	for _, fixture := range []contract.HostSummary{{Name: "gpu-box", CPUs: 32, MemBytes: 128 * box.GiB, CPUUsed: 6.5, MemUsed: 41 * box.GiB,
 		DiskBytes: 2048 * box.GiB, DiskUsed: 700 * box.GiB, LastSeen: time.Now().Add(-4 * time.Minute)},
 		// omarchy is exec only: it shows its whole-machine figures like the others, "Online" for a workspace count, never disk low.
 		contract.HostSummary{Name: "omarchy", Reachable: true, ExecOnly: true, CPUs: 20, MemBytes: 32 * box.GiB, CPUUsed: 1.4, MemUsed: 7 * box.GiB,
-			DiskBytes: 1862 * box.GiB, DiskUsed: 1326 * box.GiB, LastSeen: time.Now()})
+			DiskBytes: 1862 * box.GiB, DiskUsed: 1326 * box.GiB, LastSeen: time.Now()}} {
+		// A copied store can already have these hosts; keep its identities and figures.
+		if !slices.ContainsFunc(list.Hosts, func(h contract.HostSummary) bool { return h.Name == fixture.Name }) {
+			list.Hosts = append(list.Hosts, fixture)
+		}
+	}
 	return list, problem
 }
 
