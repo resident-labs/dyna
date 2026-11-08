@@ -388,3 +388,56 @@ func TestOwnedPullLifecycleThroughMCP(t *testing.T) {
 		})
 	}
 }
+
+// The job list's nesting is named in actions_list, and projects_write's updated_field lists its keys without oneOf, which some
+// models answer with {}.
+func TestListedToolsSpellOutTrickyShapes(t *testing.T) {
+	ctx := context.Background()
+	handler, err := Handler(ctx, "engine-token", http.DefaultTransport, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant := contract.GitHubWrites{Repos: []contract.RepoName{"o/r"}, Groups: contract.AllGitHubWriteGroups}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler.ServeHTTP(w, r.WithContext(githubwrites.WithAllowed(r.Context(), grant)))
+	}))
+	t.Cleanup(server.Close)
+	session, err := mcp.NewClient(&mcp.Implementation{Name: "pi", Version: "test"}, nil).Connect(ctx, &mcp.StreamableClientTransport{Endpoint: server.URL}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	listed, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := 0
+	for _, tool := range listed.Tools {
+		schema, _ := json.Marshal(tool.InputSchema)
+		switch tool.Name {
+		case "actions_list":
+			seen++
+			if !strings.Contains(tool.Description, ".jobs.jobs") {
+				t.Errorf("actions_list description: %s", tool.Description)
+			}
+		case "projects_write":
+			seen++
+			var parsed struct {
+				Properties map[string]struct {
+					OneOf      []any          `json:"oneOf"`
+					Properties map[string]any `json:"properties"`
+				} `json:"properties"`
+			}
+			if err := json.Unmarshal(schema, &parsed); err != nil {
+				t.Fatal(err)
+			}
+			field := parsed.Properties["updated_field"]
+			if field.OneOf != nil || field.Properties["id"] == nil || field.Properties["name"] == nil || field.Properties["value"] == nil {
+				t.Errorf("updated_field schema: %s", schema)
+			}
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("found %d of actions_list and projects_write", seen)
+	}
+}

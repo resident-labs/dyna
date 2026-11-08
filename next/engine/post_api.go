@@ -70,7 +70,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 				return contract.PostResponse{}, &contract.Error{Code: contract.ErrCrossRoomAttachment, Message: "cross-room posts cannot carry attachments"}
 			}
 			if strings.TrimSpace(req.Text) == "" || len(req.Mentions) != 1 || (req.Mentions[0] != "root" && req.Mentions[0] != "@root") || req.Home.Session != "" || (req.Home.Kind != "" && req.Home.Kind != contract.ConversationFeed) || req.ReplyTo != "" || req.VisualUpdate != "" || req.VisualReply != "" || req.Forward != "" {
-				return contract.PostResponse{}, forbidden()
+				return contract.PostResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "a post to another room takes text and mentions [\"root\"] only: no home, reply, visual or forward"}
 			}
 			source = &contract.PostSource{Room: session.Room}
 		}

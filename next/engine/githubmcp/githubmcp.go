@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"maps"
 	"net/http"
 	"runtime/debug"
 	"slices"
@@ -22,6 +23,7 @@ import (
 	"github.com/github/github-mcp-server/v2/pkg/translations"
 	"github.com/github/github-mcp-server/v2/pkg/utils"
 	gogithub "github.com/google/go-github/v92/github"
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/githubwrites"
@@ -98,8 +100,35 @@ func Handler(ctx context.Context, token string, reads http.RoundTripper, owns fu
 		}
 		tools := github.AllTools(t, github.WithHost(utils.HostTypeDotcom))
 		for i := range tools {
-			if tool := &tools[i].Tool; slices.Contains(names, tool.Name) {
+			tool := &tools[i].Tool
+			if slices.Contains(names, tool.Name) {
 				githubwrites.Describe(grant, tool)
+			}
+			switch schema, _ := tool.InputSchema.(*jsonschema.Schema); tool.Name {
+			case "actions_list":
+				// Agents read the job list as .jobs and fail; upstream nests it one level deeper.
+				tool.Description += "\nlist_workflow_jobs returns {\"jobs\": {\"total_count\": n, \"jobs\": [...]}}: the array is .jobs.jobs."
+			case "projects_write":
+				// Some models (grok) send {} for a oneOf object. The advertised field lists its keys plainly; the handler still
+				// requires id or name, not both, and a value.
+				if schema == nil {
+					break
+				}
+				if field := schema.Properties["updated_field"]; field != nil {
+					flat := *field
+					flat.OneOf = nil
+					flat.Required = []string{"value"}
+					flat.Properties = map[string]*jsonschema.Schema{
+						"id":    {Type: "integer", Description: "The numeric project field ID. Give id or name, not both."},
+						"name":  {Type: "string", Description: "The project field name, such as Status. Matching is case-insensitive."},
+						"value": {Description: "The value to apply; null clears the field."},
+					}
+					properties := maps.Clone(schema.Properties)
+					properties["updated_field"] = &flat
+					copied := *schema
+					copied.Properties = properties
+					tool.InputSchema = &copied
+				}
 			}
 		}
 		inventory, err := inventory.NewBuilder().SetTools(tools).SetResources(github.AllResources(t)).SetPrompts(github.AllPrompts(t)).

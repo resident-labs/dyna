@@ -341,7 +341,7 @@ func (s *Service) managedSession(ctx context.Context, caller contract.Principal,
 		return store.Session{}, failure(err)
 	}
 	if !tree.CanManage(caller, session.ID) {
-		return store.Session{}, forbidden()
+		return store.Session{}, &contract.Error{Code: contract.ErrForbidden, Message: fmt.Sprintf("session %s is not under you; you manage only sessions below you, so ask your parent", session.Name)}
 	}
 	return session, nil
 }
