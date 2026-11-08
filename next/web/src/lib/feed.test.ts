@@ -396,3 +396,19 @@ test("the events for subscribers stay out of the feed, as the github.pr.changed 
   assert.equal(subject(mainCI), undefined);
   assert.equal(feedRows([merged, closed, ci, main, mainCI], { kind: "feed" }).filter(row => row.kind === "work").length, 0);
 });
+
+test("work that started before midnight and ends after a later post adds no second day row: row keys stay unique", () => {
+  const local = (h: number, m: number) => new Date(2026, 10, h < 12 ? 8 : 7, h, m).toISOString();
+  const at = (seq: number, time: string, body: EventBody, from: Principal = { kind: "engine" }) => ({ ...event(seq, body, from), at: time });
+  const job = (seq: number, time: string) => at(seq, time, { type: "shell.job.ended", body: { session: "l", job: `j${seq}`, end: { kind: "exit", code: 0 }, tail: "" } });
+  const rows = dayRows([
+    at(1, local(23, 55), { type: "turn.started", body: { session: "l", turn: "a", inputs: [] } }),
+    job(2, local(23, 56)),
+    at(3, local(0, 1), { type: "post.created", body: { text: "late", home: { kind: "feed" } } }, { kind: "owner" }),
+    job(4, local(0, 5)),
+    at(5, local(0, 10), { type: "turn.ended", body: { session: "l", turn: "a", outcome: "completed", usage } }),
+    at(6, local(0, 12), { type: "post.created", body: { text: "next", home: { kind: "feed" } } }, lead),
+  ], { kind: "feed" });
+  const keys = rows.map(row => row.key);
+  assert.equal(new Set(keys).size, keys.length, keys.join(" "));
+});
