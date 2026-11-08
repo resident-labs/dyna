@@ -911,7 +911,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		}
 		return err
 	}}
-	restart := &cobra.Command{Use: "restart SESSION", Short: "Replace a failed session box", Long: "Replace a failed session box. The old volume and unpushed work are lost. Removes the container and workspace/stack volumes on every known current or prior host before resetting the box. If cleanup fails or any known host is unavailable, the box stays failed for an explicit retry naming that host. Deletion may already be partial; it is not rolled back.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	restart := &cobra.Command{Use: "restart SESSION", Short: "Replace a failed session box", Long: "Replace a failed session box. The old volume and unpushed work are lost. Removes the container and workspace/stack volumes on every known current or prior host before resetting the box. If cleanup on any of those hosts fails, as when it does not answer, the box stays failed and the error names the host; run restart again once that host answers (host list shows it). Deletion may already be partial; it is not rolled back.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := getClient().SessionRestart(cmd.Context(), contract.SessionRestartRequest{Session: contract.SessionID(args[0])})
 		return err
 	}}
