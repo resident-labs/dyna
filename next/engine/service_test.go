@@ -164,7 +164,7 @@ func TestRootCreationRollsBackAndRootCannotClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.store.StartSession(ctx, store.Session{ID: "new-root", Room: "new-room", Name: "root", Profile: "test", Box: current.Box, NewRoomName: "new-room"}, "", contract.BoxSizeAgent, "", event, contract.Event{}, "", false, "", 0)
+	_, err = s.store.StartSession(ctx, store.Session{ID: "new-root", Room: "new-room", Name: "root", Profile: "test", Box: current.Box, NewRoomName: "new-room"}, "", contract.BoxSizeAgent, "", event, contract.Event{}, "", false, "", "", 0)
 	if err == nil {
 		t.Fatal("expected duplicate box failure")
 	}

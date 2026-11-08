@@ -281,8 +281,8 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 			switch {
 			case !safeState || eligibility == createRetryUsed:
 				reason = failure + "; automatic other-host retry unsafe: allocation already started or has session work"
-			case eligibility == createRetrySameHost:
-				reason = failure + "; automatic other-host retry skipped: initial sameHost placement"
+			case eligibility == createRetryPinned:
+				reason = failure + "; automatic other-host retry skipped: initial pinned placement"
 			default:
 				reason = failure + "; automatic other-host retry skipped: first-create provenance unknown"
 			}

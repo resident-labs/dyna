@@ -5,6 +5,27 @@ import (
 	"testing"
 )
 
+func TestSessionStartHostSchemaAndGuidance(t *testing.T) {
+	list, _, err := registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range list {
+		if tool.Name != "session" {
+			continue
+		}
+		if tool.InputSchema.Properties["host"].Type != "string" {
+			t.Fatal("host is not a typed name")
+		}
+		want := "host pins a new box to that named host; sameHost resolves the parent’s host instead (choose only one), and either waits for capacity without relocation or other-host retry; host must exist, have agents enabled, not be exec-only and satisfy the room host rule."
+		if strings.Count(tool.Description, want) != 1 {
+			t.Fatalf("missing or duplicated host guidance: %s", tool.Description)
+		}
+		return
+	}
+	t.Fatal("session tool missing")
+}
+
 func TestRegistryBuilds(t *testing.T) {
 	list, actions, err := registry()
 	if err != nil {
