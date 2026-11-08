@@ -2,10 +2,53 @@ package main
 
 import (
 	"context"
+	"strconv"
 	"testing"
+	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine"
+	"github.com/resident-labs/dyna/engine/store"
 )
+
+func TestHostListKeepsStoredIdentities(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(strconv.FormatBool(existing), func(t *testing.T) {
+			ctx := context.Background()
+			st, err := store.Open(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer st.Close()
+			if existing {
+				for _, name := range []contract.HostName{"gpu-box", "omarchy"} {
+					if err := st.AddHost(ctx, box.Host{Name: name, State: box.HostReady, CPUs: 7}); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			d := devService{Service: engine.New(st, nil, profiles{}, time.Now)}
+			list, problem := d.HostList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.HostListRequest{})
+			if problem != nil {
+				t.Fatal(problem)
+			}
+			seen := map[contract.HostName]bool{}
+			for _, h := range list.Hosts {
+				if seen[h.Name] {
+					t.Fatalf("duplicate host %q", h.Name)
+				}
+				seen[h.Name] = true
+				if existing && (h.Name == "omarchy" || h.Name == "gpu-box") && h.CPUs != 7 {
+					t.Fatalf("stored host overwritten: %+v", h)
+				}
+			}
+			if !seen["omarchy"] || !seen["gpu-box"] {
+				t.Fatal("missing fixture hosts")
+			}
+		})
+	}
+}
 
 func TestRenameReachesListAndUsage(t *testing.T) {
 	ctx := context.Background()
