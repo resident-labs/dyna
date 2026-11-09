@@ -958,6 +958,15 @@
   }
   .crumb { flex: none; max-width: 25%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @container session-header (max-width: 500px) { .session-bar .crumb, .session-bar .crumb + .count { display: none; } }
+  /* A narrow DM beside the sessions panel, as on a tablet, puts the status under the name, as a phone does, so it
+     reads whole instead of as a stub. */
+  @container session-header (min-width: 0) and (max-width: 560px) {
+    .session-bar .heading { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 1.25; }
+    .session-bar .heading strong { max-width: none; }
+    .session-bar .heading .count { font-size: 12.5px; }
+    .session-bar .heading .word { flex: none; }
+    .session-bar .session-spacer { display: none; }
+  }
   .hash { display: inline-flex; align-items: center; }
   /* A phone's header: the menu button, the title over its muted counts, Requests only while something waits (40 px
      targets), and the Sessions button with its count. The room menu's one action, Terminal, moves into the drawer. */
