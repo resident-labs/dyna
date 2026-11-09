@@ -170,7 +170,7 @@
 {#snippet action()}<button type="button" class="btn add" onclick={start}>{#if phone}<Icon name="plus" size={16} />Add{:else}Add a pool{/if}</button>{/snippet}
 {#snippet header()}{@render bar("Pools", items?.length, action)}{/snippet}
 
-<ListDetail bar={header} label="Pools" title={creating ? "Add a pool" : item ? item.name : "Not found"} open={creating || (!!items && selected !== undefined)} onselect={select} onclose={close} {list} {detail} {summary} />
+<ListDetail bar={header} empty={items?.length === 0} label="Pools" title={creating ? "Add a pool" : item ? item.name : "Not found"} open={creating || (!!items && selected !== undefined)} onselect={select} onclose={close} {list} {detail} {summary} />
 
 <style>
   .add { margin-left: auto; gap: 4px; }

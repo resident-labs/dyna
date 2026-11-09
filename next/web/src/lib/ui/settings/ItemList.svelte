@@ -113,8 +113,8 @@
 <div class="column" data-page-ready={!!items || failed} data-f6 tabindex="-1"
   onfocus={event => { if (event.target === event.currentTarget) (scroller ?? event.currentTarget.querySelector<HTMLElement>("input:enabled, button:enabled"))?.focus(); }}>
   <div class="tools">
-    <SearchBox bind:value={query} slash label={`Search ${noun[1]}`} placeholder={items?.length ? `Search ${count(items.length)}` : `Search ${noun[1]}`} disabled={!items} ondown={() => void first()} />
-    {#if chips}<div class="chips" role="group" aria-label="Filter">{#each shownChips ?? [] as each (each.id)}
+    {#if items?.length !== 0}<SearchBox bind:value={query} slash label={`Search ${noun[1]}`} placeholder={items?.length ? `Search ${count(items.length)}` : `Search ${noun[1]}`} disabled={!items} ondown={() => void first()} />{/if}
+    {#if chips && items?.length !== 0}<div class="chips" role="group" aria-label="Filter">{#each shownChips ?? [] as each (each.id)}
       <button type="button" class="chip" aria-pressed={chip?.id === each.id} disabled={!items} onclick={() => { chipId = each.id; }}>{each.label}{#if each.test && view}<span class="n">{view.counts[each.id].toLocaleString("en")}</span>{/if}</button>{/each}</div>{/if}
     {@render tools?.()}
   </div>
