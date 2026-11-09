@@ -8,9 +8,6 @@ import (
 )
 
 func (s *Service) SessionWork(ctx context.Context, caller contract.Principal, req contract.SessionWorkRequest) (contract.SessionWorkResponse, *contract.Error) {
-	if caller.Kind != contract.PrincipalOwner {
-		return contract.SessionWorkResponse{}, forbidden()
-	}
 	if req.Session == "" || req.Limit < 0 || req.Limit > 100 {
 		return contract.SessionWorkResponse{}, invalid("invalid session work request")
 	}

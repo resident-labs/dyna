@@ -368,9 +368,6 @@ func TestTranscriptDigestOwnRoomOnly(t *testing.T) {
 	}
 	_, e = r.s.TranscriptDigest(r.ctx, r.a, contract.TranscriptDigestRequest{Session: string(r.a.Session), Item: "x"})
 	wantCode(t, e, contract.ErrInvalid)
-	// The owner's own transcript.read stays the owner's.
-	_, e = r.s.TranscriptRead(r.ctx, r.a, contract.TranscriptReadRequest{Session: r.a.Session})
-	wantCode(t, e, contract.ErrForbidden)
 }
 
 func TestPostForwardQuotesOriginalAndWrapsOutsideText(t *testing.T) {

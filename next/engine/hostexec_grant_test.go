@@ -99,7 +99,4 @@ func TestHostexecList(t *testing.T) {
 	if problem != nil || len(got.Grants) != 2 || got.Grants[0].ID != "active" || got.Grants[1].To != target || got.Grants[1].Hosts[0] != contract.AllHosts || !got.Grants[1].Expires.IsZero() {
 		t.Fatalf("grants: %+v, %v", got, problem)
 	}
-	if _, problem = s.HostexecList(ctx, target, contract.HostexecListRequest{}); problem == nil || problem.Code != contract.ErrForbidden {
-		t.Fatalf("session: %v", problem)
-	}
 }

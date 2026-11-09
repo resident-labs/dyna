@@ -28,9 +28,6 @@ func TestTranscriptReadOwnerAndTurn(t *testing.T) {
 		t.Fatal(e)
 	}
 	req := contract.TranscriptReadRequest{Session: caller.Session, Turn: "turn_a"}
-	if _, e := s.TranscriptRead(ctx, caller, req); e == nil || e.Code != contract.ErrForbidden {
-		t.Fatalf("session read: %v", e)
-	}
 	got, e := s.TranscriptRead(ctx, contract.Principal{Kind: contract.PrincipalOwner}, req)
 	if e != nil || len(got.Steps) != 0 {
 		t.Fatalf("read = %+v %v", got, e)

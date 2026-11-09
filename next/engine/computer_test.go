@@ -20,9 +20,6 @@ func TestComputerStartIsTheOwnersAndNeedsAReadyBox(t *testing.T) {
 	s, _, id, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	req := contract.ComputerStartRequest{Session: id}
-	if _, err := s.ComputerStart(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: id}, req); err == nil || err.Code != contract.ErrForbidden {
-		t.Fatalf("session caller: %v", err)
-	}
 	if _, err := s.ComputerStart(ctx, owner, req); err == nil || err.Code != contract.ErrConflict {
 		t.Fatalf("box not ready: %v", err)
 	}

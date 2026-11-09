@@ -70,9 +70,6 @@ func workflowProfiles(effective contract.WorkflowEffective, named []contract.Pro
 // WorkflowSettings reads the settings: the built-in defaults, the global values and each open room's, or one room's.
 func (s *Service) WorkflowSettings(ctx context.Context, caller contract.Principal, req contract.WorkflowSettingsRequest) (contract.WorkflowSettingsResponse, *contract.Error) {
 	var response contract.WorkflowSettingsResponse
-	if caller.Kind != contract.PrincipalOwner {
-		return response, forbidden()
-	}
 	all, err := s.store.WorkflowSettings(ctx)
 	if err != nil {
 		return response, failure(err)
@@ -100,9 +97,6 @@ func (s *Service) WorkflowSettings(ctx context.Context, caller contract.Principa
 // here, once, so the rest of the engine reads values it can trust.
 func (s *Service) WorkflowSet(ctx context.Context, caller contract.Principal, req contract.WorkflowSetRequest) (contract.WorkflowSetResponse, *contract.Error) {
 	var response contract.WorkflowSetResponse
-	if caller.Kind != contract.PrincipalOwner {
-		return response, forbidden()
-	}
 	set := req.Set
 	named := set.Named()
 	if len(named)+len(req.Clear) == 0 {
