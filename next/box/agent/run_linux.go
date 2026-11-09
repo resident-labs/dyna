@@ -113,7 +113,7 @@ func Run(ctx context.Context) error {
 	setup := func(ctx context.Context) error {
 		return setupRepos(ctx, "/box/work", "/box/state/setup", hello.Repos, hello.GitName, hello.GitEmail, runGit)
 	}
-	setupErr := setup(ctx)
+	setup(ctx)
 	steps.Done("repository setup")
 	for _, link := range []struct{ path, target string }{
 		{"/box/pi/AGENTS.md", "/run/dyna/instructions/global/AGENTS.md"},
@@ -248,7 +248,7 @@ func Run(ctx context.Context) error {
 	ticks := time.NewTicker(transcriptInterval)
 	defer ticks.Stop()
 	go transcript.Run(ctx, ticks.C, files)
-	runner := &Runner{Harness: h, Sink: endedSink{turnSink: client, transcript: transcript, files: files}, Setup: setup, Attach: client.Attach, Steered: steered, setupErr: setupErr}
+	runner := &Runner{Harness: h, Sink: endedSink{turnSink: client, transcript: transcript, files: files}, Setup: setup, Attach: client.Attach, Steered: steered}
 	var closing atomic.Bool
 	var stopShellWatch context.CancelFunc
 	var shellDone chan struct{}

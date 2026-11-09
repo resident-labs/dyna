@@ -34,8 +34,7 @@ type Runner struct {
 	// Attach stores an input's files in the box before Pi reads the input. It fails only when its context ends.
 	Attach func(context.Context, contract.TurnInput) (contract.TurnInput, error)
 	// Steered hears an engine-checked interrupt only after Pi successfully queues the input.
-	Steered  func(contract.Interrupt)
-	setupErr error
+	Steered func(contract.Interrupt)
 	// What the last transfer applied. Both start empty, so a new Pi process runs its transfer on the first turn:
 	// box.hello started Pi on the session's profile, and only Pi knows whether the conversation fits that model.
 	model         contract.ModelChoice
@@ -71,9 +70,8 @@ func (r *Runner) Handle(ctx context.Context, message contract.BoxMessage) error 
 	switch m := message.Body.(type) {
 	case contract.TurnStart:
 		if r.Setup != nil {
-			r.setupErr = r.Setup(ctx)
-			if r.setupErr != nil {
-				return r.Sink.TurnOutput(ctx, contract.TurnEnded{Turn: m.Turn, Outcome: contract.TurnOutcome("failed"), Error: "repository setup: " + r.setupErr.Error(), Cause: contract.CauseSetupFailed})
+			if err := r.Setup(ctx); err != nil {
+				return r.Sink.TurnOutput(ctx, contract.TurnEnded{Turn: m.Turn, Outcome: contract.TurnOutcome("failed"), Error: "repository setup: " + err.Error(), Cause: contract.CauseSetupFailed})
 			}
 		}
 		return r.start(ctx, m)
