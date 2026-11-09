@@ -466,9 +466,18 @@ func (a *API) handler(c Caller) http.Handler {
 			writeError(w, forbidden())
 			return
 		}
+		combined := r.URL.Query().Has("roomAfter")
+		if combined && c.Principal.Kind != contract.PrincipalOwner {
+			writeError(w, forbidden())
+			return
+		}
+		if combined && room == "" {
+			writeError(w, invalid())
+			return
+		}
 		var after int64
 		s := r.URL.Query().Get("after")
-		if r.Header.Get("Last-Event-ID") != "" {
+		if !combined && r.Header.Get("Last-Event-ID") != "" {
 			s = r.Header.Get("Last-Event-ID")
 		}
 		if s != "" {
@@ -479,7 +488,26 @@ func (a *API) handler(c Caller) http.Handler {
 			}
 			after = n
 		}
-		ch, err := a.service.Events(r.Context(), c.Principal, room, after)
+		var ch <-chan contract.Event
+		var err *contract.Error
+		if combined {
+			roomAfter, parseErr := strconv.ParseInt(r.URL.Query().Get("roomAfter"), 10, 64)
+			if parseErr != nil || roomAfter < 0 {
+				writeError(w, invalid())
+				return
+			}
+			if last := r.Header.Get("Last-Event-ID"); last != "" {
+				n, parseErr := strconv.ParseInt(last, 10, 64)
+				if parseErr != nil || n < 0 {
+					writeError(w, invalid())
+					return
+				}
+				after, roomAfter = max(after, n), max(roomAfter, n)
+			}
+			ch, err = a.service.CombinedEvents(r.Context(), c.Principal, room, after, roomAfter)
+		} else {
+			ch, err = a.service.Events(r.Context(), c.Principal, room, after)
+		}
 		if err != nil {
 			writeError(w, err)
 			return
@@ -490,7 +518,7 @@ func (a *API) handler(c Caller) http.Handler {
 		if !ok {
 			return
 		}
-		data, marshalErr := json.Marshal(contract.StreamHello{Build: a.Build, HeartbeatMs: 15000})
+		data, marshalErr := json.Marshal(contract.StreamHello{Build: a.Build, HeartbeatMs: 15000, RoomUnion: c.Principal.Kind == contract.PrincipalOwner})
 		if marshalErr != nil {
 			return
 		}

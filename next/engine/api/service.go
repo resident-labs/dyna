@@ -185,6 +185,7 @@ type Service interface {
 	// Events atomically subscribes after seq, including committed events not yet
 	// delivered. The producer closes the channel when ctx ends.
 	Events(context.Context, contract.Principal, contract.RoomID, int64) (<-chan contract.Event, *contract.Error)
+	CombinedEvents(context.Context, contract.Principal, contract.RoomID, int64, int64) (<-chan contract.Event, *contract.Error)
 	// BoxChannel subscribes atomically and first emits the current durable
 	// delivery and turn state. Reconnects repeat unfinished work.
 	BoxChannel(context.Context, contract.Principal, string) (<-chan contract.BoxMessage, *contract.Error)
