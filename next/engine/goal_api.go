@@ -53,7 +53,7 @@ func goalProblem(err error) *contract.Error {
 		return invalid(refusal.Message)
 	}
 	if errors.Is(err, store.ErrTreeForbidden) {
-		return forbidden()
+		return &contract.Error{Code: contract.ErrForbidden, Message: "that session is not you or below you; you change only your own goal and goals of sessions below you, so ask your parent"}
 	}
 	return failure(err)
 }

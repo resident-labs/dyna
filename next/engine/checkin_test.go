@@ -366,7 +366,7 @@ func TestGoalAuthority(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e := r.s.GoalItem(r.ctx, asSession(r.child), contract.GoalItemRequest{Goal: lead.Goal, Text: "x"}); e == nil || e.Code != contract.ErrForbidden {
+	if _, e := r.s.GoalItem(r.ctx, asSession(r.child), contract.GoalItemRequest{Goal: lead.Goal, Text: "x"}); e == nil || e.Code != contract.ErrForbidden || !strings.Contains(e.Message, "ask your parent") {
 		t.Fatalf("child on parent's goal: %v", e)
 	}
 	if _, e := r.s.GoalSet(r.ctx, asSession(r.child), contract.GoalSetRequest{Session: r.lead, Text: "x", DoneWhen: "y"}); e == nil || e.Code != contract.ErrForbidden {
