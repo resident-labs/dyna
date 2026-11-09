@@ -53,12 +53,9 @@ func (c *Connections) Credentials(ctx context.Context) ([]Credential, error) {
 }
 
 func (c *Connections) RemoveCredential(ctx context.Context, id string) error {
-	body, err := json.Marshal(struct {
+	body, _ := json.Marshal(struct {
 		ID string `json:"id"`
 	}{id})
-	if err != nil {
-		return err
-	}
-	_, err = c.management.request(ctx, http.MethodPost, "/dyna/credentials/remove", body)
+	_, err := c.management.request(ctx, http.MethodPost, "/dyna/credentials/remove", body)
 	return err
 }
