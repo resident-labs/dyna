@@ -39,7 +39,7 @@ test("settings actions use the pane names, targets and access rules from Setting
 test("pane names are searchable actions, without exposing admin panes to non-admin devices", () => {
   for (const admin of [true, false]) {
     const sources: Sources = { rooms: [], sessions: [], actions: settingsActions(admin), recent: [], messages: { state: "done", posts: [], total: 0 } };
-    for (const [query, panes] of [["acc", ["devices", "accounts"]], ["hosts", ["hosts"]], ["profiles", ["profiles"]]] as const) {
+    for (const [query, panes] of [["acc", ["accounts", "devices"]], ["hosts", ["hosts"]], ["profiles", ["profiles"]]] as const) {
       for (const scope of [undefined, "actions"] as const) {
         const found = rows(build(query, scope, sources));
         assert.deepEqual(found.map(item => item.kind === "action" && item.action.id === "settings-pane" && item.action.pane), admin ? panes : []);
