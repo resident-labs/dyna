@@ -7,6 +7,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -136,7 +137,7 @@ func (s *Store) SessionList(ctx context.Context, req contract.SessionListRequest
 		COALESCE((SELECT outcome FROM turns WHERE session=s.id AND ended_at IS NOT NULL AND outcome!='stopped' ORDER BY ended_at DESC LIMIT 1),''),
 		s.shell_jobs, COALESCE(c.seq,0), s.created_at,
 		(SELECT ended_at FROM turns WHERE session=s.id AND ended_at IS NOT NULL ORDER BY ended_at DESC LIMIT 1),
-		EXISTS (SELECT 1 FROM shell_jobs j WHERE j.session=s.id)
+		EXISTS (SELECT 1 FROM shell_jobs j WHERE j.session=s.id), COALESCE(b.updated_at,0)
 		FROM sessions s LEFT JOIN boxes b ON b.session=s.id LEFT JOIN conversation_reads c ON c.room=s.room AND c.conversation='dm:'||s.id WHERE s.room=?1 AND s.closed_at IS NULL AND (?2='' OR s.parent=?2)
 		AND (?3='' OR (s.created_at,s.id)>(SELECT created_at,id FROM sessions WHERE id=?3)) ORDER BY s.created_at,s.id LIMIT ?4`, req.Room, req.Parent, req.After, fetch)
 	if err != nil {
@@ -146,14 +147,17 @@ func (s *Store) SessionList(ctx context.Context, req contract.SessionListRequest
 	sessions := []contract.SessionSummary{}
 	for rows.Next() {
 		var session contract.SessionSummary
-		var started int64
+		var started, boxUpdated int64
 		var lastTurn sql.NullInt64
-		if err := rows.Scan(&session.ID, &session.Name, &session.Parent, &session.Profile, &session.Box, &session.BoxState, &session.BoxReason, &session.Host, &session.Goal, &session.Turn, &session.LastOutcome, &session.ShellJobs, &session.LastRead, &started, &lastTurn, &session.HadJobs); err != nil {
+		if err := rows.Scan(&session.ID, &session.Name, &session.Parent, &session.Profile, &session.Box, &session.BoxState, &session.BoxReason, &session.Host, &session.Goal, &session.Turn, &session.LastOutcome, &session.ShellJobs, &session.LastRead, &started, &lastTurn, &session.HadJobs, &boxUpdated); err != nil {
 			return contract.SessionListResponse{}, err
 		}
 		// The open turn survives for session.restart to resume, but nothing is running it.
 		if session.BoxState == contract.BoxFailed || session.BoxState == contract.BoxLost {
 			session.Turn = ""
+		}
+		if session.BoxState == contract.BoxStarting && session.BoxReason == box.SessionStartupReason {
+			session.Start = &contract.BoxStartStatus{Host: session.Host, Step: contract.StartSession, StartedAt: time.UnixMilli(boxUpdated).UTC()}
 		}
 		session.StartedAt = time.UnixMilli(started).UTC()
 		if lastTurn.Valid {

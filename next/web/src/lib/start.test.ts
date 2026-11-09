@@ -12,6 +12,7 @@ test("startup step is typed, appears after a minute and resets its elapsed wait"
   assert.equal(startLabel(start, undefined, at + 180_000), "Starting on arch · updating Dyna on host (3 min)");
   assert.equal(startLabel({ ...start, step: "container_create", startedAt: new Date(at + 180_000).toISOString() }, undefined, at + 180_001), "Starting on arch");
   assert.equal(startLabel({ ...start, step: "container_create" }, undefined, at + 120_000), "Starting on arch · creating container (2 min)");
+  assert.equal(startLabel({ ...start, step: "session_start" }, undefined, at + 118_000), "Starting on arch · loading conversation (1 min)");
   assert.equal(startLabel(undefined, undefined, at), "Starting");
 });
 
