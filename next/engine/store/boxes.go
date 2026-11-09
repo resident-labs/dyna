@@ -116,15 +116,8 @@ func (s *Store) TransitionBox(ctx context.Context, b box.Box, to contract.BoxSta
 			host = &next.Host
 		}
 		result, err := tx.ExecContext(ctx, "UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,updated_at=?,due_at=CASE WHEN ?='ready' THEN 0 ELSE due_at END WHERE id=? AND state=? AND (want='run' OR ?!='ready') AND (?!='ready' OR ? NOT IN ('creating','starting') OR due_at=0 OR due_at>?) AND (?!='lost' OR ?!='ready' OR EXISTS (SELECT 1 FROM hosts WHERE name=boxes.host AND state!='unreachable' AND state!='removed'))", host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, event.Time.UnixMilli(), next.State, next.ID, b.State, next.State, next.State, b.State, event.Time.UnixMilli(), b.State, next.State)
-		if err != nil {
+		if err := noRows(result, err, sql.ErrNoRows); err != nil {
 			return err
-		}
-		n, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			return sql.ErrNoRows
 		}
 		_, err = s.AppendEvent(tx, event)
 		return err
@@ -355,15 +348,8 @@ func (s *Store) BeginSessionStartup(ctx context.Context, b box.Box, event contra
 	event.Body = contract.BoxChanged{Box: b.ID, Session: b.Session, Host: b.Host, From: b.State, To: contract.BoxStarting, Reason: box.SessionStartupReason}
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, "UPDATE boxes SET state='starting',reason=?,updated_at=?,due_at=? WHERE id=? AND state=? AND want='run' AND (due_at=0 OR due_at>?)", box.SessionStartupReason, event.Time.UnixMilli(), event.Time.Add(box.SessionStartupBudget).UnixMilli(), b.ID, b.State, event.Time.UnixMilli())
-		if err != nil {
+		if err := noRows(result, err, sql.ErrNoRows); err != nil {
 			return err
-		}
-		n, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			return sql.ErrNoRows
 		}
 		_, err = s.AppendEvent(tx, event)
 		return err
