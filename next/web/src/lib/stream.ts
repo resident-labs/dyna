@@ -4,7 +4,7 @@ import { decodeEvent } from "./event.ts";
 export interface EventConnection {
   onmessage: ((event: MessageEvent<string>) => void) | null;
   onerror: ((event: globalThis.Event) => void) | null;
-  addEventListener(type: "hello", listener: (event: MessageEvent<string>) => void): void;
+  addEventListener(type: "hello" | "heartbeat", listener: (event: MessageEvent<string>) => void): void;
   close(): void;
 }
 export type EventFactory = (url: string) => EventConnection;
@@ -41,23 +41,50 @@ export function stream(
   function connect() {
     const reconnect = attempted;
     attempted = true;
-    source = factory(`/v1/events?${new URLSearchParams({ ...(room && { room }), after: String(after()) })}`);
-    source.addEventListener("hello", message => {
+    const current = source = factory(`/v1/events?${new URLSearchParams({ ...(room && { room }), after: String(after()) })}`);
+    let active = true;
+    let heartbeatMs: number | undefined;
+    let cancelWatchdog = () => {};
+    const alive = () => !closed && active && source === current;
+    const refresh = () => {
+      cancelWatchdog();
+      if (heartbeatMs !== undefined) cancelWatchdog = schedule(failed, heartbeatMs * 2 + 5000);
+    };
+    function failed() {
+      if (!alive()) return;
+      active = false;
+      cancelWatchdog();
+      current.close();
+      if (!room) reportStreamState(false);
+      cancel = schedule(() => { if (!closed) connect(); }, delay);
+      delay = Math.min(delay * 2, 10_000);
+    }
+    cancel = () => { active = false; cancelWatchdog(); };
+    current.addEventListener("hello", message => {
+      if (!alive()) return;
       // Each connection may have missed events the server does not replay, such as read positions.
-      opened(reconnect);
       const value: unknown = JSON.parse(message.data);
       if (typeof value === "object" && value !== null && "build" in value && typeof value.build === "string") {
         // An idle stream may send only hello and heartbeat comments. Treat hello
         // as recovery too, so the next outage does not inherit this one's backoff.
         delay = 500;
         const hello: StreamHello = { build: value.build };
+        if ("heartbeatMs" in value && typeof value.heartbeatMs === "number" && Number.isFinite(value.heartbeatMs) && value.heartbeatMs > 0 && value.heartbeatMs <= 60_000) {
+          hello.heartbeatMs = value.heartbeatMs;
+          current.addEventListener("heartbeat", () => { if (alive()) refresh(); });
+        }
+        heartbeatMs = hello.heartbeatMs;
+        refresh();
+        opened(reconnect);
         onHello(hello);
         if (!room) { reportStreamState(true); for (const listener of transcriptListeners) listener(); }
       }
     });
-    source.onmessage = message => {
+    current.onmessage = message => {
+      if (!alive()) return;
       const event = decodeEvent(JSON.parse(message.data));
       if (event) {
+        refresh();
         // Turn boundaries need not append transcript bytes: reload at start so a cold
         // session shows Working before Pi writes, and at end so live steps settle.
         if (!room && event.type === "transcript.changed" || room && (event.type === "turn.started" || event.type === "turn.ended")) for (const listener of transcriptListeners) listener(event.body.session);
@@ -65,13 +92,7 @@ export function stream(
       }
       delay = 500;
     };
-    source.onerror = () => {
-      source.close();
-      if (closed) return;
-      if (!room) reportStreamState(false);
-      cancel = schedule(connect, delay);
-      delay = Math.min(delay * 2, 10_000);
-    };
+    current.onerror = failed;
   }
   connect();
   return () => { closed = true; cancel(); source.close(); };
