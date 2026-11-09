@@ -40,7 +40,7 @@ func (r *epochNamespaceRunner) Run(ctx context.Context, input []byte, args ...st
 			gate = "touch \"$PROPOSED_LOCK_ENTERED\"\nwhile ! test -f \"$PROPOSED_LOCK_RELEASE\"; do sleep 0.01; done\ntrap \"touch \\\"$PROPOSED_LOCK_FINISHED\\\"\" EXIT\n"
 		}
 		command = strings.Replace(command, "flock -x -w 15 8", gate+"flock -x -w 15 8", 1)
-		command = strings.Replace(command, "flock -x -w 15 8 || exit 252", "flock -x -w 15 8 || exit 252\nprintf \""+who+"-acquired\\n\" >> \"$PROPOSED_LOCK_EVENTS\"", 1)
+		command = strings.Replace(command, "epoch_file=", "printf \""+who+"-acquired\\n\" >> \"$PROPOSED_LOCK_EVENTS\"\nepoch_file=", 1)
 		args = append([]string(nil), args...)
 		args[len(args)-1] = command
 	}

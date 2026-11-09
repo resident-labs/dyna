@@ -39,7 +39,45 @@ const namespaceScript = `set -eu
 root=$1; id=$2; mode=$3; shift 3
 mkdir -p -- "$root/locks"
 exec 8> "$root/locks/box-$id.lock"
-flock -x -w 15 8 || exit 252
+namespace_lock_holders() {
+ # The scan runs in a subshell that closes the lock descriptor and starts no program: only builtins read /proc, so killing
+ # the subshell leaves nothing behind, and nothing of it can hold the lock or the caller's streams.
+ exec 8>&-
+ set +e
+ printf 'namespace lock timed out: box %s; observed holders:' "$id" >&2
+ found=0
+ # Inspect only descriptors for this inode with a granted flock. Merely
+ # opening the file (including our own FD 8) does not identify a holder.
+ # Never signal: a conmon may still own a running container, and probing
+ # Podman cannot make a subsequent kill atomic with that container's life.
+ for proc in /proc/[0-9]*; do
+  for fd in "$proc"/fd/*; do
+   test "$fd" -ef "$root/locks/box-$id.lock" || continue
+   held=0
+   { while IFS= read -r line; do
+     case $line in 'lock:'*' FLOCK '*' WRITE '*) held=1;; esac
+    done < "$proc/fdinfo/${fd##*/}"; } 2>/dev/null
+   test "$held" = 1 || continue
+   command=
+   { while IFS= read -r -d '' word || test -n "$word"; do command="$command $word"; word=; done < "$proc/cmdline"; } 2>/dev/null
+   printf '\n pid=%s command=%.256s' "${proc##*/}" "$command" >&2
+   found=1
+   break
+  done
+ done
+ test "$found" = 1 || printf ' unavailable (process exited or procfs access denied)' >&2
+ printf '\n' >&2
+}
+# The scan reads every process and descriptor of the host, so it is best-effort and is killed after 2 s. The failure stays exit 252.
+namespace_scan_holders() {
+ (namespace_lock_holders) &
+ scan=$!
+ SECONDS=0
+ while kill -0 "$scan" 2>/dev/null && test "$SECONDS" -lt 2; do sleep 0.1; done
+ if kill -KILL "$scan" 2>/dev/null; then printf ' (scan stopped after 2s)\n' >&2; fi
+ wait "$scan" 2>/dev/null || true
+}
+flock -x -w 15 8 || { namespace_scan_holders || true; exit 252; }
 epoch_file="$root/locks/box-$id.epoch"
 epoch=0
 if test -e "$epoch_file"; then
