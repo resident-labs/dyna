@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack, type Snippet } from "svelte";
   import { call } from "../client.ts";
+  import { transcriptReader } from "../transcript-reader.ts";
   import { decodeEvent } from "../event.ts";
   import { hue } from "../identity.ts";
   import { visibleAttachments, causes, dayLabel, formatTime, waits } from "../feed.ts";
   import { watchTranscripts } from "../stream.ts";
   import { sourceLabel } from "../source.ts";
-  import type { Attachment, Principal, RoomID, PostRequest, TranscriptInput, TranscriptItem, TranscriptPart, TranscriptReadResponse, TranscriptTurn, TranscriptPage } from "../contract.gen.ts";
+  import type { Attachment, Principal, RoomID, PostRequest, TranscriptInput, TranscriptItem, TranscriptPart, TranscriptTurn, TranscriptPage } from "../contract.gen.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import Icon from "./Icon.svelte";
   import Avatar from "./Avatar.svelte";
@@ -98,6 +99,7 @@
   }
   let loaded = $state(false);
   let destroyed = false;
+  const readTranscript = transcriptReader(() => !destroyed);
   let queuedPosts = $derived(step ? [] : queuedTimelinePosts(view.posts(), turns));
   let pendingPosts = $derived(step ? [] : [...view.pendingPosts.values()]);
   // The owner's words a failed last turn read, so one press sends them again; only while nothing newer waits.
@@ -186,7 +188,8 @@
     void (async () => {
       let cursor = pageKind.cursor(turn);
       for (;;) {
-        const page = await call("transcript.read", { session, step, turn: turn.id, page: pageKind.page, cursor });
+        const page = await readTranscript({ session, step, turn: turn.id, page: pageKind.page, cursor });
+        if (!page) return;
         const next = page.turns?.[0];
         if (!next) throw new Error("Missing transcript page");
         turns = turns.map(item => item.id === turn.id ? { ...item, items: mergeTimelineItems(item.items ?? [], next.items ?? []), ...pageKind.patch(next) } : item);
@@ -204,7 +207,8 @@
     void (async () => {
       let after = turn.after;
       while (after) {
-        const page = await call("transcript.read", { session, step, turn: turn.id, afterItem: after });
+        const page = await readTranscript({ session, step, turn: turn.id, afterItem: after });
+        if (!page) return;
         const next = page.turns?.[0];
         if (!next || next.after === after) throw new Error("Transcript input cursor did not advance");
         turns = turns.map(item => item.id === turn.id ? { ...item, ...next, after: next.after, inputs: mergeTimelineInputs(item.inputs ?? [], next.inputs ?? []), items: mergeTimelineItems(item.items ?? [], next.items ?? []),
@@ -235,7 +239,8 @@
       let offset: number | undefined = 0, value = "";
       try {
         do {
-          const page: TranscriptReadResponse = await call("transcript.read", { session, step, turn, item, part, offset });
+          const page = await readTranscript({ session, step, turn, item, part, offset });
+          if (!page) return false;
           value += page.chunk ?? "";
           offset = page.nextOffset;
         } while (offset !== undefined);
