@@ -1,4 +1,5 @@
 import type { PostHit } from "./search.svelte.ts";
+import { settingsPanes } from "./routes.ts";
 
 // The Ctrl+K palette's rules, apart from the screen: matching, the grouped list, the keys and the time labels.
 
@@ -54,8 +55,16 @@ export const CAP = 3;
 
 export type Place = { id: string; name: string; paused: boolean; sessions?: number; working: number };
 export type Person = { id: string; room: string; roomName: string; name: string; root: boolean; closed: boolean; working: boolean };
-export type ActionId = "requests" | "pause" | "theme" | "settings" | "new-session" | "new-room";
-export type Action = { id: ActionId; label: string; hint: string; keys: string[]; icon: "inbox" | "pause" | "palette" | "gear" | "plus" };
+export type ActionId = "requests" | "pause" | "theme" | "settings" | "new-session" | "new-room" | "settings-pane";
+export type Action = { label: string; hint: string; keys: string[]; icon: "inbox" | "pause" | "palette" | "gear" | "plus" }
+  & ({ id: Exclude<ActionId, "settings-pane"> } | { id: "settings-pane"; pane: string });
+
+// Use the same pane names and access rules as Settings, so palette navigation stays in sync.
+export function settingsActions(admin: boolean): Action[] {
+  return settingsPanes.filter(pane => admin || !pane.admin).map(pane => ({
+    id: "settings-pane", pane: pane.id, label: pane.label, hint: "Settings", keys: [], icon: "gear",
+  }));
+}
 
 export type Item =
   | { kind: "room"; room: Place }
@@ -83,7 +92,8 @@ const ranked = <T extends { name: string }>(list: T[], query: string, closed: (i
 
 export function build(text: string, scope: Scope | undefined, sources: Sources): Section[] {
   const mode = parse(text, scope), { query } = mode;
-  const action = (list: Action[]) => query ? list.filter(item => matches(query, item.label)) : list;
+  const action = (list: Action[]) => query
+    ? list.filter(item => matches(query, item.label)).sort((a, b) => earliest(query, a.label) - earliest(query, b.label)) : list;
   const section = (group: Scope, found: Item[], total = found.length, state?: Section["state"]): Section => {
     const alone = mode.scope === group;
     // The empty query lists every common action; a typed query caps each group at three.
