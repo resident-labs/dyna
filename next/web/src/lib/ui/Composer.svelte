@@ -301,6 +301,23 @@
     .actions .send { grid-column: 3; grid-row: 4; }
     .composer .keys, .composer .host { display: none; }
   }
+  /* With a mouse the empty box is one row too: attach, the text, the hints and Send. The text grows upward from it, and
+     the buttons stay on its last line. */
+  @media not (pointer: coarse) {
+    .composer { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto auto 32px; align-items: end; column-gap: 8px; padding: 8px 10px; }
+    .quote, .tray, .file-summary, .note, .mentions { grid-column: 1 / -1; }
+    .inputline { grid-column: 2; grid-row: 4; }
+    textarea { min-height: 32px; padding: 5px 0; }
+    .underlay { padding: 5px 0; }
+    .actions { display: contents; }
+    .actions .attach { grid-column: 1; grid-row: 4; }
+    .actions .keys { grid-column: 3; grid-row: 4; line-height: 32px; white-space: nowrap; }
+    .actions .host { grid-column: 4; grid-row: 4; line-height: 32px; white-space: nowrap; }
+    .actions .send { grid-column: 5; grid-row: 4; }
+    /* The key hint takes no room until it shows, so a draft has the whole line. */
+    .composer .keys { display: none; }
+    .composer:has(textarea:focus:placeholder-shown) .keys { display: block; }
+  }
   .actions button, .remove { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border: 0; border-radius: 8px; cursor: pointer; }
   .attach, .remove { background: none; color: var(--muted); }
   .remove { width: 24px; height: 24px; border-radius: 6px; }
