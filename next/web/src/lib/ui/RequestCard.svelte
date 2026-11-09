@@ -73,8 +73,8 @@
 {#if pending && folded}
   <article class="row" class:current>
     <button type="button" class="head" aria-expanded="false" onclick={onopen}><span class="top">{@render who()}</span>
-      {#if lead}<span class="sub">{@render ask()}{#if request.class === "owner"} · {@render expiry()}{/if}</span>{/if}
-      {#if !lead}<span class="sub">{admin ? "You can decide" : "Needs a device with full access"} · {@render expiry()}</span>{/if}</button>
+      {#if lead}<span class="sub">{@render ask()}{#if request.class === "owner" && request.expires} · {@render expiry()}{/if}</span>{/if}
+      {#if !lead}<span class="sub">{admin ? "You can decide" : "Needs a device with full access"}{#if request.expires} · {@render expiry()}{/if}</span>{/if}</button>
     {#if admin}<div class="actions">
       <button type="button" class:approve={current} onclick={() => void decide(true)} disabled={busy}>Approve</button>
       <button type="button" onclick={() => void decide(false)} disabled={busy}>Deny</button>
@@ -84,7 +84,7 @@
 {:else if pending}
   <article class="card" class:feed class:current class:yours={request.class === "owner"}>
     <p class="top">{@render who()}
-      <span class="expires">{@render expiry()}</span></p>
+      {#if request.expires}<span class="expires">{@render expiry()}</span>{/if}</p>
     {#if lead}<p class="what">{line.text}{#if line.named}<code>{line.named}</code>{line.after}{/if}</p>{/if}
     {#if rest.length}<p class="why">{rest.join("\n")}</p>{/if}
     {#if request.card.command?.length}<pre class="exact">{commandLine(request.card.command)}</pre>{/if}

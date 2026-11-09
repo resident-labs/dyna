@@ -26,7 +26,7 @@
 </script>
 <article class:current>
   {#if !grouped}<div class="head"><Avatar kind={request.by.kind} {name} size={24} /><strong style:--hue={hue(name)}>{name}</strong>
-    <span class="time">{#if soon}<StatusPill tone="warning" word label={expiryText(request.expires, now)} />{:else}{expiryText(request.expires, now)}{/if}</span></div>{/if}
+    {#if request.expires}<span class="time">{#if soon}<StatusPill tone="warning" word label={expiryText(request.expires, now)} />{:else}{expiryText(request.expires, now)}{/if}</span>{/if}</div>{/if}
   <p><span class="muted">{request.card.title}</span>{#if request.card.target.kind !== "room" && !request.card.body?.includes(request.card.target.name)}{" on "}<code>{request.card.target.name}</code>{/if}{#if request.card.body}{" · "}{request.card.body}{/if}</p>
   {#each request.card.changes ?? [] as change (change.field)}<p><span class="muted">{change.field}:</span> {change.old || "none"} → {change.new || "none"}</p>{/each}
   {#if request.card.command?.length}<pre>{commandLine(request.card.command)}</pre>{/if}
@@ -34,7 +34,7 @@
   <div class="actions">{#if admin}<button class="approve" type="button" disabled={busy} onclick={() => void decide(true)}>Approve</button>
     <button type="button" disabled={busy} onclick={() => void decide(false)}>{note ? "Confirm denial" : "Deny"}</button>
     {#if !note}<button class="ghost" type="button" onclick={() => { note = true; }}>Add a note</button>{/if}
-    {/if}{#if grouped}<span class="time">{#if soon}<StatusPill tone="warning" word label={expiryText(request.expires, now)} />{:else}{expiryText(request.expires, now)}{/if}</span>{/if}
+    {/if}{#if grouped}{#if request.expires}<span class="time">{#if soon}<StatusPill tone="warning" word label={expiryText(request.expires, now)} />{:else}{expiryText(request.expires, now)}{/if}</span>{/if}{/if}
   </div>
   {#if failure}<p class="failure" role="alert">{failure}</p>{/if}
 </article>
