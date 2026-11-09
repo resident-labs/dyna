@@ -233,8 +233,10 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		lines = append(lines, fmt.Sprintf("PR %s#%d: %s", p.Repo, p.Number, prLine(p)))
 	}
 	add(contract.ContextHolds, lines, holdsChars, 0)
-	if s.maxDepth == 0 || data.Depth < s.maxDepth {
-		lines = nil
+	lines = nil
+	if s.maxDepth > 0 && data.Depth >= s.maxDepth {
+		lines = append(lines, "none: this session is at the room's depth limit and starts no child; do the work yourself, or ask your parent to start one")
+	} else {
 		for _, p := range s.profiles.List() {
 			line := fmt.Sprintf("%s: taste %d, diagnostics %d, intelligence %d, cost %d", p.Name, p.Taste, p.Diagnostics, p.Intelligence, p.Cost)
 			if p.MaxConcurrent > 0 {
@@ -242,8 +244,8 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 			}
 			lines = append(lines, line)
 		}
-		add(contract.ContextProfiles, lines, 1200, 0)
 	}
+	add(contract.ContextProfiles, lines, 1200, 0)
 	if s.usage != nil {
 		add(contract.ContextUsage, usageLines(data.Accounts, s.usage.Latest(), s.now()), usageChars, 0)
 	}
