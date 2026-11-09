@@ -79,7 +79,7 @@
   {#if attempted && !profile && loaded}<p class="error" role="alert">Choose a profile.</p>{/if}
   <div class="actions">
     <button class="primary" type="submit" aria-keyshortcuts="Control+Enter Meta+Enter" disabled={busy || !loaded || !!problem || !profile}>{busy ? "Starting…" : "Start session"}</button>
-    {#if problem}<span class="muted">Fix the name to start.</span>{:else if !profile}<span class="muted">Pick a profile to start.</span>{/if}
+    {#if !trimmedName}<span class="muted">Name it to start.</span>{:else if problem}<span class="muted">Fix the name to start.</span>{:else if !profile}<span class="muted">Pick a profile to start.</span>{/if}
     <button type="button" onclick={onclose} disabled={busy}>Cancel</button>
   </div>
 </form>
