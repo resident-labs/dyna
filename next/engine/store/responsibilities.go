@@ -195,9 +195,14 @@ func (s *Store) responsibilities(ctx context.Context, q sqlQuery, ids []contract
 // is the parent that takes the work. A close on request ends a goal with no open item; any other goal's work goes to to,
 // whole or as an item of to's own goal, and with root as to it goes unheld, since root holds no goals.
 func (s *Store) ClosePlan(ctx context.Context, order []contract.SessionID, to contract.SessionID, toRoot bool) (contract.SessionCloseResponse, error) {
-	plan := contract.SessionCloseResponse{To: to, Handed: []contract.Responsibility{}, Unheld: []contract.GoalID{}, Ended: []contract.Responsibility{}}
+	plan := contract.SessionCloseResponse{To: to, Handed: []contract.Responsibility{}, Unheld: []contract.GoalID{}, Folded: []contract.GoalID{}, Ended: []contract.Responsibility{}}
 	held, err := s.ResponsibilitiesOf(ctx, order)
 	if err != nil {
+		return plan, err
+	}
+	// Once to holds a goal, each later goal's work folds into it.
+	var toHolds bool
+	if err := s.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM goals WHERE session=? AND state='active')", to).Scan(&toHolds); err != nil {
 		return plan, err
 	}
 	for _, id := range order {
@@ -216,8 +221,10 @@ func (s *Store) ClosePlan(ctx context.Context, order []contract.SessionID, to co
 				ended = append(ended, item)
 			case toRoot:
 				plan.Unheld = append(plan.Unheld, contract.GoalID(item.ID))
+			case toHolds:
+				plan.Folded = append(plan.Folded, contract.GoalID(item.ID))
 			default:
-				plan.Handed = append(plan.Handed, item)
+				plan.Handed, toHolds = append(plan.Handed, item), true
 			}
 		}
 		plan.Ended = append(plan.Ended, ended...)

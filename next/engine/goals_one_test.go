@@ -130,3 +130,55 @@ func TestACloseEndsAFinishedGoalAndFoldsAnOpenOne(t *testing.T) {
 		t.Fatalf("using the folded goal: %v", e)
 	}
 }
+
+// In a subtree close, a goal's work skips the closing parent for the ancestor that stays, and that ancestor is told.
+func TestASubtreeCloseTellsTheAncestorThatTakesTheWork(t *testing.T) {
+	r := newGoalRig(t)
+	lead := asSession(r.lead)
+	if _, e := r.s.GoalSet(r.ctx, lead, contract.GoalSetRequest{Text: "lead work", DoneWhen: "led"}); e != nil {
+		t.Fatal(e)
+	}
+	leaf, e := r.s.SessionStart(r.ctx, asSession(r.child), contract.SessionStartRequest{Room: r.room, Name: "leaf", Profile: "test", Goal: "check it", DoneWhen: "checked"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	held := r.goals(leaf.Session, false)[0].ID
+	if _, e := r.s.GoalItem(r.ctx, asSession(leaf.Session), contract.GoalItemRequest{Goal: held, Text: "left"}); e != nil {
+		t.Fatal(e)
+	}
+	r.exec("UPDATE sessions SET state='closing' WHERE id=?", r.child)
+	r.close(leaf.Session)
+	var bodies []string
+	rows, err := r.st.Read().Query("SELECT CAST(e.body AS TEXT) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_id=? AND e.type='session.closed'", r.lead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var body string
+		if err := rows.Scan(&body); err != nil {
+			t.Fatal(err)
+		}
+		bodies = append(bodies, body)
+	}
+	rows.Close()
+	if len(bodies) != 1 || !strings.Contains(bodies[0], `"folded":[{"goal":"`+string(held)+`","into":"g`) {
+		t.Fatalf("close notices to the lead: %v", bodies)
+	}
+	if items := r.goals(r.lead, false)[0].Items; len(items) != 2 || items[1].Text != "left" {
+		t.Fatalf("lead items %+v", items)
+	}
+}
+
+func TestTheClosePlanSaysAGoalWillFold(t *testing.T) {
+	r := newGoalRig(t)
+	if _, e := r.s.GoalSet(r.ctx, asSession(r.lead), contract.GoalSetRequest{Text: "lead work", DoneWhen: "led"}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := r.s.GoalItem(r.ctx, asSession(r.child), contract.GoalItemRequest{Goal: "g1", Text: "left"}); e != nil {
+		t.Fatal(e)
+	}
+	plan, err := r.st.ClosePlan(r.ctx, []contract.SessionID{r.child}, r.lead, false)
+	if err != nil || len(plan.Folded) != 1 || plan.Folded[0] != "g1" || len(plan.Handed) != 0 {
+		t.Fatalf("plan %+v: %v", plan, err)
+	}
+}

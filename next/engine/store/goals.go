@@ -509,6 +509,7 @@ type goalClose struct {
 	Moved  contract.GoalID // it became the goal of the nearest open ancestor, which held none
 	Unheld contract.GoalID // that ancestor is root, which holds no goals
 	Folded *contract.GoalFold
+	Target contract.SessionID // the ancestor that took the work, or root for an unheld goal
 }
 
 // settleGoal ends, moves or folds the active goal of a closing session, in the close's write. deliberate is a close that
@@ -563,6 +564,7 @@ func (s *Store) settleGoal(ctx context.Context, tx *sql.Tx, event contract.Event
 		SELECT s.id,s.parent,s.state,0 FROM sessions s WHERE s.id=(SELECT parent FROM sessions WHERE id=?)
 		UNION ALL SELECT s.id,s.parent,s.state,up.depth+1 FROM sessions s JOIN up ON s.id=up.parent WHERE up.state IN ('closing','closed'))
 		SELECT id,parent IS NULL FROM up WHERE state NOT IN ('closing','closed') OR parent IS NULL ORDER BY depth LIMIT 1`, session).Scan(&target, &targetIsRoot)
+	out.Target = target
 	if errors.Is(err, sql.ErrNoRows) || err == nil && targetIsRoot {
 		if _, err := tx.ExecContext(ctx, "UPDATE goals SET session=NULL,updated_at=? WHERE room=? AND number=?", at, event.Room, number); err != nil {
 			return out, err

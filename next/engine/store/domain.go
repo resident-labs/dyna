@@ -266,9 +266,9 @@ func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event c
 		var unheld []contract.GoalID
 		var handed []contract.Responsibility
 		var folded []contract.GoalFold
+		var goal goalClose
 		if parent != "" {
-			goal, err := s.settleGoal(ctx, tx, event, id, name, reason == "")
-			if err != nil {
+			if goal, err = s.settleGoal(ctx, tx, event, id, name, reason == ""); err != nil {
 				return err
 			}
 			if goal.Unheld != "" {
@@ -296,7 +296,11 @@ func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event c
 				return err
 			}
 		}
-		// A parent that is closing too names all of this in its own notice.
+		// A parent that is closing too names the rest in its own notice, but this goal's work skipped it for the ancestor
+		// that stays, so that ancestor hears of the goal itself.
+		if parentClosing && goal.Target != "" && (goal.Moved != "" || goal.Unheld != "" || goal.Folded != nil) {
+			return s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: goal.Target}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
+		}
 		if parentClosing || len(unheld)+len(handed)+len(folded) == 0 {
 			return nil
 		}
