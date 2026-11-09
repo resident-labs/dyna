@@ -90,10 +90,12 @@
   // stop when this feed leaves; the countdown itself runs locally.
   $effect(() => {
     if (home.kind !== 'feed') return;
-    const seqs = rows.filter(row => row.kind === 'post' && !row.pending).map(row => Number(row.key.slice(1)));
+    const posts = rows.flatMap(row => row.kind === 'post' && !row.pending ? [{ seq: Number(row.key.slice(1)), at: Date.parse(row.at) }] : []);
     let stopped = false, timer: ReturnType<typeof setTimeout>;
     async function refresh() {
-      const pending = seqs.filter(seq => !receipts.has(seq) || receipts.get(seq)!.some(r => r.state === 'pending'));
+      // A taken post turns read once the model sees it, which is soon; an old one that never did stays as it is.
+      const recent = Date.now() - 15 * 60_000;
+      const pending = posts.filter(({ seq, at }) => !receipts.has(seq) || receipts.get(seq)!.some(r => r.state === 'pending' || (r.state === 'taken' && !r.closed && at > recent))).map(({ seq }) => seq);
       for (let i = 0; i < pending.length && !stopped; i += 100) {
         const page = await call('events.list', { room: store.room, afterSeq: 0, limit: 100, receiptSeqs: pending.slice(i, i + 100) }).catch(() => undefined);
         if (stopped || !page) break;
