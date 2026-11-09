@@ -400,5 +400,6 @@ test("the figures split worker time by stage, name the longest step and count wh
   assert.deepEqual(spent.split.map(part => [part.title, part.ms / 60_000]), [["write", 15], ["review", 15]]);
   assert.equal(spent.longest?.step.key, "a");
   assert.deepEqual([spent.wall / 60_000, spent.earlier / 60_000], [20, 10]);
+  assert.deepEqual([0, 1, 29_999, 30_000, 59_999, 60_000].map(minutesLabel), ["<1m", "<1m", "<1m", "<1m", "<1m", "1m"]);
   assert.deepEqual([minutesLabel(28 * 60_000), minutesLabel(60 * 60_000), minutesLabel(125 * 60_000)], ["28m", "1h", "2h 5m"]);
 });
