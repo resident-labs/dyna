@@ -399,8 +399,9 @@ export function flow(steps: WorkflowStep[]): { nodes: FlowNode[]; edges: FlowEdg
   return { nodes, edges, failed: ordered.filter(step => step.state === "failed"), laned: paths.size > 0 };
 }
 
-// "28m", "1h" or "2h 5m" from a span in milliseconds.
+// "<1m", "28m", "1h" or "2h 5m" from a span in milliseconds.
 export function minutesLabel(ms: number): string {
+  if (ms < 60_000) return "<1m";
   const minutes = Math.round(ms / 60_000), hours = Math.floor(minutes / 60);
   return minutes < 60 ? `${minutes}m` : minutes % 60 ? `${hours}h ${minutes % 60}m` : `${hours}h`;
 }
