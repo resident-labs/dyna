@@ -448,8 +448,3 @@ var keysyms = func() map[string]uint32 {
 	}
 	return out
 }()
-
-func knownKey(name string) bool {
-	_, ok := keysyms[name]
-	return ok
-}

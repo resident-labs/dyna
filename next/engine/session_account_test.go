@@ -52,22 +52,6 @@ func (p *pinProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (p *pinProxy) set(id string, field string, value any) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for _, credential := range p.credentials {
-		if credential["id"] == id {
-			credential[field] = value
-		}
-	}
-}
-
-func (p *pinProxy) place(index string, rank int, spent bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.places = append(p.places, map[string]any{"auth_index": index, "rank": rank, "spent": spent})
-}
-
 func pinCredential(id, provider string, models ...string) map[string]any {
 	return map[string]any{"id": id, "auth_index": "index-" + id, "provider": provider, "state": "connected", "models": models}
 }

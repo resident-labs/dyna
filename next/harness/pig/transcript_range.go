@@ -44,16 +44,6 @@ func (r TranscriptReader) Read(path string, start int64, end *int64, deliveries 
 	return readTranscriptMode(section, deliveries, r.Steers, path, item, skip, limit, 16<<20, false)
 }
 
-// FindCalls marks candidate IDs found in a bounded range.
-func (r TranscriptReader) FindCalls(path string, start int64, end *int64, ids map[string]bool) error {
-	file, section, err := r.open(path, start, end)
-	if err != nil || file == nil {
-		return err
-	}
-	defer file.Close()
-	return TranscriptFindCalls(section, ids)
-}
-
 // ReadRecent retains a bounded recent window and the last assistant text.
 func (r TranscriptReader) ReadRecent(path string, start int64, end *int64, deliveries map[contract.DeliverySeq]contract.TurnID, limit int) ([]TranscriptItem, int, bool, error) {
 	file, section, err := r.open(path, start, end)
