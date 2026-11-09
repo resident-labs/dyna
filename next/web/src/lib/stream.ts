@@ -32,20 +32,24 @@ export function stream(
     return () => clearTimeout(id);
   },
   opened: (reconnect?: boolean) => void = () => {},
+  lifecycle: Pick<EventTarget, "addEventListener" | "removeEventListener"> | undefined = typeof window === "undefined" ? undefined : window,
 ): () => void {
   let source: EventConnection;
   let cancel = () => {};
   let closed = false;
   let delay = 500;
   let attempted = false;
+  let suspended = false;
+  let generation = 0;
   function connect() {
+    const currentGeneration = ++generation;
     const reconnect = attempted;
     attempted = true;
     const current = source = factory(`/v1/events?${new URLSearchParams({ ...(room && { room }), after: String(after()) })}`);
     let active = true;
     let heartbeatMs: number | undefined;
     let cancelWatchdog = () => {};
-    const alive = () => !closed && active && source === current;
+    const alive = () => !closed && !suspended && active && source === current && generation === currentGeneration;
     const refresh = () => {
       cancelWatchdog();
       if (heartbeatMs !== undefined) cancelWatchdog = schedule(failed, heartbeatMs * 2 + 5000);
@@ -56,7 +60,7 @@ export function stream(
       cancelWatchdog();
       current.close();
       if (!room) reportStreamState(false);
-      cancel = schedule(() => { if (!closed) connect(); }, delay);
+      cancel = schedule(() => { if (!closed && !suspended && generation === currentGeneration) connect(); }, delay);
       delay = Math.min(delay * 2, 10_000);
     }
     cancel = () => { active = false; cancelWatchdog(); };
@@ -94,6 +98,28 @@ export function stream(
     };
     current.onerror = failed;
   }
+  // BFCache preserves the component, so its disposer does not run on pagehide.
+  // Release HTTP/1 connections while away and resume from the latest applied cursor.
+  function hide() {
+    if (closed || suspended) return;
+    suspended = true;
+    generation++;
+    cancel();
+    source.close();
+  }
+  function show() {
+    if (closed || !suspended) return;
+    suspended = false;
+    connect();
+  }
+  lifecycle?.addEventListener("pagehide", hide);
+  lifecycle?.addEventListener("pageshow", show);
   connect();
-  return () => { closed = true; cancel(); source.close(); };
+  return () => {
+    closed = true;
+    cancel();
+    source.close();
+    lifecycle?.removeEventListener("pagehide", hide);
+    lifecycle?.removeEventListener("pageshow", show);
+  };
 }
