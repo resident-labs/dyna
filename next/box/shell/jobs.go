@@ -71,7 +71,7 @@ func startBash(command, cwd, callID string, out io.Writer) (process, error) {
 	cmd.Dir, cmd.Stdout, cmd.Stderr = cwd, out, out
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.WaitDelay = time.Second // a background child that keeps the pipe open must not hold the job
-	if err := StartIdle(cmd); err != nil {
+	if err := StartLowPriority(cmd); err != nil {
 		return nil, err
 	}
 	return &execProcess{cmd}, nil
