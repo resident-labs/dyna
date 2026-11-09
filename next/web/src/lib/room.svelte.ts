@@ -236,8 +236,13 @@ export class RoomStore {
   private async load(): Promise<void> {
     const list = await call("session.list", { room: this.room });
     // op.list reads after the seq, so an operation it misses arrives as a live event.
-    const listed = await call("op.list", { room: this.room });
-    const asked = await call("question.list", { room: this.room });
+    // These snapshots all begin after list.seq, but do not depend on one another.
+    // Start the optional workflow list here too instead of adding another round trip.
+    const workflows = this.readWorkflows();
+    const [listed, asked] = await Promise.all([
+      call("op.list", { room: this.room }),
+      call("question.list", { room: this.room }),
+    ]);
     // The shell owns the initial room list and forwards its feed position via
     // noteRead. Status reads that monotonic position even if it arrives after load.
     this.head = list.seq;
@@ -250,7 +255,7 @@ export class RoomStore {
     void this.readGoals();
     // Before the room is ready, so a crew's page opens as a run from the start.
     // A failed optional list must not leave a healthy connection empty forever.
-    if (!await this.readWorkflows() && !this.closed) await this.readWorkflows();
+    if (!await workflows && !this.closed) await this.readWorkflows();
     for (const session of list.sessions ?? []) {
       this.sessions.set(session.id, {
         session: session.id, name: session.name, parent: session.parent || undefined,
