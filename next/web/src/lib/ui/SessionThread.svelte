@@ -100,6 +100,18 @@
   let destroyed = false;
   let queuedPosts = $derived(step ? [] : queuedTimelinePosts(view.posts(), turns));
   let pendingPosts = $derived(step ? [] : [...view.pendingPosts.values()]);
+  // The owner's words a failed last turn read, so one press sends them again; only while nothing newer waits.
+  let resendable = $derived(!operate || step || closed || queuedPosts.length || pendingPosts.length || turns.at(-1)?.outcome !== "failed" ? []
+    : (turns.at(-1)?.inputs ?? []).filter(input => input.from.kind === "owner" && timelineInput(input).kind === "message"));
+  // A long message arrives cut, so its whole text loads first; if it cannot, nothing is sent and the text's own Try again shows.
+  let resending = $state(false);
+  async function resend() {
+    const turn = turns.at(-1)!, inputs = resendable;
+    resending = true;
+    const loaded = await Promise.all(inputs.map(input => !input.more || chunks["input:" + input.id + "/text"] !== undefined || fetchPart(turn.id, "input:" + input.id, "text")));
+    resending = false;
+    if (loaded.every(Boolean)) for (const input of inputs) void send({ room: store.room, home: { kind: "dm", session }, text: timelineInput(input, chunks["input:" + input.id + "/text"]).text, attachments: input.attachments?.length ? input.attachments : undefined });
+  }
   let quiet = $derived(!turns.length && !queuedPosts.length && !pendingPosts.length && !pendingBrief && !asking.length);
   // The first message after a turn may start a new day. It waits outside any turn, so its day mark is here too.
   let waitingSince = $derived(queuedPosts[0]?.at ?? pendingPosts[0]?.at);
@@ -396,7 +408,7 @@
             {:else if group.item.kind === "too_large"}<p class="muted">This item is too large to show.</p>{/if}
           {/each}
         {/each}
-        {#if turn.outcome === "failed"}<div class="failure"><span class="slot"><Icon name="warning" size={16} /></span>{turn.cause ? causes[turn.cause] : "The turn failed"}</div>
+        {#if turn.outcome === "failed"}<div class="failure"><span class="slot"><Icon name="warning" size={16} /></span><span>{turn.cause ? causes[turn.cause] : "The turn failed"}{#if index === turns.length - 1 && resendable.length}<button class="retry again" disabled={resending} onclick={() => void resend()}>Send again</button>{/if}</span></div>
         {:else if turn.outcome === "stopped"}<p class="muted turn-note">Stopped</p>{/if}
         {#if running(turn) && !(turn.items ?? []).some(item => timelineItemRunning(item, false))}<p class="muted turn-note"><span class="slot"><span class="spinner" aria-hidden="true"></span></span>{workingLine(turn.started, now, store.activityKinds.get(session))}</p>{/if}
       </article>
@@ -461,6 +473,7 @@
   .turn-note { display: flex; align-items: center; gap: 6px; margin: 0; }
   .failure { display: flex; gap: 6px; line-height: 24px; overflow-wrap: anywhere; }
   .failure .slot { color: var(--danger); }
+  .again { margin-left: 12px; color: var(--text); font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
   .slot { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; height: 24px; }
   .spinner { width: 12px; height: 12px; border: 1.5px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
