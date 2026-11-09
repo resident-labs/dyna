@@ -194,7 +194,12 @@ func (p *ProfileConfig) Model(name contract.ProfileName) (contract.ModelChoice, 
 	defer p.mu.RUnlock()
 	profile, ok := p.entries[name]
 	if !ok {
-		return contract.ModelChoice{}, nil, fmt.Errorf("unknown profile %q", name)
+		names := make([]string, 0, len(p.entries))
+		for known := range p.entries {
+			names = append(names, string(known))
+		}
+		slices.Sort(names)
+		return contract.ModelChoice{}, nil, fmt.Errorf("unknown profile %q; the profiles are %s", name, strings.Join(names, ", "))
 	}
 	return contract.ModelChoice{Provider: profile.Provider, ID: profile.Model, Thinking: profile.Thinking}, slices.Clone(profile.AllowedModels), nil
 }
