@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -13,11 +12,7 @@ import (
 func webSearchCommand(get func() *socketClient) *cobra.Command {
 	var limit int
 	c := &cobra.Command{Use: "search QUERY", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		result, err := call[contract.WebSearchRequest, contract.WebSearchResponse](cmd.Context(), get(), contract.MethodWebSearch, contract.WebSearchRequest{Query: args[0], Limit: limit})
-		if err != nil {
-			return err
-		}
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+		return printCall[contract.WebSearchResponse](cmd, get(), contract.MethodWebSearch, contract.WebSearchRequest{Query: args[0], Limit: limit})
 	}}
 	c.Flags().IntVar(&limit, "limit", 0, "Maximum results (default 5)")
 	return c
