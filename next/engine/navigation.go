@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -238,7 +239,7 @@ func (s *Service) HistoryRead(ctx context.Context, caller contract.Principal, re
 	var room contract.RoomID
 	var dm contract.SessionID
 	var anchor int64
-	if id := cmpOr(req.Post, req.Around); id != "" {
+	if id := cmp.Or(req.Post, req.Around); id != "" {
 		if req.Room != "" || req.DM != "" {
 			return contract.HistoryReadResponse{}, invalid("a post names its own room and conversation")
 		}
@@ -277,7 +278,7 @@ func (s *Service) HistoryRead(ctx context.Context, caller contract.Principal, re
 			}
 			dm = id
 		}
-		if cursor := cmpOr(req.Before, req.After); cursor != "" {
+		if cursor := cmp.Or(req.Before, req.After); cursor != "" {
 			place, err := s.store.PostPlaceOf(ctx, cursor)
 			if errors.Is(err, store.ErrNotFound) || (err == nil && (place.Room != room || place.DM != dm)) {
 				return contract.HistoryReadResponse{}, invalid("no post " + string(cursor) + " in this conversation")
@@ -397,13 +398,6 @@ func (s *Service) HistoryRead(ctx context.Context, caller contract.Principal, re
 		result.Newer = result.Posts[len(result.Posts)-1].ID
 	}
 	return result, nil
-}
-
-func cmpOr(a, b contract.EventID) contract.EventID {
-	if a != "" {
-		return a
-	}
-	return b
 }
 
 // TranscriptDigest reads a session's turns as short lines. It reaches only sessions of the caller's own room: a session

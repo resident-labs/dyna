@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -613,15 +614,7 @@ func (a *API) handler(c Caller) http.Handler {
 }
 
 func hasScope(c Caller, scope contract.Scope) bool {
-	if !c.Web {
-		return true
-	}
-	for _, held := range c.Scopes {
-		if held == scope {
-			return true
-		}
-	}
-	return false
+	return !c.Web || slices.Contains(c.Scopes, scope)
 }
 
 func owner(c Caller) bool { return c.Principal.Kind == contract.PrincipalOwner }
