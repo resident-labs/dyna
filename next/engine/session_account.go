@@ -18,10 +18,6 @@ type sessionAccounts struct {
 	models      []string
 }
 
-func (s *AccountActions) sessionAccounts(ctx context.Context, session store.Session) (sessionAccounts, error) {
-	return s.accountsForProfile(ctx, session.Room, session.Profile)
-}
-
 func (s *AccountActions) accountsForProfile(ctx context.Context, room contract.RoomID, profile contract.ProfileName) (sessionAccounts, error) {
 	choice, allowed, err := s.service.profiles.Model(profile)
 	if err != nil {
@@ -84,7 +80,7 @@ func (s *AccountActions) SessionAccount(ctx context.Context, caller contract.Pri
 	if err != nil {
 		return response, failure(err)
 	}
-	accounts, err := s.sessionAccounts(ctx, session)
+	accounts, err := s.accountsForProfile(ctx, session.Room, session.Profile)
 	if err != nil {
 		return response, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable"}
 	}
@@ -134,7 +130,7 @@ func (s *AccountActions) SessionSetAccount(ctx context.Context, caller contract.
 		return response, problem
 	}
 	if req.Account != "" {
-		accounts, err := s.sessionAccounts(ctx, session)
+		accounts, err := s.accountsForProfile(ctx, session.Room, session.Profile)
 		if err != nil {
 			return response, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable"}
 		}

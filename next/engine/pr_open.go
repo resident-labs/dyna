@@ -140,13 +140,10 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 			}
 			link := fmt.Sprintf("https://github.com/%s/pull/%d", session.Repo, payload.Number)
 			result := contract.OpResult{Output: link, PR: &contract.PrOpenResult{Number: payload.Number, URL: link}}
-			err = func() error {
-				event, err := s.event(session.Room, who, contract.PrOpened{Repo: session.Repo, Number: payload.Number, Session: who.Session, URL: link})
-				if err != nil {
-					return err
-				}
-				return s.store.RecordPROpen(ctx, session.Repo, payload.Number, who.Session, head, input.Title, link, event, nil)
-			}()
+			event, err := s.event(session.Room, who, contract.PrOpened{Repo: session.Repo, Number: payload.Number, Session: who.Session, URL: link})
+			if err == nil {
+				err = s.store.RecordPROpen(ctx, session.Repo, payload.Number, who.Session, head, input.Title, link, event, nil)
+			}
 			// GitHub created the PR, so a failed record is told in the output and does not fail the call.
 			if err != nil {
 				result.Output = fmt.Sprintf("%s\nPR #%d is open, but recording its owner failed (%v); it is not tracked, and pr track adds it", link, payload.Number, err)
