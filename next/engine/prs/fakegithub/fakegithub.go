@@ -879,6 +879,7 @@ type Suite struct {
 	App        string
 	CreatedAt  time.Time
 	Runs       int
+	Workflow   string
 }
 
 func suiteNodes(suites []Suite, total int) any {
@@ -887,7 +888,11 @@ func suiteNodes(suites []Suite, total int) any {
 		suites = suites[:pageSize]
 	}
 	result := nodes(suites, func(s Suite) map[string]any {
-		return map[string]any{"status": s.Status, "conclusion": s.Conclusion, "app": map[string]any{"slug": s.App}, "createdAt": s.CreatedAt, "checkRuns": map[string]any{"totalCount": s.Runs}}
+		node := map[string]any{"status": s.Status, "conclusion": s.Conclusion, "app": map[string]any{"slug": s.App}, "createdAt": s.CreatedAt, "checkRuns": map[string]any{"totalCount": s.Runs}}
+		if s.Workflow != "" {
+			node["workflowRun"] = map[string]any{"workflow": map[string]any{"name": s.Workflow}}
+		}
+		return node
 	})
 	result["totalCount"] = total
 	return result

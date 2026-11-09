@@ -359,7 +359,7 @@ type gqlRollup struct {
 
 // suiteFields includes the run count without listing runs: a needs-gated run may
 // not exist yet even when every currently visible context has finished.
-const suiteFields = "checkSuites(first:100){totalCount pageInfo{hasNextPage} nodes{status conclusion app{slug} createdAt checkRuns{totalCount}}}"
+const suiteFields = "checkSuites(first:100){totalCount pageInfo{hasNextPage} nodes{status conclusion app{slug} createdAt checkRuns{totalCount} workflowRun{workflow{name}}}}"
 
 type gqlSuites struct {
 	TotalCount int `json:"totalCount"`
@@ -376,22 +376,48 @@ type gqlSuites struct {
 		CheckRuns struct {
 			TotalCount int `json:"totalCount"`
 		} `json:"checkRuns"`
+		WorkflowRun *struct {
+			Workflow struct {
+				Name string `json:"name"`
+			} `json:"workflow"`
+		} `json:"workflowRun"`
 	} `json:"nodes"`
 }
 
 // summarizeCI is shared by tracked PRs and main heads. Never settle from a
 // partial list, or while a suite can still create needs-gated runs. GitHub apps
 // sometimes leave ghost suites queued with no runs; only those older than ten
-// minutes can be ignored. Suite conclusions do not replace context semantics.
+// minutes can be ignored. A completed suite that failed fails CI even when its
+// contexts all read success or skipped: a workflow run whose jobs never started
+// (a startup failure or a broken workflow file) leaves only skipped contexts or
+// none, and its suite's conclusion is the only sign of it.
 func summarizeCI(rollup *gqlRollup, suites gqlSuites, rule ciRule, now time.Time) (contract.PrCI, []string) {
 	if suites.PageInfo.HasNextPage || suites.TotalCount > len(suites.Nodes) {
 		return contract.PrCIPending, nil
 	}
+	var failedSuites []string
 	for _, suite := range suites.Nodes {
 		if suite.Status != "COMPLETED" && !(suite.CheckRuns.TotalCount == 0 && !suite.CreatedAt.IsZero() && now.Sub(suite.CreatedAt) > 10*time.Minute) {
 			return contract.PrCIPending, nil
 		}
+		switch suite.Conclusion {
+		case "FAILURE", "STARTUP_FAILURE", "TIMED_OUT", "ACTION_REQUIRED":
+			name := suite.App.Slug
+			if suite.WorkflowRun != nil {
+				name = suite.WorkflowRun.Workflow.Name
+			}
+			failedSuites = append(failedSuites, name+" (workflow run failed)")
+		}
 	}
+	ci, failed := summarizeContexts(rollup, rule)
+	// A failing context already names the job; a failed suite adds a name only when no context shows the failure.
+	if ci != contract.PrCIFailure && len(failedSuites) > 0 {
+		return contract.PrCIFailure, failedSuites
+	}
+	return ci, failed
+}
+
+func summarizeContexts(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string) {
 	if rollup != nil && (rollup.Contexts.PageInfo.HasNextPage || rollup.Contexts.TotalCount > len(rollup.Contexts.Nodes)) {
 		return contract.PrCIPending, nil
 	}
