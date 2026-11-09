@@ -906,6 +906,9 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		if err == nil && len(closed.Handed) > 0 {
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Handed to %s: %s\n", closed.To, dynaroom.ResponsibilityNames(closed.Handed))
 		}
+		if err == nil && len(closed.Folded) > 0 {
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Folds into %s's goal as items, with their open items as subtasks: %s.\n", closed.To, dynaroom.GoalNames(closed.Folded))
+		}
 		if err == nil && len(closed.Unheld) > 0 {
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Left with no holder, because %s is root and root holds no goals: %s. goal list --session %s shows them; goal done ends them, and settles their open items.\n", closed.To, dynaroom.GoalNames(closed.Unheld), closed.To)
 		}
