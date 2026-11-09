@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -162,6 +163,9 @@ type promptVars struct {
 	Shared      string
 	GlobalRules string
 	RoomRules   string
+	// CPUs and MemBytes are the box's size, which the prompt names; 0 CPUs says nothing.
+	CPUs     int
+	MemBytes int64
 }
 
 // sessionPrompt is the whole system prompt of a session: the shared core, git, delegation, the role, communication, continuity and the
@@ -189,6 +193,13 @@ func sessionPrompt(v promptVars) string {
 		if v.Repo != nil {
 			session = append(session, "Your branch: "+v.Repo.Branch+" on "+string(v.Repo.Name)+".\nPushes and fetches go through the engine, which sends a push or fetch once more when GitHub answers 5xx (for a push also a commit_refs error) and the request body is at most 1 MiB, and reports the cause when the second try fails.")
 		}
+	}
+	if v.CPUs > 0 {
+		cpus := "CPUs"
+		if v.CPUs == 1 {
+			cpus = "CPU"
+		}
+		session = append(session, fmt.Sprintf("Your box has %d %s and %d GiB of memory: heavy builds belong in a larger child session or CI.", v.CPUs, cpus, v.MemBytes/box.GiB))
 	}
 	return strings.Join([]string{
 		promptCore, promptGit, promptDelegation, role, communication,

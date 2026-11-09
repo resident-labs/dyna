@@ -10,6 +10,9 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+// sessionBox is the line of the tests' sessions, whose boxes are medium size.
+const sessionBox = "\nYour box has 4 CPUs and 8 GiB of memory: heavy builds belong in a larger child session or CI."
+
 const helloBranch = "Your branch: named-branch on owner/repo.\nPushes and fetches go through the engine, which sends a push or fetch once more when GitHub answers 5xx (for a push also a commit_refs error) and the request body is at most 1 MiB, and reports the cause when the second try fails.\n"
 
 // renderedHead reads a rendering of the prompt from testdata and returns it up to its session section, which names a session and is built by each test.
@@ -46,7 +49,7 @@ func TestBoxHelloRendersTheFourPrompts(t *testing.T) {
 				t.Fatal(problem)
 			}
 			// Root has no branch line: its session section names the files instead.
-			want := renderedHead(t, "root") + fmt.Sprintf("You are root of room room (ID %[1]s), session %[2]s.\nFiles: /box/shared is /data/rooms/%[1]s/shared/ on host.\nStanding rules: the global AGENTS.md is /data/AGENTS.md on host and this room's is /data/rooms/%[1]s/AGENTS.md; bash with host host edits them. The engine copies each room's file to every host for boxes and rewrites that copy at each sync.", room, root)
+			want := renderedHead(t, "root") + fmt.Sprintf("You are root of room room (ID %[1]s), session %[2]s.\nFiles: /box/shared is /data/rooms/%[1]s/shared/ on host.\nStanding rules: the global AGENTS.md is /data/AGENTS.md on host and this room's is /data/rooms/%[1]s/AGENTS.md; bash with host host edits them. The engine copies each room's file to every host for boxes and rewrites that copy at each sync.\nYour box has 1 CPU and 2 GiB of memory: heavy builds belong in a larger child session or CI.", room, root)
 			if hello.Instructions != want {
 				t.Fatalf("instructions:\n%s\nwant:\n%s", hello.Instructions, want)
 			}
@@ -63,7 +66,7 @@ func TestBoxHelloRendersTheFourPrompts(t *testing.T) {
 			if problem != nil {
 				t.Fatal(problem)
 			}
-			want := renderedHead(t, "lead") + fmt.Sprintf("You are worker, session %s, in room room (ID %s). Your parent is root.", sid, room) + repo
+			want := renderedHead(t, "lead") + fmt.Sprintf("You are worker, session %s, in room room (ID %s). Your parent is root.", sid, room) + repo + sessionBox
 			if hello.Instructions != want {
 				t.Fatalf("instructions:\n%s\nwant:\n%s", hello.Instructions, want)
 			}
@@ -77,7 +80,7 @@ func TestBoxHelloRendersTheFourPrompts(t *testing.T) {
 			if problem != nil {
 				t.Fatal(problem)
 			}
-			want := renderedHead(t, "leaf") + fmt.Sprintf("You are worker, session %s, in room room (ID %s). Your parent is root.", sid, room) + repo
+			want := renderedHead(t, "leaf") + fmt.Sprintf("You are worker, session %s, in room room (ID %s). Your parent is root.", sid, room) + repo + sessionBox
 			if hello.Instructions != want {
 				t.Fatalf("instructions:\n%s\nwant:\n%s", hello.Instructions, want)
 			}

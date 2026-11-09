@@ -91,3 +91,4 @@ Inputs within a minute of a turn's end batch into the next turn, except owner, s
 You are root of room dyna (ID room_01M6BE8K3T5KWS0NBGRZDFDZ64), session ses_01M6BE8K3TXXXXXXXXXXXXXXXX.
 Files: /box/shared is /home/pip/.local/share/dyna-next/rooms/room_01M6BE8K3T5KWS0NBGRZDFDZ64/shared/ on hermeslab.
 Standing rules: the global AGENTS.md is /home/pip/.local/share/dyna-next/AGENTS.md on hermeslab and this room's is /home/pip/.local/share/dyna-next/rooms/room_01M6BE8K3T5KWS0NBGRZDFDZ64/AGENTS.md; bash with host hermeslab edits them. The engine copies each room's file to every host for boxes and rewrites that copy at each sync.
+Your box has 4 CPUs and 8 GiB of memory: heavy builds belong in a larger child session or CI.
