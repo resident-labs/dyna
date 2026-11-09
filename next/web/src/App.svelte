@@ -569,7 +569,7 @@
   const status = (id: string) => {
     const broken = store?.boxFailures.get(id), cause = store?.causes.get(id), reason = store?.pendingReasons.get(id);
     switch (store?.status(id)) {
-      case "waiting": return reason === "room-host" ? waits[reason] : store?.pendingQuestions(id).length ? "Waiting for your answer" : "Waiting for your approval";
+      case "waiting": return reason === "room-host" ? waits[reason] : store?.pendingQuestions(id).length ? "Needs your answer" : "Needs your approval";
       case "background": { const wait = store?.backgroundWaits.get(id); return wait ? `Waiting · ${waitingLabel(wait)}` : "Waiting"; }
       case "working": { const label = store?.activity.get(id); return label ? `Working · ${activityLabel(label)}` : "Working"; }
       case "failed": return broken ? boxReason(broken) : turnReason(cause);
@@ -585,7 +585,7 @@
   };
   // A DM's header says only the status word; the live line and About say what the session does. A failed session has
   // no live line, so the header gives its reason.
-  const stateWords = { waiting: "Waiting", failed: "Failed", working: "Working", background: "Waiting" };
+  const stateWords = { waiting: "Needs you", failed: "Failed", working: "Working", background: "Waiting" };
   let shown = $derived(session ? store?.status(session) ?? "idle" : "idle");
   let word = $derived(session ? (shown === "idle" || shown === "background" ? status(session) : shown === "failed" ? `Failed · ${status(session)}` : stateWords[shown]) : "");
   // The right panel opens on About in a DM and on Sessions in a room, and remembers the last choice per conversation.

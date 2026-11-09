@@ -6,7 +6,7 @@
   // it stands for more than this session; otherwise the words beside the face say the status and the dot is hidden from readers.
   let { name, root, dot, mark, size = 28 }: { name: string; root: boolean; dot: Status; mark?: string; size?: number } = $props();
   const tones = { waiting: "warning", failed: "failed", working: "working", background: "background" } as const;
-  const words = { waiting: "Waiting", failed: "Failed", working: "Working", background: "Waiting on background work" };
+  const words = { waiting: "Needs you", failed: "Failed", working: "Working", background: "Waiting on background work" };
 </script>
 
 <span class="face"><Avatar kind="session" {name} {root} {size} />
