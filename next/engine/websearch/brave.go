@@ -35,15 +35,9 @@ func (b Brave) Name() string { return "brave" }
 
 // Search asks Brave for q.Results.
 func (b Brave) Search(ctx context.Context, q Query) ([]Result, error) {
-	if b.Key == nil {
-		return nil, ErrNotSignedIn
-	}
-	key, err := b.Key(ctx)
+	key, err := savedKey(ctx, b.Key)
 	if err != nil {
 		return nil, err
-	}
-	if key == "" {
-		return nil, ErrNotSignedIn
 	}
 	base := b.BaseURL
 	if base == "" {
