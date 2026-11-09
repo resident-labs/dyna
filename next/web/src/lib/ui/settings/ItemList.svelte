@@ -24,7 +24,12 @@
 
   let query = $state("");
   // svelte-ignore state_referenced_locally
-  let chip = $state.raw(chips?.[0]), sorting = $state.raw(start), folded = $state.raw(new Set(foldedFirst));
+  // The chip by id: a page that derives its chips makes new ones on each change, and the pressed one must survive that.
+  let chipId = $state(chips?.[0]?.id), sorting = $state.raw(start), folded = $state.raw(new Set(foldedFirst));
+  let chip = $derived(chips?.find(each => each.id === chipId) ?? chips?.[0]);
+  // A chip no item passes would only lead to an empty list, so it shows only while pressed. It counts over all items,
+  // not the search's matches, so chips do not come and go while typing.
+  let shownChips = $derived(chips?.filter(each => !each.test || !items || each.id === chipId || items.some(each.test)));
   let scroller: HTMLDivElement | undefined = $state();
   let scrollTop = $state(0), height = $state(0), width = $state(0);
   // The row the keys are on, by key, so a filter that moves it keeps it.
@@ -101,7 +106,7 @@
     scroller?.focus();
     if (active < 0) { const index = rows.findIndex(each => each.kind === "item"); if (index >= 0) { await tick(); move(index, false); } }
   }
-  function clear() { query = ""; chip = chips?.[0]; onclear?.(); }
+  function clear() { query = ""; chipId = chips?.[0]?.id; onclear?.(); }
 </script>
 
 <!-- The column is an F6 stop (spec 5.13); F6 hands its focus to the list, or to the first control while the list is not there. -->
@@ -109,8 +114,8 @@
   onfocus={event => { if (event.target === event.currentTarget) (scroller ?? event.currentTarget.querySelector<HTMLElement>("input:enabled, button:enabled"))?.focus(); }}>
   <div class="tools">
     <SearchBox bind:value={query} slash label={`Search ${noun[1]}`} placeholder={items?.length ? `Search ${count(items.length)}` : `Search ${noun[1]}`} disabled={!items} ondown={() => void first()} />
-    {#if chips}<div class="chips" role="group" aria-label="Filter">{#each chips as each (each.id)}
-      <button type="button" class="chip" aria-pressed={chip === each} disabled={!items} onclick={() => { chip = each; }}>{each.label}{#if each.test && view}<span class="n">{view.counts[each.id].toLocaleString("en")}</span>{/if}</button>{/each}</div>{/if}
+    {#if chips}<div class="chips" role="group" aria-label="Filter">{#each shownChips ?? [] as each (each.id)}
+      <button type="button" class="chip" aria-pressed={chip?.id === each.id} disabled={!items} onclick={() => { chipId = each.id; }}>{each.label}{#if each.test && view}<span class="n">{view.counts[each.id].toLocaleString("en")}</span>{/if}</button>{/each}</div>{/if}
     {@render tools?.()}
   </div>
   <div class="frame" bind:clientWidth={width}>
