@@ -16,8 +16,8 @@
   import { subscriptionSummary } from "../subscriptions.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import type { Responsibility, ResponsibilityKind, SessionAccountResponse, SubscriptionInfo } from "../contract.gen.ts";
-  // What a DM's session is, in the order the owner asks: who it is, the box it runs in, then what it holds. Goals fold to
-  // a line or two, and each kind of hold is one line that opens its whole list in a modal, so the first two never leave
+  // What a DM's session is, in the order the owner asks: who it is, the box it runs in, then what it holds. The goal folds to
+  // a line or two, its todo list is one line, and each kind of hold is one line that opens its whole list in a modal, so the first two never leave
   // the screen and nothing pushes the panel sideways. A row without a value does not show, and a session holding nothing
   // simply ends after the box. The header and the composer already show the turn, its stop and the jobs.
   // `shown` is false while the panel is closed, and stops the box's figures.
@@ -28,6 +28,9 @@
   // A session holds one goal; its todo list nests one level of subtasks.
   let goals = $derived(store.goals.get(session) ?? []);
   let goal = $derived(goals[0]);
+  // The goal's todo list is its own row under the goal, and opens whole in a modal.
+  let todo = $derived(goal?.items ?? []);
+  let left = $derived(openLeaves(todo));
   let parent = $derived(open?.parent && store.names.get(open.parent));
   // The relative time stays roughly true while the panel stays open.
   let now = $state(Date.now());
@@ -63,7 +66,7 @@
   let hooks = $derived(subscriptionSummary(subscriptions));
   const holdIcons: Partial<Record<ResponsibilityKind, IconName>> = { pr: "pr", issue: "issue", child: "people", terminal: "terminal", workflow: "list", question: "chat" };
   // Each hold, and the room's hooks, is one line here; the full list opens in a modal. A list that empties closes it.
-  let showing: ResponsibilityKind | "hooks" | undefined = $state();
+  let showing: ResponsibilityKind | "hooks" | "todo" | undefined = $state();
   $effect(() => { void session; showing = undefined; });
   let shownHold = $derived(held.find(row => row.kind === showing && row.opens));
   // A link in a modal goes where it says and takes the modal away with it.
@@ -85,17 +88,19 @@
   </dl>
   {#key session}<BoxFacts {store} {session} {shown} />{/key}
   {#if goal}
-    {@const items = goal.items ?? []}
-    {@const left = openLeaves(items)}
     <section>
       <h3>Goal</h3>
-      <FoldRow more={Boolean(goal.doneWhen || items.length)}>
+      <FoldRow more={Boolean(goal.doneWhen)}>
         {#snippet head()}<WrapText text={goal.text} />{/snippet}
-        {#snippet aside()}{#if left}{left} open{/if}{/snippet}
         {#if goal.doneWhen}<p class="when">Done when: <WrapText text={goal.doneWhen} /></p>{/if}
-        {#if items.length}<ul class="todo">{#each goalTree(items) as item (item.number)}<li class:quiet={item.state !== "open"} class:dropped={item.state === "dropped"}><span class="mark" aria-label={item.state}>{item.state === "done" ? "✓" : item.state === "dropped" ? "–" : "○"}</span><WrapText text={item.text} />{#if item.subtasks.length}<ul>{#each item.subtasks as sub (sub.number)}<li class:quiet={sub.state !== "open"} class:dropped={sub.state === "dropped"}><span class="mark" aria-label={sub.state}>{sub.state === "done" ? "✓" : sub.state === "dropped" ? "–" : "○"}</span><WrapText text={sub.text} /></li>{/each}</ul>{/if}</li>{/each}</ul>{/if}
       </FoldRow>
     </section>
+    {#if todo.length}
+      <section>
+        <h3>Todo</h3>
+        <button type="button" class="hold" aria-haspopup="dialog" onclick={() => { showing = "todo"; }}><Icon name="check" size={14} /><span class="hold-label">{left ? `${left} open` : "All settled"}<span class="hold-count">{todo.length} items</span></span><span></span><span class="go"><Icon name="forwardChevron" size={12} /></span></button>
+      </section>
+    {/if}
   {/if}
   {#if held.length || hooks.count}
     <section>
@@ -141,6 +146,11 @@
       {/each}
     </ul>
   </Modal>
+{:else if showing === "todo" && todo.length}
+  {#snippet mark(state: string)}<span class="mark" class:ring={state === "open"} aria-label={state}>{#if state === "done"}<Icon name="check" size={14} />{:else if state === "dropped"}–{/if}</span>{/snippet}
+  <Modal title="Todo" count={left ? `${left} open` : undefined} onclose={() => { showing = undefined; }}>
+    <ul class="todo">{#each goalTree(todo) as item (item.number)}<li class:quiet={item.state !== "open"} class:dropped={item.state === "dropped"}>{@render mark(item.state)}<WrapText text={item.text} />{#if item.subtasks.length}<ul>{#each item.subtasks as sub (sub.number)}<li class:quiet={sub.state !== "open"} class:dropped={sub.state === "dropped"}>{@render mark(sub.state)}<WrapText text={sub.text} /></li>{/each}</ul>{/if}</li>{/each}</ul>
+  </Modal>
 {:else if showing === "hooks" && hooks.count}
   <Modal title="Hooks" count={hooks.count} onclose={() => { showing = undefined; }}>
     <HooksList {subscriptions} name={id => store.names.get(id) ?? id} />
@@ -166,10 +176,12 @@
   .quiet { color: var(--muted); }
   .dropped { text-decoration: line-through; }
   .todo, .todo ul { list-style: none; padding-left: 0; }
+  .todo { gap: 8px; }
   .todo ul { margin-top: 4px; padding-left: 16px; }
-  .todo li { display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 6px; }
+  .todo li { display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 8px; line-height: 20px; }
   .todo li > ul { grid-column: 2; }
-  .mark { color: var(--muted); text-decoration: none; display: inline-block; }
+  .mark { display: grid; place-items: center; height: 20px; color: var(--muted); text-decoration: none; }
+  .ring::before { content: ""; width: 9px; height: 9px; border: 1.5px solid var(--muted); border-radius: 50%; }
   a, button { padding: 0; border: 0; border-radius: 4px; background: none; color: var(--focus); font: inherit; text-decoration: none; cursor: pointer; }
   .endnote { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
   .close-link { flex: none; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
