@@ -39,7 +39,27 @@ const namespaceScript = `set -eu
 root=$1; id=$2; mode=$3; shift 3
 mkdir -p -- "$root/locks"
 exec 8> "$root/locks/box-$id.lock"
-flock -x -w 15 8 || exit 252
+if ! flock -x -w 15 8; then
+ printf 'namespace lock timed out: box %s; observed holders:' "$id" >&2
+ found=0
+ # Inspect only descriptors for this inode with a granted flock. Merely
+ # opening the file (including our own FD 8) does not identify a holder.
+ # Never signal: a conmon may still own a running container, and probing
+ # Podman cannot make a subsequent kill atomic with that container's life.
+ for proc in /proc/[0-9]*; do
+  for fd in "$proc"/fd/*; do
+   test "$fd" -ef "$root/locks/box-$id.lock" || continue
+   grep -q '^lock:.* FLOCK .* WRITE ' "$proc/fdinfo/${fd##*/}" 2>/dev/null || continue
+   command=$(tr '\000\n' '  ' < "$proc/cmdline" 2>/dev/null) || continue
+   printf '\n pid=%s command=%.256s' "${proc##*/}" "$command" >&2
+   found=1
+   break
+  done
+ done
+ test "$found" = 1 || printf ' unavailable (process exited or procfs access denied)' >&2
+ printf '\n' >&2
+ exit 252
+fi
 epoch_file="$root/locks/box-$id.epoch"
 epoch=0
 if test -e "$epoch_file"; then
