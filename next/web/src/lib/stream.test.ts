@@ -142,3 +142,21 @@ test("reconnects after the last applied event", () => {
   assert.equal(new URL(urls[1], "http://localhost").searchParams.get("after"), "7");
   stop();
 });
+
+
+test("a room turn start invalidates the open transcript before its first append", () => {
+  const calls: (string | undefined)[] = [];
+  const unwatch = watchTranscripts(session => calls.push(session));
+  const sources: EventConnection[] = [];
+  const stop = stream("room", () => 0, () => {}, () => {
+    const source: EventConnection = { onmessage: null, onerror: null, addEventListener() {}, close() {} };
+    sources.push(source);
+    return source;
+  });
+  sources[0].onmessage?.(new MessageEvent("message", { data: JSON.stringify({
+    seq: 5, id: "e", at: "", from: { kind: "engine" }, type: "turn.started",
+    body: { session: "s", turn: "t", inputs: [] },
+  }) }));
+  assert.deepEqual(calls, ["s"]);
+  unwatch(); stop();
+});
