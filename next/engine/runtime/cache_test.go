@@ -69,3 +69,15 @@ func TestContainerCarriesTheAssignedGPUCard(t *testing.T) {
 		t.Fatalf("a box with no GPU got card %d", *c.GPUCard)
 	}
 }
+
+func TestContainerSeesItsSizeLimits(t *testing.T) {
+	b := &Boxes{}
+	size, _ := box.Size(contract.BoxSizeAgent)
+	slice, c := b.container(lifecycle.BoxSpec{Size: size}, "image", box.Mount{})
+	if c.CPUs != 1 || c.MemBytes != slice.MemMax {
+		t.Fatalf("container limits %d CPUs, %d bytes; want 1 and the slice's %d", c.CPUs, c.MemBytes, slice.MemMax)
+	}
+	if !slices.Contains(c.Env, box.EnvVar{Name: "OMP_THREAD_LIMIT", Value: "1"}) {
+		t.Fatalf("env %v lacks OMP_THREAD_LIMIT=1, which nproc reads", c.Env)
+	}
+}
