@@ -81,7 +81,7 @@ func Attempt(ctx context.Context, provider Provider, q Query) ([]Result, error) 
 }
 
 // SafeMessage folds and redacts a provider failure before it reaches a caller.
-func SafeMessage(err error) string { return clip(redactTokens(oneLine(err))) }
+func SafeMessage(err error) string { return clip(redactTokens(fold(err.Error()))) }
 
 // attemptContext bounds one provider's attempt to attemptBudget of the time the
 // caller left. Without a caller deadline a provider is bounded by its own
@@ -108,11 +108,6 @@ func attemptBudget(left time.Duration) time.Duration {
 		attempt = min(minAttempt, left)
 	}
 	return attempt
-}
-
-// oneLine keeps a provider's reason on the one line the tool reports.
-func oneLine(err error) string {
-	return strings.Join(strings.Fields(err.Error()), " ")
 }
 
 // capped returns results limited to q, tagged with the provider that found them.

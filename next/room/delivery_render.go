@@ -162,7 +162,10 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		}
 		return text, nil
 	case contract.ShellJobEnded:
-		result := jobExit(b.End.Code)
+		result := "has completed"
+		if b.End.Code != 0 {
+			result = fmt.Sprintf("failed with exit code %d", b.End.Code)
+		}
 		switch b.End.Kind {
 		case contract.ShellJobSignaled:
 			result = fmt.Sprintf("ended by a signal (%s)", b.End.Signal)
@@ -474,11 +477,4 @@ func jobTime(minutes int) string {
 	default:
 		return unit(hours, "hour") + " " + unit(rest, "minute")
 	}
-}
-
-func jobExit(code int) string {
-	if code == 0 {
-		return "has completed"
-	}
-	return fmt.Sprintf("failed with exit code %d", code)
 }
