@@ -11,7 +11,7 @@ import (
 )
 
 // sessionBox is the line of the tests' sessions, whose boxes are medium size.
-const sessionBox = "\nYour box has 4 CPU and 8 GiB of memory: heavy builds belong in a larger child session or CI."
+const sessionBox = "\nYour box has 4 CPUs and 8 GiB of memory: heavy builds belong in a larger child session or CI."
 
 const helloBranch = "Your branch: named-branch on owner/repo.\nPushes and fetches go through the engine, which sends a push or fetch once more when GitHub answers 5xx (for a push also a commit_refs error) and the request body is at most 1 MiB, and reports the cause when the second try fails.\n"
 
