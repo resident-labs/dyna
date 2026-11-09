@@ -52,10 +52,7 @@ func (c ChatGPT) Search(ctx context.Context, q Query) ([]Result, error) {
 	if model == "" {
 		model = ChatGPTModel
 	}
-	body, err := json.Marshal(chatGPTSearch(model, q.Text))
-	if err != nil {
-		return nil, err
-	}
+	body, _ := json.Marshal(chatGPTSearch(model, q.Text))
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(base, "/")+"/responses", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
