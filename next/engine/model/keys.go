@@ -80,14 +80,11 @@ func (c *Connections) SetKey(ctx context.Context, req contract.AccountsSetKeyReq
 	}
 	proxyID := "dyna-key-" + hex.EncodeToString(raw[:16])
 	accountID := contract.AccountID(hex.EncodeToString(raw[16:]))
-	body, err := json.Marshal(struct {
+	body, _ := json.Marshal(struct {
 		ID  string `json:"id"`
 		Key string `json:"key"`
 		keyTarget
 	}{proxyID, req.Key, target})
-	if err != nil {
-		return contract.AccountsSetKeyResponse{}, errConnect
-	}
 	bound := false
 	defer func() {
 		if bound {
@@ -111,13 +108,10 @@ func (c *Connections) SetKey(ctx context.Context, req contract.AccountsSetKeyReq
 		return contract.AccountsSetKeyResponse{}, errConnect
 	}
 	bound = true
-	payload, err := json.Marshal(struct {
+	payload, _ := json.Marshal(struct {
 		ID    string `json:"id"`
 		Model string `json:"model"`
 	}{proxyID, saved.Model})
-	if err != nil {
-		return contract.AccountsSetKeyResponse{}, errConnect
-	}
 	// Finish activation or rollback even when the request is canceled after binding.
 	finish := context.WithoutCancel(ctx)
 	if _, err = c.management.request(finish, http.MethodPost, "/dyna/credentials/activate", payload); err != nil {
