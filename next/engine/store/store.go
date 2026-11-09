@@ -397,3 +397,15 @@ func (s *Store) SetWake(wake func([]contract.SessionID, []contract.Event)) { s.w
 
 // Done closes when the store writer stops.
 func (s *Store) Done() <-chan struct{} { return s.done }
+
+// noRows passes on an Exec's error, and gives missing when the statement changed no row.
+func noRows(result sql.Result, err error, missing error) error {
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err == nil && n == 0 {
+		return missing
+	}
+	return err
+}

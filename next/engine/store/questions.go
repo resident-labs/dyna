@@ -79,15 +79,8 @@ func (s *Store) AskQuestion(ctx context.Context, q contract.Question, event cont
 func (s *Store) AnswerQuestion(ctx context.Context, id contract.QuestionID, answer string, event contract.Event, deliveries []contract.Delivery) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, "UPDATE questions SET state=?,answer=?,answered_at=? WHERE id=? AND state=?", contract.QuestionStateAnswered, answer, event.Time.UnixMilli(), id, contract.QuestionStatePending)
-		if err != nil {
+		if err := noRows(result, err, ErrQuestionNotWaiting); err != nil {
 			return err
-		}
-		n, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			return ErrQuestionNotWaiting
 		}
 		seq, err := s.AppendEvent(tx, event)
 		if err != nil {
