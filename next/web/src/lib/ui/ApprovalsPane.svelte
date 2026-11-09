@@ -88,7 +88,7 @@
   {#if room}
     <p class="small muted">Each switch is off until you turn it on. With one on, this room's root decides that kind of request, and you still can.</p>
     <div class="stack">{#each rootApprovals as { kind, label, note }, index (kind)}
-      <label class="set"><span class="name">{label} <span class="key" title={`Key ${index + 1} in the list`}>{index + 1}</span></span>{@render toggle(room, kind, label, false)}<span class="help">{note}</span></label>{/each}</div>
+      <label class="set"><span class="name">{label} <kbd title={`Press ${index + 1} on the room's row in the list`}>{index + 1}</kbd></span>{@render toggle(room, kind, label, false)}<span class="help">{note}</span></label>{/each}</div>
     <div class="section"><div class="actions"><button type="button" class="btn" aria-pressed={autopilotOn(room)} disabled={busy} onclick={() => void autopilot(room!)}>Autopilot</button></div>
       <p class="small muted">Turns all four on, or all off when all are on. Turning on asks first.</p></div>
     <div class="section"><h3 class="small">GitHub writes</h3>
@@ -114,4 +114,7 @@
   .problem { flex-basis: 100%; margin: 0; color: var(--danger); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
   .said { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .btn[aria-pressed="true"] { border-color: var(--focus); }
+  /* The switch's key in the list, drawn as a key so it does not read as a count; a phone has no keys to press. */
+  kbd { margin-left: 4px; padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; background: var(--selected); color: var(--muted); font: 11px/16px var(--mono); vertical-align: 1px; }
+  @media (pointer: coarse) { kbd { display: none; } }
 </style>
