@@ -14,7 +14,7 @@ func TestTimestampMigrationHistoricalZero(t *testing.T) {
  INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('s','r','s','p','open','',0);
  INSERT INTO turns(id,session,started_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) VALUES('old','s',1,'','',0,0,0,0);
  ALTER TABLE turns DROP COLUMN model_sent_at; ALTER TABLE deliveries DROP COLUMN taken_at;
- UPDATE meta SET value='101' WHERE key='schema_version';`)
+ DROP INDEX goals_holder; CREATE INDEX goals_holder ON goals(session) WHERE state='active'; ALTER TABLE goal_items DROP COLUMN parent; ALTER TABLE goals DROP COLUMN folded_goal; ALTER TABLE goals DROP COLUMN folded_item; UPDATE meta SET value='101' WHERE key='schema_version';`)
 	if err != nil {
 		t.Fatal(err)
 	}

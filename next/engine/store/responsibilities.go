@@ -192,25 +192,42 @@ func (s *Store) responsibilities(ctx context.Context, q sqlQuery, ids []contract
 }
 
 // ClosePlan says what closing these sessions does with what they hold. order is the closing session and its subtree, and to
-// is the parent that takes the work. Root holds no goals, so with root as to, goals are listed as unheld instead of handed.
+// is the parent that takes the work. A close on request ends a goal with no open item; any other goal's work goes to to,
+// whole or as an item of to's own goal, and with root as to it goes unheld, since root holds no goals.
 func (s *Store) ClosePlan(ctx context.Context, order []contract.SessionID, to contract.SessionID, toRoot bool) (contract.SessionCloseResponse, error) {
-	plan := contract.SessionCloseResponse{To: to, Handed: []contract.Responsibility{}, Unheld: []contract.GoalID{}, Ended: []contract.Responsibility{}}
+	plan := contract.SessionCloseResponse{To: to, Handed: []contract.Responsibility{}, Unheld: []contract.GoalID{}, Folded: []contract.GoalID{}, Ended: []contract.Responsibility{}}
 	held, err := s.ResponsibilitiesOf(ctx, order)
 	if err != nil {
 		return plan, err
 	}
+	// Once to holds a goal, each later goal's work folds into it.
+	var toHolds bool
+	if err := s.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM goals WHERE session=? AND state='active')", to).Scan(&toHolds); err != nil {
+		return plan, err
+	}
 	for _, id := range order {
 		handed, ended := held[id].splitClose()
-		if toRoot && id == order[len(order)-1] {
-			handed = slices.DeleteFunc(handed, func(item contract.Responsibility) bool {
-				if item.Kind != contract.ResponsibilityGoal {
-					return false
-				}
+		for _, item := range handed {
+			if item.Kind != contract.ResponsibilityGoal {
+				plan.Handed = append(plan.Handed, item)
+				continue
+			}
+			var open bool
+			if err := s.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM goal_items i JOIN goals g ON g.room=i.room AND g.number=i.goal WHERE g.session=? AND 'g'||g.number=? AND i.state='open')", id, item.ID).Scan(&open); err != nil {
+				return plan, err
+			}
+			switch {
+			case !open:
+				ended = append(ended, item)
+			case toRoot:
 				plan.Unheld = append(plan.Unheld, contract.GoalID(item.ID))
-				return true
-			})
+			case toHolds:
+				plan.Folded = append(plan.Folded, contract.GoalID(item.ID))
+			default:
+				plan.Handed, toHolds = append(plan.Handed, item), true
+			}
 		}
-		plan.Handed, plan.Ended = append(plan.Handed, handed...), append(plan.Ended, ended...)
+		plan.Ended = append(plan.Ended, ended...)
 	}
 	return plan, nil
 }

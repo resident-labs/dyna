@@ -203,6 +203,15 @@ type SessionClosed struct {
 	Unheld  []GoalID           `json:"unheld,omitempty"` // open goals left with no holder, because the parent is root (7.4)
 	// Handed is the owed work that moved to the parent.
 	Handed []Responsibility `json:"handed,omitempty"`
+	// Folded is the goal whose work became an item of an ancestor's goal, since a session holds one goal.
+	Folded []GoalFold `json:"folded,omitempty"`
+}
+
+// GoalFold is a closed session's goal that became item Item of goal Into, with its open items as that item's subtasks.
+type GoalFold struct {
+	Goal GoalID `json:"goal"`
+	Into GoalID `json:"into"`
+	Item int    `json:"item"`
 }
 
 // SessionCompacted records one compaction of a quiet box before its stop, or a failed try. Pi writes the compaction itself

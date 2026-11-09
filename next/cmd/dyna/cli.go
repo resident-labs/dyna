@@ -906,6 +906,9 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		if err == nil && len(closed.Handed) > 0 {
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Handed to %s: %s\n", closed.To, dynaroom.ResponsibilityNames(closed.Handed))
 		}
+		if err == nil && len(closed.Folded) > 0 {
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Folds into %s's goal as items, with their open items as subtasks: %s.\n", closed.To, dynaroom.GoalNames(closed.Folded))
+		}
 		if err == nil && len(closed.Unheld) > 0 {
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Left with no holder, because %s is root and root holds no goals: %s. goal list --session %s shows them; goal done ends them, and settles their open items.\n", closed.To, dynaroom.GoalNames(closed.Unheld), closed.To)
 		}
@@ -1391,16 +1394,17 @@ func goalCommand(getClient func() client) *cobra.Command {
 	}}
 	list.Flags().StringVar(&listHolder, "session", "", "Only this session's goals")
 	list.Flags().BoolVar(&all, "all", false, "Include ended goals")
-	var item int
+	var item, parent int
 	var itemText, itemState string
-	itemCmd := &cobra.Command{Use: "item GOAL", Short: "Add a checklist item, or change one with --item", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		r, err := getClient().GoalItem(cmd.Context(), contract.GoalItemRequest{Room: contract.RoomID(roomID), Goal: contract.GoalID(args[0]), Item: item, Text: itemText, State: contract.GoalItemState(itemState)})
+	itemCmd := &cobra.Command{Use: "item GOAL", Short: "Add a todo item, a subtask with --parent, or change one with --item", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		r, err := getClient().GoalItem(cmd.Context(), contract.GoalItemRequest{Room: contract.RoomID(roomID), Goal: contract.GoalID(args[0]), Item: item, Parent: parent, Text: itemText, State: contract.GoalItemState(itemState)})
 		if err == nil {
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), r.Item)
 		}
 		return err
 	}}
 	itemCmd.Flags().IntVar(&item, "item", 0, "Item number to change")
+	itemCmd.Flags().IntVar(&parent, "parent", 0, "Item number a new item is a subtask of")
 	itemCmd.Flags().StringVar(&itemText, "text", "", "Item text")
 	itemCmd.Flags().StringVar(&itemState, "state", "", "open, done or dropped")
 	var drop bool
