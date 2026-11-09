@@ -148,7 +148,8 @@
   function markRead() {
     if (loaded && atBottom && view.ready && view.atPresent && document.visibilityState === "visible") store.see({ kind: "dm", session }, view.newest);
   }
-  $effect(markRead);
+  // view.newest is a plain read, so the effect also follows the events themselves: what arrives while the owner watches is read.
+  $effect(() => { void view.ordered.length; markRead(); });
   onMount(() => {
     document.addEventListener("visibilitychange", markRead);
     const stop = watchTranscripts(id => { if (!id || id === session) void load(); });

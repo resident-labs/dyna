@@ -72,7 +72,9 @@
       watched = newest;
     });
   }
-  $effect(markRead);
+  // view.newest is a plain read, so the effect also follows the events themselves: an event that arrives while the owner
+  // watches the end is read, and never sits under a New line.
+  $effect(() => { void view.ordered.length; markRead(); });
   $effect(() => {
     document.addEventListener("visibilitychange", markRead);
     return () => document.removeEventListener("visibilitychange", markRead);
