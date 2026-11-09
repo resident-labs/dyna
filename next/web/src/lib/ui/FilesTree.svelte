@@ -113,7 +113,7 @@
             <Icon name={row.entry.dir ? "folder" : "file"} /><span class="name">{row.entry.name}</span>{#if !row.entry.dir}<span class="size">{fileSize(row.entry.size)}</span>{/if}
           </button>
         </div>
-      {:else if row.kind === "error"}<button class="state" style:padding-left={`${30 + depth * 16}px`} onclick={() => void load(row.path)}>Couldn't load. Retry</button>
+      {:else if row.kind === "error"}<button class="state" style:padding-left={`${30 + depth * 16}px`} onclick={() => void load(row.path)}>Didn't load. <span class="again">Try again</span></button>
       {:else}<div class="state" style:padding-left={`${30 + depth * 16}px`}>{row.kind === "empty" ? "Empty" : "Loading…"}</div>{/if}
     {/snippet}
   </VirtualList>
@@ -139,5 +139,8 @@
   .fold:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
   .state { display: block; width: 100%; min-height: 30px; padding: 6px 12px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12.5px; text-align: left; }
   button.state { cursor: pointer; }
+  /* The retry reads as the one action in the line, as the Settings lists' Try again does. */
+  .again { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+  button.state:hover .again { color: var(--focus); }
   @media (hover: none) { .fold { width: 24px; min-height: 30px; } }
 </style>
