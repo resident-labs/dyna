@@ -309,7 +309,10 @@
   @media (pointer: coarse) { .remove { width: 44px; height: 44px; } .retry { min-height: 44px; margin-block: -14px; display: inline-flex; align-items: center; } }
   .send { background: var(--focus); color: var(--bg); }
   .send:disabled { background: var(--selected); color: var(--muted); cursor: default; }
-  .stop { background: var(--text); }
+  /* Stop is there while the session works, not a call to act: an outlined square in the text color, firm on hover. */
+  .stop { background: none; color: var(--text); box-shadow: inset 0 0 0 1px var(--firm); }
+  .stop:hover:not(:disabled) { background: var(--hover); }
+  .stop:disabled { background: none; color: var(--muted); }
   .stop :global(svg) { fill: currentColor; }
   .actions button:focus-visible, .remove:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 </style>
