@@ -490,7 +490,7 @@ func (a *API) handler(c Caller) http.Handler {
 		if !ok {
 			return
 		}
-		data, marshalErr := json.Marshal(contract.StreamHello{Build: a.Build})
+		data, marshalErr := json.Marshal(contract.StreamHello{Build: a.Build, HeartbeatMs: 15000})
 		if marshalErr != nil {
 			return
 		}
@@ -498,12 +498,12 @@ func (a *API) handler(c Caller) http.Handler {
 			return
 		}
 		f.Flush()
-		ticker := time.NewTicker(25 * time.Second)
+		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+				if _, err := fmt.Fprint(w, "event: heartbeat\ndata: {}\n\n"); err != nil {
 					return
 				}
 				f.Flush()
