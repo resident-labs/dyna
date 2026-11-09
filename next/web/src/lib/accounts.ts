@@ -91,8 +91,6 @@ export const accountPath = (id: string) => "/settings/accounts/" + encodeURIComp
 
 export const reconnectUnavailable = (error: unknown) => error instanceof APIError && error.detail.code === "reconnect_unavailable";
 
-export const canReconnect = (account: Account, method: ConnectMethod) => account.state === "sign_in_expired" && method === "oauth";
-
 // What Remove's confirm says it deletes.
 export const removalPrompt = (method: ConnectMethod) => `Dyna deletes its ${method === "key" ? "key" : "sign-in"} where Dyna runs.`;
 
