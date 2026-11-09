@@ -99,6 +99,21 @@ func (s *Service) GoalList(ctx context.Context, caller contract.Principal, req c
 	return contract.GoalListResponse{Goals: goals}, nil
 }
 
+// callerGoal fills an omitted goal with the one the calling session holds.
+func (s *Service) callerGoal(ctx context.Context, caller contract.Principal, room contract.RoomID, goal contract.GoalID) (contract.GoalID, *contract.Error) {
+	if goal != "" || caller.Kind != contract.PrincipalSession {
+		return goal, nil
+	}
+	held, err := s.store.ListGoals(ctx, room, contract.GoalListRequest{Session: caller.Session})
+	if err != nil {
+		return "", failure(err)
+	}
+	if len(held) == 0 {
+		return "", invalid("you hold no goal, so name one; goal list shows the room's goals")
+	}
+	return held[0].ID, nil
+}
+
 func (s *Service) GoalItem(ctx context.Context, caller contract.Principal, req contract.GoalItemRequest) (contract.GoalItemResponse, *contract.Error) {
 	switch req.State {
 	case "", contract.GoalItemOpen, contract.GoalItemDone, contract.GoalItemDropped:
@@ -110,6 +125,9 @@ func (s *Service) GoalItem(ctx context.Context, caller contract.Principal, req c
 	}
 	room, e := s.goalRoom(ctx, caller, req.Room)
 	if e != nil {
+		return contract.GoalItemResponse{}, e
+	}
+	if req.Goal, e = s.callerGoal(ctx, caller, room, req.Goal); e != nil {
 		return contract.GoalItemResponse{}, e
 	}
 	event, err := s.event(room, caller, contract.GoalItemChanged{})
@@ -134,6 +152,9 @@ func (s *Service) GoalDone(ctx context.Context, caller contract.Principal, req c
 	if e != nil {
 		return contract.GoalDoneResponse{}, e
 	}
+	if req.Goal, e = s.callerGoal(ctx, caller, room, req.Goal); e != nil {
+		return contract.GoalDoneResponse{}, e
+	}
 	event, err := s.event(room, caller, contract.GoalEnded{})
 	if err != nil {
 		return contract.GoalDoneResponse{}, failure(err)
@@ -150,6 +171,9 @@ func (s *Service) GoalJournal(ctx context.Context, caller contract.Principal, re
 	}
 	room, e := s.goalRoom(ctx, caller, req.Room)
 	if e != nil {
+		return contract.GoalJournalResponse{}, e
+	}
+	if req.Goal, e = s.callerGoal(ctx, caller, room, req.Goal); e != nil {
 		return contract.GoalJournalResponse{}, e
 	}
 	if req.Text != "" {
