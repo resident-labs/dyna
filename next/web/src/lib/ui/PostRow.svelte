@@ -4,6 +4,7 @@
  import type { PostReceipt } from '../contract.gen.ts';
   import Icon from "./Icon.svelte";
   import Markdown from "./Markdown.svelte";
+  import SlowSend from "./SlowSend.svelte";
   import PostData from "./PostData.svelte";
   import PostAttachments from "./PostAttachments.svelte";
   import PostTarget from "./PostTarget.svelte";
@@ -145,6 +146,7 @@
   {#if row.data !== undefined}<PostData value={row.data} />{/if}
   <PostAttachments onmedia={position => onmedia(shownAttachments[position].position)} attachments={shownAttachments.map(({ file }) => file)} {newest} event={visualEvent} at={row.at} />
   <DeliveryReceipt {receipts} />
+  {#if row.pending && !row.pending.failed && row.pending.seq === undefined}<SlowSend at={row.pending.at} />{/if}
   {#if row.pending?.failed}{@const id = row.pending.id}<p class="unsent" role="alert">Not sent
     <button type="button" onclick={() => onretry(id)}>Retry</button><button type="button" onclick={() => ondiscard(id)}>Discard</button></p>{/if}
 </article>
@@ -200,7 +202,7 @@
   .post > :global(.avatar) { grid-column: 1; grid-row: 1 / span 3; margin-top: 2px; }
 
   /* A post the engine has not confirmed is dimmed; its Not sent line keeps full contrast in the danger color, because the owner must act. */
-  .pending > :global(:not(.unsent, .sheet)) { opacity: 0.5; }
+  .pending > :global(:not(.unsent, .sheet, .slow-send)) { opacity: 0.5; }
   .unsent { margin: 2px 0 0; display: flex; align-items: baseline; gap: 12px; color: var(--danger); font-size: 12px; }
   .unsent button { all: unset; cursor: pointer; color: var(--focus); border-radius: 3px; }
   .unsent button:hover { text-decoration: underline; }
