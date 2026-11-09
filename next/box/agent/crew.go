@@ -25,6 +25,7 @@ import (
 
 	"github.com/MichaelKinsy/PiG/codemode"
 	"github.com/resident-labs/dyna/box/dynaext"
+	"github.com/resident-labs/dyna/box/shell"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness"
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -953,7 +954,11 @@ func (c *Crew) command(ctx context.Context, argv []string, opts commandOpts) ste
 	var stdout, stderr tail
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	started := time.Now()
-	err := cmd.Run()
+	// Low priority, like a command of the shell tool: the box agent keeps its CPU while a build uses the cap.
+	err := shell.StartIdle(cmd)
+	if err == nil {
+		err = cmd.Wait()
+	}
 	result := commandResult{Code: cmd.ProcessState.ExitCode(), Stdout: stdout.String(), Stderr: stderr.String(), DurationMS: time.Since(started).Milliseconds()}
 	out := stepOutcome{value: result}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
