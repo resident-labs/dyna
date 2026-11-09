@@ -57,17 +57,7 @@ func (s *Store) RemoveAccount(ctx context.Context, id contract.AccountID) error 
 func (s *Store) RenameAccount(ctx context.Context, id contract.AccountID, label string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, "UPDATE accounts SET label=? WHERE id=?", label, id)
-		if err != nil {
-			return err
-		}
-		n, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			return ErrNotFound
-		}
-		return nil
+		return noRows(result, err, ErrNotFound)
 	})
 }
 
@@ -75,17 +65,7 @@ func (s *Store) RenameAccount(ctx context.Context, id contract.AccountID, label 
 func (s *Store) BindAccount(ctx context.Context, id contract.AccountID, proxyID string, provider contract.AccountProvider, label string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, "INSERT INTO accounts(id,proxy_id,provider,label) SELECT ?,id,?,? FROM proxy_auths WHERE id=?", id, provider, label, proxyID)
-		if err != nil {
-			return err
-		}
-		n, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			return sql.ErrNoRows
-		}
-		return nil
+		return noRows(result, err, sql.ErrNoRows)
 	})
 }
 

@@ -1,7 +1,6 @@
 package store
 
 import (
-	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -20,13 +19,7 @@ var ErrRepoNotFound = errors.New("unknown repository")
 func (s *Store) SetRepoCI(ctx context.Context, repo contract.RepoName, on bool, max int) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, "UPDATE repos SET ci=?, ci_max=? WHERE repo=?", on, max, repo)
-		if err != nil {
-			return err
-		}
-		if n, err := result.RowsAffected(); err != nil || n == 0 {
-			return cmp.Or(err, ErrRepoNotFound)
-		}
-		return nil
+		return noRows(result, err, ErrRepoNotFound)
 	})
 }
 

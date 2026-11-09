@@ -236,15 +236,8 @@ func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event c
 			return err
 		}
 		result, err := tx.ExecContext(ctx, "UPDATE sessions SET state='closed',closed_at=? WHERE id=? AND closed_at IS NULL", event.Time.UnixMilli(), id)
-		if err != nil {
+		if err := noRows(result, err, sql.ErrNoRows); err != nil {
 			return err
-		}
-		n, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			return sql.ErrNoRows
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE turns SET ended_at=?,outcome=? WHERE session=? AND ended_at IS NULL", event.Time.UnixMilli(), contract.TurnClosed, id); err != nil {
 			return err
@@ -318,17 +311,7 @@ func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event c
 func (s *Store) DeliveryDone(ctx context.Context, session contract.SessionID, seq contract.DeliverySeq) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='read' WHERE to_kind=? AND to_id=? AND seq=? AND state IN ('taken','read')", contract.PrincipalSession, session, seq)
-		if err != nil {
-			return err
-		}
-		n, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			return sql.ErrNoRows
-		}
-		return nil
+		return noRows(result, err, sql.ErrNoRows)
 	})
 }
 
