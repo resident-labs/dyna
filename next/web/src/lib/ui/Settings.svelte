@@ -71,7 +71,7 @@
   <div class="settings-layout">
   {#if !phone}<aside class="nav"><header class="bar"><strong>Settings</strong></header>
     <nav aria-label="Settings panes">{#each panes as pane (pane.id)}
-      <a href={`/settings/${pane.id}`} onclick={navigate} class:sep={pane.sep} aria-current={shown === pane ? "page" : undefined}><Icon name={pane.icon} /><span class="l">{pane.label}</span>{#if counts[pane.id] !== undefined}<span class="n">{counts[pane.id]!.toLocaleString("en")}</span>{/if}</a>{/each}</nav></aside>{/if}
+      <a href={`/settings/${pane.id}`} onclick={navigate} class:sep={pane.sep} aria-current={shown === pane ? "page" : undefined} {@attach node => { if (shown === pane) node.scrollIntoView({ block: "nearest", inline: "nearest" }); }}><Icon name={pane.icon} /><span class="l">{pane.label}</span>{#if counts[pane.id] !== undefined}<span class="n">{counts[pane.id]!.toLocaleString("en")}</span>{/if}</a>{/each}</nav></aside>{/if}
   <div class="pane">
     {#if lost}<Blocked kind="no-page" back={{ href: "/settings", label: "Back to Settings" }} {navigate} />
     {:else if shown?.id === "appearance"}<AppearancePane {bar} />
@@ -120,7 +120,10 @@
   .list a .n + :global(svg) { margin-left: 0; }
   @container settings (max-width: 720px) {
     .settings-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-    .nav nav { display: flex; overflow-x: auto; }
+    /* The panes become one strip that scrolls sideways; its right edge fades, so a cut-off pane reads as more to
+       scroll to, and the end padding lets the last pane clear the fade. */
+    .nav nav { display: flex; overflow-x: auto; scrollbar-width: none; padding-right: 40px; scroll-padding-inline: 8px 40px;
+      mask-image: linear-gradient(to right, var(--bg) calc(100% - 40px), transparent); }
     .nav a { flex: none; }
     .nav a.sep { margin-top: 0; }
     .nav a.sep::before { display: none; }
