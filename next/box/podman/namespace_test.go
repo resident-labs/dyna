@@ -267,6 +267,12 @@ func TestNamespaceCreateHasBoundedLockWaitAndNoFallback(t *testing.T) {
 	if !errors.As(err, &uncertain) || time.Since(start) > 20*time.Second {
 		t.Fatalf("lock wait was not bounded typed uncertainty: %v (%s)", err, time.Since(start))
 	}
+	if !strings.Contains(err.Error(), "pid="+strconv.Itoa(os.Getpid())) || !strings.Contains(err.Error(), "command=") {
+		t.Fatalf("lock failure omitted holder identity: %v", err)
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatalf("diagnostics disturbed holder: %v", err)
+	}
 	if _, err := os.Stat(filepath.Join(root, "calls")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("create escaped contended lock")
 	}
