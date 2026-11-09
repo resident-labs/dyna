@@ -145,14 +145,7 @@ func (s *Store) StartPoolNode(ctx context.Context, p Pool, node box.Host) (bool,
 func (s *Store) FinishPoolNode(ctx context.Context, h box.Host) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, "UPDATE hosts SET ssh=?,state='ready',cpus=?,mem_bytes=?,disk_bytes=?,checked_at=?,maintained_at=?,engine_host=?,create_problem=? WHERE name=? AND state='provisioning'", h.SSH, h.CPUs, h.MemBytes, h.DiskBytes, h.CheckedAt.UnixMilli(), h.CheckedAt.UnixMilli(), h.EngineHost, h.Problem, h.Name)
-		if err != nil {
-			return err
-		}
-		n, err := result.RowsAffected()
-		if err == nil && n == 0 {
-			err = fmt.Errorf("node %s: %w", h.Name, ErrNotFound)
-		}
-		if err != nil {
+		if err := noRows(result, err, fmt.Errorf("node %s: %w", h.Name, ErrNotFound)); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, "UPDATE pools SET failures=0,retry_at=0,problem='' WHERE name=?", h.Pool)
