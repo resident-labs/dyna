@@ -140,7 +140,6 @@ type Server struct {
 	rest           int
 	notModified    int
 	sentETags      []string
-	tokens         []string
 	sizes          []int
 	headSizes      []int
 }

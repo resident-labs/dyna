@@ -97,19 +97,6 @@ func healthCommand(test []string) string {
 	return string(encoded)
 }
 
-// stackStep runs one Podman command and keeps its output when it fails, because that says why a stack cannot run, such as
-// a host where pasta cannot start. Podman's own message holds nothing of a sidecar's.
-func (h *Host) stackStep(ctx context.Context, what string, argv ...string) error {
-	out, err := h.run(ctx, argv...)
-	var exit remoteExit
-	if errors.As(err, &exit) {
-		return box.StackError{Reason: fmt.Sprintf("%s: %s", what, strings.TrimSpace(string(out[max(0, len(out)-512):])))}
-	}
-	return err
-}
-
-// CreateStack creates a box's compose volumes, its pod and its sidecars, all stopped. A volume that exists stays as it is,
-// so a swap keeps its data. A stack with no sidecars needs no pod.
 func stackCommand(what string, args ...string) string {
 	return "if output=$(" + shellCommand(args...) + " 2>&1); then printf '%s' \"$output\"; else printf '%s: %s\\n' " + quote(what) + " \"$output\" >&2; exit 253; fi"
 }
@@ -128,6 +115,8 @@ func stackCommands(id contract.BoxID, slice string, s *box.Stack) string {
 	return strings.Join(commands, "\n")
 }
 
+// CreateStack creates a box's compose volumes, its pod and its sidecars, all stopped. A volume that exists stays as it is,
+// so a swap keeps its data. A stack with no sidecars needs no pod.
 func (h *Host) CreateStack(ctx context.Context, id contract.BoxID, slice string, s *box.Stack) error {
 	_, err := h.namespace(ctx, id, "create", "bash", "-c", "set -eu\n"+stackCommands(id, slice, s), "dyna-create-stack")
 	var exit remoteExit

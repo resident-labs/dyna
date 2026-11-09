@@ -76,21 +76,6 @@ func (w workflowCase) step(crew contract.Principal, key string, state contract.W
 	}
 }
 
-func (w workflowCase) ended(session contract.SessionID) contract.TurnEnded {
-	w.t.Helper()
-	listed, problem := w.EventsList(w.ctx, w.owner, contract.EventsListRequest{Room: w.room, Types: []contract.EventType{"turn.ended"}, Limit: 100})
-	if problem != nil {
-		w.t.Fatal(problem)
-	}
-	for _, event := range listed.Events {
-		if body := event.Body.(contract.TurnEnded); body.Session == session {
-			return body
-		}
-	}
-	w.t.Fatal("no turn ended")
-	return contract.TurnEnded{}
-}
-
 func TestACrewReachesEveryModelOfItsProfilesAndNoOther(t *testing.T) {
 	w := setupWorkflow(t)
 	script := "export const meta = { name: 'one', profiles: ['deep'] }"

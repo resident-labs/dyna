@@ -29,12 +29,3 @@ func nextTurn(t *testing.T, s *Service, ctx context.Context, session contract.Se
 	t.Fatal("the channel ended without a turn")
 	return contract.TurnStart{}
 }
-
-// wake gives an idle session a reason to start a turn.
-func wake(t *testing.T, s *Service, ctx context.Context, room contract.RoomID, session contract.SessionID) {
-	t.Helper()
-	home := contract.Conversation{Kind: contract.ConversationDM, Session: session}
-	if _, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: room, Home: home, Text: "next"}); problem != nil {
-		t.Fatal(problem)
-	}
-}

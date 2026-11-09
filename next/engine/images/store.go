@@ -48,11 +48,8 @@ func checkRecipe(recipe, variable string) error {
 	var joined string
 	lines := strings.Split(strings.ReplaceAll(recipe, "\r\n", "\n"), "\n")
 	// A parser directive, as in # syntax=... or # escape=\x60, changes how the builder reads the file, so none is accepted.
-	for _, line := range lines {
-		if !directive.MatchString(strings.TrimSpace(line)) {
-			break
-		}
-		return fmt.Errorf("a parser directive is not allowed: %q", line)
+	if directive.MatchString(strings.TrimSpace(lines[0])) {
+		return fmt.Errorf("a parser directive is not allowed: %q", lines[0])
 	}
 	for _, line := range lines {
 		line = strings.TrimSpace(line)

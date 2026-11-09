@@ -345,55 +345,6 @@ func transcriptRemovedMessages(r io.Reader) (map[string]bool, error) {
 	}
 }
 
-// TranscriptFindCalls marks candidate IDs found in an acknowledged range.
-func TranscriptFindCalls(r io.Reader, ids map[string]bool) error {
-	reader := bufio.NewReaderSize(r, 64<<10)
-	for {
-		var line []byte
-		oversized := false
-		for {
-			part, err := reader.ReadSlice('\n')
-			if !oversized && len(line)+len(part) <= 16<<20 {
-				line = append(line, part...)
-			} else {
-				oversized = true
-				line = nil
-			}
-			if err == bufio.ErrBufferFull {
-				continue
-			}
-			if err == io.EOF {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			break
-		}
-		if oversized {
-			continue
-		}
-		var entry struct {
-			Type    string `json:"type"`
-			Message struct {
-				Role    string `json:"role"`
-				Content []struct {
-					Type string `json:"type"`
-					ID   string `json:"id"`
-				} `json:"content"`
-			} `json:"message"`
-		}
-		if json.Unmarshal(line, &entry) != nil || entry.Type != "message" || entry.Message.Role != "assistant" {
-			continue
-		}
-		for _, block := range entry.Message.Content {
-			if _, wanted := ids[block.ID]; block.Type == "toolCall" && wanted {
-				ids[block.ID] = true
-			}
-		}
-	}
-}
-
 // TranscriptStep keeps the Work tab compatible until the thread replaces it.
 func TranscriptStep(item contract.TranscriptItem) contract.TranscriptStep {
 	label := harness.Mask(activityLabel(item.Tool, json.RawMessage(item.Arguments)))

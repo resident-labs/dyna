@@ -103,17 +103,6 @@ func (r *statusRig) nextWait(t *testing.T) statusWait {
 	}
 }
 
-func (r *statusRig) status(t *testing.T) contract.ShellJobRunningRequest {
-	t.Helper()
-	select {
-	case req := <-r.statuses:
-		return req
-	case <-time.After(5 * time.Second):
-		t.Fatal("no status")
-		return contract.ShellJobRunningRequest{}
-	}
-}
-
 // reach ticks the clock until the job reports, and takes the status.
 func (r *statusRig) reach(t *testing.T) contract.ShellJobRunningRequest {
 	t.Helper()

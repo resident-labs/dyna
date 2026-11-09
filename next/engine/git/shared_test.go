@@ -302,7 +302,7 @@ func TestASharedFetchFailureReachesEveryCallerSharingIt(t *testing.T) {
 	}
 }
 
-type failingFetch struct{ fakeRunner }
+type failingFetch struct{}
 
 func (r *failingFetch) Run(_ context.Context, _ []string, args ...string) ([]byte, error) {
 	return nil, errors.New("git failed")
