@@ -53,6 +53,33 @@ func goalReplayRef(room contract.RoomID, id contract.GoalID) string {
 	return string(room) + "/" + string(id)
 }
 
+// heldGoal returns the active goal session holds other than except, with its text, or 0 when it holds none.
+func heldGoal(ctx context.Context, tx *sql.Tx, room contract.RoomID, session contract.SessionID, except int64) (int64, string, error) {
+	var number int64
+	var text string
+	err := tx.QueryRowContext(ctx, "SELECT number,text FROM goals WHERE room=? AND session=? AND state='active' AND number<>? ORDER BY number LIMIT 1", room, session, except).Scan(&number, &text)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, "", nil
+	}
+	return number, text, err
+}
+
+// refuseSecondGoal refuses giving holder a goal while it holds another: a session holds one goal, and more work goes in as items.
+func refuseSecondGoal(ctx context.Context, tx *sql.Tx, room contract.RoomID, holder contract.SessionID, except int64) error {
+	held, text, err := heldGoal(ctx, tx, room, holder, except)
+	if err != nil || held == 0 {
+		return err
+	}
+	var name string
+	if err := tx.QueryRowContext(ctx, "SELECT name FROM sessions WHERE id=?", holder).Scan(&name); err != nil {
+		return err
+	}
+	if runes := []rune(text); len(runes) > 80 {
+		text = string(runes[:80]) + "…"
+	}
+	return &GoalRefusal{Message: fmt.Sprintf("session %s already holds %s (%q), and a session holds one goal; add this work to it as an item (goal item with goal %s and text, and parent for a subtask), change it with goal set and goal, or end it with goal done first", name, goalID(held), text, goalID(held))}
+}
+
 // openGoal returns a goal's holder, after checking that the caller may work on it and that it is still active.
 func openGoal(ctx context.Context, tx *sql.Tx, tree room.Tree, caller contract.Principal, id contract.RoomID, goal contract.GoalID) (int64, contract.SessionID, error) {
 	number, err := goalNumber(goal)
@@ -61,18 +88,30 @@ func openGoal(ctx context.Context, tx *sql.Tx, tree room.Tree, caller contract.P
 	}
 	var holder contract.SessionID
 	var state contract.GoalState
-	err = tx.QueryRowContext(ctx, "SELECT COALESCE(session,''),state FROM goals WHERE room=? AND number=?", id, number).Scan(&holder, &state)
+	var foldedGoal, foldedItem int64
+	err = tx.QueryRowContext(ctx, "SELECT COALESCE(session,''),state,folded_goal,folded_item FROM goals WHERE room=? AND number=?", id, number).Scan(&holder, &state, &foldedGoal, &foldedItem)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, "", goalMissing(goal)
 	}
 	if err != nil {
 		return 0, "", err
 	}
+	// An ended goal says where its work went before the tree check: its holder may have closed, and the work moved on.
+	if state != contract.GoalActive {
+		if foldedGoal > 0 {
+			return 0, "", &GoalRefusal{Message: fmt.Sprintf("goal %s was folded into %s as item %d when its session closed; work on that item of %s", goal, goalID(foldedGoal), foldedItem, goalID(foldedGoal))}
+		}
+		if caller.Kind == contract.PrincipalSession {
+			if held, _, err := heldGoal(ctx, tx, id, caller.Session, 0); err != nil {
+				return 0, "", err
+			} else if held > 0 {
+				return 0, "", &GoalRefusal{Message: fmt.Sprintf("goal %s is %s; your goal is %s, so add further work to it as an item with goal item", goal, state, goalID(held))}
+			}
+		}
+		return 0, "", &GoalRefusal{Message: fmt.Sprintf("goal %s is %s; set a new goal instead", goal, state)}
+	}
 	if !tree.CanTend(caller, holder) {
 		return 0, "", ErrTreeForbidden
-	}
-	if state != contract.GoalActive {
-		return 0, "", &GoalRefusal{Message: fmt.Sprintf("goal %s is %s; set a new goal instead", goal, state)}
 	}
 	return number, holder, nil
 }
@@ -140,6 +179,9 @@ func (s *Store) SetGoal(ctx context.Context, req contract.GoalSetRequest, event 
 			if err := checkHolder(ctx, tx, tree, caller, body.Session); err != nil {
 				return err
 			}
+			if err := refuseSecondGoal(ctx, tx, event.Room, body.Session, 0); err != nil {
+				return err
+			}
 			var number int64
 			if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(number),0)+1 FROM goals WHERE room=?", event.Room).Scan(&number); err != nil {
 				return err
@@ -165,6 +207,9 @@ func (s *Store) SetGoal(ctx context.Context, req contract.GoalSetRequest, event 
 				if err := checkHolder(ctx, tx, tree, caller, body.Session); err != nil {
 					return err
 				}
+				if err := refuseSecondGoal(ctx, tx, event.Room, body.Session, number); err != nil {
+					return err
+				}
 			}
 			if err := tx.QueryRowContext(ctx, "UPDATE goals SET session=NULLIF(?,''),text=COALESCE(NULLIF(?,''),text),done_when=COALESCE(NULLIF(?,''),done_when),updated_at=? WHERE room=? AND number=? RETURNING text,done_when", body.Session, req.Text, req.DoneWhen, at, event.Room, number).Scan(&body.Text, &body.DoneWhen); err != nil {
 				return err
@@ -185,7 +230,9 @@ func (s *Store) SetGoal(ctx context.Context, req contract.GoalSetRequest, event 
 	return id, err
 }
 
-// SetGoalItem adds an item to a goal, or changes one.
+// SetGoalItem adds an item to a goal, under a parent item for a subtask, or changes one. Items go two levels deep, and an
+// open item never sits under a settled one: a done item needs its subtasks settled, dropping an item drops its open
+// subtasks, and opening a subtask or adding one reopens its parent. Each item that changes gets its own event.
 func (s *Store) SetGoalItem(ctx context.Context, req contract.GoalItemRequest, event contract.Event) (int, error) {
 	item := req.Item
 	err := s.Write(ctx, func(tx *sql.Tx) error {
@@ -198,32 +245,120 @@ func (s *Store) SetGoalItem(ctx context.Context, req contract.GoalItemRequest, e
 			return err
 		}
 		at := event.Time.UnixMilli()
-		body := contract.GoalItemChanged{Goal: req.Goal, Item: item, Text: req.Text, State: req.State}
+		var changed []contract.GoalItemChanged
+		// reopen opens a settled parent before an open item goes under it.
+		reopen := func(parent int) error {
+			var text string
+			err := tx.QueryRowContext(ctx, "UPDATE goal_items SET state=?,updated_at=? WHERE room=? AND goal=? AND number=? AND state<>? RETURNING text", contract.GoalItemOpen, at, event.Room, goal, parent, contract.GoalItemOpen).Scan(&text)
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil
+			}
+			if err == nil {
+				changed = append(changed, contract.GoalItemChanged{Goal: req.Goal, Item: parent, Text: text, State: contract.GoalItemOpen})
+			}
+			return err
+		}
 		if item == 0 {
 			if req.Text == "" {
 				return &GoalRefusal{Message: "a new item needs text"}
 			}
+			body := contract.GoalItemChanged{Goal: req.Goal, Parent: req.Parent, Text: req.Text, State: req.State}
 			if body.State == "" {
 				body.State = contract.GoalItemOpen
+			}
+			if req.Parent != 0 {
+				var grand int
+				err := tx.QueryRowContext(ctx, "SELECT parent FROM goal_items WHERE room=? AND goal=? AND number=?", event.Room, goal, req.Parent).Scan(&grand)
+				if errors.Is(err, sql.ErrNoRows) {
+					return &GoalRefusal{Message: fmt.Sprintf("goal %s has no item %d to put a subtask under; goal list shows its items", req.Goal, req.Parent), Missing: true}
+				}
+				if err != nil {
+					return err
+				}
+				if grand != 0 {
+					return &GoalRefusal{Message: fmt.Sprintf("item %d is itself a subtask of item %d, and subtasks go one level deep; add this under item %d", req.Parent, grand, grand)}
+				}
+				if body.State == contract.GoalItemOpen {
+					if err := reopen(req.Parent); err != nil {
+						return err
+					}
+				}
 			}
 			if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(number),0)+1 FROM goal_items WHERE room=? AND goal=?", event.Room, goal).Scan(&item); err != nil {
 				return err
 			}
 			body.Item = item
-			if _, err := tx.ExecContext(ctx, "INSERT INTO goal_items(room,goal,number,text,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", event.Room, goal, item, body.Text, body.State, at, at); err != nil {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO goal_items(room,goal,number,parent,text,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", event.Room, goal, item, body.Parent, body.Text, body.State, at, at); err != nil {
 				return err
 			}
-		} else if err := tx.QueryRowContext(ctx, "UPDATE goal_items SET text=COALESCE(NULLIF(?,''),text),state=COALESCE(NULLIF(?,''),state),updated_at=? WHERE room=? AND goal=? AND number=? RETURNING text,state", req.Text, req.State, at, event.Room, goal, item).Scan(&body.Text, &body.State); errors.Is(err, sql.ErrNoRows) {
-			return &GoalRefusal{Message: fmt.Sprintf("goal %s has no item %d; goal list shows its items", req.Goal, item), Missing: true}
-		} else if err != nil {
-			return err
+			changed = append(changed, body)
+		} else {
+			if req.Parent != 0 {
+				return &GoalRefusal{Message: "parent applies only when adding an item; an item keeps the parent it was added under"}
+			}
+			var parent int
+			var state contract.GoalItemState
+			err := tx.QueryRowContext(ctx, "SELECT parent,state FROM goal_items WHERE room=? AND goal=? AND number=?", event.Room, goal, item).Scan(&parent, &state)
+			if errors.Is(err, sql.ErrNoRows) {
+				return &GoalRefusal{Message: fmt.Sprintf("goal %s has no item %d; goal list shows its items", req.Goal, item), Missing: true}
+			}
+			if err != nil {
+				return err
+			}
+			switch req.State {
+			case contract.GoalItemDone:
+				var open string
+				if err := tx.QueryRowContext(ctx, "SELECT COALESCE(group_concat(number, ', '),'') FROM goal_items WHERE room=? AND goal=? AND parent=? AND state=?", event.Room, goal, item, contract.GoalItemOpen).Scan(&open); err != nil {
+					return err
+				}
+				if open != "" {
+					return &GoalRefusal{Message: fmt.Sprintf("item %d has open subtasks (%s); set each to done or dropped first, or drop item %d to drop them with it", item, open, item)}
+				}
+			case contract.GoalItemDropped:
+				rows, err := tx.QueryContext(ctx, "UPDATE goal_items SET state=?,updated_at=? WHERE room=? AND goal=? AND parent=? AND state=? RETURNING number,text", contract.GoalItemDropped, at, event.Room, goal, item, contract.GoalItemOpen)
+				if err != nil {
+					return err
+				}
+				for rows.Next() {
+					sub := contract.GoalItemChanged{Goal: req.Goal, Parent: item, State: contract.GoalItemDropped}
+					if err := rows.Scan(&sub.Item, &sub.Text); err != nil {
+						rows.Close()
+						return err
+					}
+					changed = append(changed, sub)
+				}
+				err = rows.Err()
+				rows.Close()
+				if err != nil {
+					return err
+				}
+			case contract.GoalItemOpen:
+				if parent != 0 {
+					if err := reopen(parent); err != nil {
+						return err
+					}
+				}
+			}
+			body := contract.GoalItemChanged{Goal: req.Goal, Item: item, Parent: parent}
+			if err := tx.QueryRowContext(ctx, "UPDATE goal_items SET text=COALESCE(NULLIF(?,''),text),state=COALESCE(NULLIF(?,''),state),updated_at=? WHERE room=? AND goal=? AND number=? RETURNING text,state", req.Text, req.State, at, event.Room, goal, item).Scan(&body.Text, &body.State); err != nil {
+				return err
+			}
+			changed = append(changed, body)
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE goals SET updated_at=? WHERE room=? AND number=?", at, event.Room, goal); err != nil {
 			return err
 		}
-		event.Body = body
-		_, err = s.AppendEvent(tx, event)
-		return err
+		for i, body := range changed {
+			each := event
+			if i > 0 {
+				each.ID = contract.EventID(fmt.Sprintf("%s_%d", event.ID, i))
+			}
+			each.Body = body
+			if _, err := s.AppendEvent(tx, each); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	return item, err
 }
@@ -347,13 +482,13 @@ func (s *Store) ListGoals(ctx context.Context, room contract.RoomID, req contrac
 	}
 	for i := range goals {
 		number, _ := goalNumber(goals[i].ID)
-		items, err := s.Read().QueryContext(ctx, "SELECT number,text,state FROM goal_items WHERE room=? AND goal=? ORDER BY number", room, number)
+		items, err := s.Read().QueryContext(ctx, "SELECT number,parent,text,state FROM goal_items WHERE room=? AND goal=? ORDER BY number", room, number)
 		if err != nil {
 			return nil, err
 		}
 		for items.Next() {
 			var item contract.GoalItem
-			if err := items.Scan(&item.Number, &item.Text, &item.State); err != nil {
+			if err := items.Scan(&item.Number, &item.Parent, &item.Text, &item.State); err != nil {
 				items.Close()
 				return nil, err
 			}
@@ -368,28 +503,109 @@ func (s *Store) ListGoals(ctx context.Context, room contract.RoomID, req contrac
 	return goals, nil
 }
 
-// transferGoals hands a closing session's open goals to its parent. Root holds no goals, so under root they go unheld.
-func (s *Store) transferGoals(ctx context.Context, tx *sql.Tx, session, parent contract.SessionID, at time.Time) ([]contract.GoalID, error) {
-	var parentIsRoot bool
-	if err := tx.QueryRowContext(ctx, "SELECT parent IS NULL FROM sessions WHERE id=?", parent).Scan(&parentIsRoot); err != nil {
-		return nil, err
+// goalClose is what a session's close did with its active goal. At most one field is set.
+type goalClose struct {
+	Ended  contract.GoalID // it had no open item and was closed on purpose, so it ended done
+	Moved  contract.GoalID // it became the goal of the nearest open ancestor, which held none
+	Unheld contract.GoalID // that ancestor is root, which holds no goals
+	Folded *contract.GoalFold
+	Target contract.SessionID // the ancestor that took the work, or root for an unheld goal
+}
+
+// settleGoal ends, moves or folds the active goal of a closing session, in the close's write. deliberate is a close that
+// an ancestor or the owner asked for, after its result; a dormant or disk close is the engine's. The goal's work goes to
+// the nearest ancestor that is not closing, so a subtree close folds every goal straight into the one that stays.
+func (s *Store) settleGoal(ctx context.Context, tx *sql.Tx, event contract.Event, session contract.SessionID, name string, deliberate bool) (goalClose, error) {
+	var out goalClose
+	var number int64
+	var text, doneWhen string
+	err := tx.QueryRowContext(ctx, "SELECT number,text,done_when FROM goals WHERE room=? AND session=? AND state='active' ORDER BY number LIMIT 1", event.Room, session).Scan(&number, &text, &doneWhen)
+	if errors.Is(err, sql.ErrNoRows) {
+		return out, nil
 	}
-	if !parentIsRoot {
-		_, err := tx.ExecContext(ctx, "UPDATE goals SET session=?,updated_at=? WHERE session=? AND state='active'", parent, at.UnixMilli(), session)
-		return nil, err
-	}
-	rows, err := tx.QueryContext(ctx, "UPDATE goals SET session=NULL,updated_at=? WHERE session=? AND state='active' RETURNING number", at.UnixMilli(), session)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
-	defer rows.Close()
-	var unheld []contract.GoalID
-	for rows.Next() {
-		var number int64
-		if err := rows.Scan(&number); err != nil {
-			return nil, err
+	at := event.Time.UnixMilli()
+	ended := func(state contract.GoalState, summary string) error {
+		_, err := s.AppendEvent(tx, contract.Event{ID: contract.EventID(fmt.Sprintf("%s_g%d", event.ID, number)), Time: event.Time, Room: event.Room, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.GoalEnded{Goal: goalID(number), Session: session, State: state, Summary: summary}})
+		return err
+	}
+	// Open leaves: open items with no open subtask. They are the work left; an open parent of open subtasks is only a heading.
+	leaves, err := tx.QueryContext(ctx, "SELECT text FROM goal_items i WHERE room=?1 AND goal=?2 AND state='open' AND NOT EXISTS (SELECT 1 FROM goal_items c WHERE c.room=?1 AND c.goal=?2 AND c.parent=i.number AND c.state='open') ORDER BY CASE parent WHEN 0 THEN number ELSE parent END, parent<>0, number", event.Room, number)
+	if err != nil {
+		return out, err
+	}
+	var open []string
+	for leaves.Next() {
+		var leaf string
+		if err := leaves.Scan(&leaf); err != nil {
+			leaves.Close()
+			return out, err
 		}
-		unheld = append(unheld, goalID(number))
+		open = append(open, leaf)
 	}
-	return unheld, rows.Err()
+	err = leaves.Err()
+	leaves.Close()
+	if err != nil {
+		return out, err
+	}
+	if len(open) == 0 && deliberate {
+		summary := "ended when " + name + " closed"
+		if _, err := tx.ExecContext(ctx, "UPDATE goals SET state=?,summary=?,updated_at=? WHERE room=? AND number=?", contract.GoalDone, summary, at, event.Room, number); err != nil {
+			return out, err
+		}
+		out.Ended = goalID(number)
+		return out, ended(contract.GoalDone, summary)
+	}
+	var target contract.SessionID
+	var targetIsRoot bool
+	err = tx.QueryRowContext(ctx, `WITH RECURSIVE up(id,parent,state,depth) AS (
+		SELECT s.id,s.parent,s.state,0 FROM sessions s WHERE s.id=(SELECT parent FROM sessions WHERE id=?)
+		UNION ALL SELECT s.id,s.parent,s.state,up.depth+1 FROM sessions s JOIN up ON s.id=up.parent WHERE up.state IN ('closing','closed'))
+		SELECT id,parent IS NULL FROM up WHERE state NOT IN ('closing','closed') OR parent IS NULL ORDER BY depth LIMIT 1`, session).Scan(&target, &targetIsRoot)
+	out.Target = target
+	if errors.Is(err, sql.ErrNoRows) || err == nil && targetIsRoot {
+		if _, err := tx.ExecContext(ctx, "UPDATE goals SET session=NULL,updated_at=? WHERE room=? AND number=?", at, event.Room, number); err != nil {
+			return out, err
+		}
+		out.Unheld = goalID(number)
+		return out, nil
+	}
+	if err != nil {
+		return out, err
+	}
+	into, _, err := heldGoal(ctx, tx, event.Room, target, number)
+	if err != nil {
+		return out, err
+	}
+	if into == 0 {
+		if _, err := tx.ExecContext(ctx, "UPDATE goals SET session=?,updated_at=? WHERE room=? AND number=?", target, at, event.Room, number); err != nil {
+			return out, err
+		}
+		out.Moved = goalID(number)
+		return out, nil
+	}
+	var header int
+	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(number),0)+1 FROM goal_items WHERE room=? AND goal=?", event.Room, into).Scan(&header); err != nil {
+		return out, err
+	}
+	heading := fmt.Sprintf("from %s, %s: %s", name, goalID(number), text)
+	if doneWhen != "" {
+		heading += " — done when: " + doneWhen
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO goal_items(room,goal,number,parent,text,state,created_at,updated_at) VALUES(?,?,?,0,?,?,?,?)", event.Room, into, header, heading, contract.GoalItemOpen, at, at); err != nil {
+		return out, err
+	}
+	for i, leaf := range open {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO goal_items(room,goal,number,parent,text,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", event.Room, into, header+1+i, header, leaf, contract.GoalItemOpen, at, at); err != nil {
+			return out, err
+		}
+	}
+	summary := fmt.Sprintf("folded into %s as item %d when %s closed", goalID(into), header, name)
+	if _, err := tx.ExecContext(ctx, "UPDATE goals SET state=?,summary=?,folded_goal=?,folded_item=?,updated_at=? WHERE room=? AND number=?", contract.GoalDropped, summary, into, header, at, event.Room, number); err != nil {
+		return out, err
+	}
+	out.Folded = &contract.GoalFold{Goal: goalID(number), Into: goalID(into), Item: header}
+	return out, ended(contract.GoalDropped, summary)
 }

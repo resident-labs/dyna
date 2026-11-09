@@ -9,6 +9,7 @@
   import StatusPill from "./StatusPill.svelte";
   import WrapText from "./WrapText.svelte";
   import { fromNow, fullTime } from "../feed.ts";
+  import { goalTree, openLeaves } from "../goals.ts";
   import { call } from "../client.ts";
   import { confirmClose } from "../session-confirms.ts";
   import { descendants, holdRows } from "../session-tree.ts";
@@ -24,7 +25,9 @@
     store: RoomStore; room: string; session: string; switchable: boolean; shown: boolean; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; onclosed: () => void;
   } = $props();
   let open = $derived(store.sessions.get(session));
+  // A session holds one goal; its todo list nests one level of subtasks.
   let goals = $derived(store.goals.get(session) ?? []);
+  let goal = $derived(goals[0]);
   let parent = $derived(open?.parent && store.names.get(open.parent));
   // The relative time stays roughly true while the panel stays open.
   let now = $state(Date.now());
@@ -81,20 +84,17 @@
     {#if account}<dt>Account</dt><dd><AccountMenu {session} {account} {switchable} onchanged={loadAccount} /></dd>{/if}
   </dl>
   {#key session}<BoxFacts {store} {session} {shown} />{/key}
-  {#if goals.length || open?.goal}
+  {#if goal}
+    {@const items = goal.items ?? []}
+    {@const left = openLeaves(items)}
     <section>
-      <h3>{goals.length > 1 ? "Goals" : "Goal"}{#if goals.length > 1}<span>{goals.length}</span>{/if}</h3>
-      {#each goals as goal (goal.id)}
-        {@const items = goal.items?.filter(item => item.state === "open").length}
-        <FoldRow more={Boolean(goal.doneWhen || goal.items?.length)}>
-          {#snippet head()}<WrapText text={goal.text} />{/snippet}
-          {#snippet aside()}{#if items}{items} open{/if}{/snippet}
-          {#if goal.doneWhen}<p class="when">Done when: <WrapText text={goal.doneWhen} /></p>{/if}
-          {#if goal.items?.length}<ul>{#each goal.items as item (item.number)}<li class:quiet={item.state !== "open"} class:dropped={item.state === "dropped"}>{item.state === "done" ? "Done · " : ""}<WrapText text={item.text} /></li>{/each}</ul>{/if}
-        </FoldRow>
-      {:else}
-        {#if open?.goal}<FoldRow>{#snippet head()}<WrapText text={open?.goal ?? ""} />{/snippet}</FoldRow>{/if}
-      {/each}
+      <h3>Goal</h3>
+      <FoldRow more={Boolean(goal.doneWhen || items.length)}>
+        {#snippet head()}<WrapText text={goal.text} />{/snippet}
+        {#snippet aside()}{#if left}{left} open{/if}{/snippet}
+        {#if goal.doneWhen}<p class="when">Done when: <WrapText text={goal.doneWhen} /></p>{/if}
+        {#if items.length}<ul class="todo">{#each goalTree(items) as item (item.number)}<li class:quiet={item.state !== "open"} class:dropped={item.state === "dropped"}><span class="mark" aria-label={item.state}>{item.state === "done" ? "✓" : item.state === "dropped" ? "–" : "○"}</span><WrapText text={item.text} />{#if item.subtasks.length}<ul>{#each item.subtasks as sub (sub.number)}<li class:quiet={sub.state !== "open"} class:dropped={sub.state === "dropped"}><span class="mark" aria-label={sub.state}>{sub.state === "done" ? "✓" : sub.state === "dropped" ? "–" : "○"}</span><WrapText text={sub.text} /></li>{/each}</ul>{/if}</li>{/each}</ul>{/if}
+      </FoldRow>
     </section>
   {/if}
   {#if held.length || hooks.count}
@@ -156,7 +156,6 @@
   /* An empty list of facts, as for a session still loading, takes no gap. */
   .about :global(.facts:empty) { display: none; }
   h3 { display: flex; align-items: baseline; gap: 6px; margin: 0 0 4px; font-size: 13px; font-weight: 600; line-height: 20px; }
-  h3 span { color: var(--muted); font-size: 12.5px; font-weight: 400; font-variant-numeric: tabular-nums; }
   section { min-width: 0; }
   p { margin: 0; }
   .when, .times { color: var(--muted); font-size: 12.5px; line-height: 1.45; }
@@ -166,6 +165,11 @@
   ul { display: grid; gap: 4px; margin: 0; padding: 0 0 0 16px; line-height: 1.45; overflow-wrap: break-word; }
   .quiet { color: var(--muted); }
   .dropped { text-decoration: line-through; }
+  .todo, .todo ul { list-style: none; padding-left: 0; }
+  .todo ul { margin-top: 4px; padding-left: 16px; }
+  .todo li { display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 6px; }
+  .todo li > ul { grid-column: 2; }
+  .mark { color: var(--muted); text-decoration: none; display: inline-block; }
   a, button { padding: 0; border: 0; border-radius: 4px; background: none; color: var(--focus); font: inherit; text-decoration: none; cursor: pointer; }
   .endnote { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
   .close-link { flex: none; color: var(--muted); font-size: 12.5px; line-height: 1.45; }

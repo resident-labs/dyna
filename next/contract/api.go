@@ -579,7 +579,10 @@ type SessionCloseResponse struct {
 	To     SessionID        `json:"to"`     // the parent that takes the work
 	Handed []Responsibility `json:"handed"` // owed work that moves to To
 	Unheld []GoalID         `json:"unheld"` // goals that have no holder after the close, because To is root, which holds none
-	Ended  []Responsibility `json:"ended"`  // what stops or is withdrawn with the close
+	// Folded is goals whose work becomes an item of To's goal, with their open items as subtasks, as To's goal stands now;
+	// a goal that moves whole is in Handed.
+	Folded []GoalID         `json:"folded"`
+	Ended  []Responsibility `json:"ended"` // what stops or is withdrawn with the close, and goals with no open item, which end done
 }
 
 type SessionSetProfileRequest struct {
