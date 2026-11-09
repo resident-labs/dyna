@@ -270,11 +270,6 @@ func (r *poolRig) closed(id contract.BoxID) box.Box {
 	return b
 }
 
-func (r *poolRig) notices() []contract.NoticePosted {
-	r.t.Helper()
-	return eventsOf[contract.NoticePosted](r.t, r.s, r.ctx, r.room)
-}
-
 func TestARestartMidCreateUndoesItAndKeepsMax(t *testing.T) {
 	r := setupPool(t)
 	r.addPool(1, true)

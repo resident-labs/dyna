@@ -273,17 +273,6 @@ func (p ServiceParts) Source() string {
 // Pids is the process limit of the container: 512 for each CPU, at least 256.
 func (p ServiceParts) Pids() int { return int(max(256, p.CPUMilli*512/1000)) }
 
-// SamePorts says whether two port lists publish the same host ports and protocols.
-func SamePorts(a, b []PortBinding) bool {
-	key := func(x, y PortBinding) int {
-		return strings.Compare(fmt.Sprintf("%d/%s", x.Host, x.Proto), fmt.Sprintf("%d/%s", y.Host, y.Proto))
-	}
-	a, b = slices.Clone(a), slices.Clone(b)
-	slices.SortFunc(a, key)
-	slices.SortFunc(b, key)
-	return slices.EqualFunc(a, b, func(x, y PortBinding) bool { return key(x, y) == 0 })
-}
-
 // ServiceSecretStatus says whether a declared secret has a value. The value is never given back.
 type ServiceSecretStatus struct {
 	Name string `json:"name"`
