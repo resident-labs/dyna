@@ -24,11 +24,12 @@
   import TimelineMinimap from "./TimelineMinimap.svelte";
   import PostTarget from "./PostTarget.svelte";
   import QuestionCard from "./QuestionCard.svelte";
+  import RequestCard from "./RequestCard.svelte";
   import EngineRestartNotice from "./EngineRestartNotice.svelte";
   import { attemptFailedNote, compactionNote, engineEventsNote, finalTimelineItem, foldInputRuns, ownPost, postDestination, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief, workingLine } from "../timeline.ts";
 
   // With step, the thread reads one worker of a crew: its transcript alone, and nothing that was sent to the crew.
-  let { hasRoom, session, step, roomName, store, operate, unsent, onunsent, onsettled, onpostlocation, navigate, startingBrief, clock = Date.now }: { hasRoom: (room: RoomID) => boolean; startingBrief?: string; session: string; step?: string; roomName: string; store: RoomStore; operate: boolean; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
+  let { hasRoom, session, step, roomName, store, admin = false, operate, unsent, onunsent, onsettled, onpostlocation, navigate, startingBrief, clock = Date.now }: { hasRoom: (room: RoomID) => boolean; startingBrief?: string; session: string; step?: string; roomName: string; store: RoomStore; admin?: boolean; operate: boolean; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
   const view = untrack(() => store.window({ kind: "dm", session }));
   view.onunsent = request => onunsent(request);
   view.onsettled = request => onsettled(request);
@@ -42,6 +43,8 @@
   // A closed session can have a transcript with no DM events, so the thread is empty only when neither has anything.
   export const empty = () => view.ready && !view.ordered.length && !loading && !turns.length;
   let asking = $derived(step ? [] : store.pendingQuestions(session));
+  // What the session waits on the owner to approve: the header says Needs you, so the thread shows what for.
+  let requesting = $derived(step ? [] : [...store.requests.values()].filter(request => request.state === "pending" && request.class === "owner" && request.by.session === session));
   let turns: TranscriptTurn[] = $state([]);
   let pendingBrief = $derived(pendingStartBrief(startingBrief, turns));
   let expandedTurns: Record<string, boolean> = $state({});
@@ -88,8 +91,11 @@
   let lastTop = 0, clicked = -Infinity;
   const gap = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
   // Scrolling up leaves the end at once, so new content never pulls the owner back; coming near it again follows it.
+  // Only a move up leaves it: a scroll event reports the thread's own move to the end a frame late, and what was added
+  // in that frame (a sent message and its Working line are over 80 px) is a gap the owner did not make.
   function scrolled() {
-    atBottom = gap() < (scroller.scrollTop < lastTop ? 2 : 80);
+    if (scroller.scrollTop < lastTop) atBottom = gap() < 2;
+    else if (gap() < 80) atBottom = true;
     lastTop = scroller.scrollTop;
     updatePosition();
     if (loaded && before && !loading && scroller.scrollTop < 100) void load(true);
@@ -117,7 +123,7 @@
     resending = false;
     if (loaded.every(Boolean)) for (const input of inputs) void send({ room: store.room, home: { kind: "dm", session }, text: timelineInput(input, chunks["input:" + input.id + "/text"]).text, attachments: input.attachments?.length ? input.attachments : undefined });
   }
-  let quiet = $derived(!turns.length && !queuedPosts.length && !pendingPosts.length && !pendingBrief && !asking.length);
+  let quiet = $derived(!turns.length && !queuedPosts.length && !pendingPosts.length && !pendingBrief && !asking.length && !requesting.length);
   // The first message after a turn may start a new day. It waits outside any turn, so its day mark is here too.
   let waitingSince = $derived(queuedPosts[0]?.at ?? pendingPosts[0]?.at);
 
@@ -375,7 +381,7 @@
 {#if mediaIndex !== undefined}<MediaViewer room={store.room} {loadVisual} items={media} initial={mediaIndex} name={mediaName} root={mediaRoot} onclose={() => mediaIndex = undefined} onjump={jumpMedia} />{/if}
 
 <div class="thread-frame" bind:clientWidth={frameWidth}>
-{#if frameWidth >= 880 && !step}<TimelineMinimap turns={minimapTurns} current={currentTurn} onselect={(id) => scroller.querySelector<HTMLElement>(`article[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" })} />{/if}
+{#if frameWidth >= 880 && !step && turns.length > 5}<TimelineMinimap turns={minimapTurns} current={currentTurn} onselect={(id) => scroller.querySelector<HTMLElement>(`article[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" })} />{/if}
 <div class="thread" bind:this={scroller} onscroll={scrolled}>
   <div class="body" bind:this={content} onclickcapture={() => { clicked = performance.now(); }}>
     {#if before && loaded}<div class="skeleton" aria-hidden="true"><i></i></div>{/if}
@@ -418,7 +424,9 @@
         {/each}
         {#if turn.outcome === "failed"}<div class="failure"><span class="slot"><Icon name="warning" size={16} /></span><span>{turn.cause ? causes[turn.cause] : "The turn failed"}{#if index === turns.length - 1 && resendable.length}<button class="retry again" disabled={resending} onclick={() => void resend()}>Send again</button>{/if}</span></div>
         {:else if turn.outcome === "stopped"}<p class="muted turn-note">Stopped</p>{/if}
-        {#if running(turn) && !(turn.items ?? []).some(item => timelineItemRunning(item, false))}<p class="muted turn-note"><span class="slot"><span class="spinner" aria-hidden="true"></span></span>{workingLine(turn.started, now, store.activityKinds.get(session))}</p>{/if}
+        {#if running(turn) && !(turn.items ?? []).some(item => timelineItemRunning(item, false))}<!-- A turn that waits on the owner is not working: the line says what it waits for, with no spinner. -->
+          {#if requesting.length || asking.length}<p class="muted turn-note"><span class="slot"></span>{requesting.length ? "Waiting for your approval" : "Waiting for your answer"}</p>
+          {:else}<p class="muted turn-note"><span class="slot"><span class="spinner" aria-hidden="true"></span></span>{workingLine(turn.started, now, store.activityKinds.get(session))}</p>{/if}{/if}
       </article>
     {/each}
     <!-- A box that failed or was lost ends the thread: the turn it held stopped there, and nothing runs until it is back. -->
@@ -429,6 +437,7 @@
     {/if}
     <!-- A question waits at the end of the thread. Once answered, it is part of the input that answer becomes. -->
     {#each asking as question (question.id)}<div class="question"><QuestionCard {question} name={sender("session", session)} root={!store.sessions.get(session)?.parent} {operate} /></div>{/each}
+    {#each requesting as request (request.id)}<div class="question"><RequestCard {admin} {request} {store} {now} feed /></div>{/each}
     {#if waitingSince}{@render dayMark(waitingSince, turns.at(-1)?.started)}{/if}
     {#each queuedPosts as post (post.id)}
       {#snippet body()}{@render message(post.id, post.body.text, post.body.attachments, post.id, post.at, post.body.data, undefined, post.body.dataAttachment, post.from)}{/snippet}
@@ -456,9 +465,11 @@
   .thread { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable both-edges; }
   .body { display: flex; flex-direction: column; gap: 12px; max-width: 784px; margin: auto; padding: 16px 24px; }
   article { display: flex; flex-direction: column; gap: 12px; min-width: 0; scroll-margin-top: 16px; }
-  /* The only line in the thread: the end of a turn, once something follows it. */
-  article.ended:not(:last-child) { margin-bottom: 12px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+  /* Turns part by space alone: a rule under each boxed a one-line exchange. */
+  article.ended:not(:last-child) { margin-bottom: 16px; }
   .question { margin: 0 -16px; }
+  /* The feed's form of the card, at the thread's own edge. */
+  .question :global(.card.feed) { margin-left: 16px; }
   .day { margin: 0; color: var(--muted); font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: center; }
   .owner-message { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
   .bubble { max-width: 80%; min-width: 0; padding: 12px 16px; background: var(--raised); border-radius: 12px; }

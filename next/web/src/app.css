@@ -1,6 +1,6 @@
 :root {
-  /* The left edge of post text: the 16 px row padding, the 32 px avatar and a 12 px gap. */
-  --gutter: 60px;
+  /* The left edge of post text: the 16 px row padding, PostRow's 40 px avatar column and its 16 px gap (8 px on a phone). */
+  --gutter: 72px;
   /* v1's --feed-reading-width: the feed and its composer stop here on a wide window and centre. */
   --feed-reading-width: 920px;
   /* Avatar initials under 24 px: no step of the type scale fits two letters there. */
@@ -10,6 +10,7 @@
   /* v1's scale: 15 px running text at 1.45; weights are 400, 500 and 600. */
   font: 15px/1.45 var(--sans); -webkit-font-smoothing: antialiased;
 }
+@media (max-width: 640px) { :root { --gutter: 64px; } }
 strong, b, h1, h2, h3, h4 { font-weight: 600; }
 /* Shared by Markdown and script views. Grammar markup never changes font metrics. */
 .hljs-keyword, .hljs-selector-tag, .hljs-doctag { color: var(--code-keyword); }
