@@ -214,7 +214,7 @@
         <a class="open" href={roomHref(room.id)} onclick={event => { navigate(event); if (event.defaultPrevented) onrequests(); }}>Open</a></span></div>{/each}
       {#each asking as { id, room, value, who, root } (id)}<div class="item request question">
         <Avatar kind="session" name={who} label={sessionInitials.get(value.session)} {root} size={28} />
-        <span class="lines"><span class="title"><b class="who">{who}</b> asks</span><span class="line asked">{value.text}</span>{#if value.meanwhile}<span class="line plan">{questionPlan(value)}</span>{/if}<span class="line">{room.name}</span></span>
+        <span class="lines"><span class="title"><b class="who">{who}</b> asks</span><span class="line asked">{value.text}</span>{#if value.meanwhile}<span class="line plan">{questionPlan(value)}</span>{/if}<span class="line">{room.name}<a class="inline-open" href={`${roomHref(room.id)}/s/${encodeURIComponent(value.session)}`} onclick={navigate}>Open</a></span></span>
         <span class="acts"><a class="open" href={`${roomHref(room.id)}/s/${encodeURIComponent(value.session)}`} onclick={navigate}>Open</a></span>
         {#if attention.can("operate")}<div class="reply"><QuestionAnswer {id} name={who} onanswered={() => { decided.set(id, `Answered · ${who}`); }} /></div>{/if}</div>{/each}{/each}
       {#each failures as { room, title, reason } (room.id)}<div class="item failure"><Avatar kind="room" name={room.name} label={initials.get(room.name)} size={28} />
@@ -297,6 +297,7 @@
   .acts .approve { background: var(--focus); color: var(--bg); border-color: var(--focus); }
   .acts .approve:hover:not(:disabled) { background: var(--focus); filter: brightness(1.08); }
   .open { border-color: transparent; color: var(--muted); }
+  .inline-open { display: none; margin-left: 12px; color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
   .open.sign-in { border-color: var(--line); color: var(--text); white-space: nowrap; }
   /* The ring sits outside a filled button, so it shows on the fill's own color. */
   .acts button:focus-visible, .open:focus-visible { outline-offset: 2px; }
@@ -310,6 +311,8 @@
   @container (max-width: 480px) {
     .acts { width: 100%; margin-left: 38px; }
     .acts button { flex: 1; height: 40px; }
-    .question .acts { order: 1; }
+    /* A question's Open joins its room line, so nothing stands alone under the answer box. */
+    .question .acts { display: none; }
+    .question .inline-open { display: inline; }
   }
 </style>
