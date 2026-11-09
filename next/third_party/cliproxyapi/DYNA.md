@@ -79,6 +79,12 @@ Each later patch to this folder must be its own commit. Each patch must add an e
 
 - Upstream error code on a cooling failure: 10 product lines added, 1 import, plus a 22-line test. When every credential cools after an upstream overload, the next pick finds none and fails as `auth_unavailable` (503) with the last upstream error only inside the message text; `BuildErrorResponseBodyWithError` then set the generic `internal_server_error` code, so the client saw `auth_unavailable: no auth available` and no cause. A 5xx failure that wraps an upstream error now keeps that error's own `error.code` (such as `server_is_overloaded`) in the response body. The cooldown is unchanged. The 2026-11-03 search of upstream found no fix.
 
+- Claude Fable 5.2 ahead of upstream (PRs #2328 and #2329, 2026-11-09). Anthropic refuses `claude-fable-5-2` from Claude Code older than 2.1.290, and upstream presents 2.1.280 (upstream issue #7386, open with no fix when this landed). Three changes serve the `fable` profile in `engine/profiles.go`:
+  - `internal/registry/models/models.json` gains a `claude-fable-5-2` entry.
+  - The baseline Claude Code profile moves as a whole to 2.1.321, measured from the real client: the User-Agent, `@anthropic-ai/sdk` 0.128.0 and Node v26.12.1 in `helps/claude_device_profile.go`, and the version in the billing header and system signing. Test fixtures and version-derived hashes move with it.
+  - `isClaudeFable51Model`, `isClaudeFable51OnlyModel` and `claudeModelHasPerTurnEffort` also match Fable 5.2. A capture of Claude Code 2.1.321 in print mode on 2026-11-09 showed the same betas, body keys and thinking shape for 5.1 and 5.2; its interactive mode was not measured.
+  Drop all three when a subtree pull brings upstream's own Fable 5.2 support, and take upstream's values where they differ.
+
 ## Pulls
 
 - `v8.0.49` (2026-11-01): `git subtree pull` merged with no conflicts. Every patch above still applies, and none is obsolete: PR #5434 stays open and unmerged, PR #5833 was closed unmerged. The release changes plugin login, Gemini sanitizing and Codex commentary through Claude clients. The commentary option defaults to off, so `engine/model` sees no change in routing, management paths or credential handling. `TestResponsesInterruptStopsHTTPUpstream` and `TestCodexClientModelsApplyPatchRouting` are flaky on `v8.0.48` with Dyna's patches too, and `TestEnsureClientsWaitsForPreviousTargetClose` fails there on every run, so this pull did not cause them; CI does not run them.
