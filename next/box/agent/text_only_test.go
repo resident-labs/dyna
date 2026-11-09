@@ -9,6 +9,14 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+func TestUncataloguedModelTakesImages(t *testing.T) {
+	models := agent.Models(contract.TextOnlyModel{Provider: contract.ModelProviderAnthropic, Model: "claude-fable-5-2", Images: true})
+	got := models.Providers["anthropic"].Models
+	if len(got) != 1 || got[0].ID != "claude-fable-5-2" || !reflect.DeepEqual(got[0].Input, []string{"text", "image"}) || got[0].API != "anthropic-messages" {
+		t.Fatalf("models = %+v", got)
+	}
+}
+
 func TestTextOnlyModels(t *testing.T) {
 	entries := []contract.TextOnlyModel{{Provider: contract.ModelProviderOpenAI, Model: "glm-5.3"}, {Provider: contract.ModelProviderOpenAI, Model: "alternate"}, {Provider: contract.ModelProviderAnthropic, Model: "other"}}
 	models := agent.Models(entries...)
