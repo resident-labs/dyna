@@ -422,3 +422,11 @@ test("a digest is one feed row naming its count; failed tool calls get none of t
   assert.equal(rows.length, 1);
   assert.deepEqual(feedRows([digest], { kind: "dm", session: "s" }), []);
 });
+
+
+test("a server-accepted optimistic post retains its sequence before the event arrives", () => {
+  const pending = { id: 1, at: "2026-11-09T00:00:00Z", text: "hello", attachments: [], to: [], failed: false, seq: 42 };
+  const rows = dayRows([], { kind: "feed" }, [pending]);
+  const post = rows.find(row => row.kind === "post");
+  assert.equal(post?.kind === "post" ? post.pending?.seq : undefined, 42);
+});
