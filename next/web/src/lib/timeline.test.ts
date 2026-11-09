@@ -268,6 +268,14 @@ test("a running turn's working line says it is compacting while its live activit
   assert.equal(compactionNote({ tokens: 153400 }), "Compacted the conversation at 153k tokens");
 });
 
+test("live working time waits a second and counts whole elapsed seconds", () => {
+  const started = "2026-11-01T00:00:00Z";
+  for (const [elapsed, expected] of [[0, "Working…"], [32, "Working…"], [999, "Working…"], [1000, "Working for 1s"], [1100, "Working for 1s"], [6400, "Working for 6s"], [12900, "Working for 12s"], [59999, "Working for 59s"], [60000, "Working for 1m"]] as const) {
+    assert.equal(workingLine(started, Date.parse(started) + elapsed), expected);
+  }
+  assert.equal(formatTimelineDuration(6200), "6.2s");
+});
+
 test("a post stands before the item that began after it, and posts of one index go in the order sent", () => {
   const tool = (id: string, index: number): TranscriptItem => ({ id, turn: "t", at: "", kind: "tool", index });
   const post = (id: string, index: number, seq: number): TranscriptItem => ({ id, event: id, seq, turn: "t", at: "", kind: "post", index });
