@@ -124,7 +124,7 @@
 <!-- A long press opens the action sheet; a right swipe forwards on release. -->
 <div class="swipe" class:mention={row.from.kind !== "owner" && row.to.some(target => target.kind === "owner")} use:swipe>
   {#if dragging && !row.pending}<div class="cue" class:ready class:first={row.first} aria-hidden="true"><Icon name="forward" /></div>{/if}
-<article style:transform="translateX({distance}px)" class:dragging class="post" class:first={row.first} class:last class:tucked={belowNew} class:pending={row.pending} aria-busy={row.pending && !row.pending.failed} tabindex="-1"
+<article style:transform="translateX({distance}px)" class:dragging class="post" class:first={row.first} class:last class:tucked={belowNew} class:pending={row.pending && row.pending.seq === undefined} aria-busy={row.pending && !row.pending.failed && row.pending.seq === undefined} tabindex="-1"
   style:--lift="{lift}px" onpointerdown={press} onpointermove={drift} onpointerup={release} onpointercancel={release}
   oncontextmenu={event => { if (sheet) event.preventDefault(); }}>
   {#if !row.pending}<div class="bar"><span class="status" role="status">{copied}</span>

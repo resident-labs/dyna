@@ -45,8 +45,8 @@
     const session = [...store.sessions.values()].find(open => open.name === name)?.session;
     return session ? [{ kind: "session" as const, session }] : [];
   });
-  let pending = $derived([...view.pendingPosts.values()].map(({ id, request, at, failed }) => ({
-    id, at, failed, text: request.text, data: request.data, attachments: request.attachments ?? [], to: mentioned(request.mentions ?? []),
+  let pending = $derived([...view.pendingPosts.values()].map(({ id, request, at, failed, seq }) => ({
+    id, at, failed, seq, text: request.text, data: request.data, attachments: request.attachments ?? [], to: mentioned(request.mentions ?? []),
   })));
   // The owner's read position when the conversation opened, as in Discord: the New line marks what arrived while the
   // owner was away. It is taken once the room and the window load. Sending, Escape, or watching an event arrive at the
