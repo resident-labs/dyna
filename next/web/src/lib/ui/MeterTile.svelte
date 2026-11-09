@@ -19,7 +19,8 @@
   .unit { margin-left: 4px; color: var(--muted); font-size: 12.5px; }
   .track { height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
   .fill { display: block; height: 100%; background: color-mix(in srgb, var(--muted) 70%, transparent); }
-  .text { overflow: hidden; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+  /* The text wraps: cut short, "8.1 of 27 co…" lost its unit. */
+  .text { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
   .busy strong, .busy .text { color: var(--attention); }
   .busy .fill { background: var(--attention-fill); }
   /* A narrow card, such as on a phone, keeps three tiles in one row: smaller figures, and the text may take two lines
@@ -27,6 +28,5 @@
   @container (max-width: 320px) {
     strong { font-size: 20px; }
     .name, .unit, .text { font-size: 11px; }
-    .text { white-space: normal; }
   }
 </style>

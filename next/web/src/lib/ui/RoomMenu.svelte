@@ -29,8 +29,7 @@
   function atPointer(node: HTMLElement, moved: boolean) { if (moved) document.body.append(node); return { destroy() { if (moved) node.remove(); } }; }
   // A page the menu opened returns focus here when it closes.
   export function focus(options?: FocusOptions) { button?.focus(options); }
-  let waitingLabel = $derived(`${waiting} ${waiting === 1 ? "request" : "requests"} waiting`);
-  let menuLabel = $derived(["Room menu", waiting ? waitingLabel : ""].filter(Boolean).join(", "));
+  const menuLabel = "Room menu";
   // Up and Down move between entries, Home and End jump, Escape closes and Tab leaves.
   function move(event: KeyboardEvent) {
     const all = items();
@@ -47,7 +46,7 @@
   {#if phone}<button type="button" class="open" bind:this={button} aria-haspopup="menu" aria-expanded={open} aria-controls="room-menu"
     aria-label={menuLabel} title={menuLabel}
     onclick={() => void show(!open)} onkeydown={event => { if (event.key === "ArrowDown") { event.preventDefault(); void show(true); } }}>
-    <Icon name="more" />{#if waiting}<StatusPill tone="warning" label="Requests waiting" count={waiting} />{/if}</button>{/if}
+    <Icon name="more" /></button>{/if}
   {#if open}
     <div class="list" class:pointer={at} style:left={at && `${at.x}px`} style:top={at && `${at.y}px`} role="menu" id="room-menu" aria-label="Room menu" tabindex="-1" bind:this={list} onkeydown={move} use:atPointer={!!at}>
       {#if onrequests}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onrequests(); }}>Requests{#if waiting}<StatusPill tone="warning" label="Requests waiting" count={waiting} />{/if}</button>{/if}

@@ -33,7 +33,8 @@
 </article>
 
 <style>
-  .failed { display: grid; grid-template-columns: 32px minmax(0, 1fr); column-gap: 12px; padding: 6px 16px; }
+  /* PostRow's columns, so the text starts at the post text's edge and the mark sits in the avatar column. */
+  .failed { display: grid; grid-template-columns: 40px minmax(0, 1fr); column-gap: calc(var(--gutter) - 56px); padding: 6px 16px; }
   .compact { display: block; padding: 0; }
   .compact .cause { color: var(--text); }
   .mark { grid-row: 1 / span 2; display: flex; justify-content: center; padding-top: 2px; }

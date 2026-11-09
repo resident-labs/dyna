@@ -45,6 +45,9 @@
   let asking = $derived(step ? [] : store.pendingQuestions(session));
   // What the session waits on the owner to approve: the header says Needs you, so the thread shows what for.
   let requesting = $derived(step ? [] : [...store.requests.values()].filter(request => request.state === "pending" && request.class === "owner" && request.by.session === session));
+  // A request decided while the thread is open stays as its one-line record, as in the feed; older ones are in the feed alone.
+  const waited = new Set<string>();
+  let decided = $derived.by(() => { for (const request of requesting) waited.add(request.id); return [...store.requests.values()].filter(request => request.state !== "pending" && waited.has(request.id)); });
   let turns: TranscriptTurn[] = $state([]);
   let pendingBrief = $derived(pendingStartBrief(startingBrief, turns));
   let expandedTurns: Record<string, boolean> = $state({});
@@ -425,7 +428,7 @@
         {#if turn.outcome === "failed"}<div class="failure"><span class="slot"><Icon name="warning" size={16} /></span><span>{turn.cause ? causes[turn.cause] : "The turn failed"}{#if index === turns.length - 1 && resendable.length}<button class="retry again" disabled={resending} onclick={() => void resend()}>Send again</button>{/if}</span></div>
         {:else if turn.outcome === "stopped"}<p class="muted turn-note">Stopped</p>{/if}
         {#if running(turn) && !(turn.items ?? []).some(item => timelineItemRunning(item, false))}<!-- A turn that waits on the owner is not working: the line says what it waits for, with no spinner. -->
-          {#if requesting.length || asking.length}<p class="muted turn-note"><span class="slot"></span>{requesting.length ? "Waiting for your approval" : "Waiting for your answer"}</p>
+          {#if requesting.length || asking.length}<p class="muted turn-note">{requesting.length ? "Waiting for your approval" : "Waiting for your answer"}</p>
           {:else}<p class="muted turn-note"><span class="slot"><span class="spinner" aria-hidden="true"></span></span>{workingLine(turn.started, now, store.activityKinds.get(session))}</p>{/if}{/if}
       </article>
     {/each}
@@ -437,6 +440,7 @@
     {/if}
     <!-- A question waits at the end of the thread. Once answered, it is part of the input that answer becomes. -->
     {#each asking as question (question.id)}<div class="question"><QuestionCard {question} name={sender("session", session)} root={!store.sessions.get(session)?.parent} {operate} /></div>{/each}
+    {#each decided as request (request.id)}<div class="question"><RequestCard {admin} {request} {store} {now} /></div>{/each}
     {#each requesting as request (request.id)}<div class="question"><RequestCard {admin} {request} {store} {now} feed /></div>{/each}
     {#if waitingSince}{@render dayMark(waitingSince, turns.at(-1)?.started)}{/if}
     {#each queuedPosts as post (post.id)}

@@ -331,7 +331,7 @@
   .more-failures time { opacity: .8; }
   .failure-chevron { display: inline-flex; transform: rotate(-90deg); }
   .failure-chevron.open { transform: none; }
-  .restart-warning { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; padding: 6px 16px; color: var(--muted); font-size: 14px; }
+  .restart-warning { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: calc(var(--gutter) - 56px); padding: 6px 16px; color: var(--muted); font-size: 14px; }
   .restart-mark { display: flex; justify-content: center; padding-top: 2px; }
   .restart-warning p { margin: 0; overflow-wrap: anywhere; }
   .restart-warning time { white-space: nowrap; font-size: 12.5px; }
