@@ -103,7 +103,7 @@
 
 {#snippet header()}{@render bar("Images", items?.length, undefined)}{/snippet}
 
-<ListDetail bar={header} label="Images" title={item ? item.name : "Not found"} open={!!items && selected !== undefined} {onselect} {onclose} {list} {detail} {summary} />
+<ListDetail bar={header} empty={items?.length === 0} label="Images" title={item ? item.name : "Not found"} open={!!items && selected !== undefined} {onselect} {onclose} {list} {detail} {summary} />
 
 <style>
   .icon { display: grid; flex: none; color: var(--muted); }

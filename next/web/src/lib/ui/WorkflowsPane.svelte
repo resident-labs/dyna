@@ -146,7 +146,7 @@
 
 {#snippet header()}{@render bar("Workflows", items?.length, undefined)}{/snippet}
 
-<ListDetail bar={header} label="Workflows" title={item ? scopeName(item) : "Not found"} open={!!items && selected !== undefined} {onselect} {onclose} {list} {detail} {summary} />
+<ListDetail bar={header} empty={items?.length === 0} label="Workflows" title={item ? scopeName(item) : "Not found"} open={!!items && selected !== undefined} {onselect} {onclose} {list} {detail} {summary} />
 
 <style>
   .icon { display: grid; place-items: center; flex: none; width: 24px; color: var(--muted); }
