@@ -31,11 +31,8 @@ func (s *Store) NewPairCode(ctx context.Context, scopes []contract.Scope, now ti
 	}
 	code := pairEncoding.EncodeToString(raw)[:10]
 	hash := sha256.Sum256([]byte(code))
-	body, err := json.Marshal(scopes)
-	if err != nil {
-		return "", err
-	}
-	err = s.Write(ctx, func(tx *sql.Tx) error {
+	body, _ := json.Marshal(scopes)
+	err := s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "INSERT INTO pairing_codes(id,code_hash,scopes,expires_at,tries) VALUES(1,?,?,?,0) ON CONFLICT(id) DO UPDATE SET code_hash=excluded.code_hash,scopes=excluded.scopes,expires_at=excluded.expires_at,tries=0", hash[:], body, now.Add(5*time.Minute).UnixMilli())
 		return err
 	})
