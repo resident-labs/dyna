@@ -92,7 +92,8 @@ const ranked = <T extends { name: string }>(list: T[], query: string, closed: (i
 
 export function build(text: string, scope: Scope | undefined, sources: Sources): Section[] {
   const mode = parse(text, scope), { query } = mode;
-  const action = (list: Action[]) => query ? list.filter(item => matches(query, item.label)) : list;
+  const action = (list: Action[]) => query
+    ? list.filter(item => matches(query, item.label)).sort((a, b) => earliest(query, a.label) - earliest(query, b.label)) : list;
   const section = (group: Scope, found: Item[], total = found.length, state?: Section["state"]): Section => {
     const alone = mode.scope === group;
     // The empty query lists every common action; a typed query caps each group at three.
