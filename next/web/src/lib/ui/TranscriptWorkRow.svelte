@@ -96,7 +96,7 @@
   {@const title = titleOf(item)}
   {@const running = timelineItemRunning(item, ended)}
   {#if item.tool === "codemode"}
-    <CodemodeScript {item} {ended} {chunks} {onload} {onopen} />
+    <CodemodeScript {item} {ended} {now} {chunks} {onload} {onopen} />
   {:else}
   <details class="entry" data-media-key={item.image?.item} ontoggle={(event) => { if (event.currentTarget.open) { onopen(); if (item.more) { void load(item, "arguments"); void load(item, "output"); if (item.diff) void load(item, "diff"); } } }}>
     <summary>
