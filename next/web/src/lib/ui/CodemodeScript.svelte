@@ -1,15 +1,15 @@
 <script lang="ts">
   import DOMPurify from "dompurify";
   import type { TranscriptItem, TranscriptPart, TranscriptCall } from "../contract.gen.ts";
-  import { stepTitle } from "../steps.ts";
+  import { elapsed, stepTime, stepTitle } from "../steps.ts";
   import { formatTimelineDuration } from "../timeline.ts";
   import { highlight } from "../highlight.ts";
   import Icon from "./Icon.svelte";
   import TranscriptIcon from "./TranscriptIcon.svelte";
   import StatusPill from "./StatusPill.svelte";
 
-  let { item, ended, chunks, onload, onopen }: {
-    item: TranscriptItem; ended: boolean; chunks: Record<string, string>;
+  let { item, ended, now, chunks, onload, onopen }: {
+    item: TranscriptItem; ended: boolean; now: number; chunks: Record<string, string>;
     onload: (item: TranscriptItem, part: TranscriptPart) => Promise<void>;
     onopen: () => void;
   } = $props();
@@ -71,6 +71,7 @@
     <summary><span class="slot"><Icon name="prompt" size={14} /></span>
       <span>{!item.ended && !ended ? "Running script" : item.calls?.length ? `Script · ${lines.length} ${lines.length === 1 ? "line" : "lines"}${output ? ` · output ${outputLines.length} ${outputLines.length === 1 ? "line" : "lines"}` : ""}` : "Ran a script"}</span>
       {#if item.failed}<StatusPill tone="failed" label="Failed" word />{/if}
+      <span class="time">{!item.ended && !ended ? elapsed(item.at, now) : stepTime({ started: item.at, ended: item.ended })}</span>
       <span class="chevron"><Icon name="chevron" size={14} /></span>
     </summary>
     <div class="body">
@@ -91,6 +92,7 @@
   .slot { display: inline-flex; flex: none; width: 24px; justify-content: center; }
   .target { font-family: var(--mono); color: var(--text); overflow-wrap: anywhere; }
   .time, .chevron { margin-left: auto; white-space: nowrap; }
+  .time + .chevron { margin-left: 0; }
   .time { font-size: 11px; font-variant-numeric: tabular-nums; }
   .error { margin-left: 30px; color: var(--danger); overflow-wrap: anywhere; }
   .body { margin-left: 30px; }
