@@ -629,22 +629,15 @@ func (s *Store) nextQueued(ctx context.Context, tx *sql.Tx, id contract.Subscrip
 
 // ActiveRuns lists the Runs in progress.
 func (s *Store) ActiveRuns(ctx context.Context) ([]HookRun, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT id,sub,COALESCE(room,''),host,size,started_at FROM subscription_runs ORDER BY started_at,id")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []HookRun
-	for rows.Next() {
+	return queryAll(ctx, s.Read(), func(rows scanner) (HookRun, error) {
 		var run HookRun
 		var at int64
 		if err := rows.Scan(&run.ID, &run.Subscription, &run.Room, &run.Host, &run.Size, &at); err != nil {
-			return nil, err
+			return run, err
 		}
 		run.StartedAt = time.UnixMilli(at).UTC()
-		out = append(out, run)
-	}
-	return out, rows.Err()
+		return run, nil
+	}, "SELECT id,sub,COALESCE(room,''),host,size,started_at FROM subscription_runs ORDER BY started_at,id")
 }
 
 // HookOutcome is what one Run leaves on its subscription.

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"github.com/resident-labs/dyna/box"
-	"github.com/resident-labs/dyna/contract"
 	"net/url"
 )
 
@@ -16,19 +15,8 @@ func DeployHosts(ctx context.Context, data string) ([]box.Host, error) {
 		return nil, err
 	}
 	defer db.Close()
-	rows, err := db.QueryContext(ctx, `SELECT name,ssh FROM hosts WHERE state='ready' AND exec_only=0 ORDER BY name`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var hosts []box.Host
-	for rows.Next() {
-		var name contract.HostName
-		var ssh string
-		if err := rows.Scan(&name, &ssh); err != nil {
-			return nil, err
-		}
-		hosts = append(hosts, box.Host{Name: name, SSH: ssh})
-	}
-	return hosts, rows.Err()
+	return queryAll(ctx, db, func(rows scanner) (h box.Host, err error) {
+		err = rows.Scan(&h.Name, &h.SSH)
+		return
+	}, `SELECT name,ssh FROM hosts WHERE state='ready' AND exec_only=0 ORDER BY name`)
 }

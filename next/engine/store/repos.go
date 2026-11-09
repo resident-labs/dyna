@@ -41,24 +41,17 @@ type CIRepo struct {
 
 // CIRepos lists the repositories whose CI is on.
 func (s *Store) CIRepos(ctx context.Context) ([]CIRepo, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT p.repo, p.ci_max, p.default_room, r.only_hosts FROM repos p JOIN rooms r ON r.id=p.default_room WHERE p.ci=1 ORDER BY p.repo")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var repos []CIRepo
-	for rows.Next() {
+	return queryAll(ctx, s.Read(), func(rows scanner) (CIRepo, error) {
 		var repo CIRepo
 		var only string
 		if err := rows.Scan(&repo.Repo, &repo.Max, &repo.Room, &only); err != nil {
-			return nil, err
+			return repo, err
 		}
 		if err := json.Unmarshal([]byte(only), &repo.Only); err != nil {
-			return nil, err
+			return repo, err
 		}
-		repos = append(repos, repo)
-	}
-	return repos, rows.Err()
+		return repo, nil
+	}, "SELECT p.repo, p.ci_max, p.default_room, r.only_hosts FROM repos p JOIN rooms r ON r.id=p.default_room WHERE p.ci=1 ORDER BY p.repo")
 }
 
 // RoomRepos returns the repositories listed by a room.
