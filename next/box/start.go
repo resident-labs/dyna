@@ -8,6 +8,8 @@ import (
 
 const (
 	StartStepBudget        = 3 * time.Minute
+	SessionStartupBudget   = 10 * time.Minute
+	SessionStartupReason   = "initializing session"
 	StartPreparationBudget = 15 * time.Minute
 	StartCleanupBudget     = 30 * time.Second
 	ProbeFailureLimit      = 3

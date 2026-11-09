@@ -699,7 +699,12 @@ type EventsListResponse struct {
 	Names    map[SessionID]string    `json:"names"`
 	Next     int64                   `json:"next"`
 }
-type BoxHelloRequest struct{}
+
+// WaitForChannel keeps startup visible until the agent has initialized its harness.
+// Older agents omit it and retain the ready-on-hello handshake.
+type BoxHelloRequest struct {
+	WaitForChannel bool `json:"waitForChannel,omitempty"`
+}
 type ModelProvider string
 
 const (

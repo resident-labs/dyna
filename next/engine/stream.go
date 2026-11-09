@@ -156,6 +156,16 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 	if !open {
 		return nil, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 	}
+	current, err := s.store.Box(ctx, session.Box)
+	if err != nil {
+		return nil, failure(err)
+	}
+	// The channel opens only after Pi finishes loading the saved conversation.
+	if current.State == contract.BoxStarting {
+		if _, err := s.transition(ctx, session.Room, current, contract.BoxReady, "", ""); err != nil {
+			return nil, failure(err)
+		}
+	}
 	if err := s.store.WakeLostInventory(ctx, session.Box); err != nil {
 		return nil, failure(err)
 	}

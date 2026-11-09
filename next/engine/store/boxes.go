@@ -348,3 +348,24 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 		return err
 	})
 }
+
+// BeginSessionStartup records that the agent answered, but its harness is not ready.
+// Preserve retry counters and desired state; a concurrent stop or expired admission wins.
+func (s *Store) BeginSessionStartup(ctx context.Context, b box.Box, event contract.Event) error {
+	event.Body = contract.BoxChanged{Box: b.ID, Session: b.Session, Host: b.Host, From: b.State, To: contract.BoxStarting, Reason: box.SessionStartupReason}
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "UPDATE boxes SET state='starting',reason=?,updated_at=?,due_at=? WHERE id=? AND state=? AND want='run' AND (due_at=0 OR due_at>?)", box.SessionStartupReason, event.Time.UnixMilli(), event.Time.Add(box.SessionStartupBudget).UnixMilli(), b.ID, b.State, event.Time.UnixMilli())
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return sql.ErrNoRows
+		}
+		_, err = s.AppendEvent(tx, event)
+		return err
+	})
+}
