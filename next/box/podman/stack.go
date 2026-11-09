@@ -115,17 +115,6 @@ func stackCommands(id contract.BoxID, slice string, s *box.Stack) string {
 	return strings.Join(commands, "\n")
 }
 
-// CreateStack creates a box's compose volumes, its pod and its sidecars, all stopped. A volume that exists stays as it is,
-// so a swap keeps its data. A stack with no sidecars needs no pod.
-func (h *Host) CreateStack(ctx context.Context, id contract.BoxID, slice string, s *box.Stack) error {
-	_, err := h.namespace(ctx, id, "create", "bash", "-c", "set -eu\n"+stackCommands(id, slice, s), "dyna-create-stack")
-	var exit remoteExit
-	if errors.As(err, &exit) && exit == 253 {
-		return box.StackError{Reason: err.Error()}
-	}
-	return err
-}
-
 type stackContainer struct {
 	Names    []string          `json:"Names"`
 	Labels   map[string]string `json:"Labels"`
@@ -205,12 +194,6 @@ func (h *Host) awaitHealthy(ctx context.Context, name string, wait time.Duration
 	}
 }
 
-// StopPod stops a box's pod, sidecars and all. A box without one needs nothing.
-func (h *Host) StopPod(ctx context.Context, id contract.BoxID) error {
-	_, err := h.namespaceDelete(ctx, id, "podman", "--cgroup-manager=systemd", "pod", "stop", "--ignore", box.PodName(id))
-	return err
-}
-
 // RemovePod removes a box's pod and every container in it, the box too, and keeps the volumes.
 func (h *Host) RemovePod(ctx context.Context, id contract.BoxID) error {
 	return h.removeBoxNow(ctx, id, false)
@@ -230,14 +213,11 @@ func (h *Host) PullImage(ctx context.Context, ref string) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	_, err := h.run(ctx, "podman", "image", "exists", ref)
-	if err == nil {
-		return nil
-	}
-	var exit remoteExit
-	if !errors.As(err, &exit) || exit != 1 {
+	have, err := h.HasImage(ctx, ref)
+	if have || err != nil {
 		return err
 	}
+	var exit remoteExit
 	// A pull has no bound, so like a build it takes no short-command slot.
 	out, err := h.runUnbounded(ctx, nil, "bash", "-c", `exec podman pull --quiet --authfile=<(printf '{}') "$1"`, "dyna-pull", ref)
 	if errors.As(err, &exit) {

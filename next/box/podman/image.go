@@ -75,14 +75,11 @@ func (h *Host) buildWith(ctx context.Context, tag, baseArg, base string, context
 	case <-ctx.Done():
 		return false, ctx.Err()
 	}
-	_, err := h.run(ctx, "podman", "image", "exists", tag)
-	if err == nil {
-		return false, nil
-	}
-	var exit remoteExit
-	if !errors.As(err, &exit) || exit != 1 {
+	have, err := h.HasImage(ctx, tag)
+	if have || err != nil {
 		return false, err
 	}
+	var exit remoteExit
 	args := []string{"podman", "build", "-t", tag}
 	if base != "" {
 		args = append(args, "--build-arg", baseArg+"="+base)

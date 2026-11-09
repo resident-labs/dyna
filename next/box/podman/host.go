@@ -490,10 +490,7 @@ func (h *Host) executeOver(ctx context.Context, ssh []string, input []byte, argv
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if replyErr != nil {
-			return nil, fmt.Errorf("%w: %v", replyErr, sshErr)
-		}
-		return nil, sshErr
+		return nil, fmt.Errorf("%w: %v", replyErr, sshErr)
 	}
 	if replyErr != nil {
 		return nil, fmt.Errorf("%w: %v", replyErr, sshErr)

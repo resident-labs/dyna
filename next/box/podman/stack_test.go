@@ -180,7 +180,7 @@ func TestAFailedPodSaysWhy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = h.CreateStack(context.Background(), "box_1", "dyna-box_1.slice", &box.Stack{Infra: "base", Sidecars: []box.Sidecar{{Name: "db", Image: "image"}}})
+	err = h.CreateBox(context.Background(), box.ContainerSpec{Box: "box_1", Image: "image", Slice: "dyna-box_1.slice"}, &box.Stack{Infra: "base", Sidecars: []box.Sidecar{{Name: "db", Image: "image"}}}, false)
 	var stack box.StackError
 	if !errors.As(err, &stack) || !strings.Contains(err.Error(), "create pod: Failed to set up tap device") {
 		t.Fatalf("got %v", err)
