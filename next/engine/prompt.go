@@ -195,7 +195,7 @@ func sessionPrompt(v promptVars) string {
 		}
 	}
 	if v.CPUs > 0 {
-		session = append(session, fmt.Sprintf("Your box is capped at %d CPU and %d GiB of memory: heavy builds belong in a larger child session or CI.", v.CPUs, v.MemBytes/box.GiB))
+		session = append(session, fmt.Sprintf("Your box has %d CPU and %d GiB of memory: heavy builds belong in a larger child session or CI.", v.CPUs, v.MemBytes/box.GiB))
 	}
 	return strings.Join([]string{
 		promptCore, promptGit, promptDelegation, role, communication,
