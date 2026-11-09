@@ -128,46 +128,7 @@ func newClient(socket string) *socketClient {
 	}}}}
 }
 
-type requestType interface {
-	contract.ProfileListRequest | contract.ProfileSetRequest | contract.ProfileRemoveRequest |
-		contract.ProxyKeyRequest | contract.ProxyUsageRequest |
-		contract.WorkflowRunRequest | contract.WorkflowReloadRequest | contract.WorkflowStatusRequest | contract.WorkflowListRequest | contract.WorkflowSettingsRequest | contract.WorkflowSetRequest |
-		contract.AddonListRequest | contract.AddonRemoveRequest | contract.ImageSaveRequest | contract.ImageListRequest | contract.ImageShowRequest | contract.ImageRemoveRequest | contract.PackageAddRequest | contract.SkillSaveRequest | contract.AddonSetHostsRequest | contract.MCPAddRequest |
-		contract.SubscriptionAddRequest | contract.SubscriptionListRequest | contract.SubscriptionRemoveRequest | contract.SubscriptionSetEnabledRequest |
-		contract.WebSearchRequest | contract.WebsearchSetKeyRequest | contract.WebsearchRemoveKeyRequest |
-		contract.ContextSnapshotRequest |
-		contract.IssueListRequest | contract.IssueStatusRequest | contract.IssueTrackRequest | contract.IssueUntrackRequest |
-		contract.QuestionAskRequest | contract.QuestionAnswerRequest | contract.QuestionListRequest |
-		contract.OpWithdrawRequest |
-		contract.SessionMoveRequest | contract.SessionSetBranchRequest |
-		contract.SessionListRequest |
-		contract.SessionResponsibilitiesRequest |
-		contract.GoalSetRequest | contract.GoalListRequest | contract.GoalItemRequest | contract.GoalDoneRequest | contract.GoalJournalRequest |
-		contract.ServiceSetRequest | contract.ServiceListRequest | contract.ServiceRef | contract.ServiceLogsRequest | contract.ServiceSecretSetRequest |
-		contract.PoolAddRequest | contract.PoolListRequest | contract.PoolRemoveRequest | contract.RoomHostsRequest | contract.HostRemoveRequest | contract.HostSetRequest | contract.RoomSetRequest |
-		contract.RoomSetLimitsRequest | contract.RoomPauseRequest | contract.SessionStopRequest | contract.HostexecRunRequest | contract.HostexecStopRequest | contract.WebLoginRequest | contract.HostAddRequest | contract.HostSetLimitsRequest | contract.HostListRequest | contract.RoomCreateRequest | contract.RoomDeleteRequest | contract.RoomRepoAddRequest | contract.RepoCISetRequest | contract.RoomReposRequest | contract.ComposeListRequest | contract.SessionStartRequest | contract.SessionCloseRequest | contract.SessionSetProfileRequest | contract.SessionRestartRequest | contract.SessionRefreshRequest | contract.PostRequest | contract.EventsListRequest | contract.OpListRequest | contract.OpDecideRequest | contract.OpSubmitRequest | contract.DevicePairRequest | contract.DeviceListRequest | contract.DeviceRevokeRequest | contract.DeviceSetScopesRequest | contract.DeviceSetHostRequest | contract.ConnectStartRequest | contract.ConnectStatusRequest | contract.ConnectCancelRequest | contract.ConnectUnlinkRequest | contract.PrListRequest | contract.PrStatusRequest | contract.PrTrackRequest | contract.PrUntrackRequest | contract.SearchRequest | contract.HistoryReadRequest | contract.TranscriptDigestRequest
-}
-type responseType interface {
-	contract.ProfileListResponse | contract.ProfileSetResponse | contract.ProfileRemoveResponse |
-		contract.ProxyKeyResponse | contract.ProxyUsageResponse |
-		contract.WorkflowRunResponse | contract.WorkflowReloadResponse | contract.WorkflowStatusResponse | contract.WorkflowListResponse | contract.WorkflowSettingsResponse | contract.WorkflowSetResponse |
-		contract.AddonListResponse | contract.AddonChangeResponse | contract.AddonSetHostsResponse | contract.ImageSaveResponse | contract.ImageListResponse | contract.ImageShowResponse | contract.ImageRemoveResponse |
-		contract.SubscriptionAddResponse | contract.SubscriptionListResponse | contract.SubscriptionRemoveResponse | contract.SubscriptionSetEnabledResponse |
-		contract.WebSearchResponse | contract.WebsearchSetKeyResponse | contract.WebsearchRemoveKeyResponse |
-		contract.ContextSnapshotResponse |
-		contract.IssueListResponse | contract.IssueStatusResponse | contract.IssueTrackResponse | contract.IssueUntrackResponse |
-		contract.QuestionAskResponse | contract.QuestionAnswerResponse | contract.QuestionListResponse |
-		contract.OpWithdrawResponse |
-		contract.SessionMoveResponse | contract.SessionSetBranchResponse |
-		contract.SessionListResponse |
-		contract.SessionResponsibilitiesResponse |
-		contract.GoalSetResponse | contract.GoalListResponse | contract.GoalItemResponse | contract.GoalDoneResponse | contract.GoalJournalResponse |
-		contract.ServiceSetResponse | contract.ServiceListResponse | contract.ServiceShowResponse | contract.ServiceLogsResponse | contract.ServiceActionResponse | contract.ServiceSecretSetResponse |
-		contract.PoolAddResponse | contract.PoolListResponse | contract.PoolRemoveResponse | contract.RoomHostsResponse | contract.HostRemoveResponse | contract.HostSetResponse | contract.RoomSetResponse |
-		contract.RoomSetLimitsResponse | contract.RoomPauseResponse | contract.SessionStopResponse | contract.HostexecRunResponse | contract.HostexecStopResponse | contract.WebLoginResponse | contract.HostAddResponse | contract.HostSetLimitsResponse | contract.HostListResponse | contract.RoomCreateResponse | contract.RoomDeleteResponse | contract.RoomRepoAddResponse | contract.RepoCISetResponse | contract.RoomReposResponse | contract.ComposeListResponse | contract.SessionStartResponse | contract.SessionCloseResponse | contract.SessionSetProfileResponse | contract.SessionRestartResponse | contract.SessionRefreshResponse | contract.PostResponse | contract.EventsListResponse | contract.OpListResponse | contract.OpDecideResponse | contract.OpSubmitResponse | contract.DevicePairResponse | contract.DeviceListResponse | contract.DeviceRevokeResponse | contract.DeviceSetScopesResponse | contract.DeviceSetHostResponse | contract.ConnectStartResponse | contract.ConnectStatusResponse | contract.ConnectCancelResponse | contract.ConnectUnlinkResponse | contract.PrListResponse | contract.PrStatusResponse | contract.PrTrackResponse | contract.PrUntrackResponse | contract.SearchResponse | contract.HistoryReadResponse | contract.TranscriptDigestResponse
-}
-
-func call[Q requestType, R responseType](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {
+func call[Q, R any](ctx context.Context, c *socketClient, method contract.Method, input Q) (R, error) {
 	var result R
 	body, err := json.Marshal(input)
 	if err != nil {
@@ -1497,4 +1458,13 @@ func (c *socketClient) ServiceRemove(ctx context.Context, q contract.ServiceRef)
 
 func (c *socketClient) ServiceSecretSet(ctx context.Context, q contract.ServiceSecretSetRequest) (contract.ServiceSecretSetResponse, error) {
 	return call[contract.ServiceSecretSetRequest, contract.ServiceSecretSetResponse](ctx, c, contract.MethodServiceSecretSet, q)
+}
+
+// printCall calls method and prints its answer as JSON.
+func printCall[R, Q any](cmd *cobra.Command, c *socketClient, method contract.Method, input Q) error {
+	result, err := call[Q, R](cmd.Context(), c, method, input)
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 }

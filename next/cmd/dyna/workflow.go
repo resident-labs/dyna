@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"slices"
@@ -20,11 +19,7 @@ func workflowCommand(get func() *socketClient) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		result, err := call[contract.WorkflowRunRequest, contract.WorkflowRunResponse](cmd.Context(), get(), contract.MethodWorkflowRun, contract.WorkflowRunRequest{Room: contract.RoomID(room), Script: string(script), Args: args, Resume: contract.WorkflowRunID(resume), ClientID: clientID})
-		if err != nil {
-			return err
-		}
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+		return printCall[contract.WorkflowRunResponse](cmd, get(), contract.MethodWorkflowRun, contract.WorkflowRunRequest{Room: contract.RoomID(room), Script: string(script), Args: args, Resume: contract.WorkflowRunID(resume), ClientID: clientID})
 	}}
 	run.Flags().StringVar(&room, "room", "", "Room; a session may omit it for its own")
 	run.Flags().StringVar(&args, "args", "", "JSON the script reads as args")
@@ -35,25 +30,13 @@ func workflowCommand(get func() *socketClient) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		result, err := call[contract.WorkflowReloadRequest, contract.WorkflowReloadResponse](cmd.Context(), get(), contract.MethodWorkflowReload, contract.WorkflowReloadRequest{Run: contract.WorkflowRunID(args[0]), Script: string(script)})
-		if err != nil {
-			return err
-		}
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+		return printCall[contract.WorkflowReloadResponse](cmd, get(), contract.MethodWorkflowReload, contract.WorkflowReloadRequest{Run: contract.WorkflowRunID(args[0]), Script: string(script)})
 	}}
 	status := &cobra.Command{Use: "status RUN", Short: "Show one run and its steps", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, runs []string) error {
-		result, err := call[contract.WorkflowStatusRequest, contract.WorkflowStatusResponse](cmd.Context(), get(), contract.MethodWorkflowStatus, contract.WorkflowStatusRequest{Run: contract.WorkflowRunID(runs[0])})
-		if err != nil {
-			return err
-		}
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+		return printCall[contract.WorkflowStatusResponse](cmd, get(), contract.MethodWorkflowStatus, contract.WorkflowStatusRequest{Run: contract.WorkflowRunID(runs[0])})
 	}}
 	list := &cobra.Command{Use: "list", Short: "List a room's workflow runs, newest first", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		result, err := call[contract.WorkflowListRequest, contract.WorkflowListResponse](cmd.Context(), get(), contract.MethodWorkflowList, contract.WorkflowListRequest{Room: contract.RoomID(room)})
-		if err != nil {
-			return err
-		}
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+		return printCall[contract.WorkflowListResponse](cmd, get(), contract.MethodWorkflowList, contract.WorkflowListRequest{Room: contract.RoomID(room)})
 	}}
 	list.Flags().StringVar(&room, "room", "", "Room; a session may omit it for its own")
 	var clear []string
@@ -62,11 +45,7 @@ func workflowCommand(get func() *socketClient) *cobra.Command {
 		fmt.Fprintf(&settingHelp, "  %s  %s\n", info.Setting, info.Help)
 	}
 	settings := &cobra.Command{Use: "settings", Short: "Show the workflow settings: defaults, global values, and each room's own values and what applies there (owner only)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		result, err := call[contract.WorkflowSettingsRequest, contract.WorkflowSettingsResponse](cmd.Context(), get(), contract.MethodWorkflowSettings, contract.WorkflowSettingsRequest{Room: contract.RoomID(room)})
-		if err != nil {
-			return err
-		}
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+		return printCall[contract.WorkflowSettingsResponse](cmd, get(), contract.MethodWorkflowSettings, contract.WorkflowSettingsRequest{Room: contract.RoomID(room)})
 	}}
 	settings.Flags().StringVar(&room, "room", "", "Show only this room")
 	set := &cobra.Command{Use: "set [SETTING=VALUE...]", Short: "Change workflow settings, in one room or for all rooms (owner only)", Long: "Change workflow settings for one room with --room, or for every room that does not set its own without it. A room's value wins over the global one. A bool setting takes on or off; profiles takes a comma-separated list. --clear returns a setting to the value it inherits.\n\nSettings:\n" + settingHelp.String(), Example: "  dyna workflow set start=leads maxRuns=3\n  dyna workflow set --room ROOM worktree=off profiles=fast,deep\n  dyna workflow set --room ROOM --clear start", RunE: func(cmd *cobra.Command, pairs []string) error {
