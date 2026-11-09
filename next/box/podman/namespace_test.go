@@ -322,3 +322,35 @@ exit "$2"`
 		})
 	}
 }
+
+func TestNamespaceLockHolderScanIsBounded(t *testing.T) {
+	root, h := namespaceFixture(t)
+	// A tr that never returns stands for a procfs scan that hangs.
+	slow := t.TempDir()
+	if err := os.WriteFile(filepath.Join(slow, "tr"), []byte("#!/bin/bash\nexec sleep 60\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", slow+":"+os.Getenv("PATH"))
+	lockDir := filepath.Join(root, "locks")
+	if err := os.MkdirAll(lockDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(filepath.Join(lockDir, "box-b.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	err = h.CreateBox(context.Background(), box.ContainerSpec{Box: "b", Image: "new"}, nil, false)
+	var uncertain NamespaceUncertain
+	// 15 s of lock wait, then at most 2 s of scan.
+	if !errors.As(err, &uncertain) || time.Since(start) > 19*time.Second {
+		t.Fatalf("a hung scan was not bounded, or the failure lost its type: %v (%s)", err, time.Since(start))
+	}
+	if !strings.Contains(err.Error(), "scan stopped after 2s") {
+		t.Fatalf("failure does not say the scan was cut short: %v", err)
+	}
+}
