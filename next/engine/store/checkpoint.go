@@ -9,10 +9,6 @@ const checkpointBytes = 64 << 20
 const checkpointInterval = 30 * time.Second
 const modelStampRetention = 10 * time.Minute
 
-// checkpoint runs independently from the writer. The callback is injectable
-// so a unit test can hold a checkpoint open while a write completes.
-func (s *Store) checkpointOnce() error { return s.checkpointRun() }
-
 func (s *Store) checkLoop(path string) {
 	defer close(s.checkDone)
 	last := time.Now()
@@ -32,7 +28,7 @@ func (s *Store) checkLoop(path string) {
 				continue
 			}
 			if info.Size() >= checkpointBytes || time.Since(last) >= checkpointInterval {
-				_ = s.checkpointOnce()
+				_ = s.checkpointRun()
 				last = time.Now()
 			}
 		}

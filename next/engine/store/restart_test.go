@@ -236,8 +236,9 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 				t.Fatalf("%s: stored notice %+v", id, body)
 			}
 		}
-		if open, err := s.HasOpenGoal(ctx, id); err != nil || open != want {
-			t.Fatalf("%s: HasOpenGoal %v: %v", id, open, err)
+		var open bool
+		if err := s.Read().QueryRowContext(ctx, openGoalSQL, id).Scan(&open); err != nil || open != want {
+			t.Fatalf("%s: open goal %v: %v", id, open, err)
 		}
 	}
 }

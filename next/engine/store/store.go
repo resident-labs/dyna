@@ -49,10 +49,11 @@ type request struct {
 	done chan error
 }
 type Store struct {
-	lock          *os.File
-	writer        *sql.DB
-	read          *sql.DB
-	checkpoint    *sql.DB
+	lock       *os.File
+	writer     *sql.DB
+	read       *sql.DB
+	checkpoint *sql.DB
+	// checkpointRun runs independently from the writer. It is injectable so a unit test can hold a checkpoint open while a write completes.
 	checkpointRun func() error
 	requests      chan request
 	stop          chan struct{}

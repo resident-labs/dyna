@@ -48,11 +48,6 @@ func goalNumber(id contract.GoalID) (int64, error) {
 
 func goalID(number int64) contract.GoalID { return contract.GoalID(fmt.Sprintf("g%d", number)) }
 
-// goalReplayRef keeps the room beside the number, since goal numbers restart in each room.
-func goalReplayRef(room contract.RoomID, id contract.GoalID) string {
-	return string(room) + "/" + string(id)
-}
-
 // heldGoal returns the active goal session holds other than except, with its text, or 0 when it holds none.
 func heldGoal(ctx context.Context, tx *sql.Tx, room contract.RoomID, session contract.SessionID, except int64) (int64, string, error) {
 	var number int64
@@ -190,8 +185,9 @@ func (s *Store) SetGoal(ctx context.Context, req contract.GoalSetRequest, event 
 				return err
 			}
 			body.Goal = goalID(number)
+			// The room rides along in ref, since goal numbers restart in each room.
 			if req.ClientID != "" {
-				if _, err := tx.ExecContext(ctx, "INSERT INTO client_replays(method,caller_kind,caller_id,client_id,ref,created_at) VALUES(?,?,?,?,?,?)", contract.MethodGoalSet, caller.Kind, caller.Session, req.ClientID, goalReplayRef(event.Room, body.Goal), at); err != nil {
+				if _, err := tx.ExecContext(ctx, "INSERT INTO client_replays(method,caller_kind,caller_id,client_id,ref,created_at) VALUES(?,?,?,?,?,?)", contract.MethodGoalSet, caller.Kind, caller.Session, req.ClientID, string(event.Room)+"/"+string(body.Goal), at); err != nil {
 					return err
 				}
 			}
@@ -505,7 +501,6 @@ func (s *Store) ListGoals(ctx context.Context, room contract.RoomID, req contrac
 
 // goalClose is what a session's close did with its active goal. At most one field is set.
 type goalClose struct {
-	Ended  contract.GoalID // it had no open item and was closed on purpose, so it ended done
 	Moved  contract.GoalID // it became the goal of the nearest open ancestor, which held none
 	Unheld contract.GoalID // that ancestor is root, which holds no goals
 	Folded *contract.GoalFold
@@ -555,7 +550,6 @@ func (s *Store) settleGoal(ctx context.Context, tx *sql.Tx, event contract.Event
 		if _, err := tx.ExecContext(ctx, "UPDATE goals SET state=?,summary=?,updated_at=? WHERE room=? AND number=?", contract.GoalDone, summary, at, event.Room, number); err != nil {
 			return out, err
 		}
-		out.Ended = goalID(number)
 		return out, ended(contract.GoalDone, summary)
 	}
 	var target contract.SessionID
