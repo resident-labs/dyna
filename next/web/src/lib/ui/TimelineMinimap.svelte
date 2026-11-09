@@ -16,6 +16,8 @@
   let active: number | null = $state(null);
   let rail: HTMLDivElement;
   let currentIndex = $derived(turns.findIndex(turn => turn.id === current));
+  // One mark is a Tab stop, the current turn's, and the arrows, Home and End move between marks, so a long
+  // conversation does not put a stop per turn ahead of the messages.
   let selected = $derived(active === null ? undefined : turns[active]);
   let height = $derived(`min(${Math.max(1, (turns.length - 1) * 8)}px, calc(100vh - 18rem))`);
 
@@ -45,6 +47,7 @@
       <div class="rail" bind:this={rail} style:height onkeydown={keydown} role="group" aria-label="Turns">
         {#each turns as turn, index (turn.id)}
           <button class="mark" class:current={index === currentIndex} class:visible={turn.visible} class:active={index === active}
+            tabindex={index === Math.max(0, currentIndex) ? 0 : -1}
             style:top={`${index * 100 / (turns.length - 1)}%`}
             aria-label={`Jump to turn ${index + 1}: ${turn.userText?.trim() || "Turn"}`}
             aria-current={index === currentIndex ? "location" : undefined}
