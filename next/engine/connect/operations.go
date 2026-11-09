@@ -132,7 +132,7 @@ func (o *Operations) Start(ctx context.Context, req contract.ConnectStartRequest
 	if _, err := CheckRelayURL(req.Relay); err != nil {
 		return err
 	}
-	if req.Name == "" || o.appPort == 0 || o.cardPort == 0 {
+	if o.appPort == 0 || o.cardPort == 0 {
 		return errors.New("web listener and machine name required")
 	}
 	o.mu.Lock()

@@ -64,7 +64,6 @@ func (l *checkedListener) Accept() (net.Conn, error) {
 type socket struct {
 	server   *http.Server
 	listener net.Listener
-	path     string
 }
 
 // BoxSocketGeneration is an opaque process-local listener identity. Keeping the
@@ -107,7 +106,7 @@ func (s *Sockets) OpenOwner() error {
 	}
 	checked := &checkedListener{Listener: l, uid: s.uid, peer: s.peer}
 	server := &http.Server{Handler: s.api.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}})}
-	s.owner = &socket{server: server, listener: checked, path: path}
+	s.owner = &socket{server: server, listener: checked}
 	go server.Serve(checked)
 	return nil
 }
@@ -132,7 +131,7 @@ func (s *Sockets) AddBox(id contract.BoxID, session contract.SessionID, room con
 	}
 	caller := Caller{Principal: contract.Principal{Kind: contract.PrincipalSession, Session: session}, Box: id, Room: room}
 	server := &http.Server{Handler: s.api.handler(caller)}
-	s.boxes[id] = &socket{server: server, listener: l, path: path}
+	s.boxes[id] = &socket{server: server, listener: l}
 	go server.Serve(l)
 	return nil
 }
@@ -157,7 +156,7 @@ func (s *Sockets) AddRun(id contract.BoxID, sub contract.SubscriptionID, room co
 		return err
 	}
 	server := &http.Server{Handler: s.api.runHandler(sub, room)}
-	s.boxes[id] = &socket{server: server, listener: l, path: path}
+	s.boxes[id] = &socket{server: server, listener: l}
 	go server.Serve(l)
 	return nil
 }
