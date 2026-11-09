@@ -143,7 +143,7 @@ func (s *Service) GoalItem(ctx context.Context, caller contract.Principal, req c
 
 func (s *Service) GoalDone(ctx context.Context, caller contract.Principal, req contract.GoalDoneRequest) (contract.GoalDoneResponse, *contract.Error) {
 	if req.Summary == "" {
-		return contract.GoalDoneResponse{}, invalid("summary is required")
+		return contract.GoalDoneResponse{}, invalid("summary is required: say in a sentence or two what the goal achieved, or why it is dropped")
 	}
 	if e := checkGoalText(req.Summary); e != nil {
 		return contract.GoalDoneResponse{}, e
