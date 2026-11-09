@@ -193,6 +193,9 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	defer r.pass.Unlock()
 	unlock := r.store.LockAdmission()
 	defer unlock()
+	if err := r.store.NotifyDiskWaits(ctx, r.now()); err != nil {
+		return err
+	}
 	if err := r.store.WakeModelRetries(ctx, r.now()); err != nil {
 		return err
 	}
