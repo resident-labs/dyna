@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/MichaelKinsy/PiG/ai"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 )
@@ -112,17 +113,29 @@ func (p *ProfileConfig) List() []contract.Profile {
 	return result
 }
 
+// textOnlyModels lists the models a box defines in its models.json: every model of a profile without images, and each model
+// of a profile with images that Pi's catalog lacks, such as one released after the pinned Pi, marked Images. A model some
+// profile declares text-only stays text-only.
 func textOnlyModels(profiles map[contract.ProfileName]profile) []contract.TextOnlyModel {
-	seen := map[contract.TextOnlyModel]bool{}
+	images := map[contract.TextOnlyModel]bool{}
 	for _, p := range profiles {
-		if !p.Images {
-			for _, id := range append(slices.Clone(p.AllowedModels), p.Model) {
-				seen[contract.TextOnlyModel{Provider: p.Provider, Model: id}] = true
+		for _, id := range append(slices.Clone(p.AllowedModels), p.Model) {
+			model := contract.TextOnlyModel{Provider: p.Provider, Model: id}
+			switch seen, ok := images[model]; {
+			case !p.Images:
+				images[model] = false
+			case !ok:
+				if _, catalogued := ai.LookupModelExact(string(p.Provider) + "/" + id); !catalogued {
+					images[model] = true
+				}
+			default:
+				images[model] = seen
 			}
 		}
 	}
-	result := make([]contract.TextOnlyModel, 0, len(seen))
-	for model := range seen {
+	result := make([]contract.TextOnlyModel, 0, len(images))
+	for model, takesImages := range images {
+		model.Images = takesImages
 		result = append(result, model)
 	}
 	slices.SortFunc(result, func(a, b contract.TextOnlyModel) int {

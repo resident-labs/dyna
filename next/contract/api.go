@@ -737,9 +737,12 @@ type BoxRepo struct {
 	Commit string   `json:"commit,omitempty"` // a crew's fixed commit: a new branch starts here, not at Base
 }
 
+// TextOnlyModel is a model the box defines in its models.json for Pi. Images marks one that Pi's catalog lacks and that
+// takes images; the others take text alone.
 type TextOnlyModel struct {
 	Provider ModelProvider `json:"provider"`
 	Model    string        `json:"model"`
+	Images   bool          `json:"images,omitempty"`
 }
 
 type BoxHelloResponse struct {
