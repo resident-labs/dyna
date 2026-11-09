@@ -4,7 +4,8 @@ import "time"
 
 // StreamHello is sent before events on each stream connection.
 type StreamHello struct {
-	Build string `json:"build"`
+	Build       string `json:"build"`
+	HeartbeatMs int    `json:"heartbeatMs,omitempty"` // named heartbeat cadence; absent on older servers
 }
 
 // EventType is "family.verb" in the past tense, such as "post.created".
