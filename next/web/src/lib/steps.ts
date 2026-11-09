@@ -67,12 +67,6 @@ export function activeVerb(kind: StepKind, fallback: string): string {
   const active: Record<StepKind, string> = { run: "Running", read: "Reading", edit: "Editing", write: "Writing", search: "Searching", list: "Listing", fetch: "Fetching", tool: fallback };
   return active[kind];
 }
-export function workSummary(items: TranscriptItem[]) {
-  const counts = new Map<StepKind, number>();
-  for (const item of items) { const kind = titleOf(item).kind; counts.set(kind, (counts.get(kind) ?? 0) + 1); }
-  const words: Record<StepKind, [string, string]> = { run: ["Ran", "command"], read: ["Read", "file"], edit: ["Edited", "file"], write: ["Wrote", "file"], search: ["Searched", "time"], list: ["Listed", "time"], fetch: ["Fetched", "page"], tool: ["Used", "tool"] };
-  return [...counts].map(([kind, n], i) => { const [verb, noun] = words[kind]; return `${i ? verb.toLowerCase() : verb} ${n} ${noun}${n === 1 ? "" : "s"}`; }).join(", ");
-}
 
 // An injected clock keeps a live turn current without depending on wall time in tests.
 export function elapsed(started: string, now: number): string {
