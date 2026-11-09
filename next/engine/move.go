@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
@@ -29,7 +30,7 @@ func (s *Service) SessionMove(ctx context.Context, caller contract.Principal, re
 		return response, invalid(treeErr.Error())
 	}
 	if errors.Is(err, store.ErrTreeForbidden) {
-		return response, forbidden()
+		return response, &contract.Error{Code: contract.ErrForbidden, Message: fmt.Sprintf("you move only sessions below you, to yourself or a session below you; %s or %s is not, so ask your parent", session.Name, parent.Name)}
 	}
 	if err != nil {
 		return response, failure(err)

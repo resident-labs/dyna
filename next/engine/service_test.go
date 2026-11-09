@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -566,8 +567,11 @@ func TestSessionSetProfileAuthority(t *testing.T) {
 		t.Fatal(e)
 	}
 	req := contract.SessionSetProfileRequest{Session: worker, Profile: "other"}
-	if _, e = s.SessionSetProfile(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sibling.Session}, req); e == nil || e.Code != contract.ErrForbidden {
+	if _, e = s.SessionSetProfile(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sibling.Session}, req); e == nil || e.Code != contract.ErrForbidden || !strings.Contains(e.Message, "is not under you") {
 		t.Fatalf("sibling: %v", e)
+	}
+	if _, e := s.SessionMove(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: sibling.Session}, contract.SessionMoveRequest{Session: worker, NewParent: sibling.Session}); e == nil || e.Code != contract.ErrForbidden || !strings.Contains(e.Message, "ask your parent") {
+		t.Fatalf("sibling move: %v", e)
 	}
 	if _, e = s.SessionSetProfile(ctx, owner, req); e != nil {
 		t.Fatalf("owner: %v", e)
