@@ -209,7 +209,7 @@ test("a long reply waits for its whole body, and an unreadable body stays neutra
   const clipped: TranscriptInput = { ...wake("turn.ended", body), text: whole.slice(0, 512), more: true };
   assert.deepEqual(timelineInput(clipped), { kind: "message", text: "" });
   assert.deepEqual(timelineInput(clipped, whole), { kind: "message", text: body.final });
-  assert.equal(timelineInputText({ ...clipped, type: "session.started" }), "Started work");
+  assert.deepEqual(timelineInput({ ...clipped, type: "session.started" }), { kind: "line", text: "Session started" });
   assert.deepEqual(timelineInput({ ...clipped, type: "checkin.due" }), { kind: "line", text: "Event: checkin.due" });
   assert.deepEqual(timelineInput({ ...clipped, more: false }), { kind: "line", text: "Event: turn.ended" });
 });
@@ -235,7 +235,8 @@ test("an engine notice is one plain line, and a type this build does not know sa
 test("a brief still reads as the start of the work", () => {
   const started = { session: "s", name: "n", profile: "p" };
   assert.deepEqual(timelineInput(wake("session.started", { ...started, brief: "Do it" })), { kind: "message", text: "Do it" });
-  assert.deepEqual(timelineInput(wake("session.started", started)), { kind: "message", text: "Started work" });
+  assert.deepEqual(timelineInput(wake("session.started", started)), { kind: "line", text: "Session started" });
+  assert.deepEqual(timelineInput(wake("session.started", { ...started, brief: "" })), { kind: "line", text: "Session started" });
 });
 
 test("a steered reply decodes as an input does", () => {

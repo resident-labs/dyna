@@ -14,7 +14,7 @@ const line = (text: string): TimelineInput => ({ kind: "line", text });
 
 function eventInput(event: Event): TimelineInput | undefined {
   switch (event.type) {
-    case "session.started": return { kind: "message", text: event.body.brief || "Started work" };
+    case "session.started": return event.body.brief ? { kind: "message", text: event.body.brief } : line("Session started");
     case "turn.ended": {
       const { outcome, final, cause, error } = event.body;
       if (outcome === "failed") return { kind: "failed", text: `Turn failed: ${cause ? causes[cause] : error || "no reason was given"}` };
@@ -49,7 +49,7 @@ function eventInput(event: Event): TimelineInput | undefined {
 export function timelineInput(input: TranscriptInput, full?: string): TimelineInput {
   if (input.type === "post.created" || input.type === "question.answered") return { kind: "message", text: full ?? input.text };
   const neutral = line(`Event: ${input.type}`);
-  if (input.more && full === undefined) return input.type === "turn.ended" ? { kind: "message", text: "" } : input.type === "session.started" ? { kind: "message", text: "Started work" } : neutral;
+  if (input.more && full === undefined) return input.type === "turn.ended" ? { kind: "message", text: "" } : input.type === "session.started" ? line("Session started") : neutral;
   try {
     const event = decodeEvent({ id: input.id, seq: input.seq, room: input.room, at: input.at, from: input.from, type: input.type, body: JSON.parse(full ?? input.text) });
     return (event && eventInput(event)) ?? neutral;
