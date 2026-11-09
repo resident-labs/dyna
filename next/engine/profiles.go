@@ -141,9 +141,6 @@ func (p *ProfileConfig) TextOnlyModels() []contract.TextOnlyModel {
 }
 
 func (s *Service) ProfileList(ctx context.Context, who contract.Principal, _ contract.ProfileListRequest) (contract.ProfileListResponse, *contract.Error) {
-	if who.Kind != contract.PrincipalOwner {
-		return contract.ProfileListResponse{}, forbidden()
-	}
 	counts, err := s.store.ProfileUsage(ctx)
 	if err != nil {
 		return contract.ProfileListResponse{}, failure(err)
@@ -262,9 +259,6 @@ func (p *ProfileConfig) updateLocked(name contract.ProfileName, value *profile, 
 }
 
 func (s *Service) ProfileSet(ctx context.Context, who contract.Principal, req contract.ProfileSetRequest) (contract.ProfileSetResponse, *contract.Error) {
-	if who.Kind != contract.PrincipalOwner {
-		return contract.ProfileSetResponse{}, forbidden()
-	}
 	p, ok := s.profiles.(*ProfileConfig)
 	if !ok {
 		return contract.ProfileSetResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "profile configuration is read-only"}
@@ -334,9 +328,6 @@ func (s *Service) withProfile(name contract.ProfileName, fn func() *contract.Err
 }
 
 func (s *Service) ProfileRemove(ctx context.Context, who contract.Principal, req contract.ProfileRemoveRequest) (contract.ProfileRemoveResponse, *contract.Error) {
-	if who.Kind != contract.PrincipalOwner {
-		return contract.ProfileRemoveResponse{}, forbidden()
-	}
 	p, ok := s.profiles.(*ProfileConfig)
 	if !ok {
 		return contract.ProfileRemoveResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "profile configuration is read-only"}

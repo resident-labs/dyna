@@ -13,9 +13,6 @@ const boxStatsWait = 2 * time.Second
 // BoxStats asks a running box what it is using. The engine holds no reading: each one is the box's answer to this call.
 func (s *Service) BoxStats(ctx context.Context, caller contract.Principal, req contract.BoxStatsRequest) (contract.BoxStatsResponse, *contract.Error) {
 	var response contract.BoxStatsResponse
-	if caller.Kind != contract.PrincipalOwner {
-		return response, forbidden()
-	}
 	session, problem := s.managedSession(ctx, caller, req.Session)
 	if problem != nil {
 		return response, problem

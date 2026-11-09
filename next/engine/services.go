@@ -35,9 +35,6 @@ func (s *Service) serviceNamed(ctx context.Context, ref contract.ServiceRef) (st
 }
 
 func (s *Service) ServiceSet(ctx context.Context, who contract.Principal, req contract.ServiceSetRequest) (contract.ServiceSetResponse, *contract.Error) {
-	if who.Kind != contract.PrincipalOwner {
-		return contract.ServiceSetResponse{}, forbidden()
-	}
 	parts, err := req.Spec.Parse()
 	if err != nil {
 		return contract.ServiceSetResponse{}, invalid(err.Error())
@@ -119,10 +116,7 @@ func (s *Service) ServiceSet(ctx context.Context, who contract.Principal, req co
 	return contract.ServiceSetResponse{Service: row.Service}, nil
 }
 
-func (s *Service) ServiceList(ctx context.Context, who contract.Principal, req contract.ServiceListRequest) (contract.ServiceListResponse, *contract.Error) {
-	if who.Kind != contract.PrincipalOwner {
-		return contract.ServiceListResponse{}, forbidden()
-	}
+func (s *Service) ServiceList(ctx context.Context, _ contract.Principal, req contract.ServiceListRequest) (contract.ServiceListResponse, *contract.Error) {
 	rows, err := s.store.Services(ctx, req.Room)
 	if err != nil {
 		return contract.ServiceListResponse{}, failure(err)
@@ -134,18 +128,12 @@ func (s *Service) ServiceList(ctx context.Context, who contract.Principal, req c
 	return result, nil
 }
 
-func (s *Service) ServiceShow(ctx context.Context, who contract.Principal, req contract.ServiceShowRequest) (contract.ServiceShowResponse, *contract.Error) {
-	if who.Kind != contract.PrincipalOwner {
-		return contract.ServiceShowResponse{}, forbidden()
-	}
+func (s *Service) ServiceShow(ctx context.Context, _ contract.Principal, req contract.ServiceShowRequest) (contract.ServiceShowResponse, *contract.Error) {
 	row, problem := s.serviceNamed(ctx, req)
 	return contract.ServiceShowResponse{Service: row.Service}, problem
 }
 
-func (s *Service) ServiceLogs(ctx context.Context, who contract.Principal, req contract.ServiceLogsRequest) (contract.ServiceLogsResponse, *contract.Error) {
-	if who.Kind != contract.PrincipalOwner {
-		return contract.ServiceLogsResponse{}, forbidden()
-	}
+func (s *Service) ServiceLogs(ctx context.Context, _ contract.Principal, req contract.ServiceLogsRequest) (contract.ServiceLogsResponse, *contract.Error) {
 	lines := req.Lines
 	if lines == 0 {
 		lines = contract.ServiceLogsDefault
@@ -182,63 +170,42 @@ func (s *Service) serviceAction(ctx context.Context, ref contract.ServiceRef, ac
 	return contract.ServiceActionResponse{Service: row.Service}, serviceFailureOrNil(err)
 }
 
-func (s *Service) ServiceRestart(ctx context.Context, who contract.Principal, req contract.ServiceRestartRequest) (contract.ServiceActionResponse, *contract.Error) {
-	if who.Kind != contract.PrincipalOwner {
-		return contract.ServiceActionResponse{}, forbidden()
-	}
+func (s *Service) ServiceRestart(ctx context.Context, _ contract.Principal, req contract.ServiceRestartRequest) (contract.ServiceActionResponse, *contract.Error) {
 	return s.serviceAction(ctx, req, s.reconciler.RestartServiceUnit)
 }
 
-func (s *Service) ServiceStop(ctx context.Context, who contract.Principal, req contract.ServiceStopRequest) (contract.ServiceActionResponse, *contract.Error) {
-	if who.Kind != contract.PrincipalOwner {
-		return contract.ServiceActionResponse{}, forbidden()
-	}
+func (s *Service) ServiceStop(ctx context.Context, _ contract.Principal, req contract.ServiceStopRequest) (contract.ServiceActionResponse, *contract.Error) {
 	return s.serviceAction(ctx, req, func(ctx context.Context, row store.ServiceRow) (store.ServiceRow, error) {
 		return s.reconciler.StopService(ctx, row.ID)
 	})
 }
 
-func (s *Service) ServiceStart(ctx context.Context, who contract.Principal, req contract.ServiceStartRequest) (contract.ServiceActionResponse, *contract.Error) {
-	if who.Kind != contract.PrincipalOwner {
-		return contract.ServiceActionResponse{}, forbidden()
-	}
+func (s *Service) ServiceStart(ctx context.Context, _ contract.Principal, req contract.ServiceStartRequest) (contract.ServiceActionResponse, *contract.Error) {
 	return s.serviceAction(ctx, req, func(ctx context.Context, row store.ServiceRow) (store.ServiceRow, error) {
 		return s.reconciler.StartService(ctx, row.ID)
 	})
 }
 
-func (s *Service) ServiceUpdate(ctx context.Context, who contract.Principal, req contract.ServiceUpdateRequest) (contract.ServiceActionResponse, *contract.Error) {
-	if who.Kind != contract.PrincipalOwner {
-		return contract.ServiceActionResponse{}, forbidden()
-	}
+func (s *Service) ServiceUpdate(ctx context.Context, _ contract.Principal, req contract.ServiceUpdateRequest) (contract.ServiceActionResponse, *contract.Error) {
 	return s.serviceAction(ctx, req, func(ctx context.Context, row store.ServiceRow) (store.ServiceRow, error) {
 		return s.reconciler.UpdateService(ctx, row.ID)
 	})
 }
 
-func (s *Service) ServiceRollback(ctx context.Context, who contract.Principal, req contract.ServiceRollbackRequest) (contract.ServiceActionResponse, *contract.Error) {
-	if who.Kind != contract.PrincipalOwner {
-		return contract.ServiceActionResponse{}, forbidden()
-	}
+func (s *Service) ServiceRollback(ctx context.Context, _ contract.Principal, req contract.ServiceRollbackRequest) (contract.ServiceActionResponse, *contract.Error) {
 	return s.serviceAction(ctx, req, func(ctx context.Context, row store.ServiceRow) (store.ServiceRow, error) {
 		return s.reconciler.RollbackService(ctx, row.ID)
 	})
 }
 
-func (s *Service) ServiceRemove(ctx context.Context, who contract.Principal, req contract.ServiceRemoveRequest) (contract.ServiceActionResponse, *contract.Error) {
-	if who.Kind != contract.PrincipalOwner {
-		return contract.ServiceActionResponse{}, forbidden()
-	}
+func (s *Service) ServiceRemove(ctx context.Context, _ contract.Principal, req contract.ServiceRemoveRequest) (contract.ServiceActionResponse, *contract.Error) {
 	return s.serviceAction(ctx, req, func(ctx context.Context, row store.ServiceRow) (store.ServiceRow, error) {
 		return row, s.reconciler.RemoveService(ctx, row.ID)
 	})
 }
 
 // ServiceSecretSet writes a secret's value. The response holds nothing of it, and nothing reads it back.
-func (s *Service) ServiceSecretSet(ctx context.Context, who contract.Principal, req contract.ServiceSecretSetRequest) (contract.ServiceSecretSetResponse, *contract.Error) {
-	if who.Kind != contract.PrincipalOwner {
-		return contract.ServiceSecretSetResponse{}, forbidden()
-	}
+func (s *Service) ServiceSecretSet(ctx context.Context, _ contract.Principal, req contract.ServiceSecretSetRequest) (contract.ServiceSecretSetResponse, *contract.Error) {
 	unlock, err := s.reconciler.LockServiceDeclaration(ctx, req.Room, req.Name)
 	if err != nil {
 		return contract.ServiceSecretSetResponse{}, failure(err)

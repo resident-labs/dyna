@@ -629,9 +629,6 @@ func (s *Service) BoxStopped(ctx context.Context, id contract.SessionID) {
 // name. The session's earlier branches stay its own, and it gets a notice with the new one. Nothing is pushed or renamed.
 func (s *Service) SessionSetBranch(ctx context.Context, caller contract.Principal, req contract.SessionSetBranchRequest) (contract.SessionSetBranchResponse, *contract.Error) {
 	var response contract.SessionSetBranchResponse
-	if caller.Kind != contract.PrincipalOwner {
-		return response, forbidden()
-	}
 	target, problem := s.resolveSession(ctx, caller, req.Session)
 	if problem != nil {
 		return response, problem

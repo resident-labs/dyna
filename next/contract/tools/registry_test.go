@@ -244,3 +244,20 @@ func TestServiceLogsNeedAdminScope(t *testing.T) {
 		}
 	}
 }
+
+// These methods check no caller themselves, so the table alone keeps them the owner's.
+func TestOwnerOnlyMethodsWithoutTheirOwnCheck(t *testing.T) {
+	for _, m := range []contract.Method{
+		contract.MethodAccountsList, contract.MethodAccountsConnectStatus, contract.MethodAccountsRename, contract.MethodAccountsImportOAuth,
+		contract.MethodBoxStats, contract.MethodComputerStart, contract.MethodHostexecList, contract.MethodInstructionsGet, contract.MethodInstructionsSet,
+		contract.MethodPostSearch, contract.MethodProfileList, contract.MethodProfileSet, contract.MethodProfileRemove,
+		contract.MethodSessionAccount, contract.MethodSessionSetAccount, contract.MethodSessionSetBranch, contract.MethodSessionSearch, contract.MethodSessionWork,
+		contract.MethodTranscriptRead, contract.MethodWorkflowSettings, contract.MethodWorkflowSet,
+		contract.MethodServiceSet, contract.MethodServiceList, contract.MethodServiceShow, contract.MethodServiceLogs, contract.MethodServiceRestart, contract.MethodServiceStop,
+		contract.MethodServiceStart, contract.MethodServiceUpdate, contract.MethodServiceRollback, contract.MethodServiceRemove, contract.MethodServiceSecretSet,
+	} {
+		if row, ok := MethodRule(m); !ok || row.Access != OwnerAccess {
+			t.Errorf("%s: %+v", m, row)
+		}
+	}
+}

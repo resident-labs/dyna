@@ -127,9 +127,6 @@ func (s *AccountActions) runAccountAction(ctx context.Context, caller contract.P
 }
 
 func (s *AccountActions) AccountsList(ctx context.Context, caller contract.Principal, _ contract.AccountsListRequest) (contract.AccountsListResponse, *contract.Error) {
-	if caller.Kind != contract.PrincipalOwner {
-		return contract.AccountsListResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "forbidden"}
-	}
 	bindings, err := s.service.store.Accounts(ctx)
 	if err != nil {
 		return contract.AccountsListResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable"}
@@ -252,9 +249,6 @@ func (s *AccountActions) CompleteOAuth(ctx context.Context, completed model.OAut
 }
 
 func (s *AccountActions) AccountsConnectStatus(ctx context.Context, caller contract.Principal, req contract.AccountsConnectStatusRequest) (contract.AccountsConnectStatusResponse, *contract.Error) {
-	if caller.Kind != contract.PrincipalOwner {
-		return contract.AccountsConnectStatusResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "forbidden"}
-	}
 	s.removeMu.Lock()
 	defer s.removeMu.Unlock()
 	out, err := s.connections.Status(ctx, req, func(commit func() error) error {
@@ -282,9 +276,6 @@ func (s *AccountActions) AccountsSetLimits(ctx context.Context, caller contract.
 // AccountsRename changes only the label in the store. The proxy never sees a label,
 // and accounts.quota reads it fresh, so no credential or usage cache changes.
 func (s *AccountActions) AccountsRename(ctx context.Context, caller contract.Principal, req contract.AccountsRenameRequest) (contract.AccountsRenameResponse, *contract.Error) {
-	if caller.Kind != contract.PrincipalOwner {
-		return contract.AccountsRenameResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "forbidden"}
-	}
 	label, ok := model.CleanAccountLabel(req.Label)
 	if !ok {
 		return contract.AccountsRenameResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "invalid account label"}
@@ -300,9 +291,6 @@ func (s *AccountActions) AccountsRename(ctx context.Context, caller contract.Pri
 }
 
 func (s *AccountActions) AccountsImportOAuth(ctx context.Context, caller contract.Principal, req contract.AccountsImportOAuthRequest) (contract.AccountsImportOAuthResponse, *contract.Error) {
-	if caller.Kind != contract.PrincipalOwner {
-		return contract.AccountsImportOAuthResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "forbidden"}
-	}
 	label, labelOK := model.CleanAccountLabel(req.Label)
 	if _, ok := model.OAuthProxyProvider(req.Provider); !ok || !labelOK || req.ExpiresAt.Unix() <= 0 || len(req.Credential) == 0 || len(req.Credential) > 16384 {
 		return contract.AccountsImportOAuthResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "invalid account input"}
