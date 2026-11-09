@@ -94,7 +94,7 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	if err != nil {
 		return contract.BoxHelloResponse{}, failure(err)
 	}
-	vars := promptVars{Role: roleWorker, Name: session.Name, ID: session.ID, Room: roomName, RoomID: session.Room, Parent: parentName}
+	vars := promptVars{Role: roleWorker, Name: session.Name, ID: session.ID, Room: roomName, RoomID: session.Room, Parent: parentName, CPUs: current.Size.CPUs, MemBytes: current.Size.MemBytes}
 	if len(repos) > 0 {
 		vars.Repo = &repos[0]
 	}
