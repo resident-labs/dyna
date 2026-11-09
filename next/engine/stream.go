@@ -14,6 +14,21 @@ import (
 )
 
 func (s *Service) Events(ctx context.Context, caller contract.Principal, room contract.RoomID, after int64) (<-chan contract.Event, *contract.Error) {
+	return s.events(ctx, caller, room, after, nil)
+}
+
+// CombinedEvents carries owner attention and the selected room on one ordered stream.
+func (s *Service) CombinedEvents(ctx context.Context, caller contract.Principal, room contract.RoomID, after, roomAfter int64) (<-chan contract.Event, *contract.Error) {
+	if caller.Kind != contract.PrincipalOwner {
+		return nil, forbidden()
+	}
+	if room == "" || after < 0 || roomAfter < 0 {
+		return nil, invalid("invalid combined stream")
+	}
+	return s.events(ctx, caller, room, after, &roomAfter)
+}
+
+func (s *Service) events(ctx context.Context, caller contract.Principal, room contract.RoomID, after int64, roomAfter *int64) (<-chan contract.Event, *contract.Error) {
 	if room == "" && caller.Kind != contract.PrincipalOwner {
 		return nil, forbidden()
 	}
@@ -23,7 +38,13 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 		}
 	}
 	sub, cancel := s.store.Subscribe()
-	subscription, liveEvents := s.live.Subscribe(room, 16)
+	liveRoom := room
+	attentionAfter := after
+	if roomAfter != nil {
+		liveRoom = ""
+		after = min(after, *roomAfter)
+	}
+	subscription, liveEvents := s.live.Subscribe(liveRoom, 16)
 	out := make(chan contract.Event)
 	go func() {
 		defer close(out)
@@ -34,7 +55,9 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 			if replay {
 				var events []contract.Event
 				var err error
-				if room == "" {
+				if roomAfter != nil {
+					events, err = s.store.CombinedEvents(ctx, room, max(after, attentionAfter), max(after, *roomAfter), 256)
+				} else if room == "" {
 					events, err = s.store.OwnerEvents(ctx, after, 256)
 				} else {
 					events, err = s.store.Events(ctx, room, after, 256, nil)
@@ -75,7 +98,11 @@ func (s *Service) Events(ctx context.Context, caller contract.Principal, room co
 					replay = true
 					continue
 				}
-				if event.Seq <= after || !store.StreamMatches(event, room) {
+				matches := store.StreamMatches(event, room)
+				if roomAfter != nil {
+					matches = event.Seq > attentionAfter && store.StreamMatches(event, "") || event.Seq > *roomAfter && event.Room == room
+				}
+				if event.Seq <= after || !matches {
 					continue
 				}
 				select {
