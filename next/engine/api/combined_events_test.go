@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
@@ -22,6 +23,34 @@ func (s *combinedService) CombinedEvents(_ context.Context, _ contract.Principal
 	close(ch)
 	return ch, nil
 }
+func (s *combinedService) Events(context.Context, contract.Principal, contract.RoomID, int64) (<-chan contract.Event, *contract.Error) {
+	ch := make(chan contract.Event)
+	close(ch)
+	return ch, nil
+}
+
+func TestStreamHelloRoomUnionCapability(t *testing.T) {
+	for _, tc := range []struct {
+		query      string
+		kind       contract.PrincipalKind
+		advertised bool
+	}{
+		{"", contract.PrincipalOwner, true},
+		{"room=r", contract.PrincipalOwner, true},
+		{"room=r&roomAfter=0", contract.PrincipalOwner, true},
+		{"room=r", contract.PrincipalSession, false},
+	} {
+		t.Run(tc.query+string(tc.kind), func(t *testing.T) {
+			c := Caller{Principal: contract.Principal{Kind: tc.kind}, Room: "r", Web: true, Scopes: []contract.Scope{contract.ScopeRead}}
+			w := httptest.NewRecorder()
+			New(&combinedService{}, nil).handler(c).ServeHTTP(w, httptest.NewRequest("GET", "/v1/events?"+tc.query, nil))
+			if w.Code != 200 || strings.Contains(w.Body.String(), `"roomUnion":true`) != tc.advertised {
+				t.Fatalf("status %d hello %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestCombinedEventsRoute(t *testing.T) {
 	for _, tc := range []struct {
 		query, last string

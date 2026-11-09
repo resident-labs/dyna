@@ -518,7 +518,7 @@ func (a *API) handler(c Caller) http.Handler {
 		if !ok {
 			return
 		}
-		data, marshalErr := json.Marshal(contract.StreamHello{Build: a.Build, HeartbeatMs: 15000})
+		data, marshalErr := json.Marshal(contract.StreamHello{Build: a.Build, HeartbeatMs: 15000, RoomUnion: c.Principal.Kind == contract.PrincipalOwner})
 		if marshalErr != nil {
 			return
 		}
