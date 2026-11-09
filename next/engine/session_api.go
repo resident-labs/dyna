@@ -683,7 +683,7 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 	problem = s.withProfile(req.Profile, func() *contract.Error {
 		if err := s.store.SetSessionProfile(ctx, target.ID, req.Profile, event); err != nil {
 			if errors.Is(err, store.ErrTreeForbidden) {
-				return forbidden()
+				return &contract.Error{Code: contract.ErrForbidden, Message: fmt.Sprintf("session %s is not under you; you manage only sessions below you, so ask your parent", target.Name)}
 			}
 			return failure(err)
 		}
