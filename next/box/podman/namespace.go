@@ -39,7 +39,7 @@ const namespaceScript = `set -eu
 root=$1; id=$2; mode=$3; shift 3
 mkdir -p -- "$root/locks"
 exec 8> "$root/locks/box-$id.lock"
-if ! flock -x -w 15 8; then
+namespace_lock_holders() {
  printf 'namespace lock timed out: box %s; observed holders:' "$id" >&2
  found=0
  # Inspect only descriptors for this inode with a granted flock. Merely
@@ -58,8 +58,8 @@ if ! flock -x -w 15 8; then
  done
  test "$found" = 1 || printf ' unavailable (process exited or procfs access denied)' >&2
  printf '\n' >&2
- exit 252
-fi
+}
+flock -x -w 15 8 || { namespace_lock_holders; exit 252; }
 epoch_file="$root/locks/box-$id.epoch"
 epoch=0
 if test -e "$epoch_file"; then
