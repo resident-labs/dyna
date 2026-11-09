@@ -550,6 +550,12 @@ func (h *Host) containerCommand(ctx context.Context, c box.ContainerSpec) ([]str
 	}
 	args := append([]string{"podman", "--cgroup-manager=systemd", "create", "--name", string(c.Box)}, userns...)
 	args = append(args, "--user", "1000:1000", "--label", "dyna.box="+string(c.Box), "--cgroup-parent="+c.Slice, "--cgroupns=private", "--systemd=always", "--stop-signal", "SIGTERM", "--entrypoint", "/usr/bin/tini", "--tmpfs", "/run/dyna:mode=1777", "--env", "HOME=/box/home", "--env", "PI_CODING_AGENT_DIR=/box/pi", "--volume", "dyna-box-"+string(c.Box)+":/box")
+	if c.CPUs > 0 {
+		args = append(args, "--cpus="+strconv.Itoa(c.CPUs))
+	}
+	if c.MemBytes > 0 {
+		args = append(args, "--memory="+strconv.FormatInt(c.MemBytes, 10))
+	}
 	var binaryRoot string
 	for _, m := range c.Mounts {
 		if m.BoxPath == "/opt/dyna/bin/current" {

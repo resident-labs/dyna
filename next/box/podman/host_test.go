@@ -573,3 +573,16 @@ func TestHeartbeatThreeMisses(t *testing.T) {
 	cancel()
 	<-done
 }
+
+func TestContainerLimitsAreSetOnTheContainerToo(t *testing.T) {
+	r := &runner{}
+	h := newTestHost(t, r)
+	if err := h.CreateContainer(context.Background(), box.ContainerSpec{Box: "a", Image: "image", Slice: "dyna-a.slice", CPUs: 2, MemBytes: 6}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"'--cpus=2'", "'--memory=6'"} {
+		if command := r.calls[len(r.calls)-1]; !strings.Contains(command[len(command)-1], want) {
+			t.Fatalf("command %q lacks %s", command[len(command)-1], want)
+		}
+	}
+}
