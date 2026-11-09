@@ -301,9 +301,11 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
 export function timeSpan(start: string, end: string): string {
   const formatter = new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" });
   const a = formatter.formatToParts(new Date(start)), b = formatter.formatToParts(new Date(end));
+  const last = b.map(part => part.value).join("").trim();
+  if (a.map(part => part.value).join("").trim() === last) return last;
   const period = (parts: Intl.DateTimeFormatPart[]) => parts.find(part => part.type === "dayPeriod")?.value;
   const first = a.filter(part => period(a) && period(a) === period(b) ? part.type !== "dayPeriod" : true).map(part => part.value).join("").trim();
-  return `${first} – ${b.map(part => part.value).join("").trim()}`;
+  return `${first} – ${last}`;
 }
 
 // Every event type has a plural group label, including types that do not currently appear in a work block.
