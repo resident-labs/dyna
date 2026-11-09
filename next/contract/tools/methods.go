@@ -49,7 +49,7 @@ var methodTable = []MethodEntry{
 		act("goal", "item", typ[contract.GoalItemRequest](), "Add an item to goal's todo list with text; with parent, an item number, it is a subtask of that item, one level deep. With item, change its text, or set state to open, done or dropped. An item is done only once its subtasks are settled, dropping it drops its open subtasks, and opening or adding a subtask reopens its parent.", "goal item"),
 	),
 	method(contract.MethodGoalDone, contract.ScopeOperate, UserAccess,
-		act("goal", "done", typ[contract.GoalDoneRequest](), "End goal with a summary, once its done condition holds and no item is open. Set drop to give it up instead.", "goal done"),
+		act("goal", "done", typ[contract.GoalDoneRequest](), "End goal once its done condition holds and no item is open. summary is required: a sentence or two on what was done, or why it was given up. Set drop to give it up instead.", "goal done"),
 	),
 	method(contract.MethodGoalJournal, contract.ScopeOperate, UserAccess,
 		act("goal", "journal", typ[contract.GoalJournalRequest](), "Add a line of text to goal's journal and read its newest 5 lines, with older, the count of lines before them. Omit text to only read.", "goal journal"),
