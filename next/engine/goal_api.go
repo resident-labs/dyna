@@ -69,6 +69,14 @@ func (s *Service) GoalSet(ctx context.Context, caller contract.Principal, req co
 	if e != nil {
 		return contract.GoalSetResponse{}, e
 	}
+	// A session may name the holder; the owner gives its ID.
+	if req.Session != "" && caller.Kind == contract.PrincipalSession && !sessionID.MatchString(string(req.Session)) {
+		holder, e := s.resolveSession(ctx, caller, req.Session)
+		if e != nil {
+			return contract.GoalSetResponse{}, e
+		}
+		req.Session = holder.ID
+	}
 	event, err := s.event(room, caller, contract.GoalSet{})
 	if err != nil {
 		return contract.GoalSetResponse{}, failure(err)
