@@ -196,7 +196,7 @@
 {#snippet action()}{#if admin}<button type="button" class="btn add" onclick={() => void start()}>Add</button>{/if}{/snippet}
 {#snippet header()}{@render bar("Skills & tools", items?.length, action)}{/snippet}
 
-<ListDetail bar={header} label="Skills & tools" title={creating ? "Add" : item?.name ?? "Not found"} open={creating || (!!items && selected !== undefined)} onselect={select} onclose={close} {list} {detail} {summary} />
+<ListDetail bar={header} empty={ordered?.length === 0} label="Skills & tools" title={creating ? "Add" : item?.name ?? "Not found"} open={creating || (!!items && selected !== undefined)} onselect={select} onclose={close} {list} {detail} {summary} />
 
 <style>
   .add { margin-left: auto; }

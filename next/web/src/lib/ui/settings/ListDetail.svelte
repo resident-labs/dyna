@@ -5,9 +5,10 @@
   // Below 760 px of pane the detail is a screen of its own with a back arrow, in place of the bar and the list, which
   // stays mounted so its search and scroll wait for the way back. Esc closes the detail, and focus returns to the list.
   // list gets drill (the narrow layout) and select, which opens an item; an item opened as a screen, or with Enter,
-  // takes the focus into its detail. With nothing open, a wide pane shows summary in the detail's place.
-  let { bar, label, title, open, onselect, onclose, list, detail, summary }: {
-    bar: Snippet; label: string; title: string; open: boolean; onselect: (key: string, open: boolean) => void; onclose: () => void;
+  // takes the focus into its detail. With nothing open, a wide pane shows summary in the detail's place; with no items at all
+  // (empty), the list says so and that place stays blank.
+  let { bar, label, title, open, onselect, onclose, list, detail, summary, empty = false }: {
+    bar: Snippet; label: string; empty?: boolean; title: string; open: boolean; onselect: (key: string, open: boolean) => void; onclose: () => void;
     list: Snippet<[{ drill: boolean; select: (key: string, open: boolean) => void }]>; detail: Snippet; summary?: Snippet;
   } = $props();
   let width = $state(0);
@@ -48,7 +49,7 @@
       {#if open}<header class="bar">{#if drill}<button type="button" class="round" aria-label={`Back to ${label}`} title="Back (Esc)" onclick={onclose}><Icon name="backChevron" size={20} /></button>{/if}
         <strong>{title}</strong>{#if !drill}<button type="button" class="round close" aria-label="Close" title="Close (Esc)" onclick={onclose}><Icon name="close" /></button>{/if}</header>
         <div class="body">{@render detail()}</div>
-      {:else}<header class="bar"><strong class="quiet">{label}</strong></header><div class="body">{@render summary?.()}<p class="small muted">Pick a row to see its settings.</p></div>{/if}
+      {:else}<header class="bar"><strong class="quiet">{label}</strong></header><div class="body">{#if !empty}{@render summary?.()}<p class="small muted">Pick a row to see its settings.</p>{/if}</div>{/if}
     </aside>{/if}
   </div>
 </div>

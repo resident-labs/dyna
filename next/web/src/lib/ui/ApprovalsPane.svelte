@@ -108,7 +108,7 @@
 
 {#snippet header()}{@render bar("Approvals", rooms?.length, undefined)}{/snippet}
 
-<ListDetail bar={header} label="Approvals" title={room?.name ?? "Not found"} open={!!rooms && selected !== undefined} {onselect} {onclose} {list} {detail} {summary} />
+<ListDetail bar={header} empty={rooms?.length === 0} label="Approvals" title={room?.name ?? "Not found"} open={!!rooms && selected !== undefined} {onselect} {onclose} {list} {detail} {summary} />
 
 <style>
   .problem { flex-basis: 100%; margin: 0; color: var(--danger); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
