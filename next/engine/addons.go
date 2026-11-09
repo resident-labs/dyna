@@ -94,16 +94,9 @@ func (s *Service) applyAddon(ctx context.Context, target addonTarget, change con
 		}
 		return s.addons.Put(target.room, item)
 	}
-	var err error
-	if target.room == "" {
-		err = apply()
-	} else {
-		err = s.roomWrite(ctx, target.room, apply)
-	}
-	if err != nil {
+	if err := s.writeAddons(ctx, target.room, apply); err != nil {
 		return nil, err
 	}
-	s.publishAddons(ctx)
 	if change.Remove {
 		return nil, nil
 	}
@@ -297,40 +290,12 @@ func (s *Service) MCPList(ctx context.Context, caller contract.Principal, req co
 
 // AddonSetEnabled is the owner's: the method table lets nobody else call it.
 func (s *Service) AddonSetEnabled(ctx context.Context, _ contract.Principal, req contract.AddonSetEnabledRequest) (contract.AddonSetEnabledResponse, *contract.Error) {
-	apply := func() error { return s.addons.SetEnabled(req.Room, req.Kind, req.Name, req.Enabled) }
-	var err error
-	if req.Room == "" {
-		err = apply()
-	} else {
-		err = s.roomWrite(ctx, req.Room, apply)
-	}
-	if errors.Is(err, addons.ErrMissing) {
-		return contract.AddonSetEnabledResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("no %s named %s", req.Kind, req.Name)}
-	}
-	if err != nil {
-		return contract.AddonSetEnabledResponse{}, failure(err)
-	}
-	s.publishAddons(ctx)
-	return contract.AddonSetEnabledResponse{}, nil
+	return contract.AddonSetEnabledResponse{}, s.addonSet(ctx, req.Room, func() error { return s.addons.SetEnabled(req.Room, req.Kind, req.Name, req.Enabled) }, fmt.Sprintf("no %s named %s", req.Kind, req.Name))
 }
 
 // AddonSetRootOnly is the owner's, like AddonSetEnabled.
 func (s *Service) AddonSetRootOnly(ctx context.Context, _ contract.Principal, req contract.AddonSetRootOnlyRequest) (contract.AddonSetRootOnlyResponse, *contract.Error) {
-	apply := func() error { return s.addons.SetRootOnly(req.Room, req.Kind, req.Name, req.RootOnly) }
-	var err error
-	if req.Room == "" {
-		err = apply()
-	} else {
-		err = s.roomWrite(ctx, req.Room, apply)
-	}
-	if errors.Is(err, addons.ErrMissing) {
-		return contract.AddonSetRootOnlyResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("no %s named %s", req.Kind, req.Name)}
-	}
-	if err != nil {
-		return contract.AddonSetRootOnlyResponse{}, failure(err)
-	}
-	s.publishAddons(ctx)
-	return contract.AddonSetRootOnlyResponse{}, nil
+	return contract.AddonSetRootOnlyResponse{}, s.addonSet(ctx, req.Room, func() error { return s.addons.SetRootOnly(req.Room, req.Kind, req.Name, req.RootOnly) }, fmt.Sprintf("no %s named %s", req.Kind, req.Name))
 }
 
 // AddonSetHosts is the owner's, like AddonSetRootOnly: it changes a skill's run-on hosts and leaves its files.
@@ -339,21 +304,33 @@ func (s *Service) AddonSetHosts(ctx context.Context, _ contract.Principal, req c
 	if problem != nil {
 		return contract.AddonSetHostsResponse{}, problem
 	}
-	apply := func() error { return s.addons.SetHosts(req.Room, req.Name, hosts) }
-	var err error
-	if req.Room == "" {
-		err = apply()
-	} else {
-		err = s.roomWrite(ctx, req.Room, apply)
-	}
+	return contract.AddonSetHostsResponse{}, s.addonSet(ctx, req.Room, func() error { return s.addons.SetHosts(req.Room, req.Name, hosts) }, "no skill named "+req.Name)
+}
+
+// addonSet makes an owner's change with writeAddons. missing is the answer when the add-on does not exist.
+func (s *Service) addonSet(ctx context.Context, room contract.RoomID, apply func() error, missing string) *contract.Error {
+	err := s.writeAddons(ctx, room, apply)
 	if errors.Is(err, addons.ErrMissing) {
-		return contract.AddonSetHostsResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "no skill named " + req.Name}
+		return &contract.Error{Code: contract.ErrNotFound, Message: missing}
 	}
 	if err != nil {
-		return contract.AddonSetHostsResponse{}, failure(err)
+		return failure(err)
 	}
-	s.publishAddons(ctx)
-	return contract.AddonSetHostsResponse{}, nil
+	return nil
+}
+
+// writeAddons applies a change to one room's add-ons, or to the global ones with no room, and publishes the result.
+func (s *Service) writeAddons(ctx context.Context, room contract.RoomID, apply func() error) error {
+	var err error
+	if room == "" {
+		err = apply()
+	} else {
+		err = s.roomWrite(ctx, room, apply)
+	}
+	if err == nil {
+		s.publishAddons(ctx)
+	}
+	return err
 }
 
 // registeredHosts checks a skill's run-on hosts once, where they arrive: each must be registered, and a name given twice counts once.
