@@ -122,7 +122,7 @@
   .open:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
   .open.phone { justify-content: center; width: 44px; height: 44px; padding: 0; }
   .n { font-variant-numeric: tabular-nums; }
-  .sheet.full { top: 0; border: 0; border-radius: 0; padding-top: env(safe-area-inset-top); }
+  .sheet.full { top: 0; max-height: none; border: 0; border-radius: 0; padding-top: env(safe-area-inset-top); }
   .scrim { all: unset; position: fixed; inset: 0; z-index: 5; background: var(--scrim); }
   .head { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 14px 6px; }
   .head strong { font-size: 16px; }
