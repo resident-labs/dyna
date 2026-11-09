@@ -165,10 +165,14 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 			lines = append(lines, "Done when: "+contextLine(g.DoneWhen, 200))
 		}
 		for _, item := range g.Items {
-			lines = append(lines, "- "+contextLine(item, 120))
+			indent := "- "
+			if item.Parent != 0 {
+				indent = "  - "
+			}
+			lines = append(lines, fmt.Sprintf("%s%d. %s", indent, item.Number, contextLine(item.Text, 160)))
 		}
 	}
-	add(contract.ContextGoal, lines, 800, 0)
+	add(contract.ContextGoal, lines, 1500, 0)
 	lines = nil
 	for _, c := range data.Children {
 		line := fmt.Sprintf("%s: %s, %s", c.Name, c.Profile, c.State)

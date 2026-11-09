@@ -124,7 +124,7 @@ func TestContextContactsIgnoreSiblingActivity(t *testing.T) {
 		unchanged()
 	}
 	who := contract.Principal{Kind: contract.PrincipalSession, Session: sibling.Session}
-	goal, problem := r.s.GoalSet(ctx, who, contract.GoalSetRequest{Text: "new goal", DoneWhen: "finished"})
+	goal, problem := r.s.GoalSet(ctx, who, contract.GoalSetRequest{Goal: "g2", Text: "new goal", DoneWhen: "finished"})
 	if problem != nil {
 		t.Fatal(problem)
 	}

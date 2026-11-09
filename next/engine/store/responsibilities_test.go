@@ -152,7 +152,7 @@ func TestTheBatchedFormMatchesTheSingleFormInOneQuery(t *testing.T) {
 	ctx := context.Background()
 	s := responsibilityStore(t)
 	if _, err := s.writer.Exec(addTurn + ";" + addGoal + ";" + addPR + ";" + addChild + `;
-INSERT INTO goals(room,number,session,text,done_when,state,created_at,updated_at) VALUES('r',10,'s','x','y','active',0,0),('r',9,'s','x','y','active',0,0),('r',2,'other','x','y','active',0,0);
+INSERT INTO goals(room,number,session,text,done_when,state,created_at,updated_at) VALUES('r',10,'c','x','y','active',0,0),('r',9,'other','x','y','active',0,0);
 INSERT INTO questions(id,room,session,text,state,asked_at,blocked) VALUES('q','r','other','why','pending',0,1);
 UPDATE sessions SET shell_jobs=1 WHERE id='other'`); err != nil {
 		t.Fatal(err)
@@ -180,7 +180,7 @@ UPDATE sessions SET shell_jobs=1 WHERE id='other'`); err != nil {
 	for _, item := range batch["s"] {
 		kinds = append(kinds, string(item.Kind)+" "+item.ID)
 	}
-	want := []string{"turn t", "goal g1", "goal g9", "goal g10", "pr repo#1", "child c"}
+	want := []string{"turn t", "goal g1", "pr repo#1", "child c"}
 	if !reflect.DeepEqual(kinds, want) {
 		t.Fatalf("order %v", kinds)
 	}

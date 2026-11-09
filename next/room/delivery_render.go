@@ -55,6 +55,9 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		if len(b.Unheld) > 0 {
 			did = append(did, "left goals with no holder, because you are root and root holds no goals: "+GoalNames(b.Unheld)+". goal list with your session shows them; goal done ends them and settles their open items")
 		}
+		for _, fold := range b.Folded {
+			did = append(did, fmt.Sprintf("folded its goal %s into your goal %s as item %d, with its open items as subtasks; settle them, or drop item %d if the work is finished", fold.Goal, fold.Into, fold.Item, fold.Item))
+		}
 		return fmt.Sprintf("Session %s closed and %s.", b.Session, strings.Join(did, " and ")), nil
 	case contract.EngineRestarted:
 		build, previous := b.Build[:min(12, len(b.Build))], b.PreviousBuild[:min(12, len(b.PreviousBuild))]
