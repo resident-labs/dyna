@@ -224,7 +224,7 @@
 {#snippet action()}<button type="button" class="btn add" onclick={start}>{#if phone}<Icon name="plus" size={16} />Add{:else}Add a host{/if}</button>{/snippet}
 {#snippet header()}{@render bar("Hosts", items?.length, action)}{/snippet}
 
-<ListDetail bar={header} label="Hosts" title={creating ? "Add a host" : item ? hostName(item) : "Not found"} open={creating || (!!items && selected !== undefined)} onselect={select} onclose={close} {list} {detail} {summary} />
+<ListDetail bar={header} empty={items?.length === 0} label="Hosts" title={creating ? "Add a host" : item ? hostName(item) : "Not found"} open={creating || (!!items && selected !== undefined)} onselect={select} onclose={close} {list} {detail} {summary} />
 
 <style>
   select { width: auto; min-height: 30px; padding: 3px 5px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--text); font: inherit; cursor: pointer; }

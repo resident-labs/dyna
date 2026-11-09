@@ -230,7 +230,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions: Esc is caught on its way down, before ListDetail closes the detail with it. -->
 <div class="keys" onkeydowncapture={escape}>
-<ListDetail bar={header} label="Sharing & access" title={pairing ? "Pair a device" : item?.kind === "device" ? item.device.name : item?.name ?? "Not found"}
+<ListDetail bar={header} empty={items?.length === 0} label="Sharing & access" title={pairing ? "Pair a device" : item?.kind === "device" ? item.device.name : item?.name ?? "Not found"}
   open={pairing || (!!items && selected !== undefined)} onselect={select} onclose={close} {list} {detail} {summary} />
 </div>
 

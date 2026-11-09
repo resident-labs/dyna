@@ -117,7 +117,7 @@
 {#snippet action()}<button type="button" class="btn new" onclick={start}>{phone ? "New" : "New profile"}</button>{/snippet}
 {#snippet header()}{@render bar("Profiles", profiles?.length, action)}{/snippet}
 
-<ListDetail bar={header} label="Profiles" title={creating ? "New profile" : profile?.name ?? "Not found"} open={creating || (!!profiles && selected !== undefined)} onselect={select} onclose={close} {list} {detail} {summary} />
+<ListDetail bar={header} empty={profiles?.length === 0} label="Profiles" title={creating ? "New profile" : profile?.name ?? "Not found"} open={creating || (!!profiles && selected !== undefined)} onselect={select} onclose={close} {list} {detail} {summary} />
 
 <style>
   .new { margin-left: auto; }
