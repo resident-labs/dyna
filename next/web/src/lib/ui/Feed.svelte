@@ -16,6 +16,7 @@
   import StatusPill from "./StatusPill.svelte";
   import { boxRow, closedSession, describe, formatTime, shortPaths, dayLabel, feedRows, visibleAttachments, timeSpan, type Quote, type Row } from "../feed.ts";
   import { runCounts, runWords } from "../workflow.ts";
+  import { activityLabel } from "../steps.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import { sourceLabel } from "../source.ts";
   import type { FeedDepthFilter } from "../feed-depth.ts";
@@ -39,7 +40,7 @@
     for (const request of unsent) if (!shown.has(request)) view.unsent(request);
   });
   onDestroy(() => store.leave(view));
-  type Item = Row | { kind: "intro"; key: string } | { kind: "steps"; key: string; labels: string[] };
+  type Item = Row | { kind: "intro"; key: string } | { kind: "steps"; key: string; labels: string[] } | { kind: "working"; key: string; lines: string[] };
   // A pending post's mentions are names; its row shows them as the sessions the engine will resolve.
   const mentioned = (names: string[]) => names.flatMap(name => {
     const session = [...store.sessions.values()].find(open => open.name === name)?.session;
@@ -142,10 +143,16 @@
   }
   let failure = $derived(home.kind === "dm" && home.session && view.atPresent ? store.boxFailures.get(home.session) : undefined);
   let steps = $derived(home.kind === "dm" && home.session && view.atPresent ? (store.steps.get(home.session) ?? []).slice(0, failure ? undefined : -1) : []);
+  // In the feed, the sessions that took the owner's last post and still run a turn say so under it, until they answer.
+  let lastOwnerPost = $derived(rows.findLast(row => row.kind === "post" && !row.pending && row.from.kind === "owner"));
+  let working = $derived(home.kind !== "feed" || !view.atPresent || !lastOwnerPost || rows.at(-1) !== lastOwnerPost ? []
+    : (receipts.get(Number(lastOwnerPost.key.slice(1))) ?? []).filter(r => (r.state === "taken" || r.state === "read") && store.turns.has(r.session)).slice(0, 3)
+      .map(r => { const label = store.activity.get(r.session); return label ? `${r.name} is working · ${activityLabel(label)}` : `${r.name} is working`; }));
   let items: Item[] = $derived([
     ...view.ready && !view.hasOlder ? [{ kind: "intro" as const, key: "intro" }] : [],
     ...rows,
     ...steps.length ? [{ kind: "steps" as const, key: "steps", labels: steps }] : [],
+    ...working.length ? [{ kind: "working" as const, key: "working", lines: working }] : [],
     ...failure && home.kind === "dm" && home.session ? [{ kind: "failed" as const, key: "box-failed", seq: 0, session: home.session, at: failure.at ?? "", ...boxRow(failure.box, failure.cause) }] : [],
   ]);
   import { TurnTranscripts } from "../transcripts.svelte.ts";
@@ -276,6 +283,7 @@
       {:else if item.kind === "work"}<WorkRow row={item} {name} {opened} ontoggle={toggle} {transcripts} {transcriptOf} {onjobs} prs={store.prs} onmedia={openStep} />
       {:else if item.kind === "new"}<p class="new"><span>New</span></p>
       {:else if item.kind === "day"}<p class="day"><span>{dayLabel(item.at, Date.now())}</span></p>
+      {:else if item.kind === "working"}{#each item.lines as line (line)}<p class="working"><span class="pulse" aria-hidden="true"></span><span>{line}</span></p>{/each}
       {:else if item.kind === "steps"}<ul class="steps" aria-label="Finished steps">
         {#if item.labels.length > 8}<li>{item.labels.length - 8} earlier</li>{/if}
         {#each item.labels.slice(-8) as label, i (i)}<li>{shortPaths(label)}</li>{/each}</ul>
@@ -297,6 +305,11 @@
   @keyframes highlight { from { box-shadow: inset 0 0 0 2px var(--focus); } to { box-shadow: inset 0 0 0 2px transparent; } }
   @media (prefers-reduced-motion: reduce) { .ring { animation: none; box-shadow: inset 0 0 0 2px var(--focus); } }
   /* The running turn's steps sit where its work line will fold, in the work list's form. */
+  .working { display: flex; align-items: center; gap: 8px; margin: 0; padding: 2px 16px 2px var(--gutter); color: var(--muted); font-size: 12.5px; line-height: 20px; }
+  .working span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pulse { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--success); animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
   .steps { margin: 4px 16px 4px var(--gutter); padding: 0 0 0 12px; border-left: 1px solid var(--line); list-style: none; color: var(--muted); font-size: 12.5px; }
   .steps li { padding: 1px 0; overflow-wrap: anywhere; }
   /* A run's line sits where a work row does, past PostRow's avatar. */
