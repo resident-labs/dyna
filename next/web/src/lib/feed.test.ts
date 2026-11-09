@@ -2,7 +2,7 @@ import { test } from "node:test";
 import { decodeEvent } from "./event.ts";
 import { dmOf } from "./window.svelte.ts";
 import assert from "node:assert/strict";
-import { clause, commandLine, dayLabel, describe, feedRows as dayRows, fileSize, formatTime, fromNow, isImage, isThumb, prWords, quoted, requestLine, shortPaths, subject, workIsBare, workSummary } from "./feed.ts";
+import { clause, commandLine, dayLabel, describe, feedRows as dayRows, fileSize, formatTime, fromNow, isImage, isThumb, prWords, quoted, requestLine, shortPaths, subject, timeSpan, workIsBare, workSummary } from "./feed.ts";
 import type { BoxState, Event, EventBody, FailureCause, Principal } from "./contract.gen.ts";
 
 test("a forward quotes every line of the post under its label, then the owner's words", () => {
@@ -429,4 +429,20 @@ test("a server-accepted optimistic post retains its sequence before the event ar
   const rows = dayRows([], { kind: "feed" }, [pending]);
   const post = rows.find(row => row.kind === "post");
   assert.equal(post?.kind === "post" ? post.pending?.seq : undefined, 42);
+});
+
+test("work in one displayed minute shows a single time, including its day period", () => {
+  const start = "2026-11-09T08:52:01Z", end = "2026-11-09T08:52:59Z";
+  const expected = new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" })
+    .formatToParts(new Date(end)).map(part => part.value).join("").trim();
+  assert.equal(timeSpan(start, end), expected);
+  assert.equal(timeSpan(start, start), expected);
+});
+
+test("work across different displayed minutes keeps a range", () => {
+  assert.ok(timeSpan("2026-11-09T08:52:59Z", "2026-11-09T08:53:01Z").includes(" – "));
+});
+
+test("matching clock digits in different day periods do not collapse", () => {
+  assert.ok(timeSpan("2026-11-09T08:52:00Z", "2026-11-09T20:52:00Z").includes(" – "));
 });
