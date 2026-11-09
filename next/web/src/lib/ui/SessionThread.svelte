@@ -14,6 +14,7 @@
   import Avatar from "./Avatar.svelte";
   import CollapsibleBody from "./CollapsibleBody.svelte";
   import Markdown from "./Markdown.svelte";
+  import SlowSend from "./SlowSend.svelte";
   import PostData from "./PostData.svelte";
   import PostAttachments from "./PostAttachments.svelte";
   import MediaViewer from "./MediaViewer.svelte";
@@ -439,7 +440,8 @@
     {#each pendingPosts as post (post.id)}
       {#snippet body()}{@render message(pendingKey(post.id), post.request.text, post.request.attachments, undefined, post.at, post.request.data, undefined, undefined, { kind: "owner" })}{/snippet}
       {#snippet unsent()}<p class="owner-note unsent" role="alert">Not sent<button class="retry" onclick={() => void view.retry(post.id)}>Retry</button><button class="retry" onclick={() => view.discard(post.id)}>Discard</button></p>{/snippet}
-      {@render ownerMessage(pendingKey(post.id), undefined, !post.failed && post.seq === undefined, body, post.failed ? unsent : undefined)}
+      {#snippet slow()}<SlowSend at={post.at} />{/snippet}
+      {@render ownerMessage(pendingKey(post.id), undefined, !post.failed && post.seq === undefined, body, post.failed ? unsent : post.seq === undefined ? slow : undefined)}
     {/each}
     {#if loaded && !failed && quiet}<p class="muted empty">{step ? "The worker's transcript will appear here." : "The conversation will appear here."}</p>{/if}
     {#if failed}<p class="muted" role="alert">The conversation did not load. <button class="retry" onclick={() => void load()}>Try again</button></p>{/if}
