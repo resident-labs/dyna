@@ -47,6 +47,9 @@ export function stream(
       opened(reconnect);
       const value: unknown = JSON.parse(message.data);
       if (typeof value === "object" && value !== null && "build" in value && typeof value.build === "string") {
+        // An idle stream may send only hello and heartbeat comments. Treat hello
+        // as recovery too, so the next outage does not inherit this one's backoff.
+        delay = 500;
         const hello: StreamHello = { build: value.build };
         onHello(hello);
         if (!room) { reportStreamState(true); for (const listener of transcriptListeners) listener(); }

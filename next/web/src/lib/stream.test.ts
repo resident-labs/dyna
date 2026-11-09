@@ -160,3 +160,29 @@ test("a room turn start invalidates the open transcript before its first append"
   assert.deepEqual(calls, ["s"]);
   unwatch(); stop();
 });
+
+for (const room of [undefined, "room"]) test(`hello resets outage backoff on an idle ${room ?? "owner"} stream`, () => {
+  const sources: EventConnection[] = [];
+  const hellos: ((event: MessageEvent<string>) => void)[] = [];
+  const delays: number[] = [];
+  let retry = () => {};
+  const stop = stream(room, () => 7, () => {}, () => {
+    const source: EventConnection = {
+      onmessage: null, onerror: null,
+      addEventListener(_type, listener) { hellos.push(listener); }, close() {},
+    };
+    sources.push(source);
+    return source;
+  }, (callback, delay) => { retry = callback; delays.push(delay); return () => {}; });
+  // Repeated failed attempts cap at 10 seconds.
+  for (let i = 0; i < 7; i++) {
+    sources.at(-1)!.onerror?.(new Event("error"));
+    retry();
+  }
+  assert.deepEqual(delays, [500, 1000, 2000, 4000, 8000, 10000, 10000]);
+  // Server recovery sends hello before replay, even if no event was missed.
+  hellos.at(-1)!(new MessageEvent("hello", { data: '{"build":"b"}' }));
+  sources.at(-1)!.onerror?.(new Event("error"));
+  assert.equal(delays.at(-1), 500);
+  stop();
+});
