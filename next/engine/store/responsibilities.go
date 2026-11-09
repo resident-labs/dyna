@@ -159,10 +159,7 @@ func (s *Store) responsibilities(ctx context.Context, q sqlQuery, ids []contract
 	if len(ids) == 0 {
 		return held, nil
 	}
-	wanted, err := json.Marshal(ids)
-	if err != nil {
-		return nil, err
-	}
+	wanted, _ := json.Marshal(ids)
 	rows, err := q.QueryContext(ctx, responsibilityQuery, string(wanted))
 	if err != nil {
 		return nil, err

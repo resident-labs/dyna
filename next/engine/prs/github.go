@@ -499,10 +499,7 @@ var verdictLine = regexp.MustCompile(`\A[^\n]*\n\*\*Verdict: (Approved|Changes r
 
 // graphQL runs one query and returns its repository, which is nil for a query that names none.
 func (c *Client) graphQL(ctx context.Context, query string, variables map[string]string) (map[string]json.RawMessage, error) {
-	input, err := json.Marshal(map[string]any{"query": query, "variables": variables})
-	if err != nil {
-		return nil, err
-	}
+	input, _ := json.Marshal(map[string]any{"query": query, "variables": variables})
 	response, data, err := c.send(ctx, &c.graphql, http.MethodPost, "/graphql", input, "")
 	if err != nil {
 		return nil, err

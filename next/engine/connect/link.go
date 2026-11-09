@@ -168,10 +168,7 @@ func LinkMachine(ctx context.Context, relay *Relay, files *Files, state LinkStat
 		if err != nil {
 			return Link{}, err
 		}
-		b, err := json.Marshal(pending)
-		if err != nil {
-			return Link{}, err
-		}
+		b, _ := json.Marshal(pending)
 		if err := files.write("pending.json", b); err != nil {
 			return Link{}, err
 		}

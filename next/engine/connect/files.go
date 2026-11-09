@@ -111,10 +111,7 @@ func (f *Files) Keys(now time.Time) (KeySet, error) {
 }
 
 func saveJSON[T Link | KeySet](f *Files, name string, value T) error {
-	b, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
+	b, _ := json.Marshal(value)
 	return f.write(name, b)
 }
 func (f *Files) SaveLink(link Link) error           { return saveJSON(f, "link.json", link) }
