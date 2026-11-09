@@ -73,10 +73,7 @@ func (s *Service) PrStack(token string, endpoint *url.URL, transport http.RoundT
 				seen[n] = true
 			}
 			session, err := s.store.Session(ctx, who.Session)
-			if err != nil {
-				return invalid(first, "caller needs an open session repository")
-			}
-			if session.Repo == "" || session.Closing {
+			if err != nil || session.Repo == "" || session.Closing {
 				return invalid(first, "caller needs an open session repository")
 			}
 			if err := s.store.CheckPRStack(ctx, session.Repo, prs, who.Session, session.Room); err != nil {
