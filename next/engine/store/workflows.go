@@ -110,20 +110,7 @@ func (s *Store) WorkflowRun(ctx context.Context, id contract.WorkflowRunID) (Wor
 
 // WorkflowRuns lists a room's newest runs.
 func (s *Store) WorkflowRuns(ctx context.Context, room contract.RoomID) ([]WorkflowRun, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT "+workflowColumns+" FROM workflow_runs WHERE room=? ORDER BY started_at DESC,id DESC LIMIT 100", room)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var runs []WorkflowRun
-	for rows.Next() {
-		run, err := scanWorkflow(rows)
-		if err != nil {
-			return nil, err
-		}
-		runs = append(runs, run)
-	}
-	return runs, rows.Err()
+	return queryAll(ctx, s.Read(), scanWorkflow, "SELECT "+workflowColumns+" FROM workflow_runs WHERE room=? ORDER BY started_at DESC,id DESC LIMIT 100", room)
 }
 
 // WorkflowList reads lightweight headers and journal totals in one statement, without scripts or results.

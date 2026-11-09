@@ -254,20 +254,10 @@ func (s *Store) ContextAccounts(ctx context.Context, id contract.SessionID) ([]C
 }
 
 func (s *Store) ContextPRs(ctx context.Context, id contract.SessionID) ([]ContextPR, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT repo,number,draft,review,ci,merge FROM pr_owners WHERE session=? AND state='open' ORDER BY repo,number`, id)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []ContextPR
-	for rows.Next() {
-		var p ContextPR
-		if err := rows.Scan(&p.Repo, &p.Number, &p.Draft, &p.Review, &p.CI, &p.Merge); err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
+	return queryAll(ctx, s.Read(), func(rows scanner) (p ContextPR, err error) {
+		err = rows.Scan(&p.Repo, &p.Number, &p.Draft, &p.Review, &p.CI, &p.Merge)
+		return
+	}, `SELECT repo,number,draft,review,ci,merge FROM pr_owners WHERE session=? AND state='open' ORDER BY repo,number`, id)
 }
 
 func (s *Store) ContextDepth(ctx context.Context, id contract.SessionID) (int, error) {
@@ -300,20 +290,10 @@ func (s *Store) DispatchTurnModel(ctx context.Context, turn contract.TurnID, mod
 // RecentTurnModels returns the models of a session's last two dispatched turns: the running one and the one before it.
 // The engine wrote these values, so a box cannot name a model of its own here.
 func (s *Store) RecentTurnModels(ctx context.Context, session contract.SessionID) ([]string, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT dispatched_model FROM turns WHERE session=? AND dispatched_model<>'' ORDER BY started_at DESC, started_seq DESC LIMIT 2", session)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var models []string
-	for rows.Next() {
-		var model string
-		if err := rows.Scan(&model); err != nil {
-			return nil, err
-		}
-		models = append(models, model)
-	}
-	return models, rows.Err()
+	return queryAll(ctx, s.Read(), func(rows scanner) (model string, err error) {
+		err = rows.Scan(&model)
+		return
+	}, "SELECT dispatched_model FROM turns WHERE session=? AND dispatched_model<>'' ORDER BY started_at DESC, started_seq DESC LIMIT 2", session)
 }
 
 // TurnSections saves the first rendered snapshot and returns it on every replay.

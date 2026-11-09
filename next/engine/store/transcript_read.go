@@ -18,20 +18,10 @@ type TranscriptTurnRange struct {
 
 // TranscriptTurnRanges returns each file range for a turn, with the next start as its exclusive end.
 func (s *Store) TranscriptTurnRanges(ctx context.Context, session contract.SessionID, turn contract.TurnID) ([]TranscriptTurnRange, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT t.turn,t.path,t.start,(SELECT min(n.start) FROM transcript_turns n WHERE n.session=t.session AND n.path=t.path AND n.start>t.start) FROM transcript_turns t WHERE t.session=? AND t.turn=? ORDER BY t.path,t.start`, session, turn)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var ranges []TranscriptTurnRange
-	for rows.Next() {
-		var r TranscriptTurnRange
-		if err := rows.Scan(&r.Turn, &r.Path, &r.Start, &r.End); err != nil {
-			return nil, err
-		}
-		ranges = append(ranges, r)
-	}
-	return ranges, rows.Err()
+	return queryAll(ctx, s.Read(), func(rows scanner) (r TranscriptTurnRange, err error) {
+		err = rows.Scan(&r.Turn, &r.Path, &r.Start, &r.End)
+		return
+	}, `SELECT t.turn,t.path,t.start,(SELECT min(n.start) FROM transcript_turns n WHERE n.session=t.session AND n.path=t.path AND n.start>t.start) FROM transcript_turns t WHERE t.session=? AND t.turn=? ORDER BY t.path,t.start`, session, turn)
 }
 
 // TranscriptTurnsIntersecting returns turns intersecting the half-open append range [start,end).
@@ -39,20 +29,10 @@ func (s *Store) TranscriptTurnsIntersecting(ctx context.Context, session contrac
 	if start >= end {
 		return nil, nil
 	}
-	rows, err := s.Read().QueryContext(ctx, `SELECT turn FROM transcript_turns WHERE session=? AND path=? AND start<? AND (start>=? OR start=(SELECT max(start) FROM transcript_turns WHERE session=? AND path=? AND start<=?)) ORDER BY start`, session, path, end, start, session, path, start)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var turns []contract.TurnID
-	for rows.Next() {
-		var turn contract.TurnID
-		if err := rows.Scan(&turn); err != nil {
-			return nil, err
-		}
-		turns = append(turns, turn)
-	}
-	return turns, rows.Err()
+	return queryAll(ctx, s.Read(), func(rows scanner) (turn contract.TurnID, err error) {
+		err = rows.Scan(&turn)
+		return
+	}, `SELECT turn FROM transcript_turns WHERE session=? AND path=? AND start<? AND (start>=? OR start=(SELECT max(start) FROM transcript_turns WHERE session=? AND path=? AND start<=?)) ORDER BY start`, session, path, end, start, session, path, start)
 }
 
 // TranscriptTurnMetadata returns a bounded newest-first page without loading sent posts.
@@ -194,20 +174,7 @@ func (s *Store) TranscriptSentPosts(ctx context.Context, session contract.Sessio
 // TranscriptSentPostsNewest returns a bounded newest-first page.
 func (s *Store) TranscriptSentPostsNewest(ctx context.Context, session contract.SessionID, turn contract.TurnID, limit, offset int) ([]contract.Event, error) {
 	query := `SELECT e.seq,e.id,e.at,e.room,e.type,e.from_kind,e.from_id,e.body` + transcriptPostsQuery
-	rows, err := s.Read().QueryContext(ctx, query+` AND (?=0 OR e.seq<=?) ORDER BY e.seq DESC LIMIT ?`, session, turn, offset, offset, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var posts []contract.Event
-	for rows.Next() {
-		event, err := scanEvent(rows)
-		if err != nil {
-			return nil, err
-		}
-		posts = append(posts, event)
-	}
-	return posts, rows.Err()
+	return queryAll(ctx, s.Read(), func(row scanner) (contract.Event, error) { return scanEvent(row) }, query+` AND (?=0 OR e.seq<=?) ORDER BY e.seq DESC LIMIT ?`, session, turn, offset, offset, limit)
 }
 
 type TranscriptFile struct {
@@ -216,20 +183,10 @@ type TranscriptFile struct {
 }
 
 func (s *Store) TranscriptFiles(ctx context.Context, session contract.SessionID) ([]TranscriptFile, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT path,acked FROM transcript_offsets WHERE session=? ORDER BY path`, session)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var files []TranscriptFile
-	for rows.Next() {
-		var f TranscriptFile
-		if err := rows.Scan(&f.Path, &f.Acked); err != nil {
-			return nil, err
-		}
-		files = append(files, f)
-	}
-	return files, rows.Err()
+	return queryAll(ctx, s.Read(), func(rows scanner) (f TranscriptFile, err error) {
+		err = rows.Scan(&f.Path, &f.Acked)
+		return
+	}, `SELECT path,acked FROM transcript_offsets WHERE session=? ORDER BY path`, session)
 }
 
 func (s *Store) TranscriptDeliveries(ctx context.Context, session contract.SessionID) (map[contract.DeliverySeq]contract.TurnID, error) {

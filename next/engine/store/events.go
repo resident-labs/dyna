@@ -175,7 +175,7 @@ func (s *Store) eventsPage(ctx context.Context, room contract.RoomID, afterSeq, 
 }
 
 // scanEvent shares the event wire decoding. database/sql requires heterogeneous scan destinations.
-func scanEvent(rows *sql.Rows, extra ...interface{}) (contract.Event, error) {
+func scanEvent(rows scanner, extra ...interface{}) (contract.Event, error) {
 	var event contract.Event
 	var at int64
 	var room sql.NullString

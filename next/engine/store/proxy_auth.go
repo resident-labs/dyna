@@ -42,20 +42,10 @@ func (s *Store) SaveProxyAuth(ctx context.Context, auth ProxyAuth, create bool) 
 }
 
 func (s *Store) ListProxyAuths(ctx context.Context) ([]ProxyAuth, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT p.id,p.provider,p.record,p.updated_at,EXISTS (SELECT 1 FROM accounts a WHERE a.proxy_id=p.id) FROM proxy_auths p ORDER BY p.id")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var auths []ProxyAuth
-	for rows.Next() {
-		var auth ProxyAuth
-		if err := rows.Scan(&auth.ID, &auth.Provider, &auth.Record, &auth.UpdatedAt, &auth.Bound); err != nil {
-			return nil, err
-		}
-		auths = append(auths, auth)
-	}
-	return auths, rows.Err()
+	return queryAll(ctx, s.Read(), func(rows scanner) (auth ProxyAuth, err error) {
+		err = rows.Scan(&auth.ID, &auth.Provider, &auth.Record, &auth.UpdatedAt, &auth.Bound)
+		return
+	}, "SELECT p.id,p.provider,p.record,p.updated_at,EXISTS (SELECT 1 FROM accounts a WHERE a.proxy_id=p.id) FROM proxy_auths p ORDER BY p.id")
 }
 
 // PruneUnboundProxyAuths reconciles interrupted account creation before proxy startup.

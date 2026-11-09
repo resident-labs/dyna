@@ -40,20 +40,10 @@ func insertDevice(ctx context.Context, tx *sql.Tx, d Device) error {
 }
 
 func readDeviceScopes(ctx context.Context, tx *sql.Tx, id string) ([]contract.Scope, error) {
-	rows, err := tx.QueryContext(ctx, "SELECT scope FROM device_scopes WHERE device=? ORDER BY scope", id)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var scopes []contract.Scope
-	for rows.Next() {
-		var scope contract.Scope
-		if err := rows.Scan(&scope); err != nil {
-			return nil, err
-		}
-		scopes = append(scopes, scope)
-	}
-	return scopes, rows.Err()
+	return queryAll(ctx, tx, func(rows scanner) (scope contract.Scope, err error) {
+		err = rows.Scan(&scope)
+		return
+	}, "SELECT scope FROM device_scopes WHERE device=? ORDER BY scope", id)
 }
 
 // AuthenticateDevice reads the device and its scopes from one SQLite snapshot.
