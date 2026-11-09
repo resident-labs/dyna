@@ -114,9 +114,24 @@ func (s *Store) EventsPage(ctx context.Context, room contract.RoomID, afterSeq, 
 	return s.eventsPage(ctx, room, afterSeq, beforeSeq, limit, types, dm, false)
 }
 
+var ownerStreamTypes = []contract.EventType{"op.requested", "op.decided", "op.ran", "question.asked", "question.answered", "question.withdrawn", "turn.started", "turn.ended", "session.started", "session.closed", "box.changed", "room.paused", "room.resumed"}
+
 // OwnerEvents pages the cross-room attention events.
 func (s *Store) OwnerEvents(ctx context.Context, afterSeq int64, limit int) ([]contract.Event, error) {
-	return s.eventsPage(ctx, "", afterSeq, 0, limit, []contract.EventType{"op.requested", "op.decided", "op.ran", "question.asked", "question.answered", "question.withdrawn", "turn.started", "turn.ended", "session.started", "session.closed", "box.changed", "room.paused", "room.resumed"}, "", true)
+	return s.eventsPage(ctx, "", afterSeq, 0, limit, ownerStreamTypes, "", true)
+}
+
+// CombinedEvents applies independent snapshot bounds in one globally ordered query.
+// An event matching both branches appears once, including across page boundaries.
+func (s *Store) CombinedEvents(ctx context.Context, room contract.RoomID, after, roomAfter int64, limit int) ([]contract.Event, error) {
+	query := `SELECT seq,id,at,room,type,from_kind,from_id,body FROM events WHERE
+	 (room=? AND seq>?) OR (seq>? AND (room IS NOT NULL OR type IN ('op.requested','op.decided','op.ran')) AND type IN (` + strings.TrimRight(strings.Repeat("?,", len(ownerStreamTypes)), ",") + `)) ORDER BY seq LIMIT ?`
+	args := []any{room, roomAfter, after}
+	for _, kind := range ownerStreamTypes {
+		args = append(args, kind)
+	}
+	args = append(args, limit)
+	return queryAll(ctx, s.Read(), func(rows scanner) (contract.Event, error) { return scanEvent(rows) }, query, args...)
 }
 
 func (s *Store) eventsPage(ctx context.Context, room contract.RoomID, afterSeq, beforeSeq int64, limit int, types []contract.EventType, dm contract.SessionID, allRooms bool) ([]contract.Event, error) {
