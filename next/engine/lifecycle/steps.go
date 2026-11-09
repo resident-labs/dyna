@@ -177,6 +177,10 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			due = r.now().Add(60 * time.Second)
 		}
 	case !row.DueAt.IsZero():
+		reason := "no hello within 60 s"
+		if b.Reason == box.SessionStartupReason {
+			reason = "session initialization exceeded 10 min"
+		}
 		hadTurns, err := r.store.SessionHasTurns(ctx, b.Session)
 		if err != nil {
 			return err
@@ -184,7 +188,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 		if hadTurns {
 			workErr = r.boxes.Stop(ctx, b.ID)
 			if workErr == nil {
-				next.State, next.Reason = contract.BoxStopped, "no hello within 60 s"
+				next.State, next.Reason = contract.BoxStopped, reason
 				failures++
 				due = r.retryAt(failures)
 				cause = contract.CauseNoHello
@@ -196,7 +200,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			workErr = r.boxes.Remove(ctx, b.ID)
 			if workErr == nil {
 				next.State = contract.BoxFailed
-				next.Reason = "no hello within 60 s"
+				next.Reason = reason
 				cause = contract.CauseNoHello
 			}
 		}

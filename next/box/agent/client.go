@@ -288,7 +288,7 @@ func (c *Client) call(ctx context.Context, method contract.Method, body []byte) 
 }
 
 func (c *Client) Hello(ctx context.Context) (contract.BoxHelloResponse, error) {
-	body, err := json.Marshal(contract.BoxHelloRequest{})
+	body, err := json.Marshal(contract.BoxHelloRequest{WaitForChannel: true})
 	if err != nil {
 		return contract.BoxHelloResponse{}, err
 	}
