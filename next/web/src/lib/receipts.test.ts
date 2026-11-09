@@ -7,9 +7,9 @@ test('all recipients must take delivery; countdown is future only', () => {
  const now = Date.parse('2026-11-07T12:00:20Z');
  assert.equal(receiptSummary([pending, taken], now).label, 'Queued');
  assert.equal(receiptSummary([pending, taken], now).seconds, 40);
- assert.match(receiptSummary([pending, taken], now).details, /lead: Delivered/);
+ assert.match(receiptSummary([pending, taken], now).details, /lead: Awaiting read/);
  assert.equal(receiptSummary([pending], now + 60000).seconds, undefined);
- assert.equal(receiptSummary([taken, { ...taken, state: 'read' }], now).label, 'Delivered');
+ assert.equal(receiptSummary([taken, { ...taken, state: 'read' }], now).label, 'Awaiting read');
  assert.equal(receiptSummary([{ ...pending, batchDeadline: undefined }], now).seconds, undefined);
 });
 test('closed explicit recipients are tooltip context, not queued deliveries', () => {
@@ -20,12 +20,12 @@ test('closed explicit recipients are tooltip context, not queued deliveries', ()
  assert.equal(receiptSummary([closed, live], now).seconds, 40);
  assert.match(receiptSummary([closed, live], now).details, /former: closed/);
  for (const state of ['taken', 'read']) {
-  assert.equal(receiptSummary([closed, { ...live, state }], now).label, 'Delivered');
+  assert.equal(receiptSummary([closed, { ...live, state }], now).label, state === 'read' ? 'Read' : 'Awaiting read');
  }
  assert.equal(receiptSummary([closed], now).label, 'Not delivered · recipient closed');
  assert.equal(receiptSummary([closed, { ...closed, session: 'c', name: 'also closed' }], now).label, 'Not delivered · recipient closed');
- assert.equal(receiptSummary([{ ...closed, state: 'read' }], now).label, 'Delivered');
- assert.match(receiptSummary([{ ...closed, state: 'read' }], now).details, /former: closed/);
+ assert.equal(receiptSummary([{ ...closed, state: 'read' }], now).label, 'Read');
+ assert.match(receiptSummary([{ ...closed, state: 'read' }], now).details, /former: Read/);
  assert.equal(receiptSummary([{ ...live, closed: true }], now).label, 'Not delivered · recipient closed');
  assert.equal(receiptSummary([{ ...live, closed: true }], now).seconds, undefined);
 });
