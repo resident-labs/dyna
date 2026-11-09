@@ -397,10 +397,7 @@ func (s *Store) DeleteService(ctx context.Context, row ServiceRow, owed bool) er
 
 // ServiceLeftovers lists the services a host still holds after their removal while it was offline.
 func (s *Store) ServiceLeftovers(ctx context.Context, host contract.HostName) ([]contract.ServiceID, error) {
-	return queryAll(ctx, s.Read(), func(rows scanner) (id contract.ServiceID, err error) {
-		err = rows.Scan(&id)
-		return
-	}, "SELECT service FROM service_leftovers WHERE host=? ORDER BY service", host)
+	return listIDs[contract.ServiceID](ctx, s.Read(), "SELECT service FROM service_leftovers WHERE host=? ORDER BY service", host)
 }
 
 // ForgetServiceLeftover closes one debt after the host removed the service.

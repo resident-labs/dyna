@@ -906,11 +906,11 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 				immediate = immediate || (item.wake && item.immediate)
 			}
 			if !immediate {
-				deadline, err := batchDeadline(ctx, tx, session)
-				if err != nil {
+				var ended sql.NullInt64
+				if err := tx.QueryRowContext(ctx, "SELECT MAX(ended_at) FROM turns WHERE session=?", session).Scan(&ended); err != nil {
 					return err
 				}
-				if deadline.After(started.Time) {
+				if ended.Valid && time.UnixMilli(ended.Int64).Add(InputBatchWindow).After(started.Time) {
 					return nil
 				}
 			}
