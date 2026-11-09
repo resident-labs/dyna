@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -697,5 +698,37 @@ func TestRunnerInterruptIsTypedAndOnlyAfterSuccessfulSteer(t *testing.T) {
 				t.Fatalf("interrupts %+v", got)
 			}
 		})
+	}
+}
+
+// A turn that changes the model brings the models the box defines, and the box writes them before the transfer, once per list.
+func TestRunnerWritesAChangedModelListBeforeTheTransfer(t *testing.T) {
+	completed := fakeharness.Turn{Result: contract.TurnEnded{Outcome: "completed"}}
+	h := &fakeharness.Harness{Turns: []fakeharness.Turn{completed, completed, completed}}
+	sink := &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 1)}
+	var wrote [][]contract.TextOnlyModel
+	var transfersAtWrite []int
+	runner := &Runner{Harness: h, Sink: sink, Models: func(list []contract.TextOnlyModel) error {
+		wrote, transfersAtWrite = append(wrote, list), append(transfersAtWrite, len(h.Models))
+		return nil
+	}}
+	one := []contract.TextOnlyModel{{Provider: contract.ModelProviderAnthropic, Model: "a"}}
+	two := append(slices.Clone(one), contract.TextOnlyModel{Provider: contract.ModelProviderAnthropic, Model: "b", Images: true})
+	for i, turn := range []struct {
+		model contract.ModelChoice
+		list  []contract.TextOnlyModel
+	}{{modelA, one}, {modelB, one}, {modelA, two}} {
+		start := turnStart(i, turn.model, 0)
+		body := start.Body.(contract.TurnStart)
+		body.TextOnlyModels = turn.list
+		start.Body = body
+		if err := runner.Handle(context.Background(), start); err != nil {
+			t.Fatal(err)
+		}
+		<-sink.done
+		runner.turns.Wait()
+	}
+	if !reflect.DeepEqual(wrote, [][]contract.TextOnlyModel{one, two}) || !reflect.DeepEqual(transfersAtWrite, []int{0, 2}) {
+		t.Fatalf("wrote %+v with %v transfers done", wrote, transfersAtWrite)
 	}
 }
