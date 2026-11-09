@@ -395,30 +395,13 @@ func summarizeCI(rollup *gqlRollup, suites gqlSuites, rule ciRule, now time.Time
 	if rollup != nil && (rollup.Contexts.PageInfo.HasNextPage || rollup.Contexts.TotalCount > len(rollup.Contexts.Nodes)) {
 		return contract.PrCIPending, nil
 	}
-	return rollupCI(rollup, rule)
-}
-
-// ciRule preserves the PR/main distinction for empty rollups. summarizeCI first
-// holds incomplete suites and truncated context lists pending.
-type ciRule int
-
-const (
-	// ciMainHead keeps an empty non-success rollup pending until the head leaves the recent-head list.
-	ciMainHead ciRule = iota
-	// ciPullHead follows GitHub's state for an empty non-success rollup.
-	ciPullHead
-)
-
-// rollupCI reads what a rollup says of CI: success, failure or cancelled when GitHub has finished, pending while it runs, and none for no rollup or the empty success
-// GitHub reports before any check has run. Whatever the rollup state says, a rollup settles only when every context it lists is terminal; a cancelled run alone is not
-// a failure. Any cancellation without a failure is cancelled, never success. summarizeCI excludes truncated reads before this is called.
-// The rule preserves how an empty rollup is read. It names the checks that failed.
-func rollupCI(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string) {
+	// A rollup settles only when every context is terminal. Cancellation without
+	// failure is cancelled, not success; an empty success means no checks ran.
 	if rollup == nil || rollup.State == "SUCCESS" && len(rollup.Contexts.Nodes) == 0 {
 		return contract.PrCINone, nil
 	}
 	var failed []string
-	if len(rollup.Contexts.Nodes) > 0 && rollup.Contexts.TotalCount <= len(rollup.Contexts.Nodes) {
+	if len(rollup.Contexts.Nodes) > 0 {
 		ci, cancelled := contract.PrCISuccess, []string{}
 		for _, check := range rollup.Contexts.Nodes {
 			name := check.Name
@@ -442,28 +425,26 @@ func rollupCI(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string) {
 		return ci, failed
 	}
 	if rule == ciMainHead {
-		if rollup.State == "SUCCESS" {
-			return contract.PrCISuccess, nil
-		}
 		return contract.PrCIPending, nil
 	}
 	ci := contract.PrCIPending
 	switch rollup.State {
-	case "SUCCESS":
-		ci = contract.PrCISuccess
 	case "FAILURE", "ERROR":
 		ci = contract.PrCIFailure
 	}
-	for _, check := range rollup.Contexts.Nodes {
-		switch {
-		case check.Conclusion == "FAILURE" || check.Conclusion == "TIMED_OUT" || check.Conclusion == "STARTUP_FAILURE" || check.Conclusion == "CANCELLED":
-			failed = append(failed, check.Name)
-		case check.State == "FAILURE" || check.State == "ERROR":
-			failed = append(failed, check.Context)
-		}
-	}
 	return ci, failed
 }
+
+// ciRule preserves the PR/main distinction for empty rollups. summarizeCI first
+// holds incomplete suites and truncated context lists pending.
+type ciRule int
+
+const (
+	// ciMainHead keeps an empty non-success rollup pending until the head leaves the recent-head list.
+	ciMainHead ciRule = iota
+	// ciPullHead follows GitHub's state for an empty non-success rollup.
+	ciPullHead
+)
 
 type gqlPull struct {
 	Number         int    `json:"number"`

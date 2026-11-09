@@ -1139,15 +1139,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		if err != nil {
 			return err
 		}
-		res := r.Operation.Result
-		if res == nil {
-			return fmt.Errorf("pr open %s has no result yet (state %s)", r.Operation.ID, r.Operation.State)
-		}
-		if res.Error != "" || res.ExitCode != 0 {
-			return fmt.Errorf("pr open %s failed (exit code %d): %s", r.Operation.ID, res.ExitCode, res.Error)
-		}
-		_, err = fmt.Fprintln(cmd.OutOrStdout(), res.Output)
-		return err
+		return printPrResult(cmd, r.Operation, "pr open")
 	}}
 	prOpen.Flags().StringVar(&prTitle, "title", "", "Pull request title")
 	prOpen.Flags().StringVar(&prBodyFile, "body-file", "", "File with the pull request body")
@@ -1237,15 +1229,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 		if err != nil {
 			return err
 		}
-		res := r.Operation.Result
-		if res == nil {
-			return fmt.Errorf("pr stack %s has no result yet (state %s)", r.Operation.ID, r.Operation.State)
-		}
-		if res.Error != "" || res.ExitCode != 0 {
-			return fmt.Errorf("pr stack %s failed (exit code %d): %s", r.Operation.ID, res.ExitCode, res.Error)
-		}
-		_, err = fmt.Fprintln(cmd.OutOrStdout(), res.Output)
-		return err
+		return printPrResult(cmd, r.Operation, "pr stack")
 	}}
 	pr.AddCommand(prOpen, prList, prStatus, prTrack, prUntrack, prStack)
 	root.AddCommand(pr)
@@ -1467,4 +1451,16 @@ func printCall[R, Q any](cmd *cobra.Command, c *socketClient, method contract.Me
 		return err
 	}
 	return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+}
+
+// printPrResult prints the shared operation result for PR-writing commands.
+func printPrResult(cmd *cobra.Command, op contract.Operation, action string) error {
+	if op.Result == nil {
+		return fmt.Errorf("%s %s has no result yet (state %s)", action, op.ID, op.State)
+	}
+	if op.Result.Error != "" || op.Result.ExitCode != 0 {
+		return fmt.Errorf("%s %s failed (exit code %d): %s", action, op.ID, op.Result.ExitCode, op.Result.Error)
+	}
+	_, err := fmt.Fprintln(cmd.OutOrStdout(), op.Result.Output)
+	return err
 }

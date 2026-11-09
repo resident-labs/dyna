@@ -195,14 +195,10 @@ func (c *Connections) Callback(ctx context.Context, req contract.AccountsConnect
 		c.mu.Unlock()
 		return errConnect
 	}
-	payload, err := json.Marshal(struct {
+	payload, _ := json.Marshal(struct {
 		Provider    string `json:"provider"`
 		RedirectURL string `json:"redirect_url"`
 	}{a.proxyProvider, req.RedirectURL})
-	if err != nil {
-		c.mu.Unlock()
-		return errConnect
-	}
 	a.callbackSent = true
 	c.mu.Unlock()
 	var result oauthResponse
