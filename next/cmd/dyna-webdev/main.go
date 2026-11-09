@@ -456,7 +456,21 @@ func (h *scripted) Start(ctx context.Context, id contract.TurnID, inputs []contr
 			text = in.Text
 		}
 	}
-	result := contract.TurnEnded{Outcome: contract.TurnCompleted, Final: "Thanks. I will work on this:\n\n> " + strings.ReplaceAll(text, "\n", "\n> ")}
+	// The reply names the ask in a line, as a person would, never the engine's [Dyna] header or the whole input.
+	ask := "that"
+	asked := text
+	for _, in := range inputs { // the owner's words, when a turn batched them with notices
+		if strings.HasPrefix(in.Text, "[Dyna] From the owner") {
+			asked = in.Text
+		}
+	}
+	for _, line := range strings.Split(asked, "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "[Dyna]") && !strings.HasPrefix(line, ">") {
+			ask = strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(line, "Done: "), "Goal: "), ".")
+			break
+		}
+	}
+	result := contract.TurnEnded{Outcome: contract.TurnCompleted, Final: "Done: " + ask + "."}
 	if marked(text, "[fail]") {
 		result = contract.TurnEnded{Outcome: contract.TurnFailed, Error: "Scripted development failure", Cause: contract.CauseModelFailed}
 	}
