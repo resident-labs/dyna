@@ -424,10 +424,7 @@ func (s *Store) SetHostGPUs(ctx context.Context, host contract.HostName, gpus []
 	if gpus == nil {
 		gpus = []contract.GPU{}
 	}
-	text, err := json.Marshal(gpus)
-	if err != nil {
-		return err
-	}
+	text, _ := json.Marshal(gpus)
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "UPDATE hosts SET gpus=? WHERE name=?", text, host)
 		return err
