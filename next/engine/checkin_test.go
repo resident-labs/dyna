@@ -482,6 +482,17 @@ func TestGoalListTakesASessionName(t *testing.T) {
 	}
 }
 
+func TestSessionListTakesAParentName(t *testing.T) {
+	r := newGoalRig(t)
+	listed, e := r.s.SessionList(r.ctx, asSession(r.root), contract.SessionListRequest{Room: r.room, Parent: "lead"})
+	if e != nil || len(listed.Sessions) != 1 || listed.Sessions[0].ID != r.child {
+		t.Fatalf("children of lead %+v: %v", listed, e)
+	}
+	if _, e := r.s.SessionList(r.ctx, asSession(r.root), contract.SessionListRequest{Room: r.room, Parent: "nobody"}); e == nil || e.Code != contract.ErrNotFound {
+		t.Fatalf("unknown parent: %v", e)
+	}
+}
+
 func TestGoalSetTakesASessionName(t *testing.T) {
 	r := newGoalRig(t)
 	set, e := r.s.GoalSet(r.ctx, asSession(r.root), contract.GoalSetRequest{Session: "lead", Text: "lead it", DoneWhen: "merged"})
