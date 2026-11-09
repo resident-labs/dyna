@@ -34,15 +34,9 @@ func (t Tavily) Name() string { return "tavily" }
 
 // Search asks Tavily for q.Results.
 func (t Tavily) Search(ctx context.Context, q Query) ([]Result, error) {
-	if t.Key == nil {
-		return nil, ErrNotSignedIn
-	}
-	key, err := t.Key(ctx)
+	key, err := savedKey(ctx, t.Key)
 	if err != nil {
 		return nil, err
-	}
-	if key == "" {
-		return nil, ErrNotSignedIn
 	}
 	body, err := json.Marshal(tavilyRequest{Query: q.Text, MaxResults: q.results()})
 	if err != nil {
