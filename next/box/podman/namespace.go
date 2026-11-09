@@ -59,7 +59,16 @@ namespace_lock_holders() {
  test "$found" = 1 || printf ' unavailable (process exited or procfs access denied)' >&2
  printf '\n' >&2
 }
-flock -x -w 15 8 || { namespace_lock_holders; exit 252; }
+# The scan reads every process and descriptor of the host, so it is best-effort and ends after 2 s. The failure stays exit 252.
+namespace_scan_holders() {
+ namespace_lock_holders &
+ scan=$!
+ { sleep 2; kill "$scan"; } >/dev/null 2>&1 &
+ watchdog=$!
+ wait "$scan" 2>/dev/null || printf ' (scan stopped after 2s)\n' >&2
+ kill "$watchdog" 2>/dev/null || true
+}
+flock -x -w 15 8 || { namespace_scan_holders || true; exit 252; }
 epoch_file="$root/locks/box-$id.epoch"
 epoch=0
 if test -e "$epoch_file"; then
