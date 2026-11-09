@@ -313,6 +313,11 @@
   .stop { background: none; color: var(--text); box-shadow: inset 0 0 0 1px var(--firm); }
   .stop:hover:not(:disabled) { background: var(--hover); }
   .stop:disabled { background: none; color: var(--muted); }
+  /* A press answers at once: the button gives under the finger before the post shows. */
+  .actions button { transition: background-color 150ms, transform 100ms ease-out; }
+  .send:not(.stop):hover:not(:disabled) { filter: brightness(1.1); }
+  .actions button:active:not(:disabled) { transform: scale(0.9); }
+  @media (prefers-reduced-motion: reduce) { .actions button { transition: none; } .actions button:active:not(:disabled) { transform: none; } }
   .stop :global(svg) { fill: currentColor; }
   .actions button:focus-visible, .remove:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 </style>
