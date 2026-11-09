@@ -260,3 +260,71 @@ func TestJobStartedHookKillsTheWorkerOfARefusedJob(t *testing.T) {
 		})
 	}
 }
+
+func TestPruneRunnerFoldersProtectsExistingContainers(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		t.Run(fmt.Sprint("listing-failed-", failed), func(t *testing.T) {
+			root := t.TempDir()
+			for _, slot := range []string{"0", "1", "2", "other"} {
+				if err := os.Mkdir(filepath.Join(root, slot), 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			bin := t.TempDir()
+			// Both running and stopped containers appear in ps --all. Named volumes
+			// must never be inspected or deleted by this operation.
+			fake := `#!/bin/bash
+case "$1" in
+ps)
+ [[ "$*" == *--all* ]] || exit 9
+ [[ "$FAIL_LIST" != true ]] || exit 1
+ printf '0\n2\n'
+ ;;
+unshare) shift; exec "$@" ;;
+*) exit 9 ;;
+esac
+`
+			if err := os.WriteFile(filepath.Join(bin, "podman"), []byte(fake), 0755); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("bash", "-c", pruneRunnerFoldersScript, "test", root, "16")
+			cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), fmt.Sprint("FAIL_LIST=", failed))
+			out, err := cmd.CombinedOutput()
+			if (err != nil) != failed {
+				t.Fatalf("error = %v: %s", err, out)
+			}
+			for _, slot := range []string{"0", "1", "2", "other"} {
+				_, err := os.Stat(filepath.Join(root, slot))
+				wantGone := slot == "1" && !failed
+				if os.IsNotExist(err) != wantGone {
+					t.Errorf("slot %s: stat = %v", slot, err)
+				}
+			}
+		})
+	}
+}
+
+func TestRunnerSurveyAndRemovalPruneFolders(t *testing.T) {
+	for _, remove := range []bool{false, true} {
+		h, runner := newFrameHost(t)
+		runner.reply = []byte("[]")
+		var err error
+		if remove {
+			err = h.RemoveRunner(context.Background(), "dyna-ci-test")
+		} else {
+			_, _, err = h.ListRunners(context.Background())
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, args := range runner.args {
+			if strings.Contains(strings.Join(args, " "), "dyna-ci-prune") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("remove=%v did not prune", remove)
+		}
+	}
+}
