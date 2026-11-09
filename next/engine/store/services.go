@@ -67,8 +67,6 @@ func (row ServiceRow) Reservation() contract.ServiceParts {
 
 const serviceColumns = `id,room,spec,generation,host,cpu_milli,mem_bytes,disk_bytes,image_bytes,image_estimate,want,state,reason,cause,detail,last_state,deployed_generation,image_ref,previous_ref,target_ref,deployed_spec,unit_sha,restarts,since,updated_at,placed_at,rev`
 
-type scanner interface{ Scan(...any) error }
-
 func scanService(r scanner) (ServiceRow, error) {
 	var row ServiceRow
 	var spec []byte
@@ -109,20 +107,7 @@ func scanService(r scanner) (ServiceRow, error) {
 }
 
 func queryServices(ctx context.Context, q sqlQuery, where string, args ...any) ([]ServiceRow, error) {
-	rows, err := q.QueryContext(ctx, "SELECT "+serviceColumns+" FROM services WHERE "+where+" ORDER BY room,name,id", args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []ServiceRow
-	for rows.Next() {
-		row, err := scanService(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, row)
-	}
-	return out, rows.Err()
+	return queryAll(ctx, q, scanService, "SELECT "+serviceColumns+" FROM services WHERE "+where+" ORDER BY room,name,id", args...)
 }
 
 // Services lists services, a room's or, with no room, every room's, with their secrets as set or missing.
@@ -412,20 +397,10 @@ func (s *Store) DeleteService(ctx context.Context, row ServiceRow, owed bool) er
 
 // ServiceLeftovers lists the services a host still holds after their removal while it was offline.
 func (s *Store) ServiceLeftovers(ctx context.Context, host contract.HostName) ([]contract.ServiceID, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT service FROM service_leftovers WHERE host=? ORDER BY service", host)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []contract.ServiceID
-	for rows.Next() {
-		var id contract.ServiceID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		out = append(out, id)
-	}
-	return out, rows.Err()
+	return queryAll(ctx, s.Read(), func(rows scanner) (id contract.ServiceID, err error) {
+		err = rows.Scan(&id)
+		return
+	}, "SELECT service FROM service_leftovers WHERE host=? ORDER BY service", host)
 }
 
 // ForgetServiceLeftover closes one debt after the host removed the service.

@@ -339,6 +339,29 @@ func (s *Store) writeLoop() {
 	}
 }
 func (s *Store) Read() *sql.DB { return s.read }
+
+// scanner is a row or rows, which is what a scan function reads.
+type scanner = interface{ Scan(...any) error }
+
+// queryAll runs a query and scans each row it returns. No rows give a nil slice.
+func queryAll[T any](ctx context.Context, db interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, scan func(scanner) (T, error), query string, args ...any) ([]T, error) {
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []T
+	for rows.Next() {
+		item, err := scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
 func (s *Store) Close() error {
 	s.mu.Lock()
 	if s.closed {

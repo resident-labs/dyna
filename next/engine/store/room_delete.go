@@ -42,20 +42,10 @@ func refuseNewWork(ctx context.Context, tx *sql.Tx, room contract.RoomID) error 
 }
 
 func listIDs[ID ~string](ctx context.Context, q sqlQuery, query string, args ...any) ([]ID, error) {
-	rows, err := q.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var ids []ID
-	for rows.Next() {
-		var id ID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
+	return queryAll(ctx, q, func(rows scanner) (id ID, err error) {
+		err = rows.Scan(&id)
+		return
+	}, query, args...)
 }
 
 // OpenRooms lists the rooms that are not being deleted.
@@ -273,20 +263,10 @@ func (s *Store) AddRoomLeftover(ctx context.Context, host contract.HostName, roo
 
 // Leftovers lists the debts of the given host, boxes before folders, since a box mounts its room's folder.
 func (s *Store) Leftovers(ctx context.Context, host contract.HostName) ([]Leftover, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT host,room,box,slice FROM room_leftovers WHERE host=? ORDER BY box='',room,box", host)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Leftover
-	for rows.Next() {
-		var l Leftover
-		if err := rows.Scan(&l.Host, &l.Room, &l.Box, &l.Slice); err != nil {
-			return nil, err
-		}
-		out = append(out, l)
-	}
-	return out, rows.Err()
+	return queryAll(ctx, s.Read(), func(rows scanner) (l Leftover, err error) {
+		err = rows.Scan(&l.Host, &l.Room, &l.Box, &l.Slice)
+		return
+	}, "SELECT host,room,box,slice FROM room_leftovers WHERE host=? ORDER BY box='',room,box", host)
 }
 
 // LeftoverCounts tells each host's debts for host.list, so an owed cleanup stays visible.

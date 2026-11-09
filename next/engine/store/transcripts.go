@@ -50,18 +50,8 @@ func (s *Store) ResetTranscriptOffset(ctx context.Context, session contract.Sess
 
 // Transcripts lists files in their insertion order, oldest first.
 func (s *Store) Transcripts(ctx context.Context, session contract.SessionID) ([]contract.TranscriptFile, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT path,acked FROM transcript_offsets WHERE session=? ORDER BY rowid", session)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var files []contract.TranscriptFile
-	for rows.Next() {
-		var f contract.TranscriptFile
-		if err := rows.Scan(&f.Path, &f.Bytes); err != nil {
-			return nil, err
-		}
-		files = append(files, f)
-	}
-	return files, rows.Err()
+	return queryAll(ctx, s.Read(), func(rows scanner) (f contract.TranscriptFile, err error) {
+		err = rows.Scan(&f.Path, &f.Bytes)
+		return
+	}, "SELECT path,acked FROM transcript_offsets WHERE session=? ORDER BY rowid", session)
 }

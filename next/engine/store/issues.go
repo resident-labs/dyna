@@ -78,20 +78,7 @@ func scanIssue(row interface{ Scan(...any) error }) (TrackedIssue, error) {
 }
 
 func (s *Store) queryIssues(ctx context.Context, query string, args ...any) ([]TrackedIssue, error) {
-	rows, err := s.Read().QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []TrackedIssue
-	for rows.Next() {
-		i, err := scanIssue(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, i)
-	}
-	return out, rows.Err()
+	return queryAll(ctx, s.Read(), scanIssue, query, args...)
 }
 
 // TrackedIssues lists every tracked issue. A closed one is read no more, but a feed can still reopen it.

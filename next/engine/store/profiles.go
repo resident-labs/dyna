@@ -37,20 +37,10 @@ func (s *Store) ProfileUsage(ctx context.Context) (map[contract.ProfileName]int,
 
 // SessionsOnProfile returns the open sessions that use a profile. The caller holds the profile write lock.
 func (s *Store) SessionsOnProfile(ctx context.Context, name contract.ProfileName) ([]Session, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT id,room FROM sessions WHERE profile=? AND closed_at IS NULL ORDER BY created_at,id", name)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var sessions []Session
-	for rows.Next() {
-		var session Session
-		if err := rows.Scan(&session.ID, &session.Room); err != nil {
-			return nil, err
-		}
-		sessions = append(sessions, session)
-	}
-	return sessions, rows.Err()
+	return queryAll(ctx, s.Read(), func(rows scanner) (session Session, err error) {
+		err = rows.Scan(&session.ID, &session.Room)
+		return
+	}, "SELECT id,room FROM sessions WHERE profile=? AND closed_at IS NULL ORDER BY created_at,id", name)
 }
 
 // SetSessionProfile changes the profile and delivers the change atomically.
