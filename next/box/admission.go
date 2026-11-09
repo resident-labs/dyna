@@ -40,7 +40,6 @@ func SliceName(id contract.BoxID) (string, error) {
 	}
 	return "dyna-" + string(id) + ".slice", nil
 }
-func CgroupArgs(slice string) []string { return []string{"--cgroup-parent=" + slice} }
 
 // DiskFloor is the free space a host keeps: 20 GiB, or a tenth of its disk if that is more.
 func DiskFloor(total int64) int64 { return max(20*GiB, total/10) }

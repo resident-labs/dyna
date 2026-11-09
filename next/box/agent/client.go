@@ -302,63 +302,33 @@ func (c *Client) Hello(ctx context.Context) (contract.BoxHelloResponse, error) {
 }
 
 func (c *Client) DiffSaved(ctx context.Context, result contract.DiffSavedRequest) error {
-	body, err := json.Marshal(result)
-	if err != nil {
-		return err
-	}
-	_, err = c.call(ctx, contract.MethodDiffSaved, body)
+	_, err := request[contract.DiffSavedRequest, contract.DiffSavedResponse](ctx, c, contract.MethodDiffSaved, result)
 	return err
 }
 
 func (c *Client) ShellJobEnded(ctx context.Context, req contract.ShellJobEndedRequest) error {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return err
-	}
-	_, err = c.call(ctx, contract.MethodShellJobEnded, body)
+	_, err := request[contract.ShellJobEndedRequest, contract.ShellJobEndedResponse](ctx, c, contract.MethodShellJobEnded, req)
 	return err
 }
 
 func (c *Client) ShellJobRunning(ctx context.Context, req contract.ShellJobRunningRequest) error {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return err
-	}
-	_, err = c.call(ctx, contract.MethodShellJobRunning, body)
+	_, err := request[contract.ShellJobRunningRequest, contract.ShellJobRunningResponse](ctx, c, contract.MethodShellJobRunning, req)
 	return err
 }
 
 // Notice tells the session and the owner what this box could not set up.
 func (c *Client) Notice(ctx context.Context, text string) error {
-	body, err := json.Marshal(contract.BoxNoticeRequest{Text: text})
-	if err != nil {
-		return err
-	}
-	_, err = c.call(ctx, contract.MethodBoxNotice, body)
+	_, err := request[contract.BoxNoticeRequest, contract.BoxNoticeResponse](ctx, c, contract.MethodBoxNotice, contract.BoxNoticeRequest{Text: text})
 	return err
 }
 
 func (c *Client) DeliveryDone(ctx context.Context, id contract.DeliverySeq) error {
-	body, err := json.Marshal(contract.DeliveryDoneRequest{Delivery: id})
-	if err != nil {
-		return err
-	}
-	_, err = c.call(ctx, contract.MethodDeliveryDone, body)
+	_, err := request[contract.DeliveryDoneRequest, contract.DeliveryDoneResponse](ctx, c, contract.MethodDeliveryDone, contract.DeliveryDoneRequest{Delivery: id})
 	return err
 }
 
 func (c *Client) TranscriptAppend(ctx context.Context, req contract.TranscriptAppendRequest) (contract.TranscriptAppendResponse, error) {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return contract.TranscriptAppendResponse{}, err
-	}
-	data, err := c.call(ctx, contract.MethodTranscriptAppend, body)
-	if err != nil {
-		return contract.TranscriptAppendResponse{}, err
-	}
-	var result contract.TranscriptAppendResponse
-	err = json.Unmarshal(data, &result)
-	return result, err
+	return request[contract.TranscriptAppendRequest, contract.TranscriptAppendResponse](ctx, c, contract.MethodTranscriptAppend, req)
 }
 
 func (c *Client) TurnOutput(ctx context.Context, result contract.TurnEnded) error {
@@ -421,15 +391,25 @@ func (c *Client) WorkflowPost(ctx context.Context, req contract.PostRequest) (co
 }
 
 func (c *Client) TranscriptFetch(ctx context.Context, req contract.TranscriptFetchRequest) (contract.TranscriptFetchResponse, error) {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return contract.TranscriptFetchResponse{}, err
+	return request[contract.TranscriptFetchRequest, contract.TranscriptFetchResponse](ctx, c, contract.MethodTranscriptFetch, req)
+}
+
+func (c *Client) watchShell(ctx context.Context, jobs *shell.Server, generation uint64, ticker *time.Ticker) {
+	defer ticker.Stop()
+	reset := true
+	for {
+		view := jobs.View(reset)
+		if len(view) != 0 {
+			body, _ := json.Marshal(contract.ShellOutputRequest{Generation: generation, Jobs: view})
+			_, err := c.call(ctx, contract.MethodShellOutput, body)
+			reset = err != nil
+		} else {
+			reset = false
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return
+		}
 	}
-	data, err := c.call(ctx, contract.MethodTranscriptFetch, body)
-	if err != nil {
-		return contract.TranscriptFetchResponse{}, err
-	}
-	var result contract.TranscriptFetchResponse
-	err = json.Unmarshal(data, &result)
-	return result, err
 }
