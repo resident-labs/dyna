@@ -58,15 +58,9 @@ func (m Muse) Search(ctx context.Context, q Query) ([]Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("muse request id failed: %w", err)
 	}
-	base := m.BaseURL
-	if base == "" {
-		base = MuseEndpoint
-	}
-	body, err := json.Marshal(museRequest{Query: q.Text, RequestID: requestID})
-	if err != nil {
-		return nil, err
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(base, "/")+"/muse-code/search", strings.NewReader(string(body)))
+	base := apiRoot(m.BaseURL, MuseEndpoint)
+	body, _ := json.Marshal(museRequest{Query: q.Text, RequestID: requestID})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/muse-code/search", strings.NewReader(string(body)))
 	if err != nil {
 		return nil, err
 	}

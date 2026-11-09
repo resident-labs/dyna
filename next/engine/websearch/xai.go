@@ -47,10 +47,7 @@ func (x XAI) Search(ctx context.Context, q Query) ([]Result, error) {
 	if model == "" {
 		model = XAIModel
 	}
-	body, err := json.Marshal(xaiSearch(model, q.Text))
-	if err != nil {
-		return nil, err
-	}
+	body, _ := json.Marshal(xaiSearch(model, q.Text))
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(base, "/")+"/responses", bytes.NewReader(body))
 	if err != nil {
 		return nil, err

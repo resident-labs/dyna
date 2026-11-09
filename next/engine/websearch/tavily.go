@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -38,15 +37,9 @@ func (t Tavily) Search(ctx context.Context, q Query) ([]Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	body, err := json.Marshal(tavilyRequest{Query: q.Text, MaxResults: q.results()})
-	if err != nil {
-		return nil, err
-	}
-	base := t.BaseURL
-	if base == "" {
-		base = TavilyEndpoint
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(base, "/")+"/search", bytes.NewReader(body))
+	body, _ := json.Marshal(tavilyRequest{Query: q.Text, MaxResults: q.results()})
+	base := apiRoot(t.BaseURL, TavilyEndpoint)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/search", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}

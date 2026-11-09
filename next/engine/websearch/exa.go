@@ -38,19 +38,13 @@ func (e Exa) Search(ctx context.Context, q Query) ([]Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	body, err := json.Marshal(exaRequest{
+	body, _ := json.Marshal(exaRequest{
 		Query:      q.Text,
 		NumResults: q.results(),
 		Contents:   exaContents{Highlights: true},
 	})
-	if err != nil {
-		return nil, err
-	}
-	base := e.BaseURL
-	if base == "" {
-		base = ExaEndpoint
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(base, "/")+"/search", bytes.NewReader(body))
+	base := apiRoot(e.BaseURL, ExaEndpoint)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/search", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
