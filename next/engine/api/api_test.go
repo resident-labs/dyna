@@ -83,7 +83,7 @@ func TestEventsStartWithBuildHello(t *testing.T) {
 	a.Build = "b"
 	w := httptest.NewRecorder()
 	a.handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}}).ServeHTTP(w, httptest.NewRequest("GET", "/v1/events", nil))
-	if got, want := w.Body.String(), "event: hello\ndata: {\"build\":\"b\",\"heartbeatMs\":15000}\n\n"; got != want {
+	if got, want := w.Body.String(), "event: hello\ndata: {\"build\":\"b\",\"heartbeatMs\":15000,\"roomUnion\":true}\n\n"; got != want {
 		t.Fatalf("stream starts with %q, want %q", got, want)
 	}
 }
