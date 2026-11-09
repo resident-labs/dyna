@@ -66,8 +66,9 @@
   .more, .count { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
   .phone { display: none; }
   @media (max-width: 640px) {
-    /* A phone header keeps the room's name: Requests, Jobs and Runs live in the ⋯ menu, which carries the waiting count. */
-    :global(.jobs > .open), :global(.runs > .open), .requests { display: none; }
+    /* A phone header keeps the room's name: Jobs and Runs live in the ⋯ menu. Requests shows only while something waits
+       for the owner, as the inbox with its count, so the count never reads as part of the menu. */
+    :global(.jobs > .open), :global(.runs > .open), .requests:not(.waiting) { display: none; }
     .requests { min-width: 44px; min-height: 44px; }
     .panel-toggle { gap: 4px; min-width: 44px; min-height: 44px; padding: 0 4px; }
     .phone { display: inline; }

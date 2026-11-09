@@ -306,14 +306,15 @@
   @media not (pointer: coarse) {
     .composer { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto auto 32px; align-items: end; column-gap: 8px; padding: 8px 10px; }
     .quote, .tray, .file-summary, .note, .mentions { grid-column: 1 / -1; }
-    .inputline { grid-column: 2; grid-row: 4; }
+    /* The input's row comes last by order, not by a row number, so any count of notes, a quote and a tray stay above it. */
+    .inputline { grid-column: 2; order: 2; }
     textarea { min-height: 32px; padding: 5px 0; }
     .underlay { padding: 5px 0; }
     .actions { display: contents; }
-    .actions .attach { grid-column: 1; grid-row: 4; }
-    .actions .keys { grid-column: 3; grid-row: 4; line-height: 32px; white-space: nowrap; }
-    .actions .host { grid-column: 4; grid-row: 4; line-height: 32px; white-space: nowrap; }
-    .actions .send { grid-column: 5; grid-row: 4; }
+    .actions .attach { grid-column: 1; order: 1; }
+    .actions .keys { grid-column: 3; order: 3; line-height: 32px; white-space: nowrap; }
+    .actions .host { grid-column: 4; order: 4; line-height: 32px; white-space: nowrap; }
+    .actions .send { grid-column: 5; order: 5; }
     /* The key hint takes no room until it shows, so a draft has the whole line. */
     .composer .keys { display: none; }
     .composer:has(textarea:focus:placeholder-shown) .keys { display: block; }
