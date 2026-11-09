@@ -114,29 +114,22 @@ func (s *Store) SetPool(ctx context.Context, name string, max *int, perSession *
 }
 
 func (s *Store) Pools(ctx context.Context) ([]Pool, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT name,max,per_session,idle_ms,failures,retry_at,problem,told FROM pools ORDER BY name")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var pools []Pool
-	for rows.Next() {
+	return queryAll(ctx, s.Read(), func(rows scanner) (Pool, error) {
 		var p Pool
 		var idle, retry int64
 		var told string
 		if err := rows.Scan(&p.Name, &p.Max, &p.PerSession, &idle, &p.Failures, &retry, &p.Problem, &told); err != nil {
-			return nil, err
+			return p, err
 		}
 		p.Idle = time.Duration(idle) * time.Millisecond
 		if retry != 0 {
 			p.RetryAt = time.UnixMilli(retry)
 		}
 		if err := json.Unmarshal([]byte(told), &p.Told); err != nil {
-			return nil, err
+			return p, err
 		}
-		pools = append(pools, p)
-	}
-	return pools, rows.Err()
+		return p, nil
+	}, "SELECT name,max,per_session,idle_ms,failures,retry_at,problem,told FROM pools ORDER BY name")
 }
 
 // PoolNodes lists every pool's nodes, counting those being created.
