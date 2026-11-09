@@ -37,7 +37,7 @@ const (
 	// entrypoint's timeout, so it can stop that clock. This one is outside the container.
 	runnerLimit = "--timeout=22200" // 6 hours 10 minutes
 	// cacheMount is where a runner reads the host's cache, the folder the host's boxes mount at /box/cache. It writes only its
-	// slot's build folder there, which outlives the job, as upstream projects keep CARGO_TARGET_DIR on their own runners.
+	// slot's build folder there, reclaimed after its runner container is gone.
 	cacheMount = "/cache"
 	// buildMount is where a runner writes its slot's build folder, one path for every slot. sccache's keys hold the paths a
 	// build hands the compiler, so the folder's cargo and target folders are mounted again where a box has them, and a job and
@@ -201,6 +201,8 @@ func runnerArgs(s box.RunnerSpec) []string {
 
 // StartRunner starts one ephemeral runner. It is gone when its job ends.
 func (h *Host) StartRunner(ctx context.Context, s box.RunnerSpec) error {
+	h.runnerMu.Lock()
+	defer h.runnerMu.Unlock()
 	if _, err := box.RepoFolder(s.Repo); err != nil {
 		return errors.New("invalid runner")
 	}
@@ -224,8 +226,35 @@ func (h *Host) StartRunner(ctx context.Context, s box.RunnerSpec) error {
 	return err
 }
 
-// ListRunners reports this host's runner containers and whether its proxy is running.
+// pruneRunnerFoldersScript removes only canonical slot directories without a container.
+// Include stopped containers, and fail closed if Podman cannot list them. This never
+// touches named volumes (including legacy dyna.ci=cache volumes).
+const pruneRunnerFoldersScript = `set -eu
+root="$1"; slots="$2"
+held=$(podman ps --all --filter label=dyna.ci.slot --format '{{.Label "dyna.ci.slot"}}')
+for ((slot=0; slot<slots; slot++)); do
+  if ! grep -qxF -- "$slot" <<< "$held"; then
+    if [ -e "$root/$slot" ] || [ -L "$root/$slot" ]; then
+      podman unshare rm -rf -- "$root/$slot"
+    fi
+  fi
+done`
+
+// pruneRunnerFolders requires runnerMu, so preparing a slot cannot race its cleanup.
+func (h *Host) pruneRunnerFolders(ctx context.Context) error {
+	layout := box.Layout{HostData: h.dataDir}
+	_, err := h.runUnbounded(ctx, nil, "bash", "-c", pruneRunnerFoldersScript, "dyna-ci-prune", filepath.Join(layout.HostCache(), "ci"), strconv.Itoa(box.RunnerSlots))
+	return err
+}
+
+// ListRunners reclaims orphan slot folders during every survey, including startup,
+// and reports this host's runner containers and whether its proxy is running.
 func (h *Host) ListRunners(ctx context.Context) ([]box.Runner, bool, error) {
+	h.runnerMu.Lock()
+	defer h.runnerMu.Unlock()
+	if err := h.pruneRunnerFolders(ctx); err != nil {
+		return nil, false, err
+	}
 	out, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "ps", "--all", "--filter", "label="+ciLabel, "--format", "json")
 	if err != nil {
 		return nil, false, err
@@ -268,11 +297,15 @@ func (h *Host) ListRunners(ctx context.Context) ([]box.Runner, bool, error) {
 
 // RemoveRunner destroys a runner container, running or not.
 func (h *Host) RemoveRunner(ctx context.Context, name string) error {
+	h.runnerMu.Lock()
+	defer h.runnerMu.Unlock()
 	if name == "" || strings.HasPrefix(name, "-") {
 		return errors.New("invalid runner name")
 	}
-	_, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "rm", "--force", "--ignore", "--time", "0", name)
-	return err
+	if _, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "rm", "--force", "--ignore", "--time", "0", name); err != nil {
+		return err
+	}
+	return h.pruneRunnerFolders(ctx)
 }
 
 // PruneRunnerLayers removes the room layer images of every room but these, as a room that dropped its ci-runner image, was

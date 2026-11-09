@@ -57,6 +57,7 @@ func (ExecRunner) RunProgress(ctx context.Context, in []byte, progress func(int)
 const masterStart = 2 * time.Minute
 
 type Host struct {
+	runnerMu            sync.Mutex // serializes slot preparation and orphan cleanup
 	pendingMu           sync.Mutex
 	pendingCancels      map[string]struct{}
 	buildGate           chan struct{}
