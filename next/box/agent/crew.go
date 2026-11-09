@@ -955,7 +955,7 @@ func (c *Crew) command(ctx context.Context, argv []string, opts commandOpts) ste
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	started := time.Now()
 	// Low priority, like a command of the shell tool: the box agent keeps its CPU while a build uses the cap.
-	err := shell.StartIdle(cmd)
+	err := shell.StartLowPriority(cmd)
 	if err == nil {
 		err = cmd.Wait()
 	}
