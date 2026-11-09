@@ -3,6 +3,7 @@ package podman
 import (
 	"crypto/sha256"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -59,7 +60,7 @@ func RenderServiceUnit(u box.ServiceUnitSpec) string {
 	if p.Spec.Data != "" {
 		line("Volume=%s:%s", name, p.Spec.Data)
 	}
-	for _, key := range sortedKeys(p.Spec.Env) {
+	for _, key := range slices.Sorted(maps.Keys(p.Spec.Env)) {
 		line("Environment=%s", unitWord(key+"="+p.Spec.Env[key]))
 	}
 	for _, secret := range p.Spec.Secrets {
@@ -84,12 +85,3 @@ func RenderServiceUnit(u box.ServiceUnitSpec) string {
 
 // ServiceUnitSHA is the hash of a quadlet file, which the engine compares after a restart.
 func ServiceUnitSHA(file string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(file))) }
-
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	return keys
-}
