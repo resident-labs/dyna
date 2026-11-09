@@ -22,7 +22,8 @@ export type Row =
   | { kind: "new"; key: string };
 
 // An owner's post the engine has not confirmed yet, with its mentions as sessions.
-export type Pending = { id: number; at: string; text: string; data?: JSONData; attachments: Attachment[]; to: Principal[]; failed: boolean };
+// seq confirms server acceptance even while its live post event is still in flight.
+export type Pending = { id: number; at: string; text: string; data?: JSONData; attachments: Attachment[]; to: Principal[]; failed: boolean; seq?: number };
 
 type Name = (session: string) => string;
 
