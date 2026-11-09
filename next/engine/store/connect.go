@@ -74,17 +74,7 @@ var ErrConnectEpoch = errors.New("connect link is inactive or epoch is stale")
 func (s *Store) InitializeConnectLink(ctx context.Context, epoch int64) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		r, err := tx.ExecContext(ctx, "INSERT INTO connect_link_state(id,epoch,linked,generation) VALUES(1,?,1,1) ON CONFLICT(id) DO UPDATE SET epoch=excluded.epoch,linked=1,generation=generation+1 WHERE linked=0", epoch)
-		if err != nil {
-			return err
-		}
-		n, err := r.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			return errors.New("connect link is already active")
-		}
-		return nil
+		return noRows(r, err, errors.New("connect link is already active"))
 	})
 }
 
@@ -127,28 +117,11 @@ func (s *Store) ConsumeConnectNonceForLink(ctx context.Context, epoch, generatio
 			return err
 		}
 		r, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO connect_nonces(nonce,expires_at) VALUES(?,?)", nonce, expires.Unix())
-		if err != nil {
+		if err := noRows(r, err, errors.New("replayed relay request")); err != nil {
 			return err
-		}
-		n, err := r.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			return errors.New("replayed relay request")
 		}
 		r, err = tx.ExecContext(ctx, "UPDATE connect_link_state SET epoch=? WHERE id=1 AND linked=1 AND epoch<=? AND generation=?", epoch, epoch, generation)
-		if err != nil {
-			return err
-		}
-		n, err = r.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			return ErrConnectEpoch
-		}
-		return nil
+		return noRows(r, err, ErrConnectEpoch)
 	})
 }
 
@@ -156,17 +129,7 @@ func (s *Store) ConsumeConnectNonceForLink(ctx context.Context, epoch, generatio
 func (s *Store) AdvanceConnectEpoch(ctx context.Context, epoch, generation int64) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		r, err := tx.ExecContext(ctx, "UPDATE connect_link_state SET epoch=? WHERE id=1 AND linked=1 AND epoch<=? AND generation=?", epoch, epoch, generation)
-		if err != nil {
-			return err
-		}
-		n, err := r.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			return ErrConnectEpoch
-		}
-		return nil
+		return noRows(r, err, ErrConnectEpoch)
 	})
 }
 

@@ -136,14 +136,7 @@ func (s *Store) DrainHost(ctx context.Context, host contract.HostName) error {
 			return err
 		}
 		result, err := tx.ExecContext(ctx, "UPDATE hosts SET state='draining' WHERE name=? AND state!='provisioning'", host)
-		if err != nil {
-			return err
-		}
-		n, err := result.RowsAffected()
-		if err == nil && n == 0 {
-			err = fmt.Errorf("host %s: %w", host, ErrNotFound)
-		}
-		return err
+		return noRows(result, err, fmt.Errorf("host %s: %w", host, ErrNotFound))
 	})
 }
 

@@ -56,14 +56,7 @@ func (p Pool) NewOrphans(unknown []string) []string {
 func (s *Store) AddPool(ctx context.Context, p Pool) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO pools(name,max,per_session,idle_ms) VALUES(?,?,?,?)", p.Name, p.Max, p.PerSession, p.Idle.Milliseconds())
-		if err != nil {
-			return err
-		}
-		n, err := result.RowsAffected()
-		if err == nil && n == 0 {
-			err = fmt.Errorf("%w: %s", ErrPoolExists, p.Name)
-		}
-		return err
+		return noRows(result, err, fmt.Errorf("%w: %s", ErrPoolExists, p.Name))
 	})
 }
 
@@ -82,14 +75,7 @@ func (s *Store) RemovePool(ctx context.Context, name string) error {
 			return &PoolInUseError{Name: name, Nodes: nodes, Rooms: rooms}
 		}
 		result, err := tx.ExecContext(ctx, "DELETE FROM pools WHERE name=?", name)
-		if err != nil {
-			return err
-		}
-		n, err := result.RowsAffected()
-		if err == nil && n == 0 {
-			err = fmt.Errorf("pool %s: %w", name, ErrNotFound)
-		}
-		return err
+		return noRows(result, err, fmt.Errorf("pool %s: %w", name, ErrNotFound))
 	})
 }
 
@@ -102,14 +88,7 @@ func (s *Store) SetPool(ctx context.Context, name string, max *int, perSession *
 	}
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, "UPDATE pools SET max=COALESCE(?,max), per_session=COALESCE(?,per_session), idle_ms=COALESCE(?,idle_ms) WHERE name=?", max, perSession, idleMS, name)
-		if err != nil {
-			return err
-		}
-		n, err := result.RowsAffected()
-		if err == nil && n == 0 {
-			err = ErrNotFound
-		}
-		return err
+		return noRows(result, err, ErrNotFound)
 	})
 }
 
