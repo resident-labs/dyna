@@ -70,10 +70,6 @@ func (r route) match(segments []string) (matched, bool) {
 		case "{owner}":
 			found.owner = segments[i]
 		case "{workflow}":
-			if !namePart.MatchString(segments[i]) || segments[i] == "." || segments[i] == ".." {
-				return matched{}, false
-			}
-			continue
 		case "{repo}":
 			found.repo = segments[i]
 		case "{number}":
