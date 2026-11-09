@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -28,8 +29,8 @@ func (s *Store) MoveSession(ctx context.Context, target, parent contract.Session
 		if err != nil {
 			return &TreeError{Message: err.Error()}
 		}
-		if err := checkDepth(tree.Depth(parent)+1+tree.Depth(order[0])-tree.Depth(target), maxDepth); err != nil {
-			return err
+		if depth := tree.Depth(parent) + 1 + tree.Depth(order[0]) - tree.Depth(target); maxDepth > 0 && depth > maxDepth {
+			return &TreeError{Message: fmt.Sprintf("the move would put the deepest session of this subtree at depth %d, past the room's limit of %d; choose a parent higher in the tree", depth, maxDepth)}
 		}
 		var state string
 		if err := tx.QueryRowContext(ctx, "SELECT state FROM sessions WHERE id=? AND closed_at IS NULL", parent).Scan(&state); err != nil {
