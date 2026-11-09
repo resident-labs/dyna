@@ -206,8 +206,8 @@
       <Avatar kind={value.by.kind} name={who} label={value.by.session ? sessionInitials.get(value.by.session) : undefined} {root} size={28} />
       <!-- The title is the phrase after the asker's name, as on the request card. The body's first line says who gets what for how long, so Approve never hides it; only a line that does not name the host gives way to the host. -->
       <span class="lines"><span class="title"><b class="who">{who}</b> {value.title}</span>
-        <span class="line">{#if line.named}{line.text}<code>{line.named}</code>{clause(line.after)}{" · "}{:else if value.target.kind === "host"}on <code>{value.target.name}</code>{" · "}{:else if value.body}{clause(value.body)}{" · "}{:else if value.target.kind !== "room"}on {value.target.kind} {value.target.name}{" · "}{/if}{room.name} ·
-          {#if soon}<StatusPill tone="warning" label={expiryText(value.expires, now)} />{:else}{expiryText(value.expires, now)}{/if}</span>
+        <span class="line">{#if line.named}{line.text}<code>{line.named}</code>{clause(line.after)}{" · "}{:else if value.target.kind === "host"}on <code>{value.target.name}</code>{" · "}{:else if value.body}{clause(value.body)}{" · "}{:else if value.target.kind !== "room"}on {value.target.kind} {value.target.name}{" · "}{/if}{room.name}{#if value.expires}{" · "}
+          {#if soon}<StatusPill tone="warning" label={expiryText(value.expires, now)} />{:else}{expiryText(value.expires, now)}{/if}{/if}</span>
         {#if refused.has(id)}<span class="line" role="alert">{refused.get(id)}</span>{/if}</span>
       <span class="acts">{#if attention.can("admin")}<button type="button" class="approve" disabled={deciding.has(id)} onclick={event => void decide(id, `${who} ${value.title}`, true, event.currentTarget.closest(".request") ?? event.currentTarget)}>Approve</button>
         <button type="button" disabled={deciding.has(id)} onclick={event => void decide(id, `${who} ${value.title}`, false, event.currentTarget.closest(".request") ?? event.currentTarget)}>Deny</button>{/if}
