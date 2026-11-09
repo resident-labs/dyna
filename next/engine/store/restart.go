@@ -49,20 +49,10 @@ func (s *Store) CanRestartSession(ctx context.Context, old box.Box) (current boo
 // BoxLeftovers lists all known old allocations, including prior retry hosts.
 // Their volume records remain until explicit destructive cleanup confirms them.
 func (s *Store) BoxLeftovers(ctx context.Context, id contract.BoxID) ([]Leftover, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT host,room,box,slice FROM room_leftovers WHERE box=? ORDER BY host,room`, id)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var leftovers []Leftover
-	for rows.Next() {
-		var l Leftover
-		if err := rows.Scan(&l.Host, &l.Room, &l.Box, &l.Slice); err != nil {
-			return nil, err
-		}
-		leftovers = append(leftovers, l)
-	}
-	return leftovers, rows.Err()
+	return queryAll(ctx, s.Read(), func(rows scanner) (l Leftover, err error) {
+		err = rows.Scan(&l.Host, &l.Room, &l.Box, &l.Slice)
+		return
+	}, `SELECT host,room,box,slice FROM room_leftovers WHERE box=? ORDER BY host,room`, id)
 }
 
 // RestartSession commits a reset only after the API has synchronously removed the

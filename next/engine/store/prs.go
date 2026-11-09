@@ -79,20 +79,7 @@ func scanPR(row interface{ Scan(...any) error }) (TrackedPR, error) {
 }
 
 func (s *Store) queryPRs(ctx context.Context, query string, args ...any) ([]TrackedPR, error) {
-	rows, err := s.Read().QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []TrackedPR
-	for rows.Next() {
-		p, err := scanPR(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
+	return queryAll(ctx, s.Read(), scanPR, query, args...)
 }
 
 // A repository's list of recent heads keeps the newest HeadsKept and none first read HeadsWithin or longer ago (spec 7.7). A head past either is
