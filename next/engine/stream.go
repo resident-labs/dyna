@@ -186,6 +186,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 		_ = s.computerEvent(context.Background(), session.ID, roomID, contract.ComputerStopped)
 	}
 	handle.Unlock()
+	slog.Info("box channel connected", "session", session.ID, "box", session.Box, "stale", stale)
 	s.reconciler.Connected(session.Box)
 	out := make(chan contract.BoxMessage)
 	go func() {
