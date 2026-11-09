@@ -64,10 +64,6 @@ func profileCommand(getClient func() client) *cobra.Command {
 			p = e.Profile
 		}
 		flags := cmd.Flags()
-		changed := flags.NFlag()
-		if create {
-			changed--
-		}
 		if flags.Changed("description") {
 			p.Description = description
 		}
@@ -108,7 +104,7 @@ func profileCommand(getClient func() client) *cobra.Command {
 		if flags.Changed("max-concurrent") {
 			p.MaxConcurrent = maxConcurrent
 		}
-		if changed == 0 && !create {
+		if flags.NFlag() == 0 && !create {
 			return fmt.Errorf("give at least one field to change, such as --thinking")
 		}
 		_, err := getClient().ProfileSet(cmd.Context(), contract.ProfileSetRequest{Create: create, Profile: p})

@@ -189,27 +189,21 @@ func (g *Guard) within(request *http.Request, grant contract.GitHubWrites, seen 
 	}) bool {
 		return repo != nil && grant.Allows(repo.Name)
 	}
+	var allowed bool
 	switch kind {
 	case nodeRepository:
-		if found.Typename == string(kind) && grant.Allows(found.Name) {
-			return nil
-		}
+		allowed = found.Typename == string(kind) && grant.Allows(found.Name)
 	case nodeIssue, nodePullRequest, nodeReview, nodeThread, nodeLabel, nodeMilestone:
-		if found.Typename == string(kind) && inRepo(found.Repository) {
-			return nil
-		}
+		allowed = found.Typename == string(kind) && inRepo(found.Repository)
 	case nodeContent:
-		if (found.Typename == string(nodeIssue) || found.Typename == string(nodePullRequest)) && inRepo(found.Repository) {
-			return nil
-		}
+		allowed = (found.Typename == string(nodeIssue) || found.Typename == string(nodePullRequest)) && inRepo(found.Repository)
 	case nodeProject:
-		if found.Typename == string(kind) && found.Owner != nil && grant.AllowsOwner(found.Owner.Login) {
-			return nil
-		}
+		allowed = found.Typename == string(kind) && found.Owner != nil && grant.AllowsOwner(found.Owner.Login)
 	case nodeItem:
-		if found.Typename == string(kind) && found.Project != nil && found.Project.Owner != nil && grant.AllowsOwner(found.Project.Owner.Login) && found.Content != nil && inRepo(found.Content.Repository) {
-			return nil
-		}
+		allowed = found.Typename == string(kind) && found.Project != nil && found.Project.Owner != nil && grant.AllowsOwner(found.Project.Owner.Login) && found.Content != nil && inRepo(found.Content.Repository)
+	}
+	if allowed {
+		return nil
 	}
 	return refuse(contract.GitHubWriteRepoNotAllowed, "the node ID given to %s is not a %s of a repository (or a project of an owner) this room allows", mutationName, kind)
 }
