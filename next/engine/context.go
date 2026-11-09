@@ -130,15 +130,6 @@ func holdsLine(held store.Held, budget int) string {
 	return "You still hold: " + strings.Join(names, ", ") + "."
 }
 
-// contextLine folds session-written text to one line of at most n characters.
-func contextLine(text string, n int) string {
-	runes := []rune(strings.Join(strings.Fields(text), " "))
-	if len(runes) > n {
-		return string(runes[:n-1]) + "…"
-	}
-	return string(runes)
-}
-
 func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal, req contract.ContextSnapshotRequest) (contract.ContextSnapshotResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalSession {
 		return contract.ContextSnapshotResponse{}, forbidden()
@@ -160,16 +151,16 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	}
 	var lines []string
 	for _, g := range data.Goals {
-		lines = append(lines, fmt.Sprintf("%s: %s", g.ID, contextLine(g.Text, 300)))
+		lines = append(lines, fmt.Sprintf("%s: %s", g.ID, excerpt(g.Text, 300)))
 		if g.DoneWhen != "" {
-			lines = append(lines, "Done when: "+contextLine(g.DoneWhen, 200))
+			lines = append(lines, "Done when: "+excerpt(g.DoneWhen, 200))
 		}
 		for _, item := range g.Items {
 			indent := "- "
 			if item.Parent != 0 {
 				indent = "  - "
 			}
-			lines = append(lines, fmt.Sprintf("%s%d. %s", indent, item.Number, contextLine(item.Text, 160)))
+			lines = append(lines, fmt.Sprintf("%s%d. %s", indent, item.Number, excerpt(item.Text, 160)))
 		}
 	}
 	add(contract.ContextGoal, lines, 1500, 0)
@@ -182,7 +173,7 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 			}
 		}
 		if c.Item != "" {
-			line += ", " + contextLine(c.Item, 80)
+			line += ", " + excerpt(c.Item, 80)
 		}
 		if c.Waiting != nil {
 			line += ", waiting: " + c.Waiting.Label()

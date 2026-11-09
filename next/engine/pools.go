@@ -91,17 +91,8 @@ func (s *Service) addPool(ctx context.Context, req contract.PoolAddRequest) erro
 
 // asker gives the room a session asks from, and no room for the owner, who acts at once.
 func (s *Service) asker(ctx context.Context, caller contract.Principal) (contract.RoomID, *contract.Error) {
-	switch caller.Kind {
-	case contract.PrincipalOwner:
-		return "", nil
-	case contract.PrincipalSession:
-		session, err := s.store.Session(ctx, caller.Session)
-		if err != nil {
-			return "", failure(err)
-		}
-		return session.Room, nil
-	}
-	return "", forbidden()
+	own, _, e := s.navScope(ctx, caller)
+	return own, e
 }
 
 // PoolAdd adds a pool. It runs on the engine host and costs money, so a session's request waits for the owner.

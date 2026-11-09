@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"mime"
 	"os"
 	"path/filepath"
@@ -428,11 +429,7 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 		}
 	}
 	delete(named, "")
-	ids := make([]contract.SessionID, 0, len(named))
-	for id := range named {
-		ids = append(ids, id)
-	}
-	names, err := s.store.SessionNames(ctx, ids)
+	names, err := s.store.SessionNames(ctx, slices.Collect(maps.Keys(named)))
 	if err != nil {
 		return contract.EventsListResponse{}, failure(err)
 	}
