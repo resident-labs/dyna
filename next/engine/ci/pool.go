@@ -237,9 +237,18 @@ func (p *Pool) Tick(ctx context.Context, group *sync.WaitGroup) error {
 		}
 	}
 	for repo := range view.repos {
-		if err := p.upkeep(ctx, repo, alive[repo]); err != nil {
-			failures = append(failures, fmt.Errorf("repository %s: %w", repo, err))
+		now := p.Now()
+		if now.Before(p.reaped[repo]) {
+			continue
 		}
+		if err := p.reap(ctx, repo, alive[repo]); err != nil {
+			failures = append(failures, fmt.Errorf("repository %s: %w", repo, errors.Join(err)))
+			continue
+		}
+		if p.reaped == nil {
+			p.reaped = make(map[contract.RepoName]time.Time)
+		}
+		p.reaped[repo] = now.Add(reapEvery)
 	}
 	// One pass after the last repository leaves removes its runners. A pass that failed looks again, and the first pass
 	// reaps what an earlier engine left.
@@ -945,23 +954,6 @@ func (p *Pool) renew(ctx context.Context, repo contract.RepoName, hosts []box.Ho
 	}
 	p.leased[repo] = now.Add(leaseEvery)
 	return nil
-}
-
-// upkeep removes dead registrations.
-func (p *Pool) upkeep(ctx context.Context, repo contract.RepoName, alive map[string]bool) error {
-	var failures []error
-	now := p.Now()
-	if !now.Before(p.reaped[repo]) {
-		if err := p.reap(ctx, repo, alive); err != nil {
-			failures = append(failures, err)
-		} else {
-			if p.reaped == nil {
-				p.reaped = make(map[contract.RepoName]time.Time)
-			}
-			p.reaped[repo] = now.Add(reapEvery)
-		}
-	}
-	return errors.Join(failures...)
 }
 
 // reap removes registrations no container answers for: a runner killed before it finished a job, or one on a host that

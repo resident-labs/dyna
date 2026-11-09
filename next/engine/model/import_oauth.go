@@ -19,15 +19,12 @@ func (c *Connections) ImportOAuth(ctx context.Context, req contract.AccountsImpo
 	}
 	proxyID := "dyna-oauth-" + hex.EncodeToString(raw[:16])
 	accountID := contract.AccountID(hex.EncodeToString(raw[16:]))
-	body, err := json.Marshal(struct {
+	body, _ := json.Marshal(struct {
 		ID         string                   `json:"id"`
 		Provider   contract.AccountProvider `json:"provider"`
 		ExpiresAt  string                   `json:"expiresAt"`
 		Credential string                   `json:"credential"`
 	}{proxyID, req.Provider, req.ExpiresAt.UTC().Format(time.RFC3339Nano), req.Credential})
-	if err != nil {
-		return contract.AccountsImportOAuthResponse{}, errConnect
-	}
 	bound := false
 	defer func() {
 		if !bound {
