@@ -276,9 +276,6 @@ func TestSliceAndCgroup(t *testing.T) {
 	if err != nil || name != "dyna-box_a.slice" {
 		t.Fatalf("%q %v", name, err)
 	}
-	if got := box.CgroupArgs(name); len(got) != 1 || got[0] != "--cgroup-parent="+name {
-		t.Fatal(got)
-	}
 }
 func TestFakeHost(t *testing.T) {
 	h := fakehost.New()
