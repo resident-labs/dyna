@@ -949,7 +949,8 @@
   .heading strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @media (min-width: 641px) {
     .word { flex: 1 1 0; }
-    .session-bar .heading strong { min-width: min(8rem, 100%); }
+    /* The title keeps its own width, so the word sits right after it; only a very long title truncates. */
+    .session-bar .heading strong { flex: none; max-width: 50%; }
   }
   .crumb { flex: none; max-width: 25%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @container session-header (max-width: 500px) { .session-bar .crumb, .session-bar .crumb + .count { display: none; } }
