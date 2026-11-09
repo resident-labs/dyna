@@ -49,15 +49,9 @@ func (m Muse) Name() string { return "muse" }
 
 // Search asks the Muse search API about q.
 func (m Muse) Search(ctx context.Context, q Query) ([]Result, error) {
-	if m.Key == nil {
-		return nil, ErrNotSignedIn
-	}
-	key, err := m.Key(ctx)
+	key, err := savedKey(ctx, m.Key)
 	if err != nil {
 		return nil, err
-	}
-	if key == "" {
-		return nil, ErrNotSignedIn
 	}
 	// One request id names the search in both the body and the session header.
 	requestID, err := museRequestID()

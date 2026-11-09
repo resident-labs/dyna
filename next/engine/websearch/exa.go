@@ -34,15 +34,9 @@ func (e Exa) Name() string { return "exa" }
 
 // Search asks Exa for q.Results. Highlights hold the snippet.
 func (e Exa) Search(ctx context.Context, q Query) ([]Result, error) {
-	if e.Key == nil {
-		return nil, ErrNotSignedIn
-	}
-	key, err := e.Key(ctx)
+	key, err := savedKey(ctx, e.Key)
 	if err != nil {
 		return nil, err
-	}
-	if key == "" {
-		return nil, ErrNotSignedIn
 	}
 	body, err := json.Marshal(exaRequest{
 		Query:      q.Text,
