@@ -10,19 +10,6 @@ import (
 // InputBatchWindow is measured from the preceding turn's end, not an arrival.
 const InputBatchWindow = time.Minute
 
-type batchReader interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}
-
-func batchDeadline(ctx context.Context, db batchReader, session contract.SessionID) (time.Time, error) {
-	var ended sql.NullInt64
-	err := db.QueryRowContext(ctx, "SELECT MAX(ended_at) FROM turns WHERE session=?", session).Scan(&ended)
-	if err != nil || !ended.Valid {
-		return time.Time{}, err
-	}
-	return time.UnixMilli(ended.Int64).Add(InputBatchWindow), nil
-}
-
 // InputBatchDeadline derives the current idle wait from durable state. A stream
 // owns one scheduled kick; reconnecting recomputes it, never restarts the window.
 func (s *Store) InputBatchDeadline(ctx context.Context, session contract.SessionID) (time.Time, error) {

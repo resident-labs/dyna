@@ -118,12 +118,6 @@ func (s *Store) noticeSent(ctx context.Context, tx *sql.Tx, notice contract.Even
 // openGoalSQL asks whether an open session holds a goal that is not done.
 const openGoalSQL = `SELECT EXISTS (SELECT 1 FROM goals g JOIN sessions s ON s.id=g.session WHERE g.session=? AND g.state='active' AND s.closed_at IS NULL)`
 
-// HasOpenGoal says whether a session holds a goal that is not done.
-func (s *Store) HasOpenGoal(ctx context.Context, id contract.SessionID) (open bool, err error) {
-	err = s.Read().QueryRowContext(ctx, openGoalSQL, id).Scan(&open)
-	return open, err
-}
-
 // NoticeRestarted tells a session its box started again after it stopped.
 func (s *Store) NoticeRestarted(ctx context.Context, notice contract.Event) error {
 	return s.Write(ctx, func(tx *sql.Tx) error { return s.restartNotice(ctx, tx, notice) })

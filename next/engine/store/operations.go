@@ -74,11 +74,6 @@ func (s *Store) InsertOperationReplay(tx *sql.Tx, caller contract.Principal, cli
 	return err
 }
 
-// ReplayOperation finds a caller's keyed operation in the active write transaction.
-func (s *Store) ReplayOperation(tx *sql.Tx, caller contract.Principal, clientID string) (StoredOperation, error) {
-	return scanOperation(tx.QueryRow(replayOperationQuery, contract.MethodOpSubmit, caller.Kind, caller.Session, clientID))
-}
-
 // Operations lists records in a state. A nonzero due time limits expiry to that time.
 func (s *Store) Operations(ctx context.Context, room contract.RoomID, state contract.OpState, due time.Time) ([]StoredOperation, error) {
 	query := "SELECT " + operationColumns + " FROM operations"
@@ -224,7 +219,7 @@ func (s *Store) SubmitOperation(ctx context.Context, record StoredOperation, req
 	op := record.Operation
 	err = s.Write(ctx, func(tx *sql.Tx) error {
 		if clientID != "" {
-			found, err := s.ReplayOperation(tx, op.By, clientID)
+			found, err := scanOperation(tx.QueryRow(replayOperationQuery, contract.MethodOpSubmit, op.By.Kind, op.By.Session, clientID))
 			if err == nil {
 				previous = found
 				replay = true

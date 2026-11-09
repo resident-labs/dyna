@@ -177,7 +177,7 @@ func TestCheckpointDoesNotBlockWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { done <- s.checkpointOnce() }()
+	go func() { done <- s.checkpointRun() }()
 	<-started
 	err = s.Write(context.Background(), func(tx *sql.Tx) error {
 		_, err := tx.Exec("INSERT INTO meta VALUES ('checkpoint-test','value')")
