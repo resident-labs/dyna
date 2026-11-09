@@ -41,7 +41,7 @@
       {:else if reason === "room-host"}<StatusPill tone="warning" word label={waits[reason]} />
       {:else if reason}{waits[reason]}
       {:else if running}{place}
-      {:else if box === "stopped"}<span title="Wakes on your next message">{onHost("Stopped", host)}{#if size}{" · "}{size.name}{/if}</span>
+      {:else if box === "stopped"}<span title="Wakes on your next message">{onHost("Asleep", host)}{#if size}{" · "}{size.name}{/if}</span>
       {:else if store.starting(session)}{store.startLine(session)}
       {:else}{onHost(boxWords[box], host)}{/if}</dd>
     {#if holding}
