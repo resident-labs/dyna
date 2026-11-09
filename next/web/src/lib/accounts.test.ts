@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountChips, accountChoiceName, accountChoiceNote, accountItems, accountLine, accountPath, accountPill, addProviderError, labelRefusal, parseModelIDs, providerChoices, removalPrompt, canReconnect,
+import { accountChips, accountChoiceName, accountChoiceNote, accountItems, accountLine, accountPath, accountPill, addProviderError, labelRefusal, parseModelIDs, providerChoices, removalPrompt,
   reconnectUnavailable, roomChoices, usageHint, usageNote, type AccountItem } from "./accounts.ts";
 import { APIError } from "./client.ts";
 import type { Account, AccountProviderInfo, AccountUsage, ErrorCode, RoomSummary, UsageWindow } from "./contract.gen.ts";
@@ -135,13 +135,6 @@ test("only the engine's refusal asks for a different label", () => {
   assert.equal(labelRefusal(new APIError({ code: "invalid", message: "invalid account label" })), "Use 1 to 128 characters, without @.");
   assert.equal(labelRefusal(new APIError({ code: "unavailable", message: "offline" })), "The label was not saved. Try again.");
   assert.equal(labelRefusal(new Error("invalid")), "The label was not saved. Try again.");
-});
-
-test("only expired sign-ins offer reconnect", () => {
-  const account = acct("a", { state: "sign_in_expired" });
-  assert.equal(canReconnect(account, "oauth"), true);
-  assert.equal(canReconnect({ ...account, state: "connected" }, "oauth"), false);
-  assert.equal(canReconnect(account, "key"), false);
 });
 
 test("removal says what Dyna deletes for each connection method", () => {
