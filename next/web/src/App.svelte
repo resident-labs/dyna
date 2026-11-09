@@ -590,8 +590,8 @@
     const goal = store?.goals.get(id)?.at(-1);
     return goal?.items?.find(item => item.state === "open")?.text ?? goal?.text ?? "";
   };
-  // A DM's header says only the status word; the live line and About say what the session does. A failed session has
-  // no live line, so the header gives its reason.
+  // A DM's header says the status word in every state, as the live line can be scrolled out of view; the live line and
+  // About say what the session does. A failed session has no live line, so the header gives its reason.
   const stateWords = { waiting: "Needs you", failed: "Failed", working: "Working", background: "Waiting" };
   let shown = $derived(session ? store?.status(session) ?? "idle" : "idle");
   let word = $derived(session ? (shown === "idle" || shown === "background" ? status(session) : shown === "failed" ? `Failed · ${status(session)}` : stateWords[shown]) : "");
@@ -810,7 +810,7 @@
       {:else if room}<span class="hash"><Icon name="room" /></span>{/if}
       {#if session && !closed}<Avatar kind="session" name={title} root={!store?.sessions.get(session)?.parent} size={24} />{/if}
       <span class="heading"><strong title={title}>{title}</strong>
-        {#if closed && !missing}<span class="count">closed</span>{:else if (shown === "idle" || shown === "background") && word && !missing}<span class="count word" title={word === "Asleep" ? "Wakes on your next message" : word}>{word}</span>{/if}
+        {#if closed && !missing}<span class="count">closed</span>{:else if word && !missing}<span class="count word" class:asks={shown === "waiting"} title={word === "Asleep" ? "Wakes on your next message" : word}>{word}</span>{/if}
         {#if store?.ready && !session}<span class="count narrow">{count(store.members.length, "session")}</span>{/if}</span>
       {#if store && !unavailable}
         {#if !session}<FeedDepthControl value={feedDepth} onchange={chooseDepth} />{/if}
@@ -834,7 +834,7 @@
       {:else if !room}<Home {attention} {initials} loaded={roomsLoaded} {navigate} onrequests={() => { section = "requests"; }} covered={inSettings} />
       {:else if unavailable === "unreachable"}<Blocked kind="unreachable" onretry={reopen} />
       {:else if store && !unavailable}
-        {#if session}{#key session}{#if crew}<WorkflowRun {store} {hasRoom} {session} {roomName} {navigate} operate={attention.can("operate")} onpostlocation={(room, seq) => openLocation(room, undefined, seq)} />{:else}<SessionThread bind:this={thread} {store} {hasRoom} {session} {roomName} {navigate} operate={attention.can("operate")} startingBrief={startingBriefs[session]} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle} onpostlocation={(room, seq) => openLocation(room, undefined, seq)} />{/if}{/key}{:else}{#key key}<Feed bind:this={view} depth={{ mode: feedDepth, depths }} {store} {hasRoom} {home} {navigate} admin={attention.can("admin")} operate={attention.can("operate") && !closed} waiting={quotes[key]} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
+        {#if session}{#key session}{#if crew}<WorkflowRun {store} {hasRoom} {session} {roomName} {navigate} operate={attention.can("operate")} onpostlocation={(room, seq) => openLocation(room, undefined, seq)} />{:else}<SessionThread bind:this={thread} {store} {hasRoom} {session} {roomName} {navigate} admin={attention.can("admin")} operate={attention.can("operate")} startingBrief={startingBriefs[session]} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle} onpostlocation={(room, seq) => openLocation(room, undefined, seq)} />{/if}{/key}{:else}{#key key}<Feed bind:this={view} depth={{ mode: feedDepth, depths }} {store} {hasRoom} {home} {navigate} admin={attention.can("admin")} operate={attention.can("operate") && !closed} waiting={quotes[key]} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
           onforward={forward} onclosed={() => composer?.focus()} onjobs={item => void jobsTool?.show(item)}
           />{/key}{/if}
         <!-- The open thread or feed stays mounted behind the error, as it tells the page the session has no history. -->
@@ -953,6 +953,7 @@
   .heading { display: contents; }
   /* The header has one line, and a failed session's word is a sentence, so the word gives way and the title stays whole. */
   .word { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .word.asks { color: var(--attention); }
   .heading strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @media (min-width: 641px) {
     .word { flex: 1 1 0; }

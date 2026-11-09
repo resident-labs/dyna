@@ -313,14 +313,15 @@
   .steps { margin: 4px 16px 4px var(--gutter); padding: 0 0 0 12px; border-left: 1px solid var(--line); list-style: none; color: var(--muted); font-size: 12.5px; }
   .steps li { padding: 1px 0; overflow-wrap: anywhere; }
   /* A run's line sits where a work row does, past PostRow's avatar. */
-  .run { display: grid; grid-template-columns: 14px minmax(0, 1fr); align-items: start; gap: 10px; padding: 7px 16px 7px 72px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; text-decoration: none; }
+  .run { display: grid; grid-template-columns: 14px minmax(0, 1fr); align-items: start; gap: 10px; padding: 7px 16px 7px calc(var(--gutter) - 24px); color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; text-decoration: none; }
   .run :global(svg) { margin-top: 4px; }
   .run-line { min-width: 0; padding-top: 3px; overflow-wrap: anywhere; }
   .run strong { color: var(--text); font-weight: 500; }
-  .run time { margin-left: 8px; opacity: .8; white-space: nowrap; }
+  .run time { opacity: .8; white-space: nowrap; }
+  .run time::before { content: "· "; }
   .run:hover strong { text-decoration: underline; }
   .run:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-  @media (max-width: 640px) { .run { padding-left: 64px; } }
+  @media (max-width: 640px) { .run time::before { content: none; } }
   @media (hover: none) { .run { min-height: 40px; align-items: center; } }
   /* A centred muted date on a hairline, as in Discord. */
   .day { margin: 16px 16px 4px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; }
