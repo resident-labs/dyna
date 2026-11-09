@@ -3,7 +3,7 @@
   import { call } from "../client.ts";
   import { decodeEvent } from "../event.ts";
   import { hue } from "../identity.ts";
-  import { visibleAttachments, causes, dayLabel, formatTime } from "../feed.ts";
+  import { visibleAttachments, causes, dayLabel, formatTime, waits } from "../feed.ts";
   import { watchTranscripts } from "../stream.ts";
   import { sourceLabel } from "../source.ts";
   import type { Attachment, Principal, RoomID, PostRequest, TranscriptInput, TranscriptItem, TranscriptPart, TranscriptReadResponse, TranscriptTurn, TranscriptPage } from "../contract.gen.ts";
@@ -47,8 +47,18 @@
   // An open turn of a closed session or a failed box never ends, so it does not count as running.
   let closed = $derived(store.ready && !store.sessions.has(session));
   let stalled = $derived(closed || store.boxFailures.has(session));
+  // The store hears turn.ended at once and a transcript read can lag it, so a turn the store no longer runs is over.
+  let liveTurn = $derived(store.turns.get(session));
+  const running = (turn: TranscriptTurn) => !turn.ended && !stalled && (!store.ready || liveTurn === turn.id);
+  // Why a message is still waiting, in the owner's words: the box, the running turn, or nothing yet.
+  let box = $derived(store.boxes.get(session));
+  let reason = $derived(store.pendingReasons.get(session));
+  let queuedNote = $derived(box === "lost" || box === "failed" ? "Queued · its box stopped"
+    : liveTurn ? "Queued · it reads this next"
+    : box === "pending" && reason ? `Queued · ${waits[reason].toLowerCase()}`
+    : box && box !== "ready" ? "Queued · waking the session" : "Queued");
   $effect(() => {
-    if (stalled || !turns.some(turn => !turn.ended)) return;
+    if (!turns.some(running)) return;
     now = clock();
     const timer = setInterval(() => { now = clock(); }, 1000);
     return () => clearInterval(timer);
@@ -357,7 +367,7 @@
     {#each turns as turn, index (turn.id)}
       {@const segments = timelineSegments(turn.id, turn.items ?? [])}
       {@render dayMark(turn.started, turns[index - 1]?.started)}
-      <article data-turn={turn.id} class:ended={turn.ended || stalled}>
+      <article data-turn={turn.id} class:ended={!running(turn)}>
         {#each foldInputRuns(turn.inputs ?? []) as run (run.kind === "input" ? run.input.id : run.id)}
           {#if run.kind === "input"}{@render inputRow(turn, run.input.id, "input:" + run.input.id, run.input)}
           {:else}<p class="muted turn-note input-line" title={formatTime(run.from)}><span class="slot"><Icon name="inbox" size={14} /></span><span>{engineEventsNote(run)}</span></p>{/if}
@@ -371,7 +381,7 @@
           {/if}
           {#each shownTimelineGroups(segment.items, !!turn.ended && !expandedTurns[segment.id]) as group (group.id)}
             {#if group.kind === "work"}
-              <TranscriptWorkRow items={group.items} ended={!!turn.ended || stalled} started={turn.started} {now} activity={store.activityKinds.get(session)} {chunks} {session} onmedia={key => openMedia(key, 0)}
+              <TranscriptWorkRow items={group.items} ended={!running(turn)} started={turn.started} {now} activity={store.activityKinds.get(session)} {chunks} {session} onmedia={key => openMedia(key, 0)}
                 onopen={() => { if (turn.olderItems) void readContinuation(turn, "older"); }}
                 onload={async (item, part) => { if (!await fetchPart(turn.id, item.id, part)) throw new Error("Part did not load"); }} />
             {:else if group.kind === "posts"}
@@ -387,7 +397,7 @@
         {/each}
         {#if turn.outcome === "failed"}<div class="failure"><span class="slot"><Icon name="warning" size={16} /></span>{turn.cause ? causes[turn.cause] : "The turn failed"}</div>
         {:else if turn.outcome === "stopped"}<p class="muted turn-note">Stopped</p>{/if}
-        {#if !turn.ended && !stalled && !(turn.items ?? []).some(item => timelineItemRunning(item, false))}<p class="muted turn-note"><span class="slot"><span class="spinner" aria-hidden="true"></span></span>{workingLine(turn.started, now, store.activityKinds.get(session))}</p>{/if}
+        {#if running(turn) && !(turn.items ?? []).some(item => timelineItemRunning(item, false))}<p class="muted turn-note"><span class="slot"><span class="spinner" aria-hidden="true"></span></span>{workingLine(turn.started, now, store.activityKinds.get(session))}</p>{/if}
       </article>
     {/each}
     <!-- A question waits at the end of the thread. Once answered, it is part of the input that answer becomes. -->
@@ -395,7 +405,7 @@
     {#if waitingSince}{@render dayMark(waitingSince, turns.at(-1)?.started)}{/if}
     {#each queuedPosts as post (post.id)}
       {#snippet body()}{@render message(post.id, post.body.text, post.body.attachments, post.id, post.at, post.body.data, undefined, post.body.dataAttachment, post.from)}{/snippet}
-      {#snippet queued()}<p class="owner-note queued">Queued</p>{/snippet}
+      {#snippet queued()}<p class="owner-note queued">{queuedNote}</p>{/snippet}
       {#if post.from.kind === "owner"}{@render ownerMessage(post.id, post.at, false, body, closed ? undefined : queued)}
       {:else if post.from.kind === "session" && post.from.session === session}<div class="agent-message" data-media-key={post.id}>{@render body()}</div>
       {:else}{@render inbound(post.id, post.from, post.at, body, !!post.body.attachments?.length, post.body.source)}{/if}
