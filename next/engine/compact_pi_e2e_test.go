@@ -50,9 +50,3 @@ func (p *compactProvider) serve(w http.ResponseWriter, r *http.Request) {
 	send("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`)
 	send("message_stop", `{"type":"message_stop"}`)
 }
-
-func (p *compactProvider) last() string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.bodies[len(p.bodies)-1]
-}

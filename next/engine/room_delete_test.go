@@ -11,7 +11,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -438,22 +437,6 @@ func TestRoomDeleteRemovesEveryRowAndFolder(t *testing.T) {
 	}
 	if _, e := r.s.RoomList(ctx, deleteOwner, contract.RoomListRequest{}); e != nil {
 		t.Fatal(e)
-	}
-}
-
-func (r *deleteRig) refused(t *testing.T, ctx context.Context, room contract.RoomID, accounts []contract.AccountID, hosts []contract.HostName, names ...string) {
-	t.Helper()
-	_, e := r.s.RoomDelete(ctx, deleteOwner, contract.RoomDeleteRequest{Room: room, Discard: true})
-	if e == nil || e.Code != contract.ErrRoomLimited || e.Limited == nil {
-		t.Fatalf("got %+v", e)
-	}
-	if !slices.Equal(e.Limited.Accounts, accounts) || !slices.Equal(e.Limited.Hosts, hosts) {
-		t.Fatalf("limited: %+v", e.Limited)
-	}
-	for _, name := range names {
-		if !strings.Contains(e.Message, name) {
-			t.Fatalf("%q does not name %s", e.Message, name)
-		}
 	}
 }
 

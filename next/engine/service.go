@@ -65,7 +65,6 @@ type Service struct {
 	usage             Usage
 	searchMu          sync.Mutex
 	searchFailures    map[string]time.Time
-	dispatch          func(context.Context, contract.SessionID, contract.TurnID, contract.Event, bool) (contract.TurnID, []store.FeedInput, error)
 	boxes             lifecycle.BoxAdapter
 	reconciler        *lifecycle.Reconciler
 	binary            string

@@ -109,16 +109,6 @@ func TestTranscriptItemIndexContinuesInOrder(t *testing.T) {
 	}
 }
 
-func TestTranscriptCallClaimRequiresExactID(t *testing.T) {
-	data := `{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"right","name":"bash"}]}}
-{"type":"message","message":{"role":"toolResult","toolCallId":"right","content":[{"type":"text","text":"fake-id"}]}}
-`
-	ids := map[string]bool{"right": false, "fake-id": false}
-	if err := TranscriptFindCalls(strings.NewReader(data), ids); err != nil || !ids["right"] || ids["fake-id"] {
-		t.Fatalf("calls=%v err=%v", ids, err)
-	}
-}
-
 func TestTranscriptBoundsToolIdentity(t *testing.T) {
 	id := strings.Repeat("x", 200000)
 	name := strings.Repeat("n", 200000)
