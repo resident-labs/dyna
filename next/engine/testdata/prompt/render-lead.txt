@@ -89,4 +89,4 @@ Inputs within a minute of a turn's end batch into the next turn, except owner, s
 
 You are build-lead, session ses_01M6XXXXXXXXXXXXXXXXXXXXXX, in room dyna (ID room_01M6BE8K3T5KWS0NBGRZDFDZ64). Your parent is root.
 Your branch: build-lead on resident-labs/dyna. Pushes and fetches go through the engine, which sends a push or fetch once more when GitHub answers 5xx (for a push also a commit_refs error) and the request body is at most 1 MiB, and reports the cause when the second try fails.
-Your box is capped at 4 CPU and 8 GiB of memory: heavy builds belong in a larger child session or CI.
+Your box has 4 CPU and 8 GiB of memory: heavy builds belong in a larger child session or CI.
