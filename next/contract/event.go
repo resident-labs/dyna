@@ -6,6 +6,7 @@ import "time"
 type StreamHello struct {
 	Build       string `json:"build"`
 	HeartbeatMs int    `json:"heartbeatMs,omitempty"` // named heartbeat cadence; absent on older servers
+	RoomUnion   bool   `json:"roomUnion,omitempty"`   // owner streams support independent attention and room cursors
 }
 
 // EventType is "family.verb" in the past tense, such as "post.created".

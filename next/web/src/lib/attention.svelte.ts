@@ -1,6 +1,6 @@
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { APIError, blockedBy, call, retryDelay } from "./client.ts";
-import { stream } from "./stream.ts";
+import { stream, type StreamSubscribe } from "./stream.ts";
 import { boxFailures, turnFailures, type BoxFailure } from "./status.ts";
 import { pendingReason } from "./event.ts";
 import { scopes as everyScope } from "./devices.ts";
@@ -48,8 +48,8 @@ export class Attention {
   // The newest event applied; room.list gives the first value and the stream resumes after it.
   private head = 0;
   private stop = () => {};
-  private readonly connect: typeof stream;
-  constructor(connect: typeof stream = stream) { this.connect = connect; }
+  private readonly connect: StreamSubscribe;
+  constructor(connect: StreamSubscribe = stream) { this.connect = connect; }
 
   async open(): Promise<void> {
     const [list, mine] = await Promise.all([call("room.list", {}), call("device.scopes", {}).catch((error: unknown) => { if (error instanceof APIError && error.detail.code === "not_found") return undefined; throw error; })]);

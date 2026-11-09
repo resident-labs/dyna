@@ -4,6 +4,7 @@
   import { paneCounts, roomRoute, settingsRoute } from "./lib/routes.ts";
   import { nextArea } from "./lib/areas.ts";
   import { watchHello, watchStreamState } from "./lib/stream.ts";
+  import { PageEvents } from "./lib/page-events.ts";
   import { watchConnect } from "./lib/connect-watch.ts";
   import { reconnectNotice } from "./lib/reconnect.ts";
   import { FormDrafts } from "./lib/form-drafts.ts";
@@ -96,7 +97,9 @@
   const reconnect = reconnectNotice(on => { reconnecting = on; });
   watchStreamState(up => { streamUp = up; reconnect(up); });
   void watchConnect().then(watch => { if (watch) { watchStreamState(watch.stream); if (streamUp !== undefined) watch.stream(streamUp); } }, () => {});
-  const attention = new Attention();
+  const events = new PageEvents();
+  const attention = new Attention(events.connect);
+  $effect(() => () => { events.close(); attention.close(); });
   const hasRoom = (id: RoomID) => roomIsLive(attention.rooms, id);
   let rooms = $derived([...attention.rooms.values()]);
   // Distinct initials for every room avatar, so two rooms never look alike on the rail.
@@ -187,7 +190,7 @@
     localStorage.setItem(key, JSON.stringify(remember(visits(localStorage.getItem(key)), { room, session })));
   });
   // Derived, not set in the effect below: the room's views render with the store of the room they show.
-  let store = $derived(room ? new RoomStore(room) : undefined);
+  let store = $derived(room ? new RoomStore(room, events.connect) : undefined);
   const chosenDepths = new SvelteMap<string, FeedDepth>();
   let feedDepth = $derived(room ? chosenDepths.get(room) ?? loadFeedDepth(room, () => localStorage) : "all");
   let depths = $derived(sessionDepths([...store?.sessions.values() ?? []]));
