@@ -27,7 +27,7 @@
 {#if failure}<p role="alert">{failure}</p>{/if}
 <style>
   form { display: flex; align-items: flex-start; gap: 8px; min-width: 0; width: 100%; }
-  textarea { flex: 1; min-width: 0; min-height: 30px; max-height: 160px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; line-height: 18px; resize: vertical; field-sizing: content; }
+  textarea { flex: 1; min-width: 0; min-height: 30px; max-height: 160px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; line-height: 18px; resize: none; field-sizing: content; }
   textarea:focus-visible { border-color: var(--focus); outline: none; box-shadow: 0 0 0 1px var(--focus); }
   button { flex: none; height: 30px; padding: 0 12px; border: 1px solid var(--focus); border-radius: 6px; background: var(--focus); color: var(--bg); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
   button:hover:not(:disabled) { filter: brightness(1.08); }

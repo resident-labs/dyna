@@ -82,18 +82,23 @@
 </div>
 
 <style>
-  /* A work row starts at the message text, past PostRow's 40 px avatar and its gap, so it reads as under the message. */
-  .work { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 10px; padding: 7px 16px 7px 72px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+  /* A work row's text starts at the message text, and its glyph sits in the avatar column, so it reads as under the message. */
+  .work { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 10px; padding: 7px 16px 7px calc(var(--gutter) - 24px); color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
   .glyph { display: flex; justify-content: center; padding-top: 5px; }
-  @media (max-width: 640px) { .work { padding-left: 64px; } }
   .body { min-width: 0; }
   .fold { all: unset; display: flex; align-items: flex-start; gap: 8px; width: 100%; min-height: 24px; cursor: pointer; border-radius: 6px; }
   .bare { display: flex; min-height: 24px; }
   .fold:hover, .retry:hover { color: var(--text); }
   .fold:focus-visible, .retry:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-  .summary { flex: 1; min-width: 0; padding-top: 3px; overflow-wrap: anywhere; }
+  /* The chevron follows the text, so it reads as this line's; the whole row is still the button. */
+  .summary { min-width: 0; padding-top: 3px; overflow-wrap: anywhere; }
+  /* On a phone most summaries wrap, so the chevrons keep one column at the row's end. */
+  @media (max-width: 640px) { .summary { flex: 1; } }
   time { color: var(--muted); opacity: .8; white-space: nowrap; }
-  .summary time { margin-left: 8px; }
+  /* The time is the line's last part, after the same dot as the others, so when it wraps it starts at the text's edge. */
+  .summary time::before { content: "· "; }
+  /* On a phone the time often wraps, and a line must not start with the dot. */
+  @media (max-width: 640px) { .summary time::before { content: none; } }
   .chevron { display: inline-flex; flex: none; padding-top: 4px; transform: rotate(-90deg); }
   .chevron.open { transform: none; }
   .opened { margin: 4px 0 4px 10px; padding-left: 16px; border-left: 1px solid var(--line); }

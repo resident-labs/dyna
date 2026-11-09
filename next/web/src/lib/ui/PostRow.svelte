@@ -170,12 +170,12 @@
   .post.last { padding-bottom: 8px; }
   /* The wash follows the pointer only; a tap or a closed menu leaves none behind. */
   @media (hover: hover) { .swipe:hover { background: var(--post-hover); } }
-  .mention { background: var(--mention-bg); }
+  /* A post to the owner has the bar alone: most posts in a room's feed are to the owner, and a wash on each striped the feed. */
   .mention .post { padding-top: 4px; padding-bottom: 4px; }
   .mention .post.first { padding-top: 9px; }
   .mention .post.last { padding-bottom: 8px; }
-  .mention::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 2px; background: var(--mention-bar); }
-  @media (hover: hover) { .swipe.mention:hover { background: linear-gradient(var(--post-hover) 0 0), var(--mention-bg); } }
+  /* The bar stands at the reading column's edge: the row's own edge can lie under the rail, where it would not show. */
+  .mention::before { content: ""; position: absolute; inset: 0 auto 0 var(--bleed); width: 2px; background: var(--mention-bar); }
   .post .follow-time { grid-column: 1; grid-row: 1; align-self: start; text-align: center; font-size: 11px; visibility: hidden; }
   @media (hover: hover) { .swipe:hover .follow-time { visibility: visible; } }
   @media (max-width: 640px) { .post { column-gap: 8px; } }

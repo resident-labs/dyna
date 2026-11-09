@@ -95,6 +95,8 @@
   button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .back { padding: 0; color: var(--muted); font-size: 22px; }
   .back span { font-size: 13px; }
+  /* With the page bar above, the heading needs no second way back. */
+  @media (min-width: 641px) { .back { display: none; } }
   .fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
   .fields.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   label { display: grid; align-content: start; gap: 8px; min-width: 0; font-size: 14px; font-weight: 600; }
