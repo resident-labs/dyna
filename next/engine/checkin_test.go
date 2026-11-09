@@ -481,3 +481,18 @@ func TestGoalListTakesASessionName(t *testing.T) {
 		t.Fatalf("unknown name: %v", e)
 	}
 }
+
+func TestGoalSetTakesASessionName(t *testing.T) {
+	r := newGoalRig(t)
+	set, e := r.s.GoalSet(r.ctx, asSession(r.root), contract.GoalSetRequest{Session: "lead", Text: "lead it", DoneWhen: "merged"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	listed, e := r.s.GoalList(r.ctx, asSession(r.root), contract.GoalListRequest{Session: r.lead})
+	if e != nil || len(listed.Goals) != 1 || listed.Goals[0].ID != set.Goal {
+		t.Fatalf("lead's goals %+v: %v", listed, e)
+	}
+	if _, e := r.s.GoalSet(r.ctx, asSession(r.root), contract.GoalSetRequest{Session: "nobody", Text: "x", DoneWhen: "y"}); e == nil || e.Code != contract.ErrNotFound || !strings.Contains(e.Message, "nobody") {
+		t.Fatalf("unknown name: %v", e)
+	}
+}
