@@ -175,16 +175,10 @@ func (s *Service) subscriptionAccess(ctx context.Context, caller contract.Princi
 		return forbidden()
 	}
 	root := tree.Root() == caller.Session
-	manages := func(target contract.SessionID) bool {
-		return target == caller.Session || tree.CanManage(caller, target)
-	}
-	if sub.Run != nil && !root {
+	if !root && (sub.Run != nil || sub.Scope == contract.ScopeRoom) {
 		return forbidden()
 	}
-	if sub.Scope == contract.ScopeRoom && !root {
-		return forbidden()
-	}
-	if sub.Scope == contract.ScopeSession && !manages(sub.Session) {
+	if sub.Scope == contract.ScopeSession && sub.Session != caller.Session && !tree.CanManage(caller, sub.Session) {
 		return forbidden()
 	}
 	if sub.Wake != "" && sub.Wake != caller.Session {
