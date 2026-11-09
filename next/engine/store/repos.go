@@ -63,7 +63,11 @@ func (s *Store) RoomRepos(ctx context.Context, id contract.RoomID) ([]contract.R
 		}
 		return nil, err
 	}
-	return queryAll(ctx, s.Read(), func(rows scanner) (repo contract.RoomRepo, err error) {
+	return roomRepos(ctx, s.Read(), id)
+}
+
+func roomRepos(ctx context.Context, q sqlQuery, id contract.RoomID) ([]contract.RoomRepo, error) {
+	return queryAll(ctx, q, func(rows scanner) (repo contract.RoomRepo, err error) {
 		err = rows.Scan(&repo.Repo, &repo.Default)
 		return
 	}, "SELECT repo,is_default FROM room_repos WHERE room=? ORDER BY repo", id)
@@ -82,21 +86,7 @@ func (s *Store) AddRoomRepo(ctx context.Context, id contract.RoomID, name contra
 		if err := refuseNewWork(ctx, tx, id); err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, "SELECT repo,is_default FROM room_repos WHERE room=? ORDER BY repo", id)
-		if err != nil {
-			return err
-		}
-		var current []contract.RoomRepo
-		for rows.Next() {
-			var repo contract.RoomRepo
-			if err := rows.Scan(&repo.Repo, &repo.Default); err != nil {
-				rows.Close()
-				return err
-			}
-			current = append(current, repo)
-		}
-		err = rows.Err()
-		rows.Close()
+		current, err := roomRepos(ctx, tx, id)
 		if err != nil {
 			return err
 		}
