@@ -273,35 +273,6 @@ func TestSettledGoalChecklistDoesNotStall(t *testing.T) {
 	}
 }
 
-func TestSettledGoalDoesNotHideAnotherHeldGoal(t *testing.T) {
-	for _, openItem := range []bool{false, true} {
-		t.Run(map[bool]string{false: "zero items", true: "open item"}[openItem], func(t *testing.T) {
-			r := newGoalRig(t)
-			caller := asSession(r.child)
-			if _, e := r.s.GoalItem(r.ctx, caller, contract.GoalItemRequest{Goal: "g1", Text: "finished", State: contract.GoalItemDone}); e != nil {
-				t.Fatal(e)
-			}
-			second, e := r.s.GoalSet(r.ctx, caller, contract.GoalSetRequest{Text: "other work", DoneWhen: "shipped"})
-			if e != nil {
-				t.Fatal(e)
-			}
-			if openItem {
-				if _, e := r.s.GoalItem(r.ctx, caller, contract.GoalItemRequest{Goal: second.Goal, Text: "remaining"}); e != nil {
-					t.Fatal(e)
-				}
-			}
-			r.turn(r.child, "work remains on the second goal")
-			r.turn(r.lead, "noted")
-			r.advance(room.CheckinIdle + time.Minute)
-			r.pass()
-			r.wantCheckins(r.lead, 1)
-			if got := r.checkins(r.lead)[0].Children; len(got) != 1 || got[0].Goal != second.Goal {
-				t.Fatalf("report %+v", got)
-			}
-		})
-	}
-}
-
 func TestZeroItemGoalStillStalls(t *testing.T) {
 	r := newGoalRig(t)
 	r.turn(r.child, "work remains despite no checklist")
@@ -430,7 +401,7 @@ func TestGoalAuthority(t *testing.T) {
 
 func TestGoalLifecycleThroughTheAPI(t *testing.T) {
 	r := newGoalRig(t)
-	child := asSession(r.child)
+	child := asSession(r.lead)
 	own, e := r.s.GoalSet(r.ctx, child, contract.GoalSetRequest{ClientID: "retry", Text: "write tests", DoneWhen: "tests pass"})
 	if e != nil {
 		t.Fatal(e)
@@ -456,7 +427,7 @@ func TestGoalLifecycleThroughTheAPI(t *testing.T) {
 		t.Fatal(e)
 	}
 	journal, e := r.s.GoalJournal(r.ctx, child, contract.GoalJournalRequest{Goal: own.Goal, Text: "second"})
-	if e != nil || len(journal.Entries) != 2 || journal.Entries[0].Text != "second" || journal.Entries[0].By.Session != r.child {
+	if e != nil || len(journal.Entries) != 2 || journal.Entries[0].Text != "second" || journal.Entries[0].By.Session != r.lead {
 		t.Fatalf("journal %+v: %v", journal, e)
 	}
 	if _, e := r.s.GoalDone(r.ctx, child, contract.GoalDoneRequest{Goal: own.Goal, Summary: "all pass"}); e != nil {
@@ -466,11 +437,11 @@ func TestGoalLifecycleThroughTheAPI(t *testing.T) {
 	if e != nil || len(list.Goals) != 1 || list.Goals[0].ID != "g1" || list.Goals[0].DoneWhen != "the port is merged" || list.Goals[0].Session != r.child {
 		t.Fatalf("active goals %+v: %v", list, e)
 	}
-	all, e := r.s.GoalList(r.ctx, ownerCaller, contract.GoalListRequest{Room: r.room, All: true, Session: r.child})
-	if e != nil || len(all.Goals) != 2 || all.Goals[1].State != contract.GoalDone || all.Goals[1].Summary != "all pass" {
+	all, e := r.s.GoalList(r.ctx, ownerCaller, contract.GoalListRequest{Room: r.room, All: true, Session: r.lead})
+	if e != nil || len(all.Goals) != 1 || all.Goals[0].State != contract.GoalDone || all.Goals[0].Summary != "all pass" {
 		t.Fatalf("all goals %+v: %v", all, e)
 	}
-	ended := all.Goals[1]
+	ended := all.Goals[0]
 	if len(ended.Items) != 1 || ended.Items[0].State != contract.GoalItemDone {
 		t.Fatalf("items %+v", ended.Items)
 	}

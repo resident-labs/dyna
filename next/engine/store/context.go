@@ -60,12 +60,12 @@ func (s *Store) ContextDataForSession(ctx context.Context, id contract.SessionID
 	return data, err
 }
 
-// ContextGoal is a goal the session holds, with its open items.
+// ContextGoal is the goal the session holds, with its open items in tree order: each top-level item, then its subtasks.
 type ContextGoal struct {
 	ID       contract.GoalID
 	Text     string
 	DoneWhen string
-	Items    []string
+	Items    []contract.GoalItem
 }
 type ContextChild struct {
 	Box     contract.BoxID
@@ -74,7 +74,7 @@ type ContextChild struct {
 	Profile contract.ProfileName
 	State   contract.BoxState
 	Asking  bool   // it waits for the owner's answer, so it is not finished
-	Item    string // what it works on now: its oldest goal's first open item, or that goal
+	Item    string // what it works on now: its goal's first open leaf in tree order, or that goal
 }
 
 // ContextContact holds only a session's identity and profile, so activity never changes its contact entry.
@@ -115,7 +115,7 @@ type ContextPR struct {
 }
 
 func (s *Store) ContextGoals(ctx context.Context, id contract.SessionID) ([]ContextGoal, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT g.number,g.text,g.done_when,i.text FROM goals g LEFT JOIN goal_items i ON i.room=g.room AND i.goal=g.number AND i.state='open' WHERE g.session=? AND g.state='active' ORDER BY g.number,i.number`, id)
+	rows, err := s.Read().QueryContext(ctx, `SELECT g.number,g.text,g.done_when,i.number,i.parent,i.text FROM goals g LEFT JOIN goal_items i ON i.room=g.room AND i.goal=g.number AND i.state='open' WHERE g.session=? AND g.state='active' ORDER BY g.number,CASE i.parent WHEN 0 THEN i.number ELSE i.parent END,i.parent<>0,i.number`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -124,8 +124,9 @@ func (s *Store) ContextGoals(ctx context.Context, id contract.SessionID) ([]Cont
 	for rows.Next() {
 		var number int64
 		var text, doneWhen string
-		var item sql.NullString
-		if err := rows.Scan(&number, &text, &doneWhen, &item); err != nil {
+		var item, parent sql.NullInt64
+		var itemText sql.NullString
+		if err := rows.Scan(&number, &text, &doneWhen, &item, &parent, &itemText); err != nil {
 			return nil, err
 		}
 		if n := len(out); n == 0 || out[n-1].ID != goalID(number) {
@@ -133,7 +134,7 @@ func (s *Store) ContextGoals(ctx context.Context, id contract.SessionID) ([]Cont
 		}
 		if item.Valid {
 			last := &out[len(out)-1]
-			last.Items = append(last.Items, item.String)
+			last.Items = append(last.Items, contract.GoalItem{Number: int(item.Int64), Parent: int(parent.Int64), Text: itemText.String, State: contract.GoalItemOpen})
 		}
 	}
 	return out, rows.Err()
@@ -142,7 +143,7 @@ func (s *Store) ContextGoals(ctx context.Context, id contract.SessionID) ([]Cont
 // ContextChildren lists the open children in the order they were created, so a child's activity never reorders the list
 // and a snapshot changes only when its set or a row does.
 func (s *Store) ContextChildren(ctx context.Context, id contract.SessionID) ([]ContextChild, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT s.id,s.room,s.name,s.profile,b.state,b.id,COALESCE((SELECT COALESCE((SELECT i.text FROM goal_items i WHERE i.room=g.room AND i.goal=g.number AND i.state='open' ORDER BY i.number LIMIT 1),g.text) FROM goals g WHERE g.session=s.id AND g.state='active' ORDER BY g.number LIMIT 1),'') FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.parent=? AND s.closed_at IS NULL ORDER BY s.created_at,s.id`, id)
+	rows, err := s.Read().QueryContext(ctx, `SELECT s.id,s.room,s.name,s.profile,b.state,b.id,COALESCE((SELECT COALESCE((SELECT i.text FROM goal_items i WHERE i.room=g.room AND i.goal=g.number AND i.state='open' AND NOT EXISTS (SELECT 1 FROM goal_items c WHERE c.room=i.room AND c.goal=i.goal AND c.parent=i.number AND c.state='open') ORDER BY CASE i.parent WHEN 0 THEN i.number ELSE i.parent END,i.parent<>0,i.number LIMIT 1),g.text) FROM goals g WHERE g.session=s.id AND g.state='active'),'') FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.parent=? AND s.closed_at IS NULL ORDER BY s.created_at,s.id`, id)
 	if err != nil {
 		return nil, err
 	}

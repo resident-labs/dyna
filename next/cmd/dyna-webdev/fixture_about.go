@@ -29,31 +29,30 @@ func seedAbout(ctx context.Context, s *engine.Service, room contract.RoomID, hot
 	}
 	long := start("launcher-port", "Port the launcher's native profile handling so that ATLAS_LAUNCHER_NATIVE_PROFILE_OVERRIDE and the matching path in src/launcher/profiles/nativeProfileResolver.ts agree on every platform, then remove the old fallback that reads the previous settings file and migrate anyone still on it.",
 		"ATLAS_LAUNCHER_NATIVE_PROFILE_OVERRIDE is honoured on Windows, macOS and Linux, the nativeProfileResolver tests cover a missing file, a corrupt file and a file from the previous version, a user on the old settings file keeps their profile after one launch, and nothing in the repository still reads legacy_launcher_settings_v2_path.")
-	second, problem := s.GoalSet(ctx, owner, contract.GoalSetRequest{Room: room, Session: long, Text: "Keep the release checklist honest: every step in docs/release/CHECKLIST.md runs in CI or says plainly why it cannot, and the nightly build publishes to the staging channel first.",
-		DoneWhen: "A dry run of the release goes green from a clean checkout, with no manual step left out of the checklist."})
-	if problem != nil {
-		log.Fatal(problem.Message)
-	}
 	goals, problem := s.GoalList(ctx, owner, contract.GoalListRequest{Room: room, Session: long})
 	if problem != nil {
 		log.Fatal(problem.Message)
 	}
-	for _, goal := range goals.Goals {
-		if goal.ID == second.Goal {
+	goal := goals.Goals[0].ID
+	parent := 0
+	for i, text := range []string{"Read ATLAS_LAUNCHER_NATIVE_PROFILE_OVERRIDE before the settings file", "Add the corrupt-file test", "Cover a file from the previous version", "Migrate the old settings file on first launch", "Drop the settings importer"} {
+		under := 0
+		if i == 2 {
+			under = parent
+		}
+		item, problem := s.GoalItem(ctx, owner, contract.GoalItemRequest{Room: room, Goal: goal, Text: text, Parent: under})
+		if problem != nil {
+			log.Fatal(problem.Message)
+		}
+		if i == 1 {
+			parent = item.Item
+		}
+		state := map[int]contract.GoalItemState{0: contract.GoalItemDone, 4: contract.GoalItemDropped}[i]
+		if state == "" {
 			continue
 		}
-		for i, text := range []string{"Read ATLAS_LAUNCHER_NATIVE_PROFILE_OVERRIDE before the settings file", "Add the corrupt-file test", "Migrate the old settings file on first launch", "Drop the settings importer"} {
-			item, problem := s.GoalItem(ctx, owner, contract.GoalItemRequest{Room: room, Goal: goal.ID, Text: text})
-			if problem != nil {
-				log.Fatal(problem.Message)
-			}
-			state := map[int]contract.GoalItemState{0: contract.GoalItemDone, 3: contract.GoalItemDropped}[i]
-			if state == "" {
-				continue
-			}
-			if _, problem := s.GoalItem(ctx, owner, contract.GoalItemRequest{Room: room, Goal: goal.ID, Item: item.Item, State: state}); problem != nil {
-				log.Fatal(problem.Message)
-			}
+		if _, problem := s.GoalItem(ctx, owner, contract.GoalItemRequest{Room: room, Goal: goal, Item: item.Item, State: state}); problem != nil {
+			log.Fatal(problem.Message)
 		}
 	}
 	start("quiet-helper", "", "")

@@ -6,11 +6,30 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 103
+const schemaVersion = 104
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
+	// A session holds one goal, with a todo list two levels deep. A holder of several keeps its own (the goal it was started
+	// with) or else its oldest. Each other one with no open item ends done; one with open items becomes an item of the kept
+	// goal, its open items that item's subtasks. Numbers are fixed in temp tables before any insert.
+	103: {
+		`ALTER TABLE goal_items ADD COLUMN parent INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE goals ADD COLUMN folded_goal INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE goals ADD COLUMN folded_item INTEGER NOT NULL DEFAULT 0`,
+		`CREATE TEMP TABLE one_goal_keep AS SELECT g.room,g.session,COALESCE((SELECT k.number FROM goals k JOIN sessions s ON s.id=k.session WHERE k.room=g.room AND k.session=g.session AND k.state='active' AND k.text=s.goal AND k.created_at=s.created_at ORDER BY k.number LIMIT 1),MIN(g.number)) AS keeper FROM goals g WHERE g.state='active' AND g.session IS NOT NULL GROUP BY g.room,g.session HAVING COUNT(*)>1`,
+		`CREATE TEMP TABLE one_goal_extra AS SELECT g.room,g.number AS goal,k.keeper,g.text,g.done_when,(SELECT COUNT(*) FROM goal_items i WHERE i.room=g.room AND i.goal=g.number AND i.state='open') AS open FROM goals g JOIN one_goal_keep k ON k.room=g.room AND k.session=g.session WHERE g.state='active' AND g.number<>k.keeper`,
+		`CREATE TEMP TABLE one_goal_fold AS SELECT e.room,e.goal,e.keeper,e.text,e.done_when,(SELECT COALESCE(MAX(i.number),0) FROM goal_items i WHERE i.room=e.room AND i.goal=e.keeper)+ROW_NUMBER() OVER (PARTITION BY e.room,e.keeper ORDER BY e.goal) AS header FROM one_goal_extra e WHERE e.open>0`,
+		`CREATE TEMP TABLE one_goal_copy AS SELECT f.room,f.keeper,f.header,i.text,(SELECT MAX(x.header) FROM one_goal_fold x WHERE x.room=f.room AND x.keeper=f.keeper)+ROW_NUMBER() OVER (PARTITION BY f.room,f.keeper ORDER BY f.goal,i.number) AS number FROM one_goal_fold f JOIN goal_items i ON i.room=f.room AND i.goal=f.goal AND i.state='open'`,
+		`INSERT INTO goal_items(room,goal,number,parent,text,state,created_at,updated_at) SELECT room,keeper,header,0,'from g'||goal||': '||text||CASE WHEN done_when<>'' THEN ' — done when: '||done_when ELSE '' END,'open',(CAST(strftime('%s','now') AS INTEGER)*1000),(CAST(strftime('%s','now') AS INTEGER)*1000) FROM one_goal_fold`,
+		`INSERT INTO goal_items(room,goal,number,parent,text,state,created_at,updated_at) SELECT room,keeper,number,header,text,'open',(CAST(strftime('%s','now') AS INTEGER)*1000),(CAST(strftime('%s','now') AS INTEGER)*1000) FROM one_goal_copy`,
+		`UPDATE goals SET state='dropped',folded_goal=(SELECT f.keeper FROM one_goal_fold f WHERE f.room=goals.room AND f.goal=goals.number),folded_item=(SELECT f.header FROM one_goal_fold f WHERE f.room=goals.room AND f.goal=goals.number),summary='folded into g'||(SELECT f.keeper FROM one_goal_fold f WHERE f.room=goals.room AND f.goal=goals.number)||' as item '||(SELECT f.header FROM one_goal_fold f WHERE f.room=goals.room AND f.goal=goals.number)||' when a session came to hold one goal',updated_at=(CAST(strftime('%s','now') AS INTEGER)*1000) WHERE EXISTS (SELECT 1 FROM one_goal_fold f WHERE f.room=goals.room AND f.goal=goals.number)`,
+		`UPDATE goals SET state='done',summary='ended when a session came to hold one goal',updated_at=(CAST(strftime('%s','now') AS INTEGER)*1000) WHERE EXISTS (SELECT 1 FROM one_goal_extra e WHERE e.room=goals.room AND e.goal=goals.number AND e.open=0)`,
+		`DROP TABLE one_goal_copy`, `DROP TABLE one_goal_fold`, `DROP TABLE one_goal_extra`, `DROP TABLE one_goal_keep`,
+		`DROP INDEX goals_holder`,
+		`CREATE UNIQUE INDEX goals_holder ON goals(session) WHERE state='active'`,
+	},
 	102: {`UPDATE turns SET ended_at=(SELECT closed_at FROM sessions WHERE id=turns.session),outcome='closed' WHERE ended_at IS NULL AND session IN (SELECT id FROM sessions WHERE state='closed' AND closed_at IS NOT NULL)`},
 	// SQLite needs this exact IN predicate in callers; state='pending' alone
 	// does not prove that a query can use this partial index.

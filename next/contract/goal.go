@@ -26,13 +26,16 @@ const (
 	GoalItemDropped GoalItemState = "dropped"
 )
 
+// GoalItem is one entry of a goal's todo list. Parent is the item it is a subtask of; 0 is the top level.
 type GoalItem struct {
 	Number int           `json:"number"`
+	Parent int           `json:"parent,omitempty"`
 	Text   string        `json:"text"`
 	State  GoalItemState `json:"state"`
 }
 
-// Goal is one piece of work with a done condition. Session is its holder; a goal with no holder waits for root to assign it.
+// Goal is one piece of work with a done condition and a todo list. Session is its holder, which holds no other active
+// goal; a goal with no holder waits for root to assign it.
 type Goal struct {
 	ID       GoalID     `json:"id"`
 	Room     RoomID     `json:"room"`
@@ -70,13 +73,14 @@ type GoalListResponse struct {
 	Goals []Goal `json:"goals"`
 }
 
-// GoalItemRequest adds an item, or with Item set changes that item's text or state.
+// GoalItemRequest adds an item, under Parent for a subtask, or with Item set changes that item's text or state.
 type GoalItemRequest struct {
-	Room  RoomID        `json:"room,omitempty"`
-	Goal  GoalID        `json:"goal"`
-	Item  int           `json:"item,omitempty"`
-	Text  string        `json:"text,omitempty"`
-	State GoalItemState `json:"state,omitempty"`
+	Room   RoomID        `json:"room,omitempty"`
+	Goal   GoalID        `json:"goal"`
+	Item   int           `json:"item,omitempty"`
+	Parent int           `json:"parent,omitempty"`
+	Text   string        `json:"text,omitempty"`
+	State  GoalItemState `json:"state,omitempty"`
 }
 type GoalItemResponse struct {
 	Item int `json:"item"`
@@ -118,10 +122,11 @@ type GoalSet struct {
 }
 
 type GoalItemChanged struct {
-	Goal  GoalID        `json:"goal"`
-	Item  int           `json:"item"`
-	Text  string        `json:"text"`
-	State GoalItemState `json:"state"`
+	Goal   GoalID        `json:"goal"`
+	Item   int           `json:"item"`
+	Parent int           `json:"parent,omitempty"`
+	Text   string        `json:"text"`
+	State  GoalItemState `json:"state"`
 }
 
 type GoalEnded struct {

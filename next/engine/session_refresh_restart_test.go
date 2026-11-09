@@ -78,15 +78,14 @@ func TestRefreshRestartsTheBoxAfterItsTurn(t *testing.T) {
 		for _, goal := range []bool{true, false} {
 			t.Run(fmt.Sprintf("owner=%v goal=%v", byOwner, goal), func(t *testing.T) {
 				s, host, room, sid, ctx := staleSession(t)
-				if goal {
-					if _, problem := s.GoalSet(ctx, refreshOwner, contract.GoalSetRequest{Room: room, Session: sid, Text: "g", DoneWhen: "d"}); problem != nil {
-						t.Fatal(problem)
+				// The session was started with a goal; without one, it has ended.
+				if !goal {
+					if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+						_, err := tx.Exec(`UPDATE goals SET state='done' WHERE session=?`, sid)
+						return err
+					}); err != nil {
+						t.Fatal(err)
 					}
-				} else if err := s.store.Write(ctx, func(tx *sql.Tx) error {
-					_, err := tx.Exec(`UPDATE goals SET state='done' WHERE session=?`, sid)
-					return err
-				}); err != nil {
-					t.Fatal(err)
 				}
 				turn := openTurn(t, s, ctx, room, sid, "turn_open")
 				turns, disconnect := connectBox(t, s, ctx, sid, newBinary)

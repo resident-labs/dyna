@@ -259,22 +259,32 @@ func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event c
 		}
 		var parent contract.SessionID
 		var parentClosing bool
-		if err := tx.QueryRowContext(ctx, "SELECT COALESCE(s.parent,''),COALESCE(p.state='closing',0) FROM sessions s LEFT JOIN sessions p ON p.id=s.parent WHERE s.id=?", id).Scan(&parent, &parentClosing); err != nil {
+		var name, reason string
+		if err := tx.QueryRowContext(ctx, "SELECT COALESCE(s.parent,''),COALESCE(p.state='closing',0),s.name,s.close_reason FROM sessions s LEFT JOIN sessions p ON p.id=s.parent WHERE s.id=?", id).Scan(&parent, &parentClosing, &name, &reason); err != nil {
 			return err
 		}
 		var unheld []contract.GoalID
 		var handed []contract.Responsibility
+		var folded []contract.GoalFold
 		if parent != "" {
-			if unheld, err = s.transferGoals(ctx, tx, id, parent, event.Time); err != nil {
+			goal, err := s.settleGoal(ctx, tx, event, id, name, reason == "")
+			if err != nil {
 				return err
 			}
+			if goal.Unheld != "" {
+				unheld = append(unheld, goal.Unheld)
+			}
+			if goal.Folded != nil {
+				folded = append(folded, *goal.Folded)
+			}
 			all, _ := held[id].splitClose()
+			// Only a goal that moved whole is handed; one that ended, folded or went unheld is not.
 			handed = slices.DeleteFunc(all, func(item contract.Responsibility) bool {
-				return item.Kind == contract.ResponsibilityGoal && slices.Contains(unheld, contract.GoalID(item.ID))
+				return item.Kind == contract.ResponsibilityGoal && contract.GoalID(item.ID) != goal.Moved
 			})
 		}
 		if body, ok := event.Body.(contract.SessionClosed); ok {
-			body.Unheld, body.Handed = unheld, handed
+			body.Unheld, body.Handed, body.Folded = unheld, handed, folded
 			event.Body = body
 		}
 		seq, err := s.AppendEvent(tx, event)
@@ -287,7 +297,7 @@ func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event c
 			}
 		}
 		// A parent that is closing too names all of this in its own notice.
-		if parentClosing || len(unheld)+len(handed) == 0 {
+		if parentClosing || len(unheld)+len(handed)+len(folded) == 0 {
 			return nil
 		}
 		return s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: parent}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
