@@ -1,7 +1,6 @@
 package room
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
@@ -12,11 +11,6 @@ func TestTree(t *testing.T) {
 		t.Fatalf("empty tree: %v", err)
 	}
 	tree := NewTree([]Node{{ID: "root"}, {ID: "a", Parent: "root"}, {ID: "b", Parent: "a"}, {ID: "c", Parent: "root"}})
-	for _, tt := range []struct{ order, want []contract.SessionID }{{[]contract.SessionID{"b", "a", "c", "root"}, []contract.SessionID{"b", "c"}}, {[]contract.SessionID{"a", "b"}, []contract.SessionID{"b"}}} {
-		if got := tree.Leaves(tt.order); !reflect.DeepEqual(got, tt.want) {
-			t.Fatalf("leaves: %v, want %v", got, tt.want)
-		}
-	}
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	a := contract.Principal{Kind: contract.PrincipalSession, Session: "a"}
 	for _, tt := range []struct {

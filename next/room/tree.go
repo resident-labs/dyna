@@ -139,21 +139,6 @@ func (t Tree) CloseOrder(s contract.SessionID) ([]contract.SessionID, error) {
 	return out, nil
 }
 
-// Leaves selects sessions without open children, in the supplied close order.
-func (t Tree) Leaves(order []contract.SessionID) []contract.SessionID {
-	parents := make(map[contract.SessionID]bool)
-	for _, n := range t.nodes {
-		parents[n.Parent] = true
-	}
-	var leaves []contract.SessionID
-	for _, id := range order {
-		if !parents[id] {
-			leaves = append(leaves, id)
-		}
-	}
-	return leaves
-}
-
 // CheckMove rejects moving root, cycles and another room.
 func (t Tree) CheckMove(s, parent contract.SessionID) error {
 	_, ok := t.nodes[s]
