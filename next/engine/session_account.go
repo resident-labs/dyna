@@ -76,9 +76,6 @@ func (a sessionAccounts) choices(s *AccountActions) []contract.SessionAccountCho
 // decides that per request; this says the same thing from the same routing order.
 func (s *AccountActions) SessionAccount(ctx context.Context, caller contract.Principal, req contract.SessionAccountRequest) (contract.SessionAccountResponse, *contract.Error) {
 	var response contract.SessionAccountResponse
-	if caller.Kind != contract.PrincipalOwner {
-		return response, forbidden()
-	}
 	session, problem := s.service.managedSession(ctx, caller, req.Session)
 	if problem != nil {
 		return response, problem
@@ -132,9 +129,6 @@ func (s *AccountActions) pinIssue(ctx context.Context, accounts sessionAccounts,
 // owner-only in the registry too, so a box cannot reach it.
 func (s *AccountActions) SessionSetAccount(ctx context.Context, caller contract.Principal, req contract.SessionSetAccountRequest) (contract.SessionSetAccountResponse, *contract.Error) {
 	var response contract.SessionSetAccountResponse
-	if caller.Kind != contract.PrincipalOwner {
-		return response, forbidden()
-	}
 	session, problem := s.service.managedSession(ctx, caller, req.Session)
 	if problem != nil {
 		return response, problem

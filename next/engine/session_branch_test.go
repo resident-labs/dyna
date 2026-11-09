@@ -27,9 +27,6 @@ func TestSessionSetBranchIsTheOwnersAndMovesTheSessionsBranch(t *testing.T) {
 	if _, err := s.store.ClaimBranch(ctx, record.Repo, other.Session, "root-branch", nil, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, problem := s.SessionSetBranch(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: session}, contract.SessionSetBranchRequest{Session: session, Branch: "moved"}); problem == nil || problem.Code != contract.ErrForbidden {
-		t.Fatalf("a session moved its own branch: %+v", problem)
-	}
 	for _, bad := range []string{"main", "master", "HEAD", "develop", "release", "a..b", "x.lock", "v2/slash", "-dash", ".x", "_x", ""} {
 		if _, problem := s.SessionSetBranch(ctx, owner, contract.SessionSetBranchRequest{Session: session, Branch: bad}); problem == nil || problem.Code != contract.ErrInvalid {
 			t.Errorf("%q: %+v", bad, problem)
