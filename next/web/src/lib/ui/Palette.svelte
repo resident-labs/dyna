@@ -4,14 +4,14 @@
   import { call } from "../client.ts";
   import { sourceLabel } from "../source.ts";
   import type { RoomSummary } from "../contract.gen.ts";
-  import { build, rows, marks, count, showAll, move, parse, escape, backspace, stamp, type Action, visits, type Item, type Person, type Place, type Scope, type Visit } from "../palette.ts";
+  import { settingsActions, build, rows, marks, count, showAll, move, parse, escape, backspace, stamp, type Action, visits, type Item, type Person, type Place, type Scope, type Visit } from "../palette.ts";
   import { MessageSearch, SessionSearch, type SearchCall } from "../search.svelte.ts";
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
   import { hue } from "../identity.ts";
 
-  let { rooms, room, search, onclose, onopen }: {
-    rooms: RoomSummary[]; room?: string; search: SearchCall; onclose: () => void; onopen: (item: Item) => void;
+  let { rooms, room, admin, search, onclose, onopen }: {
+    rooms: RoomSummary[]; room?: string; admin: boolean; search: SearchCall; onclose: () => void; onopen: (item: Item) => void;
   } = $props();
   const phone = new MediaQuery("max-width: 640px");
   let input: HTMLInputElement;
@@ -35,6 +35,7 @@
     { id: "new-room", label: "Create a room", hint: "", keys: [], icon: "plus" },
     { id: "theme", label: "Theme", hint: "Carbon, Ink, Nord, Paper, Light or OLED black", keys: [], icon: "palette" },
     { id: "settings", label: "Settings", hint: "", keys: ["Ctrl", ","], icon: "gear" },
+    ...settingsActions(admin),
   ]);
   let places: Place[] = $derived(rooms.map(found => ({ id: found.id, name: found.name, paused: found.paused,
     sessions: loadedRooms.has(found.id) ? people.filter(person => person.room === found.id && !person.closed).length : undefined,

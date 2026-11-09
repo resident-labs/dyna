@@ -475,7 +475,11 @@
       else if (item.action.id === "new-room") openNew("room");
       else if (item.action.id === "pause") pause();
       else if (item.action.id === "requests") { if (inSettings) { history.pushState(null, "", behind); follow(); } section = "requests"; }
-      else { history.pushState(null, "", item.action.id === "theme" ? "/settings/appearance" : "/settings"); follow(); }
+      else {
+        const path = item.action.id === "settings-pane" ? `/settings/${encodeURIComponent(item.action.pane)}`
+          : item.action.id === "theme" ? "/settings/appearance" : "/settings";
+        history.pushState(null, "", path); follow();
+      }
       return;
     }
     const targetRoom = item.kind === "room" ? item.room.id : item.kind === "session" ? item.session.room : item.post.room;
@@ -747,7 +751,7 @@
 {/snippet}
 
 <svelte:window onkeydown={cycle} onclickcapture={dismissRequests} onfocusin={formEvent} oninput={formEvent} onpagehide={() => savedDrafts.flush()} />
-{#if palette}<Palette {rooms} {room} search={searchPosts} onclose={closePalette} onopen={paletteOpen} />{/if}
+{#if palette}<Palette {rooms} {room} admin={attention.can("admin")} search={searchPosts} onclose={closePalette} onopen={paletteOpen} />{/if}
 <ConfirmHost />
 {#snippet sheetHandle(of: string)}
   <button type="button" class="handle" aria-label={sheetFull ? `Shrink the ${of} sheet` : `Expand the ${of} sheet`}
