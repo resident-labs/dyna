@@ -417,7 +417,7 @@ func TestGoalAuthority(t *testing.T) {
 			t.Fatalf("%+v: %v", caller, e)
 		}
 	}
-	if _, e := r.s.GoalDone(r.ctx, asSession(r.child), contract.GoalDoneRequest{Goal: goal, Summary: "done"}); e == nil || e.Code != contract.ErrInvalid || !strings.Contains(e.Message, "4 open items") {
+	if _, e := r.s.GoalDone(r.ctx, asSession(r.child), contract.GoalDoneRequest{Goal: goal, Summary: "done"}); e == nil || e.Code != contract.ErrInvalid || !strings.Contains(e.Message, "4 open items (1, 2, 3, 4); set each to done or dropped with goal item") {
 		t.Fatalf("done with open items: %v", e)
 	}
 	if _, e := r.s.GoalDone(r.ctx, ownerCaller, contract.GoalDoneRequest{Room: r.room, Goal: goal, Summary: "not needed", Drop: true}); e != nil {

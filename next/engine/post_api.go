@@ -252,7 +252,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 				}
 			}
 			if errors.Is(err, store.ErrNotFound) {
-				return contract.PostResponse{}, invalid("unknown session @" + address.Name)
+				return contract.PostResponse{}, invalid("no open session named " + address.Name + " in this room; it may have closed, and session list shows the room's sessions")
 			}
 			if err != nil {
 				return contract.PostResponse{}, failure(err)

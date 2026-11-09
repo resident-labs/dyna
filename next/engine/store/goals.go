@@ -252,7 +252,11 @@ func (s *Store) EndGoal(ctx context.Context, req contract.GoalDoneRequest, event
 					return err
 				}
 			} else if open > 0 {
-				return &GoalRefusal{Message: fmt.Sprintf("goal %s has %d open items; finish or drop them first", req.Goal, open)}
+				var numbers string
+				if err := tx.QueryRowContext(ctx, "SELECT group_concat(number, ', ') FROM goal_items WHERE room=? AND goal=? AND state=?", event.Room, goal, contract.GoalItemOpen).Scan(&numbers); err != nil {
+					return err
+				}
+				return &GoalRefusal{Message: fmt.Sprintf("goal %s has %d open items (%s); set each to done or dropped with goal item (item and state), then end the goal, or end it with drop to give it up", req.Goal, open, numbers)}
 			}
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE goals SET state=?,summary=?,updated_at=? WHERE room=? AND number=?", state, req.Summary, event.Time.UnixMilli(), event.Room, goal); err != nil {
