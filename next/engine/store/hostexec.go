@@ -95,20 +95,13 @@ func (s *Store) HostexecStops(ctx context.Context, now time.Time) ([]HostexecRun
 	}); err != nil {
 		return nil, err
 	}
-	rows, err := s.read.QueryContext(ctx, "SELECT op,grant_id,host,scope,stopped FROM hostexec_runs WHERE ended_at IS NULL AND stopped!=''")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []HostexecRun
-	for rows.Next() {
+	return queryAll(ctx, s.read, func(rows scanner) (HostexecRun, error) {
 		var r HostexecRun
-		if err = rows.Scan(&r.Op, &r.Grant, &r.Host, &r.Scope, &r.Stopped); err != nil {
-			return nil, err
+		if err := rows.Scan(&r.Op, &r.Grant, &r.Host, &r.Scope, &r.Stopped); err != nil {
+			return r, err
 		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
+		return r, nil
+	}, "SELECT op,grant_id,host,scope,stopped FROM hostexec_runs WHERE ended_at IS NULL AND stopped!=''")
 }
 
 // CompleteHostexecStop waits 30 seconds for a remote launch in flight at a master drop.
