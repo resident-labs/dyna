@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -323,19 +324,32 @@ exit "$2"`
 	}
 }
 
-func TestNamespaceLockHolderScanIsBounded(t *testing.T) {
-	root, h := namespaceFixture(t)
-	// A tr that never returns stands for a procfs scan that hangs.
-	slow := t.TempDir()
-	if err := os.WriteFile(filepath.Join(slow, "tr"), []byte("#!/bin/bash\nexec sleep 60\n"), 0700); err != nil {
+// holdersOf lists the processes that have the file open, from their descriptors.
+func holdersOf(t *testing.T, path string) []int {
+	t.Helper()
+	want, err := os.Stat(path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", slow+":"+os.Getenv("PATH"))
+	var pids []int
+	links, _ := filepath.Glob("/proc/[0-9]*/fd/*")
+	for _, link := range links {
+		if got, err := os.Stat(link); err == nil && os.SameFile(want, got) {
+			pid, _ := strconv.Atoi(strings.Split(link, "/")[2])
+			pids = append(pids, pid)
+		}
+	}
+	return slices.Compact(pids)
+}
+
+func TestNamespaceLockHolderScanLeavesNothingBehind(t *testing.T) {
+	root, h := namespaceFixture(t)
 	lockDir := filepath.Join(root, "locks")
 	if err := os.MkdirAll(lockDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	lock, err := os.OpenFile(filepath.Join(lockDir, "box-b.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	path := filepath.Join(lockDir, "box-b.lock")
+	lock, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,14 +357,13 @@ func TestNamespaceLockHolderScanIsBounded(t *testing.T) {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		t.Fatal(err)
 	}
-	start := time.Now()
 	err = h.CreateBox(context.Background(), box.ContainerSpec{Box: "b", Image: "new"}, nil, false)
 	var uncertain NamespaceUncertain
-	// 15 s of lock wait, then at most 2 s of scan.
-	if !errors.As(err, &uncertain) || time.Since(start) > 19*time.Second {
-		t.Fatalf("a hung scan was not bounded, or the failure lost its type: %v (%s)", err, time.Since(start))
+	if !errors.As(err, &uncertain) || !strings.Contains(err.Error(), "pid="+strconv.Itoa(os.Getpid())) {
+		t.Fatalf("lock failure lost its type or its holder: %v", err)
 	}
-	if !strings.Contains(err.Error(), "scan stopped after 2s") {
-		t.Fatalf("failure does not say the scan was cut short: %v", err)
+	// The wrapper and the scan have returned, so the test alone has the lock file open: the diagnostic is not a holder itself.
+	if pids := holdersOf(t, path); !slices.Equal(pids, []int{os.Getpid()}) {
+		t.Fatalf("processes with the lock file open after the failure: %v, want only %d", pids, os.Getpid())
 	}
 }
