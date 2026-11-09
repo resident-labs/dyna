@@ -781,3 +781,29 @@ test("one owner loads workflows and waits; first hello repairs only positions", 
     assert.deepEqual(reads(), [2, 2, 4]);
   } finally { room.close(); globalThis.fetch = original; }
 });
+
+
+test("room snapshots share a round trip after the session baseline", async () => {
+  const original = globalThis.fetch;
+  const pending = new Map<string, () => void>();
+  const requested: string[] = [];
+  globalThis.fetch = async input => {
+    const method = String(input).split("/").at(-1)!;
+    requested.push(method);
+    if (["session.list", "op.list", "question.list", "workflow.list"].includes(method)) {
+      await new Promise<void>(resolve => pending.set(method, resolve));
+    }
+    return new Response(JSON.stringify({ rooms: [], sessions: [], operations: [], questions: [], runs: [], seq: 10 }));
+  };
+  const room = new RoomStore("parallel-load", () => () => {});
+  try {
+    const opening = room.open();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(requested, ["session.list"]);
+    pending.get("session.list")!();
+    await new Promise(resolve => setImmediate(resolve));
+    for (const method of ["op.list", "question.list", "workflow.list"]) assert.ok(pending.has(method), method);
+    for (const method of ["op.list", "question.list", "workflow.list"]) pending.get(method)!();
+    await opening;
+  } finally { room.close(); globalThis.fetch = original; }
+});
