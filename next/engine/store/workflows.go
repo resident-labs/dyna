@@ -53,9 +53,7 @@ func scanWorkflow(row interface{ Scan(...any) error }) (WorkflowRun, error) {
 		return run, err
 	}
 	run.Started = time.UnixMilli(started).UTC()
-	if ended != 0 {
-		run.Ended = time.UnixMilli(ended).UTC()
-	}
+	run.Ended = fromMillis(ended)
 	if err := json.Unmarshal([]byte(lines), &run.StatusLines); err != nil {
 		return run, err
 	}
@@ -158,9 +156,7 @@ func (s *Store) WorkflowList(ctx context.Context, room contract.RoomID) ([]contr
 			run.Status, run.StatusAt = status[len(status)-1].Text, status[len(status)-1].At
 		}
 		run.Started = time.UnixMilli(started).UTC()
-		if ended != 0 {
-			run.Ended = time.UnixMilli(ended).UTC()
-		}
+		run.Ended = fromMillis(ended)
 		runs = append(runs, run)
 	}
 	return runs, rows.Err()
@@ -323,9 +319,7 @@ func scanWorkflowStep(row interface{ Scan(...any) error }, extra ...any) (contra
 		return step, err
 	}
 	step.Started = time.UnixMilli(started).UTC()
-	if ended != 0 {
-		step.Ended = time.UnixMilli(ended).UTC()
-	}
+	step.Ended = fromMillis(ended)
 	return step, nil
 }
 
