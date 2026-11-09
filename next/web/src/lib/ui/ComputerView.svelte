@@ -105,7 +105,7 @@
   <!-- svelte-ignore a11y_no_static_element_interactions (a double tap is the pointer's way to full screen; the title bar's button is the keyboard's) -->
   <div class="screen" class:full bind:this={screen} onpointerdowncapture={press} onkeydowncapture={desktopKey}>
     {#if visible}{#key attempt}<div class="desktop" role="img" aria-label={full ? `${name}'s screen, in your control` : `${name}'s screen, live`} {@attach connect}></div>{/key}{/if}
-    {#if phase === "failed"}<p class="badge" role="status">{failure} <button type="button" class="retry" onclick={() => { attempt++; }}>Try again</button></p>{/if}
+    {#if phase === "failed"}<p class="failed" role="status">{failure} <button type="button" class="retry" onclick={() => { attempt++; }}>Try again</button></p>{/if}
   </div>
   {#if full}
     <div class="chat">
@@ -140,9 +140,10 @@
   .screen:not(.full) .desktop :global(canvas) { cursor: default !important; }
   /* The frame is drawn over the picture, which would cover an outline. */
   .screen.full::after { content: ""; position: absolute; inset: 0; border: 2px solid var(--focus); pointer-events: none; }
-  /* v1's badge: a dark chip over the last picture, readable on any frame. */
-  .badge { position: absolute; left: 12px; top: 12px; margin: 0; padding: 3px 11px; border-radius: 12px; background: var(--screen-chip); color: var(--screen-text); font-size: 12px; }
-  .badge .retry { margin-left: 4px; color: var(--screen-text); }
+  /* A failure sits in the middle of the blank screen, on one line, with Try again as a link in it. Not .badge: that
+     is the app's small bordered tag. */
+  .failed { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: baseline; gap: 6px; white-space: nowrap; max-width: calc(100% - 24px); margin: 0; padding: 6px 14px; border-radius: 16px; background: var(--screen-chip); color: var(--screen-text); font-size: 13px; text-align: center; }
+  .failed .retry { display: inline; height: auto; margin: 0; padding: 0; border: 0; background: none; color: var(--screen-text); font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
   .activity, .line { display: flex; flex: none; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; color: var(--muted); font-size: 12.5px; }
   .step { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hint { flex: none; }
