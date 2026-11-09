@@ -20,6 +20,7 @@ const (
 	StartCreate       StartStep = "container_create"
 	StartSidecars     StartStep = "sidecars"
 	StartContainer    StartStep = "container_start"
+	StartSession      StartStep = "session_start"
 )
 
 type BoxStartStatus struct {
@@ -61,6 +62,8 @@ func (s StartStep) Label() string {
 		return "starting sidecars"
 	case StartContainer:
 		return "starting container"
+	case StartSession:
+		return "loading conversation"
 	}
 	return string(s)
 }

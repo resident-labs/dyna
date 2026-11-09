@@ -4,7 +4,7 @@ import { onHost } from "./hosts.ts";
 const steps: Record<StartStep, string> = {
   instructions: "syncing instructions", binary: "updating Dyna on host", build_cache: "starting compiler cache",
   shared: "mounting shared folder", image: "preparing image", slice: "setting resource limits", forward: "forwarding socket",
-  stack: "creating compose stack", container_create: "creating container", sidecars: "starting sidecars", container_start: "starting container",
+  stack: "creating compose stack", container_create: "creating container", sidecars: "starting sidecars", container_start: "starting container", session_start: "loading conversation",
 };
 
 // The session's wait on this step, not the age of the host's shared installation.

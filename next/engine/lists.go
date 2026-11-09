@@ -51,7 +51,7 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 	}
 	for i := range result.Sessions {
 		session := &result.Sessions[i]
-		if s.startStatus != nil && (session.BoxState == contract.BoxCreating || session.BoxState == contract.BoxStarting) {
+		if session.Start == nil && s.startStatus != nil && (session.BoxState == contract.BoxCreating || session.BoxState == contract.BoxStarting) {
 			session.Start = s.startStatus(session.Box)
 		}
 		activity, _ := s.live.Activity(session.ID)
