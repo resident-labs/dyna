@@ -42,6 +42,10 @@ func TestStreamHelloRoomUnionCapability(t *testing.T) {
 	} {
 		t.Run(tc.query+string(tc.kind), func(t *testing.T) {
 			c := Caller{Principal: contract.Principal{Kind: tc.kind}, Room: "r", Web: true, Scopes: []contract.Scope{contract.ScopeRead}}
+			if tc.kind == contract.PrincipalSession {
+				c.Box = "box"
+				c.Principal.Session = "session"
+			}
 			w := httptest.NewRecorder()
 			New(&combinedService{}, nil).handler(c).ServeHTTP(w, httptest.NewRequest("GET", "/v1/events?"+tc.query, nil))
 			if w.Code != 200 || strings.Contains(w.Body.String(), `"roomUnion":true`) != tc.advertised {
@@ -72,6 +76,10 @@ func TestCombinedEventsRoute(t *testing.T) {
 		t.Run(tc.query+tc.last+string(tc.principal), func(t *testing.T) {
 			s := &combinedService{}
 			c := Caller{Principal: contract.Principal{Kind: tc.principal}, Room: "r", Web: true}
+			if tc.principal == contract.PrincipalSession {
+				c.Box = "box"
+				c.Principal.Session = "session"
+			}
 			if tc.scope {
 				c.Scopes = []contract.Scope{contract.ScopeRead}
 			}
