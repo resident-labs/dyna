@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -320,13 +321,7 @@ func (s *Service) HistoryRead(ctx context.Context, caller contract.Principal, re
 		}
 	}
 	delete(ids, "")
-	names, err := s.store.SessionNames(ctx, slices.Collect(func(yield func(contract.SessionID) bool) {
-		for id := range ids {
-			if !yield(id) {
-				return
-			}
-		}
-	}))
+	names, err := s.store.SessionNames(ctx, slices.Collect(maps.Keys(ids)))
 	if err != nil {
 		return contract.HistoryReadResponse{}, failure(err)
 	}
@@ -470,13 +465,7 @@ func (s *Service) TranscriptDigest(ctx context.Context, caller contract.Principa
 		}
 	}
 	delete(sessions, "")
-	if names, err = s.store.SessionNames(ctx, slices.Collect(func(yield func(contract.SessionID) bool) {
-		for id := range sessions {
-			if !yield(id) {
-				return
-			}
-		}
-	})); err != nil {
+	if names, err = s.store.SessionNames(ctx, slices.Collect(maps.Keys(sessions))); err != nil {
 		return contract.TranscriptDigestResponse{}, failure(err)
 	}
 	author := func(from contract.Principal) string {
