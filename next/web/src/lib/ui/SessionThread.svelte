@@ -4,7 +4,8 @@
   import { transcriptReader } from "../transcript-reader.ts";
   import { decodeEvent } from "../event.ts";
   import { hue } from "../identity.ts";
-  import { visibleAttachments, causes, dayLabel, formatTime, waits } from "../feed.ts";
+  import { visibleAttachments, boxRow, causes, dayLabel, formatTime, waits } from "../feed.ts";
+  import BoxRestart from "./BoxRestart.svelte";
   import { watchTranscripts } from "../stream.ts";
   import { sourceLabel } from "../source.ts";
   import type { Attachment, Principal, RoomID, PostRequest, TranscriptInput, TranscriptItem, TranscriptPart, TranscriptTurn, TranscriptPage } from "../contract.gen.ts";
@@ -47,6 +48,7 @@
   let now = $state(clock());
   // An open turn of a closed session or a failed box never ends, so it does not count as running.
   let closed = $derived(store.ready && !store.sessions.has(session));
+  let boxFailed = $derived(step || closed ? undefined : store.boxFailures.get(session));
   let stalled = $derived(closed || store.boxFailures.has(session));
   // The store hears turn.ended at once and a transcript read can lag it, so a turn the store no longer runs is over.
   let liveTurn = $derived(store.turns.get(session));
@@ -418,6 +420,12 @@
         {#if running(turn) && !(turn.items ?? []).some(item => timelineItemRunning(item, false))}<p class="muted turn-note"><span class="slot"><span class="spinner" aria-hidden="true"></span></span>{workingLine(turn.started, now, store.activityKinds.get(session))}</p>{/if}
       </article>
     {/each}
+    <!-- A box that failed or was lost ends the thread: the turn it held stopped there, and nothing runs until it is back. -->
+    {#if boxFailed}
+      {@const row = boxRow(boxFailed.box, boxFailed.cause)}
+      <div class="failure box-failed" role="status"><span class="slot"><Icon name="warning" size={16} /></span><span><strong>{row.label}</strong>{#if row.cause}{` · ${row.cause}`}{/if}</span>
+        {#if operate && (row.label === "Failed" || row.label === "Could not start")}<BoxRestart {session} name={sender("session", session)} onclosed={() => {}} />{/if}</div>
+    {/if}
     <!-- A question waits at the end of the thread. Once answered, it is part of the input that answer becomes. -->
     {#each asking as question (question.id)}<div class="question"><QuestionCard {question} name={sender("session", session)} root={!store.sessions.get(session)?.parent} {operate} /></div>{/each}
     {#if waitingSince}{@render dayMark(waitingSince, turns.at(-1)?.started)}{/if}
@@ -479,6 +487,9 @@
   .failure { display: flex; gap: 6px; line-height: 24px; overflow-wrap: anywhere; }
   .failure .slot { color: var(--danger); }
   .again { margin-left: 12px; color: var(--text); font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
+  .box-failed { flex-wrap: wrap; align-items: center; column-gap: 6px; row-gap: 8px; }
+  .box-failed strong { color: var(--danger); font-weight: 600; }
+  .box-failed :global(button) { margin-left: 6px; }
   .slot { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; height: 24px; }
   .spinner { width: 12px; height: 12px; border: 1.5px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
