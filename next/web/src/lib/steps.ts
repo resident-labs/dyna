@@ -67,7 +67,6 @@ export function activeVerb(kind: StepKind, fallback: string): string {
   const active: Record<StepKind, string> = { run: "Running", read: "Reading", edit: "Editing", write: "Writing", search: "Searching", list: "Listing", fetch: "Fetching", tool: fallback };
   return active[kind];
 }
-export const workingGroup = (items: TranscriptItem[], turnEnded: boolean) => !turnEnded && items.some(item => !item.ended);
 export function workSummary(items: TranscriptItem[]) {
   const counts = new Map<StepKind, number>();
   for (const item of items) { const kind = titleOf(item).kind; counts.set(kind, (counts.get(kind) ?? 0) + 1); }
