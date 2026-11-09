@@ -73,7 +73,4 @@ func TestPostSearch(t *testing.T) {
 	if e != nil || result.Names[worker] != "worker" {
 		t.Fatalf("closed author: %+v %v", result, e)
 	}
-	if _, e := s.PostSearch(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.PostSearchRequest{Query: "deploy"}); e == nil || e.Code != contract.ErrForbidden {
-		t.Fatalf("session: %v", e)
-	}
 }

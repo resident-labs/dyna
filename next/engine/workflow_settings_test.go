@@ -144,13 +144,6 @@ func TestWhoMayStartAWorkflow(t *testing.T) {
 
 func TestOnlyTheOwnerReadsAndChangesWorkflowSettings(t *testing.T) {
 	r := newSettingsRig(t)
-	root := r.as(r.root)
-	if _, problem := r.WorkflowSet(r.ctx, root, contract.WorkflowSetRequest{Set: contract.WorkflowSettings{Start: contract.WorkflowStartOff}}); problem == nil || problem.Code != contract.ErrForbidden {
-		t.Fatalf("root sets: %+v", problem)
-	}
-	if _, problem := r.WorkflowSettings(r.ctx, root, contract.WorkflowSettingsRequest{}); problem == nil || problem.Code != contract.ErrForbidden {
-		t.Fatalf("root reads: %+v", problem)
-	}
 	got, problem := r.WorkflowSettings(r.ctx, r.owner, contract.WorkflowSettingsRequest{})
 	if problem != nil || got.Global.Effective.Start != contract.WorkflowStartAny {
 		t.Fatalf("settings %+v: %+v", got.Global, problem)

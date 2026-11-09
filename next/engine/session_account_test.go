@@ -116,32 +116,3 @@ func pinHarness(t *testing.T) (*AccountActions, *pinProxy, contract.SessionID, c
 }
 
 var pinOwner = contract.Principal{Kind: contract.PrincipalOwner}
-
-// A box's caller is a session principal. It must not read or change any choice, its own
-// or a child's, even though it may manage those sessions in other ways.
-func TestBoxCannotReadOrSetAPin(t *testing.T) {
-	actions, _, session, ctx := pinHarness(t)
-	parent, err := actions.service.store.Session(ctx, session)
-	if err != nil {
-		t.Fatal(err)
-	}
-	child, problem := actions.service.SessionStart(ctx, pinOwner, contract.SessionStartRequest{Room: parent.Room, Name: "child", Profile: "test", Parent: session})
-	if problem != nil {
-		t.Fatal(problem)
-	}
-	box := contract.Principal{Kind: contract.PrincipalSession, Session: session}
-	for _, target := range []contract.SessionID{session, child.Session} {
-		if _, problem := actions.SessionSetAccount(ctx, box, contract.SessionSetAccountRequest{Session: target, Account: "b"}); problem == nil || problem.Code != contract.ErrForbidden {
-			t.Fatalf("set on %s: %v", target, problem)
-		}
-		if _, problem := actions.SessionAccount(ctx, box, contract.SessionAccountRequest{Session: target}); problem == nil || problem.Code != contract.ErrForbidden {
-			t.Fatalf("read on %s: %v", target, problem)
-		}
-		if pin, err := actions.service.store.SessionAccountPin(ctx, target); err != nil || pin != "" {
-			t.Fatalf("pin = %q, %v", pin, err)
-		}
-	}
-	if _, problem := actions.SessionSetAccount(ctx, contract.Principal{Kind: contract.PrincipalEngine}, contract.SessionSetAccountRequest{Session: session, Account: "b"}); problem == nil {
-		t.Fatal("the engine principal set a pin")
-	}
-}

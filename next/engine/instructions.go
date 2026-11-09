@@ -58,9 +58,6 @@ func readInstructions(path string) (string, string, error) {
 
 func (s *Service) InstructionsGet(ctx context.Context, caller contract.Principal, req contract.InstructionsGetRequest) (contract.InstructionsGetResponse, *contract.Error) {
 	var out contract.InstructionsGetResponse
-	if caller.Kind != contract.PrincipalOwner {
-		return out, forbidden()
-	}
 	path, problem := s.instructionsPath(ctx, req.Room)
 	if problem != nil {
 		return out, problem
@@ -85,9 +82,6 @@ func (s *Service) InstructionsGet(ctx context.Context, caller contract.Principal
 
 func (s *Service) InstructionsSet(ctx context.Context, caller contract.Principal, req contract.InstructionsSetRequest) (contract.InstructionsSetResponse, *contract.Error) {
 	var out contract.InstructionsSetResponse
-	if caller.Kind != contract.PrincipalOwner {
-		return out, forbidden()
-	}
 	path, problem := s.instructionsPath(ctx, req.Room)
 	if problem != nil {
 		return out, problem

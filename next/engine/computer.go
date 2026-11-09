@@ -55,9 +55,6 @@ const computerStartLimit = 30 * time.Second
 // ComputerStart starts the desktop in the session's box for the owner, and returns once it runs. It runs the box's own
 // `dyna computer start`, which the agent's computer actions also start the desktop with. It does not touch the turn.
 func (s *Service) ComputerStart(ctx context.Context, caller contract.Principal, req contract.ComputerStartRequest) (contract.ComputerStartResponse, *contract.Error) {
-	if caller.Kind != contract.PrincipalOwner {
-		return contract.ComputerStartResponse{}, forbidden()
-	}
 	current, problem := s.readyBox(ctx, req.Session)
 	if problem != nil {
 		return contract.ComputerStartResponse{}, problem

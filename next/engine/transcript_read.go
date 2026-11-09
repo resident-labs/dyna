@@ -26,9 +26,6 @@ const (
 // TranscriptRead reads the acknowledged prefix without holding the writer or service lock.
 func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal, req contract.TranscriptReadRequest) (contract.TranscriptReadResponse, *contract.Error) {
 	response := contract.TranscriptReadResponse{Steps: []contract.TranscriptStep{}, Turns: []contract.TranscriptTurn{}}
-	if caller.Kind != contract.PrincipalOwner {
-		return response, forbidden()
-	}
 	if req.Page != "" && req.Page != contract.TranscriptPageOlderItems && req.Page != contract.TranscriptPageMandatoryItems && req.Page != contract.TranscriptPageMandatoryPosts {
 		return response, invalid("invalid transcript page")
 	}
