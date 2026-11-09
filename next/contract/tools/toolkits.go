@@ -18,7 +18,7 @@ var toolkits = map[string]Toolkit{
 	"computer":     {Name: "computer", Title: "Computer", Destructive: true, OpenWorld: true, Description: computerHelp, Fields: computerFields},
 	"context":      {Name: "context", Title: "Context", Idempotent: true},
 	"device":       {Name: "device", Title: "Devices", Destructive: true},
-	"goal":         {Name: "goal", Title: "Goals"},
+	"goal":         {Name: "goal", Title: "Goals", Description: "item, done and journal act on the goal you hold when goal is omitted."},
 	"host":         {Name: "host", Title: "Hosts", Destructive: true, OpenWorld: true},
 	"hostexec":     {Name: "hostexec", Title: "Host access", Destructive: true, OpenWorld: true},
 	"issue":        {Name: "issue", Title: "Issues", OpenWorld: true},

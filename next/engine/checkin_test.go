@@ -423,14 +423,18 @@ func TestGoalLifecycleThroughTheAPI(t *testing.T) {
 	if _, e := r.s.GoalItem(r.ctx, child, contract.GoalItemRequest{Goal: own.Goal, Item: 1, State: "maybe"}); e == nil || e.Code != contract.ErrInvalid {
 		t.Fatalf("bad state: %v", e)
 	}
-	if _, e := r.s.GoalJournal(r.ctx, child, contract.GoalJournalRequest{Goal: own.Goal, Text: "first"}); e != nil {
+	if _, e := r.s.GoalJournal(r.ctx, child, contract.GoalJournalRequest{Text: "first"}); e != nil {
 		t.Fatal(e)
 	}
 	journal, e := r.s.GoalJournal(r.ctx, child, contract.GoalJournalRequest{Goal: own.Goal, Text: "second"})
 	if e != nil || len(journal.Entries) != 2 || journal.Entries[0].Text != "second" || journal.Entries[0].By.Session != r.lead {
 		t.Fatalf("journal %+v: %v", journal, e)
 	}
-	if _, e := r.s.GoalDone(r.ctx, child, contract.GoalDoneRequest{Goal: own.Goal, Summary: "all pass"}); e != nil {
+	// An omitted goal is the caller's own; a caller that holds none is told to name one.
+	if _, e := r.s.GoalDone(r.ctx, asSession(r.root), contract.GoalDoneRequest{Summary: "all pass"}); e == nil || e.Message != "you hold no goal, so name one; goal list shows the room's goals" {
+		t.Fatalf("done with no goal held: %v", e)
+	}
+	if _, e := r.s.GoalDone(r.ctx, child, contract.GoalDoneRequest{Summary: "all pass"}); e != nil {
 		t.Fatal(e)
 	}
 	list, e := r.s.GoalList(r.ctx, asSession(r.root), contract.GoalListRequest{})
