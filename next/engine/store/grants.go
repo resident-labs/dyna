@@ -14,16 +14,13 @@ func (s *Store) CreateGrant(ctx context.Context, g contract.Grant) error {
 }
 
 func (s *Store) InsertGrant(tx *sql.Tx, g contract.Grant) error {
-	hosts, err := json.Marshal(g.Hosts)
-	if err != nil {
-		return err
-	}
+	hosts, _ := json.Marshal(g.Hosts)
 	var expires *int64
 	if !g.Expires.IsZero() {
 		v := g.Expires.UnixMilli()
 		expires = &v
 	}
-	_, err = tx.Exec("INSERT INTO grants(id,kind,room,to_kind,to_id,hosts,expires_at,by_kind,by_id,created_at,reason) VALUES(?,?,?,?,?,?,?,?,?,?,?)", g.ID, g.Kind, g.Room, g.To.Kind, g.To.Session, hosts, expires, g.By.Kind, g.By.Session, g.Created.UnixMilli(), g.Reason)
+	_, err := tx.Exec("INSERT INTO grants(id,kind,room,to_kind,to_id,hosts,expires_at,by_kind,by_id,created_at,reason) VALUES(?,?,?,?,?,?,?,?,?,?,?)", g.ID, g.Kind, g.Room, g.To.Kind, g.To.Session, hosts, expires, g.By.Kind, g.By.Session, g.Created.UnixMilli(), g.Reason)
 	return err
 }
 

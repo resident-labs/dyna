@@ -96,10 +96,7 @@ func call[I, O any](ctx context.Context, r *Relay, issuer, path string, body I, 
 	}
 	claims := machineClaims{issuer, r.Base, "POST", path, now.Unix(), now.Unix() + 60, b64.EncodeToString(nonce[:]), hashToken(string(b))}
 	header, _ := json.Marshal(jwsHeader{Alg: "EdDSA", Typ: "dyna-machine+jws"})
-	payload, err := json.Marshal(claims)
-	if err != nil {
-		return err
-	}
+	payload, _ := json.Marshal(claims)
 	input := b64.EncodeToString(header) + "." + b64.EncodeToString(payload)
 	token := input + "." + b64.EncodeToString(ed25519.Sign(r.Key, []byte(input)))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.Base+path, bytes.NewReader(b))

@@ -107,14 +107,11 @@ func (a addonStart) apply(ctx context.Context) (map[string]pig.MCPServer, []stri
 	// Pi asks before it trusts a repository's own resources, and a box has nobody to ask, so repository skills need this.
 	// Pi reads its steer queue after each tool batch, and "all" takes every message queued since as one batch, where its
 	// default takes one per model request.
-	settings, err := json.Marshal(struct {
+	settings, _ := json.Marshal(struct {
 		DefaultProjectTrust string   `json:"defaultProjectTrust"`
 		SteeringMode        string   `json:"steeringMode"`
 		Packages            []string `json:"packages,omitempty"`
 	}{"always", "all", paths})
-	if err != nil {
-		return nil, nil, err
-	}
 	if err := os.WriteFile(a.Settings, settings, 0o600); err != nil {
 		return nil, nil, err
 	}
@@ -203,12 +200,9 @@ func installedPath(root string, item contract.Addon) string {
 // one is configured, so each source gets its own folder. A package whose extension fails to load must show here, or the
 // session would report it at every box start.
 func piInstall(ctx context.Context, dir, source string) error {
-	settings, err := json.Marshal(struct {
+	settings, _ := json.Marshal(struct {
 		Packages []string `json:"packages"`
 	}{[]string{source}})
-	if err != nil {
-		return err
-	}
 	if err := os.WriteFile(filepath.Join(dir, "settings.json"), settings, 0o600); err != nil {
 		return err
 	}

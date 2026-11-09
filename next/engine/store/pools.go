@@ -190,17 +190,14 @@ func (s *Store) PoolRecovered(ctx context.Context, name string) error {
 // PoolOrphans remembers the unknown machines the script still lists, and posts the notice about any new one.
 func (s *Store) PoolOrphans(ctx context.Context, name string, unknown []string, notice *contract.Event) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		told, err := json.Marshal(append([]string{}, unknown...))
-		if err != nil {
-			return err
-		}
+		told, _ := json.Marshal(append([]string{}, unknown...))
 		if _, err := tx.ExecContext(ctx, "UPDATE pools SET told=? WHERE name=?", string(told), name); err != nil {
 			return err
 		}
 		if notice == nil {
 			return nil
 		}
-		_, err = s.AppendEvent(tx, *notice)
+		_, err := s.AppendEvent(tx, *notice)
 		return err
 	})
 }
@@ -231,14 +228,11 @@ func (s *Store) SetRoomOnly(ctx context.Context, room contract.RoomID, only []st
 		if err := roomOpen(ctx, tx, room); err != nil {
 			return err
 		}
-		names, err := json.Marshal(append([]string{}, only...))
-		if err != nil {
-			return err
-		}
+		names, _ := json.Marshal(append([]string{}, only...))
 		if _, err := tx.ExecContext(ctx, "UPDATE rooms SET only_hosts=? WHERE id=?", string(names), room); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "INSERT OR IGNORE INTO host_rooms(host,room) SELECT h.name,?1 FROM hosts h, json_each(?2) j WHERE h.pool=j.value AND h.box=''", room, string(names))
+		_, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO host_rooms(host,room) SELECT h.name,?1 FROM hosts h, json_each(?2) j WHERE h.pool=j.value AND h.box=''", room, string(names))
 		return err
 	})
 }
