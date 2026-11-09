@@ -1054,6 +1054,9 @@ type TurnStart struct {
 	ModelInstructions string           `json:"modelInstructions,omitempty"`
 	// CompactTokens is the profile's compaction trigger, which applies with Model. 0: Pi's default.
 	CompactTokens int `json:"compactTokens,omitempty"`
+	// TextOnlyModels is the list box.hello gave, as it is now: a profile made since the box started can name a model the
+	// box's models.json lacks, and Pi sends such a model to a route the engine does not serve.
+	TextOnlyModels []TextOnlyModel `json:"textOnlyModels,omitempty"`
 }
 type TurnQueue string
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"sync"
 	"time"
 
@@ -35,6 +36,10 @@ type Runner struct {
 	Attach func(context.Context, contract.TurnInput) (contract.TurnInput, error)
 	// Steered hears an engine-checked interrupt only after Pi successfully queues the input.
 	Steered func(contract.Interrupt)
+	// Models rewrites the box's models.json before a transfer whose turn brought a changed list. Nil: the file stays.
+	Models func([]contract.TextOnlyModel) error
+	// textOnly is the list the file holds, once a turn has brought one.
+	textOnly []contract.TextOnlyModel
 	// What the last transfer applied. Both start empty, so a new Pi process runs its transfer on the first turn:
 	// box.hello started Pi on the session's profile, and only Pi knows whether the conversation fits that model.
 	model         contract.ModelChoice
@@ -207,6 +212,12 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 				return nil
 			}
 			preparing()
+			if r.Models != nil && start.TextOnlyModels != nil && !slices.Equal(start.TextOnlyModels, r.textOnly) {
+				if err := r.Models(start.TextOnlyModels); err != nil {
+					return err
+				}
+				r.textOnly = start.TextOnlyModels
+			}
 			moved, err := r.Harness.TransferModel(ctx, start.Turn, start.Model, start.CompactTokens, start.ModelInstructions)
 			if errors.Is(err, harness.ErrRefused) {
 				cause = contract.CauseSetModelFailed
