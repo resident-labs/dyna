@@ -2,8 +2,11 @@ package engine
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 func (s *Service) RoomList(ctx context.Context, caller contract.Principal, _ contract.RoomListRequest) (contract.RoomListResponse, *contract.Error) {
@@ -41,6 +44,16 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 		return contract.SessionListResponse{}, e
 	}
 	// A session reads the list as tool output, which its harness cuts at about 10 KB, so it gets a page unless it asks for a size.
+	if req.Parent != "" && !sessionID.MatchString(string(req.Parent)) {
+		parent, err := s.store.SessionByName(ctx, req.Room, string(req.Parent))
+		if errors.Is(err, store.ErrNotFound) {
+			return contract.SessionListResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("no open session named %q in this room", req.Parent)}
+		}
+		if err != nil {
+			return contract.SessionListResponse{}, failure(err)
+		}
+		req.Parent = parent.ID
+	}
 	limit := req.Limit
 	if limit == 0 && caller.Kind == contract.PrincipalSession {
 		limit = contract.SessionListPage
