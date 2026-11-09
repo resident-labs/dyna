@@ -90,7 +90,7 @@ func loadTree(ctx context.Context, q sqlQuery, id contract.RoomID) (room.Tree, e
 
 func checkDepth(depth, limit int) error {
 	if limit > 0 && depth > limit {
-		return &TreeError{Message: fmt.Sprintf("session depth %d exceeds limit %d", depth, limit)}
+		return &TreeError{Message: fmt.Sprintf("session depth %d exceeds limit %d; a session this deep starts no child, so do the work yourself or ask your parent to start it", depth, limit)}
 	}
 	return nil
 }
