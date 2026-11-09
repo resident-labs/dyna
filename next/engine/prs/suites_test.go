@@ -2,6 +2,7 @@ package prs
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 	"time"
 
@@ -81,6 +82,29 @@ func TestSuiteSettlementControls(t *testing.T) {
 			server.SetCommit("owner/repo", sha, fakegithub.Commit{Rollup: "SUCCESS", Checks: checks, Suites: suites, SuiteTotal: test.total})
 			assertBothCI(t, c, test.want)
 		})
+	}
+}
+
+// Model horizon#2527: GitHub failed to start a workflow's jobs, so the rollup held only skipped contexts and read SUCCESS,
+// and a second workflow failed with no check runs at all; each suite's conclusion was FAILURE.
+func TestFailedSuiteFailsCIWhenContextsReadGreen(t *testing.T) {
+	c, server, at := client(t)
+	checks := []fakegithub.Check{{Name: "book", Conclusion: "SUCCESS"}, {Name: "lint", Conclusion: "SKIPPED"}, {Name: "verify", Conclusion: "SKIPPED"}}
+	suites := []fakegithub.Suite{
+		{Status: "COMPLETED", Conclusion: "SUCCESS", App: "github-actions", CreatedAt: at.Now(), Runs: 1, Workflow: "modding-book"},
+		{Status: "COMPLETED", Conclusion: "FAILURE", App: "github-actions", CreatedAt: at.Now(), Runs: 2, Workflow: "dyna-checks"},
+		{Status: "COMPLETED", Conclusion: "FAILURE", App: "github-actions", CreatedAt: at.Now(), Workflow: "launcher-windows-check"},
+		{Status: "QUEUED", App: "greptile-apps", CreatedAt: at.Now().Add(-time.Hour)},
+	}
+	server.Add(fakegithub.Pull{Repo: "owner/repo", Number: 1, Head: sha, Rollup: "SUCCESS", Checks: checks, Suites: suites})
+	server.SetCommit("owner/repo", sha, fakegithub.Commit{Rollup: "SUCCESS", Checks: checks, Suites: suites})
+	assertBothCI(t, c, contract.PrCIFailure)
+	pulls, err := c.Read(t.Context(), "owner/repo", []int{1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := pulls[1].FailedChecks, []string{"dyna-checks (workflow run failed)", "launcher-windows-check (workflow run failed)"}; !slices.Equal(got, want) {
+		t.Errorf("failed checks = %q, want %q", got, want)
 	}
 }
 
