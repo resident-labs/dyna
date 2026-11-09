@@ -184,6 +184,9 @@ func Models(textOnly ...contract.TextOnlyModel) ModelsConfig {
 	for _, entry := range textOnly {
 		provider := config.Providers[string(entry.Provider)]
 		model := ModelDefinition{ID: entry.Model, Reasoning: true, Input: []string{"text"}, MaxTokens: 128000}
+		if entry.Images {
+			model.Input = append(model.Input, "image")
+		}
 		model.InputLimits = &modelInputLimits{Images: modelImageLimits{Resize: modelImageResize{MaxWidth: 2000, MaxHeight: 2000, MaxBytes: 4718592, JPEGQuality: 80}}}
 		level := func(s string) *string { return &s }
 		// Pi ai 1.4.0-dyna.13.228dd4febd41, catalog openai/gpt-5.5.
