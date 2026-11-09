@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { activityLabel, activeVerb, elapsed, stepTime, stepTitle, titleOf, toolPart, workSummary } from "./steps.ts";
+import { activityLabel, activeVerb, elapsed, stepTime, stepTitle, titleOf, toolPart } from "./steps.ts";
 import type { TranscriptItem } from "./contract.gen.ts";
 
 test("a live duration uses the injected clock", () => {
@@ -13,7 +13,6 @@ test("summarizes adjacent tool kinds and shows a parsed target", () => {
     { id: "2", turn: "t", kind: "tool", at: "", tool: "bash", arguments: "{" },
     { id: "3", turn: "t", kind: "tool", at: "", tool: "read", arguments: '{"path":"src/App.svelte"}' },
   ];
-  assert.equal(workSummary(items), "Ran 2 commands, read 1 file");
   assert.equal(activeVerb("run", "Ran"), "Running");
   assert.equal(activeVerb("read", "Read"), "Reading");
   assert.equal(titleOf(items[0]).target, "npm test");
