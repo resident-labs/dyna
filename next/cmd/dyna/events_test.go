@@ -12,14 +12,14 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-func TestEventsSkipsHelloEvent(t *testing.T) {
+func TestEventsSkipsHelloAndHeartbeatEvents(t *testing.T) {
 	event, err := json.Marshal(contract.Event{Seq: 3, Body: contract.PostCreated{Text: "third"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "event: hello\ndata: {\"build\":\"b\"}\n\n")
+		fmt.Fprint(w, "event: hello\ndata: {\"build\":\"b\",\"heartbeatMs\":15000}\n\nevent: heartbeat\ndata: {}\n\n")
 		fmt.Fprintf(w, "id: 3\ndata: %s\n\n", event)
 	}))
 	defer srv.Close()
