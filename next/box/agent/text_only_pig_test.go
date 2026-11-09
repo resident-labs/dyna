@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"image"
 	"image/png"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -87,5 +88,49 @@ func TestTextOnlyTransferOnPiG(t *testing.T) {
 	}
 	if !reflect.DeepEqual(requests[1].OutputConfig, requests[0].OutputConfig) {
 		t.Fatalf("settings differ from the catalog model's: %s, then %s", requests[0].OutputConfig, requests[1].OutputConfig)
+	}
+}
+
+// A profile made after the box started names a model PiG's catalog lacks. The turn that moves to it brings the entry, and
+// the request goes to the Messages route. Without the entry PiG sends such a model to /chat/completions.
+func TestAModelAddedAfterStartReachesMessages(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "ok"}})
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		model.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	dir := pigtest.AgentDir(t, model, "")
+	write := func(textOnly ...contract.TextOnlyModel) {
+		models := agent.Models(textOnly...)
+		anthropic := models.Providers["anthropic"]
+		anthropic.BaseURL = server.URL
+		models.Providers["anthropic"] = anthropic
+		encoded, err := json.Marshal(models)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "models.json"), encoded, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write()
+	h, err := pig.Open(context.Background(), pig.Config{Dir: t.TempDir(), AgentDir: dir, SessionDir: filepath.Join(dir, "sessions"), Model: contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "claude-opus-4-8", Thinking: contract.ThinkingMedium}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = h.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	write(contract.TextOnlyModel{Provider: contract.ModelProviderAnthropic, Model: "claude-new-9", Images: true})
+	if _, err := h.TransferModel(ctx, "turn_a", contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "claude-new-9", Thinking: contract.ThinkingMedium}, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Start(ctx, "turn_a", []contract.TurnInput{{Delivery: 1, Text: "hello"}}, func() {}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(paths, []string{"/v1/messages"}) {
+		t.Fatalf("requests went to %q", paths)
 	}
 }

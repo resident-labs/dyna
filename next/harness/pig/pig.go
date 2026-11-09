@@ -313,6 +313,8 @@ func (h *Harness) ClearQueue(context.Context) error {
 // against the model and compacts it on the one that held it first when it must (coding.Session.TransferModel). Abort
 // cancels that compaction, and the model stays.
 func (h *Harness) TransferModel(ctx context.Context, id contract.TurnID, model contract.ModelChoice, compactTokens int, instructions string) (harness.ModelTransfer, error) {
+	// The box rewrites models.json when a profile brings a model it lacked, and PiG reads the file only here and at start.
+	h.services.Registry().ModelRegistry.Refresh()
 	target, err := coding.BuildModel(string(model.Provider)+"/"+model.ID, h.services)
 	// A model the box cannot use is the agent program's refusal, which fails the turn; TransferModel's own errors do not.
 	if err == nil {

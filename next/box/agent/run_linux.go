@@ -157,12 +157,15 @@ func Run(ctx context.Context) error {
 		}
 		log.Printf("transcript restore: %v", err)
 	}
-	models, err := json.Marshal(Models(hello.TextOnlyModels...))
-	if err != nil {
-		return err
-	}
 	modelsPath := filepath.Join(piDir, "models.json")
-	if err = os.WriteFile(modelsPath, models, 0600); err != nil {
+	writeModels := func(textOnly []contract.TextOnlyModel) error {
+		models, err := json.Marshal(Models(textOnly...))
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(modelsPath, models, 0600)
+	}
+	if err = writeModels(hello.TextOnlyModels); err != nil {
 		return err
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:7781")
@@ -249,6 +252,10 @@ func Run(ctx context.Context) error {
 	defer ticks.Stop()
 	go transcript.Run(ctx, ticks.C, files)
 	runner := &Runner{Harness: h, Sink: endedSink{turnSink: client, transcript: transcript, files: files}, Setup: setup, Attach: client.Attach, Steered: steered}
+	if crew == nil {
+		// A crew's workers each read their own models.json, written when the worker opens.
+		runner.Models = writeModels
+	}
 	var closing atomic.Bool
 	var stopShellWatch context.CancelFunc
 	var shellDone chan struct{}
