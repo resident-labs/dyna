@@ -123,7 +123,7 @@
     /* The panes become one strip that scrolls sideways; its right edge fades, so a cut-off pane reads as more to
        scroll to, and the end padding lets the last pane clear the fade. */
     .nav nav { display: flex; overflow-x: auto; scrollbar-width: none; padding-right: 40px; scroll-padding-inline: 8px 40px;
-      mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); }
+      mask-image: linear-gradient(to right, var(--bg) calc(100% - 40px), transparent); }
     .nav a { flex: none; }
     .nav a.sep { margin-top: 0; }
     .nav a.sep::before { display: none; }
