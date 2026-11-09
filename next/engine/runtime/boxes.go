@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1716,7 +1717,7 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image stri
 func (b *Boxes) container(spec lifecycle.BoxSpec, image string, shared box.Mount) (box.Slice, box.ContainerSpec) {
 	size := spec.Size
 	slice := box.Slice{Name: spec.Slice, CPUs: size.CPUs, MemHigh: size.MemBytes, MemMax: size.MemBytes * 3 / 2, Pids: size.Pids}
-	c := box.ContainerSpec{Box: spec.Box, Image: image, Slice: spec.Slice, Needs: spec.Needs, GPUCard: spec.GPUCard, Labels: []box.Label{{Key: "dyna.layout", Value: box.ContainerLayout}, {Key: "dyna.binary", Value: b.binSum}}, Mounts: []box.Mount{
+	c := box.ContainerSpec{Box: spec.Box, Image: image, Slice: spec.Slice, CPUs: slice.CPUs, MemBytes: slice.MemMax, Needs: spec.Needs, GPUCard: spec.GPUCard, Labels: []box.Label{{Key: "dyna.layout", Value: box.ContainerLayout}, {Key: "dyna.binary", Value: b.binSum}}, Mounts: []box.Mount{
 		{HostPath: b.Layout.HostSocketFolder(spec.Box), BoxPath: "/run/dyna/engine", ReadOnly: true},
 		{HostPath: filepath.Join(b.Layout.HostBin(), b.binSum), BoxPath: "/opt/dyna/bin/current", ReadOnly: true},
 		{HostPath: b.Layout.HostCache(), BoxPath: "/box/cache"},
@@ -1725,6 +1726,10 @@ func (b *Boxes) container(spec lifecycle.BoxSpec, image string, shared box.Mount
 		{HostPath: filepath.Dir(b.Layout.HostInstructions("")), BoxPath: "/run/dyna/instructions/global", ReadOnly: true, MakeDir: true},
 		{HostPath: filepath.Dir(b.Layout.HostInstructions(spec.Room)), BoxPath: "/run/dyna/instructions/room", ReadOnly: true, MakeDir: true},
 	}, Env: []box.EnvVar{{Name: "GOMODCACHE", Value: "/box/cache/gomod"}, {Name: "GOCACHE", Value: "/box/cache/gocache"}, {Name: "CARGO_HOME", Value: box.CargoHome}, {Name: "npm_config_store_dir", Value: "/box/cache/pnpm"}}}
+	// nproc reads this, and not cpu.max, so make -j$(nproc) matches the cap.
+	if slice.CPUs > 0 {
+		c.Env = append(c.Env, box.EnvVar{Name: "OMP_THREAD_LIMIT", Value: strconv.Itoa(slice.CPUs)})
+	}
 	if spec.Root {
 		c.Mounts = append(c.Mounts,
 			box.Mount{HostPath: filepath.Dir(b.Layout.HostRootAddons("")), BoxPath: "/run/dyna/root-addons/global", ReadOnly: true, MakeDir: true},

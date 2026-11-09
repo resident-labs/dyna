@@ -26,10 +26,13 @@ type Label struct{ Key, Value string }
 type ContainerSpec struct {
 	Box          contract.BoxID
 	Image, Slice string
-	Needs        []Need
-	Mounts       []Mount
-	Env          []EnvVar
-	Labels       []Label
+	// CPUs and MemBytes are the limits set on the container as well as on its slice, so the box sees them in cpu.max and memory.max.
+	CPUs     int
+	MemBytes int64
+	Needs    []Need
+	Mounts   []Mount
+	Env      []EnvVar
+	Labels   []Label
 	// Pod is the pod the box joins, which then sets its user namespace and network. Empty for a box alone.
 	Pod string
 	// Volumes are its named compose volumes.
