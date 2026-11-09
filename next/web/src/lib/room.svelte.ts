@@ -1,6 +1,6 @@
 import { SvelteMap, SvelteSet, createSubscriber } from "svelte/reactivity";
 import { call } from "./client.ts";
-import { stream } from "./stream.ts";
+import { stream, type StreamSubscribe } from "./stream.ts";
 import { EventWindow } from "./window.svelte.ts";
 import { pendingReason, type PendingReason } from "./event.ts";
 import { boxFailures, countOf, statusOf, turnFailures, type BoxFailure, type Counts, type Status } from "./status.ts";
@@ -115,8 +115,8 @@ export class RoomStore {
   private subscribe = createSubscriber(update => { this.changed = update; });
 
   readonly room: string;
-  private readonly connect: typeof stream;
-  constructor(room: string, connect: typeof stream = stream) {
+  private readonly connect: StreamSubscribe;
+  constructor(room: string, connect: StreamSubscribe = stream) {
     this.room = room;
     this.connect = connect;
   }

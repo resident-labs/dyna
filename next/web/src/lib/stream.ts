@@ -9,6 +9,10 @@ export interface EventConnection {
 }
 export type EventFactory = (url: string) => EventConnection;
 export type Schedule = (callback: () => void, delay: number) => () => void;
+export type StreamOpened = (reconnect?: boolean, hello?: StreamHello) => void;
+// The data stores subscribe logically; transport factory/timer injection belongs to their connection owner.
+export type StreamSubscribe = (room: string | undefined, after: () => number, apply: (event: Event) => void,
+  factory?: undefined, schedule?: undefined, opened?: StreamOpened) => () => void;
 
 const transcriptListeners = new Set<(session?: string) => void>();
 export function watchTranscripts(listener: (session?: string) => void): () => void {
@@ -31,9 +35,11 @@ export function stream(
     const id = setTimeout(callback, delay);
     return () => clearTimeout(id);
   },
-  opened: (reconnect?: boolean) => void = () => {},
+  opened: StreamOpened = () => {},
   lifecycle: Pick<EventTarget, "addEventListener" | "removeEventListener"> | undefined = typeof window === "undefined" ? undefined : window,
+  attentionAfter?: () => number,
 ): () => void {
+  const owner = !room || attentionAfter !== undefined;
   let source: EventConnection;
   let cancel = () => {};
   let closed = false;
@@ -45,7 +51,8 @@ export function stream(
     const currentGeneration = ++generation;
     const reconnect = attempted;
     attempted = true;
-    const current = source = factory(`/v1/events?${new URLSearchParams({ ...(room && { room }), after: String(after()) })}`);
+    const current = source = factory(`/v1/events?${new URLSearchParams({ ...(room && { room }),
+      after: String(attentionAfter ? attentionAfter() : after()), ...(room && attentionAfter ? { roomAfter: String(after()) } : {}) })}`);
     let active = true;
     let heartbeatMs: number | undefined;
     let cancelWatchdog = () => {};
@@ -59,7 +66,7 @@ export function stream(
       active = false;
       cancelWatchdog();
       current.close();
-      if (!room) reportStreamState(false);
+      if (owner) reportStreamState(false);
       cancel = schedule(() => { if (!closed && !suspended && generation === currentGeneration) connect(); }, delay);
       delay = Math.min(delay * 2, 10_000);
     }
@@ -73,15 +80,17 @@ export function stream(
         // as recovery too, so the next outage does not inherit this one's backoff.
         delay = 500;
         const hello: StreamHello = { build: value.build };
+        if ("roomUnion" in value && typeof value.roomUnion === "boolean") hello.roomUnion = value.roomUnion;
         if ("heartbeatMs" in value && typeof value.heartbeatMs === "number" && Number.isFinite(value.heartbeatMs) && value.heartbeatMs > 0 && value.heartbeatMs <= 60_000) {
           hello.heartbeatMs = value.heartbeatMs;
           current.addEventListener("heartbeat", () => { if (alive()) refresh(); });
         }
         heartbeatMs = hello.heartbeatMs;
         refresh();
-        opened(reconnect);
+        opened(reconnect, hello);
+        if (!alive()) return;
         onHello(hello);
-        if (!room) { reportStreamState(true); for (const listener of transcriptListeners) listener(); }
+        if (owner) { reportStreamState(true); for (const listener of transcriptListeners) listener(); }
       }
     });
     current.onmessage = message => {
@@ -91,7 +100,7 @@ export function stream(
         refresh();
         // Turn boundaries need not append transcript bytes: reload at start so a cold
         // session shows Working before Pi writes, and at end so live steps settle.
-        if (!room && event.type === "transcript.changed" || room && (event.type === "turn.started" || event.type === "turn.ended")) for (const listener of transcriptListeners) listener(event.body.session);
+        if ((owner && event.type === "transcript.changed") || (room && (!attentionAfter || event.room === room) && (event.type === "turn.started" || event.type === "turn.ended"))) for (const listener of transcriptListeners) listener(event.body.session);
         apply(event);
       }
       delay = 500;
