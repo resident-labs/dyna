@@ -671,7 +671,7 @@ type PostSearchResponse struct {
 }
 type EventsListRequest struct {
 	// ReceiptSeqs reads current delivery receipts for feed posts in this room instead of log events.
-	ReceiptSeqs []int64     `json:"receiptSeqs,omitempty" desc:"Read delivery receipts for up to 100 feed post sequence numbers in this room. Pending is queued; taken/read means delivered into a turn, not model completion. batchDeadline is present only during an active batch wait. Closed explicit mentions with discarded unread deliveries have state closed and do not count toward delivery; closed implicit recipients without delivery rows are omitted."`
+	ReceiptSeqs []int64     `json:"receiptSeqs,omitempty" desc:"Read delivery receipts for up to 100 feed post sequence numbers in this room. Pending is queued; taken means assigned to a turn but not yet read; read means the session consumed the input. Neither taken nor read means the work is complete. batchDeadline is present only during an active batch wait. Closed explicit mentions with discarded unread deliveries have state closed and do not count toward delivery; closed implicit recipients without delivery rows are omitted."`
 	Event       EventID     `json:"event,omitempty"` // return this room event by ID
 	Room        RoomID      `json:"room"`
 	AfterSeq    int64       `json:"afterSeq"`
