@@ -256,3 +256,11 @@ func savedKey(ctx context.Context, read func(context.Context) (string, error)) (
 	}
 	return key, nil
 }
+
+// apiRoot selects the default endpoint and removes one trailing slash.
+func apiRoot(base, fallback string) string {
+	if base == "" {
+		base = fallback
+	}
+	return strings.TrimSuffix(base, "/")
+}

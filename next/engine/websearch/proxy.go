@@ -17,14 +17,11 @@ type ProxySearch struct {
 
 func (p ProxySearch) Name() string { return p.Provider }
 func (p ProxySearch) Search(ctx context.Context, q Query) ([]Result, error) {
-	body, err := json.Marshal(struct {
+	body, _ := json.Marshal(struct {
 		Provider string `json:"provider"`
 		Query    string `json:"query"`
 		Limit    int    `json:"limit"`
 	}{p.Provider, q.Text, q.results()})
-	if err != nil {
-		return nil, err
-	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://cliproxy/dyna/search", bytes.NewReader(body))
 	if err != nil {
 		return nil, err

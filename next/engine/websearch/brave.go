@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -39,11 +38,8 @@ func (b Brave) Search(ctx context.Context, q Query) ([]Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	base := b.BaseURL
-	if base == "" {
-		base = BraveEndpoint
-	}
-	endpoint, err := url.Parse(strings.TrimSuffix(base, "/") + "/res/v1/web/search")
+	base := apiRoot(b.BaseURL, BraveEndpoint)
+	endpoint, err := url.Parse(base + "/res/v1/web/search")
 	if err != nil {
 		return nil, fmt.Errorf("brave endpoint is not a URL: %w", err)
 	}
