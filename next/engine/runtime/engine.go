@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime/debug"
 	"slices"
@@ -27,8 +28,7 @@ import (
 	"github.com/resident-labs/dyna/engine/compose"
 	"github.com/resident-labs/dyna/engine/connect"
 	enginegit "github.com/resident-labs/dyna/engine/git"
-	"github.com/resident-labs/dyna/engine/githubmcp"
-	"github.com/resident-labs/dyna/engine/githubwrites"
+	"github.com/resident-labs/dyna/engine/githubaccount"
 	"github.com/resident-labs/dyna/engine/images"
 	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/model"
@@ -207,24 +207,15 @@ func Run(ctx context.Context, cfg Config) error {
 	service.SetInstructionsPublisher(boxes.PublishInstructions)
 	boxes.Addons = service.Addons()
 	go boxes.watchInstructions(boxCtx)
-	mirror := &enginegit.Mirror{Layout: layout, Token: token, Runner: enginegit.GitRunner{}}
+	credentials := &githubaccount.Resolver{Store: st, Tokens: &githubaccount.Files{Dir: filepath.Join(cfg.Data, "github-accounts")}, DefaultToken: token}
+	mirror := &enginegit.Mirror{Layout: layout, Token: token, ResolveToken: credentials.Repo, Runner: enginegit.GitRunner{}}
 	service.SetRepositories(&enginegit.Repositories{Rooms: st, Hosts: boxes, Mirror: mirror})
 	pulls := &prs.Client{Token: token, Endpoint: &url.URL{Scheme: "https", Host: "api.github.com"}, Transport: http.DefaultTransport, Now: time.Now}
-	prPoll := &prs.Poller{Store: st, GitHub: pulls, Now: time.Now}
+	accountClients := &prs.Accounts{Resolve: credentials.Repo, Endpoint: pulls.Endpoint, Transport: pulls.Transport, Now: time.Now}
+	service.SetGitHubAccounts(credentials, accountClients)
+	prPoll := &prs.Poller{Store: st, GitHub: pulls, Accounts: accountClients, Now: time.Now}
 	service.SetPRTracking(pulls)
-	if token != "" {
-		// Agents' GitHub reads spend the feeds' quota through pulls, which keeps the feeds' share.
-		// Without them boxes list no github server, and the engine still starts.
-		if tools, err := githubmcp.Handler(ctx, token, pulls.Reads(http.DefaultTransport), func(ctx context.Context, repo contract.RepoName, number int) (bool, error) {
-			return st.OwnsPR(ctx, repo, githubwrites.SessionFrom(ctx), number)
-		}, func(ctx context.Context, repo contract.RepoName, branch string) (bool, error) {
-			return enginegit.CanPushBranch(ctx, st, repo, githubwrites.SessionFrom(ctx), branch)
-		}); err != nil {
-			log.Printf("GitHub tools for boxes: %v", err)
-		} else {
-			service.SetGitHubTools(tools)
-		}
-	}
+	service.SetGitHubTools(accountTools(ctx, st, credentials, accountClients))
 	boxes.RoomImages = service.Images()
 	boxes.Migrator = service.SetImageMigration(boxCtx, mirror)
 	boxes.Compose = &compose.Files{Layout: layout, Repo: mirror, Images: service.Images()}
@@ -276,11 +267,24 @@ func Run(ctx context.Context, cfg Config) error {
 	})
 	apiServer.SetLocalModelRoute(drain.Wrap(proxy.Local(st)))
 	apiServer.Build = build
-	apiServer.SetGitHubRead(enginegit.ReadOnly(&url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport, token))
+	apiServer.SetGitHubRoomRead(func(room contract.RoomID) http.Handler {
+ return http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+ credential,_,err := credentials.Room(r.Context(),room)
+ if err != nil { http.Error(w,err.Error(),http.StatusServiceUnavailable);return }
+ enginegit.ReadOnly(&url.URL{Scheme:"https",Host:"api.github.com"},http.DefaultTransport,credential).ServeHTTP(w,r)
+ })
+ })
 	apiServer.SetFilesRoute(func(c api.Caller) http.Handler { return service.Files(c.Principal, c.Room) })
 	apiServer.SetSharedRoute(func(c api.Caller) http.Handler { return service.Shared(c.Principal) })
 	apiServer.SetGitRoute(func(c api.Caller) http.Handler {
-		return enginegit.Handler(&url.URL{Scheme: "https", Host: "github.com"}, http.DefaultTransport, token, c.Principal.Session, c.Room, st)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			credential, _, err := credentials.Room(r.Context(), c.Room)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+			enginegit.Handler(&url.URL{Scheme: "https", Host: "github.com"}, http.DefaultTransport, credential, c.Principal.Session, c.Room, st).ServeHTTP(w, r)
+		})
 	})
 	files, err := connect.OpenFiles(cfg.Data)
 	if err != nil {

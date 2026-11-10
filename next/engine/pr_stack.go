@@ -17,6 +17,9 @@ import (
 
 // PrStack creates an immutable GitHub stack; it never merges or rebases it.
 func (s *Service) PrStack(token string, endpoint *url.URL, transport http.RoundTripper) approve.Entry {
+	return s.accountEntry(token, func(credential string) approve.Entry { return s.prStack(credential, endpoint, transport) })
+}
+func (s *Service) prStack(token string, endpoint *url.URL, transport http.RoundTripper) approve.Entry {
 	client := http.Client{Transport: transport, Timeout: time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	request := func(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
 		target := *endpoint

@@ -16,6 +16,7 @@ import (
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/compose"
 	"github.com/resident-labs/dyna/engine/images"
+ "github.com/resident-labs/dyna/engine/githubaccount"
 	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/live"
 	"github.com/resident-labs/dyna/engine/model"
@@ -74,6 +75,8 @@ type Service struct {
 	compose           *compose.Files
 	approvals         *approve.Service
 	pulls             *prs.Client
+ githubAccounts *githubaccount.Resolver
+ githubClients *prs.Accounts
 	githubTools       http.Handler
 	hostexec          HostexecRunner
 	promoteHost       func(context.Context, contract.HostName, bool) error

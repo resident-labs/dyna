@@ -6,11 +6,12 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 104
+const schemaVersion = 105
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
+	104: {`CREATE TABLE IF NOT EXISTS room_github_accounts (room TEXT PRIMARY KEY REFERENCES rooms(id) ON DELETE CASCADE, login TEXT NOT NULL, name TEXT NOT NULL, email TEXT NOT NULL)`},
 	// A session holds one goal, with a todo list two levels deep. A holder of several keeps its own (the goal it was started
 	// with) or else its oldest. Each other one with no open item ends done; one with open items becomes an item of the kept
 	// goal, its open items that item's subtasks. Numbers are fixed in temp tables before any insert.
