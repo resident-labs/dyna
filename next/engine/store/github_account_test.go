@@ -15,10 +15,16 @@ func TestGitHubAccountRepositoryIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	for _, room := range []contract.RoomID{"work", "personal", "other-work"} {
+	for _, room := range []contract.RoomID{"work", "personal", "other-work", "default-attached"} {
 		if err := s.CreateRoom(ctx, room, string(room), time.Now()); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := s.AddRoomRepo(ctx, "default-attached", "org/default", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetGitHubAccount(ctx, "default-attached", GitHubIdentity{Login: "new-login"}); err == nil {
+		t.Fatal("selected an account with existing default-account repositories")
 	}
 	account := GitHubIdentity{Login: "work-login", Name: "Work User", Email: "work@example.com", Credential: "opaque-id"}
 	for _, room := range []contract.RoomID{"work", "other-work"} {
@@ -29,10 +35,23 @@ func TestGitHubAccountRepositoryIsolation(t *testing.T) {
 	if err := s.AddRoomRepo(ctx, "work", "org/repo", true); err != nil {
 		t.Fatal(err)
 	}
+	for _, replacement := range []GitHubIdentity{{}, {Login: "another-login"}} {
+		if err := s.SetGitHubAccount(ctx, "work", replacement); err == nil {
+			t.Fatal("changed account with an attached repository")
+		}
+	}
+	if err := s.SetGitHubAccount(ctx, "personal", GitHubIdentity{Login: "personal-login"}); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.AddRoomRepo(ctx, "personal", "org/repo", false); err == nil {
 		t.Fatal("attached across accounts")
 	}
 	if err := s.AddRoomRepo(ctx, "other-work", "org/repo", false); err != nil {
+		t.Fatal(err)
+	}
+	// Token replacement for the same account remains allowed, even when shared.
+	account.Credential = "rotated-key"
+	if err := s.SetGitHubAccount(ctx, "work", account); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetGitHubAccount(ctx, "work", GitHubIdentity{}); err == nil {

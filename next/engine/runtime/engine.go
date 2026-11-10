@@ -209,7 +209,13 @@ func Run(ctx context.Context, cfg Config) error {
 	boxes.Addons = service.Addons()
 	go boxes.watchInstructions(boxCtx)
 	credentials := &githubaccount.Resolver{Store: st, Tokens: &githubaccount.Files{Dir: filepath.Join(cfg.Data, "github-accounts")}, DefaultToken: token}
-	mirror := &enginegit.Mirror{Layout: layout, Token: token, ResolveToken: credentials.Repo, Runner: enginegit.GitRunner{}, ErrorContext: func(ctx context.Context, repo contract.RepoName, problem error) error {
+	mirror := &enginegit.Mirror{Layout: layout, Token: token, ResolveToken: credentials.Repo, Runner: enginegit.GitRunner{}, VerifyAccount: func(ctx context.Context, repo contract.RepoName, token, login string) error {
+		room, err := st.RepoRoom(ctx, repo)
+		if err != nil {
+			return err
+		}
+		return githubaccount.VerifyRepo(ctx, &http.Client{Timeout: 10 * time.Second}, "https://api.github.com", repo, token, fmt.Sprintf("GitHub account %s of room %s", login, room))
+	}, ErrorContext: func(ctx context.Context, repo contract.RepoName, problem error) error {
 		credential, login, err := credentials.Repo(ctx, repo)
 		if err != nil {
 			return err

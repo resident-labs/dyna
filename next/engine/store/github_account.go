@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -25,15 +26,20 @@ func (s *Store) RepoRoom(ctx context.Context, repo contract.RepoName) (contract.
 }
 
 // SetGitHubAccount changes metadata only; credentials are never stored in SQLite.
-// Shared repositories and CI must be removed before changing account identity.
+// Repositories must be detached before changing account identity. A token may
+// be replaced for the same login without disturbing attached repositories.
 func (s *Store) SetGitHubAccount(ctx context.Context, room contract.RoomID, a GitHubIdentity) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		var count int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM room_repos rr JOIN repos p ON p.repo=rr.repo WHERE rr.room=? AND (p.ci=1 OR EXISTS(SELECT 1 FROM room_repos other WHERE other.repo=rr.repo AND other.room<>rr.room))`, room).Scan(&count); err != nil {
+		var previous string
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT login FROM room_github_accounts WHERE room=r.id),'') FROM rooms r WHERE r.id=?`, room).Scan(&previous); err != nil {
 			return err
 		}
-		if count != 0 {
-			return errors.New("remove shared repositories and disable CI before changing GitHub account")
+		var count int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM room_repos WHERE room=?`, room).Scan(&count); err != nil {
+			return err
+		}
+		if count != 0 && !strings.EqualFold(previous, a.Login) {
+			return errors.New("detach the room's repositories first before changing GitHub account")
 		}
 		if a.Login == "" {
 			_, err := tx.ExecContext(ctx, `DELETE FROM room_github_accounts WHERE room=?`, room)
