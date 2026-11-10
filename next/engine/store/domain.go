@@ -516,6 +516,10 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 					return err
 				}
 			}
+			// A post already answered, and the text of a turn that still waits adds no result to it.
+			if waiting && reply.Posted != "" && len(ended) == 0 {
+				continue
+			}
 			d := contract.Delivery{To: reply.Reply.Target, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyPost, Target: event.From, Home: reply.Reply.Home}, Wake: reply.Posted == "" && !waiting}
 			// The engine opened this channel, so reach does not apply, but a reply to a parent that can't receive goes up.
 			if _, err := reroute(ctx, tx, event.From, &d); err != nil {
