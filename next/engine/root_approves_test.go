@@ -83,7 +83,7 @@ func TestRootApprovesKinds(t *testing.T) {
 			if problem != nil {
 				t.Fatal(problem)
 			}
-			if got, err := r.s.store.Operation(ctx, on); err != nil || !strings.Contains(got.Operation.Card.Body, " or the owner.") {
+			if got, err := r.s.store.Operation(ctx, on); err != nil || strings.Contains(got.Operation.Card.Body, "Waiting for") {
 				t.Fatalf("card with the setting on: %q %v", got.Operation.Card.Body, err)
 			}
 			if problem := decide(r.owner, on); problem != nil {

@@ -1,6 +1,6 @@
 [Dyna] From your child "worker", as an approval request. No reply is delivered.
-asks for host access: Run any command on host until the session closes.
+worker asks for host access.
+Run any command on host until the session closes.
 Reason: Inspect logs
 A host here may hold the model sign-ins. Approve only if you trust this session with them.
-Waiting for root or the owner.
 Decide it with op decide, id op_example: approve true or false, with a reason when you deny.

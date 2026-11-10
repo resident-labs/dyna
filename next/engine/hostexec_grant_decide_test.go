@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -76,7 +75,7 @@ func TestGrantRequestDoesNotExpire(t *testing.T) {
 func TestRootHoldingHostsDecidesGrant(t *testing.T) {
 	r := newGrantRig(t)
 	op := r.ask()
-	if op.Decider != r.root.Session || !strings.Contains(op.Card.Body, " or the owner.") {
+	if op.Decider != r.root.Session {
 		t.Fatalf("decider: %+v", op)
 	}
 	if _, problem := r.s.OpDecide(t.Context(), r.worker, contract.OpDecideRequest{ID: op.ID, Approve: true}); problem == nil {

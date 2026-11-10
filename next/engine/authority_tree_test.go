@@ -161,3 +161,102 @@ func TestApprovalInputGolden(t *testing.T) {
 		t.Fatalf("input differs:\n%s", got)
 	}
 }
+
+func TestHolderAboveTargetButNotRequesterCannotDecide(t *testing.T) {
+	r := newGrantRig(t)
+	ctx := t.Context()
+	child, p := r.s.SessionStart(ctx, r.owner, contract.SessionStartRequest{Room: r.room, Name: "target", Profile: "test", Parent: r.worker.Session})
+	if p != nil {
+		t.Fatal(p)
+	}
+	if err := r.s.store.CreateGrant(ctx, contract.Grant{ID: "grant_lead", Kind: contract.GrantHostExec, Room: r.room, To: r.worker, Hosts: []contract.HostName{"host"}, By: r.owner, Created: r.s.now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE grants SET revoked_at=1 WHERE to_id=?", r.root.Session)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	args := contract.HostexecGrantArgs{Room: r.room, To: contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}, Hosts: []contract.HostName{"host"}, Reason: "inspect"}
+	res, p := r.s.OpSubmit(ctx, r.root, contract.OpSubmitRequest{Operation: contract.Operation{Room: r.room, Kind: "hostexec.grant", Args: args}})
+	if p != nil {
+		t.Fatal(p)
+	}
+	if _, p := r.s.OpDecide(ctx, r.worker, contract.OpDecideRequest{ID: res.Operation.ID, Approve: true}); p == nil {
+		t.Fatal("holder below requester decided")
+	}
+	grandchild, p := r.s.SessionStart(ctx, r.owner, contract.SessionStartRequest{Room: r.room, Name: "grandchild", Profile: "test", Parent: child.Session})
+	if p != nil {
+		t.Fatal(p)
+	}
+	args.To.Session = grandchild.Session
+	handed, p := r.s.OpSubmit(ctx, r.worker, contract.OpSubmitRequest{Operation: contract.Operation{Room: r.room, Kind: "hostexec.grant", Args: args}})
+	if p != nil || handed.Operation.State != contract.OpDone {
+		t.Fatalf("two-level handdown: %+v %v", handed, p)
+	}
+	for _, session := range []contract.SessionID{child.Session, grandchild.Session} {
+		holds, err := r.s.holdsHostexecGrant(ctx, args, session)
+		if err != nil || !holds {
+			t.Fatalf("path %s: %v %v", session, holds, err)
+		}
+	}
+}
+
+func TestPendingListRefreshesAClosedDecider(t *testing.T) {
+	for _, owner := range []bool{false, true} {
+		t.Run(map[bool]string{false: "root", true: "owner"}[owner], func(t *testing.T) {
+			r := newGrantRig(t)
+			ctx := t.Context()
+			child, p := r.s.SessionStart(ctx, r.owner, contract.SessionStartRequest{Room: r.room, Name: "target", Profile: "test", Parent: r.worker.Session})
+			if p != nil {
+				t.Fatal(p)
+			}
+			if err := r.s.store.CreateGrant(ctx, contract.Grant{ID: "grant_lead", Kind: contract.GrantHostExec, Room: r.room, To: r.worker, Hosts: []contract.HostName{"host"}, By: r.owner, Created: r.s.now()}); err != nil {
+				t.Fatal(err)
+			}
+			asker := contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}
+			args := contract.HostexecGrantArgs{Room: r.room, To: asker, Hosts: []contract.HostName{"host"}, Reason: "inspect"}
+			res, p := r.s.OpSubmit(ctx, asker, contract.OpSubmitRequest{Operation: contract.Operation{Room: r.room, Kind: "hostexec.grant", Args: args}})
+			if p != nil || res.Operation.Decider != r.worker.Session {
+				t.Fatalf("submit %+v %v", res, p)
+			}
+			// Move the requester out before its former parent's close, so its request remains pending.
+			if err := r.s.store.Write(ctx, func(tx *sql.Tx) error {
+				if _, err := tx.Exec("UPDATE sessions SET parent=? WHERE id=?", r.root.Session, child.Session); err != nil {
+					return err
+				}
+				if _, err := tx.Exec("UPDATE sessions SET closed_at=? WHERE id=?", r.s.now().UnixMilli(), r.worker.Session); err != nil {
+					return err
+				}
+				if owner {
+					_, err := tx.Exec("UPDATE grants SET revoked_at=1 WHERE to_id=?", r.root.Session)
+					return err
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			list, p := r.s.OpList(ctx, r.owner, contract.OpListRequest{Room: r.room})
+			if p != nil || len(list.Operations) != 1 {
+				t.Fatalf("list %+v %v", list, p)
+			}
+			want := r.root.Session
+			if owner {
+				want = ""
+			}
+			if list.Operations[0].Decider != want {
+				t.Fatalf("decider %s want %s", list.Operations[0].Decider, want)
+			}
+			events, err := r.s.store.Events(ctx, r.room, 0, 100, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, event := range events {
+				if body, ok := event.Body.(contract.OpRequested); ok && body.ID == res.Operation.ID && body.Decider != r.worker.Session {
+					t.Fatalf("history changed: %+v", body)
+				}
+			}
+		})
+	}
+}

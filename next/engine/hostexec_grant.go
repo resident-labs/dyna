@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"github.com/resident-labs/dyna/contract"
@@ -17,20 +16,8 @@ func (s *Service) HostexecGrant() approve.Entry {
 		Scope: contract.ScopeAdmin,
 		// The request waits for a holder above it or the owner, or for its session to close.
 		NoExpiry: true,
-		Holds: func(ctx context.Context, args contract.OpArgs, session contract.SessionID) (bool, error) {
-			a := args.(contract.HostexecGrantArgs)
-			grants, err := s.store.ListActiveGrants(ctx, a.Room, contract.Principal{Kind: contract.PrincipalSession, Session: session}, s.now())
-			if err != nil {
-				return false, err
-			}
-			for _, host := range a.Hosts {
-				if _, err := hostexec.Match(grants, host, s.now()); err != nil {
-					return false, nil
-				}
-			}
-			return true, nil
-		},
-		Class: func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassOwner },
+		Holds:    s.holdsHostexecGrant,
+		Class:    func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassOwner },
 
 		// The title is the phrase after the asker's name, as for every card: "<session> asks for host access".
 		// The body then says "Run any command on <host> until the session closes."
@@ -129,7 +116,7 @@ func (s *Service) HostexecGrant() approve.Entry {
 			}
 			var grants []contract.Grant
 			for target := a.To.Session; target != "" && target != by.Session; target = tree.Parent(target) {
-				holds, err := s.HostexecGrant().Holds(ctx, args, target)
+				holds, err := s.holdsHostexecGrant(ctx, args, target)
 				if err != nil {
 					return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
 				}
@@ -142,14 +129,7 @@ func (s *Service) HostexecGrant() approve.Entry {
 				}
 				grants = append(grants, contract.Grant{ID: contract.GrantID(grantID), Kind: contract.GrantHostExec, Room: a.Room, To: contract.Principal{Kind: contract.PrincipalSession, Session: target}, Hosts: a.Hosts, Reason: a.Reason, By: by, Created: now})
 			}
-			err = s.store.Write(ctx, func(tx *sql.Tx) error {
-				for _, grant := range grants {
-					if err := s.store.InsertGrant(tx, grant); err != nil {
-						return err
-					}
-				}
-				return nil
-			})
+			err = s.store.CreateGrants(ctx, grants)
 			if err != nil {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
 			}
@@ -171,4 +151,18 @@ func quoteHostexec(value string) string {
 		}
 	}
 	return value
+}
+
+func (s *Service) holdsHostexecGrant(ctx context.Context, args contract.OpArgs, session contract.SessionID) (bool, error) {
+	a := args.(contract.HostexecGrantArgs)
+	grants, err := s.store.ListActiveGrants(ctx, a.Room, contract.Principal{Kind: contract.PrincipalSession, Session: session}, s.now())
+	if err != nil {
+		return false, err
+	}
+	for _, host := range a.Hosts {
+		if _, err := hostexec.Match(grants, host, s.now()); err != nil {
+			return false, nil
+		}
+	}
+	return true, nil
 }

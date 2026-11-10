@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { needsOwner } from "../room.svelte.ts";
   import { requestsFor } from "../request-groups.ts";
   import { roomRuns } from "../workflow.ts";
   import type { Attention } from "../attention.svelte.ts";
@@ -26,7 +27,7 @@
   let allSessions = $derived([...store.sessions.values()].filter(item => store.hadJobs.has(item.session) && store.boxes.get(item.session) === "ready")
     .map(item => ({ id: item.session, name: item.name, root: !item.parent, running: store.shellJobs.get(item.session) ?? 0 })));
   let sessions = $derived(session ? allSessions.filter(item => item.id === session) : allSessions);
-  let waiting = $derived(session ? requestsFor(store.requests.values(), session).filter(request => request.state === "pending" && request.class === "owner" && !request.decider).length + store.pendingQuestions(session).length : store.waiting);
+  let waiting = $derived(session ? requestsFor(store.requests.values(), session).filter(needsOwner).length + store.pendingQuestions(session).length : store.waiting);
   let working = $derived(store.counts.working);
   let busy = $derived(store.members.filter(item => store.status(item.session) === "working"));
   // The room's runs, the running ones first. A crew has no row among the sessions: its run stands for it here.

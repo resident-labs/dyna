@@ -66,9 +66,6 @@ func (s *Service) events(ctx context.Context, caller contract.Principal, room co
 					return
 				}
 				for _, event := range events {
-					if err := s.approvalDecider(ctx, &event); err != nil {
-						return
-					}
 					select {
 					case out <- event:
 						after = event.Seq

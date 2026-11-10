@@ -82,18 +82,3 @@ func (s *Service) OperationScope(kind contract.OpKind) contract.Scope {
 	}
 	return s.approvals.Kinds[kind].Scope
 }
-
-// approvalDecider refreshes the read-only routing field on streamed and replayed requests.
-func (s *Service) approvalDecider(ctx context.Context, event *contract.Event) error {
-	requested, ok := event.Body.(contract.OpRequested)
-	if !ok || s.approvals == nil {
-		return nil
-	}
-	decider, err := s.approvals.DeciderForID(ctx, requested.ID)
-	if err != nil {
-		return err
-	}
-	requested.Decider = decider
-	event.Body = requested
-	return nil
-}

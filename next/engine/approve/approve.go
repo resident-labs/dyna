@@ -118,7 +118,7 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 			return contract.Operation{}, err
 		}
 		if previous.Operation.ID != "" {
-			return s.decodeReplay(ctx, previous, input)
+			return s.decodeReplay(previous, input)
 		}
 	}
 	if input.Args == nil {
@@ -167,13 +167,6 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 			return contract.Operation{}, err
 		}
 	}
-	if !immediate && decider != "" {
-		session, err := s.Store.Session(ctx, decider)
-		if err != nil {
-			return contract.Operation{}, err
-		}
-		card.Body += "\nWaiting for " + session.Name + " or the owner."
-	}
 	op := contract.Operation{Decider: decider, ID: contract.OpID(id), Kind: kind, Room: input.Room, By: who, Args: input.Args, Class: class, Card: card, State: contract.OpPending, Created: now}
 	if !entry.NoExpiry {
 		op.Expires = now.Add(s.Expiry)
@@ -197,11 +190,10 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 	}
 	if previous.Operation.ID != "" {
 		if replay {
-			return s.decodeReplay(ctx, previous, input)
+			return s.decodeReplay(previous, input)
 		}
 		previous.Operation.Args = input.Args
-		previous.Operation.Decider, err = s.Decider(ctx, previous.Operation)
-		return previous.Operation, err
+		return previous.Operation, nil
 	}
 	if !immediate {
 		return op, nil
@@ -251,7 +243,7 @@ func (s *Service) Wait(ctx context.Context, id contract.OpID) (contract.Operatio
 	return s.await(record.Operation, w)
 }
 
-func (s *Service) decodeReplay(ctx context.Context, record store.StoredOperation, input contract.Operation) (contract.Operation, error) {
+func (s *Service) decodeReplay(record store.StoredOperation, input contract.Operation) (contract.Operation, error) {
 	// The API authorized the submitted kind. Never return a different kind or room.
 	if record.Operation.Kind != input.Kind || record.Operation.Room != input.Room {
 		return contract.Operation{}, ErrForbidden
@@ -262,9 +254,6 @@ func (s *Service) decodeReplay(ctx context.Context, record store.StoredOperation
 	}
 	args, err := entry.Decode(record.Args)
 	record.Operation.Args = args
-	if err == nil {
-		record.Operation.Decider, err = s.Decider(ctx, record.Operation)
-	}
 	return record.Operation, err
 }
 
