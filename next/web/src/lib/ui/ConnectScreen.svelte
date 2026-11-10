@@ -5,7 +5,9 @@
   import PairScreen from "./PairScreen.svelte";
 
   let { code = "", landing = false }: { code?: string; landing?: boolean } = $props();
-  let pairing = $state(untrack(() => code !== "")), greeting: Hello | undefined = $state(), pin: Pin | undefined = $state();
+  let pairing = $state(untrack(() => code !== "")), greeting: Hello | undefined = $state();
+  // Raw, because IndexedDB cannot clone the proxy of a deep state, and a returning device writes its pin back.
+  let pin: Pin | undefined = $state.raw();
   let result: Landing | undefined = $state(), loading = $state(true), busy = $state(false);
   let trusted = $state(""), offered = $state("");
   let button: HTMLButtonElement | undefined = $state();
