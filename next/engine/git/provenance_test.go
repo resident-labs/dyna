@@ -41,6 +41,9 @@ func TestMirrorProvenanceBlocksOfflineIdentityChanges(t *testing.T) {
 			// A failed refill leaves a durable requirement, including across restarts.
 			f.mirror.fetched.Clear()
 			for _, read := range []func(context.Context) error{
+				func(ctx context.Context) error { return f.mirror.Refresh(ctx, "owner/repo") },
+				func(ctx context.Context) error { _, err := f.mirror.Default(ctx, "owner/repo"); return err },
+				func(ctx context.Context) error { _, err := f.mirror.Branches(ctx, "owner/repo"); return err },
 				func(ctx context.Context) error { _, err := f.mirror.ComposeNames(ctx, "owner/repo"); return err },
 				func(ctx context.Context) error {
 					_, err := f.mirror.ComposeFile(ctx, "owner/repo", "default")

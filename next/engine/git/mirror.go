@@ -152,6 +152,9 @@ func (m *Mirror) Prepare(ctx context.Context, host CacheHost, repo contract.Repo
 
 // Default names the branch the mirror's HEAD is on, which is the repository's default branch.
 func (m *Mirror) Default(ctx context.Context, repo contract.RepoName) (string, error) {
+	if err := m.checkAccess(ctx, repo); err != nil {
+		return "", err
+	}
 	path, err := m.Layout.Git(repo)
 	if err != nil {
 		return "", err
@@ -162,6 +165,9 @@ func (m *Mirror) Default(ctx context.Context, repo contract.RepoName) (string, e
 
 // Branches lists the branches the mirror holds, which is what GitHub had at the last fetch.
 func (m *Mirror) Branches(ctx context.Context, repo contract.RepoName) ([]string, error) {
+	if err := m.checkAccess(ctx, repo); err != nil {
+		return nil, err
+	}
 	path, err := m.Layout.Git(repo)
 	if err != nil {
 		return nil, err
@@ -278,6 +284,9 @@ func (m *Mirror) Cloned(repo contract.RepoName) bool {
 
 // Refresh brings the mirror up to date, sharing a fetch with any box start of this repository.
 func (m *Mirror) Refresh(ctx context.Context, repo contract.RepoName) error {
+	if err := m.checkAccess(ctx, repo); err != nil {
+		return err
+	}
 	if m.Token == "" && m.ResolveToken == nil {
 		return MissingTokenError{}
 	}
