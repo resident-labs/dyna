@@ -66,13 +66,22 @@ func TestUnmarkedEngineMirrorStillWorksOffline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(filepath.Join(path, box.GitIdentityMarker)); err != nil {
+	// The fixture fetched and pushed once. A subsequent ordinary fetch/push
+	// must still leave the engine mirror unmarked.
+	if _, err := f.mirror.Prepare(t.Context(), gitCache{t}, "owner/repo", true); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(path, box.GitIdentityMarker)); !os.IsNotExist(err) {
+		t.Fatalf("ordinary fetch created provenance marker: %v", err)
 	}
 	f.github.hang.Store(true)
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
-	item, err := f.mirror.Prepare(ctx, gitCache{t}, "owner/repo", false)
+	cache := &fakeCache{}
+	item, err := f.mirror.Prepare(ctx, cache, "owner/repo", false)
+	if cache.called {
+		t.Fatal("unmarked offline engine prepare pushed the host cache")
+	}
 	if err != nil || item.Base != "main" {
 		t.Fatalf("legacy engine offline setup: %+v %v", item, err)
 	}

@@ -29,7 +29,7 @@ func TestPushCacheUsesMaster(t *testing.T) {
 				push = call
 			}
 		}
-		if len(init) == 0 || !strings.HasSuffix(init[len(init)-1], `'dyna' '/data/git/owner/repo.git' '' '.dyna-github-identity'`) || !strings.Contains(init[len(init)-1], `rm -rf -- "$1"`) {
+		if len(init) == 0 || !strings.HasSuffix(init[len(init)-1], `'dyna' '/data/git/owner/repo.git' '' '.dyna-github-identity'`) || !strings.Contains(init[len(init)-1], `mv -- "$1" "$old"`) || !strings.Contains(init[len(init)-1], `rm -rf -- "$old"`) {
 			t.Fatalf("cache reset/init: %v", init)
 		}
 		want := []string{"env", "GIT_SSH_COMMAND=ssh -S " + quote(h.socket) + " -o ControlMaster=no", "git", "-C", "/mirror", "push", "--force", "user@host:/data/git/owner/repo.git", "refs/heads/main"}
@@ -43,13 +43,15 @@ func TestPushCacheUsesMaster(t *testing.T) {
 }
 
 func TestCacheProvenanceResetsOldObjects(t *testing.T) {
-	for _, markers := range [][2]string{{`{"login":"","generation":"one"}`, `{"login":"work","generation":"two"}`}, {`{"login":"work","generation":"one"}`, `{"login":"","generation":"two"}`}, {`{"login":"work","generation":"one"}`, `{"login":"work","generation":"refilled"}`}} {
+	for _, markers := range [][2]string{{"", ""}, {`{"login":"","generation":"one"}`, `{"login":"work","generation":"two"}`}, {`{"login":"work","generation":"one"}`, `{"login":"","generation":"two"}`}, {`{"login":"work","generation":"one"}`, `{"login":"work","generation":"refilled"}`}} {
 		cache := filepath.Join(t.TempDir(), "repo.git")
 		if err := os.MkdirAll(cache, 0700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(cache, box.GitIdentityMarker), []byte(markers[0]), 0600); err != nil {
-			t.Fatal(err)
+		if markers[0] != "" {
+			if err := os.WriteFile(filepath.Join(cache, box.GitIdentityMarker), []byte(markers[0]), 0600); err != nil {
+				t.Fatal(err)
+			}
 		}
 		oldObject := filepath.Join(cache, "old-private-object")
 		if err := os.WriteFile(oldObject, []byte("private"), 0600); err != nil {
@@ -59,8 +61,18 @@ func TestCacheProvenanceResetsOldObjects(t *testing.T) {
 		if output, err := command.CombinedOutput(); err != nil {
 			t.Fatalf("reset: %v %s", err, output)
 		}
-		if _, err := os.Stat(oldObject); !os.IsNotExist(err) {
+		if markers[1] == "" {
+			if _, err := os.Stat(oldObject); err != nil {
+				t.Fatalf("ordinary cache objects removed: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(cache, box.GitIdentityMarker)); !os.IsNotExist(err) {
+				t.Fatal("ordinary cache gained a marker")
+			}
+		} else if _, err := os.Stat(oldObject); !os.IsNotExist(err) {
 			t.Fatal("previous cache objects survived identity/refill change")
+		}
+		if old, err := filepath.Glob(cache + ".old.*"); err != nil || len(old) != 0 {
+			t.Fatalf("reset left old cache folders: %v %v", old, err)
 		}
 	}
 }
