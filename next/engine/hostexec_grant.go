@@ -100,7 +100,7 @@ func (s *Service) HostexecGrant() approve.Entry {
 		Execute: func(ctx context.Context, op contract.OpID, args contract.OpArgs, _ contract.Principal) contract.OpResult {
 			a := args.(contract.HostexecGrantArgs)
 			now := s.now()
-			// The grant records who decided it: the owner, or the room's root. An owner's own request has no decision.
+			// The grant records its deciding holder. An owner's own request has no decision.
 			by := contract.Principal{Kind: contract.PrincipalOwner}
 			record, err := s.store.Operation(ctx, op)
 			if err != nil {
@@ -128,6 +128,21 @@ func (s *Service) HostexecGrant() approve.Entry {
 					return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
 				}
 				grants = append(grants, contract.Grant{ID: contract.GrantID(grantID), Kind: contract.GrantHostExec, Room: a.Room, To: contract.Principal{Kind: contract.PrincipalSession, Session: target}, Hosts: a.Hosts, Reason: a.Reason, By: by, Created: now})
+			}
+			if by.Kind == contract.PrincipalSession {
+				tree, err := s.store.RoomTree(ctx, a.Room)
+				if err != nil {
+					return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
+				}
+				holds, err := s.holdsHostexecGrant(ctx, args, by.Session)
+				if err != nil {
+					return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
+				}
+				managesTarget := tree.Above(by.Session, a.To.Session) || by == record.Operation.By && by == a.To
+				managesRequester := by == record.Operation.By || tree.Above(by.Session, record.Operation.By.Session)
+				if !holds || !managesTarget || !managesRequester {
+					return contract.OpResult{Cause: contract.CauseStale, Error: "stale: the deciding session no longer holds the requested hosts or authority over the requester and target"}
+				}
 			}
 			err = s.store.CreateGrants(ctx, grants)
 			if err != nil {
