@@ -98,6 +98,22 @@ func TestDiskWarnWakesRoomRootsOncePerSpell(t *testing.T) {
 	}
 }
 
+func TestDiskWarnTellsOnlyRoomsWithABoxOnTheHost(t *testing.T) {
+	ctx := context.Background()
+	s := diskStore(t)
+	if _, err := s.writer.Exec("UPDATE boxes SET host='h' WHERE id='b1'"); err != nil {
+		t.Fatal(err)
+	}
+	free := 10 * box.GiB
+	if err := s.RecordHostHeartbeat(ctx, "h", true, &free, 1000*box.GiB, time.Unix(1, 0)); err != nil {
+		t.Fatal(err)
+	}
+	events, wakes := diskAlerts(t, s)
+	if events["r1"] != 1 || events["r2"] != 0 || wakes["root1"] != 1 || wakes["root2"] != 0 {
+		t.Fatalf("events %v wakes %v, want only r1", events, wakes)
+	}
+}
+
 func TestDiskWarnReachesRootsWhenControlPlaneIsNoHost(t *testing.T) {
 	ctx := context.Background()
 	s := diskStore(t)
