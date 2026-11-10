@@ -6,11 +6,15 @@ import (
 	"errors"
 
 	"github.com/resident-labs/dyna/contract"
-	"github.com/resident-labs/dyna/engine/githubaccount"
 )
 
-func (s *Store) GitHubAccount(ctx context.Context, room contract.RoomID) (githubaccount.Account, error) {
-	var a githubaccount.Account
+type GitHubIdentity struct {
+	Login, Name, Email string
+	Credential         contract.RoomID
+}
+
+func (s *Store) GitHubAccount(ctx context.Context, room contract.RoomID) (GitHubIdentity, error) {
+	var a GitHubIdentity
 	err := s.Read().QueryRowContext(ctx, `SELECT COALESCE(a.login,''),COALESCE(a.name,''),COALESCE(a.email,''),COALESCE(a.credential,'') FROM rooms r LEFT JOIN room_github_accounts a ON a.room=r.id WHERE r.id=?`, room).Scan(&a.Login, &a.Name, &a.Email, &a.Credential)
 	return a, err
 }
@@ -22,7 +26,7 @@ func (s *Store) RepoRoom(ctx context.Context, repo contract.RepoName) (contract.
 
 // SetGitHubAccount changes metadata only; credentials are never stored in SQLite.
 // Shared repositories and CI must be removed before changing account identity.
-func (s *Store) SetGitHubAccount(ctx context.Context, room contract.RoomID, a githubaccount.Account) error {
+func (s *Store) SetGitHubAccount(ctx context.Context, room contract.RoomID, a GitHubIdentity) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		var count int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM room_repos rr JOIN repos p ON p.repo=rr.repo WHERE rr.room=? AND (p.ci=1 OR EXISTS(SELECT 1 FROM room_repos other WHERE other.repo=rr.repo AND other.room<>rr.room))`, room).Scan(&count); err != nil {

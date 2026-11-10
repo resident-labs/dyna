@@ -197,7 +197,11 @@ func (s *Service) PrTrack(ctx context.Context, caller contract.Principal, req co
 	}
 	pull, err := client.Pull(ctx, repo, req.Number)
 	if errors.Is(err, prs.ErrNotFound) {
-		return contract.PrTrackResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "GitHub has no such pull request"}
+		message := "GitHub has no such pull request"
+		if client.AccountLabel != "" {
+			message = client.AccountLabel + ": " + message
+		}
+		return contract.PrTrackResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: message}
 	}
 	if err != nil {
 		return contract.PrTrackResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "GitHub did not answer: " + err.Error()}

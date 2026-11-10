@@ -46,7 +46,7 @@ func (p *Poller) Run(ctx context.Context, ticks <-chan time.Time) {
 }
 
 // due lists the repositories to read now. That is every one of them, until the quota runs low.
-func (p *Poller) due(repos map[contract.RepoName]bool) []contract.RepoName {
+func (p *Poller) due(ctx context.Context, repos map[contract.RepoName]bool) []contract.RepoName {
 	if p.last == nil {
 		p.last, p.failed = map[contract.RepoName]time.Time{}, map[contract.RepoName]string{}
 	}
@@ -57,6 +57,14 @@ func (p *Poller) due(repos map[contract.RepoName]bool) []contract.RepoName {
 	}
 	var due []contract.RepoName
 	for repo := range repos {
+		if p.Accounts != nil {
+			client, err := p.Accounts.Repo(ctx, repo)
+			if err == nil {
+				_, low = client.Low()
+			} else {
+				low = false
+			}
+		}
 		if last, read := p.last[repo]; !low || !read || !now.Before(last.Add(lowQuotaWait)) {
 			due = append(due, repo)
 			p.last[repo] = now
@@ -224,7 +232,7 @@ func (p *Poller) Pass(ctx context.Context) error {
 		repos[row.Repo] = true
 		issuesIn[row.Repo] = append(issuesIn[row.Repo], row)
 	}
-	due := p.due(repos)
+	due := p.due(ctx, repos)
 	if len(due) == 0 {
 		return nil
 	}

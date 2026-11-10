@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/githubaccount"
@@ -21,11 +22,29 @@ func (s *Service) accountEntry(token string, makeEntry func(string) approve.Entr
 		if err != nil {
 			return approve.Entry{}, err
 		}
-		credential, _, err := s.githubAccounts.Room(ctx, session.Room)
+		credential, login, err := s.githubAccounts.Room(ctx, session.Room)
 		if err != nil {
 			return approve.Entry{}, err
 		}
-		return makeEntry(credential), nil
+		selected := makeEntry(credential)
+		if login != "" {
+			label := fmt.Sprintf("GitHub account %s of room %s", login, session.Room)
+			check, execute := selected.Check, selected.Execute
+			selected.Check = func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {
+				if err := check(ctx, args, who); err != nil {
+					return fmt.Errorf("%s: %w", label, err)
+				}
+				return nil
+			}
+			selected.Execute = func(ctx context.Context, id contract.OpID, args contract.OpArgs, who contract.Principal) contract.OpResult {
+				result := execute(ctx, id, args, who)
+				if result.Error != "" {
+					result.Error = label + ": " + result.Error
+				}
+				return result
+			}
+		}
+		return selected, nil
 	}
 	entry.Check = func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {
 		selected, err := resolve(ctx, who)
@@ -54,6 +73,9 @@ func (s *Service) roomGitHub(ctx context.Context, room contract.RoomID) (*prs.Cl
 	token, login, err := s.githubAccounts.Room(ctx, room)
 	if err != nil {
 		return nil, err
+	}
+	if login != "" {
+		login += " of room " + string(room)
 	}
 	return s.githubClients.Client(token, login), nil
 }

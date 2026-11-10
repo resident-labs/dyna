@@ -142,7 +142,11 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	if account.Login != "" {
 		gitName, gitEmail = account.Name, account.Email
 	}
-	return contract.BoxHelloResponse{Room: session.Room, GitName: gitName, GitEmail: gitEmail, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: modelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: sessionPrompt(vars), WorkerInstructions: promptCore, Root: vars.Role == roleRoot, Workflow: workflow, GitHub: s.githubTools != nil}, nil
+	githubAvailable := s.githubTools != nil
+	if s.githubAccounts != nil {
+		githubAvailable = githubAvailable && (account.Login != "" || s.githubAccounts.DefaultToken != "")
+	}
+	return contract.BoxHelloResponse{Room: session.Room, GitName: gitName, GitEmail: gitEmail, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: modelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: sessionPrompt(vars), WorkerInstructions: promptCore, Root: vars.Role == roleRoot, Workflow: workflow, GitHub: githubAvailable}, nil
 }
 
 func (s *Service) DeliveryDone(ctx context.Context, caller contract.Principal, req contract.DeliveryDoneRequest) (contract.DeliveryDoneResponse, *contract.Error) {

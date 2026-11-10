@@ -15,13 +15,11 @@ import (
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 // Account is public metadata; it deliberately contains no credential.
-type Account struct {
-	Login, Name, Email string
-	Credential         contract.RoomID
-}
+type Account = store.GitHubIdentity
 
 // Store supplies metadata and a repository's unique default room.
 type Store interface {
