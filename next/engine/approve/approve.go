@@ -25,6 +25,8 @@ type Entry struct {
 	Scope     contract.Scope
 	// NoExpiry keeps a request pending until it is decided or withdrawn.
 	NoExpiry bool
+	// Holds reports whether a session holds everything requested by args.
+	Holds func(context.Context, contract.OpArgs, contract.SessionID) (bool, error)
 	// RootApproves names the room setting that lets the room's root decide this kind in the room, as the owner can. Empty means only the owner.
 	RootApproves contract.RootApproval
 	Class        func(contract.OpArgs, contract.Principal) contract.Class
@@ -154,25 +156,30 @@ func (s *Service) submit(ctx context.Context, who contract.Principal, input cont
 		return contract.Operation{}, err
 	}
 	card := entry.Card(ctx, input.Args, who)
-	if !immediate && entry.RootApproves != "" {
-		name, on, err := s.Store.RoomRootApproves(ctx, input.Room, entry.RootApproves)
+
+	decider, err := s.Decider(ctx, contract.Operation{Room: input.Room, By: who, Args: input.Args, Kind: kind})
+	if err != nil {
+		return contract.Operation{}, err
+	}
+	if !immediate && entry.Holds != nil && who.Kind == contract.PrincipalSession {
+		immediate, err = entry.Holds(ctx, input.Args, who.Session)
 		if err != nil {
 			return contract.Operation{}, err
 		}
-		if on {
-			card.Body += "\nWaiting for " + name + "'s root or the owner."
-		}
 	}
-	op := contract.Operation{ID: contract.OpID(id), Kind: kind, Room: input.Room, By: who, Args: input.Args, Class: class, Card: card, State: contract.OpPending, Created: now}
+	op := contract.Operation{Decider: decider, ID: contract.OpID(id), Kind: kind, Room: input.Room, By: who, Args: input.Args, Class: class, Card: card, State: contract.OpPending, Created: now}
 	if !entry.NoExpiry {
 		op.Expires = now.Add(s.Expiry)
 	}
 	if immediate {
 		op.State = contract.OpApproved
+		if entry.Holds != nil && who.Kind == contract.PrincipalSession {
+			op.Decision = &contract.Decision{By: who, Approved: true, At: now}
+		}
 	}
 	var request contract.Event
 	if !immediate {
-		request, err = s.event(op.Room, who, contract.OpRequested{ID: op.ID, Kind: op.Kind, By: who, Class: class, Card: op.Card, Expires: op.Expires})
+		request, err = s.event(op.Room, who, contract.OpRequested{Decider: decider, ID: op.ID, Kind: op.Kind, By: who, Class: class, Card: op.Card, Expires: op.Expires})
 		if err != nil {
 			return contract.Operation{}, err
 		}
@@ -260,20 +267,32 @@ func (s *Service) Decide(ctx context.Context, who contract.Principal, id contrac
 		return err
 	}
 	entry, known := s.Kinds[op.Kind]
-	// The owner decides. A session may withdraw its own request, and the room's root decides a kind that lets it.
+
 	if who.Kind != contract.PrincipalOwner && (state != contract.OpWithdrawn || who != op.By) {
-		if state == contract.OpWithdrawn || entry.RootApproves == "" {
+		if state == contract.OpWithdrawn {
 			return ErrForbidden
-		}
-		_, allowed, err := s.Store.RoomRootApproves(ctx, op.Room, entry.RootApproves)
-		if err != nil {
-			return err
 		}
 		tree, err := s.Store.RoomTree(ctx, op.Room)
 		if err != nil {
 			return err
 		}
-		if !allowed || tree.Root() != who.Session {
+		allowed := false
+		if entry.Holds != nil && tree.Above(who.Session, op.By.Session) {
+			args, err := entry.Decode(record.Args)
+			if err != nil {
+				return err
+			}
+			allowed, err = entry.Holds(ctx, args, who.Session)
+			if err != nil {
+				return err
+			}
+		} else if entry.RootApproves != "" && tree.Root() == who.Session {
+			_, allowed, err = s.Store.RoomRootApproves(ctx, op.Room, entry.RootApproves)
+			if err != nil {
+				return err
+			}
+		}
+		if !allowed {
 			return ErrForbidden
 		}
 	}
@@ -470,7 +489,60 @@ func (s *Service) List(ctx context.Context, who contract.Principal, room contrac
 		if err != nil {
 			return nil, err
 		}
+		record.Operation.Decider, err = s.Decider(ctx, record.Operation)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, record.Operation)
 	}
 	return out, nil
+}
+
+// Decider computes the nearest current holder above the requester; empty means the owner.
+func (s *Service) Decider(ctx context.Context, op contract.Operation) (contract.SessionID, error) {
+	entry := s.Kinds[op.Kind]
+	if op.By.Kind != contract.PrincipalSession {
+		return "", nil
+	}
+	tree, err := s.Store.RoomTree(ctx, op.Room)
+	if err != nil {
+		return "", err
+	}
+	if entry.Holds != nil {
+		for parent := tree.Parent(op.By.Session); parent != ""; parent = tree.Parent(parent) {
+			holds, err := entry.Holds(ctx, op.Args, parent)
+			if err != nil {
+				return "", err
+			}
+			if holds {
+				return parent, nil
+			}
+		}
+	} else if entry.RootApproves != "" {
+		_, on, err := s.Store.RoomRootApproves(ctx, op.Room, entry.RootApproves)
+		if err != nil {
+			return "", err
+		}
+		if on {
+			return tree.Root(), nil
+		}
+	}
+	return "", nil
+}
+
+// DeciderForID reads the arguments before resolving current authority.
+func (s *Service) DeciderForID(ctx context.Context, id contract.OpID) (contract.SessionID, error) {
+	record, err := s.Store.Operation(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	entry, ok := s.Kinds[record.Operation.Kind]
+	if !ok {
+		return "", nil
+	}
+	record.Operation.Args, err = entry.Decode(record.Args)
+	if err != nil {
+		return "", err
+	}
+	return s.Decider(ctx, record.Operation)
 }

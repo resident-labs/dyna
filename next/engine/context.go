@@ -26,10 +26,9 @@ const workflowsChars = 300
 
 // rootApprovalNames name the root-approves kinds as Settings > Approvals does.
 var rootApprovalNames = map[contract.RootApproval]string{
-	contract.RootApprovesHostexec: "host exec",
-	contract.RootApprovesAddons:   "global add-ons",
-	contract.RootApprovesHosts:    "room host rules",
-	contract.RootApprovesPools:    "node pools",
+	contract.RootApprovesAddons: "global add-ons",
+	contract.RootApprovesHosts:  "room host rules",
+	contract.RootApprovesPools:  "node pools",
 }
 
 func renderContextSection(key contract.ContextSectionKey, lines []string, maxChars int, full bool, rowLimit int) contract.ContextSection {

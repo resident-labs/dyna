@@ -247,7 +247,11 @@ func (s *Store) SubmitOperation(ctx context.Context, record StoredOperation, req
 		if checkErr != nil {
 			return checkErr
 		}
-		if err := s.InsertOperation(tx, record, request, nil); err != nil {
+		var deliveries []contract.Delivery
+		if to := record.Operation.Decider; to != "" {
+			deliveries = []contract.Delivery{{To: contract.Principal{Kind: contract.PrincipalSession, Session: to}, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}}
+		}
+		if err := s.InsertOperation(tx, record, request, deliveries); err != nil {
 			return err
 		}
 		if clientID != "" {

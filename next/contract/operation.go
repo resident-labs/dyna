@@ -15,6 +15,7 @@ const (
 type OpState string // "pending" | "approved" | "running" | "denied" | "expired" | "withdrawn" | "done" | "failed"
 
 type Operation struct {
+	Decider  SessionID `json:"decider,omitempty"`
 	ID       OpID      `json:"id"`
 	Kind     OpKind    `json:"kind"`
 	Room     RoomID    `json:"room"`

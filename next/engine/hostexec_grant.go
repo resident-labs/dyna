@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
+	"github.com/resident-labs/dyna/engine/hostexec"
 	"strconv"
 	"strings"
 )
@@ -13,10 +14,10 @@ import (
 func (s *Service) HostexecGrant() approve.Entry {
 	return approve.Entry{
 		Scope: contract.ScopeAdmin,
-		// The request waits for a decision, or for its session to close. A room setting also lets its root decide.
-		NoExpiry:     true,
-		RootApproves: contract.RootApprovesHostexec,
-		Class:        func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassOwner },
+		// The request waits for a holder above it or the owner, or for its session to close.
+		NoExpiry: true,
+		Holds:    s.holdsHostexecGrant,
+		Class:    func(contract.OpArgs, contract.Principal) contract.Class { return contract.ClassOwner },
 
 		// The title is the phrase after the asker's name, as for every card: "<session> asks for host access".
 		// The body then says "Run any command on <host> until the session closes."
@@ -82,6 +83,13 @@ func (s *Service) HostexecGrant() approve.Entry {
 			if err != nil || target.Room != a.Room {
 				return approve.ErrInvalid
 			}
+			tree, err := s.store.RoomTree(ctx, a.Room)
+			if err != nil {
+				return err
+			}
+			if who.Kind != contract.PrincipalOwner && who.Session != a.To.Session && !tree.CanManage(who, a.To.Session) {
+				return approve.ErrForbidden
+			}
 			return nil
 		},
 		Decode: func(data json.RawMessage) (contract.OpArgs, error) {
@@ -92,11 +100,7 @@ func (s *Service) HostexecGrant() approve.Entry {
 		Execute: func(ctx context.Context, op contract.OpID, args contract.OpArgs, _ contract.Principal) contract.OpResult {
 			a := args.(contract.HostexecGrantArgs)
 			now := s.now()
-			value, err := id("grant_", now)
-			if err != nil {
-				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
-			}
-			// The grant records who decided it: the owner, or the room's root. An owner's own request has no decision.
+			// The grant records its deciding holder. An owner's own request has no decision.
 			by := contract.Principal{Kind: contract.PrincipalOwner}
 			record, err := s.store.Operation(ctx, op)
 			if err != nil {
@@ -105,12 +109,49 @@ func (s *Service) HostexecGrant() approve.Entry {
 			if record.Operation.Decision != nil {
 				by = record.Operation.Decision.By
 			}
-			g := contract.Grant{ID: contract.GrantID(value), Kind: contract.GrantHostExec, Room: a.Room, To: a.To, Hosts: a.Hosts, Reason: a.Reason, By: by, Created: now}
-			err = s.store.CreateGrant(ctx, g)
+
+			tree, err := s.store.RoomTree(ctx, a.Room)
 			if err != nil {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
 			}
-			return contract.OpResult{Output: value}
+			var grants []contract.Grant
+			for target := a.To.Session; target != "" && target != by.Session; target = tree.Parent(target) {
+				holds, err := s.holdsHostexecGrant(ctx, args, target)
+				if err != nil {
+					return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
+				}
+				if holds {
+					continue
+				}
+				grantID, err := id("grant_", now)
+				if err != nil {
+					return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
+				}
+				grants = append(grants, contract.Grant{ID: contract.GrantID(grantID), Kind: contract.GrantHostExec, Room: a.Room, To: contract.Principal{Kind: contract.PrincipalSession, Session: target}, Hosts: a.Hosts, Reason: a.Reason, By: by, Created: now})
+			}
+			if by.Kind == contract.PrincipalSession {
+				tree, err := s.store.RoomTree(ctx, a.Room)
+				if err != nil {
+					return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
+				}
+				holds, err := s.holdsHostexecGrant(ctx, args, by.Session)
+				if err != nil {
+					return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
+				}
+				managesTarget := tree.Above(by.Session, a.To.Session) || by == record.Operation.By && by == a.To
+				managesRequester := by == record.Operation.By || tree.Above(by.Session, record.Operation.By.Session)
+				if !holds || !managesTarget || !managesRequester {
+					return contract.OpResult{Cause: contract.CauseStale, Error: "stale: the deciding session no longer holds the requested hosts or authority over the requester and target"}
+				}
+			}
+			err = s.store.CreateGrants(ctx, grants)
+			if err != nil {
+				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
+			}
+			if len(grants) > 0 {
+				return contract.OpResult{Output: string(grants[0].ID)}
+			}
+			return contract.OpResult{}
 		},
 	}
 }
@@ -125,4 +166,18 @@ func quoteHostexec(value string) string {
 		}
 	}
 	return value
+}
+
+func (s *Service) holdsHostexecGrant(ctx context.Context, args contract.OpArgs, session contract.SessionID) (bool, error) {
+	a := args.(contract.HostexecGrantArgs)
+	grants, err := s.store.ListActiveGrants(ctx, a.Room, contract.Principal{Kind: contract.PrincipalSession, Session: session}, s.now())
+	if err != nil {
+		return false, err
+	}
+	for _, host := range a.Hosts {
+		if _, err := hostexec.Match(grants, host, s.now()); err != nil {
+			return false, nil
+		}
+	}
+	return true, nil
 }

@@ -422,6 +422,9 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 			named[body.Session] = true
 		case contract.OpRequested:
 			named[body.By.Session] = true
+			if body.Decider != "" {
+				named[body.Decider] = true
+			}
 		case contract.QuestionAnswered:
 			named[body.Session] = true
 		case contract.QuestionWithdrawn:

@@ -61,8 +61,8 @@ func TestHostListShowsBothSwitches(t *testing.T) {
 
 func TestRoomSetRootApproves(t *testing.T) {
 	f := &fakeClient{}
-	runCLI(t, f, "room", "set", "r", "--root-approves-hostexec", "on", "--root-approves-pools", "off")
-	want := map[contract.RootApproval]bool{contract.RootApprovesHostexec: true, contract.RootApprovesPools: false}
+	runCLI(t, f, "room", "set", "r", "--root-approves-addons", "on", "--root-approves-pools", "off")
+	want := map[contract.RootApproval]bool{contract.RootApprovesAddons: true, contract.RootApprovesPools: false}
 	if f.roomSet == nil || f.roomSet.Room != "r" || !maps.Equal(f.roomSet.RootApproves, want) {
 		t.Fatalf("on: %+v", f.roomSet)
 	}
@@ -73,7 +73,7 @@ func TestRoomSetRootApproves(t *testing.T) {
 			t.Fatalf("%s: %+v", kind, g.roomSet)
 		}
 	}
-	for _, args := range [][]string{{"room", "set", "r"}, {"room", "set", "r", "--root-approves-hostexec", "maybe"}} {
+	for _, args := range [][]string{{"room", "set", "r"}, {"room", "set", "r", "--root-approves-addons", "maybe"}} {
 		g := &fakeClient{}
 		if _, err := execCLI(g, args...); err == nil || g.roomSet != nil {
 			t.Fatalf("%v: err=%v sent=%+v", args, err, g.roomSet)

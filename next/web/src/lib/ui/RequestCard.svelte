@@ -4,7 +4,7 @@
   import { hue } from "../identity.ts";
   import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
-  import type { Request, RoomStore } from "../room.svelte.ts";
+  import { needsOwner, type Request, type RoomStore } from "../room.svelte.ts";
   import type { OpState, Principal } from "../contract.gen.ts";
   // feed places the card in the post column, where the request happened. gone marks a request that no longer waits
   // although its decision is unknown here, so it shows as decided without one. On the Requests page a waiting request
@@ -82,11 +82,12 @@
     {#if failure}<p class="why" role="alert">{failure}</p>{/if}
   </article>
 {:else if pending}
-  <article class="card" class:feed class:current class:yours={request.class === "owner"}>
+  <article class="card" class:feed class:current class:yours={needsOwner(request)}>
     <p class="top">{@render who()}
       {#if request.expires}<span class="expires">{@render expiry()}</span>{/if}</p>
     {#if lead}<p class="what">{line.text}{#if line.named}<code>{line.named}</code>{line.after}{/if}</p>{/if}
     {#if rest.length}<p class="why">{rest.join("\n")}</p>{/if}
+ {#if request.decider}<p class="why">Waiting for {store.names.get(request.decider) ?? "a closed session"} or the owner.</p>{/if}
     {#if request.card.command?.length}<pre class="exact">{commandLine(request.card.command)}</pre>{/if}
     {#each request.card.changes ?? [] as change (change.field)}<p class="what"><span class="field">{change.field}:</span> {change.old || "none"} → {change.new || "none"}</p>{/each}
     <!-- The page says who decides on every open card; the card body already says what the grant allows. -->

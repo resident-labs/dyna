@@ -34,7 +34,9 @@ type OpListResponse struct {
 	Operations []Operation `json:"operations"`
 }
 
+// OpRequested is an operation awaiting a decision from its decider or the owner.
 type OpRequested struct {
+	Decider SessionID `json:"decider,omitempty"`
 	ID      OpID      `json:"id"`
 	Kind    OpKind    `json:"kind"`
 	By      Principal `json:"by"`
