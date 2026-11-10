@@ -349,13 +349,8 @@
   {/snippet}
   {#snippet body()}{#if to}{@render destination()}{/if}{@render content()}{/snippet}
   {#if item.kind === "post" && !ownPost(item, session)}{@render inbound(item.id, item.from ?? { kind: "engine" }, item.at, body, !!item.attachments?.length)}
-  <!-- A post to somewhere else is not part of this conversation, so it folds like what arrives from elsewhere. -->
-  {:else if item.kind === "post" && to}
-    <div class="agent-input" data-media-key={item.id}>
-      {@render destination()}
-      {#if item.attachments?.length}{@render content()}{:else}<CollapsibleBody>{@render content()}</CollapsibleBody>{/if}
-    </div>
-  {:else}<div class="agent-message" data-media-key={item.id}>{@render body()}</div>{/if}
+  <!-- A post to somewhere else is the session's own writing, so it reads whole like its replies; a rule and its destination mark where it went. -->
+  {:else}<div class="agent-message" class:sent={!!to} data-media-key={item.id}>{@render body()}</div>{/if}
 {/snippet}
 
 <!-- What a session read, at the start of a turn or as a steer. Part names the item whose full text loads for it. -->
@@ -485,6 +480,7 @@
   .unsent { color: var(--danger); }
   .unsent .retry { color: inherit; }
   .agent-message { min-width: 0; }
+  .sent { padding-left: 14px; border-left: 2px solid var(--line); }
   .post-destination { display: flex; min-width: 0; margin-bottom: 4px; }
   /* Mirrors .bubble from the other side. */
   .agent-input { align-self: flex-start; max-width: 80%; min-width: 0; padding: 12px 16px; background: var(--raised); border-radius: 12px; }
