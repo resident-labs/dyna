@@ -44,6 +44,7 @@ CREATE TABLE transcript_offsets (session TEXT NOT NULL REFERENCES sessions(id), 
 CREATE TABLE transcript_turns (session TEXT NOT NULL REFERENCES sessions(id), turn TEXT NOT NULL, path TEXT NOT NULL, start INTEGER NOT NULL, PRIMARY KEY(session, turn, path));
 CREATE UNIQUE INDEX transcript_turns_path_start ON transcript_turns(session, path, start);
 CREATE TABLE shell_jobs (session TEXT NOT NULL REFERENCES sessions(id), job TEXT NOT NULL, PRIMARY KEY(session, job));
+CREATE TABLE replies_owed (session TEXT PRIMARY KEY REFERENCES sessions(id), replies TEXT NOT NULL);
 CREATE TABLE event_files (seq INTEGER NOT NULL REFERENCES events(seq), sha256 TEXT NOT NULL, media TEXT NOT NULL, PRIMARY KEY(sha256, seq));
 CREATE TABLE visuals (id TEXT PRIMARY KEY, room TEXT NOT NULL, author_kind TEXT NOT NULL, author_id TEXT NOT NULL, version INTEGER NOT NULL);
 CREATE TABLE room_leftovers (host TEXT NOT NULL REFERENCES hosts(name), room TEXT NOT NULL, box TEXT NOT NULL, slice TEXT NOT NULL, PRIMARY KEY(host, room, box));
