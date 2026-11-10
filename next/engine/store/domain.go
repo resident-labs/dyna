@@ -242,6 +242,10 @@ func (s *Store) CloseSession(ctx context.Context, id contract.SessionID, event c
 		if _, err := tx.ExecContext(ctx, "UPDATE turns SET ended_at=?,outcome=? WHERE session=? AND ended_at IS NULL", event.Time.UnixMilli(), contract.TurnClosed, id); err != nil {
 			return err
 		}
+		// A closed session answers nobody, and the session that closed it is told of the close.
+		if _, err := tx.ExecContext(ctx, "DELETE FROM replies_owed WHERE session=?", id); err != nil {
+			return err
+		}
 		for _, table := range []string{"pr_owners", "issue_owners"} {
 			if _, err := tx.ExecContext(ctx, "UPDATE "+table+" SET session=(SELECT parent FROM sessions WHERE id=?) WHERE session=? AND EXISTS (SELECT 1 FROM sessions WHERE id=? AND parent IS NOT NULL)", id, id, id); err != nil {
 				return err
@@ -467,7 +471,12 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			case output.Outcome != contract.TurnStopped:
 				for _, to := range later {
 					if !slices.ContainsFunc(body.Replies, answers(to)) {
-						body.Replies = append(body.Replies, contract.FinalReply{Reply: to})
+						// A turn that ended on a post has no final text, so its last post is what answers.
+						paid := contract.FinalReply{Reply: to}
+						if len(endIDs) > 0 {
+							paid.Posted = endIDs[len(endIDs)-1]
+						}
+						body.Replies = append(body.Replies, paid)
 					}
 				}
 				later = nil

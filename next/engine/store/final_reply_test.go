@@ -182,14 +182,31 @@ func TestEndTurnReplyWaitsWhileTheSessionStillWaits(t *testing.T) {
 			if owed, err := s.RepliesOwed(ctx, "child"); err != nil || (len(owed) == 1) == tc.wake {
 				t.Fatalf("owed %v after a turn that woke the parent %v: %v", owed, tc.wake, err)
 			}
-			// The next turn owes nobody a reply by its input, and ends with nothing to wait for: it answers the parent if the first did not wake it.
-			if _, err := s.writer.ExecContext(ctx, "DELETE FROM turns WHERE id='g'; DELETE FROM deliveries WHERE state='pending' AND to_id IN ('child','grand')"); err != nil {
+			// What the session waited for goes without an input: the pass wakes it only then, and once.
+			later := now.Add(5 * time.Minute)
+			pending := func() (n int) {
+				if err := s.Read().QueryRowContext(ctx, "SELECT count(*) FROM deliveries WHERE to_id='child' AND state='pending' AND wake=1").Scan(&n); err != nil {
+					t.Fatal(err)
+				}
+				return n
+			}
+			before := pending()
+			if err := s.WakeOwedReplies(ctx, later); err != nil || pending() != before {
+				t.Fatalf("woke a session that still waits or owes nothing: %d to %d, %v", before, pending(), err)
+			}
+			if _, err := s.writer.ExecContext(ctx, "DELETE FROM turns WHERE id='g'; DELETE FROM deliveries WHERE state='pending' AND to_id IN ('child','grand'); UPDATE sessions SET shell_jobs=0"); err != nil {
 				t.Fatal(err)
 			}
-			later := now.Add(5 * time.Minute)
-			notice := contract.Event{ID: "notice", Time: later, Room: "room", From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.PostCreated{Text: "notice", Home: feed}}
-			if _, err := s.Post(ctx, notice, []contract.Delivery{{To: child, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}}); err != nil {
-				t.Fatal(err)
+			for range 2 {
+				if err := s.WakeOwedReplies(ctx, later); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := pending(); (got == 1) == tc.wake || got > 1 {
+				t.Fatalf("%d notices for a session whose first turn woke the parent %v", got, tc.wake)
+			}
+			if tc.wake {
+				return
 			}
 			again := contract.Event{ID: "start2", Time: later, Room: "room", From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.TurnStarted{}}
 			if active, _, _, err := s.Dispatch(ctx, "child", "turn2", again, false); err != nil || active != "turn2" {
@@ -200,8 +217,8 @@ func TestEndTurnReplyWaitsWhileTheSessionStillWaits(t *testing.T) {
 				t.Fatal(err)
 			}
 			var answered int
-			if err := s.Read().QueryRowContext(ctx, "SELECT count(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.id='end2' AND d.to_id='parent' AND d.wake=1").Scan(&answered); err != nil || (answered == 1) == tc.wake {
-				t.Fatalf("second turn woke the parent %d times after a first that woke it %v: %v", answered, tc.wake, err)
+			if err := s.Read().QueryRowContext(ctx, "SELECT count(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.id='end2' AND d.to_id='parent' AND d.wake=1").Scan(&answered); err != nil || answered != 1 {
+				t.Fatalf("the turn that paid woke the parent %d times: %v", answered, err)
 			}
 			if owed, err := s.RepliesOwed(ctx, "child"); err != nil || len(owed) != 0 {
 				t.Fatalf("reply still owed: %v %v", owed, err)
