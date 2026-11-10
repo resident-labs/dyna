@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"strings"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -32,7 +33,38 @@ func (s *Store) ShellJobEnded(ctx context.Context, session contract.SessionID, j
 		if err != nil {
 			return err
 		}
-		return s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: event.From, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
+		reply := contract.ReplyChannel{Kind: contract.ReplyNone}
+		// An open turn has not published its new count yet. Use the last named
+		// snapshot, excluding ends already received, rather than its stale count.
+		var remaining int
+		err = tx.QueryRowContext(ctx, `SELECT CASE WHEN json_array_length(json_extract(CAST(e.body AS TEXT),'$.jobs'))>0
+			THEN (SELECT COUNT(*) FROM json_each(json_extract(CAST(e.body AS TEXT),'$.jobs')) j WHERE NOT EXISTS (SELECT 1 FROM shell_jobs x WHERE x.session=s.id AND x.job=j.value))
+			ELSE s.shell_jobs END
+			FROM sessions s LEFT JOIN events e ON e.seq=(SELECT MAX(seq) FROM events WHERE room=? AND from_kind='session' AND from_id=s.id AND type='turn.ended') WHERE s.id=?`, event.Room, session).Scan(&remaining)
+		if err != nil {
+			return err
+		}
+		if remaining == 0 {
+			var turn contract.TurnID
+			err = tx.QueryRowContext(ctx, `SELECT json_extract(CAST(e.body AS TEXT),'$.turn') FROM events e
+				WHERE e.room=? AND e.from_kind='session' AND e.from_id=? AND e.type='turn.ended'
+				AND EXISTS (SELECT 1 FROM json_each(json_extract(CAST(e.body AS TEXT),'$.jobs')) WHERE value=?) ORDER BY e.seq LIMIT 1`, event.Room, session, job).Scan(&turn)
+			if err != nil && err != sql.ErrNoRows {
+				return err
+			}
+			if err == nil {
+				var home string
+				err = tx.QueryRowContext(ctx, `SELECT reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to FROM deliveries WHERE to_kind='session' AND to_id=? AND turn=? AND reply_kind='final' ORDER BY seq DESC LIMIT 1`, session, turn).Scan(&reply.Kind, &reply.Target.Kind, &reply.Target.Session, &home, &reply.ReplyTo)
+				if err != nil && err != sql.ErrNoRows {
+					return err
+				}
+				if err == nil {
+					kind, id, _ := strings.Cut(home, ":")
+					reply.Home = contract.Conversation{Kind: contract.ConversationKind(kind), Session: contract.SessionID(id)}
+				}
+			}
+		}
+		return s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: event.From, Surface: contract.SurfaceEngine, Reply: reply, Wake: true})
 	})
 }
 
