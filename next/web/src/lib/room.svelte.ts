@@ -285,8 +285,8 @@ export class RoomStore {
       this.failed.set(session, seq);
       if (body.cause) this.causes.set(session, body.cause);
     }
-    for (const { id, kind, by, class: level, card, expires, state } of listed.operations ?? []) {
-      this.requests.set(id, { id, kind, by, class: level, card, expires, state });
+    for (const { id, kind, by, class: level, card, expires, state, decider } of listed.operations ?? []) {
+      this.requests.set(id, { id, kind, by, class: level, card, expires, state, decider });
     }
     for (const question of asked.questions ?? []) this.questions.set(question.id, question);
   }

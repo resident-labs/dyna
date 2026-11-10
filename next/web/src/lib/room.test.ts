@@ -814,3 +814,15 @@ test("a session decider keeps a pending approval out of owner attention", () => 
  assert.equal(room.waiting, 0);
  assert.equal(room.requests.get("delegated")?.state, "pending");
 });
+
+ test("opening a room preserves the pending list decider without owner attention", async () => {
+ const original = globalThis.fetch;
+ const operation = { id: "delegated", kind: "hostexec.grant", by: { kind: "session", session: "worker" }, class: "owner", card: { title: "asks for host access", target: { kind: "host", name: "host" } }, state: "pending", decider: "lead" };
+ globalThis.fetch = async input => new Response(JSON.stringify(String(input).endsWith("op.list") ? { operations: [operation] } : { rooms: [], sessions: [], seq: 10 }));
+ try {
+ const room = new RoomStore("r", () => () => {});
+ await room.open();
+ assert.equal(room.requests.get("delegated")?.decider, "lead");
+ assert.equal(room.waiting, 0);
+ } finally { globalThis.fetch = original; }
+ });
