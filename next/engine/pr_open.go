@@ -19,6 +19,9 @@ import (
 
 // PrOpen registers pull request creation.
 func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTripper) approve.Entry {
+	return s.accountEntry(token, func(credential string) approve.Entry { return s.prOpen(credential, endpoint, transport) })
+}
+func (s *Service) prOpen(token string, endpoint *url.URL, transport http.RoundTripper) approve.Entry {
 	lookup := func(ctx context.Context, who contract.Principal) (store.Session, string, error) {
 		if who.Kind != contract.PrincipalSession {
 			return store.Session{}, "", approve.ErrForbidden

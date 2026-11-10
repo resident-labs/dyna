@@ -22,9 +22,10 @@ const (
 
 // Poller reads the feeds of each repository a room lists or a tracked PR or issue sits on (spec 7.7).
 type Poller struct {
-	Store  *store.Store
-	GitHub *Client
-	Now    func() time.Time
+	Store    *store.Store
+	GitHub   *Client
+	Accounts *Accounts
+	Now      func() time.Time
 
 	last   map[contract.RepoName]time.Time // when each repository was last read
 	failed map[contract.RepoName]string    // the last error logged for each, so a repository that stays broken logs once
@@ -45,14 +46,25 @@ func (p *Poller) Run(ctx context.Context, ticks <-chan time.Time) {
 }
 
 // due lists the repositories to read now. That is every one of them, until the quota runs low.
-func (p *Poller) due(repos map[contract.RepoName]bool) []contract.RepoName {
+func (p *Poller) due(ctx context.Context, repos map[contract.RepoName]bool) []contract.RepoName {
 	if p.last == nil {
 		p.last, p.failed = map[contract.RepoName]time.Time{}, map[contract.RepoName]string{}
 	}
 	now := p.Now()
-	_, low := p.GitHub.Low()
+	low := false
+	if p.Accounts == nil {
+		_, low = p.GitHub.Low()
+	}
 	var due []contract.RepoName
 	for repo := range repos {
+		if p.Accounts != nil {
+			client, err := p.Accounts.Repo(ctx, repo)
+			if err == nil {
+				_, low = client.Low()
+			} else {
+				low = false
+			}
+		}
 		if last, read := p.last[repo]; !low || !read || !now.Before(last.Add(lowQuotaWait)) {
 			due = append(due, repo)
 			p.last[repo] = now
@@ -77,11 +89,22 @@ func reopens(items []contract.GitHubItem) bool {
 // next pass reads the same news again.
 func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls []store.TrackedPR, issues []store.TrackedIssue, heads map[contract.RepoName]store.RepoState, feeds map[string]store.GitHubFeed) (store.GitHubPass, error) {
 	var pass store.GitHubPass
-	probe, err := p.GitHub.Probe(ctx, repo, feeds)
+	client := p.GitHub
+	if p.Accounts != nil {
+		var err error
+		client, err = p.Accounts.Repo(ctx, repo)
+		if err != nil {
+			return pass, err
+		}
+		if err := client.LoadViewer(ctx); err != nil {
+			return pass, err
+		}
+	}
+	probe, err := client.Probe(ctx, repo, feeds)
 	if err != nil {
 		return pass, err
 	}
-	now, viewer := p.Now(), p.GitHub.Viewer()
+	now, viewer := p.Now(), client.Viewer()
 	items := map[int][]contract.GitHubItem{}
 	for _, item := range probe.Items {
 		items[item.Number] = append(items[item.Number], item)
@@ -94,7 +117,7 @@ func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls [
 			numbers = append(numbers, row.Number)
 		}
 	}
-	observed, err := p.GitHub.Read(ctx, repo, numbers)
+	observed, err := client.Read(ctx, repo, numbers)
 	if err != nil {
 		return pass, err
 	}
@@ -114,7 +137,7 @@ func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls [
 		listed, state := probe.Seen[row.Number], contract.IssueState("")
 		// Issues have no query in a usual pass, so one the feeds lost is read on its own.
 		if probe.Resync {
-			_, item, err := p.GitHub.Issue(ctx, repo, row.Number)
+			_, item, err := client.Issue(ctx, repo, row.Number)
 			if err != nil && !errors.Is(err, ErrNotFound) {
 				return pass, err
 			}
@@ -149,7 +172,7 @@ func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls [
 		for i, head := range unsettled {
 			shas[i] = head.Sha
 		}
-		reads, err := p.GitHub.CommitsCI(ctx, repo, shas)
+		reads, err := client.CommitsCI(ctx, repo, shas)
 		if err != nil {
 			return pass, err
 		}
@@ -209,15 +232,17 @@ func (p *Poller) Pass(ctx context.Context) error {
 		repos[row.Repo] = true
 		issuesIn[row.Repo] = append(issuesIn[row.Repo], row)
 	}
-	due := p.due(repos)
+	due := p.due(ctx, repos)
 	if len(due) == 0 {
 		return nil
 	}
-	if err := p.GitHub.LoadViewer(ctx); err != nil {
-		if errors.Is(err, ErrPaused) {
-			return nil
+	if p.Accounts == nil {
+		if err := p.GitHub.LoadViewer(ctx); err != nil {
+			if errors.Is(err, ErrPaused) {
+				return nil
+			}
+			return err
 		}
-		return err
 	}
 	var pass store.GitHubPass
 	for _, repo := range due {
