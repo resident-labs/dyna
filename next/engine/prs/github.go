@@ -29,10 +29,11 @@ var ErrNotFound = errors.New("not found on GitHub")
 
 // Client reads GitHub with the engine's token. REST and GraphQL have separate quotas.
 type Client struct {
-	Token     string
-	Endpoint  *url.URL
-	Transport http.RoundTripper
-	Now       func() time.Time
+	Token        string
+	AccountLabel string
+	Endpoint     *url.URL
+	Transport    http.RoundTripper
+	Now          func() time.Time
 
 	mu      sync.Mutex
 	rest    quota
@@ -163,7 +164,12 @@ func (c *Client) send(ctx context.Context, q *quota, method, path string, input 
 }
 
 // get reads one REST path. A 304 returns no body, and does not count against the quota.
-func (c *Client) get(ctx context.Context, path, etag string) (http.Header, []byte, error) {
+func (c *Client) get(ctx context.Context, path, etag string) (header http.Header, body []byte, problem error) {
+	defer func() {
+		if problem != nil && c.AccountLabel != "" {
+			problem = fmt.Errorf("%s: %w", c.AccountLabel, problem)
+		}
+	}()
 	response, data, err := c.send(ctx, &c.rest, http.MethodGet, path, nil, etag)
 	if err != nil {
 		return nil, nil, err
@@ -524,7 +530,12 @@ type gqlPull struct {
 var verdictLine = regexp.MustCompile(`\A[^\n]*\n\*\*Verdict: (Approved|Changes requested) at ([0-9a-f]{12,40})\*\*[ \t]*(?:\n|$)`)
 
 // graphQL runs one query and returns its repository, which is nil for a query that names none.
-func (c *Client) graphQL(ctx context.Context, query string, variables map[string]string) (map[string]json.RawMessage, error) {
+func (c *Client) graphQL(ctx context.Context, query string, variables map[string]string) (result map[string]json.RawMessage, problem error) {
+	defer func() {
+		if problem != nil && c.AccountLabel != "" {
+			problem = fmt.Errorf("%s: %w", c.AccountLabel, problem)
+		}
+	}()
 	input, _ := json.Marshal(map[string]any{"query": query, "variables": variables})
 	response, data, err := c.send(ctx, &c.graphql, http.MethodPost, "/graphql", input, "")
 	if err != nil {

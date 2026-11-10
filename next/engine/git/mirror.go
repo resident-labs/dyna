@@ -44,6 +44,7 @@ type Mirror struct {
 	Layout       box.Layout
 	Token        string
 	ResolveToken func(context.Context, contract.RepoName) (string, string, error)
+	ErrorContext func(context.Context, contract.RepoName, error) error
 	Runner       Runner
 	// SeedTimeout bounds the fetch of Seed; zero means 10 seconds. Now is the clock for reusing a fetch; nil means time.Now.
 	SeedTimeout time.Duration
@@ -165,7 +166,12 @@ func (m *Mirror) Branches(ctx context.Context, repo contract.RepoName) ([]string
 
 // fetch brings the mirror up to date with GitHub. A first clone goes to one side, so no reader finds a partial mirror
 // and a failed clone leaves nothing behind.
-func (m *Mirror) fetch(ctx context.Context, repo contract.RepoName, path string) error {
+func (m *Mirror) fetch(ctx context.Context, repo contract.RepoName, path string) (problem error) {
+	defer func() {
+		if problem != nil && m.ErrorContext != nil {
+			problem = m.ErrorContext(ctx, repo, problem)
+		}
+	}()
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
@@ -288,7 +294,12 @@ func (m *Mirror) ComposeFile(ctx context.Context, repo contract.RepoName, name s
 }
 
 // Ref reads one remote reference without fetching its objects.
-func (m *Mirror) Ref(ctx context.Context, repo contract.RepoName, ref string) (string, error) {
+func (m *Mirror) Ref(ctx context.Context, repo contract.RepoName, ref string) (result string, problem error) {
+	defer func() {
+		if problem != nil && m.ErrorContext != nil {
+			problem = m.ErrorContext(ctx, repo, problem)
+		}
+	}()
 	env, err := m.authEnv(ctx, repo)
 	if err != nil {
 		return "", err

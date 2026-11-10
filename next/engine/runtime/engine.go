@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"runtime/debug"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -208,10 +209,23 @@ func Run(ctx context.Context, cfg Config) error {
 	boxes.Addons = service.Addons()
 	go boxes.watchInstructions(boxCtx)
 	credentials := &githubaccount.Resolver{Store: st, Tokens: &githubaccount.Files{Dir: filepath.Join(cfg.Data, "github-accounts")}, DefaultToken: token}
-	mirror := &enginegit.Mirror{Layout: layout, Token: token, ResolveToken: credentials.Repo, Runner: enginegit.GitRunner{}}
+	mirror := &enginegit.Mirror{Layout: layout, Token: token, ResolveToken: credentials.Repo, Runner: enginegit.GitRunner{}, ErrorContext: func(ctx context.Context, repo contract.RepoName, problem error) error {
+		credential, login, err := credentials.Repo(ctx, repo)
+		if err != nil {
+			return err
+		}
+		if login == "" {
+			return problem
+		}
+		room, err := st.RepoRoom(ctx, repo)
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("GitHub account %s of room %s: %s", login, room, strings.ReplaceAll(problem.Error(), credential, "***"))
+	}}
 	service.SetRepositories(&enginegit.Repositories{Rooms: st, Hosts: boxes, Mirror: mirror})
 	pulls := &prs.Client{Token: token, Endpoint: &url.URL{Scheme: "https", Host: "api.github.com"}, Transport: http.DefaultTransport, Now: time.Now}
-	accountClients := &prs.Accounts{Resolve: credentials.Repo, Endpoint: pulls.Endpoint, Transport: pulls.Transport, Now: time.Now}
+	accountClients := &prs.Accounts{Resolve: credentials.Repo, Room: st.RepoRoom, Endpoint: pulls.Endpoint, Transport: pulls.Transport, Now: time.Now}
 	service.SetGitHubAccounts(credentials, accountClients)
 	prPoll := &prs.Poller{Store: st, GitHub: pulls, Accounts: accountClients, Now: time.Now}
 	service.SetPRTracking(pulls)
@@ -269,24 +283,32 @@ func Run(ctx context.Context, cfg Config) error {
 	apiServer.Build = build
 	apiServer.SetGitHubRoomRead(func(room contract.RoomID) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			credential, _, err := credentials.Room(r.Context(), room)
+			credential, login, err := credentials.Room(r.Context(), room)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusServiceUnavailable)
 				return
 			}
-			enginegit.ReadOnly(&url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport, credential).ServeHTTP(w, r)
+			var transport http.RoundTripper = http.DefaultTransport
+			if login != "" {
+				transport = githubaccount.Transport{Base: transport, Label: fmt.Sprintf("GitHub account %s of room %s", login, room), Token: credential}
+			}
+			enginegit.ReadOnly(&url.URL{Scheme: "https", Host: "api.github.com"}, transport, credential).ServeHTTP(w, r)
 		})
 	})
 	apiServer.SetFilesRoute(func(c api.Caller) http.Handler { return service.Files(c.Principal, c.Room) })
 	apiServer.SetSharedRoute(func(c api.Caller) http.Handler { return service.Shared(c.Principal) })
 	apiServer.SetGitRoute(func(c api.Caller) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			credential, _, err := credentials.Room(r.Context(), c.Room)
+			credential, login, err := credentials.Room(r.Context(), c.Room)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusServiceUnavailable)
 				return
 			}
-			enginegit.Handler(&url.URL{Scheme: "https", Host: "github.com"}, http.DefaultTransport, credential, c.Principal.Session, c.Room, st).ServeHTTP(w, r)
+			var transport http.RoundTripper = http.DefaultTransport
+			if login != "" {
+				transport = githubaccount.Transport{Base: transport, Label: fmt.Sprintf("GitHub account %s of room %s", login, c.Room), Token: credential}
+			}
+			enginegit.Handler(&url.URL{Scheme: "https", Host: "github.com"}, transport, credential, c.Principal.Session, c.Room, st).ServeHTTP(w, r)
 		})
 	})
 	files, err := connect.OpenFiles(cfg.Data)

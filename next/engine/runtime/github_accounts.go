@@ -32,11 +32,14 @@ func accountTools(ctx context.Context, st *store.Store, credentials *githubaccou
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
+		if login != "" {
+			login += " of room " + string(session.Room)
+		}
 		client := clients.Client(token, login)
 		mu.Lock()
 		held := handlers[session.Room]
 		if held.client != client {
-			handler, buildErr := githubmcp.Handler(ctx, token, client.Reads(http.DefaultTransport), func(ctx context.Context, repo contract.RepoName, number int) (bool, error) {
+			handler, buildErr := githubmcp.Handler(ctx, token, client.Reads(client.Transport), func(ctx context.Context, repo contract.RepoName, number int) (bool, error) {
 				return st.OwnsPR(ctx, repo, githubwrites.SessionFrom(ctx), number)
 			}, func(ctx context.Context, repo contract.RepoName, branch string) (bool, error) {
 				return enginegit.CanPushBranch(ctx, st, repo, githubwrites.SessionFrom(ctx), branch)
