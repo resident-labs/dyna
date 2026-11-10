@@ -186,6 +186,7 @@ test("a post names its destination only when it left this DM", () => {
   assert.equal(postDestination(dm("s"), "s", "r", "general", name), undefined);
   assert.equal(postDestination(dm("other"), "s", "r", "general", name), "@other");
   assert.equal(postDestination(ownedPost("p", ""), "s", "r", "general", name), "#general");
+  assert.equal(postDestination({ ...ownedPost("p", ""), mentions: ["a", "b"] }, "s", "r", "general", name), "@a, @b in #general");
   assert.equal(postDestination({ ...ownedPost("p", ""), room: "elsewhere" }, "s", "r", "general", name), "another room");
   assert.equal(postDestination({ ...ownedPost("p", ""), home: undefined }, "s", "r", "general", name), undefined);
 });
