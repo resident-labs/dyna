@@ -268,12 +268,15 @@ func Run(ctx context.Context, cfg Config) error {
 	apiServer.SetLocalModelRoute(drain.Wrap(proxy.Local(st)))
 	apiServer.Build = build
 	apiServer.SetGitHubRoomRead(func(room contract.RoomID) http.Handler {
- return http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
- credential,_,err := credentials.Room(r.Context(),room)
- if err != nil { http.Error(w,err.Error(),http.StatusServiceUnavailable);return }
- enginegit.ReadOnly(&url.URL{Scheme:"https",Host:"api.github.com"},http.DefaultTransport,credential).ServeHTTP(w,r)
- })
- })
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			credential, _, err := credentials.Room(r.Context(), room)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+			enginegit.ReadOnly(&url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport, credential).ServeHTTP(w, r)
+		})
+	})
 	apiServer.SetFilesRoute(func(c api.Caller) http.Handler { return service.Files(c.Principal, c.Room) })
 	apiServer.SetSharedRoute(func(c api.Caller) http.Handler { return service.Shared(c.Principal) })
 	apiServer.SetGitRoute(func(c api.Caller) http.Handler {

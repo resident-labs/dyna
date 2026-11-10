@@ -18,7 +18,10 @@ import (
 )
 
 // Account is public metadata; it deliberately contains no credential.
-type Account struct{ Login, Name, Email string }
+type Account struct {
+	Login, Name, Email string
+	Credential         contract.RoomID
+}
 
 // Store supplies metadata and a repository's unique default room.
 type Store interface {
@@ -42,7 +45,11 @@ func (r *Resolver) Room(ctx context.Context, room contract.RoomID) (string, stri
 	if account.Login == "" {
 		return r.DefaultToken, "", nil
 	}
-	token, err := r.Tokens.Read(room)
+	key := account.Credential
+	if key == "" {
+		key = room
+	}
+	token, err := r.Tokens.Read(key)
 	if err != nil {
 		return "", account.Login, fmt.Errorf("GitHub account %s of room %s: credential unavailable", account.Login, room)
 	}

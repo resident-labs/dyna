@@ -264,6 +264,13 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	if err != nil {
 		return contract.ContextSnapshotResponse{}, failure(err)
 	}
+	account, err := s.store.GitHubAccount(ctx, session.Room)
+	if err != nil {
+		return contract.ContextSnapshotResponse{}, failure(err)
+	}
+	if account.Login != "" {
+		lines = append(lines, "GitHub account: "+account.Login)
+	}
 	// What the room allows every session, when it is on: the GitHub writes of its githubWrites setting (spec 7.9).
 	granted, err := s.GitHubWritesOf(ctx, session.Room)
 	if err != nil {

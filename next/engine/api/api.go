@@ -28,7 +28,7 @@ type API struct {
 	localModel http.Handler
 	git        func(Caller) http.Handler
 	github     http.Handler
- githubRoom func(contract.RoomID) http.Handler
+	githubRoom func(contract.RoomID) http.Handler
 	web        *Web
 	files      func(Caller) http.Handler
 	shared     func(Caller) http.Handler
@@ -127,9 +127,11 @@ func (a *API) runHandler(sub contract.SubscriptionID, room contract.RoomID) http
 		return a.service.HookTrackIssue(ctx, room, req.Session, contract.IssueTrackRequest{Repo: req.Repo, Number: req.Number})
 	})
 	mux.HandleFunc("/v1/", func(w http.ResponseWriter, _ *http.Request) { writeError(w, forbidden()) })
-	if a.githubRoom != nil { mux.Handle("/",a.githubRoom(room)) } else if a.github != nil {
- mux.Handle("/", a.github)
- }
+	if a.githubRoom != nil {
+		mux.Handle("/", a.githubRoom(room))
+	} else if a.github != nil {
+		mux.Handle("/", a.github)
+	}
 	return mux
 }
 
@@ -328,6 +330,14 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodRoomDelete, c, a.service.RoomDelete)
 	call(mux, contract.MethodHostSetLimits, c, a.service.HostSetLimits)
 	call(mux, contract.MethodHostSet, c, a.service.HostSet)
+	call(mux, contract.MethodRoomGitHub, c, func(ctx context.Context, who contract.Principal, req contract.RoomGitHubRequest) (contract.RoomGitHubResponse, *contract.Error) {
+		if service, ok := a.service.(interface {
+			RoomGitHub(context.Context, contract.Principal, contract.RoomGitHubRequest) (contract.RoomGitHubResponse, *contract.Error)
+		}); ok {
+			return service.RoomGitHub(ctx, who, req)
+		}
+		return contract.RoomGitHubResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "GitHub accounts unavailable"}
+	})
 	call(mux, contract.MethodRoomSet, c, a.service.RoomSet)
 	call(mux, contract.MethodRoomRepoAdd, c, a.service.RoomRepoAdd)
 	call(mux, contract.MethodRoomRepos, c, a.service.RoomRepos)

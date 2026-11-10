@@ -11,7 +11,7 @@ import (
 
 func (s *Store) GitHubAccount(ctx context.Context, room contract.RoomID) (githubaccount.Account, error) {
 	var a githubaccount.Account
-	err := s.Read().QueryRowContext(ctx, `SELECT COALESCE(a.login,''),COALESCE(a.name,''),COALESCE(a.email,'') FROM rooms r LEFT JOIN room_github_accounts a ON a.room=r.id WHERE r.id=?`, room).Scan(&a.Login, &a.Name, &a.Email)
+	err := s.Read().QueryRowContext(ctx, `SELECT COALESCE(a.login,''),COALESCE(a.name,''),COALESCE(a.email,''),COALESCE(a.credential,'') FROM rooms r LEFT JOIN room_github_accounts a ON a.room=r.id WHERE r.id=?`, room).Scan(&a.Login, &a.Name, &a.Email, &a.Credential)
 	return a, err
 }
 func (s *Store) RepoRoom(ctx context.Context, repo contract.RepoName) (contract.RoomID, error) {
@@ -35,7 +35,7 @@ func (s *Store) SetGitHubAccount(ctx context.Context, room contract.RoomID, a gi
 			_, err := tx.ExecContext(ctx, `DELETE FROM room_github_accounts WHERE room=?`, room)
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO room_github_accounts(room,login,name,email) VALUES(?,?,?,?) ON CONFLICT(room) DO UPDATE SET login=excluded.login,name=excluded.name,email=excluded.email`, room, a.Login, a.Name, a.Email)
+		_, err := tx.ExecContext(ctx, `INSERT INTO room_github_accounts(room,login,name,email,credential) VALUES(?,?,?,?,?) ON CONFLICT(room) DO UPDATE SET login=excluded.login,name=excluded.name,email=excluded.email,credential=excluded.credential`, room, a.Login, a.Name, a.Email, a.Credential)
 		return err
 	})
 }
