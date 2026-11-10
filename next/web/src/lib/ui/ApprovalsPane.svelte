@@ -10,9 +10,9 @@
   import StatusPill from "./StatusPill.svelte";
   import ItemList from "./settings/ItemList.svelte";
   import ListDetail from "./settings/ListDetail.svelte";
-  // Settings > Approvals (spec 5.13): every room with its four root-approves switches as values, and the open room's
+  // Settings > Approvals (spec 5.13): every room with its three root-approves switches as values, and the open room's
   // detail, the one place that says what they do. A switch on lets the room's root decide that kind of request; the
-  // owner still can. Autopilot turns all four on, or off when all are on. Keys 1 to 4 flip the switches of the row the
+  // owner still can. Autopilot turns all three on, or off when all are on. Keys 1 to 3 flip the switches of the row the
   // list is on. room.list is whole, so the list searches and filters here.
   let { bar, signedout, selected, onselect, onclose }: {
     bar: Snippet<[string, number | undefined, Snippet | undefined]>; signedout: () => void;
@@ -49,7 +49,7 @@
   }
   function key(pressed: string, room: RoomSummary) {
     const item = rootApprovals[Number(pressed) - 1];
-    if (!/^[1-4]$/.test(pressed)) return false;
+    if (!/^[1-3]$/.test(pressed)) return false;
     if (busy) return true;
     const on = !approvalOn(room, item.kind);
     said = `${item.short} ${on ? "on" : "off"} in ${room.name}`;
@@ -90,7 +90,7 @@
     <div class="stack">{#each rootApprovals as { kind, label, note }, index (kind)}
       <label class="set"><span class="name">{label} <kbd title={`Press ${index + 1} on the room's row in the list`}>{index + 1}</kbd></span>{@render toggle(room, kind, label, false)}<span class="help">{note}</span></label>{/each}</div>
     <div class="section"><div class="actions"><button type="button" class="btn" aria-pressed={autopilotOn(room)} disabled={busy} onclick={() => void autopilot(room!)}>Autopilot</button></div>
-      <p class="small muted">Turns all four on, or all off when all are on. Turning on asks first.</p></div>
+      <p class="small muted">Turns all three on, or all off when all are on. Turning on asks first.</p></div>
     <div class="section"><h3 class="small">GitHub writes</h3>
       <p class="small muted">Off until you turn a group on. Lets this room's sessions write to GitHub without a host grant, on {writesRepos(room)}; merging, deleting and everything else stay refused.</p>
       <div class="stack">{#each writeGroups as { group, label, note } (group)}

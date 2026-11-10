@@ -807,3 +807,10 @@ test("room snapshots share a round trip after the session baseline", async () =>
     await opening;
   } finally { room.close(); globalThis.fetch = original; }
 });
+
+test("a session decider keeps a pending approval out of owner attention", () => {
+ const room = new RoomStore("r", () => () => {});
+ room.apply(event(1, { type: "op.requested", body: { id: "delegated", kind: "hostexec.grant", by: { kind: "session", session: "worker" }, decider: "lead", class: "owner", card: { title: "asks for host access", target: { kind: "host", name: "hermeslab" } } } }));
+ assert.equal(room.waiting, 0);
+ assert.equal(room.requests.get("delegated")?.state, "pending");
+});

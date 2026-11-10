@@ -60,7 +60,7 @@ func TestRenderDelivery(t *testing.T) {
 		{contract.EngineRestarted{Build: "123456789abcdef", PreviousBuild: "abcdef123456789"}, "Dyna restarted on build 123456789abc after an unclean stop (was abcdef123456).", false},
 		{contract.EngineRestarted{Build: "dev", PreviousBuild: "dev", Clean: true}, "Dyna restarted on build dev; it was down 0 s.", false},
 		{contract.HostDiskLow{Host: "h", FreeBytes: 149 << 30, FloorBytes: 100 << 30}, "Host h is low on disk: 149 GiB free, 100 GiB wanted. At the floor, new boxes wait and the oldest stopped boxes close. Closing a finished session frees its volume.", false},
-		{contract.OpRequested{}, "", true},
+		{contract.OpRequested{ID: "op_1", Card: contract.Card{Title: "asks for access", Body: "Reason: inspect"}}, "asks for access: Reason: inspect\nDecide it with op decide, id op_1: approve true or false, with a reason when you deny.", false},
 		{contract.IssueClosedEvent{Repo: "o/r", Number: 1, URL: "url"}, "Issue o/r#1 closed. url", false},
 	}
 	for _, tt := range tests {
