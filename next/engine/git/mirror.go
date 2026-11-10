@@ -131,6 +131,9 @@ func (m *Mirror) Prepare(ctx context.Context, host CacheHost, repo contract.Repo
 		if err != nil {
 			return contract.BoxRepo{}, err
 		}
+	}
+	// Even an offline setup must synchronize provenance with the capacity host.
+	if _, err := os.Stat(filepath.Join(path, box.GitIdentityMarker)); fetch || err == nil {
 		err = m.pushes.do(ctx, cachePush{repo, host}, func(ctx context.Context) error {
 			steps := box.NewStepLog("repo " + string(repo))
 			defer steps.Done("cache push")
@@ -185,7 +188,7 @@ func (m *Mirror) fetch(ctx context.Context, repo contract.RepoName, path string)
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
-	env, err := m.authEnv(ctx, repo)
+	env, login, err := m.authEnvIdentity(ctx, repo)
 	if err != nil {
 		return err
 	}
@@ -199,7 +202,10 @@ func (m *Mirror) fetch(ctx context.Context, repo contract.RepoName, path string)
 		if _, err := m.Runner.Run(ctx, env, "clone", "--bare", "--no-tags", remote, clone); err != nil {
 			return err
 		}
-		return os.Rename(clone, path)
+		if err := os.Rename(clone, path); err != nil {
+			return err
+		}
+		return m.recordIdentity(login, path)
 	}
 	if err != nil {
 		return err
@@ -216,37 +222,48 @@ func (m *Mirror) fetch(ctx context.Context, repo contract.RepoName, path string)
 		return errors.New("remote default branch not found")
 	}
 	_, err = m.Runner.Run(ctx, nil, "--git-dir", path, "symbolic-ref", "HEAD", fields[1])
-	return err
+	if err != nil {
+		return err
+	}
+	return m.recordIdentity(login, path)
 }
 
 func (m *Mirror) authEnv(ctx context.Context, repo contract.RepoName) ([]string, error) {
+	env, _, err := m.authEnvIdentity(ctx, repo)
+	return env, err
+}
+
+func (m *Mirror) authEnvIdentity(ctx context.Context, repo contract.RepoName) ([]string, string, error) {
 	token := m.Token
+	login := ""
 	if m.ResolveToken != nil {
 		var err error
-		token, _, err = m.ResolveToken(ctx, repo)
+		token, login, err = m.ResolveToken(ctx, repo)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	}
 	if token == "" {
-		return nil, MissingTokenError{}
+		return nil, "", MissingTokenError{}
 	}
 	credential := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
-	return []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.https://github.com/.extraheader", "GIT_CONFIG_VALUE_0=Authorization: Basic " + credential, "GIT_TERMINAL_PROMPT=0"}, nil
+	return []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.https://github.com/.extraheader", "GIT_CONFIG_VALUE_0=Authorization: Basic " + credential, "GIT_TERMINAL_PROMPT=0"}, login, nil
 }
 
 func (m *Mirror) checkAccess(ctx context.Context, repo contract.RepoName) error {
 	if m.ResolveToken == nil {
-		return nil
+		return m.ensureIdentity(ctx, repo, "")
 	}
 	token, login, err := m.ResolveToken(ctx, repo)
 	if err != nil {
 		return err
 	}
 	if login != "" && m.VerifyAccount != nil {
-		return m.VerifyAccount(ctx, repo, token, login)
+		if err := m.VerifyAccount(ctx, repo, token, login); err != nil {
+			return err
+		}
 	}
-	return nil
+	return m.ensureIdentity(ctx, repo, login)
 }
 
 // Cloned reports whether the repository has a mirror yet.
