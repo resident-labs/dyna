@@ -21,9 +21,9 @@
   let requests = $derived(requestsFor(store.requests.values(), session));
   let questions = $derived(store.pendingQuestions(session));
   let answered = $derived([...store.questions.values()].filter(item => item.state === "answered" && (!session || item.session === session) && new Date(item.answered ?? 0).toDateString() === new Date(now).toDateString()));
-  let waiting = $derived(requests.filter(item => item.state === "pending" && item.class === "owner")
+  let waiting = $derived(requests.filter(item => item.state === "pending" && item.class === "owner" && !item.decider)
     .sort(byExpiry));
-  let shared = $derived(requests.filter(item => item.state === "pending" && item.class !== "owner")
+  let shared = $derived(requests.filter(item => item.state === "pending" && (item.class !== "owner" || !!item.decider))
     .sort(byExpiry));
   let groups = $derived(requestGroups(waiting));
   let pending = $derived(requestOrder(waiting, shared, groups, waiting.length > groupThreshold));

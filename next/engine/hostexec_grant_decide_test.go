@@ -73,51 +73,29 @@ func TestGrantRequestDoesNotExpire(t *testing.T) {
 	}
 }
 
-func TestRootDecidesGrantOnlyWhenRoomAllows(t *testing.T) {
+func TestRootHoldingHostsDecidesGrant(t *testing.T) {
 	r := newGrantRig(t)
-	ctx := t.Context()
 	op := r.ask()
-	if strings.Contains(op.Card.Body, "root") {
-		t.Fatalf("card names root with the setting off: %q", op.Card.Body)
+	if op.Decider != r.root.Session || !strings.Contains(op.Card.Body, " or the owner.") {
+		t.Fatalf("decider: %+v", op)
 	}
-	if _, problem := r.s.OpDecide(ctx, r.root, contract.OpDecideRequest{ID: op.ID, Approve: true}); problem == nil || problem.Code != contract.ErrForbidden {
-		t.Fatalf("root with the setting off: %v", problem)
+	if _, problem := r.s.OpDecide(t.Context(), r.worker, contract.OpDecideRequest{ID: op.ID, Approve: true}); problem == nil {
+		t.Fatal("self approved")
 	}
-	if _, problem := r.s.RoomSet(ctx, r.worker, contract.RoomSetRequest{Room: r.room, RootApproves: map[contract.RootApproval]bool{contract.RootApprovesHostexec: true}}); problem == nil || problem.Code != contract.ErrForbidden {
-		t.Fatalf("a session changed the setting: %v", problem)
-	}
-	if _, problem := r.s.RoomSet(ctx, r.owner, contract.RoomSetRequest{Room: r.room}); problem == nil || problem.Code != contract.ErrInvalid {
-		t.Fatalf("empty set: %v", problem)
-	}
-	if _, problem := r.s.RoomSet(ctx, r.owner, contract.RoomSetRequest{Room: r.room, RootApproves: map[contract.RootApproval]bool{contract.RootApprovesHostexec: true}}); problem != nil {
+	if _, problem := r.s.OpDecide(t.Context(), r.root, contract.OpDecideRequest{ID: op.ID, Approve: true}); problem != nil {
 		t.Fatal(problem)
 	}
-	// The worker cannot approve its own request, with the setting on or off.
-	if _, problem := r.s.OpDecide(ctx, r.worker, contract.OpDecideRequest{ID: op.ID, Approve: true}); problem == nil || problem.Code != contract.ErrForbidden {
-		t.Fatalf("worker decided: %v", problem)
-	}
-	if _, problem := r.s.OpDecide(ctx, r.root, contract.OpDecideRequest{ID: op.ID, Approve: true}); problem != nil {
-		t.Fatalf("root with the setting on: %v", problem)
-	}
-	waitForOperation(t, r.s, ctx, op.ID, contract.OpDone)
+	waitForOperation(t, r.s, t.Context(), op.ID, contract.OpDone)
 	if r.grantsOfTest() != 1 {
-		t.Fatal("no grant after the root approved")
-	}
-	// The card now says who can approve.
-	next := r.ask()
-	if !strings.Contains(next.Card.Body, "Waiting for ") || !strings.Contains(next.Card.Body, "'s root or the owner.") {
-		t.Fatalf("card: %q", next.Card.Body)
+		t.Fatal("missing grant")
 	}
 }
 
 func TestRootCannotDecideAKindWithoutTheHook(t *testing.T) {
 	r := newGrantRig(t)
 	ctx := t.Context()
-	if _, problem := r.s.RoomSet(ctx, r.owner, contract.RoomSetRequest{Room: r.room, RootApproves: map[contract.RootApproval]bool{contract.RootApprovesHostexec: true}}); problem != nil {
-		t.Fatal(problem)
-	}
 	entry := r.s.HostexecGrant()
-	entry.RootApproves = ""
+	entry.Holds = nil
 	if entry.NoExpiry != true {
 		t.Fatal("grant entry expires")
 	}
@@ -149,9 +127,6 @@ func TestClosingASessionWithdrawsItsGrantRequest(t *testing.T) {
 func TestRootOfAnotherRoomIsRefused(t *testing.T) {
 	r := newGrantRig(t)
 	ctx := t.Context()
-	if _, problem := r.s.RoomSet(ctx, r.owner, contract.RoomSetRequest{Room: r.room, RootApproves: map[contract.RootApproval]bool{contract.RootApprovesHostexec: true}}); problem != nil {
-		t.Fatal(problem)
-	}
 	created, e := r.s.RoomCreate(ctx, r.owner, contract.RoomCreateRequest{Name: "other", RootProfile: "test"})
 	if e != nil {
 		t.Fatal(e)
@@ -169,9 +144,6 @@ func TestRootOfAnotherRoomIsRefused(t *testing.T) {
 func TestGrantRecordsWhoDecided(t *testing.T) {
 	r := newGrantRig(t)
 	ctx := t.Context()
-	if _, problem := r.s.RoomSet(ctx, r.owner, contract.RoomSetRequest{Room: r.room, RootApproves: map[contract.RootApproval]bool{contract.RootApprovesHostexec: true}}); problem != nil {
-		t.Fatal(problem)
-	}
 	op := r.ask()
 	if _, problem := r.s.OpDecide(ctx, r.root, contract.OpDecideRequest{ID: op.ID, Approve: true}); problem != nil {
 		t.Fatal(problem)

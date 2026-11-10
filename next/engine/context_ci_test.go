@@ -70,7 +70,7 @@ func TestContextRoomCI(t *testing.T) {
 	for i := 0; i < 35; i++ {
 		add(r.room, contract.RepoName(fmt.Sprintf("owner/repository-%03d-%s", i, strings.Repeat("x", 70))), true)
 	}
-	if _, problem := r.s.RoomSet(ctx, r.owner, contract.RoomSetRequest{Room: r.room, RootApproves: map[contract.RootApproval]bool{contract.RootApprovesHostexec: true}}); problem != nil {
+	if _, problem := r.s.RoomSet(ctx, r.owner, contract.RoomSetRequest{Room: r.room, RootApproves: map[contract.RootApproval]bool{contract.RootApprovesAddons: true}}); problem != nil {
 		t.Fatal(problem)
 	}
 	full, problem := r.s.ContextSnapshot(ctx, r.root, contract.ContextSnapshotRequest{Section: contract.ContextRoom})

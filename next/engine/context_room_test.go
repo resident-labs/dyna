@@ -40,12 +40,12 @@ func TestContextRoomSection(t *testing.T) {
 	if text, ok := section(r.worker); ok {
 		t.Fatalf("a non-root session has %q", text)
 	}
-	set(map[contract.RootApproval]bool{contract.RootApprovesPools: true, contract.RootApprovesHostexec: true})
-	if text, _ := section(r.root); text != "Approvals you decide: host exec, global add-ons, node pools" {
+	set(map[contract.RootApproval]bool{contract.RootApprovesPools: true})
+	if text, _ := section(r.root); text != "Approvals you decide: global add-ons, node pools" {
 		t.Fatalf("three on: %q", text)
 	}
 	set(map[contract.RootApproval]bool{contract.RootApprovesHosts: true})
-	if text, _ := section(r.root); text != "Approvals you decide: host exec, global add-ons, room host rules, node pools" {
+	if text, _ := section(r.root); text != "Approvals you decide: global add-ons, room host rules, node pools" {
 		t.Fatalf("four on: %q", text)
 	}
 	if _, ok := section(r.worker); ok {
@@ -55,7 +55,7 @@ func TestContextRoomSection(t *testing.T) {
 	if err != nil || len(one.Sections) != 1 {
 		t.Fatalf("one section: %+v %v", one, err)
 	}
-	set(map[contract.RootApproval]bool{contract.RootApprovesHostexec: false, contract.RootApprovesAddons: false, contract.RootApprovesHosts: false, contract.RootApprovesPools: false})
+	set(map[contract.RootApproval]bool{contract.RootApprovesAddons: false, contract.RootApprovesHosts: false, contract.RootApprovesPools: false})
 	if text, ok := section(r.root); ok {
 		t.Fatalf("all off again, root has %q", text)
 	}

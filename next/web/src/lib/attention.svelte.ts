@@ -213,7 +213,7 @@ export class Attention {
     if (buffer) buffer.push(event); else this.track(event);
     switch (event.type) {
       // Only owner-class requests wait for the owner.
-      case "op.requested": if (event.body.class === "owner") waiting.add(event.body.id); break;
+      case "op.requested": if (event.body.class === "owner" && !event.body.decider) waiting.add(event.body.id); break;
       case "op.decided": case "op.ran": if (event.body.state !== "pending") waiting.delete(event.body.id); break;
       case "question.asked": this.questions.get(event.room ?? "")?.add(event.body.id); break;
       case "question.answered": case "question.withdrawn": this.questions.get(event.room ?? "")?.delete(event.body.id); break;

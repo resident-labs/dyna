@@ -86,7 +86,7 @@ var methodTable = []MethodEntry{
 		act("room", "github", typ[contract.RoomGitHubRequest](), "Show, replace or clear the room's GitHub account (owner only)", "room github"),
 	),
 	method(contract.MethodRoomSet, contract.ScopeAdmin, OwnerAccess,
-		act("room", "set", typ[contract.RoomSetRequest](), "Change a room setting; an omitted one stays. rootApproves maps a kind to on or off, and a kind that is on lets the room's root decide its sessions' requests of that kind as the owner can: hostexec (host exec grants), addons (global skills, packages and MCP servers), hosts (room hosts rules), pools (pool add). Each is off by default. githubWrites {repos, groups} lets the room's sessions make GitHub writes without a host grant: groups are issues, pulls and projects, repos are repositories of the room or *; empty groups turn it off. It is off by default; merges, deletes and all else stay refused.", "room set"),
+		act("room", "set", typ[contract.RoomSetRequest](), "Change a room setting; an omitted one stays. rootApproves maps a kind to on or off, and a kind that is on lets the room's root decide its sessions' requests of that kind as the owner can: addons (global skills, packages and MCP servers), hosts (room hosts rules), pools (pool add). Each is off by default. githubWrites {repos, groups} lets the room's sessions make GitHub writes without a host grant: groups are issues, pulls and projects, repos are repositories of the room or *; empty groups turn it off. It is off by default; merges, deletes and all else stay refused.", "room set"),
 	),
 	method(contract.MethodHostList, contract.ScopeRead, OwnerAccess,
 		act("host", "list", typ[contract.HostListRequest](), "List hosts with disk use and whether disk is low: measured free space strictly below the host's reserved floor, never an early warning above it. Exec-only hosts are never flagged low. health is scheduling health, separate from reachable: degraded after three failed probes, healthy after a good probe, unknown before any. Degraded hosts take no new boxes or runners; existing boxes stay.", "host list"),
@@ -131,14 +131,14 @@ var methodTable = []MethodEntry{
 	),
 	// Settings > Pools changes a pool; agents and the CLI have no action for it.
 	method(contract.MethodPoolSet, contract.ScopeAdmin, OwnerAccess),
-	// The owner decides; so does a room's root where its room setting allows. The approval service keeps its own check.
+	// The owner, an ancestor holding the requested hosts, or root where its room setting allows decides.
 	method(contract.MethodOpDecide, contract.ScopeAdmin, UserAccess,
-		act("op", "decide", typ[contract.OpDecideRequest](), "Decide an operation", "op approve", "op deny"),
+		act("op", "decide", typ[contract.OpDecideRequest](), "Decide an operation. For host access, any ancestor of the requester holding every requested host may decide; the owner always may. For other kinds, root may decide when its room setting allows.", "op approve", "op deny"),
 	),
 	method(contract.MethodOpList, contract.ScopeRead, UserAccess),
 	// op.submit checks its own scope by operation kind, so the row names none.
 	method(contract.MethodOpSubmit, "", UserAccess,
-		opAct("hostexec", "request_grant", contract.HostexecGrantArgs{}.OpKind(), typ[contract.HostexecGrantArgs](), "Request host access with a reason. The grant lasts until the session closes. hosts is a list of host names; reason is one line of at most 300 characters.", "hostexec grant"),
+		opAct("hostexec", "request_grant", contract.HostexecGrantArgs{}.OpKind(), typ[contract.HostexecGrantArgs](), "Request host access with a reason. to must be you or a session under you; when you hold the requested hosts, access is handed down immediately. The grant lasts until the session closes. hosts is a list of host names; reason is one line of at most 300 characters.", "hostexec grant"),
 		opAct("pr", "stack", contract.PrStackArgs{}.OpKind(), typ[contract.PrStackArgs](), "make a GitHub stack from open PRs, bottom first; each PR's base is the PR below it, and you own each or are an ancestor of its owner. A stack can't change after creation. Merging it is root's.", "pr stack"),
 		opAct("pr", "open", contract.PrOpenArgs{}.OpKind(), typ[contract.PrOpenArgs](), "Open a pull request with title and base. Body and draft are optional; omit head to use your session's recorded branch (named in your instructions as \"Your branch\"), and set head to name another branch. Returns the PR number and url; the returned operation has no body field because the body was sent to GitHub as written.", "pr open"),
 	),

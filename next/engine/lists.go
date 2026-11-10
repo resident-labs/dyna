@@ -21,6 +21,15 @@ func (s *Service) RoomList(ctx context.Context, caller contract.Principal, _ con
 				continue
 			}
 			if item.Operation != "" {
+				if s.approvals != nil {
+					decider, err := s.approvals.DeciderForID(ctx, item.Operation)
+					if err != nil {
+						return contract.RoomListResponse{}, failure(err)
+					}
+					if decider != "" {
+						continue
+					}
+				}
 				result.Rooms[i].Waiting = append(result.Rooms[i].Waiting, item.Operation)
 				continue
 			}

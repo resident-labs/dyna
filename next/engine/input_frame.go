@@ -109,6 +109,9 @@ func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, eve
 	if post, ok := event.Body.(contract.PostCreated); ok && post.Hook != "" {
 		sender = fmt.Sprintf("the script of subscription %s", post.Hook)
 	}
+	if _, ok := event.Body.(contract.OpRequested); ok {
+		return fmt.Sprintf("[Dyna] From %s, as an approval request. No reply is delivered.", sender), nil, nil
+	}
 	var surface string
 	switch delivery.Surface {
 	case contract.SurfaceFeed:
