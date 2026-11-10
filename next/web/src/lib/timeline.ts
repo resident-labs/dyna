@@ -185,7 +185,9 @@ export function queuedTimelinePosts<Post extends { id: string; seq: number }>(po
 // Dyna: A post names its destination only when it left the DM on screen.
 export function postDestination(item: TranscriptItem, session: string, room: string, roomName: string, sessionName: (id: string) => string): string | undefined {
   if (item.home?.kind === "dm") return item.home.session && item.home.session !== session ? sessionName(item.home.session) : undefined;
-  if (item.home?.kind === "feed") return item.room === room ? `#${roomName}` : "another room";
+  if (item.home?.kind === "feed" && item.room !== room) return "another room";
+  // A feed post reaches the sessions it names, so they lead and the feed it sits in follows.
+  if (item.home?.kind === "feed") return item.mentions?.length ? `${item.mentions.map(sessionName).join(", ")} in #${roomName}` : `#${roomName}`;
   return undefined;
 }
 

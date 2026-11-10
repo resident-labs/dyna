@@ -911,6 +911,7 @@ type TranscriptItem struct {
 	From           *Principal              `json:"from,omitempty"`
 	Seq            int64                   `json:"seq,omitempty"`
 	Home           *Conversation           `json:"home,omitempty"`
+	Mentions       []SessionID             `json:"mentions,omitempty"` // the sessions a post names
 	Bytes          int64                   `json:"bytes,omitempty"`
 	Tokens         int64                   `json:"tokens,omitempty"`
 	ErrorName      string                  `json:"errorName,omitempty"` // an attempt_failed item's failure, such as SocketError

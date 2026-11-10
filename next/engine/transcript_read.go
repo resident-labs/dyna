@@ -425,6 +425,11 @@ func applyTranscriptPost(item *contract.TranscriptItem, event contract.Event) {
 	item.More = item.More || len(text) > 4096
 	home := post.Home
 	item.Home = &home
+	for _, to := range post.Mentions {
+		if to.Kind == contract.PrincipalSession {
+			item.Mentions = append(item.Mentions, to.Session)
+		}
+	}
 	item.DataAttachment = post.DataAttachment
 	item.Data, item.DataRef = transcriptData(post.Data, post.Attachments, post.DataAttachment)
 	item.Attachments = sanitizeTranscriptAttachments(post.Attachments)
