@@ -40,15 +40,15 @@ func (s *Store) ShellJobEnded(ctx context.Context, session contract.SessionID, j
 		err = tx.QueryRowContext(ctx, `SELECT CASE WHEN json_array_length(json_extract(CAST(e.body AS TEXT),'$.jobs'))>0
 			THEN (SELECT COUNT(*) FROM json_each(json_extract(CAST(e.body AS TEXT),'$.jobs')) j WHERE NOT EXISTS (SELECT 1 FROM shell_jobs x WHERE x.session=s.id AND x.job=j.value))
 			ELSE s.shell_jobs END
-			FROM sessions s LEFT JOIN events e ON e.seq=(SELECT MAX(seq) FROM events WHERE from_kind='session' AND from_id=s.id AND type='turn.ended') WHERE s.id=?`, session).Scan(&remaining)
+			FROM sessions s LEFT JOIN events e ON e.seq=(SELECT MAX(seq) FROM events WHERE room=? AND from_kind='session' AND from_id=s.id AND type='turn.ended') WHERE s.id=?`, event.Room, session).Scan(&remaining)
 		if err != nil {
 			return err
 		}
 		if remaining == 0 {
 			var turn contract.TurnID
 			err = tx.QueryRowContext(ctx, `SELECT json_extract(CAST(e.body AS TEXT),'$.turn') FROM events e
-				WHERE e.from_kind='session' AND e.from_id=? AND e.type='turn.ended'
-				AND EXISTS (SELECT 1 FROM json_each(json_extract(CAST(e.body AS TEXT),'$.jobs')) WHERE value=?) ORDER BY e.seq LIMIT 1`, session, job).Scan(&turn)
+				WHERE e.room=? AND e.from_kind='session' AND e.from_id=? AND e.type='turn.ended'
+				AND EXISTS (SELECT 1 FROM json_each(json_extract(CAST(e.body AS TEXT),'$.jobs')) WHERE value=?) ORDER BY e.seq LIMIT 1`, event.Room, session, job).Scan(&turn)
 			if err != nil && err != sql.ErrNoRows {
 				return err
 			}
