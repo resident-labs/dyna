@@ -221,13 +221,20 @@ func (s *Store) warnDisk(ctx context.Context, tx *sql.Tx, name contract.HostName
 	if n, err := result.RowsAffected(); err != nil || n == 0 {
 		return err
 	}
-	return s.alertRoots(ctx, tx, contract.HostDiskLow{Host: name, FreeBytes: free, FloorBytes: floor}, at, true)
+	// The control plane holds every room's folders, so every root hears of it.
+	holder := name
+	if name == contract.ControlPlane {
+		holder = ""
+	}
+	return s.alertRoots(ctx, tx, contract.HostDiskLow{Host: name, FreeBytes: free, FloorBytes: floor}, at, true, holder)
 }
 
 // alertRoots posts an engine event in every room with an open root. wake starts a turn for it; without wake the root reads it
-// with its next input.
-func (s *Store) alertRoots(ctx context.Context, tx *sql.Tx, body contract.EventBody, at time.Time, wake bool) error {
-	rows, err := tx.QueryContext(ctx, "SELECT id,room FROM sessions WHERE parent IS NULL AND state='open' AND closed_at IS NULL")
+// with its next input. With host, only the rooms that hold a box on it are told, since only they can free its disk; when no
+// room holds one, every root is told.
+func (s *Store) alertRoots(ctx context.Context, tx *sql.Tx, body contract.EventBody, at time.Time, wake bool, host contract.HostName) error {
+	const holders = "SELECT held.room FROM boxes b JOIN sessions held ON held.id=b.session WHERE b.host=?1 AND b.state!='deleted'"
+	rows, err := tx.QueryContext(ctx, "SELECT id,room FROM sessions WHERE parent IS NULL AND state='open' AND closed_at IS NULL AND (?1='' OR room IN ("+holders+") OR NOT EXISTS ("+holders+"))", host)
 	if err != nil {
 		return err
 	}
