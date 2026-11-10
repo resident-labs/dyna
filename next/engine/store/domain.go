@@ -438,6 +438,47 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 		if deferred || output.Cause == contract.CauseClosed {
 			body.Replies = nil
 		}
+		// A turn that completes while its session still has a job running or a child at work has not given its result yet.
+		// Its text reaches the sessions it answers without waking them, and the session keeps owing them a reply: the first
+		// turn that ends with nothing left to wait for, or that fails, answers them too, whatever started it.
+		var waiting bool
+		var kept []byte
+		if err := tx.QueryRowContext(ctx, `SELECT ?2 AND (?3 OR EXISTS(SELECT 1 FROM sessions c WHERE c.parent=?1 AND c.closed_at IS NULL AND (
+				EXISTS(SELECT 1 FROM turns t WHERE t.session=c.id AND t.ended_at IS NULL)
+				OR EXISTS(SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=c.id AND d.state='pending' AND d.wake=1)))), COALESCE((SELECT replies FROM replies_owed WHERE session=?1),'[]')`,
+			session, output.Outcome == contract.TurnCompleted, output.ShellJobs > 0).Scan(&waiting, &kept); err != nil {
+			return err
+		}
+		var later []contract.ReplyChannel
+		if err := json.Unmarshal(kept, &later); err != nil {
+			return err
+		}
+		if !deferred && output.Cause != contract.CauseClosed {
+			answers := func(to contract.ReplyChannel) func(contract.FinalReply) bool {
+				return func(r contract.FinalReply) bool { return r.Reply.Target == to.Target && r.Reply.Home == to.Home }
+			}
+			switch {
+			case waiting:
+				for _, reply := range body.Replies {
+					if reply.Reply.Target.Kind == contract.PrincipalSession && reply.Posted == "" && !slices.ContainsFunc(later, func(to contract.ReplyChannel) bool { return answers(to)(reply) }) {
+						later = append(later, reply.Reply)
+					}
+				}
+			case output.Outcome != contract.TurnStopped:
+				for _, to := range later {
+					if !slices.ContainsFunc(body.Replies, answers(to)) {
+						body.Replies = append(body.Replies, contract.FinalReply{Reply: to})
+					}
+				}
+				later = nil
+			}
+			if kept, err = json.Marshal(later); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO replies_owed(session,replies) SELECT ?1,?2 WHERE ?3 ON CONFLICT(session) DO UPDATE SET replies=excluded.replies; DELETE FROM replies_owed WHERE session=?1 AND NOT ?3", session, kept, len(later) > 0); err != nil {
+				return err
+			}
+		}
 		owed := slices.ContainsFunc(inputs, func(d contract.Delivery) bool { return d.Reply.Kind == contract.ReplyFinal })
 		event.Body = body
 		seq, err := s.AppendEvent(tx, event)
@@ -465,7 +506,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 					return err
 				}
 			}
-			d := contract.Delivery{To: reply.Reply.Target, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyPost, Target: event.From, Home: reply.Reply.Home}, Wake: reply.Posted == ""}
+			d := contract.Delivery{To: reply.Reply.Target, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyPost, Target: event.From, Home: reply.Reply.Home}, Wake: reply.Posted == "" && !waiting}
 			// The engine opened this channel, so reach does not apply, but a reply to a parent that can't receive goes up.
 			if _, err := reroute(ctx, tx, event.From, &d); err != nil {
 				return err

@@ -63,7 +63,6 @@ func newGoalRig(t *testing.T) *goalRig {
 	}
 	r.exec("UPDATE boxes SET state='ready',want='run'")
 	r.turn(r.lead, "started the child")
-	r.turn(r.root, "noted")
 	return r
 }
 

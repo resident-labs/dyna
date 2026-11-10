@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
@@ -96,4 +98,18 @@ func (s *Store) ShellJobRunning(ctx context.Context, session contract.SessionID,
 func dropJobRunning(ctx context.Context, tx *sql.Tx, session contract.SessionID, job contract.ShellJobID) error {
 	_, err := tx.ExecContext(ctx, `DELETE FROM deliveries AS d WHERE d.to_kind='session' AND d.to_id=? AND d.state='pending' AND EXISTS (SELECT 1 FROM events e WHERE e.seq=d.seq AND e.type='shell.job.running' AND json_extract(CAST(e.body AS TEXT),'$.job')=?)`, session, job)
 	return err
+}
+
+// RepliesOwed lists the replies a session still owes after turns that ended while it waited for a job or a child.
+func (s *Store) RepliesOwed(ctx context.Context, session contract.SessionID) ([]contract.ReplyChannel, error) {
+	var kept []byte
+	err := s.Read().QueryRowContext(ctx, "SELECT replies FROM replies_owed WHERE session=?", session).Scan(&kept)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var owed []contract.ReplyChannel
+	return owed, json.Unmarshal(kept, &owed)
 }

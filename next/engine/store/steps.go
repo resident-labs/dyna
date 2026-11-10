@@ -6,11 +6,13 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 105
+const schemaVersion = 106
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
+	// The replies a session still owes after a turn that ended while it waited for a job or a child (spec 7.1).
+	105: {`CREATE TABLE IF NOT EXISTS replies_owed (session TEXT PRIMARY KEY REFERENCES sessions(id), replies TEXT NOT NULL)`},
 	104: {`CREATE TABLE IF NOT EXISTS room_github_accounts (room TEXT PRIMARY KEY REFERENCES rooms(id) ON DELETE CASCADE, login TEXT NOT NULL, name TEXT NOT NULL, email TEXT NOT NULL, credential TEXT NOT NULL)`},
 	// A session holds one goal, with a todo list two levels deep. A holder of several keeps its own (the goal it was started
 	// with) or else its oldest. Each other one with no open item ends done; one with open items becomes an item of the kept
