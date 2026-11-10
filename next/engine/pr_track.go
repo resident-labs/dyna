@@ -109,9 +109,8 @@ func (s *Service) PrList(ctx context.Context, caller contract.Principal, req con
 		return contract.PrListResponse{}, failure(err)
 	}
 	result := contract.PrListResponse{PRs: make([]contract.PrSummary, 0, len(rows))}
-	viewer := s.prViewer()
 	for _, row := range rows {
-		result.PRs = append(result.PRs, prFor(caller, row, viewer))
+		result.PRs = append(result.PRs, prFor(caller, row, s.repoViewer(ctx, row.Repo)))
 	}
 	return result, nil
 }
@@ -125,7 +124,7 @@ func (s *Service) PrStatus(ctx context.Context, caller contract.Principal, req c
 	if e != nil {
 		return contract.PrStatusResponse{}, e
 	}
-	return contract.PrStatusResponse{PR: prFor(caller, pr, s.prViewer())}, nil
+	return contract.PrStatusResponse{PR: prFor(caller, pr, s.repoViewer(ctx, repo))}, nil
 }
 
 // prTracker finds the session that will own a newly tracked PR.
@@ -166,11 +165,15 @@ func (s *Service) prTracker(ctx context.Context, caller contract.Principal, req 
 }
 
 // trackQuota refuses a track that GitHub cannot serve. Tracking is the one PR or issue call a box can spend quota on.
-func (s *Service) trackQuota(caller contract.Principal) *contract.Error {
-	if s.pulls == nil {
+func (s *Service) trackQuota(caller contract.Principal, clients ...*prs.Client) *contract.Error {
+	client := s.pulls
+	if len(clients) > 0 {
+		client = clients[0]
+	}
+	if client == nil {
 		return &contract.Error{Code: contract.ErrUnavailable, Message: "GitHub is not connected"}
 	}
-	if reset, low := s.pulls.Low(); low && caller.Kind == contract.PrincipalSession {
+	if reset, low := client.Low(); low && caller.Kind == contract.PrincipalSession {
 		return &contract.Error{Code: contract.ErrGitHubQuota, Message: fmt.Sprintf("GitHub quota is low; try again after %s", reset.UTC().Format(time.RFC3339))}
 	}
 	return nil
@@ -185,10 +188,14 @@ func (s *Service) PrTrack(ctx context.Context, caller contract.Principal, req co
 	if e != nil {
 		return contract.PrTrackResponse{}, e
 	}
-	if e := s.trackQuota(caller); e != nil {
+	client, err := s.roomGitHub(ctx, owner.Room)
+	if err != nil {
+		return contract.PrTrackResponse{}, failure(err)
+	}
+	if e := s.trackQuota(caller, client); e != nil {
 		return contract.PrTrackResponse{}, e
 	}
-	pull, err := s.pulls.Pull(ctx, repo, req.Number)
+	pull, err := client.Pull(ctx, repo, req.Number)
 	if errors.Is(err, prs.ErrNotFound) {
 		return contract.PrTrackResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "GitHub has no such pull request"}
 	}
@@ -219,7 +226,7 @@ func (s *Service) PrTrack(ctx context.Context, caller contract.Principal, req co
 	if e != nil {
 		return contract.PrTrackResponse{}, e
 	}
-	return contract.PrTrackResponse{PR: prFor(caller, stored, s.prViewer())}, nil
+	return contract.PrTrackResponse{PR: prFor(caller, stored, client.Viewer())}, nil
 }
 
 // hookSession finds who a Run tracks for: the session it names in its room, or root with no name.

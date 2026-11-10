@@ -18,6 +18,15 @@ var ErrRepoNotFound = errors.New("unknown repository")
 // SetRepoCI turns a repository's CI runners on or off. Max bounds them across sizes, and zero leaves them to admission.
 func (s *Store) SetRepoCI(ctx context.Context, repo contract.RepoName, on bool, max int) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		if on {
+			var count int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM repos p JOIN room_github_accounts a ON a.room=p.default_room WHERE p.repo=?`, repo).Scan(&count); err != nil {
+				return err
+			}
+			if count > 0 {
+				return errors.New("CI is unavailable for repositories with a room GitHub account")
+			}
+		}
 		result, err := tx.ExecContext(ctx, "UPDATE repos SET ci=?, ci_max=? WHERE repo=?", on, max, repo)
 		return noRows(result, err, ErrRepoNotFound)
 	})
@@ -89,6 +98,13 @@ func (s *Store) AddRoomRepo(ctx context.Context, id contract.RoomID, name contra
 			return err
 		}
 		updated, defaultRoom := room.AddRepo(id, current, defaultRoom, name, makeDefault)
+		var incompatible int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM rooms r WHERE r.id=? AND COALESCE((SELECT login FROM room_github_accounts WHERE room=r.id),'') COLLATE NOCASE <> COALESCE((SELECT login FROM room_github_accounts WHERE room=?),'') COLLATE NOCASE`, id, defaultRoom).Scan(&incompatible); err != nil {
+			return err
+		}
+		if incompatible > 0 {
+			return errors.New("repository and room use different GitHub accounts")
+		}
 		if _, err := tx.ExecContext(ctx, "INSERT INTO repos(repo,default_room) VALUES(?,?) ON CONFLICT(repo) DO NOTHING", name, defaultRoom); err != nil {
 			return err
 		}

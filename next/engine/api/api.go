@@ -28,6 +28,7 @@ type API struct {
 	localModel http.Handler
 	git        func(Caller) http.Handler
 	github     http.Handler
+ githubRoom func(contract.RoomID) http.Handler
 	web        *Web
 	files      func(Caller) http.Handler
 	shared     func(Caller) http.Handler
@@ -55,6 +56,8 @@ func (a *API) SetLocalModelRoute(route http.Handler) { a.localModel = route }
 
 // SetGitHubRead configures the GitHub route of a Run's socket before opening sockets.
 func (a *API) SetGitHubRead(route http.Handler) { a.github = route }
+
+func (a *API) SetGitHubRoomRead(route func(contract.RoomID) http.Handler) { a.githubRoom = route }
 
 // githubTools serves GitHub's read-only MCP tools to a box. The service holds them, because a box's hello says whether they are
 // there; a service without them, such as a test's, has none.
@@ -124,9 +127,9 @@ func (a *API) runHandler(sub contract.SubscriptionID, room contract.RoomID) http
 		return a.service.HookTrackIssue(ctx, room, req.Session, contract.IssueTrackRequest{Repo: req.Repo, Number: req.Number})
 	})
 	mux.HandleFunc("/v1/", func(w http.ResponseWriter, _ *http.Request) { writeError(w, forbidden()) })
-	if a.github != nil {
-		mux.Handle("/", a.github)
-	}
+	if a.githubRoom != nil { mux.Handle("/",a.githubRoom(room)) } else if a.github != nil {
+ mux.Handle("/", a.github)
+ }
 	return mux
 }
 
