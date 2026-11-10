@@ -45,7 +45,9 @@ type Mirror struct {
 	Token        string
 	ResolveToken func(context.Context, contract.RepoName) (string, string, error)
 	ErrorContext func(context.Context, contract.RepoName, error) error
-	Runner       Runner
+	// VerifyAccount checks repository access before serving cached account data.
+	VerifyAccount func(context.Context, contract.RepoName, string, string) error
+	Runner        Runner
 	// SeedTimeout bounds the fetch of Seed; zero means 10 seconds. Now is the clock for reusing a fetch; nil means time.Now.
 	SeedTimeout time.Duration
 	Now         func() time.Time
@@ -75,7 +77,12 @@ func (m *Mirror) Seed(ctx context.Context, host CacheHost, repo contract.RepoNam
 	defer cancel()
 	item, err := m.Prepare(bound, host, repo, true)
 	var missing MissingTokenError
-	if err == nil || ctx.Err() != nil || errors.As(err, &missing) || !m.Cloned(repo) {
+	account := false
+	if err != nil && m.ResolveToken != nil {
+		_, login, resolveErr := m.ResolveToken(ctx, repo)
+		account = login != "" || resolveErr != nil
+	}
+	if err == nil || account || ctx.Err() != nil || errors.As(err, &missing) || !m.Cloned(repo) {
 		return item, "", err
 	}
 	reason := "the fetch failed"
@@ -90,6 +97,9 @@ func (m *Mirror) Seed(ctx context.Context, host CacheHost, repo contract.RepoNam
 // each result began after its caller asked and each push began after that caller's fetch ended, so no box starts on
 // older refs than it would alone. The token is the engine's own, so sharing grants a caller nothing new.
 func (m *Mirror) Prepare(ctx context.Context, host CacheHost, repo contract.RepoName, fetch bool) (contract.BoxRepo, error) {
+	if err := m.checkAccess(ctx, repo); err != nil {
+		return contract.BoxRepo{}, err
+	}
 	if fetch && m.Token == "" && m.ResolveToken == nil {
 		return contract.BoxRepo{}, MissingTokenError{}
 	}
@@ -225,6 +235,20 @@ func (m *Mirror) authEnv(ctx context.Context, repo contract.RepoName) ([]string,
 	return []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.https://github.com/.extraheader", "GIT_CONFIG_VALUE_0=Authorization: Basic " + credential, "GIT_TERMINAL_PROMPT=0"}, nil
 }
 
+func (m *Mirror) checkAccess(ctx context.Context, repo contract.RepoName) error {
+	if m.ResolveToken == nil {
+		return nil
+	}
+	token, login, err := m.ResolveToken(ctx, repo)
+	if err != nil {
+		return err
+	}
+	if login != "" && m.VerifyAccount != nil {
+		return m.VerifyAccount(ctx, repo, token, login)
+	}
+	return nil
+}
+
 // Cloned reports whether the repository has a mirror yet.
 func (m *Mirror) Cloned(repo contract.RepoName) bool {
 	path, err := m.Layout.Git(repo)
@@ -249,6 +273,9 @@ func (m *Mirror) Refresh(ctx context.Context, repo contract.RepoName) error {
 
 // ComposeNames lists the repository's compose files.
 func (m *Mirror) ComposeNames(ctx context.Context, repo contract.RepoName) ([]string, error) {
+	if err := m.checkAccess(ctx, repo); err != nil {
+		return nil, err
+	}
 	path, err := m.Layout.Git(repo)
 	if err != nil {
 		return nil, err
@@ -269,6 +296,9 @@ func (m *Mirror) ComposeNames(ctx context.Context, repo contract.RepoName) ([]st
 // ComposeFile reads one compose file, or nil when the repository has no such name. It reads a file over the limit only
 // as far as the limit, since a repository chooses its files' sizes and the engine holds them in memory.
 func (m *Mirror) ComposeFile(ctx context.Context, repo contract.RepoName, name string) ([]byte, error) {
+	if err := m.checkAccess(ctx, repo); err != nil {
+		return nil, err
+	}
 	path, err := m.Layout.Git(repo)
 	if err != nil || !m.Cloned(repo) {
 		return nil, err

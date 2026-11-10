@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"database/sql"
 	"net/http"
 	"strings"
 	"testing"
@@ -56,7 +57,18 @@ func TestAccountPROpenNeverUsesEngineCredential(t *testing.T) {
 	if err := files.Write("credential", "work-secret"); err != nil {
 		t.Fatal(err)
 	}
+	// The fixture attached its repository under the default account. Detach it
+	// before selecting the work account, then attach it under that account.
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `DELETE FROM room_repos WHERE room=?`, selected.Room)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.store.SetGitHubAccount(ctx, selected.Room, store.GitHubIdentity{Login: "work", Credential: "credential"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.AddRoomRepo(ctx, selected.Room, "owner/repo", true); err != nil {
 		t.Fatal(err)
 	}
 	resolver := &githubaccount.Resolver{Store: s.store, Tokens: files, DefaultToken: "engine-secret"}
