@@ -163,6 +163,18 @@ func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, eve
 		frame += " No reply is expected."
 	}
 	if delivery.Reply.Kind == contract.ReplyPost || delivery.Reply.Kind == contract.ReplyNone {
+		// A turn that ended while the session waited left a reply owed, and this turn's text may be the one that pays it.
+		owed, err := s.store.RepliesOwed(ctx, viewer)
+		if err != nil {
+			return "", nil, err
+		}
+		for _, reply := range owed {
+			target, err := s.framePrincipal(ctx, viewer, reply.Target)
+			if err != nil {
+				return "", nil, err
+			}
+			frame += fmt.Sprintf(" You still owe %s a reply: your final response goes to it if no job of yours is running and no child of yours is working when the turn ends.", target)
+		}
 		home, err := s.store.OwnerConversation(ctx, viewer)
 		if err != nil {
 			return "", nil, err

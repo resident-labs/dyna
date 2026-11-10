@@ -203,6 +203,9 @@ func (s *Service) FailureNotices(ctx context.Context) error {
 
 // Checkins runs one check-in pass. Each report wakes its reader, so the pass decides who pays for a model turn.
 func (s *Service) Checkins(ctx context.Context) error {
+	if err := s.store.WakeOwedReplies(ctx, s.now()); err != nil {
+		return err
+	}
 	return s.store.SendCheckins(ctx, s.now(), s.engineEvent)
 }
 

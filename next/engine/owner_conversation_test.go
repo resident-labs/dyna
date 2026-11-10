@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -165,6 +167,18 @@ func TestFrameSaysWherePostsToTheOwnerGo(t *testing.T) {
 	frame, _, err := s.inputFrame(ctx, worker, event, contract.Delivery{Surface: contract.SurfaceDM, Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: theOwner, Home: dmHome(worker)}})
 	if err != nil || strings.Contains(frame, "Posts to the owner") {
 		t.Fatalf("a final frame: %q %v", frame, err)
+	}
+	// A session that ended a turn while it waited is told whom its next text may answer.
+	owed := fmt.Sprintf(`[{"kind":"final","target":{"kind":"session","session":%q}}]`, worker)
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "INSERT INTO replies_owed(session,replies) VALUES(?,?)", kid, owed)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	frame, _, err = s.inputFrame(ctx, kid, event, contract.Delivery{Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}})
+	if err != nil || !strings.Contains(frame, "No reply is expected. You still owe your parent \"worker\" a reply: your final response goes to it if no job of yours is running and no child of yours is working when the turn ends.") {
+		t.Fatalf("a frame with a reply owed: %q %v", frame, err)
 	}
 }
 
