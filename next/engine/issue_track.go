@@ -92,7 +92,11 @@ func (s *Service) IssueTrack(ctx context.Context, caller contract.Principal, req
 	}
 	repo, seen, err := client.Issue(ctx, repo, req.Number)
 	if errors.Is(err, prs.ErrNotFound) {
-		return contract.IssueTrackResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "GitHub has no such issue; a pull request is tracked with pr track"}
+		message := "GitHub has no such issue; a pull request is tracked with pr track"
+		if client.AccountLabel != "" {
+			message = client.AccountLabel + ": " + message
+		}
+		return contract.IssueTrackResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: message}
 	}
 	if err != nil {
 		return contract.IssueTrackResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "GitHub did not answer: " + err.Error()}
