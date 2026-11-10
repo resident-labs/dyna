@@ -14,7 +14,7 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 	case contract.SessionProfileChanged:
 		return fmt.Sprintf("Your model is now %s.", b.Profile), nil
 	case contract.OpRequested:
-		return fmt.Sprintf("%s: %s\nDecide it with op decide, id %s: approve true or false, with a reason when you deny.", b.Card.Title, b.Card.Body, b.ID), nil
+		return fmt.Sprintf("%s\nDecide it with op decide, id %s: approve true or false, with a reason when you deny.", b.Card.Body, b.ID), nil
 	case contract.PostCreated:
 		return b.Text, nil
 	case contract.SessionRestarted:

@@ -11,6 +11,8 @@ import type { ActivityKind, BoxState, Conversation, FailureCause, Decision, Even
 
 
 // An operation of the room as the Requests panel shows it: its card, then its decision and run.
+export const needsOwner = (request: Pick<Request, "state" | "class" | "decider">): boolean => request.state === "pending" && request.class === "owner" && !request.decider;
+
 export type Request = OpRequested & { state: OpState; decision?: Decision; result?: OpResult };
 
 // A read position's key: "" for the feed, the session id for its DM.
@@ -150,7 +152,7 @@ export class RoomStore {
   get ready(): boolean { this.subscribe(); return this.loaded; }
   get error(): unknown { this.subscribe(); return this.failure; }
   // Pending owner-class operations wait for the owner.
-  get waiting(): number { return [...this.requests.values()].filter(request => request.state === "pending" && request.class === "owner" && !request.decider).length + this.pendingQuestions().length; }
+  get waiting(): number { return [...this.requests.values()].filter(needsOwner).length + this.pendingQuestions().length; }
   // The questions the owner has not answered, of one session or the room, oldest first.
   pendingQuestions(session?: string): Question[] {
     return [...this.questions.values()].filter(question => question.state === "pending" && (!session || question.session === session))
@@ -188,7 +190,7 @@ export class RoomStore {
   }
   // The sessions whose requests or questions wait for the owner.
   private asking(): Set<string> {
-    return new Set([...[...this.requests.values()].filter(request => request.state === "pending" && request.class === "owner" && !request.decider)
+    return new Set([...[...this.requests.values()].filter(needsOwner)
       .flatMap(request => request.by.session ? [request.by.session] : []), ...this.pendingQuestions().map(question => question.session)]);
   }
 

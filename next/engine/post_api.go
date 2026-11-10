@@ -397,11 +397,6 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 			return ok && requested.Card.RootOnly
 		})
 	}
-	for i := range events {
-		if err := s.approvalDecider(ctx, &events[i]); err != nil {
-			return contract.EventsListResponse{}, failure(err)
-		}
-	}
 	// Names of the sessions this page names, so that posts and events of closed sessions keep their authors.
 	named := map[contract.SessionID]bool{}
 	for _, event := range events {
@@ -427,7 +422,9 @@ func (s *Service) EventsList(ctx context.Context, caller contract.Principal, req
 			named[body.Session] = true
 		case contract.OpRequested:
 			named[body.By.Session] = true
-			named[body.Decider] = true
+			if body.Decider != "" {
+				named[body.Decider] = true
+			}
 		case contract.QuestionAnswered:
 			named[body.Session] = true
 		case contract.QuestionWithdrawn:

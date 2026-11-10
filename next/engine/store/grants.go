@@ -10,7 +10,7 @@ import (
 
 // CreateGrant inserts a grant in its own transaction.
 func (s *Store) CreateGrant(ctx context.Context, g contract.Grant) error {
-	return s.Write(ctx, func(tx *sql.Tx) error { return s.InsertGrant(tx, g) })
+	return s.CreateGrants(ctx, []contract.Grant{g})
 }
 
 func (s *Store) InsertGrant(tx *sql.Tx, g contract.Grant) error {
@@ -62,4 +62,16 @@ func scanGrants(rows *sql.Rows) ([]contract.Grant, error) {
 		grants = append(grants, g)
 	}
 	return grants, rows.Err()
+}
+
+// CreateGrants inserts a path of grants atomically.
+func (s *Store) CreateGrants(ctx context.Context, grants []contract.Grant) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		for _, grant := range grants {
+			if err := s.InsertGrant(tx, grant); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
