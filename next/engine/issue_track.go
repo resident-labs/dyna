@@ -51,9 +51,8 @@ func (s *Service) IssueList(ctx context.Context, caller contract.Principal, req 
 		return contract.IssueListResponse{}, failure(err)
 	}
 	result := contract.IssueListResponse{Issues: make([]contract.IssueSummary, 0, len(rows))}
-	viewer := s.prViewer()
 	for _, row := range rows {
-		result.Issues = append(result.Issues, issueFor(caller, row, viewer))
+		result.Issues = append(result.Issues, issueFor(caller, row, s.repoViewer(ctx, row.Repo)))
 	}
 	return result, nil
 }
@@ -67,7 +66,7 @@ func (s *Service) IssueStatus(ctx context.Context, caller contract.Principal, re
 	if e != nil {
 		return contract.IssueStatusResponse{}, e
 	}
-	return contract.IssueStatusResponse{Issue: issueFor(caller, issue, s.prViewer())}, nil
+	return contract.IssueStatusResponse{Issue: issueFor(caller, issue, s.repoViewer(ctx, repo))}, nil
 }
 
 // IssueTrack has PrTrack's rules. An issue has one repository, so the room must list that one. Tracking an issue the session
@@ -82,14 +81,22 @@ func (s *Service) IssueTrack(ctx context.Context, caller contract.Principal, req
 		return contract.IssueTrackResponse{}, e
 	}
 	if held, err := s.store.Issue(ctx, repo, req.Number); err == nil && held.Session == owner.ID && held.State == contract.IssueOpen {
-		return contract.IssueTrackResponse{Issue: issueFor(caller, held, s.prViewer())}, nil
+		return contract.IssueTrackResponse{Issue: issueFor(caller, held, s.repoViewer(ctx, repo))}, nil
 	}
-	if e := s.trackQuota(caller); e != nil {
+	client, err := s.roomGitHub(ctx, owner.Room)
+	if err != nil {
+		return contract.IssueTrackResponse{}, failure(err)
+	}
+	if e := s.trackQuota(caller, client); e != nil {
 		return contract.IssueTrackResponse{}, e
 	}
-	repo, seen, err := s.pulls.Issue(ctx, repo, req.Number)
+	repo, seen, err := client.Issue(ctx, repo, req.Number)
 	if errors.Is(err, prs.ErrNotFound) {
-		return contract.IssueTrackResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "GitHub has no such issue; a pull request is tracked with pr track"}
+		message := "GitHub has no such issue; a pull request is tracked with pr track"
+		if client.AccountLabel != "" {
+			message = client.AccountLabel + ": " + message
+		}
+		return contract.IssueTrackResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: message}
 	}
 	if err != nil {
 		return contract.IssueTrackResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "GitHub did not answer: " + err.Error()}
@@ -111,7 +118,7 @@ func (s *Service) IssueTrack(ctx context.Context, caller contract.Principal, req
 	if e != nil {
 		return contract.IssueTrackResponse{}, e
 	}
-	return contract.IssueTrackResponse{Issue: issueFor(caller, stored, s.prViewer())}, nil
+	return contract.IssueTrackResponse{Issue: issueFor(caller, stored, client.Viewer())}, nil
 }
 
 // HookTrackIssue tracks an issue the way the named session would for itself, or root with no name, as HookTrack does a PR.

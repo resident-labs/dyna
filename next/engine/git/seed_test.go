@@ -39,7 +39,7 @@ func (g *localGitHub) Run(ctx context.Context, env []string, args ...string) ([]
 	if slicesContains(args, "fetch") {
 		g.fetches.Add(1)
 	}
-	if g.hang.Load() && (slicesContains(args, "fetch") || slicesContains(args, "ls-remote")) {
+	if g.hang.Load() && (slicesContains(args, "clone") || slicesContains(args, "fetch") || slicesContains(args, "ls-remote")) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
