@@ -71,12 +71,25 @@ func (m *Mirror) ensureIdentity(ctx context.Context, repo contract.RepoName, log
 }
 
 func (m *Mirror) recordIdentity(login, path string) error {
+	previous, markerErr := os.ReadFile(filepath.Join(path, box.GitIdentityMarker))
+	if markerErr != nil && !errors.Is(markerErr, os.ErrNotExist) {
+		return markerErr
+	}
+	_, pendingErr := os.Stat(path + ".requires-fetch")
+	if pendingErr != nil && !errors.Is(pendingErr, os.ErrNotExist) {
+		return pendingErr
+	}
+	// Ordinary mirrors retain their legacy, unmarked provenance until an identity
+	// change actually discards them. A normal fetch must not reset host caches.
+	if login == "" && errors.Is(markerErr, os.ErrNotExist) && errors.Is(pendingErr, os.ErrNotExist) {
+		return nil
+	}
 	var generation [16]byte
 	if _, err := rand.Read(generation[:]); err != nil {
 		return err
 	}
 	identity := mirrorIdentity{Login: login, Generation: hex.EncodeToString(generation[:])}
-	if previous, err := os.ReadFile(filepath.Join(path, box.GitIdentityMarker)); err == nil {
+	if markerErr == nil {
 		var old mirrorIdentity
 		if json.Unmarshal(previous, &old) == nil && strings.EqualFold(old.Login, login) && old.Generation != "" {
 			identity.Generation = old.Generation
