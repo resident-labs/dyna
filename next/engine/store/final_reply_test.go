@@ -139,6 +139,7 @@ func TestEndTurnReplyWaitsWhileTheSessionStillWaits(t *testing.T) {
 		{"child briefed", "INSERT INTO sessions(id,room,name,profile,state,goal,created_at,parent) VALUES('grand','room','grand','p','open','',0,'child'); INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state) VALUES('session','grand',(SELECT seq FROM events WHERE id='start'),'engine','none','','','','',1,'pending')", 0, contract.TurnCompleted, false},
 		{"own input unread", "INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state) VALUES('session','child',(SELECT seq FROM events WHERE id='start'),'engine','none','','','','',1,'pending')", 0, contract.TurnCompleted, true},
 		{"failed with a job running", "", 1, contract.TurnFailed, true},
+		{"stopped with a job running", "", 1, contract.TurnStopped, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
