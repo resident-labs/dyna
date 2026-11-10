@@ -10,7 +10,7 @@ import (
 
 // CreateGrant inserts a grant in its own transaction.
 func (s *Store) CreateGrant(ctx context.Context, g contract.Grant) error {
-	return s.Write(ctx, func(tx *sql.Tx) error { return s.InsertGrant(tx, g) })
+	return s.CreateGrants(ctx, []contract.Grant{g})
 }
 
 func (s *Store) InsertGrant(tx *sql.Tx, g contract.Grant) error {
@@ -25,7 +25,7 @@ func (s *Store) InsertGrant(tx *sql.Tx, g contract.Grant) error {
 }
 
 func (s *Store) ListActiveGrants(ctx context.Context, room contract.RoomID, who contract.Principal, now time.Time) ([]contract.Grant, error) {
-	rows, err := s.read.QueryContext(ctx, `SELECT id,room,to_kind,to_id,hosts,expires_at,by_kind,by_id,created_at,reason FROM grants WHERE room=? AND to_kind=? AND to_id=? AND kind='hostexec' AND revoked_at IS NULL AND expired_at IS NULL AND EXISTS (SELECT 1 FROM sessions WHERE id=grants.to_id AND state!='closing' AND closed_at IS NULL) ORDER BY id`, room, who.Kind, who.Session)
+	rows, err := s.read.QueryContext(ctx, `SELECT id,room,to_kind,to_id,hosts,expires_at,by_kind,by_id,created_at,reason FROM grants WHERE room=? AND to_kind=? AND to_id=? AND kind='hostexec' AND revoked_at IS NULL AND expired_at IS NULL AND (expires_at IS NULL OR expires_at>?) AND EXISTS (SELECT 1 FROM sessions WHERE id=grants.to_id AND state!='closing' AND closed_at IS NULL) ORDER BY id`, room, who.Kind, who.Session, now.UnixMilli())
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +33,7 @@ func (s *Store) ListActiveGrants(ctx context.Context, room contract.RoomID, who 
 }
 
 func (s *Store) ListHostexecGrants(ctx context.Context, now time.Time) ([]contract.Grant, error) {
-	rows, err := s.read.QueryContext(ctx, `SELECT id,room,to_kind,to_id,hosts,expires_at,by_kind,by_id,created_at,reason FROM grants WHERE kind='hostexec' AND revoked_at IS NULL AND expired_at IS NULL AND EXISTS (SELECT 1 FROM sessions WHERE id=grants.to_id AND state!='closing' AND closed_at IS NULL) ORDER BY created_at DESC,id DESC`)
+	rows, err := s.read.QueryContext(ctx, `SELECT id,room,to_kind,to_id,hosts,expires_at,by_kind,by_id,created_at,reason FROM grants WHERE kind='hostexec' AND revoked_at IS NULL AND expired_at IS NULL AND (expires_at IS NULL OR expires_at>?) AND EXISTS (SELECT 1 FROM sessions WHERE id=grants.to_id AND state!='closing' AND closed_at IS NULL) ORDER BY created_at DESC,id DESC`, now.UnixMilli())
 	if err != nil {
 		return nil, err
 	}
@@ -62,4 +62,16 @@ func scanGrants(rows *sql.Rows) ([]contract.Grant, error) {
 		grants = append(grants, g)
 	}
 	return grants, rows.Err()
+}
+
+// CreateGrants inserts a path of grants atomically.
+func (s *Store) CreateGrants(ctx context.Context, grants []contract.Grant) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		for _, grant := range grants {
+			if err := s.InsertGrant(tx, grant); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

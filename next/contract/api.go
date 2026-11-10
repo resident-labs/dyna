@@ -208,14 +208,13 @@ type RoomSetRequest struct {
 type RootApproval string
 
 const (
-	RootApprovesHostexec RootApproval = "hostexec" // hostexec.grant
-	RootApprovesAddons   RootApproval = "addons"   // addon.global
-	RootApprovesHosts    RootApproval = "hosts"    // room.hosts
-	RootApprovesPools    RootApproval = "pools"    // pool.add
+	RootApprovesAddons RootApproval = "addons" // addon.global
+	RootApprovesHosts  RootApproval = "hosts"  // room.hosts
+	RootApprovesPools  RootApproval = "pools"  // pool.add
 )
 
 // AllRootApprovals lists every kind, in the order the web and the CLI show them.
-var AllRootApprovals = []RootApproval{RootApprovesHostexec, RootApprovesAddons, RootApprovesHosts, RootApprovesPools}
+var AllRootApprovals = []RootApproval{RootApprovesAddons, RootApprovesHosts, RootApprovesPools}
 
 type RoomSetResponse struct{}
 

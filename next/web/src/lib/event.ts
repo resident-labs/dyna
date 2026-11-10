@@ -65,7 +65,7 @@ const bodies: Record<string, Check> = {
   "conversation.read": object({ room: string, conversation, seq: number }),
   "turn.activity": object({ session: string, turn: string, label: string }),
   "transcript.changed": object({ session: string, turn: string }),
-  "op.requested": object({ id: string, kind: string, by: principal, class: oneOf("auto", "owner"), card, expires: optional(string) }),
+  "op.requested": object({ decider: optional(string), id: string, kind: string, by: principal, class: oneOf("auto", "owner"), card, expires: optional(string) }),
   "op.decided": object({ id: string, state, decision: object({ by: principal, approved: boolean, reason: optional(string), at: string }) }),
   "op.ran": object({ id: string, state, result: object({ exitCode: number, cause, error: optional(string), output: optional(string), outputFile: optional(string) }) }),
   "question.asked": object({ id: string, session: string, text: string, meanwhile: optional(string), blocked: optional(boolean) }),

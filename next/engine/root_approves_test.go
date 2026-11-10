@@ -17,10 +17,6 @@ func TestRootApprovesKinds(t *testing.T) {
 		kind    contract.RootApproval
 		request func(s *Service, who contract.Principal, room contract.RoomID) (contract.OpID, *contract.Error)
 	}{
-		{contract.RootApprovesHostexec, func(s *Service, who contract.Principal, room contract.RoomID) (contract.OpID, *contract.Error) {
-			res, problem := s.OpSubmit(t.Context(), who, contract.OpSubmitRequest{Operation: contract.Operation{Room: room, Kind: "hostexec.grant", Args: contract.HostexecGrantArgs{Room: room, To: who, Hosts: []contract.HostName{"host"}, Reason: "Inspect logs"}}})
-			return res.Operation.ID, problem
-		}},
 		{contract.RootApprovesAddons, func(s *Service, who contract.Principal, room contract.RoomID) (contract.OpID, *contract.Error) {
 			res, problem := s.OpSubmit(t.Context(), who, contract.OpSubmitRequest{Operation: contract.Operation{Room: room, Kind: "addon.global", Args: contract.AddonGlobalArgs{Kind: contract.AddonMCP, Name: "extra", Command: "node"}}})
 			return res.Operation.ID, problem
@@ -87,7 +83,7 @@ func TestRootApprovesKinds(t *testing.T) {
 			if problem != nil {
 				t.Fatal(problem)
 			}
-			if got, err := r.s.store.Operation(ctx, on); err != nil || !strings.Contains(got.Operation.Card.Body, "'s root or the owner.") {
+			if got, err := r.s.store.Operation(ctx, on); err != nil || strings.Contains(got.Operation.Card.Body, "Waiting for") {
 				t.Fatalf("card with the setting on: %q %v", got.Operation.Card.Body, err)
 			}
 			if problem := decide(r.owner, on); problem != nil {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { needsOwner } from "../room.svelte.ts";
   import { onDestroy, onMount, tick, untrack, type Snippet } from "svelte";
   import { call } from "../client.ts";
   import { transcriptReader } from "../transcript-reader.ts";
@@ -44,7 +45,7 @@
   export const empty = () => view.ready && !view.ordered.length && !loading && !turns.length;
   let asking = $derived(step ? [] : store.pendingQuestions(session));
   // What the session waits on the owner to approve: the header says Needs you, so the thread shows what for.
-  let requesting = $derived(step ? [] : [...store.requests.values()].filter(request => request.state === "pending" && request.class === "owner" && request.by.session === session));
+  let requesting = $derived(step ? [] : [...store.requests.values()].filter(request => needsOwner(request) && request.by.session === session));
   // A request decided while the thread is open stays as its one-line record, as in the feed; older ones are in the feed alone.
   const waited = new Set<string>();
   let decided = $derived.by(() => { for (const request of requesting) waited.add(request.id); return [...store.requests.values()].filter(request => request.state !== "pending" && waited.has(request.id)); });
