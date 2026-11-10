@@ -9,6 +9,14 @@ import (
 )
 
 func TestEndTurnFinalReply(t *testing.T) {
+	for _, jobs := range []int{0, 1} {
+		endTurnFinalReply(t, jobs)
+	}
+}
+
+// A turn that posted its answer delivers its final text beside it without a wake. While the session still waits on a job,
+// that text is no result and the post already answered, so nothing more is delivered.
+func endTurnFinalReply(t *testing.T, jobs int) {
 	ctx := context.Background()
 	now := time.Unix(1000, 0)
 	s, err := Open(t.TempDir())
@@ -42,7 +50,7 @@ func TestEndTurnFinalReply(t *testing.T) {
 	if _, err := s.Post(ctx, post, nil); err != nil {
 		t.Fatal(err)
 	}
-	output := contract.TurnOutputRequest{Turn: "turn", Outcome: contract.TurnCompleted, Final: "result"}
+	output := contract.TurnOutputRequest{Turn: "turn", Outcome: contract.TurnCompleted, Final: "result", ShellJobs: jobs}
 	end := contract.Event{ID: "end", Time: now, Room: "room", From: child, Body: contract.TurnEnded{Session: "child", Turn: "turn", Outcome: contract.TurnCompleted, Final: "result"}}
 	if err := s.EndTurn(ctx, "child", output, end); err != nil {
 		t.Fatal(err)
@@ -61,9 +69,12 @@ func TestEndTurnFinalReply(t *testing.T) {
 	if len(body.Replies) != 1 || body.Replies[0].Posted != "reply" {
 		t.Fatalf("replies %+v", body.Replies)
 	}
-	var wake bool
-	if err := s.Read().QueryRowContext(ctx, "SELECT wake FROM deliveries WHERE seq=? AND to_id='parent'", events[0].Seq).Scan(&wake); err != nil || wake {
-		t.Fatalf("wake %v: %v", wake, err)
+	var delivered, woke int
+	if err := s.Read().QueryRowContext(ctx, "SELECT count(*),COALESCE(sum(wake),0) FROM deliveries WHERE seq=? AND to_id='parent'", events[0].Seq).Scan(&delivered, &woke); err != nil || woke != 0 || (delivered == 1) != (jobs == 0) {
+		t.Fatalf("with %d jobs, %d deliveries of the final text and %d wakes: %v", jobs, delivered, woke, err)
+	}
+	if owed, err := s.RepliesOwed(ctx, "child"); err != nil || len(owed) != 0 {
+		t.Fatalf("owed %v after a post answered: %v", owed, err)
 	}
 }
 
