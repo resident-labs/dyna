@@ -149,7 +149,7 @@ func fixtureTurns() []contract.TranscriptTurn {
 				}
 				turn.Items = append(turn.Items, contract.TranscriptItem{ID: fmt.Sprintf("%s-script-%d", id, j), Turn: id, Kind: contract.TranscriptTool, At: at, Ended: &done, Tool: "codemode", Script: script, Calls: calls, Output: "Test Files  1 passed\nTests  3 passed\nDuration  0.4 s"})
 			}
-			turn.Items = append(turn.Items, contract.TranscriptItem{ID: "fixture-own-post", Turn: id, Kind: contract.TranscriptPost, At: end, From: &contract.Principal{Kind: contract.PrincipalSession, Session: fixtureSession}, Text: "The retry hint is ready for review.", Home: &contract.Conversation{Kind: contract.ConversationFeed}, Room: "fixture", Seq: 1})
+			turn.Items = append(turn.Items, contract.TranscriptItem{ID: "fixture-own-post", Turn: id, Kind: contract.TranscriptPost, At: end, From: &contract.Principal{Kind: contract.PrincipalSession, Session: fixtureSession}, Text: "The retry hint is ready for review at `a41c9e2`. It now says that trying again is safe, and it names the file that failed to sync.\n\nChecked: the focused tests pass and the banner reads correctly at 390 px. Not checked: the offline path, which needs a device.", Home: &contract.Conversation{Kind: contract.ConversationFeed}, Room: "fixture", Seq: 1})
 		}
 		if i == 10 {
 			turn.Outcome, turn.Cause = contract.TurnFailed, contract.CauseModelFailed
