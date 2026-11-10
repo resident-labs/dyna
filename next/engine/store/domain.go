@@ -444,7 +444,8 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 		}
 		// A turn that completes while its session still has a job running or a child at work has not given its result yet.
 		// Its text reaches the sessions it answers without waking them, and the session keeps owing them a reply: the first
-		// turn that ends with nothing left to wait for, or that fails, answers them too, whatever started it.
+		// turn that ends any other way answers them too, whatever started it. A stopped turn pays as well, as it answers its own
+		// inputs, so a stop leaves nothing for the recovery pass to wake.
 		var waiting bool
 		var kept []byte
 		if err := tx.QueryRowContext(ctx, `SELECT ?2 AND (?3 OR EXISTS(SELECT 1 FROM sessions c WHERE c.parent=?1 AND c.closed_at IS NULL AND (
@@ -468,7 +469,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 						later = append(later, reply.Reply)
 					}
 				}
-			case output.Outcome != contract.TurnStopped:
+			default:
 				for _, to := range later {
 					if !slices.ContainsFunc(body.Replies, answers(to)) {
 						// A turn that ended on a post has no final text, so its last post is what answers.
