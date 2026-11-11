@@ -48,8 +48,13 @@ func discordOutboxRestart(t *testing.T, jobs int) {
 	if _, err := s.writer.Exec("UPDATE deliveries SET state='taken',turn='turn' WHERE to_id='root'"); err != nil {
 		t.Fatal(err)
 	}
-	end := contract.Event{ID: "end", Time: now, Room: "room", From: contract.Principal{Kind: contract.PrincipalSession, Session: "root"}, Body: contract.TurnEnded{Session: "root", Turn: "turn", Outcome: contract.TurnCompleted, Final: final}}
-	if err := s.EndTurn(ctx, "root", contract.TurnOutputRequest{Turn: "turn", Outcome: contract.TurnCompleted, Final: final, ShellJobs: jobs}, end); err != nil {
+	// A waiting turn that says something has answered Discord; only a silent one still owes its channels.
+	first := final
+	if jobs > 0 {
+		first = ""
+	}
+	end := contract.Event{ID: "end", Time: now, Room: "room", From: contract.Principal{Kind: contract.PrincipalSession, Session: "root"}, Body: contract.TurnEnded{Session: "root", Turn: "turn", Outcome: contract.TurnCompleted, Final: first}}
+	if err := s.EndTurn(ctx, "root", contract.TurnOutputRequest{Turn: "turn", Outcome: contract.TurnCompleted, Final: first, ShellJobs: jobs}, end); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()
