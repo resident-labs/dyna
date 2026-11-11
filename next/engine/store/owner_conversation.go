@@ -9,15 +9,18 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+// CROSS JOIN pins the join order: find open turns before probing their deliveries.
+const ownerConversationQuery = `SELECT d.reply_home FROM turns t CROSS JOIN deliveries d ON d.turn=t.id
+	WHERE d.to_kind=? AND d.to_id=? AND t.session=? AND t.ended_at IS NULL AND d.reply_kind=? AND d.reply_target_kind=?
+	ORDER BY d.seq DESC LIMIT 1`
+
 // OwnerConversation is where a session's post to the owner goes when it names no home: the home of the final reply its
 // open turn owes the owner, else wherever the owner last wrote to it, else the feed. It reads deliveries and stores nothing.
 func (s *Store) OwnerConversation(ctx context.Context, session contract.SessionID) (contract.Conversation, error) {
 	feed := contract.Conversation{Kind: contract.ConversationFeed}
 	dm := contract.Conversation{Kind: contract.ConversationDM, Session: session}
 	var home string
-	err := s.Read().QueryRowContext(ctx, `SELECT d.reply_home FROM deliveries d JOIN turns t ON t.id=d.turn
-		WHERE d.to_kind=? AND d.to_id=? AND t.session=? AND t.ended_at IS NULL AND d.reply_kind=? AND d.reply_target_kind=?
-		ORDER BY d.seq DESC LIMIT 1`, contract.PrincipalSession, session, session, contract.ReplyFinal, contract.PrincipalOwner).Scan(&home)
+	err := s.Read().QueryRowContext(ctx, ownerConversationQuery, contract.PrincipalSession, session, session, contract.ReplyFinal, contract.PrincipalOwner).Scan(&home)
 	if err == nil {
 		kind, id, _ := strings.Cut(home, ":")
 		switch {
