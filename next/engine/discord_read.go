@@ -59,7 +59,7 @@ func (s *Service) DiscordRead(ctx context.Context, caller contract.Principal, re
 			}
 		}
 		if len(matches) != 1 {
-			return empty, invalid("channel name is unknown or ambiguous; use an ID. Available channels: " + strings.Join(candidates, ", "))
+			return empty, invalid("channel name is unknown or ambiguous; use an ID. Available channels: " + contract.Outside("discord directory", "", strings.Join(candidates, ", ")))
 		}
 		channel = matches[0]
 	}
