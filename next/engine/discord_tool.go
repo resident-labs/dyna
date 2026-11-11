@@ -142,7 +142,6 @@ func (s *Service) DiscordSend(ctx context.Context, caller contract.Principal, re
 			return contract.DiscordSendResponse{}, failure(err)
 		}
 		var files []discord.File
-		var total int64
 		for _, attachment := range req.Attachments {
 			if !validHash(attachment.SHA256) {
 				return contract.DiscordSendResponse{}, invalid("invalid attachment")
@@ -151,9 +150,8 @@ func (s *Service) DiscordSend(ctx context.Context, caller contract.Principal, re
 			if problem != nil {
 				return contract.DiscordSendResponse{}, problem
 			}
-			total += info.Size()
-			if total > 25<<20 {
-				return contract.DiscordSendResponse{}, invalid("attachments exceed 25 MB")
+			if info.Size() > 10<<20 {
+				return contract.DiscordSendResponse{}, invalid("Discord allows at most 10 files and 10 MB each without boosts; this file is larger")
 			}
 			data, err := os.ReadFile(s.layout.File(session.Room, attachment.SHA256))
 			if err != nil {

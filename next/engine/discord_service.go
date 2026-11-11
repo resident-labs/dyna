@@ -164,8 +164,22 @@ func (s *Service) discordInput(ctx context.Context, client *discord.Client, m di
 	if m.Guild != "" {
 		b.History = client.History(ctx, m.Channel, m.ID, bot.ID, bot.Owner)
 	}
+	for _, embed := range m.Embeds {
+		if embed.Title != "" {
+			b.Text += "\n" + embed.Title
+		}
+		if embed.Description != "" {
+			b.Text += "\n" + embed.Description
+		}
+	}
+	for _, sticker := range m.Stickers {
+		b.Text += "\n[sticker] " + sticker.Name
+	}
+	if m.Poll != nil {
+		b.Text += "\n[poll] " + m.Poll.Question.Text
+	}
 	for _, a := range m.Attachments {
-		b.Attachments = append(b.Attachments, a.URL)
+		b.Attachments = append(b.Attachments, contract.DiscordAttachment{Name: a.Name, Size: a.Size, URL: a.URL})
 	}
 	from := contract.Principal{Kind: contract.PrincipalEngine}
 	if b.Owner {

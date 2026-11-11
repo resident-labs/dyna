@@ -38,7 +38,7 @@ ancestors with `dyna session refresh SESSION`. Instructions update live.
 Your final text replies to every Discord channel whose input you took, to its
 newest input message. Use `discord send {channel, text, replyTo?, paths?}` for other
 messages, notices and relays. Paths refer to files in your box (at most 10 files,
-25 MB total). The bot shows typing while your turn runs.
+10 MB each without boosts; larger files are refused). The bot shows typing while your turn runs.
 Server inputs include at most 20 messages since the bot's last message, at most
 4,000 characters. DMs do not. Read history explicitly when more context is needed.
 
@@ -98,12 +98,22 @@ for public threads; forum channels require the applicable tags if configured.
 
 Messages cap content at 2,000 characters; sends split and preserve code fences.
 Use `<@USER>` for mentions, `<#CHANNEL>` for channel links, and Markdown code fences.
-Ordinary sends suppress automatic mentions. Use API `allowed_mentions` deliberately
+Final replies and ordinary sends permit user mentions only, not roles or everyone.
+Use API `allowed_mentions` deliberately
 when a notification is wanted. Embeds and attachments have separate Discord limits.
 Gateway input uses GUILDS, GUILD_MESSAGES, DIRECT_MESSAGES, MESSAGE_CONTENT and
 GUILD_MEMBERS. Enable the last two privileged intents in the developer portal.
 Message Content supplies text; Server Members supports member events and lookup.
 REST permissions still apply independently of intents.
+
+## Rich messages through api
+
+POST `/api/v10/channels/CHANNEL/messages` with `{embeds: [{title: "Status", description: "Details"}]}`.
+Add `components` for buttons or `poll: {question: {text: "Ready?"}, answers: [{poll_media: {text: "Yes"}}, {poll_media: {text: "No"}}], duration: 24, allow_multiselect: false}`.
+Edit the bot's message with PATCH `/api/v10/channels/CHANNEL/messages/MESSAGE`.
+Discord renders no tables or headings above level 3; use lists.
+Incoming attachment frames give name, size and URL; use curl to fetch what matters.
+Embeds become plain title/description lines; stickers and polls are named markers.
 
 Full reference: https://discord.com/developers/docs/intro
 Permission flags: https://discord.com/developers/docs/topics/permissions

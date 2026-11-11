@@ -69,7 +69,7 @@ func Split(text string) []string {
 func (c *Client) Send(ctx context.Context, channel, text, reply string) ([]string, int, error) {
 	var ids []string
 	for _, part := range Split(text) {
-		body := map[string]any{"content": part, "allowed_mentions": map[string]any{"parse": []string{}}}
+		body := map[string]any{"content": part, "allowed_mentions": map[string]any{"parse": []string{"users"}}}
 		if reply != "" {
 			body["message_reference"] = map[string]any{"message_id": reply, "fail_if_not_exists": false}
 		}
@@ -100,7 +100,7 @@ type File struct {
 func (c *Client) SendFiles(ctx context.Context, channel, text, reply string, files []File) (string, error) {
 	var data bytes.Buffer
 	writer := multipart.NewWriter(&data)
-	payload := map[string]any{"content": text, "allowed_mentions": map[string]any{"parse": []string{}}}
+	payload := map[string]any{"content": text, "allowed_mentions": map[string]any{"parse": []string{"users"}}}
 	if reply != "" {
 		payload["message_reference"] = map[string]any{"message_id": reply, "fail_if_not_exists": false}
 	}
