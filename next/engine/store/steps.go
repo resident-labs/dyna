@@ -6,11 +6,12 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 107
+const schemaVersion = 108
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
+	107: {`CREATE INDEX IF NOT EXISTS deliveries_by_turn ON deliveries(to_kind,to_id,turn,seq)`},
 	106: {`CREATE TABLE IF NOT EXISTS discord_messages (message TEXT PRIMARY KEY, room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE)`, `CREATE TABLE IF NOT EXISTS discord_routes (guild TEXT NOT NULL, channel TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, session TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', PRIMARY KEY(guild,channel))`, `CREATE TABLE IF NOT EXISTS discord_outbox (id INTEGER PRIMARY KEY, room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, session TEXT NOT NULL, channel TEXT NOT NULL, message TEXT NOT NULL, text TEXT NOT NULL, group_key TEXT NOT NULL DEFAULT '', attempts INTEGER NOT NULL DEFAULT 0, due_at INTEGER NOT NULL DEFAULT 0)`, `CREATE INDEX IF NOT EXISTS discord_outbox_group ON discord_outbox(group_key,id)`},
 	// The replies a session still owes after a turn that ended while it waited for a job or a child (spec 7.1).
 	105: {`CREATE TABLE IF NOT EXISTS replies_owed (session TEXT PRIMARY KEY REFERENCES sessions(id), replies TEXT NOT NULL)`},

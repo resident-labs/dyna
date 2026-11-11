@@ -63,7 +63,17 @@ func (h holding) RoundTrip(req *http.Request) (*http.Response, error) {
 	var kept []byte
 	if req.Body != nil {
 		var err error
-		kept, err = io.ReadAll(req.Body)
+		// ContentLength is only an allocation hint, never a read limit. Leave
+		// EOF-read slack so ReadFrom does not double a full buffer just for EOF.
+		const maxPreallocation = 16 << 20
+		if req.ContentLength > 0 && req.ContentLength <= maxPreallocation-512 {
+			var buffer bytes.Buffer
+			buffer.Grow(int(req.ContentLength) + 512)
+			_, err = buffer.ReadFrom(req.Body)
+			kept = buffer.Bytes()
+		} else {
+			kept, err = io.ReadAll(req.Body)
+		}
 		req.Body.Close()
 		if err != nil {
 			return nil, err
