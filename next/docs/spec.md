@@ -140,6 +140,8 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `meta` |
 | `rooms` |
 | `room_github_accounts` |
+| `room_discord` |
+| `discord_outbox` |
 | `repos` |
 | `repo_heads` |
 | `room_repos` |
@@ -1141,3 +1143,13 @@ M0 to M3 are done, and v2 replaced v1 at the cutover. Their plans, gates and evi
 ## 12. Team and ownership
 
 The dyna room's standing rules set how work is built, reviewed, merged and deployed. Spec changes land in reviewed PRs; settled decisions also need the owner.
+
+## 13. Discord for a room
+
+An owner connects one bot in exactly one server with `dyna room discord ROOM --session NAME`, passing the token on stdin. The default answering session is root; a closed answering session falls back to root. No flags shows public metadata; `--clear` disconnects. `room_discord` holds public identity and an opaque reference to private engine credential files, shared with the GitHub credential-file implementation. A bot belongs to only one room. Tokens never reach boxes, events or tool results. The `dyna_room` context names the bot, server and answering session.
+
+The engine maintains a resumable gateway connection per connected room, with heartbeats and reconnect backoff. Human mentions and replies to the bot in its server, and DMs from server members, become `discord.message` inputs with a wake and a final reply owed. Discord users are never mapped to the owner. Text is wrapped as outside text. Server inputs include up to 20 recent messages since the bot's last message, at most 4,000 characters, oldest first; one best-effort history read supplies them. DMs include no history. The room feed shows the input with its Discord author and channel.
+
+Each channel is a distinct reply destination. A turn's final text answers every channel it took input from, replying to the newest input in each channel. Existing job and child waiting rules preserve debts per destination. EndTurn writes durable outbox rows in the same transaction; the service drains them after outages and engine restarts. Permanent 403 and 404 failures wake the answering session with a notice. Messages split under Discord's 2,000-character limit and close and reopen code fences. Active turns refresh typing every eight seconds.
+
+The `discord` tool is declared in connected rooms and is callable only by the answering session and its ancestors. `send` posts text and box files; `api` makes arbitrary REST calls under `/api/v10`, adds the token, sends an optional audit-log reason, retries once after a 429 delay, and caps responses at 20 KB. External paths and bot-account writes are refused. The `dyna-discord` skill provides administration recipes and recommends a cheap front session without a repository or host access for public servers. There are no per-user sessions, owner mapping, slash-command input, voice, reactions, buttons or web settings.

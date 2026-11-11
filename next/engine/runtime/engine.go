@@ -208,6 +208,7 @@ func Run(ctx context.Context, cfg Config) error {
 	service.SetInstructionsPublisher(boxes.PublishInstructions)
 	boxes.Addons = service.Addons()
 	go boxes.watchInstructions(boxCtx)
+	service.StartDiscord(ctx, &githubaccount.Files{Dir: filepath.Join(cfg.Data, "discord-accounts")}, "https://discord.com", "wss://gateway.discord.gg")
 	credentials := &githubaccount.Resolver{Store: st, Tokens: &githubaccount.Files{Dir: filepath.Join(cfg.Data, "github-accounts")}, DefaultToken: token}
 	mirror := &enginegit.Mirror{Layout: layout, Token: token, ResolveToken: credentials.Repo, Runner: enginegit.GitRunner{}, VerifyAccount: func(ctx context.Context, repo contract.RepoName, token, login string) error {
 		room, err := st.RepoRoom(ctx, repo)

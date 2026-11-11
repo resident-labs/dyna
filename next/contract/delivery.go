@@ -15,6 +15,7 @@ type ConversationKind string // "feed" | "dm"
 
 type Conversation struct {
 	Kind    ConversationKind `json:"kind"`
+	Channel string           `json:"channel,omitempty"` // Discord only
 	Session SessionID        `json:"session,omitempty"` // dm only
 }
 

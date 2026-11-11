@@ -64,6 +64,10 @@ func (s *Store) ShellJobEnded(ctx context.Context, session contract.SessionID, j
 				if err == nil {
 					kind, id, _ := strings.Cut(home, ":")
 					reply.Home = contract.Conversation{Kind: contract.ConversationKind(kind), Session: contract.SessionID(id)}
+					if kind == "discord" {
+						reply.Home.Session = ""
+						reply.Home.Channel = id
+					}
 				}
 			}
 		}

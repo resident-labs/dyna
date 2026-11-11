@@ -319,6 +319,17 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		// Put the CI line first so even a long list of settings leaves the skill discoverable.
 		lines = append([]string{prefix + names + suffix}, lines...)
 	}
+	connection, err := s.store.DiscordConnection(ctx, session.Room)
+	if err != nil {
+		return contract.ContextSnapshotResponse{}, failure(err)
+	}
+	if connection.Guild != "" {
+		answering, err := s.store.Session(ctx, connection.Session)
+		if err != nil {
+			return contract.ContextSnapshotResponse{}, failure(err)
+		}
+		lines = append(lines, fmt.Sprintf("Discord: bot %s in server %s, answered by %s", connection.BotName, connection.GuildName, answering.Name))
+	}
 	add(contract.ContextRoom, lines, roomChars, 0)
 	// What the room's workflow settings change from the defaults, for every session; limits and defaults are named by the refusal that
 	// meets them.

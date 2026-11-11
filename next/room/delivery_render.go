@@ -11,6 +11,16 @@ import (
 // RenderDelivery renders the event bodies that may be delivered to a session.
 func RenderDelivery(body contract.EventBody) (string, error) {
 	switch b := body.(type) {
+	case contract.DiscordMessage:
+		words := b.Text
+		if b.History != "" {
+			words = b.History + "\n\n" + b.Author + ": " + b.Text
+		}
+		text := contract.Outside("discord #"+b.ChannelName, b.Author, words)
+		if len(b.Attachments) > 0 {
+			text += "\nAttachments: " + strings.Join(b.Attachments, ", ")
+		}
+		return text, nil
 	case contract.SessionProfileChanged:
 		return fmt.Sprintf("Your model is now %s.", b.Profile), nil
 	case contract.OpRequested:

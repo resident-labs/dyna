@@ -3,6 +3,7 @@
 package dynamcp
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"sort"
@@ -48,6 +49,9 @@ type Tool struct {
 func typeSchema(t reflect.Type) schema {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
+	}
+	if t == reflect.TypeFor[json.RawMessage]() {
+		return schema{Type: "object"}
 	}
 	if t == reflect.TypeFor[time.Time]() {
 		return schema{Type: "string"}

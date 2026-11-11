@@ -8,7 +8,7 @@ import type { Request } from "./room.svelte.ts";
 import { endCause, failed } from "./jobs.ts";
 
 export type Row =
-  | { kind: "post"; key: string; from: Principal; at: string; text: string; data?: JSONData; dataAttachment?: number | null; attachments: Attachment[]; first: boolean; to: Principal[]; source?: PostSource | null; target?: string; pending?: Pending }
+  | { kind: "post"; discordAuthor?: string; key: string; from: Principal; at: string; text: string; data?: JSONData; dataAttachment?: number | null; attachments: Attachment[]; first: boolean; to: Principal[]; source?: PostSource | null; target?: string; pending?: Pending }
   | { kind: "restarted"; key: string; session: string; at: string }
   // A plain line for what the owner did to a session or the room; describe gives its words.
   | { kind: "notice"; key: string; event: Event; resumedAt?: string }
@@ -185,6 +185,15 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     if (event.type === "hook.due" || event.type === "tool.failed" || event.type === "hook.finished" && event.body.result !== "failed") continue;
     const firstAt = work[0]?.at ?? (deferred[0]?.kind === "notice" ? deferred[0].event.at : deferred[0]?.kind === "failed" || deferred[0]?.kind === "request" || deferred[0]?.kind === "restarted" || deferred[0]?.kind === "run" ? deferred[0].at : undefined);
     if (firstAt && new Date(firstAt).toDateString() !== new Date(event.at).toDateString()) flush();
+    if (event.type === "discord.message") {
+      if (home.kind === "feed") {
+        const b = event.body;
+        post(`p${event.seq}`, event.seq, event.from, event.at, [b.history, b.text, ...(b.attachments ?? [])].filter(Boolean).join("\n\n"), [], []);
+        const row = rows.at(-1);
+        if (row?.kind === "post") { row.discordAuthor = `Discord · ${b.author} · #${b.channelName}`; row.first = true; }
+      }
+      continue;
+    }
     if (event.type === "post.sent") {
       if (home.kind === "feed") post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, [], [], undefined, undefined, sourceLabel(event.body.target));
       continue;

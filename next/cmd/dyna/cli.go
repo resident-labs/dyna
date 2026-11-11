@@ -673,9 +673,11 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	root.AddCommand(poolCommand(getClient))
 	root.AddCommand(serviceCommand(getClient))
 	root.AddCommand(profileCommand(getClient))
+ root.AddCommand(discordCommand(getClient))
 
 	room := &cobra.Command{Use: "room"}
 	room.AddCommand(roomGitHubCommand(getClient))
+	room.AddCommand(roomDiscordCommand(getClient))
 	for _, paused := range []bool{true, false} {
 		name := "resume"
 		if paused {

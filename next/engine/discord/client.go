@@ -25,6 +25,12 @@ type Result struct {
 
 // API validates the REST boundary and never follows a redirect with credentials.
 func (c *Client) API(ctx context.Context, method, path string, body json.RawMessage, reason string) (Result, error) {
+	if len(body) > 0 && !json.Valid(body) {
+		return Result{}, errors.New("invalid JSON body")
+	}
+	return c.request(ctx, method, path, body, "application/json", reason)
+}
+func (c *Client) request(ctx context.Context, method, path string, body []byte, contentType, reason string) (Result, error) {
 	switch method {
 	case "GET", "POST", "PUT", "PATCH", "DELETE":
 	default:
@@ -37,9 +43,6 @@ func (c *Client) API(ctx context.Context, method, path string, body json.RawMess
 	if method != "GET" && (u.Path == "/api/v10/users/@me" || strings.HasPrefix(u.Path, "/api/v10/users/@me/")) {
 		return Result{}, errors.New("bot account writes are refused")
 	}
-	if len(body) > 0 && !json.Valid(body) {
-		return Result{}, errors.New("invalid JSON body")
-	}
 	client := *c.HTTP
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	for attempt := 0; attempt < 2; attempt++ {
@@ -48,7 +51,7 @@ func (c *Client) API(ctx context.Context, method, path string, body json.RawMess
 			return Result{}, errors.New("invalid Discord request")
 		}
 		req.Header.Set("Authorization", "Bot "+c.Token)
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentType)
 		if reason != "" {
 			req.Header.Set("X-Audit-Log-Reason", url.QueryEscape(reason))
 		}
