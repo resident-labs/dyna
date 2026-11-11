@@ -11,6 +11,12 @@ import (
 // RenderDelivery renders the event bodies that may be delivered to a session.
 func RenderDelivery(body contract.EventBody) (string, error) {
 	switch b := body.(type) {
+	case contract.DiscordFilesRetrieved:
+		var lines []string
+		for _, file := range b.Attachments {
+			lines = append(lines, fmt.Sprintf("%q (%d bytes): %s", file.Name, file.Size, file.Status))
+		}
+		return contract.Outside("discord attachments", b.Author+" ("+b.AuthorID+")", strings.Join(lines, "\n")), nil
 	case contract.DiscordMessage:
 		words := b.Text + b.RichContent
 		if b.History != "" {

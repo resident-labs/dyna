@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -23,54 +24,68 @@ func discordCDN(raw string) bool {
 
 // downloadDiscordFiles treats all senders, including the owner, as untrusted.
 func (s *Service) downloadDiscordFiles(ctx context.Context, room contract.RoomID, attachments []contract.DiscordAttachment) ([]contract.Attachment, []contract.DiscordAttachment) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	client := &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 5 || !discordCDN(req.URL.String()) {
 			return fmt.Errorf("refused attachment redirect")
 		}
 		return nil
 	}}
-	var files []contract.Attachment
+	downloaded := make([]*contract.Attachment, len(attachments))
+	var wg sync.WaitGroup
 	for i := range attachments {
-		a := &attachments[i]
-		a.Name = path.Base(strings.ReplaceAll(a.Name, "\\", "/"))
-		if a.Name == "." || a.Name == "/" || a.Name == "" {
-			a.Name = "attachment"
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			a := &attachments[i]
+			a.Name = path.Base(strings.ReplaceAll(a.Name, "\\", "/"))
+			if a.Name == "." || a.Name == "/" || a.Name == "" {
+				a.Name = "attachment"
+			}
+			a.Status = "not downloaded"
+			if i >= 10 {
+				a.Status = "skipped: at most 10 files"
+				return
+			}
+			if a.Size > 10<<20 {
+				a.Status = "skipped: larger than 10 MB"
+				return
+			}
+			if !discordCDN(a.URL) {
+				return
+			}
+			req, err := http.NewRequestWithContext(ctx, "GET", a.URL, nil)
+			if err != nil {
+				return
+			}
+			res, err := client.Do(req)
+			if err != nil {
+				return
+			}
+			data, readErr := io.ReadAll(io.LimitReader(res.Body, (10<<20)+1))
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK || readErr != nil {
+				return
+			}
+			if len(data) > 10<<20 {
+				a.Status = "skipped: larger than 10 MB"
+				return
+			}
+			hash, n, err := s.saveFile(ctx, room, bytes.NewReader(data), 10<<20)
+			if err != nil {
+				return
+			}
+			downloaded[i] = &contract.Attachment{SHA256: hash, Name: a.Name, Bytes: n, Media: http.DetectContentType(data)}
+			a.Status = "downloaded"
+		}(i)
+	}
+	wg.Wait()
+	var files []contract.Attachment
+	for _, file := range downloaded {
+		if file != nil {
+			files = append(files, *file)
 		}
-		a.Status = "not downloaded"
-		if i >= 10 {
-			a.Status = "skipped: at most 10 files"
-			continue
-		}
-		if a.Size > 10<<20 {
-			a.Status = "skipped: larger than 10 MB"
-			continue
-		}
-		if !discordCDN(a.URL) {
-			continue
-		}
-		req, err := http.NewRequestWithContext(ctx, "GET", a.URL, nil)
-		if err != nil {
-			continue
-		}
-		res, err := client.Do(req)
-		if err != nil {
-			continue
-		}
-		data, readErr := io.ReadAll(io.LimitReader(res.Body, (10<<20)+1))
-		res.Body.Close()
-		if res.StatusCode != http.StatusOK || readErr != nil {
-			continue
-		}
-		if len(data) > 10<<20 {
-			a.Status = "skipped: larger than 10 MB"
-			continue
-		}
-		hash, n, err := s.saveFile(ctx, room, bytes.NewReader(data), 10<<20)
-		if err != nil {
-			continue
-		}
-		files = append(files, contract.Attachment{SHA256: hash, Name: a.Name, Bytes: n, Media: http.DetectContentType(data)})
-		a.Status = "downloaded"
 	}
 	return files, attachments
 }
@@ -80,7 +95,10 @@ func (s *Service) discordReadFiles(ctx context.Context, caller contract.Principa
 	if err != nil {
 		return "", failure(err)
 	}
-	b := contract.DiscordMessage{Channel: m.Channel, Message: m.ID, Author: m.Author.Username, AuthorID: m.Author.ID, DisplayName: m.Author.GlobalName, Text: "Attachments retrieved by discord read."}
+	b := contract.DiscordFilesRetrieved{Channel: m.Channel, Message: m.ID, Author: m.Author.Username, AuthorID: m.Author.ID}
+	if channel, ok := s.discordDirectory.Channel(m.Channel); ok {
+		b.ChannelName = channel.Name
+	}
 	for _, a := range m.Attachments {
 		b.Attachments = append(b.Attachments, contract.DiscordAttachment{Name: a.Name, Size: a.Size, URL: a.URL})
 	}
@@ -98,7 +116,7 @@ func (s *Service) discordReadFiles(ctx context.Context, caller contract.Principa
 			return err
 		}
 		event.Seq = seq
-		return s.store.InsertDelivery(ctx, tx, seq, b, contract.Delivery{To: caller, Surface: contract.SurfaceDiscord, Wake: true, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}})
+		return s.store.InsertDelivery(ctx, tx, seq, b, contract.Delivery{To: caller, Surface: contract.SurfaceEngine, Wake: true, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}})
 	})
 	if err != nil {
 		return "", failure(err)
@@ -108,5 +126,5 @@ func (s *Service) discordReadFiles(ctx context.Context, caller contract.Principa
 	for _, a := range b.Attachments {
 		statuses = append(statuses, fmt.Sprintf("%s: %s", a.Name, a.Status))
 	}
-	return "Attachment delivery queued: " + described + "\n" + strings.Join(statuses, "\n"), nil
+	return "Files arrive as the next input of this turn: " + described + "\n" + strings.Join(statuses, "\n"), nil
 }

@@ -103,3 +103,17 @@ type DiscordReadResponse struct {
 	Channel string `json:"channel"`
 	Text    string `json:"text"`
 }
+
+// DiscordFilesRetrieved carries files requested by a running session, not a new Discord input.
+type DiscordFilesRetrieved struct {
+	Channel     string              `json:"channel"`
+	ChannelName string              `json:"channelName"`
+	Message     string              `json:"message"`
+	Author      string              `json:"author"`
+	AuthorID    string              `json:"authorID"`
+	Files       []Attachment        `json:"files,omitempty"`
+	Attachments []DiscordAttachment `json:"attachments,omitempty"`
+}
+
+func (DiscordFilesRetrieved) EventType() EventType { return "discord.files_retrieved" }
+func (DiscordFilesRetrieved) isEventBody()         {}

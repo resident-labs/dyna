@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"encoding/json"
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 type discordFileTransport struct{ base http.RoundTripper }
@@ -86,6 +88,36 @@ func TestDiscordCDNBoundary(t *testing.T) {
 	for _, u := range []string{"http://cdn.discordapp.com/x", "https://cdn.discordapp.com.evil/x", "https://evil/x", "https://cdn.discordapp.com:22/x", "https://user@cdn.discordapp.com/x"} {
 		if discordCDN(u) {
 			t.Fatal(u)
+		}
+	}
+}
+
+type blockedDiscordFiles struct{ started chan struct{} }
+
+func (b blockedDiscordFiles) RoundTrip(r *http.Request) (*http.Response, error) {
+	b.started <- struct{}{}
+	<-r.Context().Done()
+	return nil, r.Context().Err()
+}
+func TestDiscordDownloadsConcurrentAndCanceled(t *testing.T) {
+	s, r, _, ctx, _, _ := discordFixture(t)
+	old := http.DefaultTransport
+	started := make(chan struct{}, 10)
+	http.DefaultTransport = blockedDiscordFiles{started}
+	t.Cleanup(func() { http.DefaultTransport = old })
+	ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	attachments := make([]contract.DiscordAttachment, 10)
+	for i := range attachments {
+		attachments[i] = contract.DiscordAttachment{Name: "slow", URL: "https://cdn.discordapp.com/slow"}
+	}
+	files, listed := s.downloadDiscordFiles(ctx, r, attachments)
+	if len(started) != 10 || len(files) != 0 {
+		t.Fatalf("started %d files %d", len(started), len(files))
+	}
+	for _, a := range listed {
+		if a.Status != "not downloaded" {
+			t.Fatal(a)
 		}
 	}
 }

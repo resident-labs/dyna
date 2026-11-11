@@ -286,6 +286,7 @@ export type DiscordAttachment = { name: string; size: number; url: string; statu
 export type DiscordMessage = { channel: string; channelName: string; thread?: string; guildName: string; author: string; authorID: string; displayName: string; roles?: Array<string> | null; owner?: boolean; message: string; text: string; richContent?: string; history?: string; attachments?: Array<DiscordAttachment> | null; files?: Array<Attachment> | null; };
 export type DiscordReadRequest = { channel: string; message?: string; limit?: number; before?: string; after?: string; around?: string; };
 export type DiscordReadResponse = { channel: string; text: string; };
+export type DiscordFilesRetrieved = { channel: string; channelName: string; message: string; author: string; authorID: string; files?: Array<Attachment> | null; attachments?: Array<DiscordAttachment> | null; };
 export type Duration = string;
 export type StreamHello = { build: string; heartbeatMs?: number; roomUnion?: boolean; };
 export type EventType = string;
@@ -676,6 +677,7 @@ export type EventBody =
   | { type: "computer.changed"; body: ComputerChanged }
   | { type: "connect.connector"; body: ConnectConnector }
   | { type: "conversation.read"; body: ConversationRead }
+  | { type: "discord.files_retrieved"; body: DiscordFilesRetrieved }
   | { type: "discord.message"; body: DiscordMessage }
   | { type: "engine.restarted"; body: EngineRestarted }
   | { type: "git.main_ci_finished"; body: GitMainCIFinished }
