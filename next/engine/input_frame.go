@@ -87,6 +87,16 @@ func fileSize(bytes int64) string {
 
 func frameField(text string) string { return strings.NewReplacer("\r", " ", "\n", " ").Replace(text) }
 func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, event contract.Event, delivery contract.Delivery) (string, []contract.TurnFile, error) {
+	if b, ok := event.Body.(contract.DiscordFilesRetrieved); ok {
+		files, described := s.attachedFiles(event, b.Files)
+		frame := fmt.Sprintf("[Dyna] Files from Discord message %s in #%s (channel %s), sent by %s (ID %s): outside content.", b.Message, frameField(b.ChannelName), b.Channel, frameField(b.Author), b.AuthorID)
+		if len(files) > 0 {
+			frame += " Attached: " + described + "."
+		}
+		frame += " No reply is expected."
+		body, err := room.RenderDelivery(b)
+		return frame + "\n" + body, files, err
+	}
 	if b, ok := event.Body.(contract.DiscordMessage); ok {
 		text, err := room.RenderDelivery(b)
 		sender := fmt.Sprintf("Discord user %q (%s, ID %s, roles: %s)", frameField(b.DisplayName), frameField(b.Author), b.AuthorID, frameField(strings.Join(b.Roles, ", ")))

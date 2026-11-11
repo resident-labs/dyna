@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
@@ -63,17 +64,42 @@ func TestDiscordReadFilesNoReply(t *testing.T) {
 		"id": "700", "content": "image", "author": map[string]any{"id": "2", "username": "ari"},
 		"attachments": []any{map[string]any{"filename": "image.png", "size": 12, "url": "https://cdn.discordapp.com/image"}},
 	}})
+	_, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: r, Text: "Read the image", Mentions: []string{"root"}})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	channel, problem := testChannel(t, s, ctx, boxCaller(root))
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	select {
+	case msg := <-channel:
+		if _, ok := msg.Body.(contract.TurnStart); !ok {
+			t.Fatalf("expected turn start: %T", msg.Body)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no start")
+	}
 	got, p := s.DiscordRead(ctx, boxCaller(root), contract.DiscordReadRequest{Channel: "200", Message: "700"})
-	if p != nil || !strings.Contains(got.Text, "Attachment delivery queued:") {
+	if p != nil || !strings.Contains(got.Text, "Files arrive as the next input of this turn:") {
 		t.Fatalf("%+v %v", got, p)
 	}
-	events, err := s.store.Events(ctx, r, 0, 100, []contract.EventType{"discord.message"})
+	events, err := s.store.Events(ctx, r, 0, 100, []contract.EventType{"discord.files_retrieved"})
 	if err != nil || len(events) != 1 {
 		t.Fatalf("%+v %v", events, err)
 	}
-	b := events[0].Body.(contract.DiscordMessage)
+	b := events[0].Body.(contract.DiscordFilesRetrieved)
 	if b.Channel != "200" || len(b.Files) != 1 || b.Attachments[0].Status != "downloaded" {
 		t.Fatalf("%+v", b)
+	}
+	select {
+	case msg := <-channel:
+		steer, ok := msg.Body.(contract.TurnSteer)
+		if !ok || steer.Queue != contract.QueueSteer || len(steer.Input.Files) != 1 || !strings.Contains(steer.Input.Text, "shown to you") {
+			t.Fatalf("expected image steer: %+v", msg)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("files did not steer into running turn")
 	}
 	var reply contract.ReplyKind
 	var wake bool
