@@ -24,7 +24,11 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 			}
 		}
 		if len(b.Attachments) > 0 {
-			text += "\nAttachments: " + strings.Join(b.Attachments, ", ")
+			var attachments []string
+			for _, file := range b.Attachments {
+				attachments = append(attachments, fmt.Sprintf("%q (%d bytes): %s", file.Name, file.Size, file.URL))
+			}
+			text += "\nAttachments: " + strings.Join(attachments, ", ")
 		}
 		return text, nil
 	case contract.SessionProfileChanged:

@@ -59,21 +59,27 @@ type DiscordSendResponse struct {
 	Messages []string `json:"messages"`
 }
 
-// DiscordMessage is untrusted text addressed to the room's bot by a human.
+type DiscordAttachment struct {
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+	URL  string `json:"url"`
+}
+
+// DiscordMessage is text addressed to the room's bot by a human; only Owner is trusted.
 type DiscordMessage struct {
-	Channel     string   `json:"channel"`
-	ChannelName string   `json:"channelName"`
-	Thread      string   `json:"thread,omitempty"`
-	GuildName   string   `json:"guildName"`
-	Author      string   `json:"author"`
-	AuthorID    string   `json:"authorID"`
-	DisplayName string   `json:"displayName"`
-	Roles       []string `json:"roles,omitempty"`
-	Owner       bool     `json:"owner,omitempty"`
-	Message     string   `json:"message"`
-	Text        string   `json:"text"`
-	History     string   `json:"history,omitempty"`
-	Attachments []string `json:"attachments,omitempty"`
+	Channel     string              `json:"channel"`
+	ChannelName string              `json:"channelName"`
+	Thread      string              `json:"thread,omitempty"`
+	GuildName   string              `json:"guildName"`
+	Author      string              `json:"author"`
+	AuthorID    string              `json:"authorID"`
+	DisplayName string              `json:"displayName"`
+	Roles       []string            `json:"roles,omitempty"`
+	Owner       bool                `json:"owner,omitempty"`
+	Message     string              `json:"message"`
+	Text        string              `json:"text"`
+	History     string              `json:"history,omitempty"`
+	Attachments []DiscordAttachment `json:"attachments,omitempty"`
 }
 
 func (DiscordMessage) EventType() EventType { return "discord.message" }

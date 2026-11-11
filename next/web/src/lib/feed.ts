@@ -188,7 +188,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     if (event.type === "discord.message") {
       if (home.kind === "feed") {
         const b = event.body;
-        post(`p${event.seq}`, event.seq, event.from, event.at, [b.history, b.text, ...(b.attachments ?? [])].filter(Boolean).join("\n\n"), [], []);
+        post(`p${event.seq}`, event.seq, event.from, event.at, [b.history, b.text, ...(b.attachments ?? []).map(file => `${file.name} (${file.size} bytes): ${file.url}`)].filter(Boolean).join("\n\n"), [], []);
         const row = rows.at(-1);
         if (row?.kind === "post") { row.discordAuthor = `Discord · ${b.author} · #${b.channelName}`; row.first = true; }
       }

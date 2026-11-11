@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/credential"
 	"github.com/resident-labs/dyna/engine/discord"
@@ -313,7 +314,7 @@ func TestDiscordGatewayToFinalReply(t *testing.T) {
 	}
 	select {
 	case body := <-fake.Messages:
-		if !strings.Contains(string(body), "final answer") || !strings.Contains(string(body), `"message_id":"300"`) {
+		if !strings.Contains(string(body), "final answer") || !strings.Contains(string(body), `"message_id":"300"`) || !strings.Contains(string(body), `"parse":["users"]`) {
 			t.Fatalf("wrong reply %s", body)
 		}
 	case <-time.After(3 * time.Second):
@@ -361,5 +362,41 @@ func TestDiscordDMRequiresExactlyOneWholeServerRoute(t *testing.T) {
 	events, err := s.store.Events(ctx, r, 0, 100, []contract.EventType{"discord.message"})
 	if err != nil || len(events) != 0 {
 		t.Fatalf("ambiguous DM delivered %d %v", len(events), err)
+	}
+}
+
+func TestDiscordIncomingRichContent(t *testing.T) {
+	s, r, _, ctx, _, client := discordFixture(t)
+	var m discord.Message
+	if err := json.Unmarshal([]byte(`{"id":"700","channel_id":"200","guild_id":"100","content":"question","author":{"id":"2","username":"ari"},"attachments":[{"filename":"message.txt","size":1234,"url":"https://example.invalid/message.txt"}],"embeds":[{"title":"Report","description":"Build failed"}],"sticker_items":[{"name":"wave"}],"poll":{"question":{"text":"Ready?"}}}`), &m); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.discordInput(ctx, client, m); err != nil {
+		t.Fatal(err)
+	}
+	events, err := s.store.Events(ctx, r, 0, 100, []contract.EventType{"discord.message"})
+	if err != nil || len(events) != 1 {
+		t.Fatal(err)
+	}
+	text, err := room.RenderDelivery(events[0].Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Report", "Build failed", "[sticker] wave", "[poll] Ready?", "message.txt", "1234 bytes", "https://example.invalid/message.txt"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in %s", want, text)
+		}
+	}
+}
+func TestDiscordRefusesLargeFiles(t *testing.T) {
+	s, r, root, ctx, _, _ := discordFixture(t)
+	s.SetLayout(box.Layout{Data: t.TempDir()})
+	hash, size, err := s.saveFile(ctx, r, strings.NewReader(strings.Repeat("x", (10<<20)+1)), 25<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, problem := s.DiscordSend(ctx, boxCaller(root), contract.DiscordSendRequest{Channel: "200", Text: "file", Attachments: []contract.Attachment{{Name: "too-large.bin", SHA256: hash, Bytes: size}}})
+	if problem == nil || !strings.Contains(problem.Message, "10 MB each without boosts") {
+		t.Fatalf("large file not clearly refused: %v", problem)
 	}
 }

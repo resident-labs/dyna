@@ -51,7 +51,7 @@ func typeSchema(t reflect.Type) schema {
 		t = t.Elem()
 	}
 	if t == reflect.TypeFor[json.RawMessage]() {
-		return schema{Type: "object"}
+		return schema{} // arbitrary JSON, including array bodies such as role positions
 	}
 	if t == reflect.TypeFor[time.Time]() {
 		return schema{Type: "string"}

@@ -29,8 +29,22 @@ type Message struct {
 	Mentions    []Identity `json:"mentions"`
 	Referenced  *Message   `json:"referenced_message"`
 	Attachments []struct {
-		URL string `json:"url"`
+		URL  string `json:"url"`
+		Name string `json:"filename"`
+		Size int64  `json:"size"`
 	} `json:"attachments"`
+	Embeds []struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+	} `json:"embeds"`
+	Stickers []struct {
+		Name string `json:"name"`
+	} `json:"sticker_items"`
+	Poll *struct {
+		Question struct {
+			Text string `json:"text"`
+		} `json:"question"`
+	} `json:"poll"`
 }
 
 type Gateway struct {
