@@ -14,6 +14,9 @@ import (
 func (c *socketClient) DiscordAPI(ctx context.Context, req contract.DiscordAPIRequest) (contract.DiscordAPIResponse, error) {
 	return call[contract.DiscordAPIRequest, contract.DiscordAPIResponse](ctx, c, contract.MethodDiscordAPI, req)
 }
+func (c *socketClient) DiscordRead(ctx context.Context, req contract.DiscordReadRequest) (contract.DiscordReadResponse, error) {
+	return call[contract.DiscordReadRequest, contract.DiscordReadResponse](ctx, c, contract.MethodDiscordRead, req)
+}
 func (c *socketClient) DiscordSend(ctx context.Context, req contract.DiscordSendRequest) (contract.DiscordSendResponse, error) {
 	return call[contract.DiscordSendRequest, contract.DiscordSendResponse](ctx, c, contract.MethodDiscordSend, req)
 }
@@ -101,6 +104,26 @@ func discordCommand(getClient func() client) *cobra.Command {
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 	}}
-	root.AddCommand(api, send)
+	var readReq contract.DiscordReadRequest
+	read := &cobra.Command{Use: "read CHANNEL", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		service, ok := getClient().(interface {
+			DiscordRead(context.Context, contract.DiscordReadRequest) (contract.DiscordReadResponse, error)
+		})
+		if !ok {
+			return fmt.Errorf("Discord unavailable")
+		}
+		readReq.Channel = args[0]
+		result, err := service.DiscordRead(cmd.Context(), readReq)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+	}}
+	read.Flags().IntVar(&readReq.Limit, "limit", 20, "Message count (maximum 100)")
+	read.Flags().StringVar(&readReq.Message, "message", "", "Read one message and retrieve its files")
+	read.Flags().StringVar(&readReq.Before, "before", "", "Messages before this ID")
+	read.Flags().StringVar(&readReq.After, "after", "", "Messages after this ID")
+	read.Flags().StringVar(&readReq.Around, "around", "", "Messages around this ID")
+	root.AddCommand(api, send, read)
 	return root
 }

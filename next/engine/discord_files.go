@@ -3,7 +3,6 @@ package engine
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"fmt"
 	"github.com/resident-labs/dyna/engine/discord"
 	"io"
@@ -110,14 +109,7 @@ func (s *Service) discordReadFiles(ctx context.Context, caller contract.Principa
 	if err != nil {
 		return "", failure(err)
 	}
-	err = s.store.Write(ctx, func(tx *sql.Tx) error {
-		seq, err := s.store.AppendEvent(tx, event)
-		if err != nil {
-			return err
-		}
-		event.Seq = seq
-		return s.store.InsertDelivery(ctx, tx, seq, b, contract.Delivery{To: caller, Surface: contract.SurfaceEngine, Wake: true, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}})
-	})
+	event.Seq, err = s.store.Post(ctx, event, []contract.Delivery{{To: caller, Surface: contract.SurfaceEngine, Wake: true, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}}})
 	if err != nil {
 		return "", failure(err)
 	}
