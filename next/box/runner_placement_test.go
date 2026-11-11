@@ -1,6 +1,7 @@
 package box_test
 
 import (
+	"fmt"
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"testing"
@@ -51,3 +52,31 @@ func TestRunnerPlacement(t *testing.T) {
 }
 
 func ptr(v float64) *float64 { return &v }
+
+func TestRunnerBurstPlacement(t *testing.T) {
+	size, _ := box.Size(contract.BoxSizeLarge)
+	var hosts []box.Host
+	for _, cores := range []int{48, 27, 20, 19, 15} {
+		hosts = append(hosts, box.Host{Name: contract.HostName(fmt.Sprint(cores)), State: box.HostReady, CPUs: cores, CPUUsed: ptr(1), MemBytes: 256 * box.GiB, DiskBytes: 10000 * box.GiB, CIScale: 4})
+	}
+	var boxes []box.Box
+	counts := make(map[contract.HostName]int)
+	for i := 0; i < 10; i++ {
+		request := box.Box{ID: contract.BoxID(fmt.Sprint(i)), Image: box.RunnerImage, Size: size, State: contract.BoxReady}
+		p := box.AdmitRunner(hosts, hosts, boxes, request)
+		if p.Host == "" {
+			t.Fatalf("runner %d: %+v", i, p)
+		}
+		request.Host = p.Host
+		boxes = append(boxes, request)
+		counts[p.Host]++
+	}
+	if len(counts) != len(hosts) {
+		t.Fatalf("burst did not spread across fleet: %v", counts)
+	}
+	for _, h := range hosts {
+		if counts[h.Name]*size.CPUs > h.CPUs {
+			t.Fatalf("host %s overfilled while fleet had idle cores: %v", h.Name, counts)
+		}
+	}
+}
