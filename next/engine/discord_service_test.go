@@ -404,7 +404,7 @@ func TestDiscordIncomingRichContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Report", "Build failed", "[sticker] wave", "[poll] Ready?", "message.txt", "1234 bytes", "https://example.invalid/message.txt"} {
+	for _, want := range []string{"Report", "Build failed", "[sticker] wave", "[poll] Ready?", "message.txt", "1234 bytes", "not downloaded"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q in %s", want, text)
 		}
