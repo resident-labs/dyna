@@ -167,11 +167,8 @@ func (s *Service) discordURLScope(ctx context.Context, caller contract.Principal
 		if r.Guild != channel.Guild {
 			continue
 		}
-		if r.Channel == parent {
-			if authorized(*r) {
-				return nil
-			}
-			return forbidden()
+		if r.Channel == parent && authorized(*r) {
+			return nil
 		}
 		if r.Channel == "" {
 			server = r

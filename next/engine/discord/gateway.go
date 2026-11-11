@@ -74,13 +74,31 @@ func (g *Gateway) Run(ctx context.Context) error {
 	defer cancel()
 	g.messages = make(chan Message, 256)
 	go func() {
+		retryDelays := [...]time.Duration{time.Second, 5 * time.Second, 15 * time.Second}
 		for {
 			select {
 			case <-worker.Done():
 				return
 			case m := <-g.messages:
-				if err := g.Receive(worker, m); err != nil && worker.Err() == nil {
-					log.Printf("Discord input %s failed: %v", m.ID, err)
+				for attempt := 0; ; attempt++ {
+					err := g.Receive(worker, m)
+					if worker.Err() != nil {
+						return
+					}
+					if err == nil {
+						break
+					}
+					if attempt == len(retryDelays) {
+						log.Printf("Discord input %s failed after retries; dropped: %v", m.ID, err)
+						break
+					}
+					timer := time.NewTimer(retryDelays[attempt])
+					select {
+					case <-worker.Done():
+						timer.Stop()
+						return
+					case <-timer.C:
+					}
 				}
 			}
 		}
