@@ -102,7 +102,16 @@ func (s *Service) DiscordRead(ctx context.Context, caller contract.Principal, re
 		}
 		return a.ID < b.ID
 	})
-	// Attachment download integration belongs here, after scoped message retrieval.
+	var fileStatus string
+	if req.Message != "" && len(messages) == 1 {
+		if messages[0].Channel == "" {
+			messages[0].Channel = channel
+		}
+		fileStatus, problem = s.discordReadFiles(ctx, caller, messages[0].Message)
+		if problem != nil {
+			return empty, problem
+		}
+	}
 	var lines []string
 	for _, m := range messages {
 		display := m.Member.Nick
@@ -123,6 +132,9 @@ func (s *Service) DiscordRead(ctx context.Context, caller contract.Principal, re
 			line += fmt.Sprintf("\nAttachment %d: %s (%d bytes)", i+1, a.Name, a.Size)
 		}
 		lines = append(lines, line)
+	}
+	if fileStatus != "" {
+		lines = append(lines, fileStatus)
 	}
 	return contract.DiscordReadResponse{Channel: channel, Text: contract.Outside("discord channel "+channel, "", strings.Join(lines, "\n\n"))}, nil
 }

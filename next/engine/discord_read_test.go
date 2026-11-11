@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -48,5 +49,34 @@ func TestDiscordRead(t *testing.T) {
 	s.discordDirectory.Apply("CHANNEL_CREATE", json.RawMessage(`{"id":"202","guild_id":"100","name":"general"}`))
 	if _, p := s.DiscordRead(ctx, boxCaller(root), contract.DiscordReadRequest{Channel: "general"}); p == nil || !strings.Contains(p.Message, "202") || strings.Contains(p.Message, "201") {
 		t.Fatalf("ambiguous/scoped candidates: %v", p)
+	}
+}
+
+func TestDiscordReadFilesNoReply(t *testing.T) {
+	s, r, root, ctx, fake, _ := discordFixture(t)
+	old := http.DefaultTransport
+	http.DefaultTransport = discordFileTransport{old}
+	t.Cleanup(func() { http.DefaultTransport = old })
+	fake.SetHistory([]any{map[string]any{
+		"id": "700", "content": "image", "author": map[string]any{"id": "2", "username": "ari"},
+		"attachments": []any{map[string]any{"filename": "image.png", "size": 12, "url": "https://cdn.discordapp.com/image"}},
+	}})
+	got, p := s.DiscordRead(ctx, boxCaller(root), contract.DiscordReadRequest{Channel: "200", Message: "700"})
+	if p != nil || !strings.Contains(got.Text, "Attachment delivery queued:") {
+		t.Fatalf("%+v %v", got, p)
+	}
+	events, err := s.store.Events(ctx, r, 0, 100, []contract.EventType{"discord.message"})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("%+v %v", events, err)
+	}
+	b := events[0].Body.(contract.DiscordMessage)
+	if b.Channel != "200" || len(b.Files) != 1 || b.Attachments[0].Status != "downloaded" {
+		t.Fatalf("%+v", b)
+	}
+	var reply contract.ReplyKind
+	var wake bool
+	err = s.store.Read().QueryRowContext(ctx, "SELECT reply_kind,wake FROM deliveries WHERE seq=? AND to_id=?", events[0].Seq, root).Scan(&reply, &wake)
+	if err != nil || reply != contract.ReplyNone || !wake {
+		t.Fatalf("reply %s wake %v error %v", reply, wake, err)
 	}
 }
