@@ -44,13 +44,17 @@ func (s *Service) DiscordRead(ctx context.Context, caller contract.Principal, re
 	if req.Message != "" && !discordID(req.Message) {
 		return empty, invalid("invalid message ID")
 	}
+	scope, problem := s.discordReadScope(ctx, caller)
+	if problem != nil {
+		return empty, problem
+	}
 	channel := req.Channel
 	if !discordID(channel) {
 		name := strings.TrimPrefix(channel, "#")
 		var candidates []string
 		var matches []string
 		for _, c := range s.discordDirectory.Channels() {
-			if s.discordScope(ctx, caller, "GET", "/api/v10/channels/"+c.ID) != nil {
+			if !scope.allowsChannel(c) {
 				continue
 			}
 			candidates = append(candidates, fmt.Sprintf("#%s (%s)", c.Name, c.ID))
@@ -69,8 +73,9 @@ func (s *Service) DiscordRead(ctx context.Context, caller contract.Principal, re
 	} else {
 		path += "?" + query.Encode()
 	}
-	if problem := s.discordScope(ctx, caller, "GET", path); problem != nil {
-		return empty, problem
+	resolved, ok := s.discordDirectory.Channel(channel)
+	if !ok || !scope.allowsChannel(resolved) {
+		return empty, forbidden()
 	}
 	result, err := client.ReadMessages(ctx, path)
 	if err != nil {
@@ -122,11 +127,10 @@ func (s *Service) DiscordRead(ctx context.Context, caller contract.Principal, re
 			display = m.Author.Username
 		}
 		line := fmt.Sprintf("%s | %s (@%s, ID %s) | message %s\n%s", m.Timestamp.UTC().Format("2006-01-02 15:04:05 UTC"), display, m.Author.Username, m.Author.ID, m.ID, m.Content)
-		if m.Reference.Message != "" {
-			line += "\nReply to " + m.Reference.Message
-		}
 		if m.Referenced != nil {
-			line += fmt.Sprintf("\nReply: @%s (message %s): %s", m.Referenced.Author.Username, m.Referenced.ID, m.Referenced.Content)
+			line += fmt.Sprintf("\nReply: @%s (message %s): %s", m.Referenced.Author.Username, m.Referenced.ID, strings.Join(strings.Fields(m.Referenced.Content), " "))
+		} else if m.Reference.Message != "" {
+			line += "\nReply to " + m.Reference.Message
 		}
 		for i, a := range m.Attachments {
 			line += fmt.Sprintf("\nAttachment %d: %s (%d bytes)", i+1, a.Name, a.Size)
