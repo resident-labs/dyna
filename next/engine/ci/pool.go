@@ -92,6 +92,8 @@ type Pool struct {
 	Sets   Scaleset
 	// Memory reads a host's latest memory use, as the box reconciler does.
 	Memory func(contract.HostName) int64
+	// CPU reads real cores used by the latest heartbeat, nil before one arrives.
+	CPU    func(contract.HostName) *float64
 	Health func(contract.HostName) contract.HostHealth
 	Now    func() time.Time
 	// Kick tells the node pools that the runners waiting for a node changed.
@@ -426,6 +428,9 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 		if p.Memory != nil {
 			host.MemUsed = p.Memory(host.Name)
 		}
+		if p.CPU != nil {
+			host.CPUUsed = p.CPU(host.Name)
+		}
 		driver, err := p.Hosts(ctx, host.Name)
 		var runners []box.Runner
 		var egress bool
@@ -519,13 +524,8 @@ func (p *Pool) place(ctx context.Context, key scaleSet, assigned int, view surve
 				open = append(open, host)
 			}
 		}
-		// A host that has the image starts a runner at once, and one that must build it makes the job wait minutes, so a host
-		// with the image takes the runner while it has room.
 		ready := slices.DeleteFunc(slices.Clone(open), func(h box.Host) bool { return p.imageFor(h.Name, view.layers[key.repo]) == "" })
-		if host := box.Admit(ready, boxes, runnerRequest(id, repo.Room, size), repo.Only...).Host; host != "" {
-			return host
-		}
-		return box.Admit(open, boxes, runnerRequest(id, repo.Room, size), repo.Only...).Host
+		return box.AdmitRunner(open, ready, boxes, runnerRequest(id, repo.Room, size), repo.Only...).Host
 	}
 	var failures []error
 	var waiting []store.LifecycleBox

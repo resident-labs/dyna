@@ -184,6 +184,9 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 		cpuFree := float64(4*cpuBudget-int64(cpu+request.Size.CPUs)*1000) / float64(4*cpuBudget)
 		memFree := float64(4*memBudget-mem-request.Size.MemBytes) / float64(4*memBudget)
 		headroom := min(cpuFree, memFree)
+		if request.Image == RunnerImage && h.CPUUsed != nil {
+			headroom = float64(h.CPUs-request.Size.CPUs) - *h.CPUUsed
+		}
 		if chosen == "" || headroom > best || (headroom == best && h.Name < chosen) {
 			chosen, best, card = h.Name, headroom, hostCard
 		}
@@ -196,3 +199,28 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 
 // GPUUsable is the VRAM of a card that boxes may ask for: its memory less a tenth kept in reserve for the host's own use.
 func GPUUsable(g contract.GPU) int64 { return g.MemBytes - g.MemBytes/10 }
+
+// AdmitRunner prefers image-ready hosts with enough real idle cores, then other idle
+// hosts. If none admits the runner, retain image-first reservation placement.
+func AdmitRunner(hosts, ready []Host, boxes []Box, request Box, only ...string) Placement {
+	idle := func(hosts []Host) []Host {
+		return slices.DeleteFunc(slices.Clone(hosts), func(h Host) bool {
+			return h.CPUUsed == nil || float64(h.CPUs)-*h.CPUUsed < float64(request.Size.CPUs)
+		})
+	}
+	for _, candidates := range [][]Host{idle(ready), idle(hosts)} {
+		if p := Admit(candidates, boxes, request, only...); p.Host != "" {
+			return p
+		}
+	}
+	for _, candidates := range [][]Host{ready, hosts} {
+		candidates = slices.Clone(candidates)
+		for i := range candidates {
+			candidates[i].CPUUsed = nil
+		}
+		if p := Admit(candidates, boxes, request, only...); p.Host != "" {
+			return p
+		}
+	}
+	return Admit(hosts, boxes, request, only...)
+}
