@@ -208,7 +208,7 @@ func runnerIdleCores(h Host, runnerCPU int) float64 {
 }
 
 // AdmitRunner prefers image-ready hosts with enough real idle cores, then other idle
-// hosts. If none admits the runner, retain image-first reservation placement.
+// hosts. If none admits the runner, the busiest fleet still spreads by idle share, image-ready hosts first.
 func AdmitRunner(hosts, ready []Host, boxes []Box, request Box, only ...string) Placement {
 	idle := func(hosts []Host) []Host {
 		return slices.DeleteFunc(slices.Clone(hosts), func(h Host) bool {
@@ -226,10 +226,6 @@ func AdmitRunner(hosts, ready []Host, boxes []Box, request Box, only ...string) 
 	}
 	var placement Placement
 	for _, candidates := range [][]Host{ready, hosts} {
-		candidates = slices.Clone(candidates)
-		for i := range candidates {
-			candidates[i].CPUUsed = nil
-		}
 		placement = Admit(candidates, boxes, request, only...)
 		if placement.Host != "" {
 			return placement
