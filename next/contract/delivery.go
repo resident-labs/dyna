@@ -3,6 +3,7 @@ package contract
 type Surface string
 
 const (
+	SurfaceDiscord Surface = "discord"
 	SurfaceFeed    Surface = "feed"    // a post in the room feed, by anyone
 	SurfaceDM      Surface = "dm"      // the owner, in this session's DM
 	SurfaceCard    Surface = "card"    // the owner, through an HTML card
@@ -15,6 +16,7 @@ type ConversationKind string // "feed" | "dm"
 
 type Conversation struct {
 	Kind    ConversationKind `json:"kind"`
+	Channel string           `json:"channel,omitempty"` // Discord only
 	Session SessionID        `json:"session,omitempty"` // dm only
 }
 
@@ -44,6 +46,7 @@ type Delivery struct {
 }
 
 const (
-	ConversationFeed ConversationKind = "feed"
-	ConversationDM   ConversationKind = "dm"
+	ConversationDiscord ConversationKind = "discord"
+	ConversationFeed    ConversationKind = "feed"
+	ConversationDM      ConversationKind = "dm"
 )

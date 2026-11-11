@@ -134,7 +134,7 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		return contract.ContextSnapshotResponse{}, forbidden()
 	}
 	switch req.Section {
-	case "", contract.ContextGoal, contract.ContextChildren, contract.ContextContacts, contract.ContextRequests, contract.ContextHolds, contract.ContextProfiles, contract.ContextUsage, contract.ContextRoom, contract.ContextWorkflows:
+	case "", contract.ContextGoal, contract.ContextChildren, contract.ContextContacts, contract.ContextRequests, contract.ContextHolds, contract.ContextProfiles, contract.ContextUsage, contract.ContextRoom, contract.ContextDiscord, contract.ContextWorkflows:
 	default:
 		return contract.ContextSnapshotResponse{}, invalid("unknown context section")
 	}
@@ -320,6 +320,46 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		lines = append([]string{prefix + names + suffix}, lines...)
 	}
 	add(contract.ContextRoom, lines, roomChars, 0)
+	routes, err := s.store.DiscordRoutes(ctx, session.Room)
+	if err != nil {
+		return contract.ContextSnapshotResponse{}, failure(err)
+	}
+	bot, err := s.store.DiscordBot(ctx)
+	if err != nil {
+		return contract.ContextSnapshotResponse{}, failure(err)
+	}
+	tree, err := s.store.RoomTree(ctx, session.Room)
+	if err != nil {
+		return contract.ContextSnapshotResponse{}, failure(err)
+	}
+	lines = nil
+	allowed := s.discordOnPath(caller.Session, routes, tree)
+	if bot.ID != "" && allowed {
+		for _, r := range routes {
+			answering, err := s.store.Session(ctx, r.Session)
+			if err != nil {
+				return contract.ContextSnapshotResponse{}, failure(err)
+			}
+			server := r.Guild
+			if g, ok := s.discordDirectory.Server(r.Guild); ok {
+				server = fmt.Sprintf("%s (ID %s)", g.Name, r.Guild)
+			}
+			place := "server " + server
+			if r.Channel != "" {
+				channel := r.Channel
+				if c, ok := s.discordDirectory.Channel(r.Channel); ok {
+					channel = fmt.Sprintf("%s (ID %s)", c.Name, r.Channel)
+				}
+				place = "#" + channel + " of " + server
+			}
+			line := fmt.Sprintf("Discord: bot %s; %s, answered by %s", bot.Name, place, answering.Name)
+			if caller.Session == r.Session && r.Instructions != "" {
+				line += "\nThe owner's instructions:\n" + r.Instructions
+			}
+			lines = append(lines, line)
+		}
+	}
+	add(contract.ContextDiscord, lines, 20000, 0)
 	// What the room's workflow settings change from the defaults, for every session; limits and defaults are named by the refusal that
 	// meets them.
 	effective, err := s.store.WorkflowEffective(ctx, session.Room)

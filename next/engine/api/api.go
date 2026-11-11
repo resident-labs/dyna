@@ -338,6 +338,38 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 		return contract.RoomGitHubResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "GitHub accounts unavailable"}
 	})
+	call(mux, contract.MethodDiscordConfigure, c, func(ctx context.Context, who contract.Principal, req contract.DiscordConfigureRequest) (contract.DiscordConfigureResponse, *contract.Error) {
+		if service, ok := a.service.(interface {
+			DiscordConfigure(context.Context, contract.Principal, contract.DiscordConfigureRequest) (contract.DiscordConfigureResponse, *contract.Error)
+		}); ok {
+			return service.DiscordConfigure(ctx, who, req)
+		}
+		return contract.DiscordConfigureResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Discord unavailable"}
+	})
+	call(mux, contract.MethodRoomDiscord, c, func(ctx context.Context, who contract.Principal, req contract.RoomDiscordRequest) (contract.RoomDiscordResponse, *contract.Error) {
+		if service, ok := a.service.(interface {
+			RoomDiscord(context.Context, contract.Principal, contract.RoomDiscordRequest) (contract.RoomDiscordResponse, *contract.Error)
+		}); ok {
+			return service.RoomDiscord(ctx, who, req)
+		}
+		return contract.RoomDiscordResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Discord unavailable"}
+	})
+	call(mux, contract.MethodDiscordAPI, c, func(ctx context.Context, who contract.Principal, req contract.DiscordAPIRequest) (contract.DiscordAPIResponse, *contract.Error) {
+		if service, ok := a.service.(interface {
+			DiscordAPI(context.Context, contract.Principal, contract.DiscordAPIRequest) (contract.DiscordAPIResponse, *contract.Error)
+		}); ok {
+			return service.DiscordAPI(ctx, who, req)
+		}
+		return contract.DiscordAPIResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Discord unavailable"}
+	})
+	call(mux, contract.MethodDiscordSend, c, func(ctx context.Context, who contract.Principal, req contract.DiscordSendRequest) (contract.DiscordSendResponse, *contract.Error) {
+		if service, ok := a.service.(interface {
+			DiscordSend(context.Context, contract.Principal, contract.DiscordSendRequest) (contract.DiscordSendResponse, *contract.Error)
+		}); ok {
+			return service.DiscordSend(ctx, who, req)
+		}
+		return contract.DiscordSendResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Discord unavailable"}
+	})
 	call(mux, contract.MethodRoomSet, c, a.service.RoomSet)
 	call(mux, contract.MethodRoomRepoAdd, c, a.service.RoomRepoAdd)
 	call(mux, contract.MethodRoomRepos, c, a.service.RoomRepos)

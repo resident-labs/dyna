@@ -13,6 +13,7 @@ const (
 	ContextProfiles  ContextSectionKey = "dyna_profiles"
 	ContextUsage     ContextSectionKey = "dyna_usage"
 	ContextRoom      ContextSectionKey = "dyna_room"
+	ContextDiscord   ContextSectionKey = "dyna_discord"
 	ContextWorkflows ContextSectionKey = "dyna_workflows"
 )
 

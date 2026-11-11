@@ -187,6 +187,9 @@ var deleteRoom = []string{
 	`DELETE FROM account_rooms WHERE room=?1`,
 	`DELETE FROM conversation_reads WHERE room=?1`,
 	`DELETE FROM room_github_accounts WHERE room=?1`,
+	`DELETE FROM discord_routes WHERE room=?1`,
+	`DELETE FROM discord_outbox WHERE room=?1`,
+	`DELETE FROM discord_messages WHERE room=?1`,
 	`DELETE FROM rooms WHERE id=?1`,
 }
 
