@@ -42,8 +42,9 @@ type Host struct {
 	CPUs                int
 	MemBytes, DiskBytes int64
 	DiskFloor           int64
-	DiskTotal           int64 // the disk's size from the latest heartbeat, 0 until one arrives
-	MemUsed             int64 // latest heartbeat; not stored
+	DiskTotal           int64    // the disk's size from the latest heartbeat, 0 until one arrives
+	MemUsed             int64    // latest heartbeat; not stored
+	CPUUsed             *float64 // real cores used in latest heartbeat; nil before a sample, not stored
 	MaintainedAt        time.Time
 	Labels              []string
 	Rooms               []contract.RoomID

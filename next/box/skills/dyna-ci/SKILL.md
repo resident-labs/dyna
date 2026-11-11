@@ -56,7 +56,7 @@ jobs:
 
 ## Capacity
 
-Check `dyna host list` before requesting a change. Ready hosts with `ci` on take runners through the same admission as boxes; placement prefers hosts with the image ready and then available CPU and memory headroom. A session box waiting for CPU or memory takes priority over new runners. A repository's runner maximum, host slot limit and room host rules also bound placement.
+Check `dyna host list` before requesting a change. Ready hosts with `ci` on take runners through the same admission as boxes; placement prefers hosts with enough real idle CPU, image-ready hosts first, ranked by idle cores after the runner. Without an eligible idle host it falls back to image-ready hosts and reservation headroom. A session box waiting for CPU or memory takes priority over new runners. A repository's runner maximum, host slot limit and room host rules also bound placement.
 
 The owner's host `ci` switch controls new runners, not ones already running. `dyna host set NAME --ci on|off` changes it. New hosts normally have CI on except the engine host; existing hosts retain their switch. These changes are owner-only. The host's `ci_scale` (`dyna host set NAME --ci-scale 1-4`, owner-only) multiplies CI CPU and memory reservation budgets, default 1: twice host CPUs and once host memory at 1. It does not multiply physical resources. The real-memory guard and 16-runner slot cap still apply.
 

@@ -467,6 +467,16 @@ func (b *Boxes) hostMemory(name contract.HostName) int64 {
 	return b.loads[name].summary.MemUsed
 }
 
+func (b *Boxes) hostCPU(name contract.HostName) *float64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	load := b.loads[name].summary
+	if load.LastSeen.IsZero() {
+		return nil
+	}
+	return &load.CPUUsed
+}
+
 // controlPlane samples the engine host on the same schedule as remote hosts.
 func (b *Boxes) controlPlane(data string) {
 	root := b.Proc
