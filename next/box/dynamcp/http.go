@@ -84,10 +84,20 @@ type Server struct {
 	preparer post.Preparer
 }
 
-func New(forward Forward, local Local, preparer post.Preparer) (*Server, error) {
+func New(forward Forward, local Local, preparer post.Preparer, discordEnabled ...bool) (*Server, error) {
 	list, actions, err := registry()
 	if err != nil {
 		return nil, err
+	}
+	if len(discordEnabled) == 0 || !discordEnabled[0] {
+		kept := list[:0]
+		for _, tool := range list {
+			if tool.Name != "discord" {
+				kept = append(kept, tool)
+			}
+		}
+		list = kept
+		delete(actions, "discord")
 	}
 	names := make([]string, 0, len(list))
 	for _, tool := range list {
@@ -198,6 +208,24 @@ func (s *Server) call(ctx context.Context, p callParams) Result {
 			name += " " + verb
 		}
 		return failure(contract.ErrInvalid, decodeProblem(err, name, a))
+	}
+	if a.method == contract.MethodDiscordSend {
+		input := decoded.(*contract.DiscordSendRequest)
+		if len(input.Paths) > 10 {
+			return failure(contract.ErrInvalid, "at most 10 files")
+		}
+		for _, path := range input.Paths {
+			if s.preparer.Upload == nil {
+				return failure(contract.ErrUnavailable, "file upload unavailable")
+			}
+			file, err := s.preparer.Upload(ctx, s.preparer.Path(path))
+			if err != nil {
+				return failure(contract.ErrInvalid, err.Error())
+			}
+			input.Attachments = append(input.Attachments, file)
+		}
+		input.Paths = nil
+		data = marshal(input)
 	}
 	if a.method == contract.MethodPost {
 		if s.preparer.Upload == nil {

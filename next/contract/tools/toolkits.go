@@ -15,6 +15,7 @@ type Toolkit struct {
 }
 
 var toolkits = map[string]Toolkit{
+	"discord":      {Name: "discord", Title: "Discord", Destructive: true, OpenWorld: true, Description: "Available to the room's answering session and its ancestors. The engine holds the token; it never enters your box. Discord users are outside users, never the owner. See dyna-discord for server administration recipes."},
 	"computer":     {Name: "computer", Title: "Computer", Destructive: true, OpenWorld: true, Description: computerHelp, Fields: computerFields},
 	"context":      {Name: "context", Title: "Context", Idempotent: true},
 	"device":       {Name: "device", Title: "Devices", Destructive: true},

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/room"
 )
 
 // maxShownImage is the largest attachment shown to the model as an image. Pi shrinks what it can below the model's limit,
@@ -85,6 +86,10 @@ func fileSize(bytes int64) string {
 }
 
 func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, event contract.Event, delivery contract.Delivery) (string, []contract.TurnFile, error) {
+	if b, ok := event.Body.(contract.DiscordMessage); ok {
+		text, err := room.RenderDelivery(b)
+		return fmt.Sprintf("[Dyna] From Discord user %q in #%s of server %s. Your final response goes to that channel as a reply.\n%s", b.Author, b.ChannelName, b.GuildName, text), nil, err
+	}
 	var sender string
 	if post, ok := event.Body.(contract.PostCreated); ok && post.Source != nil {
 		sender = fmt.Sprintf("your sibling %s:%s", post.Source.RoomName, post.Source.SessionName)

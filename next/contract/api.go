@@ -745,6 +745,7 @@ type TextOnlyModel struct {
 }
 
 type BoxHelloResponse struct {
+	Discord       bool   `json:"discord,omitempty"` // this room has a connection
 	Room          RoomID `json:"room"`
 	Root          bool   `json:"root,omitempty"` // the session has no parent, so add-ons marked root-only reach its box
 	GitName       string `json:"gitName,omitempty"`

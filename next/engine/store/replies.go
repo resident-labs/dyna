@@ -25,6 +25,10 @@ func (s *Store) turnReplies(ctx context.Context, tx *sql.Tx, room contract.RoomI
 		}
 		kind, id, _ := strings.Cut(home, ":")
 		d.Reply.Home = contract.Conversation{Kind: contract.ConversationKind(kind), Session: contract.SessionID(id)}
+		if kind == "discord" {
+			d.Reply.Home.Session = ""
+			d.Reply.Home.Channel = id
+		}
 		inputs = append(inputs, d)
 	}
 	err = rows.Err()
