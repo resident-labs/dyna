@@ -92,7 +92,7 @@ func TestDiscordConnectionInputAndAuthority(t *testing.T) {
 	}
 }
 func TestDiscordToolScope(t *testing.T) {
-	s, r, root, ctx, _, _ := discordFixture(t)
+	s, r, root, ctx, _, client := discordFixture(t)
 	s.discordDirectory.Apply("GUILD_CREATE", json.RawMessage(`{"id":"101","name":"Other","channels":[{"id":"201","name":"private"}]}`))
 	if err := s.store.CreateRoom(ctx, "other", "other", time.Now()); err != nil {
 		t.Fatal(err)
@@ -122,12 +122,30 @@ func TestDiscordToolScope(t *testing.T) {
 	if _, problem := s.DiscordAPI(ctx, boxCaller(root), contract.DiscordAPIRequest{Method: "PATCH", Path: "/api/v10/guilds/101"}); problem == nil {
 		t.Fatal("API crossed room boundary")
 	}
-	// A channel override removes it from a broader server mapping in another room.
+	// Channel routing does not take authority away from the whole-server room.
 	if err := s.store.SetDiscordRoute(ctx, store.DiscordRoute{Guild: "100", Channel: "200", Room: "other", Session: "otherroot"}, false); err != nil {
 		t.Fatal(err)
 	}
-	if problem := s.discordScope(ctx, boxCaller(root), "POST", "/api/v10/channels/200/messages"); problem == nil {
-		t.Fatal("override leaked across rooms")
+	s.discordDirectory.Apply("THREAD_CREATE", json.RawMessage(`{"id":"204","guild_id":"100","parent_id":"200","type":11}`))
+	for _, caller := range []contract.SessionID{root, "otherroot"} {
+		for _, channel := range []string{"200", "204"} {
+			if problem := s.discordScope(ctx, boxCaller(caller), "POST", "/api/v10/channels/"+channel+"/messages"); problem != nil {
+				t.Fatalf("server/channel authority refused for %s in %s: %v", caller, channel, problem)
+			}
+		}
+	}
+	var input discord.Message
+	input.ID, input.Channel, input.Guild, input.Author.ID = "733", "200", "100", "2"
+	input.Content = "channel row wins"
+	if err := s.discordInput(ctx, client, input); err != nil {
+		t.Fatal(err)
+	}
+	routed, err := s.store.Events(ctx, "other", 0, 100, []contract.EventType{"discord.message"})
+	if err != nil || len(routed) != 1 {
+		t.Fatalf("channel row lost incoming routing: %d %v", len(routed), err)
+	}
+	if problem := s.discordScope(ctx, boxCaller("otherroot"), "PATCH", "/api/v10/guilds/100"); problem == nil {
+		t.Fatal("channel mapping gained server authority")
 	}
 	// Channel-only mappings cannot administer the server.
 	if err := s.store.SetDiscordRoute(ctx, store.DiscordRoute{Guild: "100", Room: r}, true); err != nil {

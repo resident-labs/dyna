@@ -10,8 +10,8 @@ Responses carry status and JSON; large responses are cut at 20 KB.
 A rate limit waits and retries once. Check status before assuming a change worked.
 Snowflakes (server, channel, user and message IDs) are strings, not numbers.
 Scope permits guild paths only for whole-server mappings, and channel paths for
-mapped channels and threads. A channel override belongs to its mapped room, not
-the room of the whole-server route. GET /users/ID is allowed; other roots,
+mapped channels and threads. Whole-server authority includes every channel; a channel row adds authority for its room and wins incoming routing only.
+GET /users/ID is allowed; other roots,
 creating servers and the bot's own account are refused. Channel-only mappings
 cannot administer server roles or members.
 Supply a short `reason` on moderation and permission changes for the audit log.
