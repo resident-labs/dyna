@@ -556,6 +556,7 @@ func (p *Pool) place(ctx context.Context, key scaleSet, assigned int, view surve
 			p.retry[host] = p.Now().Add(retryAfter)
 			continue
 		}
+		log.Printf("ci pool: repository %s: %s: runner %s started on %s", key.repo, SetName(key.size), name, host)
 		boxes = append(boxes, runnerBox(name, host, size))
 		held[host]++
 		running++

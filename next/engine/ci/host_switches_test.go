@@ -88,7 +88,8 @@ func TestARunnerSkipsAHostWhereASessionBoxWaitsForRoom(t *testing.T) {
 		{"other boxes keep it out", []store.LifecycleBox{full, busyArch, waiting(box.PendingCPU, "", contract.BoxSize{Name: contract.BoxSizeLarge, CPUs: 20, MemBytes: small.MemBytes})}, 1},
 	} {
 		f := newFixture(0)
-		arch := f.addHost(readyHost("arch", 32*box.GiB))        // pve has more free memory, so it wins unless it is skipped
+		arch := f.addHost(readyHost("arch", 32*box.GiB))
+		f.store.hosts[1].CPUs = 32                              // a runner leaves pve the larger share of its cores idle, so pve wins unless it is skipped
 		f.store.hosts[1].Rooms = []contract.RoomID{"elsewhere"} // the waiting box cannot go to arch
 		f.store.boxes = tc.boxes
 		f.scale(1)
@@ -120,6 +121,7 @@ func TestARunnerSkipsAHostWhereAServiceWaitsForRoom(t *testing.T) {
 	} {
 		f := newFixture(0)
 		arch := f.addHost(readyHost("arch", 32*box.GiB))
+		f.store.hosts[1].CPUs = 32 // pve wins unless it is skipped
 		f.store.hosts[1].Rooms = []contract.RoomID{"elsewhere"}
 		f.store.services = []store.ServiceRow{tc.service}
 		notEngine := false
