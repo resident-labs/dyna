@@ -114,20 +114,11 @@ func (s *Service) discordScope(ctx context.Context, caller contract.Principal, m
 	return nil
 }
 func (s *Service) discordURLScope(ctx context.Context, caller contract.Principal, method, path string) *contract.Error {
-	u, err := url.Parse(path)
-	if err != nil || u.IsAbs() || u.Host != "" || !strings.HasPrefix(u.Path, "/api/v10/") {
-		return forbidden()
-	}
-	if strings.Contains(u.EscapedPath(), "%") || strings.ContainsAny(u.Path, "\\\r\n") {
-		return forbidden()
-	}
-	parts := strings.Split(strings.TrimPrefix(u.Path, "/api/v10/"), "/")
-	for _, part := range parts {
-		if part == "" || part == "." || part == ".." {
-			return forbidden()
-		}
-	}
-	if len(parts) < 2 || !discordID(parts[1]) {
+	// Public API paths are validated and normalized by DiscordAPI; other callers
+	// construct these paths from validated resource IDs.
+	resource, _, _ := strings.Cut(path, "?")
+	parts := strings.Split(strings.TrimPrefix(resource, "/api/v10/"), "/")
+	if len(parts) < 2 {
 		return forbidden()
 	}
 	if parts[0] == "users" && method == "GET" && len(parts) == 2 {
@@ -216,6 +207,9 @@ func (s *Service) DiscordAPI(ctx context.Context, caller contract.Principal, req
 	return contract.DiscordAPIResponse{Status: result.Status, Body: result.Body}, nil
 }
 func (s *Service) DiscordSend(ctx context.Context, caller contract.Principal, req contract.DiscordSendRequest) (contract.DiscordSendResponse, *contract.Error) {
+	if !discordID(req.Channel) {
+		return contract.DiscordSendResponse{}, invalid("channel must be a Discord ID")
+	}
 	client, problem := s.discordClient(ctx, caller)
 	if problem != nil {
 		return contract.DiscordSendResponse{}, problem
