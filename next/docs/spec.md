@@ -133,6 +133,8 @@ The engine keeps no backups: no daily copies, no copy before an upgrade and no o
 
 ### 4.2 Tables
 
+Owner-home indexes: `turns_session_ended(session, ended_at)` finds open turns; `deliveries_recipient_turn(to_kind, to_id, turn, seq) WHERE turn IS NOT NULL` finds their deliveries. The latter adds persistent storage and delivery write cost.
+
 This table lists the current tables in `engine/store/schema.sql`, the authority for columns and indexes. Planned tables are not listed.
 
 | Table |

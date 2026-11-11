@@ -130,3 +130,5 @@ CREATE TABLE discord_outbox (id INTEGER PRIMARY KEY, room TEXT NOT NULL REFERENC
 CREATE TABLE discord_messages (message TEXT PRIMARY KEY, room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE);
 
 CREATE INDEX discord_outbox_group ON discord_outbox(group_key,id);
+
+CREATE INDEX deliveries_recipient_turn ON deliveries(to_kind,to_id,turn,seq) WHERE turn IS NOT NULL;
