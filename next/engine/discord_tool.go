@@ -180,6 +180,9 @@ func (s *Service) discordURLScope(ctx context.Context, caller contract.Principal
 	return forbidden()
 }
 func (s *Service) DiscordAPI(ctx context.Context, caller contract.Principal, req contract.DiscordAPIRequest) (contract.DiscordAPIResponse, *contract.Error) {
+	if body := strings.TrimSpace(string(req.Body)); strings.HasPrefix(body, `"`) {
+		return contract.DiscordAPIResponse{}, invalid("body must be an object or array, not a JSON string")
+	}
 	client, problem := s.discordClient(ctx, caller)
 	if problem != nil {
 		return contract.DiscordAPIResponse{}, problem

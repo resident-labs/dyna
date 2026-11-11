@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"github.com/resident-labs/dyna/contract"
+	"strings"
 	"testing"
 )
 
@@ -52,5 +53,17 @@ func TestDiscordResourceReferencesInBodiesAndQueries(t *testing.T) {
 	}
 	if problem := s.discordScope(ctx, boxCaller(root), "POST", "/api/v10/channels/200/messages?channel_id=200", json.RawMessage(`{"nested":[{"guild_id":"100","channel_id":"200"}]}`)); problem != nil {
 		t.Fatal(problem)
+	}
+}
+
+func TestDiscordRefusesStringBody(t *testing.T) {
+	s, _, root, ctx, fake, _ := discordFixture(t)
+	before := fake.Requests()
+	_, problem := s.DiscordAPI(ctx, boxCaller(root), contract.DiscordAPIRequest{Method: "POST", Path: "/api/v10/channels/200/messages", Body: json.RawMessage(`"{}"`)})
+	if problem == nil || !strings.Contains(problem.Message, "object or array") {
+		t.Fatalf("got %v", problem)
+	}
+	if fake.Requests() != before {
+		t.Fatal("string body reached Discord")
 	}
 }
