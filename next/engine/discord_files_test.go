@@ -23,7 +23,9 @@ func (t discordFileTransport) RoundTrip(r *http.Request) (*http.Response, error)
 	if strings.Contains(r.URL.Path, "fail") {
 		status = 404
 	}
-	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header), Request: r}, nil
+	header := make(http.Header)
+ if strings.Contains(r.URL.Path,"redirect") { status=302; header.Set("Location","https://example.invalid/private") }
+ return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: header, Request: r}, nil
 }
 func TestDiscordInputFilesAndForward(t *testing.T) {
 	s, r, root, ctx, _, client := discordFixture(t)
@@ -65,6 +67,13 @@ func TestDiscordInputFilesAndForward(t *testing.T) {
 	if err != nil || len(files) != 1 || files[0].SHA256 != b.Files[0].SHA256 || !strings.Contains(frame, "shown to you") {
 		t.Fatalf("forward %s %v", frame, err)
 	}
+}
+func TestDiscordRedirectRefused(t *testing.T) {
+ s,r,_,ctx,_,_:=discordFixture(t)
+ s.SetLayout(box.Layout{Data:t.TempDir()})
+ old:=http.DefaultTransport; http.DefaultTransport=discordFileTransport{old}; t.Cleanup(func(){http.DefaultTransport=old})
+ files,listed:=s.downloadDiscordFiles(ctx,r,[]contract.DiscordAttachment{{Name:"file",URL:"https://cdn.discordapp.com/redirect"}})
+ if len(files)!=0 || listed[0].Status!="not downloaded" { t.Fatalf("redirect downloaded: %v %v",files,listed) }
 }
 func TestDiscordCDNBoundary(t *testing.T) {
 	for _, u := range []string{"http://cdn.discordapp.com/x", "https://cdn.discordapp.com.evil/x", "https://evil/x", "https://cdn.discordapp.com:22/x", "https://user@cdn.discordapp.com/x"} {
