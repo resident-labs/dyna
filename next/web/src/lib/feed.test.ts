@@ -48,6 +48,15 @@ test("a subscription shows in the feed only when it fails", () => {
   assert.ok(dayRows([failing], { kind: "feed" }).length > 0);
 });
 
+test("Discord input is a named feed post with attachment metadata", () => {
+ const input = event(1, { type: "discord.message", body: { channel: "200", channelName: "general", guildName: "Horizon", author: "ari", authorID: "2", displayName: "Ari", message: "300", text: "Question", history: "owner: Context", attachments: [{ name: "message.txt", size: 1234, url: "https://example.invalid/message.txt" }] } });
+ const rows = feedRows([input], { kind: "feed" });
+ assert.equal(rows.length, 1);
+ const row = rows[0];
+ assert.equal(row.kind, "post");
+ if (row.kind === "post") { assert.equal(row.discordAuthor, "Discord · ari · #general"); assert.match(row.text, /message.txt \(1234 bytes\)/); assert.match(row.text, /owner: Context/); }
+});
+
 function event(seq: number, body: EventBody, from: Principal = { kind: "engine" }): Event {
   return { seq, id: String(seq), at: "", from, ...body };
 }

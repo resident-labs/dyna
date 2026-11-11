@@ -14,6 +14,7 @@ const line = (text: string): TimelineInput => ({ kind: "line", text });
 
 function eventInput(event: Event): TimelineInput | undefined {
   switch (event.type) {
+    case "discord.message": return { kind: "message", text: `Discord · ${event.body.author} · #${event.body.channelName}\n${[event.body.history, event.body.text, event.body.richContent, ...(event.body.attachments ?? []).map(file => `${file.name} (${file.size} bytes): ${file.url}`)].filter(Boolean).join("\n\n")}` };
     case "session.started": return event.body.brief ? { kind: "message", text: event.body.brief } : line("Session started");
     case "turn.ended": {
       const { outcome, final, cause, error } = event.body;

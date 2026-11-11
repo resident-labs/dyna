@@ -436,6 +436,17 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			replyPosts = nil
 		}
 		body.Replies = room.FinalReplies(inputs, replyPosts, endIDs)
+		// A channel is one destination; reply to its newest input in this turn.
+		for i := range body.Replies {
+			if body.Replies[i].Reply.Home.Kind != contract.ConversationDiscord {
+				continue
+			}
+			for _, input := range inputs {
+				if input.Reply.Home == body.Replies[i].Reply.Home {
+					body.Replies[i].Reply.ReplyTo = input.Reply.ReplyTo
+				}
+			}
+		}
 		// A deferred model failure has not settled the input's reply channel.
 		// Terminal outcomes deliver failure; posts already sent by tools remain sent.
 		// A turn the close ended is answered by the closing session's notice.
@@ -465,7 +476,14 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			switch {
 			case waiting:
 				for _, reply := range body.Replies {
-					if reply.Reply.Target.Kind == contract.PrincipalSession && reply.Posted == "" && !slices.ContainsFunc(later, func(to contract.ReplyChannel) bool { return answers(to)(reply) }) {
+					if reply.Reply.Home.Kind == contract.ConversationDiscord {
+						for i := range later {
+							if later[i].Home == reply.Reply.Home {
+								later[i] = reply.Reply
+							}
+						}
+					}
+					if (reply.Reply.Target.Kind == contract.PrincipalSession || reply.Reply.Home.Kind == contract.ConversationDiscord) && reply.Posted == "" && !slices.ContainsFunc(later, func(to contract.ReplyChannel) bool { return answers(to)(reply) }) {
 						later = append(later, reply.Reply)
 					}
 				}
@@ -508,6 +526,32 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			}
 		}
 		for _, reply := range body.Replies {
+			if reply.Reply.Home.Kind == contract.ConversationDiscord {
+				if waiting && reply.Posted != "" && len(ended) == 0 {
+					continue
+				}
+				text := output.Final
+				if reply.Posted != "" {
+					for _, post := range posts {
+						if post.ID == reply.Posted {
+							text = post.Body.(contract.PostCreated).Text
+						}
+					}
+				}
+				if text != "" {
+					var message string
+					if err := tx.QueryRowContext(ctx, "SELECT json_extract(body,'$.message') FROM events WHERE id=?", reply.Reply.ReplyTo).Scan(&message); err != nil {
+						return err
+					}
+					for _, chunk := range room.SplitDiscord(text) {
+						if _, err := tx.ExecContext(ctx, "INSERT INTO discord_outbox(room,session,channel,message,text,group_key) VALUES(?,?,?,?,?,?)", event.Room, session, reply.Reply.Home.Channel, message, chunk, string(event.ID)+":"+reply.Reply.Home.Channel); err != nil {
+							return err
+						}
+						message = ""
+					}
+				}
+				continue
+			}
 			if reply.Reply.Target.Kind != contract.PrincipalSession {
 				continue
 			}
@@ -573,6 +617,9 @@ func (s *Store) InsertDelivery(ctx context.Context, tx *sql.Tx, seq int64, body 
 		return err
 	}
 	home := string(d.Reply.Home.Kind)
+	if d.Reply.Home.Kind == contract.ConversationDiscord {
+		home = string(contract.ConversationDiscord) + ":" + d.Reply.Home.Channel
+	}
 	if d.Reply.Home.Kind == contract.ConversationDM {
 		home += ":" + string(d.Reply.Home.Session)
 	}
@@ -928,6 +975,10 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 			}
 			kind, session, _ := strings.Cut(v.home, ":")
 			v.input.Reply.Home = contract.Conversation{Kind: contract.ConversationKind(kind), Session: contract.SessionID(session)}
+			if contract.ConversationKind(kind) == contract.ConversationDiscord {
+				v.input.Reply.Home.Session = ""
+				v.input.Reply.Home.Channel = session
+			}
 			if (!paused || (replay && v.turn.Valid && contract.TurnID(v.turn.String) == active)) && (active == "" || v.wake || v.turn.Valid) {
 				items = append(items, v)
 			}

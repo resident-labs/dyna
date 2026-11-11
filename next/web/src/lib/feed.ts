@@ -8,7 +8,7 @@ import type { Request } from "./room.svelte.ts";
 import { endCause, failed } from "./jobs.ts";
 
 export type Row =
-  | { kind: "post"; key: string; from: Principal; at: string; text: string; data?: JSONData; dataAttachment?: number | null; attachments: Attachment[]; first: boolean; to: Principal[]; source?: PostSource | null; target?: string; pending?: Pending }
+  | { kind: "post"; discordAuthor?: string; key: string; from: Principal; at: string; text: string; data?: JSONData; dataAttachment?: number | null; attachments: Attachment[]; first: boolean; to: Principal[]; source?: PostSource | null; target?: string; pending?: Pending }
   | { kind: "restarted"; key: string; session: string; at: string }
   // A plain line for what the owner did to a session or the room; describe gives its words.
   | { kind: "notice"; key: string; event: Event; resumedAt?: string }
@@ -94,7 +94,7 @@ const sameAuthor = (a: Principal, b: Principal) => a.kind === b.kind && a.sessio
 // The session an event is about; events without one belong to the room feed only.
 export function subject(event: Event): string | undefined {
   switch (event.type) {
-    case "host.switches_changed": case "engine.restarted": return undefined;
+    case "discord.message": case "host.switches_changed": case "engine.restarted": return undefined;
     case "post.sent": case "git.main_updated": case "git.main_ci_finished": case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": case "session.failed": case "goal.set": case "goal.item_changed": case "goal.ended": case "checkin.due": return undefined;
     case "service.changed": case "service.failed": case "hook.finished": case "hook.due": case "hook.digest": case "notice.posted": case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": return undefined;
     case "op.requested": return event.body.by.session;
@@ -185,6 +185,15 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     if (event.type === "hook.due" || event.type === "tool.failed" || event.type === "hook.finished" && event.body.result !== "failed") continue;
     const firstAt = work[0]?.at ?? (deferred[0]?.kind === "notice" ? deferred[0].event.at : deferred[0]?.kind === "failed" || deferred[0]?.kind === "request" || deferred[0]?.kind === "restarted" || deferred[0]?.kind === "run" ? deferred[0].at : undefined);
     if (firstAt && new Date(firstAt).toDateString() !== new Date(event.at).toDateString()) flush();
+    if (event.type === "discord.message") {
+      if (home.kind === "feed") {
+        const b = event.body;
+        post(`p${event.seq}`, event.seq, event.from, event.at, [b.history, b.text, b.richContent, ...(b.attachments ?? []).map(file => `${file.name} (${file.size} bytes): ${file.url}`)].filter(Boolean).join("\n\n"), [], []);
+        const row = rows.at(-1);
+        if (row?.kind === "post") { row.discordAuthor = `Discord · ${b.author} · #${b.channelName}`; row.first = true; }
+      }
+      continue;
+    }
     if (event.type === "post.sent") {
       if (home.kind === "feed") post(`p${event.seq}`, event.seq, event.from, event.at, event.body.text, [], [], undefined, undefined, sourceLabel(event.body.target));
       continue;
@@ -310,6 +319,7 @@ export function timeSpan(start: string, end: string): string {
 
 // Every event type has a plural group label, including types that do not currently appear in a work block.
 export const eventGroups: Record<Event["type"], string> = {
+ "discord.message": "Discord messages",
   "connect.connector": "Connect connector changes", "account.failed": "account failures", "account.quota_low": "account quota alerts",
   "post.sent": "sent posts", "post.created": "posts", "session.started": "sessions started", "session.closed": "sessions closed", "session.compacted": "compactions",
   "session.restarted": "boxes replaced", "session.moved": "sessions moved", "session.profile_changed": "profiles changed",
@@ -508,6 +518,7 @@ export function workIsBare(events: Event[], name: Name, until?: string): boolean
 // One plain line for an event inside an opened work row.
 export function describe(event: Event, name: Name): string {
   switch (event.type) {
+ case "discord.message": return `Discord · ${event.body.author} · #${event.body.channelName}: ${event.body.text}`;
     case "engine.restarted": return engineRestartText(event.body);
     case "session.restarted": return event.body.imageUpdated ? `${name(event.body.session)}'s box image was updated.` : event.body.stopped || event.body.refreshed ?  `${name(event.body.session)}'s box restarted.` : `${name(event.body.session)}'s box was replaced. Unpushed work in the old volume is gone.`;
     case "session.started": return `${name(event.body.session)} started`;
