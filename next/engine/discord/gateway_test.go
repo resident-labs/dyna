@@ -15,7 +15,7 @@ func TestGatewayFiltersHumansAndMembership(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	received := make(chan discord.Message, 8)
-	g := discord.Gateway{Client: &discord.Client{HTTP: fake.HTTP.Client(), Endpoint: fake.HTTP.URL, Token: fake.Token}, URL: fake.GatewayURL(), Guild: "100", Bot: "900", Receive: func(ctx context.Context, m discord.Message) error { received <- m; return nil }}
+	g := discord.Gateway{Client: &discord.Client{HTTP: fake.HTTP.Client(), Endpoint: fake.HTTP.URL, Token: fake.Token}, URL: fake.GatewayURL(), Bot: "900", Receive: func(ctx context.Context, m discord.Message) error { received <- m; return nil }}
 	done := make(chan struct{})
 	go func() { defer close(done); g.Run(ctx) }()
 	defer func() {

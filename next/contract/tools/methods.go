@@ -84,7 +84,7 @@ var methodTable = []MethodEntry{
 	),
 	method(contract.MethodDiscordConfigure, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodRoomDiscord, contract.ScopeAdmin, OwnerAccess,
-		act("room", "discord", typ[contract.RoomDiscordRequest](), "Show, replace or clear a room's Discord connection (owner only).", "room discord"),
+		act("room", "discord", typ[contract.RoomDiscordRequest](), "Show, add or remove a server/channel mapping to this room (owner only). instructions supplies up to 4,000 characters of the owner's standing words for its answering session; an empty string clears them.", "room discord"),
 	),
 	method(contract.MethodDiscordAPI, contract.ScopeOperate, BoxAccess,
 		act("discord", "api", typ[contract.DiscordAPIRequest](), "Call Discord REST under /api/v10. The engine adds the bot token. Bot account writes and external paths are refused. Rate limits wait and retry once. Returns status and JSON capped at 20 KB; reason is the audit-log reason.", "discord api"),

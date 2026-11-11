@@ -93,6 +93,18 @@ func TestDiscordConnectionInputAndAuthority(t *testing.T) {
 func TestDiscordToolScope(t *testing.T) {
 	s, r, root, ctx, _, _ := discordFixture(t)
 	s.discordDirectory.Apply("GUILD_CREATE", json.RawMessage(`{"id":"101","name":"Other","channels":[{"id":"201","name":"private"}]}`))
+	if err := s.store.CreateRoom(ctx, "other", "other", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO sessions(id,room,name,profile,state,goal,created_at,parent) VALUES('otherroot','other','root','p','open','',0,NULL); INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at) VALUES('otherbox','otherroot','','agent','ready','','',0,0)`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SetDiscordRoute(ctx, store.DiscordRoute{Guild: "101", Room: "other", Session: "otherroot"}, false); err != nil {
+		t.Fatal(err)
+	}
 	for _, path := range []string{"/api/v10/guilds/101/roles", "/api/v10/channels/201/messages", "/api/v10/users/@me", "/api/v10/webhooks/123", "/api/v10/guilds"} {
 		if problem := s.discordScope(ctx, boxCaller(root), "GET", path); problem == nil {
 			t.Errorf("scope allowed %s", path)
@@ -103,11 +115,14 @@ func TestDiscordToolScope(t *testing.T) {
 			t.Errorf("scope refused %s: %v", path, problem)
 		}
 	}
-	// A channel override removes it from a broader server mapping in another room.
-	if err := s.store.CreateRoom(ctx, "other", "other", time.Now()); err != nil {
-		t.Fatal(err)
+	if _, problem := s.DiscordSend(ctx, boxCaller(root), contract.DiscordSendRequest{Channel: "201", Text: "not allowed"}); problem == nil {
+		t.Fatal("send crossed room boundary")
 	}
-	if err := s.store.SetDiscordRoute(ctx, store.DiscordRoute{Guild: "100", Channel: "200", Room: "other", Session: root}, false); err != nil {
+	if _, problem := s.DiscordAPI(ctx, boxCaller(root), contract.DiscordAPIRequest{Method: "PATCH", Path: "/api/v10/guilds/101"}); problem == nil {
+		t.Fatal("API crossed room boundary")
+	}
+	// A channel override removes it from a broader server mapping in another room.
+	if err := s.store.SetDiscordRoute(ctx, store.DiscordRoute{Guild: "100", Channel: "200", Room: "other", Session: "otherroot"}, false); err != nil {
 		t.Fatal(err)
 	}
 	if problem := s.discordScope(ctx, boxCaller(root), "POST", "/api/v10/channels/200/messages"); problem == nil {
@@ -116,6 +131,16 @@ func TestDiscordToolScope(t *testing.T) {
 	// Channel-only mappings cannot administer the server.
 	if err := s.store.SetDiscordRoute(ctx, store.DiscordRoute{Guild: "100", Room: r}, true); err != nil {
 		t.Fatal(err)
+	}
+	s.discordDirectory.Apply("CHANNEL_CREATE", json.RawMessage(`{"id":"202","guild_id":"100","name":"mapped"}`))
+	s.discordDirectory.Apply("THREAD_CREATE", json.RawMessage(`{"id":"203","guild_id":"100","parent_id":"202","type":11}`))
+	if err := s.store.SetDiscordRoute(ctx, store.DiscordRoute{Guild: "100", Channel: "202", Room: r, Session: root}, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, channel := range []string{"202", "203"} {
+		if problem := s.discordScope(ctx, boxCaller(root), "GET", "/api/v10/channels/"+channel+"/messages"); problem != nil {
+			t.Fatalf("channel/thread refused: %s %v", channel, problem)
+		}
 	}
 	if problem := s.discordScope(ctx, boxCaller(root), "PATCH", "/api/v10/guilds/100"); problem == nil {
 		t.Fatal("channel mapping allowed server administration")
@@ -293,5 +318,48 @@ func TestDiscordGatewayToFinalReply(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("final reply did not reach Discord")
+	}
+}
+
+func TestDiscordDMRequiresExactlyOneWholeServerRoute(t *testing.T) {
+	s, r, root, ctx, fake, client := discordFixture(t)
+	if err := s.store.SetDiscordRoute(ctx, store.DiscordRoute{Guild: "100", Room: r}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SetDiscordRoute(ctx, store.DiscordRoute{Guild: "100", Channel: "200", Room: r, Session: root}, false); err != nil {
+		t.Fatal(err)
+	}
+	var m discord.Message
+	if err := json.Unmarshal([]byte(`{"id":"400","channel_id":"500","content":"DM","author":{"id":"2","username":"ari"}}`), &m); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.discordInput(ctx, client, m); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case body := <-fake.Messages:
+		if !strings.Contains(string(body), "mention me") {
+			t.Fatalf("wrong DM response %s", body)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ambiguous DM not answered")
+	}
+	for _, guild := range []string{"100", "101"} {
+		if err := s.store.SetDiscordRoute(ctx, store.DiscordRoute{Guild: guild, Room: r, Session: root}, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m.ID = "401"
+	if err := s.discordInput(ctx, client, m); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-fake.Messages:
+	case <-time.After(time.Second):
+		t.Fatal("multi-server DM not answered")
+	}
+	events, err := s.store.Events(ctx, r, 0, 100, []contract.EventType{"discord.message"})
+	if err != nil || len(events) != 0 {
+		t.Fatalf("ambiguous DM delivered %d %v", len(events), err)
 	}
 }
