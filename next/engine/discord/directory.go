@@ -153,3 +153,22 @@ func (d *Directory) Reset() {
 	d.guilds = map[string]Server{}
 	d.channels = map[string]Channel{}
 }
+
+func (d *Directory) Channels() []Channel {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	result := make([]Channel, 0, len(d.channels))
+	for _, c := range d.channels {
+		result = append(result, c)
+	}
+	slices.SortFunc(result, func(a, b Channel) int {
+		if a.ID < b.ID {
+			return -1
+		}
+		if a.ID > b.ID {
+			return 1
+		}
+		return 0
+	})
+	return result
+}

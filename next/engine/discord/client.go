@@ -146,3 +146,7 @@ type Identity struct {
 	ID   string `json:"id"`
 	Name string `json:"username"`
 }
+
+func (c *Client) ReadMessages(ctx context.Context, path string) (Result, error) {
+	return c.request(ctx, "GET", path, nil, "application/json", "")
+}

@@ -61,9 +61,10 @@ type DiscordSendResponse struct {
 }
 
 type DiscordAttachment struct {
-	Name string `json:"name"`
-	Size int64  `json:"size"`
-	URL  string `json:"url"`
+	Name   string `json:"name"`
+	Size   int64  `json:"size"`
+	URL    string `json:"url"`
+	Status string `json:"status,omitempty"`
 }
 
 // DiscordMessage is text addressed to the room's bot by a human; only Owner is trusted.
@@ -82,7 +83,37 @@ type DiscordMessage struct {
 	RichContent string              `json:"richContent,omitempty"`
 	History     string              `json:"history,omitempty"`
 	Attachments []DiscordAttachment `json:"attachments,omitempty"`
+	Files       []Attachment        `json:"files,omitempty"`
 }
 
 func (DiscordMessage) EventType() EventType { return "discord.message" }
 func (DiscordMessage) isEventBody()         {}
+
+const MethodDiscordRead Method = "discord.read"
+
+type DiscordReadRequest struct {
+	Channel string `json:"channel"`
+	Message string `json:"message,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
+	Before  string `json:"before,omitempty"`
+	After   string `json:"after,omitempty"`
+	Around  string `json:"around,omitempty"`
+}
+type DiscordReadResponse struct {
+	Channel string `json:"channel"`
+	Text    string `json:"text"`
+}
+
+// DiscordFilesRetrieved carries files requested by a running session, not a new Discord input.
+type DiscordFilesRetrieved struct {
+	Channel     string              `json:"channel"`
+	ChannelName string              `json:"channelName"`
+	Message     string              `json:"message"`
+	Author      string              `json:"author"`
+	AuthorID    string              `json:"authorID"`
+	Files       []Attachment        `json:"files,omitempty"`
+	Attachments []DiscordAttachment `json:"attachments,omitempty"`
+}
+
+func (DiscordFilesRetrieved) EventType() EventType { return "discord.files_retrieved" }
+func (DiscordFilesRetrieved) isEventBody()         {}

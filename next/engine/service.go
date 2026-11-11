@@ -88,6 +88,8 @@ type Service struct {
 	discordClientKey  string
 	discordHTTP       *discord.Client
 	discordTyping     map[string]time.Time
+	discordDownloadMu sync.Mutex
+	discordDownloads  map[contract.RoomID][]*discordDownloadCharge
 	githubTools       http.Handler
 	hostexec          HostexecRunner
 	promoteHost       func(context.Context, contract.HostName, bool) error

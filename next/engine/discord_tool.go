@@ -124,18 +124,14 @@ func (s *Service) discordURLScope(ctx context.Context, caller contract.Principal
 	if parts[0] == "users" && method == "GET" && len(parts) == 2 {
 		return nil
 	}
-	session, err := s.store.Session(ctx, caller.Session)
-	if err != nil {
-		return failure(err)
+
+	scope, problem := s.discordReadScope(ctx, caller)
+	if problem != nil {
+		return problem
 	}
-	routes, err := s.store.DiscordRoutes(ctx, "")
-	if err != nil {
-		return failure(err)
-	}
-	authorized := func(r store.DiscordRoute) bool { return r.Room == session.Room }
 	if parts[0] == "guilds" {
-		for _, r := range routes {
-			if r.Guild == parts[1] && r.Channel == "" && authorized(r) {
+		for _, r := range scope.routes {
+			if r.Guild == parts[1] && r.Channel == "" && r.Room == scope.room {
 				return nil
 			}
 		}
@@ -145,31 +141,52 @@ func (s *Service) discordURLScope(ctx context.Context, caller contract.Principal
 		return forbidden()
 	}
 	channel, ok := s.discordDirectory.Channel(parts[1])
-	if !ok {
+	if !ok || !scope.allowsChannel(channel) {
 		return forbidden()
 	}
+	return nil
+}
+
+// discordResourceScope is one request's routing snapshot, shared by REST scope
+// checks and channel-name resolution so both use the same authorization rules.
+type discordResourceScope struct {
+	room   contract.RoomID
+	routes []store.DiscordRoute
+}
+
+func (s *Service) discordReadScope(ctx context.Context, caller contract.Principal) (discordResourceScope, *contract.Error) {
+	session, err := s.store.Session(ctx, caller.Session)
+	if err != nil {
+		return discordResourceScope{}, failure(err)
+	}
+	routes, err := s.store.DiscordRoutes(ctx, "")
+	if err != nil {
+		return discordResourceScope{}, failure(err)
+	}
+	return discordResourceScope{room: session.Room, routes: routes}, nil
+}
+
+func (scope discordResourceScope) allowsChannel(channel discord.Channel) bool {
 	parent := channel.ID
 	if channel.Type == 10 || channel.Type == 11 || channel.Type == 12 {
 		parent = channel.Parent
 	}
 	var server *store.DiscordRoute
-	for i := range routes {
-		r := &routes[i]
+	for i := range scope.routes {
+		r := &scope.routes[i]
 		if r.Guild != channel.Guild {
 			continue
 		}
-		if r.Channel == parent && authorized(*r) {
-			return nil
+		if r.Channel == parent && r.Room == scope.room {
+			return true
 		}
 		if r.Channel == "" {
 			server = r
 		}
 	}
-	if server != nil && authorized(*server) {
-		return nil
-	}
-	return forbidden()
+	return server != nil && server.Room == scope.room
 }
+
 func (s *Service) DiscordAPI(ctx context.Context, caller contract.Principal, req contract.DiscordAPIRequest) (contract.DiscordAPIResponse, *contract.Error) {
 	if body := strings.TrimSpace(string(req.Body)); strings.HasPrefix(body, `"`) {
 		return contract.DiscordAPIResponse{}, invalid("body must be an object or array, not a JSON string")
