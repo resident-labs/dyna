@@ -39,6 +39,9 @@ func (d *Directory) Apply(kind string, data json.RawMessage) {
 		d.channels = map[string]Channel{}
 	}
 	switch kind {
+	case "READY":
+		d.guilds = map[string]Server{}
+		d.channels = map[string]Channel{}
 	case "GUILD_CREATE", "GUILD_UPDATE":
 		var g Server
 		if json.Unmarshal(data, &g) != nil || g.ID == "" {

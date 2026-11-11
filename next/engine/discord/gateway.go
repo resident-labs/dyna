@@ -34,10 +34,10 @@ type Message struct {
 }
 
 type Gateway struct {
-	Client          *Client
-	URL, Guild, Bot string
-	Directory       *Directory
-	Receive         func(context.Context, Message) error
+	Client    *Client
+	URL, Bot  string
+	Directory *Directory
+	Receive   func(context.Context, Message) error
 }
 
 // Run reconnects with bounded backoff. Resume state lives across connections.
@@ -159,6 +159,7 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 			acked = false
 			timer.Reset(time.Duration(h.Interval) * time.Millisecond)
 		case p := <-packets:
+			previousSeq := *seq
 			if p.Seq != nil {
 				*seq = *p.Seq
 			}
@@ -218,6 +219,7 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 					}
 					if addressed {
 						if err := g.Receive(ctx, m); err != nil {
+							*seq = previousSeq
 							return err
 						}
 					}

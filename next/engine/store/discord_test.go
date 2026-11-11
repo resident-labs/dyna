@@ -67,10 +67,12 @@ func discordOutboxRestart(t *testing.T, jobs int) {
 			t.Fatal(err)
 		}
 		start.ID = "start2"
- start.Time=now.Add(InputBatchWindow+time.Second)
-		if active, _, _, err := s.Dispatch(ctx, "root", "turn2", start, false); err != nil || active != "turn2" {t.Fatalf("dispatch %s %v",active,err)}
+		start.Time = now.Add(InputBatchWindow + time.Second)
+		if active, _, _, err := s.Dispatch(ctx, "root", "turn2", start, false); err != nil || active != "turn2" {
+			t.Fatalf("dispatch %s %v", active, err)
+		}
 		end.ID = "end2"
- end.Time=start.Time.Add(time.Second)
+		end.Time = start.Time.Add(time.Second)
 		end.Body = contract.TurnEnded{Session: "root", Turn: "turn2", Outcome: contract.TurnCompleted, Final: "answer"}
 		if err := s.EndTurn(ctx, "root", contract.TurnOutputRequest{Turn: "turn2", Outcome: contract.TurnCompleted, Final: "answer"}, end); err != nil {
 			t.Fatal(err)
