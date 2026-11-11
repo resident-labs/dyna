@@ -116,7 +116,7 @@ func (g *Gateway) Run(ctx context.Context) error {
 			return fatal
 		}
 		if err != nil && ctx.Err() == nil {
-			log.Printf("Discord gateway: %v", err)
+			log.Printf("Discord gateway: %s", strings.ReplaceAll(err.Error(), g.Client.Token, "[redacted]"))
 		}
 		if !g.readyAt.IsZero() && time.Since(g.readyAt) >= time.Minute {
 			delay = 5 * time.Second
