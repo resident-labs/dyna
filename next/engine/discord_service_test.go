@@ -111,7 +111,7 @@ func TestDiscordToolScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, path := range []string{"/api/v10/guilds/101/roles", "/api/v10/channels/201/messages", "/api/v10/users/@me", "/api/v10/webhooks/123", "/api/v10/guilds"} {
-		if problem := s.discordScope(ctx, boxCaller(root), "GET", path); problem == nil {
+		if _, problem := s.DiscordAPI(ctx, boxCaller(root), contract.DiscordAPIRequest{Method: "GET", Path: path}); problem == nil {
 			t.Errorf("scope allowed %s", path)
 		}
 	}

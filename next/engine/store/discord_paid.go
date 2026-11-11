@@ -8,12 +8,18 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+const payDiscordDelivery = `UPDATE deliveries SET reply_kind='none'
+ WHERE to_kind='session' AND to_id=? AND reply_home=? AND reply_kind='final'
+ AND turn IN (SELECT id FROM turns WHERE session=? AND ended_at IS NULL)
+ AND EXISTS (SELECT 1 FROM events WHERE events.id=deliveries.reply_to
+ AND events.type='discord.message' AND json_extract(events.body,'$.message')=?)`
+
 // PayDiscordReply settles only the input explicitly answered by a successful send.
 // The existing delivery reply kind and replies_owed survive engine restarts.
 func (s *Store) PayDiscordReply(ctx context.Context, session contract.SessionID, channel, message string) (bool, error) {
 	paid := false
 	err := s.Write(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `UPDATE deliveries SET reply_kind='none' WHERE to_kind='session' AND to_id=? AND reply_home=? AND reply_kind='final' AND reply_to IN (SELECT id FROM events WHERE type='discord.message' AND json_extract(body,'$.message')=?) AND turn IN (SELECT id FROM turns WHERE session=? AND ended_at IS NULL)`, session, "discord:"+channel, message, session)
+		result, err := tx.ExecContext(ctx, payDiscordDelivery, session, "discord:"+channel, session, message)
 		if err != nil {
 			return err
 		}
