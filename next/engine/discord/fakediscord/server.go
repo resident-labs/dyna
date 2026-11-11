@@ -67,6 +67,23 @@ func New(t testing.TB) *Server {
 			history := s.history
 			s.mu.Unlock()
 			json.NewEncoder(w).Encode(history)
+		case strings.Contains(r.URL.Path, "/messages/") && r.Method == "GET":
+			s.mu.Lock()
+			history := s.history
+			s.mu.Unlock()
+			id := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+			for _, message := range history {
+				data, _ := json.Marshal(message)
+				var identity struct {
+					ID string `json:"id"`
+				}
+				json.Unmarshal(data, &identity)
+				if identity.ID == id {
+					w.Write(data)
+					return
+				}
+			}
+			w.WriteHeader(404)
 		case strings.HasPrefix(r.URL.Path, "/api/v10/guilds/"):
 			w.Write([]byte(`{"id":"100","name":"Horizon"}`))
 		case strings.HasPrefix(r.URL.Path, "/api/v10/channels/"):

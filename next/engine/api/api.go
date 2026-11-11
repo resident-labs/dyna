@@ -362,6 +362,14 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 		return contract.DiscordAPIResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Discord unavailable"}
 	})
+	call(mux, contract.MethodDiscordRead, c, func(ctx context.Context, who contract.Principal, req contract.DiscordReadRequest) (contract.DiscordReadResponse, *contract.Error) {
+		if service, ok := a.service.(interface {
+			DiscordRead(context.Context, contract.Principal, contract.DiscordReadRequest) (contract.DiscordReadResponse, *contract.Error)
+		}); ok {
+			return service.DiscordRead(ctx, who, req)
+		}
+		return contract.DiscordReadResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Discord unavailable"}
+	})
 	call(mux, contract.MethodDiscordSend, c, func(ctx context.Context, who contract.Principal, req contract.DiscordSendRequest) (contract.DiscordSendResponse, *contract.Error) {
 		if service, ok := a.service.(interface {
 			DiscordSend(context.Context, contract.Principal, contract.DiscordSendRequest) (contract.DiscordSendResponse, *contract.Error)

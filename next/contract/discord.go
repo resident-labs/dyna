@@ -88,3 +88,18 @@ type DiscordMessage struct {
 
 func (DiscordMessage) EventType() EventType { return "discord.message" }
 func (DiscordMessage) isEventBody()         {}
+
+const MethodDiscordRead Method = "discord.read"
+
+type DiscordReadRequest struct {
+	Channel string `json:"channel"`
+	Message string `json:"message,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
+	Before  string `json:"before,omitempty"`
+	After   string `json:"after,omitempty"`
+	Around  string `json:"around,omitempty"`
+}
+type DiscordReadResponse struct {
+	Channel string `json:"channel"`
+	Text    string `json:"text"`
+}
