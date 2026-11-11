@@ -333,13 +333,7 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		return contract.ContextSnapshotResponse{}, failure(err)
 	}
 	lines = nil
-	allowed := false
-	for _, r := range routes {
-		if caller.Session == r.Session || tree.Above(caller.Session, r.Session) {
-			allowed = true
-			break
-		}
-	}
+	allowed := s.discordOnPath(caller.Session, routes, tree)
 	if bot.ID != "" && allowed {
 		for _, r := range routes {
 			answering, err := s.store.Session(ctx, r.Session)

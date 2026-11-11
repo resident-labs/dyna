@@ -2,14 +2,24 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/discord"
 	"github.com/resident-labs/dyna/engine/store"
+	"github.com/resident-labs/dyna/room"
 	"net/url"
 	"os"
 	"strings"
 )
 
+func (s *Service) discordOnPath(session contract.SessionID, routes []store.DiscordRoute, tree room.Tree) bool {
+	for _, r := range routes {
+		if session == r.Session || tree.Above(session, r.Session) {
+			return true
+		}
+	}
+	return false
+}
 func (s *Service) discordClient(ctx context.Context, caller contract.Principal) (*discord.Client, *contract.Error) {
 	if caller.Kind != contract.PrincipalSession || s.discordTokens == nil {
 		return nil, forbidden()
@@ -26,14 +36,7 @@ func (s *Service) discordClient(ctx context.Context, caller contract.Principal) 
 	if err != nil {
 		return nil, failure(err)
 	}
-	allowed := false
-	for _, r := range routes {
-		if caller.Session == r.Session || tree.Above(caller.Session, r.Session) {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
+	if !s.discordOnPath(caller.Session, routes, tree) {
 		return nil, forbidden()
 	}
 	client, err := s.machineDiscordClient(ctx)
@@ -44,12 +47,86 @@ func (s *Service) discordClient(ctx context.Context, caller contract.Principal) 
 }
 
 // discordScope checks the URL's resource against all routes, including channel overrides.
-func (s *Service) discordScope(ctx context.Context, caller contract.Principal, method, path string) *contract.Error {
+func (s *Service) discordScope(ctx context.Context, caller contract.Principal, method, path string, bodies ...json.RawMessage) *contract.Error {
+	if problem := s.discordURLScope(ctx, caller, method, path); problem != nil {
+		return problem
+	}
+	u, _ := url.Parse(path)
+	query, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return forbidden()
+	}
+	check := func(key string, value any) *contract.Error {
+		resource := ""
+		if key == "guild_id" {
+			resource = "guilds"
+		} else if strings.HasSuffix(key, "channel_id") {
+			resource = "channels"
+		} else {
+			return nil
+		}
+		id, ok := value.(string)
+		if !ok || !discordID(id) {
+			return forbidden()
+		}
+		return s.discordURLScope(ctx, caller, "GET", "/api/v10/"+resource+"/"+id)
+	}
+	for key, values := range query {
+		for _, value := range values {
+			if problem := check(key, value); problem != nil {
+				return problem
+			}
+		}
+	}
+	var walk func(any) *contract.Error
+	walk = func(value any) *contract.Error {
+		switch value := value.(type) {
+		case map[string]any:
+			for key, child := range value {
+				if problem := check(key, child); problem != nil {
+					return problem
+				}
+				if problem := walk(child); problem != nil {
+					return problem
+				}
+			}
+		case []any:
+			for _, child := range value {
+				if problem := walk(child); problem != nil {
+					return problem
+				}
+			}
+		}
+		return nil
+	}
+	for _, body := range bodies {
+		if len(body) == 0 {
+			continue
+		}
+		var value any
+		if json.Unmarshal(body, &value) != nil {
+			return invalid("invalid JSON body")
+		}
+		if problem := walk(value); problem != nil {
+			return problem
+		}
+	}
+	return nil
+}
+func (s *Service) discordURLScope(ctx context.Context, caller contract.Principal, method, path string) *contract.Error {
 	u, err := url.Parse(path)
 	if err != nil || u.IsAbs() || u.Host != "" || !strings.HasPrefix(u.Path, "/api/v10/") {
 		return forbidden()
 	}
+	if strings.Contains(u.EscapedPath(), "%") || strings.ContainsAny(u.Path, "\\\r\n") {
+		return forbidden()
+	}
 	parts := strings.Split(strings.TrimPrefix(u.Path, "/api/v10/"), "/")
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." {
+			return forbidden()
+		}
+	}
 	if len(parts) < 2 || !discordID(parts[1]) {
 		return forbidden()
 	}
@@ -110,7 +187,7 @@ func (s *Service) DiscordAPI(ctx context.Context, caller contract.Principal, req
 	if problem != nil {
 		return contract.DiscordAPIResponse{}, problem
 	}
-	if problem := s.discordScope(ctx, caller, req.Method, req.Path); problem != nil {
+	if problem := s.discordScope(ctx, caller, req.Method, req.Path, req.Body); problem != nil {
 		return contract.DiscordAPIResponse{}, problem
 	}
 	result, err := client.API(ctx, req.Method, req.Path, req.Body, req.Reason)
@@ -126,9 +203,6 @@ func (s *Service) DiscordSend(ctx context.Context, caller contract.Principal, re
 	}
 	if problem := s.discordScope(ctx, caller, "POST", "/api/v10/channels/"+req.Channel+"/messages"); problem != nil {
 		return contract.DiscordSendResponse{}, problem
-	}
-	if req.Channel == "" || strings.IndexFunc(req.Channel, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
-		return contract.DiscordSendResponse{}, invalid("invalid channel ID")
 	}
 	if len(req.Paths) > 0 {
 		return contract.DiscordSendResponse{}, invalid("paths must be uploaded by the box")

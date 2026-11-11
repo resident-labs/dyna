@@ -6,90 +6,56 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/resident-labs/dyna/room"
 	"io"
 	"mime/multipart"
-	"strings"
-	"unicode/utf16"
+	"time"
 )
 
-// Split respects Discord's UTF-16 limit and preserves fenced blocks across messages.
-func Split(text string) []string {
-	var chunks []string
-	fence := ""
-	prefix := ""
-	for text != "" {
-		capacity := 2000 - len(utf16.Encode([]rune(prefix))) - 8
-		runes := []rune(text)
-		units, end, lastLine := 0, 0, 0
-		for end < len(runes) {
-			n := 1
-			if runes[end] > 0xffff {
-				n = 2
-			}
-			if units+n > capacity {
-				break
-			}
-			units += n
-			end++
-			if runes[end-1] == '\n' {
-				lastLine = end
-			}
-		}
-		if end < len(runes) && lastLine > 0 {
-			end = lastLine
-		}
-		piece := string(runes[:end])
-		text = string(runes[end:])
-		for _, line := range strings.Split(piece, "\n") {
-			if strings.HasPrefix(line, "```") {
-				if fence != "" {
-					fence = ""
-				} else {
-					fence = strings.TrimSpace(strings.TrimPrefix(line, "```"))
-					if len([]rune(fence)) > 32 {
-						fence = " "
-					}
-					if fence == "" {
-						fence = " "
-					}
-				}
-			}
-		}
-		chunk := prefix + piece
-		prefix = ""
-		if fence != "" && text != "" {
-			chunk += "\n```"
-			prefix = "```" + strings.TrimSpace(fence) + "\n"
-		}
-		chunks = append(chunks, chunk)
-	}
-	return chunks
+// Split preserves the public transport helper while sharing formatting with EndTurn.
+func Split(text string) []string { return room.SplitDiscord(text) }
+
+type SendError struct {
+	Status     int
+	RetryAfter time.Duration
 }
+
+func (e *SendError) Error() string { return fmt.Sprintf("Discord send failed (HTTP %d)", e.Status) }
 
 func (c *Client) Send(ctx context.Context, channel, text, reply string) ([]string, int, error) {
 	var ids []string
 	for _, part := range Split(text) {
-		body := map[string]any{"content": part, "allowed_mentions": map[string]any{"parse": []string{"users"}}}
-		if reply != "" {
-			body["message_reference"] = map[string]any{"message_id": reply, "fail_if_not_exists": false}
-		}
-		data, _ := json.Marshal(body)
-		r, err := c.API(ctx, "POST", fmt.Sprintf("/api/v10/channels/%s/messages", channel), data, "")
+		id, status, err := c.SendMessage(ctx, channel, part, reply)
 		if err != nil {
-			return ids, 0, err
+			return ids, status, err
 		}
-		if r.Status < 200 || r.Status >= 300 {
-			return ids, r.Status, fmt.Errorf("Discord send failed (HTTP %d)", r.Status)
-		}
-		var message struct {
-			ID string `json:"id"`
-		}
-		if json.Unmarshal(r.Body, &message) != nil || message.ID == "" {
-			return ids, r.Status, errors.New("invalid Discord message response")
-		}
-		ids = append(ids, message.ID)
+		ids = append(ids, id)
+		reply = ""
 	}
 	return ids, 200, nil
+}
+
+// SendMessage sends one already-sized message, as used by the durable outbox.
+func (c *Client) SendMessage(ctx context.Context, channel, text, reply string) (string, int, error) {
+	body := map[string]any{"content": text, "allowed_mentions": map[string]any{"parse": []string{"users"}}}
+	if reply != "" {
+		body["message_reference"] = map[string]any{"message_id": reply, "fail_if_not_exists": false}
+	}
+	data, _ := json.Marshal(body)
+	r, err := c.API(ctx, "POST", fmt.Sprintf("/api/v10/channels/%s/messages", channel), data, "")
+	if err != nil {
+		return "", 0, err
+	}
+	if r.Status < 200 || r.Status >= 300 {
+		return "", r.Status, &SendError{Status: r.Status, RetryAfter: r.RetryAfter}
+	}
+	var message struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(r.Body, &message) != nil || message.ID == "" {
+		return "", r.Status, errors.New("invalid Discord message response")
+	}
+	return message.ID, r.Status, nil
 }
 
 type File struct {

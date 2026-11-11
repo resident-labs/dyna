@@ -21,12 +21,16 @@ type Server struct {
 	connections  int
 	history      []any
 	historyCalls int
+	requests     int
 }
 
 func New(t testing.TB) *Server {
 	t.Helper()
 	s := &Server{Token: "fake-discord-secret", Messages: make(chan json.RawMessage, 64), Events: make(chan any, 64)}
 	s.HTTP = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		s.requests++
+		s.mu.Unlock()
 		if r.URL.Path == "/gateway" {
 			s.gateway(w, r)
 			return
@@ -75,6 +79,7 @@ func New(t testing.TB) *Server {
 	return s
 }
 func (s *Server) SetHistory(messages []any) { s.mu.Lock(); defer s.mu.Unlock(); s.history = messages }
+func (s *Server) Requests() int             { s.mu.Lock(); defer s.mu.Unlock(); return s.requests }
 func (s *Server) Connections() int          { s.mu.Lock(); defer s.mu.Unlock(); return s.connections }
 func (s *Server) HistoryCalls() int         { s.mu.Lock(); defer s.mu.Unlock(); return s.historyCalls }
 func (s *Server) GatewayURL() string {

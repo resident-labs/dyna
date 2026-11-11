@@ -87,7 +87,7 @@ var methodTable = []MethodEntry{
 		act("room", "discord", typ[contract.RoomDiscordRequest](), "Show, add or remove a server/channel mapping to this room (owner only). instructions supplies up to 4,000 characters of the owner's standing words for its answering session; an empty string clears them.", "room discord"),
 	),
 	method(contract.MethodDiscordAPI, contract.ScopeOperate, BoxAccess,
-		act("discord", "api", typ[contract.DiscordAPIRequest](), "Call Discord REST under /api/v10. The engine adds the bot token. Bot account writes and external paths are refused. Rate limits wait and retry once. Returns status and JSON capped at 20 KB; reason is the audit-log reason.", "discord api"),
+		act("discord", "api", typ[contract.DiscordAPIRequest](), "Call Discord REST under /api/v10. The engine adds the bot token. Bot account writes and external paths are refused. Paths must have no escaped, empty or dot segments. Query and nested body fields named guild_id or ending in channel_id must be string IDs in your room's mapped scope. Rate limits share a cooldown and retry once. Returns status and JSON capped at 20 KB; reason is the audit-log reason.", "discord api"),
 	),
 	method(contract.MethodDiscordSend, contract.ScopeOperate, BoxAccess,
 		act("discord", "send", typ[contract.DiscordSendRequest](), "Send a Discord message, optionally replying to a message or attaching box files. Use for messages other than your final reply. Final replies go to every Discord channel you owe, replying to its newest input.", "discord send"),

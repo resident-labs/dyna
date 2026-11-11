@@ -24,11 +24,18 @@ func (s *Service) machineDiscordClient(ctx context.Context) (*discord.Client, er
 	if b.Credential == "" {
 		return nil, errors.New("Discord bot is not configured")
 	}
+	s.discordRuntime.Lock()
+	defer s.discordRuntime.Unlock()
+	if s.discordHTTP != nil && s.discordClientKey == b.Credential {
+		return s.discordHTTP, nil
+	}
 	token, err := s.discordTokens.Read(contract.RoomID(b.Credential))
 	if err != nil {
 		return nil, err
 	}
-	return &discord.Client{HTTP: &http.Client{Timeout: 30 * time.Second}, Endpoint: s.discordEndpoint, Token: token}, nil
+	s.discordHTTP = &discord.Client{HTTP: &http.Client{Timeout: 30 * time.Second}, Endpoint: s.discordEndpoint, Token: token}
+	s.discordClientKey = b.Credential
+	return s.discordHTTP, nil
 }
 func (s *Service) runDiscord(ctx context.Context, gateway string) {
 	var credential string
@@ -63,7 +70,15 @@ func (s *Service) runDiscord(ctx context.Context, gateway string) {
 						defer close(finished)
 						gatewayDone := make(chan struct{})
 						g := discord.Gateway{Client: client, URL: gateway, Bot: b.ID, Directory: &s.discordDirectory, Receive: func(ctx context.Context, m discord.Message) error { return s.discordInput(ctx, client, m) }}
-						go func() { defer close(gatewayDone); g.Run(child) }()
+						go func() {
+							defer close(gatewayDone)
+							if b.Failure != "" {
+								return
+							}
+							if err := g.Run(child); err != nil && child.Err() == nil {
+								_ = s.store.FailDiscordGateway(child, b.Credential, err.Error())
+							}
+						}()
 						s.discordDrain(child, client)
 						<-gatewayDone
 					}()
@@ -162,21 +177,21 @@ func (s *Service) discordInput(ctx context.Context, client *discord.Client, m di
 	}
 	b := contract.DiscordMessage{Channel: m.Channel, ChannelName: name, Thread: thread, GuildName: guildName, Author: m.Author.Username, DisplayName: display, Roles: roles, AuthorID: m.Author.ID, Owner: bot.Owner != "" && bot.Owner == m.Author.ID, Message: m.ID, Text: m.Content}
 	if m.Guild != "" {
-		b.History = client.History(ctx, m.Channel, m.ID, bot.ID, bot.Owner)
+		b.History = client.History(ctx, m.Channel, m.ID, bot.ID)
 	}
 	for _, embed := range m.Embeds {
 		if embed.Title != "" {
-			b.Text += "\n" + embed.Title
+			b.RichContent += "\n" + embed.Title
 		}
 		if embed.Description != "" {
-			b.Text += "\n" + embed.Description
+			b.RichContent += "\n" + embed.Description
 		}
 	}
 	for _, sticker := range m.Stickers {
-		b.Text += "\n[sticker] " + sticker.Name
+		b.RichContent += "\n[sticker] " + sticker.Name
 	}
 	if m.Poll != nil {
-		b.Text += "\n[poll] " + m.Poll.Question.Text
+		b.RichContent += "\n[poll] " + m.Poll.Question.Text
 	}
 	for _, a := range m.Attachments {
 		b.Attachments = append(b.Attachments, contract.DiscordAttachment{Name: a.Name, Size: a.Size, URL: a.URL})
@@ -189,7 +204,16 @@ func (s *Service) discordInput(ctx context.Context, client *discord.Client, m di
 	if err != nil {
 		return err
 	}
-	return s.store.DiscordInput(ctx, event, selected.Session)
+	if err := s.store.DiscordInput(ctx, event, selected.Session); err != nil {
+		return err
+	}
+	s.discordRuntime.Lock()
+	if s.discordTyping == nil {
+		s.discordTyping = map[string]time.Time{}
+	}
+	s.discordTyping[m.Channel] = time.Now().Add(10 * time.Minute)
+	s.discordRuntime.Unlock()
+	return nil
 }
 
 func (s *Service) discordDrain(ctx context.Context, client *discord.Client) {
@@ -199,8 +223,8 @@ func (s *Service) discordDrain(ctx context.Context, client *discord.Client) {
 	for {
 		reply, found, err := s.store.NextDiscordReply(ctx)
 		if err == nil && found {
-			_, status, sendErr := client.Send(ctx, reply.Channel, reply.Text, reply.Message)
-			if sendErr == nil || status == 403 || status == 404 {
+			_, status, sendErr := client.SendMessage(ctx, reply.Channel, reply.Text, reply.Message)
+			if sendErr == nil || (status >= 400 && status < 500 && status != 429) {
 				var notice *contract.Event
 				if sendErr != nil {
 					event, err := s.event(reply.Room, contract.Principal{Kind: contract.PrincipalEngine}, contract.SessionNotice{Session: reply.Session, Text: fmt.Sprintf("Discord reply to channel %s failed permanently (HTTP %d).", reply.Channel, status)})
@@ -209,23 +233,41 @@ func (s *Service) discordDrain(ctx context.Context, client *discord.Client) {
 					}
 					notice = &event
 				}
-				_ = s.store.DiscordReplySent(ctx, reply.ID, notice)
+				if s.store.DiscordReplySent(ctx, reply.ID, notice) == nil {
+					s.discordRuntime.Lock()
+					delete(s.discordTyping, reply.Channel)
+					s.discordRuntime.Unlock()
+				}
+			} else {
+				delay := min(time.Second*time.Duration(1<<min(reply.Attempts, 6)), 60*time.Second)
+				var response *discord.SendError
+				if errors.As(sendErr, &response) {
+					delay = max(delay, response.RetryAfter)
+				}
+				_ = s.store.RetryDiscordReply(ctx, reply.ID, time.Now().Add(delay))
 			}
 		}
-		channels, err := s.store.DiscordTyping(ctx)
-		if err == nil {
-			active := map[string]bool{}
-			for _, channel := range channels {
-				active[channel] = true
-				if time.Since(typing[channel]) >= 8*time.Second {
-					_, _ = client.API(ctx, "POST", "/api/v10/channels/"+channel+"/typing", nil, "")
-					typing[channel] = time.Now()
-				}
+		var channels []string
+		s.discordRuntime.Lock()
+		for channel, expiry := range s.discordTyping {
+			if time.Now().After(expiry) {
+				delete(s.discordTyping, channel)
+			} else {
+				channels = append(channels, channel)
 			}
-			for channel := range typing {
-				if !active[channel] {
-					delete(typing, channel)
-				}
+		}
+		s.discordRuntime.Unlock()
+		active := map[string]bool{}
+		for _, channel := range channels {
+			active[channel] = true
+			if time.Since(typing[channel]) >= 8*time.Second {
+				_, _ = client.API(ctx, "POST", "/api/v10/channels/"+channel+"/typing", nil, "")
+				typing[channel] = time.Now()
+			}
+		}
+		for channel := range typing {
+			if !active[channel] {
+				delete(typing, channel)
 			}
 		}
 		select {

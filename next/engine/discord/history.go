@@ -8,7 +8,7 @@ import (
 )
 
 // History is best effort: a single read, newest first from Discord, rendered oldest first.
-func (c *Client) History(ctx context.Context, channel, before, bot string, owner ...string) string {
+func (c *Client) History(ctx context.Context, channel, before, bot string) string {
 	r, err := c.request(ctx, "GET", "/api/v10/channels/"+url.PathEscape(channel)+"/messages?limit=20&before="+url.QueryEscape(before), nil, "application/json", "")
 	if err != nil || r.Status != 200 {
 		return ""
@@ -26,11 +26,7 @@ func (c *Client) History(ctx context.Context, channel, before, bot string, owner
 		if len(lines) == 20 {
 			break
 		}
-		author := "@" + m.Author.Username
-		if len(owner) > 0 && owner[0] != "" && m.Author.ID == owner[0] {
-			author = "owner"
-		}
-		line := []rune(author + ": " + m.Content)
+		line := []rune(m.Author.Username + ": " + m.Content)
 		if len(lines) > 0 {
 			remaining--
 		}

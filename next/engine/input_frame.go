@@ -85,13 +85,14 @@ func fileSize(bytes int64) string {
 	return fmt.Sprintf("%.1f MB", float64(bytes)/(1<<20))
 }
 
+func frameField(text string) string { return strings.NewReplacer("\r", " ", "\n", " ").Replace(text) }
 func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, event contract.Event, delivery contract.Delivery) (string, []contract.TurnFile, error) {
 	if b, ok := event.Body.(contract.DiscordMessage); ok {
 		text, err := room.RenderDelivery(b)
 		if b.Owner {
-			return fmt.Sprintf("[Dyna] From the owner, on Discord in #%s of server %s. Your final response goes to that channel as a reply.\n%s", strings.ReplaceAll(b.ChannelName, "\n", " "), strings.ReplaceAll(b.GuildName, "\n", " "), text), nil, err
+			return fmt.Sprintf("[Dyna] From the owner, on Discord in #%s of server %s. Your final response goes to that channel as a reply.\n%s", frameField(b.ChannelName), frameField(b.GuildName), text), nil, err
 		}
-		return fmt.Sprintf("[Dyna] From Discord user %q (%s, ID %s, roles: %s) in #%s of server %s. Your final response goes to that channel as a reply.\n%s", b.DisplayName, b.Author, b.AuthorID, strings.Join(b.Roles, ", "), strings.ReplaceAll(b.ChannelName, "\n", " "), strings.ReplaceAll(b.GuildName, "\n", " "), text), nil, err
+		return fmt.Sprintf("[Dyna] From Discord user %q (%s, ID %s, roles: %s) in #%s of server %s. Your final response goes to that channel as a reply.\n%s", frameField(b.DisplayName), frameField(b.Author), b.AuthorID, frameField(strings.Join(b.Roles, ", ")), frameField(b.ChannelName), frameField(b.GuildName), text), nil, err
 	}
 	var sender string
 	if post, ok := event.Body.(contract.PostCreated); ok && post.Source != nil {
