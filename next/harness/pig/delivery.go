@@ -2,7 +2,6 @@ package pig
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -83,13 +82,13 @@ func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, e
 		return false, err
 	}
 	defer file.Close()
+	d := &h.delivered
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	info, err := file.Stat()
 	if err != nil {
 		return false, err
 	}
-	d := &h.delivered
-	d.mu.Lock()
-	defer d.mu.Unlock()
 	// Another file, or one that shrank, is read from its start.
 	if d.path != path || info.Size() < d.read {
 		d.path, d.read, d.seen = path, 0, make(map[string]struct{})
@@ -108,9 +107,8 @@ func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, e
 			return false, err
 		}
 		d.read += int64(len(line))
-		// Only a line that holds the member's name can name a delivery, so the rest are not decoded.
 		var entry recorded
-		if !bytes.Contains(line, []byte(deliveryMember)) || json.Unmarshal(line, &entry) != nil {
+		if json.Unmarshal(line, &entry) != nil {
 			continue
 		}
 		if delivery, ok := entry.delivery(); ok {
