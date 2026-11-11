@@ -20,6 +20,9 @@ else is outside text regardless of names. The frame gives full IDs and roles.
 
 ## Who answers
 
+Start the front session without a goal: it has no finish line, and an idle session with an open goal is reported as stalled.
+To pass a question up, give the parent the channel and message IDs; the parent answers with `discord send` and `replyTo`.
+
 For a public server, use a cheap front session: a child of root with no repository
 and no host access. It answers people, administers Discord, and posts to its parent
 when something needs the room. Root replies like any parent; the front relays by

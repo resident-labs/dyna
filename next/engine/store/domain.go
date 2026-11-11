@@ -630,6 +630,8 @@ func (s *Store) InsertDelivery(ctx context.Context, tx *sql.Tx, seq int64, body 
 	}
 	if !immediate {
 		switch body := body.(type) {
+		case contract.DiscordMessage:
+			immediate = true
 		case contract.PostCreated:
 			// Non-null common parents identify siblings. Roots are siblings
 			// only across rooms, never merely because both parent fields are null.
@@ -967,6 +969,7 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 			immediate bool
 		}
 		var items []item
+		discordTaken := false
 		for rows.Next() {
 			var v item
 			if err := rows.Scan(&v.input.Seq, &v.input.Surface, &v.state, &v.queue, &v.event, &v.turn, &v.input.Reply.Kind, &v.input.Reply.Target.Kind, &v.input.Reply.Target.Session, &v.home, &v.input.Reply.ReplyTo, &v.wake, &v.input.MeantFor, &v.input.Why, &v.immediate); err != nil {
@@ -980,6 +983,12 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 				v.input.Reply.Home.Channel = session
 			}
 			if (!paused || (replay && v.turn.Valid && contract.TurnID(v.turn.String) == active)) && (active == "" || v.wake || v.turn.Valid) {
+				if v.input.Surface == contract.SurfaceDiscord && v.wake && !v.turn.Valid {
+					if active != "" || discordTaken {
+						continue
+					}
+					discordTaken = true
+				}
 				items = append(items, v)
 			}
 		}
