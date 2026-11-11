@@ -187,6 +187,25 @@ func (s *Service) DiscordAPI(ctx context.Context, caller contract.Principal, req
 	if problem != nil {
 		return contract.DiscordAPIResponse{}, problem
 	}
+	u, err := url.Parse(req.Path)
+	if err != nil || u.IsAbs() || u.Host != "" || u.Fragment != "" || !strings.HasPrefix(u.Path, "/") || strings.Contains(u.EscapedPath(), "%") || strings.ContainsAny(u.Path, "\\\r\n") {
+		return contract.DiscordAPIResponse{}, invalid("path must look like /channels/123/messages or /api/v10/channels/123/messages, with no escaped, empty or dot segments")
+	}
+	path := u.Path
+	if strings.HasPrefix(path, "/api/v10/") {
+		path = strings.TrimPrefix(path, "/api/v10")
+	}
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." {
+			return contract.DiscordAPIResponse{}, invalid("path must look like /channels/123/messages or /api/v10/channels/123/messages, with no escaped, empty or dot segments")
+		}
+	}
+	if len(parts) < 2 || (parts[0] != "channels" && parts[0] != "guilds" && parts[0] != "users") || !discordID(parts[1]) {
+		return contract.DiscordAPIResponse{}, invalid("path must look like /channels/123/messages or /api/v10/channels/123/messages")
+	}
+	u.Path = "/api/v10" + path
+	req.Path = u.String()
 	if problem := s.discordScope(ctx, caller, req.Method, req.Path, req.Body); problem != nil {
 		return contract.DiscordAPIResponse{}, problem
 	}
@@ -251,11 +270,34 @@ func (s *Service) DiscordSend(ctx context.Context, caller contract.Principal, re
 			}
 			ids = append(ids, sent...)
 		}
+		if len(ids) > 0 && req.ReplyTo != "" {
+			if err := s.payDiscordReply(ctx, caller.Session, req.Channel, req.ReplyTo); err != nil {
+				return contract.DiscordSendResponse{}, failure(err)
+			}
+		}
 		return contract.DiscordSendResponse{Messages: ids}, nil
 	}
 	ids, _, err := client.Send(ctx, req.Channel, req.Text, req.ReplyTo)
 	if err != nil {
 		return contract.DiscordSendResponse{}, failure(err)
 	}
+	if len(ids) > 0 && req.ReplyTo != "" {
+		if err := s.payDiscordReply(ctx, caller.Session, req.Channel, req.ReplyTo); err != nil {
+			return contract.DiscordSendResponse{}, failure(err)
+		}
+	}
 	return contract.DiscordSendResponse{Messages: ids}, nil
+}
+
+func (s *Service) payDiscordReply(ctx context.Context, session contract.SessionID, channel, message string) error {
+	paid, err := s.store.PayDiscordReply(ctx, session, channel, message)
+	if err != nil {
+		return err
+	}
+	if paid {
+		s.discordRuntime.Lock()
+		delete(s.discordTyping, channel)
+		s.discordRuntime.Unlock()
+	}
+	return nil
 }
