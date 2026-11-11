@@ -485,7 +485,8 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 							}
 						}
 					}
-					if (reply.Reply.Target.Kind == contract.PrincipalSession || reply.Reply.Home.Kind == contract.ConversationDiscord) && reply.Posted == "" && !slices.ContainsFunc(later, func(to contract.ReplyChannel) bool { return answers(to)(reply) }) {
+					// A session is answered again once the wait ends. Discord got this turn's text as its reply, so only a turn that said nothing still owes it.
+					if (reply.Reply.Target.Kind == contract.PrincipalSession || reply.Reply.Home.Kind == contract.ConversationDiscord && output.Final == "") && reply.Posted == "" && !slices.ContainsFunc(later, func(to contract.ReplyChannel) bool { return answers(to)(reply) }) {
 						later = append(later, reply.Reply)
 					}
 				}
