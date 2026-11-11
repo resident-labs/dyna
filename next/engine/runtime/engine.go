@@ -28,6 +28,7 @@ import (
 	"github.com/resident-labs/dyna/engine/ci"
 	"github.com/resident-labs/dyna/engine/compose"
 	"github.com/resident-labs/dyna/engine/connect"
+	"github.com/resident-labs/dyna/engine/credential"
 	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/githubaccount"
 	"github.com/resident-labs/dyna/engine/images"
@@ -208,7 +209,7 @@ func Run(ctx context.Context, cfg Config) error {
 	service.SetInstructionsPublisher(boxes.PublishInstructions)
 	boxes.Addons = service.Addons()
 	go boxes.watchInstructions(boxCtx)
-	service.StartDiscord(ctx, &githubaccount.Files{Dir: filepath.Join(cfg.Data, "discord-accounts")}, "https://discord.com", "wss://gateway.discord.gg")
+	service.StartDiscord(ctx, &credential.Files{Dir: filepath.Join(cfg.Data, "discord-accounts")}, "https://discord.com", "wss://gateway.discord.gg")
 	credentials := &githubaccount.Resolver{Store: st, Tokens: &githubaccount.Files{Dir: filepath.Join(cfg.Data, "github-accounts")}, DefaultToken: token}
 	mirror := &enginegit.Mirror{Layout: layout, Token: token, ResolveToken: credentials.Repo, Runner: enginegit.GitRunner{}, VerifyAccount: func(ctx context.Context, repo contract.RepoName, token, login string) error {
 		room, err := st.RepoRoom(ctx, repo)

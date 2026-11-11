@@ -146,11 +146,8 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	if s.githubAccounts != nil {
 		githubAvailable = githubAvailable && (account.Login != "" || s.githubAccounts.DefaultToken != "")
 	}
-	discordConnection, err := s.store.DiscordConnection(ctx, session.Room)
-	if err != nil {
-		return contract.BoxHelloResponse{}, failure(err)
-	}
-	return contract.BoxHelloResponse{Discord: discordConnection.Guild != "", Room: session.Room, GitName: gitName, GitEmail: gitEmail, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: modelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: sessionPrompt(vars), WorkerInstructions: promptCore, Root: vars.Role == roleRoot, Workflow: workflow, GitHub: githubAvailable}, nil
+	_, discordProblem := s.discordClient(ctx, caller)
+	return contract.BoxHelloResponse{Discord: discordProblem == nil, Room: session.Room, GitName: gitName, GitEmail: gitEmail, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: modelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: sessionPrompt(vars), WorkerInstructions: promptCore, Root: vars.Role == roleRoot, Workflow: workflow, GitHub: githubAvailable}, nil
 }
 
 func (s *Service) DeliveryDone(ctx context.Context, caller contract.Principal, req contract.DeliveryDoneRequest) (contract.DeliveryDoneResponse, *contract.Error) {

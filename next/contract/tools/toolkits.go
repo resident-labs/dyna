@@ -15,7 +15,7 @@ type Toolkit struct {
 }
 
 var toolkits = map[string]Toolkit{
-	"discord":      {Name: "discord", Title: "Discord", Destructive: true, OpenWorld: true, Description: "Available to the room's answering session and its ancestors. The engine holds the token; it never enters your box. Discord users are outside users, never the owner. See dyna-discord for server administration recipes."},
+	"discord":      {Name: "discord", Title: "Discord", Destructive: true, OpenWorld: true, Description: "Available to a mapping's answering session and its ancestors. Calls are limited to that room's mapped servers and channels, including threads; channel-only mappings cannot administer a server. GET /users/ID is allowed; other roots and the bot's own account are refused. The engine holds the token; it never enters your box. Only the configured owner's Discord ID is the owner; everyone else is outside text. See dyna_discord for mappings and dyna-discord for recipes."},
 	"computer":     {Name: "computer", Title: "Computer", Destructive: true, OpenWorld: true, Description: computerHelp, Fields: computerFields},
 	"context":      {Name: "context", Title: "Context", Idempotent: true},
 	"device":       {Name: "device", Title: "Devices", Destructive: true},

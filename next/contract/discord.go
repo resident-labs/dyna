@@ -6,19 +6,37 @@ const MethodRoomDiscord Method = "room.discord"
 const MethodDiscordAPI Method = "discord.api"
 const MethodDiscordSend Method = "discord.send"
 
-// RoomDiscordRequest carries credentials only on the owner socket.
+const MethodDiscordConfigure Method = "discord.configure"
+
+// DiscordConfigureRequest carries credentials only on the owner socket.
+type DiscordConfigureRequest struct {
+	Token string  `json:"token,omitempty"`
+	Owner *string `json:"owner,omitempty"`
+	Clear bool    `json:"clear,omitempty"`
+}
+type DiscordRoute struct {
+	Instructions string    `json:"instructions,omitempty"`
+	Guild        string    `json:"guild"`
+	Channel      string    `json:"channel,omitempty"`
+	Room         RoomID    `json:"room"`
+	Session      SessionID `json:"session"`
+}
+type DiscordConfigureResponse struct {
+	BotID   string         `json:"botID"`
+	BotName string         `json:"botName"`
+	Owner   string         `json:"owner"`
+	Routes  []DiscordRoute `json:"routes,omitempty"`
+}
 type RoomDiscordRequest struct {
-	Room    RoomID `json:"room"`
-	Session string `json:"session,omitempty"`
-	Token   string `json:"token,omitempty"`
-	Clear   bool   `json:"clear,omitempty"`
+	Instructions *string `json:"instructions,omitempty"`
+	Room         RoomID  `json:"room"`
+	Server       string  `json:"server,omitempty"`
+	Channel      string  `json:"channel,omitempty"`
+	Session      string  `json:"session,omitempty"`
+	Remove       bool    `json:"remove,omitempty"`
 }
 type RoomDiscordResponse struct {
-	Guild     string    `json:"guild"`
-	GuildName string    `json:"guildName"`
-	BotID     string    `json:"botID"`
-	BotName   string    `json:"botName"`
-	Session   SessionID `json:"session"`
+	Routes []DiscordRoute `json:"routes,omitempty"`
 }
 type DiscordAPIRequest struct {
 	Method string          `json:"method"`
@@ -49,6 +67,9 @@ type DiscordMessage struct {
 	GuildName   string   `json:"guildName"`
 	Author      string   `json:"author"`
 	AuthorID    string   `json:"authorID"`
+	DisplayName string   `json:"displayName"`
+	Roles       []string `json:"roles,omitempty"`
+	Owner       bool     `json:"owner,omitempty"`
 	Message     string   `json:"message"`
 	Text        string   `json:"text"`
 	History     string   `json:"history,omitempty"`

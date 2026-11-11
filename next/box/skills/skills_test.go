@@ -32,16 +32,16 @@ func TestParseRefusesWhatPiWouldNotLoad(t *testing.T) {
 
 func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
 	items := BuiltIn()
-	if len(items) != 6 || items[1].Name != "dyna-extend" || items[1].Description != "Use when you need to add a skill or mcp server to dyna" || !items[1].BuiltIn {
+	if len(items) != 7 || items[1].Name != "dyna-discord" || items[2].Name != "dyna-extend" || items[2].Description != "Use when you need to add a skill or mcp server to dyna" || !items[2].BuiltIn {
 		t.Fatalf("%+v", items)
 	}
 	if !IsBuiltIn("dyna-extend") || IsBuiltIn("other") {
 		t.Fatal("IsBuiltIn")
 	}
-	if images := items[2]; images.Name != "dyna-images" || !strings.HasPrefix(images.Description, "Use when your box lacks a tool") {
+	if images := items[3]; images.Name != "dyna-images" || !strings.HasPrefix(images.Description, "Use when your box lacks a tool") {
 		t.Fatalf("%+v", images)
 	}
-	nodes := items[4]
+	nodes := items[5]
 	if nodes.Name != "dyna-nodes" || nodes.Description != "Use when you need to add nodes to Dyna, or a room needs its own or disposable machines" {
 		t.Fatalf("%+v", nodes)
 	}

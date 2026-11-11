@@ -82,6 +82,7 @@ var methodTable = []MethodEntry{
 	method(contract.MethodHostSet, contract.ScopeAdmin, OwnerAccess,
 		act("host", "set", typ[contract.HostSetRequest](), "Turn a host's agents switch (new session boxes) or ci switch (CI runners) on or off; an omitted one stays. What already runs there stays until it stops. Actual switch changes are audited as host.switches_changed in every existing room's log; an unchanged call writes no switch event and the audit does not wake sessions.", "host set"),
 	),
+	method(contract.MethodDiscordConfigure, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodRoomDiscord, contract.ScopeAdmin, OwnerAccess,
 		act("room", "discord", typ[contract.RoomDiscordRequest](), "Show, replace or clear a room's Discord connection (owner only).", "room discord"),
 	),

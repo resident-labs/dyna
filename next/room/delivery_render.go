@@ -17,6 +17,12 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 			words = b.History + "\n\n" + b.Author + ": " + b.Text
 		}
 		text := contract.Outside("discord #"+b.ChannelName, b.Author, words)
+		if b.Owner {
+			text = b.Text
+			if b.History != "" {
+				text = contract.Outside("discord #"+b.ChannelName, "", b.History) + "\n\n" + text
+			}
+		}
 		if len(b.Attachments) > 0 {
 			text += "\nAttachments: " + strings.Join(b.Attachments, ", ")
 		}

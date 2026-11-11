@@ -13,12 +13,14 @@ import (
 )
 
 type Server struct {
-	HTTP        *httptest.Server
-	Token       string
-	Messages    chan json.RawMessage
-	Events      chan any
-	mu          sync.Mutex
-	connections int
+	HTTP         *httptest.Server
+	Token        string
+	Messages     chan json.RawMessage
+	Events       chan any
+	mu           sync.Mutex
+	connections  int
+	history      []any
+	historyCalls int
 }
 
 func New(t testing.TB) *Server {
@@ -55,8 +57,16 @@ func New(t testing.TB) *Server {
 				return
 			}
 			w.Write([]byte(`{"id":"999"}`))
+		case strings.HasSuffix(r.URL.Path, "/messages") && r.Method == "GET":
+			s.mu.Lock()
+			s.historyCalls++
+			history := s.history
+			s.mu.Unlock()
+			json.NewEncoder(w).Encode(history)
+		case strings.HasPrefix(r.URL.Path, "/api/v10/guilds/"):
+			w.Write([]byte(`{"id":"100","name":"Horizon"}`))
 		case strings.HasPrefix(r.URL.Path, "/api/v10/channels/"):
-			w.Write([]byte(`{"id":"200","name":"general","type":0}`))
+			w.Write([]byte(`{"id":"200","guild_id":"100","name":"general","type":0}`))
 		default:
 			w.WriteHeader(404)
 		}
@@ -64,6 +74,9 @@ func New(t testing.TB) *Server {
 	t.Cleanup(s.HTTP.Close)
 	return s
 }
+func (s *Server) SetHistory(messages []any) { s.mu.Lock(); defer s.mu.Unlock(); s.history = messages }
+func (s *Server) Connections() int          { s.mu.Lock(); defer s.mu.Unlock(); return s.connections }
+func (s *Server) HistoryCalls() int         { s.mu.Lock(); defer s.mu.Unlock(); return s.historyCalls }
 func (s *Server) GatewayURL() string {
 	return strings.Replace(s.HTTP.URL, "http:", "ws:", 1) + "/gateway"
 }
@@ -119,7 +132,10 @@ func (s *Server) gateway(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
-	seq := 2
+	if write(map[string]any{"op": 0, "s": 2, "t": "GUILD_CREATE", "d": map[string]any{"id": "100", "name": "Horizon", "channels": []map[string]any{{"id": "200", "name": "general", "type": 0}}, "roles": []map[string]string{{"id": "10", "name": "Admin"}}}}) != nil {
+		return
+	}
+	seq := 3
 	for {
 		select {
 		case <-ctx.Done():

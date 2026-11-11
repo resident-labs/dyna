@@ -4,10 +4,10 @@ import (
 	"context"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/discord"
-	"net/http"
+	"github.com/resident-labs/dyna/engine/store"
+	"net/url"
 	"os"
 	"strings"
-	"time"
 )
 
 func (s *Service) discordClient(ctx context.Context, caller contract.Principal) (*discord.Client, *contract.Error) {
@@ -18,29 +18,99 @@ func (s *Service) discordClient(ctx context.Context, caller contract.Principal) 
 	if err != nil {
 		return nil, failure(err)
 	}
-	c, err := s.store.DiscordConnection(ctx, session.Room)
+	routes, err := s.store.DiscordRoutes(ctx, session.Room)
 	if err != nil {
 		return nil, failure(err)
-	}
-	if c.Guild == "" {
-		return nil, invalid("room has no Discord connection")
 	}
 	tree, err := s.store.RoomTree(ctx, session.Room)
 	if err != nil {
 		return nil, failure(err)
 	}
-	if caller.Session != c.Session && !tree.Above(caller.Session, c.Session) {
+	allowed := false
+	for _, r := range routes {
+		if caller.Session == r.Session || tree.Above(caller.Session, r.Session) {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
 		return nil, forbidden()
 	}
-	token, err := s.discordTokens.Read(contract.RoomID(c.Credential))
+	client, err := s.machineDiscordClient(ctx)
 	if err != nil {
 		return nil, failure(err)
 	}
-	return &discord.Client{HTTP: &http.Client{Timeout: 60 * time.Second}, Endpoint: s.discordEndpoint, Token: token}, nil
+	return client, nil
+}
+
+// discordScope checks the URL's resource against all routes, including channel overrides.
+func (s *Service) discordScope(ctx context.Context, caller contract.Principal, method, path string) *contract.Error {
+	u, err := url.Parse(path)
+	if err != nil || u.IsAbs() || u.Host != "" || !strings.HasPrefix(u.Path, "/api/v10/") {
+		return forbidden()
+	}
+	parts := strings.Split(strings.TrimPrefix(u.Path, "/api/v10/"), "/")
+	if len(parts) < 2 || !discordID(parts[1]) {
+		return forbidden()
+	}
+	if parts[0] == "users" && method == "GET" && len(parts) == 2 {
+		return nil
+	}
+	session, err := s.store.Session(ctx, caller.Session)
+	if err != nil {
+		return failure(err)
+	}
+	routes, err := s.store.DiscordRoutes(ctx, "")
+	if err != nil {
+		return failure(err)
+	}
+	authorized := func(r store.DiscordRoute) bool { return r.Room == session.Room }
+	if parts[0] == "guilds" {
+		for _, r := range routes {
+			if r.Guild == parts[1] && r.Channel == "" && authorized(r) {
+				return nil
+			}
+		}
+		return forbidden()
+	}
+	if parts[0] != "channels" {
+		return forbidden()
+	}
+	channel, ok := s.discordDirectory.Channel(parts[1])
+	if !ok {
+		return forbidden()
+	}
+	parent := channel.ID
+	if channel.Type == 10 || channel.Type == 11 || channel.Type == 12 {
+		parent = channel.Parent
+	}
+	var server *store.DiscordRoute
+	for i := range routes {
+		r := &routes[i]
+		if r.Guild != channel.Guild {
+			continue
+		}
+		if r.Channel == parent {
+			if authorized(*r) {
+				return nil
+			}
+			return forbidden()
+		}
+		if r.Channel == "" {
+			server = r
+		}
+	}
+	if server != nil && authorized(*server) {
+		return nil
+	}
+	return forbidden()
 }
 func (s *Service) DiscordAPI(ctx context.Context, caller contract.Principal, req contract.DiscordAPIRequest) (contract.DiscordAPIResponse, *contract.Error) {
 	client, problem := s.discordClient(ctx, caller)
 	if problem != nil {
+		return contract.DiscordAPIResponse{}, problem
+	}
+	if problem := s.discordScope(ctx, caller, req.Method, req.Path); problem != nil {
 		return contract.DiscordAPIResponse{}, problem
 	}
 	result, err := client.API(ctx, req.Method, req.Path, req.Body, req.Reason)
@@ -52,6 +122,9 @@ func (s *Service) DiscordAPI(ctx context.Context, caller contract.Principal, req
 func (s *Service) DiscordSend(ctx context.Context, caller contract.Principal, req contract.DiscordSendRequest) (contract.DiscordSendResponse, *contract.Error) {
 	client, problem := s.discordClient(ctx, caller)
 	if problem != nil {
+		return contract.DiscordSendResponse{}, problem
+	}
+	if problem := s.discordScope(ctx, caller, "POST", "/api/v10/channels/"+req.Channel+"/messages"); problem != nil {
 		return contract.DiscordSendResponse{}, problem
 	}
 	if req.Channel == "" || strings.IndexFunc(req.Channel, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
