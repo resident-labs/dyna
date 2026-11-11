@@ -983,7 +983,7 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 				v.input.Reply.Home.Channel = session
 			}
 			if (!paused || (replay && v.turn.Valid && contract.TurnID(v.turn.String) == active)) && (active == "" || v.wake || v.turn.Valid) {
-				if v.input.Surface == contract.SurfaceDiscord && !v.turn.Valid {
+				if v.input.Surface == contract.SurfaceDiscord && v.wake && !v.turn.Valid {
 					if active != "" || discordTaken {
 						continue
 					}
