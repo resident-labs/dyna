@@ -55,8 +55,12 @@ func TestDiscordConnectionInputAndAuthority(t *testing.T) {
 		t.Fatalf("unsafe input %s %v", rendered, err)
 	}
 	frame, _, err := s.inputFrame(ctx, root, events[0], contract.Delivery{})
-	if err != nil || !strings.Contains(frame, "ID 2, roles: Admin") {
+	if err != nil || (!strings.Contains(frame, "ID 2, roles: Admin") || !strings.Contains(frame, "channel 200, message 300")) {
 		t.Fatalf("identity %s %v", frame, err)
+	}
+	ownerFrame, _, frameErr := s.inputFrame(ctx, root, contract.Event{Body: contract.DiscordMessage{Owner: true, Channel: "200", Message: "301", ChannelName: "general", GuildName: "server"}}, contract.Delivery{})
+	if frameErr != nil || !strings.Contains(ownerFrame, "channel 200, message 301") {
+		t.Fatalf("owner frame %s %v", ownerFrame, frameErr)
 	}
 	m.ID = "301"
 	m.Author.ID = "1"
