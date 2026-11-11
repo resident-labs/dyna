@@ -137,7 +137,7 @@ func (s *Server) gateway(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
-	if write(map[string]any{"op": 0, "s": 2, "t": "GUILD_CREATE", "d": map[string]any{"id": "100", "name": "Horizon", "channels": []map[string]any{{"id": "200", "name": "general", "type": 0}}, "roles": []map[string]string{{"id": "10", "name": "Admin"}}}}) != nil {
+	if write(map[string]any{"op": 0, "s": 2, "t": "GUILD_CREATE", "d": map[string]any{"id": "100", "name": "Horizon", "channels": []map[string]any{{"id": "200", "name": "general", "type": 0}}, "roles": []map[string]any{{"id": "10", "name": "Admin"}, {"id": "11", "name": "bot", "tags": map[string]string{"bot_id": "900"}}}}}) != nil {
 		return
 	}
 	seq := 3

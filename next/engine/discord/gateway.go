@@ -8,6 +8,7 @@ import (
 	"log"
 	"math/rand/v2"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ type Message struct {
 		Roles []string `json:"roles"`
 	} `json:"member"`
 	Mentions    []Identity `json:"mentions"`
+	Roles       []string   `json:"mention_roles"`
 	Referenced  *Message   `json:"referenced_message"`
 	Attachments []struct {
 		URL  string `json:"url"`
@@ -112,6 +114,9 @@ func (g *Gateway) Run(ctx context.Context) error {
 		var fatal *FatalClose
 		if errors.As(err, &fatal) {
 			return fatal
+		}
+		if err != nil && ctx.Err() == nil {
+			log.Printf("Discord gateway: %s", strings.ReplaceAll(err.Error(), g.Client.Token, "[redacted]"))
 		}
 		if !g.readyAt.IsZero() && time.Since(g.readyAt) >= time.Minute {
 			delay = 5 * time.Second
@@ -290,6 +295,14 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 						for _, mention := range m.Mentions {
 							if mention.ID == g.Bot {
 								addressed = true
+							}
+						}
+						if g.Directory != nil {
+							server, _ := g.Directory.Server(m.Guild)
+							for _, role := range server.Roles {
+								if role.Tags.Bot == g.Bot && slices.Contains(m.Roles, role.ID) {
+									addressed = true
+								}
 							}
 						}
 						if m.Referenced != nil && m.Referenced.Author.ID == g.Bot {
