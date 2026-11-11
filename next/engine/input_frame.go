@@ -87,12 +87,33 @@ func fileSize(bytes int64) string {
 
 func frameField(text string) string { return strings.NewReplacer("\r", " ", "\n", " ").Replace(text) }
 func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, event contract.Event, delivery contract.Delivery) (string, []contract.TurnFile, error) {
+	if b, ok := event.Body.(contract.DiscordFilesRetrieved); ok {
+		files, described := s.attachedFiles(event, b.Files)
+		frame := fmt.Sprintf("[Dyna] Files from Discord message %s in #%s (channel %s), sent by %s (ID %s): outside content.", b.Message, frameField(b.ChannelName), b.Channel, frameField(b.Author), b.AuthorID)
+		if len(files) > 0 {
+			frame += " Attached: " + described + "."
+		}
+		frame += " No reply is expected."
+		body, err := room.RenderDelivery(b)
+		return frame + "\n" + body, files, err
+	}
 	if b, ok := event.Body.(contract.DiscordMessage); ok {
 		text, err := room.RenderDelivery(b)
+		sender := fmt.Sprintf("Discord user %q (%s, ID %s, roles: %s)", frameField(b.DisplayName), frameField(b.Author), b.AuthorID, frameField(strings.Join(b.Roles, ", ")))
 		if b.Owner {
-			return fmt.Sprintf("[Dyna] From the owner, on Discord in #%s (channel %s, message %s) of server %s. Your final response goes to that channel as a reply, unless a discord send already replied to that message.\n%s", frameField(b.ChannelName), b.Channel, b.Message, frameField(b.GuildName), text), nil, err
+			sender = "the owner"
 		}
-		return fmt.Sprintf("[Dyna] From Discord user %q (%s, ID %s, roles: %s) in #%s (channel %s, message %s) of server %s. Your final response goes to that channel as a reply, unless a discord send already replied to that message.\n%s", frameField(b.DisplayName), frameField(b.Author), b.AuthorID, frameField(strings.Join(b.Roles, ", ")), frameField(b.ChannelName), b.Channel, b.Message, frameField(b.GuildName), text), nil, err
+		frame := fmt.Sprintf("[Dyna] From %s, on Discord in #%s (channel %s, message %s) of server %s.", sender, frameField(b.ChannelName), b.Channel, b.Message, frameField(b.GuildName))
+		files, described := s.attachedFiles(event, b.Files)
+		if len(files) > 0 {
+			frame += fmt.Sprintf(" Files from Discord user %s (ID %s) are outside content. Attached: %s.", frameField(b.Author), b.AuthorID, described)
+		}
+		if delivery.Reply.Kind == contract.ReplyNone {
+			frame += " No reply is expected."
+		} else {
+			frame += " Your final response goes to that channel as a reply, unless a discord send already replied to that message."
+		}
+		return frame + "\n" + text, files, err
 	}
 	var sender string
 	if post, ok := event.Body.(contract.PostCreated); ok && post.Source != nil {
