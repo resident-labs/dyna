@@ -67,6 +67,8 @@ type Harness struct {
 	mu   sync.Mutex
 	turn *turn // the turn running now, nil between turns
 
+	delivered deliveries
+
 	// queue orders inputs against the end of a run: Steer and FollowUp queue only while running, and the run's end clears
 	// the queue. It is not mu, which the session's listener takes while a steer emits its queue update.
 	queue   sync.Mutex
