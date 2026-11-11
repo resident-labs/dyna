@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -54,6 +55,7 @@ func TestDiscordRead(t *testing.T) {
 
 func TestDiscordReadFilesNoReply(t *testing.T) {
 	s, r, root, ctx, fake, _ := discordFixture(t)
+	s.SetLayout(box.Layout{Data: t.TempDir()})
 	old := http.DefaultTransport
 	http.DefaultTransport = discordFileTransport{old}
 	t.Cleanup(func() { http.DefaultTransport = old })
