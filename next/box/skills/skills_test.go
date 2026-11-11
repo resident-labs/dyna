@@ -232,7 +232,7 @@ func TestCISkill(t *testing.T) {
 		t.Fatalf("%+v %v", meta, err)
 	}
 	text := string(data)
-	for _, want := range []string{"dyna-medium", "6 hours", "CARGO_INCREMENTAL=0", "RUSTC_WRAPPER", "ci_scale", "DYNA_CI_BASE", "public", "fork", "job step status", "Jobs on GitHub-hosted runners", "Swatinem/rust-cache", "[profile.ci]", "inherits = \"dev\"", "incremental = false", "debug = 0", "github.event.pull_request.head.repo.fork", "cargo test --profile ci", "available CPU and memory headroom"} {
+	for _, want := range []string{"dyna-medium", "6 hours", "CARGO_INCREMENTAL=0", "RUSTC_WRAPPER", "ci_scale", "DYNA_CI_BASE", "public", "fork", "job step status", "Jobs on GitHub-hosted runners", "Swatinem/rust-cache", "[profile.ci]", "inherits = \"dev\"", "incremental = false", "debug = 0", "github.event.pull_request.head.repo.fork", "cargo test --profile ci", "using the greater of measured CPU use and existing runner reservations as busy cores"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q", want)
 		}
