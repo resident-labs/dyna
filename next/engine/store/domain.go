@@ -393,6 +393,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 		// Unconsumed steers never reached a model request. Keep their wake even
 		// when the turn stops or fails: Stop cancels only the work present when
 		// requested, not new inputs that arrive while the turn is ending.
+		// The redundant IN matches the deliveries_open partial index so SQLite can use it.
 		if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='pending',turn=NULL,queue=NULL WHERE to_kind=? AND to_id=? AND turn=? AND state='taken' AND state IN ('pending','taken') AND queue IS NOT NULL", contract.PrincipalSession, session, output.Turn); err != nil {
 			return err
 		}
@@ -404,6 +405,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 				}
 			}
 		}
+		// The redundant IN matches the deliveries_open partial index so SQLite can use it.
 		if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='read' WHERE to_kind=? AND to_id=? AND turn=? AND state='taken' AND state IN ('pending','taken')", contract.PrincipalSession, session, output.Turn); err != nil {
 			return err
 		}

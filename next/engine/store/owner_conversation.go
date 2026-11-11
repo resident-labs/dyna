@@ -9,6 +9,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
+// CROSS JOIN pins the join order: find open turns before probing their deliveries.
 const ownerConversationQuery = `SELECT d.reply_home FROM turns t CROSS JOIN deliveries d ON d.turn=t.id
 	WHERE d.to_kind=? AND d.to_id=? AND t.session=? AND t.ended_at IS NULL AND d.reply_kind=? AND d.reply_target_kind=?
 	ORDER BY d.seq DESC LIMIT 1`
