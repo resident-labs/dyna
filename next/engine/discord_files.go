@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -31,6 +32,13 @@ func (s *Service) downloadDiscordFiles(ctx context.Context, room contract.RoomID
 		}
 		return nil
 	}}
+	hosts, diskErr := s.store.Hosts(ctx)
+	diskLow := false
+	for _, h := range hosts {
+		if h.EngineHost != nil && *h.EngineHost && box.DiskLow(h.DiskBytes, h.DiskFloor) {
+			diskLow = true
+		}
+	}
 	downloaded := make([]*contract.Attachment, len(attachments))
 	var wg sync.WaitGroup
 	for i := range attachments {
@@ -54,6 +62,20 @@ func (s *Service) downloadDiscordFiles(ctx context.Context, room contract.RoomID
 			if !discordCDN(a.URL) {
 				return
 			}
+			if diskErr != nil {
+				return
+			}
+			if diskLow {
+				a.Status = "not downloaded: the engine's disk is low"
+				return
+			}
+			charge := s.reserveDiscordDownload(room, a.Size)
+			if charge == nil {
+				a.Status = discordHourlyLimit
+				return
+			}
+			actual := int64(0)
+			defer func() { s.correctDiscordDownload(room, charge, actual) }()
 			req, err := http.NewRequestWithContext(ctx, "GET", a.URL, nil)
 			if err != nil {
 				return
@@ -69,6 +91,12 @@ func (s *Service) downloadDiscordFiles(ctx context.Context, room contract.RoomID
 			}
 			if len(data) > 10<<20 {
 				a.Status = "skipped: larger than 10 MB"
+				return
+			}
+			actual = int64(len(data))
+			if !s.correctDiscordDownload(room, charge, actual) {
+				actual = 0
+				a.Status = discordHourlyLimit
 				return
 			}
 			hash, n, err := s.saveFile(ctx, room, bytes.NewReader(data), 10<<20)

@@ -121,3 +121,43 @@ func TestDiscordDownloadsConcurrentAndCanceled(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscordDownloadBudgetAndDiskFloor(t *testing.T) {
+	s, r, _, ctx, _, _ := discordFixture(t)
+	s.SetLayout(box.Layout{Data: t.TempDir()})
+	old := http.DefaultTransport
+	http.DefaultTransport = discordFileTransport{old}
+	t.Cleanup(func() { http.DefaultTransport = old })
+	charge := s.reserveDiscordDownload(r, discordHourlyBytes)
+	if charge == nil {
+		t.Fatal("cannot reserve initial budget")
+	}
+	files, listed := s.downloadDiscordFiles(ctx, r, []contract.DiscordAttachment{{Name: "image", Size: 12, URL: "https://cdn.discordapp.com/image"}})
+	if len(files) != 0 || listed[0].Status != discordHourlyLimit {
+		t.Fatalf("budget %v %v", files, listed)
+	}
+	// Correction releases unused declared bytes; expired charges do not block a later hour.
+	if !s.correctDiscordDownload(r, charge, 1) {
+		t.Fatal("correction rejected")
+	}
+	files, _ = s.downloadDiscordFiles(ctx, r, []contract.DiscordAttachment{{Name: "image", Size: 12, URL: "https://cdn.discordapp.com/image"}})
+	if len(files) != 1 {
+		t.Fatal("unused reservation not released")
+	}
+	s.discordDownloadMu.Lock()
+	for _, c := range s.discordDownloads[r] {
+		c.at = s.now().Add(-2 * time.Hour)
+	}
+	s.discordDownloadMu.Unlock()
+	if s.reserveDiscordDownload(r, discordHourlyBytes) == nil {
+		t.Fatal("expired budget still charged")
+	}
+	yes := true
+	if err := s.store.AddHost(ctx, box.Host{Name: "engine-disk", EngineHost: &yes, DiskBytes: 1, DiskFloor: 20}); err != nil {
+		t.Fatal(err)
+	}
+	files, listed = s.downloadDiscordFiles(ctx, r, []contract.DiscordAttachment{{Name: "image", Size: 12, URL: "https://cdn.discordapp.com/image"}})
+	if len(files) != 0 || listed[0].Status != "not downloaded: the engine's disk is low" {
+		t.Fatalf("disk floor %v %v", files, listed)
+	}
+}
