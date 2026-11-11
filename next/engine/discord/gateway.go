@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"math/rand/v2"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/coder/websocket"
@@ -52,30 +55,76 @@ type Gateway struct {
 	URL, Bot  string
 	Directory *Directory
 	Receive   func(context.Context, Message) error
+	messages  chan Message
+	readyAt   time.Time
+}
+
+type FatalClose struct {
+	Code   int
+	Reason string
+}
+
+func (e *FatalClose) Error() string {
+	return fmt.Sprintf("Discord gateway closed (%d): %s", e.Code, e.Reason)
 }
 
 // Run reconnects with bounded backoff. Resume state lives across connections.
-func (g *Gateway) Run(ctx context.Context) {
+func (g *Gateway) Run(ctx context.Context) error {
+	worker, cancel := context.WithCancel(ctx)
+	defer cancel()
+	g.messages = make(chan Message, 256)
+	go func() {
+		for {
+			select {
+			case <-worker.Done():
+				return
+			case m := <-g.messages:
+				if err := g.Receive(worker, m); err != nil && worker.Err() == nil {
+					log.Printf("Discord input %s failed: %v", m.ID, err)
+				}
+			}
+		}
+	}()
 	var session, resume string
 	var seq int64
-	delay := time.Second
+	delay := 5 * time.Second
 	for ctx.Err() == nil {
+		g.readyAt = time.Time{}
 		err := g.connect(ctx, &session, &resume, &seq)
-		if err == nil {
-			delay = time.Second
-		} else {
-			delay = min(delay*2, time.Minute)
+		var fatal *FatalClose
+		if errors.As(err, &fatal) {
+			return fatal
+		}
+		if !g.readyAt.IsZero() && time.Since(g.readyAt) >= time.Minute {
+			delay = 5 * time.Second
 		}
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return
+			return ctx.Err()
 		case <-timer.C:
 		}
+		delay = min(delay*2, 5*time.Minute)
 	}
+	return ctx.Err()
 }
-func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int64) error {
+func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int64) (result error) {
+	defer func() {
+		var close websocket.CloseError
+		if !errors.As(result, &close) {
+			return
+		}
+		code := int(close.Code)
+		if code == 4007 || code == 4009 {
+			*session = ""
+			*resume = ""
+			*seq = 0
+		}
+		if code == 4004 || (code >= 4010 && code <= 4014) {
+			result = &FatalClose{Code: code, Reason: strings.ReplaceAll(close.Reason, g.Client.Token, "[redacted]")}
+		}
+	}()
 	endpoint := g.URL
 	if *resume != "" {
 		endpoint = *resume
@@ -173,7 +222,6 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 			acked = false
 			timer.Reset(time.Duration(h.Interval) * time.Millisecond)
 		case p := <-packets:
-			previousSeq := *seq
 			if p.Seq != nil {
 				*seq = *p.Seq
 			}
@@ -208,6 +256,7 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 					if json.Unmarshal(p.Data, &ready) != nil {
 						return errors.New("invalid Discord ready")
 					}
+					g.readyAt = time.Now()
 					*session = ready.Session
 					*resume = ready.URL
 				case "MESSAGE_CREATE":
@@ -232,9 +281,10 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 						addressed = true
 					}
 					if addressed {
-						if err := g.Receive(ctx, m); err != nil {
-							*seq = previousSeq
-							return err
+						select {
+						case g.messages <- m:
+						default:
+							log.Printf("Discord input buffer full; dropped message %s", m.ID)
 						}
 					}
 				}

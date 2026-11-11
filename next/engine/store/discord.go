@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"github.com/resident-labs/dyna/contract"
+	"time"
 )
 
 // DiscordBot is machine metadata. Credential is an opaque file reference, never a token.
-type DiscordBot struct{ ID, Name, Owner, Credential string }
+type DiscordBot struct{ ID, Name, Owner, Credential, Failure string }
 
 func (s *Store) DiscordBot(ctx context.Context) (DiscordBot, error) {
 	var b DiscordBot
@@ -72,31 +73,33 @@ func (s *Store) SetDiscordRoute(ctx context.Context, r DiscordRoute, remove bool
 func (s *Store) DiscordInput(ctx context.Context, event contract.Event, to contract.SessionID) error {
 	b := event.Body.(contract.DiscordMessage)
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		var exists bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE room=? AND type='discord.message' AND json_extract(body,'$.message')=?)`, event.Room, b.Message).Scan(&exists); err != nil {
+		result, err := tx.ExecContext(ctx, "INSERT INTO discord_messages(message,room) VALUES(?,?) ON CONFLICT(message) DO NOTHING", b.Message, event.Room)
+		if err != nil {
 			return err
 		}
-		if exists {
-			return nil
+		inserted, err := result.RowsAffected()
+		if err != nil || inserted == 0 {
+			return err
 		}
 		seq, err := s.AppendEvent(tx, event)
 		if err != nil {
 			return err
 		}
-		return s.InsertDelivery(ctx, tx, seq, b, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: to}, Surface: "discord", Wake: true, Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: contract.Principal{Kind: contract.PrincipalEngine}, Home: contract.Conversation{Kind: "discord", Channel: b.Channel}, ReplyTo: event.ID}})
+		return s.InsertDelivery(ctx, tx, seq, b, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: to}, Surface: contract.SurfaceDiscord, Wake: true, Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: contract.Principal{Kind: contract.PrincipalEngine}, Home: contract.Conversation{Kind: contract.ConversationDiscord, Channel: b.Channel}, ReplyTo: event.ID}})
 	})
 }
 
 type DiscordOutbox struct {
-	ID                     int64
-	Room                   contract.RoomID
-	Session                contract.SessionID
-	Channel, Message, Text string
+	Attempts                      int
+	ID                            int64
+	Room                          contract.RoomID
+	Session                       contract.SessionID
+	Channel, Message, Text, Group string
 }
 
 func (s *Store) NextDiscordReply(ctx context.Context) (DiscordOutbox, bool, error) {
 	var o DiscordOutbox
-	err := s.Read().QueryRowContext(ctx, `SELECT id,room,session,channel,message,text FROM discord_outbox ORDER BY id LIMIT 1`).Scan(&o.ID, &o.Room, &o.Session, &o.Channel, &o.Message, &o.Text)
+	err := s.Read().QueryRowContext(ctx, `SELECT id,attempts,room,session,channel,message,text,group_key FROM discord_outbox o WHERE due_at<=? AND NOT EXISTS(SELECT 1 FROM discord_outbox earlier WHERE earlier.group_key=o.group_key AND earlier.id<o.id) ORDER BY id LIMIT 1`, time.Now().UnixMilli()).Scan(&o.ID, &o.Attempts, &o.Room, &o.Session, &o.Channel, &o.Message, &o.Text, &o.Group)
 	if err == sql.ErrNoRows {
 		return o, false, nil
 	}
@@ -114,23 +117,40 @@ func (s *Store) DiscordReplySent(ctx context.Context, id int64, notice *contract
 				return err
 			}
 		}
-		_, err := tx.ExecContext(ctx, "DELETE FROM discord_outbox WHERE id=?", id)
+		query := "DELETE FROM discord_outbox WHERE id=?"
+		if notice != nil {
+			query = "DELETE FROM discord_outbox WHERE group_key=(SELECT group_key FROM discord_outbox WHERE id=?)"
+		}
+		_, err := tx.ExecContext(ctx, query, id)
 		return err
 	})
 }
-func (s *Store) DiscordTyping(ctx context.Context) ([]string, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT DISTINCT substr(d.reply_home,9) FROM deliveries d JOIN turns t ON t.id=d.turn WHERE t.ended_at IS NULL AND d.reply_home LIKE 'discord:%' UNION SELECT json_extract(j.value,'$.home.channel') FROM replies_owed o JOIN turns t ON t.session=o.session CROSS JOIN json_each(o.replies) j WHERE t.ended_at IS NULL AND json_extract(j.value,'$.home.kind')='discord'`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var channels []string
-	for rows.Next() {
-		var channel string
-		if err := rows.Scan(&channel); err != nil {
-			return nil, err
+func (s *Store) RetryDiscordReply(ctx context.Context, id int64, due time.Time) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE discord_outbox SET attempts=attempts+1,due_at=? WHERE id=?", due.UnixMilli(), id)
+		return err
+	})
+}
+
+func (s *Store) FailDiscordGateway(ctx context.Context, credential, reason string) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		var raw string
+		if err := tx.QueryRowContext(ctx, "SELECT value FROM meta WHERE key='discord_bot'").Scan(&raw); err != nil {
+			return err
 		}
-		channels = append(channels, channel)
-	}
-	return channels, rows.Err()
+		var b DiscordBot
+		if err := json.Unmarshal([]byte(raw), &b); err != nil {
+			return err
+		}
+		if b.Credential != credential {
+			return nil
+		}
+		b.Failure = reason
+		data, err := json.Marshal(b)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "UPDATE meta SET value=? WHERE key='discord_bot'", string(data))
+		return err
+	})
 }

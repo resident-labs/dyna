@@ -12,15 +12,15 @@ import (
 func RenderDelivery(body contract.EventBody) (string, error) {
 	switch b := body.(type) {
 	case contract.DiscordMessage:
-		words := b.Text
+		words := b.Text + b.RichContent
 		if b.History != "" {
-			words = b.History + "\n\n" + b.Author + ": " + b.Text
+			words = b.History + "\n\n" + b.Author + ": " + words
 		}
 		text := contract.Outside("discord #"+b.ChannelName, b.Author, words)
 		if b.Owner {
 			text = b.Text
-			if b.History != "" {
-				text = contract.Outside("discord #"+b.ChannelName, "", b.History) + "\n\n" + text
+			if b.History+b.RichContent != "" {
+				text = contract.Outside("discord #"+b.ChannelName, "", b.History+b.RichContent) + "\n\n" + text
 			}
 		}
 		if len(b.Attachments) > 0 {

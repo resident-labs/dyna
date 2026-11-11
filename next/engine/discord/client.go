@@ -11,16 +11,20 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 type Client struct {
+	mu              sync.Mutex
+	notBefore       time.Time
 	HTTP            *http.Client
 	Endpoint, Token string
 }
 type Result struct {
-	Status int             `json:"status"`
-	Body   json.RawMessage `json:"body"`
+	RetryAfter time.Duration   `json:"-"`
+	Status     int             `json:"status"`
+	Body       json.RawMessage `json:"body"`
 }
 
 // API validates the REST boundary and never follows a redirect with credentials.
@@ -60,6 +64,21 @@ func (c *Client) request(ctx context.Context, method, path string, body []byte, 
 	client := *c.HTTP
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	for attempt := 0; attempt < 2; attempt++ {
+		for {
+			c.mu.Lock()
+			delay := time.Until(c.notBefore)
+			c.mu.Unlock()
+			if delay <= 0 {
+				break
+			}
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return Result{}, ctx.Err()
+			case <-timer.C:
+			}
+		}
 		req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(c.Endpoint, "/")+u.String(), bytes.NewReader(body))
 		if err != nil {
 			return Result{}, errors.New("invalid Discord request")
@@ -78,27 +97,36 @@ func (c *Client) request(ctx context.Context, method, path string, body []byte, 
 		if readErr != nil {
 			return Result{}, errors.New("cannot read Discord response")
 		}
-		if resp.StatusCode == 429 && attempt == 0 {
-			var rate struct {
-				RetryAfter float64 `json:"retry_after"`
-			}
+
+		var rate struct {
+			RetryAfter float64 `json:"retry_after"`
+		}
+		if resp.StatusCode == 429 {
 			_ = json.Unmarshal(data, &rate)
-			if header := resp.Header.Get("Retry-After"); header != "" {
-				delay, err := strconv.ParseFloat(header, 64)
-				if err == nil && delay > 0 {
-					rate.RetryAfter = delay
-				}
+		}
+		if header := resp.Header.Get("Retry-After"); header != "" {
+			if delay, err := strconv.ParseFloat(header, 64); err == nil && delay > 0 {
+				rate.RetryAfter = delay
+			} else if date, err := http.ParseTime(header); err == nil {
+				rate.RetryAfter = time.Until(date).Seconds()
 			}
-			if rate.RetryAfter <= 0 || rate.RetryAfter > 86400 {
-				return Result{}, errors.New("invalid Discord rate limit")
+		}
+		retry := time.Duration(0)
+		if rate.RetryAfter > 0 && rate.RetryAfter <= 86400 {
+			retry = time.Duration(rate.RetryAfter * float64(time.Second))
+		}
+		if resp.StatusCode == 429 {
+			if retry <= 0 {
+				retry = time.Second
 			}
-			timer := time.NewTimer(time.Duration(rate.RetryAfter * float64(time.Second)))
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return Result{}, ctx.Err()
-			case <-timer.C:
+			c.mu.Lock()
+			until := time.Now().Add(retry)
+			if until.After(c.notBefore) {
+				c.notBefore = until
 			}
+			c.mu.Unlock()
+		}
+		if resp.StatusCode == 429 && attempt == 0 {
 			continue
 		}
 		// Discord responses are untrusted: never return a reflected credential.
@@ -109,7 +137,7 @@ func (c *Client) request(ctx context.Context, method, path string, body []byte, 
 		if !json.Valid(data) {
 			data, _ = json.Marshal(string(data))
 		}
-		return Result{Status: resp.StatusCode, Body: data}, nil
+		return Result{Status: resp.StatusCode, Body: data, RetryAfter: retry}, nil
 	}
 	return Result{}, errors.New("Discord rate limit")
 }

@@ -58,6 +58,7 @@ func (s *Service) DiscordConfigure(ctx context.Context, caller contract.Principa
 			if _, err := rand.Read(key[:]); err != nil {
 				return contract.DiscordConfigureResponse{}, failure(err)
 			}
+			b.Failure = ""
 			b.ID = bot.ID
 			b.Name = bot.Name
 			b.Credential = hex.EncodeToString(key[:])
@@ -84,7 +85,7 @@ func (s *Service) DiscordConfigure(ctx context.Context, caller contract.Principa
 	if err != nil {
 		return contract.DiscordConfigureResponse{}, failure(err)
 	}
-	out := contract.DiscordConfigureResponse{BotID: b.ID, BotName: b.Name, Owner: b.Owner}
+	out := contract.DiscordConfigureResponse{BotID: b.ID, BotName: b.Name, Owner: b.Owner, GatewayError: b.Failure}
 	for _, r := range routes {
 		out.Routes = append(out.Routes, contract.DiscordRoute{Guild: r.Guild, Channel: r.Channel, Room: r.Room, Session: r.Session, Instructions: r.Instructions})
 	}

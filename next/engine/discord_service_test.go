@@ -196,7 +196,7 @@ func TestDiscordHistoryAndDM(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := events[0].Body.(contract.DiscordMessage)
-	if b.History != "owner: owner line\n@ari: newer" {
+	if b.History != "ownername: owner line\nari: newer" {
 		t.Fatalf("history %q", b.History)
 	}
 	rendered, err := room.RenderDelivery(b)

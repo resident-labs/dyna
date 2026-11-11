@@ -2,6 +2,7 @@ package discord
 
 import (
 	"encoding/json"
+	"slices"
 	"sync"
 )
 
@@ -79,6 +80,34 @@ func (d *Directory) Apply(kind string, data json.RawMessage) {
 		if json.Unmarshal(data, &c) == nil {
 			delete(d.channels, c.ID)
 		}
+	case "THREAD_LIST_SYNC":
+		var event struct {
+			Guild   string    `json:"guild_id"`
+			Threads []Channel `json:"threads"`
+		}
+		if json.Unmarshal(data, &event) != nil {
+			return
+		}
+		for _, c := range event.Threads {
+			c.Guild = event.Guild
+			d.channels[c.ID] = c
+		}
+	case "GUILD_ROLE_DELETE":
+		var event struct {
+			Guild string `json:"guild_id"`
+			Role  string `json:"role_id"`
+		}
+		if json.Unmarshal(data, &event) != nil {
+			return
+		}
+		g := d.guilds[event.Guild]
+		for i, r := range g.Roles {
+			if r.ID == event.Role {
+				g.Roles = append(g.Roles[:i], g.Roles[i+1:]...)
+				break
+			}
+		}
+		d.guilds[event.Guild] = g
 	case "GUILD_ROLE_CREATE", "GUILD_ROLE_UPDATE":
 		var event struct {
 			Guild string `json:"guild_id"`
@@ -111,6 +140,7 @@ func (d *Directory) Server(id string) (Server, bool) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	g, ok := d.guilds[id]
+	g.Roles = slices.Clone(g.Roles)
 	return g, ok
 }
 func (d *Directory) Reset() {

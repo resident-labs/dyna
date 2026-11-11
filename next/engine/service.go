@@ -84,6 +84,10 @@ type Service struct {
 	discordTokens     *credential.Files
 	discordEndpoint   string
 	discordDirectory  discord.Directory
+	discordRuntime    sync.Mutex
+	discordClientKey  string
+	discordHTTP       *discord.Client
+	discordTyping     map[string]time.Time
 	githubTools       http.Handler
 	hostexec          HostexecRunner
 	promoteHost       func(context.Context, contract.HostName, bool) error

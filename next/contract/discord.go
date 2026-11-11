@@ -22,10 +22,11 @@ type DiscordRoute struct {
 	Session      SessionID `json:"session"`
 }
 type DiscordConfigureResponse struct {
-	BotID   string         `json:"botID"`
-	BotName string         `json:"botName"`
-	Owner   string         `json:"owner"`
-	Routes  []DiscordRoute `json:"routes,omitempty"`
+	GatewayError string         `json:"gatewayError,omitempty"`
+	BotID        string         `json:"botID"`
+	BotName      string         `json:"botName"`
+	Owner        string         `json:"owner"`
+	Routes       []DiscordRoute `json:"routes,omitempty"`
 }
 type RoomDiscordRequest struct {
 	Instructions *string `json:"instructions,omitempty"`
@@ -78,6 +79,7 @@ type DiscordMessage struct {
 	Owner       bool                `json:"owner,omitempty"`
 	Message     string              `json:"message"`
 	Text        string              `json:"text"`
+	RichContent string              `json:"richContent,omitempty"`
 	History     string              `json:"history,omitempty"`
 	Attachments []DiscordAttachment `json:"attachments,omitempty"`
 }
