@@ -115,7 +115,7 @@ POST `/api/v10/channels/CHANNEL/messages` with `{embeds: [{title: "Status", desc
 Add `components` for buttons or `poll: {question: {text: "Ready?"}, answers: [{poll_media: {text: "Yes"}}, {poll_media: {text: "No"}}], duration: 24, allow_multiselect: false}`.
 Edit the bot's message with PATCH `/api/v10/channels/CHANNEL/messages/MESSAGE`.
 Discord renders no tables or headings above level 3; use lists.
-Incoming attachment frames give name, size and URL; use curl to fetch what matters.
+Forward a received Discord attachment with the post tool's `paths` to pass it to a parent or another session.
 Embeds become plain title/description lines; stickers and polls are named markers.
 
 Full reference: https://discord.com/developers/docs/intro

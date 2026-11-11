@@ -196,6 +196,7 @@ func (s *Service) discordInput(ctx context.Context, client *discord.Client, m di
 	for _, a := range m.Attachments {
 		b.Attachments = append(b.Attachments, contract.DiscordAttachment{Name: a.Name, Size: a.Size, URL: a.URL})
 	}
+	b.Files, b.Attachments = s.downloadDiscordFiles(ctx, selected.Room, b.Attachments)
 	from := contract.Principal{Kind: contract.PrincipalEngine}
 	if b.Owner {
 		from.Kind = contract.PrincipalOwner

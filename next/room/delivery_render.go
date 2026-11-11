@@ -26,9 +26,9 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		if len(b.Attachments) > 0 {
 			var attachments []string
 			for _, file := range b.Attachments {
-				attachments = append(attachments, fmt.Sprintf("%q (%d bytes): %s", file.Name, file.Size, file.URL))
+				attachments = append(attachments, fmt.Sprintf("%q (%d bytes): %s", file.Name, file.Size, file.Status))
 			}
-			text += "\nAttachments: " + strings.Join(attachments, ", ")
+			text += "\n" + contract.Outside("discord attachments", b.Author+" ("+b.AuthorID+")", "Attachments: "+strings.Join(attachments, ", "))
 		}
 		return text, nil
 	case contract.SessionProfileChanged:
