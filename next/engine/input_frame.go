@@ -6,9 +6,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/room"
 )
 
@@ -112,6 +114,14 @@ func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, eve
 			frame += " No reply is expected."
 		} else {
 			frame += " Your final response goes to that channel as a reply, unless a discord send already replied to that message."
+			// A mapping with the owner's instructions is a front session, which answers at once anyway.
+			routes, err := s.store.DiscordRoutes(ctx, event.Room)
+			if err != nil {
+				return "", nil, err
+			}
+			if !slices.ContainsFunc(routes, func(r store.DiscordRoute) bool { return r.Session == viewer && r.Instructions != "" }) {
+				frame += " A person is waiting in that channel. If you can answer right away, just answer. If it needs work first, send one short line now with discord send (the channel, no replyTo) saying what you are going to do, then do it; your final response still arrives as the reply."
+			}
 		}
 		return frame + "\n" + text, files, err
 	}

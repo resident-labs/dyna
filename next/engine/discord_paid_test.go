@@ -22,6 +22,8 @@ func TestDiscordExplicitReplyPaysInput(t *testing.T) {
 		{name: "no send", want: 1},
 		{name: "waiting paid early", channel: "200", reply: "300", waiting: true, want: 1},
 		{name: "waiting paid later", channel: "200", reply: "300", waiting: true, late: true, want: 2},
+		// The waiting turn's text was the reply; the turn after the wait must not answer Discord again.
+		{name: "waiting no send", waiting: true, want: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, r, root, ctx, fake, client := discordFixture(t)
@@ -130,7 +132,8 @@ func TestDiscordExplicitReplyPaysInput(t *testing.T) {
 			if debts != 0 {
 				t.Fatal("reply debt remains")
 			}
-			if tc.reply == "300" && tc.channel == "200" {
+			// A late send pays nothing: the waiting turn's text already answered, and the outbox drain clears typing.
+			if tc.reply == "300" && tc.channel == "200" && !tc.late {
 				s.discordRuntime.Lock()
 				_, typing := s.discordTyping["200"]
 				s.discordRuntime.Unlock()

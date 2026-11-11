@@ -471,6 +471,21 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 		if err := json.Unmarshal(kept, &later); err != nil {
 			return err
 		}
+		// discordText is what this turn sends to Discord for a reply, "" when it sends nothing.
+		discordText := func(reply contract.FinalReply) string {
+			if reply.Posted == "" {
+				return output.Final
+			}
+			if waiting && len(ended) == 0 {
+				return ""
+			}
+			for _, post := range posts {
+				if post.ID == reply.Posted {
+					return post.Body.(contract.PostCreated).Text
+				}
+			}
+			return output.Final
+		}
 		if !deferred && output.Cause != contract.CauseClosed {
 			answers := func(to contract.ReplyChannel) func(contract.FinalReply) bool {
 				return func(r contract.FinalReply) bool { return r.Reply.Target == to.Target && r.Reply.Home == to.Home }
@@ -478,14 +493,19 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			switch {
 			case waiting:
 				for _, reply := range body.Replies {
+					// A session is answered again once the wait ends. Discord got this turn's text as its reply, which also settles what
+					// an earlier silent turn left owed to that channel, so only a turn that said nothing still owes it.
 					if reply.Reply.Home.Kind == contract.ConversationDiscord {
+						if discordText(reply) != "" {
+							later = slices.DeleteFunc(later, func(to contract.ReplyChannel) bool { return to.Home == reply.Reply.Home })
+						}
 						for i := range later {
 							if later[i].Home == reply.Reply.Home {
 								later[i] = reply.Reply
 							}
 						}
 					}
-					if (reply.Reply.Target.Kind == contract.PrincipalSession || reply.Reply.Home.Kind == contract.ConversationDiscord) && reply.Posted == "" && !slices.ContainsFunc(later, func(to contract.ReplyChannel) bool { return answers(to)(reply) }) {
+					if (reply.Reply.Target.Kind == contract.PrincipalSession || reply.Reply.Home.Kind == contract.ConversationDiscord && output.Final == "") && reply.Posted == "" && !slices.ContainsFunc(later, func(to contract.ReplyChannel) bool { return answers(to)(reply) }) {
 						later = append(later, reply.Reply)
 					}
 				}
@@ -529,18 +549,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 		}
 		for _, reply := range body.Replies {
 			if reply.Reply.Home.Kind == contract.ConversationDiscord {
-				if waiting && reply.Posted != "" && len(ended) == 0 {
-					continue
-				}
-				text := output.Final
-				if reply.Posted != "" {
-					for _, post := range posts {
-						if post.ID == reply.Posted {
-							text = post.Body.(contract.PostCreated).Text
-						}
-					}
-				}
-				if text != "" {
+				if text := discordText(reply); text != "" {
 					var message string
 					if err := tx.QueryRowContext(ctx, "SELECT json_extract(body,'$.message') FROM events WHERE id=?", reply.Reply.ReplyTo).Scan(&message); err != nil {
 						return err
