@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/json"
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/discord"
 	"github.com/resident-labs/dyna/engine/store"
@@ -26,6 +27,7 @@ func (t discordFileTransport) RoundTrip(r *http.Request) (*http.Response, error)
 }
 func TestDiscordInputFilesAndForward(t *testing.T) {
 	s, r, root, ctx, _, client := discordFixture(t)
+	s.SetLayout(box.Layout{Data: t.TempDir()})
 	child := startChild(t, s, ctx, r, "reader", root)
 	if err := s.store.SetDiscordRoute(ctx, store.DiscordRoute{Guild: "100", Room: r, Session: child}, false); err != nil {
 		t.Fatal(err)
