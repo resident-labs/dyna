@@ -311,3 +311,24 @@ test("a failed attempt is one muted line that names the failure when Pi did", ()
   assert.equal(attemptFailedNote({ errorName: "SocketError" }), "Attempt failed (SocketError), retried");
   assert.equal(attemptFailedNote({}), "Attempt failed, retried");
 });
+
+test("folding matches full grouping for mixed items and keeps original references", () => {
+  let seed = 42;
+  const random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0);
+  const kinds: TranscriptItem["kind"][] = ["tool", "thinking", "text", "post", "steer", "compaction", "attempt_failed"];
+  for (let trial = 0; trial < 2000; trial++) {
+    const items: TranscriptItem[] = Array.from({ length: random() % 80 }, (_, index) => ({
+      id: `${index}`, turn: "t", at: "", kind: kinds[random() % kinds.length],
+      posts: random() % 3 === 0 ? [text("nested")] : [], postsOmitted: random() % 3,
+    }));
+    for (const folded of [false, true]) {
+      const expected = deriveTimelineGroups(items).filter(group => !folded || group.kind !== "work");
+      const actual = shownTimelineGroups(items, folded);
+      assert.deepEqual(actual, expected);
+      actual.forEach((group, index) => {
+        const other = expected[index];
+        if (group.kind !== "work" && other.kind !== "work") assert.equal(group.item, other.item);
+      });
+    }
+  }
+});

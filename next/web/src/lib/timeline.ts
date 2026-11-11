@@ -148,8 +148,17 @@ export function timelineItemRunning(item: TranscriptItem, turnEnded: boolean): b
 // Dyna: A closed fold hides thoughts and tool calls only. Text the agent wrote to the reader, and its posts, are never
 // work: they stay in the thread in order, and opening the fold puts the work back between them.
 export function shownTimelineGroups(items: TranscriptItem[], folded: boolean): TimelineGroup[] {
-  const groups = deriveTimelineGroups(items);
-  return folded ? groups.filter(group => group.kind !== "work") : groups;
+  if (!folded) return deriveTimelineGroups(items);
+  const groups: TimelineGroup[] = [];
+  for (const item of items) {
+    if (item.kind !== "tool" && item.kind !== "thinking") {
+      groups.push({ kind: "item", id: item.id, item });
+    }
+    if (item.kind === "tool" && ((item.posts?.length ?? 0) > 0 || item.postsOmitted)) {
+      groups.push({ kind: "posts", id: "posts:" + item.id, item });
+    }
+  }
+  return groups;
 }
 
 // Dyna: The transcript holds a session's own posts: nested under their tool call, or sent from a shell at the end of the items.
