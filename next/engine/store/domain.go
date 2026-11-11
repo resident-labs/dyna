@@ -478,14 +478,18 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			switch {
 			case waiting:
 				for _, reply := range body.Replies {
+					// A session is answered again once the wait ends. Discord got this turn's text as its reply, which also settles what
+					// an earlier silent turn left owed to that channel, so only a turn that said nothing still owes it.
 					if reply.Reply.Home.Kind == contract.ConversationDiscord {
+						if output.Final != "" && reply.Posted == "" {
+							later = slices.DeleteFunc(later, func(to contract.ReplyChannel) bool { return to.Home == reply.Reply.Home })
+						}
 						for i := range later {
 							if later[i].Home == reply.Reply.Home {
 								later[i] = reply.Reply
 							}
 						}
 					}
-					// A session is answered again once the wait ends. Discord got this turn's text as its reply, so only a turn that said nothing still owes it.
 					if (reply.Reply.Target.Kind == contract.PrincipalSession || reply.Reply.Home.Kind == contract.ConversationDiscord && output.Final == "") && reply.Posted == "" && !slices.ContainsFunc(later, func(to contract.ReplyChannel) bool { return answers(to)(reply) }) {
 						later = append(later, reply.Reply)
 					}
