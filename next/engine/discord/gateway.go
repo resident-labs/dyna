@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math/rand/v2"
-	"net/http"
 	"net/url"
 	"time"
 
@@ -19,10 +17,15 @@ type Message struct {
 	Guild   string `json:"guild_id"`
 	Content string `json:"content"`
 	Author  struct {
-		ID       string `json:"id"`
-		Username string `json:"username"`
-		Bot      bool   `json:"bot"`
+		ID         string `json:"id"`
+		Username   string `json:"username"`
+		Bot        bool   `json:"bot"`
+		GlobalName string `json:"global_name"`
 	} `json:"author"`
+	Member struct {
+		Nick  string   `json:"nick"`
+		Roles []string `json:"roles"`
+	} `json:"member"`
 	Mentions    []Identity `json:"mentions"`
 	Referenced  *Message   `json:"referenced_message"`
 	Attachments []struct {
@@ -33,6 +36,7 @@ type Message struct {
 type Gateway struct {
 	Client          *Client
 	URL, Guild, Bot string
+	Directory       *Directory
 	Receive         func(context.Context, Message) error
 }
 
@@ -177,6 +181,9 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 				}
 				return errors.New("Discord session invalidated")
 			case 0:
+				if g.Directory != nil {
+					g.Directory.Apply(p.Type, p.Data)
+				}
 				switch p.Type {
 				case "READY":
 					var ready struct {
@@ -197,7 +204,7 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 						continue
 					}
 					addressed := false
-					if m.Guild == g.Guild {
+					if m.Guild != "" {
 						for _, mention := range m.Mentions {
 							if mention.ID == g.Bot {
 								addressed = true
@@ -207,8 +214,7 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 							addressed = true
 						}
 					} else if m.Guild == "" {
-						member, e := g.Client.API(ctx, http.MethodGet, fmt.Sprintf("/api/v10/guilds/%s/members/%s", g.Guild, m.Author.ID), nil, "")
-						addressed = e == nil && member.Status == 200
+						addressed = true
 					}
 					if addressed {
 						if err := g.Receive(ctx, m); err != nil {

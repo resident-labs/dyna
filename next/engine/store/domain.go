@@ -476,6 +476,13 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			switch {
 			case waiting:
 				for _, reply := range body.Replies {
+					if reply.Reply.Home.Kind == "discord" {
+						for i := range later {
+							if later[i].Home == reply.Reply.Home {
+								later[i] = reply.Reply
+							}
+						}
+					}
 					if (reply.Reply.Target.Kind == contract.PrincipalSession || reply.Reply.Home.Kind == "discord") && reply.Posted == "" && !slices.ContainsFunc(later, func(to contract.ReplyChannel) bool { return answers(to)(reply) }) {
 						later = append(later, reply.Reply)
 					}

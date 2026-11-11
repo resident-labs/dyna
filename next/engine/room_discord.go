@@ -4,48 +4,134 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"net/http"
-	"strings"
-	"time"
-
+	"encoding/json"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/credential"
 	"github.com/resident-labs/dyna/engine/discord"
 	"github.com/resident-labs/dyna/engine/store"
+	"net/http"
+	"strings"
+	"time"
+	"unicode/utf8"
 )
 
+func (s *Service) DiscordConfigure(ctx context.Context, caller contract.Principal, req contract.DiscordConfigureRequest) (contract.DiscordConfigureResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalOwner {
+		return contract.DiscordConfigureResponse{}, forbidden()
+	}
+	if s.discordTokens == nil {
+		return contract.DiscordConfigureResponse{}, invalid("Discord unavailable")
+	}
+	if req.Clear && (req.Token != "" || req.Owner != nil) {
+		return contract.DiscordConfigureResponse{}, invalid("clear cannot include bot details")
+	}
+	if req.Owner != nil && !discordID(*req.Owner) {
+		return contract.DiscordConfigureResponse{}, invalid("invalid Discord owner ID")
+	}
+	s.discordChange.Lock()
+	defer s.discordChange.Unlock()
+	old, err := s.store.DiscordBot(ctx)
+	if err != nil {
+		return contract.DiscordConfigureResponse{}, failure(err)
+	}
+	b := old
+	if req.Clear {
+		b = store.DiscordBot{}
+	} else {
+		if req.Token != "" {
+			token := strings.TrimSpace(req.Token)
+			if token == "" || len(token) > 16384 || strings.IndexFunc(token, func(r rune) bool {
+				return !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-' || r == '=')
+			}) >= 0 {
+				return contract.DiscordConfigureResponse{}, invalid("invalid Discord token")
+			}
+			client := &discord.Client{HTTP: &http.Client{Timeout: 30 * time.Second}, Endpoint: s.discordEndpoint, Token: token}
+			result, err := client.API(ctx, "GET", "/api/v10/users/@me", nil, "")
+			if err != nil {
+				return contract.DiscordConfigureResponse{}, failure(err)
+			}
+			var bot discord.Identity
+			if result.Status != 200 || json.Unmarshal(result.Body, &bot) != nil || bot.ID == "" {
+				return contract.DiscordConfigureResponse{}, invalid("Discord rejected bot token")
+			}
+			var key [16]byte
+			if _, err := rand.Read(key[:]); err != nil {
+				return contract.DiscordConfigureResponse{}, failure(err)
+			}
+			b.ID = bot.ID
+			b.Name = bot.Name
+			b.Credential = hex.EncodeToString(key[:])
+			if err := s.discordTokens.Write(contract.RoomID(b.Credential), token); err != nil {
+				return contract.DiscordConfigureResponse{}, failure(err)
+			}
+		}
+		if req.Owner != nil {
+			b.Owner = *req.Owner
+		}
+	}
+	if req.Clear || req.Token != "" || req.Owner != nil {
+		if err := s.store.SetDiscordBot(ctx, b); err != nil {
+			if b.Credential != old.Credential {
+				_ = s.discordTokens.Clear(contract.RoomID(b.Credential))
+			}
+			return contract.DiscordConfigureResponse{}, failure(err)
+		}
+		if b.Credential != old.Credential && old.Credential != "" {
+			_ = s.discordTokens.Clear(contract.RoomID(old.Credential))
+		}
+	}
+	routes, err := s.store.DiscordRoutes(ctx, "")
+	if err != nil {
+		return contract.DiscordConfigureResponse{}, failure(err)
+	}
+	out := contract.DiscordConfigureResponse{BotID: b.ID, BotName: b.Name, Owner: b.Owner}
+	for _, r := range routes {
+		out.Routes = append(out.Routes, contract.DiscordRoute{Guild: r.Guild, Channel: r.Channel, Room: r.Room, Session: r.Session, Instructions: r.Instructions})
+	}
+	return out, nil
+}
+func discordID(id string) bool {
+	return id != "" && strings.IndexFunc(id, func(r rune) bool { return r < '0' || r > '9' }) < 0
+}
 func (s *Service) RoomDiscord(ctx context.Context, caller contract.Principal, req contract.RoomDiscordRequest) (contract.RoomDiscordResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalOwner {
 		return contract.RoomDiscordResponse{}, forbidden()
-	}
-	if s.discordTokens == nil {
-		return contract.RoomDiscordResponse{}, invalid("Discord unavailable")
 	}
 	room, _, err := s.store.ResolveRoom(ctx, string(req.Room))
 	if err != nil {
 		return contract.RoomDiscordResponse{}, invalid("unknown room")
 	}
-	if req.Clear && (req.Token != "" || req.Session != "") {
-		return contract.RoomDiscordResponse{}, invalid("clear cannot include connection details")
+	if req.Instructions != nil && utf8.RuneCountInString(*req.Instructions) > 4000 {
+		return contract.RoomDiscordResponse{}, invalid("instructions exceed 4,000 characters")
 	}
-	s.discordChange.Lock()
-	defer s.discordChange.Unlock()
-	old, err := s.store.DiscordConnection(ctx, room)
-	if err != nil {
-		return contract.RoomDiscordResponse{}, failure(err)
-	}
-	c := old
-	switch {
-	case req.Clear:
-		c = store.DiscordConnection{Room: room}
-		if err := s.store.SetDiscordConnection(ctx, c); err != nil {
-			return contract.RoomDiscordResponse{}, failure(err)
+	if req.Server != "" {
+		if !discordID(req.Server) || (req.Channel != "" && !discordID(req.Channel)) {
+			return contract.RoomDiscordResponse{}, invalid("invalid server or channel ID")
 		}
-	case req.Token != "":
-		client := &discord.Client{HTTP: &http.Client{Timeout: 30 * time.Second}, Endpoint: s.discordEndpoint, Token: strings.TrimSpace(req.Token)}
-		bot, guild, err := client.Validate(ctx)
+		bot, err := s.store.DiscordBot(ctx)
 		if err != nil {
 			return contract.RoomDiscordResponse{}, failure(err)
+		}
+		if bot.ID == "" && !req.Remove {
+			return contract.RoomDiscordResponse{}, invalid("configure the machine's Discord bot first")
+		}
+		if !req.Remove {
+			client, err := s.machineDiscordClient(ctx)
+			if err != nil {
+				return contract.RoomDiscordResponse{}, failure(err)
+			}
+			result, err := client.API(ctx, "GET", "/api/v10/guilds/"+req.Server, nil, "")
+			if err != nil || result.Status != 200 {
+				return contract.RoomDiscordResponse{}, invalid("bot is not in this server")
+			}
+			if req.Channel != "" {
+				result, err := client.API(ctx, "GET", "/api/v10/channels/"+req.Channel, nil, "")
+				var channel discord.Channel
+				if err != nil || result.Status != 200 || json.Unmarshal(result.Body, &channel) != nil || channel.Guild != req.Server {
+					return contract.RoomDiscordResponse{}, invalid("channel is not in this server")
+				}
+				s.discordDirectory.Apply("CHANNEL_CREATE", result.Body)
+			}
 		}
 		name := req.Session
 		if name == "" {
@@ -55,28 +141,35 @@ func (s *Service) RoomDiscord(ctx context.Context, caller contract.Principal, re
 		if err != nil {
 			return contract.RoomDiscordResponse{}, invalid("answering session is not open in this room")
 		}
-		var id [16]byte
-		if _, err := rand.Read(id[:]); err != nil {
+		instructions := ""
+		previous, err := s.store.DiscordRoutes(ctx, room)
+		if err != nil {
 			return contract.RoomDiscordResponse{}, failure(err)
 		}
-		c = store.DiscordConnection{Room: room, Guild: guild.ID, GuildName: guild.Name, BotID: bot.ID, BotName: bot.Name, Session: session.ID, Credential: hex.EncodeToString(id[:])}
-		if err := s.discordTokens.Write(contract.RoomID(c.Credential), client.Token); err != nil {
+		for _, r := range previous {
+			if r.Guild == req.Server && r.Channel == req.Channel {
+				instructions = r.Instructions
+			}
+		}
+		if req.Instructions != nil {
+			instructions = *req.Instructions
+		}
+		if err := s.store.SetDiscordRoute(ctx, store.DiscordRoute{Guild: req.Server, Channel: req.Channel, Room: room, Session: session.ID, Instructions: instructions}, req.Remove); err != nil {
 			return contract.RoomDiscordResponse{}, failure(err)
 		}
-		if err := s.store.SetDiscordConnection(ctx, c); err != nil {
-			_ = s.discordTokens.Clear(contract.RoomID(c.Credential))
-			return contract.RoomDiscordResponse{}, failure(err)
-		}
-	case req.Session != "":
-		return contract.RoomDiscordResponse{}, invalid("session requires a token on stdin")
+	} else if req.Channel != "" || req.Session != "" || req.Remove || req.Instructions != nil {
+		return contract.RoomDiscordResponse{}, invalid("server is required")
 	}
-	if (req.Clear || req.Token != "") && old.Credential != "" {
-		_ = s.discordTokens.Clear(contract.RoomID(old.Credential))
+	routes, err := s.store.DiscordRoutes(ctx, room)
+	if err != nil {
+		return contract.RoomDiscordResponse{}, failure(err)
 	}
-	return contract.RoomDiscordResponse{Guild: c.Guild, GuildName: c.GuildName, BotID: c.BotID, BotName: c.BotName, Session: c.Session}, nil
+	var out contract.RoomDiscordResponse
+	for _, r := range routes {
+		out.Routes = append(out.Routes, contract.DiscordRoute{Guild: r.Guild, Channel: r.Channel, Room: r.Room, Session: r.Session, Instructions: r.Instructions})
+	}
+	return out, nil
 }
-
-// StartDiscord runs only in the engine. Tokens are never mounted into a box.
 func (s *Service) StartDiscord(ctx context.Context, tokens *credential.Files, endpoint, gateway string) {
 	s.discordTokens = tokens
 	s.discordEndpoint = endpoint

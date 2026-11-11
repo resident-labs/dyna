@@ -46,6 +46,9 @@ func Split(text string) []string {
 					fence = ""
 				} else {
 					fence = strings.TrimSpace(strings.TrimPrefix(line, "```"))
+					if len([]rune(fence)) > 32 {
+						fence = " "
+					}
 					if fence == "" {
 						fence = " "
 					}

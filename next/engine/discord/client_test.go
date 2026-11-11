@@ -51,26 +51,3 @@ func TestRateLimitAndTruncation(t *testing.T) {
 		t.Fatalf("retry/truncate: %d %v", calls, err)
 	}
 }
-func TestValidateGuildCount(t *testing.T) {
-	for _, guilds := range []string{`[]`, `[{"id":"g","name":"room"}]`, `[{"id":"1"},{"id":"2"}]`} {
-		t.Run(guilds, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if strings.HasSuffix(r.URL.Path, "/guilds") {
-					w.Write([]byte(guilds))
-				} else {
-					w.Write([]byte(`{"id":"bot","username":"kira"}`))
-				}
-			}))
-			defer server.Close()
-			c := Client{HTTP: server.Client(), Endpoint: server.URL, Token: "secret"}
-			bot, guild, err := c.Validate(context.Background())
-			if strings.Contains(guilds, `"g"`) {
-				if err != nil || bot.ID != "bot" || guild.ID != "g" {
-					t.Fatal(err)
-				}
-			} else if err == nil {
-				t.Fatal("accepted wrong guild count")
-			}
-		})
-	}
-}

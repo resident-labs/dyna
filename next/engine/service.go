@@ -16,6 +16,7 @@ import (
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/compose"
 	"github.com/resident-labs/dyna/engine/credential"
+	"github.com/resident-labs/dyna/engine/discord"
 	"github.com/resident-labs/dyna/engine/githubaccount"
 	"github.com/resident-labs/dyna/engine/images"
 	"github.com/resident-labs/dyna/engine/lifecycle"
@@ -82,6 +83,7 @@ type Service struct {
 	discordChange     sync.Mutex
 	discordTokens     *credential.Files
 	discordEndpoint   string
+	discordDirectory  discord.Directory
 	githubTools       http.Handler
 	hostexec          HostexecRunner
 	promoteHost       func(context.Context, contract.HostName, bool) error

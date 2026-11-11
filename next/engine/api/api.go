@@ -338,6 +338,14 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 		return contract.RoomGitHubResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "GitHub accounts unavailable"}
 	})
+	call(mux, contract.MethodDiscordConfigure, c, func(ctx context.Context, who contract.Principal, req contract.DiscordConfigureRequest) (contract.DiscordConfigureResponse, *contract.Error) {
+		if service, ok := a.service.(interface {
+			DiscordConfigure(context.Context, contract.Principal, contract.DiscordConfigureRequest) (contract.DiscordConfigureResponse, *contract.Error)
+		}); ok {
+			return service.DiscordConfigure(ctx, who, req)
+		}
+		return contract.DiscordConfigureResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Discord unavailable"}
+	})
 	call(mux, contract.MethodRoomDiscord, c, func(ctx context.Context, who contract.Principal, req contract.RoomDiscordRequest) (contract.RoomDiscordResponse, *contract.Error) {
 		if service, ok := a.service.(interface {
 			RoomDiscord(context.Context, contract.Principal, contract.RoomDiscordRequest) (contract.RoomDiscordResponse, *contract.Error)

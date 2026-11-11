@@ -6,10 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -28,7 +28,21 @@ func (c *Client) API(ctx context.Context, method, path string, body json.RawMess
 	if len(body) > 0 && !json.Valid(body) {
 		return Result{}, errors.New("invalid JSON body")
 	}
-	return c.request(ctx, method, path, body, "application/json", reason)
+	result, err := c.request(ctx, method, path, body, "application/json", reason)
+	if err == nil && len(result.Body) > 20*1024 {
+		low, high := 0, 20*1024
+		for low < high {
+			mid := (low + high + 1) / 2
+			encoded, _ := json.Marshal(string(result.Body[:mid]) + " [truncated]")
+			if len(encoded) <= 20*1024 {
+				low = mid
+			} else {
+				high = mid - 1
+			}
+		}
+		result.Body, _ = json.Marshal(string(result.Body[:low]) + " [truncated]")
+	}
+	return result, err
 }
 func (c *Client) request(ctx context.Context, method, path string, body []byte, contentType, reason string) (Result, error) {
 	switch method {
@@ -68,7 +82,14 @@ func (c *Client) request(ctx context.Context, method, path string, body []byte, 
 			var rate struct {
 				RetryAfter float64 `json:"retry_after"`
 			}
-			if json.Unmarshal(data, &rate) != nil || rate.RetryAfter <= 0 {
+			_ = json.Unmarshal(data, &rate)
+			if header := resp.Header.Get("Retry-After"); header != "" {
+				delay, err := strconv.ParseFloat(header, 64)
+				if err == nil && delay > 0 {
+					rate.RetryAfter = delay
+				}
+			}
+			if rate.RetryAfter <= 0 || rate.RetryAfter > 86400 {
 				return Result{}, errors.New("invalid Discord rate limit")
 			}
 			timer := time.NewTimer(time.Duration(rate.RetryAfter * float64(time.Second)))
@@ -82,9 +103,6 @@ func (c *Client) request(ctx context.Context, method, path string, body []byte, 
 		}
 		// Discord responses are untrusted: never return a reflected credential.
 		data = bytes.ReplaceAll(data, []byte(c.Token), []byte("[redacted]"))
-		if len(data) > 20*1024 {
-			data, _ = json.Marshal(string(data[:20*1024]) + " [truncated]")
-		}
 		if len(data) == 0 {
 			data = []byte("null")
 		}
@@ -99,40 +117,4 @@ func (c *Client) request(ctx context.Context, method, path string, body []byte, 
 type Identity struct {
 	ID   string `json:"id"`
 	Name string `json:"username"`
-}
-type Guild struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
-func (c *Client) Validate(ctx context.Context) (Identity, Guild, error) {
-	if strings.TrimSpace(c.Token) == "" || strings.ContainsAny(c.Token, "\r\n") {
-		return Identity{}, Guild{}, errors.New("invalid Discord token")
-	}
-	user, err := c.API(ctx, "GET", "/api/v10/users/@me", nil, "")
-	if err != nil {
-		return Identity{}, Guild{}, err
-	}
-	if user.Status != 200 {
-		return Identity{}, Guild{}, fmt.Errorf("Discord rejected token (HTTP %d)", user.Status)
-	}
-	var bot Identity
-	if json.Unmarshal(user.Body, &bot) != nil || bot.ID == "" {
-		return Identity{}, Guild{}, errors.New("invalid Discord bot response")
-	}
-	result, err := c.API(ctx, "GET", "/api/v10/users/@me/guilds", nil, "")
-	if err != nil {
-		return Identity{}, Guild{}, err
-	}
-	if result.Status != 200 {
-		return Identity{}, Guild{}, errors.New("cannot list Discord servers")
-	}
-	var guilds []Guild
-	if json.Unmarshal(result.Body, &guilds) != nil {
-		return Identity{}, Guild{}, errors.New("invalid Discord server response")
-	}
-	if len(guilds) != 1 {
-		return Identity{}, Guild{}, fmt.Errorf("bot must be in exactly one server; found %d", len(guilds))
-	}
-	return bot, guilds[0], nil
 }
