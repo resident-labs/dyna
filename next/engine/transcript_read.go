@@ -59,13 +59,8 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 	for _, f := range files {
 		reader.Acked[f.Path] = f.Acked
 	}
-	deliveries, err := s.store.TranscriptDeliveries(ctx, req.Session)
-	if err != nil {
-		return response, failure(err)
-	}
-	if reader.Steers, err = s.store.TranscriptSteers(ctx, req.Session); err != nil {
-		return response, failure(err)
-	}
+	var deliveries map[contract.DeliverySeq]contract.TurnID
+	mapsLoaded := false
 	limit := req.Limit
 	if limit == 0 {
 		limit = 6
@@ -159,6 +154,18 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			seenTotal := 0
 			readerMore := false
 			for _, r := range ranges {
+				// Load attribution only when a Pi range is actually read, once per request.
+				if !mapsLoaded {
+					deliveries, err = s.store.TranscriptDeliveries(ctx, req.Session)
+					if err != nil {
+						return response, failure(err)
+					}
+					reader.Steers, err = s.store.TranscriptSteers(ctx, req.Session)
+					if err != nil {
+						return response, failure(err)
+					}
+					mapsLoaded = true
+				}
 				var items []pig.TranscriptItem
 				var seen int
 				var more bool

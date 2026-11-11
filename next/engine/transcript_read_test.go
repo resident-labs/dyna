@@ -367,3 +367,44 @@ func TestTranscriptInputAttachmentsAndBudget(t *testing.T) {
 		t.Fatalf("received %d of %d inputs", count, len(ids))
 	}
 }
+
+// An unavailable attribution table must not affect paths that never read Pi.
+func TestTranscriptDefersUnusedMaps(t *testing.T) {
+	s, ctx, caller := transcriptCaller(t)
+	session, err := s.store.Session(ctx, caller.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.store.Write(ctx, func(tx *sql.Tx) error {
+		input := contract.Event{ID: "lazy-input", Room: session.Room, From: contract.Principal{Kind: contract.PrincipalOwner}, Time: time.Unix(1, 0), Body: contract.PostCreated{Text: "input chunk", Home: feedHome}}
+		if _, err := s.store.AppendEvent(tx, input); err != nil {
+			return err
+		}
+		start := contract.Event{ID: "lazy-start", Room: session.Room, From: caller, Time: time.Unix(2, 0), Body: contract.TurnStarted{Session: caller.Session, Turn: "lazy", Inputs: []contract.EventID{input.ID}}}
+		seq, err := s.store.AppendEvent(tx, start)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO turns(id,session,started_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,started_seq) VALUES('lazy',?,0,'','',0,0,0,0,?)`, caller.Session, seq); err != nil {
+			return err
+		}
+		_, err = tx.Exec(`DROP TABLE deliveries`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, req := range []contract.TranscriptReadRequest{
+		{Session: caller.Session, Turn: "lazy", Item: "input:lazy-input"},
+		{Session: caller.Session, Turn: "lazy", AfterItem: "input:lazy-input"},
+		{Session: caller.Session, Turn: "lazy"},
+		{Session: caller.Session, Turn: "absent"},
+	} {
+		got, problem := s.TranscriptRead(ctx, theOwner, req)
+		if problem != nil {
+			t.Fatal(problem)
+		}
+		if req.Item != "" && got.Chunk != "input chunk" {
+			t.Fatalf("chunk: %+v", got)
+		}
+	}
+}
