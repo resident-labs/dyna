@@ -184,8 +184,9 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 		cpuFree := float64(4*cpuBudget-int64(cpu+request.Size.CPUs)*1000) / float64(4*cpuBudget)
 		memFree := float64(4*memBudget-mem-request.Size.MemBytes) / float64(4*memBudget)
 		headroom := min(cpuFree, memFree)
-		if request.Image == RunnerImage && h.CPUUsed != nil {
-			headroom = runnerIdleCores(h, runnerCPU) - float64(request.Size.CPUs)
+		if request.Image == RunnerImage {
+			// A share of the host, not a count of cores, so a big host fills in step with the small ones, not ahead of them.
+			headroom = (runnerIdleCores(h, runnerCPU) - float64(request.Size.CPUs)) / float64(h.CPUs)
 		}
 		if chosen == "" || headroom > best || (headroom == best && h.Name < chosen) {
 			chosen, best, card = h.Name, headroom, hostCard
@@ -200,13 +201,19 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 // GPUUsable is the VRAM of a card that boxes may ask for: its memory less a tenth kept in reserve for the host's own use.
 func GPUUsable(g contract.GPU) int64 { return g.MemBytes - g.MemBytes/10 }
 
-// runnerIdleCores accounts for runners started since the heartbeat, before they use CPU.
+// runnerIdleCores accounts for runners started since the heartbeat, before they use CPU: each is counted at half its CPUs,
+// which is what a runner uses on average, so a host is not held to one runner per reserved core set.
+// A host with no measurement yet is ranked on its runners alone, on the same scale as the others.
 func runnerIdleCores(h Host, runnerCPU int) float64 {
-	return float64(h.CPUs) - max(*h.CPUUsed, float64(runnerCPU))
+	used := float64(runnerCPU) / 2
+	if h.CPUUsed != nil {
+		used = max(used, *h.CPUUsed)
+	}
+	return float64(h.CPUs) - used
 }
 
 // AdmitRunner prefers image-ready hosts with enough real idle cores, then other idle
-// hosts. If none admits the runner, retain image-first reservation placement.
+// hosts. If none admits the runner, the busiest fleet still spreads by idle share, image-ready hosts first.
 func AdmitRunner(hosts, ready []Host, boxes []Box, request Box, only ...string) Placement {
 	idle := func(hosts []Host) []Host {
 		return slices.DeleteFunc(slices.Clone(hosts), func(h Host) bool {
@@ -224,10 +231,6 @@ func AdmitRunner(hosts, ready []Host, boxes []Box, request Box, only ...string) 
 	}
 	var placement Placement
 	for _, candidates := range [][]Host{ready, hosts} {
-		candidates = slices.Clone(candidates)
-		for i := range candidates {
-			candidates[i].CPUUsed = nil
-		}
 		placement = Admit(candidates, boxes, request, only...)
 		if placement.Host != "" {
 			return placement
