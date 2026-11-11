@@ -26,6 +26,7 @@ CREATE INDEX events_room_home ON events(room, home, seq) WHERE home IS NOT NULL;
 CREATE INDEX events_type_seq ON events(type, seq);
 -- taken_at records each actual assignment to taken, for a new turn or steer; replay does not change it.
 CREATE TABLE deliveries (to_kind TEXT NOT NULL, to_id TEXT NOT NULL, seq INTEGER NOT NULL REFERENCES events(seq), surface TEXT NOT NULL, reply_kind TEXT NOT NULL, reply_target_kind TEXT NOT NULL, reply_target_id TEXT NOT NULL, reply_home TEXT NOT NULL, reply_to TEXT NOT NULL, wake INTEGER NOT NULL, state TEXT NOT NULL, turn TEXT, queue TEXT, meant_for TEXT, meant_why TEXT NOT NULL DEFAULT '', immediate INTEGER NOT NULL DEFAULT 0, taken_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(to_kind, to_id, seq));
+CREATE INDEX deliveries_by_turn ON deliveries(to_kind,to_id,turn,seq);
 CREATE INDEX deliveries_open ON deliveries(to_kind,to_id,seq) WHERE state IN ('pending','taken');
 -- model_sent_at: the first time the engine handed a model request for this turn to its model proxy.
 -- A later rejection by the child proxy still counts; zero means not observed (including historical rows).
