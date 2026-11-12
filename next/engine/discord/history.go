@@ -26,7 +26,19 @@ func (c *Client) History(ctx context.Context, channel, before, bot string) strin
 		if len(lines) == 20 {
 			break
 		}
-		line := []rune(m.Author.Username + ": " + m.Content)
+		text := m.Author.Username + ": " + m.Content
+		for _, part := range m.Parts() {
+			text += " [" + part + "]"
+		}
+		if files := m.Files(); len(files) > 0 {
+			var names []string
+			for _, f := range files {
+				names = append(names, f.Name)
+			}
+			// The files are not delivered with history; the ID is what discord read needs to fetch them.
+			text += " [files: " + strings.Join(names, ", ") + "; discord read with message " + m.ID + " delivers them]"
+		}
+		line := []rune(text)
 		if len(lines) > 0 {
 			remaining--
 		}

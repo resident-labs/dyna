@@ -30,18 +30,19 @@ type Message struct {
 		Nick  string   `json:"nick"`
 		Roles []string `json:"roles"`
 	} `json:"member"`
-	Mentions    []Identity `json:"mentions"`
-	Roles       []string   `json:"mention_roles"`
-	Referenced  *Message   `json:"referenced_message"`
-	Attachments []struct {
-		URL  string `json:"url"`
-		Name string `json:"filename"`
-		Size int64  `json:"size"`
-	} `json:"attachments"`
-	Embeds []struct {
+	Mentions    []Identity   `json:"mentions"`
+	Roles       []string     `json:"mention_roles"`
+	Referenced  *Message     `json:"referenced_message"`
+	Attachments []Attachment `json:"attachments"`
+	Embeds      []struct {
 		Title       string `json:"title"`
 		Description string `json:"description"`
+		URL         string `json:"url"`
 	} `json:"embeds"`
+	// Snapshots hold a forwarded message.
+	Snapshots []struct {
+		Message Message `json:"message"`
+	} `json:"message_snapshots"`
 	Stickers []struct {
 		Name string `json:"name"`
 	} `json:"sticker_items"`

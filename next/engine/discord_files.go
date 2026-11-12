@@ -126,7 +126,7 @@ func (s *Service) discordReadFiles(ctx context.Context, caller contract.Principa
 	if channel, ok := s.discordDirectory.Channel(m.Channel); ok {
 		b.ChannelName = channel.Name
 	}
-	for _, a := range m.Attachments {
+	for _, a := range m.Files() {
 		b.Attachments = append(b.Attachments, contract.DiscordAttachment{Name: a.Name, Size: a.Size, URL: a.URL})
 	}
 	if len(b.Attachments) == 0 {

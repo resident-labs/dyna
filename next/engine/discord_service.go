@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -179,21 +180,16 @@ func (s *Service) discordInput(ctx context.Context, client *discord.Client, m di
 	if m.Guild != "" {
 		b.History = client.History(ctx, m.Channel, m.ID, bot.ID)
 	}
-	for _, embed := range m.Embeds {
-		if embed.Title != "" {
-			b.RichContent += "\n" + embed.Title
-		}
-		if embed.Description != "" {
-			b.RichContent += "\n" + embed.Description
-		}
+	for _, part := range m.Parts() {
+		b.RichContent += "\n" + part
 	}
-	for _, sticker := range m.Stickers {
-		b.RichContent += "\n[sticker] " + sticker.Name
+	files := m.Files()
+	// The message this one answers comes whole, files included: "what do you think" is about that message.
+	if r := m.Referenced; r != nil {
+		b.RichContent += fmt.Sprintf("\nReply to @%s (message %s): %s", r.Author.Username, r.ID, strings.Join(append([]string{strings.Join(strings.Fields(r.Content), " ")}, r.Parts()...), " | "))
+		files = append(files[:len(files):len(files)], r.Files()...)
 	}
-	if m.Poll != nil {
-		b.RichContent += "\n[poll] " + m.Poll.Question.Text
-	}
-	for _, a := range m.Attachments {
+	for _, a := range files {
 		b.Attachments = append(b.Attachments, contract.DiscordAttachment{Name: a.Name, Size: a.Size, URL: a.URL})
 	}
 	b.Files, b.Attachments = s.downloadDiscordFiles(ctx, selected.Room, b.Attachments)
