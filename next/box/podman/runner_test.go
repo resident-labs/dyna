@@ -377,7 +377,7 @@ func TestBuildFolderPastItsCapLosesTargetFirst(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(bin, "podman"), []byte(podman), 0755); err != nil {
 				t.Fatal(err)
 			}
-			cmd := exec.Command("bash", "-c", buildScript, "test", root, "200")
+			cmd := exec.Command("bash", "-c", buildScript, "test", root, "200", "16")
 			cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("%v: %s", err, out)
