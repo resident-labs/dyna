@@ -298,8 +298,11 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 		if (to == contract.BoxStarting || to == contract.BoxPending) && !due.IsZero() {
 			dueMS = due.UnixMilli()
 		}
+		// An agent that said hello before this write is already starting, with its own reason and its longer budget to open the
+		// session: a successful create keeps both.
+		greeted := failure == "" && state == contract.BoxStarting
 		// A completed turn after an early hello may have reset the current failure count.
-		result, err := tx.ExecContext(ctx, `UPDATE boxes SET host=CASE WHEN ? THEN NULL ELSE host END,create_retry_host=CASE WHEN ? THEN ? ELSE create_retry_host END,failed_create=CASE WHEN ?='failed' AND ?!='' THEN 1 ELSE 0 END,image=?,state=?,reason=?,due_at=?,created_at=CASE WHEN ?='' THEN ? ELSE created_at END,failures=CASE WHEN ?='ready' THEN failures ELSE ? END WHERE id=? AND state=? AND want='run'`, retry, retry, b.Host, to, failure, image, to, reason, dueMS, failure, event.Time.UnixMilli(), state, failures, b.ID, state)
+		result, err := tx.ExecContext(ctx, `UPDATE boxes SET host=CASE WHEN ? THEN NULL ELSE host END,create_retry_host=CASE WHEN ? THEN ? ELSE create_retry_host END,failed_create=CASE WHEN ?='failed' AND ?!='' THEN 1 ELSE 0 END,image=?,state=?,reason=CASE WHEN ? THEN reason ELSE ? END,due_at=CASE WHEN ? THEN due_at ELSE ? END,created_at=CASE WHEN ?='' THEN ? ELSE created_at END,failures=CASE WHEN ?='ready' THEN failures ELSE ? END WHERE id=? AND state=? AND want='run'`, retry, retry, b.Host, to, failure, image, to, greeted, reason, greeted, dueMS, failure, event.Time.UnixMilli(), state, failures, b.ID, state)
 		if err != nil {
 			return err
 		}
