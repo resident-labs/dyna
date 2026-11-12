@@ -48,7 +48,8 @@ type Driver interface {
 	EnsureEgress(ctx context.Context, image string) error
 	RemoveEgress(context.Context) error
 	StartRunner(context.Context, box.RunnerSpec) error
-	ListRunners(context.Context) ([]box.Runner, bool, error)
+	// ListRunners also frees every idle build folder when reclaim is set.
+	ListRunners(ctx context.Context, reclaim bool) ([]box.Runner, bool, error)
 	RemoveRunner(context.Context, string) error
 }
 
@@ -414,6 +415,12 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 	if s.pools, err = p.Store.Pools(ctx); err != nil {
 		return s, err
 	}
+	// A session box or a service that waits for disk comes before the build folders idle runner slots keep.
+	reclaim := slices.ContainsFunc(s.rows, func(row store.LifecycleBox) bool {
+		return row.State == contract.BoxPending && row.Image != box.RunnerImage && row.Reason == string(box.PendingDisk)
+	}) || slices.ContainsFunc(s.services, func(row store.ServiceRow) bool {
+		return row.State == contract.ServicePending && row.Reason == contract.ServiceNoDisk
+	})
 	var unanswered []contract.HostName
 	for _, host := range hosts {
 		if host.Pool != "" {
@@ -435,7 +442,7 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 		var runners []box.Runner
 		var egress bool
 		if err == nil {
-			runners, egress, err = driver.ListRunners(ctx)
+			runners, egress, err = driver.ListRunners(ctx, reclaim)
 		}
 		if err != nil {
 			s.failures = append(s.failures, fmt.Errorf("host %s: %w", host.Name, err))

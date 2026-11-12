@@ -53,6 +53,7 @@ type fakeDriver struct {
 	startErr    error
 	listErr     error
 	listCtx     context.Context
+	reclaimed   bool
 	gate        chan struct{} // when set, a build waits for it to close
 	buildMu     sync.Mutex    // a build-ahead runs beside placement
 	onEgress    func()        // runs when the proxy is started, which a sweep does
@@ -113,8 +114,8 @@ func (d *fakeDriver) StartRunner(_ context.Context, s box.RunnerSpec) error {
 	d.runners = append(d.runners, box.Runner{Name: s.Name, Repo: s.Repo, ID: s.ID, Slot: s.Slot, Size: s.Size, Running: true})
 	return nil
 }
-func (d *fakeDriver) ListRunners(ctx context.Context) ([]box.Runner, bool, error) {
-	d.listCtx = ctx
+func (d *fakeDriver) ListRunners(ctx context.Context, reclaim bool) ([]box.Runner, bool, error) {
+	d.listCtx, d.reclaimed = ctx, reclaim
 	return slices.Clone(d.runners), d.egress, d.listErr
 }
 func (d *fakeDriver) RemoveRunner(_ context.Context, name string) error {
