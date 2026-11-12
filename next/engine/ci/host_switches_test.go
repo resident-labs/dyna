@@ -99,6 +99,42 @@ func TestARunnerSkipsAHostWhereASessionBoxWaitsForRoom(t *testing.T) {
 	}
 }
 
+// Idle runner slots keep their build folders until a session box waits for disk; a runner that waits does not count.
+func TestABoxWaitingForDiskReclaimsIdleBuildFolders(t *testing.T) {
+	small, _ := box.Size(contract.BoxSizeSmall)
+	for image, want := range map[string]bool{"": true, box.RunnerImage: false} {
+		f := newFixture(0)
+		f.scale(1)
+		if f.drivers["pve"].reclaimed {
+			t.Fatal("reclaimed with nothing waiting")
+		}
+		f.store.boxes = []store.LifecycleBox{{Box: box.Box{ID: "b", Room: "r2", Image: image, Size: small, State: contract.BoxPending, Reason: string(box.PendingDisk)}}}
+		f.scale(1)
+		if f.drivers["pve"].reclaimed != want {
+			t.Errorf("image %q: reclaimed %v", image, !want)
+		}
+	}
+	// The last pass after every repository turned CI off reclaims too: no later pass surveys.
+	f := newFixture(0)
+	f.scale(1)
+	f.store.repos = nil
+	f.tick(t)
+	if !f.drivers["pve"].reclaimed || len(f.drivers["pve"].runners) != 0 {
+		t.Fatal("CI off: nothing reclaimed, or the runner stayed")
+	}
+	// That pass found the runner it removed, whose folder was still held, so the next one surveys again.
+	f.drivers["pve"].reclaimed = false
+	f.tick(t)
+	if !f.drivers["pve"].reclaimed {
+		t.Fatal("CI off: no pass after the runner left")
+	}
+	f.drivers["pve"].reclaimed = false
+	f.tick(t)
+	if f.drivers["pve"].reclaimed {
+		t.Fatal("CI off: still surveying a clean host")
+	}
+}
+
 // A pending service comes before a runner as a pending box does, on the hosts it could take: its declared host and its room's rule
 // narrow them, so a service that cannot go to a host holds no runner back there.
 func TestARunnerSkipsAHostWhereAServiceWaitsForRoom(t *testing.T) {
