@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -66,7 +67,7 @@ func TestStartRunnerPreparesItsBuildFolderFirst(t *testing.T) {
 	prepared, started := -1, -1
 	for i, args := range runner.args {
 		joined := strings.Join(args, " ")
-		if strings.Contains(joined, "podman unshare chown 1001:1001") && strings.Contains(joined, "/data/cache/ci/3") && strings.Contains(joined, "41943040") {
+		if strings.Contains(joined, "podman unshare chown 1001:1001") && strings.Contains(joined, "/data/cache/ci/3") && strings.Contains(joined, strconv.Itoa(cacheLimitKB)) {
 			prepared = i
 		}
 		if strings.Contains(joined, "dyna-runner") {
