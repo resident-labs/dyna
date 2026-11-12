@@ -287,6 +287,11 @@ esac
 			if err := os.WriteFile(filepath.Join(bin, "podman"), []byte(fake), 0755); err != nil {
 				t.Fatal(err)
 			}
+			// A 1000 GiB disk with 150 GiB free is under twice its floor.
+			df := "#!/bin/bash\nprintf 'Filesystem 1024-blocks Used Available Capacity Mounted\\n/dev/x 1048576000 0 157286400 85%% /\\n'\n"
+			if err := os.WriteFile(filepath.Join(bin, "df"), []byte(df), 0755); err != nil {
+				t.Fatal(err)
+			}
 			cmd := exec.Command("bash", "-c", pruneRunnerFoldersScript, "test", root, "16")
 			cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), fmt.Sprint("FAIL_LIST=", failed))
 			out, err := cmd.CombinedOutput()
@@ -297,6 +302,47 @@ esac
 				_, err := os.Stat(filepath.Join(root, slot))
 				wantGone := slot == "1" && !failed
 				if os.IsNotExist(err) != wantGone {
+					t.Errorf("slot %s: stat = %v", slot, err)
+				}
+			}
+		})
+	}
+}
+
+// A host with room keeps every slot folder, so the next job on a slot finds the last one's build. Short of disk, it
+// removes idle folders from the highest slot down and stops once there is room.
+func TestPruneRunnerFoldersKeepsThemWhileTheDiskHasRoom(t *testing.T) {
+	for name, c := range map[string]struct {
+		free string
+		gone []string
+	}{
+		"room":          {"220000000", nil},
+		"short":         {"150000000", []string{"1", "3", "5"}},
+		"short-then-ok": {"150000000 220000000", []string{"5"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root, bin := t.TempDir(), t.TempDir()
+			for _, slot := range []string{"0", "1", "3", "5"} {
+				if err := os.Mkdir(filepath.Join(root, slot), 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			podman := "#!/bin/bash\ncase \"$1\" in ps) echo 0 ;; unshare) shift; exec \"$@\" ;; *) exit 9 ;; esac\n"
+			// Each call to df reports the next free figure, the last one from then on.
+			df := "#!/bin/bash\nn=$(cat \"$COUNT\" 2>/dev/null || echo 1); echo $((n+1)) > \"$COUNT\"\nset -- $FREE; [ $n -le $# ] || n=$#\nprintf 'Filesystem 1024-blocks Used Available Capacity Mounted\\n/dev/x 1048576000 0 %s 85%% /\\n' \"${!n}\"\n"
+			for file, body := range map[string]string{"podman": podman, "df": df} {
+				if err := os.WriteFile(filepath.Join(bin, file), []byte(body), 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cmd := exec.Command("bash", "-c", pruneRunnerFoldersScript, "test", root, "16")
+			cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "FREE="+c.free, "COUNT="+filepath.Join(bin, "count"))
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%v: %s", err, out)
+			}
+			for _, slot := range []string{"0", "1", "3", "5"} {
+				_, err := os.Stat(filepath.Join(root, slot))
+				if os.IsNotExist(err) != slices.Contains(c.gone, slot) {
 					t.Errorf("slot %s: stat = %v", slot, err)
 				}
 			}
