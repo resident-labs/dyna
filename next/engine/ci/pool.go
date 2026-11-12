@@ -254,8 +254,10 @@ func (p *Pool) Tick(ctx context.Context, group *sync.WaitGroup) error {
 		p.reaped[repo] = now.Add(reapEvery)
 	}
 	// One pass after the last repository leaves removes its runners. A pass that failed looks again, and the first pass
-	// reaps what an earlier engine left.
-	p.clean = len(repos) == 0 && len(failures) == 0
+	// reaps what an earlier engine left. A pass that found a runner looks again too: its build folder is reclaimed by the
+	// survey of the pass after it is gone.
+	held := slices.ContainsFunc(hosts, func(h box.Host) bool { return len(view.hosts[h.Name].runners) > 0 })
+	p.clean = len(repos) == 0 && len(failures) == 0 && !held
 	return errors.Join(failures...)
 }
 
