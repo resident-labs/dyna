@@ -226,33 +226,46 @@ func (h *Host) StartRunner(ctx context.Context, s box.RunnerSpec) error {
 	return err
 }
 
-// pruneRunnerFoldersScript removes only canonical slot directories without a container.
+// pruneRunnerFoldersScript keeps the slot folders, which carry one job's build to the next job on that slot, while the
+// host's disk has room. Under twice the disk floor (box.DiskFloor) it removes canonical slot directories without a
+// container, highest slot first because new runners take the lowest free slot, until there is room again. With "all"
+// it removes every such directory whatever the disk holds, for a box or service that waits for disk.
 // Include stopped containers, and fail closed if Podman cannot list them. This never
 // touches named volumes (including legacy dyna.ci=cache volumes).
 const pruneRunnerFoldersScript = `set -eu
-root="$1"; slots="$2"
+root="$1"; slots="$2"; all="$3"
+[ -d "$root" ] || exit 0
+roomy() {
+  [ "$all" != all ] || return 1
+  set -- $(df -Pk -- "$root" | tail -1)
+  floor=$(( $2 / 10 )); [ "$floor" -ge 20971520 ] || floor=20971520
+  [ "$4" -ge $(( 2 * floor )) ]
+}
+if roomy; then exit 0; fi
 held=$(podman ps --all --filter label=dyna.ci.slot --format '{{.Label "dyna.ci.slot"}}')
-for ((slot=0; slot<slots; slot++)); do
+for ((slot=slots-1; slot>=0; slot--)); do
   if ! grep -qxF -- "$slot" <<< "$held"; then
     if [ -e "$root/$slot" ] || [ -L "$root/$slot" ]; then
       podman unshare rm -rf -- "$root/$slot"
+      if roomy; then exit 0; fi
     fi
   fi
 done`
 
 // pruneRunnerFolders requires runnerMu, so preparing a slot cannot race its cleanup.
-func (h *Host) pruneRunnerFolders(ctx context.Context) error {
+func (h *Host) pruneRunnerFolders(ctx context.Context, all bool) error {
 	layout := box.Layout{HostData: h.dataDir}
-	_, err := h.runUnbounded(ctx, nil, "bash", "-c", pruneRunnerFoldersScript, "dyna-ci-prune", filepath.Join(layout.HostCache(), "ci"), strconv.Itoa(box.RunnerSlots))
+	_, err := h.runUnbounded(ctx, nil, "bash", "-c", pruneRunnerFoldersScript, "dyna-ci-prune", filepath.Join(layout.HostCache(), "ci"), strconv.Itoa(box.RunnerSlots), map[bool]string{true: "all"}[all])
 	return err
 }
 
-// ListRunners reclaims orphan slot folders during every survey, including startup,
+// ListRunners reclaims idle slot folders on a host short of disk during every survey, including startup, and all of
+// them when reclaim says something waits for disk,
 // and reports this host's runner containers and whether its proxy is running.
-func (h *Host) ListRunners(ctx context.Context) ([]box.Runner, bool, error) {
+func (h *Host) ListRunners(ctx context.Context, reclaim bool) ([]box.Runner, bool, error) {
 	h.runnerMu.Lock()
 	defer h.runnerMu.Unlock()
-	if err := h.pruneRunnerFolders(ctx); err != nil {
+	if err := h.pruneRunnerFolders(ctx, reclaim); err != nil {
 		return nil, false, err
 	}
 	out, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "ps", "--all", "--filter", "label="+ciLabel, "--format", "json")
@@ -305,7 +318,7 @@ func (h *Host) RemoveRunner(ctx context.Context, name string) error {
 	if _, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "rm", "--force", "--ignore", "--time", "0", name); err != nil {
 		return err
 	}
-	return h.pruneRunnerFolders(ctx)
+	return h.pruneRunnerFolders(ctx, false)
 }
 
 // PruneRunnerLayers removes the room layer images of every room but these, as a room that dropped its ci-runner image, was

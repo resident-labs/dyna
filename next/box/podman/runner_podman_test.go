@@ -74,7 +74,7 @@ func TestRealRunnersKeepTheirOwnBuildFolders(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	found, _, err := h.ListRunners(ctx)
+	found, _, err := h.ListRunners(ctx, false)
 	if err != nil || len(found) != 2 || found[0].Size.Name == found[1].Size.Name {
 		t.Fatalf("listed %+v: %v", found, err)
 	}

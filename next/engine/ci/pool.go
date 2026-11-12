@@ -48,7 +48,8 @@ type Driver interface {
 	EnsureEgress(ctx context.Context, image string) error
 	RemoveEgress(context.Context) error
 	StartRunner(context.Context, box.RunnerSpec) error
-	ListRunners(context.Context) ([]box.Runner, bool, error)
+	// ListRunners also frees every idle build folder when reclaim is set.
+	ListRunners(ctx context.Context, reclaim bool) ([]box.Runner, bool, error)
 	RemoveRunner(context.Context, string) error
 }
 
@@ -253,8 +254,10 @@ func (p *Pool) Tick(ctx context.Context, group *sync.WaitGroup) error {
 		p.reaped[repo] = now.Add(reapEvery)
 	}
 	// One pass after the last repository leaves removes its runners. A pass that failed looks again, and the first pass
-	// reaps what an earlier engine left.
-	p.clean = len(repos) == 0 && len(failures) == 0
+	// reaps what an earlier engine left. A pass that found a runner looks again too: its build folder is reclaimed by the
+	// survey of the pass after it is gone.
+	held := slices.ContainsFunc(hosts, func(h box.Host) bool { return len(view.hosts[h.Name].runners) > 0 })
+	p.clean = len(repos) == 0 && len(failures) == 0 && !held
 	return errors.Join(failures...)
 }
 
@@ -414,6 +417,13 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 	if s.pools, err = p.Store.Pools(ctx); err != nil {
 		return s, err
 	}
+	// A session box or a service that waits for disk comes before the build folders idle runner slots keep. With no
+	// repository on, nothing will use them, and the passes that could reclaim them later stop.
+	reclaim := len(s.repos) == 0 || slices.ContainsFunc(s.rows, func(row store.LifecycleBox) bool {
+		return row.State == contract.BoxPending && row.Image != box.RunnerImage && row.Reason == string(box.PendingDisk)
+	}) || slices.ContainsFunc(s.services, func(row store.ServiceRow) bool {
+		return row.State == contract.ServicePending && row.Reason == contract.ServiceNoDisk
+	})
 	var unanswered []contract.HostName
 	for _, host := range hosts {
 		if host.Pool != "" {
@@ -435,7 +445,7 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 		var runners []box.Runner
 		var egress bool
 		if err == nil {
-			runners, egress, err = driver.ListRunners(ctx)
+			runners, egress, err = driver.ListRunners(ctx, reclaim)
 		}
 		if err != nil {
 			s.failures = append(s.failures, fmt.Errorf("host %s: %w", host.Name, err))
@@ -859,7 +869,8 @@ func (p *Pool) buildAhead(ctx context.Context, host *surveyed, layers map[contra
 }
 
 // freeSlot picks the slot of a new runner on a host: its proxy socket and its build folder. Every repository's runners count,
-// because they share that host's proxy and cache. A slot a dead runner used is free: nothing of it outlives its container.
+// because they share that host's proxy and cache. A slot a dead runner used is free, and the lowest
+// free slot is taken so that its build folder, which outlives the container, is the one most recently filled.
 func freeSlot(runners []box.Runner) (int, error) {
 	used := make(map[int]bool)
 	for _, runner := range runners {
