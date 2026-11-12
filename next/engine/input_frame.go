@@ -11,7 +11,6 @@ import (
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
-	"github.com/resident-labs/dyna/room"
 )
 
 // maxShownImage is the largest attachment shown to the model as an image. Pi shrinks what it can below the model's limit,
@@ -96,11 +95,9 @@ func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, eve
 			frame += " Attached: " + described + "."
 		}
 		frame += " No reply is expected."
-		body, err := room.RenderDelivery(b)
-		return frame + "\n" + body, files, err
+		return frame, files, nil
 	}
 	if b, ok := event.Body.(contract.DiscordMessage); ok {
-		text, err := room.RenderDelivery(b)
 		sender := fmt.Sprintf("Discord user %q (%s, ID %s, roles: %s)", frameField(b.DisplayName), frameField(b.Author), b.AuthorID, frameField(strings.Join(b.Roles, ", ")))
 		if b.Owner {
 			sender = "the owner"
@@ -123,7 +120,7 @@ func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, eve
 				frame += " A person is waiting in that channel. If you can answer right away, just answer. If it needs work first, send one short line now with discord send (the channel, no replyTo) saying what you are going to do, then do it; your final response still arrives as the reply."
 			}
 		}
-		return frame + "\n" + text, files, err
+		return frame, files, nil
 	}
 	var sender string
 	if post, ok := event.Body.(contract.PostCreated); ok && post.Source != nil {
