@@ -10,6 +10,7 @@ import (
 	"github.com/resident-labs/dyna/engine/discord"
 	"github.com/resident-labs/dyna/engine/store"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -170,6 +171,50 @@ func (s *Service) RoomDiscord(ctx context.Context, caller contract.Principal, re
 		out.Routes = append(out.Routes, contract.DiscordRoute{Guild: r.Guild, Channel: r.Channel, Room: r.Room, Session: r.Session, Instructions: r.Instructions})
 	}
 	return out, nil
+}
+
+// DiscordInstructions lets root shape the session that answers Discord for it: a brief fades at compaction, and these do not.
+func (s *Service) DiscordInstructions(ctx context.Context, caller contract.Principal, req contract.DiscordInstructionsRequest) (contract.DiscordInstructionsResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalSession {
+		return contract.DiscordInstructionsResponse{}, forbidden()
+	}
+	root, err := s.store.Session(ctx, caller.Session)
+	if err != nil {
+		return contract.DiscordInstructionsResponse{}, failure(err)
+	}
+	tree, err := s.store.RoomTree(ctx, root.Room)
+	if err != nil {
+		return contract.DiscordInstructionsResponse{}, failure(err)
+	}
+	if tree.Root() != caller.Session {
+		return contract.DiscordInstructionsResponse{}, forbidden()
+	}
+	if req.Text != nil && utf8.RuneCountInString(*req.Text) > 4000 {
+		return contract.DiscordInstructionsResponse{}, invalid("instructions exceed 4,000 characters")
+	}
+	answering, err := s.store.SessionByName(ctx, root.Room, req.Session)
+	if err != nil {
+		return contract.DiscordInstructionsResponse{}, invalid("session is not open in this room")
+	}
+	routes, err := s.store.DiscordRoutes(ctx, root.Room)
+	if err != nil {
+		return contract.DiscordInstructionsResponse{}, failure(err)
+	}
+	routes = slices.DeleteFunc(routes, func(r store.DiscordRoute) bool { return r.Session != answering.ID })
+	if len(routes) == 0 {
+		return contract.DiscordInstructionsResponse{}, invalid("that session answers no Discord mapping of this room")
+	}
+	for _, r := range routes {
+		if req.Text == nil {
+			break
+		}
+		r.Instructions = *req.Text
+		if err := s.store.SetDiscordRoute(ctx, r, false); err != nil {
+			return contract.DiscordInstructionsResponse{}, failure(err)
+		}
+		routes[0].Instructions = *req.Text
+	}
+	return contract.DiscordInstructionsResponse{Text: routes[0].Instructions}, nil
 }
 func (s *Service) StartDiscord(ctx context.Context, tokens *credential.Files, endpoint, gateway string) {
 	s.discordTokens = tokens
