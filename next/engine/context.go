@@ -353,6 +353,19 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 				place = "#" + channel + " of " + server
 			}
 			line := fmt.Sprintf("Discord: bot %s; %s, answered by %s", bot.Name, place, answering.Name)
+			if r.Channel == "" {
+				// The live list, so a session knows a channel another session made. Categories, voice and threads are left out.
+				var channels []string
+				for _, c := range s.discordDirectory.Channels() {
+					if c.Guild == r.Guild && (c.Type == 0 || c.Type == 5 || c.Type == 15) {
+						channels = append(channels, fmt.Sprintf("#%s (%s)", c.Name, c.ID))
+					}
+				}
+				if len(channels) > 50 {
+					channels = append(channels[:50], "more: GET /guilds/"+r.Guild+"/channels")
+				}
+				line += "\nChannels: " + strings.Join(channels, ", ")
+			}
 			if caller.Session == r.Session && r.Instructions != "" {
 				line += "\nThe owner's instructions:\n" + r.Instructions
 			}

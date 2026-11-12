@@ -55,7 +55,8 @@ func TestDiscordConnectionInputAndAuthority(t *testing.T) {
 		t.Fatalf("unsafe input %s %v", rendered, err)
 	}
 	frame, _, err := s.inputFrame(ctx, root, events[0], contract.Delivery{})
-	if err != nil || (!strings.Contains(frame, "ID 2, roles: Admin") || !strings.Contains(frame, "channel 200, message 300")) {
+	// The frame is the [Dyna] line alone: the stream adds the message after it, once.
+	if err != nil || strings.Contains(frame, "<outside") || (!strings.Contains(frame, "ID 2, roles: Admin") || !strings.Contains(frame, "channel 200, message 300")) {
 		t.Fatalf("identity %s %v", frame, err)
 	}
 	ownerFrame, _, frameErr := s.inputFrame(ctx, root, contract.Event{Body: contract.DiscordMessage{Owner: true, Channel: "200", Message: "301", ChannelName: "general", GuildName: "server"}}, contract.Delivery{})
@@ -218,7 +219,7 @@ func TestDiscordHistoryAndDM(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := events[0].Body.(contract.DiscordMessage)
-	if b.History != "ownername: owner line\nari: newer" {
+	if b.History != "ari: too old\nKira: bot boundary\nownername: owner line\nari: newer" {
 		t.Fatalf("history %q", b.History)
 	}
 	rendered, err := room.RenderDelivery(b)

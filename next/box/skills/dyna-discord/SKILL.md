@@ -42,7 +42,7 @@ Your final text replies to every Discord channel whose input you took, to its
 newest input message. Use `discord send {channel, text, replyTo?, paths?}` for other
 messages, notices and relays. Paths refer to files in your box (at most 10 files,
 10 MB each without boosts; larger files are refused). The bot shows typing while your turn runs.
-Server inputs include at most 20 messages since the bot's last message, at most
+Server inputs include the 20 messages before, the bot's own cut to 300 characters, at most
 4,000 characters. DMs do not. Read history explicitly when more context is needed.
 
 ## Find things
