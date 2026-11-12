@@ -114,6 +114,14 @@ func TestABoxWaitingForDiskReclaimsIdleBuildFolders(t *testing.T) {
 			t.Errorf("image %q: reclaimed %v", image, !want)
 		}
 	}
+	// The last pass after every repository turned CI off reclaims too: no later pass surveys.
+	f := newFixture(0)
+	f.scale(1)
+	f.store.repos = nil
+	f.tick(t)
+	if !f.drivers["pve"].reclaimed {
+		t.Fatal("CI off: nothing reclaimed")
+	}
 }
 
 // A pending service comes before a runner as a pending box does, on the hosts it could take: its declared host and its room's rule

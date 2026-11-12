@@ -415,8 +415,9 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 	if s.pools, err = p.Store.Pools(ctx); err != nil {
 		return s, err
 	}
-	// A session box or a service that waits for disk comes before the build folders idle runner slots keep.
-	reclaim := slices.ContainsFunc(s.rows, func(row store.LifecycleBox) bool {
+	// A session box or a service that waits for disk comes before the build folders idle runner slots keep. With no
+	// repository on, nothing will use them, and the passes that could reclaim them later stop.
+	reclaim := len(s.repos) == 0 || slices.ContainsFunc(s.rows, func(row store.LifecycleBox) bool {
 		return row.State == contract.BoxPending && row.Image != box.RunnerImage && row.Reason == string(box.PendingDisk)
 	}) || slices.ContainsFunc(s.services, func(row store.ServiceRow) bool {
 		return row.State == contract.ServicePending && row.Reason == contract.ServiceNoDisk
