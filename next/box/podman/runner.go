@@ -226,16 +226,26 @@ func (h *Host) StartRunner(ctx context.Context, s box.RunnerSpec) error {
 	return err
 }
 
-// pruneRunnerFoldersScript removes only canonical slot directories without a container.
+// pruneRunnerFoldersScript keeps the slot folders, which carry one job's build to the next job on that slot, while the
+// host's disk has room. Under twice the disk floor (box.DiskFloor) it removes canonical slot directories without a
+// container, highest slot first because new runners take the lowest free slot, until there is room again.
 // Include stopped containers, and fail closed if Podman cannot list them. This never
 // touches named volumes (including legacy dyna.ci=cache volumes).
 const pruneRunnerFoldersScript = `set -eu
 root="$1"; slots="$2"
+[ -d "$root" ] || exit 0
+roomy() {
+  set -- $(df -Pk -- "$root" | tail -1)
+  floor=$(( $2 / 10 )); [ "$floor" -ge 20971520 ] || floor=20971520
+  [ "$4" -ge $(( 2 * floor )) ]
+}
+if roomy; then exit 0; fi
 held=$(podman ps --all --filter label=dyna.ci.slot --format '{{.Label "dyna.ci.slot"}}')
-for ((slot=0; slot<slots; slot++)); do
+for ((slot=slots-1; slot>=0; slot--)); do
   if ! grep -qxF -- "$slot" <<< "$held"; then
     if [ -e "$root/$slot" ] || [ -L "$root/$slot" ]; then
       podman unshare rm -rf -- "$root/$slot"
+      if roomy; then exit 0; fi
     fi
   fi
 done`
@@ -247,7 +257,7 @@ func (h *Host) pruneRunnerFolders(ctx context.Context) error {
 	return err
 }
 
-// ListRunners reclaims orphan slot folders during every survey, including startup,
+// ListRunners reclaims idle slot folders on a host short of disk during every survey, including startup,
 // and reports this host's runner containers and whether its proxy is running.
 func (h *Host) ListRunners(ctx context.Context) ([]box.Runner, bool, error) {
 	h.runnerMu.Lock()

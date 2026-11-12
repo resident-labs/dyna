@@ -859,7 +859,8 @@ func (p *Pool) buildAhead(ctx context.Context, host *surveyed, layers map[contra
 }
 
 // freeSlot picks the slot of a new runner on a host: its proxy socket and its build folder. Every repository's runners count,
-// because they share that host's proxy and cache. A slot a dead runner used is free: nothing of it outlives its container.
+// because they share that host's proxy and cache. A slot a dead runner used is free, and the lowest
+// free slot is taken so that its build folder, which outlives the container, is the one most recently filled.
 func freeSlot(runners []box.Runner) (int, error) {
 	used := make(map[int]bool)
 	for _, runner := range runners {
