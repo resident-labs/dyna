@@ -119,8 +119,19 @@ func TestABoxWaitingForDiskReclaimsIdleBuildFolders(t *testing.T) {
 	f.scale(1)
 	f.store.repos = nil
 	f.tick(t)
+	if !f.drivers["pve"].reclaimed || len(f.drivers["pve"].runners) != 0 {
+		t.Fatal("CI off: nothing reclaimed, or the runner stayed")
+	}
+	// That pass found the runner it removed, whose folder was still held, so the next one surveys again.
+	f.drivers["pve"].reclaimed = false
+	f.tick(t)
 	if !f.drivers["pve"].reclaimed {
-		t.Fatal("CI off: nothing reclaimed")
+		t.Fatal("CI off: no pass after the runner left")
+	}
+	f.drivers["pve"].reclaimed = false
+	f.tick(t)
+	if f.drivers["pve"].reclaimed {
+		t.Fatal("CI off: still surveying a clean host")
 	}
 }
 
