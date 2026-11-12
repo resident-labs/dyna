@@ -45,7 +45,8 @@ const (
 	buildMount = "/build"
 	// buildCacheMount holds the socket of the host's compiler cache, which the entrypoint relays to the port sccache uses.
 	buildCacheMount = "/run/dyna-build-cache"
-	// cacheLimitKB is the size a build folder may have when the next job starts: 80 GiB. Slots fill to it only while the host has room: pruneRunnerFoldersScript reclaims idle ones.
+	// cacheLimitKB is the size a build folder may have when the next job starts, at most: 80 GiB. buildScript lowers it to what the
+	// host's disk can hold in every slot at once, and never under 40 GiB.
 	cacheLimitKB = 80 << 20
 )
 
@@ -56,10 +57,15 @@ func buildFolder(slot int) string { return path.Join("ci", strconv.Itoa(slot)) }
 // folder, the compiled output that grows with every branch and that the compiler cache can rebuild; what a job downloaded
 // or installed stays. Only a folder still past the limit without it is emptied. du
 // and rm run in Podman's user namespace, where the job's files live. Its cargo and target folders are mounts of their own.
-const buildScript = `b="$1"; limit="$2"
+const buildScript = `b="$1"; limit="$2"; slots="$3"
 mkdir -p -- "$b"
 # The runner's user must pass through the cache root and ci/ to reach its folder; a box may have made them 700.
 chmod a+rx -- "$(dirname -- "$(dirname -- "$b")")" "$(dirname -- "$b")"
+# Every slot at the limit must fit in the disk above twice its floor (box.DiskFloor), as in pruneRunnerFoldersScript.
+set -- $(df -Pk -- "$b" | tail -1)
+floor=$(( $2 / 10 )); [ "$floor" -ge 20971520 ] || floor=20971520
+share=$(( ($2 - 2 * floor) / slots )); [ "$share" -ge 41943040 ] || share=41943040
+[ "$limit" -le "$share" ] || limit=$share
 over() { [ "$(podman unshare du -sk "$b" | cut -f1)" -gt "$limit" ]; }
 if over; then
   if [ -d "$b/target" ]; then podman unshare find "$b/target" -mindepth 1 -delete; fi
@@ -217,7 +223,7 @@ func (h *Host) StartRunner(ctx context.Context, s box.RunnerSpec) error {
 	if _, sized := box.Size(s.Size.Name); !sized || !filepath.IsAbs(s.Cache) || strings.ContainsAny(s.Cache, ",=\n\x00") || !filepath.IsAbs(s.BuildCache) || strings.ContainsAny(s.BuildCache, ",=\n\x00") {
 		return errors.New("invalid runner")
 	}
-	if _, err := h.run(ctx, "bash", "-c", buildScript, "dyna-ci-build", filepath.Join(s.Cache, buildFolder(s.Slot)), strconv.Itoa(cacheLimitKB)); err != nil {
+	if _, err := h.run(ctx, "bash", "-c", buildScript, "dyna-ci-build", filepath.Join(s.Cache, buildFolder(s.Slot)), strconv.Itoa(cacheLimitKB), strconv.Itoa(box.RunnerSlots)); err != nil {
 		return fmt.Errorf("prepare build folder: %w", err)
 	}
 	args := append([]string{"bash", "-c", `IFS= read -r ACTIONS_RUNNER_INPUT_JITCONFIG && export ACTIONS_RUNNER_INPUT_JITCONFIG && exec "$@"`, "dyna-runner"}, runnerArgs(s)...)
