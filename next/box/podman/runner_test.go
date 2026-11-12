@@ -3,6 +3,7 @@ package podman
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"os"
@@ -366,7 +367,9 @@ func TestBuildFolderPastItsCapLosesTargetFirst(t *testing.T) {
 				if err := os.MkdirAll(filepath.Dir(filepath.Join(root, file)), 0755); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(filepath.Join(root, file), make([]byte, size), 0644); err != nil {
+				data := make([]byte, size)
+				rand.Read(data) // a compressing filesystem must not shrink it under the cap
+				if err := os.WriteFile(filepath.Join(root, file), data, 0644); err != nil {
 					t.Fatal(err)
 				}
 			}
