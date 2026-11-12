@@ -3,6 +3,7 @@ package podman
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"os"
@@ -349,6 +350,50 @@ func TestPruneRunnerFoldersKeepsThemWhileTheDiskHasRoom(t *testing.T) {
 				if os.IsNotExist(err) != slices.Contains(c.gone, slot) {
 					t.Errorf("slot %s: stat = %v", slot, err)
 				}
+			}
+		})
+	}
+}
+
+// A build folder past its cap loses the compiled output first, and everything only when that was not enough.
+func TestBuildFolderPastItsCapLosesTargetFirst(t *testing.T) {
+	for name, c := range map[string]struct {
+		big  string
+		kept bool
+	}{"target": {"target/out", true}, "cargo": {"cargo/registry", false}} {
+		t.Run(name, func(t *testing.T) {
+			root, bin := filepath.Join(t.TempDir(), "ci", "0"), t.TempDir()
+			for file, size := range map[string]int{"cargo/crate": 1, "toolchain": 1, c.big: 400 << 10} {
+				if err := os.MkdirAll(filepath.Dir(filepath.Join(root, file)), 0755); err != nil {
+					t.Fatal(err)
+				}
+				data := make([]byte, size)
+				rand.Read(data) // a compressing filesystem must not shrink it under the cap
+				if err := os.WriteFile(filepath.Join(root, file), data, 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			podman := "#!/bin/bash\ncase \"$1\" in unshare) shift; [ \"$1\" = chown ] || exec \"$@\" ;; *) exit 9 ;; esac\n"
+			if err := os.WriteFile(filepath.Join(bin, "podman"), []byte(podman), 0755); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("bash", "-c", buildScript, "test", root, "200", "16")
+			cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%v: %s", err, out)
+			}
+			for _, file := range []string{"cargo/crate", "toolchain"} {
+				if _, err := os.Stat(filepath.Join(root, file)); (err == nil) != c.kept {
+					t.Errorf("%s: stat = %v", file, err)
+				}
+			}
+			for _, folder := range []string{"cargo", "target"} {
+				if _, err := os.Stat(filepath.Join(root, folder)); err != nil {
+					t.Error(err)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(root, c.big)); err == nil {
+				t.Errorf("%s stayed", c.big)
 			}
 		})
 	}

@@ -109,7 +109,7 @@ echo "$DYNA_CI_CACHE $DYNA_CI_BUILD"`, spec.Size.Name, other)
 
 	// A folder past the cap is emptied, and the next runner gets it back empty and its own.
 	realPodman(t, "--cgroup-manager=systemd", "rm", "--force", "--time", "0", specs[0].Name)
-	if _, err := h.run(ctx, "bash", "-c", buildScript, "dyna-ci-build", filepath.Join(cache, buildFolder(0)), "0"); err != nil {
+	if _, err := h.run(ctx, "bash", "-c", buildScript, "dyna-ci-build", filepath.Join(cache, buildFolder(0)), "0", "16"); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(filepath.Join(cache, buildFolder(0)))
