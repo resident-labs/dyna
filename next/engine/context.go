@@ -367,7 +367,7 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 				line += "\nChannels: " + strings.Join(channels, ", ")
 			}
 			if caller.Session == r.Session && r.Instructions != "" {
-				line += "\nThe owner's instructions:\n" + r.Instructions
+				line += "\nYour standing instructions, from the owner or root:\n" + r.Instructions
 			}
 			lines = append(lines, line)
 		}

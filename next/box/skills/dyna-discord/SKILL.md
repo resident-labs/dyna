@@ -29,7 +29,8 @@ when something needs the room. Root replies like any parent; the front relays by
 its final text or `discord send`. Root answering directly suits private servers.
 Each server or channel mapping has an answering session; it and its ancestors
 may call the tool within that mapping. The live dyna_discord section names the
-bot and mappings. Only a mapping's answering session sees its owner's instructions.
+bot and mappings. Root shapes a front session with `discord instructions {session, text}`, not its brief:
+they stay in the front's context across compaction, and only the front sees them there.
 A closed answering session falls back to root.
 The owner configures the machine bot with `dyna discord --owner USERID` and a token
 on stdin, then maps with `dyna room discord ROOM --server ID [--channel ID]
