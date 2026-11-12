@@ -45,21 +45,25 @@ const (
 	buildMount = "/build"
 	// buildCacheMount holds the socket of the host's compiler cache, which the entrypoint relays to the port sccache uses.
 	buildCacheMount = "/run/dyna-build-cache"
-	// cacheLimitKB empties a build folder above 40 GiB before the next job starts.
+	// cacheLimitKB is the size a build folder may have when the next job starts: 40 GiB.
 	cacheLimitKB = 40 << 20
 )
 
 // buildFolder is a slot's build folder, relative to the host's cache.
 func buildFolder(slot int) string { return path.Join("ci", strconv.Itoa(slot)) }
 
-// buildScript makes a slot's build folder, owned by the runner's user, and empties it when it has grown past cacheLimitKB. du
+// buildScript makes a slot's build folder, owned by the runner's user. A folder grown past cacheLimitKB loses its target
+// folder, the compiled output that grows with every branch and that the compiler cache can rebuild; what a job downloaded
+// or installed stays. Only a folder still past the limit without it is emptied. du
 // and rm run in Podman's user namespace, where the job's files live. Its cargo and target folders are mounts of their own.
 const buildScript = `b="$1"; limit="$2"
 mkdir -p -- "$b"
 # The runner's user must pass through the cache root and ci/ to reach its folder; a box may have made them 700.
 chmod a+rx -- "$(dirname -- "$(dirname -- "$b")")" "$(dirname -- "$b")"
-kb=$(podman unshare du -sk "$b" | cut -f1)
-if [ "$kb" -gt "$limit" ]; then podman unshare find "$b" -mindepth 1 -delete; fi
+for part in "$b/target" "$b"; do
+  kb=$(podman unshare du -sk "$b" | cut -f1)
+  if [ "$kb" -gt "$limit" ] && [ -d "$part" ]; then podman unshare find "$part" -mindepth 1 -delete; fi
+done
 podman unshare mkdir -p -- "$b/cargo" "$b/target"
 podman unshare chown 1001:1001 "$b" "$b/cargo" "$b/target"`
 
