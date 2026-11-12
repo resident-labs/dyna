@@ -45,8 +45,8 @@ const (
 	buildMount = "/build"
 	// buildCacheMount holds the socket of the host's compiler cache, which the entrypoint relays to the port sccache uses.
 	buildCacheMount = "/run/dyna-build-cache"
-	// cacheLimitKB is the size a build folder may have when the next job starts: 40 GiB.
-	cacheLimitKB = 40 << 20
+	// cacheLimitKB is the size a build folder may have when the next job starts: 80 GiB. Slots fill to it only while the host has room: pruneRunnerFoldersScript reclaims idle ones.
+	cacheLimitKB = 80 << 20
 )
 
 // buildFolder is a slot's build folder, relative to the host's cache.
@@ -60,10 +60,11 @@ const buildScript = `b="$1"; limit="$2"
 mkdir -p -- "$b"
 # The runner's user must pass through the cache root and ci/ to reach its folder; a box may have made them 700.
 chmod a+rx -- "$(dirname -- "$(dirname -- "$b")")" "$(dirname -- "$b")"
-for part in "$b/target" "$b"; do
-  kb=$(podman unshare du -sk "$b" | cut -f1)
-  if [ "$kb" -gt "$limit" ] && [ -d "$part" ]; then podman unshare find "$part" -mindepth 1 -delete; fi
-done
+over() { [ "$(podman unshare du -sk "$b" | cut -f1)" -gt "$limit" ]; }
+if over; then
+  if [ -d "$b/target" ]; then podman unshare find "$b/target" -mindepth 1 -delete; fi
+  if over; then podman unshare find "$b" -mindepth 1 -delete; fi
+fi
 podman unshare mkdir -p -- "$b/cargo" "$b/target"
 podman unshare chown 1001:1001 "$b" "$b/cargo" "$b/target"`
 

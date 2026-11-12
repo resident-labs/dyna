@@ -17,7 +17,7 @@ The image's job-started hook refuses a different repository and fork pull reques
 
 The runner is user 1001 with a read-only root and dropped capabilities. `$HOME` (`/home/runner`) and `/tmp` are size-capped tmpfs; files there disappear with the container. A normal Actions checkout is under the runner's home, not a persistent checkout.
 
-Each host slot has a writable persistent build folder at `/build` (`DYNA_CI_BUILD`). Its `cargo` folder is mounted at `CARGO_HOME=/box/cache/cargo`, and its `target` folder at `CARGO_TARGET_DIR=/box/work/<owner>/<repo>/target`. These survive jobs on that slot, not moves to another host or slot. A folder over 40 GiB when a runner starts loses `target` first, and everything only if it is still over. The host's cache is also mounted read-only at `DYNA_CI_CACHE`; it is not a writable checkout. Do not rely on an earlier job's workspace being present.
+Each host slot has a writable persistent build folder at `/build` (`DYNA_CI_BUILD`). Its `cargo` folder is mounted at `CARGO_HOME=/box/cache/cargo`, and its `target` folder at `CARGO_TARGET_DIR=/box/work/<owner>/<repo>/target`. These survive jobs on that slot, not moves to another host or slot. A folder over 80 GiB when a runner starts loses `target` first, and everything only if it is still over. The host's cache is also mounted read-only at `DYNA_CI_CACHE`; it is not a writable checkout. Do not rely on an earlier job's workspace being present.
 
 The container has no direct network. Its HTTP proxy reaches public addresses only, not private host or LAN services. Tools need to honor the proxy environment. Installing system packages in a workflow cannot change the read-only root; use the room image below.
 
