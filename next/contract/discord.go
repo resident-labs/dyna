@@ -89,6 +89,18 @@ type DiscordMessage struct {
 func (DiscordMessage) EventType() EventType { return "discord.message" }
 func (DiscordMessage) isEventBody()         {}
 
+const MethodDiscordInstructions Method = "discord.instructions"
+
+// DiscordInstructionsRequest reads, or with Text sets, the standing instructions of the mappings Session answers.
+type DiscordInstructionsRequest struct {
+	Session string  `json:"session"`
+	Text    *string `json:"text,omitempty"`
+}
+
+type DiscordInstructionsResponse struct {
+	Text string `json:"text"`
+}
+
 const MethodDiscordRead Method = "discord.read"
 
 type DiscordReadRequest struct {

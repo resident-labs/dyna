@@ -11,6 +11,9 @@ import (
 	"strings"
 )
 
+func (c *socketClient) DiscordInstructions(ctx context.Context, req contract.DiscordInstructionsRequest) (contract.DiscordInstructionsResponse, error) {
+	return call[contract.DiscordInstructionsRequest, contract.DiscordInstructionsResponse](ctx, c, contract.MethodDiscordInstructions, req)
+}
 func (c *socketClient) DiscordAPI(ctx context.Context, req contract.DiscordAPIRequest) (contract.DiscordAPIResponse, error) {
 	return call[contract.DiscordAPIRequest, contract.DiscordAPIResponse](ctx, c, contract.MethodDiscordAPI, req)
 }
@@ -124,6 +127,23 @@ func discordCommand(getClient func() client) *cobra.Command {
 	read.Flags().StringVar(&readReq.Before, "before", "", "Messages before this ID")
 	read.Flags().StringVar(&readReq.After, "after", "", "Messages after this ID")
 	read.Flags().StringVar(&readReq.Around, "around", "", "Messages around this ID")
-	root.AddCommand(api, send, read)
+	instructions := &cobra.Command{Use: "instructions SESSION [TEXT]", Args: cobra.RangeArgs(1, 2), RunE: func(cmd *cobra.Command, args []string) error {
+		service, ok := getClient().(interface {
+			DiscordInstructions(context.Context, contract.DiscordInstructionsRequest) (contract.DiscordInstructionsResponse, error)
+		})
+		if !ok {
+			return fmt.Errorf("Discord unavailable")
+		}
+		req := contract.DiscordInstructionsRequest{Session: args[0]}
+		if len(args) == 2 {
+			req.Text = &args[1]
+		}
+		result, err := service.DiscordInstructions(cmd.Context(), req)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+	}}
+	root.AddCommand(api, send, read, instructions)
 	return root
 }
