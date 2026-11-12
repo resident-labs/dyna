@@ -345,8 +345,14 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 // BeginSessionStartup records that the agent answered, but its harness is not ready.
 // Preserve retry counters and desired state; a concurrent stop or expired admission wins.
 func (s *Store) BeginSessionStartup(ctx context.Context, b box.Box, event contract.Event) error {
-	event.Body = contract.BoxChanged{Box: b.ID, Session: b.Session, Host: b.Host, From: b.State, To: contract.BoxStarting, Reason: box.SessionStartupReason}
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		// The state is read here and not taken from the caller: the agent answers within a tenth of a second of its
+		// container starting, so the engine's own step from creating to starting can land between the caller's read and
+		// this write. Refusing that hello made the agent exit, and the box then failed with "no hello within 60 s".
+		if err := tx.QueryRowContext(ctx, "SELECT state FROM boxes WHERE id=? AND state IN ('creating','starting')", b.ID).Scan(&b.State); err != nil {
+			return err
+		}
+		event.Body = contract.BoxChanged{Box: b.ID, Session: b.Session, Host: b.Host, From: b.State, To: contract.BoxStarting, Reason: box.SessionStartupReason}
 		result, err := tx.ExecContext(ctx, "UPDATE boxes SET state='starting',reason=?,updated_at=?,due_at=? WHERE id=? AND state=? AND want='run' AND (due_at=0 OR due_at>?)", box.SessionStartupReason, event.Time.UnixMilli(), event.Time.Add(box.SessionStartupBudget).UnixMilli(), b.ID, b.State, event.Time.UnixMilli())
 		if err := noRows(result, err, sql.ErrNoRows); err != nil {
 			return err
