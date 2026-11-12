@@ -132,7 +132,10 @@ func (s *Service) DiscordRead(ctx context.Context, caller contract.Principal, re
 		} else if m.Reference.Message != "" {
 			line += "\nReply to " + m.Reference.Message
 		}
-		for i, a := range m.Attachments {
+		for _, part := range m.Parts() {
+			line += "\n" + part
+		}
+		for i, a := range m.Files() {
 			line += fmt.Sprintf("\nAttachment %d: %s (%d bytes)", i+1, a.Name, a.Size)
 		}
 		lines = append(lines, line)
