@@ -7,7 +7,8 @@ import (
 	"strings"
 )
 
-// History is best effort: a single read, newest first from Discord, rendered oldest first.
+// History is best effort: a single read, newest first from Discord, rendered oldest first. The bot's own messages are in
+// it, cut short: one bot speaks for several sessions, and the one answering has not seen what another said.
 func (c *Client) History(ctx context.Context, channel, before, bot string) string {
 	r, err := c.request(ctx, "GET", "/api/v10/channels/"+url.PathEscape(channel)+"/messages?limit=20&before="+url.QueryEscape(before), nil, "application/json", "")
 	if err != nil || r.Status != 200 {
@@ -20,9 +21,6 @@ func (c *Client) History(ctx context.Context, channel, before, bot string) strin
 	var lines []string
 	remaining := 4000
 	for _, m := range messages {
-		if m.Author.ID == bot {
-			break
-		}
 		if len(lines) == 20 {
 			break
 		}
@@ -39,6 +37,9 @@ func (c *Client) History(ctx context.Context, channel, before, bot string) strin
 			text += " [files: " + strings.Join(names, ", ") + "; discord read with message " + m.ID + " delivers them]"
 		}
 		line := []rune(text)
+		if m.Author.ID == bot && len(line) > 300 {
+			line = append(line[:300], '…')
+		}
 		if len(lines) > 0 {
 			remaining--
 		}
