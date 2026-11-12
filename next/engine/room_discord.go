@@ -204,17 +204,16 @@ func (s *Service) DiscordInstructions(ctx context.Context, caller contract.Princ
 	if len(routes) == 0 {
 		return contract.DiscordInstructionsResponse{}, invalid("that session answers no Discord mapping of this room")
 	}
+	if req.Text == nil {
+		return contract.DiscordInstructionsResponse{Text: routes[0].Instructions}, nil
+	}
 	for _, r := range routes {
-		if req.Text == nil {
-			break
-		}
 		r.Instructions = *req.Text
 		if err := s.store.SetDiscordRoute(ctx, r, false); err != nil {
 			return contract.DiscordInstructionsResponse{}, failure(err)
 		}
-		routes[0].Instructions = *req.Text
 	}
-	return contract.DiscordInstructionsResponse{Text: routes[0].Instructions}, nil
+	return contract.DiscordInstructionsResponse{Text: *req.Text}, nil
 }
 func (s *Service) StartDiscord(ctx context.Context, tokens *credential.Files, endpoint, gateway string) {
 	s.discordTokens = tokens
