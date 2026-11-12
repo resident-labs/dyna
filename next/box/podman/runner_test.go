@@ -141,7 +141,7 @@ func TestListRunnersSeparatesTheProxy(t *testing.T) {
 {"Names":["dyna-ci-pve-1"],"State":"running","Labels":{"dyna.ci":"runner","dyna.ci.repo":"owner/repo","dyna.ci.id":"42","dyna.ci.slot":"3","dyna.ci.size":"medium"}},
 {"Names":["dyna-ci-pve-2"],"State":"created","Labels":{"dyna.ci":"runner","dyna.ci.repo":"owner/repo","dyna.ci.id":"43","dyna.ci.slot":"0"}},
 {"Names":["dyna-ci-egress"],"State":"running","Labels":{"dyna.ci":"egress"}}]`)
-	found, egress, err := h.ListRunners(context.Background())
+	found, egress, err := h.ListRunners(context.Background(), false)
 	if err != nil || !egress || len(found) != 2 {
 		t.Fatalf("%+v %v %v", found, egress, err)
 	}
@@ -292,7 +292,7 @@ esac
 			if err := os.WriteFile(filepath.Join(bin, "df"), []byte(df), 0755); err != nil {
 				t.Fatal(err)
 			}
-			cmd := exec.Command("bash", "-c", pruneRunnerFoldersScript, "test", root, "16")
+			cmd := exec.Command("bash", "-c", pruneRunnerFoldersScript, "test", root, "16", os.Getenv("PRUNE_ALL"))
 			cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), fmt.Sprint("FAIL_LIST=", failed))
 			out, err := cmd.CombinedOutput()
 			if (err != nil) != failed {
@@ -319,8 +319,12 @@ func TestPruneRunnerFoldersKeepsThemWhileTheDiskHasRoom(t *testing.T) {
 		"room":          {"220000000", nil},
 		"short":         {"150000000", []string{"1", "3", "5"}},
 		"short-then-ok": {"150000000 220000000", []string{"5"}},
+		"all":           {"220000000", []string{"1", "3", "5"}},
 	} {
 		t.Run(name, func(t *testing.T) {
+			if name == "all" {
+				t.Setenv("PRUNE_ALL", "all")
+			}
 			root, bin := t.TempDir(), t.TempDir()
 			for _, slot := range []string{"0", "1", "3", "5"} {
 				if err := os.Mkdir(filepath.Join(root, slot), 0755); err != nil {
@@ -335,7 +339,7 @@ func TestPruneRunnerFoldersKeepsThemWhileTheDiskHasRoom(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			cmd := exec.Command("bash", "-c", pruneRunnerFoldersScript, "test", root, "16")
+			cmd := exec.Command("bash", "-c", pruneRunnerFoldersScript, "test", root, "16", os.Getenv("PRUNE_ALL"))
 			cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "FREE="+c.free, "COUNT="+filepath.Join(bin, "count"))
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("%v: %s", err, out)
@@ -358,7 +362,7 @@ func TestRunnerSurveyAndRemovalPruneFolders(t *testing.T) {
 		if remove {
 			err = h.RemoveRunner(context.Background(), "dyna-ci-test")
 		} else {
-			_, _, err = h.ListRunners(context.Background())
+			_, _, err = h.ListRunners(context.Background(), false)
 		}
 		if err != nil {
 			t.Fatal(err)
