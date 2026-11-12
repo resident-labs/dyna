@@ -26,7 +26,24 @@ func (s *Service) OpSubmit(ctx context.Context, caller contract.Principal, req c
 	if len(req.ClientID) > 64 {
 		return contract.OpSubmitResponse{}, invalid("clientId is longer than 64 characters")
 	}
+	// A session names the target of a host grant by ID or by name, as it does for every other tool.
+	var unresolved *contract.Error
+	if grant, ok := req.Operation.Args.(contract.HostexecGrantArgs); ok && caller.Kind == contract.PrincipalSession && grant.To.Device == "" {
+		grant.To.Kind = contract.PrincipalSession
+		target, problem := s.resolveSession(ctx, caller, grant.To.Session)
+		if problem == nil {
+			grant.To.Session = target.ID
+		} else if req.ClientID == "" {
+			return contract.OpSubmitResponse{}, problem
+		}
+		// A retry with a clientId still finds its recorded operation after the target closed.
+		unresolved = problem
+		req.Operation.Args = grant
+	}
 	op, err := s.approvals.SubmitWithClientID(ctx, caller, req.Operation, req.ClientID)
+	if err != nil && unresolved != nil {
+		return contract.OpSubmitResponse{}, unresolved
+	}
 	if err != nil {
 		return contract.OpSubmitResponse{}, failure(err)
 	}

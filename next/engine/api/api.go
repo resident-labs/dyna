@@ -275,7 +275,8 @@ func (a *API) handler(c Caller) http.Handler {
 			}
 			if grant, ok := req.Operation.Args.(contract.HostexecGrantArgs); ok {
 				grant.Room = c.Room
-				if grant.To.Kind == "" {
+				// A to with a session and no kind names that session; only an empty to means the caller.
+				if grant.To == (contract.Principal{}) {
 					grant.To = c.Principal
 				}
 				req.Operation.Args = grant
