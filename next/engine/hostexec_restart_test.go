@@ -134,6 +134,20 @@ func TestHostRunSurvivesAnEngineRestart(t *testing.T) {
 	}
 }
 
+func TestEngineHostRunSurvivesAnEngineRestart(t *testing.T) {
+	s, _, root, ctx := setupRoot(t)
+	if err := s.store.SetEngineHost(ctx, "host", true); err != nil {
+		t.Fatal(err)
+	}
+	who := contract.Principal{Kind: contract.PrincipalSession, Session: root}
+	runner := newRestartHostexec(func(contract.OpID) ([]byte, int, bool, error) { return []byte("engine host output\n"), 7, false, nil })
+	hostRunThenRestart(t, s, ctx, who, runner, 0, func() {})
+	got := waitForResult(t, s, ctx, who)
+	if got.Result.Output != "engine host output\n" || got.Result.ExitCode != 7 || got.Result.Error != "" {
+		t.Fatalf("operation %+v result %+v", got, got.Result)
+	}
+}
+
 // A resume that cannot follow ends with the restart as its cause and names the host and the unit, never a bare context error.
 func TestHostRunThatCannotBeFollowedAfterARestartEndsNamingTheRestart(t *testing.T) {
 	for name, follow := range map[string]func(contract.OpID) ([]byte, int, bool, error){
