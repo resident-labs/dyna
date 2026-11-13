@@ -95,12 +95,18 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 	pf, vf := readFrames(ctx, page), readFrames(ctx, provider)
 	timer := time.NewTimer(idle)
 	defer timer.Stop()
+	ready := false
+	speaking := false
 	busy := false
+	tools := 0
 	ownerPending := false
 	interrupted := false
 	var pending []string
 	item := ""
+	var generated []string
+	playing := ""
 	played := map[string]int64{}
+	handledTools := map[string]bool{}
 	type toolResult struct {
 		callID, output string
 	}
@@ -143,6 +149,18 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 						return errors.New("negative playback position")
 					}
 					played[control.ItemID] = control.End
+					if control.ItemID != "" {
+						playing = control.ItemID
+						for i, id := range generated {
+							if id == playing {
+								for _, old := range generated[:i] {
+									delete(played, old)
+								}
+								generated = generated[i:]
+								break
+							}
+						}
+					}
 				case "closed":
 					return nil
 				default:
@@ -155,7 +173,7 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 				continue
 			}
 			pending = append(pending, text)
-			if !busy {
+			if ready && !speaking && !busy && tools == 0 {
 				if err := writeJSON(ctx, provider, userText("[BACKEND]\n"+strings.Join(pending, "\n\n"))); err != nil {
 					return err
 				}
@@ -165,10 +183,25 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 				}
 			}
 		case result := <-results:
+			tools--
 			if err := writeJSON(ctx, provider, message{"type": "conversation.item.create", "item": message{"type": "function_call_output", "call_id": result.callID, "output": result.output}}); err != nil {
 				return err
 			}
 			// dispatch does not elicit another acknowledgment; backend will speak results.
+			if !busy && tools == 0 && ownerPending {
+				ownerPending = false
+				if err := respond(); err != nil {
+					return err
+				}
+			} else if ready && !speaking && !busy && tools == 0 && len(pending) > 0 {
+				if err := writeJSON(ctx, provider, userText("[BACKEND]\n"+strings.Join(pending, "\n\n"))); err != nil {
+					return err
+				}
+				pending = nil
+				if err := respond(); err != nil {
+					return err
+				}
+			}
 		case f, ok := <-vf:
 			if !ok {
 				return nil
@@ -180,10 +213,18 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 			if err := json.Unmarshal(f.data, &event); err != nil {
 				return err
 			}
+			if event.Type == "conversation.item.done" && event.Item != nil && event.Item.Type == "function_call" {
+				event = *event.Item
+				event.Type = "response.function_call_arguments.done"
+			}
 			switch event.Type {
 			case "error":
 				return fmt.Errorf("realtime: %s", event.Error)
 			case "session.updated":
+				if ready {
+					continue
+				}
+				ready = true
 				if err := writeJSON(ctx, page, message{"type": "ready"}); err != nil {
 					return err
 				}
@@ -192,10 +233,14 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 				}
 			case "input_audio_buffer.speech_started":
 				interrupted = busy
+				speaking = true
 				if busy {
 					if err := writeJSON(ctx, provider, message{"type": "response.cancel"}); err != nil {
 						return err
 					}
+				}
+				if playing != "" {
+					item = playing
 				}
 				if item != "" {
 					if err := writeJSON(ctx, provider, message{"type": "conversation.item.truncate", "item_id": item, "content_index": 0, "audio_end_ms": played[item]}); err != nil {
@@ -205,17 +250,29 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 				if err := writeJSON(ctx, page, message{"type": "speech_started"}); err != nil {
 					return err
 				}
+				for _, queued := range generated {
+					if queued != item {
+						if err := writeJSON(ctx, provider, message{"type": "conversation.item.truncate", "item_id": queued, "content_index": 0, "audio_end_ms": 0}); err != nil {
+							return err
+						}
+					}
+				}
+				generated = nil
 				item = ""
 			case "input_audio_buffer.committed":
-				ownerPending = busy
-				if !busy {
+				speaking = false
+				ownerPending = busy || tools > 0
+				if !busy && tools == 0 {
 					if err := respond(); err != nil {
 						return err
 					}
 				}
-			case "response.output_audio.delta":
+			case "response.output_audio.delta", "response.audio.delta":
 				if interrupted {
 					continue
+				}
+				if item != event.ItemID {
+					generated = append(generated, event.ItemID)
 				}
 				item = event.ItemID
 				pcm, err := base64.StdEncoding.DecodeString(event.Delta)
@@ -226,7 +283,10 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 				if err := writeJSON(ctx, page, message{"type": "transcript", "role": "assistant", "item_id": item, "text": ""}); err != nil {
 					return err
 				}
-				if err := page.Write(ctx, websocket.MessageBinary, pcm); err != nil {
+				writeCtx, stop := context.WithTimeout(ctx, 10*time.Second)
+				err = page.Write(writeCtx, websocket.MessageBinary, pcm)
+				stop()
+				if err != nil {
 					return err
 				}
 			case "conversation.item.input_audio_transcription.completed", "response.output_audio_transcript.done":
@@ -238,6 +298,10 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 					return err
 				}
 			case "response.function_call_arguments.done":
+				if handledTools[event.CallID] {
+					continue
+				}
+				handledTools[event.CallID] = true
 				var args struct {
 					Prompt string `json:"prompt"`
 				}
@@ -249,6 +313,10 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 				default:
 					return errors.New("unknown voice tool")
 				}
+				if tools >= 8 {
+					return errors.New("too many concurrent voice tools")
+				}
+				tools++
 				go func(e providerEvent, prompt string) {
 					output := "ok"
 					if e.Name == "dispatch" {
@@ -276,12 +344,12 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 				if err := writeJSON(ctx, page, message{"type": "response_done"}); err != nil {
 					return err
 				}
-				if ownerPending {
+				if ownerPending && tools == 0 {
 					ownerPending = false
 					if err := respond(); err != nil {
 						return err
 					}
-				} else if len(pending) > 0 {
+				} else if !speaking && tools == 0 && len(pending) > 0 {
 					if err := writeJSON(ctx, provider, userText("[BACKEND]\n"+strings.Join(pending, "\n\n"))); err != nil {
 						return err
 					}
