@@ -15,7 +15,7 @@ const failedStepNames = 20
 
 // WorkflowRun is one run of a script, tied to the crew session that hosts it. Repo never changes. Script is the newest version,
 // and Description and Profiles are its meta's: a reload replaces all three and adds one to Version. Commit and Image are set
-// latest, by the box's first start. Resume names the run this one resumes, and only a run's start reads it from here: afterwards
+// once, by the box's first start. Resume names the run this one resumes, and only a run's start reads it from here: afterwards
 // ResumedSessions follows the stored link.
 type WorkflowRun struct {
 	ID           contract.WorkflowRunID
@@ -305,7 +305,7 @@ func (s *Store) WorkflowCounts(ctx context.Context, run contract.WorkflowRunID) 
 	return steps, running, failed, err
 }
 
-// EndWorkflowStep stores a step's outcome. A retried parent writes the same row.
+// EndWorkflowStep stores a step's outcome. A retried report writes the same row.
 func (s *Store) EndWorkflowStep(ctx context.Context, run contract.WorkflowRunID, req contract.WorkflowStepEndRequest, at time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, "UPDATE workflow_steps SET state=?,result=?,reason=?,transcript=?,input_tokens=?,output_tokens=?,cache_read_tokens=?,cache_write_tokens=?,ended_at=? WHERE run=? AND key=?",
@@ -322,7 +322,7 @@ func (s *Store) EndWorkflowStep(ctx context.Context, run contract.WorkflowRunID,
 	})
 }
 
-// SetWorkflowStepTranscript names the file of a worker that is running. Its end names it again, so a late parent changes nothing.
+// SetWorkflowStepTranscript names the file of a worker that is running. Its end names it again, so a late report changes nothing.
 func (s *Store) SetWorkflowStepTranscript(ctx context.Context, run contract.WorkflowRunID, key, path string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "UPDATE workflow_steps SET transcript=? WHERE run=? AND key=? AND state=?", path, run, key, contract.WorkflowStepRunning)
@@ -449,7 +449,7 @@ func (s *Store) AbandonWorkflowSteps(ctx context.Context, run contract.WorkflowR
 	})
 }
 
-// EndWorkflow records a run's end and its event latest.
+// EndWorkflow records a run's end and its event once.
 func (s *Store) EndWorkflow(ctx context.Context, id contract.WorkflowRunID, state contract.WorkflowState, result string, event contract.Event) error {
 	return s.Write(ctx, func(tx *sql.Tx) error { return s.endWorkflow(ctx, tx, id, state, result, event) })
 }

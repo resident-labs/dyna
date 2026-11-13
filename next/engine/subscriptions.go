@@ -63,7 +63,7 @@ func checkEvery(every contract.Duration) (time.Duration, *contract.Error) {
 		return 0, invalid(fmt.Sprintf(`every %q is not a duration; give a string such as "1h", "15m" or "90s"`, string(every)))
 	}
 	if period < minEvery {
-		return 0, invalid(fmt.Sprintf(`every %q is under a minute; a schedule fires at most latest a minute, so every is at least "1m"`, string(every)))
+		return 0, invalid(fmt.Sprintf(`every %q is under a minute; a schedule fires at most once a minute, so every is at least "1m"`, string(every)))
 	}
 	return period, nil
 }
@@ -86,7 +86,7 @@ func checkSubscriptionShape(req contract.SubscriptionAddRequest) *contract.Error
 		return invalid("set exactly one of wake, run and workflow")
 	}
 	if len(req.On) > 0 && req.Every != "" && (req.Run != nil || req.Workflow != nil) {
-		return invalid("a digest (on and every together) wakes a session; set wake, not run")
+		return invalid("on and every together make a digest, which only wakes a session: set wake, or drop every")
 	}
 	if req.Every != "" {
 		if _, problem := checkEvery(req.Every); problem != nil {
@@ -197,7 +197,7 @@ func (s *Service) subscriptionAccess(ctx context.Context, caller contract.Princi
 	}
 	root := tree.Root() == caller.Session
 	if !root && (sub.Workflow != nil || sub.Run != nil || sub.Scope == contract.ScopeRoom) {
-		return forbidden()
+		return &contract.Error{Code: contract.ErrForbidden, Message: "only root or the owner adds a room, run or workflow subscription; ask root"}
 	}
 	if sub.Scope == contract.ScopeSession && sub.Session != caller.Session && !tree.CanManage(caller, sub.Session) {
 		return forbidden()

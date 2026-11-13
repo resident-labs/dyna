@@ -10,7 +10,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-func TestWorkflowSubscriptionSerialStateAndOnce(t *testing.T) {
+func TestWorkflowSubscriptionSerialStateAndLatest(t *testing.T) {
 	for _, latest := range []bool{false, true} {
 		t.Run(map[bool]string{false: "ordered", true: "latest"}[latest], func(t *testing.T) {
 			w := setupWorkflow(t)
@@ -97,8 +97,8 @@ func TestWorkflowSubscriptionSerialStateAndOnce(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var latest int64
-			if err := w.store.Read().QueryRowContext(w.ctx, "SELECT max(seq) FROM events WHERE type='notice.posted'").Scan(&latest); err != nil {
+			var latestSeq int64
+			if err := w.store.Read().QueryRowContext(w.ctx, "SELECT max(seq) FROM events WHERE type='notice.posted'").Scan(&latestSeq); err != nil {
 				t.Fatal(err)
 			}
 			var secondArgs struct {
@@ -109,8 +109,8 @@ func TestWorkflowSubscriptionSerialStateAndOnce(t *testing.T) {
 			if err := json.Unmarshal([]byte(second.Args), &secondArgs); err != nil {
 				t.Fatal(err)
 			}
-			if latest && secondArgs.Event.Seq != latest || !latest && secondArgs.Event.Seq >= latest {
-				t.Fatalf("queued event %d, latest %d, latest %v", secondArgs.Event.Seq, latest, latest)
+			if latest && secondArgs.Event.Seq != latestSeq || !latest && secondArgs.Event.Seq >= latestSeq {
+				t.Fatalf("queued event %d, latest %d, latest %v", secondArgs.Event.Seq, latestSeq, latest)
 			}
 			state, problem := w.WorkflowState(w.ctx, sessionCaller(second.Session), contract.WorkflowStateRequest{})
 			if problem != nil {
@@ -212,7 +212,7 @@ func TestWorkflowSubscriptionSplitsBatchedPRsByKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	if n != 2 {
-		t.Fatalf("only %d subjects started", n)
+		t.Fatalf("only %d keys started", n)
 	}
 }
 
@@ -307,7 +307,7 @@ func TestWorkflowStartRefusalConsumesEventAndBacksOffOnce(t *testing.T) {
 	}
 }
 
-func TestWorkflowClosedReportFallsBackToRoot(t *testing.T) {
+func TestWorkflowClosedParentFallsBackToRoot(t *testing.T) {
 	w := setupWorkflow(t)
 	var parent contract.SessionID
 	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT id FROM sessions WHERE name='worker' AND room=?", w.room).Scan(&parent); err != nil {
@@ -328,11 +328,10 @@ func TestWorkflowClosedReportFallsBackToRoot(t *testing.T) {
 	if err := w.fireDue(w.ctx); err != nil {
 		t.Fatal(err)
 	}
-	var parent contract.SessionID
 	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT s.parent FROM sessions s JOIN workflow_runs r ON r.session=s.id").Scan(&parent); err != nil {
 		t.Fatal(err)
 	}
 	if parent != w.root {
-		t.Fatalf("parent parent %s", parent)
+		t.Fatalf("run parent %s", parent)
 	}
 }

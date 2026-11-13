@@ -194,8 +194,8 @@ type WorkflowListResponse struct {
 // BoxWorkflow is what a crew's box runs. Each hello carries it, so a new box can restart the script, and a reload carries it
 // to the box that runs the script.
 type BoxWorkflow struct {
-	Subscription SubscriptionID    `json:"subscription,omitempty"`
 	Run          WorkflowRunID     `json:"run"`
+	Subscription SubscriptionID    `json:"subscription,omitempty"`
 	Name         string            `json:"name"`
 	Script       string            `json:"script"`
 	Version      int               `json:"version"`

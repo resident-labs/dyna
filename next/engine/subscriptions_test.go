@@ -1036,7 +1036,7 @@ func TestDigestNeedsWake(t *testing.T) {
 	s, room, _, ctx := setupRoot(t)
 	req := runRequest(room)
 	req.On = []contract.EventType{"tool.failed"}
-	if _, problem := s.SubscriptionAdd(ctx, ownerCaller, req); problem == nil || !strings.Contains(problem.Message, "set wake, not run") {
+	if _, problem := s.SubscriptionAdd(ctx, ownerCaller, req); problem == nil || !strings.Contains(problem.Message, "set wake, or drop every") {
 		t.Fatalf("%+v", problem)
 	}
 }

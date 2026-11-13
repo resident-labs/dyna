@@ -40,7 +40,15 @@ func (s *Service) fireWorkflowSubscriptions(ctx context.Context) error {
 			}
 			parent = tree.Root()
 		}
-		event, err := s.store.ClaimSubscriptionWorkflow(ctx, q.ID)
+		effective, err := s.store.WorkflowEffective(ctx, sub.Room)
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		event, err := s.store.ClaimSubscriptionWorkflow(ctx, q.ID, effective.MaxRuns)
+		if errors.Is(err, store.ErrWorkflowRunLimit) {
+			continue
+		}
 		if err != nil {
 			failures = append(failures, err)
 			continue
@@ -57,6 +65,10 @@ func (s *Service) fireWorkflowSubscriptions(ctx context.Context) error {
 		}
 		_, problem := s.workflowRun(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: parent}, contract.WorkflowRunRequest{Room: sub.Room, Script: sub.Workflow.Script, Args: string(body), ClientID: fmt.Sprintf("subscription-%d", q.ID)}, q.ID)
 		if problem != nil {
+			if problem.Workflow != nil && problem.Workflow.Setting == contract.WorkflowSettingMaxRuns || problem.Code == contract.ErrUnavailable {
+				failures = append(failures, s.store.ReleaseSubscriptionWorkflow(ctx, q.ID))
+				continue
+			}
 			refused[sub.ID] = true
 			now := s.now()
 			outcome := store.HookOutcome{Failures: sub.Failures + 1, Result: contract.HookFailed}
@@ -68,7 +80,7 @@ func (s *Service) fireWorkflowSubscriptions(ctx context.Context) error {
 			}
 			events := []contract.Event{finished}
 			if outcome.Failures == 1 {
-				notice, err := s.event(sub.Room, engineSender, contract.NoticePosted{Text: fmt.Sprintf("Workflow subscription %s could not start: %s. Subsequent events wait until %s. Further failures stay in hook.finished until a start succeeds.", sub.ID, problem.Message, outcome.HoldUntil.Format("15:04 MST"))})
+				notice, err := s.event(sub.Room, engineSender, contract.NoticePosted{Text: fmt.Sprintf("Workflow subscription %s could not start: %s. This event is dropped; events wait until %s. subscription list shows later failures; subscription enable ends the backoff.", sub.ID, problem.Message, outcome.HoldUntil.Format("15:04 MST"))})
 				if err != nil {
 					failures = append(failures, err)
 					continue
