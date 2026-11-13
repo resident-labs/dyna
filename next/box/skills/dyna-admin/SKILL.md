@@ -77,7 +77,8 @@ commits read under the wrong name, tell the owner what `room github ROOM` prints
 **Room hosts and limits.** No command prints a room's host rule: take the current one from your earlier
 report, the room's state file or the `op.requested` card that set it. `--only` names the whole rule, so
 record the new one there too. Undo with `--clear` when the room had no rule; ask the owner for an older
-rule you do not know. A pool in the rule is dyna-nodes. Boxes already placed stay; `session list` shows where new ones start. `room limit` needs both `--cpus`
+rule you do not know. A pool in the rule is dyna-nodes. Boxes already placed stay; `session list` shows
+where new ones start. `room limit` needs both `--cpus`
 and `--mem` (`0` is unlimited); `room log` type `room.limits_changed` shows the last values set.
 
 **Accounts.** ACCOUNT is the label or ID that `account list` prints; use the ID when labels repeat.
@@ -114,7 +115,7 @@ after 24 hours, except a host grant, which waits until it is decided or its sess
 
 Which kinds you decide: host grants, when you are the nearest session above the requester that holds the
 host; and global add-ons, room host rules and node pools, except the kinds your dyna_room section lists
-under "Approvals the owner keeps". With no such line you decide all three; the owner's kinds wait for her.
+under "Approvals the owner keeps". With no such line you decide all three; the owner's kinds wait for the owner.
 
 Decide by reading what the card asks for, not only its reason:
 - **Host grant.** Approve a named host the task needs: a GPU, a device on a desktop, a deploy the room's

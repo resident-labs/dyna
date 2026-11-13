@@ -58,7 +58,7 @@ func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
 		}
 	}
 	dir := t.TempDir()
-	if err := Install(dir, false); err != nil {
+	if err := Install(dir, true); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "dyna-extend", File))
@@ -334,5 +334,20 @@ func TestTheServicesSkillIsForRoot(t *testing.T) {
 	}
 	if lines := strings.Count(text, "\n"); lines > 150 {
 		t.Errorf("the skill is %d lines", lines)
+	}
+}
+
+// The watcher the dyna-ci skill hands out is the repository's own, so a fix to one reaches the other.
+func TestPoolWatchCopyMatchesTheScript(t *testing.T) {
+	skill, err := os.ReadFile("dyna-ci/pool-watch.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err := os.ReadFile("../../scripts/ci-pool-watch.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(skill) != string(script) {
+		t.Fatal("box/skills/dyna-ci/pool-watch.py differs from scripts/ci-pool-watch.py")
 	}
 }
