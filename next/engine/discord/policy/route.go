@@ -1,6 +1,9 @@
 package policy
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 type Resource string
 
@@ -13,18 +16,29 @@ const (
 type Action string
 
 const (
-	Unknown       Action = "unknown"
-	Read          Action = "read"
-	WebhookRead   Action = "webhookRead"
-	MemberTimeout Action = "memberTimeout"
-	MemberRole    Action = "memberRole"
-	MessageCreate Action = "messageCreate"
-	MessageEdit   Action = "messageEdit"
-	PollExpire    Action = "pollExpire"
-	MessageDelete Action = "messageDelete"
-	Pin           Action = "pin"
-	Reaction      Action = "reaction"
-	ThreadCreate  Action = "threadCreate"
+	Ban                 Action = "ban"
+	Kick                Action = "kick"
+	BulkDelete          Action = "bulkDelete"
+	RoleEdit            Action = "roleEdit"
+	ChannelEdit         Action = "channelEdit"
+	ChannelDelete       Action = "channelDelete"
+	ChannelCreate       Action = "channelCreate"
+	PermissionOverwrite Action = "permissionOverwrite"
+	Webhook             Action = "webhook"
+	ServerSettings      Action = "serverSettings"
+	OtherReaction       Action = "otherReaction"
+	Unknown             Action = "unknown"
+	Read                Action = "read"
+	WebhookRead         Action = "webhookRead"
+	MemberTimeout       Action = "memberTimeout"
+	MemberRole          Action = "memberRole"
+	MessageCreate       Action = "messageCreate"
+	MessageEdit         Action = "messageEdit"
+	PollExpire          Action = "pollExpire"
+	MessageDelete       Action = "messageDelete"
+	Pin                 Action = "pin"
+	Reaction            Action = "reaction"
+	ThreadCreate        Action = "threadCreate"
 )
 
 // Route is the effect classification shared by authorization and its live-fact lookups.
@@ -56,6 +70,25 @@ func ParseRoute(method, path string) Route {
 		return route
 	}
 	if route.Resource == Guild {
+		route.Action = ServerSettings
+		if len(parts) > 2 {
+			switch parts[2] {
+			case "bans", "bulk-ban":
+				route.Action = Ban
+			case "roles":
+				route.Action = RoleEdit
+			case "channels":
+				route.Action = ChannelEdit
+				if len(parts) == 3 && method == "POST" {
+					route.Action = ChannelCreate
+				}
+			case "webhooks":
+				route.Action = Webhook
+			}
+		}
+		if len(parts) == 4 && parts[2] == "members" && method == "DELETE" {
+			route.Action = Kick
+		}
 		if len(parts) == 4 && parts[2] == "members" && method == "PATCH" {
 			route.Action = MemberTimeout
 		}
@@ -65,8 +98,28 @@ func ParseRoute(method, path string) Route {
 		}
 		return route
 	}
+	if route.Resource == Channel && len(parts) == 2 {
+		if method == "PATCH" {
+			route.Action = ChannelEdit
+		}
+		if method == "DELETE" {
+			route.Action = ChannelDelete
+		}
+		return route
+	}
 	if route.Resource != Channel || len(parts) < 3 {
 		return route
+	}
+	switch parts[2] {
+	case "permissions":
+		route.Action = PermissionOverwrite
+	case "webhooks":
+		route.Action = Webhook
+	case "messages":
+		if len(parts) == 4 && parts[3] == "bulk-delete" && method == "POST" {
+			route.Action = BulkDelete
+			return route
+		}
 	}
 	if len(parts) == 3 && parts[2] == "threads" && method == "POST" {
 		route.Action = ThreadCreate
@@ -105,8 +158,34 @@ func ParseRoute(method, path string) Route {
 	if len(parts) == 5 && parts[4] == "threads" && method == "POST" {
 		route.Action = ThreadCreate
 	}
+	if len(parts) >= 5 && parts[4] == "reactions" {
+		route.Action = OtherReaction
+	}
 	if len(parts) == 7 && parts[4] == "reactions" && parts[6] == "@me" && (method == "PUT" || method == "DELETE") {
 		route.Action = Reaction
 	}
 	return route
+}
+
+// Refusal names the effect, rather than asking a front to infer it from a URL.
+func (route Route) Refusal() error {
+	sentences := map[Action]string{
+		Ban:                 "does not let the answering session ban or unban members",
+		Kick:                "does not let the answering session kick members",
+		BulkDelete:          "does not let the answering session bulk-delete messages",
+		RoleEdit:            "does not let the answering session create, edit or delete roles",
+		ChannelEdit:         "does not allow this channel edit by the answering session",
+		ChannelDelete:       "does not let the answering session delete channels",
+		ChannelCreate:       "does not allow this channel creation by the answering session",
+		PermissionOverwrite: "does not let the answering session change permission overwrites",
+		Webhook:             "does not let the answering session manage webhooks",
+		WebhookRead:         "does not let the answering session read webhook tokens",
+		ServerSettings:      "does not let the answering session change server settings",
+		OtherReaction:       "does not let the answering session remove other members' reactions",
+	}
+	sentence, known := sentences[route.Action]
+	if !known {
+		sentence = "does not allow this action by the answering session"
+	}
+	return fmt.Errorf("the server's policy %s; ask a moderator or your parent", sentence)
 }

@@ -32,6 +32,7 @@ type Policy struct {
 	Front   Front  `yaml:"front" json:"front"`
 }
 type Front struct {
+	Channels   []string `yaml:"channels" json:"channels,omitempty"`
 	TimeoutMax string   `yaml:"timeout_max" json:"timeout_max,omitempty"`
 	Roles      []string `yaml:"roles" json:"roles,omitempty"`
 	Delete     Switch   `yaml:"delete" json:"delete"`
@@ -114,6 +115,13 @@ func Decode(text string) (Policy, error) {
 		v, err := time.ParseDuration(p.Front.TimeoutMax)
 		if err != nil || v < 0 || v > 28*24*time.Hour {
 			return p, fmt.Errorf("timeout_max must be a duration from 0s to 672h")
+		}
+	}
+	for _, chore := range p.Front.Channels {
+		switch chore {
+		case "topic", "slowmode", "create":
+		default:
+			return p, fmt.Errorf("front.channels: unknown channel chore %q", chore)
 		}
 	}
 	for _, v := range []string{p.Front.Answers.PerMember, p.Front.Answers.PerChannel} {

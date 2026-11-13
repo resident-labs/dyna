@@ -156,3 +156,65 @@ func TestMessageNormalizationPreservesClearingEdits(t *testing.T) {
 		}
 	}
 }
+
+func TestChannelChores(t *testing.T) {
+	caps := Policy{Front: Front{Channels: []string{"topic", "slowmode", "create"}}}
+	facts := Facts{CategoryInGuild: func(id string) bool { return id == "category" }}
+	for _, test := range []struct {
+		method, path, body string
+		allowed            bool
+	}{
+		{"PATCH", "/api/v10/channels/3", `{"topic":"hello"}`, true},
+		{"PATCH", "/api/v10/channels/3", `{"topic":""}`, true},
+		{"PATCH", "/api/v10/channels/3", `{"topic":"hello","name":"other"}`, false},
+		{"PATCH", "/api/v10/channels/3", `{"topic":"hello","rate_limit_per_user":null}`, false},
+		{"PATCH", "/api/v10/channels/3", `{"rate_limit_per_user":0}`, true},
+		{"PATCH", "/api/v10/channels/3", `{"rate_limit_per_user":21600}`, true},
+		{"PATCH", "/api/v10/channels/3", `{"rate_limit_per_user":21601}`, false},
+		{"PATCH", "/api/v10/channels/3", `{"rate_limit_per_user":-1}`, false},
+		{"PATCH", "/api/v10/channels/3", `{"rate_limit_per_user":null}`, false},
+		{"PATCH", "/api/v10/channels/3", `{"rate_limit_per_user":1,"topic":"extra"}`, false},
+		{"PATCH", "/api/v10/channels/3", `{"rate_limit_per_user":1,"permission_overwrites":[]}`, false},
+		{"POST", "/api/v10/guilds/1/channels", `{"name":"help"}`, true},
+		{"POST", "/api/v10/guilds/1/channels", `{"name":"help","topic":"questions","type":0,"parent_id":"category"}`, true},
+		{"POST", "/api/v10/guilds/1/channels", `{"name":"help","parent_id":"other-server"}`, false},
+		{"POST", "/api/v10/guilds/1/channels", `{"name":"help","type":2}`, false},
+		{"POST", "/api/v10/guilds/1/channels", `{"name":"help","type":null}`, false},
+		{"POST", "/api/v10/guilds/1/channels", `{"name":"help","parent_id":null}`, false},
+		{"POST", "/api/v10/guilds/1/channels", `{"name":"help","permission_overwrites":[]}`, false},
+		{"PATCH", "/api/v10/guilds/1/channels", `{"topic":"hello"}`, false},
+	} {
+		err := caps.Write(test.method, test.path, json.RawMessage(test.body), facts)
+		if (err == nil) != test.allowed {
+			t.Errorf("%s %s %s: %v", test.method, test.path, test.body, err)
+		}
+		if test.allowed && (Policy{}).Write(test.method, test.path, json.RawMessage(test.body), facts) == nil {
+			t.Errorf("allowed without chore: %s", test.body)
+		}
+	}
+	for _, text := range []string{"front: {channels: [topic, slowmode, create]}", "front: {channels: []}"} {
+		if _, err := Decode(text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := Decode("front: {channels: [permissions]}"); err == nil {
+		t.Fatal("unknown chore accepted")
+	}
+}
+
+func TestRefusalsNameActionClasses(t *testing.T) {
+	for _, test := range []struct{ method, path, phrase string }{
+		{"PUT", "guilds/1/bans/2", "ban or unban"}, {"DELETE", "guilds/1/members/2", "kick"},
+		{"POST", "channels/3/messages/bulk-delete", "bulk-delete"}, {"PATCH", "guilds/1/roles/4", "roles"},
+		{"PATCH", "channels/3", "channel edit"}, {"PUT", "channels/3/permissions/4", "permission overwrites"},
+		{"POST", "channels/3/webhooks", "webhooks"}, {"PATCH", "guilds/1", "server settings"},
+		{"DELETE", "channels/3/messages/5/reactions/x/2", "other members' reactions"},
+		{"DELETE", "channels/3/messages/5/reactions", "other members' reactions"},
+		{"POST", "channels/3/future-route", "this action"},
+	} {
+		err := (Policy{}).Write(test.method, "/api/v10/"+test.path, nil, Facts{})
+		if err == nil || !strings.Contains(err.Error(), test.phrase) || !strings.HasSuffix(err.Error(), "; ask a moderator or your parent") {
+			t.Errorf("%s: %v", test.path, err)
+		}
+	}
+}
