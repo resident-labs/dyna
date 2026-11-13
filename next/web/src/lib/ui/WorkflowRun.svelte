@@ -94,8 +94,7 @@
 
   let shown = $state(shownStep(location.search));
   let worker = $derived(shown ? steps.find(step => step.key === shown) : undefined);
-  let drafts = $state<Record<string, string>>({});
-  let steering = $derived(worker ? drafts[worker.key] ?? "" : "");
+  let steering = $state("");
   let sending = $state<string[]>([]);
   let failedSteers = $state<string[]>([]);
   let steerBusy = $derived(!!worker && sending.includes(worker.key));
@@ -116,6 +115,7 @@
   $effect(() => {
     shown;
     navigation++;
+    steering = "";
     steerSent = "";
     controlError = "";
   });
@@ -129,15 +129,15 @@
     try {
       await call("workflow.steer", { run: info.run, step: key, text });
       failedSteers = failedSteers.filter(item => item !== key);
-      if (drafts[key] === text) drafts[key] = "";
-      if (visit === navigation) steerSent = text;
+      if (visit === navigation) { steering = ""; steerSent = text; }
     } catch {
       if (!failedSteers.includes(key)) failedSteers = [...failedSteers, key];
       await run.read();
-      if (visit === navigation && steps.find(step => step.key === key)?.state === "running") controlError = "Could not send. Your message is kept; try again or return to the run.";
+      if (visit === navigation) controlError = "Your message was not sent.";
     }
     finally { sending = sending.filter(item => item !== key); }
   }
+  $effect(() => { if (worker?.state !== "running") steering = ""; });
   let frame: HTMLElement | undefined = $state();
   let pushed = false;
   async function show(step: WorkflowStep) {
@@ -186,15 +186,15 @@
       <span class="figure">{stepTime(worker, now)}</span>
       {#if state.tone}<StatusPill tone={state.tone} label={state.word} word />{:else}<span class="muted">{state.word}</span>{/if}
     </div>
-    {#if operate && ((!ended && worker.state === "running") || steering)}
+    {#if operate && !ended && worker.state === "running"}
       <form class="steer" onsubmit={steer}>
-        <label for="worker-steer">{worker.state === "running" ? "Steer this worker" : "Your unsent message"}</label>
-        <div><textarea id="worker-steer" rows="1" bind:value={drafts[worker.key]} placeholder="Tell this worker what to do differently" readonly={worker.state !== "running" || steerBusy} onkeydown={event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing && matchMedia("(hover: hover)").matches) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} oninput={() => { steerSent = ""; controlError = ""; }}></textarea>{#if worker.state === "running"}<button type="submit" disabled={steerBusy || !steering.trim()}>{steerBusy ? "Sending…" : "Send"}</button>{:else}<button type="button" onclick={() => { drafts[worker.key] = ""; failedSteers = failedSteers.filter(key => key !== worker.key); controlError = ""; }}>Discard</button>{/if}</div>
-        <p class="steer-help">{worker.state !== "running" ? "This worker has ended. Your message was not sent." : info?.paused ? "Only this worker gets your message. The run is paused; you can still steer this worker." : "Only this worker gets your message."}<span class="keyboard-hint">{worker.state === "running" ? " Enter to send · Shift+Enter for a new line" : ""}</span></p>
-        {@render controlFailure()}
+        <label for="worker-steer">Steer this worker</label>
+        <div><textarea id="worker-steer" rows="1" bind:value={steering} placeholder="Tell this worker what to do differently" readonly={steerBusy} onkeydown={event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing && matchMedia("(hover: hover)").matches) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} oninput={() => { steerSent = ""; controlError = ""; }}></textarea><button type="submit" disabled={steerBusy || !steering.trim()}>{steerBusy ? "Sending…" : "Send"}</button></div>
+        <p class="steer-help">{info?.paused ? "Only this worker gets your message. The run is paused; you can still steer this worker." : "Only this worker gets your message."}<span class="keyboard-hint">{worker.state === "running" ? " Enter to send · Shift+Enter for a new line" : ""}</span></p>
         <span class="steer-status" class:sent={!!steerSent} role="status">{#if steerSent}<Icon name="check" size={12} /><span>Sent to this worker: {steerSent}</span>{/if}</span>
       </form>
     {/if}
+    {@render controlFailure()}
     {#if worker.reason}<div class="failure worker-failure"><span class="slot"><Icon name="warning" size={16} /></span><span>{worker.reason}</span></div>{/if}
     <div class="thread">{#key worker.key}<SessionThread {store} {hasRoom} {session} {roomName} {navigate} {onpostlocation} {operate} step={worker.key} unsent={[]} onunsent={() => {}} onsettled={() => {}} />{/key}</div>
   {/if}
@@ -224,7 +224,7 @@
         {#if info.description}<p class="muted">{info.description}</p>{/if}
         {#each failedSteers as key (key)}
           {@const step = steps.find(step => step.key === key)}
-          {#if step}<p class="control-error">Your message to <button type="button" class="retry" onclick={() => show(step)}>{step.name}</button> was not sent. Your draft is kept on this page; open the worker to try again.</p>{/if}
+          {#if step}<p class="control-error">Your message to <button type="button" class="retry" onclick={() => show(step)}>{step.name}</button> was not sent. Open the worker to try again if it is still running.</p>{/if}
         {/each}
         <div class="said" class:script={!!said}>
           {#if info.state === "running"}<WorkingDot />{/if}
