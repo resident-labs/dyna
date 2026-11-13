@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/resident-labs/dyna/harness/testutil"
 )
 
 func TestCgroupLimitAndFallback(t *testing.T) {
@@ -324,10 +326,5 @@ func TestOOMCount(t *testing.T) {
 
 func waitFor(t *testing.T, ok func() bool) {
 	t.Helper()
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-		if ok() {
-			return
-		}
-	}
-	t.Fatal("timed out")
+	testutil.Eventually(t, 5*time.Second, "computer process state", ok)
 }
