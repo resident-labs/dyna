@@ -85,7 +85,7 @@ func TestRunnerBurstPlacement(t *testing.T) {
 
 // A box that lives on a host wakes there while CI runners hold reservations: hermeslab, 2026-11-13, 26 GiB and 19 CPUs for
 // boxes, three large boxes and two root boxes running, three runners reserving 40 GiB.
-func TestRunnersDoNotHoldOutSessionBox(t *testing.T) {
+func TestRunnersDoNotHoldOutBoxOnItsHost(t *testing.T) {
 	large, _ := box.Size(contract.BoxSizeLarge)
 	medium, _ := box.Size(contract.BoxSizeMedium)
 	agent, _ := box.Size(contract.BoxSizeAgent)
@@ -100,6 +100,10 @@ func TestRunnersDoNotHoldOutSessionBox(t *testing.T) {
 	}
 	if p := box.Admit([]box.Host{host}, placed, placed[0]); p.Host != host.Name {
 		t.Fatalf("session box behind runners: %+v", p)
+	}
+	// A new box can go elsewhere, so it still waits where runners fill the ceiling.
+	if p := box.Admit([]box.Host{host}, placed, box.Box{ID: "new", Image: "session", Size: large}); p.Reason != box.PendingMemory {
+		t.Fatalf("new box beside runners: %+v", p)
 	}
 	// The runner's own check still counts every reservation: with the box awake, a fourth runner does not fit.
 	placed[0].State = contract.BoxReady

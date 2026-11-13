@@ -163,11 +163,11 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 		if request.Image == RunnerImage {
 			totalCPUScale = max(totalCPUScale, 2*scale)
 		}
-		// Runners yield to session boxes and not the other way round: a runner is held to what every box and runner reserves,
-		// and a session box only to what session boxes reserve. A box whose volume lives on a host would otherwise wait a
-		// whole CI job to wake there. The measured memory above still refuses a host that is really full.
+		// A box that already lives on a host can run nowhere else, so runners do not hold it out: it is held to what session
+		// boxes reserve, where it would otherwise wait a whole CI job to wake. A new box and a runner are held to every
+		// reservation, and a new box goes to another host. The measured memory above still refuses a host that is really full.
 		heldCPU, heldMem := cpu, mem
-		if request.Image != RunnerImage {
+		if existing != nil && request.Image != RunnerImage {
 			heldCPU, heldMem = cpu-runnerCPU, mem-runnerMem
 		}
 		if int64(heldCPU+request.Size.CPUs)*1000 > totalCPUScale*cpuBudget || request.Image == RunnerImage && int64(runnerCPU+request.Size.CPUs)*1000 > 2*scale*cpuBudget {
