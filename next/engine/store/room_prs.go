@@ -74,6 +74,18 @@ func (s *Store) applyRoomPRs(ctx context.Context, tx *sql.Tx, passes []RoomPRPas
 			if _, err := s.appendEngineEvent(tx, pass.Room, at, contract.PrChanged{Changes: pass.Changes}); err != nil {
 				return err
 			}
+			for _, change := range pass.Changes {
+				for _, event := range prEvents(change) {
+					// Action feeds already publish untracked close and merge events.
+					// CI has no feed, so its settled result needs the detail-read event.
+					if _, ci := event.(contract.CIFinished); !ci {
+						continue
+					}
+					if _, err := s.appendEngineEvent(tx, pass.Room, at, event); err != nil {
+						return err
+					}
+				}
+			}
 		}
 	}
 	return nil
