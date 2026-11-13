@@ -467,3 +467,24 @@ func TestPlanWithPruneListsWhatApplyDeletesAndWritesNothing(t *testing.T) {
 		t.Fatal("not deleted")
 	}
 }
+
+func TestPlanWithPruneGivesApplysRefusals(t *testing.T) {
+	server := emptyServer()
+	server.Channels = []fakediscord.Channel{{ID: "7001", Name: "lobby", Type: 0}}
+	a := newApplyTest(t, server, map[string]string{"server.yaml": "settings: {}\nroles:\n  - {name: Kira, managed: true, id: \"11\"}\n  - {name: \"@everyone\", id: \"100\", permissions: [view_channel]}\n", "channels/lobby/channel.yaml": "topic: hi\n"})
+	if _, problem := a.s.DiscordPlan(a.ctx, boxCaller(a.rootSession()), contract.DiscordPlanRequest{Prune: true}); problem == nil || !strings.Contains(problem.Message, "does not adopt it") {
+		t.Fatalf("plan with prune did not refuse as apply does: %v", problem)
+	}
+}
+
+func TestPlanWithPruneRefusesAnUnclearCreateLikeApply(t *testing.T) {
+	a := newApplyTest(t, emptyServer(), applyFolder)
+	a.fake.FailWrite(1, 500, false)
+	a.apply(false)
+	human := a.fake.Configuration()
+	human.Roles = append(human.Roles, fakediscord.Role{ID: "8001", Name: "Moderator", Permissions: "8"})
+	a.fake.SetConfiguration(human)
+	if _, problem := a.s.DiscordPlan(a.ctx, boxCaller(a.rootSession()), contract.DiscordPlanRequest{Prune: true}); problem == nil || !strings.Contains(problem.Message, "8001") {
+		t.Fatalf("plan with prune did not refuse: %v", problem)
+	}
+}

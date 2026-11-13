@@ -65,6 +65,8 @@ type run struct {
 	roles   map[string]folder.Role    // by name
 	phases  [phaseCount][]step
 	byHand  []string
+	dryRun  bool                    // plan only: claims are checked, never recorded
+	claimed map[folder.Subject]bool // objects whose id: a claim restores
 }
 
 // Run refuses before any write if the folder cannot be applied safely. Otherwise
@@ -234,12 +236,22 @@ func PlanText(ctx context.Context, target Target, prune bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if prune {
+		r.dryRun = true
+		if _, err := r.claimRecorded(); err != nil {
+			return "", err
+		}
+	}
 	r.hydrateMessages()
 	if r.plan, err = folder.BuildPlan(r.desired, r.live); err != nil {
 		return "", err
 	}
 	lines := []string{r.plan.String()}
 	if prune {
+		r.index()
+		if err := r.refuseUnadopted(); err != nil {
+			return "", err
+		}
 		if err := r.addPrune(); err != nil {
 			return "", err
 		}

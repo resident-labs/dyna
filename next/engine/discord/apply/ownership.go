@@ -68,6 +68,7 @@ func (r *run) newSince(kind folder.Kind, known string) []string {
 // outcome cannot be checked without reading history, so it refuses.
 func (r *run) claimRecorded() (folder.Folder, error) {
 	changed := false
+	r.claimed = map[folder.Subject]bool{}
 	for _, owned := range r.owned {
 		kind := folder.Kind(owned.Kind)
 		if kind == folder.MessageKind {
@@ -87,9 +88,15 @@ func (r *run) claimRecorded() (folder.Folder, error) {
 				return r.desired, fmt.Errorf("%s %s: an earlier create had an unclear outcome, and new %s objects have appeared on the server since (IDs %s). Apply cannot tell whether one is its own. Add id: to the entry for the one that is, or rename the entry in the folder to drop the earlier create", kind, owned.Path, kind, strings.Join(fresh, ", "))
 			}
 			// Nothing new exists, so the create did not happen.
-			if err := r.target.Owned.Forget(r.ctx, owned.Kind, owned.Path); err != nil {
-				return r.desired, err
+			if !r.dryRun {
+				if err := r.target.Owned.Forget(r.ctx, owned.Kind, owned.Path); err != nil {
+					return r.desired, err
+				}
 			}
+			continue
+		}
+		r.claimed[folder.Subject{Kind: kind, Name: owned.Path}] = true
+		if r.dryRun {
 			continue
 		}
 		if err := folder.RecordID(r.target.Folder, kind, owned.Path, id); err != nil {
@@ -148,7 +155,7 @@ func (r *run) refuseUnadopted() error {
 	var refusals []string
 	for subject, id := range r.plan.Resolved {
 		identity, ours := r.identityOf(subject.Kind, subject.Name)
-		if ours && identity.ID == "" && identity.Was == "" {
+		if ours && identity.ID == "" && identity.Was == "" && !r.claimed[subject] {
 			refusals = append(refusals, fmt.Sprintf("%s %s already exists on the server (ID %s) but the folder does not adopt it; add id: %q to adopt it", subject.Kind, subject.Name, id, id))
 		}
 	}
