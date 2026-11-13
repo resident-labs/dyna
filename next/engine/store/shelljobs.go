@@ -119,6 +119,13 @@ func (s *Store) RepliesOwed(ctx context.Context, session contract.SessionID) ([]
 	return owed, json.Unmarshal(kept, &owed)
 }
 
+// childAtWork holds for a child session c that will still give its parent a result: a turn running, a waking
+// input pending, a job running after its turn ended, or a reply it still owes because it waits itself.
+const childAtWork = `c.closed_at IS NULL AND (c.shell_jobs>0
+	OR EXISTS(SELECT 1 FROM replies_owed o WHERE o.session=c.id)
+	OR EXISTS(SELECT 1 FROM turns t WHERE t.session=c.id AND t.ended_at IS NULL)
+	OR EXISTS(SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=c.id AND d.state='pending' AND d.wake=1))`
+
 // WakeOwedReplies wakes each session that owes a reply and has nothing left to start it: what it waited for went without
 // an input, as a job does when its box is replaced and a child does when it is closed. The turn the notice starts pays the reply.
 // A session with a model retry pending or cancelled is left alone: the retry runs its own turn, and a stop must stay a stop.
@@ -126,9 +133,7 @@ func (s *Store) WakeOwedReplies(ctx context.Context, now time.Time) error {
 	const stranded = `SELECT s.id,s.room FROM replies_owed o JOIN sessions s ON s.id=o.session WHERE s.closed_at IS NULL AND s.shell_jobs=0 AND s.model_retry_at=0
 		AND NOT EXISTS(SELECT 1 FROM turns t WHERE t.session=s.id AND t.ended_at IS NULL)
 		AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=s.id AND d.state='pending' AND d.wake=1)
-		AND NOT EXISTS(SELECT 1 FROM sessions c WHERE c.parent=s.id AND c.closed_at IS NULL AND (
-			EXISTS(SELECT 1 FROM turns t WHERE t.session=c.id AND t.ended_at IS NULL)
-			OR EXISTS(SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=c.id AND d.state='pending' AND d.wake=1)))`
+		AND NOT EXISTS(SELECT 1 FROM sessions c WHERE c.parent=s.id AND ` + childAtWork + `)`
 	var any bool
 	if err := s.Read().QueryRowContext(ctx, "SELECT EXISTS("+stranded+")").Scan(&any); err != nil || !any {
 		return err
