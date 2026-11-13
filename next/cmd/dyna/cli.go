@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,7 +8,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/spf13/cobra"
@@ -56,246 +54,13 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	root.AddCommand(goalCommand(getClient))
 	root.AddCommand(contextCommand(getClient))
 
-	op := &cobra.Command{Use: "op"}
-	opList := &cobra.Command{Use: "list ROOM", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		r, err := getClient().OpList(cmd.Context(), contract.OpListRequest{Room: contract.RoomID(args[0])})
-		if err != nil {
-			return err
-		}
-		enc := json.NewEncoder(cmd.OutOrStdout())
-		enc.SetIndent("", "  ")
-		return enc.Encode(r.Operations)
-	}}
-	opApprove := &cobra.Command{Use: "approve ID", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := getClient().OpDecide(cmd.Context(), contract.OpDecideRequest{ID: contract.OpID(args[0]), Approve: true})
-		return err
-	}}
-	var denyReason string
-	opDeny := &cobra.Command{Use: "deny ID", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := getClient().OpDecide(cmd.Context(), contract.OpDecideRequest{ID: contract.OpID(args[0]), Approve: false, Reason: denyReason})
-		return err
-	}}
-	opDeny.Flags().StringVar(&denyReason, "reason", "", "Why the operation is denied")
-	_ = opDeny.MarkFlagRequired("reason") // fails only for an undefined flag, and "reason" is defined above
-	op.AddCommand(&cobra.Command{Use: "withdraw ID", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := getClient().OpWithdraw(cmd.Context(), contract.OpWithdrawRequest{ID: contract.OpID(args[0])})
-		return err
-	}})
-	op.AddCommand(opList, opApprove, opDeny)
-	root.AddCommand(op)
+	root.AddCommand(opCommand(getClient))
 
-	connect := &cobra.Command{Use: "connect"}
-	type connectClient interface {
-		ConnectStart(context.Context, contract.ConnectStartRequest) (contract.ConnectStartResponse, error)
-		ConnectStatus(context.Context, contract.ConnectStatusRequest) (contract.ConnectStatusResponse, error)
-		ConnectCancel(context.Context, contract.ConnectCancelRequest) (contract.ConnectCancelResponse, error)
-		ConnectUnlink(context.Context, contract.ConnectUnlinkRequest) (contract.ConnectUnlinkResponse, error)
-	}
-	getConnect := func() (connectClient, error) {
-		c, ok := getClient().(connectClient)
-		if !ok {
-			return nil, fmt.Errorf("Connect unavailable")
-		}
-		return c, nil
-	}
-	var connectRelay, connectName string
-	connectStart := &cobra.Command{Use: "start", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		c, err := getConnect()
-		if err != nil {
-			return err
-		}
-		_, err = c.ConnectStart(cmd.Context(), contract.ConnectStartRequest{Relay: connectRelay, Name: connectName})
-		return err
-	}}
-	connectStart.Flags().StringVar(&connectRelay, "relay", "", "Relay origin")
-	connectStart.Flags().StringVar(&connectName, "name", "", "Machine name")
-	connect.AddCommand(connectStart, &cobra.Command{Use: "status", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		c, err := getConnect()
-		if err != nil {
-			return err
-		}
-		status, err := c.ConnectStatus(cmd.Context(), contract.ConnectStatusRequest{})
-		if err != nil {
-			return err
-		}
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(status)
-	}}, &cobra.Command{Use: "cancel", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		c, err := getConnect()
-		if err != nil {
-			return err
-		}
-		_, err = c.ConnectCancel(cmd.Context(), contract.ConnectCancelRequest{})
-		return err
-	}}, &cobra.Command{Use: "unlink", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		c, err := getConnect()
-		if err != nil {
-			return err
-		}
-		_, err = c.ConnectUnlink(cmd.Context(), contract.ConnectUnlinkRequest{})
-		return err
-	}})
-	root.AddCommand(connect)
+	root.AddCommand(connectCommand(getClient))
 
-	device := &cobra.Command{Use: "device"}
-	var pairScopes []string
-	devicePair := &cobra.Command{Use: "pair", Args: cobra.NoArgs, Short: "Make a pairing code", Long: "Make a 10-character pairing code. It works once, lives 5 minutes, and dies after 5 wrong tries. A new code replaces the old one. Without --scope, the code grants every scope on a loopback route, and read and operate elsewhere.", RunE: func(cmd *cobra.Command, _ []string) error {
-		r, err := getClient().DevicePair(cmd.Context(), contract.DevicePairRequest{Scopes: scopeList(pairScopes)})
-		if err == nil {
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s expires %s\n", r.Code, r.ExpiresAt.Format(time.RFC3339))
-		}
-		return err
-	}}
-	devicePair.Flags().StringArrayVar(&pairScopes, "scope", nil, "Scope to grant (repeatable)")
-	deviceList := &cobra.Command{Use: "list", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		r, err := getClient().DeviceList(cmd.Context(), contract.DeviceListRequest{})
-		if err != nil {
-			return err
-		}
-		for _, d := range r.Devices {
-			scopes := make([]string, 0, len(d.Scopes))
-			for _, scope := range d.Scopes {
-				scopes = append(scopes, string(scope))
-			}
-			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\t%s\n", d.ID, d.Name, strings.Join(scopes, ","), d.LastSeenAt.Format(time.RFC3339), d.ExpiresAt.Format(time.RFC3339)); err != nil {
-				return err
-			}
-		}
-		return nil
-	}}
-	deviceRevoke := &cobra.Command{Use: "revoke ID", Args: cobra.ExactArgs(1), Short: "Revoke a paired device", Long: "Revoke a paired device. It fails on its next request, and an open stream or terminal ends within 15 seconds.", RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := getClient().DeviceRevoke(cmd.Context(), contract.DeviceRevokeRequest{ID: args[0]})
-		return err
-	}}
-	var setScopes []string
-	deviceSetScopes := &cobra.Command{Use: "set-scopes ID", Args: cobra.ExactArgs(1), Short: "Replace the scopes of a paired device", RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := getClient().DeviceSetScopes(cmd.Context(), contract.DeviceSetScopesRequest{ID: args[0], Scopes: scopeList(setScopes)})
-		return err
-	}}
-	deviceSetScopes.Flags().StringArrayVar(&setScopes, "scope", nil, "Scope to grant (repeatable)")
-	_ = deviceSetScopes.MarkFlagRequired("scope") // fails only for an undefined flag, and "scope" is defined above
-	var setHostName string
-	deviceSet := &cobra.Command{Use: "set ID --host HOST", Args: cobra.ExactArgs(1), Short: "Name the host a paired device is on", Long: "Name the host a paired device is on, as in --host omarchy, so the owner's inputs from that device say which machine they come from. --host '' clears it.", RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := getClient().DeviceSetHost(cmd.Context(), contract.DeviceSetHostRequest{ID: args[0], Host: contract.HostName(setHostName)})
-		return err
-	}}
-	deviceSet.Flags().StringVar(&setHostName, "host", "", "Host the device is on (empty clears it)")
-	_ = deviceSet.MarkFlagRequired("host") // fails only for an undefined flag
-	device.AddCommand(devicePair, deviceList, deviceRevoke, deviceSetScopes, deviceSet)
-	root.AddCommand(device)
+	root.AddCommand(deviceCommand(getClient))
 
-	pr := &cobra.Command{Use: "pr"}
-	var prTitle, prBodyFile, prBase, prHead string
-	var prDraft bool
-	prOpen := &cobra.Command{Use: "open", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		var body string
-		if prBodyFile != "" {
-			data, err := os.ReadFile(prBodyFile)
-			if err != nil {
-				return err
-			}
-			body = string(data)
-		}
-		r, err := getClient().OpSubmit(cmd.Context(), contract.OpSubmitRequest{Operation: contract.Operation{
-			Kind: "pr.open",
-			Args: contract.PrOpenArgs{Title: prTitle, Body: body, Base: prBase, Head: prHead, Draft: prDraft},
-		}})
-		if err != nil {
-			return err
-		}
-		return printPrResult(cmd, r.Operation, "pr open")
-	}}
-	prOpen.Flags().StringVar(&prTitle, "title", "", "Pull request title")
-	prOpen.Flags().StringVar(&prBodyFile, "body-file", "", "File with the pull request body")
-	prOpen.Flags().StringVar(&prHead, "head", "", "Head branch (default: session branch)")
-	prOpen.Flags().StringVar(&prBase, "base", "main", "Base branch")
-	prOpen.Flags().BoolVar(&prDraft, "draft", false, "Open as a draft")
-	_ = prOpen.MarkFlagRequired("title") // fails only for an undefined flag, and "title" is defined above
-	var prRepo, prRoom, prSession string
-	var prAll bool
-	prNumber := func(arg string) (int, error) {
-		number, err := strconv.Atoi(arg)
-		if err != nil || number <= 0 {
-			return 0, fmt.Errorf("%q is not a pull request number", arg)
-		}
-		return number, nil
-	}
-	printPR := func(cmd *cobra.Command, p contract.PrSummary) error {
-		stack := ""
-		if p.Stack > 0 {
-			stack = fmt.Sprintf("\tstack #%d %d/%d", p.Stack, p.Position, p.StackSize)
-		}
-		_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s#%d\t%s\tci=%s\treview=%s\tmerge=%s\t%s%s\n", p.Repo, p.Number, p.State, p.CI, p.Review, p.Merge, p.URL, stack)
-		if err == nil && p.CI == contract.PrCICancelled {
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), "CI cancelled: "+strings.Join(p.CancelledChecks, ", "))
-		}
-		return err
-	}
-	prList := &cobra.Command{Use: "list", Args: cobra.NoArgs, Short: "List tracked pull requests", RunE: func(cmd *cobra.Command, _ []string) error {
-		r, err := getClient().PrList(cmd.Context(), contract.PrListRequest{Room: contract.RoomID(prRoom), All: prAll})
-		if err != nil {
-			return err
-		}
-		for _, p := range r.PRs {
-			if err := printPR(cmd, p); err != nil {
-				return err
-			}
-		}
-		return nil
-	}}
-	prList.Flags().StringVar(&prRoom, "room", "", "Room id (default: the session's room, or every room for the owner)")
-	prList.Flags().BoolVar(&prAll, "all", false, "Also list merged and closed pull requests")
-	prStatus := &cobra.Command{Use: "status NUMBER", Args: cobra.ExactArgs(1), Short: "Show a tracked pull request as of the last poll", RunE: func(cmd *cobra.Command, args []string) error {
-		number, err := prNumber(args[0])
-		if err != nil {
-			return err
-		}
-		r, err := getClient().PrStatus(cmd.Context(), contract.PrStatusRequest{Repo: contract.RepoName(prRepo), Number: number})
-		if err != nil {
-			return err
-		}
-		return printPR(cmd, r.PR)
-	}}
-	prTrack := &cobra.Command{Use: "track NUMBER", Args: cobra.ExactArgs(1), Short: "Track a pull request and wake its session when it changes", RunE: func(cmd *cobra.Command, args []string) error {
-		number, err := prNumber(args[0])
-		if err != nil {
-			return err
-		}
-		r, err := getClient().PrTrack(cmd.Context(), contract.PrTrackRequest{Repo: contract.RepoName(prRepo), Number: number, Room: contract.RoomID(prRoom), Session: contract.SessionID(prSession)})
-		if err != nil {
-			return err
-		}
-		return printPR(cmd, r.PR)
-	}}
-	prTrack.Flags().StringVar(&prRoom, "room", "", "Owner only: room whose root owns the pull request")
-	prTrack.Flags().StringVar(&prSession, "session", "", "Owner only: session id that owns the pull request")
-	prUntrack := &cobra.Command{Use: "untrack NUMBER", Args: cobra.ExactArgs(1), Short: "Stop tracking a pull request", RunE: func(cmd *cobra.Command, args []string) error {
-		number, err := prNumber(args[0])
-		if err != nil {
-			return err
-		}
-		_, err = getClient().PrUntrack(cmd.Context(), contract.PrUntrackRequest{Repo: contract.RepoName(prRepo), Number: number})
-		return err
-	}}
-	for _, command := range []*cobra.Command{prStatus, prTrack, prUntrack} {
-		command.Flags().StringVar(&prRepo, "repo", "", "Base repository as owner/name (default: the session's repository)")
-	}
-	prStack := &cobra.Command{Use: "stack NUMBER NUMBER...", Args: cobra.RangeArgs(2, 20), Short: "Create a GitHub stack, bottom first", RunE: func(cmd *cobra.Command, args []string) error {
-		prs := make([]int, len(args))
-		for i, arg := range args {
-			n, err := prNumber(arg)
-			if err != nil {
-				return err
-			}
-			prs[i] = n
-		}
-		r, err := getClient().OpSubmit(cmd.Context(), contract.OpSubmitRequest{Operation: contract.Operation{Kind: "pr.stack", Args: contract.PrStackArgs{PRs: prs}}})
-		if err != nil {
-			return err
-		}
-		return printPrResult(cmd, r.Operation, "pr stack")
-	}}
-	pr.AddCommand(prOpen, prList, prStatus, prTrack, prUntrack, prStack)
-	root.AddCommand(pr)
+	root.AddCommand(prCommand(getClient))
 	root.AddCommand(issueCommand(getClient))
 }
 
@@ -470,16 +235,4 @@ func printCall[R, Q any](cmd *cobra.Command, c *socketClient, method contract.Me
 		return err
 	}
 	return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
-}
-
-// printPrResult prints the shared operation result for PR-writing commands.
-func printPrResult(cmd *cobra.Command, op contract.Operation, action string) error {
-	if op.Result == nil {
-		return fmt.Errorf("%s %s has no result yet (state %s)", action, op.ID, op.State)
-	}
-	if op.Result.Error != "" || op.Result.ExitCode != 0 {
-		return fmt.Errorf("%s %s failed (exit code %d): %s", action, op.ID, op.Result.ExitCode, op.Result.Error)
-	}
-	_, err := fmt.Fprintln(cmd.OutOrStdout(), op.Result.Output)
-	return err
 }
