@@ -3,9 +3,6 @@ package contract
 import "time"
 
 const (
-	MethodWorkflowPause     Method = "workflow.pause"
-	MethodWorkflowUnpause   Method = "workflow.unpause"
-	MethodWorkflowSteer     Method = "workflow.steer"
 	MethodWorkflowRun       Method = "workflow.run"
 	MethodWorkflowReload    Method = "workflow.reload"
 	MethodWorkflowStatus    Method = "workflow.status"
@@ -18,6 +15,9 @@ const (
 	MethodWorkflowStepTranscript Method = "workflow.step_transcript"
 	// MethodWorkflowSetStatus keeps a script's status() line on its run.
 	MethodWorkflowSetStatus Method = "workflow.set_status"
+	MethodWorkflowPause     Method = "workflow.pause"
+	MethodWorkflowUnpause   Method = "workflow.unpause"
+	MethodWorkflowSteer     Method = "workflow.steer"
 )
 
 // WorkerHeader names the worker of a crew's model call. A crew is one session with many conversations, and each needs its
@@ -84,7 +84,6 @@ type WorkflowReloadResponse struct {
 // List's Branch is the first recorded branch; status retains the most recent recorded branch. Version is the script version it runs, 1
 // until a reload. Status is the script's latest status() line, empty when it wrote none.
 type WorkflowInfo struct {
-	Paused      bool          `json:"paused,omitempty"`
 	Run         WorkflowRunID `json:"run"`
 	Room        RoomID        `json:"room"`
 	Session     SessionID     `json:"session"`
@@ -96,6 +95,7 @@ type WorkflowInfo struct {
 	Branch      string        `json:"branch,omitempty"` // the crew session's recorded branch, which its workers' branches extend
 	Version     int           `json:"version,omitempty"`
 	State       WorkflowState `json:"state"`
+	Paused      bool          `json:"paused,omitempty"`
 	Result      string        `json:"result,omitempty"`
 	Steps       int           `json:"steps,omitempty"`
 	Failed      int           `json:"failed"`
@@ -189,11 +189,11 @@ type WorkflowListResponse struct {
 // BoxWorkflow is what a crew's box runs. Each hello carries it, so a new box can restart the script, and a reload carries it
 // to the box that runs the script.
 type BoxWorkflow struct {
-	Paused   bool              `json:"paused"`
 	Run      WorkflowRunID     `json:"run"`
 	Name     string            `json:"name"`
 	Script   string            `json:"script"`
 	Version  int               `json:"version"`
+	Paused   bool              `json:"paused"`
 	Args     string            `json:"args,omitempty"`
 	Profiles []WorkflowProfile `json:"profiles"` // in meta's order: the first is the default
 	Workers  int               `json:"workers"`  // how many crew workers may run at once: the box's memory allows some, and the maxWorkers setting may allow fewer

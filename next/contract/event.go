@@ -91,7 +91,6 @@ type PostSent struct {
 
 // PostCreated is a post in a room.
 type PostCreated struct {
-	WorkflowStep   string       `json:"workflowStep,omitempty"`
 	Spoken         bool         `json:"spoken,omitempty"`
 	DataAttachment *int         `json:"dataAttachment,omitempty"` // index of the associated JSON file; other attachments remain visible
 	Source         *PostSource  `json:"source,omitempty"`         // immutable identity for a cross-room post
@@ -99,6 +98,7 @@ type PostCreated struct {
 	Data           JSONData     `json:"data,omitempty"`
 	Turn           TurnID       `json:"turn,omitempty"`
 	Mentions       []Principal  `json:"mentions,omitempty"`
+	WorkflowStep   string       `json:"workflowStep,omitempty"`
 	Home           Conversation `json:"home"` // feed or a DM
 	ReplyTo        EventID      `json:"replyTo,omitempty"`
 	Attachments    []Attachment `json:"attachments,omitempty"`

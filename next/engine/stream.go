@@ -283,7 +283,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 		diffAsked := false
 		var stopSent contract.TurnID
 		pauseSent := false
-		reloadSent := 0 // Send current script and pause state on every channel, including reconnects.
+		reloadSent := 0 // Send current script and pause state on every channel; Reload ignores a script version it already has.
 		for {
 			if !handle.Lock() {
 				return

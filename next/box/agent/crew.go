@@ -93,9 +93,9 @@ type Crew struct {
 	slots        chan struct{}
 	builds       *buildLock
 	shims        string
-	repo         sync.Mutex // the changes to the one repository that all trees share
-	pauseChanged chan struct{}
+	repo         sync.Mutex    // the changes to the one repository that all trees share
 	reloads      chan struct{} // a newer version of the script is waiting
+	pauseChanged chan struct{} // a pause change wakes calls waiting to start
 
 	mu       sync.Mutex
 	workflow contract.BoxWorkflow // the newest version of the script, which a reload replaces
@@ -143,7 +143,7 @@ func NewCrew(config CrewConfig) (*Crew, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Crew{pauseChanged: make(chan struct{}), config: config, slots: make(chan struct{}, max(config.Workflow.Workers, 1)), builds: builds, shims: shims, reloads: make(chan struct{}, 1),
+	c := &Crew{config: config, slots: make(chan struct{}, max(config.Workflow.Workers, 1)), builds: builds, shims: shims, reloads: make(chan struct{}, 1), pauseChanged: make(chan struct{}),
 		workflow: config.Workflow, limits: make(map[contract.ProfileName]chan struct{}), running: make(map[string]*runningStep), workers: make(map[string]crewWorker), queued: make(map[contract.DeliverySeq][]crewWorker), taken: make(map[contract.DeliverySeq]bool)}
 	c.addLimits(config.Workflow.Profiles)
 	return c, nil

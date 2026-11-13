@@ -93,6 +93,7 @@
   });
 
   let steering = $state("");
+  let steerSent = $state(false);
   let controlBusy = $state(false);
   let controlError = $state("");
   async function pause() {
@@ -110,9 +111,11 @@
     if (!info || !worker || !steering.trim() || controlBusy) return;
     controlBusy = true;
     controlError = "";
+    steerSent = false;
     try {
       await call("workflow.steer", { run: info.run, step: worker.key, text: steering });
       steering = "";
+      steerSent = true;
     } catch (error) { controlError = error instanceof Error ? error.message : String(error); }
     finally { controlBusy = false; }
   }
@@ -155,6 +158,7 @@
 {/snippet}
 
 <div class="frame" bind:this={frame} role="presentation" onkeydown={closeWorker}>
+  {#if controlError}<p class="control-error" role="alert">{controlError}</p>{/if}
   {#if worker}
     {@const state = stepWord(worker)}
     <div class="worker-bar">
@@ -167,10 +171,10 @@
     {#if operate && !ended && worker.state === "running"}
       <form class="steer" onsubmit={steer}>
         <label for="worker-steer">Steer this worker</label>
-        <div><input id="worker-steer" bind:value={steering} placeholder="Change direction before its next model request" disabled={controlBusy} /><button type="submit" disabled={controlBusy || !steering.trim()}>Send</button></div>
+        <div><input id="worker-steer" bind:value={steering} placeholder="Change direction before its next model request" disabled={controlBusy} oninput={() => { steerSent = false; }} /><button type="submit" disabled={controlBusy || !steering.trim()}>{controlBusy ? "Sending…" : "Send"}</button></div>
+        <span class="steer-status" role="status">{steerSent ? "Sent to this worker." : ""}</span>
       </form>
     {/if}
-    {#if controlError}<p class="control-error" role="alert">{controlError}</p>{/if}
     {#if worker.reason}<div class="failure worker-failure"><span class="slot"><Icon name="warning" size={16} /></span><span>{worker.reason}</span></div>{/if}
     <div class="thread">{#key worker.key}<SessionThread {store} {hasRoom} {session} {roomName} {navigate} {onpostlocation} {operate} step={worker.key} unsent={[]} onunsent={() => {}} onsettled={() => {}} />{/key}</div>
   {/if}
@@ -183,8 +187,10 @@
           <h2>{info.name}</h2>
           {#if info.paused && !ended}<StatusPill tone="warning" label="Paused" />{:else if words.tone}<StatusPill tone={words.tone} label={words.word} />{:else}<span class="muted">{words.word}</span>{/if}
           {#if info.state === "running" && operate && store.running(session)}
-            <button type="button" class="stop" disabled={controlBusy} onclick={pause}>{info.paused ? "Unpause" : "Pause"}</button>
-            <button type="button" class="stop" disabled={store.stopping.has(session)} onclick={() => store.stop(session)}><Icon name="stop" size={14} />{store.stopping.has(session) ? "Stopping" : "Stop"}</button>
+            <div class="controls">
+              <button type="button" class="control" disabled={controlBusy} onclick={pause}>{info.paused ? "Unpause" : "Pause"}</button>
+              <button type="button" class="control" disabled={store.stopping.has(session)} onclick={() => store.stop(session)}><Icon name="stop" size={14} />{store.stopping.has(session) ? "Stopping" : "Stop"}</button>
+            </div>
           {/if}
           <p class="facts">{#if info.ended}<span title={fullTime(info.ended)}>{formatTime(info.ended)}</span>{/if}
             <span>{formatTimelineDuration(runningFor(info.started, info.ended, now))}</span>
@@ -193,8 +199,7 @@
             {#if (info.version ?? 1) > 1}<span title="Reloaded {(info.version ?? 1) - 1} {info.version === 2 ? 'time' : 'times'}">script v{info.version}</span>{/if}
             {#if info.commit}<span class="from">{info.repo ?? ""} at {@render commit(info.commit)}</span>{/if}</p>
         </div>
-        {#if controlError}<p class="control-error" role="alert">{controlError}</p>{/if}
-        {#if info.paused && !ended}<p class="muted">New workers and commands wait. Running steps finish.</p>{/if}
+            {#if info.paused && !ended}<p class="muted">New workers and commands wait. Running steps finish.</p>{/if}
         {#if info.description}<p class="muted">{info.description}</p>{/if}
         <div class="said" class:script={!!said}>
           {#if info.state === "running"}<WorkingDot />{/if}
@@ -259,7 +264,13 @@
   .steer { padding: 8px 16px; border-bottom: 1px solid var(--line); }
   .steer label { display: block; font-size: 12px; margin-bottom: 4px; }
   .steer div { display: flex; gap: 8px; }
-  .steer input { flex: 1; min-width: 0; }
+  .steer input { flex: 1; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--text); font: inherit; font-size: 13px; }
+  .steer input::placeholder { color: var(--muted); }
+  .steer button { height: 32px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+  .steer button:disabled { opacity: 0.45; cursor: default; }
+  .steer input:focus-visible, .steer button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .steer-status { display: block; color: var(--muted); font-size: 12px; }
+  .steer-status:empty { display: none; }
   .control-error { padding: 8px 16px; color: var(--danger); }
 
   .frame { display: flex; flex-direction: column; flex: 1; min-height: 0; container: run / inline-size; }
@@ -303,10 +314,12 @@
   .facts { display: flex; flex-wrap: wrap; gap: 0 12px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
   .from { min-width: 0; overflow-wrap: anywhere; }
   .trouble { color: var(--danger); font-size: 12.5px; }
-  .stop { display: flex; flex: none; align-items: center; gap: 6px; height: 28px; margin-left: auto; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
-  .stop :global(svg) { fill: currentColor; }
-  .stop:hover:not(:disabled) { background: var(--hover); }
-  .stop:disabled { color: var(--muted); cursor: default; }
+  .controls { display: flex; gap: 8px; }
+  .control { display: flex; flex: none; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+  .control :global(svg) { fill: currentColor; }
+  .control:hover:not(:disabled) { background: var(--hover); }
+  .control:disabled { color: var(--muted); cursor: default; }
+  .control:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   /* A failure's rows share the thread's: a 24 px icon slot and a 6 px gap. */
   .failure { display: flex; gap: 6px; min-height: 24px; font-size: 14px; line-height: 24px; overflow-wrap: anywhere; }
   .failure .slot { color: var(--danger); }
@@ -344,5 +357,5 @@
     .worker-bar { padding: 4px 16px 4px 8px; }
     .worker-failure { padding: 8px 16px 0; }
   }
-  @media (hover: none) { .back { width: 40px; height: 40px; } .stop { height: 40px; } }
+  @media (hover: none) { .back { width: 40px; height: 40px; } .control { height: 40px; } }
 </style>

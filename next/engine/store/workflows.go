@@ -18,7 +18,6 @@ const failedStepNames = 20
 // once, by the box's first start. Resume names the run this one resumes, and only a run's start reads it from here: afterwards
 // ResumedSessions follows the stored link.
 type WorkflowRun struct {
-	Paused      bool
 	ID          contract.WorkflowRunID
 	Room        contract.RoomID
 	Session     contract.SessionID
@@ -31,6 +30,7 @@ type WorkflowRun struct {
 	Commit      string
 	Image       string
 	State       contract.WorkflowState
+	Paused      bool
 	Result      string
 	Resume      contract.WorkflowRunID
 	MaxRuns     int // the most runs going in the room, counted when this one starts; 0 is no limit

@@ -613,13 +613,13 @@ type SessionRefreshResponse struct {
 	Marked []SessionID `json:"marked"`
 }
 type PostRequest struct {
-	WorkflowStep   string       `json:"-"`
 	Spoken         bool         `json:"-"` // set only by the voice dispatch boundary
 	DataAttachment *int         `json:"-"` // filled by the owning post boundary, never trusted from a caller
 	Data           JSONData     `json:"data,omitempty"`
 	Room           RoomID       `json:"room"`
 	Text           string       `json:"text"`
 	Mentions       []string     `json:"mentions,omitempty"`
+	WorkflowStep   string       `json:"-"`
 	Home           Conversation `json:"home,omitempty"`
 	ReplyTo        EventID      `json:"replyTo,omitempty"`
 	Attachments    []Attachment `json:"attachments,omitempty"`
@@ -1036,10 +1036,10 @@ type ShellJobRunningRequest struct {
 }
 type ShellJobRunningResponse struct{}
 type TurnInput struct {
-	WorkflowStep string       `json:"workflowStep,omitempty"`
 	Delivery     DeliverySeq  `json:"delivery"`
 	Surface      Surface      `json:"surface"`
 	Reply        ReplyChannel `json:"reply"`
+	WorkflowStep string       `json:"workflowStep,omitempty"`
 	Text         string       `json:"text"`
 	Files        []TurnFile   `json:"files,omitempty"` // the attachments the frame names
 }

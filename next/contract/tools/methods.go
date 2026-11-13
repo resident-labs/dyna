@@ -359,7 +359,7 @@ var methodTable = []MethodEntry{
 		act("workflow", "unpause", typ[contract.WorkflowUnpauseRequest](), "Unpause a run so waiting agent() and run() calls may start. Only the starter, its ancestors and the owner may do this.", "workflow unpause"),
 	),
 	method(contract.MethodWorkflowSteer, contract.ScopeOperate, UserAccess,
-		act("workflow", "steer", typ[contract.WorkflowSteerRequest](), "Steer one running worker by label or unique step key prefix. Only the starter, its ancestors and the owner may steer. Unknown or ambiguous steps refuse with the running workers. The result is stored normally: steering changes neither the step key nor replay.", "workflow steer"),
+		act("workflow", "steer", typ[contract.WorkflowSteerRequest](), "Steer one running worker by label or unique step key prefix. It reaches that worker before its next model request, like a post to a session. Only the starter, its ancestors and the owner may steer. Unknown or ambiguous steps refuse with the running workers; if the worker has already finished, the post stays undelivered. Results store normally: keys and replay stay unchanged.", "workflow steer"),
 	),
 	method(contract.MethodWorkflowReload, contract.ScopeOperate, UserAccess,
 		act("workflow", "reload", typ[contract.WorkflowReloadRequest](), workflowReloadHelp, "workflow reload"),
