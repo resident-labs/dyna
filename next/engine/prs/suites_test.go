@@ -129,3 +129,61 @@ func TestCISummaryDoesNotSettlePartialPages(t *testing.T) {
 		}
 	}
 }
+
+func TestVisibleFailureSettlesIncompleteCI(t *testing.T) {
+	for _, typ := range []string{"CheckRun", "StatusContext"} {
+		for _, truncated := range []bool{false, true} {
+			var rollup gqlRollup
+			raw := `{"state":"FAILURE","contexts":{"totalCount":2,"nodes":[{"__typename":"CheckRun","name":"gate","status":"IN_PROGRESS"},{"__typename":"` + typ + `","name":"lint","context":"lint","status":"COMPLETED","conclusion":"FAILURE","state":"ERROR"}]}}`
+			if err := json.Unmarshal([]byte(raw), &rollup); err != nil {
+				t.Fatal(err)
+			}
+			rollup.Contexts.PageInfo.HasNextPage = truncated
+			var suites gqlSuites
+			if err := json.Unmarshal([]byte(`{"totalCount":2,"nodes":[{"status":"IN_PROGRESS"}]}`), &suites); err != nil {
+				t.Fatal(err)
+			}
+			for _, rule := range []ciRule{ciPullHead, ciMainHead} {
+				got, names := summarizeCI(&rollup, suites, rule, time.Now())
+				if got != contract.PrCIFailure || !slices.Equal(names, []string{"lint"}) {
+					t.Fatalf("%s %v: %s %v", typ, truncated, got, names)
+				}
+			}
+		}
+	}
+}
+
+func TestEmptyFailureRollupWaitsForPendingSuite(t *testing.T) {
+	var suites gqlSuites
+	if err := json.Unmarshal([]byte(`{"totalCount":1,"nodes":[{"status":"IN_PROGRESS"}]}`), &suites); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []string{"FAILURE", "ERROR"} {
+		for _, rule := range []ciRule{ciPullHead, ciMainHead} {
+			got, _ := summarizeCI(&gqlRollup{State: state}, suites, rule, time.Now())
+			if got != contract.PrCIPending {
+				t.Fatalf("%s %d: %s", state, rule, got)
+			}
+		}
+	}
+}
+
+func TestFailedSuiteOverridesEmptyAggregateAndPendingSuites(t *testing.T) {
+	for _, raw := range []string{
+		`{"totalCount":2,"nodes":[{"status":"IN_PROGRESS"},{"status":"COMPLETED","conclusion":"FAILURE","app":{"slug":"actions"}}]}`,
+		`{"totalCount":2,"pageInfo":{"hasNextPage":true},"nodes":[{"status":"COMPLETED","conclusion":"FAILURE","app":{"slug":"actions"}}]}`,
+	} {
+		var suites gqlSuites
+		if err := json.Unmarshal([]byte(raw), &suites); err != nil {
+			t.Fatal(err)
+		}
+		for _, state := range []string{"FAILURE", "ERROR"} {
+			for _, rule := range []ciRule{ciPullHead, ciMainHead} {
+				got, names := summarizeCI(&gqlRollup{State: state}, suites, rule, time.Now())
+				if got != contract.PrCIFailure || !slices.Equal(names, []string{"actions (workflow run failed)"}) {
+					t.Fatalf("%s %d: %s %v", state, rule, got, names)
+				}
+			}
+		}
+	}
+}

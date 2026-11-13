@@ -72,7 +72,7 @@ func TestSubscriptionEventsListsEachWithItsLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := out.String()
-	for _, want := range []string{"github.pr.opened\ta pull request opened, by a session or on GitHub", "git.main_updated\ta repository's default branch moving", "git.main_ci_finished\tthe CI of a default-branch head finishing, once per head sha even after the branch moved on, with repo, branch, sha, result and runs; where kind is success, failure or cancelled", "github.mention\tthe owner's GitHub account mentioned on an issue or a pull request"} {
+	for _, want := range []string{"github.pr.opened\ta pull request opened, by a session or on GitHub", "git.main_updated\ta repository's default branch moving", "git.main_ci_finished\tthe CI of a default-branch head settling at the first failed check or when all checks finish otherwise, once per head sha even after the branch moved on, with repo, branch, sha, result and runs known at that moment; where kind is success, failure or cancelled", "github.mention\tthe owner's GitHub account mentioned on an issue or a pull request"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("no %q in:\n%s", want, text)
 		}

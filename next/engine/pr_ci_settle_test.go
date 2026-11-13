@@ -91,17 +91,17 @@ func TestPRCIWaitsForEveryContextAndReportsCancellation(t *testing.T) {
 	}
 }
 
-func TestPRCIFailureWakesTheOwnerOnceWhenEveryContextIsDone(t *testing.T) {
+func TestPRCIFailureWakesTheOwnerAtFirstFailure(t *testing.T) {
 	r := newPRRig(t)
 	r.open(t, fakegithub.Pull{Repo: "owner/repo", Number: 1, Rollup: "FAILURE", Checks: []fakegithub.Check{
 		{Name: "verify", Conclusion: "FAILURE"}, {Name: "build linux", Status: "IN_PROGRESS"}, {Name: "build macos-x64", Conclusion: "CANCELLED"}}})
 	for i := 0; i < 3; i++ {
 		r.pass(t)
 	}
-	if got := r.ciFinished(t); len(got) != 0 || r.ciWakes(t, contract.PrChangeCIFailed) != 0 {
-		t.Fatalf("a failed check told before the run was complete: %+v", got)
+	if got := r.ciFinished(t); len(got) != 1 || r.ciWakes(t, contract.PrChangeCIFailed) != 1 {
+		t.Fatalf("first failed check not reported: %+v", got)
 	}
-	r.requireCI(t, contract.PrCIPending)
+	r.requireCI(t, contract.PrCIFailure)
 	r.setChecks("FAILURE", fakegithub.Check{Name: "verify", Conclusion: "FAILURE"}, fakegithub.Check{Name: "build linux", Conclusion: "SUCCESS"}, fakegithub.Check{Name: "build macos-x64", Conclusion: "CANCELLED"})
 	r.pass(t)
 	r.pass(t)

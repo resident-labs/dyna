@@ -195,7 +195,7 @@ var methodTable = []MethodEntry{
 		act("pr", "list", typ[contract.PrListRequest](), "List the tracked open PRs in room with their review, CI and merge state. Set all to add merged and closed ones.", "pr list"),
 	),
 	method(contract.MethodPrStatus, contract.ScopeRead, UserAccess,
-		act("pr", "status", typ[contract.PrStatusRequest](), "Show one tracked PR as of the last poll. CI is pending until all contexts and suites finish; failure wins over cancellation, cancelled means at least one cancelled check and no failures, and only success passes CI. CancelledChecks names cancelled checks. Omit repo to use your session repository.", "pr status"),
+		act("pr", "status", typ[contract.PrStatusRequest](), "Show one tracked PR as of the last poll. CI fails at the first failed check, even while other contexts or suites run; otherwise it stays pending until all finish. Failure wins over cancellation, cancelled means at least one cancelled check and no failures, and only success passes CI. CancelledChecks names cancelled checks. Omit repo to use your session repository.", "pr status"),
 	),
 	method(contract.MethodPrTrack, contract.ScopeOperate, UserAccess,
 		act("pr", "track", typ[contract.PrTrackRequest](), "Track a PR you did not open with pr open, such as one on an upstream repository, or resume tracking after untrack. Its base or head repository must be in your room. A same-repository PR recovers push access only when GitHub's head branch is recorded for the tracking session or one of its descendants, including closed descendants; other PRs stay read-only. Omit repo to use your session repository.", "pr track"),

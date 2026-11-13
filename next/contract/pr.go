@@ -55,6 +55,7 @@ const (
 type PrChangeKind string
 
 const (
+	// PrChangeCIFailed reports the first failed check, even while other checks run.
 	PrChangeCIFailed         PrChangeKind = "ci_failed"
 	PrChangeCICancelled      PrChangeKind = "ci_cancelled"
 	PrChangeCIPassed         PrChangeKind = "ci_passed"
@@ -162,7 +163,7 @@ type PrChanged struct {
 func (PrChanged) EventType() EventType { return "github.pr.changed" }
 func (PrChanged) isEventBody()         {}
 
-// CIFinished is one CI result on a tracked PR's head. It states what github.pr.changed told the owner, for anyone else who subscribes. Result is success, failure or cancelled.
+// CIFinished is one CI result on a tracked PR's head, at the first failed check or when all checks finish otherwise. It states what github.pr.changed told the owner, for anyone else who subscribes. Result is success, failure or cancelled.
 type CIFinished struct {
 	Repo    RepoName  `json:"repo"`
 	Number  int       `json:"number"`
@@ -185,7 +186,7 @@ type CIRun struct {
 	URL        string `json:"url"`
 }
 
-// GitMainCIFinished is the CI of a default-branch head finishing, once per head sha even after the branch moved on, with repo, branch, sha, result and runs; where kind is success, failure or cancelled. It states a head no tracked PR owns, which github.ci.finished never does.
+// GitMainCIFinished is the CI of a default-branch head settling at the first failed check or when all checks finish otherwise, once per head sha even after the branch moved on, with repo, branch, sha, result and runs known at that moment; where kind is success, failure or cancelled. It states a head no tracked PR owns, which github.ci.finished never does.
 type GitMainCIFinished struct {
 	Repo   RepoName `json:"repo"`
 	Branch string   `json:"branch"`
