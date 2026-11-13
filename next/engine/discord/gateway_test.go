@@ -32,6 +32,8 @@ func TestGatewayFiltersHumansAndMembership(t *testing.T) {
 		{"id": "unaddressed", "channel_id": "200", "guild_id": "100", "author": map[string]any{"id": "1"}},
 		{"id": "role", "channel_id": "200", "guild_id": "100", "author": map[string]any{"id": "1"}, "mention_roles": []string{"11"}},
 		{"id": "role-text", "channel_id": "200", "guild_id": "100", "author": map[string]any{"id": "1"}, "content": "<@&11> who should I wait for?"},
+		{"id": "code-role", "channel_id": "200", "guild_id": "100", "author": map[string]any{"id": "1"}, "content": "```\n<@&11>\n``` and `<@&11>`"},
+		{"id": "escaped-role", "channel_id": "200", "guild_id": "100", "author": map[string]any{"id": "1"}, "content": "type \\<@&11> to ping it"},
 		{"id": "other-role", "channel_id": "200", "guild_id": "100", "author": map[string]any{"id": "1"}, "mention_roles": []string{"10"}},
 		{"id": "mention", "channel_id": "200", "guild_id": "100", "author": map[string]any{"id": "1"}, "mentions": []map[string]string{{"id": "900"}}},
 		{"id": "reply", "channel_id": "200", "guild_id": "100", "author": map[string]any{"id": "1"}, "referenced_message": map[string]any{"author": map[string]string{"id": "900"}}},
