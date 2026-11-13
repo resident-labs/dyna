@@ -320,6 +320,7 @@ type Review struct {
 
 // Observed is what a feed cannot show of one PR. An empty Merge means GitHub has not worked it out.
 type Observed struct {
+	OwnReview    bool
 	Number       int
 	State        contract.PrState
 	Head         string
@@ -333,7 +334,7 @@ type Observed struct {
 
 // pullFields is everything a read asks per PR.
 const pullFields = `number state merged headRefOid headRepository{nameWithOwner} mergeable mergeStateStatus reviewDecision
-latestOpinionatedReviews(first:20,writersOnly:true){nodes{state}}
+latestOpinionatedReviews(first:20,writersOnly:true){nodes{state author{login}}}
 commits(last:1){nodes{commit{oid ` + suiteFields + ` statusCheckRollup{state contexts(first:50){totalCount pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion} ...on StatusContext{context state}}}}}}}
 reviews(last:20){nodes{fullDatabaseId state body url author{login} submittedAt lastEditedAt}}
 comments(last:20){nodes{body author{login} createdAt lastEditedAt}}`
@@ -498,7 +499,8 @@ type gqlPull struct {
 	ReviewDecision           string `json:"reviewDecision"`
 	LatestOpinionatedReviews struct {
 		Nodes []struct {
-			State string `json:"state"`
+			Author *gqlAuthor `json:"author"`
+			State  string     `json:"state"`
 		} `json:"nodes"`
 	} `json:"latestOpinionatedReviews"`
 	Commits struct {
@@ -679,6 +681,14 @@ func (p gqlPull) observed(viewer string, now time.Time) Observed {
 			}
 		}
 	}
+	matching, outside := false, false
+	for _, review := range p.LatestOpinionatedReviews.Nodes {
+		if (seen.Review == contract.PrApproved && review.State == "APPROVED") || (seen.Review == contract.PrChangesRequested && review.State == "CHANGES_REQUESTED") {
+			matching = true
+			outside = outside || login(review.Author) != viewer
+		}
+	}
+	seen.OwnReview = matching && !outside
 	// The latest verdict at the current head from the viewer's account counts as a review, whether it is an issue comment or the
 	// body of a review (GitHub refuses the author's own approval, so a COMMENTED review carries it). A statement's time is its
 	// last edit, as its current body is what counts. A review's own commit is not compared: the verdict names its sha. A request
@@ -718,6 +728,7 @@ func (p gqlPull) observed(viewer string, now time.Time) Observed {
 	}
 	if seen.Review != contract.PrChangesRequested && verdict != "" {
 		seen.Review = verdict
+		seen.OwnReview = true
 	}
 	// A rollup with no check in it says nothing about CI: GitHub reports success for it before any check has run. A rollup
 	// of another commit than the head is an earlier push's, and the head's own checks have not reported yet.

@@ -137,3 +137,7 @@ CREATE TABLE workflow_subscriptions (sub TEXT PRIMARY KEY REFERENCES subscriptio
 CREATE TABLE workflow_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, sub TEXT NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE, subject TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, run TEXT NOT NULL DEFAULT '');
 CREATE TABLE workflow_state (sub TEXT NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE, subject TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(sub,subject));
 CREATE TABLE workflow_origins (run TEXT PRIMARY KEY, sub TEXT NOT NULL, subject TEXT NOT NULL);
+
+CREATE TABLE room_pr_observed (room TEXT NOT NULL, repo TEXT NOT NULL, number INTEGER NOT NULL, snapshot TEXT NOT NULL, PRIMARY KEY(room,repo,number), FOREIGN KEY(room,repo) REFERENCES room_repos(room,repo) ON DELETE CASCADE);
+
+CREATE TABLE room_pr_settings (room TEXT NOT NULL, repo TEXT NOT NULL, pr_events INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(room,repo), FOREIGN KEY(room,repo) REFERENCES room_repos(room,repo) ON DELETE CASCADE);

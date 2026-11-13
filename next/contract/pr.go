@@ -66,6 +66,9 @@ const (
 	PrChangeClosed           PrChangeKind = "closed"
 	PrChangeComment          PrChangeKind = "comment"
 	PrChangeMetadata         PrChangeKind = "metadata"
+	PrChangeOpened           PrChangeKind = "opened"
+	PrChangeReady            PrChangeKind = "ready"
+	PrChangeDraft            PrChangeKind = "draft"
 	PrChangePushed           PrChangeKind = "pushed" // the head moved and Push has the shas; the owner made the push, so only subscribers hear it
 )
 
@@ -143,6 +146,8 @@ type PrComment struct {
 // PrChange is what one pass saw on one PR. No Kinds means the state moved without anything to wake for, such as CI starting.
 // Actions are what people did on it, oldest first, each with its actor.
 type PrChange struct {
+	OwnKinds []PrChangeKind `json:"ownKinds,omitempty"` // kinds attributable only to the connected GitHub account
+
 	PR           PrSummary      `json:"pr"`
 	Kinds        []PrChangeKind `json:"kinds,omitempty"`
 	FailedChecks []string       `json:"failedChecks,omitempty"` // named by the workflow files at the PR's head

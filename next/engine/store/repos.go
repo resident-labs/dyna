@@ -70,13 +70,13 @@ func (s *Store) RoomRepos(ctx context.Context, id contract.RoomID) ([]contract.R
 
 func roomRepos(ctx context.Context, q sqlQuery, id contract.RoomID) ([]contract.RoomRepo, error) {
 	return queryAll(ctx, q, func(rows scanner) (repo contract.RoomRepo, err error) {
-		err = rows.Scan(&repo.Repo, &repo.Default)
+		err = rows.Scan(&repo.Repo, &repo.Default, &repo.PREvents)
 		return
-	}, "SELECT repo,is_default FROM room_repos WHERE room=? ORDER BY repo", id)
+	}, "SELECT r.repo,r.is_default,coalesce(p.pr_events,0) FROM room_repos r LEFT JOIN room_pr_settings p ON p.room=r.room AND p.repo=r.repo WHERE r.room=? ORDER BY r.repo", id)
 }
 
 // AddRoomRepo updates both defaults in the same transaction.
-func (s *Store) AddRoomRepo(ctx context.Context, id contract.RoomID, name contract.RepoName, makeDefault bool) error {
+func (s *Store) AddRoomRepo(ctx context.Context, id contract.RoomID, name contract.RepoName, makeDefault bool, prEvents ...bool) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		var exists int
 		if err := tx.QueryRowContext(ctx, "SELECT 1 FROM rooms WHERE id=?", id).Scan(&exists); err != nil {
@@ -114,6 +114,16 @@ func (s *Store) AddRoomRepo(ctx context.Context, id contract.RoomID, name contra
 		for _, repo := range updated {
 			if _, err := tx.ExecContext(ctx, "INSERT INTO room_repos(room,repo,is_default) VALUES(?,?,?) ON CONFLICT(room,repo) DO UPDATE SET is_default=excluded.is_default", id, repo.Repo, repo.Default); err != nil {
 				return err
+			}
+		}
+		if len(prEvents) > 0 {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO room_pr_settings(room,repo,pr_events) VALUES(?,?,?) ON CONFLICT(room,repo) DO UPDATE SET pr_events=excluded.pr_events", id, name, prEvents[0]); err != nil {
+				return err
+			}
+			if !prEvents[0] {
+				if _, err := tx.ExecContext(ctx, "DELETE FROM room_pr_observed WHERE room=? AND repo=?", id, name); err != nil {
+					return err
+				}
 			}
 		}
 		return nil

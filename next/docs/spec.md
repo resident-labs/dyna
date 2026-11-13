@@ -147,6 +147,8 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `repos` |
 | `repo_heads` |
 | `room_repos` |
+| `room_pr_settings` |
+| `room_pr_observed` |
 | `sessions` |
 | `events` |
 | `deliveries` | Recipient/sequence primary key; `deliveries_open` indexes open inputs, and `deliveries_by_turn(to_kind,to_id,turn,seq)` recovers all reply channels for a turn in sequence order, including read inputs. |
