@@ -24,6 +24,7 @@ import (
 	"github.com/resident-labs/dyna/engine/model"
 	"github.com/resident-labs/dyna/engine/prs"
 	"github.com/resident-labs/dyna/engine/store"
+	"github.com/resident-labs/dyna/engine/voice"
 )
 
 type Profiles interface {
@@ -57,6 +58,7 @@ type restartClaim struct {
 }
 
 type Service struct {
+	voice voice.Manager
 	// profileMoved runs after sessions change model, so their account choices can follow.
 	profileMoved      func(context.Context, []store.Session, contract.ProfileName)
 	gitName, gitEmail string

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/coder/websocket"
 	"io"
 	"net/http"
 	"reflect"
@@ -463,6 +464,33 @@ func (a *API) handler(c Caller) http.Handler {
 			return contract.ComputerStartResponse{}, invalid()
 		}
 		return a.service.ComputerStart(ctx, p, req)
+	})
+	call(mux, contract.MethodVoiceStatus, c, a.service.VoiceStatus)
+	call(mux, contract.MethodVoiceStop, c, a.service.VoiceStop)
+	mux.HandleFunc("GET /v1/voice", func(w http.ResponseWriter, r *http.Request) {
+		caller := requestCaller(r.Context(), c)
+		if !owner(caller) || !hasScope(caller, contract.ScopeOperate) {
+			writeError(w, forbidden())
+			return
+		}
+		room := contract.RoomID(r.URL.Query().Get("room"))
+		if room == "" {
+			writeError(w, invalid())
+			return
+		}
+		run, problem := a.service.Voice(r.Context(), room)
+		if problem != nil {
+			writeError(w, problem)
+			return
+		}
+		page, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer page.CloseNow()
+		if err := run(page); err != nil {
+			_ = page.Close(websocket.StatusInternalError, "voice call ended")
+		}
 	})
 	mux.HandleFunc("GET /v1/terminal", func(w http.ResponseWriter, r *http.Request) {
 		c := requestCaller(r.Context(), c)

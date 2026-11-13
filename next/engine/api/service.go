@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"github.com/coder/websocket"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -18,6 +19,9 @@ type Caller struct {
 // Service implements the engine operations. It must authorize resource targets
 // against the caller as well as applying the API's listener-level policy.
 type Service interface {
+	Voice(context.Context, contract.RoomID) (func(*websocket.Conn) error, *contract.Error)
+	VoiceStatus(context.Context, contract.Principal, contract.VoiceStatusRequest) (contract.VoiceStatusResponse, *contract.Error)
+	VoiceStop(context.Context, contract.Principal, contract.VoiceStopRequest) (contract.VoiceStopResponse, *contract.Error)
 	WebSearch(context.Context, contract.Principal, contract.WebSearchRequest) (contract.WebSearchResponse, *contract.Error)
 	WebsearchSetKey(context.Context, contract.Principal, contract.WebsearchSetKeyRequest) (contract.WebsearchSetKeyResponse, *contract.Error)
 	WebsearchRemoveKey(context.Context, contract.Principal, contract.WebsearchRemoveKeyRequest) (contract.WebsearchRemoveKeyResponse, *contract.Error)
