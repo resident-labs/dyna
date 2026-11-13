@@ -63,6 +63,7 @@ func (f *restartHostexec) StopHostexec(context.Context, contract.HostName, strin
 
 // hostRunThenRestart starts a host run, stops the engine under it (its shutdown context ends, and so does the box's call), and
 // starts it again on the same store. It returns the run's operation ID once the new engine's startup has run.
+// Call it inside synctest.Test so Wait can join the old executor without delaying the test.
 func hostRunThenRestart(t *testing.T, s *Service, ctx context.Context, who contract.Principal, runner *restartHostexec, timeout contract.DurationMS, beforeRestart func()) contract.OpID {
 	t.Helper()
 	kinds := map[contract.OpKind]approve.Entry{"hostexec.run": s.HostexecRunEntry()}
@@ -140,17 +141,19 @@ func TestHostRunSurvivesAnEngineRestart(t *testing.T) {
 }
 
 func TestEngineHostRunSurvivesAnEngineRestart(t *testing.T) {
-	s, _, root, ctx := setupRoot(t)
-	if err := s.store.SetEngineHost(ctx, "host", true); err != nil {
-		t.Fatal(err)
-	}
-	who := contract.Principal{Kind: contract.PrincipalSession, Session: root}
-	runner := newRestartHostexec(func(contract.OpID) ([]byte, int, bool, error) { return []byte("engine host output\n"), 7, false, nil })
-	hostRunThenRestart(t, s, ctx, who, runner, 0, func() {})
-	got := waitForResult(t, s, ctx, who)
-	if got.Result.Output != "engine host output\n" || got.Result.ExitCode != 7 || got.Result.Error != "" {
-		t.Fatalf("operation %+v result %+v", got, got.Result)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		s, _, root, ctx := setupRoot(t)
+		if err := s.store.SetEngineHost(ctx, "host", true); err != nil {
+			t.Fatal(err)
+		}
+		who := contract.Principal{Kind: contract.PrincipalSession, Session: root}
+		runner := newRestartHostexec(func(contract.OpID) ([]byte, int, bool, error) { return []byte("engine host output\n"), 7, false, nil })
+		hostRunThenRestart(t, s, ctx, who, runner, 0, func() {})
+		got := waitForResult(t, s, ctx, who)
+		if got.Result.Output != "engine host output\n" || got.Result.ExitCode != 7 || got.Result.Error != "" {
+			t.Fatalf("operation %+v result %+v", got, got.Result)
+		}
+	})
 }
 
 // A resume that cannot follow ends with the restart as its cause and names the host and the unit, never a bare context error.
