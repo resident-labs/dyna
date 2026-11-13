@@ -798,6 +798,10 @@ func call[Req, Resp any](mux *http.ServeMux, m contract.Method, c Caller, fn fun
 	}
 	mux.HandleFunc("POST /v1/"+string(m), func(w http.ResponseWriter, r *http.Request) {
 		c := requestCaller(r.Context(), c)
+		if rule.Access == tools.OwnerAccess && !owner(c) {
+			writeError(w, &contract.Error{Code: contract.ErrForbidden, Message: string(m) + " is the owner's. The room's root can run it with the owner CLI on the engine host (skill dyna-admin); ask your parent."})
+			return
+		}
 		if !allows(rule.Access, c) || rule.Scope != "" && !hasScope(c, rule.Scope) {
 			writeError(w, forbidden())
 			return
