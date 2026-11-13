@@ -6,15 +6,15 @@ const out = process.argv[3];
 await mkdir(out, { recursive: true });
 const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", args: ["--no-sandbox"] });
 for (const theme of ["light", "carbon"]) for (const width of [1280, 390]) {
- const context = await browser.newContext({ viewport: { width, height: 900 } });
+ const context = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: width === 390, isMobile: width === 390 });
  const page = await context.newPage();
  const errors = [];
  page.on("pageerror", error => errors.push(String(error)));
  await page.addInitScript(theme => localStorage.setItem("dyna.theme", theme), theme);
- let paused = false, refuse = false, steered;
+ let paused = false, refuse = false, steered, pending = false, finishSteer;
  const at = "2026-11-13T09:25:00Z";
- const steps = ["Review contract", "Review worker delivery"].map((name, i) => ({ key: `worker-${i}`, kind: "agent", name, phase: "Review", profile: "sol", state: "running", started: at, usage: {} }));
- await page.route("**/v1/**", route => {
+ const steps = ["Review contract", "Review worker delivery"].map((name, i) => ({ key: `worker-${i}`, kind: "agent", name, phase: "Review", profile: "sol", state: "running", transcript: `worker-${i}.jsonl`, started: at, usage: {} }));
+ await page.route("**/v1/**", async route => {
   const method = new URL(route.request().url()).pathname.split("/").at(-1);
   const body = route.request().postDataJSON();
   let response = {};
@@ -23,7 +23,8 @@ for (const theme of ["light", "carbon"]) for (const width of [1280, 390]) {
   else if (method === "workflow.unpause") paused = false;
   else if (method === "workflow.steer") {
    steered = body;
-   if (refuse) return route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ code: "conflict", message: "That worker has ended. Running workers: Review contract (worker-0)." }) });
+   if (pending) await new Promise(resolve => { finishSteer = resolve; });
+   if (refuse) { steps[1].state = "done"; return route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ code: "conflict", message: "That worker has ended. Running workers: Review contract (worker-0)." }) }); }
   } else if (method === "transcript.read") response = { session: "run-session", turns: [] };
   else if (method === "events.list") response = { events: [], names: {}, nextSeq: 0 };
   return route.fulfill({ contentType: "application/json", body: JSON.stringify(response) });
@@ -32,18 +33,39 @@ for (const theme of ["light", "carbon"]) for (const width of [1280, 390]) {
  await page.goto("http://localhost:5173/test/workflow-controls.html");
  await page.getByRole("button", { name: "Pause", exact: true }).click();
  await page.getByRole("button", { name: "Unpause", exact: true }).waitFor();
+ await page.mouse.move(0, 899);
  await page.screenshot({ path: `${out}/${name}-paused.png` });
  await page.getByRole("button", { name: "Unpause", exact: true }).click();
  await page.getByRole("button", { name: "Pause", exact: true }).waitFor();
+ await page.mouse.move(0, 899);
  await page.screenshot({ path: `${out}/${name}-running.png` });
  await page.goto("http://localhost:5173/test/workflow-controls.html?step=worker-1");
  const input = page.getByLabel("Steer this worker");
+ await page.screenshot({ path: `${out}/${name}-worker.png` });
  await input.fill("Focus on delivery after a worker finishes.");
  await page.getByRole("button", { name: "Send", exact: true }).click();
  await page.waitForFunction(() => document.querySelector("#worker-steer")?.value === "");
  assert.equal(steered.step, "worker-1");
  assert.equal(steered.text, "Focus on delivery after a worker finishes.");
- await page.screenshot({ path: `${out}/${name}-worker.png` });
+ await page.screenshot({ path: `${out}/${name}-sent.png` });
+ pending = true;
+ await input.fill("First inspect the delivery queue.\nThen verify the worker closes cleanly.\nKeep all other workers unchanged.");
+ await page.screenshot({ path: `${out}/${name}-long-text.png` });
+ await page.getByRole("button", { name: "Send", exact: true }).click();
+ await page.getByRole("button", { name: "Sending…", exact: true }).waitFor();
+ await page.screenshot({ path: `${out}/${name}-sending.png` });
+ await page.getByRole("button", { name: "Back to Workflow review" }).click();
+ await page.getByRole("button", { name: "Review contract", exact: true }).click();
+ finishSteer();
+ pending = false;
+ await page.getByRole("button", { name: "Send", exact: true }).waitFor();
+ assert.equal(await input.inputValue(), "");
+ assert.equal(await page.getByText("Sent to this worker.", { exact: true }).count(), 0, "old worker success does not leak");
+ await page.getByRole("button", { name: "Back to Workflow review" }).click();
+ await page.getByRole("button", { name: "Pause", exact: true }).click();
+ await page.getByRole("button", { name: "Unpause", exact: true }).waitFor();
+ await page.getByRole("button", { name: "Review worker delivery", exact: true }).click();
+ await page.screenshot({ path: `${out}/${name}-paused-worker.png` });
  refuse = true;
  await input.fill("Check the last race before returning.");
  await page.getByRole("button", { name: "Send", exact: true }).click();

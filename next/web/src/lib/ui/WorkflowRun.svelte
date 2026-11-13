@@ -106,17 +106,30 @@
     } catch (error) { controlError = error instanceof Error ? error.message : String(error); }
     finally { controlBusy = false; }
   }
+  let navigation = 0;
+  $effect(() => {
+    shown;
+    navigation++;
+    steering = "";
+    steerSent = false;
+    controlError = "";
+  });
   async function steer(event: SubmitEvent) {
     event.preventDefault();
     if (!info || !worker || !steering.trim() || controlBusy) return;
+    const key = worker.key, visit = navigation;
     controlBusy = true;
     controlError = "";
     steerSent = false;
     try {
-      await call("workflow.steer", { run: info.run, step: worker.key, text: steering });
-      steering = "";
-      steerSent = true;
-    } catch (error) { controlError = error instanceof Error ? error.message : String(error); }
+      await call("workflow.steer", { run: info.run, step: key, text: steering });
+      if (visit === navigation) { steering = ""; steerSent = true; }
+    } catch (error) {
+      await run.read();
+      if (visit === navigation) controlError = steps.find(step => step.key === key)?.state !== "running"
+        ? "This worker has ended. Your message was not sent."
+        : error instanceof Error ? error.message : String(error);
+    }
     finally { controlBusy = false; }
   }
   let frame: HTMLElement | undefined = $state();
@@ -124,8 +137,6 @@
   let pushed = false;
   let worker = $derived(shown ? steps.find(step => step.key === shown) : undefined);
   async function show(step: WorkflowStep) {
-    steering = "";
-    controlError = "";
     history.pushState(history.state, "", `${location.pathname}?step=${encodeURIComponent(step.key)}`);
     pushed = true;
     shown = step.key;
@@ -157,21 +168,26 @@
   {#if link}<a class="code" href={link} target="_blank" rel="noopener noreferrer">{name}</a>{:else}<code>{name}</code>{/if}
 {/snippet}
 
-<div class="frame" bind:this={frame} role="presentation" onkeydown={closeWorker}>
+{#snippet controlFailure()}
   {#if controlError}<p class="control-error" role="alert">{controlError}</p>{/if}
+{/snippet}
+
+<div class="frame" bind:this={frame} role="presentation" onkeydown={closeWorker}>
   {#if worker}
     {@const state = stepWord(worker)}
     <div class="worker-bar">
       <button type="button" class="back" aria-label={`Back to ${info?.name ?? "the run"}`} title="Back to the run" onclick={hide}><Icon name="back" size={16} /></button>
       <strong title={worker.name}>{worker.name}</strong>
-      {#if worker.profile}<span class="muted">{worker.profile}</span>{/if}
+      {#if worker.profile}<span class="muted">Profile: {worker.profile}</span>{/if}
       <span class="figure">{stepTime(worker, now)}</span>
       {#if state.tone}<StatusPill tone={state.tone} label={state.word} word />{:else}<span class="muted">{state.word}</span>{/if}
     </div>
-    {#if operate && !ended && worker.state === "running"}
+    {#if operate && ((!ended && worker.state === "running") || steering)}
       <form class="steer" onsubmit={steer}>
         <label for="worker-steer">Steer this worker</label>
-        <div><input id="worker-steer" bind:value={steering} placeholder="Change direction before its next model request" disabled={controlBusy} oninput={() => { steerSent = false; }} /><button type="submit" disabled={controlBusy || !steering.trim()}>{controlBusy ? "Sending…" : "Send"}</button></div>
+        <div><textarea id="worker-steer" rows="1" bind:value={steering} placeholder="Tell this worker what to do differently" readonly={worker.state !== "running"} disabled={controlBusy} oninput={() => { steerSent = false; controlError = ""; }}></textarea><button type="submit" disabled={controlBusy || !steering.trim() || worker.state !== "running"}>{controlBusy ? "Sending…" : "Send"}</button></div>
+        <p class="steer-help">Only this worker gets your message.{info?.paused ? " The run is paused; running workers can still be steered." : ""}</p>
+        {@render controlFailure()}
         <span class="steer-status" role="status">{steerSent ? "Sent to this worker." : ""}</span>
       </form>
     {/if}
@@ -188,7 +204,7 @@
           {#if info.paused && !ended}<StatusPill tone="warning" label="Paused" />{:else if words.tone}<StatusPill tone={words.tone} label={words.word} />{:else}<span class="muted">{words.word}</span>{/if}
           {#if info.state === "running" && operate && store.running(session)}
             <div class="controls">
-              <button type="button" class="control" disabled={controlBusy} onclick={pause}>{info.paused ? "Unpause" : "Pause"}</button>
+              <button type="button" class="control" disabled={controlBusy} title="Stop starting new steps; running steps finish" onclick={pause}>{controlBusy ? (info.paused ? "Unpausing…" : "Pausing…") : info.paused ? "Unpause" : "Pause"}</button>
               <button type="button" class="control" disabled={store.stopping.has(session)} onclick={() => store.stop(session)}><Icon name="stop" size={14} />{store.stopping.has(session) ? "Stopping" : "Stop"}</button>
             </div>
           {/if}
@@ -199,8 +215,12 @@
             {#if (info.version ?? 1) > 1}<span title="Reloaded {(info.version ?? 1) - 1} {info.version === 2 ? 'time' : 'times'}">script v{info.version}</span>{/if}
             {#if info.commit}<span class="from">{info.repo ?? ""} at {@render commit(info.commit)}</span>{/if}</p>
         </div>
-            {#if info.paused && !ended}<p class="muted">New workers and commands wait. Running steps finish.</p>{/if}
+        {@render controlFailure()}
+        {#if info.paused && !ended}<p class="muted">No new steps start. Running steps finish and can still be steered. Unpause to continue.</p>{/if}
         {#if info.description}<p class="muted">{info.description}</p>{/if}
+        {#if !ended && steps.some(step => step.kind === "agent" && step.state === "running" && step.transcript)}
+          <div class="running-workers"><span>Workers:</span>{#each steps.filter(step => step.kind === "agent" && step.state === "running" && step.transcript) as step (step.key)}<button type="button" title="Open transcript and steer this worker" onclick={() => show(step)}>{step.name}</button>{/each}</div>
+        {/if}
         <div class="said" class:script={!!said}>
           {#if info.state === "running"}<WorkingDot />{/if}
           {#if shownLines.length > 1}<button type="button" class="line" aria-expanded={earlier} title={earlier ? "Hide what the script said before" : "Show what the script said before"}
@@ -264,14 +284,17 @@
   .steer { padding: 8px 16px; border-bottom: 1px solid var(--line); }
   .steer label { display: block; font-size: 12px; margin-bottom: 4px; }
   .steer div { display: flex; gap: 8px; }
-  .steer input { flex: 1; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--text); font: inherit; font-size: 13px; }
-  .steer input::placeholder { color: var(--muted); }
+  .steer textarea { flex: 1; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--text); font: inherit; font-size: 13px; }
+  .steer textarea::placeholder { color: var(--muted); }
   .steer button { height: 32px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
   .steer button:disabled { opacity: 0.45; cursor: default; }
-  .steer input:focus-visible, .steer button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .steer textarea:focus-visible, .steer button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .steer-status { display: block; color: var(--muted); font-size: 12px; }
-  .steer-status:empty { display: none; }
-  .control-error { padding: 8px 16px; color: var(--danger); }
+  .steer-status { min-height: 16px; }
+  .steer-help { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .steer textarea { resize: vertical; field-sizing: content; min-height: 32px; max-height: 144px; height: auto; padding-block: 6px; }
+  @media (hover: none) { .steer textarea, .steer button { min-height: 40px; } }
+  .control-error { color: var(--danger); font-size: 12px; margin-top: 4px; }
 
   .frame { display: flex; flex-direction: column; flex: 1; min-height: 0; container: run / inline-size; }
   /* Wider than the session thread, so a flowchart's row of stages and a timeline have room. */
@@ -314,6 +337,10 @@
   .facts { display: flex; flex-wrap: wrap; gap: 0 12px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
   .from { min-width: 0; overflow-wrap: anywhere; }
   .trouble { color: var(--danger); font-size: 12.5px; }
+  .running-workers { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; color: var(--muted); font-size: 12px; }
+  .running-workers button { border: 0; border-bottom: 1px solid var(--line); padding: 2px 0; background: none; color: var(--text); font: inherit; cursor: pointer; }
+  .running-workers button:hover { border-color: var(--text); }
+  .running-workers button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .controls { display: flex; gap: 8px; }
   .control { display: flex; flex: none; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
   .control :global(svg) { fill: currentColor; }
