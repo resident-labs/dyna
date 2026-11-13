@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
+	"slices"
 	"testing"
 )
 
@@ -100,6 +101,12 @@ func TestRunnersDoNotHoldOutBoxOnItsHost(t *testing.T) {
 	}
 	if p := box.Admit([]box.Host{host}, placed, placed[0]); p.Host != host.Name {
 		t.Fatalf("session box behind runners: %+v", p)
+	}
+	// A box that has a host but no container yet (a create that failed and retries) holds nothing there, so it waits too.
+	retry := slices.Clone(placed)
+	retry[0].Image = ""
+	if p := box.Admit([]box.Host{host}, retry, retry[0]); p.Reason != box.PendingMemory {
+		t.Fatalf("box with no container beside runners: %+v", p)
 	}
 	// A new box can go elsewhere, so it still waits where runners fill the ceiling.
 	if p := box.Admit([]box.Host{host}, placed, box.Box{ID: "new", Image: "session", Size: large}); p.Reason != box.PendingMemory {
