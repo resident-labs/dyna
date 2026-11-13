@@ -7,6 +7,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/resident-labs/dyna/engine/prompt"
+
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 )
@@ -94,12 +96,12 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	if err != nil {
 		return contract.BoxHelloResponse{}, failure(err)
 	}
-	vars := promptVars{Role: roleWorker, Name: session.Name, ID: session.ID, Room: roomName, RoomID: session.Room, Parent: parentName, CPUs: current.Size.CPUs, MemBytes: current.Size.MemBytes}
+	vars := prompt.Vars{Role: prompt.Worker, Name: session.Name, ID: session.ID, Room: roomName, RoomID: session.Room, Parent: parentName, CPUs: current.Size.CPUs, MemBytes: current.Size.MemBytes}
 	if len(repos) > 0 {
 		vars.Repo = &repos[0]
 	}
 	if parentName == "" {
-		vars.Role = roleRoot
+		vars.Role = prompt.Root
 		hosts, err := s.store.Hosts(ctx)
 		if err != nil {
 			return contract.BoxHelloResponse{}, failure(err)
@@ -118,7 +120,7 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 			return contract.BoxHelloResponse{}, failure(err)
 		}
 		if hasChildren {
-			vars.Role = roleLead
+			vars.Role = prompt.Lead
 		}
 	}
 	var workflow *contract.BoxWorkflow
@@ -147,7 +149,7 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		githubAvailable = githubAvailable && (account.Login != "" || s.githubAccounts.DefaultToken != "")
 	}
 	_, discordProblem := s.discordClient(ctx, caller)
-	return contract.BoxHelloResponse{Discord: discordProblem == nil, Room: session.Room, GitName: gitName, GitEmail: gitEmail, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: modelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: sessionPrompt(vars), WorkerInstructions: promptCore, Root: vars.Role == roleRoot, Workflow: workflow, GitHub: githubAvailable}, nil
+	return contract.BoxHelloResponse{Discord: discordProblem == nil, Room: session.Room, GitName: gitName, GitEmail: gitEmail, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: prompt.ModelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: prompt.Session(vars), WorkerInstructions: prompt.Core, Root: vars.Role == prompt.Root, Workflow: workflow, GitHub: githubAvailable}, nil
 }
 
 func (s *Service) DeliveryDone(ctx context.Context, caller contract.Principal, req contract.DeliveryDoneRequest) (contract.DeliveryDoneResponse, *contract.Error) {

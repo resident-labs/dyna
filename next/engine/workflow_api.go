@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/resident-labs/dyna/engine/prompt"
+
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/engine/workflowmeta"
@@ -451,7 +453,7 @@ func (s *Service) boxWorkflow(ctx context.Context, run store.WorkflowRun, memory
 		if err != nil {
 			continue
 		}
-		profile := contract.WorkflowProfile{Name: name, Model: model, ModelInstructions: modelInstructions(model), CompactTokens: s.profiles.CompactionTokens(name)}
+		profile := contract.WorkflowProfile{Name: name, Model: model, ModelInstructions: prompt.ModelInstructions(model), CompactTokens: s.profiles.CompactionTokens(name)}
 		for _, summary := range summaries {
 			if summary.Name == name {
 				profile.MaxConcurrent = summary.MaxConcurrent

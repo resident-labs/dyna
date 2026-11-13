@@ -1,4 +1,4 @@
-package engine
+package prompt
 
 import (
 	"fmt"
@@ -11,14 +11,14 @@ import (
 // The text of a session's system prompt, in the order a session reads it. A change to a word is a change to the renderings in testdata/prompt.
 // Where each fact lives is in the unified prompt design; the parts below are its sections and bullets.
 
-// promptRole is the session's place in the tree, decided from typed facts when the box says hello: root has no parent, a lead has ever started a
+// Role is the session's place in the tree, decided from typed facts when the box says hello: root has no parent, a lead has ever started a
 // child, and every other session is a worker.
-type promptRole string
+type Role string
 
 const (
-	roleRoot   promptRole = "root"
-	roleLead   promptRole = "lead"
-	roleWorker promptRole = "worker"
+	Root   Role = "root"
+	Lead   Role = "lead"
+	Worker Role = "worker"
 )
 
 const (
@@ -138,21 +138,21 @@ Your brief is your task, end to end. You do it, verify it and report the result,
 	promptNotices = `- **Notices.** An input that arrives "as a system notice" comes from the engine and states what happened and what it changed. A notice that restarts a session whose box stopped, restarted or was recreated, while it holds an open goal, also says to continue the goal, and the work continues until the goal is done or blocked.`
 )
 
-// promptCore is the part every agent shares, a workflow worker included: the intro, how work goes, working on your own and the tools.
-var promptCore = strings.Join([]string{promptIntro, promptHow, promptAutonomy, promptTools}, "\n\n")
+// Core is the part every agent shares, a workflow worker included: the intro, how work goes, working on your own and the tools.
+var Core = strings.Join([]string{promptIntro, promptHow, promptAutonomy, promptTools}, "\n\n")
 
-// modelInstructions is separate from the fixed startup prompt so a model transfer can replace or remove it.
-func modelInstructions(model contract.ModelChoice) string {
+// ModelInstructions is separate from the fixed startup prompt so a model transfer can replace or remove it.
+func ModelInstructions(model contract.ModelChoice) string {
 	if model.Provider == contract.ModelProviderOpenAI && (model.ID == "gpt-6.1" || strings.HasPrefix(model.ID, "gpt-6.1-")) {
 		return "Write normal spaced prose, with spaces between words and around numbers and IDs; do not compress wording in posts, briefs or files. Keep code and IDs themselves intact."
 	}
 	return ""
 }
 
-// promptVars holds what a session's prompt takes from the engine: its role and names, its branch when it has a repository, and, for root, where
+// Vars holds what a session's prompt takes from the engine: its role and names, its branch when it has a repository, and, for root, where
 // the files are on the engine host.
-type promptVars struct {
-	Role   promptRole
+type Vars struct {
+	Role   Role
 	Name   string
 	ID     contract.SessionID
 	Room   string
@@ -169,20 +169,20 @@ type promptVars struct {
 	MemBytes int64
 }
 
-// sessionPrompt is the whole system prompt of a session: the shared core, git, delegation, the role, communication, continuity and the
+// Session is the whole system prompt of a session: the shared core, git, delegation, the role, communication, continuity and the
 // session's own facts.
-func sessionPrompt(v promptVars) string {
+func Session(v Vars) string {
 	role, inputs, mentions := promptRoleWorker, promptInputsLead, promptMentionsLead
 	switch v.Role {
-	case roleRoot:
+	case Root:
 		role, inputs, mentions = promptRoleRoot, promptInputsRoot, promptMentionsRoot
-	case roleLead:
+	case Lead:
 		role = promptRoleLead
 	}
 	communication := promptCommunicationHeading + "\n" + strings.Join([]string{inputs, "Inputs within a minute of a turn's end batch into the next turn, except owner, sibling and ancestor posts, own job ends and question answers, and subscription wakes.", promptReplies, mentions, promptWhenToPost, promptWhatToWrite, promptOutsideText}, "\n")
 	across := []string{promptContext, promptCompaction, promptNotices}
 	var session []string
-	if v.Role == roleRoot {
+	if v.Role == Root {
 		session = []string{
 			fmt.Sprintf("You are root of room %s (ID %s), session %s.", v.Room, v.RoomID, v.ID),
 			fmt.Sprintf("Files: /box/shared is %s/ on %s.", v.Shared, v.Host),
@@ -203,7 +203,7 @@ func sessionPrompt(v promptVars) string {
 		session = append(session, fmt.Sprintf("Your box has %d %s and %d GiB of memory: heavy builds belong in a larger child session or CI.", v.CPUs, cpus, v.MemBytes/box.GiB))
 	}
 	return strings.Join([]string{
-		promptCore, promptGit, promptDelegation, role, communication,
+		Core, promptGit, promptDelegation, role, communication,
 		promptAcrossHeading + "\n" + strings.Join(across, "\n"),
 		"# This session\n\n" + strings.Join(session, "\n"),
 	}, "\n\n")
