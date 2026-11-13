@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+
 	"github.com/resident-labs/dyna/contract"
 	"github.com/spf13/cobra"
-	"strings"
 )
 
 func accountCommand(get func() client) *cobra.Command {
@@ -17,7 +18,22 @@ func accountCommand(get func() client) *cobra.Command {
 			return err
 		}
 		for _, a := range r.Accounts {
-			fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\trooms=%v\tprefer=%v\n", a.ID, a.Label, a.Provider, a.Rooms, a.Preferred)
+			rooms, prefer := "all", "none"
+			if len(a.Rooms) > 0 {
+				names := make([]string, len(a.Rooms))
+				for i, r := range a.Rooms {
+					names[i] = string(r)
+				}
+				rooms = strings.Join(names, ",")
+			}
+			if len(a.Preferred) > 0 {
+				names := make([]string, len(a.Preferred))
+				for i, r := range a.Preferred {
+					names[i] = string(r)
+				}
+				prefer = strings.Join(names, ",")
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\trooms=%s\tprefer=%s\n", a.ID, a.Label, a.Provider, rooms, prefer)
 		}
 		return nil
 	}}, &cobra.Command{Use: "quota", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
@@ -29,6 +45,9 @@ func accountCommand(get func() client) *cobra.Command {
 	}})
 	var rooms, prefer string
 	limit := &cobra.Command{Use: "limit ACCOUNT [--rooms ROOM,…|all] [--prefer ROOM,…|none]", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if !cmd.Flags().Changed("rooms") && !cmd.Flags().Changed("prefer") {
+			return fmt.Errorf("give --rooms or --prefer\n%s", cmd.UsageString())
+		}
 		a, err := findAccount(cmd, get(), args[0])
 		if err != nil {
 			return err

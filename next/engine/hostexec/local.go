@@ -3,26 +3,29 @@ package hostexec
 import (
 	"context"
 	"errors"
-	"github.com/resident-labs/dyna/box/hostexec"
-	"github.com/resident-labs/dyna/contract"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/resident-labs/dyna/box/hostexec"
+	"github.com/resident-labs/dyna/contract"
 )
 
 type Local struct{ Socket string }
 
 func (l Local) RunHostexec(ctx context.Context, a contract.HostexecRunArgs, op contract.OpID) ([]byte, int, bool, error) {
-	if l.Socket != "" && !a.Collect && !a.Attach {
+	args := hostexec.RunArgs(a, op)
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	if l.Socket != "" {
 		binary, err := os.Executable()
 		if err != nil {
 			return nil, 0, false, err
 		}
-		a.Argv = append([]string{"bash", "-c", `export DYNA_SOCKET="$1"; export PATH="$2:$PATH"; shift 2; exec "$@"`, "dyna-owner-cli", l.Socket, filepath.Dir(binary)}, a.Argv...)
+		// The scope and its detached runner inherit this environment, including collect and attach runs.
+		cmd.Env = append(os.Environ(), "DYNA_SOCKET="+l.Socket, "PATH="+filepath.Dir(binary)+":"+os.Getenv("PATH"))
 	}
-	args := hostexec.RunArgs(a, op)
-	out, err := exec.CommandContext(ctx, args[0], args[1:]...).Output()
+	out, err := cmd.Output()
 	code := 0
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {

@@ -71,3 +71,27 @@ func TestAccountAndAddonRequests(t *testing.T) {
 		}
 	}
 }
+
+func TestAccountLimitRequiresFlag(t *testing.T) {
+	cmd := accountCommand(func() client { t.Fatal("no request expected"); return nil })
+	cmd.SetArgs([]string{"limit", "primary"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "give --rooms or --prefer") {
+		t.Fatalf("%v", err)
+	}
+}
+func TestAccountListEmptyScopes(t *testing.T) {
+	cmd := accountCommand(func() client {
+		return &socketClient{http: &http.Client{Transport: guidanceTransport(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"accounts":[{"id":"a","label":"primary"}]}`))}, nil
+		})}}
+	})
+	var out strings.Builder
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"list"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "rooms=all\tprefer=none") {
+		t.Fatal(out.String())
+	}
+}

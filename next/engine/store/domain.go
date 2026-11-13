@@ -16,6 +16,9 @@ import (
 	"github.com/resident-labs/dyna/room"
 )
 
+// AllRootApprovals is a slice of strings, which JSON marshaling cannot fail to encode.
+var defaultRootApprovals, _ = json.Marshal(contract.AllRootApprovals)
+
 var ErrParentClosing = errors.New("parent session is closing")
 
 // ErrNameTaken is a session start whose name an open session in the room already has.
@@ -61,7 +64,7 @@ func (s *Store) RoomExists(ctx context.Context, room contract.RoomID) error {
 
 func (s *Store) CreateRoom(ctx context.Context, id contract.RoomID, name string, at time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "INSERT INTO rooms(id,name,created_at,cpus,mem_bytes,root_approves) VALUES(?,?,?,?,?,'[\"addons\",\"hosts\",\"pools\"]')", id, name, at.UnixMilli(), 0, 0)
+		_, err := tx.ExecContext(ctx, "INSERT INTO rooms(id,name,created_at,cpus,mem_bytes,root_approves) VALUES(?,?,?,?,?,?)", id, name, at.UnixMilli(), 0, 0, string(defaultRootApprovals))
 		return err
 	})
 }
@@ -142,7 +145,7 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 			}
 		}
 		if session.NewRoomName != "" {
-			if _, err := tx.ExecContext(ctx, "INSERT INTO rooms(id,name,created_at,cpus,mem_bytes,root_approves) VALUES(?,?,?,?,?,'[\"addons\",\"hosts\",\"pools\"]')", session.Room, session.NewRoomName, event.Time.UnixMilli(), 0, 0); err != nil {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO rooms(id,name,created_at,cpus,mem_bytes,root_approves) VALUES(?,?,?,?,?,?)", session.Room, session.NewRoomName, event.Time.UnixMilli(), 0, 0, string(defaultRootApprovals)); err != nil {
 				return err
 			}
 		}

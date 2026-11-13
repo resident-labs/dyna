@@ -142,7 +142,7 @@ func (g *Guard) checkGraphQL(request *http.Request, grant contract.GitHubWrites,
 		return false, nil
 	}
 	if !grant.On() {
-		return true, refuse(contract.GitHubWriteOff, "agents only read GitHub here, and this GraphQL request would write: the room's githubWrites setting is off, so open a PR with pr open, and leave other writes to the owner or a host")
+		return true, refuse(contract.GitHubWriteOff, "agents only read GitHub here, and this GraphQL request would write: the room's githubWrites setting is off")
 	}
 	nodes := map[string]node{}
 	for _, operation := range writes {

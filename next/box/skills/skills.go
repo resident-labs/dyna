@@ -114,8 +114,8 @@ func BuiltIn() []contract.Addon {
 func IsBuiltIn(name string) bool { return slices.Contains(builtInNames(), name) }
 
 // Install writes every built-in skill into dir.
-func Install(dir string, root ...bool) error {
-	rootSession := len(root) > 0 && root[0]
+func Install(dir string, root bool) error {
+	rootSession := root
 	excluded := map[string]bool{}
 	for _, item := range BuiltIn() {
 		excluded[item.Name] = item.RootOnly && !rootSession

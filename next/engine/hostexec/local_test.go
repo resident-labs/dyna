@@ -1,27 +1,30 @@
 package hostexec
 
 import (
-	"github.com/resident-labs/dyna/contract"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/resident-labs/dyna/contract"
 )
 
 func TestLocalExportsOwnerCLIEnvironment(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "bash"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n"), 0700); err != nil {
+	// Execute a stand-in for bash so the test sees the actual child environment, without systemd.
+	if err := os.WriteFile(filepath.Join(dir, "bash"), []byte("#!/bin/sh\nprintf '%s\\n%s\\n' \"$DYNA_SOCKET\" \"$PATH\"\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
-	out, code, _, err := (Local{Socket: "/live/runtime/owner.sock"}).RunHostexec(t.Context(), contract.HostexecRunArgs{Argv: []string{"dyna", "room", "list"}}, "test")
 	binary, _ := os.Executable()
-	for _, want := range []string{"/live/runtime/owner.sock", filepath.Dir(binary), `export PATH="$2:$PATH"`, "dyna\nroom\nlist"} {
-		if !strings.Contains(string(out), want) {
-			t.Fatalf("missing %q: %s", want, out)
+	for _, a := range []contract.HostexecRunArgs{{Argv: []string{"dyna", "room", "list"}}, {Collect: true}, {Attach: true}} {
+		out, code, _, err := (Local{Socket: "/live/runtime/owner.sock"}).RunHostexec(t.Context(), a, "test")
+		want := "/live/runtime/owner.sock\n" + filepath.Dir(binary) + ":" + dir + "\n"
+		if string(out) != want || err != nil || code != 0 {
+			t.Fatalf("got %q code=%d err=%v, want %q", out, code, err, want)
 		}
-	}
-	if err != nil || code != 0 {
-		t.Fatalf("%d %v", code, err)
+		if !strings.HasPrefix(strings.Split(string(out), "\n")[1], filepath.Dir(binary)+":") {
+			t.Fatal("binary directory not first")
+		}
 	}
 }
