@@ -70,7 +70,7 @@ func (s *Service) runDiscord(ctx context.Context, gateway string) {
 					go func() {
 						defer close(finished)
 						gatewayDone := make(chan struct{})
-						g := discord.Gateway{Client: client, URL: gateway, Bot: b.ID, Directory: &s.discordDirectory, Receive: func(ctx context.Context, m discord.Message) error { return s.discordInput(ctx, client, m) }}
+						g := discord.Gateway{Client: client, URL: gateway, Bot: b.ID, Directory: &s.discordDirectory, Receive: func(ctx context.Context, m discord.Message) error { return s.discordInput(ctx, client, m) }, Observe: s.discordServerEvent, Lost: &s.discordEventsLost}
 						go func() {
 							defer close(gatewayDone)
 							if b.Failure != "" {
@@ -290,4 +290,23 @@ func (s *Service) discordDrain(ctx context.Context, client *discord.Client) {
 		case <-ticker.C:
 		}
 	}
+}
+
+// discordServerEvent records a server event in the room that holds the server's whole-server mapping. It is no input: it
+// delivers to no session and leaves no reply owed, so only a subscription can wake on it. A server mapped by channel alone has no such room.
+func (s *Service) discordServerEvent(ctx context.Context, serverEvent discord.ServerEvent) error {
+	routes, err := s.store.DiscordRoutes(ctx, "")
+	if err != nil {
+		return err
+	}
+	for _, route := range routes {
+		if route.Guild == serverEvent.Guild && route.Channel == "" {
+			event, err := s.event(route.Room, contract.Principal{Kind: contract.PrincipalEngine}, serverEvent.Body)
+			if err != nil {
+				return err
+			}
+			return s.store.RecordEvent(ctx, event)
+		}
+	}
+	return nil
 }

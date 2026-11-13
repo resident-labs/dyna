@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -87,6 +88,7 @@ type Service struct {
 	discordTokens     *credential.Files
 	discordEndpoint   string
 	discordDirectory  discord.Directory
+	discordEventsLost atomic.Int64
 	discordRuntime    sync.Mutex
 	discordClientKey  string
 	discordHTTP       *discord.Client

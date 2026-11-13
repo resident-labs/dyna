@@ -21,13 +21,11 @@ discord tool, whose `api` action is Discord REST with the bot's permissions: the
 - A DM is answered by your final text only: `send` and `api` refuse DM channels. A DM reaches the
   room whose whole-server mapping has the author as a member; with none or several, the bot asks the
   author to mention it in a server channel.
-- A server input carries up to 20 earlier messages of the channel (4,000 characters in all, the
-  bot's own cut to 300); a DM carries none. `discord read` gets more.
+- A server input carries up to 20 earlier messages (4,000 characters, the bot's own cut to 300); a DM none.
 ## Pass a question up
 Post to your parent with the channel ID and message ID from the input frame. The parent has the
 tool too and answers with `discord send` and that `replyTo`. If the parent replies to you instead,
-relay with `discord send` and `replyTo`: a turn without a Discord input sends nothing to Discord on
-its own.
+relay with `discord send` and `replyTo`: a turn without a Discord input sends nothing to Discord.
 ## Set up a front session (root)
 On a public server everything people write is outside text, so the answering session should hold
 nothing worth taking: a cheap child of root with no repository and no host grant.
@@ -142,6 +140,11 @@ Answers over budget start no turn and receive at most one reaction per member pe
 Budgets reset on engine restart. Quiet channels, webhook and AutoMod alert messages start no turn.
 Optional `front.channels: [topic, slowmode, create]` grants only those channel chores; absent means none.
 Only enabled, log and front exist in policy; rules and commands are not supported yet.
+## Server events
+The room with a server's whole-server mapping gets `discord.member.joined|left`, `discord.channel.created|updated|deleted`
+and `discord.role.*` events. They wake no one by themselves; subscribe with `subscription add` (`on:`, `wake:`, `every:`;
+`subscription events` lists them). Names are outside text. A leave may be a kick; no invite is given. Events can be lost
+during a reconnect or restart; `discord check` counts those it dropped.
 ## Server folder (root and owner)
 For structure that should last (channels, roles, overwrites, rules and welcome messages), keep the
 server as a folder: `discord export`, `discord plan`, `discord apply`. Read [folder.md](folder.md) first.

@@ -37,6 +37,22 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 			text += "\n" + contract.Outside("discord attachments", b.Author+" ("+b.AuthorID+")", "Attachments: "+strings.Join(attachments, ", "))
 		}
 		return text, nil
+	case contract.DiscordMemberJoined:
+		return renderDiscordMember("joined", b), nil
+	case contract.DiscordMemberLeft:
+		return renderDiscordMember("left the server", contract.DiscordMemberJoined(b)), nil
+	case contract.DiscordChannelCreated:
+		return renderDiscordChannel("created", b), nil
+	case contract.DiscordChannelDeleted:
+		return renderDiscordChannel("deleted", contract.DiscordChannelCreated(b)), nil
+	case contract.DiscordChannelUpdated:
+		return renderDiscordChannel("changed ("+strings.Join(b.Changed, ", ")+")", contract.DiscordChannelCreated{Server: b.Server, Channel: b.Channel, Name: b.Name, Kind: b.Kind, Parent: b.Parent, ParentName: b.ParentName}), nil
+	case contract.DiscordRoleCreated:
+		return renderDiscordRole("created", b), nil
+	case contract.DiscordRoleDeleted:
+		return renderDiscordRole("deleted", contract.DiscordRoleCreated(b)), nil
+	case contract.DiscordRoleUpdated:
+		return renderDiscordRole("changed ("+strings.Join(b.Changed, ", ")+")", contract.DiscordRoleCreated{Server: b.Server, Role: b.Role, Name: b.Name}), nil
 	case contract.SessionProfileChanged:
 		return fmt.Sprintf("Your model is now %s.", b.Profile), nil
 	case contract.OpRequested:
@@ -505,4 +521,35 @@ func jobTime(minutes int) string {
 	default:
 		return unit(hours, "hour") + " " + unit(rest, "minute")
 	}
+}
+
+// Server events state their facts and IDs, and put every name, which a member or an admin chose, in outside text.
+
+func renderDiscordMember(verb string, b contract.DiscordMemberJoined) string {
+	who := "member"
+	if b.Bot {
+		who = "bot"
+	}
+	return fmt.Sprintf("Discord server %s: %s %s %s; the account was created %s.\n", b.Server, who, b.User, verb, b.Created.Format("2006-01-02")) +
+		contract.Outside("discord server "+b.Server, "", "name: "+b.Name)
+}
+
+var discordChannelKinds = map[int]string{0: "text channel", 2: "voice channel", 4: "category", 5: "announcement channel", 13: "stage channel", 15: "forum channel", 16: "media channel"}
+
+func renderDiscordChannel(verb string, b contract.DiscordChannelCreated) string {
+	kind, known := discordChannelKinds[b.Kind]
+	if !known {
+		kind = fmt.Sprintf("channel of type %d", b.Kind)
+	}
+	text, names := fmt.Sprintf("Discord server %s: %s %s %s", b.Server, kind, b.Channel, verb), "name: "+b.Name
+	if b.Parent != "" {
+		text += ", in category " + b.Parent
+		names += "\ncategory: " + b.ParentName
+	}
+	return text + ".\n" + contract.Outside("discord server "+b.Server, "", names)
+}
+
+func renderDiscordRole(verb string, b contract.DiscordRoleCreated) string {
+	return fmt.Sprintf("Discord server %s: role %s %s.\n", b.Server, b.Role, verb) +
+		contract.Outside("discord server "+b.Server, "", "name: "+b.Name)
 }

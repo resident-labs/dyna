@@ -94,7 +94,7 @@ const sameAuthor = (a: Principal, b: Principal) => a.kind === b.kind && a.sessio
 // The session an event is about; events without one belong to the room feed only.
 export function subject(event: Event): string | undefined {
   switch (event.type) {
-    case "discord.files_retrieved": case "discord.message": case "host.switches_changed": case "engine.restarted": return undefined;
+    case "discord.files_retrieved": case "discord.message": case "discord.member.joined": case "discord.member.left": case "discord.channel.created": case "discord.channel.updated": case "discord.channel.deleted": case "discord.role.created": case "discord.role.updated": case "discord.role.deleted": case "host.switches_changed": case "engine.restarted": return undefined;
     case "post.sent": case "git.main_updated": case "git.main_ci_finished": case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": case "session.failed": case "goal.set": case "goal.item_changed": case "goal.ended": case "checkin.due": return undefined;
     case "service.changed": case "service.failed": case "hook.finished": case "hook.due": case "hook.digest": case "notice.posted": case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": return undefined;
     case "op.requested": return event.body.by.session;
@@ -106,7 +106,7 @@ export function subject(event: Event): string | undefined {
 // Events with no row. Goals show in About and the session list; failures show on the box and turn events they report.
 // A pull request's rows come from github.pr.changed. The typed PR events, issue events, feed items, git.main_updated and git.main_ci_finished exist for subscribers and sessions.
 // A running job's status is for the session that owns the job.
-const unshown = new Set<Event["type"]>(["shell.job.running", "workflow.step_changed", "workflow.status_changed", "session.profile_changed", "transcript.changed", "session.failed", "goal.set", "goal.item_changed", "goal.ended", "checkin.due", "github.pr.merged", "github.pr.closed", "github.ci.finished", "git.main_updated", "git.main_ci_finished", "github.issue.opened", "github.comment", "github.label", "github.mention", "github.issue.changed", "github.issue.closed", "service.changed", "service.failed"]);
+const unshown = new Set<Event["type"]>(["discord.member.joined", "discord.member.left", "discord.channel.created", "discord.channel.updated", "discord.channel.deleted", "discord.role.created", "discord.role.updated", "discord.role.deleted", "shell.job.running", "workflow.step_changed", "workflow.status_changed", "session.profile_changed", "transcript.changed", "session.failed", "goal.set", "goal.item_changed", "goal.ended", "checkin.due", "github.pr.merged", "github.pr.closed", "github.ci.finished", "git.main_updated", "git.main_ci_finished", "github.issue.opened", "github.comment", "github.label", "github.mention", "github.issue.changed", "github.issue.closed", "service.changed", "service.failed"]);
 
 // Builds the rows of one conversation. Posts and final answers become post rows, a
 // failed turn and a request are each their own row, and all other events between them fold into one work row.
@@ -321,6 +321,7 @@ export function timeSpan(start: string, end: string): string {
 export const eventGroups: Record<Event["type"], string> = {
  "discord.files_retrieved": "Retrieved Discord files",
  "discord.message": "Discord messages",
+  "discord.member.joined": "Discord joins", "discord.member.left": "Discord leaves", "discord.channel.created": "Discord channels created", "discord.channel.updated": "Discord channels changed", "discord.channel.deleted": "Discord channels deleted", "discord.role.created": "Discord roles created", "discord.role.updated": "Discord roles changed", "discord.role.deleted": "Discord roles deleted",
   "connect.connector": "Connect connector changes", "account.failed": "account failures", "account.quota_low": "account quota alerts",
   "post.sent": "sent posts", "post.created": "posts", "session.started": "sessions started", "session.closed": "sessions closed", "session.compacted": "compactions",
   "session.restarted": "boxes replaced", "session.moved": "sessions moved", "session.profile_changed": "profiles changed",
@@ -549,6 +550,7 @@ export function describe(event: Event, name: Name): string {
     case "github.pr.opened": return `${name(event.body.session ?? "")} opened pull request ${event.body.repo}#${event.body.number}`;
     case "github.pr.changed": return wakingChanges(event.body).map(changeLine).join(" · ");
     case "service.changed": case "service.failed": return "";
+    case "discord.member.joined": case "discord.member.left": case "discord.channel.created": case "discord.channel.updated": case "discord.channel.deleted": case "discord.role.created": case "discord.role.updated": case "discord.role.deleted": return ""; // subscribers hear of server events; no feed row shows them.
     case "github.pr.merged": case "github.pr.closed": case "github.ci.finished": case "git.main_updated": case "git.main_ci_finished": case "github.issue.opened": case "github.comment": case "github.label": case "github.mention": case "github.issue.changed": case "github.issue.closed": return ""; // feedRows shows no row for them.
     case "grant.expired": return "A host execution grant expired";
     // The owner reads this feed; a room's root may also pause it.
