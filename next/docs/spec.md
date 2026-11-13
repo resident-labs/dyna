@@ -1169,24 +1169,26 @@ It saves script source and object args; the CLI reads `--workflow FILE`, just as
 `workflow run FILE` does. The engine adds the committed event envelope as
 `args.event`. A literal `key`, or a template using `{repo}` and `{number}`, owns
 a serial queue and JSON state within this subscription. No key means a single
-queue. `once` replaces only a queued event with the newest. Up to 256 events wait
+queue. `latest` replaces only a queued event with the newest. Up to 256 events wait
 per subscription; further events remain in the room log. A failed run releases
-its key and is not retried. A refused start also consumes its event, counts a failure,
+its key and is not retried. A room run limit leaves the event queued for a later tick. Other refused starts consume their event, count a failure,
 and backs off subsequent starts using the command-subscription backoff. Its first
-failure sends a notice to the report session; later failures stay in hook.finished
+failure sends a notice to the parent; later failures stay in hook.finished
 until a successful start resets the count. Different keys may run concurrently under room limits.
 
 Root or owner registers the action; its run is a child of root or the live room
-session named by `report`, which receives its normal posts and result. If the report
+session named by `parent`, which receives posts and results only on failure or a non-empty return. If the report
 session has closed or is closing, the new run is a child of root instead. Existing
 workflow permissions and GitHub write restrictions apply. Run status names the
-originating subscription and subject. Disabling a subscription holds new starts;
+originating subscription and key. Disabling a subscription holds new starts;
 removing it removes pending events and state but does not supersede a running run.
 
 `await state.get()` and `await state.set(value)` call `workflow.state` through the
-run's socket. Only an active event run may access its own subscription/key state;
-a caller cannot supply another key. State is JSON up to 64 KiB, null initially.
+run's socket. An active event run accesses its own subscription/key state;
+a caller cannot supply another key. Hand-started runs instead have temporary state, initially null, discarded when they end. State is JSON up to 64 KiB, null initially.
 Writes persist immediately, including on failure, and are not journaled steps.
 Own-account comment, changes_requested, approved and metadata do not start runs
 unless `includeOwn` is true; pushed, merged and ci_* remain eligible. Filters run
 after those suppressed kinds are removed. Batched PR changes split by PR first.
+
+Root or owner can queue an event manually with `subscription fire {id, key?, event?}`: event is a full envelope, omitted means synthetic hook.due, and key overrides the resolved key. `subscription update` replaces supplied workflow, where, key, latest or parent fields while preserving queue and state. `subscription state` lists keys, reads a supplied key, or writes a supplied JSON value (null resets it). Own account means the GitHub account Dyna acts as in this room. `kind=pushed,opened` matches either kind.

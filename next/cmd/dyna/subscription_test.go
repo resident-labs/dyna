@@ -1,8 +1,12 @@
 package main
 
 import (
+	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -84,5 +88,69 @@ func TestSubscriptionEventsListsEachWithItsLine(t *testing.T) {
 	}
 	if strings.Contains(text, "turn.activity") {
 		t.Error("an event no subscription can name is listed")
+	}
+}
+
+func TestSubscriptionWorkflowDescription(t *testing.T) {
+	for _, key := range []string{"", "{repo}#{number}"} {
+		sub := contract.Subscription{Workflow: &contract.WorkflowSubscription{Script: "export const meta = {name: 'review', profiles: ['sol']}\n"}, Key: key}
+		line := describeSubscription(contract.SubscriptionInfo{Subscription: sub})
+		want := "workflow review"
+		if key != "" {
+			want += " per " + key
+		}
+		if !strings.Contains(line, want+"\t") {
+			t.Fatal(line)
+		}
+	}
+}
+func TestSubscriptionFollowUpRequests(t *testing.T) {
+	for _, tc := range []struct {
+		args         []string
+		method, body string
+	}{
+		{[]string{"fire", "sub"}, "fire", "{\"id\":\"sub\"}"},
+		{[]string{"fire", "sub", "--key", "", "--event", "{\"type\":\"hook.due\",\"body\":{}}"}, "fire", "{\"id\":\"sub\",\"key\":\"\",\"event\":{\"type\":\"hook.due\",\"body\":{}}}"},
+		{[]string{"update", "sub", "--latest=false", "--key", "", "--parent", "", "--where", "kind=pushed,opened"}, "update", "{\"id\":\"sub\",\"latest\":false,\"key\":\"\",\"parent\":\"\",\"where\":[\"kind=pushed,opened\"]}"},
+		{[]string{"state", "sub"}, "state", "{\"id\":\"sub\"}"},
+		{[]string{"state", "sub", "--key", "", "--value", "null"}, "state", "{\"id\":\"sub\",\"key\":\"\",\"value\":null}"},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			called := false
+			c := &socketClient{http: &http.Client{Transport: guidanceTransport(func(r *http.Request) (*http.Response, error) {
+				called = true
+				if r.URL.Path != "/v1/subscription."+tc.method {
+					t.Fatal(r.URL.Path)
+				}
+				var got, want any
+				if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal([]byte(tc.body), &want); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("got %#v want %#v", got, want)
+				}
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+			})}}
+			cmd := subscriptionCommand(func() *socketClient { return c })
+			cmd.SetArgs(tc.args)
+			if err := cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			if !called {
+				t.Fatal("no call")
+			}
+		})
+	}
+}
+func TestSubscriptionFollowUpRejectsInvalidInput(t *testing.T) {
+	for _, args := range [][]string{{"fire", "sub", "--event", "{"}, {"update", "sub", "--args", "{}"}, {"state", "sub", "--value", "null"}, {"state", "sub", "--key", "k", "--value", "{"}} {
+		cmd := subscriptionCommand(func() *socketClient { t.Fatal("unexpected request"); return nil })
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err == nil {
+			t.Fatalf("accepted %v", args)
+		}
 	}
 }
