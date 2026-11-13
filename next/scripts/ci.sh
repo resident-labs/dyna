@@ -19,6 +19,10 @@ case "$suite" in
     fi
     node --test scripts/spacing-count.test.mjs
     go vet ./...
+    # Correctness and unused-code checks only; style/simplification checks are outside this CI gate.
+    GOBIN="$RUNNER_TEMP/dyna-lint-bin" go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
+    mapfile -t packages < <(go list ./... | grep -v '/third_party/')
+    "$RUNNER_TEMP/dyna-lint-bin/staticcheck" -checks='SA*,U*' "${packages[@]}"
     go test -count=1 -timeout 3m ./...
     # Join the vendored management handler and engine over private RPC.
     go test -count=1 -tags=dyna_integration ./engine/model -run '^TestKimiCompletionBindsAcrossProxyNotification$'
