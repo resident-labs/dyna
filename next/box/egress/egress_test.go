@@ -215,15 +215,16 @@ func TestAClosedTunnelFreesItsSlot(t *testing.T) {
 			conn := connect()
 			defer conn.Close()
 			_ = conn.SetDeadline(deadline)
-			if _, err := io.WriteString(conn, connect443); err != nil {
-				t.Fatal(err)
-			}
+			// At capacity, accept sends 429 and closes without reading the
+			// request. That close can beat our write; still read its response
+			// so only an explicit 429 is retried, not arbitrary I/O failures.
+			_, writeErr := io.WriteString(conn, connect443)
 			status, err := bufio.NewReader(conn).ReadString('\n')
 			if err == nil && strings.Contains(status, "429") {
 				return false // The preceding handler has not released its slot yet.
 			}
-			if err != nil || !strings.Contains(status, "200") {
-				t.Fatalf("%q %v", status, err)
+			if writeErr != nil || err != nil || !strings.Contains(status, "200") {
+				t.Fatalf("%q, write: %v, read: %v", status, writeErr, err)
 			}
 			return true
 		})
