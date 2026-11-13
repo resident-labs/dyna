@@ -150,7 +150,7 @@ func (s *Service) discordURLScope(ctx context.Context, caller contract.Principal
 	if parts[0] != "channels" {
 		return forbidden()
 	}
-	channel, ok := s.discordDirectory.Channel(parts[1])
+	channel, ok := scope.channel(&s.discordDirectory, parts[1])
 	if !ok || !scope.allowsChannel(channel) {
 		return forbidden()
 	}
@@ -162,6 +162,7 @@ func (s *Service) discordURLScope(ctx context.Context, caller contract.Principal
 type discordResourceScope struct {
 	room   contract.RoomID
 	routes []store.DiscordRoute
+	dms    map[string]string
 }
 
 func (s *Service) discordReadScope(ctx context.Context, caller contract.Principal) (discordResourceScope, *contract.Error) {
@@ -173,7 +174,11 @@ func (s *Service) discordReadScope(ctx context.Context, caller contract.Principa
 	if err != nil {
 		return discordResourceScope{}, failure(err)
 	}
-	return discordResourceScope{room: session.Room, routes: routes}, nil
+	dms, err := s.store.DiscordDMRoutes(ctx, session.Room)
+	if err != nil {
+		return discordResourceScope{}, failure(err)
+	}
+	return discordResourceScope{room: session.Room, routes: routes, dms: dms}, nil
 }
 
 func (scope discordResourceScope) allowsChannel(channel discord.Channel) bool {
@@ -221,6 +226,11 @@ func (s *Service) DiscordAPI(ctx context.Context, caller contract.Principal, req
 	}
 	if len(parts) < 2 || (parts[0] != "channels" && parts[0] != "guilds" && parts[0] != "users") || !discordID(parts[1]) {
 		return contract.DiscordAPIResponse{}, invalid("path must look like /channels/123/messages or /api/v10/channels/123/messages")
+	}
+	if req.Method != "GET" {
+		if _, problem := s.discordDMWriteScope(ctx, caller, parts[1], true); problem != nil {
+			return contract.DiscordAPIResponse{}, problem
+		}
 	}
 	u.Path = "/api/v10" + path
 	req.Path = u.String()
@@ -340,4 +350,11 @@ func (s *Service) payDiscordReply(ctx context.Context, session contract.SessionI
 		s.discordRuntime.Unlock()
 	}
 	return nil
+}
+
+func (scope discordResourceScope) channel(directory *discord.Directory, id string) (discord.Channel, bool) {
+	if guild, ok := scope.dms[id]; ok {
+		return discord.Channel{ID: id, Guild: guild, Type: 1}, true
+	}
+	return directory.Channel(id)
 }

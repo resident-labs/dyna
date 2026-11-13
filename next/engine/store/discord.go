@@ -204,3 +204,27 @@ func (s *Store) DeleteDiscordOwned(ctx context.Context, room contract.RoomID, gu
 		return err
 	})
 }
+
+// SetDiscordDMRoute records the room selected by member-based DM routing.
+func (s *Store) SetDiscordDMRoute(ctx context.Context, channel, guild string, room contract.RoomID) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "INSERT INTO discord_dm_routes(channel,guild,room) VALUES(?,?,?) ON CONFLICT(channel) DO UPDATE SET guild=excluded.guild,room=excluded.room", channel, guild, room)
+		return err
+	})
+}
+func (s *Store) DiscordDMRoutes(ctx context.Context, room contract.RoomID) (map[string]string, error) {
+	rows, err := s.Read().QueryContext(ctx, "SELECT d.channel,d.guild FROM discord_dm_routes d JOIN discord_routes r ON r.guild=d.guild AND r.room=d.room AND r.channel='' WHERE d.room=?", room)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := map[string]string{}
+	for rows.Next() {
+		var channel, guild string
+		if err := rows.Scan(&channel, &guild); err != nil {
+			return nil, err
+		}
+		result[channel] = guild
+	}
+	return result, rows.Err()
+}

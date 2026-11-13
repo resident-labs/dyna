@@ -1044,6 +1044,45 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 		if err := rows.Err(); err != nil {
 			return err
 		}
+
+		// A DM is one conversation and one turn. Do not let unrelated input lend
+		// it authority, including steering input arriving while the turn runs.
+		dmRows, err := tx.QueryContext(ctx, "SELECT d.seq,d.turn FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_kind=? AND d.to_id=? AND (d.state IN ('pending','taken') OR d.turn=?) AND e.type='discord.message' AND json_extract(CAST(e.body AS TEXT),'$.direct')=1", contract.PrincipalSession, session, active)
+		if err != nil {
+			return err
+		}
+		dmSeqs := map[contract.DeliverySeq]bool{}
+		activeDM := false
+		for dmRows.Next() {
+			var seq contract.DeliverySeq
+			var taken sql.NullString
+			if err := dmRows.Scan(&seq, &taken); err != nil {
+				dmRows.Close()
+				return err
+			}
+			dmSeqs[seq] = true
+			activeDM = activeDM || active != "" && taken.Valid && taken.String == string(active)
+		}
+		err = dmRows.Err()
+		dmRows.Close()
+		if err != nil {
+			return err
+		}
+		if activeDM {
+			items = slices.DeleteFunc(items, func(v item) bool { return !v.turn.Valid || v.turn.String != string(active) })
+		} else if active == "" {
+			priorWake := false
+			for _, v := range items {
+				if dmSeqs[v.input.Seq] && !priorWake {
+					items = []item{v}
+					break
+				}
+				priorWake = priorWake || v.wake
+			}
+			if len(items) != 1 || !dmSeqs[items[0].input.Seq] {
+				items = slices.DeleteFunc(items, func(v item) bool { return dmSeqs[v.input.Seq] })
+			}
+		}
 		if active == "" {
 			var immediate bool
 			for _, item := range items {

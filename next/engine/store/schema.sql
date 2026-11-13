@@ -138,3 +138,5 @@ CREATE TABLE workflow_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, sub TEXT NOT 
 CREATE TABLE workflow_state (sub TEXT NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(sub,key));
 
 CREATE TABLE room_pr_observed (room TEXT NOT NULL, repo TEXT NOT NULL, number INTEGER NOT NULL, snapshot TEXT NOT NULL, PRIMARY KEY(room,repo,number), FOREIGN KEY(room,repo) REFERENCES room_repos(room,repo) ON DELETE CASCADE);
+
+CREATE TABLE discord_dm_routes (channel TEXT PRIMARY KEY, guild TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE);

@@ -141,7 +141,7 @@ func (s *Service) discordInput(ctx context.Context, client *discord.Client, m di
 				selected = r
 			}
 		}
-		if len(guilds) != 1 {
+		if len(guilds) != 1 || len(m.Member.Roles) == 0 {
 			_, _, _ = client.Send(ctx, m.Channel, "Please mention me in a mapped server channel so I know which room should answer.", m.ID)
 			return nil
 		}
@@ -155,6 +155,11 @@ func (s *Service) discordInput(ctx context.Context, client *discord.Client, m di
 	}
 	if !allowed {
 		return nil
+	}
+	if m.Guild == "" {
+		if err := s.store.SetDiscordDMRoute(ctx, m.Channel, selected.Guild, selected.Room); err != nil {
+			return err
+		}
 	}
 	guildName := selected.Guild
 	var roles []string
@@ -186,7 +191,10 @@ func (s *Service) discordInput(ctx context.Context, client *discord.Client, m di
 			thread = m.Channel
 		}
 	}
-	b := contract.DiscordMessage{Channel: m.Channel, ChannelName: name, Thread: thread, GuildName: guildName, Author: m.Author.Username, DisplayName: display, Roles: roles, AuthorID: m.Author.ID, Owner: bot.Owner != "" && bot.Owner == m.Author.ID, Message: m.ID, Text: m.Content}
+	if m.Guild == "" {
+		name = "direct message"
+	}
+	b := contract.DiscordMessage{Direct: m.Guild == "", Channel: m.Channel, ChannelName: name, Thread: thread, GuildName: guildName, Author: m.Author.Username, DisplayName: display, Roles: roles, AuthorID: m.Author.ID, Owner: bot.Owner != "" && bot.Owner == m.Author.ID, Message: m.ID, Text: m.Content}
 	if m.Guild != "" {
 		b.History = client.History(ctx, m.Channel, m.ID, bot.ID)
 	}
