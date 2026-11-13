@@ -16,6 +16,7 @@ const (
 	ChannelKind  Kind = "channel"
 	AutoModKind  Kind = "automod"
 	MessageKind  Kind = "message"
+	PolicyKind   Kind = "policy"
 )
 
 type Operation string
@@ -45,7 +46,7 @@ type Plan struct {
 // BuildPlan resolves identities before comparing fields. Missing adopted objects
 // refuse rather than silently becoming replacements.
 func BuildPlan(desired Folder, live Snapshot) (Plan, error) {
-	var plan Plan
+	plan := Plan{Lines: slices.Clone(live.Warnings)}
 	if err := validate(desired); err != nil {
 		return plan, err
 	}
@@ -60,6 +61,9 @@ func BuildPlan(desired Folder, live Snapshot) (Plan, error) {
 		return plan, err
 	}
 	compare(&plan, ServerKind, "category order", "", desired.Server.Categories, live.Server.Categories)
+	if err := planPolicy(&plan, desired.Policy, live.Policy); err != nil {
+		return plan, err
+	}
 	if desired.Hooks {
 		plan.Lines = append(plan.Lines, "hooks.yaml is not applied yet")
 	}
@@ -116,6 +120,10 @@ func compare(plan *Plan, kind Kind, name, id string, desired, current any) {
 func (plan Plan) String() string {
 	lines := slices.Clone(plan.Lines)
 	for _, change := range plan.Changes {
+		if change.Kind == PolicyKind {
+			lines = append(lines, "policy.yaml differs from the enabled policy.")
+			continue
+		}
 		switch change.Operation {
 		case Create:
 			lines = append(lines, fmt.Sprintf("Create %s %s.", change.Kind, change.Name))

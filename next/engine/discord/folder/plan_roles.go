@@ -26,7 +26,7 @@ func planRoles(plan *Plan, desired []Role, live Snapshot) error {
 			return fmt.Errorf("server.yaml: role %q is not unique", role.Name)
 		}
 		if len(candidates) == 0 {
-			if role.ID != "" || role.Was != "" {
+			if role.Managed || role.ID != "" || role.Was != "" {
 				return fmt.Errorf("server.yaml: adopted role %q is missing", role.Name)
 			}
 			plan.Changes = append(plan.Changes, Change{Kind: RoleKind, Operation: Create, Name: role.Name, After: role})
@@ -39,10 +39,16 @@ func planRoles(plan *Plan, desired []Role, live Snapshot) error {
 		}
 		matched[current.ID] = true
 		desiredOrder = append(desiredOrder, RoleReference{ID: current.ID})
+		if current.Managed || role.Managed {
+			continue
+		}
+		// Opaque live bits are not owned by the folder and must survive edits.
+		role.OtherPermissions = current.OtherPermissions
 		role.Identity, current.Identity = Identity{}, Identity{}
 		compare(plan, RoleKind, role.Name, candidates[0].ID, role, current)
 	}
 	liveOrder, blocked := []RoleReference{}, []string{}
+	managedMoved := false
 	for _, role := range live.Server.Roles {
 		if !matched[role.ID] {
 			plan.Lines = append(plan.Lines, fmt.Sprintf("Role %s is on the server, not in the folder.", role.Name))
@@ -51,13 +57,18 @@ func planRoles(plan *Plan, desired []Role, live Snapshot) error {
 		currentIndex := len(liveOrder)
 		liveOrder = append(liveOrder, RoleReference{ID: role.ID})
 		desiredIndex := slices.Index(desiredOrder, RoleReference{ID: role.ID})
-		if currentIndex != desiredIndex && role.Position >= live.BotRolePosition {
+		if currentIndex != desiredIndex && (role.Managed || role.Position >= live.BotRolePosition) {
 			blocked = append(blocked, role.Name)
+			managedMoved = managedMoved || role.Managed
 		}
 	}
 	if !slices.Equal(desiredOrder, liveOrder) {
 		if len(blocked) > 0 {
-			plan.Lines = append(plan.Lines, fmt.Sprintf("Change role order by hand: %s sit at or above the bot's highest role.", strings.Join(blocked, ", ")))
+			reason := "sit at or above the bot's highest role"
+			if managedMoved {
+				reason = "are managed or sit at or above the bot's highest role"
+			}
+			plan.Lines = append(plan.Lines, fmt.Sprintf("Change role order by hand: %s %s.", strings.Join(blocked, ", "), reason))
 		} else {
 			compare(plan, ServerKind, "role order", "", desiredOrder, liveOrder)
 		}

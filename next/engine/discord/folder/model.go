@@ -25,14 +25,19 @@ type Community struct {
 	Rules   string `yaml:"rules"`
 	Updates string `yaml:"updates"`
 }
+
+// Managed roles are available for references but never changed or created.
+// OtherPermissions retains opaque live bits outside the folder's ownership.
 type Role struct {
-	Position    int `yaml:"-"`
-	Identity    `yaml:",inline"`
-	Name        string   `yaml:"name"`
-	Permissions []string `yaml:"permissions,omitempty"`
-	Color       string   `yaml:"color,omitempty"`
-	Hoist       bool     `yaml:"hoist,omitempty"`
-	Mentionable bool     `yaml:"mentionable,omitempty"`
+	Managed          bool   `yaml:"managed,omitempty"`
+	OtherPermissions uint64 `yaml:"other_permissions,omitempty"`
+	Position         int    `yaml:"-"`
+	Identity         `yaml:",inline"`
+	Name             string   `yaml:"name"`
+	Permissions      []string `yaml:"permissions,omitempty"`
+	Color            string   `yaml:"color,omitempty"`
+	Hoist            bool     `yaml:"hoist,omitempty"`
+	Mentionable      bool     `yaml:"mentionable,omitempty"`
 }
 type AutoMod struct {
 	Identity `yaml:",inline"`
@@ -81,6 +86,8 @@ type Entry struct {
 
 // Snapshot is configuration only, with adopted IDs and sidebar order.
 type Snapshot struct {
+	Warnings        []string // Non-fatal compatibility notices, reported once per snapshot.
+	Policy          string
 	BotRolePosition int
 	Server          Server
 	Entries         []Entry

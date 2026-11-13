@@ -34,7 +34,7 @@ func (s *Service) machineDiscordClient(ctx context.Context) (*discord.Client, er
 	if err != nil {
 		return nil, err
 	}
-	s.discordHTTP = &discord.Client{HTTP: &http.Client{Timeout: 30 * time.Second}, Endpoint: s.discordEndpoint, Token: token}
+	s.discordHTTP = &discord.Client{HTTP: &http.Client{Timeout: 30 * time.Second}, Endpoint: s.discordEndpoint, Token: token, BotID: b.ID}
 	s.discordClientKey = b.Credential
 	return s.discordHTTP, nil
 }

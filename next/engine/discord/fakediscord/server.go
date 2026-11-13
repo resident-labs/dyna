@@ -2,9 +2,11 @@
 package fakediscord
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"github.com/coder/websocket"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,14 +25,27 @@ type Server struct {
 	history       []any
 	historyCalls  int
 	requests      int
+	configuration *Configuration
+	requestLog    []Request
 }
 
 func New(t testing.TB) *Server {
 	t.Helper()
 	s := &Server{Token: "fake-discord-secret", Messages: make(chan json.RawMessage, 64), UploadedFiles: make(chan string, 64), Events: make(chan any, 64)}
 	s.HTTP = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body []byte
+		if r.Body != nil {
+			var err error
+			body, err = io.ReadAll(r.Body)
+			if err != nil {
+				w.WriteHeader(400)
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(body))
+		}
 		s.mu.Lock()
 		s.requests++
+		s.requestLog = append(s.requestLog, Request{Method: r.Method, Path: r.URL.RequestURI(), Body: string(body)})
 		s.mu.Unlock()
 		if r.URL.Path == "/gateway" {
 			s.gateway(w, r)
@@ -41,6 +56,9 @@ func New(t testing.TB) *Server {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if s.configurationGET(w, r) {
+			return
+		}
 		switch {
 		case r.URL.Path == "/api/v10/users/@me":
 			w.Write([]byte(`{"id":"900","username":"Kira"}`))
