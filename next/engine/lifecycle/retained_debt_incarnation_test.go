@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/harness/testutil"
+
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
@@ -108,20 +110,13 @@ func TestRetainedCacheCannotHideDebtFromSamePassNewCreate(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("roomPass query did not reach scheduler barrier")
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for {
+	testutil.Eventually(t, 3*time.Second, "new creation debt before room pass", func() bool {
 		current, err := rig.st.BoxLeftovers(rig.ctx, "b")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(current) == 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("new create did not generate debt before roomPass")
-		}
-		time.Sleep(time.Millisecond)
-	}
+		return len(current) == 1
+	})
 	release.Do(func() { close(gate.release) })
 	if err := <-passResult; err != nil {
 		t.Fatal(err)

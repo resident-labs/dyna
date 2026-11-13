@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/harness/testutil"
+
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
@@ -108,19 +110,11 @@ func TestQuiesceRestartJoinsCurrentHostDebt(t *testing.T) {
 		}
 		joined <- release
 	}()
-	deadline := time.Now().Add(time.Second)
-	for {
+	testutil.Eventually(t, time.Second, "restart claim", func() bool {
 		rig.r.pass.Lock()
-		claimed := rig.r.quiesced["b"]
-		rig.r.pass.Unlock()
-		if claimed {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("restart did not claim the box")
-		}
-		time.Sleep(time.Millisecond)
-	}
+		defer rig.r.pass.Unlock()
+		return rig.r.quiesced["b"]
+	})
 	select {
 	case <-joined:
 		t.Fatal("current-host debt not joined")
@@ -185,19 +179,11 @@ func TestQuiesceRestartDoesNotCancelOwnedStopOrClose(t *testing.T) {
 				}
 				result <- release
 			}()
-			deadline := time.Now().Add(time.Second)
-			for {
+			testutil.Eventually(t, time.Second, "restart claim", func() bool {
 				r.pass.Lock()
-				claimed := r.quiesced["b"]
-				r.pass.Unlock()
-				if claimed {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatal("restart did not claim the box")
-				}
-				time.Sleep(time.Millisecond)
-			}
+				defer r.pass.Unlock()
+				return r.quiesced["b"]
+			})
 			if err := ctx.Err(); err != nil {
 				t.Fatalf("restart cancelled owned %s: %v", want, err)
 			}
