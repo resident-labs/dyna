@@ -167,3 +167,23 @@ func TestEmptyFailureRollupWaitsForPendingSuite(t *testing.T) {
 		}
 	}
 }
+
+func TestFailedSuiteOverridesEmptyAggregateAndPendingSuites(t *testing.T) {
+	for _, raw := range []string{
+		`{"totalCount":2,"nodes":[{"status":"IN_PROGRESS"},{"status":"COMPLETED","conclusion":"FAILURE","app":{"slug":"actions"}}]}`,
+		`{"totalCount":2,"pageInfo":{"hasNextPage":true},"nodes":[{"status":"COMPLETED","conclusion":"FAILURE","app":{"slug":"actions"}}]}`,
+	} {
+		var suites gqlSuites
+		if err := json.Unmarshal([]byte(raw), &suites); err != nil {
+			t.Fatal(err)
+		}
+		for _, state := range []string{"FAILURE", "ERROR"} {
+			for _, rule := range []ciRule{ciPullHead, ciMainHead} {
+				got, names := summarizeCI(&gqlRollup{State: state}, suites, rule, time.Now())
+				if got != contract.PrCIFailure || !slices.Equal(names, []string{"actions (workflow run failed)"}) {
+					t.Fatalf("%s %d: %s %v", state, rule, got, names)
+				}
+			}
+		}
+	}
+}

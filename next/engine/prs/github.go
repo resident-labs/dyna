@@ -416,7 +416,7 @@ func summarizeCI(rollup *gqlRollup, suites gqlSuites, rule ciRule, now time.Time
 	}
 	ci, failed := summarizeContexts(rollup, rule)
 	// A failing context already names the job; a failed suite adds a name only when no context shows the failure.
-	if ci != contract.PrCIFailure && len(failedSuites) > 0 {
+	if (ci != contract.PrCIFailure || len(failed) == 0) && len(failedSuites) > 0 {
 		return contract.PrCIFailure, failedSuites
 	}
 	// An empty PR rollup can report aggregate failure without a terminal failed
