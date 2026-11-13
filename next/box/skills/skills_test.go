@@ -41,6 +41,15 @@ func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
 	if images := items[3]; images.Name != "dyna-images" || !strings.HasPrefix(images.Description, "Use when your box lacks a tool") {
 		t.Fatalf("%+v", images)
 	}
+	if data, err := builtIn.ReadFile("dyna-images/" + File); err != nil || strings.Count(string(data), "\n") > 150 {
+		t.Fatalf("%v", err)
+	} else {
+		for _, want := range []string{".dyna/compose/NAME.yaml", "session compose_list", "the room has several images", "dyna image save NAME"} {
+			if !strings.Contains(string(data), want) {
+				t.Errorf("dyna-images does not say %q", want)
+			}
+		}
+	}
 	nodes := items[5]
 	if nodes.Name != "dyna-nodes" || nodes.Description != "Use when you need to add nodes to Dyna, or a room needs its own or disposable machines" {
 		t.Fatalf("%+v", nodes)
