@@ -146,9 +146,6 @@ func (s *Service) WorkflowReload(ctx context.Context, caller contract.Principal,
 		return response, problem
 	}
 	ended := &contract.Error{Code: contract.ErrConflict, Message: "run " + string(run.ID) + " has ended; reload is for a running run, and run with resume starts a new one from an ended run"}
-	if run.State != contract.WorkflowRunning {
-		return response, ended
-	}
 	meta, repo, problem := s.workflowScript(ctx, run.Room, req.Script)
 	if problem != nil {
 		return response, problem
@@ -556,9 +553,6 @@ func (s *Service) WorkflowSteer(ctx context.Context, caller contract.Principal, 
 	if problem != nil {
 		return contract.WorkflowSteerResponse{}, problem
 	}
-	if run.State != contract.WorkflowRunning {
-		return contract.WorkflowSteerResponse{}, invalid("that run has ended")
-	}
 	if strings.TrimSpace(req.Text) == "" {
 		return contract.WorkflowSteerResponse{}, invalid("text is required")
 	}
@@ -622,6 +616,10 @@ func (s *Service) managedWorkflow(ctx context.Context, caller contract.Principal
 	}
 	if problem := s.roomAccess(ctx, caller, run.Room); problem != nil {
 		return run, problem
+	}
+	// An ended run's session may have closed, which no one manages, so say it ended before checking who asks.
+	if run.State != contract.WorkflowRunning {
+		return run, &contract.Error{Code: contract.ErrConflict, Message: "run " + string(run.ID) + " has ended (" + string(run.State) + "); workflow status shows its result, and run with resume starts a new one from it"}
 	}
 	tree, err := s.store.RoomTree(ctx, run.Room)
 	if err != nil {
