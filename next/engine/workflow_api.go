@@ -562,27 +562,11 @@ func (s *Service) WorkflowSteer(ctx context.Context, caller contract.Principal, 
 	if strings.TrimSpace(req.Text) == "" {
 		return contract.WorkflowSteerResponse{}, invalid("text is required")
 	}
-	steps, err := s.store.WorkflowSteps(ctx, run.ID)
-	if err != nil {
-		return contract.WorkflowSteerResponse{}, failure(err)
+	key, problem := s.runningWorker(ctx, run, req.Step)
+	if problem != nil {
+		return contract.WorkflowSteerResponse{}, problem
 	}
-	var matches, labels []string
-	for _, step := range steps {
-		if step.Kind != contract.WorkflowStepAgent || step.State != contract.WorkflowStepRunning {
-			continue
-		}
-		labels = append(labels, step.Name+" ("+step.Key+")")
-		if req.Step != "" && (step.Name == req.Step || strings.HasPrefix(step.Key, req.Step)) {
-			matches = append(matches, step.Key)
-		}
-	}
-	if len(labels) == 0 {
-		return contract.WorkflowSteerResponse{}, invalid("no worker is running in that run")
-	}
-	if len(matches) != 1 {
-		return contract.WorkflowSteerResponse{}, invalid("step must name one running worker; running workers: " + strings.Join(labels, ", "))
-	}
-	return s.Post(ctx, caller, contract.PostRequest{Room: run.Room, Mentions: []string{string(run.Session)}, Text: req.Text, WorkflowStep: matches[0]})
+	return s.Post(ctx, caller, contract.PostRequest{Room: run.Room, Mentions: []string{string(run.Session)}, Text: req.Text, WorkflowStep: key})
 }
 
 func (s *Service) WorkflowPause(ctx context.Context, caller contract.Principal, req contract.WorkflowPauseRequest) (contract.WorkflowPauseResponse, *contract.Error) {
@@ -597,27 +581,10 @@ func (s *Service) workflowPause(ctx context.Context, caller contract.Principal, 
 		return contract.WorkflowPauseResponse{}, problem
 	}
 	if step != "" {
-		steps, err := s.store.WorkflowSteps(ctx, run.ID)
-		if err != nil {
-			return contract.WorkflowPauseResponse{}, failure(err)
+		step, problem = s.runningWorker(ctx, run, step)
+		if problem != nil {
+			return contract.WorkflowPauseResponse{}, problem
 		}
-		var matches, labels []string
-		for _, worker := range steps {
-			if worker.Kind != contract.WorkflowStepAgent || worker.State != contract.WorkflowStepRunning {
-				continue
-			}
-			labels = append(labels, worker.Name+" ("+worker.Key+")")
-			if worker.Name == step || strings.HasPrefix(worker.Key, step) {
-				matches = append(matches, worker.Key)
-			}
-		}
-		if len(labels) == 0 {
-			return contract.WorkflowPauseResponse{}, invalid("no worker is running in that run")
-		}
-		if len(matches) != 1 {
-			return contract.WorkflowPauseResponse{}, invalid("step must name one running worker; running workers: " + strings.Join(labels, ", "))
-		}
-		step = matches[0]
 	}
 	if err := s.store.PauseWorkflow(ctx, run.ID, paused, step); errors.Is(err, store.ErrWorkflowEnded) {
 		return contract.WorkflowPauseResponse{}, invalid("that run has ended")
@@ -664,4 +631,29 @@ func (s *Service) managedWorkflow(ctx context.Context, caller contract.Principal
 		return run, &contract.Error{Code: contract.ErrForbidden, Message: "only the owner, the session that started a workflow or a session above it manages it"}
 	}
 	return run, nil
+}
+
+// runningWorker resolves one live agent step and lists the choices on refusal.
+func (s *Service) runningWorker(ctx context.Context, run store.WorkflowRun, step string) (string, *contract.Error) {
+	steps, err := s.store.WorkflowSteps(ctx, run.ID)
+	if err != nil {
+		return "", failure(err)
+	}
+	var matches, labels []string
+	for _, worker := range steps {
+		if worker.Kind != contract.WorkflowStepAgent || worker.State != contract.WorkflowStepRunning {
+			continue
+		}
+		labels = append(labels, worker.Name+" ("+worker.Key+")")
+		if step != "" && (worker.Name == step || strings.HasPrefix(worker.Key, step)) {
+			matches = append(matches, worker.Key)
+		}
+	}
+	if len(labels) == 0 {
+		return "", invalid("no worker is running in that run")
+	}
+	if len(matches) != 1 {
+		return "", invalid("step must name one running worker; running workers: " + strings.Join(labels, ", "))
+	}
+	return matches[0], nil
 }

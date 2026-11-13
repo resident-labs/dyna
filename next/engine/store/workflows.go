@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -478,23 +479,35 @@ func (s *Store) endWorkflow(ctx context.Context, tx *sql.Tx, id contract.Workflo
 func (s *Store) PauseWorkflow(ctx context.Context, id contract.WorkflowRunID, paused bool, step string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		var session contract.SessionID
-		query := "UPDATE workflow_runs SET paused=? WHERE id=? AND state=? RETURNING session"
-		args := []any{paused, id, contract.WorkflowRunning}
-		if step != "" {
-			query = "UPDATE workflow_runs SET paused_steps=(SELECT json_group_array(value) FROM json_each(paused_steps) WHERE value!=?) WHERE id=? AND state=? RETURNING session"
-			args[0] = step
-			if paused {
-				query = "UPDATE workflow_runs SET paused_steps=json_insert((SELECT json_group_array(value) FROM json_each(paused_steps) WHERE value!=?), '$[#]', ?) WHERE id=? AND state=? RETURNING session"
-				args = []any{step, step, id, contract.WorkflowRunning}
-			}
-		}
-		err := tx.QueryRowContext(ctx, query, args...).Scan(&session)
+		var runPaused bool
+		var raw string
+		err := tx.QueryRowContext(ctx, "SELECT session,paused,paused_steps FROM workflow_runs WHERE id=? AND state=?", id, contract.WorkflowRunning).Scan(&session, &runPaused, &raw)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrWorkflowEnded
 		}
 		if err != nil {
 			return err
 		}
+		var steps []string
+		if err := json.Unmarshal([]byte(raw), &steps); err != nil {
+			return err
+		}
+		if step == "" {
+			runPaused = paused
+		} else {
+			steps = slices.DeleteFunc(steps, func(key string) bool { return key == step })
+			if paused {
+				steps = append(steps, step)
+			}
+		}
+		data, err := json.Marshal(steps)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE workflow_runs SET paused=?,paused_steps=? WHERE id=?", runPaused, string(data), id); err != nil {
+			return err
+		}
+
 		s.wakePending = append(s.wakePending, session)
 		return nil
 	})
