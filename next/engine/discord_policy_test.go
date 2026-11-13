@@ -331,3 +331,49 @@ func TestDiscordOwnerPolicyAndCheckRequireRoom(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscordChannelChoresStayInServerAndCheckPermissions(t *testing.T) {
+	f := discordFixture(t)
+	front := startChild(t, f.s, f.ctx, f.room, "front", f.root)
+	routes, _ := f.s.store.DiscordRoutes(f.ctx, f.room)
+	mapping := routes[0]
+	mapping.Session = front
+	if err := f.s.store.SetDiscordRoute(f.ctx, mapping, false); err != nil {
+		t.Fatal(err)
+	}
+	f.s.discordDirectory.Apply("CHANNEL_CREATE", json.RawMessage(`{"id":"201","guild_id":"100","type":4,"name":"Help"}`))
+	f.s.discordDirectory.Apply("CHANNEL_CREATE", json.RawMessage(`{"id":"202","guild_id":"101","type":4,"name":"Other"}`))
+	text := "front: {channels: [topic, slowmode, create]}"
+	if _, problem := f.s.DiscordPolicy(f.ctx, boxCaller(f.root), contract.DiscordPolicyRequest{Text: &text}); problem != nil {
+		t.Fatal(problem)
+	}
+	for _, test := range []struct {
+		parent  string
+		allowed bool
+	}{{"201", true}, {"202", false}, {"200", false}, {"999", false}} {
+		_, problem := f.s.DiscordAPI(f.ctx, boxCaller(front), contract.DiscordAPIRequest{Method: "POST", Path: "/guilds/100/channels", Body: json.RawMessage(`{"name":"help","type":0,"parent_id":"` + test.parent + `"}`)})
+		if (problem == nil) != test.allowed {
+			t.Fatalf("parent %s: %v", test.parent, problem)
+		}
+	}
+	output, problem := f.s.DiscordCheck(f.ctx, boxCaller(f.root), contract.DiscordCheckRequest{})
+	if problem != nil || !strings.Contains(strings.Join(output.Lines, "\n"), "Grant the bot Manage Channels") {
+		t.Fatalf("check: %+v %v", output, problem)
+	}
+	if len(output.Lines) == 0 || !strings.HasSuffix(output.Lines[0], " problems:") {
+		t.Fatalf("missing problem count: %+v", output)
+	}
+}
+
+func TestDiscordCheckDistinguishesConfirmations(t *testing.T) {
+	f := discordFixture(t)
+	f.s.discordDirectory.Apply("GUILD_CREATE", json.RawMessage(`{"id":"100","roles":[{"id":"100","name":"Bot","position":10,"permissions":"8"},{"id":"10","name":"Contributors","position":1}]}`))
+	text := "front: {roles: [Contributors]}"
+	if _, problem := f.s.DiscordPolicy(f.ctx, boxCaller(f.root), contract.DiscordPolicyRequest{Text: &text}); problem != nil {
+		t.Fatal(problem)
+	}
+	output, problem := f.s.DiscordCheck(f.ctx, boxCaller(f.root), contract.DiscordCheckRequest{})
+	if problem != nil || len(output.Lines) < 2 || output.Lines[0] != "No problems found." || output.Lines[1] != "The dyna role is above Contributors." {
+		t.Fatalf("confirmations: %+v %v", output, problem)
+	}
+}
