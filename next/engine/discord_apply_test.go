@@ -438,3 +438,32 @@ func TestApplyRefusesManagedFlagOnAnOrdinaryRole(t *testing.T) {
 		t.Fatalf("reordered unadopted roles: %s", message)
 	}
 }
+
+func TestPlanWithPruneListsWhatApplyDeletesAndWritesNothing(t *testing.T) {
+	a := newApplyTest(t, emptyServer(), applyFolder)
+	a.write("channels/Community/old-chat/channel.yaml", "topic: soon gone\n")
+	a.write("channels/Community/category.yaml", "sync: true\nchannels: [rules, news, help, old-chat]\n")
+	a.apply(false)
+	if err := os.RemoveAll(filepath.Join(a.root, "channels/Community/old-chat")); err != nil {
+		t.Fatal(err)
+	}
+	a.write("channels/Community/category.yaml", "sync: true\nchannels: [rules, news, help]\n")
+	ownedBefore, _ := a.s.store.DiscordOwned(a.ctx, a.room, "100")
+	writesBefore := a.writes()
+	response, problem := a.s.DiscordPlan(a.ctx, boxCaller(a.rootSession()), contract.DiscordPlanRequest{Prune: true})
+	if problem != nil {
+		t.Fatal(problem.Message)
+	}
+	oldChat, _ := a.channelNamed("old-chat")
+	want := "Delete channel Community/old-chat (ID " + oldChat.ID + ")."
+	ownedAfter, _ := a.s.store.DiscordOwned(a.ctx, a.room, "100")
+	if !strings.Contains(response.Text, want) || strings.Count(response.Text, "Delete ") != 1 || a.writes() != writesBefore || len(ownedAfter) != len(ownedBefore) {
+		t.Fatalf("plan with prune:\n%s", response.Text)
+	}
+	if report := a.apply(true); !strings.Contains(report, "Done: delete channel Community/old-chat (ID "+oldChat.ID+")") {
+		t.Fatalf("apply did not delete what plan listed:\n%s", report)
+	}
+	if _, found := a.channelNamed("old-chat"); found {
+		t.Fatal("not deleted")
+	}
+}

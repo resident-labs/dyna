@@ -58,7 +58,8 @@ func discordFolderCommands(getClient func() client) []*cobra.Command {
 			room = args[0]
 		}
 		server, _ := cmd.Flags().GetString("server")
-		result, err := service.DiscordPlan(cmd.Context(), contract.DiscordPlanRequest{Room: contract.RoomID(room), Server: server})
+		prune, _ := cmd.Flags().GetBool("prune")
+		result, err := service.DiscordPlan(cmd.Context(), contract.DiscordPlanRequest{Room: contract.RoomID(room), Server: server, Prune: prune})
 		if err == nil {
 			fmt.Fprintln(cmd.OutOrStdout(), result.Text)
 		}
@@ -87,6 +88,7 @@ func discordFolderCommands(getClient func() client) []*cobra.Command {
 		return err
 	}}
 	apply.Flags().Bool("prune", false, "Also delete objects apply owns that the folder no longer lists")
+	plan.Flags().Bool("prune", false, "Also list what apply with --prune would delete")
 	for _, command := range []*cobra.Command{export, plan, apply} {
 		command.Flags().String("room", "", "Room name or ID (required for owner callers)")
 		command.Flags().String("server", "", "Mapped server ID")

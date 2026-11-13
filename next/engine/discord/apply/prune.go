@@ -35,7 +35,7 @@ func (r *run) addPrune() error {
 	var channels, categories, rules, roles []step
 	forget := func(owned Owned) error { return r.target.Owned.Forget(r.ctx, owned.Kind, owned.Path) }
 	remove := func(owned Owned, route string) step {
-		return step{"delete " + owned.Kind + " " + owned.Path, func() error {
+		return step{fmt.Sprintf("delete %s %s (ID %s)", owned.Kind, owned.Path, owned.ID), func() error {
 			if _, err := r.call("DELETE", route, nil); err != nil {
 				return err
 			}

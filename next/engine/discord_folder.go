@@ -105,7 +105,7 @@ func (s *Service) DiscordPlan(ctx context.Context, caller contract.Principal, re
 	if err != nil {
 		return contract.DiscordFolderResponse{}, failure(err)
 	}
-	text, err := apply.PlanText(ctx, s.discordApplyTarget(client, route, path))
+	text, err := apply.PlanText(ctx, s.discordApplyTarget(client, route, path), req.Prune)
 	if err != nil {
 		return contract.DiscordFolderResponse{}, invalid(err.Error())
 	}

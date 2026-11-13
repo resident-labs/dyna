@@ -70,18 +70,10 @@ type run struct {
 // Run refuses before any write if the folder cannot be applied safely. Otherwise
 // it executes the plan and reports each change; a failure stops the run at once.
 func Run(ctx context.Context, target Target, prune bool) (Report, error) {
-	r := &run{ctx: ctx, target: target}
-	var err error
-	if r.owned, err = target.Owned.Owned(ctx); err != nil {
+	r, err := load(ctx, target)
+	if err != nil {
 		return Report{}, err
 	}
-	if r.desired, err = folder.Load(target.Folder); err != nil {
-		return Report{}, err
-	}
-	if r.live, err = folder.ReadManagedSnapshot(ctx, target.Client, target.Guild, r.desired.Entries); err != nil {
-		return Report{}, err
-	}
-	r.live.Policy = target.CurrentPolicy
 	if r.desired, err = r.claimRecorded(); err != nil {
 		return Report{}, err
 	}
@@ -218,24 +210,44 @@ func (r *run) create(owned Owned, route string, body any) (string, error) {
 	return created.ID, nil
 }
 
-// PlanText is what apply would do, without writing anything: the folder is
-// compared with the server, and with the record of standing messages.
-func PlanText(ctx context.Context, target Target) (string, error) {
+// load reads the record, the folder and the server.
+func load(ctx context.Context, target Target) (*run, error) {
 	r := &run{ctx: ctx, target: target}
 	var err error
 	if r.owned, err = target.Owned.Owned(ctx); err != nil {
-		return "", err
+		return nil, err
 	}
 	if r.desired, err = folder.Load(target.Folder); err != nil {
-		return "", err
+		return nil, err
 	}
 	if r.live, err = folder.ReadManagedSnapshot(ctx, target.Client, target.Guild, r.desired.Entries); err != nil {
-		return "", err
+		return nil, err
 	}
 	r.live.Policy = target.CurrentPolicy
+	return r, nil
+}
+
+// PlanText is what apply would do, and with prune what prune would delete or
+// refuse, from the same code apply uses. It writes nothing, to Discord or the record.
+func PlanText(ctx context.Context, target Target, prune bool) (string, error) {
+	r, err := load(ctx, target)
+	if err != nil {
+		return "", err
+	}
 	r.hydrateMessages()
-	r.plan, err = folder.BuildPlan(r.desired, r.live)
-	return r.plan.String(), err
+	if r.plan, err = folder.BuildPlan(r.desired, r.live); err != nil {
+		return "", err
+	}
+	lines := []string{r.plan.String()}
+	if prune {
+		if err := r.addPrune(); err != nil {
+			return "", err
+		}
+		for _, deletion := range r.phases[prunePhase] {
+			lines = append(lines, strings.ToUpper(deletion.text[:1])+deletion.text[1:]+".")
+		}
+	}
+	return strings.Join(lines, "\n"), nil
 }
 
 func sameInventory(a, b folder.Kind) bool {

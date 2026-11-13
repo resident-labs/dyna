@@ -143,6 +143,7 @@ type DiscordExportRequest struct {
 type DiscordPlanRequest struct {
 	Room   RoomID `json:"room,omitempty"`
 	Server string `json:"server,omitempty"`
+	Prune  bool   `json:"prune,omitempty"`
 }
 type DiscordApplyRequest struct {
 	Room   RoomID `json:"room,omitempty"`

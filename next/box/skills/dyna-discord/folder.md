@@ -85,6 +85,7 @@ A failure stops and lists what was done and what remains; run apply again to res
 answer, nothing new on the server means the create did not happen; anything new refuses until you add
 `id:` to the entry that is yours (never a guess by name). A standing message whose post may have
 reached Discord refuses until you delete any copy and rename its file.
+Run `plan` with `prune` before `apply` with `prune`: it lists each object that would be deleted, or the refusal.
 `prune` deletes only recorded objects the folder no longer lists, never messages, and refuses a category
 holding a channel apply does not own. By hand (reported, not applied): channel type and forum tags of an
 existing channel, turning Community off, `sync` (derived from the channels' overwrites), role order above the
