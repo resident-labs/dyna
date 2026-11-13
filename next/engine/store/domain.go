@@ -902,6 +902,7 @@ type FeedInput struct {
 	Queue    *contract.TurnQueue
 	MeantFor contract.SessionID
 	Why      string
+	Wake     bool // false for a child's turn-end text while it still has work running
 }
 
 // Keep open lookups separate from replay so ordinary polls never scan history.
@@ -987,6 +988,7 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 				rows.Close()
 				return err
 			}
+			v.input.Wake = v.wake
 			kind, session, _ := strings.Cut(v.home, ":")
 			v.input.Reply.Home = contract.Conversation{Kind: contract.ConversationKind(kind), Session: contract.SessionID(session)}
 			if contract.ConversationKind(kind) == contract.ConversationDiscord {

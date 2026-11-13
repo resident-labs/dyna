@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"regexp"
 	"time"
@@ -142,6 +143,9 @@ const (
 	streamStopReadFailed       streamStopReason = "stop_read_failed"
 	streamWorkflowReadFailed   streamStopReason = "workflow_read_failed"
 )
+
+// waitingTextLimit is how many characters a parent gets of a child's turn-end text that is not a result.
+const waitingTextLimit = 600
 
 var quotedDynaMarker = regexp.MustCompile(`(?im)^([ \t]*)\[[ \t]*dyna[ \t]*\]`)
 
@@ -405,6 +409,13 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 				if err != nil {
 					reason, cause = streamDeliveryRenderFailed, err
 					return
+				}
+				// A result reaches the parent whole. Text from a child's turn that ended with work still running is not
+				// a result and does not wake the parent, so the parent gets its opening and the transcript keeps the rest.
+				if ended, ok := event.Body.(contract.TurnEnded); ok && delivery.Surface == contract.SurfaceSession && !delivery.Wake {
+					if runes := []rune(text); len(runes) > waitingTextLimit {
+						text = fmt.Sprintf("%s…\n[Cut: %d more characters. transcript read with session %s and turn %s has the whole text.]", string(runes[:waitingTextLimit]), len(runes)-waitingTextLimit, ended.Session, ended.Turn)
+					}
 				}
 				frame, files, err := s.inputFrame(ctx, session.ID, event, contract.Delivery{Surface: delivery.Surface, Reply: delivery.Reply, MeantFor: delivery.MeantFor, Why: delivery.Why})
 				if err != nil {
