@@ -1,4 +1,4 @@
-package engine
+package contextview
 
 import (
 	"fmt"
@@ -10,13 +10,13 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
-// usageChars is the section's budget of 80 tokens.
-const usageChars = 320
+// UsageChars is the section's budget of 80 tokens.
+const UsageChars = 320
 
-// usageLines gives one line per account the session's room may use. Accounts routing would use come first, so the
+// UsageLines gives one line per account the session's room may use. Accounts routing would use come first, so the
 // budget keeps them and "N more" counts the rest. A reading holds 10% steps and a pace word, never a time, and the
 // reading itself changes at most once per usage cache age, so a line changes rarely, not every turn.
-func usageLines(accounts []store.ContextAccount, readings []contract.AccountUsage, now time.Time) []string {
+func UsageLines(accounts []store.ContextAccount, readings []contract.AccountUsage, now time.Time) []string {
 	byID := make(map[contract.AccountID]contract.AccountUsage, len(readings))
 	for _, reading := range readings {
 		byID[reading.AccountID] = reading

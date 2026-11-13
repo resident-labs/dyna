@@ -13,8 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/resident-labs/dyna/engine/store"
+	"github.com/resident-labs/dyna/engine/contextview"
+
 	"path/filepath"
+
+	"github.com/resident-labs/dyna/engine/store"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -267,7 +270,7 @@ func (s *Service) noteToolCalls(session contract.SessionID, line []byte, failed 
 			if len(calls) >= maxSeenCalls {
 				clear(calls)
 			}
-			calls[part.ID] = seenCall{model: message.Model, args: excerpt(string(part.Arguments), 600)}
+			calls[part.ID] = seenCall{model: message.Model, args: contextview.Excerpt(string(part.Arguments), 600)}
 		}
 	case message.Role == "toolResult" && message.IsError:
 		call := calls[message.ToolCallID]
