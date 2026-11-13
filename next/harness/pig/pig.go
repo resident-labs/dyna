@@ -399,3 +399,8 @@ func (h *Harness) Close() error {
 	})
 	return err
 }
+
+// SetBeforeRequest holds a workflow worker at its next request boundary.
+func (h *Harness) SetBeforeRequest(fn func(context.Context) error) {
+	h.session.Agent().SetBeforeRequest(fn)
+}

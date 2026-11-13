@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"mime"
 	"os"
@@ -257,8 +258,8 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 				if err != nil {
 					return contract.PostResponse{}, failure(err)
 				}
-				if ended {
-					return contract.PostResponse{}, failure(store.ErrWorkflowEnded)
+				if ended.ID != "" {
+					return contract.PostResponse{}, invalid(fmt.Sprintf("workflow run %s has ended (%s) and its result went to its parent; workflow status %s shows it, and workflow run with resume continues it.", address.Name, ended.State, ended.ID))
 				}
 				return contract.PostResponse{}, invalid("no open session named " + address.Name + " in this room; it may have closed, and session list shows the room's sessions")
 			}

@@ -101,6 +101,7 @@ type WorkflowInfo struct {
 	Version      int            `json:"version,omitempty"`
 	State        WorkflowState  `json:"state"`
 	Paused       bool           `json:"paused,omitempty"`
+	PausedSteps  []string       `json:"pausedSteps,omitempty"`
 	Result       string         `json:"result,omitempty"`
 	Steps        int            `json:"steps,omitempty"`
 	Failed       int            `json:"failed"`
@@ -200,6 +201,7 @@ type BoxWorkflow struct {
 	Script       string            `json:"script"`
 	Version      int               `json:"version"`
 	Paused       bool              `json:"paused"`
+ PausedSteps []string `json:"pausedSteps,omitempty"`
 	Args         string            `json:"args,omitempty"`
 	Profiles     []WorkflowProfile `json:"profiles"` // in meta's order: the first is the default
 	Workers      int               `json:"workers"`  // how many crew workers may run at once: the box's memory allows some, and the maxWorkers setting may allow fewer
@@ -330,14 +332,15 @@ type WorkflowStateResponse struct {
 
 // WorkflowSteerRequest addresses one running worker by label or unique key prefix.
 type WorkflowSteerRequest struct {
-	Run  WorkflowRunID `json:"run"`
+	Run  WorkflowRunID `json:"run" desc:"Run ID or the run session name"`
 	Step string        `json:"step"`
 	Text string        `json:"text"`
 }
 type WorkflowSteerResponse = PostResponse
 
 type WorkflowPauseRequest struct {
-	Run WorkflowRunID `json:"run"`
+	Run  WorkflowRunID `json:"run" desc:"Run ID or the run session name"`
+	Step string        `json:"step,omitempty" desc:"One running worker label or unique key prefix; omit for the whole run"`
 }
 type WorkflowPauseResponse struct{}
 type WorkflowUnpauseRequest = WorkflowPauseRequest
@@ -348,6 +351,7 @@ type WorkflowPauseChanged struct {
 	Run     WorkflowRunID `json:"run"`
 	Session SessionID     `json:"session"`
 	Paused  bool          `json:"paused"`
+	Step    string        `json:"step,omitempty"`
 }
 
 func (WorkflowPauseChanged) EventType() EventType { return "workflow.pause_changed" }

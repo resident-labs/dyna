@@ -152,8 +152,9 @@ func (w *fakeWorker) Steer(_ context.Context, input contract.TurnInput) error {
 func (w *fakeWorker) Delivered(_ context.Context, id contract.DeliverySeq) (bool, error) {
 	return w.read != nil && w.read(id), nil
 }
-func (w *fakeWorker) SessionFile() string { return w.file }
-func (w *fakeWorker) Close() error        { return nil }
+func (w *fakeWorker) SetBeforeRequest(fn func(context.Context) error) {}
+func (w *fakeWorker) SessionFile() string                             { return w.file }
+func (w *fakeWorker) Close() error                                    { return nil }
 
 type crewHarness struct {
 	timeout int // the room's default step timeout in seconds, as the engine sends it

@@ -33,6 +33,7 @@ type WorkflowRun struct {
 	Commit       string
 	Image        string
 	State        contract.WorkflowState
+	PausedSteps  []string
 	Paused       bool
 	Result       string
 	Resume       contract.WorkflowRunID
@@ -46,14 +47,17 @@ type WorkflowRun struct {
 // workflowStatusLines is how many status() lines a run keeps.
 const workflowStatusLines = 20
 
-const workflowColumns = "sub,key,id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,result,version,status_lines,started_at,ended_at,paused"
+const workflowColumns = "sub,key,id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,result,version,status_lines,started_at,ended_at,paused,paused_steps"
 
 func scanWorkflow(row interface{ Scan(...any) error }) (WorkflowRun, error) {
 	var run WorkflowRun
-	var profiles, lines string
+	var profiles, lines, pausedSteps string
 	var started, ended int64
-	err := row.Scan(&run.Subscription, &run.Key, &run.ID, &run.Room, &run.Session, &run.Name, &run.Description, &run.Script, &run.Args, &profiles, &run.Repo, &run.Commit, &run.Image, &run.State, &run.Result, &run.Version, &lines, &started, &ended, &run.Paused)
+	err := row.Scan(&run.Subscription, &run.Key, &run.ID, &run.Room, &run.Session, &run.Name, &run.Description, &run.Script, &run.Args, &profiles, &run.Repo, &run.Commit, &run.Image, &run.State, &run.Result, &run.Version, &lines, &started, &ended, &run.Paused, &pausedSteps)
 	if err != nil {
+		return run, err
+	}
+	if err := json.Unmarshal([]byte(pausedSteps), &run.PausedSteps); err != nil {
 		return run, err
 	}
 	run.Started = time.UnixMilli(started).UTC()
@@ -471,10 +475,20 @@ func (s *Store) endWorkflow(ctx context.Context, tx *sql.Tx, id contract.Workflo
 	return err
 }
 
-func (s *Store) PauseWorkflow(ctx context.Context, id contract.WorkflowRunID, paused bool) error {
+func (s *Store) PauseWorkflow(ctx context.Context, id contract.WorkflowRunID, paused bool, steps ...string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		var session contract.SessionID
-		err := tx.QueryRowContext(ctx, "UPDATE workflow_runs SET paused=? WHERE id=? AND state=? RETURNING session", paused, id, contract.WorkflowRunning).Scan(&session)
+		query := "UPDATE workflow_runs SET paused=? WHERE id=? AND state=? RETURNING session"
+		args := []any{paused, id, contract.WorkflowRunning}
+		if len(steps) > 0 && steps[0] != "" {
+			query = "UPDATE workflow_runs SET paused_steps=(SELECT json_group_array(value) FROM json_each(paused_steps) WHERE value!=?) WHERE id=? AND state=? RETURNING session"
+			args[0] = steps[0]
+			if paused {
+				query = "UPDATE workflow_runs SET paused_steps=json_insert((SELECT json_group_array(value) FROM json_each(paused_steps) WHERE value!=?), '$[#]', ?) WHERE id=? AND state=? RETURNING session"
+				args = []any{steps[0], steps[0], id, contract.WorkflowRunning}
+			}
+		}
+		err := tx.QueryRowContext(ctx, query, args...).Scan(&session)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrWorkflowEnded
 		}
@@ -487,8 +501,43 @@ func (s *Store) PauseWorkflow(ctx context.Context, id contract.WorkflowRunID, pa
 }
 
 // EndedWorkflowNamed recognizes a finished run's session name after SessionByName no longer lists it.
-func (s *Store) EndedWorkflowNamed(ctx context.Context, room contract.RoomID, name string) (bool, error) {
-	var ended bool
-	err := s.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM workflow_runs w JOIN sessions s ON s.id=w.session WHERE s.room=? AND s.name=? AND w.state!=?)", room, name, contract.WorkflowRunning).Scan(&ended)
-	return ended, err
+func (s *Store) EndedWorkflowNamed(ctx context.Context, room contract.RoomID, name string) (WorkflowRun, error) {
+	var id contract.WorkflowRunID
+	err := s.Read().QueryRowContext(ctx, "SELECT w.id FROM workflow_runs w JOIN sessions s ON s.id=w.session WHERE s.room=? AND s.name=? AND w.state!=?", room, name, contract.WorkflowRunning).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return WorkflowRun{}, nil
+	}
+	if err != nil {
+		return WorkflowRun{}, err
+	}
+	return s.WorkflowRun(ctx, id)
+}
+
+// WorkflowRunNamed resolves a run's session name within a room, or uniquely across rooms for the owner.
+func (s *Store) WorkflowRunNamed(ctx context.Context, room contract.RoomID, name string) (WorkflowRun, error) {
+	rows, err := s.Read().QueryContext(ctx, "SELECT w.id FROM workflow_runs w JOIN sessions s ON s.id=w.session WHERE s.name=? AND (?='' OR s.room=?)", name, room, room)
+	if err != nil {
+		return WorkflowRun{}, err
+	}
+	var ids []contract.WorkflowRunID
+	for rows.Next() {
+		var id contract.WorkflowRunID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return WorkflowRun{}, err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return WorkflowRun{}, err
+	}
+	if len(ids) == 0 {
+		return WorkflowRun{}, ErrNotFound
+	}
+	if len(ids) != 1 {
+		return WorkflowRun{}, errors.New("run session name is ambiguous; use the run ID")
+	}
+	return s.WorkflowRun(ctx, ids[0])
 }
