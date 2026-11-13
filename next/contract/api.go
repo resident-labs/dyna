@@ -613,6 +613,7 @@ type SessionRefreshResponse struct {
 	Marked []SessionID `json:"marked"`
 }
 type PostRequest struct {
+	Spoken         bool         `json:"-"` // set only by the voice dispatch boundary
 	DataAttachment *int         `json:"-"` // filled by the owning post boundary, never trusted from a caller
 	Data           JSONData     `json:"data,omitempty"`
 	Room           RoomID       `json:"room"`

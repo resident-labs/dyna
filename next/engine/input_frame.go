@@ -181,6 +181,9 @@ func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, eve
 	var attachments []contract.Attachment
 	switch body := event.Body.(type) {
 	case contract.PostCreated:
+		if body.Spoken {
+			frame += " The owner spoke these words in a voice call; treat them as a transcript that may be unpunctuated or misheard, and keep the reply concise because it will be summarized aloud."
+		}
 		attachments = body.Attachments
 	case contract.TurnEnded:
 		attachments = body.Attachments

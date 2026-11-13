@@ -1,4 +1,5 @@
 <script lang="ts">
+  import VoiceWidget from "./lib/voice/VoiceWidget.svelte";
   import { sessionName, type CommandContext } from "./lib/composer-commands.ts";
   import { roomIsLive } from "./lib/source.ts";
   import { paneCounts, roomRoute, settingsRoute } from "./lib/routes.ts";
@@ -813,6 +814,7 @@
         {#if closed && !missing}<span class="count">closed</span>{:else if word && !missing}<span class="count word" class:asks={shown === "waiting"} title={word === "Asleep" ? "Wakes on your next message" : word}>{word}</span>{/if}
         {#if store?.ready && !session}<span class="count narrow">{count(store.members.length, "session")}</span>{/if}</span>
       {#if store && !unavailable}
+        {#if room}<VoiceWidget {room} name={roomName} {composer} />{/if}
         {#if !session}<FeedDepthControl value={feedDepth} onchange={chooseDepth} />{/if}
         {#if session}<span class="session-spacer"></span>{/if}
         {#if session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready"}<button type="button" class="tool" aria-label="Terminal" title={terminals?.hasShell(session) ? "Show this session's terminal" : "Open a terminal in this session's box"} aria-pressed={terminals?.hasShell(session) ?? false} onclick={() => terminals?.shell(session, title, !store?.sessions.get(session)?.parent)}><Icon name="terminal" /></button>{/if}
