@@ -27,6 +27,9 @@ type Server struct {
 	requests      int
 	configuration *Configuration
 	requestLog    []Request
+	nextID        int
+	writes        int
+	failure       writeFailure
 }
 
 func New(t testing.TB) *Server {
@@ -55,76 +58,92 @@ func New(t testing.TB) *Server {
 			w.WriteHeader(401)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		if s.configurationGET(w, r) {
+		if status, applyFirst := s.injectedFailure(r.Method); status != 0 {
+			if applyFirst {
+				s.serve(httptest.NewRecorder(), r, body)
+			}
+			w.WriteHeader(status)
 			return
 		}
-		switch {
-		case r.URL.Path == "/api/v10/users/@me":
-			w.Write([]byte(`{"id":"900","username":"Kira"}`))
-		case r.URL.Path == "/api/v10/users/@me/guilds":
-			w.Write([]byte(`[{"id":"100","name":"Horizon"}]`))
-		case strings.Contains(r.URL.Path, "/members/"):
-			w.Write([]byte(`{"user":{"id":"1"}}`))
-		case strings.HasSuffix(r.URL.Path, "/typing"):
-			w.WriteHeader(204)
-		case strings.HasSuffix(r.URL.Path, "/messages") && r.Method == "POST":
-			var body json.RawMessage
-			if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
-				if err := r.ParseMultipartForm(10 << 20); err != nil {
-					w.WriteHeader(400)
-					return
-				}
-				defer r.MultipartForm.RemoveAll()
-				body = json.RawMessage(r.FormValue("payload_json"))
-				for _, files := range r.MultipartForm.File {
-					for _, file := range files {
-						s.UploadedFiles <- file.Filename
-					}
-				}
-			} else if json.NewDecoder(r.Body).Decode(&body) != nil {
-				w.WriteHeader(400)
-				return
-			}
-			select {
-			case s.Messages <- body:
-			case <-r.Context().Done():
-				return
-			}
-			w.Write([]byte(`{"id":"999"}`))
-		case strings.HasSuffix(r.URL.Path, "/messages") && r.Method == "GET":
-			s.mu.Lock()
-			s.historyCalls++
-			history := s.history
-			s.mu.Unlock()
-			json.NewEncoder(w).Encode(history)
-		case strings.Contains(r.URL.Path, "/messages/") && r.Method == "GET":
-			s.mu.Lock()
-			history := s.history
-			s.mu.Unlock()
-			id := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
-			for _, message := range history {
-				data, _ := json.Marshal(message)
-				var identity struct {
-					ID string `json:"id"`
-				}
-				json.Unmarshal(data, &identity)
-				if identity.ID == id {
-					w.Write(data)
-					return
-				}
-			}
-			w.WriteHeader(404)
-		case strings.HasPrefix(r.URL.Path, "/api/v10/guilds/"):
-			w.Write([]byte(`{"id":"100","name":"Horizon"}`))
-		case strings.HasPrefix(r.URL.Path, "/api/v10/channels/"):
-			w.Write([]byte(`{"id":"200","guild_id":"100","name":"general","type":0}`))
-		default:
-			w.WriteHeader(404)
-		}
+		s.serve(w, r, body)
 	}))
 	t.Cleanup(s.HTTP.Close)
 	return s
+}
+
+// serve answers one authenticated REST request.
+func (s *Server) serve(w http.ResponseWriter, r *http.Request, body []byte) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.configurationGET(w, r) || s.configurationWrite(w, r, body) {
+		return
+	}
+	switch {
+	case r.URL.Path == "/api/v10/users/@me":
+		w.Write([]byte(`{"id":"900","username":"Kira"}`))
+	case r.URL.Path == "/api/v10/users/@me/guilds":
+		w.Write([]byte(`[{"id":"100","name":"Horizon"}]`))
+	case strings.Contains(r.URL.Path, "/members/"):
+		w.Write([]byte(`{"user":{"id":"1"}}`))
+	case strings.HasSuffix(r.URL.Path, "/typing"):
+		w.WriteHeader(204)
+	case strings.HasSuffix(r.URL.Path, "/messages") && r.Method == "POST":
+		var body json.RawMessage
+		if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+			if err := r.ParseMultipartForm(10 << 20); err != nil {
+				w.WriteHeader(400)
+				return
+			}
+			defer r.MultipartForm.RemoveAll()
+			body = json.RawMessage(r.FormValue("payload_json"))
+			for _, files := range r.MultipartForm.File {
+				for _, file := range files {
+					s.UploadedFiles <- file.Filename
+				}
+			}
+		} else if json.NewDecoder(r.Body).Decode(&body) != nil {
+			w.WriteHeader(400)
+			return
+		}
+		select {
+		case s.Messages <- body:
+		case <-r.Context().Done():
+			return
+		}
+		w.Write([]byte(`{"id":"` + s.newID() + `"}`))
+	case strings.Contains(r.URL.Path, "/messages/pins/"):
+		w.WriteHeader(204)
+	case strings.Contains(r.URL.Path, "/messages/") && r.Method == "PATCH":
+		w.Write([]byte(`{"id":"` + r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:] + `"}`))
+	case strings.HasSuffix(r.URL.Path, "/messages") && r.Method == "GET":
+		s.mu.Lock()
+		s.historyCalls++
+		history := s.history
+		s.mu.Unlock()
+		json.NewEncoder(w).Encode(history)
+	case strings.Contains(r.URL.Path, "/messages/") && r.Method == "GET":
+		s.mu.Lock()
+		history := s.history
+		s.mu.Unlock()
+		id := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+		for _, message := range history {
+			data, _ := json.Marshal(message)
+			var identity struct {
+				ID string `json:"id"`
+			}
+			json.Unmarshal(data, &identity)
+			if identity.ID == id {
+				w.Write(data)
+				return
+			}
+		}
+		w.WriteHeader(404)
+	case strings.HasPrefix(r.URL.Path, "/api/v10/guilds/"):
+		w.Write([]byte(`{"id":"100","name":"Horizon"}`))
+	case strings.HasPrefix(r.URL.Path, "/api/v10/channels/"):
+		w.Write([]byte(`{"id":"200","guild_id":"100","name":"general","type":0}`))
+	default:
+		w.WriteHeader(404)
+	}
 }
 func (s *Server) SetHistory(messages []any) { s.mu.Lock(); defer s.mu.Unlock(); s.history = messages }
 func (s *Server) Requests() int             { s.mu.Lock(); defer s.mu.Unlock(); return s.requests }

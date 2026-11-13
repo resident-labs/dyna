@@ -31,6 +31,7 @@ type Configuration struct {
 	Roles    []Role
 	Channels []Channel
 	AutoMod  []AutoMod
+	BotRoles []string // IDs of the roles held by the bot user (900)
 }
 type Guild struct {
 	ID            string   `json:"id"`
@@ -120,6 +121,10 @@ func (s *Server) configurationGET(w http.ResponseWriter, r *http.Request) bool {
 	if c == nil || r.Method != "GET" {
 		return false
 	}
+	if channel := c.channel(strings.TrimPrefix(r.URL.Path, "/api/v10/channels/")); channel != nil {
+		_ = json.NewEncoder(w).Encode(channel)
+		return true
+	}
 	base := "/api/v10/guilds/" + c.Guild.ID
 	if r.URL.Path != base && !strings.HasPrefix(r.URL.Path, base+"/") {
 		return false
@@ -134,6 +139,8 @@ func (s *Server) configurationGET(w http.ResponseWriter, r *http.Request) bool {
 		v = c.Channels
 	case "/auto-moderation/rules":
 		v = c.AutoMod
+	case "/members/900":
+		v = map[string][]string{"roles": c.BotRoles}
 	default:
 		return false
 	}
@@ -159,6 +166,7 @@ func CommunityConfiguration() Configuration {
 			{ID: "220", Name: "external", Type: 4, Position: 2},
 			{ID: "221", Name: "mirror", Parent: "220", Type: 0, Position: 0},
 		},
-		AutoMod: []AutoMod{{ID: "400", Name: "invites", Event: 1, Trigger: 1, Enabled: true, Metadata: TriggerMetadata{Keywords: []string{"discord.gg/*"}}, Actions: []Action{{Type: 1}, {Type: 2, Metadata: ActionMetadata{Channel: "211"}}}}},
+		BotRoles: []string{"11"},
+		AutoMod:  []AutoMod{{ID: "400", Name: "invites", Event: 1, Trigger: 1, Enabled: true, Metadata: TriggerMetadata{Keywords: []string{"discord.gg/*"}}, Actions: []Action{{Type: 1}, {Type: 2, Metadata: ActionMetadata{Channel: "211"}}}}},
 	}
 }

@@ -156,3 +156,51 @@ func (s *Store) FailDiscordGateway(ctx context.Context, credential, reason strin
 		return err
 	})
 }
+
+// DiscordOwned is an object `discord apply` created or adopted in a room's server.
+// An empty ID means a create was started and its outcome is not recorded yet.
+type DiscordOwned struct {
+	Kind    string `json:"kind"`
+	Path    string `json:"path"`
+	ID      string `json:"id"`
+	Channel string `json:"channel,omitempty"` // for a message, the channel it is in
+	Content string `json:"content,omitempty"` // for a message, what was last posted
+}
+
+func (s *Store) DiscordOwned(ctx context.Context, room contract.RoomID, guild string) ([]DiscordOwned, error) {
+	rows, err := s.Read().QueryContext(ctx, `SELECT kind,path,id,channel,content FROM discord_owned WHERE room=? AND guild=? ORDER BY kind,path`, room, guild)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var owned []DiscordOwned
+	for rows.Next() {
+		var o DiscordOwned
+		if err := rows.Scan(&o.Kind, &o.Path, &o.ID, &o.Channel, &o.Content); err != nil {
+			return nil, err
+		}
+		owned = append(owned, o)
+	}
+	return owned, rows.Err()
+}
+
+// SetDiscordOwned records one object. A recorded Discord ID has one row, so a
+// renamed object replaces the row it had under its old path.
+func (s *Store) SetDiscordOwned(ctx context.Context, room contract.RoomID, guild string, o DiscordOwned) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		if o.ID != "" {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM discord_owned WHERE room=? AND guild=? AND kind=? AND id=?`, room, guild, o.Kind, o.ID); err != nil {
+				return err
+			}
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO discord_owned(room,guild,kind,path,id,channel,content) VALUES(?,?,?,?,?,?,?) ON CONFLICT(room,guild,kind,path) DO UPDATE SET id=excluded.id,channel=excluded.channel,content=excluded.content`, room, guild, o.Kind, o.Path, o.ID, o.Channel, o.Content)
+		return err
+	})
+}
+
+func (s *Store) DeleteDiscordOwned(ctx context.Context, room contract.RoomID, guild, kind, path string) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `DELETE FROM discord_owned WHERE room=? AND guild=? AND kind=? AND path=?`, room, guild, kind, path)
+		return err
+	})
+}

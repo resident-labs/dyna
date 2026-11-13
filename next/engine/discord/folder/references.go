@@ -70,6 +70,9 @@ func validateReferences(folder Folder) error {
 			}
 		}
 	}
+	if err := validateMessages(folder, channels, roles); err != nil {
+		return err
+	}
 	automodNames := map[string]bool{}
 	for _, rule := range folder.Server.AutoMod {
 		if rule.Name == "" || automodNames[rule.Name] {
@@ -90,6 +93,22 @@ func orderedNames(path string, names []string, available map[string]int) error {
 			return fmt.Errorf("%s: ordered name %q is missing or not unique", path, name)
 		}
 		seen[name] = true
+	}
+	return nil
+}
+
+// validateMessages refuses a standing message that cannot be rendered, such as one
+// that mentions a channel or role the folder does not have.
+func validateMessages(folder Folder, channels, roles map[string]int) error {
+	known := func(names map[string]int) IDLookup {
+		return func(name string) (string, bool) { return "0", names[name] == 1 }
+	}
+	for _, entry := range folder.Entries {
+		for _, message := range entry.Messages {
+			if _, err := RenderMessage(message, known(channels), known(roles)); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

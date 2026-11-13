@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/discord/apply"
 	"github.com/resident-labs/dyna/engine/discord/folder"
 	"github.com/resident-labs/dyna/engine/store"
 )
@@ -100,22 +101,13 @@ func (s *Service) DiscordPlan(ctx context.Context, caller contract.Principal, re
 	}
 	s.discordFolderMu.Lock()
 	defer s.discordFolderMu.Unlock()
-	desired, err := folder.Load(path)
-	if err != nil {
-		return contract.DiscordFolderResponse{}, invalid(err.Error())
-	}
 	client, err := s.machineDiscordClient(ctx)
 	if err != nil {
 		return contract.DiscordFolderResponse{}, failure(err)
 	}
-	snapshot, err := folder.ReadManagedSnapshot(ctx, client, route.Guild, desired.Entries)
+	text, err := apply.PlanText(ctx, s.discordApplyTarget(client, route, path))
 	if err != nil {
 		return contract.DiscordFolderResponse{}, invalid(err.Error())
 	}
-	snapshot.Policy = route.Policy
-	plan, err := folder.BuildPlan(desired, snapshot)
-	if err != nil {
-		return contract.DiscordFolderResponse{}, invalid(err.Error())
-	}
-	return contract.DiscordFolderResponse{Text: plan.String()}, nil
+	return contract.DiscordFolderResponse{Text: text}, nil
 }

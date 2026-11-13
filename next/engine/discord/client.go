@@ -145,6 +145,14 @@ func (c *Client) request(ctx context.Context, method, path string, body []byte, 
 			}
 			c.mu.Unlock()
 		}
+		// An exhausted bucket pauses every request until it resets, before Discord has to answer 429.
+		if resp.Header.Get("X-RateLimit-Remaining") == "0" {
+			if reset, err := strconv.ParseFloat(resp.Header.Get("X-RateLimit-Reset-After"), 64); err == nil && reset > 0 && reset <= 86400 {
+				c.mu.Lock()
+				c.notBefore = latest(c.notBefore, time.Now().Add(time.Duration(reset*float64(time.Second))))
+				c.mu.Unlock()
+			}
+		}
 		if resp.StatusCode == 429 && attempt == 0 {
 			continue
 		}
@@ -159,6 +167,13 @@ func (c *Client) request(ctx context.Context, method, path string, body []byte, 
 		return Result{Status: resp.StatusCode, Body: data, RetryAfter: retry}, nil
 	}
 	return Result{}, errors.New("Discord rate limit")
+}
+
+func latest(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
 }
 
 type Identity struct {

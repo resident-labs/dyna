@@ -18,6 +18,7 @@ func planMessages(plan *Plan, desired, current Entry) {
 		before, exists := current.Messages[name]
 		id := before.ID
 		message.ID, before.ID = "", ""
+		message.Source, before.Source = Source{}, Source{}
 		if exists && reflect.DeepEqual(message, before) {
 			plan.Unchanged++
 			continue

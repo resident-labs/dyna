@@ -94,6 +94,10 @@ func loadEntry(root, name, parent string) ([]Entry, error) {
 		if entry.Channel.Type == "" {
 			entry.Channel.Type = "text"
 		}
+		// Discord reports slowmode in seconds, so "1m" is kept as "60s".
+		if duration, err := time.ParseDuration(entry.Channel.Slowmode); err == nil {
+			entry.Channel.Slowmode = strconv.Itoa(int(duration/time.Second)) + "s"
+		}
 	}
 	children, err := os.ReadDir(path)
 	if err != nil {

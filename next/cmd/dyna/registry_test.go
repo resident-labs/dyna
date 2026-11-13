@@ -45,7 +45,7 @@ func TestGuidanceBindings(t *testing.T) {
 
 func TestDiscordPolicyAndCheckBindings(t *testing.T) {
 	root := newRootCmd()
-	for _, action := range []string{"policy", "check"} {
+	for _, action := range []string{"policy", "check", "apply"} {
 		cmd, rest, e := root.Find([]string{"discord", action})
 		if e != nil || len(rest) != 0 || cmd.Name() != action || cmd.Flags().Lookup("server") == nil {
 			t.Fatalf("missing Discord %s binding: %v", action, e)

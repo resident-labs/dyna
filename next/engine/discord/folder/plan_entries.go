@@ -29,6 +29,7 @@ func planEntries(plan *Plan, desired, live []Entry) error {
 		for _, current := range live {
 			if entry.Path == current.Path {
 				matched[entryID(current)] = true
+				plan.resolve(Subject{kindOf(current), entry.Path}, entryID(current))
 				if current.Category != nil {
 					ignoredParents[current.Path] = true
 				}
@@ -44,19 +45,16 @@ func planEntries(plan *Plan, desired, live []Entry) error {
 			if ignoredParents[current.Parent] || (entry.Category == nil) != (current.Category == nil) {
 				continue
 			}
-			if matches(entryIdentity(entry), entry.Name, entryID(current), current.Name) && (entryIdentity(entry).ID != "" || parents[entry.Parent] == current.Parent) {
+			if matches(EntryIdentity(entry), entry.Name, entryID(current), current.Name) && (EntryIdentity(entry).ID != "" || parents[entry.Parent] == current.Parent) {
 				candidates = append(candidates, current)
 			}
 		}
 		if len(candidates) > 1 {
 			return fmt.Errorf("%s: name is not unique", entry.Path)
 		}
-		kind := ChannelKind
-		if entry.Category != nil {
-			kind = CategoryKind
-		}
+		kind := kindOf(entry)
 		if len(candidates) == 0 {
-			identity := entryIdentity(entry)
+			identity := EntryIdentity(entry)
 			if identity.ID != "" || identity.Was != "" {
 				return fmt.Errorf("%s: adopted %s is missing", entry.Path, kind)
 			}
@@ -70,6 +68,7 @@ func planEntries(plan *Plan, desired, live []Entry) error {
 			return fmt.Errorf("%s: object %s is already adopted or unmanaged", entry.Path, id)
 		}
 		matched[id] = true
+		plan.resolve(Subject{kind, entry.Path}, id)
 		compare(plan, kind, entry.Path, id, struct{ Name, Parent string }{entry.Name, parents[entry.Parent]}, struct{ Name, Parent string }{current.Name, current.Parent})
 		if entry.Category != nil {
 			wanted, existing := *entry.Category, *current.Category
@@ -88,4 +87,11 @@ func planEntries(plan *Plan, desired, live []Entry) error {
 		}
 	}
 	return nil
+}
+
+func kindOf(entry Entry) Kind {
+	if entry.Category != nil {
+		return CategoryKind
+	}
+	return ChannelKind
 }

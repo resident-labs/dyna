@@ -7,7 +7,7 @@ import (
 )
 
 func parseMessage(path string, data []byte) (Message, error) {
-	message := Message{Mentions: "none"}
+	message := Message{Mentions: "none", Source: Source{File: path, BodyLine: 1}}
 	text := strings.ReplaceAll(string(data), "\r\n", "\n")
 	if !strings.HasPrefix(text, "---\n") {
 		message.Body = text
@@ -43,5 +43,6 @@ func parseMessage(path string, data []byte) (Message, error) {
 		message.Embed = json.RawMessage(metadata.Embed)
 	}
 	message.Body = body
+	message.Source.BodyLine = strings.Count(header, "\n") + 4
 	return message, nil
 }

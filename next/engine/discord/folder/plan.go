@@ -37,10 +37,19 @@ type Change struct {
 	Before    any
 	After     any
 }
+
+// Subject names one object of the folder by its kind and folder name (a path for
+// categories and channels).
+type Subject struct {
+	Kind Kind
+	Name string
+}
 type Plan struct {
 	Changes   []Change
 	Lines     []string
 	Unchanged int
+	// Resolved holds the live Discord ID of each folder object that exists on the server.
+	Resolved map[Subject]string
 }
 
 // BuildPlan resolves identities before comparing fields. Missing adopted objects
@@ -79,7 +88,7 @@ func matches(identity Identity, name, currentID, currentName string) bool {
 	}
 	return name == currentName
 }
-func entryIdentity(entry Entry) Identity {
+func EntryIdentity(entry Entry) Identity {
 	if entry.Category != nil {
 		return entry.Category.Identity
 	}
@@ -88,7 +97,7 @@ func entryIdentity(entry Entry) Identity {
 	}
 	return Identity{}
 }
-func entryID(entry Entry) string { return entryIdentity(entry).ID }
+func entryID(entry Entry) string { return EntryIdentity(entry).ID }
 
 func compare(plan *Plan, kind Kind, name, id string, desired, current any) {
 	if reflect.DeepEqual(desired, current) {
@@ -135,4 +144,11 @@ func (plan Plan) String() string {
 	}
 	lines = append(lines, fmt.Sprintf("%d changes; %d unchanged.", len(plan.Changes), plan.Unchanged))
 	return strings.Join(lines, "\n")
+}
+
+func (plan *Plan) resolve(subject Subject, id string) {
+	if plan.Resolved == nil {
+		plan.Resolved = map[Subject]string{}
+	}
+	plan.Resolved[subject] = id
 }

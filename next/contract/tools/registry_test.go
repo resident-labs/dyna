@@ -273,7 +273,7 @@ func TestAdministrationCLIMethodsStayOwnerOnly(t *testing.T) {
 }
 
 func TestDiscordPolicyAndCheckActions(t *testing.T) {
-	for _, name := range []string{"policy", "check"} {
+	for _, name := range []string{"policy", "check", "apply"} {
 		found := false
 		for _, a := range Actions() {
 			if a.Tool == "discord" && a.Name == name {
