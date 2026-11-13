@@ -158,7 +158,8 @@ func discordCommand(getClient func() client) *cobra.Command {
 			return fmt.Errorf("Discord unavailable")
 		}
 		server, _ := cmd.Flags().GetString("server")
-		req := contract.DiscordPolicyRequest{Server: server}
+		room, _ := cmd.Flags().GetString("room")
+		req := contract.DiscordPolicyRequest{Server: server, Room: contract.RoomID(room)}
 		if len(args) > 0 {
 			req.Text = &args[0]
 		}
@@ -168,6 +169,7 @@ func discordCommand(getClient func() client) *cobra.Command {
 		}
 		return err
 	}}
+	policyCmd.Flags().String("room", "", "Room name or ID (required for owner callers)")
 	policyCmd.Flags().String("server", "", "Mapped server ID")
 	checkCmd := &cobra.Command{Use: "check", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		service, ok := getClient().(interface {
@@ -177,7 +179,8 @@ func discordCommand(getClient func() client) *cobra.Command {
 			return fmt.Errorf("Discord unavailable")
 		}
 		server, _ := cmd.Flags().GetString("server")
-		result, err := service.DiscordCheck(cmd.Context(), contract.DiscordCheckRequest{Server: server})
+		room, _ := cmd.Flags().GetString("room")
+		result, err := service.DiscordCheck(cmd.Context(), contract.DiscordCheckRequest{Server: server, Room: contract.RoomID(room)})
 		if err == nil {
 			for _, line := range result.Lines {
 				fmt.Fprintln(cmd.OutOrStdout(), line)
@@ -185,6 +188,7 @@ func discordCommand(getClient func() client) *cobra.Command {
 		}
 		return err
 	}}
+	checkCmd.Flags().String("room", "", "Room name or ID (required for owner callers)")
 	checkCmd.Flags().String("server", "", "Mapped server ID")
 	root.AddCommand(api, send, read, instructions, policyCmd, checkCmd)
 	return root

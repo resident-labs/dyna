@@ -16,6 +16,9 @@ func (s *Service) DiscordPolicy(ctx context.Context, caller contract.Principal, 
 	var roomID contract.RoomID
 	root := caller.Kind == contract.PrincipalOwner
 	if root {
+		if req.Room == "" {
+			return contract.DiscordPolicyResponse{}, invalid("room is required for owner callers")
+		}
 		roomID = req.Room
 		if roomID != "" {
 			resolved, _, err := s.store.ResolveRoom(ctx, string(roomID))

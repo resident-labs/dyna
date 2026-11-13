@@ -10,8 +10,10 @@ import (
 
 type discordCLIClient struct {
 	client
-	bot   contract.DiscordConfigureRequest
-	route contract.RoomDiscordRequest
+	policy contract.DiscordPolicyRequest
+	check  contract.DiscordCheckRequest
+	bot    contract.DiscordConfigureRequest
+	route  contract.RoomDiscordRequest
 }
 
 func (c *discordCLIClient) DiscordConfigure(_ context.Context, r contract.DiscordConfigureRequest) (contract.DiscordConfigureResponse, error) {
@@ -55,5 +57,47 @@ func TestDiscordInstructionsOnStdin(t *testing.T) {
 		if service.route.Instructions == nil || *service.route.Instructions != input || service.route.Server != "100" || service.route.Channel != "200" {
 			t.Fatalf("wrong route %+v", service.route)
 		}
+	}
+}
+
+func (c *discordCLIClient) DiscordPolicy(_ context.Context, req contract.DiscordPolicyRequest) (contract.DiscordPolicyResponse, error) {
+	c.policy = req
+	return contract.DiscordPolicyResponse{}, nil
+}
+func (c *discordCLIClient) DiscordCheck(_ context.Context, req contract.DiscordCheckRequest) (contract.DiscordCheckResponse, error) {
+	c.check = req
+	return contract.DiscordCheckResponse{}, nil
+}
+func TestDiscordOwnerRoomFlags(t *testing.T) {
+	for _, action := range []string{"policy", "check"} {
+		for _, room := range []string{"work", "room_123"} {
+			service := &discordCLIClient{}
+			cmd := discordCommand(func() client { return service })
+			cmd.SetOut(new(bytes.Buffer))
+			cmd.SetArgs([]string{action, "--room", room, "--server", "100"})
+			if err := cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			if action == "policy" && (service.policy.Room != contract.RoomID(room) || service.policy.Server != "100") {
+				t.Fatalf("policy %+v", service.policy)
+			}
+			if action == "check" && (service.check.Room != contract.RoomID(room) || service.check.Server != "100") {
+				t.Fatalf("check %+v", service.check)
+			}
+		}
+	}
+}
+func TestDiscordOwnerPolicyFileUsesPolicyEndpoint(t *testing.T) {
+	service := &discordCLIClient{}
+	cmd := roomDiscordCommand(func() client { return service })
+	cmd.SetOut(new(bytes.Buffer))
+	cmd.SetErr(new(bytes.Buffer))
+	cmd.SetIn(strings.NewReader("front: {}"))
+	cmd.SetArgs([]string{"work", "--server", "100", "--policy-file", "-"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if service.policy.Room != "work" || service.policy.Server != "100" || service.policy.Text == nil || *service.policy.Text != "front: {}" {
+		t.Fatalf("wrong policy %+v", service.policy)
 	}
 }

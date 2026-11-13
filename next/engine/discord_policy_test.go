@@ -302,3 +302,32 @@ func TestDiscordPolicyForwardsRichMessagesAndSuppressedMentions(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscordOwnerPolicyAndCheckRequireRoom(t *testing.T) {
+	f := discordFixture(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	if _, problem := f.s.DiscordPolicy(f.ctx, owner, contract.DiscordPolicyRequest{Server: "100"}); problem == nil || !strings.Contains(problem.Message, "room is required") {
+		t.Fatalf("policy room: %v", problem)
+	}
+	if _, problem := f.s.DiscordCheck(f.ctx, owner, contract.DiscordCheckRequest{Server: "100"}); problem == nil || !strings.Contains(problem.Message, "room is required") {
+		t.Fatalf("check room: %v", problem)
+	}
+	for _, selector := range []contract.RoomID{f.room, "room"} {
+		text := "front: {}"
+		if _, problem := f.s.DiscordPolicy(f.ctx, owner, contract.DiscordPolicyRequest{Room: selector, Server: "100", Text: &text}); problem != nil {
+			t.Fatal(problem)
+		}
+		if _, problem := f.s.DiscordPolicy(f.ctx, owner, contract.DiscordPolicyRequest{Room: selector, Server: "100"}); problem != nil {
+			t.Fatal(problem)
+		}
+		output, problem := f.s.DiscordCheck(f.ctx, owner, contract.DiscordCheckRequest{Room: selector, Server: "100"})
+		if problem != nil {
+			t.Fatal(problem)
+		}
+		for _, line := range output.Lines {
+			if strings.Contains(line, "Webhook") || strings.Contains(line, "privileged") {
+				t.Fatalf("fixed advice in findings: %s", line)
+			}
+		}
+	}
+}
