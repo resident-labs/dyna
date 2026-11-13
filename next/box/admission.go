@@ -163,11 +163,18 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 		if request.Image == RunnerImage {
 			totalCPUScale = max(totalCPUScale, 2*scale)
 		}
-		if int64(cpu+request.Size.CPUs)*1000 > totalCPUScale*cpuBudget || request.Image == RunnerImage && int64(runnerCPU+request.Size.CPUs)*1000 > 2*scale*cpuBudget {
+		// A box whose container exists on a host can run nowhere else, so runners do not hold it out: it is held to what session
+		// boxes reserve, where it would otherwise wait a whole CI job to wake. A new box and a runner are held to every
+		// reservation, and a new box goes to another host. The measured memory above still refuses a host that is really full.
+		heldCPU, heldMem := cpu, mem
+		if existing != nil && existing.Image != "" && request.Image != RunnerImage {
+			heldCPU, heldMem = cpu-runnerCPU, mem-runnerMem
+		}
+		if int64(heldCPU+request.Size.CPUs)*1000 > totalCPUScale*cpuBudget || request.Image == RunnerImage && int64(runnerCPU+request.Size.CPUs)*1000 > 2*scale*cpuBudget {
 			reason = PendingCPU
 			continue
 		}
-		if mem+request.Size.MemBytes > 4*memBudget || request.Image == RunnerImage && runnerMem+request.Size.MemBytes > scale*memBudget {
+		if heldMem+request.Size.MemBytes > 4*memBudget || request.Image == RunnerImage && runnerMem+request.Size.MemBytes > scale*memBudget {
 			reason = PendingMemory
 			continue
 		}
