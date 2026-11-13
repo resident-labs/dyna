@@ -22,7 +22,7 @@ func (p *Poller) roomPRs(ctx context.Context, client *Client, repo contract.Repo
 	}
 	census := false
 	for _, w := range watches {
-		if _, ok := w.Rows[0]; !ok {
+		if w.CensusAt == 0 {
 			census = true
 		}
 	}
@@ -53,7 +53,7 @@ func (p *Poller) roomPRs(ctx context.Context, client *Client, repo contract.Repo
 	numbers := map[int]bool{}
 	for _, w := range watches {
 		for n, row := range w.Rows {
-			if n != 0 && (row.State == contract.PrOpen || reopens(actions[n])) && (listed[n] != nil || len(actions[n]) > 0 || probe.Resync || needsRead(row, now)) {
+			if (row.State == contract.PrOpen || reopens(actions[n])) && (listed[n] != nil || len(actions[n]) > 0 || probe.Resync || needsRead(row, now)) {
 				numbers[n] = true
 			}
 		}
@@ -83,11 +83,8 @@ func (p *Poller) roomPRs(ctx context.Context, client *Client, repo contract.Repo
 	}
 	var passes []store.RoomPRPass
 	for _, w := range watches {
-		_, initialized := w.Rows[0]
-		pass := store.RoomPRPass{Room: w.Room, Repo: repo}
-		if !initialized {
-			pass.Rows = append(pass.Rows, store.TrackedPR{})
-		}
+		initialized := w.CensusAt != 0
+		pass := store.RoomPRPass{Room: w.Room, Repo: repo, CensusComplete: !initialized}
 		for n := range numbers {
 			row, exists := w.Rows[n]
 			if !exists {

@@ -46,7 +46,7 @@ func TestRoomPRCensusAndUntrackedChanges(t *testing.T) {
 	}
 	pass()
 	watches, err := s.RoomPRWatches(ctx, "owner/repo")
-	if err != nil || len(watches[0].Rows) != 102 {
+	if err != nil || len(watches[0].Rows) != 101 || watches[0].CensusAt == 0 {
 		t.Fatalf("census: %d %v", len(watches[0].Rows), err)
 	}
 	if count() != 0 {
