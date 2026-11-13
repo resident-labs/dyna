@@ -92,7 +92,9 @@
     return () => clearInterval(timer);
   });
 
+  let frame: HTMLElement | undefined = $state();
   let shown = $state(shownStep(location.search));
+  let pushed = false;
   let worker = $derived(shown ? steps.find(step => step.key === shown) : undefined);
   let steering = $state("");
   let sending = $state<string[]>([]);
@@ -138,8 +140,6 @@
     finally { sending = sending.filter(item => item !== key); }
   }
   $effect(() => { if (worker?.state !== "running") steering = ""; });
-  let frame: HTMLElement | undefined = $state();
-  let pushed = false;
   async function show(step: WorkflowStep) {
     history.pushState(history.state, "", `${location.pathname}?step=${encodeURIComponent(step.key)}`);
     pushed = true;
@@ -289,16 +289,14 @@
   .steer { padding: 8px 16px; border-bottom: 1px solid var(--line); }
   .steer label { display: block; font-size: 12px; margin-bottom: 4px; }
   .steer div { display: flex; align-items: flex-end; gap: 8px; }
-  .steer textarea { flex: 1; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--text); font: inherit; font-size: 13px; }
+  .steer textarea { flex: 1; min-width: 0; resize: vertical; field-sizing: content; min-height: 32px; max-height: 144px; height: auto; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--text); font: inherit; font-size: 13px; }
   .steer textarea::placeholder { color: var(--muted); }
   .steer button { height: 32px; min-width: 84px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
   .steer button:disabled { opacity: 0.45; cursor: default; }
   .steer textarea:focus-visible, .steer button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-  .steer-status { display: block; color: var(--muted); font-size: 12px; }
-  .steer-status { min-height: 16px; }
+  .steer-status { display: block; min-height: 16px; color: var(--muted); font-size: 12px; }
   .steer-status.sent { display: flex; align-items: baseline; gap: 4px; color: var(--success); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 144px; overflow-y: auto; }
   .steer-help { color: var(--muted); font-size: 12px; margin-top: 4px; }
-  .steer textarea { resize: vertical; field-sizing: content; min-height: 32px; max-height: 144px; height: auto; padding-block: 6px; }
   @media (hover: none) { .steer textarea, .steer button { min-height: 40px; } .keyboard-hint { display: none; } }
   .control-error { color: var(--danger); font-size: 12px; margin-top: 4px; }
 

@@ -193,7 +193,7 @@ func (s *Service) workflowInfo(ctx context.Context, run store.WorkflowRun) (cont
 		return contract.WorkflowInfo{}, err
 	}
 	recorded, err := s.store.SessionBranches(ctx, run.Repo, run.Session)
-	info := contract.WorkflowInfo{Paused: run.Paused, Run: run.ID, Room: run.Room, Session: run.Session, Name: run.Name, Description: run.Description, Profiles: run.Profiles, Repo: run.Repo, Commit: run.Commit, Version: run.Version, State: run.State, Result: run.Result, Steps: summary.Steps, Running: running, Failed: summary.Failed, FailedSteps: summary.FailedSteps, Usage: summary.Usage, Started: run.Started, Ended: run.Ended}
+	info := contract.WorkflowInfo{Run: run.ID, Room: run.Room, Session: run.Session, Name: run.Name, Description: run.Description, Profiles: run.Profiles, Repo: run.Repo, Commit: run.Commit, Version: run.Version, State: run.State, Paused: run.Paused, Result: run.Result, Steps: summary.Steps, Running: running, Failed: summary.Failed, FailedSteps: summary.FailedSteps, Usage: summary.Usage, Started: run.Started, Ended: run.Ended}
 	if len(recorded) > 0 {
 		info.Branch = recorded[0]
 	}
@@ -437,7 +437,7 @@ func (s *Service) boxWorkflow(ctx context.Context, run store.WorkflowRun, memory
 		workers = min(workers, effective.MaxWorkers)
 	}
 	summaries := s.profiles.List()
-	workflow := &contract.BoxWorkflow{Paused: run.Paused, Run: run.ID, Name: run.Name, Script: run.Script, Version: run.Version, Args: run.Args, Workers: workers, Timeout: effective.Timeout}
+	workflow := &contract.BoxWorkflow{Run: run.ID, Name: run.Name, Script: run.Script, Version: run.Version, Paused: run.Paused, Args: run.Args, Workers: workers, Timeout: effective.Timeout}
 	for _, name := range run.Profiles {
 		model, _, err := s.profiles.Model(name)
 		if err != nil {
