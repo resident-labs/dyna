@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/harness/testutil"
+
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/fakehost"
 	"github.com/resident-labs/dyna/contract"
@@ -282,9 +284,7 @@ func TestARestartMidCreateUndoesItAndKeepsMax(t *testing.T) {
 	if err := r.s.reconciler.Pass(engine); err != nil {
 		t.Fatal(err)
 	}
-	for len(r.machines()) == 0 {
-		time.Sleep(time.Millisecond)
-	}
+	testutil.Eventually(t, 5*time.Second, "provisioning machine", func() bool { return len(r.machines()) != 0 })
 	stop()
 	r.s.reconciler.Wait()
 	rows := r.nodeRows()

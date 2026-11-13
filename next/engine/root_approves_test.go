@@ -1,10 +1,12 @@
 package engine
 
 import (
-	"github.com/resident-labs/dyna/box"
+	"context"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/resident-labs/dyna/box"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
@@ -36,11 +38,26 @@ func TestRootApprovesKinds(t *testing.T) {
 			ctx := t.Context()
 			r.s.SetLayout(box.Layout{Data: t.TempDir(), HostData: t.TempDir()})
 			entries := map[contract.OpKind]approve.Entry{"hostexec.grant": r.s.HostexecGrant(), "addon.global": r.s.AddonGlobal(), "room.hosts": r.s.RoomHostsEntry(), "pool.add": r.s.PoolAddEntry()}
+			// This fixture checks authority, not add-on installation or pool creation.
+			// Keep the real metadata, decoding and checks without asynchronous side effects.
+			for kind, entry := range entries {
+				entry.Execute = func(context.Context, contract.OpID, contract.OpArgs, contract.Principal) contract.OpResult {
+					return contract.OpResult{}
+				}
+				entries[kind] = entry
+			}
 			if err := r.s.ConfigureOperations(ctx, entries, time.Hour); err != nil {
 				t.Fatal(err)
 			}
 			decide := func(who contract.Principal, id contract.OpID) *contract.Error {
 				_, problem := r.s.OpDecide(ctx, who, contract.OpDecideRequest{ID: id, Approve: true})
+				if problem == nil {
+					joined, cancel := context.WithTimeout(ctx, 5*time.Second)
+					defer cancel()
+					if _, err := r.s.approvals.Wait(joined, id); err != nil {
+						t.Fatal(err)
+					}
+				}
 				return problem
 			}
 			if _, problem := r.s.RoomSet(ctx, r.owner, contract.RoomSetRequest{Room: r.room, RootApproves: map[contract.RootApproval]bool{contract.RootApprovesAddons: false, contract.RootApprovesHosts: false, contract.RootApprovesPools: false}}); problem != nil {

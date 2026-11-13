@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/harness/testutil"
+
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/lifecycle"
@@ -147,11 +149,5 @@ func TestTurnSurvivesRestartAndLoss(t *testing.T) {
 
 func eventuallyDisconnected(t *testing.T, s *Service, id contract.SessionID) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for s.Connected(id) {
-		if time.Now().After(deadline) {
-			t.Fatal("the channel stayed connected")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	testutil.Eventually(t, 5*time.Second, "agent disconnect", func() bool { return !s.Connected(id) })
 }

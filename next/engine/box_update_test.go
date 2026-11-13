@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/harness/testutil"
+
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -71,13 +73,7 @@ func boxWant(t *testing.T, s *Service, ctx context.Context, sid contract.Session
 
 func waitWant(t *testing.T, s *Service, ctx context.Context, sid contract.SessionID, want string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for boxWant(t, s, ctx, sid) != want {
-		if time.Now().After(deadline) {
-			t.Fatalf("box want=%s, waited for %s", boxWant(t, s, ctx, sid), want)
-		}
-		time.Sleep(time.Millisecond)
-	}
+	testutil.Eventually(t, 5*time.Second, "box intent "+want, func() bool { return boxWant(t, s, ctx, sid) == want })
 }
 
 // updateNotices counts the update notices posted, and fails on a delivery of one that could start a turn.
@@ -104,13 +100,7 @@ func noticeDeliveries(t *testing.T, s *Service, ctx context.Context) int {
 
 func waitNotices(t *testing.T, s *Service, ctx context.Context, want int) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for updateNotices(t, s, ctx) != want {
-		if time.Now().After(deadline) {
-			t.Fatalf("notices=%d, waited for %d", updateNotices(t, s, ctx), want)
-		}
-		time.Sleep(time.Millisecond)
-	}
+	testutil.Eventually(t, 5*time.Second, "update notices", func() bool { return updateNotices(t, s, ctx) == want })
 }
 
 func noticeText(t *testing.T, s *Service, ctx context.Context) string {

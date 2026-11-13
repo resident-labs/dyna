@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/harness/testutil"
+
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -68,13 +70,7 @@ func TestBoxUpdateDisconnectIsNotHostLoss(t *testing.T) {
 				t.Fatal(err)
 			}
 			<-host.entered
-			deadline := time.Now().Add(5 * time.Second)
-			for r.s.Connected(r.child) {
-				if time.Now().After(deadline) {
-					t.Fatal("stopped agent still connected")
-				}
-				time.Sleep(time.Millisecond)
-			}
+			testutil.Eventually(t, 5*time.Second, "stopped agent disconnect", func() bool { return !r.s.Connected(r.child) })
 			if restart {
 				// The engine goes away after the stop killed the agent, before its reply arrived.
 				cancel()

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/harness/testutil"
+
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/skills"
 	"github.com/resident-labs/dyna/contract"
@@ -45,16 +47,13 @@ func setupAddons(t *testing.T) (*Service, contract.RoomID, contract.Principal, c
 
 func waitForOperation(t *testing.T, s *Service, ctx context.Context, id contract.OpID, state contract.OpState) {
 	t.Helper()
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+	testutil.Eventually(t, 5*time.Second, "operation "+string(id)+" reaching "+string(state), func() bool {
 		record, err := s.store.Operation(ctx, id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if record.Operation.State == state {
-			return
-		}
-	}
-	t.Fatalf("operation %s never reached %s", id, state)
+		return record.Operation.State == state
+	})
 }
 
 func TestASessionStaysInItsRoom(t *testing.T) {
