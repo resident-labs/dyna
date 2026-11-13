@@ -91,7 +91,7 @@ type WorkflowInfo struct {
 	Room         RoomID         `json:"room"`
 	Session      SessionID      `json:"session"`
 	Subscription SubscriptionID `json:"subscription,omitempty"`
-	Subject      string         `json:"subject,omitempty"`
+	Key          string         `json:"key,omitempty"`
 	Name         string         `json:"name"`
 	Description  string         `json:"description,omitempty"`
 	Profiles     []ProfileName  `json:"profiles"`
@@ -120,7 +120,7 @@ type WorkflowStatusLine struct {
 }
 
 // WorkflowStep is one journal row, without its result. Version is the script version that started it; a step a resumed run
-// kept has none. Lane names the subject the step is about, as the script tagged it, and Phase its stage.
+// kept has none. Lane names the key the step is about, as the script tagged it, and Phase its stage.
 type WorkflowStep struct {
 	Key        string            `json:"key"`
 	Parent     string            `json:"parent,omitempty"`
@@ -201,7 +201,7 @@ type BoxWorkflow struct {
 	Paused   bool              `json:"paused"`
 	Args     string            `json:"args,omitempty"`
 	Profiles []WorkflowProfile `json:"profiles"` // in meta's order: the first is the default
-	Workers  int               `json:"workers"`  // how many crew workers may run at once: the box's memory allows some, and the maxWorkers setting may allow fewer
+	Workers  int               `json:"workers"`  // how many crew workers may run at latest: the box's memory allows some, and the maxWorkers setting may allow fewer
 	Timeout  int               `json:"timeout"`  // seconds an agent() worker may run when the script sets no timeout: the timeout setting
 }
 
@@ -223,7 +223,7 @@ type WorkflowProfile struct {
 	ModelInstructions string      `json:"modelInstructions,omitempty"`
 }
 
-// WorkflowPinRequest reports the commit the crew's checkout started on. The first report stands.
+// WorkflowPinRequest reports the commit the crew's checkout started on. The first parent stands.
 type WorkflowPinRequest struct {
 	Commit string `json:"commit"`
 }

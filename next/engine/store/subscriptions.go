@@ -119,7 +119,7 @@ func insertSubscription(ctx context.Context, tx *sql.Tx, sub contract.Subscripti
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO workflow_subscriptions(sub,script,args,subject_key,once_only,report,include_own) VALUES(?,?,?,?,?,?,?)", sub.ID, sub.Workflow.Script, string(body), sub.Key, sub.Once, sub.Report, sub.IncludeOwn); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO workflow_subscriptions(sub,script,args,key,latest,parent,include_own) VALUES(?,?,?,?,?,?,?)", sub.ID, sub.Workflow.Script, string(body), sub.Key, sub.Latest, sub.Parent, sub.IncludeOwn); err != nil {
 			return err
 		}
 	}
@@ -224,7 +224,7 @@ func loadSubscriptions(ctx context.Context, q sqlQuery, where string, args ...an
 func loadSubscriptionParts(ctx context.Context, q sqlQuery, sub *Subscription) error {
 	var args string
 	var workflow contract.WorkflowSubscription
-	errSpec := q.QueryRowContext(ctx, "SELECT script,args,subject_key,once_only,report,include_own FROM workflow_subscriptions WHERE sub=?", sub.ID).Scan(&workflow.Script, &args, &sub.Key, &sub.Once, &sub.Report, &sub.IncludeOwn)
+	errSpec := q.QueryRowContext(ctx, "SELECT script,args,key,latest,parent,include_own FROM workflow_subscriptions WHERE sub=?", sub.ID).Scan(&workflow.Script, &args, &sub.Key, &sub.Latest, &sub.Parent, &sub.IncludeOwn)
 	if errSpec == nil {
 		if err := json.Unmarshal([]byte(args), &workflow.Args); err != nil {
 			return err
@@ -476,7 +476,7 @@ func (s *Store) fire(ctx context.Context, tx *sql.Tx, sub Subscription, event co
 
 // DueSubscriptions lists what can fire now: due, enabled, past any backoff, with no Run in progress and in a
 // room that is neither paused nor going away. A due subscription in a paused room keeps its time, so it fires
-// once when the room resumes.
+// latest when the room resumes.
 func (s *Store) DueSubscriptions(ctx context.Context, now time.Time) ([]Subscription, error) {
 	subs, err := loadSubscriptions(ctx, s.Read(), "WHERE s.enabled=1 AND s.due_at>0 AND s.due_at<=?1 AND s.hold_until<=?1 ORDER BY s.due_at,s.id", now.UnixMilli())
 	if err != nil {

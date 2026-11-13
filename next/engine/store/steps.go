@@ -6,11 +6,12 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 114
+const schemaVersion = 115
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
+	114: {`ALTER TABLE workflow_runs RENAME COLUMN subject TO key`, `ALTER TABLE workflow_queue RENAME COLUMN subject TO key`, `ALTER TABLE workflow_state RENAME COLUMN subject TO key`, `ALTER TABLE workflow_subscriptions RENAME COLUMN subject_key TO key`, `ALTER TABLE workflow_subscriptions RENAME COLUMN once_only TO latest`, `ALTER TABLE workflow_subscriptions RENAME COLUMN report TO parent`},
 	111: {`ALTER TABLE workflow_runs ADD COLUMN paused INTEGER NOT NULL DEFAULT 0`},
 	112: {`ALTER TABLE workflow_runs ADD COLUMN sub TEXT NOT NULL DEFAULT ''`, `ALTER TABLE workflow_runs ADD COLUMN subject TEXT NOT NULL DEFAULT ''`, `CREATE TABLE IF NOT EXISTS workflow_subscriptions (sub TEXT PRIMARY KEY REFERENCES subscriptions(id) ON DELETE CASCADE, script TEXT NOT NULL, args TEXT NOT NULL, subject_key TEXT NOT NULL, once_only INTEGER NOT NULL, report TEXT NOT NULL, include_own INTEGER NOT NULL)`, `CREATE TABLE IF NOT EXISTS workflow_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, sub TEXT NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE, subject TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, run TEXT NOT NULL DEFAULT '')`, `CREATE TABLE IF NOT EXISTS workflow_state (sub TEXT NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE, subject TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(sub,subject))`},
 	113: {`ALTER TABLE room_repos ADD COLUMN pr_events INTEGER NOT NULL DEFAULT 0`, `ALTER TABLE room_repos ADD COLUMN pr_census_at INTEGER NOT NULL DEFAULT 0`, `CREATE TABLE IF NOT EXISTS room_pr_observed (room TEXT NOT NULL, repo TEXT NOT NULL, number INTEGER NOT NULL, snapshot TEXT NOT NULL, PRIMARY KEY(room,repo,number), FOREIGN KEY(room,repo) REFERENCES room_repos(room,repo) ON DELETE CASCADE);`},

@@ -63,7 +63,7 @@ func checkEvery(every contract.Duration) (time.Duration, *contract.Error) {
 		return 0, invalid(fmt.Sprintf(`every %q is not a duration; give a string such as "1h", "15m" or "90s"`, string(every)))
 	}
 	if period < minEvery {
-		return 0, invalid(fmt.Sprintf(`every %q is under a minute; a schedule fires at most once a minute, so every is at least "1m"`, string(every)))
+		return 0, invalid(fmt.Sprintf(`every %q is under a minute; a schedule fires at most latest a minute, so every is at least "1m"`, string(every)))
 	}
 	return period, nil
 }
@@ -120,8 +120,8 @@ func checkSubscriptionShape(req contract.SubscriptionAddRequest) *contract.Error
 		if strings.ContainsAny(key, "{}") || len(req.Key) > 200 {
 			return invalid("key uses only {repo} and {number}, at most 200 characters")
 		}
-	} else if req.Key != "" || req.Once || req.Report != "" || req.IncludeOwn {
-		return invalid("key, once, report and includeOwn need workflow")
+	} else if req.Key != "" || req.Latest || req.Parent != "" || req.IncludeOwn {
+		return invalid("key, latest, parent and includeOwn need workflow")
 	}
 	if req.Run != nil {
 		return checkRun(req.Run)
@@ -227,7 +227,7 @@ func (s *Service) SubscriptionAdd(ctx context.Context, caller contract.Principal
 			return contract.SubscriptionAddResponse{}, invalid("unknown host")
 		}
 	}
-	sub := contract.Subscription{Scope: req.Scope, Room: req.Room, On: req.On, Where: req.Where, Run: req.Run, Workflow: req.Workflow, Key: req.Key, Once: req.Once, Report: req.Report, IncludeOwn: req.IncludeOwn}
+	sub := contract.Subscription{Scope: req.Scope, Room: req.Room, On: req.On, Where: req.Where, Run: req.Run, Workflow: req.Workflow, Key: req.Key, Latest: req.Latest, Parent: req.Parent, IncludeOwn: req.IncludeOwn}
 	if req.Every != "" {
 		period, _ := checkEvery(req.Every)
 		sub.Every = contract.DurationOf(period)
@@ -289,15 +289,15 @@ func (s *Service) SubscriptionAdd(ctx context.Context, caller contract.Principal
 		if _, _, problem := s.workflowScript(ctx, sub.Room, sub.Workflow.Script); problem != nil {
 			return contract.SubscriptionAddResponse{}, problem
 		}
-		if sub.Report != "" {
-			target, problem := s.subscriptionSession(ctx, caller, sub.Room, string(sub.Report))
+		if sub.Parent != "" {
+			target, problem := s.subscriptionSession(ctx, caller, sub.Room, string(sub.Parent))
 			if problem != nil {
 				return contract.SubscriptionAddResponse{}, problem
 			}
 			if target.Room != sub.Room {
-				return contract.SubscriptionAddResponse{}, invalid("report must be in this room")
+				return contract.SubscriptionAddResponse{}, invalid("parent must be in this room")
 			}
-			sub.Report = target.ID
+			sub.Parent = target.ID
 		}
 	}
 	now := s.now()
