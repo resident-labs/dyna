@@ -31,17 +31,20 @@ func TestParseRefusesWhatPiWouldNotLoad(t *testing.T) {
 }
 
 func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
-	items := BuiltIn()
-	if len(items) != 7 || items[1].Name != "dyna-discord" || items[2].Name != "dyna-extend" || items[2].Description != "Use when you need to add a skill or mcp server to dyna" || !items[2].BuiltIn {
+	items := map[string]contract.Addon{}
+	for _, item := range BuiltIn() {
+		items[item.Name] = item
+	}
+	if extend := items["dyna-extend"]; len(items) < 8 || items["dyna-discord"].Name == "" || extend.Description != "Use when you need to add a skill or mcp server to dyna" || !extend.BuiltIn {
 		t.Fatalf("%+v", items)
 	}
 	if !IsBuiltIn("dyna-extend") || IsBuiltIn("other") {
 		t.Fatal("IsBuiltIn")
 	}
-	if images := items[3]; images.Name != "dyna-images" || !strings.HasPrefix(images.Description, "Use when your box lacks a tool") {
+	if images := items["dyna-images"]; !strings.HasPrefix(images.Description, "Use when your box lacks a tool") {
 		t.Fatalf("%+v", images)
 	}
-	nodes := items[5]
+	nodes := items["dyna-nodes"]
 	if nodes.Name != "dyna-nodes" || nodes.Description != "Use when you need to add nodes to Dyna, or a room needs its own or disposable machines" {
 		t.Fatalf("%+v", nodes)
 	}
@@ -216,6 +219,26 @@ func TestAnnotateNamesEveryRunOnHost(t *testing.T) {
 		if err != nil || !strings.Contains(string(out), "Does x · runs on "+want+"\"") || !strings.Contains(string(out), "run on a host: "+want+", through bash with host.") || !strings.HasSuffix(string(out), "this box.\nBody\n") {
 			t.Fatalf("%q %v", out, err)
 		}
+	}
+}
+
+func TestTheDiagnoseSkillIsForRoot(t *testing.T) {
+	data, err := builtIn.ReadFile("dyna-diagnose/" + File)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := Parse(data)
+	if err != nil || meta.Name != "dyna-diagnose" || !strings.HasPrefix(meta.Description, "Root only. Use when") || len(meta.Description) >= 300 {
+		t.Fatalf("%+v %v", meta, err)
+	}
+	text := string(data)
+	for _, want := range []string{"dyna-audience: root", "beforeSeq", "no_hello", "room-limit", "model_failed", "journalctl --user", "engine host named in your prompt", "When runs look stuck"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the skill does not say %q", want)
+		}
+	}
+	if lines := strings.Count(text, "\n"); lines > 150 {
+		t.Errorf("the skill is %d lines", lines)
 	}
 }
 
