@@ -32,7 +32,7 @@ func TestParseRefusesWhatPiWouldNotLoad(t *testing.T) {
 
 func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
 	items := BuiltIn()
-	if len(items) != 7 || items[1].Name != "dyna-discord" || items[2].Name != "dyna-extend" || items[2].Description != "Use when you need to add a skill or mcp server to dyna" || !items[2].BuiltIn {
+	if len(items) != 8 || items[1].Name != "dyna-discord" || items[2].Name != "dyna-extend" || items[2].Description != "Use when you need to add a skill or mcp server to dyna" || !items[2].BuiltIn {
 		t.Fatalf("%+v", items)
 	}
 	if !IsBuiltIn("dyna-extend") || IsBuiltIn("other") {
@@ -239,5 +239,25 @@ func TestCISkill(t *testing.T) {
 	}
 	if strings.Count(text, "\n") > 90 {
 		t.Fatal("skill exceeds 90 lines")
+	}
+}
+
+func TestTheServicesSkillIsForRoot(t *testing.T) {
+	data, err := builtIn.ReadFile("dyna-services/" + File)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := Parse(data)
+	if err != nil || meta.Name != "dyna-services" || !strings.HasPrefix(meta.Description, "Root only. ") || len(meta.Description) > 300 {
+		t.Fatalf("%+v %v", meta, err)
+	}
+	text := string(data)
+	for _, want := range []string{"dyna-audience: root", "dyna service set ROOM --file F", "replaces the whole declaration", "dyna service secret set ROOM NAME", "dyna service update ROOM NAME", "dyna service rollback ROOM NAME", "dyna service logs ROOM NAME", "on: [service.failed]", "Log lines are not masked", "deletes the data volume"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the skill does not say %q", want)
+		}
+	}
+	if lines := strings.Count(text, "\n"); lines > 150 {
+		t.Errorf("the skill is %d lines", lines)
 	}
 }
