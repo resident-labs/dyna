@@ -17,6 +17,13 @@ func (s *Service) DiscordPolicy(ctx context.Context, caller contract.Principal, 
 	root := caller.Kind == contract.PrincipalOwner
 	if root {
 		roomID = req.Room
+		if roomID != "" {
+			resolved, _, e := s.store.ResolveRoom(ctx, string(roomID))
+			if e != nil {
+				return contract.DiscordPolicyResponse{}, invalid("unknown room")
+			}
+			roomID = resolved
+		}
 	} else {
 		session, e := s.store.Session(ctx, caller.Session)
 		if e != nil {
@@ -68,7 +75,10 @@ func (s *Service) DiscordPolicy(ctx context.Context, caller contract.Principal, 
 	}
 	resolveChannel := func(name string, category bool) (string, error) {
 		matches := []string{}
-		for _, c := range server.Channels {
+		for _, c := range s.discordDirectory.Channels() {
+			if c.Guild != selected.Guild {
+				continue
+			}
 			if c.Name == name && ((c.Type == 4) == category) {
 				matches = append(matches, c.ID)
 			}

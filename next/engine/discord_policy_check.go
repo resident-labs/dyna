@@ -13,6 +13,13 @@ import (
 
 func (s *Service) DiscordCheck(ctx context.Context, caller contract.Principal, req contract.DiscordCheckRequest) (contract.DiscordCheckResponse, *contract.Error) {
 	roomID := req.Room
+	if caller.Kind == contract.PrincipalOwner && roomID != "" {
+		resolved, _, e := s.store.ResolveRoom(ctx, string(roomID))
+		if e != nil {
+			return contract.DiscordCheckResponse{}, invalid("unknown room")
+		}
+		roomID = resolved
+	}
 	if caller.Kind != contract.PrincipalOwner {
 		session, e := s.store.Session(ctx, caller.Session)
 		if e != nil {
@@ -117,7 +124,10 @@ func (s *Service) DiscordCheck(ctx context.Context, caller contract.Principal, r
 	for _, name := range names {
 		count := 0
 		category := strings.HasSuffix(name, "/*")
-		for _, c := range server.Channels {
+		for _, c := range s.discordDirectory.Channels() {
+			if c.Guild != guildID {
+				continue
+			}
 			if c.Name == strings.TrimSuffix(name, "/*") && ((c.Type == 4) == category) {
 				count++
 			}

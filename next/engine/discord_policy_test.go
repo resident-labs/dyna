@@ -203,3 +203,16 @@ func TestDiscordAnswerBudgetIncludesDMs(t *testing.T) {
 		t.Fatalf("DM escaped member budget %v %v", allowed, e)
 	}
 }
+
+func TestDiscordPolicyResolvesLiveChannelNames(t *testing.T) {
+	f := discordFixture(t)
+	f.s.discordDirectory.Apply("CHANNEL_UPDATE", json.RawMessage(`{"id":"200","guild_id":"100","name":"renamed"}`))
+	old := "front: {quiet: [general]}"
+	if _, p := f.s.DiscordPolicy(f.ctx, boxCaller(f.root), contract.DiscordPolicyRequest{Text: &old}); p == nil {
+		t.Fatal("stale channel name accepted")
+	}
+	updated := "front: {quiet: [renamed]}"
+	if _, p := f.s.DiscordPolicy(f.ctx, boxCaller(f.root), contract.DiscordPolicyRequest{Text: &updated}); p != nil {
+		t.Fatal(p)
+	}
+}
