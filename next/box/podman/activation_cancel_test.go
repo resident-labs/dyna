@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // A native SSH stand-in whose remote shell survives the death of the local SSH process.
@@ -25,13 +24,13 @@ func (remoteDetachedSSH) Run(ctx context.Context, in []byte, args ...string) ([]
 
 func TestCancelledOldActivationCannotDowngrade(t *testing.T) {
 	tools := t.TempDir()
-	entered, release := filepath.Join(tools, "entered"), filepath.Join(tools, "release")
+	entered, release := newScriptSignal(t), newScriptSignal(t)
 	realHash := "/usr/bin/sha256sum"
 	script := `#!/bin/bash
 input=$(cat)
 if [[ $input == old-engine ]]; then
- touch "$REMOTE_ENTERED"
- while [[ ! -f $REMOTE_RELEASE ]]; do sleep 0.01; done
+ printf '%s %s\n' "$$" "$(/usr/bin/ps -o pgid= -p "$$")" > "$REMOTE_ENTERED"
+ IFS= read -r _ < "$REMOTE_RELEASE"
 fi
 printf '%s' "$input" | ` + realHash + `
 `
@@ -39,9 +38,9 @@ printf '%s' "$input" | ` + realHash + `
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", tools+":"+os.Getenv("PATH"))
-	t.Setenv("REMOTE_ENTERED", entered)
-	t.Setenv("REMOTE_RELEASE", release)
-	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0600) })
+	t.Setenv("REMOTE_ENTERED", entered.path)
+	t.Setenv("REMOTE_RELEASE", release.path)
+	t.Cleanup(func() { release.write(t, "go") })
 	bin := t.TempDir()
 	sum := func(raw string) string {
 		h := sha256.Sum256([]byte(raw))
@@ -63,16 +62,7 @@ printf '%s' "$input" | ` + realHash + `
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- h.ActivateBinary(ctx, bin, oldSum) }()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if _, err := os.Stat(entered); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("old checksum never entered")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	_, group := entered.process(t)
 	cancel()
 	if err := <-done; err == nil {
 		t.Fatal("old activation was not cancelled")
@@ -80,17 +70,11 @@ printf '%s' "$input" | ` + realHash + `
 	if err := h.ActivateBinary(context.Background(), bin, newSum); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(release, nil, 0600); err != nil {
+	assertRemoteGroupExited(t, group)
+	release.write(t, "go")
+	target, err := os.Readlink(filepath.Join(bin, "current"))
+	if err != nil {
 		t.Fatal(err)
-	}
-	deadline = time.Now().Add(2 * time.Second)
-	var target string
-	for time.Now().Before(deadline) {
-		target, err = os.Readlink(filepath.Join(bin, "current"))
-		if err == nil && target == oldSum {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
 	}
 	if strings.TrimSpace(target) != newSum {
 		t.Fatalf("late old activation downgraded current: got %s, want new %s", target, newSum)

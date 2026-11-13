@@ -26,12 +26,12 @@ func TestCanceledBinaryOperationsRemovePrivateTemporaries(t *testing.T) {
 		t.Run(phase, func(t *testing.T) {
 			bin := t.TempDir()
 			tools := t.TempDir()
-			entered := filepath.Join(tools, "entered")
-			name, script, pattern := "gzip", fmt.Sprintf("#!/bin/bash\nprintf partial\n: > %q\nsleep 1000\n", entered), filepath.Join(bin, "*", ".dyna.*")
+			entered := newScriptSignal(t)
+			name, script, pattern := "gzip", fmt.Sprintf("#!/bin/bash\nprintf partial\necho entered > %q\nsleep 1000\n", entered.path), filepath.Join(bin, "*", ".dyna.*")
 			if phase == "link" {
 				name = "mv"
 				pattern = filepath.Join(bin, ".current.*")
-				script = fmt.Sprintf("#!/bin/bash\nif [ \"$1\" = -Tf ]; then : > %q; sleep 1000; else exec /usr/bin/mv \"$@\"; fi\n", entered)
+				script = fmt.Sprintf("#!/bin/bash\nif [ \"$1\" = -Tf ]; then echo entered > %q; sleep 1000; else exec /usr/bin/mv \"$@\"; fi\n", entered.path)
 			}
 			if err := os.WriteFile(filepath.Join(tools, name), []byte(script), 0755); err != nil {
 				t.Fatal(err)
@@ -63,15 +63,8 @@ func TestCanceledBinaryOperationsRemovePrivateTemporaries(t *testing.T) {
 				}
 			}()
 			defer func() { cancel(); <-done }()
-			deadline := time.Now().Add(5 * time.Second)
-			for {
-				if _, err := os.Stat(entered); err == nil {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatal("binary operation did not reach its barrier")
-				}
-				time.Sleep(5 * time.Millisecond)
+			if got := entered.read(t); got != "entered" {
+				t.Fatalf("binary barrier %q", got)
 			}
 			cancel()
 			select {
