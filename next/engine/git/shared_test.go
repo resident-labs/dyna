@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -42,13 +43,15 @@ func (r *gatedRunner) Run(ctx context.Context, env []string, args ...string) ([]
 }
 
 type countingCache struct {
-	pushes atomic.Int32
+	pushes  atomic.Int32
+	release <-chan struct{}
 }
 
 func (c *countingCache) PushCache(context.Context, string, string, []string) error {
 	c.pushes.Add(1)
-	// A real push takes time, which is what lets callers overlap and share it.
-	time.Sleep(20 * time.Millisecond)
+	if c.release != nil {
+		<-c.release
+	}
 	return nil
 }
 
@@ -81,73 +84,89 @@ func started(t *testing.T, r *gatedRunner) contract.RepoName {
 }
 
 func TestSimultaneousStartsShareTwoFetchesAtMost(t *testing.T) {
-	r := newGatedRunner()
-	c := &countingCache{}
-	m := mirrorFor(t, r, "owner/repo")
-	var wg sync.WaitGroup
-	prepare := func(session contract.SessionID) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if _, err := m.Prepare(context.Background(), c, "owner/repo", true); err != nil {
-				t.Error(err)
-			}
-		}()
-	}
-	prepare("ses_first")
-	started(t, r)
-	for _, session := range []contract.SessionID{"ses_2", "ses_3", "ses_4", "ses_5", "ses_6", "ses_7", "ses_8"} {
-		prepare(session)
-	}
-	// All seven join the one run queued behind the fetch that is open.
-	time.Sleep(50 * time.Millisecond)
-	r.release <- struct{}{}
-	started(t, r)
-	r.release <- struct{}{}
-	wg.Wait()
-	if got := r.fetches.Load(); got != 2 {
-		t.Fatalf("eight starts took %d fetches", got)
-	}
-	if got := c.pushes.Load(); got > 3 {
-		t.Fatalf("eight starts took %d pushes", got)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		r := newGatedRunner()
+		defer close(r.release)
+		pushRelease := make(chan struct{})
+		unblockPushes := sync.OnceFunc(func() { close(pushRelease) })
+		defer unblockPushes()
+		c := &countingCache{release: pushRelease}
+		m := mirrorFor(t, r, "owner/repo")
+		var wg sync.WaitGroup
+		prepare := func(session contract.SessionID) {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if _, err := m.Prepare(context.Background(), c, "owner/repo", true); err != nil {
+					t.Error(err)
+				}
+			}()
+		}
+		prepare("ses_first")
+		started(t, r)
+		for _, session := range []contract.SessionID{"ses_2", "ses_3", "ses_4", "ses_5", "ses_6", "ses_7", "ses_8"} {
+			prepare(session)
+		}
+		// All seven join the one run queued behind the fetch that is open.
+		synctest.Wait()
+		r.release <- struct{}{}
+		started(t, r)
+		r.release <- struct{}{}
+		synctest.Wait()
+		if got := c.pushes.Load(); got != 1 {
+			t.Fatalf("pushes while the first is held = %d, want 1", got)
+		}
+		unblockPushes()
+		wg.Wait()
+		if got := r.fetches.Load(); got != 2 {
+			t.Fatalf("eight starts took %d fetches", got)
+		}
+		if got := c.pushes.Load(); got > 3 {
+			t.Fatalf("eight starts took %d pushes", got)
+		}
+
+	})
 }
 
 // A push to GitHub just before a start must reach its box, so a fetch already running cannot serve that start.
 func TestACallerNeverTakesAFetchThatBeganBeforeItAsked(t *testing.T) {
-	r := newGatedRunner()
-	c := &countingCache{}
-	m := mirrorFor(t, r, "owner/repo")
-	first := make(chan error, 1)
-	go func() {
-		_, err := m.Prepare(context.Background(), c, "owner/repo", true)
-		first <- err
-	}()
-	started(t, r)
-	late := make(chan error, 1)
-	go func() {
-		_, err := m.Prepare(context.Background(), c, "owner/repo", true)
-		late <- err
-	}()
-	time.Sleep(20 * time.Millisecond)
-	r.release <- struct{}{}
-	if err := <-first; err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case err := <-late:
-		t.Fatalf("late caller returned on the earlier fetch: %v", err)
-	case repo := <-r.started:
-		if repo == "" {
-			t.Fatal("no repository")
+	synctest.Test(t, func(t *testing.T) {
+		r := newGatedRunner()
+		defer close(r.release)
+		c := &countingCache{}
+		m := mirrorFor(t, r, "owner/repo")
+		first := make(chan error, 1)
+		go func() {
+			_, err := m.Prepare(context.Background(), c, "owner/repo", true)
+			first <- err
+		}()
+		started(t, r)
+		late := make(chan error, 1)
+		go func() {
+			_, err := m.Prepare(context.Background(), c, "owner/repo", true)
+			late <- err
+		}()
+		synctest.Wait()
+		r.release <- struct{}{}
+		if err := <-first; err != nil {
+			t.Fatal(err)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("no second fetch")
-	}
-	r.release <- struct{}{}
-	if err := <-late; err != nil {
-		t.Fatal(err)
-	}
+		select {
+		case err := <-late:
+			t.Fatalf("late caller returned on the earlier fetch: %v", err)
+		case repo := <-r.started:
+			if repo == "" {
+				t.Fatal("no repository")
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("no second fetch")
+		}
+		r.release <- struct{}{}
+		if err := <-late; err != nil {
+			t.Fatal(err)
+		}
+
+	})
 }
 
 func TestOneRepositoryDoesNotBlockAnother(t *testing.T) {
@@ -230,59 +249,66 @@ func TestEachHostGetsItsOwnPushFromOneFetch(t *testing.T) {
 
 // Closing the box that runs a fetch kills git, which must not fail the boxes that were waiting on it.
 func TestAWaiterSurvivesTheWorkerBeingCancelled(t *testing.T) {
-	var s shared
-	started := make(chan int, 4)
-	block, release := make(chan struct{}), make(chan struct{})
-	first := make(chan error, 1)
-	go func() {
-		first <- s.do(context.Background(), "key", func(context.Context) error {
-			started <- -1
-			<-block
-			return nil
-		})
-	}()
-	<-started
-	var cancels [2]context.CancelFunc
-	outcome := [2]chan error{make(chan error, 1), make(chan error, 1)}
-	for i := range cancels {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancels[i] = cancel
-		defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		var s shared
+		started := make(chan int, 4)
+		block, release := make(chan struct{}), make(chan struct{})
+		unblockFirst := sync.OnceFunc(func() { close(block) })
+		unblockNext := sync.OnceFunc(func() { close(release) })
+		defer unblockFirst()
+		defer unblockNext()
+		first := make(chan error, 1)
 		go func() {
-			outcome[i] <- s.do(ctx, "key", func(ctx context.Context) error {
-				started <- i
-				select {
-				case <-ctx.Done():
-					return errors.New("signal: killed") // what exec reports, not ctx.Err()
-				case <-release:
-					return nil
-				}
+			first <- s.do(context.Background(), "key", func(context.Context) error {
+				started <- -1
+				<-block
+				return nil
 			})
 		}()
-	}
-	// Both join the run queued behind the first, and either may end up doing it.
-	time.Sleep(50 * time.Millisecond)
-	close(block)
-	if err := <-first; err != nil {
-		t.Fatal(err)
-	}
-	worker := <-started
-	cancels[worker]()
-	if err := <-outcome[worker]; err == nil {
-		t.Fatal("the cancelled worker reported success")
-	}
-	select {
-	case next := <-started:
-		if next == worker {
-			t.Fatal("the cancelled caller worked again")
+		<-started
+		var cancels [2]context.CancelFunc
+		outcome := [2]chan error{make(chan error, 1), make(chan error, 1)}
+		for i := range cancels {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancels[i] = cancel
+			defer cancel()
+			go func() {
+				outcome[i] <- s.do(ctx, "key", func(ctx context.Context) error {
+					started <- i
+					select {
+					case <-ctx.Done():
+						return errors.New("signal: killed") // what exec reports, not ctx.Err()
+					case <-release:
+						return nil
+					}
+				})
+			}()
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the waiter gave up with the cancelled worker")
-	}
-	close(release)
-	if err := <-outcome[1-worker]; err != nil {
-		t.Fatalf("waiter failed with another caller's cancellation: %v", err)
-	}
+		// Both join the run queued behind the first, and either may end up doing it.
+		synctest.Wait()
+		unblockFirst()
+		if err := <-first; err != nil {
+			t.Fatal(err)
+		}
+		worker := <-started
+		cancels[worker]()
+		if err := <-outcome[worker]; err == nil {
+			t.Fatal("the cancelled worker reported success")
+		}
+		select {
+		case next := <-started:
+			if next == worker {
+				t.Fatal("the cancelled caller worked again")
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("the waiter gave up with the cancelled worker")
+		}
+		unblockNext()
+		if err := <-outcome[1-worker]; err != nil {
+			t.Fatalf("waiter failed with another caller's cancellation: %v", err)
+		}
+
+	})
 }
 
 func TestASharedFetchFailureReachesEveryCallerSharingIt(t *testing.T) {
