@@ -42,3 +42,17 @@ func TestGuidanceBindings(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscordPolicyAndCheckBindings(t *testing.T) {
+	root := newRootCmd()
+	for _, action := range []string{"policy", "check"} {
+		cmd, rest, e := root.Find([]string{"discord", action})
+		if e != nil || len(rest) != 0 || cmd.Name() != action || cmd.Flags().Lookup("server") == nil {
+			t.Fatalf("missing Discord %s binding: %v", action, e)
+		}
+	}
+	cmd, _, e := root.Find([]string{"room", "discord"})
+	if e != nil || cmd.Flags().Lookup("policy-file") == nil {
+		t.Fatal("missing policy-file binding")
+	}
+}

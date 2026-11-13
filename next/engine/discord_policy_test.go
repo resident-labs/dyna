@@ -1,14 +1,16 @@
 package engine
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/discord"
-	"github.com/resident-labs/dyna/engine/store"
 )
 
 func TestDiscordPolicyAuthorityAndResolution(t *testing.T) {
@@ -135,4 +137,69 @@ func TestDiscordPolicyCheckLowBot(t *testing.T) {
 	}
 }
 
-var _ store.DiscordRoute
+func TestDiscordPolicySendAndOutboxUseSafeMentions(t *testing.T) {
+	f := discordFixture(t)
+	front := startChild(t, f.s, f.ctx, f.room, "front", f.root)
+	routes, _ := f.s.store.DiscordRoutes(f.ctx, f.room)
+	r := routes[0]
+	r.Session = front
+	if e := f.s.store.SetDiscordRoute(f.ctx, r, false); e != nil {
+		t.Fatal(e)
+	}
+	text := "front: {delete: no}"
+	if _, p := f.s.DiscordPolicy(f.ctx, boxCaller(f.root), contract.DiscordPolicyRequest{Text: &text}); p != nil {
+		t.Fatal(p)
+	}
+	if _, p := f.s.DiscordAPI(f.ctx, boxCaller(front), contract.DiscordAPIRequest{Method: "POST", Path: "/channels/200/messages", Body: json.RawMessage(`{"content":"@everyone","allowed_mentions":{"parse":["everyone"]}}`)}); p == nil {
+		t.Fatal("API bypassed mentions cap")
+	}
+	if _, p := f.s.DiscordSend(f.ctx, boxCaller(front), contract.DiscordSendRequest{Channel: "200", Text: "@everyone"}); p != nil {
+		t.Fatal(p)
+	}
+	check := func() {
+		t.Helper()
+		select {
+		case body := <-f.fake.Messages:
+			if !strings.Contains(string(body), `"parse":["users"]`) {
+				t.Fatalf("unsafe mentions: %s", body)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("no message")
+		}
+	}
+	check()
+	if e := f.s.store.Write(f.ctx, func(tx *sql.Tx) error {
+		_, e := tx.ExecContext(f.ctx, `INSERT INTO discord_outbox(room,session,channel,message,text) VALUES(?,?,?,?,?)`, f.room, front, "200", "300", "@everyone")
+		return e
+	}); e != nil {
+		t.Fatal(e)
+	}
+	ctx, cancel := context.WithCancel(f.ctx)
+	done := make(chan struct{})
+	go func() { defer close(done); f.s.discordDrain(ctx, f.client) }()
+	defer func() { cancel(); <-done }()
+	check()
+}
+
+func TestDiscordAnswerBudgetIncludesDMs(t *testing.T) {
+	f := discordFixture(t)
+	text := "front: {answers: {per_member: 1/h}}"
+	if _, p := f.s.DiscordPolicy(f.ctx, boxCaller(f.root), contract.DiscordPolicyRequest{Text: &text}); p != nil {
+		t.Fatal(p)
+	}
+	routes, _ := f.s.store.DiscordRoutes(f.ctx, f.room)
+	var m discord.Message
+	m.Author.ID = "2"
+	m.Channel = "200"
+	m.Guild = "100"
+	m.ID = "300"
+	if allowed, e := f.s.discordPolicyInput(f.ctx, f.client, m, routes, routes[0]); e != nil || !allowed {
+		t.Fatalf("initial message %v %v", allowed, e)
+	}
+	m.Guild = ""
+	m.Channel = "dm"
+	m.ID = "301"
+	if allowed, e := f.s.discordPolicyInput(f.ctx, f.client, m, routes, routes[0]); e != nil || allowed {
+		t.Fatalf("DM escaped member budget %v %v", allowed, e)
+	}
+}

@@ -20,11 +20,8 @@ type discordAnswerWindow struct {
 // Answer budgets deliberately reset at engine restart. The map is bounded; at
 // capacity new keys fail closed until an old window expires.
 func (s *Service) discordPolicyInput(ctx context.Context, client *discord.Client, m discord.Message, routes []store.DiscordRoute, selected store.DiscordRoute) (bool, error) {
-	if m.Guild == "" {
-		return true, nil
-	}
 	for _, r := range routes {
-		if r.Guild != m.Guild || r.Room != selected.Room || r.Channel != "" || r.PolicyResolved == "" {
+		if r.Guild != selected.Guild || r.Room != selected.Room || r.Channel != "" || r.PolicyResolved == "" {
 			continue
 		}
 		var p policy.Policy
@@ -66,8 +63,8 @@ func (s *Service) discordPolicyInput(ctx context.Context, client *discord.Client
 				delete(s.discordAnswers, k)
 			}
 		}
-		memberKey := m.Guild + "/member/" + m.Author.ID
-		channelKey := m.Guild + "/channel/" + m.Channel
+		memberKey := selected.Guild + "/member/" + m.Author.ID
+		channelKey := selected.Guild + "/channel/" + m.Channel
 		member := s.discordAnswers[memberKey]
 		channelWindow := s.discordAnswers[channelKey]
 		if member.Start.IsZero() {
