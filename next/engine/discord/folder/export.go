@@ -34,6 +34,15 @@ func Export(path string, snapshot Snapshot, force bool) ([]string, error) {
 			break
 		}
 	}
+	if !force {
+		entries, e := os.ReadDir(root)
+		if e != nil && !os.IsNotExist(e) {
+			return nil, e
+		}
+		if len(entries) > 0 {
+			return nil, fmt.Errorf("export destination is not empty (use force)")
+		}
+	}
 	var unmanaged []string
 	var report []string
 	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, e error) error {
@@ -46,8 +55,19 @@ func Export(path string, snapshot Snapshot, force bool) ([]string, error) {
 		if d.Type()&os.ModeSymlink != 0 {
 			return fmt.Errorf("export refuses symlink %s", p)
 		}
-		if d.Name() == "UNMANAGED.md" && !d.IsDir() {
-			f, e := os.Open(p)
+		if !d.IsDir() {
+			return nil
+		}
+		marker := filepath.Join(p, "UNMANAGED.md")
+		info, markerErr := os.Lstat(marker)
+		if markerErr != nil && !os.IsNotExist(markerErr) {
+			return markerErr
+		}
+		if markerErr == nil {
+			if !info.Mode().IsRegular() {
+				return fmt.Errorf("unmanaged marker must be a regular file: %s", marker)
+			}
+			f, e := os.Open(marker)
 			if e != nil {
 				return e
 			}
@@ -59,12 +79,13 @@ func Export(path string, snapshot Snapshot, force bool) ([]string, error) {
 			if scanErr != nil {
 				return scanErr
 			}
-			rel, e := filepath.Rel(root, filepath.Dir(p))
+			rel, e := filepath.Rel(root, p)
 			if e != nil {
 				return e
 			}
 			unmanaged = append(unmanaged, rel)
 			report = append(report, rel+": unmanaged: "+line)
+			return filepath.SkipDir
 		}
 		return nil
 	})
