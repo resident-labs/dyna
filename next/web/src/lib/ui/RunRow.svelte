@@ -15,7 +15,7 @@
   // What is unusual comes first, so the cut falls on the description: the failures, then the steps the run has
   // (and how many run), which say what the tile's figure counts, then the script's status.
   let facts = $derived([...run.failed ? [`${count(run.failed, "step")} failed`] : [],
-    ...run.steps ? [count(steps, "step"), ...live && run.running ? [`${run.running} running`] : []] : live && run.steps === 0 ? ["No steps yet"] : [],
+    ...run.steps ? [count(steps, "step"), ...live && run.running ? [`${run.running} in progress`] : []] : live && run.steps === 0 ? ["No steps yet"] : [],
     ...[run.status || run.description].filter(text => text && text !== "No steps yet")]);
   // A running run's age counts up.
   let now = $state(Date.now());

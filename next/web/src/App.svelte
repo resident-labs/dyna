@@ -885,10 +885,10 @@
         {#if entry.kind === "head"}<div class="runs-head" role="heading" aria-level="2" tabindex="-1" data-key={treeKey(entry)} onkeydown={walkTree}>Workflows</div>
         {:else if entry.kind === "run"}{@const { run } = entry}<a class="member run" class:end={entry === runs.at(-1)} data-key={treeKey(entry)} href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(run.session)}`}
           onclick={openSession} onkeydown={walkTree} aria-current={session === run.session ? "page" : undefined} title={[run.name, run.status || run.description].filter(Boolean).join(": ")}><RunRow {run} /></a>
-        {:else if entry.kind === "more"}<button type="button" class="idle" data-key={treeKey(entry)} aria-expanded={entry.open} style:padding-left="6px" onkeydown={walkTree}
+        {:else if entry.kind === "more"}<button type="button" class="idle" class:end={entry === runs.at(-1)} data-key={treeKey(entry)} aria-expanded={entry.open} style:padding-left="6px" onkeydown={walkTree}
           onclick={() => { openRuns.running = !openRuns.running; }}><Icon name="chevron" size={12} />{entry.count} more running</button>
         {:else if entry.kind === "past"}<button type="button" class="idle" class:end={entry === runs.at(-1)} data-key={treeKey(entry)} aria-expanded={entry.open} style:padding-left="6px" onkeydown={walkTree}
-          onclick={() => { openRuns.past = !openRuns.past; }}><Icon name="chevron" size={12} /><span>{count(entry.count, "past run")}{#if entry.failed}<span class="failed-runs">{` · ${count(entry.failed, "failed run")}`}</span>{/if}</span></button>
+          onclick={() => { openRuns.past = !openRuns.past; }}><Icon name="chevron" size={12} /><span>{count(entry.count, "past run")}{#if entry.failed}<span class="failed-runs">{` · ${entry.failed} failed today`}</span>{/if}</span></button>
         {:else if entry.kind === "new-session"}<button type="button" class="new-session" data-key={treeKey(entry)} onkeydown={walkTree}
           onclick={() => openNew("session")}><Icon name="plus" size={14} />New session</button>
         {:else if entry.kind === "idle"}<button type="button" class="idle" data-key={treeKey(entry)} aria-expanded={entry.open} style:--depth={entry.depth} style:padding-left="{6 + entry.depth * 20}px" onkeydown={walkTree}
