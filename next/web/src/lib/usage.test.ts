@@ -34,7 +34,7 @@ const catalog: AccountsListResponse = {
     { id: "xai", displayName: "xAI", connectMethod: "oauth", connectFlow: "device" },
     { id: "opencode-go", displayName: "OpenCode Go", connectMethod: "key", connectFlow: "key" },
   ],
-  accounts: (["anthropic", "openai", "kimi", "xai", "opencode-go"] as const).map(provider => ({ id: provider, provider, label: "", rooms: null, state: "connected" })),
+  accounts: (["anthropic", "openai", "kimi", "xai", "opencode-go"] as const).map(provider => ({ id: provider, provider, label: "", rooms: null, preferred: null, state: "connected" })),
 };
 
 test("titles an account by its label and adds the catalog's provider name only when the label does not say it", () => {
@@ -97,7 +97,7 @@ test("An account is out of limit with a spent window or no credit in any balance
 });
 
 test("Usage keeps every account that reports, and active needs both routing and a good sign-in", () => {
-  const list: AccountsListResponse = { providers: [], accounts: (["connected", "quota_low", "unknown", "failed"] as const).map(state => ({ id: state, provider: "anthropic", label: "", rooms: null, state })) };
+  const list: AccountsListResponse = { providers: [], accounts: (["connected", "quota_low", "unknown", "failed"] as const).map(state => ({ id: state, provider: "anthropic", label: "", rooms: null, preferred: null, state })) };
   const rows = usageRows(["connected", "quota_low", "unknown", "failed", "new"].map(id => usageOf(id, id, "claude")), list);
   assert.deepEqual(rows.map(row => row.id).sort(), ["connected", "failed", "new", "quota_low", "unknown"]);
   assert.deepEqual(rows.filter(row => row.active).map(row => row.id).sort(), ["connected", "new", "quota_low"]);

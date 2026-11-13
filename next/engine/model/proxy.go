@@ -118,6 +118,6 @@ func NewProxy(dir, authDir, managementKey string) (*Proxy, error) {
 }
 
 // Handler binds a route to a session and its permitted models.
-func (p *Proxy) Handler(sessionID string, allowedModels, eligibleIDs []string, pinnedID string, crew bool, sent ...func(context.Context) error) http.Handler {
-	return handler(p.client, p.clientKey, sessionID, allowedModels, eligibleIDs, pinnedID, crew, sent...)
+func (p *Proxy) Handler(sessionID string, allowedModels, eligibleIDs []string, pinnedID string, preferredIDs []string, crew bool, sent ...func(context.Context) error) http.Handler {
+	return handler(p.client, p.clientKey, sessionID, allowedModels, eligibleIDs, pinnedID, preferredIDs, crew, sent...)
 }

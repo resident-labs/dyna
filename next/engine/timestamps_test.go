@@ -50,7 +50,7 @@ func TestFramedModelHandoffTimestamps(t *testing.T) {
 	})}
 	go proxy.Serve(listener)
 	defer proxy.Close()
-	route := model.Handler(socket, "key", string(worker), []string{"allowed"}, []string{"account"}, "", false, func(ctx context.Context) error { return s.store.MarkTurnModelSent(ctx, worker, first.Turn, time.Now()) })
+	route := model.Handler(socket, "key", string(worker), []string{"allowed"}, []string{"account"}, "", nil, false, func(ctx context.Context) error { return s.store.MarkTurnModelSent(ctx, worker, first.Turn, time.Now()) })
 	request := func() {
 		t.Helper()
 		w := httptest.NewRecorder()
@@ -193,7 +193,7 @@ func TestStoreStampFailureStillForwardsModel(t *testing.T) {
 	})}
 	go proxy.Serve(listener)
 	defer proxy.Close()
-	route := model.Handler(socket, "key", string(worker), []string{"allowed"}, []string{"account"}, "", false, func(ctx context.Context) error { return s.store.MarkTurnModelSent(ctx, worker, first.Turn, time.Now()) })
+	route := model.Handler(socket, "key", string(worker), []string{"allowed"}, []string{"account"}, "", nil, false, func(ctx context.Context) error { return s.store.MarkTurnModelSent(ctx, worker, first.Turn, time.Now()) })
 	for i := 0; i < 3; i++ {
 		w := httptest.NewRecorder()
 		route.ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed"}`)))

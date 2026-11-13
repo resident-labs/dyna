@@ -194,7 +194,7 @@ func TestProxySingleCodexCredentialCooldownPolicy(t *testing.T) {
 		server := &http.Server{Handler: adapter}
 		go func() { _ = server.Serve(p.Listener) }()
 		defer server.Close()
-		downstream := httptest.NewServer(p.Handler("fixture-session", []string{"gpt-5.1-codex"}, []string{"only-codex"}, "", false))
+		downstream := httptest.NewServer(p.Handler("fixture-session", []string{"gpt-5.1-codex"}, []string{"only-codex"}, "", nil, false))
 		defer downstream.Close()
 		provider := ai.NewOpenAIResponsesProvider(ai.OpenAIResponsesConfig{BaseURL: downstream.URL + "/model/v1", APIKey: "fixture", Model: "gpt-5.1-codex"})
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

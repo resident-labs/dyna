@@ -9,7 +9,7 @@ const now = Date.parse("2026-11-03T12:00:00Z");
 const claude: AccountProviderInfo = { id: "anthropic", displayName: "Claude", connectMethod: "oauth", connectFlow: "callback" };
 const chatgpt: AccountProviderInfo = { id: "openai", displayName: "ChatGPT", connectMethod: "oauth", connectFlow: "callback" };
 const deepseek: AccountProviderInfo = { id: "deepseek", displayName: "DeepSeek", connectMethod: "key", connectFlow: "key" };
-const acct = (id: string, over: Partial<Account> = {}): Account => ({ id, provider: "anthropic", label: id, rooms: null, state: "connected", ...over });
+const acct = (id: string, over: Partial<Account> = {}): Account => ({ id, provider: "anthropic", label: id, rooms: null, preferred: null, state: "connected", ...over });
 const win = (usedPercent: number, kind: UsageWindow["kind"] = "five_hour", model?: string): UsageWindow =>
   ({ name: kind + (model ?? ""), kind, model, usedPercent, seconds: kind === "weekly" ? 604800 : 18000, resetsAt: "2026-11-03T15:00:00Z" });
 const use = (accountId: string, over: Partial<AccountUsage> = {}): AccountUsage => ({ accountId, provider: "claude", label: accountId, windows: null, active: true, cause: "", ...over });
@@ -62,6 +62,7 @@ test("only an expired sign-in and low usage get a pill", () => {
 test("a row's line is its rooms and one value for its state", () => {
   assert.equal(accountLine(item(acct("a"))), "Every room");
   assert.equal(accountLine(item(acct("a", { rooms: ["r1"] }))), "1 room");
+  assert.equal(accountLine(item(acct("a", { rooms: ["r1"], preferred: ["r1"], state: "unknown" }))), "1 room · preferred by 1 room · not checked yet");
   assert.equal(accountLine(item(acct("a", { rooms: ["r1", "r2"], state: "unknown" }))), "2 rooms · not checked yet");
   assert.equal(accountLine(item(acct("a", { state: "failed" }))), "Every room · usage unread");
   assert.equal(accountLine(item(acct("a"), use("a", { cause: "insufficient_balance", balances: [{ currency: "USD", amount: "0.00" }] }))), "Every room · out of credit");

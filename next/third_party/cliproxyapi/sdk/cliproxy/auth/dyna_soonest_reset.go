@@ -547,6 +547,9 @@ func (s *SoonestResetSelector) Pick(ctx context.Context, provider, model string,
 	if pinned := dynaPinnedAuth(ctx, available, model, now); pinned != nil {
 		return pinned, nil
 	}
+	if preferred := dynaPreferredAuths(ctx, available, model, now); preferred != nil {
+		available = preferred
+	}
 	board := soonestResetBoardFrom(ctx)
 	board.requestRefresh(available, now)
 	policy := soonestResetGates

@@ -26,17 +26,18 @@ type RouteError struct {
 
 // Handler returns a route bound to one session and its allowed models.
 // socket is the proxy listener; clientKey never leaves the engine. pinnedID is the
-// credential the owner chose for this session, or empty for Automatic. It comes from the
+// credential the owner chose for this session, or empty for Automatic. preferredIDs are
+// the credentials the session's room tries first whenever one is usable. Both come from the
 // store, never from the request. crew says the session's workers each keep their own account.
-func Handler(socket string, clientKey, sessionID string, allowedModels, eligibleIDs []string, pinnedID string, crew bool, sent ...func(context.Context) error) http.Handler {
-	return handler(unixClient(socket), clientKey, sessionID, allowedModels, eligibleIDs, pinnedID, crew, sent...)
+func Handler(socket string, clientKey, sessionID string, allowedModels, eligibleIDs []string, pinnedID string, preferredIDs []string, crew bool, sent ...func(context.Context) error) http.Handler {
+	return handler(unixClient(socket), clientKey, sessionID, allowedModels, eligibleIDs, pinnedID, preferredIDs, crew, sent...)
 }
 
 func unixClient(socket string) *http.Client {
 	return &http.Client{Transport: idleTransport(socket, streamIdleTimeout), Timeout: 30 * time.Second}
 }
 
-func handler(client *http.Client, clientKey, sessionID string, allowedModels, eligibleIDs []string, pinnedID string, crew bool, sent ...func(context.Context) error) http.Handler {
+func handler(client *http.Client, clientKey, sessionID string, allowedModels, eligibleIDs []string, pinnedID string, preferredIDs []string, crew bool, sent ...func(context.Context) error) http.Handler {
 	allowed := make(map[string]struct{}, len(allowedModels))
 	for _, name := range allowedModels {
 		allowed[name] = struct{}{}
@@ -45,7 +46,7 @@ func handler(client *http.Client, clientKey, sessionID string, allowedModels, el
 		_, ok := allowed[model]
 		return ok
 	}
-	return serve(client, clientKey, sessionID, boxRoutes, allow, eligibleIDs, pinnedID, crew, sent...)
+	return serve(client, clientKey, sessionID, boxRoutes, allow, eligibleIDs, pinnedID, preferredIDs, crew, sent...)
 }
 
 // boxRoutes maps each path to its method. A box needs only what Pi sends.
@@ -57,7 +58,7 @@ var boxRoutes = map[string]string{
 
 // serve applies the policy every caller shares: it checks the model in a POST, then
 // replaces the caller's credentials and affinity headers with the engine's.
-func serve(client *http.Client, clientKey, affinityID string, routes map[string]string, allow func(string) bool, eligibleIDs []string, pinnedID string, crew bool, sent ...func(context.Context) error) http.Handler {
+func serve(client *http.Client, clientKey, affinityID string, routes map[string]string, allow func(string) bool, eligibleIDs []string, pinnedID string, preferredIDs []string, crew bool, sent ...func(context.Context) error) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: "cliproxy"})
 	proxy.Transport = client.Transport
 	proxy.FlushInterval = -1
@@ -92,16 +93,22 @@ func serve(client *http.Client, clientKey, affinityID string, routes map[string]
 		// Drop Connection before adding the policy: ReverseProxy removes headers
 		// named by Connection, which otherwise lets a box strip the policy.
 		// Do not forward box-controlled credentials or affinity headers.
-		for _, name := range []string{"Authorization", "X-Api-Key", "Proxy-Authorization", "X-Goog-Api-Key", "Api-Key", "X-Auth-Token", "X-Claude-Code-Session-Id", "Session-Id", "Session_id", "X-Session-Id", "X-Session-Affinity", "X-Client-Request-Id", "X-Dyna-Eligible-Auth", "X-Dyna-Pinned-Auth", contract.WorkerHeader, "Connection"} {
+		for _, name := range []string{"Authorization", "X-Api-Key", "Proxy-Authorization", "X-Goog-Api-Key", "Api-Key", "X-Auth-Token", "X-Claude-Code-Session-Id", "Session-Id", "Session_id", "X-Session-Id", "X-Session-Affinity", "X-Client-Request-Id", "X-Dyna-Eligible-Auth", "X-Dyna-Pinned-Auth", "X-Dyna-Preferred-Auth", contract.WorkerHeader, "Connection"} {
 			r.Header.Del(name)
 		}
-		encodedIDs := make([]string, len(eligibleIDs))
-		for i, id := range eligibleIDs {
-			encodedIDs[i] = base64.RawURLEncoding.EncodeToString([]byte(id))
+		encode := func(ids []string) string {
+			encoded := make([]string, len(ids))
+			for i, id := range ids {
+				encoded[i] = base64.RawURLEncoding.EncodeToString([]byte(id))
+			}
+			return strings.Join(encoded, ",")
 		}
-		r.Header.Set("X-Dyna-Eligible-Auth", strings.Join(encodedIDs, ","))
+		r.Header.Set("X-Dyna-Eligible-Auth", encode(eligibleIDs))
 		if pinnedID != "" {
-			r.Header.Set("X-Dyna-Pinned-Auth", base64.RawURLEncoding.EncodeToString([]byte(pinnedID)))
+			r.Header.Set("X-Dyna-Pinned-Auth", encode([]string{pinnedID}))
+		}
+		if len(preferredIDs) > 0 {
+			r.Header.Set("X-Dyna-Preferred-Auth", encode(preferredIDs))
 		}
 		r.Header.Set("Authorization", "Bearer "+clientKey)
 		r.Header.Set("X-Api-Key", clientKey)

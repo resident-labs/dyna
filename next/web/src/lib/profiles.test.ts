@@ -34,7 +34,7 @@ test("a removed profile's sessions can move to any other profile, by its shown n
 });
 
 test("a profile can choose any model the proxy routes, custom providers included", () => {
-  const account = (provider: string, models?: string[]) => ({ id: provider, provider, label: "", rooms: null, state: "connected", models }) as Account;
+  const account = (provider: string, models?: string[]) => ({ id: provider, provider, label: "", rooms: null, preferred: null, state: "connected", models }) as Account;
   assert.deepEqual(profileModels([
     account("custom-acme", ["custom-acme/local-one"]),
     account("anthropic", ["claude-opus-5-5"]),

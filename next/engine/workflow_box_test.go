@@ -266,7 +266,7 @@ func newRealCrew(t *testing.T, files map[string]string) *realCrew {
 				http.Error(w, err.Error(), http.StatusServiceUnavailable)
 				return
 			}
-			model.Handler(proxySocket, "client-key", string(session.ID), allowed, []string{"account"}, "", crew).ServeHTTP(w, r)
+			model.Handler(proxySocket, "client-key", string(session.ID), allowed, []string{"account"}, "", nil, crew).ServeHTTP(w, r)
 		})
 	})
 	server.SetFilesRoute(func(c api.Caller) http.Handler { return s.Files(c.Principal, c.Room) })

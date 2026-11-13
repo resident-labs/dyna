@@ -3,12 +3,13 @@
   import type { RoomSummary } from "../../contract.gen.ts";
   import SearchBox from "./SearchBox.svelte";
   // The rooms an item serves, in a Settings detail (spec 5.13), as an account's Serves and a host's Rooms it serves:
-  // Every room, or Only these rooms, picked from a search of the rooms in the browser, the chosen first, at most 60
-  // drawn and a count of the rest. The last chosen room cannot be unticked, so a limit is never empty. Each change saves
+  // Every room, or Only these rooms (an account's Preferred by: No room, or These rooms), picked from a search of the
+  // rooms in the browser, the chosen first, at most 60 drawn and a count of the rest. The last chosen room cannot be unticked, so a limit is never empty. Each change saves
   // at once through set, which says whether the engine took it, and a refusal puts the control back. The controls stay
   // enabled while one saves, so the focus keeps its place, and a click meanwhile does nothing.
-  let { label, rooms, chosen, busy, set }: {
+  let { label, rooms, chosen, busy, set, every = "Every room", only = "Only these rooms", hint = "" }: {
     label: string; rooms: readonly RoomSummary[]; chosen: readonly string[]; busy: boolean; set: (rooms: string[]) => Promise<boolean>;
+    every?: string; only?: string; hint?: string;
   } = $props();
   const id = $props.id();
   let query = $state("");
@@ -24,9 +25,10 @@
 <div class="section"><strong class="head" id={`${id}-head`}>{label}</strong>
   <div class="radios" role="radiogroup" aria-labelledby={`${id}-head`}>
     <label class="opt"><input type="radio" name={`${id}-serves`} value="every" checked={!limited} onclick={hold}
-      onchange={event => serve(event.currentTarget.closest("[role=radiogroup]"), [])} />Every room</label>
+      onchange={event => serve(event.currentTarget.closest("[role=radiogroup]"), [])} />{every}</label>
     <label class="opt"><input type="radio" name={`${id}-serves`} value="only" checked={limited} disabled={!rooms.length} onclick={hold}
-      onchange={event => serve(event.currentTarget.closest("[role=radiogroup]"), [rooms[0].id])} />Only these rooms</label></div>
+      onchange={event => serve(event.currentTarget.closest("[role=radiogroup]"), [rooms[0].id])} />{only}</label></div>
+  {#if hint}<p class="small muted">{hint}</p>{/if}
   {#if limited}<div class="picker">
     <SearchBox bind:value={query} label="Search rooms" placeholder={`Search ${plural(rooms.length, "room", "rooms")}`} />
     <div class="rooms"><p class="count small muted">{chosen.length} of {plural(rooms.length, "room", "rooms")} chosen</p>

@@ -131,7 +131,7 @@ func startLocalStack(t *testing.T) *localStack {
 		close(stopped)
 	}()
 	server := api.New(proxyKeyAPI{real: service}, func(c api.Caller) http.Handler {
-		return proxy.Handler(string(c.Principal.Session), []string{"claude-opus-5-5"}, []string{localAccount}, "", false)
+		return proxy.Handler(string(c.Principal.Session), []string{"claude-opus-5-5"}, []string{localAccount}, "", nil, false)
 	})
 	server.SetLocalModelRoute(proxy.Local(st))
 	runtime := filepath.Join(data, "run")

@@ -3,6 +3,9 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"slices"
+
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/contract/private"
 )
@@ -12,7 +15,7 @@ type AccountBinding = private.AccountBinding
 
 // Accounts lists accounts and their private proxy bindings.
 func (s *Store) Accounts(ctx context.Context) ([]AccountBinding, error) {
-	rows, err := s.read.QueryContext(ctx, `SELECT a.id,a.provider,a.label,a.proxy_id,r.room FROM accounts a LEFT JOIN account_rooms r ON r.account=a.id ORDER BY a.id,r.room`)
+	rows, err := s.read.QueryContext(ctx, `SELECT a.id,a.provider,a.label,a.proxy_id,r.room,r.preferred FROM accounts a LEFT JOIN (SELECT account,room,0 AS preferred FROM account_rooms UNION ALL SELECT account,room,1 FROM account_prefs) r ON r.account=a.id ORDER BY a.id,r.room`)
 	if err != nil {
 		return nil, err
 	}
@@ -22,16 +25,23 @@ func (s *Store) Accounts(ctx context.Context) ([]AccountBinding, error) {
 		var binding AccountBinding
 		account := &binding.Account
 		var room sql.NullString
-		if err := rows.Scan(&account.ID, &account.Provider, &account.Label, &binding.ProxyID, &room); err != nil {
+		var preferred sql.NullBool
+		if err := rows.Scan(&account.ID, &account.Provider, &account.Label, &binding.ProxyID, &room, &preferred); err != nil {
 			return nil, err
 		}
 		if len(accounts) == 0 || accounts[len(accounts)-1].Account.ID != account.ID {
 			account.State = contract.AccountUnknown
 			account.Rooms = []contract.RoomID{}
+			account.Preferred = []contract.RoomID{}
 			accounts = append(accounts, binding)
 		}
-		if room.Valid {
-			accounts[len(accounts)-1].Account.Rooms = append(accounts[len(accounts)-1].Account.Rooms, contract.RoomID(room.String))
+		last := &accounts[len(accounts)-1].Account
+		switch {
+		case !room.Valid:
+		case preferred.Bool:
+			last.Preferred = append(last.Preferred, contract.RoomID(room.String))
+		default:
+			last.Rooms = append(last.Rooms, contract.RoomID(room.String))
 		}
 	}
 	return accounts, rows.Err()
@@ -69,22 +79,31 @@ func (s *Store) BindAccount(ctx context.Context, id contract.AccountID, proxyID 
 	})
 }
 
-// SetAccountRooms replaces the allowlist in one transaction.
-func (s *Store) SetAccountRooms(ctx context.Context, account contract.AccountID, rooms []contract.RoomID) error {
+// ErrPreferUnserved refuses a preference for a room the account's allowlist excludes.
+var ErrPreferUnserved = errors.New("a preferred room must be one the account serves")
+
+// SetAccountRooms replaces the allowlist and the rooms that prefer the account in one
+// transaction, so a preference never outlives the allowlist entry it needs.
+func (s *Store) SetAccountRooms(ctx context.Context, account contract.AccountID, rooms, preferred []contract.RoomID) error {
+	if len(rooms) > 0 && slices.ContainsFunc(preferred, func(room contract.RoomID) bool { return !slices.Contains(rooms, room) }) {
+		return ErrPreferUnserved
+	}
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		var id contract.AccountID
 		if err := tx.QueryRowContext(ctx, "SELECT id FROM accounts WHERE id=?", account).Scan(&id); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "DELETE FROM account_rooms WHERE account=?", account); err != nil {
-			return err
-		}
-		for _, room := range rooms {
-			if err := refuseNewWork(ctx, tx, room); err != nil {
+		for table, list := range map[string][]contract.RoomID{"account_rooms": rooms, "account_prefs": preferred} {
+			if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE account=?", account); err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO account_rooms(account,room) VALUES(?,?)", account, room); err != nil {
-				return err
+			for _, room := range list {
+				if err := refuseNewWork(ctx, tx, room); err != nil {
+					return err
+				}
+				if _, err := tx.ExecContext(ctx, "INSERT INTO "+table+"(account,room) VALUES(?,?)", account, room); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -93,7 +112,17 @@ func (s *Store) SetAccountRooms(ctx context.Context, account contract.AccountID,
 
 // EligibleAccountProxyIDs reads a room's complete credential policy in one snapshot.
 func (s *Store) EligibleAccountProxyIDs(ctx context.Context, room contract.RoomID) ([]string, error) {
-	rows, err := s.read.QueryContext(ctx, `SELECT a.proxy_id FROM accounts a WHERE NOT EXISTS (SELECT 1 FROM account_rooms r WHERE r.account=a.id) OR EXISTS (SELECT 1 FROM account_rooms r WHERE r.account=a.id AND r.room=?) ORDER BY a.id`, room)
+	return s.accountProxyIDs(ctx, `SELECT a.proxy_id FROM accounts a WHERE NOT EXISTS (SELECT 1 FROM account_rooms r WHERE r.account=a.id) OR EXISTS (SELECT 1 FROM account_rooms r WHERE r.account=a.id AND r.room=?) ORDER BY a.id`, room)
+}
+
+// PreferredAccountProxyIDs lists the credentials a room prefers. The proxy tries them
+// first among the eligible ones.
+func (s *Store) PreferredAccountProxyIDs(ctx context.Context, room contract.RoomID) ([]string, error) {
+	return s.accountProxyIDs(ctx, `SELECT a.proxy_id FROM accounts a JOIN account_prefs p ON p.account=a.id WHERE p.room=? ORDER BY a.id`, room)
+}
+
+func (s *Store) accountProxyIDs(ctx context.Context, query string, room contract.RoomID) ([]string, error) {
+	rows, err := s.read.QueryContext(ctx, query, room)
 	if err != nil {
 		return nil, err
 	}

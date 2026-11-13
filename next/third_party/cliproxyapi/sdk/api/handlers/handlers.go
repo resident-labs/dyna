@@ -628,6 +628,10 @@ func (h *BaseAPIHandler) GetContextWithCancel(handler interfaces.APIHandler, c *
 			newCtx = coreauth.WithDynaPinnedAuth(newCtx, values)
 			c.Request.Header.Del("X-Dyna-Pinned-Auth")
 		}
+		if values, present := c.Request.Header[http.CanonicalHeaderKey("X-Dyna-Preferred-Auth")]; present {
+			newCtx = coreauth.WithDynaPreferredAuth(newCtx, values)
+			c.Request.Header.Del("X-Dyna-Preferred-Auth")
+		}
 	}
 
 	endpoint := ""
