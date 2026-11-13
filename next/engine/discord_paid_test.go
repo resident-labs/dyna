@@ -13,10 +13,12 @@ import (
 func TestDiscordExplicitReplyPaysInput(t *testing.T) {
 	for _, tc := range []struct {
 		name, channel, reply string
-		waiting, late        bool
+		waiting, late, api   bool
 		want                 int
 	}{
 		{name: "matching", channel: "200", reply: "300", want: 1},
+		{name: "matching through api", channel: "200", reply: "300", api: true, want: 1},
+		{name: "unthreaded through api", channel: "200", api: true, want: 2},
 		{name: "unthreaded", channel: "200", want: 2},
 		{name: "other channel", channel: "201", reply: "300", want: 2},
 		{name: "no send", want: 1},
@@ -71,7 +73,15 @@ func TestDiscordExplicitReplyPaysInput(t *testing.T) {
 			}
 			send := func() {
 				t.Helper()
-				if tc.channel != "" {
+				if tc.api {
+					body := `{"content":"explicit answer"}`
+					if tc.reply != "" {
+						body = `{"content":"explicit answer","message_reference":{"message_id":"` + tc.reply + `"}}`
+					}
+					if _, problem := s.DiscordAPI(ctx, boxCaller(root), contract.DiscordAPIRequest{Method: "POST", Path: "/channels/" + tc.channel + "/messages", Body: json.RawMessage(body)}); problem != nil {
+						t.Fatal(problem)
+					}
+				} else if tc.channel != "" {
 					if _, problem := s.DiscordSend(ctx, boxCaller(root), contract.DiscordSendRequest{Channel: tc.channel, ReplyTo: tc.reply, Text: "explicit answer"}); problem != nil {
 						t.Fatal(problem)
 					}
