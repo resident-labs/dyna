@@ -18,7 +18,7 @@ func planAutoMod(plan *Plan, desired, live []AutoMod) error {
 			if rule.ID != "" || rule.Was != "" {
 				return fmt.Errorf("server.yaml: adopted automod rule %q is missing", rule.Name)
 			}
-			plan.Changes = append(plan.Changes, Change{Kind: "automod", Name: rule.Name, Field: "create", After: rule})
+			plan.Changes = append(plan.Changes, Change{Kind: AutoModKind, Operation: Create, Name: rule.Name, After: rule})
 			continue
 		}
 		current := candidates[0]
@@ -28,7 +28,7 @@ func planAutoMod(plan *Plan, desired, live []AutoMod) error {
 		}
 		matched[id] = true
 		rule.Identity, current.Identity = Identity{}, Identity{}
-		compare(plan, "automod", rule.Name, id, rule, current)
+		compare(plan, AutoModKind, rule.Name, id, rule, current)
 	}
 	for _, rule := range live {
 		if !matched[rule.ID] {

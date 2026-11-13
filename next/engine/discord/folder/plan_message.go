@@ -22,10 +22,10 @@ func planMessages(plan *Plan, desired, current Entry) {
 			plan.Unchanged++
 			continue
 		}
-		field := "create"
+		operation := Create
 		if exists {
-			field = "edit"
+			operation = EditMessage
 		}
-		plan.Changes = append(plan.Changes, Change{Kind: "message", Name: desired.Path + "/" + name, ID: id, Target: entryID(current), Field: field, Before: before, After: message})
+		plan.Changes = append(plan.Changes, Change{Kind: MessageKind, Operation: operation, Name: desired.Path + "/" + name, ID: id, Target: entryID(current), Before: before, After: message})
 	}
 }
