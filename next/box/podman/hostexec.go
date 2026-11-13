@@ -20,6 +20,11 @@ const (
 )
 
 func (h *Host) RunHostexec(ctx context.Context, a contract.HostexecRunArgs, op contract.OpID) ([]byte, int, bool, error) {
+	return h.RunHostexecWithEnv(ctx, a, op, nil)
+}
+
+// RunHostexecWithEnv supplies engine-host environment through the SSH boundary.
+func (h *Host) RunHostexecWithEnv(ctx context.Context, a contract.HostexecRunArgs, op contract.OpID, env []string) ([]byte, int, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, 0, false, err
 	}
@@ -34,7 +39,11 @@ func (h *Host) RunHostexec(ctx context.Context, a contract.HostexecRunArgs, op c
 	defer func() { setup.Stop(); free() }()
 	// Each command has a connection of its own, so any number run at once and none waits on the master. A host that does
 	// not answer fails the ssh, which the engine reports as the host lost.
-	out, err := h.executeOver(ctx, h.direct(), nil, hostexec.RunArgs(a, op)...)
+	args := hostexec.RunArgs(a, op)
+	if len(env) > 0 {
+		args = append(append([]string{"env"}, env...), args...)
+	}
+	out, err := h.executeOver(ctx, h.direct(), nil, args...)
 	code := 0
 	var exit remoteExit
 	if errors.As(err, &exit) {
