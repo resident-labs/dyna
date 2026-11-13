@@ -340,11 +340,8 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 									addressed = true
 								}
 								// Discord leaves mention_roles empty when the role is not mentionable, though the text still holds <@&id>.
-								// Even pieces between backticks are outside code; an escaped mention is text.
-								for i, piece := range strings.Split(m.Content, "`") {
-									if i%2 == 0 && strings.Contains(piece, "<@&"+role.ID+">") && !strings.Contains(piece, "\\<@&"+role.ID+">") {
-										addressed = true
-									}
+								if mentionsOutsideCode(m.Content, "<@&"+role.ID+">") {
+									addressed = true
 								}
 							}
 						}
@@ -365,4 +362,47 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 			}
 		}
 	}
+}
+
+// mentionsOutsideCode reports whether text holds mention outside Markdown code and not escaped with a backslash.
+// A code span opens with a run of backticks and closes at the next run of exactly that length; one never closed is text.
+func mentionsOutsideCode(text, mention string) bool {
+	for i := 0; i < len(text); {
+		if text[i] == '`' {
+			run := backticks(text, i)
+			end := -1
+			for j := i + run; j < len(text); {
+				if text[j] != '`' {
+					j++
+					continue
+				}
+				closing := backticks(text, j)
+				if closing == run {
+					end = j + closing
+					break
+				}
+				j += closing
+			}
+			if end < 0 {
+				i += run
+			} else {
+				i = end
+			}
+			continue
+		}
+		if strings.HasPrefix(text[i:], mention) && (i == 0 || text[i-1] != '\\') {
+			return true
+		}
+		i++
+	}
+	return false
+}
+
+// backticks counts the run of backticks that starts at i.
+func backticks(text string, i int) int {
+	n := 0
+	for i+n < len(text) && text[i+n] == '`' {
+		n++
+	}
+	return n
 }

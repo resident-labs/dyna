@@ -33,7 +33,9 @@ func TestGatewayFiltersHumansAndMembership(t *testing.T) {
 		{"id": "role", "channel_id": "200", "guild_id": "100", "author": map[string]any{"id": "1"}, "mention_roles": []string{"11"}},
 		{"id": "role-text", "channel_id": "200", "guild_id": "100", "author": map[string]any{"id": "1"}, "content": "<@&11> who should I wait for?"},
 		{"id": "code-role", "channel_id": "200", "guild_id": "100", "author": map[string]any{"id": "1"}, "content": "```\n<@&11>\n``` and `<@&11>`"},
+		{"id": "span-role", "channel_id": "200", "guild_id": "100", "author": map[string]any{"id": "1"}, "content": "``a ` <@&11>`` and ```\nx`y <@&11>\n```"},
 		{"id": "escaped-role", "channel_id": "200", "guild_id": "100", "author": map[string]any{"id": "1"}, "content": "type \\<@&11> to ping it"},
+		{"id": "escaped-then-role", "channel_id": "200", "guild_id": "100", "author": map[string]any{"id": "1"}, "content": "type \\<@&11> to ping it; <@&11> who should I wait for?"},
 		{"id": "other-role", "channel_id": "200", "guild_id": "100", "author": map[string]any{"id": "1"}, "mention_roles": []string{"10"}},
 		{"id": "mention", "channel_id": "200", "guild_id": "100", "author": map[string]any{"id": "1"}, "mentions": []map[string]string{{"id": "900"}}},
 		{"id": "reply", "channel_id": "200", "guild_id": "100", "author": map[string]any{"id": "1"}, "referenced_message": map[string]any{"author": map[string]string{"id": "900"}}},
@@ -41,7 +43,7 @@ func TestGatewayFiltersHumansAndMembership(t *testing.T) {
 	} {
 		fake.Events <- event
 	}
-	for _, want := range []string{"role", "role-text", "mention", "reply", "dm"} {
+	for _, want := range []string{"role", "role-text", "escaped-then-role", "mention", "reply", "dm"} {
 		select {
 		case got := <-received:
 			if got.ID != want {
