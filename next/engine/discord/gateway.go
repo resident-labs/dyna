@@ -365,9 +365,14 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 }
 
 // mentionsOutsideCode reports whether text holds mention outside Markdown code and not escaped with a backslash.
-// A code span opens with a run of backticks and closes at the next run of exactly that length; one never closed is text.
+// A backslash escapes the next character, a backtick included. A code span opens with a run of backticks and closes at
+// the next run of exactly that length; one never closed is text.
 func mentionsOutsideCode(text, mention string) bool {
 	for i := 0; i < len(text); {
+		if text[i] == '\\' {
+			i += 2
+			continue
+		}
 		if text[i] == '`' {
 			run := backticks(text, i)
 			end := -1
@@ -390,7 +395,7 @@ func mentionsOutsideCode(text, mention string) bool {
 			}
 			continue
 		}
-		if strings.HasPrefix(text[i:], mention) && (i == 0 || text[i-1] != '\\') {
+		if strings.HasPrefix(text[i:], mention) {
 			return true
 		}
 		i++
