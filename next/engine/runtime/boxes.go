@@ -957,39 +957,49 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	steps.Done("image")
 	spec.Needs, spec.Stack = image.Needs, image.Stack
 	slice, c := b.container(spec, image.Tag, shared)
-	sliced = true
-	if err = run(contract.StartSlice, func(ctx context.Context) error { return h.EnsureSlice(ctx, slice) }); err != nil {
-		return "", box.RuntimeCreateError{Err: err}
-	}
-	sliced = true
-	steps.Done("slice")
-	forwarded = true
-	if err = run(contract.StartForward, func(ctx context.Context) error { return h.AddForward(ctx, forward) }); err != nil {
-		return "", box.RuntimeCreateError{Err: err}
-	}
-	forwarded = true
-	steps.Done("forward")
-	stacked = spec.Stack != nil
-	created = true
-	if err = run(contract.StartCreate, func(ctx context.Context) error { return h.CreateBox(ctx, c, spec.Stack, false) }); err != nil {
-		var missing box.MissingDevice
-		if errors.As(err, &missing) {
-			missing.Host = string(spec.Host)
-			return "", missing
+	// Mark attempts before startStep: a failed or timed-out host operation may
+	// already have created resources and must still be cleaned up.
+	for _, step := range []struct {
+		id           contract.StartStep
+		label        string
+		attempted    *bool
+		runtimeError bool
+		work         func(context.Context) error
+	}{
+		{contract.StartSlice, "slice", &sliced, true, func(ctx context.Context) error { return h.EnsureSlice(ctx, slice) }},
+		{contract.StartForward, "forward", &forwarded, true, func(ctx context.Context) error { return h.AddForward(ctx, forward) }},
+		{contract.StartCreate, "container create", &created, true, func(ctx context.Context) error {
+			return h.CreateBox(ctx, c, spec.Stack, false)
+		}},
+		{contract.StartSidecars, "sidecars", nil, false, func(ctx context.Context) error { return h.StartSidecars(ctx, spec.Box) }},
+	} {
+		if step.id == contract.StartSidecars && spec.Stack == nil {
+			continue
 		}
-		var imageErr box.ImageCreateError
-		if errors.As(err, &imageErr) {
+		if step.attempted != nil {
+			*step.attempted = true
+		}
+		if step.id == contract.StartCreate {
+			stacked = spec.Stack != nil
+		}
+		if err = run(step.id, step.work); err != nil {
+			if step.id == contract.StartCreate {
+				var missing box.MissingDevice
+				if errors.As(err, &missing) {
+					missing.Host = string(spec.Host)
+					return "", missing
+				}
+				var imageErr box.ImageCreateError
+				if errors.As(err, &imageErr) {
+					return "", err
+				}
+			}
+			if step.runtimeError {
+				return "", box.RuntimeCreateError{Err: err}
+			}
 			return "", err
 		}
-		return "", box.RuntimeCreateError{Err: err}
-	}
-	created = true
-	steps.Done("container create")
-	if spec.Stack != nil {
-		if err = run(contract.StartSidecars, func(ctx context.Context) error { return h.StartSidecars(ctx, spec.Box) }); err != nil {
-			return "", err
-		}
-		steps.Done("sidecars")
+		steps.Done(step.label)
 	}
 	if err = run(contract.StartContainer, func(ctx context.Context) error { return h.StartContainer(ctx, spec.Box) }); err != nil {
 		return "", box.RuntimeCreateError{Err: err}
