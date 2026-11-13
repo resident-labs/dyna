@@ -9,8 +9,13 @@ The prompt and RealtimeV2 session/tool definitions follow OpenAI Codex at
 - `codex-rs/core/src/realtime_conversation.rs`
 
 The prompt only renames Codex to Dyna and removes the user-name paragraph.
-The provider schedules responses and interrupts them. The engine does not retry,
-queue spoken responses, or batch posts. Dyna's backend is the room root's owner DM.
+The provider schedules speech turns and interrupts them. Codex's single deferred
+response-create flag handles backend context arriving while a response is active;
+there is no engine speak queue, retry timer, or batching of posts. Dyna's backend
+is the room root's owner DM. Handoff completion appends the final `[BACKEND]`
+context under the handoff budget, then returns Codex's constant function output.
+Audio truncation follows Codex's received-frame duration and item matching, not
+browser playback receipts. The page sends only an empty-item heartbeat.
 
 ## Live transport probe
 

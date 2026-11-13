@@ -84,6 +84,7 @@ func TestVoiceHandoffIdleBusyAndFinal(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	finalItems := 0
 	output := func(id string) string {
 		t.Helper()
 		for {
@@ -103,7 +104,7 @@ func TestVoiceHandoffIdleBusyAndFinal(t *testing.T) {
 			}
 			for _, content := range event.Item.Content {
 				if strings.Contains(content.Text, "voice final answer") {
-					t.Fatal("handoff final leaked into backend stream")
+					finalItems++
 				}
 			}
 			if event.Item.Type == "function_call_output" && event.Item.CallID == id {
@@ -123,8 +124,11 @@ func TestVoiceHandoffIdleBusyAndFinal(t *testing.T) {
 	if _, problem := s.TurnOutput(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnCompleted, Final: "voice final answer"}); problem != nil {
 		t.Fatal(problem)
 	}
-	if got := output("idle"); got != "voice final answer" {
+	if got := output("idle"); got != "Background agent finished. Use the preceding [BACKEND] messages as the result." {
 		t.Fatalf("idle output: %q", got)
+	}
+	if finalItems != 1 {
+		t.Fatalf("final BACKEND items: %d", finalItems)
 	}
 	post, err := s.store.Event(ctx, int64(start.Inputs[0].Delivery))
 	if err != nil {

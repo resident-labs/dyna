@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/coder/websocket"
-	"github.com/resident-labs/dyna/contract"
 	"slices"
 	"sync"
+
+	"github.com/coder/websocket"
+	"github.com/resident-labs/dyna/contract"
 )
 
 func (s *Service) VoiceStatus(ctx context.Context, p contract.Principal, _ contract.VoiceStatusRequest) (contract.VoiceStatusResponse, *contract.Error) {
