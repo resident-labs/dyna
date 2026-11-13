@@ -14,12 +14,20 @@ import (
 	"testing"
 )
 
+// Dispatch is a gateway dispatch other than a message. A zero Seq takes the next sequence number; a set one is sent as given, to replay.
+type Dispatch struct {
+	Type string
+	Seq  int
+	Data any
+}
+
 type Server struct {
 	HTTP          *httptest.Server
 	Token         string
 	Messages      chan json.RawMessage
 	UploadedFiles chan string
 	Events        chan any
+	Dispatches    chan Dispatch
 	mu            sync.Mutex
 	connections   int
 	history       []any
@@ -34,7 +42,7 @@ type Server struct {
 
 func New(t testing.TB) *Server {
 	t.Helper()
-	s := &Server{Token: "fake-discord-secret", Messages: make(chan json.RawMessage, 64), UploadedFiles: make(chan string, 64), Events: make(chan any, 64)}
+	s := &Server{Token: "fake-discord-secret", Messages: make(chan json.RawMessage, 64), UploadedFiles: make(chan string, 64), Events: make(chan any, 64), Dispatches: make(chan Dispatch, 64)}
 	s.HTTP = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body []byte
 		if r.Body != nil {
@@ -217,6 +225,15 @@ func (s *Server) gateway(w http.ResponseWriter, r *http.Request) {
 				if write(map[string]int{"op": 11}) != nil {
 					return
 				}
+			}
+		case d := <-s.Dispatches:
+			sequence := d.Seq
+			if sequence == 0 {
+				sequence = seq
+				seq++
+			}
+			if write(map[string]any{"op": 0, "s": sequence, "t": d.Type, "d": d.Data}) != nil {
+				return
 			}
 		case event := <-s.Events:
 			if write(map[string]any{"op": 0, "s": seq, "t": "MESSAGE_CREATE", "d": event}) != nil {

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -60,8 +61,13 @@ type Gateway struct {
 	URL, Bot  string
 	Directory *Directory
 	Receive   func(context.Context, Message) error
-	messages  chan Message
-	readyAt   time.Time
+	// Observe receives the server events the gateway finds, one at a time in order, on a lane of its own that
+	// never touches Receive. An event the lane has no room for, or that Observe fails on, is added to Lost.
+	Observe      func(context.Context, ServerEvent) error
+	Lost         *atomic.Int64
+	messages     chan Message
+	serverEvents chan ServerEvent
+	readyAt      time.Time
 }
 
 type FatalClose struct {
@@ -78,6 +84,21 @@ func (g *Gateway) Run(ctx context.Context) error {
 	worker, cancel := context.WithCancel(ctx)
 	defer cancel()
 	g.messages = make(chan Message, 256)
+	g.serverEvents = make(chan ServerEvent, 256)
+	if g.Observe != nil {
+		go func() {
+			for {
+				select {
+				case <-worker.Done():
+					return
+				case event := <-g.serverEvents:
+					if err := g.Observe(worker, event); err != nil && worker.Err() == nil {
+						log.Printf("Discord server event %s lost (%d so far): %v", event.Body.EventType(), g.Lost.Add(1), err)
+					}
+				}
+			}
+		}()
+	}
 	go func() {
 		retryDelays := [...]time.Duration{time.Second, 5 * time.Second, 15 * time.Second}
 		for {
@@ -248,7 +269,9 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 			acked = false
 			timer.Reset(time.Duration(h.Interval) * time.Millisecond)
 		case p := <-packets:
-			if p.Seq != nil {
+			// A dispatch at or below the sequence already seen is one Discord sent again.
+			replayed := p.Seq != nil && *p.Seq <= *seq && p.Type != "READY"
+			if p.Seq != nil && (*p.Seq > *seq || p.Type == "READY") {
 				*seq = *p.Seq
 			}
 			switch p.Op {
@@ -271,6 +294,13 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 				return errors.New("Discord session invalidated")
 			case 0:
 				if g.Directory != nil {
+					if event, found := g.Directory.serverEvent(p.Type, p.Data); found && !replayed && g.Observe != nil {
+						select {
+						case g.serverEvents <- event:
+						default:
+							log.Printf("Discord server event lane full; dropped %s (%d so far)", event.Body.EventType(), g.Lost.Add(1))
+						}
+					}
 					g.Directory.Apply(p.Type, p.Data)
 				}
 				switch p.Type {
