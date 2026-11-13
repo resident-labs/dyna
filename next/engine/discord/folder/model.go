@@ -1,7 +1,10 @@
 // Package folder describes a room's private, engine-host Discord folder.
 package folder
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 type Identity struct {
 	ID  string `yaml:"id,omitempty"`
@@ -73,6 +76,17 @@ type Entry struct {
 	Messages  map[string]Message
 	Unmanaged string
 }
+
+// Snapshot is configuration only, with adopted IDs and sidebar order.
+type Snapshot struct {
+	Server  Server
+	Entries []Entry
+}
+
+func safeName(name string) bool {
+	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, "/\\\x00\r\n") && name != "UNMANAGED.md"
+}
+
 type Folder struct {
 	Server  Server
 	Entries []Entry

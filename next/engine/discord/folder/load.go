@@ -143,8 +143,11 @@ func rejectLinks(root string) error {
 			return fmt.Errorf("%s: symlinks are refused", path)
 		}
 		if entry.IsDir() {
-			_, err := os.Lstat(filepath.Join(path, "UNMANAGED.md"))
+			marker, err := os.Lstat(filepath.Join(path, "UNMANAGED.md"))
 			if err == nil {
+				if !marker.Mode().IsRegular() {
+					return fmt.Errorf("%s: UNMANAGED.md must be a regular file", path)
+				}
 				return filepath.SkipDir
 			}
 			if !errors.Is(err, fs.ErrNotExist) {

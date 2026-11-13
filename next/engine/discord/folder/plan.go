@@ -30,6 +30,7 @@ func BuildPlan(desired Folder, live Snapshot) (Plan, error) {
 	}
 	compare(&plan, "server", "settings", "", desired.Server.Settings, live.Server.Settings)
 	matchedRoles := map[string]bool{}
+	roleOrder := []string{}
 	for _, role := range desired.Server.Roles {
 		candidates := []Role{}
 		for _, current := range live.Server.Roles {
@@ -52,6 +53,7 @@ func BuildPlan(desired Folder, live Snapshot) (Plan, error) {
 			return plan, fmt.Errorf("server.yaml: role %s adopted twice", current.ID)
 		}
 		matchedRoles[current.ID] = true
+		roleOrder = append(roleOrder, current.ID)
 		role.Identity, current.Identity = Identity{}, Identity{}
 		compare(&plan, "role", role.Name, candidates[0].ID, role, current)
 	}
@@ -63,13 +65,10 @@ func BuildPlan(desired Folder, live Snapshot) (Plan, error) {
 	if err := planAutoMod(&plan, desired.Server.AutoMod, live.Server.AutoMod); err != nil {
 		return plan, err
 	}
-	desiredOrder, liveOrder := []string{}, []string{}
-	for _, role := range desired.Server.Roles {
-		desiredOrder = append(desiredOrder, role.Name)
-	}
+	desiredOrder, liveOrder := roleOrder, []string{}
 	for _, role := range live.Server.Roles {
 		if matchedRoles[role.ID] {
-			liveOrder = append(liveOrder, role.Name)
+			liveOrder = append(liveOrder, role.ID)
 		}
 	}
 	if !slices.Equal(desiredOrder, liveOrder) {

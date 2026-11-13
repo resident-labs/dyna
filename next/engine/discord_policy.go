@@ -181,7 +181,10 @@ func (s *Service) discordPrepare(ctx context.Context, caller contract.Principal,
 		if !resolvedPolicy.On() {
 			return body, nil
 		}
-		facts := policy.Facts{Now: time.Now()}
+		facts := policy.Facts{Now: time.Now(), CategoryInGuild: func(id string) bool {
+			category, known := s.discordDirectory.Channel(id)
+			return known && category.Type == 4 && category.Guild == guild
+		}}
 		if route.Action == policy.MessageEdit || route.Action == policy.PollExpire {
 			client, err := s.machineDiscordClient(ctx)
 			if err != nil {

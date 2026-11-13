@@ -56,8 +56,9 @@ func (s *Service) DiscordCheck(ctx context.Context, caller contract.Principal, r
 		return contract.DiscordCheckResponse{}, invalid("server directory unavailable")
 	}
 	out := contract.DiscordCheckResponse{}
+	var problems, confirmations []string
 	if read.Text == "" {
-		out.Lines = append(out.Lines, "No front policy is set.")
+		out.Lines = []string{"No problems found.", "No front policy is set."}
 		return out, nil
 	}
 	p, err := policy.Decode(read.Text)
@@ -104,20 +105,20 @@ func (s *Service) DiscordCheck(ctx context.Context, caller contract.Principal, r
 			}
 		}
 		if len(found) != 1 {
-			out.Lines = append(out.Lines, fmt.Sprintf("The policy role %q no longer resolves uniquely; set the policy again.", name))
+			problems = append(problems, fmt.Sprintf("The policy role %q no longer resolves uniquely; set the policy again.", name))
 			continue
 		}
 		role := found[0]
 		if highest <= role.Position {
-			out.Lines = append(out.Lines, fmt.Sprintf("Drag the dyna role above %s in Server Settings > Roles.", name))
+			problems = append(problems, fmt.Sprintf("Drag the dyna role above %s in Server Settings > Roles.", name))
 		} else {
-			out.Lines = append(out.Lines, fmt.Sprintf("The dyna role is above %s.", name))
+			confirmations = append(confirmations, fmt.Sprintf("The dyna role is above %s.", name))
 		}
 		if role.Managed {
-			out.Lines = append(out.Lines, fmt.Sprintf("The role %s is managed by an integration and cannot be assigned.", name))
+			problems = append(problems, fmt.Sprintf("The role %s is managed by an integration and cannot be assigned.", name))
 		}
 		if role.Permissions&policy.DangerousPermissions != 0 {
-			out.Lines = append(out.Lines, fmt.Sprintf("The role %s carries dangerous permissions and the answering session cannot manage it.", name))
+			problems = append(problems, fmt.Sprintf("The role %s carries dangerous permissions and the answering session cannot manage it.", name))
 		}
 	}
 	names := append([]string{}, p.Front.Quiet...)
@@ -136,7 +137,7 @@ func (s *Service) DiscordCheck(ctx context.Context, caller contract.Principal, r
 			}
 		}
 		if count != 1 {
-			out.Lines = append(out.Lines, fmt.Sprintf("The policy channel %q no longer resolves uniquely; set the policy again.", name))
+			problems = append(problems, fmt.Sprintf("The policy channel %q no longer resolves uniquely; set the policy again.", name))
 		}
 	}
 	required := []struct {
@@ -161,6 +162,12 @@ func (s *Service) DiscordCheck(ctx context.Context, caller contract.Principal, r
 			bit  uint64
 		}{"Manage Roles", 1 << 28})
 	}
+	if len(p.Front.Channels) > 0 {
+		required = append(required, struct {
+			name string
+			bit  uint64
+		}{"Manage Channels", policy.ManageChannels})
+	}
 	if p.Front.Threads {
 		required = append(required, struct {
 			name string
@@ -172,8 +179,14 @@ func (s *Service) DiscordCheck(ctx context.Context, caller contract.Principal, r
 	}
 	for _, need := range required {
 		if permissions&(1<<3) == 0 && permissions&need.bit == 0 {
-			out.Lines = append(out.Lines, "Grant the bot "+need.name+" in Server Settings > Roles.")
+			problems = append(problems, "Grant the bot "+need.name+" in Server Settings > Roles.")
 		}
 	}
+	heading := "No problems found."
+	if len(problems) > 0 {
+		heading = fmt.Sprintf("%d problems:", len(problems))
+	}
+	out.Lines = append([]string{heading}, problems...)
+	out.Lines = append(out.Lines, confirmations...)
 	return out, nil
 }

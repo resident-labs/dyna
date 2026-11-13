@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"slices"
 	"strconv"
 
 	"time"
@@ -15,6 +16,7 @@ import (
 type Facts struct {
 	Now             time.Time
 	OwnMessage      bool
+	CategoryInGuild func(string) bool
 	RolePermissions uint64
 }
 
@@ -128,7 +130,54 @@ func (p Policy) Authorize(route Route, body json.RawMessage, facts Facts) (json.
 	case Read:
 		return body, nil
 	case WebhookRead:
-		return deny("webhook reads")
+		return nil, route.Refusal()
+	case ChannelEdit:
+		if route.Resource != Channel {
+			return nil, route.Refusal()
+		}
+		var edit struct {
+			Topic    json.RawMessage `json:"topic"`
+			Slowmode json.RawMessage `json:"rate_limit_per_user"`
+		}
+		if bodyInto(body, &edit) != nil {
+			return nil, route.Refusal()
+		}
+		if len(edit.Topic) > 0 && len(edit.Slowmode) == 0 && slices.Contains(p.Front.Channels, "topic") {
+			var topic *string
+			if json.Unmarshal(edit.Topic, &topic) == nil {
+				return body, nil
+			}
+		}
+		if len(edit.Slowmode) > 0 && len(edit.Topic) == 0 && slices.Contains(p.Front.Channels, "slowmode") {
+			var seconds *int
+			if json.Unmarshal(edit.Slowmode, &seconds) == nil && seconds != nil && *seconds >= 0 && *seconds <= 21600 {
+				return body, nil
+			}
+		}
+		return nil, route.Refusal()
+	case ChannelCreate:
+		var channel struct {
+			Name   string          `json:"name"`
+			Topic  *string         `json:"topic"`
+			Parent json.RawMessage `json:"parent_id"`
+			Type   json.RawMessage `json:"type"`
+		}
+		if !slices.Contains(p.Front.Channels, "create") || bodyInto(body, &channel) != nil || channel.Name == "" {
+			return nil, route.Refusal()
+		}
+		if len(channel.Type) > 0 {
+			var kind *int
+			if json.Unmarshal(channel.Type, &kind) != nil || kind == nil || *kind != 0 {
+				return nil, route.Refusal()
+			}
+		}
+		if len(channel.Parent) > 0 {
+			var parent *string
+			if json.Unmarshal(channel.Parent, &parent) != nil || parent == nil || facts.CategoryInGuild == nil || !facts.CategoryInGuild(*parent) {
+				return nil, route.Refusal()
+			}
+		}
+		return body, nil
 	case MemberTimeout:
 		var timeout struct {
 			Until json.RawMessage `json:"communication_disabled_until"`
@@ -217,7 +266,7 @@ func (p Policy) Authorize(route Route, body json.RawMessage, facts Facts) (json.
 		}
 		return suppressMissingMentions(body, true)
 	default:
-		return deny("writes")
+		return nil, route.Refusal()
 	}
 }
 

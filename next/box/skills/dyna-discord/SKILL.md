@@ -140,4 +140,5 @@ front:
 An enabled policy caps every non-root answering session; root is not capped.
 Answers over budget start no turn and receive at most one reaction per member per hour.
 Budgets reset on engine restart. Quiet channels, webhook and AutoMod alert messages start no turn.
+Optional `front.channels: [topic, slowmode, create]` grants only those channel chores; absent means none.
 Only enabled, log and front exist; rules, automod and commands are not supported yet.
