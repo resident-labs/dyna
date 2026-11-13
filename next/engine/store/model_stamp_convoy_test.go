@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/model"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -55,7 +56,16 @@ func TestWarmModelRouteBypassesUnrelatedWriterWaits(t *testing.T) {
 				t.Fatal(e)
 			}
 			var upstream atomic.Int64
-			server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { upstream.Add(1); w.WriteHeader(200) })}
+			server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Drain before replying: the proxy disables keep-alive, so an early reply can close the socket while it is still writing the body.
+				if _, err := io.Copy(io.Discard, r.Body); err != nil {
+					t.Error(err)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				upstream.Add(1)
+				w.WriteHeader(200)
+			})}
 			go server.Serve(ln)
 			defer server.Close()
 			h := model.Handler(socket, "synthetic-key", "s", []string{"test-model"}, []string{"synthetic-account"}, "", nil, false, func(ctx context.Context) error { return s.MarkTurnModelSent(ctx, "s", "t", time.Now()) })
@@ -155,7 +165,15 @@ func TestColdModelHandoffDoesNotWaitForStampWriter(t *testing.T) {
 		close(release)
 		t.Fatal(err)
 	}
-	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusAccepted) })}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Consume the request before closing a non-keep-alive connection; an early response can race the proxy's body write.
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	})}
 	go server.Serve(listener)
 	defer server.Close()
 	recorded := make(chan error, 1)
