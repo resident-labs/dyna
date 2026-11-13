@@ -125,12 +125,12 @@ export function roomRuns(runs: Iterable<WorkflowInfo>): { running: WorkflowInfo[
     past: all.filter(run => run.state !== "running").sort((a, b) => at(b) - at(a)) };
 }
 
-// The runs' rows in the sessions panel: each running run, then one row that counts the past ones and, open, lists them. A room
-// with no runs has no rows.
+// The runs' rows in the sessions panel: each running run, then one row that counts the past ones and, open, lists them. keep is
+// the open page's run, which stays listed under a closed fold. A room with no runs has no rows.
 export type RunRow = { kind: "run"; run: WorkflowInfo } | { kind: "past"; count: number; failed: number; open: boolean };
-export function runRows(runs: Iterable<WorkflowInfo>, open: boolean): RunRow[] {
+export function runRows(runs: Iterable<WorkflowInfo>, open: boolean, keep?: string): RunRow[] {
   const { running, past } = roomRuns(runs), row = (run: WorkflowInfo): RunRow => ({ kind: "run", run });
-  return [...running.map(row), ...past.length ? [{ kind: "past" as const, count: past.length, failed: past.filter(run => run.state === "failed").length, open }] : [], ...open ? past.map(row) : []];
+  return [...running.map(row), ...past.length ? [{ kind: "past" as const, count: past.length, failed: past.filter(run => run.state === "failed").length, open }] : [], ...past.filter(run => open || run.session === keep).map(row)];
 }
 
 // The line a script that never called status() gets, as "75 of 76 steps · 1 running".

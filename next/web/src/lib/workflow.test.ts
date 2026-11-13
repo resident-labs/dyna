@@ -238,6 +238,7 @@ test("the panel's run rows: running runs, then a count of the past ones that lis
   const names = (open: boolean) => runRows(runs, open).map(row => row.kind === "run" ? row.run.session : `${row.kind} ${row.count} ${row.failed}f${row.open ? " open" : ""}`);
   assert.deepEqual(names(false), ["live", "past 2 1f"]);
   assert.deepEqual(names(true), ["live", "past 2 1f open", "new", "old"]);
+  assert.deepEqual(runRows(runs, false, "old").map(row => row.kind === "run" ? row.run.session : row.kind), ["live", "past", "old"], "the open page's run stays under a closed fold");
   assert.deepEqual(runRows([], true), []);
   assert.deepEqual(runRows([runs[1]], false).map(row => row.kind), ["run"]);
 });
