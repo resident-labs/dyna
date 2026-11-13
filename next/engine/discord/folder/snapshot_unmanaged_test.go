@@ -17,6 +17,17 @@ func TestUnmanagedConfigurationIsNotInterpreted(t *testing.T) {
 			config.Channels[index].Type = 13
 		}
 	}
+	var externalID string
+	for _, channel := range config.Channels {
+		if channel.Name == "external" {
+			externalID = channel.ID
+		}
+	}
+	config.Channels = append(config.Channels,
+		fakediscord.Channel{ID: "911", Name: "duplicate", Parent: externalID, Type: 0},
+		fakediscord.Channel{ID: "912", Name: "duplicate", Parent: externalID, Type: 0},
+		fakediscord.Channel{ID: "913", Name: "../unsafe", Parent: externalID, Type: 0},
+	)
 	fake.SetConfiguration(config)
 	client := &discord.Client{Endpoint: fake.HTTP.URL, HTTP: fake.HTTP.Client(), Token: fake.Token}
 	root := t.TempDir()

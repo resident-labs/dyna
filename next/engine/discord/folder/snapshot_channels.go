@@ -10,14 +10,6 @@ import (
 func snapshotChannels(out Snapshot, channels []liveChannel, roleNames, byID map[string]string, entries []Entry) (Snapshot, error) {
 	sort.SliceStable(channels, func(i, j int) bool { return channels[i].Position < channels[j].Position })
 	channelNames := map[string]bool{}
-	for _, channel := range channels {
-		key := channel.ParentID + "/" + channel.Name
-		if !safeName(channel.Name) || channelNames[key] {
-			return out, fmt.Errorf("unsafe or ambiguous channel/category name %q under %s", channel.Name, channel.ParentID)
-		}
-		channelNames[key] = true
-		byID[channel.ID] = channel.Name
-	}
 	unmanaged := map[string]string{}
 	for _, entry := range entries {
 		if entry.Unmanaged != "" {
@@ -44,6 +36,11 @@ func snapshotChannels(out Snapshot, channels []liveChannel, roleNames, byID map[
 			out.Entries = append(out.Entries, entry)
 			continue
 		}
+		key := channel.ParentID + "/" + channel.Name
+		if !safeName(channel.Name) || channelNames[key] {
+			return out, fmt.Errorf("unsafe or ambiguous channel/category name %q under %s", channel.Name, channel.ParentID)
+		}
+		channelNames[key] = true
 		overwrites := Overwrites{}
 		for _, overwrite := range channel.Overwrites {
 			name := roleNames[overwrite.ID]

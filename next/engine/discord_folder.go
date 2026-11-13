@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
@@ -65,9 +64,9 @@ func (s *Service) discordFolderRoute(ctx context.Context, caller contract.Princi
 	if err != nil {
 		return selected, "", failure(err)
 	}
-	path := filepath.Join(roomPath, "discord")
-	if count > 1 {
-		path = filepath.Join(path, selected.Guild)
+	path, err := folder.ServerPath(roomPath, selected.Guild, count > 1)
+	if err != nil {
+		return selected, "", invalid(err.Error())
 	}
 	return selected, path, nil
 }
@@ -138,6 +137,7 @@ func (s *Service) DiscordPlan(ctx context.Context, caller contract.Principal, re
 			}
 		}
 	}
+	snapshot.Policy = route.Policy
 	plan, err := folder.BuildPlan(desired, snapshot)
 	if err != nil {
 		return contract.DiscordFolderResponse{}, invalid(err.Error())
