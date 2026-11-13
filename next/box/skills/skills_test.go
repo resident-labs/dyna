@@ -75,7 +75,7 @@ func TestTheWorkflowSkillSaysWhatTheCodeDoes(t *testing.T) {
 		t.Fatal(err)
 	}
 	meta, err := Parse(data)
-	if err != nil || meta.Name != "dyna-workflows" || !strings.HasPrefix(meta.Description, "Use when you write, test or resume a Dyna workflow, or reload a running one") {
+	if err != nil || meta.Name != "dyna-workflows" || !strings.HasPrefix(meta.Description, "Use when you write, run, resume or reload a Dyna workflow script") {
 		t.Fatalf("%+v %v", meta, err)
 	}
 	text := string(data)
@@ -83,11 +83,11 @@ func TestTheWorkflowSkillSaysWhatTheCodeDoes(t *testing.T) {
 		"`JSON.parse(args)`", "`{code, stdout, stderr, durationMs}`", "`check` defaults to `true`", "`{failed: true, step, reason}`",
 		"`{step, text, branch, commit, files}`", "`{step, output, branch, commit, files}`", "`{branch, commit, merged, conflicts}`", "`r.output.issues`",
 		"A crew reports only to its parent", "`merge()` reads `commit`, not the tip of `branch`", "A resume is a new session", "through any chain of resumes",
-		"the run ended first", "needs no polling", "Nothing wakes a worker", "only through the prompt", "one worker per 512 MiB", "holds a box slot",
+		"the run ended first", "`Failed steps (N): <names>`", "`data.json`", "Up to 1024 bytes", "Nothing wakes a worker", "only through the prompt", "one worker per 512 MiB", "holds a box slot",
 		"dry run of one group", "give up in 40 seconds", "still reports done",
 		"Reload is for a running run, resume for an ended one", "`dyna workflow reload RUN FILE`", "no second one starts", "runs on until the run ends",
 		"`meta.name`, `meta.repo`, `meta.size` and `meta.gpu` stay", "the run's models follow the new profiles", "the version that started it",
-		"the worker submits a JSON file with its `submit` tool", "`status(text)`", "It is not a step", "`75 of 76 steps · 1 running`", "`{lane: g.id}`", "options other than `lane`", "Nothing is read from a step's name",
+		"the worker submits a JSON file with its `submit` tool", "`status(text)`", "It is not a step", "`{lane: g.id}`", "options other than `lane`", "nothing is read from a step's name",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the skill does not say %q", want)
