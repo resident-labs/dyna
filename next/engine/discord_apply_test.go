@@ -431,7 +431,7 @@ func TestPruneRefusesACategoryHoldingAnUnmanagedChannel(t *testing.T) {
 
 func TestApplyRefusesManagedFlagOnAnOrdinaryRole(t *testing.T) {
 	server := emptyServer()
-	server.Roles = append(server.Roles, fakediscord.Role{ID: "30", Name: "A", Position: 2}, fakediscord.Role{ID: "31", Name: "B", Position: 1})
+	server.Roles = append(server.Roles, fakediscord.Role{ID: "30", Name: "A", Position: 2, Permissions: "0"}, fakediscord.Role{ID: "31", Name: "B", Position: 1, Permissions: "0"})
 	yaml := "settings: {}\nroles:\n  - {name: Kira, managed: true, id: \"11\"}\n  - {name: B, managed: true}\n  - {name: A, managed: true}\n  - {name: \"@everyone\", id: \"100\", permissions: [view_channel]}\n"
 	a := newApplyTest(t, server, map[string]string{"server.yaml": yaml})
 	if message := a.refusal(); !strings.Contains(message, "managed") || a.writes() != 0 {
