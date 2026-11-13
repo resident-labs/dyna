@@ -11,7 +11,8 @@ export class VoiceCall {
   private item = '';
   private generation = 0;
   private receiptTimer?: ReturnType<typeof setInterval>;
-  constructor(private changed: (state: CallState) => void) {}
+  private changed: (state: CallState) => void;
+  constructor(changed: (state: CallState) => void) { this.changed = changed; }
   private update() { this.changed({ ...this.state, transcript: [...this.state.transcript] }); }
   async start(room: string) {
     if (this.state.active) return;
@@ -36,6 +37,7 @@ export class VoiceCall {
         if (++ticks % 60 === 0) played('', 0);
       }, 250);
       ws.onmessage = event => {
+        if (this.socket !== ws || generation !== this.generation) return;
         if (event.data instanceof ArrayBuffer) {
           if (this.item) audio.play(bytesToBase64(new Uint8Array(event.data)), 24000, this.item);
           return;
@@ -53,7 +55,7 @@ export class VoiceCall {
         }
         this.update();
       };
-      ws.onerror = () => this.stop('Could not connect the call.');
+      ws.onerror = () => { if (this.socket === ws && generation === this.generation) this.stop('Could not connect the call.'); };
       ws.onclose = () => { if (this.socket === ws) this.stop('Call ended'); };
     } catch (error) { if (generation === this.generation) this.stop(micError(error)); }
   }
