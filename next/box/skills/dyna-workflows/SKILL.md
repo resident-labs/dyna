@@ -1,108 +1,150 @@
 ---
 name: dyna-workflows
-description: Use when you write, test or resume a Dyna workflow, or reload a running one, a script that fans work out to workers in one box. It gives every script call's return and failure, reload and resume, worktrees and merge, and what a worker knows.
+description: Use when you write, run, resume or reload a Dyna workflow script, read why a run failed, or a task needs many agents coordinated in code.
 ---
 
 # Dyna workflows
 
-A workflow is a script that fans work out to workers in one box. `dyna workflow run FILE [--args JSON] [--resume RUN]`, or the `workflow` tool, starts it as a child session, a crew, and `dyna workflow reload RUN FILE` changes a running one. Any session starts one unless the owner's workflow settings say otherwise, and a refused call names the setting that refused it. Its end, whether a return, a throw or a stop, reaches whoever started it as a reply, so a run needs no polling.
+A workflow is a JavaScript script that a crew, one child session with one box, runs to start workers,
+commands and merges. Every call is a step stored under a key hashed from what the call is, so a
+restarted box, a reload or a resume gets each unchanged finished step's result back without rerunning it.
 
-The owner's workflow settings, per room with a global default, can turn off `agent()` with `worktree`, `merge()`, `run()`, `workflow()`, `post()` and resume, limit the runs going and the workers in a run, allow only some profiles, and set the default box size and timeout. A call a setting refuses throws, or fails the start, naming the setting. The `dyna_workflows` section lists what the room changes from the defaults.
+## Write and start a script
 
-Every script begins with `export const meta = {...}`: a pure literal (no variables, calls or interpolation) that the engine reads before any box exists.
-
-```js
-export const meta = { name: 'sweep', profiles: ['terra', 'opus'], size: 'large', description: 'One PR per group' }
-```
-
-- `name` (required): letters, digits, `.`, `_` or `-`, at most 57.
-- `profiles` (required): the first is `agent()`'s default.
-- `size`: `agent`, `small`, `medium`, `large` or `xlarge`, one worker per 512 MiB: 4, 8, 16, 32 or 64.
-- `repo`: one of the room's repositories, by default the room's default. Without one, `worktree` and `merge()` are unavailable.
-
-The usual shape is writers in worktrees, a check that each wrote something, and one merge:
+Save this complete script as `sweep.js`, set `profiles` from `dyna_profiles`, and start it as below.
 
 ```js
-const written = await parallel(args.groups.map(g => () =>
-  agent(`Implement ${g.id}: ...`, { worktree: true, label: `write ${g.id}`, schema: WRITE })))
-const real = written.filter(w => !w.failed && w.files.length)
-const merged = await merge(real)
-return { merged: merged.merged, conflicts: merged.conflicts, empty: written.filter(w => !w.failed && !w.files.length).map(w => w.step) }
+export const meta = { name: 'sweep', profiles: ['fast'], size: 'large', description: 'One change per group' }
+const WRITE = { type: 'object', required: ['summary'], properties: { summary: { type: 'string' } } }
+const written = await parallel(args.groups.map(g => () => agent(`In this repository, ${g.task}`,
+  { worktree: true, label: `write ${g.id}`, lane: g.id, schema: WRITE })))
+const merged = await merge(written.filter(w => !w.failed && w.files.length), { label: 'merge' })
+return { branch: merged.branch, merged: merged.merged, conflicts: merged.conflicts,
+  empty: written.filter(w => !w.failed && !w.files.length).map(w => w.step) }
 ```
 
-## Script globals
+```sh
+dyna workflow run sweep.js --args '{"groups":[{"id":"a","task":"fix the typos in README.md."}]}'
+```
 
-- `args`: the request's JSON, already parsed, or `null`. `JSON.parse(args)` throws on an object.
-- `agent(prompt, {profile, schema, label, phase, lane, timeout, worktree})`: one worker, a PiG session. Returns its final text; with `schema`, the parsed value; with `worktree: true`, `{step, text, branch, commit, files}`, or `{step, output, branch, commit, files}` with `schema`, so a schema field is `r.issues`, or `r.output.issues` in a worktree. With `schema`, the worker submits a JSON file with its `submit` tool, so a large result lives in the file and the final text is not read. Throws on an unknown profile, a timeout (seconds, default 5 hours or the room's default timeout), no final text (without `schema`), or no valid submit in three tries (with one).
-- `run(command, {cwd, env, timeout, check, label, phase, lane})`: one command in the main tree, holding the build lock. A string runs in `sh -c`, a list directly. Returns `{code, stdout, stderr, durationMs}`, the last 64 KiB of each stream. `check` defaults to `true`, so a nonzero exit throws `exit code N: <stderr>`; with `check: false` the object carries `code`. A timeout throws either way.
-- `parallel(thunks)`: starts every thunk at once and returns results in input order. It does not throw: a failure becomes `{failed: true, step, reason}`.
-- `pipeline(items, ...stages)`: each item goes through the stages on its own, and a stage gets `(previous, item, index)`. Same failure entries, and a failed item skips its later stages.
-- `merge(results, {base, label, phase})`: merges each result's `commit`, in order, from `base` (the pinned commit by default) into `<your branch>-run` (your branch is named in your instructions). Returns `{branch, commit, merged, conflicts}`. A conflict leaves that step out and does not throw. A failed entry lands in `conflicts` with its reason. A later merge starts from `base` again, so `{base: earlier.commit}` builds on an earlier one. `merge()` reads `commit`, not the tip of `branch`: after a push to a result's branch, `{...result, commit: pushed}` carries the new work.
-- `workflow(path, args)`: runs one script from the checkout and returns its value. Nesting is one level.
-- `post(to, text, data, {lane})`: posts as the crew to its parent and returns `{event, seq}`. A crew reports only to its parent, the session that started it, or root when the owner did, so `to` is `parent` or that session's name or ID; the engine refuses any other mention and the step fails. `data` is a separate JSON value, not part of the text; omission differs from `null`. The web shows values at or below 300 UTF-8 JSON bytes as a quiet monospace line (Copy on hover/focus, no Download); larger values use a collapsed, foldable data chip with Copy JSON and Download inside. Array positions are unquoted; long strings start at three lines with Show all. Copy and file delivery preserve the complete value. Recipient inputs pretty-print values at or below 1024 encoded bytes inline; larger values arrive as the ordinary attachment `data.json`, with its actual `/box/attachments/<seq>/data.json` path in the frame and body. Read that file for the complete value. Encoding is compact UTF-8 JSON without a trailing newline, preserving number spellings and escaping HTML-sensitive characters as `\u` sequences; no data is truncated. A non-string script return uses the same delivery rule for its final reply and remains complete in the journal; a returned string stays final text (even if it looks like JSON). Throws and stops still report their status and reason. Replay keeps the same post/file.
-- `phase(title)` sets the stage of later steps, and the `phase` option sets one step's. `lane` names the subject a step is about, as in `{lane: g.id}`. Nothing is read from a step's name: the run page's flowchart has a node per phase and draws each lane's path between them, loops included, and its timeline labels a step by its lane. Without lanes, phases connect in the order they first ran.
-- `status(text)` sets the run's one line of what is happening, shown under its name on the run page and in the Runs list, as in ``status(`Wave 3: ${landed} of ${total} landed`)``. It is not a step: the run keeps the latest line and the 19 before it, and a resumed script writes its lines again as it reaches them. Without one, the page counts steps, as `75 of 76 steps · 1 running`.
-- `log(...values)` and `console.*` write to the run, joining values with spaces: strings as they are, arrays and objects as JSON.
-- `Date.now()`, `Math.random()` and `new Date()` with no argument throw, because a rerun has to make the same calls. A bare `Date()` throws the engine's TypeError, and `globalThis.Date.now()` and `globalThis.Math.random()` reach the frozen built-ins, because the guard is for honest scripts, not a boundary.
-- A step the script does not await is cancelled when the script returns, and it fails: a script reads the result of every `agent()` it needs, by awaiting it.
+- Only comments may come before `meta`. An unknown key, or no `name` or `profiles`, refuses the start.
+- `name`: letters, digits, `.`, `_` or `-`, at most 57; the crew session is `<name>-<6 characters>`.
+- `profiles`: the only ones `agent()` may use, the first its default. An unknown one refuses the start.
+- `size`: `agent`, `small`, `medium`, `large` or `xlarge` (2 to 32 GiB); else the room's `size` setting.
+- `repo`: by default the room's default repository. A run with none has no `worktree` or `merge()`.
 
-A failed call throws an `Error` with `.step` and `.reason`. An uncaught throw ends the run as `failed`. A script that returns ends `done`, however many steps failed; its value, up to 1 MiB, is the reply.
+A refused start names the setting; `dyna_workflows` lists what is off. Root changes it with
+`dyna workflow set` (skill dyna-admin), others ask their parent. A switch turned off mid-run throws.
 
-## Reload and resume
+## Collect what workers and commands return
 
-Reload is for a running run, resume for an ended one. Both go by step key: a hash of the step's kind, prompt or command, options other than `lane`, profile and enclosing `workflow()` step, not its order. A key that matches a finished step returns the stored result, so a changed prompt, command or option reruns that step alone, and a kept step takes the lane the script now gives it.
+A failed call throws an `Error` with `.step` and `.reason`. An option a call does not take fails that step.
 
-`dyna workflow reload RUN FILE`, or the tool's `reload` action, gives a running run a new script. The starter, a session above it and the owner reload one.
+- `args` is `null` without `--args`. It is already parsed: `JSON.parse(args)` throws on an object.
+- `agent()` returns the final text, or with `schema` the parsed JSON the worker submits as a JSON file.
+  With `worktree: true` it returns `{step, text, branch, commit, files}`, or
+  `{step, output, branch, commit, files}` with `schema`, so a field is `r.issues` or `r.output.issues`.
+- `agent()` throws on a profile not in `meta.profiles`, on a timeout (seconds; default the room's
+  workflow timeout, 5 hours unless set), on no final text (without `schema`), on no valid submit in
+  three tries (with one), and when a worktree's push fails.
+- `run()` holds the build lock; `cwd` is relative to the main tree unless it is absolute. A string runs
+  in `sh -c`, a list directly. It returns `{code, stdout, stderr, durationMs}`, the last 64 KiB of each
+  stream. `check` defaults to `true`, so a nonzero exit throws `exit code N: <stderr>`; with
+  `check: false` read `code`. A timeout throws either way.
+- `parallel()` and `pipeline()` do not throw: a failure becomes `{failed: true, step, reason}`, and in a
+  pipeline a failed item skips its later stages. A stage gets `(previous, item, index)`.
+- `workflow(path, args)` nests one level, ignores the child's `meta`, and reruns on every call.
+- `post()` returns `{event, seq}`, once however often the script replays.
+  A crew reports only to its parent: any other mention fails the step. Omitting `data` differs from `null`.
+- `label` names the step in `failedSteps`, `merged`, `conflicts` and `.step`, and
+  nothing is read from a step's name; the default is the kind and 80 characters, so set distinct labels.
+- `status(text)` keeps the newest 20 lines of up to 200 characters. It is not a step and does not replay.
+- `Date.now()`, `Math.random()` and `new Date()` with no argument throw, because a rerun makes the same
+  calls; pass a time or a seed in `args`. The VM has no timers, files or network.
+- A step the script does not await is cancelled when the script returns, and fails.
 
-- The same crew, box, main tree, branches and journal carry on. The crew stops the old script and runs the new one from its start.
-- A key whose step is running joins it: the call waits for the worker already at work, and no second one starts. A new key starts a step. A running step the new script does not call runs on until the run ends, and then fails with `the run ended first`.
-- `meta.name`, `meta.repo`, `meta.size` and `meta.gpu` stay as the run has them, and a reload that changes one is refused. `profiles` and `description` may change, and the run's models follow the new profiles.
-- The run keeps every version of its script, and each step records the version that started it.
+An uncaught throw ends the run `failed`. A return ends it `done`, however many steps failed; a return
+value or step result over 1 MiB as JSON fails it.
 
-`--resume RUN` names an ended run of the same room and repository. A resume is a new session, possibly on another host, with the same pinned commit.
+## Read how a run ended
 
-- Failed steps and steps the end cut off run again. Main-tree files are not kept. Worktree branches are, and the new run can push to the branches of the runs it resumes, through any chain of resumes.
-- A step reruns only when its own key changes. A reviewer whose prompt is unchanged keeps its old verdict after the code under it changed; a prompt that names the commit it reviews ties the verdict to that code.
+- A returned string is the starter's reply text, plus `Failed steps (N): <names>` when any failed.
+- Any other value is the reply's data, with the text `Workflow <name> finished.`: compact UTF-8 JSON,
+  number spellings kept, HTML-sensitive characters as `\u` escapes. Up to 1024 bytes it is printed in
+  the input; above, it is the attachment `data.json` at the `/box/attachments/<seq>/data.json` path the
+  input names. `post()` data arrives the same way. Nothing is truncated.
+- A throw gives the error `workflow <name>: <reason>`, a stop `Workflow <name> stopped.`.
+- `dyna workflow status RUN` (or the tool's `status` action) shows the result, each step's state,
+  failure reason and script version, and the newest merge; `dyna workflow list` gives run IDs, crew
+  sessions and pinned commits. A worker's words are not readable from a box, so return what is needed.
 
-## Workers
+## Merge worktrees and test the merge
 
-- Each `agent()` is a new PiG session with the session's instructions, one paragraph on being a worker, its prompt and the schema. It has no memory of other steps, no `args`, no feed and no view of other workers, so paths, branches, rules and earlier output reach it only through the prompt.
-- It has the session's tools: files, `bash`, `job`, `codemode`, the `dyna` tools and git with the crew's push rights. Nothing wakes a worker: a `bash` command past 30 seconds becomes a job that it reads with `job output`.
-- With `worktree: true` it gets its own tree and branch from the pinned commit. What it leaves is committed and pushed before the step is stored, and `files` lists what changed, `[]` for nothing. Without it, workers share the main tree, whose uncommitted files a lost box or a resume drops. Two writers editing one place conflict at merge.
-- A worker waits for a box slot, then its profile's `maxConcurrent`; `timeout` starts once it holds both, so a step waiting on its profile holds a box slot. One build runs at a time across `run()` and the workers.
+- `worktree: true` gives a worker its own tree and branch `<crew branch>-<12 hex>` from the pinned
+  commit (`commit` in `workflow list`). What it left, except ignored files, is committed and pushed;
+  `files` lists what changed, `[]` for nothing. The tree is then removed; later steps see a branch.
+- Without `worktree`, workers share the main tree, whose uncommitted files a lost box or a resume drops.
+- `merge(results)` merges each `commit`, in order, from `base` (the pinned commit by default) into
+  `<crew branch>-run`, pushes it and returns `{branch, commit, merged, conflicts}`. A conflict or a
+  failed `parallel` entry lands in `conflicts` as a failed step; it throws only on misuse or a git
+  failure. A later `merge()` replaces the run branch; `{base: earlier.commit}` builds on an earlier one.
+- `merge()` reads `commit`, not the tip of `branch`: after a push to a result's branch,
+  `{...result, commit: pushed}` carries the new work. No rebase and no repair: hand a conflict to an
+  `agent()` in a worktree whose prompt names both branches.
 
-## Stopping
-
-`session stop` on the crew stops the run. Finished steps stay, running ones fail with `the run ended first`, the end reaches the starter as a reply, and the crew closes itself.
-
-## Shaping a run
-
-A run is worth its cost when it covers more than one context holds, checks its own findings, or takes several independent angles before committing. A small task is cheaper done directly.
-
-`pipeline()` is the default for work in stages: each item moves to its next stage as soon as it is ready, so wall time is the slowest single chain, not the sum of each stage's slowest. A barrier, `await parallel(...)` between stages, earns its wait only when a stage needs every earlier result at once: deduplicating across all findings, stopping early when there are none, or comparing items with each other. Flattening, mapping or filtering happens inside a stage and needs no barrier.
+The main tree stays on the pinned commit, so test a merge in a temporary worktree, in one `run()` that
+a replay cannot split. Use the repository's test command; `test.code` is 0 when the merge passes:
 
 ```js
-const reviewed = await pipeline(groups,
-  g => agent(`Write ${g.id}`, { worktree: true, label: `write ${g.id}`, schema: WRITE }),
-  w => w.files.length ? agent(`Review commit ${w.commit} on ${w.branch}`, { label: `review ${w.step}`, schema: REVIEW }) : { empty: true })
+const dir = `/tmp/check-${merged.commit}`
+const test = await run(`git fetch origin ${merged.branch} && git worktree add --detach ${dir} ${merged.commit} &&
+  (cd ${dir} && go test ./...); s=$?; git worktree remove --force ${dir}; exit $s`, { check: false, label: 'test merge' })
 ```
 
-Patterns, which compose:
+## What a worker knows, and why it waits
 
-- **Write, review, fix:** a writer in a worktree, a reviewer whose prompt names the commit, and a fixer that gets the findings and the branch. The fixer's result carries its own commit, and `merge()` takes that. A fixed round count bounds the loop.
-- **Adversarial verify:** several workers each try to refute one finding, and the finding survives when most fail to. This keeps a plausible but wrong finding out.
-- **Different lenses:** when a finding can fail in more than one way, each verifier takes one lens, such as correctness, security, or whether it reproduces. Different lenses catch what repeating one lens misses.
-- **Judge panel:** several independent attempts from different starting points, scored by separate judges, then built from the best with the runners-up's good ideas. It suits a wide solution space.
-- **Loop until dry:** finders run in rounds until a set number of rounds in a row turn up nothing new, deduplicated against everything seen so far, not only against what passed. A fixed count misses the tail.
-- **Several search methods:** workers each search a different way, by file, by content, by name or by history, because each misses what the others find.
-- **Completeness check:** a last worker asks what is missing, such as an unread source, an unrun method or an unchecked claim, and its answer becomes the next round.
-- **No silent caps:** a run that samples or takes the top N says what it left out with `log()` and in its result, so a partial pass does not read as a full one.
+- Each `agent()` is a new session with the shared core of the system prompt, AGENTS.md, the skills, its
+  prompt and the schema: no `dyna_*` context, no `args`, no memory of other steps, so paths, branches,
+  rules and earlier output reach it only through the prompt.
+- A box holds at most one worker per 512 MiB (4 to 64 by `size`). A worker waits for a box slot, then
+  its profile's `maxConcurrent` (`dyna_profiles`); the room's workflow `maxWorkers` can cap a run lower,
+  read when its box starts (skill dyna-admin). `timeout` starts once a worker holds both, so a step
+  waiting on its profile holds a box slot.
+- One build runs at a time in the box: `run()` and workers' `cargo`, `go`, `npm`, `make` and similar
+  share one lock, and time queued for it does not count against a timeout.
 
-Scale follows the ask: a quick check takes a few workers and one verifier each, and a thorough audit takes more finders, three to five verifiers and a closing synthesis. Profile limits bound how many run at once. A stronger profile for reviewing and a cheaper one for writing is a common split.
+## Stop, reload or resume a run
 
-## Gotchas
+- Stop: the session tool's `stop` action on the crew, or `dyna session stop CREW`, then check
+  `dyna workflow status RUN` says `stopped`. Running steps fail with `the run ended first`; to undo,
+  start the same script with `--resume RUN`. A lost box needs nothing: a new box replays the script.
 
-- A worker that skips everything still reports done, because it ends with text. Reading `files.length` or a schema field before moving on catches it.
-- A rule worded too tightly stops work: "read and write files and use git only" made every writer give up in 40 seconds.
+Reload is for a running run, resume for an ended one. Both match steps by key: a hash of the kind,
+prompt or command, options other than `lane`, effective profile and enclosing `workflow()` step. A
+finished key returns its stored result, so a changed prompt or option reruns that step alone, and a new
+`meta.profiles[0]` reruns every step that used the default. Two identical calls are two steps. Name
+the commit in a reviewer's prompt, or its old verdict survives a change to the code.
+
+- `dyna workflow reload RUN FILE` (or the tool's `reload` action) fixes a prompt or adds steps while
+  finished work stays. A running step the new script still calls keeps its worker, so
+  no second one starts; one it drops runs on until the run ends.
+- `dyna workflow run FILE --resume RUN` takes an ended run of the same room and repository.
+  A resume is a new session, possibly on another host, with the same pinned commit. Failed steps,
+  `workflow()` steps and cut-off steps rerun; main-tree files are lost. Worktree branches are fetched
+  back (a deleted one fails its call); it can push to branches of runs through any chain of resumes.
+
+## Shape a run
+
+A run pays when it covers more than one context holds, checks its own findings, or takes several
+independent angles; a small task is cheaper done directly. `pipeline()` is the default for stages:
+wall time is the slowest chain, not the sum of each stage's slowest. A barrier, `await parallel(...)`
+between stages, pays only when a stage needs every earlier result at once: deduplicating, stopping
+early, comparing. Useful shapes: write, review (the prompt names the commit) and fix, for a fixed
+number of rounds; several workers each trying to refute one finding; finders in rounds until a set
+number of rounds in a row find nothing new. A run that samples or takes the top N says what it left out.
+
+- A worker that skips everything still reports done. Check `files.length` or a schema field.
+- Do not prohibit the tools a worker needs to build and verify its change.
 - A dry run of one group finds a wrong prompt or result shape for the cost of one worker.
+- Two writers editing one place conflict at merge, so give writers separate files.
 - A `done` run is not proof of finished work: `conflicts`, `merged` and failed steps say what happened.
