@@ -28,6 +28,7 @@ import (
 	"github.com/resident-labs/dyna/engine/api"
 	enginegit "github.com/resident-labs/dyna/engine/git"
 	"github.com/resident-labs/dyna/engine/model"
+	"github.com/resident-labs/dyna/harness/testutil"
 )
 
 const (
@@ -439,12 +440,16 @@ func (c *realCrew) lose(id contract.BoxID, session contract.SessionID) {
 
 func (c *realCrew) wait(what string, done func() bool) {
 	c.t.Helper()
-	for !done() {
+	deadline, _ := c.ctx.Deadline()
+	testutil.Eventually(c.t, time.Until(deadline), what, func() bool {
+		if done() {
+			return true
+		}
 		if c.ctx.Err() != nil {
 			c.t.Fatalf("waited for %s, after %d model requests", what, c.upstream.count())
 		}
-		time.Sleep(100 * time.Millisecond)
-	}
+		return false
+	})
 }
 
 func (c *realCrew) status(run contract.WorkflowRunID) contract.WorkflowStatusResponse {
