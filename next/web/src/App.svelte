@@ -265,7 +265,7 @@
   const folded = new SvelteSet<string>();
   const openIdle = new SvelteSet<string>();
   type SessionListRow = TreeRow | RunRowEntry | { kind: "new-session" };
-  const treeKey = (entry: SessionListRow) => entry.kind === "new-session" ? "new-session" : entry.kind === "idle" ? `idle ${entry.key}` : entry.kind === "past" ? "past runs" : entry.kind === "head" ? "runs" : entry.kind === "run" ? `run ${entry.run.session}` : entry.session.session;
+  const treeKey = (entry: SessionListRow) => entry.kind === "new-session" ? "new-session" : entry.kind === "idle" ? `idle ${entry.key}` : entry.kind === "past" ? "past runs" : entry.kind === "more" ? "more runs" : entry.kind === "head" ? "runs" : entry.kind === "run" ? `run ${entry.run.session}` : entry.session.session;
   // A row's menu of actions. A right click or the Menu key opens it at the pointer, and the row's More button opens it
   // under the button. It closes with its session, and a button that opened it toggles it.
   let acting: { session: string; anchor: DOMRect; side: "start" | "end"; trigger: HTMLElement } | undefined = $state();
@@ -287,8 +287,8 @@
   let tree = $derived(sessionTree(store?.members ?? [], store?.statuses() ?? new Map(), starting, session, folded, openIdle));
   // The room's workflow runs lead the panel: the running ones stand in view, and the past ones fold into one row that counts them,
   // so that 19 runs never bury 3 sessions. A past run that is open stays listed under a closed fold.
-  let openPast = $state(false);
-  let runs = $derived(store?.ready ? runRows(store.workflows.values(), openPast, session) : []);
+  let openRuns = $state({ running: false, past: false });
+  let runs = $derived(store?.ready ? runRows(store.workflows.values(), openRuns, session) : []);
   let sessionRows: SessionListRow[] = $derived([...runs, ...tree, ...attention.can("operate") ? [{ kind: "new-session" as const }] : []]);
   // Left folds a parent's subtree and Right opens it, on its row or its chevron.
   function fold(event: KeyboardEvent, id: string) {
@@ -884,9 +884,11 @@
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions (the arrow keys walk the list through its heading too) -->
         {#if entry.kind === "head"}<div class="runs-head" role="heading" aria-level="2" tabindex="-1" data-key={treeKey(entry)} onkeydown={walkTree}>Workflows</div>
         {:else if entry.kind === "run"}{@const { run } = entry}<a class="member run" class:end={entry === runs.at(-1)} data-key={treeKey(entry)} href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(run.session)}`}
-          onclick={openSession} onkeydown={walkTree} aria-current={session === run.session ? "page" : undefined} title={run.description ? `${run.name}: ${run.description}` : run.name}><RunRow {run} /></a>
+          onclick={openSession} onkeydown={walkTree} aria-current={session === run.session ? "page" : undefined} title={[run.name, run.status || run.description].filter(Boolean).join(": ")}><RunRow {run} /></a>
+        {:else if entry.kind === "more"}<button type="button" class="idle" data-key={treeKey(entry)} aria-expanded={entry.open} style:padding-left="6px" onkeydown={walkTree}
+          onclick={() => { openRuns.running = !openRuns.running; }}><Icon name="chevron" size={12} />{entry.count} more running</button>
         {:else if entry.kind === "past"}<button type="button" class="idle" class:end={entry === runs.at(-1)} data-key={treeKey(entry)} aria-expanded={entry.open} style:padding-left="6px" onkeydown={walkTree}
-          onclick={() => { openPast = !openPast; }}><Icon name="chevron" size={12} /><span>{count(entry.count, "past run")}{#if entry.failed}<span class="failed-runs">{` · ${count(entry.failed, "failed run")}`}</span>{/if}</span></button>
+          onclick={() => { openRuns.past = !openRuns.past; }}><Icon name="chevron" size={12} /><span>{count(entry.count, "past run")}{#if entry.failed}<span class="failed-runs">{` · ${count(entry.failed, "failed run")}`}</span>{/if}</span></button>
         {:else if entry.kind === "new-session"}<button type="button" class="new-session" data-key={treeKey(entry)} onkeydown={walkTree}
           onclick={() => openNew("session")}><Icon name="plus" size={14} />New session</button>
         {:else if entry.kind === "idle"}<button type="button" class="idle" data-key={treeKey(entry)} aria-expanded={entry.open} style:--depth={entry.depth} style:padding-left="{6 + entry.depth * 20}px" onkeydown={walkTree}

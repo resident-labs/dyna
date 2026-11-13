@@ -125,12 +125,20 @@ export function roomRuns(runs: Iterable<WorkflowInfo>): { running: WorkflowInfo[
     past: all.filter(run => run.state !== "running").sort((a, b) => at(b) - at(a)) };
 }
 
-// The runs' rows in the sessions panel: each running run, then one row that counts the past ones and, open, lists them. keep is
-// the open page's run, which stays listed under a closed fold. A room with no runs has no rows, and any runs lead with a "Workflows" heading.
-export type RunRow = { kind: "head" } | { kind: "run"; run: WorkflowInfo } | { kind: "past"; count: number; failed: number; open: boolean };
-export function runRows(runs: Iterable<WorkflowInfo>, open: boolean, keep?: string): RunRow[] {
+// The runs' rows in the sessions panel, under a "Workflows" heading: the first few running runs, a row that counts the rest and,
+// open, lists them, then the same for the past runs, so that many runs never bury the sessions. The past row counts the failures
+// of the last day, which are news. keep is the open page's run, which stays listed under a closed fold. A room with no runs has
+// no rows.
+export const RUNNING_SHOWN = 4;
+export type RunRow = { kind: "head" } | { kind: "run"; run: WorkflowInfo } | { kind: "more"; count: number; open: boolean } | { kind: "past"; count: number; failed: number; open: boolean };
+export function runRows(runs: Iterable<WorkflowInfo>, open: { running: boolean; past: boolean }, keep?: string): RunRow[] {
   const { running, past } = roomRuns(runs), row = (run: WorkflowInfo): RunRow => ({ kind: "run", run });
-  const rows = [...running.map(row), ...past.length ? [{ kind: "past" as const, count: past.length, failed: past.filter(run => run.state === "failed").length, open }] : [], ...past.filter(run => open || run.session === keep).map(row)];
+  // The runs under a fold: all of them when it is open, else only the open page's.
+  const folded = (list: WorkflowInfo[], opened: boolean) => list.filter(run => opened || run.session === keep).map(row);
+  const news = Date.now() - 86_400_000;
+  const rows: RunRow[] = [...running.slice(0, RUNNING_SHOWN).map(row),
+    ...running.length > RUNNING_SHOWN ? [{ kind: "more" as const, count: running.length - RUNNING_SHOWN, open: open.running }, ...folded(running.slice(RUNNING_SHOWN), open.running)] : [],
+    ...past.length ? [{ kind: "past" as const, count: past.length, failed: past.filter(run => run.state === "failed" && Date.parse(run.ended ?? run.started) > news).length, open: open.past }, ...folded(past, open.past)] : []];
   return rows.length ? [{ kind: "head" }, ...rows] : [];
 }
 

@@ -232,15 +232,20 @@ test("Runs lists the running runs first, newest first, then the rest, the latest
   assert.deepEqual(runCounts({ failed: 0 }), []);
 });
 
-test("the panel's run rows: running runs, then a count of the past ones that lists them when open", () => {
+test("the panel's run rows: a few running runs, a count of the rest, and the past ones, each folded until opened", () => {
   const run = (session: string, fields: Partial<WorkflowInfo> = {}): WorkflowInfo => status({ session, state: "done", ...fields }).run;
-  const runs = [run("old", { ended: "2026-01-01T01:00:00Z" }), run("live", { state: "running" }), run("new", { state: "failed", ended: "2026-01-02T00:00:00Z" })];
-  const names = (open: boolean) => runRows(runs, open).map(row => row.kind === "run" ? row.run.session : row.kind === "head" ? "head" : `${row.kind} ${row.count} ${row.failed}f${row.open ? " open" : ""}`);
-  assert.deepEqual(names(false), ["head", "live", "past 2 1f"]);
-  assert.deepEqual(names(true), ["head", "live", "past 2 1f open", "new", "old"]);
-  assert.deepEqual(runRows(runs, false, "old").map(row => row.kind === "run" ? row.run.session : row.kind), ["head", "live", "past", "old"], "the open page's run stays under a closed fold");
-  assert.deepEqual(runRows([], true), []);
-  assert.deepEqual(runRows([runs[1]], false).map(row => row.kind), ["head", "run"]);
+  const hour = (ago: number) => new Date(Date.now() - ago * 3600_000).toISOString();
+  const runs = [run("old", { ended: hour(80) }), run("live", { state: "running" }), run("new", { state: "failed", ended: hour(2) }), run("older", { state: "failed", ended: hour(60) })];
+  const names = (open: boolean, list = runs) => runRows(list, { running: open, past: open }).map(row => row.kind === "run" ? row.run.session : row.kind === "head" ? "head" : `${row.kind} ${row.count}${row.kind === "past" ? ` ${row.failed}f` : ""}${row.open ? " open" : ""}`);
+  assert.deepEqual(names(false), ["head", "live", "past 3 1f"], "only the failure of the last day is news");
+  assert.deepEqual(names(true), ["head", "live", "past 3 1f open", "new", "older", "old"]);
+  assert.deepEqual(runRows(runs, { running: false, past: false }, "old").map(row => row.kind === "run" ? row.run.session : row.kind), ["head", "live", "past", "old"], "the open page's run stays under a closed fold");
+  assert.deepEqual(runRows([], { running: true, past: true }), []);
+  assert.deepEqual(runRows([runs[1]], { running: false, past: false }).map(row => row.kind), ["head", "run"]);
+  const busy = Array.from({ length: 7 }, (_, i) => run(`b${i}`, { state: "running", started: hour(7 - i) }));
+  assert.deepEqual(names(false, busy), ["head", "b6", "b5", "b4", "b3", "more 3"]);
+  assert.deepEqual(names(true, busy), ["head", "b6", "b5", "b4", "b3", "more 3 open", "b2", "b1", "b0"]);
+  assert.deepEqual(runRows(busy, { running: false, past: false }, "b0").map(row => row.kind === "run" ? row.run.session : row.kind).slice(-2), ["more", "b0"]);
 });
 
 test("the run branch and commit link to the repository, and a run with none links nowhere", () => {
