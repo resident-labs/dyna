@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"github.com/coder/websocket"
 	"github.com/resident-labs/dyna/contract"
+	"slices"
+	"sync"
 )
 
 func (s *Service) VoiceStatus(ctx context.Context, p contract.Principal, _ contract.VoiceStatusRequest) (contract.VoiceStatusResponse, *contract.Error) {
@@ -62,8 +64,13 @@ func (s *Service) Voice(ctx context.Context, room contract.RoomID) (func(*websoc
 			unsubscribe()
 			return err
 		}
+		var handoffMu sync.Mutex
+		var handoffInput contract.EventID
+		var handoffTurn contract.TurnID
+		var handoffResult chan string
 		backend := make(chan string)
 		go func() {
+			defer cancel()
 			defer func() { unsubscribe() }()
 			defer close(backend)
 			seen := make(map[contract.QuestionID]bool)
@@ -86,13 +93,50 @@ func (s *Service) Voice(ctx context.Context, room contract.RoomID) (func(*websoc
 				for _, event := range events {
 					after = event.Seq
 					text := ""
+					handoffMu.Lock()
 					switch b := event.Body.(type) {
+					case contract.TurnStarted:
+						if b.Session == root && handoffResult != nil && slices.Contains(b.Inputs, handoffInput) {
+							handoffTurn = b.Turn
+						}
 					case contract.PostCreated:
 						if event.From.Session == root && b.Home.Kind == contract.ConversationDM && b.Home.Session == root {
 							text = b.Text
 						}
 					case contract.TurnEnded:
-						if b.Session == root {
+						// A turn can start between the idle snapshot and posting. In
+						// that case the new input steers it without another turn.started.
+						if b.Session == root && handoffResult != nil && handoffTurn == "" {
+							var took bool
+							err := s.store.Read().QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.id=? AND d.to_id=? AND d.turn=?)`, handoffInput, root, b.Turn).Scan(&took)
+							if err != nil {
+								handoffMu.Unlock()
+								return
+							}
+							if took {
+								handoffTurn = b.Turn
+							}
+						}
+						if b.Session == root && handoffResult != nil && b.Turn == handoffTurn {
+							final := b.Final
+							for _, reply := range b.Replies {
+								if reply.Posted != "" && reply.Reply.Home.Kind == contract.ConversationDM && reply.Reply.Home.Session == root {
+									post, err := s.store.EventInRoom(ctx, room, reply.Posted)
+									if err != nil {
+										handoffMu.Unlock()
+										return
+									}
+									if body, ok := post.Body.(contract.PostCreated); ok {
+										final = body.Text
+									}
+									break
+								}
+							}
+							handoffResult <- final
+							handoffResult = nil
+							handoffInput = ""
+							handoffTurn = ""
+						} else if b.Session == root {
 							for _, reply := range b.Replies {
 								if reply.Posted == "" && reply.Reply.Home.Kind == contract.ConversationDM && reply.Reply.Home.Session == root {
 									text = b.Final
@@ -106,6 +150,7 @@ func (s *Service) Voice(ctx context.Context, room contract.RoomID) (func(*websoc
 							text = fmt.Sprintf("Question %s: %s", b.ID, b.Text)
 						}
 					}
+					handoffMu.Unlock()
 					if text != "" {
 						select {
 						case backend <- text:
@@ -131,12 +176,39 @@ func (s *Service) Voice(ctx context.Context, room contract.RoomID) (func(*websoc
 				}
 			}
 		}()
-		dispatch := func(ctx context.Context, text string) error {
-			_, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: room, Text: text, Spoken: true, Home: contract.Conversation{Kind: contract.ConversationDM, Session: root}})
-			if problem != nil {
-				return errors.New(problem.Message)
+		dispatch := func(ctx context.Context, text string) (string, error) {
+			handoffMu.Lock()
+			session, err := s.store.Session(ctx, root)
+			if err != nil {
+				handoffMu.Unlock()
+				return "", err
 			}
-			return nil
+			busy := session.Turn != "" || handoffResult != nil
+			result, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: room, Text: text, Spoken: true, Home: contract.Conversation{Kind: contract.ConversationDM, Session: root}})
+			if problem != nil {
+				handoffMu.Unlock()
+				return "", errors.New(problem.Message)
+			}
+			if busy {
+				handoffMu.Unlock()
+				return "This was sent to steer the previous background agent task.", nil
+			}
+			answer := make(chan string, 1)
+			handoffInput, handoffResult = result.Event, answer
+			handoffMu.Unlock()
+			select {
+			case final := <-answer:
+				return final, nil
+			case <-ctx.Done():
+				handoffMu.Lock()
+				if handoffResult == answer {
+					handoffResult = nil
+					handoffInput = ""
+					handoffTurn = ""
+				}
+				handoffMu.Unlock()
+				return "", ctx.Err()
+			}
 		}
 		return s.voice.Start(ctx, string(room), page, func(ctx context.Context) (*websocket.Conn, error) { return s.searchProxy.DialRealtime(ctx, ids) }, dispatch, backend)
 	}, nil
