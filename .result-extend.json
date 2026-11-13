@@ -1,0 +1,9 @@
+{
+  "summary": "Rewrote next/box/skills/dyna-extend/SKILL.md around tasks: choosing room/global/root-only/repository, making an add-on reach sessions now and checking it, writing and saving a skill (with the five-rule standard and the built-in-name refusal), run-on hosts with --host, owner-CLI changes on the engine host (dyna skill set NAME --host, HOST:PATH, dyna addon set --enabled/--root-only), Pi packages and MCP servers; description is 214 characters. Updated skills_test.go to the new description and added phrase checks (--root-only, dyna skill set NAME --host, is a built-in skill, dyna addon set); go test ./box/skills passes and the work is committed.",
+  "lines": 131,
+  "unverified": [
+    "`dyna addon set KIND NAME --room ROOM --enabled on|off` / `--root-only on|off` is not in this tree's CLI; printed from the brief's list of commands the parallel code PR adds (assumed: no --room means the global item, as addon.set_hosts does in code).",
+    "The root's dyna_room line \"Approvals the owner keeps\" naming global add-ons comes from the agreed code item E, not yet in this tree.",
+    "Outside next/box/skills: next/engine/addon_box_test.go:281 still asserts the old dyna-extend description, so that engine test fails until its expected string is updated. I could not touch it under the brief's rule."
+  ]
+}
