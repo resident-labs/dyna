@@ -88,7 +88,7 @@ func (s *Service) DiscordConfigure(ctx context.Context, caller contract.Principa
 	}
 	out := contract.DiscordConfigureResponse{BotID: b.ID, BotName: b.Name, Owner: b.Owner, GatewayError: b.Failure}
 	for _, r := range routes {
-		out.Routes = append(out.Routes, contract.DiscordRoute{Guild: r.Guild, Channel: r.Channel, Room: r.Room, Session: r.Session, Instructions: r.Instructions})
+		out.Routes = append(out.Routes, contract.DiscordRoute{Guild: r.Guild, Channel: r.Channel, Room: r.Room, Session: r.Session, Instructions: r.Instructions, Policy: r.Policy})
 	}
 	return out, nil
 }
@@ -144,6 +144,7 @@ func (s *Service) RoomDiscord(ctx context.Context, caller contract.Principal, re
 			return contract.RoomDiscordResponse{}, invalid("answering session is not open in this room")
 		}
 		instructions := ""
+		policyText, policyResolved := "", ""
 		previous, err := s.store.DiscordRoutes(ctx, room)
 		if err != nil {
 			return contract.RoomDiscordResponse{}, failure(err)
@@ -151,12 +152,13 @@ func (s *Service) RoomDiscord(ctx context.Context, caller contract.Principal, re
 		for _, r := range previous {
 			if r.Guild == req.Server && r.Channel == req.Channel {
 				instructions = r.Instructions
+				policyText, policyResolved = r.Policy, r.PolicyResolved
 			}
 		}
 		if req.Instructions != nil {
 			instructions = *req.Instructions
 		}
-		if err := s.store.SetDiscordRoute(ctx, store.DiscordRoute{Guild: req.Server, Channel: req.Channel, Room: room, Session: session.ID, Instructions: instructions}, req.Remove); err != nil {
+		if err := s.store.SetDiscordRoute(ctx, store.DiscordRoute{Guild: req.Server, Channel: req.Channel, Room: room, Session: session.ID, Instructions: instructions, Policy: policyText, PolicyResolved: policyResolved}, req.Remove); err != nil {
 			return contract.RoomDiscordResponse{}, failure(err)
 		}
 	} else if req.Channel != "" || req.Session != "" || req.Remove || req.Instructions != nil {
@@ -168,7 +170,7 @@ func (s *Service) RoomDiscord(ctx context.Context, caller contract.Principal, re
 	}
 	var out contract.RoomDiscordResponse
 	for _, r := range routes {
-		out.Routes = append(out.Routes, contract.DiscordRoute{Guild: r.Guild, Channel: r.Channel, Room: r.Room, Session: r.Session, Instructions: r.Instructions})
+		out.Routes = append(out.Routes, contract.DiscordRoute{Guild: r.Guild, Channel: r.Channel, Room: r.Room, Session: r.Session, Instructions: r.Instructions, Policy: r.Policy})
 	}
 	return out, nil
 }

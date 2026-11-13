@@ -90,6 +90,7 @@ type Service struct {
 	discordClientKey  string
 	discordHTTP       *discord.Client
 	discordTyping     map[string]time.Time
+	discordAnswers    map[string]discordAnswerWindow
 	discordDownloadMu sync.Mutex
 	discordDownloads  map[contract.RoomID][]*discordDownloadCharge
 	githubTools       http.Handler

@@ -364,6 +364,22 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 		return contract.DiscordAPIResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Discord unavailable"}
 	})
+	call(mux, contract.MethodDiscordCheck, c, func(ctx context.Context, who contract.Principal, req contract.DiscordCheckRequest) (contract.DiscordCheckResponse, *contract.Error) {
+		if service, ok := a.service.(interface {
+			DiscordCheck(context.Context, contract.Principal, contract.DiscordCheckRequest) (contract.DiscordCheckResponse, *contract.Error)
+		}); ok {
+			return service.DiscordCheck(ctx, who, req)
+		}
+		return contract.DiscordCheckResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Discord unavailable"}
+	})
+	call(mux, contract.MethodDiscordPolicy, c, func(ctx context.Context, who contract.Principal, req contract.DiscordPolicyRequest) (contract.DiscordPolicyResponse, *contract.Error) {
+		if service, ok := a.service.(interface {
+			DiscordPolicy(context.Context, contract.Principal, contract.DiscordPolicyRequest) (contract.DiscordPolicyResponse, *contract.Error)
+		}); ok {
+			return service.DiscordPolicy(ctx, who, req)
+		}
+		return contract.DiscordPolicyResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Discord unavailable"}
+	})
 	call(mux, contract.MethodDiscordInstructions, c, func(ctx context.Context, who contract.Principal, req contract.DiscordInstructionsRequest) (contract.DiscordInstructionsResponse, *contract.Error) {
 		if service, ok := a.service.(interface {
 			DiscordInstructions(context.Context, contract.Principal, contract.DiscordInstructionsRequest) (contract.DiscordInstructionsResponse, *contract.Error)

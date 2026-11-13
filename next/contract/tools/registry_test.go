@@ -271,3 +271,20 @@ func TestAdministrationCLIMethodsStayOwnerOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscordPolicyAndCheckActions(t *testing.T) {
+	for _, name := range []string{"policy", "check"} {
+		found := false
+		for _, a := range Actions() {
+			if a.Tool == "discord" && a.Name == name {
+				found = true
+				if len(a.CLI) != 1 || a.CLI[0] != "discord "+name {
+					t.Fatalf("bad binding for %s", name)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("missing discord %s", name)
+		}
+	}
+}

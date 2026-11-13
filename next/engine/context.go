@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/resident-labs/dyna/engine/contextview"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/discord/policy"
 )
 
 // requestChars keeps a question's line short enough for several in the section's budget.
@@ -255,6 +257,12 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 				place = "#" + channel + " of " + server
 			}
 			line := fmt.Sprintf("Discord: bot %s; %s, answered by %s", bot.Name, place, answering.Name)
+			if r.PolicyResolved != "" {
+				var p policy.Policy
+				if json.Unmarshal([]byte(r.PolicyResolved), &p) == nil && p.On() {
+					line += "\nPolicy: on; the answering session is capped (discord policy)"
+				}
+			}
 			if r.Channel == "" {
 				// The live list, so a session knows a channel another session made. Categories, voice and threads are left out.
 				var channels []string

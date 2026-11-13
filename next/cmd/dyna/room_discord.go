@@ -15,7 +15,7 @@ func (c *socketClient) RoomDiscord(ctx context.Context, req contract.RoomDiscord
 	return call[contract.RoomDiscordRequest, contract.RoomDiscordResponse](ctx, c, contract.MethodRoomDiscord, req)
 }
 func roomDiscordCommand(getClient func() client) *cobra.Command {
-	var server, channel, session, instructionsFile string
+	var server, channel, session, instructionsFile, policyFile string
 	var remove bool
 	cmd := &cobra.Command{Use: "discord ROOM", Short: "Map a Discord server or channel to a room", Long: "Map with --server ID and optionally --channel ID, --session NAME (default root), and --instructions-file FILE. For public servers use a cheap front child of root with no repository or host access. Start it without a goal: it has no finish line, and an idle session with an open goal is reported as stalled. No flags lists this room's mappings.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		req := contract.RoomDiscordRequest{Room: contract.RoomID(args[0]), Server: server, Channel: channel, Remove: remove}
@@ -52,6 +52,38 @@ func roomDiscordCommand(getClient func() client) *cobra.Command {
 		if err != nil {
 			return err
 		}
+		if policyFile != "" {
+			input := cmd.InOrStdin()
+			if policyFile != "-" {
+				f, err := os.Open(policyFile)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+				input = f
+			}
+			data, err := io.ReadAll(io.LimitReader(input, 65537))
+			if err != nil {
+				return err
+			}
+			if len(data) > 65536 {
+				return fmt.Errorf("policy exceeds 64 KB")
+			}
+			text := string(data)
+			policyService, ok := getClient().(interface {
+				DiscordPolicy(context.Context, contract.DiscordPolicyRequest) (contract.DiscordPolicyResponse, error)
+			})
+			if !ok {
+				return fmt.Errorf("Discord unavailable")
+			}
+			if _, err := policyService.DiscordPolicy(cmd.Context(), contract.DiscordPolicyRequest{Room: req.Room, Server: server, Text: &text}); err != nil {
+				return err
+			}
+			result, err = service.RoomDiscord(cmd.Context(), contract.RoomDiscordRequest{Room: req.Room})
+			if err != nil {
+				return err
+			}
+		}
 		if req.Server != "" {
 			fmt.Fprintln(cmd.ErrOrStderr(), "If tool availability changed, run dyna session refresh SESSION for the answering session and its ancestors that are already running. Instructions update live.")
 		}
@@ -61,6 +93,7 @@ func roomDiscordCommand(getClient func() client) *cobra.Command {
 	cmd.Flags().StringVar(&channel, "channel", "", "Optional channel ID")
 	cmd.Flags().StringVar(&session, "session", "root", "Answering session")
 	cmd.Flags().StringVar(&instructionsFile, "instructions-file", "", "Owner's instructions for this mapping, at most 4,000 characters")
+	cmd.Flags().StringVar(&policyFile, "policy-file", "", "Strict YAML front policy for the whole server, at most 64 KB")
 	cmd.Flags().BoolVar(&remove, "remove", false, "Unmap this server or channel")
 	return cmd
 }

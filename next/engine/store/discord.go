@@ -36,15 +36,17 @@ func (s *Store) SetDiscordBot(ctx context.Context, b DiscordBot) error {
 }
 
 type DiscordRoute struct {
-	Instructions string             `json:"instructions,omitempty"`
-	Guild        string             `json:"guild"`
-	Channel      string             `json:"channel,omitempty"`
-	Room         contract.RoomID    `json:"room"`
-	Session      contract.SessionID `json:"session"`
+	Policy         string             `json:"policy,omitempty"`
+	PolicyResolved string             `json:"policy_resolved,omitempty"`
+	Instructions   string             `json:"instructions,omitempty"`
+	Guild          string             `json:"guild"`
+	Channel        string             `json:"channel,omitempty"`
+	Room           contract.RoomID    `json:"room"`
+	Session        contract.SessionID `json:"session"`
 }
 
 func (s *Store) DiscordRoutes(ctx context.Context, room contract.RoomID) ([]DiscordRoute, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT guild,channel,room,instructions,CASE WHEN EXISTS(SELECT 1 FROM sessions WHERE id=d.session AND closed_at IS NULL) THEN session ELSE (SELECT id FROM sessions WHERE room=d.room AND parent IS NULL AND closed_at IS NULL) END FROM discord_routes d WHERE ?='' OR room=? ORDER BY guild,channel`, room, room)
+	rows, err := s.Read().QueryContext(ctx, `SELECT guild,channel,room,instructions,policy,policy_resolved,CASE WHEN EXISTS(SELECT 1 FROM sessions WHERE id=d.session AND closed_at IS NULL) THEN session ELSE (SELECT id FROM sessions WHERE room=d.room AND parent IS NULL AND closed_at IS NULL) END FROM discord_routes d WHERE ?='' OR room=? ORDER BY guild,channel`, room, room)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +54,7 @@ func (s *Store) DiscordRoutes(ctx context.Context, room contract.RoomID) ([]Disc
 	var routes []DiscordRoute
 	for rows.Next() {
 		var r DiscordRoute
-		if err := rows.Scan(&r.Guild, &r.Channel, &r.Room, &r.Instructions, &r.Session); err != nil {
+		if err := rows.Scan(&r.Guild, &r.Channel, &r.Room, &r.Instructions, &r.Policy, &r.PolicyResolved, &r.Session); err != nil {
 			return nil, err
 		}
 		routes = append(routes, r)
@@ -65,7 +67,7 @@ func (s *Store) SetDiscordRoute(ctx context.Context, r DiscordRoute, remove bool
 			_, err := tx.ExecContext(ctx, `DELETE FROM discord_routes WHERE guild=? AND channel=? AND room=?`, r.Guild, r.Channel, r.Room)
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO discord_routes(guild,channel,room,session,instructions) VALUES(?,?,?,?,?) ON CONFLICT(guild,channel) DO UPDATE SET room=excluded.room,session=excluded.session,instructions=excluded.instructions`, r.Guild, r.Channel, r.Room, r.Session, r.Instructions)
+		_, err := tx.ExecContext(ctx, `INSERT INTO discord_routes(guild,channel,room,session,instructions,policy,policy_resolved) VALUES(?,?,?,?,?,?,?) ON CONFLICT(guild,channel) DO UPDATE SET room=excluded.room,session=excluded.session,instructions=excluded.instructions,policy=excluded.policy,policy_resolved=excluded.policy_resolved`, r.Guild, r.Channel, r.Room, r.Session, r.Instructions, r.Policy, r.PolicyResolved)
 		return err
 	})
 }

@@ -2,16 +2,12 @@
 name: dyna-discord
 description: Use when a Discord message reaches you or you act on Discord (answer or relay a message, set up a front session, manage channels, roles, members, threads or polls).
 ---
-
 # Answer and act on Discord
-
 One bot serves the whole machine; each mapping of your room routes a server or one channel to an
 answering session, and dyna_discord lists them. That session and the sessions above it get the
 discord tool, whose `api` action is Discord REST with the bot's permissions: the recipes from
 "Find things" on are `api` calls.
-
 ## Answer a message
-
 - Only messages that mention the bot or its role, reply to one of its messages, or DM it arrive as
   input. Other messages do not wake you; `discord read` gets them. Dyna never delivers reactions
   or button clicks.
@@ -27,16 +23,12 @@ discord tool, whose `api` action is Discord REST with the bot's permissions: the
   author to mention it in a server channel.
 - A server input carries up to 20 earlier messages of the channel (4,000 characters in all, the
   bot's own cut to 300); a DM carries none. `discord read` gets more.
-
 ## Pass a question up
-
 Post to your parent with the channel ID and message ID from the input frame. The parent has the
 tool too and answers with `discord send` and that `replyTo`. If the parent replies to you instead,
 relay with `discord send` and `replyTo`: a turn without a Discord input sends nothing to Discord on
 its own.
-
 ## Set up a front session (root)
-
 On a public server everything people write is outside text, so the answering session should hold
 nothing worth taking: a cheap child of root with no repository and no host grant.
 1. `session start` it with a cheap profile, no repo and no goal. It has no finish line, and an idle
@@ -47,9 +39,7 @@ nothing worth taking: a cheap child of root with no repository and no host grant
    Read the current text first (no `text`): a write replaces the owner's words for that mapping too.
 4. Whether a box has the discord tool is decided when it starts: `session refresh` the front, and
    your own session if your discord tool is missing.
-
 ## Find things
-
 | What | `api` call |
 |---|---|
 | Server | `GET /guilds/SERVER` |
@@ -61,20 +51,15 @@ nothing worth taking: a cheap child of root with no repository and no host grant
 | Bans | `GET /guilds/SERVER/bans` |
 | Who changed what | `GET /guilds/SERVER/audit-logs?limit=20` |
 | Messages | `discord read` (not `api`) |
-
 IDs are strings. A channel mapping cannot call any `/guilds/…` path: it reaches its channel, the
 channel's threads and `/users/USER` only.
-
 | Result | Who refused | Next |
 |---|---|---|
 | `forbidden` | Dyna: you are not the answering session or above it, or a path or ID is outside the mapped scope | check dyna_discord; ask the session above you |
 | status 403 | Discord: the bot lacks a permission, or its highest role sits too low | the owner grants it or moves the bot's role up in Server Settings |
-
 Before a change, GET the object and keep the fields you change: the undo writes them back.
 Kicks, deleted messages and deleted channels or roles have no undo.
-
 ## Channels and permissions
-
 - Create: `POST /guilds/SERVER/channels` with `{name: "help", type: 0}` (text), `type: 4`
   (category) or `type: 15` (forum); `parent_id: CATEGORY` puts it in a category. Undo with
   `DELETE /channels/CHANNEL`.
@@ -89,9 +74,7 @@ Kicks, deleted messages and deleted channels or roles have no undo.
   bot loses the channel too.
 - Needs MANAGE_CHANNELS, and MANAGE_ROLES for overwrites. Check with `GET /channels/CHANNEL`,
   whose `permission_overwrites` lists the overwrites.
-
 ## Roles
-
 - Create: `POST /guilds/SERVER/roles` with `{name: "Helpers", color: 3447003}`; undo with
   `DELETE /guilds/SERVER/roles/ROLE`. Edit: `PATCH` on that path; undo with the saved fields.
   Check with `GET /guilds/SERVER/roles`. Deleting a role takes it from every member for good.
@@ -99,9 +82,7 @@ Kicks, deleted messages and deleted channels or roles have no undo.
   the other. Check the `roles` of `GET /guilds/SERVER/members/USER`.
 - Needs MANAGE_ROLES, and the bot's highest role must sit above the role it creates, edits, gives
   or takes; Administrator does not bypass that.
-
 ## Moderate
-
 Give `reason` on every moderation call. The bot's highest role must sit above the member's.
 - Timeout: `PATCH /guilds/SERVER/members/USER` with `{communication_disabled_until: "UNTIL"}`,
   UNTIL a future UTC time computed now, such as `date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ`, at
@@ -114,9 +95,7 @@ Give `reason` on every moderation call. The bot's highest role must sit above th
 - Delete a message: `DELETE /channels/CHANNEL/messages/MESSAGE` (MANAGE_MESSAGES for others').
 - Purge: `POST /channels/CHANNEL/messages/bulk-delete` with `{messages: ["ID1", "ID2"]}`: 2 to 100
   IDs, none older than 14 days, or the whole call fails; delete older ones one by one.
-
 ## Threads, forums and pins
-
 - Thread on a message: `POST /channels/CHANNEL/messages/MESSAGE/threads` with
   `{name: "Follow-up", auto_archive_duration: 1440}`; the thread's ID is the message's ID.
 - Forum post: `POST /channels/FORUM/threads` with `{name: "Topic", message: {content: "Text"}}`,
@@ -126,9 +105,7 @@ Give `reason` on every moderation call. The bot's highest role must sit above th
 - Pin: `PUT /channels/CHANNEL/messages/pins/MESSAGE`; unpin with `DELETE` (PIN_MESSAGES). Check
   with `GET /channels/CHANNEL/messages/pins`.
 - Threads of a mapped channel are in scope; to post in one, use the thread's ID as the channel.
-
 ## Rich messages
-
 - Your final text and `discord send` split at 2,000 characters, keep code fences whole, and ping
   users only, never roles or @everyone. An `api` POST pings whatever its content mentions unless it
   sets `allowed_mentions`, for example `{parse: ["users"]}`.
@@ -143,6 +120,24 @@ Give `reason` on every moderation call. The bot's highest role must sit above th
 - Buttons: only link buttons do anything, because clicks never reach Dyna:
   `components: [{type: 1, components: [{type: 2, style: 5, label: "Open", url: "https://…"}]}]`.
 - Edit a bot message: `PATCH /channels/CHANNEL/messages/MESSAGE`.
-
 Reference: https://discord.com/developers/docs/resources/message and
 https://discord.com/developers/docs/topics/permissions
+
+## Front policy (root)
+Read with `discord policy` before replacing the whole YAML text; `discord check` reports setup problems.
+Only root or the owner sets it. Names must resolve uniquely. Starter file:
+```yaml
+enabled: true
+log: mod-log
+front:
+  timeout_max: 1h
+  roles: [Contributors]
+  delete: yes
+  threads: no
+  quiet: [Logs/*]
+  answers: {per_member: 6/h, per_channel: 30/h}
+```
+An enabled policy caps every non-root answering session; root is not capped.
+Answers over budget start no turn and receive at most one reaction per member per hour.
+Budgets reset on engine restart. Quiet channels, webhook and AutoMod alert messages start no turn.
+Only enabled, log and front exist; rules, automod and commands are not supported yet.
