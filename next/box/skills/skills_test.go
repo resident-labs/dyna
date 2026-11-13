@@ -32,7 +32,7 @@ func TestParseRefusesWhatPiWouldNotLoad(t *testing.T) {
 
 func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
 	items := BuiltIn()
-	if len(items) != 7 || items[1].Name != "dyna-discord" || items[2].Name != "dyna-extend" || items[2].Description != "Use when you need to add a skill or mcp server to dyna" || !items[2].BuiltIn {
+	if len(items) != 7 || items[1].Name != "dyna-discord" || items[2].Name != "dyna-extend" || !strings.HasPrefix(items[2].Description, "Use when a task needs a tool, MCP server or Pi package") || !items[2].BuiltIn {
 		t.Fatalf("%+v", items)
 	}
 	if !IsBuiltIn("dyna-extend") || IsBuiltIn("other") {
@@ -53,7 +53,7 @@ func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"dyna skill save", "dyna package add", "dyna mcp add", "next box start", "unless the owner tells you otherwise", ".pi/skills"} {
+	for _, want := range []string{"dyna skill save", "dyna package add", "dyna mcp add", "next box start", "unless the owner tells you otherwise", ".pi/skills", "--root-only", "dyna skill set NAME --host", "is a built-in skill", "dyna addon set"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("the skill does not say %q", want)
 		}
