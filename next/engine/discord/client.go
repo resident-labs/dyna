@@ -48,6 +48,21 @@ func (c *Client) API(ctx context.Context, method, path string, body json.RawMess
 	}
 	return result, err
 }
+
+// ReadConfiguration reads a guild configuration endpoint without the tool API's
+// display truncation. It refuses messages, members, and all non-configuration routes.
+func (c *Client) ReadConfiguration(ctx context.Context, guild, resource string) (Result, error) {
+	if guild == "" || strings.Trim(guild, "0123456789") != "" {
+		return Result{}, errors.New("invalid guild ID")
+	}
+	switch resource {
+	case "", "/roles", "/channels", "/auto-moderation/rules":
+	default:
+		return Result{}, errors.New("not a configuration resource")
+	}
+	return c.request(ctx, "GET", "/api/v10/guilds/"+guild+resource, nil, "application/json", "")
+}
+
 func (c *Client) request(ctx context.Context, method, path string, body []byte, contentType, reason string) (Result, error) {
 	switch method {
 	case "GET", "POST", "PUT", "PATCH", "DELETE":
@@ -92,9 +107,9 @@ func (c *Client) request(ctx context.Context, method, path string, body []byte, 
 		if err != nil {
 			return Result{}, errors.New("Discord request unavailable")
 		}
-		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		data, readErr := io.ReadAll(io.LimitReader(resp.Body, (8<<20)+1))
 		resp.Body.Close()
-		if readErr != nil {
+		if readErr != nil || len(data) > 8<<20 {
 			return Result{}, errors.New("cannot read Discord response")
 		}
 
