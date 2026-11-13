@@ -10,7 +10,6 @@
   import RoomMenu from "./RoomMenu.svelte";
   import { count } from "../feed.ts";
   import StatusPill from "./StatusPill.svelte";
-  import WorkingDot from "./WorkingDot.svelte";
 
   type JobSession = { id: string; name: string; root: boolean; running: number };
   let { store, session, attention, closed, phone, paused, panelShown, requestsOpen,
@@ -44,9 +43,10 @@
     onterminal={phone && session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready" ? onterminal : undefined} oncomputer={phone && session && !closed && attention.can("computers") && store.boxes.get(session) === "ready" ? oncomputer : undefined} waiting={phone ? waiting : 0} />
   <button type="button" class="panel-toggle" bind:this={toggle} aria-label={"Sessions" + (faces ? `, ${working} working` : "") + (runsGoing ? `, ${count(runsGoing, "workflow")} running` : "") + (store.counts.failed ? ", a session failed" : "")}
     title={[faces ? busy.map(item => item.name).join(", ") : "Sessions", ...runsGoing ? [`${count(runsGoing, "workflow")} running`] : []].join(", ")} aria-controls="sessions" aria-keyshortcuts="Control+B" aria-pressed={panelShown} onclick={event => onpanel(event.detail > 0)}>
+    {#if runsGoing && !panelShown}<span class="run-mark" aria-hidden="true"></span>{/if}
     {#if faces}<span class="faces">{#each busy.slice(0, 3) as item (item.session)}<Avatar kind="session" name={item.name} root={!item.parent} size={24} />{/each}</span>
-      {#if busy.length > 3}<span class="more">+{busy.length - 3}</span>{/if}<span class="count">{working}<span class="wide"> working</span></span>{#if runsGoing && !panelShown}<WorkingDot />{/if}
-    {:else}<Icon name="people" />{#if runsGoing && !panelShown}<WorkingDot />{/if}{#if store.ready && !session}<span class="count phone">{store.members.length}</span>{/if}{/if}
+      {#if busy.length > 3}<span class="more">+{busy.length - 3}</span>{/if}<span class="count">{working}<span class="wide"> working</span></span>
+    {:else}<Icon name="people" />{#if store.ready && !session}<span class="count phone">{store.members.length}</span>{/if}{/if}
     {#if store.counts.failed && !panelShown && !session}<span class="attention"></span>{/if}
   </button>
 </div>
@@ -58,6 +58,8 @@
   @media (min-width: 761px) { .requests.waiting { margin-right: 4px; } }
   .panel-toggle { display: flex; align-items: center; gap: 8px; }
   .panel-toggle[aria-pressed="true"] { background: var(--hover); color: var(--text); }
+  /* A run is going: a small green square, as a run's tile is square, so it never reads as a session's working dot. */
+  .run-mark { flex: none; width: 8px; height: 8px; border-radius: 2px; background: var(--success); }
   .faces { display: flex; }
   .faces > :global(.avatar) { --under: var(--bg); box-shadow: 0 0 0 2px var(--bg); letter-spacing: 0; }
   .more, .count { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }

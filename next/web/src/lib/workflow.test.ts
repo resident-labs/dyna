@@ -235,9 +235,9 @@ test("Runs lists the running runs first, newest first, then the rest, the latest
 test("the panel's run rows: a few running runs, a count of the rest, and the past ones, each folded until opened", () => {
   const run = (session: string, fields: Partial<WorkflowInfo> = {}): WorkflowInfo => status({ session, state: "done", ...fields }).run;
   const hour = (ago: number) => new Date(Date.now() - ago * 3600_000).toISOString();
-  const runs = [run("old", { ended: hour(80) }), run("live", { state: "running" }), run("new", { state: "failed", ended: hour(2) }), run("older", { state: "failed", ended: hour(60) })];
+  const runs = [run("old", { ended: hour(80) }), run("live", { state: "running" }), run("new", { state: "failed", ended: hour(0) }), run("older", { state: "failed", ended: hour(60) })];
   const names = (open: boolean, list = runs) => runRows(list, { running: open, past: open }).map(row => row.kind === "run" ? row.run.session : row.kind === "head" ? "head" : `${row.kind} ${row.count}${row.kind === "past" ? ` ${row.failed}f` : ""}${row.open ? " open" : ""}`);
-  assert.deepEqual(names(false), ["head", "live", "past 3 1f"], "only the failure of the last day is news");
+  assert.deepEqual(names(false), ["head", "live", "past 3 1f"], "only a failure of today is news");
   assert.deepEqual(names(true), ["head", "live", "past 3 1f open", "new", "older", "old"]);
   assert.deepEqual(runRows(runs, { running: false, past: false }, "old").map(row => row.kind === "run" ? row.run.session : row.kind), ["head", "live", "past", "old"], "the open page's run stays under a closed fold");
   assert.deepEqual(runRows([], { running: true, past: true }), []);
