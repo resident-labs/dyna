@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/harness/testutil"
+
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
@@ -62,16 +64,10 @@ func stagePinnedFixture(t *testing.T, bin string, raw []byte) string {
 }
 func waitPinnedFile(t *testing.T, path string) {
 	t.Helper()
-	deadline := time.Now().Add(8 * time.Second)
-	for {
-		if _, err := os.Stat(path); err == nil {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("binary barrier not reached: %s", path)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	testutil.Eventually(t, 8*time.Second, "binary barrier "+path, func() bool {
+		_, err := os.Stat(path)
+		return err == nil
+	})
 }
 func TestPinnedContainerActuallyExecutesEngineBinaryDuringDowngradedWindow(t *testing.T) {
 	tools, root := t.TempDir(), t.TempDir()
@@ -135,18 +131,11 @@ printf '%s' "$!" > "$PIN_PID"
 	if err := os.WriteFile(gate, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
 	var raw []byte
-	for {
+	testutil.Eventually(t, 5*time.Second, "container child execution", func() bool {
 		raw, err = os.ReadFile(actual)
-		if err == nil && len(raw) > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("container child never executed")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+		return err == nil && len(raw) > 0
+	})
 	if string(raw) != "NEW" {
 		t.Fatalf("actual container child executed %s instead of pinned NEW after host current was downgraded", raw)
 	}
@@ -209,30 +198,16 @@ func TestOneHostSurveyConvergesAfterUnconfirmedActivationAndRepeatedSHAABA(t *te
 			b.cache("host", newest)
 			b.mu.Unlock()
 			ticks <- time.Now()
-			deadline := time.Now().Add(8 * time.Second)
-			for {
+			testutil.Eventually(t, 8*time.Second, "single production host survey", func() bool {
 				b.mu.Lock()
+				defer b.mu.Unlock()
 				load, seen := b.loads["host"]
-				b.mu.Unlock()
-				if seen && load.summary.Health == contract.HostHealthy {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatal("the single production survey callback did not complete")
-				}
-				time.Sleep(5 * time.Millisecond)
-			}
-			deadline = time.Now().Add(8 * time.Second)
-			for {
+				return seen && load.summary.Health == contract.HostHealthy
+			})
+			testutil.Eventually(t, 8*time.Second, "survey restoring NEW", func() bool {
 				target, err := os.Readlink(filepath.Join(bin, "current"))
-				if err == nil && target == newSum {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatalf("one survey did not restore NEW: %s, %v", target, err)
-				}
-				time.Sleep(5 * time.Millisecond)
-			}
+				return err == nil && target == newSum
+			})
 		})
 	}
 }

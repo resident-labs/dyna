@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/harness/testutil"
+
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
@@ -99,14 +101,14 @@ func TestRecreateMovesAStoppedBoxToANewImageAndKeepsItsVolume(t *testing.T) {
 	}
 	wokeOn := func(want string) {
 		t.Helper()
-		for ctx.Err() == nil {
-			out, err := exec.Command("podman", "exec", string(id), "cat", "/box/woke-on").CombinedOutput()
-			if err == nil && strings.TrimSpace(string(out)) == want {
-				return
+		deadline, _ := ctx.Deadline()
+		testutil.Eventually(t, time.Until(deadline), "box waking on "+want, func() bool {
+			if err := ctx.Err(); err != nil {
+				t.Fatal(err)
 			}
-			time.Sleep(100 * time.Millisecond)
-		}
-		t.Fatalf("the box never woke on %s", want)
+			out, err := exec.Command("podman", "exec", string(id), "cat", "/box/woke-on").CombinedOutput()
+			return err == nil && strings.TrimSpace(string(out)) == want
+		})
 	}
 	wokeOn("old")
 	before := podmanCommand(t, "inspect", "--format", "{{.Id}}", string(id))
