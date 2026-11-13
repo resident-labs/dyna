@@ -82,7 +82,7 @@ func (h *Handler) sharedQuota(ctx context.Context, cfg *config.Config, manager *
 		}
 		h.dynaUsage.keep(key, entry, time.Now())
 		if hint, ok := dynaQuotaHint(entry); ok {
-			manager.PublishQuotaReading(auth.ID, hint)
+			manager.PublishQuotaReadingForAuth(auth, hint)
 		}
 		return entry, nil
 	})
