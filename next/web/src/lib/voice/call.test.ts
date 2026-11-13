@@ -114,7 +114,7 @@ test('call start, microphone mute, interruption and stop release resources', asy
     assert.deepEqual(ws.receipts(), [{ type: 'played', item_id: '', audio_end_ms: 0 }]);
     assert.ok(Context.last.sources.every(source => source.stopped));
     ws.event({ type: 'response_done', working: true });
-    assert.equal(call.state.status, 'Working with root');
+    assert.equal(call.state.status, 'Working');
     ws.event({ type: 'response_done', working: false });
     assert.equal(call.state.status, 'Listening');
     call.stop(); assert.equal(call.state.active, false); assert.equal(ws.readyState, 3);

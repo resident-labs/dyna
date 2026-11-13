@@ -1,7 +1,7 @@
 import { openAudio, micError, type AudioHandle } from './audio.ts';
 import { bytesToBase64, encodePCMFrame } from './pcm.ts';
 
-export type CallState = { status: string; active: boolean; muted: boolean; transcript: { role: string; text: string }[] };
+export type CallState = { status: string; level?: number; active: boolean; muted: boolean; transcript: { role: string; text: string }[] };
 // An assistant transcript with item_id precedes each item's binary audio;
 // the engine sends its final text later.
 export class VoiceCall {
@@ -23,9 +23,11 @@ export class VoiceCall {
     try {
       const drained = (id: string) => {
         this.playing.delete(id);
-        if (!this.playing.size && this.state.active) { this.state.status = this.working ? 'Working with root' : 'Listening'; this.update(); }
+        if (!this.playing.size && this.state.active) { this.state.status = this.working ? 'Working' : 'Listening'; this.update(); }
       };
       const audio = await openAudio((frame, rate) => {
+        this.state.level = this.state.muted ? 0 : Math.min(1, Math.sqrt(frame.reduce((sum, v) => sum + v * v, 0) / frame.length) * 6);
+        this.update();
         if (!this.state.muted && this.socket?.readyState === WebSocket.OPEN && this.state.status !== 'Connecting…') this.socket.send(encodePCMFrame(frame, rate, 24000));
       }, { started: id => { this.playing.add(id); this.state.status = 'Speaking'; this.update(); }, progress() {}, ended: drained, cancelled: drained });
       if (generation !== this.generation) { audio.close(); return; }
@@ -53,7 +55,7 @@ export class VoiceCall {
           case 'response_done':
             this.working = msg.working === true;
             if (this.item) audio.done(this.item);
-            if (!this.playing.size) this.state.status = this.working ? 'Working with root' : 'Listening';
+            if (!this.playing.size) this.state.status = this.working ? 'Working' : 'Listening';
             break;
           case 'closed': this.stop(msg.reason || 'Call ended'); break;
         }
