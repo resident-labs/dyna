@@ -375,7 +375,7 @@ func TestWebGuardAndLogin(t *testing.T) {
 	if got := request("GET", host, "/v1/events", "", nil).Code; got != 403 {
 		t.Fatal(got)
 	}
-	login, problem := w.login(nil, contract.Principal{}, contract.WebLoginRequest{})
+	login, problem := w.login(context.Background(), contract.Principal{}, contract.WebLoginRequest{})
 	if problem != nil {
 		t.Fatal(problem)
 	}
@@ -408,7 +408,7 @@ func TestWebGuardAndLogin(t *testing.T) {
 	if got := request("POST", host, "/v1/web.login", "http://"+host, cookie).Code; got != http.StatusForbidden {
 		t.Fatal(got)
 	}
-	expiring, _ := w.login(nil, contract.Principal{}, contract.WebLoginRequest{})
+	expiring, _ := w.login(context.Background(), contract.Principal{}, contract.WebLoginRequest{})
 	u, _ = url.Parse(expiring.URL)
 	now = now.Add(time.Minute)
 	if got := request("GET", host, u.RequestURI(), "", nil).Code; got != 403 {
