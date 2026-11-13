@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -112,9 +113,6 @@ func ReadSnapshot(ctx context.Context, client *discord.Client, server string) (S
 			names[r.Name] = true
 			roleNames[r.ID] = r.Name
 		}
-		if r.Managed {
-			return out, fmt.Errorf("managed role %q cannot be represented", r.Name)
-		}
 		if r.Icon != nil || r.UnicodeEmoji != nil {
 			return out, fmt.Errorf("role icons cannot be represented")
 		}
@@ -160,7 +158,7 @@ func ReadSnapshot(ctx context.Context, client *discord.Client, server string) (S
 				ow.Deny[name] = d
 			}
 		}
-		e := Entry{Name: c.Name, Path: "channels/" + c.Name}
+		e := Entry{Name: c.Name, Path: c.Name}
 		if c.Type == 4 {
 			if c.ParentID != "" {
 				return out, fmt.Errorf("nested category")
@@ -168,7 +166,7 @@ func ReadSnapshot(ctx context.Context, client *discord.Client, server string) (S
 			e.Category = &Category{Identity: Identity{ID: c.ID}, Overwrites: ow}
 			out.Server.Categories = append(out.Server.Categories, c.Name)
 		} else {
-			kind := map[int]string{0: "text", 5: "announcement", 15: "forum"}[c.Type]
+			kind := map[int]string{0: "text", 2: "voice", 5: "announcement", 15: "forum"}[c.Type]
 			if kind == "" {
 				return out, fmt.Errorf("channel %q type %d cannot be represented", c.Name, c.Type)
 			}
@@ -203,7 +201,7 @@ func ReadSnapshot(ctx context.Context, client *discord.Client, server string) (S
 					return out, fmt.Errorf("missing parent")
 				}
 				e.Parent = parent
-				e.Path = "channels/" + parent + "/" + c.Name
+				e.Path = parent + "/" + c.Name
 			}
 		}
 		out.Entries = append(out.Entries, e)
@@ -211,9 +209,13 @@ func ReadSnapshot(ctx context.Context, client *discord.Client, server string) (S
 	for i := range out.Entries {
 		e := &out.Entries[i]
 		if e.Category != nil {
+			e.Category.Sync = true
 			for _, child := range out.Entries {
 				if child.Parent == e.Name {
 					e.Category.Channels = append(e.Category.Channels, child.Name)
+					if child.Channel != nil && !reflect.DeepEqual(child.Channel.Overwrites, e.Category.Overwrites) {
+						e.Category.Sync = false
+					}
 				}
 			}
 		}
