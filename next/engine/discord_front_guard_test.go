@@ -2,6 +2,7 @@ package engine
 
 import (
 	"database/sql"
+	"encoding/json"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/discord"
 	"testing"
@@ -121,6 +122,20 @@ func TestDiscordFrontGuard(t *testing.T) {
 			}
 			if p := f.s.discordScope(f.ctx, caller, "GET", "/api/v10/channels/200/messages"); p != nil {
 				t.Fatal(p)
+			}
+			// A confined server turn may still delete the message it answers and time out its author.
+			other := f.s.discordScope(f.ctx, caller, "PATCH", "/api/v10/guilds/100/members/3", json.RawMessage(`{"communication_disabled_until":null}`))
+			if other == nil {
+				t.Fatal("timed out another member")
+			}
+			self := f.s.discordScope(f.ctx, caller, "PATCH", "/api/v10/guilds/100/members/2", json.RawMessage(`{"communication_disabled_until":null}`))
+			del := f.s.discordScope(f.ctx, caller, "DELETE", "/api/v10/channels/200/messages/400")
+			if tc.legacy {
+				if self == nil || del == nil {
+					t.Fatal("a DM turn moderated", self, del)
+				}
+			} else if self != nil || del != nil {
+				t.Fatal(self, del)
 			}
 		})
 	}

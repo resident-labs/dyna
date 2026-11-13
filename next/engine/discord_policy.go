@@ -154,7 +154,7 @@ func (s *Service) discordPrepare(ctx context.Context, caller contract.Principal,
 		return nil, problem
 	}
 	route := policy.ParseRoute(method, path)
-	confinedOnly := scope.confined != ""
+	confinedOnly := scope.confined != "" && !scope.moderatesInput(method, path)
 	if confinedOnly && route.ResourceID != scope.confined {
 		return nil, confinedDiscordRefusal()
 	}

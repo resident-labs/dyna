@@ -136,7 +136,7 @@ func (s *Service) discordURLScope(ctx context.Context, caller contract.Principal
 	if problem != nil {
 		return problem
 	}
-	if scope.confined != "" {
+	if scope.confined != "" && !scope.moderatesInput(method, path) {
 		if parts[0] != "channels" || parts[1] != scope.confined || (method == "GET" && !(len(parts) == 2 || len(parts) == 3 && parts[2] == "messages" || len(parts) == 4 && parts[2] == "messages")) {
 			return confinedDiscordRefusal()
 		}
@@ -166,6 +166,8 @@ func (s *Service) discordURLScope(ctx context.Context, caller contract.Principal
 // checks and channel-name resolution so both use the same authorization rules.
 type discordResourceScope struct {
 	confined string
+	input    contract.DiscordMessage // the confined input, when confined is set
+	guild    string                  // the confined server input's server
 	room     contract.RoomID
 	routes   []store.DiscordRoute
 	dms      map[string]string
@@ -188,14 +190,30 @@ func (s *Service) discordReadScope(ctx context.Context, caller contract.Principa
 	if err != nil {
 		return discordResourceScope{}, failure(err)
 	}
-	confined := ""
+	scope := discordResourceScope{room: session.Room, routes: routes, dms: dms}
 	for _, m := range inputs {
 		if m.Confined || m.Direct && !m.Owner {
-			confined = m.Channel
+			scope.confined, scope.input = m.Channel, m
+			channel, _ := s.discordDirectory.Channel(m.Channel)
+			scope.guild = channel.Guild
 			break
 		}
 	}
-	return discordResourceScope{room: session.Room, routes: routes, dms: dms, confined: confined}, nil
+	return scope, nil
+}
+
+// moderatesInput reports the moderation a confined server turn keeps: deleting
+// the message it answers and timing out that message's author. The server policy
+// still applies (front.delete, timeout_max); it touches no one but the sender.
+func (scope discordResourceScope) moderatesInput(method, path string) bool {
+	in := scope.input
+	if scope.confined == "" || in.Direct || scope.guild == "" {
+		return false
+	}
+	resource, _, _ := strings.Cut(path, "?")
+	resource = strings.TrimPrefix(resource, "/api/v10/")
+	return method == "DELETE" && resource == "channels/"+in.Channel+"/messages/"+in.Message ||
+		method == "PATCH" && resource == "guilds/"+scope.guild+"/members/"+in.AuthorID
 }
 
 func (scope discordResourceScope) allowsChannel(channel discord.Channel) bool {
