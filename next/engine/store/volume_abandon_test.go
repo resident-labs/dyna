@@ -180,28 +180,9 @@ func TestAbandonedVolumeOperationCannotReleaseLaterOrUnrelatedClaims(t *testing.
 		t.Fatal(err)
 	}
 	expectVolumeJoinHosts(t, r.s, b.ID, "arch, spare", "")
+	retired := volumeRetirement(t, r.s, b.ID, "arch")
 	close(later)
-	// The new arch operation may release; the unrelated host must still own its
-	// namespace. The old arch callback above was not its completion capability.
-	deadline := time.Now().Add(time.Second)
-	for {
-		var arch bool
-		if err := r.s.Write(r.ctx, func(*sql.Tx) error {
-			for claim := range r.s.volumeRemovals[b.ID] {
-				arch = arch || claim.host == "arch"
-			}
-			return nil
-		}); err != nil {
-			t.Fatal(err)
-		}
-		if !arch {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("later confirmed claim did not release")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	awaitStoreSignal(t, retired)
 	expectVolumeJoinHosts(t, r.s, b.ID, "spare", "arch")
 	close(unrelated)
 	ctx, cancel := context.WithTimeout(r.ctx, time.Second)

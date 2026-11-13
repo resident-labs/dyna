@@ -59,28 +59,9 @@ func TestVolumeRemovalJoinsRemainingTypedHostsAndFencesReset(t *testing.T) {
 	if reset, err := r.s.RestartSession(r.ctx, old, event, notice); err != nil || reset {
 		t.Fatalf("reset committed before physical volume joins: %v %v", reset, err)
 	}
+	retired := volumeRetirement(t, r.s, b.ID, "arch")
 	close(first)
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		var remaining bool
-		if err := r.s.Write(r.ctx, func(*sql.Tx) error {
-			for claim := range r.s.volumeRemovals[b.ID] {
-				if claim.host == "arch" {
-					remaining = true
-				}
-			}
-			return nil
-		}); err != nil {
-			t.Fatal(err)
-		}
-		if !remaining {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("confirmed first host kept its ownership")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	awaitStoreSignal(t, retired)
 	ctx, cancel := context.WithTimeout(r.ctx, 30*time.Millisecond)
 	err = r.s.JoinBoxVolumeRemovals(ctx, b.ID)
 	cancel()

@@ -71,28 +71,28 @@ func TestWarmModelRouteBypassesUnrelatedWriterWaits(t *testing.T) {
 			entered, release, writerDone := make(chan struct{}), make(chan struct{}), make(chan error, 1)
 			go func() { writerDone <- s.Write(ctx, func(*sql.Tx) error { close(entered); <-release; return nil }) }()
 			<-entered
+			defer func() {
+				select {
+				case <-release:
+				default:
+					close(release)
+				}
+			}()
 			blockerDone := make(chan error, 1)
+			blockerCtx := &writerAdmissionContext{Context: ctx, admitted: make(chan struct{})}
 			go func() {
 				switch kind {
 				case "cold-stamp":
-					blockerDone <- s.MarkTurnModelSent(ctx, "other", "u", time.Now())
+					blockerDone <- s.MarkTurnModelSent(blockerCtx, "other", "u", time.Now())
 				case "end-turn":
-					blockerDone <- s.EndTurn(ctx, "other", contract.TurnOutputRequest{Turn: "u", Outcome: contract.TurnCompleted}, contract.Event{ID: "end", Time: time.Now(), Room: "r", From: contract.Principal{Kind: contract.PrincipalSession, Session: "other"}, Body: contract.TurnEnded{Session: "other", Turn: "u", Outcome: contract.TurnCompleted}})
+					blockerDone <- s.EndTurn(blockerCtx, "other", contract.TurnOutputRequest{Turn: "u", Outcome: contract.TurnCompleted}, contract.Event{ID: "end", Time: time.Now(), Room: "r", From: contract.Principal{Kind: contract.PrincipalSession, Session: "other"}, Body: contract.TurnEnded{Session: "other", Turn: "u", Outcome: contract.TurnCompleted}})
 				case "close-session":
-					blockerDone <- s.CloseSession(ctx, "other", contract.Event{ID: "close", Time: time.Now(), Room: "r", From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionClosed{Session: "other"}})
+					blockerDone <- s.CloseSession(blockerCtx, "other", contract.Event{ID: "close", Time: time.Now(), Room: "r", From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionClosed{Session: "other"}})
 				}
 			}()
 			// The unbuffered single-writer admission owns s.mu while waiting to enqueue.
 			// Wait for that boundary, not the recorder mutex whose convoy is under test.
-			deadline := time.Now().Add(2 * time.Second)
-			for s.mu.TryLock() {
-				s.mu.Unlock()
-				if time.Now().After(deadline) {
-					close(release)
-					t.Fatal("blocker never reached writer admission")
-				}
-				time.Sleep(time.Millisecond)
-			}
+			awaitStoreSignal(t, blockerCtx.admitted)
 
 			canceled, cancel := context.WithCancel(ctx)
 			cancel()
