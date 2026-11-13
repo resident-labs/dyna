@@ -346,6 +346,8 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 		}
 		var streamScope contract.Scope
 		switch r.URL.Path {
+		case "/v1/voice":
+			streamScope = contract.ScopeOperate
 		case "/v1/terminal":
 			streamScope = contract.ScopeTerminal
 		case "/v1/computers/stream":
