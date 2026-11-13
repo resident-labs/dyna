@@ -451,3 +451,17 @@ func TestWorkflowControlsAcceptSessionName(t *testing.T) {
 		t.Fatal(problem)
 	}
 }
+
+func TestPauseEndedWorkflowReturnsEnded(t *testing.T) {
+	w := setupWorkflow(t)
+	started, worker := w.start(w.owner, workflowScript)
+	w.endRun(worker)
+	for _, step := range []string{"", "alpha-key"} {
+		if err := w.store.PauseWorkflow(w.ctx, started.Run, true, step); err != store.ErrWorkflowEnded {
+			t.Fatalf("pause step %q: %v, want ErrWorkflowEnded", step, err)
+		}
+	}
+	if _, problem := w.WorkflowPause(w.ctx, w.owner, contract.WorkflowPauseRequest{Run: started.Run}); problem == nil || problem.Message != "that run has ended" {
+		t.Fatalf("pause refusal: %+v", problem)
+	}
+}
