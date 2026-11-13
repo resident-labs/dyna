@@ -80,15 +80,19 @@ type Channel struct {
 	Tags          []Tag       `json:"available_tags,omitempty"`
 }
 type AutoMod struct {
-	ID       string          `json:"id"`
-	Name     string          `json:"name"`
-	Event    int             `json:"event_type"`
-	Trigger  int             `json:"trigger_type"`
-	Enabled  bool            `json:"enabled"`
-	Metadata TriggerMetadata `json:"trigger_metadata"`
-	Actions  []Action        `json:"actions"`
+	ExemptRoles    []string        `json:"exempt_roles,omitempty"`
+	ExemptChannels []string        `json:"exempt_channels,omitempty"`
+	ID             string          `json:"id"`
+	Name           string          `json:"name"`
+	Event          int             `json:"event_type"`
+	Trigger        int             `json:"trigger_type"`
+	Enabled        bool            `json:"enabled"`
+	Metadata       TriggerMetadata `json:"trigger_metadata"`
+	Actions        []Action        `json:"actions"`
 }
 type TriggerMetadata struct {
+	Regex    []string `json:"regex_patterns,omitempty"`
+	Allowed  []string `json:"allow_list,omitempty"`
 	Keywords []string `json:"keyword_filter"`
 }
 type Action struct {
@@ -96,6 +100,7 @@ type Action struct {
 	Metadata ActionMetadata `json:"metadata"`
 }
 type ActionMetadata struct {
+	Custom  string `json:"custom_message,omitempty"`
 	Channel string `json:"channel_id,omitempty"`
 }
 
