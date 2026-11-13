@@ -30,6 +30,11 @@ for (const theme of ["light", "carbon"]) for (const width of [1280, 390]) {
   else if (method === "events.list") response = { events: [], names: {}, nextSeq: 0 };
   return route.fulfill({ contentType: "application/json", body: JSON.stringify(response) });
  });
+ async function openWorker(key) {
+  const row = page.locator(`button.step[data-step="${key}"]`);
+  if (!await row.isVisible()) await page.getByRole("button", { name: /^Review: .*Show its steps$/ }).click();
+  await row.click();
+ }
  const name = `${theme}-${width}`;
  await page.goto("http://localhost:5173/test/workflow-controls.html");
  await page.getByRole("button", { name: "Pause", exact: true }).click();
@@ -57,7 +62,7 @@ for (const theme of ["light", "carbon"]) for (const width of [1280, 390]) {
  await page.screenshot({ path: `${out}/${name}-sending.png` });
  await page.getByRole("button", { name: "Back to Workflow review" }).click();
  assert.equal(await page.getByRole("button", { name: "Pausing…", exact: true }).count(), 0);
- await page.getByRole("button", { name: "Review contract", exact: true }).click();
+ await openWorker("worker-0");
  assert.equal(await input.isEnabled(), true, "A pending steer does not disable B");
  assert.equal(await page.getByRole("button", { name: "Sending…", exact: true }).count(), 0);
  finishSteer();
@@ -68,7 +73,7 @@ for (const theme of ["light", "carbon"]) for (const width of [1280, 390]) {
  await page.getByRole("button", { name: "Back to Workflow review" }).click();
  await page.getByRole("button", { name: "Pause", exact: true }).click();
  await page.getByRole("button", { name: "Unpause", exact: true }).waitFor();
- await page.getByRole("button", { name: "Review worker delivery", exact: true }).click();
+ await openWorker("worker-1");
  await page.screenshot({ path: `${out}/${name}-paused-worker.png` });
  failSteer = true;
  await input.fill("Keep this draft when the engine cannot be reached.");
@@ -92,7 +97,8 @@ for (const theme of ["light", "carbon"]) for (const width of [1280, 390]) {
  steps[0].name = "Review long-running delivery recovery after a workflow box reconnects";
  for (let i = 2; i < 8; i++) steps.push({ ...steps[0], key: `worker-${i}`, name: `Review case ${i}` });
  await page.goto("http://localhost:5173/test/workflow-controls.html");
- await page.getByText("and 3 more: open a stage in the chart", { exact: true }).waitFor();
+ await page.getByRole("button", { name: /^Review: .*Show its steps$/ }).click();
+ await page.locator('button.step[data-step="worker-7"]').waitFor();
  await page.screenshot({ path: `${out}/${name}-many-workers.png` });
  assert.deepEqual(errors, []);
  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "no horizontal page overflow");

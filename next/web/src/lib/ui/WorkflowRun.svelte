@@ -41,7 +41,6 @@
   let stuck = $derived(info?.state === "running" && !!broken);
   let counts = $derived(tally(steps));
   let settled = $derived(counts.done + counts.failed);
-  let steerable = $derived(steps.filter(step => step.kind === "agent" && step.state === "running" && step.transcript));
   // The script's latest line, or the counts when it wrote none or cleared it.
   let said = $derived(lines.at(-1)?.text ? lines.at(-1) : undefined);
   let shownLines = $derived(lines.filter(line => line.text));
@@ -98,6 +97,7 @@
   let drafts = $state<Record<string, string>>({});
   let steering = $derived(worker ? drafts[worker.key] ?? "" : "");
   let sending = $state<string[]>([]);
+  let failedSteers = $state<string[]>([]);
   let steerBusy = $derived(!!worker && sending.includes(worker.key));
   let steerSent = $state("");
   let pauseBusy = $state(false);
@@ -128,9 +128,11 @@
     steerSent = "";
     try {
       await call("workflow.steer", { run: info.run, step: key, text });
+      failedSteers = failedSteers.filter(item => item !== key);
       if (drafts[key] === text) drafts[key] = "";
       if (visit === navigation) steerSent = text;
     } catch {
+      if (!failedSteers.includes(key)) failedSteers = [...failedSteers, key];
       await run.read();
       if (visit === navigation && steps.find(step => step.key === key)?.state === "running") controlError = "Could not send. Your message is kept; try again or return to the run.";
     }
@@ -187,7 +189,7 @@
     {#if operate && ((!ended && worker.state === "running") || steering)}
       <form class="steer" onsubmit={steer}>
         <label for="worker-steer">{worker.state === "running" ? "Steer this worker" : "Your unsent message"}</label>
-        <div><textarea id="worker-steer" rows="1" bind:value={drafts[worker.key]} placeholder="Tell this worker what to do differently" readonly={worker.state !== "running" || steerBusy} onkeydown={event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing && matchMedia("(hover: hover)").matches) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} oninput={() => { steerSent = ""; controlError = ""; }}></textarea>{#if worker.state === "running"}<button type="submit" disabled={steerBusy || !steering.trim()}>{steerBusy ? "Sending…" : "Send"}</button>{:else}<button type="button" onclick={() => { drafts[worker.key] = ""; controlError = ""; }}>Discard</button>{/if}</div>
+        <div><textarea id="worker-steer" rows="1" bind:value={drafts[worker.key]} placeholder="Tell this worker what to do differently" readonly={worker.state !== "running" || steerBusy} onkeydown={event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing && matchMedia("(hover: hover)").matches) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} oninput={() => { steerSent = ""; controlError = ""; }}></textarea>{#if worker.state === "running"}<button type="submit" disabled={steerBusy || !steering.trim()}>{steerBusy ? "Sending…" : "Send"}</button>{:else}<button type="button" onclick={() => { drafts[worker.key] = ""; failedSteers = failedSteers.filter(key => key !== worker.key); controlError = ""; }}>Discard</button>{/if}</div>
         <p class="steer-help">{worker.state !== "running" ? "This worker has ended. Your message was not sent." : info?.paused ? "Only this worker gets your message. The run is paused; you can still steer this worker." : "Only this worker gets your message."}<span class="keyboard-hint">{worker.state === "running" ? " Enter to send · Shift+Enter for a new line" : ""}</span></p>
         {@render controlFailure()}
         <span class="steer-status" class:sent={!!steerSent} role="status">{#if steerSent}<Icon name="check" size={12} /><span>Sent to this worker: {steerSent}</span>{/if}</span>
@@ -220,9 +222,10 @@
         {@render controlFailure()}
         {#if info.paused && !ended}<p class="muted">No new steps will start. Running workers keep going and can still be steered. Unpause to continue.</p>{/if}
         {#if info.description}<p class="muted">{info.description}</p>{/if}
-        {#if !ended && steerable.length}
-          <div class="running-workers"><span>Steer a worker:</span>{#each steerable.slice(0, 4) as step (step.key)}<button type="button" title="Open transcript and steer this worker" onclick={() => show(step)}>{step.name}</button>{/each}{#if steerable.length > 4}<span>and {steerable.length - 4} more: open a stage in the chart</span>{/if}</div>
-        {/if}
+        {#each failedSteers as key (key)}
+          {@const step = steps.find(step => step.key === key)}
+          {#if step}<p class="control-error">Your message to <button type="button" class="retry" onclick={() => show(step)}>{step.name}</button> was not sent. Your draft is kept on this page; open the worker to try again.</p>{/if}
+        {/each}
         <div class="said" class:script={!!said}>
           {#if info.state === "running"}<WorkingDot />{/if}
           {#if shownLines.length > 1}<button type="button" class="line" aria-expanded={earlier} title={earlier ? "Hide what the script said before" : "Show what the script said before"}
@@ -296,7 +299,7 @@
   .steer-status.sent { display: flex; align-items: baseline; gap: 4px; color: var(--success); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 144px; overflow-y: auto; }
   .steer-help { color: var(--muted); font-size: 12px; margin-top: 4px; }
   .steer textarea { resize: vertical; field-sizing: content; min-height: 32px; max-height: 144px; height: auto; padding-block: 6px; }
-  @media (hover: none) { .steer textarea, .steer button { min-height: 40px; } .keyboard-hint { display: none; } .running-workers button { min-height: 40px; } }
+  @media (hover: none) { .steer textarea, .steer button { min-height: 40px; } .keyboard-hint { display: none; } }
   .control-error { color: var(--danger); font-size: 12px; margin-top: 4px; }
 
   .frame { display: flex; flex-direction: column; flex: 1; min-height: 0; container: run / inline-size; }
@@ -340,10 +343,6 @@
   .facts { display: flex; flex-wrap: wrap; gap: 0 12px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
   .from { min-width: 0; overflow-wrap: anywhere; }
   .trouble { color: var(--danger); font-size: 12.5px; }
-  .running-workers { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; color: var(--muted); font-size: 12px; }
-  .running-workers button { border: 0; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; padding: 2px 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: none; color: var(--text); font: inherit; cursor: pointer; }
-  .running-workers button:hover { text-decoration-color: var(--text); }
-  .running-workers button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .controls { display: flex; gap: 8px; }
   .control { display: flex; flex: none; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
   .control :global(svg) { fill: currentColor; }
