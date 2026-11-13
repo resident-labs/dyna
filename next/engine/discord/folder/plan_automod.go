@@ -27,6 +27,7 @@ func planAutoMod(plan *Plan, desired, live []AutoMod) error {
 			return fmt.Errorf("server.yaml: automod rule %s adopted twice", id)
 		}
 		matched[id] = true
+		plan.resolve(Subject{AutoModKind, rule.Name}, id)
 		rule.Identity, current.Identity = Identity{}, Identity{}
 		compare(plan, AutoModKind, rule.Name, id, rule, current)
 	}

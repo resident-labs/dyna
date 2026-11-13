@@ -64,14 +64,21 @@ type Channel struct {
 	Slowmode   string   `yaml:"slowmode,omitempty"`
 	Tags       []string `yaml:"tags,omitempty"`
 }
+
+// Source says where a message was read, for refusals that name file and line.
+type Source struct {
+	File     string
+	BodyLine int
+}
 type Message struct {
 	ID       string          `yaml:"-"`
+	Source   Source          `yaml:"-"`
 	Title    string          `yaml:"title,omitempty"`
 	Color    string          `yaml:"color,omitempty"`
 	Footer   string          `yaml:"footer,omitempty"`
 	Pin      bool            `yaml:"pin,omitempty"`
 	Mentions string          `yaml:"mentions,omitempty"`
-	Embed    json.RawMessage `yaml:"-"`
+	Embed    json.RawMessage `yaml:"-" json:",omitempty"`
 	Body     string          `yaml:"-"`
 }
 type Entry struct {
@@ -89,8 +96,11 @@ type Snapshot struct {
 	Warnings        []string // Non-fatal compatibility notices, reported once per snapshot.
 	Policy          string
 	BotRolePosition int
-	Server          Server
-	Entries         []Entry
+	// Every channel and AutoMod rule ID on the server, including those the folder does not
+	// represent or that sit under unmanaged categories; only IDs, never their configuration.
+	ChannelIDs, AutoModIDs []string
+	Server                 Server
+	Entries                []Entry
 }
 
 func safeName(name string) bool {
@@ -102,4 +112,15 @@ type Folder struct {
 	Entries []Entry
 	Policy  string
 	Hooks   bool
+}
+
+// Overwrites returns the entry's permission overwrites, if it is a category or channel.
+func (entry Entry) Overwrites() Overwrites {
+	if entry.Category != nil {
+		return entry.Category.Overwrites
+	}
+	if entry.Channel != nil {
+		return entry.Channel.Overwrites
+	}
+	return Overwrites{}
 }

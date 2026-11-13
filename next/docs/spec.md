@@ -143,6 +143,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `discord_routes` |
 | `discord_outbox` |
 | `discord_messages` |
+| `discord_owned` |
 | `repos` |
 | `repo_heads` |
 | `room_repos` |

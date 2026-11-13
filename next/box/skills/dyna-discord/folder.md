@@ -3,13 +3,13 @@
 The engine reads `rooms/ROOM/discord/` beside the room's AGENTS.md on the engine host.
 Never put this folder in a repository or copy it into a box. With several whole-server mappings,
 use `discord/SERVER_ID/` for each server. Only the room's root and owner can export or plan.
-Owner CLI: `dyna discord export ROOM --server ID` and `dyna discord plan ROOM --server ID`.
-With one mapped server, omit server. Tool calls use `discord export {server?}` and `discord plan {server?}`.
+Owner CLI: `dyna discord export|plan|apply ROOM --server ID`. With one mapped server, omit server.
+Tool calls use `discord export {server?}`, `discord plan {server?}` and `discord apply {server?, prune?}`.
 
 Export first to adopt an existing server. It refuses a non-empty folder unless `force: true`
 (CLI `--force`); force replaces configuration only, preserving messages, policy and unmanaged areas.
 It exports no message history and never exports or applies role membership. Plan is read-only.
-Apply is not available yet. `hooks.yaml` is recognized but not applied.
+`hooks.yaml` is recognized but not applied.
 
 ```text
 discord/
@@ -71,3 +71,23 @@ Message names are stable ownership keys; do not rename a file to edit its messag
 `policy.yaml` uses the front-policy format in SKILL.md, not the server settings format.
 All YAML files are strict: unknown/duplicate keys, aliases and unknown permissions refuse.
 Do not add unsupported fields or role membership. Keep policy and private channel configuration on the host.
+
+## Apply
+
+Run plan first, then `discord apply`. Apply owns only what it created or the folder adopts by `id:` or
+`was:`; an object matched by name alone is refused until you add its `id:`. When apply creates an object it
+writes the new `id:` into the file, so a hand move or rename on the server is later matched by ID.
+It never touches UNMANAGED folders, Discord-managed roles, `other_permissions` bits, role membership or
+message history, and a missing adopted object is a refusal, never a re-create.
+Order: roles, channels (Community's channels, then Community, then forum and announcement), overwrites,
+channel and role order, AutoMod, messages, policy.yaml. Apply twice changes nothing the second time.
+A failure stops and lists what was done and what remains; run apply again to resume. After an unclear
+answer, nothing new on the server means the create did not happen; anything new refuses until you add
+`id:` to the entry that is yours (never a guess by name). A standing message whose post may have
+reached Discord refuses until you delete any copy and rename its file.
+Run `plan` with `prune` before `apply` with `prune`: it lists each object that would be deleted, or the refusal.
+`prune` deletes only recorded objects the folder no longer lists, never messages, and refuses a category
+holding a channel apply does not own. By hand (reported, not applied): channel type and forum tags of an
+existing channel, turning Community off, `sync` (derived from the channels' overwrites), role order above the
+bot. List every channel of a category in `channels:` or plan keeps reporting its order.
+The last 20 applied copies are kept beside the folder in `discord-applied/SERVER_ID/`.

@@ -17,7 +17,7 @@ func TestDiscordFolderReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, phrase := range []string{"rooms/ROOM/discord/", "Never put this folder in a repository", "UNMANAGED.md", "server.yaml", "category.yaml", "channel.yaml", "policy.yaml", "hooks.yaml", "Apply is not available yet", "no message history"} {
+	for _, phrase := range []string{"rooms/ROOM/discord/", "Never put this folder in a repository", "UNMANAGED.md", "server.yaml", "category.yaml", "channel.yaml", "policy.yaml", "hooks.yaml", "discord apply", "no message history"} {
 		if !strings.Contains(string(reference), phrase) {
 			t.Errorf("folder reference missing %q", phrase)
 		}

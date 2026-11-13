@@ -133,6 +133,7 @@ func (DiscordFilesRetrieved) isEventBody()         {}
 
 const MethodDiscordExport Method = "discord.export"
 const MethodDiscordPlan Method = "discord.plan"
+const MethodDiscordApply Method = "discord.apply"
 
 type DiscordExportRequest struct {
 	Room   RoomID `json:"room,omitempty"`
@@ -142,6 +143,12 @@ type DiscordExportRequest struct {
 type DiscordPlanRequest struct {
 	Room   RoomID `json:"room,omitempty"`
 	Server string `json:"server,omitempty"`
+	Prune  bool   `json:"prune,omitempty"`
+}
+type DiscordApplyRequest struct {
+	Room   RoomID `json:"room,omitempty"`
+	Server string `json:"server,omitempty"`
+	Prune  bool   `json:"prune,omitempty"`
 }
 type DiscordFolderResponse struct {
 	Text string `json:"text"`
