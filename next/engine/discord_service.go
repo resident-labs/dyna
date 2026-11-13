@@ -149,6 +149,13 @@ func (s *Service) discordInput(ctx context.Context, client *discord.Client, m di
 	if selected == nil {
 		return nil
 	}
+	allowed, err := s.discordPolicyInput(ctx, client, m, routes, *selected)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return nil
+	}
 	guildName := selected.Guild
 	var roles []string
 	if guild, ok := s.discordDirectory.Server(selected.Guild); ok {
@@ -223,7 +230,14 @@ func (s *Service) discordDrain(ctx context.Context, client *discord.Client) {
 	for {
 		reply, found, err := s.store.NextDiscordReply(ctx)
 		if err == nil && found {
-			_, status, sendErr := client.SendMessage(ctx, reply.Channel, reply.Text, reply.Message)
+			var status int
+			var sendErr error
+			if p := s.discordCap(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: reply.Session}, "POST", "/api/v10/channels/"+reply.Channel+"/messages", json.RawMessage(`{"allowed_mentions":{"parse":["users"]}}`)); p != nil {
+				status = 403
+				sendErr = fmt.Errorf("%s", p.Message)
+			} else {
+				_, status, sendErr = client.SendMessage(ctx, reply.Channel, reply.Text, reply.Message)
+			}
 			if sendErr == nil || (status >= 400 && status < 500 && status != 429) {
 				var notice *contract.Event
 				if sendErr != nil {

@@ -141,3 +141,13 @@ type DiscordPolicyRequest struct {
 type DiscordPolicyResponse struct {
 	Text string `json:"text"`
 }
+
+const MethodDiscordCheck Method = "discord.check"
+
+type DiscordCheckRequest struct {
+	Room   RoomID `json:"room,omitempty"`
+	Server string `json:"server,omitempty"`
+}
+type DiscordCheckResponse struct {
+	Lines []string `json:"lines"`
+}

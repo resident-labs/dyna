@@ -11,6 +11,9 @@ import (
 	"strings"
 )
 
+func (c *socketClient) DiscordCheck(ctx context.Context, req contract.DiscordCheckRequest) (contract.DiscordCheckResponse, error) {
+	return call[contract.DiscordCheckRequest, contract.DiscordCheckResponse](ctx, c, contract.MethodDiscordCheck, req)
+}
 func (c *socketClient) DiscordPolicy(ctx context.Context, req contract.DiscordPolicyRequest) (contract.DiscordPolicyResponse, error) {
 	return call[contract.DiscordPolicyRequest, contract.DiscordPolicyResponse](ctx, c, contract.MethodDiscordPolicy, req)
 }
@@ -166,6 +169,23 @@ func discordCommand(getClient func() client) *cobra.Command {
 		return err
 	}}
 	policyCmd.Flags().String("server", "", "Mapped server ID")
-	root.AddCommand(api, send, read, instructions, policyCmd)
+	checkCmd := &cobra.Command{Use: "check", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		service, ok := getClient().(interface {
+			DiscordCheck(context.Context, contract.DiscordCheckRequest) (contract.DiscordCheckResponse, error)
+		})
+		if !ok {
+			return fmt.Errorf("Discord unavailable")
+		}
+		server, _ := cmd.Flags().GetString("server")
+		result, err := service.DiscordCheck(cmd.Context(), contract.DiscordCheckRequest{Server: server})
+		if err == nil {
+			for _, line := range result.Lines {
+				fmt.Fprintln(cmd.OutOrStdout(), line)
+			}
+		}
+		return err
+	}}
+	checkCmd.Flags().String("server", "", "Mapped server ID")
+	root.AddCommand(api, send, read, instructions, policyCmd, checkCmd)
 	return root
 }
