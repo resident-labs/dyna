@@ -488,3 +488,23 @@ func TestPlanWithPruneRefusesAnUnclearCreateLikeApply(t *testing.T) {
 		t.Fatalf("plan with prune did not refuse: %v", problem)
 	}
 }
+
+func TestPlanWithPruneMatchesARecordedIDLostFromTheFile(t *testing.T) {
+	a := newApplyTest(t, emptyServer(), applyFolder)
+	a.apply(false)
+	a.write("channels/Community/news/channel.yaml", "topic: Updates\n") // the id: is lost
+	configuration := a.fake.Configuration()
+	for i := range configuration.Channels {
+		if configuration.Channels[i].Name == "news" {
+			configuration.Channels[i].Name = "headlines"
+		}
+	}
+	a.fake.SetConfiguration(configuration)
+	response, problem := a.s.DiscordPlan(a.ctx, boxCaller(a.rootSession()), contract.DiscordPlanRequest{Prune: true})
+	if problem != nil {
+		t.Fatal(problem.Message)
+	}
+	if strings.Contains(response.Text, "Create channel Community/news") || strings.Contains(response.Text, "Delete ") {
+		t.Fatalf("plan disagrees with apply:\n%s", response.Text)
+	}
+}

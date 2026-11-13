@@ -97,6 +97,7 @@ func (r *run) claimRecorded() (folder.Folder, error) {
 		}
 		r.claimed[folder.Subject{Kind: kind, Name: owned.Path}] = true
 		if r.dryRun {
+			r.restoreID(kind, owned.Path, id)
 			continue
 		}
 		if err := folder.RecordID(r.target.Folder, kind, owned.Path, id); err != nil {
@@ -176,4 +177,34 @@ func (r *run) recordAdopted() error {
 		}
 	}
 	return nil
+}
+
+// restoreID gives a folder object its recorded ID in memory only, as RecordID does
+// in the file, so that a plan matches it by ID as the real run will.
+func (r *run) restoreID(kind folder.Kind, name, id string) {
+	switch kind {
+	case folder.RoleKind:
+		for i := range r.desired.Server.Roles {
+			if r.desired.Server.Roles[i].Name == name {
+				r.desired.Server.Roles[i].ID = id
+			}
+		}
+	case folder.AutoModKind:
+		for i := range r.desired.Server.AutoMod {
+			if r.desired.Server.AutoMod[i].Name == name {
+				r.desired.Server.AutoMod[i].ID = id
+			}
+		}
+	default:
+		for _, entry := range r.desired.Entries {
+			if entry.Path != name {
+				continue
+			}
+			if entry.Category != nil {
+				entry.Category.ID = id
+			} else if entry.Channel != nil {
+				entry.Channel.ID = id
+			}
+		}
+	}
 }
