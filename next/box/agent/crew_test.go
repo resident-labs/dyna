@@ -119,7 +119,8 @@ type fakeWorker struct {
 	dir    string
 	work   func(dir string, submit dynaext.Submit) // what a schema worker does with its submit tool
 	submit dynaext.Submit
-	steer  func(contract.TurnInput) error // nil: no turn is running to take a steer
+	steer  func(contract.TurnInput) error  // nil: no turn is running to take a steer
+	read   func(contract.DeliverySeq) bool // whether the session holds a steer it queued
 }
 
 func (w *fakeWorker) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput, _ func()) (contract.TurnEnded, error) {
@@ -147,6 +148,9 @@ func (w *fakeWorker) Steer(_ context.Context, input contract.TurnInput) error {
 	}
 	return w.steer(input)
 }
+func (w *fakeWorker) Delivered(_ context.Context, id contract.DeliverySeq) (bool, error) {
+	return w.read != nil && w.read(id), nil
+}
 func (w *fakeWorker) SessionFile() string { return w.file }
 func (w *fakeWorker) Close() error        { return nil }
 
@@ -162,6 +166,7 @@ type crewHarness struct {
 	act     func(dir, prompt string)
 	hold    func(ctx context.Context, prompt string) error
 	steer   func(contract.TurnInput) error
+	read    func(contract.DeliverySeq) bool
 	workdir string
 	branch  string
 	base    string
@@ -203,7 +208,7 @@ func (h *crewHarness) start(script string, profiles ...contract.WorkflowProfile)
 			h.mu.Lock()
 			h.submits = append(h.submits, submit != nil)
 			h.mu.Unlock()
-			return &fakeWorker{reply: h.reply, act: h.act, work: h.work, submit: submit, hold: h.hold, steer: h.steer, dir: dir, model: profile.Model.ID, file: filepath.Join(sessions, fmt.Sprintf("w%d.jsonl", opened.Add(1)))}, nil
+			return &fakeWorker{reply: h.reply, act: h.act, work: h.work, submit: submit, hold: h.hold, steer: h.steer, read: h.read, dir: dir, model: profile.Model.ID, file: filepath.Join(sessions, fmt.Sprintf("w%d.jsonl", opened.Add(1)))}, nil
 		},
 		Transcript: NewTranscript(&transcriptEngine{}, sessions),
 		Workdir:    h.workdir,
@@ -1002,8 +1007,11 @@ func TestCrewPreservesTypedResultAndDoesNotRetypeStrings(t *testing.T) {
 // A post to a run reaches every worker that is running, and counts as delivered once one took it.
 func TestCrewSteerReachesRunningWorkers(t *testing.T) {
 	h := newCrewHarness(t)
-	steers, release := make(chan string, 2), make(chan struct{})
-	h.steer = func(input contract.TurnInput) error { steers <- input.Text; return nil }
+	release := make(chan struct{})
+	var steers atomic.Int32
+	h.steer = func(contract.TurnInput) error { steers.Add(1); return nil }
+	var read atomic.Bool
+	h.read = func(id contract.DeliverySeq) bool { return id == 8 && read.Load() }
 	h.hold = func(ctx context.Context, _ string) error {
 		select {
 		case <-release:
@@ -1016,17 +1024,28 @@ func TestCrewSteerReachesRunningWorkers(t *testing.T) {
 	post := contract.TurnInput{Delivery: 8, Text: "skip the generated files"}
 	waitFor(t, "both workers", func() bool { return h.started.Load() == 2 })
 	waitFor(t, "a steer both workers take", func() bool {
-		for len(steers) > 0 {
-			<-steers
-		}
-		return crew.Steer(context.Background(), post) == nil && len(steers) == 2
+		steers.Store(0)
+		return crew.Steer(context.Background(), post) == nil && steers.Load() == 2
 	})
+	// Queued is not read: a worker may end before its next request.
+	if delivered, _ := crew.Delivered(context.Background(), 8); delivered {
+		t.Fatal("a steer no worker has read counts as delivered")
+	}
+	_ = crew.Steer(context.Background(), contract.TurnInput{Delivery: 10, Text: "never read"})
+	read.Store(true)
 	if delivered, _ := crew.Delivered(context.Background(), 8); !delivered {
-		t.Fatal("a steer the workers took is not delivered")
+		t.Fatal("a steer a running worker read is not delivered")
 	}
 	close(release)
 	if got := <-ended; got.Outcome != contract.TurnCompleted {
 		t.Fatalf("turn %+v", got)
+	}
+	// What a worker read stays delivered after it is gone, and what it only queued does not.
+	if delivered, _ := crew.Delivered(context.Background(), 8); !delivered {
+		t.Fatal("a steer read by a worker that has ended is not delivered")
+	}
+	if delivered, _ := crew.Delivered(context.Background(), 10); delivered {
+		t.Fatal("a steer the workers ended without reading counts as delivered")
 	}
 	// The workers are gone, so no one takes a later post, and it stays undelivered.
 	if err := crew.Steer(context.Background(), contract.TurnInput{Delivery: 9, Text: "late"}); !errors.Is(err, harness.ErrNoTurn) {
