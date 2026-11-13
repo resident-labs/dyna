@@ -475,17 +475,17 @@ func (s *Store) endWorkflow(ctx context.Context, tx *sql.Tx, id contract.Workflo
 	return err
 }
 
-func (s *Store) PauseWorkflow(ctx context.Context, id contract.WorkflowRunID, paused bool, steps ...string) error {
+func (s *Store) PauseWorkflow(ctx context.Context, id contract.WorkflowRunID, paused bool, step string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		var session contract.SessionID
 		query := "UPDATE workflow_runs SET paused=? WHERE id=? AND state=? RETURNING session"
 		args := []any{paused, id, contract.WorkflowRunning}
-		if len(steps) > 0 && steps[0] != "" {
+		if step != "" {
 			query = "UPDATE workflow_runs SET paused_steps=(SELECT json_group_array(value) FROM json_each(paused_steps) WHERE value!=?) WHERE id=? AND state=? RETURNING session"
-			args[0] = steps[0]
+			args[0] = step
 			if paused {
 				query = "UPDATE workflow_runs SET paused_steps=json_insert((SELECT json_group_array(value) FROM json_each(paused_steps) WHERE value!=?), '$[#]', ?) WHERE id=? AND state=? RETURNING session"
-				args = []any{steps[0], steps[0], id, contract.WorkflowRunning}
+				args = []any{step, step, id, contract.WorkflowRunning}
 			}
 		}
 		err := tx.QueryRowContext(ctx, query, args...).Scan(&session)

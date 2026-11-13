@@ -109,14 +109,13 @@ const test = await run(`git fetch origin ${merged.branch} && git worktree add --
   time queued for it does not count against a timeout.
 
 ## Steer, stop, reload or resume a run
-
 - A post mentioning the run's session reaches every worker running then, before its next model request.
   The script reads nothing; with no worker running the post stays undelivered.
 - One worker: `dyna workflow steer RUN STEP TEXT`, or workflow steer with run, step and text. STEP is a
   label or unique key prefix; status lists steps. Steering changes neither its key nor replay.
 - `dyna workflow pause RUN [STEP]` holds the run, or one worker, before its next model request; `unpause` lets it go on.
   A run-wide pause also holds new agent() and run() calls. Steering waits for release. Pause survives restarts.
-  RUN accepts a run ID or its session name. The starter, its ancestors and owner control the run.
+  RUN is a run ID or session name. The starter, its ancestors and owner control the run.
 - Stop: session stop on the run's session, or `dyna session stop SESSION`; status then says `stopped`.
   Running steps fail with `the run ended first`; `--resume RUN` carries on from finished steps.
 
