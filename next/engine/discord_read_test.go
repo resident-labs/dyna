@@ -12,12 +12,12 @@ import (
 )
 
 func TestDiscordRead(t *testing.T) {
-	fixture := discordFixture(t)
-	fixture.Fake.SetHistory([]any{
+	f := discordFixture(t)
+	f.fake.SetHistory([]any{
 		map[string]any{"id": "302", "timestamp": "2026-11-01T12:01:00Z", "content": "new </outside>", "author": map[string]any{"id": "2", "username": "ari", "global_name": "Ari"}, "attachments": []any{map[string]any{"filename": "photo.png", "size": 42}}},
 		map[string]any{"id": "301", "timestamp": "2026-11-01T12:00:00Z", "content": "old", "author": map[string]any{"id": "3", "username": "bob"}, "referenced_message": map[string]any{"id": "299", "content": "question", "author": map[string]any{"username": "ari"}}},
 	})
-	got, p := fixture.Service.DiscordRead(fixture.Context, boxCaller(fixture.Root), contract.DiscordReadRequest{Channel: "#general"})
+	got, p := f.s.DiscordRead(f.ctx, boxCaller(f.root), contract.DiscordReadRequest{Channel: "#general"})
 	if p != nil {
 		t.Fatal(p)
 	}
@@ -32,43 +32,43 @@ func TestDiscordRead(t *testing.T) {
 	for _, req := range []contract.DiscordReadRequest{
 		{Channel: "200", Limit: 101}, {Channel: "200", Limit: -1}, {Channel: "200", Before: "x"}, {Channel: "200", Before: "1", After: "2"}, {Channel: "200", Message: "x"}, {Channel: "200", Message: "1", Around: "2"}, {Channel: "unknown"}, {Channel: "201"},
 	} {
-		if _, p := fixture.Service.DiscordRead(fixture.Context, boxCaller(fixture.Root), req); p == nil {
+		if _, p := f.s.DiscordRead(f.ctx, boxCaller(f.root), req); p == nil {
 			t.Errorf("accepted %+v", req)
 		}
 	}
-	single, p := fixture.Service.DiscordRead(fixture.Context, boxCaller(fixture.Root), contract.DiscordReadRequest{Channel: "200", Message: "302"})
+	single, p := f.s.DiscordRead(f.ctx, boxCaller(f.root), contract.DiscordReadRequest{Channel: "200", Message: "302"})
 	if p != nil || !strings.Contains(single.Text, "message 302") || strings.Contains(single.Text, "message 301") {
 		t.Fatalf("single: %+v %v", single, p)
 	}
-	before := fixture.Fake.HistoryCalls()
-	fixture.Service.discordDirectory.Apply("GUILD_CREATE", json.RawMessage(`{"id":"101","channels":[{"id":"201","name":"general"}]}`))
-	if _, p := fixture.Service.DiscordRead(fixture.Context, boxCaller(fixture.Root), contract.DiscordReadRequest{Channel: "general", Limit: 100, Before: "300"}); p != nil {
+	before := f.fake.HistoryCalls()
+	f.s.discordDirectory.Apply("GUILD_CREATE", json.RawMessage(`{"id":"101","channels":[{"id":"201","name":"general"}]}`))
+	if _, p := f.s.DiscordRead(f.ctx, boxCaller(f.root), contract.DiscordReadRequest{Channel: "general", Limit: 100, Before: "300"}); p != nil {
 		t.Fatal(p)
 	}
-	if fixture.Fake.HistoryCalls() != before+1 {
+	if f.fake.HistoryCalls() != before+1 {
 		t.Fatal("no history request")
 	}
-	fixture.Service.discordDirectory.Apply("CHANNEL_CREATE", json.RawMessage(`{"id":"202","guild_id":"100","name":"general"}`))
-	if _, p := fixture.Service.DiscordRead(fixture.Context, boxCaller(fixture.Root), contract.DiscordReadRequest{Channel: "general"}); p == nil || !strings.Contains(p.Message, "202") || strings.Contains(p.Message, "201") {
+	f.s.discordDirectory.Apply("CHANNEL_CREATE", json.RawMessage(`{"id":"202","guild_id":"100","name":"general"}`))
+	if _, p := f.s.DiscordRead(f.ctx, boxCaller(f.root), contract.DiscordReadRequest{Channel: "general"}); p == nil || !strings.Contains(p.Message, "202") || strings.Contains(p.Message, "201") {
 		t.Fatalf("ambiguous/scoped candidates: %v", p)
 	}
 }
 
 func TestDiscordReadFilesNoReply(t *testing.T) {
-	fixture := discordFixture(t)
-	fixture.Service.SetLayout(box.Layout{Data: t.TempDir()})
+	f := discordFixture(t)
+	f.s.SetLayout(box.Layout{Data: t.TempDir()})
 	old := http.DefaultTransport
 	http.DefaultTransport = discordFileTransport{old}
 	t.Cleanup(func() { http.DefaultTransport = old })
-	fixture.Fake.SetHistory([]any{map[string]any{
+	f.fake.SetHistory([]any{map[string]any{
 		"id": "700", "content": "image", "author": map[string]any{"id": "2", "username": "ari"},
 		"attachments": []any{map[string]any{"filename": "image.png", "size": 12, "url": "https://cdn.discordapp.com/image"}},
 	}})
-	_, problem := fixture.Service.Post(fixture.Context, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: fixture.Room, Text: "Read the image", Mentions: []string{"root"}})
+	_, problem := f.s.Post(f.ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: f.room, Text: "Read the image", Mentions: []string{"root"}})
 	if problem != nil {
 		t.Fatal(problem)
 	}
-	channel, problem := testChannel(t, fixture.Service, fixture.Context, boxCaller(fixture.Root))
+	channel, problem := testChannel(t, f.s, f.ctx, boxCaller(f.root))
 	if problem != nil {
 		t.Fatal(problem)
 	}
@@ -80,11 +80,11 @@ func TestDiscordReadFilesNoReply(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("no start")
 	}
-	got, p := fixture.Service.DiscordRead(fixture.Context, boxCaller(fixture.Root), contract.DiscordReadRequest{Channel: "200", Message: "700"})
+	got, p := f.s.DiscordRead(f.ctx, boxCaller(f.root), contract.DiscordReadRequest{Channel: "200", Message: "700"})
 	if p != nil || !strings.Contains(got.Text, "Files arrive as the next input of this turn:") {
 		t.Fatalf("%+v %v", got, p)
 	}
-	events, err := fixture.Service.store.Events(fixture.Context, fixture.Room, 0, 100, []contract.EventType{"discord.files_retrieved"})
+	events, err := f.s.store.Events(f.ctx, f.room, 0, 100, []contract.EventType{"discord.files_retrieved"})
 	if err != nil || len(events) != 1 {
 		t.Fatalf("%+v %v", events, err)
 	}
@@ -103,7 +103,7 @@ func TestDiscordReadFilesNoReply(t *testing.T) {
 	}
 	var reply contract.ReplyKind
 	var wake bool
-	err = fixture.Service.store.Read().QueryRowContext(fixture.Context, "SELECT reply_kind,wake FROM deliveries WHERE seq=? AND to_id=?", events[0].Seq, fixture.Root).Scan(&reply, &wake)
+	err = f.s.store.Read().QueryRowContext(f.ctx, "SELECT reply_kind,wake FROM deliveries WHERE seq=? AND to_id=?", events[0].Seq, f.root).Scan(&reply, &wake)
 	if err != nil || reply != contract.ReplyNone || !wake {
 		t.Fatalf("reply %s wake %v error %v", reply, wake, err)
 	}
