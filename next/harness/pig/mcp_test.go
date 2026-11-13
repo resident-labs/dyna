@@ -9,7 +9,7 @@ import (
 
 func TestAgentMCPExposure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mcp.json")
-	if err := WriteAgentMCPConfig(path, "areas", map[string]MCPServer{"docs": {URL: "https://example.test/mcp", Exposure: "deferred"}}); err != nil {
+	if err := WriteAgentMCPConfig(path, "areas", true, map[string]MCPServer{"docs": {URL: "https://example.test/mcp", Exposure: "deferred"}}); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)
@@ -27,7 +27,7 @@ func TestAgentMCPExposure(t *testing.T) {
 		t.Fatal(err)
 	}
 	dyna := config.Servers["dyna"]
-	if dyna.Exposure != "deferred" || dyna.ToolExposure["post"] != "direct" || dyna.Timeout != 600 || config.Servers["docs"].Exposure != "deferred" {
+	if dyna.Exposure != "deferred" || dyna.ToolExposure["post"] != "direct" || dyna.ToolExposure["goal"] != "direct" || dyna.Timeout != 600 || config.Servers["docs"].Exposure != "deferred" {
 		t.Fatalf("%+v", config)
 	}
 }
