@@ -134,14 +134,20 @@ func (l *buildLock) waited() time.Duration {
 	return l.total
 }
 
-// timeout ends ctx with DeadlineExceeded as its cause after limit, leaving out the time the lock had a queue. Any worker may
+// timeout ends ctx with DeadlineExceeded as its cause after limit, leaving out build-lock waits and worker holds. Any worker may
 // be the one waiting, so all of them get that time, and none can fail for its place in the queue.
-func (l *buildLock) timeout(ctx context.Context, limit time.Duration) (context.Context, context.CancelFunc) {
+func (l *buildLock) timeout(ctx context.Context, limit time.Duration, held func() time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancelCause(ctx)
-	started, waited := time.Now(), l.waited()
+	credited := func() time.Duration {
+		if held != nil {
+			return l.waited() + held()
+		}
+		return l.waited()
+	}
+	started, waited := time.Now(), credited()
 	go func() {
 		for {
-			left := limit - time.Since(started) + l.waited() - waited
+			left := limit - time.Since(started) + credited() - waited
 			if left <= 0 {
 				cancel(context.DeadlineExceeded)
 				return

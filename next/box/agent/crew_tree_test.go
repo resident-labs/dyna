@@ -632,7 +632,7 @@ func TestALockWaitDoesNotCountAgainstAWorkersTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	work, cancel := lock.timeout(ctx, 300*time.Millisecond)
+	work, cancel := lock.timeout(ctx, 300*time.Millisecond, nil)
 	defer cancel()
 	queued, finished := make(chan struct{}), make(chan struct{})
 	go func() {

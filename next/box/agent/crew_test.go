@@ -112,16 +112,17 @@ func (j *fakeJournal) WorkflowPost(_ context.Context, req contract.PostRequest) 
 
 // fakeWorker answers as reply says. It stands in for a Pi process.
 type fakeWorker struct {
-	reply  func(prompt string, model string) (contract.TurnEnded, error)
-	model  string
-	file   string
-	act    func(dir, prompt string) // what the worker does to its tree before it answers
-	hold   func(ctx context.Context, prompt string) error
-	dir    string
-	work   func(dir string, submit dynaext.Submit) // what a schema worker does with its submit tool
-	submit dynaext.Submit
-	steer  func(contract.TurnInput) error  // nil: no turn is running to take a steer
-	read   func(contract.DeliverySeq) bool // whether the session holds a steer it queued
+	beforeRequest func(context.Context) error
+	reply         func(prompt string, model string) (contract.TurnEnded, error)
+	model         string
+	file          string
+	act           func(dir, prompt string) // what the worker does to its tree before it answers
+	hold          func(ctx context.Context, prompt string) error
+	dir           string
+	work          func(dir string, submit dynaext.Submit) // what a schema worker does with its submit tool
+	submit        dynaext.Submit
+	steer         func(contract.TurnInput) error  // nil: no turn is running to take a steer
+	read          func(contract.DeliverySeq) bool // whether the session holds a steer it queued
 }
 
 func (w *fakeWorker) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput, _ func()) (contract.TurnEnded, error) {
@@ -133,6 +134,11 @@ func (w *fakeWorker) Start(ctx context.Context, id contract.TurnID, inputs []con
 	}
 	if w.hold != nil {
 		if err := w.hold(ctx, inputs[0].Text); err != nil {
+			return contract.TurnEnded{}, err
+		}
+	}
+	if w.beforeRequest != nil {
+		if err := w.beforeRequest(ctx); err != nil {
 			return contract.TurnEnded{}, err
 		}
 	}
@@ -152,8 +158,9 @@ func (w *fakeWorker) Steer(_ context.Context, input contract.TurnInput) error {
 func (w *fakeWorker) Delivered(_ context.Context, id contract.DeliverySeq) (bool, error) {
 	return w.read != nil && w.read(id), nil
 }
-func (w *fakeWorker) SessionFile() string { return w.file }
-func (w *fakeWorker) Close() error        { return nil }
+func (w *fakeWorker) SetBeforeRequest(fn func(context.Context) error) { w.beforeRequest = fn }
+func (w *fakeWorker) SessionFile() string                             { return w.file }
+func (w *fakeWorker) Close() error                                    { return nil }
 
 type crewHarness struct {
 	timeout int // the room's default step timeout in seconds, as the engine sends it
@@ -1092,12 +1099,11 @@ func TestCrewSteerTargetsOnlyOneWorker(t *testing.T) {
 	<-ended
 }
 
-func TestCrewPauseHoldsNewCallsButRunningWorkerFinishes(t *testing.T) {
+func TestCrewPauseHoldsRunningWorkersAndNewCalls(t *testing.T) {
 	h := newCrewHarness(t)
-	release := make(chan struct{})
-	entered := make(chan struct{})
+	release, entered := make(chan struct{}), make(chan struct{}, 2)
 	h.hold = func(ctx context.Context, _ string) error {
-		close(entered)
+		entered <- struct{}{}
 		select {
 		case <-release:
 			return nil
@@ -1105,20 +1111,38 @@ func TestCrewPauseHoldsNewCallsButRunningWorkerFinishes(t *testing.T) {
 			return ctx.Err()
 		}
 	}
-	crew, ended := h.start(crewMeta + "await agent('first'); return await agent('second')")
+	var steers atomic.Int32
+	h.steer = func(contract.TurnInput) error { steers.Add(1); return nil }
+	crew, ended := h.start(crewMeta + "await parallel([() => agent('first'), () => agent('second')]); return await agent('third')")
 	<-entered
+	<-entered
+	boundaries := make(chan struct{}, 2)
 	crew.mu.Lock()
 	workflow := crew.workflow
+	for _, worker := range crew.workers {
+		fake := worker.(*fakeWorker)
+		gate := fake.beforeRequest
+		fake.beforeRequest = func(ctx context.Context) error { boundaries <- struct{}{}; return gate(ctx) }
+	}
 	crew.mu.Unlock()
 	workflow.Paused = true
 	crew.Reload(workflow)
 	close(release)
-	waitFor(t, "first worker ends", func() bool { crew.mu.Lock(); defer crew.mu.Unlock(); return len(crew.workers) == 0 })
-	if h.started.Load() != 1 {
-		t.Fatal("second worker started while paused")
+	<-boundaries
+	<-boundaries
+	if h.started.Load() != 2 {
+		t.Fatal("new worker started while paused")
 	}
-	if err := crew.Steer(context.Background(), contract.TurnInput{Delivery: 8, Text: "paused"}); !errors.Is(err, harness.ErrNoTurn) {
+	select {
+	case <-ended:
+		t.Fatal("running workers escaped their holds")
+	default:
+	}
+	if err := crew.Steer(context.Background(), contract.TurnInput{Delivery: 8, Text: "paused"}); err != nil {
 		t.Fatal(err)
+	}
+	if steers.Load() != 2 {
+		t.Fatalf("steered %d held workers", steers.Load())
 	}
 	h.hold = nil
 	workflow.Paused = false
@@ -1126,8 +1150,8 @@ func TestCrewPauseHoldsNewCallsButRunningWorkerFinishes(t *testing.T) {
 	if got := <-ended; got.Outcome != contract.TurnCompleted {
 		t.Fatal(got)
 	}
-	if h.started.Load() != 2 {
-		t.Fatal("second worker did not start")
+	if h.started.Load() != 3 {
+		t.Fatal("new worker did not start after release")
 	}
 }
 

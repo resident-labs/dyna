@@ -72,7 +72,7 @@ type WorkflowRunResponse struct {
 // WorkflowReloadRequest gives a running run a new script, which its crew runs in place of the old one in the same box. Its
 // meta keeps the run's name, repo and size; its profiles and description may change.
 type WorkflowReloadRequest struct {
-	Run    WorkflowRunID `json:"run"`
+	Run    WorkflowRunID `json:"run" desc:"Run ID; steer, pause, unpause and reload also accept the run session name"`
 	Script string        `json:"script"`
 }
 
@@ -101,6 +101,7 @@ type WorkflowInfo struct {
 	Version      int            `json:"version,omitempty"`
 	State        WorkflowState  `json:"state"`
 	Paused       bool           `json:"paused,omitempty"`
+	PausedSteps  []string       `json:"pausedSteps,omitempty"`
 	Result       string         `json:"result,omitempty"`
 	Steps        int            `json:"steps,omitempty"`
 	Failed       int            `json:"failed"`
@@ -141,7 +142,7 @@ type WorkflowStep struct {
 
 // WorkflowStatusRequest names a run, or the crew session that hosts it.
 type WorkflowStatusRequest struct {
-	Run     WorkflowRunID `json:"run,omitempty"`
+	Run     WorkflowRunID `json:"run,omitempty" desc:"Run ID; steer, pause, unpause and reload also accept the run session name"`
 	Session SessionID     `json:"session,omitempty"`
 }
 
@@ -200,6 +201,7 @@ type BoxWorkflow struct {
 	Script       string            `json:"script"`
 	Version      int               `json:"version"`
 	Paused       bool              `json:"paused"`
+	PausedSteps  []string          `json:"pausedSteps,omitempty"`
 	Args         string            `json:"args,omitempty"`
 	Profiles     []WorkflowProfile `json:"profiles"` // in meta's order: the first is the default
 	Workers      int               `json:"workers"`  // how many crew workers may run at once: the box's memory allows some, and the maxWorkers setting may allow fewer
@@ -330,14 +332,15 @@ type WorkflowStateResponse struct {
 
 // WorkflowSteerRequest addresses one running worker by label or unique key prefix.
 type WorkflowSteerRequest struct {
-	Run  WorkflowRunID `json:"run"`
-	Step string        `json:"step"`
+	Run  WorkflowRunID `json:"run" desc:"Run ID; steer, pause, unpause and reload also accept the run session name"`
+	Step string        `json:"step" desc:"Running worker label or unique key prefix; pause and unpause may omit it for the whole run"`
 	Text string        `json:"text"`
 }
 type WorkflowSteerResponse = PostResponse
 
 type WorkflowPauseRequest struct {
-	Run WorkflowRunID `json:"run"`
+	Run  WorkflowRunID `json:"run" desc:"Run ID; steer, pause, unpause and reload also accept the run session name"`
+	Step string        `json:"step,omitempty" desc:"Running worker label or unique key prefix; pause and unpause may omit it for the whole run"`
 }
 type WorkflowPauseResponse struct{}
 type WorkflowUnpauseRequest = WorkflowPauseRequest
@@ -348,6 +351,7 @@ type WorkflowPauseChanged struct {
 	Run     WorkflowRunID `json:"run"`
 	Session SessionID     `json:"session"`
 	Paused  bool          `json:"paused"`
+	Step    string        `json:"step,omitempty"`
 }
 
 func (WorkflowPauseChanged) EventType() EventType { return "workflow.pause_changed" }

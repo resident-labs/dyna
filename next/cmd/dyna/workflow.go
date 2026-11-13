@@ -65,11 +65,19 @@ func workflowCommand(get func() *socketClient) *cobra.Command {
 	steer := &cobra.Command{Use: "steer RUN STEP TEXT", Args: cobra.ExactArgs(3), RunE: func(cmd *cobra.Command, args []string) error {
 		return printCall[contract.WorkflowSteerResponse](cmd, get(), contract.MethodWorkflowSteer, contract.WorkflowSteerRequest{Run: contract.WorkflowRunID(args[0]), Step: args[1], Text: args[2]})
 	}}
-	pause := &cobra.Command{Use: "pause RUN", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		return printCall[contract.WorkflowPauseResponse](cmd, get(), contract.MethodWorkflowPause, contract.WorkflowPauseRequest{Run: contract.WorkflowRunID(args[0])})
+	pause := &cobra.Command{Use: "pause RUN [STEP]", Args: cobra.RangeArgs(1, 2), RunE: func(cmd *cobra.Command, args []string) error {
+		step := ""
+		if len(args) > 1 {
+			step = args[1]
+		}
+		return printCall[contract.WorkflowPauseResponse](cmd, get(), contract.MethodWorkflowPause, contract.WorkflowPauseRequest{Run: contract.WorkflowRunID(args[0]), Step: step})
 	}}
-	unpause := &cobra.Command{Use: "unpause RUN", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		return printCall[contract.WorkflowUnpauseResponse](cmd, get(), contract.MethodWorkflowUnpause, contract.WorkflowUnpauseRequest{Run: contract.WorkflowRunID(args[0])})
+	unpause := &cobra.Command{Use: "unpause RUN [STEP]", Args: cobra.RangeArgs(1, 2), RunE: func(cmd *cobra.Command, args []string) error {
+		step := ""
+		if len(args) > 1 {
+			step = args[1]
+		}
+		return printCall[contract.WorkflowUnpauseResponse](cmd, get(), contract.MethodWorkflowUnpause, contract.WorkflowUnpauseRequest{Run: contract.WorkflowRunID(args[0]), Step: step})
 	}}
 	c.AddCommand(steer, pause, unpause, run, reload, status, list, settings, set)
 	return c

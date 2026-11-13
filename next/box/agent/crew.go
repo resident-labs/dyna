@@ -66,6 +66,7 @@ type crewWorker interface {
 	Steer(context.Context, contract.TurnInput) error
 	Delivered(context.Context, contract.DeliverySeq) (bool, error)
 	SessionFile() string
+	SetBeforeRequest(func(context.Context) error)
 	Close() error
 }
 
@@ -166,7 +167,8 @@ func (c *Crew) addLimits(profiles []contract.WorkflowProfile) {
 func (c *Crew) Reload(workflow contract.BoxWorkflow) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if workflow.Paused != c.workflow.Paused {
+	if workflow.Paused != c.workflow.Paused || !slices.Equal(workflow.PausedSteps, c.workflow.PausedSteps) {
+		c.workflow.PausedSteps = slices.Clone(workflow.PausedSteps)
 		c.workflow.Paused = workflow.Paused
 		close(c.pauseChanged)
 		c.pauseChanged = make(chan struct{})
@@ -766,7 +768,7 @@ type agentOpts struct {
 }
 
 func (c *Crew) agentCall(ctx context.Context, call crewCall) crewReply {
-	if err := c.waitUnpaused(ctx); err != nil {
+	if err := c.waitUnpaused(ctx, ""); err != nil {
 		return crewReply{Error: "the run stopped"}
 	}
 	var opts agentOpts
@@ -841,7 +843,8 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 		defer release()
 	}
 	limit := c.timeout(opts.Timeout)
-	ctx, cancel := c.builds.timeout(ctx, limit)
+	pauseTime := &buildLock{}
+	ctx, cancel := c.builds.timeout(ctx, limit, pauseTime.waited)
 	defer cancel()
 	folder := filepath.Join(c.config.State, "workers", key)
 	if err := os.MkdirAll(folder, 0700); err != nil {
@@ -866,6 +869,11 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 		return stepOutcome{reason: "the worker did not start: " + err.Error()}
 	}
 	c.mu.Lock()
+	worker.SetBeforeRequest(func(ctx context.Context) error {
+		pauseTime.queue(1)
+		defer pauseTime.queue(-1)
+		return c.waitUnpaused(ctx, key)
+	})
 	c.workers[key] = worker
 	c.mu.Unlock()
 	defer func() {
@@ -1023,7 +1031,7 @@ type commandResult struct {
 }
 
 func (c *Crew) commandCall(ctx context.Context, call crewCall) crewReply {
-	if err := c.waitUnpaused(ctx); err != nil {
+	if err := c.waitUnpaused(ctx, ""); err != nil {
 		return crewReply{Error: "the run stopped"}
 	}
 	var opts commandOpts
@@ -1209,11 +1217,11 @@ func (t *tail) String() string {
 	return strings.ToValidUTF8(string(t.data), "")
 }
 
-// waitUnpaused gates new agent and command calls; workers already running keep their turns.
-func (c *Crew) waitUnpaused(ctx context.Context) error {
+// waitUnpaused holds new calls and each worker before its next request.
+func (c *Crew) waitUnpaused(ctx context.Context, key string) error {
 	for {
 		c.mu.Lock()
-		paused, changed := c.workflow.Paused, c.pauseChanged
+		paused, changed := c.workflow.Paused || slices.Contains(c.workflow.PausedSteps, key), c.pauseChanged
 		c.mu.Unlock()
 		if !paused {
 			return nil

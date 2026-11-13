@@ -400,3 +400,93 @@ func TestPostToEndedWorkflowNamesWhyItCannotReceive(t *testing.T) {
 		t.Fatalf("refusal: %+v", problem)
 	}
 }
+
+func TestWorkflowStepPauseUsesWorkerResolutionAndPersists(t *testing.T) {
+	w := setupWorkflow(t)
+	started, run := w.start(w.owner, workflowScript)
+	w.step(run, "alpha-key", contract.WorkflowStepRunning, "")
+	w.step(run, "beta-key", contract.WorkflowStepRunning, "")
+	for _, step := range []string{"missing"} {
+		if _, problem := w.WorkflowPause(w.ctx, w.owner, contract.WorkflowPauseRequest{Run: started.Run, Step: step}); problem == nil || !strings.Contains(problem.Message, "alpha-key") {
+			t.Fatalf("refusal: %+v", problem)
+		}
+	}
+	if _, problem := w.WorkflowPause(w.ctx, w.owner, contract.WorkflowPauseRequest{Run: started.Run, Step: "alpha-k"}); problem != nil {
+		t.Fatal(problem)
+	}
+	stored, err := w.store.WorkflowRun(w.ctx, started.Run)
+	if err != nil || stored.Paused || len(stored.PausedSteps) != 1 || stored.PausedSteps[0] != "alpha-key" {
+		t.Fatalf("stored: %+v %v", stored, err)
+	}
+	// A box rebuild reads the durable run, not the previous box's gate.
+	workflow, err := w.boxWorkflow(w.ctx, stored, 16<<30)
+	if err != nil || len(workflow.PausedSteps) != 1 {
+		t.Fatalf("box pause: %+v %v", workflow, err)
+	}
+	if _, problem := w.WorkflowUnpause(w.ctx, w.owner, contract.WorkflowUnpauseRequest{Run: started.Run, Step: "alpha-key"}); problem != nil {
+		t.Fatal(problem)
+	}
+	stored, err = w.store.WorkflowRun(w.ctx, started.Run)
+	if err != nil || len(stored.PausedSteps) != 0 {
+		t.Fatalf("stored: %+v %v", stored, err)
+	}
+}
+
+func TestWorkflowControlsAcceptSessionName(t *testing.T) {
+	w := setupWorkflow(t)
+	started, run := w.start(w.owner, workflowScript)
+	w.step(run, "alpha-key", contract.WorkflowStepRunning, "")
+	session, err := w.store.Session(w.ctx, started.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := contract.WorkflowRunID(session.Name)
+	if _, problem := w.WorkflowPause(w.ctx, w.owner, contract.WorkflowPauseRequest{Run: name}); problem != nil {
+		t.Fatal(problem)
+	}
+	if _, problem := w.WorkflowUnpause(w.ctx, w.owner, contract.WorkflowUnpauseRequest{Run: name}); problem != nil {
+		t.Fatal(problem)
+	}
+	if _, problem := w.WorkflowSteer(w.ctx, w.owner, contract.WorkflowSteerRequest{Run: name, Step: "alpha-key", Text: "redirect"}); problem != nil {
+		t.Fatal(problem)
+	}
+}
+
+func TestPauseEndedWorkflowReturnsEnded(t *testing.T) {
+	w := setupWorkflow(t)
+	started, worker := w.start(w.owner, workflowScript)
+	w.endRun(worker)
+	for _, step := range []string{"", "alpha-key"} {
+		if err := w.store.PauseWorkflow(w.ctx, started.Run, true, step); err != store.ErrWorkflowEnded {
+			t.Fatalf("pause step %q: %v, want ErrWorkflowEnded", step, err)
+		}
+	}
+	if _, problem := w.WorkflowPause(w.ctx, w.owner, contract.WorkflowPauseRequest{Run: started.Run}); problem == nil || problem.Message != "that run has ended" {
+		t.Fatalf("pause refusal: %+v", problem)
+	}
+}
+
+func TestEndedStepAndRunUnpauseClearWorkerHolds(t *testing.T) {
+	w := setupWorkflow(t)
+	started, run := w.start(w.owner, workflowScript)
+	for _, key := range []string{"alpha", "beta"} {
+		w.step(run, key, contract.WorkflowStepRunning, "")
+		if err := w.store.PauseWorkflow(w.ctx, started.Run, true, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.store.EndWorkflowStep(w.ctx, started.Run, contract.WorkflowStepEndRequest{Key: "alpha", State: contract.WorkflowStepDone}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := w.store.WorkflowRun(w.ctx, started.Run)
+	if err != nil || !slices.Equal(stored.PausedSteps, []string{"beta"}) {
+		t.Fatalf("step cleanup: %+v %v", stored.PausedSteps, err)
+	}
+	if _, problem := w.WorkflowUnpause(w.ctx, w.owner, contract.WorkflowUnpauseRequest{Run: started.Run}); problem != nil {
+		t.Fatal(problem)
+	}
+	stored, err = w.store.WorkflowRun(w.ctx, started.Run)
+	if err != nil || len(stored.PausedSteps) != 0 || stored.Paused {
+		t.Fatalf("run unpause: %+v %v", stored, err)
+	}
+}
