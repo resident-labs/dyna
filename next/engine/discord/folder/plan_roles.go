@@ -40,6 +40,9 @@ func planRoles(plan *Plan, desired []Role, live Snapshot) error {
 		matched[current.ID] = true
 		plan.resolve(Subject{RoleKind, role.Name}, current.ID)
 		desiredOrder = append(desiredOrder, RoleReference{ID: current.ID})
+		if current.Managed != role.Managed {
+			return fmt.Errorf("server.yaml: role %q has managed: %v in the folder but %v on the server", role.Name, role.Managed, current.Managed)
+		}
 		if current.Managed || role.Managed {
 			continue
 		}
