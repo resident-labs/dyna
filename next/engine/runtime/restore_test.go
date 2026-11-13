@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/harness/testutil"
+
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
@@ -227,13 +229,7 @@ func restoreFixture(ids ...contract.BoxID) restoreStore {
 
 func eventually(t *testing.T, what string, done func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
-	for !done() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(time.Millisecond)
-	}
+	testutil.Eventually(t, 20*time.Second, what, done)
 }
 
 // The incident: a deploy's binary took 37 seconds to reach a relayed host, past the 15-second budget of a restore that sent

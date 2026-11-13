@@ -82,7 +82,6 @@ func assertVolumeOwnerFencesUse(t *testing.T, f *restartFixture) {
 		if current.State == contract.BoxReady {
 			t.Fatal("BoxHello admitted readiness during physical volume removal")
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 	current, err := f.st.Box(ctx, "b")
 	if err != nil {

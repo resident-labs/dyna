@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/harness/testutil"
+
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
@@ -182,19 +184,20 @@ func TestRealRunInASmallBox(t *testing.T) {
 	}
 	wait := func(id contract.BoxID) box.RunStatus {
 		t.Helper()
-		for {
-			status, err := b.RunStatus(ctx, "h", id)
+		var status box.RunStatus
+		deadline, _ := ctx.Deadline()
+		testutil.Eventually(t, time.Until(deadline), "hook run ending", func() bool {
+			if err := ctx.Err(); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			status, err = b.RunStatus(ctx, "h", id)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if status.Found && !status.Running {
-				return status
-			}
-			if ctx.Err() != nil {
-				t.Fatalf("run %s did not end: %+v", id, status)
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
+			return status.Found && !status.Running
+		})
+		return status
 	}
 	run := func(id contract.BoxID, command ...string) (box.RunStatus, string) {
 		t.Helper()

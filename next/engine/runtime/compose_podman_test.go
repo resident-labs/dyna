@@ -5,13 +5,15 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	engineimages "github.com/resident-labs/dyna/engine/images"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	engineimages "github.com/resident-labs/dyna/engine/images"
+	"github.com/resident-labs/dyna/harness/testutil"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/images"
@@ -204,16 +206,14 @@ func TestComposeStackOnRealPodman(t *testing.T) {
 	}
 	boxSays := func(want, script string) {
 		t.Helper()
-		var out []byte
-		var err error
-		for ctx.Err() == nil {
-			out, err = exec.Command("podman", "exec", string(id), "sh", "-c", script).CombinedOutput()
-			if err == nil && strings.TrimSpace(string(out)) == want {
-				return
+		deadline, _ := ctx.Deadline()
+		testutil.Eventually(t, time.Until(deadline), "box output "+want, func() bool {
+			if err := ctx.Err(); err != nil {
+				t.Fatal(err)
 			}
-			time.Sleep(200 * time.Millisecond)
-		}
-		t.Fatalf("%s: got %q, want %q: %v", script, out, want, err)
+			out, err := exec.Command("podman", "exec", string(id), "sh", "-c", script).CombinedOutput()
+			return err == nil && strings.TrimSpace(string(out)) == want
+		})
 	}
 	db, web := box.SidecarName(id, "db"), box.SidecarName(id, "web")
 
@@ -454,13 +454,14 @@ func TestAComposeSessionFromStartToClose(t *testing.T) {
 	if err != nil || record.State != contract.BoxStarting || record.Image != tag {
 		t.Fatalf("box %+v: %v", record, err)
 	}
-	for ctx.Err() == nil {
-		out, err := exec.Command("podman", "exec", string(session.Box), "sh", "-c", "echo hello | nc -w2 db 5432").CombinedOutput()
-		if err == nil && strings.TrimSpace(string(out)) == "hello" {
-			break
+	deadline, _ := ctx.Deadline()
+	testutil.Eventually(t, time.Until(deadline), "box reaching its sidecar", func() bool {
+		if err := ctx.Err(); err != nil {
+			t.Fatal(err)
 		}
-		time.Sleep(200 * time.Millisecond)
-	}
+		out, err := exec.Command("podman", "exec", string(session.Box), "sh", "-c", "echo hello | nc -w2 db 5432").CombinedOutput()
+		return err == nil && strings.TrimSpace(string(out)) == "hello"
+	})
 	if ctx.Err() != nil {
 		t.Fatal("the box never reached its sidecar")
 	}

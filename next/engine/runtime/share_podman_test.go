@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/harness/testutil"
+
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
@@ -65,8 +67,8 @@ func TestSharedFolderReachesARealBoxThroughItsMount(t *testing.T) {
 		}
 	}
 	serve()
-	stopServer := func() { _ = exec.Command("systemctl", "--user", "stop", "dyna-share-server.service").Run() }
-	t.Cleanup(stopServer)
+	stopServer := func() error { return exec.Command("systemctl", "--user", "stop", "dyna-share-server.service").Run() }
+	t.Cleanup(func() { _ = stopServer() })
 	stopMount := func() { _ = exec.Command("systemctl", "--user", "stop", "dyna-share.service").Run() }
 	t.Cleanup(stopMount)
 
@@ -120,12 +122,7 @@ func TestSharedFolderReachesARealBoxThroughItsMount(t *testing.T) {
 	soon := func(what string, ok func() bool) {
 		t.Helper()
 		start := time.Now()
-		for !ok() {
-			if time.Since(start) > shareSeen {
-				t.Fatalf("%s: not within %s", what, shareSeen)
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
+		testutil.Eventually(t, shareSeen, what, ok)
 		t.Logf("%s: %s", what, time.Since(start).Round(100*time.Millisecond))
 	}
 	engineHas := func(name, want string) func() bool {
@@ -234,8 +231,10 @@ func TestSharedFolderReachesARealBoxThroughItsMount(t *testing.T) {
 	soon("a write held through the restart reaches the engine host", engineHas("while-down", "written-while-down"))
 
 	// The server stops and comes back with the forward in place, and the mount picks it up.
-	stopServer()
-	time.Sleep(time.Second)
+	// systemctl stop waits for the unit to finish deactivating; no grace delay is needed.
+	if err := stopServer(); err != nil {
+		t.Fatal(err)
+	}
 	serve()
 	soon("the mount reaches the server again", func() bool {
 		_, err := inBox("echo -n after-the-server > /box/shared/after-server")
