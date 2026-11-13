@@ -115,14 +115,29 @@ func TestVoiceHandoffIdleBusyAndFinal(t *testing.T) {
 			}
 		}
 	}
+	// Send adjacent calls without waiting for dispatch or a turn to start. The
+	// first must own the handoff even when the scheduler has not started root.
 	sendTool("idle", "start a voice task")
-	start := nextTurn(t, s, ctx, root)
-	if !strings.Contains(start.Inputs[0].Text, "start a voice task") {
-		t.Fatalf("input: %+v", start.Inputs)
-	}
 	sendTool("busy", "steer this task")
 	if got := output("busy"); got != "This was sent to steer the previous background agent task." {
 		t.Fatalf("busy output: %q", got)
+	}
+	events, err := s.store.Events(ctx, room, 0, 256, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var posted []string
+	for _, event := range events {
+		if post, ok := event.Body.(contract.PostCreated); ok && post.Spoken {
+			posted = append(posted, post.Text)
+		}
+	}
+	if len(posted) != 2 || posted[0] != "start a voice task" || posted[1] != "steer this task" {
+		t.Fatalf("owner post order: %q", posted)
+	}
+	start := nextTurn(t, s, ctx, root)
+	if !strings.Contains(start.Inputs[0].Text, "start a voice task") {
+		t.Fatalf("input: %+v", start.Inputs)
 	}
 	if _, problem := s.TurnOutput(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnCompleted, Final: "voice final answer"}); problem != nil {
 		t.Fatal(problem)

@@ -176,39 +176,43 @@ func (s *Service) Voice(ctx context.Context, room contract.RoomID) (func(*websoc
 				}
 			}
 		}()
-		dispatch := func(ctx context.Context, text string) (string, error) {
+		dispatch := func(ctx context.Context, text string) (func(context.Context) (string, error), error) {
 			handoffMu.Lock()
 			session, err := s.store.Session(ctx, root)
 			if err != nil {
 				handoffMu.Unlock()
-				return "", err
+				return nil, err
 			}
 			busy := session.Turn != "" || handoffResult != nil
 			result, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: room, Text: text, Spoken: true, Home: contract.Conversation{Kind: contract.ConversationDM, Session: root}})
 			if problem != nil {
 				handoffMu.Unlock()
-				return "", errors.New(problem.Message)
+				return nil, errors.New(problem.Message)
 			}
 			if busy {
 				handoffMu.Unlock()
-				return "This was sent to steer the previous background agent task.", nil
+				return func(context.Context) (string, error) {
+					return "This was sent to steer the previous background agent task.", nil
+				}, nil
 			}
 			answer := make(chan string, 1)
 			handoffInput, handoffResult = result.Event, answer
 			handoffMu.Unlock()
-			select {
-			case final := <-answer:
-				return final, nil
-			case <-ctx.Done():
-				handoffMu.Lock()
-				if handoffResult == answer {
-					handoffResult = nil
-					handoffInput = ""
-					handoffTurn = ""
+			return func(ctx context.Context) (string, error) {
+				select {
+				case final := <-answer:
+					return final, nil
+				case <-ctx.Done():
+					handoffMu.Lock()
+					if handoffResult == answer {
+						handoffResult = nil
+						handoffInput = ""
+						handoffTurn = ""
+					}
+					handoffMu.Unlock()
+					return "", ctx.Err()
 				}
-				handoffMu.Unlock()
-				return "", ctx.Err()
-			}
+			}, nil
 		}
 		return s.voice.Start(ctx, string(room), page, func(ctx context.Context) (*websocket.Conn, error) { return s.searchProxy.DialRealtime(ctx, ids) }, dispatch, backend)
 	}, nil
