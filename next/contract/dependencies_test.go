@@ -29,7 +29,8 @@ func TestDependencyDirection(t *testing.T) {
 		"engine/lifecycle": {"contract", "box", "engine/store"},
 		"engine/store":     {"contract", "room", "box"},
 		"engine/approve":   {"contract", "engine/store"},
-		"engine/model":     {"contract", "engine/child"},
+		"engine/model":     {"contract", "engine/child", "engine/voice"},
+		"engine/voice":     {}, // transport and call state only; no store or credential access
 	}
 	for _, line := range lines {
 		fields := strings.Fields(line)

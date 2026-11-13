@@ -9,6 +9,8 @@ func method(m contract.Method, scope contract.Scope, access Access, actions ...A
 // methodTable is the one method table, in method order. Rows without
 // actions are engine-only or not yet served.
 var methodTable = []MethodEntry{
+	method(contract.MethodVoiceStatus, contract.ScopeRead, OwnerAccess),
+	method(contract.MethodVoiceStop, contract.ScopeOperate, OwnerAccess),
 	method(contract.MethodAccountsConnect, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodAccountsConnectCallback, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodAccountsConnectStatus, contract.ScopeAdmin, OwnerAccess),
