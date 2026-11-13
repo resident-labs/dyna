@@ -1,4 +1,4 @@
-package engine
+package workflowmeta
 
 import (
 	"bytes"
@@ -12,8 +12,8 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-// workflowMeta is what a script declares before anything starts.
-type workflowMeta struct {
+// Meta is what a script declares before anything starts.
+type Meta struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description"`
 	Profiles    []contract.ProfileName `json:"profiles"`
@@ -28,10 +28,10 @@ var (
 	metaValue = regexp.MustCompile(`^(true|false|null|-?[0-9][0-9.eE+-]*)$`)
 )
 
-// parseWorkflowMeta reads the literal in `export const meta = {...}` without running the script: scripts never run in the
+// Parse reads the literal in `export const meta = {...}` without running the script: scripts never run in the
 // engine, and the meta has to be checked before any box or model is spent on it.
-func parseWorkflowMeta(script string) (workflowMeta, error) {
-	var meta workflowMeta
+func Parse(script string) (Meta, error) {
+	var meta Meta
 	text := skipSpace(script)
 	start := metaStart.FindString(text)
 	if start == "" {
