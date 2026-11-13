@@ -187,3 +187,32 @@ func TestFailedSuiteOverridesEmptyAggregateAndPendingSuites(t *testing.T) {
 		}
 	}
 }
+
+// A run dispatched on main, such as one gating a PR, is filed under main's head but is not main's CI (horizon, 2026-11-13).
+func TestMainCICountsOnlyPushRuns(t *testing.T) {
+	c, server, _ := client(t)
+	push := fakegithub.Check{Name: "build", Conclusion: "SUCCESS", Event: "push"}
+	gate := fakegithub.Check{Name: "gate pr 7", Conclusion: "FAILURE", Event: "workflow_dispatch"}
+	suites := []fakegithub.Suite{{Status: "COMPLETED", Conclusion: "SUCCESS", Workflow: "ci", Runs: 1}, {Status: "COMPLETED", Conclusion: "FAILURE", Workflow: "dyna-ci", Event: "workflow_dispatch", Runs: 1}}
+	for _, step := range []struct {
+		name   string
+		checks []fakegithub.Check
+		want   contract.PrCI
+	}{
+		{"push green, dispatch red", []fakegithub.Check{push, gate}, contract.PrCISuccess},
+		{"only a dispatched run", []fakegithub.Check{gate}, contract.PrCINone},
+		{"push red", []fakegithub.Check{{Name: "build", Conclusion: "FAILURE", Event: "push"}, gate}, contract.PrCIFailure},
+	} {
+		t.Run(step.name, func(t *testing.T) {
+			server.SetCommit("owner/repo", sha, fakegithub.Commit{Rollup: "FAILURE", Checks: step.checks, Suites: suites})
+			commits, err := c.CommitsCI(t.Context(), "owner/repo", []string{sha})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := commits[sha]
+			if got.Result != step.want || slices.ContainsFunc(got.Runs, func(r contract.CIRun) bool { return r.Name == gate.Name }) {
+				t.Fatalf("%+v, want %s without the dispatched run", got, step.want)
+			}
+		})
+	}
+}

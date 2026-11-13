@@ -360,13 +360,18 @@ type gqlRollup struct {
 			Context    string `json:"context"`
 			State      string `json:"state"`
 			TargetURL  string `json:"targetUrl"`
+			CheckSuite struct {
+				WorkflowRun *struct {
+					Event string `json:"event"`
+				} `json:"workflowRun"`
+			} `json:"checkSuite"`
 		} `json:"nodes"`
 	} `json:"contexts"`
 }
 
 // suiteFields includes the run count without listing runs: a needs-gated run may
 // not exist yet even when every currently visible context has finished.
-const suiteFields = "checkSuites(first:100){totalCount pageInfo{hasNextPage} nodes{status conclusion app{slug} createdAt checkRuns{totalCount} workflowRun{workflow{name}}}}"
+const suiteFields = "checkSuites(first:100){totalCount pageInfo{hasNextPage} nodes{status conclusion app{slug} createdAt checkRuns{totalCount} workflowRun{event workflow{name}}}}"
 
 type gqlSuites struct {
 	TotalCount int `json:"totalCount"`
@@ -384,6 +389,7 @@ type gqlSuites struct {
 			TotalCount int `json:"totalCount"`
 		} `json:"checkRuns"`
 		WorkflowRun *struct {
+			Event    string `json:"event"`
 			Workflow struct {
 				Name string `json:"name"`
 			} `json:"workflow"`
@@ -772,7 +778,7 @@ func (c *Client) CommitsCI(ctx context.Context, repo contract.RepoName, shas []s
 		fields += fmt.Sprintf(" h%d:object(oid:$h%d){...ci}", i, i)
 	}
 	query := "query($owner:String!,$name:String!" + declared + "){viewer{login} repository(owner:$owner,name:$name){" + fields + "}}" +
-		fmt.Sprintf(" fragment ci on Commit{"+suiteFields+" statusCheckRollup{state contexts(first:%d){totalCount pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion detailsUrl} ...on StatusContext{context state targetUrl}}}}}", ciRunsRead)
+		fmt.Sprintf(" fragment ci on Commit{"+suiteFields+" statusCheckRollup{state contexts(first:%d){totalCount pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion detailsUrl checkSuite{workflowRun{event}}} ...on StatusContext{context state targetUrl}}}}}", ciRunsRead)
 	repository, err := c.graphQL(ctx, query, variables)
 	if err != nil {
 		return nil, err
@@ -786,6 +792,29 @@ func (c *Client) CommitsCI(ctx context.Context, repo contract.RepoName, shas []s
 		if raw := repository[fmt.Sprintf("h%d", i)]; raw != nil && string(raw) != "null" {
 			if err := json.Unmarshal(raw, &commit); err != nil {
 				return nil, fmt.Errorf("GitHub answer: %w", err)
+			}
+		}
+		// Main's CI is what its pushes started. GitHub files a workflow_dispatch run under the head of the ref it ran on,
+		// so a run dispatched on main to gate a PR would otherwise read as main's own result. Other apps' checks stay.
+		suites := commit.CheckSuites.Nodes[:0]
+		for _, suite := range commit.CheckSuites.Nodes {
+			if suite.WorkflowRun == nil || suite.WorkflowRun.Event == "push" {
+				suites = append(suites, suite)
+			}
+		}
+		commit.CheckSuites.TotalCount -= len(commit.CheckSuites.Nodes) - len(suites)
+		commit.CheckSuites.Nodes = suites
+		if rollup := commit.StatusCheckRollup; rollup != nil {
+			kept := rollup.Contexts.Nodes[:0]
+			for _, check := range rollup.Contexts.Nodes {
+				if run := check.CheckSuite.WorkflowRun; run == nil || run.Event == "push" {
+					kept = append(kept, check)
+				}
+			}
+			rollup.Contexts.TotalCount -= len(rollup.Contexts.Nodes) - len(kept)
+			rollup.Contexts.Nodes = kept
+			if len(kept) == 0 && !rollup.Contexts.PageInfo.HasNextPage {
+				commit.StatusCheckRollup = nil
 			}
 		}
 		result, _ := summarizeCI(commit.StatusCheckRollup, commit.CheckSuites, ciMainHead, c.Now())
