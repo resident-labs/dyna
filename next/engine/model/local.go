@@ -54,7 +54,7 @@ func (p *Proxy) Local(st LocalStore) http.Handler {
 		for i, account := range accounts {
 			ids[i] = account.ProxyID
 		}
-		serve(p.client, p.clientKey, contract.LocalClient, localRoutes, anyModel, ids, "", false).ServeHTTP(w, r)
+		serve(p.client, p.clientKey, contract.LocalClient, localRoutes, anyModel, ids, "", nil, false).ServeHTTP(w, r)
 	})
 }
 

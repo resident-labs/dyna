@@ -67,12 +67,14 @@ type AccountProviderInfo struct {
 	AlsoKey bool `json:"alsoKey,omitempty"`
 }
 type Account struct {
-	ID       AccountID            `json:"id"`
-	Provider AccountProvider      `json:"provider"`
-	Label    string               `json:"label"`
-	Rooms    []RoomID             `json:"rooms"`
-	State    AccountState         `json:"state"`
-	Reason   AccountFailureReason `json:"reason,omitempty"`
+	ID       AccountID       `json:"id"`
+	Provider AccountProvider `json:"provider"`
+	Label    string          `json:"label"`
+	Rooms    []RoomID        `json:"rooms"`
+	// Preferred are the rooms that try this account first whenever it is usable, each one it serves.
+	Preferred []RoomID             `json:"preferred"`
+	State     AccountState         `json:"state"`
+	Reason    AccountFailureReason `json:"reason,omitempty"`
 	// Models are what the proxy routes for this account.
 	Models []string `json:"models,omitempty"`
 }
@@ -177,6 +179,7 @@ type AccountsRemoveResponse struct{}
 type AccountsSetLimitsRequest struct {
 	AccountID AccountID `json:"accountId"`
 	Rooms     []RoomID  `json:"rooms"`
+	Preferred []RoomID  `json:"preferred"`
 }
 type AccountsSetLimitsResponse struct{}
 type AccountsRenameRequest struct {

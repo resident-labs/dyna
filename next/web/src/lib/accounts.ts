@@ -35,10 +35,11 @@ export function accountPill(account: Account): { tone: "error" | "warning"; labe
   return undefined;
 }
 
-// A row's second line: the rooms it serves, then one value for a state the row's bars cannot show.
+// A row's second line: the rooms it serves and those that prefer it, then one value for a state the row's bars cannot show.
 export function accountLine({ account, usage }: AccountItem): string {
-  const n = account.rooms?.length ?? 0;
-  const rooms = n ? `${n.toLocaleString("en")} ${n === 1 ? "room" : "rooms"}` : "Every room";
+  const count = (n: number) => `${n.toLocaleString("en")} ${n === 1 ? "room" : "rooms"}`;
+  const n = account.rooms?.length ?? 0, preferred = account.preferred?.length ?? 0;
+  const rooms = (n ? count(n) : "Every room") + (preferred ? ` · preferred by ${count(preferred)}` : "");
   const state = account.state === "unknown" ? "not checked yet" : account.state === "failed" ? "usage unread"
     : usage?.cause === "insufficient_balance" ? "out of credit" : usage?.balances?.length ? balancesText(usage.balances) : "";
   return state ? `${rooms} · ${state}` : rooms;

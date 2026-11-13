@@ -108,6 +108,9 @@ func (s *AccountActions) runAccountAction(ctx context.Context, caller contract.P
 			if errors.Is(result.err, store.ErrRoomDeleting) {
 				return accountActionResult{}, failure(result.err)
 			}
+			if errors.Is(result.err, store.ErrPreferUnserved) {
+				return accountActionResult{}, invalid(result.err.Error())
+			}
 			if errors.Is(result.err, errAccountMissing) {
 				return accountActionResult{}, &contract.Error{Code: contract.ErrNotFound, Message: "account not found"}
 			}
@@ -268,7 +271,7 @@ func (s *AccountActions) AccountsConnectStatus(ctx context.Context, caller contr
 
 func (s *AccountActions) AccountsSetLimits(ctx context.Context, caller contract.Principal, req contract.AccountsSetLimitsRequest) (contract.AccountsSetLimitsResponse, *contract.Error) {
 	_, problem := s.runAccountAction(ctx, caller, contract.AccountActionSetLimits, req.AccountID, func(ctx context.Context) accountActionResult {
-		return accountActionResult{err: s.service.store.SetAccountRooms(ctx, req.AccountID, req.Rooms)}
+		return accountActionResult{err: s.service.store.SetAccountRooms(ctx, req.AccountID, req.Rooms, req.Preferred)}
 	})
 	return contract.AccountsSetLimitsResponse{}, problem
 }

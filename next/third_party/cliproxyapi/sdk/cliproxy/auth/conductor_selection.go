@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"maps"
@@ -87,16 +86,7 @@ type dynaEligibleContextKey struct{}
 
 // WithDynaEligibleAuth captures the private request policy before upstream execution.
 func WithDynaEligibleAuth(ctx context.Context, values []string) context.Context {
-	ids := make(map[string]struct{})
-	for _, value := range values {
-		for _, id := range strings.Split(value, ",") {
-			decoded, err := base64.RawURLEncoding.DecodeString(id)
-			if err == nil && len(decoded) != 0 {
-				ids[string(decoded)] = struct{}{}
-			}
-		}
-	}
-	return context.WithValue(ctx, dynaEligibleContextKey{}, ids)
+	return context.WithValue(ctx, dynaEligibleContextKey{}, dynaAuthIDs(values))
 }
 
 type authSelectionEligibility struct {

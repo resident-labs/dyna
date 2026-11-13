@@ -135,7 +135,7 @@ func TestBoxRouteKeepsItsThreePaths(t *testing.T) {
 	called := false
 	up := unixServer(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
 	defer up.Close()
-	route := Handler(up.Listener.Addr().String(), "secret", "session", []string{"allowed"}, []string{"credential"}, "", false)
+	route := Handler(up.Listener.Addr().String(), "secret", "session", []string{"allowed"}, []string{"credential"}, "", nil, false)
 	for _, path := range []string{"/model/v1/models", "/model/v1/messages/count_tokens", "/model/v1/responses/compact"} {
 		w := httptest.NewRecorder()
 		route.ServeHTTP(w, httptest.NewRequest("POST", path, strings.NewReader(`{"model":"allowed"}`)))

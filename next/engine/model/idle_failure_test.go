@@ -35,7 +35,7 @@ func TestIdleStreamReachesExistingModelFailure(t *testing.T) {
 			})}
 			go upstream.Serve(listener)
 			defer upstream.Close()
-			route := httptest.NewServer(handler(&http.Client{Transport: idleTransport(socket, 40*time.Millisecond)}, "key", "session", []string{"test-model"}, []string{"account"}, "", false))
+			route := httptest.NewServer(handler(&http.Client{Transport: idleTransport(socket, 40*time.Millisecond)}, "key", "session", []string{"test-model"}, []string{"account"}, "", nil, false))
 			defer route.Close()
 			dir := pigtest.AgentDir(t, pigtest.NewModel(), "")
 			path := filepath.Join(dir, "models.json")

@@ -279,7 +279,12 @@ func Run(ctx context.Context, cfg Config) error {
 			if err != nil {
 				pinned = ""
 			}
-			proxy.Handler(string(session.ID), allowed, eligible, pinned, crew, func(_ context.Context) error {
+			// So is a room preference that cannot be read.
+			preferred, err := st.PreferredAccountProxyIDs(r.Context(), session.Room)
+			if err != nil {
+				preferred = nil
+			}
+			proxy.Handler(string(session.ID), allowed, eligible, pinned, preferred, crew, func(_ context.Context) error {
 				// Capture handoff time now; recording uses engine, not request, lifetime.
 				at := time.Now()
 				go st.MarkTurnModelSent(ctx, session.ID, session.Turn, at)

@@ -31,7 +31,7 @@ func TestRouteSwapsKeyAndSetsAffinity(t *testing.T) {
 	req.Header.Set("X-Api-Key", "box")
 	req.Header.Set("Authorization", "Bearer box")
 	w := httptest.NewRecorder()
-	Handler(target, "secret", "session", []string{"allowed"}, []string{"credential"}, "", false).ServeHTTP(w, req)
+	Handler(target, "secret", "session", []string{"allowed"}, []string{"credential"}, "", nil, false).ServeHTTP(w, req)
 	if w.Code != 204 {
 		t.Fatalf("status %d", w.Code)
 	}
@@ -53,7 +53,7 @@ func pinnedRoute(t *testing.T, pinned string, headers map[string]string) string 
 		req.Header.Set(name, value)
 	}
 	w := httptest.NewRecorder()
-	Handler(up.Listener.Addr().String(), "secret", "session", []string{"allowed"}, []string{"credential"}, pinned, false).ServeHTTP(w, req)
+	Handler(up.Listener.Addr().String(), "secret", "session", []string{"allowed"}, []string{"credential"}, pinned, nil, false).ServeHTTP(w, req)
 	if w.Code != 204 {
 		t.Fatalf("status %d", w.Code)
 	}
@@ -94,7 +94,7 @@ func TestRouteRefusesForbiddenModel(t *testing.T) {
 	defer up.Close()
 	target := up.Listener.Addr().String()
 	w := httptest.NewRecorder()
-	Handler(target, "secret", "session", nil, nil, "", false).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"other"}`)))
+	Handler(target, "secret", "session", nil, nil, "", nil, false).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"other"}`)))
 	if w.Code != 403 || called {
 		t.Fatalf("status %d, called %v", w.Code, called)
 	}
@@ -113,7 +113,7 @@ func TestRouteStreamsAndDoesNotRetry(t *testing.T) {
 	defer up.Close()
 	target := up.Listener.Addr().String()
 	w := httptest.NewRecorder()
-	Handler(target, "secret", "session", []string{"allowed"}, []string{"credential"}, "", false).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed"}`)))
+	Handler(target, "secret", "session", []string{"allowed"}, []string{"credential"}, "", nil, false).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed"}`)))
 	if calls != 1 || w.Code != 503 || w.Body.String() != "data: one\n\ndata: two\n\n" || !w.Flushed {
 		t.Fatalf("calls %d status %d body %q flushed %v", calls, w.Code, w.Body.String(), w.Flushed)
 	}
@@ -125,7 +125,7 @@ func TestRouteRejectsURLSelectedModel(t *testing.T) {
 	defer up.Close()
 	target := up.Listener.Addr().String()
 	w := httptest.NewRecorder()
-	Handler(target, "secret", "session", []string{"allowed"}, []string{"credential"}, "", false).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1beta/models/forbidden:generateContent", strings.NewReader(`{"model":"allowed"}`)))
+	Handler(target, "secret", "session", []string{"allowed"}, []string{"credential"}, "", nil, false).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1beta/models/forbidden:generateContent", strings.NewReader(`{"model":"allowed"}`)))
 	if w.Code != http.StatusNotFound || called {
 		t.Fatalf("status %d, called %v", w.Code, called)
 	}
@@ -134,7 +134,7 @@ func TestRouteRejectsURLSelectedModel(t *testing.T) {
 func TestRouteRejectsAmbiguousModel(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "unused.sock")
 	w := httptest.NewRecorder()
-	Handler(target, "secret", "session", []string{"allowed"}, []string{"credential"}, "", false).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed","model":"other"}`)))
+	Handler(target, "secret", "session", []string{"allowed"}, []string{"credential"}, "", nil, false).ServeHTTP(w, httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed","model":"other"}`)))
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status %d", w.Code)
 	}
@@ -222,11 +222,33 @@ func TestACrewsWorkersEachKeepAnAffinity(t *testing.T) {
 	send := func(crew bool) {
 		req := httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed"}`))
 		req.Header.Set(contract.WorkerHeader, "w1")
-		Handler(up.Listener.Addr().String(), "secret", "session", []string{"allowed"}, []string{"credential"}, "", crew).ServeHTTP(httptest.NewRecorder(), req)
+		Handler(up.Listener.Addr().String(), "secret", "session", []string{"allowed"}, []string{"credential"}, "", nil, crew).ServeHTTP(httptest.NewRecorder(), req)
 	}
 	send(true)
 	send(false)
 	if len(got) != 2 || got[0] != "session/w1|" || got[1] != "session|" {
 		t.Fatalf("got %q: only a crew divides its affinity, and the header stops at the route", got)
+	}
+}
+
+// The room's preference comes from the store, and a box's header never reaches the proxy.
+func TestRouteSendsTheStoredPreference(t *testing.T) {
+	for _, tc := range []struct {
+		preferred []string
+		want      string
+	}{{nil, ""}, {[]string{"a", "b"}, "YQ,Yg"}} {
+		var got []string
+		up := unixServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			got = r.Header["X-Dyna-Preferred-Auth"]
+			w.WriteHeader(204)
+		}))
+		req := httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"allowed"}`))
+		req.Header.Set("X-Dyna-Preferred-Auth", "c3Bvb2Y")
+		req.Header.Set("Connection", "X-Dyna-Preferred-Auth")
+		Handler(up.Listener.Addr().String(), "secret", "session", []string{"allowed"}, []string{"a", "b"}, "", tc.preferred, false).ServeHTTP(httptest.NewRecorder(), req)
+		up.Close()
+		if strings.Join(got, "|") != tc.want || (tc.want == "" && got != nil) {
+			t.Fatalf("preferred %v: proxy got %q", tc.preferred, got)
+		}
 	}
 }

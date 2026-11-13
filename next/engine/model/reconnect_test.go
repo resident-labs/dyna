@@ -248,7 +248,7 @@ func TestReconnectSaveAttributionAndExpiry(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetAccountRooms(ctx, "account", []contract.RoomID{"room"}); err != nil {
+	if err := st.SetAccountRooms(ctx, "account", []contract.RoomID{"room"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

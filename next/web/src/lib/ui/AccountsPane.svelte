@@ -184,10 +184,11 @@
     }, (reason: unknown) => { if (!gone(reason) && selected === account.id) labelError = labelRefusal(reason); });
     labelSaving = false;
   }
-  // Whether the engine took the rooms.
-  async function setRooms(account: Account, ids: string[]) {
+  // Whether the engine took the rooms. A room keeps preferring the account only while the account serves it.
+  async function setRooms(account: Account, ids: string[], preferred = account.preferred ?? []) {
     busy = true; problem = "";
-    const done = await call("accounts.set_limits", { accountId: account.id, rooms: ids }).then(async () => { await reload(); return true; },
+    if (ids.length) preferred = preferred.filter(room => ids.includes(room));
+    const done = await call("accounts.set_limits", { accountId: account.id, rooms: ids, preferred }).then(async () => { await reload(); return true; },
       (reason: unknown) => { if (!gone(reason)) problem = "Room limits could not be saved. Try again."; return false; });
     busy = false;
     return done;
@@ -312,6 +313,8 @@
     {#if balances.length}<p class="small">Balance {balancesText(balances)}</p>{/if}</div>
   {#if a.models?.length}<div class="section"><strong class="head">Models</strong><p class="small models">{a.models.join(" · ")}</p></div>{/if}
   <RoomsServed label="Serves" {rooms} chosen={a.rooms ?? []} {busy} set={ids => setRooms(a, ids)} />
+  <RoomsServed label="Preferred by" rooms={a.rooms?.length ? rooms.filter(room => a.rooms?.includes(room.id)) : rooms} chosen={a.preferred ?? []} {busy}
+    every="No room" only="These rooms" hint="These rooms use this account first whenever it has quota left, and their other accounts otherwise." set={ids => setRooms(a, a.rooms ?? [], ids)} />
   {#if each.provider?.connectMethod === "oauth"}<div class="section"><strong class="head">Sign-in</strong>
     {#if attempt && reconnect === a.id}{@render waiting(attempt, name)}
     {:else}<div class="actions"><button type="button" class="btn" class:fill={a.state === "sign_in_expired"} disabled={busy} onclick={() => void begin(a)}>Sign in again</button></div>

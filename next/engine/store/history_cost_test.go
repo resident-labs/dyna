@@ -151,7 +151,7 @@ func TestDeliveriesByTurnUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Use the store's actual metadata key, not a hard-coded assumption.
-	if _, err = s.writer.Exec("UPDATE meta SET value='107' WHERE value='108'"); err != nil {
+	if _, err = s.writer.Exec("UPDATE meta SET value='107' WHERE value='109'"); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()

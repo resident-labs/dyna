@@ -58,7 +58,7 @@ func TestWarmModelRouteBypassesUnrelatedWriterWaits(t *testing.T) {
 			server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { upstream.Add(1); w.WriteHeader(200) })}
 			go server.Serve(ln)
 			defer server.Close()
-			h := model.Handler(socket, "synthetic-key", "s", []string{"test-model"}, []string{"synthetic-account"}, "", false, func(ctx context.Context) error { return s.MarkTurnModelSent(ctx, "s", "t", time.Now()) })
+			h := model.Handler(socket, "synthetic-key", "s", []string{"test-model"}, []string{"synthetic-account"}, "", nil, false, func(ctx context.Context) error { return s.MarkTurnModelSent(ctx, "s", "t", time.Now()) })
 			call := func() int {
 				r := httptest.NewRequest("POST", "/model/v1/messages", strings.NewReader(`{"model":"test-model"}`))
 				w := httptest.NewRecorder()
@@ -160,7 +160,7 @@ func TestColdModelHandoffDoesNotWaitForStampWriter(t *testing.T) {
 	defer server.Close()
 	recorded := make(chan error, 1)
 	// Match runtime: the task uses engine lifetime, not the HTTP request context.
-	route := model.Handler(listener.Addr().String(), "key", "s", []string{"allowed"}, []string{"account"}, "", false, func(_ context.Context) error {
+	route := model.Handler(listener.Addr().String(), "key", "s", []string{"allowed"}, []string{"account"}, "", nil, false, func(_ context.Context) error {
 		go func() { recorded <- s.MarkTurnModelSent(ctx, "s", "t", time.UnixMilli(123)) }()
 		return nil
 	})
