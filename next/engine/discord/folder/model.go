@@ -59,6 +59,7 @@ type Channel struct {
 	Tags       []string `yaml:"tags,omitempty"`
 }
 type Message struct {
+	ID       string          `yaml:"-"`
 	Title    string          `yaml:"title,omitempty"`
 	Color    string          `yaml:"color,omitempty"`
 	Footer   string          `yaml:"footer,omitempty"`
