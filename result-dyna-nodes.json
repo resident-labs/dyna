@@ -1,0 +1,7 @@
+{
+  "summary": "Rewrote dyna-nodes as a root-only skill (dyna-audience: root) organised by task: why a box waits (boxReason table), writing and testing a pool script on the engine host, adding a pool and the room rule with undo, deciding a child's pool/host-rule request, node lifetimes and costs, adding/removing a host by hand with prerequisites, and GPUs. It fixes the wrong `host add` line (a box is refused; root runs owner commands with bash on the engine host), removes the nonexistent `session close --discard` (now `host remove --discard-boxes` then `session restart`), drops machine-specific paths and user names, points host switches, CI scale and host room limits to dyna-admin, and updates skills_test.go expectations (go test ./box/skills passes; commit 940301c36).",
+  "lines": 148,
+  "unverified": [
+    "`pgrep -af -- --host-data` on the engine host shows the host data folder: the --host-data engine flag and its use as one absolute path on every host are verified in code, but I could not run on the engine host to confirm that the live engine is started with the flag visible on its command line."
+  ]
+}
