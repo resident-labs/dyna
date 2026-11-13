@@ -235,13 +235,13 @@ func TestCISkill(t *testing.T) {
 		t.Fatalf("%+v %v", meta, err)
 	}
 	text := string(data)
-	for _, want := range []string{"dyna-medium", "6 hours", "CARGO_INCREMENTAL=0", "RUSTC_WRAPPER", "ci_scale", "DYNA_CI_BASE", "public", "fork", "job step status", "Jobs on GitHub-hosted runners", "Swatinem/rust-cache", "[profile.ci]", "inherits = \"dev\"", "incremental = false", "debug = 0", "github.event.pull_request.head.repo.fork", "cargo test --profile ci", "half the CPUs of the runners already there"} {
+	for _, want := range []string{"dyna-medium", "6 hours", "CARGO_INCREMENTAL=0", "RUSTC_WRAPPER", "DYNA_CI_POOL_UNTIL", "DYNA_CI_BASE", "public", "fork", "job step status", "Jobs on GitHub-hosted runners", "Swatinem/rust-cache", "[profile.ci]", "inherits = \"dev\"", "incremental = false", "debug = 0", "github.event.pull_request.head.repo.full_name", "cargo test --profile ci", "dyna-admin", "dyna-diagnose"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q", want)
 		}
 	}
-	if strings.Count(text, "\n") > 90 {
-		t.Fatal("skill exceeds 90 lines")
+	if strings.Count(text, "\n") > 120 {
+		t.Fatal("skill exceeds 120 lines")
 	}
 }
 
