@@ -41,7 +41,7 @@ Then check: a skill appears in the skills list of the prompt; an MCP server's to
 `mcp__<name>__<tool>` in deferred_tools; a package or server that failed arrives as a notice
 naming it, and the session runs without it.
 
-## Write and save a skill
+## Create a skill
 
 A skill is a folder with `SKILL.md` and any files it names by relative path:
 
