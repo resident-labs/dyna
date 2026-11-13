@@ -89,3 +89,22 @@ func TestWriteMatrix(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestJSONCaseAndDuplicatesCannotShadowCaps(t *testing.T) {
+	p := Policy{Front: Front{TimeoutMax: "1h"}}
+	for _, body := range []string{
+		`{"content":"@everyone","allowed_mentions":{"parse":["everyone"]},"ALLOWED_MENTIONS":{"parse":["users"]}}`,
+		`{"allowed_mentions":{"parse":["everyone"],"parse":["users"]}}`,
+		`{"allowed_mentions":{"PARSE":["users"]}}`,
+	} {
+		if e := p.Write("POST", "/api/v10/channels/3/messages", json.RawMessage(body), Facts{Now: time.Now()}); e == nil {
+			t.Fatalf("accepted %s", body)
+		}
+	}
+	until := time.Now().Add(2 * time.Hour).Format(time.RFC3339)
+	for _, body := range []string{`{"communication_disabled_until":"` + until + `","COMMUNICATION_DISABLED_UNTIL":null}`, `{"communication_disabled_until":"` + until + `","communication_disabled_until":null}`} {
+		if e := p.Write("PATCH", "/api/v10/guilds/1/members/2", json.RawMessage(body), Facts{Now: time.Now()}); e == nil {
+			t.Fatalf("accepted %s", body)
+		}
+	}
+}

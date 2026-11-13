@@ -11,7 +11,7 @@ const schemaVersion = 110
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
-	110: {`ALTER TABLE discord_routes ADD COLUMN policy TEXT NOT NULL DEFAULT ''`, `ALTER TABLE discord_routes ADD COLUMN policy_resolved TEXT NOT NULL DEFAULT ''`},
+	109: {`CREATE TEMP TABLE discord_routes_old AS SELECT guild,channel,room,session,instructions FROM discord_routes`, `DROP TABLE discord_routes`, `CREATE TABLE discord_routes (guild TEXT NOT NULL, channel TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, session TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', policy TEXT NOT NULL DEFAULT '', policy_resolved TEXT NOT NULL DEFAULT '', PRIMARY KEY(guild,channel))`, `INSERT INTO discord_routes(guild,channel,room,session,instructions) SELECT guild,channel,room,session,instructions FROM discord_routes_old`, `DROP TABLE discord_routes_old`},
 	// The rooms that prefer an account, each one it serves.
 	108: {`CREATE TABLE IF NOT EXISTS account_prefs (account TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, PRIMARY KEY(account, room))`},
 	107: {`CREATE INDEX IF NOT EXISTS deliveries_by_turn ON deliveries(to_kind,to_id,turn,seq)`},

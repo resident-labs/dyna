@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,9 @@ const DangerousPermissions uint64 = 1<<3 | 1<<5 | 1<<28 | 1<<4 | 1<<1 | 1<<2 | 1
 func bodyInto(body json.RawMessage, out any) error {
 	if len(body) == 0 {
 		body = json.RawMessage(`{}`)
+	}
+	if err := exactJSON(json.NewDecoder(bytes.NewReader(body)), reflect.TypeOf(out)); err != nil {
+		return err
 	}
 	d := json.NewDecoder(bytes.NewReader(body))
 	d.DisallowUnknownFields()
