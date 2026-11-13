@@ -72,7 +72,7 @@ func roomRepos(ctx context.Context, q sqlQuery, id contract.RoomID) ([]contract.
 	return queryAll(ctx, q, func(rows scanner) (repo contract.RoomRepo, err error) {
 		err = rows.Scan(&repo.Repo, &repo.Default, &repo.PREvents)
 		return
-	}, "SELECT r.repo,r.is_default,coalesce(p.pr_events,0) FROM room_repos r LEFT JOIN room_pr_settings p ON p.room=r.room AND p.repo=r.repo WHERE r.room=? ORDER BY r.repo", id)
+	}, "SELECT repo,is_default,pr_events FROM room_repos WHERE room=? ORDER BY repo", id)
 }
 
 // AddRoomRepo updates both defaults in the same transaction.
@@ -117,7 +117,7 @@ func (s *Store) AddRoomRepo(ctx context.Context, id contract.RoomID, name contra
 			}
 		}
 		if len(prEvents) > 0 {
-			if _, err := tx.ExecContext(ctx, "INSERT INTO room_pr_settings(room,repo,pr_events) VALUES(?,?,?) ON CONFLICT(room,repo) DO UPDATE SET pr_events=excluded.pr_events", id, name, prEvents[0]); err != nil {
+			if _, err := tx.ExecContext(ctx, "UPDATE room_repos SET pr_events=?, pr_census_at=CASE WHEN ? THEN pr_census_at ELSE 0 END WHERE room=? AND repo=?", prEvents[0], prEvents[0], id, name); err != nil {
 				return err
 			}
 			if !prEvents[0] {

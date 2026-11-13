@@ -9,25 +9,27 @@ import (
 )
 
 type RoomPRWatch struct {
-	Room contract.RoomID
-	Repo contract.RepoName
-	Rows map[int]TrackedPR
+	Room     contract.RoomID
+	Repo     contract.RepoName
+	Rows     map[int]TrackedPR
+	CensusAt int64 // Unix milliseconds; zero means the initial census is pending.
 }
 
 type RoomPRPass struct {
-	Room    contract.RoomID
-	Repo    contract.RepoName
-	Rows    []TrackedPR
-	Changes []contract.PrChange
+	Room           contract.RoomID
+	Repo           contract.RepoName
+	Rows           []TrackedPR
+	Changes        []contract.PrChange
+	CensusComplete bool // This pass completed the initial census, including an empty one.
 }
 
 func (s *Store) RoomPRWatches(ctx context.Context, repo contract.RepoName) ([]RoomPRWatch, error) {
 	watches, err := queryAll(ctx, s.Read(), func(r scanner) (RoomPRWatch, error) {
 		var w RoomPRWatch
-		err := r.Scan(&w.Room, &w.Repo)
+		err := r.Scan(&w.Room, &w.Repo, &w.CensusAt)
 		w.Rows = map[int]TrackedPR{}
 		return w, err
-	}, `SELECT room,repo FROM room_pr_settings WHERE repo=? AND pr_events=1`, repo)
+	}, `SELECT room,repo,pr_census_at FROM room_repos WHERE repo=? AND pr_events=1`, repo)
 	if err != nil {
 		return nil, err
 	}
@@ -54,19 +56,24 @@ func (s *Store) RoomPRWatches(ctx context.Context, repo contract.RepoName) ([]Ro
 func (s *Store) applyRoomPRs(ctx context.Context, tx *sql.Tx, passes []RoomPRPass, at time.Time) error {
 	for _, pass := range passes {
 		var enabled bool
-		err := tx.QueryRowContext(ctx, `SELECT pr_events FROM room_pr_settings WHERE room=? AND repo=?`, pass.Room, pass.Repo).Scan(&enabled)
+		err := tx.QueryRowContext(ctx, `SELECT pr_events FROM room_repos WHERE room=? AND repo=?`, pass.Room, pass.Repo).Scan(&enabled)
 		if err != nil && err != sql.ErrNoRows {
 			return err
 		}
 		if !enabled {
 			continue
 		}
+		if pass.CensusComplete {
+			if _, err := tx.ExecContext(ctx, `UPDATE room_repos SET pr_census_at=? WHERE room=? AND repo=? AND pr_census_at=0`, at.UnixMilli(), pass.Room, pass.Repo); err != nil {
+				return err
+			}
+		}
 		for _, row := range pass.Rows {
 			data, err := json.Marshal(row)
 			if err != nil {
 				return err
 			}
-			if _, err = tx.ExecContext(ctx, `INSERT INTO room_pr_observed(room,repo,number,snapshot) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM room_pr_settings WHERE room=? AND repo=? AND pr_events=1) ON CONFLICT(room,repo,number) DO UPDATE SET snapshot=excluded.snapshot`, pass.Room, pass.Repo, row.Number, string(data), pass.Room, pass.Repo); err != nil {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO room_pr_observed(room,repo,number,snapshot) VALUES(?,?,?,?) ON CONFLICT(room,repo,number) DO UPDATE SET snapshot=excluded.snapshot`, pass.Room, pass.Repo, row.Number, string(data)); err != nil {
 				return err
 			}
 		}
