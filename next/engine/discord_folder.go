@@ -81,12 +81,12 @@ func (s *Service) DiscordExport(ctx context.Context, caller contract.Principal, 
 	if err != nil {
 		return contract.DiscordFolderResponse{}, failure(err)
 	}
-	snapshot, err := folder.ReadSnapshot(ctx, client, route.Guild)
+	s.discordFolderMu.Lock()
+	defer s.discordFolderMu.Unlock()
+	snapshot, err := folder.ReadExportSnapshot(ctx, client, route.Guild, path, req.Force)
 	if err != nil {
 		return contract.DiscordFolderResponse{}, invalid(err.Error())
 	}
-	s.discordFolderMu.Lock()
-	defer s.discordFolderMu.Unlock()
 	report, err := folder.Export(path, snapshot, req.Force)
 	if err != nil {
 		return contract.DiscordFolderResponse{}, invalid(err.Error())
