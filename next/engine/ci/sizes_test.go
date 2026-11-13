@@ -7,7 +7,7 @@ import (
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
-	"github.com/resident-labs/dyna/internal/testutil"
+	"github.com/resident-labs/dyna/harness/testutil"
 )
 
 // Each size is a scale set of its own, named as a workflow's runs-on names it, so GitHub assigns each job to its size.

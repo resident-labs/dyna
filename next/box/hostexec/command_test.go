@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
-	"github.com/resident-labs/dyna/internal/testutil"
+	"github.com/resident-labs/dyna/harness/testutil"
 )
 
 // bashOf runs the wrapper of RunArgs without systemd-run, which a test machine may lack: a fake one runs what follows "--".

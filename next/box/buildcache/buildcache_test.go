@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/resident-labs/dyna/internal/testutil"
+	"github.com/resident-labs/dyna/harness/testutil"
 )
 
 func request(t *testing.T, method, url, body string) (int, string) {
