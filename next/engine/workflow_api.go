@@ -14,6 +14,7 @@ import (
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
+	"github.com/resident-labs/dyna/engine/workflowmeta"
 	"github.com/resident-labs/dyna/harness"
 	"github.com/resident-labs/dyna/room"
 )
@@ -39,11 +40,11 @@ func (s *Service) workflowRoom(ctx context.Context, caller contract.Principal, r
 }
 
 // workflowScript reads a script's meta, with its profiles and its repository among the room's.
-func (s *Service) workflowScript(ctx context.Context, roomID contract.RoomID, script string) (workflowMeta, contract.RepoName, *contract.Error) {
+func (s *Service) workflowScript(ctx context.Context, roomID contract.RoomID, script string) (workflowmeta.Meta, contract.RepoName, *contract.Error) {
 	if len(script) > workflowScriptBytes {
-		return workflowMeta{}, "", invalid("the script is over 1 MiB")
+		return workflowmeta.Meta{}, "", invalid("the script is over 1 MiB")
 	}
-	meta, err := parseWorkflowMeta(script)
+	meta, err := workflowmeta.Parse(script)
 	if err != nil {
 		return meta, "", invalid(err.Error())
 	}
@@ -163,7 +164,7 @@ func (s *Service) WorkflowReload(ctx context.Context, caller contract.Principal,
 	if problem := workflowProfiles(effective, meta.Profiles); problem != nil {
 		return response, problem
 	}
-	current, err := parseWorkflowMeta(run.Script)
+	current, err := workflowmeta.Parse(run.Script)
 	if err != nil {
 		return response, failure(err)
 	}
