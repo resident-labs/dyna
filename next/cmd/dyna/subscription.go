@@ -245,6 +245,9 @@ dyna subscription events lists the event types.`,
 			}
 		}
 		if cmd.Flags().Changed("where") {
+			if len(updateWhere) == 1 && updateWhere[0] == "" {
+				updateWhere = []string{}
+			}
 			req.Where = &updateWhere
 		}
 		if cmd.Flags().Changed("key") {
@@ -262,7 +265,7 @@ dyna subscription events lists the event types.`,
 	}}
 	update.Flags().StringVar(&updateWorkflow, "workflow", "", "Replacement script file")
 	update.Flags().StringVar(&updateArgs, "args", "", "Replacement workflow args as a JSON object")
-	update.Flags().StringArrayVar(&updateWhere, "where", nil, "Replacement filters (repeatable)")
+	update.Flags().StringArrayVar(&updateWhere, "where", nil, "Replacement filters (repeatable); an empty value clears them")
 	update.Flags().StringVar(&updateKey, "key", "", "Replacement serial key")
 	update.Flags().BoolVar(&updateLatest, "latest", false, "Keep only the newest waiting event per key")
 	update.Flags().StringVar(&updateParent, "parent", "", "Parent session; empty means root")

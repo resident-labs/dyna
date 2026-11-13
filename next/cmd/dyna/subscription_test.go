@@ -112,6 +112,7 @@ func TestSubscriptionFollowUpRequests(t *testing.T) {
 		{[]string{"fire", "sub"}, "fire", "{\"id\":\"sub\"}"},
 		{[]string{"fire", "sub", "--key", "", "--event", "{\"type\":\"hook.due\",\"body\":{}}"}, "fire", "{\"id\":\"sub\",\"key\":\"\",\"event\":{\"type\":\"hook.due\",\"body\":{}}}"},
 		{[]string{"update", "sub", "--latest=false", "--key", "", "--parent", "", "--where", "kind=pushed,opened"}, "update", "{\"id\":\"sub\",\"latest\":false,\"key\":\"\",\"parent\":\"\",\"where\":[\"kind=pushed,opened\"]}"},
+		{[]string{"update", "sub", "--where", ""}, "update", `{"id":"sub","where":[]}`},
 		{[]string{"state", "sub"}, "state", "{\"id\":\"sub\"}"},
 		{[]string{"state", "sub", "--key", "", "--value", "null"}, "state", "{\"id\":\"sub\",\"key\":\"\",\"value\":null}"},
 	} {
