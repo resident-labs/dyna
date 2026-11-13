@@ -134,7 +134,7 @@ func TestEndTurnIgnoresPostBeforeTurnStart(t *testing.T) {
 	}
 }
 
-// A completed turn wakes the session it answers only when nothing will start its own session again.
+// Waiting notices wake the parent without paying the reply debt.
 func TestEndTurnReplyWaitsWhileTheSessionStillWaits(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -187,8 +187,28 @@ func TestEndTurnReplyWaitsWhileTheSessionStillWaits(t *testing.T) {
 			if err := s.EndTurn(ctx, "child", output, end); err != nil {
 				t.Fatal(err)
 			}
+			events, err := s.Events(ctx, "room", 0, 100, []contract.EventType{"turn.ended"})
+			if err != nil || len(events) != 1 {
+				t.Fatalf("events: %v %v", events, err)
+			}
+			body := events[0].Body.(contract.TurnEnded)
+			if body.Final != "text" {
+				t.Fatalf("stored text changed: %+v", body)
+			}
+			if tc.wake && body.WaitingNotice != "" {
+				t.Fatalf("unexpected notice: %s", body.WaitingNotice)
+			}
+			if !tc.wake {
+				label := "child grand"
+				if tc.jobs > 0 {
+					label = "1 job"
+				}
+				if body.WaitingNotice != "child's turn ended; it is waiting for "+label+"." {
+					t.Fatalf("notice: %s", body.WaitingNotice)
+				}
+			}
 			var wake bool
-			if err := s.Read().QueryRowContext(ctx, "SELECT d.wake FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.type='turn.ended' AND d.to_id='parent'").Scan(&wake); err != nil || wake != tc.wake {
+			if err := s.Read().QueryRowContext(ctx, "SELECT d.wake FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.type='turn.ended' AND d.to_id='parent'").Scan(&wake); err != nil || !wake {
 				t.Fatalf("wake %v, want %v: %v", wake, tc.wake, err)
 			}
 			if owed, err := s.RepliesOwed(ctx, "child"); err != nil || (len(owed) == 1) == tc.wake {

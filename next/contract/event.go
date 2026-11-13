@@ -238,6 +238,8 @@ type TurnOutcome string // "completed" | "failed" | "stopped" | "closed"
 
 // TurnEnded is a session's turn ending.
 type TurnEnded struct {
+	WaitingNotice string `json:"waitingNotice,omitempty"` // session recipients see this instead of the waiting turn
+
 	DataAttachment *int         `json:"dataAttachment,omitempty"`
 	Data           JSONData     `json:"data,omitempty"`
 	Attachments    []Attachment `json:"attachments,omitempty"`
