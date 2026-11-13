@@ -50,7 +50,9 @@ func (m *Manager) Start(ctx context.Context, room string, page *websocket.Conn, 
 		m.mu.Unlock()
 		page.Close(websocket.StatusNormalClosure, "call ended")
 	}()
-	provider, err := dial(ctx)
+	dialCtx, stopDial := context.WithTimeout(ctx, 15*time.Second)
+	provider, err := dial(dialCtx)
+	stopDial()
 	if err != nil {
 		return err
 	}

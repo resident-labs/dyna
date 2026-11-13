@@ -170,3 +170,47 @@ func TestOutputBudget(t *testing.T) {
 		t.Fatalf("bad budget %d", len(got))
 	}
 }
+
+func TestResponseConflictDoesNotEndCall(t *testing.T) {
+	page, browser := pair(t)
+	provider, fake := pair(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ended := make(chan error, 1)
+	go func() { ended <- run(ctx, page, provider, nil, nil, time.Minute) }()
+	expect(t, fake, "session.update")
+	send(t, fake, message{"type": "error", "error": message{"code": "conversation_already_has_active_response", "message": "active response"}})
+	send(t, fake, message{"type": "session.updated"})
+	expect(t, browser, "ready")
+	send(t, fake, message{"type": "error", "error": message{"code": "invalid_api_key", "message": "bad key"}})
+	select {
+	case err := <-ended:
+		if err == nil || !strings.Contains(err.Error(), "bad key") {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("fatal provider error ignored")
+	}
+}
+
+func TestCodexSession(t *testing.T) {
+	session := sessionUpdate()["session"].(message)
+	if session["type"] != "realtime" || session["tool_choice"] != "auto" {
+		t.Fatal(session)
+	}
+	audio := session["audio"].(message)
+	vad := audio["input"].(message)["turn_detection"].(message)
+	if vad["type"] != "server_vad" || vad["create_response"] != true || vad["interrupt_response"] != true || vad["silence_duration_ms"] != 500 {
+		t.Fatal(vad)
+	}
+	if audio["output"].(message)["voice"] != "marin" {
+		t.Fatal(audio)
+	}
+	tools := session["tools"].([]message)
+	if len(tools) != 2 || tools[0]["name"] != "background_agent" || tools[1]["name"] != "remain_silent" {
+		t.Fatal(tools)
+	}
+	if strings.Contains(prompt, "{{") || !strings.Contains(prompt, "You are Dyna,") {
+		t.Fatal("prompt not adapted")
+	}
+}
