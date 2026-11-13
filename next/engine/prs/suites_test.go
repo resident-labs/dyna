@@ -188,8 +188,9 @@ func TestFailedSuiteOverridesEmptyAggregateAndPendingSuites(t *testing.T) {
 	}
 }
 
-// A run dispatched on main, such as one gating a PR, is filed under main's head but is not main's CI (horizon, 2026-11-13).
-func TestMainCICountsOnlyPushRuns(t *testing.T) {
+// A run dispatched on main, such as one gating a PR, is filed under main's head but is not main's CI (horizon, 2026-11-13);
+// runs started by the branch itself (push, schedule, workflow_run) still are.
+func TestMainCILeavesOutDispatchedRuns(t *testing.T) {
 	c, server, _ := client(t)
 	push := fakegithub.Check{Name: "build", Conclusion: "SUCCESS", Event: "push"}
 	gate := fakegithub.Check{Name: "gate pr 7", Conclusion: "FAILURE", Event: "workflow_dispatch"}
@@ -202,6 +203,10 @@ func TestMainCICountsOnlyPushRuns(t *testing.T) {
 		{"push green, dispatch red", []fakegithub.Check{push, gate}, contract.PrCISuccess},
 		{"only a dispatched run", []fakegithub.Check{gate}, contract.PrCINone},
 		{"push red", []fakegithub.Check{{Name: "build", Conclusion: "FAILURE", Event: "push"}, gate}, contract.PrCIFailure},
+		{"chained run red", []fakegithub.Check{push, gate, {Name: "deploy", Conclusion: "FAILURE", Event: "workflow_run"}}, contract.PrCIFailure},
+		{"chained run still going", []fakegithub.Check{push, gate, {Name: "deploy", Status: "IN_PROGRESS", Event: "workflow_run"}}, contract.PrCIPending},
+		{"scheduled run counts", []fakegithub.Check{push, {Name: "nightly", Conclusion: "FAILURE", Event: "schedule"}}, contract.PrCIFailure},
+		{"API-dispatched run", []fakegithub.Check{push, {Name: "gate pr 7", Conclusion: "FAILURE", Event: "repository_dispatch"}}, contract.PrCISuccess},
 	} {
 		t.Run(step.name, func(t *testing.T) {
 			server.SetCommit("owner/repo", sha, fakegithub.Commit{Rollup: "FAILURE", Checks: step.checks, Suites: suites})

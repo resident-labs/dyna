@@ -794,11 +794,11 @@ func (c *Client) CommitsCI(ctx context.Context, repo contract.RepoName, shas []s
 				return nil, fmt.Errorf("GitHub answer: %w", err)
 			}
 		}
-		// Main's CI is what its pushes started. GitHub files a workflow_dispatch run under the head of the ref it ran on,
-		// so a run dispatched on main to gate a PR would otherwise read as main's own result. Other apps' checks stay.
+		// A run started by hand or through the API (workflow_dispatch, repository_dispatch) is filed under the head of the ref
+		// it ran on, so one gating a PR would otherwise read as main's own result. Push, schedule, workflow_run and other apps stay.
 		suites := commit.CheckSuites.Nodes[:0]
 		for _, suite := range commit.CheckSuites.Nodes {
-			if suite.WorkflowRun == nil || suite.WorkflowRun.Event == "push" {
+			if suite.WorkflowRun == nil || !dispatched(suite.WorkflowRun.Event) {
 				suites = append(suites, suite)
 			}
 		}
@@ -807,7 +807,7 @@ func (c *Client) CommitsCI(ctx context.Context, repo contract.RepoName, shas []s
 		if rollup := commit.StatusCheckRollup; rollup != nil {
 			kept := rollup.Contexts.Nodes[:0]
 			for _, check := range rollup.Contexts.Nodes {
-				if run := check.CheckSuite.WorkflowRun; run == nil || run.Event == "push" {
+				if run := check.CheckSuite.WorkflowRun; run == nil || !dispatched(run.Event) {
 					kept = append(kept, check)
 				}
 			}
@@ -832,4 +832,9 @@ func (c *Client) CommitsCI(ctx context.Context, repo contract.RepoName, shas []s
 		reads[sha] = read
 	}
 	return reads, nil
+}
+
+// dispatched reports a workflow run started by hand or through the API rather than by what happened on the branch.
+func dispatched(event string) bool {
+	return event == "workflow_dispatch" || event == "repository_dispatch"
 }
