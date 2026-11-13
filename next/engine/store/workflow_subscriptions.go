@@ -12,7 +12,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-// queueWorkflow splits a batched PR notification at the subject boundary before
+// queueWorkflow splits a batched PR notification at the key boundary before
 // applying filters. Different PRs in one poll must never share a state key.
 func (s *Store) queueWorkflow(ctx context.Context, tx *sql.Tx, sub Subscription, event contract.Event) error {
 	events := []contract.Event{event}
@@ -101,13 +101,13 @@ func (s *Store) queueWorkflow(ctx context.Context, tx *sql.Tx, sub Subscription,
 		if !contract.MatchesWhere(sub.Where, event.Body) {
 			continue
 		}
-		subject := strings.NewReplacer("{repo}", string(repo), "{number}", strconv.Itoa(number)).Replace(sub.Key)
+		key := strings.NewReplacer("{repo}", string(repo), "{number}", strconv.Itoa(number)).Replace(sub.Key)
 		body, err := json.Marshal(event)
 		if err != nil {
 			return err
 		}
-		if sub.Once {
-			result, err := tx.ExecContext(ctx, "UPDATE workflow_queue SET seq=?,body=? WHERE sub=? AND subject=? AND run=''", event.Seq, string(body), sub.ID, subject)
+		if sub.Latest {
+			result, err := tx.ExecContext(ctx, "UPDATE workflow_queue SET seq=?,body=? WHERE sub=? AND key=? AND run=''", event.Seq, string(body), sub.ID, key)
 			if err != nil {
 				return err
 			}
@@ -119,7 +119,7 @@ func (s *Store) queueWorkflow(ctx context.Context, tx *sql.Tx, sub Subscription,
 				continue
 			}
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO workflow_queue(sub,subject,seq,body) SELECT ?1,?2,?3,?4 WHERE (SELECT count(*) FROM workflow_queue WHERE sub=?1 AND run IN ('','starting'))<?5", sub.ID, subject, event.Seq, string(body), maxQueuedRuns); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO workflow_queue(sub,key,seq,body) SELECT ?1,?2,?3,?4 WHERE (SELECT count(*) FROM workflow_queue WHERE sub=?1 AND run IN ('','starting'))<?5", sub.ID, key, event.Seq, string(body), maxQueuedRuns); err != nil {
 			return err
 		}
 	}
@@ -150,7 +150,7 @@ func (s *Store) QueuedWorkflows(ctx context.Context, now time.Time) ([]QueuedWor
 		if sub.Held || sub.HoldUntil.After(now) {
 			continue
 		}
-		rows, err := s.Read().QueryContext(ctx, `SELECT id,subject FROM workflow_queue q WHERE sub=? AND run IN ('','starting') AND NOT EXISTS(SELECT 1 FROM workflow_queue a WHERE a.sub=q.sub AND a.subject=q.subject AND (a.id!=q.id AND (a.run!='' OR a.id<q.id))) ORDER BY id`, sub.ID)
+		rows, err := s.Read().QueryContext(ctx, `SELECT id,key FROM workflow_queue q WHERE sub=? AND run IN ('','starting') AND NOT EXISTS(SELECT 1 FROM workflow_queue a WHERE a.sub=q.sub AND a.key=q.key AND (a.id!=q.id AND (a.run!='' OR a.id<q.id))) ORDER BY id`, sub.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -184,23 +184,23 @@ func (s *Store) ClaimSubscriptionWorkflow(ctx context.Context, queue int64) (jso
 }
 
 // SubscriptionWorkflowState authorizes state access by the active run's queue row,
-// never by a subject supplied by the box.
+// never by a key supplied by the box.
 func (s *Store) SubscriptionWorkflowState(ctx context.Context, run contract.WorkflowRunID, value json.RawMessage) (json.RawMessage, error) {
 	var result json.RawMessage
 	err := s.Write(ctx, func(tx *sql.Tx) error {
-		var sub, subject string
-		if err := tx.QueryRowContext(ctx, "SELECT q.sub,q.subject FROM workflow_queue q JOIN workflow_runs r ON r.id=q.run WHERE q.run=? AND r.state='running'", run).Scan(&sub, &subject); err != nil {
+		var sub, key string
+		if err := tx.QueryRowContext(ctx, "SELECT q.sub,q.key FROM workflow_queue q JOIN workflow_runs r ON r.id=q.run WHERE q.run=? AND r.state='running'", run).Scan(&sub, &key); err != nil {
 			return err
 		}
 		if len(value) > 0 {
-			if _, err := tx.ExecContext(ctx, "INSERT INTO workflow_state(sub,subject,value) VALUES(?,?,?) ON CONFLICT(sub,subject) DO UPDATE SET value=excluded.value", sub, subject, string(value)); err != nil {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO workflow_state(sub,key,value) VALUES(?,?,?) ON CONFLICT(sub,key) DO UPDATE SET value=excluded.value", sub, key, string(value)); err != nil {
 				return err
 			}
 			result = value
 			return nil
 		}
 		var stored string
-		err := tx.QueryRowContext(ctx, "SELECT value FROM workflow_state WHERE sub=? AND subject=?", sub, subject).Scan(&stored)
+		err := tx.QueryRowContext(ctx, "SELECT value FROM workflow_state WHERE sub=? AND key=?", sub, key).Scan(&stored)
 		if err == sql.ErrNoRows {
 			result = json.RawMessage("null")
 			return nil
@@ -232,7 +232,7 @@ func (s *Store) QueueScheduledWorkflow(ctx context.Context, sub Subscription, ev
 
 // FailSubscriptionWorkflow consumes a refused start like a failed command run:
 // its event is not retried, and subsequent events wait out the subscription backoff.
-func (s *Store) FailSubscriptionWorkflow(ctx context.Context, queue int64, outcome HookOutcome, report contract.SessionID, events ...contract.Event) error {
+func (s *Store) FailSubscriptionWorkflow(ctx context.Context, queue int64, outcome HookOutcome, parent contract.SessionID, events ...contract.Event) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		var sub contract.SubscriptionID
 		if err := tx.QueryRowContext(ctx, "DELETE FROM workflow_queue WHERE id=? AND run='starting' RETURNING sub", queue).Scan(&sub); err != nil {
@@ -247,7 +247,7 @@ func (s *Store) FailSubscriptionWorkflow(ctx context.Context, queue int64, outco
 				return err
 			}
 			if i > 0 {
-				if err := s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: report}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}); err != nil {
+				if err := s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: parent}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}); err != nil {
 					return err
 				}
 			}

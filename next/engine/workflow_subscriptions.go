@@ -22,23 +22,23 @@ func (s *Service) fireWorkflowSubscriptions(ctx context.Context) error {
 		if refused[sub.ID] {
 			continue
 		}
-		report := sub.Report
-		if report != "" {
-			target, err := s.store.Session(ctx, report)
+		parent := sub.Parent
+		if parent != "" {
+			target, err := s.store.Session(ctx, parent)
 			if errors.Is(err, store.ErrNotFound) || err == nil && target.Closing {
-				report = ""
+				parent = ""
 			} else if err != nil {
 				failures = append(failures, err)
 				continue
 			}
 		}
-		if report == "" {
+		if parent == "" {
 			tree, err := s.store.RoomTree(ctx, sub.Room)
 			if err != nil {
 				failures = append(failures, err)
 				continue
 			}
-			report = tree.Root()
+			parent = tree.Root()
 		}
 		event, err := s.store.ClaimSubscriptionWorkflow(ctx, q.ID)
 		if err != nil {
@@ -55,7 +55,7 @@ func (s *Service) fireWorkflowSubscriptions(ctx context.Context) error {
 			failures = append(failures, err)
 			continue
 		}
-		_, problem := s.workflowRun(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: report}, contract.WorkflowRunRequest{Room: sub.Room, Script: sub.Workflow.Script, Args: string(body), ClientID: fmt.Sprintf("subscription-%d", q.ID)}, q.ID)
+		_, problem := s.workflowRun(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: parent}, contract.WorkflowRunRequest{Room: sub.Room, Script: sub.Workflow.Script, Args: string(body), ClientID: fmt.Sprintf("subscription-%d", q.ID)}, q.ID)
 		if problem != nil {
 			refused[sub.ID] = true
 			now := s.now()
@@ -75,7 +75,7 @@ func (s *Service) fireWorkflowSubscriptions(ctx context.Context) error {
 				}
 				events = append(events, notice)
 			}
-			failures = append(failures, s.store.FailSubscriptionWorkflow(ctx, q.ID, outcome, report, events...))
+			failures = append(failures, s.store.FailSubscriptionWorkflow(ctx, q.ID, outcome, parent, events...))
 		}
 	}
 	return errors.Join(failures...)
