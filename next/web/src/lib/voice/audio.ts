@@ -195,6 +195,5 @@ export function micError(err: unknown): string {
     case 'NotFoundError': return 'No microphone was found.'
     case 'NotReadableError': return 'Another app is using the microphone.'
   }
-  const message = err instanceof Error ? err.message : ''
-  return `The microphone did not start: ${message || String(err)}`
+  return 'The microphone did not start. Check your microphone and try again.'
 }

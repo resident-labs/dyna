@@ -92,10 +92,13 @@ try {
   await page.getByRole('status').filter({ hasText: 'Working' }).waitFor();
   assert.equal(await page.locator('aside[aria-label="Voice call"] details').getAttribute('open'), null);
   await page.screenshot({ path: output + '/real-room-1440-dark.png' });
-  await page.getByRole('button', { name: 'Hide voice call' }).click();
-  assert.equal(await page.getByRole('button', { name: 'Hang up' }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: 'Close voice call' }).count(), 0);
   await page.getByRole('button', { name: 'Call', exact: true }).click();
-  await page.getByRole('button', { name: 'Hang up' }).waitFor();
+  assert.equal(await page.locator('aside[aria-label="Voice call"]').evaluate(el => el === document.activeElement), true);
+  const desktopComposer = await page.locator('.composer').boundingBox();
+  const desktopWidget = await page.locator('aside[aria-label="Voice call"]').boundingBox();
+  assert.ok(desktopWidget.x + desktopWidget.width <= desktopComposer.x + desktopComposer.width + 1);
+  assert.ok(desktopWidget.y + desktopWidget.height <= desktopComposer.y);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(100);
   const composer = await page.getByRole('combobox', { name: 'Message', exact: true }).boundingBox();
@@ -118,7 +121,9 @@ try {
   assert.equal(await page.locator('.voice details').getAttribute('open'), null);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.evaluate(() => { history.pushState({}, '', '/r/room-b/s/room-b-root'); window.dispatchEvent(new PopStateEvent('popstate')); });
-  await page.getByRole('button', { name: 'Call active in dyna', exact: true }).click();
+  const crossroom = page.getByRole('button', { name: 'Call active in dyna', exact: true });
+  assert.equal(await crossroom.textContent(), 'Call');
+  await crossroom.click();
   await page.getByRole('button', { name: 'End it and call here' }).waitFor();
   await page.screenshot({ path: output + '/real-header-crossroom.png' });
   socket.send(JSON.stringify({ type: 'closed', reason: 'Fixture connection ended' }));
