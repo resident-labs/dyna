@@ -308,3 +308,17 @@ func TestCancelledNamesSurviveReopenAndClearOnNextHead(t *testing.T) {
 		t.Fatalf("next head retained old names: %+v", next)
 	}
 }
+
+func TestEarlyFailureThenCompletionAndSuccessfulRerun(t *testing.T) {
+	first, _ := ComparePR(tracked(nil), nil, nil, observed(func(o *Observed) { o.CI = contract.PrCIFailure; o.FailedChecks = []string{"lint"} }), "me", at)
+	row := tracked(func(r *store.TrackedPR) { r.CI, r.CITold = contract.PrCIFailure, first.CITold })
+	update, _ := ComparePR(row, nil, nil, observed(func(o *Observed) { o.CI = contract.PrCIFailure; o.FailedChecks = []string{"lint", "gate"} }), "me", at)
+	if update.Change != nil && slices.Contains(update.Change.Kinds, contract.PrChangeCIFailed) {
+		t.Fatalf("duplicate failure: %+v", update.Change)
+	}
+	row.CI = contract.PrCIPending
+	update, _ = ComparePR(row, nil, nil, observed(func(o *Observed) { o.CI = contract.PrCISuccess }), "me", at)
+	if update.Change == nil || !slices.Contains(update.Change.Kinds, contract.PrChangeCIPassed) {
+		t.Fatalf("lost pass: %+v", update.Change)
+	}
+}

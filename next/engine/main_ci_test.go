@@ -431,14 +431,14 @@ func TestMainCIFinishedWaitsForEveryContextAndReportsCancellation(t *testing.T) 
 	requireShas(t, r.toldShas(t), "f319701")
 }
 
-func TestMainCIFinishedFailureWaitsForTheOtherContextsToFinish(t *testing.T) {
+func TestMainCIFinishedFailureDoesNotWaitForOtherContexts(t *testing.T) {
 	r := mainRig(t)
 	running := fakegithub.Commit{Rollup: "FAILURE", Checks: []fakegithub.Check{{Name: "verify", Conclusion: "FAILURE"}, {Name: "build linux", Status: "IN_PROGRESS"}, {Name: "build macos-x64", Conclusion: "CANCELLED"}}}
 	r.moveMain("owner/repo", "A", running)
 	for i := 0; i < 3; i++ {
 		r.next(t)
 	}
-	requireShas(t, r.toldShas(t))
+	requireShas(t, r.toldShas(t), "A")
 	r.github.SetCommit("owner/repo", "A", mixFailedRun)
 	r.next(t)
 	got := r.mainCIs(t)
@@ -518,5 +518,22 @@ func TestMainCIFinishedTruncatedReadStaysPendingRegardlessOfRollup(t *testing.T)
 			}
 			requireShas(t, r.toldShas(t))
 		})
+	}
+}
+
+func TestMainCIEarlyFailureIncludesPendingRunsAndSettlesOnce(t *testing.T) {
+	r := mainRig(t)
+	early := fakegithub.Commit{Rollup: "FAILURE", Checks: []fakegithub.Check{{Name: "lint", Conclusion: "FAILURE"}, {Name: "gate"}}}
+	r.moveMain("owner/repo", "early", early)
+	r.next(t)
+	got := r.mainCIs(t)
+	if len(got) != 1 || got[0].Result != contract.PrCIFailure || len(got[0].Runs) != 2 || got[0].Runs[1].Name != "gate" {
+		t.Fatalf("early event: %+v", got)
+	}
+	early.Checks[1].Conclusion = "SUCCESS"
+	r.github.SetCommit("owner/repo", "early", early)
+	r.next(t)
+	if got := r.mainCIs(t); len(got) != 1 {
+		t.Fatalf("duplicate: %+v", got)
 	}
 }

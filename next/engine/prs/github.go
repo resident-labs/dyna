@@ -398,13 +398,12 @@ type gqlSuites struct {
 // (a startup failure or a broken workflow file) leaves only skipped contexts or
 // none, and its suite's conclusion is the only sign of it.
 func summarizeCI(rollup *gqlRollup, suites gqlSuites, rule ciRule, now time.Time) (contract.PrCI, []string) {
-	if suites.PageInfo.HasNextPage || suites.TotalCount > len(suites.Nodes) {
-		return contract.PrCIPending, nil
-	}
+	pending := suites.PageInfo.HasNextPage || suites.TotalCount > len(suites.Nodes)
 	var failedSuites []string
 	for _, suite := range suites.Nodes {
 		if suite.Status != "COMPLETED" && !(suite.CheckRuns.TotalCount == 0 && !suite.CreatedAt.IsZero() && now.Sub(suite.CreatedAt) > 10*time.Minute) {
-			return contract.PrCIPending, nil
+			pending = true
+			continue
 		}
 		switch suite.Conclusion {
 		case "FAILURE", "STARTUP_FAILURE", "TIMED_OUT", "ACTION_REQUIRED":
@@ -420,15 +419,18 @@ func summarizeCI(rollup *gqlRollup, suites gqlSuites, rule ciRule, now time.Time
 	if ci != contract.PrCIFailure && len(failedSuites) > 0 {
 		return contract.PrCIFailure, failedSuites
 	}
+	if ci != contract.PrCIFailure && pending {
+		return contract.PrCIPending, nil
+	}
 	return ci, failed
 }
 
 func summarizeContexts(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string) {
-	if rollup != nil && (rollup.Contexts.PageInfo.HasNextPage || rollup.Contexts.TotalCount > len(rollup.Contexts.Nodes)) {
+	// A visible failure is definitive even when other contexts are unread or pending.
+	pending := rollup != nil && (rollup.Contexts.PageInfo.HasNextPage || rollup.Contexts.TotalCount > len(rollup.Contexts.Nodes))
+	if pending && len(rollup.Contexts.Nodes) == 0 {
 		return contract.PrCIPending, nil
 	}
-	// A rollup settles only when every context is terminal. Cancellation without
-	// failure is cancelled, not success; an empty success means no checks ran.
 	if rollup == nil || rollup.State == "SUCCESS" && len(rollup.Contexts.Nodes) == 0 {
 		return contract.PrCINone, nil
 	}
@@ -442,7 +444,7 @@ func summarizeContexts(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string)
 			}
 			switch {
 			case check.Type == "StatusContext" && (check.State == "PENDING" || check.State == "EXPECTED"), check.Type != "StatusContext" && check.Status != "COMPLETED":
-				return contract.PrCIPending, nil
+				pending = true
 			case check.Type == "StatusContext" && check.State == "SUCCESS", check.Conclusion == "SUCCESS" || check.Conclusion == "SKIPPED" || check.Conclusion == "NEUTRAL":
 			case check.Conclusion == "CANCELLED":
 				cancelled = append(cancelled, name)
@@ -451,12 +453,15 @@ func summarizeContexts(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string)
 				failed = append(failed, name)
 			}
 		}
+		if ci != contract.PrCIFailure && pending {
+			return contract.PrCIPending, nil
+		}
 		if ci != contract.PrCIFailure && len(cancelled) > 0 {
 			ci, failed = contract.PrCICancelled, cancelled
 		}
 		return ci, failed
 	}
-	if rule == ciMainHead {
+	if pending || rule == ciMainHead {
 		return contract.PrCIPending, nil
 	}
 	ci := contract.PrCIPending
@@ -468,7 +473,7 @@ func summarizeContexts(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string)
 }
 
 // ciRule preserves the PR/main distinction for empty rollups. summarizeCI first
-// holds incomplete suites and truncated context lists pending.
+// holds incomplete suites and truncated context lists pending unless a failure is visible.
 type ciRule int
 
 const (
