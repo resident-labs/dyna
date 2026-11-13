@@ -1,0 +1,4 @@
+Prompt and RealtimeV2 session/tool definitions derived from OpenAI Codex.
+Copyright 2025 OpenAI. Licensed under Apache-2.0; see LICENSE.codex.
+Dyna modifications: renamed identity, removed user-name template, adapted transport
+and handoff to the room root owner DM.

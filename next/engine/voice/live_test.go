@@ -58,7 +58,7 @@ func TestLiveProxyAudio(t *testing.T) {
 		}
 		switch event.Type {
 		case "error":
-			t.Fatalf("provider: %s", event.Error)
+			t.Fatalf("provider: %s", event.Error.Message)
 		case "session.updated":
 			if requested {
 				continue

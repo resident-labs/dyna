@@ -100,6 +100,7 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 	played := map[string]int64{}
 	var generated []string
 	playing := ""
+	interrupted := false
 	last := ""
 	active := 0
 	var budget outputBudget
@@ -210,12 +211,18 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 			}
 			switch event.Type {
 			case "error":
-				return fmt.Errorf("realtime: %s", event.Error)
+				if event.Error.Code == "conversation_already_has_active_response" {
+					continue
+				}
+				return fmt.Errorf("realtime: %s", event.Error.Message)
 			case "session.updated":
 				if err := writeJSON(ctx, page, message{"type": "ready"}); err != nil {
 					return err
 				}
+			case "response.created":
+				interrupted = false
 			case "input_audio_buffer.speech_started":
+				interrupted = true
 				if err := writeJSON(ctx, page, message{"type": "speech_started"}); err != nil {
 					return err
 				}
@@ -238,6 +245,9 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 				last = ""
 				playing = ""
 			case "response.output_audio.delta", "response.audio.delta":
+				if interrupted {
+					continue
+				}
 				if last != event.ItemID {
 					generated = append(generated, event.ItemID)
 				}

@@ -63,13 +63,16 @@ func userText(text string) message {
 }
 
 type providerEvent struct {
-	Type       string          `json:"type"`
-	ItemID     string          `json:"item_id"`
-	Delta      string          `json:"delta"`
-	Transcript string          `json:"transcript"`
-	Name       string          `json:"name"`
-	CallID     string          `json:"call_id"`
-	Arguments  string          `json:"arguments"`
-	Error      json.RawMessage `json:"error"`
-	Item       *providerEvent  `json:"item"`
+	Type       string `json:"type"`
+	ItemID     string `json:"item_id"`
+	Delta      string `json:"delta"`
+	Transcript string `json:"transcript"`
+	Name       string `json:"name"`
+	CallID     string `json:"call_id"`
+	Arguments  string `json:"arguments"`
+	Error      struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+	Item *providerEvent `json:"item"`
 }
