@@ -13,26 +13,28 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/harness/testutil"
+
 	"github.com/resident-labs/dyna/box/dynaext"
 	"github.com/resident-labs/dyna/contract"
 )
 
 // fakeJournal is the engine's side of a crew, kept in memory so that a second Crew can resume from it.
 type fakeJournal struct {
-	mu        sync.Mutex
-	steps     map[string]contract.WorkflowStepEndRequest
-	names     map[string]string
-	files     map[string]string // what each running worker reported
-	lanes     map[string]string
-	phases    map[string]string                   // each step key to the stage it started in
-	endDelay  time.Duration                       // how long the journal takes to store a step end
-	slowStart string                              // the name of a step whose start the journal takes a while to store
-	started   []string                            // step names, in the order their starts were stored
-	features  map[string]contract.WorkflowFeature // step names to the switch each named
-	refuse    map[contract.WorkflowFeature]error  // a feature the engine's settings turn off
-	posts     []contract.PostRequest
-	lines     []string // status() lines
-	pin       string
+	mu          sync.Mutex
+	steps       map[string]contract.WorkflowStepEndRequest
+	names       map[string]string
+	files       map[string]string // what each running worker reported
+	lanes       map[string]string
+	phases      map[string]string // each step key to the stage it started in
+	beforeEnd   func()
+	beforeStart func(string)
+	started     []string                            // step names, in the order their starts were stored
+	features    map[string]contract.WorkflowFeature // step names to the switch each named
+	refuse      map[contract.WorkflowFeature]error  // a feature the engine's settings turn off
+	posts       []contract.PostRequest
+	lines       []string // status() lines
+	pin         string
 	// by step name, the script version that started each step
 	versions map[string]int
 }
@@ -61,8 +63,8 @@ func (j *fakeJournal) WorkflowStepStart(_ context.Context, req contract.Workflow
 	if err := j.refuse[req.Feature]; err != nil {
 		return contract.WorkflowStepStartResponse{}, err
 	}
-	if req.Name == j.slowStart {
-		time.Sleep(300 * time.Millisecond)
+	if j.beforeStart != nil {
+		j.beforeStart(req.Name)
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -82,7 +84,9 @@ func (j *fakeJournal) WorkflowStepStart(_ context.Context, req contract.Workflow
 }
 
 func (j *fakeJournal) WorkflowStepEnd(_ context.Context, req contract.WorkflowStepEndRequest) error {
-	time.Sleep(j.endDelay)
+	if j.beforeEnd != nil {
+		j.beforeEnd()
+	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.steps[req.Key] = req
@@ -330,11 +334,7 @@ func (h *heldTasks) count(of map[string]int, task string) int {
 
 func waitFor(t *testing.T, what string, done func() bool) {
 	t.Helper()
-	for deadline := time.Now().Add(10 * time.Second); !done(); time.Sleep(5 * time.Millisecond) {
-		if time.Now().After(deadline) {
-			t.Fatalf("waited for %s", what)
-		}
-	}
+	testutil.Eventually(t, 10*time.Second, what, done)
 }
 
 func reloaded(script string, version int, profiles ...contract.WorkflowProfile) contract.BoxWorkflow {
@@ -359,7 +359,7 @@ func TestAReloadJoinsRunningStepsAndKeepsFinishedOnes(t *testing.T) {
 	})
 	crew.Reload(reloaded(crewMeta+`return await parallel(['quick', 'slow', 'new'].map((task) => () => agent('work on ' + task)))`, 2))
 	waitFor(t, "the new step's worker", func() bool { return h.started.Load() == 3 })
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond) // timing: observe that reload does not start duplicate workers.
 	if got := held.count(held.working, "slow"); got != 1 || h.started.Load() != 3 {
 		t.Fatalf("%d slow workers and %d in all: the reload started a step again", got, h.started.Load())
 	}
@@ -857,9 +857,31 @@ func TestAForgottenStepEndsWithTheRun(t *testing.T) {
 
 func TestTheLastLinesOfAScriptReachTheJournalBeforeItsRunEnds(t *testing.T) {
 	h := newCrewHarness(t)
-	h.journal.endDelay = 300 * time.Millisecond
-	h.result(crewMeta + `log('last words'); return 1`)
-	h.result(crewMeta + `await parallel([() => agent('good'), () => { throw new Error('gave up') }]); return 2`)
+	for _, script := range []string{
+		crewMeta + "log('last words'); return 1",
+		crewMeta + "await parallel([() => agent('good'), () => { throw new Error('gave up') }]); return 2",
+	} {
+		entered, release := make(chan struct{}), make(chan struct{})
+		signal := sync.OnceFunc(func() { close(entered) })
+		unblock := sync.OnceFunc(func() { close(release) })
+		defer unblock()
+		h.journal.beforeEnd = func() { signal(); <-release }
+		_, out := h.start(script)
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("journal end did not enter")
+		}
+		select {
+		case <-out:
+			t.Fatal("run ended before journal writes completed")
+		case <-time.After(300 * time.Millisecond): // timing: completion cannot overtake a held journal write.
+		}
+		unblock()
+		if ended := <-out; ended.Outcome != contract.TurnCompleted {
+			t.Fatalf("turn %+v", ended)
+		}
+	}
 	var logged, failed bool
 	for key, name := range h.journal.names {
 		step := h.journal.steps[key]
@@ -894,8 +916,33 @@ func TestAScriptThatOutgrowsItsMemoryFails(t *testing.T) {
 
 func TestLinesReachTheJournalInTheOrderTheScriptWroteThem(t *testing.T) {
 	h := newCrewHarness(t)
-	h.journal.slowStart = "log: a"
-	h.result(crewMeta + `log('a'); log('b'); return 1`)
+	entered, release := make(chan struct{}), make(chan struct{})
+	overtook := make(chan string, 1)
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	h.journal.beforeStart = func(name string) {
+		if name == "log: a" {
+			close(entered)
+			<-release
+		} else {
+			overtook <- name
+		}
+	}
+	_, out := h.start(crewMeta + "log('a'); log('b'); return 1")
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first journal line did not start")
+	}
+	select {
+	case name := <-overtook:
+		t.Fatalf("%s overtook the blocked first line", name)
+	case <-time.After(300 * time.Millisecond): // timing: preserve the serial-order observation window.
+	}
+	unblock()
+	if ended := <-out; ended.Outcome != contract.TurnCompleted {
+		t.Fatalf("turn %+v", ended)
+	}
 	if !slices.Equal(h.journal.started, []string{"log: a", "log: b"}) {
 		t.Fatalf("lines started in the order %q", h.journal.started)
 	}

@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/resident-labs/dyna/harness/testutil"
 )
 
 // A fake cgroup, a clock moved by hand and a du that counts its runs.
@@ -63,15 +65,12 @@ func (f *statsFixture) cpu(t *testing.T, usec int) {
 
 func (f *statsFixture) waitRuns(t *testing.T, want int32) {
 	t.Helper()
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+	testutil.Eventually(t, 5*time.Second, "idle disk measurement with expected run count", func() bool {
 		f.stats.mu.Lock()
 		idle := !f.stats.measuring
 		f.stats.mu.Unlock()
-		if idle && f.runs.Load() == want {
-			return
-		}
-	}
-	t.Fatalf("du ran %d times, want %d", f.runs.Load(), want)
+		return idle && f.runs.Load() == want
+	})
 }
 
 func TestReadingCountsMemoryLessReclaimableCache(t *testing.T) {

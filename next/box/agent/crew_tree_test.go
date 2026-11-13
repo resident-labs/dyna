@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"github.com/resident-labs/dyna/box/dynaext"
 	"net"
 	"os"
 	"os/exec"
@@ -14,6 +13,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/resident-labs/dyna/box/dynaext"
+	"github.com/resident-labs/dyna/harness/testutil"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -466,7 +468,9 @@ func TestBuildsTakeTurnsAndReadsDoNotWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	release = sync.OnceFunc(release)
 	var builds sync.WaitGroup
+	t.Cleanup(func() { cancel(); release(); builds.Wait() })
 	for range 3 {
 		builds.Go(func() {
 			if out, err := inShell(t, ctx, "make"); err != nil {
@@ -481,9 +485,8 @@ func TestBuildsTakeTurnsAndReadsDoNotWait(t *testing.T) {
 			t.Errorf("run: %s", reply.Error)
 		}
 	})
-	for crew.builds.waited() == 0 {
-		time.Sleep(time.Millisecond)
-	}
+	deadline, _ := ctx.Deadline()
+	testutil.Eventually(t, time.Until(deadline), "a build waiting in the queue", func() bool { return crew.builds.waited() != 0 })
 	for _, read := range []string{"go version", "go env GOPATH", "cargo metadata", "npm ls", "npm --version", "cargo --version", "grep -c . /dev/null || true", "git --version"} {
 		started := time.Now()
 		out, err := inShell(t, ctx, read)
@@ -631,11 +634,11 @@ func TestALockWaitDoesNotCountAgainstAWorkersTimeout(t *testing.T) {
 	}
 	work, cancel := lock.timeout(ctx, 300*time.Millisecond)
 	defer cancel()
-	queued := make(chan struct{})
+	queued, finished := make(chan struct{}), make(chan struct{})
 	go func() {
+		defer close(finished)
 		next, err := lock.acquire(ctx, func() { close(queued) })
 		if err == nil {
-			time.Sleep(time.Millisecond)
 			next()
 		}
 	}()
@@ -652,6 +655,11 @@ func TestALockWaitDoesNotCountAgainstAWorkersTimeout(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("the timeout never came back once the queue was gone")
+	}
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the queued lock holder never finished")
 	}
 }
 
