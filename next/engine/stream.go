@@ -410,7 +410,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					reason, cause = streamDeliveryRenderFailed, err
 					return
 				}
-				// A result reaches the parent whole. Text from a child's turn that ended with work still running is not
+				// A result reaches the parent whole. Text from a child's turn that ended with work still running, or after it posted its answer, is not
 				// a result and does not wake the parent, so the parent gets its opening and the transcript keeps the rest.
 				if ended, ok := event.Body.(contract.TurnEnded); ok && delivery.Surface == contract.SurfaceSession && !delivery.Wake {
 					if runes := []rune(text); len(runes) > waitingTextLimit {

@@ -902,7 +902,7 @@ type FeedInput struct {
 	Queue    *contract.TurnQueue
 	MeantFor contract.SessionID
 	Why      string
-	Wake     bool // false for a child's turn-end text while it still has work running
+	Wake     bool // false for a child's turn-end text that is not a result: it still has work running, or it already posted its answer
 }
 
 // Keep open lookups separate from replay so ordinary polls never scan history.
