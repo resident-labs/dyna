@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/harness"
 	"github.com/resident-labs/dyna/harness/testutil"
 
 	"github.com/resident-labs/dyna/box/dynaext"
@@ -117,6 +119,7 @@ type fakeWorker struct {
 	dir    string
 	work   func(dir string, submit dynaext.Submit) // what a schema worker does with its submit tool
 	submit dynaext.Submit
+	steer  func(contract.TurnInput) error // nil: no turn is running to take a steer
 }
 
 func (w *fakeWorker) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput, _ func()) (contract.TurnEnded, error) {
@@ -138,6 +141,12 @@ func (w *fakeWorker) Start(ctx context.Context, id contract.TurnID, inputs []con
 	ended.Usage.InputTokens, ended.Turn = 10, id
 	return ended, err
 }
+func (w *fakeWorker) Steer(_ context.Context, input contract.TurnInput) error {
+	if w.steer == nil {
+		return harness.ErrNoTurn
+	}
+	return w.steer(input)
+}
 func (w *fakeWorker) SessionFile() string { return w.file }
 func (w *fakeWorker) Close() error        { return nil }
 
@@ -152,6 +161,7 @@ type crewHarness struct {
 	reply   func(prompt, model string) (contract.TurnEnded, error)
 	act     func(dir, prompt string)
 	hold    func(ctx context.Context, prompt string) error
+	steer   func(contract.TurnInput) error
 	workdir string
 	branch  string
 	base    string
@@ -193,7 +203,7 @@ func (h *crewHarness) start(script string, profiles ...contract.WorkflowProfile)
 			h.mu.Lock()
 			h.submits = append(h.submits, submit != nil)
 			h.mu.Unlock()
-			return &fakeWorker{reply: h.reply, act: h.act, work: h.work, submit: submit, hold: h.hold, dir: dir, model: profile.Model.ID, file: filepath.Join(sessions, fmt.Sprintf("w%d.jsonl", opened.Add(1)))}, nil
+			return &fakeWorker{reply: h.reply, act: h.act, work: h.work, submit: submit, hold: h.hold, steer: h.steer, dir: dir, model: profile.Model.ID, file: filepath.Join(sessions, fmt.Sprintf("w%d.jsonl", opened.Add(1)))}, nil
 		},
 		Transcript: NewTranscript(&transcriptEngine{}, sessions),
 		Workdir:    h.workdir,
@@ -986,5 +996,43 @@ func TestCrewPreservesTypedResultAndDoesNotRetypeStrings(t *testing.T) {
 				t.Fatalf("typed result lost: %+v", ended)
 			}
 		})
+	}
+}
+
+// A post to a run reaches every worker that is running, and counts as delivered once one took it.
+func TestCrewSteerReachesRunningWorkers(t *testing.T) {
+	h := newCrewHarness(t)
+	steers, release := make(chan string, 2), make(chan struct{})
+	h.steer = func(input contract.TurnInput) error { steers <- input.Text; return nil }
+	h.hold = func(ctx context.Context, _ string) error {
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	crew, ended := h.start(crewMeta + "return await parallel([() => agent('a'), () => agent('b')])")
+	post := contract.TurnInput{Delivery: 8, Text: "skip the generated files"}
+	waitFor(t, "both workers", func() bool { return h.started.Load() == 2 })
+	waitFor(t, "a steer both workers take", func() bool {
+		for len(steers) > 0 {
+			<-steers
+		}
+		return crew.Steer(context.Background(), post) == nil && len(steers) == 2
+	})
+	if delivered, _ := crew.Delivered(context.Background(), 8); !delivered {
+		t.Fatal("a steer the workers took is not delivered")
+	}
+	close(release)
+	if got := <-ended; got.Outcome != contract.TurnCompleted {
+		t.Fatalf("turn %+v", got)
+	}
+	// The workers are gone, so no one takes a later post, and it stays undelivered.
+	if err := crew.Steer(context.Background(), contract.TurnInput{Delivery: 9, Text: "late"}); !errors.Is(err, harness.ErrNoTurn) {
+		t.Fatalf("a steer after the run: %v", err)
+	}
+	if delivered, _ := crew.Delivered(context.Background(), 9); delivered {
+		t.Fatal("a steer no worker took counts as delivered")
 	}
 }
