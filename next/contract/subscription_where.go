@@ -92,13 +92,16 @@ func Fields(body EventBody) []EventFields {
 }
 
 // whereClause is one parsed line of a Where.
-type whereClause struct{ key, op, value string }
+type whereClause struct {
+	key, op, value string
+	kinds          []string
+}
 
 var whereKeys = []string{"repo", "number", "author", "actor", "label", "kind"}
 
 func parseWhere(text string) (whereClause, error) {
 	if value, ok := strings.CutPrefix(text, "text~"); ok && value != "" {
-		return whereClause{"text", "~", value}, nil
+		return whereClause{key: "text", op: "~", value: value}, nil
 	}
 	key, value, ok := strings.Cut(text, "=")
 	op := "="
@@ -111,7 +114,14 @@ func parseWhere(text string) (whereClause, error) {
 	if _, err := strconv.Atoi(value); err != nil && key == "number" {
 		return whereClause{}, fmt.Errorf("where %q needs a number", text)
 	}
-	return whereClause{key, op, value}, nil
+	clause := whereClause{key: key, op: op, value: value}
+	if key == "kind" {
+		clause.kinds = strings.Split(value, ",")
+		if slices.Contains(clause.kinds, "") {
+			return whereClause{}, fmt.Errorf("where %q needs a kind between commas", text)
+		}
+	}
+	return clause, nil
 }
 
 // CheckWhere says why a line of a Where is no good, if it is not.
@@ -129,10 +139,14 @@ func (c whereClause) holds(fields EventFields) bool {
 	case c.op == "~":
 		return strings.Contains(got, c.value)
 	}
+	if c.key == "kind" {
+		return slices.Contains(c.kinds, got) == (c.op == "=")
+	}
 	return (got == c.value) == (c.op == "=")
 }
 
-// MatchesWhere reports whether an event meets a Where, all of whose lines must hold of one thing in it. An empty Where always does.
+// MatchesWhere reports whether an event meets a Where, all of whose lines must hold of one thing in it.
+// kind=a,b matches either kind; kind!=a,b excludes both. An empty Where always does.
 func MatchesWhere(where []string, body EventBody) bool {
 	if len(where) == 0 {
 		return true
