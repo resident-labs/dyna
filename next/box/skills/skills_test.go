@@ -31,29 +31,41 @@ func TestParseRefusesWhatPiWouldNotLoad(t *testing.T) {
 }
 
 func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
-	items := BuiltIn()
-	if len(items) != 7 || items[1].Name != "dyna-discord" || items[2].Name != "dyna-extend" || items[2].Description != "Use when you need to add a skill or mcp server to dyna" || !items[2].BuiltIn {
-		t.Fatalf("%+v", items)
+	byName := map[string]contract.Addon{}
+	for _, item := range BuiltIn() {
+		byName[item.Name] = item
+	}
+	if extend := byName["dyna-extend"]; len(byName) != 10 || !strings.HasPrefix(extend.Description, "Use when sessions need a skill, Pi package or MCP server") || !extend.BuiltIn || byName["dyna-discord"].Name == "" {
+		t.Fatalf("%+v", byName)
 	}
 	if !IsBuiltIn("dyna-extend") || IsBuiltIn("other") {
 		t.Fatal("IsBuiltIn")
 	}
-	if images := items[3]; images.Name != "dyna-images" || !strings.HasPrefix(images.Description, "Use when your box lacks a tool") {
+	if images := byName["dyna-images"]; !strings.HasPrefix(images.Description, "Use when your box lacks a tool") {
 		t.Fatalf("%+v", images)
 	}
-	nodes := items[5]
-	if nodes.Name != "dyna-nodes" || nodes.Description != "Use when you need to add nodes to Dyna, or a room needs its own or disposable machines" {
+	nodes := byName["dyna-nodes"]
+	if !strings.HasPrefix(nodes.Description, "Root only. Use when the room needs more or other machines") {
 		t.Fatalf("%+v", nodes)
 	}
+	if data, err := builtIn.ReadFile("dyna-images/" + File); err != nil || strings.Count(string(data), "\n") > 150 {
+		t.Fatalf("%v", err)
+	} else {
+		for _, want := range []string{".dyna/compose/NAME.yaml", "session compose_list", "the room has several images", "dyna image save NAME"} {
+			if !strings.Contains(string(data), want) {
+				t.Errorf("dyna-images does not say %q", want)
+			}
+		}
+	}
 	dir := t.TempDir()
-	if err := Install(dir, false); err != nil {
+	if err := Install(dir, true); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "dyna-extend", File))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"dyna skill save", "dyna package add", "dyna mcp add", "next box start", "unless the owner tells you otherwise", ".pi/skills"} {
+	for _, want := range []string{"dyna skill save", "dyna package add", "dyna mcp add", "next box start", "unless the owner tells you otherwise", ".pi/skills", "--root-only", "dyna skill set NAME --host", "is a built-in skill", "dyna addon set"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("the skill does not say %q", want)
 		}
@@ -62,7 +74,7 @@ func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"create NAME SIZE", "destroy NAME", "list ", "--per-session", "--max", "--idle", "room hosts", "--only", "Podman 5", "FUSE", "user_allow_other", "OpenSSH", "SSH key", "/home/pip/.local/share/dyna-next-host", "dormant session keeps its node", "#!/usr/bin/env bash"} {
+	for _, want := range []string{"create NAME SIZE", "destroy NAME", "list ", "--per-session", "--max", "--idle", "room hosts", "--only", "Podman 5", "FUSE", "user_allow_other", "OpenSSH", "authorized_keys", "--host-data", "dormant included", "host add NAME --ssh", "--discard-boxes", "#!/usr/bin/env bash"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("the skill does not say %q", want)
 		}
@@ -75,7 +87,7 @@ func TestTheWorkflowSkillSaysWhatTheCodeDoes(t *testing.T) {
 		t.Fatal(err)
 	}
 	meta, err := Parse(data)
-	if err != nil || meta.Name != "dyna-workflows" || !strings.HasPrefix(meta.Description, "Use when you write, test or resume a Dyna workflow, or reload a running one") {
+	if err != nil || meta.Name != "dyna-workflows" || !strings.HasPrefix(meta.Description, "Use when you write, run, resume or reload a Dyna workflow script") {
 		t.Fatalf("%+v %v", meta, err)
 	}
 	text := string(data)
@@ -83,11 +95,12 @@ func TestTheWorkflowSkillSaysWhatTheCodeDoes(t *testing.T) {
 		"`JSON.parse(args)`", "`{code, stdout, stderr, durationMs}`", "`check` defaults to `true`", "`{failed: true, step, reason}`",
 		"`{step, text, branch, commit, files}`", "`{step, output, branch, commit, files}`", "`{branch, commit, merged, conflicts}`", "`r.output.issues`",
 		"A crew reports only to its parent", "`merge()` reads `commit`, not the tip of `branch`", "A resume is a new session", "through any chain of resumes",
-		"the run ended first", "needs no polling", "Nothing wakes a worker", "only through the prompt", "one worker per 512 MiB", "holds a box slot",
-		"dry run of one group", "give up in 40 seconds", "still reports done",
+		"the run ended first", "`Failed steps (N): <names>`", "`data.json`", "Up to 1024 bytes", "only through the prompt", "one worker per 512 MiB", "holds a box slot",
+		"dry run of one group", "Do not prohibit the tools a worker needs", "still reports done",
+		"`cwd` is relative to the main tree unless it is", "`maxWorkers`", "git worktree remove --force", "`dyna session stop CREW`",
 		"Reload is for a running run, resume for an ended one", "`dyna workflow reload RUN FILE`", "no second one starts", "runs on until the run ends",
-		"`meta.name`, `meta.repo`, `meta.size` and `meta.gpu` stay", "the run's models follow the new profiles", "the version that started it",
-		"the worker submits a JSON file with its `submit` tool", "`status(text)`", "It is not a step", "`75 of 76 steps · 1 running`", "`{lane: g.id}`", "options other than `lane`", "Nothing is read from a step's name",
+		"script version",
+		"the worker submits as a JSON file", "`status(text)`", "It is not a step", "options other than `lane`", "nothing is read from a step's name",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the skill does not say %q", want)
@@ -228,16 +241,113 @@ func TestCISkill(t *testing.T) {
 		t.Fatal(err)
 	}
 	meta, err := Parse(data)
-	if err != nil || meta.Name != "dyna-ci" || meta.Description != "Use when you write, debug or speed up a GitHub Actions workflow, whether its jobs run on Dyna's self-hosted runners or on GitHub-hosted ones" {
+	if err != nil || meta.Name != "dyna-ci" || meta.Description != "Use when you write, debug or speed up a GitHub Actions workflow, or its runs look stuck." {
 		t.Fatalf("%+v %v", meta, err)
 	}
 	text := string(data)
-	for _, want := range []string{"dyna-medium", "6 hours", "CARGO_INCREMENTAL=0", "RUSTC_WRAPPER", "ci_scale", "DYNA_CI_BASE", "public", "fork", "job step status", "Jobs on GitHub-hosted runners", "Swatinem/rust-cache", "[profile.ci]", "inherits = \"dev\"", "incremental = false", "debug = 0", "github.event.pull_request.head.repo.fork", "cargo test --profile ci", "half the CPUs of the runners already there"} {
+	for _, want := range []string{"dyna-medium", "6 hours", "CARGO_INCREMENTAL=0", "RUSTC_WRAPPER", "DYNA_CI_POOL_UNTIL", "DYNA_CI_BASE", "public", "fork", "job step status", "Jobs on GitHub-hosted runners", "Swatinem/rust-cache", "[profile.ci]", "inherits = \"dev\"", "incremental = false", "debug = 0", "github.event.pull_request.head.repo.full_name", "cargo test --profile ci", "dyna-admin", "dyna-diagnose"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q", want)
 		}
 	}
-	if strings.Count(text, "\n") > 90 {
-		t.Fatal("skill exceeds 90 lines")
+	if strings.Count(text, "\n") > 120 {
+		t.Fatal("skill exceeds 120 lines")
+	}
+}
+
+func TestAdminSkill(t *testing.T) {
+	data, err := builtIn.ReadFile("dyna-admin/" + File)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := Parse(data)
+	if err != nil || meta.Name != "dyna-admin" || !strings.HasPrefix(meta.Description, "Root only. Use when") || len(meta.Description) >= 300 {
+		t.Fatalf("%+v %v", meta, err)
+	}
+	text := string(data)
+	for _, want := range []string{"dyna-audience: root", "--github-writes GROUPS@REPOS", "`actions`", "room repo add ROOM", "room repo ci", "room hosts ROOM --only", "room limit ROOM --cpus N --mem SIZE", "workflow set --room ROOM", "session set-account SESSION", "account limit ACCOUNT", "addon set KIND NAME", "host set NAME", "profile set NAME", "op decide", "op list ROOM", "24 hours", "full owner\n  power", "**Yours**", "**Every room**", "**The owner's**"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the skill does not say %q", want)
+		}
+	}
+	if lines := strings.Count(text, "\n"); lines > 150 {
+		t.Errorf("the skill is %d lines", lines)
+	}
+}
+
+func TestRootOnlySkills(t *testing.T) {
+	root := map[string]bool{"dyna-admin": true, "dyna-diagnose": true, "dyna-local-proxy": true, "dyna-nodes": true, "dyna-services": true}
+	total := 0
+	for _, item := range BuiltIn() {
+		data, err := builtIn.ReadFile(item.Name + "/" + File)
+		if err != nil {
+			t.Fatal(err)
+		}
+		marked := strings.Contains(string(data), "\ndyna-audience: root\n")
+		if marked != root[item.Name] || strings.HasPrefix(item.Description, "Root only. ") != root[item.Name] {
+			t.Errorf("%s: root only is %v, marked %v, description %q", item.Name, root[item.Name], marked, item.Description)
+		}
+		if len(item.Description) >= 300 || !strings.Contains(item.Description, "Use when") {
+			t.Errorf("%s: description %q", item.Name, item.Description)
+		}
+		total += len(item.Description)
+	}
+	if total > 1700 {
+		t.Errorf("the descriptions take %d characters", total)
+	}
+}
+
+func TestTheDiagnoseSkillIsForRoot(t *testing.T) {
+	data, err := builtIn.ReadFile("dyna-diagnose/" + File)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := Parse(data)
+	if err != nil || meta.Name != "dyna-diagnose" || !strings.HasPrefix(meta.Description, "Root only. Use when") || len(meta.Description) >= 300 {
+		t.Fatalf("%+v %v", meta, err)
+	}
+	text := string(data)
+	for _, want := range []string{"dyna-audience: root", "beforeSeq", "no_hello", "room-limit", "model_failed", "journalctl --user", "engine host named in your prompt", "When runs look stuck"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the skill does not say %q", want)
+		}
+	}
+	if lines := strings.Count(text, "\n"); lines > 150 {
+		t.Errorf("the skill is %d lines", lines)
+	}
+}
+
+func TestTheServicesSkillIsForRoot(t *testing.T) {
+	data, err := builtIn.ReadFile("dyna-services/" + File)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := Parse(data)
+	if err != nil || meta.Name != "dyna-services" || !strings.HasPrefix(meta.Description, "Root only. ") || len(meta.Description) > 300 {
+		t.Fatalf("%+v %v", meta, err)
+	}
+	text := string(data)
+	for _, want := range []string{"dyna-audience: root", "dyna service set ROOM --file F", "replaces the whole declaration", "dyna service secret set ROOM NAME", "dyna service update ROOM NAME", "dyna service rollback ROOM NAME", "dyna service logs ROOM NAME", "on: [service.failed]", "Log lines are not masked", "deletes the data volume"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the skill does not say %q", want)
+		}
+	}
+	if lines := strings.Count(text, "\n"); lines > 150 {
+		t.Errorf("the skill is %d lines", lines)
+	}
+}
+
+// The watcher the dyna-ci skill hands out is the repository's own, so a fix to one reaches the other.
+func TestPoolWatchCopyMatchesTheScript(t *testing.T) {
+	skill, err := os.ReadFile("dyna-ci/pool-watch.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err := os.ReadFile("../../scripts/ci-pool-watch.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(skill) != string(script) {
+		t.Fatal("box/skills/dyna-ci/pool-watch.py differs from scripts/ci-pool-watch.py")
 	}
 }
