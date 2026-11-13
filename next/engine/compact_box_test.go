@@ -18,6 +18,7 @@ import (
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/api"
+	"github.com/resident-labs/dyna/harness/testutil"
 )
 
 // One session in a real box on real Podman with the real box agent and the Pi the image ships, against the fake upstream: its
@@ -38,6 +39,7 @@ func TestCompactionBeforeAStopInARealBox(t *testing.T) {
 	s.now = func() time.Time { return time.UnixMilli(clock.Load()) }
 	resetLifecycle(s)
 	ctx, cancel := context.WithTimeout(base, 6*time.Minute)
+	deadline, _ := ctx.Deadline()
 	defer cancel()
 	data, err := os.MkdirTemp("", "dyna-compact-")
 	if err != nil {
@@ -105,7 +107,7 @@ func TestCompactionBeforeAStopInARealBox(t *testing.T) {
 	}
 	waitTurns := func(want int) {
 		t.Helper()
-		for {
+		testutil.Eventually(t, time.Until(deadline), "compaction turns", func() bool {
 			listed, problem := s.EventsList(ctx, owner, contract.EventsListRequest{Room: room, Types: []contract.EventType{"turn.ended"}, Limit: 1000})
 			if problem != nil {
 				t.Fatal(problem)
@@ -120,13 +122,13 @@ func TestCompactionBeforeAStopInARealBox(t *testing.T) {
 				}
 			}
 			if ended >= want {
-				return
+				return true
 			}
 			if ctx.Err() != nil {
 				t.Fatalf("waited for %d turns, have %d", want, ended)
 			}
-			time.Sleep(100 * time.Millisecond)
-		}
+			return false
+		})
 	}
 	post("the first thing")
 	if err := host.StartContainer(ctx, id); err != nil {
@@ -137,13 +139,16 @@ func TestCompactionBeforeAStopInARealBox(t *testing.T) {
 	waitTurns(2)
 
 	clock.Add((11 * time.Minute).Milliseconds())
-	for stops.stops == 0 {
+	testutil.Eventually(t, time.Until(deadline), "compaction stop", func() bool {
+		if stops.stops != 0 {
+			return true
+		}
 		if ctx.Err() != nil {
 			t.Fatal("the box never stopped")
 		}
 		passLifecycle(t, s, ctx)
-		time.Sleep(100 * time.Millisecond)
-	}
+		return false
+	})
 	events, err := s.store.Events(ctx, room, 0, 256, []contract.EventType{"session.compacted"})
 	if err != nil || len(events) != 1 {
 		t.Fatalf("recorded %+v: %v", events, err)

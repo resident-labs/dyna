@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +27,7 @@ import (
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/api"
+	"github.com/resident-labs/dyna/harness/testutil"
 )
 
 type boxProfiles struct{ fakeProfiles }
@@ -102,10 +104,11 @@ func slowRelay(t *testing.T, listen, engine string, rate int) {
 
 // scriptedModel answers a real Pi in a real box. Each request runs reply, which returns "" for text or a path to read.
 type scriptedModel struct {
-	mu     sync.Mutex
-	bodies []string
-	reply  func(body string) string
-	hold   chan struct{} // when set, a request waits here before it is answered
+	mu      sync.Mutex
+	bodies  []string
+	reply   func(body string) string
+	changed chan struct{}
+	hold    chan struct{} // when set, a request waits here before it is answered
 }
 
 func (m *scriptedModel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -114,6 +117,10 @@ func (m *scriptedModel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	m.bodies = append(m.bodies, string(data))
 	reply, hold := m.reply, m.hold
 	m.mu.Unlock()
+	select {
+	case m.changed <- struct{}{}:
+	default:
+	}
 	if hold != nil {
 		<-hold
 	}
@@ -159,6 +166,42 @@ func (m *scriptedModel) set(reply func(string) string, hold chan struct{}) {
 	m.reply, m.hold = reply, hold
 }
 
+func TestScriptedModelRequestNotification(t *testing.T) {
+	release := make(chan struct{})
+	model := &scriptedModel{changed: make(chan struct{}, 1), hold: release}
+	done := make(chan struct{})
+	go func() {
+		model.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", strings.NewReader("{}")))
+		close(done)
+	}()
+	defer func() { close(release); <-done }()
+	select {
+	case <-model.changed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("held request did not announce arrival")
+	}
+	if model.count() != 1 {
+		t.Fatal("arrival notification preceded request publication")
+	}
+	model.set(nil, nil)
+	for range 2 {
+		model.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", strings.NewReader("{}")))
+	}
+	if model.count() != 3 {
+		t.Fatal("coalescing lost a request")
+	}
+	select {
+	case <-model.changed:
+	default:
+		t.Fatal("coalesced requests did not notify")
+	}
+	select {
+	case <-model.changed:
+		t.Fatal("request notifications did not coalesce")
+	default:
+	}
+}
+
 // One session in a real box on real Podman with the real box agent and the Pi the image ships, over a slow relayed socket:
 // the agent reads a text file with its own read tool and sees an image, a post written while the box is stopped reaches
 // it on waking with its big file intact, and a steer brings another image into a running turn.
@@ -172,6 +215,7 @@ func TestAttachmentsInARealBox(t *testing.T) {
 	s, room, session, base := setup(t)
 	s.profiles = boxProfiles{}
 	ctx, cancel := context.WithTimeout(base, 12*time.Minute)
+	deadline, _ := ctx.Deadline()
 	defer cancel()
 	data, err := os.MkdirTemp("", "dyna-att-")
 	if err != nil {
@@ -186,7 +230,7 @@ func TestAttachmentsInARealBox(t *testing.T) {
 	}
 	id := record.Box
 
-	model := &scriptedModel{}
+	model := &scriptedModel{changed: make(chan struct{}, 1)}
 	server := api.New(boxService{Service: s}, func(api.Caller) http.Handler { return model })
 	server.SetFilesRoute(func(c api.Caller) http.Handler { return s.Files(c.Principal, c.Room) })
 	runtimeDir := filepath.Join(data, "rt")
@@ -255,20 +299,24 @@ func TestAttachmentsInARealBox(t *testing.T) {
 	}
 	waitTurns := func(want int) {
 		t.Helper()
-		for endedTurns() < want {
+		testutil.Eventually(t, time.Until(deadline), "attachment turns", func() bool {
+			if endedTurns() >= want {
+				return true
+			}
 			if ctx.Err() != nil {
 				t.Fatalf("waited for %d turns, have %d, after %d model requests", want, endedTurns(), model.count())
 			}
-			time.Sleep(100 * time.Millisecond)
-		}
+			return false
+		})
 	}
 	waitRequests := func(want int) {
 		t.Helper()
 		for model.count() < want {
-			if ctx.Err() != nil {
+			select {
+			case <-model.changed:
+			case <-ctx.Done():
 				t.Fatalf("waited for %d model requests, have %d", want, model.count())
 			}
-			time.Sleep(50 * time.Millisecond)
 		}
 	}
 	post := func(text string, files ...contract.Attachment) contract.PostResponse {
@@ -359,12 +407,15 @@ func TestAttachmentsInARealBox(t *testing.T) {
 	steered := noisePNG(t, 300, 300)
 	steer := post("and this one too", uploadFile(t, s, room, "steered.png", "image/png", string(steered)))
 	path := fmt.Sprintf("/box/attachments/%d/steered.png", steer.Seq)
-	for exec.Command("podman", "exec", string(id), "test", "-e", path).Run() != nil {
+	testutil.Eventually(t, time.Until(deadline), "steered attachment file", func() bool {
+		if exec.CommandContext(ctx, "podman", "exec", string(id), "test", "-e", path).Run() == nil {
+			return true
+		}
 		if ctx.Err() != nil {
 			t.Fatal("the steered file never arrived")
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
+		return false
+	})
 	// The file is in the box a moment before Pi has the steer.
 	time.Sleep(time.Second)
 	close(hold)

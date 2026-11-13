@@ -23,6 +23,7 @@ import (
 	"github.com/resident-labs/dyna/engine/api"
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/hostexec"
+	"github.com/resident-labs/dyna/harness/testutil"
 )
 
 // localHostexec runs host commands on this machine, as the engine does on the control plane.
@@ -368,12 +369,16 @@ func (b *toolBox) turns(t *testing.T) int {
 
 func (b *toolBox) waitTurns(t *testing.T, what string, want int) {
 	t.Helper()
-	for b.turns(t) < want {
+	deadline, _ := b.ctx.Deadline()
+	testutil.Eventually(t, time.Until(deadline), what, func() bool {
+		if b.turns(t) >= want {
+			return true
+		}
 		if b.ctx.Err() != nil {
 			t.Fatalf("%s: waited for %d turns, have %d", what, want, b.turns(t))
 		}
-		time.Sleep(100 * time.Millisecond)
-	}
+		return false
+	})
 }
 
 // task posts one task and waits for its turn to end.
@@ -441,6 +446,7 @@ return JSON.stringify({ box, host, refused, jobs: jobs.jobs.length });`)},
 	// The owner's panel watches the box from here on.
 	var jobsMu sync.Mutex
 	jobs := map[contract.ShellJobID]contract.ShellJobOutput{}
+	changed := make(chan struct{}, 1)
 	watching, stopWatching := context.WithCancel(ctx)
 	defer stopWatching()
 	views, problem := s.ShellWatch(watching, session)
@@ -452,6 +458,10 @@ return JSON.stringify({ box, host, refused, jobs: jobs.jobs.length });`)},
 			jobsMu.Lock()
 			jobs[view.Job] = view
 			jobsMu.Unlock()
+			select {
+			case changed <- struct{}{}:
+			default:
+			}
 		}
 	}()
 	seen := func(what string, match func(contract.ShellJobOutput) bool) contract.ShellJobOutput {
@@ -465,10 +475,13 @@ return JSON.stringify({ box, host, refused, jobs: jobs.jobs.length });`)},
 				}
 			}
 			jobsMu.Unlock()
-			if ctx.Err() != nil {
+			select {
+			case <-changed:
+			case <-ctx.Done():
+				jobsMu.Lock()
+				defer jobsMu.Unlock()
 				t.Fatalf("the panel never showed %s: %+v", what, jobs)
 			}
-			time.Sleep(100 * time.Millisecond)
 		}
 	}
 	seen("the first job", func(view contract.ShellJobOutput) bool { return strings.HasPrefix(view.Command, "echo hello") })

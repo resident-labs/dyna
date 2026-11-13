@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/harness/testutil"
 )
 
 // A session in a real box on real Podman, with the real box agent and the Pi the image ships, against the fake upstream: a
@@ -22,6 +23,7 @@ func TestMessagesJoinARunningTurnInARealBox(t *testing.T) {
 		"task-batch": {{"bash", jsonOf(t, map[string]any{"command": "echo quick"})}},
 	}}
 	b := newToolBox(t, boxProfiles{}, provider)
+	deadline, _ := b.ctx.Deadline()
 	b.start(t)
 	post := func(text string) {
 		t.Helper()
@@ -41,12 +43,15 @@ func TestMessagesJoinARunningTurnInARealBox(t *testing.T) {
 	b.waitTurns(t, "the brief", 1)
 	before := len(requests())
 	post("task-steer")
-	for exec.Command("podman", "exec", string(b.id), "test", "-e", "/tmp/started").Run() != nil {
+	testutil.Eventually(t, time.Until(deadline), "steer command start", func() bool {
+		if exec.CommandContext(b.ctx, "podman", "exec", string(b.id), "test", "-e", "/tmp/started").Run() == nil {
+			return true
+		}
 		if b.ctx.Err() != nil {
 			t.Fatal("the command never started")
 		}
-		time.Sleep(200 * time.Millisecond)
-	}
+		return false
+	})
 	sent := time.Now()
 	post("note-one")
 	b.waitTurns(t, "the steered turn", 2)
@@ -99,12 +104,15 @@ func TestMessagesJoinARunningTurnInARealBox(t *testing.T) {
 	<-reached
 	post("note-two")
 	post("note-three")
-	for b.s.storeCount(t, "SELECT COUNT(*) FROM deliveries WHERE queue='steer' AND state='taken'") != 2 {
+	testutil.Eventually(t, time.Until(deadline), "two taken steer deliveries", func() bool {
+		if b.s.storeCount(t, "SELECT COUNT(*) FROM deliveries WHERE queue='steer' AND state='taken'") == 2 {
+			return true
+		}
 		if b.ctx.Err() != nil {
 			t.Fatal("the messages never went to the box")
 		}
-		time.Sleep(100 * time.Millisecond)
-	}
+		return false
+	})
 	time.Sleep(2 * time.Second) // the box passes them on to Pi
 	close(release)
 	b.waitTurns(t, "the batched turn", 4)
