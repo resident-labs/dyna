@@ -170,6 +170,11 @@ func validate(folder Folder) error {
 			return fmt.Errorf("server.yaml: %w", err)
 		}
 	}
+	for _, rule := range folder.Server.AutoMod {
+		if err := identity(rule.Identity, ids); err != nil {
+			return fmt.Errorf("server.yaml: %w", err)
+		}
+	}
 	for _, entry := range folder.Entries {
 		if entry.Unmanaged != "" {
 			continue

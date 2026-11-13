@@ -11,6 +11,7 @@ type Change struct {
 	Kind   string
 	Name   string
 	ID     string
+	Target string
 	Field  string
 	Before any
 	After  any
@@ -75,6 +76,18 @@ func BuildPlan(desired Folder, live Snapshot) (Plan, error) {
 		plan.Lines = append(plan.Lines, "Role order must be changed by hand if the bot's highest role is not above every role it must manage.")
 		compare(&plan, "server", "role order", "", desiredOrder, liveOrder)
 	}
+	resolvedParents := map[string]string{"": ""}
+	for _, entry := range desired.Entries {
+		if entry.Category == nil {
+			continue
+		}
+		resolvedParents[entry.Name] = entry.Name
+		for _, current := range live.Entries {
+			if current.Category != nil && matches(entry.Category.Identity, entry.Name, entryID(current), current.Name) {
+				resolvedParents[entry.Name] = current.Name
+			}
+		}
+	}
 	matchedEntries := map[string]bool{}
 	ignoredParents := map[string]bool{}
 	// Identify unmanaged categories before considering their children.
@@ -104,7 +117,7 @@ func BuildPlan(desired Folder, live Snapshot) (Plan, error) {
 			if (entry.Category == nil) != (current.Category == nil) {
 				continue
 			}
-			if matches(entryIdentity(entry), entry.Name, entryID(current), current.Name) && (entryIdentity(entry).ID != "" || entry.Parent == current.Parent) {
+			if matches(entryIdentity(entry), entry.Name, entryID(current), current.Name) && (entryIdentity(entry).ID != "" || resolvedParents[entry.Parent] == current.Parent) {
 				candidates = append(candidates, current)
 			}
 		}
@@ -121,6 +134,7 @@ func BuildPlan(desired Folder, live Snapshot) (Plan, error) {
 				return plan, fmt.Errorf("%s: adopted %s is missing", entry.Path, kind)
 			}
 			plan.Changes = append(plan.Changes, Change{Kind: kind, Name: entry.Path, Field: "create", After: entry})
+			planMessages(&plan, entry, Entry{})
 			continue
 		}
 		current := candidates[0]
@@ -129,7 +143,7 @@ func BuildPlan(desired Folder, live Snapshot) (Plan, error) {
 			return plan, fmt.Errorf("%s: object %s is already adopted or unmanaged", entry.Path, id)
 		}
 		matchedEntries[id] = true
-		compare(&plan, kind, entry.Path, id, struct{ Name, Parent string }{entry.Name, entry.Parent}, struct{ Name, Parent string }{current.Name, current.Parent})
+		compare(&plan, kind, entry.Path, id, struct{ Name, Parent string }{entry.Name, resolvedParents[entry.Parent]}, struct{ Name, Parent string }{current.Name, current.Parent})
 		if entry.Category != nil {
 			desiredCategory, liveCategory := *entry.Category, *current.Category
 			desiredCategory.Identity, liveCategory.Identity = Identity{}, Identity{}
@@ -139,9 +153,7 @@ func BuildPlan(desired Folder, live Snapshot) (Plan, error) {
 			desiredChannel.Identity, liveChannel.Identity = Identity{}, Identity{}
 			compare(&plan, kind, entry.Path, id, desiredChannel, liveChannel)
 		}
-		for name := range entry.Messages {
-			plan.Changes = append(plan.Changes, Change{Kind: "message", Name: entry.Path + "/" + name, Field: "create", After: entry.Messages[name]})
-		}
+		planMessages(&plan, entry, current)
 	}
 	for _, entry := range live.Entries {
 		if !matchedEntries[entryID(entry)] && !ignoredParents[entry.Parent] {
