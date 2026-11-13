@@ -24,7 +24,7 @@
       {#if view.active}<button type="button" aria-pressed={view.muted} onclick={() => voice.mute()}>{view.muted ? 'Unmute' : 'Mute'}</button><button type="button" onclick={() => voice.stop()}>Hang up</button>
       {:else}<button type="button" onclick={() => visible = false}>Close</button>{/if}
     </div>
-    <details><summary>Transcript</summary><div class="transcript">{#each view.transcript as line}<p><strong>{line.role === 'user' ? 'You' : 'Voice'}:</strong> {line.text}</p>{/each}</div></details>
+    <details><summary>Transcript</summary><div class="transcript">{#each view.transcript as line}<p><strong>{line.role === 'owner' || line.role === 'user' ? 'You' : 'Voice'}:</strong> {line.text}</p>{/each}</div></details>
   </aside>
 {/if}
 <style>

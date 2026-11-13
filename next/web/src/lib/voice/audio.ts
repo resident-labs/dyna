@@ -52,7 +52,7 @@ interface Playback {
   done: boolean
   started: boolean
   timer: ReturnType<typeof setTimeout> | null
-  startAt: number
+  intervals: { at: number; duration: number }[]
   dur: number
 }
 
@@ -66,6 +66,7 @@ interface Playback {
 // out is the node the call's audio goes through; the player only connects
 // to it.
 export function createPlayer(ctx: PlaybackContext, out: unknown, receipts: PlaybackReceipts): Player {
+  const heardMs = (r: Playback) => r.intervals.reduce((ms, chunk) => ms + Math.max(0, Math.min(chunk.duration, ctx.currentTime - chunk.at)) * 1000, 0)
   let next = 0
   const responses = new Map<string, Playback>()
   const finish = (id: string) => {
@@ -77,7 +78,6 @@ export function createPlayer(ctx: PlaybackContext, out: unknown, receipts: Playb
   const start = (id: string, r: Playback) => {
     r.timer = null
     r.started = true
-    r.startAt = ctx.currentTime
     receipts.started(id)
     finish(id)
   }
@@ -95,13 +95,14 @@ export function createPlayer(ctx: PlaybackContext, out: unknown, receipts: Playb
       next = at + samples.length / rate
       let r = responses.get(id)
       if (!r) {
-        const fresh: Playback = { sources: new Set(), done: false, started: false, timer: null, startAt: 0, dur: 0 }
+        const fresh: Playback = { sources: new Set(), done: false, started: false, timer: null, intervals: [], dur: 0 }
         responses.set(id, fresh)
         const wait = (at - ctx.currentTime) * 1000
         if (wait > 1) fresh.timer = setTimeout(() => start(id, fresh), wait)
         else start(id, fresh)
         r = fresh
       }
+      r.intervals.push({ at, duration: samples.length / rate })
       r.dur += samples.length / rate
       r.sources.add(src)
       src.onended = () => {
@@ -111,7 +112,7 @@ export function createPlayer(ctx: PlaybackContext, out: unknown, receipts: Playb
     },
     reportPlayed() {
       for (const [id, r] of responses) {
-        if (r.started) receipts.progress(id, Math.max(0, Math.min(r.dur, ctx.currentTime - r.startAt) * 1000))
+        if (r.started) receipts.progress(id, heardMs(r))
       }
     },
     done(id) {
@@ -129,7 +130,7 @@ export function createPlayer(ctx: PlaybackContext, out: unknown, receipts: Playb
         }
         // played is what the owner heard: the engine truncates the reply
         // there, and a response that never started was not heard at all.
-        const played = r.started ? Math.min(r.dur, ctx.currentTime - r.startAt) * 1000 : 0
+        const played = r.started ? heardMs(r) : 0
         if (reason) receipts.cancelled(id, reason, played)
       }
       responses.clear()
