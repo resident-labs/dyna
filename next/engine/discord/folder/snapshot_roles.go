@@ -20,25 +20,39 @@ func snapshotRoles(out Snapshot, roles []liveRole, server string) (Snapshot, map
 			names[role.Name] = true
 			roleNames[role.ID] = role.Name
 		}
-		if role.Icon != nil || role.UnicodeEmoji != nil {
-			return out, nil, fmt.Errorf("role icons cannot be represented")
-		}
-		permissionNames, err := permissions(role.Permissions)
+		permissionNames, otherPermissions, err := splitPermissions(role.Permissions)
 		if err != nil {
 			return out, nil, err
 		}
 		name := role.Name
 		// The role keeps Discord's @everyone name; overwrite references use everyone.
-		out.Server.Roles = append(out.Server.Roles, Role{Position: role.Position, Identity: Identity{ID: role.ID}, Name: name, Permissions: permissionNames, Color: fmt.Sprintf("#%06x", role.Color), Hoist: role.Hoist, Mentionable: role.Mentionable})
+		out.Server.Roles = append(out.Server.Roles, Role{Managed: role.Managed, OtherPermissions: otherPermissions, Position: role.Position, Identity: Identity{ID: role.ID}, Name: name, Permissions: permissionNames, Color: fmt.Sprintf("#%06x", role.Color), Hoist: role.Hoist, Mentionable: role.Mentionable})
 	}
 
+	for _, role := range out.Server.Roles {
+		if role.OtherPermissions != 0 {
+			out.Warnings = append(out.Warnings, "Unknown role permission bits are preserved as other_permissions; they are not managed.")
+			break
+		}
+	}
 	return out, roleNames, nil
 }
 
 func permissions(raw string) ([]string, error) {
-	bits, err := strconv.ParseUint(raw, 10, 64)
+	names, other, err := splitPermissions(raw)
 	if err != nil {
 		return nil, err
+	}
+	if other != 0 {
+		return nil, fmt.Errorf("unsupported permission bits %x", other)
+	}
+	return names, nil
+}
+
+func splitPermissions(raw string) ([]string, uint64, error) {
+	bits, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return nil, 0, err
 	}
 	var names []string
 	for name, bit := range PermissionBits {
@@ -48,8 +62,5 @@ func permissions(raw string) ([]string, error) {
 		}
 	}
 	sort.Slice(names, func(i, j int) bool { return PermissionBits[names[i]] < PermissionBits[names[j]] })
-	if bits != 0 {
-		return nil, fmt.Errorf("unsupported permission bits %x", bits)
-	}
-	return names, nil
+	return names, bits, nil
 }
