@@ -159,6 +159,14 @@ func (s *Service) fireDue(ctx context.Context) error {
 			}
 			room = woken.Room
 		}
+		if sub.Workflow != nil {
+			event, err := s.event(sub.Room, engineSender, contract.HookDue{Subscription: sub.ID})
+			if err == nil {
+				err = s.store.QueueScheduledWorkflow(ctx, sub, event)
+			}
+			failures = append(failures, err)
+			continue
+		}
 		if sub.Wake != "" && len(sub.On) > 0 {
 			event, err := s.event(room, engineSender, contract.HookDigest{Subscription: sub.ID})
 			if err == nil {
@@ -179,6 +187,7 @@ func (s *Service) fireDue(ctx context.Context) error {
 			failures = append(failures, s.beginRun(ctx, sub, now))
 		}
 	}
+	failures = append(failures, s.fireWorkflowSubscriptions(ctx))
 	return errors.Join(failures...)
 }
 

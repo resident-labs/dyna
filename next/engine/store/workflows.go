@@ -18,38 +18,41 @@ const failedStepNames = 20
 // once, by the box's first start. Resume names the run this one resumes, and only a run's start reads it from here: afterwards
 // ResumedSessions follows the stored link.
 type WorkflowRun struct {
-	ID          contract.WorkflowRunID
-	Room        contract.RoomID
-	Session     contract.SessionID
-	Name        string
-	Description string
-	Script      string
-	Args        string
-	Profiles    []contract.ProfileName
-	Repo        contract.RepoName
-	Commit      string
-	Image       string
-	State       contract.WorkflowState
-	Paused      bool
-	Result      string
-	Resume      contract.WorkflowRunID
-	MaxRuns     int // the most runs going in the room, counted when this one starts; 0 is no limit
-	Version     int
-	StatusLines []contract.WorkflowStatusLine // the script's latest status() lines, oldest first
-	Started     time.Time
-	Ended       time.Time
+	Subscription contract.SubscriptionID
+	Subject      string
+	Queue        int64 // pending subscription event, bound atomically at session creation
+	ID           contract.WorkflowRunID
+	Room         contract.RoomID
+	Session      contract.SessionID
+	Name         string
+	Description  string
+	Script       string
+	Args         string
+	Profiles     []contract.ProfileName
+	Repo         contract.RepoName
+	Commit       string
+	Image        string
+	State        contract.WorkflowState
+	Paused       bool
+	Result       string
+	Resume       contract.WorkflowRunID
+	MaxRuns      int // the most runs going in the room, counted when this one starts; 0 is no limit
+	Version      int
+	StatusLines  []contract.WorkflowStatusLine // the script's latest status() lines, oldest first
+	Started      time.Time
+	Ended        time.Time
 }
 
 // workflowStatusLines is how many status() lines a run keeps.
 const workflowStatusLines = 20
 
-const workflowColumns = "id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,result,version,status_lines,started_at,ended_at,paused"
+const workflowColumns = "COALESCE((SELECT sub FROM workflow_origins WHERE run=workflow_runs.id),''),COALESCE((SELECT subject FROM workflow_origins WHERE run=workflow_runs.id),''),id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,result,version,status_lines,started_at,ended_at,paused"
 
 func scanWorkflow(row interface{ Scan(...any) error }) (WorkflowRun, error) {
 	var run WorkflowRun
 	var profiles, lines string
 	var started, ended int64
-	err := row.Scan(&run.ID, &run.Room, &run.Session, &run.Name, &run.Description, &run.Script, &run.Args, &profiles, &run.Repo, &run.Commit, &run.Image, &run.State, &run.Result, &run.Version, &lines, &started, &ended, &run.Paused)
+	err := row.Scan(&run.Subscription, &run.Subject, &run.ID, &run.Room, &run.Session, &run.Name, &run.Description, &run.Script, &run.Args, &profiles, &run.Repo, &run.Commit, &run.Image, &run.State, &run.Result, &run.Version, &lines, &started, &ended, &run.Paused)
 	if err != nil {
 		return run, err
 	}
@@ -72,6 +75,22 @@ func insertWorkflow(ctx context.Context, tx *sql.Tx, session contract.SessionID,
 		}
 		if going >= run.MaxRuns {
 			return ErrWorkflowRunLimit
+		}
+	}
+	if run.Queue != 0 {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO workflow_origins(run,sub,subject) SELECT ?,sub,subject FROM workflow_queue WHERE id=?", run.ID, run.Queue); err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, "UPDATE workflow_queue SET run=? WHERE id=? AND run='starting'", run.ID, run.Queue)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return ErrNotFound
 		}
 	}
 	profiles, err := json.Marshal(run.Profiles)

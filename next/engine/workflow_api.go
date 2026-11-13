@@ -69,6 +69,10 @@ func (s *Service) workflowScript(ctx context.Context, roomID contract.RoomID, sc
 // WorkflowRun checks a script and starts its crew: one child session of the caller, in one box, whose only turn runs it.
 // Everything a script can get wrong in its meta fails here, before a box or a model is spent on it.
 func (s *Service) WorkflowRun(ctx context.Context, caller contract.Principal, req contract.WorkflowRunRequest) (contract.WorkflowRunResponse, *contract.Error) {
+	return s.workflowRun(ctx, caller, req, 0)
+}
+
+func (s *Service) workflowRun(ctx context.Context, caller contract.Principal, req contract.WorkflowRunRequest, queue int64) (contract.WorkflowRunResponse, *contract.Error) {
 	var response contract.WorkflowRunResponse
 	roomID, problem := s.workflowRoom(ctx, caller, req.Room)
 	if problem != nil {
@@ -120,7 +124,7 @@ func (s *Service) WorkflowRun(ctx context.Context, caller contract.Principal, re
 	if !mentionName.MatchString(name) {
 		return response, invalid("meta.name must be letters, digits, dots, underscores or hyphens, at most 57 of them, and start with a letter or digit")
 	}
-	run := store.WorkflowRun{ID: contract.WorkflowRunID(runID), Room: roomID, Name: meta.Name, Description: meta.Description, Script: req.Script, Args: req.Args, Profiles: meta.Profiles, Repo: repo, Resume: req.Resume, MaxRuns: effective.MaxRuns}
+	run := store.WorkflowRun{Queue: queue, ID: contract.WorkflowRunID(runID), Room: roomID, Name: meta.Name, Description: meta.Description, Script: req.Script, Args: req.Args, Profiles: meta.Profiles, Repo: repo, Resume: req.Resume, MaxRuns: effective.MaxRuns}
 	started, problem := s.startSession(ctx, caller, contract.SessionStartRequest{Room: roomID, Name: name, Profile: meta.Profiles[0], Repo: repo, Size: cmp.Or(meta.Size, effective.Size), GPU: meta.GPU, Brief: "Run workflow " + meta.Name + ".", ClientID: req.ClientID}, "", &run)
 	if problem != nil {
 		return response, problem
@@ -193,7 +197,7 @@ func (s *Service) workflowInfo(ctx context.Context, run store.WorkflowRun) (cont
 		return contract.WorkflowInfo{}, err
 	}
 	recorded, err := s.store.SessionBranches(ctx, run.Repo, run.Session)
-	info := contract.WorkflowInfo{Run: run.ID, Room: run.Room, Session: run.Session, Name: run.Name, Description: run.Description, Profiles: run.Profiles, Repo: run.Repo, Commit: run.Commit, Version: run.Version, State: run.State, Paused: run.Paused, Result: run.Result, Steps: summary.Steps, Running: running, Failed: summary.Failed, FailedSteps: summary.FailedSteps, Usage: summary.Usage, Started: run.Started, Ended: run.Ended}
+	info := contract.WorkflowInfo{Subscription: run.Subscription, Subject: run.Subject, Run: run.ID, Room: run.Room, Session: run.Session, Name: run.Name, Description: run.Description, Profiles: run.Profiles, Repo: run.Repo, Commit: run.Commit, Version: run.Version, State: run.State, Paused: run.Paused, Result: run.Result, Steps: summary.Steps, Running: running, Failed: summary.Failed, FailedSteps: summary.FailedSteps, Usage: summary.Usage, Started: run.Started, Ended: run.Ended}
 	if len(recorded) > 0 {
 		info.Branch = recorded[0]
 	}

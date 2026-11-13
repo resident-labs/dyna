@@ -1,6 +1,9 @@
 package contract
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 const (
 	MethodWorkflowRun       Method = "workflow.run"
@@ -84,28 +87,30 @@ type WorkflowReloadResponse struct {
 // List's Branch is the first recorded branch; status retains the most recent recorded branch. Version is the script version it runs, 1
 // until a reload. Status is the script's latest status() line, empty when it wrote none.
 type WorkflowInfo struct {
-	Run         WorkflowRunID `json:"run"`
-	Room        RoomID        `json:"room"`
-	Session     SessionID     `json:"session"`
-	Name        string        `json:"name"`
-	Description string        `json:"description,omitempty"`
-	Profiles    []ProfileName `json:"profiles"`
-	Repo        RepoName      `json:"repo,omitempty"`
-	Commit      string        `json:"commit,omitempty"`
-	Branch      string        `json:"branch,omitempty"` // the crew session's recorded branch, which its workers' branches extend
-	Version     int           `json:"version,omitempty"`
-	State       WorkflowState `json:"state"`
-	Paused      bool          `json:"paused,omitempty"`
-	Result      string        `json:"result,omitempty"`
-	Steps       int           `json:"steps,omitempty"`
-	Failed      int           `json:"failed"`
-	FailedSteps []string      `json:"failedSteps,omitempty"`
-	Running     int           `json:"running,omitempty"`
-	Status      string        `json:"status,omitempty"`
-	StatusAt    time.Time     `json:"statusAt,omitzero"`
-	Usage       Usage         `json:"usage"`
-	Started     time.Time     `json:"started"`
-	Ended       time.Time     `json:"ended,omitzero"`
+	Subscription SubscriptionID `json:"subscription,omitempty"`
+	Subject      string         `json:"subject,omitempty"`
+	Run          WorkflowRunID  `json:"run"`
+	Room         RoomID         `json:"room"`
+	Session      SessionID      `json:"session"`
+	Name         string         `json:"name"`
+	Description  string         `json:"description,omitempty"`
+	Profiles     []ProfileName  `json:"profiles"`
+	Repo         RepoName       `json:"repo,omitempty"`
+	Commit       string         `json:"commit,omitempty"`
+	Branch       string         `json:"branch,omitempty"` // the crew session's recorded branch, which its workers' branches extend
+	Version      int            `json:"version,omitempty"`
+	State        WorkflowState  `json:"state"`
+	Paused       bool           `json:"paused,omitempty"`
+	Result       string         `json:"result,omitempty"`
+	Steps        int            `json:"steps,omitempty"`
+	Failed       int            `json:"failed"`
+	FailedSteps  []string       `json:"failedSteps,omitempty"`
+	Running      int            `json:"running,omitempty"`
+	Status       string         `json:"status,omitempty"`
+	StatusAt     time.Time      `json:"statusAt,omitzero"`
+	Usage        Usage          `json:"usage"`
+	Started      time.Time      `json:"started"`
+	Ended        time.Time      `json:"ended,omitzero"`
 }
 
 // WorkflowStatusLine is one status() line and when the script wrote it.
@@ -312,6 +317,15 @@ type WorkflowStatusChanged struct {
 
 func (WorkflowStatusChanged) EventType() EventType { return "workflow.status_changed" }
 func (WorkflowStatusChanged) isEventBody()         {}
+
+const MethodWorkflowState Method = "workflow.state"
+
+type WorkflowStateRequest struct {
+	Value json.RawMessage `json:"value,omitempty"`
+}
+type WorkflowStateResponse struct {
+	Value json.RawMessage `json:"value"`
+}
 
 // WorkflowSteerRequest addresses one running worker by label or unique key prefix.
 type WorkflowSteerRequest struct {

@@ -6,12 +6,12 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 112
+const schemaVersion = 113
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
-	111: {`ALTER TABLE workflow_runs ADD COLUMN paused INTEGER NOT NULL DEFAULT 0`},
+	112: {`CREATE TABLE IF NOT EXISTS workflow_origins (run TEXT PRIMARY KEY, sub TEXT NOT NULL, subject TEXT NOT NULL)`, `CREATE TABLE IF NOT EXISTS workflow_subscriptions (sub TEXT PRIMARY KEY REFERENCES subscriptions(id) ON DELETE CASCADE, script TEXT NOT NULL, args TEXT NOT NULL, subject_key TEXT NOT NULL, once_only INTEGER NOT NULL, report TEXT NOT NULL, include_own INTEGER NOT NULL)`, `CREATE TABLE IF NOT EXISTS workflow_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, sub TEXT NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE, subject TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, run TEXT NOT NULL DEFAULT '')`, `CREATE TABLE IF NOT EXISTS workflow_state (sub TEXT NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE, subject TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(sub,subject))`},
 	110: {`CREATE TABLE IF NOT EXISTS discord_owned (room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, guild TEXT NOT NULL, kind TEXT NOT NULL, path TEXT NOT NULL, id TEXT NOT NULL, channel TEXT NOT NULL DEFAULT '', content TEXT NOT NULL DEFAULT '', PRIMARY KEY(room,guild,kind,path))`},
 	109: {`CREATE TEMP TABLE discord_routes_old AS SELECT guild,channel,room,session,instructions FROM discord_routes`, `DROP TABLE discord_routes`, `CREATE TABLE discord_routes (guild TEXT NOT NULL, channel TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, session TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', policy TEXT NOT NULL DEFAULT '', policy_resolved TEXT NOT NULL DEFAULT '', PRIMARY KEY(guild,channel))`, `INSERT INTO discord_routes(guild,channel,room,session,instructions) SELECT guild,channel,room,session,instructions FROM discord_routes_old`, `DROP TABLE discord_routes_old`},
 	// The rooms that prefer an account, each one it serves.
@@ -60,7 +60,7 @@ var steps = map[int][]string{
 	75: {
 		`ALTER TABLE workflow_runs ADD COLUMN version INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE workflow_steps ADD COLUMN version INTEGER NOT NULL DEFAULT 0`,
-		`CREATE TABLE workflow_scripts (run TEXT NOT NULL REFERENCES workflow_runs(id), version INTEGER NOT NULL, script TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(run, version))`,
+		`CREATE TABLE IF NOT EXISTS workflow_scripts (run TEXT NOT NULL REFERENCES workflow_runs(id), version INTEGER NOT NULL, script TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(run, version))`,
 		`INSERT INTO workflow_scripts(run,version,script,created_at) SELECT id,1,script,started_at FROM workflow_runs`,
 		`UPDATE workflow_steps SET version=1 WHERE started_at>=(SELECT started_at FROM workflow_runs WHERE id=workflow_steps.run)`,
 	},
@@ -123,7 +123,7 @@ var steps = map[int][]string{
 		`ALTER TABLE boxes ADD COLUMN gpu_index INTEGER NOT NULL DEFAULT 0`,
 	},
 	// The owner's workflow settings: one row for the global scope (room '') and one for each room that overrides it.
-	91: {`CREATE TABLE workflow_settings (room TEXT PRIMARY KEY, settings TEXT NOT NULL)`},
+	91: {`CREATE TABLE IF NOT EXISTS workflow_settings (room TEXT PRIMARY KEY, settings TEXT NOT NULL)`},
 	// A room's githubWrites setting (spec 7.9), JSON; `{}` is off.
 	92: {`ALTER TABLE rooms ADD COLUMN github_writes TEXT NOT NULL DEFAULT '{}'`},
 	// The default-branch head whose CI git.main_ci_finished has settled (spec 7.7). A head a store already holds starts settled, so enabling the event reports nothing from before it.

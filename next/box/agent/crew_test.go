@@ -1129,3 +1129,7 @@ func TestCrewPauseHoldsNewCallsButRunningWorkerFinishes(t *testing.T) {
 		t.Fatal("second worker did not start")
 	}
 }
+
+func (j *fakeJournal) WorkflowState(context.Context, contract.WorkflowStateRequest) (contract.WorkflowStateResponse, error) {
+	return contract.WorkflowStateResponse{Value: json.RawMessage("null")}, nil
+}

@@ -23,17 +23,27 @@ const (
 )
 
 // Subscription is a hook as a typed event subscription (spec 8.5). Exactly
-// one of On and Every, and exactly one of Wake and Run, is set. Wake is the ID of the session it wakes.
+// one of On and Every, and exactly one of Wake, Run and Workflow, is set. Wake is the ID of the session it wakes.
 type Subscription struct {
-	ID      SubscriptionID    `json:"id"`
-	Scope   SubscriptionScope `json:"scope"`
-	Room    RoomID            `json:"room,omitempty"`
-	Session SessionID         `json:"session,omitempty"`
-	On      []EventType       `json:"on,omitempty"`
-	Where   []string          `json:"where,omitempty"`
-	Every   Duration          `json:"every,omitempty"`
-	Wake    SessionID         `json:"wake,omitempty"`
-	Run     *RunSpec          `json:"run,omitempty"`
+	ID         SubscriptionID        `json:"id"`
+	Scope      SubscriptionScope     `json:"scope"`
+	Room       RoomID                `json:"room,omitempty"`
+	Session    SessionID             `json:"session,omitempty"`
+	On         []EventType           `json:"on,omitempty"`
+	Where      []string              `json:"where,omitempty"`
+	Every      Duration              `json:"every,omitempty"`
+	Wake       SessionID             `json:"wake,omitempty"`
+	Run        *RunSpec              `json:"run,omitempty"`
+	Workflow   *WorkflowSubscription `json:"workflow,omitempty" desc:"Workflow action: saved JavaScript source as script and an args object. Owner or root only, room scope. Give wake, run or workflow."`
+	Key        string                `json:"key,omitempty" desc:"Workflow serial key, a literal or template using {repo} and {number}; omitted means one key per subscription."`
+	Once       bool                  `json:"once,omitempty" desc:"With workflow, replace the queued event for this key with the newest; the running run is never replaced."`
+	Report     SessionID             `json:"report,omitempty" desc:"Workflow report session name or ID in the room, root by default."`
+	IncludeOwn bool                  `json:"includeOwn,omitempty" desc:"Allow own-account comments, reviews and metadata to start workflows; own pushes, merges and CI always may."`
+}
+
+type WorkflowSubscription struct {
+	Script string                     `json:"script"`
+	Args   map[string]json.RawMessage `json:"args,omitempty"`
 }
 
 type RunSpec struct {
@@ -50,18 +60,23 @@ type RunFile struct {
 }
 
 // SubscriptionAddRequest creates one subscription (spec 8.5). The engine picks its ID. Exactly one of
-// On and Every, and exactly one of Wake and Run, is set. Scope room names Room, scope session names
+// On and Every, and exactly one of Wake, Run and Workflow, is set. Scope room names Room, scope session names
 // Session, and scope machine names neither room nor session. Session and Wake each take a session's name in Room, or in the
 // caller's room with no Room, or its ID. Where filters On, as key=value, key!=value and text~value, all of which must hold.
 type SubscriptionAddRequest struct {
-	Scope   SubscriptionScope `json:"scope" desc:"What the subscription belongs to: session, room or machine. A session's subscription ends when the session closes. Room scope is root's, and machine scope is the owner's."`
-	Room    RoomID            `json:"room,omitempty" desc:"A room_… ID, from your instructions. Omitted, it is your own room."`
-	Session string            `json:"session,omitempty" desc:"With scope session, the session it belongs to: a name in the room, such as upstream-sync, or a ses_… ID."`
-	On      []EventType       `json:"on,omitempty" desc:"Event types that fire it, such as github.pr.opened; dyna subscription events lists them. Give on, every, or both for a digest: with both, the matching events gather and each every that has any wakes once with all of them."`
-	Where   []string          `json:"where,omitempty" desc:"Filters on github.* and git.* events in on: key=value, key!=value or text~value, with key repo, author, actor, label, kind or number. kind is a change kind of github.pr.changed or github.issue.changed, such as pushed, ci_failed, ci_cancelled or merged; on github.ci.finished and git.main_ci_finished it is the result: success, failure or cancelled. All must hold."`
-	Every   Duration          `json:"every,omitempty" desc:"A schedule, as a duration string such as 1h, 15m or 90s, of at least 1m. Give on, every, or both for a digest, which needs wake."`
-	Wake    string            `json:"wake,omitempty" desc:"The session to wake: a name in the room, such as upstream-sync, or a ses_… ID. Give wake or run."`
-	Run     *RunSpec          `json:"run,omitempty" desc:"A command for a small box: command, image (base, or an image folder of the room's default repository), size (small or agent), and optional host and files. Owner or root only. Give wake or run."`
+	Scope      SubscriptionScope     `json:"scope" desc:"What the subscription belongs to: session, room or machine. A session's subscription ends when the session closes. Room scope is root's, and machine scope is the owner's."`
+	Room       RoomID                `json:"room,omitempty" desc:"A room_… ID, from your instructions. Omitted, it is your own room."`
+	Session    string                `json:"session,omitempty" desc:"With scope session, the session it belongs to: a name in the room, such as upstream-sync, or a ses_… ID."`
+	On         []EventType           `json:"on,omitempty" desc:"Event types that fire it, such as github.pr.opened; dyna subscription events lists them. Give on, every, or both for a digest: with both, the matching events gather and each every that has any wakes once with all of them."`
+	Where      []string              `json:"where,omitempty" desc:"Filters on github.* and git.* events in on: key=value, key!=value or text~value, with key repo, author, actor, label, kind or number. kind is a change kind of github.pr.changed or github.issue.changed, such as pushed, ci_failed, ci_cancelled or merged; on github.ci.finished and git.main_ci_finished it is the result: success, failure or cancelled. All must hold."`
+	Every      Duration              `json:"every,omitempty" desc:"A schedule, as a duration string such as 1h, 15m or 90s, of at least 1m. Give on, every, or both for a digest, which needs wake."`
+	Wake       string                `json:"wake,omitempty" desc:"The session to wake: a name in the room, such as upstream-sync, or a ses_… ID. Give wake, run or workflow."`
+	Run        *RunSpec              `json:"run,omitempty" desc:"A command for a small box: command, image (base, or an image folder of the room's default repository), size (small or agent), and optional host and files. Owner or root only. Give wake, run or workflow."`
+	Workflow   *WorkflowSubscription `json:"workflow,omitempty" desc:"Workflow action: saved JavaScript source as script and an args object. Owner or root only, room scope. Give wake, run or workflow."`
+	Key        string                `json:"key,omitempty" desc:"Workflow serial key, a literal or template using {repo} and {number}; omitted means one key per subscription."`
+	Once       bool                  `json:"once,omitempty" desc:"With workflow, replace the queued event for this key with the newest; the running run is never replaced."`
+	Report     SessionID             `json:"report,omitempty" desc:"Workflow report session name or ID in the room, root by default."`
+	IncludeOwn bool                  `json:"includeOwn,omitempty" desc:"Allow own-account comments, reviews and metadata to start workflows; own pushes, merges and CI always may."`
 }
 
 // UnmarshalJSON refuses a number for every and an object for session or wake, naming the field and the form it takes.

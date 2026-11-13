@@ -72,10 +72,20 @@ func checkSubscriptionShape(req contract.SubscriptionAddRequest) *contract.Error
 	if len(req.On) == 0 && req.Every == "" {
 		return invalid("set on, every, or both for a digest")
 	}
-	if (req.Wake != "") == (req.Run != nil) {
-		return invalid("set exactly one of wake and run")
+	actions := 0
+	if req.Wake != "" {
+		actions++
 	}
-	if len(req.On) > 0 && req.Every != "" && req.Run != nil {
+	if req.Run != nil {
+		actions++
+	}
+	if req.Workflow != nil {
+		actions++
+	}
+	if actions != 1 {
+		return invalid("set exactly one of wake, run and workflow")
+	}
+	if len(req.On) > 0 && req.Every != "" && (req.Run != nil || req.Workflow != nil) {
 		return invalid("a digest (on and every together) wakes a session; set wake, not run")
 	}
 	if req.Every != "" {
@@ -101,6 +111,17 @@ func checkSubscriptionShape(req contract.SubscriptionAddRequest) *contract.Error
 		return !strings.HasPrefix(string(kind), "github.") && !strings.HasPrefix(string(kind), "git.")
 	})) {
 		return invalid("where filters github.* and git.* events: dyna subscription events lists them")
+	}
+	if req.Workflow != nil {
+		if req.Scope != contract.ScopeRoom {
+			return invalid("workflow subscriptions belong to a room")
+		}
+		key := strings.NewReplacer("{repo}", "", "{number}", "").Replace(req.Key)
+		if strings.ContainsAny(key, "{}") || len(req.Key) > 200 {
+			return invalid("key uses only {repo} and {number}, at most 200 characters")
+		}
+	} else if req.Key != "" || req.Once || req.Report != "" || req.IncludeOwn {
+		return invalid("key, once, report and includeOwn need workflow")
 	}
 	if req.Run != nil {
 		return checkRun(req.Run)
@@ -175,7 +196,7 @@ func (s *Service) subscriptionAccess(ctx context.Context, caller contract.Princi
 		return forbidden()
 	}
 	root := tree.Root() == caller.Session
-	if !root && (sub.Run != nil || sub.Scope == contract.ScopeRoom) {
+	if !root && (sub.Workflow != nil || sub.Run != nil || sub.Scope == contract.ScopeRoom) {
 		return forbidden()
 	}
 	if sub.Scope == contract.ScopeSession && sub.Session != caller.Session && !tree.CanManage(caller, sub.Session) {
@@ -206,7 +227,7 @@ func (s *Service) SubscriptionAdd(ctx context.Context, caller contract.Principal
 			return contract.SubscriptionAddResponse{}, invalid("unknown host")
 		}
 	}
-	sub := contract.Subscription{Scope: req.Scope, Room: req.Room, On: req.On, Where: req.Where, Run: req.Run}
+	sub := contract.Subscription{Scope: req.Scope, Room: req.Room, On: req.On, Where: req.Where, Run: req.Run, Workflow: req.Workflow, Key: req.Key, Once: req.Once, Report: req.Report, IncludeOwn: req.IncludeOwn}
 	if req.Every != "" {
 		period, _ := checkEvery(req.Every)
 		sub.Every = contract.DurationOf(period)
@@ -263,6 +284,21 @@ func (s *Service) SubscriptionAdd(ctx context.Context, caller contract.Principal
 	}
 	if problem := s.subscriptionAccess(ctx, caller, sub); problem != nil {
 		return contract.SubscriptionAddResponse{}, problem
+	}
+	if sub.Workflow != nil {
+		if _, _, problem := s.workflowScript(ctx, sub.Room, sub.Workflow.Script); problem != nil {
+			return contract.SubscriptionAddResponse{}, problem
+		}
+		if sub.Report != "" {
+			target, problem := s.subscriptionSession(ctx, caller, sub.Room, string(sub.Report))
+			if problem != nil {
+				return contract.SubscriptionAddResponse{}, problem
+			}
+			if target.Room != sub.Room {
+				return contract.SubscriptionAddResponse{}, invalid("report must be in this room")
+			}
+			sub.Report = target.ID
+		}
 	}
 	now := s.now()
 	value, err := id("sub_", now)

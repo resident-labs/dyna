@@ -133,3 +133,7 @@ CREATE TABLE discord_messages (message TEXT PRIMARY KEY, room TEXT NOT NULL REFE
 CREATE TABLE discord_owned (room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, guild TEXT NOT NULL, kind TEXT NOT NULL, path TEXT NOT NULL, id TEXT NOT NULL, channel TEXT NOT NULL DEFAULT '', content TEXT NOT NULL DEFAULT '', PRIMARY KEY(room,guild,kind,path));
 
 CREATE INDEX discord_outbox_group ON discord_outbox(group_key,id);
+CREATE TABLE workflow_subscriptions (sub TEXT PRIMARY KEY REFERENCES subscriptions(id) ON DELETE CASCADE, script TEXT NOT NULL, args TEXT NOT NULL, subject_key TEXT NOT NULL, once_only INTEGER NOT NULL, report TEXT NOT NULL, include_own INTEGER NOT NULL);
+CREATE TABLE workflow_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, sub TEXT NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE, subject TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, run TEXT NOT NULL DEFAULT '');
+CREATE TABLE workflow_state (sub TEXT NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE, subject TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(sub,subject));
+CREATE TABLE workflow_origins (run TEXT PRIMARY KEY, sub TEXT NOT NULL, subject TEXT NOT NULL);
