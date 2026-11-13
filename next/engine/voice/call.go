@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -46,7 +45,12 @@ func (m *Manager) Start(ctx context.Context, room string, page *websocket.Conn, 
 	defer func() {
 		if err != nil && !errors.Is(err, context.Canceled) {
 			closeCtx, stop := context.WithTimeout(context.Background(), time.Second)
-			_ = writeJSON(closeCtx, page, message{"type": "closed", "reason": err.Error()})
+			reason := "The connection dropped. Try calling again."
+			var failure callFailure
+			if errors.As(err, &failure) {
+				reason = string(failure)
+			}
+			_ = writeJSON(closeCtx, page, message{"type": "closed", "reason": reason})
 			stop()
 		}
 		cancel()
@@ -114,7 +118,7 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timer.C:
-			_ = writeJSON(ctx, page, message{"type": "closed", "reason": "idle"})
+			_ = writeJSON(ctx, page, message{"type": "closed", "reason": "The call was inactive for 60 seconds."})
 			return nil
 		case f, ok := <-pf:
 			if !ok {
@@ -217,7 +221,14 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 					responses.pending = true
 					continue
 				}
-				return fmt.Errorf("realtime: %s", event.Error.Message)
+				switch event.Error.Code {
+				case "invalid_api_key", "invalid_auth", "authentication_error", "token_expired":
+					return callFailure("Reconnect your ChatGPT account and try again.")
+				case "rate_limit_exceeded", "insufficient_quota":
+					return callFailure("Your ChatGPT account has reached its usage limit. Try again later.")
+				default:
+					return callFailure("The connection dropped. Try calling again.")
+				}
 			case "session.updated":
 				if err := writeJSON(ctx, page, message{"type": "ready"}); err != nil {
 					return err
@@ -326,7 +337,7 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 				if err := responses.finished(ctx, provider); err != nil {
 					return err
 				}
-				if err := writeJSON(ctx, page, message{"type": "response_done"}); err != nil {
+				if err := writeJSON(ctx, page, message{"type": "response_done", "working": active > 0}); err != nil {
 					return err
 				}
 			}
@@ -418,3 +429,8 @@ func (q *responseQueue) finished(ctx context.Context, c *websocket.Conn) error {
 	q.pending = false
 	return q.request(ctx, c)
 }
+
+// callFailure contains only owner-facing text, never an upstream message.
+type callFailure string
+
+func (e callFailure) Error() string { return string(e) }

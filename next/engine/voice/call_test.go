@@ -188,7 +188,7 @@ func TestResponseConflictDoesNotEndCall(t *testing.T) {
 	send(t, fake, message{"type": "error", "error": message{"code": "invalid_api_key", "message": "bad key"}})
 	select {
 	case err := <-ended:
-		if err == nil || !strings.Contains(err.Error(), "bad key") {
+		if err == nil || !strings.Contains(err.Error(), "Reconnect your ChatGPT account") {
 			t.Fatal(err)
 		}
 	case <-time.After(time.Second):
