@@ -13,9 +13,11 @@
   let live = $derived(run.state === "running");
   let word = $derived(runWords[run.state]);
   let steps = $derived(run.steps ?? 0);
-  // "of" only ever means progress: a run between steps has none to show, and a past run says how many steps failed.
-  let facts = $derived([...live ? [steps ? run.running ? `${steps - run.running}/${steps} steps` : count(steps, "step") : "No steps yet"] : [],
-    ...run.failed ? [live ? `${run.failed} failed` : `${count(run.failed, "step")} failed`] : [], ...[run.status || run.description].filter(text => text && !(live && !steps && text === "No steps yet"))]);
+  // What is unusual comes first, so the cut falls on the description: the failures, then the progress of a run with a step in
+  // flight, then the script's status. "/" only ever means progress, and the tile holds the total.
+  let facts = $derived([...run.failed ? [live ? `${run.failed} failed` : `${count(run.failed, "step")} failed`] : [],
+    ...live && run.running ? [`${steps - run.running}/${steps} steps`] : live && run.steps === 0 ? ["No steps yet"] : [],
+    ...[run.status || run.description].filter(text => text && text !== "No steps yet")]);
   // A running run's age counts up.
   let now = $state(Date.now());
   $effect(() => {
@@ -29,7 +31,7 @@
   let stamp = $derived(live ? minutesLabel(Math.max(0, now - Date.parse(run.started))) : new Date(at).toDateString() === new Date().toDateString() ? formatTime(at) : new Date(at).toLocaleDateString([], { month: "short", day: "numeric" }));
 </script>
 
-<span class="tile {run.state}" class:hurt={live && run.failed > 0} role="img" aria-label={`Workflow, ${word.word.toLowerCase()}${run.steps ? `, ${count(steps, "step")}` : ""}${run.failed ? `, ${run.failed} failed` : ""}`} title={run.steps ? count(steps, "step") : undefined}>{#if steps}{steps > 999 ? "1k+" : steps}{:else}<Icon name="tool" size={14} />{/if}</span>
+<span class="tile {run.state}" class:hurt={run.failed > 0 && (live || run.state === "done")} role="img" aria-label={`Workflow, ${word.word.toLowerCase()}${run.steps ? `, ${count(steps, "step")}` : ""}${run.failed ? `, ${run.failed} failed` : ""}`} title={run.steps ? count(steps, "step") : undefined}>{#if steps}{steps > 999 ? "1k+" : steps}{:else}<Icon name="tool" size={14} />{/if}</span>
 <span class="who"><span class="name">{run.name}</span>
   <span class="line">{#if word.tone}<StatusPill tone={word.tone} label={word.word} word />{:else}{word.word}{/if}{#each facts as part}{` · ${part}`}{/each}</span></span>
 <span class="when" title={`${live ? "Running for" : word.word} ${live ? stamp : formatTime(at)}`}>{stamp}</span>
@@ -41,7 +43,7 @@
   .running { background: var(--success); }
   .failed { background: var(--danger); }
   .stopped { background: none; box-shadow: inset 0 0 0 1.5px var(--muted); color: var(--muted); }
-  /* A running run with a failed step keeps its green tile and a red dot on the corner, ringed in the panel's color. */
+  /* A running or done run with a failed step keeps its tile and a red dot on the corner, ringed in the panel's color. */
   .hurt { position: relative; }
   .hurt::after { content: ""; position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 2px var(--sidebar); }
   .who { flex: 1; min-width: 0; display: grid; line-height: 1.3; }

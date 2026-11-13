@@ -265,7 +265,7 @@
   const folded = new SvelteSet<string>();
   const openIdle = new SvelteSet<string>();
   type SessionListRow = TreeRow | RunRowEntry | { kind: "new-session" };
-  const treeKey = (entry: SessionListRow) => entry.kind === "new-session" ? "new-session" : entry.kind === "idle" ? `idle ${entry.key}` : entry.kind === "past" ? "past runs" : entry.kind === "run" ? `run ${entry.run.session}` : entry.session.session;
+  const treeKey = (entry: SessionListRow) => entry.kind === "new-session" ? "new-session" : entry.kind === "idle" ? `idle ${entry.key}` : entry.kind === "past" ? "past runs" : entry.kind === "head" ? "runs" : entry.kind === "run" ? `run ${entry.run.session}` : entry.session.session;
   // A row's menu of actions. A right click or the Menu key opens it at the pointer, and the row's More button opens it
   // under the button. It closes with its session, and a button that opened it toggles it.
   let acting: { session: string; anchor: DOMRect; side: "start" | "end"; trigger: HTMLElement } | undefined = $state();
@@ -881,8 +881,10 @@
       <div class="tree"><VirtualList bind:this={sessionList} items={sessionRows} key={treeKey}
         label="Session list" role="group" align="top" estimate={48}>
         {#snippet row(entry: SessionListRow)}
-        {#if entry.kind === "run"}{@const { run } = entry}<a class="member run" class:end={entry === runs.at(-1)} data-key={treeKey(entry)} href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(run.session)}`}
-          onclick={openSession} onkeydown={walkTree} aria-current={session === run.session ? "page" : undefined} title={run.description}><RunRow {run} /></a>
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions (the arrow keys walk the list through its heading too) -->
+        {#if entry.kind === "head"}<div class="runs-head" role="heading" aria-level="2" tabindex="-1" data-key={treeKey(entry)} onkeydown={walkTree}>Workflows</div>
+        {:else if entry.kind === "run"}{@const { run } = entry}<a class="member run" class:end={entry === runs.at(-1)} data-key={treeKey(entry)} href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(run.session)}`}
+          onclick={openSession} onkeydown={walkTree} aria-current={session === run.session ? "page" : undefined} title={run.description ? `${run.name}: ${run.description}` : run.name}><RunRow {run} /></a>
         {:else if entry.kind === "past"}<button type="button" class="idle" class:end={entry === runs.at(-1)} data-key={treeKey(entry)} aria-expanded={entry.open} style:padding-left="6px" onkeydown={walkTree}
           onclick={() => { openPast = !openPast; }}><Icon name="chevron" size={12} /><span>{count(entry.count, "past run")}{#if entry.failed}<span class="failed-runs">{` · ${count(entry.failed, "failed run")}`}</span>{/if}</span></button>
         {:else if entry.kind === "new-session"}<button type="button" class="new-session" data-key={treeKey(entry)} onkeydown={walkTree}
@@ -931,6 +933,9 @@
   a.member.run { padding-left: 34px; }
   /* One hairline closes the runs, so the sessions below read as another list. */
   .end, .idle.end { border-bottom: 1px solid var(--line); }
+  .runs-head { display: flex; align-items: center; height: 32px; padding-left: 16px; color: var(--muted); font-size: 12.5px; font-weight: 600; }
+  .runs-head:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  @media (hover: none) { .runs-head { height: 40px; } }
   .failed-runs { color: var(--danger); }
   /* The title keeps the total; the second line separates work, background waits and owner-needed sessions. */
   aside.members > header strong { font-size: 16px; }
