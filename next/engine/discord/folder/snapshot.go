@@ -122,7 +122,8 @@ func ReadSnapshot(ctx context.Context, client *discord.Client, server string) (S
 		if err != nil {
 			return out, err
 		}
-		name := roleNames[r.ID]
+		name := r.Name
+		// The role keeps Discord's @everyone name; overwrite references use everyone.
 		out.Server.Roles = append(out.Server.Roles, Role{Identity: Identity{ID: r.ID}, Name: name, Permissions: p, Color: fmt.Sprintf("#%06x", r.Color), Hoist: r.Hoist, Mentionable: r.Mentionable})
 	}
 	sort.SliceStable(channels, func(i, j int) bool { return channels[i].Position < channels[j].Position })
