@@ -81,6 +81,7 @@ type Entry struct {
 
 // Snapshot is configuration only, with adopted IDs and sidebar order.
 type Snapshot struct {
+	Policy          string
 	BotRolePosition int
 	Server          Server
 	Entries         []Entry

@@ -16,6 +16,7 @@ const (
 	ChannelKind  Kind = "channel"
 	AutoModKind  Kind = "automod"
 	MessageKind  Kind = "message"
+	PolicyKind   Kind = "policy"
 )
 
 type Operation string
@@ -60,6 +61,9 @@ func BuildPlan(desired Folder, live Snapshot) (Plan, error) {
 		return plan, err
 	}
 	compare(&plan, ServerKind, "category order", "", desired.Server.Categories, live.Server.Categories)
+	if desired.Policy != "" {
+		compare(&plan, PolicyKind, "policy.yaml", "", desired.Policy, live.Policy)
+	}
 	if desired.Hooks {
 		plan.Lines = append(plan.Lines, "hooks.yaml is not applied yet")
 	}

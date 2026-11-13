@@ -131,6 +131,22 @@ type DiscordFilesRetrieved struct {
 func (DiscordFilesRetrieved) EventType() EventType { return "discord.files_retrieved" }
 func (DiscordFilesRetrieved) isEventBody()         {}
 
+const MethodDiscordExport Method = "discord.export"
+const MethodDiscordPlan Method = "discord.plan"
+
+type DiscordExportRequest struct {
+	Room   RoomID `json:"room,omitempty"`
+	Server string `json:"server,omitempty"`
+	Force  bool   `json:"force,omitempty"`
+}
+type DiscordPlanRequest struct {
+	Room   RoomID `json:"room,omitempty"`
+	Server string `json:"server,omitempty"`
+}
+type DiscordFolderResponse struct {
+	Text string `json:"text"`
+}
+
 const MethodDiscordPolicy Method = "discord.policy"
 
 type DiscordPolicyRequest struct {
