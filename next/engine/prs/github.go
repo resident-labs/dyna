@@ -419,7 +419,9 @@ func summarizeCI(rollup *gqlRollup, suites gqlSuites, rule ciRule, now time.Time
 	if ci != contract.PrCIFailure && len(failedSuites) > 0 {
 		return contract.PrCIFailure, failedSuites
 	}
-	if ci != contract.PrCIFailure && pending {
+	// An empty PR rollup can report aggregate failure without a terminal failed
+	// context. Preserve that fallback only after all suites have finished.
+	if pending && (ci != contract.PrCIFailure || len(failed) == 0) {
 		return contract.PrCIPending, nil
 	}
 	return ci, failed

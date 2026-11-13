@@ -152,3 +152,18 @@ func TestVisibleFailureSettlesIncompleteCI(t *testing.T) {
 		}
 	}
 }
+
+func TestEmptyFailureRollupWaitsForPendingSuite(t *testing.T) {
+	var suites gqlSuites
+	if err := json.Unmarshal([]byte(`{"totalCount":1,"nodes":[{"status":"IN_PROGRESS"}]}`), &suites); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []string{"FAILURE", "ERROR"} {
+		for _, rule := range []ciRule{ciPullHead, ciMainHead} {
+			got, _ := summarizeCI(&gqlRollup{State: state}, suites, rule, time.Now())
+			if got != contract.PrCIPending {
+				t.Fatalf("%s %d: %s", state, rule, got)
+			}
+		}
+	}
+}
