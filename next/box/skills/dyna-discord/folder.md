@@ -1,93 +1,130 @@
-# A server's private folder
+# A server as a folder (root and owner)
 
-The engine reads `rooms/ROOM/discord/` beside the room's AGENTS.md on the engine host.
-Never put this folder in a repository or copy it into a box. With several whole-server mappings,
-use `discord/SERVER_ID/` for each server. Only the room's root and owner can export or plan.
-Owner CLI: `dyna discord export|plan|apply ROOM --server ID`. With one mapped server, omit server.
-Tool calls use `discord export {server?}`, `discord plan {server?}` and `discord apply {server?, prune?}`.
+The whole server's structure lives in one private folder: `rooms/ROOM/discord/` beside the room's
+AGENTS.md on the engine host (with several whole-server mappings, `discord/SERVER_ID/` each).
+Never put this folder in a repository or copy it into a box. Edit it with bash on the engine host.
+Three actions, for the room's root (tool) and the owner (CLI):
 
-Export first to adopt an existing server. It refuses a non-empty folder unless `force: true`
-(CLI `--force`); force replaces configuration only, preserving messages, policy and unmanaged areas.
-It exports no message history and never exports or applies role membership. Plan is read-only.
-`hooks.yaml` is recognized but not applied.
+| Action | Tool call | Owner CLI | Writes |
+|---|---|---|---|
+| Server to folder | `discord export {server?, force?}` | `dyna discord export ROOM [--server ID] [--force]` | the folder |
+| Compare | `discord plan {server?, prune?}` | `dyna discord plan ROOM [--server ID] [--prune]` | nothing |
+| Folder to server | `discord apply {server?, prune?}` | `dyna discord apply ROOM [--server ID] [--prune]` | Discord, and new ids into the folder |
 
+Use the folder for structure that should last (channels, categories, roles, overwrites, standing
+messages such as rules and welcome, the front policy). Use `api` calls for one-off acts and for
+everything about people (membership, moderation).
+
+## Adopt a server, then change it
+1. `discord export`. It refuses a non-empty folder unless `force`; force replaces configuration
+   files only, keeping messages, policy.yaml and unmanaged areas. It exports no message history
+   and no role membership. Read its report: it names what it left to Discord and why.
+2. `discord plan`: expect `0 changes`. Mark what scripts or other bots feed with `UNMANAGED.md`.
+3. Edit files, `discord plan`, read every line, then `discord apply`. Plan again: `0 changes`.
+4. To delete: remove the folder or entry and its name from any `channels:` or `categories:` list,
+   `discord plan` with `prune`, check that the `Delete …` lines are exactly what you mean, then
+   `discord apply` with `prune`.
+
+## The tree
 ```text
 discord/
-  server.yaml
-  policy.yaml
+  server.yaml              settings, category order, roles, AutoMod
+  policy.yaml              the front policy (format in SKILL.md)
   channels/
-    Community/
+    Community/             a category is a folder
       category.yaml
-      general/
-        channel.yaml
-        welcome.md
+      general/             a channel is a folder
+        channel.yaml       may be omitted for a plain text channel
+        welcome.md         a standing message
     hchat/
-      UNMANAGED.md
+      UNMANAGED.md         apply never touches this category or anything in it
 ```
-
-`server.yaml` holds settings, categories in sidebar order, roles top first and AutoMod rules:
+`server.yaml`: categories in sidebar order, roles top first.
 ```yaml
-settings: {verification: medium, notifications: mentions}
+settings: {verification: medium, notifications: mentions, community: {rules: rules, updates: announcements}}
 categories: [Community]
 roles:
   - {name: Moderator, permissions: [manage_messages, moderate_members], color: "#e67e22", hoist: true}
 automod:
-  - {name: no-invites, keywords: ["discord.gg/*"], block: true, alert: general}
+  - {name: no-invites, keywords: ["discord.gg/*"], block: true, alert: mod-log}
 ```
-Community settings are `community: {rules: rules, updates: announcements}` inside settings.
-Names must resolve uniquely. Role permissions use Discord's snake-case names.
-Export marks channels outside this schema with generated UNMANAGED.md reasons and reports them.
-Role icons/emoji remain Discord-owned. Exported `managed: true` roles are read-only; opaque
-`other_permissions` bits are preserved, never removed by a plan. Unsupported AutoMod rules stay
-on Discord and are reported, not adopted. Unsafe names, duplicate siblings and nested categories refuse.
-
-`channels/Community/category.yaml` controls category overwrites and its children:
+`category.yaml` gives the order of its channels (list them all, or plan keeps reporting the order)
+and may carry overwrites:
 ```yaml
-sync: false
-channels: [general]
+channels: [general, showcase]
+deny: {everyone: [send_messages]}
 ```
-A channel without a category lives directly under channels. `channel.yaml` may be omitted for plain text.
+`channel.yaml`: type is text, voice, announcement or forum.
 ```yaml
-type: forum
-tags: [question, bug]
+topic: Ask anything about the project.
 slowmode: 10s
 allow: {Moderator: [view_channel]}
 deny: {everyone: [view_channel], "member:1234567890": [view_channel]}
 ```
-Channel types are text, voice, announcement and forum; topic is a string.
-Overwrites use role names, everyone, or member:ID; categories use the same allow/deny syntax.
-An `id: "123"` adopts an object; `was: old-name` adopts and renames it. Never use both.
-Missing adopted objects refuse rather than becoming replacements. Rename the folder to rename a channel/category.
+Permissions use Discord's snake-case names. Overwrites name a role, `everyone` or `member:ID`.
+Unless the bot has Administrator, a private channel must also allow the bot's own role.
+Every YAML file is strict: an unknown or duplicate key, an alias or an unknown permission refuses,
+naming file and line.
 
-A category or channel containing `UNMANAGED.md` is excluded, along with all descendants.
-Its first line appears in the plan as the reason. Use this for external webhook or service-owned channels.
-The engine does not inspect descendant configuration there or write over it, even with force.
+## Identity: id, was and UNMANAGED
+- `id: "123"` ties an entry to one Discord object. Export writes it; apply writes it when it creates
+  something. With an id, a rename or move on either side is matched, never duplicated.
+- `was: old-name` adopts the object with that name and renames it to the entry's name. Before you
+  rename that entry again, replace `was:` with the object's `id:`. Rename a channel or category
+  that has an id by renaming its folder. Never set both id and was.
+- An entry with neither is new: apply creates it. If an object of that name already exists, apply
+  refuses until you add its id or a `was:`; it never takes over by name.
+- An adopted object that is gone from the server is a refusal, never a re-create: remove the entry,
+  and add it again under a new name if you want a new object. Apply remembers the ids it recorded,
+  so deleting an `id:` line from an entry that keeps its name does not detach it.
+- `UNMANAGED.md` in a category or channel folder excludes it and everything under it; its first
+  line is the reason shown in plan. Files left beside it are ignored. Export writes one itself for
+  what the format cannot hold (stage and NSFW channels, forum defaults).
+- Left on Discord and never changed: `managed: true` roles (bots, boosters), `other_permissions`
+  bits, role icons, AutoMod rules outside the format above, role membership, message history.
 
-Standing messages are `.md` files in a channel folder. Front matter accepts title, color, footer, pin,
-mentions: none, and embed (a string containing a JSON object). The remaining Markdown is the body;
-`## Heading` describes an embed field. `#channel` and `@Role` are references for future apply.
-Message names are stable ownership keys; do not rename a file to edit its message.
+## Standing messages
+A `.md` file in a channel folder is one message the bot keeps posted there, as an embed:
+```markdown
+---
+title: Welcome
+color: "#5865f2"
+footer: Updated by the team
+pin: true
+---
+Read #rules first, then say hello in #general.
 
-`policy.yaml` uses the front-policy format in SKILL.md, not the server settings format.
-All YAML files are strict: unknown/duplicate keys, aliases and unknown permissions refuse.
-Do not add unsupported fields or role membership. Keep policy and private channel configuration on the host.
+## Getting help
+Ask in #{help desk}; a @Moderator will answer.
+```
+Text before the first heading is the description; each `## Heading` is a field. `#channel` and
+`@Role` become mentions (`#{name with spaces}`); an unknown name refuses with file and line, and
+nothing in a standing message pings. `embed:` in front matter (a JSON object as a string) replaces
+the generated embed. Edit the file and apply to edit the message in place. The file name is the
+message's identity, kept in the engine: renaming the file posts a new message.
 
-## Apply
+## Reading plan and apply
+- `Create …`, `Change KIND NAME FIELD: before → after.`, `Edit message … in place`, and with prune
+  `Delete KIND NAME (ID …).`; then `N changes; M unchanged.`
+- `X is on the server, not in the folder.`: left alone unless you add it or prune something recorded.
+- Not applied, and plan may still list them as changes: a channel's type and forum tags once it
+  exists and turning Community off (apply reports `By hand: …`), `sync` (ignored), and role order
+  involving a managed role or one at or above the bot's top role (`Change role order by hand: …`).
+- Apply prints `Done:`, `Failed:` and `Not done:` per step and stops at the first failure; run it
+  again to resume. It never repeats a create blindly: after an unclear answer it retries only if
+  nothing new appeared on the server, and otherwise refuses until you add the id of the object that
+  is yours. A message whose post is unclear refuses until you delete any copy and rename its file.
+- Apply order: roles, channels, Community, forum and announcement channels, overwrites, channel and
+  role order, AutoMod, messages, prune, policy.yaml.
+- `prune` deletes only objects apply created or the folder adopted and no longer lists, never
+  messages, and refuses a category holding a channel it is not deleting.
 
-Run plan first, then `discord apply`. Apply owns only what it created or the folder adopts by `id:` or
-`was:`; an object matched by name alone is refused until you add its `id:`. When apply creates an object it
-writes the new `id:` into the file, so a hand move or rename on the server is later matched by ID.
-It never touches UNMANAGED folders, Discord-managed roles, `other_permissions` bits, role membership or
-message history, and a missing adopted object is a refusal, never a re-create.
-Order: roles, channels (Community's channels, then Community, then forum and announcement), overwrites,
-channel and role order, AutoMod, messages, policy.yaml. Apply twice changes nothing the second time.
-A failure stops and lists what was done and what remains; run apply again to resume. After an unclear
-answer, nothing new on the server means the create did not happen; anything new refuses until you add
-`id:` to the entry that is yours (never a guess by name). A standing message whose post may have
-reached Discord refuses until you delete any copy and rename its file.
-Run `plan` with `prune` before `apply` with `prune`: it lists each object that would be deleted, or the refusal.
-`prune` deletes only recorded objects the folder no longer lists, never messages, and refuses a category
-holding a channel apply does not own. By hand (reported, not applied): channel type and forum tags of an
-existing channel, turning Community off, `sync` (derived from the channels' overwrites), role order above the
-bot. List every channel of a category in `channels:` or plan keeps reporting its order.
-The last 20 applied copies are kept beside the folder in `discord-applied/SERVER_ID/`.
+## When someone changes the server by hand
+Nothing reverts on its own. `discord plan` shows a hand change to anything the folder manages as
+a change, and `discord apply` puts back the fields it applies (not those listed above as not
+applied). To keep a hand change, edit the folder to match: for a move or rename, move or rename
+the folder and fix the `channels:` and `categories:` lists that name it. `discord export` with
+`force` rewrites files in place but does not move or remove folders. A standing message edited or deleted by hand is not noticed:
+plan compares the file with what apply last posted, never with the channel. The last 20 applied
+copies of the folder are in `rooms/ROOM/discord-applied/SERVER_ID/`. `hooks.yaml` is recognized
+but not applied yet.
