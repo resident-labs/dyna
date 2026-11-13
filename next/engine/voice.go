@@ -107,8 +107,7 @@ func (s *Service) Voice(ctx context.Context, room contract.RoomID) (func(*websoc
 						// A turn can start between the idle snapshot and posting. In
 						// that case the new input steers it without another turn.started.
 						if b.Session == root && handoffResult != nil && handoffTurn == "" {
-							var took bool
-							err := s.store.Read().QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.id=? AND d.to_id=? AND d.turn=?)`, handoffInput, root, b.Turn).Scan(&took)
+							took, err := s.store.TurnTookPost(ctx, root, b.Turn, handoffInput)
 							if err != nil {
 								handoffMu.Unlock()
 								return
