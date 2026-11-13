@@ -15,14 +15,14 @@ import (
 // A mention about an image reaches the session with the image when it replies to it, and with the image's name and
 // message ID when it only follows it. Embeds, stickers and forwarded messages show as a line, in the input and in a read.
 func TestDiscordMentionSeesWhatItIsAbout(t *testing.T) {
-	s, r, root, ctx, fake, client := discordFixture(t)
-	s.SetLayout(box.Layout{Data: t.TempDir()})
+	fixture := discordFixture(t)
+	fixture.Service.SetLayout(box.Layout{Data: t.TempDir()})
 	old := http.DefaultTransport
 	http.DefaultTransport = discordFileTransport{old}
 	t.Cleanup(func() { http.DefaultTransport = old })
 	image := map[string]any{"filename": "affair.png", "size": 12, "url": "https://cdn.discordapp.com/image"}
 	ari := map[string]any{"id": "2", "username": "ari"}
-	fake.SetHistory([]any{
+	fixture.Fake.SetHistory([]any{
 		map[string]any{"id": "29", "timestamp": "2026-11-01T12:03:00Z", "content": "", "author": ari, "embeds": []any{map[string]any{"url": "https://tenor.com/view/x"}}},
 		map[string]any{"id": "28", "timestamp": "2026-11-01T12:02:00Z", "content": "", "author": ari, "sticker_items": []any{map[string]any{"name": "wave"}}},
 		map[string]any{"id": "27", "timestamp": "2026-11-01T12:01:00Z", "content": "", "author": ari, "message_snapshots": []any{map[string]any{"message": map[string]any{"content": "from elsewhere", "attachments": []any{image}}}}},
@@ -37,10 +37,10 @@ func TestDiscordMentionSeesWhatItIsAbout(t *testing.T) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.discordInput(ctx, client, m); err != nil {
+	if err := fixture.Service.discordInput(fixture.Context, fixture.Client, m); err != nil {
 		t.Fatal(err)
 	}
-	events, err := s.store.Events(ctx, r, 0, 100, []contract.EventType{"discord.message"})
+	events, err := fixture.Service.store.Events(fixture.Context, fixture.Room, 0, 100, []contract.EventType{"discord.message"})
 	if err != nil || len(events) != 1 {
 		t.Fatal(events, err)
 	}
@@ -62,7 +62,7 @@ func TestDiscordMentionSeesWhatItIsAbout(t *testing.T) {
 			t.Errorf("input lacks %q:\n%s", want, rendered)
 		}
 	}
-	got, p := s.DiscordRead(ctx, boxCaller(root), contract.DiscordReadRequest{Channel: "200"})
+	got, p := fixture.Service.DiscordRead(fixture.Context, boxCaller(fixture.Root), contract.DiscordReadRequest{Channel: "200"})
 	if p != nil {
 		t.Fatal(p)
 	}
