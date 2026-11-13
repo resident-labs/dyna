@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/resident-labs/dyna/harness/testutil"
 )
 
 func TestPublicRefusesEveryInternalRange(t *testing.T) {
@@ -207,17 +209,24 @@ func TestAClosedTunnelFreesItsSlot(t *testing.T) {
 		go far.Close()
 		return near, nil
 	}, limits{tunnels: 1, closeWait: time.Millisecond, rate: 1 << 30})
+	deadline := time.Now().Add(5 * time.Second)
 	for range 3 {
-		conn := connect()
-		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-		if _, err := io.WriteString(conn, connect443); err != nil {
-			t.Fatal(err)
-		}
-		if status, err := bufio.NewReader(conn).ReadString('\n'); err != nil || !strings.Contains(status, "200") {
-			t.Fatalf("%q %v", status, err)
-		}
-		conn.Close()
-		time.Sleep(50 * time.Millisecond)
+		testutil.Eventually(t, time.Until(deadline), "closed tunnel releasing its slot", func() bool {
+			conn := connect()
+			defer conn.Close()
+			_ = conn.SetDeadline(deadline)
+			if _, err := io.WriteString(conn, connect443); err != nil {
+				t.Fatal(err)
+			}
+			status, err := bufio.NewReader(conn).ReadString('\n')
+			if err == nil && strings.Contains(status, "429") {
+				return false // The preceding handler has not released its slot yet.
+			}
+			if err != nil || !strings.Contains(status, "200") {
+				t.Fatalf("%q %v", status, err)
+			}
+			return true
+		})
 	}
 }
 
