@@ -464,9 +464,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 		// inputs, so a stop leaves nothing for the recovery pass to wake.
 		var waiting bool
 		var kept []byte
-		if err := tx.QueryRowContext(ctx, `SELECT ?2 AND (?3 OR EXISTS(SELECT 1 FROM sessions c WHERE c.parent=?1 AND c.closed_at IS NULL AND (
-				EXISTS(SELECT 1 FROM turns t WHERE t.session=c.id AND t.ended_at IS NULL)
-				OR EXISTS(SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=c.id AND d.state='pending' AND d.wake=1)))), COALESCE((SELECT replies FROM replies_owed WHERE session=?1),'[]')`,
+		if err := tx.QueryRowContext(ctx, `SELECT ?2 AND (?3 OR EXISTS(SELECT 1 FROM sessions c WHERE c.parent=?1 AND `+childAtWork+`)), COALESCE((SELECT replies FROM replies_owed WHERE session=?1),'[]')`,
 			session, output.Outcome == contract.TurnCompleted, output.ShellJobs > 0).Scan(&waiting, &kept); err != nil {
 			return err
 		}
@@ -479,7 +477,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			if wait == nil {
 				// dyna_children reports actual running turns; reply debt also counts a child's pending waking inputs as work.
 				wait = &contract.SessionWaiting{Kind: contract.WaitChildren}
-				if err := tx.QueryRowContext(ctx, "SELECT COUNT(*),COALESCE(MIN(c.name),'') FROM sessions c WHERE c.parent=? AND c.closed_at IS NULL AND EXISTS(SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=c.id AND d.state='pending' AND d.wake=1)", session).Scan(&wait.Count, &wait.Name); err != nil {
+				if err := tx.QueryRowContext(ctx, "SELECT COUNT(*),COALESCE(MIN(c.name),'') FROM sessions c WHERE c.parent=? AND "+childAtWork, session).Scan(&wait.Count, &wait.Name); err != nil {
 					return err
 				}
 			}
