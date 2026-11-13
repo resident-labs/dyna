@@ -114,15 +114,23 @@ export const runWords: Record<WorkflowState, { word: string; tone?: Tone }> = {
   running: { word: "Running", tone: "working" }, done: { word: "Done" }, failed: { word: "Failed", tone: "failed" }, stopped: { word: "Stopped" },
 };
 
-// What a run that ended came to, after its state: its feed row and its row in the header's Runs. A run from before steps were
+// What a run that ended came to, after its state: its feed row and its row in the sessions panel. A run from before steps were
 // counted has no figure.
 export const runCounts = ({ steps, failed }: { steps?: number; failed: number }): string[] => [...steps ? [count(steps, "step")] : [], ...failed ? [`${failed} failed`] : []];
 
-// The header's Runs: the running ones, newest first, then the rest, the latest to end first.
+// The room's runs: the running ones, newest first, then the rest, the latest to end first.
 export function roomRuns(runs: Iterable<WorkflowInfo>): { running: WorkflowInfo[]; past: WorkflowInfo[] } {
   const all = [...runs], at = (run: WorkflowInfo) => Date.parse(run.ended ?? run.started);
   return { running: all.filter(run => run.state === "running").sort((a, b) => Date.parse(b.started) - Date.parse(a.started)),
     past: all.filter(run => run.state !== "running").sort((a, b) => at(b) - at(a)) };
+}
+
+// The runs' rows in the sessions panel: each running run, then one row that counts the past ones and, open, lists them. A room
+// with no runs has no rows.
+export type RunRow = { kind: "run"; run: WorkflowInfo } | { kind: "past"; count: number; open: boolean };
+export function runRows(runs: Iterable<WorkflowInfo>, open: boolean): RunRow[] {
+  const { running, past } = roomRuns(runs), row = (run: WorkflowInfo): RunRow => ({ kind: "run", run });
+  return [...running.map(row), ...past.length ? [{ kind: "past" as const, count: past.length, open }] : [], ...open ? past.map(row) : []];
 }
 
 // The line a script that never called status() gets, as "75 of 76 steps · 1 running".

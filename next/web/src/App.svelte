@@ -27,6 +27,7 @@
   import WorkflowRun from "./lib/ui/WorkflowRun.svelte";
   import StatusPill from "./lib/ui/StatusPill.svelte";
   import Composer from "./lib/ui/Composer.svelte";
+  import RunRow from "./lib/ui/RunRow.svelte";
   import SessionRow from "./lib/ui/SessionRow.svelte";
   import SessionActions from "./lib/ui/SessionActions.svelte";
   import AboutPanel from "./lib/ui/AboutPanel.svelte";
@@ -43,6 +44,7 @@
   import RoomIntro from "./lib/ui/RoomIntro.svelte";
   import { boxReason, count, quoted, turnReason, waits, type Quote } from "./lib/feed.ts";
   import { sessionActions, sessionTree, type TreeRow } from "./lib/session-tree.ts";
+  import { runRows, type RunRow as RunRowEntry } from "./lib/workflow.ts";
   import { activityLabel } from "./lib/steps.ts";
   import { FileDraft } from "./lib/attach.svelte.ts";
   import ComputerView from "./lib/ui/ComputerView.svelte";
@@ -262,8 +264,8 @@
   // more idle siblings fold into one "N idle" row that opens in place, so a room of 100 sessions shows its work first.
   const folded = new SvelteSet<string>();
   const openIdle = new SvelteSet<string>();
-  type SessionListRow = TreeRow | { kind: "new-session" };
-  const treeKey = (entry: SessionListRow) => entry.kind === "new-session" ? "new-session" : entry.kind === "idle" ? `idle ${entry.key}` : entry.session.session;
+  type SessionListRow = TreeRow | RunRowEntry | { kind: "new-session" };
+  const treeKey = (entry: SessionListRow) => entry.kind === "new-session" ? "new-session" : entry.kind === "idle" ? `idle ${entry.key}` : entry.kind === "past" ? "past runs" : entry.kind === "run" ? `run ${entry.run.session}` : entry.session.session;
   // A row's menu of actions. A right click or the Menu key opens it at the pointer, and the row's More button opens it
   // under the button. It closes with its session, and a button that opened it toggles it.
   let acting: { session: string; anchor: DOMRect; side: "start" | "end"; trigger: HTMLElement } | undefined = $state();
@@ -283,7 +285,11 @@
   let sessionList: VirtualList<SessionListRow> | undefined = $state();
   const starting = (id: string) => { const box = store?.boxes.get(id); return box === "pending" || box === "creating" || box === "starting"; };
   let tree = $derived(sessionTree(store?.members ?? [], store?.statuses() ?? new Map(), starting, session, folded, openIdle));
-  let sessionRows: SessionListRow[] = $derived(attention.can("operate") ? [...tree, { kind: "new-session" }] : tree);
+  // The room's workflow runs lead the panel: the running ones stand in view, and the past ones fold into one row that counts them,
+  // so that 19 runs never bury 3 sessions. A past run that is open keeps the fold open, as an open session keeps its idle fold.
+  let openPast = $state(false);
+  let runs = $derived(store?.ready ? runRows(store.workflows.values(), openPast || (!!session && store.workflows.get(session)?.state !== undefined && store.workflows.get(session)?.state !== "running")) : []);
+  let sessionRows: SessionListRow[] = $derived([...runs, ...tree, ...attention.can("operate") ? [{ kind: "new-session" as const }] : []]);
   // Left folds a parent's subtree and Right opens it, on its row or its chevron.
   function fold(event: KeyboardEvent, id: string) {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -584,7 +590,7 @@
       default: return reason ? waits[reason] : starting(id) ? store?.startLine(id) ?? "Starting" : store?.boxes.get(id) === "stopped" ? "Asleep" : "";
     }
   };
-  // A row's line: what needs the owner, else what the session works on. A crew has no row: Runs lists its run.
+  // A row's line: what needs the owner, else what the session works on. A crew has no session row: its run has a run row.
   const rowLine = (id: string) => status(id) || goalLine(id);
   // What the session works on, for its row in the list: the first open item of its first goal, or that goal.
   const goalLine = (id: string) => {
@@ -823,7 +829,7 @@
           bind:jobsTool bind:roomMenu bind:requestsButton bind:toggle
           onopen={(item, job) => terminals?.openJob(item, job)} onpause={pause} oninstructions={openInstructions} onrequests={() => { section = section === "requests" ? undefined : "requests"; }} onpanel={tapped => void showPanel(!panelShown, tapped)}
           onterminal={() => terminals?.shell(session!, title, !store?.sessions.get(session!)?.parent)}
-          oncomputer={() => watch(session!)} {navigate} />{/key}
+          oncomputer={() => watch(session!)} />{/key}
       {/if}</header>
     {#if routeNotice}<div class="route-notice"><Icon name="globe" size={18} /><span><strong>Moved to {routeNotice}</strong>{moveData.has("old") ? `: ${moveData.get("old")} stopped answering for 20 seconds.` : `, a nearer route to ${moveData.get("name") || "this machine"}. Same session, same room.`}</span><button type="button" aria-label="Dismiss route notice" onclick={() => { routeNotice = ""; sessionStorage.removeItem("dyna-connect-move"); }}>✕</button></div>{/if}
     {#if reloadPending}<p class="reload-notice" role="status">Dyna updated. Reload to use the new version. <button type="button" onclick={() => location.reload()}>Reload</button></p>{/if}
@@ -875,7 +881,11 @@
       <div class="tree"><VirtualList bind:this={sessionList} items={sessionRows} key={treeKey}
         label="Session list" role="group" align="top" estimate={48}>
         {#snippet row(entry: SessionListRow)}
-        {#if entry.kind === "new-session"}<button type="button" class="new-session" data-key={treeKey(entry)} onkeydown={walkTree}
+        {#if entry.kind === "run"}{@const { run } = entry}<a class="member run" class:end={entry === runs.at(-1)} data-key={treeKey(entry)} href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(run.session)}`}
+          onclick={openSession} onkeydown={walkTree} aria-current={session === run.session ? "page" : undefined} title={run.description}><RunRow {run} /></a>
+        {:else if entry.kind === "past"}<button type="button" class="idle" class:end={entry === runs.at(-1)} data-key={treeKey(entry)} aria-expanded={entry.open} onkeydown={walkTree}
+          onclick={() => { openPast = !openPast; }}><Icon name="chevron" size={12} />{count(entry.count, "past run")}</button>
+        {:else if entry.kind === "new-session"}<button type="button" class="new-session" data-key={treeKey(entry)} onkeydown={walkTree}
           onclick={() => openNew("session")}><Icon name="plus" size={14} />New session</button>
         {:else if entry.kind === "idle"}<button type="button" class="idle" data-key={treeKey(entry)} aria-expanded={entry.open} style:--depth={entry.depth} style:padding-left="{6 + entry.depth * 20}px" onkeydown={walkTree}
           onclick={() => { if (!openIdle.delete(entry.key)) openIdle.add(entry.key); }}><Icon name="chevron" size={12} />{count(entry.count, "idle session")}</button>
@@ -917,6 +927,10 @@
   .reload-notice button { margin-left: 4px; padding: 8px 4px; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
   /* Two-line rows around the 28 px avatar, as in the chosen mockup: the name, then what the session does. */
   a.member { min-height: 48px; color: var(--text); text-decoration: none; }
+  /* A run's tile stands where a session's face does, so the tiles and the faces line up. */
+  a.member.run { padding-left: 34px; }
+  /* One hairline closes the runs, so the sessions below read as another list. */
+  .end { border-bottom: 1px solid var(--line); }
   /* The title keeps the total; the second line separates work, background waits and owner-needed sessions. */
   aside.members > header strong { font-size: 16px; }
   /* The header's face rings its dot in the header's color. */

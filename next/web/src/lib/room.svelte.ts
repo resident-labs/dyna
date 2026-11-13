@@ -94,7 +94,7 @@ export class RoomStore {
   readonly prs = new SvelteMap<string, PrSummary>();
   // Workflow runs by crew session. They outlive the session, which closes as its run ends.
   readonly workflows = new SvelteMap<string, WorkflowInfo>();
-  // Crews that session.started named before workflow.list lists their run. A crew's page is its run, reached from Runs, so
+  // Crews that session.started named before workflow.list lists their run. A crew's page is its run, reached from the panel's run rows, so
   // it has no row among the sessions.
   private readonly crews = new SvelteSet<string>();
   // The open run page, which takes each step row. With no row, it has lost track and reads again.
@@ -173,7 +173,7 @@ export class RoomStore {
     return this.turns.has(id) && box !== "failed" && box !== "lost";
   }
   status(id: string): Status { return this.statusWith(id, this.asking()); }
-  // The sessions panel's statuses, and so its counts: a crew stands for its run, which Runs shows.
+  // The sessions panel's statuses, and so its counts: a crew stands for its run, which the panel shows as a run row.
   statuses(): Map<string, Status> {
     const asking = this.asking();
     return new Map(this.members.map(item => [item.session, this.statusWith(item.session, asking)]));
@@ -393,7 +393,7 @@ export class RoomStore {
         this.names.set(event.body.session, event.body.name);
         if (event.body.goal) void this.readGoals();
         if (event.body.workflow) this.crews.add(event.body.session);
-        void this.readWorkflows(); // Its run's row, for the Runs list.
+        void this.readWorkflows(); // Its run's row in the panel.
         break;
       case "session.closed":
         this.sessions.delete(event.body.session);

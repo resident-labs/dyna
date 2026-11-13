@@ -1,7 +1,6 @@
 <script lang="ts">
   import { needsOwner } from "../room.svelte.ts";
   import { requestsFor } from "../request-groups.ts";
-  import { roomRuns } from "../workflow.ts";
   import type { Attention } from "../attention.svelte.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import type { ShellJob } from "../shell.ts";
@@ -9,42 +8,35 @@
   import Icon from "./Icon.svelte";
   import JobsTool from "./JobsTool.svelte";
   import RoomMenu from "./RoomMenu.svelte";
-  import RunsTool from "./RunsTool.svelte";
   import StatusPill from "./StatusPill.svelte";
 
   type JobSession = { id: string; name: string; root: boolean; running: number };
   let { store, session, attention, closed, phone, paused, panelShown, requestsOpen,
     jobsTool = $bindable(), roomMenu = $bindable(), requestsButton = $bindable(), toggle = $bindable(),
-    onopen, onpause, oninstructions, onrequests, onpanel, onterminal, oncomputer, navigate }: {
+    onopen, onpause, oninstructions, onrequests, onpanel, onterminal, oncomputer }: {
     store: RoomStore; session?: string; attention: Attention; closed: boolean;
     phone: boolean; paused: boolean; panelShown: boolean; requestsOpen: boolean;
     jobsTool?: JobsTool; roomMenu?: RoomMenu; requestsButton?: HTMLButtonElement; toggle?: HTMLButtonElement;
     onopen: (session: JobSession, job: ShellJob) => void; onpause: () => void; oninstructions: () => void;
     onrequests: () => void; onpanel: (tapped: boolean) => void; onterminal?: () => void; oncomputer?: () => void;
-    navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void;
   } = $props();
-  let runsTool: RunsTool | undefined = $state();
   let allSessions = $derived([...store.sessions.values()].filter(item => store.hadJobs.has(item.session) && store.boxes.get(item.session) === "ready")
     .map(item => ({ id: item.session, name: item.name, root: !item.parent, running: store.shellJobs.get(item.session) ?? 0 })));
   let sessions = $derived(session ? allSessions.filter(item => item.id === session) : allSessions);
   let waiting = $derived(session ? requestsFor(store.requests.values(), session).filter(needsOwner).length + store.pendingQuestions(session).length : store.waiting);
   let working = $derived(store.counts.working);
   let busy = $derived(store.members.filter(item => store.status(item.session) === "working"));
-  // The room's runs, the running ones first. A crew has no row among the sessions: its run stands for it here.
-  let runs = $derived(store.ready ? roomRuns(store.workflows.values()) : { running: [], past: [] });
-  let anyRuns = $derived(runs.running.length + runs.past.length > 0);
   let faces = $derived(!session && !panelShown && working > 0);
 </script>
 
 <div class="actions" class:session={!!session}>
   <JobsTool bind:this={jobsTool} {sessions} {allSessions} {phone} {onopen} />
-  {#if anyRuns}<RunsTool bind:this={runsTool} running={runs.running} past={runs.past} room={store.room} {session} {phone} {navigate} />{/if}
   <button type="button" class="requests" class:waiting={waiting > 0} bind:this={requestsButton} aria-pressed={requestsOpen}
     aria-label={waiting ? `${waiting} requests wait for you` : "Requests"} title="Requests" onclick={onrequests}>
     <Icon name="inbox" />{#if waiting}<StatusPill tone="warning" label="Waiting" count={waiting} />{/if}
   </button>
   <RoomMenu bind:this={roomMenu} {phone} {paused} operate={attention.can("operate")} admin={attention.can("admin")} {onpause} {oninstructions}
-    onrequests={phone ? onrequests : undefined} onjobs={phone ? () => void jobsTool?.show() : undefined} onruns={phone && anyRuns ? () => void runsTool?.show() : undefined} runsLive={runs.running.length > 0}
+    onrequests={phone ? onrequests : undefined} onjobs={phone ? () => void jobsTool?.show() : undefined}
     onterminal={phone && session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready" ? onterminal : undefined} oncomputer={phone && session && !closed && attention.can("computers") && store.boxes.get(session) === "ready" ? oncomputer : undefined} waiting={phone ? waiting : 0} />
   <button type="button" class="panel-toggle" bind:this={toggle} aria-label={"Sessions" + (faces ? `, ${working} working` : "") + (store.counts.failed ? ", a session failed" : "")}
     title={faces ? busy.map(item => item.name).join(", ") : "Sessions"} aria-controls="sessions" aria-keyshortcuts="Control+B" aria-pressed={panelShown} onclick={event => onpanel(event.detail > 0)}>
@@ -67,9 +59,9 @@
   .more, .count { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
   .phone { display: none; }
   @media (max-width: 640px) {
-    /* A phone header keeps the room's name: Jobs and Runs live in the ⋯ menu. Requests shows only while something waits
+    /* A phone header keeps the room's name: Jobs lives in the ⋯ menu. Requests shows only while something waits
        for the owner, as the inbox with its count, so the count never reads as part of the menu. */
-    :global(.jobs > .open), :global(.runs > .open), .requests:not(.waiting) { display: none; }
+    :global(.jobs > .open), .requests:not(.waiting) { display: none; }
     .requests { min-width: 44px; min-height: 44px; }
     .panel-toggle { gap: 4px; min-width: 44px; min-height: 44px; padding: 0 4px; }
     .phone { display: inline; }

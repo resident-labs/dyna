@@ -4,7 +4,7 @@ import { decodeEvent } from "./event.ts";
 import { feedRows } from "./feed.ts";
 import { RunState } from "./run.svelte.ts";
 import type { Json } from "./json.ts";
-import { FAILED, LONG_PHASE, READABLE_SPAN, STRIP_PHASES, applyStep, branchLink, commitLink, countedLine, failedNodes, figures, flow, foldable, jsonFields, minutesLabel, nested, openable, phases, reading, roomRuns, runCounts, runScale, runStatus, shownFacts, shownStep, spanReads, stageOf, stagesOf, stepBody, stepSpan, stepTime, stepTitle, stepWord, strip, timed, timeline, tokens } from "./workflow.ts";
+import { FAILED, LONG_PHASE, READABLE_SPAN, STRIP_PHASES, applyStep, branchLink, commitLink, countedLine, failedNodes, figures, flow, foldable, jsonFields, minutesLabel, nested, openable, phases, reading, roomRuns, runCounts, runRows, runScale, runStatus, shownFacts, shownStep, spanReads, stageOf, stagesOf, stepBody, stepSpan, stepTime, stepTitle, stepWord, strip, timed, timeline, tokens } from "./workflow.ts";
 import type { Event, WorkflowInfo, WorkflowStatusResponse, WorkflowStep } from "./contract.gen.ts";
 
 const usage = { model: "", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
@@ -232,6 +232,16 @@ test("Runs lists the running runs first, newest first, then the rest, the latest
   assert.deepEqual(runCounts({ steps: 1, failed: 0 }), ["1 step"]);
   assert.deepEqual(runCounts({ steps: 60, failed: 4 }), ["60 steps", "4 failed"]);
   assert.deepEqual(runCounts({ failed: 0 }), []);
+});
+
+test("the panel's run rows: running runs, then a count of the past ones that lists them when open", () => {
+  const run = (session: string, fields: Partial<WorkflowInfo> = {}): WorkflowInfo => status({ session, state: "done", ...fields }).run;
+  const runs = [run("old", { ended: "2026-01-01T01:00:00Z" }), run("live", { state: "running" }), run("new", { ended: "2026-01-02T00:00:00Z" })];
+  const names = (open: boolean) => runRows(runs, open).map(row => row.kind === "run" ? row.run.session : `${row.kind} ${row.count}${row.open ? " open" : ""}`);
+  assert.deepEqual(names(false), ["live", "past 2"]);
+  assert.deepEqual(names(true), ["live", "past 2 open", "new", "old"]);
+  assert.deepEqual(runRows([], true), []);
+  assert.deepEqual(runRows([runs[1]], false).map(row => row.kind), ["run"]);
 });
 
 test("the run branch and commit link to the repository, and a run with none links nowhere", () => {
