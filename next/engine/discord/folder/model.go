@@ -26,6 +26,7 @@ type Community struct {
 	Updates string `yaml:"updates"`
 }
 type Role struct {
+	Position    int `yaml:"-"`
 	Identity    `yaml:",inline"`
 	Name        string   `yaml:"name"`
 	Permissions []string `yaml:"permissions,omitempty"`
@@ -80,8 +81,9 @@ type Entry struct {
 
 // Snapshot is configuration only, with adopted IDs and sidebar order.
 type Snapshot struct {
-	Server  Server
-	Entries []Entry
+	BotRolePosition int
+	Server          Server
+	Entries         []Entry
 }
 
 func safeName(name string) bool {

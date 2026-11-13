@@ -64,7 +64,7 @@ func TestPlanFieldsAndAdoption(t *testing.T) {
 		}
 	}
 	for _, change := range plan.Changes {
-		if change.Field == "create" {
+		if change.Operation == Create {
 			t.Fatalf("rename created object: %+v", change)
 		}
 	}

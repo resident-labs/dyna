@@ -11,7 +11,7 @@ func TestCategoryRenamePreservesChildren(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, change := range plan.Changes {
-			if change.Field == "create" {
+			if change.Operation == Create {
 				t.Fatalf("rename recreated: %s", plan.String())
 			}
 		}
@@ -26,8 +26,8 @@ func TestMessageDiffs(t *testing.T) {
 	for _, test := range []struct {
 		body    string
 		changes int
-		field   string
-	}{{"hello", 0, ""}, {"changed", 1, "edit"}} {
+		field   Operation
+	}{{"hello", 0, ""}, {"changed", 1, EditMessage}} {
 		desired := Folder{Entries: []Entry{{Name: "chat", Path: "chat", Channel: &Channel{Type: "text"}, Messages: map[string]Message{"welcome.md": {Body: test.body}}}}}
 		plan, err := BuildPlan(desired, live)
 		if err != nil {
@@ -36,7 +36,7 @@ func TestMessageDiffs(t *testing.T) {
 		if len(plan.Changes) != test.changes {
 			t.Fatal(plan.String())
 		}
-		if test.changes > 0 && (plan.Changes[0].ID != "300" || plan.Changes[0].Target != "201" || plan.Changes[0].Field != test.field) {
+		if test.changes > 0 && (plan.Changes[0].ID != "300" || plan.Changes[0].Target != "201" || plan.Changes[0].Operation != test.field) {
 			t.Fatalf("bad edit: %+v", plan.Changes[0])
 		}
 	}
@@ -45,7 +45,7 @@ func TestMessageDiffs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Changes) != 2 || plan.Changes[1].Kind != "message" || plan.Changes[1].Field != "create" {
+	if len(plan.Changes) != 2 || plan.Changes[1].Kind != MessageKind || plan.Changes[1].Operation != Create {
 		t.Fatal(plan.String())
 	}
 }
