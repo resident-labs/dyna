@@ -122,7 +122,7 @@ func TestWorkflowEventsGuideIsInstalled(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(guide)
-	for _, want := range []string{"```js\nexport const meta", "```sh\ndyna subscription add", "args.event", "await state.get()", "await state.set({ head })", "kind=pushed,opened", "subscription fire", "subscription update", "subscription state"} {
+	for _, want := range []string{"```js\nexport const meta", "```sh\ndyna room repo add ROOM OWNER/REPO --pr-events on", "dyna subscription add", "args.event", "await state.get()", "await state.set({ head })", "kind=pushed,opened", "subscription fire", "subscription update", "subscription state"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("events guide does not say %q", want)
 		}

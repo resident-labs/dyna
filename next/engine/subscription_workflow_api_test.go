@@ -222,3 +222,56 @@ func TestEnablingLatestCoalescesOnTheNextEvent(t *testing.T) {
 		t.Fatal("new event did not coalesce waiting events")
 	}
 }
+
+func TestLatestRealDispatchCoalescesWaitingEvents(t *testing.T) {
+	w := setupWorkflow(t)
+	sub := addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, On: []contract.EventType{"notice.posted"}, Workflow: &contract.WorkflowSubscription{Script: workflowScript}})
+	for range 2 {
+		if _, problem := w.SubscriptionFire(w.ctx, w.owner, contract.SubscriptionFireRequest{ID: sub}); problem != nil {
+			t.Fatal(problem)
+		}
+	}
+	latest := true
+	if _, problem := w.SubscriptionUpdate(w.ctx, w.owner, contract.SubscriptionUpdateRequest{ID: sub, Latest: &latest}); problem != nil {
+		t.Fatal(problem)
+	}
+	recordNotice(t, w.Service, w.ctx, w.room)
+	if _, err := w.store.DispatchEvents(w.ctx, 1000); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT count(*) FROM workflow_queue WHERE sub=? AND run=''", sub).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("latest retained %d waiting copies; want 1", count)
+	}
+	var queuedSeq, newestSeq int64
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT seq FROM workflow_queue WHERE sub=?", sub).Scan(&queuedSeq); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT max(seq) FROM events WHERE type='notice.posted'").Scan(&newestSeq); err != nil {
+		t.Fatal(err)
+	}
+	if queuedSeq != newestSeq {
+		t.Fatalf("queued sequence %d, newest %d", queuedSeq, newestSeq)
+	}
+	if err := w.fireDue(w.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.store.Write(w.ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(w.ctx, "UPDATE workflow_runs SET state='done' WHERE sub=?", sub)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.fireDue(w.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT count(*) FROM workflow_runs WHERE sub=?", sub).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("same event started %d runs", count)
+	}
+}

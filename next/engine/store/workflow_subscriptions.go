@@ -102,24 +102,7 @@ func (s *Store) queueWorkflow(ctx context.Context, tx *sql.Tx, sub Subscription,
 			continue
 		}
 		key := strings.NewReplacer("{repo}", string(repo), "{number}", strconv.Itoa(number)).Replace(sub.Key)
-		body, err := json.Marshal(event)
-		if err != nil {
-			return err
-		}
-		if sub.Latest {
-			result, err := tx.ExecContext(ctx, "UPDATE workflow_queue SET seq=?,body=? WHERE sub=? AND key=? AND run=''", event.Seq, string(body), sub.ID, key)
-			if err != nil {
-				return err
-			}
-			n, err := result.RowsAffected()
-			if err != nil {
-				return err
-			}
-			if n > 0 {
-				continue
-			}
-		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO workflow_queue(sub,key,seq,body) SELECT ?1,?2,?3,?4 WHERE (SELECT count(*) FROM workflow_queue WHERE sub=?1 AND run IN ('','starting'))<?5", sub.ID, key, event.Seq, string(body), maxQueuedRuns); err != nil {
+		if _, err := s.queueWorkflowEvent(ctx, tx, sub, key, event); err != nil {
 			return err
 		}
 	}

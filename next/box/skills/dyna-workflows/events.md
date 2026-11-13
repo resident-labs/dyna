@@ -43,10 +43,11 @@ must act on. A failed run reports. Existing room write restrictions apply.
 
 ## Register and try it
 
-Enable `prEvents` for the repository with the room tool's `add_repo` action, then
-register the script. Replace `ROOM` and `OWNER/REPO` with the room ID and repository:
+Enable `prEvents` with the owner CLI on the engine host (dyna-admin), then register
+the script. Replace `ROOM` and `OWNER/REPO` with the room ID and repository:
 
 ```sh
+dyna room repo add ROOM OWNER/REPO --pr-events on
 dyna subscription add --room ROOM --on github.pr.changed \
   --where repo=OWNER/REPO --where kind=pushed,opened \
   --workflow push-review.js --key '{repo}#{number}' --latest
