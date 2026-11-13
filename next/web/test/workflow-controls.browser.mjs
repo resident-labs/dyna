@@ -40,7 +40,7 @@ for (const theme of ["light", "carbon"]) for (const width of [1280, 390]) {
  await page.mouse.move(0, 899);
  await page.screenshot({ path: `${out}/${name}-running.png` });
  await page.goto("http://localhost:5173/test/workflow-controls.html?step=worker-1");
- const input = page.getByLabel("Steer this worker");
+ const input = page.locator("#worker-steer");
  await page.screenshot({ path: `${out}/${name}-worker.png` });
  await input.fill("Focus on delivery after a worker finishes.");
  await page.getByRole("button", { name: "Send", exact: true }).click();
@@ -55,7 +55,10 @@ for (const theme of ["light", "carbon"]) for (const width of [1280, 390]) {
  await page.getByRole("button", { name: "Sending…", exact: true }).waitFor();
  await page.screenshot({ path: `${out}/${name}-sending.png` });
  await page.getByRole("button", { name: "Back to Workflow review" }).click();
+ assert.equal(await page.getByRole("button", { name: "Pausing…", exact: true }).count(), 0);
  await page.getByRole("button", { name: "Review contract", exact: true }).click();
+ assert.equal(await input.isEnabled(), true, "A pending steer does not disable B");
+ assert.equal(await page.getByRole("button", { name: "Sending…", exact: true }).count(), 0);
  finishSteer();
  pending = false;
  await page.getByRole("button", { name: "Send", exact: true }).waitFor();
@@ -69,7 +72,7 @@ for (const theme of ["light", "carbon"]) for (const width of [1280, 390]) {
  refuse = true;
  await input.fill("Check the last race before returning.");
  await page.getByRole("button", { name: "Send", exact: true }).click();
- await page.getByRole("alert").waitFor();
+ await page.getByText("This worker has ended. Your message was not sent.", { exact: true }).waitFor();
  assert.equal(await input.inputValue(), "Check the last race before returning.");
  await page.screenshot({ path: `${out}/${name}-error.png` });
  assert.deepEqual(errors, []);
