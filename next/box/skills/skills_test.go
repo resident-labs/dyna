@@ -42,7 +42,7 @@ func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
 		t.Fatalf("%+v", images)
 	}
 	nodes := items[5]
-	if nodes.Name != "dyna-nodes" || nodes.Description != "Use when you need to add nodes to Dyna, or a room needs its own or disposable machines" {
+	if nodes.Name != "dyna-nodes" || !strings.HasPrefix(nodes.Description, "Root only. Use when boxes or CI jobs wait for a host") {
 		t.Fatalf("%+v", nodes)
 	}
 	dir := t.TempDir()
@@ -62,7 +62,7 @@ func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"create NAME SIZE", "destroy NAME", "list ", "--per-session", "--max", "--idle", "room hosts", "--only", "Podman 5", "FUSE", "user_allow_other", "OpenSSH", "SSH key", "/home/pip/.local/share/dyna-next-host", "dormant session keeps its node", "#!/usr/bin/env bash"} {
+	for _, want := range []string{"create NAME SIZE", "destroy NAME", "list ", "--per-session", "--max", "--idle", "room hosts", "--only", "Podman 5", "FUSE", "user_allow_other", "OpenSSH", "authorized_keys", "--host-data", "dormant included", "host add NAME --ssh", "--discard-boxes", "#!/usr/bin/env bash"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("the skill does not say %q", want)
 		}
