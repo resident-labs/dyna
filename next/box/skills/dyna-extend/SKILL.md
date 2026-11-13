@@ -16,7 +16,7 @@ and an MCP server serves tools from a process or a URL. Each kind has a tool (`s
 | Tools someone publishes for Pi, on npm or git | Pi package | `dyna package add SOURCE` | `dyna package list` |
 | Tools an MCP server serves | MCP server | `dyna mcp add NAME URL_OR_COMMAND` | `dyna mcp list` |
 
-Each kind's `remove NAME` undoes an add; with `--global` it waits for a decision as an add does.
+Each kind's `remove NAME` undoes a new add; with `--global` it waits for a decision as an add does.
 
 ## Choose where it goes
 
@@ -35,9 +35,8 @@ A session changes only its own room.
 
 ## Make it reach sessions now
 
-Nothing reloads a running box. Call `session refresh` on yourself (it applies when your turn
-ends), on a session under you, or `dyna session refresh --room ROOM` for a whole room you manage.
-Then check: a skill appears in the skills list of the prompt; an MCP server's tools are named
+Nothing reloads a running box. After an add or change, call `session refresh` on the sessions that
+need it, then check: a skill appears in the skills list of the prompt; an MCP server's tools are named
 `mcp__<name>__<tool>` in deferred_tools; a package or server that failed arrives as a notice
 naming it, and the session runs without it.
 
@@ -100,6 +99,24 @@ its parent. Give `--room ROOM` for a room's item and leave it out for a global o
 KIND in `addon set` is `skill`, `package` or `mcp`. Check with the kind's `list`, whose columns are
 name, scope, on or off (with "root only"), who added it, and its source.
 
+## Replace an item, and undo it
+
+Saving or adding a name that exists replaces that item in the same scope: its root-only mark
+stays, a skill saved without `--host` keeps its hosts, and an item turned off is on again. Dyna
+keeps no old version, so record it first:
+
+- **Skill**: keep a copy of the folder you last saved, and note its scope and hosts from
+  `dyna skill list`. Undo by saving that copy again in the same scope.
+- **Package**: note its pinned source from `dyna package list`, then add the new source. Undo by
+  adding the noted source again.
+- **MCP server**: note its scope and URL or command from `dyna mcp list`. Add it again with the
+  same name and scope and the new URL or command; do not remove it first. Undo by adding the
+  noted definition again.
+- **Run-on hosts**: note them from `dyna skill list` before `skill set`; undo with `skill set`
+  and the old hosts.
+
+After a change or an undo, refresh and check as in "Make it reach sessions now".
+
 ## Add a Pi package
 
 Use one when something has to run as a Pi tool, or is already published as a package:
@@ -109,8 +126,8 @@ dyna package add npm:@example/pi-tools
 dyna package add https://github.com/example/pi-tools
 ```
 
-The source is pinned when added, to an exact npm version or a git commit, and an npm range is
-refused; add it again to move to a newer one. `package list` gives the name `remove` takes.
+An npm range is refused; give an exact version or a tag. To move to a newer version, add it again
+(see "Replace an item"). `package list` gives the name `remove` takes.
 The box has no Pi documentation. A package declares what it bundles in the `pi` block of its
 `package.json`, each key a list of files, folders or globs:
 
@@ -126,6 +143,7 @@ dyna mcp add files -- npx -y @modelcontextprotocol/server-filesystem /box/work
 ```
 
 Put `--` before a command with flags of its own. A command runs inside each box, so the room's
-image must have it (dyna-images). The name is letters, digits, `_` and `-`, and `dyna` is taken.
+image must have it (dyna-images). Use 1 to 64 letters, digits, underscores or hyphens; no leading,
+trailing or double underscore. The name `dyna` is reserved.
 Dyna has no place for a server's secret: a token in a URL or argument is stored as plain text that
 `mcp list` prints, so ask the owner instead of adding one.
