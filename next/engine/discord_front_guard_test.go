@@ -19,6 +19,7 @@ func TestDiscordFrontGuard(t *testing.T) {
 		{name: "empty team", policy: "front:\n  team: []", confined: true},
 		{name: "team", policy: "front:\n  team: [Admin]", roles: []string{"10"}},
 		{name: "no key", policy: "front: {}"},
+		{name: "owner DM", policy: "front:\n  team: [Admin]", owner: true},
 		{name: "owner", policy: "front:\n  team: [Admin]", owner: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -30,6 +31,10 @@ func TestDiscordFrontGuard(t *testing.T) {
 			m.Author.ID = "2"
 			if tc.owner {
 				m.Author.ID = "1"
+				if tc.name == "owner DM" {
+					m.Guild = ""
+					m.Channel = "500"
+				}
 			}
 			m.Member.Roles = tc.roles
 			if err := f.s.discordInput(f.ctx, f.client, m); err != nil {

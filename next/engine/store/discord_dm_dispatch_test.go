@@ -8,8 +8,10 @@ import (
 )
 
 func TestDiscordDMTakesATurnAlone(t *testing.T) {
-	for _, legacy := range []bool{false, true} {
-		t.Run(map[bool]string{false: "confined", true: "legacy DM"}[legacy], func(t *testing.T) {
+	for _, name := range []string{"confined", "legacy DM", "owner DM"} {
+		legacy := name != "confined"
+		owner := name == "owner DM"
+		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			s, err := Open(t.TempDir())
 			if err != nil {
@@ -25,7 +27,7 @@ func TestDiscordDMTakesATurnAlone(t *testing.T) {
 			}
 			input := func(id, channel string, direct bool) {
 				t.Helper()
-				if err := s.DiscordInput(ctx, contract.Event{ID: contract.EventID(id), Room: "room", Time: now, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.DiscordMessage{Channel: channel, Message: id, Confined: direct && !legacy, Direct: direct && legacy}}, "s"); err != nil {
+				if err := s.DiscordInput(ctx, contract.Event{ID: contract.EventID(id), Room: "room", Time: now, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.DiscordMessage{Channel: channel, Message: id, Confined: direct && !legacy, Direct: direct && legacy, Owner: direct && owner}}, "s"); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -46,6 +48,13 @@ func TestDiscordDMTakesATurnAlone(t *testing.T) {
 			}
 			input("dm", "500", true)
 			notice("notice")
+			if owner {
+				inputs := dispatch("ownerturn", false)
+				if len(inputs) != 2 {
+					t.Fatal("owner DM isolated", inputs)
+				}
+				return
+			}
 			input("server", "200", false)
 			inputs := dispatch("dmturn", false)
 			if len(inputs) != 1 || inputs[0].Reply.ReplyTo != "dm" {

@@ -190,7 +190,7 @@ func (s *Service) discordReadScope(ctx context.Context, caller contract.Principa
 	}
 	confined := ""
 	for _, m := range inputs {
-		if m.Confined || m.Direct {
+		if m.Confined || m.Direct && !m.Owner {
 			confined = m.Channel
 			break
 		}
