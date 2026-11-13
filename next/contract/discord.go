@@ -73,6 +73,7 @@ type DiscordAttachment struct {
 
 // DiscordMessage is text addressed to the room's bot by a human; only Owner is trusted.
 type DiscordMessage struct {
+	Direct      bool                `json:"direct,omitempty"`
 	Channel     string              `json:"channel"`
 	ChannelName string              `json:"channelName"`
 	Thread      string              `json:"thread,omitempty"`

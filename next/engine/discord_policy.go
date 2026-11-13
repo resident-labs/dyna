@@ -147,6 +147,61 @@ func (s *Service) discordPrepare(ctx context.Context, caller contract.Principal,
 	if err != nil {
 		return nil, failure(err)
 	}
+	scope, problem := s.discordReadScope(ctx, caller)
+	if problem != nil {
+		return nil, problem
+	}
+	route := policy.ParseRoute(method, path)
+	directOnly := false
+	if method != "GET" {
+		var problem *contract.Error
+		directOnly, problem = s.discordDMWriteScope(ctx, caller, route.ResourceID, false)
+		if problem != nil {
+			return nil, problem
+		}
+	}
+	if directOnly {
+		if route.Resource != policy.Channel {
+			return nil, directMessageRefusal()
+		}
+		switch route.Action {
+		case policy.MessageCreate, policy.MessageEdit, policy.MessageDelete:
+		default:
+			return nil, directMessageRefusal()
+		}
+		if route.Action != policy.MessageCreate {
+			client, err := s.machineDiscordClient(ctx)
+			if err != nil {
+				return nil, failure(err)
+			}
+			result, err := client.API(ctx, "GET", "/api/v10/channels/"+route.ResourceID+"/messages/"+route.MessageID, nil, "")
+			if err != nil {
+				return nil, failure(err)
+			}
+			var message struct{ Author struct{ ID string } }
+			bot, err := s.store.DiscordBot(ctx)
+			if err != nil {
+				return nil, failure(err)
+			}
+			if result.Status != 200 || json.Unmarshal(result.Body, &message) != nil || message.Author.ID != bot.ID {
+				return nil, directMessageRefusal()
+			}
+			if route.Action == policy.MessageDelete {
+				return body, nil
+			}
+		}
+	}
+	if _, dm := scope.dms[route.ResourceID]; dm && route.Resource == policy.Channel {
+		switch route.Action {
+		case policy.Read, policy.MessageCreate, policy.MessageEdit, policy.PollExpire, policy.Reaction:
+		case policy.MessageDelete:
+			if !directOnly {
+				return nil, forbidden()
+			}
+		default:
+			return nil, forbidden()
+		}
+	}
 	tree, err := s.store.RoomTree(ctx, session.Room)
 	if err != nil {
 		return nil, failure(err)
@@ -154,13 +209,12 @@ func (s *Service) discordPrepare(ctx context.Context, caller contract.Principal,
 	if tree.Root() == caller.Session {
 		return body, nil
 	}
-	route := policy.ParseRoute(method, path)
 	guild := ""
 	switch route.Resource {
 	case policy.Guild:
 		guild = route.ResourceID
 	case policy.Channel:
-		channel, known := s.discordDirectory.Channel(route.ResourceID)
+		channel, known := scope.channel(&s.discordDirectory, route.ResourceID)
 		if !known {
 			return nil, forbidden()
 		}

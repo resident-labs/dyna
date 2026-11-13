@@ -73,7 +73,7 @@ func (s *Service) DiscordRead(ctx context.Context, caller contract.Principal, re
 	} else {
 		path += "?" + query.Encode()
 	}
-	resolved, ok := s.discordDirectory.Channel(channel)
+	resolved, ok := scope.channel(&s.discordDirectory, channel)
 	if !ok || !scope.allowsChannel(resolved) {
 		return empty, forbidden()
 	}

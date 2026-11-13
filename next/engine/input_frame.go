@@ -98,7 +98,11 @@ func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, eve
 		return frame, files, nil
 	}
 	if b, ok := event.Body.(contract.DiscordMessage); ok {
-		sender := fmt.Sprintf("Discord user %q (%s, ID %s, roles: %s)", frameField(b.DisplayName), frameField(b.Author), b.AuthorID, frameField(strings.Join(b.Roles, ", ")))
+		roles := strings.Join(b.Roles, ", ")
+		if roles == "" {
+			roles = "no roles"
+		}
+		sender := fmt.Sprintf("Discord user %q (%s, ID %s, roles: %s)", frameField(b.DisplayName), frameField(b.Author), b.AuthorID, frameField(roles))
 		if b.Owner {
 			sender = "the owner"
 		}
