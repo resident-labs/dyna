@@ -12,10 +12,10 @@
   let live = $derived(run.state === "running");
   let word = $derived(runWords[run.state]);
   let steps = $derived(run.steps ?? 0);
-  // What is unusual comes first, so the cut falls on the description: the failures, then the progress of a run with a step in
-  // flight or the steps a past run took, which say what the tile's figure counts, then the script's status. "/" only means progress.
+  // What is unusual comes first, so the cut falls on the description: the failures, then the steps the run has
+  // (and how many run), which say what the tile's figure counts, then the script's status.
   let facts = $derived([...run.failed ? [`${count(run.failed, "step")} failed`] : [],
-    ...live ? run.running ? [`${steps - run.running}/${steps} steps`] : run.steps === 0 ? ["No steps yet"] : [] : run.steps ? [count(steps, "step")] : [],
+    ...run.steps ? [count(steps, "step"), ...live && run.running ? [`${run.running} running`] : []] : live && run.steps === 0 ? ["No steps yet"] : [],
     ...[run.status || run.description].filter(text => text && text !== "No steps yet")]);
   // A running run's age counts up.
   let now = $state(Date.now());
@@ -31,7 +31,7 @@
 </script>
 
 <span class="tile {run.state}" class:hurt={run.failed > 0 && run.state !== "failed"} role="img" aria-label={`Workflow, ${word.word.toLowerCase()}${run.steps ? `, ${count(steps, "step")}` : ""}${run.failed ? `, ${run.failed} failed` : ""}`} title={run.steps ? count(steps, "step") : undefined}>{#if steps}{steps > 999 ? "1k+" : steps}{:else}<Icon name="tool" size={14} />{/if}</span>
-<span class="who"><span class="name">{run.name}</span><span class="when" title={`${live ? "Running for" : word.word} ${live ? stamp : formatTime(at)}`}>{stamp}</span>
+<span class="who"><span class="name" title={run.name}>{run.name}</span><span class="when" title={`${live ? "Running for" : word.word} ${live ? stamp : new Date(at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`}>{stamp}</span>
   <span class="line">{#if word.tone}<StatusPill tone={word.tone} label={word.word} word />{:else}{word.word}{/if}{#each facts as part}{` · ${part}`}{/each}</span></span>
 
 <style>
