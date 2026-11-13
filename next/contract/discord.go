@@ -174,3 +174,8 @@ type DiscordCheckRequest struct {
 type DiscordCheckResponse struct {
 	Lines []string `json:"lines"`
 }
+
+// The folder methods answer with one shape; the method map names a method's response after the method.
+type DiscordExportResponse = DiscordFolderResponse
+type DiscordPlanResponse = DiscordFolderResponse
+type DiscordApplyResponse = DiscordFolderResponse
