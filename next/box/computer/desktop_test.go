@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/resident-labs/dyna/harness/testutil"
 )
 
 // pss sums the proportional memory of the desktop's programs, which share Chromium's pages between its processes.
@@ -179,7 +181,22 @@ for (const kind of ["mousedown", "mouseup", "dblclick", "contextmenu"]) addEvent
 	if _, err := c.conn.Write([]byte{2, 0, 0, 1, 0, 0, 0, 0}); err != nil { // SetEncodings: Raw only
 		t.Fatal(err)
 	}
-	time.Sleep(200 * time.Millisecond)
+	// A full update on this connection follows SetEncodings, so receiving it
+	// acknowledges that Raw-only mode is active before another connection moves the pointer.
+	if err := c.request(false, Rect{0, 0, c.width, c.height}); err != nil {
+		t.Fatal(err)
+	}
+	_ = c.conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	for {
+		got, err := c.update(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !got.empty() {
+			break
+		}
+	}
+	_ = c.conn.SetReadDeadline(time.Time{})
 	do(Move, Request{X: number(900), Y: number(700)})
 	if err := c.request(true, Rect{0, 0, c.width, c.height}); err != nil {
 		t.Fatal(err)
@@ -216,20 +233,14 @@ for (const kind of ["mousedown", "mouseup", "dblclick", "contextmenu"]) addEvent
 		t.Fatalf("launch %q", launched.Text)
 	}
 	do(Type, Request{Text: "echo typed-in-term > /tmp/dyna-term.out\n"})
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if out, _ := os.ReadFile("/tmp/dyna-term.out"); string(out) == "typed-in-term\n" {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("typing into the terminal did not run its command")
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+	testutil.Eventually(t, 5*time.Second, "typed terminal command", func() bool {
+		out, _ := os.ReadFile("/tmp/dyna-term.out")
+		return string(out) == "typed-in-term\n"
+	})
 	if _, err := Do(ctx, agent, Launch, Request{Command: "true", TimeoutMS: 1000}); err == nil || !strings.Contains(err.Error(), "no new window") {
 		t.Fatalf("a command with no window: %v", err)
 	}
-	time.Sleep(2 * time.Second)
+	time.Sleep(2 * time.Second) // sampling: preserve the settled-memory measurement interval.
 	t.Logf("desktop memory with a page and a terminal open: %d MiB PSS", pss()/1024)
 
 	do(Stop, Request{})
