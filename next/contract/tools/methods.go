@@ -231,7 +231,7 @@ var methodTable = []MethodEntry{
 		act("room", "pause", typ[contract.RoomPauseRequest](), "Set paused for room.", "room pause", "room resume"),
 	),
 	method(contract.MethodRoomRepoAdd, contract.ScopeAdmin, OwnerAccess,
-		act("room", "add_repo", typ[contract.RoomRepoAddRequest](), "Add a repository", "room repo add"),
+		act("room", "add_repo", typ[contract.RoomRepoAddRequest](), "Add a repository or update its settings. prEvents enables room-wide github.pr.changed events for all open PRs, including untracked ones; off by default. The initial census is silent. Later changes include ready and draft kinds. It does not assign a session or wake the room root without a subscription.", "room repo add"),
 	),
 	method(contract.MethodRoomRepos, contract.ScopeRead, UserAccess,
 		act("room", "repos", typ[contract.RoomReposRequest](), "List repositories in room.", "room repo list"),

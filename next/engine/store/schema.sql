@@ -133,3 +133,7 @@ CREATE TABLE discord_messages (message TEXT PRIMARY KEY, room TEXT NOT NULL REFE
 CREATE TABLE discord_owned (room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, guild TEXT NOT NULL, kind TEXT NOT NULL, path TEXT NOT NULL, id TEXT NOT NULL, channel TEXT NOT NULL DEFAULT '', content TEXT NOT NULL DEFAULT '', PRIMARY KEY(room,guild,kind,path));
 
 CREATE INDEX discord_outbox_group ON discord_outbox(group_key,id);
+
+CREATE TABLE room_pr_observed (room TEXT NOT NULL, repo TEXT NOT NULL, number INTEGER NOT NULL, snapshot TEXT NOT NULL, PRIMARY KEY(room,repo,number), FOREIGN KEY(room,repo) REFERENCES room_repos(room,repo) ON DELETE CASCADE);
+
+CREATE TABLE room_pr_settings (room TEXT NOT NULL, repo TEXT NOT NULL, pr_events INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(room,repo), FOREIGN KEY(room,repo) REFERENCES room_repos(room,repo) ON DELETE CASCADE);

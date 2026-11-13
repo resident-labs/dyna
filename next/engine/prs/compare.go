@@ -143,6 +143,13 @@ func ComparePR(row store.TrackedPR, items []contract.GitHubItem, listed *FeedIte
 		items = append(slices.Clone(items), refresh(&meta, listed, contract.GitHubItem{Repo: row.Repo, Author: listed.Author})...)
 	}
 	var kinds []contract.PrChangeKind
+	if next.Draft != row.Draft {
+		if next.Draft {
+			kinds = append(kinds, contract.PrChangeDraft)
+		} else {
+			kinds = append(kinds, contract.PrChangeReady)
+		}
+	}
 	var failed []string
 	if seen != nil {
 		next.State, next.Head, next.Review, next.CI = seen.State, seen.Head, seen.Review, seen.CI
@@ -230,6 +237,22 @@ func ComparePR(row store.TrackedPR, items []contract.GitHubItem, listed *FeedIte
 	change.Comments, change.MoreComments = found.shown()
 	if found.ownNews {
 		update.OwnWakeAt = now.UnixMilli()
+	}
+	for _, kind := range change.Kinds {
+		switch kind {
+		case contract.PrChangeApproved, contract.PrChangeChangesRequested:
+			if seen != nil && seen.OwnReview {
+				change.OwnKinds = append(change.OwnKinds, kind)
+			}
+		case contract.PrChangeComment:
+			if len(found.comments) > 0 && !slices.ContainsFunc(found.comments, func(i contract.GitHubItem) bool { return i.Outside }) {
+				change.OwnKinds = append(change.OwnKinds, kind)
+			}
+		case contract.PrChangeMetadata:
+			if len(found.actions) > 0 && !slices.ContainsFunc(found.actions, func(i contract.GitHubItem) bool { return i.Outside }) {
+				change.OwnKinds = append(change.OwnKinds, kind)
+			}
+		}
 	}
 	update.Change = &change
 	return update, true

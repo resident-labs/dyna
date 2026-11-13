@@ -173,6 +173,8 @@ var deleteRoom = []string{
 	`DELETE FROM checkins WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM boxes WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM sessions WHERE room=?1`,
+	`DELETE FROM room_pr_observed WHERE room=?1`,
+	`DELETE FROM room_pr_settings WHERE room=?1`,
 	`DELETE FROM room_repos WHERE room=?1`,
 	`DELETE FROM workflow_settings WHERE room=?1`,
 	// A repository another room lists stays, with a default room that exists. One no room lists goes, and with it any PR or issue
