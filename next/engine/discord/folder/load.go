@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -159,9 +160,25 @@ func rejectLinks(root string) error {
 }
 
 func validate(folder Folder) error {
+	switch folder.Server.Settings.Verification {
+	case "", "none", "low", "medium", "high", "very_high":
+	default:
+		return fmt.Errorf("server.yaml: unknown verification %q", folder.Server.Settings.Verification)
+	}
+	switch folder.Server.Settings.Notifications {
+	case "", "all", "mentions":
+	default:
+		return fmt.Errorf("server.yaml: unknown notifications %q", folder.Server.Settings.Notifications)
+	}
 	names := map[string]bool{}
 	ids := map[string]bool{}
 	for _, role := range folder.Server.Roles {
+		if role.Color != "" {
+			color, hasPrefix := strings.CutPrefix(role.Color, "#")
+			if _, err := strconv.ParseUint(color, 16, 24); !hasPrefix || len(color) != 6 || err != nil {
+				return fmt.Errorf("server.yaml: role %q color must be #RRGGBB", role.Name)
+			}
+		}
 		if role.Name == "" || names[role.Name] {
 			return fmt.Errorf("server.yaml: role name %q is missing or not unique", role.Name)
 		}

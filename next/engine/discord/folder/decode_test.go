@@ -63,6 +63,16 @@ func TestLoadSkipsUnmanagedDescendants(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsInvalidSettings(t *testing.T) {
+	for _, text := range []string{"settings: {verification: impossible}", "settings: {notifications: loudly}", "roles: [{name: Mods, color: red}]"} {
+		root := t.TempDir()
+		writeTestFile(t, root, "server.yaml", text)
+		if _, err := Load(root); err == nil {
+			t.Fatalf("accepted %s", text)
+		}
+	}
+}
+
 func TestLoadRefusesManagedSymlink(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, root, "server.yaml", "categories: []")
