@@ -11,11 +11,13 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -60,6 +62,8 @@ type crewEngine interface {
 // crewWorker is one running PiG session. harness/pig's Harness is one.
 type crewWorker interface {
 	Start(context.Context, contract.TurnID, []contract.TurnInput, func()) (contract.TurnEnded, error)
+	Steer(context.Context, contract.TurnInput) error
+	Delivered(context.Context, contract.DeliverySeq) (bool, error)
 	SessionFile() string
 	Close() error
 }
@@ -95,7 +99,9 @@ type Crew struct {
 	mu       sync.Mutex
 	workflow contract.BoxWorkflow // the newest version of the script, which a reload replaces
 	limits   map[contract.ProfileName]chan struct{}
-	running  map[string]*runningStep // by key, the steps this box is running
+	running  map[string]*runningStep               // by key, the steps this box is running
+	workers  map[string]crewWorker                 // by key, the workers that are open: a post to the run reaches each
+	queued   map[contract.DeliverySeq][]crewWorker // the open workers that queued a post and have not said whether they read it
 	taken    map[contract.DeliverySeq]bool
 	delivery contract.DeliverySeq // workers carry it, so the engine files their transcripts under the crew's turn
 	turn     contract.TurnID
@@ -137,7 +143,7 @@ func NewCrew(config CrewConfig) (*Crew, error) {
 		return nil, err
 	}
 	c := &Crew{config: config, slots: make(chan struct{}, max(config.Workflow.Workers, 1)), builds: builds, shims: shims, reloads: make(chan struct{}, 1),
-		workflow: config.Workflow, limits: make(map[contract.ProfileName]chan struct{}), running: make(map[string]*runningStep), taken: make(map[contract.DeliverySeq]bool)}
+		workflow: config.Workflow, limits: make(map[contract.ProfileName]chan struct{}), running: make(map[string]*runningStep), workers: make(map[string]crewWorker), queued: make(map[contract.DeliverySeq][]crewWorker), taken: make(map[contract.DeliverySeq]bool)}
 	c.addLimits(config.Workflow.Profiles)
 	return c, nil
 }
@@ -204,10 +210,22 @@ func (c *Crew) Abort(context.Context) error {
 	return nil
 }
 
-func (c *Crew) Delivered(_ context.Context, id contract.DeliverySeq) (bool, error) {
+// Delivered reports a turn's own inputs, and a post once a worker's session holds it.
+func (c *Crew) Delivered(ctx context.Context, id contract.DeliverySeq) (bool, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.taken[id], nil
+	taken, workers := c.taken[id], slices.Clone(c.queued[id])
+	c.mu.Unlock()
+	for _, worker := range workers {
+		if taken {
+			break
+		}
+		read, err := worker.Delivered(ctx, id)
+		if err != nil {
+			return false, err
+		}
+		taken = read
+	}
+	return taken, nil
 }
 
 // Recover keeps the delivery of a turn a new box takes over, so the workers it starts are filed under that turn too.
@@ -235,10 +253,70 @@ func (c *Crew) Compact(context.Context, int64) (harness.Compaction, error) {
 
 func (c *Crew) SetPromptSections(context.Context, []contract.ContextSection) error { return nil }
 
-// A script takes no input once it runs. The turn's final reply still answers whoever steered it.
-func (c *Crew) Steer(context.Context, contract.TurnInput) error    { return nil }
-func (c *Crew) FollowUp(context.Context, contract.TurnInput) error { return nil }
-func (c *Crew) ClearQueue(context.Context) error                   { return nil }
+// Steer gives a post to the run to every worker that is running, as a steer of its own turn: each reads it before its next
+// model request. The script is code and reads nothing. With no worker running, no one can take the post, and the engine
+// keeps it undelivered. The step's result is stored as any other, so its key and a replay do not change.
+//
+// A worker that queues the post has not read it yet: it may end first. So the post is delivered only once a worker's
+// session holds it, which Delivered and the end of each worker check. Every worker is tried before a failure counts, and
+// one that queued it is enough: a retry would give it to that worker twice.
+func (c *Crew) Steer(ctx context.Context, input contract.TurnInput) error {
+	c.mu.Lock()
+	workers := slices.Collect(maps.Values(c.workers))
+	c.mu.Unlock()
+	var queued []crewWorker
+	var failed error
+	for _, worker := range workers {
+		switch err := worker.Steer(ctx, input); {
+		case err == nil:
+			queued = append(queued, worker)
+		case !errors.Is(err, harness.ErrNoTurn):
+			failed = errors.Join(failed, err)
+		}
+	}
+	if len(queued) == 0 {
+		if failed != nil {
+			return failed
+		}
+		return harness.ErrNoTurn
+	}
+	if failed != nil {
+		log.Printf("workflow steer %d: %v", input.Delivery, failed)
+	}
+	c.mu.Lock()
+	for _, worker := range queued {
+		// The runner may send a post again; a worker is asked about it once.
+		if !slices.Contains(c.queued[input.Delivery], worker) {
+			c.queued[input.Delivery] = append(c.queued[input.Delivery], worker)
+		}
+	}
+	c.mu.Unlock()
+	return nil
+}
+
+// settle asks a worker whose turn has ended which queued posts its session holds, and forgets the worker.
+func (c *Crew) settle(ctx context.Context, worker crewWorker) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for id, workers := range c.queued {
+		at := slices.Index(workers, worker)
+		if at < 0 {
+			continue
+		}
+		if read, err := worker.Delivered(ctx, id); err == nil && read {
+			c.taken[id] = true
+		}
+		if c.queued[id] = slices.Delete(workers, at, at+1); len(c.queued[id]) == 0 {
+			delete(c.queued, id)
+		}
+	}
+}
+
+// FollowUp is a steer here: a worker has one turn, so input for after it has nowhere else to go.
+func (c *Crew) FollowUp(ctx context.Context, input contract.TurnInput) error {
+	return c.Steer(ctx, input)
+}
+func (c *Crew) ClearQueue(context.Context) error { return nil }
 
 // Start runs the script as the session's turn and returns when it settles. A script that throws fails the run; a failed
 // worker only fails its step, which the script may handle.
@@ -740,6 +818,14 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 	if err != nil {
 		return stepOutcome{reason: "the worker did not start: " + err.Error()}
 	}
+	c.mu.Lock()
+	c.workers[key] = worker
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		delete(c.workers, key)
+		c.mu.Unlock()
+	}()
 	file := worker.SessionFile()
 	out.transcript, _ = filepath.Rel(c.config.Sessions, file)
 	// Only the run page needs this, so a worker runs on without it.
@@ -754,6 +840,7 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 	turn, delivery := c.turn, c.delivery
 	c.mu.Unlock()
 	ended, err := worker.Start(ctx, turn, []contract.TurnInput{{Delivery: delivery, Text: prompt}}, func() {})
+	c.settle(context.WithoutCancel(ctx), worker)
 	out.usage = contract.Usage{Model: ended.Usage.Model, InputTokens: ended.Usage.InputTokens, OutputTokens: ended.Usage.OutputTokens, CacheReadTokens: ended.Usage.CacheReadTokens, CacheWriteTokens: ended.Usage.CacheWriteTokens}
 	switch {
 	case errors.Is(context.Cause(ctx), context.DeadlineExceeded):
