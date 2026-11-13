@@ -211,6 +211,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodWorkflowStepEnd, c, a.service.WorkflowStepEnd)
 	call(mux, contract.MethodWorkflowStepTranscript, c, a.service.WorkflowStepTranscript)
 	call(mux, contract.MethodWorkflowSetStatus, c, a.service.WorkflowSetStatus)
+	call(mux, contract.MethodWorkflowState, c, a.service.WorkflowState)
 	call(mux, contract.MethodSubscriptionAdd, c, a.service.SubscriptionAdd)
 	call(mux, contract.MethodSubscriptionList, c, a.service.SubscriptionList)
 	call(mux, contract.MethodSubscriptionRemove, c, a.service.SubscriptionRemove)

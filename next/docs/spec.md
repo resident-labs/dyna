@@ -147,6 +147,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `repos` |
 | `repo_heads` |
 | `room_repos` |
+| `room_pr_observed` |
 | `sessions` |
 | `events` |
 | `deliveries` | Recipient/sequence primary key; `deliveries_open` indexes open inputs, and `deliveries_by_turn(to_kind,to_id,turn,seq)` recovers all reply channels for a turn in sequence order, including read inputs. |
@@ -206,6 +207,9 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `subscription_files` |
 | `subscription_runs` | one row for each Run in progress, which is what stops a subscription overlapping itself |
 | `workflow_runs` | one row for each run of a script, tied to its run session (9.2) |
+| `workflow_subscriptions` | saved workflow action and key policy |
+| `workflow_queue` | bounded pending events and active runs by subscription and key |
+| `workflow_state` | small JSON state by subscription and key |
 | `workflow_steps` | a run's journal: each step's start and result, by step key |
 | `workflow_scripts` | every version of a run's script, which a reload adds (9.2) |
 | `workflow_settings` | the owner's workflow settings (9.2): one row for the global default (room `''`) and one for each room that overrides it; the `settings` column holds the JSON of the values that scope sets, so a value it leaves out is inherited |
@@ -1157,3 +1161,32 @@ The engine maintains one resumable gateway connection, with independent heartbea
 Each channel is a distinct reply destination. Discord inputs are immediate, bypassing the minute batch wait. A turn takes only the oldest pending waking Discord input; later waking Discord inputs never steer into a running turn and start new turns promptly after it ends. Non-waking Discord inputs returned by an earlier turn ride along with the next turn like other non-waking inputs. Non-Discord inputs still batch and steer as before. The final text replies to that message; debts preserved across turns still reply to the newest owed input per channel. Existing job and child waiting rules preserve debts per destination. EndTurn splits text into one durable outbox row per message, grouped by reply with the replied-to ID on the first chunk only, in the same transaction; the service drains them after outages and engine restarts. Every 4xx except 429 is permanent and wakes the answering session with one notice, discarding that reply's remaining chunks. Other failures back off from 1 second to 60 seconds and honor Retry-After; delayed replies do not block unrelated replies. Messages split under Discord's 2,000-character limit and close and reopen code fences. Stored inputs start in-memory typing, refreshed every eight seconds until a reply leaves the outbox or 10 minutes pass. Typing state is intentionally lost on restart. Final replies and send allow only user mentions, never role or everyone mentions. Sends accept at most 10 files, each at most 10 MB without boosts, and refuse larger files clearly. Embeds, buttons, polls and edits use api. Discord renders no tables or headings above level 3.
 
 The `discord` tool is declared in mapped rooms and is callable only by a mapping's answering session and its ancestors. `read` resolves a channel ID or exact scoped channel name, returns oldest-first outside-wrapped messages with paging, and retrieves a single message's attachments through a no-reply input delivery. `send` posts text and box files; `api` calls REST under `/api/v10`, adds the token, sends an optional audit-log reason, retries once after a 429 delay, and caps responses at 20 KB. Scope permits `/guilds/SERVER/...` for a server mapped to the room, `/channels/CHANNEL/...` for every channel and thread of its mapped servers as well as its explicitly mapped channels and their threads, and `GET /users/ID`. Everything else, including the bot's account and creating servers, is refused. Gateway metadata supplies channel ownership. Paths must be canonical with no empty or dot segments or percent escapes. Query and recursively nested JSON fields named guild_id or ending in channel_id must contain string IDs within the same mapped scope. Input duplicate detection uses discord_messages' primary key rather than scanning events. The `dyna-discord` skill supplies administration recipes and recommends a cheap front session without a repository or host access for public servers. There are no per-user sessions, slash-command input, voice, reactions, buttons or web settings.
+
+### Event-started workflow runs
+
+A room subscription may name a `workflow` action instead of `wake` or `run`.
+It saves script source and object args; the CLI reads `--workflow FILE`, just as
+`workflow run FILE` does. The engine adds the committed event envelope as
+`args.event`. A literal `key`, or a template using `{repo}` and `{number}`, owns
+a serial queue and JSON state within this subscription. No key means a single
+queue. `once` replaces only a queued event with the newest. Up to 256 events wait
+per subscription; further events remain in the room log. A failed run releases
+its key and is not retried. A refused start also consumes its event, counts a failure,
+and backs off subsequent starts using the command-subscription backoff. Its first
+failure sends a notice to the report session; later failures stay in hook.finished
+until a successful start resets the count. Different keys may run concurrently under room limits.
+
+Root or owner registers the action; its run is a child of root or the live room
+session named by `report`, which receives its normal posts and result. If the report
+session has closed or is closing, the new run is a child of root instead. Existing
+workflow permissions and GitHub write restrictions apply. Run status names the
+originating subscription and subject. Disabling a subscription holds new starts;
+removing it removes pending events and state but does not supersede a running run.
+
+`await state.get()` and `await state.set(value)` call `workflow.state` through the
+run's socket. Only an active event run may access its own subscription/key state;
+a caller cannot supply another key. State is JSON up to 64 KiB, null initially.
+Writes persist immediately, including on failure, and are not journaled steps.
+Own-account comment, changes_requested, approved and metadata do not start runs
+unless `includeOwn` is true; pushed, merged and ci_* remain eligible. Filters run
+after those suppressed kinds are removed. Batched PR changes split by PR first.

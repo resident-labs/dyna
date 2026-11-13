@@ -190,6 +190,19 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		}
 		lines = append(lines, "GitHub writes: "+strings.Join(groups, ", ")+" on "+strings.Join(repos, ", "))
 	}
+	repos, err := s.store.RoomRepos(ctx, session.Room)
+	if err != nil {
+		return contract.ContextSnapshotResponse{}, failure(err)
+	}
+	var prEvents []string
+	for _, repo := range repos {
+		if repo.PREvents {
+			prEvents = append(prEvents, string(repo.Repo))
+		}
+	}
+	if len(prEvents) > 0 {
+		lines = append(lines, "Room-wide PR events: "+strings.Join(prEvents, ", "))
+	}
 	ciRepos, err := s.store.CIRepos(ctx)
 	if err != nil {
 		return contract.ContextSnapshotResponse{}, failure(err)

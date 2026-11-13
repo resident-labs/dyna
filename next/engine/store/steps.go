@@ -6,12 +6,14 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 112
+const schemaVersion = 114
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
 	111: {`ALTER TABLE workflow_runs ADD COLUMN paused INTEGER NOT NULL DEFAULT 0`},
+	112: {`ALTER TABLE workflow_runs ADD COLUMN sub TEXT NOT NULL DEFAULT ''`, `ALTER TABLE workflow_runs ADD COLUMN subject TEXT NOT NULL DEFAULT ''`, `CREATE TABLE IF NOT EXISTS workflow_subscriptions (sub TEXT PRIMARY KEY REFERENCES subscriptions(id) ON DELETE CASCADE, script TEXT NOT NULL, args TEXT NOT NULL, subject_key TEXT NOT NULL, once_only INTEGER NOT NULL, report TEXT NOT NULL, include_own INTEGER NOT NULL)`, `CREATE TABLE IF NOT EXISTS workflow_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, sub TEXT NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE, subject TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, run TEXT NOT NULL DEFAULT '')`, `CREATE TABLE IF NOT EXISTS workflow_state (sub TEXT NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE, subject TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(sub,subject))`},
+	113: {`ALTER TABLE room_repos ADD COLUMN pr_events INTEGER NOT NULL DEFAULT 0`, `ALTER TABLE room_repos ADD COLUMN pr_census_at INTEGER NOT NULL DEFAULT 0`, `CREATE TABLE IF NOT EXISTS room_pr_observed (room TEXT NOT NULL, repo TEXT NOT NULL, number INTEGER NOT NULL, snapshot TEXT NOT NULL, PRIMARY KEY(room,repo,number), FOREIGN KEY(room,repo) REFERENCES room_repos(room,repo) ON DELETE CASCADE);`},
 	110: {`CREATE TABLE IF NOT EXISTS discord_owned (room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, guild TEXT NOT NULL, kind TEXT NOT NULL, path TEXT NOT NULL, id TEXT NOT NULL, channel TEXT NOT NULL DEFAULT '', content TEXT NOT NULL DEFAULT '', PRIMARY KEY(room,guild,kind,path))`},
 	109: {`CREATE TEMP TABLE discord_routes_old AS SELECT guild,channel,room,session,instructions FROM discord_routes`, `DROP TABLE discord_routes`, `CREATE TABLE discord_routes (guild TEXT NOT NULL, channel TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, session TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', policy TEXT NOT NULL DEFAULT '', policy_resolved TEXT NOT NULL DEFAULT '', PRIMARY KEY(guild,channel))`, `INSERT INTO discord_routes(guild,channel,room,session,instructions) SELECT guild,channel,room,session,instructions FROM discord_routes_old`, `DROP TABLE discord_routes_old`},
 	// The rooms that prefer an account, each one it serves.

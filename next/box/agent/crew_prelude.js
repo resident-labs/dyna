@@ -55,6 +55,7 @@
     emit({ op: "log", payload: line.join(" ") });
   };
   const api = {
+    state: { get: () => call({op: "state_get"}), set: (value) => call({op: "state_set", payload: value}) },
     args: JSON.parse(argsText),
     phase: (title) => {
       current = String(title);

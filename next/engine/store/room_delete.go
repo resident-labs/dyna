@@ -145,6 +145,9 @@ var deleteRoom = []string{
 	`DELETE FROM subscription_queue WHERE sub IN (SELECT id FROM subscriptions WHERE ` + roomSubscriptions + `)`,
 	`DELETE FROM subscription_args WHERE sub IN (SELECT id FROM subscriptions WHERE ` + roomSubscriptions + `)`,
 	`DELETE FROM subscription_files WHERE sub IN (SELECT id FROM subscriptions WHERE ` + roomSubscriptions + `)`,
+	`DELETE FROM workflow_subscriptions WHERE sub IN (SELECT id FROM subscriptions WHERE ` + roomSubscriptions + `)`,
+	`DELETE FROM workflow_queue WHERE sub IN (SELECT id FROM subscriptions WHERE ` + roomSubscriptions + `)`,
+	`DELETE FROM workflow_state WHERE sub IN (SELECT id FROM subscriptions WHERE ` + roomSubscriptions + `)`,
 	`DELETE FROM subscriptions WHERE ` + roomSubscriptions,
 	`DELETE FROM hostexec_runs WHERE grant_id IN (SELECT id FROM grants WHERE room=?1) OR op IN (SELECT id FROM operations WHERE room=?1 OR (by_kind='session' AND by_id IN (SELECT id FROM sessions WHERE room=?1)))`,
 	`DELETE FROM client_replays WHERE ref IN (SELECT id FROM sessions WHERE room=?1) OR ref IN (SELECT id FROM operations WHERE room=?1) OR ref IN (SELECT id FROM questions WHERE room=?1) OR (caller_kind='session' AND caller_id IN (SELECT id FROM sessions WHERE room=?1)) OR (method='goal.set' AND ref LIKE ?1||'/%')`,
@@ -173,6 +176,7 @@ var deleteRoom = []string{
 	`DELETE FROM checkins WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM boxes WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM sessions WHERE room=?1`,
+	`DELETE FROM room_pr_observed WHERE room=?1`,
 	`DELETE FROM room_repos WHERE room=?1`,
 	`DELETE FROM workflow_settings WHERE room=?1`,
 	// A repository another room lists stays, with a default room that exists. One no room lists goes, and with it any PR or issue

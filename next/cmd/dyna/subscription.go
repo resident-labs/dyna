@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -61,6 +62,8 @@ func describeSubscription(info contract.SubscriptionInfo) string {
 		if sub.Run.Host != "" {
 			action = "run " + sub.Run.Image + " on " + string(sub.Run.Host) + ": " + strings.Join(sub.Run.Command, " ")
 		}
+	} else if sub.Workflow != nil {
+		action = "workflow key " + sub.Key
 	} else if sub.Wake != "" {
 		action = "wake " + string(sub.Wake)
 	}
@@ -98,7 +101,8 @@ func printEventTypes(out io.Writer) error {
 
 func subscriptionCommand(get func() *socketClient) *cobra.Command {
 	root := &cobra.Command{Use: "subscription", Short: "Typed subscriptions: wake a session or run a small box on events or on a schedule"}
-	var machine bool
+	var machine, once, includeOwn bool
+	var workflow, workflowArgs, key, report string
 	var room, session, image, size, host, wake, every string
 	var on, where, files []string
 	add := &cobra.Command{Use: "add (--machine | --room ROOM | [--room ROOM] --session SESSION) (--on TYPE [--where FILTER] | --every DURATION) (--wake SESSION | [--image NAME] [--size SIZE] [--host HOST] [--file BOXPATH=LOCALPATH] -- COMMAND [ARG...])", Short: "Add a subscription",
@@ -126,7 +130,24 @@ dyna subscription events lists the event types.`,
 			if err != nil {
 				return err
 			}
-			req := contract.SubscriptionAddRequest{Scope: scope, Room: contract.RoomID(room), Session: session, Where: where, Every: contract.Duration(every), Wake: wake}
+			req := contract.SubscriptionAddRequest{Scope: scope, Room: contract.RoomID(room), Session: session, Where: where, Every: contract.Duration(every), Wake: wake, Key: key, Once: once, Report: contract.SessionID(report), IncludeOwn: includeOwn}
+			if workflow == "" && workflowArgs != "" {
+				return fmt.Errorf("--args needs --workflow")
+			}
+
+			if workflow != "" {
+				script, err := os.ReadFile(workflow)
+				if err != nil {
+					return err
+				}
+				spec := &contract.WorkflowSubscription{Script: string(script)}
+				if workflowArgs != "" {
+					if err := json.Unmarshal([]byte(workflowArgs), &spec.Args); err != nil {
+						return err
+					}
+				}
+				req.Workflow = spec
+			}
 			for _, kind := range on {
 				req.On = append(req.On, contract.EventType(kind))
 			}
@@ -144,6 +165,12 @@ dyna subscription events lists the event types.`,
 			return err
 		}}
 	add.Flags().BoolVar(&machine, "machine", false, "Machine scope")
+	add.Flags().StringVar(&workflow, "workflow", "", "Workflow script path in the repository or shared folder")
+	add.Flags().StringVar(&workflowArgs, "args", "", "Workflow args as a JSON object")
+	add.Flags().StringVar(&key, "key", "", "Serial key: literal, or template with {repo} and {number}")
+	add.Flags().StringVar(&report, "report", "", "Workflow report session; root by default")
+	add.Flags().BoolVar(&once, "once", false, "Replace a queued workflow event for its key with the newest")
+	add.Flags().BoolVar(&includeOwn, "include-own", false, "Allow own-account comments, reviews and metadata to start workflows")
 	add.Flags().StringVar(&room, "room", "", "Room scope, or with --session the session's room")
 	add.Flags().StringVar(&session, "session", "", "Session scope: a session name in --room, or a ses_… ID")
 	add.Flags().StringArrayVar(&on, "on", nil, "Event type (repeatable); dyna subscription events lists them")

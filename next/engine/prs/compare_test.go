@@ -273,7 +273,7 @@ func TestAReadOfAMergeWinsOverAClose(t *testing.T) {
 func TestAFeedKeepsTheItemCurrentQuietly(t *testing.T) {
 	listed := &FeedItem{Number: 1, URL: "new-url", Title: "new title", Author: "me", Draft: true, Meta: store.ItemMeta{Labels: []string{"bug"}, Body: "b1"}}
 	update, moved := ComparePR(tracked(nil), nil, listed, nil, "me", at)
-	if !moved || update.Change == nil || len(update.Change.Kinds) != 0 || update.PR.Title != "new title" || !update.PR.Draft || update.Meta.Labels[0] != "bug" {
+	if !moved || update.Change == nil || !slices.Contains(update.Change.Kinds, contract.PrChangeDraft) || update.PR.Title != "new title" || !update.PR.Draft || update.Meta.Labels[0] != "bug" {
 		t.Fatalf("%+v", update)
 	}
 }
@@ -320,5 +320,46 @@ func TestEarlyFailureThenCompletionAndSuccessfulRerun(t *testing.T) {
 	update, _ = ComparePR(row, nil, nil, observed(func(o *Observed) { o.CI = contract.PrCISuccess }), "me", at)
 	if update.Change == nil || !slices.Contains(update.Change.Kinds, contract.PrChangeCIPassed) {
 		t.Fatalf("lost pass: %+v", update.Change)
+	}
+}
+
+func TestDraftTransitions(t *testing.T) {
+	for _, draft := range []bool{true, false} {
+		row := tracked(func(r *store.TrackedPR) { r.Draft = !draft })
+		listed := &FeedItem{Number: 1, URL: row.URL, Title: row.Title, Author: row.Author, Draft: draft}
+		update, _ := ComparePR(row, nil, listed, nil, "me", at)
+		want := contract.PrChangeReady
+		if draft {
+			want = contract.PrChangeDraft
+		}
+		if update.Change == nil || !slices.Contains(update.Change.Kinds, want) {
+			t.Fatalf("draft %v: %+v", draft, update)
+		}
+		row.Baseline = true
+		update, _ = ComparePR(row, nil, listed, nil, "me", at)
+		if update.Change != nil {
+			t.Fatal("baseline emitted a transition")
+		}
+	}
+}
+
+func TestOwnKindsArePerKindAndKeepMixedOutsideComments(t *testing.T) {
+	for _, outside := range []bool{false, true} {
+		items := []contract.GitHubItem{said("me", "owner message"), act(contract.GitHubLabeled, "me", "bug")}
+		if outside {
+			items = append(items, said("other", "outside message"))
+		}
+		seen := observed(func(o *Observed) { o.Head = "new"; o.Review = contract.PrChangesRequested; o.OwnReview = true })
+		update, _ := ComparePR(tracked(nil), items, nil, seen, "me", at)
+		if update.Change == nil {
+			t.Fatal("missing change")
+		}
+		own := update.Change.OwnKinds
+		if !slices.Contains(own, contract.PrChangeChangesRequested) || !slices.Contains(own, contract.PrChangeMetadata) || slices.Contains(own, contract.PrChangePushed) {
+			t.Fatalf("%+v", update.Change)
+		}
+		if slices.Contains(own, contract.PrChangeComment) == outside {
+			t.Fatalf("outside %v: %+v", outside, update.Change)
+		}
 	}
 }

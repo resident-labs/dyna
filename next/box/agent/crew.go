@@ -56,6 +56,7 @@ type crewEngine interface {
 	WorkflowStepEnd(context.Context, contract.WorkflowStepEndRequest) error
 	WorkflowStepTranscript(context.Context, contract.WorkflowStepTranscriptRequest) error
 	WorkflowSetStatus(context.Context, contract.WorkflowSetStatusRequest) error
+	WorkflowState(context.Context, contract.WorkflowStateRequest) (contract.WorkflowStateResponse, error)
 	WorkflowPost(context.Context, contract.PostRequest) (contract.PostResponse, error)
 }
 
@@ -479,7 +480,7 @@ const (
 	// crewScriptMemory bounds one script's VM. A script holds the results of its steps, which are at most a megabyte each.
 	crewScriptMemory = 256 << 20
 	// crewAPI is the names of the script API, which crew_prelude.js builds and the script's own scope declares.
-	crewAPI = "args, phase, log, console, status, agent, run, merge, post, parallel, pipeline, workflow, Date, Math"
+	crewAPI = "state, args, phase, log, console, status, agent, run, merge, post, parallel, pipeline, workflow, Date, Math"
 )
 
 //go:embed crew_prelude.js
@@ -572,6 +573,16 @@ func finalText(value json.RawMessage) string {
 
 func (c *Crew) handle(ctx context.Context, call crewCall) crewReply {
 	switch call.Op {
+	case "state_get", "state_set":
+		req := contract.WorkflowStateRequest{}
+		if call.Op == "state_set" {
+			req.Value = call.Payload
+		}
+		response, err := c.config.Engine.WorkflowState(ctx, req)
+		if err != nil {
+			return crewReply{Error: err.Error()}
+		}
+		return crewReply{Value: response.Value}
 	case "agent":
 		return c.agentCall(ctx, call)
 	case "run":

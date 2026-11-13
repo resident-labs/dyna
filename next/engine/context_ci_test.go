@@ -141,3 +141,35 @@ func TestContextRoomCIAtNextTurn(t *testing.T) {
 		t.Fatalf("stale sections: %+v", start.Sections)
 	}
 }
+
+func TestContextShowsRoomWidePREventsOnlyWhenEnabled(t *testing.T) {
+	r := newGrantRig(t)
+	snapshot := func() string {
+		t.Helper()
+		got, problem := r.s.ContextSnapshot(t.Context(), r.root, contract.ContextSnapshotRequest{Section: contract.ContextRoom})
+		if problem != nil {
+			t.Fatal(problem)
+		}
+		for _, section := range got.Sections {
+			if section.Key == contract.ContextRoom {
+				return section.Text
+			}
+		}
+		return ""
+	}
+	if strings.Contains(snapshot(), "Room-wide PR events:") {
+		t.Fatal("on by default")
+	}
+	if err := r.s.store.AddRoomRepo(t.Context(), r.room, "owner/review", false, true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(snapshot(), "Room-wide PR events: owner/review") {
+		t.Fatal("enabled setting absent")
+	}
+	if err := r.s.store.AddRoomRepo(t.Context(), r.room, "owner/review", false, false); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(snapshot(), "Room-wide PR events:") {
+		t.Fatal("disabled setting remained")
+	}
+}

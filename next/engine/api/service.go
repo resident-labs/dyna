@@ -161,6 +161,7 @@ type Service interface {
 	WorkflowStepEnd(context.Context, contract.Principal, contract.WorkflowStepEndRequest) (contract.WorkflowStepEndResponse, *contract.Error)
 	WorkflowStepTranscript(context.Context, contract.Principal, contract.WorkflowStepTranscriptRequest) (contract.WorkflowStepTranscriptResponse, *contract.Error)
 	WorkflowSetStatus(context.Context, contract.Principal, contract.WorkflowSetStatusRequest) (contract.WorkflowSetStatusResponse, *contract.Error)
+	WorkflowState(context.Context, contract.Principal, contract.WorkflowStateRequest) (contract.WorkflowStateResponse, *contract.Error)
 	SubscriptionAdd(context.Context, contract.Principal, contract.SubscriptionAddRequest) (contract.SubscriptionAddResponse, *contract.Error)
 	SubscriptionList(context.Context, contract.Principal, contract.SubscriptionListRequest) (contract.SubscriptionListResponse, *contract.Error)
 	SubscriptionRemove(context.Context, contract.Principal, contract.SubscriptionRemoveRequest) (contract.SubscriptionRemoveResponse, *contract.Error)

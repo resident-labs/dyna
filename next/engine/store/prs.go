@@ -368,6 +368,7 @@ func (s *Store) moveRepoHead(ctx context.Context, tx *sql.Tx, head RepoHead, at 
 
 // GitHubPass is what one pass found, across every repository it read.
 type GitHubPass struct {
+	RoomPRs []RoomPRPass
 	PRs     []PRUpdate
 	Issues  []IssueUpdate
 	Heads   []RepoHead
@@ -383,6 +384,30 @@ type GitHubPass struct {
 // drops out.
 func (s *Store) ApplyPRPoll(ctx context.Context, pass GitHubPass, at time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		for i := range pass.RoomPRs {
+			changes := pass.RoomPRs[i].Changes[:0]
+			for _, change := range pass.RoomPRs[i].Changes {
+				duplicate := false
+				for _, update := range pass.PRs {
+					if update.Change != nil && update.PR.Repo == change.PR.Repo && update.PR.Number == change.PR.Number {
+						var room contract.RoomID
+						err := tx.QueryRowContext(ctx, recipient("pr_owners"), change.PR.Repo, change.PR.Number).Scan(new(contract.SessionID), &room)
+						if err != nil && !errors.Is(err, sql.ErrNoRows) {
+							return err
+						}
+						duplicate = err == nil && room == pass.RoomPRs[i].Room
+						break
+					}
+				}
+				if !duplicate {
+					changes = append(changes, change)
+				}
+			}
+			pass.RoomPRs[i].Changes = changes
+		}
+		if err := s.applyRoomPRs(ctx, tx, pass.RoomPRs, at); err != nil {
+			return err
+		}
 		type batch struct {
 			session contract.SessionID
 			room    contract.RoomID
