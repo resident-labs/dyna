@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -606,15 +605,30 @@ await post('@root', 'g1 written', null); status('g1 written'); return a`
 func TestAProfileLimitBoundsItsWorkers(t *testing.T) {
 	h := newCrewHarness(t)
 	var running, peak atomic.Int32
+	entered, release := make(chan struct{}, 6), make(chan struct{})
+	defer close(release)
 	h.reply = func(prompt, _ string) (contract.TurnEnded, error) {
 		now := running.Add(1)
 		for old := peak.Load(); now > old && !peak.CompareAndSwap(old, now); old = peak.Load() {
 		}
-		time.Sleep(50 * time.Millisecond)
+		entered <- struct{}{}
+		<-release
 		running.Add(-1)
 		return contract.TurnEnded{Final: prompt}, nil
 	}
-	h.run(crewMeta+`return await parallel(['a', 'b', 'c', 'd', 'e', 'f'].map((n) => () => agent(n)))`, contract.WorkflowProfile{Name: "fast", MaxConcurrent: 2})
+	_, done := h.start(crewMeta+`return await parallel(['a', 'b', 'c', 'd', 'e', 'f'].map((n) => () => agent(n)))`, contract.WorkflowProfile{Name: "fast", MaxConcurrent: 2})
+	for wave := 0; wave < 3; wave++ {
+		for i := 0; i < 2; i++ {
+			select {
+			case <-entered:
+			case <-time.After(10 * time.Second):
+				t.Fatal("workers did not fill the available profile slots")
+			}
+		}
+		release <- struct{}{}
+		release <- struct{}{}
+	}
+	<-done
 	if peak.Load() != 2 {
 		t.Fatalf("peak %d workers with a limit of 2", peak.Load())
 	}
@@ -623,15 +637,15 @@ func TestAProfileLimitBoundsItsWorkers(t *testing.T) {
 func TestStoppingARunStoresNothing(t *testing.T) {
 	h := newCrewHarness(t)
 	entered := make(chan struct{})
-	h.reply = func(string, string) (contract.TurnEnded, error) {
+	hold := func(ctx context.Context, _ string) error {
 		close(entered)
-		time.Sleep(200 * time.Millisecond)
-		return contract.TurnEnded{}, errors.New("killed")
+		<-ctx.Done()
+		return ctx.Err()
 	}
 	state, sessions := t.TempDir(), t.TempDir()
 	crew, err := NewCrew(CrewConfig{Workflow: contract.BoxWorkflow{Script: crewMeta + `return await agent('long')`, Profiles: []contract.WorkflowProfile{{Name: "fast"}}, Workers: 1}, Engine: h.journal, Transcript: NewTranscript(&transcriptEngine{}, sessions), Workdir: h.workdir, Sessions: sessions, State: state,
 		Open: func(context.Context, contract.WorkflowProfile, string, string, dynaext.Submit) (crewWorker, error) {
-			return &fakeWorker{reply: h.reply, file: filepath.Join(sessions, "w.jsonl")}, nil
+			return &fakeWorker{reply: h.reply, hold: hold, file: filepath.Join(sessions, "w.jsonl")}, nil
 		}})
 	if err != nil {
 		t.Fatal(err)
