@@ -99,7 +99,7 @@
   let steering = $derived(worker ? drafts[worker.key] ?? "" : "");
   let sending = $state<string[]>([]);
   let steerBusy = $derived(!!worker && sending.includes(worker.key));
-  let steerSent = $state(false);
+  let steerSent = $state("");
   let pauseBusy = $state(false);
   let controlError = $state("");
   async function pause() {
@@ -116,7 +116,7 @@
   $effect(() => {
     shown;
     navigation++;
-    steerSent = false;
+    steerSent = "";
     controlError = "";
   });
   async function steer(event: SubmitEvent) {
@@ -125,11 +125,11 @@
     const key = worker.key, visit = navigation, text = steering;
     sending = [...sending, key];
     controlError = "";
-    steerSent = false;
+    steerSent = "";
     try {
       await call("workflow.steer", { run: info.run, step: key, text });
       if (drafts[key] === text) drafts[key] = "";
-      if (visit === navigation) steerSent = true;
+      if (visit === navigation) steerSent = text;
     } catch {
       await run.read();
       if (visit === navigation && steps.find(step => step.key === key)?.state === "running") controlError = "Could not send. Your message is kept; try again or return to the run.";
@@ -154,7 +154,7 @@
     void tick().then(() => frame?.querySelector<HTMLElement>(`[data-step="${CSS.escape(key ?? "")}"]`)?.focus());
   }
   function closeWorker(event: KeyboardEvent) {
-    if (event.key === "Escape" && worker && (!steering || worker.state !== "running") && !event.defaultPrevented) hide();
+    if (event.key === "Escape" && worker && !event.defaultPrevented) hide();
   }
 </script>
 
@@ -187,10 +187,10 @@
     {#if operate && ((!ended && worker.state === "running") || steering)}
       <form class="steer" onsubmit={steer}>
         <label for="worker-steer">{worker.state === "running" ? "Steer this worker" : "Your unsent message"}</label>
-        <div><textarea id="worker-steer" rows="1" bind:value={drafts[worker.key]} placeholder="Tell this worker what to do differently" readonly={worker.state !== "running" || steerBusy} onkeydown={event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing && matchMedia("(hover: hover)").matches) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} oninput={() => { steerSent = false; controlError = ""; }}></textarea>{#if worker.state === "running"}<button type="submit" disabled={steerBusy || !steering.trim()}>{steerBusy ? "Sending…" : "Send"}</button>{:else}<button type="button" onclick={() => { drafts[worker.key] = ""; controlError = ""; }}>Discard</button>{/if}</div>
+        <div><textarea id="worker-steer" rows="1" bind:value={drafts[worker.key]} placeholder="Tell this worker what to do differently" readonly={worker.state !== "running" || steerBusy} onkeydown={event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing && matchMedia("(hover: hover)").matches) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} oninput={() => { steerSent = ""; controlError = ""; }}></textarea>{#if worker.state === "running"}<button type="submit" disabled={steerBusy || !steering.trim()}>{steerBusy ? "Sending…" : "Send"}</button>{:else}<button type="button" onclick={() => { drafts[worker.key] = ""; controlError = ""; }}>Discard</button>{/if}</div>
         <p class="steer-help">{worker.state !== "running" ? "This worker has ended. Your message was not sent." : info?.paused ? "Only this worker gets your message. The run is paused; you can still steer this worker." : "Only this worker gets your message."}<span class="keyboard-hint">{worker.state === "running" ? " Enter to send · Shift+Enter for a new line" : ""}</span></p>
         {@render controlFailure()}
-        <span class="steer-status" class:sent={steerSent} role="status">{steerSent ? "✓ Sent to this worker." : ""}</span>
+        <span class="steer-status" class:sent={!!steerSent} role="status">{#if steerSent}<Icon name="check" size={12} /><span>Sent to this worker: {steerSent}</span>{/if}</span>
       </form>
     {/if}
     {#if worker.reason}<div class="failure worker-failure"><span class="slot"><Icon name="warning" size={16} /></span><span>{worker.reason}</span></div>{/if}
@@ -221,7 +221,7 @@
         {#if info.paused && !ended}<p class="muted">No new steps will start. Running workers keep going and can still be steered. Unpause to continue.</p>{/if}
         {#if info.description}<p class="muted">{info.description}</p>{/if}
         {#if !ended && steerable.length}
-          <div class="running-workers"><span>Steer a worker:</span>{#each steerable.slice(0, 4) as step (step.key)}<button type="button" title="Open transcript and steer this worker" onclick={() => show(step)}>{step.name}</button>{/each}{#if steerable.length > 4}<span>and {steerable.length - 4} more in the chart</span>{/if}</div>
+          <div class="running-workers"><span>Steer a worker:</span>{#each steerable.slice(0, 4) as step (step.key)}<button type="button" title="Open transcript and steer this worker" onclick={() => show(step)}>{step.name}</button>{/each}{#if steerable.length > 4}<span>and {steerable.length - 4} more: open a stage in the chart</span>{/if}</div>
         {/if}
         <div class="said" class:script={!!said}>
           {#if info.state === "running"}<WorkingDot />{/if}
@@ -293,7 +293,7 @@
   .steer textarea:focus-visible, .steer button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .steer-status { display: block; color: var(--muted); font-size: 12px; }
   .steer-status { min-height: 16px; }
-  .steer-status.sent { color: var(--success); }
+  .steer-status.sent { display: flex; align-items: baseline; gap: 4px; color: var(--success); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 144px; overflow-y: auto; }
   .steer-help { color: var(--muted); font-size: 12px; margin-top: 4px; }
   .steer textarea { resize: vertical; field-sizing: content; min-height: 32px; max-height: 144px; height: auto; padding-block: 6px; }
   @media (hover: none) { .steer textarea, .steer button { min-height: 40px; } .keyboard-hint { display: none; } .running-workers button { min-height: 40px; } }
