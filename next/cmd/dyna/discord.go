@@ -11,6 +11,9 @@ import (
 	"strings"
 )
 
+func (c *socketClient) DiscordPolicy(ctx context.Context, req contract.DiscordPolicyRequest) (contract.DiscordPolicyResponse, error) {
+	return call[contract.DiscordPolicyRequest, contract.DiscordPolicyResponse](ctx, c, contract.MethodDiscordPolicy, req)
+}
 func (c *socketClient) DiscordInstructions(ctx context.Context, req contract.DiscordInstructionsRequest) (contract.DiscordInstructionsResponse, error) {
 	return call[contract.DiscordInstructionsRequest, contract.DiscordInstructionsResponse](ctx, c, contract.MethodDiscordInstructions, req)
 }
@@ -144,6 +147,25 @@ func discordCommand(getClient func() client) *cobra.Command {
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 	}}
-	root.AddCommand(api, send, read, instructions)
+	policyCmd := &cobra.Command{Use: "policy [TEXT]", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		service, ok := getClient().(interface {
+			DiscordPolicy(context.Context, contract.DiscordPolicyRequest) (contract.DiscordPolicyResponse, error)
+		})
+		if !ok {
+			return fmt.Errorf("Discord unavailable")
+		}
+		server, _ := cmd.Flags().GetString("server")
+		req := contract.DiscordPolicyRequest{Server: server}
+		if len(args) > 0 {
+			req.Text = &args[0]
+		}
+		result, err := service.DiscordPolicy(cmd.Context(), req)
+		if err == nil {
+			fmt.Fprintln(cmd.OutOrStdout(), result.Text)
+		}
+		return err
+	}}
+	policyCmd.Flags().String("server", "", "Mapped server ID")
+	root.AddCommand(api, send, read, instructions, policyCmd)
 	return root
 }

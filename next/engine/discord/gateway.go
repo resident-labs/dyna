@@ -16,6 +16,8 @@ import (
 )
 
 type Message struct {
+	Webhook string `json:"webhook_id"`
+	Type    int    `json:"type"`
 	ID      string `json:"id"`
 	Channel string `json:"channel_id"`
 	Guild   string `json:"guild_id"`
@@ -288,7 +290,7 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 					if json.Unmarshal(p.Data, &m) != nil {
 						return errors.New("invalid Discord message")
 					}
-					if m.Author.Bot || m.Author.ID == g.Bot {
+					if m.Author.Bot || m.Author.ID == g.Bot || m.Webhook != "" || m.Type == 24 {
 						continue
 					}
 					addressed := false

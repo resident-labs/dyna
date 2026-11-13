@@ -14,8 +14,11 @@ type Channel struct {
 	Type   int    `json:"type"`
 }
 type Role struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	Permissions uint64 `json:"permissions,string"`
+	Position    int    `json:"position"`
+	Managed     bool   `json:"managed"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
 	// Tags.Bot names the bot a managed role belongs to. Discord offers that role beside the bot itself when someone types its name.
 	Tags struct {
 		Bot string `json:"bot_id"`

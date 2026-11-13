@@ -111,7 +111,11 @@ func (s *Service) discordScope(ctx context.Context, caller contract.Principal, m
 			return problem
 		}
 	}
-	return nil
+	var body json.RawMessage
+	if len(bodies) > 0 {
+		body = bodies[0]
+	}
+	return s.discordCap(ctx, caller, method, path, body)
 }
 func (s *Service) discordURLScope(ctx context.Context, caller contract.Principal, method, path string) *contract.Error {
 	// Public API paths are validated and normalized by DiscordAPI; other callers
@@ -245,7 +249,7 @@ func (s *Service) DiscordSend(ctx context.Context, caller contract.Principal, re
 	if problem != nil {
 		return contract.DiscordSendResponse{}, problem
 	}
-	if problem := s.discordScope(ctx, caller, "POST", "/api/v10/channels/"+req.Channel+"/messages"); problem != nil {
+	if problem := s.discordScope(ctx, caller, "POST", "/api/v10/channels/"+req.Channel+"/messages", json.RawMessage(`{"allowed_mentions":{"parse":["users"]}}`)); problem != nil {
 		return contract.DiscordSendResponse{}, problem
 	}
 	if len(req.Paths) > 0 {

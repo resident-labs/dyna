@@ -96,6 +96,9 @@ func (s *Service) runDiscord(ctx context.Context, gateway string) {
 	}
 }
 func (s *Service) discordInput(ctx context.Context, client *discord.Client, m discord.Message) error {
+	if m.Webhook != "" || m.Type == 24 {
+		return nil
+	}
 	routes, err := s.store.DiscordRoutes(ctx, "")
 	if err != nil {
 		return err

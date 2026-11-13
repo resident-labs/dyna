@@ -6,11 +6,12 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 109
+const schemaVersion = 110
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
+	110: {`ALTER TABLE discord_routes ADD COLUMN policy TEXT NOT NULL DEFAULT ''`, `ALTER TABLE discord_routes ADD COLUMN policy_resolved TEXT NOT NULL DEFAULT ''`},
 	// The rooms that prefer an account, each one it serves.
 	108: {`CREATE TABLE IF NOT EXISTS account_prefs (account TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, PRIMARY KEY(account, room))`},
 	107: {`CREATE INDEX IF NOT EXISTS deliveries_by_turn ON deliveries(to_kind,to_id,turn,seq)`},

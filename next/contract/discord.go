@@ -15,6 +15,7 @@ type DiscordConfigureRequest struct {
 	Clear bool    `json:"clear,omitempty"`
 }
 type DiscordRoute struct {
+	Policy       string    `json:"policy,omitempty"`
 	Instructions string    `json:"instructions,omitempty"`
 	Guild        string    `json:"guild"`
 	Channel      string    `json:"channel,omitempty"`
@@ -129,3 +130,14 @@ type DiscordFilesRetrieved struct {
 
 func (DiscordFilesRetrieved) EventType() EventType { return "discord.files_retrieved" }
 func (DiscordFilesRetrieved) isEventBody()         {}
+
+const MethodDiscordPolicy Method = "discord.policy"
+
+type DiscordPolicyRequest struct {
+	Room   RoomID  `json:"room,omitempty"`
+	Server string  `json:"server,omitempty"`
+	Text   *string `json:"text,omitempty"`
+}
+type DiscordPolicyResponse struct {
+	Text string `json:"text"`
+}

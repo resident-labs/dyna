@@ -126,7 +126,7 @@ CREATE TABLE service_secrets (service TEXT NOT NULL REFERENCES services(id), nam
 CREATE TABLE service_leftovers (host TEXT NOT NULL REFERENCES hosts(name), room TEXT NOT NULL, service TEXT NOT NULL, PRIMARY KEY(host, service));
 CREATE TABLE service_image_sizes (room TEXT NOT NULL, source TEXT NOT NULL, bytes INTEGER NOT NULL, measured_at INTEGER NOT NULL, PRIMARY KEY(room, source));
 
-CREATE TABLE discord_routes (guild TEXT NOT NULL, channel TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, session TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', PRIMARY KEY(guild,channel));
+CREATE TABLE discord_routes (guild TEXT NOT NULL, channel TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, session TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', policy TEXT NOT NULL DEFAULT '', policy_resolved TEXT NOT NULL DEFAULT '', PRIMARY KEY(guild,channel));
 CREATE TABLE discord_outbox (id INTEGER PRIMARY KEY, room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, session TEXT NOT NULL, channel TEXT NOT NULL, message TEXT NOT NULL, text TEXT NOT NULL, group_key TEXT NOT NULL DEFAULT '', attempts INTEGER NOT NULL DEFAULT 0, due_at INTEGER NOT NULL DEFAULT 0);
 
 CREATE TABLE discord_messages (message TEXT PRIMARY KEY, room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE);
