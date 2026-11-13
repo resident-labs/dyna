@@ -11,9 +11,8 @@ or a node pool adds them: a script on the engine host rents a machine when a box
 rule names the pool has nowhere to go, and gives it back once it is empty.
 
 The `dyna …` commands below run with bash, host set to the engine host named in your prompt;
-`dyna COMMAND --help` is the reference. From your box, `host …` and `pool remove` are refused as
-owner-only. Host switches, CI scale and the rooms a host serves are in the dyna-admin skill, which
-also says when a change that reaches every room is yours to make.
+`dyna COMMAND --help` is the reference. Host switches, CI scale, the rooms a host serves and when a
+change that reaches every room is yours to make are in the dyna-admin skill.
 
 ## Why a box waits
 
@@ -21,7 +20,7 @@ also says when a change that reaches every room is yours to make.
 
 | boxReason | Meaning | Next step |
 |---|---|---|
-| `pool-node` | its node is being created (the script has 15 minutes) | nothing |
+| `pool-node` | its pool is creating a node (up to 15 minutes), or is at its max | `dyna pool list`; at max (`6 of 6 nodes`), close sessions that hold nodes or ask the owner to raise it |
 | `pool-failed` | a create failed; retry in 1 minute, doubling to 1 hour | `dyna pool list` |
 | `room-host` | no host fits the room's rule and serves the room | `dyna host list` |
 | `no-ready-host` | no host is ready | `dyna host list` |
@@ -44,6 +43,8 @@ pool.sh list               # prints a JSON list of the NAMEs it still has
   80 GiB of disk above the host's floor of 20 GiB (or a tenth of the disk, if more).
 - It runs on the engine host as the engine's user, with only `PATH`, `HOME`, `USER`, `LANG` and
   `XDG_RUNTIME_DIR` set, so it reads credentials as the owner's own commands do.
+- It runs in a private folder that holds only the engine's copy of the script, not in the folder
+  you added it from: name helpers and credential files by absolute path, or keep it self-contained.
 - A non-zero exit is a failure; the end of stderr goes into the room's notice and `dyna pool list`.
 - A node that fails the host check (Prerequisites, below) or is too small for its box is destroyed
   as a failed create, so the script starts from an image that has everything ready.
@@ -64,14 +65,14 @@ case "$1" in
 esac
 ```
 
-Test it on the engine host, in the same bare environment, before adding it:
+Test it on the engine host before adding it, from another folder and in the same bare environment:
 
 ```bash
-env -i PATH="$PATH" HOME="$HOME" USER="$USER" LANG="$LANG" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
-  ./boats.sh create boats-test0001 agent
-./boats.sh list                    # shows "boats-test0001"
-./boats.sh destroy boats-test0001
-./boats.sh list                    # no longer shows it; check the provider too
+cd /tmp; bare="env -i PATH=$PATH HOME=$HOME USER=$USER LANG=$LANG XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+$bare /path/to/boats.sh create boats-test0001 agent
+$bare /path/to/boats.sh list       # shows "boats-test0001"
+$bare /path/to/boats.sh destroy boats-test0001
+$bare /path/to/boats.sh list       # no longer shows it; check the provider too
 ```
 
 ## Add the pool and point the room at it
@@ -82,32 +83,29 @@ dyna room hosts ROOM_ID --only boats
 dyna pool list                     # boats  0 of 6 nodes  per session
 ```
 
-- `--script` is a path on the engine host; the engine keeps a copy, so a later edit changes nothing.
-- `--max` is required: the most nodes at once, counting those being created. `--per-session`
-  gives each box a node of its own, which goes when the session closes. Without it sessions share
-  nodes, and one with no box or runner goes after `--idle` (default `30m`, reset by an engine
-  restart).
-- `room hosts` replaces the rule whole: at most one pool, plus hosts that are not pool nodes. No
-  command prints the rule, so pass the full list each time. Placed boxes stay where they are. A
-  pool grows only for a room whose rule names it, though a room with no rule uses its shared nodes.
-- Only the owner changes `--max`, `--idle` or `--per-session` later, in Settings > Pools. To change
-  the script, undo and add the pool again.
-- Undo: `dyna room hosts ROOM_ID --clear` in each room that names the pool, then
-  `dyna pool remove boats` once `dyna pool list` shows 0 nodes.
+- `--max` counts nodes being created. `--per-session` gives each box its own node, which goes when
+  the session closes; a shared node with no box or runner goes after `--idle` (default `30m`, reset
+  by an engine restart). Only the owner changes these later, in Settings > Pools. The engine keeps
+  its own copy of the script, so to change the script, undo and add the pool again.
+- `room hosts` replaces the rule whole: at most one pool, plus hosts that are not pool nodes. A
+  pool grows only for a room whose rule names it. No command prints a rule: before you replace
+  one, take the current list from the room's state file or the `op.requested` card that set it,
+  and write the new list there.
+- Check: the room's waiting boxes show `pool-node` in `session list`, then land on a node that
+  `dyna host list` marks `pool boats`.
+- Undo: in each room that names the pool, `dyna room hosts ROOM_ID --only OLD_LIST`, or `--clear`
+  if the room had no rule before; then `dyna pool remove boats` once `dyna pool list` shows 0 nodes.
 
-When dyna_room lists pools or host rules among the approvals the owner keeps, ask the owner
-instead. Otherwise a child's `pool add` or `room hosts` call waits for you as an approval request.
-`room log` with types `op.requested` gives its op ID and card, which holds the script and the max;
-op decide approves or denies it.
+A child's `pool add` or `room hosts` call waits for you as an approval request, unless dyna_room
+lists it among the approvals the owner keeps; deciding requests is in the dyna-admin skill.
 
 ## What a node costs and when it goes
 
 - A per-session node stays while its session is open, dormant included: the stopped box holds it.
 - Every 10 minutes the pool compares `list` with its nodes. A machine Dyna has no record of is
   reported once and never destroyed: check it is not the owner's, then run `destroy` yourself.
-- A node the script no longer lists is a lost host, and its box waits. If it is gone for good,
-  `dyna host remove NODE --discard-boxes` fails its boxes (work not pushed is lost) and prints
-  their sessions; `dyna session restart SESSION` gives each a new box.
+- A node the script no longer lists is a lost host, and its box waits. If it is gone for good, run
+  `dyna host remove NODE --discard-boxes`, then `dyna session restart` for each session it prints.
 
 ## Add one machine by hand
 
@@ -120,12 +118,14 @@ dyna host list                                              # NAME is listed, wi
 - `--owner-only-admin` confirms that only the owner administers the machine; a host that runs
   boxes or CI needs it. `--agents off --ci off` adds an exec-only host instead: it takes host-exec
   runs only and needs just SSH, bash and `pgrep`.
-- A failed add names the first check that failed; fix it and add again. Without FUSE the host is
-  added for CI runners only, and `dyna host list` says so.
-- Undo: `dyna host remove NAME`; it refuses while a box is on the host, and names it. It runs
-  nothing on the machine, which keeps the host data folder, the user units `dyna-share.service`
-  and `dyna-build-cache.service`, and Podman images. Files CI runners wrote belong to mapped IDs:
-  `podman unshare rm -rf PATH` removes them where `rm` fails.
+- A failed add names the check that failed. Without FUSE the host serves CI runners only.
+- Undo: `dyna host remove NAME`, then `dyna host list` no longer shows it. It refuses, naming what
+  holds the host, while a box, CI runner, service or subscription run is on it or a room's rule
+  names it. Drain first: `dyna host set NAME --agents off --ci off` (running jobs finish), a rule
+  without it in each such room, services moved or removed (dyna-services skill), runs ended.
+  `--discard-boxes` is only for a machine gone for good, and gets past none of the others.
+- Removal leaves the machine's host data folder, user units and Podman images. Files CI runners
+  wrote belong to mapped IDs: `podman unshare rm -rf PATH` removes them where `rm` fails.
 
 ### Prerequisites, for hosts and pool nodes
 
@@ -141,8 +141,9 @@ dyna host list                                              # NAME is listed, wi
 
 ## A host with a GPU
 
-Once, on a host whose NVIDIA driver works, install `nvidia-container-toolkit` and run
-`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`; run it again after a driver or card
-change. Dyna reads the cards with `nvidia-ctk cdi list` and `nvidia-smi` about every 5 minutes, and
-Settings > Hosts lists them. A box asks for one with `gpu` (GiB) on session start or in a
-workflow's `meta`.
+A box that asks for a GPU never makes a pool create a node, since a new node brings no card. Add
+a machine that has one by hand (above). On it, once `nvidia-smi` shows the card, copy any existing
+`/etc/cdi/nvidia.yaml` aside, install `nvidia-container-toolkit` and run
+`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`; again after a driver or card change.
+Check: `nvidia-ctk cdi list` names the card, Settings > Hosts lists it within 5 minutes, and a test
+session started with `gpu` sees it with `nvidia-smi`. Undo: restore the old file or delete the new.
