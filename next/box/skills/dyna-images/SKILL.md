@@ -17,12 +17,14 @@ Install under your home folder (`$HOME` is `/box/home`, on your box's volume):
 - A Debian package, with the package lists kept in your home folder:
   ```sh
   A="-o Dir::State::Lists=$HOME/apt/lists -o Dir::Cache=$HOME/apt/cache"
-  mkdir -p ~/apt/lists/partial ~/apt/cache/archives/partial
+  mkdir -p ~/apt/lists/partial ~/apt/cache/archives/partial ~/deb && cd ~/deb
   apt-get $A update && apt-get $A download jq libjq1 libonig5
   for f in *.deb; do dpkg -x "$f" ~/pkgs; done
   export PATH=~/pkgs/usr/bin:$PATH LD_LIBRARY_PATH=~/pkgs/usr/lib/$(uname -m)-linux-gnu
+  jq --version
   ```
   `apt-get download` fetches one package, not its dependencies; `apt-cache $A depends jq` lists them.
+  Undo: `rm -rf ~/pkgs ~/deb ~/apt`; the exports end with the shell.
 
 Files under `/box` survive a refresh and a new image. They are lost when the session is restarted with
 `session restart`, and other sessions do not have them. When the room will need the tool again, change the image.
@@ -34,7 +36,8 @@ to its own room, with the `image` tool or the `dyna image` CLI (`list`, `show NA
 
 1. Read what is there: `dyna image list`, then copy the current image to a folder, which is also your undo:
    `mkdir -p ~/img-old && dyna image show NAME | tail -n +3 > ~/img-old/Containerfile`
-   (`show` prints a summary line, a `files:` line, then the Containerfile; other files it lists are not printed).
+   (`show` prints a summary line, a `files:` line, then the Containerfile). Other files on the `files:` line are
+   not printed, so with any, this copy is no full undo: keep the folder you save from as the next undo.
 2. Write the new folder. A Containerfile has this shape; the save refuses any other `FROM`:
    ```dockerfile
    ARG DYNA_BASE
@@ -43,19 +46,21 @@ to its own room, with the `image` tool or the `dyna image` CLI (`list`, `show NA
    RUN apt-get update && apt-get install -y --no-install-recommends ripgrep && rm -rf /var/lib/apt/lists/*
    USER node
    ```
-   Install outside `/box`: the box's volume is mounted there and hides what the image puts in it.
+   Install outside `/box`: the box's volume is mounted there and hides what the image puts in it. Every stage
+   starts `FROM ${DYNA_BASE}`. NAME is lowercase letters, digits, `_`, `.` and `-`. Only regular files are sent
+   (links are dropped) and the folder packs to at most 3 MiB, within 16 images and 128 MiB per room, so download
+   large toolchains in a `RUN` rather than copying them in.
    Optional files beside it: `box-needs` (words `nested-containers` or `kvm`; a box placed on a host without the
-   device fails to start, so every host the room uses needs it) and `size` (one box size name from the table below,
-   the default size of boxes on this image).
+   device fails to start and placement does not look for it, so first have your parent restrict the room to hosts
+   that have it, see dyna-nodes) and `size` (a size from the table below, the default for boxes on this image).
 3. Save it under the same name: `dyna image save NAME ~/img`. Saving an unchanged folder changes nothing.
-4. Check it builds before you rely on it. Running boxes keep their image until they next start, and a box whose image
-   does not build fails to start. Push your branch first, then either start a small child session whose brief is to
-   run the new tool and report, or call `session refresh` with your own name: your box restarts on the new image
-   at the end of your turn and wakes you, with `/box` kept. The first start on each host builds the image, which
-   takes minutes.
+4. Check it before you rely on it: `dyna image show NAME`, then run the new tool in a box on the new image. A box
+   whose image does not build fails to start, so push your branch first, then either start a small child session
+   whose brief is to run the tool and report, or `session refresh` yourself. The first start on each host builds
+   the image, which takes minutes.
 5. To roll it out, a root can call `session refresh` with its room; otherwise boxes take it at their next start.
 
-Undo: `dyna image save NAME ~/img-old`. A session whose box failed on the broken image comes back only through
+Undo: `dyna image save NAME ~/img-old`, then refresh as in step 5. A session whose box failed on the broken image comes back only through
 `session restart` by its parent, which discards its volume.
 
 Keep one box image per room and extend it. With two or more, every box whose compose file has no `build`,
