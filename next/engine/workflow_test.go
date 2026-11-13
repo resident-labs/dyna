@@ -342,3 +342,51 @@ func TestWorkflowListOmitsResultButStatusKeepsIt(t *testing.T) {
 		t.Fatalf("status lost result: %v", problem)
 	}
 }
+
+func TestWorkflowSteerResolvesOneRunningWorker(t *testing.T) {
+	w := setupWorkflow(t)
+	started, run := w.start(w.owner, workflowScript)
+	w.step(run, "alpha-key", contract.WorkflowStepRunning, "")
+	w.step(run, "beta-key", contract.WorkflowStepRunning, "")
+	w.step(run, "alpha-other", contract.WorkflowStepRunning, "")
+	for _, step := range []string{"", "missing", "alpha"} {
+		_, problem := w.WorkflowSteer(w.ctx, w.owner, contract.WorkflowSteerRequest{Run: started.Run, Step: step, Text: "change direction"})
+		if problem == nil || !strings.Contains(problem.Message, "alpha-key") || !strings.Contains(problem.Message, "beta-key") {
+			t.Fatalf("refusal: %+v", problem)
+		}
+	}
+	posted, problem := w.WorkflowSteer(w.ctx, w.owner, contract.WorkflowSteerRequest{Run: started.Run, Step: "alpha-k", Text: "change direction"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	event, err := w.store.Event(w.ctx, posted.Seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if post := event.Body.(contract.PostCreated); post.WorkflowStep != "alpha-key" {
+		t.Fatalf("post: %+v", post)
+	}
+}
+
+func TestWorkflowPauseIsStoredAndShownInStatus(t *testing.T) {
+	w := setupWorkflow(t)
+	started, _ := w.start(w.owner, workflowScript)
+	if _, problem := w.WorkflowPause(w.ctx, w.owner, contract.WorkflowPauseRequest{Run: started.Run}); problem != nil {
+		t.Fatal(problem)
+	}
+	status, problem := w.WorkflowStatus(w.ctx, w.owner, contract.WorkflowStatusRequest{Run: started.Run})
+	if problem != nil || !status.Run.Paused {
+		t.Fatalf("status %+v: %v", status, problem)
+	}
+	stored, err := w.store.WorkflowRun(w.ctx, started.Run)
+	if err != nil || !stored.Paused {
+		t.Fatalf("stored %+v: %v", stored, err)
+	}
+	if _, problem := w.WorkflowUnpause(w.ctx, w.owner, contract.WorkflowUnpauseRequest{Run: started.Run}); problem != nil {
+		t.Fatal(problem)
+	}
+	stored, err = w.store.WorkflowRun(w.ctx, started.Run)
+	if err != nil || stored.Paused {
+		t.Fatalf("stored %+v: %v", stored, err)
+	}
+}

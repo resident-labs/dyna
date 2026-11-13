@@ -23,7 +23,7 @@ func TestUpgradeLeavesEachSessionOneGoal(t *testing.T) {
  INSERT INTO goal_items(room,goal,number,text,state,created_at,updated_at) VALUES
   ('r',1,1,'a','open',0,0),('r',1,2,'b','done',0,0),('r',1,3,'c','open',0,0),('r',2,7,'mine','open',0,0),('r',3,1,'gone','dropped',0,0),
   ('q',2,1,'z','open',0,0);
- UPDATE meta SET value='103' WHERE key='schema_version';`)
+ ALTER TABLE workflow_runs DROP COLUMN paused; UPDATE meta SET value='103' WHERE key='schema_version';`)
 	if err != nil {
 		t.Fatal(err)
 	}

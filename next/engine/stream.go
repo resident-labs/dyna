@@ -282,7 +282,8 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 		replay := true
 		diffAsked := false
 		var stopSent contract.TurnID
-		reloadSent := 1 // a crew's box says hello with its run's script, and a run starts on version 1
+		pauseSent := false
+		reloadSent := 0 // Send current script and pause state on every channel, including reconnects.
 		for {
 			if !handle.Lock() {
 				return
@@ -350,7 +351,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					reason, cause = streamWorkflowReadFailed, err
 					return
 				}
-				if run.State == contract.WorkflowRunning && run.Version != reloadSent {
+				if run.State == contract.WorkflowRunning && (run.Version != reloadSent || run.Paused != pauseSent) {
 					workflow, err := s.boxWorkflow(ctx, run, current.Size.MemBytes)
 					if err != nil {
 						reason, cause = streamWorkflowReadFailed, err
@@ -359,6 +360,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					select {
 					case out <- contract.BoxMessage{Body: contract.WorkflowReload{Workflow: *workflow}}:
 						reloadSent = run.Version
+						pauseSent = run.Paused
 					case <-ctx.Done():
 						reason, cause = streamCanceled, ctx.Err()
 						return
@@ -414,6 +416,9 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					return
 				}
 				input := contract.TurnInput{Delivery: delivery.Seq, Surface: delivery.Surface, Reply: delivery.Reply, Text: frame + "\n" + quotedDynaMarker.ReplaceAllString(s.deliveryData(event, text), "${1}[quoted]"), Files: files}
+				if post, ok := event.Body.(contract.PostCreated); ok {
+					input.WorkflowStep = post.WorkflowStep
+				}
 				if delivery.Queue == nil {
 					start = append(start, input)
 				} else {

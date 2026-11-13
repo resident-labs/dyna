@@ -91,6 +91,7 @@ type PostSent struct {
 
 // PostCreated is a post in a room.
 type PostCreated struct {
+	WorkflowStep   string       `json:"workflowStep,omitempty"`
 	Spoken         bool         `json:"spoken,omitempty"`
 	DataAttachment *int         `json:"dataAttachment,omitempty"` // index of the associated JSON file; other attachments remain visible
 	Source         *PostSource  `json:"source,omitempty"`         // immutable identity for a cross-room post

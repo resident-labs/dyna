@@ -18,6 +18,7 @@ const failedStepNames = 20
 // once, by the box's first start. Resume names the run this one resumes, and only a run's start reads it from here: afterwards
 // ResumedSessions follows the stored link.
 type WorkflowRun struct {
+	Paused      bool
 	ID          contract.WorkflowRunID
 	Room        contract.RoomID
 	Session     contract.SessionID
@@ -42,13 +43,13 @@ type WorkflowRun struct {
 // workflowStatusLines is how many status() lines a run keeps.
 const workflowStatusLines = 20
 
-const workflowColumns = "id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,result,version,status_lines,started_at,ended_at"
+const workflowColumns = "id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,result,version,status_lines,started_at,ended_at,paused"
 
 func scanWorkflow(row interface{ Scan(...any) error }) (WorkflowRun, error) {
 	var run WorkflowRun
 	var profiles, lines string
 	var started, ended int64
-	err := row.Scan(&run.ID, &run.Room, &run.Session, &run.Name, &run.Description, &run.Script, &run.Args, &profiles, &run.Repo, &run.Commit, &run.Image, &run.State, &run.Result, &run.Version, &lines, &started, &ended)
+	err := row.Scan(&run.ID, &run.Room, &run.Session, &run.Name, &run.Description, &run.Script, &run.Args, &profiles, &run.Repo, &run.Commit, &run.Image, &run.State, &run.Result, &run.Version, &lines, &started, &ended, &run.Paused)
 	if err != nil {
 		return run, err
 	}
@@ -446,4 +447,19 @@ func (s *Store) endWorkflow(ctx context.Context, tx *sql.Tx, id contract.Workflo
 	}
 	_, err = s.AppendEvent(tx, event)
 	return err
+}
+
+func (s *Store) PauseWorkflow(ctx context.Context, id contract.WorkflowRunID, paused bool) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		var session contract.SessionID
+		err := tx.QueryRowContext(ctx, "UPDATE workflow_runs SET paused=? WHERE id=? AND state=? RETURNING session", paused, id, contract.WorkflowRunning).Scan(&session)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrWorkflowEnded
+		}
+		if err != nil {
+			return err
+		}
+		s.wakePending = append(s.wakePending, session)
+		return nil
+	})
 }

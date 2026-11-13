@@ -171,7 +171,7 @@ func TestUpgradeCarriesRootApprovesHostexec(t *testing.T) {
 		"DROP TABLE services",
 		"DROP TABLE service_image_sizes",
 		"DROP TABLE repo_heads",
-		"DROP INDEX goals_holder; CREATE INDEX goals_holder ON goals(session) WHERE state='active'; ALTER TABLE goal_items DROP COLUMN parent; ALTER TABLE goals DROP COLUMN folded_goal; ALTER TABLE goals DROP COLUMN folded_item; UPDATE meta SET value='86' WHERE key='schema_version'",
+		"DROP INDEX goals_holder; CREATE INDEX goals_holder ON goals(session) WHERE state='active'; ALTER TABLE goal_items DROP COLUMN parent; ALTER TABLE goals DROP COLUMN folded_goal; ALTER TABLE goals DROP COLUMN folded_item; ALTER TABLE workflow_runs DROP COLUMN paused; UPDATE meta SET value='86' WHERE key='schema_version'",
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatalf("%s: %v", q, err)
@@ -232,7 +232,7 @@ func TestUpgradeTurnsHeldAndRetryingArchivesIntoPlainCloses(t *testing.T) {
 		"DROP TABLE services",
 		"DROP TABLE service_image_sizes",
 		"DROP TABLE repo_heads",
-		"DROP INDEX goals_holder; CREATE INDEX goals_holder ON goals(session) WHERE state='active'; ALTER TABLE goal_items DROP COLUMN parent; ALTER TABLE goals DROP COLUMN folded_goal; ALTER TABLE goals DROP COLUMN folded_item; UPDATE meta SET value='88' WHERE key='schema_version'",
+		"DROP INDEX goals_holder; CREATE INDEX goals_holder ON goals(session) WHERE state='active'; ALTER TABLE goal_items DROP COLUMN parent; ALTER TABLE goals DROP COLUMN folded_goal; ALTER TABLE goals DROP COLUMN folded_item; ALTER TABLE workflow_runs DROP COLUMN paused; UPDATE meta SET value='88' WHERE key='schema_version'",
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatalf("%s: %v", q, err)

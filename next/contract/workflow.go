@@ -3,6 +3,9 @@ package contract
 import "time"
 
 const (
+	MethodWorkflowPause     Method = "workflow.pause"
+	MethodWorkflowUnpause   Method = "workflow.unpause"
+	MethodWorkflowSteer     Method = "workflow.steer"
 	MethodWorkflowRun       Method = "workflow.run"
 	MethodWorkflowReload    Method = "workflow.reload"
 	MethodWorkflowStatus    Method = "workflow.status"
@@ -81,6 +84,7 @@ type WorkflowReloadResponse struct {
 // List's Branch is the first recorded branch; status retains the most recent recorded branch. Version is the script version it runs, 1
 // until a reload. Status is the script's latest status() line, empty when it wrote none.
 type WorkflowInfo struct {
+	Paused      bool          `json:"paused,omitempty"`
 	Run         WorkflowRunID `json:"run"`
 	Room        RoomID        `json:"room"`
 	Session     SessionID     `json:"session"`
@@ -185,6 +189,7 @@ type WorkflowListResponse struct {
 // BoxWorkflow is what a crew's box runs. Each hello carries it, so a new box can restart the script, and a reload carries it
 // to the box that runs the script.
 type BoxWorkflow struct {
+	Paused   bool              `json:"paused"`
 	Run      WorkflowRunID     `json:"run"`
 	Name     string            `json:"name"`
 	Script   string            `json:"script"`
@@ -307,3 +312,28 @@ type WorkflowStatusChanged struct {
 
 func (WorkflowStatusChanged) EventType() EventType { return "workflow.status_changed" }
 func (WorkflowStatusChanged) isEventBody()         {}
+
+// WorkflowSteerRequest addresses one running worker by label or unique key prefix.
+type WorkflowSteerRequest struct {
+	Run  WorkflowRunID `json:"run"`
+	Step string        `json:"step"`
+	Text string        `json:"text"`
+}
+type WorkflowSteerResponse = PostResponse
+
+type WorkflowPauseRequest struct {
+	Run WorkflowRunID `json:"run"`
+}
+type WorkflowPauseResponse struct{}
+type WorkflowUnpauseRequest = WorkflowPauseRequest
+type WorkflowUnpauseResponse = WorkflowPauseResponse
+
+// WorkflowPauseChanged refreshes open run pages after a pause or unpause.
+type WorkflowPauseChanged struct {
+	Run     WorkflowRunID `json:"run"`
+	Session SessionID     `json:"session"`
+	Paused  bool          `json:"paused"`
+}
+
+func (WorkflowPauseChanged) EventType() EventType { return "workflow.pause_changed" }
+func (WorkflowPauseChanged) isEventBody()         {}

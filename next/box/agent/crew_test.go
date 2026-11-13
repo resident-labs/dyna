@@ -1055,3 +1055,77 @@ func TestCrewSteerReachesRunningWorkers(t *testing.T) {
 		t.Fatal("a steer no worker took counts as delivered")
 	}
 }
+
+func TestCrewSteerTargetsOnlyOneWorker(t *testing.T) {
+	h := newCrewHarness(t)
+	release := make(chan struct{})
+	var steers atomic.Int32
+	h.steer = func(contract.TurnInput) error { steers.Add(1); return nil }
+	h.hold = func(ctx context.Context, _ string) error {
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	crew, ended := h.start(crewMeta + "return await parallel([() => agent('a'), () => agent('b')])")
+	waitFor(t, "two running workers", func() bool { crew.mu.Lock(); defer crew.mu.Unlock(); return len(crew.workers) == 2 })
+	crew.mu.Lock()
+	var key string
+	for k := range crew.workers {
+		key = k
+		break
+	}
+	crew.mu.Unlock()
+	if err := crew.Steer(context.Background(), contract.TurnInput{Delivery: 8, Text: "one only", WorkflowStep: key}); err != nil {
+		t.Fatal(err)
+	}
+	if steers.Load() != 1 {
+		t.Fatalf("steered %d workers", steers.Load())
+	}
+	if err := crew.Steer(context.Background(), contract.TurnInput{Delivery: 9, Text: "unknown", WorkflowStep: "missing"}); !errors.Is(err, harness.ErrNoTurn) {
+		t.Fatal(err)
+	}
+	close(release)
+	<-ended
+}
+
+func TestCrewPauseHoldsNewCallsButRunningWorkerFinishes(t *testing.T) {
+	h := newCrewHarness(t)
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	h.hold = func(ctx context.Context, _ string) error {
+		close(entered)
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	crew, ended := h.start(crewMeta + "await agent('first'); return await agent('second')")
+	<-entered
+	crew.mu.Lock()
+	workflow := crew.workflow
+	crew.mu.Unlock()
+	workflow.Paused = true
+	crew.Reload(workflow)
+	close(release)
+	waitFor(t, "first worker ends", func() bool { crew.mu.Lock(); defer crew.mu.Unlock(); return len(crew.workers) == 0 })
+	if h.started.Load() != 1 {
+		t.Fatal("second worker started while paused")
+	}
+	if err := crew.Steer(context.Background(), contract.TurnInput{Delivery: 8, Text: "paused"}); !errors.Is(err, harness.ErrNoTurn) {
+		t.Fatal(err)
+	}
+	h.hold = nil
+	workflow.Paused = false
+	crew.Reload(workflow)
+	if got := <-ended; got.Outcome != contract.TurnCompleted {
+		t.Fatal(got)
+	}
+	if h.started.Load() != 2 {
+		t.Fatal("second worker did not start")
+	}
+}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { call } from "../client.ts";
   import { onMount, tick, untrack } from "svelte";
   import type { RoomStore } from "../room.svelte.ts";
   import type { RoomID, WorkflowStep } from "../contract.gen.ts";
@@ -91,11 +92,37 @@
     return () => clearInterval(timer);
   });
 
+  let steering = $state("");
+  let controlBusy = $state(false);
+  let controlError = $state("");
+  async function pause() {
+    if (!info || controlBusy) return;
+    controlBusy = true;
+    controlError = "";
+    try {
+      await call(info.paused ? "workflow.unpause" : "workflow.pause", { run: info.run });
+      await run.read();
+    } catch (error) { controlError = error instanceof Error ? error.message : String(error); }
+    finally { controlBusy = false; }
+  }
+  async function steer(event: SubmitEvent) {
+    event.preventDefault();
+    if (!info || !worker || !steering.trim() || controlBusy) return;
+    controlBusy = true;
+    controlError = "";
+    try {
+      await call("workflow.steer", { run: info.run, step: worker.key, text: steering });
+      steering = "";
+    } catch (error) { controlError = error instanceof Error ? error.message : String(error); }
+    finally { controlBusy = false; }
+  }
   let frame: HTMLElement | undefined = $state();
   let shown = $state(shownStep(location.search));
   let pushed = false;
   let worker = $derived(shown ? steps.find(step => step.key === shown) : undefined);
   async function show(step: WorkflowStep) {
+    steering = "";
+    controlError = "";
     history.pushState(history.state, "", `${location.pathname}?step=${encodeURIComponent(step.key)}`);
     pushed = true;
     shown = step.key;
@@ -137,6 +164,13 @@
       <span class="figure">{stepTime(worker, now)}</span>
       {#if state.tone}<StatusPill tone={state.tone} label={state.word} word />{:else}<span class="muted">{state.word}</span>{/if}
     </div>
+    {#if operate && !ended && worker.state === "running"}
+      <form class="steer" onsubmit={steer}>
+        <label for="worker-steer">Steer this worker</label>
+        <div><input id="worker-steer" bind:value={steering} placeholder="Change direction before its next model request" disabled={controlBusy} /><button type="submit" disabled={controlBusy || !steering.trim()}>Send</button></div>
+      </form>
+    {/if}
+    {#if controlError}<p class="control-error" role="alert">{controlError}</p>{/if}
     {#if worker.reason}<div class="failure worker-failure"><span class="slot"><Icon name="warning" size={16} /></span><span>{worker.reason}</span></div>{/if}
     <div class="thread">{#key worker.key}<SessionThread {store} {hasRoom} {session} {roomName} {navigate} {onpostlocation} {operate} step={worker.key} unsent={[]} onunsent={() => {}} onsettled={() => {}} />{/key}</div>
   {/if}
@@ -147,8 +181,9 @@
       <header>
         <div class="heading">
           <h2>{info.name}</h2>
-          {#if words.tone}<StatusPill tone={words.tone} label={words.word} />{:else}<span class="muted">{words.word}</span>{/if}
+          {#if info.paused && !ended}<StatusPill tone="warning" label="Paused" />{:else if words.tone}<StatusPill tone={words.tone} label={words.word} />{:else}<span class="muted">{words.word}</span>{/if}
           {#if info.state === "running" && operate && store.running(session)}
+            <button type="button" class="stop" disabled={controlBusy} onclick={pause}>{info.paused ? "Unpause" : "Pause"}</button>
             <button type="button" class="stop" disabled={store.stopping.has(session)} onclick={() => store.stop(session)}><Icon name="stop" size={14} />{store.stopping.has(session) ? "Stopping" : "Stop"}</button>
           {/if}
           <p class="facts">{#if info.ended}<span title={fullTime(info.ended)}>{formatTime(info.ended)}</span>{/if}
@@ -158,6 +193,8 @@
             {#if (info.version ?? 1) > 1}<span title="Reloaded {(info.version ?? 1) - 1} {info.version === 2 ? 'time' : 'times'}">script v{info.version}</span>{/if}
             {#if info.commit}<span class="from">{info.repo ?? ""} at {@render commit(info.commit)}</span>{/if}</p>
         </div>
+        {#if controlError}<p class="control-error" role="alert">{controlError}</p>{/if}
+        {#if info.paused && !ended}<p class="muted">New workers and commands wait. Running steps finish.</p>{/if}
         {#if info.description}<p class="muted">{info.description}</p>{/if}
         <div class="said" class:script={!!said}>
           {#if info.state === "running"}<WorkingDot />{/if}
@@ -219,6 +256,12 @@
 </div>
 
 <style>
+  .steer { padding: 8px 16px; border-bottom: 1px solid var(--line); }
+  .steer label { display: block; font-size: 12px; margin-bottom: 4px; }
+  .steer div { display: flex; gap: 8px; }
+  .steer input { flex: 1; min-width: 0; }
+  .control-error { padding: 8px 16px; color: var(--danger); }
+
   .frame { display: flex; flex-direction: column; flex: 1; min-height: 0; container: run / inline-size; }
   /* Wider than the session thread, so a flowchart's row of stages and a timeline have room. */
   .run { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable both-edges; }

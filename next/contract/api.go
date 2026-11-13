@@ -613,6 +613,7 @@ type SessionRefreshResponse struct {
 	Marked []SessionID `json:"marked"`
 }
 type PostRequest struct {
+	WorkflowStep   string       `json:"-"`
 	Spoken         bool         `json:"-"` // set only by the voice dispatch boundary
 	DataAttachment *int         `json:"-"` // filled by the owning post boundary, never trusted from a caller
 	Data           JSONData     `json:"data,omitempty"`
@@ -1035,11 +1036,12 @@ type ShellJobRunningRequest struct {
 }
 type ShellJobRunningResponse struct{}
 type TurnInput struct {
-	Delivery DeliverySeq  `json:"delivery"`
-	Surface  Surface      `json:"surface"`
-	Reply    ReplyChannel `json:"reply"`
-	Text     string       `json:"text"`
-	Files    []TurnFile   `json:"files,omitempty"` // the attachments the frame names
+	WorkflowStep string       `json:"workflowStep,omitempty"`
+	Delivery     DeliverySeq  `json:"delivery"`
+	Surface      Surface      `json:"surface"`
+	Reply        ReplyChannel `json:"reply"`
+	Text         string       `json:"text"`
+	Files        []TurnFile   `json:"files,omitempty"` // the attachments the frame names
 }
 
 // TurnFile is one attachment of an input. The box fetches it by hash and stores it at Path before Pi reads the input.
