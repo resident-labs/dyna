@@ -253,3 +253,10 @@ func (DiscordRoleUpdated) EventType() EventType    { return "discord.role.update
 func (DiscordRoleUpdated) isEventBody()            {}
 func (DiscordRoleDeleted) EventType() EventType    { return "discord.role.deleted" }
 func (DiscordRoleDeleted) isEventBody()            {}
+
+// The folder actions answer alike. Each has a response named for its method, as every method does.
+type (
+	DiscordExportResponse = DiscordFolderResponse
+	DiscordPlanResponse   = DiscordFolderResponse
+	DiscordApplyResponse  = DiscordFolderResponse
+)
