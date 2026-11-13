@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"regexp"
+	"slices"
 	"time"
 
 	"github.com/resident-labs/dyna/engine/prompt"
@@ -282,7 +283,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 		replay := true
 		diffAsked := false
 		var stopSent contract.TurnID
-		pauseSent := false
+		pauseSent, stepsSent := false, []string(nil)
 		reloadSent := 0 // Send current script and pause state on every channel; Reload ignores a script version it already has.
 		for {
 			if !handle.Lock() {
@@ -351,7 +352,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					reason, cause = streamWorkflowReadFailed, err
 					return
 				}
-				if run.State == contract.WorkflowRunning && (run.Version != reloadSent || run.Paused != pauseSent) {
+				if run.State == contract.WorkflowRunning && (run.Version != reloadSent || run.Paused != pauseSent || !slices.Equal(run.PausedSteps, stepsSent)) {
 					workflow, err := s.boxWorkflow(ctx, run, current.Size.MemBytes)
 					if err != nil {
 						reason, cause = streamWorkflowReadFailed, err
@@ -360,7 +361,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					select {
 					case out <- contract.BoxMessage{Body: contract.WorkflowReload{Workflow: *workflow}}:
 						reloadSent = run.Version
-						pauseSent = run.Paused
+						pauseSent, stepsSent = run.Paused, run.PausedSteps
 					case <-ctx.Done():
 						reason, cause = streamCanceled, ctx.Err()
 						return

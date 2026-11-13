@@ -461,7 +461,7 @@ func TestPauseEndedWorkflowReturnsEnded(t *testing.T) {
 			t.Fatalf("pause step %q: %v, want ErrWorkflowEnded", step, err)
 		}
 	}
-	if _, problem := w.WorkflowPause(w.ctx, w.owner, contract.WorkflowPauseRequest{Run: started.Run}); problem == nil || problem.Message != "that run has ended" {
+	if _, problem := w.WorkflowPause(w.ctx, w.owner, contract.WorkflowPauseRequest{Run: started.Run}); problem == nil || problem.Code != contract.ErrConflict || !strings.Contains(problem.Message, "has ended (") {
 		t.Fatalf("pause refusal: %+v", problem)
 	}
 }
