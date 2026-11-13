@@ -135,7 +135,7 @@ func ReadSnapshot(ctx context.Context, client *discord.Client, server string) (S
 		byID[c.ID] = c.Name
 	}
 	for _, c := range channels {
-		ow := Overwrites{Allow: map[string][]string{}, Deny: map[string][]string{}}
+		ow := Overwrites{}
 		for _, w := range c.Overwrites {
 			name := roleNames[w.ID]
 			if w.Type == 1 {
@@ -152,9 +152,15 @@ func ReadSnapshot(ctx context.Context, client *discord.Client, server string) (S
 				return out, err
 			}
 			if len(a) > 0 {
+				if ow.Allow == nil {
+					ow.Allow = map[string][]string{}
+				}
 				ow.Allow[name] = a
 			}
 			if len(d) > 0 {
+				if ow.Deny == nil {
+					ow.Deny = map[string][]string{}
+				}
 				ow.Deny[name] = d
 			}
 		}
