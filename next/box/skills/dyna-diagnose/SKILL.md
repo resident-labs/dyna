@@ -15,7 +15,7 @@ action that fixes it, because the later actions lose work.
 
 Start with dyna_children (free): `name: profile, state`, then `Starting on HOST · step (N min)` once a
 start passes a minute, the goal item it is on, and `waiting: …` when no turn runs. Then `session list`
-(with `parent` for one subtree). Note its `seq`: it is the newest event, for step 3.
+(omit `parent` to search the room; `parent` gives only immediate children); note its `seq` for step 3.
 
 | `session list` shows | Means | Next |
 |---|---|---|
@@ -38,8 +38,9 @@ nobody answered.
 
 ## 3. What the engine saw
 
-`room log` with `types` and `beforeSeq` set to the `seq` from step 1; without `beforeSeq` it starts at
-the room's oldest event. It has no session filter: filter the bodies by session or box ID in codemode.
+`room log` with `types` and `beforeSeq` set to the `seq` from step 1 plus 1 (it is exclusive; without
+it the log starts at the room's oldest event). If the failure is not there, page back with `beforeSeq`
+set to the oldest seq returned. There is no session filter: filter bodies by session or box ID in codemode.
 
 | Type | Carries |
 |---|---|
@@ -50,8 +51,7 @@ the room's oldest event. It has no session filter: filter the bodies by session 
 | `tool.failed`, `image.failed`, `host.disk_low`, `engine.restarted`, `checkin.due` | as named |
 
 `dyna subscription events` describes most types. For a workflow, `workflow status` gives its status
-lines and step journal; a step's own output is the owner's (the web), and reload or resume is in the
-dyna-workflows skill.
+lines and step journal; a step's own output is on the web, and reload or resume is in dyna-workflows.
 
 ## 4. Causes and what to do
 
@@ -106,10 +106,10 @@ Owner commands run with bash with host set to the engine host named in your prom
 - A lost box comes back with its host, and `session restart` refuses it until it is failed. A host
   gone for good is removed with `dyna host remove NAME --discard-boxes`, which fails its boxes and
   loses their unpushed work.
-- The engine journal: `systemctl --user list-units 'dyna*' --no-pager` names the engine's unit
-  (`dyna-next.service` by default). `journalctl --user -u dyna-next.service --since -1h --no-pager
-  | grep BOX_ID` shows `lifecycle step BOX_ID: …`, the raw error of a failed creation; `pool NAME:`
-  lines are a pool script's output; `git route: upstream request failed` is a push or fetch GitHub refused.
+- The engine journal: `systemctl --user list-units 'dyna*' --no-pager` names the engine's unit; set
+  `UNIT` to it and run `journalctl --user -u "$UNIT" --since -1h --no-pager`. Search the output for
+  the box ID: `lifecycle step BOX_ID: …` is the raw error of a failed creation; `pool NAME:` lines are
+  a pool script's output; `git route: upstream request failed` is a push or fetch GitHub refused.
 - On the box's host (`host` in `session list`): `podman ps -a --filter name=BOX_ID` shows its
   container, and `systemctl --user status dyna-BOX_ID.slice` its CPU, memory and tasks.
 
@@ -124,16 +124,19 @@ the cause is fixed) reach every room: dyna-admin says when they are yours to run
 | post to the session | idle stall, failed turn, a question it is stuck on | one turn |
 | `session stop` | a turn looping or running away, or a model retry to cancel | the turn's work in flight |
 | `session set_profile` | its model or account keeps failing | a cold prompt cache |
-| `session refresh` | a live box that misbehaves | a container restart; the volume stays |
-| `session restart` | a failed box only | the volume and all unpushed work |
-| `session close` | finished, or not worth saving | the box and its whole subtree |
+| `session refresh` | a live box that misbehaves | a container restart |
+| `session restart` | a failed box only | the volume; no undo |
+| `session close` | finished, or not worth saving | the box and its whole subtree; no undo |
 | `room pause` | a runaway that spends money, such as sessions starting sessions | the whole room stops |
 
-A refresh waits until no turn, job or terminal needs the box, so stop a hung turn first. Before a
-close, read `session responsibilities`, and `session move` out any child to keep: a close takes the
-subtree. Unpushed work goes to an archive diff only if the box is connected. A paused room starts
-no box and delivers no input to any session, yours included; turns already running go on, so stop
-them. Resume (`room pause` with `paused` false) in the same turn, or only the owner can.
+Stop a hung turn before a refresh, which waits for it. Before a close, read `session
+responsibilities`, and `session move` out any child to keep. A profile, account or parent change is
+an experiment: note the current `profile` and `parent` in `session list` first and set them back the
+same way if it does not help (`dyna session set-account SESSION auto` undoes an account pin). A
+paused room starts no box and delivers no input to any session, yours included; turns already
+running go on, so stop them. Resume (`room pause` with `paused` false) in the same turn, or only
+the owner can. After any action, check that `session list` shows the box `ready` and a new `turn`
+or later `lastOutcome`, and `transcript read` shows the kept input making progress.
 
 ## CI jobs
 
