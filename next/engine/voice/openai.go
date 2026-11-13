@@ -74,5 +74,9 @@ type providerEvent struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
-	Item *providerEvent `json:"item"`
+	Item        *providerEvent `json:"item"`
+	Samples     *uint32        `json:"samples_per_channel"`
+	Rate        uint32         `json:"sample_rate"`
+	Channels    uint32         `json:"channels"`
+	NumChannels uint32         `json:"num_channels"`
 }

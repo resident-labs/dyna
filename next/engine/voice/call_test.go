@@ -125,6 +125,7 @@ func TestCodexHandoffAndBargeIn(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("tool did not start")
 	}
+	expect(t, browser, "response_done")
 	backend <- "working"
 	m := expect(t, fake, "conversation.item.create")
 	b, _ := json.Marshal(m)
@@ -132,6 +133,8 @@ func TestCodexHandoffAndBargeIn(t *testing.T) {
 		t.Fatal(string(b))
 	}
 	finish <- "done"
+	expect(t, browser, "response_done")
+	expect(t, fake, "conversation.item.create")
 	m = expect(t, fake, "conversation.item.create")
 	b, _ = json.Marshal(m)
 	if !strings.Contains(string(b), "function_call_output") {
@@ -143,7 +146,7 @@ func TestCodexHandoffAndBargeIn(t *testing.T) {
 	if m["item"].(map[string]any)["output"] != "" {
 		t.Fatal(m)
 	}
-	send(t, fake, message{"type": "response.audio.delta", "item_id": "a1", "delta": "AAA="})
+	send(t, fake, message{"type": "response.audio.delta", "item_id": "a1", "delta": "AAA=", "samples_per_channel": 24000})
 	expect(t, browser, "transcript")
 	readCtx, stop := context.WithTimeout(ctx, time.Second)
 	defer stop()
@@ -156,7 +159,7 @@ func TestCodexHandoffAndBargeIn(t *testing.T) {
 	expect(t, browser, "speech_started")
 	// No engine response.cancel: provider VAD owns interruption.
 	m = expect(t, fake, "conversation.item.truncate")
-	if m["item_id"] != "a1" {
+	if m["item_id"] != "a1" || m["audio_end_ms"] != float64(1000) {
 		t.Fatal(m)
 	}
 	send(t, fake, message{"type": "response.done"})
@@ -213,4 +216,54 @@ func TestCodexSession(t *testing.T) {
 	if strings.Contains(prompt, "{{") || !strings.Contains(prompt, "You are Dyna,") {
 		t.Fatal("prompt not adapted")
 	}
+}
+
+func TestResponseQueueAndSteeringPreserveFirstHandoff(t *testing.T) {
+	page, browser := pair(t)
+	provider, fake := pair(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	finish := make(chan struct{})
+	started := make(chan struct{})
+	go func() {
+		_ = run(ctx, page, provider, func(ctx context.Context, p string) (string, error) {
+			if p == "first" {
+				close(started)
+				select {
+				case <-finish:
+					return "first final", nil
+				case <-ctx.Done():
+					return "", ctx.Err()
+				}
+			}
+			return "This was sent to steer the previous background agent task.", nil
+		}, nil, time.Minute)
+	}()
+	expect(t, fake, "session.update")
+	send(t, fake, message{"type": "response.created"})
+	send(t, fake, message{"type": "response.function_call_arguments.done", "name": "background_agent", "call_id": "first", "arguments": "{\"prompt\":\"first\"}"})
+	<-started
+	expect(t, browser, "response_done")
+	send(t, fake, message{"type": "response.function_call_arguments.done", "name": "background_agent", "call_id": "second", "arguments": "{\"prompt\":\"second\"}"})
+	expect(t, browser, "response_done")
+	expect(t, browser, "response_done")
+	m := expect(t, fake, "conversation.item.create")
+	item := m["item"].(map[string]any)
+	if item["call_id"] != "second" || item["output"] != "This was sent to steer the previous background agent task." {
+		t.Fatal(item)
+	}
+	// Steering's create is deferred until current server response ends.
+	send(t, fake, message{"type": "response.done"})
+	expect(t, browser, "response_done")
+	expect(t, fake, "response.create")
+	close(finish)
+	expect(t, browser, "response_done")
+	expect(t, fake, "conversation.item.create")
+	m = expect(t, fake, "conversation.item.create")
+	item = m["item"].(map[string]any)
+	if item["call_id"] != "first" || item["output"] != completionAcknowledgement {
+		t.Fatal(item)
+	}
+	send(t, fake, message{"type": "response.cancelled"})
+	expect(t, fake, "response.create")
 }

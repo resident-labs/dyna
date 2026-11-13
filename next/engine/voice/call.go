@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,7 +32,7 @@ func (m *Manager) Stop() {
 
 // Start holds the call until either connection ends. backend contains only root
 // DM posts and questions. Its producer must observe ctx when the call ends.
-func (m *Manager) Start(ctx context.Context, room string, page *websocket.Conn, dial func(context.Context) (*websocket.Conn, error), dispatch func(context.Context, string) (string, error), backend <-chan string) error {
+func (m *Manager) Start(ctx context.Context, room string, page *websocket.Conn, dial func(context.Context) (*websocket.Conn, error), dispatch func(context.Context, string) (string, error), backend <-chan string) (err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	m.mu.Lock()
 	if m.cancel != nil {
@@ -43,6 +44,11 @@ func (m *Manager) Start(ctx context.Context, room string, page *websocket.Conn, 
 	m.cancel = cancel
 	m.mu.Unlock()
 	defer func() {
+		if err != nil && !errors.Is(err, context.Canceled) {
+			closeCtx, stop := context.WithTimeout(context.Background(), time.Second)
+			_ = writeJSON(closeCtx, page, message{"type": "closed", "reason": err.Error()})
+			stop()
+		}
 		cancel()
 		m.mu.Lock()
 		m.room = ""
@@ -99,11 +105,8 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 	type toolResult struct{ id, output string }
 	results := make(chan toolResult, 8)
 	handled := map[string]bool{}
-	played := map[string]int64{}
-	var generated []string
-	playing := ""
-	interrupted := false
-	last := ""
+	var output *outputAudio
+	var responses responseQueue
 	active := 0
 	var budget outputBudget
 	for {
@@ -142,19 +145,6 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 					if control.End < 0 {
 						return errors.New("negative playback position")
 					}
-					if control.ItemID != "" {
-						playing = control.ItemID
-						played[playing] = control.End
-						for i, id := range generated {
-							if id == playing {
-								for _, old := range generated[:i] {
-									delete(played, old)
-								}
-								generated = generated[i:]
-								break
-							}
-						}
-					}
 				case "closed":
 					return nil
 				default:
@@ -177,23 +167,32 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 				}
 			}
 			if active == 0 {
-				if err := writeJSON(ctx, provider, message{"type": "response.create"}); err != nil {
+				if err := responses.request(ctx, provider); err != nil {
 					return err
 				}
 			}
 		case result := <-results:
 			active--
-			if active == 0 {
+			if err := writeJSON(ctx, page, message{"type": "response_done", "working": active > 0}); err != nil {
+				return err
+			}
+			if result.output != steerAcknowledgement {
+				if chunk := budget.append(result.output); chunk != "" {
+					if err := writeJSON(ctx, provider, userText("[BACKEND] "+chunk)); err != nil {
+						return err
+					}
+				}
 				if tail := budget.finish(); tail != "" {
 					if err := writeJSON(ctx, provider, userText("[BACKEND] "+tail)); err != nil {
 						return err
 					}
 				}
+				result.output = completionAcknowledgement
 			}
 			if err := writeJSON(ctx, provider, message{"type": "conversation.item.create", "item": message{"type": "function_call_output", "call_id": result.id, "output": truncateText(result.output, 4000)}}); err != nil {
 				return err
 			}
-			if err := writeJSON(ctx, provider, message{"type": "response.create"}); err != nil {
+			if err := responses.request(ctx, provider); err != nil {
 				return err
 			}
 		case f, ok := <-vf:
@@ -213,7 +212,9 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 			}
 			switch event.Type {
 			case "error":
-				if event.Error.Code == "conversation_already_has_active_response" {
+				if event.Error.Code == "conversation_already_has_active_response" || strings.HasPrefix(event.Error.Message, "Conversation already has an active response in progress:") {
+					responses.active = true
+					responses.pending = true
 					continue
 				}
 				return fmt.Errorf("realtime: %s", event.Error.Message)
@@ -222,43 +223,53 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 					return err
 				}
 			case "response.created":
-				interrupted = false
+				responses.active = true
+			case "response.cancelled":
+				output = nil
+				if err := responses.finished(ctx, provider); err != nil {
+					return err
+				}
 			case "input_audio_buffer.speech_started":
-				interrupted = true
 				if err := writeJSON(ctx, page, message{"type": "speech_started"}); err != nil {
 					return err
 				}
-				if playing == "" {
-					playing = last
-				}
-				if playing != "" {
-					if err := writeJSON(ctx, provider, message{"type": "conversation.item.truncate", "item_id": playing, "content_index": 0, "audio_end_ms": played[playing]}); err != nil {
+				if output != nil && (event.ItemID == "" || event.ItemID == output.item) {
+					if err := writeJSON(ctx, provider, message{"type": "conversation.item.truncate", "item_id": output.item, "content_index": 0, "audio_end_ms": output.end}); err != nil {
 						return err
 					}
 				}
-				for _, id := range generated {
-					if id != playing {
-						if err := writeJSON(ctx, provider, message{"type": "conversation.item.truncate", "item_id": id, "content_index": 0, "audio_end_ms": 0}); err != nil {
-							return err
-						}
-					}
-				}
-				generated = nil
-				last = ""
-				playing = ""
+				output = nil
 			case "response.output_audio.delta", "response.audio.delta":
-				if interrupted {
-					continue
-				}
-				if last != event.ItemID {
-					generated = append(generated, event.ItemID)
-				}
-				last = event.ItemID
 				pcm, err := base64.StdEncoding.DecodeString(event.Delta)
 				if err != nil {
 					return err
 				}
-				if err := writeJSON(ctx, page, message{"type": "transcript", "role": "assistant", "item_id": last, "text": ""}); err != nil {
+				if event.ItemID != "" {
+					rate := event.Rate
+					if rate == 0 {
+						rate = 24000
+					}
+					channels := event.Channels
+					if channels == 0 {
+						channels = event.NumChannels
+					}
+					if channels == 0 {
+						channels = 1
+					}
+					samples := uint64(len(pcm)/2) / uint64(channels)
+					if event.Samples != nil {
+						samples = uint64(*event.Samples)
+					}
+					duration := samples * 1000 / uint64(rate)
+					if duration > 0 {
+						if output != nil && output.item == event.ItemID {
+							output.end += duration
+						} else {
+							output = &outputAudio{event.ItemID, duration}
+						}
+					}
+				}
+				if err := writeJSON(ctx, page, message{"type": "transcript", "role": "assistant", "item_id": event.ItemID, "text": ""}); err != nil {
 					return err
 				}
 				writeCtx, stop := context.WithTimeout(ctx, 10*time.Second)
@@ -276,6 +287,7 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 					return err
 				}
 			case "response.function_call_arguments.done":
+				output = nil
 				if handled[event.CallID] {
 					continue
 				}
@@ -296,6 +308,9 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 					return err
 				}
 				active++
+				if err := writeJSON(ctx, page, message{"type": "response_done", "working": true}); err != nil {
+					return err
+				}
 				go func(id, prompt string) {
 					output, err := dispatch(ctx, prompt)
 					if err != nil {
@@ -307,6 +322,10 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 					}
 				}(event.CallID, args.Prompt)
 			case "response.done":
+				output = nil
+				if err := responses.finished(ctx, provider); err != nil {
+					return err
+				}
 				if err := writeJSON(ctx, page, message{"type": "response_done"}); err != nil {
 					return err
 				}
@@ -314,6 +333,9 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 		}
 	}
 }
+
+const steerAcknowledgement = "This was sent to steer the previous background agent task."
+const completionAcknowledgement = "Background agent finished. Use the preceding [BACKEND] messages as the result."
 
 const truncationMarker = "\n…output truncated…\n"
 
@@ -369,4 +391,30 @@ func (b *outputBudget) finish() string {
 	}
 	*b = outputBudget{}
 	return out
+}
+
+type outputAudio struct {
+	item string
+	end  uint64
+}
+
+// responseQueue is Codex's RealtimeResponseCreateQueue: a single deferred
+// create request, not a speak queue. A racing active-response error re-arms it.
+type responseQueue struct{ active, pending bool }
+
+func (q *responseQueue) request(ctx context.Context, c *websocket.Conn) error {
+	if q.active {
+		q.pending = true
+		return nil
+	}
+	q.active = true
+	return writeJSON(ctx, c, message{"type": "response.create"})
+}
+func (q *responseQueue) finished(ctx context.Context, c *websocket.Conn) error {
+	q.active = false
+	if !q.pending {
+		return nil
+	}
+	q.pending = false
+	return q.request(ctx, c)
 }
