@@ -221,6 +221,20 @@ func (s *Service) DiscordAPI(ctx context.Context, caller contract.Principal, req
 	if err != nil {
 		return contract.DiscordAPIResponse{}, failure(err)
 	}
+	// A message posted through api as a reply answers its input as discord send with replyTo does,
+	// so the turn's final text does not answer that input again.
+	if req.Method == "POST" && len(parts) == 3 && parts[0] == "channels" && parts[2] == "messages" && result.Status < 300 {
+		var sent struct {
+			Reference struct {
+				Message string `json:"message_id"`
+			} `json:"message_reference"`
+		}
+		if json.Unmarshal(req.Body, &sent) == nil && sent.Reference.Message != "" {
+			if err := s.payDiscordReply(ctx, caller.Session, parts[1], sent.Reference.Message); err != nil {
+				return contract.DiscordAPIResponse{}, failure(err)
+			}
+		}
+	}
 	return contract.DiscordAPIResponse{Status: result.Status, Body: result.Body}, nil
 }
 func (s *Service) DiscordSend(ctx context.Context, caller contract.Principal, req contract.DiscordSendRequest) (contract.DiscordSendResponse, *contract.Error) {
