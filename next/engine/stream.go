@@ -284,6 +284,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 		diffAsked := false
 		var stopSent contract.TurnID
 		pauseSent, stepsSent := false, []string(nil)
+		var releasedSent []string
 		reloadSent := 0 // Send current script and pause state on every channel; Reload ignores a script version it already has.
 		for {
 			if !handle.Lock() {
@@ -352,7 +353,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					reason, cause = streamWorkflowReadFailed, err
 					return
 				}
-				if run.State == contract.WorkflowRunning && (run.Version != reloadSent || run.Paused != pauseSent || !slices.Equal(run.PausedSteps, stepsSent)) {
+				if run.State == contract.WorkflowRunning && (run.Version != reloadSent || run.Paused != pauseSent || !slices.Equal(run.PausedSteps, stepsSent) || !slices.Equal(run.ReleasedSteps, releasedSent)) {
 					workflow, err := s.boxWorkflow(ctx, run, current.Size.MemBytes)
 					if err != nil {
 						reason, cause = streamWorkflowReadFailed, err
@@ -362,6 +363,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					case out <- contract.BoxMessage{Body: contract.WorkflowReload{Workflow: *workflow}}:
 						reloadSent = run.Version
 						pauseSent, stepsSent = run.Paused, run.PausedSteps
+						releasedSent = run.ReleasedSteps
 					case <-ctx.Done():
 						reason, cause = streamCanceled, ctx.Err()
 						return

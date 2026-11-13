@@ -438,12 +438,12 @@ func TestRoomDeleteNeedsDiscard(t *testing.T) {
 func TestRoomRepos(t *testing.T) {
 	f := &fakeClient{}
 	runCLI(t, f, "room", "repo", "add", "r", "owner/a", "--default")
-	if f.repoAdd.Room != "r" || f.repoAdd.Repo != "owner/a" || !f.repoAdd.Default {
+	if f.repoAdd.Room != "r" || f.repoAdd.Repo != "owner/a" || !f.repoAdd.Default || f.repoAdd.PREvents != nil {
 		t.Fatalf("%+v", f.repoAdd)
 	}
 	for _, mode := range []string{"on", "off"} {
 		runCLI(t, f, "room", "repo", "add", "r", "owner/a", "--pr-events", mode)
-		if f.repoAdd.PREvents != (mode == "on") {
+		if f.repoAdd.PREvents == nil || *f.repoAdd.PREvents != (mode == "on") {
 			t.Fatalf("--pr-events %s: %+v", mode, f.repoAdd)
 		}
 	}

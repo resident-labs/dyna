@@ -98,7 +98,7 @@ func TestTheWorkflowSkillSaysWhatTheCodeDoes(t *testing.T) {
 		"the run ended first", "`Failed steps (N): <names>`", "`data.json`", "Up to 1024 bytes", "AGENTS.md changes reach a running worker", "one worker per 512 MiB", "holds a box slot",
 		"dry run of one group", "Do not prohibit the tools a worker needs", "still reports done",
 		"`cwd` is relative to the main tree unless absolute", "`maxWorkers`", "git worktree remove --force", "`dyna session stop SESSION`",
-		"Reload is for a running run, resume for an ended one", "`dyna workflow reload RUN FILE`", "no second one starts", "bounded read-only work with a schema result", "small has 2 CPU, 4 GiB", "six child", "[Context update]", "dyna workflow steer RUN STEP TEXT", "dyna workflow pause RUN", "dyna workflow unpause RUN", "runs on until the run ends",
+		"Reload is for a running run, resume for an ended one", "`dyna workflow reload RUN FILE`", "no second one starts", "bounded work with a schema result", "small has 2 CPU, 4 GiB", "six child", "[Context update]", "dyna workflow steer RUN STEP TEXT", "dyna workflow pause RUN", "dyna workflow unpause RUN", "runs on until the run ends",
 		"script version", "[events.md](events.md)",
 		"the worker submits as a JSON file", "`status(text)`", "It is not a step", "options other than `lane`", "nothing is read from a step's name",
 	} {

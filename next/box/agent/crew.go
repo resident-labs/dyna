@@ -167,7 +167,8 @@ func (c *Crew) addLimits(profiles []contract.WorkflowProfile) {
 func (c *Crew) Reload(workflow contract.BoxWorkflow) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if workflow.Paused != c.workflow.Paused || !slices.Equal(workflow.PausedSteps, c.workflow.PausedSteps) {
+	if workflow.Paused != c.workflow.Paused || !slices.Equal(workflow.PausedSteps, c.workflow.PausedSteps) || !slices.Equal(workflow.ReleasedSteps, c.workflow.ReleasedSteps) {
+		c.workflow.ReleasedSteps = slices.Clone(workflow.ReleasedSteps)
 		c.workflow.PausedSteps = slices.Clone(workflow.PausedSteps)
 		c.workflow.Paused = workflow.Paused
 		close(c.pauseChanged)
@@ -1221,7 +1222,7 @@ func (t *tail) String() string {
 func (c *Crew) waitUnpaused(ctx context.Context, key string) error {
 	for {
 		c.mu.Lock()
-		paused, changed := c.workflow.Paused || slices.Contains(c.workflow.PausedSteps, key), c.pauseChanged
+		paused, changed := (c.workflow.Paused && !slices.Contains(c.workflow.ReleasedSteps, key)) || slices.Contains(c.workflow.PausedSteps, key), c.pauseChanged
 		c.mu.Unlock()
 		if !paused {
 			return nil

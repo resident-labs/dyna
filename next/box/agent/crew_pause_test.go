@@ -88,3 +88,18 @@ func TestPausedWorkerDoesNotSpendItsTimeout(t *testing.T) {
 		t.Fatalf("released worker: %+v", got)
 	}
 }
+
+func TestRunPauseReleasesOnlySelectedWorker(t *testing.T) {
+	c := &Crew{workflow: contract.BoxWorkflow{Paused: true, Version: 1}, pauseChanged: make(chan struct{})}
+	c.Reload(contract.BoxWorkflow{Paused: true, Version: 1, ReleasedSteps: []string{"a"}})
+	if err := c.waitUnpaused(t.Context(), "a"); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"b", ""} {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if err := c.waitUnpaused(ctx, key); err != context.Canceled {
+			t.Fatalf("%q escaped: %v", key, err)
+		}
+	}
+}

@@ -19,46 +19,50 @@ const failedStepNames = 20
 // once, by the box's first start. Resume names the run this one resumes, and only a run's start reads it from here: afterwards
 // ResumedSessions follows the stored link.
 type WorkflowRun struct {
-	ID           contract.WorkflowRunID
-	Room         contract.RoomID
-	Session      contract.SessionID
-	Subscription contract.SubscriptionID
-	Key          string
-	Queue        int64 // pending subscription event, bound atomically at session creation
-	Name         string
-	Description  string
-	Script       string
-	Args         string
-	Profiles     []contract.ProfileName
-	Repo         contract.RepoName
-	Commit       string
-	Image        string
-	State        contract.WorkflowState
-	PausedSteps  []string
-	Paused       bool
-	Result       string
-	Resume       contract.WorkflowRunID
-	MaxRuns      int // the most runs going in the room, counted when this one starts; 0 is no limit
-	Version      int
-	StatusLines  []contract.WorkflowStatusLine // the script's latest status() lines, oldest first
-	Started      time.Time
-	Ended        time.Time
+	ID            contract.WorkflowRunID
+	Room          contract.RoomID
+	Session       contract.SessionID
+	Subscription  contract.SubscriptionID
+	Key           string
+	Queue         int64 // pending subscription event, bound atomically at session creation
+	Name          string
+	Description   string
+	Script        string
+	Args          string
+	Profiles      []contract.ProfileName
+	Repo          contract.RepoName
+	Commit        string
+	Image         string
+	State         contract.WorkflowState
+	PausedSteps   []string
+	ReleasedSteps []string
+	Paused        bool
+	Result        string
+	Resume        contract.WorkflowRunID
+	MaxRuns       int // the most runs going in the room, counted when this one starts; 0 is no limit
+	Version       int
+	StatusLines   []contract.WorkflowStatusLine // the script's latest status() lines, oldest first
+	Started       time.Time
+	Ended         time.Time
 }
 
 // workflowStatusLines is how many status() lines a run keeps.
 const workflowStatusLines = 20
 
-const workflowColumns = "sub,key,id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,result,version,status_lines,started_at,ended_at,paused,paused_steps"
+const workflowColumns = "sub,key,id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,result,version,status_lines,started_at,ended_at,paused,paused_steps,released_steps"
 
 func scanWorkflow(row interface{ Scan(...any) error }) (WorkflowRun, error) {
 	var run WorkflowRun
-	var profiles, lines, pausedSteps string
+	var profiles, lines, pausedSteps, releasedSteps string
 	var started, ended int64
-	err := row.Scan(&run.Subscription, &run.Key, &run.ID, &run.Room, &run.Session, &run.Name, &run.Description, &run.Script, &run.Args, &profiles, &run.Repo, &run.Commit, &run.Image, &run.State, &run.Result, &run.Version, &lines, &started, &ended, &run.Paused, &pausedSteps)
+	err := row.Scan(&run.Subscription, &run.Key, &run.ID, &run.Room, &run.Session, &run.Name, &run.Description, &run.Script, &run.Args, &profiles, &run.Repo, &run.Commit, &run.Image, &run.State, &run.Result, &run.Version, &lines, &started, &ended, &run.Paused, &pausedSteps, &releasedSteps)
 	if err != nil {
 		return run, err
 	}
 	if err := json.Unmarshal([]byte(pausedSteps), &run.PausedSteps); err != nil {
+		return run, err
+	}
+	if err := json.Unmarshal([]byte(releasedSteps), &run.ReleasedSteps); err != nil {
 		return run, err
 	}
 	run.Started = time.UnixMilli(started).UTC()
@@ -323,22 +327,24 @@ func (s *Store) EndWorkflowStep(ctx context.Context, run contract.WorkflowRunID,
 		} else if n == 0 {
 			return ErrNotFound
 		}
-		var raw string
-		if err := tx.QueryRowContext(ctx, "SELECT paused_steps FROM workflow_runs WHERE id=?", run).Scan(&raw); err != nil {
-			return err
-		}
-		var paused []string
-		if err := json.Unmarshal([]byte(raw), &paused); err != nil {
-			return err
-		}
-		kept := slices.DeleteFunc(paused, func(key string) bool { return key == req.Key })
-		if len(kept) != len(paused) {
-			data, err := json.Marshal(kept)
-			if err != nil {
+		for _, column := range []string{"paused_steps", "released_steps"} {
+			var raw string
+			if err := tx.QueryRowContext(ctx, "SELECT "+column+" FROM workflow_runs WHERE id=?", run).Scan(&raw); err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, "UPDATE workflow_runs SET paused_steps=? WHERE id=?", string(data), run); err != nil {
+			var paused []string
+			if err := json.Unmarshal([]byte(raw), &paused); err != nil {
 				return err
+			}
+			kept := slices.DeleteFunc(paused, func(key string) bool { return key == req.Key })
+			if len(kept) != len(paused) {
+				data, err := json.Marshal(kept)
+				if err != nil {
+					return err
+				}
+				if _, err := tx.ExecContext(ctx, "UPDATE workflow_runs SET "+column+"=? WHERE id=?", string(data), run); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -498,8 +504,8 @@ func (s *Store) PauseWorkflow(ctx context.Context, id contract.WorkflowRunID, pa
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		var session contract.SessionID
 		var runPaused bool
-		var raw string
-		err := tx.QueryRowContext(ctx, "SELECT session,paused,paused_steps FROM workflow_runs WHERE id=? AND state=?", id, contract.WorkflowRunning).Scan(&session, &runPaused, &raw)
+		var raw, releasedRaw string
+		err := tx.QueryRowContext(ctx, "SELECT session,paused,paused_steps,released_steps FROM workflow_runs WHERE id=? AND state=?", id, contract.WorkflowRunning).Scan(&session, &runPaused, &raw, &releasedRaw)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrWorkflowEnded
 		}
@@ -510,12 +516,21 @@ func (s *Store) PauseWorkflow(ctx context.Context, id contract.WorkflowRunID, pa
 		if err := json.Unmarshal([]byte(raw), &steps); err != nil {
 			return err
 		}
+		var released []string
+		if err := json.Unmarshal([]byte(releasedRaw), &released); err != nil {
+			return err
+		}
 		if step == "" {
+			released = []string{}
 			runPaused = paused
 			if !paused {
 				steps = []string{}
 			}
 		} else {
+			released = slices.DeleteFunc(released, func(key string) bool { return key == step })
+			if !paused && runPaused {
+				released = append(released, step)
+			}
 			steps = slices.DeleteFunc(steps, func(key string) bool { return key == step })
 			if paused {
 				steps = append(steps, step)
@@ -525,7 +540,11 @@ func (s *Store) PauseWorkflow(ctx context.Context, id contract.WorkflowRunID, pa
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE workflow_runs SET paused=?,paused_steps=? WHERE id=?", runPaused, string(data), id); err != nil {
+		releasedData, err := json.Marshal(released)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE workflow_runs SET paused=?,paused_steps=?,released_steps=? WHERE id=?", runPaused, string(data), string(releasedData), id); err != nil {
 			return err
 		}
 

@@ -352,7 +352,7 @@ func subscriptionInfo(sub store.Subscription) contract.SubscriptionInfo {
 		}
 		sub.Run = &run
 	}
-	info := contract.SubscriptionInfo{Subscription: sub.Subscription, Disabled: sub.Disabled, Default: sub.Default, Running: sub.Running, Failures: sub.Failures, Last: sub.Last}
+	info := contract.SubscriptionInfo{Subscription: sub.Subscription, Waiting: sub.Waiting, Disabled: sub.Disabled, Default: sub.Default, Running: sub.Running, Failures: sub.Failures, Last: sub.Last}
 	next := sub.DueAt
 	if sub.HoldUntil.After(next) && !next.IsZero() {
 		next = sub.HoldUntil

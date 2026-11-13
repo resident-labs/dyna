@@ -160,13 +160,13 @@ func TestContextShowsRoomWidePREventsOnlyWhenEnabled(t *testing.T) {
 	if strings.Contains(snapshot(), "Room-wide PR events:") {
 		t.Fatal("on by default")
 	}
-	if err := r.s.store.AddRoomRepo(t.Context(), r.room, "owner/review", false, true); err != nil {
+	if err := r.s.store.AddRoomRepo(t.Context(), r.room, "owner/review", false, func() *bool { v := true; return &v }()); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(snapshot(), "Room-wide PR events: owner/review") {
 		t.Fatal("enabled setting absent")
 	}
-	if err := r.s.store.AddRoomRepo(t.Context(), r.room, "owner/review", false, false); err != nil {
+	if err := r.s.store.AddRoomRepo(t.Context(), r.room, "owner/review", false, func() *bool { v := false; return &v }()); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(snapshot(), "Room-wide PR events:") {

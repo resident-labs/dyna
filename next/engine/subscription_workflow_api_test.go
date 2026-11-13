@@ -18,6 +18,22 @@ func TestSubscriptionFireUpdateAndStateKeepQueueAndState(t *testing.T) {
 	if _, problem := w.SubscriptionFire(w.ctx, w.owner, contract.SubscriptionFireRequest{ID: sub, Key: &key}); problem != nil {
 		t.Fatal(problem)
 	}
+	listedSubscriptions, listProblem := w.SubscriptionList(w.ctx, w.owner, contract.SubscriptionListRequest{Room: w.room})
+	if listProblem != nil {
+		t.Fatal(listProblem)
+	}
+	found := false
+	for _, info := range listedSubscriptions.Subscriptions {
+		if info.Subscription.ID == sub {
+			found = true
+			if info.Waiting != 1 {
+				t.Fatalf("waiting: %+v", info)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing subscription")
+	}
 	changedKey := "new-template"
 	latest := true
 	parent := w.root
@@ -44,6 +60,15 @@ func TestSubscriptionFireUpdateAndStateKeepQueueAndState(t *testing.T) {
 	var run contract.WorkflowRunID
 	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT id FROM workflow_runs WHERE sub=?", sub).Scan(&run); err != nil {
 		t.Fatal(err)
+	}
+	listedSubscriptions, listProblem = w.SubscriptionList(w.ctx, w.owner, contract.SubscriptionListRequest{Room: w.room})
+	if listProblem != nil {
+		t.Fatal(listProblem)
+	}
+	for _, info := range listedSubscriptions.Subscriptions {
+		if info.Subscription.ID == sub && info.Waiting != 0 {
+			t.Fatalf("running event counted as waiting: %+v", info)
+		}
 	}
 	active, err := w.store.WorkflowRun(w.ctx, run)
 	if err != nil {
