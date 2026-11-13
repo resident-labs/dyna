@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/resident-labs/dyna/engine/transcriptview"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -108,12 +109,12 @@ func TestWorkflowTranscriptDataOwnership(t *testing.T) {
 	}
 	t.Run("post adapter", func(t *testing.T) {
 		item := contract.TranscriptItem{}
-		applyTranscriptPost(&item, event)
+		transcriptview.ApplyPost(&item, event)
 		check(t, item)
 	})
 	t.Run("steer adapter", func(t *testing.T) {
 		item := pig.TranscriptItem{}
-		if err := applyTranscriptSteer(&item, event, false); err != nil {
+		if err := transcriptview.ApplySteer(&item, event, false); err != nil {
 			t.Fatal(err)
 		}
 		check(t, item.TranscriptItem)
@@ -181,13 +182,13 @@ func TestWorkflowDeepDataAndOwnedTranscriptReference(t *testing.T) {
 		t.Fatal("deep canonical data or owning index changed")
 	}
 	item := contract.TranscriptItem{}
-	applyTranscriptPost(&item, event)
+	transcriptview.ApplyPost(&item, event)
 	if item.Data != "" || item.DataAttachment == nil || *item.DataAttachment != 1 || item.DataRef == nil || item.DataRef.File != post.Attachments[1] || item.DataRef.Summary != "1 keys" {
 		t.Fatalf("reference guessed the first same-hash file or lost ownership: %+v", item)
 	}
 	// Final inputs use the same typed ownership path, without appending data or attachment metadata to their text.
 	event.Body = contract.TurnEnded{Data: post.Data, Attachments: post.Attachments, DataAttachment: post.DataAttachment}
-	text, _, files, data, index, err := transcriptInputBody(event)
+	text, _, files, data, index, err := transcriptview.InputBody(event)
 	if err != nil || data != raw || index == nil || *index != 1 || len(files) != 2 || strings.Contains(text, "dataAttachment") || strings.Contains(text, string(raw)) {
 		t.Fatalf("final transcript input lost exact data/ownership: %v", err)
 	}
