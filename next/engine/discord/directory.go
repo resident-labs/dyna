@@ -6,12 +6,21 @@ import (
 	"sync"
 )
 
+type Overwrite struct {
+	ID    string `json:"id"`
+	Type  int    `json:"type"`
+	Allow string `json:"allow"`
+	Deny  string `json:"deny"`
+}
 type Channel struct {
-	ID     string `json:"id"`
-	Guild  string `json:"guild_id"`
-	Parent string `json:"parent_id"`
-	Name   string `json:"name"`
-	Type   int    `json:"type"`
+	ID         string      `json:"id"`
+	Guild      string      `json:"guild_id"`
+	Parent     string      `json:"parent_id"`
+	Name       string      `json:"name"`
+	Type       int         `json:"type"`
+	Position   int         `json:"position"`
+	Topic      string      `json:"topic"`
+	Overwrites []Overwrite `json:"permission_overwrites"`
 }
 type Role struct {
 	Permissions uint64 `json:"permissions,string"`

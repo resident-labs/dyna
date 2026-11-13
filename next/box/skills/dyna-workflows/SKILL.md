@@ -113,12 +113,12 @@ const test = await run(`git fetch origin ${merged.branch} && git worktree add --
 - One build runs at a time in the box: `run()` and workers' `cargo`, `go`, `npm`, `make` and similar
   share one lock, and time queued for it does not count against a timeout.
 
-## Stop, reload or resume a run
+## Steer, stop, reload or resume a run
 
-- Stop: the session tool's `stop` action on the crew, or `dyna session stop CREW`, then check
-  `dyna workflow status RUN` says `stopped`. Running steps fail with `the run ended first`; to undo,
-  start the same script with `--resume RUN`. A box whose host stops answering waits for that host; if its
-  container is gone the run fails, and `--resume RUN` carries on from the finished steps.
+- Steer: a post that mentions the run's session reaches every worker running then, before its next
+  model request. The script reads nothing, and with no worker running the post stays undelivered.
+- Stop: the session tool's `stop` action on the crew, or `dyna session stop CREW`; `dyna workflow status RUN`
+  then says `stopped`. Running steps fail with `the run ended first`; `--resume RUN` carries on from the finished steps.
 
 Reload is for a running run, resume for an ended one. Both match steps by key: a hash of the kind,
 prompt or command, options other than `lane`, effective profile and enclosing `workflow()` step. A

@@ -57,8 +57,12 @@ func (s *Service) DiscordCheck(ctx context.Context, caller contract.Principal, r
 	}
 	out := contract.DiscordCheckResponse{}
 	var problems, confirmations []string
+	var lost []string
+	if count := s.discordEventsLost.Load(); count > 0 {
+		lost = []string{fmt.Sprintf("%d server events (members, channels, roles) were lost since the engine started, because their queue was full or the room could not store them; see the engine log.", count)}
+	}
 	if read.Text == "" {
-		out.Lines = []string{"No problems found.", "No front policy is set."}
+		out.Lines = append([]string{"No problems found.", "No front policy is set."}, lost...)
 		return out, nil
 	}
 	p, err := policy.Decode(read.Text)
@@ -188,5 +192,6 @@ func (s *Service) DiscordCheck(ctx context.Context, caller contract.Principal, r
 	}
 	out.Lines = append([]string{heading}, problems...)
 	out.Lines = append(out.Lines, confirmations...)
+	out.Lines = append(out.Lines, lost...)
 	return out, nil
 }

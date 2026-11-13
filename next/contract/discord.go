@@ -1,6 +1,9 @@
 package contract
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 const MethodRoomDiscord Method = "room.discord"
 const MethodDiscordAPI Method = "discord.api"
@@ -175,7 +178,85 @@ type DiscordCheckResponse struct {
 	Lines []string `json:"lines"`
 }
 
-// The folder methods answer with one shape; the method map names a method's response after the method.
-type DiscordExportResponse = DiscordFolderResponse
-type DiscordPlanResponse = DiscordFolderResponse
-type DiscordApplyResponse = DiscordFolderResponse
+// Server events are what happens on a Discord server whose whole-server mapping a room holds. Names are chosen by
+// members or admins, so the renderer marks them as outside text. The invite used is not known.
+
+// DiscordMemberJoined says a member joined the server.
+type DiscordMemberJoined struct {
+	Server  string    `json:"server"`
+	User    string    `json:"user"`
+	Name    string    `json:"name"`
+	Created time.Time `json:"created"` // when the account was made, from its ID
+	Bot     bool      `json:"bot,omitempty"`
+}
+
+// DiscordMemberLeft says a member is no longer in the server; Discord does not say whether they left or were removed.
+type DiscordMemberLeft DiscordMemberJoined
+
+// DiscordChannelCreated says a channel or category was created.
+type DiscordChannelCreated struct {
+	Server     string `json:"server"`
+	Channel    string `json:"channel"`
+	Name       string `json:"name"`
+	Kind       int    `json:"kind"` // Discord's channel type number
+	Parent     string `json:"parent,omitempty"`
+	ParentName string `json:"parentName,omitempty"`
+}
+
+// DiscordChannelDeleted says a channel or category was deleted.
+type DiscordChannelDeleted DiscordChannelCreated
+
+// DiscordChannelUpdated says a channel or category changed; Changed lists name, parent, position, topic or overwrites.
+// A position that moved by one place is not listed, because dragging one channel shifts its neighbours by one.
+type DiscordChannelUpdated struct {
+	Server     string   `json:"server"`
+	Channel    string   `json:"channel"`
+	Name       string   `json:"name"`
+	Kind       int      `json:"kind"`
+	Parent     string   `json:"parent,omitempty"`
+	ParentName string   `json:"parentName,omitempty"`
+	Changed    []string `json:"changed"`
+}
+
+// DiscordRoleCreated says a role was created.
+type DiscordRoleCreated struct {
+	Server string `json:"server"`
+	Role   string `json:"role"`
+	Name   string `json:"name"`
+}
+
+// DiscordRoleDeleted says a role was deleted.
+type DiscordRoleDeleted DiscordRoleCreated
+
+// DiscordRoleUpdated says a role changed; Changed lists name, position or permissions.
+// A position that moved by one place is not listed, as for channels.
+type DiscordRoleUpdated struct {
+	Server  string   `json:"server"`
+	Role    string   `json:"role"`
+	Name    string   `json:"name"`
+	Changed []string `json:"changed"`
+}
+
+func (DiscordMemberJoined) EventType() EventType   { return "discord.member.joined" }
+func (DiscordMemberJoined) isEventBody()           {}
+func (DiscordMemberLeft) EventType() EventType     { return "discord.member.left" }
+func (DiscordMemberLeft) isEventBody()             {}
+func (DiscordChannelCreated) EventType() EventType { return "discord.channel.created" }
+func (DiscordChannelCreated) isEventBody()         {}
+func (DiscordChannelUpdated) EventType() EventType { return "discord.channel.updated" }
+func (DiscordChannelUpdated) isEventBody()         {}
+func (DiscordChannelDeleted) EventType() EventType { return "discord.channel.deleted" }
+func (DiscordChannelDeleted) isEventBody()         {}
+func (DiscordRoleCreated) EventType() EventType    { return "discord.role.created" }
+func (DiscordRoleCreated) isEventBody()            {}
+func (DiscordRoleUpdated) EventType() EventType    { return "discord.role.updated" }
+func (DiscordRoleUpdated) isEventBody()            {}
+func (DiscordRoleDeleted) EventType() EventType    { return "discord.role.deleted" }
+func (DiscordRoleDeleted) isEventBody()            {}
+
+// The folder actions answer alike. Each has a response named for its method, as every method does.
+type (
+	DiscordExportResponse = DiscordFolderResponse
+	DiscordPlanResponse   = DiscordFolderResponse
+	DiscordApplyResponse  = DiscordFolderResponse
+)

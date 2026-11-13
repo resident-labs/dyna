@@ -297,6 +297,14 @@ export type DiscordPolicyRequest = { room?: RoomID; server?: string; text?: stri
 export type DiscordPolicyResponse = { text: string; };
 export type DiscordCheckRequest = { room?: RoomID; server?: string; };
 export type DiscordCheckResponse = { lines: Array<string> | null; };
+export type DiscordMemberJoined = { server: string; user: string; name: string; created: string; bot?: boolean; };
+export type DiscordMemberLeft = DiscordMemberJoined;
+export type DiscordChannelCreated = { server: string; channel: string; name: string; kind: number; parent?: string; parentName?: string; };
+export type DiscordChannelDeleted = DiscordChannelCreated;
+export type DiscordChannelUpdated = { server: string; channel: string; name: string; kind: number; parent?: string; parentName?: string; changed: Array<string> | null; };
+export type DiscordRoleCreated = { server: string; role: string; name: string; };
+export type DiscordRoleDeleted = DiscordRoleCreated;
+export type DiscordRoleUpdated = { server: string; role: string; name: string; changed: Array<string> | null; };
 export type DiscordExportResponse = DiscordFolderResponse;
 export type DiscordPlanResponse = DiscordFolderResponse;
 export type DiscordApplyResponse = DiscordFolderResponse;
@@ -694,8 +702,16 @@ export type EventBody =
   | { type: "computer.changed"; body: ComputerChanged }
   | { type: "connect.connector"; body: ConnectConnector }
   | { type: "conversation.read"; body: ConversationRead }
+  | { type: "discord.channel.created"; body: DiscordChannelCreated }
+  | { type: "discord.channel.deleted"; body: DiscordChannelDeleted }
+  | { type: "discord.channel.updated"; body: DiscordChannelUpdated }
   | { type: "discord.files_retrieved"; body: DiscordFilesRetrieved }
+  | { type: "discord.member.joined"; body: DiscordMemberJoined }
+  | { type: "discord.member.left"; body: DiscordMemberLeft }
   | { type: "discord.message"; body: DiscordMessage }
+  | { type: "discord.role.created"; body: DiscordRoleCreated }
+  | { type: "discord.role.deleted"; body: DiscordRoleDeleted }
+  | { type: "discord.role.updated"; body: DiscordRoleUpdated }
   | { type: "engine.restarted"; body: EngineRestarted }
   | { type: "git.main_ci_finished"; body: GitMainCIFinished }
   | { type: "git.main_updated"; body: GitMainUpdated }
