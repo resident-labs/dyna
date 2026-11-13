@@ -99,7 +99,7 @@ func TestTheWorkflowSkillSaysWhatTheCodeDoes(t *testing.T) {
 		"dry run of one group", "Do not prohibit the tools a worker needs", "still reports done",
 		"`cwd` is relative to the main tree unless absolute", "`maxWorkers`", "git worktree remove --force", "`dyna session stop SESSION`",
 		"Reload is for a running run, resume for an ended one", "`dyna workflow reload RUN FILE`", "no second one starts", "bounded read-only work with a schema result", "small has 2 CPU, 4 GiB", "six child", "[Context update]", "dyna workflow steer RUN STEP TEXT", "dyna workflow pause RUN", "dyna workflow unpause RUN", "runs on until the run ends",
-		"script version",
+		"script version", "[events.md](events.md)",
 		"the worker submits as a JSON file", "`status(text)`", "It is not a step", "options other than `lane`", "nothing is read from a step's name",
 	} {
 		if !strings.Contains(text, want) {
@@ -112,6 +112,37 @@ func TestTheWorkflowSkillSaysWhatTheCodeDoes(t *testing.T) {
 	for _, word := range []string{"you must", "always", "never"} {
 		if strings.Contains(strings.ToLower(text), word) {
 			t.Errorf("the skill says %q: it states facts", word)
+		}
+	}
+}
+
+func TestWorkflowEventsGuideIsInstalled(t *testing.T) {
+	guide, err := builtIn.ReadFile("dyna-workflows/events.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(guide)
+	for _, want := range []string{"```js\nexport const meta", "```sh\ndyna subscription add", "args.event", "await state.get()", "await state.set({ head })", "kind=pushed,opened", "subscription fire", "subscription update", "subscription state"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("events guide does not say %q", want)
+		}
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if len(line) > 120 {
+			t.Errorf("events guide line is %d characters: %s", len(line), line)
+		}
+	}
+	for _, root := range []bool{true, false} {
+		dir := t.TempDir()
+		if err := Install(dir, root); err != nil {
+			t.Fatal(err)
+		}
+		copied, err := os.ReadFile(filepath.Join(dir, "dyna-workflows", "events.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(copied) != text {
+			t.Fatalf("events guide changed during install (root=%v)", root)
 		}
 	}
 }
