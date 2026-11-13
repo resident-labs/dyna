@@ -173,8 +173,8 @@ func (s *Store) ResumedSessions(ctx context.Context, repo contract.RepoName, ses
 		SELECT session FROM chain WHERE session!=?`, session, repo, repo, session)
 }
 
-// ErrWorkflowEnded is a reload of a run that is no longer running.
-var ErrWorkflowEnded = errors.New("the run has ended")
+// ErrWorkflowEnded refuses a control or post to a run that is no longer running.
+var ErrWorkflowEnded = errors.New("the workflow run has ended")
 
 // ReloadWorkflow makes script the run's newest version, with its meta's description and profiles, keeps it beside the earlier
 // ones, and wakes the crew's channel to carry it to the box. It returns the new version.
@@ -462,4 +462,11 @@ func (s *Store) PauseWorkflow(ctx context.Context, id contract.WorkflowRunID, pa
 		s.wakePending = append(s.wakePending, session)
 		return nil
 	})
+}
+
+// EndedWorkflowNamed recognizes a finished run's session name after SessionByName no longer lists it.
+func (s *Store) EndedWorkflowNamed(ctx context.Context, room contract.RoomID, name string) (bool, error) {
+	var ended bool
+	err := s.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM workflow_runs w JOIN sessions s ON s.id=w.session WHERE s.room=? AND s.name=? AND w.state!=?)", room, name, contract.WorkflowRunning).Scan(&ended)
+	return ended, err
 }

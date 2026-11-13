@@ -253,6 +253,13 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 				}
 			}
 			if errors.Is(err, store.ErrNotFound) {
+				ended, err := s.store.EndedWorkflowNamed(ctx, targetRoom, address.Name)
+				if err != nil {
+					return contract.PostResponse{}, failure(err)
+				}
+				if ended {
+					return contract.PostResponse{}, failure(store.ErrWorkflowEnded)
+				}
 				return contract.PostResponse{}, invalid("no open session named " + address.Name + " in this room; it may have closed, and session list shows the room's sessions")
 			}
 			if err != nil {

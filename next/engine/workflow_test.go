@@ -390,3 +390,13 @@ func TestWorkflowPauseIsStoredAndShownInStatus(t *testing.T) {
 		t.Fatalf("stored %+v: %v", stored, err)
 	}
 }
+
+func TestPostToEndedWorkflowNamesWhyItCannotReceive(t *testing.T) {
+	w := setupWorkflow(t)
+	started, worker := w.start(w.owner, workflowScript)
+	w.endRun(worker)
+	_, problem := w.Post(w.ctx, w.owner, contract.PostRequest{Room: w.room, Text: "late direction", Mentions: []string{string(started.Session)}})
+	if problem == nil || problem.Code != contract.ErrConflict || !strings.Contains(problem.Message, "workflow run has ended") {
+		t.Fatalf("refusal: %+v", problem)
+	}
+}
