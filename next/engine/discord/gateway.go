@@ -333,7 +333,8 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 						if g.Directory != nil {
 							server, _ := g.Directory.Server(m.Guild)
 							for _, role := range server.Roles {
-								if role.Tags.Bot == g.Bot && slices.Contains(m.Roles, role.ID) {
+								// Discord leaves mention_roles empty when the role is not mentionable, though the text still holds <@&id>.
+								if role.Tags.Bot == g.Bot && (slices.Contains(m.Roles, role.ID) || strings.Contains(m.Content, "<@&"+role.ID+">")) {
 									addressed = true
 								}
 							}
