@@ -31,7 +31,7 @@ func (m *Manager) Stop() {
 
 // Start holds the call until either connection ends. backend contains only root
 // DM posts and questions. Its producer must observe ctx when the call ends.
-func (m *Manager) Start(ctx context.Context, room string, page *websocket.Conn, dial func(context.Context) (*websocket.Conn, error), dispatch func(context.Context, string) (string, error), backend <-chan string) (err error) {
+func (m *Manager) Start(ctx context.Context, room string, page *websocket.Conn, dial func(context.Context) (*websocket.Conn, error), dispatch func(context.Context, string) (func(context.Context) (string, error), error), backend <-chan string) (err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	m.mu.Lock()
 	if m.cancel != nil {
@@ -67,7 +67,7 @@ func (m *Manager) Start(ctx context.Context, room string, page *websocket.Conn, 
 		return err
 	}
 	defer provider.Close(websocket.StatusNormalClosure, "call ended")
-	return run(ctx, page, provider, dispatch, backend, 60*time.Second)
+	return run(ctx, page, provider, dispatch, backend, callLimits{60 * time.Second, 10 * time.Minute, 2 * time.Hour})
 }
 
 type frame struct {
@@ -95,7 +95,7 @@ func readFrames(ctx context.Context, c *websocket.Conn) <-chan frame {
 	return out
 }
 
-func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(context.Context, string) (string, error), backend <-chan string, idle time.Duration) error {
+func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(context.Context, string) (func(context.Context) (string, error), error), backend <-chan string, limits callLimits) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	provider.SetReadLimit(2 << 20)
@@ -104,8 +104,14 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 		return err
 	}
 	pf, vf := readFrames(ctx, page), readFrames(ctx, provider)
-	timer := time.NewTimer(idle)
+	timer := time.NewTimer(limits.page)
 	defer timer.Stop()
+	quiet := time.NewTimer(limits.quiet)
+	defer quiet.Stop()
+	maximum := time.NewTimer(limits.maximum)
+	defer maximum.Stop()
+	ownerReady := false
+	seenOwner := map[string]bool{}
 	type toolResult struct{ id, output string }
 	results := make(chan toolResult, 8)
 	handled := map[string]bool{}
@@ -117,6 +123,16 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-maximum.C:
+			_ = writeJSON(ctx, page, message{"type": "closed", "reason": "The call reached its 2 hour limit."})
+			return nil
+		case <-quiet.C:
+			if active > 0 {
+				quiet.Reset(limits.quiet)
+				continue
+			}
+			_ = writeJSON(ctx, page, message{"type": "closed", "reason": "No one spoke for 10 minutes."})
+			return nil
 		case <-timer.C:
 			_ = writeJSON(ctx, page, message{"type": "closed", "reason": "The call was inactive for 60 seconds."})
 			return nil
@@ -127,7 +143,7 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 			if f.err != nil {
 				return f.err
 			}
-			timer.Reset(idle)
+			timer.Reset(limits.page)
 			if f.kind == websocket.MessageBinary {
 				if len(f.data)%2 != 0 {
 					return errors.New("PCM16 frame has odd length")
@@ -177,6 +193,9 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 			}
 		case result := <-results:
 			active--
+			if active == 0 {
+				quiet.Reset(limits.quiet)
+			}
 			if err := writeJSON(ctx, page, message{"type": "response_done", "working": active > 0}); err != nil {
 				return err
 			}
@@ -213,6 +232,13 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 			if event.Type == "conversation.item.done" && event.Item != nil && event.Item.Type == "function_call" {
 				event = *event.Item
 				event.Type = "response.function_call_arguments.done"
+			}
+			if event.Type == "input_audio_buffer.speech_started" || event.Type == "input_audio_buffer.committed" || event.Type == "conversation.item.input_audio_transcription.completed" {
+				quiet.Reset(limits.quiet)
+			}
+			if (event.Type == "input_audio_buffer.committed" || event.Type == "conversation.item.input_audio_transcription.completed") && event.ItemID != "" && !seenOwner[event.ItemID] {
+				seenOwner[event.ItemID] = true
+				ownerReady = true
 			}
 			switch event.Type {
 			case "error":
@@ -289,7 +315,18 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 				if err != nil {
 					return err
 				}
-			case "conversation.item.input_audio_transcription.completed", "response.output_audio_transcript.done":
+			case "conversation.item.input_audio_transcription.delta", "response.output_text.delta", "response.output_audio_transcript.delta":
+				role := "assistant"
+				if event.Type == "conversation.item.input_audio_transcription.delta" {
+					role = "owner"
+				}
+				if err := writeJSON(ctx, page, message{"type": "transcript", "role": role, "item_id": event.ItemID, "delta": event.Delta}); err != nil {
+					return err
+				}
+			case "conversation.item.input_audio_transcription.completed", "response.output_audio_transcript.done", "response.output_text.done":
+				if event.Type == "response.output_text.done" {
+					event.Transcript = event.Text
+				}
 				role := "assistant"
 				if event.Type == "conversation.item.input_audio_transcription.completed" {
 					role = "owner"
@@ -299,6 +336,12 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 				}
 			case "response.function_call_arguments.done":
 				output = nil
+				if event.CallID == "" {
+					event.CallID = event.ID
+				}
+				if event.CallID == "" {
+					continue
+				}
 				if handled[event.CallID] {
 					continue
 				}
@@ -310,20 +353,30 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 					continue
 				}
 				if event.Name != "background_agent" {
-					return errors.New("unknown voice tool")
+					continue
 				}
-				var args struct {
-					Prompt string `json:"prompt"`
+				request := toolPrompt(event.Arguments)
+				if !ownerReady || strings.TrimSpace(request) == "" {
+					if err := writeJSON(ctx, provider, message{"type": "conversation.item.create", "item": message{"type": "function_call_output", "call_id": event.CallID, "output": "No new user request to send."}}); err != nil {
+						return err
+					}
+					if err := responses.request(ctx, provider); err != nil {
+						return err
+					}
+					continue
 				}
-				if err := json.Unmarshal([]byte(event.Arguments), &args); err != nil {
-					return err
-				}
+				ownerReady = false
+				wait, dispatchErr := dispatch(ctx, request)
 				active++
 				if err := writeJSON(ctx, page, message{"type": "response_done", "working": true}); err != nil {
 					return err
 				}
-				go func(id, prompt string) {
-					output, err := dispatch(ctx, prompt)
+				go func(id string) {
+					output := ""
+					err := dispatchErr
+					if err == nil {
+						output, err = wait(ctx)
+					}
 					if err != nil {
 						output = err.Error()
 					}
@@ -331,7 +384,7 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 					case results <- toolResult{id, output}:
 					case <-ctx.Done():
 					}
-				}(event.CallID, args.Prompt)
+				}(event.CallID)
 			case "response.done":
 				output = nil
 				if err := responses.finished(ctx, provider); err != nil {
@@ -380,25 +433,41 @@ func truncateText(s string, n int) string {
 // outputBudget follows Codex's approximate 1,000-token handoff budget: stream
 // the head immediately, retain the newest tail, and emit the marker on finish.
 type outputBudget struct {
-	sent      int
-	pending   string
-	truncated bool
+	sent         int
+	buffer, tail string
+	truncated    bool
 }
 
 func (b *outputBudget) append(s string) string {
-	remaining := 2000 - b.sent
-	chunk := head(s, remaining)
-	b.sent += len(chunk)
-	if len(chunk) < len(s) {
-		b.truncated = true
-		b.pending = tail(b.pending+s[len(chunk):], 2000-len(truncationMarker))
+	headLimit := (4000 - len(truncationMarker)) / 2
+	tailLimit := 4000 - headLimit - len(truncationMarker)
+	if b.truncated {
+		b.tail = tail(b.tail+s, tailLimit)
+	} else {
+		b.buffer += s
+		if len(b.buffer) > 4000-b.sent {
+			available := headLimit - b.sent
+			if available < 0 {
+				available = 0
+			}
+			b.tail = tail(b.buffer, tailLimit)
+			b.buffer = head(b.buffer, available)
+			b.truncated = true
+		}
 	}
+	available := headLimit - b.sent
+	if available < 0 {
+		available = 0
+	}
+	chunk := head(b.buffer, available)
+	b.buffer = b.buffer[len(chunk):]
+	b.sent += len(chunk)
 	return chunk
 }
 func (b *outputBudget) finish() string {
-	out := ""
+	out := b.buffer
 	if b.truncated {
-		out = truncationMarker + b.pending
+		out += truncationMarker + b.tail
 	}
 	*b = outputBudget{}
 	return out
@@ -434,3 +503,5 @@ func (q *responseQueue) finished(ctx context.Context, c *websocket.Conn) error {
 type callFailure string
 
 func (e callFailure) Error() string { return string(e) }
+
+type callLimits struct{ page, quiet, maximum time.Duration }

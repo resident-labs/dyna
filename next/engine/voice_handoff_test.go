@@ -79,6 +79,9 @@ func TestVoiceHandoffIdleBusyAndFinal(t *testing.T) {
 	}
 	sendTool := func(id, prompt string) {
 		t.Helper()
+		if err := wsjson.Write(ctx, provider, map[string]any{"type": "input_audio_buffer.committed", "item_id": "owner-" + id}); err != nil {
+			t.Fatal(err)
+		}
 		args, _ := json.Marshal(map[string]string{"prompt": prompt})
 		if err := wsjson.Write(ctx, provider, map[string]any{"type": "response.function_call_arguments.done", "name": "background_agent", "call_id": id, "arguments": string(args)}); err != nil {
 			t.Fatal(err)

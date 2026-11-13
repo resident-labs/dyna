@@ -63,6 +63,8 @@ func userText(text string) message {
 }
 
 type providerEvent struct {
+	ID         string `json:"id"`
+	Text       string `json:"text"`
 	Type       string `json:"type"`
 	ItemID     string `json:"item_id"`
 	Delta      string `json:"delta"`
@@ -79,4 +81,20 @@ type providerEvent struct {
 	Rate        uint32         `json:"sample_rate"`
 	Channels    uint32         `json:"channels"`
 	NumChannels uint32         `json:"num_channels"`
+}
+
+// toolPrompt matches Codex's extract_input_transcript, including raw fallback.
+func toolPrompt(arguments string) string {
+	var object map[string]json.RawMessage
+	if json.Unmarshal([]byte(arguments), &object) == nil {
+		for _, key := range []string{"input_transcript", "input", "text", "prompt", "query"} {
+			var value string
+			if json.Unmarshal(object[key], &value) == nil {
+				if trimmed := strings.TrimSpace(value); trimmed != "" {
+					return trimmed
+				}
+			}
+		}
+	}
+	return arguments
 }
