@@ -61,18 +61,19 @@ it in `/box/shared/services/NAME.json` and pass `--file` the path the prompt's F
 | `command` | replaces the image's CMD (the image's) |
 | `ports` | `PORT`, `PORT/udp` or `HOSTPORT:PORT/tcp`, published on every address of the host (none) |
 | `env`, `secrets` | plain values, and names whose values you set apart; no name starts with `DYNA_` |
-| `data` | absolute path of a volume that survives restarts, updates and rollbacks (none) |
+| `data` | absolute path, without space `:` `,` `"` `%` `\` `$` `=`, of a volume that survives restarts, updates and rollbacks (none) |
 | `cpus`, `memory` | hard limits and reservations: 0.25 to 8 in steps of 0.25 (1); 64MiB to 16GiB (512MiB) |
 | `disk` | accounting for the volume and logs, up to 100GiB, not a quota (1GiB) |
 | `host` | a host your room may use (admission picks one) |
 | `restart`, `health` | `always` or `on-failure` (always); a command that gates an update (10 s active) |
 
 The root filesystem is read-only: the service writes only to `data` and a 64 MiB `/tmp`. It has its own
-network namespace and cannot reach the host's loopback. A room image is one saved with the `image save`
-action, so it starts FROM `${DYNA_BASE}`, a large base; a small registry image pinned by digest is
-lighter.
+network namespace and cannot reach the host's loopback. Prefer a small registry image pinned by digest;
+for a room image, see dyna-images.
 
-Each `set` redeploys, with a few seconds of downtime. Undo: `set` again with the earlier file.
+Each `set` redeploys, with a few seconds of downtime. Undo: `set` again with the earlier file, then
+set again the value of any secret the change dropped; the file restores only its name. Before dropping
+a secret, make sure whoever holds its value can set it again.
 
 **Cost.** A service reserves its full CPU and memory on its host. Boxes there lose four times that, and
 it counts against the room's limits. A host gives services at most a quarter of its CPU and memory. A
@@ -88,7 +89,8 @@ openssl rand -hex 32 | dyna service secret set ROOM NAME RELAY_TOKEN
 
 A value you generate this way never enters your transcript. A token only the owner holds (an API key, a
 bot token) is the owner's to set: ask them to run the command. Until every secret has a value the
-service waits with `secret_missing`. Setting a value redeploys the service.
+service waits with `secret_missing`. Setting a value redeploys the service. A replaced value is undone
+only by setting the previous value again.
 
 ## Ship a new version, roll back, restart
 
@@ -100,7 +102,9 @@ service waits with `secret_missing`. Setting a value redeploys the service.
 - `dyna service rollback ROOM NAME` runs the previous image with the current declaration. It exists only
   after a deploy that changed the image.
 - `dyna service restart ROOM NAME` restarts the unit and clears `crash_loop`.
-- `dyna service stop ROOM NAME` and `dyna service start ROOM NAME` turn it off and on.
+- `dyna service stop ROOM NAME` and `dyna service start ROOM NAME` turn it off and on; stop is done
+  when the state is `stopped`. `set`, `update` and `rollback` keep a stopped service stopped: run
+  `start` when it should run, and only then wait for the running check above.
 - An engine restart leaves services running. A service stays on its host for good; moving it means
   `remove` and `set` again, which loses the data volume.
 
@@ -113,7 +117,7 @@ dyna service logs ROOM NAME --lines 500 --since 1h   # 1 to 2000 lines, 200 by d
 Log lines are not masked: a service that prints a secret shows it to you, so do not quote such lines.
 By default nothing wakes you when a service fails. To hear of it, add a subscription
 `{scope: room, on: [service.failed], wake: root}`; it fires on `crash_loop`, `rolled_back` and `failed`.
-`room log` with types `service.changed` and `service.failed` gives the history.
+For history, use the `room log` tool with types `service.changed` and `service.failed`.
 
 ## Why a service is not running
 
