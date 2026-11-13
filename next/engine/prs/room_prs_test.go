@@ -86,3 +86,77 @@ func TestRoomPRCensusAndUntrackedChanges(t *testing.T) {
 		t.Fatal("quiet pass repeated event")
 	}
 }
+
+func TestUntrackedRoomCISettlesOnce(t *testing.T) {
+	for _, result := range []string{"SUCCESS", "FAILURE", "CANCELLED"} {
+		t.Run(result, func(t *testing.T) {
+			ctx := context.Background()
+			s, err := store.Open(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			if err := s.CreateRoom(ctx, "room", "room", at); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.AddRoomRepo(ctx, "room", "owner/repo", true, true); err != nil {
+				t.Fatal(err)
+			}
+			c, server, clock := client(t)
+			server.Add(fakegithub.Pull{Repo: "owner/repo", Number: 1, Author: "writer", Rollup: "PENDING", Checks: []fakegithub.Check{{Name: "build", Status: "IN_PROGRESS"}}})
+			p := Poller{Store: s, GitHub: c, Now: clock.Now}
+			pass := func() {
+				t.Helper()
+				if err := p.Pass(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			count := func() int {
+				t.Helper()
+				var n int
+				if err := s.Read().QueryRowContext(ctx, `SELECT count(*) FROM events WHERE type='github.ci.finished'`).Scan(&n); err != nil {
+					t.Fatal(err)
+				}
+				return n
+			}
+			pass()
+			if count() != 0 {
+				t.Fatal("baseline emitted CI")
+			}
+			server.Edit("owner/repo", 1, func(pr *fakegithub.Pull) {
+				pr.Rollup = result
+				pr.Checks = []fakegithub.Check{{Name: "build", Status: "COMPLETED", Conclusion: result}}
+			})
+			pass()
+			if count() != 1 {
+				t.Fatalf("settled CI events: %d", count())
+			}
+			pass()
+			if count() != 1 {
+				t.Fatal("settled CI emitted twice")
+			}
+			var data []byte
+			if err := s.Read().QueryRowContext(ctx, `SELECT body FROM events WHERE type='github.ci.finished'`).Scan(&data); err != nil {
+				t.Fatal(err)
+			}
+			var event contract.CIFinished
+			if err := json.Unmarshal(data, &event); err != nil {
+				t.Fatal(err)
+			}
+			want := contract.PrCISuccess
+			if result == "FAILURE" {
+				want = contract.PrCIFailure
+			}
+			if result == "CANCELLED" {
+				want = contract.PrCICancelled
+			}
+			if event.Repo != "owner/repo" || event.Number != 1 || event.Result != want || event.Head == "" || event.Session != "" {
+				t.Fatalf("%+v", event)
+			}
+			var deliveries int
+			if err := s.Read().QueryRowContext(ctx, `SELECT count(*) FROM deliveries`).Scan(&deliveries); err != nil || deliveries != 0 {
+				t.Fatalf("direct deliveries: %d %v", deliveries, err)
+			}
+		})
+	}
+}
