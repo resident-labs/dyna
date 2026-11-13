@@ -180,7 +180,8 @@ func (r *run) create(owned Owned, route string, body any) (string, error) {
 		// The receipt keeps what existed, so the next run can tell whether anything new appeared.
 		known := r.liveIDs(kind)
 		for subject, id := range r.ids {
-			if subject.Kind == kind {
+			// Categories and channels share one inventory on the server.
+			if sameInventory(subject.Kind, kind) {
 				known = append(known, id)
 			}
 		}
@@ -235,4 +236,9 @@ func PlanText(ctx context.Context, target Target) (string, error) {
 	r.hydrateMessages()
 	r.plan, err = folder.BuildPlan(r.desired, r.live)
 	return r.plan.String(), err
+}
+
+func sameInventory(a, b folder.Kind) bool {
+	isChannel := func(kind folder.Kind) bool { return kind == folder.ChannelKind || kind == folder.CategoryKind }
+	return a == b || (isChannel(a) && isChannel(b))
 }

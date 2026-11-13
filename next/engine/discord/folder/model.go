@@ -96,8 +96,11 @@ type Snapshot struct {
 	Warnings        []string // Non-fatal compatibility notices, reported once per snapshot.
 	Policy          string
 	BotRolePosition int
-	Server          Server
-	Entries         []Entry
+	// Every channel and AutoMod rule ID on the server, including those the folder does not
+	// represent or that sit under unmanaged categories; only IDs, never their configuration.
+	ChannelIDs, AutoModIDs []string
+	Server                 Server
+	Entries                []Entry
 }
 
 func safeName(name string) bool {

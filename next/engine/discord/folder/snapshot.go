@@ -97,6 +97,16 @@ func ReadManagedSnapshot(ctx context.Context, client *discord.Client, server str
 	out.Server.Settings.Verification = []string{"none", "low", "medium", "high", "very_high"}[guild.Verification]
 	out.Server.Settings.Notifications = []string{"all", "mentions"}[guild.Notifications]
 
+	for _, channel := range channels {
+		out.ChannelIDs = append(out.ChannelIDs, channel.ID)
+	}
+	for _, raw := range rules {
+		var identity struct{ ID string }
+		if err := json.Unmarshal(raw, &identity); err != nil {
+			return out, err
+		}
+		out.AutoModIDs = append(out.AutoModIDs, identity.ID)
+	}
 	var err error
 	var roleNames map[string]string
 	out, roleNames, err = snapshotRoles(out, roles, server)

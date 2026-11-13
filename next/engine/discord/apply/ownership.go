@@ -36,7 +36,8 @@ func (r *run) identityOf(kind folder.Kind, name string) (folder.Identity, bool) 
 	return folder.Identity{}, false
 }
 
-// liveIDs lists the IDs of the live objects of a kind.
+// liveIDs lists the IDs of every live object of a kind, including those hidden from
+// the plan under unmanaged categories: only a complete list can show a create failed.
 func (r *run) liveIDs(kind folder.Kind) []string {
 	var found []string
 	switch kind {
@@ -45,15 +46,9 @@ func (r *run) liveIDs(kind folder.Kind) []string {
 			found = append(found, role.ID)
 		}
 	case folder.AutoModKind:
-		for _, rule := range r.live.Server.AutoMod {
-			found = append(found, rule.ID)
-		}
+		found = r.live.AutoModIDs
 	default:
-		for _, entry := range r.live.Entries {
-			if (entry.Category != nil) == (kind == folder.CategoryKind) {
-				found = append(found, folder.EntryIdentity(entry).ID)
-			}
-		}
+		found = r.live.ChannelIDs
 	}
 	return found
 }

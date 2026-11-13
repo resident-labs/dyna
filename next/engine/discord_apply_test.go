@@ -378,3 +378,33 @@ func TestApplyRefusesToAdoptAnAutomaticallyUnmanagedChannel(t *testing.T) {
 		t.Fatalf("wrote to an unmanaged channel: %s", message)
 	}
 }
+
+func TestApplyDoesNotRecreateAChannelMovedUnderAnUnmanagedCategory(t *testing.T) {
+	server := emptyServer()
+	server.Channels = []fakediscord.Channel{{ID: "800", Name: "External", Type: 4}}
+	files := map[string]string{"channels/External/UNMANAGED.md": "owned elsewhere\n"}
+	for name, content := range applyFolder {
+		files[name] = content
+	}
+	files["server.yaml"] = strings.Replace(applyServerYAML, "categories: [Community, Staff]", "categories: [Community, Staff, External]", 1)
+	a := newApplyTest(t, server, files)
+	a.fake.FailWrite(4, 500, true) // a channel is created, then the answer is lost
+	a.apply(false)
+	moved := a.fake.Configuration()
+	for i := range moved.Channels {
+		if moved.Channels[i].Name == "news" {
+			moved.Channels[i].Parent = "800"
+		}
+	}
+	a.fake.SetConfiguration(moved)
+	a.refusal()
+	count := 0
+	for _, channel := range a.fake.Configuration().Channels {
+		if channel.Name == "news" {
+			count++
+		}
+	}
+	if count > 1 {
+		t.Fatal("news was created twice")
+	}
+}
