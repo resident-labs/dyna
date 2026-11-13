@@ -168,7 +168,7 @@ func TestCreateKeepsMainSuccessBoundaryAfterContainerStart(t *testing.T) {
 			if err := format.Node(&source, set, statement); err != nil {
 				t.Fatal(err)
 			}
-			if source.String() == `steps.Done("container start")` {
+			if strings.HasPrefix(source.String(), `if err = run(contract.StartContainer, "container start",`) {
 				found = true
 				continue
 			}

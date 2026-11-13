@@ -43,6 +43,9 @@ func TestRootApprovesKinds(t *testing.T) {
 				_, problem := r.s.OpDecide(ctx, who, contract.OpDecideRequest{ID: id, Approve: true})
 				return problem
 			}
+			if _, problem := r.s.RoomSet(ctx, r.owner, contract.RoomSetRequest{Room: r.room, RootApproves: map[contract.RootApproval]bool{contract.RootApprovesAddons: false, contract.RootApprovesHosts: false, contract.RootApprovesPools: false}}); problem != nil {
+				t.Fatal(problem)
+			}
 			// Off, as today: the root is refused, and the card names no root.
 			off, problem := k.request(r.s, r.worker, r.room)
 			if problem != nil {

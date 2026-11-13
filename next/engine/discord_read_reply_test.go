@@ -7,12 +7,12 @@ import (
 )
 
 func TestDiscordReadCompactReply(t *testing.T) {
-	s, _, root, ctx, fake, _ := discordFixture(t)
-	fake.SetHistory([]any{
+	f := discordFixture(t)
+	f.fake.SetHistory([]any{
 		map[string]any{"id": "301", "message_reference": map[string]any{"message_id": "299"}, "referenced_message": map[string]any{"id": "299", "content": "first\nsecond", "author": map[string]any{"username": "ari"}}},
 		map[string]any{"id": "302", "message_reference": map[string]any{"message_id": "298"}},
 	})
-	got, p := s.DiscordRead(ctx, boxCaller(root), contract.DiscordReadRequest{Channel: "general"})
+	got, p := f.s.DiscordRead(f.ctx, boxCaller(f.root), contract.DiscordReadRequest{Channel: "general"})
 	if p != nil {
 		t.Fatal(p)
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -28,7 +29,27 @@ type Guard struct {
 	API  *url.URL // GitHub's REST API; its path is the prefix of every REST route, and its host the only one writes go to
 }
 
-func (g *Guard) RoundTrip(request *http.Request) (*http.Response, error) {
+func (g *Guard) RoundTrip(request *http.Request) (response *http.Response, err error) {
+	// These setting refusals originate in ten REST, GraphQL and Actions paths; append guidance once here.
+	defer func() {
+		var refusal *Refusal
+		if errors.As(err, &refusal) && (refusal.Reason == contract.GitHubWriteOff || refusal.Reason == contract.GitHubWriteGroupOff || refusal.Reason == contract.GitHubWriteRepoNotAllowed) {
+			grant := AllowedFrom(request.Context())
+			setting := "The room's githubWrites setting is off."
+			if grant.On() {
+				groups := make([]string, len(grant.Groups))
+				for i, g := range grant.Groups {
+					groups[i] = string(g)
+				}
+				repos := make([]string, len(grant.Repos))
+				for i, r := range grant.Repos {
+					repos[i] = string(r)
+				}
+				setting = "The room's githubWrites setting allows " + strings.Join(groups, ", ") + " on " + strings.Join(repos, ", ") + "."
+			}
+			refusal.Detail += ". " + setting + " The room's root can change it with the owner CLI on the engine host (skill dyna-admin); ask your parent."
+		}
+	}()
 	if request.Method == http.MethodGet || request.Method == http.MethodHead {
 		return g.Base.RoundTrip(request)
 	}
@@ -45,7 +66,7 @@ func (g *Guard) RoundTrip(request *http.Request) (*http.Response, error) {
 	// parsed, so that is checked before the setting is.
 	graphQL := request.Method == http.MethodPost && request.URL.Path == prefix+"/graphql" && request.URL.RawQuery == ""
 	if !grant.On() && !graphQL {
-		return nil, refuse(contract.GitHubWriteOff, "agents only read GitHub here, and %s %s would write: this room's githubWrites setting is off, so open a PR with pr open, and leave other writes to the owner or a host", request.Method, request.URL.Path)
+		return nil, refuse(contract.GitHubWriteOff, "agents only read GitHub here, and %s %s would write: this room's githubWrites setting is off", request.Method, request.URL.Path)
 	}
 	if !strings.EqualFold(request.URL.Host, g.API.Host) || request.URL.Scheme != g.API.Scheme || request.URL.User != nil {
 		return nil, refuse(contract.GitHubWriteRouteNotAllowed, "%s %s is not on GitHub's API host", request.Method, request.URL.Path)

@@ -261,3 +261,13 @@ func TestOwnerOnlyMethodsWithoutTheirOwnCheck(t *testing.T) {
 		}
 	}
 }
+
+// The administration CLI exposes existing owner routes, not new agent actions.
+func TestAdministrationCLIMethodsStayOwnerOnly(t *testing.T) {
+	for _, m := range []contract.Method{contract.MethodAccountsList, contract.MethodAccountsQuota, contract.MethodAccountsSetLimits, contract.MethodSessionSetAccount, contract.MethodAddonSetEnabled, contract.MethodAddonSetRootOnly} {
+		rule, ok := MethodRule(m)
+		if !ok || rule.Access != OwnerAccess {
+			t.Fatalf("%s is not owner-only: %+v", m, rule)
+		}
+	}
+}

@@ -118,6 +118,7 @@ func modelRoute(transport http.RoundTripper) http.Handler {
 	return &httputil.ReverseProxy{
 		Transport:     transport,
 		FlushInterval: -time.Nanosecond,
+		//lint:ignore SA1019 Keep Director's existing forwarding-header semantics until a separately tested proxy migration.
 		Director: func(r *http.Request) {
 			r.URL.Scheme = "http"
 			r.URL.Host = "dyna"

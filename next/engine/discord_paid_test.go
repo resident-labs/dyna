@@ -28,46 +28,46 @@ func TestDiscordExplicitReplyPaysInput(t *testing.T) {
 		{name: "waiting no send", waiting: true, want: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s, r, root, ctx, fake, client := discordFixture(t)
-			if err := s.store.Write(ctx, func(tx *sql.Tx) error {
-				_, err := tx.ExecContext(ctx, "UPDATE sessions SET closed_at=1 WHERE parent=?", root)
+			f := discordFixture(t)
+			if err := f.s.store.Write(f.ctx, func(tx *sql.Tx) error {
+				_, err := tx.ExecContext(f.ctx, "UPDATE sessions SET closed_at=1 WHERE parent=?", f.root)
 				return err
 			}); err != nil {
 				t.Fatal(err)
 			}
-			s.discordDirectory.Apply("CHANNEL_CREATE", json.RawMessage(`{"id":"201","guild_id":"100","name":"other","type":0}`))
+			f.s.discordDirectory.Apply("CHANNEL_CREATE", json.RawMessage(`{"id":"201","guild_id":"100","name":"other","type":0}`))
 			var m discord.Message
 			if err := json.Unmarshal([]byte(`{"id":"300","channel_id":"200","guild_id":"100","content":"question","author":{"id":"2","username":"ari"}}`), &m); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.discordInput(ctx, client, m); err != nil {
+			if err := f.s.discordInput(f.ctx, f.client, m); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.store.Write(ctx, func(tx *sql.Tx) error {
-				_, err := tx.ExecContext(ctx, "UPDATE boxes SET state='ready',want='run' WHERE session=?", root)
+			if err := f.s.store.Write(f.ctx, func(tx *sql.Tx) error {
+				_, err := tx.ExecContext(f.ctx, "UPDATE boxes SET state='ready',want='run' WHERE session=?", f.root)
 				return err
 			}); err != nil {
 				t.Fatal(err)
 			}
 			start := func(turn contract.TurnID) {
 				t.Helper()
-				e, err := s.event(r, contract.Principal{Kind: contract.PrincipalEngine}, contract.TurnStarted{})
+				e, err := f.s.event(f.room, contract.Principal{Kind: contract.PrincipalEngine}, contract.TurnStarted{})
 				if err != nil {
 					t.Fatal(err)
 				}
 				e.Time = e.Time.Add(time.Hour)
-				if active, _, _, err := s.store.Dispatch(ctx, root, turn, e, false); err != nil || active != turn {
+				if active, _, _, err := f.s.store.Dispatch(f.ctx, f.root, turn, e, false); err != nil || active != turn {
 					t.Fatalf("dispatch %s: %s %v", turn, active, err)
 				}
 			}
 			end := func(turn contract.TurnID, jobs int) {
 				t.Helper()
 				out := contract.TurnOutputRequest{Turn: turn, Outcome: contract.TurnCompleted, Final: "final answer", ShellJobs: jobs}
-				e, err := s.event(r, boxCaller(root), contract.TurnEnded{Session: root, Turn: turn, Outcome: out.Outcome, Final: out.Final})
+				e, err := f.s.event(f.room, boxCaller(f.root), contract.TurnEnded{Session: f.root, Turn: turn, Outcome: out.Outcome, Final: out.Final})
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := s.store.EndTurn(ctx, root, out, e); err != nil {
+				if err := f.s.store.EndTurn(f.ctx, f.root, out, e); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -78,11 +78,11 @@ func TestDiscordExplicitReplyPaysInput(t *testing.T) {
 					if tc.reply != "" {
 						body = `{"content":"explicit answer","message_reference":{"message_id":"` + tc.reply + `"}}`
 					}
-					if _, problem := s.DiscordAPI(ctx, boxCaller(root), contract.DiscordAPIRequest{Method: "POST", Path: "/channels/" + tc.channel + "/messages", Body: json.RawMessage(body)}); problem != nil {
+					if _, problem := f.s.DiscordAPI(f.ctx, boxCaller(f.root), contract.DiscordAPIRequest{Method: "POST", Path: "/channels/" + tc.channel + "/messages", Body: json.RawMessage(body)}); problem != nil {
 						t.Fatal(problem)
 					}
 				} else if tc.channel != "" {
-					if _, problem := s.DiscordSend(ctx, boxCaller(root), contract.DiscordSendRequest{Channel: tc.channel, ReplyTo: tc.reply, Text: "explicit answer"}); problem != nil {
+					if _, problem := f.s.DiscordSend(f.ctx, boxCaller(f.root), contract.DiscordSendRequest{Channel: tc.channel, ReplyTo: tc.reply, Text: "explicit answer"}); problem != nil {
 						t.Fatal(problem)
 					}
 				}
@@ -97,15 +97,15 @@ func TestDiscordExplicitReplyPaysInput(t *testing.T) {
 			}
 			end("first", jobs)
 			if tc.waiting {
-				e, err := s.event(r, contract.Principal{Kind: contract.PrincipalEngine}, contract.SessionNotice{Session: root, Text: "job finished"})
+				e, err := f.s.event(f.room, contract.Principal{Kind: contract.PrincipalEngine}, contract.SessionNotice{Session: f.root, Text: "job finished"})
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := s.store.Post(ctx, e, []contract.Delivery{{To: boxCaller(root), Surface: contract.SurfaceEngine, Wake: true}}); err != nil {
+				if _, err := f.s.store.Post(f.ctx, e, []contract.Delivery{{To: boxCaller(f.root), Surface: contract.SurfaceEngine, Wake: true}}); err != nil {
 					t.Fatal(err)
 				}
-				if err := s.store.Write(ctx, func(tx *sql.Tx) error {
-					_, err := tx.ExecContext(ctx, "UPDATE boxes SET state='ready',want='run' WHERE session=?", root)
+				if err := f.s.store.Write(f.ctx, func(tx *sql.Tx) error {
+					_, err := tx.ExecContext(f.ctx, "UPDATE boxes SET state='ready',want='run' WHERE session=?", f.root)
 					return err
 				}); err != nil {
 					t.Fatal(err)
@@ -118,25 +118,25 @@ func TestDiscordExplicitReplyPaysInput(t *testing.T) {
 			}
 			// Drain the durable final-reply outbox through the same fake Discord client.
 			for {
-				reply, found, err := s.store.NextDiscordReply(ctx)
+				reply, found, err := f.s.store.NextDiscordReply(f.ctx)
 				if err != nil {
 					t.Fatal(err)
 				}
 				if !found {
 					break
 				}
-				if _, _, err := client.SendMessage(ctx, reply.Channel, reply.Text, reply.Message); err != nil {
+				if _, _, err := f.client.SendMessage(f.ctx, reply.Channel, reply.Text, reply.Message); err != nil {
 					t.Fatal(err)
 				}
-				if err := s.store.DiscordReplySent(ctx, reply.ID, nil); err != nil {
+				if err := f.s.store.DiscordReplySent(f.ctx, reply.ID, nil); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if got := len(fake.Messages); got != tc.want {
+			if got := len(f.fake.Messages); got != tc.want {
 				t.Fatalf("messages = %d, want %d", got, tc.want)
 			}
 			var debts int
-			if err := s.store.Read().QueryRowContext(ctx, "SELECT count(*) FROM replies_owed WHERE session=?", root).Scan(&debts); err != nil {
+			if err := f.s.store.Read().QueryRowContext(f.ctx, "SELECT count(*) FROM replies_owed WHERE session=?", f.root).Scan(&debts); err != nil {
 				t.Fatal(err)
 			}
 			if debts != 0 {
@@ -144,9 +144,9 @@ func TestDiscordExplicitReplyPaysInput(t *testing.T) {
 			}
 			// A late send pays nothing: the waiting turn's text already answered, and the outbox drain clears typing.
 			if tc.reply == "300" && tc.channel == "200" && !tc.late {
-				s.discordRuntime.Lock()
-				_, typing := s.discordTyping["200"]
-				s.discordRuntime.Unlock()
+				f.s.discordRuntime.Lock()
+				_, typing := f.s.discordTyping["200"]
+				f.s.discordRuntime.Unlock()
 				if typing {
 					t.Fatal("typing remains after explicit reply")
 				}
@@ -156,7 +156,7 @@ func TestDiscordExplicitReplyPaysInput(t *testing.T) {
 }
 
 func TestDiscordAPIPathNormalization(t *testing.T) {
-	s, _, root, ctx, _, _ := discordFixture(t)
+	f := discordFixture(t)
 	for _, tc := range []struct {
 		path string
 		code contract.ErrorCode
@@ -169,7 +169,7 @@ func TestDiscordAPIPathNormalization(t *testing.T) {
 		{"/channels/200/../messages", contract.ErrInvalid},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
-			_, problem := s.DiscordAPI(ctx, boxCaller(root), contract.DiscordAPIRequest{Method: "GET", Path: tc.path})
+			_, problem := f.s.DiscordAPI(f.ctx, boxCaller(f.root), contract.DiscordAPIRequest{Method: "GET", Path: tc.path})
 			if tc.code == "" {
 				if problem != nil {
 					t.Fatal(problem)

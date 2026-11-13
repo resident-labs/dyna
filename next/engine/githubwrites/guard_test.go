@@ -765,3 +765,22 @@ func TestPullOwnershipUsesContextCaller(t *testing.T) {
 		}
 	}
 }
+
+func TestSettingRefusalNamesCurrentSettingAndNextStep(t *testing.T) {
+	for i, grant := range []contract.GitHubWrites{{}, {Groups: []contract.GitHubWriteGroup{contract.GitHubWritePulls}, Repos: []contract.RepoName{"acme/app"}}, {Groups: everyGroup, Repos: []contract.RepoName{"acme/other"}}} {
+		g, _ := newGuard()
+		req, _ := http.NewRequestWithContext(WithAllowed(t.Context(), grant), "POST", "https://api.github.com/repos/acme/app/issues", strings.NewReader(`{"title":"x"}`))
+		req.Header.Set("Content-Type", "application/json")
+		_, err := g.RoundTrip(req)
+		if err == nil {
+			t.Fatal("write allowed")
+		}
+		causes := []string{"POST /repos/acme/app/issues would write", "belongs to a write group this room has not turned on", "is on acme/app, which is not among the repositories this room allows"}
+		settings := []string{"The room's githubWrites setting is off.", "The room's githubWrites setting allows pulls on acme/app.", "The room's githubWrites setting allows issues, pulls, projects on acme/other."}
+		for _, want := range []string{causes[i], settings[i], "owner CLI on the engine host", "ask your parent"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("missing %s: %v", want, err)
+			}
+		}
+	}
+}

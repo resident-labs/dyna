@@ -34,7 +34,9 @@ const (
 )
 
 //go:embed */*
-var builtIn embed.FS
+var embedded embed.FS
+
+var builtIn fs.ReadFileFS = embedded
 
 var validName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
@@ -50,6 +52,7 @@ type List struct {
 type Meta struct {
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
+	Audience    string `yaml:"dyna-audience"`
 }
 
 // Parse reads a SKILL.md's frontmatter and refuses what Pi would not load.
@@ -71,6 +74,9 @@ func Parse(data []byte) (Meta, error) {
 	}
 	if meta.Description = strings.TrimSpace(meta.Description); meta.Description == "" || len(meta.Description) > 1024 {
 		return meta, errors.New("SKILL.md needs a description of at most 1024 characters")
+	}
+	if meta.Audience != "" && meta.Audience != "root" {
+		return meta, errors.New("dyna-audience must be root when set")
 	}
 	return meta, nil
 }
@@ -99,7 +105,7 @@ func BuiltIn() []contract.Addon {
 		if err != nil {
 			panic(fmt.Sprintf("built-in skill %s: %v", name, err))
 		}
-		items = append(items, contract.Addon{Kind: contract.AddonSkill, Name: meta.Name, Description: meta.Description, BuiltIn: true})
+		items = append(items, contract.Addon{Kind: contract.AddonSkill, Name: meta.Name, Description: meta.Description, BuiltIn: true, RootOnly: meta.Audience == "root"})
 	}
 	return items
 }
@@ -108,8 +114,16 @@ func BuiltIn() []contract.Addon {
 func IsBuiltIn(name string) bool { return slices.Contains(builtInNames(), name) }
 
 // Install writes every built-in skill into dir.
-func Install(dir string) error {
+func Install(dir string, root bool) error {
+	rootSession := root
+	excluded := map[string]bool{}
+	for _, item := range BuiltIn() {
+		excluded[item.Name] = item.RootOnly && !rootSession
+	}
 	return fs.WalkDir(builtIn, ".", func(path string, entry fs.DirEntry, err error) error {
+		if err == nil && entry.IsDir() && excluded[path] {
+			return fs.SkipDir
+		}
 		if err != nil || entry.IsDir() {
 			return err
 		}

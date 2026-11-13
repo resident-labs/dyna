@@ -30,6 +30,7 @@ const installTimeout = 3 * time.Minute
 // addonStart feeds a scope's add-ons to Pi the way Pi takes them: skills in the folder it discovers, packages in its
 // settings, and servers in its MCP config. It runs before Pi at every box start, so a new item waits for the next one.
 type addonStart struct {
+	Root     bool
 	Bundles  []string // global, then room: on a clash the later scope wins
 	Skills   string   // Pi's skills folder, which this rebuilds
 	Settings string   // Pi's settings file
@@ -44,6 +45,7 @@ func roomAddons(root bool) addonStart {
 		bundles = []string{"/run/dyna/instructions/global/" + box.AddonBundle, "/run/dyna/root-addons/global/" + box.AddonBundle, "/run/dyna/instructions/room/" + box.AddonBundle, "/run/dyna/root-addons/room/" + box.AddonBundle}
 	}
 	return addonStart{
+		Root:     root,
 		Bundles:  bundles,
 		Skills:   "/box/pi/skills",
 		Settings: "/box/pi/settings.json",
@@ -81,7 +83,7 @@ func (a addonStart) apply(ctx context.Context) (map[string]pig.MCPServer, []stri
 	if err := os.RemoveAll(a.Skills); err != nil {
 		return nil, nil, err
 	}
-	if err := skills.Install(a.Skills); err != nil {
+	if err := skills.Install(a.Skills, a.Root); err != nil {
 		return nil, nil, err
 	}
 	servers := map[string]pig.MCPServer{}

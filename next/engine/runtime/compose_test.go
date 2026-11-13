@@ -174,6 +174,31 @@ func creatingBoxes(t *testing.T, r *stackRunner) (*Boxes, lifecycle.BoxSpec) {
 	return b, lifecycle.BoxSpec{Box: "box_1", Session: "ses_1", Room: "room_1", Host: "host", Slice: "dyna-box_1.slice", Size: size}
 }
 
+// Host commands can perform work before returning failure (or losing their reply).
+// In particular EnsureSlice starts the slice before setting its properties.
+func TestCreateCleansUpPartiallyFailedHostStep(t *testing.T) {
+	for _, fail := range []string{"dyna-ensure-slice", "'create' '--name' 'box_1'"} {
+		t.Run(fail, func(t *testing.T) {
+			r := &stackRunner{fail: fail}
+			b, spec := creatingBoxes(t, r)
+			if _, err := b.Create(context.Background(), spec); err == nil {
+				t.Fatal("partial host failure succeeded")
+			}
+			failed := r.index(t, fail)
+			removed := r.index(t, "'rm' '--ignore' '--volumes' 'box_1'")
+			if removed <= failed {
+				t.Fatalf("cleanup did not follow the failed attempt: %v", r.commands)
+			}
+			if !strings.Contains(r.commands[removed], "dyna-box_1.slice") {
+				t.Fatalf("partial slice was not included in cleanup: %s", r.commands[removed])
+			}
+			if slices.ContainsFunc(r.commands, func(command string) bool { return strings.Contains(command, "'start' 'box_1'") }) {
+				t.Fatalf("container started after failed attempt: %v", r.commands)
+			}
+		})
+	}
+}
+
 func TestCreateBringsUpSidecarsBeforeTheBox(t *testing.T) {
 	r := &stackRunner{}
 	b, spec := creatingBoxes(t, r)

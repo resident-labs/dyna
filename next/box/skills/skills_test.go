@@ -58,7 +58,7 @@ func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
 		}
 	}
 	dir := t.TempDir()
-	if err := Install(dir); err != nil {
+	if err := Install(dir, false); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "dyna-extend", File))

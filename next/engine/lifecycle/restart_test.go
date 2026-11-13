@@ -43,7 +43,12 @@ func TestQuiesceRestartJoinsOldStepAndDebtWithoutHoldingPass(t *testing.T) {
 		t.Fatalf("duplicate claim: %v %v", claimed, err)
 	}
 	pass := make(chan struct{})
-	go func() { r.pass.Lock(); r.pass.Unlock(); close(pass) }()
+	go func() {
+		r.pass.Lock()
+		//lint:ignore SA2001 Acquiring the lock is the probe: the join must not hold the global pass lock.
+		r.pass.Unlock()
+		close(pass)
+	}()
 	select {
 	case <-pass:
 	case <-time.After(time.Second):
