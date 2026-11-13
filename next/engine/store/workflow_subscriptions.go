@@ -93,7 +93,7 @@ func (s *Store) queueWorkflow(ctx context.Context, tx *sql.Tx, sub Subscription,
 				continue
 			}
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO workflow_queue(sub,subject,seq,body) SELECT ?1,?2,?3,?4 WHERE (SELECT count(*) FROM workflow_queue WHERE sub=?1 AND run='')<?5", sub.ID, subject, event.Seq, string(body), maxQueuedRuns); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO workflow_queue(sub,subject,seq,body) SELECT ?1,?2,?3,?4 WHERE (SELECT count(*) FROM workflow_queue WHERE sub=?1 AND run IN ('','starting'))<?5", sub.ID, subject, event.Seq, string(body), maxQueuedRuns); err != nil {
 			return err
 		}
 	}
@@ -163,7 +163,7 @@ func (s *Store) SubscriptionWorkflowState(ctx context.Context, run contract.Work
 	var result json.RawMessage
 	err := s.Write(ctx, func(tx *sql.Tx) error {
 		var sub, subject string
-		if err := tx.QueryRowContext(ctx, "SELECT sub,subject FROM workflow_queue WHERE run=?", run).Scan(&sub, &subject); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT q.sub,q.subject FROM workflow_queue q JOIN workflow_runs r ON r.id=q.run WHERE q.run=? AND r.state='running'", run).Scan(&sub, &subject); err != nil {
 			return err
 		}
 		if len(value) > 0 {

@@ -130,7 +130,10 @@ dyna subscription events lists the event types.`,
 			if err != nil {
 				return err
 			}
-			req := contract.SubscriptionAddRequest{Scope: scope, Room: contract.RoomID(room), Session: session, Where: where, Every: contract.Duration(every), Wake: wake}
+			req := contract.SubscriptionAddRequest{Scope: scope, Room: contract.RoomID(room), Session: session, Where: where, Every: contract.Duration(every), Wake: wake, Key: key, Once: once, Report: contract.SessionID(report), IncludeOwn: includeOwn}
+			if workflow == "" && workflowArgs != "" {
+				return fmt.Errorf("--args needs --workflow")
+			}
 
 			if workflow != "" {
 				script, err := os.ReadFile(workflow)
@@ -144,10 +147,6 @@ dyna subscription events lists the event types.`,
 					}
 				}
 				req.Workflow = spec
-				req.Key = key
-				req.Once = once
-				req.Report = contract.SessionID(report)
-				req.IncludeOwn = includeOwn
 			}
 			for _, kind := range on {
 				req.On = append(req.On, contract.EventType(kind))
