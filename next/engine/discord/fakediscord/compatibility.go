@@ -15,5 +15,11 @@ func CompatibilityConfiguration() Configuration {
 		Channel{ID: "234", Name: "flags", Type: 0, Flags: 16, Parent: "200", Position: 7},
 		Channel{ID: "235", Name: "opaque-overwrite", Type: 0, Parent: "200", Position: 8, Overwrites: []Overwrite{{ID: "10", Type: 0, Allow: "9223372036854775808", Deny: "0"}}},
 	)
+	configuration.AutoMod = append(configuration.AutoMod,
+		AutoMod{ID: "410", Name: "disabled", Event: 1, Trigger: 1, Enabled: false},
+		AutoMod{ID: "411", Name: "preset", Event: 1, Trigger: 4, Enabled: true},
+		AutoMod{ID: "412", Name: "regex", Event: 1, Trigger: 1, Enabled: true, Metadata: TriggerMetadata{Regex: []string{"spam.*"}}},
+		AutoMod{ID: "413", Name: "timeout", Event: 1, Trigger: 1, Enabled: true, Actions: []Action{{Type: 3}}},
+	)
 	return configuration
 }

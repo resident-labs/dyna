@@ -19,16 +19,30 @@ func TestCompatibilityExportRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Warnings) != 1 {
+	if len(snapshot.Warnings) != 5 {
 		t.Fatalf("opaque permission warning: %v", snapshot.Warnings)
+	}
+	if len(snapshot.Server.AutoMod) != 1 || snapshot.Server.AutoMod[0].Name != "invites" {
+		t.Fatalf("unsupported rules adopted: %+v", snapshot.Server.AutoMod)
+	}
+	for _, id := range []string{"410", "411", "412", "413"} {
+		found := false
+		for _, warning := range snapshot.Warnings {
+			if strings.Contains(warning, "ID "+id) && strings.Contains(warning, "not adopted") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("rule %s warning missing: %v", id, snapshot.Warnings)
+		}
 	}
 	directory := t.TempDir()
 	report, err := Export(directory, snapshot, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(report) != 7 {
-		t.Fatalf("expected 6 generated markers and 1 warning: %v", report)
+	if len(report) != 11 {
+		t.Fatalf("expected 6 generated markers and 5 warnings: %v", report)
 	}
 	for _, name := range []string{"unknown-kind", "nsfw", "forum-defaults", "tag-metadata", "flags", "opaque-overwrite"} {
 		path := filepath.Join(directory, "channels/Community", name)
