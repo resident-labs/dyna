@@ -36,7 +36,10 @@ automod:
 ```
 Community settings are `community: {rules: rules, updates: announcements}` inside settings.
 Names must resolve uniquely. Role permissions use Discord's snake-case names.
-Export refuses live settings it cannot represent rather than silently dropping them.
+Export marks channels outside this schema with generated UNMANAGED.md reasons and reports them.
+Role icons/emoji remain Discord-owned. Exported `managed: true` roles are read-only; opaque
+`other_permissions` bits are preserved, never removed by a plan. Unsupported AutoMod rules stay
+on Discord and are reported, not adopted. Unsafe names, duplicate siblings and nested categories refuse.
 
 `channels/Community/category.yaml` controls category overwrites and its children:
 ```yaml

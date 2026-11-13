@@ -9,7 +9,7 @@ import (
 
 func snapshotChannels(out Snapshot, channels []liveChannel, roleNames, byID map[string]string, entries []Entry) (Snapshot, error) {
 	sort.SliceStable(channels, func(i, j int) bool { return channels[i].Position < channels[j].Position })
-	channelNames := map[string]bool{}
+	channelNames := map[string]string{}
 	unmanaged := map[string]string{}
 	for _, entry := range entries {
 		if entry.Unmanaged != "" {
@@ -42,6 +42,17 @@ func snapshotChannels(out Snapshot, channels []liveChannel, roleNames, byID map[
 		if unmanaged[parent] != "" {
 			continue
 		}
+		key := channel.ParentID + "/" + channel.Name
+		if !safeName(channel.Name) {
+			return out, fmt.Errorf("unsafe channel/category name %q (ID %s)", channel.Name, channel.ID)
+		}
+		if previous, exists := channelNames[key]; exists {
+			return out, fmt.Errorf("duplicate channel/category name %q under %s: IDs %s and %s", channel.Name, channel.ParentID, previous, channel.ID)
+		}
+		channelNames[key] = channel.ID
+		if channel.Type == 4 && channel.ParentID != "" {
+			return out, fmt.Errorf("nested category %s (ID %s)", channel.Name, channel.ID)
+		}
 		if note := unmanaged[path]; note != "" {
 			entry := Entry{Name: channel.Name, Parent: parent, Path: path, Unmanaged: note}
 			if channel.Type == 4 {
@@ -53,11 +64,6 @@ func snapshotChannels(out Snapshot, channels []liveChannel, roleNames, byID map[
 			out.Entries = append(out.Entries, entry)
 			continue
 		}
-		key := channel.ParentID + "/" + channel.Name
-		if !safeName(channel.Name) || channelNames[key] {
-			return out, fmt.Errorf("unsafe or ambiguous channel/category name %q under %s", channel.Name, channel.ParentID)
-		}
-		channelNames[key] = true
 		overwrites := Overwrites{}
 		for _, overwrite := range channel.Overwrites {
 			name := roleNames[overwrite.ID]
@@ -89,9 +95,6 @@ func snapshotChannels(out Snapshot, channels []liveChannel, roleNames, byID map[
 		}
 		entry := Entry{Name: channel.Name, Path: channel.Name}
 		if channel.Type == 4 {
-			if channel.ParentID != "" {
-				return out, fmt.Errorf("nested category")
-			}
 			entry.Category = &Category{Identity: Identity{ID: channel.ID}, Overwrites: overwrites}
 			out.Server.Categories = append(out.Server.Categories, channel.Name)
 		} else {

@@ -46,7 +46,7 @@ type Plan struct {
 // BuildPlan resolves identities before comparing fields. Missing adopted objects
 // refuse rather than silently becoming replacements.
 func BuildPlan(desired Folder, live Snapshot) (Plan, error) {
-	var plan Plan
+	plan := Plan{Lines: slices.Clone(live.Warnings)}
 	if err := validate(desired); err != nil {
 		return plan, err
 	}

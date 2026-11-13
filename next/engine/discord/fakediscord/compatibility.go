@@ -8,6 +8,7 @@ func CompatibilityConfiguration() Configuration {
 	configuration.Roles[1].Icon = "role-icon"
 	configuration.Roles[1].UnicodeEmoji = "star"
 	configuration.Channels = append(configuration.Channels,
+		Channel{ID: "236", Name: "stage", Type: 13, Parent: "200", Position: 9},
 		Channel{ID: "230", Name: "unknown-kind", Type: 99, Parent: "200", Position: 3},
 		Channel{ID: "231", Name: "nsfw", Type: 0, NSFW: true, Parent: "200", Position: 4},
 		Channel{ID: "232", Name: "forum-defaults", Type: 15, DefaultLayout: 1, Parent: "200", Position: 5},

@@ -7,6 +7,8 @@ import "fmt"
 func unmanagedChannelReason(channel liveChannel) (string, error) {
 	switch channel.Type {
 	case 0, 2, 4, 5, 15:
+	case 13:
+		return "Stage channel: not managed by the folder yet.", nil
 	default:
 		return fmt.Sprintf("Discord channel type %d is not managed by this folder.", channel.Type), nil
 	}

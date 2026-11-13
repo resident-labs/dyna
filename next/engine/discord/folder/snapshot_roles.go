@@ -29,11 +29,12 @@ func snapshotRoles(out Snapshot, roles []liveRole, server string) (Snapshot, map
 		out.Server.Roles = append(out.Server.Roles, Role{Managed: role.Managed, OtherPermissions: otherPermissions, Position: role.Position, Identity: Identity{ID: role.ID}, Name: name, Permissions: permissionNames, Color: fmt.Sprintf("#%06x", role.Color), Hoist: role.Hoist, Mentionable: role.Mentionable})
 	}
 
+	var unknownBits uint64
 	for _, role := range out.Server.Roles {
-		if role.OtherPermissions != 0 {
-			out.Warnings = append(out.Warnings, "Unknown role permission bits are preserved as other_permissions; they are not managed.")
-			break
-		}
+		unknownBits |= role.OtherPermissions
+	}
+	if unknownBits != 0 {
+		out.Warnings = append(out.Warnings, fmt.Sprintf("Unknown role permission bits 0x%x are preserved as other_permissions; they are not managed.", unknownBits))
 	}
 	return out, roleNames, nil
 }

@@ -41,10 +41,10 @@ func TestCompatibilityExportRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(report) != 11 {
-		t.Fatalf("expected 6 generated markers and 5 warnings: %v", report)
+	if len(report) != 12 {
+		t.Fatalf("expected 7 generated markers and 5 warnings: %v", report)
 	}
-	for _, name := range []string{"unknown-kind", "nsfw", "forum-defaults", "tag-metadata", "flags", "opaque-overwrite"} {
+	for _, name := range []string{"stage", "unknown-kind", "nsfw", "forum-defaults", "tag-metadata", "flags", "opaque-overwrite"} {
 		path := filepath.Join(directory, "channels/Community", name)
 		marker, err := os.ReadFile(filepath.Join(path, "UNMANAGED.md"))
 		if err != nil {
