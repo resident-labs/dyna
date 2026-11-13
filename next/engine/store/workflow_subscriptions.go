@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -42,8 +43,8 @@ func (s *Store) queueWorkflow(ctx context.Context, tx *sql.Tx, sub Subscription,
 				var kinds []contract.PrChangeKind
 				for _, kind := range c.Kinds {
 					allowed := true
-					switch string(kind) {
-					case "comment", "changes_requested", "approved", "metadata":
+					switch kind {
+					case contract.PrChangeComment, contract.PrChangeChangesRequested, contract.PrChangeApproved, contract.PrChangeMetadata:
 						allowed = !slices.Contains(c.OwnKinds, kind)
 					}
 					if allowed {
@@ -57,6 +58,7 @@ func (s *Store) queueWorkflow(ctx context.Context, tx *sql.Tx, sub Subscription,
 				event.Body = contract.PrChanged{Session: b.Session, Changes: []contract.PrChange{c}}
 			}
 		case contract.IssueChanged:
+			// Issues carry actors in Outside; PR review provenance is summarized per kind in OwnKinds.
 			c := b.Changes[0]
 			repo, number = c.Issue.Repo, c.Issue.Number
 			if !sub.IncludeOwn {
@@ -131,7 +133,7 @@ type QueuedWorkflow struct {
 }
 
 // QueuedWorkflows returns only the oldest pending event for each idle key.
-func (s *Store) QueuedWorkflows(ctx context.Context) ([]QueuedWorkflow, error) {
+func (s *Store) QueuedWorkflows(ctx context.Context, now time.Time) ([]QueuedWorkflow, error) {
 	// Terminal runs release their key; state remains until the subscription is removed.
 	if err := s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "DELETE FROM workflow_queue WHERE run!='' AND EXISTS(SELECT 1 FROM workflow_runs r WHERE r.id=workflow_queue.run AND r.state!='running')")
@@ -145,7 +147,7 @@ func (s *Store) QueuedWorkflows(ctx context.Context) ([]QueuedWorkflow, error) {
 	}
 	var out []QueuedWorkflow
 	for _, sub := range subs {
-		if sub.Held {
+		if sub.Held || sub.HoldUntil.After(now) {
 			continue
 		}
 		rows, err := s.Read().QueryContext(ctx, `SELECT id,subject FROM workflow_queue q WHERE sub=? AND run IN ('','starting') AND NOT EXISTS(SELECT 1 FROM workflow_queue a WHERE a.sub=q.sub AND a.subject=q.subject AND (a.id!=q.id AND (a.run!='' OR a.id<q.id))) ORDER BY id`, sub.ID)
@@ -225,5 +227,31 @@ func (s *Store) QueueScheduledWorkflow(ctx context.Context, sub Subscription, ev
 		}
 		event.Seq = seq
 		return s.queueWorkflow(ctx, tx, sub, event)
+	})
+}
+
+// FailSubscriptionWorkflow consumes a refused start like a failed command run:
+// its event is not retried, and subsequent events wait out the subscription backoff.
+func (s *Store) FailSubscriptionWorkflow(ctx context.Context, queue int64, outcome HookOutcome, report contract.SessionID, events ...contract.Event) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		var sub contract.SubscriptionID
+		if err := tx.QueryRowContext(ctx, "DELETE FROM workflow_queue WHERE id=? AND run='starting' RETURNING sub", queue).Scan(&sub); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE subscriptions SET failures=?,hold_until=?,last_at=?,last_result=? WHERE id=?", outcome.Failures, millis(outcome.HoldUntil), events[0].Time.UnixMilli(), outcome.Result, sub); err != nil {
+			return err
+		}
+		for i, event := range events {
+			seq, err := s.AppendEvent(tx, event)
+			if err != nil {
+				return err
+			}
+			if i > 0 {
+				if err := s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: report}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	})
 }

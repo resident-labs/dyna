@@ -160,7 +160,7 @@ func TestWorkflowSubscriptionOwnCommentAndPush(t *testing.T) {
 		t.Fatalf("own push: %d runs; comment must not match", n)
 	}
 	var subject string
-	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT subject FROM workflow_origins").Scan(&subject); err != nil {
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT subject FROM workflow_runs").Scan(&subject); err != nil {
 		t.Fatal(err)
 	}
 	if subject != "owner/repo/7" {
@@ -208,7 +208,7 @@ func TestWorkflowSubscriptionSplitsBatchedPRsByKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n int
-	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT count(DISTINCT subject) FROM workflow_origins").Scan(&n); err != nil {
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT count(DISTINCT subject) FROM workflow_runs").Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n != 2 {
@@ -236,10 +236,103 @@ func TestWorkflowSubscriptionIssueKeysAndOwnComment(t *testing.T) {
 		t.Fatal(err)
 	}
 	var subject string
-	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT subject FROM workflow_origins").Scan(&subject); err != nil {
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT subject FROM workflow_runs").Scan(&subject); err != nil {
 		t.Fatal(err)
 	}
 	if subject != "owner/repo/8" {
 		t.Fatalf("outside issue key %q", subject)
+	}
+}
+
+func TestWorkflowStartRefusalConsumesEventAndBacksOffOnce(t *testing.T) {
+	w := setupWorkflow(t)
+	_, clock := withRuns(t, w.Service)
+	sub := addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, On: []contract.EventType{"notice.posted"}, Workflow: &contract.WorkflowSubscription{Script: workflowScript}})
+	w.set(w.room, contract.WorkflowSettings{Start: contract.WorkflowStartOff})
+	tick := func() {
+		t.Helper()
+		if _, err := w.store.DispatchEvents(w.ctx, 1000); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.fireDue(w.ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recordNotice(t, w.Service, w.ctx, w.room)
+	tick()
+	for range 3 {
+		tick()
+	}
+	failed := eventsOf[contract.HookFinished](t, w.Service, w.ctx, w.room)
+	if len(failed) != 1 || failed[0].Failures != 1 {
+		t.Fatalf("refusals %+v", failed)
+	}
+	stored, err := w.store.SubscriptionByID(w.ctx, sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Failures != 1 || !stored.HoldUntil.After(clock.now()) {
+		t.Fatalf("backoff %+v", stored)
+	}
+	var starting int
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT count(*) FROM workflow_queue WHERE run='starting'").Scan(&starting); err != nil {
+		t.Fatal(err)
+	}
+	if starting != 0 {
+		t.Fatal("refused event still starting")
+	}
+	clock.add(time.Minute)
+	tick()
+	failed = eventsOf[contract.HookFinished](t, w.Service, w.ctx, w.room)
+	if len(failed) != 2 || failed[1].Failures != 2 {
+		t.Fatalf("second refusal %+v", failed)
+	}
+	var notices int
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT count(*) FROM events WHERE type='notice.posted' AND CAST(body AS TEXT) LIKE '%could not start%'").Scan(&notices); err != nil {
+		t.Fatal(err)
+	}
+	if notices != 1 {
+		t.Fatalf("failure notices %d", notices)
+	}
+	recordNotice(t, w.Service, w.ctx, w.room)
+	w.set(w.room, contract.WorkflowSettings{Start: contract.WorkflowStartAny})
+	clock.add(2 * time.Minute)
+	tick()
+	stored, err = w.store.SubscriptionByID(w.ctx, sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Failures != 0 || !stored.HoldUntil.IsZero() {
+		t.Fatal("successful start did not reset backoff")
+	}
+}
+
+func TestWorkflowClosedReportFallsBackToRoot(t *testing.T) {
+	w := setupWorkflow(t)
+	var report contract.SessionID
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT id FROM sessions WHERE name='worker' AND room=?", w.room).Scan(&report); err != nil {
+		t.Fatal(err)
+	}
+	addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, Report: report, On: []contract.EventType{"notice.posted"}, Workflow: &contract.WorkflowSubscription{Script: workflowScript}})
+	closed, err := w.event(w.room, engineSender, contract.SessionClosed{Session: report})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.store.CloseSession(w.ctx, report, closed); err != nil {
+		t.Fatal(err)
+	}
+	recordNotice(t, w.Service, w.ctx, w.room)
+	if _, err := w.store.DispatchEvents(w.ctx, 1000); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.fireDue(w.ctx); err != nil {
+		t.Fatal(err)
+	}
+	var parent contract.SessionID
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT s.parent FROM sessions s JOIN workflow_runs r ON r.session=s.id").Scan(&parent); err != nil {
+		t.Fatal(err)
+	}
+	if parent != w.root {
+		t.Fatalf("report parent %s", parent)
 	}
 }

@@ -164,7 +164,6 @@ var deleteRoom = []string{
 	`DELETE FROM session_accounts WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM workflow_steps WHERE run IN (SELECT id FROM workflow_runs WHERE room=?1)`,
 	`DELETE FROM workflow_scripts WHERE run IN (SELECT id FROM workflow_runs WHERE room=?1)`,
-	`DELETE FROM workflow_origins WHERE run IN (SELECT id FROM workflow_runs WHERE room=?1)`,
 	`DELETE FROM workflow_runs WHERE room=?1`,
 	`DELETE FROM replies_owed WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM shell_jobs WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
@@ -178,7 +177,6 @@ var deleteRoom = []string{
 	`DELETE FROM boxes WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM sessions WHERE room=?1`,
 	`DELETE FROM room_pr_observed WHERE room=?1`,
-	`DELETE FROM room_pr_settings WHERE room=?1`,
 	`DELETE FROM room_repos WHERE room=?1`,
 	`DELETE FROM workflow_settings WHERE room=?1`,
 	// A repository another room lists stays, with a default room that exists. One no room lists goes, and with it any PR or issue

@@ -18,12 +18,12 @@ const failedStepNames = 20
 // once, by the box's first start. Resume names the run this one resumes, and only a run's start reads it from here: afterwards
 // ResumedSessions follows the stored link.
 type WorkflowRun struct {
-	Subscription contract.SubscriptionID
-	Subject      string
-	Queue        int64 // pending subscription event, bound atomically at session creation
 	ID           contract.WorkflowRunID
 	Room         contract.RoomID
 	Session      contract.SessionID
+	Subscription contract.SubscriptionID
+	Subject      string
+	Queue        int64 // pending subscription event, bound atomically at session creation
 	Name         string
 	Description  string
 	Script       string
@@ -46,7 +46,7 @@ type WorkflowRun struct {
 // workflowStatusLines is how many status() lines a run keeps.
 const workflowStatusLines = 20
 
-const workflowColumns = "COALESCE((SELECT sub FROM workflow_origins WHERE run=workflow_runs.id),''),COALESCE((SELECT subject FROM workflow_origins WHERE run=workflow_runs.id),''),id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,result,version,status_lines,started_at,ended_at,paused"
+const workflowColumns = "sub,subject,id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,result,version,status_lines,started_at,ended_at,paused"
 
 func scanWorkflow(row interface{ Scan(...any) error }) (WorkflowRun, error) {
 	var run WorkflowRun
@@ -78,7 +78,7 @@ func insertWorkflow(ctx context.Context, tx *sql.Tx, session contract.SessionID,
 		}
 	}
 	if run.Queue != 0 {
-		if _, err := tx.ExecContext(ctx, "INSERT INTO workflow_origins(run,sub,subject) SELECT ?,sub,subject FROM workflow_queue WHERE id=?", run.ID, run.Queue); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT sub,subject FROM workflow_queue WHERE id=?", run.Queue).Scan(&run.Subscription, &run.Subject); err != nil {
 			return err
 		}
 		result, err := tx.ExecContext(ctx, "UPDATE workflow_queue SET run=? WHERE id=? AND run='starting'", run.ID, run.Queue)
@@ -92,6 +92,9 @@ func insertWorkflow(ctx context.Context, tx *sql.Tx, session contract.SessionID,
 		if n != 1 {
 			return ErrNotFound
 		}
+		if _, err := tx.ExecContext(ctx, "UPDATE subscriptions SET failures=0,hold_until=0 WHERE id=?", run.Subscription); err != nil {
+			return err
+		}
 	}
 	profiles, err := json.Marshal(run.Profiles)
 	if err != nil {
@@ -103,7 +106,7 @@ func insertWorkflow(ctx context.Context, tx *sql.Tx, session contract.SessionID,
 			return err
 		}
 	}
-	_, err = tx.ExecContext(ctx, "INSERT INTO workflow_runs(id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,started_at,resumes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", run.ID, run.Room, session, run.Name, run.Description, run.Script, run.Args, string(profiles), run.Repo, run.Commit, run.Image, contract.WorkflowRunning, at.UnixMilli(), run.Resume)
+	_, err = tx.ExecContext(ctx, "INSERT INTO workflow_runs(sub,subject,id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,started_at,resumes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", run.Subscription, run.Subject, run.ID, run.Room, session, run.Name, run.Description, run.Script, run.Args, string(profiles), run.Repo, run.Commit, run.Image, contract.WorkflowRunning, at.UnixMilli(), run.Resume)
 	if err != nil {
 		return err
 	}
@@ -135,7 +138,7 @@ func (s *Store) WorkflowRuns(ctx context.Context, room contract.RoomID) ([]Workf
 // Branch is the crew's first recorded branch, with rowid breaking timestamp ties.
 func (s *Store) WorkflowList(ctx context.Context, room contract.RoomID) ([]contract.WorkflowInfo, error) {
 	rows, err := s.Read().QueryContext(ctx, `WITH runs AS (
- SELECT id,room,session,name,description,profiles,repo,commit_sha,version,state,status_lines,started_at,ended_at
+ SELECT sub,subject,id,room,session,name,description,profiles,repo,commit_sha,version,state,status_lines,started_at,ended_at
  FROM workflow_runs WHERE room=? ORDER BY started_at DESC,id DESC LIMIT 100
  ), steps AS (
  SELECT w.run,w.state,w.name,w.started_at,w.input_tokens,w.output_tokens,w.cache_read_tokens,w.cache_write_tokens, row_number() OVER (PARTITION BY w.run,w.state ORDER BY w.started_at,w.rowid) AS ordinal
@@ -145,7 +148,7 @@ func (s *Store) WorkflowList(ctx context.Context, room contract.RoomID) ([]contr
  json_group_array(name ORDER BY started_at,ordinal) FILTER (WHERE state='failed' AND ordinal<=20) AS names,
  SUM(input_tokens) AS input,SUM(output_tokens) AS output,SUM(cache_read_tokens) AS cache_read,SUM(cache_write_tokens) AS cache_write
  FROM steps GROUP BY run
- ) SELECT r.id,r.room,r.session,r.name,r.description,r.profiles,r.repo,r.commit_sha,r.version,r.state,r.status_lines,r.started_at,r.ended_at,
+ ) SELECT r.sub,r.subject,r.id,r.room,r.session,r.name,r.description,r.profiles,r.repo,r.commit_sha,r.version,r.state,r.status_lines,r.started_at,r.ended_at,
  COALESCE((SELECT branch FROM session_branches b WHERE b.repo=r.repo AND b.session=r.session ORDER BY created_at,rowid LIMIT 1),''),
  COALESCE(t.steps,0),COALESCE(t.running,0),COALESCE(t.failed,0),COALESCE(t.names,'[]'),
  COALESCE(t.input,0),COALESCE(t.output,0),COALESCE(t.cache_read,0),COALESCE(t.cache_write,0)
@@ -159,7 +162,7 @@ func (s *Store) WorkflowList(ctx context.Context, room contract.RoomID) ([]contr
 		var run contract.WorkflowInfo
 		var profiles, lines, names string
 		var started, ended int64
-		if err := rows.Scan(&run.Run, &run.Room, &run.Session, &run.Name, &run.Description, &profiles, &run.Repo, &run.Commit, &run.Version, &run.State, &lines, &started, &ended, &run.Branch, &run.Steps, &run.Running, &run.Failed, &names, &run.Usage.InputTokens, &run.Usage.OutputTokens, &run.Usage.CacheReadTokens, &run.Usage.CacheWriteTokens); err != nil {
+		if err := rows.Scan(&run.Subscription, &run.Subject, &run.Run, &run.Room, &run.Session, &run.Name, &run.Description, &profiles, &run.Repo, &run.Commit, &run.Version, &run.State, &lines, &started, &ended, &run.Branch, &run.Steps, &run.Running, &run.Failed, &names, &run.Usage.InputTokens, &run.Usage.OutputTokens, &run.Usage.CacheReadTokens, &run.Usage.CacheWriteTokens); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(profiles), &run.Profiles); err != nil {

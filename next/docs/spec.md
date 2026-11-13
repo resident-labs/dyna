@@ -147,7 +147,6 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `repos` |
 | `repo_heads` |
 | `room_repos` |
-| `room_pr_settings` |
 | `room_pr_observed` |
 | `sessions` |
 | `events` |
@@ -208,7 +207,6 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `subscription_files` |
 | `subscription_runs` | one row for each Run in progress, which is what stops a subscription overlapping itself |
 | `workflow_runs` | one row for each run of a script, tied to its run session (9.2) |
-| `workflow_origins` | originating subscription and subject of an event run |
 | `workflow_subscriptions` | saved workflow action and key policy |
 | `workflow_queue` | bounded pending events and active runs by subscription and key |
 | `workflow_state` | small JSON state by subscription and key |
@@ -1173,10 +1171,14 @@ It saves script source and object args; the CLI reads `--workflow FILE`, just as
 a serial queue and JSON state within this subscription. No key means a single
 queue. `once` replaces only a queued event with the newest. Up to 256 events wait
 per subscription; further events remain in the room log. A failed run releases
-its key and is not retried. Different keys may run concurrently under room limits.
+its key and is not retried. A refused start also consumes its event, counts a failure,
+and backs off subsequent starts using the command-subscription backoff. Its first
+failure sends a notice to the report session; later failures stay in hook.finished
+until a successful start resets the count. Different keys may run concurrently under room limits.
 
 Root or owner registers the action; its run is a child of root or the live room
-session named by `report`, which receives its normal posts and result. Existing
+session named by `report`, which receives its normal posts and result. If the report
+session has closed or is closing, the new run is a child of root instead. Existing
 workflow permissions and GitHub write restrictions apply. Run status names the
 originating subscription and subject. Disabling a subscription holds new starts;
 removing it removes pending events and state but does not supersede a running run.

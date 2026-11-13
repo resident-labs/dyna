@@ -37,7 +37,7 @@ type Subscription struct {
 	Workflow   *WorkflowSubscription `json:"workflow,omitempty" desc:"Workflow action: saved JavaScript source as script and an args object. Owner or root only, room scope. Give wake, run or workflow."`
 	Key        string                `json:"key,omitempty" desc:"Workflow serial key, a literal or template using {repo} and {number}; omitted means one key per subscription."`
 	Once       bool                  `json:"once,omitempty" desc:"With workflow, replace the queued event for this key with the newest; the running run is never replaced."`
-	Report     SessionID             `json:"report,omitempty" desc:"Workflow report session name or ID in the room, root by default."`
+	Report     SessionID             `json:"report,omitempty" desc:"Workflow report session name or ID in the room; root by default and if that session closes."`
 	IncludeOwn bool                  `json:"includeOwn,omitempty" desc:"Allow own-account comments, reviews and metadata to start workflows; own pushes, merges and CI always may."`
 }
 
@@ -75,7 +75,7 @@ type SubscriptionAddRequest struct {
 	Workflow   *WorkflowSubscription `json:"workflow,omitempty" desc:"Workflow action: saved JavaScript source as script and an args object. Owner or root only, room scope. Give wake, run or workflow."`
 	Key        string                `json:"key,omitempty" desc:"Workflow serial key, a literal or template using {repo} and {number}; omitted means one key per subscription."`
 	Once       bool                  `json:"once,omitempty" desc:"With workflow, replace the queued event for this key with the newest; the running run is never replaced."`
-	Report     SessionID             `json:"report,omitempty" desc:"Workflow report session name or ID in the room, root by default."`
+	Report     SessionID             `json:"report,omitempty" desc:"Workflow report session name or ID in the room; root by default and if that session closes."`
 	IncludeOwn bool                  `json:"includeOwn,omitempty" desc:"Allow own-account comments, reviews and metadata to start workflows; own pushes, merges and CI always may."`
 }
 

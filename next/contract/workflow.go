@@ -87,11 +87,11 @@ type WorkflowReloadResponse struct {
 // List's Branch is the first recorded branch; status retains the most recent recorded branch. Version is the script version it runs, 1
 // until a reload. Status is the script's latest status() line, empty when it wrote none.
 type WorkflowInfo struct {
-	Subscription SubscriptionID `json:"subscription,omitempty"`
-	Subject      string         `json:"subject,omitempty"`
 	Run          WorkflowRunID  `json:"run"`
 	Room         RoomID         `json:"room"`
 	Session      SessionID      `json:"session"`
+	Subscription SubscriptionID `json:"subscription,omitempty"`
+	Subject      string         `json:"subject,omitempty"`
 	Name         string         `json:"name"`
 	Description  string         `json:"description,omitempty"`
 	Profiles     []ProfileName  `json:"profiles"`

@@ -572,7 +572,8 @@ func finalText(value json.RawMessage) string {
 }
 
 func (c *Crew) handle(ctx context.Context, call crewCall) crewReply {
-	if call.Op == "state_get" || call.Op == "state_set" {
+	switch call.Op {
+	case "state_get", "state_set":
 		req := contract.WorkflowStateRequest{}
 		if call.Op == "state_set" {
 			req.Value = call.Payload
@@ -582,8 +583,6 @@ func (c *Crew) handle(ctx context.Context, call crewCall) crewReply {
 			return crewReply{Error: err.Error()}
 		}
 		return crewReply{Value: response.Value}
-	}
-	switch call.Op {
 	case "agent":
 		return c.agentCall(ctx, call)
 	case "run":
