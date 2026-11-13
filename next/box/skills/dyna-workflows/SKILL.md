@@ -83,7 +83,7 @@ value or step result over 1 MiB as JSON fails it.
 - `worktree: true` gives a worker its own tree and branch `<crew branch>-<12 hex>` from the pinned
   commit (`commit` in `workflow list`). What it left, except ignored files, is committed and pushed;
   `files` lists what changed, `[]` for nothing. The tree is then removed; later steps see a branch.
-- Without `worktree`, workers share the main tree, whose uncommitted files a lost box or a resume drops.
+- Without `worktree`, workers share the main tree, whose uncommitted files a replaced box or a resume drops.
 - `merge(results)` merges each `commit`, in order, from `base` (the pinned commit by default) into
   `<crew branch>-run`, pushes it and returns `{branch, commit, merged, conflicts}`. A conflict or a
   failed `parallel` entry lands in `conflicts` as a failed step; it throws only on misuse or a git
@@ -108,7 +108,7 @@ const test = await run(`git fetch origin ${merged.branch} && git worktree add --
   rules and earlier output reach it only through the prompt.
 - A box holds at most one worker per 512 MiB (4 to 64 by `size`). A worker waits for a box slot, then
   its profile's `maxConcurrent` (`dyna_profiles`); the room's workflow `maxWorkers` can cap a run lower,
-  read when its box starts (dyna-admin). `timeout` starts once a worker holds both, so a step
+  read when its box starts (root changes it, dyna-admin; others ask their parent). `timeout` starts once a worker holds both, so a step
   waiting on its profile holds a box slot.
 - One build runs at a time in the box: `run()` and workers' `cargo`, `go`, `npm`, `make` and similar
   share one lock, and time queued for it does not count against a timeout.
@@ -117,7 +117,8 @@ const test = await run(`git fetch origin ${merged.branch} && git worktree add --
 
 - Stop: the session tool's `stop` action on the crew, or `dyna session stop CREW`, then check
   `dyna workflow status RUN` says `stopped`. Running steps fail with `the run ended first`; to undo,
-  start the same script with `--resume RUN`. A lost box needs nothing: a new box replays the script.
+  start the same script with `--resume RUN`. A box whose host stops answering waits for that host; if its
+  container is gone the run fails, and `--resume RUN` carries on from the finished steps.
 
 Reload is for a running run, resume for an ended one. Both match steps by key: a hash of the kind,
 prompt or command, options other than `lane`, effective profile and enclosing `workflow()` step. A
@@ -135,8 +136,7 @@ the commit in a reviewer's prompt, or its old verdict survives a change to the c
 
 ## Shape a run
 
-A run pays when it covers more than one context holds, checks its own findings, or takes several
-independent angles; a small task is cheaper done directly. `pipeline()` is the default for stages:
+`pipeline()` is the default for stages:
 wall time is the slowest chain, not the sum of each stage's slowest. A barrier, `await parallel(...)`
 between stages, pays only when a stage needs every earlier result at once: deduplicating, stopping
 early, comparing. Useful shapes: write, review (the prompt names the commit) and fix, for a fixed
