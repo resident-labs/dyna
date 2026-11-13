@@ -191,5 +191,6 @@ func discordCommand(getClient func() client) *cobra.Command {
 	checkCmd.Flags().String("room", "", "Room name or ID (required for owner callers)")
 	checkCmd.Flags().String("server", "", "Mapped server ID")
 	root.AddCommand(api, send, read, instructions, policyCmd, checkCmd)
+	root.AddCommand(discordFolderCommands(getClient)...)
 	return root
 }

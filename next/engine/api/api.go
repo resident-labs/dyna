@@ -364,6 +364,22 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 		return contract.DiscordAPIResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Discord unavailable"}
 	})
+	call(mux, contract.MethodDiscordExport, c, func(ctx context.Context, who contract.Principal, req contract.DiscordExportRequest) (contract.DiscordFolderResponse, *contract.Error) {
+		if service, ok := a.service.(interface {
+			DiscordExport(context.Context, contract.Principal, contract.DiscordExportRequest) (contract.DiscordFolderResponse, *contract.Error)
+		}); ok {
+			return service.DiscordExport(ctx, who, req)
+		}
+		return contract.DiscordFolderResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Discord unavailable"}
+	})
+	call(mux, contract.MethodDiscordPlan, c, func(ctx context.Context, who contract.Principal, req contract.DiscordPlanRequest) (contract.DiscordFolderResponse, *contract.Error) {
+		if service, ok := a.service.(interface {
+			DiscordPlan(context.Context, contract.Principal, contract.DiscordPlanRequest) (contract.DiscordFolderResponse, *contract.Error)
+		}); ok {
+			return service.DiscordPlan(ctx, who, req)
+		}
+		return contract.DiscordFolderResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Discord unavailable"}
+	})
 	call(mux, contract.MethodDiscordCheck, c, func(ctx context.Context, who contract.Principal, req contract.DiscordCheckRequest) (contract.DiscordCheckResponse, *contract.Error) {
 		if service, ok := a.service.(interface {
 			DiscordCheck(context.Context, contract.Principal, contract.DiscordCheckRequest) (contract.DiscordCheckResponse, *contract.Error)
