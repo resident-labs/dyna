@@ -46,31 +46,19 @@ func stampCancellation(t *testing.T, fail bool) {
 	}()
 	canceled, cancel := context.WithCancel(ctx)
 	defer cancel()
+	firstCtx := &writerAdmissionContext{Context: canceled, admitted: make(chan struct{})}
 	first := make(chan error, 1)
-	go func() { first <- s.MarkTurnModelSent(canceled, "child", "turn", time.UnixMilli(100)) }()
-	deadline := time.Now().Add(2 * time.Second)
-	for s.mu.TryLock() {
-		s.mu.Unlock()
-		if time.Now().After(deadline) {
-			t.Fatal("first attempt did not reach writer")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	go func() { first <- s.MarkTurnModelSent(firstCtx, "child", "turn", time.UnixMilli(100)) }()
+	awaitStoreSignal(t, firstCtx.admitted)
+	waiterCtx := &writerAdmissionContext{Context: ctx, admitted: make(chan struct{})}
 	waiter := make(chan error, 1)
-	go func() { waiter <- s.MarkTurnModelSent(ctx, "child", "turn", time.UnixMilli(200)) }()
+	go func() { waiter <- s.MarkTurnModelSent(waiterCtx, "child", "turn", time.UnixMilli(200)) }()
 	cancel()
 	if err := <-first; err == nil {
 		t.Fatal("canceled engine-context attempt succeeded")
 	}
 	conn.Close()
-	deadline = time.Now().Add(2 * time.Second)
-	for s.mu.TryLock() {
-		s.mu.Unlock()
-		if time.Now().After(deadline) {
-			t.Fatal("waiter did not reach writer")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	awaitStoreSignal(t, waiterCtx.admitted)
 	replacement := make(chan error, 1)
 	go func() { replacement <- s.MarkTurnModelSent(ctx, "child", "turn", time.UnixMilli(300)) }()
 	close(release)
