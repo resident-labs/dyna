@@ -131,13 +131,18 @@ func (s *Service) discordURLScope(ctx context.Context, caller contract.Principal
 	if len(parts) < 2 {
 		return forbidden()
 	}
-	if parts[0] == "users" && method == "GET" && len(parts) == 2 {
-		return nil
-	}
 
 	scope, problem := s.discordReadScope(ctx, caller)
 	if problem != nil {
 		return problem
+	}
+	if scope.confined != "" {
+		if parts[0] != "channels" || parts[1] != scope.confined || (method == "GET" && !(len(parts) == 2 || len(parts) == 3 && parts[2] == "messages" || len(parts) == 4 && parts[2] == "messages")) {
+			return confinedDiscordRefusal()
+		}
+	}
+	if parts[0] == "users" && method == "GET" && len(parts) == 2 {
+		return nil
 	}
 	if parts[0] == "guilds" {
 		for _, r := range scope.routes {
@@ -160,9 +165,10 @@ func (s *Service) discordURLScope(ctx context.Context, caller contract.Principal
 // discordResourceScope is one request's routing snapshot, shared by REST scope
 // checks and channel-name resolution so both use the same authorization rules.
 type discordResourceScope struct {
-	room   contract.RoomID
-	routes []store.DiscordRoute
-	dms    map[string]string
+	confined string
+	room     contract.RoomID
+	routes   []store.DiscordRoute
+	dms      map[string]string
 }
 
 func (s *Service) discordReadScope(ctx context.Context, caller contract.Principal) (discordResourceScope, *contract.Error) {
@@ -178,10 +184,24 @@ func (s *Service) discordReadScope(ctx context.Context, caller contract.Principa
 	if err != nil {
 		return discordResourceScope{}, failure(err)
 	}
-	return discordResourceScope{room: session.Room, routes: routes, dms: dms}, nil
+	inputs, err := s.store.DiscordTurnInputs(ctx, caller.Session)
+	if err != nil {
+		return discordResourceScope{}, failure(err)
+	}
+	confined := ""
+	for _, m := range inputs {
+		if m.Confined || m.Direct && !m.Owner {
+			confined = m.Channel
+			break
+		}
+	}
+	return discordResourceScope{room: session.Room, routes: routes, dms: dms, confined: confined}, nil
 }
 
 func (scope discordResourceScope) allowsChannel(channel discord.Channel) bool {
+	if scope.confined != "" {
+		return channel.ID == scope.confined
+	}
 	parent := channel.ID
 	if channel.Type == 10 || channel.Type == 11 || channel.Type == 12 {
 		parent = channel.Parent
@@ -226,11 +246,6 @@ func (s *Service) DiscordAPI(ctx context.Context, caller contract.Principal, req
 	}
 	if len(parts) < 2 || (parts[0] != "channels" && parts[0] != "guilds" && parts[0] != "users") || !discordID(parts[1]) {
 		return contract.DiscordAPIResponse{}, invalid("path must look like /channels/123/messages or /api/v10/channels/123/messages")
-	}
-	if req.Method != "GET" {
-		if _, problem := s.discordDMWriteScope(ctx, caller, parts[1], true); problem != nil {
-			return contract.DiscordAPIResponse{}, problem
-		}
 	}
 	u.Path = "/api/v10" + path
 	req.Path = u.String()

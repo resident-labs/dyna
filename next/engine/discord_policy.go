@@ -103,17 +103,19 @@ func (s *Service) setDiscordPolicy(ctx context.Context, route store.DiscordRoute
 			return contract.DiscordPolicyResponse{}, invalid(err.Error())
 		}
 	}
-	for i, name := range resolvedPolicy.Front.Roles {
-		matches := []string{}
-		for _, role := range server.Roles {
-			if role.Name == name {
-				matches = append(matches, role.ID)
+	for _, roles := range [][]string{resolvedPolicy.Front.Roles, resolvedPolicy.Front.Team} {
+		for i, name := range roles {
+			matches := []string{}
+			for _, role := range server.Roles {
+				if role.Name == name {
+					matches = append(matches, role.ID)
+				}
 			}
+			if len(matches) != 1 {
+				return contract.DiscordPolicyResponse{}, invalid(fmt.Sprintf("role %q is missing or ambiguous", name))
+			}
+			roles[i] = matches[0]
 		}
-		if len(matches) != 1 {
-			return contract.DiscordPolicyResponse{}, invalid(fmt.Sprintf("role %q is missing or ambiguous", name))
-		}
-		resolvedPolicy.Front.Roles[i] = matches[0]
 	}
 	for i, name := range resolvedPolicy.Front.Quiet {
 		category := strings.HasSuffix(name, "/*")
@@ -152,22 +154,18 @@ func (s *Service) discordPrepare(ctx context.Context, caller contract.Principal,
 		return nil, problem
 	}
 	route := policy.ParseRoute(method, path)
-	directOnly := false
-	if method != "GET" {
-		var problem *contract.Error
-		directOnly, problem = s.discordDMWriteScope(ctx, caller, route.ResourceID, false)
-		if problem != nil {
-			return nil, problem
-		}
+	confinedOnly := scope.confined != ""
+	if confinedOnly && route.ResourceID != scope.confined {
+		return nil, confinedDiscordRefusal()
 	}
-	if directOnly {
+	if confinedOnly && method != "GET" {
 		if route.Resource != policy.Channel {
-			return nil, directMessageRefusal()
+			return nil, confinedDiscordRefusal()
 		}
 		switch route.Action {
 		case policy.MessageCreate, policy.MessageEdit, policy.MessageDelete:
 		default:
-			return nil, directMessageRefusal()
+			return nil, confinedDiscordRefusal()
 		}
 		if route.Action != policy.MessageCreate {
 			client, err := s.machineDiscordClient(ctx)
@@ -184,7 +182,7 @@ func (s *Service) discordPrepare(ctx context.Context, caller contract.Principal,
 				return nil, failure(err)
 			}
 			if result.Status != 200 || json.Unmarshal(result.Body, &message) != nil || message.Author.ID != bot.ID {
-				return nil, directMessageRefusal()
+				return nil, confinedDiscordRefusal()
 			}
 			if route.Action == policy.MessageDelete {
 				return body, nil
@@ -195,7 +193,7 @@ func (s *Service) discordPrepare(ctx context.Context, caller contract.Principal,
 		switch route.Action {
 		case policy.Read, policy.MessageCreate, policy.MessageEdit, policy.PollExpire, policy.Reaction:
 		case policy.MessageDelete:
-			if !directOnly {
+			if !confinedOnly {
 				return nil, forbidden()
 			}
 		default:
