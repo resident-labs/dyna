@@ -61,8 +61,8 @@ export class VoiceCall {
         }
         this.update();
       };
-      ws.onerror = () => { if (this.socket === ws && generation === this.generation) this.stop('Could not connect the call.'); };
-      ws.onclose = () => { if (this.socket === ws) this.stop('Call ended'); };
+      ws.onerror = () => { if (this.socket === ws && generation === this.generation) this.stop('The connection dropped. Try calling again.'); };
+      ws.onclose = () => { if (this.socket === ws) this.stop('The connection dropped. Try calling again.'); };
     } catch (error) { if (generation === this.generation) this.stop(micError(error)); }
   }
   mute() { this.state.muted = !this.state.muted; this.update(); }

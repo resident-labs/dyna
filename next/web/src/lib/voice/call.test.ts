@@ -6,7 +6,7 @@ registerHooks({ resolve(specifier, context, next) {
   if (specifier.endsWith('micWorklet.ts?worker&url')) return { url: 'data:text/javascript,export default "/mic-worklet.js"', shortCircuit: true };
   return next(specifier, context);
 } });
-const { createPlayer } = await import('./audio.ts');
+const { createPlayer, micError } = await import('./audio.ts');
 const { VoiceCall } = await import('./call.ts');
 const { silence } = await import('./pcm.ts');
 
@@ -122,6 +122,9 @@ test('call start, microphone mute, interruption and stop release resources', asy
     await call.start("replacement");
     ws.onerror?.(); ws.event({ type: "closed" });
     assert.equal(call.state.active, true);
+    Socket.last.onerror?.();
+    assert.equal(call.state.status, 'The connection dropped. Try calling again.');
+    assert.equal(call.state.active, false);
   } finally {
     call.stop();
     for (const [key, descriptor] of saved) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); }
@@ -136,4 +139,10 @@ test('player excludes underrun silence from progress and cancellation', () => {
   player.play(silence(24000, 100), 24000, 'item');
   player.reportPlayed(); player.stop('interrupted');
   assert.deepEqual(progress, [100, 100]);
+});
+
+test('microphone fallback never displays browser or provider error details', () => {
+  assert.equal(micError(new Error('secret provider detail')), 'The microphone did not start. Check your microphone and try again.');
+  const denied = new Error('private'); denied.name = 'NotAllowedError';
+  assert.equal(micError(denied), 'Dyna may not use the microphone. Allow it, then call again.');
 });
