@@ -26,7 +26,6 @@ import (
 	"github.com/resident-labs/dyna/engine/ci"
 	"github.com/resident-labs/dyna/engine/compose"
 	enginegit "github.com/resident-labs/dyna/engine/git"
-	"github.com/resident-labs/dyna/engine/hostexec"
 	engineimages "github.com/resident-labs/dyna/engine/images"
 	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/store"
@@ -926,18 +925,41 @@ func (b *Boxes) ExecArgv(ctx context.Context, host contract.HostName, id contrac
 	return h.ExecArgv(id, argv...), nil
 }
 
+// engineScopeRunner uses SSH even for the engine host: setsid alone does not
+// move a detached runner out of the engine service's cgroup during a restart.
+type engineScopeRunner struct {
+	*podman.Host
+	env []string
+}
+
+func (r engineScopeRunner) RunHostexec(ctx context.Context, a contract.HostexecRunArgs, op contract.OpID) ([]byte, int, bool, error) {
+	return r.Host.RunHostexecWithEnv(ctx, a, op, r.env)
+}
+
 func (b *Boxes) scopeRunner(ctx context.Context, host contract.HostName) (scopeRunner, error) {
-	if host == contract.ControlPlane {
-		return hostexec.Local{Socket: filepath.Join(b.Runtime, "owner.sock")}, nil
-	}
 	hosts, err := b.Store.Hosts(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for _, record := range hosts {
-		if record.Name == host && record.EngineHost != nil && *record.EngineHost {
-			return hostexec.Local{Socket: filepath.Join(b.Runtime, "owner.sock")}, nil
+		if record.EngineHost == nil || !*record.EngineHost {
+			continue
 		}
+		if record.Name != host && host != contract.ControlPlane {
+			continue
+		}
+		h, err := b.host(ctx, record.Name)
+		if err != nil {
+			return nil, err
+		}
+		binary, err := os.Executable()
+		if err != nil {
+			return nil, err
+		}
+		return engineScopeRunner{Host: h, env: []string{"DYNA_SOCKET=" + filepath.Join(b.Runtime, "owner.sock"), "PATH=" + filepath.Dir(binary) + ":" + os.Getenv("PATH")}}, nil
+	}
+	if host == contract.ControlPlane {
+		return nil, fmt.Errorf("control-plane host exec requires a registered engine host")
 	}
 	return b.host(ctx, host)
 }
