@@ -23,6 +23,7 @@ import (
 
 // fakeJournal is the engine's side of a crew, kept in memory so that a second Crew can resume from it.
 type fakeJournal struct {
+	state       json.RawMessage
 	mu          sync.Mutex
 	steps       map[string]contract.WorkflowStepEndRequest
 	names       map[string]string
@@ -1130,6 +1131,29 @@ func TestCrewPauseHoldsNewCallsButRunningWorkerFinishes(t *testing.T) {
 	}
 }
 
-func (j *fakeJournal) WorkflowState(context.Context, contract.WorkflowStateRequest) (contract.WorkflowStateResponse, error) {
-	return contract.WorkflowStateResponse{Value: json.RawMessage("null")}, nil
+func (j *fakeJournal) WorkflowState(_ context.Context, req contract.WorkflowStateRequest) (contract.WorkflowStateResponse, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if len(req.Value) > 0 {
+		j.state = req.Value
+	}
+	if len(j.state) == 0 {
+		j.state = json.RawMessage("null")
+	}
+	return contract.WorkflowStateResponse{Value: j.state}, nil
+}
+
+func TestScriptStateCallsPersistOutsideTheStepJournal(t *testing.T) {
+	h := newCrewHarness(t)
+	got := h.result(crewMeta + `const before=await state.get(); await state.set({head: args.topic}); return {before, after:await state.get()}`)
+	if fmt.Sprint(got) != fmt.Sprint(map[string]any{"before": nil, "after": map[string]any{"head": "bounds"}}) {
+		t.Fatalf("state %v", got)
+	}
+	got = h.result(crewMeta + `return await state.get()`)
+	if fmt.Sprint(got) != fmt.Sprint(map[string]any{"head": "bounds"}) {
+		t.Fatalf("restarted state %v", got)
+	}
+	if len(h.journal.steps) != 0 {
+		t.Fatal("state unexpectedly replayed as journal steps")
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -96,6 +97,21 @@ func TestWorkflowSubscriptionSerialStateAndOnce(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			var latest int64
+			if err := w.store.Read().QueryRowContext(w.ctx, "SELECT max(seq) FROM events WHERE type='notice.posted'").Scan(&latest); err != nil {
+				t.Fatal(err)
+			}
+			var secondArgs struct {
+				Event struct {
+					Seq int64 `json:"seq"`
+				} `json:"event"`
+			}
+			if err := json.Unmarshal([]byte(second.Args), &secondArgs); err != nil {
+				t.Fatal(err)
+			}
+			if once && secondArgs.Event.Seq != latest || !once && secondArgs.Event.Seq >= latest {
+				t.Fatalf("queued event %d, latest %d, once %v", secondArgs.Event.Seq, latest, once)
+			}
 			state, problem := w.WorkflowState(w.ctx, sessionCaller(second.Session), contract.WorkflowStateRequest{})
 			if problem != nil {
 				t.Fatal(problem)
@@ -104,5 +120,98 @@ func TestWorkflowSubscriptionSerialStateAndOnce(t *testing.T) {
 				t.Fatalf("state %s", state.Value)
 			}
 		})
+	}
+}
+
+func TestWorkflowSubscriptionOwnCommentAndPush(t *testing.T) {
+	w := setupWorkflow(t)
+	for _, kind := range []string{"comment", "pushed"} {
+		addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, On: []contract.EventType{"github.pr.changed"}, Where: []string{"kind=" + kind}, Workflow: &contract.WorkflowSubscription{Script: workflowScript}, Key: "{repo}/{number}"})
+	}
+	record := func(kinds ...contract.PrChangeKind) {
+		t.Helper()
+		event, err := w.event(w.room, engineSender, contract.PrChanged{Changes: []contract.PrChange{{PR: contract.PrSummary{Repo: "owner/repo", Number: 7}, Kinds: kinds, Comments: []contract.PrComment{{Author: "own", Body: "own review", Outside: false}}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := w.store.RecordEvent(w.ctx, event); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.store.DispatchEvents(w.ctx, 1000); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.fireDue(w.ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record(contract.PrChangeComment)
+	var n int
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT count(*) FROM workflow_runs").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("own comment started a run")
+	}
+	record(contract.PrChangeComment, contract.PrChangePushed)
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT count(*) FROM workflow_runs").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("own push: %d runs; comment must not match", n)
+	}
+	var subject string
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT subject FROM workflow_origins").Scan(&subject); err != nil {
+		t.Fatal(err)
+	}
+	if subject != "owner/repo/7" {
+		t.Fatalf("key %q", subject)
+	}
+}
+
+func TestScheduledWorkflowUsesNormalRunAndState(t *testing.T) {
+	w := setupWorkflow(t)
+	_, clock := withRuns(t, w.Service)
+	addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, Every: "1m", Workflow: &contract.WorkflowSubscription{Script: workflowScript}})
+	if err := w.fireDue(w.ctx); err != nil {
+		t.Fatal(err)
+	}
+	clock.add(time.Minute)
+	if err := w.fireDue(w.ctx); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT count(*) FROM workflow_runs").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("scheduled runs: %d", n)
+	}
+}
+
+func TestWorkflowSubscriptionSplitsBatchedPRsByKey(t *testing.T) {
+	w := setupWorkflow(t)
+	addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, On: []contract.EventType{"github.pr.changed"}, Workflow: &contract.WorkflowSubscription{Script: workflowScript}, Key: "{repo}/{number}"})
+	event, err := w.event(w.room, engineSender, contract.PrChanged{Changes: []contract.PrChange{
+		{PR: contract.PrSummary{Repo: "owner/repo", Number: 7}, Kinds: []contract.PrChangeKind{contract.PrChangePushed}},
+		{PR: contract.PrSummary{Repo: "owner/repo", Number: 8}, Kinds: []contract.PrChangeKind{contract.PrChangePushed}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.store.RecordEvent(w.ctx, event); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.store.DispatchEvents(w.ctx, 1000); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.fireDue(w.ctx); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT count(DISTINCT subject) FROM workflow_origins").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("only %d subjects started", n)
 	}
 }
