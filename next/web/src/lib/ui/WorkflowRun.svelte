@@ -41,6 +41,7 @@
   let stuck = $derived(info?.state === "running" && !!broken);
   let counts = $derived(tally(steps));
   let settled = $derived(counts.done + counts.failed);
+  let steerable = $derived(steps.filter(step => step.kind === "agent" && step.state === "running" && step.transcript));
   // The script's latest line, or the counts when it wrote none or cleared it.
   let said = $derived(lines.at(-1)?.text ? lines.at(-1) : undefined);
   let shownLines = $derived(lines.filter(line => line.text));
@@ -108,7 +109,7 @@
     try {
       await call(info.paused ? "workflow.unpause" : "workflow.pause", { run: info.run });
       await run.read();
-    } catch (error) { controlError = error instanceof Error ? error.message : String(error); }
+    } catch { controlError = `Could not ${info.paused ? "unpause" : "pause"} the run. Try again.`; }
     finally { pauseBusy = false; }
   }
   let navigation = 0;
@@ -129,9 +130,9 @@
       await call("workflow.steer", { run: info.run, step: key, text });
       if (drafts[key] === text) drafts[key] = "";
       if (visit === navigation) steerSent = true;
-    } catch (error) {
+    } catch {
       await run.read();
-      if (visit === navigation && steps.find(step => step.key === key)?.state === "running") controlError = "Could not send; your message is still here. " + (error instanceof Error ? error.message : String(error));
+      if (visit === navigation && steps.find(step => step.key === key)?.state === "running") controlError = "Could not send. Your message is kept; try again or return to the run.";
     }
     finally { sending = sending.filter(item => item !== key); }
   }
@@ -153,7 +154,7 @@
     void tick().then(() => frame?.querySelector<HTMLElement>(`[data-step="${CSS.escape(key ?? "")}"]`)?.focus());
   }
   function closeWorker(event: KeyboardEvent) {
-    if (event.key === "Escape" && worker && !steering && !event.defaultPrevented) hide();
+    if (event.key === "Escape" && worker && (!steering || worker.state !== "running") && !event.defaultPrevented) hide();
   }
 </script>
 
@@ -186,10 +187,10 @@
     {#if operate && ((!ended && worker.state === "running") || steering)}
       <form class="steer" onsubmit={steer}>
         <label for="worker-steer">{worker.state === "running" ? "Steer this worker" : "Your unsent message"}</label>
-        <div><textarea id="worker-steer" rows="1" bind:value={drafts[worker.key]} placeholder="Tell this worker what to do differently" readonly={worker.state !== "running"} disabled={steerBusy} onkeydown={event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing && matchMedia("(hover: hover)").matches) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} oninput={() => { steerSent = false; controlError = ""; }}></textarea><button type="submit" disabled={steerBusy || !steering.trim() || worker.state !== "running"}>{steerBusy ? "Sending…" : "Send"}</button></div>
-        <p class="steer-help">{worker.state !== "running" ? "This worker has ended. Your message was not sent." : info?.paused ? "The run is paused. Running workers can still be steered." : "Only this worker gets your message."}<span class="keyboard-hint">{worker.state === "running" ? " Enter to send · Shift+Enter for a new line" : ""}</span></p>
+        <div><textarea id="worker-steer" rows="1" bind:value={drafts[worker.key]} placeholder="Tell this worker what to do differently" readonly={worker.state !== "running" || steerBusy} onkeydown={event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing && matchMedia("(hover: hover)").matches) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} oninput={() => { steerSent = false; controlError = ""; }}></textarea>{#if worker.state === "running"}<button type="submit" disabled={steerBusy || !steering.trim()}>{steerBusy ? "Sending…" : "Send"}</button>{:else}<button type="button" onclick={() => { drafts[worker.key] = ""; controlError = ""; }}>Discard</button>{/if}</div>
+        <p class="steer-help">{worker.state !== "running" ? "This worker has ended. Your message was not sent." : info?.paused ? "Only this worker gets your message. The run is paused; you can still steer this worker." : "Only this worker gets your message."}<span class="keyboard-hint">{worker.state === "running" ? " Enter to send · Shift+Enter for a new line" : ""}</span></p>
         {@render controlFailure()}
-        <span class="steer-status" role="status">{steerSent ? "Sent to this worker." : ""}</span>
+        <span class="steer-status" class:sent={steerSent} role="status">{steerSent ? "✓ Sent to this worker." : ""}</span>
       </form>
     {/if}
     {#if worker.reason}<div class="failure worker-failure"><span class="slot"><Icon name="warning" size={16} /></span><span>{worker.reason}</span></div>{/if}
@@ -205,7 +206,7 @@
           {#if info.paused && !ended}<StatusPill tone="warning" label="Paused" />{:else if words.tone}<StatusPill tone={words.tone} label={words.word} />{:else}<span class="muted">{words.word}</span>{/if}
           {#if info.state === "running" && operate && store.running(session)}
             <div class="controls">
-              <button type="button" class="control" disabled={pauseBusy} title={info.paused ? "Start new steps again" : "Stop starting new steps; running steps finish"} onclick={pause}>{pauseBusy ? (info.paused ? "Unpausing…" : "Pausing…") : info.paused ? "Unpause" : "Pause"}</button>
+              <button type="button" class="control" disabled={pauseBusy} title={info.paused ? "Start new steps again" : "No new steps start; running workers keep going and can still be steered"} onclick={pause}>{pauseBusy ? (info.paused ? "Unpausing…" : "Pausing…") : info.paused ? "Unpause" : "Pause"}</button>
               <button type="button" class="control" disabled={store.stopping.has(session)} onclick={() => store.stop(session)}><Icon name="stop" size={14} />{store.stopping.has(session) ? "Stopping" : "Stop"}</button>
             </div>
           {/if}
@@ -217,10 +218,10 @@
             {#if info.commit}<span class="from">{info.repo ?? ""} at {@render commit(info.commit)}</span>{/if}</p>
         </div>
         {@render controlFailure()}
-        {#if info.paused && !ended}<p class="muted">No new steps start. Running workers keep going and can still be steered. Unpause to continue.</p>{/if}
+        {#if info.paused && !ended}<p class="muted">No new steps will start. Running workers keep going and can still be steered. Unpause to continue.</p>{/if}
         {#if info.description}<p class="muted">{info.description}</p>{/if}
-        {#if !ended && steps.some(step => step.kind === "agent" && step.state === "running" && step.transcript)}
-          <div class="running-workers"><span>Workers:</span>{#each steps.filter(step => step.kind === "agent" && step.state === "running" && step.transcript).slice(0, 4) as step (step.key)}<button type="button" title="Open transcript and steer this worker" onclick={() => show(step)}>{step.name}</button>{/each}{#if counts.running > 4}<span>and {counts.running - 4} more in the chart</span>{/if}</div>
+        {#if !ended && steerable.length}
+          <div class="running-workers"><span>Steer a worker:</span>{#each steerable.slice(0, 4) as step (step.key)}<button type="button" title="Open transcript and steer this worker" onclick={() => show(step)}>{step.name}</button>{/each}{#if steerable.length > 4}<span>and {steerable.length - 4} more in the chart</span>{/if}</div>
         {/if}
         <div class="said" class:script={!!said}>
           {#if info.state === "running"}<WorkingDot />{/if}
@@ -292,6 +293,7 @@
   .steer textarea:focus-visible, .steer button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .steer-status { display: block; color: var(--muted); font-size: 12px; }
   .steer-status { min-height: 16px; }
+  .steer-status.sent { color: var(--success); }
   .steer-help { color: var(--muted); font-size: 12px; margin-top: 4px; }
   .steer textarea { resize: vertical; field-sizing: content; min-height: 32px; max-height: 144px; height: auto; padding-block: 6px; }
   @media (hover: none) { .steer textarea, .steer button { min-height: 40px; } .keyboard-hint { display: none; } .running-workers button { min-height: 40px; } }
@@ -339,8 +341,8 @@
   .from { min-width: 0; overflow-wrap: anywhere; }
   .trouble { color: var(--danger); font-size: 12.5px; }
   .running-workers { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; color: var(--muted); font-size: 12px; }
-  .running-workers button { border: 0; border-bottom: 1px solid var(--line); padding: 2px 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: none; color: var(--text); font: inherit; cursor: pointer; }
-  .running-workers button:hover { border-color: var(--text); }
+  .running-workers button { border: 0; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; padding: 2px 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: none; color: var(--text); font: inherit; cursor: pointer; }
+  .running-workers button:hover { text-decoration-color: var(--text); }
   .running-workers button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .controls { display: flex; gap: 8px; }
   .control { display: flex; flex: none; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
