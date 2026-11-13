@@ -765,3 +765,20 @@ func TestPullOwnershipUsesContextCaller(t *testing.T) {
 		}
 	}
 }
+
+func TestSettingRefusalNamesCurrentSettingAndNextStep(t *testing.T) {
+	for _, grant := range []contract.GitHubWrites{{}, {Groups: []contract.GitHubWriteGroup{contract.GitHubWritePulls}, Repos: []contract.RepoName{"acme/app"}}, {Groups: everyGroup, Repos: []contract.RepoName{"acme/other"}}} {
+		g, _ := newGuard()
+		req, _ := http.NewRequestWithContext(WithAllowed(t.Context(), grant), "POST", "https://api.github.com/repos/acme/app/issues", strings.NewReader(`{"title":"x"}`))
+		req.Header.Set("Content-Type", "application/json")
+		_, err := g.RoundTrip(req)
+		if err == nil {
+			t.Fatal("write allowed")
+		}
+		for _, want := range []string{"githubWrites groups=", "repositories=", "owner CLI on the engine host", "ask your parent"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("missing %s: %v", want, err)
+			}
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -28,7 +29,14 @@ type Guard struct {
 	API  *url.URL // GitHub's REST API; its path is the prefix of every REST route, and its host the only one writes go to
 }
 
-func (g *Guard) RoundTrip(request *http.Request) (*http.Response, error) {
+func (g *Guard) RoundTrip(request *http.Request) (response *http.Response, err error) {
+	defer func() {
+		var refusal *Refusal
+		if errors.As(err, &refusal) && (refusal.Reason == contract.GitHubWriteOff || refusal.Reason == contract.GitHubWriteGroupOff || refusal.Reason == contract.GitHubWriteRepoNotAllowed) {
+			grant := AllowedFrom(request.Context())
+			refusal.Detail = fmt.Sprintf("githubWrites groups=%v repositories=%v refused this write (%s). The room's root can change the setting with the owner CLI on the engine host (skill dyna-admin); ask your parent.", grant.Groups, grant.Repos, refusal.Reason)
+		}
+	}()
 	if request.Method == http.MethodGet || request.Method == http.MethodHead {
 		return g.Base.RoundTrip(request)
 	}

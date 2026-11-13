@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
@@ -145,6 +146,9 @@ func TestSessionRestartPassesCaller(t *testing.T) {
 func TestHostAddRejectsBox(t *testing.T) {
 	a := New(&fakeService{}, nil)
 	rec := request(a.handler(boxCaller()), "/v1/host.add", `{"name":"host","ssh":"u@host","ownerOnlyAdmin":true}`)
+	if !strings.Contains(rec.Body.String(), "host.add is the owner's") || !strings.Contains(rec.Body.String(), "ask your parent") {
+		t.Fatal(rec.Body.String())
+	}
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("got %d, want forbidden", rec.Code)
 	}

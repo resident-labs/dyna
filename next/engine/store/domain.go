@@ -61,7 +61,7 @@ func (s *Store) RoomExists(ctx context.Context, room contract.RoomID) error {
 
 func (s *Store) CreateRoom(ctx context.Context, id contract.RoomID, name string, at time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES(?,?,?,?,?)", id, name, at.UnixMilli(), 0, 0)
+		_, err := tx.ExecContext(ctx, "INSERT INTO rooms(id,name,created_at,cpus,mem_bytes,root_approves) VALUES(?,?,?,?,?,'[\"addons\",\"hosts\",\"pools\"]')", id, name, at.UnixMilli(), 0, 0)
 		return err
 	})
 }
@@ -142,7 +142,7 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 			}
 		}
 		if session.NewRoomName != "" {
-			if _, err := tx.ExecContext(ctx, "INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES(?,?,?,?,?)", session.Room, session.NewRoomName, event.Time.UnixMilli(), 0, 0); err != nil {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO rooms(id,name,created_at,cpus,mem_bytes,root_approves) VALUES(?,?,?,?,?,'[\"addons\",\"hosts\",\"pools\"]')", session.Room, session.NewRoomName, event.Time.UnixMilli(), 0, 0); err != nil {
 				return err
 			}
 		}

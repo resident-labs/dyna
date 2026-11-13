@@ -1503,7 +1503,16 @@ func (b *Boxes) ExecArgv(ctx context.Context, host contract.HostName, id contrac
 
 func (b *Boxes) scopeRunner(ctx context.Context, host contract.HostName) (scopeRunner, error) {
 	if host == contract.ControlPlane {
-		return hostexec.Local{}, nil
+		return hostexec.Local{Socket: filepath.Join(b.Runtime, "owner.sock")}, nil
+	}
+	hosts, err := b.Store.Hosts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, record := range hosts {
+		if record.Name == host && record.EngineHost != nil && *record.EngineHost {
+			return hostexec.Local{Socket: filepath.Join(b.Runtime, "owner.sock")}, nil
+		}
 	}
 	return b.host(ctx, host)
 }

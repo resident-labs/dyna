@@ -102,7 +102,7 @@ func subscriptionCommand(get func() *socketClient) *cobra.Command {
 	var room, session, image, size, host, wake, every string
 	var on, where, files []string
 	add := &cobra.Command{Use: "add (--machine | --room ROOM | [--room ROOM] --session SESSION) (--on TYPE [--where FILTER] | --every DURATION) (--wake SESSION | [--image NAME] [--size SIZE] [--host HOST] [--file BOXPATH=LOCALPATH] -- COMMAND [ARG...])", Short: "Add a subscription",
-		Long: `Add a subscription: an event or a schedule, any filters, and one action, which wakes a session or runs a small box.
+		Long: `List event types with dyna subscription events. Add a subscription: an event or a schedule, any filters, and one action, which wakes a session or runs a small box.
 
 --every takes a duration such as 1h, 15m or 90s, of at least 1m. --session and --wake take a session's name in --room, or its
 ses_… ID.

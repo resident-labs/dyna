@@ -32,6 +32,12 @@ import (
 )
 
 type client interface {
+	AddonSetRootOnly(context.Context, contract.AddonSetRootOnlyRequest) (contract.AddonSetRootOnlyResponse, error)
+	AddonSetEnabled(context.Context, contract.AddonSetEnabledRequest) (contract.AddonSetEnabledResponse, error)
+	SessionSetAccount(context.Context, contract.SessionSetAccountRequest) (contract.SessionSetAccountResponse, error)
+	AccountsSetLimits(context.Context, contract.AccountsSetLimitsRequest) (contract.AccountsSetLimitsResponse, error)
+	AccountsQuota(context.Context, contract.AccountsQuotaRequest) (contract.AccountsQuotaResponse, error)
+	AccountsList(context.Context, contract.AccountsListRequest) (contract.AccountsListResponse, error)
 	ContextSnapshot(context.Context, contract.ContextSnapshotRequest) (contract.ContextSnapshotResponse, error)
 	GoalSet(context.Context, contract.GoalSetRequest) (contract.GoalSetResponse, error)
 	GoalList(context.Context, contract.GoalListRequest) (contract.GoalListResponse, error)
@@ -407,6 +413,9 @@ func (c *socketClient) Events(ctx context.Context, room contract.RoomID, after i
 }
 
 func defaultSocket() string {
+	if socket := os.Getenv("DYNA_SOCKET"); socket != "" {
+		return socket
+	}
 	const boxSocket = "/run/dyna/engine/engine.sock"
 	if _, err := os.Stat(boxSocket); err == nil {
 		return boxSocket
@@ -672,7 +681,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	root.AddCommand(host)
 	root.AddCommand(poolCommand(getClient))
 	root.AddCommand(serviceCommand(getClient))
-	root.AddCommand(profileCommand(getClient))
+	root.AddCommand(profileCommand(getClient), accountCommand(getClient), addonCommand(getClient))
 	root.AddCommand(discordCommand(getClient))
 
 	room := &cobra.Command{Use: "room"}
@@ -707,7 +716,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	for _, kind := range contract.AllRootApprovals {
 		rootApproves[kind] = new(string)
 	}
-	setRoom := &cobra.Command{Use: "set ROOM [--root-approves-KIND on|off] [--github-writes GROUPS@REPOS|off]", Short: "Change a room setting", Long: "Change a room setting; a setting left out stays. --github-writes lets the room's sessions make GitHub writes without a host grant: GROUPS are issues, pulls and projects, comma-separated, and REPOS are repositories of the room or *, comma-separated, as in issues,projects@owner/repo; off turns it off. It is off by default, and merges, deletes and everything else stay refused. With --root-approves-KIND on, the room's root decides that kind of its sessions' requests with op approve and op deny, as the owner can, and the owner still can. KIND is hostexec (host exec grants), addons (global skills, packages and MCP servers), hosts (room hosts rules) or pools (pool add). Each is off by default, and the request still waits for a decision.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	setRoom := &cobra.Command{Use: "set ROOM [--root-approves-KIND on|off] [--github-writes GROUPS@REPOS|off]", Short: "Change a room setting", Long: "Change a room setting; a setting left out stays. --github-writes lets the room's sessions make GitHub writes without a host grant: GROUPS are issues, pulls, projects and actions, comma-separated, and REPOS are repositories of the room or *, comma-separated, as in issues,projects@owner/repo; off turns it off. It is off by default, and merges, deletes and everything else stay refused. With --root-approves-KIND on, the room's root decides that kind of its sessions' requests with op approve and op deny, as the owner can, and the owner still can. KIND is addons (global skills, packages and MCP servers), hosts (room hosts rules) or pools (pool add). Each is on by default, and the request still waits for a decision.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		req := contract.RoomSetRequest{Room: contract.RoomID(args[0]), RootApproves: map[contract.RootApproval]bool{}}
 		for _, kind := range contract.AllRootApprovals {
 			if *rootApproves[kind] == "" {
@@ -756,7 +765,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	}}
 	deleteRoom.Flags().BoolVar(&discardRoom, "discard", false, "Confirm that all the room's work is discarded")
 	var follow bool
-	log := &cobra.Command{Use: "log ROOM", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	log := &cobra.Command{Use: "log ROOM", Short: "Read room events; list event types with dyna subscription events", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		c := getClient()
 		room := contract.RoomID(args[0])
 		var after int64
@@ -832,6 +841,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	root.AddCommand(room)
 
 	session := &cobra.Command{Use: "session"}
+	session.AddCommand(setAccountCommand(getClient))
 	session.AddCommand(&cobra.Command{Use: "stop SESSION", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		result, err := getClient().SessionStop(cmd.Context(), contract.SessionStopRequest{Session: contract.SessionID(args[0])})
 		if err != nil {

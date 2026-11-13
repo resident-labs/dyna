@@ -252,12 +252,12 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	lines = nil
 	var decide []string
 	for _, kind := range contract.AllRootApprovals {
-		if slices.Contains(data.RootApproves, kind) {
+		if data.Depth == 1 && !slices.Contains(data.RootApproves, kind) {
 			decide = append(decide, rootApprovalNames[kind])
 		}
 	}
 	if len(decide) > 0 {
-		lines = append(lines, "Approvals you decide: "+strings.Join(decide, ", "))
+		lines = append(lines, "Approvals the owner keeps: "+strings.Join(decide, ", "))
 	}
 	session, err := s.store.Session(ctx, caller.Session)
 	if err != nil {
