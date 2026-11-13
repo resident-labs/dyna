@@ -154,7 +154,9 @@ func (s *Service) discordPrepare(ctx context.Context, caller contract.Principal,
 		return nil, problem
 	}
 	route := policy.ParseRoute(method, path)
-	confinedOnly := scope.confined != "" && !scope.moderatesInput(method, path)
+	// A confined turn's own moderation always goes through the server policy, even for root.
+	moderating := scope.moderatesInput(method, path)
+	confinedOnly := scope.confined != "" && !moderating
 	if confinedOnly && route.ResourceID != scope.confined {
 		return nil, confinedDiscordRefusal()
 	}
@@ -204,7 +206,7 @@ func (s *Service) discordPrepare(ctx context.Context, caller contract.Principal,
 	if err != nil {
 		return nil, failure(err)
 	}
-	if tree.Root() == caller.Session {
+	if tree.Root() == caller.Session && !moderating {
 		return body, nil
 	}
 	guild := ""
@@ -231,6 +233,9 @@ func (s *Service) discordPrepare(ctx context.Context, caller contract.Principal,
 			return nil, failure(err)
 		}
 		if !resolvedPolicy.On() {
+			if moderating {
+				return nil, confinedDiscordRefusal()
+			}
 			return body, nil
 		}
 		facts := policy.Facts{Now: time.Now(), CategoryInGuild: func(id string) bool {
@@ -280,6 +285,9 @@ func (s *Service) discordPrepare(ctx context.Context, caller contract.Principal,
 			return nil, &contract.Error{Code: contract.ErrForbidden, Message: err.Error()}
 		}
 		return normalized, nil
+	}
+	if moderating {
+		return nil, confinedDiscordRefusal()
 	}
 	return body, nil
 }

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/discord"
+	"strconv"
 	"testing"
+	"time"
 )
 
 func TestDiscordFrontGuard(t *testing.T) {
@@ -16,7 +18,7 @@ func TestDiscordFrontGuard(t *testing.T) {
 		legacy          bool
 	}{
 		{name: "legacy DM", policy: "front:\n  team: [Admin]", confined: true, legacy: true},
-		{name: "guest", policy: "front:\n  team: [Admin]", confined: true},
+		{name: "guest", policy: "front:\n  team: [Admin]\n  delete: yes\n  timeout_max: 1h", confined: true},
 		{name: "empty team", policy: "front:\n  team: []", confined: true},
 		{name: "team", policy: "front:\n  team: [Admin]", roles: []string{"10"}},
 		{name: "no key", policy: "front: {}"},
@@ -28,7 +30,9 @@ func TestDiscordFrontGuard(t *testing.T) {
 			if _, p := f.s.DiscordPolicy(f.ctx, boxCaller(f.root), contract.DiscordPolicyRequest{Text: &tc.policy}); p != nil {
 				t.Fatal(p)
 			}
-			m := discord.Message{ID: "400", Channel: "200", Guild: "100"}
+			// A recent snowflake: the policy deletes only messages under 14 days old.
+			input := strconv.FormatUint(uint64(time.Now().UnixMilli()-1420070400000)<<22, 10)
+			m := discord.Message{ID: input, Channel: "200", Guild: "100"}
 			m.Author.ID = "2"
 			if tc.owner {
 				m.Author.ID = "1"
@@ -129,13 +133,20 @@ func TestDiscordFrontGuard(t *testing.T) {
 				t.Fatal("timed out another member")
 			}
 			self := f.s.discordScope(f.ctx, caller, "PATCH", "/api/v10/guilds/100/members/2", json.RawMessage(`{"communication_disabled_until":null}`))
-			del := f.s.discordScope(f.ctx, caller, "DELETE", "/api/v10/channels/200/messages/400")
+			del := f.s.discordScope(f.ctx, caller, "DELETE", "/api/v10/channels/200/messages/"+input)
 			if tc.legacy {
 				if self == nil || del == nil {
 					t.Fatal("a DM turn moderated", self, del)
 				}
-			} else if self != nil || del != nil {
-				t.Fatal(self, del)
+			} else if self != nil || (del == nil) != (tc.name == "guest") {
+				t.Fatal("policy not applied to own moderation", self, del)
+			}
+			// Even root may only time the sender out: no roles, nick or other member fields.
+			if p := f.s.discordScope(f.ctx, caller, "PATCH", "/api/v10/guilds/100/members/2", json.RawMessage(`{"roles":["10"],"nick":"elevated"}`)); p == nil {
+				t.Fatal("member edit beyond a timeout")
+			}
+			if p := f.s.discordScope(f.ctx, caller, "PATCH", "/api/v10/guilds/100/members/2", json.RawMessage(`{"communication_disabled_until":"2999-01-01T00:00:00Z"}`)); p == nil {
+				t.Fatal("timeout beyond timeout_max")
 			}
 		})
 	}
