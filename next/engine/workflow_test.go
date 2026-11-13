@@ -465,3 +465,28 @@ func TestPauseEndedWorkflowReturnsEnded(t *testing.T) {
 		t.Fatalf("pause refusal: %+v", problem)
 	}
 }
+
+func TestEndedStepAndRunUnpauseClearWorkerHolds(t *testing.T) {
+	w := setupWorkflow(t)
+	started, run := w.start(w.owner, workflowScript)
+	for _, key := range []string{"alpha", "beta"} {
+		w.step(run, key, contract.WorkflowStepRunning, "")
+		if err := w.store.PauseWorkflow(w.ctx, started.Run, true, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.store.EndWorkflowStep(w.ctx, started.Run, contract.WorkflowStepEndRequest{Key: "alpha", State: contract.WorkflowStepDone}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := w.store.WorkflowRun(w.ctx, started.Run)
+	if err != nil || !slices.Equal(stored.PausedSteps, []string{"beta"}) {
+		t.Fatalf("step cleanup: %+v %v", stored.PausedSteps, err)
+	}
+	if _, problem := w.WorkflowUnpause(w.ctx, w.owner, contract.WorkflowUnpauseRequest{Run: started.Run}); problem != nil {
+		t.Fatal(problem)
+	}
+	stored, err = w.store.WorkflowRun(w.ctx, started.Run)
+	if err != nil || len(stored.PausedSteps) != 0 || stored.Paused {
+		t.Fatalf("run unpause: %+v %v", stored, err)
+	}
+}

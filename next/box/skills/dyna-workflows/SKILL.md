@@ -115,7 +115,7 @@ const test = await run(`git fetch origin ${merged.branch} && git worktree add --
 - One worker: `dyna workflow steer RUN STEP TEXT`, or workflow steer with run, step and text. STEP is a
   label or unique key prefix; status lists steps. Steering changes neither its key nor replay.
 - `dyna workflow pause RUN [STEP]` holds the run, or one worker, before its next model request;
-  `dyna workflow unpause RUN [STEP]` lets it go on.
+  `dyna workflow unpause RUN [STEP]` lets it go on; without STEP it clears all holds.
   A run-wide pause also holds new agent() and run() calls. Steering waits for release. Pause survives restarts.
   RUN is a run ID or session name. The starter, its ancestors and owner control the run.
 - Stop: session stop on the run's session, or `dyna session stop SESSION`; status then says `stopped`.

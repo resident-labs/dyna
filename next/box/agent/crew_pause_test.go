@@ -53,3 +53,38 @@ func TestPauseGateHonorsCancellation(t *testing.T) {
 		t.Fatalf("gate: %v", err)
 	}
 }
+
+func TestPausedWorkerDoesNotSpendItsTimeout(t *testing.T) {
+	h := newCrewHarness(t)
+	h.timeout = 1
+	entered, release := make(chan struct{}), make(chan struct{})
+	h.hold = func(ctx context.Context, _ string) error {
+		close(entered)
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	crew, ended := h.start(crewMeta + "return await agent('held')")
+	<-entered
+	crew.mu.Lock()
+	workflow := crew.workflow
+	crew.mu.Unlock()
+	workflow.Paused = true
+	crew.Reload(workflow)
+	close(release)
+	timer := time.NewTimer(1200 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case got := <-ended:
+		t.Fatalf("held worker ended before release: %+v", got)
+	case <-timer.C:
+	}
+	workflow.Paused = false
+	crew.Reload(workflow)
+	if got := <-ended; got.Outcome != contract.TurnCompleted {
+		t.Fatalf("released worker: %+v", got)
+	}
+}

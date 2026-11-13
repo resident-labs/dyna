@@ -843,7 +843,8 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 		defer release()
 	}
 	limit := c.timeout(opts.Timeout)
-	ctx, cancel := c.builds.timeout(ctx, limit)
+	pauseTime := &buildLock{}
+	ctx, cancel := c.builds.timeout(ctx, limit, pauseTime.waited)
 	defer cancel()
 	folder := filepath.Join(c.config.State, "workers", key)
 	if err := os.MkdirAll(folder, 0700); err != nil {
@@ -868,7 +869,11 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 		return stepOutcome{reason: "the worker did not start: " + err.Error()}
 	}
 	c.mu.Lock()
-	worker.SetBeforeRequest(func(ctx context.Context) error { return c.waitUnpaused(ctx, key) })
+	worker.SetBeforeRequest(func(ctx context.Context) error {
+		pauseTime.queue(1)
+		defer pauseTime.queue(-1)
+		return c.waitUnpaused(ctx, key)
+	})
 	c.workers[key] = worker
 	c.mu.Unlock()
 	defer func() {

@@ -72,7 +72,7 @@ type WorkflowRunResponse struct {
 // WorkflowReloadRequest gives a running run a new script, which its crew runs in place of the old one in the same box. Its
 // meta keeps the run's name, repo and size; its profiles and description may change.
 type WorkflowReloadRequest struct {
-	Run    WorkflowRunID `json:"run"`
+	Run    WorkflowRunID `json:"run" desc:"Run ID; steer, pause, unpause and reload also accept the run session name"`
 	Script string        `json:"script"`
 }
 
@@ -142,7 +142,7 @@ type WorkflowStep struct {
 
 // WorkflowStatusRequest names a run, or the crew session that hosts it.
 type WorkflowStatusRequest struct {
-	Run     WorkflowRunID `json:"run,omitempty"`
+	Run     WorkflowRunID `json:"run,omitempty" desc:"Run ID; steer, pause, unpause and reload also accept the run session name"`
 	Session SessionID     `json:"session,omitempty"`
 }
 
@@ -332,15 +332,15 @@ type WorkflowStateResponse struct {
 
 // WorkflowSteerRequest addresses one running worker by label or unique key prefix.
 type WorkflowSteerRequest struct {
-	Run  WorkflowRunID `json:"run" desc:"Run ID or the run session name"`
-	Step string        `json:"step"`
+	Run  WorkflowRunID `json:"run" desc:"Run ID; steer, pause, unpause and reload also accept the run session name"`
+	Step string        `json:"step" desc:"Running worker label or unique key prefix; pause and unpause may omit it for the whole run"`
 	Text string        `json:"text"`
 }
 type WorkflowSteerResponse = PostResponse
 
 type WorkflowPauseRequest struct {
-	Run  WorkflowRunID `json:"run" desc:"Run ID or the run session name"`
-	Step string        `json:"step,omitempty" desc:"One running worker label or unique key prefix; omit for the whole run"`
+	Run  WorkflowRunID `json:"run" desc:"Run ID; steer, pause, unpause and reload also accept the run session name"`
+	Step string        `json:"step,omitempty" desc:"Running worker label or unique key prefix; pause and unpause may omit it for the whole run"`
 }
 type WorkflowPauseResponse struct{}
 type WorkflowUnpauseRequest = WorkflowPauseRequest

@@ -323,6 +323,24 @@ func (s *Store) EndWorkflowStep(ctx context.Context, run contract.WorkflowRunID,
 		} else if n == 0 {
 			return ErrNotFound
 		}
+		var raw string
+		if err := tx.QueryRowContext(ctx, "SELECT paused_steps FROM workflow_runs WHERE id=?", run).Scan(&raw); err != nil {
+			return err
+		}
+		var paused []string
+		if err := json.Unmarshal([]byte(raw), &paused); err != nil {
+			return err
+		}
+		kept := slices.DeleteFunc(paused, func(key string) bool { return key == req.Key })
+		if len(kept) != len(paused) {
+			data, err := json.Marshal(kept)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "UPDATE workflow_runs SET paused_steps=? WHERE id=?", string(data), run); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 }
@@ -494,6 +512,9 @@ func (s *Store) PauseWorkflow(ctx context.Context, id contract.WorkflowRunID, pa
 		}
 		if step == "" {
 			runPaused = paused
+			if !paused {
+				steps = []string{}
+			}
 		} else {
 			steps = slices.DeleteFunc(steps, func(key string) bool { return key == step })
 			if paused {
