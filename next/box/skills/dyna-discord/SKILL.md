@@ -1,6 +1,6 @@
 ---
 name: dyna-discord
-description: Use when a Discord message reaches you or you act on Discord (answer or relay a message, set up a front session, manage channels, roles, members, threads or polls).
+description: Use when a Discord message reaches you or you act on Discord (answer or relay a message, set up a front session, manage channels, roles, members, threads or polls, or keep a server's structure and standing messages as a folder with export, plan and apply).
 ---
 # Answer and act on Discord
 One bot serves the whole machine; each mapping of your room routes a server or one channel to an
@@ -143,5 +143,5 @@ Budgets reset on engine restart. Quiet channels, webhook and AutoMod alert messa
 Optional `front.channels: [topic, slowmode, create]` grants only those channel chores; absent means none.
 Only enabled, log and front exist in policy; rules and commands are not supported yet.
 ## Server folder (root and owner)
-`discord export` and `discord plan` work on the private engine-host folder beside this room's AGENTS.md.
-Read [folder.md](folder.md) for the starter tree, formats, adoption and unmanaged boundaries.
+For structure that should last (channels, roles, overwrites, rules and welcome messages), keep the
+server as a folder: `discord export`, `discord plan`, `discord apply`. Read [folder.md](folder.md) first.
