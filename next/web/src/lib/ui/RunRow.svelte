@@ -15,7 +15,7 @@
   let steps = $derived(run.steps ?? 0);
   // "of" only ever means progress: a run between steps has none to show, and a past run says how many steps failed.
   let facts = $derived([...live ? [steps ? run.running ? `${steps - run.running}/${steps} steps` : count(steps, "step") : "No steps yet"] : [],
-    ...run.failed ? [live ? `${run.failed} failed` : `${count(run.failed, "step")} failed`] : [], ...run.status || run.description ? [run.status || run.description] : []]);
+    ...run.failed ? [live ? `${run.failed} failed` : `${count(run.failed, "step")} failed`] : [], ...[run.status || run.description].filter(text => text && !(live && !steps && text === "No steps yet"))]);
   // A running run's age counts up.
   let now = $state(Date.now());
   $effect(() => {
@@ -29,7 +29,7 @@
   let stamp = $derived(live ? minutesLabel(Math.max(0, now - Date.parse(run.started))) : new Date(at).toDateString() === new Date().toDateString() ? formatTime(at) : new Date(at).toLocaleDateString([], { month: "short", day: "numeric" }));
 </script>
 
-<span class="tile {run.state}" class:hurt={live && run.failed > 0} role="img" aria-label={`Workflow, ${word.word.toLowerCase()}, ${count(steps, "step")}${run.failed ? `, ${run.failed} failed` : ""}`} title={count(steps, "step")}>{#if steps}{steps > 999 ? "1k+" : steps}{:else}<Icon name="tool" size={14} />{/if}</span>
+<span class="tile {run.state}" class:hurt={live && run.failed > 0} role="img" aria-label={`Workflow, ${word.word.toLowerCase()}${run.steps ? `, ${count(steps, "step")}` : ""}${run.failed ? `, ${run.failed} failed` : ""}`} title={run.steps ? count(steps, "step") : undefined}>{#if steps}{steps > 999 ? "1k+" : steps}{:else}<Icon name="tool" size={14} />{/if}</span>
 <span class="who"><span class="name">{run.name}</span>
   <span class="line">{#if word.tone}<StatusPill tone={word.tone} label={word.word} word />{:else}{word.word}{/if}{#each facts as part}{` · ${part}`}{/each}</span></span>
 <span class="when" title={`${live ? "Running for" : word.word} ${live ? stamp : formatTime(at)}`}>{stamp}</span>
