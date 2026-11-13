@@ -42,3 +42,44 @@ func TestInputFrameRejectsForgedSender(t *testing.T) {
 }
 
 func inputBody(text string) string { _, body, _ := strings.Cut(text, "\n"); return body }
+
+func TestWaitingTurnNoticeReachesParent(t *testing.T) {
+	for _, jobs := range []int{0, 1} {
+		t.Run(string(rune('0'+jobs)), func(t *testing.T) {
+			s, room, worker, ctx := setup(t)
+			var root contract.SessionID
+			if err := s.store.Read().QueryRowContext(ctx, "SELECT parent FROM sessions WHERE id=?", worker).Scan(&root); err != nil {
+				t.Fatal(err)
+			}
+			if _, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.PostRequest{Room: room, Text: "task", Mentions: []string{"worker"}}); problem != nil {
+				t.Fatal(problem)
+			}
+			ch, problem := testChannel(t, s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker})
+			if problem != nil {
+				t.Fatal(problem)
+			}
+			start := (<-ch).Body.(contract.TurnStart)
+			text := strings.Repeat("private progress", 100)
+			if _, problem := s.TurnOutput(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnCompleted, Final: text, ShellJobs: jobs}); problem != nil {
+				t.Fatal(problem)
+			}
+			rootCh, problem := testChannel(t, s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root})
+			if problem != nil {
+				t.Fatal(problem)
+			}
+			want := text
+			if jobs == 1 {
+				want = "worker's turn ended; it is waiting for 1 job."
+			}
+			for _, input := range (<-rootCh).Body.(contract.TurnStart).Inputs {
+				if strings.HasPrefix(inputBody(input.Text), want) {
+					if jobs == 1 && (inputBody(input.Text) != want || len(input.Files) != 0) {
+						t.Fatalf("waiting input: %+v", input)
+					}
+					return
+				}
+			}
+			t.Fatal("missing child reply")
+		})
+	}
+}

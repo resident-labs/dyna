@@ -403,6 +403,12 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					reason, cause = streamDeliveryReadFailed, err
 					return
 				}
+				if body, ok := event.Body.(contract.TurnEnded); ok && body.WaitingNotice != "" {
+					// Keep the stored event whole; a waiting turn is not a result.
+					body.Final = body.WaitingNotice
+					body.Attachments, body.Data, body.DataAttachment = nil, "", nil
+					event.Body = body
+				}
 				text, err := room.RenderDelivery(event.Body)
 				if err != nil {
 					reason, cause = streamDeliveryRenderFailed, err

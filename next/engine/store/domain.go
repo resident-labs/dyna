@@ -459,7 +459,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			body.Replies = nil
 		}
 		// A turn that completes while its session still has a job running or a child at work has not given its result yet.
-		// Its text reaches the sessions it answers without waking them, and the session keeps owing them a reply: the first
+		// A notice wakes the sessions it answers, and the session keeps owing them a reply: the first
 		// turn that ends any other way answers them too, whatever started it. A stopped turn pays as well, as it answers its own
 		// inputs, so a stop leaves nothing for the recovery pass to wake.
 		var waiting bool
@@ -469,6 +469,25 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 				OR EXISTS(SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=c.id AND d.state='pending' AND d.wake=1)))), COALESCE((SELECT replies FROM replies_owed WHERE session=?1),'[]')`,
 			session, output.Outcome == contract.TurnCompleted, output.ShellJobs > 0).Scan(&waiting, &kept); err != nil {
 			return err
+		}
+		if waiting && len(ended) == 0 {
+			waits, err := sessionWaits(ctx, tx, event.Room)
+			if err != nil {
+				return err
+			}
+			wait := waits[session]
+			if wait == nil {
+				// dyna_children reports actual running turns; reply debt also counts a child's pending waking inputs as work.
+				wait = &contract.SessionWaiting{Kind: contract.WaitChildren}
+				if err := tx.QueryRowContext(ctx, "SELECT COUNT(*),COALESCE(MIN(c.name),'') FROM sessions c WHERE c.parent=? AND c.closed_at IS NULL AND EXISTS(SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=c.id AND d.state='pending' AND d.wake=1)", session).Scan(&wait.Count, &wait.Name); err != nil {
+					return err
+				}
+			}
+			var name string
+			if err := tx.QueryRowContext(ctx, "SELECT name FROM sessions WHERE id=?", session).Scan(&name); err != nil {
+				return err
+			}
+			body.WaitingNotice = name + "'s turn ended; it is waiting for " + wait.Label() + "."
 		}
 		var later []contract.ReplyChannel
 		if err := json.Unmarshal(kept, &later); err != nil {
@@ -578,7 +597,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			if waiting && reply.Posted != "" && len(ended) == 0 {
 				continue
 			}
-			d := contract.Delivery{To: reply.Reply.Target, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyPost, Target: event.From, Home: reply.Reply.Home}, Wake: reply.Posted == "" && !waiting}
+			d := contract.Delivery{To: reply.Reply.Target, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyPost, Target: event.From, Home: reply.Reply.Home}, Wake: reply.Posted == ""}
 			// The engine opened this channel, so reach does not apply, but a reply to a parent that can't receive goes up.
 			if _, err := reroute(ctx, tx, event.From, &d); err != nil {
 				return err

@@ -244,8 +244,9 @@ type TurnEnded struct {
 	Session        SessionID    `json:"session"`
 	Turn           TurnID       `json:"turn"`
 	Outcome        TurnOutcome  `json:"outcome"`
-	Final          string       `json:"final,omitempty"`   // the final response
-	Replies        []FinalReply `json:"replies,omitempty"` // where Final was delivered
+	Final          string       `json:"final,omitempty"`         // the final response
+	WaitingNotice  string       `json:"waitingNotice,omitempty"` // replaces Final for session recipients while waiting
+	Replies        []FinalReply `json:"replies,omitempty"`       // where Final was delivered
 	Usage          Usage        `json:"usage"`
 	Error          string       `json:"error,omitempty"` // failed only
 	Cause          FailureCause `json:"cause,omitempty"` // failed only

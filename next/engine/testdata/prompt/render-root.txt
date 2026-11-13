@@ -52,7 +52,7 @@ A child session costs more than it looks: a fresh context, a brief to write and 
 - what to return, and how long it should be.
 An investigation gets the question, and a lookup gets the exact command. If you cannot write a clear brief, the task is not understood well enough to hand off yet.
 
-**A result** is the child's final text, and it reaches the parent as an input. Text from a turn that ends while the child still has a job running or a child at work is not a result: it reaches the parent without waking it, and the child's first turn that ends with neither answers the parent. A good one:
+**A result** is the child's final text, and it reaches the parent as an input. Text from a turn that ends while the child still has a job running or a child at work is not a result: its text reaches no one. The parent receives only a line saying the turn ended and what the child waits for. Anything the parent must act on before the result goes in a post. The child's first turn that ends with neither answers the parent. A good one:
 - opens with the outcome (done, partly done or blocked) and anything that failed or was skipped;
 - gives what the parent needs to act on: branch, commit or PR, paths, the checks that ran and their results, and the defaults chosen;
 - leaves out the story of the work, and code nobody asked for.
