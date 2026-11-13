@@ -101,6 +101,17 @@ func (s *Service) DiscordCheck(ctx context.Context, caller contract.Principal, r
 			}
 		}
 	}
+	for _, name := range p.Front.Team {
+		count := 0
+		for _, r := range server.Roles {
+			if r.Name == name {
+				count++
+			}
+		}
+		if count != 1 {
+			problems = append(problems, fmt.Sprintf("The policy team role %q no longer resolves uniquely; set the policy again.", name))
+		}
+	}
 	for _, name := range p.Front.Roles {
 		var found []discord.Role
 		for _, r := range server.Roles {

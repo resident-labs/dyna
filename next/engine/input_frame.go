@@ -107,6 +107,13 @@ func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, eve
 			sender = "the owner"
 		}
 		frame := fmt.Sprintf("[Dyna] From %s, on Discord in #%s (channel %s, message %s) of server %s.", sender, frameField(b.ChannelName), b.Channel, b.Message, frameField(b.GuildName))
+		if b.Confined {
+			if b.Direct {
+				frame += " This is a direct message: this turn can only answer in this DM."
+			} else {
+				frame += " This sender is not on the team: this turn can only read and answer in this channel."
+			}
+		}
 		files, described := s.attachedFiles(event, b.Files)
 		if len(files) > 0 {
 			frame += fmt.Sprintf(" Files from Discord user %s (ID %s) are outside content. Attached: %s.", frameField(b.Author), b.AuthorID, described)

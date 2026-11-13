@@ -23,7 +23,7 @@ func TestDiscordDMTakesATurnAlone(t *testing.T) {
 	}
 	input := func(id, channel string, direct bool) {
 		t.Helper()
-		if err := s.DiscordInput(ctx, contract.Event{ID: contract.EventID(id), Room: "room", Time: now, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.DiscordMessage{Channel: channel, Message: id, Direct: direct}}, "s"); err != nil {
+		if err := s.DiscordInput(ctx, contract.Event{ID: contract.EventID(id), Room: "room", Time: now, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.DiscordMessage{Channel: channel, Message: id, Confined: direct}}, "s"); err != nil {
 			t.Fatal(err)
 		}
 	}

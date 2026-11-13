@@ -32,6 +32,7 @@ type Policy struct {
 	Front   Front  `yaml:"front" json:"front"`
 }
 type Front struct {
+	Team       []string `yaml:"team" json:"team"`
 	Channels   []string `yaml:"channels" json:"channels,omitempty"`
 	TimeoutMax string   `yaml:"timeout_max" json:"timeout_max,omitempty"`
 	Roles      []string `yaml:"roles" json:"roles,omitempty"`

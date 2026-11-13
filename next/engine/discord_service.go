@@ -11,6 +11,7 @@ import (
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/discord"
+	"github.com/resident-labs/dyna/engine/discord/policy"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
@@ -195,6 +196,29 @@ func (s *Service) discordInput(ctx context.Context, client *discord.Client, m di
 		name = "direct message"
 	}
 	b := contract.DiscordMessage{Direct: m.Guild == "", Channel: m.Channel, ChannelName: name, Thread: thread, GuildName: guildName, Author: m.Author.Username, DisplayName: display, Roles: roles, AuthorID: m.Author.ID, Owner: bot.Owner != "" && bot.Owner == m.Author.ID, Message: m.ID, Text: m.Content}
+	b.Confined = b.Direct
+	for _, route := range routes {
+		if route.Guild != selected.Guild || route.Channel != "" || route.PolicyResolved == "" {
+			continue
+		}
+		var p policy.Policy
+		if err := json.Unmarshal([]byte(route.PolicyResolved), &p); err != nil {
+			return err
+		}
+		if p.Front.Team != nil {
+			b.Confined = true
+			for _, team := range p.Front.Team {
+				for _, role := range m.Member.Roles {
+					if team == role && !b.Direct {
+						b.Confined = false
+					}
+				}
+			}
+		}
+	}
+	if b.Owner {
+		b.Confined = false
+	}
 	if m.Guild != "" {
 		b.History = client.History(ctx, m.Channel, m.ID, bot.ID)
 	}

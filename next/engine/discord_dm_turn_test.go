@@ -43,11 +43,11 @@ func TestDiscordDMOnlyTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	caller := boxCaller(f.root)
-	if _, p := f.s.DiscordSend(f.ctx, caller, contract.DiscordSendRequest{Channel: "200", Text: "injected"}); p == nil || p.Message != directMessageRefusal().Message {
+	if _, p := f.s.DiscordSend(f.ctx, caller, contract.DiscordSendRequest{Channel: "200", Text: "injected"}); p == nil || p.Message != confinedDiscordRefusal().Message {
 		t.Fatal(p)
 	}
-	if _, p := f.s.DiscordAPI(f.ctx, caller, contract.DiscordAPIRequest{Method: "POST", Path: "/channels/500/messages", Body: []byte(`{"content":"injected"}`)}); p == nil {
-		t.Fatal("api write allowed")
+	if _, p := f.s.DiscordAPI(f.ctx, caller, contract.DiscordAPIRequest{Method: "POST", Path: "/channels/500/messages", Body: []byte(`{"content":"injected"}`)}); p != nil {
+		t.Fatal(p)
 	}
 	if _, p := f.s.DiscordSend(f.ctx, caller, contract.DiscordSendRequest{Channel: "500", Text: "answer"}); p != nil {
 		t.Fatal(p)
