@@ -42,14 +42,16 @@ type Guild struct {
 	Updates       string   `json:"public_updates_channel_id"`
 }
 type Role struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Permissions string `json:"permissions"`
-	Position    int    `json:"position"`
-	Managed     bool   `json:"managed"`
-	Color       int    `json:"color"`
-	Hoist       bool   `json:"hoist"`
-	Mentionable bool   `json:"mentionable"`
+	Icon         string `json:"icon,omitempty"`
+	UnicodeEmoji string `json:"unicode_emoji,omitempty"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Permissions  string `json:"permissions"`
+	Position     int    `json:"position"`
+	Managed      bool   `json:"managed"`
+	Color        int    `json:"color"`
+	Hoist        bool   `json:"hoist"`
+	Mentionable  bool   `json:"mentionable"`
 }
 type Overwrite struct {
 	ID    string `json:"id"`
@@ -58,20 +60,24 @@ type Overwrite struct {
 	Deny  string `json:"deny"`
 }
 type Tag struct {
+	EmojiName string `json:"emoji_name,omitempty"`
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Moderated bool   `json:"moderated"`
 }
 type Channel struct {
-	ID         string      `json:"id"`
-	Name       string      `json:"name"`
-	Type       int         `json:"type"`
-	Position   int         `json:"position"`
-	Parent     string      `json:"parent_id,omitempty"`
-	Topic      string      `json:"topic"`
-	Slowmode   int         `json:"rate_limit_per_user"`
-	Overwrites []Overwrite `json:"permission_overwrites"`
-	Tags       []Tag       `json:"available_tags,omitempty"`
+	NSFW          bool        `json:"nsfw,omitempty"`
+	Flags         int         `json:"flags,omitempty"`
+	DefaultLayout int         `json:"default_forum_layout,omitempty"`
+	ID            string      `json:"id"`
+	Name          string      `json:"name"`
+	Type          int         `json:"type"`
+	Position      int         `json:"position"`
+	Parent        string      `json:"parent_id,omitempty"`
+	Topic         string      `json:"topic"`
+	Slowmode      int         `json:"rate_limit_per_user"`
+	Overwrites    []Overwrite `json:"permission_overwrites"`
+	Tags          []Tag       `json:"available_tags,omitempty"`
 }
 type AutoMod struct {
 	ID       string          `json:"id"`
