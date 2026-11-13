@@ -110,7 +110,7 @@ func (s *Service) DiscordPlan(ctx context.Context, caller contract.Principal, re
 	if err != nil {
 		return contract.DiscordFolderResponse{}, failure(err)
 	}
-	snapshot, err := folder.ReadSnapshot(ctx, client, route.Guild)
+	snapshot, err := folder.ReadManagedSnapshot(ctx, client, route.Guild, desired.Entries)
 	if err != nil {
 		return contract.DiscordFolderResponse{}, invalid(err.Error())
 	}

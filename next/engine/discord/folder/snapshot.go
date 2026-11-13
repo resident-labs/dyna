@@ -49,6 +49,12 @@ type liveChannel struct {
 
 // ReadSnapshot fetches only guild configuration endpoints, bounded to 8 MiB each.
 func ReadSnapshot(ctx context.Context, client *discord.Client, server string) (Snapshot, error) {
+	return ReadManagedSnapshot(ctx, client, server, nil)
+}
+
+// ReadManagedSnapshot ignores unmanaged configuration while projecting the bulk
+// guild/channel response; no per-channel reads are made for unmanaged entries.
+func ReadManagedSnapshot(ctx context.Context, client *discord.Client, server string, entries []Entry) (Snapshot, error) {
 	var out Snapshot
 	if server == "" || strings.Trim(server, "0123456789") != "" {
 		return out, fmt.Errorf("invalid guild ID")
@@ -128,7 +134,32 @@ func ReadSnapshot(ctx context.Context, client *discord.Client, server string) (S
 		channelNames[key] = true
 		byID[c.ID] = c.Name
 	}
+	unmanaged := map[string]string{}
+	for _, entry := range entries {
+		if entry.Unmanaged != "" {
+			unmanaged[entry.Path] = entry.Unmanaged
+		}
+	}
 	for _, c := range channels {
+		parent := byID[c.ParentID]
+		path := c.Name
+		if parent != "" {
+			path = parent + "/" + c.Name
+		}
+		if unmanaged[parent] != "" {
+			continue
+		}
+		if note := unmanaged[path]; note != "" {
+			entry := Entry{Name: c.Name, Parent: parent, Path: path, Unmanaged: note}
+			if c.Type == 4 {
+				entry.Category = &Category{Identity: Identity{ID: c.ID}}
+				out.Server.Categories = append(out.Server.Categories, c.Name)
+			} else {
+				entry.Channel = &Channel{Identity: Identity{ID: c.ID}, Type: "text"}
+			}
+			out.Entries = append(out.Entries, entry)
+			continue
+		}
 		ow := Overwrites{}
 		for _, w := range c.Overwrites {
 			name := roleNames[w.ID]
