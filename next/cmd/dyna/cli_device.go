@@ -57,3 +57,12 @@ func deviceCommand(getClient func() client) *cobra.Command {
 	device.AddCommand(devicePair, deviceList, deviceRevoke, deviceSetScopes, deviceSet)
 	return device
 }
+
+// scopeList turns repeated --scope flags into typed scopes. The engine checks the values.
+func scopeList(values []string) []contract.Scope {
+	scopes := make([]contract.Scope, 0, len(values))
+	for _, value := range values {
+		scopes = append(scopes, contract.Scope(value))
+	}
+	return scopes
+}

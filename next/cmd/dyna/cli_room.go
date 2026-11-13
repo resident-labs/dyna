@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
+	"strings"
 
 	"github.com/dustin/go-humanize"
 	"github.com/resident-labs/dyna/contract"
@@ -166,4 +168,31 @@ func roomCommand(getClient func() client) *cobra.Command {
 	repo.AddCommand(addRepo, listRepos, repoCI)
 	room.AddCommand(create, deleteRoom, log, repo)
 	return room
+}
+
+// parseGitHubWrites reads --github-writes: `off`, or GROUPS@REPOS with one @, both comma-separated lists with no empty element. A
+// group is a known one and a repository is owner/name or *; the engine checks the repositories against the room's.
+func parseGitHubWrites(value string) (contract.GitHubWrites, error) {
+	writes := contract.GitHubWrites{Repos: []contract.RepoName{}, Groups: []contract.GitHubWriteGroup{}}
+	if value == "off" {
+		return writes, nil
+	}
+	groups, repos, found := strings.Cut(value, "@")
+	if !found || strings.Contains(repos, "@") {
+		return writes, fmt.Errorf("--github-writes is GROUPS@REPOS with one @, such as issues,projects@owner/repo, or off; %q is not", value)
+	}
+	for _, group := range strings.Split(groups, ",") {
+		if !slices.Contains(contract.AllGitHubWriteGroups, contract.GitHubWriteGroup(group)) {
+			return writes, fmt.Errorf("--github-writes group %q is not one of %v", group, contract.AllGitHubWriteGroups)
+		}
+		writes.Groups = append(writes.Groups, contract.GitHubWriteGroup(group))
+	}
+	for _, repo := range strings.Split(repos, ",") {
+		owner, name, slash := strings.Cut(repo, "/")
+		if strings.ContainsAny(repo, " \t\r\n") || repo != contract.GitHubWriteAllRepos && (!slash || owner == "" || name == "" || strings.Contains(name, "/")) {
+			return writes, fmt.Errorf("--github-writes repository %q is not owner/name or *", repo)
+		}
+		writes.Repos = append(writes.Repos, contract.RepoName(repo))
+	}
+	return writes, nil
 }
