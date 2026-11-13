@@ -41,10 +41,11 @@ func sessionUpdate() message {
 	pcm := message{"type": "audio/pcm", "rate": 24000}
 	return message{"type": "session.update", "session": message{
 		"type": "realtime", "instructions": prompt, "output_modalities": []string{"audio"},
-		"audio": message{"input": message{"format": pcm, "transcription": message{"model": "gpt-4o-mini-transcribe"}, "noise_reduction": message{"type": "near_field"}, "turn_detection": message{"type": "server_vad", "silence_duration_ms": 500, "create_response": false, "interrupt_response": false}}, "output": message{"format": pcm, "voice": "marin"}},
+		"audio":       message{"input": message{"format": pcm, "transcription": message{"model": "gpt-4o-mini-transcribe"}, "noise_reduction": message{"type": "near_field"}, "turn_detection": message{"type": "server_vad", "silence_duration_ms": 500, "create_response": true, "interrupt_response": true}}, "output": message{"format": pcm, "voice": "marin"}},
+		"tool_choice": "auto",
 		"tools": []message{
-			{"type": "function", "name": "dispatch", "description": "Send the owner's exact words to the execution agent.", "parameters": message{"type": "object", "properties": message{"prompt": message{"type": "string"}}, "required": []string{"prompt"}, "additionalProperties": false}},
-			{"type": "function", "name": "remain_silent", "description": "Say nothing when speech adds no useful information.", "parameters": message{"type": "object", "properties": message{}, "additionalProperties": false}},
+			{"type": "function", "name": "background_agent", "description": "Send a user request to the background agent. Use this as the default action. Do not rephrase the user's ask or rewrite it in your own words; pass along the user's own words. If the background agent is idle, this starts a new task and returns the final result to the user. If the background agent is already working on a task, this sends the request as guidance to steer that previous task. If the user asks to do something next, later, after this, or once current work finishes, call this tool so the work is actually queued instead of merely promising to do it later.", "parameters": message{"type": "object", "properties": message{"prompt": message{"type": "string", "description": "The user request to delegate to the background agent."}}, "required": []string{"prompt"}, "additionalProperties": false}},
+			{"type": "function", "name": "remain_silent", "description": "Call this when the best response is to say nothing. Use it instead of speaking after hidden system/control messages, after background agent updates in silent modes, or whenever acknowledging aloud would be distracting. This tool has no user-visible effect.", "parameters": message{"type": "object", "properties": message{}, "additionalProperties": false}},
 		},
 	}}
 }
