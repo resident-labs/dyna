@@ -237,7 +237,7 @@ func TestCISkill(t *testing.T) {
 			t.Errorf("missing %q", want)
 		}
 	}
-	if strings.Count(text, "\n") > 90 {
-		t.Fatal("skill exceeds 90 lines")
+	if strings.Count(text, "\n") > 120 {
+		t.Fatal("skill exceeds 120 lines")
 	}
 }

@@ -18,8 +18,9 @@ a `pull_request` from the same repository; its "Set up runner" log says why. So 
 is never built under `pull_request_target`. A runner ends after 6 hours: keep `timeout-minutes` well under 360.
 
 While the pool serves the repository, the engine keeps its variable `DYNA_CI_POOL_UNTIL` at a Unix time 15 minutes
-ahead, renewed every 5 minutes. This job, under `jobs:`, sends fork PRs, and every job while the pool is down, to
-GitHub; a job then sets `needs: route` and `runs-on: ${{ needs.route.outputs.runner }}`:
+ahead, renewed every 5 minutes. This job, under `jobs:`, sends the events the runner refuses (fork PRs, `schedule`,
+`workflow_run`, `pull_request_target` and the rest), and every job while the pool is down, to GitHub; a job then
+sets `needs: route` and `runs-on: ${{ needs.route.outputs.runner }}`:
 ```yaml
   route:
     runs-on: ubuntu-latest
@@ -29,10 +30,31 @@ GitHub; a job then sets `needs: route` and `runs-on: ${{ needs.route.outputs.run
       - id: pick
         env:
           LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}
-          SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+          SERVED: >-
+            ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
+            (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
         run: |
-          [ "$SAME_REPO" = true ] && [ "${LEASE:-0}" -gt "$(date +%s)" ] && r=dyna-medium || r=ubuntu-latest
+          [ "$SERVED" = true ] && [ "${LEASE:-0}" -gt "$(date +%s)" ] && r=dyna-medium || r=ubuntu-latest
           echo "runner=$r" >> "$GITHUB_OUTPUT"
+```
+The route is fixed once picked: if the pool dies after that, its jobs wait for a runner, up to GitHub's 24 hours.
+Add a watcher beside them: copy `pool-watch.py` from this skill's folder into the repository (here `.github/`) and
+add this job, with no `name:`. It cancels the run once its pool jobs have made no progress for 20 minutes and two
+looks 3 minutes apart find no pool job of the repository running or just finished; a queue behind a busy pool stays.
+```yaml
+  pool-watch:
+    needs: route
+    if: startsWith(needs.route.outputs.runner, 'dyna-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/pool-watch.py
 ```
 
 ## Files, tools and network
@@ -69,10 +91,12 @@ USER root
 RUN apt-get update && apt-get install -y --no-install-recommends mesa-vulkan-drivers && rm -rf /var/lib/apt/lists/*
 USER 1001:1001
 ```
-Save it with the image tool or `dyna image save ci-runner ./dir`, read it with `dyna image show ci-runner`, undo
-with `dyna image remove ci-runner`. Dyna's user, entrypoint, read-only root and network hold whatever it says. A
-host builds it, in minutes, when a job there first needs it; a failed build runs jobs on the shared image. So check
-with a job that uses the new package; if it is missing, root reads the build error in `dyna host list` (dyna-admin).
+First run `dyna image show ci-runner`: if the room has one, rebuild its folder from that Containerfile and the
+listed files (show gives their names, not contents) and keep it. Save yours with the image tool or
+`dyna image save ci-runner ./dir`, which replaces it. Dyna's user, entrypoint, read-only root and network hold
+whatever it says. A host builds it, in minutes, when a job there first needs it; a failed build runs jobs on the
+shared image. So check with a job that uses the new package; if it is missing, root reads the build error in
+`dyna host list` (dyna-admin). To undo, save the kept folder again, or `dyna image remove ci-runner` if none existed.
 
 ## Inspect and control a run
 
@@ -86,5 +110,7 @@ Dispatch, rerun and cancel use `actions_run_trigger`, present when dyna_room's "
 Check in order: a queued run with no jobs is not expanded by GitHub yet; a job on `ubuntu-latest` or a "GitHub
 Actions" runner never touches Dyna; during an Actions or Webhooks incident on https://www.githubstatus.com, wait
 for recovery without rerunning or pushing; a `dyna-*` job of a repository off the "Dyna CI runners" line never
-runs. Only `dyna-*` jobs queued over 15 minutes with no runner point at Dyna: tell your parent the run ID, the
+runs. A `dyna-*` job waiting while other pool jobs of the repository run is behind a busy pool: let it wait. One
+waiting while none run or just finished points at a dead pool: once the `pool-watch` job (or you) cancelled the
+run, rerun it after `DYNA_CI_POOL_UNTIL` has passed, so it routes to GitHub, and tell your parent the run ID, the
 job's label and the wait (root: dyna-diagnose).
