@@ -64,6 +64,9 @@ func planEntries(plan *Plan, desired, live []Entry) error {
 		}
 		current := candidates[0]
 		id := entryID(current)
+		if current.Unmanaged != "" {
+			return fmt.Errorf("%s: the server object %s is not managed by this folder (%s); remove its id or mark the folder UNMANAGED.md", entry.Path, id, current.Unmanaged)
+		}
 		if matched[id] {
 			return fmt.Errorf("%s: object %s is already adopted or unmanaged", entry.Path, id)
 		}

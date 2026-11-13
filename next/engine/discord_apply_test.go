@@ -208,6 +208,14 @@ func TestApplyStopsOnFailureAndResumesWithoutDuplicates(t *testing.T) {
 		if !strings.Contains(report, "Failed:") || !strings.Contains(report, "Not done:") {
 			t.Fatalf("no failure reported:\n%s", report)
 		}
+		if appliedBeforeFailure {
+			// The outcome is unknown and something new exists: apply must not guess.
+			before := a.writes()
+			if message := a.refusal(); !strings.Contains(message, "unclear outcome") || a.writes() != before {
+				t.Fatalf("resume guessed: %s", message)
+			}
+			continue
+		}
 		if second := a.apply(false); strings.Contains(second, "Failed") {
 			t.Fatalf("resume failed:\n%s", second)
 		}
@@ -346,5 +354,27 @@ func TestApplyAuthorization(t *testing.T) {
 	}
 	if _, problem := a.s.DiscordApply(a.ctx, owner, contract.DiscordApplyRequest{Room: a.room}); problem != nil {
 		t.Fatalf("owner with room refused: %s", problem.Message)
+	}
+}
+
+func TestApplyDoesNotAdoptAHumanObjectAfterAnUnclearCreate(t *testing.T) {
+	a := newApplyTest(t, emptyServer(), applyFolder)
+	a.fake.FailWrite(1, 500, false) // the first create fails and did not happen
+	a.apply(false)
+	human := a.fake.Configuration()
+	human.Roles = append(human.Roles, fakediscord.Role{ID: "8001", Name: "Moderator", Permissions: "8"})
+	a.fake.SetConfiguration(human)
+	before := a.writes()
+	if message := a.refusal(); !strings.Contains(message, "8001") || a.writes() != before {
+		t.Fatalf("a human role was adopted or the refusal is unclear: %s", message)
+	}
+}
+
+func TestApplyRefusesToAdoptAnAutomaticallyUnmanagedChannel(t *testing.T) {
+	server := emptyServer()
+	server.Channels = []fakediscord.Channel{{ID: "700", Name: "stage", Type: 13}}
+	a := newApplyTest(t, server, map[string]string{"server.yaml": "settings: {}\nroles:\n  - {name: Kira, managed: true, id: \"11\"}\n  - {name: \"@everyone\", id: \"100\", permissions: [view_channel]}\n", "channels/stage/channel.yaml": "id: \"700\"\ntopic: overwritten\n"})
+	if message := a.refusal(); !strings.Contains(message, "not managed by this folder") || a.writes() != 0 {
+		t.Fatalf("wrote to an unmanaged channel: %s", message)
 	}
 }

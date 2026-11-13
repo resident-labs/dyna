@@ -176,6 +176,17 @@ func (r *run) call(method, route string, body any) (json.RawMessage, error) {
 // instead of being repeated. A created role, category, channel or AutoMod rule
 // gets its new ID written into the folder at once.
 func (r *run) create(owned Owned, route string, body any) (string, error) {
+	if kind := folder.Kind(owned.Kind); kind != folder.MessageKind {
+		// The receipt keeps what existed, so the next run can tell whether anything new appeared.
+		known := r.liveIDs(kind)
+		for subject, id := range r.ids {
+			if subject.Kind == kind {
+				known = append(known, id)
+			}
+		}
+		data, _ := json.Marshal(known)
+		owned.Content = string(data)
+	}
 	if err := r.target.Owned.Record(r.ctx, owned); err != nil {
 		return "", err
 	}
@@ -193,6 +204,9 @@ func (r *run) create(owned Owned, route string, body any) (string, error) {
 		return "", fmt.Errorf("%w: no ID in the answer", errUnknownOutcome)
 	}
 	owned.ID = created.ID
+	if folder.Kind(owned.Kind) != folder.MessageKind {
+		owned.Content = "" // the receipt's list of known objects
+	}
 	if err := r.target.Owned.Record(r.ctx, owned); err != nil {
 		return "", err
 	}

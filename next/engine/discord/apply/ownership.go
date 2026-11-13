@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/resident-labs/dyna/engine/discord/folder"
@@ -35,26 +36,21 @@ func (r *run) identityOf(kind folder.Kind, name string) (folder.Identity, bool) 
 	return folder.Identity{}, false
 }
 
-// liveMatches lists the live objects of a kind with this name, for matching a create
-// whose outcome was not recorded.
-func (r *run) liveMatches(kind folder.Kind, name string) []string {
+// liveIDs lists the IDs of the live objects of a kind.
+func (r *run) liveIDs(kind folder.Kind) []string {
 	var found []string
 	switch kind {
 	case folder.RoleKind:
 		for _, role := range r.live.Server.Roles {
-			if role.Name == name && !role.Managed {
-				found = append(found, role.ID)
-			}
+			found = append(found, role.ID)
 		}
 	case folder.AutoModKind:
 		for _, rule := range r.live.Server.AutoMod {
-			if rule.Name == name {
-				found = append(found, rule.ID)
-			}
+			found = append(found, rule.ID)
 		}
 	default:
 		for _, entry := range r.live.Entries {
-			if entry.Path == name && entry.Unmanaged == "" && ((entry.Category != nil) == (kind == folder.CategoryKind)) {
+			if (entry.Category != nil) == (kind == folder.CategoryKind) {
 				found = append(found, folder.EntryIdentity(entry).ID)
 			}
 		}
@@ -62,11 +58,19 @@ func (r *run) liveMatches(kind folder.Kind, name string) []string {
 	return found
 }
 
+// newSince lists live objects of a kind that were not known when a create was
+// started; known is the JSON list recorded with the receipt.
+func (r *run) newSince(kind folder.Kind, known string) []string {
+	var before []string
+	_ = json.Unmarshal([]byte(known), &before) // a damaged receipt knows nothing, so everything is new
+	return slices.DeleteFunc(r.liveIDs(kind), func(id string) bool { return slices.Contains(before, id) })
+}
+
 // claimRecorded finishes what an earlier run began. A recorded object whose folder
-// entry lost its "id:" gets it back. A create whose outcome was unknown is matched
-// to the one live object of that name; if there is none, the create never happened
-// and is forgotten. A message create with unknown outcome cannot be matched
-// without reading history, so it refuses.
+// entry lost its "id:" gets it back. A create with an unknown outcome is forgotten
+// only if nothing new of its kind exists on the server; otherwise it refuses, since
+// a name match would not prove the object is ours. A message create with unknown
+// outcome cannot be checked without reading history, so it refuses.
 func (r *run) claimRecorded() (folder.Folder, error) {
 	changed := false
 	for _, owned := range r.owned {
@@ -83,21 +87,15 @@ func (r *run) claimRecorded() (folder.Folder, error) {
 		}
 		id := owned.ID
 		if id == "" {
-			matches := r.liveMatches(kind, owned.Path)
-			if len(matches) > 1 {
-				return r.desired, fmt.Errorf("%s %s: several objects of that name exist and the earlier create is unmatched; give the right one an id: in the folder", kind, owned.Path)
+			fresh := r.newSince(kind, owned.Content)
+			if len(fresh) > 0 {
+				return r.desired, fmt.Errorf("%s %s: an earlier create had an unclear outcome, and new %s objects have appeared on the server since (IDs %s). Apply cannot tell whether one is its own. Add id: to the entry for the one that is, or rename the entry in the folder to drop the earlier create", kind, owned.Path, kind, strings.Join(fresh, ", "))
 			}
-			if len(matches) == 0 {
-				if err := r.target.Owned.Forget(r.ctx, owned.Kind, owned.Path); err != nil {
-					return r.desired, err
-				}
-				continue
-			}
-			id = matches[0]
-			owned.ID = id
-			if err := r.target.Owned.Record(r.ctx, owned); err != nil {
+			// Nothing new exists, so the create did not happen.
+			if err := r.target.Owned.Forget(r.ctx, owned.Kind, owned.Path); err != nil {
 				return r.desired, err
 			}
+			continue
 		}
 		if err := folder.RecordID(r.target.Folder, kind, owned.Path, id); err != nil {
 			return r.desired, err

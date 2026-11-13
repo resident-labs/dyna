@@ -81,8 +81,9 @@ It never touches UNMANAGED folders, Discord-managed roles, `other_permissions` b
 message history, and a missing adopted object is a refusal, never a re-create.
 Order: roles, channels (Community's channels, then Community, then forum and announcement), overwrites,
 channel and role order, AutoMod, messages, policy.yaml. Apply twice changes nothing the second time.
-A failure stops and lists what was done and what remains; run apply again to resume. An unclear answer
-is matched against the server next run, never repeated. A standing message whose post may have
+A failure stops and lists what was done and what remains; run apply again to resume. After an unclear
+answer, nothing new on the server means the create did not happen; anything new refuses until you add
+`id:` to the entry that is yours (never a guess by name). A standing message whose post may have
 reached Discord refuses until you delete any copy and rename its file.
 `prune` deletes only recorded objects the folder no longer lists, never messages, and refuses a category
 holding a channel apply does not own. By hand (reported, not applied): channel type and forum tags of an
