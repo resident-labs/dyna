@@ -24,6 +24,13 @@ func (r *run) addPrune() error {
 			doomed[owned.ID] = owned
 		}
 	}
+	// Only a channel that will really be deleted may stand in a deleted category.
+	scheduled := map[string]bool{}
+	for _, entry := range r.live.Entries {
+		if id := folder.EntryIdentity(entry).ID; entry.Category == nil && entry.Unmanaged == "" && doomed[id].ID != "" {
+			scheduled[id] = true
+		}
+	}
 	var refusals []string
 	var channels, categories, rules, roles []step
 	forget := func(owned Owned) error { return r.target.Owned.Forget(r.ctx, owned.Kind, owned.Path) }
@@ -60,8 +67,8 @@ func (r *run) addPrune() error {
 					continue
 				}
 				for _, child := range r.live.Entries {
-					if _, ours := doomed[folder.EntryIdentity(child).ID]; child.Parent == entry.Name && !ours {
-						refusals = append(refusals, fmt.Sprintf("category %s holds %s, which apply does not own", entry.Path, child.Path))
+					if child.Parent == entry.Name && !scheduled[folder.EntryIdentity(child).ID] {
+						refusals = append(refusals, fmt.Sprintf("category %s holds %s, which apply is not deleting", entry.Path, child.Path))
 					}
 				}
 				categories = append(categories, remove(owned, "/channels/"+id))

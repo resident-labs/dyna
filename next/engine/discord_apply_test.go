@@ -408,3 +408,23 @@ func TestApplyDoesNotRecreateAChannelMovedUnderAnUnmanagedCategory(t *testing.T)
 		t.Fatal("news was created twice")
 	}
 }
+
+func TestPruneRefusesACategoryHoldingAnUnmanagedChannel(t *testing.T) {
+	a := newApplyTest(t, emptyServer(), applyFolder)
+	a.apply(false)
+	configuration := a.fake.Configuration()
+	for i := range configuration.Channels {
+		if configuration.Channels[i].Name == "mod-log" {
+			configuration.Channels[i].NSFW = true // makes it unmanaged
+		}
+	}
+	a.fake.SetConfiguration(configuration)
+	a.write("server.yaml", strings.NewReplacer("categories: [Community, Staff]", "categories: [Community]", ", alert: mod-log", "").Replace(applyServerYAML))
+	if err := os.RemoveAll(filepath.Join(a.root, "channels/Staff")); err != nil {
+		t.Fatal(err)
+	}
+	before := a.writes()
+	if message := a.refusalWithPrune(); !strings.Contains(message, "mod-log") || a.writes() != before {
+		t.Fatalf("category with an unmanaged child was deleted: %s", message)
+	}
+}
