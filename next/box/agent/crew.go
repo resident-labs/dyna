@@ -107,6 +107,7 @@ type Crew struct {
 	taken    map[contract.DeliverySeq]bool
 	delivery contract.DeliverySeq // workers carry it, so the engine files their transcripts under the crew's turn
 	turn     contract.TurnID
+	dryState json.RawMessage // hand-started state lives only in this crew
 	stop     context.CancelFunc
 }
 
@@ -334,6 +335,11 @@ func (c *Crew) ClearQueue(context.Context) error { return nil }
 // Start runs the script as the session's turn and returns when it settles. A script that throws fails the run; a failed
 // worker only fails its step, which the script may handle.
 func (c *Crew) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput, started func()) (contract.TurnEnded, error) {
+	defer func() {
+		c.mu.Lock()
+		c.dryState = nil
+		c.mu.Unlock()
+	}()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	c.mu.Lock()
@@ -574,6 +580,21 @@ func finalText(value json.RawMessage) string {
 func (c *Crew) handle(ctx context.Context, call crewCall) crewReply {
 	switch call.Op {
 	case "state_get", "state_set":
+		if c.config.Workflow.Subscription == "" {
+			if call.Op == "state_set" && (len(call.Payload) > 65536 || !json.Valid(call.Payload)) {
+				return crewReply{Error: "state is JSON of at most 64 KiB"}
+			}
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			if call.Op == "state_set" {
+				c.dryState = append(json.RawMessage(nil), call.Payload...)
+			}
+			value := append(json.RawMessage(nil), c.dryState...)
+			if len(value) == 0 {
+				value = json.RawMessage("null")
+			}
+			return crewReply{Value: value}
+		}
 		req := contract.WorkflowStateRequest{}
 		if call.Op == "state_set" {
 			req.Value = call.Payload

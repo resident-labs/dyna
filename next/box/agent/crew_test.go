@@ -1143,17 +1143,51 @@ func (j *fakeJournal) WorkflowState(_ context.Context, req contract.WorkflowStat
 	return contract.WorkflowStateResponse{Value: j.state}, nil
 }
 
-func TestScriptStateCallsPersistOutsideTheStepJournal(t *testing.T) {
+func TestScriptManualStateIsDiscardedOutsideTheStepJournal(t *testing.T) {
 	h := newCrewHarness(t)
 	got := h.result(crewMeta + `const before=await state.get(); await state.set({head: args.topic}); return {before, after:await state.get()}`)
 	if fmt.Sprint(got) != fmt.Sprint(map[string]any{"before": nil, "after": map[string]any{"head": "bounds"}}) {
 		t.Fatalf("state %v", got)
 	}
 	got = h.result(crewMeta + `return await state.get()`)
-	if fmt.Sprint(got) != fmt.Sprint(map[string]any{"head": "bounds"}) {
-		t.Fatalf("restarted state %v", got)
+	if got != nil {
+		t.Fatalf("new run retained state %v", got)
 	}
 	if len(h.journal.steps) != 0 {
 		t.Fatal("state unexpectedly replayed as journal steps")
+	}
+}
+
+func TestCrewStateBoundary(t *testing.T) {
+	for _, event := range []bool{false, true} {
+		c := &Crew{config: CrewConfig{Engine: &fakeJournal{}}}
+		if event {
+			c.config.Workflow.Subscription = "sub_test"
+		}
+		get := func() crewReply { return c.handle(context.Background(), crewCall{Op: "state_get"}) }
+		if got := get(); string(got.Value.(json.RawMessage)) != "null" {
+			t.Fatalf("initial: %+v", got)
+		}
+		value := json.RawMessage(`{"head":"abc"}`)
+		if got := c.handle(context.Background(), crewCall{Op: "state_set", Payload: value}); got.Error != "" {
+			t.Fatal(got.Error)
+		}
+		if got := get(); string(got.Value.(json.RawMessage)) != string(value) {
+			t.Fatalf("stored: %+v", got)
+		}
+		if !event {
+			for _, value := range []string{`{`, `"` + strings.Repeat("x", 65535) + `"`} {
+				if got := c.handle(context.Background(), crewCall{Op: "state_set", Payload: json.RawMessage(value)}); got.Error == "" {
+					t.Fatal("accepted invalid state")
+				}
+			}
+			if got := get(); string(got.Value.(json.RawMessage)) != string(value) {
+				t.Fatal("invalid state overwrote value")
+			}
+			limit := json.RawMessage(`"` + strings.Repeat("x", 65534) + `"`)
+			if got := c.handle(context.Background(), crewCall{Op: "state_set", Payload: limit}); got.Error != "" {
+				t.Fatal("rejected 64 KiB state:", got.Error)
+			}
+		}
 	}
 }
