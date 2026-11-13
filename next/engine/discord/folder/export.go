@@ -29,6 +29,17 @@ func Export(path string, snapshot Snapshot, force bool) ([]string, error) {
 	if err != nil {
 		return report, err
 	}
+	report = append(report, snapshot.Warnings...)
+	var generatedPaths []string
+	for path := range files {
+		if filepath.Base(path) == "UNMANAGED.md" {
+			generatedPaths = append(generatedPaths, path)
+		}
+	}
+	sort.Strings(generatedPaths)
+	for _, path := range generatedPaths {
+		report = append(report, filepath.Dir(path)+": unmanaged: "+strings.TrimSuffix(string(files[path]), "\n"))
+	}
 	return report, writeExportFiles(root, files, force)
 }
 
@@ -106,6 +117,12 @@ func scanExportTree(root string, force bool) ([]string, []string, error) {
 
 func buildExportFiles(snapshot Snapshot, unmanaged []string) (map[string][]byte, error) {
 	files := map[string][]byte{}
+	var generatedDirectories []string
+	for _, entry := range snapshot.Entries {
+		if entry.Unmanaged != "" {
+			generatedDirectories = append(generatedDirectories, filepath.Join("channels", entry.Parent, entry.Name))
+		}
+	}
 	add := func(path string, value any) error {
 		directory := filepath.Dir(path)
 		for _, unmanagedPath := range unmanaged {
@@ -113,8 +130,17 @@ func buildExportFiles(snapshot Snapshot, unmanaged []string) (map[string][]byte,
 				return nil
 			}
 		}
+		for _, generatedDirectory := range generatedDirectories {
+			if strings.HasPrefix(directory, generatedDirectory+string(filepath.Separator)) {
+				return nil
+			}
+		}
 		if _, exists := files[path]; exists {
 			return fmt.Errorf("duplicate export path %s", path)
+		}
+		if filepath.Base(path) == "UNMANAGED.md" {
+			files[path] = []byte(value.(string) + "\n")
+			return nil
 		}
 		data, err := yaml.Marshal(value)
 		if err != nil {
@@ -153,6 +179,10 @@ func buildExportFiles(snapshot Snapshot, unmanaged []string) (map[string][]byte,
 			return nil, fmt.Errorf("duplicate export entry %q: IDs %q and %q", directory, previousID, id)
 		}
 		identities[directory] = id
+		if entry.Unmanaged != "" {
+			filename = "UNMANAGED.md"
+			value = strings.SplitN(entry.Unmanaged, "\n", 2)[0]
+		}
 		if err := add(filepath.Join(directory, filename), value); err != nil {
 			return nil, err
 		}

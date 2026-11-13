@@ -22,6 +22,23 @@ func snapshotChannels(out Snapshot, channels []liveChannel, roleNames, byID map[
 		if parent != "" {
 			path = parent + "/" + channel.Name
 		}
+		if unmanaged[path] != "" || unmanaged[parent] != "" {
+			continue
+		}
+		reason, err := unmanagedChannelReason(channel)
+		if err != nil {
+			return out, err
+		}
+		if reason != "" {
+			unmanaged[path] = reason
+		}
+	}
+	for _, channel := range channels {
+		parent := byID[channel.ParentID]
+		path := channel.Name
+		if parent != "" {
+			path = parent + "/" + channel.Name
+		}
 		if unmanaged[parent] != "" {
 			continue
 		}
@@ -79,12 +96,6 @@ func snapshotChannels(out Snapshot, channels []liveChannel, roleNames, byID map[
 			out.Server.Categories = append(out.Server.Categories, channel.Name)
 		} else {
 			kind := map[int]string{0: "text", 2: "voice", 5: "announcement", 15: "forum"}[channel.Type]
-			if kind == "" {
-				return out, fmt.Errorf("channel %q type %deny cannot be represented", channel.Name, channel.Type)
-			}
-			if channel.NSFW || channel.Flags != 0 || channel.DefaultThreadSlowmode != 0 || channel.DefaultLayout != 0 || channel.DefaultSort != nil || (len(channel.DefaultReaction) > 0 && string(channel.DefaultReaction) != "null") || (channel.DefaultArchive != 0 && channel.DefaultArchive != 1440) {
-				return out, fmt.Errorf("channel %q has unrepresentable settings", channel.Name)
-			}
 			config := &Channel{Identity: Identity{ID: channel.ID}, Overwrites: overwrites, Type: kind, Topic: channel.Topic}
 			if channel.Slowmode != 0 {
 				config.Slowmode = strconv.Itoa(channel.Slowmode) + "s"
@@ -95,9 +106,6 @@ func snapshotChannels(out Snapshot, channels []liveChannel, roleNames, byID map[
 					return out, fmt.Errorf("ambiguous forum tag %q", tag.Name)
 				}
 				tagNames[tag.Name] = true
-				if tag.Moderated || tag.EmojiID != nil || tag.EmojiName != nil {
-					return out, fmt.Errorf("forum tag metadata cannot be represented")
-				}
 				config.Tags = append(config.Tags, tag.Name)
 			}
 			entry.Channel = config
