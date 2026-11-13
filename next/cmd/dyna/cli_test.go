@@ -441,6 +441,15 @@ func TestRoomRepos(t *testing.T) {
 	if f.repoAdd.Room != "r" || f.repoAdd.Repo != "owner/a" || !f.repoAdd.Default {
 		t.Fatalf("%+v", f.repoAdd)
 	}
+	for _, mode := range []string{"on", "off"} {
+		runCLI(t, f, "room", "repo", "add", "r", "owner/a", "--pr-events", mode)
+		if f.repoAdd.PREvents != (mode == "on") {
+			t.Fatalf("--pr-events %s: %+v", mode, f.repoAdd)
+		}
+	}
+	if _, err := execCLI(f, "room", "repo", "add", "r", "owner/a", "--pr-events", "yes"); err == nil || !strings.Contains(err.Error(), "on or off") {
+		t.Fatalf("invalid PR events flag: %v", err)
+	}
 	out := runCLI(t, f, "room", "repo", "list", "r")
 	if f.repoList.Room != "r" || out != "owner/a (default)\nowner/b\n" {
 		t.Fatalf("%+v: %q", f.repoList, out)

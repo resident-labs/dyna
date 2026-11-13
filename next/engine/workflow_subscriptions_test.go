@@ -10,11 +10,11 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-func TestWorkflowSubscriptionSerialStateAndOnce(t *testing.T) {
-	for _, once := range []bool{false, true} {
-		t.Run(map[bool]string{false: "ordered", true: "latest"}[once], func(t *testing.T) {
+func TestWorkflowSubscriptionSerialStateAndLatest(t *testing.T) {
+	for _, latest := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ordered", true: "latest"}[latest], func(t *testing.T) {
 			w := setupWorkflow(t)
-			sub := addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, On: []contract.EventType{"notice.posted"}, Workflow: &contract.WorkflowSubscription{Script: workflowScript, Args: map[string]json.RawMessage{"fixed": json.RawMessage(`42`)}}, Key: "one", Once: once})
+			sub := addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, On: []contract.EventType{"notice.posted"}, Workflow: &contract.WorkflowSubscription{Script: workflowScript, Args: map[string]json.RawMessage{"fixed": json.RawMessage(`42`)}}, Key: "one", Latest: latest})
 			tick := func() {
 				t.Helper()
 				if _, err := w.store.DispatchEvents(w.ctx, 1000); err != nil {
@@ -44,7 +44,7 @@ func TestWorkflowSubscriptionSerialStateAndOnce(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if stored.Subscription != sub || stored.Subject != "one" {
+			if stored.Subscription != sub || stored.Key != "one" {
 				t.Fatalf("origin: %+v", stored)
 			}
 			var args map[string]json.RawMessage
@@ -73,7 +73,7 @@ func TestWorkflowSubscriptionSerialStateAndOnce(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := 2
-			if once {
+			if latest {
 				want = 1
 			}
 			if pending != want {
@@ -97,8 +97,8 @@ func TestWorkflowSubscriptionSerialStateAndOnce(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var latest int64
-			if err := w.store.Read().QueryRowContext(w.ctx, "SELECT max(seq) FROM events WHERE type='notice.posted'").Scan(&latest); err != nil {
+			var latestSeq int64
+			if err := w.store.Read().QueryRowContext(w.ctx, "SELECT max(seq) FROM events WHERE type='notice.posted'").Scan(&latestSeq); err != nil {
 				t.Fatal(err)
 			}
 			var secondArgs struct {
@@ -109,8 +109,8 @@ func TestWorkflowSubscriptionSerialStateAndOnce(t *testing.T) {
 			if err := json.Unmarshal([]byte(second.Args), &secondArgs); err != nil {
 				t.Fatal(err)
 			}
-			if once && secondArgs.Event.Seq != latest || !once && secondArgs.Event.Seq >= latest {
-				t.Fatalf("queued event %d, latest %d, once %v", secondArgs.Event.Seq, latest, once)
+			if latest && secondArgs.Event.Seq != latestSeq || !latest && secondArgs.Event.Seq >= latestSeq {
+				t.Fatalf("queued event %d, latest %d, latest %v", secondArgs.Event.Seq, latestSeq, latest)
 			}
 			state, problem := w.WorkflowState(w.ctx, sessionCaller(second.Session), contract.WorkflowStateRequest{})
 			if problem != nil {
@@ -159,12 +159,12 @@ func TestWorkflowSubscriptionOwnCommentAndPush(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("own push: %d runs; comment must not match", n)
 	}
-	var subject string
-	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT subject FROM workflow_runs").Scan(&subject); err != nil {
+	var key string
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT key FROM workflow_runs").Scan(&key); err != nil {
 		t.Fatal(err)
 	}
-	if subject != "owner/repo/7" {
-		t.Fatalf("key %q", subject)
+	if key != "owner/repo/7" {
+		t.Fatalf("key %q", key)
 	}
 }
 
@@ -208,11 +208,11 @@ func TestWorkflowSubscriptionSplitsBatchedPRsByKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n int
-	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT count(DISTINCT subject) FROM workflow_runs").Scan(&n); err != nil {
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT count(DISTINCT key) FROM workflow_runs").Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n != 2 {
-		t.Fatalf("only %d subjects started", n)
+		t.Fatalf("only %d keys started", n)
 	}
 }
 
@@ -235,12 +235,12 @@ func TestWorkflowSubscriptionIssueKeysAndOwnComment(t *testing.T) {
 	if err := w.fireDue(w.ctx); err != nil {
 		t.Fatal(err)
 	}
-	var subject string
-	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT subject FROM workflow_runs").Scan(&subject); err != nil {
+	var key string
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT key FROM workflow_runs").Scan(&key); err != nil {
 		t.Fatal(err)
 	}
-	if subject != "owner/repo/8" {
-		t.Fatalf("outside issue key %q", subject)
+	if key != "owner/repo/8" {
+		t.Fatalf("outside issue key %q", key)
 	}
 }
 
@@ -307,18 +307,18 @@ func TestWorkflowStartRefusalConsumesEventAndBacksOffOnce(t *testing.T) {
 	}
 }
 
-func TestWorkflowClosedReportFallsBackToRoot(t *testing.T) {
+func TestWorkflowClosedParentFallsBackToRoot(t *testing.T) {
 	w := setupWorkflow(t)
-	var report contract.SessionID
-	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT id FROM sessions WHERE name='worker' AND room=?", w.room).Scan(&report); err != nil {
+	var parent contract.SessionID
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT id FROM sessions WHERE name='worker' AND room=?", w.room).Scan(&parent); err != nil {
 		t.Fatal(err)
 	}
-	addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, Report: report, On: []contract.EventType{"notice.posted"}, Workflow: &contract.WorkflowSubscription{Script: workflowScript}})
-	closed, err := w.event(w.room, engineSender, contract.SessionClosed{Session: report})
+	addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, Parent: parent, On: []contract.EventType{"notice.posted"}, Workflow: &contract.WorkflowSubscription{Script: workflowScript}})
+	closed, err := w.event(w.room, engineSender, contract.SessionClosed{Session: parent})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := w.store.CloseSession(w.ctx, report, closed); err != nil {
+	if err := w.store.CloseSession(w.ctx, parent, closed); err != nil {
 		t.Fatal(err)
 	}
 	recordNotice(t, w.Service, w.ctx, w.room)
@@ -328,11 +328,10 @@ func TestWorkflowClosedReportFallsBackToRoot(t *testing.T) {
 	if err := w.fireDue(w.ctx); err != nil {
 		t.Fatal(err)
 	}
-	var parent contract.SessionID
 	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT s.parent FROM sessions s JOIN workflow_runs r ON r.session=s.id").Scan(&parent); err != nil {
 		t.Fatal(err)
 	}
 	if parent != w.root {
-		t.Fatalf("report parent %s", parent)
+		t.Fatalf("run parent %s", parent)
 	}
 }

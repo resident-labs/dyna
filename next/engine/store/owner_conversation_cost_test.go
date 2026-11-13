@@ -154,7 +154,7 @@ func TestOwnerConversationIndexMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.writer.Exec(`DROP INDEX deliveries_by_turn; ALTER TABLE workflow_runs DROP COLUMN paused; ALTER TABLE workflow_runs DROP COLUMN sub; ALTER TABLE workflow_runs DROP COLUMN subject; ALTER TABLE room_repos DROP COLUMN pr_events; ALTER TABLE room_repos DROP COLUMN pr_census_at; UPDATE meta SET value='107' WHERE key='schema_version'`); err != nil {
+	if _, err = s.writer.Exec(`DROP INDEX deliveries_by_turn; ALTER TABLE workflow_runs DROP COLUMN paused; ALTER TABLE workflow_runs DROP COLUMN sub; ALTER TABLE workflow_runs DROP COLUMN key; DROP TABLE workflow_queue; DROP TABLE workflow_state; DROP TABLE workflow_subscriptions; ALTER TABLE room_repos DROP COLUMN pr_events; ALTER TABLE room_repos DROP COLUMN pr_census_at; UPDATE meta SET value='107' WHERE key='schema_version'`); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Close(); err != nil {

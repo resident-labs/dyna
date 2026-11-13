@@ -499,10 +499,10 @@ type RoomDeleteRequest struct {
 
 type RoomDeleteResponse struct{}
 type RoomRepoAddRequest struct {
-	PREvents bool     `json:"prEvents"`
 	Room     RoomID   `json:"room"`
 	Repo     RepoName `json:"repo"`
 	Default  bool     `json:"default"`
+	PREvents bool     `json:"prEvents,omitempty"`
 }
 type RoomRepoAddResponse struct{}
 type RoomReposRequest struct {

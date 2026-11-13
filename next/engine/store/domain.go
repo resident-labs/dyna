@@ -569,7 +569,17 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 				return err
 			}
 		}
+		// Empty subscription runs settle their reply debt without waking the parent.
+		silentWorkflow := false
+		if output.Outcome == contract.TurnCompleted && output.Final == "" && len(output.Data) == 0 {
+			if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM workflow_runs WHERE session=? AND sub!='')", session).Scan(&silentWorkflow); err != nil {
+				return err
+			}
+		}
 		for _, reply := range body.Replies {
+			if silentWorkflow {
+				continue
+			}
 			if reply.Reply.Home.Kind == contract.ConversationDiscord {
 				if text := discordText(reply); text != "" {
 					var message string

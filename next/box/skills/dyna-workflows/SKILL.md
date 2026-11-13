@@ -140,11 +140,5 @@ A worker that skips everything still reports done: check `files.length` or a sch
 is not proof of finished work: `conflicts`, `merged` and failed steps say what happened.
 Do not prohibit the tools a worker needs to build and verify its change.
 
-## Event-started scripts
-Root attaches scripts to room subscriptions; the subscription tool describes registration and queues.
-The committed event is `args.event`; GitHub text marked outside remains untrusted input.
-`await state.get()` returns this subscription/key's JSON state, initially `null`.
-`await state.set(value)` persists JSON up to 64 KiB immediately, even if the run later fails.
-State calls are not journaled steps: a restart reads current state and may repeat a write.
-Write reviewed-head markers only after completing the corresponding work; state is not a write ledger.
-Ordinary manually started runs have no subscription state. Event runs keep existing room write restrictions.
+## Start a script from events
+Root can attach a script to room events, with one run at a time per key and saved state. Read [events.md](events.md).

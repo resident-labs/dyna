@@ -434,6 +434,7 @@ const closeReasons: Record<SessionCloseReason, string> = { dormant: "after 7 qui
 const changeWords: Record<PrChangeKind, string> = {
   ci_failed: "CI failed", ci_cancelled: "CI cancelled", ci_passed: "CI passed", changes_requested: "changes requested", approved: "approved",
   conflict: "conflicts with its base", merged: "merged", closed: "closed without merging", comment: "new comments", metadata: "details changed", pushed: "pushed",
+  opened: "opened", ready: "ready for review", draft: "converted to draft",
 };
 
 // The changes of a github.pr.changed event that say something; the rest only keep state current.

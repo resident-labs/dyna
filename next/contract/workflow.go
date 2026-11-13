@@ -91,7 +91,7 @@ type WorkflowInfo struct {
 	Room         RoomID         `json:"room"`
 	Session      SessionID      `json:"session"`
 	Subscription SubscriptionID `json:"subscription,omitempty"`
-	Subject      string         `json:"subject,omitempty"`
+	Key          string         `json:"key,omitempty"`
 	Name         string         `json:"name"`
 	Description  string         `json:"description,omitempty"`
 	Profiles     []ProfileName  `json:"profiles"`
@@ -120,7 +120,7 @@ type WorkflowStatusLine struct {
 }
 
 // WorkflowStep is one journal row, without its result. Version is the script version that started it; a step a resumed run
-// kept has none. Lane names the subject the step is about, as the script tagged it, and Phase its stage.
+// kept has none. Lane names the key the step is about, as the script tagged it, and Phase its stage.
 type WorkflowStep struct {
 	Key        string            `json:"key"`
 	Parent     string            `json:"parent,omitempty"`
@@ -194,15 +194,16 @@ type WorkflowListResponse struct {
 // BoxWorkflow is what a crew's box runs. Each hello carries it, so a new box can restart the script, and a reload carries it
 // to the box that runs the script.
 type BoxWorkflow struct {
-	Run      WorkflowRunID     `json:"run"`
-	Name     string            `json:"name"`
-	Script   string            `json:"script"`
-	Version  int               `json:"version"`
-	Paused   bool              `json:"paused"`
-	Args     string            `json:"args,omitempty"`
-	Profiles []WorkflowProfile `json:"profiles"` // in meta's order: the first is the default
-	Workers  int               `json:"workers"`  // how many crew workers may run at once: the box's memory allows some, and the maxWorkers setting may allow fewer
-	Timeout  int               `json:"timeout"`  // seconds an agent() worker may run when the script sets no timeout: the timeout setting
+	Run          WorkflowRunID     `json:"run"`
+	Subscription SubscriptionID    `json:"subscription,omitempty"`
+	Name         string            `json:"name"`
+	Script       string            `json:"script"`
+	Version      int               `json:"version"`
+	Paused       bool              `json:"paused"`
+	Args         string            `json:"args,omitempty"`
+	Profiles     []WorkflowProfile `json:"profiles"` // in meta's order: the first is the default
+	Workers      int               `json:"workers"`  // how many crew workers may run at once: the box's memory allows some, and the maxWorkers setting may allow fewer
+	Timeout      int               `json:"timeout"`  // seconds an agent() worker may run when the script sets no timeout: the timeout setting
 }
 
 // WorkflowReload hands a crew's box a newer version of its script. The engine sends the run's current version on each channel,
