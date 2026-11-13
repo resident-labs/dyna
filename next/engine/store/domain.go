@@ -477,7 +477,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			}
 			wait := waits[session]
 			if wait == nil {
-				// Pending waking inputs also count as child work at this boundary.
+				// dyna_children reports actual running turns; reply debt also counts a child's pending waking inputs as work.
 				wait = &contract.SessionWaiting{Kind: contract.WaitChildren}
 				if err := tx.QueryRowContext(ctx, "SELECT COUNT(*),COALESCE(MIN(c.name),'') FROM sessions c WHERE c.parent=? AND c.closed_at IS NULL AND EXISTS(SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=c.id AND d.state='pending' AND d.wake=1)", session).Scan(&wait.Count, &wait.Name); err != nil {
 					return err
