@@ -88,3 +88,65 @@ func TestPausedWorkerDoesNotSpendItsTimeout(t *testing.T) {
 		t.Fatalf("released worker: %+v", got)
 	}
 }
+
+func TestRunPauseReleasesOnlySelectedWorker(t *testing.T) {
+	c := &Crew{workflow: contract.BoxWorkflow{Paused: true, Version: 1}, pauseChanged: make(chan struct{})}
+	c.Reload(contract.BoxWorkflow{Paused: true, Version: 1, ReleasedSteps: []string{"a"}})
+	if err := c.waitUnpaused(t.Context(), "a"); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"b", ""} {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if err := c.waitUnpaused(ctx, key); err != context.Canceled {
+			t.Fatalf("%q escaped: %v", key, err)
+		}
+	}
+}
+
+func TestReleasedCallReplaysAfterBoxRestart(t *testing.T) {
+	for _, call := range []string{`agent('a')`, `run('echo a')`} {
+		t.Run(call, func(t *testing.T) {
+			h := newCrewHarness(t)
+			script := crewMeta + `return await ` + call
+			old, ended := h.start(script)
+			if got := <-ended; got.Outcome != contract.TurnCompleted {
+				t.Fatalf("first: %+v", got)
+			}
+			var key string
+			for k := range h.journal.steps {
+				key = k
+			}
+			// A was started before the hold. Recreate the journal of an interrupted step.
+			delete(h.journal.steps, key)
+			old.mu.Lock()
+			snapshot := old.workflow
+			old.mu.Unlock()
+			snapshot.Paused = true
+			old.Reload(snapshot)
+			snapshot.ReleasedSteps = []string{key}
+			old.Reload(snapshot)
+			h.workflow = &snapshot
+			replayed := make(chan struct{}, 1)
+			h.journal.beforeEnd = func() { replayed <- struct{}{} }
+			// A is released; the next, new call must stay held.
+			restarted, done := h.start(crewMeta + `await ` + call + `; return await run('echo new')`)
+			select {
+			case <-replayed:
+			case <-time.After(time.Second):
+				t.Fatal("released call did not replay")
+			}
+			select {
+			case got := <-done:
+				t.Fatalf("new call escaped hold: %+v", got)
+			case <-time.After(30 * time.Millisecond):
+			}
+			snapshot.Paused = false
+			snapshot.ReleasedSteps = nil
+			restarted.Reload(snapshot)
+			if got := <-done; got.Outcome != contract.TurnCompleted {
+				t.Fatalf("released: %+v", got)
+			}
+		})
+	}
+}

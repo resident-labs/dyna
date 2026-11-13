@@ -53,6 +53,7 @@ unless a paragraph below says otherwise. Read again after the change. Rows marke
 | A host is full, degraded or off* | `host set NAME …` | `host list` | every room |
 | A host serves the wrong rooms* | `host limit NAME --room ROOM` or `--all` | Settings > Hosts | every room |
 | A profile's model, ratings or cap | `profile set NAME --FIELD VALUE` | `profile show NAME` | every room |
+| PR events for every open PR | `room repo add ROOM owner/repo --pr-events on` | `room repo list ROOM` | yours |
 | The room should answer on Discord* | `room discord ROOM --server ID …` | `room discord ROOM` | yours |
 | Commits carry the wrong GitHub identity | none: a token goes on stdin | `room github ROOM` | the owner's |
 | A request waits for a decision | see "Decide sessions' requests" | `op list ROOM` | yours |

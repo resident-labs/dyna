@@ -76,7 +76,7 @@ func roomRepos(ctx context.Context, q sqlQuery, id contract.RoomID) ([]contract.
 }
 
 // AddRoomRepo updates both defaults in the same transaction.
-func (s *Store) AddRoomRepo(ctx context.Context, id contract.RoomID, name contract.RepoName, makeDefault bool, prEvents ...bool) error {
+func (s *Store) AddRoomRepo(ctx context.Context, id contract.RoomID, name contract.RepoName, makeDefault bool, prEvents ...*bool) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		var exists int
 		if err := tx.QueryRowContext(ctx, "SELECT 1 FROM rooms WHERE id=?", id).Scan(&exists); err != nil {
@@ -116,11 +116,11 @@ func (s *Store) AddRoomRepo(ctx context.Context, id contract.RoomID, name contra
 				return err
 			}
 		}
-		if len(prEvents) > 0 {
-			if _, err := tx.ExecContext(ctx, "UPDATE room_repos SET pr_events=?, pr_census_at=CASE WHEN ? THEN pr_census_at ELSE 0 END WHERE room=? AND repo=?", prEvents[0], prEvents[0], id, name); err != nil {
+		if len(prEvents) > 0 && prEvents[0] != nil {
+			if _, err := tx.ExecContext(ctx, "UPDATE room_repos SET pr_events=?, pr_census_at=CASE WHEN ? THEN pr_census_at ELSE 0 END WHERE room=? AND repo=?", *prEvents[0], *prEvents[0], id, name); err != nil {
 				return err
 			}
-			if !prEvents[0] {
+			if !*prEvents[0] {
 				if _, err := tx.ExecContext(ctx, "DELETE FROM room_pr_observed WHERE room=? AND repo=?", id, name); err != nil {
 					return err
 				}

@@ -24,7 +24,10 @@ func TestRoomPREventsOptIn(t *testing.T) {
 	if err != nil || len(watches) != 0 {
 		t.Fatalf("default: %+v %v", watches, err)
 	}
-	if err := s.AddRoomRepo(ctx, "room", "owner/repo", false, true); err != nil {
+	if err := s.AddRoomRepo(ctx, "room", "owner/repo", false, func() *bool { v := true; return &v }()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddRoomRepo(ctx, "room", "owner/repo", true, nil); err != nil {
 		t.Fatal(err)
 	}
 	watches, err = s.RoomPRWatches(ctx, "owner/repo")
@@ -44,7 +47,7 @@ func TestRoomPREventsOptIn(t *testing.T) {
 	if err := s.Read().QueryRowContext(ctx, `SELECT count(*) FROM events WHERE room='room' AND type='github.pr.changed'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("untracked event: %d %v", count, err)
 	}
-	if err := s.AddRoomRepo(ctx, "room", pr.Repo, false, false); err != nil {
+	if err := s.AddRoomRepo(ctx, "room", pr.Repo, false, func() *bool { v := false; return &v }()); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Read().QueryRowContext(ctx, `SELECT count(*) FROM room_pr_observed`).Scan(&count); err != nil || count != 0 {
@@ -62,7 +65,7 @@ func TestTrackedRoomCIIsNotDuplicated(t *testing.T) {
 	if err := s.CreateRoom(ctx, "room", "room", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AddRoomRepo(ctx, "room", "owner/repo", true, true); err != nil {
+	if err := s.AddRoomRepo(ctx, "room", "owner/repo", true, func() *bool { v := true; return &v }()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.writer.ExecContext(ctx, `INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('s','room','s','p','ready','',0)`); err != nil {
@@ -95,7 +98,7 @@ func TestRoomPRCensusLifecycle(t *testing.T) {
 	if err := s.CreateRoom(ctx, "room", "room", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AddRoomRepo(ctx, "room", "owner/repo", true, true); err != nil {
+	if err := s.AddRoomRepo(ctx, "room", "owner/repo", true, func() *bool { v := true; return &v }()); err != nil {
 		t.Fatal(err)
 	}
 	check := func(want int64) {
@@ -120,18 +123,18 @@ func TestRoomPRCensusLifecycle(t *testing.T) {
 	}
 	check(at.UnixMilli())
 	// Updating the default or opting in again must preserve the completed census.
-	if err := s.AddRoomRepo(ctx, "room", "owner/repo", false, true); err != nil {
+	if err := s.AddRoomRepo(ctx, "room", "owner/repo", false, func() *bool { v := true; return &v }()); err != nil {
 		t.Fatal(err)
 	}
 	check(at.UnixMilli())
-	if err := s.AddRoomRepo(ctx, "room", "owner/repo", false, false); err != nil {
+	if err := s.AddRoomRepo(ctx, "room", "owner/repo", false, func() *bool { v := false; return &v }()); err != nil {
 		t.Fatal(err)
 	}
 	// An in-flight pass cannot complete a disabled census.
 	if err := s.ApplyPRPoll(ctx, pass, at); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AddRoomRepo(ctx, "room", "owner/repo", false, true); err != nil {
+	if err := s.AddRoomRepo(ctx, "room", "owner/repo", false, func() *bool { v := true; return &v }()); err != nil {
 		t.Fatal(err)
 	}
 	check(0)

@@ -73,6 +73,9 @@ func describeSubscription(info contract.SubscriptionInfo) string {
 		action = "wake " + string(sub.Wake)
 	}
 	state := []string{}
+	if sub.Workflow != nil {
+		state = append(state, fmt.Sprintf("%d waiting", info.Waiting))
+	}
 	if info.Disabled {
 		state = append(state, "disabled")
 	}

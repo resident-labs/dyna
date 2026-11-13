@@ -167,7 +167,8 @@ func (c *Crew) addLimits(profiles []contract.WorkflowProfile) {
 func (c *Crew) Reload(workflow contract.BoxWorkflow) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if workflow.Paused != c.workflow.Paused || !slices.Equal(workflow.PausedSteps, c.workflow.PausedSteps) {
+	if workflow.Paused != c.workflow.Paused || !slices.Equal(workflow.PausedSteps, c.workflow.PausedSteps) || !slices.Equal(workflow.ReleasedSteps, c.workflow.ReleasedSteps) {
+		c.workflow.ReleasedSteps = slices.Clone(workflow.ReleasedSteps)
 		c.workflow.PausedSteps = slices.Clone(workflow.PausedSteps)
 		c.workflow.Paused = workflow.Paused
 		close(c.pauseChanged)
@@ -768,9 +769,6 @@ type agentOpts struct {
 }
 
 func (c *Crew) agentCall(ctx context.Context, call crewCall) crewReply {
-	if err := c.waitUnpaused(ctx, ""); err != nil {
-		return crewReply{Error: "the run stopped"}
-	}
 	var opts agentOpts
 	refused := strictOpts(call.Opts, &opts)
 	var prompt string
@@ -793,6 +791,9 @@ func (c *Crew) agentCall(ctx context.Context, call crewCall) crewReply {
 		info.profile = profile.Name
 	}
 	reply := c.step(ctx, call, info, func(ctx context.Context, key string) stepOutcome {
+		if err := c.waitUnpaused(ctx, key); err != nil {
+			return stepOutcome{reason: "the run stopped"}
+		}
 		if refused != nil {
 			return stepOutcome{reason: "agent options: " + refused.Error()}
 		}
@@ -1031,9 +1032,6 @@ type commandResult struct {
 }
 
 func (c *Crew) commandCall(ctx context.Context, call crewCall) crewReply {
-	if err := c.waitUnpaused(ctx, ""); err != nil {
-		return crewReply{Error: "the run stopped"}
-	}
 	var opts commandOpts
 	refused := strictOpts(call.Opts, &opts)
 	var argv []string
@@ -1048,7 +1046,10 @@ func (c *Crew) commandCall(ctx context.Context, call crewCall) crewReply {
 		detail = script
 	}
 	info := stepInfo{kind: contract.WorkflowStepCommand, feature: contract.WorkflowFeatureRun, label: opts.Label, phase: opts.Phase, detail: detail}
-	return c.step(ctx, call, info, func(ctx context.Context, _ string) stepOutcome {
+	return c.step(ctx, call, info, func(ctx context.Context, key string) stepOutcome {
+		if err := c.waitUnpaused(ctx, key); err != nil {
+			return stepOutcome{reason: "the run stopped"}
+		}
 		if refused != nil {
 			return stepOutcome{reason: "run options: " + refused.Error()}
 		}
@@ -1221,7 +1222,7 @@ func (t *tail) String() string {
 func (c *Crew) waitUnpaused(ctx context.Context, key string) error {
 	for {
 		c.mu.Lock()
-		paused, changed := c.workflow.Paused || slices.Contains(c.workflow.PausedSteps, key), c.pauseChanged
+		paused, changed := (c.workflow.Paused && !slices.Contains(c.workflow.ReleasedSteps, key)) || slices.Contains(c.workflow.PausedSteps, key), c.pauseChanged
 		c.mu.Unlock()
 		if !paused {
 			return nil

@@ -39,26 +39,40 @@ await state.set({ head })
 ```
 
 An event run returning nothing ends silently. Return or `post()` what the parent
-must act on. A failed run reports. Existing room write restrictions apply.
+must act on. A failed run reports. Workers write to GitHub only as the room's GitHub write settings allow.
 
 ## Register and try it
 
 Enable `prEvents` with the owner CLI on the engine host (dyna-admin), then register
 the script. Replace `ROOM` and `OWNER/REPO` with the room ID and repository:
 
+On the engine host (host exec, dyna-admin):
+
 ```sh
 dyna room repo add ROOM OWNER/REPO --pr-events on
+```
+
+In your box:
+
+```sh
 dyna subscription add --room ROOM --on github.pr.changed \
-  --where repo=OWNER/REPO --where kind=pushed,opened \
+  --where repo=OWNER/REPO --where kind=pushed,opened,ready \
   --workflow push-review.js --key '{repo}#{number}' --latest
 ```
 
-`kind=pushed,opened` matches either kind. With `prEvents` on, changes cover every
-open PR, including untracked ones; the initial census is silent.
+`kind=pushed,opened,ready` matches any of them, so a draft is reviewed once it is marked ready.
+With `prEvents` on, changes cover every
+open PR, including untracked ones. PRs already open when you turn it on fire at their next change, not at once.
 
 A hand-started `dyna workflow run push-review.js --args '{"event":...}'` uses
 temporary state starting at null, discarded when the run ends. Supply a full
-event envelope for the script's input; its ID and timestamp are optional.
+event envelope for the script's input; its ID and timestamp are optional:
+
+```sh
+dyna workflow run push-review.js --args '{"event":{"type":"github.pr.changed","body":{"changes":[
+  {"pr":{"repo":"OWNER/REPO","number":12,"head":"abc1234","draft":false},"kinds":["pushed"]}
+]}}}'
+```
 
 `dyna subscription fire ID --event JSON [--key KEY]` queues one event using real
 state. Its key overrides the resolved key literally. Without an event it queues

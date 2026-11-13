@@ -87,31 +87,32 @@ type WorkflowReloadResponse struct {
 // List's Branch is the first recorded branch; status retains the most recent recorded branch. Version is the script version it runs, 1
 // until a reload. Status is the script's latest status() line, empty when it wrote none.
 type WorkflowInfo struct {
-	Run          WorkflowRunID  `json:"run"`
-	Room         RoomID         `json:"room"`
-	Session      SessionID      `json:"session"`
-	Subscription SubscriptionID `json:"subscription,omitempty"`
-	Key          string         `json:"key,omitempty"`
-	Name         string         `json:"name"`
-	Description  string         `json:"description,omitempty"`
-	Profiles     []ProfileName  `json:"profiles"`
-	Repo         RepoName       `json:"repo,omitempty"`
-	Commit       string         `json:"commit,omitempty"`
-	Branch       string         `json:"branch,omitempty"` // the crew session's recorded branch, which its workers' branches extend
-	Version      int            `json:"version,omitempty"`
-	State        WorkflowState  `json:"state"`
-	Paused       bool           `json:"paused,omitempty"`
-	PausedSteps  []string       `json:"pausedSteps,omitempty"`
-	Result       string         `json:"result,omitempty"`
-	Steps        int            `json:"steps,omitempty"`
-	Failed       int            `json:"failed"`
-	FailedSteps  []string       `json:"failedSteps,omitempty"`
-	Running      int            `json:"running,omitempty"`
-	Status       string         `json:"status,omitempty"`
-	StatusAt     time.Time      `json:"statusAt,omitzero"`
-	Usage        Usage          `json:"usage"`
-	Started      time.Time      `json:"started"`
-	Ended        time.Time      `json:"ended,omitzero"`
+	Run           WorkflowRunID  `json:"run"`
+	Room          RoomID         `json:"room"`
+	Session       SessionID      `json:"session"`
+	Subscription  SubscriptionID `json:"subscription,omitempty"`
+	Key           string         `json:"key,omitempty"`
+	Name          string         `json:"name"`
+	Description   string         `json:"description,omitempty"`
+	Profiles      []ProfileName  `json:"profiles"`
+	Repo          RepoName       `json:"repo,omitempty"`
+	Commit        string         `json:"commit,omitempty"`
+	Branch        string         `json:"branch,omitempty"` // the crew session's recorded branch, which its workers' branches extend
+	Version       int            `json:"version,omitempty"`
+	State         WorkflowState  `json:"state"`
+	Paused        bool           `json:"paused,omitempty"`
+	PausedSteps   []string       `json:"pausedSteps,omitempty"`
+	ReleasedSteps []string       `json:"releasedSteps,omitempty"`
+	Result        string         `json:"result,omitempty"`
+	Steps         int            `json:"steps,omitempty"`
+	Failed        int            `json:"failed"`
+	FailedSteps   []string       `json:"failedSteps,omitempty"`
+	Running       int            `json:"running,omitempty"`
+	Status        string         `json:"status,omitempty"`
+	StatusAt      time.Time      `json:"statusAt,omitzero"`
+	Usage         Usage          `json:"usage"`
+	Started       time.Time      `json:"started"`
+	Ended         time.Time      `json:"ended,omitzero"`
 }
 
 // WorkflowStatusLine is one status() line and when the script wrote it.
@@ -195,17 +196,18 @@ type WorkflowListResponse struct {
 // BoxWorkflow is what a crew's box runs. Each hello carries it, so a new box can restart the script, and a reload carries it
 // to the box that runs the script.
 type BoxWorkflow struct {
-	Run          WorkflowRunID     `json:"run"`
-	Subscription SubscriptionID    `json:"subscription,omitempty"`
-	Name         string            `json:"name"`
-	Script       string            `json:"script"`
-	Version      int               `json:"version"`
-	Paused       bool              `json:"paused"`
-	PausedSteps  []string          `json:"pausedSteps,omitempty"`
-	Args         string            `json:"args,omitempty"`
-	Profiles     []WorkflowProfile `json:"profiles"` // in meta's order: the first is the default
-	Workers      int               `json:"workers"`  // how many crew workers may run at once: the box's memory allows some, and the maxWorkers setting may allow fewer
-	Timeout      int               `json:"timeout"`  // seconds an agent() worker may run when the script sets no timeout: the timeout setting
+	Run           WorkflowRunID     `json:"run"`
+	Subscription  SubscriptionID    `json:"subscription,omitempty"`
+	Name          string            `json:"name"`
+	Script        string            `json:"script"`
+	Version       int               `json:"version"`
+	Paused        bool              `json:"paused"`
+	PausedSteps   []string          `json:"pausedSteps,omitempty"`
+	ReleasedSteps []string          `json:"releasedSteps,omitempty"`
+	Args          string            `json:"args,omitempty"`
+	Profiles      []WorkflowProfile `json:"profiles"` // in meta's order: the first is the default
+	Workers       int               `json:"workers"`  // how many crew workers may run at once: the box's memory allows some, and the maxWorkers setting may allow fewer
+	Timeout       int               `json:"timeout"`  // seconds an agent() worker may run when the script sets no timeout: the timeout setting
 }
 
 // WorkflowReload hands a crew's box a newer version of its script. The engine sends the run's current version on each channel,
@@ -333,7 +335,7 @@ type WorkflowStateResponse struct {
 // WorkflowSteerRequest addresses one running worker by label or unique key prefix.
 type WorkflowSteerRequest struct {
 	Run  WorkflowRunID `json:"run" desc:"Run ID; steer, pause, unpause and reload also accept the run session name"`
-	Step string        `json:"step" desc:"Running worker label or unique key prefix; pause and unpause may omit it for the whole run"`
+	Step string        `json:"step" desc:"Running worker label or unique key prefix"`
 	Text string        `json:"text"`
 }
 type WorkflowSteerResponse = PostResponse
@@ -342,7 +344,11 @@ type WorkflowPauseRequest struct {
 	Run  WorkflowRunID `json:"run" desc:"Run ID; steer, pause, unpause and reload also accept the run session name"`
 	Step string        `json:"step,omitempty" desc:"Running worker label or unique key prefix; pause and unpause may omit it for the whole run"`
 }
-type WorkflowPauseResponse struct{}
+type WorkflowPauseResponse struct {
+	Paused        bool     `json:"paused"`
+	PausedSteps   []string `json:"pausedSteps"`
+	ReleasedSteps []string `json:"releasedSteps"`
+}
 type WorkflowUnpauseRequest = WorkflowPauseRequest
 type WorkflowUnpauseResponse = WorkflowPauseResponse
 

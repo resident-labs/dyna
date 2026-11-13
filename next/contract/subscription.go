@@ -33,14 +33,14 @@ type Subscription struct {
 	Room       RoomID                `json:"room,omitempty"`
 	Session    SessionID             `json:"session,omitempty"`
 	On         []EventType           `json:"on,omitempty"`
-	Where      []string              `json:"where,omitempty"`
+	Where      []string              `json:"where,omitempty" desc:"Filters on repo, author, actor, label, kind or number: key=value, key!=value or text~value; all must hold; kind=a,b matches any."`
 	Every      Duration              `json:"every,omitempty"`
 	Wake       SessionID             `json:"wake,omitempty"`
 	Run        *RunSpec              `json:"run,omitempty"`
-	Workflow   *WorkflowSubscription `json:"workflow,omitempty"`
-	Key        string                `json:"key,omitempty"`
-	Latest     bool                  `json:"latest,omitempty"`
-	Parent     SessionID             `json:"parent,omitempty"`
+	Workflow   *WorkflowSubscription `json:"workflow,omitempty" desc:"{script, args}: each matching event starts a run of script with args.event set. Root or owner, room scope."`
+	Key        string                `json:"key,omitempty" desc:"Runs one at a time per key: a literal, or a template with {repo} and {number}, such as {repo}#{number}."`
+	Latest     bool                  `json:"latest,omitempty" desc:"Keep only the newest waiting event per key; a running run is never replaced."`
+	Parent     SessionID             `json:"parent,omitempty" desc:"The session the runs report to and that may steer them; root by default, or when it has closed."`
 	IncludeOwn bool                  `json:"includeOwn,omitempty" desc:"Own account is the GitHub account Dyna acts as in this room. Allow its comments, reviews and metadata to start workflows; own pushes, merges and CI always may."`
 }
 
@@ -71,14 +71,14 @@ type SubscriptionAddRequest struct {
 	Room       RoomID                `json:"room,omitempty" desc:"A room_… ID, from your instructions. Omitted, it is your own room."`
 	Session    string                `json:"session,omitempty" desc:"With scope session, the session it belongs to: a name in the room, such as upstream-sync, or a ses_… ID."`
 	On         []EventType           `json:"on,omitempty" desc:"Event types that fire it, such as github.pr.opened; dyna subscription events lists them. Give on, every, or both for a digest: with both, the matching events gather and each every that has any wakes once with all of them."`
-	Where      []string              `json:"where,omitempty"`
+	Where      []string              `json:"where,omitempty" desc:"Filters on repo, author, actor, label, kind or number: key=value, key!=value or text~value; all must hold; kind=a,b matches any."`
 	Every      Duration              `json:"every,omitempty" desc:"A schedule, as a duration string such as 1h, 15m or 90s, of at least 1m. Give on, every, or both for a digest, which needs wake."`
 	Wake       string                `json:"wake,omitempty" desc:"The session to wake: a name in the room, such as upstream-sync, or a ses_… ID. Give wake, run or workflow."`
 	Run        *RunSpec              `json:"run,omitempty" desc:"A command for a small box: command, image (base, or an image folder of the room's default repository), size (small or agent), and optional host and files. Owner or root only. Give wake, run or workflow."`
-	Workflow   *WorkflowSubscription `json:"workflow,omitempty"`
-	Key        string                `json:"key,omitempty"`
-	Latest     bool                  `json:"latest,omitempty"`
-	Parent     SessionID             `json:"parent,omitempty"`
+	Workflow   *WorkflowSubscription `json:"workflow,omitempty" desc:"{script, args}: each matching event starts a run of script with args.event set. Root or owner, room scope."`
+	Key        string                `json:"key,omitempty" desc:"Runs one at a time per key: a literal, or a template with {repo} and {number}, such as {repo}#{number}."`
+	Latest     bool                  `json:"latest,omitempty" desc:"Keep only the newest waiting event per key; a running run is never replaced."`
+	Parent     SessionID             `json:"parent,omitempty" desc:"The session the runs report to and that may steer them; root by default, or when it has closed."`
 	IncludeOwn bool                  `json:"includeOwn,omitempty" desc:"Own account is the GitHub account Dyna acts as in this room. Allow its comments, reviews and metadata to start workflows; own pushes, merges and CI always may."`
 }
 
@@ -142,6 +142,7 @@ type SubscriptionListResponse struct {
 
 // SubscriptionInfo is one subscription and what it is doing.
 type SubscriptionInfo struct {
+	Waiting      int          `json:"waiting"`
 	Subscription Subscription `json:"subscription"`
 	Disabled     bool         `json:"disabled,omitempty"`
 	Default      bool         `json:"default,omitempty"` // the room's own subscription for root
@@ -154,24 +155,24 @@ type SubscriptionInfo struct {
 
 type SubscriptionFireRequest struct {
 	ID    SubscriptionID  `json:"id"`
-	Key   *string         `json:"key,omitempty"`
+	Key   *string         `json:"key,omitempty" desc:"Use this key as written instead of the one the event resolves to."`
 	Event json.RawMessage `json:"event,omitempty" desc:"An event envelope with top-level type and body; omitted queues a hook.due event. Filters do not apply to a manual fire."`
 }
 type SubscriptionFireResponse struct{}
 
 type SubscriptionUpdateRequest struct {
 	ID       SubscriptionID        `json:"id"`
-	Workflow *WorkflowSubscription `json:"workflow,omitempty"`
-	Where    *[]string             `json:"where,omitempty"`
-	Key      *string               `json:"key,omitempty"`
-	Latest   *bool                 `json:"latest,omitempty"`
-	Parent   *SessionID            `json:"parent,omitempty"`
+	Workflow *WorkflowSubscription `json:"workflow,omitempty" desc:"Replaces script and args together; omitted args become none."`
+	Where    *[]string             `json:"where,omitempty" desc:"Filters on repo, author, actor, label, kind or number: key=value, key!=value or text~value; all must hold; kind=a,b matches any."`
+	Key      *string               `json:"key,omitempty" desc:"Runs one at a time per key: a literal, or a template with {repo} and {number}, such as {repo}#{number}."`
+	Latest   *bool                 `json:"latest,omitempty" desc:"Keep only the newest waiting event per key; a running run is never replaced."`
+	Parent   *SessionID            `json:"parent,omitempty" desc:"The session the runs report to and that may steer them; root by default, or when it has closed."`
 }
 type SubscriptionUpdateResponse struct{}
 
 type SubscriptionStateRequest struct {
 	ID    SubscriptionID  `json:"id"`
-	Key   *string         `json:"key,omitempty"`
+	Key   *string         `json:"key,omitempty" desc:"Read or reset this literal key; omitted lists all stored keys."`
 	Value json.RawMessage `json:"value,omitempty" desc:"Write JSON for the key, up to 64 KiB; null resets it. Omit to read."`
 }
 type SubscriptionKeyState struct {

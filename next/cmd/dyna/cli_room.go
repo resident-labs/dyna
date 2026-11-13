@@ -137,11 +137,16 @@ func roomCommand(getClient func() client) *cobra.Command {
 		if prEvents != "on" && prEvents != "off" {
 			return fmt.Errorf("--pr-events is on or off")
 		}
-		_, err := getClient().RoomRepoAdd(cmd.Context(), contract.RoomRepoAddRequest{Room: contract.RoomID(args[0]), Repo: contract.RepoName(args[1]), Default: makeDefault, PREvents: prEvents == "on"})
+		var events *bool
+		if cmd.Flags().Changed("pr-events") {
+			enabled := prEvents == "on"
+			events = &enabled
+		}
+		_, err := getClient().RoomRepoAdd(cmd.Context(), contract.RoomRepoAddRequest{Room: contract.RoomID(args[0]), Repo: contract.RepoName(args[1]), Default: makeDefault, PREvents: events})
 		return err
 	}}
 	addRepo.Flags().BoolVar(&makeDefault, "default", false, "Make this the room default")
-	addRepo.Flags().StringVar(&prEvents, "pr-events", "off", "Room-wide PR events: on or off (initial census is silent)")
+	addRepo.Flags().StringVar(&prEvents, "pr-events", "off", "Room-wide PR events: on or off; left as it is when omitted.")
 	listRepos := &cobra.Command{Use: "list ROOM", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		r, err := getClient().RoomRepos(cmd.Context(), contract.RoomReposRequest{Room: contract.RoomID(args[0])})
 		if err != nil {

@@ -7,7 +7,7 @@ description: Use when you write, run, resume or reload a Dyna workflow script, o
 
 A workflow is a JavaScript script run by a child session in one box. Every call is a keyed step;
 a restarted box, reload or resume returns unchanged finished steps without rerunning them.
-Use a workflow worker for bounded read-only work with a schema result. Use a child session for its
+Use a workflow worker for bounded work with a schema result. Use a child session for its
 own build, branch or context across wakes. A run is one box: small has 2 CPU, 4 GiB and about 8 workers;
 six child sessions are six boxes.
 

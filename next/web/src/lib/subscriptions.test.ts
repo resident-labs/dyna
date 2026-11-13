@@ -5,7 +5,7 @@ import { hookName, subscriptionAction, subscriptionRows, subscriptionState, subs
 
 const run = { command: ["bash", "watch.sh"], image: "base", size: "small" as const };
 const info = (subscription: Partial<SubscriptionInfo["subscription"]>, rest: Partial<SubscriptionInfo> = {}): SubscriptionInfo =>
-  ({ subscription: { id: "sub_a", scope: "room", ...subscription }, ...rest });
+  ({ waiting: 0, subscription: { id: "sub_a", scope: "room", ...subscription }, ...rest });
 
 test("a subscription says when it fires", () => {
   assert.equal(subscriptionWhen(info({ every: "30m" })), "Every 30 min");

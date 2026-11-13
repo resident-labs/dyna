@@ -6,11 +6,12 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 116
+const schemaVersion = 117
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
+	116: {`ALTER TABLE workflow_runs ADD COLUMN released_steps TEXT NOT NULL DEFAULT '[]'`},
 	114: {`ALTER TABLE workflow_runs RENAME COLUMN subject TO key`, `ALTER TABLE workflow_queue RENAME COLUMN subject TO key`, `ALTER TABLE workflow_state RENAME COLUMN subject TO key`, `ALTER TABLE workflow_subscriptions RENAME COLUMN subject_key TO key`, `ALTER TABLE workflow_subscriptions RENAME COLUMN once_only TO latest`, `ALTER TABLE workflow_subscriptions RENAME COLUMN report TO parent`},
 	115: {`ALTER TABLE workflow_runs ADD COLUMN paused_steps TEXT NOT NULL DEFAULT '[]'`},
 	111: {`ALTER TABLE workflow_runs ADD COLUMN paused INTEGER NOT NULL DEFAULT 0`},

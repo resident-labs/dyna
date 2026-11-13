@@ -3,6 +3,7 @@ package dynamcp
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/box/post"
@@ -64,10 +65,13 @@ func TestSubscriptionFieldsAreDescribed(t *testing.T) {
 		if item.Name != "subscription" {
 			continue
 		}
-		for _, field := range []string{"scope", "room", "session", "on", "where", "every", "wake", "run"} {
+		for _, field := range []string{"scope", "room", "session", "on", "where", "every", "wake", "run", "workflow", "key", "latest", "parent"} {
 			if item.InputSchema.Properties[field].Description == "" {
 				t.Errorf("%s has no description", field)
 			}
+		}
+		if description := item.InputSchema.Properties["key"].Description; !strings.Contains(description, "fire: Use this key as written") || !strings.Contains(description, "add: Runs one at a time") {
+			t.Errorf("action-specific key descriptions lost: %s", description)
 		}
 		for _, field := range []string{"every", "wake", "session"} {
 			if got := item.InputSchema.Properties[field].Type; got != "string" {

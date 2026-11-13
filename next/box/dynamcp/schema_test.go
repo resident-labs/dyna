@@ -1,6 +1,7 @@
 package dynamcp
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -24,6 +25,30 @@ func TestSessionStartHostSchemaAndGuidance(t *testing.T) {
 		return
 	}
 	t.Fatal("session tool missing")
+}
+
+func TestRegistrySchemaIsStable(t *testing.T) {
+	first, _, err := registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := json.Marshal(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 20 {
+		next, _, err := registry()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := json.Marshal(next)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != string(want) {
+			t.Fatal("registry schema changed between builds")
+		}
+	}
 }
 
 func TestRegistryBuilds(t *testing.T) {

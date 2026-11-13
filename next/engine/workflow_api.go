@@ -145,7 +145,7 @@ func (s *Service) WorkflowReload(ctx context.Context, caller contract.Principal,
 	if problem != nil {
 		return response, problem
 	}
-	ended := &contract.Error{Code: contract.ErrConflict, Message: "run " + string(run.ID) + " has ended; reload is for a running run, and run with resume starts a new one from an ended run"}
+	ended := &contract.Error{Code: contract.ErrConflict, Message: "run " + string(run.ID) + " has ended; reload is for a running run, and workflow run with resume starts a new one from an ended run"}
 	meta, repo, problem := s.workflowScript(ctx, run.Room, req.Script)
 	if problem != nil {
 		return response, problem
@@ -194,7 +194,7 @@ func (s *Service) workflowInfo(ctx context.Context, run store.WorkflowRun) (cont
 		return contract.WorkflowInfo{}, err
 	}
 	recorded, err := s.store.SessionBranches(ctx, run.Repo, run.Session)
-	info := contract.WorkflowInfo{Subscription: run.Subscription, Key: run.Key, Run: run.ID, Room: run.Room, Session: run.Session, Name: run.Name, Description: run.Description, Profiles: run.Profiles, Repo: run.Repo, Commit: run.Commit, Version: run.Version, State: run.State, Paused: run.Paused, PausedSteps: run.PausedSteps, Result: run.Result, Steps: summary.Steps, Running: running, Failed: summary.Failed, FailedSteps: summary.FailedSteps, Usage: summary.Usage, Started: run.Started, Ended: run.Ended}
+	info := contract.WorkflowInfo{Subscription: run.Subscription, Key: run.Key, Run: run.ID, Room: run.Room, Session: run.Session, Name: run.Name, Description: run.Description, Profiles: run.Profiles, Repo: run.Repo, Commit: run.Commit, Version: run.Version, State: run.State, Paused: run.Paused, PausedSteps: run.PausedSteps, ReleasedSteps: run.ReleasedSteps, Result: run.Result, Steps: summary.Steps, Running: running, Failed: summary.Failed, FailedSteps: summary.FailedSteps, Usage: summary.Usage, Started: run.Started, Ended: run.Ended}
 	if len(recorded) > 0 {
 		info.Branch = recorded[0]
 	}
@@ -438,7 +438,7 @@ func (s *Service) boxWorkflow(ctx context.Context, run store.WorkflowRun, memory
 		workers = min(workers, effective.MaxWorkers)
 	}
 	summaries := s.profiles.List()
-	workflow := &contract.BoxWorkflow{Subscription: run.Subscription, Run: run.ID, Name: run.Name, Script: run.Script, Version: run.Version, Paused: run.Paused, PausedSteps: run.PausedSteps, Args: run.Args, Workers: workers, Timeout: effective.Timeout}
+	workflow := &contract.BoxWorkflow{Subscription: run.Subscription, Run: run.ID, Name: run.Name, Script: run.Script, Version: run.Version, Paused: run.Paused, PausedSteps: run.PausedSteps, ReleasedSteps: run.ReleasedSteps, Args: run.Args, Workers: workers, Timeout: effective.Timeout}
 	for _, name := range run.Profiles {
 		model, _, err := s.profiles.Model(name)
 		if err != nil {
@@ -594,7 +594,11 @@ func (s *Service) workflowPause(ctx context.Context, caller contract.Principal, 
 	} else {
 		s.live.Publish(run.Room, event, false)
 	}
-	return contract.WorkflowPauseResponse{}, nil
+	updated, err := s.store.WorkflowRun(ctx, run.ID)
+	if err != nil {
+		return contract.WorkflowPauseResponse{}, failure(err)
+	}
+	return contract.WorkflowPauseResponse{Paused: updated.Paused, PausedSteps: updated.PausedSteps, ReleasedSteps: updated.ReleasedSteps}, nil
 }
 
 // managedWorkflow applies the same authority boundary to reload, steering and pause.
@@ -610,6 +614,9 @@ func (s *Service) managedWorkflow(ctx context.Context, caller contract.Principal
 			room = self.Room
 		}
 		run, err = s.store.WorkflowRunNamed(ctx, room, string(id))
+		if errors.Is(err, store.ErrNotFound) {
+			return run, &contract.Error{Code: contract.ErrNotFound, Message: "no workflow run " + string(id) + " in this room; workflow list shows run IDs and session names"}
+		}
 	}
 	if err != nil {
 		return run, failure(err)
@@ -619,7 +626,7 @@ func (s *Service) managedWorkflow(ctx context.Context, caller contract.Principal
 	}
 	// An ended run's session may have closed, which no one manages, so say it ended before checking who asks.
 	if run.State != contract.WorkflowRunning {
-		return run, &contract.Error{Code: contract.ErrConflict, Message: "run " + string(run.ID) + " has ended (" + string(run.State) + "); workflow status shows its result, and run with resume starts a new one from it"}
+		return run, &contract.Error{Code: contract.ErrConflict, Message: "run " + string(run.ID) + " has ended (" + string(run.State) + "); workflow status shows its result, and workflow run with resume starts a new one from it"}
 	}
 	tree, err := s.store.RoomTree(ctx, run.Room)
 	if err != nil {

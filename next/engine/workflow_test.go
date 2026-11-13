@@ -490,3 +490,29 @@ func TestEndedStepAndRunUnpauseClearWorkerHolds(t *testing.T) {
 		t.Fatalf("run unpause: %+v %v", stored, err)
 	}
 }
+
+func TestWorkflowRunPauseReleasesOneWorker(t *testing.T) {
+	w := setupWorkflow(t)
+	started, run := w.start(w.owner, workflowScript)
+	w.step(run, "alpha", contract.WorkflowStepRunning, "")
+	w.step(run, "beta", contract.WorkflowStepRunning, "")
+	if _, problem := w.WorkflowPause(w.ctx, w.owner, contract.WorkflowPauseRequest{Run: started.Run}); problem != nil {
+		t.Fatal(problem)
+	}
+	response, problem := w.WorkflowUnpause(w.ctx, w.owner, contract.WorkflowUnpauseRequest{Run: started.Run, Step: "alpha"})
+	if problem != nil || !response.Paused || !slices.Equal(response.ReleasedSteps, []string{"alpha"}) {
+		t.Fatalf("release: %+v %v", response, problem)
+	}
+	stored, err := w.store.WorkflowRun(w.ctx, started.Run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	box, err := w.boxWorkflow(w.ctx, stored, 16<<30)
+	if err != nil || !box.Paused || !slices.Equal(box.ReleasedSteps, []string{"alpha"}) {
+		t.Fatalf("box: %+v %v", box, err)
+	}
+	_, problem = w.WorkflowPause(w.ctx, w.owner, contract.WorkflowPauseRequest{Run: "unknown-workflow"})
+	if problem == nil || problem.Code != contract.ErrNotFound || !strings.Contains(problem.Message, "workflow list shows") {
+		t.Fatalf("unknown: %v", problem)
+	}
+}

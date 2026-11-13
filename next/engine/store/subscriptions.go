@@ -29,6 +29,7 @@ var ErrSubscriptionTarget = errors.New("subscription session is closed")
 
 // Subscription is a stored subscription with its schedule and its last result.
 type Subscription struct {
+	Waiting int
 	contract.Subscription
 	Period    time.Duration // Every, read; zero for an event subscription
 	Disabled  bool
@@ -222,6 +223,9 @@ func loadSubscriptions(ctx context.Context, q sqlQuery, where string, args ...an
 }
 
 func loadSubscriptionParts(ctx context.Context, q sqlQuery, sub *Subscription) error {
+	if err := q.QueryRowContext(ctx, "SELECT COUNT(*) FROM workflow_queue WHERE sub=? AND run=''", sub.ID).Scan(&sub.Waiting); err != nil {
+		return err
+	}
 	var args string
 	var workflow contract.WorkflowSubscription
 	errSpec := q.QueryRowContext(ctx, "SELECT script,args,key,latest,parent,include_own FROM workflow_subscriptions WHERE sub=?", sub.ID).Scan(&workflow.Script, &args, &sub.Key, &sub.Latest, &sub.Parent, &sub.IncludeOwn)
