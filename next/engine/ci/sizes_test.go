@@ -7,6 +7,7 @@ import (
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/harness/testutil"
 )
 
 // Each size is a scale set of its own, named as a workflow's runs-on names it, so GitHub assigns each job to its size.
@@ -30,9 +31,7 @@ func TestSizesMapToScaleSets(t *testing.T) {
 		return f.sets.listening[string(repo)+" "+name]
 	}
 	for _, name := range names {
-		for deadline := time.Now().Add(5 * time.Second); listening(name) == 0 && time.Now().Before(deadline); {
-			time.Sleep(time.Millisecond)
-		}
+		testutil.Eventually(t, 5*time.Second, "scale-set listener "+name, func() bool { return listening(name) != 0 })
 		if n := listening(name); n != 1 {
 			t.Errorf("%s has %d listeners", name, n)
 		}
