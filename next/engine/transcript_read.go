@@ -5,14 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
-	"strings"
 	"unicode/utf8"
+
+	"github.com/resident-labs/dyna/engine/transcriptview"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/harness"
 	"github.com/resident-labs/dyna/harness/pig"
-	"github.com/resident-labs/dyna/room"
 )
 
 const maxTranscriptCallPosts = 8
@@ -91,7 +91,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 		}
 		if req.Step != "" {
 			w.Inputs = nil
-			applyWorkerTurn(&t, worker, w.Started)
+			transcriptview.ApplyWorkerTurn(&t, worker, w.Started)
 		}
 		after := req.AfterItem == ""
 		inputBytes := 0
@@ -102,7 +102,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			if req.Item != "" && req.Item != "input:"+string(input.ID) {
 				continue
 			}
-			value, home, attachments, postData, dataAttachment, err := transcriptInputBody(input)
+			value, home, attachments, postData, dataAttachment, err := transcriptview.InputBody(input)
 			if err != nil {
 				return response, failure(err)
 			}
@@ -123,8 +123,8 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			if post, ok := input.Body.(contract.PostCreated); ok {
 				source = post.Source
 			}
-			read := contract.TranscriptInput{Data: postData, DataAttachment: dataAttachment, Source: source, Home: home, At: input.Time, ID: input.ID, Seq: input.Seq, Room: input.Room, Type: input.Body.EventType(), From: input.From, Text: clipTranscript(value, 512), More: len(value) > 512, Attachments: attachments}
-			read.Data, read.DataRef = transcriptData(read.Data, read.Attachments, read.DataAttachment)
+			read := contract.TranscriptInput{Data: postData, DataAttachment: dataAttachment, Source: source, Home: home, At: input.Time, ID: input.ID, Seq: input.Seq, Room: input.Room, Type: input.Body.EventType(), From: input.From, Text: transcriptview.Clip(value, 512), More: len(value) > 512, Attachments: attachments}
+			read.Data, read.DataRef = transcriptview.Data(read.Data, read.Attachments, read.DataAttachment)
 			encoded, _ := json.Marshal(read)
 			if inputBytes+len(encoded)+1 > maxTranscriptInputBytes && len(t.Inputs) > 0 {
 				t.More = true
@@ -226,7 +226,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 					if err != nil {
 						return response, failure(err)
 					}
-					if err := applyTranscriptSteer(&pageItems[i], event, req.Item != ""); err != nil {
+					if err := transcriptview.ApplySteer(&pageItems[i], event, req.Item != ""); err != nil {
 						return response, failure(err)
 					}
 				}
@@ -248,7 +248,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 					added := false
 					if len(item.Posts) < maxTranscriptCallPosts && item.PostsNext == nil {
 						post := contract.TranscriptItem{ID: string(event.ID), Turn: t.ID, At: event.Time}
-						applyTranscriptPost(&post, event)
+						transcriptview.ApplyPost(&post, event)
 						item.Posts = append(item.Posts, post)
 						encoded, _ := json.Marshal(item.TranscriptItem)
 						if len(encoded) > 80<<10 {
@@ -327,12 +327,12 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 						}
 					}
 					item := contract.TranscriptItem{ID: string(post.ID), Index: index, Turn: t.ID, At: post.Time}
-					applyTranscriptPost(&item, post)
+					transcriptview.ApplyPost(&item, post)
 					t.Items = append(t.Items, item)
 				}
 			}
 
-			budgetTranscriptTurn(&t, req, 180<<10)
+			transcriptview.BudgetTurn(&t, req, 180<<10)
 			if len(posts) > 0 {
 				kept := make(map[string]bool, len(t.Items))
 				nested := make(map[string]bool)
@@ -390,17 +390,6 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 	return response, nil
 }
 
-// applyWorkerTurn makes a crew's turn read as one worker: its times, and its prompt as what it read. The crew's turn is the
-// script's, so its outcome says nothing about this worker. The run page shows the step's own.
-func applyWorkerTurn(t *contract.TranscriptTurn, worker store.WorkerTranscript, started contract.Event) {
-	step := worker.Step
-	t.Started, t.Ended, t.DurationMS, t.Outcome, t.Cause = step.Started, nil, 0, "", ""
-	if !step.Ended.IsZero() {
-		t.Ended, t.DurationMS = &step.Ended, step.Ended.Sub(step.Started).Milliseconds()
-	}
-	t.Inputs = []contract.TranscriptInput{{ID: contract.EventID("step:" + step.Key), At: step.Started, Room: started.Room, Type: contract.PostCreated{}.EventType(), From: contract.Principal{Kind: contract.PrincipalSession, Session: worker.Session}, Text: harness.Mask(worker.Prompt)}}
-}
-
 func transcriptChunk(response contract.TranscriptReadResponse, value string, offset int) (contract.TranscriptReadResponse, *contract.Error) {
 	if offset > len(value) || !utf8.ValidString(value[:offset]) {
 		return response, invalid("invalid transcript offset")
@@ -414,197 +403,4 @@ func transcriptChunk(response contract.TranscriptReadResponse, value string, off
 		response.NextOffset = end
 	}
 	return response, nil
-}
-
-func clipTranscript(value string, maxBytes int) string {
-	if len(value) <= maxBytes {
-		return value
-	}
-	return strings.ToValidUTF8(value[:maxBytes], "")
-}
-
-func applyTranscriptPost(item *contract.TranscriptItem, event contract.Event) {
-	post := event.Body.(contract.PostCreated)
-	text := harness.Mask(post.Text)
-	item.Kind, item.Event, item.Room, item.Seq, item.Text = contract.TranscriptPost, event.ID, event.Room, event.Seq, clipTranscript(text, 4096)
-	from := event.From
-	item.From = &from
-	item.More = item.More || len(text) > 4096
-	home := post.Home
-	item.Home = &home
-	for _, to := range post.Mentions {
-		if to.Kind == contract.PrincipalSession {
-			item.Mentions = append(item.Mentions, to.Session)
-		}
-	}
-	item.DataAttachment = post.DataAttachment
-	item.Data, item.DataRef = transcriptData(post.Data, post.Attachments, post.DataAttachment)
-	item.Attachments = sanitizeTranscriptAttachments(post.Attachments)
-}
-
-// transcriptInputBody returns the masked text of an event a session read, with where it was sent and what it carried.
-func transcriptInputBody(input contract.Event) (string, *contract.Conversation, []contract.Attachment, contract.JSONData, *int, error) {
-	body := input.Body
-	var postData contract.JSONData
-	var dataAttachment *int
-	var finalFiles []contract.Attachment
-	if ended, ok := body.(contract.TurnEnded); ok {
-		postData, finalFiles, dataAttachment = ended.Data, ended.Attachments, ended.DataAttachment
-		ended.Data, ended.Attachments, ended.DataAttachment = "", nil, nil
-		body = ended
-	}
-	data, err := json.Marshal(body)
-	if err != nil {
-		return "", nil, nil, "", nil, err
-	}
-	value := string(data)
-	var home *contract.Conversation
-	attachments := sanitizeTranscriptAttachments(finalFiles)
-	if post, ok := input.Body.(contract.PostCreated); ok {
-		value = post.Text
-		postData, dataAttachment = post.Data, post.DataAttachment
-		home = &post.Home
-		attachments = sanitizeTranscriptAttachments(post.Attachments)
-	}
-	if answer, ok := input.Body.(contract.QuestionAnswered); ok {
-		if value, err = room.RenderDelivery(answer); err != nil {
-			return "", nil, nil, "", nil, err
-		}
-		home = &contract.Conversation{Kind: contract.ConversationDM, Session: answer.Session}
-	}
-	return harness.Mask(value), home, attachments, postData, dataAttachment, nil
-}
-
-// applyTranscriptSteer fills a steer from its event. Pi's record holds the frame the session read, not what the owner wrote.
-func applyTranscriptSteer(item *pig.TranscriptItem, event contract.Event, full bool) error {
-	value, home, attachments, postData, dataAttachment, err := transcriptInputBody(event)
-	if err != nil {
-		return err
-	}
-	from := event.From
-	item.Event, item.Type, item.Room, item.Seq, item.At, item.From, item.Home, item.Attachments = event.ID, event.Body.EventType(), event.Room, event.Seq, event.Time, &from, home, attachments
-	item.DataAttachment = dataAttachment
-	item.Data, item.DataRef = transcriptData(postData, attachments, dataAttachment)
-	item.Text, item.More = value, false
-	if !full {
-		item.Text, item.More = clipTranscript(value, 4096), len(value) > 4096
-	}
-	return nil
-}
-
-func sanitizeTranscriptAttachments(attachments []contract.Attachment) []contract.Attachment {
-	attachments = slices.Clone(attachments)
-	for i := range attachments {
-		a := &attachments[i]
-		a.Name = clipTranscript(harness.Mask(a.Name), 128)
-		a.Media = clipTranscript(harness.Mask(a.Media), 128)
-		if a.Visual != nil {
-			visual := *a.Visual
-			visual.Checks = slices.Clone(visual.Checks)
-			a.Visual = &visual
-			a.Visual.Title = clipTranscript(harness.Mask(a.Visual.Title), 128)
-			for j := range a.Visual.Checks {
-				a.Visual.Checks[j].Detail = clipTranscript(harness.Mask(a.Visual.Checks[j].Detail), 128)
-			}
-		}
-	}
-	return attachments
-}
-
-// budgetTranscriptTurn retains the final text, then the newest mandatory items,
-// then tools. Mandatory continuations advance forward and contain no tools.
-func budgetTranscriptTurn(t *contract.TranscriptTurn, req contract.TranscriptReadRequest, budget int) {
-	items := t.Items
-	t.Items = nil
-	base, _ := json.Marshal(t)
-	size := len(base) + 512 // Reserve cursor and JSON framing bytes.
-	stepSize := 0
-	keep := make([]bool, len(items))
-	mandatory := func(item contract.TranscriptItem) bool {
-		return item.Kind != contract.TranscriptTool || len(item.Posts) > 0 || item.PostsOmitted > 0
-	}
-	add := func(i int) bool {
-		data, _ := json.Marshal(items[i])
-		stepBytes := 0
-		if req.Turn != "" && (items[i].Kind == contract.TranscriptTool || items[i].Kind == contract.TranscriptPost) {
-			step, _ := json.Marshal(pig.TranscriptStep(items[i]))
-			stepBytes = len(step) + 1
-		}
-		if size+len(data)+1 > budget || size+len(data)+1+stepSize+stepBytes > 250<<10 {
-			return false
-		}
-		keep[i] = true
-		size += len(data) + 1
-		stepSize += stepBytes
-		return true
-	}
-	if req.Page == contract.TranscriptPageMandatoryItems {
-		for i, item := range items {
-			if item.Index < req.Cursor || !mandatory(item) {
-				continue
-			}
-			if !add(i) {
-				if !t.MandatoryItems || item.Index < t.NextMandatory {
-					t.NextMandatory = item.Index
-				}
-				t.MandatoryItems = true
-				break
-			}
-		}
-	} else if req.Page == contract.TranscriptPageMandatoryPosts {
-		for i := len(items) - 1; i >= 0; i-- {
-			add(i)
-		}
-	} else if req.Page == contract.TranscriptPageOlderItems {
-		for i, item := range items {
-			if !add(i) {
-				if !t.OlderItems || item.Index < t.NextItem {
-					t.NextItem = item.Index
-				}
-				t.OlderItems = true
-				break
-			}
-		}
-	} else {
-		// Reserve the final text before selecting newer posts.
-		for i := len(items) - 1; i >= 0; i-- {
-			if items[i].Kind == contract.TranscriptText {
-				add(i)
-				break
-			}
-		}
-		for i := len(items) - 1; i >= 0; i-- {
-			if !mandatory(items[i]) || keep[i] {
-				continue
-			}
-			if !add(i) {
-				if items[i].Kind != contract.TranscriptPost {
-					if !t.MandatoryItems || items[i].Index < t.NextMandatory {
-						t.NextMandatory = items[i].Index
-					}
-					t.MandatoryItems = true
-				}
-			}
-		}
-		for i := len(items) - 1; i >= 0; i-- {
-			if mandatory(items[i]) {
-				continue
-			}
-			if !add(i) {
-				if !t.OlderItems || items[i].Index < t.NextItem {
-					t.NextItem = items[i].Index
-				}
-				t.OlderItems = true
-			}
-		}
-	}
-	for i, item := range items {
-		if keep[i] {
-			t.Items = append(t.Items, item)
-		}
-	}
-	if t.Items == nil {
-		t.Items = []contract.TranscriptItem{}
-	}
-	t.More = t.More || t.OlderItems || t.MandatoryItems || t.MandatoryPosts
 }

@@ -81,39 +81,3 @@ func (s *Service) deliveryData(event contract.Event, text string) string {
 	_ = json.Indent(&pretty, []byte(data), "", "  ") // Validated by the owning boundary.
 	return text + "\n\ndata:\n" + pretty.String()
 }
-
-// transcriptData uses the constructor's associated file index, not a filename or content-hash guess.
-func transcriptData(data contract.JSONData, files []contract.Attachment, associated *int) (contract.JSONData, *contract.PostDataRef) {
-	if len(data) <= 32<<10 || associated == nil {
-		return data, nil
-	}
-	file := files[*associated]
-	decoder := json.NewDecoder(strings.NewReader(string(data)))
-	decoder.UseNumber()
-	token, _ := decoder.Token() // Canonical JSON is already validated.
-	summary := "null"
-	switch value := token.(type) {
-	case json.Delim:
-		count := 0
-		for decoder.More() {
-			if value == '{' {
-				_, _ = decoder.Token()
-			}
-			var child json.RawMessage
-			_ = decoder.Decode(&child) // Skip a child without recursively materializing a Go value.
-			count++
-		}
-		noun := "items"
-		if value == '{' {
-			noun = "keys"
-		}
-		summary = fmt.Sprintf("%d %s", count, noun)
-	case string:
-		summary = "string"
-	case bool:
-		summary = "boolean"
-	case json.Number:
-		summary = "number"
-	}
-	return "", &contract.PostDataRef{File: file, Summary: summary}
-}

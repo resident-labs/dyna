@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/resident-labs/dyna/engine/transcriptview"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -245,8 +246,8 @@ func TestWorkflowPostDataContractsAndForward(t *testing.T) {
 			t.Fatalf("text/absence changed: %+v", post)
 		}
 		item := contract.TranscriptItem{}
-		applyTranscriptPost(&item, event)
-		text, _, files, data, associated, err := transcriptInputBody(event)
+		transcriptview.ApplyPost(&item, event)
+		text, _, files, data, associated, err := transcriptview.InputBody(event)
 		if err != nil || text != req.Text || string(data) != string(post.Data) || string(item.Data) != string(post.Data) || len(files) != len(post.Attachments) || (associated == nil) != (post.DataAttachment == nil) {
 			t.Fatalf("transcript data lost: %+v %s %v", item, data, err)
 		}
@@ -288,12 +289,12 @@ func TestWorkflowHugeTranscriptDataHasReadableReference(t *testing.T) {
 		t.Fatal(err)
 	}
 	item := contract.TranscriptItem{}
-	applyTranscriptPost(&item, event)
+	transcriptview.ApplyPost(&item, event)
 	if len(item.Data) != 0 || item.DataRef == nil || item.DataRef.Summary != "1 keys" {
 		t.Fatalf("oversized data is not referenced: %d inline bytes; reference present=%v", len(item.Data), item.DataRef != nil)
 	}
 	turn := contract.TranscriptTurn{Items: []contract.TranscriptItem{item}}
-	budgetTranscriptTurn(&turn, contract.TranscriptReadRequest{}, 180<<10)
+	transcriptview.BudgetTurn(&turn, contract.TranscriptReadRequest{}, 180<<10)
 	if len(turn.Items) != 1 {
 		t.Fatal("oversized data made post disappear from transcript")
 	}
