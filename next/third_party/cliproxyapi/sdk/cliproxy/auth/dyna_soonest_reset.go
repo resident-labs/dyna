@@ -196,12 +196,24 @@ func (b *quotaResetBoard) runRefresh(provider string, refresh func(string) bool,
 // reads usage publishes here, so a read Home started serves routing too. A failed read
 // publishes nothing, which leaves the last reading in place.
 func (m *Manager) PublishQuotaReading(authID string, hint QuotaResetHint) {
+	m.publishQuotaReading(authID, hint, nil)
+}
+
+// PublishQuotaReadingForAuth binds a completed read to the credential it started on.
+func (m *Manager) PublishQuotaReadingForAuth(auth *Auth, hint QuotaResetHint) {
+	if auth == nil {
+		return
+	}
+	m.publishQuotaReading(auth.ID, hint, &auth.RegistrationEpoch)
+}
+
+func (m *Manager) publishQuotaReading(authID string, hint QuotaResetHint, epoch *uint64) {
 	if m == nil {
 		return
 	}
 	m.mu.RLock()
 	auth := m.auths[authID]
-	if auth == nil {
+	if auth == nil || (epoch != nil && auth.RegistrationEpoch != *epoch) {
 		m.mu.RUnlock()
 		return
 	}
@@ -209,14 +221,16 @@ func (m *Manager) PublishQuotaReading(authID string, hint QuotaResetHint) {
 	m.mu.RUnlock()
 	board := &m.quotaBoard
 	board.mu.Lock()
-	defer board.mu.Unlock()
 	if current, ok := board.hints[authID]; ok && current.registrationEpoch == hint.registrationEpoch && current.ObservedAt.After(hint.ObservedAt) {
+		board.mu.Unlock()
 		return
 	}
 	if board.hints == nil {
 		board.hints = make(map[string]QuotaResetHint)
 	}
 	board.hints[authID] = hint
+	board.mu.Unlock()
+	m.reconcileClaudeQuotaReading(authID, hint)
 }
 
 // SetQuotaRefresher installs the reader that cold picks start. refresh reports whether
