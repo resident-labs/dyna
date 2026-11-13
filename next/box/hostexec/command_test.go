@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/internal/testutil"
 )
 
 // bashOf runs the wrapper of RunArgs without systemd-run, which a test machine may lack: a fake one runs what follows "--".
@@ -237,14 +238,10 @@ func TestRunSurvivesItsCallAndCanBeFollowed(t *testing.T) {
 	tmp := t.TempDir()
 	a := contract.HostexecRunArgs{Argv: []string{"bash", "-c", `touch "$DYNA_OUT/up"; echo one; sleep 1; echo two; exit 7`}, Timeout: 10000}
 	cmd, _ := runIn(t, tmp, a, "op9")
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-		if _, err := os.Stat(filepath.Join(tmp, "dyna-out-op9", "up")); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the command printed nothing")
-		}
-	}
+	testutil.Eventually(t, 5*time.Second, "detached command readiness", func() bool {
+		_, err := os.Stat(filepath.Join(tmp, "dyna-out-op9", "up"))
+		return err == nil
+	})
 	// The runner is in no group or session of the call, which is what a dropped connection ends.
 	pid, err := os.ReadFile(filepath.Join(tmp, "dyna-out-op9.run", "pid"))
 	if err != nil {

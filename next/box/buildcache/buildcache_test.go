@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/resident-labs/dyna/internal/testutil"
 )
 
 func request(t *testing.T, method, url, body string) (int, string) {
@@ -147,19 +149,14 @@ func TestServeAnswersOnItsSocketForAnyUser(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- Serve(ctx, filepath.Join(dir, "store"), socket) }()
-	var info os.FileInfo
-	for range 100 {
-		var err error
-		if info, err = os.Stat(socket); err == nil {
-			break
+	defer func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if info == nil || info.Mode().Perm() != 0o666 {
-		t.Fatalf("socket %v", info)
-	}
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
+	}()
+	testutil.Eventually(t, time.Second, "world-writable cache socket", func() bool {
+		info, err := os.Stat(socket)
+		return err == nil && info.Mode().Perm() == 0o666
+	})
 }
