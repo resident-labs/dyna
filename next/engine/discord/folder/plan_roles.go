@@ -26,7 +26,7 @@ func planRoles(plan *Plan, desired []Role, live Snapshot) error {
 			return fmt.Errorf("server.yaml: role %q is not unique", role.Name)
 		}
 		if len(candidates) == 0 {
-			if role.ID != "" || role.Was != "" {
+			if role.Managed || role.ID != "" || role.Was != "" {
 				return fmt.Errorf("server.yaml: adopted role %q is missing", role.Name)
 			}
 			plan.Changes = append(plan.Changes, Change{Kind: RoleKind, Operation: Create, Name: role.Name, After: role})
@@ -38,6 +38,11 @@ func planRoles(plan *Plan, desired []Role, live Snapshot) error {
 			return fmt.Errorf("server.yaml: role %s adopted twice", current.ID)
 		}
 		matched[current.ID] = true
+		if current.Managed || role.Managed {
+			continue
+		}
+		// Opaque live bits are not owned by the folder and must survive edits.
+		role.OtherPermissions = current.OtherPermissions
 		desiredOrder = append(desiredOrder, RoleReference{ID: current.ID})
 		role.Identity, current.Identity = Identity{}, Identity{}
 		compare(plan, RoleKind, role.Name, candidates[0].ID, role, current)
@@ -46,6 +51,9 @@ func planRoles(plan *Plan, desired []Role, live Snapshot) error {
 	for _, role := range live.Server.Roles {
 		if !matched[role.ID] {
 			plan.Lines = append(plan.Lines, fmt.Sprintf("Role %s is on the server, not in the folder.", role.Name))
+			continue
+		}
+		if role.Managed {
 			continue
 		}
 		currentIndex := len(liveOrder)
