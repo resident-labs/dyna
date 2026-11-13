@@ -163,21 +163,22 @@ func (w *fakeWorker) SessionFile() string                             { return w
 func (w *fakeWorker) Close() error                                    { return nil }
 
 type crewHarness struct {
-	timeout int // the room's default step timeout in seconds, as the engine sends it
-	t       *testing.T
-	work    func(dir string, submit dynaext.Submit)
-	mu      sync.Mutex
-	submits []bool // whether each opened worker had the submit tool
-	journal *fakeJournal
-	started atomic.Int32
-	reply   func(prompt, model string) (contract.TurnEnded, error)
-	act     func(dir, prompt string)
-	hold    func(ctx context.Context, prompt string) error
-	steer   func(contract.TurnInput) error
-	read    func(contract.DeliverySeq) bool
-	workdir string
-	branch  string
-	base    string
+	workflow *contract.BoxWorkflow
+	timeout  int // the room's default step timeout in seconds, as the engine sends it
+	t        *testing.T
+	work     func(dir string, submit dynaext.Submit)
+	mu       sync.Mutex
+	submits  []bool // whether each opened worker had the submit tool
+	journal  *fakeJournal
+	started  atomic.Int32
+	reply    func(prompt, model string) (contract.TurnEnded, error)
+	act      func(dir, prompt string)
+	hold     func(ctx context.Context, prompt string) error
+	steer    func(contract.TurnInput) error
+	read     func(contract.DeliverySeq) bool
+	workdir  string
+	branch   string
+	base     string
 }
 
 func newCrewHarness(t *testing.T) *crewHarness {
@@ -204,8 +205,13 @@ func (h *crewHarness) start(script string, profiles ...contract.WorkflowProfile)
 	}
 	state, sessions := h.t.TempDir(), h.t.TempDir()
 	var opened atomic.Int32
+	workflow := contract.BoxWorkflow{Run: "wf_1", Name: "test", Script: script, Version: 1, Args: `{"topic":"bounds"}`, Profiles: profiles, Workers: 16, Timeout: h.timeout}
+	if h.workflow != nil {
+		workflow = *h.workflow
+		workflow.Script = script
+	}
 	crew, err := NewCrew(CrewConfig{
-		Workflow: contract.BoxWorkflow{Run: "wf_1", Name: "test", Script: script, Version: 1, Args: `{"topic":"bounds"}`, Profiles: profiles, Workers: 16, Timeout: h.timeout},
+		Workflow: workflow,
 		Engine:   h.journal,
 		Open: func(_ context.Context, profile contract.WorkflowProfile, folder, dir string, submit dynaext.Submit) (crewWorker, error) {
 			data, err := os.ReadFile(filepath.Join(folder, "models.json"))

@@ -769,9 +769,6 @@ type agentOpts struct {
 }
 
 func (c *Crew) agentCall(ctx context.Context, call crewCall) crewReply {
-	if err := c.waitUnpaused(ctx, ""); err != nil {
-		return crewReply{Error: "the run stopped"}
-	}
 	var opts agentOpts
 	refused := strictOpts(call.Opts, &opts)
 	var prompt string
@@ -794,6 +791,9 @@ func (c *Crew) agentCall(ctx context.Context, call crewCall) crewReply {
 		info.profile = profile.Name
 	}
 	reply := c.step(ctx, call, info, func(ctx context.Context, key string) stepOutcome {
+		if err := c.waitUnpaused(ctx, key); err != nil {
+			return stepOutcome{reason: "the run stopped"}
+		}
 		if refused != nil {
 			return stepOutcome{reason: "agent options: " + refused.Error()}
 		}
@@ -1032,9 +1032,6 @@ type commandResult struct {
 }
 
 func (c *Crew) commandCall(ctx context.Context, call crewCall) crewReply {
-	if err := c.waitUnpaused(ctx, ""); err != nil {
-		return crewReply{Error: "the run stopped"}
-	}
 	var opts commandOpts
 	refused := strictOpts(call.Opts, &opts)
 	var argv []string
@@ -1049,7 +1046,10 @@ func (c *Crew) commandCall(ctx context.Context, call crewCall) crewReply {
 		detail = script
 	}
 	info := stepInfo{kind: contract.WorkflowStepCommand, feature: contract.WorkflowFeatureRun, label: opts.Label, phase: opts.Phase, detail: detail}
-	return c.step(ctx, call, info, func(ctx context.Context, _ string) stepOutcome {
+	return c.step(ctx, call, info, func(ctx context.Context, key string) stepOutcome {
+		if err := c.waitUnpaused(ctx, key); err != nil {
+			return stepOutcome{reason: "the run stopped"}
+		}
 		if refused != nil {
 			return stepOutcome{reason: "run options: " + refused.Error()}
 		}
