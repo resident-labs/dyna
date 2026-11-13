@@ -201,7 +201,7 @@ type BoxWorkflow struct {
 	Script       string            `json:"script"`
 	Version      int               `json:"version"`
 	Paused       bool              `json:"paused"`
- PausedSteps []string `json:"pausedSteps,omitempty"`
+	PausedSteps  []string          `json:"pausedSteps,omitempty"`
 	Args         string            `json:"args,omitempty"`
 	Profiles     []WorkflowProfile `json:"profiles"` // in meta's order: the first is the default
 	Workers      int               `json:"workers"`  // how many crew workers may run at once: the box's memory allows some, and the maxWorkers setting may allow fewer
