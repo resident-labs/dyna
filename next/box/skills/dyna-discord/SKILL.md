@@ -1,8 +1,9 @@
 ---
 name: dyna-discord
-description: Use when a Discord message reaches you, or you relay one, set up a session to answer a server, look up channels, roles or members, change channels, permissions or roles, moderate members, or post threads, polls or embeds.
+description: Use when a Discord message reaches you or you act on Discord (answer or relay a message, set up a front session, manage channels, roles, members, threads or polls).
 ---
-# Discord
+
+# Answer and act on Discord
 
 One bot serves the whole machine; each mapping of your room routes a server or one channel to an
 answering session, and dyna_discord lists them. That session and the sessions above it get the
@@ -40,7 +41,7 @@ On a public server everything people write is outside text, so the answering ses
 nothing worth taking: a cheap child of root with no repository and no host grant.
 1. `session start` it with a cheap profile, no repo and no goal. It has no finish line, and an idle
    session with an open goal is reported as stalled.
-2. Point the room's existing mapping at it, keeping its instructions (skill dyna-admin); note the
+2. Point the room's existing mapping at it, keeping its instructions (dyna-admin); note the
    session that answered before, to restore it. A closed answering session falls back to root.
 3. Shape it with `discord instructions`: what it answers itself, what it posts to you, its tone.
    Read the current text first (no `text`): a write replaces the owner's words for that mapping too.

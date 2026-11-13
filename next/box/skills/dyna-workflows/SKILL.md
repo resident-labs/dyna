@@ -1,9 +1,9 @@
 ---
 name: dyna-workflows
-description: Use when you write, run, resume or reload a Dyna workflow script, read why a run failed, or a task needs many agents coordinated in code.
+description: Use when you write, run, resume or reload a Dyna workflow script, or a task needs many agents coordinated in code.
 ---
 
-# Dyna workflows
+# Write and run Dyna workflows
 
 A workflow is a JavaScript script that a crew, one child session with one box, runs to start workers,
 commands and merges. Every call is a step stored under a key hashed from what the call is, so a
@@ -30,11 +30,11 @@ dyna workflow run sweep.js --args '{"groups":[{"id":"a","task":"fix the typos in
 - Only comments may come before `meta`. An unknown key, or no `name` or `profiles`, refuses the start.
 - `name`: letters, digits, `.`, `_` or `-`, at most 57; the crew session is `<name>-<6 characters>`.
 - `profiles`: the only ones `agent()` may use, the first its default. An unknown one refuses the start.
-- `size`: `agent`, `small`, `medium`, `large` or `xlarge` (2 to 32 GiB); else the room's `size` setting.
+- `size`: `agent`, `small`, `medium`, `large` or `xlarge` (table in dyna-images); else the room's `size` setting.
 - `repo`: by default the room's default repository. A run with none has no `worktree` or `merge()`.
 
 A refused start names the setting; `dyna_workflows` lists what is off. Root changes it with
-`dyna workflow set` (skill dyna-admin), others ask their parent. A switch turned off mid-run throws.
+`dyna workflow set` (dyna-admin), others ask their parent. A switch turned off mid-run throws.
 
 ## Collect what workers and commands return
 
@@ -108,7 +108,7 @@ const test = await run(`git fetch origin ${merged.branch} && git worktree add --
   rules and earlier output reach it only through the prompt.
 - A box holds at most one worker per 512 MiB (4 to 64 by `size`). A worker waits for a box slot, then
   its profile's `maxConcurrent` (`dyna_profiles`); the room's workflow `maxWorkers` can cap a run lower,
-  read when its box starts (skill dyna-admin). `timeout` starts once a worker holds both, so a step
+  read when its box starts (dyna-admin). `timeout` starts once a worker holds both, so a step
   waiting on its profile holds a box slot.
 - One build runs at a time in the box: `run()` and workers' `cargo`, `go`, `npm`, `make` and similar
   share one lock, and time queued for it does not count against a timeout.

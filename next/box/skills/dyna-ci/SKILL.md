@@ -1,13 +1,13 @@
 ---
 name: dyna-ci
-description: Use when you write, debug or speed up a GitHub Actions workflow, whether its jobs run on Dyna's self-hosted runners or on GitHub-hosted ones
+description: Use when you write, debug or speed up a GitHub Actions workflow, or its runs look stuck.
 ---
 
-# GitHub Actions on Dyna's runners
+# Run GitHub Actions on Dyna's runners
 
 Dyna runs a repository's Actions jobs on its own hosts, one runner container per job, sized by `runs-on` and gone
 when the job ends. The repositories it serves are on dyna_room's "Dyna CI runners" line. Turning a repository's
-runners on or off, its runner maximum, hosts and host rules are root's (skill dyna-admin); others ask their parent.
+runners on or off, its runner maximum, hosts and host rules are root's (dyna-admin); other sessions ask their parent.
 
 ## Route a job
 
