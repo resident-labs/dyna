@@ -888,6 +888,7 @@ type Check struct {
 	Status        string
 	StatusContext bool
 	URL           string
+	Event         string // the event that started its workflow run, such as workflow_dispatch; empty for a check from another app
 }
 
 // Suite is one app's check suite, including runs that have not appeared in the rollup yet.
@@ -898,6 +899,7 @@ type Suite struct {
 	CreatedAt  time.Time
 	Runs       int
 	Workflow   string
+	Event      string // the event that started the workflow run; push when empty
 }
 
 func suiteNodes(suites []Suite, total int) any {
@@ -908,7 +910,11 @@ func suiteNodes(suites []Suite, total int) any {
 	result := nodes(suites, func(s Suite) map[string]any {
 		node := map[string]any{"status": s.Status, "conclusion": s.Conclusion, "app": map[string]any{"slug": s.App}, "createdAt": s.CreatedAt, "checkRuns": map[string]any{"totalCount": s.Runs}}
 		if s.Workflow != "" {
-			node["workflowRun"] = map[string]any{"workflow": map[string]any{"name": s.Workflow}}
+			event := s.Event
+			if event == "" {
+				event = "push"
+			}
+			node["workflowRun"] = map[string]any{"event": event, "workflow": map[string]any{"name": s.Workflow}}
 		}
 		return node
 	})
@@ -965,5 +971,9 @@ func checkNode(c Check) map[string]any {
 			status = "COMPLETED"
 		}
 	}
-	return map[string]any{"__typename": "CheckRun", "name": c.Name, "status": status, "conclusion": c.Conclusion, "detailsUrl": c.URL}
+	node := map[string]any{"__typename": "CheckRun", "name": c.Name, "status": status, "conclusion": c.Conclusion, "detailsUrl": c.URL}
+	if c.Event != "" {
+		node["checkSuite"] = map[string]any{"workflowRun": map[string]any{"event": c.Event}}
+	}
+	return node
 }
