@@ -57,7 +57,7 @@ A failed call throws an `Error` with `.step` and `.reason`. An unknown option fa
 - `post()` returns `{event, seq}`, once however often the script replays. A run reports only to its parent:
   any other mention fails the step. Omitting `data` differs from `null`.
 - `label` names the step in `failedSteps`, `merged`, `conflicts` and `.step`; nothing is read from a step's name.
-   The default is the kind and 80 characters, so set distinct labels.
+  The default is the kind and 80 characters, so set distinct labels.
 - `status(text)` keeps the newest 20 lines of up to 200 characters. It is not a step and does not replay.
 - `Date.now()`, `Math.random()` and `new Date()` without an argument throw: pass time or a seed in `args`.
   The VM has no timers, files or network. A step not awaited is cancelled when the script returns, and fails.
@@ -88,7 +88,8 @@ A return value or step result over 1 MiB as JSON fails it.
 - `merge()` reads `commit`, not the tip of `branch`: after a push, pass `{...result, commit: pushed}`.
   No rebase or repair: hand a conflict to an `agent()` in a worktree whose prompt names both branches.
 
-The main tree stays pinned. Test the merge in a temporary worktree, in one `run()` a replay cannot split:
+The main tree stays pinned. Test the merge in a temporary worktree, in one `run()` a replay cannot split.
+Use the repository's test command; `test.code` is 0 when the merge passes:
 
 ```js
 const dir = `/tmp/check-${merged.commit}`
@@ -103,7 +104,7 @@ const test = await run(`git fetch origin ${merged.branch} && git worktree add --
   steps do not, so pass paths, branches and results in the prompt.
 - A box holds one worker per 512 MiB (4 to 64 by `size`). A worker waits for a box slot, then its profile's
   `maxConcurrent`; the room's `maxWorkers` can cap a run lower, read when its box starts. `timeout` starts once
-  it holds both; waiting on a profile holds a box slot. Root changes settings, others ask their parent.
+  it holds both; waiting on a profile holds a box slot. Root changes `maxWorkers` (dyna-admin); others ask their parent.
 - One build runs at a time: `run()` and workers' `cargo`, `go`, `npm`, `make` and similar share one lock;
   time queued for it does not count against a timeout.
 
@@ -131,6 +132,8 @@ Two identical calls are two steps. Name the commit in a reviewer's prompt so its
 
 ## Shape a run
 
+Useful shapes: write, review (the prompt names the commit) and fix for a fixed number of rounds; several workers
+each trying to refute one finding; finders in rounds until rounds in a row find nothing new.
 `pipeline()` overlaps stages; a barrier pays when a stage needs all earlier results. A run that samples says
 what it left out. A dry run of one group finds wrong prompts cheaply. Give writers separate files.
 A worker that skips everything still reports done: check `files.length` or a schema field. A `done` run
