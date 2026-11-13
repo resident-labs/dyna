@@ -139,3 +139,20 @@ func TestRichMessagesAndOwnReactions(t *testing.T) {
 		}
 	}
 }
+
+func TestMessageNormalizationPreservesClearingEdits(t *testing.T) {
+	body := json.RawMessage(`{"content":"","embeds":[],"components":[],"flags":0}`)
+	normalized, err := (Policy{}).Authorize(Route{Action: MessageEdit}, body, Facts{OwnMessage: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(normalized, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"content", "embeds", "components", "flags", "allowed_mentions"} {
+		if _, ok := fields[key]; !ok {
+			t.Fatalf("lost clearing field %s: %s", key, normalized)
+		}
+	}
+}

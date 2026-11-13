@@ -35,6 +35,10 @@ func bodyInto(body json.RawMessage, out any) error {
 	if len(body) == 0 {
 		body = json.RawMessage(`{}`)
 	}
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return fmt.Errorf("body must be a JSON object")
+	}
 	if err := exactJSON(json.NewDecoder(bytes.NewReader(body)), reflect.TypeOf(out)); err != nil {
 		return err
 	}
@@ -167,10 +171,7 @@ func (p Policy) Authorize(route Route, body json.RawMessage, facts Facts) (json.
 		if !safeMessage(message) {
 			return deny("message fields and allowed_mentions")
 		}
-		if message.Mentions == nil {
-			message.Mentions = &Mentions{Parse: []string{}}
-		}
-		return json.Marshal(message)
+		return suppressMissingMentions(body, false)
 	case PollExpire:
 		var empty struct{}
 		if !facts.OwnMessage || bodyInto(body, &empty) != nil {
@@ -214,8 +215,29 @@ func (p Policy) Authorize(route Route, body json.RawMessage, facts Facts) (json.
 				thread.Message.Mentions = &Mentions{Parse: []string{}}
 			}
 		}
-		return json.Marshal(thread)
+		return suppressMissingMentions(body, true)
 	default:
 		return deny("writes")
 	}
+}
+
+// Preserve explicitly supplied empty content, rich-message arrays and zero flags
+// when suppressing mentions, so edits can clear those fields too.
+func suppressMissingMentions(body json.RawMessage, thread bool) (json.RawMessage, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		return nil, err
+	}
+	if thread {
+		if message, ok := fields["message"]; ok && string(bytes.TrimSpace(message)) != "null" {
+			normalized, err := suppressMissingMentions(message, false)
+			if err != nil {
+				return nil, err
+			}
+			fields["message"] = normalized
+		}
+	} else if mentions, ok := fields["allowed_mentions"]; !ok || string(mentions) == "null" {
+		fields["allowed_mentions"] = json.RawMessage(`{"parse":[]}`)
+	}
+	return json.Marshal(fields)
 }
