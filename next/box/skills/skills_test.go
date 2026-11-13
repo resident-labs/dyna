@@ -83,11 +83,12 @@ func TestTheWorkflowSkillSaysWhatTheCodeDoes(t *testing.T) {
 		"`JSON.parse(args)`", "`{code, stdout, stderr, durationMs}`", "`check` defaults to `true`", "`{failed: true, step, reason}`",
 		"`{step, text, branch, commit, files}`", "`{step, output, branch, commit, files}`", "`{branch, commit, merged, conflicts}`", "`r.output.issues`",
 		"A crew reports only to its parent", "`merge()` reads `commit`, not the tip of `branch`", "A resume is a new session", "through any chain of resumes",
-		"the run ended first", "`Failed steps (N): <names>`", "`data.json`", "Up to 1024 bytes", "Nothing wakes a worker", "only through the prompt", "one worker per 512 MiB", "holds a box slot",
-		"dry run of one group", "give up in 40 seconds", "still reports done",
+		"the run ended first", "`Failed steps (N): <names>`", "`data.json`", "Up to 1024 bytes", "only through the prompt", "one worker per 512 MiB", "holds a box slot",
+		"dry run of one group", "Do not prohibit the tools a worker needs", "still reports done",
+		"`cwd` is relative to the main tree unless it is", "`maxWorkers`", "git worktree remove --force", "`dyna session stop CREW`",
 		"Reload is for a running run, resume for an ended one", "`dyna workflow reload RUN FILE`", "no second one starts", "runs on until the run ends",
-		"`meta.name`, `meta.repo`, `meta.size` and `meta.gpu` stay", "the run's models follow the new profiles", "the version that started it",
-		"the worker submits a JSON file with its `submit` tool", "`status(text)`", "It is not a step", "`{lane: g.id}`", "options other than `lane`", "nothing is read from a step's name",
+		"script version",
+		"the worker submits as a JSON file", "`status(text)`", "It is not a step", "options other than `lane`", "nothing is read from a step's name",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the skill does not say %q", want)
