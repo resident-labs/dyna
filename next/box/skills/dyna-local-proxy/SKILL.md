@@ -1,6 +1,7 @@
 ---
 name: dyna-local-proxy
-description: Use when the owner wants Claude Code, Codex or another local harness to use Dyna's accounts
+description: Root only. Use when the owner wants Claude Code, Codex or another local harness to use Dyna's accounts.
+dyna-audience: root
 ---
 
 # Point a local harness at Dyna

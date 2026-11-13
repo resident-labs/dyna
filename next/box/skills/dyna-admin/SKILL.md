@@ -1,6 +1,6 @@
 ---
 name: dyna-admin
-description: Root only. Use when a session is refused as owner-only or by a room setting (GitHub writes, hosts, limits, workflows), a request waits for your decision, or the owner asks to change the room or machine (repositories, CI, hosts, profiles, model accounts, add-ons, Discord).
+description: Root only. Use when a call is refused as the owner's or by a room setting, a request waits for your decision, or the owner asks to change a setting (repositories, GitHub writes, CI, hosts, profiles, model accounts, Discord mapping).
 dyna-audience: root
 ---
 
@@ -13,7 +13,8 @@ only the owner holds.
 
 ## Run an owner command
 
-- Use bash with host set to the engine host named in your prompt (its Files line), and run `dyna …`.
+- The owner CLI is `dyna …` run with bash, host set to the engine host named in your prompt (its Files
+  line).
 - ROOM is your room's ID from your prompt's "This session" line; not every command takes the name.
 - `dyna COMMAND --help` is the reference for flags.
 - A refusal of the form "`room.set` is the owner's …" names the method: `room.set` is `dyna room set`.
@@ -48,7 +49,7 @@ unless a paragraph below says otherwise. Read again after the change. Rows marke
 | A child needs a host (deploy, GPU) | `hostexec request_grant`, to the child | `host list` | yours |
 | A session needs another account* | `session set-account SESSION ACCOUNT` | none | yours |
 | Out of quota, or the wrong account* | `account limit ACCOUNT …` | `account list` | every room |
-| An add-on breaks, or only root needs it* | `addon set KIND NAME …` | `skill list` etc. | see below |
+| An add-on breaks, or only root needs it | `addon set KIND NAME …` (dyna-extend) | `skill list` etc. | yours with `--room` |
 | A host is full, degraded or off* | `host set NAME …` | `host list` | every room |
 | A host serves the wrong rooms* | `host limit NAME --room ROOM` or `--all` | Settings > Hosts | every room |
 | A profile's model, ratings or cap | `profile set NAME --FIELD VALUE` | `profile show NAME` | every room |
@@ -73,9 +74,10 @@ settings stay refused with every group on; those go through a host grant and `gh
 **GitHub account.** Attribution is the owner's choice: do not set or change a room's GitHub account. If
 commits read under the wrong name, tell the owner what `room github ROOM` prints.
 
-**Room hosts and limits.** No command prints a room's host rule, so `--only` names the whole rule and your
-report records it. Undo with `--clear` when the room had no rule; ask the owner for an older rule you do not
-know. Boxes already placed stay; `session list` shows where new ones start. `room limit` needs both `--cpus`
+**Room hosts and limits.** No command prints a room's host rule: take the current one from your earlier
+report, the room's state file or the `op.requested` card that set it. `--only` names the whole rule, so
+record the new one there too. Undo with `--clear` when the room had no rule; ask the owner for an older
+rule you do not know. A pool in the rule is dyna-nodes. Boxes already placed stay; `session list` shows where new ones start. `room limit` needs both `--cpus`
 and `--mem` (`0` is unlimited); `room log` type `room.limits_changed` shows the last values set.
 
 **Accounts.** ACCOUNT is the label or ID that `account list` prints; use the ID when labels repeat.
@@ -85,9 +87,6 @@ A session's choice (`session set-account`, SESSION from `session list`) wins ove
 command prints a session's current choice (the owner sees it on its About panel), so set one only on a
 session with none, undo with `session set-account SESSION auto`, and ask the owner to change an existing
 one. Connecting, removing or renaming an account and its key are the owner's, in Settings > Accounts.
-
-**Add-ons.** `addon set KIND NAME [--room ROOM] [--enabled on|off] [--root-only on|off]`: with `--room`
-it changes your room's add-on and is yours; without, a global one for every room. Omitted switches stay.
 
 **Hosts.** `host list` prints each host's agents and ci switches, and its CI scale while ci is on.
 `host set NAME --agents on|off --ci on|off --ci-scale N` changes them; N is an integer from 1 to 4.
