@@ -24,6 +24,13 @@ func (s *Service) DiscordCheck(ctx context.Context, caller contract.Principal, r
 		roomID = resolved
 	}
 	if caller.Kind != contract.PrincipalOwner {
+		scope, problem := s.discordReadScope(ctx, caller)
+		if problem != nil {
+			return contract.DiscordCheckResponse{}, problem
+		}
+		if scope.confined != "" {
+			return contract.DiscordCheckResponse{}, confinedDiscordRefusal()
+		}
 		session, err := s.store.Session(ctx, caller.Session)
 		if err != nil {
 			return contract.DiscordCheckResponse{}, failure(err)

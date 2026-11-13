@@ -1047,7 +1047,7 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 
 		// A confined input is one conversation and one turn. Do not let unrelated input lend
 		// it authority, including steering input arriving while the turn runs.
-		confinedRows, err := tx.QueryContext(ctx, "SELECT d.seq,d.turn FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_kind=? AND d.to_id=? AND (d.state IN ('pending','taken') OR d.turn=?) AND e.type='discord.message' AND json_extract(CAST(e.body AS TEXT),'$.confined')=1", contract.PrincipalSession, session, active)
+		confinedRows, err := tx.QueryContext(ctx, "SELECT d.seq,d.turn FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_kind=? AND d.to_id=? AND (d.state IN ('pending','taken') OR d.turn=?) AND e.type='discord.message' AND (json_extract(CAST(e.body AS TEXT),'$.confined')=1 OR json_extract(CAST(e.body AS TEXT),'$.direct')=1)", contract.PrincipalSession, session, active)
 		if err != nil {
 			return err
 		}

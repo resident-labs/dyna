@@ -12,7 +12,9 @@ func TestDiscordFrontGuard(t *testing.T) {
 		name, policy    string
 		roles           []string
 		owner, confined bool
+		legacy          bool
 	}{
+		{name: "legacy DM", policy: "front:\n  team: [Admin]", confined: true, legacy: true},
 		{name: "guest", policy: "front:\n  team: [Admin]", confined: true},
 		{name: "empty team", policy: "front:\n  team: []", confined: true},
 		{name: "team", policy: "front:\n  team: [Admin]", roles: []string{"10"}},
@@ -41,6 +43,11 @@ func TestDiscordFrontGuard(t *testing.T) {
 				t.Fatalf("confined %v", got)
 			}
 			if err := f.s.store.Write(f.ctx, func(tx *sql.Tx) error {
+				if tc.legacy {
+					if _, err := tx.ExecContext(f.ctx, "UPDATE events SET body=json_remove(json_set(CAST(body AS TEXT),'$.direct',json('true')),'$.confined') WHERE type='discord.message'"); err != nil {
+						return err
+					}
+				}
 				if _, err := tx.ExecContext(f.ctx, "INSERT INTO turns(id,session,started_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,started_seq) VALUES('guard',?,0,'','',0,0,0,0,0)", f.root); err != nil {
 					return err
 				}
@@ -58,6 +65,32 @@ func TestDiscordFrontGuard(t *testing.T) {
 			}
 			if !tc.confined {
 				return
+			}
+			before := f.fake.Requests()
+			for _, call := range []func() *contract.Error{
+				func() *contract.Error {
+					_, p := f.s.DiscordExport(f.ctx, caller, contract.DiscordExportRequest{})
+					return p
+				},
+				func() *contract.Error {
+					_, p := f.s.DiscordPlan(f.ctx, caller, contract.DiscordPlanRequest{})
+					return p
+				},
+				func() *contract.Error {
+					_, p := f.s.DiscordApply(f.ctx, caller, contract.DiscordApplyRequest{})
+					return p
+				},
+				func() *contract.Error {
+					_, p := f.s.DiscordCheck(f.ctx, caller, contract.DiscordCheckRequest{})
+					return p
+				},
+			} {
+				if p := call(); p == nil || p.Message != confinedDiscordRefusal().Message {
+					t.Fatal("unconfined call", p)
+				}
+			}
+			if f.fake.Requests() != before {
+				t.Fatal("confined tool called Discord")
 			}
 			for _, path := range []string{"/api/v10/channels/201/messages", "/api/v10/channels/200/pins"} {
 				if p := f.s.discordScope(f.ctx, caller, "GET", path); p == nil {
