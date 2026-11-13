@@ -8,6 +8,8 @@ export class VoiceCall {
   state: CallState = { status: '', active: false, muted: false, transcript: [] };
   private audio?: AudioHandle;
   private socket?: WebSocket;
+  private working = false;
+  private playing = new Set<string>();
   private item = '';
   private generation = 0;
   private receiptTimer?: ReturnType<typeof setInterval>;
@@ -19,23 +21,21 @@ export class VoiceCall {
     const generation = ++this.generation;
     this.state = { status: 'Opening microphone…', active: true, muted: false, transcript: [] }; this.update();
     try {
-      const played = (item_id: string, audio_end_ms: number) => {
-        if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ type: 'played', item_id, audio_end_ms: Math.floor(audio_end_ms) }));
+      const drained = (id: string) => {
+        this.playing.delete(id);
+        if (!this.playing.size && this.state.active) { this.state.status = this.working ? 'Working with root' : 'Listening'; this.update(); }
       };
       const audio = await openAudio((frame, rate) => {
         if (!this.state.muted && this.socket?.readyState === WebSocket.OPEN && this.state.status !== 'Connecting…') this.socket.send(encodePCMFrame(frame, rate, 24000));
-      }, { started: id => played(id, 0), progress: played, ended: played, cancelled: (id, _reason, ms) => played(id, ms) });
+      }, { started: id => { this.playing.add(id); this.state.status = 'Speaking'; this.update(); }, progress() {}, ended: drained, cancelled: drained });
       if (generation !== this.generation) { audio.close(); return; }
       this.audio = audio;
       this.state.status = 'Connecting…'; this.update();
       const url = new URL('/v1/voice', location.href); url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'; url.searchParams.set('room', room);
       const ws = this.socket = new WebSocket(url); ws.binaryType = 'arraybuffer';
-      let ticks = 0;
       this.receiptTimer = setInterval(() => {
-        audio.reportPlayed();
-        // Empty-item receipts keep a muted, silent page alive as well.
-        if (++ticks % 60 === 0) played('', 0);
-      }, 250);
+        if (this.socket === ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'played', item_id: '', audio_end_ms: 0 }));
+      }, 15000);
       ws.onmessage = event => {
         if (this.socket !== ws || generation !== this.generation) return;
         if (event.data instanceof ArrayBuffer) {
@@ -45,12 +45,16 @@ export class VoiceCall {
         const msg = JSON.parse(event.data);
         switch (msg.type) {
           case 'ready': this.state.status = 'Listening'; break;
-          case 'speech_started': audio.stopPlayback('interrupted'); this.item = ''; this.state.status = 'Listening'; break;
+          case 'speech_started': audio.stopPlayback('interrupted'); this.item = ''; this.working = false; this.state.status = 'Listening'; break;
           case 'transcript':
-            if (msg.role === 'assistant' && msg.item_id) { this.item = msg.item_id; this.state.status = 'Speaking'; }
+            if (msg.role === 'assistant' && msg.item_id) { this.item = msg.item_id; }
             if (msg.text) this.state.transcript.push({ role: msg.role, text: msg.text });
             break;
-          case 'response_done': if (this.item) audio.done(this.item); this.state.status = 'Listening'; break;
+          case 'response_done':
+            this.working = msg.working === true;
+            if (this.item) audio.done(this.item);
+            if (!this.playing.size) this.state.status = this.working ? 'Working with root' : 'Listening';
+            break;
           case 'closed': this.stop(msg.reason || 'Call ended'); break;
         }
         this.update();
@@ -65,6 +69,6 @@ export class VoiceCall {
     clearInterval(this.receiptTimer); this.receiptTimer = undefined;
     this.audio?.close(); this.audio = undefined;
     const ws = this.socket; this.socket = undefined; ws?.close();
-    this.item = ''; this.state.active = false; this.state.status = status; this.update();
+    this.item = ''; this.working = false; this.playing.clear(); this.state.active = false; this.state.status = status; this.update();
   }
 }

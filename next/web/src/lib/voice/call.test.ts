@@ -88,7 +88,8 @@ test('player reports final cumulative duration after the item drains', () => {
   ctx.sources[1].onended?.(); assert.deepEqual(ended, ['one', 300.00000000000006]);
 });
 
-test('call start, microphone mute, interruption and stop release resources', async () => {
+test('call start, microphone mute, interruption and stop release resources', async t => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
   let stopped = false;
   const saved = new Map<string, PropertyDescriptor | undefined>();
   const globals = { AudioContext: Context, AudioWorkletNode: Mic, WebSocket: Socket,
@@ -107,8 +108,14 @@ test('call start, microphone mute, interruption and stop release resources', asy
     ws.event({ type: 'transcript', role: 'assistant', item_id: 'queued', text: '' }); ws.audio();
     Context.last.currentTime = 0.25;
     ws.event({ type: 'speech_started' });
-    assert.ok(ws.receipts().some(r => r.item_id === 'heard' && r.audio_end_ms === 250));
-    assert.ok(ws.receipts().some(r => r.item_id === 'queued' && r.audio_end_ms === 0));
+    assert.deepEqual(ws.receipts(), []); // Item playback no longer reaches the engine.
+    call.mute();
+    t.mock.timers.tick(15000);
+    assert.deepEqual(ws.receipts(), [{ type: 'played', item_id: '', audio_end_ms: 0 }]);
+    assert.ok(Context.last.sources.every(source => source.stopped));
+    ws.event({ type: 'response_done', working: true });
+    assert.equal(call.state.status, 'Working with root');
+    ws.event({ type: 'response_done', working: false });
     assert.equal(call.state.status, 'Listening');
     call.stop(); assert.equal(call.state.active, false); assert.equal(ws.readyState, 3);
     assert.ok(stopped && Context.last.closed);
