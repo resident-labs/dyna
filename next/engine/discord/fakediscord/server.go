@@ -13,20 +13,21 @@ import (
 )
 
 type Server struct {
-	HTTP         *httptest.Server
-	Token        string
-	Messages     chan json.RawMessage
-	Events       chan any
-	mu           sync.Mutex
-	connections  int
-	history      []any
-	historyCalls int
-	requests     int
+	HTTP          *httptest.Server
+	Token         string
+	Messages      chan json.RawMessage
+	UploadedFiles chan string
+	Events        chan any
+	mu            sync.Mutex
+	connections   int
+	history       []any
+	historyCalls  int
+	requests      int
 }
 
 func New(t testing.TB) *Server {
 	t.Helper()
-	s := &Server{Token: "fake-discord-secret", Messages: make(chan json.RawMessage, 64), Events: make(chan any, 64)}
+	s := &Server{Token: "fake-discord-secret", Messages: make(chan json.RawMessage, 64), UploadedFiles: make(chan string, 64), Events: make(chan any, 64)}
 	s.HTTP = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		s.requests++
@@ -51,7 +52,19 @@ func New(t testing.TB) *Server {
 			w.WriteHeader(204)
 		case strings.HasSuffix(r.URL.Path, "/messages") && r.Method == "POST":
 			var body json.RawMessage
-			if json.NewDecoder(r.Body).Decode(&body) != nil {
+			if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+				if err := r.ParseMultipartForm(10 << 20); err != nil {
+					w.WriteHeader(400)
+					return
+				}
+				defer r.MultipartForm.RemoveAll()
+				body = json.RawMessage(r.FormValue("payload_json"))
+				for _, files := range r.MultipartForm.File {
+					for _, file := range files {
+						s.UploadedFiles <- file.Filename
+					}
+				}
+			} else if json.NewDecoder(r.Body).Decode(&body) != nil {
 				w.WriteHeader(400)
 				return
 			}

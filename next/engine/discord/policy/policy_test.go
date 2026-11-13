@@ -42,7 +42,7 @@ func TestWriteMatrix(t *testing.T) {
 		{"DELETE", "channels/3", `{}`, false},
 		{"PUT", "channels/3/permissions/4", `{}`, false},
 		{"POST", "channels/3/messages", `{"content":"hi","allowed_mentions":{"parse":["users"]}}`, true},
-		{"POST", "channels/3/messages", `{"content":"hi"}`, false},
+		{"POST", "channels/3/messages", `{"content":"hi"}`, true},
 		{"PATCH", "channels/3/messages/5", `{"content":"hi","allowed_mentions":{"parse":[]}}`, true},
 		{"POST", "channels/3/messages/bulk-delete", `{}`, false},
 		{"POST", "channels/3/threads", `{"name":"test"}`, true},
@@ -52,7 +52,7 @@ func TestWriteMatrix(t *testing.T) {
 		{"PUT", "channels/3/messages/pins/5", `{}`, true},
 		{"POST", "channels/3/messages/5/crosspost", `{}`, false},
 		{"POST", "channels/3/followers", `{}`, false},
-		{"POST", "channels/3/polls/5/expire", `{}`, false},
+		{"POST", "channels/3/polls/5/expire", `{}`, true},
 		{"POST", "channels/3/webhooks", `{}`, false},
 		{"GET", "channels/3/webhooks", `{}`, false},
 		{"GET", "guilds/1/webhooks", `{}`, false},
@@ -105,6 +105,37 @@ func TestJSONCaseAndDuplicatesCannotShadowCaps(t *testing.T) {
 	for _, body := range []string{`{"communication_disabled_until":"` + until + `","COMMUNICATION_DISABLED_UNTIL":null}`, `{"communication_disabled_until":"` + until + `","communication_disabled_until":null}`} {
 		if e := p.Write("PATCH", "/api/v10/guilds/1/members/2", json.RawMessage(body), Facts{Now: time.Now()}); e == nil {
 			t.Fatalf("accepted %s", body)
+		}
+	}
+}
+
+func TestRichMessagesAndOwnReactions(t *testing.T) {
+	caps := Policy{}
+	for _, body := range []string{`{"embeds":[{"title":"Build","fields":[{"name":"Status","value":"green"}]}]}`, `{"poll":{"question":{"text":"Ready?"},"answers":[{"poll_media":{"text":"Yes"}}],"duration":24}}`, `{"components":[{"type":1,"components":[{"type":2,"style":5,"label":"Docs","url":"https://example.com"}]}]}`, `{"sticker_ids":["123"],"flags":4100}`} {
+		for _, action := range []Action{MessageCreate, MessageEdit} {
+			normalized, err := caps.Authorize(Route{Action: action}, json.RawMessage(body), Facts{OwnMessage: true})
+			if err != nil || !strings.Contains(string(normalized), `"allowed_mentions":{"parse":[]}`) {
+				t.Fatalf("%s: %s %v", action, normalized, err)
+			}
+		}
+	}
+	for _, body := range []string{`{"tts":true}`, `{"attachments":[]}`, `{"flags":64}`, `{"flags":4097}`, `{"embeds":[null]}`, `{"poll":[]}`, `{"components":[1]}`, `{"embeds":[{},{},{},{},{},{},{},{},{},{},{}]}`} {
+		if err := caps.Write("POST", "/api/v10/channels/3/messages", json.RawMessage(body), Facts{}); err == nil {
+			t.Fatalf("accepted %s", body)
+		}
+	}
+	for _, path := range []string{"/api/v10/channels/3/messages/5/reactions/x/@me", "/api/v10/channels/3/messages/5/reactions/x/2", "/api/v10/channels/3/messages/5/reactions/x", "/api/v10/channels/3/messages/5/reactions"} {
+		for _, method := range []string{"PUT", "DELETE"} {
+			err := caps.Write(method, path, nil, Facts{})
+			if (err == nil) != strings.HasSuffix(path, "/@me") {
+				t.Fatalf("%s %s: %v", method, path, err)
+			}
+		}
+	}
+	for _, own := range []bool{false, true} {
+		err := caps.Write("POST", "/api/v10/channels/3/polls/5/expire", nil, Facts{OwnMessage: own})
+		if (err == nil) != own {
+			t.Fatalf("poll own=%v: %v", own, err)
 		}
 	}
 }

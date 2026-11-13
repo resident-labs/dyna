@@ -48,6 +48,16 @@ func (s *Service) discordClient(ctx context.Context, caller contract.Principal) 
 
 // discordScope checks the URL's resource against all routes, including channel overrides.
 func (s *Service) discordScope(ctx context.Context, caller contract.Principal, method, path string, bodies ...json.RawMessage) *contract.Error {
+	if problem := s.discordBodyScope(ctx, caller, method, path, bodies...); problem != nil {
+		return problem
+	}
+	var body json.RawMessage
+	if len(bodies) > 0 {
+		body = bodies[0]
+	}
+	return s.discordCap(ctx, caller, method, path, body)
+}
+func (s *Service) discordBodyScope(ctx context.Context, caller contract.Principal, method, path string, bodies ...json.RawMessage) *contract.Error {
 	if problem := s.discordURLScope(ctx, caller, method, path); problem != nil {
 		return problem
 	}
@@ -111,11 +121,7 @@ func (s *Service) discordScope(ctx context.Context, caller contract.Principal, m
 			return problem
 		}
 	}
-	var body json.RawMessage
-	if len(bodies) > 0 {
-		body = bodies[0]
-	}
-	return s.discordCap(ctx, caller, method, path, body)
+	return nil
 }
 func (s *Service) discordURLScope(ctx context.Context, caller contract.Principal, method, path string) *contract.Error {
 	// Public API paths are validated and normalized by DiscordAPI; other callers
@@ -218,9 +224,14 @@ func (s *Service) DiscordAPI(ctx context.Context, caller contract.Principal, req
 	}
 	u.Path = "/api/v10" + path
 	req.Path = u.String()
-	if problem := s.discordScope(ctx, caller, req.Method, req.Path, req.Body); problem != nil {
+	if problem := s.discordBodyScope(ctx, caller, req.Method, req.Path, req.Body); problem != nil {
 		return contract.DiscordAPIResponse{}, problem
 	}
+	normalized, problem := s.discordPrepare(ctx, caller, req.Method, req.Path, req.Body)
+	if problem != nil {
+		return contract.DiscordAPIResponse{}, problem
+	}
+	req.Body = normalized
 	result, err := client.API(ctx, req.Method, req.Path, req.Body, req.Reason)
 	if err != nil {
 		return contract.DiscordAPIResponse{}, failure(err)

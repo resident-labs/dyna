@@ -18,46 +18,46 @@ func (s *Service) DiscordPolicy(ctx context.Context, caller contract.Principal, 
 	if root {
 		roomID = req.Room
 		if roomID != "" {
-			resolved, _, e := s.store.ResolveRoom(ctx, string(roomID))
-			if e != nil {
+			resolved, _, err := s.store.ResolveRoom(ctx, string(roomID))
+			if err != nil {
 				return contract.DiscordPolicyResponse{}, invalid("unknown room")
 			}
 			roomID = resolved
 		}
 	} else {
-		session, e := s.store.Session(ctx, caller.Session)
-		if e != nil {
-			return contract.DiscordPolicyResponse{}, failure(e)
+		session, err := s.store.Session(ctx, caller.Session)
+		if err != nil {
+			return contract.DiscordPolicyResponse{}, failure(err)
 		}
 		roomID = session.Room
-		tree, e := s.store.RoomTree(ctx, roomID)
-		if e != nil {
-			return contract.DiscordPolicyResponse{}, failure(e)
+		tree, err := s.store.RoomTree(ctx, roomID)
+		if err != nil {
+			return contract.DiscordPolicyResponse{}, failure(err)
 		}
 		root = tree.Root() == caller.Session
 		if !root {
-			if _, p := s.discordClient(ctx, caller); p != nil {
-				return contract.DiscordPolicyResponse{}, p
+			if _, resolvedPolicy := s.discordClient(ctx, caller); resolvedPolicy != nil {
+				return contract.DiscordPolicyResponse{}, resolvedPolicy
 			}
 		}
 	}
 	if req.Text != nil && !root {
 		return contract.DiscordPolicyResponse{}, forbidden()
 	}
-	routes, e := s.store.DiscordRoutes(ctx, roomID)
-	if e != nil {
-		return contract.DiscordPolicyResponse{}, failure(e)
+	routes, err := s.store.DiscordRoutes(ctx, roomID)
+	if err != nil {
+		return contract.DiscordPolicyResponse{}, failure(err)
 	}
 	var selected *store.DiscordRoute
 	for i := range routes {
-		r := &routes[i]
-		if r.Channel != "" || (req.Server != "" && r.Guild != req.Server) {
+		mapping := &routes[i]
+		if mapping.Channel != "" || (req.Server != "" && mapping.Guild != req.Server) {
 			continue
 		}
 		if selected != nil {
 			return contract.DiscordPolicyResponse{}, invalid("server is required when several servers are mapped")
 		}
-		selected = r
+		selected = mapping
 	}
 	if selected == nil {
 		return contract.DiscordPolicyResponse{}, invalid("no whole-server mapping matches")
@@ -65,9 +65,15 @@ func (s *Service) DiscordPolicy(ctx context.Context, caller contract.Principal, 
 	if req.Text == nil {
 		return contract.DiscordPolicyResponse{Text: selected.Policy}, nil
 	}
-	p, e := policy.Decode(*req.Text)
-	if e != nil {
-		return contract.DiscordPolicyResponse{}, invalid(e.Error())
+	return s.setDiscordPolicy(ctx, *selected, *req.Text)
+}
+
+// setDiscordPolicy is the text-and-route entry point shared with the future discord apply.
+func (s *Service) setDiscordPolicy(ctx context.Context, route store.DiscordRoute, text string) (contract.DiscordPolicyResponse, *contract.Error) {
+	selected := &route
+	resolvedPolicy, err := policy.Decode(text)
+	if err != nil {
+		return contract.DiscordPolicyResponse{}, invalid(err.Error())
 	}
 	server, ok := s.discordDirectory.Server(selected.Guild)
 	if !ok {
@@ -88,97 +94,99 @@ func (s *Service) DiscordPolicy(ctx context.Context, caller contract.Principal, 
 		}
 		return matches[0], nil
 	}
-	if p.Log != "" {
-		p.Log, e = resolveChannel(p.Log, false)
-		if e != nil {
-			return contract.DiscordPolicyResponse{}, invalid(e.Error())
+	if resolvedPolicy.Log != "" {
+		resolvedPolicy.Log, err = resolveChannel(resolvedPolicy.Log, false)
+		if err != nil {
+			return contract.DiscordPolicyResponse{}, invalid(err.Error())
 		}
 	}
-	for i, name := range p.Front.Roles {
+	for i, name := range resolvedPolicy.Front.Roles {
 		matches := []string{}
-		for _, r := range server.Roles {
-			if r.Name == name {
-				matches = append(matches, r.ID)
+		for _, role := range server.Roles {
+			if role.Name == name {
+				matches = append(matches, role.ID)
 			}
 		}
 		if len(matches) != 1 {
 			return contract.DiscordPolicyResponse{}, invalid(fmt.Sprintf("role %q is missing or ambiguous", name))
 		}
-		p.Front.Roles[i] = matches[0]
+		resolvedPolicy.Front.Roles[i] = matches[0]
 	}
-	for i, name := range p.Front.Quiet {
+	for i, name := range resolvedPolicy.Front.Quiet {
 		category := strings.HasSuffix(name, "/*")
-		id, e := resolveChannel(strings.TrimSuffix(name, "/*"), category)
-		if e != nil {
-			return contract.DiscordPolicyResponse{}, invalid(e.Error())
+		id, err := resolveChannel(strings.TrimSuffix(name, "/*"), category)
+		if err != nil {
+			return contract.DiscordPolicyResponse{}, invalid(err.Error())
 		}
 		if category {
 			id += "/*"
 		}
-		p.Front.Quiet[i] = id
+		resolvedPolicy.Front.Quiet[i] = id
 	}
-	data, e := json.Marshal(p)
-	if e != nil {
-		return contract.DiscordPolicyResponse{}, failure(e)
+	data, err := json.Marshal(resolvedPolicy)
+	if err != nil {
+		return contract.DiscordPolicyResponse{}, failure(err)
 	}
-	selected.Policy = *req.Text
+	selected.Policy = text
 	selected.PolicyResolved = string(data)
-	if e := s.store.SetDiscordRoute(ctx, *selected, false); e != nil {
-		return contract.DiscordPolicyResponse{}, failure(e)
+	if err := s.store.SetDiscordRoute(ctx, *selected, false); err != nil {
+		return contract.DiscordPolicyResponse{}, failure(err)
 	}
-	return contract.DiscordPolicyResponse{Text: *req.Text}, nil
+	return contract.DiscordPolicyResponse{Text: text}, nil
 }
 
 func (s *Service) discordCap(ctx context.Context, caller contract.Principal, method, path string, body json.RawMessage) *contract.Error {
-	session, e := s.store.Session(ctx, caller.Session)
-	if e != nil {
-		return failure(e)
+	_, problem := s.discordPrepare(ctx, caller, method, path, body)
+	return problem
+}
+func (s *Service) discordPrepare(ctx context.Context, caller contract.Principal, method, path string, body json.RawMessage) (json.RawMessage, *contract.Error) {
+	session, err := s.store.Session(ctx, caller.Session)
+	if err != nil {
+		return nil, failure(err)
 	}
-	tree, e := s.store.RoomTree(ctx, session.Room)
-	if e != nil {
-		return failure(e)
+	tree, err := s.store.RoomTree(ctx, session.Room)
+	if err != nil {
+		return nil, failure(err)
 	}
 	if tree.Root() == caller.Session {
-		return nil
+		return body, nil
 	}
-	resource, _, _ := strings.Cut(path, "?")
-	a := strings.Split(strings.TrimPrefix(resource, "/api/v10/"), "/")
-	if len(a) < 2 {
-		return forbidden()
-	}
+	route := policy.ParseRoute(method, path)
 	guild := ""
-	if a[0] == "guilds" {
-		guild = a[1]
-	} else if a[0] == "channels" {
-		c, ok := s.discordDirectory.Channel(a[1])
-		if ok {
-			guild = c.Guild
+	switch route.Resource {
+	case policy.Guild:
+		guild = route.ResourceID
+	case policy.Channel:
+		channel, known := s.discordDirectory.Channel(route.ResourceID)
+		if !known {
+			return nil, forbidden()
 		}
+		guild = channel.Guild
 	}
-	routes, e := s.store.DiscordRoutes(ctx, session.Room)
-	if e != nil {
-		return failure(e)
+	routes, err := s.store.DiscordRoutes(ctx, session.Room)
+	if err != nil {
+		return nil, failure(err)
 	}
-	for _, r := range routes {
-		if r.Guild != guild || r.Channel != "" || r.PolicyResolved == "" {
+	for _, mapping := range routes {
+		if mapping.Guild != guild || mapping.Channel != "" || mapping.PolicyResolved == "" {
 			continue
 		}
-		var p policy.Policy
-		if e := json.Unmarshal([]byte(r.PolicyResolved), &p); e != nil {
-			return failure(e)
+		var resolvedPolicy policy.Policy
+		if err := json.Unmarshal([]byte(mapping.PolicyResolved), &resolvedPolicy); err != nil {
+			return nil, failure(err)
 		}
-		if !p.On() {
-			return nil
+		if !resolvedPolicy.On() {
+			return body, nil
 		}
 		facts := policy.Facts{Now: time.Now()}
-		if method == "PATCH" && len(a) == 4 && a[0] == "channels" && a[2] == "messages" {
-			client, e := s.machineDiscordClient(ctx)
-			if e != nil {
-				return failure(e)
+		if route.Action == policy.MessageEdit || route.Action == policy.PollExpire {
+			client, err := s.machineDiscordClient(ctx)
+			if err != nil {
+				return nil, failure(err)
 			}
-			result, e := client.API(ctx, "GET", resource, nil, "")
-			if e != nil {
-				return failure(e)
+			result, err := client.API(ctx, "GET", "/api/v10/channels/"+route.ResourceID+"/messages/"+route.MessageID, nil, "")
+			if err != nil {
+				return nil, failure(err)
 			}
 			var message struct {
 				Author struct {
@@ -186,33 +194,34 @@ func (s *Service) discordCap(ctx context.Context, caller contract.Principal, met
 				} `json:"author"`
 			}
 			if result.Status != 200 || json.Unmarshal(result.Body, &message) != nil {
-				return invalid("cannot verify message ownership")
+				return nil, &contract.Error{Code: contract.ErrForbidden, Message: "cannot verify message ownership"}
 			}
-			bot, e := s.store.DiscordBot(ctx)
-			if e != nil {
-				return failure(e)
+			bot, err := s.store.DiscordBot(ctx)
+			if err != nil {
+				return nil, failure(err)
 			}
 			facts.OwnMessage = message.Author.ID == bot.ID
 		}
-		if len(a) == 6 && a[0] == "guilds" && a[2] == "members" && a[4] == "roles" {
+		if route.Action == policy.MemberRole {
 			server, ok := s.discordDirectory.Server(guild)
 			found := false
 			if ok {
 				for _, role := range server.Roles {
-					if role.ID == a[5] {
+					if role.ID == route.RoleID {
 						facts.RolePermissions = role.Permissions
 						found = true
 					}
 				}
 			}
 			if !found {
-				return invalid("the policy role no longer resolves; ask a moderator or your parent")
+				return nil, &contract.Error{Code: contract.ErrForbidden, Message: "the policy role no longer resolves; ask a moderator or your parent"}
 			}
 		}
-		if e := p.Write(method, path, body, facts); e != nil {
-			return invalid(e.Error())
+		normalized, err := resolvedPolicy.Authorize(route, body, facts)
+		if err != nil {
+			return nil, &contract.Error{Code: contract.ErrForbidden, Message: err.Error()}
 		}
-		return nil
+		return normalized, nil
 	}
-	return nil
+	return body, nil
 }

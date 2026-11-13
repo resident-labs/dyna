@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/discord"
 )
@@ -214,5 +215,90 @@ func TestDiscordPolicyResolvesLiveChannelNames(t *testing.T) {
 	updated := "front: {quiet: [renamed]}"
 	if _, p := f.s.DiscordPolicy(f.ctx, boxCaller(f.root), contract.DiscordPolicyRequest{Text: &updated}); p != nil {
 		t.Fatal(p)
+	}
+}
+
+func TestDiscordPolicyAllowsSendFiles(t *testing.T) {
+	f := discordFixture(t)
+	front := startChild(t, f.s, f.ctx, f.room, "front", f.root)
+	routes, _ := f.s.store.DiscordRoutes(f.ctx, f.room)
+	route := routes[0]
+	route.Session = front
+	if err := f.s.store.SetDiscordRoute(f.ctx, route, false); err != nil {
+		t.Fatal(err)
+	}
+	text := "front: {}"
+	if _, problem := f.s.DiscordPolicy(f.ctx, boxCaller(f.root), contract.DiscordPolicyRequest{Text: &text}); problem != nil {
+		t.Fatal(problem)
+	}
+	f.s.SetLayout(box.Layout{Data: t.TempDir()})
+	hash, size, err := f.s.saveFile(f.ctx, f.room, strings.NewReader("file contents"), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, problem := f.s.DiscordSend(f.ctx, boxCaller(front), contract.DiscordSendRequest{Channel: "200", Text: "attached", Attachments: []contract.Attachment{{Name: "file.txt", SHA256: hash, Bytes: size}}}); problem != nil {
+		t.Fatal(problem)
+	}
+	select {
+	case name := <-f.fake.UploadedFiles:
+		if name != "file.txt" {
+			t.Fatalf("wrong uploaded file: %s", name)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no multipart message")
+	}
+}
+
+func TestDiscordPolicyForwardsRichMessagesAndSuppressedMentions(t *testing.T) {
+	f := discordFixture(t)
+	front := startChild(t, f.s, f.ctx, f.room, "front", f.root)
+	routes, _ := f.s.store.DiscordRoutes(f.ctx, f.room)
+	route := routes[0]
+	route.Session = front
+	if err := f.s.store.SetDiscordRoute(f.ctx, route, false); err != nil {
+		t.Fatal(err)
+	}
+	text := "front: {timeout_max: 1h}"
+	if _, problem := f.s.DiscordPolicy(f.ctx, boxCaller(f.root), contract.DiscordPolicyRequest{Text: &text}); problem != nil {
+		t.Fatal(problem)
+	}
+	for _, body := range []string{`{"embeds":[{"title":"Status"}]}`, `{"poll":{"question":{"text":"Ready?"},"duration":24}}`, `{"components":[{"type":1,"components":[{"type":2,"style":5,"label":"Docs","url":"https://example.com"}]}]}`} {
+		if _, problem := f.s.DiscordAPI(f.ctx, boxCaller(front), contract.DiscordAPIRequest{Method: "POST", Path: "/channels/200/messages", Body: json.RawMessage(body)}); problem != nil {
+			t.Fatal(problem)
+		}
+		select {
+		case forwarded := <-f.fake.Messages:
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(forwarded, &fields); err != nil {
+				t.Fatal(err)
+			}
+			if string(fields["allowed_mentions"]) != `{"parse":[]}` {
+				t.Fatalf("mentions not suppressed: %s", forwarded)
+			}
+			for _, key := range []string{"embeds", "poll", "components"} {
+				if strings.Contains(body, `"`+key+`"`) && len(fields[key]) == 0 {
+					t.Fatalf("lost rich field %s", forwarded)
+				}
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("no forwarded body")
+		}
+	}
+	for _, body := range []string{`{"tts":true}`, `{"attachments":[]}`, `{"flags":64}`, `{"allowed_mentions":{"parse":["everyone"]}}`} {
+		if _, problem := f.s.DiscordAPI(f.ctx, boxCaller(front), contract.DiscordAPIRequest{Method: "POST", Path: "/channels/200/messages", Body: json.RawMessage(body)}); problem == nil || problem.Code != contract.ErrForbidden {
+			t.Fatalf("permission refusal missing for %s: %v", body, problem)
+		}
+	}
+	tooLong := time.Now().Add(2 * time.Hour).Format(time.RFC3339)
+	_, problem := f.s.DiscordAPI(f.ctx, boxCaller(front), contract.DiscordAPIRequest{Method: "PATCH", Path: "/guilds/100/members/2", Body: json.RawMessage(`{"communication_disabled_until":"` + tooLong + `"}`)})
+	if problem == nil || problem.Code != contract.ErrForbidden || problem.Message != "the server's policy lets the answering session time a member out for at most 1h; ask a moderator or your parent" {
+		t.Fatalf("timeout refusal: %v", problem)
+	}
+	f.fake.SetHistory([]any{map[string]any{"id": "300", "author": map[string]string{"id": "900"}}, map[string]any{"id": "301", "author": map[string]string{"id": "2"}}})
+	for _, messageID := range []string{"300", "301"} {
+		_, problem := f.s.DiscordAPI(f.ctx, boxCaller(front), contract.DiscordAPIRequest{Method: "POST", Path: "/channels/200/polls/" + messageID + "/expire"})
+		if (problem == nil) != (messageID == "300") {
+			t.Fatalf("poll %s: %v", messageID, problem)
+		}
 	}
 }

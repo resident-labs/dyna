@@ -7,19 +7,29 @@ import (
 	"io"
 	"reflect"
 	"strconv"
-	"strings"
+
 	"time"
 )
 
-// Write checks a normalized Discord route. Resource scope remains the caller's responsibility.
-// OwnMessage is fetched from Discord, rather than trusted from the request body.
+// Facts contains live Discord metadata, never assertions from a write body.
 type Facts struct {
 	Now             time.Time
 	OwnMessage      bool
 	RolePermissions uint64
 }
 
-const DangerousPermissions uint64 = 1<<3 | 1<<5 | 1<<28 | 1<<4 | 1<<1 | 1<<2 | 1<<40 | 1<<29 | 1<<17
+const (
+	Administrator        uint64 = 1 << 3
+	ManageGuild          uint64 = 1 << 5
+	ManageRoles          uint64 = 1 << 28
+	ManageChannels       uint64 = 1 << 4
+	KickMembers          uint64 = 1 << 1
+	BanMembers           uint64 = 1 << 2
+	ModerateMembers      uint64 = 1 << 40
+	ManageWebhooks       uint64 = 1 << 29
+	MentionEveryone      uint64 = 1 << 17
+	DangerousPermissions        = Administrator | ManageGuild | ManageRoles | ManageChannels | KickMembers | BanMembers | ModerateMembers | ManageWebhooks | MentionEveryone
+)
 
 func bodyInto(body json.RawMessage, out any) error {
 	if len(body) == 0 {
@@ -41,15 +51,20 @@ func bodyInto(body json.RawMessage, out any) error {
 }
 
 type Mentions struct {
-	Parse       []string `json:"parse,omitempty"`
+	Parse       []string `json:"parse"`
 	Users       []string `json:"users,omitempty"`
 	Roles       []string `json:"roles,omitempty"`
 	RepliedUser bool     `json:"replied_user,omitempty"`
 }
 type Message struct {
-	Content   string    `json:"content,omitempty"`
-	Mentions  *Mentions `json:"allowed_mentions,omitempty"`
-	Reference *struct {
+	Poll       json.RawMessage   `json:"poll,omitempty"`
+	Components []json.RawMessage `json:"components,omitempty"`
+	Stickers   []string          `json:"sticker_ids,omitempty"`
+	Flags      uint64            `json:"flags,omitempty"`
+	Embeds     []json.RawMessage `json:"embeds,omitempty"`
+	Content    string            `json:"content,omitempty"`
+	Mentions   *Mentions         `json:"allowed_mentions,omitempty"`
+	Reference  *struct {
 		Message string `json:"message_id"`
 		Channel string `json:"channel_id,omitempty"`
 		Guild   string `json:"guild_id,omitempty"`
@@ -57,136 +72,150 @@ type Message struct {
 	} `json:"message_reference,omitempty"`
 }
 
-func safeMessage(m Message) bool {
-	if m.Mentions == nil {
+func safeMessage(message Message) bool {
+	if message.Flags & ^uint64((1<<2)|(1<<12)) != 0 {
 		return false
 	}
-	if len(m.Mentions.Roles) > 0 {
+	if len(message.Poll) > 0 && bytes.TrimSpace(message.Poll)[0] != '{' {
 		return false
 	}
-	for _, s := range m.Mentions.Parse {
+	for _, component := range message.Components {
+		trimmed := bytes.TrimSpace(component)
+		if len(trimmed) == 0 || trimmed[0] != '{' {
+			return false
+		}
+	}
+	if len(message.Embeds) > 10 {
+		return false
+	}
+	for _, embed := range message.Embeds {
+		trimmed := bytes.TrimSpace(embed)
+		if len(trimmed) == 0 || trimmed[0] != '{' {
+			return false
+		}
+	}
+	if message.Mentions == nil {
+		message.Mentions = &Mentions{Parse: []string{}}
+	}
+	if len(message.Mentions.Roles) > 0 {
+		return false
+	}
+	for _, s := range message.Mentions.Parse {
 		if s != "users" {
 			return false
 		}
 	}
 	return true
 }
-func (p Policy) Write(method, path string, body json.RawMessage, f Facts) error {
-	deny := func(cap string) error {
-		return fmt.Errorf("the server's policy limits the answering session's %s; ask a moderator or your parent", cap)
-	}
-	path, _, _ = strings.Cut(path, "?")
-	a := strings.Split(strings.TrimPrefix(path, "/api/v10/"), "/")
-	if method == "GET" {
-		if len(a) > 2 && a[2] == "webhooks" {
-			return deny("webhook reads")
-		}
-		return nil
-	}
-	if len(a) < 3 {
-		return deny("writes")
-	}
-	if a[0] == "guilds" {
-		if len(a) == 4 && a[2] == "members" && method == "PATCH" {
-			var b struct {
-				Until json.RawMessage `json:"communication_disabled_until"`
-			}
-			if bodyInto(body, &b) != nil || len(b.Until) == 0 {
-				return deny("timeout fields")
-			}
-			if string(b.Until) == "null" {
-				return nil
-			}
-			var text string
-			if json.Unmarshal(b.Until, &text) != nil {
-				return deny("timeout_max")
-			}
-			until, e := time.Parse(time.RFC3339Nano, text)
-			max, _ := time.ParseDuration(p.Front.TimeoutMax)
-			if e != nil || max == 0 || until.After(f.Now.Add(max)) {
-				return deny("timeout_max of " + p.Front.TimeoutMax)
-			}
-			return nil
-		}
-		if len(a) == 6 && a[2] == "members" && a[4] == "roles" && (method == "PUT" || method == "DELETE") {
-			var empty struct{}
-			if bodyInto(body, &empty) != nil {
-				return deny("role fields")
-			}
-			for _, r := range p.Front.Roles {
-				if r == a[5] && f.RolePermissions&DangerousPermissions == 0 {
-					return nil
-				}
-			}
-			return deny("roles and safe role permissions")
-		}
-		return deny("writes")
-	}
-	if a[0] != "channels" {
-		return deny("writes")
-	}
-	if a[2] == "messages" {
-		if len(a) == 3 && method == "POST" {
-			var m Message
-			if bodyInto(body, &m) != nil || !safeMessage(m) {
-				return deny("message fields and allowed_mentions")
-			}
-			return nil
-		}
-		if len(a) == 4 && method == "PATCH" {
-			var m Message
-			if bodyInto(body, &m) != nil || m.Reference != nil || !safeMessage(m) || !f.OwnMessage {
-				return deny("editing its own message")
-			}
-			return nil
-		}
-		if len(a) == 4 && method == "DELETE" {
-			id, e := strconv.ParseUint(a[3], 10, 64)
-			created := time.UnixMilli(int64(id>>22) + 1420070400000)
-			var empty struct{}
-			if !bool(p.Front.Delete) || e != nil || created.Before(f.Now.Add(-14*24*time.Hour)) || bodyInto(body, &empty) != nil {
-				return deny("delete of one message under 14 days")
-			}
-			return nil
-		}
-		if len(a) == 5 && a[3] == "pins" && (method == "PUT" || method == "DELETE") {
-			var empty struct{}
-			if bodyInto(body, &empty) == nil {
-				return nil
-			}
-		}
-		if len(a) == 6 && a[4] == "threads" {
-			return deny("writes")
-		}
-		if len(a) == 5 && a[4] == "threads" && method == "POST" {
-			return p.thread(body, false, deny)
-		}
-		if len(a) >= 5 && a[4] == "reactions" && (method == "PUT" || method == "DELETE") {
-			var empty struct{}
-			if len(a) <= 7 && bodyInto(body, &empty) == nil {
-				return nil
-			}
-		}
-	}
-	if len(a) == 3 && a[2] == "threads" && method == "POST" {
-		return p.thread(body, true, deny)
-	}
-	return deny("writes")
+
+// Write checks a normalized route without retaining its normalized send body.
+func (p Policy) Write(method, path string, body json.RawMessage, facts Facts) error {
+	_, err := p.Authorize(ParseRoute(method, path), body, facts)
+	return err
 }
-func (p Policy) thread(body json.RawMessage, forum bool, deny func(string) error) error {
-	if !p.Front.Threads {
-		return deny("threads")
+
+// Authorize checks a classified route and returns the body to forward. Resource
+// scope remains the engine's responsibility. Missing mentions are suppressed.
+func (p Policy) Authorize(route Route, body json.RawMessage, facts Facts) (json.RawMessage, error) {
+	deny := func(cap string) (json.RawMessage, error) {
+		return nil, fmt.Errorf("the server's policy limits the answering session's %s; ask a moderator or your parent", cap)
 	}
-	var b struct {
-		Name      string   `json:"name"`
-		Archive   int      `json:"auto_archive_duration,omitempty"`
-		Type      int      `json:"type,omitempty"`
-		Invitable *bool    `json:"invitable,omitempty"`
-		Message   *Message `json:"message,omitempty"`
-		Tags      []string `json:"applied_tags,omitempty"`
+	switch route.Action {
+	case Read:
+		return body, nil
+	case WebhookRead:
+		return deny("webhook reads")
+	case MemberTimeout:
+		var timeout struct {
+			Until json.RawMessage `json:"communication_disabled_until"`
+		}
+		if bodyInto(body, &timeout) != nil || len(timeout.Until) == 0 {
+			return deny("timeout fields")
+		}
+		if string(timeout.Until) == "null" {
+			return body, nil
+		}
+		var timestamp string
+		if json.Unmarshal(timeout.Until, &timestamp) != nil {
+			return deny("timeout_max")
+		}
+		until, err := time.Parse(time.RFC3339Nano, timestamp)
+		maximum, _ := time.ParseDuration(p.Front.TimeoutMax)
+		if err != nil || maximum == 0 || until.After(facts.Now.Add(maximum)) {
+			return nil, fmt.Errorf("the server's policy lets the answering session time a member out for at most %s; ask a moderator or your parent", p.Front.TimeoutMax)
+		}
+		return body, nil
+	case MemberRole:
+		var empty struct{}
+		if bodyInto(body, &empty) != nil {
+			return deny("role fields")
+		}
+		for _, roleID := range p.Front.Roles {
+			if roleID == route.RoleID && facts.RolePermissions&DangerousPermissions == 0 {
+				return body, nil
+			}
+		}
+		return deny("roles and safe role permissions")
+	case MessageCreate, MessageEdit:
+		var message Message
+		if bodyInto(body, &message) != nil {
+			return deny("message fields")
+		}
+		if route.Action == MessageEdit && (message.Reference != nil || !facts.OwnMessage) {
+			return deny("editing its own message")
+		}
+		if !safeMessage(message) {
+			return deny("message fields and allowed_mentions")
+		}
+		if message.Mentions == nil {
+			message.Mentions = &Mentions{Parse: []string{}}
+		}
+		return json.Marshal(message)
+	case PollExpire:
+		var empty struct{}
+		if !facts.OwnMessage || bodyInto(body, &empty) != nil {
+			return deny("ending its own poll")
+		}
+		return body, nil
+	case MessageDelete:
+		messageID, err := strconv.ParseUint(route.MessageID, 10, 64)
+		created := time.UnixMilli(int64(messageID>>22) + 1420070400000)
+		var empty struct{}
+		if !bool(p.Front.Delete) || err != nil || created.Before(facts.Now.Add(-14*24*time.Hour)) || bodyInto(body, &empty) != nil {
+			return deny("delete of one message under 14 days")
+		}
+		return body, nil
+	case Pin, Reaction:
+		var empty struct{}
+		if bodyInto(body, &empty) == nil {
+			return body, nil
+		}
+		return deny("pin and reaction fields")
+	case ThreadCreate:
+		if !p.Front.Threads {
+			return deny("threads")
+		}
+		var thread struct {
+			Name      string   `json:"name"`
+			Archive   int      `json:"auto_archive_duration,omitempty"`
+			Type      int      `json:"type,omitempty"`
+			Invitable *bool    `json:"invitable,omitempty"`
+			Message   *Message `json:"message,omitempty"`
+			Tags      []string `json:"applied_tags,omitempty"`
+		}
+		if bodyInto(body, &thread) != nil || thread.Name == "" || (!route.Forum && (thread.Message != nil || len(thread.Tags) > 0)) {
+			return deny("thread fields")
+		}
+		if thread.Message != nil {
+			if !safeMessage(*thread.Message) {
+				return deny("thread message fields")
+			}
+			if thread.Message.Mentions == nil {
+				thread.Message.Mentions = &Mentions{Parse: []string{}}
+			}
+		}
+		return json.Marshal(thread)
+	default:
+		return deny("writes")
 	}
-	if bodyInto(body, &b) != nil || b.Name == "" || (!forum && (b.Message != nil || len(b.Tags) > 0)) || (b.Message != nil && !safeMessage(*b.Message)) {
-		return deny("thread fields")
-	}
-	return nil
 }

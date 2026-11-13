@@ -25,8 +25,8 @@ func (s *Service) discordPolicyInput(ctx context.Context, client *discord.Client
 			continue
 		}
 		var p policy.Policy
-		if e := json.Unmarshal([]byte(r.PolicyResolved), &p); e != nil {
-			return false, e
+		if err := json.Unmarshal([]byte(r.PolicyResolved), &p); err != nil {
+			return false, err
 		}
 		if !p.On() {
 			return true, nil

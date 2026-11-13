@@ -14,21 +14,21 @@ import (
 func (s *Service) DiscordCheck(ctx context.Context, caller contract.Principal, req contract.DiscordCheckRequest) (contract.DiscordCheckResponse, *contract.Error) {
 	roomID := req.Room
 	if caller.Kind == contract.PrincipalOwner && roomID != "" {
-		resolved, _, e := s.store.ResolveRoom(ctx, string(roomID))
-		if e != nil {
+		resolved, _, err := s.store.ResolveRoom(ctx, string(roomID))
+		if err != nil {
 			return contract.DiscordCheckResponse{}, invalid("unknown room")
 		}
 		roomID = resolved
 	}
 	if caller.Kind != contract.PrincipalOwner {
-		session, e := s.store.Session(ctx, caller.Session)
-		if e != nil {
-			return contract.DiscordCheckResponse{}, failure(e)
+		session, err := s.store.Session(ctx, caller.Session)
+		if err != nil {
+			return contract.DiscordCheckResponse{}, failure(err)
 		}
 		roomID = session.Room
-		tree, e := s.store.RoomTree(ctx, roomID)
-		if e != nil {
-			return contract.DiscordCheckResponse{}, failure(e)
+		tree, err := s.store.RoomTree(ctx, roomID)
+		if err != nil {
+			return contract.DiscordCheckResponse{}, failure(err)
 		}
 		if tree.Root() != caller.Session {
 			return contract.DiscordCheckResponse{}, forbidden()
@@ -38,9 +38,9 @@ func (s *Service) DiscordCheck(ctx context.Context, caller contract.Principal, r
 	if problem != nil {
 		return contract.DiscordCheckResponse{}, problem
 	}
-	routes, e := s.store.DiscordRoutes(ctx, roomID)
-	if e != nil {
-		return contract.DiscordCheckResponse{}, failure(e)
+	routes, err := s.store.DiscordRoutes(ctx, roomID)
+	if err != nil {
+		return contract.DiscordCheckResponse{}, failure(err)
 	}
 	guildID := req.Server
 	for _, r := range routes {
@@ -57,21 +57,21 @@ func (s *Service) DiscordCheck(ctx context.Context, caller contract.Principal, r
 		out.Lines = append(out.Lines, "No front policy is set.")
 		return out, nil
 	}
-	p, e := policy.Decode(read.Text)
-	if e != nil {
-		return out, failure(e)
+	p, err := policy.Decode(read.Text)
+	if err != nil {
+		return out, failure(err)
 	}
-	bot, e := s.store.DiscordBot(ctx)
-	if e != nil {
-		return out, failure(e)
+	bot, err := s.store.DiscordBot(ctx)
+	if err != nil {
+		return out, failure(err)
 	}
-	client, e := s.machineDiscordClient(ctx)
-	if e != nil {
-		return out, failure(e)
+	client, err := s.machineDiscordClient(ctx)
+	if err != nil {
+		return out, failure(err)
 	}
-	result, e := client.API(ctx, "GET", "/api/v10/guilds/"+guildID+"/members/"+bot.ID, nil, "")
-	if e != nil {
-		return out, failure(e)
+	result, err := client.API(ctx, "GET", "/api/v10/guilds/"+guildID+"/members/"+bot.ID, nil, "")
+	if err != nil {
+		return out, failure(err)
 	}
 	var member struct {
 		Roles []string `json:"roles"`

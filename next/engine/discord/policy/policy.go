@@ -111,14 +111,14 @@ func Decode(text string) (Policy, error) {
 		return p, err
 	}
 	if p.Front.TimeoutMax != "" {
-		v, e := time.ParseDuration(p.Front.TimeoutMax)
-		if e != nil || v < 0 || v > 28*24*time.Hour {
+		v, err := time.ParseDuration(p.Front.TimeoutMax)
+		if err != nil || v < 0 || v > 28*24*time.Hour {
 			return p, fmt.Errorf("timeout_max must be a duration from 0s to 672h")
 		}
 	}
 	for _, v := range []string{p.Front.Answers.PerMember, p.Front.Answers.PerChannel} {
-		if _, e := Budget(v); e != nil {
-			return p, e
+		if _, err := Budget(v); err != nil {
+			return p, err
 		}
 	}
 	return p, nil

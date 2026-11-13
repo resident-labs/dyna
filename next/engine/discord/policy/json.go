@@ -9,13 +9,14 @@ import (
 
 // exactJSON closes the gap between Go's case-insensitive field matching and
 // Discord's case-sensitive JSON. It also refuses duplicate keys at every depth.
-func exactJSON(d *json.Decoder, t reflect.Type) error {
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
+func exactJSON(decoder *json.Decoder, target reflect.Type) error {
+	for target.Kind() == reflect.Pointer {
+		target = target.Elem()
 	}
-	token, e := d.Token()
-	if e != nil {
-		return e
+	raw := target == reflect.TypeOf(json.RawMessage{})
+	token, err := decoder.Token()
+	if err != nil {
+		return err
 	}
 	delimiter, ok := token.(json.Delim)
 	if !ok {
@@ -24,23 +25,27 @@ func exactJSON(d *json.Decoder, t reflect.Type) error {
 	switch delimiter {
 	case '{':
 		fields := map[string]reflect.Type{}
-		if t.Kind() == reflect.Struct {
-			for i := 0; i < t.NumField(); i++ {
-				f := t.Field(i)
-				name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if target.Kind() == reflect.Struct {
+			for i := 0; i < target.NumField(); i++ {
+				fieldInfo := target.Field(i)
+				name, _, _ := strings.Cut(fieldInfo.Tag.Get("json"), ",")
 				if name != "" && name != "-" {
-					fields[name] = f.Type
+					fields[name] = fieldInfo.Type
 				}
 			}
 		}
 		seen := map[string]bool{}
-		for d.More() {
-			k, e := d.Token()
-			if e != nil {
-				return e
+		for decoder.More() {
+			keyToken, err := decoder.Token()
+			if err != nil {
+				return err
 			}
-			key := k.(string)
+			key := keyToken.(string)
 			field, ok := fields[key]
+			if raw {
+				field = target
+				ok = true
+			}
 			if !ok {
 				return fmt.Errorf("unknown field %q", key)
 			}
@@ -48,22 +53,26 @@ func exactJSON(d *json.Decoder, t reflect.Type) error {
 				return fmt.Errorf("duplicate field %q", key)
 			}
 			seen[key] = true
-			if e := exactJSON(d, field); e != nil {
-				return e
+			if err := exactJSON(decoder, field); err != nil {
+				return err
 			}
 		}
 	case '[':
-		if t.Kind() != reflect.Slice {
+		if !raw && target.Kind() != reflect.Slice {
 			return fmt.Errorf("unexpected array")
 		}
-		for d.More() {
-			if e := exactJSON(d, t.Elem()); e != nil {
-				return e
+		for decoder.More() {
+			element := target
+			if !raw {
+				element = target.Elem()
+			}
+			if err := exactJSON(decoder, element); err != nil {
+				return err
 			}
 		}
 	default:
 		return fmt.Errorf("unexpected JSON delimiter")
 	}
-	_, e = d.Token()
-	return e
+	_, err = decoder.Token()
+	return err
 }
