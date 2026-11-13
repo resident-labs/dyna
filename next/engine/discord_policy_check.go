@@ -12,6 +12,9 @@ import (
 )
 
 func (s *Service) DiscordCheck(ctx context.Context, caller contract.Principal, req contract.DiscordCheckRequest) (contract.DiscordCheckResponse, *contract.Error) {
+	if caller.Kind == contract.PrincipalOwner && req.Room == "" {
+		return contract.DiscordCheckResponse{}, invalid("room is required for owner callers")
+	}
 	roomID := req.Room
 	if caller.Kind == contract.PrincipalOwner && roomID != "" {
 		resolved, _, err := s.store.ResolveRoom(ctx, string(roomID))
@@ -52,7 +55,7 @@ func (s *Service) DiscordCheck(ctx context.Context, caller contract.Principal, r
 	if !ok {
 		return contract.DiscordCheckResponse{}, invalid("server directory unavailable")
 	}
-	out := contract.DiscordCheckResponse{Lines: []string{"Webhook messages and AutoMod alert messages never start a turn.", "Enable the privileged Server Members and Message Content intents in the Discord Developer Portal; the gateway requests both."}}
+	out := contract.DiscordCheckResponse{}
 	if read.Text == "" {
 		out.Lines = append(out.Lines, "No front policy is set.")
 		return out, nil
