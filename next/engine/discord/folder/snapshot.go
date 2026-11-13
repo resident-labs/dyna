@@ -12,13 +12,6 @@ import (
 	"github.com/resident-labs/dyna/engine/discord"
 )
 
-// Snapshot contains configuration only: never messages or role memberships.
-// Entries retain sidebar order; IDs in every entry adopt the live objects.
-type Snapshot struct {
-	Server  Server
-	Entries []Entry
-}
-
 type liveRole struct {
 	ID, Name, Permissions       string
 	Color                       int
@@ -300,7 +293,4 @@ func permissions(raw string) ([]string, error) {
 		return nil, fmt.Errorf("unsupported permission bits %x", n)
 	}
 	return out, nil
-}
-func safeName(s string) bool {
-	return s != "" && s != "." && s != ".." && !strings.ContainsAny(s, "/\\\x00\r\n") && s != "UNMANAGED.md"
 }
