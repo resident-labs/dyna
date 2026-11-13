@@ -120,7 +120,7 @@ func TestEngineWithoutGitHubCredential(t *testing.T) {
 				return
 			}
 		}
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond) // timing: sample responsiveness through the next CI tick.
 	}
 	body, _ := os.ReadFile(logPath)
 	t.Fatalf("engine did not report CI pool off and remain up through another tick:\n%s", body)

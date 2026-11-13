@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/harness/testutil"
+
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine"
 	"github.com/resident-labs/dyna/engine/api"
@@ -169,13 +171,14 @@ func startLocalStack(t *testing.T) *localStack {
 }
 
 func (s *localStack) waitForServe() {
-	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-		if c, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(s.port))); err == nil {
-			_ = c.Close()
-			return
+	testutil.Eventually(s.t, 10*time.Second, "dyna proxy serve", func() bool {
+		c, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(s.port)))
+		if err != nil {
+			return false
 		}
-	}
-	s.t.Fatal("dyna proxy serve did not start")
+		_ = c.Close()
+		return true
+	})
 }
 
 func unixHTTP(socket string) *http.Client {
@@ -432,16 +435,13 @@ func (s *localStack) waitForUsage(want ...contract.ProxyUsage) {
 		}
 		return true
 	}
-	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+	testutil.Eventually(s.t, 10*time.Second, "matching local usage", func() bool {
 		var err error
 		if got, err = s.st.LocalUsage(context.Background()); err != nil {
 			s.t.Fatal(err)
 		}
-		if matches() {
-			return
-		}
-	}
-	s.t.Fatalf("usage = %+v, want %+v", got, want)
+		return matches()
+	})
 }
 
 func TestUsageCountsOnlyTheLocalClient(t *testing.T) {

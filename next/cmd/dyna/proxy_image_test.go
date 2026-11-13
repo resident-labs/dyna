@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/harness/testutil"
+
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 )
@@ -83,7 +85,11 @@ codex-api-key:
 	} {
 		var status int
 		var reply string
-		for ctx.Err() == nil {
+		deadline, _ := ctx.Deadline()
+		testutil.Eventually(t, time.Until(deadline), "successful proxy reply for "+route, func() bool {
+			if err := ctx.Err(); err != nil {
+				t.Fatal(err)
+			}
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://proxy"+route, bytes.NewBufferString(body))
 			if err != nil {
 				t.Fatal(err)
@@ -95,12 +101,9 @@ codex-api-key:
 				data, _ := io.ReadAll(resp.Body)
 				resp.Body.Close()
 				status, reply = resp.StatusCode, string(data)
-				if status == http.StatusOK {
-					break
-				}
 			}
-			time.Sleep(100 * time.Millisecond)
-		}
+			return status == http.StatusOK
+		})
 		if status != http.StatusOK {
 			t.Fatalf("%s: %d %s", route, status, reply)
 		}
