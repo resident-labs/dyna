@@ -130,7 +130,7 @@ func TestWorkflowSubscriptionOwnCommentAndPush(t *testing.T) {
 	}
 	record := func(kinds ...contract.PrChangeKind) {
 		t.Helper()
-		event, err := w.event(w.room, engineSender, contract.PrChanged{Changes: []contract.PrChange{{PR: contract.PrSummary{Repo: "owner/repo", Number: 7}, Kinds: kinds, Comments: []contract.PrComment{{Author: "own", Body: "own review", Outside: false}}}}})
+		event, err := w.event(w.room, engineSender, contract.PrChanged{Changes: []contract.PrChange{{PR: contract.PrSummary{Repo: "owner/repo", Number: 7}, Kinds: kinds, OwnKinds: []contract.PrChangeKind{contract.PrChangeComment}, Comments: []contract.PrComment{{Author: "own", Body: "own review", Outside: false}}}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -213,5 +213,33 @@ func TestWorkflowSubscriptionSplitsBatchedPRsByKey(t *testing.T) {
 	}
 	if n != 2 {
 		t.Fatalf("only %d subjects started", n)
+	}
+}
+
+func TestWorkflowSubscriptionIssueKeysAndOwnComment(t *testing.T) {
+	w := setupWorkflow(t)
+	addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, On: []contract.EventType{"github.issue.changed"}, Workflow: &contract.WorkflowSubscription{Script: workflowScript}, Key: "{repo}/{number}"})
+	event, err := w.event(w.room, engineSender, contract.IssueChanged{Changes: []contract.IssueChange{
+		{Issue: contract.IssueSummary{Repo: "owner/repo", Number: 7}, Kinds: []contract.PrChangeKind{contract.PrChangeComment}, Comments: []contract.PrComment{{Outside: false}}},
+		{Issue: contract.IssueSummary{Repo: "owner/repo", Number: 8}, Kinds: []contract.PrChangeKind{contract.PrChangeComment}, Comments: []contract.PrComment{{Outside: true}}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.store.RecordEvent(w.ctx, event); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.store.DispatchEvents(w.ctx, 1000); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.fireDue(w.ctx); err != nil {
+		t.Fatal(err)
+	}
+	var subject string
+	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT subject FROM workflow_origins").Scan(&subject); err != nil {
+		t.Fatal(err)
+	}
+	if subject != "owner/repo/8" {
+		t.Fatalf("outside issue key %q", subject)
 	}
 }

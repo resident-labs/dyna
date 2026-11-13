@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -22,6 +23,14 @@ func (s *Store) queueWorkflow(ctx context.Context, tx *sql.Tx, sub Subscription,
 			events = append(events, one)
 		}
 	}
+	if changed, ok := event.Body.(contract.IssueChanged); ok {
+		events = nil
+		for _, change := range changed.Changes {
+			one := event
+			one.Body = contract.IssueChanged{Session: changed.Session, Changes: []contract.IssueChange{change}}
+			events = append(events, one)
+		}
+	}
 	for _, event := range events {
 		var repo contract.RepoName
 		var number int
@@ -34,16 +43,8 @@ func (s *Store) queueWorkflow(ctx context.Context, tx *sql.Tx, sub Subscription,
 				for _, kind := range c.Kinds {
 					allowed := true
 					switch string(kind) {
-					case "comment", "changes_requested", "approved":
-						allowed = false
-						for _, comment := range c.Comments {
-							allowed = allowed || comment.Outside
-						}
-					case "metadata":
-						allowed = false
-						for _, action := range c.Actions {
-							allowed = allowed || action.Outside
-						}
+					case "comment", "changes_requested", "approved", "metadata":
+						allowed = !slices.Contains(c.OwnKinds, kind)
 					}
 					if allowed {
 						kinds = append(kinds, kind)
@@ -54,6 +55,29 @@ func (s *Store) queueWorkflow(ctx context.Context, tx *sql.Tx, sub Subscription,
 				}
 				c.Kinds = kinds
 				event.Body = contract.PrChanged{Session: b.Session, Changes: []contract.PrChange{c}}
+			}
+		case contract.IssueChanged:
+			c := b.Changes[0]
+			repo, number = c.Issue.Repo, c.Issue.Number
+			if !sub.IncludeOwn {
+				var kinds []contract.PrChangeKind
+				for _, kind := range c.Kinds {
+					allowed := true
+					switch kind {
+					case contract.PrChangeComment:
+						allowed = slices.ContainsFunc(c.Comments, func(comment contract.PrComment) bool { return comment.Outside })
+					case contract.PrChangeMetadata:
+						allowed = slices.ContainsFunc(c.Actions, func(action contract.GitHubItem) bool { return action.Outside })
+					}
+					if allowed {
+						kinds = append(kinds, kind)
+					}
+				}
+				if len(kinds) == 0 {
+					continue
+				}
+				c.Kinds = kinds
+				event.Body = contract.IssueChanged{Session: b.Session, Changes: []contract.IssueChange{c}}
 			}
 		case contract.CIFinished:
 			repo, number = b.Repo, b.Number
