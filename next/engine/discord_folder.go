@@ -84,6 +84,8 @@ func (s *Service) DiscordExport(ctx context.Context, caller contract.Principal, 
 	if err != nil {
 		return contract.DiscordFolderResponse{}, invalid(err.Error())
 	}
+	s.discordFolderMu.Lock()
+	defer s.discordFolderMu.Unlock()
 	report, err := folder.Export(path, snapshot, req.Force)
 	if err != nil {
 		return contract.DiscordFolderResponse{}, invalid(err.Error())
@@ -97,6 +99,8 @@ func (s *Service) DiscordPlan(ctx context.Context, caller contract.Principal, re
 	if problem != nil {
 		return contract.DiscordFolderResponse{}, problem
 	}
+	s.discordFolderMu.Lock()
+	defer s.discordFolderMu.Unlock()
 	desired, err := folder.Load(path)
 	if err != nil {
 		return contract.DiscordFolderResponse{}, invalid(err.Error())

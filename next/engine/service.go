@@ -83,6 +83,7 @@ type Service struct {
 	githubClients     *prs.Accounts
 	githubChange      sync.Mutex
 	discordChange     sync.Mutex
+	discordFolderMu   sync.Mutex
 	discordTokens     *credential.Files
 	discordEndpoint   string
 	discordDirectory  discord.Directory
