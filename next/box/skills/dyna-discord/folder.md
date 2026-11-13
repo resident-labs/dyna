@@ -69,14 +69,14 @@ naming file and line.
 ## Identity: id, was and UNMANAGED
 - `id: "123"` ties an entry to one Discord object. Export writes it; apply writes it when it creates
   something. With an id, a rename or move on either side is matched, never duplicated.
-- `was: old-name` adopts the object with that name and renames it to the entry's name. Remove the
-  line before you rename the entry again. Rename a channel or category that has an id by renaming
-  its folder. Never set both id and was.
+- `was: old-name` adopts the object with that name and renames it to the entry's name. Before you
+  rename that entry again, replace `was:` with the object's `id:`. Rename a channel or category
+  that has an id by renaming its folder. Never set both id and was.
 - An entry with neither is new: apply creates it. If an object of that name already exists, apply
   refuses until you add its id or a `was:`; it never takes over by name.
 - An adopted object that is gone from the server is a refusal, never a re-create: remove the entry,
   and add it again under a new name if you want a new object. Apply remembers the ids it recorded,
-  so deleting an `id:` line does not detach an entry.
+  so deleting an `id:` line from an entry that keeps its name does not detach it.
 - `UNMANAGED.md` in a category or channel folder excludes it and everything under it; its first
   line is the reason shown in plan. Files left beside it are ignored. Export writes one itself for
   what the format cannot hold (stage and NSFW channels, forum defaults).
@@ -120,10 +120,11 @@ message's identity, kept in the engine: renaming the file posts a new message.
   messages, and refuses a category holding a channel it is not deleting.
 
 ## When someone changes the server by hand
-Nothing reverts on its own. `discord plan` shows a changed channel, category, role or setting as a
-change; `discord apply` puts it back. To keep a hand change, edit the folder to match (for a move
-or rename, move or rename the folder); `discord export` with `force` rewrites files in place but
-does not move or remove folders. A standing message edited or deleted by hand is not noticed:
+Nothing reverts on its own. `discord plan` shows a hand change to anything the folder manages as
+a change, and `discord apply` puts back the fields it applies (not those listed above as not
+applied). To keep a hand change, edit the folder to match: for a move or rename, move or rename
+the folder and fix the `channels:` and `categories:` lists that name it. `discord export` with
+`force` rewrites files in place but does not move or remove folders. A standing message edited or deleted by hand is not noticed:
 plan compares the file with what apply last posted, never with the channel. The last 20 applied
 copies of the folder are in `rooms/ROOM/discord-applied/SERVER_ID/`. `hooks.yaml` is recognized
 but not applied yet.
