@@ -293,8 +293,8 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 				}
 				return errors.New("Discord session invalidated")
 			case 0:
-				if g.Directory != nil {
-					if event, found := g.Directory.serverEvent(p.Type, p.Data); found && !replayed && g.Observe != nil {
+				if g.Directory != nil && !replayed {
+					if event, found := g.Directory.serverEvent(p.Type, p.Data); found && g.Observe != nil {
 						select {
 						case g.serverEvents <- event:
 						default:

@@ -55,6 +55,8 @@ func TestDiscordServerEventsBecomeRoomEvents(t *testing.T) {
 	send("CHANNEL_UPDATE", 0, channel("201", "rules-2", "", 0))
 	send("CHANNEL_UPDATE", 0, channel("201", "rules-2", "200", 0))
 	send("CHANNEL_DELETE", 0, channel("201", "rules-2", "200", 0))
+	send("CHANNEL_CREATE", 5, channel("201", "rules", "", 0)) // the first create again, which must not bring the channel back
+	send("CHANNEL_DELETE", 0, channel("201", "rules", "", 0))
 	send("GUILD_ROLE_CREATE", 0, role("0"))
 	send("GUILD_ROLE_UPDATE", 0, role("8"))
 	send("GUILD_ROLE_UPDATE", 0, role("8")) // nothing changed
@@ -68,7 +70,7 @@ func TestDiscordServerEventsBecomeRoomEvents(t *testing.T) {
 		send("CHANNEL_UPDATE", 0, channel("30"+string(rune('1'+i)), "c"+string(rune('1'+i)), "", i-1))
 	}
 	send("CHANNEL_DELETE", 0, channel("306", "c6", "", 4)) // the last event, so everything before it is stored
-	want := 12 + 1 + 6 + 1
+	want := 17
 	deadline := time.Now().Add(5 * time.Second)
 	for len(serverBodies(t, f, f.room)) < want && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)

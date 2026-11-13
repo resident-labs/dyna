@@ -24,9 +24,10 @@ func TestGatewayCountsServerEventsItCannotHold(t *testing.T) {
 		fake.Dispatches <- fakediscord.Dispatch{Type: "GUILD_MEMBER_ADD", Data: map[string]any{"guild_id": "100", "user": map[string]any{"id": "175928847299117063"}}}
 	}
 	deadline := time.Now().Add(5 * time.Second)
-	for lost.Load() < 100 && time.Now().Before(deadline) {
+	for lost.Load() < 143 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
+	time.Sleep(100 * time.Millisecond) // let the rest of the 400 arrive
 	// One event is held by the blocked consumer and 256 wait, so 400 sent lose 143, or 144 if the consumer was slow to take the first.
 	if got := lost.Load(); got < 143 || got > 144 {
 		t.Fatalf("lost %d, want 143 or 144", got)
