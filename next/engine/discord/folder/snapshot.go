@@ -124,6 +124,10 @@ func ReadManagedSnapshot(ctx context.Context, client *discord.Client, server str
 	if err != nil {
 		return out, err
 	}
+	out.BotRolePosition, err = snapshotBotPosition(ctx, client, server, out.Server.Roles)
+	if err != nil {
+		return out, err
+	}
 	if err := validate(Folder{Server: out.Server, Entries: out.Entries}); err != nil {
 		return out, err
 	}

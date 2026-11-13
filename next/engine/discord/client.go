@@ -20,6 +20,7 @@ type Client struct {
 	notBefore       time.Time
 	HTTP            *http.Client
 	Endpoint, Token string
+	BotID           string
 }
 type Result struct {
 	RetryAfter time.Duration   `json:"-"`
@@ -50,7 +51,8 @@ func (c *Client) API(ctx context.Context, method, path string, body json.RawMess
 }
 
 // ReadConfiguration reads a guild configuration endpoint without the tool API's
-// display truncation. It refuses messages, members, and all non-configuration routes.
+// display truncation. Membership reads are limited to the configured bot itself
+// for role hierarchy; other members, messages and non-configuration routes refuse.
 func (c *Client) ReadConfiguration(ctx context.Context, guild, resource string) (Result, error) {
 	if guild == "" || strings.Trim(guild, "0123456789") != "" {
 		return Result{}, errors.New("invalid guild ID")
@@ -58,7 +60,9 @@ func (c *Client) ReadConfiguration(ctx context.Context, guild, resource string) 
 	switch resource {
 	case "", "/roles", "/channels", "/auto-moderation/rules":
 	default:
-		return Result{}, errors.New("not a configuration resource")
+		if c.BotID == "" || strings.Trim(c.BotID, "0123456789") != "" || resource != "/members/"+c.BotID {
+			return Result{}, errors.New("not a configuration resource")
+		}
 	}
 	return c.request(ctx, "GET", "/api/v10/guilds/"+guild+resource, nil, "application/json", "")
 }

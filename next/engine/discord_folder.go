@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -112,30 +111,6 @@ func (s *Service) DiscordPlan(ctx context.Context, caller contract.Principal, re
 	snapshot, err := folder.ReadManagedSnapshot(ctx, client, route.Guild, desired.Entries)
 	if err != nil {
 		return contract.DiscordFolderResponse{}, invalid(err.Error())
-	}
-	bot, err := s.store.DiscordBot(ctx)
-	if err != nil {
-		return contract.DiscordFolderResponse{}, failure(err)
-	}
-	memberResult, err := client.API(ctx, "GET", "/api/v10/guilds/"+route.Guild+"/members/"+bot.ID, nil, "")
-	if err != nil {
-		return contract.DiscordFolderResponse{}, failure(err)
-	}
-	if memberResult.Status != 200 {
-		return contract.DiscordFolderResponse{}, invalid("cannot read the bot's server roles")
-	}
-	var member struct {
-		Roles []string `json:"roles"`
-	}
-	if err := json.Unmarshal(memberResult.Body, &member); err != nil {
-		return contract.DiscordFolderResponse{}, invalid("cannot decode the bot's server roles")
-	}
-	for _, role := range snapshot.Server.Roles {
-		for _, id := range member.Roles {
-			if role.ID == id && role.Position > snapshot.BotRolePosition {
-				snapshot.BotRolePosition = role.Position
-			}
-		}
 	}
 	snapshot.Policy = route.Policy
 	plan, err := folder.BuildPlan(desired, snapshot)
