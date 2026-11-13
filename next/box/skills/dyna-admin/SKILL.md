@@ -6,10 +6,10 @@ dyna-audience: root
 
 # Run your room's settings
 
-Most of what blocks a session is a setting, and the owner CLI changes it. You hold host exec on the engine
-host, and there plain `dyna …` reaches the owner socket and acts as the owner, so its commands run at once
-and need no approval. Your room's settings are yours to keep right; some settings reach every room, and a
-few changes need a secret only the owner holds.
+Most of what blocks a session is a setting, and the owner CLI changes it. Under host exec on the engine
+host, plain `dyna …` reaches the owner socket and acts as the owner, so its commands run at once with no
+approval. Your room's settings are yours to keep right; some reach every room, and a few need a secret
+only the owner holds.
 
 ## Run an owner command
 
@@ -33,28 +33,28 @@ few changes need a secret only the owner holds.
 
 ## From symptom to setting
 
-"Read" also serves to check the change.
+Before a change, read the current value and save it: giving it back with the same command is the undo,
+unless a paragraph below says otherwise. Read again after the change. Rows marked * have a paragraph.
 
-| You see | Change | Read | Undo | Whose |
-|---|---|---|---|---|
-| GitHub write refused: `writes_off`, `group_off`, `repo_not_allowed` | `room set ROOM --github-writes GROUPS@REPOS` | `context show dyna_room` (GitHub writes line) | the old value, or `--github-writes off` | yours |
-| A repository is not in the room | `room repo add ROOM owner/repo` | `room repo list ROOM` | none: removal is the owner's | yours |
-| Jobs with `runs-on: dyna-…` sit queued | `room repo ci owner/repo --on [--max N]` | `context show dyna_room` (CI runners line) | `room repo ci owner/repo --off` | yours |
-| New boxes wait for a host, or go to the wrong one | `room hosts ROOM --only [POOL,]HOST,…` | `session list` (start host and step) | the old `--only`, or `--clear` | yours |
-| Boxes wait while hosts have room | `room limit ROOM --cpus N --mem SIZE` | `room log`, types `room.limits_changed` | the old values; `0` is unlimited | yours |
-| Workflow start refused, or runs or workers capped | `workflow set --room ROOM SETTING=VALUE` | `workflow settings --room ROOM` | `workflow set --room ROOM --clear SETTING` | yours |
-| A session's recorded branch is wrong | `session set-branch SESSION BRANCH` | the session's prompt ("Your branch") | the old branch | yours |
-| A child needs a host (deploy, GPU, a device) | `hostexec request_grant` tool, to the child | `host list` for names | close the child | yours |
-| A session needs another account | `session set-account SESSION ACCOUNT` | `account list` | `session set-account SESSION auto` | yours |
-| Out of quota, or the room uses the wrong account | `account limit ACCOUNT --rooms … --prefer …` | `account quota`, `account list`, dyna_usage | the old lists | every room |
-| An add-on breaks sessions, or only root needs it | `addon set KIND NAME [--room ROOM] --enabled off` or `--root-only on` | `skill list`, `package list`, `mcp list` | the opposite value | yours with `--room`, else every room |
-| A host is full, degraded, off or has disk low | `host set NAME --agents on\|off --ci on\|off --ci-scale 1-4` | `host list` | the opposite value | every room |
-| A host's create failure blocks boxes | `host set NAME --clear-create-problem` | `host list` | none needed | every room |
-| A host serves the wrong rooms | `host limit NAME --room ROOM` (repeat) or `--all` | not printed by the CLI | the old rooms, or `--all` | every room |
-| A profile has the wrong model, ratings or cap | `profile set NAME --FIELD VALUE` | `profile show NAME` | the old values from `profile show` | every room |
-| The room should answer a Discord server or channel | `room discord ROOM --server ID [--channel ID] [--session NAME]` | `room discord ROOM` | the same flags with `--remove` | yours |
-| Commits or PRs carry the wrong GitHub identity | none: a token goes on stdin | `room github ROOM` | | the owner's |
-| A request waits for a decision | see "Decide sessions' requests" | `op list ROOM` | | yours |
+| You see | Change | Read | Whose |
+|---|---|---|---|
+| GitHub write refused* | `room set ROOM --github-writes GROUPS@REPOS` | the refusal | yours |
+| A repository is not in the room | `room repo add ROOM owner/repo` | `room repo list ROOM` | yours |
+| `runs-on: dyna-…` jobs sit queued | `room repo ci owner/repo --on [--max N]` | dyna_room | yours |
+| New boxes wait or go to the wrong host* | `room hosts ROOM --only [POOL,]HOST,…` | none | yours |
+| Boxes wait while hosts have room* | `room limit ROOM --cpus N --mem SIZE` | `room log` | yours |
+| Workflow refused, or runs capped* | `workflow set --room ROOM SETTING=VALUE` | `workflow settings` | yours |
+| A session's recorded branch is wrong | `session set-branch SESSION BRANCH` | its "Your branch" | yours |
+| A child needs a host (deploy, GPU) | `hostexec request_grant`, to the child | `host list` | yours |
+| A session needs another account* | `session set-account SESSION ACCOUNT` | none | yours |
+| Out of quota, or the wrong account* | `account limit ACCOUNT …` | `account list` | every room |
+| An add-on breaks, or only root needs it* | `addon set KIND NAME …` | `skill list` etc. | see below |
+| A host is full, degraded or off* | `host set NAME …` | `host list` | every room |
+| A host serves the wrong rooms* | `host limit NAME --room ROOM` or `--all` | Settings > Hosts | every room |
+| A profile's model, ratings or cap | `profile set NAME --FIELD VALUE` | `profile show NAME` | every room |
+| The room should answer on Discord* | `room discord ROOM --server ID …` | `room discord ROOM` | yours |
+| Commits carry the wrong GitHub identity | none: a token goes on stdin | `room github ROOM` | the owner's |
+| A request waits for a decision | see "Decide sessions' requests" | `op list ROOM` | yours |
 
 Other subjects have their own skill: adding a skill, package or MCP server is dyna-extend; long-running
 containers are dyna-services; node pools and adding machines are dyna-nodes; box images and compose files
@@ -63,47 +63,64 @@ are dyna-images; a local harness on Dyna's accounts is dyna-local-proxy; stuck s
 ## What the table cannot hold
 
 **GitHub writes.** The groups are `issues`, `pulls`, `projects` and `actions`; REPOS are the room's
-repositories or `*`, as in `issues,pulls@owner/repo` or `issues,pulls,projects,actions@*`. The command
-replaces the whole setting, so read the current line first and give every group and repository you keep.
-`*` means every repository the room lists at the time of each write, so it covers repositories added later.
-A repository must be in the room before the setting can name it: run `room repo add` first. Merges, deletes,
-approving reviews, pushes and file writes through the API, releases and repository settings stay refused
-with every group on; those go through a host grant and `gh` on a host, or to the owner.
+repositories or `*` (every repository the room lists, later ones too), as in `issues,pulls@owner/repo`.
+The command replaces the whole setting, so give every group and repository you keep. The refusal names the
+stored value; dyna_room has a GitHub writes line only while it is on, with `*` expanded, so keep `*` from
+the refusal. A repository must be in the room first. Undo with the saved value or `--github-writes off`.
+Merges, deletes, approving reviews, pushes and file writes through the API, releases and repository
+settings stay refused with every group on; those go through a host grant and `gh` on a host, or to the owner.
 
 **GitHub account.** Attribution is the owner's choice: do not set or change a room's GitHub account. If
 commits read under the wrong name, tell the owner what `room github ROOM` prints.
 
-**Accounts.** ACCOUNT is the label or ID that `account list` prints. `--rooms all` lets an account serve
-every room; `--prefer` names the rooms that use it first while it has quota, and `none` clears that. A
-preferred room must be one the account serves. The method sets both lists at once, so give both flags
-with the values you want kept. A session pin (`session set-account`) wins over a room's preference. SESSION is the
-session's ID, which `session list ROOM` prints. Connecting, reconnecting, removing or renaming an account
-and setting its key are the owner's, in Settings > Accounts.
+**Room hosts and limits.** No command prints a room's host rule, so `--only` names the whole rule and your
+report records it. Undo with `--clear` when the room had no rule; ask the owner for an older rule you do not
+know. Boxes already placed stay; `session list` shows where new ones start. `room limit` needs both `--cpus`
+and `--mem` (`0` is unlimited); `room log` type `room.limits_changed` shows the last values set.
 
-**Hosts.** `host set` and `host limit` change what every room can use. What already runs on a host stays
-there until it stops. A degraded host takes no new boxes until a probe succeeds. Adding or removing a host
-is dyna-nodes.
+**Accounts.** ACCOUNT is the label or ID that `account list` prints; use the ID when labels repeat.
+`account limit ACCOUNT --rooms ROOM,…|all` sets the rooms it serves, `--prefer ROOM,…|none` the served rooms
+that use it first while it has quota. Omitted flags preserve their lists, so change only the list you need.
+A session's choice (`session set-account`, SESSION from `session list`) wins over a room's preference. No
+command prints a session's current choice (the owner sees it on its About panel), so set one only on a
+session with none, undo with `session set-account SESSION auto`, and ask the owner to change an existing
+one. Connecting, removing or renaming an account and its key are the owner's, in Settings > Accounts.
 
-**Room limits.** `room limit` needs both `--cpus` and `--mem`, so give the one you keep as well.
+**Add-ons.** `addon set KIND NAME [--room ROOM] [--enabled on|off] [--root-only on|off]`: with `--room`
+it changes your room's add-on and is yours; without, a global one for every room. Omitted switches stay.
 
-**Workflow settings.** Without `--room`, `workflow set` changes the value for every room that sets none of
-its own; with `--room`, only yours. `dyna workflow set --help` lists the settings.
+**Hosts.** `host list` prints each host's agents and ci switches, and its CI scale while ci is on.
+`host set NAME --agents on|off --ci on|off --ci-scale N` changes them; N is an integer from 1 to 4.
+Turning agents or ci on for an exec-only host also needs `--owner-only-admin`, the owner's word that only
+they administer it: use it only when the owner asked. Do not change a scale you could not read.
+`host set NAME --clear-create-problem` clears a create failure that blocks boxes. What runs on a host stays
+until it stops; a degraded host takes no new boxes until a probe succeeds. Adding a host is dyna-nodes.
+
+**Host rooms.** `host limit` replaces the rooms a host serves. The CLI does not print them; the owner sees
+them as Rooms it serves in Settings > Hosts. Unless the host serves every room, ask the owner for that list
+before you change it, and undo with it or `--all`.
+
+**Discord.** `room discord ROOM` lists the mappings; save the one you change. Undo a new mapping with its
+`--server` (and `--channel`) and `--remove`; undo a change by mapping again with the saved session and
+instructions (`--session NAME --instructions-file FILE`).
+
+**Workflow settings.** Without `--room`, `workflow set` changes every room that sets none of its own;
+`workflow set --help` lists the settings. Undo with `workflow set --room ROOM --clear SETTING`.
 
 ## Decide sessions' requests
 
 A request reaches you as an input "as an approval request", with its card and the line "Decide it with op
-decide, id …". Decide it with the `op decide` tool: approve true, or false with a reason, which the
-requester reads. A pending request expires after 24 hours, except a host grant, which waits until it is
-decided or its session closes. `dyna op list ROOM` on the engine host lists what is pending in the room.
+decide, id …". Decide it with `op decide`; the requester reads your reason. A pending request expires
+after 24 hours, except a host grant, which waits until it is decided or its session closes.
 
 Which kinds you decide: host grants, when you are the nearest session above the requester that holds the
-host; and global add-ons, room host rules and node pools, for each kind your dyna_room section's Approvals
-line gives you. The owner sets those kinds; a request of a kind you do not hold waits for the owner.
+host; and global add-ons, room host rules and node pools, except the kinds your dyna_room section lists
+under "Approvals the owner keeps". With no such line you decide all three; the owner's kinds wait for her.
 
 Decide by reading what the card asks for, not only its reason:
 - **Host grant.** Approve a named host the task needs: a GPU, a device on a desktop, a deploy the room's
   AGENTS.md allows. Deny the engine host and every host (`*`): the card warns that they give full owner
-  power. Run the owner command for the session yourself instead. A grant lasts until the session closes.
+  power. Run the owner command for the session yourself instead.
 - **Global add-on** (a skill, package or MCP server for every room, or its removal). Read the skill text,
   the package source or the MCP command. Approve what is useful beyond this room and does nothing you have
   not read. Deny with "add it to the room without --global" when only this room needs it; a room add needs
@@ -121,5 +138,5 @@ list`, `pool list`, `skill list`, or the requester's next box.
 ## After a change
 
 - Retry the call that was refused, or post to the session that was refused that it can retry.
-- Read the setting again with its Read command, or `context show dyna_room` for room lines.
+- Read the setting again, or `context show dyna_room` for room lines.
 - In your report: what you changed, why, its undo command, and whether it reaches every room.
