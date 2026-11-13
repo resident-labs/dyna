@@ -12,12 +12,17 @@ func validateReferences(folder Folder) error {
 	for _, role := range folder.Server.Roles {
 		roles[role.Name]++
 	}
+	listedCategories := map[string]bool{}
+	for _, name := range folder.Server.Categories {
+		listedCategories[name] = true
+	}
 	children := map[string]map[string]int{}
 	for _, entry := range folder.Entries {
-		if entry.Parent == "" && (entry.Category != nil || entry.Unmanaged != "") {
+		isCategory := entry.Category != nil || (entry.Parent == "" && entry.Unmanaged != "" && listedCategories[entry.Name])
+		if entry.Parent == "" && isCategory {
 			categories[entry.Name]++
 		}
-		if entry.Channel != nil {
+		if entry.Channel != nil || (entry.Unmanaged != "" && !isCategory) {
 			channels[entry.Name]++
 		}
 		if children[entry.Parent] == nil {
