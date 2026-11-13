@@ -94,11 +94,11 @@ func TestTheWorkflowSkillSaysWhatTheCodeDoes(t *testing.T) {
 	for _, want := range []string{
 		"`JSON.parse(args)`", "`{code, stdout, stderr, durationMs}`", "`check` defaults to `true`", "`{failed: true, step, reason}`",
 		"`{step, text, branch, commit, files}`", "`{step, output, branch, commit, files}`", "`{branch, commit, merged, conflicts}`", "`r.output.issues`",
-		"A crew reports only to its parent", "`merge()` reads `commit`, not the tip of `branch`", "A resume is a new session", "through any chain of resumes",
-		"the run ended first", "`Failed steps (N): <names>`", "`data.json`", "Up to 1024 bytes", "only through the prompt", "one worker per 512 MiB", "holds a box slot",
+		"A run reports only to its parent", "`merge()` reads `commit`, not the tip of `branch`", "A resume is a new session", "through any chain of resumes",
+		"the run ended first", "`Failed steps (N): <names>`", "`data.json`", "Up to 1024 bytes", "Workers do not receive engine `dyna_*` sections", "one worker per 512 MiB", "holds a box slot",
 		"dry run of one group", "Do not prohibit the tools a worker needs", "still reports done",
-		"`cwd` is relative to the main tree unless it is", "`maxWorkers`", "git worktree remove --force", "`dyna session stop CREW`",
-		"Reload is for a running run, resume for an ended one", "`dyna workflow reload RUN FILE`", "no second one starts", "runs on until the run ends",
+		"`cwd` is relative to the main tree unless it is", "`maxWorkers`", "git worktree remove --force", "`dyna session stop SESSION`",
+		"Reload is for a running run, resume for an ended one", "`dyna workflow reload RUN FILE`", "no second one starts", "bounded read-only work with a schema result", "small has 2 CPU, 4 GiB", "six child", "[Context update]", "dyna workflow steer RUN STEP TEXT", "dyna workflow pause RUN", "dyna workflow unpause RUN", "runs on until the run ends",
 		"script version",
 		"the worker submits as a JSON file", "`status(text)`", "It is not a step", "options other than `lane`", "nothing is read from a step's name",
 	} {

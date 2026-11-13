@@ -11,7 +11,7 @@ restarted box, a reload or a resume gets each unchanged finished step's result b
 
 Use a workflow worker for bounded read-only work with a schema result. Use a child session for its own build,
 branch or context across wakes. A run is one box: small has 2 CPU, 4 GiB and about 8 workers; six child
-sessions are six boxes. Workers never start their own workers.
+sessions are six boxes. Workers do not start their own workers.
 
 ## Write and start a script
 
@@ -29,7 +29,7 @@ return { branch: merged.branch, merged: merged.merged, conflicts: merged.conflic
 dyna workflow run sweep.js --args '{"groups":[{"id":"a","task":"fix the typos in README.md."}]}'
 ```
 - Only comments may come before `meta`. An unknown key, or no `name` or `profiles`, refuses the start.
-- `name`: letters, digits, `.`, `_` or `-`, at most 57; the run’s session is `<name>-<6 characters>`.
+- `name`: letters, digits, `.`, `_` or `-`, at most 57; the run's session is `<name>-<6 characters>`.
 - `profiles`: the only ones `agent()` may use, the first its default. An unknown one refuses the start.
 - `size`: `agent`, `small`, `medium`, `large` or `xlarge` (table in dyna-images); else the room's `size` setting.
 - `repo`: by default the room's default repository. A run with none has no `worktree` or `merge()`.
@@ -112,7 +112,7 @@ const test = await run(`git fetch origin ${merged.branch} && git worktree add --
   label or unique key prefix; status lists the steps. Steering changes neither its key nor replay.
 - Pause/unpause: `dyna workflow pause RUN` and `dyna workflow unpause RUN` hold new agent() and run() calls,
   not running ones. Pause survives restarts. The starter, its ancestors and owner control the run.
-- Stop: the session tool's `stop` action on the run’s session, or `dyna session stop SESSION`; `dyna workflow status RUN`
+- Stop: the session tool's `stop` action on the run's session, or `dyna session stop SESSION`; `dyna workflow status RUN`
   then says `stopped`. Running steps fail with `the run ended first`; `--resume RUN` carries on from the finished steps.
 Reload is for a running run, resume for an ended one. Both match steps by key: a hash of the kind,
 prompt or command, options other than `lane`, effective profile and enclosing `workflow()` step. A

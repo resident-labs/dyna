@@ -296,7 +296,7 @@ func (s *Service) callerWorkflow(ctx context.Context, caller contract.Principal)
 	}
 	run, err := s.store.SessionWorkflow(ctx, caller.Session)
 	if errors.Is(err, store.ErrNotFound) {
-		return run, &contract.Error{Code: contract.ErrForbidden, Message: "this session is not a crew"}
+		return run, &contract.Error{Code: contract.ErrForbidden, Message: "this session is not a workflow run"}
 	}
 	if err != nil {
 		return run, failure(err)

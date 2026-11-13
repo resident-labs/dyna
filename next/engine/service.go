@@ -282,7 +282,7 @@ func failure(err error) *contract.Error {
 		code = contract.ErrForbidden
 	} else if errors.Is(err, approve.ErrInvalid) {
 		code = contract.ErrInvalid
-	} else if errors.Is(err, approve.ErrConflict) {
+	} else if errors.Is(err, approve.ErrConflict) || errors.Is(err, store.ErrWorkflowEnded) {
 		code = contract.ErrConflict
 	} else if errors.Is(err, store.ErrNotFound) {
 		code = contract.ErrNotFound

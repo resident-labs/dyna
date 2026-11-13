@@ -25,7 +25,7 @@ func workflowCommand(get func() *socketClient) *cobra.Command {
 	run.Flags().StringVar(&args, "args", "", "JSON the script reads as args")
 	run.Flags().StringVar(&resume, "resume", "", "An ended run whose finished steps this run keeps, so only changed steps run; reload changes a running one")
 	run.Flags().StringVar(&clientID, "client-id", "", "Retry key: the same key returns the first run")
-	reload := &cobra.Command{Use: "reload RUN FILE", Short: "Give a running run a new script, in the same crew and box. Finished steps return their results, running ones are joined, and new ones start.", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+	reload := &cobra.Command{Use: "reload RUN FILE", Short: "Give a running run a new script, in the same session and box. Finished steps return their results, running ones are joined, and new ones start.", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
 		script, err := os.ReadFile(args[1])
 		if err != nil {
 			return err

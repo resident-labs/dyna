@@ -843,9 +843,12 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 			if delivery.To.Kind != contract.PrincipalSession {
 				continue
 			}
-			var open bool
-			if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL AND b.want NOT IN ('close','discard'))", delivery.To.Session).Scan(&open); err != nil {
+			var open, endedWorkflow bool
+			if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL AND b.want NOT IN ('close','discard')),EXISTS(SELECT 1 FROM workflow_runs WHERE session=? AND state!='running')", delivery.To.Session, delivery.To.Session).Scan(&open, &endedWorkflow); err != nil {
 				return err
+			}
+			if endedWorkflow {
+				return ErrWorkflowEnded
 			}
 			if !open {
 				return ErrSessionClosing
