@@ -10,7 +10,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/resident-labs/dyna/harness/testutil"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
@@ -258,6 +261,15 @@ func TestQuotaReaderFailuresNeverExpireASignIn(t *testing.T) {
 	}
 }
 
+// quotaHandlerTransport keeps quota coordination in process so synctest can observe every caller blocked.
+type quotaHandlerTransport struct{ http.Handler }
+
+func (t quotaHandlerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	w := httptest.NewRecorder()
+	t.ServeHTTP(w, r)
+	return w.Result(), nil
+}
+
 func TestQuotaBoundsConcurrentReadsAndSharesThem(t *testing.T) {
 	const accounts = 9
 	ids := make([]string, accounts)
@@ -269,51 +281,56 @@ func TestQuotaBoundsConcurrentReadsAndSharesThem(t *testing.T) {
 		}
 		fmt.Fprintf(&list, `{"id":%q,"auth_index":%q,"provider":"kimi","state":"unknown"}`, ids[i], ids[i])
 	}
-	var active, peak, reads atomic.Int32
-	release := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/dyna/credentials" {
-			fmt.Fprintf(w, `{"credentials":[%s]}`, list.String())
-			return
-		}
-		if r.URL.Path == "/v8/management/routing/status" {
-			return
-		}
-		reads.Add(1)
-		now := active.Add(1)
-		defer active.Add(-1)
-		for {
-			seen := peak.Load()
-			if now <= seen || peak.CompareAndSwap(seen, now) {
-				break
+	st := quotaAccounts(t, contract.ProviderKimi, ids...)
+	synctest.Test(t, func(t *testing.T) {
+		var active, peak, reads atomic.Int32
+		release := make(chan struct{})
+		releaseReads := sync.OnceFunc(func() { close(release) })
+		defer releaseReads()
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/dyna/credentials" {
+				fmt.Fprintf(w, `{"credentials":[%s]}`, list.String())
+				return
 			}
-		}
-		<-release
-		fmt.Fprintf(w, `{"files":[{"auth_index":%q,"status_code":200,"state":"unknown"}]}`, r.URL.Query().Get("auth_index"))
-	}))
-	defer server.Close()
-	q := quotaProxy(server.URL, server.Client().Transport).Quotas("key", quotaAccounts(t, contract.ProviderKimi, ids...), time.Now)
-	var callers sync.WaitGroup
-	for range 3 {
-		callers.Go(func() {
-			if got, err := q.Read(context.Background()); err != nil || len(got.Accounts) != accounts {
-				t.Errorf("read failed: %v", err)
+			if r.URL.Path == "/v8/management/routing/status" {
+				return
 			}
+			reads.Add(1)
+			now := active.Add(1)
+			defer active.Add(-1)
+			for {
+				seen := peak.Load()
+				if now <= seen || peak.CompareAndSwap(seen, now) {
+					break
+				}
+			}
+			<-release
+			fmt.Fprintf(w, `{"files":[{"auth_index":%q,"status_code":200,"state":"unknown"}]}`, r.URL.Query().Get("auth_index"))
 		})
-	}
-	for peak.Load() < quotaReads {
-		time.Sleep(time.Millisecond)
-	}
-	// Let all three callers reach every credential before any read can finish.
-	time.Sleep(50 * time.Millisecond)
-	close(release)
-	callers.Wait()
-	if peak.Load() != quotaReads {
-		t.Fatalf("peak = %d, want %d", peak.Load(), quotaReads)
-	}
-	if reads.Load() != accounts {
-		t.Fatalf("reads = %d, want one per account", reads.Load())
-	}
+		q := quotaProxy("http://fixture", quotaHandlerTransport{handler}).Quotas("key", st, time.Now)
+		var callers sync.WaitGroup
+		for range 3 {
+			callers.Go(func() {
+				if got, err := q.Read(context.Background()); err != nil || len(got.Accounts) != accounts {
+					t.Errorf("read failed: %v", err)
+				}
+			})
+		}
+		// All three callers and their credential goroutines must be durably blocked
+		// on shared reads or bounded slots before any upstream reading can finish.
+		synctest.Wait()
+		if peak.Load() != quotaReads {
+			t.Fatalf("active read slots = %d, want %d", peak.Load(), quotaReads)
+		}
+		releaseReads()
+		callers.Wait()
+		if peak.Load() != quotaReads {
+			t.Fatalf("peak = %d, want %d", peak.Load(), quotaReads)
+		}
+		if reads.Load() != accounts {
+			t.Fatalf("reads = %d, want one per account", reads.Load())
+		}
+	})
 }
 
 func TestQuotaCanceledCallerDoesNotCacheAFailure(t *testing.T) {
@@ -459,12 +476,7 @@ func TestLatestReturnsAtOnceAndAddsNoReads(t *testing.T) {
 	}
 	close(release)
 	deadline := time.Now().Add(5 * time.Second)
-	for len(q.Latest()) == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("the reading never arrived")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	testutil.Eventually(t, time.Until(deadline), "published quota reading", func() bool { return len(q.Latest()) != 0 })
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("reads for one age: %d", got)
 	}
@@ -484,12 +496,7 @@ func TestLatestReturnsAtOnceAndAddsNoReads(t *testing.T) {
 	if got := q.Latest(); len(got) != 1 {
 		t.Fatalf("an old reading stays until the new one: %+v", got)
 	}
-	for calls.Load() != 2 {
-		if time.Now().After(deadline) {
-			t.Fatal("the old reading was not refreshed")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	testutil.Eventually(t, time.Until(deadline), "quota refresh request", func() bool { return calls.Load() == 2 })
 }
 
 func TestQuotaShowsInsufficientBalanceFromRouting(t *testing.T) {
