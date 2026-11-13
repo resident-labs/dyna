@@ -101,39 +101,37 @@ func (s *Service) DiscordCheck(ctx context.Context, caller contract.Principal, r
 			}
 		}
 	}
-	for _, name := range p.Front.Team {
-		count := 0
-		for _, r := range server.Roles {
-			if r.Name == name {
-				count++
+	for kind, roles := range [][]string{p.Front.Roles, p.Front.Team} {
+		roleKind := "role"
+		if kind == 1 {
+			roleKind = "team role"
+		}
+		for _, name := range roles {
+			var found []discord.Role
+			for _, r := range server.Roles {
+				if r.Name == name {
+					found = append(found, r)
+				}
 			}
-		}
-		if count != 1 {
-			problems = append(problems, fmt.Sprintf("The policy team role %q no longer resolves uniquely; set the policy again.", name))
-		}
-	}
-	for _, name := range p.Front.Roles {
-		var found []discord.Role
-		for _, r := range server.Roles {
-			if r.Name == name {
-				found = append(found, r)
+			if len(found) != 1 {
+				problems = append(problems, fmt.Sprintf("The policy %s %q no longer resolves uniquely; set the policy again.", roleKind, name))
+				continue
 			}
-		}
-		if len(found) != 1 {
-			problems = append(problems, fmt.Sprintf("The policy role %q no longer resolves uniquely; set the policy again.", name))
-			continue
-		}
-		role := found[0]
-		if highest <= role.Position {
-			problems = append(problems, fmt.Sprintf("Drag the dyna role above %s in Server Settings > Roles.", name))
-		} else {
-			confirmations = append(confirmations, fmt.Sprintf("The dyna role is above %s.", name))
-		}
-		if role.Managed {
-			problems = append(problems, fmt.Sprintf("The role %s is managed by an integration and cannot be assigned.", name))
-		}
-		if role.Permissions&policy.DangerousPermissions != 0 {
-			problems = append(problems, fmt.Sprintf("The role %s carries dangerous permissions and the answering session cannot manage it.", name))
+			if kind == 1 {
+				continue
+			}
+			role := found[0]
+			if highest <= role.Position {
+				problems = append(problems, fmt.Sprintf("Drag the dyna role above %s in Server Settings > Roles.", name))
+			} else {
+				confirmations = append(confirmations, fmt.Sprintf("The dyna role is above %s.", name))
+			}
+			if role.Managed {
+				problems = append(problems, fmt.Sprintf("The role %s is managed by an integration and cannot be assigned.", name))
+			}
+			if role.Permissions&policy.DangerousPermissions != 0 {
+				problems = append(problems, fmt.Sprintf("The role %s carries dangerous permissions and the answering session cannot manage it.", name))
+			}
 		}
 	}
 	names := append([]string{}, p.Front.Quiet...)

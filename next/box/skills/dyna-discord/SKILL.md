@@ -127,7 +127,7 @@ Only root or the owner sets it. Names must resolve uniquely. Starter file:
 enabled: true
 log: mod-log
 front:
-  team: [Maintainers] # Trusted senders; omit to leave server inputs unconfined.
+  team: [Maintainers] # Trusted senders; [] confines everyone except the owner; omit for no server confinement.
   timeout_max: 1h
   roles: [Contributors]
   delete: yes

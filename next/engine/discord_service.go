@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -205,16 +206,7 @@ func (s *Service) discordInput(ctx context.Context, client *discord.Client, m di
 		if err := json.Unmarshal([]byte(route.PolicyResolved), &p); err != nil {
 			return err
 		}
-		if p.Front.Team != nil {
-			b.Confined = true
-			for _, team := range p.Front.Team {
-				for _, role := range m.Member.Roles {
-					if team == role && !b.Direct {
-						b.Confined = false
-					}
-				}
-			}
-		}
+		b.Confined = b.Direct || p.Front.Team != nil && !slices.ContainsFunc(m.Member.Roles, func(r string) bool { return slices.Contains(p.Front.Team, r) })
 	}
 	if b.Owner {
 		b.Confined = false
