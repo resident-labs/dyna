@@ -120,9 +120,10 @@ func (s *Store) RepliesOwed(ctx context.Context, session contract.SessionID) ([]
 }
 
 // childAtWork holds for a child session c that will still give its parent a result: a turn running, a waking
-// input pending, a job running after its turn ended, or a reply it still owes because it waits itself.
+// input pending, a job running after its turn ended, or a reply it still owes because it waits itself (not after
+// a stop cancelled its model retry: then nothing will pay it, and the parent must be woken).
 const childAtWork = `c.closed_at IS NULL AND (c.shell_jobs>0
-	OR EXISTS(SELECT 1 FROM replies_owed o WHERE o.session=c.id)
+	OR c.model_retry_at>=0 AND EXISTS(SELECT 1 FROM replies_owed o WHERE o.session=c.id)
 	OR EXISTS(SELECT 1 FROM turns t WHERE t.session=c.id AND t.ended_at IS NULL)
 	OR EXISTS(SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=c.id AND d.state='pending' AND d.wake=1))`
 
