@@ -5,6 +5,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/resident-labs/dyna/engine/contextview"
+
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -56,7 +58,7 @@ func (s *Service) BoxCompacted(ctx context.Context, caller contract.Principal, r
 		if len(models) > 0 {
 			req.Usage.Model = models[0]
 		}
-		event, err := s.event(session.Room, caller, contract.SessionCompacted{Session: session.ID, Turn: req.Turn, TokensBefore: req.TokensBefore, TokensAfter: req.TokensAfter, Usage: req.Usage, Error: excerpt(req.Error, 500)})
+		event, err := s.event(session.Room, caller, contract.SessionCompacted{Session: session.ID, Turn: req.Turn, TokensBefore: req.TokensBefore, TokensAfter: req.TokensAfter, Usage: req.Usage, Error: contextview.Excerpt(req.Error, 500)})
 		if err != nil {
 			return response, failure(err)
 		}

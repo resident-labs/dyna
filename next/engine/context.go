@@ -7,15 +7,15 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/resident-labs/dyna/engine/contextview"
+
 	"github.com/resident-labs/dyna/contract"
-	"github.com/resident-labs/dyna/engine/store"
-	"github.com/resident-labs/dyna/room"
 )
 
 // requestChars keeps a question's line short enough for several in the section's budget.
 const requestChars = 80
 
-// holdsChars is the budget of dyna_holds, which holdsLine also keeps to, so its first line always fits.
+// holdsChars is the budget of dyna_holds, which contextview.HoldsLine also keeps to, so its first line always fits.
 const holdsChars = 1000
 
 // roomChars is the budget of dyna_room.
@@ -29,104 +29,6 @@ var rootApprovalNames = map[contract.RootApproval]string{
 	contract.RootApprovesAddons: "global add-ons",
 	contract.RootApprovesHosts:  "room host rules",
 	contract.RootApprovesPools:  "node pools",
-}
-
-func renderContextSection(key contract.ContextSectionKey, lines []string, maxChars int, full bool, rowLimit int) contract.ContextSection {
-	if full {
-		return contract.ContextSection{Key: key, Text: strings.Join(lines, "\n")}
-	}
-	var kept []string
-	chars := 0
-	for i, line := range lines {
-		if rowLimit > 0 && i >= rowLimit {
-			break
-		}
-		n := utf8.RuneCountInString(line)
-		remaining := len(lines) - i - 1
-		suffix := ""
-		if remaining > 0 {
-			suffix = fmt.Sprintf("\n%d more: context show", remaining)
-		}
-		sep := 0
-		if len(kept) > 0 {
-			sep = 1
-		}
-		if chars+sep+n+utf8.RuneCountInString(suffix) > maxChars {
-			break
-		}
-		kept = append(kept, line)
-		chars += sep + n
-	}
-	if more := len(lines) - len(kept); more > 0 {
-		kept = append(kept, fmt.Sprintf("%d more: context show", more))
-	}
-	return contract.ContextSection{Key: key, Text: strings.Join(kept, "\n")}
-}
-
-// prLine says a PR's state in a few words. It holds nothing from GitHub's free text, so the snapshot needs no wrapper.
-func prLine(p store.ContextPR) string {
-	var parts []string
-	if p.Draft {
-		parts = append(parts, "draft")
-	}
-	switch p.CI {
-	case contract.PrCISuccess:
-		parts = append(parts, "CI passed")
-	case contract.PrCICancelled:
-		parts = append(parts, "CI cancelled")
-	case contract.PrCIFailure:
-		parts = append(parts, "CI failed")
-	case contract.PrCIPending:
-		parts = append(parts, "CI running")
-	case contract.PrCINone:
-		parts = append(parts, "no CI")
-	default:
-		parts = append(parts, "CI not read yet")
-	}
-	switch p.Review {
-	case contract.PrApproved:
-		parts = append(parts, "approved")
-	case contract.PrChangesRequested:
-		parts = append(parts, "changes requested")
-	default:
-		parts = append(parts, "not approved")
-	}
-	switch p.Merge {
-	case contract.PrMergeClean:
-		parts = append(parts, "mergeable")
-	case contract.PrMergeConflict:
-		parts = append(parts, "conflict")
-	case contract.PrMergeBehind:
-		parts = append(parts, "behind base")
-	case contract.PrMergeBlocked:
-		parts = append(parts, "merge blocked")
-	}
-	return strings.Join(parts, ", ")
-}
-
-// holdsLine states what the session still holds. The turn being dispatched is not one of those: it is open because it is
-// starting. A budget of 0 names everything.
-func holdsLine(held store.Held, budget int) string {
-	var names []string
-	used := 0
-	for _, item := range held {
-		if item.Kind == contract.ResponsibilityTurn {
-			continue
-		}
-		name := room.ResponsibilityName(item)
-		if used += len(name) + 2; budget > 0 && used > budget {
-			break
-		}
-		names = append(names, name)
-	}
-	more := len(held) - held.Count(contract.ResponsibilityTurn) - len(names)
-	if more > 0 {
-		names = append(names, fmt.Sprintf("%d more: context show", more))
-	}
-	if len(names) == 0 {
-		return ""
-	}
-	return "You still hold: " + strings.Join(names, ", ") + "."
 }
 
 func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal, req contract.ContextSnapshotRequest) (contract.ContextSnapshotResponse, *contract.Error) {
@@ -145,21 +47,21 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	result := contract.ContextSnapshotResponse{Sections: []contract.ContextSection{}}
 	add := func(key contract.ContextSectionKey, lines []string, maxChars, limit int) {
 		if len(lines) > 0 && (req.Section == "" || req.Section == key) {
-			result.Sections = append(result.Sections, renderContextSection(key, lines, maxChars, req.Section != "", limit))
+			result.Sections = append(result.Sections, contextview.Section(key, lines, maxChars, req.Section != "", limit))
 		}
 	}
 	var lines []string
 	for _, g := range data.Goals {
-		lines = append(lines, fmt.Sprintf("%s: %s", g.ID, excerpt(g.Text, 300)))
+		lines = append(lines, fmt.Sprintf("%s: %s", g.ID, contextview.Excerpt(g.Text, 300)))
 		if g.DoneWhen != "" {
-			lines = append(lines, "Done when: "+excerpt(g.DoneWhen, 200))
+			lines = append(lines, "Done when: "+contextview.Excerpt(g.DoneWhen, 200))
 		}
 		for _, item := range g.Items {
 			indent := "- "
 			if item.Parent != 0 {
 				indent = "  - "
 			}
-			lines = append(lines, fmt.Sprintf("%s%d. %s", indent, item.Number, excerpt(item.Text, 160)))
+			lines = append(lines, fmt.Sprintf("%s%d. %s", indent, item.Number, contextview.Excerpt(item.Text, 160)))
 		}
 	}
 	add(contract.ContextGoal, lines, 1500, 0)
@@ -172,7 +74,7 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 			}
 		}
 		if c.Item != "" {
-			line += ", " + excerpt(c.Item, 80)
+			line += ", " + contextview.Excerpt(c.Item, 80)
 		}
 		if c.Waiting != nil {
 			line += ", waiting: " + c.Waiting.Label()
@@ -215,7 +117,7 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	for _, r := range data.Requests {
 		line := fmt.Sprintf("%s: %s, waiting", r.ID, r.Kind)
 		if r.Text != "" {
-			line += ": " + excerpt(r.Text, requestChars)
+			line += ": " + contextview.Excerpt(r.Text, requestChars)
 		}
 		lines = append(lines, line)
 	}
@@ -225,11 +127,11 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	if req.Section != "" {
 		budget = 0
 	}
-	if line := holdsLine(data.Held, budget); line != "" {
+	if line := contextview.HoldsLine(data.Held, budget); line != "" {
 		lines = append(lines, line)
 	}
 	for _, p := range data.PRs {
-		lines = append(lines, fmt.Sprintf("PR %s#%d: %s", p.Repo, p.Number, prLine(p)))
+		lines = append(lines, fmt.Sprintf("PR %s#%d: %s", p.Repo, p.Number, contextview.PRLine(p)))
 	}
 	add(contract.ContextHolds, lines, holdsChars, 0)
 	lines = nil
@@ -246,7 +148,7 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	}
 	add(contract.ContextProfiles, lines, 1200, 0)
 	if s.usage != nil {
-		add(contract.ContextUsage, usageLines(data.Accounts, s.usage.Latest(), s.now()), usageChars, 0)
+		add(contract.ContextUsage, contextview.UsageLines(data.Accounts, s.usage.Latest(), s.now()), contextview.UsageChars, 0)
 	}
 	// One line per room setting that is not at its default and changes what root may do; a new setting adds its line here.
 	lines = nil
@@ -403,13 +305,4 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	}
 	add(contract.ContextWorkflows, lines, workflowsChars, 0)
 	return result, nil
-}
-
-// excerpt fits text on one row of a section.
-func excerpt(text string, limit int) string {
-	runes := []rune(strings.Join(strings.Fields(text), " "))
-	if len(runes) <= limit {
-		return string(runes)
-	}
-	return string(runes[:limit-1]) + "…"
 }
