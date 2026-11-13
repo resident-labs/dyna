@@ -127,10 +127,10 @@ export function roomRuns(runs: Iterable<WorkflowInfo>): { running: WorkflowInfo[
 
 // The runs' rows in the sessions panel: each running run, then one row that counts the past ones and, open, lists them. A room
 // with no runs has no rows.
-export type RunRow = { kind: "run"; run: WorkflowInfo } | { kind: "past"; count: number; open: boolean };
+export type RunRow = { kind: "run"; run: WorkflowInfo } | { kind: "past"; count: number; failed: number; open: boolean };
 export function runRows(runs: Iterable<WorkflowInfo>, open: boolean): RunRow[] {
   const { running, past } = roomRuns(runs), row = (run: WorkflowInfo): RunRow => ({ kind: "run", run });
-  return [...running.map(row), ...past.length ? [{ kind: "past" as const, count: past.length, open }] : [], ...open ? past.map(row) : []];
+  return [...running.map(row), ...past.length ? [{ kind: "past" as const, count: past.length, failed: past.filter(run => run.state === "failed").length, open }] : [], ...open ? past.map(row) : []];
 }
 
 // The line a script that never called status() gets, as "75 of 76 steps · 1 running".
@@ -138,10 +138,6 @@ export function countedLine({ steps, running, failed }: { steps: number; running
   if (!steps) return "No steps yet";
   return [running ? `${steps - running} of ${steps} steps` : count(steps, "step"), ...running ? [`${running} running`] : [], ...failed ? [`${failed} failed`] : []].join(" · ");
 }
-
-// A run's one line: its script's latest status(), or its counts.
-export const runStatus = (run: Pick<WorkflowInfo, "status" | "steps" | "running" | "failed">): { text: string; script: boolean } =>
-  run.status ? { text: run.status, script: true } : { text: countedLine({ steps: run.steps ?? 0, running: run.running ?? 0, failed: run.failed }), script: false };
 
 // A worker with a file has a transcript to open.
 export const openable = (step: WorkflowStep): boolean => step.kind === "agent" && !!step.transcript;

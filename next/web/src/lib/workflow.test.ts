@@ -4,7 +4,7 @@ import { decodeEvent } from "./event.ts";
 import { feedRows } from "./feed.ts";
 import { RunState } from "./run.svelte.ts";
 import type { Json } from "./json.ts";
-import { FAILED, LONG_PHASE, READABLE_SPAN, STRIP_PHASES, applyStep, branchLink, commitLink, countedLine, failedNodes, figures, flow, foldable, jsonFields, minutesLabel, nested, openable, phases, reading, roomRuns, runCounts, runRows, runScale, runStatus, shownFacts, shownStep, spanReads, stageOf, stagesOf, stepBody, stepSpan, stepTime, stepTitle, stepWord, strip, timed, timeline, tokens } from "./workflow.ts";
+import { FAILED, LONG_PHASE, READABLE_SPAN, STRIP_PHASES, applyStep, branchLink, commitLink, countedLine, failedNodes, figures, flow, foldable, jsonFields, minutesLabel, nested, openable, phases, reading, roomRuns, runCounts, runRows, runScale, shownFacts, shownStep, spanReads, stageOf, stagesOf, stepBody, stepSpan, stepTime, stepTitle, stepWord, strip, timed, timeline, tokens } from "./workflow.ts";
 import type { Event, WorkflowInfo, WorkflowStatusResponse, WorkflowStep } from "./contract.gen.ts";
 
 const usage = { model: "", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
@@ -69,9 +69,7 @@ test("only a worker with a file opens, and the address names it", () => {
   assert.equal(shownStep(""), undefined);
 });
 
-test("a run's line is its script's status, or its counts when the script wrote none", () => {
-  assert.deepEqual(runStatus({ status: "Wave 3: 6 of 7 landed", steps: 76, running: 1, failed: 0 }), { text: "Wave 3: 6 of 7 landed", script: true });
-  assert.deepEqual(runStatus({ steps: 76, running: 1, failed: 0 }), { text: "75 of 76 steps · 1 running", script: false });
+test("a script that wrote no status gets a counted line", () => {
   assert.equal(countedLine({ steps: 12, running: 0, failed: 2 }), "12 steps · 2 failed");
   assert.equal(countedLine({ steps: 1, running: 0, failed: 0 }), "1 step");
   assert.equal(countedLine({ steps: 0, running: 0, failed: 0 }), "No steps yet");
@@ -236,10 +234,10 @@ test("Runs lists the running runs first, newest first, then the rest, the latest
 
 test("the panel's run rows: running runs, then a count of the past ones that lists them when open", () => {
   const run = (session: string, fields: Partial<WorkflowInfo> = {}): WorkflowInfo => status({ session, state: "done", ...fields }).run;
-  const runs = [run("old", { ended: "2026-01-01T01:00:00Z" }), run("live", { state: "running" }), run("new", { ended: "2026-01-02T00:00:00Z" })];
-  const names = (open: boolean) => runRows(runs, open).map(row => row.kind === "run" ? row.run.session : `${row.kind} ${row.count}${row.open ? " open" : ""}`);
-  assert.deepEqual(names(false), ["live", "past 2"]);
-  assert.deepEqual(names(true), ["live", "past 2 open", "new", "old"]);
+  const runs = [run("old", { ended: "2026-01-01T01:00:00Z" }), run("live", { state: "running" }), run("new", { state: "failed", ended: "2026-01-02T00:00:00Z" })];
+  const names = (open: boolean) => runRows(runs, open).map(row => row.kind === "run" ? row.run.session : `${row.kind} ${row.count} ${row.failed}f${row.open ? " open" : ""}`);
+  assert.deepEqual(names(false), ["live", "past 2 1f"]);
+  assert.deepEqual(names(true), ["live", "past 2 1f open", "new", "old"]);
   assert.deepEqual(runRows([], true), []);
   assert.deepEqual(runRows([runs[1]], false).map(row => row.kind), ["run"]);
 });

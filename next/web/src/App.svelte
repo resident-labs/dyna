@@ -555,7 +555,7 @@
   // the row is scrolled back in first; and a row shows its icons only on hover or focus, so its link takes focus
   // before the icon. With the icon gone, focus stays on the link.
   async function focusRowIcon(id: string, tapped = false) {
-    const index = tree.findIndex(entry => entry.kind === "session" && entry.session.session === id);
+    const index = sessionRows.findIndex(entry => entry.kind === "session" && entry.session.session === id);
     if (index >= 0) await sessionList?.reveal(index);
     const link = members?.querySelector<HTMLElement>(`a.member[data-key="${CSS.escape(id)}"]`);
     link?.focus({ focusVisible: !tapped });
@@ -883,8 +883,8 @@
         {#snippet row(entry: SessionListRow)}
         {#if entry.kind === "run"}{@const { run } = entry}<a class="member run" class:end={entry === runs.at(-1)} data-key={treeKey(entry)} href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(run.session)}`}
           onclick={openSession} onkeydown={walkTree} aria-current={session === run.session ? "page" : undefined} title={run.description}><RunRow {run} /></a>
-        {:else if entry.kind === "past"}<button type="button" class="idle" class:end={entry === runs.at(-1)} data-key={treeKey(entry)} aria-expanded={entry.open} onkeydown={walkTree}
-          onclick={() => { openPast = !openPast; }}><Icon name="chevron" size={12} />{count(entry.count, "past run")}</button>
+        {:else if entry.kind === "past"}<button type="button" class="idle" class:end={entry === runs.at(-1)} data-key={treeKey(entry)} aria-expanded={entry.open} style:padding-left="6px" onkeydown={walkTree}
+          onclick={() => { openPast = !openPast; }}><Icon name="chevron" size={12} /><span>{count(entry.count, "past run")}{#if entry.failed}<span class="failed-runs">{` · ${entry.failed} failed`}</span>{/if}</span></button>
         {:else if entry.kind === "new-session"}<button type="button" class="new-session" data-key={treeKey(entry)} onkeydown={walkTree}
           onclick={() => openNew("session")}><Icon name="plus" size={14} />New session</button>
         {:else if entry.kind === "idle"}<button type="button" class="idle" data-key={treeKey(entry)} aria-expanded={entry.open} style:--depth={entry.depth} style:padding-left="{6 + entry.depth * 20}px" onkeydown={walkTree}
@@ -930,7 +930,8 @@
   /* A run's tile stands where a session's face does, so the tiles and the faces line up. */
   a.member.run { padding-left: 34px; }
   /* One hairline closes the runs, so the sessions below read as another list. */
-  .end { border-bottom: 1px solid var(--line); }
+  .end, .idle.end { border-bottom: 1px solid var(--line); }
+  .failed-runs { color: var(--danger); }
   /* The title keeps the total; the second line separates work, background waits and owner-needed sessions. */
   aside.members > header strong { font-size: 16px; }
   /* The header's face rings its dot in the header's color. */
