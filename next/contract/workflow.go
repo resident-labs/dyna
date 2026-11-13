@@ -194,15 +194,16 @@ type WorkflowListResponse struct {
 // BoxWorkflow is what a crew's box runs. Each hello carries it, so a new box can restart the script, and a reload carries it
 // to the box that runs the script.
 type BoxWorkflow struct {
-	Run      WorkflowRunID     `json:"run"`
-	Name     string            `json:"name"`
-	Script   string            `json:"script"`
-	Version  int               `json:"version"`
-	Paused   bool              `json:"paused"`
-	Args     string            `json:"args,omitempty"`
-	Profiles []WorkflowProfile `json:"profiles"` // in meta's order: the first is the default
-	Workers  int               `json:"workers"`  // how many crew workers may run at once: the box's memory allows some, and the maxWorkers setting may allow fewer
-	Timeout  int               `json:"timeout"`  // seconds an agent() worker may run when the script sets no timeout: the timeout setting
+	Subscription SubscriptionID    `json:"subscription,omitempty"`
+	Run          WorkflowRunID     `json:"run"`
+	Name         string            `json:"name"`
+	Script       string            `json:"script"`
+	Version      int               `json:"version"`
+	Paused       bool              `json:"paused"`
+	Args         string            `json:"args,omitempty"`
+	Profiles     []WorkflowProfile `json:"profiles"` // in meta's order: the first is the default
+	Workers      int               `json:"workers"`  // how many crew workers may run at once: the box's memory allows some, and the maxWorkers setting may allow fewer
+	Timeout      int               `json:"timeout"`  // seconds an agent() worker may run when the script sets no timeout: the timeout setting
 }
 
 // WorkflowReload hands a crew's box a newer version of its script. The engine sends the run's current version on each channel,
