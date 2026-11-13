@@ -21,170 +21,189 @@ func Export(path string, snapshot Snapshot, force bool) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Refuse symlink ancestors as well as symlinks anywhere in an existing tree.
-	for p := root; ; p = filepath.Dir(p) {
-		info, e := os.Lstat(p)
-		if e == nil && info.Mode()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("export path contains symlink: %s", p)
+	unmanaged, report, err := scanExportTree(root, force)
+	if err != nil {
+		return report, err
+	}
+	files, err := buildExportFiles(snapshot, unmanaged)
+	if err != nil {
+		return report, err
+	}
+	return report, writeExportFiles(root, files, force)
+}
+
+// scanExportTree refuses symlinks outside unmanaged directories. It looks for a
+// marker before descending, so even unusual unmanaged contents stay opaque.
+func scanExportTree(root string, force bool) ([]string, []string, error) {
+	for path := root; ; path = filepath.Dir(path) {
+		info, err := os.Lstat(path)
+		if err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return nil, nil, fmt.Errorf("export path contains symlink: %s", path)
 		}
-		if e != nil && !os.IsNotExist(e) {
-			return nil, e
+		if err != nil && !os.IsNotExist(err) {
+			return nil, nil, err
 		}
-		if filepath.Dir(p) == p {
+		if filepath.Dir(path) == path {
 			break
 		}
 	}
 	if !force {
-		entries, e := os.ReadDir(root)
-		if e != nil && !os.IsNotExist(e) {
-			return nil, e
+		entries, err := os.ReadDir(root)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, nil, err
 		}
 		if len(entries) > 0 {
-			return nil, fmt.Errorf("export destination is not empty (use force)")
+			return nil, nil, fmt.Errorf("export destination is not empty (use force)")
 		}
 	}
-	var unmanaged []string
-	var report []string
-	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, e error) error {
-		if os.IsNotExist(e) && p == root {
+	var unmanaged, report []string
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if os.IsNotExist(err) && path == root {
 			return nil
 		}
-		if e != nil {
-			return e
+		if err != nil {
+			return err
 		}
-		if d.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("export refuses symlink %s", p)
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("export refuses symlink %s", path)
 		}
-		if !d.IsDir() {
+		if !entry.IsDir() {
 			return nil
 		}
-		marker := filepath.Join(p, "UNMANAGED.md")
-		info, markerErr := os.Lstat(marker)
-		if markerErr != nil && !os.IsNotExist(markerErr) {
-			return markerErr
+		marker := filepath.Join(path, "UNMANAGED.md")
+		info, err := os.Lstat(marker)
+		if os.IsNotExist(err) {
+			return nil
 		}
-		if markerErr == nil {
-			if !info.Mode().IsRegular() {
-				return fmt.Errorf("unmanaged marker must be a regular file: %s", marker)
-			}
-			f, e := os.Open(marker)
-			if e != nil {
-				return e
-			}
-			scanner := bufio.NewScanner(f)
-			scanner.Scan()
-			line := scanner.Text()
-			scanErr := scanner.Err()
-			f.Close()
-			if scanErr != nil {
-				return scanErr
-			}
-			rel, e := filepath.Rel(root, p)
-			if e != nil {
-				return e
-			}
-			unmanaged = append(unmanaged, rel)
-			report = append(report, rel+": unmanaged: "+line)
-			return filepath.SkipDir
+		if err != nil {
+			return err
 		}
-		return nil
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("unmanaged marker must be a regular file: %s", marker)
+		}
+		file, err := os.Open(marker)
+		if err != nil {
+			return err
+		}
+		scanner := bufio.NewScanner(file)
+		scanner.Scan()
+		line := scanner.Text()
+		scanErr := scanner.Err()
+		file.Close()
+		if scanErr != nil {
+			return scanErr
+		}
+		relativePath, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		unmanaged = append(unmanaged, relativePath)
+		report = append(report, relativePath+": unmanaged: "+line)
+		return filepath.SkipDir
 	})
-	if err != nil {
-		return report, err
-	}
-	blocked := func(p string) bool {
-		for _, u := range unmanaged {
-			if u == "." || p == u || strings.HasPrefix(p, u+string(filepath.Separator)) {
-				return true
+	return unmanaged, report, err
+}
+
+func buildExportFiles(snapshot Snapshot, unmanaged []string) (map[string][]byte, error) {
+	files := map[string][]byte{}
+	add := func(path string, value any) error {
+		directory := filepath.Dir(path)
+		for _, unmanagedPath := range unmanaged {
+			if unmanagedPath == "." || directory == unmanagedPath || strings.HasPrefix(directory, unmanagedPath+string(filepath.Separator)) {
+				return nil
 			}
 		}
-		return false
-	}
-	files := map[string][]byte{}
-	add := func(p string, v any) error {
-		if blocked(filepath.Dir(p)) {
-			return nil
+		if _, exists := files[path]; exists {
+			return fmt.Errorf("duplicate export path %s", path)
 		}
-		if _, ok := files[p]; ok {
-			return fmt.Errorf("duplicate export path %s", p)
+		data, err := yaml.Marshal(value)
+		if err != nil {
+			return err
 		}
-		b, e := yaml.Marshal(v)
-		if e != nil {
-			return e
-		}
-		files[p] = b
+		files[path] = data
 		return nil
 	}
 	if err := add("server.yaml", snapshot.Server); err != nil {
-		return report, err
+		return nil, err
 	}
-	names := map[string]bool{}
-	for _, e := range snapshot.Entries {
-		if !safeName(e.Name) || (e.Parent != "" && !safeName(e.Parent)) {
-			return report, fmt.Errorf("unsafe entry name %q", e.Name)
+	// A channel name is scoped to its parent, just as it is in the sidebar.
+	identities := map[string]string{}
+	for _, entry := range snapshot.Entries {
+		if !safeName(entry.Name) || (entry.Parent != "" && !safeName(entry.Parent)) {
+			return nil, fmt.Errorf("unsafe entry name %q", entry.Name)
 		}
-		if names[e.Name] {
-			return report, fmt.Errorf("ambiguous entry name %q", e.Name)
+		if (entry.Category == nil) == (entry.Channel == nil) {
+			return nil, fmt.Errorf("entry %q must be category or channel", entry.Name)
 		}
-		names[e.Name] = true
-		dir := filepath.Join("channels", e.Parent, e.Name)
-		if (e.Category == nil) == (e.Channel == nil) {
-			return report, fmt.Errorf("entry %q must be category or channel", e.Name)
-		}
-		if e.Category != nil {
-			if e.Parent != "" {
-				return report, fmt.Errorf("nested category")
+		directory := filepath.Join("channels", entry.Parent, entry.Name)
+		id := ""
+		filename := "channel.yaml"
+		var value any = entry.Channel
+		if entry.Category != nil {
+			if entry.Parent != "" {
+				return nil, fmt.Errorf("nested category")
 			}
-			err = add(filepath.Join(dir, "category.yaml"), e.Category)
+			id = entry.Category.ID
+			filename = "category.yaml"
+			value = entry.Category
 		} else {
-			err = add(filepath.Join(dir, "channel.yaml"), e.Channel)
+			id = entry.Channel.ID
 		}
-		if err != nil {
-			return report, err
+		if previousID, exists := identities[directory]; exists {
+			return nil, fmt.Errorf("duplicate export entry %q: IDs %q and %q", directory, previousID, id)
+		}
+		identities[directory] = id
+		if err := add(filepath.Join(directory, filename), value); err != nil {
+			return nil, err
 		}
 	}
+	return files, nil
+}
+
+// writeExportFiles preflights every destination before changing any file. Each
+// replacement is atomic; the set of files is not a directory-wide transaction.
+func writeExportFiles(root string, files map[string][]byte, force bool) error {
 	paths := make([]string, 0, len(files))
-	for p := range files {
-		paths = append(paths, p)
+	for path := range files {
+		paths = append(paths, path)
 	}
 	sort.Strings(paths)
-	// Validate all destinations before creating any files.
-	for _, p := range paths {
-		dest := filepath.Join(root, p)
-		info, e := os.Lstat(dest)
-		if e == nil {
+	for _, path := range paths {
+		destination := filepath.Join(root, path)
+		info, err := os.Lstat(destination)
+		if err == nil {
 			if !force {
-				return report, fmt.Errorf("export destination exists: %s (use force)", p)
+				return fmt.Errorf("export destination exists: %s (use force)", path)
 			}
 			if !info.Mode().IsRegular() {
-				return report, fmt.Errorf("not a regular file: %s", p)
+				return fmt.Errorf("not a regular file: %s", path)
 			}
-		} else if !os.IsNotExist(e) {
-			return report, e
+		} else if !os.IsNotExist(err) {
+			return err
 		}
 	}
-	for _, p := range paths {
-		dest := filepath.Join(root, p)
-		if err := os.MkdirAll(filepath.Dir(dest), 0700); err != nil {
-			return report, err
+	for _, path := range paths {
+		destination := filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(destination), 0700); err != nil {
+			return err
 		}
-		f, e := os.CreateTemp(filepath.Dir(dest), ".export-*")
-		if e != nil {
-			return report, e
+		file, err := os.CreateTemp(filepath.Dir(destination), ".export-*")
+		if err != nil {
+			return err
 		}
-		tmp := f.Name()
-		_, e = f.Write(files[p])
-		closeErr := f.Close()
-		if e == nil {
-			e = closeErr
+		temporaryPath := file.Name()
+		_, err = file.Write(files[path])
+		closeErr := file.Close()
+		if err == nil {
+			err = closeErr
 		}
-		if e == nil {
-			e = os.Rename(tmp, dest)
+		if err == nil {
+			err = os.Rename(temporaryPath, destination)
 		}
-		if e != nil {
-			os.Remove(tmp)
-			return report, e
+		if err != nil {
+			os.Remove(temporaryPath)
+			return err
 		}
 	}
-	return report, nil
+	return nil
 }

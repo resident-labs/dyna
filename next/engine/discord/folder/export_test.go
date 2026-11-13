@@ -3,8 +3,32 @@ package folder
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestExportScopedChannelNames(t *testing.T) {
+	snapshot := Snapshot{Entries: []Entry{
+		{Name: "Community", Category: &Category{Identity: Identity{ID: "10"}}},
+		{Name: "Staff", Category: &Category{Identity: Identity{ID: "11"}}},
+		{Name: "general", Parent: "Community", Channel: &Channel{Identity: Identity{ID: "20"}}},
+		{Name: "general", Parent: "Staff", Channel: &Channel{Identity: Identity{ID: "21"}}},
+	}}
+	directory := t.TempDir()
+	if _, err := Export(directory, snapshot, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, parent := range []string{"Community", "Staff"} {
+		if _, err := os.Stat(filepath.Join(directory, "channels", parent, "general", "channel.yaml")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snapshot.Entries = append(snapshot.Entries, Entry{Name: "general", Parent: "Community", Channel: &Channel{Identity: Identity{ID: "22"}}})
+	_, err := Export(t.TempDir(), snapshot, false)
+	if err == nil || !strings.Contains(err.Error(), `"20"`) || !strings.Contains(err.Error(), `"22"`) {
+		t.Fatalf("duplicate must identify both IDs: %v", err)
+	}
+}
 
 func TestExportNonemptyAndOpaqueUnmanaged(t *testing.T) {
 	dir := t.TempDir()
