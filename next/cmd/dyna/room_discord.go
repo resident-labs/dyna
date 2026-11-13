@@ -46,7 +46,7 @@ func roomDiscordCommand(getClient func() client) *cobra.Command {
 			RoomDiscord(context.Context, contract.RoomDiscordRequest) (contract.RoomDiscordResponse, error)
 		})
 		if !ok {
-			return fmt.Errorf("Discord unavailable")
+			return fmt.Errorf("discord unavailable")
 		}
 		result, err := service.RoomDiscord(cmd.Context(), req)
 		if err != nil {

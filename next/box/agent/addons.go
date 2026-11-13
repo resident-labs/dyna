@@ -177,7 +177,7 @@ func (a addonStart) installOne(ctx context.Context, item contract.Addon) (string
 		return "", err
 	}
 	if _, err := os.Stat(installedPath(unpacked, item)); err != nil {
-		return "", errors.New("Pi installed it somewhere else")
+		return "", errors.New("pi installed it somewhere else")
 	}
 	if err := os.Rename(unpacked, folder); err != nil {
 		if _, won := os.Stat(folder); won != nil {

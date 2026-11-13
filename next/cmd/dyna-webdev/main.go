@@ -76,13 +76,13 @@ func (d devConnect) Status(context.Context) (contract.ConnectStatusResponse, err
 }
 
 func (devConnect) Start(context.Context, contract.ConnectStartRequest) error {
-	return fmt.Errorf("Connect actions are disabled in webdev")
+	return fmt.Errorf("connect actions are disabled in webdev")
 }
 func (devConnect) Cancel(context.Context) error {
-	return fmt.Errorf("Connect actions are disabled in webdev")
+	return fmt.Errorf("connect actions are disabled in webdev")
 }
 func (devConnect) Unlink(context.Context) error {
-	return fmt.Errorf("Connect actions are disabled in webdev")
+	return fmt.Errorf("connect actions are disabled in webdev")
 }
 
 // Account actions other than a rename are disabled in the fake-model development engine.

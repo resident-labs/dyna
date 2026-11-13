@@ -60,7 +60,7 @@ func discordCommand(getClient func() client) *cobra.Command {
 			DiscordConfigure(context.Context, contract.DiscordConfigureRequest) (contract.DiscordConfigureResponse, error)
 		})
 		if !ok {
-			return fmt.Errorf("Discord unavailable")
+			return fmt.Errorf("discord unavailable")
 		}
 		result, err := service.DiscordConfigure(cmd.Context(), req)
 		if err != nil {
@@ -78,7 +78,7 @@ func discordCommand(getClient func() client) *cobra.Command {
 			DiscordAPI(context.Context, contract.DiscordAPIRequest) (contract.DiscordAPIResponse, error)
 		})
 		if !ok {
-			return fmt.Errorf("Discord unavailable")
+			return fmt.Errorf("discord unavailable")
 		}
 		var body json.RawMessage
 		if args[0] != "GET" {
@@ -99,7 +99,7 @@ func discordCommand(getClient func() client) *cobra.Command {
 			DiscordSend(context.Context, contract.DiscordSendRequest) (contract.DiscordSendResponse, error)
 		})
 		if !ok {
-			return fmt.Errorf("Discord unavailable")
+			return fmt.Errorf("discord unavailable")
 		}
 		result, err := service.DiscordSend(cmd.Context(), contract.DiscordSendRequest{Channel: args[0], Text: args[1]})
 		if err != nil {
@@ -113,7 +113,7 @@ func discordCommand(getClient func() client) *cobra.Command {
 			DiscordRead(context.Context, contract.DiscordReadRequest) (contract.DiscordReadResponse, error)
 		})
 		if !ok {
-			return fmt.Errorf("Discord unavailable")
+			return fmt.Errorf("discord unavailable")
 		}
 		readReq.Channel = args[0]
 		result, err := service.DiscordRead(cmd.Context(), readReq)
@@ -132,7 +132,7 @@ func discordCommand(getClient func() client) *cobra.Command {
 			DiscordInstructions(context.Context, contract.DiscordInstructionsRequest) (contract.DiscordInstructionsResponse, error)
 		})
 		if !ok {
-			return fmt.Errorf("Discord unavailable")
+			return fmt.Errorf("discord unavailable")
 		}
 		req := contract.DiscordInstructionsRequest{Session: args[0]}
 		if len(args) == 2 {

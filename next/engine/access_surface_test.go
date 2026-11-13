@@ -50,13 +50,13 @@ func TestRoomReposSessionAccess(t *testing.T) {
 	if _, e := s.RoomRepos(ctx, caller, contract.RoomReposRequest{Room: room}); e != nil {
 		t.Fatalf("own room: %v", e)
 	}
-	if _, e := s.RoomRepos(ctx, caller, contract.RoomReposRequest{Room: other.Room}); e == nil || e.Code != contract.ErrForbidden {
+	if _, e := s.RoomRepos(ctx, caller, contract.RoomReposRequest(other)); e == nil || e.Code != contract.ErrForbidden {
 		t.Fatalf("other room: %v", e)
 	}
 	if _, e := s.RoomRepos(ctx, contract.Principal{Kind: contract.PrincipalEngine}, contract.RoomReposRequest{Room: room}); e == nil || e.Code != contract.ErrForbidden {
 		t.Fatalf("engine: %v", e)
 	}
-	if _, e := s.RoomRepos(ctx, owner, contract.RoomReposRequest{Room: other.Room}); e != nil {
+	if _, e := s.RoomRepos(ctx, owner, contract.RoomReposRequest(other)); e != nil {
 		t.Fatalf("owner: %v", e)
 	}
 }

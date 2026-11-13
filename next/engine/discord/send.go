@@ -94,7 +94,7 @@ func (c *Client) SendFiles(ctx context.Context, channel, text, reply string, fil
 		return "", err
 	}
 	if r.Status < 200 || r.Status >= 300 {
-		return "", fmt.Errorf("Discord file send failed (HTTP %d)", r.Status)
+		return "", fmt.Errorf("discord file send failed (HTTP %d)", r.Status)
 	}
 	var message struct {
 		ID string `json:"id"`

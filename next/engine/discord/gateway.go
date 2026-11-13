@@ -163,7 +163,7 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 	u.RawQuery = q.Encode()
 	conn, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{HTTPClient: g.Client.HTTP})
 	if err != nil {
-		return errors.New("Discord gateway unavailable")
+		return errors.New("discord gateway unavailable")
 	}
 	defer conn.CloseNow()
 	conn.SetReadLimit(4 << 20)
@@ -238,7 +238,7 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 			return err
 		case <-timer.C:
 			if !acked {
-				return errors.New("Discord heartbeat missed")
+				return errors.New("discord heartbeat missed")
 			}
 			if err := write(1, *seq); err != nil {
 				return err
@@ -266,7 +266,7 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 					*resume = ""
 					*seq = 0
 				}
-				return errors.New("Discord session invalidated")
+				return errors.New("discord session invalidated")
 			case 0:
 				if g.Directory != nil {
 					g.Directory.Apply(p.Type, p.Data)

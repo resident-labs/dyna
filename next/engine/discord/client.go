@@ -90,7 +90,7 @@ func (c *Client) request(ctx context.Context, method, path string, body []byte, 
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			return Result{}, errors.New("Discord request unavailable")
+			return Result{}, errors.New("discord request unavailable")
 		}
 		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		resp.Body.Close()
@@ -139,7 +139,7 @@ func (c *Client) request(ctx context.Context, method, path string, body []byte, 
 		}
 		return Result{Status: resp.StatusCode, Body: data, RetryAfter: retry}, nil
 	}
-	return Result{}, errors.New("Discord rate limit")
+	return Result{}, errors.New("discord rate limit")
 }
 
 type Identity struct {

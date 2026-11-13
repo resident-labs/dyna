@@ -66,7 +66,7 @@ func TestASessionStaysInItsRoom(t *testing.T) {
 	if _, problem := s.PackageAdd(ctx, worker, contract.PackageAddRequest{Source: "npm:tools@1.2.3", Room: other.Room}); problem == nil || problem.Code != contract.ErrForbidden {
 		t.Fatalf("%+v", problem)
 	}
-	if _, problem := s.AddonList(ctx, worker, contract.AddonListRequest{Room: other.Room}); problem == nil || problem.Code != contract.ErrForbidden {
+	if _, problem := s.AddonList(ctx, worker, contract.AddonListRequest(other)); problem == nil || problem.Code != contract.ErrForbidden {
 		t.Fatalf("%+v", problem)
 	}
 }

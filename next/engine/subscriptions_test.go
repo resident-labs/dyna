@@ -282,7 +282,7 @@ func TestSubscriptionAuthority(t *testing.T) {
 	if _, problem := s.SubscriptionSetEnabled(ctx, sessionCaller(child.Session), contract.SubscriptionSetEnabledRequest{ID: id, Enabled: false}); problem == nil || problem.Code != contract.ErrForbidden {
 		t.Errorf("child disabled a run: %v", problem)
 	}
-	if _, problem := s.SubscriptionList(ctx, sessionCaller(worker), contract.SubscriptionListRequest{Room: other.Room}); problem == nil || problem.Code != contract.ErrForbidden {
+	if _, problem := s.SubscriptionList(ctx, sessionCaller(worker), contract.SubscriptionListRequest(other)); problem == nil || problem.Code != contract.ErrForbidden {
 		t.Errorf("worker listed another room: %v", problem)
 	}
 	own, problem := s.SubscriptionList(ctx, sessionCaller(worker), contract.SubscriptionListRequest{})
@@ -355,8 +355,8 @@ func TestEventWakeSkipsOwnEventsAndDMs(t *testing.T) {
 	s, room, worker, ctx := setup(t)
 	addSubscription(t, s, ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeSession, Session: string(worker), On: []contract.EventType{"post.created"}, Wake: string(worker)})
 	pass(t, s, ctx)
-	var delivered func() int
-	delivered = func() int {
+
+	delivered := func() int {
 		var n int
 		if err := s.store.Read().QueryRowContext(ctx, "SELECT COUNT(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_id=? AND e.type='post.created'", worker).Scan(&n); err != nil {
 			t.Fatal(err)

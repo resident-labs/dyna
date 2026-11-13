@@ -16,14 +16,14 @@ import (
 
 func (s *Service) machineDiscordClient(ctx context.Context) (*discord.Client, error) {
 	if s.discordTokens == nil {
-		return nil, errors.New("Discord is unavailable")
+		return nil, errors.New("discord is unavailable")
 	}
 	b, err := s.store.DiscordBot(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if b.Credential == "" {
-		return nil, errors.New("Discord bot is not configured")
+		return nil, errors.New("discord bot is not configured")
 	}
 	s.discordRuntime.Lock()
 	defer s.discordRuntime.Unlock()

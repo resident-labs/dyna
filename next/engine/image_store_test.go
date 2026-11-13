@@ -38,7 +38,7 @@ func TestASessionSavesImagesOnlyInItsOwnRoomAndTheOwnerInAny(t *testing.T) {
 	other1.Room = other.Room
 	_, problem = s.ImageSave(ctx, worker, other1)
 	forbidden("save", problem)
-	_, problem = s.ImageList(ctx, worker, contract.ImageListRequest{Room: other.Room})
+	_, problem = s.ImageList(ctx, worker, contract.ImageListRequest(other))
 	forbidden("list", problem)
 	_, problem = s.ImageShow(ctx, worker, contract.ImageShowRequest{Name: "rust", Room: other.Room})
 	forbidden("show", problem)
@@ -52,7 +52,7 @@ func TestASessionSavesImagesOnlyInItsOwnRoomAndTheOwnerInAny(t *testing.T) {
 	if list, problem := s.ImageList(ctx, worker, contract.ImageListRequest{Room: room}); problem != nil || len(list.Images) != 1 {
 		t.Fatalf("%+v %+v", list, problem)
 	}
-	if list, _ := s.ImageList(ctx, ownerCaller, contract.ImageListRequest{Room: other.Room}); len(list.Images) != 0 {
+	if list, _ := s.ImageList(ctx, ownerCaller, contract.ImageListRequest(other)); len(list.Images) != 0 {
 		t.Fatalf("the refused save landed: %+v", list)
 	}
 

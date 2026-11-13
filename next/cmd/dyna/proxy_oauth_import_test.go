@@ -41,7 +41,7 @@ func (t importTestTransport) RoundTrip(r *http.Request) (*http.Response, error) 
 type importTestTransportProvider struct{ seen **http.Request }
 
 func (p importTestTransportProvider) RoundTripperFor(*coreauth.Auth) http.RoundTripper {
-	return importTestTransport{p.seen}
+	return importTestTransport(p)
 }
 
 func routesConfig(t *testing.T) *config.Config {

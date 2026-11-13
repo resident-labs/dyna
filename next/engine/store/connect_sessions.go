@@ -39,7 +39,7 @@ func (s *Store) StartConnectSession(ctx context.Context, x ConnectSession) error
 		// Relay signatures allow 60 seconds of clock skew. Do not let an old
 		// future-dated mint cross a revocation within that window.
 		if revokedAt.Valid && x.Minted.UnixMilli() <= revokedAt.Int64+time.Minute.Milliseconds() {
-			return errors.New("Connect mint predates revocation")
+			return errors.New("connect mint predates revocation")
 		}
 		var device string
 		var revoked sql.NullInt64
@@ -49,7 +49,7 @@ func (s *Store) StartConnectSession(ctx context.Context, x ConnectSession) error
 			return err
 		}
 		if revoked.Valid && x.Minted.UnixMilli() <= revoked.Int64+time.Minute.Milliseconds() {
-			return errors.New("Connect device revoked after mint")
+			return errors.New("connect device revoked after mint")
 		}
 		if newDevice || revoked.Valid {
 			var token [32]byte

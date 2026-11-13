@@ -181,6 +181,7 @@ func bash(c Config, roots map[string]string) extension.ToolDefinition {
 			}
 			answer, err := c.Shell.Run(ctx, run)
 			if err != nil && ctx.Err() != nil {
+				//lint:ignore ST1005 This is a complete agent-facing explanatory message, not an error fragment.
 				return extension.AgentToolResult{}, errors.New(abortedNote)
 			}
 			if err != nil {
