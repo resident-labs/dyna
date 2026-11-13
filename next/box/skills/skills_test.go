@@ -31,18 +31,21 @@ func TestParseRefusesWhatPiWouldNotLoad(t *testing.T) {
 }
 
 func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
-	items := BuiltIn()
-	if len(items) != 7 || items[1].Name != "dyna-discord" || items[2].Name != "dyna-extend" || items[2].Description != "Use when you need to add a skill or mcp server to dyna" || !items[2].BuiltIn {
-		t.Fatalf("%+v", items)
+	byName := map[string]contract.Addon{}
+	for _, item := range BuiltIn() {
+		byName[item.Name] = item
+	}
+	if extend := byName["dyna-extend"]; extend.Description != "Use when you need to add a skill or mcp server to dyna" || !extend.BuiltIn || byName["dyna-discord"].Name == "" {
+		t.Fatalf("%+v", byName)
 	}
 	if !IsBuiltIn("dyna-extend") || IsBuiltIn("other") {
 		t.Fatal("IsBuiltIn")
 	}
-	if images := items[3]; images.Name != "dyna-images" || !strings.HasPrefix(images.Description, "Use when your box lacks a tool") {
+	if images := byName["dyna-images"]; !strings.HasPrefix(images.Description, "Use when your box lacks a tool") {
 		t.Fatalf("%+v", images)
 	}
-	nodes := items[5]
-	if nodes.Name != "dyna-nodes" || nodes.Description != "Use when you need to add nodes to Dyna, or a room needs its own or disposable machines" {
+	nodes := byName["dyna-nodes"]
+	if nodes.Description != "Use when you need to add nodes to Dyna, or a room needs its own or disposable machines" {
 		t.Fatalf("%+v", nodes)
 	}
 	dir := t.TempDir()
@@ -239,5 +242,25 @@ func TestCISkill(t *testing.T) {
 	}
 	if strings.Count(text, "\n") > 90 {
 		t.Fatal("skill exceeds 90 lines")
+	}
+}
+
+func TestAdminSkill(t *testing.T) {
+	data, err := builtIn.ReadFile("dyna-admin/" + File)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := Parse(data)
+	if err != nil || meta.Name != "dyna-admin" || !strings.HasPrefix(meta.Description, "Root only. Use when") || len(meta.Description) >= 300 {
+		t.Fatalf("%+v %v", meta, err)
+	}
+	text := string(data)
+	for _, want := range []string{"dyna-audience: root", "--github-writes GROUPS@REPOS", "`actions`", "room repo add ROOM", "room repo ci", "room hosts ROOM --only", "room limit ROOM --cpus N --mem SIZE", "workflow set --room ROOM", "session set-account SESSION", "account limit ACCOUNT", "addon set KIND NAME", "host set NAME", "profile set NAME", "op decide", "op list ROOM", "24 hours", "full owner\n  power", "**Yours**", "**Every room**", "**The owner's**"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the skill does not say %q", want)
+		}
+	}
+	if lines := strings.Count(text, "\n"); lines > 150 {
+		t.Errorf("the skill is %d lines", lines)
 	}
 }
