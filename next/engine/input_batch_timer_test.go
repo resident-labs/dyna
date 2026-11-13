@@ -1,16 +1,18 @@
 package engine
 
 import (
-	"github.com/resident-labs/dyna/contract"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/resident-labs/dyna/contract"
 )
 
 type inputBatchTestTimer struct {
-	ticks   chan time.Time
-	delay   time.Duration
-	stopped atomic.Bool
+	ticks    chan time.Time
+	delay    time.Duration
+	stopped  atomic.Bool
+	canceled chan struct{}
 }
 
 func TestInputBatchTimerLifecycle(t *testing.T) {
@@ -22,9 +24,13 @@ func TestInputBatchTimerLifecycle(t *testing.T) {
 			s.now = func() time.Time { return time.UnixMilli(clock.Load()) }
 			armed := make(chan *inputBatchTestTimer, 8)
 			s.batchTimer = func(d time.Duration) (<-chan time.Time, func()) {
-				timer := &inputBatchTestTimer{ticks: make(chan time.Time, 1), delay: d}
+				timer := &inputBatchTestTimer{ticks: make(chan time.Time, 1), delay: d, canceled: make(chan struct{})}
 				armed <- timer
-				return timer.ticks, func() { timer.stopped.Store(true) }
+				return timer.ticks, func() {
+					if !timer.stopped.Swap(true) {
+						close(timer.canceled)
+					}
+				}
 			}
 			nextTimer := func() *inputBatchTestTimer {
 				t.Helper()
@@ -124,10 +130,9 @@ func TestInputBatchTimerLifecycle(t *testing.T) {
 				}
 				receive(ch, 3)
 				// Cancellation occurs after the unbuffered TurnStart handoff.
-				for i := 0; i < 100 && !tm.stopped.Load(); i++ {
-					time.Sleep(time.Millisecond)
-				}
-				if !tm.stopped.Load() {
+				select {
+				case <-tm.canceled:
+				case <-time.After(2 * time.Second):
 					t.Fatal("owner did not cancel timer")
 				}
 				clock.Add(90_000)
