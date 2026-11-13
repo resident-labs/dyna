@@ -77,7 +77,7 @@ export type InstructionsGetRequest = { room?: RoomID; };
 export type InstructionsGetResponse = { text: string; hash: string; savedAt?: string | null; };
 export type InstructionsSetRequest = { room?: RoomID; text: string; base: string; };
 export type InstructionsSetResponse = { hash: string; };
-export type Method = "addon.list" | "addon.set_enabled" | "addon.set_root_only" | "addon.set_hosts" | "box.notice" | "mcp.add" | "mcp.list" | "mcp.remove" | "package.add" | "package.list" | "package.remove" | "skill.list" | "skill.remove" | "skill.save" | "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "proxy.key" | "proxy.usage" | "conversation.read" | "room.list" | "session.list" | "diff.saved" | "delivery.done" | "host.add" | "host.set_limits" | "host.set" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.set" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.set_branch" | "session.restart" | "session.refresh" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.compacted" | "box.hello" | "computer.changed" | "computer.start" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.job.running" | "shell.output" | "box.stats" | "box.stats.report" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "device.set_host" | "room.discord" | "discord.api" | "discord.send" | "discord.configure" | "discord.instructions" | "discord.read" | "discord.export" | "discord.plan" | "discord.apply" | "discord.policy" | "discord.check" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "hostexec.stop" | "image.list" | "image.remove" | "image.save" | "image.show" | "issue.list" | "issue.status" | "issue.track" | "issue.untrack" | "search.posts" | "search.sessions" | "search.rooms" | "history.read" | "transcript.digest" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pool.add" | "pool.list" | "pool.remove" | "pool.set" | "room.hosts" | "host.remove" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "session.responsibilities" | "room.github" | "service.set" | "service.list" | "service.show" | "service.logs" | "service.restart" | "service.stop" | "service.start" | "service.update" | "service.rollback" | "service.remove" | "service.secret_set" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled" | "voice.status" | "voice.stop" | "workflow.run" | "workflow.reload" | "workflow.status" | "workflow.step" | "workflow.list" | "workflow.pin" | "workflow.step_start" | "workflow.step_end" | "workflow.step_transcript" | "workflow.set_status" | "workflow.settings" | "workflow.set";
+export type Method = "addon.list" | "addon.set_enabled" | "addon.set_root_only" | "addon.set_hosts" | "box.notice" | "mcp.add" | "mcp.list" | "mcp.remove" | "package.add" | "package.list" | "package.remove" | "skill.list" | "skill.remove" | "skill.save" | "instructions.get" | "instructions.set" | "web.login" | "web.search" | "websearch.set_key" | "websearch.remove_key" | "proxy.key" | "proxy.usage" | "conversation.read" | "room.list" | "session.list" | "diff.saved" | "delivery.done" | "host.add" | "host.set_limits" | "host.set" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "room.set" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "session.set_profile" | "session.account" | "session.set_account" | "session.set_branch" | "session.restart" | "session.refresh" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.compacted" | "box.hello" | "computer.changed" | "computer.start" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.job.running" | "shell.output" | "box.stats" | "box.stats.report" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "device.set_host" | "room.discord" | "discord.api" | "discord.send" | "discord.configure" | "discord.instructions" | "discord.read" | "discord.export" | "discord.plan" | "discord.apply" | "discord.policy" | "discord.check" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "hostexec.stop" | "image.list" | "image.remove" | "image.save" | "image.show" | "issue.list" | "issue.status" | "issue.track" | "issue.untrack" | "search.posts" | "search.sessions" | "search.rooms" | "history.read" | "transcript.digest" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pool.add" | "pool.list" | "pool.remove" | "pool.set" | "room.hosts" | "host.remove" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "session.responsibilities" | "room.github" | "service.set" | "service.list" | "service.show" | "service.logs" | "service.restart" | "service.stop" | "service.start" | "service.update" | "service.rollback" | "service.remove" | "service.secret_set" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled" | "voice.status" | "voice.stop" | "workflow.run" | "workflow.reload" | "workflow.status" | "workflow.step" | "workflow.list" | "workflow.pin" | "workflow.step_start" | "workflow.step_end" | "workflow.step_transcript" | "workflow.set_status" | "workflow.pause" | "workflow.unpause" | "workflow.steer" | "workflow.settings" | "workflow.set";
 export type ErrorCode = "podman_required" | "invalid" | "unknown_action" | "not_found" | "forbidden" | "cross_room_attachment" | "conflict" | "room_limited" | "profile_exists" | "move_busy" | "has_children" | "parent_closing" | "session_closing" | "stale" | "github_quota" | "visual_superseded" | "unavailable" | "reconnect_unavailable" | "models_unavailable" | "store_from_v1" | "store_too_old" | "no_gpu" | "gpu_too_large" | "no_grant" | "command_too_long" | "port_taken" | "port_privileged";
 export type Error = { code: ErrorCode; message: string; visual?: VisualSuperseded | null; limited?: RoomLimited | null; workflow?: WorkflowRefused | null; githubWrites?: GitHubWritesRefused | null; };
 export type VisualSuperseded = { event: EventID; version: number; seq: number; };
@@ -202,7 +202,7 @@ export type ShellJobEndedRequest = { description?: string; end?: ShellJobEnd | n
 export type ShellJobEndedResponse = { };
 export type ShellJobRunningRequest = { description?: string; job: ShellJobID; ranMinutes: number; quietMinutes?: number | null; tail: string; idleMinutes?: number | null; processes?: string; };
 export type ShellJobRunningResponse = { };
-export type TurnInput = { delivery: DeliverySeq; surface: Surface; reply: ReplyChannel; text: string; files?: Array<TurnFile> | null; };
+export type TurnInput = { delivery: DeliverySeq; surface: Surface; reply: ReplyChannel; workflowStep?: string; text: string; files?: Array<TurnFile> | null; };
 export type TurnFile = { path: string; sha256: string; bytes: number; };
 export type TurnStart = { sections: Array<ContextSection> | null; turn: TurnID; inputs: Array<TurnInput> | null; model: ModelChoice; modelInstructions?: string; compactTokens?: number; textOnlyModels?: Array<TextOnlyModel> | null; };
 export type TurnQueue = "steer" | "follow_up";
@@ -321,7 +321,7 @@ export type RoomDeleted = { };
 export type SessionProfileChanged = { session: SessionID; profile: ProfileName; };
 export type PostSource = { room: RoomID; roomName: RoomName; sessionName: string; };
 export type PostSent = { text: string; target: PostSource; };
-export type PostCreated = { spoken?: boolean; dataAttachment?: number | null; source?: PostSource | null; text: string; data?: JSONData; turn?: TurnID; mentions?: Array<Principal> | null; home: Conversation; replyTo?: EventID; attachments?: Array<Attachment> | null; clientId?: string; toolCallId?: string; hook?: SubscriptionID; };
+export type PostCreated = { spoken?: boolean; dataAttachment?: number | null; source?: PostSource | null; text: string; data?: JSONData; turn?: TurnID; mentions?: Array<Principal> | null; workflowStep?: string; home: Conversation; replyTo?: EventID; attachments?: Array<Attachment> | null; clientId?: string; toolCallId?: string; hook?: SubscriptionID; };
 export type Attachment = { name: string; media: string; bytes: number; sha256: string; visual?: VisualCard | null; };
 export type VisualCard = { id: EventID; version: number; title: string; height: number; allowNet: boolean; banner: string; thumbnail: string; shots: Array<VisualShot> | null; checks: Array<VisualCheck> | null; };
 export type VisualShot = { width: number; file: string; };
@@ -654,7 +654,7 @@ export type WorkflowRunRequest = { room?: RoomID; script: string; args?: string;
 export type WorkflowRunResponse = { run: WorkflowRunID; session: SessionID; box: BoxID; };
 export type WorkflowReloadRequest = { run: WorkflowRunID; script: string; };
 export type WorkflowReloadResponse = { run: WorkflowRunID; version: number; };
-export type WorkflowInfo = { run: WorkflowRunID; room: RoomID; session: SessionID; name: string; description?: string; profiles: Array<ProfileName> | null; repo?: RepoName; commit?: string; branch?: string; version?: number; state: WorkflowState; result?: string; steps?: number; failed: number; failedSteps?: Array<string> | null; running?: number; status?: string; statusAt?: string; usage: Usage; started: string; ended?: string; };
+export type WorkflowInfo = { run: WorkflowRunID; room: RoomID; session: SessionID; name: string; description?: string; profiles: Array<ProfileName> | null; repo?: RepoName; commit?: string; branch?: string; version?: number; state: WorkflowState; paused?: boolean; result?: string; steps?: number; failed: number; failedSteps?: Array<string> | null; running?: number; status?: string; statusAt?: string; usage: Usage; started: string; ended?: string; };
 export type WorkflowStatusLine = { text: string; at: string; };
 export type WorkflowStep = { key: string; parent?: string; kind: WorkflowStepKind; name: string; phase?: string; lane?: string; profile?: ProfileName; version?: number; state: WorkflowStepState; reason?: string; transcript?: string; more?: boolean; usage: Usage; started: string; ended?: string; };
 export type WorkflowStatusRequest = { run?: WorkflowRunID; session?: SessionID; };
@@ -665,7 +665,7 @@ export type WorkflowMerge = { branch: string; commit: string; merged: Array<stri
 export type WorkflowConflict = { step: string; branch?: string; files: Array<string> | null; reason?: string; };
 export type WorkflowListRequest = { room?: RoomID; };
 export type WorkflowListResponse = { runs: Array<WorkflowInfo> | null; };
-export type BoxWorkflow = { run: WorkflowRunID; name: string; script: string; version: number; args?: string; profiles: Array<WorkflowProfile> | null; workers: number; timeout: number; };
+export type BoxWorkflow = { run: WorkflowRunID; name: string; script: string; version: number; paused: boolean; args?: string; profiles: Array<WorkflowProfile> | null; workers: number; timeout: number; };
 export type WorkflowReload = { workflow: BoxWorkflow; };
 export type WorkflowProfile = { name: ProfileName; model: ModelChoice; compactTokens?: number; maxConcurrent?: number; modelInstructions?: string; };
 export type WorkflowPinRequest = { commit: string; };
@@ -681,6 +681,13 @@ export type WorkflowSetStatusResponse = { };
 export type WorkflowEnded = { run: WorkflowRunID; session: SessionID; name: string; state: WorkflowState; steps?: number; failed: number; failedSteps?: Array<string> | null; usage: Usage; };
 export type WorkflowStepChanged = { run: WorkflowRunID; session: SessionID; step: WorkflowStep; steps: number; running: number; failed: number; };
 export type WorkflowStatusChanged = { run: WorkflowRunID; session: SessionID; status: string; };
+export type WorkflowSteerRequest = { run: WorkflowRunID; step: string; text: string; };
+export type WorkflowSteerResponse = PostResponse;
+export type WorkflowPauseRequest = { run: WorkflowRunID; };
+export type WorkflowPauseResponse = { };
+export type WorkflowUnpauseRequest = WorkflowPauseRequest;
+export type WorkflowUnpauseResponse = WorkflowPauseResponse;
+export type WorkflowPauseChanged = { run: WorkflowRunID; session: SessionID; paused: boolean; };
 export type WorkflowStarters = "any" | "leads" | "root" | "off";
 export type WorkflowFeature = "worktree" | "merge" | "run" | "workflow" | "post" | "resume";
 export type WorkflowSetting = "start" | "maxRuns" | "maxWorkers" | "profiles" | "size" | "timeout" | "worktree" | "merge" | "run" | "workflow" | "post" | "resume";
@@ -769,6 +776,7 @@ export type EventBody =
   | { type: "turn.ended"; body: TurnEnded }
   | { type: "turn.started"; body: TurnStarted }
   | { type: "workflow.ended"; body: WorkflowEnded }
+  | { type: "workflow.pause_changed"; body: WorkflowPauseChanged }
   | { type: "workflow.status_changed"; body: WorkflowStatusChanged }
   | { type: "workflow.step_changed"; body: WorkflowStepChanged }
 ;
@@ -990,6 +998,9 @@ export interface MethodMap {
   "workflow.step_end": { request: WorkflowStepEndRequest; response: WorkflowStepEndResponse };
   "workflow.step_transcript": { request: WorkflowStepTranscriptRequest; response: WorkflowStepTranscriptResponse };
   "workflow.set_status": { request: WorkflowSetStatusRequest; response: WorkflowSetStatusResponse };
+  "workflow.pause": { request: WorkflowPauseRequest; response: WorkflowPauseResponse };
+  "workflow.unpause": { request: WorkflowUnpauseRequest; response: WorkflowUnpauseResponse };
+  "workflow.steer": { request: WorkflowSteerRequest; response: WorkflowSteerResponse };
   "workflow.settings": { request: WorkflowSettingsRequest; response: WorkflowSettingsResponse };
   "workflow.set": { request: WorkflowSetRequest; response: WorkflowSetResponse };
 }

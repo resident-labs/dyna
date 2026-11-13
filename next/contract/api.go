@@ -619,6 +619,7 @@ type PostRequest struct {
 	Room           RoomID       `json:"room"`
 	Text           string       `json:"text"`
 	Mentions       []string     `json:"mentions,omitempty"`
+	WorkflowStep   string       `json:"-"`
 	Home           Conversation `json:"home,omitempty"`
 	ReplyTo        EventID      `json:"replyTo,omitempty"`
 	Attachments    []Attachment `json:"attachments,omitempty"`
@@ -1035,11 +1036,12 @@ type ShellJobRunningRequest struct {
 }
 type ShellJobRunningResponse struct{}
 type TurnInput struct {
-	Delivery DeliverySeq  `json:"delivery"`
-	Surface  Surface      `json:"surface"`
-	Reply    ReplyChannel `json:"reply"`
-	Text     string       `json:"text"`
-	Files    []TurnFile   `json:"files,omitempty"` // the attachments the frame names
+	Delivery     DeliverySeq  `json:"delivery"`
+	Surface      Surface      `json:"surface"`
+	Reply        ReplyChannel `json:"reply"`
+	WorkflowStep string       `json:"workflowStep,omitempty"`
+	Text         string       `json:"text"`
+	Files        []TurnFile   `json:"files,omitempty"` // the attachments the frame names
 }
 
 // TurnFile is one attachment of an input. The box fetches it by hash and stores it at Path before Pi reads the input.

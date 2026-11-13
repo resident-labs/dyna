@@ -89,12 +89,13 @@ type CrewConfig struct {
 // journal, not this process, holds what has finished. A restarted box runs the script again and stored steps return at once.
 // A reload runs a new version in the same turn, and a step still running here is joined, not started again.
 type Crew struct {
-	config  CrewConfig
-	slots   chan struct{}
-	builds  *buildLock
-	shims   string
-	repo    sync.Mutex    // the changes to the one repository that all trees share
-	reloads chan struct{} // a newer version of the script is waiting
+	config       CrewConfig
+	slots        chan struct{}
+	builds       *buildLock
+	shims        string
+	repo         sync.Mutex    // the changes to the one repository that all trees share
+	reloads      chan struct{} // a newer version of the script is waiting
+	pauseChanged chan struct{} // a pause change wakes calls waiting to start
 
 	mu       sync.Mutex
 	workflow contract.BoxWorkflow // the newest version of the script, which a reload replaces
@@ -142,7 +143,7 @@ func NewCrew(config CrewConfig) (*Crew, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Crew{config: config, slots: make(chan struct{}, max(config.Workflow.Workers, 1)), builds: builds, shims: shims, reloads: make(chan struct{}, 1),
+	c := &Crew{config: config, slots: make(chan struct{}, max(config.Workflow.Workers, 1)), builds: builds, shims: shims, reloads: make(chan struct{}, 1), pauseChanged: make(chan struct{}),
 		workflow: config.Workflow, limits: make(map[contract.ProfileName]chan struct{}), running: make(map[string]*runningStep), workers: make(map[string]crewWorker), queued: make(map[contract.DeliverySeq][]crewWorker), taken: make(map[contract.DeliverySeq]bool)}
 	c.addLimits(config.Workflow.Profiles)
 	return c, nil
@@ -163,6 +164,11 @@ func (c *Crew) addLimits(profiles []contract.WorkflowProfile) {
 func (c *Crew) Reload(workflow contract.BoxWorkflow) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if workflow.Paused != c.workflow.Paused {
+		c.workflow.Paused = workflow.Paused
+		close(c.pauseChanged)
+		c.pauseChanged = make(chan struct{})
+	}
 	if workflow.Version <= c.workflow.Version {
 		return
 	}
@@ -263,6 +269,12 @@ func (c *Crew) SetPromptSections(context.Context, []contract.ContextSection) err
 func (c *Crew) Steer(ctx context.Context, input contract.TurnInput) error {
 	c.mu.Lock()
 	workers := slices.Collect(maps.Values(c.workers))
+	if input.WorkflowStep != "" {
+		workers = nil
+		if worker := c.workers[input.WorkflowStep]; worker != nil {
+			workers = append(workers, worker)
+		}
+	}
 	c.mu.Unlock()
 	var queued []crewWorker
 	var failed error
@@ -722,6 +734,9 @@ type agentOpts struct {
 }
 
 func (c *Crew) agentCall(ctx context.Context, call crewCall) crewReply {
+	if err := c.waitUnpaused(ctx); err != nil {
+		return crewReply{Error: "the run stopped"}
+	}
 	var opts agentOpts
 	refused := strictOpts(call.Opts, &opts)
 	var prompt string
@@ -976,6 +991,9 @@ type commandResult struct {
 }
 
 func (c *Crew) commandCall(ctx context.Context, call crewCall) crewReply {
+	if err := c.waitUnpaused(ctx); err != nil {
+		return crewReply{Error: "the run stopped"}
+	}
 	var opts commandOpts
 	refused := strictOpts(call.Opts, &opts)
 	var argv []string
@@ -1157,4 +1175,21 @@ func (t *tail) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return strings.ToValidUTF8(string(t.data), "")
+}
+
+// waitUnpaused gates new agent and command calls; workers already running keep their turns.
+func (c *Crew) waitUnpaused(ctx context.Context) error {
+	for {
+		c.mu.Lock()
+		paused, changed := c.workflow.Paused, c.pauseChanged
+		c.mu.Unlock()
+		if !paused {
+			return nil
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }

@@ -15,6 +15,9 @@ const (
 	MethodWorkflowStepTranscript Method = "workflow.step_transcript"
 	// MethodWorkflowSetStatus keeps a script's status() line on its run.
 	MethodWorkflowSetStatus Method = "workflow.set_status"
+	MethodWorkflowPause     Method = "workflow.pause"
+	MethodWorkflowUnpause   Method = "workflow.unpause"
+	MethodWorkflowSteer     Method = "workflow.steer"
 )
 
 // WorkerHeader names the worker of a crew's model call. A crew is one session with many conversations, and each needs its
@@ -92,6 +95,7 @@ type WorkflowInfo struct {
 	Branch      string        `json:"branch,omitempty"` // the crew session's recorded branch, which its workers' branches extend
 	Version     int           `json:"version,omitempty"`
 	State       WorkflowState `json:"state"`
+	Paused      bool          `json:"paused,omitempty"`
 	Result      string        `json:"result,omitempty"`
 	Steps       int           `json:"steps,omitempty"`
 	Failed      int           `json:"failed"`
@@ -189,6 +193,7 @@ type BoxWorkflow struct {
 	Name     string            `json:"name"`
 	Script   string            `json:"script"`
 	Version  int               `json:"version"`
+	Paused   bool              `json:"paused"`
 	Args     string            `json:"args,omitempty"`
 	Profiles []WorkflowProfile `json:"profiles"` // in meta's order: the first is the default
 	Workers  int               `json:"workers"`  // how many crew workers may run at once: the box's memory allows some, and the maxWorkers setting may allow fewer
@@ -307,3 +312,28 @@ type WorkflowStatusChanged struct {
 
 func (WorkflowStatusChanged) EventType() EventType { return "workflow.status_changed" }
 func (WorkflowStatusChanged) isEventBody()         {}
+
+// WorkflowSteerRequest addresses one running worker by label or unique key prefix.
+type WorkflowSteerRequest struct {
+	Run  WorkflowRunID `json:"run"`
+	Step string        `json:"step"`
+	Text string        `json:"text"`
+}
+type WorkflowSteerResponse = PostResponse
+
+type WorkflowPauseRequest struct {
+	Run WorkflowRunID `json:"run"`
+}
+type WorkflowPauseResponse struct{}
+type WorkflowUnpauseRequest = WorkflowPauseRequest
+type WorkflowUnpauseResponse = WorkflowPauseResponse
+
+// WorkflowPauseChanged refreshes open run pages after a pause or unpause.
+type WorkflowPauseChanged struct {
+	Run     WorkflowRunID `json:"run"`
+	Session SessionID     `json:"session"`
+	Paused  bool          `json:"paused"`
+}
+
+func (WorkflowPauseChanged) EventType() EventType { return "workflow.pause_changed" }
+func (WorkflowPauseChanged) isEventBody()         {}

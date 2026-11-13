@@ -98,6 +98,7 @@ type PostCreated struct {
 	Data           JSONData     `json:"data,omitempty"`
 	Turn           TurnID       `json:"turn,omitempty"`
 	Mentions       []Principal  `json:"mentions,omitempty"`
+	WorkflowStep   string       `json:"workflowStep,omitempty"`
 	Home           Conversation `json:"home"` // feed or a DM
 	ReplyTo        EventID      `json:"replyTo,omitempty"`
 	Attachments    []Attachment `json:"attachments,omitempty"`

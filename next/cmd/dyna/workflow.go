@@ -62,7 +62,16 @@ func workflowCommand(get func() *socketClient) *cobra.Command {
 	}}
 	set.Flags().StringVar(&room, "room", "", "Room to change; without it, the global values")
 	set.Flags().StringSliceVar(&clear, "clear", nil, "Settings to return to what they inherit")
-	c.AddCommand(run, reload, status, list, settings, set)
+	steer := &cobra.Command{Use: "steer RUN STEP TEXT", Args: cobra.ExactArgs(3), RunE: func(cmd *cobra.Command, args []string) error {
+		return printCall[contract.WorkflowSteerResponse](cmd, get(), contract.MethodWorkflowSteer, contract.WorkflowSteerRequest{Run: contract.WorkflowRunID(args[0]), Step: args[1], Text: args[2]})
+	}}
+	pause := &cobra.Command{Use: "pause RUN", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		return printCall[contract.WorkflowPauseResponse](cmd, get(), contract.MethodWorkflowPause, contract.WorkflowPauseRequest{Run: contract.WorkflowRunID(args[0])})
+	}}
+	unpause := &cobra.Command{Use: "unpause RUN", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		return printCall[contract.WorkflowUnpauseResponse](cmd, get(), contract.MethodWorkflowUnpause, contract.WorkflowUnpauseRequest{Run: contract.WorkflowRunID(args[0])})
+	}}
+	c.AddCommand(steer, pause, unpause, run, reload, status, list, settings, set)
 	return c
 }
 

@@ -137,19 +137,9 @@ func (s *Service) WorkflowRun(ctx context.Context, caller contract.Principal, re
 // branches and journal. The meta must keep the run's name, repo and size, which its session and box were made for.
 func (s *Service) WorkflowReload(ctx context.Context, caller contract.Principal, req contract.WorkflowReloadRequest) (contract.WorkflowReloadResponse, *contract.Error) {
 	var response contract.WorkflowReloadResponse
-	run, err := s.store.WorkflowRun(ctx, req.Run)
-	if err != nil {
-		return response, failure(err)
-	}
-	if problem := s.roomAccess(ctx, caller, run.Room); problem != nil {
+	run, problem := s.managedWorkflow(ctx, caller, req.Run)
+	if problem != nil {
 		return response, problem
-	}
-	tree, err := s.store.RoomTree(ctx, run.Room)
-	if err != nil {
-		return response, failure(err)
-	}
-	if !tree.CanManage(caller, run.Session) {
-		return response, &contract.Error{Code: contract.ErrForbidden, Message: "only the owner, the session that started a workflow or a session above it reloads it"}
 	}
 	ended := &contract.Error{Code: contract.ErrConflict, Message: "run " + string(run.ID) + " has ended; reload is for a running run, and run with resume starts a new one from an ended run"}
 	if run.State != contract.WorkflowRunning {
@@ -203,7 +193,7 @@ func (s *Service) workflowInfo(ctx context.Context, run store.WorkflowRun) (cont
 		return contract.WorkflowInfo{}, err
 	}
 	recorded, err := s.store.SessionBranches(ctx, run.Repo, run.Session)
-	info := contract.WorkflowInfo{Run: run.ID, Room: run.Room, Session: run.Session, Name: run.Name, Description: run.Description, Profiles: run.Profiles, Repo: run.Repo, Commit: run.Commit, Version: run.Version, State: run.State, Result: run.Result, Steps: summary.Steps, Running: running, Failed: summary.Failed, FailedSteps: summary.FailedSteps, Usage: summary.Usage, Started: run.Started, Ended: run.Ended}
+	info := contract.WorkflowInfo{Run: run.ID, Room: run.Room, Session: run.Session, Name: run.Name, Description: run.Description, Profiles: run.Profiles, Repo: run.Repo, Commit: run.Commit, Version: run.Version, State: run.State, Paused: run.Paused, Result: run.Result, Steps: summary.Steps, Running: running, Failed: summary.Failed, FailedSteps: summary.FailedSteps, Usage: summary.Usage, Started: run.Started, Ended: run.Ended}
 	if len(recorded) > 0 {
 		info.Branch = recorded[0]
 	}
@@ -447,7 +437,7 @@ func (s *Service) boxWorkflow(ctx context.Context, run store.WorkflowRun, memory
 		workers = min(workers, effective.MaxWorkers)
 	}
 	summaries := s.profiles.List()
-	workflow := &contract.BoxWorkflow{Run: run.ID, Name: run.Name, Script: run.Script, Version: run.Version, Args: run.Args, Workers: workers, Timeout: effective.Timeout}
+	workflow := &contract.BoxWorkflow{Run: run.ID, Name: run.Name, Script: run.Script, Version: run.Version, Paused: run.Paused, Args: run.Args, Workers: workers, Timeout: effective.Timeout}
 	for _, name := range run.Profiles {
 		model, _, err := s.profiles.Model(name)
 		if err != nil {
@@ -550,4 +540,82 @@ func (s *Service) stopWorkflows(ctx context.Context, sessions []contract.Session
 		}
 	}
 	return nil
+}
+
+func (s *Service) WorkflowSteer(ctx context.Context, caller contract.Principal, req contract.WorkflowSteerRequest) (contract.WorkflowSteerResponse, *contract.Error) {
+	run, problem := s.managedWorkflow(ctx, caller, req.Run)
+	if problem != nil {
+		return contract.WorkflowSteerResponse{}, problem
+	}
+	if run.State != contract.WorkflowRunning {
+		return contract.WorkflowSteerResponse{}, invalid("that run has ended")
+	}
+	if strings.TrimSpace(req.Text) == "" {
+		return contract.WorkflowSteerResponse{}, invalid("text is required")
+	}
+	steps, err := s.store.WorkflowSteps(ctx, run.ID)
+	if err != nil {
+		return contract.WorkflowSteerResponse{}, failure(err)
+	}
+	var matches, labels []string
+	for _, step := range steps {
+		if step.Kind != contract.WorkflowStepAgent || step.State != contract.WorkflowStepRunning {
+			continue
+		}
+		labels = append(labels, step.Name+" ("+step.Key+")")
+		if req.Step != "" && (step.Name == req.Step || strings.HasPrefix(step.Key, req.Step)) {
+			matches = append(matches, step.Key)
+		}
+	}
+	if len(labels) == 0 {
+		return contract.WorkflowSteerResponse{}, invalid("no worker is running in that run")
+	}
+	if len(matches) != 1 {
+		return contract.WorkflowSteerResponse{}, invalid("step must name one running worker; running workers: " + strings.Join(labels, ", "))
+	}
+	return s.Post(ctx, caller, contract.PostRequest{Room: run.Room, Mentions: []string{string(run.Session)}, Text: req.Text, WorkflowStep: matches[0]})
+}
+
+func (s *Service) WorkflowPause(ctx context.Context, caller contract.Principal, req contract.WorkflowPauseRequest) (contract.WorkflowPauseResponse, *contract.Error) {
+	return s.workflowPause(ctx, caller, req.Run, true)
+}
+func (s *Service) WorkflowUnpause(ctx context.Context, caller contract.Principal, req contract.WorkflowUnpauseRequest) (contract.WorkflowUnpauseResponse, *contract.Error) {
+	return s.workflowPause(ctx, caller, req.Run, false)
+}
+func (s *Service) workflowPause(ctx context.Context, caller contract.Principal, id contract.WorkflowRunID, paused bool) (contract.WorkflowPauseResponse, *contract.Error) {
+	run, problem := s.managedWorkflow(ctx, caller, id)
+	if problem != nil {
+		return contract.WorkflowPauseResponse{}, problem
+	}
+	if err := s.store.PauseWorkflow(ctx, id, paused); errors.Is(err, store.ErrWorkflowEnded) {
+		return contract.WorkflowPauseResponse{}, invalid("that run has ended")
+	} else if err != nil {
+		return contract.WorkflowPauseResponse{}, failure(err)
+	}
+	event, err := s.event(run.Room, caller, contract.WorkflowPauseChanged{Run: run.ID, Session: run.Session, Paused: paused})
+	if err != nil {
+		log.Printf("workflow %s pause: %v", run.ID, err)
+	} else {
+		s.live.Publish(run.Room, event, false)
+	}
+	return contract.WorkflowPauseResponse{}, nil
+}
+
+// managedWorkflow applies the same authority boundary to reload, steering and pause.
+func (s *Service) managedWorkflow(ctx context.Context, caller contract.Principal, id contract.WorkflowRunID) (store.WorkflowRun, *contract.Error) {
+	run, err := s.store.WorkflowRun(ctx, id)
+	if err != nil {
+		return run, failure(err)
+	}
+	if problem := s.roomAccess(ctx, caller, run.Room); problem != nil {
+		return run, problem
+	}
+	tree, err := s.store.RoomTree(ctx, run.Room)
+	if err != nil {
+		return run, failure(err)
+	}
+	if !tree.CanManage(caller, run.Session) {
+		return run, &contract.Error{Code: contract.ErrForbidden, Message: "only the owner, the session that started a workflow or a session above it manages it"}
+	}
+	return run, nil
 }

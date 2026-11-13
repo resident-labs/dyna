@@ -360,6 +360,12 @@ export class RoomStore {
       return;
     }
     // A step row and a status line have seq 0 too. They reach an open run page and the run's counts and line, never a window.
+    if (event.type === "workflow.pause_changed") {
+      const { session, paused } = event.body, run = this.workflows.get(session);
+      if (run) this.workflows.set(session, { ...run, paused });
+      this.runPages.get(session)?.step();
+      return;
+    }
     if (event.type === "workflow.step_changed") {
       const { session, step, steps, running, failed } = event.body, run = this.workflows.get(session);
       if (run?.state === "running") this.workflows.set(session, { ...run, steps, running, failed });
