@@ -30,10 +30,8 @@ case "$1 $2" in
   [ "$3" = dyna-box-b ] || exit 95
   test -d "$NS_ROOT/workspace" || exit 1
   if test -f "$NS_ROOT/gate-child"; then
-   printf '%s\n' "$PPID" > "$NS_ROOT/body-pid"
-   ps -o ppid= -p "$PPID" | tr -d ' ' > "$NS_ROOT/lock-pid"
-   touch "$NS_ROOT/child-entered"
-   while ! test -f "$NS_ROOT/release-child"; do sleep 0.01; done
+   printf '%s %s\n' "$PPID" "$(ps -o ppid= -p "$PPID")" > "$NS_CHILD_READY"
+   IFS= read -r _ < "$NS_CHILD_RELEASE"
   fi
   rm -rf "$NS_ROOT/workspace";;
  'volume prune')
@@ -59,18 +57,13 @@ esac
 	return root, h
 }
 
-func waitNamespaceFile(t *testing.T, path string) []byte {
+func readNamespaceFile(t *testing.T, path string) []byte {
 	t.Helper()
-	end := time.Now().Add(5 * time.Second)
-	for time.Now().Before(end) {
-		b, err := os.ReadFile(path)
-		if err == nil {
-			return b
-		}
-		time.Sleep(5 * time.Millisecond)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Fatalf("host fixture did not reach %s", path)
-	return nil
+	return raw
 }
 
 func TestNamespaceMissingWorkspaceStillDeletesStack(t *testing.T) {
@@ -107,13 +100,13 @@ func TestNamespaceEpochSupersedesWholeWorkspaceAndStackDelete(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	calls := waitNamespaceFile(t, filepath.Join(root, "calls"))
+	calls := readNamespaceFile(t, filepath.Join(root, "calls"))
 	err = h.RemoveBox(ctx, "b", before, true, "")
 	var superseded NamespaceSuperseded
 	if !errors.As(err, &superseded) {
 		t.Fatalf("stale delete: %v", err)
 	}
-	after := waitNamespaceFile(t, filepath.Join(root, "calls"))
+	after := readNamespaceFile(t, filepath.Join(root, "calls"))
 	if string(calls) != string(after) {
 		t.Fatalf("superseded deleter touched namespace:\n%s", after)
 	}
@@ -137,7 +130,7 @@ func TestNamespaceEpochSupersedesWholeWorkspaceAndStackDelete(t *testing.T) {
 
 // This gates the ACTUAL production command before its flock, without inserting
 // any test lock or replacement body. The cancellation transport cannot join it.
-type delayedNamespaceRunner struct{ root string }
+type delayedNamespaceRunner struct{ entered, release, finished *scriptSignal }
 
 func (r delayedNamespaceRunner) Run(ctx context.Context, in []byte, args ...string) ([]byte, error) {
 	command := args[len(args)-1]
@@ -145,9 +138,11 @@ func (r delayedNamespaceRunner) Run(ctx context.Context, in []byte, args ...stri
 		return nil, errors.New("old cancellation transport lost")
 	}
 	if strings.Contains(command, "'delete'") {
-		gate := "touch " + quote(filepath.Join(r.root, "old-entered")) + "; while ! test -f " + quote(filepath.Join(r.root, "old-release")) + "; do sleep 0.01; done\n"
-		// The command is shell-quoted inside the frame; gate contains only fixture paths.
-		gate += `trap 'touch "$NS_ROOT/old-finished"' EXIT` + "\n"
+		gate := "echo entered > " + quote(r.entered.path) + "; IFS= read -r _ < " + quote(r.release.path) + "\n"
+		gate += "trap " + quote("echo finished > "+quote(r.finished.path)) + " EXIT\n"
+		if strings.Count(command, "flock -x -w 15 8") != 1 {
+			return nil, errors.New("namespace flock anchor changed")
+		}
 		command = strings.Replace(command, "flock -x -w 15 8", strings.ReplaceAll(gate, "'", `'\''`)+"flock -x -w 15 8", 1)
 		args = append([]string(nil), args...)
 		args[len(args)-1] = command
@@ -157,7 +152,8 @@ func (r delayedNamespaceRunner) Run(ctx context.Context, in []byte, args ...stri
 
 func TestNamespaceOldPreLockCommandCannotDeleteNewCreation(t *testing.T) {
 	root, h := namespaceFixture(t)
-	old, err := New("user@host", t.TempDir(), "old", delayedNamespaceRunner{root}, root)
+	entered, release, finished := newScriptSignal(t), newScriptSignal(t), newScriptSignal(t)
+	old, err := New("user@host", t.TempDir(), "old", delayedNamespaceRunner{entered: entered, release: release, finished: finished}, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,9 +165,10 @@ func TestNamespaceOldPreLockCommandCannotDeleteNewCreation(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- old.RemoveBox(WithRemoteCancellation(ctx), "b", epoch, true, "") }()
-	release := filepath.Join(root, "old-release")
-	defer os.WriteFile(release, nil, 0600)
-	waitNamespaceFile(t, filepath.Join(root, "old-entered"))
+	defer release.write(t, "go")
+	if got := entered.read(t); got != "entered" {
+		t.Fatalf("old command readiness: %q", got)
+	}
 	cancel()
 	var uncertain RemoteCancellationUnconfirmed
 	if err := <-done; !errors.As(err, &uncertain) {
@@ -185,12 +182,12 @@ func TestNamespaceOldPreLockCommandCannotDeleteNewCreation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	calls := waitNamespaceFile(t, filepath.Join(root, "calls"))
-	if err := os.WriteFile(release, nil, 0600); err != nil {
-		t.Fatal(err)
+	calls := readNamespaceFile(t, filepath.Join(root, "calls"))
+	release.write(t, "go")
+	if got := finished.read(t); got != "finished" {
+		t.Fatalf("old command completion: %q", got)
 	}
-	waitNamespaceFile(t, filepath.Join(root, "old-finished"))
-	after := waitNamespaceFile(t, filepath.Join(root, "calls"))
+	after := readNamespaceFile(t, filepath.Join(root, "calls"))
 	if string(calls) != string(after) {
 		t.Fatalf("old command mutated after new create: %s", after)
 	}
@@ -214,16 +211,20 @@ func TestNamespaceMutatingChildInheritsLockAfterWrapperDeath(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "gate-child"), nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	release := filepath.Join(root, "release-child")
-	defer os.WriteFile(release, nil, 0600)
+	entered, release := newScriptSignal(t), newScriptSignal(t)
+	t.Setenv("NS_CHILD_READY", entered.path)
+	t.Setenv("NS_CHILD_RELEASE", release.path)
+	defer release.write(t, "go")
 	done := make(chan error, 1)
 	go func() { done <- h.RemoveBox(ctx, "b", epoch, true, "") }()
-	waitNamespaceFile(t, filepath.Join(root, "child-entered"))
-	for _, name := range []string{"body-pid", "lock-pid"} {
-		raw := waitNamespaceFile(t, filepath.Join(root, name))
-		pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-		if err != nil {
-			t.Fatal(err)
+	pids := strings.Fields(entered.read(t))
+	if len(pids) != 2 {
+		t.Fatalf("namespace wrapper PIDs: %q", pids)
+	}
+	for _, raw := range pids {
+		pid, err := strconv.Atoi(raw)
+		if err != nil || pid <= 0 {
+			t.Fatalf("namespace PID %q: %v", raw, err)
 		}
 		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 			t.Fatal(err)
@@ -239,9 +240,7 @@ func TestNamespaceMutatingChildInheritsLockAfterWrapperDeath(t *testing.T) {
 	if _, err := h.BoxEpoch(ctx, "different"); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(release, nil, 0600); err != nil {
-		t.Fatal(err)
-	}
+	release.write(t, "go")
 	<-done
 	if _, err := h.BoxEpoch(ctx, "b"); err != nil {
 		t.Fatalf("lock did not release after child exit: %v", err)
@@ -297,7 +296,7 @@ printf '%s\n' "$!" > "$1"
 exit "$2"`
 			cmd := exec.Command("bash", "-c", namespaceScript, "dyna-box-namespace", root, "b", "use", "bash", "-c", body, "daemon-fixture", pidFile, status)
 			out, err := cmd.CombinedOutput()
-			raw := waitNamespaceFile(t, pidFile)
+			raw := readNamespaceFile(t, pidFile)
 			pid, parseErr := strconv.Atoi(strings.TrimSpace(string(raw)))
 			if parseErr != nil {
 				t.Fatal(parseErr)

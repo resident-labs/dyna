@@ -30,27 +30,16 @@ func TestCancelledStartKillsRemoteProcessBeforeCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	entered := filepath.Join(dir, "entered")
+	entered := newScriptSignal(t)
 	late := filepath.Join(dir, "late")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := h.run(WithRemoteCancellation(ctx), "bash", "-c", `echo $$ > "$1"; sleep 10; touch "$2"`, "dyna-test", entered, late)
+		_, err := h.run(WithRemoteCancellation(ctx), "bash", "-c", `printf '%s %s\n' "$$" "$(/usr/bin/ps -o pgid= -p "$$")" > "$1"; sleep 10; touch "$2"`, "dyna-test", entered.path, late)
 		done <- err
 	}()
-	deadline := time.Now().Add(5 * time.Second)
-	var pidBytes []byte
-	for time.Now().Before(deadline) {
-		pidBytes, err = os.ReadFile(entered)
-		if err == nil {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if err != nil {
-		t.Fatal("command never entered")
-	}
+	pid, group := entered.process(t)
 	cancel()
 	select {
 	case err := <-done:
@@ -60,10 +49,7 @@ func TestCancelledStartKillsRemoteProcessBeforeCleanup(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("cancellation did not join")
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	assertRemoteGroupExited(t, group)
 	// A zombie has no work left to run; an extant non-zombie command would still be able to create the late resource.
 	out, _ := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
 	if stat := strings.TrimSpace(string(out)); stat != "" && !strings.HasPrefix(stat, "Z") {

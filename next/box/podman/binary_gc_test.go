@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -337,6 +338,25 @@ func TestPruneBinariesLockedInventoryFailuresDeleteNothing(t *testing.T) {
 	}
 }
 
+// observeCreationLock proves that the production lock descriptor is contended
+// before reporting the remote process. It then runs the unchanged blocking flock.
+func (r *binaryGCRig) observeCreationLock() *scriptSignal {
+	ready := newScriptSignal(r.t)
+	script := `#!/bin/bash
+status=0
+/usr/bin/flock -x -n "${@: -1}" || status=$?
+if [ "$status" -ne 1 ]; then echo "lock-probe:$status" > ` + quote(ready.path) + `; exit 99; fi
+printf '%s %s\n' "$$" "$(/usr/bin/ps -o pgid= -p "$$")" > ` + quote(ready.path) + `
+exec /usr/bin/flock "$@"
+`
+	path := filepath.Join(r.r.path, "flock")
+	r.write(path, []byte(script))
+	if err := os.Chmod(path, 0700); err != nil {
+		r.t.Fatal(err)
+	}
+	return ready
+}
+
 func TestPruneBinariesReReadsMountsWhileHoldingCreationLock(t *testing.T) {
 	r := newBinaryGCRig(t)
 	lock, err := os.OpenFile(filepath.Join(r.bin, ".activation.lock"), os.O_CREATE|os.O_RDWR, 0600)
@@ -348,18 +368,13 @@ func TestPruneBinariesReReadsMountsWhileHoldingCreationLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	entered := make(chan struct{})
-	r.r.beforeDelete = func() { close(entered) }
+	entered := r.observeCreationLock()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- r.h.PruneBinaries(ctx, r.bin, r.wanted) }()
-	select {
-	case <-entered:
-	case <-ctx.Done():
-		t.Fatal("did not reach delete phase")
-	}
-	time.Sleep(80 * time.Millisecond)
+	go func() { defer close(done); done <- r.h.PruneBinaries(ctx, r.bin, r.wanted) }()
+	defer func() { cancel(); <-done }()
+	entered.process(t)
 	if _, err := os.Stat(filepath.Join(r.fixture, "locked-read")); !os.IsNotExist(err) {
 		t.Fatalf("inventory did not wait for creation lock: %v", err)
 	}
@@ -428,10 +443,7 @@ func TestPruneBinariesLeavesNonObjectsSymlinksAndActiveStages(t *testing.T) {
 
 func TestPruneBinariesCancellationCannotLeaveALateDeleter(t *testing.T) {
 	r := newBinaryGCRig(t)
-	r.write(filepath.Join(r.r.path, "flock"), []byte("#!/bin/bash\ntouch \"$GC_FIXTURE/lock-wait\"\nexec /usr/bin/flock \"$@\"\n"))
-	if err := os.Chmod(filepath.Join(r.r.path, "flock"), 0700); err != nil {
-		t.Fatal(err)
-	}
+	entered := r.observeCreationLock()
 	lock, err := os.OpenFile(filepath.Join(r.bin, ".activation.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		t.Fatal(err)
@@ -441,40 +453,26 @@ func TestPruneBinariesCancellationCannotLeaveALateDeleter(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	entered := make(chan struct{})
-	r.r.beforeDelete = func() { close(entered) }
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- r.h.PruneBinaries(ctx, r.bin, r.wanted) }()
-	select {
-	case <-entered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("did not reach delete phase")
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if _, err := os.Stat(filepath.Join(r.fixture, "lock-wait")); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("remote prune did not try to lock")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	go func() { defer close(done); done <- r.h.PruneBinaries(ctx, r.bin, r.wanted) }()
+	defer func() { cancel(); <-done }()
+	_, group := entered.process(t)
 	cancel()
 	select {
 	case err := <-done:
-		if err == nil {
-			t.Fatal("cancelled prune succeeded")
+		var unconfirmed RemoteCancellationUnconfirmed
+		if err == nil || errors.As(err, &unconfirmed) {
+			t.Fatalf("expected confirmed cancellation: %v", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("remote prune was not joined")
 	}
+	assertRemoteGroupExited(t, group)
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(50 * time.Millisecond)
 	r.allPresent()
 	if _, err := os.Stat(filepath.Join(r.fixture, "locked-read")); !os.IsNotExist(err) {
 		t.Fatalf("cancelled command escaped lock: %v", err)
