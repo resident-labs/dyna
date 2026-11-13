@@ -28,15 +28,7 @@ func (f *fakeClient) AddonSetEnabled(context.Context, contract.AddonSetEnabledRe
 func (f *fakeClient) AddonSetRootOnly(context.Context, contract.AddonSetRootOnlyRequest) (contract.AddonSetRootOnlyResponse, error) {
 	return contract.AddonSetRootOnlyResponse{}, nil
 }
-func TestGuidanceBindings(t *testing.T) {
-	r := newRootCmd()
-	for _, words := range [][]string{{"account", "list"}, {"account", "quota"}, {"account", "limit"}, {"session", "set-account"}, {"addon", "set"}} {
-		c, rest, err := r.Find(words)
-		if err != nil || len(rest) > 0 || c == r {
-			t.Fatalf("%v: %v %v", words, rest, err)
-		}
-	}
-}
+
 func TestSocketEnvironment(t *testing.T) {
 	t.Setenv("DYNA_SOCKET", "/tmp/owner-test.sock")
 	if defaultSocket() != "/tmp/owner-test.sock" {

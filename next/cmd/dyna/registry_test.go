@@ -32,3 +32,13 @@ func TestSharedPostHelp(t *testing.T) {
 		t.Fatalf("post help: %q %v", cmd.Short, err)
 	}
 }
+
+func TestGuidanceBindings(t *testing.T) {
+	r := newRootCmd()
+	for _, words := range [][]string{{"account", "list"}, {"account", "quota"}, {"account", "limit"}, {"session", "set-account"}, {"addon", "set"}} {
+		c, rest, err := r.Find(words)
+		if err != nil || len(rest) > 0 || c == r {
+			t.Fatalf("%v: %v %v", words, rest, err)
+		}
+	}
+}
