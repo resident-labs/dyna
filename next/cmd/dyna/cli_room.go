@@ -82,7 +82,15 @@ func roomCommand(getClient func() client) *cobra.Command {
 		_, err := getClient().RoomSet(cmd.Context(), contract.RoomSetRequest{Room: contract.RoomID(args[0]), Advisor: &profile})
 		return err
 	}}
-	room.AddCommand(limit, setRoom, advisor, roomHostsCommand(getClient))
+	signing := &cobra.Command{Use: "signing ROOM on|off", Short: "Turn the signing of a room's commits and tags on or off", Long: "With signing on, the room's boxes sign their commits and tags as the owner with the engine's key (print its public half with dyna signing key). A box's git follows at its next box start; session refresh restarts a box. Off by default.", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		on := args[1] == "on"
+		if !on && args[1] != "off" {
+			return fmt.Errorf("signing is on or off, not %q", args[1])
+		}
+		_, err := getClient().RoomSet(cmd.Context(), contract.RoomSetRequest{Room: contract.RoomID(args[0]), GitSigning: &on})
+		return err
+	}}
+	room.AddCommand(limit, setRoom, advisor, signing, roomHostsCommand(getClient))
 	var rootProfile string
 	create := &cobra.Command{Use: "create NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		r, err := getClient().RoomCreate(cmd.Context(), contract.RoomCreateRequest{Name: args[0], RootProfile: contract.ProfileName(rootProfile)})

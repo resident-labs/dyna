@@ -24,6 +24,8 @@ type Service interface {
 	VoiceStop(context.Context, contract.Principal, contract.VoiceStopRequest) (contract.VoiceStopResponse, *contract.Error)
 	WebSearch(context.Context, contract.Principal, contract.WebSearchRequest) (contract.WebSearchResponse, *contract.Error)
 	WebsearchSetKey(context.Context, contract.Principal, contract.WebsearchSetKeyRequest) (contract.WebsearchSetKeyResponse, *contract.Error)
+	GitSign(context.Context, contract.Principal, contract.GitSignRequest) (contract.GitSignResponse, *contract.Error)
+	SigningKey(context.Context, contract.Principal, contract.SigningKeyRequest) (contract.SigningKeyResponse, *contract.Error)
 	WebsearchRemoveKey(context.Context, contract.Principal, contract.WebsearchRemoveKeyRequest) (contract.WebsearchRemoveKeyResponse, *contract.Error)
 	ContextSnapshot(context.Context, contract.Principal, contract.ContextSnapshotRequest) (contract.ContextSnapshotResponse, *contract.Error)
 	GoalSet(context.Context, contract.Principal, contract.GoalSetRequest) (contract.GoalSetResponse, *contract.Error)

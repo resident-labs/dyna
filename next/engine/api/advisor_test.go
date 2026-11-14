@@ -23,7 +23,7 @@ func (advisorService) Post(context.Context, contract.Principal, contract.PostReq
 }
 
 func TestTheAdvisorMeetsOneRefusalWhereItActs(t *testing.T) {
-	for _, method := range []string{"post", "session.start", "goal.set", "hostexec.run", "question.ask", "session.close", "discord.send"} {
+	for _, method := range []string{"post", "session.start", "goal.set", "hostexec.run", "question.ask", "session.close", "discord.send", "git.sign"} {
 		got := request(New(advisorService{advisor: true}, nil).handler(boxCaller()), "/v1/"+method, `{"text":"hi","room":"r"}`)
 		if got.Code != http.StatusForbidden || !strings.Contains(got.Body.String(), contract.AdvisorRefusal) {
 			t.Fatalf("%s by the advisor: %d %s", method, got.Code, got.Body)
@@ -80,5 +80,15 @@ func TestTheAdvisorGetsNoGitHubWriteGrant(t *testing.T) {
 		if got.On() == advisor {
 			t.Fatalf("advisor=%v: write grant on is %v", advisor, got.On())
 		}
+	}
+}
+
+func TestABoxCannotReadTheSigningKeyAndTheOwnerOnlyMethodsStayOwners(t *testing.T) {
+	got := request(New(advisorService{}, nil).handler(boxCaller()), "/v1/signing.key", `{}`)
+	if got.Code != http.StatusForbidden {
+		t.Fatalf("signing.key by a box: %d %s", got.Code, got.Body)
+	}
+	if advisorReads[contract.MethodGitSign] {
+		t.Fatal("the advisor may sign commits")
 	}
 }

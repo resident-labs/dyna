@@ -6,11 +6,13 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 119
+const schemaVersion = 120
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
+	// A room's gitSigning switch: its boxes sign commits and tags with the engine's key when it is on.
+	119: {`ALTER TABLE rooms ADD COLUMN git_signing INTEGER NOT NULL DEFAULT 0`},
 	118: {`ALTER TABLE sessions ADD COLUMN advisor INTEGER NOT NULL DEFAULT 0`},
 	117: {`CREATE TABLE IF NOT EXISTS discord_dm_routes (channel TEXT PRIMARY KEY, guild TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE)`},
 	116: {`ALTER TABLE workflow_runs ADD COLUMN released_steps TEXT NOT NULL DEFAULT '[]'`},
