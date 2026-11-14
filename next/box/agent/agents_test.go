@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -352,5 +353,70 @@ func TestAStopWhoseAbortBlocksStillEndsTheTurnAndFreesTheName(t *testing.T) {
 	agents.Turn(contract.AgentTurn{ID: "next", Name: "advisor"})
 	if ended := engine.wait(t); ended.ID != "next" || ended.Outcome != contract.TurnCompleted {
 		t.Fatalf("the next agent ended %+v", ended)
+	}
+}
+
+// unsettled is a session whose turn, Abort and Close all wait for release, as a stuck one does.
+type unsettled struct {
+	*fakeAgent
+	release chan struct{}
+}
+
+func (s *unsettled) Start(context.Context, contract.TurnID, []contract.TurnInput, func()) (contract.TurnEnded, error) {
+	<-s.release
+	return contract.TurnEnded{Outcome: contract.TurnStopped}, nil
+}
+func (s *unsettled) Abort(context.Context) error { <-s.release; return nil }
+func (s *unsettled) Close() error                { <-s.release; return nil }
+
+// When a turn gives up on a session that will not settle, the name is freed but the conversation is not: the next persistent turn
+// starts a new one, so the old session's late writes and the new turn's never share a file.
+func TestAnAbandonedConversationIsNotResumedByTheNextTurn(t *testing.T) {
+	was := agentSettleFor(30 * time.Millisecond)
+	defer agentSettleFor(was)
+	sessions := t.TempDir()
+	dir := filepath.Join(sessions, "agents", "advisor")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "existing.jsonl")
+	if err := os.WriteFile(file, []byte("existing conversation"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	first := &unsettled{fakeAgent: &fakeAgent{file: file, aborted: make(chan struct{})}, release: make(chan struct{})}
+	defer close(first.release)
+	engine := newAgentRecorder()
+	var opens atomic.Int32
+	resumed := make(chan []string, 1)
+	agents := NewAgents(context.Background(), AgentsConfig{
+		Engine: engine, Transcript: NewTranscript(&transcriptEngine{}, sessions), Sessions: sessions,
+		Open: func(_ context.Context, _ contract.AgentTurn, dir string, _ func()) (agentSession, error) {
+			if opens.Add(1) == 1 {
+				return first, nil
+			}
+			// This is how pig.Open picks the conversation it resumes.
+			found, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+			resumed <- found
+			done := make(chan struct{})
+			close(done)
+			return &fakeAgent{file: filepath.Join(dir, "new.jsonl"), hold: done, aborted: make(chan struct{})}, nil
+		},
+	})
+	agents.Turn(contract.AgentTurn{ID: "one", Name: "advisor", Persist: true, TimeoutMS: 50})
+	if ended := engine.wait(t); ended.Outcome != contract.TurnStopped {
+		t.Fatalf("first %+v", ended)
+	}
+	agents.Turn(contract.AgentTurn{ID: "two", Name: "advisor", Persist: true})
+	second := engine.wait(t)
+	if found := <-resumed; len(found) != 0 || !second.Fresh {
+		t.Fatalf("the next turn found %v to resume, fresh=%v", found, second.Fresh)
+	}
+	if _, err := os.Stat(filepath.Join(sessions, "agents", "advisor.abandoned-one", "existing.jsonl")); err != nil {
+		t.Fatalf("the abandoned conversation was not kept aside: %v", err)
+	}
+	for _, f := range agents.Files() {
+		if strings.Contains(f, "abandoned") {
+			t.Fatalf("an abandoned conversation is sent as transcript: %s", f)
+		}
 	}
 }

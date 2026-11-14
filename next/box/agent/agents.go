@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -77,10 +78,14 @@ func NewAgents(ctx context.Context, config AgentsConfig) *Agents {
 	return &Agents{ctx: ctx, config: config, running: make(map[contract.AgentID]context.CancelFunc), names: make(map[string]chan struct{}), slots: make(map[contract.ProfileName]chan struct{})}
 }
 
-// Files lists every agent session file in the box, for the transcript to send.
+// abandonedSuffix names the folder of a conversation that was left running when its turn gave up: <name>.abandoned-<turn>.
+const abandonedSuffix = ".abandoned-"
+
+// Files lists every agent session file in the box, for the transcript to send. An abandoned conversation is not one: the engine
+// holds what it had sent before the turn gave up, under its first path.
 func (a *Agents) Files() []string {
 	files, _ := filepath.Glob(filepath.Join(a.config.Sessions, "agents", "*", "*.jsonl"))
-	return files
+	return slices.DeleteFunc(files, func(file string) bool { return strings.Contains(filepath.Dir(file), abandonedSuffix) })
 }
 
 // Turn starts the turn and returns at once. The answer is agent.ended, which every turn sends, however it ends.
@@ -160,7 +165,9 @@ func (a *Agents) run(ctx context.Context, turn contract.AgentTurn, name, slots c
 		return ended
 	}
 	file := session.SessionFile()
-	// A session that will not close does not hold the name or the slot: it is left to close in the background.
+	// A turn or a session that will not settle does not hold the name or the slot: it is left to finish in the background. Its
+	// conversation is moved aside first, so the next turn of the name starts a new one and the two never write the same file.
+	var abandoned atomic.Bool
 	defer func() {
 		closed := make(chan struct{})
 		go func() {
@@ -172,6 +179,12 @@ func (a *Agents) run(ctx context.Context, turn contract.AgentTurn, name, slots c
 		case <-closed:
 		case <-time.After(agentSettle):
 			log.Printf("agent %s: its session is still closing; it closes in the background", turn.ID)
+			abandoned.Store(true)
+		}
+		if abandoned.Load() {
+			if err := os.Rename(dir, dir+abandonedSuffix+string(turn.ID)); err != nil {
+				log.Printf("agent %s: moving its conversation aside: %v", turn.ID, err)
+			}
 		}
 	}()
 	var offset int64
@@ -223,6 +236,7 @@ func (a *Agents) run(ctx context.Context, turn contract.AgentTurn, name, slots c
 		case finished = <-done:
 		case <-time.After(agentSettle):
 			log.Printf("agent %s: its turn did not settle after the abort; it is reported with the text it had", turn.ID)
+			abandoned.Store(true)
 		}
 	}
 	result, err := finished.result, finished.err
