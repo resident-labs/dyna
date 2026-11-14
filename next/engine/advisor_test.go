@@ -13,6 +13,7 @@ import (
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
+	"github.com/resident-labs/dyna/room"
 )
 
 func TestBoxHelloGivesRootAndAdvisorTheirSections(t *testing.T) {
@@ -173,6 +174,14 @@ func TestAdvisorReturnsTheFinalTextOfItsTurn(t *testing.T) {
 	r := newAdvisorRig(t)
 	before := r.rootDeliveries()
 	r.ask(r.ctx)
+	var text, context string
+	if err := r.st.Read().QueryRowContext(r.ctx, "SELECT json_extract(CAST(body AS TEXT),'$.text'),coalesce(json_extract(CAST(body AS TEXT),'$.context'),'') FROM events e JOIN sessions s ON s.id=e.from_id WHERE e.type='post.created' AND s.name='root' ORDER BY e.seq DESC LIMIT 1").Scan(&text, &context); err != nil || text != "Which cache?" || context == "" {
+		t.Fatalf("the feed post is %q with context %q (%v): want the bare prompt, and the delta kept for the advisor", text, context, err)
+	}
+	body, err := room.RenderDelivery(contract.PostCreated{Text: text, Context: context})
+	if err != nil || !strings.HasPrefix(body, context) || !strings.HasSuffix(body, "Which cache?") {
+		t.Fatalf("the advisor reads %q (%v)", body, err)
+	}
 	r.turn(r.advisor, "Use the shared cache.")
 	got := r.result()
 	if got.problem != nil || got.response.Answer != "Use the shared cache." {
@@ -334,5 +343,60 @@ func TestAdvisorDeltaCarriesOnlyNewStepsAndCutsLongResults(t *testing.T) {
 	later, e := s.advisorDelta(ctx, root.Session, time.Date(2026, 1, 1, 0, 0, 5, 0, time.UTC))
 	if e != nil || strings.Contains(later, "first") || !strings.Contains(later, "second") {
 		t.Fatalf("later call: %v\n%s", e, later)
+	}
+}
+
+func TestAdvisorDeltaReadsAllOfALongTurn(t *testing.T) {
+	s, ctx, root := transcriptCaller(t)
+	session, err := s.store.Session(ctx, root.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wake, problem := s.Post(ctx, ownerCaller, contract.PostRequest{Room: session.Room, Home: contract.Conversation{Kind: contract.ConversationDM, Session: root.Session}, Text: "wake"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		var input contract.EventID
+		if err := tx.QueryRowContext(ctx, "SELECT id FROM events WHERE seq=?", wake.Seq).Scan(&input); err != nil {
+			return err
+		}
+		seq, err := s.store.AppendEvent(tx, contract.Event{ID: "long-start", Room: session.Room, From: root, Time: time.Unix(1, 0), Body: contract.TurnStarted{Session: root.Session, Turn: "turn_a", Inputs: []contract.EventID{input}}})
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO turns(id,session,started_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,started_seq) VALUES('turn_a',?,0,'','',0,0,0,0,?)", root.Session, seq); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "UPDATE deliveries SET turn='turn_a' WHERE to_kind='session' AND to_id=? AND seq=?", root.Session, wake.Seq)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	const calls = 600 // more than one page of items
+	data := fmt.Sprintf(`{"type":"message","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","deliveryId":"%d"}}`+"\n", wake.Seq)
+	for i := 0; i < calls; i++ {
+		data += fmt.Sprintf(`{"type":"message","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"c%d","name":"bash","arguments":{"command":"step-%d-end"}}]}}`+"\n", i, i)
+	}
+	if _, e := appendTranscript(s, ctx, root, "a.jsonl", 0, data); e != nil {
+		t.Fatal(e)
+	}
+	delta, e := s.advisorDelta(ctx, root.Session, time.Time{})
+	if e != nil {
+		t.Fatal(e)
+	}
+	for i := 0; i < calls; i++ {
+		if !strings.Contains(delta, fmt.Sprintf("step-%d-end", i)) && i >= calls-advisorFirstSteps {
+			t.Fatalf("step %d missing from the last %d", i, advisorFirstSteps)
+		}
+	}
+	later, e := s.advisorDelta(ctx, root.Session, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
+	if e != nil {
+		t.Fatal(e)
+	}
+	for i := 0; i < calls; i++ {
+		if !strings.Contains(later, fmt.Sprintf("step-%d-end", i)) {
+			t.Fatalf("a call on a later turn lost step %d of %d", i, calls)
+		}
 	}
 }

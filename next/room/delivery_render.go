@@ -58,6 +58,9 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 	case contract.OpRequested:
 		return fmt.Sprintf("%s\nDecide it with op decide, id %s: approve true or false, with a reason when you deny.", b.Card.Body, b.ID), nil
 	case contract.PostCreated:
+		if b.Context != "" {
+			return b.Context + "\n\nRoot's prompt:\n\n" + b.Text, nil
+		}
 		return b.Text, nil
 	case contract.SessionRestarted:
 		switch {

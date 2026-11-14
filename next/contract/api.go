@@ -637,6 +637,7 @@ type SessionRefreshResponse struct {
 type PostRequest struct {
 	Spoken         bool         `json:"-"` // set only by the voice dispatch boundary
 	Awaited        bool         `json:"-"` // set only by the advisor call, which waits for the reply itself, so the post owes none
+	Context        string       `json:"-"` // what the one recipient reads before Text, which the feed does not show; set only by the advisor call
 	DataAttachment *int         `json:"-"` // filled by the owning post boundary, never trusted from a caller
 	Data           JSONData     `json:"data,omitempty"`
 	Room           RoomID       `json:"room"`

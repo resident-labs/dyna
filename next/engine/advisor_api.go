@@ -35,7 +35,7 @@ func (s *Service) Advisor(ctx context.Context, caller contract.Principal, req co
 	}
 	advisor, err := s.store.RoomAdvisor(ctx, self.Room)
 	if errors.Is(err, store.ErrNotFound) {
-		return contract.AdvisorResponse{}, invalid("this room has no advisor; session start with advisor: true starts one on a stronger profile")
+		return contract.AdvisorResponse{}, invalid("this room has no advisor; set one with the room's advisor setting (root's About panel, or `dyna room advisor ROOM PROFILE`)")
 	}
 	if err != nil {
 		return contract.AdvisorResponse{}, failure(err)
@@ -51,7 +51,7 @@ func (s *Service) Advisor(ctx context.Context, caller contract.Principal, req co
 	// Subscribe before the post, so that an end cannot fall between the post and the first look.
 	changes, unsubscribe := s.store.Subscribe()
 	defer func() { unsubscribe() }()
-	post, problem := s.Post(ctx, caller, contract.PostRequest{Room: self.Room, Text: delta + "\n\nRoot's prompt:\n\n" + req.Prompt, Mentions: []string{advisor.Name}, Awaited: true})
+	post, problem := s.Post(ctx, caller, contract.PostRequest{Room: self.Room, Text: req.Prompt, Context: delta, Mentions: []string{advisor.Name}, Awaited: true})
 	if problem != nil {
 		return contract.AdvisorResponse{}, problem
 	}
@@ -144,13 +144,37 @@ const (
 // advisorDelta renders root's transcript for the advisor: root's inputs, its text and each tool call with its arguments and result,
 // since the advisor last answered. With no earlier answer it is root's current turn, or the last advisorFirstSteps steps of it.
 func (s *Service) advisorDelta(ctx context.Context, root contract.SessionID, since time.Time) (string, *contract.Error) {
-	read, problem := s.TranscriptRead(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.TranscriptReadRequest{Session: root, Limit: 20})
-	if problem != nil {
-		return "", problem
-	}
-	turns := slices.Clone(read.Turns) // newest first
-	if since.IsZero() && len(turns) > 0 {
-		turns = turns[:1]
+	var turns []contract.TranscriptTurn // newest first, whole
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	for before := contract.TurnID(""); ; {
+		read, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: root, Before: before, Limit: 5})
+		if problem != nil {
+			return "", problem
+		}
+		done := !read.More
+		for _, turn := range read.Turns {
+			if turn.Ended != nil && turn.Ended.Before(since) || since.IsZero() && len(turns) > 0 {
+				done = true
+				break
+			}
+			// A long turn comes back as its newest items; the rest is read from its start in pages.
+			for cursor := 0; turn.OlderItems; {
+				page, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: root, Turn: turn.ID, Page: contract.TranscriptPageOlderItems, Cursor: cursor})
+				if problem != nil || len(page.Turns) == 0 {
+					return "", problem
+				}
+				if cursor == 0 {
+					turn.Items = nil
+				}
+				turn.Items = append(turn.Items, page.Turns[0].Items...)
+				turn.OlderItems, cursor = page.Turns[0].OlderItems, page.Turns[0].NextItem
+			}
+			turns = append(turns, turn)
+		}
+		if done || read.Before == "" {
+			break
+		}
+		before = read.Before
 	}
 	slices.Reverse(turns)
 	var out []string

@@ -104,6 +104,8 @@ type PostCreated struct {
 	Attachments    []Attachment `json:"attachments,omitempty"`
 	ClientID       string       `json:"clientId,omitempty"` // the sender's PostRequest.ClientID, so a pending row is replaced exactly
 	ToolCallID     string       `json:"toolCallId,omitempty"`
+	// Context is read before Text by the one recipient and is not shown in the feed: root's work, for the advisor.
+	Context string `json:"context,omitempty"`
 	// Hook names the subscription whose Run wrote this post. The engine sends it, but the text is the script's.
 	Hook SubscriptionID `json:"hook,omitempty"`
 }
