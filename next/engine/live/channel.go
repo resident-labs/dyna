@@ -12,6 +12,7 @@ type Channel struct {
 	stop          context.CancelFunc
 	wake          chan struct{}
 	asks          chan uint64
+	agents        chan contract.BoxMessage
 	asked         uint64
 	answers       map[uint64]chan contract.BoxReading
 	shellWatching uint64
@@ -99,7 +100,7 @@ func (s *Session) SetChannel(channel *Channel) { s.channel = channel }
 
 // NewChannel makes a box channel. The caller holds its session lock.
 func NewChannel(stop context.CancelFunc) *Channel {
-	return &Channel{stop: stop, wake: make(chan struct{}, 1), asks: make(chan uint64, 8), answers: make(map[uint64]chan contract.BoxReading)}
+	return &Channel{stop: stop, wake: make(chan struct{}, 1), asks: make(chan uint64, 8), agents: make(chan contract.BoxMessage, 8), answers: make(map[uint64]chan contract.BoxReading)}
 }
 
 // Wake notifies a box loop. The caller holds the session lock.
@@ -119,6 +120,19 @@ func (c *Channel) Close() {
 
 func (c *Channel) WakeSignal() <-chan struct{} { return c.wake }
 func (c *Channel) Asks() <-chan uint64         { return c.asks }
+
+// Agents hands the box loop the agent messages to send, in order.
+func (c *Channel) Agents() <-chan contract.BoxMessage { return c.agents }
+
+// SendAgent queues an agent message for the box and reports whether the queue took it. A full queue means the box stopped reading.
+func (c *Channel) SendAgent(body contract.BoxMessageBody) bool {
+	select {
+	case c.agents <- contract.BoxMessage{Body: body}:
+		return true
+	default:
+		return false
+	}
+}
 
 // AskStats queues a question for the box and returns where its answer arrives. A full queue means the box stopped
 // reading, so nothing arrives and the wait runs out. The caller holds the session lock, and later calls ForgetStats.

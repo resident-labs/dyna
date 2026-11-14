@@ -259,6 +259,12 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					case <-ctx.Done():
 						return
 					}
+				case message := <-channel.Agents():
+					select {
+					case out <- message:
+					case <-ctx.Done():
+						return
+					}
 				case <-ctx.Done():
 					return
 				}
