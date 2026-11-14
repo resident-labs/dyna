@@ -6,20 +6,30 @@ dyna-audience: root
 
 # Writing AGENTS.md rules
 
-The global AGENTS.md says what belongs in these files. This is how to keep them a set of rules
-rather than a journal.
+Every session reads the global and room AGENTS.md on every request and follows them, so each line
+costs every session tokens and attention, and a long file gets followed less.
+
+## What belongs
+
+Keep a line only if an agent without it would do the wrong thing.
+- **Rules:** "always" or "never", concrete and checkable: "run `go test ./engine` before a PR", not
+  "test well". One bullet each, ending with who decided it and when: `(owner, 2026-11-13)`.
+- **Pointers:** a path, host, command or skill everyone should know of, in one line.
+- **Elsewhere:** procedures go in a skill or a `/box/shared` file; status, history and current work in
+  goals and state files; how a Dyna tool behaves in its description. Overviews of a repository, or
+  anything the code already shows, go nowhere: studies found they add about 20% to cost and do not help.
+- **Size:** under about 100 lines per file. The global file holds what is true in every room; a room's
+  file holds that room's own rules.
 
 ## A rule, not a story
 
 - Write the rule as it stands: "Merge only with an approval on the current head and green CI."
   Not: "After the incident on 11-03 we decided that…".
-- Change a rule by editing its line. Never add a second line that "replaces" the first.
+- Change a rule by editing its line, and delete one that no longer applies. Never add a second line
+  that "replaces" the first.
 - Pair each "never" with what to do instead: "Never print the token; read it into a variable
   with …". A list of bare don'ts makes agents timid.
-
-## Before adding a line
-
-Search both files for a line it overlaps, and merge the two.
+- Before adding a line, search both files for one it overlaps, and merge the two.
 
 ## Checking a file
 
