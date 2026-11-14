@@ -86,6 +86,19 @@ func (s *Store) AppendEvent(tx *sql.Tx, event contract.Event) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	// Discord files are downloaded into the room before their event; registering them here is what lets a box fetch them.
+	var files []contract.Attachment
+	switch body := event.Body.(type) {
+	case contract.DiscordMessage:
+		files = body.Files
+	case contract.DiscordFilesRetrieved:
+		files = body.Files
+	}
+	for _, file := range files {
+		if _, err := tx.Exec("INSERT OR IGNORE INTO event_files(seq,sha256,media) VALUES(?,?,?)", seq, file.SHA256, file.Media); err != nil {
+			return 0, err
+		}
+	}
 	event.Seq = seq
 	event.Time = time.UnixMilli(event.Time.UnixMilli()).UTC()
 	event.From = contract.Principal{Kind: event.From.Kind}
