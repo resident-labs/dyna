@@ -1,7 +1,9 @@
 package engine
 
 import (
+	"context"
 	"database/sql"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -71,6 +73,70 @@ func TestHostListServicesStayInSessionRoom(t *testing.T) {
 			}
 		} else if len(services) != 2 {
 			t.Fatalf("owner lost services: %+v", services)
+		}
+	}
+}
+
+func TestHostListSessionAllowlistDropsOtherRoomsMetadata(t *testing.T) {
+	s, room, root, ctx := setup(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	other, problem := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "private-room", RootProfile: "test"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if err := s.store.AddHost(ctx, box.Host{Name: "shared", State: box.HostReady, Rooms: []contract.RoomID{room, other.Room}}); err != nil {
+		t.Fatal(err)
+	}
+	ownProblem := contract.RunnerImageProblem{Room: room, Image: "own-image", Reason: "own failure"}
+	privateProblem := contract.RunnerImageProblem{Room: other.Room, Image: "private-image", Reason: "private build log"}
+	s.SetRunnerImageProblems(func() map[contract.HostName][]contract.RunnerImageProblem {
+		return map[contract.HostName][]contract.RunnerImageProblem{"shared": {ownProblem, privateProblem}}
+	})
+	load := func(_ context.Context, hosts []contract.HostSummary) error {
+		for i := range hosts {
+			if hosts[i].Name == "shared" {
+				h := &hosts[i]
+				h.CPUFree, h.MemFree, h.DiskFree = 7, 8, 9
+				h.Health = contract.HostHealthy
+				h.Boxes, h.Runners, h.Leftovers = 12, 13, 14
+				h.History = []contract.HostLoadPoint{{CPUUsed: 5}}
+				h.GPUs = []contract.GPU{{Index: 1, Name: "GPU", MemBytes: 20, FreeBytes: 10, RequestedBytes: 8}}
+			}
+		}
+		return nil
+	}
+	for _, live := range []bool{false, true} {
+		for _, who := range []contract.Principal{{Kind: contract.PrincipalSession, Session: root}, owner} {
+			var got contract.HostListResponse
+			if live {
+				got, problem = s.HostListWithLoad(ctx, who, contract.HostListRequest{}, load)
+			} else {
+				got, problem = s.HostList(ctx, who, contract.HostListRequest{})
+			}
+			if problem != nil {
+				t.Fatal(problem)
+			}
+			var shared contract.HostSummary
+			for _, host := range got.Hosts {
+				if host.Name == "shared" {
+					shared = host
+				}
+			}
+			if who.Kind == contract.PrincipalOwner {
+				if len(shared.Rooms) != 2 || len(shared.RunnerImages) != 2 || shared.RunnerImages[1] != privateProblem {
+					t.Fatalf("owner metadata lost: %+v", shared)
+				}
+				continue
+			}
+			want := contract.HostSummary{Name: "shared", State: "ready", Agents: true, RunnerImages: []contract.RunnerImageProblem{ownProblem}}
+			if live {
+				want.CPUFree, want.MemFree, want.DiskFree = 7, 8, 9
+				want.Health = contract.HostHealthy
+				want.GPUs = []contract.GPU{{Index: 1, Name: "GPU", MemBytes: 20, FreeBytes: 10}}
+			}
+			if !reflect.DeepEqual(shared, want) {
+				t.Fatalf("live=%v: session entry %+v, want allowlist %+v", live, shared, want)
+			}
 		}
 	}
 }

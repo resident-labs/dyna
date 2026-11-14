@@ -8,7 +8,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-// host.list names sessions only in rooms the caller can read, by the same rule as session.list.
+// The owner sees host sessions; agent inventory contains no session identities.
 func TestHostListSessionsFollowRoomAccess(t *testing.T) {
 	s, room, worker, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
@@ -34,7 +34,7 @@ func TestHostListSessionsFollowRoomAccess(t *testing.T) {
 	if got := rooms(owner); !got[room] || !got[other.Room] {
 		t.Fatalf("owner: %+v", got)
 	}
-	if got := rooms(contract.Principal{Kind: contract.PrincipalSession, Session: worker}); !got[room] || got[other.Room] {
+	if got := rooms(contract.Principal{Kind: contract.PrincipalSession, Session: worker}); len(got) != 0 {
 		t.Fatalf("session: %+v", got)
 	}
 	if got := rooms(contract.Principal{Kind: contract.PrincipalEngine}); len(got) != 0 {

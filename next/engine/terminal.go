@@ -8,7 +8,13 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contract.HostListRequest) (contract.HostListResponse, *contract.Error) {
+func (s *Service) HostList(ctx context.Context, who contract.Principal, req contract.HostListRequest) (contract.HostListResponse, *contract.Error) {
+	return s.HostListWithLoad(ctx, who, req, nil)
+}
+
+// HostListWithLoad adds current host measurements before projecting the caller's inventory.
+// Runtime supplies load; callers without live measurements use HostList.
+func (s *Service) HostListWithLoad(ctx context.Context, who contract.Principal, _ contract.HostListRequest, load func(context.Context, []contract.HostSummary) error) (contract.HostListResponse, *contract.Error) {
 	var room contract.RoomID
 	if who.Kind == contract.PrincipalSession {
 		var problem *contract.Error
@@ -96,6 +102,32 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 			state = "degraded"
 		}
 		result.Hosts = append(result.Hosts, contract.HostSummary{State: state, CPUFree: float64(host.CPUs), MemFree: max(0, host.MemBytes-host.MemUsed), DiskFree: host.DiskBytes, Health: host.Health, DiskBytes: host.DiskTotal, DiskUsed: max(0, host.DiskTotal-host.DiskBytes), Name: host.Name, Problem: host.Problem, Sessions: sessions[host.Name], Shared: []contract.RoomShared{}, Pool: host.Pool, Agents: !host.NoAgents, CI: host.CI, CIScale: host.CIScale, Rooms: host.Rooms, ExecOnly: host.ExecOnly, Runners: runners[host.Name], RunnerImages: imageProblems[host.Name], CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.ExecOnly && !host.CheckedAt.IsZero() && box.DiskLow(host.DiskBytes, host.DiskFloor), EngineHost: host.EngineHost != nil && *host.EngineHost, Leftovers: leftovers[host.Name], GPUs: cards, Services: services[host.Name], ServiceHost: s.reconciler.ServiceHostStatus(host.Name)})
+	}
+	if load != nil {
+		if err := load(ctx, result.Hosts); err != nil {
+			return contract.HostListResponse{}, failure(err)
+		}
+	}
+	if room != "" {
+		for i, host := range result.Hosts {
+			// Session inventory is an allowlist, applied after live measurements so
+			// enrichment cannot restore owner-only history, counts or identities.
+			entry := contract.HostSummary{
+				Name: host.Name, State: host.State, Health: host.Health,
+				Agents: host.Agents, CI: host.CI,
+				CPUFree: host.CPUFree, MemFree: host.MemFree, DiskFree: host.DiskFree,
+				Services: host.Services,
+			}
+			for _, card := range host.GPUs {
+				entry.GPUs = append(entry.GPUs, contract.GPU{Index: card.Index, Name: card.Name, MemBytes: card.MemBytes, FreeBytes: card.FreeBytes})
+			}
+			for _, problem := range host.RunnerImages {
+				if problem.Room == room {
+					entry.RunnerImages = append(entry.RunnerImages, problem)
+				}
+			}
+			result.Hosts[i] = entry
+		}
 	}
 	return result, nil
 }
