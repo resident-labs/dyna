@@ -1,9 +1,9 @@
 <!-- Ported from T3 Code (apps/web/src/components/chat/WorkLog.tsx), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE. -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import type { ActivityKind, TranscriptItem, TranscriptPart } from "../contract.gen.ts";
+  import type { ActivityKind, ToolFinished, TranscriptItem, TranscriptPart } from "../contract.gen.ts";
   import { activeVerb, elapsed, stepTime, titleOf, toolPart, type StepKind } from "../steps.ts";
-  import { formatTimelineDuration, summarizeWork, timelineItemRunning, workingLine, workLayout } from "../timeline.ts";
+  import { formatTimelineDuration, summarizeWork, timelineItemRunning, withFinished, workingLine, workLayout } from "../timeline.ts";
   import Icon, { type IconName } from "./Icon.svelte";
   import TranscriptIcon from "./TranscriptIcon.svelte";
   import Markdown from "./Markdown.svelte";
@@ -13,8 +13,9 @@
   import RunFields from "./RunFields.svelte";
   import { readMedia } from "../media.ts";
 
-  let { items, ended, started, now, activity, chunks, onload, onopen, session, onmedia }: {
+  let { items: reported, finished, ended, started, now, activity, chunks, onload, onopen, session, onmedia }: {
     items: TranscriptItem[];
+    finished?: ReadonlyMap<string, ToolFinished>;
     ended: boolean;
     started: string;
     now: number;
@@ -42,6 +43,7 @@
   }
 
   // Dyna keeps thoughts and tools in transcript order. The caller splits at posts and other boundaries.
+  let items = $derived(withFinished(reported, finished));
   let active = $derived(items.some(item => timelineItemRunning(item, ended)));
   let summary = $derived(active ? workingLine(started, now, activity) : summarizeWork(items));
   let thoughts = $derived(items.filter(item => item.kind === "thinking"));

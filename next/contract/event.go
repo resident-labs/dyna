@@ -285,6 +285,16 @@ type TurnActivity struct {
 	Turn    TurnID       `json:"turn"`
 	Kind    ActivityKind `json:"kind"`  // what the turn is doing; the label only words it
 	Label   string       `json:"label"` // the running tool call, masked, one line of at most 80 characters
+	// Finished is set when a call of a parallel batch ends before its batch does. It leaves the latest label as it was.
+	Finished *ToolFinished `json:"finished,omitempty"`
+}
+
+// ToolFinished tells a reader that one call of a parallel batch is done. The transcript writes the batch's results
+// together once every call has ended, so this live signal lets the call stop showing as running until then.
+type ToolFinished struct {
+	Call       string `json:"call"` // the transcript item ID of the call
+	DurationMs int64  `json:"durationMs"`
+	Failed     bool   `json:"failed,omitempty"`
 }
 
 // ToolFailed records one tool call a session's transcript shows failing. Error and args are cut short and can hold outside text.

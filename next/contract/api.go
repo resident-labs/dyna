@@ -794,6 +794,8 @@ type TurnActivityRequest struct {
 	Turn  TurnID       `json:"turn"`
 	Kind  ActivityKind `json:"kind,omitempty"` // empty from a box agent that predates kinds, which the engine reads as a tool call
 	Label string       `json:"label"`
+	// Finished reports one call of a parallel batch that ended early; Kind and Label are then empty.
+	Finished *ToolFinished `json:"finished,omitempty"`
 }
 type TurnActivityResponse struct{}
 type SessionWorkRequest struct {

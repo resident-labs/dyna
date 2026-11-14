@@ -240,6 +240,7 @@ func Run(ctx context.Context) error {
 			return err
 		}
 		session.Activity = activity.set
+		session.Finished = activity.finish
 		h, files, steered = session, func() []string { return []string{session.SessionFile()} }, func(sender contract.Interrupt) { jobs.StepAside(sender); interrupts.Send(sender) }
 	}
 	defer h.Close()

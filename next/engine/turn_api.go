@@ -257,7 +257,10 @@ func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, r
 	if !open {
 		return contract.TurnActivityResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 	}
-	body := contract.TurnActivity{Session: caller.Session, Turn: req.Turn, Kind: req.Kind, Label: req.Label}
+	if req.Finished != nil && (req.Finished.Call == "" || len(req.Finished.Call) > 300 || req.Finished.DurationMs < 0) {
+		return contract.TurnActivityResponse{}, invalid("finished call must name a call and a duration of at least 0")
+	}
+	body := contract.TurnActivity{Session: caller.Session, Turn: req.Turn, Kind: req.Kind, Label: req.Label, Finished: req.Finished}
 	event, err := s.event(session.Room, caller, body)
 	if err != nil {
 		return contract.TurnActivityResponse{}, failure(err)
