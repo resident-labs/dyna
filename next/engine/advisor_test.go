@@ -400,3 +400,24 @@ func TestAdvisorDeltaReadsAllOfALongTurn(t *testing.T) {
 		}
 	}
 }
+
+func TestAdvisorDeltaStartsAtRootsLastConsultationNotTheAdvisorsLastTurn(t *testing.T) {
+	r := newAdvisorRig(t)
+	r.ask(r.ctx)
+	r.turn(r.advisor, "first answer")
+	r.result()
+	consulted, err := r.st.LastConsultEnd(r.ctx, r.advisor, r.root)
+	if err != nil || consulted.IsZero() {
+		t.Fatalf("after root's consultation: %v, %v", consulted, err)
+	}
+	// Root works on, then the owner talks to the advisor, whose turn ends later than root's last consultation.
+	time.Sleep(20 * time.Millisecond)
+	if _, problem := r.s.Post(r.ctx, ownerCaller, contract.PostRequest{Room: r.room, Home: contract.Conversation{Kind: contract.ConversationDM, Session: r.advisor}, Text: "How is it going?"}); problem != nil {
+		t.Fatal(problem)
+	}
+	r.turn(r.advisor, "owner answer")
+	got, err := r.st.LastConsultEnd(r.ctx, r.advisor, r.root)
+	if err != nil || !got.Equal(consulted) {
+		t.Fatalf("the owner's DM moved the watermark: %v, want %v (%v)", got, consulted, err)
+	}
+}

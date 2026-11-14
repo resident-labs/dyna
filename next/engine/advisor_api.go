@@ -40,7 +40,7 @@ func (s *Service) Advisor(ctx context.Context, caller contract.Principal, req co
 	if err != nil {
 		return contract.AdvisorResponse{}, failure(err)
 	}
-	since, err := s.store.LastTurnEnd(ctx, advisor.ID)
+	since, err := s.store.LastConsultEnd(ctx, advisor.ID, self.ID)
 	if err != nil {
 		return contract.AdvisorResponse{}, failure(err)
 	}

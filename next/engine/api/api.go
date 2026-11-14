@@ -65,11 +65,11 @@ func (a *API) SetGitHubRoomRead(route func(contract.RoomID) http.Handler) { a.gi
 func (a *API) githubTools(c Caller, w http.ResponseWriter, r *http.Request) {
 	if held, ok := a.service.(interface{ GitHubTools() http.Handler }); ok {
 		if tools := held.GitHubTools(); tools != nil {
-			// The room is the socket's: the engine fixed it when it opened this socket for the box, and the request has no say.
+			// The advisor reads only, so it has no write grant. The room is the socket's: the engine fixed it when it opened this socket for the box, and the request has no say.
 			var grant contract.GitHubWrites
 			if writes, ok := a.service.(interface {
 				GitHubWritesOf(context.Context, contract.RoomID) (contract.GitHubWrites, error)
-			}); ok {
+			}); ok && !a.isAdvisor(r, c) {
 				var err error
 				if grant, err = writes.GitHubWritesOf(r.Context(), c.Room); err != nil {
 					writeError(w, &contract.Error{Code: contract.ErrUnavailable, Message: "the room's githubWrites setting could not be read"})
@@ -924,23 +924,30 @@ func writeError(w http.ResponseWriter, err *contract.Error) {
 	_ = json.NewEncoder(w).Encode(err)
 }
 
-// advisorActs are the methods that act in the room, which the advisor may not call: its answer reaches root as its final text.
-var advisorActs = map[contract.Method]bool{
-	contract.MethodPost: true, contract.MethodSessionStart: true, contract.MethodGoalSet: true, contract.MethodWorkflowRun: true,
-	contract.MethodHostexecRun: true, contract.MethodOpSubmit: true,
-	contract.MethodDiscordAPI: true, contract.MethodDiscordSend: true, contract.MethodDiscordConfigure: true, contract.MethodDiscordApply: true,
-}
+// advisorReads are the methods the advisor may call: those that only read, which include the box plumbing every session needs (turn output,
+// transcripts, shell jobs, hello, context). Three methods carry the read scope for their own grants but act, so they are left out. Any other method acts in the room, and its answer reaches root as its final text instead.
+var advisorReads = func() map[contract.Method]bool {
+	reads := map[contract.Method]bool{}
+	for _, row := range tools.Methods() {
+		reads[row.Method] = row.Scope == contract.ScopeRead
+	}
+	for _, acts := range []contract.Method{contract.MethodHostexecRun, contract.MethodHostexecStop, contract.MethodQuestionAsk} {
+		reads[acts] = false
+	}
+	return reads
+}()
 
-func (a *API) refuseAdvisor(c Caller, next http.Handler) http.Handler {
-	// A service without the check, such as a test's, has no advisor.
+// isAdvisor reports whether the call comes from the room's advisor. A service without the check, such as a test's, has no advisor.
+func (a *API) isAdvisor(r *http.Request, c Caller) bool {
 	service, ok := a.service.(interface {
 		IsAdvisor(context.Context, contract.Principal) bool
 	})
-	if !ok {
-		return next
-	}
+	return ok && service.IsAdvisor(r.Context(), requestCaller(r.Context(), c).Principal)
+}
+
+func (a *API) refuseAdvisor(c Caller, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if method, ok := strings.CutPrefix(r.URL.Path, "/v1/"); ok && advisorActs[contract.Method(method)] && service.IsAdvisor(r.Context(), requestCaller(r.Context(), c).Principal) {
+		if method, ok := strings.CutPrefix(r.URL.Path, "/v1/"); ok && !advisorReads[contract.Method(method)] && a.isAdvisor(r, c) {
 			writeError(w, &contract.Error{Code: contract.ErrForbidden, Message: contract.AdvisorRefusal})
 			return
 		}

@@ -53,10 +53,14 @@ func (s *Store) OweReply(ctx context.Context, session contract.SessionID, seq in
 	return owed, err
 }
 
-// LastTurnEnd returns when the session's latest turn ended, or the zero time when none has.
-func (s *Store) LastTurnEnd(ctx context.Context, session contract.SessionID) (time.Time, error) {
+// LastConsultEnd returns when the advisor's latest turn on a prompt from root ended, or the zero time when root has asked nothing yet.
+// The advisor's other turns, such as an owner's DM, do not count: root's work since this end is what the next consultation brings.
+func (s *Store) LastConsultEnd(ctx context.Context, advisor, root contract.SessionID) (time.Time, error) {
 	var at sql.NullInt64
-	err := s.Read().QueryRowContext(ctx, "SELECT MAX(at) FROM events WHERE type='turn.ended' AND from_kind='session' AND from_id=?", session).Scan(&at)
+	err := s.Read().QueryRowContext(ctx, `SELECT MAX(e.at) FROM deliveries d
+JOIN events p ON p.seq=d.seq AND p.from_kind='session' AND p.from_id=?
+JOIN events e ON e.type='turn.ended' AND e.from_kind='session' AND e.from_id=d.to_id AND e.seq>d.seq AND json_extract(CAST(e.body AS TEXT),'$.turn')=d.turn
+WHERE d.to_kind='session' AND d.to_id=?`, root, advisor).Scan(&at)
 	if !at.Valid {
 		return time.Time{}, err
 	}
