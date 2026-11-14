@@ -17,7 +17,7 @@ Keep a line only if an agent without it would do the wrong thing.
 - **Pointers:** a path, host, command or skill everyone should know of, in one line.
 - **Elsewhere:** procedures go in a skill or a `/box/shared` file; status, history and current work in
   goals and state files; how a Dyna tool behaves in its description. Overviews of a repository, or
-  anything the code already shows, go nowhere: studies found they add about 20% to cost and do not help.
+  anything the code already shows, do not belong here.
 - **Size:** under about 100 lines per file. The global file holds what is true in every room; a room's
   file holds that room's own rules.
 
