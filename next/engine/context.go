@@ -327,8 +327,8 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	add(contract.ContextWorkflows, lines, workflowsChars, 0)
 	// Root's advisor, which its tool and prompt section name.
 	lines = nil
-	if advisor, err := s.store.RoomAdvisor(ctx, session.Room); err == nil && session.Root {
-		lines = append(lines, fmt.Sprintf("%s: %s", advisor.Name, advisor.Profile))
+	if advisor, err := s.store.RoomAdvisorProfile(ctx, session.Room); err == nil && advisor != "" && session.Root {
+		lines = append(lines, fmt.Sprintf("%s: %s", advisorName, advisor))
 	}
 	add(contract.ContextAdvisor, lines, 200, 0)
 	return result, nil

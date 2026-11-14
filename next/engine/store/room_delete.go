@@ -158,6 +158,7 @@ var deleteRoom = []string{
 	`DELETE FROM event_files WHERE seq IN (SELECT seq FROM events WHERE room=?1)`,
 	`DELETE FROM events WHERE room=?1`,
 	`DELETE FROM visuals WHERE room=?1`,
+	`DELETE FROM agents WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM turns WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM transcript_offsets WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM transcript_turns WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,

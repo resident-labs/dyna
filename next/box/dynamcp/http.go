@@ -270,6 +270,10 @@ func (s *Server) call(ctx context.Context, p callParams) Result {
 		data = marshal(req)
 	}
 
+	if a.method == contract.MethodAdvisor {
+		data = marshal(contract.AdvisorRequest{Prompt: decoded.(*tools.AdvisorInput).Prompt, ToolCallID: callID})
+	}
+
 	if a.method == contract.MethodImageSave {
 		in := decoded.(*tools.ImageSaveInput)
 		archive, err := skills.PackFolder(in.Path, s.preparer.Dir)

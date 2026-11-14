@@ -1,0 +1,39 @@
+package store
+
+import (
+	"context"
+	"testing"
+
+	"github.com/resident-labs/dyna/contract"
+)
+
+// The advisor setting moved from a session to a room column: an upgrade copies each open advisor session's profile into it, and leaves a room
+// with a closed one, or none, on no advisor.
+func TestAdvisorProfileMigrationCopiesTheOpenAdvisorSessionsProfile(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('with','with',0,0,0),('closed','closed',0,0,0),('none','none',0,0,0);
+ INSERT INTO sessions(id,room,name,profile,state,goal,created_at,advisor) VALUES('a1','with','advisor','deep','open','',0,1),('a2','closed','advisor','deep','open','',0,1),('r','none','root','test','open','',0,0);
+ UPDATE sessions SET closed_at=1 WHERE id='a2';
+ ALTER TABLE rooms DROP COLUMN advisor_profile; DROP TABLE agents; UPDATE meta SET value='120' WHERE key='schema_version'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for room, want := range map[string]string{"with": "deep", "closed": "", "none": ""} {
+		got, err := s.RoomAdvisorProfile(context.Background(), contract.RoomID(room))
+		if err != nil || string(got) != want {
+			t.Fatalf("room %s: advisor %q (%v), want %q", room, got, err, want)
+		}
+	}
+}

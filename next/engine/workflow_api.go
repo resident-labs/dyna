@@ -437,22 +437,28 @@ func (s *Service) boxWorkflow(ctx context.Context, run store.WorkflowRun, memory
 	if effective.MaxWorkers > 0 {
 		workers = min(workers, effective.MaxWorkers)
 	}
-	summaries := s.profiles.List()
 	workflow := &contract.BoxWorkflow{Subscription: run.Subscription, Run: run.ID, Name: run.Name, Script: run.Script, Version: run.Version, Paused: run.Paused, PausedSteps: run.PausedSteps, ReleasedSteps: run.ReleasedSteps, Args: run.Args, Workers: workers, Timeout: effective.Timeout}
 	for _, name := range run.Profiles {
-		model, _, err := s.profiles.Model(name)
-		if err != nil {
-			continue
+		if profile, err := s.workflowProfile(name); err == nil {
+			workflow.Profiles = append(workflow.Profiles, profile)
 		}
-		profile := contract.WorkflowProfile{Name: name, Model: model, ModelInstructions: prompt.ModelInstructions(model), CompactTokens: s.profiles.CompactionTokens(name)}
-		for _, summary := range summaries {
-			if summary.Name == name {
-				profile.MaxConcurrent = summary.MaxConcurrent
-			}
-		}
-		workflow.Profiles = append(workflow.Profiles, profile)
 	}
 	return workflow, nil
+}
+
+// workflowProfile is a profile as an agent in a box needs it: its model, compaction trigger and concurrency limit.
+func (s *Service) workflowProfile(name contract.ProfileName) (contract.WorkflowProfile, error) {
+	model, _, err := s.profiles.Model(name)
+	if err != nil {
+		return contract.WorkflowProfile{}, err
+	}
+	profile := contract.WorkflowProfile{Name: name, Model: model, ModelInstructions: prompt.ModelInstructions(model), CompactTokens: s.profiles.CompactionTokens(name)}
+	for _, summary := range s.profiles.List() {
+		if summary.Name == name {
+			profile.MaxConcurrent = summary.MaxConcurrent
+		}
+	}
+	return profile, nil
 }
 
 // workflowSummary closes a run's journal, failing what its script left running, and totals it.

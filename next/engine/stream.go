@@ -228,6 +228,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 	handle.Unlock()
 	slog.Info("box channel connected", "session", session.ID, "box", session.Box, "stale", stale)
 	s.reconciler.Connected(session.Box)
+	s.stopOrphanedAgents(ctx, session.ID)
 	out := make(chan contract.BoxMessage)
 	go func() {
 		defer func() {
@@ -256,6 +257,12 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 				case ask := <-channel.Asks():
 					select {
 					case out <- contract.BoxMessage{Body: contract.BoxStatsAsk{Ask: ask}}:
+					case <-ctx.Done():
+						return
+					}
+				case message := <-channel.Agents():
+					select {
+					case out <- message:
 					case <-ctx.Done():
 						return
 					}

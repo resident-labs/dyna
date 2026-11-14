@@ -200,7 +200,7 @@ func (s *Service) indexTranscript(ctx context.Context, session contract.SessionI
 		if oversized {
 			continue
 		}
-		if bytes.Contains(line, []byte(`"toolCall"`)) || bytes.Contains(line, []byte(`"isError":true`)) {
+		if (bytes.Contains(line, []byte(`"toolCall"`)) || bytes.Contains(line, []byte(`"isError":true`))) && !strings.HasPrefix(path, agentsFolder) {
 			s.noteToolCalls(session, line, failed)
 		}
 		var entry struct {

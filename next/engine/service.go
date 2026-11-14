@@ -117,6 +117,7 @@ type Service struct {
 	// transcriptMu serializes appends, so each offset check and write runs alone.
 	transcriptMu        sync.Mutex
 	toolCalls           map[contract.SessionID]map[string]seenCall // under transcriptMu
+	agents              agentRuns
 	layout              box.Layout
 	roomData            sync.RWMutex // writers of a room folder share it; removing one takes it alone
 	instructionsMu      sync.Mutex

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/resident-labs/dyna/engine/transcriptview"
@@ -16,6 +17,9 @@ import (
 )
 
 const maxTranscriptCallPosts = 8
+
+// agentsFolder holds the session files of in-box agents, under the session's transcript folder.
+const agentsFolder = "agents/"
 
 // A turn's inputs come at most 50 and 48 KiB of encoded inputs to a page, whichever is reached first.
 const (
@@ -43,6 +47,16 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 		}
 		req.Session = worker.Session
 	}
+	var agent store.Agent
+	if req.Agent != "" {
+		var err error
+		if agent, err = s.store.Agent(ctx, req.Agent); err != nil || agent.Session != req.Session {
+			return response, &contract.Error{Code: contract.ErrNotFound, Message: "agent not found"}
+		}
+		if agent.Transcript == "" {
+			return response, nil // The box has not opened it yet.
+		}
+	}
 	roomID, err := s.store.TranscriptRoom(ctx, req.Session)
 	if errors.Is(err, store.ErrNotFound) {
 		return response, &contract.Error{Code: contract.ErrNotFound, Message: "session not found"}
@@ -69,6 +83,9 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 	if req.Step != "" {
 		exact = worker.Turn
 	}
+	if req.Agent != "" {
+		exact = agent.Turn
+	}
 	work, err := s.store.TranscriptTurnMetadata(ctx, req.Session, req.Before, exact, limit+1)
 	if errors.Is(err, store.ErrInvalidWorkCursor) {
 		return response, invalid("invalid turn cursor")
@@ -92,6 +109,10 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 		if req.Step != "" {
 			w.Inputs = nil
 			transcriptview.ApplyWorkerTurn(&t, worker, w.Started)
+		}
+		if req.Agent != "" {
+			w.Inputs = nil
+			transcriptview.ApplyAgentTurn(&t, agent)
 		}
 		after := req.AfterItem == ""
 		inputBytes := 0
@@ -143,8 +164,19 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			if err != nil {
 				return response, failure(err)
 			}
-			if req.Step != "" {
+			switch {
+			case req.Step != "":
 				ranges = slices.DeleteFunc(ranges, func(r store.TranscriptTurnRange) bool { return r.Path != worker.Step.Transcript })
+			case req.Agent != "":
+				ranges = ranges[:0]
+				r, err := s.store.AgentRange(ctx, agent)
+				if err != nil {
+					return response, failure(err)
+				}
+				ranges = append(ranges, r)
+			default:
+				// An in-box agent's steps show under the call that asked, not among the session's own.
+				ranges = slices.DeleteFunc(ranges, func(r store.TranscriptTurnRange) bool { return strings.HasPrefix(r.Path, agentsFolder) })
 			}
 			// Every request reads the window of items, because a post's index is where it falls among them.
 			wantItems := !req.Tail && req.Page != contract.TranscriptPageMandatoryPosts
@@ -311,7 +343,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 			var posts []contract.Event
 			const postPageSize = 8
 			// The crew's posts have no worker to belong to.
-			if req.Step == "" && req.Page != contract.TranscriptPageMandatoryItems && req.Page != contract.TranscriptPageOlderItems {
+			if req.Step == "" && req.Agent == "" && req.Page != contract.TranscriptPageMandatoryItems && req.Page != contract.TranscriptPageOlderItems {
 				posts, err = s.store.TranscriptSentPostsNewest(ctx, req.Session, t.ID, postPageSize, req.Cursor)
 				if err != nil {
 					return response, failure(err)

@@ -52,15 +52,6 @@ func crewInstructions(hello contract.BoxHelloResponse, tree string) string {
 	return text + "You have your own git worktree at " + tree + " on your own branch, and other workers cannot see it. Work only there. When you end, whatever you left there is committed and pushed for you, except ignored files. Cargo builds share CARGO_TARGET_DIR with the other workers, so reach a binary with cargo run or through that folder, not through ./target.\n"
 }
 
-// workerConfig is what a crew worker opens with, on the box-wide config: its own tree, its profile's model and compaction trigger, its own models.json
-// in folder, and a session file of its own, so that workers sharing the session folder never resume one another's.
-func workerConfig(box pig.Config, profile contract.WorkflowProfile, folder, dir string) pig.Config {
-	box.Dir, box.Model, box.CompactTokens, box.New = dir, profile.Model, profile.CompactTokens, true
-	box.ModelInstructions = profile.ModelInstructions
-	box.ModelsFile = filepath.Join(folder, "models.json")
-	return box
-}
-
 // Run connects the box, serves its model route, and runs the Pi session.
 func Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
@@ -244,6 +235,24 @@ func Run(ctx context.Context) error {
 		h, files, steered = session, func() []string { return []string{session.SessionFile()} }, func(sender contract.Interrupt) { jobs.StepAside(sender); interrupts.Send(sender) }
 	}
 	defer h.Close()
+	// In-box agents run beside the session's own turn, in this process. A crew's box runs none yet.
+	var agents *Agents
+	if crew == nil {
+		parentFile := files()[0]
+		sessionFiles := files
+		agents = NewAgents(ctx, AgentsConfig{
+			Engine:     client,
+			Transcript: transcript,
+			Sessions:   sessions,
+			Orient: func(ctx context.Context) string {
+				return "Your parent's conversation is the file " + parentFile + ": it holds everything its agent has done and been asked, and you can read it.\n\nThe state of its working repository " + workdir + ":\n" + gitBlock(ctx, workdir)
+			},
+			Open: func(ctx context.Context, turn contract.AgentTurn, dir string, toolCall func()) (agentSession, error) {
+				return openAgent(ctx, piDir, workdir, hello.WorkerInstructions, Models(hello.TextOnlyModels...), func(text string) { go notice(text) }, turn, dir, toolCall)
+			},
+		})
+		files = func() []string { return append(sessionFiles(), agents.Files()...) }
+	}
 	steps.Done("session start")
 	activityTicks := time.NewTicker(time.Second)
 	defer activityTicks.Stop()
@@ -291,6 +300,18 @@ func Run(ctx context.Context) error {
 			case contract.BoxStatsAsk:
 				// A first reading takes a moment, and the channel keeps reading meanwhile.
 				go client.reportStats(ctx, stats, body.Ask)
+				return nil
+			case contract.AgentTurn:
+				if agents == nil {
+					go client.AgentEnded(ctx, contract.AgentEndedRequest{ID: body.ID, Outcome: contract.TurnFailed, Error: "this box runs no agents"})
+					return nil
+				}
+				agents.Turn(body)
+				return nil
+			case contract.AgentStop:
+				if agents != nil {
+					agents.Stop(body.ID)
+				}
 				return nil
 			case contract.WorkflowReload:
 				if crew != nil {

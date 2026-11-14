@@ -205,8 +205,8 @@ type RoomSetRequest struct {
 	// GitHubWrites sets the room's githubWrites setting whole (spec 7.9): the groups to allow on repositories of the room, or `*`. No groups
 	// turns it off. Nil leaves it as it is.
 	GitHubWrites *GitHubWrites `json:"githubWrites,omitempty"`
-	// Advisor sets the room's advisor profile: a session on that profile beside root, started if missing, switched when the profile
-	// changes and closed when it is empty. Nil leaves it as it is.
+	// Advisor sets the room's advisor profile: an agent on that profile that runs in root's box with read-only tools. Empty turns it
+	// off. Nil leaves it as it is.
 	Advisor *ProfileName `json:"advisor,omitempty"`
 	// GitSigning switches the signing of the room's commits and tags with the engine's key, as the owner. Nil leaves it as it is.
 	GitSigning *bool `json:"gitSigning,omitempty"`
@@ -622,7 +622,9 @@ const AdvisorRefusal = "the advisor answers root; it does not act in the room"
 
 // AdvisorRequest is root's prompt for the room's advisor.
 type AdvisorRequest struct {
-	Prompt string `json:"prompt" desc:"What the advisor needs: the task, what you found so far and what you want judged. It can read your transcript, so point to evidence rather than pasting it."`
+	Prompt string `json:"prompt"`
+	// ToolCallID is the call that carries the request, which the box fills in: the advisor's steps show under that call.
+	ToolCallID string `json:"toolCallId,omitempty"`
 }
 
 // AdvisorResponse is the final text of the advisor's turn.
@@ -851,6 +853,7 @@ type SessionWorkResponse struct {
 type TranscriptReadRequest struct {
 	Session   SessionID      `json:"session"`
 	Step      string         `json:"step,omitempty"`
+	Agent     AgentID        `json:"agent,omitempty"` // reads one in-box agent's turn instead, by its ID
 	Turn      TurnID         `json:"turn,omitempty"`
 	Before    TurnID         `json:"before,omitempty"`
 	Limit     int            `json:"limit,omitempty"`

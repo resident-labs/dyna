@@ -114,11 +114,11 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 			}
 		}
 		vars.Shared, vars.GlobalRules, vars.RoomRules = s.layout.Shared(session.Room), s.layout.Instructions(""), s.layout.Instructions(session.Room)
-		_, err = s.store.RoomAdvisor(ctx, session.Room)
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
+		advisor, err := s.store.RoomAdvisorProfile(ctx, session.Room)
+		if err != nil {
 			return contract.BoxHelloResponse{}, failure(err)
 		}
-		vars.Advisor = err == nil
+		vars.Advisor = advisor != ""
 	} else {
 		hasChildren, err := s.store.SessionHasChildren(ctx, session.ID)
 		if err != nil {
