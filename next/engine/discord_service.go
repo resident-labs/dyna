@@ -72,7 +72,7 @@ func (s *Service) runDiscord(ctx context.Context, gateway string) {
 					go func() {
 						defer close(finished)
 						gatewayDone := make(chan struct{})
-						g := discord.Gateway{LoadResume: func(ctx context.Context) (discord.ResumeState, error) {
+						g := discord.Gateway{PrepareResume: func(ctx context.Context) error { return s.discordRestoreDirectory(ctx, client) }, LoadResume: func(ctx context.Context) (discord.ResumeState, error) {
 							var state discord.ResumeState
 							data, err := s.store.DiscordResume(ctx, b.Credential)
 							if err != nil || data == "" {

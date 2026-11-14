@@ -19,7 +19,6 @@ import (
 type ResumeState struct {
 	Session, URL string
 	Seq          int64
-	Servers      []Server
 }
 
 type Message struct {
@@ -64,7 +63,9 @@ type Message struct {
 }
 
 type Gateway struct {
-	LoadResume       func(context.Context) (ResumeState, error)
+	LoadResume func(context.Context) (ResumeState, error)
+	// PrepareResume restores routing metadata before any replay is received.
+	PrepareResume    func(context.Context) error
 	SaveResume       func(context.Context, ResumeState) error
 	lastCheckpoint   time.Time
 	checkpointUnsafe atomic.Bool
@@ -159,12 +160,6 @@ func (g *Gateway) Run(ctx context.Context) error {
 			return err
 		}
 		session, resume, seq = state.Session, state.URL, state.Seq
-		if g.Directory != nil {
-			for _, server := range state.Servers {
-				data, _ := json.Marshal(server)
-				g.Directory.Apply("GUILD_CREATE", data)
-			}
-		}
 	}
 	delay := 5 * time.Second
 	for ctx.Err() == nil {
@@ -207,6 +202,11 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 			result = &FatalClose{Code: code, Reason: strings.ReplaceAll(close.Reason, g.Client.Token, "[redacted]")}
 		}
 	}()
+	if *session != "" && g.PrepareResume != nil {
+		if err := g.PrepareResume(ctx); err != nil {
+			return err
+		}
+	}
 	endpoint := g.URL
 	if *resume != "" {
 		endpoint = *resume
@@ -382,11 +382,8 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 			}
 			// Checkpoint on the intake lane, behind all prior messages. A crash may
 			// replay a few already-delivered messages, but cannot skip queued input.
-			if p.Op == 0 && g.SaveResume != nil && (time.Since(g.lastCheckpoint) >= 3*time.Second || p.Type == "GUILD_CREATE") {
+			if p.Op == 0 && g.SaveResume != nil && time.Since(g.lastCheckpoint) >= 3*time.Second {
 				state := ResumeState{Session: *session, URL: *resume, Seq: *seq}
-				if g.Directory != nil {
-					state.Servers = g.Directory.Snapshot()
-				}
 				select {
 				case g.messages <- Message{checkpoint: &state}:
 					g.lastCheckpoint = time.Now()
