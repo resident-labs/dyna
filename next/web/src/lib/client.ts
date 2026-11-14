@@ -1,8 +1,9 @@
+import { connectVersion, recoverConnect } from "./connect-watch.ts";
 import type { Attachment, Error as ContractError, MethodMap } from "./contract.gen.ts";
 
 export class APIError extends Error {
-  readonly detail: ContractError;
-  constructor(detail: ContractError) {
+  readonly detail: Omit<ContractError, "code"> & { code: ContractError["code"] | "renew" | "renew-wait" | "connect-unavailable" | "connect-ended" };
+  constructor(detail: APIError["detail"]) {
     super(detail.message);
     this.detail = detail;
     this.name = "APIError";
@@ -16,9 +17,9 @@ export class SignedOut extends APIError {}
 const signedOut = () => new SignedOut({ code: "forbidden", message: "You are signed out." });
 
 // Why the page cannot show rooms, from a call's typed error; other errors belong to the view that made the call.
-export type Blocked = "signed-out" | "unreachable";
+export type Blocked = "renew-wait" | "signed-out" | "unreachable" | "sign-in-unavailable";
 export const blockedBy = (error: unknown): Blocked | undefined => !(error instanceof APIError) ? undefined
-  : error.detail.code === "forbidden" ? "signed-out" : error.detail.code === "unavailable" ? "unreachable" : undefined;
+  : ["forbidden", "connect-ended"].includes(error.detail.code) ? "signed-out" : error.detail.code === "renew-wait" ? "renew-wait" : error.detail.code === "connect-unavailable" ? "sign-in-unavailable" : error.detail.code === "unavailable" ? "unreachable" : undefined;
 // The wait before the next automatic try while the engine is not reachable: 1 s, doubling to at most 30 s.
 export const retryDelay = (attempt: number) => Math.min(30_000, 1000 * 2 ** attempt);
 
@@ -50,25 +51,44 @@ export async function call<M extends keyof MethodMap>(
 }
 
 async function send<M extends keyof MethodMap>(
-  method: M, request: MethodMap[M]["request"],
+  method: M, request: MethodMap[M]["request"], renewed = false,
 ): Promise<MethodMap[M]["response"]> {
+  const version = connectVersion();
   const response = await fetch(`/v1/${method}`, {
     method: "POST", credentials: "same-origin",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify(request),
   }).catch(() => { throw unavailable(); });
+  if (!renewed) {
+    const recovery = await recoverConnect(response, version);
+    if (recovery === "retry") return send(method, request, true);
+    if (recovery === "ended") throw signedOut();
+    if (recovery) throw new APIError({ code: recovery === "wait" ? "renew-wait" : "connect-unavailable", message: "Sign-in renewal is pending." });
+  }
   const body: unknown = await response.json().catch(() => { throw response.status === 403 ? signedOut() : unavailable(); });
   // The engine answers with the contract's JSON: an Error when the status is not OK,
   // else the method's response. Callers that read events check them with decodeEvent.
-  if (!response.ok) throw new APIError(body as ContractError);
+  if (!response.ok) {
+    const detail = body as APIError["detail"];
+    if (detail.code === "renew" || detail.code === "connect-ended") throw signedOut();
+    throw new APIError(detail);
+  }
   return body as MethodMap[M]["response"];
 }
 
 // Stores one file in a room; the answer is the Attachment a post carries. The engine answers a
 // failed upload with plain text, so any failure is the one typed error.
-export async function upload(file: File, room: string): Promise<Attachment> {
+export async function upload(file: File, room: string, renewed = false): Promise<Attachment> {
+  const version = connectVersion();
   const response = await fetch(`/v1/files?name=${encodeURIComponent(file.name)}&room=${encodeURIComponent(room)}`, {
     method: "POST", credentials: "same-origin", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file,
   }).catch(() => { throw unavailable(); });
+  if (!renewed) {
+    const recovery = await recoverConnect(response, version);
+    if (recovery === "retry") return upload(file, room, true);
+    if (recovery === "ended") throw signedOut();
+    if (recovery) throw new APIError({ code: recovery === "wait" ? "renew-wait" : "connect-unavailable", message: "Sign-in renewal is pending." });
+  }
+  if (response.status === 401 || response.status === 403) throw signedOut();
   if (!response.ok) throw unavailable();
   // The engine's own JSON, as in call.
   return await response.json().catch(() => { throw unavailable(); }) as Attachment;

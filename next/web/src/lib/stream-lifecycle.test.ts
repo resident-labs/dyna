@@ -85,3 +85,41 @@ for (const room of [undefined, "room"]) {
     });
   }
 }
+
+for (const action of ["dispose", "pagehide"]) {
+  test(`pending stream probe aborts on ${action}`, async () => {
+    const originalFetch = globalThis.fetch;
+    const originalSource = Object.getOwnPropertyDescriptor(globalThis, "EventSource");
+    let source: EventConnection;
+    class FakeSource {
+      onmessage = null;
+      onerror: ((event: Event) => void) | null = null;
+      constructor() { source = this; }
+      addEventListener() {}
+      close() {}
+    }
+    Object.defineProperty(globalThis, "EventSource", { configurable: true, value: FakeSource });
+    let signal: AbortSignal | undefined;
+    globalThis.fetch = async (_url, options) => {
+      signal = options?.signal ?? undefined;
+      return new Promise((_resolve, reject) => signal!.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+    };
+    const lifecycle = new EventTarget();
+    let retry = () => {};
+    const stop = stream(undefined, () => 0, () => {}, undefined, callback => { retry = callback; return () => {}; }, undefined, lifecycle);
+    try {
+      source!.onerror?.(new Event("error"));
+      retry();
+      assert.equal(signal?.aborted, false);
+      if (action === "dispose") stop();
+      else lifecycle.dispatchEvent(new Event("pagehide"));
+      assert.equal(signal?.aborted, true);
+      await new Promise(resolve => setImmediate(resolve));
+    } finally {
+      stop();
+      globalThis.fetch = originalFetch;
+      if (originalSource) Object.defineProperty(globalThis, "EventSource", originalSource);
+      else Reflect.deleteProperty(globalThis, "EventSource");
+    }
+  });
+}

@@ -10,7 +10,7 @@
   import { reconnectNotice } from "./lib/reconnect.ts";
   import { FormDrafts } from "./lib/form-drafts.ts";
   import { ComposerDrafts } from "./lib/composer-drafts.ts";
-  import { tick, untrack } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { waitingLabel, sessionCountsLine } from "./lib/status.ts";
   import { RoomStore } from "./lib/room.svelte.ts";
   import { ForwardExpiry } from "./lib/forward-clock.ts";
@@ -118,7 +118,7 @@
       pending = true;
       void open().then(state => {
         pending = false;
-        failing = state === "unreachable";
+        failing = state === "unreachable" || state === "sign-in-unavailable" || state === "renew-wait";
         if (stopped) return;
         if (!failing) { tries = 0; return; }
         if (document.visibilityState === "visible") timer = setTimeout(run, retryDelay(tries++));
@@ -717,6 +717,17 @@
   // room.list gives the feed's read position. Opening a session's DM shows the owner its failure, which clears the mark.
   // This device was revoked while its page stayed open.
   let revoked = $state(false);
+  onMount(() => {
+    const ended = () => { revoked = true; };
+    const renewal = (event: Event) => {
+      const state = (event as CustomEvent<string>).detail;
+      if (state === "ended") revoked = true;
+      else if (state === "ready" && blocked === "sign-in-unavailable") { blocked = undefined; connect(); }
+    };
+    window.addEventListener("connect-renewal", renewal);
+    window.addEventListener("connect-ended", ended);
+    return () => { window.removeEventListener("connect-ended", ended); window.removeEventListener("connect-renewal", renewal); };
+  });
   let signedOut = $derived(revoked || blocked === "signed-out" || unavailable === "signed-out");
   // Inside Settings the drawer lists rooms, as its room pages act on a view that Settings covers.
   let pagesRoom = $derived(inSettings ? undefined : room);
@@ -830,11 +841,11 @@
     {#if reconnecting}<p class="reconnect-notice" role="status">Reconnecting to Dyna…</p>{/if}
     {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} {session} admin={attention.can("admin")} operate={attention.can("operate")} anchor={requestsButton} onclose={() => void closeSection()} />{/if}
     <div class="feed">
-      {#if blocked}<Blocked kind="unreachable" onretry={connect} />
+      {#if blocked}<Blocked kind={(blocked === "sign-in-unavailable" || blocked === "renew-wait") ? blocked : "unreachable"} onretry={connect} />
       {:else if lost === "room"}<Blocked kind="no-room" back={{ href: "/", label: "Go to Home" }} {navigate} />
       {:else if lost === "page"}<Blocked kind="no-page" back={{ href: "/", label: "Go to Home" }} {navigate} />
       {:else if !room}<Home {attention} {initials} loaded={roomsLoaded} {navigate} onrequests={() => { section = "requests"; }} covered={inSettings} />
-      {:else if unavailable === "unreachable"}<Blocked kind="unreachable" onretry={reopen} />
+      {:else if unavailable === "unreachable" || unavailable === "sign-in-unavailable" || unavailable === "renew-wait"}<Blocked kind={unavailable} onretry={reopen} />
       {:else if store && !unavailable}
         {#if session}{#key session}{#if crew}<WorkflowRun {store} {hasRoom} {session} {roomName} {navigate} operate={attention.can("operate")} onpostlocation={(room, seq) => openLocation(room, undefined, seq)} />{:else}<SessionThread bind:this={thread} {store} {hasRoom} {session} {roomName} {navigate} admin={attention.can("admin")} operate={attention.can("operate")} startingBrief={startingBriefs[session]} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle} onpostlocation={(room, seq) => openLocation(room, undefined, seq)} />{/if}{/key}{:else}{#key key}<Feed bind:this={view} depth={{ mode: feedDepth, depths }} {store} {hasRoom} {home} {navigate} admin={attention.can("admin")} operate={attention.can("operate") && !closed} waiting={quotes[key]} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
           onforward={forward} onclosed={() => composer?.focus()} onjobs={item => void jobsTool?.show(item)}
