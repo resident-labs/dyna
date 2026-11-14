@@ -118,7 +118,7 @@
       pending = true;
       void open().then(state => {
         pending = false;
-        failing = state === "unreachable" || state === "sign-in-unavailable";
+        failing = state === "unreachable" || state === "sign-in-unavailable" || state === "renew-wait";
         if (stopped) return;
         if (!failing) { tries = 0; return; }
         if (document.visibilityState === "visible") timer = setTimeout(run, retryDelay(tries++));
@@ -719,8 +719,15 @@
   let revoked = $state(false);
   onMount(() => {
     const ended = () => { revoked = true; };
+    const renewal = (event: Event) => {
+      const state = (event as CustomEvent<string>).detail;
+      if (state === "ended") revoked = true;
+      else if (state === "unavailable") blocked = "sign-in-unavailable";
+      else if (blocked === "sign-in-unavailable") { blocked = undefined; connect(); }
+    };
+    window.addEventListener("connect-renewal", renewal);
     window.addEventListener("connect-ended", ended);
-    return () => window.removeEventListener("connect-ended", ended);
+    return () => { window.removeEventListener("connect-ended", ended); window.removeEventListener("connect-renewal", renewal); };
   });
   let signedOut = $derived(revoked || blocked === "signed-out" || unavailable === "signed-out");
   // Inside Settings the drawer lists rooms, as its room pages act on a view that Settings covers.
@@ -835,11 +842,11 @@
     {#if reconnecting}<p class="reconnect-notice" role="status">Reconnecting to Dyna…</p>{/if}
     {#if section === "requests" && store && !unavailable}<RequestsPanel bind:element={page} {store} {session} admin={attention.can("admin")} operate={attention.can("operate")} anchor={requestsButton} onclose={() => void closeSection()} />{/if}
     <div class="feed">
-      {#if blocked}<Blocked kind={blocked === "sign-in-unavailable" ? blocked : "unreachable"} onretry={connect} />
+      {#if blocked}<Blocked kind={(blocked === "sign-in-unavailable" || blocked === "renew-wait") ? blocked : "unreachable"} onretry={connect} />
       {:else if lost === "room"}<Blocked kind="no-room" back={{ href: "/", label: "Go to Home" }} {navigate} />
       {:else if lost === "page"}<Blocked kind="no-page" back={{ href: "/", label: "Go to Home" }} {navigate} />
       {:else if !room}<Home {attention} {initials} loaded={roomsLoaded} {navigate} onrequests={() => { section = "requests"; }} covered={inSettings} />
-      {:else if unavailable === "unreachable" || unavailable === "sign-in-unavailable"}<Blocked kind={unavailable} onretry={reopen} />
+      {:else if unavailable === "unreachable" || unavailable === "sign-in-unavailable" || unavailable === "renew-wait"}<Blocked kind={unavailable} onretry={reopen} />
       {:else if store && !unavailable}
         {#if session}{#key session}{#if crew}<WorkflowRun {store} {hasRoom} {session} {roomName} {navigate} operate={attention.can("operate")} onpostlocation={(room, seq) => openLocation(room, undefined, seq)} />{:else}<SessionThread bind:this={thread} {store} {hasRoom} {session} {roomName} {navigate} admin={attention.can("admin")} operate={attention.can("operate")} startingBrief={startingBriefs[session]} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle} onpostlocation={(room, seq) => openLocation(room, undefined, seq)} />{/if}{/key}{:else}{#key key}<Feed bind:this={view} depth={{ mode: feedDepth, depths }} {store} {hasRoom} {home} {navigate} admin={attention.can("admin")} operate={attention.can("operate") && !closed} waiting={quotes[key]} target={jumpSeq} ontarget={() => jumpSeq = undefined} bind:element={feed} {intro} unsent={unsent[key] ?? []} onunsent={keep} onsettled={settle}
           onforward={forward} onclosed={() => composer?.focus()} onjobs={item => void jobsTool?.show(item)}

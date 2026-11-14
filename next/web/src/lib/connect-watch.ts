@@ -12,11 +12,33 @@ async function post(path: string, body: object): Promise<Response> {
 }
 
 // API calls and the timer share one proof-bound cookie rotation.
+let renewalVersion = 0;
+export const connectVersion = () => renewalVersion;
 let renewing: Promise<Response | undefined> | undefined;
 export function renewConnect(): Promise<Response | undefined> {
   return renewing ??= (async () => post("/api/connect/renew", {
     proof: await proof(await deviceKey(), "/api/connect/renew"),
-  }))().catch(() => undefined).finally(() => { renewing = undefined; });
+  }))().then(response => {
+    if (response.ok) renewalVersion++;
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("connect-renewal", { detail: response.ok ? "ready" : response.status === 429 ? "wait" : response.status === 401 || response.status === 403 ? "ended" : "unavailable" }));
+    return response;
+  }).catch(() => {
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("connect-renewal", { detail: "unavailable" }));
+    return undefined;
+  }).finally(() => { renewing = undefined; });
+}
+
+export type Renewal = "retry" | "ended" | "unavailable" | "wait";
+// A generation prevents delayed refusals from rotating an already renewed cookie.
+export async function recoverConnect(response: Response, sentVersion: number): Promise<Renewal | undefined> {
+  if (response.status !== 401) return;
+  const body: unknown = await response.clone().json().catch(() => undefined);
+  if (typeof body !== "object" || body === null || !("code" in body)) return;
+  if (body.code === "connect-ended") return "ended";
+  if (body.code !== "renew") return;
+  if (sentVersion < renewalVersion) return "retry";
+  const renewal = await renewConnect();
+  return renewal?.ok ? "retry" : renewal?.status === 401 || renewal?.status === 403 ? "ended" : renewal?.status === 429 ? "wait" : "unavailable";
 }
 
 // The private routes response proves the server has authenticated this Connect session.

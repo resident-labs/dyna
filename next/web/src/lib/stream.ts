@@ -1,3 +1,4 @@
+import { connectVersion, recoverConnect, type Renewal } from "./connect-watch.ts";
 import type { Event, StreamHello } from "./contract.gen.ts";
 import { decodeEvent } from "./event.ts";
 
@@ -6,6 +7,16 @@ export interface EventConnection {
   onerror: ((event: globalThis.Event) => void) | null;
   addEventListener(type: "hello" | "heartbeat", listener: (event: MessageEvent<string>) => void): void;
   close(): void;
+}
+const browserEvents = (url: string) => new EventSource(url);
+// EventSource hides HTTP refusals. Probe only after an error, then release the
+// response body before reconnecting the real stream from its current cursor.
+export async function recoverEventStream(url: string, version: number): Promise<Renewal | undefined> {
+  const response = await fetch(url, { credentials: "same-origin" }).catch(() => undefined);
+  if (!response) return "unavailable";
+  const result = await recoverConnect(response, version);
+  await response.body?.cancel().catch(() => {});
+  return result;
 }
 export type EventFactory = (url: string) => EventConnection;
 export type Schedule = (callback: () => void, delay: number) => () => void;
@@ -30,7 +41,7 @@ export function watchHello(listener: (hello: StreamHello) => void): void { onHel
 // Without a room, the owner stream carries the attention events of every room.
 export function stream(
   room: string | undefined, after: () => number, apply: (event: Event) => void,
-  factory: EventFactory = url => new EventSource(url),
+  factory: EventFactory = browserEvents,
   schedule: Schedule = (callback, delay) => {
     const id = setTimeout(callback, delay);
     return () => clearTimeout(id);
@@ -48,6 +59,7 @@ export function stream(
   let suspended = false;
   let generation = 0;
   function connect() {
+    const sentVersion = connectVersion();
     const currentGeneration = ++generation;
     const reconnect = attempted;
     attempted = true;
@@ -67,7 +79,14 @@ export function stream(
       cancelWatchdog();
       current.close();
       if (owner) reportStreamState(false);
-      cancel = schedule(() => { if (!closed && !suspended && generation === currentGeneration) connect(); }, delay);
+      cancel = schedule(() => {
+        const resume = () => { if (!closed && !suspended && generation === currentGeneration) connect(); };
+        if (factory !== browserEvents) { resume(); return; }
+        void recoverEventStream(`/v1/events?${new URLSearchParams({ ...(room && { room }), after: String(after()) })}`, sentVersion).then(result => {
+          if (result === "ended") { window.dispatchEvent(new globalThis.Event("connect-ended")); return; }
+          resume();
+        });
+      }, delay);
       delay = Math.min(delay * 2, 10_000);
     }
     cancel = () => { active = false; cancelWatchdog(); };
