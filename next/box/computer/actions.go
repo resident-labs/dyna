@@ -13,7 +13,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -393,15 +392,14 @@ func (a Agent) Start(ctx context.Context) (Started, error) {
 	return a.post(ctx, "/computer", StartRequest{})
 }
 
-var actionMu sync.Mutex
+// actionSlot serializes desktop actions; stop bypasses it to recover a stalled desktop.
+var actionSlot = make(chan struct{}, 1)
 
 // pageActionTimeout bounds a complete DevTools action. A variable lets tests avoid a 30 second wait.
 var pageActionTimeout = 30 * time.Second
 
 // Do runs one action. The text of its result starts with a report of anything of the desktop that exited since.
 func Do(ctx context.Context, agent Agent, action Action, r Request) (Result, error) {
-	actionMu.Lock()
-	defer actionMu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
@@ -413,6 +411,15 @@ func Do(ctx context.Context, agent Agent, action Action, r Request) (Result, err
 			return Result{}, err
 		}
 		return Result{Text: "The desktop stopped. The next action starts it again."}, nil
+	}
+	select {
+	case actionSlot <- struct{}{}:
+		defer func() { <-actionSlot }()
+	case <-ctx.Done():
+		return Result{}, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
 	}
 	started, err := agent.Start(ctx)
 	if err != nil {
