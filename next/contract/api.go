@@ -205,8 +205,8 @@ type RoomSetRequest struct {
 	// GitHubWrites sets the room's githubWrites setting whole (spec 7.9): the groups to allow on repositories of the room, or `*`. No groups
 	// turns it off. Nil leaves it as it is.
 	GitHubWrites *GitHubWrites `json:"githubWrites,omitempty"`
-	// Advisor sets the room's advisor profile: a session on that profile beside root, started if missing, switched when the profile
-	// changes and closed when it is empty. Nil leaves it as it is.
+	// Advisor sets the room's advisor profile: an agent on that profile that runs in root's box with read-only tools. Empty turns it
+	// off. Nil leaves it as it is.
 	Advisor *ProfileName `json:"advisor,omitempty"`
 	// GitSigning switches the signing of the room's commits and tags with the engine's key, as the owner. Nil leaves it as it is.
 	GitSigning *bool `json:"gitSigning,omitempty"`

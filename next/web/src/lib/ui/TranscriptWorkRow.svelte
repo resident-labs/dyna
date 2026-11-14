@@ -17,7 +17,7 @@
   import AgentRead from "./AgentRead.svelte";
   import Self from "./TranscriptWorkRow.svelte";
 
-  let { items: reported, finished, ended, started, now, activity, chunks, onload, onopen, session, onmedia, operate = false }: {
+  let { items: reported, finished, ended, started, now, activity, chunks, onload, onopen, session, onmedia, operate = false, bare = false }: {
     items: TranscriptItem[];
     finished?: ReadonlyMap<string, ToolFinished>;
     ended: boolean;
@@ -30,6 +30,7 @@
     session: string;
     onmedia: (key: string) => void;
     operate?: boolean;
+    bare?: boolean; // no heading: the group is under a row that says what it is
   } = $props();
   // The steps an advisor call's agent has taken, by call, and the calls the owner is stopping.
   let agentSteps: Record<string, number> = $state({});
@@ -126,13 +127,6 @@
       <span class="entry-chevron"><TranscriptIcon kind="chevron" /></span>
     </summary>
     <div class="content">
-        {#if title.kind === "advisor"}
-          <AgentRead {session} id={item.id} {running} oncount={count => { agentSteps[item.id] = count; }}>
-            {#snippet children(turn, agentChunks, agentLoad)}
-              <div class="agent"><Self items={turn.items ?? []} ended={!running} started={turn.started} {now} chunks={agentChunks} onload={agentLoad} onopen={() => {}} {session} {onmedia} /></div>
-            {/snippet}
-          </AgentRead>
-        {/if}
         {#if item.diff}
           {@const diff = chunks[key(item, "diff")] ?? item.diff}
           {@const lines = diff.split("\n")}
@@ -143,6 +137,14 @@
         {/if}
         {#if !item.diff || item.failed}
         {#each parts as name}
+          <!-- The advisor's steps come between what it was asked and what it answered. -->
+          {#if title.kind === "advisor" && name === "output"}
+            <AgentRead {session} id={item.id} {running} oncount={count => { agentSteps[item.id] = count; }}>
+              {#snippet children(turn, agentChunks, agentLoad)}
+                <div class="agent"><Self items={turn.items ?? []} ended={!running} started={turn.started} {now} chunks={agentChunks} onload={agentLoad} onopen={() => {}} {session} {onmedia} bare /></div>
+              {/snippet}
+            </AgentRead>
+          {/if}
           {#if item[name] || chunks[key(item, name)] !== undefined}
             {@const part = toolPart(name, chunks[key(item, name)] ?? item[name] ?? "", title.kind, !!item.more && chunks[key(item, name)] === undefined)}
             {#if title.kind === "advisor" && name === "output"}<div class="advice"><Markdown text={advice(chunks[key(item, name)] ?? item[name] ?? "")} source={{ key: item.id, from: { kind: "session", session }, at: item.at }} /></div>
@@ -170,10 +172,10 @@
   </div>
 {:else if items.length}
   <div class="group">
-    <div class="group-heading"><span class="slot"><TranscriptIcon kind="hammer" /></span><span>{summary}</span>
+    {#if !bare}<div class="group-heading"><span class="slot"><TranscriptIcon kind="hammer" /></span><span>{summary}</span>
       {#if failedCount}<StatusPill tone="failed" label={`${failedCount} failed`} word />{/if}
       {#if thoughts.length}<button class="thought-toggle" aria-expanded={showThoughts} onclick={toggleThoughts}>{thoughts.length} {thoughts.length === 1 ? "thought" : "thoughts"} <span class="fold-chevron"><TranscriptIcon kind="chevron" /></span></button>{/if}
-    </div>
+    </div>{/if}
     <div class="entries" role="region" aria-label="Work details">
       {#each items as item (item.id)}
         {#if item.kind !== "thinking"}{@render entry(item)}{:else if showThoughts}{@render thought(item, true)}{/if}

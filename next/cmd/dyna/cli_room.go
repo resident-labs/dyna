@@ -74,7 +74,7 @@ func roomCommand(getClient func() client) *cobra.Command {
 		setRoom.Flags().StringVar(rootApproves[kind], "root-approves-"+string(kind), "", "on or off: whether the room's root may decide its sessions' "+string(kind)+" requests")
 	}
 	setRoom.Flags().StringVar(&githubWrites, "github-writes", "", "GROUPS@REPOS (issues,pulls,projects @ repositories of the room or *), or off: the GitHub writes the room's sessions may make")
-	advisor := &cobra.Command{Use: "advisor ROOM PROFILE|none", Short: "Set the room's advisor profile, or none", Long: "Set the room's advisor: a session on PROFILE beside root, started if missing and switched to a new profile. none closes it. Root's advisor tool and prompt section follow at its next box start.", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+	advisor := &cobra.Command{Use: "advisor ROOM PROFILE|none", Short: "Set the room's advisor profile, or none", Long: "Set the room's advisor: an agent on PROFILE that runs in root's box with read-only tools. none turns it off. Root's advisor tool and prompt section follow at its next box start.", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
 		profile := contract.ProfileName(args[1])
 		if args[1] == "none" {
 			profile = ""
