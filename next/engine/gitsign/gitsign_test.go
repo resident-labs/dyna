@@ -29,6 +29,9 @@ func TestCheckAcceptsCommitsAndTagsOfTheIdentity(t *testing.T) {
 		"sha256 objects":    "tree " + id + strings.Repeat("0", 24) + "\nauthor " + ident + "\ncommitter " + ident + "\n\nm\n",
 		"another timezone":  "tree " + id + "\nauthor " + ident + "\ncommitter Aria Owner <aria@example.com> 5 -0700\n\nm\n",
 		"committer in body": commit + "committer " + other + "\n",
+		"encoding":          "tree " + id + "\nauthor " + ident + "\ncommitter " + ident + "\nencoding ISO-8859-1\n\nm\n",
+		"mergetag":          "tree " + id + "\nparent " + id + "\nparent " + id + "\nauthor " + ident + "\ncommitter " + ident + "\nmergetag object " + id + "\n type commit\n tag v1\n \n release\n\nm\n",
+		"a tag of a tree":   "object " + id + "\ntype tree\ntag v1\ntagger " + ident + "\n\nm\n",
 	} {
 		if err := Check([]byte(payload), "Aria Owner", "aria@example.com"); err != nil {
 			t.Errorf("%s: %v", name, err)
@@ -41,21 +44,46 @@ func TestCheckAcceptsCommitsAndTagsOfTheIdentity(t *testing.T) {
 }
 
 func TestCheckRefuses(t *testing.T) {
+	const tree, author, committer = "tree " + id + "\n", "author " + ident + "\n", "committer " + ident + "\n"
+	const tagHead = "object " + id + "\ntype commit\ntag v1\n"
+	const whole = "whole git commit and tag objects"
 	cases := map[string]struct{ payload, name, email, say string }{
-		"other committer":     {"tree " + id + "\nauthor " + ident + "\ncommitter " + other + "\n\nm\n", "Aria Owner", "aria@example.com", "user.name"},
-		"other tagger":        {"object " + id + "\ntype commit\ntag v1\ntagger " + other + "\n\nm\n", "Aria Owner", "aria@example.com", "tagger"},
+		"other committer":     {tree + author + "committer " + other + "\n\nm\n", "Aria Owner", "aria@example.com", "user.name"},
+		"other tagger":        {tagHead + "tagger " + other + "\n\nm\n", "Aria Owner", "aria@example.com", "tagger"},
 		"email differs":       {commit, "Aria Owner", "other@example.com", "other@example.com"},
-		"name is a suffix":    {"tree " + id + "\nauthor x <x> 1 +0000\ncommitter Evil Aria Owner <aria@example.com> 1 +0000\n\nm\n", "Aria Owner", "aria@example.com", "committer"},
-		"junk after the time": {"tree " + id + "\nauthor x <x> 1 +0000\ncommitter " + ident + " x\n\nm\n", "Aria Owner", "aria@example.com", "committer"},
-		"two committers":      {"tree " + id + "\nauthor x <x> 1 +0000\ncommitter " + ident + "\ncommitter " + ident + "\n\nm\n", "Aria Owner", "aria@example.com", "one committer"},
-		"no committer":        {"tree " + id + "\nauthor " + ident + "\n\nm\n", "Aria Owner", "aria@example.com", "one committer"},
-		"tag without tagger":  {"object " + id + "\ntype commit\ntag v1\n\nm\n", "Aria Owner", "aria@example.com", "one tagger"},
-		"a continuation line": {"tree " + id + "\nauthor x <x> 1 +0000\ngpgsig a\n committer " + ident + "\n\nm\n", "Aria Owner", "aria@example.com", "one committer"},
-		"a file":              {"just a file\n", "Aria Owner", "aria@example.com", "commit and tag"},
-		"empty":               {"", "Aria Owner", "aria@example.com", "commit and tag"},
-		"bad tree id":         {"tree xyz\ncommitter " + ident + "\n\nm\n", "Aria Owner", "aria@example.com", "commit and tag"},
+		"name is a suffix":    {tree + author + "committer Evil Aria Owner <aria@example.com> 1 +0000\n\nm\n", "Aria Owner", "aria@example.com", "committer"},
+		"junk after the time": {tree + author + "committer " + ident + " x\n\nm\n", "Aria Owner", "aria@example.com", "committer"},
 		"no identity name":    {commit, "", "aria@example.com", "no git identity"},
 		"no identity email":   {commit, "Aria Owner", "", "no git identity"},
+		// Payloads that are not whole objects.
+		"no author, no blank line":     {tree + "committer " + ident + "\n", "Aria Owner", "aria@example.com", whole},
+		"no blank line":                {tree + author + committer, "Aria Owner", "aria@example.com", whole},
+		"no author":                    {tree + committer + "\nm\n", "Aria Owner", "aria@example.com", "author"},
+		"two authors":                  {tree + author + author + committer + "\nm\n", "Aria Owner", "aria@example.com", "author"},
+		"a malformed author":           {tree + "author nobody\n" + committer + "\nm\n", "Aria Owner", "aria@example.com", "author"},
+		"committer before author":      {tree + committer + author + "\nm\n", "Aria Owner", "aria@example.com", "author"},
+		"no committer":                 {tree + author + "\nm\n", "Aria Owner", "aria@example.com", "committer"},
+		"two committers":               {tree + author + committer + committer + "\nm\n", "Aria Owner", "aria@example.com", "repeated"},
+		"two trees":                    {tree + tree + author + committer + "\nm\n", "Aria Owner", "aria@example.com", "author"},
+		"a parent after the author":    {tree + author + "parent " + id + "\n" + committer + "\nm\n", "Aria Owner", "aria@example.com", "committer"},
+		"a bad parent id":              {tree + "parent xyz\n" + author + committer + "\nm\n", "Aria Owner", "aria@example.com", "parent"},
+		"a signature already there":    {tree + author + committer + "gpgsig -----BEGIN SSH SIGNATURE-----\n abc\n -----END SSH SIGNATURE-----\n\nm\n", "Aria Owner", "aria@example.com", "already signed"},
+		"an unknown header":            {tree + author + committer + "x-extra yes\n\nm\n", "Aria Owner", "aria@example.com", "unknown"},
+		"two encodings":                {tree + author + committer + "encoding utf-8\nencoding latin1\n\nm\n", "Aria Owner", "aria@example.com", "repeated"},
+		"encoding before committer":    {tree + author + "encoding utf-8\n" + committer + "\nm\n", "Aria Owner", "aria@example.com", "committer"},
+		"a hidden committer":           {tree + author + "gpgsig a\n committer " + ident + "\n\nm\n", "Aria Owner", "aria@example.com", "committer"},
+		"a leading continuation":       {" tree " + id + "\n" + author + committer + "\nm\n", "Aria Owner", "aria@example.com", "continuation"},
+		"bad tree id":                  {"tree xyz\n" + author + committer + "\nm\n", "Aria Owner", "aria@example.com", "tree id"},
+		"a tag without tagger":         {tagHead + "\nm\n", "Aria Owner", "aria@example.com", "tagger"},
+		"a tag without type":           {"object " + id + "\ntag v1\ntagger " + ident + "\n\nm\n", "Aria Owner", "aria@example.com", "type"},
+		"a tag with a bad type":        {"object " + id + "\ntype nonsense\ntag v1\ntagger " + ident + "\n\nm\n", "Aria Owner", "aria@example.com", "type"},
+		"a tag without a name":         {"object " + id + "\ntype commit\ntagger " + ident + "\n\nm\n", "Aria Owner", "aria@example.com", "tag line"},
+		"a tag with no blank line":     {tagHead + "tagger " + ident + "\n", "Aria Owner", "aria@example.com", whole},
+		"a tag with two taggers":       {tagHead + "tagger " + ident + "\ntagger " + ident + "\n\nm\n", "Aria Owner", "aria@example.com", "repeated"},
+		"a tag with a signature":       {tagHead + "tagger " + ident + "\ngpgsig x\n\nm\n", "Aria Owner", "aria@example.com", "already signed"},
+		"a tag with an unknown header": {tagHead + "tagger " + ident + "\nx-extra y\n\nm\n", "Aria Owner", "aria@example.com", "unknown"},
+		"a file":                       {"just a file\n", "Aria Owner", "aria@example.com", whole},
+		"empty":                        {"", "Aria Owner", "aria@example.com", whole},
 	}
 	for label, tc := range cases {
 		if err := Check([]byte(tc.payload), tc.name, tc.email); err == nil || !strings.Contains(err.Error(), tc.say) {

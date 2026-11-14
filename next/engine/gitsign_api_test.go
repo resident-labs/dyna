@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -127,7 +128,13 @@ func TestACommitSignedThroughTheEngineVerifies(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", signer, "../cmd/dyna").CombinedOutput(); err != nil {
 		t.Fatalf("build the signer: %v\n%s", err, out)
 	}
-	sockets := api.NewSockets(api.New(boxService{Service: s}, nil), filepath.Join(dir, "rt"), uint32(os.Getuid()), nil)
+	// A unix socket path is limited to about 100 bytes, which the test's temp folder can exceed.
+	runtime, err := os.MkdirTemp("/tmp", "gs-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(runtime) })
+	sockets := api.NewSockets(api.New(boxService{Service: s}, nil), runtime, uint32(os.Getuid()), nil)
 	t.Cleanup(func() { _ = sockets.Close() })
 	if err := sockets.AddBox(record.Box, worker.Session, room); err != nil {
 		t.Fatal(err)
@@ -137,7 +144,7 @@ func TestACommitSignedThroughTheEngineVerifies(t *testing.T) {
 		t.Fatal(problem)
 	}
 	repo := filepath.Join(dir, "repo")
-	env := append(os.Environ(), "HOME="+dir, "GIT_CONFIG_NOSYSTEM=1", "DYNA_SOCKET="+filepath.Join(dir, "rt", "boxes", string(record.Box)+".sock"))
+	env := append(os.Environ(), "HOME="+dir, "GIT_CONFIG_NOSYSTEM=1", "DYNA_SOCKET="+filepath.Join(runtime, "boxes", string(record.Box)+".sock"))
 	git := func(args ...string) string {
 		t.Helper()
 		cmd := exec.Command("git", args...)
@@ -190,5 +197,26 @@ func TestACommitSignedThroughTheEngineVerifies(t *testing.T) {
 	out, err = cmd.CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "gitSigning") {
 		t.Fatalf("signing off: %v\n%s", err, out)
+	}
+}
+
+func TestGitSignRefusesARoomThatIsBeingDeleted(t *testing.T) {
+	s, room, worker, ctx := signingService(t, true)
+	good := commitPayload(signName + " <" + signEmail + ">")
+	if _, problem := s.GitSign(ctx, worker, contract.GitSignRequest{Payload: good}); problem != nil {
+		t.Fatalf("an open room: %v", problem)
+	}
+	err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE rooms SET state='deleting' WHERE id=?", room)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, problem := s.GitSign(ctx, worker, contract.GitSignRequest{Payload: good}); problem == nil || !strings.Contains(problem.Message, "being deleted") {
+		t.Fatalf("a deleting room: %v", problem)
+	}
+	if key, problem := s.boxSigningKey(ctx, room); problem != nil || key != "" {
+		t.Fatalf("a deleting room gets no key: %q %v", key, problem)
 	}
 }

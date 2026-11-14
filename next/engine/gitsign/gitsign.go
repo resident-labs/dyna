@@ -4,7 +4,6 @@
 package gitsign
 
 import (
-	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha512"
@@ -120,43 +119,97 @@ func appendString(b, s []byte) []byte {
 
 var (
 	objectID  = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
-	timestamp = regexp.MustCompile(`^[0-9]+ [+-][0-9]{4}$`)
+	person    = regexp.MustCompile(`^[^<>\n]* <[^<>\n]*> [0-9]+ [+-][0-9]{4}$`)
+	tagTypes  = map[string]bool{"commit": true, "tree": true, "blob": true, "tag": true}
+	errObject = errors.New("the engine signs only whole git commit and tag objects, as git hands them to its signer: a commit is tree, parent lines, author, committer, then a blank line and the message; a tag is object, type, tag, tagger, then a blank line and the message")
 )
 
-// Check accepts a payload only when it is a git commit or tag object whose committer or tagger is name <email>. The
-// payload is what git hands a signer: the object without its signature.
+// header is one header line of an object, with the continuation lines (each starting with a space) that follow it.
+type header struct{ key, value string }
+
+// Check accepts a payload only when it is a whole git commit or tag object, without a signature, whose committer or tagger is
+// name <email>. The payload is what git hands a signer.
 func Check(payload []byte, name, email string) error {
 	if name == "" || email == "" {
 		return errors.New("the engine has no git identity configured for this box, so it signs nothing")
 	}
-	head, _, _ := bytes.Cut(payload, []byte("\n\n"))
-	var first, role string
-	var idents []string
-	for i, line := range strings.Split(string(head), "\n") {
-		key, value, _ := strings.Cut(line, " ")
-		if i == 0 {
-			first = key
-			if !objectID.MatchString(value) || key != "tree" && key != "object" {
-				return errors.New("the engine signs only git commit and tag objects")
-			}
-			role = map[string]string{"tree": "committer", "object": "tagger"}[key]
-		}
-		if key == role && !strings.HasPrefix(line, " ") {
-			idents = append(idents, value)
-		}
+	head, _, found := strings.Cut(string(payload), "\n\n")
+	if !found {
+		return fmt.Errorf("%w (this payload has no blank line after its headers)", errObject)
 	}
-	if len(idents) != 1 {
-		return fmt.Errorf("the engine signs only git commit and tag objects with one %s line (this one has %d)", role, len(idents))
+	var headers []header
+	for _, line := range strings.Split(head, "\n") {
+		if strings.HasPrefix(line, " ") {
+			if len(headers) == 0 {
+				return fmt.Errorf("%w (it starts with a continuation line)", errObject)
+			}
+			headers[len(headers)-1].value += "\n" + line[1:]
+			continue
+		}
+		key, value, _ := strings.Cut(line, " ")
+		headers = append(headers, header{key, value})
+	}
+	next := func() header {
+		if len(headers) == 0 {
+			return header{}
+		}
+		first := headers[0]
+		headers = headers[1:]
+		return first
+	}
+	// want reads the next header, which must be key; ok reports that it was.
+	want := func(key string) (value string, ok bool) {
+		if len(headers) == 0 || headers[0].key != key {
+			return "", false
+		}
+		return next().value, true
+	}
+	var who string
+	switch headers[0].key {
+	case "tree":
+		if value, _ := want("tree"); !objectID.MatchString(value) {
+			return fmt.Errorf("%w (bad tree id)", errObject)
+		}
+		for len(headers) > 0 && headers[0].key == "parent" {
+			if value, _ := want("parent"); !objectID.MatchString(value) {
+				return fmt.Errorf("%w (bad parent id)", errObject)
+			}
+		}
+		if value, ok := want("author"); !ok || !person.MatchString(value) {
+			return fmt.Errorf("%w (it needs exactly one author line after the parents)", errObject)
+		}
+		who = "committer"
+	case "object":
+		if value, _ := want("object"); !objectID.MatchString(value) {
+			return fmt.Errorf("%w (bad object id)", errObject)
+		}
+		if value, ok := want("type"); !ok || !tagTypes[value] {
+			return fmt.Errorf("%w (a tag needs its type line)", errObject)
+		}
+		if value, ok := want("tag"); !ok || value == "" || strings.Contains(value, "\n") {
+			return fmt.Errorf("%w (a tag needs its tag line)", errObject)
+		}
+		who = "tagger"
+	default:
+		return errObject
+	}
+	identity, ok := want(who)
+	if !ok {
+		return fmt.Errorf("%w (it needs exactly one %s line in its place)", errObject, who)
 	}
 	// git trims "crud" from both ends of a name when it writes the line.
-	want := strings.Trim(name, " .,:;<>\"\\'") + " <" + email + "> "
-	rest, ok := strings.CutPrefix(idents[0], want)
-	if !ok || !timestamp.MatchString(rest) {
-		who := "committer"
-		if first == "object" {
-			who = "tagger"
+	prefix := strings.Trim(name, " .,:;<>\"\\'") + " <" + email + "> "
+	if _, found := strings.CutPrefix(identity, prefix); !found || !person.MatchString(identity) {
+		return fmt.Errorf("the engine signs only as %s <%s> and this %s is %q. Set git config user.name and user.email to the identity Dyna configured for this box, and unset GIT_COMMITTER_NAME and GIT_COMMITTER_EMAIL", name, email, who, identity)
+	}
+	if who == "committer" {
+		want("encoding")
+		for len(headers) > 0 && headers[0].key == "mergetag" {
+			next()
 		}
-		return fmt.Errorf("the engine signs only as %s <%s> and this %s is %q. Set git config user.name and user.email to the identity Dyna configured for this box, and unset GIT_COMMITTER_NAME and GIT_COMMITTER_EMAIL", name, email, who, idents[0])
+	}
+	if len(headers) > 0 {
+		return fmt.Errorf("%w (it has an unknown, repeated or misplaced %q header, or is already signed)", errObject, headers[0].key)
 	}
 	return nil
 }

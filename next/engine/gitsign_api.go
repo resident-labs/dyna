@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/gitsign"
@@ -45,6 +46,9 @@ func (s *Service) GitSign(ctx context.Context, caller contract.Principal, req co
 		return contract.GitSignResponse{}, failure(err)
 	}
 	on, err := s.store.RoomGitSigning(ctx, session.Room)
+	if errors.Is(err, store.ErrRoomNotFound) {
+		return contract.GitSignResponse{}, invalid("this room is closed or being deleted, so the engine signs nothing")
+	}
 	if err != nil {
 		return contract.GitSignResponse{}, failure(err)
 	}
@@ -84,6 +88,9 @@ func (s *Service) SigningKey(context.Context, contract.Principal, contract.Signi
 // boxSigningKey is the public key line a room's box signs with, or empty while the room's signing is off.
 func (s *Service) boxSigningKey(ctx context.Context, room contract.RoomID) (string, *contract.Error) {
 	on, err := s.store.RoomGitSigning(ctx, room)
+	if errors.Is(err, store.ErrRoomNotFound) {
+		return "", nil
+	}
 	if err != nil {
 		return "", failure(err)
 	}

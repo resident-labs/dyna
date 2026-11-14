@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
 	"slices"
 	"time"
@@ -242,10 +243,14 @@ func (s *Store) clearModelStamps() {
 	s.logged.Clear()
 }
 
-// RoomGitSigning reads whether a room's boxes sign their commits and tags.
+// RoomGitSigning reads whether a room's boxes sign their commits and tags. A room that is not open, such as one being
+// deleted, is ErrRoomNotFound: it signs nothing.
 func (s *Store) RoomGitSigning(ctx context.Context, room contract.RoomID) (bool, error) {
 	var on bool
-	err := s.Read().QueryRowContext(ctx, "SELECT git_signing FROM rooms WHERE id=?", room).Scan(&on)
+	err := s.Read().QueryRowContext(ctx, "SELECT git_signing FROM rooms WHERE id=? AND state='open'", room).Scan(&on)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrRoomNotFound
+	}
 	return on, err
 }
 
