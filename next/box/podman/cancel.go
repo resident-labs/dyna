@@ -108,7 +108,21 @@ kill -KILL -- "-$pid" 2>/dev/null || true
 end=$((SECONDS+20))
 while true; do
  status=0
- pgrep -g "$pid" >/dev/null 2>&1 || status=$?
+ members=$(pgrep -g "$pid" 2>/dev/null) || status=$?
+ # A member that took the KILL but sits in the kernel (a write waiting on the disk, or a zombie leader waiting for such a
+ # thread) runs no more user code, so it counts as gone: one stuck syscall must not fence every later command on the host.
+ if [ "$status" -eq 0 ] && [ -n "$members" ]; then
+  live=0
+  for member in $members; do
+   state=; pending=0
+   test -r "/proc/$member/status" || continue
+   while IFS=$': \t' read -r key value _; do
+    case "$key" in State) state=$value ;; ShdPnd|SigPnd) pending=$((pending | 16#$value)) ;; esac
+   done < "/proc/$member/status"
+   [ "$state" = Z ] || [ $((pending & 0x100)) -ne 0 ] || live=1
+  done
+  [ "$live" -eq 1 ] || status=1
+ fi
  case "$status" in
   0) ;;
   1)
