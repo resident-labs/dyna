@@ -363,6 +363,13 @@ func Capture(ctx context.Context, socket string, region Rect) (shot []byte, err 
 			return nil, err
 		}
 		got = got.union(changed)
+		// A cursor-only update consumes the request too. Ask again rather than
+		// waiting forever for a frame the server has not been asked to send.
+		if got.union(region) != got {
+			if err := c.request(false, region); err != nil {
+				return nil, err
+			}
+		}
 	}
 	var out bytes.Buffer
 	if err := png.Encode(&out, img); err != nil {

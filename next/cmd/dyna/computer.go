@@ -160,6 +160,7 @@ func computerCommand(socket string) *cobra.Command {
 	point(shot)
 	shot.Flags().IntVar(&req.Width, "width", 0, "A region's width")
 	shot.Flags().IntVar(&req.Height, "height", 0, "A region's height")
+	shot.Flags().StringVar(&req.Window, "window", "", "Visible client area of this X11 window ID")
 	shot.Flags().BoolVar(&req.Page, "page", false, "Chromium's whole page instead of the desktop")
 	launch := command("launch COMMAND", cobra.ExactArgs(1), computer.Launch, func(_ *cobra.Command, args []string) error { req.Command = args[0]; return nil })
 	launch.Flags().IntVar(&req.TimeoutMS, "timeout-ms", 0, "How long to wait for the new window")
@@ -168,6 +169,7 @@ func computerCommand(socket string) *cobra.Command {
 	stream := &cobra.Command{Use: "stream", Short: "Carry the desktop's VNC stream over stdin and stdout", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return computer.Stream(cmd.Context(), computer.VNCSocket, cmd.InOrStdin(), cmd.OutOrStdout())
 	}}
-	root.AddCommand(start, open, click, move, drag, scroll, key, typ, text, wait, shot, launch, stop, stream)
+	check := command("check", cobra.NoArgs, computer.Check, nil)
+	root.AddCommand(check, start, open, click, move, drag, scroll, key, typ, text, wait, shot, launch, stop, stream)
 	return root
 }
