@@ -2,6 +2,7 @@ package podman
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,8 +14,9 @@ import (
 )
 
 // A group whose only member is a zombie (here an unreaped leader; on hosts a podman leader whose last thread waits on
-// disk writeback) runs no more user code: cancellation confirms it instead of fencing every later host command.
-func TestCancelConfirmsZombieOnlyGroup(t *testing.T) {
+// disk writeback) can start nothing new: the cancel stays unconfirmed for its caller and keeps the start dir, but it
+// stops fencing every later command on the host.
+func TestCancelReleasesHostForZombieOnlyGroup(t *testing.T) {
 	cmd := exec.Command("true")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
@@ -48,13 +50,17 @@ func TestCancelConfirmsZombieOnlyGroup(t *testing.T) {
 	h := &Host{runner: confirmationRunner{}, pendingCancels: map[string]struct{}{token: {}}}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := h.cancelRemote(ctx, token); err != nil {
-		t.Fatalf("zombie-only group stayed unconfirmed: %v", err)
+	if err := h.cancelRemote(ctx, token); !errors.Is(err, errKernelRemnant) {
+		t.Fatalf("zombie-only group: want a kernel remnant, got %v", err)
 	}
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Fatalf("confirmed cancel kept its directory: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "pid")); err != nil {
+		t.Fatalf("a kernel remnant must keep its start dir: %v", err)
 	}
 	if len(h.pendingCancels) != 0 {
-		t.Fatal("confirmed cancel stayed pending")
+		t.Fatal("a kernel remnant still fences the host")
+	}
+	h.pendingCancels[token] = struct{}{}
+	if err := h.joinPending(ctx); err != nil {
+		t.Fatalf("a kernel remnant blocked a later operation: %v", err)
 	}
 }
