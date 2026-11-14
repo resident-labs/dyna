@@ -11,12 +11,17 @@ export interface EventConnection {
 const browserEvents = (url: string) => new EventSource(url);
 // EventSource hides HTTP refusals. Probe only after an error, then release the
 // response body before reconnecting the real stream from its current cursor.
-export async function recoverEventStream(url: string, version: number): Promise<Renewal | undefined> {
-  const response = await fetch(url, { credentials: "same-origin" }).catch(() => undefined);
-  if (!response) return "unavailable";
-  const result = await recoverConnect(response, version);
-  await response.body?.cancel().catch(() => {});
-  return result;
+export async function recoverEventStream(url: string, version: number, signal?: AbortSignal, timeoutMs = 10_000): Promise<Renewal | undefined> {
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), timeoutMs);
+  const bounded = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
+  try {
+    const response = await fetch(url, { credentials: "same-origin", signal: bounded }).catch(() => undefined);
+    if (!response) return "unavailable";
+    const result = await recoverConnect(response, version);
+    await response.body?.cancel().catch(() => {});
+    return result;
+  } finally { clearTimeout(timer); }
 }
 export type EventFactory = (url: string) => EventConnection;
 export type Schedule = (callback: () => void, delay: number) => () => void;
@@ -52,6 +57,7 @@ export function stream(
 ): () => void {
   const owner = !room || attentionAfter !== undefined;
   let source: EventConnection;
+  let probe: AbortController | undefined;
   let cancel = () => {};
   let closed = false;
   let delay = 500;
@@ -82,7 +88,10 @@ export function stream(
       cancel = schedule(() => {
         const resume = () => { if (!closed && !suspended && generation === currentGeneration) connect(); };
         if (factory !== browserEvents) { resume(); return; }
-        void recoverEventStream(`/v1/events?${new URLSearchParams({ ...(room && { room }), after: String(after()) })}`, sentVersion).then(result => {
+        probe = new AbortController();
+        void recoverEventStream(`/v1/events?${new URLSearchParams({ ...(room && { room }), after: String(after()) })}`, sentVersion, probe.signal).then(result => {
+          if (closed || suspended || generation !== currentGeneration) return;
+          probe = undefined;
           if (result === "ended") { window.dispatchEvent(new globalThis.Event("connect-ended")); return; }
           resume();
         });
@@ -132,6 +141,7 @@ export function stream(
     if (closed || suspended) return;
     suspended = true;
     generation++;
+    probe?.abort();
     cancel();
     source.close();
   }
@@ -145,6 +155,7 @@ export function stream(
   connect();
   return () => {
     closed = true;
+    probe?.abort();
     cancel();
     source.close();
     lifecycle?.removeEventListener("pagehide", hide);

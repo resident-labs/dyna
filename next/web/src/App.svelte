@@ -722,8 +722,7 @@
     const renewal = (event: Event) => {
       const state = (event as CustomEvent<string>).detail;
       if (state === "ended") revoked = true;
-      else if (state === "unavailable") blocked = "sign-in-unavailable";
-      else if (blocked === "sign-in-unavailable") { blocked = undefined; connect(); }
+      else if (state === "ready" && blocked === "sign-in-unavailable") { blocked = undefined; connect(); }
     };
     window.addEventListener("connect-renewal", renewal);
     window.addEventListener("connect-ended", ended);

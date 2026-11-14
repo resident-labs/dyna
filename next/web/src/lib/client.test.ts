@@ -145,3 +145,31 @@ test("background renewal reports outages, waiting and recovery distinctly", asyn
     else Reflect.deleteProperty(globalThis, "window");
   }
 });
+
+test("a stalled stream probe times out so reconnect can proceed", async () => {
+  const original = globalThis.fetch;
+  let aborted = false;
+  globalThis.fetch = async (_url, options) => new Promise((_resolve, reject) => {
+    options?.signal?.addEventListener("abort", () => { aborted = true; reject(new Error("aborted")); }, { once: true });
+  });
+  try {
+    assert.equal(await recoverEventStream("/v1/events", connectVersion(), undefined, 5), "unavailable");
+    assert.equal(aborted, true);
+  } finally { globalThis.fetch = original; }
+});
+
+test("background renewal failure leaves working API access usable without blocking the page", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async path => path === "/api/connect/renew" ? Response.json({}, { status: 503 }) : Response.json({ rooms: [] });
+  try {
+    await renewConnect();
+    assert.deepEqual(await call("room.list", {}), { rooms: [] });
+    // The app only enters the outage block from a failed real request. Its
+    // background event listener may sign out or clear an existing outage.
+    const { readFileSync } = await import("node:fs");
+    const app = readFileSync(new URL("../App.svelte", import.meta.url), "utf8");
+    const listener = app.slice(app.indexOf("const renewal = (event:"), app.indexOf('window.addEventListener("connect-renewal"'));
+    assert.doesNotMatch(listener, /blocked\s*=\s*"sign-in-unavailable"/);
+    assert.match(listener, /state === "ended"/);
+  } finally { globalThis.fetch = original; }
+});
