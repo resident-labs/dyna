@@ -35,7 +35,7 @@ func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
 	for _, item := range BuiltIn() {
 		byName[item.Name] = item
 	}
-	if extend := byName["dyna-extend"]; len(byName) != 10 || !strings.HasPrefix(extend.Description, "Use when sessions need a skill, Pi package or MCP server") || !extend.BuiltIn || byName["dyna-discord"].Name == "" {
+	if extend := byName["dyna-extend"]; len(byName) != 11 || !strings.HasPrefix(extend.Description, "Use when sessions need a skill, Pi package or MCP server") || !extend.BuiltIn || byName["dyna-discord"].Name == "" {
 		t.Fatalf("%+v", byName)
 	}
 	if !IsBuiltIn("dyna-extend") || IsBuiltIn("other") {
@@ -307,7 +307,7 @@ func TestAdminSkill(t *testing.T) {
 }
 
 func TestRootOnlySkills(t *testing.T) {
-	root := map[string]bool{"dyna-admin": true, "dyna-diagnose": true, "dyna-local-proxy": true, "dyna-nodes": true, "dyna-services": true}
+	root := map[string]bool{"dyna-admin": true, "dyna-diagnose": true, "dyna-local-proxy": true, "dyna-nodes": true, "dyna-rules": true, "dyna-services": true}
 	total := 0
 	for _, item := range BuiltIn() {
 		data, err := builtIn.ReadFile(item.Name + "/" + File)
@@ -323,7 +323,7 @@ func TestRootOnlySkills(t *testing.T) {
 		}
 		total += len(item.Description)
 	}
-	if total > 1700 {
+	if total > 1850 {
 		t.Errorf("the descriptions take %d characters", total)
 	}
 }
