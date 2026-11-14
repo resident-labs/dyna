@@ -117,7 +117,7 @@ func (s *Service) RoomSet(ctx context.Context, caller contract.Principal, req co
 		}
 	}
 	if req.Advisor != nil {
-		if problem := s.setAdvisor(ctx, caller, req.Room, *req.Advisor); problem != nil {
+		if problem := s.setAdvisor(ctx, req.Room, *req.Advisor); problem != nil {
 			return contract.RoomSetResponse{}, problem
 		}
 	}

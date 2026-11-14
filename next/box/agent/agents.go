@@ -180,6 +180,9 @@ func (a *Agents) run(ctx context.Context, turn contract.AgentTurn, name, slots c
 		}
 	}()
 	prompt := turn.Prompt
+	if ended.Fresh && turn.FreshPrompt != "" {
+		prompt = turn.FreshPrompt
+	}
 	if turn.Orient && a.config.Orient != nil {
 		prompt = a.config.Orient(ctx) + "\n\n" + prompt
 	}

@@ -25,6 +25,8 @@ type AgentTurn struct {
 	// Persist keeps the conversation between turns of the name, in the box and in the engine's transcript copy. Without it each turn is new.
 	Persist bool   `json:"persist,omitempty"`
 	Prompt  string `json:"prompt"`
+	// FreshPrompt is what a conversation that begins with this turn reads instead of Prompt, which assumes the earlier turns. Empty keeps Prompt.
+	FreshPrompt string `json:"freshPrompt,omitempty"`
 	// Orient puts the parent's session file and the state of its working repository ahead of the prompt.
 	Orient bool `json:"orient,omitempty"`
 	// Turn and Delivery are the parent's running turn and one of its deliveries, which file the agent's transcript under that turn.

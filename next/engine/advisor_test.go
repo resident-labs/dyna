@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -12,11 +11,12 @@ import (
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/live"
+	"github.com/resident-labs/dyna/engine/prompt"
 	"github.com/resident-labs/dyna/engine/store"
-	"github.com/resident-labs/dyna/room"
 )
 
-func TestBoxHelloGivesRootAndAdvisorTheirSections(t *testing.T) {
+func TestBoxHelloGivesRootTheAdvisorSectionWhenTheRoomHasOne(t *testing.T) {
 	s, room, root, ctx := setupRoot(t)
 	s.SetLayout(box.Layout{Data: "/data", HostData: "/hostdata"})
 	if err := s.store.SetEngineHost(ctx, "host", true); err != nil {
@@ -26,7 +26,7 @@ func TestBoxHelloGivesRootAndAdvisorTheirSections(t *testing.T) {
 	if problem != nil || plain.Advisor || strings.Contains(plain.Instructions, "# Advisor") {
 		t.Fatalf("root before an advisor: %v %+v", problem, plain.Advisor)
 	}
-	advisor := setAdvisorProfile(t, s, ctx, room, "test")
+	setAdvisorProfile(t, s, ctx, room, "test")
 	passLifecycle(t, s, ctx)
 	hello, problem := s.BoxHello(ctx, boxCaller(root), contract.BoxHelloRequest{})
 	if problem != nil || !hello.Advisor {
@@ -36,86 +36,45 @@ func TestBoxHelloGivesRootAndAdvisorTheirSections(t *testing.T) {
 	if hello.Instructions != want {
 		t.Fatalf("root instructions:\n%s\nwant:\n%s", hello.Instructions, want)
 	}
-	adviser, problem := s.BoxHello(ctx, boxCaller(advisor), contract.BoxHelloRequest{})
-	if problem != nil || adviser.Advisor || adviser.Root {
-		t.Fatalf("advisor hello: %v %+v", problem, adviser)
-	}
-	want = renderedHead(t, "advisor") + fmt.Sprintf("You are advisor, session %s, in room room (ID %s). Your parent is root.", advisor, room) + sessionBox
-	if adviser.Instructions != want {
-		t.Fatalf("advisor instructions:\n%s\nwant:\n%s", adviser.Instructions, want)
+	setAdvisorProfile(t, s, ctx, room, "")
+	if hello, problem := s.BoxHello(ctx, boxCaller(root), contract.BoxHelloRequest{}); problem != nil || hello.Advisor {
+		t.Fatalf("root after none: %v %+v", problem, hello.Advisor)
 	}
 }
 
-// setAdvisorProfile is the owner's room advisor setting, and returns the advisor session it leaves, or "" for none.
-func setAdvisorProfile(t *testing.T, s *Service, ctx context.Context, room contract.RoomID, profile contract.ProfileName) contract.SessionID {
+// setAdvisorProfile is the owner's room advisor setting.
+func setAdvisorProfile(t *testing.T, s *Service, ctx context.Context, room contract.RoomID, profile contract.ProfileName) {
 	t.Helper()
 	if _, e := s.RoomSet(ctx, ownerCaller, contract.RoomSetRequest{Room: room, Advisor: &profile}); e != nil {
 		t.Fatal(e)
 	}
-	advisor, err := s.store.RoomAdvisor(ctx, room)
-	if errors.Is(err, store.ErrNotFound) {
-		return ""
+	got, err := s.store.RoomAdvisorProfile(ctx, room)
+	if err != nil || got != profile {
+		t.Fatalf("the room's advisor is %q (%v), want %q", got, err, profile)
 	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	return advisor.ID
 }
 
-func TestAdvisorSettingStartsSwitchesAndClosesTheSession(t *testing.T) {
+func TestOnlyTheOwnerSetsTheAdvisorAndItStartsNoSession(t *testing.T) {
 	r := newGoalRig(t)
 	if _, e := r.s.RoomSet(r.ctx, asSession(r.root), contract.RoomSetRequest{Room: r.room, Advisor: new(contract.ProfileName)}); e == nil {
 		t.Fatal("root set the advisor through room set")
 	}
-	advisor := setAdvisorProfile(t, r.s, r.ctx, r.room, "test")
-	if advisor == "" {
-		t.Fatal("setting a profile started no advisor")
+	setAdvisorProfile(t, r.s, r.ctx, r.room, "test")
+	var sessions int
+	if err := r.st.Read().QueryRowContext(r.ctx, "SELECT COUNT(*) FROM sessions WHERE advisor=1").Scan(&sessions); err != nil || sessions != 0 {
+		t.Fatalf("%d advisor sessions: %v", sessions, err)
 	}
-	var parent, profile string
-	if err := r.st.Read().QueryRowContext(r.ctx, "SELECT parent,profile FROM sessions WHERE id=?", advisor).Scan(&parent, &profile); err != nil || parent != string(r.root) || profile != "test" {
-		t.Fatalf("advisor under %q on %q: %v", parent, profile, err)
-	}
-	if again := setAdvisorProfile(t, r.s, r.ctx, r.room, "test"); again != advisor {
-		t.Fatalf("setting the same profile made %s, want %s", again, advisor)
-	}
-	if same := setAdvisorProfile(t, r.s, r.ctx, r.room, "deep"); same != advisor {
-		t.Fatalf("a new profile made %s, want the same session %s", same, advisor)
-	}
-	if err := r.st.Read().QueryRowContext(r.ctx, "SELECT profile FROM sessions WHERE id=?", advisor).Scan(&profile); err != nil || profile != "deep" {
-		t.Fatalf("profile %q: %v", profile, err)
-	}
-	if none := setAdvisorProfile(t, r.s, r.ctx, r.room, ""); none != "" {
-		t.Fatalf("none left advisor %s", none)
-	}
-	hello, e := r.s.BoxHello(r.ctx, boxCaller(r.root), contract.BoxHelloRequest{})
-	if e != nil || hello.Advisor || strings.Contains(hello.Instructions, "# Advisor\n\nYou have an advisor") {
-		t.Fatalf("root after none: %v advisor=%v", e, hello.Advisor)
+	rooms, e := r.s.RoomList(r.ctx, ownerCaller, contract.RoomListRequest{})
+	if e != nil || len(rooms.Rooms) != 1 || rooms.Rooms[0].Advisor != "test" {
+		t.Fatalf("room list: %v %+v", e, rooms)
 	}
 }
 
-func TestAdvisorHoldsNothingAndStartsNothing(t *testing.T) {
-	r := newGoalRig(t)
-	advisor := setAdvisorProfile(t, r.s, r.ctx, r.room, "test")
-	if _, e := r.s.SessionStart(r.ctx, asSession(advisor), contract.SessionStartRequest{Room: r.room, Name: "helper", Profile: "test"}); e == nil || !strings.Contains(e.Message, "starts no sessions") {
-		t.Fatalf("the advisor's session start: %v", e)
-	}
-	if _, e := r.s.SessionStart(r.ctx, asSession(r.root), contract.SessionStartRequest{Room: r.room, Name: "under", Profile: "test", Parent: advisor}); e == nil {
-		t.Fatal("a session under the advisor started")
-	}
-	for name, caller := range map[string]contract.Principal{"advisor": asSession(advisor), "root": asSession(r.root)} {
-		if _, e := r.s.GoalSet(r.ctx, caller, contract.GoalSetRequest{Session: advisor, Text: "work", DoneWhen: "done"}); e == nil || !strings.Contains(e.Message, "holds no goals") {
-			t.Fatalf("goal set for the advisor by %s: %v", name, e)
-		}
-	}
-	if _, e := r.s.GoalSet(r.ctx, asSession(advisor), contract.GoalSetRequest{Text: "work", DoneWhen: "done"}); e == nil || !strings.Contains(e.Message, "holds no goals") {
-		t.Fatalf("the advisor's own goal: %v", e)
-	}
-}
-
-// advisorRig is a room with an advisor, and root's call to it running in the background.
+// advisorRig is a room with an advisor whose root runs a turn, and a box channel standing in for root's box.
 type advisorRig struct {
 	*goalRig
-	advisor contract.SessionID
+	channel *live.Channel
+	turnID  contract.TurnID
 	answer  chan advisorResult
 }
 
@@ -126,37 +85,50 @@ type advisorResult struct {
 
 func newAdvisorRig(t *testing.T) *advisorRig {
 	r := &advisorRig{goalRig: newGoalRig(t), answer: make(chan advisorResult, 1)}
-	r.advisor = setAdvisorProfile(t, r.s, r.ctx, r.room, "test")
-	r.exec("UPDATE boxes SET state='ready',want='run'")
+	setAdvisorProfile(t, r.s, r.ctx, r.room, "test")
+	handle, _ := r.s.live.CreateSession(r.root)
+	handle.Lock()
+	r.channel = live.NewChannel(func() {})
+	handle.SetChannel(r.channel)
+	handle.Unlock()
+	r.newRootTurn()
 	return r
 }
 
-// ask is root's call, with a prompt, and waits until the advisor has the post.
-func (r *advisorRig) ask(ctx context.Context) {
-	go func() {
-		response, problem := r.s.Advisor(ctx, asSession(r.root), contract.AdvisorRequest{Prompt: "Which cache?"})
-		r.answer <- advisorResult{response, problem}
-	}()
-	for i := 0; i < 500; i++ {
-		var posts int
-		if err := r.st.Read().QueryRowContext(r.ctx, "SELECT COUNT(*) FROM deliveries WHERE to_kind='session' AND to_id=?", r.advisor).Scan(&posts); err != nil {
-			r.t.Fatal(err)
-		}
-		if posts > 0 {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+// newRootTurn ends root's running turn, if any, and starts another over an owner post.
+func (r *advisorRig) newRootTurn() {
+	r.t.Helper()
+	if r.turnID != "" {
+		r.end(r.root, r.turnID, contract.TurnCompleted, "", "done")
 	}
-	r.t.Fatal("the advisor was never posted to")
+	if _, problem := r.s.Post(r.ctx, ownerCaller, contract.PostRequest{Room: r.room, Home: contract.Conversation{Kind: contract.ConversationDM, Session: r.root}, Text: "work"}); problem != nil {
+		r.t.Fatal(problem)
+	}
+	r.turnID = r.begin(r.root)
 }
 
-func (r *advisorRig) rootDeliveries() int {
+// ask is root's call with a tool call ID, and returns what the box is asked.
+func (r *advisorRig) ask(ctx context.Context, call string) contract.AgentTurn {
 	r.t.Helper()
-	var n int
-	if err := r.st.Read().QueryRowContext(r.ctx, "SELECT COUNT(*) FROM deliveries WHERE to_kind='session' AND to_id=?", r.root).Scan(&n); err != nil {
-		r.t.Fatal(err)
+	go func() {
+		response, problem := r.s.Advisor(ctx, asSession(r.root), contract.AdvisorRequest{Prompt: "Which cache?", ToolCallID: call})
+		r.answer <- advisorResult{response, problem}
+	}()
+	select {
+	case message := <-r.channel.Agents():
+		return message.Body.(contract.AgentTurn)
+	case <-time.After(5 * time.Second):
+		r.t.Fatal("the box was never asked")
+		return contract.AgentTurn{}
 	}
-	return n
+}
+
+// boxEnds is the box's answer for the agent.
+func (r *advisorRig) boxEnds(id contract.AgentID, outcome contract.TurnOutcome, final string) {
+	r.t.Helper()
+	if _, e := r.s.AgentEnded(r.ctx, asSession(r.root), contract.AgentEndedRequest{ID: id, Outcome: outcome, Final: final, Usage: contract.Usage{Model: "m", InputTokens: 5}}); e != nil {
+		r.t.Fatal(e)
+	}
 }
 
 func (r *advisorRig) result() advisorResult {
@@ -170,75 +142,138 @@ func (r *advisorRig) result() advisorResult {
 	}
 }
 
-func TestAdvisorReturnsTheFinalTextOfItsTurn(t *testing.T) {
+func (r *advisorRig) agentState(id contract.AgentID) string {
+	r.t.Helper()
+	agent, err := r.st.Agent(r.ctx, id)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return agent.State
+}
+
+func TestAdvisorAsksAnInBoxAgentAndReturnsItsFinalText(t *testing.T) {
 	r := newAdvisorRig(t)
-	before := r.rootDeliveries()
-	r.ask(r.ctx)
-	var text, context string
-	if err := r.st.Read().QueryRowContext(r.ctx, "SELECT json_extract(CAST(body AS TEXT),'$.text'),coalesce(json_extract(CAST(body AS TEXT),'$.context'),'') FROM events e JOIN sessions s ON s.id=e.from_id WHERE e.type='post.created' AND s.name='root' ORDER BY e.seq DESC LIMIT 1").Scan(&text, &context); err != nil || text != "Which cache?" || context == "" {
-		t.Fatalf("the feed post is %q with context %q (%v): want the bare prompt, and the delta kept for the advisor", text, context, err)
+	turn := r.ask(r.ctx, "call_1")
+	if turn.ID != "call_1" || turn.Name != "advisor" || !turn.Persist || !turn.Orient || turn.Instructions != prompt.AdvisorInstructions || turn.Profile.Name != "test" {
+		t.Fatalf("the box was asked %+v", turn)
 	}
-	body, err := room.RenderDelivery(contract.PostCreated{Text: text, Context: context})
-	if err != nil || !strings.HasPrefix(body, context) || !strings.HasSuffix(body, "Which cache?") {
-		t.Fatalf("the advisor reads %q (%v)", body, err)
+	if !slices.Equal(turn.Tools, []string{"read", "grep", "find", "ls"}) {
+		t.Fatalf("tools %v", turn.Tools)
 	}
-	r.turn(r.advisor, "Use the shared cache.")
+	if turn.Turn != r.turnID || turn.Delivery == 0 || !strings.HasSuffix(turn.Prompt, "Which cache?") || !strings.Contains(turn.Prompt, "Root's work since your last answer") || turn.FreshPrompt != "" {
+		t.Fatalf("turn and prompt: %+v", turn)
+	}
+	if _, e := r.s.AgentStarted(r.ctx, asSession(r.root), contract.AgentStartedRequest{ID: "call_1", Transcript: "agents/advisor/a.jsonl", Offset: 0}); e != nil {
+		t.Fatal(e)
+	}
+	r.boxEnds("call_1", contract.TurnCompleted, "Use the shared cache.")
 	got := r.result()
 	if got.problem != nil || got.response.Answer != "Use the shared cache." {
 		t.Fatalf("answer: %+v", got)
 	}
-	var feed int
-	if err := r.st.Read().QueryRowContext(r.ctx, "SELECT COUNT(*) FROM events e JOIN sessions s ON s.id=e.from_id WHERE e.type='post.created' AND e.from_kind='session' AND s.name IN ('root','advisor') AND e.home IS NULL").Scan(&feed); err != nil {
-		t.Fatal(err)
+	if state := r.agentState("call_1"); state != "completed" {
+		t.Fatalf("the agent record is %q", state)
 	}
-	if feed != 0 {
-		t.Fatalf("%d posts from root or the advisor reached the feed, want none", feed)
+	var feed, sessions int
+	if err := r.st.Read().QueryRowContext(r.ctx, "SELECT COUNT(*) FROM events WHERE type='post.created' AND from_kind='session' AND home IS NULL").Scan(&feed); err != nil || feed != 0 {
+		t.Fatalf("%d posts reached the feed: %v", feed, err)
 	}
-	if after := r.rootDeliveries(); after != before {
-		t.Fatalf("root was also sent the answer as an input: %d deliveries, had %d", after, before)
+	if err := r.st.Read().QueryRowContext(r.ctx, "SELECT COUNT(*) FROM sessions WHERE advisor=1").Scan(&sessions); err != nil || sessions != 0 {
+		t.Fatalf("%d advisor sessions", sessions)
 	}
 }
 
-func TestAdvisorAnswersAnyOutcome(t *testing.T) {
+func TestASecondCallStartsItsRecordAfterTheFirstAndCarriesAFreshPrompt(t *testing.T) {
 	r := newAdvisorRig(t)
-	r.ask(r.ctx)
-	r.end(r.advisor, r.begin(r.advisor), contract.TurnFailed, "", "")
-	got := r.result()
-	if got.problem != nil || !strings.Contains(got.response.Answer, "failed") {
-		t.Fatalf("answer to a failed turn: %+v", got)
+	first := r.ask(r.ctx, "call_1")
+	r.boxEnds(first.ID, contract.TurnCompleted, "one")
+	r.result()
+	r.newRootTurn()
+	second := r.ask(r.ctx, "call_2")
+	if second.FreshPrompt == "" || !strings.HasSuffix(second.FreshPrompt, "Which cache?") || second.Turn != r.turnID {
+		t.Fatalf("second call %+v", second)
+	}
+	r.boxEnds(second.ID, contract.TurnCompleted, "two")
+	if got := r.result(); got.response.Answer != "two" {
+		t.Fatalf("answer %+v", got)
 	}
 }
 
-func TestAdvisorTimeoutLeavesTheReplyToArriveLater(t *testing.T) {
+func TestTheOwnersStopReturnsThePartialText(t *testing.T) {
 	r := newAdvisorRig(t)
-	was := advisorTimeout
-	advisorTimeout = 100 * time.Millisecond
-	t.Cleanup(func() { advisorTimeout = was })
-	before := r.rootDeliveries()
-	r.ask(r.ctx)
-	got := r.result()
-	if got.problem == nil || !strings.Contains(got.problem.Message, "did not answer") || !strings.Contains(got.problem.Message, "arrive as an input") {
-		t.Fatalf("timeout: %+v", got)
+	turn := r.ask(r.ctx, "call_1")
+	if _, e := r.s.AgentStop(r.ctx, asSession(r.root), contract.AgentStopRequest{Session: r.root, ID: "call_1"}); e != nil {
+		t.Fatal(e)
 	}
-	r.turn(r.advisor, "Late advice.")
-	if after := r.rootDeliveries(); after != before+1 {
-		t.Fatalf("root has %d deliveries, want the late reply on top of %d", after, before)
+	select {
+	case message := <-r.channel.Agents():
+		if stop, ok := message.Body.(contract.AgentStop); !ok || stop.ID != turn.ID {
+			t.Fatalf("the box was sent %+v", message.Body)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the box was never told to stop")
+	}
+	r.boxEnds("call_1", contract.TurnStopped, "I had found the cache config")
+	got := r.result()
+	if got.problem != nil || !strings.HasPrefix(got.response.Answer, "the owner stopped the advisor") || !strings.Contains(got.response.Answer, "I had found the cache config") {
+		t.Fatalf("answer %+v", got)
+	}
+	if _, e := r.s.AgentStop(r.ctx, ownerCaller, contract.AgentStopRequest{Session: r.root, ID: "call_1"}); e == nil {
+		t.Fatal("a stopped agent was stopped again")
 	}
 }
 
-func TestAdvisorCallEndsWhenRootsTurnStops(t *testing.T) {
+func TestRootsStoppedTurnStopsTheAdvisorToo(t *testing.T) {
 	r := newAdvisorRig(t)
 	ctx, stop := context.WithCancel(r.ctx)
-	before := r.rootDeliveries()
-	r.ask(ctx)
+	r.ask(ctx, "call_1")
 	stop()
-	got := r.result()
-	if got.problem == nil || !strings.Contains(got.problem.Message, "cancelled") {
-		t.Fatalf("cancel: %+v", got)
+	if _, ok := (<-r.channel.Agents()).Body.(contract.AgentStop); !ok {
+		t.Fatal("the box was not told to stop")
 	}
-	r.turn(r.advisor, "Too late.")
-	if after := r.rootDeliveries(); after != before+1 {
-		t.Fatalf("root has %d deliveries, want the reply on top of %d", after, before)
+	r.boxEnds("call_1", contract.TurnStopped, "half")
+	got := r.result()
+	if got.problem != nil || !strings.HasPrefix(got.response.Answer, "your turn was stopped") || !strings.Contains(got.response.Answer, "half") {
+		t.Fatalf("answer %+v", got)
+	}
+}
+
+func TestAnAdvisorThatDoesNotAnswerTimesOutAndIsStopped(t *testing.T) {
+	r := newAdvisorRig(t)
+	timeout, wait := agentTimeout, agentStopWait
+	agentTimeout, agentStopWait = 50*time.Millisecond, 50*time.Millisecond
+	t.Cleanup(func() { agentTimeout, agentStopWait = timeout, wait })
+	r.ask(r.ctx, "call_1")
+	got := r.result()
+	if got.problem != nil || !strings.Contains(got.response.Answer, "did not answer within") {
+		t.Fatalf("answer %+v", got)
+	}
+	if state := r.agentState("call_1"); state != "stopped" {
+		t.Fatalf("the agent record is %q", state)
+	}
+}
+
+func TestAnAdvisorTurnThatEndedWithoutTextSaysSo(t *testing.T) {
+	r := newAdvisorRig(t)
+	r.ask(r.ctx, "call_1")
+	r.boxEnds("call_1", contract.TurnFailed, "")
+	if got := r.result(); !strings.Contains(got.response.Answer, "failed") {
+		t.Fatalf("answer %+v", got)
+	}
+}
+
+func TestOnlyTheSessionThatAskedMayAnswerAnAgent(t *testing.T) {
+	r := newAdvisorRig(t)
+	r.ask(r.ctx, "call_1")
+	if _, e := r.s.AgentEnded(r.ctx, asSession(r.lead), contract.AgentEndedRequest{ID: "call_1", Outcome: contract.TurnCompleted, Final: "forged"}); e == nil {
+		t.Fatal("another session ended the agent")
+	}
+	if _, e := r.s.AgentStarted(r.ctx, ownerCaller, contract.AgentStartedRequest{ID: "call_1", Transcript: "x.jsonl"}); e == nil {
+		t.Fatal("the owner reported for a box")
+	}
+	r.boxEnds("call_1", contract.TurnCompleted, "real")
+	if got := r.result(); got.response.Answer != "real" {
+		t.Fatalf("answer %+v", got)
 	}
 }
 
@@ -250,47 +285,77 @@ func TestAdvisorToolIsForRootWithAnAdvisor(t *testing.T) {
 	if _, e := r.s.Advisor(r.ctx, asSession(r.lead), contract.AdvisorRequest{Prompt: "hi"}); e == nil || !strings.Contains(e.Message, "only root") {
 		t.Fatalf("a lead: %v", e)
 	}
+	setAdvisorProfile(t, r.s, r.ctx, r.room, "test")
 	if _, e := r.s.Advisor(r.ctx, asSession(r.root), contract.AdvisorRequest{}); e == nil || !strings.Contains(e.Message, "prompt is required") {
 		t.Fatalf("no prompt: %v", e)
 	}
-}
-
-func TestAdvisorReadsRootsTranscript(t *testing.T) {
-	r := newAdvisorRig(t)
-	if _, e := r.s.TranscriptDigest(r.ctx, asSession(r.advisor), contract.TranscriptDigestRequest{Session: string(r.root)}); e != nil {
-		t.Fatalf("the advisor reads root's transcript: %v", e)
+	if _, e := r.s.Advisor(r.ctx, asSession(r.root), contract.AdvisorRequest{Prompt: "hi"}); e == nil || !strings.Contains(e.Message, "no running turn") {
+		t.Fatalf("no turn: %v", e)
 	}
 }
 
-func TestRootKeepsAdvisorToolAndSectionWhileItsBoxIsStopped(t *testing.T) {
-	s, room, root, ctx := setupRoot(t)
-	advisor := setAdvisorProfile(t, s, ctx, room, "test")
-	passLifecycle(t, s, ctx)
-	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "UPDATE boxes SET state='stopped',want='stop' WHERE session=?", advisor)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	hello, problem := s.BoxHello(ctx, boxCaller(root), contract.BoxHelloRequest{})
-	if problem != nil || !hello.Advisor || !strings.Contains(hello.Instructions, "# Advisor\n\nYou have an advisor") {
-		t.Fatalf("root with a stopped advisor: %v advisor=%v", problem, hello.Advisor)
-	}
-}
-
-func TestIdleSweepsNeverCloseTheAdvisor(t *testing.T) {
-	r := newAdvisorRig(t)
-	plain, e := r.s.SessionStart(r.ctx, asSession(r.root), contract.SessionStartRequest{Room: r.room, Name: "plain", Profile: "test"})
-	if e != nil {
-		t.Fatal(e)
-	}
-	r.exec("UPDATE boxes SET state='stopped',want='stop',updated_at=1")
-	ids, err := r.st.DormantCloseCandidates(r.ctx, time.Now())
+// An agent's steps lie in files under agents/ in root's transcript folder. They show for the agent and are not among root's own.
+func TestAnAgentsStepsShowForItAndNotAmongTheSessionsOwn(t *testing.T) {
+	s, ctx, root := transcriptCaller(t)
+	session, err := s.store.Session(ctx, root.Session)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(ids, plain.Session) || slices.Contains(ids, r.advisor) {
-		t.Fatalf("candidates %v: want the plain child %s and not the advisor %s", ids, plain.Session, r.advisor)
+	wake, problem := s.Post(ctx, ownerCaller, contract.PostRequest{Room: session.Room, Home: contract.Conversation{Kind: contract.ConversationDM, Session: root.Session}, Text: "wake"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if err := s.store.SeedEndedTurn(ctx, session.Room, root.Session, "turn_a", mustEventID(t, s, ctx, wake.Seq), wake.Seq, time.Unix(1, 0), time.Unix(2, 0)); err != nil {
+		t.Fatal(err)
+	}
+	user := fmt.Sprintf(`{"type":"message","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","deliveryId":"%d"}}`+"\n", wake.Seq)
+	call := func(id, command string) string {
+		return fmt.Sprintf(`{"type":"message","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":%q,"name":"bash","arguments":{"command":%q}}]}}`+"\n", id, command)
+	}
+	if _, e := appendTranscript(s, ctx, root, "a.jsonl", 0, user+call("own", "root-step")); e != nil {
+		t.Fatal(e)
+	}
+	// Two advisor calls in the one root turn, in one file.
+	first := user + call("a1", "advisor-first")
+	second := user + call("a2", "advisor-second")
+	if _, e := appendTranscript(s, ctx, root, "agents/advisor/b.jsonl", 0, first+second); e != nil {
+		t.Fatal(e)
+	}
+	for id, offset := range map[contract.AgentID]int64{"call_1": 0, "call_2": int64(len(first))} {
+		if err := s.store.StartAgent(ctx, store.Agent{ID: id, Session: root.Session, Turn: "turn_a", Name: "advisor", Started: time.Unix(1, 0)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.store.AgentFile(ctx, root.Session, id, "agents/advisor/b.jsonl", offset); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commands := func(req contract.TranscriptReadRequest) string {
+		read, e := s.TranscriptRead(ctx, root, req)
+		if e != nil {
+			t.Fatal(e)
+		}
+		var out string
+		for _, turn := range read.Turns {
+			for _, item := range turn.Items {
+				out += item.Arguments + "\n"
+			}
+		}
+		return out
+	}
+	own := commands(contract.TranscriptReadRequest{Session: root.Session})
+	if !strings.Contains(own, "root-step") || strings.Contains(own, "advisor") {
+		t.Fatalf("the session's own steps:\n%s", own)
+	}
+	one := commands(contract.TranscriptReadRequest{Session: root.Session, Agent: "call_1"})
+	if !strings.Contains(one, "advisor-first") || strings.Contains(one, "advisor-second") || strings.Contains(one, "root-step") {
+		t.Fatalf("the first call's steps:\n%s", one)
+	}
+	two := commands(contract.TranscriptReadRequest{Session: root.Session, Agent: "call_2"})
+	if !strings.Contains(two, "advisor-second") || strings.Contains(two, "advisor-first") {
+		t.Fatalf("the second call's steps:\n%s", two)
+	}
+	if _, e := s.TranscriptRead(ctx, root, contract.TranscriptReadRequest{Session: root.Session, Agent: "nonesuch"}); e == nil {
+		t.Fatal("an unknown agent was read")
 	}
 }
 
@@ -401,27 +466,6 @@ func TestAdvisorDeltaReadsAllOfALongTurn(t *testing.T) {
 	}
 	if strings.Contains(later, "step-569-end") || !strings.Contains(later, "570 earlier steps omitted; transcript read has them") {
 		t.Fatalf("the step cap did not hold or did not say so:\n%s", later)
-	}
-}
-
-func TestAdvisorDeltaStartsAtRootsLastConsultationNotTheAdvisorsLastTurn(t *testing.T) {
-	r := newAdvisorRig(t)
-	r.ask(r.ctx)
-	r.turn(r.advisor, "first answer")
-	r.result()
-	consulted, err := r.st.LastConsultEnd(r.ctx, r.advisor, r.root)
-	if err != nil || consulted.IsZero() {
-		t.Fatalf("after root's consultation: %v, %v", consulted, err)
-	}
-	// Root works on, then the owner talks to the advisor, whose turn ends later than root's last consultation.
-	time.Sleep(20 * time.Millisecond)
-	if _, problem := r.s.Post(r.ctx, ownerCaller, contract.PostRequest{Room: r.room, Home: contract.Conversation{Kind: contract.ConversationDM, Session: r.advisor}, Text: "How is it going?"}); problem != nil {
-		t.Fatal(problem)
-	}
-	r.turn(r.advisor, "owner answer")
-	got, err := r.st.LastConsultEnd(r.ctx, r.advisor, r.root)
-	if err != nil || !got.Equal(consulted) {
-		t.Fatalf("the owner's DM moved the watermark: %v, want %v (%v)", got, consulted, err)
 	}
 }
 

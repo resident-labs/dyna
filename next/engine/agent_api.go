@@ -28,6 +28,7 @@ type agentSpec struct {
 	Instructions string
 	Persist      bool
 	Orient       bool
+	FreshPrompt  string
 	Prompt       string
 }
 
@@ -117,7 +118,7 @@ func (s *Service) askAgent(ctx context.Context, session store.Session, spec agen
 		}
 		return agentResult{AgentEndedRequest: ended, Cause: cause}, nil
 	}
-	turn := contract.AgentTurn{ID: spec.ID, Name: spec.Name, Profile: spec.Profile, Tools: contract.AgentReadOnlyTools, Instructions: spec.Instructions, Persist: spec.Persist, Prompt: spec.Prompt, Orient: spec.Orient, Turn: session.Turn, Delivery: delivery}
+	turn := contract.AgentTurn{ID: spec.ID, Name: spec.Name, Profile: spec.Profile, Tools: contract.AgentReadOnlyTools, Instructions: spec.Instructions, Persist: spec.Persist, Prompt: spec.Prompt, FreshPrompt: spec.FreshPrompt, Orient: spec.Orient, Turn: session.Turn, Delivery: delivery}
 	if !s.sendAgent(session.ID, turn) {
 		_, err := finish(contract.AgentEndedRequest{ID: spec.ID, Outcome: contract.TurnFailed}, "")
 		return agentResult{}, errors.Join(errors.New("the session's box is not connected"), err)

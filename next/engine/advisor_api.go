@@ -2,23 +2,21 @@ package engine
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
-	"github.com/resident-labs/dyna/engine/store"
+	"github.com/resident-labs/dyna/engine/prompt"
 	"github.com/resident-labs/dyna/engine/transcriptview"
 )
 
-// advisorTimeout is how long root waits for the advisor's answer. It is a variable so that a test need not wait it out.
-var advisorTimeout = 15 * time.Minute
+// advisorName names the room's advisor: an in-box agent in root's box, whose conversation persists under this name.
+const advisorName = "advisor"
 
-// Advisor posts root's prompt to the room's advisor and waits for the end of the turn that takes it, whatever its outcome. The answer
-// is the turn's final text. A wait that ends early, by timeout or by root's
-// stop, leaves the advisor's reply to arrive as an input, as a child's result does.
+// Advisor asks the room's advisor, an agent that runs in root's box with read-only tools, and waits for its answer. Root's work since
+// its last consultation goes ahead of its prompt. A stop, a timeout and the end of root's own turn each return what the advisor had said.
 func (s *Service) Advisor(ctx context.Context, caller contract.Principal, req contract.AdvisorRequest) (contract.AdvisorResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalSession {
 		return contract.AdvisorResponse{}, forbidden()
@@ -33,14 +31,18 @@ func (s *Service) Advisor(ctx context.Context, caller contract.Principal, req co
 	if strings.TrimSpace(req.Prompt) == "" {
 		return contract.AdvisorResponse{}, invalid("prompt is required: the task, what you found so far and what you want judged")
 	}
-	advisor, err := s.store.RoomAdvisor(ctx, self.Room)
-	if errors.Is(err, store.ErrNotFound) {
-		return contract.AdvisorResponse{}, invalid("this room has no advisor; set one with the room's advisor setting (root's About panel, or `dyna room advisor ROOM PROFILE`)")
-	}
+	name, err := s.store.RoomAdvisorProfile(ctx, self.Room)
 	if err != nil {
 		return contract.AdvisorResponse{}, failure(err)
 	}
-	since, err := s.store.LastConsultEnd(ctx, advisor.ID, self.ID)
+	if name == "" {
+		return contract.AdvisorResponse{}, invalid("this room has no advisor; set one with the room's advisor setting (root's About panel, or `dyna room advisor ROOM PROFILE`)")
+	}
+	profile, err := s.workflowProfile(name)
+	if err != nil {
+		return contract.AdvisorResponse{}, invalid("unknown profile " + string(name))
+	}
+	since, err := s.store.LastAgentEnd(ctx, self.ID, advisorName)
 	if err != nil {
 		return contract.AdvisorResponse{}, failure(err)
 	}
@@ -48,86 +50,69 @@ func (s *Service) Advisor(ctx context.Context, caller contract.Principal, req co
 	if problem != nil {
 		return contract.AdvisorResponse{}, problem
 	}
-	// Subscribe before the post, so that an end cannot fall between the post and the first look.
-	changes, unsubscribe := s.store.Subscribe()
-	defer func() { unsubscribe() }()
-	post, problem := s.Post(ctx, caller, contract.PostRequest{Room: self.Room, Text: req.Prompt, Context: delta, Home: contract.Conversation{Kind: contract.ConversationDM, Session: advisor.ID}, Awaited: true})
-	if problem != nil {
-		return contract.AdvisorResponse{}, problem
+	// A conversation the box lost or never had begins with the first call's record, which the box knows only when it opens it.
+	spec := agentSpec{ID: contract.AgentID(req.ToolCallID), Name: advisorName, Profile: profile, Instructions: prompt.AdvisorInstructions, Persist: true, Orient: true, Prompt: delta + "\n\n" + req.Prompt}
+	if !since.IsZero() {
+		first, problem := s.advisorDelta(ctx, self.ID, time.Time{})
+		if problem != nil {
+			return contract.AdvisorResponse{}, problem
+		}
+		spec.FreshPrompt = first + "\n\n" + req.Prompt
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, advisorTimeout)
-	defer cancel()
-	for {
-		ended, done, err := s.store.DeliveryTurnEnded(waitCtx, advisor.ID, post.Seq)
-		if err != nil && waitCtx.Err() == nil {
+	if spec.ID == "" {
+		generated, err := id("agent_", s.now())
+		if err != nil {
 			return contract.AdvisorResponse{}, failure(err)
 		}
-		if done {
-			return advisorAnswer(ended), nil
-		}
-		select {
-		case <-waitCtx.Done():
-			// The reply is owed from here on, unless the turn ended just now.
-			settle := context.WithoutCancel(ctx)
-			owed, err := s.store.OweReply(settle, advisor.ID, post.Seq, self.ID)
-			if err != nil {
-				return contract.AdvisorResponse{}, failure(err)
-			}
-			if !owed {
-				if ended, done, err := s.store.DeliveryTurnEnded(settle, advisor.ID, post.Seq); err == nil && done {
-					return advisorAnswer(ended), nil
-				}
-			}
-			if ctx.Err() != nil {
-				return contract.AdvisorResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "the advisor call was cancelled; its reply will still arrive as an input"}
-			}
-			return contract.AdvisorResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: fmt.Sprintf("the advisor did not answer within %s; its reply will still arrive as an input", advisorTimeout)}
-		case _, ok := <-changes:
-			if !ok {
-				unsubscribe()
-				changes, unsubscribe = s.store.Subscribe()
-			}
-		}
+		spec.ID = contract.AgentID(generated)
 	}
+	result, err := s.askAgent(ctx, self, spec)
+	if err != nil {
+		return contract.AdvisorResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "the advisor could not run: " + err.Error()}
+	}
+	return advisorAnswer(result), nil
 }
 
-// advisorAnswer is the advisor's final text, which is root's tool result. Nothing posts it: the feed holds neither the prompt nor the answer,
-// and the owner reads them in root's transcript, under the tool call.
-func advisorAnswer(ended contract.TurnEnded) contract.AdvisorResponse {
-	if ended.Final == "" {
-		return contract.AdvisorResponse{Answer: "The advisor's turn ended (" + string(ended.Outcome) + ") with no text. " + ended.Error}
+// advisorAnswer is root's tool result: the advisor's final text, or what it had when something ended its turn, with the reason.
+func advisorAnswer(result agentResult) contract.AdvisorResponse {
+	var reason string
+	switch result.Cause {
+	case agentOwnerStopped:
+		reason = "the owner stopped the advisor"
+	case agentCancelled:
+		reason = "your turn was stopped, so the advisor was stopped"
+	case agentTimedOut:
+		reason = fmt.Sprintf("the advisor did not answer within %s", agentTimeout)
+	case agentBoxGone:
+		reason = "the box went away while the advisor ran"
+	case "":
+		switch {
+		case result.Outcome != contract.TurnCompleted:
+			reason = "the advisor's turn ended (" + string(result.Outcome) + ")"
+			if result.Error != "" {
+				reason += ": " + result.Error
+			}
+		case result.Final == "":
+			reason = "the advisor's turn ended with no text"
+		default:
+			return contract.AdvisorResponse{Answer: result.Final}
+		}
 	}
-	return contract.AdvisorResponse{Answer: ended.Final}
+	if result.Final == "" {
+		return contract.AdvisorResponse{Answer: reason + "; it had said nothing yet."}
+	}
+	return contract.AdvisorResponse{Answer: reason + ". What it had said:\n\n" + result.Final}
 }
 
-// advisorName is the name of the session the room's advisor setting starts.
-const advisorName = "advisor"
-
-// setAdvisor makes the room's advisor match the setting: with a profile, one session beside root on it, started if missing and
-// switched when its profile differs; with none, no session. The setting is that session, so nothing else stores it.
-func (s *Service) setAdvisor(ctx context.Context, caller contract.Principal, room contract.RoomID, profile contract.ProfileName) *contract.Error {
+// setAdvisor sets the room's advisor: a profile, or none.
+func (s *Service) setAdvisor(ctx context.Context, room contract.RoomID, profile contract.ProfileName) *contract.Error {
 	if profile != "" {
 		if _, _, err := s.profiles.Model(profile); err != nil {
 			return invalid("unknown profile " + string(profile))
 		}
 	}
-	advisor, err := s.store.RoomAdvisor(ctx, room)
-	missing := errors.Is(err, store.ErrNotFound)
-	if err != nil && !missing {
+	if err := s.store.SetRoomAdvisorProfile(ctx, room, profile); err != nil {
 		return failure(err)
-	}
-	switch {
-	case missing && profile == "":
-		return nil
-	case missing:
-		_, problem := s.startSession(ctx, caller, contract.SessionStartRequest{Room: room, Name: advisorName, Profile: profile, Advisor: true}, "", nil)
-		return problem
-	case profile == "":
-		_, problem := s.SessionClose(ctx, caller, contract.SessionCloseRequest{Session: advisor.ID})
-		return problem
-	case advisor.Profile != profile:
-		_, problem := s.SessionSetProfile(ctx, caller, contract.SessionSetProfileRequest{Session: advisor.ID, Profile: profile})
-		return problem
 	}
 	return nil
 }
@@ -196,7 +181,7 @@ func (s *Service) advisorDelta(ctx context.Context, root contract.SessionID, sin
 			case contract.TranscriptText:
 				lines = append(lines, "root: "+transcriptview.Clip(item.Text, advisorTextChars))
 			case contract.TranscriptTool:
-				line := fmt.Sprintf("tool %s %s -> ", item.Tool, transcriptview.Clip(item.Arguments, advisorArgChars))
+				line := fmt.Sprintf("tool %s %s -> ", item.Tool, strings.ReplaceAll(transcriptview.Clip(item.Arguments, advisorArgChars), "\n", " "))
 				if item.Failed {
 					line += "failed: "
 				}
