@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"database/sql"
 	"strings"
 	"testing"
 
@@ -27,6 +28,50 @@ func TestRoomHostsRequiresExplicitChange(t *testing.T) {
 	got, problem := r.s.RoomHosts(r.ctx, who, contract.RoomHostsRequest{Room: r.room, Clear: true})
 	if problem != nil || got.Operation == "" {
 		t.Fatalf("explicit clear %+v: %v", got, problem)
+	}
+}
+
+func TestHostListServicesStayInSessionRoom(t *testing.T) {
+	r := setupPool(t)
+	serviceHost(t, r, "shared")
+	other, problem := r.s.RoomCreate(r.ctx, r.owner, contract.RoomCreateRequest{Name: "private", RootProfile: "test"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	for i, room := range []contract.RoomID{r.room, other.Room} {
+		name, port := contract.ServiceName("own-api"), contract.ServicePort("8443")
+		if i == 1 {
+			name, port = "private-api", "8444"
+		}
+		_, problem := r.s.ServiceSet(r.ctx, r.owner, contract.ServiceSetRequest{Room: room, Spec: contract.ServiceSpec{Name: name, Image: svcDigest, Host: "shared", Ports: []contract.ServicePort{port}}})
+		if problem != nil {
+			t.Fatal(problem)
+		}
+	}
+	if err := r.s.store.Write(r.ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE services SET host='shared'")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, who := range []contract.Principal{{Kind: contract.PrincipalSession, Session: r.root}, r.owner} {
+		got, problem := r.s.HostList(r.ctx, who, contract.HostListRequest{})
+		if problem != nil {
+			t.Fatal(problem)
+		}
+		var services []contract.HostService
+		for _, host := range got.Hosts {
+			if host.Name == "shared" {
+				services = host.Services
+			}
+		}
+		if who.Kind == contract.PrincipalSession {
+			if len(services) != 1 || services[0].Name != "own-api" || services[0].Room != r.room {
+				t.Fatalf("session sees other rooms' services: %+v", services)
+			}
+		} else if len(services) != 2 {
+			t.Fatalf("owner lost services: %+v", services)
+		}
 	}
 }
 

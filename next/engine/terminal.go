@@ -46,7 +46,7 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 		return contract.HostListResponse{}, failure(err)
 	}
 	runners := s.reconciler.RunnerCounts()
-	services, err := s.hostServices(ctx)
+	services, err := s.hostServices(ctx, room)
 	if err != nil {
 		return contract.HostListResponse{}, failure(err)
 	}
