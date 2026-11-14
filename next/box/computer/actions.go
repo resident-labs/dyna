@@ -37,6 +37,7 @@ const (
 	Screenshot Action = "screenshot"
 	Launch     Action = "launch"
 	Stop       Action = "stop"
+	Check      Action = "check"
 )
 
 // Point is a place on the desktop.
@@ -67,6 +68,7 @@ type Request struct {
 	Command   string   `json:"command,omitempty"`
 	TimeoutMS int      `json:"timeout_ms,omitempty"`
 	Page      bool     `json:"page,omitempty"`
+	Window    string   `json:"window,omitempty"`
 }
 
 // Result is what an action returns: a line for the agent, and a PNG for a screenshot.
@@ -185,6 +187,15 @@ func Validate(action Action, r Request) error {
 			return fmt.Errorf("ms is 0 to %d", maxWaitMS)
 		}
 	case Screenshot:
+		if r.Window != "" {
+			id, err := strconv.ParseUint(r.Window, 0, 32)
+			if err != nil || id == 0 {
+				return errors.New("window is a positive decimal or hexadecimal X11 window ID")
+			}
+			if r.Page || hasPoint || r.Width != 0 || r.Height != 0 {
+				return errors.New("a window screenshot takes no page or region")
+			}
+		}
 		if hasPoint != (r.Width > 0 || r.Height > 0) {
 			return errors.New("a region takes x, y, width and height")
 		}
@@ -206,7 +217,7 @@ func Validate(action Action, r Request) error {
 		if r.TimeoutMS < 0 || r.TimeoutMS > maxLaunchMS {
 			return fmt.Errorf("timeout_ms is 0 to %d", maxLaunchMS)
 		}
-	case Text, Stop:
+	case Text, Stop, Check:
 	default:
 		return fmt.Errorf("unknown computer action %q", action)
 	}
@@ -489,6 +500,9 @@ func run(ctx context.Context, agent Agent, base string, action Action, r Request
 			if clipped {
 				text = "The first 16384 px of the page in Chromium; the taller page was clipped."
 			}
+			if err == nil && solidPNG(shot) {
+				text += " Warning: the image is one solid colour; the app may not have drawn."
+			}
 			return Result{PNG: shot, Text: text}, err
 		}
 		width, height := desktopSize()
@@ -497,8 +511,22 @@ func run(ctx context.Context, agent Agent, base string, action Action, r Request
 			region = Rect{at.X, at.Y, r.Width, r.Height}
 			text = fmt.Sprintf("%s of the %s desktop; add %d,%d to a point in it for the desktop's.", region, Size, at.X, at.Y)
 		}
+		if r.Window != "" {
+			var err error
+			region, err = windowRect(ctx, r.Window)
+			if err != nil {
+				return Result{}, err
+			}
+			text = fmt.Sprintf("Window %s, %s on the desktop.", r.Window, region)
+		}
 		shot, err := Capture(ctx, desktopSocket, region)
+		if err == nil && solidPNG(shot) {
+			text += " Warning: the image is one solid colour; the app may not have drawn."
+		}
 		return Result{PNG: shot, Text: text}, err
+	case Check:
+		checked, err := agent.post(ctx, "/computer/check", nil)
+		return Result{Text: checked.Log}, err
 	case Launch:
 		return launch(ctx, agent, r)
 	}
@@ -653,15 +681,22 @@ func press(ctx context.Context, chord []uint32, hold time.Duration) error {
 
 // windows lists the desktop's visible windows.
 func windows(ctx context.Context) (map[string]bool, error) {
-	// Only named windows: jwm's frames around them have no name.
-	out, err := xdotoolCommand(ctx, "search", "--onlyvisible", "--name", ".").Output()
+	// EWMH lists clients, including unnamed Vulkan apps, but not JWM frames.
+	cmd := exec.CommandContext(ctx, "xprop", "-root", "_NET_CLIENT_LIST")
+	cmd.Env = desktopEnv(VNCSocket)
+	out, err := cmd.Output()
 	var exit *exec.ExitError
 	if err != nil && !(errors.As(err, &exit) && len(out) == 0) { // no window at all exits 1
 		return nil, err
 	}
 	seen := map[string]bool{}
-	for _, id := range strings.Fields(string(out)) {
-		seen[id] = true
+	_, ids, _ := strings.Cut(string(out), "#")
+	for _, id := range strings.Fields(strings.ReplaceAll(ids, ",", " ")) {
+		n, err := strconv.ParseUint(id, 0, 32)
+		if err != nil {
+			return nil, err
+		}
+		seen[strconv.FormatUint(n, 10)] = true
 	}
 	return seen, nil
 }

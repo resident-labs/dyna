@@ -2,10 +2,12 @@ package computer
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"image/png"
 	"io"
 	"net"
 	"net/http"
@@ -405,5 +407,50 @@ func TestQueuedActionCancellationAndStopBypassesQueue(t *testing.T) {
 	defer stopCancel()
 	if _, err := Do(stopCtx, agent, Stop, Request{}); err != nil {
 		t.Fatalf("stop waited behind holder: %v", err)
+	}
+}
+
+func TestCaptureRequestsPixelsAfterCursorOnlyUpdate(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "vnc.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+		r := bufio.NewReader(conn)
+		read := func(n int) { _, _ = io.ReadFull(r, make([]byte, n)) }
+		_, _ = conn.Write([]byte("RFB 003.008\n\x01\x01"))
+		read(13)
+		_, _ = conn.Write(make([]byte, 4))
+		read(1)
+		_, _ = conn.Write(append([]byte{0, 1, 0, 1}, make([]byte, 20)...))
+		read(20)      // pixel format
+		read(4 + 3*4) // encodings
+		read(10)      // initial framebuffer request
+		// An empty cursor shape, and no pixels, consumes that request.
+		_, _ = conn.Write([]byte{0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 17})
+		read(10) // the client must request another frame
+		_, _ = conn.Write([]byte{0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 255, 0})
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	shot, err := Capture(ctx, socket, Rect{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	im, err := png.Decode(bytes.NewReader(shot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	red, green, blue, _ := im.At(0, 0).RGBA()
+	if red != 65535 || green != 0 || blue != 0 {
+		t.Fatalf("pixel = %d,%d,%d", red, green, blue)
 	}
 }

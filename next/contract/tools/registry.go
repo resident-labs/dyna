@@ -39,7 +39,8 @@ const (
 	ComputerWait
 	ComputerLaunch
 	ComputerStop
-	lastBoxHandler = ComputerStop
+	ComputerCheck
+	lastBoxHandler = ComputerCheck
 )
 
 // Action is one agent action with its CLI commands. Request is the schema

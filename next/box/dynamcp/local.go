@@ -16,7 +16,7 @@ import (
 var computerActions = map[tools.BoxHandler]computer.Action{
 	tools.ComputerOpen: computer.Open, tools.ComputerClick: computer.Click, tools.ComputerMove: computer.Move, tools.ComputerDrag: computer.Drag,
 	tools.ComputerScroll: computer.Scroll, tools.ComputerKey: computer.Key, tools.ComputerType: computer.Type, tools.ComputerText: computer.Text,
-	tools.ComputerWait: computer.Wait, tools.ComputerScreenshot: computer.Screenshot, tools.ComputerLaunch: computer.Launch, tools.ComputerStop: computer.Stop,
+	tools.ComputerWait: computer.Wait, tools.ComputerScreenshot: computer.Screenshot, tools.ComputerLaunch: computer.Launch, tools.ComputerStop: computer.Stop, tools.ComputerCheck: computer.Check,
 }
 
 // BoxTools runs the actions which live in the box instead of the engine.
