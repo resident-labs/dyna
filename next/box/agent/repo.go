@@ -37,13 +37,19 @@ const (
 	setupDone    = "done"
 )
 
-func setupRepos(ctx context.Context, root, stateRoot string, repos []contract.BoxRepo, name, email string, git gitRunner) error {
+// signerProgram is the dyna binary in every box. git calls it as gpg.ssh.program, ssh-keygen style, and it signs through the engine.
+const signerProgram = "/opt/dyna/bin/current/dyna"
+
+func setupRepos(ctx context.Context, root, stateRoot string, repos []contract.BoxRepo, name, email, signingKey string, git gitRunner) error {
 	for _, entry := range []struct{ key, value string }{{"user.name", name}, {"user.email", email}} {
 		if entry.value != "" {
 			if _, err := git(ctx, "", "", "config", "--global", entry.key, entry.value); err != nil {
 				return err
 			}
 		}
+	}
+	if err := configureSigning(ctx, signingKey, git); err != nil {
+		return err
 	}
 	for _, repo := range repos {
 		if err := setupRepo(ctx, root, stateRoot, repo, git); err != nil {
@@ -129,4 +135,22 @@ func writeSetupState(path, value string) error {
 		_ = os.Remove(tmp)
 	}
 	return err
+}
+
+// configureSigning sets git's signing for every repository, worktree and clone in the box, through the global config that setup
+// writes at each box start. With no key (the room's signing is off) it removes what an earlier start set.
+func configureSigning(ctx context.Context, signingKey string, git gitRunner) error {
+	if signingKey == "" {
+		for _, key := range []string{"commit.gpgsign", "tag.gpgsign"} {
+			// Exit 5 means the key was never set, which is the state wanted.
+			_, _ = git(ctx, "", "", "config", "--global", "--unset-all", key)
+		}
+		return nil
+	}
+	for _, entry := range [][2]string{{"gpg.format", "ssh"}, {"gpg.ssh.program", signerProgram}, {"user.signingkey", "key::" + signingKey}, {"commit.gpgsign", "true"}, {"tag.gpgsign", "true"}} {
+		if _, err := git(ctx, "", "", "config", "--global", entry[0], entry[1]); err != nil {
+			return err
+		}
+	}
+	return nil
 }

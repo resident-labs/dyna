@@ -151,7 +151,7 @@ func TestDeliveriesByTurnUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Use the store's actual metadata key, not a hard-coded assumption.
-	if _, err = s.writer.Exec("ALTER TABLE workflow_runs DROP COLUMN released_steps; ALTER TABLE sessions DROP COLUMN advisor; ALTER TABLE workflow_runs DROP COLUMN paused_steps; ALTER TABLE workflow_runs DROP COLUMN paused; ALTER TABLE workflow_runs DROP COLUMN sub; ALTER TABLE workflow_runs DROP COLUMN key; DROP TABLE workflow_queue; DROP TABLE workflow_state; DROP TABLE workflow_subscriptions; ALTER TABLE room_repos DROP COLUMN pr_events; ALTER TABLE room_repos DROP COLUMN pr_census_at; UPDATE meta SET value='107' WHERE key='schema_version'"); err != nil {
+	if _, err = s.writer.Exec("ALTER TABLE workflow_runs DROP COLUMN released_steps; ALTER TABLE rooms DROP COLUMN git_signing; ALTER TABLE sessions DROP COLUMN advisor; ALTER TABLE workflow_runs DROP COLUMN paused_steps; ALTER TABLE workflow_runs DROP COLUMN paused; ALTER TABLE workflow_runs DROP COLUMN sub; ALTER TABLE workflow_runs DROP COLUMN key; DROP TABLE workflow_queue; DROP TABLE workflow_state; DROP TABLE workflow_subscriptions; ALTER TABLE room_repos DROP COLUMN pr_events; ALTER TABLE room_repos DROP COLUMN pr_census_at; UPDATE meta SET value='107' WHERE key='schema_version'"); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()

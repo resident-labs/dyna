@@ -20,6 +20,9 @@ func TestSetupRepos(t *testing.T) {
 			repo := contract.BoxRepo{Name: "owner/repo", Cache: "/cache/repo", Branch: "v2/s", Base: "main"}
 			var calls [][]string
 			git := func(_ context.Context, _, _ string, args ...string) (string, error) {
+				if args[0] == "config" {
+					return "", nil // signing setup is TestSetupGitIdentity's
+				}
 				calls = append(calls, append([]string(nil), args...))
 				switch args[0] {
 				case "clone":
@@ -31,7 +34,7 @@ func TestSetupRepos(t *testing.T) {
 				}
 				return "", nil
 			}
-			if err := setupRepos(context.Background(), root, stateRoot, []contract.BoxRepo{repo}, "", "", git); err != nil {
+			if err := setupRepos(context.Background(), root, stateRoot, []contract.BoxRepo{repo}, "", "", "", git); err != nil {
 				t.Fatal(err)
 			}
 			dir := filepath.Join(root, "owner/repo")
@@ -47,7 +50,7 @@ func TestSetupRepos(t *testing.T) {
 				t.Fatal(calls)
 			}
 			calls = nil
-			if err := setupRepos(context.Background(), root, stateRoot, []contract.BoxRepo{repo}, "", "", git); err != nil || len(calls) != 0 {
+			if err := setupRepos(context.Background(), root, stateRoot, []contract.BoxRepo{repo}, "", "", "", git); err != nil || len(calls) != 0 {
 				t.Fatalf("skip: %v %v", calls, err)
 			}
 		})
@@ -81,14 +84,14 @@ func TestSetupRetryAfterCrashStartsFromEmptyDirectory(t *testing.T) {
 		}
 		return "", nil
 	}
-	if err := setupRepos(context.Background(), root, stateRoot, []contract.BoxRepo{repo}, "", "", git); err == nil {
+	if err := setupRepos(context.Background(), root, stateRoot, []contract.BoxRepo{repo}, "", "", "", git); err == nil {
 		t.Fatal("expected crash")
 	}
 	if got, err := os.ReadFile(state); err != nil || string(got) != setupStarted {
 		t.Fatalf("state after crash: %q %v", got, err)
 	}
 	crash = false
-	if err := setupRepos(context.Background(), root, stateRoot, []contract.BoxRepo{repo}, "", "", git); err != nil {
+	if err := setupRepos(context.Background(), root, stateRoot, []contract.BoxRepo{repo}, "", "", "", git); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := os.ReadFile(state); err != nil || string(got) != setupDone {
@@ -114,10 +117,13 @@ func TestSetupDoneCheckoutKeepsFilesWithoutIndex(t *testing.T) {
 	}
 	var calls [][]string
 	git := func(_ context.Context, _, _ string, args ...string) (string, error) {
+		if args[0] == "config" {
+			return "", nil
+		}
 		calls = append(calls, args)
 		return "", nil
 	}
-	if err := setupRepos(context.Background(), root, stateRoot, []contract.BoxRepo{repo}, "", "", git); err != nil {
+	if err := setupRepos(context.Background(), root, stateRoot, []contract.BoxRepo{repo}, "", "", "", git); err != nil {
 		t.Fatal(err)
 	}
 	if len(calls) != 0 {
@@ -140,7 +146,7 @@ func TestSetupStateNamesDoNotCollide(t *testing.T) {
 		}
 		return "", nil
 	}
-	if err := setupRepos(context.Background(), root, stateRoot, repos, "", "", git); err != nil {
+	if err := setupRepos(context.Background(), root, stateRoot, repos, "", "", "", git); err != nil {
 		t.Fatal(err)
 	}
 	for _, repo := range repos {
@@ -167,7 +173,7 @@ func TestSetupRetryFillsRunningProcessDirectory(t *testing.T) {
 		}
 		return "", nil
 	}
-	if err := setupRepos(context.Background(), root, stateRoot, []contract.BoxRepo{repo}, "", "", git); err == nil {
+	if err := setupRepos(context.Background(), root, stateRoot, []contract.BoxRepo{repo}, "", "", "", git); err == nil {
 		t.Fatal("expected setup failure")
 	}
 	cmd := exec.Command("sh", "-c", "read -r go; cat AGENTS.md")
@@ -185,7 +191,7 @@ func TestSetupRetryFillsRunningProcessDirectory(t *testing.T) {
 	}
 	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
 	fail = false
-	if err := setupRepos(context.Background(), root, stateRoot, []contract.BoxRepo{repo}, "", "", git); err != nil {
+	if err := setupRepos(context.Background(), root, stateRoot, []contract.BoxRepo{repo}, "", "", "", git); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := io.WriteString(input, "go\n"); err != nil {
@@ -198,19 +204,24 @@ func TestSetupRetryFillsRunningProcessDirectory(t *testing.T) {
 }
 
 func TestSetupGitIdentity(t *testing.T) {
+	unset := [][]string{{"config", "--global", "--unset-all", "commit.gpgsign"}, {"config", "--global", "--unset-all", "tag.gpgsign"}}
 	for _, tc := range []struct {
-		name, email string
-		want        [][]string
+		name, email, key string
+		want             [][]string
 	}{
-		{name: "Example User", email: "user@example.invalid", want: [][]string{{"config", "--global", "user.name", "Example User"}, {"config", "--global", "user.email", "user@example.invalid"}}},
-		{},
+		{name: "Example User", email: "user@example.invalid", want: append([][]string{{"config", "--global", "user.name", "Example User"}, {"config", "--global", "user.email", "user@example.invalid"}}, unset...)},
+		{want: unset},
+		{name: "Example User", email: "user@example.invalid", key: "ssh-ed25519 AAAA", want: [][]string{
+			{"config", "--global", "user.name", "Example User"}, {"config", "--global", "user.email", "user@example.invalid"},
+			{"config", "--global", "gpg.format", "ssh"}, {"config", "--global", "gpg.ssh.program", "/opt/dyna/bin/current/dyna"},
+			{"config", "--global", "user.signingkey", "key::ssh-ed25519 AAAA"}, {"config", "--global", "commit.gpgsign", "true"}, {"config", "--global", "tag.gpgsign", "true"}}},
 	} {
 		var calls [][]string
 		git := func(_ context.Context, _, _ string, args ...string) (string, error) {
 			calls = append(calls, args)
 			return "", nil
 		}
-		if err := setupRepos(context.Background(), t.TempDir(), t.TempDir(), nil, tc.name, tc.email, git); err != nil {
+		if err := setupRepos(context.Background(), t.TempDir(), t.TempDir(), nil, tc.name, tc.email, tc.key, git); err != nil {
 			t.Fatal(err)
 		}
 		if !reflect.DeepEqual(calls, tc.want) {
@@ -237,7 +248,7 @@ func TestACrewStartsOnItsFixedCommitUnlessItPushedABranch(t *testing.T) {
 			}
 			return "", nil
 		}
-		if err := setupRepos(context.Background(), root, stateRoot, []contract.BoxRepo{repo}, "", "", git); err != nil {
+		if err := setupRepos(context.Background(), root, stateRoot, []contract.BoxRepo{repo}, "", "", "", git); err != nil {
 			t.Fatal(err)
 		}
 		want := "abc123"

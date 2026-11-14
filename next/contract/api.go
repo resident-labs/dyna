@@ -33,6 +33,8 @@ const (
 	MethodInstructionsSet         Method = "instructions.set"
 	MethodWebLogin                Method = "web.login"
 	MethodWebSearch               Method = "web.search"
+	MethodGitSign                 Method = "git.sign"
+	MethodSigningKey              Method = "signing.key"
 	MethodWebsearchSetKey         Method = "websearch.set_key"
 	MethodWebsearchRemoveKey      Method = "websearch.remove_key"
 	MethodProxyKey                Method = "proxy.key"
@@ -206,6 +208,8 @@ type RoomSetRequest struct {
 	// Advisor sets the room's advisor profile: a session on that profile beside root, started if missing, switched when the profile
 	// changes and closed when it is empty. Nil leaves it as it is.
 	Advisor *ProfileName `json:"advisor,omitempty"`
+	// GitSigning switches the signing of the room's commits and tags with the engine's key, as the owner. Nil leaves it as it is.
+	GitSigning *bool `json:"gitSigning,omitempty"`
 }
 
 // RootApproval names the owner-class operations a room's root may also decide, when the owner allows it for the room.
@@ -246,6 +250,8 @@ type RoomSummary struct {
 	RootApproves []RootApproval `json:"rootApproves,omitempty"`
 	// Advisor is the room's advisor profile; empty when it has none.
 	Advisor ProfileName `json:"advisor,omitempty"`
+	// GitSigning is whether the room's boxes sign their commits and tags with the engine's key.
+	GitSigning bool `json:"gitSigning,omitempty"`
 	// GitHubWrites is the room's githubWrites setting, as the owner set it; nil when it is off.
 	GitHubWrites *GitHubWrites `json:"githubWrites,omitempty"`
 	// Questions are those the owner has not answered.
@@ -777,6 +783,7 @@ type BoxHelloResponse struct {
 	Advisor       bool   `json:"advisor,omitempty"` // root's room has an advisor, so root's advisor tool is direct
 	GitName       string `json:"gitName,omitempty"`
 	GitEmail      string `json:"gitEmail,omitempty"`
+	GitSigningKey string `json:"gitSigningKey,omitempty"` // the engine's public signing key line; the box's git signs through the engine
 	CompactTokens int    `json:"compactTokens,omitempty"`
 	Instructions  string `json:"instructions"`
 	// ModelInstructions is the model-specific prompt part, replaced with the model at a turn boundary.
@@ -1281,3 +1288,22 @@ func (r HostAddRequest) ExecOnly() bool {
 
 // SessionListPage is how many sessions a session's list returns when it names no limit.
 const SessionListPage = 25
+
+// GitSignRequest asks the engine to sign what git passes its signer: a commit or tag object without its signature. The
+// engine refuses any other payload, and one whose committer or tagger is not the box's configured git identity.
+type GitSignRequest struct {
+	Payload []byte `json:"payload"`
+}
+
+// GitSignResponse holds the armored SSHSIG, in the git namespace.
+type GitSignResponse struct {
+	Signature string `json:"signature"`
+}
+
+// SigningKeyRequest asks for the public half of the key that signs boxes' commits and tags.
+type SigningKeyRequest struct{}
+
+// SigningKeyResponse holds the line to add on GitHub as a signing key.
+type SigningKeyResponse struct {
+	PublicKey string `json:"publicKey"`
+}

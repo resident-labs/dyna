@@ -358,6 +358,8 @@ var methodTable = []MethodEntry{
 	method(contract.MethodTurnOutput, contract.ScopeRead, BoxAccess),
 	method(contract.MethodWebLogin, contract.ScopeAdmin, OwnerLocalAccess),
 	method(contract.MethodWebSearch, contract.ScopeRead, UserAccess, act("web", "search", typ[contract.WebSearchRequest](), "Search the web for query. Limit is 1 to 10 results; omit it for 5. An empty provider means all providers failed; a named provider can return zero results. Whatever you report from a search names its sources by URL, with what each one said.", "web search")),
+	method(contract.MethodGitSign, contract.ScopeOperate, BoxAccess),
+	method(contract.MethodSigningKey, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodWebsearchSetKey, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodWebsearchRemoveKey, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodWorkflowList, contract.ScopeRead, UserAccess,

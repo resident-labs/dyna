@@ -241,3 +241,25 @@ func (s *Store) clearModelStamps() {
 	s.stamped.Clear()
 	s.logged.Clear()
 }
+
+// RoomGitSigning reads whether a room's boxes sign their commits and tags.
+func (s *Store) RoomGitSigning(ctx context.Context, room contract.RoomID) (bool, error) {
+	var on bool
+	err := s.Read().QueryRowContext(ctx, "SELECT git_signing FROM rooms WHERE id=?", room).Scan(&on)
+	return on, err
+}
+
+// SetRoomGitSigning switches an open room's git signing.
+func (s *Store) SetRoomGitSigning(ctx context.Context, room contract.RoomID, on bool) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "UPDATE rooms SET git_signing=? WHERE id=? AND state='open'", on, room)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err == nil && n == 0 {
+			return ErrRoomNotFound
+		}
+		return err
+	})
+}

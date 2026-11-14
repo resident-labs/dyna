@@ -111,7 +111,7 @@ func Run(ctx context.Context) error {
 		return err
 	}
 	setup := func(ctx context.Context) error {
-		return setupRepos(ctx, "/box/work", "/box/state/setup", hello.Repos, hello.GitName, hello.GitEmail, runGit)
+		return setupRepos(ctx, "/box/work", "/box/state/setup", hello.Repos, hello.GitName, hello.GitEmail, hello.GitSigningKey, runGit)
 	}
 	setup(ctx)
 	steps.Done("repository setup")
