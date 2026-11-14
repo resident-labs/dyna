@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -91,5 +92,45 @@ func TestCatchUpBlockedHistoryAndNewLiveMessageThenRestart(t *testing.T) {
 	events, err := f.s.store.Events(f.ctx, f.room, 0, 100, []contract.EventType{"discord.message"})
 	if err != nil || len(events) != 2 {
 		t.Fatalf("events: %d %v", len(events), err)
+	}
+}
+
+func TestDiscordCatchUpOversizedHistory(t *testing.T) {
+	f := discordFixture(t)
+	var messages []discord.Message
+	for i := 0; i < 30; i++ {
+		var m discord.Message
+		m.ID = strconv.FormatUint(uint64(time.Now().Add(-time.Minute).UnixMilli()-1420070400000)<<22|uint64(i), 10)
+		m.Author.ID = "1"
+		m.Content = strings.Repeat("a", 1000)
+		messages = append(messages, m)
+	}
+	body, err := json.Marshal(messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) <= 20*1024 {
+		t.Fatal("fixture too small")
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/members/") {
+			fmt.Fprint(w, `{"roles":["10"]}`)
+			return
+		}
+		if r.URL.Query().Get("after") == "" {
+			fmt.Fprint(w, `[]`)
+			return
+		}
+		w.Write(body)
+	}))
+	defer srv.Close()
+	client := &discord.Client{HTTP: srv.Client(), Endpoint: srv.URL, Token: "test-secret", BotID: "900"}
+	count, err := f.s.discordCatchUpChannel(f.ctx, client, "100", "200", func(ctx context.Context, m discord.Message) error { return f.s.discordInput(ctx, client, m) })
+	if err != nil || count != 30 {
+		t.Fatalf("recovered %d: %v", count, err)
+	}
+	events, err := f.s.store.Events(f.ctx, f.room, 0, 100, []contract.EventType{"discord.message"})
+	if err != nil || len(events) != 30 {
+		t.Fatalf("events %d: %v", len(events), err)
 	}
 }

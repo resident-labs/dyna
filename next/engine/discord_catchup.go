@@ -46,7 +46,7 @@ func (s *Service) discordCatchUpChannel(ctx context.Context, client *discord.Cli
 	after := strconv.FormatUint(floor, 10)
 	count := 0
 	for {
-		result, err := client.API(ctx, "GET", "/api/v10/channels/"+channel+"/messages?after="+after+"&limit=100", nil, "")
+		result, err := client.ReadMessages(ctx, "/api/v10/channels/"+channel+"/messages?after="+after+"&limit=100")
 		if err != nil {
 			return count, err
 		}

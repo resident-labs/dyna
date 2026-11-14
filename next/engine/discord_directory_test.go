@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -84,5 +85,51 @@ func TestDiscordResumeRestoresNewThreadBeforeReplay(t *testing.T) {
 	message := events[0].Body.(contract.DiscordMessage)
 	if message.Thread != "201" || message.ChannelName != "new thread" {
 		t.Fatalf("missing thread metadata: %+v", message)
+	}
+}
+
+func TestDiscordDirectoryOversizedResponses(t *testing.T) {
+	f := discordFixture(t)
+	var server discord.Server
+	server.ID = "100"
+	for i := 0; i < 150; i++ {
+		id := fmt.Sprint(i + 1000)
+		server.Roles = append(server.Roles, discord.Role{ID: id, Name: strings.Repeat("r", 150)})
+		server.Channels = append(server.Channels, discord.Channel{ID: id, Name: strings.Repeat("c", 150), Type: 0})
+		server.Threads = append(server.Threads, discord.Channel{ID: "2" + id, Parent: id, Name: strings.Repeat("t", 150), Type: 11})
+	}
+	guild := server
+	guild.Channels, guild.Threads = nil, nil
+	responses := map[string]any{
+		"/api/v10/guilds/100":                guild,
+		"/api/v10/guilds/100/channels":       server.Channels,
+		"/api/v10/guilds/100/threads/active": map[string]any{"threads": server.Threads},
+	}
+	bodies := map[string][]byte{}
+	for path, value := range responses {
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(data) <= 20*1024 {
+			t.Fatalf("fixture %s too small", path)
+		}
+		bodies[path] = data
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(bodies[r.URL.Path]) }))
+	defer srv.Close()
+	client := &discord.Client{HTTP: srv.Client(), Endpoint: srv.URL, Token: "test-secret", BotID: "900"}
+	if err := f.s.discordRestoreDirectory(f.ctx, client); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := f.s.discordDirectory.Server("100")
+	if !ok || len(got.Roles) != 150 {
+		t.Fatalf("roles %d", len(got.Roles))
+	}
+	if _, ok := f.s.discordDirectory.Channel("1149"); !ok {
+		t.Fatal("missing final channel")
+	}
+	if thread, ok := f.s.discordDirectory.Channel("21149"); !ok || thread.Parent != "1149" {
+		t.Fatal("missing final thread")
 	}
 }

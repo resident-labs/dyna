@@ -27,20 +27,20 @@ guildLoop:
 			Threads []discord.Channel `json:"threads"`
 		}
 		for _, request := range []struct {
-			path   string
-			target any
+			resource string
+			target   any
 		}{
-			{"/api/v10/guilds/" + route.Guild, &server},
-			{"/api/v10/guilds/" + route.Guild + "/channels", &server.Channels},
-			{"/api/v10/guilds/" + route.Guild + "/threads/active", &threads},
+			{"", &server},
+			{"/channels", &server.Channels},
+			{"/threads/active", &threads},
 		} {
-			result, err := client.API(ctx, "GET", request.path, nil, "")
+			result, err := client.ReadConfiguration(ctx, route.Guild, request.resource)
 			if err != nil {
 				log.Printf("Discord directory guild %s: %v", route.Guild, err)
 				continue guildLoop
 			}
 			if result.Status != 200 {
-				log.Printf("Discord directory guild %s: %s returned %d", route.Guild, request.path, result.Status)
+				log.Printf("Discord directory guild %s: %s returned %d", route.Guild, request.resource, result.Status)
 				continue guildLoop
 			}
 			if err := json.Unmarshal(result.Body, request.target); err != nil {
