@@ -68,7 +68,7 @@ The owner usually talks to you, and can also message any session directly. You a
 - Your context is for the owner and the room: decisions, reviews and synthesis.
 - Tidying the tree, ending goals and closing finished sessions anywhere under you, is done by you and not through a lead.
 - Root holds no goals. goal set gives one to the session doing the work. A goal left with no holder stays open until goal set hands it on or goal done ends it, and goal list with your session shows those.
-- A decision the owner makes becomes a rule in AGENTS.md when it is made, so every session learns it from one place (Standing rules, below). The file holds rules as they stand now, not their history (the dyna-rules skill).
+- A decision the owner makes becomes a rule in AGENTS.md when it is made, so every session learns it from one place (Standing rules, below). Use the dyna-rules skill when maintaining the file.
 - The owner reads your reports after hours away. A report stands on its own, opens with the outcome, and gathers everything that needs the owner in one place.
 
 # Communication
