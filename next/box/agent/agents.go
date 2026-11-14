@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -53,11 +52,11 @@ type agentEngine interface {
 // AgentsConfig is what a box hands its in-box agents.
 type AgentsConfig struct {
 	Engine agentEngine
-	// Open opens the conversation in dir, which holds the agent's session files: it continues the newest one when the turn persists
-	// and starts a new one otherwise. toolCall is told each tool call the session starts.
+	// Open opens the conversation in dir, a folder of its own that holds its session files: it continues the newest one there, or
+	// starts one. toolCall is told each tool call the session starts.
 	Open       func(ctx context.Context, turn contract.AgentTurn, dir string, toolCall func()) (agentSession, error)
 	Transcript *Transcript
-	Sessions   string // PiG's session folder, which holds each agent's folder under agents/
+	Sessions   string // PiG's session folder, which holds each agent's conversations under agents/<name>/<generation>/
 	// Orient is the text an agent that asks for it reads ahead of its prompt: where its parent's work is.
 	Orient func(context.Context) string
 }
@@ -72,20 +71,77 @@ type Agents struct {
 	running map[contract.AgentID]context.CancelFunc
 	names   map[string]chan struct{}
 	slots   map[contract.ProfileName]chan struct{}
+	// current is each name's conversation, a generation folder. A generation that a turn gave up on is in abandoned, and its
+	// session may still be writing, so nothing resumes it and the next turn of its name starts a new one.
+	current   map[string]string
+	abandoned map[string]bool // by name and generation
 }
 
+// abandonedMarker is the file a turn leaves in the folder of a conversation it gave up on, so that a restarted box does not resume it.
+const abandonedMarker = "abandoned"
+
+// NewAgents starts the box's agents. It first clears what an earlier run left: the conversations it gave up on, and every generation older
+// than a name's newest. Nothing of those is still writing, since the process that wrote them is gone.
 func NewAgents(ctx context.Context, config AgentsConfig) *Agents {
-	return &Agents{ctx: ctx, config: config, running: make(map[contract.AgentID]context.CancelFunc), names: make(map[string]chan struct{}), slots: make(map[contract.ProfileName]chan struct{})}
+	root := filepath.Join(config.Sessions, "agents")
+	names, _ := os.ReadDir(root)
+	for _, name := range names {
+		kept := ""
+		generations, _ := os.ReadDir(filepath.Join(root, name.Name())) // oldest first
+		for _, generation := range generations {
+			folder := filepath.Join(root, name.Name(), generation.Name())
+			if _, err := os.Stat(filepath.Join(folder, abandonedMarker)); err == nil {
+				_ = os.RemoveAll(folder)
+				continue
+			}
+			if kept != "" {
+				_ = os.RemoveAll(filepath.Join(root, name.Name(), kept))
+			}
+			kept = generation.Name()
+		}
+	}
+	return &Agents{ctx: ctx, config: config, running: make(map[contract.AgentID]context.CancelFunc), names: make(map[string]chan struct{}), slots: make(map[contract.ProfileName]chan struct{}), current: make(map[string]string), abandoned: make(map[string]bool)}
 }
 
-// abandonedSuffix names the folder of a conversation that was left running when its turn gave up: <name>.abandoned-<turn>.
-const abandonedSuffix = ".abandoned-"
+// conversation is the folder the turn's conversation lives in. A persisting turn continues its name's current generation, or on a
+// first turn since the box started the newest one on disk; otherwise it starts a new generation, named by the time so that they sort.
+func (a *Agents) conversation(turn contract.AgentTurn) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	folder := filepath.Join(a.config.Sessions, "agents", turn.Name)
+	if turn.Persist {
+		generation, known := a.current[turn.Name]
+		if !known {
+			if generations, _ := os.ReadDir(folder); len(generations) > 0 {
+				generation = generations[len(generations)-1].Name()
+			}
+		}
+		if generation != "" && !a.abandoned[turn.Name+"/"+generation] {
+			a.current[turn.Name] = generation
+			return filepath.Join(folder, generation)
+		}
+	}
+	generation := fmt.Sprintf("%020d", time.Now().UnixNano())
+	if turn.Persist {
+		a.current[turn.Name] = generation
+	}
+	return filepath.Join(folder, generation)
+}
 
-// Files lists every agent session file in the box, for the transcript to send. An abandoned conversation is not one: the engine
-// holds what it had sent before the turn gave up, under its first path.
+// abandon marks the conversation as given up on, in memory first, which cannot fail, and then with a file in its folder.
+func (a *Agents) abandon(name, folder string) {
+	a.mu.Lock()
+	a.abandoned[name+"/"+filepath.Base(folder)] = true
+	a.mu.Unlock()
+	if err := os.WriteFile(filepath.Join(folder, abandonedMarker), nil, 0600); err != nil {
+		log.Printf("agent %s: marking its conversation abandoned: %v", name, err)
+	}
+}
+
+// Files lists every agent session file in the box, for the transcript to send, abandoned conversations too: their sessions may still write.
 func (a *Agents) Files() []string {
-	files, _ := filepath.Glob(filepath.Join(a.config.Sessions, "agents", "*", "*.jsonl"))
-	return slices.DeleteFunc(files, func(file string) bool { return strings.Contains(filepath.Dir(file), abandonedSuffix) })
+	files, _ := filepath.Glob(filepath.Join(a.config.Sessions, "agents", "*", "*", "*.jsonl"))
+	return files
 }
 
 // Turn starts the turn and returns at once. The answer is agent.ended, which every turn sends, however it ends.
@@ -151,7 +207,7 @@ func (a *Agents) run(ctx context.Context, turn contract.AgentTurn, name, slots c
 			return ended
 		}
 	}
-	dir := filepath.Join(a.config.Sessions, "agents", turn.Name)
+	dir := a.conversation(turn)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		ended.Error = err.Error()
 		return ended
@@ -166,7 +222,7 @@ func (a *Agents) run(ctx context.Context, turn contract.AgentTurn, name, slots c
 	}
 	file := session.SessionFile()
 	// A turn or a session that will not settle does not hold the name or the slot: it is left to finish in the background. Its
-	// conversation is moved aside first, so the next turn of the name starts a new one and the two never write the same file.
+	// conversation is marked abandoned first, so the next turn of the name starts a new one in a folder of its own.
 	var abandoned atomic.Bool
 	defer func() {
 		closed := make(chan struct{})
@@ -182,9 +238,7 @@ func (a *Agents) run(ctx context.Context, turn contract.AgentTurn, name, slots c
 			abandoned.Store(true)
 		}
 		if abandoned.Load() {
-			if err := os.Rename(dir, dir+abandonedSuffix+string(turn.ID)); err != nil {
-				log.Printf("agent %s: moving its conversation aside: %v", turn.ID, err)
-			}
+			a.abandon(turn.Name, dir)
 		}
 	}()
 	var offset int64

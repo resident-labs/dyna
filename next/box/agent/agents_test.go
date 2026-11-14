@@ -369,54 +369,94 @@ func (s *unsettled) Start(context.Context, contract.TurnID, []contract.TurnInput
 func (s *unsettled) Abort(context.Context) error { <-s.release; return nil }
 func (s *unsettled) Close() error                { <-s.release; return nil }
 
-// When a turn gives up on a session that will not settle, the name is freed but the conversation is not: the next persistent turn
-// starts a new one, so the old session's late writes and the new turn's never share a file.
+// When a turn gives up on a session that will not settle, the name is freed but the conversation is not: the next persistent turn starts
+// a new one in a folder of its own, so the old session's late writes, which PiG makes by reopening its file's path, and the new turn's
+// never share a file.
 func TestAnAbandonedConversationIsNotResumedByTheNextTurn(t *testing.T) {
 	was := agentSettleFor(30 * time.Millisecond)
 	defer agentSettleFor(was)
 	sessions := t.TempDir()
-	dir := filepath.Join(sessions, "agents", "advisor")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	old := filepath.Join(sessions, "agents", "advisor", "00000000000000000001")
+	if err := os.MkdirAll(old, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	file := filepath.Join(dir, "existing.jsonl")
-	if err := os.WriteFile(file, []byte("existing conversation"), 0o600); err != nil {
+	file := filepath.Join(old, "existing.jsonl")
+	if err := os.WriteFile(file, []byte("existing conversation\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	first := &unsettled{fakeAgent: &fakeAgent{file: file, aborted: make(chan struct{})}, release: make(chan struct{})}
 	defer close(first.release)
 	engine := newAgentRecorder()
 	var opens atomic.Int32
-	resumed := make(chan []string, 1)
+	type opened struct {
+		dir   string
+		found []string
+	}
+	reopened := make(chan opened, 2)
 	agents := NewAgents(context.Background(), AgentsConfig{
 		Engine: engine, Transcript: NewTranscript(&transcriptEngine{}, sessions), Sessions: sessions,
 		Open: func(_ context.Context, _ contract.AgentTurn, dir string, _ func()) (agentSession, error) {
+			found, _ := filepath.Glob(filepath.Join(dir, "*.jsonl")) // how pig.Open picks the conversation it resumes
+			reopened <- opened{dir, found}
 			if opens.Add(1) == 1 {
 				return first, nil
 			}
-			// This is how pig.Open picks the conversation it resumes.
-			found, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
-			resumed <- found
 			done := make(chan struct{})
 			close(done)
 			return &fakeAgent{file: filepath.Join(dir, "new.jsonl"), hold: done, aborted: make(chan struct{})}, nil
 		},
 	})
 	agents.Turn(contract.AgentTurn{ID: "one", Name: "advisor", Persist: true, TimeoutMS: 50})
-	if ended := engine.wait(t); ended.Outcome != contract.TurnStopped {
+	if got := <-reopened; got.dir != old || len(got.found) != 1 {
+		t.Fatalf("the first turn did not resume the conversation on disk: %+v", got)
+	}
+	if ended := engine.wait(t); ended.Outcome != contract.TurnStopped || ended.Fresh {
 		t.Fatalf("first %+v", ended)
 	}
 	agents.Turn(contract.AgentTurn{ID: "two", Name: "advisor", Persist: true})
 	second := engine.wait(t)
-	if found := <-resumed; len(found) != 0 || !second.Fresh {
-		t.Fatalf("the next turn found %v to resume, fresh=%v", found, second.Fresh)
+	got := <-reopened
+	if got.dir == old || len(got.found) != 0 || !second.Fresh {
+		t.Fatalf("the next turn opened %+v, fresh=%v: it must start its own conversation", got, second.Fresh)
 	}
-	if _, err := os.Stat(filepath.Join(sessions, "agents", "advisor.abandoned-one", "existing.jsonl")); err != nil {
-		t.Fatalf("the abandoned conversation was not kept aside: %v", err)
+	// The old session writes late, through the path it holds.
+	late, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, f := range agents.Files() {
-		if strings.Contains(f, "abandoned") {
-			t.Fatalf("an abandoned conversation is sent as transcript: %s", f)
+	if _, err := late.WriteString("late write\n"); err != nil {
+		t.Fatal(err)
+	}
+	late.Close()
+	if data, _ := os.ReadFile(file); !strings.Contains(string(data), "late write") {
+		t.Fatal("the late write did not land in the old conversation")
+	}
+	if found, _ := filepath.Glob(filepath.Join(sessions, "agents", "advisor", "*.jsonl")); len(found) != 0 {
+		t.Fatalf("a late write recreated a file outside any conversation: %v", found)
+	}
+	if found, _ := filepath.Glob(filepath.Join(got.dir, "*.jsonl")); len(found) != 0 {
+		t.Fatalf("the old session's late write reached the new conversation: %v", found)
+	}
+}
+
+// A restarted box clears the conversations a run gave up on, and every generation older than a name's newest; with the newest marked
+// abandoned, the one before it is the newest that counts.
+func TestARestartedBoxClearsAbandonedAndOldConversations(t *testing.T) {
+	sessions := t.TempDir()
+	for _, generation := range []string{"01", "02", "03", "04"} {
+		if err := os.MkdirAll(filepath.Join(sessions, "agents", "advisor", generation), 0o700); err != nil {
+			t.Fatal(err)
 		}
+		if err := os.WriteFile(filepath.Join(sessions, "agents", "advisor", generation, "a.jsonl"), []byte("x\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(sessions, "agents", "advisor", "04", abandonedMarker), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	NewAgents(context.Background(), AgentsConfig{Sessions: sessions})
+	kept, _ := filepath.Glob(filepath.Join(sessions, "agents", "advisor", "*"))
+	if len(kept) != 1 || filepath.Base(kept[0]) != "03" {
+		t.Fatalf("kept %v, want only generation 03", kept)
 	}
 }
