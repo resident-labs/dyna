@@ -622,7 +622,9 @@ const AdvisorRefusal = "the advisor answers root; it does not act in the room"
 
 // AdvisorRequest is root's prompt for the room's advisor.
 type AdvisorRequest struct {
-	Prompt string `json:"prompt" desc:"What the advisor needs: the task, what you found so far and what you want judged. It can read your transcript, so point to evidence rather than pasting it."`
+	Prompt string `json:"prompt"`
+	// ToolCallID is the call that carries the request, which the box fills in: the advisor's steps show under that call.
+	ToolCallID string `json:"toolCallId,omitempty"`
 }
 
 // AdvisorResponse is the final text of the advisor's turn.
@@ -851,6 +853,7 @@ type SessionWorkResponse struct {
 type TranscriptReadRequest struct {
 	Session   SessionID      `json:"session"`
 	Step      string         `json:"step,omitempty"`
+	Agent     AgentID        `json:"agent,omitempty"` // reads one in-box agent's turn instead, by its ID
 	Turn      TurnID         `json:"turn,omitempty"`
 	Before    TurnID         `json:"before,omitempty"`
 	Limit     int            `json:"limit,omitempty"`
