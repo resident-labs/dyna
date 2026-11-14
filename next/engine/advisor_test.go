@@ -512,8 +512,8 @@ func mustEventID(t *testing.T, s *Service, ctx context.Context, seq int64) contr
 func TestAnAgentWhoseCallDiedWithTheEngineIsStoppedWhenItsBoxReconnects(t *testing.T) {
 	r := newAdvisorRig(t)
 	turn := r.ask(r.ctx, "call_1")
-	if turn.Deadline.IsZero() || !turn.Deadline.After(r.now()) {
-		t.Fatalf("the box was given no deadline: %+v", turn)
+	if turn.TimeoutMS != agentTimeout.Milliseconds() {
+		t.Fatalf("the box was given no timeout: %+v", turn)
 	}
 	r.restart()
 	handle, _ := r.s.live.CreateSession(r.root)

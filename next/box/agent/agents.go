@@ -22,7 +22,14 @@ const agentToolCalls = 40
 const agentCapNotice = "You have used all 40 of your tool calls. Do not call another tool: answer now with what you have found, and say what you did not get to."
 
 // agentSettle is how long a stopped agent has to settle its streaming message before its turn is given up.
-const agentSettle = 5 * time.Second
+var agentSettle = 5 * time.Second
+
+// agentSettleFor sets the bound for a test, and returns the old one.
+func agentSettleFor(d time.Duration) time.Duration {
+	old := agentSettle
+	agentSettle = d
+	return old
+}
 
 var errAgentCap = errors.New("the agent kept calling tools after it was told to answer")
 
@@ -79,9 +86,9 @@ func (a *Agents) Files() []string {
 // Turn starts the turn and returns at once. The answer is agent.ended, which every turn sends, however it ends.
 func (a *Agents) Turn(turn contract.AgentTurn) {
 	ctx, cancel := context.WithCancel(a.ctx)
-	if !turn.Deadline.IsZero() {
+	if turn.TimeoutMS > 0 {
 		cancel()
-		ctx, cancel = context.WithDeadline(a.ctx, turn.Deadline)
+		ctx, cancel = context.WithTimeout(a.ctx, time.Duration(turn.TimeoutMS)*time.Millisecond)
 	}
 	a.mu.Lock()
 	if _, ok := a.running[turn.ID]; ok {
@@ -153,9 +160,19 @@ func (a *Agents) run(ctx context.Context, turn contract.AgentTurn, name, slots c
 		return ended
 	}
 	file := session.SessionFile()
+	// A session that will not close does not hold the name or the slot: it is left to close in the background.
 	defer func() {
-		_ = session.Close()
-		a.config.Transcript.syncLogged(context.WithoutCancel(ctx), file)
+		closed := make(chan struct{})
+		go func() {
+			_ = session.Close()
+			a.config.Transcript.syncLogged(context.WithoutCancel(ctx), file)
+			close(closed)
+		}()
+		select {
+		case <-closed:
+		case <-time.After(agentSettle):
+			log.Printf("agent %s: its session is still closing; it closes in the background", turn.ID)
+		}
 	}()
 	var offset int64
 	if info, err := os.Stat(file); err == nil {
@@ -200,10 +217,12 @@ func (a *Agents) run(ctx context.Context, turn contract.AgentTurn, name, slots c
 	select {
 	case finished = <-done:
 	case <-ctx.Done():
-		_ = session.Abort(context.WithoutCancel(ctx))
+		// Abort waits for the session to be idle, so it runs apart: the bound covers it and the settling of the turn together.
+		go func() { _ = session.Abort(context.WithoutCancel(ctx)) }()
 		select {
 		case finished = <-done:
 		case <-time.After(agentSettle):
+			log.Printf("agent %s: its turn did not settle after the abort; it is reported with the text it had", turn.ID)
 		}
 	}
 	result, err := finished.result, finished.err

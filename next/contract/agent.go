@@ -1,7 +1,5 @@
 package contract
 
-import "time"
-
 const (
 	MethodAgentStarted Method = "agent.started"
 	MethodAgentEnded   Method = "agent.ended"
@@ -31,8 +29,9 @@ type AgentTurn struct {
 	FreshPrompt string `json:"freshPrompt,omitempty"`
 	// Orient puts the parent's session file and the state of its working repository ahead of the prompt.
 	Orient bool `json:"orient,omitempty"`
-	// Deadline is when the box ends the turn itself, whether or not the engine is still there to stop it. Zero sets none.
-	Deadline time.Time `json:"deadline,omitzero"`
+	// TimeoutMS is how long after it receives the turn the box ends it itself, whether or not the engine is still there to stop it. A
+	// duration, not a time, so a box clock that differs from the engine's changes nothing. Zero sets none.
+	TimeoutMS int64 `json:"timeoutMs,omitempty"`
 	// Turn and Delivery are the parent's running turn and one of its deliveries, which file the agent's transcript under that turn.
 	Turn     TurnID      `json:"turn"`
 	Delivery DeliverySeq `json:"delivery"`

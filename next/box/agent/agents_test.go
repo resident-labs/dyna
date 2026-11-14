@@ -248,7 +248,7 @@ func TestStopEndsAnAgentAndTheSameNameWaits(t *testing.T) {
 // A turn that passes its deadline is ended by the box itself, with the text it had, whether or not the engine is there to stop it.
 func TestAnAgentTurnEndsAtItsDeadline(t *testing.T) {
 	agents, engine := fakeAgents(t, func(f *fakeAgent) { f.hold = make(chan struct{}) })
-	agents.Turn(contract.AgentTurn{ID: "late", Name: "advisor", Deadline: time.Now().Add(100 * time.Millisecond)})
+	agents.Turn(contract.AgentTurn{ID: "late", Name: "advisor", TimeoutMS: 100})
 	ended := engine.wait(t)
 	if ended.Outcome != contract.TurnStopped || ended.Final != "partial text" || !strings.Contains(ended.Error, "ran out of time") {
 		t.Fatalf("ended %+v", ended)
@@ -297,5 +297,60 @@ func TestStoppingAStreamingAgentKeepsItsPartialAnswer(t *testing.T) {
 	agents.Stop("call_1")
 	if ended := engine.wait(t); ended.Outcome != contract.TurnStopped || ended.Final != "partial answer" {
 		t.Fatalf("ended %+v", ended)
+	}
+}
+
+// blockedAbort is a session whose Abort waits for it to be idle, which it never is until released.
+type blockedAbort struct {
+	*fakeAgent
+	entered, release chan struct{}
+	once             sync.Once
+}
+
+func (s *blockedAbort) Abort(ctx context.Context) error {
+	s.once.Do(func() { close(s.entered) })
+	<-s.release
+	return s.fakeAgent.Abort(ctx)
+}
+
+// A stop whose Abort never returns still ends the turn within the settle bound, and frees the name for the next turn.
+func TestAStopWhoseAbortBlocksStillEndsTheTurnAndFreesTheName(t *testing.T) {
+	was := agentSettleFor(100 * time.Millisecond)
+	defer agentSettleFor(was)
+	sessions := t.TempDir()
+	blocked := &blockedAbort{fakeAgent: &fakeAgent{file: filepath.Join(sessions, "a.jsonl"), aborted: make(chan struct{}), hold: make(chan struct{})}, entered: make(chan struct{}), release: make(chan struct{})}
+	defer close(blocked.release)
+	engine := newAgentRecorder()
+	opened := 0
+	agents := NewAgents(context.Background(), AgentsConfig{
+		Engine: engine, Transcript: NewTranscript(&transcriptEngine{}, sessions), Sessions: sessions,
+		Open: func(context.Context, contract.AgentTurn, string, func()) (agentSession, error) {
+			opened++
+			if opened == 1 {
+				return blocked, nil
+			}
+			return &fakeAgent{file: filepath.Join(sessions, "b.jsonl"), aborted: make(chan struct{}), hold: func() chan struct{} { c := make(chan struct{}); close(c); return c }()}, nil
+		},
+	})
+	agents.Turn(contract.AgentTurn{ID: "stuck", Name: "advisor"})
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		engine.mu.Lock()
+		running := len(engine.started)
+		engine.mu.Unlock()
+		if running == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the agent never started")
+		}
+	}
+	agents.Stop("stuck")
+	<-blocked.entered
+	if ended := engine.wait(t); ended.ID != "stuck" || ended.Outcome != contract.TurnStopped {
+		t.Fatalf("the stuck agent ended %+v", ended)
+	}
+	agents.Turn(contract.AgentTurn{ID: "next", Name: "advisor"})
+	if ended := engine.wait(t); ended.ID != "next" || ended.Outcome != contract.TurnCompleted {
+		t.Fatalf("the next agent ended %+v", ended)
 	}
 }
