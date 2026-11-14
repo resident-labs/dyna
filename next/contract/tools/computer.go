@@ -7,7 +7,7 @@ func typeOf(v any) reflect.Type { return reflect.TypeOf(v) }
 // The computer's actions are v1's, one to a call (spec 5.14). The box handles every action itself (box/computer).
 
 // computerHelp opens the tool's description, for every action.
-const computerHelp = "The box desktop is 1280x800, with Chromium in a window and a taskbar; any action but stop starts it."
+const computerHelp = "The box desktop is 1280x800, with Chromium in a window and a taskbar; any action but stop starts it. Computer tool actions in a box run one at a time, so parallel calls queue. Chromium page actions time out after 30 s; if a page screenshot times out, take a desktop screenshot or use the visual tool."
 
 // computerFields describes the fields several actions take, once, so the tool's flat schema reads the same for each.
 var computerFields = map[string]string{
@@ -86,7 +86,7 @@ type ComputerScreenshotRequest struct {
 	Y      *int `json:"y,omitempty"`
 	Width  int  `json:"width,omitempty"`
 	Height int  `json:"height,omitempty"`
-	Page   bool `json:"page,omitempty" desc:"Capture Chromium's whole page, beyond its window, instead of the desktop."`
+	Page   bool `json:"page,omitempty" desc:"Capture Chromium's page beyond its window, clipped to 16384 px tall."`
 }
 
 type ComputerLaunchRequest struct {

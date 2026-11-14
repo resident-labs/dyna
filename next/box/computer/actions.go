@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -392,8 +393,18 @@ func (a Agent) Start(ctx context.Context) (Started, error) {
 	return a.post(ctx, "/computer", StartRequest{})
 }
 
+var actionMu sync.Mutex
+
+// pageActionTimeout bounds a complete DevTools action. A variable lets tests avoid a 30 second wait.
+var pageActionTimeout = 30 * time.Second
+
 // Do runs one action. The text of its result starts with a report of anything of the desktop that exited since.
 func Do(ctx context.Context, agent Agent, action Action, r Request) (Result, error) {
+	actionMu.Lock()
+	defer actionMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
 	if err := Validate(action, r); err != nil {
 		return Result{}, err
 	}
@@ -414,7 +425,23 @@ func Do(ctx context.Context, agent Agent, action Action, r Request) (Result, err
 	return result, err
 }
 
-func run(ctx context.Context, agent Agent, base string, action Action, r Request) (Result, error) {
+func run(ctx context.Context, agent Agent, base string, action Action, r Request) (_ Result, resultErr error) {
+	if action == Open || action == Text || (action == Screenshot && r.Page) || ((action == Click || action == Type) && r.Selector != "") {
+		parent := ctx
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, pageActionTimeout)
+		defer cancel()
+		defer func() {
+			if resultErr != nil && ctx.Err() == context.DeadlineExceeded && parent.Err() == nil {
+				if action == Screenshot {
+					resultErr = fmt.Errorf("the page screenshot took over %s; take a desktop screenshot or use the visual tool", pageActionTimeout)
+				} else {
+					resultErr = fmt.Errorf("the page %s action took over %s; try again or use the desktop", action, pageActionTimeout)
+				}
+			}
+		}()
+	}
+
 	page := func(do func(*DevTools) (string, error)) (Result, error) {
 		d, err := Connect(ctx, base)
 		if err != nil {
@@ -450,8 +477,12 @@ func run(ctx context.Context, agent Agent, base string, action Action, r Request
 				return Result{}, err
 			}
 			defer d.Close()
-			shot, err := pageScreenshot(ctx, d)
-			return Result{PNG: shot, Text: "The whole page in Chromium."}, err
+			shot, clipped, err := pageScreenshot(ctx, d)
+			text := "The whole page in Chromium."
+			if clipped {
+				text = "The first 16384 px of the page in Chromium; the taller page was clipped."
+			}
+			return Result{PNG: shot, Text: text}, err
 		}
 		width, height := desktopSize()
 		region, text := Rect{0, 0, width, height}, fmt.Sprintf("The %s desktop.", Size)

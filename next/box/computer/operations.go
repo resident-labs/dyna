@@ -136,27 +136,30 @@ func elementPoint(ctx context.Context, d *DevTools, selector string) (int, int, 
 }
 
 // pageScreenshot captures the whole page, beyond the window, as a PNG.
-func pageScreenshot(ctx context.Context, d *DevTools) ([]byte, error) {
+func pageScreenshot(ctx context.Context, d *DevTools) ([]byte, bool, error) {
 	metrics, err := d.Call(ctx, "Page.getLayoutMetrics", nil)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var layout struct {
 		Content viewport `json:"cssContentSize"`
 	}
 	if err := json.Unmarshal(metrics, &layout); err != nil {
-		return nil, err
+		return nil, false, err
 	}
+	clipped := layout.Content.Height > 16384
+	layout.Content.Height = min(layout.Content.Height, 16384)
 	layout.Content.Scale = 1
 	data, err := d.call(ctx, "Page.captureScreenshot", params{Format: "png", CaptureBeyondViewport: true, Clip: &layout.Content})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var result struct {
 		Data string `json:"data"`
 	}
 	if err = json.Unmarshal(data, &result); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return base64.StdEncoding.DecodeString(result.Data)
+	png, err := base64.StdEncoding.DecodeString(result.Data)
+	return png, clipped, err
 }
