@@ -3,7 +3,6 @@ package engine
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -190,7 +189,7 @@ func (s *Service) AllowedModels(ctx context.Context, session store.Session) ([]s
 	// Root's advisor runs in root's box and calls the model through root's route.
 	if session.Root {
 		advisor, err := s.store.RoomAdvisorProfile(ctx, session.Room)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err != nil {
 			return nil, false, err
 		}
 		if advisor != "" {
