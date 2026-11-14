@@ -3,7 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"log"
 
 	"github.com/resident-labs/dyna/engine/discord"
 )
@@ -16,6 +16,7 @@ func (s *Service) discordRestoreDirectory(ctx context.Context, client *discord.C
 		return err
 	}
 	guilds := map[string]bool{}
+guildLoop:
 	for _, route := range routes {
 		if guilds[route.Guild] {
 			continue
@@ -35,20 +36,24 @@ func (s *Service) discordRestoreDirectory(ctx context.Context, client *discord.C
 		} {
 			result, err := client.API(ctx, "GET", request.path, nil, "")
 			if err != nil {
-				return err
+				log.Printf("Discord directory guild %s: %v", route.Guild, err)
+				continue guildLoop
 			}
 			if result.Status != 200 {
-				return fmt.Errorf("Discord directory %s returned %d", request.path, result.Status)
+				log.Printf("Discord directory guild %s: %s returned %d", route.Guild, request.path, result.Status)
+				continue guildLoop
 			}
 			if err := json.Unmarshal(result.Body, request.target); err != nil {
-				return err
+				log.Printf("Discord directory guild %s: %v", route.Guild, err)
+				continue guildLoop
 			}
 		}
 		server.ID = route.Guild
 		server.Threads = threads.Threads
 		data, err := json.Marshal(server)
 		if err != nil {
-			return err
+			log.Printf("Discord directory guild %s: %v", route.Guild, err)
+			continue
 		}
 		s.discordDirectory.Apply("GUILD_CREATE", data)
 	}

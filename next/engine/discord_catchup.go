@@ -42,18 +42,11 @@ func (s *Service) discordCatchUp(ctx context.Context, client *discord.Client, gu
 }
 
 func (s *Service) discordCatchUpChannel(ctx context.Context, client *discord.Client, guild, channel string, receive func(context.Context, discord.Message) error) (int, error) {
-	after, err := s.store.DiscordCursor(ctx, channel)
-	if err != nil {
-		return 0, err
-	}
 	floor := uint64(time.Now().Add(-10*time.Minute).UnixMilli()-1420070400000) << 22
-	id, _ := strconv.ParseUint(after, 10, 64)
-	if id < floor {
-		after = strconv.FormatUint(floor, 10)
-	}
+	after := strconv.FormatUint(floor, 10)
 	count := 0
 	for {
-		result, err := client.API(ctx, "GET", "/api/v10/channels/"+channel+"/messages?after="+after+"&limit=50", nil, "")
+		result, err := client.API(ctx, "GET", "/api/v10/channels/"+channel+"/messages?after="+after+"&limit=100", nil, "")
 		if err != nil {
 			return count, err
 		}
@@ -107,7 +100,7 @@ func (s *Service) discordCatchUpChannel(ctx context.Context, client *discord.Cli
 			after = m.ID
 			count++
 		}
-		if len(messages) < 50 {
+		if len(messages) < 100 {
 			return count, nil
 		}
 	}

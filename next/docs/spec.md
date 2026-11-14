@@ -142,7 +142,6 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `room_github_accounts` |
 | `discord_routes` |
 | `discord_dm_routes` |
-| `discord_cursors` | Highest Discord message taken in per server channel; bounds restart catch-up. |
 | `discord_outbox` |
 | `discord_messages` |
 | `discord_owned` |

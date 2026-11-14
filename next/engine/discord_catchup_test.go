@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,6 +42,54 @@ func TestDiscordCatchUpWindowAndDedupe(t *testing.T) {
 	}
 	events, err := f.s.store.Events(f.ctx, f.room, 0, 100, []contract.EventType{"discord.message"})
 	if err != nil || len(events) != 1 {
+		t.Fatalf("events: %d %v", len(events), err)
+	}
+}
+
+func TestCatchUpBlockedHistoryAndNewLiveMessageThenRestart(t *testing.T) {
+	f := discordFixture(t)
+	snowflake := func(when time.Time) string { return strconv.FormatUint(uint64(when.UnixMilli()-1420070400000)<<22, 10) }
+	older, newer := snowflake(time.Now().Add(-time.Minute)), snowflake(time.Now())
+	blocked, release := make(chan struct{}), make(chan struct{})
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/members/") {
+			fmt.Fprint(w, `{"roles":["10"]}`)
+			return
+		}
+		if r.URL.Query().Get("after") == "" {
+			fmt.Fprint(w, `[]`)
+			return
+		}
+		if requests.Add(1) == 1 {
+			close(blocked)
+			<-release
+		}
+		fmt.Fprintf(w, `[{"id":%q,"author":{"id":"1","username":"owner"}},{"id":%q,"author":{"id":"1","username":"owner"}}]`, newer, older)
+	}))
+	defer srv.Close()
+	client := &discord.Client{HTTP: srv.Client(), Endpoint: srv.URL, Token: "test-secret", BotID: "900"}
+	receive := func(ctx context.Context, m discord.Message) error { return f.s.discordInput(ctx, client, m) }
+	done := make(chan error, 1)
+	go func() { _, err := f.s.discordCatchUpChannel(f.ctx, client, "100", "200", receive); done <- err }()
+	<-blocked
+	var live discord.Message
+	live.ID, live.Guild, live.Channel, live.Author.ID = newer, "100", "200", "1"
+	err := receive(f.ctx, live)
+	close(release)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	// A new process has no cursor: it repeats the whole bounded window, even
+	// though the newer live message arrived while the first history was blocked.
+	if _, err := f.s.discordCatchUpChannel(f.ctx, client, "100", "200", receive); err != nil {
+		t.Fatal(err)
+	}
+	events, err := f.s.store.Events(f.ctx, f.room, 0, 100, []contract.EventType{"discord.message"})
+	if err != nil || len(events) != 2 {
 		t.Fatalf("events: %d %v", len(events), err)
 	}
 }

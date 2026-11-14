@@ -2,6 +2,7 @@ package discord
 
 import (
 	"context"
+	"fmt"
 	"github.com/coder/websocket"
 	"net/http"
 	"net/http/httptest"
@@ -120,5 +121,38 @@ func TestInvalidSessionEnablesFreshCatchUp(t *testing.T) {
 	g.connect(ctx, &session, &resume, &seq)
 	if session != "new" {
 		t.Fatal("fresh READY not handled")
+	}
+}
+
+func TestPrepareResumeOnceAndFailureDoesNotBlockConnect(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	defer cancel()
+	var connections atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.CloseNow()
+		c.Write(ctx, websocket.MessageText, []byte(`{"op":10,"d":{"heartbeat_interval":10000}}`))
+		_, data, err := c.Read(ctx)
+		if err != nil {
+			return
+		}
+		if !strings.Contains(string(data), `"op":6`) {
+			t.Errorf("not RESUME: %s", data)
+		}
+		if connections.Add(1) == 1 {
+			c.Write(ctx, websocket.MessageText, []byte(`{"op":7,"d":null}`))
+			return
+		}
+		cancel()
+	}))
+	defer srv.Close()
+	calls := 0
+	g := Gateway{Client: &Client{HTTP: srv.Client(), Token: "secret"}, URL: strings.Replace(srv.URL, "http:", "ws:", 1), LoadResume: func(context.Context) (ResumeState, error) { return ResumeState{Session: "saved", Seq: 55}, nil }, PrepareResume: func(context.Context) error { calls++; return fmt.Errorf("unavailable guild") }}
+	g.Run(ctx)
+	if calls != 1 || connections.Load() != 2 {
+		t.Fatalf("prepare %d, connections %d", calls, connections.Load())
 	}
 }

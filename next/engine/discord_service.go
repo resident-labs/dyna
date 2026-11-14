@@ -89,13 +89,7 @@ func (s *Service) runDiscord(ctx context.Context, gateway string) {
 						}, Client: client, URL: gateway, Bot: b.ID, Directory: &s.discordDirectory, CatchUp: func(ctx context.Context, guild string, receive func(context.Context, discord.Message) error) {
 							s.discordCatchUp(ctx, client, guild, receive)
 						}, Receive: func(ctx context.Context, m discord.Message) error {
-							if err := s.discordInput(ctx, client, m); err != nil {
-								return err
-							}
-							if m.Guild != "" {
-								return s.store.SetDiscordCursor(ctx, m.Channel, m.ID)
-							}
-							return nil
+							return s.discordInput(ctx, client, m)
 						}, Observe: s.discordServerEvent, Lost: &s.discordEventsLost}
 						go func() {
 							defer close(gatewayDone)

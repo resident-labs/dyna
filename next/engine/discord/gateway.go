@@ -64,7 +64,7 @@ type Message struct {
 
 type Gateway struct {
 	LoadResume func(context.Context) (ResumeState, error)
-	// PrepareResume restores routing metadata before any replay is received.
+	// PrepareResume runs once at startup with saved state, before replay is received.
 	PrepareResume    func(context.Context) error
 	SaveResume       func(context.Context, ResumeState) error
 	lastCheckpoint   time.Time
@@ -161,6 +161,11 @@ func (g *Gateway) Run(ctx context.Context) error {
 		}
 		session, resume, seq = state.Session, state.URL, state.Seq
 	}
+	if session != "" && g.PrepareResume != nil {
+		if err := g.PrepareResume(ctx); err != nil {
+			log.Printf("Discord directory rebuild: %v", err)
+		}
+	}
 	delay := 5 * time.Second
 	for ctx.Err() == nil {
 		g.readyAt = time.Time{}
@@ -202,11 +207,6 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 			result = &FatalClose{Code: code, Reason: strings.ReplaceAll(close.Reason, g.Client.Token, "[redacted]")}
 		}
 	}()
-	if *session != "" && g.PrepareResume != nil {
-		if err := g.PrepareResume(ctx); err != nil {
-			return err
-		}
-	}
 	endpoint := g.URL
 	if *resume != "" {
 		endpoint = *resume

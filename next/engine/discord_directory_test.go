@@ -12,14 +12,20 @@ import (
 	"github.com/coder/websocket"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/discord"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 func TestDiscordResumeRestoresNewThreadBeforeReplay(t *testing.T) {
 	f := discordFixture(t)
+	if err := f.s.store.SetDiscordRoute(f.ctx, store.DiscordRoute{Guild: "099", Room: f.room, Session: f.root}, false); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(f.ctx, 3*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/api/v10/guilds/099":
+			w.WriteHeader(http.StatusForbidden)
 		case "/api/v10/guilds/100":
 			fmt.Fprint(w, `{"id":"100","name":"Horizon","roles":[{"id":"11","name":"Bot","tags":{"bot_id":"900"}}]}`)
 		case "/api/v10/guilds/100/channels":

@@ -6,12 +6,11 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 119
+const schemaVersion = 118
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
-	118: {`CREATE TABLE IF NOT EXISTS discord_cursors (channel TEXT PRIMARY KEY, message TEXT NOT NULL)`},
 	117: {`CREATE TABLE IF NOT EXISTS discord_dm_routes (channel TEXT PRIMARY KEY, guild TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE)`},
 	116: {`ALTER TABLE workflow_runs ADD COLUMN released_steps TEXT NOT NULL DEFAULT '[]'`},
 	114: {`ALTER TABLE workflow_runs RENAME COLUMN subject TO key`, `ALTER TABLE workflow_queue RENAME COLUMN subject TO key`, `ALTER TABLE workflow_state RENAME COLUMN subject TO key`, `ALTER TABLE workflow_subscriptions RENAME COLUMN subject_key TO key`, `ALTER TABLE workflow_subscriptions RENAME COLUMN once_only TO latest`, `ALTER TABLE workflow_subscriptions RENAME COLUMN report TO parent`},
