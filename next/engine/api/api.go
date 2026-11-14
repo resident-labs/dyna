@@ -945,9 +945,22 @@ func (a *API) isAdvisor(r *http.Request, c Caller) bool {
 	return ok && service.IsAdvisor(r.Context(), requestCaller(r.Context(), c).Principal)
 }
 
+// advisorStreams are the GET routes outside the method table that a box needs to run at all, or that only read room files.
+// The terminal, voice and computer streams stay refused.
+func advisorStream(r *http.Request, path string) bool {
+	if r.Method != http.MethodGet {
+		return false
+	}
+	switch path {
+	case "box/channel", "events", "shell/watch", "files":
+		return true
+	}
+	return strings.HasPrefix(path, "files/") || strings.HasPrefix(path, "rooms/")
+}
+
 func (a *API) refuseAdvisor(c Caller, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if method, ok := strings.CutPrefix(r.URL.Path, "/v1/"); ok && !advisorReads[contract.Method(method)] && a.isAdvisor(r, c) {
+		if method, ok := strings.CutPrefix(r.URL.Path, "/v1/"); ok && !advisorReads[contract.Method(method)] && !advisorStream(r, method) && a.isAdvisor(r, c) {
 			writeError(w, &contract.Error{Code: contract.ErrForbidden, Message: contract.AdvisorRefusal})
 			return
 		}
