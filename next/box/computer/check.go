@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"image/png"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,7 +43,7 @@ func solidPNG(data []byte) bool {
 func (p *Process) Check(ctx context.Context) string {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	report := "X11, TigerVNC Xvnc, JWM (no compositor), " + Size + ", software rendering."
+	report := "X11, TigerVNC Xvnc, JWM (no compositor), " + Size + ". Renderers below."
 	for _, probe := range []struct {
 		label, command string
 		args           []string
@@ -73,15 +72,16 @@ func (p *Process) Check(ctx context.Context) string {
 	return report
 }
 
-func (p *Process) drawProbe(ctx context.Context, name string, args []string) string {
+func (p *Process) drawProbe(ctx context.Context, name string, args []string) (result string) {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	before, err := windows(ctx)
 	if err != nil {
 		return err.Error()
 	}
+	var output bytes.Buffer
 	p.mu.Lock()
-	app, err := p.spawn(ctx, io.Discard, name, args...)
+	app, err := p.spawn(ctx, &output, "stdbuf", append([]string{"-oL", name}, args...)...)
 	if err == nil {
 		if p.apps == nil {
 			p.apps = map[*program]struct{}{}
@@ -92,7 +92,16 @@ func (p *Process) drawProbe(ctx context.Context, name string, args []string) str
 	if err != nil {
 		return err.Error()
 	}
-	defer app.kill()
+	defer func() {
+		app.kill()
+		<-app.done // Wait also joins the stdout copier before reading its buffer.
+		for _, line := range strings.Split(output.String(), "\n") {
+			if strings.HasPrefix(line, "Selected GPU ") {
+				result += "; " + line
+				break
+			}
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -109,11 +118,11 @@ func (p *Process) drawProbe(ctx context.Context, name string, args []string) str
 			if before[id] {
 				continue
 			}
-			if err := xdotool(ctx, "windowactivate", "--sync", id); err != nil {
-				return err.Error()
-			}
 			region, err := windowRect(ctx, id)
-			if err != nil {
+			if err != nil || region.Width != 256 || region.Height != 256 {
+				continue // Chromium may finish opening concurrently with the first probe.
+			}
+			if err := xdotool(ctx, "windowactivate", "--sync", id); err != nil {
 				return err.Error()
 			}
 			// Ignore the client edges as well as the WM decorations.
