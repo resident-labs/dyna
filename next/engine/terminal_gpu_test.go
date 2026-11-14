@@ -42,7 +42,7 @@ func TestHostListShowsEachCardWithTheVRAMRequestedOfIt(t *testing.T) {
 			got = h.GPUs
 		}
 	}
-	want := []contract.GPU{cards[0], {Index: 1, Name: "GTX 1050 Ti", MemBytes: 4 * box.GiB, RequestedBytes: 3 * box.GiB}}
+	want := []contract.GPU{{Index: 0, Name: cards[0].Name, MemBytes: cards[0].MemBytes, FreeBytes: box.GPUUsable(cards[0])}, {Index: 1, Name: "GTX 1050 Ti", MemBytes: 4 * box.GiB, RequestedBytes: 3 * box.GiB, FreeBytes: box.GPUUsable(cards[1]) - 3*box.GiB}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("cards %+v, want %+v", got, want)
 	}

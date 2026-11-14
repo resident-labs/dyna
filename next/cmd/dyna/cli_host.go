@@ -104,7 +104,7 @@ func hostCommand(getClient func() client) *cobra.Command {
 	}}
 	limitHost.Flags().StringSliceVar(&limitRooms, "room", nil, "Room ID this host serves (repeatable)")
 	limitHost.Flags().BoolVar(&limitAll, "all", false, "Serve every room")
-	list := &cobra.Command{Use: "list", Args: cobra.NoArgs, Short: "Show each host's disk use, switches, CI scale and runners", RunE: func(cmd *cobra.Command, _ []string) error {
+	list := &cobra.Command{Use: "list", Args: cobra.NoArgs, Short: "Show each host's disk use, switches, CI scale, runners and GPUs", RunE: func(cmd *cobra.Command, _ []string) error {
 		r, err := getClient().HostList(cmd.Context(), contract.HostListRequest{})
 		if err != nil {
 			return err
@@ -159,6 +159,9 @@ func hostCommand(getClient func() client) *cobra.Command {
 				if h.EngineHost {
 					state += "\tengine host"
 				}
+			}
+			for _, gpu := range h.GPUs {
+				state += fmt.Sprintf("\tGPU %d %s: %s memory, %s free", gpu.Index, gpu.Name, humanize.IBytes(uint64(gpu.MemBytes)), humanize.IBytes(uint64(gpu.FreeBytes)))
 			}
 			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n", h.Name, used, total, state); err != nil {
 				return err

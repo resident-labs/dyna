@@ -5,7 +5,7 @@ import type { HostSummary, Pool } from "./contract.gen.ts";
 
 const pool = (name: string, more: Partial<Pool> = {}): Pool => ({ name, max: 4, nodes: 0, idle: 1_800_000, ...more });
 const host = (name: string, pool?: string): HostSummary =>
-  ({ name, pool, reachable: true, boxes: 0, cpus: 4, memBytes: 4, cpuUsed: 0, memUsed: 0, diskBytes: 0, diskUsed: 0, diskLow: false, shared: [], history: null });
+  ({ state: "ready", cpuFree: 0, memFree: 0, diskFree: 0, name, pool, reachable: true, boxes: 0, cpus: 4, memBytes: 4, cpuUsed: 0, memUsed: 0, diskBytes: 0, diskUsed: 0, diskLow: false, shared: [], history: null });
 
 test("pools sort by name with digits as numbers, and the engine's list is not changed", () => {
   const items = [pool("gpu-10"), pool("ci-burst"), pool("gpu-2"), pool("eu-small"), pool("gpu-9")];

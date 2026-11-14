@@ -375,7 +375,7 @@ func TestPoolCommandsMapFlags(t *testing.T) {
 		t.Fatalf("%+v", f.roomHosts)
 	}
 	runCLI(t, f, "room", "hosts", "horizon", "--clear")
-	if f.roomHosts.Room != "horizon" || len(f.roomHosts.Only) != 0 {
+	if f.roomHosts.Room != "horizon" || len(f.roomHosts.Only) != 0 || !f.roomHosts.Clear {
 		t.Fatalf("%+v", f.roomHosts)
 	}
 	for _, args := range [][]string{{"room", "hosts", "horizon"}, {"room", "hosts", "horizon", "--clear", "--only", "boats"}} {
@@ -687,6 +687,18 @@ func TestHostListPrintsDiskState(t *testing.T) {
 	out := runCLI(t, f, "host", "list")
 	if out != "control-plane\t40 GiB\t100 GiB\tok\tengine machine: host exec and room folders only; same machine as worker\nworker\t90 GiB\t100 GiB\tlow\tagents on\tci on (scale 3, 2 runners now)\tengine host\n" {
 		t.Fatalf("output=%q", out)
+	}
+}
+func TestHostListPrintsEachGPU(t *testing.T) {
+	f := &fakeClient{hosts: []contract.HostSummary{{Name: "gpu", GPUs: []contract.GPU{
+		{Index: 0, Name: "RTX 3090", MemBytes: 24 << 30, FreeBytes: 10 << 30},
+		{Index: 1, Name: "GTX 1050 Ti", MemBytes: 4 << 30},
+	}}}}
+	out := runCLI(t, f, "host", "list")
+	for _, want := range []string{"GPU 0 RTX 3090: 24 GiB memory, 10 GiB free", "GPU 1 GTX 1050 Ti: 4.0 GiB memory, 0 B free"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output %q missing %q", out, want)
+		}
 	}
 }
 func TestDeviceRevokeMapsID(t *testing.T) {

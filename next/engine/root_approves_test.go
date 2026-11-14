@@ -24,7 +24,7 @@ func TestRootApprovesKinds(t *testing.T) {
 			return res.Operation.ID, problem
 		}},
 		{contract.RootApprovesHosts, func(s *Service, who contract.Principal, room contract.RoomID) (contract.OpID, *contract.Error) {
-			res, problem := s.RoomHosts(t.Context(), who, contract.RoomHostsRequest{Room: room})
+			res, problem := s.RoomHosts(t.Context(), who, contract.RoomHostsRequest{Room: room, Clear: true})
 			return res.Operation, problem
 		}},
 		{contract.RootApprovesPools, func(s *Service, who contract.Principal, room contract.RoomID) (contract.OpID, *contract.Error) {

@@ -7,7 +7,7 @@ import type { HostSummary, RoomImage, RunnerImageProblem } from "./contract.gen.
 const image = (room: string, name: string, more: Partial<RoomImage> = {}): RoomImage => ({ room, name, id: `${room}-${name}`, files: 3, bytes: 2048, ...more });
 const names = new Map([["r1", "payments"], ["r2", "Infra"], ["r3", "data-pipeline"], ["r10", "omarchy"]]);
 const host = (name: string, runnerImages?: RunnerImageProblem[] | null): HostSummary =>
-  ({ name, reachable: true, boxes: 0, cpus: 4, memBytes: 4, cpuUsed: 0, memUsed: 0, diskBytes: 0, diskUsed: 0, diskLow: false, shared: [], history: null, runnerImages });
+  ({ state: "ready", cpuFree: 0, memFree: 0, diskFree: 0, name, reachable: true, boxes: 0, cpus: 4, memBytes: 4, cpuUsed: 0, memUsed: 0, diskBytes: 0, diskUsed: 0, diskLow: false, shared: [], history: null, runnerImages });
 
 test("an image's key is its room and its name, so two rooms' images of one name differ", () => {
   assert.equal(imageKey(image("r1", "node-22")), "r1:node-22");
