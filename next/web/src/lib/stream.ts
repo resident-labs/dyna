@@ -18,7 +18,15 @@ export async function recoverEventStream(url: string, version: number, signal?: 
   try {
     const response = await fetch(url, { credentials: "same-origin", signal: bounded }).catch(() => undefined);
     if (!response) return "unavailable";
-    const result = await recoverConnect(response, version);
+    // Cancelling this probe only stops its wait. Other callers still share the
+    // separately bounded renewal, so the probe must not abort that operation.
+    let aborted!: () => void;
+    const cancelled = new Promise<"unavailable">(resolve => { aborted = () => resolve("unavailable"); });
+    bounded.addEventListener("abort", aborted, { once: true });
+    if (bounded.aborted) aborted();
+    let result: Renewal | undefined;
+    try { result = await Promise.race([recoverConnect(response, version), cancelled]); }
+    finally { bounded.removeEventListener("abort", aborted); }
     await response.body?.cancel().catch(() => {});
     return result;
   } finally { clearTimeout(timer); }

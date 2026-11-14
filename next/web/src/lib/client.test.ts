@@ -173,3 +173,33 @@ test("background renewal failure leaves working API access usable without blocki
     assert.match(listener, /state === "ended"/);
   } finally { globalThis.fetch = original; }
 });
+
+test("probe timeout and disposal stop waiting for a hung shared renewal without cancelling it", async () => {
+  const original = globalThis.fetch;
+  let renewalSignal: AbortSignal | undefined;
+  let began!: () => void;
+  const started = new Promise<void>(resolve => { began = resolve; });
+  globalThis.fetch = async (url, options) => {
+    if (url !== "/api/connect/renew") return Response.json({ code: "renew" }, { status: 401 });
+    renewalSignal = options?.signal ?? undefined;
+    began();
+    return new Promise((_resolve, reject) => renewalSignal!.addEventListener("abort", () => reject(new Error("renewal timed out")), { once: true }));
+  };
+  try {
+    const probe = recoverEventStream("/v1/events", connectVersion(), undefined, 25);
+    await started;
+    const shared = renewConnect();
+    assert.equal(await probe, "unavailable");
+    assert.equal(renewalSignal?.aborted, false);
+    const controller = new AbortController();
+    const disposed = recoverEventStream("/v1/events", connectVersion(), controller.signal);
+    controller.abort();
+    assert.equal(await disposed, "unavailable");
+    assert.equal(renewalSignal?.aborted, false);
+    // The renewal has its own 10-second bound, independent of the probe.
+    assert.equal(await shared, undefined);
+    assert.equal(renewalSignal?.aborted, true);
+    globalThis.fetch = async () => Response.json({});
+    assert.equal((await renewConnect())?.ok, true);
+  } finally { globalThis.fetch = original; }
+});
