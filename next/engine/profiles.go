@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -184,6 +185,18 @@ func (s *Service) AllowedModels(ctx context.Context, session store.Session) ([]s
 		// A profile removed during a run has no models left, so its workers fail like any refused call.
 		if _, models, err := s.profiles.Model(name); err == nil {
 			allowed = append(allowed, models...)
+		}
+	}
+	// Root's advisor runs in root's box and calls the model through root's route.
+	if session.Root {
+		advisor, err := s.store.RoomAdvisorProfile(ctx, session.Room)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, false, err
+		}
+		if advisor != "" {
+			if _, models, err := s.profiles.Model(advisor); err == nil {
+				allowed = append(allowed, models...)
+			}
 		}
 	}
 	recent, err := s.store.RecentTurnModels(ctx, session.ID)

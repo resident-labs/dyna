@@ -104,6 +104,16 @@ func TestACrewReachesEveryModelOfItsProfilesAndNoOther(t *testing.T) {
 	if _, crew, err := w.AllowedModels(w.ctx, root); err == nil && crew {
 		t.Fatal("root is not a crew")
 	}
+	// p224: the advisor runs in root's box and calls its model through root's route.
+	if models, _, err := w.AllowedModels(w.ctx, root); err != nil || slices.Contains(models, crewDeepModel) {
+		t.Fatalf("root before an advisor: %v %v", models, err)
+	}
+	if err := w.store.SetRoomAdvisorProfile(w.ctx, root.Room, "deep"); err != nil {
+		t.Fatal(err)
+	}
+	if models, _, err := w.AllowedModels(w.ctx, root); err != nil || !slices.Contains(models, crewDeepModel) {
+		t.Fatalf("root with an advisor may not call its model: %v %v", models, err)
+	}
 }
 
 func TestAClosedCrewKeepsWhatItsStepsRanAndCountsThem(t *testing.T) {
