@@ -180,7 +180,7 @@ export class RoomStore {
   }
   crew(id: string): boolean { return this.crews.has(id) || this.workflows.has(id); }
   // The sessions that the sessions panel lists: every open one but a crew.
-  get members(): (SessionStarted & { startedAt: string; lastTurnAt?: string })[] { return [...this.sessions.values()].filter(item => !this.crew(item.session)); }
+  get members(): (SessionStarted & { startedAt: string; lastTurnAt?: string })[] { return [...this.sessions.values()].filter(item => !this.crew(item.session) && !item.advisor); }
   get counts(): Counts { return countOf(this.statuses().values()); }
   private statusWith(id: string, asking: Set<string>): Status {
     const box = this.boxes.get(id);

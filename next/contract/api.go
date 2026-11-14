@@ -203,6 +203,9 @@ type RoomSetRequest struct {
 	// GitHubWrites sets the room's githubWrites setting whole (spec 7.9): the groups to allow on repositories of the room, or `*`. No groups
 	// turns it off. Nil leaves it as it is.
 	GitHubWrites *GitHubWrites `json:"githubWrites,omitempty"`
+	// Advisor sets the room's advisor profile: a session on that profile beside root, started if missing, switched when the profile
+	// changes and closed when it is empty. Nil leaves it as it is.
+	Advisor *ProfileName `json:"advisor,omitempty"`
 }
 
 // RootApproval names the owner-class operations a room's root may also decide, when the owner allows it for the room.
@@ -241,6 +244,8 @@ type RoomSummary struct {
 	Waiting  []OpID    `json:"waiting"` // pending owner-class operations, which the owner decides, and the root for the kinds RootApproves names
 	// RootApproves lists the kinds the room's root may decide.
 	RootApproves []RootApproval `json:"rootApproves,omitempty"`
+	// Advisor is the room's advisor profile; empty when it has none.
+	Advisor ProfileName `json:"advisor,omitempty"`
 	// GitHubWrites is the room's githubWrites setting, as the owner set it; nil when it is off.
 	GitHubWrites *GitHubWrites `json:"githubWrites,omitempty"`
 	// Questions are those the owner has not answered.
@@ -537,7 +542,7 @@ type SessionStartRequest struct {
 	Host     HostName    `json:"host,omitempty"`
 	GPU      GPUGiB      `json:"gpu,omitempty" desc:"GiB of GPU memory the box needs on one card; true means 1. The session waits for a host with a card that has that much unclaimed. GPU memory is not limited per box, so a box that uses more makes other boxes on the card fail their CUDA allocations, and nothing stops it. Fails with no_gpu when no host reports a GPU and gpu_too_large when no card is big enough."`
 	Compose  string      `json:"compose,omitempty"`
-	Advisor  bool        `json:"advisor,omitempty" desc:"Start the room's advisor: a child of root on a stronger profile that answers root's advisor calls. Root or the owner only, one per room, and it takes no goal. Root gets its advisor tool and prompt section when its box next starts, which session refresh on itself brings about."`
+	Advisor  bool        `json:"-"` // set only by the room's advisor setting, which starts the advisor under root
 }
 type SessionStartResponse struct {
 	Session SessionID `json:"session"`
@@ -605,6 +610,9 @@ type SessionRestartRequest struct {
 	Session SessionID `json:"session"`
 }
 type SessionRestartResponse struct{}
+
+// AdvisorRefusal is what the advisor meets when it tries to act in the room. Its final text still reaches root.
+const AdvisorRefusal = "the advisor answers root; it does not act in the room"
 
 // AdvisorRequest is root's prompt for the room's advisor.
 type AdvisorRequest struct {

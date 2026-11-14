@@ -86,8 +86,8 @@ func (s *Service) RoomSet(ctx context.Context, caller contract.Principal, req co
 		}
 		return contract.RoomSetResponse{}, forbidden()
 	}
-	if len(req.RootApproves) == 0 && req.GitHubWrites == nil {
-		return contract.RoomSetResponse{}, invalid("set rootApproves or githubWrites")
+	if len(req.RootApproves) == 0 && req.GitHubWrites == nil && req.Advisor == nil {
+		return contract.RoomSetResponse{}, invalid("set rootApproves, githubWrites or advisor")
 	}
 	for kind := range req.RootApproves {
 		if !slices.Contains(contract.AllRootApprovals, kind) {
@@ -109,6 +109,11 @@ func (s *Service) RoomSet(ctx context.Context, caller contract.Principal, req co
 	if req.GitHubWrites != nil {
 		if err := s.store.SetRoomGitHubWrites(ctx, req.Room, writes); err != nil {
 			return contract.RoomSetResponse{}, failure(err)
+		}
+	}
+	if req.Advisor != nil {
+		if problem := s.setAdvisor(ctx, caller, req.Room, *req.Advisor); problem != nil {
+			return contract.RoomSetResponse{}, problem
 		}
 	}
 	return contract.RoomSetResponse{}, nil

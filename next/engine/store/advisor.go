@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -12,7 +13,7 @@ import (
 // RoomAdvisor returns the room's open advisor, or ErrNotFound.
 func (s *Store) RoomAdvisor(ctx context.Context, room contract.RoomID) (Session, error) {
 	var id contract.SessionID
-	if err := s.Read().QueryRowContext(ctx, "SELECT id FROM sessions WHERE room=? AND advisor=1 AND closed_at IS NULL", room).Scan(&id); err != nil {
+	if err := s.Read().QueryRowContext(ctx, "SELECT id FROM sessions WHERE room=? AND advisor=1 AND closed_at IS NULL AND state='open'", room).Scan(&id); err != nil {
 		return Session{}, err
 	}
 	return s.Session(ctx, id)
@@ -50,4 +51,14 @@ func (s *Store) OweReply(ctx context.Context, session contract.SessionID, seq in
 		return err
 	})
 	return owed, err
+}
+
+// LastTurnEnd returns when the session's latest turn ended, or the zero time when none has.
+func (s *Store) LastTurnEnd(ctx context.Context, session contract.SessionID) (time.Time, error) {
+	var at sql.NullInt64
+	err := s.Read().QueryRowContext(ctx, "SELECT MAX(at) FROM events WHERE type='turn.ended' AND from_kind='session' AND from_id=?", session).Scan(&at)
+	if !at.Valid {
+		return time.Time{}, err
+	}
+	return time.UnixMilli(at.Int64), err
 }

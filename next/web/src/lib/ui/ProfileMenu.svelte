@@ -6,15 +6,17 @@
   import MenuList from "./MenuList.svelte";
   // A session's profile, and the menu that changes it, with RoomMenu's keys. The row shows the store's profile, which
   // session.profile_changed updates, so the value moves only once the engine has changed it. Until the list loads, the
-  // profile's name stands in for its label; opening the menu asks again after a failed load.
-  let { session, profile, switchable }: { session: string; profile: string; switchable: boolean } = $props();
+  // profile's name stands in for its label; opening the menu asks again after a failed load. With a room it is that room's advisor
+  // instead: the same menu with None beside the profiles, which sets the room's advisor setting, and an empty profile reads None.
+  let { session, profile, switchable, room }: { session: string; profile: string; switchable: boolean; room?: string } = $props();
+  const NONE = "(none)";
   let profiles: ProfileSummary[] | undefined = $state();
   let open = $state(false), busy = $state(false), failure = $state("");
   let root: HTMLDivElement;
   let button: HTMLButtonElement | undefined = $state();
   let current = $derived(profiles?.find(item => item.name === profile));
-  let label = $derived(current ? profileLabel(current) : { name: slugName(profile), detail: "" });
-  let rows = $derived((profiles ?? []).map(item => ({ name: item.name, shown: profileLabel(item) })));
+  let label = $derived(current ? profileLabel(current) : { name: profile ? slugName(profile) : "None", detail: "" });
+  let rows = $derived([...(room ? [{ name: NONE, shown: { name: "None", detail: "" } }] : []), ...(profiles ?? []).map(item => ({ name: item.name, shown: profileLabel(item) }))]);
   async function load() {
     failure = "";
     await call("profile.list", {}).then(answer => { profiles = profileRows(answer.profiles); }, () => { failure = "The profiles did not load."; });
@@ -28,10 +30,10 @@
   }
   async function choose(name: string) {
     await show(false, true);
-    if (name === profile) return;
+    if (name === (profile || NONE)) return;
     busy = true;
     failure = "";
-    await call("session.set_profile", { session, profile: name }).catch(() => { failure = "The profile did not change. Try again."; });
+    await (room ? call("room.set", { room, advisor: name === NONE ? "" : name }) : call("session.set_profile", { session, profile: name })).catch(() => { failure = "The profile did not change. Try again."; });
     busy = false;
   }
 </script>
@@ -39,11 +41,11 @@
 <svelte:window onpointerdown={event => { if (open && event.target instanceof Node && !root.contains(event.target)) void show(false); }} />
 <div class="menu" bind:this={root}>
   {#if !switchable}<span class="names">{label.name}{#if label.detail}<small>{label.detail}</small>{/if}</span>{:else}
-  <button type="button" class="open" bind:this={button} aria-disabled={busy} aria-haspopup="menu" aria-expanded={open} aria-label={`Profile: ${label.name} ${label.detail}. Change profile`}
+  <button type="button" class="open" bind:this={button} aria-disabled={busy} aria-haspopup="menu" aria-expanded={open} aria-label={`${room ? "Advisor" : "Profile"}: ${label.name} ${label.detail}. Change ${room ? "advisor" : "profile"}`}
     onclick={() => void show(!open)} onkeydown={event => { if (event.key === "ArrowDown") { event.preventDefault(); void show(true); } }}>
     <span class="names"><span class="name">{label.name}<Icon name="chevron" /></span>{#if label.detail}<small>{label.detail}</small>{/if}</span></button>{/if}
   {#if open && profiles}
-    <MenuList label="Profiles" items={rows} keyOf={entry => entry.name} checked={profile} anchor={root} onchoose={name => void choose(name)} onclose={refocus => void show(false, refocus)}>
+    <MenuList label="Profiles" items={rows} keyOf={entry => entry.name} checked={profile || (room ? NONE : "")} anchor={root} onchoose={name => void choose(name)} onclose={refocus => void show(false, refocus)}>
       {#snippet row(entry)}<span class="names">{entry.shown.name}<small>{entry.shown.detail}</small></span>{/snippet}
     </MenuList>
   {/if}

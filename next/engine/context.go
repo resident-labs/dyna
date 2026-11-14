@@ -38,7 +38,7 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		return contract.ContextSnapshotResponse{}, forbidden()
 	}
 	switch req.Section {
-	case "", contract.ContextGoal, contract.ContextChildren, contract.ContextContacts, contract.ContextRequests, contract.ContextHolds, contract.ContextProfiles, contract.ContextUsage, contract.ContextRoom, contract.ContextDiscord, contract.ContextWorkflows:
+	case "", contract.ContextGoal, contract.ContextChildren, contract.ContextContacts, contract.ContextRequests, contract.ContextHolds, contract.ContextProfiles, contract.ContextUsage, contract.ContextRoom, contract.ContextDiscord, contract.ContextWorkflows, contract.ContextAdvisor:
 	default:
 		return contract.ContextSnapshotResponse{}, invalid("unknown context section")
 	}
@@ -325,5 +325,11 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		lines = append(lines, "Off: "+strings.Join(off, ", "))
 	}
 	add(contract.ContextWorkflows, lines, workflowsChars, 0)
+	// Root's advisor, which its tool and prompt section name.
+	lines = nil
+	if advisor, err := s.store.RoomAdvisor(ctx, session.Room); err == nil && session.Root {
+		lines = append(lines, fmt.Sprintf("%s: %s", advisor.Name, advisor.Profile))
+	}
+	add(contract.ContextAdvisor, lines, 200, 0)
 	return result, nil
 }

@@ -151,9 +151,6 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		if p.Advisor {
 			return contract.SessionStartResponse{}, invalid("the advisor starts no sessions and has no children: it advises root and holds no goals")
 		}
-		if req.Advisor && parent != tree.Root() {
-			return contract.SessionStartResponse{}, invalid("the advisor is a child of root: only root or the owner starts it, with no parent named")
-		}
 		repo, err = room.RepoForSession(repos, req.Repo, p.Repo)
 		if err != nil {
 			return contract.SessionStartResponse{}, invalid(err.Error())

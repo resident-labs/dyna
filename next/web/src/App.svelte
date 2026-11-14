@@ -900,7 +900,7 @@
           onclick={openSession} oncontextmenu={event => act(event, item.session, item.parent, new DOMRect(event.clientX, event.clientY), "start")}
           onkeydown={event => { void walkTree(event); if (parent) fold(event, item.session); }}
           aria-current={session === item.session ? "page" : undefined} title={item.profile} style:padding-left="{34 + depth * 20 + (hidden ? String(hidden).length * 7 : 0)}px">
-          <SessionRow name={item.name} root={!item.parent} {state} {dot} line={rowLine(item.session) || (item.advisor ? item.profile : "")} tag={item.advisor ? "Advisor" : undefined} {mark} /></a>
+          <SessionRow name={item.name} root={!item.parent} {state} {dot} line={rowLine(item.session)} {mark} /></a>
           {#if jobs(item.session)}<button type="button" class="watch" aria-label={`${item.name}'s background jobs, ${jobs(item.session)} running`}
             title={`${item.name}'s background jobs, ${jobs(item.session)} running`} onclick={async event => { if (!wide.current) await showPanel(false, event.detail > 0); void jobsTool?.show(item.session); }}><Icon name="terminal" /></button>{/if}
           {#if attention.can("computers") && store?.computers.has(item.session)}<button type="button" class="watch" class:open={watching === item.session} data-watch={item.session} aria-label={`Watch ${item.name}'s computer`}

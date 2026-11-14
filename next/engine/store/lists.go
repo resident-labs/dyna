@@ -25,7 +25,7 @@ func (s *Store) RoomList(ctx context.Context) (contract.RoomListResponse, []Room
 	if err := s.Read().QueryRowContext(ctx, "SELECT COALESCE(MAX(seq),0) FROM events").Scan(&seq); err != nil {
 		return contract.RoomListResponse{}, nil, err
 	}
-	rows, err := s.Read().QueryContext(ctx, "SELECT r.id,r.name,r.created_at,COALESCE(c.seq,0),r.paused_at IS NOT NULL,r.state='deleting',r.reason,r.root_approves,r.github_writes FROM rooms r LEFT JOIN conversation_reads c ON c.room=r.id AND c.conversation='feed' ORDER BY r.name")
+	rows, err := s.Read().QueryContext(ctx, "SELECT r.id,r.name,r.created_at,COALESCE(c.seq,0),r.paused_at IS NOT NULL,r.state='deleting',r.reason,r.root_approves,r.github_writes,COALESCE((SELECT profile FROM sessions WHERE room=r.id AND advisor=1 AND closed_at IS NULL AND state='open'),'') FROM rooms r LEFT JOIN conversation_reads c ON c.room=r.id AND c.conversation='feed' ORDER BY r.name")
 	if err != nil {
 		return contract.RoomListResponse{}, nil, err
 	}
@@ -35,7 +35,7 @@ func (s *Store) RoomList(ctx context.Context) (contract.RoomListResponse, []Room
 		var room contract.RoomSummary
 		var created int64
 		var approves, writes string
-		if err := rows.Scan(&room.ID, &room.Name, &created, &room.LastRead, &room.Paused, &room.Deleting, &room.DeleteReason, &approves, &writes); err != nil {
+		if err := rows.Scan(&room.ID, &room.Name, &created, &room.LastRead, &room.Paused, &room.Deleting, &room.DeleteReason, &approves, &writes, &room.Advisor); err != nil {
 			return contract.RoomListResponse{}, nil, err
 		}
 		if err := json.Unmarshal([]byte(approves), &room.RootApproves); err != nil {

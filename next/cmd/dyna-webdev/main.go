@@ -421,6 +421,7 @@ func (p profiles) List() []contract.Profile {
 	// Invented models, so the session profile menu has choices. Model still runs every profile on the fake harness.
 	list := []contract.Profile{{Name: "fake", Provider: contract.ModelProviderAnthropic, Model: "claude-sonnet-5-5", Thinking: contract.ThinkingMedium},
 		{Name: "deep", Provider: contract.ModelProviderAnthropic, Model: "claude-opus-5-5", Thinking: contract.ThinkingXHigh},
+		{Name: "fable", Provider: contract.ModelProviderAnthropic, Model: "claude-fable-5", Thinking: contract.ThinkingXHigh},
 		{Name: "quick", Provider: contract.ModelProviderOpenAI, Model: "gpt-6.1-mini", Thinking: contract.ThinkingOff}}
 	if !p.empty {
 		for i := range list {

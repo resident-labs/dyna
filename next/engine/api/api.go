@@ -776,7 +776,7 @@ func (a *API) handler(c Caller) http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, &contract.Error{Code: contract.ErrNotFound, Message: "route not found"})
 	})
-	return mux
+	return a.refuseAdvisor(c, mux)
 }
 
 func hasScope(c Caller, scope contract.Scope) bool {
@@ -922,4 +922,28 @@ func writeError(w http.ResponseWriter, err *contract.Error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(err)
+}
+
+// advisorActs are the methods that act in the room, which the advisor may not call: its answer reaches root as its final text.
+var advisorActs = map[contract.Method]bool{
+	contract.MethodPost: true, contract.MethodSessionStart: true, contract.MethodGoalSet: true, contract.MethodWorkflowRun: true,
+	contract.MethodHostexecRun: true, contract.MethodOpSubmit: true,
+	contract.MethodDiscordAPI: true, contract.MethodDiscordSend: true, contract.MethodDiscordConfigure: true, contract.MethodDiscordApply: true,
+}
+
+func (a *API) refuseAdvisor(c Caller, next http.Handler) http.Handler {
+	// A service without the check, such as a test's, has no advisor.
+	service, ok := a.service.(interface {
+		IsAdvisor(context.Context, contract.Principal) bool
+	})
+	if !ok {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if method, ok := strings.CutPrefix(r.URL.Path, "/v1/"); ok && advisorActs[contract.Method(method)] && service.IsAdvisor(r.Context(), requestCaller(r.Context(), c).Principal) {
+			writeError(w, &contract.Error{Code: contract.ErrForbidden, Message: contract.AdvisorRefusal})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

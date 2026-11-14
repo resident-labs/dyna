@@ -17,7 +17,7 @@ var (
 )
 
 // seedAbout adds the sessions that exercise the About panel, all invented: one with goals as long as agents write them,
-// one with nothing at all, one whose box is stopped, the room's advisor, and one running hot. Root's panel takes the hooks of SubscriptionList.
+// one with nothing at all, one whose box is stopped, and one running hot. Root's panel takes the hooks of SubscriptionList.
 func seedAbout(ctx context.Context, s *engine.Service, room contract.RoomID, hot contract.SessionID) {
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	start := func(name, goal, doneWhen string) contract.SessionID {
@@ -56,9 +56,6 @@ func seedAbout(ctx context.Context, s *engine.Service, room contract.RoomID, hot
 		}
 	}
 	start("quiet-helper", "", "")
-	if _, problem := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "advisor", Profile: "deep", Advisor: true}); problem != nil {
-		log.Fatal(problem.Message)
-	}
 	fixtureAsleep = start("asleep-review", "Review the sync hint copy", "The owner has signed off on the wording.")
 	fixtureHot, fixtureHolding = hot, long
 }

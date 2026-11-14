@@ -115,9 +115,9 @@ export function sessionTree(sessions: SessionStarted[], own: Map<string, Status>
   function walk(parent: string | undefined, depth: number): void {
     const kids = (children.get(parent) ?? []).sort((a, b) => {
       const x = subtree(a.session), y = subtree(b.session);
-      return Number(!!b.advisor) - Number(!!a.advisor) || urgency(x.top) - urgency(y.top) || Number(x.quiet) - Number(y.quiet);
+      return urgency(x.top) - urgency(y.top) || Number(x.quiet) - Number(y.quiet);
     });
-    const idle = kids.filter(item => !item.advisor && subtree(item.session).quiet && !keep.has(item.session));
+    const idle = kids.filter(item => subtree(item.session).quiet && !keep.has(item.session));
     const idleIds = new Set(idle.map(item => item.session));
     const key = parent ?? "", open = idle.length < 2 || openIdle.has(key);
     for (const item of kids) {
