@@ -85,3 +85,14 @@ test("tree keeps focus visible and reports urgent folded descendants", () => {
   const starting = sessionTree(sessions, own, id => id === "d", undefined, new Set(), new Set());
   assert.ok(starting.some(row => row.kind === "session" && row.session.session === "d"));
 });
+
+test("the advisor sits directly under root, above busier children and outside the idle fold", () => {
+  const item = (session: string, parent?: string, advisor?: boolean): SessionStarted => ({ session, parent, name: session, profile: "p", advisor });
+  const sessions = [item("root"), item("a", "root"), item("b", "root"), item("c", "root"), item("adv", "root", true)];
+  const own = new Map<string, Status>(sessions.map(s => [s.session, s.session === "c" ? "waiting" : "idle"]));
+  const order = (rows: ReturnType<typeof sessionTree>) => rows.map(row => row.kind === "idle" ? `${row.count} idle` : row.session.session);
+  assert.deepEqual(order(sessionTree(sessions, own, () => false, undefined, new Set(), new Set())), ["root", "adv", "c", "2 idle"]);
+  assert.deepEqual(order(sessionTree(sessions, own, () => false, undefined, new Set(), new Set(["root"]))), ["root", "adv", "c", "2 idle", "a", "b"]);
+  const working = new Map(own).set("adv", "working");
+  assert.deepEqual(order(sessionTree(sessions, working, () => false, undefined, new Set(), new Set())).slice(0, 3), ["root", "adv", "c"]);
+});

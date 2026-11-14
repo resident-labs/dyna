@@ -114,6 +114,11 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 			}
 		}
 		vars.Shared, vars.GlobalRules, vars.RoomRules = s.layout.Shared(session.Room), s.layout.Instructions(""), s.layout.Instructions(session.Room)
+		_, err = s.store.RoomAdvisor(ctx, session.Room)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return contract.BoxHelloResponse{}, failure(err)
+		}
+		vars.Advisor = err == nil
 	} else {
 		hasChildren, err := s.store.SessionHasChildren(ctx, session.ID)
 		if err != nil {
@@ -121,6 +126,9 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		}
 		if hasChildren {
 			vars.Role = prompt.Lead
+		}
+		if session.Advisor {
+			vars.Role = prompt.Advisor
 		}
 	}
 	var workflow *contract.BoxWorkflow
@@ -149,7 +157,7 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		githubAvailable = githubAvailable && (account.Login != "" || s.githubAccounts.DefaultToken != "")
 	}
 	_, discordProblem := s.discordClient(ctx, caller)
-	return contract.BoxHelloResponse{Discord: discordProblem == nil, Room: session.Room, GitName: gitName, GitEmail: gitEmail, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: prompt.ModelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: prompt.Session(vars), WorkerInstructions: prompt.Core, Root: vars.Role == prompt.Root, Workflow: workflow, GitHub: githubAvailable}, nil
+	return contract.BoxHelloResponse{Discord: discordProblem == nil, Room: session.Room, GitName: gitName, GitEmail: gitEmail, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: prompt.ModelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: prompt.Session(vars), WorkerInstructions: prompt.Core, Root: vars.Role == prompt.Root, Advisor: vars.Advisor, Workflow: workflow, GitHub: githubAvailable}, nil
 }
 
 func (s *Service) DeliveryDone(ctx context.Context, caller contract.Principal, req contract.DeliveryDoneRequest) (contract.DeliveryDoneResponse, *contract.Error) {

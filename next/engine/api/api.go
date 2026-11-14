@@ -261,6 +261,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodRoomSetLimits, c, a.service.RoomSetLimits)
 	call(mux, contract.MethodRoomPause, c, a.service.RoomPause)
 	call(mux, contract.MethodSessionStop, c, a.service.SessionStop)
+	call(mux, contract.MethodAdvisor, c, a.service.Advisor)
 	call(mux, contract.MethodRoomList, c, a.service.RoomList)
 	call(mux, contract.MethodSessionList, c, a.service.SessionList)
 	call(mux, contract.MethodHostexecRun, c, a.service.HostexecRun)

@@ -7,9 +7,9 @@
   // name in its identity color; and a muted line that says what the session does. Only the word "Failed" takes a
   // color in that line, and the failure's reason truncates first. mark names the dot when it stands for more than
   // the row, such as a failure in a folded subtree: then dot is that subtree's status, while state and the line stay
-  // the row's own.
-  let { name, root, state = "idle", dot = state, line, mark }: {
-    name: string; root: boolean; state?: Status; dot?: Status; line: string; mark?: string;
+  // the row's own. tag is a role the row carries beside the name, such as Advisor.
+  let { name, root, state = "idle", dot = state, line, mark, tag }: {
+    name: string; root: boolean; state?: Status; dot?: Status; line: string; mark?: string; tag?: string;
   } = $props();
   // A name whose hue sits next to its status color would read as status, so it shows in the text color instead.
   const statusHues = { waiting: 70, failed: 25, working: 150 };
@@ -17,11 +17,13 @@
 </script>
 
 <SessionFace {name} {root} {dot} {mark} />
-<span class="who"><span class="name" class:quiet style:--hue={hue(name)}>{name}</span>
+<span class="who"><span class="top"><span class="name" class:quiet style:--hue={hue(name)}>{name}</span>{#if tag}<span class="tag">{tag}</span>{/if}</span>
   {#if line || state === "failed"}<span class="line" title={line} class:split={state === "failed"} class:ask={state === "waiting"}>{#if state === "failed"}<StatusPill tone="failed" word label="Failed" />{#if line}<span class="reason">{` · ${line}`}</span>{/if}{:else}{line}{/if}</span>{/if}</span>
 
 <style>
   .who { flex: 1; min-width: 0; display: grid; line-height: 1.3; }
+  .top { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  .tag { flex: none; color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: 14px; color: oklch(var(--id-name) var(--hue)); }
   .name.quiet { color: var(--text); }
   .line { min-width: 0; color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -732,6 +732,8 @@ The engine derives identity from the connection (3.7), never from the caller. Th
 
 Root is the parentless session. An ancestor controls every session under it at any depth, not only its children: it can stop, close, restart, refresh, set the profile of and move such a session, and a move's new parent is the ancestor itself or another session under it. Room grants `ask-owner` and `hostexec` give extra powers. A default subscription wakes root for engine notices and the default branch moving. Root holds no goals. It has a room-creation prompt template. v1's dual address, root seat, service flag, `NeedsRoot` routing and engine-as-root have no v2 equivalent.
 
+**Advisor.** A room may have one advisor: a child of root started by root or the owner with `session start` and `advisor: true` (stored as `sessions.advisor`, `session.started` carries it), on its own profile, holding no goals and starting no sessions (both refused with a reason). Root's `advisor` tool (direct in its box only when the room has one) posts its `prompt` to the advisor as a post from root with no reply owed, waits up to 15 minutes for the end of the turn that takes it, whatever its outcome, and returns that turn's final text, which the engine also posts to the feed from the advisor; a timeout or root's stop ends the wait and makes the reply arrive as an input instead. The advisor reads root's transcript with `transcript read`. Root's prompt gets the `Advisor` section and the advisor its own role text when their box next starts.
+
 ### 7.3 External members (dropped for now)
 
 There is no external member principal, token, inbox or grant. A future need requires a separate design (D-583).

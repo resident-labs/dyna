@@ -77,6 +77,13 @@ func (s *Service) GoalSet(ctx context.Context, caller contract.Principal, req co
 		}
 		req.Session = holder.ID
 	}
+	holder := req.Session
+	if holder == "" && caller.Kind == contract.PrincipalSession {
+		holder = caller.Session
+	}
+	if held, err := s.store.Session(ctx, holder); err == nil && held.Advisor {
+		return contract.GoalSetResponse{}, invalid("the advisor holds no goals: it answers root's calls and does no work of its own")
+	}
 	event, err := s.event(room, caller, contract.GoalSet{})
 	if err != nil {
 		return contract.GoalSetResponse{}, failure(err)

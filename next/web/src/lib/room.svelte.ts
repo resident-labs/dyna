@@ -261,7 +261,7 @@ export class RoomStore {
     for (const session of list.sessions ?? []) {
       this.sessions.set(session.id, {
         session: session.id, name: session.name, parent: session.parent || undefined,
-        profile: session.profile, goal: session.goal || undefined, startedAt: session.startedAt, lastTurnAt: session.lastTurnAt,
+        profile: session.profile, goal: session.goal || undefined, advisor: session.advisor, startedAt: session.startedAt, lastTurnAt: session.lastTurnAt,
       });
       this.names.set(session.id, session.name);
       this.noteRead({ kind: "dm", session: session.id }, session.lastRead);

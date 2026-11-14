@@ -52,6 +52,7 @@ type Session struct {
 	GPU         contract.GPUGiB // the VRAM its box asks of a card (5.5); set to start, not read back
 	Root        bool            // read back only: the session has no parent
 	Closing     bool            // read back only: the session is closing
+	Advisor     bool            // the room's advisor; set to start and read back by Session
 	// Workflow makes the new session a crew. It is set only to start one: Session does not read it back.
 	Workflow *WorkflowRun
 }
@@ -160,7 +161,11 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 		case !errors.Is(err, sql.ErrNoRows):
 			return err
 		}
-		_, err := tx.ExecContext(ctx, "INSERT INTO sessions(id,room,name,parent,repo,profile,state,goal,created_at,compose) VALUES(?,?,?,?,?,?,?,?,?,?)", session.ID, session.Room, session.Name, parentID, session.Repo, session.Profile, "open", goal, event.Time.UnixMilli(), session.Compose)
+		var advisor string
+		if err := tx.QueryRowContext(ctx, "SELECT name FROM sessions WHERE room=? AND advisor=1 AND closed_at IS NULL", session.Room).Scan(&advisor); session.Advisor && err == nil {
+			return &TreeError{Message: "the room already has an advisor, " + advisor + "; a room has one. Close it first to start another"}
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO sessions(id,room,name,parent,repo,profile,state,goal,created_at,compose,advisor) VALUES(?,?,?,?,?,?,?,?,?,?,?)", session.ID, session.Room, session.Name, parentID, session.Repo, session.Profile, "open", goal, event.Time.UnixMilli(), session.Compose, session.Advisor)
 		if err != nil {
 			return err
 		}
@@ -636,7 +641,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 
 func (s *Store) Session(ctx context.Context, id contract.SessionID) (Session, error) {
 	var session Session
-	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.repo,s.profile,b.id,s.close_reason,s.compose,s.parent IS NULL,s.state='closing',COALESCE((SELECT id FROM turns WHERE session=s.id AND ended_at IS NULL),'') FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL", id).Scan(&session.ID, &session.Room, &session.Name, &session.Repo, &session.Profile, &session.Box, &session.CloseReason, &session.Compose, &session.Root, &session.Closing, &session.Turn)
+	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.repo,s.profile,b.id,s.close_reason,s.compose,s.parent IS NULL,s.state='closing',s.advisor,COALESCE((SELECT id FROM turns WHERE session=s.id AND ended_at IS NULL),'') FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL", id).Scan(&session.ID, &session.Room, &session.Name, &session.Repo, &session.Profile, &session.Box, &session.CloseReason, &session.Compose, &session.Root, &session.Closing, &session.Advisor, &session.Turn)
 	return session, err
 }
 

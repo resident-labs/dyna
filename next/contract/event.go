@@ -169,6 +169,7 @@ type SessionStarted struct {
 	DoneWhen string      `json:"doneWhen,omitempty"`
 	Brief    string      `json:"brief,omitempty"`
 	Workflow bool        `json:"workflow,omitempty"`
+	Advisor  bool        `json:"advisor,omitempty"` // the room's advisor, which sits under root apart from its children
 }
 
 // SessionRestarted is a session's box being replaced, updated or started again. With neither flag the box was recreated from

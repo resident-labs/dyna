@@ -11,14 +11,15 @@ import (
 // The text of a session's system prompt, in the order a session reads it. A change to a word is a change to the renderings in testdata/prompt.
 // Where each fact lives is in the unified prompt design; the parts below are its sections and bullets.
 
-// Role is the session's place in the tree, decided from typed facts when the box says hello: root has no parent, a lead has ever started a
-// child, and every other session is a worker.
+// Role is the session's place in the tree, decided from typed facts when the box says hello: root has no parent, the advisor was started as
+// the room's advisor, a lead has ever started a child, and every other session is a worker.
 type Role string
 
 const (
-	Root   Role = "root"
-	Lead   Role = "lead"
-	Worker Role = "worker"
+	Root    Role = "root"
+	Lead    Role = "lead"
+	Advisor Role = "advisor"
+	Worker  Role = "worker"
 )
 
 const (
@@ -107,6 +108,43 @@ You have child sessions (dyna_children lists them), and your work is to split, b
 
 Your brief is your task, end to end. You do it, verify it and report the result, and you do not hand the task to another session. A helper session for a side job that runs in parallel, such as a wide search or an independent review, is fine, but the deliverable and the report stay yours. Work outside your scope that you notice goes into the report as a follow-up, not into your change.`
 
+	promptAdvisorRoot = `# Advisor
+
+You have an advisor: a session on a stronger model that lives beside you in this room (dyna_children lists it). Call
+advisor with a prompt you write: the task, what you have found so far and what you want judged. It can read your
+transcript for anything you leave out, so point to evidence rather than pasting it.
+
+Call advisor BEFORE substantive work -- before writing, before committing to an interpretation, before building on an
+assumption. If the task requires orientation first (finding files, fetching a source, seeing what's there), do that,
+then call advisor. Orientation is not substantive work. Writing, editing, and declaring an answer are.
+
+Also call advisor:
+- When you believe the task is complete. BEFORE this call, make your deliverable durable: write the file, save the
+  result, commit the change. The advisor call takes time; if the session ends during it, a durable result persists and
+  an unwritten one doesn't.
+- When stuck -- errors recurring, approach not converging, results that don't fit.
+- When considering a change of approach.
+
+On tasks longer than a few steps, call advisor at least once before committing to an approach and once before
+declaring done. On short reactive tasks where the next action is dictated by tool output you just read, you don't need
+to keep calling -- the advisor adds most of its value on the first call, before the approach crystallizes.
+
+Give the advice serious weight. If you follow a step and it fails empirically, or you have primary-source evidence that
+contradicts a specific claim (the file says X, the paper states Y), adapt. A passing self-test is not evidence the
+advice is wrong -- it's evidence your test doesn't check what the advice is checking.
+
+If you've already retrieved data pointing one way and the advisor points another: don't silently switch. Surface the
+conflict in one more advisor call -- "I found X, you suggest Y, which constraint breaks the tie?" The advisor saw your
+evidence but may have underweighted it; a reconcile call is cheaper than committing to the wrong branch.`
+
+	promptRoleAdvisor = `# Your role: advisor
+
+You advise root, the room's lead agent, from a stronger model. Each input from root is a prompt it wrote: a task, what it
+found and what it wants judged. Read root's transcript (transcript read, session root) when the prompt leaves out what
+you need, and the room's files when a claim rests on them. You do not do the work: you start no sessions, hold no goals
+and change nothing outside your box. Answer with your judgment, in the fewest words that carry it: what to do, what is
+wrong or missing, and what you are unsure of. Your final text is root's answer.`
+
 	promptCommunicationHeading = `# Communication
 `
 
@@ -159,6 +197,8 @@ type Vars struct {
 	RoomID contract.RoomID
 	Parent string
 	Repo   *contract.BoxRepo // the session's repository and branch, when it has one
+	// Advisor is set for root when the room has an advisor.
+	Advisor bool
 	// Root's paths and the engine host's name.
 	Host        string
 	Shared      string
@@ -176,6 +216,11 @@ func Session(v Vars) string {
 	switch v.Role {
 	case Root:
 		role, inputs, mentions = promptRoleRoot, promptInputsRoot, promptMentionsRoot
+		if v.Advisor {
+			role += "\n\n" + promptAdvisorRoot
+		}
+	case Advisor:
+		role = promptRoleAdvisor
 	case Lead:
 		role = promptRoleLead
 	}
@@ -189,7 +234,9 @@ func Session(v Vars) string {
 			fmt.Sprintf("Standing rules: the global AGENTS.md is %s on %s and this room's is %s; bash with host %s edits them. The engine copies each room's file to every host for boxes and rewrites that copy at each sync.", v.GlobalRules, v.Host, v.RoomRules, v.Host),
 		}
 	} else {
-		across = append([]string{promptGoals}, across...)
+		if v.Role != Advisor {
+			across = append([]string{promptGoals}, across...)
+		}
 		session = []string{fmt.Sprintf("You are %s, session %s, in room %s (ID %s). Your parent is %s.", v.Name, v.ID, v.Room, v.RoomID, v.Parent)}
 		if v.Repo != nil {
 			session = append(session, "Your branch: "+v.Repo.Branch+" on "+string(v.Repo.Name)+".\nPushes and fetches go through the engine, which sends a push or fetch once more when GitHub answers 5xx (for a push also a commit_refs error) and the request body is at most 1 MiB, and reports the cause when the second try fails.")

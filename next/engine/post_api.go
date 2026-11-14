@@ -285,6 +285,11 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		return contract.PostResponse{}, failure(err)
 	}
 	deliveries := tree.Deliveries(room.DeliveryInput{Event: event, Surface: surface, Recipients: recipients, HasMentions: len(req.Mentions) > 0, Home: req.Home, ReplyTo: req.ReplyTo})
+	if req.Awaited {
+		for i := range deliveries {
+			deliveries[i].Reply = contract.ReplyChannel{Kind: contract.ReplyNone}
+		}
+	}
 	id, seq, err := s.store.PostOnce(ctx, event, deliveries, req.VisualUpdate, req.VisualReply)
 	var superseded *store.VisualSupersededError
 	if errors.As(err, &superseded) {
