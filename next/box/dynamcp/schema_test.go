@@ -133,7 +133,7 @@ func TestSharedFieldsAndTheToolDescriptionComeFromTheToolkit(t *testing.T) {
 		if !strings.HasPrefix(props["keys"].Description, "Key names: ") || !strings.HasSuffix(props["keys"].Description, "For click, drag, key and scroll.") {
 			t.Errorf("keys: %q", props["keys"].Description)
 		}
-		const opening = "The box desktop is 1280x800, with Chromium in a window and a taskbar; any action but stop starts it.\n"
+		const opening = "The box desktop is 1280x800, with Chromium in a window and a taskbar; any action but stop starts it. Computer tool actions in a box run one at a time, so parallel calls queue; stop bypasses the queue to recover a stalled desktop. Chromium page actions time out after 30 s; if a page screenshot times out, take a desktop screenshot or use the visual tool.\n"
 		if !strings.HasPrefix(item.Description, opening) || strings.Count(item.Description, "The box desktop is") != 1 {
 			t.Fatalf("description %q", item.Description)
 		}

@@ -9,6 +9,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -329,5 +331,79 @@ func TestCaptureTellsADesktopThatSentNoFrame(t *testing.T) {
 	}
 	if !strings.HasPrefix(err.Error(), "the desktop sent no frame within 0.1 s") || !errors.Is(err, os.ErrDeadlineExceeded) {
 		t.Fatalf("text %q", err)
+	}
+}
+
+func TestConcurrentActionsAreSerialized(t *testing.T) {
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		entered <- struct{}{}
+		<-release
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	agent := Agent{client: &http.Client{Transport: redirectTransport{base: server.URL}}}
+	done := make(chan error, 2)
+	go func() { _, err := Do(context.Background(), agent, Wait, Request{MS: number(0)}); done <- err }()
+	<-entered
+	go func() { _, err := Do(context.Background(), agent, Wait, Request{MS: number(0)}); done <- err }()
+	select {
+	case <-entered:
+		t.Error("second action entered while first was running")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+type redirectTransport struct{ base string }
+
+func (r redirectTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	copy := req.Clone(req.Context())
+	base, err := url.Parse(r.base)
+	if err != nil {
+		return nil, err
+	}
+	copy.URL.Scheme, copy.URL.Host = base.Scheme, base.Host
+	return http.DefaultTransport.RoundTrip(copy)
+}
+
+func TestQueuedActionCancellationAndStopBypassesQueue(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/computer" {
+			close(entered)
+			<-release
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	agent := Agent{client: &http.Client{Transport: redirectTransport{base: server.URL}}}
+	holder := make(chan error, 1)
+	go func() { _, err := Do(context.Background(), agent, Wait, Request{MS: number(0)}); holder <- err }()
+	<-entered
+	defer func() { close(release); <-holder }()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	queued := make(chan error, 1)
+	go func() { _, err := Do(ctx, agent, Wait, Request{MS: number(0)}); queued <- err }()
+	select {
+	case err := <-queued:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("queued error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("queued action ignored cancellation")
+	}
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+	defer stopCancel()
+	if _, err := Do(stopCtx, agent, Stop, Request{}); err != nil {
+		t.Fatalf("stop waited behind holder: %v", err)
 	}
 }
