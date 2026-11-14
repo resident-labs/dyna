@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -52,8 +53,14 @@ func (s *Sessions) checkGrant(ctx context.Context, x store.ConnectSession) (bool
 
 // ServePrivate handles proof-bound renewal.
 func (s *Sessions) ServePrivate(w http.ResponseWriter, r *http.Request, origin string, x store.ConnectSession, routes []string) {
+	deny := func(w http.ResponseWriter, status int, reason string) {
+		if r.URL.Path == "/api/connect/renew" {
+			slog.Warn("Connect renew refused", "status", status, "reason", reason, "relay_device", x.RelayDevice)
+		}
+		fail(w, status, reason)
+	}
 	if !browserRequest(r, origin) {
-		fail(w, 403, "forbidden")
+		deny(w, 403, "forbidden")
 		return
 	}
 	var req struct {
@@ -61,7 +68,7 @@ func (s *Sessions) ServePrivate(w http.ResponseWriter, r *http.Request, origin s
 		Target string `json:"target"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16384)).Decode(&req); err != nil && r.URL.Path != "/api/connect/logout" && r.URL.Path != "/api/logout" {
-		fail(w, 400, "bad request")
+		deny(w, 400, "bad request")
 		return
 	}
 	switch r.URL.Path {
@@ -71,20 +78,22 @@ func (s *Sessions) ServePrivate(w http.ResponseWriter, r *http.Request, origin s
 		s.issueHandoff(w, r, origin, req.Target, req.Proof, x, routes)
 	case "/api/connect/renew":
 		if err := s.proof(r.Context(), req.Proof, origin, r.URL.Path, x.JKT, x.Epoch, x.Generation); err != nil {
-			fail(w, 403, "invalid proof")
+			deny(w, 403, "invalid proof")
 			return
 		}
 		if !s.allow("renew:"+x.ID, 10) {
-			fail(w, 429, "too many renewals")
+			deny(w, 429, "too many renewals")
 			return
 		}
 		refused, err := s.checkGrant(r.Context(), x)
 		grace := false
 		if refused {
 			if err := s.store.RevokeConnectDevice(r.Context(), x.RelayDevice, x.Generation, s.now()); err != nil {
-				fail(w, 503, "unavailable")
+				deny(w, 503, "unavailable")
 				return
 			}
+			slog.Warn("Connect relay device revoked", "relay_device", x.RelayDevice, "reason", "grant refused")
+			slog.Warn("Connect renew refused", "status", 401, "reason", "connect-ended", "relay_device", x.RelayDevice)
 			setConnectCookie(w, origin, "", -1)
 			reply(w, 401, struct {
 				Error string `json:"error"`
@@ -94,19 +103,19 @@ func (s *Sessions) ServePrivate(w http.ResponseWriter, r *http.Request, origin s
 		}
 		if err != nil {
 			if s.now().Sub(x.Grant) > 15*time.Minute {
-				fail(w, 503, "relay unavailable")
+				deny(w, 503, "relay unavailable")
 				return
 			}
 			grace = true
 		}
 		token, err := randomSecret()
 		if err != nil {
-			fail(w, 503, "unavailable")
+			deny(w, 503, "unavailable")
 			return
 		}
 		now := s.now()
 		if err = s.store.RotateConnectSession(r.Context(), x, sha256.Sum256([]byte(token)), now, grace); err != nil {
-			fail(w, 401, "session ended")
+			deny(w, 401, "session ended")
 			return
 		}
 		access := now.Add(15 * time.Minute)
@@ -122,13 +131,13 @@ func (s *Sessions) ServePrivate(w http.ResponseWriter, r *http.Request, origin s
 	case "/api/connect/logout", "/api/logout":
 		if !x.CookieStale {
 			if err := s.store.EndConnectSession(r.Context(), x.ID); err != nil {
-				fail(w, 503, "unavailable")
+				deny(w, 503, "unavailable")
 				return
 			}
 		}
 		setConnectCookie(w, origin, "", -1)
 		reply(w, 200, struct{}{})
 	default:
-		fail(w, 404, "not found")
+		deny(w, 404, "not found")
 	}
 }

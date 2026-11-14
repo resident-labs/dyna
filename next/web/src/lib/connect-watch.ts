@@ -11,6 +11,14 @@ async function post(path: string, body: object): Promise<Response> {
   return fetch(path, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-Dyna": "1" }, body: JSON.stringify(body) });
 }
 
+// API calls and the timer share one proof-bound cookie rotation.
+let renewing: Promise<Response | undefined> | undefined;
+export function renewConnect(): Promise<Response | undefined> {
+  return renewing ??= (async () => post("/api/connect/renew", {
+    proof: await proof(await deviceKey(), "/api/connect/renew"),
+  }))().catch(() => undefined).finally(() => { renewing = undefined; });
+}
+
 // The private routes response proves the server has authenticated this Connect session.
 export async function watchConnect(): Promise<{ stream(up: boolean): void; stop(): void } | undefined> {
   const response = await post("/api/connect/routes", {}).catch(() => undefined);
@@ -25,8 +33,8 @@ export async function watchConnect(): Promise<{ stream(up: boolean): void; stop(
   let expires = Date.parse(data.expires);
   async function renew() {
     if (stopped) return;
-    const response = await post("/api/connect/renew", { proof: await proof(await deviceKey(), "/api/connect/renew") }).catch(() => undefined);
-    if (response?.status === 401) { location.reload(); return; }
+    const response = await renewConnect();
+    if (response?.status === 401 || response?.status === 403) { window.dispatchEvent(new Event("connect-ended")); return; }
     if (response?.ok) {
       const value: unknown = await response.json();
       if (typeof value === "object" && value !== null && "expires" in value && typeof value.expires === "string") expires = Date.parse(value.expires);
