@@ -59,12 +59,13 @@ type PoolSetRequest struct {
 }
 type PoolSetResponse struct{}
 
-// RoomHostsRequest replaces the hosts a room's new boxes may use: host names and at most one pool. No names clears the rule,
+// RoomHostsRequest replaces the hosts a room's new boxes may use: host names and at most one pool. Clear removes the rule,
 // so they may use any host again. A box already placed stays where it is. A session's request waits for the owner, so this
 // is also the operation's arguments.
 type RoomHostsRequest struct {
-	Room RoomID   `json:"room"`
-	Only []string `json:"only,omitempty"`
+	Room  RoomID   `json:"room"`
+	Only  []string `json:"only,omitempty"`
+	Clear bool     `json:"clear,omitempty"`
 }
 
 func (RoomHostsRequest) OpKind() OpKind { return "room.hosts" }

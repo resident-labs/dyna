@@ -459,6 +459,10 @@ type RunnerImageProblem struct {
 }
 
 type HostSummary struct {
+	State        string               `json:"state"` // ready, degraded, agents off, or the host setup state
+	CPUFree      float64              `json:"cpuFree"`
+	MemFree      int64                `json:"memFree"`
+	DiskFree     int64                `json:"diskFree"`
 	Health       HostHealth           `json:"health,omitempty"`
 	Problem      HostProblem          `json:"problem,omitempty"`
 	RunnerImages []RunnerImageProblem `json:"runnerImages,omitempty"` // runner images that failed to build here

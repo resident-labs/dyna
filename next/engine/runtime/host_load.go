@@ -106,6 +106,12 @@ func (b *Boxes) HostLoad(ctx context.Context, hosts []contract.HostSummary) erro
 		if h.Name == contract.ControlPlane {
 			h.Reachable, h.CPUs, h.MemBytes = true, goruntime.NumCPU(), load.MemBytes
 		}
+		h.CPUFree = max(0, float64(h.CPUs)-h.CPUUsed)
+		h.MemFree = max(0, h.MemBytes-h.MemUsed)
+		h.DiskFree = max(0, h.DiskBytes-h.DiskUsed)
+		if h.Agents && h.Health == contract.HostDegraded {
+			h.State = "degraded"
+		}
 	}
 	return nil
 }

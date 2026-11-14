@@ -35,4 +35,5 @@ type GPU struct {
 	Name           string `json:"name"`
 	MemBytes       int64  `json:"memBytes"`
 	RequestedBytes int64  `json:"requestedBytes,omitempty"`
+	FreeBytes      int64  `json:"freeBytes"` // schedulable VRAM after reserve and requests; filled by host.list
 }

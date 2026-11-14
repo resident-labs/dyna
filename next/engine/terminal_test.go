@@ -20,12 +20,14 @@ func TestHostListSessionsFollowRoomAccess(t *testing.T) {
 	rooms := func(who contract.Principal) map[contract.RoomID]bool {
 		t.Helper()
 		list, problem := s.HostList(ctx, who, contract.HostListRequest{})
-		if problem != nil || len(list.Hosts) != 2 {
+		if problem != nil || len(list.Hosts) == 0 {
 			t.Fatalf("hosts: %+v %v", list, problem)
 		}
 		got := make(map[contract.RoomID]bool)
-		for _, session := range list.Hosts[1].Sessions {
-			got[session.Room] = true
+		for _, host := range list.Hosts {
+			for _, session := range host.Sessions {
+				got[session.Room] = true
+			}
 		}
 		return got
 	}

@@ -9,6 +9,22 @@ import (
 )
 
 func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contract.HostListRequest) (contract.HostListResponse, *contract.Error) {
+	var room contract.RoomID
+	if who.Kind == contract.PrincipalSession {
+		var problem *contract.Error
+		room, problem = s.asker(ctx, who)
+		if problem != nil {
+			return contract.HostListResponse{}, problem
+		}
+	}
+	var only []string
+	if room != "" {
+		var err error
+		only, err = s.store.RoomOnly(ctx, room)
+		if err != nil {
+			return contract.HostListResponse{}, failure(err)
+		}
+	}
 	hosts, err := s.store.Hosts(ctx)
 	if err != nil {
 		return contract.HostListResponse{}, failure(err)
@@ -39,7 +55,28 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 		imageProblems = s.runnerImageProblems()
 	}
 	result := contract.HostListResponse{Hosts: []contract.HostSummary{{Name: contract.ControlPlane, Sessions: sessions[contract.ControlPlane], Shared: shared}}}
+	if room != "" {
+		result.Hosts = nil // the control plane does not place session boxes
+	}
 	for _, host := range hosts {
+		if room != "" {
+			if host.ExecOnly || (host.Pool == "" && len(host.Rooms) > 0 && !slices.Contains(host.Rooms, room)) {
+				continue
+			}
+			if host.Box != "" {
+				if !slices.ContainsFunc(boxes, func(b box.Box) bool { return b.ID == host.Box && b.Room == room }) {
+					continue
+				}
+			} else if len(only) > 0 {
+				name := string(host.Name)
+				if host.Pool != "" {
+					name = host.Pool
+				}
+				if !slices.Contains(only, name) {
+					continue
+				}
+			}
+		}
 		var cards []contract.GPU
 		if len(host.GPUs) > 0 {
 			cards = slices.Clone(host.GPUs)
@@ -50,8 +87,15 @@ func (s *Service) HostList(ctx context.Context, who contract.Principal, _ contra
 					cards[i].RequestedBytes += int64(b.GPU) * box.GiB
 				}
 			}
+			cards[i].FreeBytes = max(0, box.GPUUsable(cards[i])-cards[i].RequestedBytes)
 		}
-		result.Hosts = append(result.Hosts, contract.HostSummary{Name: host.Name, Problem: host.Problem, Sessions: sessions[host.Name], Shared: []contract.RoomShared{}, Pool: host.Pool, Agents: !host.NoAgents, CI: host.CI, CIScale: host.CIScale, Rooms: host.Rooms, ExecOnly: host.ExecOnly, Runners: runners[host.Name], RunnerImages: imageProblems[host.Name], CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.ExecOnly && !host.CheckedAt.IsZero() && box.DiskLow(host.DiskBytes, host.DiskFloor), EngineHost: host.EngineHost != nil && *host.EngineHost, Leftovers: leftovers[host.Name], GPUs: cards, Services: services[host.Name], ServiceHost: s.reconciler.ServiceHostStatus(host.Name)})
+		state := string(host.State)
+		if host.NoAgents {
+			state = "agents off"
+		} else if host.Health == contract.HostDegraded {
+			state = "degraded"
+		}
+		result.Hosts = append(result.Hosts, contract.HostSummary{State: state, CPUFree: float64(host.CPUs), MemFree: max(0, host.MemBytes-host.MemUsed), DiskFree: host.DiskBytes, Health: host.Health, DiskBytes: host.DiskTotal, DiskUsed: max(0, host.DiskTotal-host.DiskBytes), Name: host.Name, Problem: host.Problem, Sessions: sessions[host.Name], Shared: []contract.RoomShared{}, Pool: host.Pool, Agents: !host.NoAgents, CI: host.CI, CIScale: host.CIScale, Rooms: host.Rooms, ExecOnly: host.ExecOnly, Runners: runners[host.Name], RunnerImages: imageProblems[host.Name], CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.ExecOnly && !host.CheckedAt.IsZero() && box.DiskLow(host.DiskBytes, host.DiskFloor), EngineHost: host.EngineHost != nil && *host.EngineHost, Leftovers: leftovers[host.Name], GPUs: cards, Services: services[host.Name], ServiceHost: s.reconciler.ServiceHostStatus(host.Name)})
 	}
 	return result, nil
 }

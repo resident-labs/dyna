@@ -201,6 +201,9 @@ func (s *Service) PoolRemove(ctx context.Context, caller contract.Principal, req
 }
 
 func (s *Service) checkRoomHosts(ctx context.Context, req contract.RoomHostsRequest) *contract.Error {
+	if req.Clear == (len(req.Only) > 0) {
+		return invalid("pass only with host names and at most one pool, or clear: true to remove the rule; to list hosts use host list (dyna host list on the CLI)")
+	}
 	if err := s.store.RoomOpen(ctx, req.Room); err != nil {
 		return failure(err)
 	}
