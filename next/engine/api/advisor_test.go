@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -37,6 +38,26 @@ func TestTheAdvisorKeepsTheReadsEverySessionNeeds(t *testing.T) {
 	for _, method := range []contract.Method{contract.MethodBoxHello, contract.MethodTurnOutput, contract.MethodTranscriptAppend, contract.MethodShellOutput, contract.MethodContextSnapshot, contract.MethodSessionList} {
 		if !advisorReads[method] {
 			t.Fatalf("the advisor may not call %s", method)
+		}
+	}
+}
+
+// p220's advisor box exited at start: its own box channel was refused.
+func TestTheAdvisorBoxReachesItsChannel(t *testing.T) {
+	for _, path := range []string{"box/channel", "events", "shell/watch", "files/x", "rooms/r/shared/tree"} {
+		if !advisorStream(httptest.NewRequest(http.MethodGet, "/v1/"+path, nil), path) {
+			t.Fatalf("GET /v1/%s is refused to the advisor", path)
+		}
+	}
+	if advisorStream(httptest.NewRequest(http.MethodPut, "/v1/files/x", nil), "files/x") {
+		t.Fatal("a file write passes for the advisor")
+	}
+	handler := New(advisorService{advisor: true}, nil).handler(boxCaller())
+	for _, path := range []string{"/v1/terminal", "/v1/voice", "/v1/computers/stream"} {
+		got := httptest.NewRecorder()
+		handler.ServeHTTP(got, httptest.NewRequest(http.MethodGet, path, nil))
+		if !strings.Contains(got.Body.String(), contract.AdvisorRefusal) {
+			t.Fatalf("GET %s by the advisor: %d %s", path, got.Code, got.Body)
 		}
 	}
 }
