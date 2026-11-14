@@ -228,3 +228,33 @@ func (s *Store) DiscordDMRoutes(ctx context.Context, room contract.RoomID) (map[
 	}
 	return result, rows.Err()
 }
+
+func (s *Store) DiscordCursor(ctx context.Context, channel string) (string, error) {
+	var id string
+	err := s.Read().QueryRowContext(ctx, "SELECT message FROM discord_cursors WHERE channel=?", channel).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return id, err
+}
+func (s *Store) SetDiscordCursor(ctx context.Context, channel, id string) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "INSERT INTO discord_cursors(channel,message) VALUES(?,?) ON CONFLICT(channel) DO UPDATE SET message=excluded.message WHERE length(excluded.message)>length(message) OR (length(excluded.message)=length(message) AND excluded.message>message)", channel, id)
+		return err
+	})
+}
+
+func (s *Store) DiscordResume(ctx context.Context, credential string) (string, error) {
+	var data string
+	err := s.Read().QueryRowContext(ctx, "SELECT value FROM meta WHERE key=?", "discord_resume:"+credential).Scan(&data)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return data, err
+}
+func (s *Store) SetDiscordResume(ctx context.Context, credential, data string) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", "discord_resume:"+credential, data)
+		return err
+	})
+}

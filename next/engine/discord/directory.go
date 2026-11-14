@@ -184,3 +184,13 @@ func (d *Directory) Channels() []Channel {
 	})
 	return result
 }
+
+func (d *Directory) Snapshot() []Server {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	var out []Server
+	for _, g := range d.guilds {
+		out = append(out, g)
+	}
+	return out
+}

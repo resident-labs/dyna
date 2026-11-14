@@ -72,7 +72,31 @@ func (s *Service) runDiscord(ctx context.Context, gateway string) {
 					go func() {
 						defer close(finished)
 						gatewayDone := make(chan struct{})
-						g := discord.Gateway{Client: client, URL: gateway, Bot: b.ID, Directory: &s.discordDirectory, Receive: func(ctx context.Context, m discord.Message) error { return s.discordInput(ctx, client, m) }, Observe: s.discordServerEvent, Lost: &s.discordEventsLost}
+						g := discord.Gateway{LoadResume: func(ctx context.Context) (discord.ResumeState, error) {
+							var state discord.ResumeState
+							data, err := s.store.DiscordResume(ctx, b.Credential)
+							if err != nil || data == "" {
+								return state, err
+							}
+							err = json.Unmarshal([]byte(data), &state)
+							return state, err
+						}, SaveResume: func(ctx context.Context, state discord.ResumeState) error {
+							data, err := json.Marshal(state)
+							if err != nil {
+								return err
+							}
+							return s.store.SetDiscordResume(ctx, b.Credential, string(data))
+						}, Client: client, URL: gateway, Bot: b.ID, Directory: &s.discordDirectory, CatchUp: func(ctx context.Context, guild string, receive func(context.Context, discord.Message) error) {
+							s.discordCatchUp(ctx, client, guild, receive)
+						}, Receive: func(ctx context.Context, m discord.Message) error {
+							if err := s.discordInput(ctx, client, m); err != nil {
+								return err
+							}
+							if m.Guild != "" {
+								return s.store.SetDiscordCursor(ctx, m.Channel, m.ID)
+							}
+							return nil
+						}, Observe: s.discordServerEvent, Lost: &s.discordEventsLost}
 						go func() {
 							defer close(gatewayDone)
 							if b.Failure != "" {
