@@ -337,7 +337,7 @@ func TestAdvisorDeltaCarriesOnlyNewStepsAndCutsLongResults(t *testing.T) {
 	if e != nil || !strings.Contains(first, "first") || !strings.Contains(first, "second") {
 		t.Fatalf("first call: %v\n%s", e, first)
 	}
-	if !strings.Contains(first, "(cut; transcript read has the rest)") || strings.Contains(first, strings.Repeat("y", 2001)) {
+	if !strings.Contains(first, strings.Repeat("y", 300)) || strings.Contains(first, strings.Repeat("y", 301)) {
 		t.Fatalf("a long result was not cut:\n%s", first)
 	}
 	later, e := s.advisorDelta(ctx, root.Session, time.Date(2026, 1, 1, 0, 0, 5, 0, time.UTC))
@@ -394,10 +394,13 @@ func TestAdvisorDeltaReadsAllOfALongTurn(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	for i := 0; i < calls; i++ {
+	for i := calls - advisorMaxSteps; i < calls; i++ {
 		if !strings.Contains(later, fmt.Sprintf("step-%d-end", i)) {
-			t.Fatalf("a call on a later turn lost step %d of %d", i, calls)
+			t.Fatalf("a call on a later turn lost step %d of the newest %d", i, advisorMaxSteps)
 		}
+	}
+	if strings.Contains(later, "step-569-end") || !strings.Contains(later, "570 earlier steps omitted; transcript read has them") {
+		t.Fatalf("the step cap did not hold or did not say so:\n%s", later)
 	}
 }
 
@@ -420,4 +423,42 @@ func TestAdvisorDeltaStartsAtRootsLastConsultationNotTheAdvisorsLastTurn(t *test
 	if err != nil || !got.Equal(consulted) {
 		t.Fatalf("the owner's DM moved the watermark: %v, want %v (%v)", got, consulted, err)
 	}
+}
+
+func TestAdvisorDeltaStaysWithinTheCharacterCap(t *testing.T) {
+	s, ctx, root := transcriptCaller(t)
+	session, err := s.store.Session(ctx, root.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wake, problem := s.Post(ctx, ownerCaller, contract.PostRequest{Room: session.Room, Home: contract.Conversation{Kind: contract.ConversationDM, Session: root.Session}, Text: "wake"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if err := s.store.SeedEndedTurn(ctx, session.Room, root.Session, "turn_a", mustEventID(t, s, ctx, wake.Seq), wake.Seq, time.Unix(1, 0), time.Unix(2, 0)); err != nil {
+		t.Fatal(err)
+	}
+	data := fmt.Sprintf(`{"type":"message","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","deliveryId":"%d"}}`+"\n", wake.Seq)
+	for i := 0; i < 20; i++ {
+		data += fmt.Sprintf(`{"type":"message","timestamp":"2026-01-01T00:00:%02dZ","message":{"role":"assistant","content":[{"type":"text","text":"n%02d-%s"}]}}`+"\n", i, i, strings.Repeat("x", 5000))
+	}
+	if _, e := appendTranscript(s, ctx, root, "a.jsonl", 0, data); e != nil {
+		t.Fatal(e)
+	}
+	delta, e := s.advisorDelta(ctx, root.Session, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
+	if e != nil {
+		t.Fatal(e)
+	}
+	// Each text is clipped to 2,000 characters, so 24,000 holds the newest 11 of the 20.
+	if len(delta) > advisorMaxChars+200 || !strings.Contains(delta, "n19-") || strings.Contains(delta, "n08-") || !strings.Contains(delta, "9 earlier steps omitted; transcript read has them") {
+		t.Fatalf("%d characters:\n%.300s", len(delta), delta)
+	}
+}
+
+func mustEventID(t *testing.T, s *Service, ctx context.Context, seq int64) contract.EventID {
+	id, err := s.store.EventID(ctx, seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
 }

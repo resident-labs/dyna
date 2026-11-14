@@ -140,7 +140,7 @@ evidence but may have underweighted it; a reconcile call is cheaper than committ
 	promptRoleAdvisor = `# Your role: advisor
 
 You are root's advisor: a stronger reviewer model that lives beside root in this room. Each call brings root's work since
-your last answer -- the task, every tool call it has made, every result it has seen, with long results cut -- and then
+your last answer -- a short record of root's recent work: its inputs, its text and one line per tool call -- and then
 the prompt root wrote. Read root's transcript (transcript read, session root) for anything cut or older.
 
 Root calls you BEFORE substantive work -- before writing, before committing to an interpretation, before building on an

@@ -133,12 +133,16 @@ func (s *Service) setAdvisor(ctx context.Context, caller contract.Principal, roo
 }
 
 const (
-	advisorResultChars = 2000 // a longer tool result is cut, and transcript read has the rest
-	advisorFirstSteps  = 50   // the first call carries root's current turn, or this many of its last steps
+	advisorTextChars   = 2000  // an input or root's own text is clipped to this
+	advisorArgChars    = 200   // a tool call's arguments
+	advisorResultChars = 300   // a tool call's result
+	advisorFirstSteps  = 10    // the first call carries root's last steps
+	advisorMaxSteps    = 30    // every call is cut to the newest steps
+	advisorMaxChars    = 24000 // and to about this many characters
 )
 
-// advisorDelta renders root's transcript for the advisor: root's inputs, its text and each tool call with its arguments and result,
-// since the advisor last answered. With no earlier answer it is root's current turn, or the last advisorFirstSteps steps of it.
+// advisorDelta renders root's transcript for the advisor as a short record since root's last consultation: its inputs, its text and one line
+// per tool call, the newest advisorMaxSteps of them within about advisorMaxChars. The first call has only the last advisorFirstSteps.
 func (s *Service) advisorDelta(ctx context.Context, root contract.SessionID, since time.Time) (string, *contract.Error) {
 	var turns []contract.TranscriptTurn // newest first, whole
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
@@ -181,7 +185,7 @@ func (s *Service) advisorDelta(ctx context.Context, root contract.SessionID, sin
 		var lines []string
 		for _, input := range turn.Inputs {
 			if input.At.After(since) {
-				lines = append(lines, fmt.Sprintf("input from %s%s: %s", input.From.Kind, input.From.Session, input.Text))
+				lines = append(lines, fmt.Sprintf("input from %s%s: %s", input.From.Kind, input.From.Session, transcriptview.Clip(input.Text, advisorTextChars)))
 			}
 		}
 		for _, item := range turn.Items {
@@ -190,28 +194,34 @@ func (s *Service) advisorDelta(ctx context.Context, root contract.SessionID, sin
 			}
 			switch item.Kind {
 			case contract.TranscriptText:
-				lines = append(lines, "root: "+item.Text)
+				lines = append(lines, "root: "+transcriptview.Clip(item.Text, advisorTextChars))
 			case contract.TranscriptTool:
-				line := fmt.Sprintf("tool %s %s", item.Tool, transcriptview.Clip(item.Arguments, advisorResultChars))
+				line := fmt.Sprintf("tool %s %s -> ", item.Tool, transcriptview.Clip(item.Arguments, advisorArgChars))
 				if item.Failed {
-					line += "\nfailed:"
+					line += "failed: "
 				}
-				line += "\nresult: " + transcriptview.Clip(item.Output, advisorResultChars)
-				if item.More || len(item.Output) > advisorResultChars {
-					line += "\n(cut; transcript read has the rest)"
-				}
-				lines = append(lines, line)
+				lines = append(lines, line+strings.ReplaceAll(transcriptview.Clip(item.Output, advisorResultChars), "\n", " "))
 			}
 		}
 		out = append(out, lines...)
 	}
+	steps := advisorMaxSteps
 	if since.IsZero() {
-		out = out[max(0, len(out)-advisorFirstSteps):]
+		steps = advisorFirstSteps
 	}
-	if len(out) == 0 {
+	kept, size := 0, 0
+	for kept < min(steps, len(out)) && size+len(out[len(out)-1-kept]) <= advisorMaxChars {
+		size += len(out[len(out)-1-kept])
+		kept++
+	}
+	if kept == 0 {
 		return "Root's work since your last answer: nothing new.", nil
 	}
-	return "Root's work since your last answer:\n\n" + strings.Join(out, "\n\n"), nil
+	note := ""
+	if omitted := len(out) - kept; omitted > 0 {
+		note = fmt.Sprintf("%d earlier steps omitted; transcript read has them\n\n", omitted)
+	}
+	return "Root's work since your last answer:\n\n" + note + strings.Join(out[len(out)-kept:], "\n\n"), nil
 }
 
 // IsAdvisor reports whether a principal is the advisor session.
