@@ -4,7 +4,7 @@ import { decodeEvent } from "./event.ts";
 import { feedRows } from "./feed.ts";
 import { RunState } from "./run.svelte.ts";
 import type { Json } from "./json.ts";
-import { FAILED, LONG_PHASE, READABLE_SPAN, STRIP_PHASES, applyStep, branchLink, commitLink, countedLine, failedNodes, figures, flow, foldable, jsonFields, minutesLabel, nested, openable, phases, reading, roomRuns, runCounts, runScale, runStatus, shownFacts, shownStep, spanReads, stageOf, stagesOf, stepBody, stepSpan, stepTime, stepTitle, stepWord, strip, timed, timeline, tokens } from "./workflow.ts";
+import { FAILED, LONG_PHASE, READABLE_SPAN, STRIP_PHASES, applyStep, branchLink, commitLink, countedLine, failedNodes, figures, flow, foldable, jsonFields, minutesLabel, nested, openable, phases, reading, roomRuns, runCounts, runRows, runScale, shownFacts, shownStep, spanReads, stageOf, stagesOf, stepBody, stepSpan, stepTime, stepTitle, stepWord, strip, timed, timeline, tokens } from "./workflow.ts";
 import type { Event, WorkflowInfo, WorkflowStatusResponse, WorkflowStep } from "./contract.gen.ts";
 
 const usage = { model: "", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
@@ -69,9 +69,7 @@ test("only a worker with a file opens, and the address names it", () => {
   assert.equal(shownStep(""), undefined);
 });
 
-test("a run's line is its script's status, or its counts when the script wrote none", () => {
-  assert.deepEqual(runStatus({ status: "Wave 3: 6 of 7 landed", steps: 76, running: 1, failed: 0 }), { text: "Wave 3: 6 of 7 landed", script: true });
-  assert.deepEqual(runStatus({ steps: 76, running: 1, failed: 0 }), { text: "75 of 76 steps · 1 running", script: false });
+test("a script that wrote no status gets a counted line", () => {
   assert.equal(countedLine({ steps: 12, running: 0, failed: 2 }), "12 steps · 2 failed");
   assert.equal(countedLine({ steps: 1, running: 0, failed: 0 }), "1 step");
   assert.equal(countedLine({ steps: 0, running: 0, failed: 0 }), "No steps yet");
@@ -232,6 +230,22 @@ test("Runs lists the running runs first, newest first, then the rest, the latest
   assert.deepEqual(runCounts({ steps: 1, failed: 0 }), ["1 step"]);
   assert.deepEqual(runCounts({ steps: 60, failed: 4 }), ["60 steps", "4 failed"]);
   assert.deepEqual(runCounts({ failed: 0 }), []);
+});
+
+test("the panel's run rows: a few running runs, a count of the rest, and the past ones, each folded until opened", () => {
+  const run = (session: string, fields: Partial<WorkflowInfo> = {}): WorkflowInfo => status({ session, state: "done", ...fields }).run;
+  const hour = (ago: number) => new Date(Date.now() - ago * 3600_000).toISOString();
+  const runs = [run("old", { ended: hour(80) }), run("live", { state: "running" }), run("new", { state: "failed", ended: hour(0) }), run("older", { state: "failed", ended: hour(60) })];
+  const names = (open: boolean, list = runs) => runRows(list, { running: open, past: open }).map(row => row.kind === "run" ? row.run.session : row.kind === "head" ? "head" : `${row.kind} ${row.count}${row.kind === "past" ? ` ${row.failed}f` : ""}${row.open ? " open" : ""}`);
+  assert.deepEqual(names(false), ["head", "live", "past 3 1f"], "only a failure of today is news");
+  assert.deepEqual(names(true), ["head", "live", "past 3 1f open", "new", "older", "old"]);
+  assert.deepEqual(runRows(runs, { running: false, past: false }, "old").map(row => row.kind === "run" ? row.run.session : row.kind), ["head", "live", "past", "old"], "the open page's run stays under a closed fold");
+  assert.deepEqual(runRows([], { running: true, past: true }), []);
+  assert.deepEqual(runRows([runs[1]], { running: false, past: false }).map(row => row.kind), ["head", "run"]);
+  const busy = Array.from({ length: 7 }, (_, i) => run(`b${i}`, { state: "running", started: hour(7 - i) }));
+  assert.deepEqual(names(false, busy), ["head", "b6", "b5", "b4", "b3", "more 3"]);
+  assert.deepEqual(names(true, busy), ["head", "b6", "b5", "b4", "b3", "more 3 open", "b2", "b1", "b0"]);
+  assert.deepEqual(runRows(busy, { running: false, past: false }, "b0").map(row => row.kind === "run" ? row.run.session : row.kind).slice(-2), ["more", "b0"]);
 });
 
 test("the run branch and commit link to the repository, and a run with none links nowhere", () => {

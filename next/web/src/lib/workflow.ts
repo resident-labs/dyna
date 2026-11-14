@@ -114,15 +114,32 @@ export const runWords: Record<WorkflowState, { word: string; tone?: Tone }> = {
   running: { word: "Running", tone: "working" }, done: { word: "Done" }, failed: { word: "Failed", tone: "failed" }, stopped: { word: "Stopped" },
 };
 
-// What a run that ended came to, after its state: its feed row and its row in the header's Runs. A run from before steps were
+// What a run that ended came to, after its state: its feed row and its row in the sessions panel. A run from before steps were
 // counted has no figure.
 export const runCounts = ({ steps, failed }: { steps?: number; failed: number }): string[] => [...steps ? [count(steps, "step")] : [], ...failed ? [`${failed} failed`] : []];
 
-// The header's Runs: the running ones, newest first, then the rest, the latest to end first.
+// The room's runs: the running ones, newest first, then the rest, the latest to end first.
 export function roomRuns(runs: Iterable<WorkflowInfo>): { running: WorkflowInfo[]; past: WorkflowInfo[] } {
   const all = [...runs], at = (run: WorkflowInfo) => Date.parse(run.ended ?? run.started);
   return { running: all.filter(run => run.state === "running").sort((a, b) => Date.parse(b.started) - Date.parse(a.started)),
     past: all.filter(run => run.state !== "running").sort((a, b) => at(b) - at(a)) };
+}
+
+// The runs' rows in the sessions panel, under a "Workflows" heading: the first few running runs, a row that counts the rest and,
+// open, lists them, then the same for the past runs, so that many runs never bury the sessions. The past row counts the failures
+// of today, which are news. keep is the open page's run, which stays listed under a closed fold. A room with no runs has
+// no rows.
+export const RUNNING_SHOWN = 4;
+export type RunRow = { kind: "head" } | { kind: "run"; run: WorkflowInfo } | { kind: "more"; count: number; open: boolean } | { kind: "past"; count: number; failed: number; open: boolean };
+export function runRows(runs: Iterable<WorkflowInfo>, open: { running: boolean; past: boolean }, keep?: string): RunRow[] {
+  const { running, past } = roomRuns(runs), row = (run: WorkflowInfo): RunRow => ({ kind: "run", run });
+  // The runs under a fold: all of them when it is open, else only the open page's.
+  const folded = (list: WorkflowInfo[], opened: boolean) => list.filter(run => opened || run.session === keep).map(row);
+  const today = new Date().toDateString();
+  const rows: RunRow[] = [...running.slice(0, RUNNING_SHOWN).map(row),
+    ...running.length > RUNNING_SHOWN ? [{ kind: "more" as const, count: running.length - RUNNING_SHOWN, open: open.running }, ...folded(running.slice(RUNNING_SHOWN), open.running)] : [],
+    ...past.length ? [{ kind: "past" as const, count: past.length, failed: past.filter(run => run.state === "failed" && new Date(run.ended ?? run.started).toDateString() === today).length, open: open.past }, ...folded(past, open.past)] : []];
+  return rows.length ? [{ kind: "head" }, ...rows] : [];
 }
 
 // The line a script that never called status() gets, as "75 of 76 steps · 1 running".
@@ -130,10 +147,6 @@ export function countedLine({ steps, running, failed }: { steps: number; running
   if (!steps) return "No steps yet";
   return [running ? `${steps - running} of ${steps} steps` : count(steps, "step"), ...running ? [`${running} running`] : [], ...failed ? [`${failed} failed`] : []].join(" · ");
 }
-
-// A run's one line: its script's latest status(), or its counts.
-export const runStatus = (run: Pick<WorkflowInfo, "status" | "steps" | "running" | "failed">): { text: string; script: boolean } =>
-  run.status ? { text: run.status, script: true } : { text: countedLine({ steps: run.steps ?? 0, running: run.running ?? 0, failed: run.failed }), script: false };
 
 // A worker with a file has a transcript to open.
 export const openable = (step: WorkflowStep): boolean => step.kind === "agent" && !!step.transcript;
