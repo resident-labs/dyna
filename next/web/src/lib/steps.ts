@@ -3,7 +3,7 @@ import { parsedJson } from "./json.ts";
 import { jsonFields, reading, type Field } from "./workflow.ts";
 import type { Event, TranscriptItem, TranscriptPart, TranscriptStep } from "./contract.gen.ts";
 
-export type StepKind = "read" | "edit" | "write" | "search" | "list" | "run" | "fetch" | "tool";
+export type StepKind = "read" | "edit" | "write" | "search" | "list" | "run" | "fetch" | "advisor" | "tool";
 
 // What a step did, not which tool did it. Each harness tool name maps to one kind; any other tool keeps its own name,
 // written as words, so the view never shows a tool ID (r8).
@@ -11,13 +11,13 @@ const kinds: Record<string, StepKind> = {
   read: "read", edit: "edit", write: "write", grep: "search", find: "search", web_search: "search", ls: "list", bash: "run", web_fetch: "fetch",
 };
 const verbs: Record<Exclude<StepKind, "tool">, string> = {
-  read: "Read", edit: "Edited", write: "Wrote", search: "Searched", list: "Listed", run: "Ran", fetch: "Fetched",
+  read: "Read", edit: "Edited", write: "Wrote", search: "Searched", list: "Listed", run: "Ran", fetch: "Fetched", advisor: "Asked the advisor",
 };
 
 // The transcript's label is the tool name and then its target, as "bash go test ./...". target is short for the row;
 // full is for its tooltip.
 export function stepTitle({ tool, label }: Pick<TranscriptStep, "tool" | "label">): { kind: StepKind; verb: string; target: string; full: string } {
-  const kind = kinds[tool] ?? "tool";
+  const kind = kinds[tool] ?? (tool.split("__").at(-1) === "advisor" ? "advisor" : "tool");
   const words = tool.split("__").at(-1)!.replace(/[_-]+/g, " ").trim();
   const verb = kind === "tool" ? words.charAt(0).toUpperCase() + words.slice(1) : verbs[kind];
   const full = label.startsWith(tool) ? label.slice(tool.length).trim() : label;
@@ -39,7 +39,7 @@ export function titleOf(item: TranscriptItem) {
     const value: unknown = JSON.parse(item.arguments ?? "{}");
     if (value && typeof value === "object" && !Array.isArray(value)) {
       const entries: [string, unknown][] = Object.entries(value);
-      for (const key of ["command", "path", "query", "pattern", "url", "job"]) {
+      for (const key of ["command", "path", "query", "pattern", "url", "job", "prompt"]) {
         const field = entries.find(([name]) => name === key)?.[1];
         if (typeof field === "string") { target = field; break; }
       }
@@ -49,7 +49,9 @@ export function titleOf(item: TranscriptItem) {
     }
   } catch { /* An incomplete preview has no row target; its fold keeps the full arguments. */ }
   const tool = item.tool ?? "tool";
-  return stepTitle({ tool, label: target ? `${tool} ${target}` : "" });
+  // The advisor row stays one quiet line: its prompt is what the row opens to.
+  const title = stepTitle({ tool, label: target ? `${tool} ${target}` : "" });
+  return title.kind === "advisor" ? { ...title, target: "" } : title;
 }
 
 // An opened tool reads for a person: a command or a file's body as the text it is, and any other argument as a labelled row. A
@@ -64,7 +66,7 @@ export function toolPart(part: TranscriptPart, text: string, kind: StepKind, cut
   return { text: typeof body === "string" ? body : undefined, fields: jsonFields(rest) };
 }
 export function activeVerb(kind: StepKind, fallback: string): string {
-  const active: Record<StepKind, string> = { run: "Running", read: "Reading", edit: "Editing", write: "Writing", search: "Searching", list: "Listing", fetch: "Fetching", tool: fallback };
+  const active: Record<StepKind, string> = { run: "Running", read: "Reading", edit: "Editing", write: "Writing", search: "Searching", list: "Listing", fetch: "Fetching", advisor: "Asking the advisor", tool: fallback };
   return active[kind];
 }
 

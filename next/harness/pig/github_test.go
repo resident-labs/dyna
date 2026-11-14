@@ -14,7 +14,7 @@ func TestGitHubServerIsDeferred(t *testing.T) {
 		t.Fatalf("%+v (%d characters)", server, len(server.Description))
 	}
 	path := filepath.Join(t.TempDir(), "mcp.json")
-	if err := WriteAgentMCPConfig(path, "areas", false, map[string]MCPServer{"github": server}); err != nil {
+	if err := WriteAgentMCPConfig(path, "areas", false, false, map[string]MCPServer{"github": server}); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)

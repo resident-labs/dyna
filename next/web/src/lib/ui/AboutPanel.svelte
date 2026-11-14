@@ -45,6 +45,7 @@
   $effect(() => { void open?.profile; loadAccount(); });
   // Root's panel is the room's, so it shows what the room is subscribed to. A list that cannot load shows nothing.
   let isRoot = $derived(open !== undefined && !open.parent);
+  let advisor = $derived([...store.sessions.values()].find(item => item.advisor));
   let subscriptions: SubscriptionInfo[] = $state([]);
   $effect(() => {
     if (!isRoot) { subscriptions = []; return; }
@@ -85,6 +86,7 @@
     {#if parent && open?.parent}<dt>Parent</dt><dd><a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(open.parent)}`} onclick={navigate}>{parent}</a></dd>{/if}
     {#if open?.profile}<dt>Profile</dt><dd><ProfileMenu {session} profile={open.profile} {switchable} /></dd>{/if}
     {#if account}<dt>Account</dt><dd><AccountMenu {session} {account} {switchable} onchanged={loadAccount} /></dd>{/if}
+    {#if isRoot}<dt>Advisor</dt><dd class="advisor"><ProfileMenu {session} {room} profile={advisor?.profile ?? ""} {switchable} />{#if advisor}<a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(advisor.session)}`} onclick={navigate}>Open</a>{/if}</dd>{/if}
   </dl>
   {#key session}<BoxFacts {store} {session} {shown} />{/key}
   {#if goal}
@@ -165,6 +167,9 @@
   .end { display: grid; gap: 8px; padding: 8px 16px 12px; }
   /* An empty list of facts, as for a session still loading, takes no gap. */
   .about :global(.facts:empty) { display: none; }
+  .advisor { display: flex; align-items: baseline; gap: 12px; }
+  .advisor > :global(.menu) { flex: none; }
+  .advisor :global(.name) { white-space: nowrap; }
   h3 { display: flex; align-items: baseline; gap: 6px; margin: 0 0 4px; font-size: 13px; font-weight: 600; line-height: 20px; }
   section { min-width: 0; }
   p { margin: 0; }

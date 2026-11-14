@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { activityLabel, activeVerb, elapsed, stepTime, stepTitle, titleOf, toolPart } from "./steps.ts";
+import { summarizeWork } from "./timeline.ts";
 import type { TranscriptItem } from "./contract.gen.ts";
 
 test("a live duration uses the injected clock", () => {
@@ -52,4 +53,10 @@ test("an opened tool shows its command and labelled arguments, never raw JSON", 
   assert.deepEqual(toolPart("arguments", "not json", "tool", false), { text: "not json", fields: [] });
   assert.deepEqual(toolPart("output", '{"state":"open"}', "tool", false), { text: undefined, fields: [{ label: "State", kind: "text", text: "open" }] });
   assert.deepEqual(toolPart("output", '{"state":"open"}', "run", false), { text: '{"state":"open"}', fields: [] });
+});
+
+test("root's advisor call is its own row, that opens to its prompt", () => {
+  const item = { id: "i", turn: "t", kind: "tool", at: "", tool: "mcp__dyna__advisor", arguments: JSON.stringify({ prompt: "Which cache should the store use?" }) } as TranscriptItem;
+  assert.deepEqual([titleOf(item).kind, titleOf(item).verb, titleOf(item).target], ["advisor", "Asked the advisor", ""]);
+  assert.equal(summarizeWork([item, item]), "Asked the advisor");
 });

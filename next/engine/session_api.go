@@ -39,6 +39,9 @@ func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, r
 }
 
 func (s *Service) startSession(ctx context.Context, caller contract.Principal, req contract.SessionStartRequest, roomName string, run *store.WorkflowRun) (contract.SessionStartResponse, *contract.Error) {
+	if req.Advisor && (roomName != "" || req.Goal != "" || req.DoneWhen != "") {
+		return contract.SessionStartResponse{}, invalid("the advisor holds no goals and starts with none: leave goal and doneWhen out, and start it in an existing room")
+	}
 	if roomName == "" {
 		if e := s.roomAccess(ctx, caller, req.Room); e != nil {
 			return contract.SessionStartResponse{}, e
@@ -145,6 +148,9 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		if err != nil {
 			return contract.SessionStartResponse{}, failure(err)
 		}
+		if p.Advisor {
+			return contract.SessionStartResponse{}, invalid("the advisor starts no sessions and has no children: it advises root and holds no goals")
+		}
 		repo, err = room.RepoForSession(repos, req.Repo, p.Repo)
 		if err != nil {
 			return contract.SessionStartResponse{}, invalid(err.Error())
@@ -167,8 +173,8 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 			return contract.SessionStartResponse{}, problem
 		}
 	}
-	session := store.Session{ID: contract.SessionID(sid), Room: req.Room, Name: req.Name, Repo: repo, Profile: req.Profile, Box: contract.BoxID(bid), NewRoomName: roomName, Compose: composeName, GPU: req.GPU, Workflow: run}
-	event, err := s.event(req.Room, caller, contract.SessionStarted{Session: session.ID, Name: req.Name, Parent: parent, Profile: req.Profile, Goal: req.Goal, DoneWhen: req.DoneWhen, Brief: req.Brief, Workflow: run != nil})
+	session := store.Session{ID: contract.SessionID(sid), Room: req.Room, Name: req.Name, Repo: repo, Profile: req.Profile, Box: contract.BoxID(bid), NewRoomName: roomName, Compose: composeName, GPU: req.GPU, Workflow: run, Advisor: req.Advisor}
+	event, err := s.event(req.Room, caller, contract.SessionStarted{Session: session.ID, Name: req.Name, Parent: parent, Profile: req.Profile, Goal: req.Goal, DoneWhen: req.DoneWhen, Brief: req.Brief, Workflow: run != nil, Advisor: req.Advisor})
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
 	}

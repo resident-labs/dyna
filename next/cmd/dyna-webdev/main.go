@@ -421,6 +421,7 @@ func (p profiles) List() []contract.Profile {
 	// Invented models, so the session profile menu has choices. Model still runs every profile on the fake harness.
 	list := []contract.Profile{{Name: "fake", Provider: contract.ModelProviderAnthropic, Model: "claude-sonnet-5-5", Thinking: contract.ThinkingMedium},
 		{Name: "deep", Provider: contract.ModelProviderAnthropic, Model: "claude-opus-5-5", Thinking: contract.ThinkingXHigh},
+		{Name: "fable", Provider: contract.ModelProviderAnthropic, Model: "claude-fable-5", Thinking: contract.ThinkingXHigh},
 		{Name: "quick", Provider: contract.ModelProviderOpenAI, Model: "gpt-6.1-mini", Thinking: contract.ThinkingOff}}
 	if !p.empty {
 		for i := range list {
@@ -770,6 +771,9 @@ func seedRoom(ctx context.Context, s *engine.Service, st *store.Store, posts, ag
 	}
 	fixtureSession, fixtureChild, fixtureRoom = fixture.Session, child.Session, room.Room
 	seedAbout(ctx, s, room.Room, lead.Session)
+	tree, err := st.RoomTree(ctx, room.Room)
+	fatal(err)
+	seedAdvisorCall(ctx, s, st, room.Room, tree.Root())
 	// A root has the grant by itself; this one shows a question in Needs you, Requests and a DM.
 	asker := contract.Principal{Kind: contract.PrincipalSession, Session: fixture.Session}
 	fatal(st.CreateGrant(ctx, contract.Grant{ID: "grant_fixture", Kind: contract.GrantAskOwner, Room: room.Room, To: asker, By: owner, Created: time.Now()}))

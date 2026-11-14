@@ -677,6 +677,9 @@ test("step rows reach only the open run page, and the run's end and a new connec
     // A new crew has no row from its start, before workflow.list names its run.
     store.apply(event(8, { type: "session.started", body: { session: "crew2", name: "crew-2", profile: "p", workflow: true } }));
     store.apply(event(9, { type: "session.started", body: { session: "s2", name: "worker", profile: "p" } }));
+    // The advisor has a page but no row among the sessions: it shows in root's About.
+    store.apply(event(10, { type: "session.started", body: { session: "adv", name: "advisor", profile: "p", advisor: true } }));
+    assert.equal(store.sessions.has("adv"), true);
     assert.deepEqual(store.members.map(item => item.session), ["s2"]);
     hello(); // Initial hello does not reread the open page.
     assert.deepEqual(seen, [step, undefined]);

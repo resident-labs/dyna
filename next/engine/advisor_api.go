@@ -1,0 +1,234 @@
+package engine
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
+	"github.com/resident-labs/dyna/engine/transcriptview"
+)
+
+// advisorTimeout is how long root waits for the advisor's answer. It is a variable so that a test need not wait it out.
+var advisorTimeout = 15 * time.Minute
+
+// Advisor posts root's prompt to the room's advisor and waits for the end of the turn that takes it, whatever its outcome. The answer
+// is the turn's final text. A wait that ends early, by timeout or by root's
+// stop, leaves the advisor's reply to arrive as an input, as a child's result does.
+func (s *Service) Advisor(ctx context.Context, caller contract.Principal, req contract.AdvisorRequest) (contract.AdvisorResponse, *contract.Error) {
+	if caller.Kind != contract.PrincipalSession {
+		return contract.AdvisorResponse{}, forbidden()
+	}
+	self, problem := s.callerSession(ctx, caller)
+	if problem != nil {
+		return contract.AdvisorResponse{}, problem
+	}
+	if !self.Root {
+		return contract.AdvisorResponse{}, invalid("only root calls the advisor")
+	}
+	if strings.TrimSpace(req.Prompt) == "" {
+		return contract.AdvisorResponse{}, invalid("prompt is required: the task, what you found so far and what you want judged")
+	}
+	advisor, err := s.store.RoomAdvisor(ctx, self.Room)
+	if errors.Is(err, store.ErrNotFound) {
+		return contract.AdvisorResponse{}, invalid("this room has no advisor; set one with the room's advisor setting (root's About panel, or `dyna room advisor ROOM PROFILE`)")
+	}
+	if err != nil {
+		return contract.AdvisorResponse{}, failure(err)
+	}
+	since, err := s.store.LastConsultEnd(ctx, advisor.ID, self.ID)
+	if err != nil {
+		return contract.AdvisorResponse{}, failure(err)
+	}
+	delta, problem := s.advisorDelta(ctx, self.ID, since)
+	if problem != nil {
+		return contract.AdvisorResponse{}, problem
+	}
+	// Subscribe before the post, so that an end cannot fall between the post and the first look.
+	changes, unsubscribe := s.store.Subscribe()
+	defer func() { unsubscribe() }()
+	post, problem := s.Post(ctx, caller, contract.PostRequest{Room: self.Room, Text: req.Prompt, Context: delta, Home: contract.Conversation{Kind: contract.ConversationDM, Session: advisor.ID}, Awaited: true})
+	if problem != nil {
+		return contract.AdvisorResponse{}, problem
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, advisorTimeout)
+	defer cancel()
+	for {
+		ended, done, err := s.store.DeliveryTurnEnded(waitCtx, advisor.ID, post.Seq)
+		if err != nil && waitCtx.Err() == nil {
+			return contract.AdvisorResponse{}, failure(err)
+		}
+		if done {
+			return advisorAnswer(ended), nil
+		}
+		select {
+		case <-waitCtx.Done():
+			// The reply is owed from here on, unless the turn ended just now.
+			settle := context.WithoutCancel(ctx)
+			owed, err := s.store.OweReply(settle, advisor.ID, post.Seq, self.ID)
+			if err != nil {
+				return contract.AdvisorResponse{}, failure(err)
+			}
+			if !owed {
+				if ended, done, err := s.store.DeliveryTurnEnded(settle, advisor.ID, post.Seq); err == nil && done {
+					return advisorAnswer(ended), nil
+				}
+			}
+			if ctx.Err() != nil {
+				return contract.AdvisorResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "the advisor call was cancelled; its reply will still arrive as an input"}
+			}
+			return contract.AdvisorResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: fmt.Sprintf("the advisor did not answer within %s; its reply will still arrive as an input", advisorTimeout)}
+		case _, ok := <-changes:
+			if !ok {
+				unsubscribe()
+				changes, unsubscribe = s.store.Subscribe()
+			}
+		}
+	}
+}
+
+// advisorAnswer is the advisor's final text, which is root's tool result. Nothing posts it: the feed holds neither the prompt nor the answer,
+// and the owner reads them in root's transcript, under the tool call.
+func advisorAnswer(ended contract.TurnEnded) contract.AdvisorResponse {
+	if ended.Final == "" {
+		return contract.AdvisorResponse{Answer: "The advisor's turn ended (" + string(ended.Outcome) + ") with no text. " + ended.Error}
+	}
+	return contract.AdvisorResponse{Answer: ended.Final}
+}
+
+// advisorName is the name of the session the room's advisor setting starts.
+const advisorName = "advisor"
+
+// setAdvisor makes the room's advisor match the setting: with a profile, one session beside root on it, started if missing and
+// switched when its profile differs; with none, no session. The setting is that session, so nothing else stores it.
+func (s *Service) setAdvisor(ctx context.Context, caller contract.Principal, room contract.RoomID, profile contract.ProfileName) *contract.Error {
+	if profile != "" {
+		if _, _, err := s.profiles.Model(profile); err != nil {
+			return invalid("unknown profile " + string(profile))
+		}
+	}
+	advisor, err := s.store.RoomAdvisor(ctx, room)
+	missing := errors.Is(err, store.ErrNotFound)
+	if err != nil && !missing {
+		return failure(err)
+	}
+	switch {
+	case missing && profile == "":
+		return nil
+	case missing:
+		_, problem := s.startSession(ctx, caller, contract.SessionStartRequest{Room: room, Name: advisorName, Profile: profile, Advisor: true}, "", nil)
+		return problem
+	case profile == "":
+		_, problem := s.SessionClose(ctx, caller, contract.SessionCloseRequest{Session: advisor.ID})
+		return problem
+	case advisor.Profile != profile:
+		_, problem := s.SessionSetProfile(ctx, caller, contract.SessionSetProfileRequest{Session: advisor.ID, Profile: profile})
+		return problem
+	}
+	return nil
+}
+
+const (
+	advisorTextChars   = 2000  // an input or root's own text is clipped to this
+	advisorArgChars    = 200   // a tool call's arguments
+	advisorResultChars = 300   // a tool call's result
+	advisorFirstSteps  = 10    // the first call carries root's last steps
+	advisorMaxSteps    = 30    // every call is cut to the newest steps
+	advisorMaxChars    = 24000 // and to about this many characters
+)
+
+// advisorDelta renders root's transcript for the advisor as a short record since root's last consultation: its inputs, its text and one line
+// per tool call, the newest advisorMaxSteps of them within about advisorMaxChars. The first call has only the last advisorFirstSteps.
+func (s *Service) advisorDelta(ctx context.Context, root contract.SessionID, since time.Time) (string, *contract.Error) {
+	var turns []contract.TranscriptTurn // newest first, whole
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	for before := contract.TurnID(""); ; {
+		read, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: root, Before: before, Limit: 5})
+		if problem != nil {
+			return "", problem
+		}
+		done := !read.More
+		for _, turn := range read.Turns {
+			if turn.Ended != nil && turn.Ended.Before(since) || since.IsZero() && len(turns) > 0 {
+				done = true
+				break
+			}
+			// A long turn comes back as its newest items; the rest is read from its start in pages.
+			for cursor := 0; turn.OlderItems; {
+				page, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: root, Turn: turn.ID, Page: contract.TranscriptPageOlderItems, Cursor: cursor})
+				if problem != nil || len(page.Turns) == 0 {
+					return "", problem
+				}
+				if cursor == 0 {
+					turn.Items = nil
+				}
+				turn.Items = append(turn.Items, page.Turns[0].Items...)
+				turn.OlderItems, cursor = page.Turns[0].OlderItems, page.Turns[0].NextItem
+			}
+			turns = append(turns, turn)
+		}
+		if done || read.Before == "" {
+			break
+		}
+		before = read.Before
+	}
+	slices.Reverse(turns)
+	var out []string
+	for _, turn := range turns {
+		if turn.Ended != nil && turn.Ended.Before(since) {
+			continue
+		}
+		var lines []string
+		for _, input := range turn.Inputs {
+			if input.At.After(since) {
+				lines = append(lines, fmt.Sprintf("input from %s%s: %s", input.From.Kind, input.From.Session, transcriptview.Clip(input.Text, advisorTextChars)))
+			}
+		}
+		for _, item := range turn.Items {
+			if !item.At.After(since) {
+				continue
+			}
+			switch item.Kind {
+			case contract.TranscriptText:
+				lines = append(lines, "root: "+transcriptview.Clip(item.Text, advisorTextChars))
+			case contract.TranscriptTool:
+				line := fmt.Sprintf("tool %s %s -> ", item.Tool, transcriptview.Clip(item.Arguments, advisorArgChars))
+				if item.Failed {
+					line += "failed: "
+				}
+				lines = append(lines, line+strings.ReplaceAll(transcriptview.Clip(item.Output, advisorResultChars), "\n", " "))
+			}
+		}
+		out = append(out, lines...)
+	}
+	steps := advisorMaxSteps
+	if since.IsZero() {
+		steps = advisorFirstSteps
+	}
+	kept, size := 0, 0
+	for kept < min(steps, len(out)) && size+len(out[len(out)-1-kept]) <= advisorMaxChars {
+		size += len(out[len(out)-1-kept])
+		kept++
+	}
+	if kept == 0 {
+		return "Root's work since your last answer: nothing new.", nil
+	}
+	note := ""
+	if omitted := len(out) - kept; omitted > 0 {
+		note = fmt.Sprintf("%d earlier steps omitted; transcript read has them\n\n", omitted)
+	}
+	return "Root's work since your last answer:\n\n" + note + strings.Join(out[len(out)-kept:], "\n\n"), nil
+}
+
+// IsAdvisor reports whether a principal is the advisor session.
+func (s *Service) IsAdvisor(ctx context.Context, who contract.Principal) bool {
+	if who.Kind != contract.PrincipalSession {
+		return false
+	}
+	session, err := s.store.Session(ctx, who.Session)
+	return err == nil && session.Advisor
+}

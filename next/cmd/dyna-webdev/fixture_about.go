@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"github.com/resident-labs/dyna/engine/store"
 	"log"
 	"time"
 
@@ -104,4 +106,25 @@ func (d devService) SubscriptionList(ctx context.Context, p contract.Principal, 
 		hook("sub_author_a", 15, "bash", "author-watch.sh", "mira-chen", "3"), hook("sub_author_b", 15, "bash", "author-watch.sh", "tobias"),
 		hook("sub_release", 15, "bash", "release-watch.sh"), hook("sub_sample", 15, "bash", "sample-repo-watch.sh"), retired)
 	return list, nil
+}
+
+// seedAdvisorCall gives root one turn that asked the advisor, so its transcript shows the advisor row with the prompt and the answer.
+func seedAdvisorCall(ctx context.Context, s *engine.Service, st *store.Store, room contract.RoomID, root contract.SessionID) {
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	wake, problem := s.Post(ctx, owner, contract.PostRequest{Room: room, Home: contract.Conversation{Kind: contract.ConversationDM, Session: root}, Text: "Which cache should the store use?"})
+	if problem != nil {
+		log.Fatal(problem.Message)
+	}
+	input, err := st.EventID(ctx, wake.Seq)
+	fatal(err)
+	fatal(st.SeedEndedTurn(ctx, room, root, "turn_advisor", input, wake.Seq, time.Now().Add(-5*time.Minute), time.Now().Add(-4*time.Minute)))
+	prompt := "Task: pick the cache for the store. I found that reads dominate and the data fits in memory; I lean toward an in-process LRU. What would you check before committing?"
+	answer := "Go with the LRU unless the store is read by more than one process.\n\n- **Check first:** if two processes share it, a stale read is the risk.\n- **Unsure:** your read volume."
+	lines := fmt.Sprintf(`{"type":"message","timestamp":%q,"message":{"role":"user","deliveryId":"%d"}}
+{"type":"message","timestamp":%q,"message":{"role":"assistant","content":[{"type":"toolCall","id":"adv1","name":"advisor","arguments":{"prompt":%q}}]}}
+{"type":"message","timestamp":%q,"message":{"role":"toolResult","toolCallId":"adv1","content":[{"type":"text","text":%q}]}}
+`, time.Now().Add(-5*time.Minute).Format(time.RFC3339), wake.Seq, time.Now().Add(-290*time.Second).Format(time.RFC3339), prompt, time.Now().Add(-270*time.Second).Format(time.RFC3339), answer)
+	if _, e := s.TranscriptAppend(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.TranscriptAppendRequest{Path: "advisor.jsonl", Bytes: []byte(lines)}); e != nil {
+		log.Fatal(e.Message)
+	}
 }

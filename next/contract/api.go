@@ -72,6 +72,7 @@ const (
 	MethodComposeList             Method = "compose.list"
 	MethodSessionClose            Method = "session.close"
 	MethodSessionStop             Method = "session.stop"
+	MethodAdvisor                 Method = "advisor"
 	MethodSessionSetProfile       Method = "session.set_profile"
 	MethodSessionAccount          Method = "session.account"
 	MethodSessionSetAccount       Method = "session.set_account"
@@ -202,6 +203,9 @@ type RoomSetRequest struct {
 	// GitHubWrites sets the room's githubWrites setting whole (spec 7.9): the groups to allow on repositories of the room, or `*`. No groups
 	// turns it off. Nil leaves it as it is.
 	GitHubWrites *GitHubWrites `json:"githubWrites,omitempty"`
+	// Advisor sets the room's advisor profile: a session on that profile beside root, started if missing, switched when the profile
+	// changes and closed when it is empty. Nil leaves it as it is.
+	Advisor *ProfileName `json:"advisor,omitempty"`
 }
 
 // RootApproval names the owner-class operations a room's root may also decide, when the owner allows it for the room.
@@ -240,6 +244,8 @@ type RoomSummary struct {
 	Waiting  []OpID    `json:"waiting"` // pending owner-class operations, which the owner decides, and the root for the kinds RootApproves names
 	// RootApproves lists the kinds the room's root may decide.
 	RootApproves []RootApproval `json:"rootApproves,omitempty"`
+	// Advisor is the room's advisor profile; empty when it has none.
+	Advisor ProfileName `json:"advisor,omitempty"`
 	// GitHubWrites is the room's githubWrites setting, as the owner set it; nil when it is off.
 	GitHubWrites *GitHubWrites `json:"githubWrites,omitempty"`
 	// Questions are those the owner has not answered.
@@ -293,6 +299,7 @@ type SessionSummary struct {
 	ShellJobs    int             `json:"shellJobs,omitempty"`    // TurnEnded.ShellJobs of the last ended turn
 	Waiting      *SessionWaiting `json:"waiting,omitempty"`      // current wait, only when no turn is running
 	HadJobs      bool            `json:"hadJobs"`                // the session has ever run a background shell job, so a finished job stays reachable
+	Advisor      bool            `json:"advisor,omitempty"`      // the room's advisor
 	StartedAt    time.Time       `json:"startedAt"`              // when the session was created
 	LastTurnAt   time.Time       `json:"lastTurnAt,omitzero"`    // when the latest turn ended; empty when no turn has ended
 }
@@ -535,6 +542,7 @@ type SessionStartRequest struct {
 	Host     HostName    `json:"host,omitempty"`
 	GPU      GPUGiB      `json:"gpu,omitempty" desc:"GiB of GPU memory the box needs on one card; true means 1. The session waits for a host with a card that has that much unclaimed. GPU memory is not limited per box, so a box that uses more makes other boxes on the card fail their CUDA allocations, and nothing stops it. Fails with no_gpu when no host reports a GPU and gpu_too_large when no card is big enough."`
 	Compose  string      `json:"compose,omitempty"`
+	Advisor  bool        `json:"-"` // set only by the room's advisor setting, which starts the advisor under root
 }
 type SessionStartResponse struct {
 	Session SessionID `json:"session"`
@@ -603,6 +611,19 @@ type SessionRestartRequest struct {
 }
 type SessionRestartResponse struct{}
 
+// AdvisorRefusal is what the advisor meets when it tries to act in the room. Its final text still reaches root.
+const AdvisorRefusal = "the advisor answers root; it does not act in the room"
+
+// AdvisorRequest is root's prompt for the room's advisor.
+type AdvisorRequest struct {
+	Prompt string `json:"prompt" desc:"What the advisor needs: the task, what you found so far and what you want judged. It can read your transcript, so point to evidence rather than pasting it."`
+}
+
+// AdvisorResponse is the final text of the advisor's turn.
+type AdvisorResponse struct {
+	Answer string `json:"answer"`
+}
+
 // SessionRefreshRequest names one session, or a room for every open session in it that the caller may manage.
 type SessionRefreshRequest struct {
 	Session SessionID `json:"session,omitempty"`
@@ -615,6 +636,8 @@ type SessionRefreshResponse struct {
 }
 type PostRequest struct {
 	Spoken         bool         `json:"-"` // set only by the voice dispatch boundary
+	Awaited        bool         `json:"-"` // set only by the advisor call, which waits for the reply itself, so the post owes none
+	Context        string       `json:"-"` // what the one recipient reads before Text, which the feed does not show; set only by the advisor call
 	DataAttachment *int         `json:"-"` // filled by the owning post boundary, never trusted from a caller
 	Data           JSONData     `json:"data,omitempty"`
 	Room           RoomID       `json:"room"`
@@ -750,7 +773,8 @@ type TextOnlyModel struct {
 type BoxHelloResponse struct {
 	Discord       bool   `json:"discord,omitempty"` // this room has a connection
 	Room          RoomID `json:"room"`
-	Root          bool   `json:"root,omitempty"` // the session has no parent, so add-ons marked root-only reach its box
+	Root          bool   `json:"root,omitempty"`    // the session has no parent, so add-ons marked root-only reach its box
+	Advisor       bool   `json:"advisor,omitempty"` // root's room has an advisor, so root's advisor tool is direct
 	GitName       string `json:"gitName,omitempty"`
 	GitEmail      string `json:"gitEmail,omitempty"`
 	CompactTokens int    `json:"compactTokens,omitempty"`

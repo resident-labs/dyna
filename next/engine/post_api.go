@@ -195,7 +195,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	}
 	surface := contract.SurfaceFeed
 	if req.Home.Kind == contract.ConversationDM {
-		own := caller.Kind == contract.PrincipalOwner || (caller.Kind == contract.PrincipalSession && req.Home.Session == caller.Session)
+		own := caller.Kind == contract.PrincipalOwner || req.Awaited || (caller.Kind == contract.PrincipalSession && req.Home.Session == caller.Session)
 		if !own || req.Home.Session == "" || len(req.Mentions) != 0 {
 			return contract.PostResponse{}, invalid("invalid DM")
 		}
@@ -280,11 +280,16 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	if surface == contract.SurfaceDM {
 		recipients = append(recipients, room.Recipient{Session: req.Home.Session, Explicit: true})
 	}
-	event, err := s.event(req.Room, caller, contract.PostCreated{WorkflowStep: req.WorkflowStep, Spoken: req.Spoken, Source: source, Text: req.Text, Data: req.Data, DataAttachment: req.DataAttachment, Mentions: mentions, Home: req.Home, ReplyTo: req.ReplyTo, Attachments: req.Attachments, ClientID: req.ClientID, ToolCallID: req.ToolCallID})
+	event, err := s.event(req.Room, caller, contract.PostCreated{WorkflowStep: req.WorkflowStep, Spoken: req.Spoken, Source: source, Text: req.Text, Data: req.Data, DataAttachment: req.DataAttachment, Mentions: mentions, Home: req.Home, ReplyTo: req.ReplyTo, Attachments: req.Attachments, ClientID: req.ClientID, ToolCallID: req.ToolCallID, Context: req.Context})
 	if err != nil {
 		return contract.PostResponse{}, failure(err)
 	}
 	deliveries := tree.Deliveries(room.DeliveryInput{Event: event, Surface: surface, Recipients: recipients, HasMentions: len(req.Mentions) > 0, Home: req.Home, ReplyTo: req.ReplyTo})
+	if req.Awaited {
+		for i := range deliveries {
+			deliveries[i].Reply = contract.ReplyChannel{Kind: contract.ReplyNone}
+		}
+	}
 	id, seq, err := s.store.PostOnce(ctx, event, deliveries, req.VisualUpdate, req.VisualReply)
 	var superseded *store.VisualSupersededError
 	if errors.As(err, &superseded) {

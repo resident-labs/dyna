@@ -182,7 +182,7 @@ export class RoomStore {
   }
   crew(id: string): boolean { return this.crews.has(id) || this.workflows.has(id); }
   // The sessions that the sessions panel lists: every open one but a crew.
-  get members(): (SessionStarted & { startedAt: string; lastTurnAt?: string })[] { return [...this.sessions.values()].filter(item => !this.crew(item.session)); }
+  get members(): (SessionStarted & { startedAt: string; lastTurnAt?: string })[] { return [...this.sessions.values()].filter(item => !this.crew(item.session) && !item.advisor); }
   get counts(): Counts { return countOf(this.statuses().values()); }
   private statusWith(id: string, asking: Set<string>): Status {
     const box = this.boxes.get(id);
@@ -263,7 +263,7 @@ export class RoomStore {
     for (const session of list.sessions ?? []) {
       this.sessions.set(session.id, {
         session: session.id, name: session.name, parent: session.parent || undefined,
-        profile: session.profile, goal: session.goal || undefined, startedAt: session.startedAt, lastTurnAt: session.lastTurnAt,
+        profile: session.profile, goal: session.goal || undefined, advisor: session.advisor, startedAt: session.startedAt, lastTurnAt: session.lastTurnAt,
       });
       this.names.set(session.id, session.name);
       this.noteRead({ kind: "dm", session: session.id }, session.lastRead);

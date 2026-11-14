@@ -74,7 +74,15 @@ func roomCommand(getClient func() client) *cobra.Command {
 		setRoom.Flags().StringVar(rootApproves[kind], "root-approves-"+string(kind), "", "on or off: whether the room's root may decide its sessions' "+string(kind)+" requests")
 	}
 	setRoom.Flags().StringVar(&githubWrites, "github-writes", "", "GROUPS@REPOS (issues,pulls,projects @ repositories of the room or *), or off: the GitHub writes the room's sessions may make")
-	room.AddCommand(limit, setRoom, roomHostsCommand(getClient))
+	advisor := &cobra.Command{Use: "advisor ROOM PROFILE|none", Short: "Set the room's advisor profile, or none", Long: "Set the room's advisor: a session on PROFILE beside root, started if missing and switched to a new profile. none closes it. Root's advisor tool and prompt section follow at its next box start.", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		profile := contract.ProfileName(args[1])
+		if args[1] == "none" {
+			profile = ""
+		}
+		_, err := getClient().RoomSet(cmd.Context(), contract.RoomSetRequest{Room: contract.RoomID(args[0]), Advisor: &profile})
+		return err
+	}}
+	room.AddCommand(limit, setRoom, advisor, roomHostsCommand(getClient))
 	var rootProfile string
 	create := &cobra.Command{Use: "create NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		r, err := getClient().RoomCreate(cmd.Context(), contract.RoomCreateRequest{Name: args[0], RootProfile: contract.ProfileName(rootProfile)})
