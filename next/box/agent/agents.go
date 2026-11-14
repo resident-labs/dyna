@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -19,6 +20,9 @@ import (
 const agentToolCalls = 40
 
 const agentCapNotice = "You have used all 40 of your tool calls. Do not call another tool: answer now with what you have found, and say what you did not get to."
+
+// agentSettle is how long a stopped agent has to settle its streaming message before its turn is given up.
+const agentSettle = 5 * time.Second
 
 var errAgentCap = errors.New("the agent kept calling tools after it was told to answer")
 
@@ -75,6 +79,10 @@ func (a *Agents) Files() []string {
 // Turn starts the turn and returns at once. The answer is agent.ended, which every turn sends, however it ends.
 func (a *Agents) Turn(turn contract.AgentTurn) {
 	ctx, cancel := context.WithCancel(a.ctx)
+	if !turn.Deadline.IsZero() {
+		cancel()
+		ctx, cancel = context.WithDeadline(a.ctx, turn.Deadline)
+	}
 	a.mu.Lock()
 	if _, ok := a.running[turn.ID]; ok {
 		a.mu.Unlock()
@@ -170,15 +178,6 @@ func (a *Agents) run(ctx context.Context, turn contract.AgentTurn, name, slots c
 		}
 		return nil
 	})
-	stopped := make(chan struct{})
-	defer close(stopped)
-	go func() {
-		select {
-		case <-ctx.Done():
-			_ = session.Abort(context.WithoutCancel(ctx))
-		case <-stopped:
-		}
-	}()
 	prompt := turn.Prompt
 	if ended.Fresh && turn.FreshPrompt != "" {
 		prompt = turn.FreshPrompt
@@ -186,11 +185,35 @@ func (a *Agents) run(ctx context.Context, turn contract.AgentTurn, name, slots c
 	if turn.Orient && a.config.Orient != nil {
 		prompt = a.config.Orient(ctx) + "\n\n" + prompt
 	}
-	result, err := session.Start(ctx, turn.Turn, []contract.TurnInput{{Delivery: turn.Delivery, Text: prompt}}, func() {})
+	// The turn runs on a context a stop cannot cancel: a cancelled one would return the turn before Abort has settled the message it was
+	// streaming, and the text so far would be lost. A stop aborts instead, and the turn settles with that text.
+	type started struct {
+		result contract.TurnEnded
+		err    error
+	}
+	done := make(chan started, 1)
+	go func() {
+		result, err := session.Start(context.WithoutCancel(ctx), turn.Turn, []contract.TurnInput{{Delivery: turn.Delivery, Text: prompt}}, func() {})
+		done <- started{result, err}
+	}()
+	var finished started
+	select {
+	case finished = <-done:
+	case <-ctx.Done():
+		_ = session.Abort(context.WithoutCancel(ctx))
+		select {
+		case finished = <-done:
+		case <-time.After(agentSettle):
+		}
+	}
+	result, err := finished.result, finished.err
 	ended.Final, ended.Usage = result.Final, result.Usage
 	switch {
 	case ctx.Err() != nil:
 		ended.Outcome = contract.TurnStopped
+		if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+			ended.Error = "the agent ran out of time"
+		}
 	case capped.Load():
 		ended.Outcome, ended.Error = contract.TurnStopped, fmt.Sprintf("it used %d tool calls and was told to answer, and called more", agentToolCalls)
 	case err != nil:

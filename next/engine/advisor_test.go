@@ -506,3 +506,57 @@ func mustEventID(t *testing.T, s *Service, ctx context.Context, seq int64) contr
 	}
 	return id
 }
+
+// The engine restarts while the advisor runs: root's call died with it, so no call waits. The box's reconnect stops the agent and ends its
+// row, and the owner's Stop reaches an agent by its row.
+func TestAnAgentWhoseCallDiedWithTheEngineIsStoppedWhenItsBoxReconnects(t *testing.T) {
+	r := newAdvisorRig(t)
+	turn := r.ask(r.ctx, "call_1")
+	if turn.Deadline.IsZero() || !turn.Deadline.After(r.now()) {
+		t.Fatalf("the box was given no deadline: %+v", turn)
+	}
+	r.restart()
+	handle, _ := r.s.live.CreateSession(r.root)
+	handle.Lock()
+	r.channel = live.NewChannel(func() {})
+	handle.SetChannel(r.channel)
+	handle.Unlock()
+	if state := r.agentState("call_1"); state != "running" {
+		t.Fatalf("after the restart the row is %q", state)
+	}
+	r.s.stopOrphanedAgents(r.ctx, r.root)
+	select {
+	case message := <-r.channel.Agents():
+		if stop, ok := message.Body.(contract.AgentStop); !ok || stop.ID != "call_1" {
+			t.Fatalf("the box was sent %+v", message.Body)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the box was never told to stop")
+	}
+	if state := r.agentState("call_1"); state != "stopped" {
+		t.Fatalf("the row is %q", state)
+	}
+}
+
+func TestTheOwnersStopReachesAnAgentByItsRowAfterARestart(t *testing.T) {
+	r := newAdvisorRig(t)
+	r.ask(r.ctx, "call_1")
+	r.restart()
+	handle, _ := r.s.live.CreateSession(r.root)
+	handle.Lock()
+	r.channel = live.NewChannel(func() {})
+	handle.SetChannel(r.channel)
+	handle.Unlock()
+	if _, e := r.s.AgentStop(r.ctx, ownerCaller, contract.AgentStopRequest{Session: r.root, ID: "call_1"}); e != nil {
+		t.Fatal(e)
+	}
+	if message := <-r.channel.Agents(); message.Body.(contract.AgentStop).ID != "call_1" {
+		t.Fatalf("the box was sent %+v", message.Body)
+	}
+	if state := r.agentState("call_1"); state != "stopped" {
+		t.Fatalf("the row is %q", state)
+	}
+	if _, e := r.s.AgentStop(r.ctx, ownerCaller, contract.AgentStopRequest{Session: r.root, ID: "call_1"}); e == nil {
+		t.Fatal("an ended agent was stopped again")
+	}
+}

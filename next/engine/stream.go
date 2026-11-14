@@ -228,6 +228,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 	handle.Unlock()
 	slog.Info("box channel connected", "session", session.ID, "box", session.Box, "stale", stale)
 	s.reconciler.Connected(session.Box)
+	s.stopOrphanedAgents(ctx, session.ID)
 	out := make(chan contract.BoxMessage)
 	go func() {
 		defer func() {

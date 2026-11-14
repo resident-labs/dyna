@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"path/filepath"
 	"sync"
 	"time"
@@ -118,7 +119,7 @@ func (s *Service) askAgent(ctx context.Context, session store.Session, spec agen
 		}
 		return agentResult{AgentEndedRequest: ended, Cause: cause}, nil
 	}
-	turn := contract.AgentTurn{ID: spec.ID, Name: spec.Name, Profile: spec.Profile, Tools: contract.AgentReadOnlyTools, Instructions: spec.Instructions, Persist: spec.Persist, Prompt: spec.Prompt, FreshPrompt: spec.FreshPrompt, Orient: spec.Orient, Turn: session.Turn, Delivery: delivery}
+	turn := contract.AgentTurn{ID: spec.ID, Name: spec.Name, Profile: spec.Profile, Tools: contract.AgentReadOnlyTools, Instructions: spec.Instructions, Persist: spec.Persist, Prompt: spec.Prompt, FreshPrompt: spec.FreshPrompt, Orient: spec.Orient, Deadline: s.now().Add(agentTimeout), Turn: session.Turn, Delivery: delivery}
 	if !s.sendAgent(session.ID, turn) {
 		_, err := finish(contract.AgentEndedRequest{ID: spec.ID, Outcome: contract.TurnFailed}, "")
 		return agentResult{}, errors.Join(errors.New("the session's box is not connected"), err)
@@ -218,12 +219,43 @@ func (s *Service) AgentEnded(ctx context.Context, caller contract.Principal, req
 	return contract.AgentEndedResponse{}, nil
 }
 
-// AgentStop is the owner's stop of an agent that runs for a session. The call that asked for it returns the text so far.
-func (s *Service) AgentStop(_ context.Context, _ contract.Principal, req contract.AgentStopRequest) (contract.AgentStopResponse, *contract.Error) {
-	run := s.agents.get(req.ID)
-	if run == nil || run.session != req.Session {
+// AgentStop is the owner's stop of an agent that runs for a session. The call that asked for it returns the text so far. It goes by the
+// agent's row, so it also reaches an agent whose call died with an engine restart: that one is told to stop and its row ends.
+func (s *Service) AgentStop(ctx context.Context, _ contract.Principal, req contract.AgentStopRequest) (contract.AgentStopResponse, *contract.Error) {
+	agent, err := s.store.Agent(ctx, req.ID)
+	if err != nil || agent.Session != req.Session || agent.State != store.AgentRunning {
 		return contract.AgentStopResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "that agent is not running"}
 	}
-	run.once.Do(func() { close(run.stop) })
+	if run := s.agents.get(req.ID); run != nil {
+		run.once.Do(func() { close(run.stop) })
+		return contract.AgentStopResponse{}, nil
+	}
+	if err := s.stopAgent(ctx, agent); err != nil {
+		return contract.AgentStopResponse{}, failure(err)
+	}
 	return contract.AgentStopResponse{}, nil
+}
+
+// stopAgent tells the box to stop an agent no call waits for, and ends its row: the box's answer, if it comes, changes nothing.
+func (s *Service) stopAgent(ctx context.Context, agent store.Agent) error {
+	s.sendAgent(agent.Session, contract.AgentStop{ID: agent.ID})
+	return s.store.EndAgent(ctx, agent.Session, agent.ID, contract.TurnStopped, contract.Usage{}, s.now())
+}
+
+// stopOrphanedAgents stops the session's agent turns that still run in its box with no call waiting: the call died with the engine.
+// A box asks it each time it connects, and a turn whose call is alive is left alone.
+func (s *Service) stopOrphanedAgents(ctx context.Context, session contract.SessionID) {
+	running, err := s.store.RunningAgents(ctx, session)
+	if err != nil {
+		slog.Warn("running agents", "session", session, "err", err)
+		return
+	}
+	for _, agent := range running {
+		if s.agents.get(agent.ID) != nil {
+			continue
+		}
+		if err := s.stopAgent(ctx, agent); err != nil {
+			slog.Warn("stop orphaned agent", "agent", agent.ID, "err", err)
+		}
+	}
 }

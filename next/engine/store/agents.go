@@ -112,3 +112,8 @@ func (s *Store) AgentRange(ctx context.Context, a Agent) (TranscriptTurnRange, e
 	}
 	return r, err
 }
+
+// RunningAgents lists the session's agent turns that have not ended.
+func (s *Store) RunningAgents(ctx context.Context, session contract.SessionID) ([]Agent, error) {
+	return queryAll(ctx, s.Read(), func(rows scanner) (Agent, error) { return scanAgent(rows) }, "SELECT "+agentColumns+" FROM agents WHERE session=? AND state=? ORDER BY started_at", session, AgentRunning)
+}

@@ -3,6 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -124,22 +127,23 @@ func TestAnInBoxAgentReadsTheParentsFilesAndOnlyReads(t *testing.T) {
 
 // fakeAgent is a session that makes tool calls until told to stop, or to answer.
 type fakeAgent struct {
-	file     string
-	toolCall func()
-	before   func(context.Context) error
-	obey     bool // answers when told to
-	mu       sync.Mutex
-	steers   []string
-	aborted  chan struct{}
-	hold     chan struct{} // when set, the turn waits for it
+	file      string
+	toolCall  func()
+	before    func(context.Context) error
+	obey      bool // answers when told to
+	mu        sync.Mutex
+	steers    []string
+	aborted   chan struct{}
+	hold      chan struct{} // when set, the turn waits for it, or for an abort
+	abortOnce sync.Once
 }
 
 func (f *fakeAgent) Start(ctx context.Context, _ contract.TurnID, _ []contract.TurnInput, _ func()) (contract.TurnEnded, error) {
 	if f.hold != nil {
 		select {
 		case <-f.hold:
-		case <-ctx.Done():
-			return contract.TurnEnded{Final: "partial text"}, ctx.Err()
+		case <-f.aborted:
+			return contract.TurnEnded{Final: "partial text", Outcome: contract.TurnStopped}, nil
 		}
 		return contract.TurnEnded{Outcome: contract.TurnCompleted, Final: "held"}, nil
 	}
@@ -163,9 +167,7 @@ func (f *fakeAgent) Steer(_ context.Context, input contract.TurnInput) error {
 	return nil
 }
 func (f *fakeAgent) Abort(context.Context) error {
-	if f.aborted != nil {
-		close(f.aborted)
-	}
+	f.abortOnce.Do(func() { close(f.aborted) })
 	return nil
 }
 func (f *fakeAgent) SessionFile() string                             { return f.file }
@@ -241,4 +243,59 @@ func TestStopEndsAnAgentAndTheSameNameWaits(t *testing.T) {
 		t.Fatalf("the waiting agent %+v", ended)
 	}
 	agents.Stop("two") // an ended agent is gone: no panic, nothing to stop
+}
+
+// A turn that passes its deadline is ended by the box itself, with the text it had, whether or not the engine is there to stop it.
+func TestAnAgentTurnEndsAtItsDeadline(t *testing.T) {
+	agents, engine := fakeAgents(t, func(f *fakeAgent) { f.hold = make(chan struct{}) })
+	agents.Turn(contract.AgentTurn{ID: "late", Name: "advisor", Deadline: time.Now().Add(100 * time.Millisecond)})
+	ended := engine.wait(t)
+	if ended.Outcome != contract.TurnStopped || ended.Final != "partial text" || !strings.Contains(ended.Error, "ran out of time") {
+		t.Fatalf("ended %+v", ended)
+	}
+}
+
+// A stop while the model is streaming keeps what it had streamed: the turn settles after the abort, and the text is taken then.
+func TestStoppingAStreamingAgentKeepsItsPartialAnswer(t *testing.T) {
+	streaming := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"test-model\",\"content\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial answer\"}}\n\n")
+		w.(http.Flusher).Flush()
+		select {
+		case streaming <- struct{}{}:
+		default:
+		}
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+	agentDir := pigtest.AgentDir(t, pigtest.NewModel(), "")
+	var models ModelsConfig
+	data, err := os.ReadFile(filepath.Join(agentDir, "models.json"))
+	if err != nil || json.Unmarshal(data, &models) != nil {
+		t.Fatal("no models", err)
+	}
+	provider := models.Providers["anthropic"]
+	provider.BaseURL = server.URL
+	models.Providers["anthropic"] = provider
+	sessions := filepath.Join(agentDir, "sessions")
+	engine := newAgentRecorder()
+	agents := NewAgents(context.Background(), AgentsConfig{
+		Engine: engine, Transcript: NewTranscript(&transcriptEngine{}, sessions), Sessions: sessions,
+		Open: func(ctx context.Context, turn contract.AgentTurn, dir string, toolCall func()) (agentSession, error) {
+			return openAgent(ctx, agentDir, t.TempDir(), "core", models, nil, turn, dir, toolCall)
+		},
+	})
+	agents.Turn(contract.AgentTurn{ID: "call_1", Name: "advisor", Tools: contract.AgentReadOnlyTools, Prompt: "hi", Turn: "turn_a", Delivery: 1,
+		Profile: contract.WorkflowProfile{Name: "advisor", Model: contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "test-model", Thinking: contract.ThinkingLow}}})
+	select {
+	case <-streaming:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the model never streamed")
+	}
+	time.Sleep(200 * time.Millisecond) // the stream's first text has reached the session
+	agents.Stop("call_1")
+	if ended := engine.wait(t); ended.Outcome != contract.TurnStopped || ended.Final != "partial answer" {
+		t.Fatalf("ended %+v", ended)
+	}
 }
