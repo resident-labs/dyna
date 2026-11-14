@@ -132,7 +132,7 @@ func seedAdvisorCall(ctx context.Context, s *engine.Service, st *store.Store, ro
 		return err
 	}))
 	prompt := "Task: pick the cache for the store. I found that reads dominate and the data fits in memory; I lean toward an in-process LRU. What would you check before committing?"
-	answer := "Go with the LRU unless the store is read by more than one process. Check that first: if two processes share it, a stale read is the risk, and a shared cache is worth its cost. Unsure: your read volume. The evidence that would change my advice is more than one reader."
+	answer := "Go with the LRU unless the store is read by more than one process.\n\n- **Check first:** if two processes share it, a stale read is the risk.\n- **Unsure:** your read volume."
 	lines := fmt.Sprintf(`{"type":"message","timestamp":%q,"message":{"role":"user","deliveryId":"%d"}}
 {"type":"message","timestamp":%q,"message":{"role":"assistant","content":[{"type":"toolCall","id":"adv1","name":"advisor","arguments":{"prompt":%q}}]}}
 {"type":"message","timestamp":%q,"message":{"role":"toolResult","toolCallId":"adv1","content":[{"type":"text","text":%q}]}}

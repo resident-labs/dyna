@@ -12,6 +12,7 @@
   import ReadThumb from "./ReadThumb.svelte";
   import RunFields from "./RunFields.svelte";
   import { readMedia } from "../media.ts";
+  import { parsedJson } from "../json.ts";
 
   let { items, ended, started, now, activity, chunks, onload, onopen, session, onmedia }: {
     items: TranscriptItem[];
@@ -28,6 +29,8 @@
 
   const icons: Record<StepKind, IconName> = { read: "file", edit: "edit", write: "write", search: "search", list: "list", run: "terminal", fetch: "globe", advisor: "chat", tool: "tool" };
   const parts = ["arguments", "output"] as const;
+  // The advisor's answer is prose, shown as a message is. The tool returns it as {answer}, and an older or cut result is the text itself.
+  const advice = (text: string) => { const value = parsedJson(text); const answer = value && typeof value === "object" && !Array.isArray(value) ? value["answer"] : undefined; return typeof answer === "string" ? answer : text; };
   let failures: Record<string, boolean> = $state({});
   let loading: Record<string, boolean> = $state({});
   let expandedContent: Record<string, boolean> = $state({});
@@ -120,7 +123,8 @@
         {#each parts as name}
           {#if item[name] || chunks[key(item, name)] !== undefined}
             {@const part = toolPart(name, chunks[key(item, name)] ?? item[name] ?? "", title.kind, !!item.more && chunks[key(item, name)] === undefined)}
-            {#if part.text}{@const lines = part.text.split("\n")}<pre>{(expandedContent[key(item, name)] ? lines : lines.slice(0, 12)).join("\n")}</pre>{#if lines.length > 12 && !expandedContent[key(item, name)]}<button onclick={() => expandedContent[key(item, name)] = true}>Show all</button>{/if}{/if}
+            {#if title.kind === "advisor" && name === "output"}<div class="advice"><Markdown text={advice(chunks[key(item, name)] ?? item[name] ?? "")} source={{ key: item.id, from: { kind: "session", session }, at: item.at }} /></div>
+            {:else if part.text}{@const lines = part.text.split("\n")}<pre>{(expandedContent[key(item, name)] ? lines : lines.slice(0, 12)).join("\n")}</pre>{#if lines.length > 12 && !expandedContent[key(item, name)]}<button onclick={() => expandedContent[key(item, name)] = true}>Show all</button>{/if}{/if}
             {#if part.fields.length}<div class="fields"><RunFields fields={part.fields} /></div>{/if}
           {/if}
           {#if item.more && chunks[key(item, name)] === undefined}
@@ -157,6 +161,7 @@
 {/if}
 
 <style>
+  .advice { padding: 4px 0 4px 0; font-size: 14px; }
   .group, .entry { color: var(--muted); font-size: 14px; line-height: 1.625; }
   .group-heading { display: flex; align-items: center; gap: 6px; }
   .thought-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
