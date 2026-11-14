@@ -53,6 +53,8 @@ type Config struct {
 type Harness struct {
 	// Activity hears what the turn is doing: each tool call, and a compaction.
 	Activity func(contract.TurnID, contract.ActivityKind, string)
+	// Finished hears each call of a parallel batch as it ends, before the batch writes its results together.
+	Finished func(contract.TurnID, contract.ToolFinished)
 	services *coding.AgentSessionServices
 	models   *coding.ModelRuntime // the runtime a ModelsFile made, which the services leave to their owner; nil without one
 	session  *coding.Session
@@ -256,6 +258,7 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, send func(context
 		activity = h.Activity
 	}
 	t := newTurn(id, activity)
+	t.finished = h.Finished
 	h.mu.Lock()
 	h.turn = t
 	h.mu.Unlock()

@@ -407,7 +407,7 @@
           {/if}
           {#each shownTimelineGroups(segment.items, !!turn.ended && !expandedTurns[segment.id]) as group (group.id)}
             {#if group.kind === "work"}
-              <TranscriptWorkRow items={group.items} ended={!running(turn)} started={turn.started} {now} activity={store.activityKinds.get(session)} {chunks} {session} onmedia={key => openMedia(key, 0)}
+              <TranscriptWorkRow items={group.items} finished={store.finished.get(session)} ended={!running(turn)} started={turn.started} {now} activity={store.activityKinds.get(session)} {chunks} {session} onmedia={key => openMedia(key, 0)}
                 onopen={() => { if (turn.olderItems) void readContinuation(turn, "older"); }}
                 onload={async (item, part) => { if (!await fetchPart(turn.id, item.id, part)) throw new Error("Part did not load"); }} />
             {:else if group.kind === "posts"}
