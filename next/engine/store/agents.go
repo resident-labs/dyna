@@ -86,10 +86,13 @@ func (s *Store) TurnDelivery(ctx context.Context, session contract.SessionID, tu
 	return seq, err
 }
 
-// RoomAdvisorProfile is the room's advisor setting: a profile, or none.
+// RoomAdvisorProfile is the room's advisor setting: a profile, or none. A room that is not open has none.
 func (s *Store) RoomAdvisorProfile(ctx context.Context, room contract.RoomID) (contract.ProfileName, error) {
 	var profile contract.ProfileName
 	err := s.Read().QueryRowContext(ctx, "SELECT advisor_profile FROM rooms WHERE id=? AND state='open'", room).Scan(&profile)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
 	return profile, err
 }
 

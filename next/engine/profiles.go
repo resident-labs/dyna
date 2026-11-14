@@ -186,6 +186,18 @@ func (s *Service) AllowedModels(ctx context.Context, session store.Session) ([]s
 			allowed = append(allowed, models...)
 		}
 	}
+	// Root's advisor runs in root's box and calls the model through root's route.
+	if session.Root {
+		advisor, err := s.store.RoomAdvisorProfile(ctx, session.Room)
+		if err != nil {
+			return nil, false, err
+		}
+		if advisor != "" {
+			if _, models, err := s.profiles.Model(advisor); err == nil {
+				allowed = append(allowed, models...)
+			}
+		}
+	}
 	recent, err := s.store.RecentTurnModels(ctx, session.ID)
 	if err != nil {
 		return nil, false, err
