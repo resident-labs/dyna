@@ -62,3 +62,25 @@ func (s *Store) LastTurnEnd(ctx context.Context, session contract.SessionID) (ti
 	}
 	return time.UnixMilli(at.Int64), err
 }
+
+// SeedEndedTurn records a finished turn that took one input, for the web fixtures, which have no box to run one.
+func (s *Store) SeedEndedTurn(ctx context.Context, room contract.RoomID, session contract.SessionID, turn contract.TurnID, input contract.EventID, delivery int64, started, ended time.Time) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		seq, err := s.AppendEvent(tx, contract.Event{ID: contract.EventID("seed-" + string(turn)), Room: room, From: contract.Principal{Kind: contract.PrincipalEngine}, Time: started, Body: contract.TurnStarted{Session: session, Turn: turn, Inputs: []contract.EventID{input}}})
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO turns(id,session,started_at,ended_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,started_seq) VALUES(?,?,?,?,'completed','',0,0,0,0,?)", turn, session, started.UnixMilli(), ended.UnixMilli(), seq); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "UPDATE deliveries SET turn=?,state='read' WHERE to_kind='session' AND to_id=? AND seq=?", turn, session, delivery)
+		return err
+	})
+}
+
+// EventID returns the ID of the event at seq.
+func (s *Store) EventID(ctx context.Context, seq int64) (contract.EventID, error) {
+	var id contract.EventID
+	err := s.Read().QueryRowContext(ctx, "SELECT id FROM events WHERE seq=?", seq).Scan(&id)
+	return id, err
+}

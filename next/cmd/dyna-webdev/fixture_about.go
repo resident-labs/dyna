@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"github.com/resident-labs/dyna/engine/store"
 	"log"
@@ -116,21 +115,9 @@ func seedAdvisorCall(ctx context.Context, s *engine.Service, st *store.Store, ro
 	if problem != nil {
 		log.Fatal(problem.Message)
 	}
-	fatal(st.Write(ctx, func(tx *sql.Tx) error {
-		var input contract.EventID
-		if err := tx.QueryRowContext(ctx, "SELECT id FROM events WHERE seq=?", wake.Seq).Scan(&input); err != nil {
-			return err
-		}
-		seq, err := st.AppendEvent(tx, contract.Event{ID: "seed-advisor-turn", Room: room, From: contract.Principal{Kind: contract.PrincipalEngine}, Time: time.Now().Add(-5 * time.Minute), Body: contract.TurnStarted{Session: root, Turn: "turn_advisor", Inputs: []contract.EventID{input}}})
-		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO turns(id,session,started_at,ended_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,started_seq) VALUES('turn_advisor',?,?,?,'completed','',0,0,0,0,?)", root, time.Now().Add(-5*time.Minute).UnixMilli(), time.Now().Add(-4*time.Minute).UnixMilli(), seq); err != nil {
-			return err
-		}
-		_, err = tx.ExecContext(ctx, "UPDATE deliveries SET turn='turn_advisor',state='read' WHERE to_kind='session' AND to_id=? AND seq=?", root, wake.Seq)
-		return err
-	}))
+	input, err := st.EventID(ctx, wake.Seq)
+	fatal(err)
+	fatal(st.SeedEndedTurn(ctx, room, root, "turn_advisor", input, wake.Seq, time.Now().Add(-5*time.Minute), time.Now().Add(-4*time.Minute)))
 	prompt := "Task: pick the cache for the store. I found that reads dominate and the data fits in memory; I lean toward an in-process LRU. What would you check before committing?"
 	answer := "Go with the LRU unless the store is read by more than one process.\n\n- **Check first:** if two processes share it, a stale read is the risk.\n- **Unsure:** your read volume."
 	lines := fmt.Sprintf(`{"type":"message","timestamp":%q,"message":{"role":"user","deliveryId":"%d"}}

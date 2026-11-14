@@ -771,9 +771,9 @@ func seedRoom(ctx context.Context, s *engine.Service, st *store.Store, posts, ag
 	}
 	fixtureSession, fixtureChild, fixtureRoom = fixture.Session, child.Session, room.Room
 	seedAbout(ctx, s, room.Room, lead.Session)
-	var rootSession contract.SessionID
-	fatal(st.Read().QueryRowContext(ctx, "SELECT parent FROM sessions WHERE id=?", lead.Session).Scan(&rootSession))
-	seedAdvisorCall(ctx, s, st, room.Room, rootSession)
+	tree, err := st.RoomTree(ctx, room.Room)
+	fatal(err)
+	seedAdvisorCall(ctx, s, st, room.Room, tree.Root())
 	// A root has the grant by itself; this one shows a question in Needs you, Requests and a DM.
 	asker := contract.Principal{Kind: contract.PrincipalSession, Session: fixture.Session}
 	fatal(st.CreateGrant(ctx, contract.Grant{ID: "grant_fixture", Kind: contract.GrantAskOwner, Room: room.Room, To: asker, By: owner, Created: time.Now()}))
