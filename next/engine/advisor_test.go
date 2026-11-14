@@ -188,11 +188,11 @@ func TestAdvisorReturnsTheFinalTextOfItsTurn(t *testing.T) {
 		t.Fatalf("answer: %+v", got)
 	}
 	var feed int
-	if err := r.st.Read().QueryRowContext(r.ctx, "SELECT COUNT(*) FROM events e JOIN sessions s ON s.id=e.from_id WHERE e.type='post.created' AND e.from_kind='session' AND s.name IN ('root','advisor')").Scan(&feed); err != nil {
+	if err := r.st.Read().QueryRowContext(r.ctx, "SELECT COUNT(*) FROM events e JOIN sessions s ON s.id=e.from_id WHERE e.type='post.created' AND e.from_kind='session' AND s.name IN ('root','advisor') AND e.home IS NULL").Scan(&feed); err != nil {
 		t.Fatal(err)
 	}
-	if feed != 2 {
-		t.Fatalf("%d posts from root and the advisor in the feed, want the prompt and the answer", feed)
+	if feed != 0 {
+		t.Fatalf("%d posts from root or the advisor reached the feed, want none", feed)
 	}
 	if after := r.rootDeliveries(); after != before {
 		t.Fatalf("root was also sent the answer as an input: %d deliveries, had %d", after, before)

@@ -223,6 +223,7 @@ export function summarizeWork(items: TranscriptItem[]): string {
     if (kind === "edit") return `Edited ${count} file${plural}`;
     if (kind === "write") return `Wrote ${count} file${plural}`;
     if (kind === "read") return `Read ${count} file${plural}`;
+    if (kind === "advisor") return "Asked the advisor";
     if (kind === "search") return `Searched code ${count} ${count === 1 ? "time" : "times"}`;
     return `Used ${count} tool${plural}`;
   });

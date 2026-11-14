@@ -26,7 +26,7 @@
     onmedia: (key: string) => void;
   } = $props();
 
-  const icons: Record<StepKind, IconName> = { read: "file", edit: "edit", write: "write", search: "search", list: "list", run: "terminal", fetch: "globe", tool: "tool" };
+  const icons: Record<StepKind, IconName> = { read: "file", edit: "edit", write: "write", search: "search", list: "list", run: "terminal", fetch: "globe", advisor: "chat", tool: "tool" };
   const parts = ["arguments", "output"] as const;
   let failures: Record<string, boolean> = $state({});
   let loading: Record<string, boolean> = $state({});

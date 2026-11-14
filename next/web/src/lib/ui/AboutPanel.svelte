@@ -169,6 +169,7 @@
   .about :global(.facts:empty) { display: none; }
   .advisor { display: flex; align-items: baseline; gap: 12px; }
   .advisor > :global(.menu) { flex: none; }
+  .advisor :global(.name) { white-space: nowrap; }
   h3 { display: flex; align-items: baseline; gap: 6px; margin: 0 0 4px; font-size: 13px; font-weight: 600; line-height: 20px; }
   section { min-width: 0; }
   p { margin: 0; }

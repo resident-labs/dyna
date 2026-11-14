@@ -195,7 +195,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	}
 	surface := contract.SurfaceFeed
 	if req.Home.Kind == contract.ConversationDM {
-		own := caller.Kind == contract.PrincipalOwner || (caller.Kind == contract.PrincipalSession && req.Home.Session == caller.Session)
+		own := caller.Kind == contract.PrincipalOwner || req.Awaited || (caller.Kind == contract.PrincipalSession && req.Home.Session == caller.Session)
 		if !own || req.Home.Session == "" || len(req.Mentions) != 0 {
 			return contract.PostResponse{}, invalid("invalid DM")
 		}

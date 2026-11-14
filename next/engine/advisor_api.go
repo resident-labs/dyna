@@ -17,7 +17,7 @@ import (
 var advisorTimeout = 15 * time.Minute
 
 // Advisor posts root's prompt to the room's advisor and waits for the end of the turn that takes it, whatever its outcome. The answer
-// is the turn's final text, which the engine also posts to the feed from the advisor. A wait that ends early, by timeout or by root's
+// is the turn's final text. A wait that ends early, by timeout or by root's
 // stop, leaves the advisor's reply to arrive as an input, as a child's result does.
 func (s *Service) Advisor(ctx context.Context, caller contract.Principal, req contract.AdvisorRequest) (contract.AdvisorResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalSession {
@@ -51,7 +51,7 @@ func (s *Service) Advisor(ctx context.Context, caller contract.Principal, req co
 	// Subscribe before the post, so that an end cannot fall between the post and the first look.
 	changes, unsubscribe := s.store.Subscribe()
 	defer func() { unsubscribe() }()
-	post, problem := s.Post(ctx, caller, contract.PostRequest{Room: self.Room, Text: req.Prompt, Context: delta, Mentions: []string{advisor.Name}, Awaited: true})
+	post, problem := s.Post(ctx, caller, contract.PostRequest{Room: self.Room, Text: req.Prompt, Context: delta, Home: contract.Conversation{Kind: contract.ConversationDM, Session: advisor.ID}, Awaited: true})
 	if problem != nil {
 		return contract.AdvisorResponse{}, problem
 	}
@@ -63,7 +63,7 @@ func (s *Service) Advisor(ctx context.Context, caller contract.Principal, req co
 			return contract.AdvisorResponse{}, failure(err)
 		}
 		if done {
-			return s.advisorAnswer(ctx, self.Room, advisor.ID, ended)
+			return advisorAnswer(ended), nil
 		}
 		select {
 		case <-waitCtx.Done():
@@ -75,7 +75,7 @@ func (s *Service) Advisor(ctx context.Context, caller contract.Principal, req co
 			}
 			if !owed {
 				if ended, done, err := s.store.DeliveryTurnEnded(settle, advisor.ID, post.Seq); err == nil && done {
-					return s.advisorAnswer(settle, self.Room, advisor.ID, ended)
+					return advisorAnswer(ended), nil
 				}
 			}
 			if ctx.Err() != nil {
@@ -91,17 +91,13 @@ func (s *Service) Advisor(ctx context.Context, caller contract.Principal, req co
 	}
 }
 
-// advisorAnswer shows the advisor's final text in the feed and returns it as root's result.
-func (s *Service) advisorAnswer(ctx context.Context, room contract.RoomID, advisor contract.SessionID, ended contract.TurnEnded) (contract.AdvisorResponse, *contract.Error) {
-	answer := ended.Final
-	if answer == "" {
-		answer = "The advisor's turn ended (" + string(ended.Outcome) + ") with no text. " + ended.Error
+// advisorAnswer is the advisor's final text, which is root's tool result. Nothing posts it: the feed holds neither the prompt nor the answer,
+// and the owner reads them in root's transcript, under the tool call.
+func advisorAnswer(ended contract.TurnEnded) contract.AdvisorResponse {
+	if ended.Final == "" {
+		return contract.AdvisorResponse{Answer: "The advisor's turn ended (" + string(ended.Outcome) + ") with no text. " + ended.Error}
 	}
-	_, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: advisor}, contract.PostRequest{Room: room, Text: answer, Home: contract.Conversation{Kind: contract.ConversationFeed}})
-	if problem != nil {
-		return contract.AdvisorResponse{}, problem
-	}
-	return contract.AdvisorResponse{Answer: answer}, nil
+	return contract.AdvisorResponse{Answer: ended.Final}
 }
 
 // advisorName is the name of the session the room's advisor setting starts.
