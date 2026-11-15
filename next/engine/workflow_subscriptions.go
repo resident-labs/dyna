@@ -10,6 +10,7 @@ import (
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
+	"github.com/resident-labs/dyna/engine/workflowmeta"
 	"github.com/resident-labs/dyna/harness"
 )
 
@@ -40,7 +41,7 @@ func checkServes(script string) *contract.Error {
 	if callsServe.MatchString(script) {
 		return nil
 	}
-	return invalid("a workflow subscription runs as a service: its script keeps one run and calls serve(async (event, key, state) => { … }) to handle each event, where it used to read args.event and end. Add serve(), and see events.md in the dyna-workflows skill")
+	return invalid("a workflow subscription runs as a service: call serve(async (event, key, state) => { … }) in the script to handle each event (events.md in the dyna-workflows skill)")
 }
 
 // serveSubscriptions gives each enabled workflow subscription its one run, and ends the run of one that is disabled or gone.
@@ -115,7 +116,7 @@ func (s *Service) failService(ctx context.Context, sub store.Subscription, paren
 	}
 	events := []contract.Event{finished}
 	if outcome.Failures == 1 {
-		notice, err := s.event(sub.Room, engineSender, contract.NoticePosted{Text: fmt.Sprintf("Workflow service %s failed: %s. It starts again at %s, and waits longer after each failure in a row. Events wait in its queue. subscription list shows later failures; subscription enable ends the wait.", sub.ID, harness.Mask(tail(message)), outcome.HoldUntil.Format("15:04 MST"))})
+		notice, err := s.event(sub.Room, engineSender, contract.NoticePosted{Text: fmt.Sprintf("Workflow service %s (%s) failed: %s. It starts again at %s, and waits longer after each failure in a row. Events wait in its queue. To fix the script: subscription update %s --workflow FILE, which also ends the wait. subscription list shows later failures.", serviceName(sub), sub.ID, harness.Mask(tail(message)), outcome.HoldUntil.Format("15:04 MST"), sub.ID)})
 		if err != nil {
 			return err
 		}
@@ -171,7 +172,7 @@ func (s *Service) WorkflowEvents(ctx context.Context, caller contract.Principal,
 	if sub.Disabled || sub.Held {
 		return contract.WorkflowEventsResponse{Events: []contract.WorkflowEvent{}}, nil
 	}
-	events, dropped, err := s.store.HandOverEvents(ctx, run, req.Boot, min(max(req.Limit, 1), handOverBatch), s.now())
+	events, dropped, err := s.store.HandOverEvents(ctx, run, req.Boot, req.Held, min(max(req.Limit, 1), handOverBatch), s.now())
 	if err != nil {
 		return contract.WorkflowEventsResponse{}, failure(err)
 	}
@@ -230,4 +231,10 @@ func (s *Service) WorkflowState(ctx context.Context, caller contract.Principal, 
 		return contract.WorkflowStateResponse{}, failure(err)
 	}
 	return contract.WorkflowStateResponse{Value: value}, nil
+}
+
+// serviceName is the workflow's name from its script's meta, which tells a person which service a notice is about.
+func serviceName(sub store.Subscription) string {
+	meta, _ := workflowmeta.Parse(sub.Workflow.Script)
+	return meta.Name
 }

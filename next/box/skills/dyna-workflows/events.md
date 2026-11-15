@@ -15,7 +15,7 @@ the subscription's `parent`. The script's body sets up (fetch, warm caches). The
 - The box keeps its git objects, build caches and toolchains between events.
   Handlers that write files use `worktree: true`, as concurrent workers must.
 - A script whose body ends without calling `serve` is refused: it would end after
-  one event. Before, it read `args.event` and returned. Now the handler takes the event.
+  one event. The handler takes the event, not `args.event`.
 
 ## Write the script
 
@@ -49,7 +49,7 @@ serve(async (event, key, state) => {
   // Keys run concurrently in one box, so each review gets its own worktree.
   const r = await agent(
     `Review ${repo}#${number} at ${head}. Fetch with git fetch origin pull/${number}/head.`,
-    { label: `review #${number} ${head.slice(0, 8)}`, lane: key, schema: VERDICT, worktree: true }
+    { label: `review #${number} ${head.slice(0, 8)}`, schema: VERDICT, worktree: true }
   )
   await post('parent', `#${number}: ${r.output.verdict}`, r)
   await state.set({ head })
@@ -59,7 +59,9 @@ serve(async (event, key, state) => {
 How it runs:
 - **Replay.** A handler runs in its own VM: the script runs again, its body's steps
   return their stored results, and `serve` calls the handler. So top-level constants
-  are there, and body code must be deterministic, as in any script.
+  are there, and body code must be deterministic, as in any script. Code outside
+  steps in the body runs again for every event, and a top-level variable a handler
+  changes reaches no other handler: handlers share only `state` and files.
 - **Steps.** The body's steps belong to the box start: a new box runs the body for real.
   A handler's steps belong to its event: if the box is lost mid-handler, the event is
   handed over again and its finished steps return at once. Handlers must be safe to run again.
@@ -69,7 +71,7 @@ How it runs:
 - **Errors.** A handler that throws fails its event, tells the parent once per streak of failures
   of that key, and the service goes on. A handler that returns nothing is silent; `post()` what the
   parent must act on.
-- Each key is a lane; `status(text)` works as in any run.
+- Each key is a lane: a handler's steps carry its key. `status(text)` works as in any run.
 
 ## Register and try it
 
@@ -105,7 +107,8 @@ refuses `serve`.
 
 - `dyna workflow status RUN` and the run page show the state (starting, serving), the events
   waiting and in a handler by key, and the totals handled and failed. The Runs list marks it "service".
-- `dyna subscription update ID --workflow push-review.js --args JSON` reloads the running service,
+- `dyna subscription update ID --workflow push-review.js --args JSON` reloads the running service (`workflow reload`
+  refuses a service: the subscription keeps the script for restarts), ends a failure wait,
   as `workflow reload` does, and keeps state and queued events. A handler in flight runs again with
   the new script, and its finished steps still hit. `--where`, `--key`, `--latest` and `--parent`
   replace settings; `--where ''` clears filters.

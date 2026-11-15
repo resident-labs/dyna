@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"log"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -28,7 +30,7 @@ func (c *Crew) serve(work context.Context, run *execution, workflow contract.Box
 	wake := make(chan struct{}, 1)
 	handle := func(event contract.WorkflowEvent) {
 		handlers.Go(func() {
-			if c.handler(work, run, workflow, event) {
+			if c.handleEvent(work, run, workflow, event) {
 				select {
 				case wake <- struct{}{}:
 				default:
@@ -37,21 +39,21 @@ func (c *Crew) serve(work context.Context, run *execution, workflow contract.Box
 		})
 	}
 	c.mu.Lock()
-	cut := make([]contract.WorkflowEvent, 0, len(c.held))
+	unfinished := make([]contract.WorkflowEvent, 0, len(c.held))
 	for _, event := range c.held {
-		cut = append(cut, event)
+		unfinished = append(unfinished, event)
 	}
 	boot := c.boot
 	c.mu.Unlock()
-	for _, event := range cut {
+	for _, event := range unfinished {
 		handle(event)
 	}
 	for {
 		c.mu.Lock()
-		free := handlerSlots - len(c.held)
+		holding := slices.Collect(maps.Keys(c.held))
 		c.mu.Unlock()
-		if free > 0 {
-			response, err := c.config.Engine.WorkflowEvents(run.ctx, contract.WorkflowEventsRequest{Boot: boot, Limit: free})
+		if free := handlerSlots - len(holding); free > 0 {
+			response, err := c.config.Engine.WorkflowEvents(run.ctx, contract.WorkflowEventsRequest{Boot: boot, Limit: free, Held: holding})
 			if err != nil && run.ctx.Err() == nil {
 				log.Printf("workflow events: %v", err)
 			}
@@ -76,10 +78,10 @@ func (c *Crew) serve(work context.Context, run *execution, workflow contract.Box
 	}
 }
 
-// handler runs the script for one event and acknowledges the row when the handler ends, whether it returned or threw. A VM
+// handleEvent runs the script for one event and acknowledges the row when the handler ends, whether it returned or threw. A VM
 // the run stopped acknowledges nothing: the row stays held for the next version, or for the next box. It reports whether the
 // row was acknowledged.
-func (c *Crew) handler(work context.Context, parent *execution, workflow contract.BoxWorkflow, event contract.WorkflowEvent) bool {
+func (c *Crew) handleEvent(work context.Context, parent *execution, workflow contract.BoxWorkflow, event contract.WorkflowEvent) bool {
 	ctx, cancel := context.WithCancel(parent.ctx)
 	defer cancel()
 	run := &execution{version: workflow.Version, seen: make(map[string]int), ctx: ctx, steps: parent.steps}

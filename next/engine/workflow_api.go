@@ -145,6 +145,9 @@ func (s *Service) WorkflowReload(ctx context.Context, caller contract.Principal,
 	if problem != nil {
 		return contract.WorkflowReloadResponse{}, problem
 	}
+	if run.Subscription != "" && run.Key == "" {
+		return contract.WorkflowReloadResponse{}, invalid("this run is a workflow service: subscription update ID --workflow FILE reloads it and keeps the script for restarts")
+	}
 	return s.reloadRun(ctx, run, req.Script)
 }
 
@@ -219,7 +222,7 @@ func (s *Service) addService(ctx context.Context, info *contract.WorkflowInfo, s
 	if info.Subscription == "" || info.Key != "" {
 		return nil
 	}
-	info.Service = served.Info()
+	info.Service = served.Info(info.State == contract.WorkflowRunning)
 	info.Usage = info.Usage.Plus(served.Usage)
 	if info.State != contract.WorkflowRunning {
 		return nil

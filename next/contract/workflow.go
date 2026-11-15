@@ -116,7 +116,7 @@ type WorkflowInfo struct {
 	Ended         time.Time        `json:"ended,omitzero"`
 }
 
-// WorkflowService is what a run that serves events shows. State is starting until its box first asks for events, then
+// WorkflowService is what a run that serves events shows. State is ended once the run has, else starting until its box first asks for events, then
 // serving. Keys lists each key with events waiting or in a handler. Handled and Failed count the events whose handlers have
 // ended, and Usage is the usage of the steps dropped with them: a service's journal holds only what is in flight.
 type WorkflowService struct {
@@ -133,6 +133,7 @@ type WorkflowServiceState string
 const (
 	WorkflowServiceStarting WorkflowServiceState = "starting"
 	WorkflowServiceServing  WorkflowServiceState = "serving"
+	WorkflowServiceEnded    WorkflowServiceState = "ended"
 )
 
 // WorkflowServiceKey counts one key's events: waiting in the queue, and handed to the box.
@@ -405,8 +406,9 @@ const (
 // each key that has none in a handler, and hands them over. Boot names this start of the box. A row claimed by an earlier
 // start was never acknowledged, so it is handed over again.
 type WorkflowEventsRequest struct {
-	Boot  string `json:"boot"`
-	Limit int    `json:"limit"`
+	Boot  string  `json:"boot"`
+	Limit int     `json:"limit"`
+	Held  []int64 `json:"held,omitempty"` // the rows its handlers hold now: a claimed row not among them is handed over again, as a lost reply leaves one
 }
 
 // WorkflowEvent is one claimed queue row. Row names it for its acknowledgement and for the state calls of its handler.

@@ -15,6 +15,7 @@ type serviceCase struct {
 	workflowCase
 	sub   contract.SubscriptionID
 	clock *clock
+	held  map[int64]bool // the rows the box holds, which it reports with each request
 }
 
 func newService(t *testing.T, latest bool) serviceCase {
@@ -22,7 +23,7 @@ func newService(t *testing.T, latest bool) serviceCase {
 	w := setupWorkflow(t)
 	_, clock := withRuns(t, w.Service)
 	sub := addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, On: []contract.EventType{"notice.posted"}, Workflow: &contract.WorkflowSubscription{Script: serviceScript}, Latest: latest})
-	return serviceCase{w, sub, clock}
+	return serviceCase{w, sub, clock, map[int64]bool{}}
 }
 
 func (s serviceCase) fire(key string) {
@@ -47,7 +48,21 @@ func (s serviceCase) run() (store.WorkflowRun, contract.Principal) {
 
 func (s serviceCase) poll(box contract.Principal, boot string, limit int) []contract.WorkflowEvent {
 	s.t.Helper()
-	got, problem := s.WorkflowEvents(s.ctx, box, contract.WorkflowEventsRequest{Boot: boot, Limit: limit})
+	events := s.ask(box, boot, limit)
+	for _, event := range events {
+		s.held[event.Row] = true
+	}
+	return events
+}
+
+// ask is a request whose reply the box may never read.
+func (s serviceCase) ask(box contract.Principal, boot string, limit int) []contract.WorkflowEvent {
+	s.t.Helper()
+	var held []int64
+	for row := range s.held {
+		held = append(held, row)
+	}
+	got, problem := s.WorkflowEvents(s.ctx, box, contract.WorkflowEventsRequest{Boot: boot, Limit: limit, Held: held})
 	if problem != nil {
 		s.t.Fatal(problem)
 	}
@@ -59,6 +74,7 @@ func (s serviceCase) done(box contract.Principal, row int64, failure string) {
 	if _, problem := s.WorkflowEventDone(s.ctx, box, contract.WorkflowEventDoneRequest{Row: row, Error: failure}); problem != nil {
 		s.t.Fatal(problem)
 	}
+	delete(s.held, row)
 }
 
 func (s serviceCase) notices(match string) int {
@@ -378,5 +394,20 @@ func TestServiceStartRefusalBacksOffAndTellsTheParentOnce(t *testing.T) {
 	}
 	if s.notices("failed") != 1 {
 		t.Fatal("the parent should hear once")
+	}
+}
+
+func TestServiceHandsARowOverAgainWhenItsReplyWasLost(t *testing.T) {
+	s := newService(t, false)
+	s.fire("a")
+	s.fire("a")
+	_, box := s.run()
+	lost := s.ask(box, "boot1", 10) // the engine restarted before the box read this
+	again := s.poll(box, "boot1", 10)
+	if len(lost) != 1 || len(again) != 1 || again[0].Row != lost[0].Row {
+		t.Fatalf("the unread row, handed again: %+v then %+v", lost, again)
+	}
+	if more := s.poll(box, "boot1", 10); len(more) != 0 {
+		t.Fatalf("a row the box holds, handed a third time: %+v", more)
 	}
 }

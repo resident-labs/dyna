@@ -23,7 +23,7 @@ type WorkflowRun struct {
 	Room          contract.RoomID
 	Session       contract.SessionID
 	Subscription  contract.SubscriptionID
-	Key           string // set for a hand-run's key; a service's run has none
+	Key           string // the key of a per-event run from before services; a service's run has none
 	Name          string
 	Description   string
 	Script        string
@@ -182,7 +182,7 @@ func (s *Store) WorkflowList(ctx context.Context, room contract.RoomID) ([]contr
 					return nil, err
 				}
 			}
-			run.Service = kept.Info()
+			run.Service = kept.Info(run.State == contract.WorkflowRunning)
 			run.Usage = run.Usage.Plus(kept.Usage)
 		}
 		runs = append(runs, run)

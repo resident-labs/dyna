@@ -73,7 +73,7 @@ func (j *fakeJournal) WorkflowEvents(_ context.Context, req contract.WorkflowEve
 			continue
 		}
 		seen[row.Key] = true
-		if q.handed[row.Row] == req.Boot {
+		if q.handed[row.Row] == req.Boot && slices.Contains(req.Held, row.Row) {
 			keep = append(keep, row)
 			continue
 		}
@@ -338,4 +338,22 @@ func TestServiceReloadRunsAHandlerAgainWithTheNewVersion(t *testing.T) {
 		t.Fatalf("started %v", h.journal.started)
 	}
 	_ = fmt.Sprint()
+}
+
+func TestServiceSetupAfterServeStaysUnderTheBoxStart(t *testing.T) {
+	h := serviceHarness(t)
+	q := &h.journal.queue
+	q.add("k", `{}`)
+	crew, ended := h.start(crewMeta + "serve(async () => { await agent('handle') }); await run('echo after')")
+	q.waitAcked(t, 1)
+	stopped(t, crew, ended)
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	h.journal.mu.Lock()
+	defer h.journal.mu.Unlock()
+	for key := range q.events {
+		if name := h.journal.names[key]; !strings.HasPrefix(name, "agent") {
+			t.Fatalf("setup after serve ran as the event's step %q", name)
+		}
+	}
 }

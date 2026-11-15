@@ -53,10 +53,11 @@ func updateServed(ctx context.Context, tx *sql.Tx, run contract.WorkflowRunID, c
 }
 
 // HandOverEvents claims for a service's box the rows it should handle now: the oldest row of each key that has none in a
-// handler of this box start, at most limit. A row that an earlier box start or an earlier run was handling is handed over
-// again. A row handed over maxHandOvers times already fails instead. The first call of a box also ends the run's backoff,
+// handler of this box start, at most limit. A row is in a handler when this box start claimed it and the box says it holds
+// it. One that an earlier box start or run was handling, or whose reply to the box was lost, is handed over again. A row
+// handed over maxHandOvers times already fails instead. The first call of a box also ends the run's backoff,
 // because the script reached serve.
-func (s *Store) HandOverEvents(ctx context.Context, run WorkflowRun, boot string, limit int, now time.Time) ([]contract.WorkflowEvent, []DroppedEvent, error) {
+func (s *Store) HandOverEvents(ctx context.Context, run WorkflowRun, boot string, held []int64, limit int, now time.Time) ([]contract.WorkflowEvent, []DroppedEvent, error) {
 	var events []contract.WorkflowEvent
 	var dropped []DroppedEvent
 	err := s.Write(ctx, func(tx *sql.Tx) error {
@@ -69,9 +70,14 @@ func (s *Store) HandOverEvents(ctx context.Context, run WorkflowRun, boot string
 				return err
 			}
 		}
+		heldRows, err := json.Marshal(append([]int64{}, held...)) // [] and not null, which json_each reads as one NULL
+		if err != nil {
+			return err
+		}
 		rows, err := tx.QueryContext(ctx, `SELECT q.id,q.key,q.body,q.handovers FROM workflow_queue q
-			WHERE q.sub=?1 AND q.id=(SELECT min(id) FROM workflow_queue WHERE sub=?1 AND key=q.key) AND NOT (q.run=?2 AND q.boot=?3)
-			ORDER BY q.id LIMIT ?4`, run.Subscription, run.ID, boot, limit)
+			WHERE q.sub=?1 AND q.id=(SELECT min(id) FROM workflow_queue WHERE sub=?1 AND key=q.key)
+			AND NOT (q.run=?2 AND q.boot=?3 AND q.id IN (SELECT value FROM json_each(?5)))
+			ORDER BY q.id LIMIT ?4`, run.Subscription, run.ID, boot, limit, string(heldRows))
 		if err != nil {
 			return err
 		}
@@ -274,10 +280,13 @@ func (s *Store) noticeSession(ctx context.Context, tx *sql.Tx, to contract.Sessi
 	return s.InsertDelivery(ctx, tx, seq, notice.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: to}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
 }
 
-// Info is what a run page shows of a service: Starting until its box first asked for events. The keys are the caller's.
-func (s Served) Info() *contract.WorkflowService {
+// Info is what a run page shows of a service: Ended once its run has, else Starting until its box first asked for events. The keys are the caller's.
+func (s Served) Info(running bool) *contract.WorkflowService {
 	info := &contract.WorkflowService{State: contract.WorkflowServiceStarting, Keys: []contract.WorkflowServiceKey{}, Handled: s.Handled, Failed: s.Failed, LastEvent: s.LastEvent, Usage: s.Usage}
-	if !s.Since.IsZero() {
+	switch {
+	case !running:
+		info.State = contract.WorkflowServiceEnded
+	case !s.Since.IsZero():
 		info.State = contract.WorkflowServiceServing
 	}
 	return info

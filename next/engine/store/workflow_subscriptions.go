@@ -181,6 +181,10 @@ func (s *Store) UpdateWorkflowSubscription(ctx context.Context, sub contract.Sub
 				return err
 			}
 		}
+		// A new script may fix what failed, so an update also ends the wait before the service starts again.
+		if _, err = tx.ExecContext(ctx, "UPDATE subscriptions SET failures=0,hold_until=0 WHERE id=?", sub.ID); err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx, "UPDATE workflow_subscriptions SET script=?,args=?,key=?,latest=?,parent=? WHERE sub=?", sub.Workflow.Script, string(args), sub.Key, sub.Latest, sub.Parent, sub.ID)
 		return err
 	})

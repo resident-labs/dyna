@@ -25,6 +25,7 @@
   let row = service?.row ?? 0;
   let replaying = service?.handler != null;
   let served = false;
+  let registered = null;
   let handled = null;
 
   let current = "";
@@ -47,10 +48,12 @@
     if (!error?.failed) emit({ op: "failed", payload: where + ": " + reason });
     return { failed: true, step: error?.step ?? where, reason };
   };
+  // In a handler a step's lane is its key unless the script names another.
+  const handlerKey = () => (!replaying && service?.handler ? service.handler.key : "");
   // A lane names the subject a step is about. It leaves the options before they are hashed, so it changes no step's key.
   const laned = (opts) => {
     const { lane, ...rest } = opts ?? {};
-    return { opts: rest, lane: lane === undefined || lane === null ? "" : String(lane) };
+    return { opts: rest, lane: lane === undefined || lane === null ? handlerKey() : String(lane) };
   };
 
   // Strings stay as they are and arrays and objects are JSON, as console.log shows them. A BigInt inside one becomes a string and
@@ -113,20 +116,9 @@
     serve: (handler) => {
       if (depth > 0) throw new Error("serve() belongs in the run's own script, not in one that workflow() runs");
       if (!service) throw new Error("serve() needs a subscription: dyna subscription add --workflow starts a service, and workflow run does not");
-      if (served) throw new Error("serve() is called once");
+      if (served) throw new Error("serve() was already called; call it once, after setup");
       served = true;
-      if (!service.handler) return;
-      scope = "event:" + service.handler.row;
-      row = service.handler.row;
-      replaying = false;
-      handled = (async () => {
-        try {
-          await handler(service.handler.event, service.handler.key, api.state);
-          return { value: "null" };
-        } catch (error) {
-          return failure(error, "the handler");
-        }
-      })();
+      registered = handler;
     },
     workflow: async (ref, value) => {
       if (depth > 0) throw new Error("workflow() nests one level: a child script cannot call it");
@@ -143,10 +135,22 @@
       const text = JSON.stringify((await script(api)) ?? null);
       if (text === undefined) throw new Error("the script returned a value that JSON cannot hold");
       if (service && depth === 0 && !served) {
-        throw new Error("the script's body ended without calling serve(). A workflow subscription runs as a service: call serve(async (event, key, state) => { … }) to handle each event, where the script used to read args.event and end");
+        throw new Error("the script's body ended without calling serve(). A workflow subscription runs as a service: call serve(async (event, key, state) => { … }) in the script to handle each event (events.md in the dyna-workflows skill)");
+      }
+      if (service?.handler && depth === 0) {
+        // The body has ended, so its setup has replayed under the box start's scope. The event's steps take the row's.
+        scope = "event:" + service.handler.row;
+        row = service.handler.row;
+        replaying = false;
+        try {
+          await registered(service.handler.event, service.handler.key, api.state);
+          handled = { value: "null" };
+        } catch (error) {
+          handled = failure(error, "the handler");
+        }
       }
       if (handled) {
-        const outcome = await handled;
+        const outcome = handled;
         return outcome.failed ? { failure: { reason: outcome.reason, report: outcome.reason, step: outcome.step } } : outcome;
       }
       return { value: text, served: served && !service.handler };
