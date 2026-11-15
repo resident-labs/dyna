@@ -164,7 +164,7 @@ func TestAdvisorAsksAnInBoxAgentAndReturnsItsFinalText(t *testing.T) {
 	}
 	r.boxEnds("call_1", contract.TurnCompleted, "Use the shared cache.")
 	got := r.result()
-	if got.problem != nil || got.response.Answer != "Use the shared cache." {
+	if got.problem != nil || got.response.Answer != "Use the shared cache." || got.response.Note != "" || got.response.Advisor != "test" {
 		t.Fatalf("answer: %+v", got)
 	}
 	if state := r.agentState("call_1"); state != "completed" {
@@ -208,7 +208,7 @@ func TestTheOwnersStopReturnsThePartialText(t *testing.T) {
 	}
 	r.boxEnds("call_1", contract.TurnStopped, "I had found the cache config")
 	got := r.result()
-	if got.problem != nil || !strings.HasPrefix(got.response.Answer, "the owner stopped the advisor") || !strings.Contains(got.response.Answer, "I had found the cache config") {
+	if got.problem != nil || !strings.HasPrefix(got.response.Note, "the owner stopped the advisor") || got.response.Answer != "I had found the cache config" {
 		t.Fatalf("answer %+v", got)
 	}
 	if _, e := r.s.AgentStop(r.ctx, ownerCaller, contract.AgentStopRequest{Session: r.root, ID: "call_1"}); e == nil {
@@ -226,7 +226,7 @@ func TestRootsStoppedTurnStopsTheAdvisorToo(t *testing.T) {
 	}
 	r.boxEnds("call_1", contract.TurnStopped, "half")
 	got := r.result()
-	if got.problem != nil || !strings.HasPrefix(got.response.Answer, "your turn was stopped") || !strings.Contains(got.response.Answer, "half") {
+	if got.problem != nil || !strings.HasPrefix(got.response.Note, "root's turn was stopped") || got.response.Answer != "half" {
 		t.Fatalf("answer %+v", got)
 	}
 }
@@ -238,7 +238,7 @@ func TestAnAdvisorThatDoesNotAnswerTimesOutAndIsStopped(t *testing.T) {
 	t.Cleanup(func() { agentTimeout, agentStopWait = timeout, wait })
 	r.ask(r.ctx, "call_1")
 	got := r.result()
-	if got.problem != nil || !strings.Contains(got.response.Answer, "did not answer within") {
+	if got.problem != nil || !strings.Contains(got.response.Note, "timed out after") || got.response.Answer != "" {
 		t.Fatalf("answer %+v", got)
 	}
 	if state := r.agentState("call_1"); state != "stopped" {
@@ -250,7 +250,7 @@ func TestAnAdvisorTurnThatEndedWithoutTextSaysSo(t *testing.T) {
 	r := newAdvisorRig(t)
 	r.ask(r.ctx, "call_1")
 	r.boxEnds("call_1", contract.TurnFailed, "")
-	if got := r.result(); !strings.Contains(got.response.Answer, "failed") {
+	if got := r.result(); !strings.Contains(got.response.Note, "failed") {
 		t.Fatalf("answer %+v", got)
 	}
 }

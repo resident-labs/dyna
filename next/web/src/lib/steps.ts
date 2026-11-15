@@ -54,6 +54,16 @@ export function titleOf(item: TranscriptItem) {
   return title.kind === "advisor" ? { ...title, target: "" } : title;
 }
 
+// The advisor's reply, read from its tool result once. The tool returns {answer, note, advisor}: note says what ended the call early, with the
+// answer then what it had said, and advisor is the profile. An older or cut result is the text itself.
+export type AdvisorReply = { answer: string; note?: string; advisor?: string };
+export function advisorReply(output: string): AdvisorReply {
+  const value = parsedJson(output);
+  if (!value || typeof value !== "object" || Array.isArray(value) || typeof value["answer"] !== "string") return { answer: output };
+  const { note, advisor } = value;
+  return { answer: value["answer"], note: typeof note === "string" ? note : undefined, advisor: typeof advisor === "string" ? advisor : undefined };
+}
+
 // An opened tool reads for a person: a command or a file's body as the text it is, and any other argument as a labelled row. A
 // command's own output stays whole, JSON or not. A cut preview is not JSON yet, and the row loads the rest as it opens.
 const bodies = ["command", "content", "code", "script"];

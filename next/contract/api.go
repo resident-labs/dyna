@@ -626,9 +626,12 @@ type AdvisorRequest struct {
 	ToolCallID string `json:"toolCallId,omitempty"`
 }
 
-// AdvisorResponse is the final text of the advisor's turn.
+// AdvisorResponse is the advisor's answer: the final text of its turn, or what it had said when something ended the turn early, in which
+// case Note says what ended it. The owner reads both in root's DM.
 type AdvisorResponse struct {
-	Answer string `json:"answer"`
+	Answer  string      `json:"answer"`
+	Note    string      `json:"note,omitempty"`
+	Advisor ProfileName `json:"advisor"` // the profile that answered, which the DM names the message by
 }
 
 // SessionRefreshRequest names one session, or a room for every open session in it that the caller may manage.
