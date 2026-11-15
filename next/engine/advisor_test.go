@@ -192,30 +192,6 @@ func TestASecondCallStartsItsRecordAfterTheFirstAndCarriesAFreshPrompt(t *testin
 	}
 }
 
-func TestTheOwnersStopReturnsThePartialText(t *testing.T) {
-	r := newAdvisorRig(t)
-	turn := r.ask(r.ctx, "call_1")
-	if _, e := r.s.AgentStop(r.ctx, asSession(r.root), contract.AgentStopRequest{Session: r.root, ID: "call_1"}); e != nil {
-		t.Fatal(e)
-	}
-	select {
-	case message := <-r.channel.Agents():
-		if stop, ok := message.Body.(contract.AgentStop); !ok || stop.ID != turn.ID {
-			t.Fatalf("the box was sent %+v", message.Body)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the box was never told to stop")
-	}
-	r.boxEnds("call_1", contract.TurnStopped, "I had found the cache config")
-	got := r.result()
-	if got.problem != nil || !strings.HasPrefix(got.response.Note, "the owner stopped the advisor") || got.response.Answer != "I had found the cache config" {
-		t.Fatalf("answer %+v", got)
-	}
-	if _, e := r.s.AgentStop(r.ctx, ownerCaller, contract.AgentStopRequest{Session: r.root, ID: "call_1"}); e == nil {
-		t.Fatal("a stopped agent was stopped again")
-	}
-}
-
 func TestRootsStoppedTurnStopsTheAdvisorToo(t *testing.T) {
 	r := newAdvisorRig(t)
 	ctx, stop := context.WithCancel(r.ctx)
@@ -226,7 +202,7 @@ func TestRootsStoppedTurnStopsTheAdvisorToo(t *testing.T) {
 	}
 	r.boxEnds("call_1", contract.TurnStopped, "half")
 	got := r.result()
-	if got.problem != nil || !strings.HasPrefix(got.response.Note, "root's turn was stopped") || got.response.Answer != "half" {
+	if got.problem != nil || got.response.Note != "root was stopped; the answer is what it had said so far" || got.response.Answer != "half" || r.agentState("call_1") != "stopped" {
 		t.Fatalf("answer %+v", got)
 	}
 }
@@ -528,29 +504,6 @@ func TestAnAgentWhoseCallDiedWithTheEngineIsStoppedWhenItsBoxReconnects(t *testi
 	}
 	if state := r.agentState("call_1"); state != "stopped" {
 		t.Fatalf("the row is %q", state)
-	}
-}
-
-func TestTheOwnersStopReachesAnAgentByItsRowAfterARestart(t *testing.T) {
-	r := newAdvisorRig(t)
-	r.ask(r.ctx, "call_1")
-	r.restart()
-	handle, _ := r.s.live.CreateSession(r.root)
-	handle.Lock()
-	r.channel = live.NewChannel(func() {})
-	handle.SetChannel(r.channel)
-	handle.Unlock()
-	if _, e := r.s.AgentStop(r.ctx, ownerCaller, contract.AgentStopRequest{Session: r.root, ID: "call_1"}); e != nil {
-		t.Fatal(e)
-	}
-	if message := <-r.channel.Agents(); message.Body.(contract.AgentStop).ID != "call_1" {
-		t.Fatalf("the box was sent %+v", message.Body)
-	}
-	if state := r.agentState("call_1"); state != "stopped" {
-		t.Fatalf("the row is %q", state)
-	}
-	if _, e := r.s.AgentStop(r.ctx, ownerCaller, contract.AgentStopRequest{Session: r.root, ID: "call_1"}); e == nil {
-		t.Fatal("an ended agent was stopped again")
 	}
 }
 

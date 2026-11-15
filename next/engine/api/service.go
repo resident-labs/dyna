@@ -55,7 +55,6 @@ type Service interface {
 	Advisor(context.Context, contract.Principal, contract.AdvisorRequest) (contract.AdvisorResponse, *contract.Error)
 	AgentStarted(context.Context, contract.Principal, contract.AgentStartedRequest) (contract.AgentStartedResponse, *contract.Error)
 	AgentEnded(context.Context, contract.Principal, contract.AgentEndedRequest) (contract.AgentEndedResponse, *contract.Error)
-	AgentStop(context.Context, contract.Principal, contract.AgentStopRequest) (contract.AgentStopResponse, *contract.Error)
 	RoomList(context.Context, contract.Principal, contract.RoomListRequest) (contract.RoomListResponse, *contract.Error)
 	SessionList(context.Context, contract.Principal, contract.SessionListRequest) (contract.SessionListResponse, *contract.Error)
 	HostexecRun(context.Context, contract.Principal, contract.HostexecRunRequest) (contract.HostexecRunResponse, *contract.Error)

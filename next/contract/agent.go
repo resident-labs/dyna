@@ -3,7 +3,6 @@ package contract
 const (
 	MethodAgentStarted Method = "agent.started"
 	MethodAgentEnded   Method = "agent.ended"
-	MethodAgentStop    Method = "agent.stop"
 )
 
 // AgentID names one turn of an in-box agent. A tool call that starts one uses its own call ID, so the transcript row of that call finds its agent.
@@ -62,13 +61,6 @@ type AgentEndedRequest struct {
 	Fresh   bool        `json:"fresh,omitempty"`
 }
 type AgentEndedResponse struct{}
-
-// AgentStopRequest is the owner's stop of an agent that runs for a session, by its ID.
-type AgentStopRequest struct {
-	Session SessionID `json:"session"`
-	ID      AgentID   `json:"id"`
-}
-type AgentStopResponse struct{}
 
 func (AgentTurn) BoxMessageType() BoxMessageType { return "agent.turn" }
 func (AgentTurn) isBoxMessageBody()              {}

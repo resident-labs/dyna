@@ -62,8 +62,8 @@ test("root's advisor call is its own row, that opens to its prompt", () => {
 });
 
 test("the advisor's reply is the answer, its note and its profile, and an older result is the text", () => {
-  assert.deepEqual(advisorReply('{"answer":"Use the cache.","note":"the owner stopped the advisor; the answer is what it had said so far","advisor":"fable"}'), { answer: "Use the cache.", note: "the owner stopped the advisor; the answer is what it had said so far", advisor: "fable" });
+  assert.deepEqual(advisorReply('{"answer":"Use the cache.","note":"root was stopped; the answer is what it had said so far","advisor":"fable"}'), { answer: "Use the cache.", note: "root was stopped; the answer is what it had said so far", advisor: "fable" });
   assert.deepEqual(advisorReply('{"answer":"Done"}'), { answer: "Done", note: undefined, advisor: undefined });
-  assert.deepEqual(advisorReply("the owner stopped the advisor. What it had said:\n\nhalf"), { answer: "the owner stopped the advisor. What it had said:\n\nhalf" });
+  assert.deepEqual(advisorReply("root was stopped. What it had said:\n\nhalf"), { answer: "root was stopped. What it had said:\n\nhalf" });
   assert.deepEqual(advisorReply('{"other":1}'), { answer: '{"other":1}' });
 });

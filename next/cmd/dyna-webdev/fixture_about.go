@@ -120,7 +120,7 @@ func seedAdvisorCall(ctx context.Context, s *engine.Service, st *store.Store, ro
 	fatal(st.SeedEndedTurn(ctx, room, root, "turn_advisor", input, wake.Seq, time.Now().Add(-5*time.Minute), time.Now().Add(-4*time.Minute)))
 	prompt := "Task: pick the cache for the store. I found that reads dominate and the data fits in memory; I lean toward an in-process LRU. What would you check before committing?"
 	answer := `{"answer":"Go with the LRU unless the store is read by more than one process.\n\n- **Check first:** if two processes share it, a stale read is the risk.\n- **Unsure:** your read volume.","advisor":"fable"}`
-	stopped := `{"answer":"Before the migration, check that nothing else writes the table.","note":"the owner stopped the advisor; the answer is what it had said so far","advisor":"fable"}`
+	stopped := `{"answer":"Before the migration, check that nothing else writes the table.","note":"root was stopped; the answer is what it had said so far","advisor":"fable"}`
 	lines := fmt.Sprintf(`{"type":"message","timestamp":%q,"message":{"role":"user","deliveryId":"%d"}}
 {"type":"message","timestamp":%q,"message":{"role":"assistant","content":[{"type":"toolCall","id":"adv1","name":"advisor","arguments":{"prompt":%q}}]}}
 {"type":"message","timestamp":%q,"message":{"role":"toolResult","toolCallId":"adv1","content":[{"type":"text","text":%q}]}}

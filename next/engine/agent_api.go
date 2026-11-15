@@ -37,10 +37,9 @@ type agentSpec struct {
 type agentCause string
 
 const (
-	agentOwnerStopped agentCause = "owner"     // the owner pressed Stop
-	agentCancelled    agentCause = "cancelled" // the caller's own turn was stopped
-	agentTimedOut     agentCause = "timeout"
-	agentBoxGone      agentCause = "box" // the box went away, and the agent with it
+	agentCancelled agentCause = "cancelled" // the caller's own turn was stopped
+	agentTimedOut  agentCause = "timeout"
+	agentBoxGone   agentCause = "box" // the box went away, and the agent with it
 )
 
 // agentResult is what the agent said, or the text it had when it was stopped.
@@ -53,8 +52,6 @@ type agentResult struct {
 type agentRun struct {
 	session contract.SessionID
 	ended   chan contract.AgentEndedRequest
-	stop    chan struct{} // closed by the owner's stop
-	once    sync.Once
 }
 
 // agentRuns are the calls waiting, by agent ID.
@@ -96,7 +93,7 @@ func (s *Service) sendAgent(session contract.SessionID, body contract.BoxMessage
 }
 
 // askAgent runs one turn of an in-box agent in the session's box, beside the session's running turn, and waits for its answer. It
-// ends early on ctx, on the timeout, on the owner's stop and when the box goes away; it stops the agent unless the box is gone, and
+// ends early on ctx, on the timeout and when the box goes away; it stops the agent unless the box is gone, and
 // returns the text the agent had, which a stopped agent still sends.
 func (s *Service) askAgent(ctx context.Context, session store.Session, spec agentSpec) (agentResult, error) {
 	if session.Turn == "" {
@@ -106,7 +103,7 @@ func (s *Service) askAgent(ctx context.Context, session store.Session, spec agen
 	if err != nil {
 		return agentResult{}, err
 	}
-	run := &agentRun{session: session.ID, ended: make(chan contract.AgentEndedRequest, 1), stop: make(chan struct{})}
+	run := &agentRun{session: session.ID, ended: make(chan contract.AgentEndedRequest, 1)}
 	s.agents.add(spec.ID, run)
 	defer s.agents.remove(spec.ID)
 	if err := s.store.StartAgent(ctx, store.Agent{ID: spec.ID, Session: session.ID, Turn: session.Turn, Name: spec.Name, Started: s.now()}); err != nil {
@@ -136,8 +133,6 @@ func (s *Service) askAgent(ctx context.Context, session store.Session, spec agen
 			return finish(ended, "")
 		case <-ctx.Done():
 			cause = agentCancelled
-		case <-run.stop:
-			cause = agentOwnerStopped
 		case <-timeout.C:
 			cause = agentTimedOut
 		case <-check.C:
@@ -217,23 +212,6 @@ func (s *Service) AgentEnded(ctx context.Context, caller contract.Principal, req
 	}
 	s.agentChanged(caller, session, agent)
 	return contract.AgentEndedResponse{}, nil
-}
-
-// AgentStop is the owner's stop of an agent that runs for a session. The call that asked for it returns the text so far. It goes by the
-// agent's row, so it also reaches an agent whose call died with an engine restart: that one is told to stop and its row ends.
-func (s *Service) AgentStop(ctx context.Context, _ contract.Principal, req contract.AgentStopRequest) (contract.AgentStopResponse, *contract.Error) {
-	agent, err := s.store.Agent(ctx, req.ID)
-	if err != nil || agent.Session != req.Session || agent.State != store.AgentRunning {
-		return contract.AgentStopResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "that agent is not running"}
-	}
-	if run := s.agents.get(req.ID); run != nil {
-		run.once.Do(func() { close(run.stop) })
-		return contract.AgentStopResponse{}, nil
-	}
-	if err := s.stopAgent(ctx, agent); err != nil {
-		return contract.AgentStopResponse{}, failure(err)
-	}
-	return contract.AgentStopResponse{}, nil
 }
 
 // stopAgent tells the box to stop an agent no call waits for, and ends its row: the box's answer, if it comes, changes nothing.

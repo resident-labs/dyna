@@ -79,10 +79,8 @@ func (s *Service) Advisor(ctx context.Context, caller contract.Principal, req co
 func advisorAnswer(result agentResult) contract.AdvisorResponse {
 	var reason string
 	switch result.Cause {
-	case agentOwnerStopped:
-		reason = "the owner stopped the advisor"
 	case agentCancelled:
-		reason = "root's turn was stopped, so the advisor was stopped"
+		reason = "root was stopped"
 	case agentTimedOut:
 		reason = fmt.Sprintf("the advisor timed out after %s", agentTimeout)
 	case agentBoxGone:
