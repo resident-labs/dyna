@@ -8,6 +8,8 @@ description: Use when you write, debug or speed up a GitHub Actions workflow, or
 Dyna runs a repository's Actions jobs on its own hosts, one runner container per job, sized by `runs-on` and gone
 when the job ends. The repositories it serves are on dyna_room's "Dyna CI runners" line. Turning a repository's
 runners on or off, its runner maximum, hosts and host rules are root's (dyna-admin); other sessions ask their parent.
+Runners go only to hosts with ci on that the room's host rule allows (`room hosts ROOM --only`), the same rule as its
+boxes; there is no host choice per repository.
 
 ## Route a job
 

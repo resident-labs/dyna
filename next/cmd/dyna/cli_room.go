@@ -181,7 +181,7 @@ func roomCommand(getClient func() client) *cobra.Command {
 	}}
 	var ciOn, ciOff bool
 	var ciMax int
-	repoCI := &cobra.Command{Use: "ci REPO", Short: "Turn a repository's CI runners on or off", Long: "--on serves the repository's jobs that say runs-on: dyna-small, dyna-medium, dyna-large or dyna-xlarge, each from a runner of that size, on a host with ci on that admission picks as it picks one for a box, or on a node of the room's pool. --max bounds its runners across sizes. --off removes them at once. See next/docs/ci-runners.md.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	repoCI := &cobra.Command{Use: "ci REPO", Short: "Turn a repository's CI runners on or off", Long: "--on serves the repository's jobs that say runs-on: dyna-small, dyna-medium, dyna-large or dyna-xlarge, each from a runner of that size, on a host with ci on that the room's host rule allows (room hosts ROOM --only, the same rule as its boxes; there is no host choice per repository), picked as admission picks one for a box, or on a node of the room's pool. --max bounds its runners across sizes. --off removes them at once. See next/docs/ci-runners.md.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := getClient().RepoCISet(cmd.Context(), contract.RepoCISetRequest{Repo: contract.RepoName(args[0]), On: ciOn, Max: ciMax})
 		return err
 	}}
