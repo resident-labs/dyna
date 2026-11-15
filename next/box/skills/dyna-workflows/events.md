@@ -96,9 +96,21 @@ dyna subscription add --room ROOM --on github.pr.changed \
 With `prEvents` on, changes cover every
 open PR, including untracked ones. PRs already open when you turn it on fire at their next change, not at once.
 
-`dyna subscription fire ID --event JSON [--key KEY]` queues one event using real
-state. Its key overrides the resolved key literally. Without an event it queues
-`hook.due`, which a handler can treat separately from PR changes.
+`dyna subscription fire ID [--event JSON | --data JSON] [--key KEY]` queues one event using real
+state. `--event` takes a full event envelope; `--data` takes any JSON up to 1 MiB
+and queues `hook.fired` with body `{subscription, data}`. They are mutually exclusive.
+The key overrides the resolved key literally; data resolves the template with empty
+repo and number 0. With neither option it queues `hook.due` with the subscription ID.
+For example, `dyna subscription fire ID --data '{"brief":"Review the parser"}'`
+can reach a service like this:
+
+```js
+export const meta = { name: 'briefs', profiles: ['sol'] }
+serve(async (event) => {
+  if (event.type !== 'hook.fired') return
+  await agent(event.body.data.brief, { label: 'review brief' })
+})
+```
 
 `serve()` needs a subscription. A hand-started `dyna workflow run` has no events, so it
 refuses `serve`.

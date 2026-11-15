@@ -102,7 +102,19 @@ func (s *Service) SubscriptionFire(ctx context.Context, caller contract.Principa
 	if problem != nil {
 		return contract.SubscriptionFireResponse{}, problem
 	}
+	if len(req.Event) > 0 && len(req.Data) > 0 {
+		return contract.SubscriptionFireResponse{}, invalid("event and data are mutually exclusive; supply only one")
+	}
 	var body contract.EventBody = contract.HookDue{Subscription: sub.ID}
+	if len(req.Data) > 0 {
+		if len(req.Data) > 1<<20 {
+			return contract.SubscriptionFireResponse{}, invalid("data is at most 1 MiB")
+		}
+		if !json.Valid(req.Data) {
+			return contract.SubscriptionFireResponse{}, invalid("data must be JSON")
+		}
+		body = contract.HookFired{Subscription: sub.ID, Data: req.Data}
+	}
 	if len(req.Event) > 0 {
 		if len(req.Event) > 1<<20 {
 			return contract.SubscriptionFireResponse{}, invalid("event is at most 1 MiB")
@@ -116,6 +128,10 @@ func (s *Service) SubscriptionFire(ctx context.Context, caller contract.Principa
 	var repo contract.RepoName
 	var number int
 	switch b := body.(type) {
+	case contract.HookDue:
+		body = contract.HookDue{Subscription: sub.ID}
+	case contract.HookFired:
+		body = contract.HookFired{Subscription: sub.ID, Data: b.Data}
 	case contract.PrChanged:
 		if len(b.Changes) != 1 {
 			return contract.SubscriptionFireResponse{}, invalid("fire takes one PR change in body.changes")
