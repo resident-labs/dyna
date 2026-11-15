@@ -6,13 +6,15 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 122
+const schemaVersion = 123
 
 const agentsTable = `CREATE TABLE agents (id TEXT PRIMARY KEY, session TEXT NOT NULL REFERENCES sessions(id), turn TEXT NOT NULL, name TEXT NOT NULL, state TEXT NOT NULL, transcript TEXT NOT NULL DEFAULT '', start_offset INTEGER NOT NULL DEFAULT 0, started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL DEFAULT 0, model TEXT NOT NULL DEFAULT '', input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, cache_read_tokens INTEGER NOT NULL DEFAULT 0, cache_write_tokens INTEGER NOT NULL DEFAULT 0)`
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
+	// Complete transcript records contribute once to a running workflow step's persisted totals.
+	122: {`ALTER TABLE workflow_steps ADD COLUMN progress_offset INTEGER NOT NULL DEFAULT 0`, `ALTER TABLE workflow_steps ADD COLUMN tool_calls INTEGER NOT NULL DEFAULT 0`, `ALTER TABLE workflow_steps ADD COLUMN last_activity INTEGER NOT NULL DEFAULT 0`},
 	// The advisor is an agent in root's box, not a session: each open advisor session starts closing with its box to close, and the flag goes.
 	121: {`UPDATE sessions SET state='closing',close_reason='the advisor is an agent in root''s box now' WHERE advisor=1 AND closed_at IS NULL AND state='open'`, `UPDATE boxes SET want='close',due_at=0 WHERE session IN (SELECT id FROM sessions WHERE advisor=1 AND state='closing' AND closed_at IS NULL)`, `ALTER TABLE sessions DROP COLUMN advisor`},
 	// The room's advisor setting is a profile on the room, not a session; each open advisor session's profile becomes it. An agent is one turn of an in-box agent.

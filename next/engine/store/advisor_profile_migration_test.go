@@ -19,7 +19,7 @@ func TestAdvisorProfileMigrationCopiesTheOpenAdvisorSessionsProfile(t *testing.T
 ALTER TABLE sessions ADD COLUMN advisor INTEGER NOT NULL DEFAULT 0;
  INSERT INTO sessions(id,room,name,profile,state,goal,created_at,advisor) VALUES('a1','with','advisor','deep','open','',0,1),('a2','closed','advisor','deep','open','',0,1),('r','none','root','test','open','',0,0);
  UPDATE sessions SET closed_at=1 WHERE id='a2';
- ALTER TABLE rooms DROP COLUMN advisor_profile; DROP TABLE agents; UPDATE meta SET value='120' WHERE key='schema_version'`)
+ ALTER TABLE rooms DROP COLUMN advisor_profile; DROP TABLE agents; ALTER TABLE workflow_steps DROP COLUMN progress_offset; ALTER TABLE workflow_steps DROP COLUMN tool_calls; ALTER TABLE workflow_steps DROP COLUMN last_activity; UPDATE meta SET value='120' WHERE key='schema_version'`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestAdvisorSessionsStartClosingWhenTheFlagGoes(t *testing.T) {
  INSERT INTO sessions(id,room,name,profile,state,goal,created_at,advisor) VALUES('open','room','advisor','deep','open','',0,1),('old','room','old','deep','closed','',0,1),('root','room','root','test','open','',0,0);
  UPDATE sessions SET closed_at=1 WHERE id='old';
  INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updated_at,want) VALUES('b-open','open',NULL,'','small','ready','','',0,0,'run'),('b-root','root',NULL,'','small','ready','','',0,0,'run');
- UPDATE meta SET value='121' WHERE key='schema_version'`)
+ ALTER TABLE workflow_steps DROP COLUMN progress_offset; ALTER TABLE workflow_steps DROP COLUMN tool_calls; ALTER TABLE workflow_steps DROP COLUMN last_activity; UPDATE meta SET value='121' WHERE key='schema_version'`)
 	if err != nil {
 		t.Fatal(err)
 	}

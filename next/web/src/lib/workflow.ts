@@ -100,7 +100,9 @@ export function applyStep(steps: WorkflowStep[], step: WorkflowStep): WorkflowSt
   if (at < 0) return [...steps, step];
   const old = steps[at];
   if (step.state === "running" && step.started === old.started && (old.state !== "running" || old.transcript)) return steps;
-  return steps.with(at, step);
+  // Step events carry journal fields, while status reads add transcript progress. Do not let a late event erase it.
+  const next = step.started === old.started ? { ...step, toolCalls: Math.max(old.toolCalls, step.toolCalls), lastActivity: step.lastActivity ?? old.lastActivity } : step;
+  return steps.with(at, next);
 }
 
 // A worker that has no file yet is waiting for its place: the box's memory or a profile's limit bounds how many run.
@@ -160,7 +162,7 @@ export function total(steps: WorkflowStep[]): Usage {
   return sum;
 }
 
-// A step that has not ended reports no usage, so it shows nothing rather than a zero.
+// Usage can arrive while a worker runs. Until any is reported, leave the token figure empty.
 export function tokens(usage: Usage): string {
   const n = used(usage);
   if (!n) return "";

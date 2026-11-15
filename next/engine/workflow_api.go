@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -359,6 +360,8 @@ func (s *Service) WorkflowStepEnd(ctx context.Context, caller contract.Principal
 	if req.State != contract.WorkflowStepDone && req.State != contract.WorkflowStepFailed {
 		return contract.WorkflowStepEndResponse{}, invalid("invalid step state")
 	}
+	s.transcriptMu.Lock()
+	defer s.transcriptMu.Unlock()
 	if err := s.store.EndWorkflowStep(ctx, run.ID, req, s.now()); err != nil {
 		return contract.WorkflowStepEndResponse{}, failure(err)
 	}
@@ -374,8 +377,28 @@ func (s *Service) WorkflowStepTranscript(ctx context.Context, caller contract.Pr
 	if !filepath.IsLocal(req.Transcript) {
 		return contract.WorkflowStepTranscriptResponse{}, invalid("transcript path must be local")
 	}
+	s.transcriptMu.Lock()
+	defer s.transcriptMu.Unlock()
 	if err := s.store.SetWorkflowStepTranscript(ctx, run.ID, req.Key, req.Transcript); err != nil {
 		return contract.WorkflowStepTranscriptResponse{}, failure(err)
+	}
+	// Registration can race ahead of or behind the first transcript sync.
+	ack, err := s.store.TranscriptOffset(ctx, run.Session, req.Transcript)
+	if err != nil {
+		return contract.WorkflowStepTranscriptResponse{}, failure(err)
+	}
+	if ack > 0 {
+		file, err := os.Open(filepath.Join(s.layout.Transcripts(run.Room, run.Session), req.Transcript))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return contract.WorkflowStepTranscriptResponse{}, failure(err)
+		}
+		if file != nil {
+			err = s.syncWorkflowProgress(ctx, run.Session, req.Transcript, file, ack)
+			_ = file.Close()
+			if err != nil {
+				return contract.WorkflowStepTranscriptResponse{}, failure(err)
+			}
+		}
 	}
 	s.publishStep(ctx, run, req.Key)
 	return contract.WorkflowStepTranscriptResponse{}, nil

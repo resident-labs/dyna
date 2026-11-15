@@ -75,7 +75,7 @@ func scanWorkflow(row interface{ Scan(...any) error }) (WorkflowRun, error) {
 
 // insertWorkflow adds a run in the transaction that starts its session. A resumed run keeps the old run's commit, image and
 // finished steps, so an unchanged step finds its result. Failed steps stay behind and run again, and a workflow step always
-// runs again so that its script is read afresh. The kept steps cost this run nothing, so they carry no usage.
+// runs again so that its script is read afresh. Kept steps preserve their usage and transcript progress.
 func insertWorkflow(ctx context.Context, tx *sql.Tx, session contract.SessionID, run WorkflowRun, at time.Time) error {
 	if run.MaxRuns > 0 {
 		var going int
@@ -123,8 +123,8 @@ func insertWorkflow(ctx context.Context, tx *sql.Tx, session contract.SessionID,
 	if err != nil || run.Resume == "" {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(run,key,parent,kind,name,phase,lane,profile,detail,state,result,transcript,started_at,ended_at)
-		SELECT ?,key,parent,kind,name,phase,lane,profile,detail,state,result,transcript,started_at,ended_at FROM workflow_steps WHERE run=? AND state=? AND kind!=?`,
+	_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(run,key,parent,kind,name,phase,lane,profile,detail,state,result,reason,transcript,started_at,ended_at,progress_offset,tool_calls,last_activity)
+		SELECT ?,key,parent,kind,name,phase,lane,profile,detail,state,result,reason,transcript,started_at,ended_at,progress_offset,tool_calls,last_activity FROM workflow_steps WHERE run=? AND state=? AND kind!=?`,
 		run.ID, run.Resume, contract.WorkflowStepDone, contract.WorkflowStepWorkflow)
 	return err
 }
@@ -277,7 +277,7 @@ func (s *Store) StartWorkflowStep(ctx context.Context, run contract.WorkflowRunI
 		}
 		stored = contract.WorkflowStepStartResponse{}
 		_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(run,key,parent,kind,name,phase,lane,profile,detail,state,started_at,version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
-			ON CONFLICT(run,key) DO UPDATE SET state=excluded.state,lane=excluded.lane,reason='',transcript='',started_at=excluded.started_at,ended_at=0,version=excluded.version`, run, req.Key, req.Parent, req.Kind, req.Name, req.Phase, req.Lane, req.Profile, req.Detail, contract.WorkflowStepRunning, at.UnixMilli(), req.Version)
+			ON CONFLICT(run,key) DO UPDATE SET state=excluded.state,lane=excluded.lane,reason='',transcript='',started_at=excluded.started_at,ended_at=0,version=excluded.version,progress_offset=0,tool_calls=0,last_activity=0,input_tokens=0,output_tokens=0,cache_read_tokens=0,cache_write_tokens=0`, run, req.Key, req.Parent, req.Kind, req.Name, req.Phase, req.Lane, req.Profile, req.Detail, contract.WorkflowStepRunning, at.UnixMilli(), req.Version)
 		return err
 	})
 	return stored, err
@@ -359,19 +359,59 @@ func (s *Store) SetWorkflowStepTranscript(ctx context.Context, run contract.Work
 	})
 }
 
+// WorkflowStepProgress holds totals through Offset, the byte after the last complete transcript record.
+// Losing a transcript file does not reset this high-water mark.
+type WorkflowStepProgress struct {
+	Offset       int64
+	ToolCalls    int
+	Usage        contract.Usage
+	LastActivity time.Time
+}
+
+// WorkflowProgress reads a running step's persisted progress without opening its transcript.
+func (s *Store) WorkflowProgress(ctx context.Context, session contract.SessionID, path string) (WorkflowStepProgress, error) {
+	var progress WorkflowStepProgress
+	var activity int64
+	err := s.Read().QueryRowContext(ctx, `SELECT progress_offset,tool_calls,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,last_activity
+		FROM workflow_steps WHERE run=(SELECT id FROM workflow_runs WHERE session=?) AND transcript=? AND state=?`, session, path, contract.WorkflowStepRunning).Scan(
+		&progress.Offset, &progress.ToolCalls, &progress.Usage.InputTokens, &progress.Usage.OutputTokens, &progress.Usage.CacheReadTokens, &progress.Usage.CacheWriteTokens, &activity)
+	progress.LastActivity = fromMillis(activity)
+	return progress, err
+}
+
+// SetWorkflowProgress replaces running totals only if previous still matches the stored offset.
+// A stale offset or finished step returns ErrNotFound; neither can change the stored totals.
+func (s *Store) SetWorkflowProgress(ctx context.Context, session contract.SessionID, path string, previous int64, progress WorkflowStepProgress) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `UPDATE workflow_steps SET progress_offset=?,tool_calls=?,input_tokens=?,output_tokens=?,cache_read_tokens=?,cache_write_tokens=?,last_activity=?
+			WHERE run=(SELECT id FROM workflow_runs WHERE session=?) AND transcript=? AND state=? AND progress_offset=? AND progress_offset<=?`,
+			progress.Offset, progress.ToolCalls, progress.Usage.InputTokens, progress.Usage.OutputTokens, progress.Usage.CacheReadTokens, progress.Usage.CacheWriteTokens, millis(progress.LastActivity), session, path, contract.WorkflowStepRunning, previous, progress.Offset)
+		if err != nil {
+			return err
+		}
+		if n, err := result.RowsAffected(); err != nil {
+			return err
+		} else if n == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
+}
+
 // workflowStepMore says a step holds more than its row: what it ran beyond the words its name quotes, or what a command wrote.
 const workflowStepMore = `ifnull(trim(detail,char(32,9,10,13)) NOT IN ('',substr(name,length(kind)+3)) OR CASE WHEN kind='run' AND json_valid(result) THEN ifnull(json_extract(result,'$.stdout'),'')!='' OR ifnull(json_extract(result,'$.stderr'),'')!='' OR ifnull(json_extract(result,'$.code'),0)!=0 OR json_type(result,'$.conflicts')='array' ELSE 0 END,0)`
 
-const workflowStepColumns = "key,parent,kind,name,phase,lane,profile,version,state,reason,transcript," + workflowStepMore + ",input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,started_at,ended_at"
+const workflowStepColumns = "key,parent,kind,name,phase,lane,profile,version,state,reason,transcript," + workflowStepMore + ",input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,tool_calls,last_activity,started_at,ended_at"
 
 func scanWorkflowStep(row interface{ Scan(...any) error }, extra ...any) (contract.WorkflowStep, error) {
 	var step contract.WorkflowStep
-	var started, ended int64
-	if err := row.Scan(append([]any{&step.Key, &step.Parent, &step.Kind, &step.Name, &step.Phase, &step.Lane, &step.Profile, &step.Version, &step.State, &step.Reason, &step.Transcript, &step.More, &step.Usage.InputTokens, &step.Usage.OutputTokens, &step.Usage.CacheReadTokens, &step.Usage.CacheWriteTokens, &started, &ended}, extra...)...); err != nil {
+	var started, ended, activity int64
+	if err := row.Scan(append([]any{&step.Key, &step.Parent, &step.Kind, &step.Name, &step.Phase, &step.Lane, &step.Profile, &step.Version, &step.State, &step.Reason, &step.Transcript, &step.More, &step.Usage.InputTokens, &step.Usage.OutputTokens, &step.Usage.CacheReadTokens, &step.Usage.CacheWriteTokens, &step.ToolCalls, &activity, &started, &ended}, extra...)...); err != nil {
 		return step, err
 	}
 	step.Started = time.UnixMilli(started).UTC()
 	step.Ended = fromMillis(ended)
+	step.LastActivity = fromMillis(activity)
 	return step, nil
 }
 

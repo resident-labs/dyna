@@ -88,8 +88,16 @@
   $effect(() => {
     if (ended) return;
     now = clock();
+    let polling = false;
     const timer = setInterval(() => { now = clock(); }, 1000);
-    return () => clearInterval(timer);
+    // Usage and activity change between step events; read the live snapshot without overlapping polls.
+    const progress = setInterval(async () => {
+      if (polling) return;
+      polling = true;
+      await run.read();
+      polling = false;
+    }, 5000);
+    return () => { clearInterval(timer); clearInterval(progress); };
   });
 
   let frame: HTMLElement | undefined = $state();
