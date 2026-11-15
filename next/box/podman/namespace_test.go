@@ -416,7 +416,7 @@ func TestNamespaceUnreadableSessionDecision(t *testing.T) {
 	}{
 		{"old process", "unknown", "100", 1100, true},
 		{"new process", "unknown", "10000", 1050, false},
-		{"rounded boundary", "unknown", "10000", 1101, false},
+		{"rounded boundary", "unknown", "1100", 1101, false},
 		{"missing birth", "unknown", "100", 0, false},
 		{"missing stat", "unknown", "", 1100, false},
 		{"sshd session", "sshd-session: pip@notty", "", 0, true},
@@ -440,12 +440,88 @@ func TestNamespaceUnreadableSessionDecision(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			script := namespaceProcAccess + fmt.Sprintf("lock_birth=%d; boot=1000; ticks_per_second=100\n", tc.birth) + `namespace_unreadable_safe "$1"`
+			script := namespaceProcAccess + fmt.Sprintf("age_ticks=%d\n", tc.birth) + `namespace_unreadable_safe "$1"`
 			err := exec.Command("bash", "-c", script, "fixture", proc).Run()
 			if (err == nil) != tc.skip {
 				t.Fatalf("skip = %v, want %v (%v)", err == nil, tc.skip, err)
 			}
 		})
+	}
+}
+
+func TestNamespaceClockRollbackCannotExemptNewProcess(t *testing.T) {
+	proc := t.TempDir()
+	uid := os.Geteuid()
+	for name, data := range map[string]string{
+		"status":  fmt.Sprintf("Uid:\t%d\t%d\t%d\t%d\n", uid, uid, uid, uid),
+		"cmdline": "worker\x00",
+		"stat":    "42 (worker) S " + strings.Repeat("0 ", 18) + "10100\n",
+	} {
+		if err := os.WriteFile(filepath.Join(proc, name), []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A lock created at 100 seconds since boot precedes this worker at 101.
+	// Rolling realtime back changes btime but never the sidecar's clock domain.
+	for _, boot := range []int{1000, 990} {
+		script := namespaceProcAccess + fmt.Sprintf("age_ticks=10000; boot=%d; lock_birth=1100\n", boot) + `namespace_unreadable_safe "$1"`
+		if err := exec.Command("bash", "-c", script, "fixture", proc).Run(); err == nil {
+			t.Fatalf("clock rollback allowed younger worker (btime %d)", boot)
+		}
+	}
+}
+
+func TestNamespaceBirthMetadata(t *testing.T) {
+	root := t.TempDir()
+	lock := filepath.Join(root, "locks", "box-b.lock")
+	if err := os.MkdirAll(filepath.Dir(lock), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lock, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stat := info.Sys().(*syscall.Stat_t)
+	inode := fmt.Sprintf("%d:%d", stat.Dev, stat.Ino)
+	boot := strings.TrimSpace(string(readNamespaceFile(t, "/proc/sys/kernel/random/boot_id")))
+	for _, tc := range []struct {
+		name, data string
+		valid      bool
+	}{
+		{"valid", boot + " 10000 " + inode + "\n", true},
+		{"missing", "", false},
+		{"different boot", "different-boot 10000 " + inode + "\n", false},
+		{"bad ticks", boot + " invalid " + inode + "\n", false},
+		{"overflow", boot + " 999999999999999999999999 " + inode + "\n", false},
+		{"wrong inode", boot + " 10000 0:0\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			birth := filepath.Join(t.TempDir(), "born")
+			if tc.data != "" {
+				if err := os.WriteFile(birth, []byte(tc.data), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			script := namespaceProcAccess + "root=" + quote(root) + "; id=b; birth_file=" + quote(birth) + `
+namespace_load_birth && test "$age_ticks" = 10000`
+			err := exec.Command("bash", "-c", script).Run()
+			if (err == nil) != tc.valid {
+				t.Fatalf("metadata accepted = %v, want %v (%v)", err == nil, tc.valid, err)
+			}
+		})
+	}
+}
+
+func TestNamespaceRecoveryCheckMissingDirectory(t *testing.T) {
+	root := t.TempDir()
+	if out, err := namespaceCommand(root, "recover", "--check").CombinedOutput(); err != nil {
+		t.Fatalf("check: %s: %v", out, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "locks")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("check created locks directory: %v", err)
 	}
 }
 
@@ -465,6 +541,7 @@ func TestNamespaceRecoveryCheckDoesNotRotate(t *testing.T) {
 			}
 			path := filepath.Join(root, "locks", "box-b.lock")
 			before, _ := os.Stat(path)
+			beforeNames, _ := filepath.Glob(filepath.Join(root, "locks", "*"))
 			out, err := namespaceCommand(root, "recover", "--check").CombinedOutput()
 			if err != nil || !strings.Contains(string(out), "check passed") {
 				t.Fatalf("check: %s: %v", out, err)
@@ -472,6 +549,10 @@ func TestNamespaceRecoveryCheckDoesNotRotate(t *testing.T) {
 			after, err := os.Stat(path)
 			if err != nil || !os.SameFile(before, after) {
 				t.Fatalf("check rotated: %v", err)
+			}
+			afterNames, _ := filepath.Glob(filepath.Join(root, "locks", "*"))
+			if !slices.Equal(beforeNames, afterNames) {
+				t.Fatalf("check changed lock directory: %v -> %v", beforeNames, afterNames)
 			}
 		})
 	}
@@ -489,12 +570,24 @@ func TestNamespaceStaleConmonRecovery(t *testing.T) {
 	if before.Mode().Perm() != 0600 {
 		t.Fatalf("lock permissions: %v", before.Mode())
 	}
+	birth := filepath.Join(root, "locks", "box-b.born")
+	checkBirth := namespaceProcAccess + "root=" + quote(root) + "; id=b; birth_file=" + quote(birth) + "\nnamespace_load_birth"
+	if out, err := exec.Command("bash", "-c", checkBirth).CombinedOutput(); err != nil {
+		t.Fatalf("created lock metadata: %v: %s", err, out)
+	}
+	oldBirth := readNamespaceFile(t, birth)
 	if _, err := h.BoxEpoch(context.Background(), "b"); err != nil {
 		t.Fatal(err)
 	}
 	after, err := os.Stat(path)
 	if err != nil || os.SameFile(before, after) {
 		t.Fatalf("not rotated: %v", err)
+	}
+	if out, err := exec.Command("bash", "-c", checkBirth).CombinedOutput(); err != nil {
+		t.Fatalf("rotated lock metadata: %v: %s", err, out)
+	}
+	if string(oldBirth) == string(readNamespaceFile(t, birth)) {
+		t.Fatal("rotation did not replace birth metadata")
 	}
 	if err := syscall.Kill(pid, 0); err != nil {
 		t.Fatalf("recovery killed conmon: %v", err)
@@ -583,7 +676,7 @@ func TestNamespaceConmonExitsBeforeRotation(t *testing.T) {
 		t.Fatal(err)
 	}
 	tools := t.TempDir()
-	gate := "#!/bin/bash\nprintf 'entered\\n' > " + quote(entered.path) + "; IFS= read -r _ < " + quote(release.path) + "\nexec " + quote(mv) + " \"$@\"\n"
+	gate := "#!/bin/bash\ncase ${!#} in *.lock) printf 'entered\\n' > " + quote(entered.path) + "; IFS= read -r _ < " + quote(release.path) + ";; esac\nexec " + quote(mv) + " \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(tools, "mv"), []byte(gate), 0700); err != nil {
 		t.Fatal(err)
 	}

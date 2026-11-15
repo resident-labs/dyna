@@ -49,16 +49,39 @@ namespace_unreadable_safe() {
  case ${command##*/} in
   sshd-session:*|sshd:*|'(sd-pam)'|ssh-agent|gpg-agent) return 0;;
  esac
- # Only wrappers open these private files; an older unrelated process cannot
- # have inherited an FD opened later. If birth time or clock data is missing,
- # this proof is unavailable. Round the process start UP, including btime's
- # one-second precision, and compare to the birth time rounded DOWN.
- test "$lock_birth" -gt 0 && test "$boot" -gt 0 && test "$ticks_per_second" -gt 0 || return 1
+ # age_ticks is accepted only from same-boot metadata bound to this inode.
+ # Only wrappers open the file; older unrelated processes cannot inherit it.
+ # Start ticks round down, while our pre-creation sample rounds up: exclude
+ # the ambiguous boundary tick too. Realtime adjustments never enter this proof.
+ test "$age_ticks" -gt 0 || return 1
  IFS= read -r process_stat < "$1/stat" || return 1
  read -ra fields <<< "${process_stat##*) }"
  start=${fields[19]:-}
  [[ "$start" =~ ^[0-9]+$ ]] || return 1
- test $((boot + (start + ticks_per_second - 1) / ticks_per_second + 1)) -lt "$lock_birth"
+ test $((start + 1)) -lt "$age_ticks"
+}
+namespace_birth_clock() {
+ IFS= read -r birth_boot < /proc/sys/kernel/random/boot_id || return 1
+ read -r uptime rest < /proc/uptime || return 1
+ hz=$(getconf CLK_TCK) || return 1
+ [[ "$uptime" =~ ^([0-9]+)\.([0-9]{2})$ ]] || return 1
+ # Linux exports uptime in hundredths. Sample before creating the inode.
+ birth_ticks=$((BASH_REMATCH[1] * hz + (10#${BASH_REMATCH[2]} * hz + 99) / 100))
+}
+namespace_write_birth() {
+ inode=$(stat -c %d:%i -- "$1") || return 1
+ printf '%s %s %s\n' "$birth_boot" "$birth_ticks" "$inode" > "$birth_file.new" || return 1
+ mv -f -- "$birth_file.new" "$birth_file"
+}
+namespace_load_birth() {
+ age_ticks=0
+ IFS= read -r current_boot < /proc/sys/kernel/random/boot_id || return 1
+ read -r recorded_boot recorded_ticks recorded_inode extra 2>/dev/null < "$birth_file" || return 1
+ test -z "$extra" && test "$recorded_boot" = "$current_boot" || return 1
+ [[ "$recorded_ticks" =~ ^[1-9][0-9]*$ ]] && test "${#recorded_ticks}" -lt 18 || return 1
+ inode=$(stat -c %d:%i -- "$root/locks/box-$id.lock") || return 1
+ test "$recorded_inode" = "$inode" || return 1
+ age_ticks=$recorded_ticks
 }
 `
 
@@ -67,15 +90,30 @@ namespace_unreadable_safe() {
 // A completed command explicitly unlocks the shared description: Podman can
 // leave conmon holding FD 8 after its synchronous command returns. Without
 // this unlock, that daemon fences the box for its entire lifetime. Do not use
-// an EXIT trap: interrupted wrappers must retain the lock in surviving work.
+// an EXIT unlock trap: interrupted wrappers retain the lock in surviving work.
 // All namespace files live outside container, workspace, stack and room trees.
 const namespaceScript = namespaceProcAccess + `set -eu
 umask 077
 trap : HUP PIPE TERM
 root=$1; id=$2; mode=$3; shift 3
-mkdir -p -- "$root/locks"
-exec 8> "$root/locks/box-$id.lock"
-chmod 600 -- "$root/locks/box-$id.lock"
+check=0
+if test "$mode" = recover && test "${1:-}" = --check; then check=1; fi
+birth_file="$root/locks/box-$id.born"
+SECONDS=0
+if test "$check" = 0; then
+ mkdir -p -- "$root/locks"
+ exec 9> "$root/locks/box-$id.rotate"
+ flock -x -w 15 9 || exit 252
+ if ! test -e "$root/locks/box-$id.lock"; then
+  namespace_birth_clock || exit 251
+  exec 8> "$root/locks/box-$id.lock"
+  namespace_write_birth "$root/locks/box-$id.lock" || exit 251
+ else
+  exec 8> "$root/locks/box-$id.lock"
+ fi
+ chmod 600 -- "$root/locks/box-$id.lock"
+ exec 9>&-
+fi
 namespace_lock_holders() {
  # The scan runs in a subshell that closes the lock descriptor and starts no program: only builtins read /proc, so killing
  # the subshell leaves nothing behind, and nothing of it can hold the lock or the caller's streams.
@@ -156,7 +194,7 @@ namespace_stale_holders() {
  printf '%s\n' "$pids"
 }
 namespace_stale_scan() {
- (namespace_stale_holders) > "$root/locks/box-$id.rotate.new" &
+ (namespace_stale_holders) > "$scan_result" &
  scan=$!
  while kill -0 "$scan" 2>/dev/null && test "$SECONDS" -lt 10; do sleep 0.1; done
  if kill -KILL "$scan" 2>/dev/null; then
@@ -166,34 +204,36 @@ namespace_stale_scan() {
  wait "$scan"
 }
 if test "$mode" = recover; then
- check=0
- test "${1:-}" != --check || check=1
- lock_birth=$(stat -c %W -- "$root/locks/box-$id.lock") || lock_birth=0
- boot=0
- while read -r key value rest; do
-  test "$key" != btime || { boot=$value; break; }
- done < /proc/stat
- ticks_per_second=$(getconf CLK_TCK) || ticks_per_second=0
- exec 9> "$root/locks/box-$id.rotate"
- flock -x -w 10 9 || exit 254
+ if test "$check" = 1; then
+  # --check never creates or modifies anything in the locks directory. Its
+  # only scratch is a temporary scan result, removed on exit. No lock FD is open.
+  scan_result=$(mktemp "${TMPDIR:-/tmp}/dyna-namespace-check.XXXXXX") || exit 254
+  trap 'rm -f -- "$scan_result"' EXIT
+ else
+  exec 9> "$root/locks/box-$id.rotate"
+  flock -x -w 10 9 || exit 254
+  scan_result="$root/locks/box-$id.rotate.new"
+ fi
+ namespace_load_birth || true
  SECONDS=0
  namespace_stale_scan || exit 254
- IFS= read -r first < "$root/locks/box-$id.rotate.new" || exit 254
+ IFS= read -r first < "$scan_result" || exit 254
  sleep 1
  namespace_stale_scan || exit 254
- IFS= read -r second < "$root/locks/box-$id.rotate.new" || exit 254
+ IFS= read -r second < "$scan_result" || exit 254
  test "$first" = "$second" || exit 254
  if test "$check" = 1; then
   printf 'namespace recovery check passed: box %s; eligible conmon pids:%s\n' "$id" "$first"
   exit 0
  fi
- : > "$root/locks/box-$id.rotate.new"
- mv -f -- "$root/locks/box-$id.rotate.new" "$root/locks/box-$id.lock"
+ namespace_birth_clock || exit 254
+ fresh=$(mktemp "$root/locks/box-$id.lock.XXXXXX") || exit 254
+ mv -f -- "$fresh" "$root/locks/box-$id.lock"
+ namespace_write_birth "$root/locks/box-$id.lock" || exit 254
  exec 9>&-
  printf 'rotated namespace lock: box %s; conmon pids:%s\n' "$id" "$first"
  exit 0
 fi
-SECONDS=0
 while :; do
  remaining=$((15 - SECONDS))
  test "$remaining" -gt 0 || { namespace_scan_holders || true; exit 252; }
