@@ -138,8 +138,6 @@ Useful shapes: write, review (the prompt names the commit) and fix for a fixed n
 each trying to refute one finding; finders in rounds until rounds in a row find nothing new.
 `pipeline()` overlaps stages; a barrier pays when a stage needs all earlier results. A run that samples says
 what it left out. A dry run of one group finds wrong prompts cheaply. Give writers separate files.
-For a cheap reader, pick a profile whose ratings in `dyna_profiles` show enough diagnostics for the task, not only the cheapest one, and check a sample of its results before a large run.
-Give each worker one or two items, not a batch.
 A worker that skips everything still reports done: check `files.length` or a schema field. A `done` run
 is not proof of finished work: `conflicts`, `merged` and failed steps say what happened.
 Do not prohibit the tools a worker needs to build and verify its change.
