@@ -16,6 +16,7 @@ func TestAdvisorProfileMigrationCopiesTheOpenAdvisorSessionsProfile(t *testing.T
 		t.Fatal(err)
 	}
 	_, err = s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('with','with',0,0,0),('closed','closed',0,0,0),('none','none',0,0,0);
+ALTER TABLE sessions ADD COLUMN advisor INTEGER NOT NULL DEFAULT 0;
  INSERT INTO sessions(id,room,name,profile,state,goal,created_at,advisor) VALUES('a1','with','advisor','deep','open','',0,1),('a2','closed','advisor','deep','open','',0,1),('r','none','root','test','open','',0,0);
  UPDATE sessions SET closed_at=1 WHERE id='a2';
  ALTER TABLE rooms DROP COLUMN advisor_profile; DROP TABLE agents; UPDATE meta SET value='120' WHERE key='schema_version'`)
@@ -35,5 +36,41 @@ func TestAdvisorProfileMigrationCopiesTheOpenAdvisorSessionsProfile(t *testing.T
 		if err != nil || string(got) != want {
 			t.Fatalf("room %s: advisor %q (%v), want %q", room, got, err, want)
 		}
+	}
+}
+
+// The advisor stopped being a session: an upgrade starts each open advisor session closing, with its box to close so the engine finishes it,
+// and drops the flag. Other sessions, and an advisor already closed, are left alone.
+func TestAdvisorSessionsStartClosingWhenTheFlagGoes(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('room','room',0,0,0);
+ ALTER TABLE sessions ADD COLUMN advisor INTEGER NOT NULL DEFAULT 0;
+ INSERT INTO sessions(id,room,name,profile,state,goal,created_at,advisor) VALUES('open','room','advisor','deep','open','',0,1),('old','room','old','deep','closed','',0,1),('root','room','root','test','open','',0,0);
+ UPDATE sessions SET closed_at=1 WHERE id='old';
+ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updated_at,want) VALUES('b-open','open',NULL,'','small','ready','','',0,0,'run'),('b-root','root',NULL,'','small','ready','','',0,0,'run');
+ UPDATE meta SET value='121' WHERE key='schema_version'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for session, want := range map[string][2]string{"open": {"closing", "close"}, "old": {"closed", ""}, "root": {"open", "run"}} {
+		var state, box string
+		if err := s.Read().QueryRow(`SELECT s.state,COALESCE((SELECT want FROM boxes WHERE session=s.id),'') FROM sessions s WHERE s.id=?`, session).Scan(&state, &box); err != nil || state != want[0] || box != want[1] {
+			t.Fatalf("session %s: state %q, box %q (%v), want %v", session, state, box, err, want)
+		}
+	}
+	if _, err := s.Read().Exec(`SELECT advisor FROM sessions`); err == nil {
+		t.Fatal("the advisor flag is still a column")
 	}
 }

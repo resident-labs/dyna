@@ -11,15 +11,14 @@ import (
 // The text of a session's system prompt, in the order a session reads it. A change to a word is a change to the renderings in testdata/prompt.
 // Where each fact lives is in the unified prompt design; the parts below are its sections and bullets.
 
-// Role is the session's place in the tree, decided from typed facts when the box says hello: root has no parent, the advisor was started as
-// the room's advisor, a lead has ever started a child, and every other session is a worker.
+// Role is the session's place in the tree, decided from typed facts when the box says hello: root has no parent, a lead has ever started
+// a child, and every other session is a worker.
 type Role string
 
 const (
-	Root    Role = "root"
-	Lead    Role = "lead"
-	Advisor Role = "advisor"
-	Worker  Role = "worker"
+	Root   Role = "root"
+	Lead   Role = "lead"
+	Worker Role = "worker"
 )
 
 const (
@@ -138,22 +137,6 @@ If you've already retrieved data pointing one way and the advisor points another
 conflict in one more advisor call -- "I found X, you suggest Y, which constraint breaks the tie?" The advisor saw your
 evidence but may have underweighted it; a reconcile call is cheaper than committing to the wrong branch.`
 
-	promptRoleAdvisor = `# Your role: advisor
-
-You are root's advisor: a stronger reviewer model that lives beside root in this room. Each call brings root's work since
-your last answer -- a short record of root's recent work: its inputs, its text and one line per tool call -- and then
-the prompt root wrote. Read root's transcript (transcript read, session root) for anything cut or older.
-
-Root calls you BEFORE substantive work -- before writing, before committing to an interpretation, before building on an
-assumption -- when it believes the task is complete, when it is stuck, and when it is considering a change of approach.
-You add most of your value on the first call, before the approach crystallizes.
-
-You do not do the work: you start no sessions, hold no goals and change nothing outside your box. Answer with your
-judgment: what to do next, what is wrong or missing, and what you are unsure of. Name the evidence that would change
-your advice. When root reports a conflict ("I found X, you suggest Y"), weigh its evidence again and say which
-constraint breaks the tie. Your final text is root's answer.
-`
-
 	// AdvisorInstructions is the advisor's system text, which the box agent adds to the core every agent shares.
 	AdvisorInstructions = `# Your role: advisor
 
@@ -238,8 +221,6 @@ func Session(v Vars) string {
 		if v.Advisor {
 			role += "\n\n" + promptAdvisorRoot
 		}
-	case Advisor:
-		role = promptRoleAdvisor
 	case Lead:
 		role = promptRoleLead
 	}
@@ -253,9 +234,7 @@ func Session(v Vars) string {
 			fmt.Sprintf("Standing rules: the global AGENTS.md is %s on %s and this room's is %s; bash with host %s edits them. The engine copies each room's file to every host for boxes and rewrites that copy at each sync.", v.GlobalRules, v.Host, v.RoomRules, v.Host),
 		}
 	} else {
-		if v.Role != Advisor {
-			across = append([]string{promptGoals}, across...)
-		}
+		across = append([]string{promptGoals}, across...)
 		session = []string{fmt.Sprintf("You are %s, session %s, in room %s (ID %s). Your parent is %s.", v.Name, v.ID, v.Room, v.RoomID, v.Parent)}
 		if v.Repo != nil {
 			session = append(session, "Your branch: "+v.Repo.Branch+" on "+string(v.Repo.Name)+".\nPushes and fetches go through the engine, which sends a push or fetch once more when GitHub answers 5xx (for a push also a commit_refs error) and the request body is at most 1 MiB, and reports the cause when the second try fails.")

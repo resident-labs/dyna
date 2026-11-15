@@ -305,7 +305,6 @@ type SessionSummary struct {
 	ShellJobs    int             `json:"shellJobs,omitempty"`    // TurnEnded.ShellJobs of the last ended turn
 	Waiting      *SessionWaiting `json:"waiting,omitempty"`      // current wait, only when no turn is running
 	HadJobs      bool            `json:"hadJobs"`                // the session has ever run a background shell job, so a finished job stays reachable
-	Advisor      bool            `json:"advisor,omitempty"`      // the room's advisor
 	StartedAt    time.Time       `json:"startedAt"`              // when the session was created
 	LastTurnAt   time.Time       `json:"lastTurnAt,omitzero"`    // when the latest turn ended; empty when no turn has ended
 }
@@ -552,7 +551,6 @@ type SessionStartRequest struct {
 	Host     HostName    `json:"host,omitempty"`
 	GPU      GPUGiB      `json:"gpu,omitempty" desc:"GiB of GPU memory the box needs on one card; true means 1. The session waits for a host with a card that has that much unclaimed. GPU memory is not limited per box, so a box that uses more makes other boxes on the card fail their CUDA allocations, and nothing stops it. Fails with no_gpu when no host reports a GPU and gpu_too_large when no card is big enough."`
 	Compose  string      `json:"compose,omitempty"`
-	Advisor  bool        `json:"-"` // set only by the room's advisor setting, which starts the advisor under root
 }
 type SessionStartResponse struct {
 	Session SessionID `json:"session"`
@@ -620,9 +618,6 @@ type SessionRestartRequest struct {
 	Session SessionID `json:"session"`
 }
 type SessionRestartResponse struct{}
-
-// AdvisorRefusal is what the advisor meets when it tries to act in the room. Its final text still reaches root.
-const AdvisorRefusal = "the advisor answers root; it does not act in the room"
 
 // AdvisorRequest is root's prompt for the room's advisor.
 type AdvisorRequest struct {
