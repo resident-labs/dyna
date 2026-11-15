@@ -83,3 +83,11 @@ func TestWaitingTurnNoticeReachesParent(t *testing.T) {
 		})
 	}
 }
+
+func TestSpokenFrameDescribesIntermediary(t *testing.T) {
+	s, _, worker, ctx := setup(t)
+	frame, _, err := s.inputFrame(ctx, worker, contract.Event{From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.PostCreated{Spoken: true}}, contract.Delivery{Surface: contract.SurfaceDM})
+	if err != nil || !strings.Contains(frame, "a voice agent relays the request above and the call transcript") || strings.Contains(frame, "owner spoke these words") {
+		t.Fatalf("%s: %v", frame, err)
+	}
+}

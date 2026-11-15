@@ -49,7 +49,9 @@ func TestVoiceHandoffIdleBusyAndFinal(t *testing.T) {
 	})}
 	go proxyServer.Serve(proxy.Listener)
 	defer proxyServer.Close()
-	run, problem := s.Voice(ctx, room)
+	_, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: room, Text:"recent conversation", Home:contract.Conversation{Kind:contract.ConversationDM,Session:root}})
+ if problem != nil {t.Fatal(problem)}
+ run, problem := s.Voice(ctx, room)
 	if problem != nil {
 		t.Fatal(problem)
 	}
@@ -77,12 +79,17 @@ func TestVoiceHandoffIdleBusyAndFinal(t *testing.T) {
 	if err := wsjson.Read(ctx, provider, &session); err != nil {
 		t.Fatal(err)
 	}
-	sendTool := func(id, prompt string) {
+	var startup map[string]any
+ if err := wsjson.Read(ctx, provider, &startup); err != nil {t.Fatal(err)}
+ startupJSON, _ := json.Marshal(startup)
+ if !strings.Contains(string(startupJSON),"recent conversation") || !strings.Contains(string(startupJSON),"developer") { t.Fatal(startup) }
+ sendTool := func(id, prompt string) {
 		t.Helper()
 		if err := wsjson.Write(ctx, provider, map[string]any{"type": "input_audio_buffer.committed", "item_id": "owner-" + id}); err != nil {
 			t.Fatal(err)
 		}
-		args, _ := json.Marshal(map[string]string{"prompt": prompt})
+		if err := wsjson.Write(ctx, provider, map[string]any{"type":"conversation.item.input_audio_transcription.completed","item_id":"owner-"+id,"transcript":prompt}); err != nil {t.Fatal(err)}
+ args, _ := json.Marshal(map[string]string{"prompt": prompt})
 		if err := wsjson.Write(ctx, provider, map[string]any{"type": "response.function_call_arguments.done", "name": "background_agent", "call_id": id, "arguments": string(args)}); err != nil {
 			t.Fatal(err)
 		}
@@ -130,9 +137,11 @@ func TestVoiceHandoffIdleBusyAndFinal(t *testing.T) {
 	for _, event := range events {
 		if post, ok := event.Body.(contract.PostCreated); ok && post.Spoken {
 			posted = append(posted, post.Text)
+ if !strings.Contains(post.Text,"<transcript_delta>user:") {t.Fatal(post)}
+ if (len(posted)==1) != strings.Contains(post.Context,"Realtime conversation started.") {t.Fatal("start not once",post.Context)}
 		}
 	}
-	if len(posted) != 2 || posted[0] != "start a voice task" || posted[1] != "steer this task" {
+	if len(posted) != 2 || !strings.Contains(posted[0], "<input>start a voice task</input>") || !strings.Contains(posted[1], "<input>steer this task</input>") {
 		t.Fatalf("owner post order: %q", posted)
 	}
 	start := nextTurn(t, s, ctx, root)
