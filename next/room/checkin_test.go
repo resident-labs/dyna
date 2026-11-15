@@ -56,6 +56,7 @@ func TestPlanCheckins(t *testing.T) {
 			c.Last, c.Silent, c.Progress = ago(2*time.Minute), true, ago(time.Minute)
 		}, nil},
 		{"running turn", func(s []CheckinSession) { c := childOf(s); c.Turn, c.Last = true, ago(time.Hour) }, nil},
+		{"a serving turn is never stalled", func(s []CheckinSession) { c := childOf(s); c.Turn, c.Serving, c.Last = true, true, ago(100*CheckinStuck) }, nil},
 		{"turn past the stuck limit", func(s []CheckinSession) { c := childOf(s); c.Turn, c.Last = true, ago(CheckinStuck) }, []contract.SessionID{"lead"}},
 		{"background job", func(s []CheckinSession) { c := childOf(s); c.Jobs, c.Last = 1, ago(time.Hour) }, nil},
 		{"background job past the stuck limit", func(s []CheckinSession) { c := childOf(s); c.Jobs, c.Last = 1, ago(10*CheckinStuck) }, nil},
