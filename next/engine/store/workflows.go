@@ -277,7 +277,7 @@ func (s *Store) StartWorkflowStep(ctx context.Context, run contract.WorkflowRunI
 		}
 		stored = contract.WorkflowStepStartResponse{}
 		_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(run,key,parent,kind,name,phase,lane,profile,detail,state,started_at,version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
-			ON CONFLICT(run,key) DO UPDATE SET state=excluded.state,lane=excluded.lane,reason='',transcript='',started_at=excluded.started_at,ended_at=0,version=excluded.version`, run, req.Key, req.Parent, req.Kind, req.Name, req.Phase, req.Lane, req.Profile, req.Detail, contract.WorkflowStepRunning, at.UnixMilli(), req.Version)
+			ON CONFLICT(run,key) DO UPDATE SET state=excluded.state,lane=excluded.lane,reason='',transcript='',started_at=excluded.started_at,ended_at=0,version=excluded.version,progress_offset=0,tool_calls=0,last_activity=0,input_tokens=0,output_tokens=0,cache_read_tokens=0,cache_write_tokens=0`, run, req.Key, req.Parent, req.Kind, req.Name, req.Phase, req.Lane, req.Profile, req.Detail, contract.WorkflowStepRunning, at.UnixMilli(), req.Version)
 		return err
 	})
 	return stored, err

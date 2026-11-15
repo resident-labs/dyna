@@ -92,6 +92,48 @@ func TestWorkflowProgress(t *testing.T) {
 	}
 }
 
+func TestWorkflowProgressRestart(t *testing.T) {
+	s, ctx := branchStore(t)
+	for _, q := range []string{
+		`INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('crew','room','crew','p','ready','',0)`,
+		`INSERT INTO workflow_runs(id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,started_at) VALUES('run','room','crew','test','','script','','[]','owner/repo','','','running',1)`,
+	} {
+		if _, err := s.writer.ExecContext(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	req := contract.WorkflowStepStartRequest{Key: "step", Kind: contract.WorkflowStepAgent, Name: "agent test"}
+	if _, err := s.StartWorkflowStep(ctx, "run", req, time.UnixMilli(10)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetWorkflowStepTranscript(ctx, "run", "step", "first.jsonl"); err != nil {
+		t.Fatal(err)
+	}
+	progress := WorkflowStepProgress{Offset: 100, ToolCalls: 3, Usage: contract.Usage{InputTokens: 11, OutputTokens: 12, CacheReadTokens: 13, CacheWriteTokens: 14}, LastActivity: time.UnixMilli(30).UTC()}
+	if err := s.SetWorkflowProgress(ctx, "crew", "first.jsonl", 0, progress); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.StartWorkflowStep(ctx, "run", req, time.UnixMilli(40)); err != nil {
+		t.Fatal(err)
+	}
+	step, err := s.WorkflowStep(ctx, "run", "step")
+	if err != nil || step.Transcript != "" || step.ToolCalls != 0 || !step.LastActivity.IsZero() || step.Usage != (contract.Usage{}) || !step.Started.Equal(time.UnixMilli(40)) {
+		t.Fatalf("restarted step %+v: %v", step, err)
+	}
+	if err := s.SetWorkflowProgress(ctx, "crew", "first.jsonl", 100, progress); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("old worker update: %v", err)
+	}
+	if err := s.SetWorkflowStepTranscript(ctx, "run", "step", "second.jsonl"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.WorkflowProgress(ctx, "crew", "second.jsonl"); err != nil || got != (WorkflowStepProgress{}) {
+		t.Fatalf("new worker progress %+v: %v", got, err)
+	}
+	if err := s.SetWorkflowProgress(ctx, "crew", "second.jsonl", 0, progress); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWorkflowProgressMigration(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(dir)
