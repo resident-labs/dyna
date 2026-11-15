@@ -14,6 +14,9 @@ import (
 
 const workflowScript = "export const meta = { name: 'sweep', profiles: ['fast', 'deep'] }\nreturn await agent('look')\n"
 
+// serviceScript is a workflow subscription's script: it serves each event with one worker.
+const serviceScript = "export const meta = { name: 'sweep', profiles: ['fast', 'deep'] }\nserve(async () => { await agent('look') })\n"
+
 type workflowCase struct {
 	*Service
 	t     *testing.T

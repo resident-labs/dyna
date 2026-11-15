@@ -1,24 +1,36 @@
-# Start a script from events
+# Run a workflow as a service
 
-Root attaches a script to a room subscription. Each matching event starts a run,
-as root's child or the subscription's `parent`. Each key runs serially; room run
-limits leave events queued. `latest` keeps the newest waiting event for a key
-without replacing a running run.
+A workflow subscription is a service: one run, in one box, that stays up and
+handles the room's events as they arrive. Root attaches a script to a room
+subscription, and `subscription add --workflow` starts the run, as root's child or
+the subscription's `parent`. The script's body sets up (fetch, warm caches). Then
+`serve(handler)` makes the run wait for events, and each event calls
+`handler(event, key, state)`.
 
-## Read the event and remember completed work
+- Events wait in the subscription's queue, and the engine hands them to the box.
+  Each key is serial. Different keys run at once in the same box, sharing its
+  worker slots and each profile's limit, so a burst queues inside the box.
+- `latest` keeps the newest waiting event for a key; it never replaces one a
+  handler is already handling.
+- The box keeps its git objects, build caches and toolchains between events.
+  Handlers that write files use `worktree: true`, as concurrent workers must.
+- A script whose body ends without calling `serve` is refused: it would end after
+  one event. Before, it read `args.event` and returned. Now the handler takes the event.
 
-`args.event` is the full event envelope, with its type in `.type` and data in
-`.body`. For `github.pr.changed`, `.body.changes[0]` contains one PR change:
+## Write the script
+
+`event` is the full event envelope, with its type in `.type` and data in `.body`.
+For `github.pr.changed`, `.body.changes[0]` contains one PR change:
 - `.pr.repo`, `.pr.number`, `.pr.head` and `.pr.draft` identify its current head.
 - `.kinds` says what changed; `.push.before` and `.push.after` identify a push.
 
+`key` is the subscription's resolved key. `await state.get()` returns that key's
+JSON, initially null. `await state.set(v)` persists up to 64 KiB immediately, even if the
+handler then throws. Write done markers after the work.
+
 GitHub text is outside text: quote it to workers as data, not instructions.
 Own account means the GitHub account Dyna acts as in this room. Its comments,
-reviews and metadata do not start workflows unless `includeOwn` is set.
-
-`await state.get()` returns this key's JSON, initially null. `await state.set(v)`
-persists up to 64 KiB immediately, even if the run then fails. Calls are not steps:
-a restarted run reads the current value. Write done markers after the work.
+reviews and metadata do not start the handler unless `includeOwn` is set.
 
 Save this script as `push-review.js`, with `meta` on its own first line:
 
@@ -28,18 +40,36 @@ const VERDICT = {
   type: 'object', required: ['verdict'],
   properties: { verdict: { type: 'string' } }
 }
-const { repo, number, head, draft } = args.event.body.changes[0].pr
-if (draft || (await state.get())?.head === head) return
-const result = await agent(
-  `Review ${repo}#${number} at ${head}. Fetch with git fetch origin pull/${number}/head.`,
-  { label: `review #${number}`, schema: VERDICT }
-)
-await post('parent', `#${number} at ${head.slice(0, 8)}: ${result.verdict}`, result)
-await state.set({ head })
+// The body runs at each box start: set up and warm caches.
+await run('git fetch -q origin')
+
+serve(async (event, key, state) => {
+  const { repo, number, head, draft } = event.body.changes[0].pr
+  if (draft || (await state.get())?.head === head) return
+  // Keys run concurrently in one box, so each review gets its own worktree.
+  const r = await agent(
+    `Review ${repo}#${number} at ${head}. Fetch with git fetch origin pull/${number}/head.`,
+    { label: `review #${number} ${head.slice(0, 8)}`, lane: key, schema: VERDICT, worktree: true }
+  )
+  await post('parent', `#${number}: ${r.output.verdict}`, r)
+  await state.set({ head })
+})
 ```
 
-An event run returning nothing ends silently. Return or `post()` what the parent
-must act on. A failed run reports. Workers write to GitHub only as the room's GitHub write settings allow.
+How it runs:
+- **Replay.** A handler runs in its own VM: the script runs again, its body's steps
+  return their stored results, and `serve` calls the handler. So top-level constants
+  are there, and body code must be deterministic, as in any script.
+- **Steps.** The body's steps belong to the box start: a new box runs the body for real.
+  A handler's steps belong to its event: if the box is lost mid-handler, the event is
+  handed over again and its finished steps return at once. Handlers must be safe to run again.
+  At most 3 hand-overs, then the event fails and the parent is told.
+- **Acknowledged events.** When a handler returns or throws, its event leaves the queue and its
+  steps leave the journal. The run keeps counts (handled, failed) and usage.
+- **Errors.** A handler that throws fails its event, tells the parent once per streak of failures
+  of that key, and the service goes on. A handler that returns nothing is silent; `post()` what the
+  parent must act on.
+- Each key is a lane; `status(text)` works as in any run.
 
 ## Register and try it
 
@@ -64,26 +94,24 @@ dyna subscription add --room ROOM --on github.pr.changed \
 With `prEvents` on, changes cover every
 open PR, including untracked ones. PRs already open when you turn it on fire at their next change, not at once.
 
-A hand-started `dyna workflow run push-review.js --args '{"event":...}'` uses
-temporary state starting at null, discarded when the run ends. Supply a full
-event envelope for the script's input; its ID and timestamp are optional:
-
-```sh
-dyna workflow run push-review.js --args '{"event":{"type":"github.pr.changed","body":{"changes":[
-  {"pr":{"repo":"OWNER/REPO","number":12,"head":"abc1234","draft":false},"kinds":["pushed"]}
-]}}}'
-```
-
 `dyna subscription fire ID --event JSON [--key KEY]` queues one event using real
 state. Its key overrides the resolved key literally. Without an event it queues
-`hook.due`, which a script can handle separately from PR changes.
+`hook.due`, which a handler can treat separately from PR changes.
 
-## Update the script or inspect state
+`serve()` needs a subscription. A hand-started `dyna workflow run` has no events, so it
+refuses `serve`.
 
-`dyna subscription update ID --workflow push-review.js --args JSON` keeps state
-and queued events. `--where`, `--key`, `--latest` and `--parent` replace settings;
-`--where ''` clears filters.
+## Control the service
 
-`dyna subscription state ID` lists stored keys. Add `--key KEY` to read one,
-or `--key KEY --value null` to reset it. Disabling holds starts; removing the
-subscription deletes its state.
+- `dyna workflow status RUN` and the run page show the state (starting, serving), the events
+  waiting and in a handler by key, and the totals handled and failed. The Runs list marks it "service".
+- `dyna subscription update ID --workflow push-review.js --args JSON` reloads the running service,
+  as `workflow reload` does, and keeps state and queued events. A handler in flight runs again with
+  the new script, and its finished steps still hit. `--where`, `--key`, `--latest` and `--parent`
+  replace settings; `--where ''` clears filters.
+- `dyna subscription disable ID` stops the run and events wait in the queue; `enable` starts it again.
+  `remove` ends it for good and deletes its state.
+- A run that ends in failure, or whose box is lost, starts again on its own after 1, 5, then 30
+  minutes; the parent hears once per streak. `enable` ends the wait.
+- `dyna subscription state ID` lists stored keys. Add `--key KEY` to read one,
+  or `--key KEY --value null` to reset it.

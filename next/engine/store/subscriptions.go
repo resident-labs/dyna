@@ -488,7 +488,7 @@ func (s *Store) DueSubscriptions(ctx context.Context, now time.Time) ([]Subscrip
 	}
 	var due []Subscription
 	for _, sub := range subs {
-		if !sub.Held && !sub.Running {
+		if !sub.Held && (!sub.Running || sub.Workflow != nil) { // a service always runs; its schedule only queues events
 			due = append(due, sub)
 		}
 	}
