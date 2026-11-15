@@ -35,3 +35,10 @@ func (s *Store) PreviousOwnerInput(ctx context.Context, viewer contract.SessionI
 	}
 	return time.UnixMilli(at), err
 }
+
+// TurnStartedAt is the original clock for a turn, including reconnects and steering dispatches.
+func (s *Store) TurnStartedAt(ctx context.Context, turn contract.TurnID) (time.Time, error) {
+	var at int64
+	err := s.Read().QueryRowContext(ctx, "SELECT started_at FROM turns WHERE id=?", turn).Scan(&at)
+	return time.UnixMilli(at).UTC(), err
+}

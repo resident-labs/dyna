@@ -407,6 +407,14 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 				return
 			}
 			replay = false
+			turnTime := started.Time
+			if turn != "" {
+				turnTime, err = s.store.TurnStartedAt(ctx, turn)
+				if err != nil {
+					reason, cause = streamFrameFailed, err
+					return
+				}
+			}
 			var start []contract.TurnInput
 			var steer []contract.TurnSteer
 			for _, delivery := range deliveries {
@@ -426,7 +434,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					reason, cause = streamDeliveryRenderFailed, err
 					return
 				}
-				frame, files, err := s.inputFrameAt(ctx, session.ID, event, started.Time, contract.Delivery{Surface: delivery.Surface, Reply: delivery.Reply, MeantFor: delivery.MeantFor, Why: delivery.Why})
+				frame, files, err := s.inputFrameAt(ctx, session.ID, event, turnTime, contract.Delivery{Surface: delivery.Surface, Reply: delivery.Reply, MeantFor: delivery.MeantFor, Why: delivery.Why})
 				if err != nil {
 					reason, cause = streamFrameFailed, err
 					return
@@ -471,12 +479,12 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 						return
 					}
 					sections = snapshot.Sections
-					clock, err := s.frameClock(ctx, started.Time, started.Time)
+					clock, err := s.frameClock(ctx, turnTime, turnTime)
 					if err != nil {
 						reason, cause = streamSnapshotFailed, err
 						return
 					}
-					sections = append(sections, contract.ContextSection{Key: "dyna_time", Text: "Turn started: " + started.Time.UTC().Format("2006-01-02") + " " + clock + "."})
+					sections = append(sections, contract.ContextSection{Key: "dyna_time", Text: "Turn started: " + turnTime.UTC().Format("2006-01-02") + " " + clock + "."})
 					sections, err = s.store.TurnSections(ctx, turn, sections)
 					if err != nil {
 						reason, cause = streamSectionsSaveFailed, err

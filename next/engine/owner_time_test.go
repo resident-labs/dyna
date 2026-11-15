@@ -24,6 +24,10 @@ func TestInputFrameTimes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			event := contract.Event{Time: at, Room: room, From: tc.from, Body: tc.body}
+			delivery := delivery
+			if tc.name == "notice" {
+				delivery.Surface = contract.SurfaceEngine
+			}
 			frame, _, err := s.inputFrameAt(ctx, worker, event, at, delivery)
 			if err != nil || !strings.HasPrefix(frame, "[Dyna] 03:52 UTC. ") || strings.Contains(frame, "previous message") {
 				t.Fatalf("%s %v", frame, err)
@@ -96,4 +100,16 @@ func TestOwnerGapAcrossSurfacesAndBatchedInputs(t *testing.T) {
 		}
 		t.Log(frame)
 	}
+	sample := post("time-owner-sample", at.Add(102*time.Minute), contract.PostCreated{Text: "back"}, owner, contract.SurfaceDM)
+	zone := "America/Chicago"
+	if _, e := s.OwnerTimezone(ctx, owner, contract.OwnerTimezoneRequest{Zone: &zone}); e != nil {
+		t.Fatal(e)
+	}
+	delivery.Surface = contract.SurfaceDM
+	frame, _, err := s.inputFrameAt(ctx, worker, sample, sample.Time, delivery)
+	if err != nil || !strings.Contains(frame, "The owner's previous message was 1 h 32 m ago.") {
+		t.Fatalf("%s %v", frame, err)
+	}
+	t.Log(frame)
+
 }
