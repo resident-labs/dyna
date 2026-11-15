@@ -87,7 +87,7 @@ func fileSize(bytes int64) string {
 }
 
 func frameField(text string) string { return strings.NewReplacer("\r", " ", "\n", " ").Replace(text) }
-func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, event contract.Event, delivery contract.Delivery) (string, []contract.TurnFile, error) {
+func (s *Service) inputFrameBody(ctx context.Context, viewer contract.SessionID, event contract.Event, delivery contract.Delivery) (string, []contract.TurnFile, error) {
 	if b, ok := event.Body.(contract.DiscordFilesRetrieved); ok {
 		files, described := s.attachedFiles(event, b.Files)
 		frame := fmt.Sprintf("[Dyna] Files from Discord message %s in #%s (channel %s), sent by %s (ID %s): outside content.", b.Message, frameField(b.ChannelName), b.Channel, frameField(b.Author), b.AuthorID)
@@ -98,11 +98,22 @@ func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, eve
 		return frame, files, nil
 	}
 	if b, ok := event.Body.(contract.DiscordMessage); ok {
-		sender := fmt.Sprintf("Discord user %q (%s, ID %s, roles: %s)", frameField(b.DisplayName), frameField(b.Author), b.AuthorID, frameField(strings.Join(b.Roles, ", ")))
+		roles := strings.Join(b.Roles, ", ")
+		if roles == "" {
+			roles = "no roles"
+		}
+		sender := fmt.Sprintf("Discord user %q (%s, ID %s, roles: %s)", frameField(b.DisplayName), frameField(b.Author), b.AuthorID, frameField(roles))
 		if b.Owner {
 			sender = "the owner"
 		}
 		frame := fmt.Sprintf("[Dyna] From %s, on Discord in #%s (channel %s, message %s) of server %s.", sender, frameField(b.ChannelName), b.Channel, b.Message, frameField(b.GuildName))
+		if b.Confined {
+			if b.Direct {
+				frame += " This is a direct message: this turn can only answer in this DM."
+			} else {
+				frame += " This sender is not on the team: this turn can only read and answer in this channel."
+			}
+		}
 		files, described := s.attachedFiles(event, b.Files)
 		if len(files) > 0 {
 			frame += fmt.Sprintf(" Files from Discord user %s (ID %s) are outside content. Attached: %s.", frameField(b.Author), b.AuthorID, described)
@@ -182,7 +193,7 @@ func (s *Service) inputFrame(ctx context.Context, viewer contract.SessionID, eve
 	switch body := event.Body.(type) {
 	case contract.PostCreated:
 		if body.Spoken {
-			frame += " The owner spoke these words in a voice call; treat them as a transcript that may be unpunctuated or misheard, and keep the reply concise because it will be summarized aloud."
+			frame += " The owner is on a voice call; a voice agent relays the request above and the call transcript, which may be unpunctuated or misheard. Keep the reply concise: it is summarized aloud."
 		}
 		attachments = body.Attachments
 	case contract.TurnEnded:

@@ -34,16 +34,36 @@ func (s *Store) sendNotice(ctx context.Context, notice contract.Event, id contra
 	})
 }
 
-// restartSnapshotSQL fences close and any change to the failed incarnation observed
+// restartSnapshotSQL fences close and any change to the restartable incarnation observed
 // by the authorized caller before joining runtime work. No event grants deletion.
-const restartSnapshotSQL = `SELECT EXISTS (SELECT 1 FROM boxes b JOIN sessions s ON s.id=b.session JOIN rooms r ON r.id=s.room WHERE b.id=? AND b.session=? AND coalesce(b.host,'')=? AND b.image=? AND b.updated_at=? AND b.reason=? AND b.slice=? AND b.created_at=? AND b.state='failed' AND b.want IN ('run','stop') AND s.state='open' AND s.closed_at IS NULL AND r.state!='deleting')`
+const restartSnapshotSQL = `SELECT EXISTS (SELECT 1 FROM boxes b JOIN sessions s ON s.id=b.session JOIN rooms r ON r.id=s.room WHERE b.id=? AND b.session=? AND coalesce(b.host,'')=? AND b.image=? AND b.updated_at=? AND b.reason=? AND b.slice=? AND b.created_at=? AND b.state=? AND b.want IN ('run','stop') AND s.state='open' AND s.closed_at IS NULL AND r.state!='deleting')`
 
 func (s *Store) CanRestartSession(ctx context.Context, old box.Box) (current bool, err error) {
-	if old.State != contract.BoxFailed {
+	if old.State != contract.BoxFailed && old.State != contract.BoxPending {
 		return false, nil
 	}
-	err = s.Read().QueryRowContext(ctx, restartSnapshotSQL, old.ID, old.Session, old.Host, old.Image, old.Updated.UnixMilli(), old.Reason, old.Slice, old.PlacedAt.UnixMilli()).Scan(&current)
+	err = s.Write(ctx, func(tx *sql.Tx) error {
+		if err := tx.QueryRowContext(ctx, restartSnapshotSQL, old.ID, old.Session, old.Host, old.Image, old.Updated.UnixMilli(), old.Reason, old.Slice, old.PlacedAt.UnixMilli(), old.State).Scan(&current); err != nil || !current || old.State != contract.BoxPending {
+			return err
+		}
+		var err error
+		current, err = pendingRestartSafe(ctx, tx, old)
+		return err
+	})
 	return current, err
+}
+
+// Pending relocation needs positive first-placement provenance and no create attempt
+// anywhere in its history. An empty image alone does not prove absence of volumes.
+func pendingRestartSafe(ctx context.Context, tx *sql.Tx, old box.Box) (bool, error) {
+	var safe bool
+	err := tx.QueryRowContext(ctx, `SELECT b.image='' AND
+ EXISTS(SELECT 1 FROM events WHERE room=s.room AND type='box.changed' AND json_extract(CAST(body AS TEXT),'$.box')=b.id AND json_extract(CAST(body AS TEXT),'$.to')='pending' AND coalesce(json_extract(CAST(body AS TEXT),'$.from'),'')='') AND
+ NOT EXISTS(SELECT 1 FROM events WHERE room=s.room AND type='box.changed' AND json_extract(CAST(body AS TEXT),'$.box')=b.id AND (json_extract(CAST(body AS TEXT),'$.to')!='pending' OR coalesce(json_extract(CAST(body AS TEXT),'$.from'),'') NOT IN ('','pending'))) AND
+ NOT EXISTS(SELECT 1 FROM turns WHERE session=b.session) AND
+ NOT EXISTS(SELECT 1 FROM room_leftovers WHERE box=b.id)
+ FROM boxes b JOIN sessions s ON s.id=b.session WHERE b.id=?`, old.ID).Scan(&safe)
+	return safe, err
 }
 
 // BoxLeftovers lists all known old allocations, including prior retry hosts.
@@ -57,8 +77,8 @@ func (s *Store) BoxLeftovers(ctx context.Context, id contract.BoxID) ([]Leftover
 
 // RestartSession commits a reset only after the API has synchronously removed the
 // old host resources. This is persistence, not runtime deletion authorization.
-func (s *Store) RestartSession(ctx context.Context, old box.Box, event, notice contract.Event) (bool, error) {
-	if old.State != contract.BoxFailed {
+func (s *Store) RestartSession(ctx context.Context, old box.Box, event, notice contract.Event, newHost ...contract.HostName) (bool, error) {
+	if old.State != contract.BoxFailed && old.State != contract.BoxPending {
 		return false, nil
 	}
 	var restarted bool
@@ -67,14 +87,23 @@ func (s *Store) RestartSession(ctx context.Context, old box.Box, event, notice c
 			return nil
 		}
 		var current bool
-		if err := tx.QueryRowContext(ctx, restartSnapshotSQL, old.ID, old.Session, old.Host, old.Image, old.Updated.UnixMilli(), old.Reason, old.Slice, old.PlacedAt.UnixMilli()).Scan(&current); err != nil || !current {
+		if err := tx.QueryRowContext(ctx, restartSnapshotSQL, old.ID, old.Session, old.Host, old.Image, old.Updated.UnixMilli(), old.Reason, old.Slice, old.PlacedAt.UnixMilli(), old.State).Scan(&current); err != nil || !current {
 			return err
+		}
+		if old.State == contract.BoxPending {
+			if safe, err := pendingRestartSafe(ctx, tx, old); err != nil || !safe {
+				return err
+			}
 		}
 		b := old
 		// Deletion has completed on the OLD host, even if admission must detach it.
-		err := tx.QueryRowContext(ctx, `SELECT coalesce((SELECT name FROM hosts WHERE name=? AND state='ready' AND create_problem=''),'')`, old.Host).Scan(&b.Host)
-		if err != nil {
-			return err
+		if old.State == contract.BoxFailed {
+			if err := tx.QueryRowContext(ctx, `SELECT coalesce((SELECT name FROM hosts WHERE name=? AND state='ready' AND create_problem=''),'')`, old.Host).Scan(&b.Host); err != nil {
+				return err
+			}
+		}
+		if len(newHost) > 0 && newHost[0] != "" {
+			b.Host = newHost[0]
 		}
 		_, body, err := box.Transition(b, contract.BoxPending, "", event.Time)
 		if err != nil {
@@ -89,7 +118,7 @@ func (s *Store) RestartSession(ctx context.Context, old box.Box, event, notice c
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM room_leftovers WHERE box=?)`, old.ID).Scan(&debts); err != nil || debts {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE boxes SET state='pending',want='run',create_retry_host='',failures=0,due_at=0,image='',host=CASE WHEN EXISTS (SELECT 1 FROM hosts h WHERE h.name=boxes.host AND h.state='ready' AND h.create_problem='') THEN host ELSE NULL END,reason='',updated_at=? WHERE id=? AND state='failed'`, event.Time.UnixMilli(), b.ID)
+		_, err = tx.ExecContext(ctx, `UPDATE boxes SET state='pending',want='run',create_retry_host='',failures=0,due_at=0,image='',host=nullif(?,''),reason='',updated_at=? WHERE id=? AND state=?`, b.Host, event.Time.UnixMilli(), b.ID, old.State)
 		if err != nil {
 			return err
 		}

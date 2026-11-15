@@ -320,6 +320,7 @@ type Review struct {
 
 // Observed is what a feed cannot show of one PR. An empty Merge means GitHub has not worked it out.
 type Observed struct {
+	OwnReview    bool
 	Number       int
 	State        contract.PrState
 	Head         string
@@ -333,7 +334,7 @@ type Observed struct {
 
 // pullFields is everything a read asks per PR.
 const pullFields = `number state merged headRefOid headRepository{nameWithOwner} mergeable mergeStateStatus reviewDecision
-latestOpinionatedReviews(first:20,writersOnly:true){nodes{state}}
+latestOpinionatedReviews(first:20,writersOnly:true){nodes{state author{login}}}
 commits(last:1){nodes{commit{oid ` + suiteFields + ` statusCheckRollup{state contexts(first:50){totalCount pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion} ...on StatusContext{context state}}}}}}}
 reviews(last:20){nodes{fullDatabaseId state body url author{login} submittedAt lastEditedAt}}
 comments(last:20){nodes{body author{login} createdAt lastEditedAt}}`
@@ -359,13 +360,18 @@ type gqlRollup struct {
 			Context    string `json:"context"`
 			State      string `json:"state"`
 			TargetURL  string `json:"targetUrl"`
+			CheckSuite struct {
+				WorkflowRun *struct {
+					Event string `json:"event"`
+				} `json:"workflowRun"`
+			} `json:"checkSuite"`
 		} `json:"nodes"`
 	} `json:"contexts"`
 }
 
 // suiteFields includes the run count without listing runs: a needs-gated run may
 // not exist yet even when every currently visible context has finished.
-const suiteFields = "checkSuites(first:100){totalCount pageInfo{hasNextPage} nodes{status conclusion app{slug} createdAt checkRuns{totalCount} workflowRun{workflow{name}}}}"
+const suiteFields = "checkSuites(first:100){totalCount pageInfo{hasNextPage} nodes{status conclusion app{slug} createdAt checkRuns{totalCount} workflowRun{event workflow{name}}}}"
 
 type gqlSuites struct {
 	TotalCount int `json:"totalCount"`
@@ -383,6 +389,7 @@ type gqlSuites struct {
 			TotalCount int `json:"totalCount"`
 		} `json:"checkRuns"`
 		WorkflowRun *struct {
+			Event    string `json:"event"`
 			Workflow struct {
 				Name string `json:"name"`
 			} `json:"workflow"`
@@ -398,13 +405,12 @@ type gqlSuites struct {
 // (a startup failure or a broken workflow file) leaves only skipped contexts or
 // none, and its suite's conclusion is the only sign of it.
 func summarizeCI(rollup *gqlRollup, suites gqlSuites, rule ciRule, now time.Time) (contract.PrCI, []string) {
-	if suites.PageInfo.HasNextPage || suites.TotalCount > len(suites.Nodes) {
-		return contract.PrCIPending, nil
-	}
+	pending := suites.PageInfo.HasNextPage || suites.TotalCount > len(suites.Nodes)
 	var failedSuites []string
 	for _, suite := range suites.Nodes {
 		if suite.Status != "COMPLETED" && !(suite.CheckRuns.TotalCount == 0 && !suite.CreatedAt.IsZero() && now.Sub(suite.CreatedAt) > 10*time.Minute) {
-			return contract.PrCIPending, nil
+			pending = true
+			continue
 		}
 		switch suite.Conclusion {
 		case "FAILURE", "STARTUP_FAILURE", "TIMED_OUT", "ACTION_REQUIRED":
@@ -417,18 +423,23 @@ func summarizeCI(rollup *gqlRollup, suites gqlSuites, rule ciRule, now time.Time
 	}
 	ci, failed := summarizeContexts(rollup, rule)
 	// A failing context already names the job; a failed suite adds a name only when no context shows the failure.
-	if ci != contract.PrCIFailure && len(failedSuites) > 0 {
+	if (ci != contract.PrCIFailure || len(failed) == 0) && len(failedSuites) > 0 {
 		return contract.PrCIFailure, failedSuites
+	}
+	// An empty PR rollup can report aggregate failure without a terminal failed
+	// context. Preserve that fallback only after all suites have finished.
+	if pending && (ci != contract.PrCIFailure || len(failed) == 0) {
+		return contract.PrCIPending, nil
 	}
 	return ci, failed
 }
 
 func summarizeContexts(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string) {
-	if rollup != nil && (rollup.Contexts.PageInfo.HasNextPage || rollup.Contexts.TotalCount > len(rollup.Contexts.Nodes)) {
+	// A visible failure is definitive even when other contexts are unread or pending.
+	pending := rollup != nil && (rollup.Contexts.PageInfo.HasNextPage || rollup.Contexts.TotalCount > len(rollup.Contexts.Nodes))
+	if pending && len(rollup.Contexts.Nodes) == 0 {
 		return contract.PrCIPending, nil
 	}
-	// A rollup settles only when every context is terminal. Cancellation without
-	// failure is cancelled, not success; an empty success means no checks ran.
 	if rollup == nil || rollup.State == "SUCCESS" && len(rollup.Contexts.Nodes) == 0 {
 		return contract.PrCINone, nil
 	}
@@ -442,7 +453,7 @@ func summarizeContexts(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string)
 			}
 			switch {
 			case check.Type == "StatusContext" && (check.State == "PENDING" || check.State == "EXPECTED"), check.Type != "StatusContext" && check.Status != "COMPLETED":
-				return contract.PrCIPending, nil
+				pending = true
 			case check.Type == "StatusContext" && check.State == "SUCCESS", check.Conclusion == "SUCCESS" || check.Conclusion == "SKIPPED" || check.Conclusion == "NEUTRAL":
 			case check.Conclusion == "CANCELLED":
 				cancelled = append(cancelled, name)
@@ -451,12 +462,15 @@ func summarizeContexts(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string)
 				failed = append(failed, name)
 			}
 		}
+		if ci != contract.PrCIFailure && pending {
+			return contract.PrCIPending, nil
+		}
 		if ci != contract.PrCIFailure && len(cancelled) > 0 {
 			ci, failed = contract.PrCICancelled, cancelled
 		}
 		return ci, failed
 	}
-	if rule == ciMainHead {
+	if pending || rule == ciMainHead {
 		return contract.PrCIPending, nil
 	}
 	ci := contract.PrCIPending
@@ -468,7 +482,7 @@ func summarizeContexts(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string)
 }
 
 // ciRule preserves the PR/main distinction for empty rollups. summarizeCI first
-// holds incomplete suites and truncated context lists pending.
+// holds incomplete suites and truncated context lists pending unless a failure is visible.
 type ciRule int
 
 const (
@@ -491,7 +505,8 @@ type gqlPull struct {
 	ReviewDecision           string `json:"reviewDecision"`
 	LatestOpinionatedReviews struct {
 		Nodes []struct {
-			State string `json:"state"`
+			Author *gqlAuthor `json:"author"`
+			State  string     `json:"state"`
 		} `json:"nodes"`
 	} `json:"latestOpinionatedReviews"`
 	Commits struct {
@@ -672,6 +687,14 @@ func (p gqlPull) observed(viewer string, now time.Time) Observed {
 			}
 		}
 	}
+	matching, outside := false, false
+	for _, review := range p.LatestOpinionatedReviews.Nodes {
+		if (seen.Review == contract.PrApproved && review.State == "APPROVED") || (seen.Review == contract.PrChangesRequested && review.State == "CHANGES_REQUESTED") {
+			matching = true
+			outside = outside || login(review.Author) != viewer
+		}
+	}
+	seen.OwnReview = matching && !outside
 	// The latest verdict at the current head from the viewer's account counts as a review, whether it is an issue comment or the
 	// body of a review (GitHub refuses the author's own approval, so a COMMENTED review carries it). A statement's time is its
 	// last edit, as its current body is what counts. A review's own commit is not compared: the verdict names its sha. A request
@@ -711,6 +734,7 @@ func (p gqlPull) observed(viewer string, now time.Time) Observed {
 	}
 	if seen.Review != contract.PrChangesRequested && verdict != "" {
 		seen.Review = verdict
+		seen.OwnReview = true
 	}
 	// A rollup with no check in it says nothing about CI: GitHub reports success for it before any check has run. A rollup
 	// of another commit than the head is an earlier push's, and the head's own checks have not reported yet.
@@ -754,7 +778,7 @@ func (c *Client) CommitsCI(ctx context.Context, repo contract.RepoName, shas []s
 		fields += fmt.Sprintf(" h%d:object(oid:$h%d){...ci}", i, i)
 	}
 	query := "query($owner:String!,$name:String!" + declared + "){viewer{login} repository(owner:$owner,name:$name){" + fields + "}}" +
-		fmt.Sprintf(" fragment ci on Commit{"+suiteFields+" statusCheckRollup{state contexts(first:%d){totalCount pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion detailsUrl} ...on StatusContext{context state targetUrl}}}}}", ciRunsRead)
+		fmt.Sprintf(" fragment ci on Commit{"+suiteFields+" statusCheckRollup{state contexts(first:%d){totalCount pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion detailsUrl checkSuite{workflowRun{event}}} ...on StatusContext{context state targetUrl}}}}}", ciRunsRead)
 	repository, err := c.graphQL(ctx, query, variables)
 	if err != nil {
 		return nil, err
@@ -768,6 +792,29 @@ func (c *Client) CommitsCI(ctx context.Context, repo contract.RepoName, shas []s
 		if raw := repository[fmt.Sprintf("h%d", i)]; raw != nil && string(raw) != "null" {
 			if err := json.Unmarshal(raw, &commit); err != nil {
 				return nil, fmt.Errorf("GitHub answer: %w", err)
+			}
+		}
+		// A run started by hand or through the API (workflow_dispatch, repository_dispatch) is filed under the head of the ref
+		// it ran on, so one gating a PR would otherwise read as main's own result. Push, schedule, workflow_run and other apps stay.
+		suites := commit.CheckSuites.Nodes[:0]
+		for _, suite := range commit.CheckSuites.Nodes {
+			if suite.WorkflowRun == nil || !dispatched(suite.WorkflowRun.Event) {
+				suites = append(suites, suite)
+			}
+		}
+		commit.CheckSuites.TotalCount -= len(commit.CheckSuites.Nodes) - len(suites)
+		commit.CheckSuites.Nodes = suites
+		if rollup := commit.StatusCheckRollup; rollup != nil {
+			kept := rollup.Contexts.Nodes[:0]
+			for _, check := range rollup.Contexts.Nodes {
+				if run := check.CheckSuite.WorkflowRun; run == nil || !dispatched(run.Event) {
+					kept = append(kept, check)
+				}
+			}
+			rollup.Contexts.TotalCount -= len(rollup.Contexts.Nodes) - len(kept)
+			rollup.Contexts.Nodes = kept
+			if len(kept) == 0 && !rollup.Contexts.PageInfo.HasNextPage {
+				commit.StatusCheckRollup = nil
 			}
 		}
 		result, _ := summarizeCI(commit.StatusCheckRollup, commit.CheckSuites, ciMainHead, c.Now())
@@ -785,4 +832,9 @@ func (c *Client) CommitsCI(ctx context.Context, repo contract.RepoName, shas []s
 		reads[sha] = read
 	}
 	return reads, nil
+}
+
+// dispatched reports a workflow run started by hand or through the API rather than by what happened on the branch.
+func dispatched(event string) bool {
+	return event == "workflow_dispatch" || event == "repository_dispatch"
 }

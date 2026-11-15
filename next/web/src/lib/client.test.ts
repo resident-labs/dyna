@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { APIError, blockedBy, call } from "./client.ts";
+import { renewConnect } from "./connect-watch.ts";
+import { recoverEventStream } from "./stream.ts";
+import { connectVersion } from "./connect-watch.ts";
+import { APIError, blockedBy, call, upload } from "./client.ts";
 
 test("turns a non-JSON error answer into a typed error", async () => {
   const original = globalThis.fetch;
@@ -34,5 +37,169 @@ test("identical reads in flight at once share one request, each with its own cop
     assert.equal(requests, 4);
     await Promise.all([call("session.stop", { session: "s" }), call("session.stop", { session: "s" })]);
     assert.equal(requests, 6);
+  } finally { globalThis.fetch = original; }
+});
+
+test("Connect refusals map to sign-in states", () => {
+  assert.equal(blockedBy(new APIError({ code: "connect-ended", message: "ended" })), "signed-out");
+  assert.equal(blockedBy(new APIError({ code: "connect-unavailable", message: "offline" })), "sign-in-unavailable");
+});
+
+test("stale API access renews and retries; invalid renewal proof signs out", async () => {
+  const original = globalThis.fetch;
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+  // Minimal IndexedDB boundary: the browser has already stored its device key.
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: { open() {
+    const request: any = {};
+    request.result = { transaction() {
+      const transaction: any = { objectStore: () => ({ get: () => ({ result: pair }) }) };
+      setTimeout(() => transaction.oncomplete(), 0);
+      return transaction;
+    } };
+    setTimeout(() => request.onsuccess(), 0);
+    return request;
+  } } });
+  Object.defineProperty(globalThis, "location", { configurable: true, value: { origin: "https://machine.example" } });
+  let status = 200, calls = 0, renewals = 0;
+  globalThis.fetch = async path => {
+    if (path === "/api/connect/renew") { renewals++; return Response.json({}, { status }); }
+    calls++;
+    return calls % 2 === 1 ? Response.json({ code: "renew", message: "renew" }, { status: 401 }) : Response.json({ rooms: [] });
+  };
+  try {
+    await call("room.list", {});
+    assert.equal(calls, 2);
+    assert.equal(renewals, 1);
+    const [a, b] = await Promise.all([renewConnect(), renewConnect()]);
+    assert.equal(a, b);
+    assert.equal(renewals, 2);
+    status = 403;
+    await assert.rejects(call("room.list", {}), error => blockedBy(error) === "signed-out");
+  } finally { globalThis.fetch = original; }
+});
+
+test("uploads and event stream probes recover stale access", async () => {
+  const original = globalThis.fetch;
+  let uploads = 0, renewals = 0;
+  globalThis.fetch = async path => {
+    if (path === "/api/connect/renew") { renewals++; return Response.json({}); }
+    if (String(path).startsWith("/v1/files")) {
+      return ++uploads === 1 ? Response.json({ code: "renew" }, { status: 401 }) : Response.json({ id: "file" });
+    }
+    return Response.json({ code: "renew" }, { status: 401 });
+  };
+  try {
+    await upload(new File(["hello"], "hello.txt"), "room");
+    assert.equal(uploads, 2);
+    assert.equal(renewals, 1);
+    assert.equal(await recoverEventStream("/v1/events", connectVersion()), "retry");
+    assert.equal(renewals, 2);
+  } finally { globalThis.fetch = original; }
+});
+
+test("a delayed stale refusal retries using the cookie another call renewed", async () => {
+  const original = globalThis.fetch;
+  let release!: () => void;
+  const delayed = new Promise<void>(resolve => { release = resolve; });
+  let started!: () => void;
+  const pending = new Promise<void>(resolve => { started = resolve; });
+  let rooms = 0, profiles = 0, renewals = 0;
+  globalThis.fetch = async path => {
+    if (path === "/api/connect/renew") { renewals++; return Response.json({}); }
+    if (path === "/v1/profile.list" && ++profiles === 1) {
+      started(); await delayed;
+      return Response.json({ code: "renew" }, { status: 401 });
+    }
+    if (path === "/v1/room.list" && ++rooms === 1) return Response.json({ code: "renew" }, { status: 401 });
+    return Response.json({});
+  };
+  try {
+    const slow = call("profile.list", {});
+    await pending;
+    await call("room.list", {});
+    release(); await slow;
+    assert.equal(renewals, 1);
+    assert.equal(profiles, 2);
+  } finally { globalThis.fetch = original; }
+});
+
+test("background renewal reports outages, waiting and recovery distinctly", async () => {
+  const original = globalThis.fetch;
+  const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const target = new EventTarget();
+  Object.defineProperty(globalThis, "window", { configurable: true, value: target });
+  const states: string[] = [];
+  target.addEventListener("connect-renewal", event => states.push((event as CustomEvent<string>).detail));
+  try {
+    for (const status of [503, 429, 200, 403]) {
+      globalThis.fetch = async () => Response.json({}, { status });
+      await renewConnect();
+    }
+    globalThis.fetch = async () => { throw new TypeError("offline"); };
+    await renewConnect();
+    assert.deepEqual(states, ["unavailable", "wait", "ready", "ended", "unavailable"]);
+    assert.equal(blockedBy(new APIError({ code: "renew-wait", message: "wait" })), "renew-wait");
+  } finally {
+    globalThis.fetch = original;
+    if (windowDescriptor) Object.defineProperty(globalThis, "window", windowDescriptor);
+    else Reflect.deleteProperty(globalThis, "window");
+  }
+});
+
+test("a stalled stream probe times out so reconnect can proceed", async () => {
+  const original = globalThis.fetch;
+  let aborted = false;
+  globalThis.fetch = async (_url, options) => new Promise((_resolve, reject) => {
+    options?.signal?.addEventListener("abort", () => { aborted = true; reject(new Error("aborted")); }, { once: true });
+  });
+  try {
+    assert.equal(await recoverEventStream("/v1/events", connectVersion(), undefined, 5), "unavailable");
+    assert.equal(aborted, true);
+  } finally { globalThis.fetch = original; }
+});
+
+test("background renewal failure leaves working API access usable without blocking the page", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async path => path === "/api/connect/renew" ? Response.json({}, { status: 503 }) : Response.json({ rooms: [] });
+  try {
+    await renewConnect();
+    assert.deepEqual(await call("room.list", {}), { rooms: [] });
+    // The app only enters the outage block from a failed real request. Its
+    // background event listener may sign out or clear an existing outage.
+    const { readFileSync } = await import("node:fs");
+    const app = readFileSync(new URL("../App.svelte", import.meta.url), "utf8");
+    const listener = app.slice(app.indexOf("const renewal = (event:"), app.indexOf('window.addEventListener("connect-renewal"'));
+    assert.doesNotMatch(listener, /blocked\s*=\s*"sign-in-unavailable"/);
+    assert.match(listener, /state === "ended"/);
+  } finally { globalThis.fetch = original; }
+});
+
+test("probe timeout and disposal stop waiting for a hung shared renewal without cancelling it", async () => {
+  const original = globalThis.fetch;
+  let renewalSignal: AbortSignal | undefined;
+  let began!: () => void;
+  const started = new Promise<void>(resolve => { began = resolve; });
+  globalThis.fetch = async (url, options) => {
+    if (url !== "/api/connect/renew") return Response.json({ code: "renew" }, { status: 401 });
+    renewalSignal = options?.signal ?? undefined;
+    began();
+    return new Promise((_resolve, reject) => renewalSignal!.addEventListener("abort", () => reject(new Error("renewal timed out")), { once: true }));
+  };
+  try {
+    const probe = recoverEventStream("/v1/events", connectVersion(), undefined, 25);
+    await started;
+    const shared = renewConnect();
+    assert.equal(await probe, "unavailable");
+    assert.equal(renewalSignal?.aborted, false);
+    const controller = new AbortController();
+    const disposed = recoverEventStream("/v1/events", connectVersion(), controller.signal);
+    controller.abort();
+    assert.equal(await disposed, "unavailable");
+    assert.equal(renewalSignal?.aborted, false);
+    // The renewal has its own 10-second bound, independent of the probe.
+    assert.equal(await shared, undefined);
+    assert.equal(renewalSignal?.aborted, true);
+    globalThis.fetch = async () => Response.json({});
+    assert.equal((await renewConnect())?.ok, true);
   } finally { globalThis.fetch = original; }
 });

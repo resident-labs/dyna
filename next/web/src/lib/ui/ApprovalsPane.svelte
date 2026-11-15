@@ -96,6 +96,10 @@
       <div class="stack">{#each writeGroups as { group, label, note } (group)}
         <label class="set"><span class="name">{label}</span><input type="checkbox" role="switch" checked={writeOn(room, group)} disabled={busy} aria-label={writeLabel(group, room)}
           onchange={event => { const box = event.currentTarget; void change(room!, writeRequest(room!, group, box.checked)).then(done => { if (!done) box.checked = !box.checked; }); }} /><span class="help">{note}</span></label>{/each}</div></div>
+    <div class="section"><h3 class="small">Git signing</h3>
+      <p class="small muted">Off until you turn it on. This room's boxes then sign their commits and tags as you. Add the key from <code>dyna signing key</code> on GitHub once, as a signing key. Boxes pick up a change at their next start.</p>
+      <div class="stack"><label class="set"><span class="name">Sign commits and tags</span><input type="checkbox" role="switch" checked={!!room.gitSigning} disabled={busy} aria-label={`Git signing in ${room.name}`}
+        onchange={event => { const box = event.currentTarget; void change(room!, { room: room!.id, gitSigning: box.checked }).then(done => { if (!done) box.checked = !box.checked; }); }} /><span class="help">Commits show as Verified on GitHub.</span></label></div></div>
     {#if problem?.id === room.id}<p class="problem" role="alert">{problem.text}</p>{/if}
   {:else}<p class="muted">That room is gone, or the link is wrong.</p>
   {/if}

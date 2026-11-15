@@ -37,12 +37,12 @@ var jwmrc []byte
 
 // desktopArgs make TigerVNC's Xvnc both the display and its VNC server, so it knows exactly what changed. It serves VNC
 // on a Unix socket only, with no password: the socket is inside the box, and the engine checks the owner. A box has no
-// GPU, and without GLX Xvnc loads no Mesa: about 17 MiB instead of 60, and Chromium draws in software either way. The
+// GPU; GLX stays enabled for software-rendered desktop apps. The
 // view takes continuous updates, so the frame cap, not the round trip, sets its rate; 60 costs Xvnc about 9% of a core
 // under motion where 30 costs 7%.
 func desktopArgs(socket string) []string {
 	return []string{display, "-geometry", Size, "-depth", "24", "-rfbunixpath", socket, "-rfbport", "-1", "-SecurityTypes", "None",
-		"-AlwaysShared", "-AcceptSetDesktopSize=0", "-FrameRate", "60", "-extension", "GLX"}
+		"-AlwaysShared", "-AcceptSetDesktopSize=0", "-FrameRate", "60"}
 }
 
 // Profile is Chromium's profile, in the box's volume, so it lasts across restarts.
@@ -230,6 +230,12 @@ func (p *Process) Start(ctx context.Context) (string, error) {
 // was killed leaves its lock and sockets, and the lock's process ID may belong to another process after a restart, so
 // they go first: only this process runs display :1 in the box.
 func (p *Process) startDisplay(ctx context.Context) error {
+	if err := os.MkdirAll(runtimeDir(p.socket), 0700); err != nil {
+		return err
+	}
+	if err := os.Chmod(runtimeDir(p.socket), 0700); err != nil {
+		return err
+	}
 	for _, stale := range []string{p.socket, filepath.Join(p.tmp, ".X1-lock"), filepath.Join(p.tmp, ".X11-unix", "X1")} {
 		if err := os.Remove(stale); err != nil && !os.IsNotExist(err) {
 			return err
@@ -317,7 +323,7 @@ func (p *Process) Stop() {
 func (p *Process) spawn(ctx context.Context, out io.Writer, name string, args ...string) (*program, error) {
 	command := func() *exec.Cmd {
 		cmd := exec.CommandContext(ctx, name, args...)
-		cmd.Env = append(os.Environ(), "DISPLAY="+display)
+		cmd.Env = desktopEnv(p.socket)
 		cmd.Stdout, cmd.Stderr = out, out
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
@@ -454,7 +460,7 @@ func (p *Process) Handler(ctx context.Context) http.Handler {
 		switch r.URL.Path {
 		case "/computer/stop":
 			p.Stop()
-		case "/computer", "/computer/launch":
+		case "/computer", "/computer/launch", "/computer/check":
 			var req StartRequest
 			if r.URL.Path == "/computer/launch" {
 				if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&req); err != nil || req.Launch == "" {
@@ -464,6 +470,9 @@ func (p *Process) Handler(ctx context.Context) http.Handler {
 			}
 			started.URL = URL
 			started.Exit, err = p.Start(ctx)
+			if err == nil && r.URL.Path == "/computer/check" {
+				started.Log = p.Check(r.Context())
+			}
 			if err == nil && req.Launch != "" {
 				started.Log, err = p.Launch(ctx, req.Launch)
 			}

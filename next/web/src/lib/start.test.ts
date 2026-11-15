@@ -17,7 +17,7 @@ test("startup step is typed, appears after a minute and resets its elapsed wait"
 });
 
 test("degradation stays separate from reachability on host views", () => {
-  const host: HostSummary = { name: "arch", reachable: true, health: "degraded", shared: [], boxes: 1, cpus: 8, memBytes: 16, cpuUsed: 1, memUsed: 2, diskBytes: 100, diskUsed: 20, diskLow: false, history: [] };
+  const host: HostSummary = { state: "degraded", cpuFree: 7, memFree: 14, diskFree: 80, name: "arch", reachable: true, health: "degraded", shared: [], boxes: 1, cpus: 8, memBytes: 16, cpuUsed: 1, memUsed: 2, diskBytes: 100, diskUsed: 20, diskLow: false, history: [] };
   assert.deepEqual(hostState(host), { tone: "warning", label: "Degraded" });
   assert.deepEqual(hostState({ ...host, reachable: false }), { tone: "error", label: "Unreachable" });
   const merged = machines([{ ...host, name: "control-plane", health: "healthy", cpus: 8, memBytes: 16 }, { ...host, engineHost: true }]);

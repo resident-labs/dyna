@@ -19,6 +19,7 @@ import (
 	"github.com/resident-labs/dyna/engine/credential"
 	"github.com/resident-labs/dyna/engine/discord"
 	"github.com/resident-labs/dyna/engine/githubaccount"
+	"github.com/resident-labs/dyna/engine/gitsign"
 	"github.com/resident-labs/dyna/engine/images"
 	"github.com/resident-labs/dyna/engine/lifecycle"
 	"github.com/resident-labs/dyna/engine/live"
@@ -63,6 +64,10 @@ type Service struct {
 	// profileMoved runs after sessions change model, so their account choices can follow.
 	profileMoved      func(context.Context, []store.Session, contract.ProfileName)
 	gitName, gitEmail string
+	signing           struct {
+		sync.Mutex
+		key *gitsign.Key
+	}
 	maxDepth          int
 	store             *store.Store
 	searchBraveURL    string
@@ -112,6 +117,7 @@ type Service struct {
 	// transcriptMu serializes appends, so each offset check and write runs alone.
 	transcriptMu        sync.Mutex
 	toolCalls           map[contract.SessionID]map[string]seenCall // under transcriptMu
+	agents              agentRuns
 	layout              box.Layout
 	roomData            sync.RWMutex // writers of a room folder share it; removing one takes it alone
 	instructionsMu      sync.Mutex
@@ -282,7 +288,7 @@ func failure(err error) *contract.Error {
 		code = contract.ErrForbidden
 	} else if errors.Is(err, approve.ErrInvalid) {
 		code = contract.ErrInvalid
-	} else if errors.Is(err, approve.ErrConflict) {
+	} else if errors.Is(err, approve.ErrConflict) || errors.Is(err, store.ErrWorkflowEnded) {
 		code = contract.ErrConflict
 	} else if errors.Is(err, store.ErrNotFound) {
 		code = contract.ErrNotFound

@@ -35,7 +35,7 @@ func (r *poolRig) onSpare(names ...string) (*fakehost.Host, []contract.SessionID
 			r.t.Fatalf("box %+v", got)
 		}
 	}
-	if _, e := r.s.RoomHosts(r.ctx, r.owner, contract.RoomHostsRequest{Room: r.room}); e != nil {
+	if _, e := r.s.RoomHosts(r.ctx, r.owner, contract.RoomHostsRequest{Room: r.room, Clear: true}); e != nil {
 		r.t.Fatal(e)
 	}
 	return machine, sessions

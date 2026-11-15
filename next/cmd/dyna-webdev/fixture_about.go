@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"github.com/resident-labs/dyna/engine/store"
 	"log"
 	"time"
 
@@ -104,4 +106,84 @@ func (d devService) SubscriptionList(ctx context.Context, p contract.Principal, 
 		hook("sub_author_a", 15, "bash", "author-watch.sh", "mira-chen", "3"), hook("sub_author_b", 15, "bash", "author-watch.sh", "tobias"),
 		hook("sub_release", 15, "bash", "release-watch.sh"), hook("sub_sample", 15, "bash", "sample-repo-watch.sh"), retired)
 	return list, nil
+}
+
+// seedAdvisorCall gives root one turn that asked the advisor, so its transcript shows the advisor row with the prompt and the answer.
+func seedAdvisorCall(ctx context.Context, s *engine.Service, st *store.Store, room contract.RoomID, root contract.SessionID) {
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	wake, problem := s.Post(ctx, owner, contract.PostRequest{Room: room, Home: contract.Conversation{Kind: contract.ConversationDM, Session: root}, Text: "Which cache should the store use?"})
+	if problem != nil {
+		log.Fatal(problem.Message)
+	}
+	input, err := st.EventID(ctx, wake.Seq)
+	fatal(err)
+	fatal(st.SeedEndedTurn(ctx, room, root, "turn_advisor", input, wake.Seq, time.Now().Add(-5*time.Minute), time.Now().Add(-4*time.Minute)))
+	prompt := "Task: pick the cache for the store. I found that reads dominate and the data fits in memory; I lean toward an in-process LRU. What would you check before committing?"
+	answer := `{"answer":"Go with the LRU unless the store is read by more than one process.\n\n- **Check first:** if two processes share it, a stale read is the risk.\n- **Unsure:** your read volume.","advisor":"fable"}`
+	stopped := `{"answer":"Before the migration, check that nothing else writes the table.","note":"root was stopped; the answer is what it had said so far","advisor":"fable"}`
+	lines := fmt.Sprintf(`{"type":"message","timestamp":%q,"message":{"role":"user","deliveryId":"%d"}}
+{"type":"message","timestamp":%q,"message":{"role":"assistant","content":[{"type":"toolCall","id":"adv1","name":"advisor","arguments":{"prompt":%q}}]}}
+{"type":"message","timestamp":%q,"message":{"role":"toolResult","toolCallId":"adv1","content":[{"type":"text","text":%q}]}}
+{"type":"message","timestamp":%q,"message":{"role":"assistant","content":[{"type":"text","text":"The advisor says to keep it in-process. Before I commit, one more check on the migration."},{"type":"toolCall","id":"adv2","name":"advisor","arguments":{"prompt":"Is the migration safe to run while the store is live?"}}]}}
+{"type":"message","timestamp":%q,"message":{"role":"toolResult","toolCallId":"adv2","content":[{"type":"text","text":%q}]}}
+`, time.Now().Add(-5*time.Minute).Format(time.RFC3339), wake.Seq, time.Now().Add(-290*time.Second).Format(time.RFC3339), prompt, time.Now().Add(-270*time.Second).Format(time.RFC3339), answer,
+		time.Now().Add(-260*time.Second).Format(time.RFC3339), time.Now().Add(-240*time.Second).Format(time.RFC3339), stopped)
+	if _, e := s.TranscriptAppend(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.TranscriptAppendRequest{Path: "advisor.jsonl", Bytes: []byte(lines)}); e != nil {
+		log.Fatal(e.Message)
+	}
+}
+
+// seedAdvisorLive gives root a turn that is asking the advisor now: a [wait] turn, which the fake box keeps open, whose last call has
+// no result, and the advisor's agent has read a few files in root's box and is on its next step. The call's row shows its steps and the
+// Stop control. It seeds once root's turn has started, which is why it runs apart.
+func seedAdvisorLive(ctx context.Context, s *engine.Service, st *store.Store, room contract.RoomID, root contract.SessionID) {
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	wake, problem := s.Post(ctx, owner, contract.PostRequest{Room: room, Home: contract.Conversation{Kind: contract.ConversationDM, Session: root}, Text: "[wait] Review the retry change before I merge it."})
+	if problem != nil {
+		log.Fatal(problem.Message)
+	}
+	go func() {
+		var turn contract.TurnID
+		for i := 0; i < 200 && turn == ""; i++ {
+			if session, err := st.Session(ctx, root); err == nil {
+				turn = session.Turn
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		if turn == "" {
+			log.Print("seedAdvisorLive: root's turn never started")
+			return
+		}
+		started := time.Now().Add(-90 * time.Second)
+		at := func(seconds int) string {
+			return started.Add(time.Duration(seconds) * time.Second).Format(time.RFC3339)
+		}
+		prompt := "Task: add retry hints to the sync status. I changed backoff.go and wrote notes.md, which is not committed. Is the backoff right, and does my note match the code?"
+		rootLines := fmt.Sprintf(`{"type":"message","timestamp":%q,"message":{"role":"user","deliveryId":"%d"}}
+{"type":"message","timestamp":%q,"message":{"role":"assistant","content":[{"type":"toolCall","id":"adv_live","name":"advisor","arguments":{"prompt":%q}}]}}
+`, at(0), wake.Seq, at(20), prompt)
+		rootCaller := contract.Principal{Kind: contract.PrincipalSession, Session: root}
+		if _, e := s.TranscriptAppend(ctx, rootCaller, contract.TranscriptAppendRequest{Path: "live.jsonl", Bytes: []byte(rootLines)}); e != nil {
+			log.Print(e.Message)
+			return
+		}
+		call := func(second int, id, tool, arguments, result string) string {
+			line := fmt.Sprintf(`{"type":"message","timestamp":%q,"message":{"role":"assistant","content":[{"type":"toolCall","id":%q,"name":%q,"arguments":%s}]}}`+"\n", at(second), id, tool, arguments)
+			if result != "" {
+				line += fmt.Sprintf(`{"type":"message","timestamp":%q,"message":{"role":"toolResult","toolCallId":%q,"toolName":%q,"content":[{"type":"text","text":%q}]}}`+"\n", at(second+1), id, tool, result)
+			}
+			return line
+		}
+		agentLines := fmt.Sprintf(`{"type":"message","timestamp":%q,"message":{"role":"user","deliveryId":"%d"}}`+"\n", at(20), wake.Seq) +
+			call(24, "a1", "read", `{"path":"/box/work/sync/notes.md"}`, "Retry hints: wait 2s, then double each time up to 60s.") +
+			call(31, "a2", "grep", `{"pattern":"backoff","path":"/box/work/sync"}`, "backoff.go:12: func next(attempt int) time.Duration {\nstatus.go:40: hint := backoff.next(n)") +
+			call(38, "a3", "read", `{"path":"/box/work/sync/backoff.go"}`, "func next(attempt int) time.Duration { return min(time.Second<<attempt, time.Minute) }") +
+			call(52, "a4", "read", `{"path":"/box/work/sync/status.go"}`, "")
+		if _, e := s.TranscriptAppend(ctx, rootCaller, contract.TranscriptAppendRequest{Path: "agents/advisor/live.jsonl", Bytes: []byte(agentLines)}); e != nil {
+			log.Print(e.Message)
+			return
+		}
+		fatal(st.StartAgent(ctx, store.Agent{ID: "adv_live", Session: root, Turn: turn, Name: "advisor", Started: started.Add(20 * time.Second)}))
+		fatal(st.AgentFile(ctx, root, "adv_live", "agents/advisor/live.jsonl", 0))
+	}()
 }

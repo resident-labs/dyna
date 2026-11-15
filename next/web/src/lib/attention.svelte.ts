@@ -181,6 +181,7 @@ export class Attention {
     // A live activity label has seq 0, so it comes before the seq check.
     if (event.type === "turn.activity") {
       const { session, turn, label } = event.body;
+      if (event.body.finished) return; // a call that ended is not a new label
       if (this.working.get(event.room ?? "")?.has(session) && (this.turns.get(session) ?? turn) === turn) {
         this.activity.delete(session);
         this.activity.set(session, label);

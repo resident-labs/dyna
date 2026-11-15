@@ -41,6 +41,7 @@ type client interface {
 	HostAdd(context.Context, contract.HostAddRequest) (contract.HostAddResponse, error)
 	HostSetLimits(context.Context, contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, error)
 	HostSet(context.Context, contract.HostSetRequest) (contract.HostSetResponse, error)
+	OwnerTimezone(context.Context, contract.OwnerTimezoneRequest) (contract.OwnerTimezoneResponse, error)
 	RoomSet(context.Context, contract.RoomSetRequest) (contract.RoomSetResponse, error)
 	HostRemove(context.Context, contract.HostRemoveRequest) (contract.HostRemoveResponse, error)
 	PoolAdd(context.Context, contract.PoolAddRequest) (contract.PoolAddResponse, error)
@@ -485,4 +486,8 @@ func (c *socketClient) ServiceRemove(ctx context.Context, q contract.ServiceRef)
 
 func (c *socketClient) ServiceSecretSet(ctx context.Context, q contract.ServiceSecretSetRequest) (contract.ServiceSecretSetResponse, error) {
 	return call[contract.ServiceSecretSetRequest, contract.ServiceSecretSetResponse](ctx, c, contract.MethodServiceSecretSet, q)
+}
+
+func (c *socketClient) OwnerTimezone(ctx context.Context, q contract.OwnerTimezoneRequest) (contract.OwnerTimezoneResponse, error) {
+	return call[contract.OwnerTimezoneRequest, contract.OwnerTimezoneResponse](ctx, c, contract.MethodOwnerTimezone, q)
 }

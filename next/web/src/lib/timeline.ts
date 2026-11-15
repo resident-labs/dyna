@@ -1,5 +1,5 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
-import type { ActivityKind, EngineRestarted, Event, TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
+import type { ActivityKind, EngineRestarted, Event, ToolFinished, TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
 import { engineRestartText } from "./engine-restarted.ts";
 import { decodeEvent } from "./event.ts";
 import { causes, formatTime } from "./feed.ts";
@@ -123,7 +123,8 @@ export function segmentDuration(segments: TimelineSegment[], index: number, star
 }
 
 // Dyna: Transcript items already arrive in timeline order, and posts can belong to a tool.
-export type TimelineGroup = { kind: "work"; id: string; items: TranscriptItem[] } | { kind: "item" | "posts"; id: string; item: TranscriptItem };
+// An advisor call that has its result is followed by the advisor's answer as a message, which stays in view when the work folds.
+export type TimelineGroup = { kind: "work"; id: string; items: TranscriptItem[] } | { kind: "item" | "posts" | "advice"; id: string; item: TranscriptItem };
 export function deriveTimelineGroups(items: TranscriptItem[]): TimelineGroup[] {
   const result: TimelineGroup[] = [];
   for (const item of items) {
@@ -135,6 +136,7 @@ export function deriveTimelineGroups(items: TranscriptItem[]): TimelineGroup[] {
     if (item.kind === "tool" && ((item.posts?.length ?? 0) > 0 || item.postsOmitted)) {
       result.push({ kind: "posts", id: "posts:" + item.id, item });
     }
+    if (item.kind === "tool" && item.ended && item.output && titleOf(item).kind === "advisor") result.push({ kind: "advice", id: "advice:" + item.id, item });
   }
   return result;
 }
@@ -143,6 +145,16 @@ export function deriveTimelineGroups(items: TranscriptItem[]): TimelineGroup[] {
 // a separate end: its result, which sets ended.
 export function timelineItemRunning(item: TranscriptItem, turnEnded: boolean): boolean {
   return !turnEnded && item.kind === "tool" && !item.ended;
+}
+
+// Dyna: A parallel batch writes its results together, once every call has ended. The engine passes on each call that ends
+// sooner, and until its result arrives the call reads as ended after that duration.
+export function withFinished(items: TranscriptItem[], finished?: ReadonlyMap<string, ToolFinished>): TranscriptItem[] {
+  if (!finished?.size) return items;
+  return items.map(item => {
+    const done = item.kind === "tool" && !item.ended ? finished.get(item.id) : undefined;
+    return done ? { ...item, ended: new Date(Date.parse(item.at) + done.durationMs).toISOString(), failed: item.failed || done.failed } : item;
+  });
 }
 
 // Dyna: A closed fold hides thoughts and tool calls only. Text the agent wrote to the reader, and its posts, are never
@@ -223,6 +235,7 @@ export function summarizeWork(items: TranscriptItem[]): string {
     if (kind === "edit") return `Edited ${count} file${plural}`;
     if (kind === "write") return `Wrote ${count} file${plural}`;
     if (kind === "read") return `Read ${count} file${plural}`;
+    if (kind === "advisor") return "Asked the advisor";
     if (kind === "search") return `Searched code ${count} ${count === 1 ? "time" : "times"}`;
     return `Used ${count} tool${plural}`;
   });

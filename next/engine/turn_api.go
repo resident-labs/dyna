@@ -114,6 +114,11 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 			}
 		}
 		vars.Shared, vars.GlobalRules, vars.RoomRules = s.layout.Shared(session.Room), s.layout.Instructions(""), s.layout.Instructions(session.Room)
+		advisor, err := s.store.RoomAdvisorProfile(ctx, session.Room)
+		if err != nil {
+			return contract.BoxHelloResponse{}, failure(err)
+		}
+		vars.Advisor = advisor != ""
 	} else {
 		hasChildren, err := s.store.SessionHasChildren(ctx, session.ID)
 		if err != nil {
@@ -136,20 +141,21 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return contract.BoxHelloResponse{}, failure(err)
 	}
-	gitName, gitEmail := s.gitName, s.gitEmail
 	account, err := s.store.GitHubAccount(ctx, session.Room)
 	if err != nil {
 		return contract.BoxHelloResponse{}, failure(err)
 	}
-	if account.Login != "" {
-		gitName, gitEmail = account.Name, account.Email
+	gitName, gitEmail := s.gitIdentity(account)
+	signingKey, problem := s.boxSigningKey(ctx, session.Room)
+	if problem != nil {
+		return contract.BoxHelloResponse{}, problem
 	}
 	githubAvailable := s.githubTools != nil
 	if s.githubAccounts != nil {
 		githubAvailable = githubAvailable && (account.Login != "" || s.githubAccounts.DefaultToken != "")
 	}
 	_, discordProblem := s.discordClient(ctx, caller)
-	return contract.BoxHelloResponse{Discord: discordProblem == nil, Room: session.Room, GitName: gitName, GitEmail: gitEmail, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: prompt.ModelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: prompt.Session(vars), WorkerInstructions: prompt.Core, Root: vars.Role == prompt.Root, Workflow: workflow, GitHub: githubAvailable}, nil
+	return contract.BoxHelloResponse{Discord: discordProblem == nil, Room: session.Room, GitName: gitName, GitEmail: gitEmail, GitSigningKey: signingKey, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: prompt.ModelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: prompt.Session(vars), WorkerInstructions: prompt.Core, Root: vars.Role == prompt.Root, Advisor: vars.Advisor, Workflow: workflow, GitHub: githubAvailable}, nil
 }
 
 func (s *Service) DeliveryDone(ctx context.Context, caller contract.Principal, req contract.DeliveryDoneRequest) (contract.DeliveryDoneResponse, *contract.Error) {
@@ -227,6 +233,19 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 	if err != nil {
 		return contract.TurnOutputResponse{}, failure(err)
 	}
+	if crew && run.Subscription != "" && run.Key == "" && summary.State == contract.WorkflowFailed {
+		// A service that ends in failure starts again after a wait, and its parent hears of the first failure in a row.
+		sub, err := s.store.SubscriptionByID(ctx, run.Subscription)
+		if err == nil {
+			var parent contract.SessionID
+			if parent, err = s.runParent(ctx, run); err == nil {
+				err = s.failService(ctx, sub, parent, contract.CauseWorkflowFailed, req.Error)
+			}
+		}
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			log.Printf("workflow %s service failure: %v", run.ID, err)
+		}
+	}
 	if crew {
 		// Closing saves a diff of what the workers left unpushed. A close that fails here leaves a quiet box, which the dormant
 		// sweep closes, and the run's result is already safe.
@@ -257,7 +276,10 @@ func (s *Service) TurnActivity(ctx context.Context, caller contract.Principal, r
 	if !open {
 		return contract.TurnActivityResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "session is closed"}
 	}
-	body := contract.TurnActivity{Session: caller.Session, Turn: req.Turn, Kind: req.Kind, Label: req.Label}
+	if req.Finished != nil && (req.Finished.Call == "" || len(req.Finished.Call) > 300 || req.Finished.DurationMs < 0) {
+		return contract.TurnActivityResponse{}, invalid("finished call must name a call and a duration of at least 0")
+	}
+	body := contract.TurnActivity{Session: caller.Session, Turn: req.Turn, Kind: req.Kind, Label: req.Label, Finished: req.Finished}
 	event, err := s.event(session.Room, caller, body)
 	if err != nil {
 		return contract.TurnActivityResponse{}, failure(err)

@@ -58,31 +58,8 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		if req.SameHost {
 			return contract.SessionStartResponse{}, invalid("host and sameHost cannot be used together")
 		}
-		hosts, err := s.store.Hosts(ctx)
-		if err != nil {
-			return contract.SessionStartResponse{}, failure(err)
-		}
-		index := slices.IndexFunc(hosts, func(h box.Host) bool { return h.Name == req.Host })
-		if index < 0 || hosts[index].State == box.HostRemoved {
-			return contract.SessionStartResponse{}, invalid("unknown host: " + string(req.Host))
-		}
-		host := hosts[index]
-		if host.ExecOnly {
-			return contract.SessionStartResponse{}, invalid("host is exec-only: " + string(req.Host))
-		}
-		if host.NoAgents {
-			return contract.SessionStartResponse{}, invalid("host has agents disabled: " + string(req.Host))
-		}
-		only, err := s.store.RoomOnly(ctx, req.Room)
-		if err != nil {
-			return contract.SessionStartResponse{}, failure(err)
-		}
-		target := string(host.Name)
-		if host.Pool != "" {
-			target = host.Pool
-		}
-		if !host.Serves(req.Room) || host.Box != "" || len(only) > 0 && !slices.Contains(only, target) {
-			return contract.SessionStartResponse{}, invalid("host is outside the room host rule: " + string(req.Host))
+		if problem := s.validateSessionHost(ctx, req.Room, req.Host); problem != nil {
+			return contract.SessionStartResponse{}, problem
 		}
 	}
 	if req.Name == "" || req.Profile == "" {
@@ -416,8 +393,39 @@ func (s *Service) closeSession(ctx context.Context, session store.Session, disca
 	return plan, nil
 }
 
-// SessionRestart synchronously discards a failed box's old host resources before
-// resetting the same row. Failure retains its metadata for an explicit retry.
+// validateSessionHost applies the same placement boundary to start and restart.
+func (s *Service) validateSessionHost(ctx context.Context, room contract.RoomID, name contract.HostName) *contract.Error {
+	hosts, err := s.store.Hosts(ctx)
+	if err != nil {
+		return failure(err)
+	}
+	index := slices.IndexFunc(hosts, func(h box.Host) bool { return h.Name == name })
+	if index < 0 || hosts[index].State == box.HostRemoved {
+		return invalid("unknown host: " + string(name))
+	}
+	host := hosts[index]
+	if host.ExecOnly {
+		return invalid("host is exec-only: " + string(name))
+	}
+	if host.NoAgents {
+		return invalid("host has agents disabled: " + string(name))
+	}
+	only, err := s.store.RoomOnly(ctx, room)
+	if err != nil {
+		return failure(err)
+	}
+	target := string(host.Name)
+	if host.Pool != "" {
+		target = host.Pool
+	}
+	if !host.Serves(room) || host.Box != "" || len(only) > 0 && !slices.Contains(only, target) {
+		return invalid("host is outside the room host rule: " + string(name))
+	}
+	return nil
+}
+
+// SessionRestart discards a failed box's old resources, or re-places a pending box
+// with positive never-created proof. Both paths fence lifecycle work before reset.
 func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal, req contract.SessionRestartRequest) (contract.SessionRestartResponse, *contract.Error) {
 	entered := time.Now() // monotonic process-local API ordering, not the stored event clock
 	session, problem := s.managedSession(ctx, caller, req.Session)
@@ -430,7 +438,7 @@ func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal,
 		return contract.SessionRestartResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "box restart is already in progress"}
 	}
 	defer claim.Unlock()
-	conflict := &contract.Error{Code: contract.ErrConflict, Message: "session is closing or its failed box changed"}
+	conflict := &contract.Error{Code: contract.ErrConflict, Message: "session is closing or its box changed"}
 	if claim.completed.After(entered) {
 		return contract.SessionRestartResponse{}, conflict
 	}
@@ -438,14 +446,26 @@ func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal,
 	if err != nil {
 		return contract.SessionRestartResponse{}, failure(err)
 	}
-	if old.State != contract.BoxFailed {
+	if old.State != contract.BoxFailed && old.State != contract.BoxPending {
 		return contract.SessionRestartResponse{}, conflict
+	}
+	if req.Host != "" {
+		if problem := s.validateSessionHost(ctx, session.Room, req.Host); problem != nil {
+			return contract.SessionRestartResponse{}, problem
+		}
 	}
 	current, err := s.store.CanRestartSession(ctx, old)
 	if err != nil {
 		return contract.SessionRestartResponse{}, failure(err)
 	}
 	if !current {
+		if old.State == contract.BoxPending {
+			host := "a host"
+			if old.Host != "" {
+				host = "host " + string(old.Host)
+			}
+			return contract.SessionRestartResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "pending box cannot be relocated: its files may already be on " + host + "; files must stay on their host. Only a box never created on any host can restart while pending"}
+		}
 		return contract.SessionRestartResponse{}, conflict
 	}
 	// The claim is process-local, not a stored lifecycle/deletion permission.
@@ -467,35 +487,37 @@ func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal,
 	if !current {
 		return contract.SessionRestartResponse{}, conflict
 	}
-	remover, ok := s.boxes.(lifecycle.FailedBoxRemover)
-	if !ok {
-		return contract.SessionRestartResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "runtime cannot remove failed box resources"}
-	}
-	debts, err := s.store.BoxLeftovers(ctx, old.ID)
-	if err != nil {
-		return contract.SessionRestartResponse{}, failure(err)
-	}
-	targets := []box.Box{old}
-	known := map[contract.HostName]bool{old.Host: true}
-	for _, debt := range debts {
-		if !known[debt.Host] {
-			targets = append(targets, box.Box{ID: old.ID, Session: old.Session, Host: debt.Host, Slice: debt.Slice, State: contract.BoxFailed})
-			known[debt.Host] = true
+	if old.State == contract.BoxFailed {
+		remover, ok := s.boxes.(lifecycle.FailedBoxRemover)
+		if !ok {
+			return contract.SessionRestartResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "runtime cannot remove failed box resources"}
 		}
-	}
-	for _, target := range targets {
-		if err := remover.RemoveFailedBox(ctx, target); err != nil {
-			return contract.SessionRestartResponse{}, failure(fmt.Errorf("restart cleanup on host %s: %w; the session stays failed, so call restart again once that host answers", target.Host, err))
+		debts, err := s.store.BoxLeftovers(ctx, old.ID)
+		if err != nil {
+			return contract.SessionRestartResponse{}, failure(err)
 		}
-		if err := ctx.Err(); err != nil {
-			return contract.SessionRestartResponse{}, failure(fmt.Errorf("restart cleanup on host %s: %w; the session stays failed, so call restart again once that host answers", target.Host, err))
-		}
-		// Confirmed physical deletion and debt retirement are not rolled back if
-		// a later host fails. Every unconfirmed host remains known for retry.
+		targets := []box.Box{old}
+		known := map[contract.HostName]bool{old.Host: true}
 		for _, debt := range debts {
-			if debt.Host == target.Host {
-				if err := s.store.ForgetLeftover(ctx, debt); err != nil {
-					return contract.SessionRestartResponse{}, failure(fmt.Errorf("retire restart cleanup on host %s: %w", target.Host, err))
+			if !known[debt.Host] {
+				targets = append(targets, box.Box{ID: old.ID, Session: old.Session, Host: debt.Host, Slice: debt.Slice, State: contract.BoxFailed})
+				known[debt.Host] = true
+			}
+		}
+		for _, target := range targets {
+			if err := remover.RemoveFailedBox(ctx, target); err != nil {
+				return contract.SessionRestartResponse{}, failure(fmt.Errorf("restart cleanup on host %s: %w; the session stays failed, so call restart again once that host answers", target.Host, err))
+			}
+			if err := ctx.Err(); err != nil {
+				return contract.SessionRestartResponse{}, failure(fmt.Errorf("restart cleanup on host %s: %w; the session stays failed, so call restart again once that host answers", target.Host, err))
+			}
+			// Confirmed physical deletion and debt retirement are not rolled back if
+			// a later host fails. Every unconfirmed host remains known for retry.
+			for _, debt := range debts {
+				if debt.Host == target.Host {
+					if err := s.store.ForgetLeftover(ctx, debt); err != nil {
+						return contract.SessionRestartResponse{}, failure(fmt.Errorf("retire restart cleanup on host %s: %w", target.Host, err))
+					}
 				}
 			}
 		}
@@ -508,12 +530,12 @@ func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal,
 	if err != nil {
 		return contract.SessionRestartResponse{}, failure(err)
 	}
-	restarted, err := s.store.RestartSession(ctx, old, event, notice)
+	restarted, err := s.store.RestartSession(ctx, old, event, notice, req.Host)
 	if err != nil {
 		return contract.SessionRestartResponse{}, failure(err)
 	}
 	if !restarted {
-		return contract.SessionRestartResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "session is closing or its box has not failed"}
+		return contract.SessionRestartResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "session is closing or its box changed"}
 	}
 	claim.completed = time.Now()
 	s.reconciler.Kick()

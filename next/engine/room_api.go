@@ -39,7 +39,7 @@ func (s *Service) RoomRepoAdd(ctx context.Context, caller contract.Principal, re
 	if !ok || !ownerOK || !nameOK || name == "." || name == ".." {
 		return contract.RoomRepoAddResponse{}, invalid("repository must be owner/name")
 	}
-	if err := s.store.AddRoomRepo(ctx, req.Room, req.Repo, req.Default); err != nil {
+	if err := s.store.AddRoomRepo(ctx, req.Room, req.Repo, req.Default, req.PREvents); err != nil {
 		if errors.Is(err, store.ErrRoomNotFound) {
 			return contract.RoomRepoAddResponse{}, invalid("unknown room")
 		}

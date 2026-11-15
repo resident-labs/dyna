@@ -16,14 +16,20 @@ import (
 	"github.com/coder/websocket"
 )
 
+type ResumeState struct {
+	Session, URL string
+	Seq          int64
+}
+
 type Message struct {
-	Webhook string `json:"webhook_id"`
-	Type    int    `json:"type"`
-	ID      string `json:"id"`
-	Channel string `json:"channel_id"`
-	Guild   string `json:"guild_id"`
-	Content string `json:"content"`
-	Author  struct {
+	checkpoint *ResumeState
+	Webhook    string `json:"webhook_id"`
+	Type       int    `json:"type"`
+	ID         string `json:"id"`
+	Channel    string `json:"channel_id"`
+	Guild      string `json:"guild_id"`
+	Content    string `json:"content"`
+	Author     struct {
 		ID         string `json:"id"`
 		Username   string `json:"username"`
 		Bot        bool   `json:"bot"`
@@ -57,17 +63,25 @@ type Message struct {
 }
 
 type Gateway struct {
-	Client    *Client
-	URL, Bot  string
-	Directory *Directory
-	Receive   func(context.Context, Message) error
+	LoadResume func(context.Context) (ResumeState, error)
+	// PrepareResume runs once at startup with saved state, before replay is received.
+	PrepareResume    func(context.Context) error
+	SaveResume       func(context.Context, ResumeState) error
+	lastCheckpoint   time.Time
+	checkpointUnsafe atomic.Bool
+	Client           *Client
+	URL, Bot         string
+	Directory        *Directory
+	Receive          func(context.Context, Message) error
+	CatchUp          func(context.Context, string, func(context.Context, Message) error)
 	// Observe receives the server events the gateway finds, one at a time in order, on a lane of its own that
 	// never touches Receive. An event the lane has no room for, or that Observe fails on, is added to Lost.
-	Observe      func(context.Context, ServerEvent) error
-	Lost         *atomic.Int64
-	messages     chan Message
-	serverEvents chan ServerEvent
-	readyAt      time.Time
+	Observe       func(context.Context, ServerEvent) error
+	Lost          *atomic.Int64
+	messages      chan Message
+	serverEvents  chan ServerEvent
+	readyAt       time.Time
+	catchupGuilds map[string]bool
 }
 
 type FatalClose struct {
@@ -106,6 +120,14 @@ func (g *Gateway) Run(ctx context.Context) error {
 			case <-worker.Done():
 				return
 			case m := <-g.messages:
+				if m.checkpoint != nil {
+					if g.SaveResume != nil && !g.checkpointUnsafe.Load() {
+						if err := g.SaveResume(worker, *m.checkpoint); err != nil {
+							log.Printf("Discord checkpoint: %v", err)
+						}
+					}
+					continue
+				}
 				for attempt := 0; ; attempt++ {
 					err := g.Receive(worker, m)
 					if worker.Err() != nil {
@@ -115,6 +137,7 @@ func (g *Gateway) Run(ctx context.Context) error {
 						break
 					}
 					if attempt == len(retryDelays) {
+						g.checkpointUnsafe.Store(true)
 						log.Printf("Discord input %s failed after retries; dropped: %v", m.ID, err)
 						break
 					}
@@ -131,6 +154,18 @@ func (g *Gateway) Run(ctx context.Context) error {
 	}()
 	var session, resume string
 	var seq int64
+	if g.LoadResume != nil {
+		state, err := g.LoadResume(ctx)
+		if err != nil {
+			return err
+		}
+		session, resume, seq = state.Session, state.URL, state.Seq
+	}
+	if session != "" && g.PrepareResume != nil {
+		if err := g.PrepareResume(ctx); err != nil {
+			log.Printf("Discord directory rebuild: %v", err)
+		}
+	}
 	delay := 5 * time.Second
 	for ctx.Err() == nil {
 		g.readyAt = time.Time{}
@@ -188,6 +223,7 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 	if err != nil {
 		return errors.New("Discord gateway unavailable")
 	}
+	// Dropping the socket preserves the Discord session for the next process.
 	defer conn.CloseNow()
 	conn.SetReadLimit(4 << 20)
 	write := func(op int, d any) error {
@@ -313,46 +349,131 @@ func (g *Gateway) connect(ctx context.Context, session, resume *string, seq *int
 						return errors.New("invalid Discord ready")
 					}
 					g.readyAt = time.Now()
+					g.catchupGuilds = map[string]bool{}
 					*session = ready.Session
 					*resume = ready.URL
+				case "GUILD_CREATE":
+					var guild struct {
+						ID string `json:"id"`
+					}
+					if json.Unmarshal(p.Data, &guild) == nil && g.catchupGuilds != nil && !g.catchupGuilds[guild.ID] && g.CatchUp != nil {
+						g.catchupGuilds[guild.ID] = true
+						go g.CatchUp(ctx, guild.ID, func(ctx context.Context, m Message) error {
+							if g.addressed(m) {
+								return g.Receive(ctx, m)
+							}
+							return nil
+						})
+					}
 				case "MESSAGE_CREATE":
 					var m Message
 					if json.Unmarshal(p.Data, &m) != nil {
 						return errors.New("invalid Discord message")
 					}
-					if m.Author.Bot || m.Author.ID == g.Bot || m.Webhook != "" || m.Type == 24 {
-						continue
-					}
-					addressed := false
-					if m.Guild != "" {
-						for _, mention := range m.Mentions {
-							if mention.ID == g.Bot {
-								addressed = true
-							}
-						}
-						if g.Directory != nil {
-							server, _ := g.Directory.Server(m.Guild)
-							for _, role := range server.Roles {
-								if role.Tags.Bot == g.Bot && slices.Contains(m.Roles, role.ID) {
-									addressed = true
-								}
-							}
-						}
-						if m.Referenced != nil && m.Referenced.Author.ID == g.Bot {
-							addressed = true
-						}
-					} else if m.Guild == "" {
-						addressed = true
-					}
-					if addressed {
+					if g.addressed(m) {
 						select {
 						case g.messages <- m:
 						default:
+							g.checkpointUnsafe.Store(true)
 							log.Printf("Discord input buffer full; dropped message %s", m.ID)
 						}
 					}
 				}
 			}
+			// Checkpoint on the intake lane, behind all prior messages. A crash may
+			// replay a few already-delivered messages, but cannot skip queued input.
+			if p.Op == 0 && g.SaveResume != nil && time.Since(g.lastCheckpoint) >= 3*time.Second {
+				state := ResumeState{Session: *session, URL: *resume, Seq: *seq}
+				select {
+				case g.messages <- Message{checkpoint: &state}:
+					g.lastCheckpoint = time.Now()
+				default:
+				}
+			}
 		}
 	}
+}
+
+// mentionsOutsideCode reports whether text holds mention outside Markdown code and not escaped with a backslash.
+// A backslash escapes the next character, a backtick included. A code span opens with a run of backticks and closes at
+// the next run of exactly that length; one never closed is text.
+func mentionsOutsideCode(text, mention string) bool {
+	for i := 0; i < len(text); {
+		if text[i] == '\\' {
+			i += 2
+			continue
+		}
+		if text[i] == '`' {
+			run := backticks(text, i)
+			end := -1
+			for j := i + run; j < len(text); {
+				if text[j] != '`' {
+					j++
+					continue
+				}
+				closing := backticks(text, j)
+				if closing == run {
+					end = j + closing
+					break
+				}
+				j += closing
+			}
+			if end < 0 {
+				i += run
+			} else {
+				i = end
+			}
+			continue
+		}
+		if strings.HasPrefix(text[i:], mention) {
+			return true
+		}
+		i++
+	}
+	return false
+}
+
+// backticks counts the run of backticks that starts at i.
+func backticks(text string, i int) int {
+	n := 0
+	for i+n < len(text) && text[i+n] == '`' {
+		n++
+	}
+	return n
+}
+
+func (g *Gateway) addressed(m Message) bool {
+	if m.Author.Bot || m.Author.ID == g.Bot || m.Webhook != "" || m.Type == 24 {
+		return false
+	}
+	addressed := false
+	if m.Guild != "" {
+		for _, mention := range m.Mentions {
+			if mention.ID == g.Bot {
+				addressed = true
+			}
+		}
+		if g.Directory != nil {
+			server, _ := g.Directory.Server(m.Guild)
+			for _, role := range server.Roles {
+				if role.Tags.Bot != g.Bot {
+					continue
+				}
+				if slices.Contains(m.Roles, role.ID) {
+					addressed = true
+				}
+				// Discord leaves mention_roles empty when the role is not mentionable, though the text still holds <@&id>.
+				if mentionsOutsideCode(m.Content, "<@&"+role.ID+">") {
+					addressed = true
+				}
+			}
+		}
+		if m.Referenced != nil && m.Referenced.Author.ID == g.Bot {
+			addressed = true
+		}
+	} else if m.Guild == "" {
+		addressed = true
+	}
+
+	return addressed
 }

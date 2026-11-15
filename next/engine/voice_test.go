@@ -37,7 +37,7 @@ func TestVoiceOwnerOnlyAndSpokenFrame(t *testing.T) {
 		t.Fatalf("post: %+v", post)
 	}
 	frame, _, err := s.inputFrame(ctx, root, events[0], contract.Delivery{Surface: contract.SurfaceDM})
-	if err != nil || !strings.Contains(frame, "transcript that may be unpunctuated or misheard") {
+	if err != nil || !strings.Contains(frame, "call transcript, which may be unpunctuated or misheard") {
 		t.Fatalf("frame: %s %v", frame, err)
 	}
 }

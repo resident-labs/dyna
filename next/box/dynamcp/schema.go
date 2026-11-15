@@ -134,6 +134,7 @@ func registry() ([]Tool, map[string]map[string]action, error) {
 		}
 		readOnly := true
 		props := map[string]schema{}
+		descriptions := map[string][]string{}
 		takers := map[string][]string{} // the actions that take each property
 		for verb := range actions[name] {
 			verbs = append(verbs, verb)
@@ -148,15 +149,34 @@ func registry() ([]Tool, map[string]map[string]action, error) {
 				if value.Description == "" {
 					value.Description = metadata.Fields[key]
 				}
-				if old, ok := props[key]; ok && !reflect.DeepEqual(old, value) {
-					return nil, nil, fmt.Errorf("%s.%s: incompatible property %s", name, verb, key)
+				if old, ok := props[key]; ok {
+					old.Description = value.Description
+					if !reflect.DeepEqual(old, value) {
+						return nil, nil, fmt.Errorf("%s.%s: incompatible property %s", name, verb, key)
+					}
 				}
+				descriptions[key] = append(descriptions[key], value.Description)
 				props[key] = value
 				takers[key] = append(takers[key], verb)
 			}
 		}
 		// The actions share one schema, and each decodes strictly, so a property that only some take says which.
 		for key, by := range takers {
+			prop := props[key]
+			different := false
+			for _, description := range descriptions[key] {
+				if description != prop.Description {
+					different = true
+				}
+			}
+			if different {
+				var parts []string
+				for i, description := range descriptions[key] {
+					parts = append(parts, by[i]+": "+description)
+				}
+				prop.Description = strings.Join(parts, " ")
+				props[key] = prop
+			}
 			if len(by) < len(verbs) {
 				prop := props[key]
 				prop.Description = strings.TrimSpace(prop.Description + " For " + listWords(by) + ".")

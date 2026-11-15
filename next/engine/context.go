@@ -38,7 +38,7 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		return contract.ContextSnapshotResponse{}, forbidden()
 	}
 	switch req.Section {
-	case "", contract.ContextGoal, contract.ContextChildren, contract.ContextContacts, contract.ContextRequests, contract.ContextHolds, contract.ContextProfiles, contract.ContextUsage, contract.ContextRoom, contract.ContextDiscord, contract.ContextWorkflows:
+	case "", contract.ContextGoal, contract.ContextChildren, contract.ContextContacts, contract.ContextRequests, contract.ContextHolds, contract.ContextProfiles, contract.ContextUsage, contract.ContextRoom, contract.ContextDiscord, contract.ContextWorkflows, contract.ContextAdvisor:
 	default:
 		return contract.ContextSnapshotResponse{}, invalid("unknown context section")
 	}
@@ -190,6 +190,19 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		}
 		lines = append(lines, "GitHub writes: "+strings.Join(groups, ", ")+" on "+strings.Join(repos, ", "))
 	}
+	repos, err := s.store.RoomRepos(ctx, session.Room)
+	if err != nil {
+		return contract.ContextSnapshotResponse{}, failure(err)
+	}
+	var prEvents []string
+	for _, repo := range repos {
+		if repo.PREvents {
+			prEvents = append(prEvents, string(repo.Repo))
+		}
+	}
+	if len(prEvents) > 0 {
+		lines = append(lines, "Room-wide PR events: "+strings.Join(prEvents, ", "))
+	}
 	ciRepos, err := s.store.CIRepos(ctx)
 	if err != nil {
 		return contract.ContextSnapshotResponse{}, failure(err)
@@ -312,5 +325,11 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		lines = append(lines, "Off: "+strings.Join(off, ", "))
 	}
 	add(contract.ContextWorkflows, lines, workflowsChars, 0)
+	// Root's advisor, which its tool and prompt section name.
+	lines = nil
+	if advisor, err := s.store.RoomAdvisorProfile(ctx, session.Room); err == nil && advisor != "" && session.Root {
+		lines = append(lines, fmt.Sprintf("%s: %s", advisorName, advisor))
+	}
+	add(contract.ContextAdvisor, lines, 200, 0)
 	return result, nil
 }

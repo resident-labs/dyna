@@ -56,3 +56,13 @@ func TestDiscordPolicyAndCheckBindings(t *testing.T) {
 		t.Fatal("missing policy-file binding")
 	}
 }
+
+func TestWorkflowControlBindings(t *testing.T) {
+	root := newRootCmd()
+	for _, action := range []string{"steer", "pause", "unpause"} {
+		cmd, rest, err := root.Find([]string{"workflow", action})
+		if err != nil || len(rest) != 0 || cmd.Name() != action {
+			t.Fatalf("missing workflow %s: %v", action, err)
+		}
+	}
+}

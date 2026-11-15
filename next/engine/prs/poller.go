@@ -184,6 +184,10 @@ func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls [
 			}
 		}
 	}
+	pass.RoomPRs, err = p.roomPRs(ctx, client, repo, probe, now, observed)
+	if err != nil {
+		return pass, err
+	}
 	pass.Feeds = probe.Feeds
 	return pass, nil
 }
@@ -251,6 +255,7 @@ func (p *Poller) Pass(ctx context.Context) error {
 		if err != nil {
 			continue
 		}
+		pass.RoomPRs = append(pass.RoomPRs, found.RoomPRs...)
 		pass.PRs = append(pass.PRs, found.PRs...)
 		pass.Issues = append(pass.Issues, found.Issues...)
 		pass.Heads = append(pass.Heads, found.Heads...)
@@ -258,7 +263,7 @@ func (p *Poller) Pass(ctx context.Context) error {
 		pass.Feeds = append(pass.Feeds, found.Feeds...)
 		pass.Items = append(pass.Items, found.Items...)
 	}
-	if len(pass.PRs)+len(pass.Issues)+len(pass.Heads)+len(pass.MainCIs)+len(pass.Feeds)+len(pass.Items) == 0 {
+	if len(pass.RoomPRs)+len(pass.PRs)+len(pass.Issues)+len(pass.Heads)+len(pass.MainCIs)+len(pass.Feeds)+len(pass.Items) == 0 {
 		return nil
 	}
 	return p.Store.ApplyPRPoll(ctx, pass, p.Now())

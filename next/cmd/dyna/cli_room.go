@@ -74,7 +74,23 @@ func roomCommand(getClient func() client) *cobra.Command {
 		setRoom.Flags().StringVar(rootApproves[kind], "root-approves-"+string(kind), "", "on or off: whether the room's root may decide its sessions' "+string(kind)+" requests")
 	}
 	setRoom.Flags().StringVar(&githubWrites, "github-writes", "", "GROUPS@REPOS (issues,pulls,projects @ repositories of the room or *), or off: the GitHub writes the room's sessions may make")
-	room.AddCommand(limit, setRoom, roomHostsCommand(getClient))
+	advisor := &cobra.Command{Use: "advisor ROOM PROFILE|none", Short: "Set the room's advisor profile, or none", Long: "Set the room's advisor: an agent on PROFILE that runs in root's box with read-only tools. none turns it off. Root's advisor tool and prompt section follow at its next box start.", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		profile := contract.ProfileName(args[1])
+		if args[1] == "none" {
+			profile = ""
+		}
+		_, err := getClient().RoomSet(cmd.Context(), contract.RoomSetRequest{Room: contract.RoomID(args[0]), Advisor: &profile})
+		return err
+	}}
+	signing := &cobra.Command{Use: "signing ROOM on|off", Short: "Turn the signing of a room's commits and tags on or off", Long: "With signing on, the room's boxes sign their commits and tags as the owner with the engine's key (print its public half with dyna signing key). A box's git follows at its next box start; session refresh restarts a box. Off by default.", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		on := args[1] == "on"
+		if !on && args[1] != "off" {
+			return fmt.Errorf("signing is on or off, not %q", args[1])
+		}
+		_, err := getClient().RoomSet(cmd.Context(), contract.RoomSetRequest{Room: contract.RoomID(args[0]), GitSigning: &on})
+		return err
+	}}
+	room.AddCommand(limit, setRoom, advisor, signing, roomHostsCommand(getClient))
 	var rootProfile string
 	create := &cobra.Command{Use: "create NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		r, err := getClient().RoomCreate(cmd.Context(), contract.RoomCreateRequest{Name: args[0], RootProfile: contract.ProfileName(rootProfile)})
@@ -132,11 +148,21 @@ func roomCommand(getClient func() client) *cobra.Command {
 	log.Flags().BoolVar(&follow, "follow", false, "Follow new events")
 	repo := &cobra.Command{Use: "repo"}
 	var makeDefault bool
+	var prEvents string
 	addRepo := &cobra.Command{Use: "add ROOM REPO", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := getClient().RoomRepoAdd(cmd.Context(), contract.RoomRepoAddRequest{Room: contract.RoomID(args[0]), Repo: contract.RepoName(args[1]), Default: makeDefault})
+		if prEvents != "on" && prEvents != "off" {
+			return fmt.Errorf("--pr-events is on or off")
+		}
+		var events *bool
+		if cmd.Flags().Changed("pr-events") {
+			enabled := prEvents == "on"
+			events = &enabled
+		}
+		_, err := getClient().RoomRepoAdd(cmd.Context(), contract.RoomRepoAddRequest{Room: contract.RoomID(args[0]), Repo: contract.RepoName(args[1]), Default: makeDefault, PREvents: events})
 		return err
 	}}
 	addRepo.Flags().BoolVar(&makeDefault, "default", false, "Make this the room default")
+	addRepo.Flags().StringVar(&prEvents, "pr-events", "off", "Room-wide PR events: on or off; left as it is when omitted.")
 	listRepos := &cobra.Command{Use: "list ROOM", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		r, err := getClient().RoomRepos(cmd.Context(), contract.RoomReposRequest{Room: contract.RoomID(args[0])})
 		if err != nil {

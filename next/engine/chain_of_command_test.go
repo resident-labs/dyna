@@ -163,7 +163,7 @@ func TestPostGoesUpPastParentThatCantReceive(t *testing.T) {
 				t.Fatal(err)
 			}
 			frame, _, err := s.inputFrame(ctx, root, event, contract.Delivery{Surface: contract.SurfaceFeed, Reply: contract.ReplyChannel{Kind: contract.ReplyPost}, MeantFor: meantFor, Why: why})
-			if line := "[Dyna] From \"kid\", in the room feed. For worker, which can't receive (" + c.want + ")."; err != nil || !strings.HasPrefix(frame, line) {
+			if line := "[Dyna] 00:16 UTC. From \"kid\", in the room feed. For worker, which can't receive (" + c.want + ")."; err != nil || !strings.HasPrefix(frame, line) {
 				t.Fatalf("frame %q, want it to start %q: %v", frame, line, err)
 			}
 		})
@@ -201,7 +201,7 @@ func TestFrameOfAPostThatWentUp(t *testing.T) {
 	start := (<-channel).Body.(contract.TurnStart)
 	for _, input := range start.Inputs {
 		if inputBody(input.Text) == "result" {
-			if !strings.HasPrefix(input.Text, "[Dyna] From \"kid\", in the room feed. For worker, which can't receive (box failed). No reply is delivered.") {
+			if !strings.HasPrefix(input.Text, "[Dyna] 00:16 UTC. From \"kid\", in the room feed. For worker, which can't receive (box failed). No reply is delivered.") {
 				t.Fatalf("frame %q", input.Text)
 			}
 			return

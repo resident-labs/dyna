@@ -58,7 +58,7 @@ func (c *Client) ReadConfiguration(ctx context.Context, guild, resource string) 
 		return Result{}, errors.New("invalid guild ID")
 	}
 	switch resource {
-	case "", "/roles", "/channels", "/auto-moderation/rules":
+	case "", "/roles", "/channels", "/threads/active", "/auto-moderation/rules":
 	default:
 		if c.BotID == "" || strings.Trim(c.BotID, "0123456789") != "" || resource != "/members/"+c.BotID {
 			return Result{}, errors.New("not a configuration resource")

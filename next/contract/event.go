@@ -98,11 +98,14 @@ type PostCreated struct {
 	Data           JSONData     `json:"data,omitempty"`
 	Turn           TurnID       `json:"turn,omitempty"`
 	Mentions       []Principal  `json:"mentions,omitempty"`
+	WorkflowStep   string       `json:"workflowStep,omitempty"`
 	Home           Conversation `json:"home"` // feed or a DM
 	ReplyTo        EventID      `json:"replyTo,omitempty"`
 	Attachments    []Attachment `json:"attachments,omitempty"`
 	ClientID       string       `json:"clientId,omitempty"` // the sender's PostRequest.ClientID, so a pending row is replaced exactly
 	ToolCallID     string       `json:"toolCallId,omitempty"`
+	// Context is read before Text by the one recipient and is not shown in the feed: root's work, for the advisor.
+	Context string `json:"context,omitempty"`
 	// Hook names the subscription whose Run wrote this post. The engine sends it, but the text is the script's.
 	Hook SubscriptionID `json:"hook,omitempty"`
 }
@@ -244,8 +247,9 @@ type TurnEnded struct {
 	Session        SessionID    `json:"session"`
 	Turn           TurnID       `json:"turn"`
 	Outcome        TurnOutcome  `json:"outcome"`
-	Final          string       `json:"final,omitempty"`   // the final response
-	Replies        []FinalReply `json:"replies,omitempty"` // where Final was delivered
+	Final          string       `json:"final,omitempty"`         // the final response
+	WaitingNotice  string       `json:"waitingNotice,omitempty"` // replaces Final for session recipients while waiting
+	Replies        []FinalReply `json:"replies,omitempty"`       // where Final was delivered
 	Usage          Usage        `json:"usage"`
 	Error          string       `json:"error,omitempty"` // failed only
 	Cause          FailureCause `json:"cause,omitempty"` // failed only
@@ -283,6 +287,16 @@ type TurnActivity struct {
 	Turn    TurnID       `json:"turn"`
 	Kind    ActivityKind `json:"kind"`  // what the turn is doing; the label only words it
 	Label   string       `json:"label"` // the running tool call, masked, one line of at most 80 characters
+	// Finished is set when a call of a parallel batch ends before its batch does. It leaves the latest label as it was.
+	Finished *ToolFinished `json:"finished,omitempty"`
+}
+
+// ToolFinished tells a reader that one call of a parallel batch is done. The transcript writes the batch's results
+// together once every call has ended, so this live signal lets the call stop showing as running until then.
+type ToolFinished struct {
+	Call       string `json:"call"` // the transcript item ID of the call
+	DurationMs int64  `json:"durationMs"`
+	Failed     bool   `json:"failed,omitempty"`
 }
 
 // ToolFailed records one tool call a session's transcript shows failing. Error and args are cut short and can hold outside text.
@@ -391,7 +405,7 @@ const (
 	CauseSetupFailed         FailureCause = "setup_failed"          // the box could not set up the session's repository before the turn
 	CauseModelFailed         FailureCause = "model_failed"          // the model provider refused or failed the request
 	CauseOutputLimit         FailureCause = "output_limit"          // the reply reached the model's output limit
-	CauseNoSubmit            FailureCause = "no_submit"             // a schema step's worker ended without a valid submit
+	CauseBadResult           FailureCause = "bad_result"            // a schema step's worker ended without a final text that matches the schema
 	CauseHarnessFailed       FailureCause = "harness_failed"        // the agent program stopped or could not run the turn
 	CauseSetModelFailed      FailureCause = "set_model_failed"      // the agent program refused the session's new model
 	CauseNotStarted          FailureCause = "not_started"           // on a stopped turn: it stopped before Pi took its inputs, so they stay pending
@@ -548,3 +562,12 @@ const (
 
 func (ConversationRead) EventType() EventType { return "conversation.read" }
 func (ConversationRead) isEventBody()         {}
+
+// Plus adds the tokens of other to u's. The model stays u's.
+func (u Usage) Plus(other Usage) Usage {
+	u.InputTokens += other.InputTokens
+	u.OutputTokens += other.OutputTokens
+	u.CacheReadTokens += other.CacheReadTokens
+	u.CacheWriteTokens += other.CacheWriteTokens
+	return u
+}

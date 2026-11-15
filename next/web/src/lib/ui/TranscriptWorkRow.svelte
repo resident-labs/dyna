@@ -1,9 +1,9 @@
 <!-- Ported from T3 Code (apps/web/src/components/chat/WorkLog.tsx), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE. -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import type { ActivityKind, TranscriptItem, TranscriptPart } from "../contract.gen.ts";
+  import type { ActivityKind, ToolFinished, TranscriptItem, TranscriptPart } from "../contract.gen.ts";
   import { activeVerb, elapsed, stepTime, titleOf, toolPart, type StepKind } from "../steps.ts";
-  import { formatTimelineDuration, summarizeWork, timelineItemRunning, workingLine, workLayout } from "../timeline.ts";
+  import { formatTimelineDuration, summarizeWork, timelineItemRunning, withFinished, workingLine, workLayout } from "../timeline.ts";
   import Icon, { type IconName } from "./Icon.svelte";
   import TranscriptIcon from "./TranscriptIcon.svelte";
   import Markdown from "./Markdown.svelte";
@@ -12,9 +12,12 @@
   import ReadThumb from "./ReadThumb.svelte";
   import RunFields from "./RunFields.svelte";
   import { readMedia } from "../media.ts";
+  import AgentRead from "./AgentRead.svelte";
+  import Self from "./TranscriptWorkRow.svelte";
 
-  let { items, ended, started, now, activity, chunks, onload, onopen, session, onmedia }: {
+  let { items: reported, finished, ended, started, now, activity, chunks, onload, onopen, session, onmedia, bare = false }: {
     items: TranscriptItem[];
+    finished?: ReadonlyMap<string, ToolFinished>;
     ended: boolean;
     started: string;
     now: number;
@@ -24,10 +27,15 @@
     onopen: () => void;
     session: string;
     onmedia: (key: string) => void;
+    bare?: boolean; // no heading: the group is under a row that says what it is
   } = $props();
+  // The steps an advisor call's agent has taken, by call. Stopping root's turn stops the call.
+  let agentSteps: Record<string, number> = $state({});
 
-  const icons: Record<StepKind, IconName> = { read: "file", edit: "edit", write: "write", search: "search", list: "list", run: "terminal", fetch: "globe", tool: "tool" };
+  const icons: Record<StepKind, IconName> = { read: "file", edit: "edit", write: "write", search: "search", list: "list", run: "terminal", fetch: "globe", advisor: "chat", tool: "tool" };
   const parts = ["arguments", "output"] as const;
+  // The advisor's answer is a message after the call, in the thread: the row links to it instead of repeating it.
+  const showAnswer = (id: string) => document.getElementById("advice-" + id)?.scrollIntoView({ block: "center" });
   let failures: Record<string, boolean> = $state({});
   let loading: Record<string, boolean> = $state({});
   let expandedContent: Record<string, boolean> = $state({});
@@ -42,6 +50,7 @@
   }
 
   // Dyna keeps thoughts and tools in transcript order. The caller splits at posts and other boundaries.
+  let items = $derived(withFinished(reported, finished));
   let active = $derived(items.some(item => timelineItemRunning(item, ended)));
   let summary = $derived(active ? workingLine(started, now, activity) : summarizeWork(items));
   let thoughts = $derived(items.filter(item => item.kind === "thinking"));
@@ -98,11 +107,12 @@
   {#if item.tool === "codemode"}
     <CodemodeScript {item} {ended} {now} {chunks} {onload} {onopen} />
   {:else}
-  <details class="entry" data-media-key={item.image?.item} ontoggle={(event) => { if (event.currentTarget.open) { onopen(); if (item.more) { void load(item, "arguments"); void load(item, "output"); if (item.diff) void load(item, "diff"); } } }}>
+  <details class="entry" data-media-key={item.image?.item} {@attach (node: HTMLDetailsElement) => { if (running && title.kind === "advisor") node.open = true; }} ontoggle={(event) => { if (event.currentTarget.open) { onopen(); if (item.more) { void load(item, "arguments"); void load(item, "output"); if (item.diff) void load(item, "diff"); } } }}>
     <summary>
       <span class="slot">{#if running}<span class="spinner" aria-label="Working" role="img"></span>{:else}{#if ["run", "search", "read", "edit", "write"].includes(title.kind)}<TranscriptIcon kind={title.kind} />{:else}<Icon name={icons[title.kind]} size={16} />{/if}{/if}</span>
       {#if running}<span class="target" title={title.full}>{activeVerb(title.kind, title.verb)} {title.target}</span>{:else if title.kind === "run" || title.kind === "edit" || title.kind === "write"}<span class="target" title={title.full}>{title.target || title.verb}</span>{:else}<span class="target" title={title.full}>{title.verb} {title.target}</span>{/if}
       {#if item.image}{@const media = readMedia(session, item.turn, item.at, title.full, item.image)}<ReadThumb src={media.src} name={media.attachments[0].name} onopen={() => onmedia(media.key)} />{/if}
+      {#if running && title.kind === "advisor" && agentSteps[item.id]}<span class="steps">{agentSteps[item.id]} {agentSteps[item.id] === 1 ? "step" : "steps"}</span>{/if}
       <span class="time">{running ? elapsed(item.at, now) : stepTime({ started: item.at, ended: item.ended })}</span>
       {#if item.failed}<StatusPill tone="failed" label="Failed" word />{/if}
       <span class="entry-chevron"><TranscriptIcon kind="chevron" /></span>
@@ -118,9 +128,18 @@
         {/if}
         {#if !item.diff || item.failed}
         {#each parts as name}
+          <!-- The advisor's steps come between what it was asked and what it answered. -->
+          {#if title.kind === "advisor" && name === "output"}
+            <AgentRead {session} id={item.id} {running} oncount={count => { agentSteps[item.id] = count; }}>
+              {#snippet children(turn, agentChunks, agentLoad)}
+                <div class="agent"><Self items={turn.items ?? []} ended={!running} started={turn.started} {now} chunks={agentChunks} onload={agentLoad} onopen={() => {}} {session} {onmedia} bare /></div>
+              {/snippet}
+            </AgentRead>
+          {/if}
           {#if item[name] || chunks[key(item, name)] !== undefined}
             {@const part = toolPart(name, chunks[key(item, name)] ?? item[name] ?? "", title.kind, !!item.more && chunks[key(item, name)] === undefined)}
-            {#if part.text}{@const lines = part.text.split("\n")}<pre>{(expandedContent[key(item, name)] ? lines : lines.slice(0, 12)).join("\n")}</pre>{#if lines.length > 12 && !expandedContent[key(item, name)]}<button onclick={() => expandedContent[key(item, name)] = true}>Show all</button>{/if}{/if}
+            {#if title.kind === "advisor" && name === "output"}<button type="button" class="advice-link" onclick={() => showAnswer(item.id)}>Read the answer below</button>
+            {:else if part.text}{@const lines = part.text.split("\n")}<pre>{(expandedContent[key(item, name)] ? lines : lines.slice(0, 12)).join("\n")}</pre>{#if lines.length > 12 && !expandedContent[key(item, name)]}<button onclick={() => expandedContent[key(item, name)] = true}>Show all</button>{/if}{/if}
             {#if part.fields.length}<div class="fields"><RunFields fields={part.fields} /></div>{/if}
           {/if}
           {#if item.more && chunks[key(item, name)] === undefined}
@@ -144,10 +163,10 @@
   </div>
 {:else if items.length}
   <div class="group">
-    <div class="group-heading"><span class="slot"><TranscriptIcon kind="hammer" /></span><span>{summary}</span>
+    {#if !bare}<div class="group-heading"><span class="slot"><TranscriptIcon kind="hammer" /></span><span>{summary}</span>
       {#if failedCount}<StatusPill tone="failed" label={`${failedCount} failed`} word />{/if}
       {#if thoughts.length}<button class="thought-toggle" aria-expanded={showThoughts} onclick={toggleThoughts}>{thoughts.length} {thoughts.length === 1 ? "thought" : "thoughts"} <span class="fold-chevron"><TranscriptIcon kind="chevron" /></span></button>{/if}
-    </div>
+    </div>{/if}
     <div class="entries" role="region" aria-label="Work details">
       {#each items as item (item.id)}
         {#if item.kind !== "thinking"}{@render entry(item)}{:else if showThoughts}{@render thought(item, true)}{/if}
@@ -157,6 +176,9 @@
 {/if}
 
 <style>
+  .advice-link { padding: 4px 0; font-size: 14px; text-decoration: underline; text-underline-offset: 2px; }
+  .agent { padding: 2px 0 6px 0; }
+  .steps { white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; }
   .group, .entry { color: var(--muted); font-size: 14px; line-height: 1.625; }
   .group-heading { display: flex; align-items: center; gap: 6px; }
   .thought-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }

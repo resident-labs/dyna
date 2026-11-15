@@ -190,3 +190,28 @@ func TestOrdinaryTurnWaitsForModelAfterTools(t *testing.T) {
 		t.Fatalf("activity %v %v", kinds, labels)
 	}
 }
+
+// A parallel batch writes its results together, so each call of two or more says when it ends. A lone call needs no word.
+func TestOnlyAParallelBatchReportsFinishedCalls(t *testing.T) {
+	took := int64(8)
+	end := func(id, parent string, ms *int64, failed bool) agent.AgentEvent {
+		return agent.ToolExecutionEndEvent{ToolCallID: id, ParentToolCallID: parent, DurationMs: ms, IsError: failed}
+	}
+	run := func(batch agent.AgentEvent, ends ...agent.AgentEvent) []contract.ToolFinished {
+		var got []contract.ToolFinished
+		tr := newTurn("turn_a", func(contract.TurnID, contract.ActivityKind, string) {})
+		tr.finished = func(_ contract.TurnID, f contract.ToolFinished) { got = append(got, f) }
+		tr.event(batch)
+		for _, e := range ends {
+			tr.event(e)
+		}
+		return got
+	}
+	if got := run(narrated, end("a", "", &took, false)); got != nil {
+		t.Fatalf("a single call reported %+v", got)
+	}
+	want := []contract.ToolFinished{{Call: "b", DurationMs: 8, Failed: true}, {Call: "a"}}
+	if got := run(twoCalls, end("b", "", &took, true), end("inner", "b", &took, false), end("a", "", nil, false)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}

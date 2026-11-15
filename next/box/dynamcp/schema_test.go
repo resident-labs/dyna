@@ -1,6 +1,7 @@
 package dynamcp
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -24,6 +25,30 @@ func TestSessionStartHostSchemaAndGuidance(t *testing.T) {
 		return
 	}
 	t.Fatal("session tool missing")
+}
+
+func TestRegistrySchemaIsStable(t *testing.T) {
+	first, _, err := registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := json.Marshal(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 20 {
+		next, _, err := registry()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := json.Marshal(next)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != string(want) {
+			t.Fatal("registry schema changed between builds")
+		}
+	}
 }
 
 func TestRegistryBuilds(t *testing.T) {
@@ -108,7 +133,7 @@ func TestSharedFieldsAndTheToolDescriptionComeFromTheToolkit(t *testing.T) {
 		if !strings.HasPrefix(props["keys"].Description, "Key names: ") || !strings.HasSuffix(props["keys"].Description, "For click, drag, key and scroll.") {
 			t.Errorf("keys: %q", props["keys"].Description)
 		}
-		const opening = "The box desktop is 1280x800, with Chromium in a window and a taskbar; any action but stop starts it.\n"
+		const opening = "The box desktop is X11 on TigerVNC Xvnc, 1280x800, with JWM (no compositor), Chromium and a taskbar."
 		if !strings.HasPrefix(item.Description, opening) || strings.Count(item.Description, "The box desktop is") != 1 {
 			t.Fatalf("description %q", item.Description)
 		}

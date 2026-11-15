@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -18,38 +19,55 @@ const failedStepNames = 20
 // once, by the box's first start. Resume names the run this one resumes, and only a run's start reads it from here: afterwards
 // ResumedSessions follows the stored link.
 type WorkflowRun struct {
-	ID          contract.WorkflowRunID
-	Room        contract.RoomID
-	Session     contract.SessionID
-	Name        string
-	Description string
-	Script      string
-	Args        string
-	Profiles    []contract.ProfileName
-	Repo        contract.RepoName
-	Commit      string
-	Image       string
-	State       contract.WorkflowState
-	Result      string
-	Resume      contract.WorkflowRunID
-	MaxRuns     int // the most runs going in the room, counted when this one starts; 0 is no limit
-	Version     int
-	StatusLines []contract.WorkflowStatusLine // the script's latest status() lines, oldest first
-	Started     time.Time
-	Ended       time.Time
+	ID            contract.WorkflowRunID
+	Room          contract.RoomID
+	Session       contract.SessionID
+	Subscription  contract.SubscriptionID
+	Key           string // the key of a per-event run from before services; a service's run has none
+	Name          string
+	Description   string
+	Script        string
+	Args          string
+	Profiles      []contract.ProfileName
+	Repo          contract.RepoName
+	Commit        string
+	Image         string
+	State         contract.WorkflowState
+	PausedSteps   []string
+	ReleasedSteps []string
+	Paused        bool
+	Result        string
+	Resume        contract.WorkflowRunID
+	MaxRuns       int // the most runs going in the room, counted when this one starts; 0 is no limit
+	Version       int
+	StatusLines   []contract.WorkflowStatusLine // the script's latest status() lines, oldest first
+	Served        Served                        // what a service run has finished, and when its box first asked for events
+	Started       time.Time
+	Ended         time.Time
 }
 
 // workflowStatusLines is how many status() lines a run keeps.
 const workflowStatusLines = 20
 
-const workflowColumns = "id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,result,version,status_lines,started_at,ended_at"
+const workflowColumns = "sub,key,id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,result,version,status_lines,started_at,ended_at,paused,paused_steps,released_steps,served"
 
 func scanWorkflow(row interface{ Scan(...any) error }) (WorkflowRun, error) {
 	var run WorkflowRun
-	var profiles, lines string
+	var profiles, lines, pausedSteps, releasedSteps, served string
 	var started, ended int64
-	err := row.Scan(&run.ID, &run.Room, &run.Session, &run.Name, &run.Description, &run.Script, &run.Args, &profiles, &run.Repo, &run.Commit, &run.Image, &run.State, &run.Result, &run.Version, &lines, &started, &ended)
+	err := row.Scan(&run.Subscription, &run.Key, &run.ID, &run.Room, &run.Session, &run.Name, &run.Description, &run.Script, &run.Args, &profiles, &run.Repo, &run.Commit, &run.Image, &run.State, &run.Result, &run.Version, &lines, &started, &ended, &run.Paused, &pausedSteps, &releasedSteps, &served)
 	if err != nil {
+		return run, err
+	}
+	if served != "" {
+		if err := json.Unmarshal([]byte(served), &run.Served); err != nil {
+			return run, err
+		}
+	}
+	if err := json.Unmarshal([]byte(pausedSteps), &run.PausedSteps); err != nil {
+		return run, err
+	}
+	if err := json.Unmarshal([]byte(releasedSteps), &run.ReleasedSteps); err != nil {
 		return run, err
 	}
 	run.Started = time.UnixMilli(started).UTC()
@@ -62,7 +80,7 @@ func scanWorkflow(row interface{ Scan(...any) error }) (WorkflowRun, error) {
 
 // insertWorkflow adds a run in the transaction that starts its session. A resumed run keeps the old run's commit, image and
 // finished steps, so an unchanged step finds its result. Failed steps stay behind and run again, and a workflow step always
-// runs again so that its script is read afresh. The kept steps cost this run nothing, so they carry no usage.
+// runs again so that its script is read afresh. Kept steps preserve their usage and transcript progress.
 func insertWorkflow(ctx context.Context, tx *sql.Tx, session contract.SessionID, run WorkflowRun, at time.Time) error {
 	if run.MaxRuns > 0 {
 		var going int
@@ -83,7 +101,7 @@ func insertWorkflow(ctx context.Context, tx *sql.Tx, session contract.SessionID,
 			return err
 		}
 	}
-	_, err = tx.ExecContext(ctx, "INSERT INTO workflow_runs(id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,started_at,resumes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", run.ID, run.Room, session, run.Name, run.Description, run.Script, run.Args, string(profiles), run.Repo, run.Commit, run.Image, contract.WorkflowRunning, at.UnixMilli(), run.Resume)
+	_, err = tx.ExecContext(ctx, "INSERT INTO workflow_runs(sub,key,id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,started_at,resumes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", run.Subscription, run.Key, run.ID, run.Room, session, run.Name, run.Description, run.Script, run.Args, string(profiles), run.Repo, run.Commit, run.Image, contract.WorkflowRunning, at.UnixMilli(), run.Resume)
 	if err != nil {
 		return err
 	}
@@ -91,8 +109,8 @@ func insertWorkflow(ctx context.Context, tx *sql.Tx, session contract.SessionID,
 	if err != nil || run.Resume == "" {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(run,key,parent,kind,name,phase,lane,profile,detail,state,result,transcript,started_at,ended_at)
-		SELECT ?,key,parent,kind,name,phase,lane,profile,detail,state,result,transcript,started_at,ended_at FROM workflow_steps WHERE run=? AND state=? AND kind!=?`,
+	_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(run,key,parent,kind,name,phase,lane,profile,detail,state,result,reason,transcript,started_at,ended_at,progress_offset,tool_calls,last_activity)
+		SELECT ?,key,parent,kind,name,phase,lane,profile,detail,state,result,reason,transcript,started_at,ended_at,progress_offset,tool_calls,last_activity FROM workflow_steps WHERE run=? AND state=? AND kind!=?`,
 		run.ID, run.Resume, contract.WorkflowStepDone, contract.WorkflowStepWorkflow)
 	return err
 }
@@ -115,7 +133,7 @@ func (s *Store) WorkflowRuns(ctx context.Context, room contract.RoomID) ([]Workf
 // Branch is the crew's first recorded branch, with rowid breaking timestamp ties.
 func (s *Store) WorkflowList(ctx context.Context, room contract.RoomID) ([]contract.WorkflowInfo, error) {
 	rows, err := s.Read().QueryContext(ctx, `WITH runs AS (
- SELECT id,room,session,name,description,profiles,repo,commit_sha,version,state,status_lines,started_at,ended_at
+ SELECT sub,key,id,room,session,name,description,profiles,repo,commit_sha,version,state,status_lines,started_at,ended_at,served
  FROM workflow_runs WHERE room=? ORDER BY started_at DESC,id DESC LIMIT 100
  ), steps AS (
  SELECT w.run,w.state,w.name,w.started_at,w.input_tokens,w.output_tokens,w.cache_read_tokens,w.cache_write_tokens, row_number() OVER (PARTITION BY w.run,w.state ORDER BY w.started_at,w.rowid) AS ordinal
@@ -125,7 +143,7 @@ func (s *Store) WorkflowList(ctx context.Context, room contract.RoomID) ([]contr
  json_group_array(name ORDER BY started_at,ordinal) FILTER (WHERE state='failed' AND ordinal<=20) AS names,
  SUM(input_tokens) AS input,SUM(output_tokens) AS output,SUM(cache_read_tokens) AS cache_read,SUM(cache_write_tokens) AS cache_write
  FROM steps GROUP BY run
- ) SELECT r.id,r.room,r.session,r.name,r.description,r.profiles,r.repo,r.commit_sha,r.version,r.state,r.status_lines,r.started_at,r.ended_at,
+ ) SELECT r.sub,r.key,r.id,r.room,r.session,r.name,r.description,r.profiles,r.repo,r.commit_sha,r.version,r.state,r.status_lines,r.started_at,r.ended_at,r.served,
  COALESCE((SELECT branch FROM session_branches b WHERE b.repo=r.repo AND b.session=r.session ORDER BY created_at,rowid LIMIT 1),''),
  COALESCE(t.steps,0),COALESCE(t.running,0),COALESCE(t.failed,0),COALESCE(t.names,'[]'),
  COALESCE(t.input,0),COALESCE(t.output,0),COALESCE(t.cache_read,0),COALESCE(t.cache_write,0)
@@ -137,9 +155,9 @@ func (s *Store) WorkflowList(ctx context.Context, room contract.RoomID) ([]contr
 	runs := []contract.WorkflowInfo{}
 	for rows.Next() {
 		var run contract.WorkflowInfo
-		var profiles, lines, names string
+		var profiles, lines, names, served string
 		var started, ended int64
-		if err := rows.Scan(&run.Run, &run.Room, &run.Session, &run.Name, &run.Description, &profiles, &run.Repo, &run.Commit, &run.Version, &run.State, &lines, &started, &ended, &run.Branch, &run.Steps, &run.Running, &run.Failed, &names, &run.Usage.InputTokens, &run.Usage.OutputTokens, &run.Usage.CacheReadTokens, &run.Usage.CacheWriteTokens); err != nil {
+		if err := rows.Scan(&run.Subscription, &run.Key, &run.Run, &run.Room, &run.Session, &run.Name, &run.Description, &profiles, &run.Repo, &run.Commit, &run.Version, &run.State, &lines, &started, &ended, &served, &run.Branch, &run.Steps, &run.Running, &run.Failed, &names, &run.Usage.InputTokens, &run.Usage.OutputTokens, &run.Usage.CacheReadTokens, &run.Usage.CacheWriteTokens); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(profiles), &run.Profiles); err != nil {
@@ -157,6 +175,16 @@ func (s *Store) WorkflowList(ctx context.Context, room contract.RoomID) ([]contr
 		}
 		run.Started = time.UnixMilli(started).UTC()
 		run.Ended = fromMillis(ended)
+		if run.Subscription != "" && run.Key == "" {
+			var kept Served
+			if served != "" {
+				if err := json.Unmarshal([]byte(served), &kept); err != nil {
+					return nil, err
+				}
+			}
+			run.Service = kept.Info(run.State == contract.WorkflowRunning)
+			run.Usage = run.Usage.Plus(kept.Usage)
+		}
 		runs = append(runs, run)
 	}
 	return runs, rows.Err()
@@ -172,8 +200,8 @@ func (s *Store) ResumedSessions(ctx context.Context, repo contract.RepoName, ses
 		SELECT session FROM chain WHERE session!=?`, session, repo, repo, session)
 }
 
-// ErrWorkflowEnded is a reload of a run that is no longer running.
-var ErrWorkflowEnded = errors.New("the run has ended")
+// ErrWorkflowEnded refuses a control or post to a run that is no longer running.
+var ErrWorkflowEnded = errors.New("the workflow run has ended")
 
 // ReloadWorkflow makes script the run's newest version, with its meta's description and profiles, keeps it beside the earlier
 // ones, and wakes the crew's channel to carry it to the box. It returns the new version.
@@ -244,8 +272,8 @@ func (s *Store) StartWorkflowStep(ctx context.Context, run contract.WorkflowRunI
 			return err
 		}
 		stored = contract.WorkflowStepStartResponse{}
-		_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(run,key,parent,kind,name,phase,lane,profile,detail,state,started_at,version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
-			ON CONFLICT(run,key) DO UPDATE SET state=excluded.state,lane=excluded.lane,reason='',transcript='',started_at=excluded.started_at,ended_at=0,version=excluded.version`, run, req.Key, req.Parent, req.Kind, req.Name, req.Phase, req.Lane, req.Profile, req.Detail, contract.WorkflowStepRunning, at.UnixMilli(), req.Version)
+		_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(run,key,parent,kind,name,phase,lane,profile,detail,state,started_at,version,event) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+			ON CONFLICT(run,key) DO UPDATE SET state=excluded.state,lane=excluded.lane,reason='',transcript='',started_at=excluded.started_at,ended_at=0,version=excluded.version,progress_offset=0,tool_calls=0,last_activity=0,input_tokens=0,output_tokens=0,cache_read_tokens=0,cache_write_tokens=0`, run, req.Key, req.Parent, req.Kind, req.Name, req.Phase, req.Lane, req.Profile, req.Detail, contract.WorkflowStepRunning, at.UnixMilli(), req.Version, req.Event)
 		return err
 	})
 	return stored, err
@@ -295,6 +323,26 @@ func (s *Store) EndWorkflowStep(ctx context.Context, run contract.WorkflowRunID,
 		} else if n == 0 {
 			return ErrNotFound
 		}
+		for _, column := range []string{"paused_steps", "released_steps"} {
+			var raw string
+			if err := tx.QueryRowContext(ctx, "SELECT "+column+" FROM workflow_runs WHERE id=?", run).Scan(&raw); err != nil {
+				return err
+			}
+			var paused []string
+			if err := json.Unmarshal([]byte(raw), &paused); err != nil {
+				return err
+			}
+			kept := slices.DeleteFunc(paused, func(key string) bool { return key == req.Key })
+			if len(kept) != len(paused) {
+				data, err := json.Marshal(kept)
+				if err != nil {
+					return err
+				}
+				if _, err := tx.ExecContext(ctx, "UPDATE workflow_runs SET "+column+"=? WHERE id=?", string(data), run); err != nil {
+					return err
+				}
+			}
+		}
 		return nil
 	})
 }
@@ -307,19 +355,59 @@ func (s *Store) SetWorkflowStepTranscript(ctx context.Context, run contract.Work
 	})
 }
 
+// WorkflowStepProgress holds totals through Offset, the byte after the last complete transcript record.
+// Losing a transcript file does not reset this high-water mark.
+type WorkflowStepProgress struct {
+	Offset       int64
+	ToolCalls    int
+	Usage        contract.Usage
+	LastActivity time.Time
+}
+
+// WorkflowProgress reads a running step's persisted progress without opening its transcript.
+func (s *Store) WorkflowProgress(ctx context.Context, session contract.SessionID, path string) (WorkflowStepProgress, error) {
+	var progress WorkflowStepProgress
+	var activity int64
+	err := s.Read().QueryRowContext(ctx, `SELECT progress_offset,tool_calls,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,last_activity
+		FROM workflow_steps WHERE run=(SELECT id FROM workflow_runs WHERE session=?) AND transcript=? AND state=?`, session, path, contract.WorkflowStepRunning).Scan(
+		&progress.Offset, &progress.ToolCalls, &progress.Usage.InputTokens, &progress.Usage.OutputTokens, &progress.Usage.CacheReadTokens, &progress.Usage.CacheWriteTokens, &activity)
+	progress.LastActivity = fromMillis(activity)
+	return progress, err
+}
+
+// SetWorkflowProgress replaces running totals only if previous still matches the stored offset.
+// A stale offset or finished step returns ErrNotFound; neither can change the stored totals.
+func (s *Store) SetWorkflowProgress(ctx context.Context, session contract.SessionID, path string, previous int64, progress WorkflowStepProgress) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `UPDATE workflow_steps SET progress_offset=?,tool_calls=?,input_tokens=?,output_tokens=?,cache_read_tokens=?,cache_write_tokens=?,last_activity=?
+			WHERE run=(SELECT id FROM workflow_runs WHERE session=?) AND transcript=? AND state=? AND progress_offset=? AND progress_offset<=?`,
+			progress.Offset, progress.ToolCalls, progress.Usage.InputTokens, progress.Usage.OutputTokens, progress.Usage.CacheReadTokens, progress.Usage.CacheWriteTokens, millis(progress.LastActivity), session, path, contract.WorkflowStepRunning, previous, progress.Offset)
+		if err != nil {
+			return err
+		}
+		if n, err := result.RowsAffected(); err != nil {
+			return err
+		} else if n == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
+}
+
 // workflowStepMore says a step holds more than its row: what it ran beyond the words its name quotes, or what a command wrote.
 const workflowStepMore = `ifnull(trim(detail,char(32,9,10,13)) NOT IN ('',substr(name,length(kind)+3)) OR CASE WHEN kind='run' AND json_valid(result) THEN ifnull(json_extract(result,'$.stdout'),'')!='' OR ifnull(json_extract(result,'$.stderr'),'')!='' OR ifnull(json_extract(result,'$.code'),0)!=0 OR json_type(result,'$.conflicts')='array' ELSE 0 END,0)`
 
-const workflowStepColumns = "key,parent,kind,name,phase,lane,profile,version,state,reason,transcript," + workflowStepMore + ",input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,started_at,ended_at"
+const workflowStepColumns = "key,parent,kind,name,phase,lane,profile,version,state,reason,transcript," + workflowStepMore + ",input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,tool_calls,last_activity,started_at,ended_at"
 
 func scanWorkflowStep(row interface{ Scan(...any) error }, extra ...any) (contract.WorkflowStep, error) {
 	var step contract.WorkflowStep
-	var started, ended int64
-	if err := row.Scan(append([]any{&step.Key, &step.Parent, &step.Kind, &step.Name, &step.Phase, &step.Lane, &step.Profile, &step.Version, &step.State, &step.Reason, &step.Transcript, &step.More, &step.Usage.InputTokens, &step.Usage.OutputTokens, &step.Usage.CacheReadTokens, &step.Usage.CacheWriteTokens, &started, &ended}, extra...)...); err != nil {
+	var started, ended, activity int64
+	if err := row.Scan(append([]any{&step.Key, &step.Parent, &step.Kind, &step.Name, &step.Phase, &step.Lane, &step.Profile, &step.Version, &step.State, &step.Reason, &step.Transcript, &step.More, &step.Usage.InputTokens, &step.Usage.OutputTokens, &step.Usage.CacheReadTokens, &step.Usage.CacheWriteTokens, &step.ToolCalls, &activity, &started, &ended}, extra...)...); err != nil {
 		return step, err
 	}
 	step.Started = time.UnixMilli(started).UTC()
 	step.Ended = fromMillis(ended)
+	step.LastActivity = fromMillis(activity)
 	return step, nil
 }
 
@@ -446,4 +534,99 @@ func (s *Store) endWorkflow(ctx context.Context, tx *sql.Tx, id contract.Workflo
 	}
 	_, err = s.AppendEvent(tx, event)
 	return err
+}
+
+func (s *Store) PauseWorkflow(ctx context.Context, id contract.WorkflowRunID, paused bool, step string) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		var session contract.SessionID
+		var runPaused bool
+		var raw, releasedRaw string
+		err := tx.QueryRowContext(ctx, "SELECT session,paused,paused_steps,released_steps FROM workflow_runs WHERE id=? AND state=?", id, contract.WorkflowRunning).Scan(&session, &runPaused, &raw, &releasedRaw)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrWorkflowEnded
+		}
+		if err != nil {
+			return err
+		}
+		var steps []string
+		if err := json.Unmarshal([]byte(raw), &steps); err != nil {
+			return err
+		}
+		var released []string
+		if err := json.Unmarshal([]byte(releasedRaw), &released); err != nil {
+			return err
+		}
+		if step == "" {
+			released = []string{}
+			runPaused = paused
+			if !paused {
+				steps = []string{}
+			}
+		} else {
+			released = slices.DeleteFunc(released, func(key string) bool { return key == step })
+			if !paused && runPaused {
+				released = append(released, step)
+			}
+			steps = slices.DeleteFunc(steps, func(key string) bool { return key == step })
+			if paused {
+				steps = append(steps, step)
+			}
+		}
+		data, err := json.Marshal(steps)
+		if err != nil {
+			return err
+		}
+		releasedData, err := json.Marshal(released)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE workflow_runs SET paused=?,paused_steps=?,released_steps=? WHERE id=?", runPaused, string(data), string(releasedData), id); err != nil {
+			return err
+		}
+
+		s.wakePending = append(s.wakePending, session)
+		return nil
+	})
+}
+
+// EndedWorkflowNamed recognizes a finished run's session name after SessionByName no longer lists it.
+func (s *Store) EndedWorkflowNamed(ctx context.Context, room contract.RoomID, name string) (WorkflowRun, error) {
+	var id contract.WorkflowRunID
+	err := s.Read().QueryRowContext(ctx, "SELECT w.id FROM workflow_runs w JOIN sessions s ON s.id=w.session WHERE s.room=? AND s.name=? AND w.state!=?", room, name, contract.WorkflowRunning).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return WorkflowRun{}, nil
+	}
+	if err != nil {
+		return WorkflowRun{}, err
+	}
+	return s.WorkflowRun(ctx, id)
+}
+
+// WorkflowRunNamed resolves a run's session name within a room, or uniquely across rooms for the owner.
+func (s *Store) WorkflowRunNamed(ctx context.Context, room contract.RoomID, name string) (WorkflowRun, error) {
+	rows, err := s.Read().QueryContext(ctx, "SELECT w.id FROM workflow_runs w JOIN sessions s ON s.id=w.session WHERE s.name=? AND (?='' OR s.room=?)", name, room, room)
+	if err != nil {
+		return WorkflowRun{}, err
+	}
+	var ids []contract.WorkflowRunID
+	for rows.Next() {
+		var id contract.WorkflowRunID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return WorkflowRun{}, err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return WorkflowRun{}, err
+	}
+	if len(ids) == 0 {
+		return WorkflowRun{}, ErrNotFound
+	}
+	if len(ids) != 1 {
+		return WorkflowRun{}, errors.New("run session name is ambiguous; use the run ID")
+	}
+	return s.WorkflowRun(ctx, ids[0])
 }

@@ -35,7 +35,7 @@ func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
 	for _, item := range BuiltIn() {
 		byName[item.Name] = item
 	}
-	if extend := byName["dyna-extend"]; len(byName) != 10 || !strings.HasPrefix(extend.Description, "Use when sessions need a skill, Pi package or MCP server") || !extend.BuiltIn || byName["dyna-discord"].Name == "" {
+	if extend := byName["dyna-extend"]; len(byName) != 11 || !strings.HasPrefix(extend.Description, "Use when sessions need a skill, Pi package or MCP server") || !extend.BuiltIn || byName["dyna-discord"].Name == "" {
 		t.Fatalf("%+v", byName)
 	}
 	if !IsBuiltIn("dyna-extend") || IsBuiltIn("other") {
@@ -92,26 +92,56 @@ func TestTheWorkflowSkillSaysWhatTheCodeDoes(t *testing.T) {
 	}
 	text := string(data)
 	for _, want := range []string{
-		"`JSON.parse(args)`", "`{code, stdout, stderr, durationMs}`", "`check` defaults to `true`", "`{failed: true, step, reason}`",
-		"`{step, text, branch, commit, files}`", "`{step, output, branch, commit, files}`", "`{branch, commit, merged, conflicts}`", "`r.output.issues`",
-		"A crew reports only to its parent", "`merge()` reads `commit`, not the tip of `branch`", "A resume is a new session", "through any chain of resumes",
-		"the run ended first", "`Failed steps (N): <names>`", "`data.json`", "Up to 1024 bytes", "only through the prompt", "one worker per 512 MiB", "holds a box slot",
-		"dry run of one group", "Do not prohibit the tools a worker needs", "still reports done",
-		"`cwd` is relative to the main tree unless it is", "`maxWorkers`", "git worktree remove --force", "`dyna session stop CREW`",
-		"Reload is for a running run, resume for an ended one", "`dyna workflow reload RUN FILE`", "no second one starts", "runs on until the run ends",
-		"script version",
-		"the worker submits as a JSON file", "`status(text)`", "It is not a step", "options other than `lane`", "nothing is read from a step's name",
+		"`JSON.parse(args)`", "{code, stdout, stderr, durationMs}", "`check` defaults to `true`", "`{failed: true, step, reason}`",
+		"`{step, text, branch, commit, files}`", "`output` in place of `text` with a schema", "{branch, commit, merged, conflicts}",
+		"reads `commit`, not the tip of `branch`", "is a new session", "through any chain of resumes",
+		"the run ended first", "`Failed steps (N): <names>`", "`data.json`", "Up to 1024 bytes", "one worker per 512 MiB", "holds a box slot",
+		"Don't prohibit the tools a worker needs", "still reports done", "the final text is parsed as JSON and validated",
+		"`cwd` is relative to the main tree unless absolute", "`maxWorkers`", "git worktree remove --force", "`dyna session stop SESSION`",
+		"reload is for a running run", "resume is for an ended run", "`dyna workflow reload RUN FILE`", "no second one starts", "dyna workflow steer RUN STEP TEXT", "dyna workflow pause RUN", "dyna workflow unpause RUN", "runs on until the run ends",
+		"script version", "[events.md](events.md)", "status(text: string)", "It is not a step", "options other than `lane`",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the skill does not say %q", want)
 		}
 	}
-	if lines := strings.Count(text, "\n"); lines > 150 {
+	if lines := strings.Count(text, "\n"); lines > 190 {
 		t.Errorf("the skill is %d lines", lines)
 	}
 	for _, word := range []string{"you must", "always", "never"} {
 		if strings.Contains(strings.ToLower(text), word) {
 			t.Errorf("the skill says %q: it states facts", word)
+		}
+	}
+}
+
+func TestWorkflowEventsGuideIsInstalled(t *testing.T) {
+	guide, err := builtIn.ReadFile("dyna-workflows/events.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(guide)
+	for _, want := range []string{"```js\nexport const meta", "```sh\ndyna room repo add ROOM OWNER/REPO --pr-events on", "dyna subscription add", "args.event", "await state.get()", "await state.set({ head })", "kind=pushed,opened", "subscription fire", "subscription update", "subscription state"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("events guide does not say %q", want)
+		}
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if len(line) > 120 {
+			t.Errorf("events guide line is %d characters: %s", len(line), line)
+		}
+	}
+	for _, root := range []bool{true, false} {
+		dir := t.TempDir()
+		if err := Install(dir, root); err != nil {
+			t.Fatal(err)
+		}
+		copied, err := os.ReadFile(filepath.Join(dir, "dyna-workflows", "events.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(copied) != text {
+			t.Fatalf("events guide changed during install (root=%v)", root)
 		}
 	}
 }
@@ -276,7 +306,7 @@ func TestAdminSkill(t *testing.T) {
 }
 
 func TestRootOnlySkills(t *testing.T) {
-	root := map[string]bool{"dyna-admin": true, "dyna-diagnose": true, "dyna-local-proxy": true, "dyna-nodes": true, "dyna-services": true}
+	root := map[string]bool{"dyna-admin": true, "dyna-diagnose": true, "dyna-local-proxy": true, "dyna-nodes": true, "dyna-rules": true, "dyna-services": true}
 	total := 0
 	for _, item := range BuiltIn() {
 		data, err := builtIn.ReadFile(item.Name + "/" + File)
@@ -292,7 +322,7 @@ func TestRootOnlySkills(t *testing.T) {
 		}
 		total += len(item.Description)
 	}
-	if total > 1700 {
+	if total > 1850 {
 		t.Errorf("the descriptions take %d characters", total)
 	}
 }
@@ -307,12 +337,12 @@ func TestTheDiagnoseSkillIsForRoot(t *testing.T) {
 		t.Fatalf("%+v %v", meta, err)
 	}
 	text := string(data)
-	for _, want := range []string{"dyna-audience: root", "beforeSeq", "no_hello", "room-limit", "model_failed", "journalctl --user", "engine host named in your prompt", "When runs look stuck"} {
+	for _, want := range []string{"dyna-audience: root", "beforeSeq", "no_hello", "room-limit", "model_failed", "journalctl --user", "engine host named in your prompt", "When runs look stuck", "Box lost before its work was pushed", "transcripts/<session>", "oldText", "isError", "chronological"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the skill does not say %q", want)
 		}
 	}
-	if lines := strings.Count(text, "\n"); lines > 150 {
+	if lines := strings.Count(text, "\n"); lines > 165 {
 		t.Errorf("the skill is %d lines", lines)
 	}
 }

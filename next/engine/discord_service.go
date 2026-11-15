@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/discord"
+	"github.com/resident-labs/dyna/engine/discord/policy"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
@@ -70,7 +72,25 @@ func (s *Service) runDiscord(ctx context.Context, gateway string) {
 					go func() {
 						defer close(finished)
 						gatewayDone := make(chan struct{})
-						g := discord.Gateway{Client: client, URL: gateway, Bot: b.ID, Directory: &s.discordDirectory, Receive: func(ctx context.Context, m discord.Message) error { return s.discordInput(ctx, client, m) }, Observe: s.discordServerEvent, Lost: &s.discordEventsLost}
+						g := discord.Gateway{PrepareResume: func(ctx context.Context) error { return s.discordRestoreDirectory(ctx, client) }, LoadResume: func(ctx context.Context) (discord.ResumeState, error) {
+							var state discord.ResumeState
+							data, err := s.store.DiscordResume(ctx, b.Credential)
+							if err != nil || data == "" {
+								return state, err
+							}
+							err = json.Unmarshal([]byte(data), &state)
+							return state, err
+						}, SaveResume: func(ctx context.Context, state discord.ResumeState) error {
+							data, err := json.Marshal(state)
+							if err != nil {
+								return err
+							}
+							return s.store.SetDiscordResume(ctx, b.Credential, string(data))
+						}, Client: client, URL: gateway, Bot: b.ID, Directory: &s.discordDirectory, CatchUp: func(ctx context.Context, guild string, receive func(context.Context, discord.Message) error) {
+							s.discordCatchUp(ctx, client, guild, receive)
+						}, Receive: func(ctx context.Context, m discord.Message) error {
+							return s.discordInput(ctx, client, m)
+						}, Observe: s.discordServerEvent, Lost: &s.discordEventsLost}
 						go func() {
 							defer close(gatewayDone)
 							if b.Failure != "" {
@@ -141,7 +161,7 @@ func (s *Service) discordInput(ctx context.Context, client *discord.Client, m di
 				selected = r
 			}
 		}
-		if len(guilds) != 1 {
+		if len(guilds) != 1 || len(m.Member.Roles) == 0 {
 			_, _, _ = client.Send(ctx, m.Channel, "Please mention me in a mapped server channel so I know which room should answer.", m.ID)
 			return nil
 		}
@@ -155,6 +175,11 @@ func (s *Service) discordInput(ctx context.Context, client *discord.Client, m di
 	}
 	if !allowed {
 		return nil
+	}
+	if m.Guild == "" {
+		if err := s.store.SetDiscordDMRoute(ctx, m.Channel, selected.Guild, selected.Room); err != nil {
+			return err
+		}
 	}
 	guildName := selected.Guild
 	var roles []string
@@ -186,7 +211,24 @@ func (s *Service) discordInput(ctx context.Context, client *discord.Client, m di
 			thread = m.Channel
 		}
 	}
-	b := contract.DiscordMessage{Channel: m.Channel, ChannelName: name, Thread: thread, GuildName: guildName, Author: m.Author.Username, DisplayName: display, Roles: roles, AuthorID: m.Author.ID, Owner: bot.Owner != "" && bot.Owner == m.Author.ID, Message: m.ID, Text: m.Content}
+	if m.Guild == "" {
+		name = "direct message"
+	}
+	b := contract.DiscordMessage{Direct: m.Guild == "", Channel: m.Channel, ChannelName: name, Thread: thread, GuildName: guildName, Author: m.Author.Username, DisplayName: display, Roles: roles, AuthorID: m.Author.ID, Owner: bot.Owner != "" && bot.Owner == m.Author.ID, Message: m.ID, Text: m.Content}
+	b.Confined = b.Direct
+	for _, route := range routes {
+		if route.Guild != selected.Guild || route.Channel != "" || route.PolicyResolved == "" {
+			continue
+		}
+		var p policy.Policy
+		if err := json.Unmarshal([]byte(route.PolicyResolved), &p); err != nil {
+			return err
+		}
+		b.Confined = b.Direct || p.Front.Team != nil && !slices.ContainsFunc(m.Member.Roles, func(r string) bool { return slices.Contains(p.Front.Team, r) })
+	}
+	if b.Owner {
+		b.Confined = false
+	}
 	if m.Guild != "" {
 		b.History = client.History(ctx, m.Channel, m.ID, bot.ID)
 	}

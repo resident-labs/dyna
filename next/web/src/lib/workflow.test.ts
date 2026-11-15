@@ -4,11 +4,11 @@ import { decodeEvent } from "./event.ts";
 import { feedRows } from "./feed.ts";
 import { RunState } from "./run.svelte.ts";
 import type { Json } from "./json.ts";
-import { FAILED, LONG_PHASE, READABLE_SPAN, STRIP_PHASES, applyStep, branchLink, commitLink, countedLine, failedNodes, figures, flow, foldable, jsonFields, minutesLabel, nested, openable, phases, reading, roomRuns, runCounts, runRows, runScale, shownFacts, shownStep, spanReads, stageOf, stagesOf, stepBody, stepSpan, stepTime, stepTitle, stepWord, strip, timed, timeline, tokens } from "./workflow.ts";
+import { FAILED, LONG_PHASE, READABLE_SPAN, STRIP_PHASES, applyStep, branchLink, commitLink, countedLine, failedNodes, figures, flow, foldable, jsonFields, minutesLabel, nested, openable, phases, reading, roomRuns, runCounts, runRows, runScale, serviceLine, shownFacts, shownStep, spanReads, stageOf, stagesOf, stepBody, stepSpan, stepTime, stepTitle, stepWord, strip, timed, timeline, tokens } from "./workflow.ts";
 import type { Event, WorkflowInfo, WorkflowStatusResponse, WorkflowStep } from "./contract.gen.ts";
 
 const usage = { model: "", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
-const step = (key: string, fields: Partial<WorkflowStep> = {}): WorkflowStep => ({ key, kind: "agent", name: key, state: "done", usage, started: "2026-01-01T00:00:00Z", ended: "2026-01-01T00:00:04Z", transcript: `${key}.jsonl`, ...fields });
+const step = (key: string, fields: Partial<WorkflowStep> = {}): WorkflowStep => ({ toolCalls: 0, key, kind: "agent", name: key, state: "done", usage, started: "2026-01-01T00:00:00Z", ended: "2026-01-01T00:00:04Z", transcript: `${key}.jsonl`, ...fields });
 const status = (fields: Partial<WorkflowStatusResponse["run"]>, steps: WorkflowStep[] = [], merge?: WorkflowStatusResponse["merge"]): WorkflowStatusResponse =>
   ({ run: { run: "wf", room: "r", session: "crew", name: "sweep", profiles: ["p"], state: "running", failed: 0, usage, started: "2026-01-01T00:00:00Z", ...fields }, steps, merge });
 
@@ -67,6 +67,11 @@ test("only a worker with a file opens, and the address names it", () => {
   assert.equal(openable(step("c", { kind: "run" })), false);
   assert.equal(shownStep("?step=abc"), "abc");
   assert.equal(shownStep(""), undefined);
+});
+
+test("a service's line counts its events", () => {
+  const service = { state: "serving" as const, keys: [{ key: "a", waiting: 2, inFlight: 1 }, { key: "b", waiting: 0, inFlight: 1 }], handled: 14, failed: 1, usage };
+  assert.equal(serviceLine(service), "serving · 2 waiting · 2 in flight · 14 handled · 1 failed");
 });
 
 test("a script that wrote no status gets a counted line", () => {
@@ -252,6 +257,31 @@ test("the run branch and commit link to the repository, and a run with none link
   assert.equal(branchLink("resident-labs/dyna", "v2/ses_1-run"), "https://github.com/resident-labs/dyna/tree/v2/ses_1-run");
   assert.equal(commitLink("resident-labs/dyna", "18b5fa2"), "https://github.com/resident-labs/dyna/commit/18b5fa2");
   assert.equal(branchLink(undefined, "x"), undefined);
+});
+
+test("journal events preserve status progress for the same attempt, but a rerun starts fresh", () => {
+  const live = step("a", { state: "running", ended: undefined, toolCalls: 12, lastActivity: "2026-01-01T00:00:03Z" });
+  const ended = applyStep([live], step("a"));
+  assert.equal(ended[0].toolCalls, 12);
+  assert.equal(ended[0].lastActivity, live.lastActivity);
+  const rerun = step("a", { state: "running", started: "2026-01-02T00:00:00Z", toolCalls: 0 });
+  assert.equal(applyStep(ended, rerun)[0].toolCalls, 0);
+  assert.equal(applyStep(ended, rerun)[0].lastActivity, undefined);
+});
+
+test("a final run refresh replaces journal counts with final transcript progress", async () => {
+  const restore = answering([reply(status({}, [step("a", { toolCalls: 3 })])), reply(status({ state: "done" }, [step("a", { toolCalls: 14 })]))]);
+  try {
+    const run = new RunState("crew");
+    await run.read();
+    run.apply(step("a"));
+    assert.equal(run.snapshot.steps[0].toolCalls, 3);
+    run.apply();
+    await new Promise(done => setTimeout(done));
+    assert.equal(run.snapshot.steps[0].toolCalls, 14);
+    run.apply(step("a"));
+    assert.equal(run.snapshot.steps[0].toolCalls, 14);
+  } finally { restore(); }
 });
 
 test("a closed run shows its journal by session, with its result and merge", async () => {

@@ -18,9 +18,8 @@ discord tool, whose `api` action is Discord REST with the bot's permissions: the
   followed by your final text in the same channel, so give an answer you send yourself a `replyTo`.
 - While a child of yours is at work or a job of yours runs, a turn that ends with no final text
   keeps the answer owed; the first later turn with final text answers it.
-- A DM is answered by your final text only: `send` and `api` refuse DM channels. A DM reaches the
-  room whose whole-server mapping has the author as a member; with none or several, the bot asks the
-  author to mention it in a server channel.
+- A DM or a server sender outside `front.team` gets a confined turn: read, answer and edit or delete your
+  own messages only in its channel; from a server message also delete it or time out its author (policy).
 - A server input carries up to 20 earlier messages (4,000 characters, the bot's own cut to 300); a DM none.
 ## Pass a question up
 Post to your parent with the channel ID and message ID from the input frame. The parent has the
@@ -128,6 +127,7 @@ Only root or the owner sets it. Names must resolve uniquely. Starter file:
 enabled: true
 log: mod-log
 front:
+  team: [Maintainers] # Trusted senders; [] confines everyone except the owner; omit for no server confinement.
   timeout_max: 1h
   roles: [Contributors]
   delete: yes

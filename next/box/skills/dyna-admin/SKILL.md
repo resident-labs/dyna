@@ -40,6 +40,8 @@ unless a paragraph below says otherwise. Read again after the change. Rows marke
 | You see | Change | Read | Whose |
 |---|---|---|---|
 | GitHub write refused* | `room set ROOM --github-writes GROUPS@REPOS` | the refusal | yours |
+| The owner wants local time in input frames | `owner timezone ZONE` (IANA name; `""` clears) | `owner timezone` | the owner's, install-wide |
+| The owner wants an advisor, or a new profile for it | `room advisor ROOM PROFILE` (`none` removes it) | dyna_advisor | the owner's: it is a room setting only the owner changes |
 | A repository is not in the room | `room repo add ROOM owner/repo` | `room repo list ROOM` | yours |
 | `runs-on: dyna-…` jobs sit queued | `room repo ci owner/repo --on [--max N]` | dyna_room | yours |
 | New boxes wait or go to the wrong host* | `room hosts ROOM --only [POOL,]HOST,…` | none | yours |
@@ -53,6 +55,7 @@ unless a paragraph below says otherwise. Read again after the change. Rows marke
 | A host is full, degraded or off* | `host set NAME …` | `host list` | every room |
 | A host serves the wrong rooms* | `host limit NAME --room ROOM` or `--all` | Settings > Hosts | every room |
 | A profile's model, ratings or cap | `profile set NAME --FIELD VALUE` | `profile show NAME` | every room |
+| PR events for every open PR | `room repo add ROOM owner/repo --pr-events on` | `room repo list ROOM` | yours |
 | The room should answer on Discord* | `room discord ROOM --server ID …` | `room discord ROOM` | yours |
 | Commits carry the wrong GitHub identity | none: a token goes on stdin | `room github ROOM` | the owner's |
 | A request waits for a decision | see "Decide sessions' requests" | `op list ROOM` | yours |

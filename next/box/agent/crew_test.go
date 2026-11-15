@@ -17,12 +17,12 @@ import (
 	"github.com/resident-labs/dyna/harness"
 	"github.com/resident-labs/dyna/harness/testutil"
 
-	"github.com/resident-labs/dyna/box/dynaext"
 	"github.com/resident-labs/dyna/contract"
 )
 
 // fakeJournal is the engine's side of a crew, kept in memory so that a second Crew can resume from it.
 type fakeJournal struct {
+	state       json.RawMessage
 	mu          sync.Mutex
 	steps       map[string]contract.WorkflowStepEndRequest
 	names       map[string]string
@@ -39,6 +39,7 @@ type fakeJournal struct {
 	pin         string
 	// by step name, the script version that started each step
 	versions map[string]int
+	queue    queueFake
 }
 
 func newFakeJournal() *fakeJournal {
@@ -73,6 +74,7 @@ func (j *fakeJournal) WorkflowStepStart(_ context.Context, req contract.Workflow
 	j.started = append(j.started, req.Name)
 	j.features[req.Name] = req.Feature
 	j.names[req.Key] = req.Name
+	j.queue.stepEvent(req.Key, req.Event)
 	j.lanes[req.Key] = req.Lane
 	j.phases[req.Key] = req.Phase
 	if stored, ok := j.steps[req.Key]; ok && req.Kind != contract.WorkflowStepWorkflow {
@@ -111,27 +113,28 @@ func (j *fakeJournal) WorkflowPost(_ context.Context, req contract.PostRequest) 
 
 // fakeWorker answers as reply says. It stands in for a Pi process.
 type fakeWorker struct {
-	reply  func(prompt string, model string) (contract.TurnEnded, error)
-	model  string
-	file   string
-	act    func(dir, prompt string) // what the worker does to its tree before it answers
-	hold   func(ctx context.Context, prompt string) error
-	dir    string
-	work   func(dir string, submit dynaext.Submit) // what a schema worker does with its submit tool
-	submit dynaext.Submit
-	steer  func(contract.TurnInput) error  // nil: no turn is running to take a steer
-	read   func(contract.DeliverySeq) bool // whether the session holds a steer it queued
+	beforeRequest func(context.Context) error
+	reply         func(prompt string, model string) (contract.TurnEnded, error)
+	model         string
+	file          string
+	act           func(dir, prompt string) // what the worker does to its tree before it answers
+	hold          func(ctx context.Context, prompt string) error
+	dir           string
+	steer         func(contract.TurnInput) error  // nil: no turn is running to take a steer
+	read          func(contract.DeliverySeq) bool // whether the session holds a steer it queued
 }
 
 func (w *fakeWorker) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput, _ func()) (contract.TurnEnded, error) {
 	if w.act != nil {
 		w.act(w.dir, inputs[0].Text)
 	}
-	if w.work != nil && w.submit != nil {
-		w.work(w.dir, w.submit)
-	}
 	if w.hold != nil {
 		if err := w.hold(ctx, inputs[0].Text); err != nil {
+			return contract.TurnEnded{}, err
+		}
+	}
+	if w.beforeRequest != nil {
+		if err := w.beforeRequest(ctx); err != nil {
 			return contract.TurnEnded{}, err
 		}
 	}
@@ -151,25 +154,26 @@ func (w *fakeWorker) Steer(_ context.Context, input contract.TurnInput) error {
 func (w *fakeWorker) Delivered(_ context.Context, id contract.DeliverySeq) (bool, error) {
 	return w.read != nil && w.read(id), nil
 }
-func (w *fakeWorker) SessionFile() string { return w.file }
-func (w *fakeWorker) Close() error        { return nil }
+func (w *fakeWorker) SetBeforeRequest(fn func(context.Context) error) { w.beforeRequest = fn }
+func (w *fakeWorker) SessionFile() string                             { return w.file }
+func (w *fakeWorker) Close() error                                    { return nil }
 
 type crewHarness struct {
-	timeout int // the room's default step timeout in seconds, as the engine sends it
-	t       *testing.T
-	work    func(dir string, submit dynaext.Submit)
-	mu      sync.Mutex
-	submits []bool // whether each opened worker had the submit tool
-	journal *fakeJournal
-	started atomic.Int32
-	reply   func(prompt, model string) (contract.TurnEnded, error)
-	act     func(dir, prompt string)
-	hold    func(ctx context.Context, prompt string) error
-	steer   func(contract.TurnInput) error
-	read    func(contract.DeliverySeq) bool
-	workdir string
-	branch  string
-	base    string
+	workflow *contract.BoxWorkflow
+	timeout  int // the room's default step timeout in seconds, as the engine sends it
+	t        *testing.T
+	mu       sync.Mutex
+	schemas  []string // the schema each opened worker was given
+	journal  *fakeJournal
+	started  atomic.Int32
+	reply    func(prompt, model string) (contract.TurnEnded, error)
+	act      func(dir, prompt string)
+	hold     func(ctx context.Context, prompt string) error
+	steer    func(contract.TurnInput) error
+	read     func(contract.DeliverySeq) bool
+	workdir  string
+	branch   string
+	base     string
 }
 
 func newCrewHarness(t *testing.T) *crewHarness {
@@ -196,19 +200,24 @@ func (h *crewHarness) start(script string, profiles ...contract.WorkflowProfile)
 	}
 	state, sessions := h.t.TempDir(), h.t.TempDir()
 	var opened atomic.Int32
+	workflow := contract.BoxWorkflow{Run: "wf_1", Name: "test", Script: script, Version: 1, Args: `{"topic":"bounds"}`, Profiles: profiles, Workers: 16, Timeout: h.timeout}
+	if h.workflow != nil {
+		workflow = *h.workflow
+		workflow.Script = script
+	}
 	crew, err := NewCrew(CrewConfig{
-		Workflow: contract.BoxWorkflow{Run: "wf_1", Name: "test", Script: script, Version: 1, Args: `{"topic":"bounds"}`, Profiles: profiles, Workers: 16, Timeout: h.timeout},
+		Workflow: workflow,
 		Engine:   h.journal,
-		Open: func(_ context.Context, profile contract.WorkflowProfile, folder, dir string, submit dynaext.Submit) (crewWorker, error) {
+		Open: func(_ context.Context, profile contract.WorkflowProfile, folder, dir string, schema json.RawMessage) (crewWorker, error) {
 			data, err := os.ReadFile(filepath.Join(folder, "models.json"))
 			if err != nil || !strings.Contains(string(data), contract.WorkerHeader) {
 				h.t.Errorf("worker configuration %s: %v", data, err)
 			}
 			h.started.Add(1)
 			h.mu.Lock()
-			h.submits = append(h.submits, submit != nil)
+			h.schemas = append(h.schemas, string(schema))
 			h.mu.Unlock()
-			return &fakeWorker{reply: h.reply, act: h.act, work: h.work, submit: submit, hold: h.hold, steer: h.steer, read: h.read, dir: dir, model: profile.Model.ID, file: filepath.Join(sessions, fmt.Sprintf("w%d.jsonl", opened.Add(1)))}, nil
+			return &fakeWorker{reply: h.reply, act: h.act, hold: h.hold, steer: h.steer, read: h.read, dir: dir, model: profile.Model.ID, file: filepath.Join(sessions, fmt.Sprintf("w%d.jsonl", opened.Add(1)))}, nil
 		},
 		Transcript: NewTranscript(&transcriptEngine{}, sessions),
 		Workdir:    h.workdir,
@@ -659,7 +668,7 @@ func TestStoppingARunStoresNothing(t *testing.T) {
 	}
 	state, sessions := t.TempDir(), t.TempDir()
 	crew, err := NewCrew(CrewConfig{Workflow: contract.BoxWorkflow{Script: crewMeta + `return await agent('long')`, Profiles: []contract.WorkflowProfile{{Name: "fast"}}, Workers: 1}, Engine: h.journal, Transcript: NewTranscript(&transcriptEngine{}, sessions), Workdir: h.workdir, Sessions: sessions, State: state,
-		Open: func(context.Context, contract.WorkflowProfile, string, string, dynaext.Submit) (crewWorker, error) {
+		Open: func(context.Context, contract.WorkflowProfile, string, string, json.RawMessage) (crewWorker, error) {
 			return &fakeWorker{reply: h.reply, hold: hold, file: filepath.Join(sessions, "w.jsonl")}, nil
 		}})
 	if err != nil {
@@ -692,7 +701,7 @@ func TestAReconnectDoesNotRestartTheScript(t *testing.T) {
 	}
 	state, sessions := t.TempDir(), t.TempDir()
 	crew, err := NewCrew(CrewConfig{Workflow: contract.BoxWorkflow{Script: crewMeta + `return await agent('long')`, Profiles: []contract.WorkflowProfile{{Name: "fast"}}, Workers: 1}, Engine: h.journal, Transcript: NewTranscript(&transcriptEngine{}, sessions), Workdir: h.workdir, Sessions: sessions, State: state,
-		Open: func(context.Context, contract.WorkflowProfile, string, string, dynaext.Submit) (crewWorker, error) {
+		Open: func(context.Context, contract.WorkflowProfile, string, string, json.RawMessage) (crewWorker, error) {
 			h.started.Add(1)
 			return &fakeWorker{reply: h.reply, file: filepath.Join(sessions, "w.jsonl")}, nil
 		}})
@@ -812,7 +821,7 @@ func TestARecoveredCrewFilesItsWorkersUnderItsTurn(t *testing.T) {
 	sessions := t.TempDir()
 	var delivery contract.DeliverySeq
 	crew, err := NewCrew(CrewConfig{Workflow: contract.BoxWorkflow{Script: crewMeta + `return await agent('one')`, Profiles: []contract.WorkflowProfile{{Name: "fast"}}, Workers: 1}, Engine: h.journal, Transcript: NewTranscript(&transcriptEngine{}, sessions), Workdir: h.workdir, Sessions: sessions, State: t.TempDir(),
-		Open: func(context.Context, contract.WorkflowProfile, string, string, dynaext.Submit) (crewWorker, error) {
+		Open: func(context.Context, contract.WorkflowProfile, string, string, json.RawMessage) (crewWorker, error) {
 			return recordingWorker{fakeWorker: &fakeWorker{reply: h.reply, file: filepath.Join(sessions, "w.jsonl")}, delivery: &delivery}, nil
 		}})
 	if err != nil {
@@ -1053,5 +1062,158 @@ func TestCrewSteerReachesRunningWorkers(t *testing.T) {
 	}
 	if delivered, _ := crew.Delivered(context.Background(), 9); delivered {
 		t.Fatal("a steer no worker took counts as delivered")
+	}
+}
+
+func TestCrewSteerTargetsOnlyOneWorker(t *testing.T) {
+	h := newCrewHarness(t)
+	release := make(chan struct{})
+	var steers atomic.Int32
+	h.steer = func(contract.TurnInput) error { steers.Add(1); return nil }
+	h.hold = func(ctx context.Context, _ string) error {
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	crew, ended := h.start(crewMeta + "return await parallel([() => agent('a'), () => agent('b')])")
+	waitFor(t, "two running workers", func() bool { crew.mu.Lock(); defer crew.mu.Unlock(); return len(crew.workers) == 2 })
+	crew.mu.Lock()
+	var key string
+	for k := range crew.workers {
+		key = k
+		break
+	}
+	crew.mu.Unlock()
+	if err := crew.Steer(context.Background(), contract.TurnInput{Delivery: 8, Text: "one only", WorkflowStep: key}); err != nil {
+		t.Fatal(err)
+	}
+	if steers.Load() != 1 {
+		t.Fatalf("steered %d workers", steers.Load())
+	}
+	if err := crew.Steer(context.Background(), contract.TurnInput{Delivery: 9, Text: "unknown", WorkflowStep: "missing"}); !errors.Is(err, harness.ErrNoTurn) {
+		t.Fatal(err)
+	}
+	close(release)
+	<-ended
+}
+
+func TestCrewPauseHoldsRunningWorkersAndNewCalls(t *testing.T) {
+	h := newCrewHarness(t)
+	release, entered := make(chan struct{}), make(chan struct{}, 2)
+	h.hold = func(ctx context.Context, _ string) error {
+		entered <- struct{}{}
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	var steers atomic.Int32
+	h.steer = func(contract.TurnInput) error { steers.Add(1); return nil }
+	crew, ended := h.start(crewMeta + "await parallel([() => agent('first'), () => agent('second')]); return await agent('third')")
+	<-entered
+	<-entered
+	boundaries := make(chan struct{}, 2)
+	crew.mu.Lock()
+	workflow := crew.workflow
+	for _, worker := range crew.workers {
+		fake := worker.(*fakeWorker)
+		gate := fake.beforeRequest
+		fake.beforeRequest = func(ctx context.Context) error { boundaries <- struct{}{}; return gate(ctx) }
+	}
+	crew.mu.Unlock()
+	workflow.Paused = true
+	crew.Reload(workflow)
+	close(release)
+	<-boundaries
+	<-boundaries
+	if h.started.Load() != 2 {
+		t.Fatal("new worker started while paused")
+	}
+	select {
+	case <-ended:
+		t.Fatal("running workers escaped their holds")
+	default:
+	}
+	if err := crew.Steer(context.Background(), contract.TurnInput{Delivery: 8, Text: "paused"}); err != nil {
+		t.Fatal(err)
+	}
+	if steers.Load() != 2 {
+		t.Fatalf("steered %d held workers", steers.Load())
+	}
+	h.hold = nil
+	workflow.Paused = false
+	crew.Reload(workflow)
+	if got := <-ended; got.Outcome != contract.TurnCompleted {
+		t.Fatal(got)
+	}
+	if h.started.Load() != 3 {
+		t.Fatal("new worker did not start after release")
+	}
+}
+
+func (j *fakeJournal) WorkflowState(_ context.Context, req contract.WorkflowStateRequest) (contract.WorkflowStateResponse, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if len(req.Value) > 0 {
+		j.state = req.Value
+	}
+	if len(j.state) == 0 {
+		j.state = json.RawMessage("null")
+	}
+	return contract.WorkflowStateResponse{Value: j.state}, nil
+}
+
+func TestScriptManualStateIsDiscardedOutsideTheStepJournal(t *testing.T) {
+	h := newCrewHarness(t)
+	got := h.result(crewMeta + `const before=await state.get(); await state.set({head: args.topic}); return {before, after:await state.get()}`)
+	if fmt.Sprint(got) != fmt.Sprint(map[string]any{"before": nil, "after": map[string]any{"head": "bounds"}}) {
+		t.Fatalf("state %v", got)
+	}
+	got = h.result(crewMeta + `return await state.get()`)
+	if got != nil {
+		t.Fatalf("new run retained state %v", got)
+	}
+	if len(h.journal.steps) != 0 {
+		t.Fatal("state unexpectedly replayed as journal steps")
+	}
+}
+
+func TestCrewStateBoundary(t *testing.T) {
+	for _, event := range []bool{false, true} {
+		row := int64(0)
+		c := &Crew{config: CrewConfig{Engine: &fakeJournal{}}}
+		if event {
+			c.config.Workflow.Subscription, row = "sub_test", 7
+		}
+		get := func() crewReply { return c.handle(context.Background(), crewCall{Op: "state_get", Event: row}) }
+		if got := get(); string(got.Value.(json.RawMessage)) != "null" {
+			t.Fatalf("initial: %+v", got)
+		}
+		value := json.RawMessage(`{"head":"abc"}`)
+		if got := c.handle(context.Background(), crewCall{Op: "state_set", Event: row, Payload: value}); got.Error != "" {
+			t.Fatal(got.Error)
+		}
+		if got := get(); string(got.Value.(json.RawMessage)) != string(value) {
+			t.Fatalf("stored: %+v", got)
+		}
+		if !event {
+			for _, value := range []string{`{`, `"` + strings.Repeat("x", 65535) + `"`} {
+				if got := c.handle(context.Background(), crewCall{Op: "state_set", Event: row, Payload: json.RawMessage(value)}); got.Error == "" {
+					t.Fatal("accepted invalid state")
+				}
+			}
+			if got := get(); string(got.Value.(json.RawMessage)) != string(value) {
+				t.Fatal("invalid state overwrote value")
+			}
+			limit := json.RawMessage(`"` + strings.Repeat("x", 65534) + `"`)
+			if got := c.handle(context.Background(), crewCall{Op: "state_set", Event: row, Payload: limit}); got.Error != "" {
+				t.Fatal("rejected 64 KiB state:", got.Error)
+			}
+		}
 	}
 }

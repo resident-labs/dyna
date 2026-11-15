@@ -31,3 +31,27 @@ func TestActivityCoalesces(t *testing.T) {
 		}
 	}
 }
+
+func TestActivitySendsEveryFinishedCall(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ticks := make(chan time.Time)
+	got := make(chan contract.TurnActivityRequest, 4)
+	a := &activity{}
+	a.set("turn_1", contract.ActivityTool, "open")
+	a.finish("turn_1", contract.ToolFinished{Call: "a", DurationMs: 8})
+	a.finish("turn_1", contract.ToolFinished{Call: "b", DurationMs: 135})
+	go a.run(ctx, ticks, func(_ context.Context, req contract.TurnActivityRequest) error {
+		got <- req
+		return nil
+	})
+	ticks <- time.Time{}
+	for _, call := range []string{"a", "b"} {
+		if req := <-got; req.Finished == nil || req.Finished.Call != call || req.Label != "" {
+			t.Fatalf("got %+v, want a finish of %s", req, call)
+		}
+	}
+	if req := <-got; req.Label != "open" || req.Finished != nil {
+		t.Fatalf("got %+v, want the latest label", req)
+	}
+}

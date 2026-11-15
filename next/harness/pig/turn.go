@@ -20,6 +20,7 @@ type EndPost struct {
 type turn struct {
 	id       contract.TurnID
 	activity func(contract.TurnID, contract.ActivityKind, string)
+	finished func(contract.TurnID, contract.ToolFinished) // nil when nobody listens
 	result   contract.TurnEnded
 	batch    endBatch
 	reply    replyText
@@ -35,6 +36,16 @@ func (t *turn) event(e agent.AgentEvent) {
 		t.activity(t.id, contract.ActivityModelWait, "waiting for model")
 	case agent.ToolExecutionStartEvent:
 		t.activity(t.id, contract.ActivityTool, activityLabel(e.ToolName, e.Args))
+	case agent.ToolExecutionEndEvent:
+		// The batch writes its results together once every call has ended, so a call that ends early says so. A single call
+		// has its result at once, and a call another tool made is part of that tool.
+		if t.finished != nil && t.batch.calls > 1 && e.ParentToolCallID == "" {
+			finished := contract.ToolFinished{Call: transcriptItemID(e.ToolCallID), Failed: e.IsError}
+			if e.DurationMs != nil {
+				finished.DurationMs = *e.DurationMs
+			}
+			t.finished(t.id, finished)
+		}
 	case agent.CompactionStartEvent:
 		// A compaction runs a model call with no tool, so the line says so rather than keep the last command.
 		t.activity(t.id, contract.ActivityCompaction, "compacting the conversation")

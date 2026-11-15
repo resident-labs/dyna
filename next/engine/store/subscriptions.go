@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"time"
@@ -28,6 +29,7 @@ var ErrSubscriptionTarget = errors.New("subscription session is closed")
 
 // Subscription is a stored subscription with its schedule and its last result.
 type Subscription struct {
+	Waiting int
 	contract.Subscription
 	Period    time.Duration // Every, read; zero for an event subscription
 	Disabled  bool
@@ -113,6 +115,15 @@ func insertSubscription(ctx context.Context, tx *sql.Tx, sub contract.Subscripti
 	if err != nil {
 		return err
 	}
+	if sub.Workflow != nil {
+		body, err := json.Marshal(sub.Workflow.Args)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO workflow_subscriptions(sub,script,args,key,latest,parent,include_own) VALUES(?,?,?,?,?,?,?)", sub.ID, sub.Workflow.Script, string(body), sub.Key, sub.Latest, sub.Parent, sub.IncludeOwn); err != nil {
+			return err
+		}
+	}
 	for _, kind := range sub.On {
 		if _, err := tx.ExecContext(ctx, "INSERT INTO subscription_events(sub,event_type) VALUES(?,?)", sub.ID, kind); err != nil {
 			return err
@@ -164,7 +175,7 @@ func (s *Store) AddSubscription(ctx context.Context, sub contract.Subscription, 
 }
 
 const subscriptionSelect = `SELECT s.id,s.scope,COALESCE(s.room,''),COALESCE(s.session,''),s.every_ms,s.wake_kind,s.wake_id,s.run_image,s.run_size,s.run_host,s.enabled,s.due_at,s.hold_until,s.failures,s.last_at,s.last_result,s.last_seq,
-EXISTS(SELECT 1 FROM subscription_runs u WHERE u.sub=s.id),
+(EXISTS(SELECT 1 FROM subscription_runs u WHERE u.sub=s.id) OR EXISTS(SELECT 1 FROM workflow_runs r WHERE r.sub=s.id AND r.key='' AND r.state='running')),
 EXISTS(SELECT 1 FROM rooms r WHERE (r.paused_at IS NOT NULL OR r.state!='open') AND r.id IN (s.room,(SELECT t.room FROM sessions t WHERE t.id=s.wake_id)))
 FROM subscriptions s `
 
@@ -212,6 +223,20 @@ func loadSubscriptions(ctx context.Context, q sqlQuery, where string, args ...an
 }
 
 func loadSubscriptionParts(ctx context.Context, q sqlQuery, sub *Subscription) error {
+	if err := q.QueryRowContext(ctx, "SELECT COUNT(*) FROM workflow_queue WHERE sub=? AND run=''", sub.ID).Scan(&sub.Waiting); err != nil {
+		return err
+	}
+	var args string
+	var workflow contract.WorkflowSubscription
+	errSpec := q.QueryRowContext(ctx, "SELECT script,args,key,latest,parent,include_own FROM workflow_subscriptions WHERE sub=?", sub.ID).Scan(&workflow.Script, &args, &sub.Key, &sub.Latest, &sub.Parent, &sub.IncludeOwn)
+	if errSpec == nil {
+		if err := json.Unmarshal([]byte(args), &workflow.Args); err != nil {
+			return err
+		}
+		sub.Workflow, sub.Run = &workflow, nil
+	} else if !errors.Is(errSpec, sql.ErrNoRows) {
+		return errSpec
+	}
 	var err error
 	if sub.On, err = listIDs[contract.EventType](ctx, q, "SELECT event_type FROM subscription_events WHERE sub=? ORDER BY event_type", sub.ID); err != nil {
 		return err
@@ -422,6 +447,9 @@ func (s *Store) DispatchEvents(ctx context.Context, limit int) (int, error) {
 
 // fire wakes a target on an event, or queues the event for a Run of its own. Runs of a subscription go one at a time.
 func (s *Store) fire(ctx context.Context, tx *sql.Tx, sub Subscription, event contract.Event) error {
+	if sub.Workflow != nil {
+		return s.queueWorkflow(ctx, tx, sub, event)
+	}
 	// A digest gathers its events for the next tick of its schedule.
 	if sub.Period > 0 && len(sub.On) > 0 {
 		_, err := tx.ExecContext(ctx, "INSERT INTO subscription_queue(sub,seq) SELECT ?1,?2 WHERE (SELECT count(*) FROM subscription_queue WHERE sub=?1)<?3", sub.ID, event.Seq, maxQueuedRuns)
@@ -452,7 +480,7 @@ func (s *Store) fire(ctx context.Context, tx *sql.Tx, sub Subscription, event co
 
 // DueSubscriptions lists what can fire now: due, enabled, past any backoff, with no Run in progress and in a
 // room that is neither paused nor going away. A due subscription in a paused room keeps its time, so it fires
-// once when the room resumes.
+// latest when the room resumes.
 func (s *Store) DueSubscriptions(ctx context.Context, now time.Time) ([]Subscription, error) {
 	subs, err := loadSubscriptions(ctx, s.Read(), "WHERE s.enabled=1 AND s.due_at>0 AND s.due_at<=?1 AND s.hold_until<=?1 ORDER BY s.due_at,s.id", now.UnixMilli())
 	if err != nil {
@@ -460,7 +488,7 @@ func (s *Store) DueSubscriptions(ctx context.Context, now time.Time) ([]Subscrip
 	}
 	var due []Subscription
 	for _, sub := range subs {
-		if !sub.Held && !sub.Running {
+		if !sub.Held && (!sub.Running || sub.Workflow != nil) { // a service always runs; its schedule only queues events
 			due = append(due, sub)
 		}
 	}

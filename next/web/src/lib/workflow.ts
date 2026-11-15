@@ -1,4 +1,4 @@
-import type { WorkflowInfo, WorkflowMerge, WorkflowState, WorkflowStep, WorkflowStepResponse } from "./contract.gen.ts";
+import type { WorkflowInfo, WorkflowService, WorkflowMerge, WorkflowState, WorkflowStep, WorkflowStepResponse } from "./contract.gen.ts";
 import { count, formatTime } from "./feed.ts";
 import { parsedJson, type Json } from "./json.ts";
 import { formatTimelineDuration } from "./timeline.ts";
@@ -100,7 +100,9 @@ export function applyStep(steps: WorkflowStep[], step: WorkflowStep): WorkflowSt
   if (at < 0) return [...steps, step];
   const old = steps[at];
   if (step.state === "running" && step.started === old.started && (old.state !== "running" || old.transcript)) return steps;
-  return steps.with(at, step);
+  // Step events carry journal fields, while status reads add transcript progress. Do not let a late event erase it.
+  const next = step.started === old.started ? { ...step, toolCalls: Math.max(old.toolCalls, step.toolCalls), lastActivity: step.lastActivity ?? old.lastActivity } : step;
+  return steps.with(at, next);
 }
 
 // A worker that has no file yet is waiting for its place: the box's memory or a profile's limit bounds how many run.
@@ -148,6 +150,13 @@ export function countedLine({ steps, running, failed }: { steps: number; running
   return [running ? `${steps - running} of ${steps} steps` : count(steps, "step"), ...running ? [`${running} running`] : [], ...failed ? [`${failed} failed`] : []].join(" · ");
 }
 
+// What a service shows of itself, as "serving · 2 waiting · 1 in flight · 14 handled · 1 failed".
+export function serviceLine({ state, keys: listed, handled, failed }: WorkflowService): string {
+  const keys = listed ?? [];
+  const waiting = keys.reduce((n, key) => n + key.waiting, 0), inFlight = keys.reduce((n, key) => n + key.inFlight, 0);
+  return [state, ...waiting ? [`${waiting} waiting`] : [], ...inFlight ? [`${inFlight} in flight`] : [], `${handled} handled`, ...failed ? [`${failed} failed`] : []].join(" · ");
+}
+
 // A worker with a file has a transcript to open.
 export const openable = (step: WorkflowStep): boolean => step.kind === "agent" && !!step.transcript;
 // A step that holds more than its row opens in place. One with nothing more has nothing to open, and a workflow step folds its children.
@@ -173,7 +182,7 @@ export function total(steps: WorkflowStep[]): Usage {
   return sum;
 }
 
-// A step that has not ended reports no usage, so it shows nothing rather than a zero.
+// Usage can arrive while a worker runs. Until any is reported, leave the token figure empty.
 export function tokens(usage: Usage): string {
   const n = used(usage);
   if (!n) return "";

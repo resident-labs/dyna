@@ -49,6 +49,54 @@ func TestWhereMatchesExactly(t *testing.T) {
 	}
 }
 
+func TestWhereKindAlternatives(t *testing.T) {
+	for _, test := range []struct {
+		where string
+		kind  string
+		want  bool
+	}{
+		{"kind=pushed,opened", "pushed", true},
+		{"kind=pushed,opened", "opened", true},
+		{"kind=pushed,opened", "closed", false},
+		{"kind=pushed,opened", "push", false},
+		{"kind=pushed,opened", "Opened", false},
+		{"kind=pushed,opened", "", false},
+		{"kind!=pushed,opened", "pushed", false},
+		{"kind!=pushed,opened", "opened", false},
+		{"kind!=pushed,opened", "closed", true},
+		{"kind!=pushed,opened", "", false},
+		{"kind=success,failure", "success", true},
+		{"kind=pushed,pushed", "pushed", true},
+	} {
+		clause, err := parseWhere(test.where)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := clause.holds(EventFields{Kind: test.kind}); got != test.want {
+			t.Errorf("%s on %q = %v, want %v", test.where, test.kind, got, test.want)
+		}
+	}
+	pass := PrChanged{Changes: []PrChange{
+		{PR: PrSummary{Repo: "o/a"}, Kinds: []PrChangeKind{PrChangePushed}},
+		{PR: PrSummary{Repo: "o/b"}, Kinds: []PrChangeKind{PrChangeOpened}},
+	}}
+	if !MatchesWhere([]string{"repo=o/b", "kind=pushed,opened"}, pass) {
+		t.Error("missed second alternative on the same PR")
+	}
+	if MatchesWhere([]string{"repo=o/c", "kind=pushed,opened"}, pass) {
+		t.Error("kind alternatives bypassed another clause")
+	}
+	if MatchesWhere([]string{"repo=o/a", "kind=opened,closed"}, pass) {
+		t.Error("kind alternatives matched across PRs")
+	}
+	if MatchesWhere([]string{"author=ana,lev"}, PrOpened{Author: "ana"}) {
+		t.Error("commas became alternatives outside kind")
+	}
+	if !MatchesWhere([]string{"author=ana,lev"}, PrOpened{Author: "ana,lev"}) {
+		t.Error("commas stopped being literal outside kind")
+	}
+}
+
 func TestWhereHoldsOfOneThingInAPass(t *testing.T) {
 	pass := PrChanged{Changes: []PrChange{
 		{PR: PrSummary{Repo: "o/a", Number: 1, Author: "lev"}},
@@ -68,7 +116,7 @@ func TestWhereHoldsOfOneThingInAPass(t *testing.T) {
 }
 
 func TestWhereRefusesWhatItCannotMean(t *testing.T) {
-	for _, text := range []string{"", "author", "author=", "author!=", "nobody=x", "title=x", "text=x", "text~", "author~x", "number=one", "author==x"} {
+	for _, text := range []string{"", "author", "author=", "author!=", "nobody=x", "title=x", "text=x", "text~", "author~x", "number=one", "kind=,opened", "kind=pushed,", "kind=pushed,,opened", "kind!=,opened", "author==x"} {
 		if text == "author==x" {
 			continue // the value is "=x", which is a value
 		}
@@ -76,7 +124,7 @@ func TestWhereRefusesWhatItCannotMean(t *testing.T) {
 			t.Errorf("%q passed", text)
 		}
 	}
-	for _, text := range []string{"repo=o/r", "author!=x", "text~a b", "number=12", "label=needs review"} {
+	for _, text := range []string{"repo=o/r", "author!=x", "text~a b", "number=12", "label=needs review", "kind=pushed,opened", "kind!=pushed,opened"} {
 		if err := CheckWhere(text); err != nil {
 			t.Errorf("%q: %v", text, err)
 		}

@@ -129,3 +129,95 @@ func TestCISummaryDoesNotSettlePartialPages(t *testing.T) {
 		}
 	}
 }
+
+func TestVisibleFailureSettlesIncompleteCI(t *testing.T) {
+	for _, typ := range []string{"CheckRun", "StatusContext"} {
+		for _, truncated := range []bool{false, true} {
+			var rollup gqlRollup
+			raw := `{"state":"FAILURE","contexts":{"totalCount":2,"nodes":[{"__typename":"CheckRun","name":"gate","status":"IN_PROGRESS"},{"__typename":"` + typ + `","name":"lint","context":"lint","status":"COMPLETED","conclusion":"FAILURE","state":"ERROR"}]}}`
+			if err := json.Unmarshal([]byte(raw), &rollup); err != nil {
+				t.Fatal(err)
+			}
+			rollup.Contexts.PageInfo.HasNextPage = truncated
+			var suites gqlSuites
+			if err := json.Unmarshal([]byte(`{"totalCount":2,"nodes":[{"status":"IN_PROGRESS"}]}`), &suites); err != nil {
+				t.Fatal(err)
+			}
+			for _, rule := range []ciRule{ciPullHead, ciMainHead} {
+				got, names := summarizeCI(&rollup, suites, rule, time.Now())
+				if got != contract.PrCIFailure || !slices.Equal(names, []string{"lint"}) {
+					t.Fatalf("%s %v: %s %v", typ, truncated, got, names)
+				}
+			}
+		}
+	}
+}
+
+func TestEmptyFailureRollupWaitsForPendingSuite(t *testing.T) {
+	var suites gqlSuites
+	if err := json.Unmarshal([]byte(`{"totalCount":1,"nodes":[{"status":"IN_PROGRESS"}]}`), &suites); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []string{"FAILURE", "ERROR"} {
+		for _, rule := range []ciRule{ciPullHead, ciMainHead} {
+			got, _ := summarizeCI(&gqlRollup{State: state}, suites, rule, time.Now())
+			if got != contract.PrCIPending {
+				t.Fatalf("%s %d: %s", state, rule, got)
+			}
+		}
+	}
+}
+
+func TestFailedSuiteOverridesEmptyAggregateAndPendingSuites(t *testing.T) {
+	for _, raw := range []string{
+		`{"totalCount":2,"nodes":[{"status":"IN_PROGRESS"},{"status":"COMPLETED","conclusion":"FAILURE","app":{"slug":"actions"}}]}`,
+		`{"totalCount":2,"pageInfo":{"hasNextPage":true},"nodes":[{"status":"COMPLETED","conclusion":"FAILURE","app":{"slug":"actions"}}]}`,
+	} {
+		var suites gqlSuites
+		if err := json.Unmarshal([]byte(raw), &suites); err != nil {
+			t.Fatal(err)
+		}
+		for _, state := range []string{"FAILURE", "ERROR"} {
+			for _, rule := range []ciRule{ciPullHead, ciMainHead} {
+				got, names := summarizeCI(&gqlRollup{State: state}, suites, rule, time.Now())
+				if got != contract.PrCIFailure || !slices.Equal(names, []string{"actions (workflow run failed)"}) {
+					t.Fatalf("%s %d: %s %v", state, rule, got, names)
+				}
+			}
+		}
+	}
+}
+
+// A run dispatched on main, such as one gating a PR, is filed under main's head but is not main's CI (horizon, 2026-11-13);
+// runs started by the branch itself (push, schedule, workflow_run) still are.
+func TestMainCILeavesOutDispatchedRuns(t *testing.T) {
+	c, server, _ := client(t)
+	push := fakegithub.Check{Name: "build", Conclusion: "SUCCESS", Event: "push"}
+	gate := fakegithub.Check{Name: "gate pr 7", Conclusion: "FAILURE", Event: "workflow_dispatch"}
+	suites := []fakegithub.Suite{{Status: "COMPLETED", Conclusion: "SUCCESS", Workflow: "ci", Runs: 1}, {Status: "COMPLETED", Conclusion: "FAILURE", Workflow: "dyna-ci", Event: "workflow_dispatch", Runs: 1}}
+	for _, step := range []struct {
+		name   string
+		checks []fakegithub.Check
+		want   contract.PrCI
+	}{
+		{"push green, dispatch red", []fakegithub.Check{push, gate}, contract.PrCISuccess},
+		{"only a dispatched run", []fakegithub.Check{gate}, contract.PrCINone},
+		{"push red", []fakegithub.Check{{Name: "build", Conclusion: "FAILURE", Event: "push"}, gate}, contract.PrCIFailure},
+		{"chained run red", []fakegithub.Check{push, gate, {Name: "deploy", Conclusion: "FAILURE", Event: "workflow_run"}}, contract.PrCIFailure},
+		{"chained run still going", []fakegithub.Check{push, gate, {Name: "deploy", Status: "IN_PROGRESS", Event: "workflow_run"}}, contract.PrCIPending},
+		{"scheduled run counts", []fakegithub.Check{push, {Name: "nightly", Conclusion: "FAILURE", Event: "schedule"}}, contract.PrCIFailure},
+		{"API-dispatched run", []fakegithub.Check{push, {Name: "gate pr 7", Conclusion: "FAILURE", Event: "repository_dispatch"}}, contract.PrCISuccess},
+	} {
+		t.Run(step.name, func(t *testing.T) {
+			server.SetCommit("owner/repo", sha, fakegithub.Commit{Rollup: "FAILURE", Checks: step.checks, Suites: suites})
+			commits, err := c.CommitsCI(t.Context(), "owner/repo", []string{sha})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := commits[sha]
+			if got.Result != step.want || slices.ContainsFunc(got.Runs, func(r contract.CIRun) bool { return r.Name == gate.Name }) {
+				t.Fatalf("%+v, want %s without the dispatched run", got, step.want)
+			}
+		})
+	}
+}

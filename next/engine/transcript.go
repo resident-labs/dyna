@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/engine/contextview"
+	"github.com/resident-labs/dyna/harness/pig"
 
 	"path/filepath"
 
@@ -55,6 +56,18 @@ func (s *Service) TranscriptAppend(ctx context.Context, caller contract.Principa
 	}
 	end := req.Offset + int64(len(req.Bytes))
 	if end <= acked {
+		// A previous attempt may have acknowledged bytes before saving progress.
+		if acked > 0 {
+			file, err := os.Open(name)
+			if err != nil {
+				return contract.TranscriptAppendResponse{}, failure(err)
+			}
+			err = s.syncWorkflowProgress(ctx, caller.Session, req.Path, file, acked)
+			_ = file.Close()
+			if err != nil {
+				return contract.TranscriptAppendResponse{}, failure(err)
+			}
+		}
 		return contract.TranscriptAppendResponse{AckedOffset: acked}, nil
 	}
 	var file *os.File
@@ -82,6 +95,9 @@ func (s *Service) TranscriptAppend(ctx context.Context, caller contract.Principa
 	if err := s.indexTranscript(ctx, caller.Session, req.Path, file, acked, end, &failed); err != nil {
 		return contract.TranscriptAppendResponse{}, failure(err)
 	}
+	if err := s.syncWorkflowProgress(ctx, caller.Session, req.Path, file, end); err != nil {
+		return contract.TranscriptAppendResponse{}, failure(err)
+	}
 	// The bytes are stored, so a failure here is logged: refusing the append would send them, and the events, again.
 	for _, body := range failed {
 		event, err := s.event(room, caller, body)
@@ -105,6 +121,40 @@ func (s *Service) TranscriptAppend(ctx context.Context, caller contract.Principa
 	}
 
 	return contract.TranscriptAppendResponse{AckedOffset: end}, nil
+}
+
+// syncWorkflowProgress advances a running step through complete records only. The
+// durable high-water mark survives a lost engine copy and the box's full resync.
+// Callers hold transcriptMu; status reads only the stored aggregates.
+func (s *Service) syncWorkflowProgress(ctx context.Context, session contract.SessionID, path string, file *os.File, end int64) error {
+	stored, err := s.store.WorkflowProgress(ctx, session, path)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if end <= stored.Offset {
+		return nil
+	}
+	delta, consumed, err := pig.ReadProgress(io.NewSectionReader(file, stored.Offset, end-stored.Offset))
+	if err != nil {
+		return err
+	}
+	if consumed == 0 {
+		return nil
+	}
+	next := stored
+	next.Offset += consumed
+	next.ToolCalls += delta.ToolCalls
+	next.Usage.InputTokens += delta.Usage.InputTokens
+	next.Usage.OutputTokens += delta.Usage.OutputTokens
+	next.Usage.CacheReadTokens += delta.Usage.CacheReadTokens
+	next.Usage.CacheWriteTokens += delta.Usage.CacheWriteTokens
+	if delta.LastActivity.After(next.LastActivity) {
+		next.LastActivity = delta.LastActivity
+	}
+	return s.store.SetWorkflowProgress(ctx, session, path, stored.Offset, next)
 }
 
 // TranscriptFetch reads only bytes committed for the calling session.
@@ -200,7 +250,7 @@ func (s *Service) indexTranscript(ctx context.Context, session contract.SessionI
 		if oversized {
 			continue
 		}
-		if bytes.Contains(line, []byte(`"toolCall"`)) || bytes.Contains(line, []byte(`"isError":true`)) {
+		if (bytes.Contains(line, []byte(`"toolCall"`)) || bytes.Contains(line, []byte(`"isError":true`))) && !strings.HasPrefix(path, agentsFolder) {
 			s.noteToolCalls(session, line, failed)
 		}
 		var entry struct {

@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -20,6 +21,9 @@ import (
 var version = "dev"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "-Y" {
+		os.Exit(runSigner(context.Background(), os.Args[1:], func() *socketClient { return newClient(defaultSocket()) }, os.Stderr))
+	}
 	if err := newRootCmd().Execute(); err != nil {
 		var exit commandExit
 		if errors.As(err, &exit) {
@@ -65,10 +69,11 @@ func newRootCmd() *cobra.Command {
 	web.AddCommand(webSearchCommand(func() *socketClient { return newClient(socket) }))
 	root.AddCommand(addonCommands(func() *socketClient { return newClient(socket) })...)
 	root.AddCommand(imageCommands(func() *socketClient { return newClient(socket) }))
-	root.AddCommand(web, websearchKeyCommand(func() *socketClient { return newClient(socket) }), questionCommand(func() *socketClient { return newClient(socket) }), subscriptionCommand(func() *socketClient { return newClient(socket) }), workflowCommand(func() *socketClient { return newClient(socket) }))
+	root.AddCommand(web, websearchKeyCommand(func() *socketClient { return newClient(socket) }), questionCommand(func() *socketClient { return newClient(socket) }), advisorCommand(func() *socketClient { return newClient(socket) }), subscriptionCommand(func() *socketClient { return newClient(socket) }), workflowCommand(func() *socketClient { return newClient(socket) }))
 	root.AddCommand(computerCommand("/run/dyna/agent.sock"))
 	root.AddCommand(proxyCommand(func() *socketClient { return newClient(socket) }))
 	root.AddCommand(ciEgressCommand())
+	root.AddCommand(signingCommand(func() *socketClient { return newClient(socket) }))
 	root.AddCommand(shareCommand())
 	root.AddCommand(navigationCommands(func() *socketClient { return newClient(socket) })...)
 	root.AddCommand(buildCacheCommand(), stageBinaryCommand())

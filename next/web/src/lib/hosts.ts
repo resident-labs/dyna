@@ -40,7 +40,7 @@ export function machines(hosts: HostSummary[]): HostSummary[] {
   if (!plane || !same || !hostMeters(plane).length) return hosts;
   const merged = { ...plane, name: same.name, reachable: same.reachable, lastSeen: same.lastSeen, boxes: plane.boxes + same.boxes, runners: same.runners,
     agents: same.agents, ci: same.ci, ciScale: same.ciScale, rooms: same.rooms, problem: same.problem, health: same.health,
-    diskLow: diskLow(plane) || diskLow(same), sessions: [...plane.sessions ?? [], ...same.sessions ?? []], engineHost: true };
+    reservations: same.reservations, diskLow: diskLow(plane) || diskLow(same), sessions: [...plane.sessions ?? [], ...same.sessions ?? []], engineHost: true };
   return hosts.filter(h => h !== same).map(h => h === plane ? merged : h);
 }
 
@@ -156,3 +156,11 @@ export const hostChips: Chip<HostSummary>[] = [
 ];
 
 export const hostText = (h: HostSummary) => `${h.name} ${h.engineHost ? "Dyna host" : ""} ${h.pool ?? ""}`;
+
+// Aggregate admission reservations, separate from the measured-load meters.
+export function hostReservations(h: HostSummary): string | undefined {
+ const r = h.reservations;
+ if (!r) return undefined;
+ const gib = (n: number) => (n / 2 ** 30).toFixed(1);
+ return `Reserved: CPU ${r.cpuMilli / 1000}/${r.cpuCap / 1000} cores · memory ${gib(r.memory)}/${gib(r.memoryCap)} GiB · disk ${gib(r.disk)}/${gib(r.diskCap)} GiB`;
+}

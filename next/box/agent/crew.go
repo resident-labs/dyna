@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
@@ -26,7 +27,6 @@ import (
 	"time"
 
 	"github.com/MichaelKinsy/PiG/codemode"
-	"github.com/resident-labs/dyna/box/dynaext"
 	"github.com/resident-labs/dyna/box/shell"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness"
@@ -56,6 +56,9 @@ type crewEngine interface {
 	WorkflowStepEnd(context.Context, contract.WorkflowStepEndRequest) error
 	WorkflowStepTranscript(context.Context, contract.WorkflowStepTranscriptRequest) error
 	WorkflowSetStatus(context.Context, contract.WorkflowSetStatusRequest) error
+	WorkflowState(context.Context, contract.WorkflowStateRequest) (contract.WorkflowStateResponse, error)
+	WorkflowEvents(context.Context, contract.WorkflowEventsRequest) (contract.WorkflowEventsResponse, error)
+	WorkflowEventDone(context.Context, contract.WorkflowEventDoneRequest) error
 	WorkflowPost(context.Context, contract.PostRequest) (contract.PostResponse, error)
 }
 
@@ -65,6 +68,7 @@ type crewWorker interface {
 	Steer(context.Context, contract.TurnInput) error
 	Delivered(context.Context, contract.DeliverySeq) (bool, error)
 	SessionFile() string
+	SetBeforeRequest(func(context.Context) error)
 	Close() error
 }
 
@@ -75,7 +79,7 @@ type CrewConfig struct {
 	Engine         crewEngine
 	// Open starts a worker for a step in dir, its working tree. Folder is the worker's own, for the time it runs, and holds
 	// its model configuration in models.json.
-	Open       func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string, submit dynaext.Submit) (crewWorker, error)
+	Open       func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string, schema json.RawMessage) (crewWorker, error)
 	Transcript *Transcript
 	Workdir    string
 	Branch     string // the session's branch, which names the crew's other branches
@@ -89,12 +93,13 @@ type CrewConfig struct {
 // journal, not this process, holds what has finished. A restarted box runs the script again and stored steps return at once.
 // A reload runs a new version in the same turn, and a step still running here is joined, not started again.
 type Crew struct {
-	config  CrewConfig
-	slots   chan struct{}
-	builds  *buildLock
-	shims   string
-	repo    sync.Mutex    // the changes to the one repository that all trees share
-	reloads chan struct{} // a newer version of the script is waiting
+	config       CrewConfig
+	slots        chan struct{}
+	builds       *buildLock
+	shims        string
+	repo         sync.Mutex    // the changes to the one repository that all trees share
+	reloads      chan struct{} // a newer version of the script is waiting
+	pauseChanged chan struct{} // a pause change wakes calls waiting to start
 
 	mu       sync.Mutex
 	workflow contract.BoxWorkflow // the newest version of the script, which a reload replaces
@@ -105,6 +110,9 @@ type Crew struct {
 	taken    map[contract.DeliverySeq]bool
 	delivery contract.DeliverySeq // workers carry it, so the engine files their transcripts under the crew's turn
 	turn     contract.TurnID
+	dryState json.RawMessage                  // hand-started state lives only in this crew
+	boot     string                           // names this start of the script to the engine, which hands an event over again to a new one
+	held     map[int64]contract.WorkflowEvent // the events whose handlers have not ended, which a reload runs again
 	stop     context.CancelFunc
 }
 
@@ -142,7 +150,7 @@ func NewCrew(config CrewConfig) (*Crew, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Crew{config: config, slots: make(chan struct{}, max(config.Workflow.Workers, 1)), builds: builds, shims: shims, reloads: make(chan struct{}, 1),
+	c := &Crew{config: config, slots: make(chan struct{}, max(config.Workflow.Workers, 1)), builds: builds, shims: shims, reloads: make(chan struct{}, 1), pauseChanged: make(chan struct{}),
 		workflow: config.Workflow, limits: make(map[contract.ProfileName]chan struct{}), running: make(map[string]*runningStep), workers: make(map[string]crewWorker), queued: make(map[contract.DeliverySeq][]crewWorker), taken: make(map[contract.DeliverySeq]bool)}
 	c.addLimits(config.Workflow.Profiles)
 	return c, nil
@@ -163,6 +171,13 @@ func (c *Crew) addLimits(profiles []contract.WorkflowProfile) {
 func (c *Crew) Reload(workflow contract.BoxWorkflow) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if workflow.Paused != c.workflow.Paused || !slices.Equal(workflow.PausedSteps, c.workflow.PausedSteps) || !slices.Equal(workflow.ReleasedSteps, c.workflow.ReleasedSteps) {
+		c.workflow.ReleasedSteps = slices.Clone(workflow.ReleasedSteps)
+		c.workflow.PausedSteps = slices.Clone(workflow.PausedSteps)
+		c.workflow.Paused = workflow.Paused
+		close(c.pauseChanged)
+		c.pauseChanged = make(chan struct{})
+	}
 	if workflow.Version <= c.workflow.Version {
 		return
 	}
@@ -263,6 +278,12 @@ func (c *Crew) SetPromptSections(context.Context, []contract.ContextSection) err
 func (c *Crew) Steer(ctx context.Context, input contract.TurnInput) error {
 	c.mu.Lock()
 	workers := slices.Collect(maps.Values(c.workers))
+	if input.WorkflowStep != "" {
+		workers = nil
+		if worker := c.workers[input.WorkflowStep]; worker != nil {
+			workers = append(workers, worker)
+		}
+	}
 	c.mu.Unlock()
 	var queued []crewWorker
 	var failed error
@@ -321,6 +342,11 @@ func (c *Crew) ClearQueue(context.Context) error { return nil }
 // Start runs the script as the session's turn and returns when it settles. A script that throws fails the run; a failed
 // worker only fails its step, which the script may handle.
 func (c *Crew) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput, started func()) (contract.TurnEnded, error) {
+	defer func() {
+		c.mu.Lock()
+		c.dryState = nil
+		c.mu.Unlock()
+	}()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	c.mu.Lock()
@@ -329,6 +355,7 @@ func (c *Crew) Start(ctx context.Context, id contract.TurnID, inputs []contract.
 		c.delivery = input.Delivery
 	}
 	c.turn, c.stop = id, cancel
+	c.boot, c.held = rand.Text(), make(map[int64]contract.WorkflowEvent)
 	profiles := c.workflow.Profiles
 	c.mu.Unlock()
 	started()
@@ -372,6 +399,8 @@ type crewCall struct {
 	Parent  string          `json:"parent"`
 	Phase   string          `json:"phase"`
 	Lane    string          `json:"lane"`
+	Scope   string          `json:"scope"` // the box start for a body's steps, the queue row for a handler's; empty outside a service
+	Event   int64           `json:"event"` // the queue row of a handler's calls
 	Payload json.RawMessage `json:"payload"`
 	Opts    json.RawMessage `json:"opts"`
 	run     *execution      // the execution that made the call
@@ -435,7 +464,15 @@ func (c *Crew) execute(ctx, work context.Context, steps *sync.WaitGroup, workflo
 	if args == "" {
 		args = "null"
 	}
-	end, err := c.runScript(work, run, workflow.Script, args, "", 0)
+	var service *serviceMode
+	if workflow.Subscription != "" {
+		service = &serviceMode{Scope: "boot:" + c.boot}
+	}
+	end, err := c.runScript(work, run, workflow.Script, args, "", 0, service)
+	if err == nil && end.Failure == nil && end.Served {
+		// The body has set up. The run now hands events to handlers, until a reload or the end of the run stops the VM.
+		c.serve(work, run, workflow)
+	}
 	switch {
 	case reloaded.Load():
 		return "", true, nil
@@ -453,6 +490,22 @@ func (c *Crew) execute(ctx, work context.Context, steps *sync.WaitGroup, workflo
 type scriptEnd struct {
 	Value   string         `json:"value"`
 	Failure *scriptFailure `json:"failure"`
+	Served  bool           `json:"served"` // the body ended after serve(): the run now handles events
+}
+
+// serviceMode is what a script of a subscription's run knows about its place. Scope keys the steps of the body: the box start.
+// A handler's VM runs the same script again with Handler set, and its steps take the queue row as their scope, once serve()
+// hands it the event. A child script keeps the scope and row of the call that started it.
+type serviceMode struct {
+	Scope   string        `json:"scope"`
+	Row     int64         `json:"row"`
+	Handler *handlerEvent `json:"handler,omitempty"`
+}
+
+type handlerEvent struct {
+	Row   int64           `json:"row"`
+	Key   string          `json:"key"`
+	Event json.RawMessage `json:"event"`
 }
 
 // scriptFailure is why a script threw. A parent script reads the Reason, a failed run shows the Report, and Step names the
@@ -467,7 +520,7 @@ const (
 	// crewScriptMemory bounds one script's VM. A script holds the results of its steps, which are at most a megabyte each.
 	crewScriptMemory = 256 << 20
 	// crewAPI is the names of the script API, which crew_prelude.js builds and the script's own scope declares.
-	crewAPI = "args, phase, log, console, status, agent, run, merge, post, parallel, pipeline, workflow, Date, Math"
+	crewAPI = "state, args, phase, log, console, status, agent, run, merge, post, serve, parallel, pipeline, workflow, Date, Math"
 )
 
 //go:embed crew_prelude.js
@@ -479,7 +532,7 @@ var metaDeclaration = regexp.MustCompile(`^((?:\s|//[^\n]*\n|/\*[\s\S]*?\*/)*)ex
 // runScript runs source in a VM of its own on PiG's codemode sandbox and serves the calls it makes, with args as the script's
 // `args`. A child script, at depth 1, is one level down from the run's own, under the key of the step that started it.
 // It returns an error only when the VM could not finish: the run stopped, or the sandbox failed.
-func (c *Crew) runScript(work context.Context, run *execution, source, args, parent string, depth int) (scriptEnd, error) {
+func (c *Crew) runScript(work context.Context, run *execution, source, args, parent string, depth int, service *serviceMode) (scriptEnd, error) {
 	// A script waits hours for its workers, so the VM has no deadline: every step has its own timeout, and the run's turn
 	// ends it when it is stopped.
 	sandbox, err := codemode.NewSandbox(codemode.SandboxOptions{TimeoutMs: math.Inf(1), MemoryLimitBytes: crewScriptMemory, Globals: []codemode.Tool{
@@ -530,10 +583,11 @@ func (c *Crew) runScript(work context.Context, run *execution, source, args, par
 	defer sandbox.Close()
 	argsLiteral, _ := json.Marshal(args)
 	parentLiteral, _ := json.Marshal(parent)
+	serviceLiteral, _ := json.Marshal(service)
 	// The script is the body of a function that names the API, with its own block inside, so its declarations may reuse those
 	// names. It starts on the first line, so the line numbers of its errors are its own.
 	code := "async function script({" + crewAPI + "}) {{" + metaDeclaration.ReplaceAllString(source, "${1}const meta") + "\n}}\n" +
-		"return await (" + crewPrelude + ")(dyna.call, dyna.send, " + string(argsLiteral) + ", " + string(parentLiteral) + ", " + strconv.Itoa(depth) + ")(script)"
+		"return await (" + crewPrelude + ")(dyna.call, dyna.send, " + string(argsLiteral) + ", " + string(parentLiteral) + ", " + strconv.Itoa(depth) + ", " + strconv.Quote(string(serviceLiteral)) + ")(script)"
 	result, err := sandbox.Execute(run.ctx, code, codemode.ExecuteOptions{})
 	if err != nil {
 		return scriptEnd{}, err
@@ -560,6 +614,34 @@ func finalText(value json.RawMessage) string {
 
 func (c *Crew) handle(ctx context.Context, call crewCall) crewReply {
 	switch call.Op {
+	case "state_get", "state_set":
+		if c.config.Workflow.Subscription != "" && call.Event == 0 {
+			return crewReply{Error: "state belongs to an event: use the state that serve() gives the handler"}
+		}
+		if c.config.Workflow.Subscription == "" {
+			if call.Op == "state_set" && (len(call.Payload) > 65536 || !json.Valid(call.Payload)) {
+				return crewReply{Error: "state is JSON of at most 64 KiB"}
+			}
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			if call.Op == "state_set" {
+				c.dryState = append(json.RawMessage(nil), call.Payload...)
+			}
+			value := append(json.RawMessage(nil), c.dryState...)
+			if len(value) == 0 {
+				value = json.RawMessage("null")
+			}
+			return crewReply{Value: value}
+		}
+		req := contract.WorkflowStateRequest{Row: call.Event}
+		if call.Op == "state_set" {
+			req.Value = call.Payload
+		}
+		response, err := c.config.Engine.WorkflowState(ctx, req)
+		if err != nil {
+			return crewReply{Error: err.Error()}
+		}
+		return crewReply{Value: response.Value}
 	case "agent":
 		return c.agentCall(ctx, call)
 	case "run":
@@ -582,7 +664,11 @@ func (c *Crew) stepKey(call crewCall, profile contract.ProfileName) string {
 		_ = json.Unmarshal(raw, &value)
 		return value
 	}
-	data, _ := json.Marshal([]any{call.Op, canonical(call.Payload), canonical(call.Opts), call.Parent, profile})
+	parts := []any{call.Op, canonical(call.Payload), canonical(call.Opts), call.Parent, profile}
+	if call.Scope != "" {
+		parts = append(parts, call.Scope)
+	}
+	data, _ := json.Marshal(parts)
 	sum := sha256.Sum256(data)
 	key := hex.EncodeToString(sum[:])
 	ordinal := 0
@@ -668,7 +754,7 @@ func (c *Crew) journal(ctx context.Context, call crewCall, key, name string, inf
 	if runes := []rune(lane); len(runes) > laneRunes {
 		lane = string(runes[:laneRunes])
 	}
-	stored, err := c.config.Engine.WorkflowStepStart(ctx, contract.WorkflowStepStartRequest{Key: key, Parent: call.Parent, Kind: info.kind, Name: name, Phase: info.phase, Lane: lane, Profile: info.profile, Detail: detail, Version: call.run.number(), Feature: info.feature})
+	stored, err := c.config.Engine.WorkflowStepStart(ctx, contract.WorkflowStepStartRequest{Key: key, Parent: call.Parent, Kind: info.kind, Name: name, Phase: info.phase, Lane: lane, Profile: info.profile, Detail: detail, Version: call.run.number(), Event: call.Event, Feature: info.feature})
 	if err != nil {
 		return crewReply{Error: err.Error(), Step: name}
 	}
@@ -744,6 +830,9 @@ func (c *Crew) agentCall(ctx context.Context, call crewCall) crewReply {
 		info.profile = profile.Name
 	}
 	reply := c.step(ctx, call, info, func(ctx context.Context, key string) stepOutcome {
+		if err := c.waitUnpaused(ctx, key); err != nil {
+			return stepOutcome{reason: "the run stopped"}
+		}
 		if refused != nil {
 			return stepOutcome{reason: "agent options: " + refused.Error()}
 		}
@@ -781,7 +870,6 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 		if schema, err = compileSchema(opts.Schema); err != nil {
 			return stepOutcome{reason: "schema: " + err.Error()}
 		}
-		prompt += "\n\nThis step's result is a JSON file that matches this JSON Schema, which you give to the submit tool:\n" + string(opts.Schema)
 	}
 	c.mu.Lock()
 	profileSlots := c.limits[profile.Name]
@@ -794,7 +882,8 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 		defer release()
 	}
 	limit := c.timeout(opts.Timeout)
-	ctx, cancel := c.builds.timeout(ctx, limit)
+	pauseTime := &buildLock{}
+	ctx, cancel := c.builds.timeout(ctx, limit, pauseTime.waited)
 	defer cancel()
 	folder := filepath.Join(c.config.State, "workers", key)
 	if err := os.MkdirAll(folder, 0700); err != nil {
@@ -808,17 +897,16 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 	if err := os.WriteFile(filepath.Join(folder, "models.json"), data, 0600); err != nil {
 		return stepOutcome{reason: err.Error()}
 	}
-	var submitted *submission
-	var submit dynaext.Submit
-	if schema != nil {
-		submitted = &submission{}
-		submit = submitted.judge(schema, dir)
-	}
-	worker, err := c.config.Open(ctx, profile, folder, dir, submit)
+	worker, err := c.config.Open(ctx, profile, folder, dir, opts.Schema)
 	if err != nil {
 		return stepOutcome{reason: "the worker did not start: " + err.Error()}
 	}
 	c.mu.Lock()
+	worker.SetBeforeRequest(func(ctx context.Context) error {
+		pauseTime.queue(1)
+		defer pauseTime.queue(-1)
+		return c.waitUnpaused(ctx, key)
+	})
 	c.workers[key] = worker
 	c.mu.Unlock()
 	defer func() {
@@ -839,25 +927,51 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 	c.mu.Lock()
 	turn, delivery := c.turn, c.delivery
 	c.mu.Unlock()
-	ended, err := worker.Start(ctx, turn, []contract.TurnInput{{Delivery: delivery, Text: prompt}}, func() {})
-	c.settle(context.WithoutCancel(ctx), worker)
-	out.usage = contract.Usage{Model: ended.Usage.Model, InputTokens: ended.Usage.InputTokens, OutputTokens: ended.Usage.OutputTokens, CacheReadTokens: ended.Usage.CacheReadTokens, CacheWriteTokens: ended.Usage.CacheWriteTokens}
+	inputs := prompt
+	var ended contract.TurnEnded
+	var usage contract.Usage
+	var value any
+	var problem string
+	for turns := 1; ; turns++ {
+		ended, err = worker.Start(ctx, turn, []contract.TurnInput{{Delivery: delivery, Text: inputs}}, func() {})
+		c.settle(context.WithoutCancel(ctx), worker)
+		usage.InputTokens, usage.OutputTokens, usage.CacheReadTokens, usage.CacheWriteTokens = usage.InputTokens+ended.Usage.InputTokens, usage.OutputTokens+ended.Usage.OutputTokens, usage.CacheReadTokens+ended.Usage.CacheReadTokens, usage.CacheWriteTokens+ended.Usage.CacheWriteTokens
+		// A step with a schema reads its final text as the result; one that does not match goes back to the worker, in its own session, to fix.
+		tooLarge := ended.Outcome == contract.TurnFailed && ended.Cause == contract.CauseOutputLimit
+		if schema == nil || err != nil || context.Cause(ctx) != nil || (ended.Outcome != contract.TurnCompleted && !tooLarge) {
+			break
+		}
+		if tooLarge {
+			problem = "the reply reached the output limit before it ended"
+		} else if value, problem = readResult(schema, ended.Final); problem == "" {
+			break
+		}
+		if turns >= schemaAttempts {
+			break
+		}
+		inputs = "Your final message was not accepted: " + problem + ".\n\n"
+		if tooLarge {
+			inputs += "The result is too large to return as text. Write it to a file in your working folder and put its path in your final message, in the shape the schema allows."
+		} else {
+			inputs += "Reply again with only a JSON value that matches the schema, with no prose around it."
+		}
+	}
+	out.usage = usage
+	out.usage.Model = ended.Usage.Model
 	switch {
 	case errors.Is(context.Cause(ctx), context.DeadlineExceeded):
 		out.reason = fmt.Sprintf("timed out after %s", limit)
 	case err != nil:
 		out.reason = err.Error()
-	case submitted != nil && submitted.accepted:
-		out.value = submitted.value
-	case ended.Outcome != contract.TurnCompleted:
+	case ended.Outcome != contract.TurnCompleted && !(schema != nil && ended.Cause == contract.CauseOutputLimit):
 		out.reason = ended.Error
 		if out.reason == "" {
 			out.reason = "the worker's turn " + string(ended.Outcome)
 		}
-	case submitted != nil && submitted.attempts == 0:
-		out.cause, out.reason = contract.CauseNoSubmit, "the worker ended without submitting a file"
-	case submitted != nil:
-		out.cause, out.reason = contract.CauseNoSubmit, fmt.Sprintf("the worker ended without a valid submit, after %d submits: %s", submitted.attempts, submitted.problem)
+	case schema != nil && problem != "":
+		out.cause, out.reason = contract.CauseBadResult, fmt.Sprintf("the worker's final text does not match the schema, after %d turns: %s; its last text: %s", schemaAttempts, problem, clip(ended.Final, 500))
+	case schema != nil:
+		out.value = value
 	case ended.Final == "":
 		out.reason = "the worker ended with no text"
 	default:
@@ -866,85 +980,33 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 	return out
 }
 
-// submission is what a schema worker's submits come to. judge runs on the worker's tool calls, one at a time.
-type submission struct {
-	mu       sync.Mutex
-	attempts int
-	accepted bool
-	value    any
-	problem  string // the latest submit's
-}
+var fenced = regexp.MustCompile("(?s)^```[A-Za-z]*\\s*\n(.*?)\n?```$")
 
-var (
-	errSubmitOutside = errors.New("the path is outside the working folder")
-	errSubmitNotFile = errors.New("the path is not a file")
-)
-
-// judge reads the file a worker names, inside dir, as JSON and checks it against the schema. A valid file is the result and
-// ends the turn; so does the last of the schemaAttempts files, which fails the step. A refused path is no file and does not count.
-func (s *submission) judge(schema *jsonschema.Schema, dir string) dynaext.Submit {
-	return func(path string) (string, bool, error) {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		value, problem, refused := readSubmit(schema, dir, path)
-		if refused == nil {
-			s.attempts++
-		}
-		if problem == "" && refused == nil {
-			s.value, s.accepted = value, true
-			return "Submitted: this is the step's result.", true, nil
-		}
-		s.problem = problem
-		if refused != nil {
-			s.problem = refused.Error()
-		}
-		if s.attempts >= schemaAttempts {
-			return fmt.Sprintf("%s\nThat was submit %d of %d, so the step fails.", s.problem, s.attempts, schemaAttempts), true, nil
-		}
-		return problem, false, refused
+// readResult reads a schema step's final text as its result: the whole text is JSON, or it is exactly one fenced block of it.
+// Prose around the JSON is a mismatch, as is a text like "Done.". What is wrong comes back as the problem to tell the worker.
+func readResult(schema *jsonschema.Schema, text string) (value any, problem string) {
+	text = strings.TrimSpace(text)
+	if m := fenced.FindStringSubmatch(text); m != nil && !strings.Contains(m[1], "```") {
+		text = strings.TrimSpace(m[1])
 	}
-}
-
-// readSubmit reads the file at path inside dir. A path it may not read is refused; a file that is not JSON, or that the
-// schema rejects, comes back as the problem to tell the worker.
-func readSubmit(schema *jsonschema.Schema, dir, path string) (value any, problem string, refused error) {
-	name := path
-	if filepath.IsAbs(path) {
-		rel, err := filepath.Rel(dir, path)
-		if err != nil || !filepath.IsLocal(rel) {
-			return nil, "", errSubmitOutside
-		}
-		name = rel
+	if len(text) > stepResultBytes {
+		return nil, fmt.Sprintf("the text is %d bytes, over the limit of %d", len(text), stepResultBytes)
 	}
-	root, err := os.OpenRoot(dir)
+	value, err := jsonschema.UnmarshalJSON(strings.NewReader(text))
 	if err != nil {
-		return nil, "", err
-	}
-	defer root.Close()
-	// The root refuses ".." and a symlink that leaves it.
-	file, err := root.Open(name)
-	if err != nil {
-		return nil, "", err
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return nil, "", err
-	}
-	if !info.Mode().IsRegular() {
-		return nil, "", errSubmitNotFile
-	}
-	if info.Size() > stepResultBytes {
-		return nil, fmt.Sprintf("the file is %d bytes, over the limit of %d", info.Size(), stepResultBytes), nil
-	}
-	value, err = jsonschema.UnmarshalJSON(file)
-	if err != nil {
-		return nil, "it is not JSON: " + err.Error(), nil
+		return nil, "it is not JSON: " + err.Error()
 	}
 	if err := schema.Validate(value); err != nil {
-		return nil, err.Error(), nil
+		return nil, err.Error()
 	}
-	return value, "", nil
+	return value, ""
+}
+
+func clip(text string, n int) string {
+	if r := []rune(text); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return text
 }
 
 func compileSchema(raw json.RawMessage) (*jsonschema.Schema, error) {
@@ -990,7 +1052,10 @@ func (c *Crew) commandCall(ctx context.Context, call crewCall) crewReply {
 		detail = script
 	}
 	info := stepInfo{kind: contract.WorkflowStepCommand, feature: contract.WorkflowFeatureRun, label: opts.Label, phase: opts.Phase, detail: detail}
-	return c.step(ctx, call, info, func(ctx context.Context, _ string) stepOutcome {
+	return c.step(ctx, call, info, func(ctx context.Context, key string) stepOutcome {
+		if err := c.waitUnpaused(ctx, key); err != nil {
+			return stepOutcome{reason: "the run stopped"}
+		}
 		if refused != nil {
 			return stepOutcome{reason: "run options: " + refused.Error()}
 		}
@@ -1106,7 +1171,7 @@ func (c *Crew) workflowCall(ctx context.Context, call crewCall) crewReply {
 	}
 	info := stepInfo{kind: contract.WorkflowStepWorkflow, feature: contract.WorkflowFeatureWorkflow, detail: body.Ref}
 	key, name := c.stepKey(call, ""), info.name()
-	if _, err := c.config.Engine.WorkflowStepStart(ctx, contract.WorkflowStepStartRequest{Key: key, Parent: call.Parent, Kind: info.kind, Name: name, Phase: call.Phase, Detail: body.Ref, Version: call.run.number(), Feature: info.feature}); err != nil {
+	if _, err := c.config.Engine.WorkflowStepStart(ctx, contract.WorkflowStepStartRequest{Key: key, Parent: call.Parent, Kind: info.kind, Name: name, Phase: call.Phase, Detail: body.Ref, Version: call.run.number(), Event: call.Event, Feature: info.feature}); err != nil {
 		return crewReply{Error: err.Error(), Step: name}
 	}
 	script, err := os.ReadFile(path)
@@ -1116,7 +1181,7 @@ func (c *Crew) workflowCall(ctx context.Context, call crewCall) crewReply {
 		}
 		return crewReply{Error: err.Error(), Step: name}
 	}
-	end, err := c.runScript(ctx, call.run, string(script), string(body.Args), key, 1)
+	end, err := c.runScript(ctx, call.run, string(script), string(body.Args), key, 1, &serviceMode{Scope: call.Scope, Row: call.Event})
 	if err != nil {
 		// The VM stopped with the run, or with this version of it, so the step is left open for the next to join.
 		return crewReply{Error: err.Error(), Step: name}
@@ -1157,4 +1222,21 @@ func (t *tail) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return strings.ToValidUTF8(string(t.data), "")
+}
+
+// waitUnpaused holds new calls and each worker before its next request.
+func (c *Crew) waitUnpaused(ctx context.Context, key string) error {
+	for {
+		c.mu.Lock()
+		paused, changed := (c.workflow.Paused && !slices.Contains(c.workflow.ReleasedSteps, key)) || slices.Contains(c.workflow.PausedSteps, key), c.pauseChanged
+		c.mu.Unlock()
+		if !paused {
+			return nil
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }

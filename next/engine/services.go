@@ -226,8 +226,8 @@ func (s *Service) ServiceSecretSet(ctx context.Context, _ contract.Principal, re
 }
 
 // hostServices lists each host's services for host.list: the room, name, state and what each reserves.
-func (s *Service) hostServices(ctx context.Context) (map[contract.HostName][]contract.HostService, error) {
-	rows, err := s.store.Services(ctx, "")
+func (s *Service) hostServices(ctx context.Context, room contract.RoomID) (map[contract.HostName][]contract.HostService, error) {
+	rows, err := s.store.Services(ctx, room)
 	if err != nil {
 		return nil, err
 	}

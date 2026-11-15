@@ -288,3 +288,28 @@ func TestDiscordPolicyAndCheckActions(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkflowControlActions(t *testing.T) {
+	for _, action := range []string{"steer", "pause", "unpause"} {
+		found := false
+		for _, row := range Methods() {
+			for _, a := range row.Actions {
+				if a.Tool == "workflow" && a.Name == action {
+					found = slices.Contains(a.CLI, "workflow "+action) && a.Help != ""
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("missing workflow %s action or binding", action)
+		}
+	}
+}
+
+// p226 made host.list box-only, so the owner CLI and the web's Hosts page got "forbidden". Both the owner and sessions list hosts.
+func TestHostListServesTheOwnerAndSessions(t *testing.T) {
+	for _, row := range Methods() {
+		if row.Method == contract.MethodHostList && row.Access != UserAccess {
+			t.Fatalf("host.list access %d, want UserAccess", row.Access)
+		}
+	}
+}

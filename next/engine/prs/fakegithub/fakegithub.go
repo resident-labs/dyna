@@ -687,6 +687,24 @@ func (s *Server) serveREST(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-Poll-Interval", strconv.Itoa(s.pollInterval))
 		}
 		s.answer(w, r, map[string]any{"object": map[string]string{"sha": head}})
+	case rest == "pulls":
+		list := []map[string]any{}
+		for _, pull := range s.pulls {
+			if pull.Repo == repo && pull.State == "OPEN" {
+				list = append(list, metaNode(map[string]any{"number": pull.Number, "html_url": s.link(pull), "title": pull.Title, "draft": pull.Draft, "state": "open", "user": user(pull.Author)}, pull.Meta))
+			}
+		}
+		slices.SortFunc(list, func(a, b map[string]any) int { return cmp.Compare(a["number"].(int), b["number"].(int)) })
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		if page < 1 {
+			page = 1
+		}
+		start := (page - 1) * 100
+		if start > len(list) {
+			start = len(list)
+		}
+		end := min(start+100, len(list))
+		s.answer(w, r, list[start:end])
 	case rest == "issues" || rest == "issues/events" || rest == "issues/comments" || rest == "pulls/comments":
 		s.serveFeed(w, r, repo, rest)
 	case len(parts) == 5 && parts[3] == "pulls":
@@ -870,6 +888,7 @@ type Check struct {
 	Status        string
 	StatusContext bool
 	URL           string
+	Event         string // the event that started its workflow run, such as workflow_dispatch; empty for a check from another app
 }
 
 // Suite is one app's check suite, including runs that have not appeared in the rollup yet.
@@ -880,6 +899,7 @@ type Suite struct {
 	CreatedAt  time.Time
 	Runs       int
 	Workflow   string
+	Event      string // the event that started the workflow run; push when empty
 }
 
 func suiteNodes(suites []Suite, total int) any {
@@ -890,7 +910,11 @@ func suiteNodes(suites []Suite, total int) any {
 	result := nodes(suites, func(s Suite) map[string]any {
 		node := map[string]any{"status": s.Status, "conclusion": s.Conclusion, "app": map[string]any{"slug": s.App}, "createdAt": s.CreatedAt, "checkRuns": map[string]any{"totalCount": s.Runs}}
 		if s.Workflow != "" {
-			node["workflowRun"] = map[string]any{"workflow": map[string]any{"name": s.Workflow}}
+			event := s.Event
+			if event == "" {
+				event = "push"
+			}
+			node["workflowRun"] = map[string]any{"event": event, "workflow": map[string]any{"name": s.Workflow}}
 		}
 		return node
 	})
@@ -947,5 +971,9 @@ func checkNode(c Check) map[string]any {
 			status = "COMPLETED"
 		}
 	}
-	return map[string]any{"__typename": "CheckRun", "name": c.Name, "status": status, "conclusion": c.Conclusion, "detailsUrl": c.URL}
+	node := map[string]any{"__typename": "CheckRun", "name": c.Name, "status": status, "conclusion": c.Conclusion, "detailsUrl": c.URL}
+	if c.Event != "" {
+		node["checkSuite"] = map[string]any{"workflowRun": map[string]any{"event": c.Event}}
+	}
+	return node
 }

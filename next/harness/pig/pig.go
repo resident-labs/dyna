@@ -47,12 +47,21 @@ type Config struct {
 	// Notice hears the warnings an extension gives outside a turn, such as an MCP server that did not connect, and each
 	// package extension that failed to load, which leaves the session running without it.
 	Notice func(string)
+	// Tools is the exact list of tools the session has, and no others, in a resumed conversation too. Empty keeps the
+	// box's usual set. Bare loads no codemode, tool-search, MCP or package extension and no package skill or prompt, which an
+	// agent with a fixed tool list does not need.
+	Tools []string
+	Bare  bool
+	// NoSkills leaves the skills index out of the prompt: a workflow worker's prompt is its own, and it still reads the AGENTS.md files.
+	NoSkills bool
 }
 
 // Harness drives one retained PiG session.
 type Harness struct {
 	// Activity hears what the turn is doing: each tool call, and a compaction.
 	Activity func(contract.TurnID, contract.ActivityKind, string)
+	// Finished hears each call of a parallel batch as it ends, before the batch writes its results together.
+	Finished func(contract.TurnID, contract.ToolFinished)
 	services *coding.AgentSessionServices
 	models   *coding.ModelRuntime // the runtime a ModelsFile made, which the services leave to their owner; nil without one
 	session  *coding.Session
@@ -79,11 +88,14 @@ var _ harness.Harness = (*Harness)(nil)
 
 // Open starts the session, continuing the newest one in the session folder if there is one.
 func Open(ctx context.Context, c Config) (*Harness, error) {
-	extensions := append(append([]extension.InlineExtension{}, c.Extensions...),
-		extension.NamedInlineExtension{Name: "codemode", Replaceable: true, Factory: codemode.CreateCodemodeExtension(codemode.Options{})},
-		extension.NamedInlineExtension{Name: "tool-search", Replaceable: true, Factory: toolsearch.CreateToolSearchExtensionWith(toolsearch.Options{DeferredToolsSection: true, DefaultLimit: 3})},
-		extension.NamedInlineExtension{Name: "mcp", Replaceable: true, Factory: mcpext.CreateMcpExtension(mcpext.Options{AgentDir: c.AgentDir, ConfigDirName: ".pi", DeferredToolsSection: true})},
-	)
+	extensions := append([]extension.InlineExtension{}, c.Extensions...)
+	if !c.Bare {
+		extensions = append(extensions,
+			extension.NamedInlineExtension{Name: "codemode", Replaceable: true, Factory: codemode.CreateCodemodeExtension(codemode.Options{})},
+			extension.NamedInlineExtension{Name: "tool-search", Replaceable: true, Factory: toolsearch.CreateToolSearchExtensionWith(toolsearch.Options{DeferredToolsSection: true, DefaultLimit: 3})},
+			extension.NamedInlineExtension{Name: "mcp", Replaceable: true, Factory: mcpext.CreateMcpExtension(mcpext.Options{AgentDir: c.AgentDir, ConfigDirName: ".pi", DeferredToolsSection: true})},
+		)
+	}
 	var models *coding.ModelRuntime
 	if c.ModelsFile != "" {
 		file := &c.ModelsFile
@@ -103,6 +115,10 @@ func Open(ctx context.Context, c Config) (*Harness, error) {
 			// The engine's text is the whole head: it replaces the preamble, tools and rules, and the empty, non-nil list keeps PiG from reading APPEND_SYSTEM.md.
 			SystemPrompt:       &c.Instructions,
 			AppendSystemPrompt: []string{},
+			NoExtensions:       c.Bare,
+			NoSkills:           c.Bare || c.NoSkills,
+			NoPromptTemplates:  c.Bare,
+			NoContextFiles:     c.Bare,
 		},
 	})
 	if err != nil {
@@ -151,7 +167,11 @@ func (h *Harness) start(ctx context.Context, c Config) error {
 	// "+bash" keeps the extension's bash active in a resumed session, which restores the tools its transcript recorded.
 	// A model that marks effort changes mid-conversation still gets the session's effort at the top level, where Pi sends "high"
 	// (the fork's patch P8, as Dyna's Pi fork did).
-	created, err := coding.CreateAgentSessionFromServices(coding.CreateAgentSessionFromServicesOptions{Services: h.services, SessionManager: manager, Model: model, ThinkingLevel: ai.ModelThinkingLevel(c.Model.Thinking), Tools: []string{"+codemode", "+bash"}, ContextUpdates: true, ActiveEffortAtTopLevel: true})
+	tools := []string{"+codemode", "+bash"}
+	if len(c.Tools) > 0 {
+		tools = c.Tools
+	}
+	created, err := coding.CreateAgentSessionFromServices(coding.CreateAgentSessionFromServicesOptions{Services: h.services, SessionManager: manager, Model: model, ThinkingLevel: ai.ModelThinkingLevel(c.Model.Thinking), Tools: tools, ContextUpdates: true, ActiveEffortAtTopLevel: true})
 	if err != nil {
 		return err
 	}
@@ -256,6 +276,7 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, send func(context
 		activity = h.Activity
 	}
 	t := newTurn(id, activity)
+	t.finished = h.Finished
 	h.mu.Lock()
 	h.turn = t
 	h.mu.Unlock()
@@ -398,4 +419,9 @@ func (h *Harness) Close() error {
 		close(h.done)
 	})
 	return err
+}
+
+// SetBeforeRequest holds a workflow worker at its next request boundary.
+func (h *Harness) SetBeforeRequest(fn func(context.Context) error) {
+	h.session.Agent().SetBeforeRequest(fn)
 }

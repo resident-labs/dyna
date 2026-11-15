@@ -59,7 +59,7 @@ func TestCloseListedSessionByName(t *testing.T) {
 		{"restart", func() *contract.Error {
 			_, p := s.SessionRestart(ctx, caller, contract.SessionRestartRequest{Session: contract.SessionID(name)})
 			return p
-		}, contract.ErrConflict},
+		}, ""},
 		{"refresh", func() *contract.Error {
 			_, p := s.SessionRefresh(ctx, caller, contract.SessionRefreshRequest{Session: contract.SessionID(name)})
 			return p

@@ -60,14 +60,7 @@ func (s *serviceWithHosts) AccountsQuota(ctx context.Context, caller contract.Pr
 }
 
 func (s *serviceWithHosts) HostList(ctx context.Context, caller contract.Principal, req contract.HostListRequest) (contract.HostListResponse, *contract.Error) {
-	result, problem := s.Service.HostList(ctx, caller, req)
-	if problem != nil {
-		return result, problem
-	}
-	if err := s.boxes.HostLoad(ctx, result.Hosts); err != nil {
-		return contract.HostListResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: err.Error()}
-	}
-	return result, nil
+	return s.Service.HostListWithLoad(ctx, caller, req, s.boxes.HostLoad)
 }
 
 func (s *serviceWithHosts) HostAdd(ctx context.Context, caller contract.Principal, req contract.HostAddRequest) (contract.HostAddResponse, *contract.Error) {

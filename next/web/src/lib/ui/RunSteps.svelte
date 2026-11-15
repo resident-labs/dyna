@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { fromNow } from "../feed.ts";
   import { fade, slide } from "svelte/transition";
   import { MediaQuery, SvelteSet } from "svelte/reactivity";
   import type { WorkflowInfo, WorkflowStep } from "../contract.gen.ts";
@@ -49,10 +50,11 @@
   <span class="name" title={step.name}>{step.name}</span>
   {#if spans}<span class="when" aria-hidden="true">{#if time && spanReads(span)}<i class={step.state} style:left="{span.left}%" style:width="{span.width}%"></i>{/if}</span>{/if}
   <span class="meta"><span class="profile" title={step.profile}>{step.profile ?? ""}{#if (info.version ?? 1) > 1 && step.version}<span class="version" title="Started by script v{step.version}"> v{step.version}</span>{/if}</span>
-    <span class="figure" title={tokenDetail(step.usage)}>{tokens(step.usage)}</span>
+    <span class="figure" title={`${step.state === "running" ? "Tokens so far" : "Tokens"}: ${tokenDetail(step.usage) || "0"}`}>{tokens(step.usage)}</span>
     <span class="figure">{time}</span></span>
   <span class="state">{#key state.word}<span in:fade={motion}>{#if state.tone}<StatusPill tone={state.tone} label={state.word} word />{:else}{state.word}{/if}</span>{/key}</span>
   <span class="go">{#if open === undefined && openable(step)}<Icon name="forwardChevron" size={14} />{/if}</span>
+  {#if step.kind === "agent"}<span class="progress">{step.toolCalls} tool {step.toolCalls === 1 ? "call" : "calls"}{#if step.state === "running"}<span class="activity" title={step.lastActivity ? `Last received transcript activity: ${step.lastActivity}` : "No transcript activity received yet"}> · {step.lastActivity ? `Last activity ${fromNow(step.lastActivity, now)}` : "Waiting for activity"}</span>{/if}</span>{/if}
 {/snippet}
 
 {#snippet row(node: StepNode, depth: number)}
@@ -130,6 +132,7 @@
   .meta { display: contents; }
   .profile { min-width: 0; overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
   .version { opacity: 0.7; font-variant-numeric: tabular-nums; }
+  .progress { grid-column: 3 / -2; padding-bottom: 4px; font-size: 12px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
   .figure { font-size: 12.5px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
   .state { font-size: 12.5px; text-align: right; white-space: nowrap; }
   .go { display: inline-flex; width: 14px; }
@@ -146,15 +149,16 @@
   button.step:focus-visible, .phase-head:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   .filter:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   /* A narrow column keeps the name and the state, and the figures take a second line. */
-  @container run (max-width: 600px) {
-    .step { grid-template-columns: 14px 14px minmax(0, 1fr) auto 14px; grid-template-areas: "fold icon name state go" ". . meta meta go"; gap: 0 8px; padding-block: 4px; }
+  @container run (max-width: 700px) {
+    .step { grid-template-columns: 14px 14px minmax(0, 1fr) auto 14px; grid-template-areas: "fold icon name state go" ". . meta meta go" ". . progress progress ."; gap: 0 8px; padding-block: 4px; }
     .fold { grid-area: fold; }
     .step > :global(svg) { grid-area: icon; }
     .name { grid-area: name; }
     .when { display: none; }
     .state { grid-area: state; }
     .go { grid-area: go; }
-    .meta { grid-area: meta; display: flex; gap: 8px; min-width: 0; }
+    .progress { grid-area: progress; padding-bottom: 0; }
+    .meta { grid-area: meta; display: flex; flex-wrap: wrap; gap: 0 8px; min-width: 0; }
     .meta > :empty { display: none; }
     .profile { flex: 0 1 auto; }
   }

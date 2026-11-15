@@ -8,7 +8,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-// host.list names sessions only in rooms the caller can read, by the same rule as session.list.
+// The owner sees host sessions; agent inventory contains no session identities.
 func TestHostListSessionsFollowRoomAccess(t *testing.T) {
 	s, room, worker, ctx := setup(t)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
@@ -20,19 +20,21 @@ func TestHostListSessionsFollowRoomAccess(t *testing.T) {
 	rooms := func(who contract.Principal) map[contract.RoomID]bool {
 		t.Helper()
 		list, problem := s.HostList(ctx, who, contract.HostListRequest{})
-		if problem != nil || len(list.Hosts) != 2 {
+		if problem != nil || len(list.Hosts) == 0 {
 			t.Fatalf("hosts: %+v %v", list, problem)
 		}
 		got := make(map[contract.RoomID]bool)
-		for _, session := range list.Hosts[1].Sessions {
-			got[session.Room] = true
+		for _, host := range list.Hosts {
+			for _, session := range host.Sessions {
+				got[session.Room] = true
+			}
 		}
 		return got
 	}
 	if got := rooms(owner); !got[room] || !got[other.Room] {
 		t.Fatalf("owner: %+v", got)
 	}
-	if got := rooms(contract.Principal{Kind: contract.PrincipalSession, Session: worker}); !got[room] || got[other.Room] {
+	if got := rooms(contract.Principal{Kind: contract.PrincipalSession, Session: worker}); len(got) != 0 {
 		t.Fatalf("session: %+v", got)
 	}
 	if got := rooms(contract.Principal{Kind: contract.PrincipalEngine}); len(got) != 0 {

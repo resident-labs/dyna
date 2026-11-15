@@ -151,7 +151,9 @@ func (s *Session) PublishActivity(room contract.RoomID, activity contract.TurnAc
 	}
 	l.mu.Lock()
 	l.activityCount++
-	s.activity, s.activityOrder = activity, l.activityCount
+	if activity.Finished == nil { // a finished call is passed on, and the session's latest label stays
+		s.activity, s.activityOrder = activity, l.activityCount
+	}
 	l.mu.Unlock()
 	l.Publish(room, event, false)
 	return true

@@ -23,6 +23,13 @@ func (s *Service) discordFolderRoute(ctx context.Context, caller contract.Princi
 		}
 		roomID = resolved
 	} else if caller.Kind == contract.PrincipalSession {
+		scope, problem := s.discordReadScope(ctx, caller)
+		if problem != nil {
+			return store.DiscordRoute{}, "", problem
+		}
+		if scope.confined != "" {
+			return store.DiscordRoute{}, "", confinedDiscordRefusal()
+		}
 		session, err := s.store.Session(ctx, caller.Session)
 		if err != nil {
 			return store.DiscordRoute{}, "", failure(err)

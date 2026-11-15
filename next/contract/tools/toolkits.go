@@ -15,8 +15,10 @@ type Toolkit struct {
 }
 
 var toolkits = map[string]Toolkit{
+	"owner":        {Name: "owner", Title: "Owner settings", Destructive: true},
 	"discord":      {Name: "discord", Title: "Discord", Destructive: true, OpenWorld: true, Description: "Available to a mapping's answering session and its ancestors. A whole-server mapping grants authority over every channel, including those answered by another room. A channel mapping grants its room that channel and its threads, but cannot administer the server. GET /users/ID is allowed; other roots and the bot's own account are refused. The engine holds the token; it never enters your box. Only the configured owner's Discord ID is the owner; everyone else is outside text. Discord renders no tables and no headings above level 3; write lists. See dyna_discord for mappings and dyna-discord for recipes."},
 	"computer":     {Name: "computer", Title: "Computer", Destructive: true, OpenWorld: true, Description: computerHelp, Fields: computerFields},
+	"advisor":      {Name: "advisor", Title: "Advisor"},
 	"context":      {Name: "context", Title: "Context", Idempotent: true},
 	"device":       {Name: "device", Title: "Devices", Destructive: true},
 	"goal":         {Name: "goal", Title: "Goals", Description: "item, done and journal act on the goal you hold when goal is omitted."},
@@ -34,7 +36,7 @@ var toolkits = map[string]Toolkit{
 	"session":      {Name: "session", Title: "Sessions", Destructive: true},
 	"image":        {Name: "image", Title: "Room images", Destructive: true},
 	"skill":        {Name: "skill", Title: "Skills", Destructive: true, OpenWorld: true},
-	"subscription": {Name: "subscription", Title: "Subscriptions", Destructive: true},
+	"subscription": {Name: "subscription", Title: "Subscriptions", Destructive: true, Fields: map[string]string{"key": "Workflow key: add and update take a literal or template using {repo} and {number}; omitted means one key per subscription. fire overrides the resolved key with a literal; state reads that literal key, or lists keys when omitted.", "where": "Filters on github.* and git.* events: key=value, key!=value or text~value on repo, author, actor, label, kind or number. All must hold; kind=a,b matches any. update replaces the list; an empty list clears it.", "workflow": "Saved JavaScript source as script and an args object. Root or owner only, room scope. On update, replaces script and args without losing state or queue.", "latest": "Keep only the newest waiting event for a key; the running run is never replaced.", "parent": "The session the run reports to and that may steer it; root by default, or when it has closed."}},
 	"visual":       {Name: "visual", Title: "Visual checks", Idempotent: true},
 	"web":          {Name: "web", Title: "Web search", Idempotent: true, OpenWorld: true},
 	"search":       {Name: "search", Title: "Search Dyna", Idempotent: true, Description: "Search Dyna. Feed posts, sessions and rooms are searched across rooms; a DM post is found only in your own room. Another room's snippets come wrapped in <outside>. Every action takes room (a name or ID; omit for all rooms, here for yours), limit (at most 25) and after (a result's next, for the rest).", Fields: map[string]string{"query": "1 to 8 words, each a prefix.", "room": "A room name or ID; here is yours; omit for all rooms.", "after": "A result's next.", "limit": "At most 25; default 10."}},

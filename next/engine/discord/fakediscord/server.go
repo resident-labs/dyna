@@ -31,6 +31,7 @@ type Server struct {
 	mu            sync.Mutex
 	connections   int
 	history       []any
+	memberRoles   []string
 	historyCalls  int
 	requests      int
 	configuration *Configuration
@@ -42,7 +43,7 @@ type Server struct {
 
 func New(t testing.TB) *Server {
 	t.Helper()
-	s := &Server{Token: "fake-discord-secret", Messages: make(chan json.RawMessage, 64), UploadedFiles: make(chan string, 64), Events: make(chan any, 64), Dispatches: make(chan Dispatch, 64)}
+	s := &Server{memberRoles: []string{"10"}, Token: "fake-discord-secret", Messages: make(chan json.RawMessage, 64), UploadedFiles: make(chan string, 64), Events: make(chan any, 64), Dispatches: make(chan Dispatch, 64)}
 	s.HTTP = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body []byte
 		if r.Body != nil {
@@ -91,7 +92,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, body []byte) {
 	case r.URL.Path == "/api/v10/users/@me/guilds":
 		w.Write([]byte(`[{"id":"100","name":"Horizon"}]`))
 	case strings.Contains(r.URL.Path, "/members/"):
-		w.Write([]byte(`{"user":{"id":"1"}}`))
+		s.mu.Lock()
+		roles := append([]string{}, s.memberRoles...)
+		s.mu.Unlock()
+		json.NewEncoder(w).Encode(map[string]any{"user": map[string]string{"id": "1"}, "roles": roles})
 	case strings.HasSuffix(r.URL.Path, "/typing"):
 		w.WriteHeader(204)
 	case strings.HasSuffix(r.URL.Path, "/messages") && r.Method == "POST":
@@ -242,4 +246,10 @@ func (s *Server) gateway(w http.ResponseWriter, r *http.Request) {
 			seq++
 		}
 	}
+}
+
+func (s *Server) SetMemberRoles(roles []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.memberRoles = roles
 }

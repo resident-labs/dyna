@@ -7,8 +7,48 @@ export function parseRoutes(value: unknown): Routes | undefined {
     !("routes" in value) || !Array.isArray(value.routes) || !value.routes.every((route: unknown) => typeof route === "string")) return;
   return { machine: value.machine, current: value.current, expires: value.expires, routes: value.routes.filter(allowedOrigin) };
 }
-async function post(path: string, body: object): Promise<Response> {
-  return fetch(path, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-Dyna": "1" }, body: JSON.stringify(body) });
+async function post(path: string, body: object, signal?: AbortSignal): Promise<Response> {
+  return fetch(path, { signal, method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-Dyna": "1" }, body: JSON.stringify(body) });
+}
+
+// API calls and the timer share one proof-bound cookie rotation.
+let renewalVersion = 0;
+export const connectVersion = () => renewalVersion;
+let renewing: Promise<Response | undefined> | undefined;
+export function renewConnect(): Promise<Response | undefined> {
+  return renewing ??= (async () => {
+    const controller = new AbortController();
+    let expire!: () => void;
+    const expired = new Promise<undefined>(resolve => { expire = () => resolve(undefined); });
+    const timer = setTimeout(() => { controller.abort(); expire(); }, 10_000);
+    try {
+      // Race the entire operation, including key access. A stuck local key store
+      // must not retain the shared in-flight renewal forever either.
+      return await Promise.race([expired, (async () => post("/api/connect/renew", {
+        proof: await proof(await deviceKey(), "/api/connect/renew"),
+      }, controller.signal))()]);
+    } finally { clearTimeout(timer); }
+  })().then(response => {
+    if (response?.ok) renewalVersion++;
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("connect-renewal", { detail: response?.ok ? "ready" : response?.status === 429 ? "wait" : response?.status === 401 || response?.status === 403 ? "ended" : "unavailable" }));
+    return response;
+  }).catch(() => {
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("connect-renewal", { detail: "unavailable" }));
+    return undefined;
+  }).finally(() => { renewing = undefined; });
+}
+
+export type Renewal = "retry" | "ended" | "unavailable" | "wait";
+// A generation prevents delayed refusals from rotating an already renewed cookie.
+export async function recoverConnect(response: Response, sentVersion: number): Promise<Renewal | undefined> {
+  if (response.status !== 401) return;
+  const body: unknown = await response.clone().json().catch(() => undefined);
+  if (typeof body !== "object" || body === null || !("code" in body)) return;
+  if (body.code === "connect-ended") return "ended";
+  if (body.code !== "renew") return;
+  if (sentVersion < renewalVersion) return "retry";
+  const renewal = await renewConnect();
+  return renewal?.ok ? "retry" : renewal?.status === 401 || renewal?.status === 403 ? "ended" : renewal?.status === 429 ? "wait" : "unavailable";
 }
 
 // The private routes response proves the server has authenticated this Connect session.
@@ -25,8 +65,8 @@ export async function watchConnect(): Promise<{ stream(up: boolean): void; stop(
   let expires = Date.parse(data.expires);
   async function renew() {
     if (stopped) return;
-    const response = await post("/api/connect/renew", { proof: await proof(await deviceKey(), "/api/connect/renew") }).catch(() => undefined);
-    if (response?.status === 401) { location.reload(); return; }
+    const response = await renewConnect();
+    if (response?.status === 401 || response?.status === 403) { window.dispatchEvent(new Event("connect-ended")); return; }
     if (response?.ok) {
       const value: unknown = await response.json();
       if (typeof value === "object" && value !== null && "expires" in value && typeof value.expires === "string") expires = Date.parse(value.expires);

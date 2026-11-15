@@ -33,6 +33,8 @@ const (
 	MethodInstructionsSet         Method = "instructions.set"
 	MethodWebLogin                Method = "web.login"
 	MethodWebSearch               Method = "web.search"
+	MethodGitSign                 Method = "git.sign"
+	MethodSigningKey              Method = "signing.key"
 	MethodWebsearchSetKey         Method = "websearch.set_key"
 	MethodWebsearchRemoveKey      Method = "websearch.remove_key"
 	MethodProxyKey                Method = "proxy.key"
@@ -62,6 +64,7 @@ const (
 	MethodAccountsQuota           Method = "accounts.quota"
 	MethodRoomPause               Method = "room.pause"
 	MethodRoomSetLimits           Method = "room.set_limits"
+	MethodOwnerTimezone           Method = "owner.timezone"
 	MethodRoomSet                 Method = "room.set"
 	MethodRoomCreate              Method = "room.create"
 	MethodRoomDelete              Method = "room.delete"
@@ -72,6 +75,7 @@ const (
 	MethodComposeList             Method = "compose.list"
 	MethodSessionClose            Method = "session.close"
 	MethodSessionStop             Method = "session.stop"
+	MethodAdvisor                 Method = "advisor"
 	MethodSessionSetProfile       Method = "session.set_profile"
 	MethodSessionAccount          Method = "session.account"
 	MethodSessionSetAccount       Method = "session.set_account"
@@ -202,6 +206,11 @@ type RoomSetRequest struct {
 	// GitHubWrites sets the room's githubWrites setting whole (spec 7.9): the groups to allow on repositories of the room, or `*`. No groups
 	// turns it off. Nil leaves it as it is.
 	GitHubWrites *GitHubWrites `json:"githubWrites,omitempty"`
+	// Advisor sets the room's advisor profile: an agent on that profile that runs in root's box with read-only tools. Empty turns it
+	// off. Nil leaves it as it is.
+	Advisor *ProfileName `json:"advisor,omitempty"`
+	// GitSigning switches the signing of the room's commits and tags with the engine's key, as the owner. Nil leaves it as it is.
+	GitSigning *bool `json:"gitSigning,omitempty"`
 }
 
 // RootApproval names the owner-class operations a room's root may also decide, when the owner allows it for the room.
@@ -240,6 +249,10 @@ type RoomSummary struct {
 	Waiting  []OpID    `json:"waiting"` // pending owner-class operations, which the owner decides, and the root for the kinds RootApproves names
 	// RootApproves lists the kinds the room's root may decide.
 	RootApproves []RootApproval `json:"rootApproves,omitempty"`
+	// Advisor is the room's advisor profile; empty when it has none.
+	Advisor ProfileName `json:"advisor,omitempty"`
+	// GitSigning is whether the room's boxes sign their commits and tags with the engine's key.
+	GitSigning bool `json:"gitSigning,omitempty"`
 	// GitHubWrites is the room's githubWrites setting, as the owner set it; nil when it is off.
 	GitHubWrites *GitHubWrites `json:"githubWrites,omitempty"`
 	// Questions are those the owner has not answered.
@@ -446,6 +459,11 @@ type RunnerImageProblem struct {
 }
 
 type HostSummary struct {
+	Reservations *HostReservations    `json:"reservations,omitempty"`
+	State        string               `json:"state"` // ready, degraded, agents off, or the host setup state
+	CPUFree      float64              `json:"cpuFree"`
+	MemFree      int64                `json:"memFree"`
+	DiskFree     int64                `json:"diskFree"`
 	Health       HostHealth           `json:"health,omitempty"`
 	Problem      HostProblem          `json:"problem,omitempty"`
 	RunnerImages []RunnerImageProblem `json:"runnerImages,omitempty"` // runner images that failed to build here
@@ -499,9 +517,10 @@ type RoomDeleteRequest struct {
 
 type RoomDeleteResponse struct{}
 type RoomRepoAddRequest struct {
-	Room    RoomID   `json:"room"`
-	Repo    RepoName `json:"repo"`
-	Default bool     `json:"default"`
+	Room     RoomID   `json:"room"`
+	Repo     RepoName `json:"repo"`
+	Default  bool     `json:"default"`
+	PREvents *bool    `json:"prEvents,omitempty"`
 }
 type RoomRepoAddResponse struct{}
 type RoomReposRequest struct {
@@ -599,8 +618,25 @@ type SessionSetBranchRequest struct {
 type SessionSetBranchResponse struct{}
 type SessionRestartRequest struct {
 	Session SessionID `json:"session"`
+	// Host replaces a placement pin, within the room host rule. Omit to keep the pin.
+	Host HostName `json:"host,omitempty"`
 }
 type SessionRestartResponse struct{}
+
+// AdvisorRequest is root's prompt for the room's advisor.
+type AdvisorRequest struct {
+	Prompt string `json:"prompt"`
+	// ToolCallID is the call that carries the request, which the box fills in: the advisor's steps show under that call.
+	ToolCallID string `json:"toolCallId,omitempty"`
+}
+
+// AdvisorResponse is the advisor's answer: the final text of its turn, or what it had said when something ended the turn early, in which
+// case Note says what ended it. The owner reads both in root's DM.
+type AdvisorResponse struct {
+	Answer  string      `json:"answer"`
+	Note    string      `json:"note,omitempty"`
+	Advisor ProfileName `json:"advisor"` // the profile that answered, which the DM names the message by
+}
 
 // SessionRefreshRequest names one session, or a room for every open session in it that the caller may manage.
 type SessionRefreshRequest struct {
@@ -614,11 +650,14 @@ type SessionRefreshResponse struct {
 }
 type PostRequest struct {
 	Spoken         bool         `json:"-"` // set only by the voice dispatch boundary
+	Awaited        bool         `json:"-"` // set only by the advisor call, which waits for the reply itself, so the post owes none
+	Context        string       `json:"-"` // what the one recipient reads before Text, which the feed does not show; set only by the advisor call
 	DataAttachment *int         `json:"-"` // filled by the owning post boundary, never trusted from a caller
 	Data           JSONData     `json:"data,omitempty"`
 	Room           RoomID       `json:"room"`
 	Text           string       `json:"text"`
 	Mentions       []string     `json:"mentions,omitempty"`
+	WorkflowStep   string       `json:"-"`
 	Home           Conversation `json:"home,omitempty"`
 	ReplyTo        EventID      `json:"replyTo,omitempty"`
 	Attachments    []Attachment `json:"attachments,omitempty"`
@@ -721,6 +760,7 @@ const (
 	ThinkingMedium  ThinkingLevel = "medium"
 	ThinkingHigh    ThinkingLevel = "high"
 	ThinkingXHigh   ThinkingLevel = "xhigh"
+	ThinkingMax     ThinkingLevel = "max"
 )
 
 type ModelChoice struct {
@@ -748,9 +788,11 @@ type TextOnlyModel struct {
 type BoxHelloResponse struct {
 	Discord       bool   `json:"discord,omitempty"` // this room has a connection
 	Room          RoomID `json:"room"`
-	Root          bool   `json:"root,omitempty"` // the session has no parent, so add-ons marked root-only reach its box
+	Root          bool   `json:"root,omitempty"`    // the session has no parent, so add-ons marked root-only reach its box
+	Advisor       bool   `json:"advisor,omitempty"` // root's room has an advisor, so root's advisor tool is direct
 	GitName       string `json:"gitName,omitempty"`
 	GitEmail      string `json:"gitEmail,omitempty"`
+	GitSigningKey string `json:"gitSigningKey,omitempty"` // the engine's public signing key line; the box's git signs through the engine
 	CompactTokens int    `json:"compactTokens,omitempty"`
 	Instructions  string `json:"instructions"`
 	// ModelInstructions is the model-specific prompt part, replaced with the model at a turn boundary.
@@ -792,6 +834,8 @@ type TurnActivityRequest struct {
 	Turn  TurnID       `json:"turn"`
 	Kind  ActivityKind `json:"kind,omitempty"` // empty from a box agent that predates kinds, which the engine reads as a tool call
 	Label string       `json:"label"`
+	// Finished reports one call of a parallel batch that ended early; Kind and Label are then empty.
+	Finished *ToolFinished `json:"finished,omitempty"`
 }
 type TurnActivityResponse struct{}
 type SessionWorkRequest struct {
@@ -816,6 +860,7 @@ type SessionWorkResponse struct {
 type TranscriptReadRequest struct {
 	Session   SessionID      `json:"session"`
 	Step      string         `json:"step,omitempty"`
+	Agent     AgentID        `json:"agent,omitempty"` // reads one in-box agent's turn instead, by its ID
 	Turn      TurnID         `json:"turn,omitempty"`
 	Before    TurnID         `json:"before,omitempty"`
 	Limit     int            `json:"limit,omitempty"`
@@ -1035,11 +1080,12 @@ type ShellJobRunningRequest struct {
 }
 type ShellJobRunningResponse struct{}
 type TurnInput struct {
-	Delivery DeliverySeq  `json:"delivery"`
-	Surface  Surface      `json:"surface"`
-	Reply    ReplyChannel `json:"reply"`
-	Text     string       `json:"text"`
-	Files    []TurnFile   `json:"files,omitempty"` // the attachments the frame names
+	Delivery     DeliverySeq  `json:"delivery"`
+	Surface      Surface      `json:"surface"`
+	Reply        ReplyChannel `json:"reply"`
+	WorkflowStep string       `json:"workflowStep,omitempty"`
+	Text         string       `json:"text"`
+	Files        []TurnFile   `json:"files,omitempty"` // the attachments the frame names
 }
 
 // TurnFile is one attachment of an input. The box fetches it by hash and stores it at Path before Pi reads the input.
@@ -1158,7 +1204,7 @@ func (saved *DiffSavedRequest) CloseNotice(session string) string {
 	var text string
 	switch {
 	case saved == nil:
-		return fmt.Sprintf("Session %s closed; not checked, nothing saved (its box was not running, or did not report in time). Anything it had not pushed is gone.", session)
+		return fmt.Sprintf("Session %s closed; not checked, nothing saved (its box was not running, or did not report in time). Anything it had not pushed is gone from the box; its transcript is still on the engine host, and the dyna-diagnose skill says how to rebuild from it.", session)
 	case saved.Error != "":
 		return fmt.Sprintf("Session %s closed; no diff was saved (%s). Anything it had not pushed is gone.", session, saved.Error)
 	case saved.File == "":
@@ -1252,3 +1298,40 @@ func (r HostAddRequest) ExecOnly() bool {
 
 // SessionListPage is how many sessions a session's list returns when it names no limit.
 const SessionListPage = 25
+
+// GitSignRequest asks the engine to sign what git passes its signer: a commit or tag object without its signature. The
+// engine refuses any other payload, and one whose committer or tagger is not the box's configured git identity.
+type GitSignRequest struct {
+	Payload []byte `json:"payload"`
+}
+
+// GitSignResponse holds the armored SSHSIG, in the git namespace.
+type GitSignResponse struct {
+	Signature string `json:"signature"`
+}
+
+// SigningKeyRequest asks for the public half of the key that signs boxes' commits and tags.
+type SigningKeyRequest struct{}
+
+// SigningKeyResponse holds the line to add on GitHub as a signing key.
+type SigningKeyResponse struct {
+	PublicKey string `json:"publicKey"`
+}
+
+// HostReservations exposes aggregate admission holds without holder identities.
+type HostReservations struct {
+	CPUMilli  int64 `json:"cpuMilli"`
+	CPUCap    int64 `json:"cpuCap"`
+	Memory    int64 `json:"memory"`
+	MemoryCap int64 `json:"memoryCap"`
+	Disk      int64 `json:"disk"`
+	DiskCap   int64 `json:"diskCap"`
+}
+
+// OwnerTimezoneRequest reads the install-wide zone, or sets it when Zone is present. Empty clears it.
+type OwnerTimezoneRequest struct {
+	Zone *string `json:"zone,omitempty"`
+}
+type OwnerTimezoneResponse struct {
+	Zone string `json:"zone"`
+}

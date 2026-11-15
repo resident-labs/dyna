@@ -24,7 +24,7 @@ func (s *Service) workflowStarters(ctx context.Context, caller contract.Principa
 		return nil
 	}
 	if _, err := s.store.SessionWorkflow(ctx, caller.Session); err == nil {
-		return &contract.Error{Code: contract.ErrForbidden, Message: "a workflow's crew starts no workflow of its own; a script runs another with workflow()"}
+		return &contract.Error{Code: contract.ErrForbidden, Message: "a workflow worker starts no workers of its own; a script runs another script with workflow()"}
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return failure(err)
 	}

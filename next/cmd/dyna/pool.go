@@ -63,7 +63,7 @@ func roomHostsCommand(getClient func() client) *cobra.Command {
 		if clear == (len(only) > 0) {
 			return fmt.Errorf("pass --only with the hosts and pool, or --clear")
 		}
-		result, err := getClient().RoomHosts(cmd.Context(), contract.RoomHostsRequest{Room: contract.RoomID(args[0]), Only: only})
+		result, err := getClient().RoomHosts(cmd.Context(), contract.RoomHostsRequest{Room: contract.RoomID(args[0]), Only: only, Clear: clear})
 		if err == nil && result.Operation != "" {
 			fmt.Fprintln(cmd.OutOrStdout(), "waiting for the owner:", result.Operation)
 		}

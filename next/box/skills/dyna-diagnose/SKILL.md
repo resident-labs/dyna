@@ -74,7 +74,7 @@ A failed turn (`turn.ended` `cause`; the next input starts a new turn):
 | `harness_failed` | the agent program stopped; a third crash without a completed turn fails the box. Post once; on another failure, `session restart` |
 | `setup_failed` | the box could not set up the repository: the turn's `error` says why |
 
-A pending box (`boxReason`):
+A pending box (`boxReason`): After 5 minutes pending admission, the parent and room root receive a system notice with the blocking reason, reservation holders and next steps; `host list` shows current reservations and free disk.
 
 | Reason | Do |
 |---|---|
@@ -137,6 +137,21 @@ paused room starts no box and delivers no input to any session, yours included; 
 running go on, so stop them. Resume (`room pause` with `paused` false) in the same turn, or only
 the owner can. After any action, check that `session list` shows the box `ready` and a new `turn`
 or later `lastOutcome`, and `transcript read` shows the kept input making progress.
+
+## Box lost before its work was pushed
+
+The engine keeps each session's full transcript on its host, at `<data>/rooms/<room>/transcripts/<session>/*.jsonl`
+(`<data>`: the engine's data directory, from `systemctl --user cat` of its unit), and it outlives the box. It holds every
+tool call's full arguments, which `transcript read` clips. Root reads it with bash on the engine host.
+- `edit` and `write` calls rebuild exactly. A call is an item of an assistant message's `message.content`:
+  `{"type":"toolCall","id","name":"write","arguments":{"path","content"}}` or `{..."name":"edit","arguments":{"path",
+  "edits":[{"oldText","newText"}]}}`. Its result is a later message with `message.role` `toolResult` and `message.toolCallId`
+  equal to the call's `id`: skip every call whose result has `isError` true, since it changed nothing.
+- `bash` changes come back only sometimes: redo them from their commands (`sed -i`, a formatter, a generator). Build
+  output and installed tools are gone.
+Replay in file order, which is chronological: successful writes, edits and recovered bash changes interleaved as they
+happened, onto a fresh checkout on a new branch, so each edit sees the file as it was then. Push the branch and tell the
+session's parent what it holds and what could not be rebuilt.
 
 ## CI jobs
 

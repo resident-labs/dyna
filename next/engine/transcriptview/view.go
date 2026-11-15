@@ -24,6 +24,15 @@ func ApplyWorkerTurn(t *contract.TranscriptTurn, worker store.WorkerTranscript, 
 	t.Inputs = []contract.TranscriptInput{{ID: contract.EventID("step:" + step.Key), At: step.Started, Room: started.Room, Type: contract.PostCreated{}.EventType(), From: contract.Principal{Kind: contract.PrincipalSession, Session: worker.Session}, Text: harness.Mask(worker.Prompt)}}
 }
 
+// ApplyAgentTurn makes the parent's turn read as one turn of an in-box agent: its times and outcome, and no inputs, since its prompt
+// is the arguments of the call that asked.
+func ApplyAgentTurn(t *contract.TranscriptTurn, agent store.Agent) {
+	t.Started, t.Ended, t.DurationMS, t.Outcome, t.Cause = agent.Started, nil, 0, "", ""
+	if !agent.Ended.IsZero() {
+		t.Ended, t.DurationMS, t.Outcome = &agent.Ended, agent.Ended.Sub(agent.Started).Milliseconds(), contract.TurnOutcome(agent.State)
+	}
+}
+
 func Clip(value string, maxBytes int) string {
 	if len(value) <= maxBytes {
 		return value

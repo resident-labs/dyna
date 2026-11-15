@@ -1,6 +1,9 @@
 package contract
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 const (
 	MethodWorkflowRun       Method = "workflow.run"
@@ -15,6 +18,9 @@ const (
 	MethodWorkflowStepTranscript Method = "workflow.step_transcript"
 	// MethodWorkflowSetStatus keeps a script's status() line on its run.
 	MethodWorkflowSetStatus Method = "workflow.set_status"
+	MethodWorkflowPause     Method = "workflow.pause"
+	MethodWorkflowUnpause   Method = "workflow.unpause"
+	MethodWorkflowSteer     Method = "workflow.steer"
 )
 
 // WorkerHeader names the worker of a crew's model call. A crew is one session with many conversations, and each needs its
@@ -66,7 +72,7 @@ type WorkflowRunResponse struct {
 // WorkflowReloadRequest gives a running run a new script, which its crew runs in place of the old one in the same box. Its
 // meta keeps the run's name, repo and size; its profiles and description may change.
 type WorkflowReloadRequest struct {
-	Run    WorkflowRunID `json:"run"`
+	Run    WorkflowRunID `json:"run" desc:"Run ID; steer, pause, unpause and reload also accept the run session name"`
 	Script string        `json:"script"`
 }
 
@@ -81,27 +87,60 @@ type WorkflowReloadResponse struct {
 // List's Branch is the first recorded branch; status retains the most recent recorded branch. Version is the script version it runs, 1
 // until a reload. Status is the script's latest status() line, empty when it wrote none.
 type WorkflowInfo struct {
-	Run         WorkflowRunID `json:"run"`
-	Room        RoomID        `json:"room"`
-	Session     SessionID     `json:"session"`
-	Name        string        `json:"name"`
-	Description string        `json:"description,omitempty"`
-	Profiles    []ProfileName `json:"profiles"`
-	Repo        RepoName      `json:"repo,omitempty"`
-	Commit      string        `json:"commit,omitempty"`
-	Branch      string        `json:"branch,omitempty"` // the crew session's recorded branch, which its workers' branches extend
-	Version     int           `json:"version,omitempty"`
-	State       WorkflowState `json:"state"`
-	Result      string        `json:"result,omitempty"`
-	Steps       int           `json:"steps,omitempty"`
-	Failed      int           `json:"failed"`
-	FailedSteps []string      `json:"failedSteps,omitempty"`
-	Running     int           `json:"running,omitempty"`
-	Status      string        `json:"status,omitempty"`
-	StatusAt    time.Time     `json:"statusAt,omitzero"`
-	Usage       Usage         `json:"usage"`
-	Started     time.Time     `json:"started"`
-	Ended       time.Time     `json:"ended,omitzero"`
+	Run           WorkflowRunID    `json:"run"`
+	Room          RoomID           `json:"room"`
+	Session       SessionID        `json:"session"`
+	Subscription  SubscriptionID   `json:"subscription,omitempty"`
+	Key           string           `json:"key,omitempty"`
+	Name          string           `json:"name"`
+	Description   string           `json:"description,omitempty"`
+	Profiles      []ProfileName    `json:"profiles"`
+	Repo          RepoName         `json:"repo,omitempty"`
+	Commit        string           `json:"commit,omitempty"`
+	Branch        string           `json:"branch,omitempty"` // the crew session's recorded branch, which its workers' branches extend
+	Version       int              `json:"version,omitempty"`
+	State         WorkflowState    `json:"state"`
+	Paused        bool             `json:"paused,omitempty"`
+	PausedSteps   []string         `json:"pausedSteps,omitempty"`
+	ReleasedSteps []string         `json:"releasedSteps,omitempty"`
+	Result        string           `json:"result,omitempty"`
+	Service       *WorkflowService `json:"service,omitempty"`
+	Steps         int              `json:"steps,omitempty"`
+	Failed        int              `json:"failed"`
+	FailedSteps   []string         `json:"failedSteps,omitempty"`
+	Running       int              `json:"running,omitempty"`
+	Status        string           `json:"status,omitempty"`
+	StatusAt      time.Time        `json:"statusAt,omitzero"`
+	Usage         Usage            `json:"usage"`
+	Started       time.Time        `json:"started"`
+	Ended         time.Time        `json:"ended,omitzero"`
+}
+
+// WorkflowService is what a run that serves events shows. State is ended once the run has, else starting until its box first asks for events, then
+// serving. Keys lists each key with events waiting or in a handler. Handled and Failed count the events whose handlers have
+// ended, and Usage is the usage of the steps dropped with them: a service's journal holds only what is in flight.
+type WorkflowService struct {
+	State     WorkflowServiceState `json:"state"`
+	Keys      []WorkflowServiceKey `json:"keys"`
+	Handled   int                  `json:"handled"`
+	Failed    int                  `json:"failed"`
+	LastEvent time.Time            `json:"lastEvent,omitzero"`
+	Usage     Usage                `json:"usage"`
+}
+
+type WorkflowServiceState string
+
+const (
+	WorkflowServiceStarting WorkflowServiceState = "starting"
+	WorkflowServiceServing  WorkflowServiceState = "serving"
+	WorkflowServiceEnded    WorkflowServiceState = "ended"
+)
+
+// WorkflowServiceKey counts one key's events: waiting in the queue, and handed to the box.
+type WorkflowServiceKey struct {
+	Key      string `json:"key"`
+	Waiting  int    `json:"waiting"`
+	InFlight int    `json:"inFlight"`
 }
 
 // WorkflowStatusLine is one status() line and when the script wrote it.
@@ -111,28 +150,30 @@ type WorkflowStatusLine struct {
 }
 
 // WorkflowStep is one journal row, without its result. Version is the script version that started it; a step a resumed run
-// kept has none. Lane names the subject the step is about, as the script tagged it, and Phase its stage.
+// kept has none. Lane names the key the step is about, as the script tagged it, and Phase its stage.
 type WorkflowStep struct {
-	Key        string            `json:"key"`
-	Parent     string            `json:"parent,omitempty"`
-	Kind       WorkflowStepKind  `json:"kind"`
-	Name       string            `json:"name"`
-	Phase      string            `json:"phase,omitempty"`
-	Lane       string            `json:"lane,omitempty"`
-	Profile    ProfileName       `json:"profile,omitempty"`
-	Version    int               `json:"version,omitempty"`
-	State      WorkflowStepState `json:"state"`
-	Reason     string            `json:"reason,omitempty"`
-	Transcript string            `json:"transcript,omitempty"` // the worker's session file, as transcript.append names it
-	More       bool              `json:"more,omitempty"`       // workflow.step holds more than this row says
-	Usage      Usage             `json:"usage"`
-	Started    time.Time         `json:"started"`
-	Ended      time.Time         `json:"ended,omitzero"`
+	Key          string            `json:"key"`
+	Parent       string            `json:"parent,omitempty"`
+	Kind         WorkflowStepKind  `json:"kind"`
+	Name         string            `json:"name"`
+	Phase        string            `json:"phase,omitempty"`
+	Lane         string            `json:"lane,omitempty"`
+	Profile      ProfileName       `json:"profile,omitempty"`
+	Version      int               `json:"version,omitempty"`
+	State        WorkflowStepState `json:"state"`
+	Reason       string            `json:"reason,omitempty"`
+	Transcript   string            `json:"transcript,omitempty"` // the worker's session file, as transcript.append names it
+	ToolCalls    int               `json:"toolCalls"`
+	LastActivity time.Time         `json:"lastActivity,omitzero"`
+	More         bool              `json:"more,omitempty"` // workflow.step holds more than this row says
+	Usage        Usage             `json:"usage"`
+	Started      time.Time         `json:"started"`
+	Ended        time.Time         `json:"ended,omitzero"`
 }
 
 // WorkflowStatusRequest names a run, or the crew session that hosts it.
 type WorkflowStatusRequest struct {
-	Run     WorkflowRunID `json:"run,omitempty"`
+	Run     WorkflowRunID `json:"run,omitempty" desc:"Run ID; steer, pause, unpause and reload also accept the run session name"`
 	Session SessionID     `json:"session,omitempty"`
 }
 
@@ -185,14 +226,18 @@ type WorkflowListResponse struct {
 // BoxWorkflow is what a crew's box runs. Each hello carries it, so a new box can restart the script, and a reload carries it
 // to the box that runs the script.
 type BoxWorkflow struct {
-	Run      WorkflowRunID     `json:"run"`
-	Name     string            `json:"name"`
-	Script   string            `json:"script"`
-	Version  int               `json:"version"`
-	Args     string            `json:"args,omitempty"`
-	Profiles []WorkflowProfile `json:"profiles"` // in meta's order: the first is the default
-	Workers  int               `json:"workers"`  // how many crew workers may run at once: the box's memory allows some, and the maxWorkers setting may allow fewer
-	Timeout  int               `json:"timeout"`  // seconds an agent() worker may run when the script sets no timeout: the timeout setting
+	Run           WorkflowRunID     `json:"run"`
+	Subscription  SubscriptionID    `json:"subscription,omitempty"`
+	Name          string            `json:"name"`
+	Script        string            `json:"script"`
+	Version       int               `json:"version"`
+	Paused        bool              `json:"paused"`
+	PausedSteps   []string          `json:"pausedSteps,omitempty"`
+	ReleasedSteps []string          `json:"releasedSteps,omitempty"`
+	Args          string            `json:"args,omitempty"`
+	Profiles      []WorkflowProfile `json:"profiles"` // in meta's order: the first is the default
+	Workers       int               `json:"workers"`  // how many crew workers may run at once: the box's memory allows some, and the maxWorkers setting may allow fewer
+	Timeout       int               `json:"timeout"`  // seconds an agent() worker may run when the script sets no timeout: the timeout setting
 }
 
 // WorkflowReload hands a crew's box a newer version of its script. The engine sends the run's current version on each channel,
@@ -231,6 +276,8 @@ type WorkflowStepStartRequest struct {
 	Profile ProfileName      `json:"profile,omitempty"`
 	Detail  string           `json:"detail"`
 	Version int              `json:"version,omitempty"`
+	// Event is the queue row of the handler that made the call, or zero for the script's body.
+	Event int64 `json:"event,omitempty"`
 	// Feature names the feature the call uses, so the settings can turn it off: worktree for agent() with a worktree, merge, run, workflow and post. Empty for a step that no switch gates.
 	Feature WorkflowFeature `json:"feature,omitempty"`
 }
@@ -307,3 +354,76 @@ type WorkflowStatusChanged struct {
 
 func (WorkflowStatusChanged) EventType() EventType { return "workflow.status_changed" }
 func (WorkflowStatusChanged) isEventBody()         {}
+
+const MethodWorkflowState Method = "workflow.state"
+
+// WorkflowStateRequest reads or writes the state of the key of Row, the event a handler is handling.
+type WorkflowStateRequest struct {
+	Row   int64           `json:"row"`
+	Value json.RawMessage `json:"value,omitempty"`
+}
+type WorkflowStateResponse struct {
+	Value json.RawMessage `json:"value"`
+}
+
+// WorkflowSteerRequest addresses one running worker by label or unique key prefix.
+type WorkflowSteerRequest struct {
+	Run  WorkflowRunID `json:"run" desc:"Run ID; steer, pause, unpause and reload also accept the run session name"`
+	Step string        `json:"step" desc:"Running worker label or unique key prefix"`
+	Text string        `json:"text"`
+}
+type WorkflowSteerResponse = PostResponse
+
+type WorkflowPauseRequest struct {
+	Run  WorkflowRunID `json:"run" desc:"Run ID; steer, pause, unpause and reload also accept the run session name"`
+	Step string        `json:"step,omitempty" desc:"Running worker label or unique key prefix; pause and unpause may omit it for the whole run"`
+}
+type WorkflowPauseResponse struct {
+	Paused        bool     `json:"paused"`
+	PausedSteps   []string `json:"pausedSteps"`
+	ReleasedSteps []string `json:"releasedSteps"`
+}
+type WorkflowUnpauseRequest = WorkflowPauseRequest
+type WorkflowUnpauseResponse = WorkflowPauseResponse
+
+// WorkflowPauseChanged refreshes open run pages after a pause or unpause.
+type WorkflowPauseChanged struct {
+	Run     WorkflowRunID `json:"run"`
+	Session SessionID     `json:"session"`
+	Paused  bool          `json:"paused"`
+	Step    string        `json:"step,omitempty"`
+}
+
+func (WorkflowPauseChanged) EventType() EventType { return "workflow.pause_changed" }
+func (WorkflowPauseChanged) isEventBody()         {}
+
+const (
+	MethodWorkflowEvents    Method = "workflow.events"
+	MethodWorkflowEventDone Method = "workflow.event_done"
+)
+
+// WorkflowEventsRequest is how a service's box asks for events to handle: the engine claims up to Limit rows, the oldest of
+// each key that has none in a handler, and hands them over. Boot names this start of the box. A row claimed by an earlier
+// start was never acknowledged, so it is handed over again.
+type WorkflowEventsRequest struct {
+	Boot  string  `json:"boot"`
+	Limit int     `json:"limit"`
+	Held  []int64 `json:"held,omitempty"` // the rows its handlers hold now: a claimed row not among them is handed over again, as a lost reply leaves one
+}
+
+// WorkflowEvent is one claimed queue row. Row names it for its acknowledgement and for the state calls of its handler.
+type WorkflowEvent struct {
+	Row   int64           `json:"row"`
+	Key   string          `json:"key"`
+	Event json.RawMessage `json:"event"`
+}
+type WorkflowEventsResponse struct {
+	Events []WorkflowEvent `json:"events"`
+}
+
+// WorkflowEventDoneRequest acknowledges a row when its handler has ended. Error is empty for a handler that returned.
+type WorkflowEventDoneRequest struct {
+	Row   int64  `json:"row"`
+	Error string `json:"error,omitempty"`
+}
+type WorkflowEventDoneResponse struct{}

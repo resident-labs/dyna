@@ -79,7 +79,7 @@ func TestScriptCancellationLeavesNestedBashAndOneCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	args, _ := json.Marshal(map[string]string{"code": `text("partial"); await tools.bash({command:"echo running; cat ` + pipe + `"}); text("never reached");`})
-	b := newSessionShell(t, "test-model", nil, nil, shell.Config{After: func(time.Duration) <-chan time.Time {
+	b := newSessionShell(t, "test-model", nil, shell.Config{After: func(time.Duration) <-chan time.Time {
 		select {
 		case entered <- struct{}{}:
 		default:
@@ -127,7 +127,7 @@ func TestLoopingBashScriptStopsInsteadOfWaitingForEveryCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	args, _ := json.Marshal(map[string]string{"code": `for(let n=0;n<10;n++){await tools.bash({command:"cat ` + pipe + `"});text("ran " + n);}`})
-	b := newSessionShell(t, "test-model", nil, nil, shell.Config{After: func(time.Duration) <-chan time.Time {
+	b := newSessionShell(t, "test-model", nil, shell.Config{After: func(time.Duration) <-chan time.Time {
 		select {
 		case entered <- struct{}{}:
 		default:

@@ -14,7 +14,7 @@
     session: string; onmedia: (row: MediaRow) => void;
   } = $props();
   const shown = 8;
-  const icons: Record<StepKind, IconName> = { read: "file", edit: "edit", write: "write", search: "search", list: "list", run: "terminal", fetch: "globe", tool: "tool" };
+  const icons: Record<StepKind, IconName> = { read: "file", edit: "edit", write: "write", search: "search", list: "list", run: "terminal", fetch: "globe", advisor: "chat", tool: "tool" };
   let all = $derived(opened.has(`${id}/all`));
   let hidden = $derived(Math.max(0, steps.length - shown));
   let hiddenFailures = $derived(steps.slice(0, hidden).filter(step => step.failed).length);

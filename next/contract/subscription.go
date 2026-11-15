@@ -8,6 +8,9 @@ import (
 )
 
 const (
+	MethodSubscriptionFire       Method = "subscription.fire"
+	MethodSubscriptionUpdate     Method = "subscription.update"
+	MethodSubscriptionState      Method = "subscription.state"
 	MethodSubscriptionAdd        Method = "subscription.add"
 	MethodSubscriptionList       Method = "subscription.list"
 	MethodSubscriptionRemove     Method = "subscription.remove"
@@ -23,17 +26,27 @@ const (
 )
 
 // Subscription is a hook as a typed event subscription (spec 8.5). Exactly
-// one of On and Every, and exactly one of Wake and Run, is set. Wake is the ID of the session it wakes.
+// one of On and Every, and exactly one of Wake, Run and Workflow, is set. Wake is the ID of the session it wakes.
 type Subscription struct {
-	ID      SubscriptionID    `json:"id"`
-	Scope   SubscriptionScope `json:"scope"`
-	Room    RoomID            `json:"room,omitempty"`
-	Session SessionID         `json:"session,omitempty"`
-	On      []EventType       `json:"on,omitempty"`
-	Where   []string          `json:"where,omitempty"`
-	Every   Duration          `json:"every,omitempty"`
-	Wake    SessionID         `json:"wake,omitempty"`
-	Run     *RunSpec          `json:"run,omitempty"`
+	ID         SubscriptionID        `json:"id"`
+	Scope      SubscriptionScope     `json:"scope"`
+	Room       RoomID                `json:"room,omitempty"`
+	Session    SessionID             `json:"session,omitempty"`
+	On         []EventType           `json:"on,omitempty"`
+	Where      []string              `json:"where,omitempty" desc:"Filters on repo, author, actor, label, kind or number: key=value, key!=value or text~value; all must hold; kind=a,b matches any."`
+	Every      Duration              `json:"every,omitempty"`
+	Wake       SessionID             `json:"wake,omitempty"`
+	Run        *RunSpec              `json:"run,omitempty"`
+	Workflow   *WorkflowSubscription `json:"workflow,omitempty" desc:"{script, args}: starts a service, one run that handles each matching event through serve(handler) in its script. Root or owner, room scope."`
+	Key        string                `json:"key,omitempty" desc:"A key's events are handled one at a time, keys at once: a literal, or a template with {repo} and {number}, such as {repo}#{number}."`
+	Latest     bool                  `json:"latest,omitempty" desc:"Keep only the newest waiting event per key; an event in a handler is never replaced."`
+	Parent     SessionID             `json:"parent,omitempty" desc:"The session the service reports to and that may steer it; root by default, or when it has closed."`
+	IncludeOwn bool                  `json:"includeOwn,omitempty" desc:"Own account is the GitHub account Dyna acts as in this room. Allow its comments, reviews and metadata to start workflows; own pushes, merges and CI always may."`
+}
+
+type WorkflowSubscription struct {
+	Script string                     `json:"script"`
+	Args   map[string]json.RawMessage `json:"args,omitempty"`
 }
 
 type RunSpec struct {
@@ -50,18 +63,23 @@ type RunFile struct {
 }
 
 // SubscriptionAddRequest creates one subscription (spec 8.5). The engine picks its ID. Exactly one of
-// On and Every, and exactly one of Wake and Run, is set. Scope room names Room, scope session names
+// On and Every, and exactly one of Wake, Run and Workflow, is set. Scope room names Room, scope session names
 // Session, and scope machine names neither room nor session. Session and Wake each take a session's name in Room, or in the
 // caller's room with no Room, or its ID. Where filters On, as key=value, key!=value and text~value, all of which must hold.
 type SubscriptionAddRequest struct {
-	Scope   SubscriptionScope `json:"scope" desc:"What the subscription belongs to: session, room or machine. A session's subscription ends when the session closes. Room scope is root's, and machine scope is the owner's."`
-	Room    RoomID            `json:"room,omitempty" desc:"A room_… ID, from your instructions. Omitted, it is your own room."`
-	Session string            `json:"session,omitempty" desc:"With scope session, the session it belongs to: a name in the room, such as upstream-sync, or a ses_… ID."`
-	On      []EventType       `json:"on,omitempty" desc:"Event types that fire it, such as github.pr.opened; dyna subscription events lists them. Give on, every, or both for a digest: with both, the matching events gather and each every that has any wakes once with all of them."`
-	Where   []string          `json:"where,omitempty" desc:"Filters on github.* and git.* events in on: key=value, key!=value or text~value, with key repo, author, actor, label, kind or number. kind is a change kind of github.pr.changed or github.issue.changed, such as pushed, ci_failed, ci_cancelled or merged; on github.ci.finished and git.main_ci_finished it is the result: success, failure or cancelled. All must hold."`
-	Every   Duration          `json:"every,omitempty" desc:"A schedule, as a duration string such as 1h, 15m or 90s, of at least 1m. Give on, every, or both for a digest, which needs wake."`
-	Wake    string            `json:"wake,omitempty" desc:"The session to wake: a name in the room, such as upstream-sync, or a ses_… ID. Give wake or run."`
-	Run     *RunSpec          `json:"run,omitempty" desc:"A command for a small box: command, image (base, or an image folder of the room's default repository), size (small or agent), and optional host and files. Owner or root only. Give wake or run."`
+	Scope      SubscriptionScope     `json:"scope" desc:"What the subscription belongs to: session, room or machine. A session's subscription ends when the session closes. Room scope is root's, and machine scope is the owner's."`
+	Room       RoomID                `json:"room,omitempty" desc:"A room_… ID, from your instructions. Omitted, it is your own room."`
+	Session    string                `json:"session,omitempty" desc:"With scope session, the session it belongs to: a name in the room, such as upstream-sync, or a ses_… ID."`
+	On         []EventType           `json:"on,omitempty" desc:"Event types that fire it, such as github.pr.opened; dyna subscription events lists them. Give on, every, or both for a digest: with both, the matching events gather and each every that has any wakes once with all of them."`
+	Where      []string              `json:"where,omitempty" desc:"Filters on repo, author, actor, label, kind or number: key=value, key!=value or text~value; all must hold; kind=a,b matches any."`
+	Every      Duration              `json:"every,omitempty" desc:"A schedule, as a duration string such as 1h, 15m or 90s, of at least 1m. Give on, every, or both for a digest, which needs wake."`
+	Wake       string                `json:"wake,omitempty" desc:"The session to wake: a name in the room, such as upstream-sync, or a ses_… ID. Give wake, run or workflow."`
+	Run        *RunSpec              `json:"run,omitempty" desc:"A command for a small box: command, image (base, or an image folder of the room's default repository), size (small or agent), and optional host and files. Owner or root only. Give wake, run or workflow."`
+	Workflow   *WorkflowSubscription `json:"workflow,omitempty" desc:"{script, args}: starts a service, one run that handles each matching event through serve(handler) in its script. Root or owner, room scope."`
+	Key        string                `json:"key,omitempty" desc:"A key's events are handled one at a time, keys at once: a literal, or a template with {repo} and {number}, such as {repo}#{number}."`
+	Latest     bool                  `json:"latest,omitempty" desc:"Keep only the newest waiting event per key; an event in a handler is never replaced."`
+	Parent     SessionID             `json:"parent,omitempty" desc:"The session the service reports to and that may steer it; root by default, or when it has closed."`
+	IncludeOwn bool                  `json:"includeOwn,omitempty" desc:"Own account is the GitHub account Dyna acts as in this room. Allow its comments, reviews and metadata to start workflows; own pushes, merges and CI always may."`
 }
 
 // UnmarshalJSON refuses a number for every and an object for session or wake, naming the field and the form it takes.
@@ -124,6 +142,7 @@ type SubscriptionListResponse struct {
 
 // SubscriptionInfo is one subscription and what it is doing.
 type SubscriptionInfo struct {
+	Waiting      int          `json:"waiting"`
 	Subscription Subscription `json:"subscription"`
 	Disabled     bool         `json:"disabled,omitempty"`
 	Default      bool         `json:"default,omitempty"` // the room's own subscription for root
@@ -132,6 +151,36 @@ type SubscriptionInfo struct {
 	NextAt       *time.Time   `json:"nextAt,omitempty"`   // the next firing, counting any backoff
 	LastAt       *time.Time   `json:"lastAt,omitempty"`
 	Last         HookResult   `json:"last,omitempty"`
+}
+
+type SubscriptionFireRequest struct {
+	ID    SubscriptionID  `json:"id"`
+	Key   *string         `json:"key,omitempty" desc:"Use this key as written instead of the one the event resolves to."`
+	Event json.RawMessage `json:"event,omitempty" desc:"An event envelope with top-level type and body; omitted queues a hook.due event. Filters do not apply to a manual fire."`
+}
+type SubscriptionFireResponse struct{}
+
+type SubscriptionUpdateRequest struct {
+	ID       SubscriptionID        `json:"id"`
+	Workflow *WorkflowSubscription `json:"workflow,omitempty" desc:"Replaces script and args together; omitted args become none."`
+	Where    *[]string             `json:"where,omitempty" desc:"Filters on repo, author, actor, label, kind or number: key=value, key!=value or text~value; all must hold; kind=a,b matches any."`
+	Key      *string               `json:"key,omitempty" desc:"A key's events are handled one at a time, keys at once: a literal, or a template with {repo} and {number}, such as {repo}#{number}."`
+	Latest   *bool                 `json:"latest,omitempty" desc:"Keep only the newest waiting event per key; an event in a handler is never replaced."`
+	Parent   *SessionID            `json:"parent,omitempty" desc:"The session the service reports to and that may steer it; root by default, or when it has closed."`
+}
+type SubscriptionUpdateResponse struct{}
+
+type SubscriptionStateRequest struct {
+	ID    SubscriptionID  `json:"id"`
+	Key   *string         `json:"key,omitempty" desc:"Read or reset this literal key; omitted lists all stored keys."`
+	Value json.RawMessage `json:"value,omitempty" desc:"Write JSON for the key, up to 64 KiB; null resets it. Omit to read."`
+}
+type SubscriptionKeyState struct {
+	Key   string          `json:"key"`
+	Value json.RawMessage `json:"value"`
+}
+type SubscriptionStateResponse struct {
+	States []SubscriptionKeyState `json:"states"`
 }
 
 type SubscriptionRemoveRequest struct {

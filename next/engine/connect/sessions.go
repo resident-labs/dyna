@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"regexp"
@@ -291,6 +292,7 @@ func (s *Sessions) ServePublic(w http.ResponseWriter, r *http.Request, origin st
 		delete(s.grants, c.Dev)
 		if c.Dev != "" {
 			err = s.store.RevokeConnectDevice(r.Context(), c.Dev, c.Generation, s.now())
+			slog.Info("Connect relay revoke", "relay_device", c.Dev, "error", err)
 		}
 		s.mu.Unlock()
 		if err != nil {

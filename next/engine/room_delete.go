@@ -86,9 +86,14 @@ func (s *Service) RoomSet(ctx context.Context, caller contract.Principal, req co
 		}
 		return contract.RoomSetResponse{}, forbidden()
 	}
-	if len(req.RootApproves) == 0 && req.GitHubWrites == nil {
-		return contract.RoomSetResponse{}, invalid("set rootApproves or githubWrites")
+	if len(req.RootApproves) == 0 && req.GitHubWrites == nil && req.Advisor == nil && req.GitSigning == nil {
+		return contract.RoomSetResponse{}, invalid("set rootApproves, githubWrites, advisor or gitSigning")
 	}
+	room, _, err := s.store.ResolveRoom(ctx, string(req.Room)) // the CLI passes a name or an ID
+	if err != nil {
+		return contract.RoomSetResponse{}, invalid("unknown room")
+	}
+	req.Room = room
 	for kind := range req.RootApproves {
 		if !slices.Contains(contract.AllRootApprovals, kind) {
 			return contract.RoomSetResponse{}, invalid(fmt.Sprintf("rootApproves has no kind %q; the kinds are %v", kind, contract.AllRootApprovals))
@@ -109,6 +114,16 @@ func (s *Service) RoomSet(ctx context.Context, caller contract.Principal, req co
 	if req.GitHubWrites != nil {
 		if err := s.store.SetRoomGitHubWrites(ctx, req.Room, writes); err != nil {
 			return contract.RoomSetResponse{}, failure(err)
+		}
+	}
+	if req.GitSigning != nil {
+		if err := s.store.SetRoomGitSigning(ctx, req.Room, *req.GitSigning); err != nil {
+			return contract.RoomSetResponse{}, failure(err)
+		}
+	}
+	if req.Advisor != nil {
+		if problem := s.setAdvisor(ctx, req.Room, *req.Advisor); problem != nil {
+			return contract.RoomSetResponse{}, problem
 		}
 	}
 	return contract.RoomSetResponse{}, nil

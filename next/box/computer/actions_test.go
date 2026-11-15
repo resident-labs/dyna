@@ -2,13 +2,17 @@ package computer
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"image/png"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -329,5 +333,124 @@ func TestCaptureTellsADesktopThatSentNoFrame(t *testing.T) {
 	}
 	if !strings.HasPrefix(err.Error(), "the desktop sent no frame within 0.1 s") || !errors.Is(err, os.ErrDeadlineExceeded) {
 		t.Fatalf("text %q", err)
+	}
+}
+
+func TestConcurrentActionsAreSerialized(t *testing.T) {
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		entered <- struct{}{}
+		<-release
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	agent := Agent{client: &http.Client{Transport: redirectTransport{base: server.URL}}}
+	done := make(chan error, 2)
+	go func() { _, err := Do(context.Background(), agent, Wait, Request{MS: number(0)}); done <- err }()
+	<-entered
+	go func() { _, err := Do(context.Background(), agent, Wait, Request{MS: number(0)}); done <- err }()
+	select {
+	case <-entered:
+		t.Error("second action entered while first was running")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+type redirectTransport struct{ base string }
+
+func (r redirectTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	copy := req.Clone(req.Context())
+	base, err := url.Parse(r.base)
+	if err != nil {
+		return nil, err
+	}
+	copy.URL.Scheme, copy.URL.Host = base.Scheme, base.Host
+	return http.DefaultTransport.RoundTrip(copy)
+}
+
+func TestQueuedActionCancellationAndStopBypassesQueue(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/computer" {
+			close(entered)
+			<-release
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	agent := Agent{client: &http.Client{Transport: redirectTransport{base: server.URL}}}
+	holder := make(chan error, 1)
+	go func() { _, err := Do(context.Background(), agent, Wait, Request{MS: number(0)}); holder <- err }()
+	<-entered
+	defer func() { close(release); <-holder }()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	queued := make(chan error, 1)
+	go func() { _, err := Do(ctx, agent, Wait, Request{MS: number(0)}); queued <- err }()
+	select {
+	case err := <-queued:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("queued error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("queued action ignored cancellation")
+	}
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+	defer stopCancel()
+	if _, err := Do(stopCtx, agent, Stop, Request{}); err != nil {
+		t.Fatalf("stop waited behind holder: %v", err)
+	}
+}
+
+func TestCaptureRequestsPixelsAfterCursorOnlyUpdate(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "vnc.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+		r := bufio.NewReader(conn)
+		read := func(n int) { _, _ = io.ReadFull(r, make([]byte, n)) }
+		_, _ = conn.Write([]byte("RFB 003.008\n\x01\x01"))
+		read(13)
+		_, _ = conn.Write(make([]byte, 4))
+		read(1)
+		_, _ = conn.Write(append([]byte{0, 1, 0, 1}, make([]byte, 20)...))
+		read(20)      // pixel format
+		read(4 + 3*4) // encodings
+		read(10)      // initial framebuffer request
+		// An empty cursor shape, and no pixels, consumes that request.
+		_, _ = conn.Write([]byte{0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 17})
+		read(10) // the client must request another frame
+		_, _ = conn.Write([]byte{0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 255, 0})
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	shot, err := Capture(ctx, socket, Rect{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	im, err := png.Decode(bytes.NewReader(shot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	red, green, blue, _ := im.At(0, 0).RGBA()
+	if red != 65535 || green != 0 || blue != 0 {
+		t.Fatalf("pixel = %d,%d,%d", red, green, blue)
 	}
 }

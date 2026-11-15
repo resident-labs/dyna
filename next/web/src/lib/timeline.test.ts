@@ -1,7 +1,7 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.test.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { workingLine, compactionNote, summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineSegments, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, workLayout, foldInputRuns, engineEventsNote, attemptFailedNote } from "./timeline.ts";
+import { workingLine, compactionNote, summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineSegments, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, withFinished, workLayout, foldInputRuns, engineEventsNote, attemptFailedNote } from "./timeline.ts";
 import type { TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
 
 const steer = (id: string, at = ""): TranscriptItem => ({ id: `steer:${id}`, event: id, seq: 6, turn: "t", at, kind: "steer", from: { kind: "owner" } });
@@ -310,4 +310,25 @@ test("engine events are told by their type and never by their text", () => {
 test("a failed attempt is one muted line that names the failure when Pi did", () => {
   assert.equal(attemptFailedNote({ errorName: "SocketError" }), "Attempt failed (SocketError), retried");
   assert.equal(attemptFailedNote({}), "Attempt failed, retried");
+});
+
+test("a call that ended early stops running with its duration, while its batch waits for the others", () => {
+  const call = (id: string): TranscriptItem => ({ id, turn: "t", at: "2026-11-14T10:00:00.000Z", kind: "tool", tool: "bash" });
+  const items = [call("a"), call("b")];
+  const shown = withFinished(items, new Map([["a", { call: "a", durationMs: 8, failed: true }]]));
+  assert.deepEqual(shown.map(item => timelineItemRunning(item, false)), [false, true]);
+  assert.equal(shown[0].ended, "2026-11-14T10:00:00.008Z");
+  assert.equal(shown[0].failed, true);
+  assert.equal(shown[1], items[1]);
+  // Nothing finished, or a result that came: the items are the transcript's own.
+  assert.equal(withFinished(items), items);
+  const landed = [{ ...items[0], ended: "2026-11-14T10:00:01.000Z" }];
+  assert.equal(withFinished(landed, new Map([["a", { call: "a", durationMs: 8 }]]))[0], landed[0]);
+});
+
+test("an advisor call that has its result is followed by the answer, which stays when the work folds", () => {
+  const call = (id: string, patch: Partial<TranscriptItem> = {}): TranscriptItem => ({ id, turn: "t", at: "", kind: "tool", tool: "mcp__dyna__advisor", ended: "2026-01-01T00:00:01Z", output: '{"answer":"Use the cache."}', ...patch });
+  const items: TranscriptItem[] = [{ id: "r", turn: "t", at: "", kind: "tool", tool: "read" }, call("a"), { id: "b", turn: "t", at: "", kind: "tool", tool: "bash" }, call("running", { ended: undefined, output: undefined })];
+  assert.deepEqual(deriveTimelineGroups(items).map(group => [group.kind, group.id]), [["work", "r"], ["advice", "advice:a"], ["work", "b"]]);
+  assert.deepEqual(shownTimelineGroups(items, true).map(group => group.kind), ["advice"]);
 });

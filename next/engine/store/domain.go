@@ -459,16 +459,33 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			body.Replies = nil
 		}
 		// A turn that completes while its session still has a job running or a child at work has not given its result yet.
-		// Its text reaches the sessions it answers without waking them, and the session keeps owing them a reply: the first
+		// A notice wakes the sessions it answers, and the session keeps owing them a reply: the first
 		// turn that ends any other way answers them too, whatever started it. A stopped turn pays as well, as it answers its own
 		// inputs, so a stop leaves nothing for the recovery pass to wake.
 		var waiting bool
 		var kept []byte
-		if err := tx.QueryRowContext(ctx, `SELECT ?2 AND (?3 OR EXISTS(SELECT 1 FROM sessions c WHERE c.parent=?1 AND c.closed_at IS NULL AND (
-				EXISTS(SELECT 1 FROM turns t WHERE t.session=c.id AND t.ended_at IS NULL)
-				OR EXISTS(SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=c.id AND d.state='pending' AND d.wake=1)))), COALESCE((SELECT replies FROM replies_owed WHERE session=?1),'[]')`,
+		if err := tx.QueryRowContext(ctx, `SELECT ?2 AND (?3 OR EXISTS(SELECT 1 FROM sessions c WHERE c.parent=?1 AND `+childAtWork+`)), COALESCE((SELECT replies FROM replies_owed WHERE session=?1),'[]')`,
 			session, output.Outcome == contract.TurnCompleted, output.ShellJobs > 0).Scan(&waiting, &kept); err != nil {
 			return err
+		}
+		if waiting && len(ended) == 0 {
+			waits, err := sessionWaits(ctx, tx, event.Room)
+			if err != nil {
+				return err
+			}
+			wait := waits[session]
+			if wait == nil {
+				// dyna_children reports actual running turns; reply debt also counts a child's pending waking inputs as work.
+				wait = &contract.SessionWaiting{Kind: contract.WaitChildren}
+				if err := tx.QueryRowContext(ctx, "SELECT COUNT(*),COALESCE(MIN(c.name),'') FROM sessions c WHERE c.parent=? AND "+childAtWork, session).Scan(&wait.Count, &wait.Name); err != nil {
+					return err
+				}
+			}
+			var name string
+			if err := tx.QueryRowContext(ctx, "SELECT name FROM sessions WHERE id=?", session).Scan(&name); err != nil {
+				return err
+			}
+			body.WaitingNotice = name + "'s turn ended; it is waiting for " + wait.Label() + "."
 		}
 		var later []contract.ReplyChannel
 		if err := json.Unmarshal(kept, &later); err != nil {
@@ -550,7 +567,17 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 				return err
 			}
 		}
+		// Empty subscription runs settle their reply debt without waking the parent.
+		silentWorkflow := false
+		if output.Outcome == contract.TurnCompleted && output.Final == "" && len(output.Data) == 0 {
+			if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM workflow_runs WHERE session=? AND sub!='')", session).Scan(&silentWorkflow); err != nil {
+				return err
+			}
+		}
 		for _, reply := range body.Replies {
+			if silentWorkflow {
+				continue
+			}
 			if reply.Reply.Home.Kind == contract.ConversationDiscord {
 				if text := discordText(reply); text != "" {
 					var message string
@@ -578,7 +605,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			if waiting && reply.Posted != "" && len(ended) == 0 {
 				continue
 			}
-			d := contract.Delivery{To: reply.Reply.Target, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyPost, Target: event.From, Home: reply.Reply.Home}, Wake: reply.Posted == "" && !waiting}
+			d := contract.Delivery{To: reply.Reply.Target, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyPost, Target: event.From, Home: reply.Reply.Home}, Wake: reply.Posted == ""}
 			// The engine opened this channel, so reach does not apply, but a reply to a parent that can't receive goes up.
 			if _, err := reroute(ctx, tx, event.From, &d); err != nil {
 				return err
@@ -843,9 +870,12 @@ func (s *Store) PostOnce(ctx context.Context, event contract.Event, deliveries [
 			if delivery.To.Kind != contract.PrincipalSession {
 				continue
 			}
-			var open bool
-			if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL AND b.want NOT IN ('close','discard'))", delivery.To.Session).Scan(&open); err != nil {
+			var open, endedWorkflow bool
+			if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL AND b.want NOT IN ('close','discard')),EXISTS(SELECT 1 FROM workflow_runs WHERE session=? AND state!='running')", delivery.To.Session, delivery.To.Session).Scan(&open, &endedWorkflow); err != nil {
 				return err
+			}
+			if endedWorkflow {
+				return ErrWorkflowEnded
 			}
 			if !open {
 				return ErrSessionClosing
@@ -1011,6 +1041,45 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 		}
 		if err := rows.Err(); err != nil {
 			return err
+		}
+
+		// A confined input is one conversation and one turn. Do not let unrelated input lend
+		// it authority, including steering input arriving while the turn runs.
+		confinedRows, err := tx.QueryContext(ctx, "SELECT d.seq,d.turn FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_kind=? AND d.to_id=? AND (d.state IN ('pending','taken') OR d.turn=?) AND e.type='discord.message' AND (json_extract(CAST(e.body AS TEXT),'$.confined')=1 OR (json_extract(CAST(e.body AS TEXT),'$.direct')=1 AND COALESCE(json_extract(CAST(e.body AS TEXT),'$.owner'),0)!=1))", contract.PrincipalSession, session, active)
+		if err != nil {
+			return err
+		}
+		confinedSeqs := map[contract.DeliverySeq]bool{}
+		activeConfined := false
+		for confinedRows.Next() {
+			var seq contract.DeliverySeq
+			var taken sql.NullString
+			if err := confinedRows.Scan(&seq, &taken); err != nil {
+				confinedRows.Close()
+				return err
+			}
+			confinedSeqs[seq] = true
+			activeConfined = activeConfined || active != "" && taken.Valid && taken.String == string(active)
+		}
+		err = confinedRows.Err()
+		confinedRows.Close()
+		if err != nil {
+			return err
+		}
+		if activeConfined {
+			items = slices.DeleteFunc(items, func(v item) bool { return !v.turn.Valid || v.turn.String != string(active) })
+		} else if active == "" {
+			priorWake := false
+			for _, v := range items {
+				if confinedSeqs[v.input.Seq] && !priorWake {
+					items = []item{v}
+					break
+				}
+				priorWake = priorWake || v.wake
+			}
+			if len(items) != 1 || !confinedSeqs[items[0].input.Seq] {
+				items = slices.DeleteFunc(items, func(v item) bool { return confinedSeqs[v.input.Seq] })
+			}
 		}
 		if active == "" {
 			var immediate bool

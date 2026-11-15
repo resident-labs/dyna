@@ -361,6 +361,16 @@ func request[Req, Res any](ctx context.Context, c *Client, method contract.Metho
 	return result, json.Unmarshal(data, &result)
 }
 
+func (c *Client) AgentStarted(ctx context.Context, req contract.AgentStartedRequest) error {
+	_, err := request[contract.AgentStartedRequest, contract.AgentStartedResponse](ctx, c, contract.MethodAgentStarted, req)
+	return err
+}
+
+func (c *Client) AgentEnded(ctx context.Context, req contract.AgentEndedRequest) error {
+	_, err := request[contract.AgentEndedRequest, contract.AgentEndedResponse](ctx, c, contract.MethodAgentEnded, req)
+	return err
+}
+
 func (c *Client) WorkflowPin(ctx context.Context, commit string) error {
 	_, err := request[contract.WorkflowPinRequest, contract.WorkflowPinResponse](ctx, c, contract.MethodWorkflowPin, contract.WorkflowPinRequest{Commit: commit})
 	return err
@@ -412,4 +422,17 @@ func (c *Client) watchShell(ctx context.Context, jobs *shell.Server, generation 
 			return
 		}
 	}
+}
+
+func (c *Client) WorkflowState(ctx context.Context, req contract.WorkflowStateRequest) (contract.WorkflowStateResponse, error) {
+	return request[contract.WorkflowStateRequest, contract.WorkflowStateResponse](ctx, c, contract.MethodWorkflowState, req)
+}
+
+func (c *Client) WorkflowEvents(ctx context.Context, req contract.WorkflowEventsRequest) (contract.WorkflowEventsResponse, error) {
+	return request[contract.WorkflowEventsRequest, contract.WorkflowEventsResponse](ctx, c, contract.MethodWorkflowEvents, req)
+}
+
+func (c *Client) WorkflowEventDone(ctx context.Context, req contract.WorkflowEventDoneRequest) error {
+	_, err := request[contract.WorkflowEventDoneRequest, contract.WorkflowEventDoneResponse](ctx, c, contract.MethodWorkflowEventDone, req)
+	return err
 }

@@ -103,17 +103,19 @@ func (s *Service) setDiscordPolicy(ctx context.Context, route store.DiscordRoute
 			return contract.DiscordPolicyResponse{}, invalid(err.Error())
 		}
 	}
-	for i, name := range resolvedPolicy.Front.Roles {
-		matches := []string{}
-		for _, role := range server.Roles {
-			if role.Name == name {
-				matches = append(matches, role.ID)
+	for _, roles := range [][]string{resolvedPolicy.Front.Roles, resolvedPolicy.Front.Team} {
+		for i, name := range roles {
+			matches := []string{}
+			for _, role := range server.Roles {
+				if role.Name == name {
+					matches = append(matches, role.ID)
+				}
 			}
+			if len(matches) != 1 {
+				return contract.DiscordPolicyResponse{}, invalid(fmt.Sprintf("role %q is missing or ambiguous", name))
+			}
+			roles[i] = matches[0]
 		}
-		if len(matches) != 1 {
-			return contract.DiscordPolicyResponse{}, invalid(fmt.Sprintf("role %q is missing or ambiguous", name))
-		}
-		resolvedPolicy.Front.Roles[i] = matches[0]
 	}
 	for i, name := range resolvedPolicy.Front.Quiet {
 		category := strings.HasSuffix(name, "/*")
@@ -147,20 +149,72 @@ func (s *Service) discordPrepare(ctx context.Context, caller contract.Principal,
 	if err != nil {
 		return nil, failure(err)
 	}
+	scope, problem := s.discordReadScope(ctx, caller)
+	if problem != nil {
+		return nil, problem
+	}
+	route := policy.ParseRoute(method, path)
+	// A confined turn's own moderation always goes through the server policy, even for root.
+	moderating := scope.moderatesInput(method, path)
+	confinedOnly := scope.confined != "" && !moderating
+	if confinedOnly && route.ResourceID != scope.confined {
+		return nil, confinedDiscordRefusal()
+	}
+	if confinedOnly && method != "GET" {
+		if route.Resource != policy.Channel {
+			return nil, confinedDiscordRefusal()
+		}
+		switch route.Action {
+		case policy.MessageCreate, policy.MessageEdit, policy.MessageDelete:
+		default:
+			return nil, confinedDiscordRefusal()
+		}
+		if route.Action != policy.MessageCreate {
+			client, err := s.machineDiscordClient(ctx)
+			if err != nil {
+				return nil, failure(err)
+			}
+			result, err := client.API(ctx, "GET", "/api/v10/channels/"+route.ResourceID+"/messages/"+route.MessageID, nil, "")
+			if err != nil {
+				return nil, failure(err)
+			}
+			var message struct{ Author struct{ ID string } }
+			bot, err := s.store.DiscordBot(ctx)
+			if err != nil {
+				return nil, failure(err)
+			}
+			if result.Status != 200 || json.Unmarshal(result.Body, &message) != nil || message.Author.ID != bot.ID {
+				return nil, confinedDiscordRefusal()
+			}
+			if route.Action == policy.MessageDelete {
+				return body, nil
+			}
+		}
+	}
+	if _, dm := scope.dms[route.ResourceID]; dm && route.Resource == policy.Channel {
+		switch route.Action {
+		case policy.Read, policy.MessageCreate, policy.MessageEdit, policy.PollExpire, policy.Reaction:
+		case policy.MessageDelete:
+			if !confinedOnly {
+				return nil, forbidden()
+			}
+		default:
+			return nil, forbidden()
+		}
+	}
 	tree, err := s.store.RoomTree(ctx, session.Room)
 	if err != nil {
 		return nil, failure(err)
 	}
-	if tree.Root() == caller.Session {
+	if tree.Root() == caller.Session && !moderating {
 		return body, nil
 	}
-	route := policy.ParseRoute(method, path)
 	guild := ""
 	switch route.Resource {
 	case policy.Guild:
 		guild = route.ResourceID
 	case policy.Channel:
-		channel, known := s.discordDirectory.Channel(route.ResourceID)
+		channel, known := scope.channel(&s.discordDirectory, route.ResourceID)
 		if !known {
 			return nil, forbidden()
 		}
@@ -179,6 +233,9 @@ func (s *Service) discordPrepare(ctx context.Context, caller contract.Principal,
 			return nil, failure(err)
 		}
 		if !resolvedPolicy.On() {
+			if moderating {
+				return nil, confinedDiscordRefusal()
+			}
 			return body, nil
 		}
 		facts := policy.Facts{Now: time.Now(), CategoryInGuild: func(id string) bool {
@@ -228,6 +285,9 @@ func (s *Service) discordPrepare(ctx context.Context, caller contract.Principal,
 			return nil, &contract.Error{Code: contract.ErrForbidden, Message: err.Error()}
 		}
 		return normalized, nil
+	}
+	if moderating {
+		return nil, confinedDiscordRefusal()
 	}
 	return body, nil
 }

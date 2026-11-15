@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { diskLow, hang, hostBars, gpuLine, hostChips, hostGroup, hostLabel, hostLine, hostLoads, hostMeters, hostName, hostOrder, hostState, hostText, largeShared, lastSeen, machines, onHost, roomSessions } from "./hosts.ts";
+import { diskLow, hang, hostBars, gpuLine, hostChips, hostGroup, hostLabel, hostLine, hostLoads, hostMeters, hostReservations, hostName, hostOrder, hostState, hostText, largeShared, lastSeen, machines, onHost, roomSessions } from "./hosts.ts";
 import { listView } from "./settings-list.ts";
 import type { HostSummary } from "./contract.gen.ts";
 
@@ -16,7 +16,7 @@ test("a box's state names its machine, as the host label does, once it has one",
   assert.equal(onHost("Starting", ""), "Starting");
 });
 
-const machine = { name: "lab", reachable: true, boxes: 2, cpus: 8, memBytes: 8, cpuUsed: 0, memUsed: 0, diskBytes: 0, diskUsed: 0, diskLow: false, shared: [], history: null };
+const machine = { state: "ready", cpuFree: 0, memFree: 0, diskFree: 0, name: "lab", reachable: true, boxes: 2, cpus: 8, memBytes: 8, cpuUsed: 0, memUsed: 0, diskBytes: 0, diskUsed: 0, diskLow: false, shared: [], history: null };
 
 test("a machine's sessions group by room, rooms by name, each room in the engine's order", () => {
   const session = (room: string, id: string, boxState: "ready" | "stopped" = "ready") => ({ room, id, name: id, boxState });
@@ -56,9 +56,9 @@ test("a merged card keeps the sessions both sides report, and an unmerged host k
 
 test("one machine reported as the control plane and a registered host is one card, named for the host, with whole-machine figures", () => {
   const gib = 2 ** 30;
-  const plane = { name: "control-plane", reachable: true, boxes: 0, cpus: 20, memBytes: 31 * gib, cpuUsed: 0.2, memUsed: 4 * gib, diskBytes: 1900 * gib, diskUsed: 1192 * gib,
+  const plane = { state: "ready", cpuFree: 0, memFree: 0, diskFree: 0, name: "control-plane", reachable: true, boxes: 0, cpus: 20, memBytes: 31 * gib, cpuUsed: 0.2, memUsed: 4 * gib, diskBytes: 1900 * gib, diskUsed: 1192 * gib,
     diskLow: false, shared: [{ room: "r", bytes: gib }], history: null, lastSeen: "2026-10-31T00:00:00Z" };
-  const lab = { name: "lab", reachable: true, boxes: 3, cpus: 19, memBytes: 27 * gib, cpuUsed: 0, memUsed: 0, diskBytes: 1900 * gib, diskUsed: 1192 * gib,
+  const lab = { state: "ready", cpuFree: 0, memFree: 0, diskFree: 0, name: "lab", reachable: true, boxes: 3, cpus: 19, memBytes: 27 * gib, cpuUsed: 0, memUsed: 0, diskBytes: 1900 * gib, diskUsed: 1192 * gib,
     diskLow: false, shared: [], history: null, lastSeen: "2026-10-31T00:00:05Z", engineHost: true };
   const other = { ...lab, name: "gpu-box", engineHost: undefined, boxes: 1 };
   const [one, ...rest] = machines([plane, lab, other]);
@@ -80,7 +80,7 @@ test("one machine reported as the control plane and a registered host is one car
 
 test("words a host's load, marks meters at 90% of their limit as busy, and has none without capacity", () => {
   const gib = 2 ** 30;
-  const h = { name: "build-server", reachable: true, boxes: 1, cpus: 128, memBytes: 31 * gib, cpuUsed: 118.4, memUsed: 9.8 * gib,
+  const h = { state: "ready", cpuFree: 0, memFree: 0, diskFree: 0, name: "build-server", reachable: true, boxes: 1, cpus: 128, memBytes: 31 * gib, cpuUsed: 118.4, memUsed: 9.8 * gib,
     diskBytes: 2048 * gib, diskUsed: 700 * gib, diskLow: false, shared: [], lastSeen: "2026-10-31T00:00:00Z", history: null };
   assert.deepEqual(hostMeters(h).map(({ text, percent, busy }) => ({ text, percent, busy })), [
     { text: "118 of 128 cores", percent: 93, busy: true }, { text: "9.8 of 31 GB", percent: 32, busy: false },
@@ -91,7 +91,7 @@ test("words a host's load, marks meters at 90% of their limit as busy, and has n
 
 test("the panel foot shows unreachable hosts first, then those low on disk, then reachable ones busiest first by CPU or memory, at most 3", () => {
   const host = (name: string, cpuUsed: number, memUsed: number, reachable = true) =>
-    ({ name, reachable, boxes: 0, cpus: 10, memBytes: 100, cpuUsed, memUsed, diskBytes: 0, diskUsed: 0, diskLow: false, shared: [], history: null });
+    ({ state: "ready", cpuFree: 0, memFree: 0, diskFree: 0, name, reachable, boxes: 0, cpus: 10, memBytes: 100, cpuUsed, memUsed, diskBytes: 0, diskUsed: 0, diskLow: false, shared: [], history: null });
   const hosts = [host("calm", 1, 10), host("cpu", 9.5, 10), host("down", 10, 100, false), { ...host("control-plane", 0, 0), cpus: 0 },
     host("mem", 2, 60), host("quiet", 0.5, 5)];
   const lines = (list: typeof hosts) => hostLoads(list).map(h => [h.name, ...h.reachable ? h.meters.map(m => `${m.label} ${m.percent}%${m.busy ? " busy" : ""}`) : ["Unreachable"]]);
@@ -101,7 +101,7 @@ test("the panel foot shows unreachable hosts first, then those low on disk, then
 });
 
 test("Home names a room's shared folder only past a quarter of its host's disk, largest first", () => {
-  const host = (diskBytes: number, shared: { room: string; bytes: number }[] | null) => ({ name: "build-server", reachable: true, boxes: 1, cpus: 8, memBytes: 0,
+  const host = (diskBytes: number, shared: { room: string; bytes: number }[] | null) => ({ state: "ready", cpuFree: 0, memFree: 0, diskFree: 0, name: "build-server", reachable: true, boxes: 1, cpus: 8, memBytes: 0,
     cpuUsed: 0, memUsed: 0, diskBytes, diskUsed: 0, diskLow: false, shared, history: null });
   const quarter = 100 * 2 ** 30;
   assert.deepEqual(largeShared(host(4 * quarter, [{ room: "a", bytes: quarter }, { room: "b", bytes: quarter + 1 }, { room: "c", bytes: 2 * quarter }])).map(f => f.room), ["c", "b"]);
@@ -111,7 +111,7 @@ test("Home names a room's shared folder only past a quarter of its host's disk, 
 
 test("an exec-only host with figures shows the same three meters and is never low at 99% disk", () => {
   const gib = 2 ** 30;
-  const execOnly = { name: "omarchy", reachable: true, boxes: 0, cpus: 8, memBytes: 16 * gib, cpuUsed: 2, memUsed: 4 * gib, diskBytes: 1000 * gib, diskUsed: 990 * gib, diskLow: true, execOnly: true, shared: [], history: null };
+  const execOnly = { state: "agents off", cpuFree: 0, memFree: 0, diskFree: 0, name: "omarchy", reachable: true, boxes: 0, cpus: 8, memBytes: 16 * gib, cpuUsed: 2, memUsed: 4 * gib, diskBytes: 1000 * gib, diskUsed: 990 * gib, diskLow: true, execOnly: true, shared: [], history: null };
   assert.deepEqual(hostMeters(execOnly).map(m => [m.label, m.percent]), [["CPU", 25], ["Memory", 25], ["Disk", 99]]);
   assert.equal(diskLow(execOnly), false);
   assert.deepEqual(hostLoads([execOnly]).map(h => [h.name, h.diskLow, h.meters.length]), [["omarchy", false, 2]]);
@@ -119,12 +119,12 @@ test("an exec-only host with figures shows the same three meters and is never lo
 });
 
 test("an exec-only host with no figures has no meters, as before", () => {
-  const bare = { name: "omarchy", reachable: true, boxes: 0, cpus: 0, memBytes: 0, cpuUsed: 0, memUsed: 0, diskBytes: 0, diskUsed: 0, diskLow: false, execOnly: true, shared: [], history: null };
+  const bare = { state: "agents off", cpuFree: 0, memFree: 0, diskFree: 0, name: "omarchy", reachable: true, boxes: 0, cpus: 0, memBytes: 0, cpuUsed: 0, memUsed: 0, diskBytes: 0, diskUsed: 0, diskLow: false, execOnly: true, shared: [], history: null };
   assert.deepEqual(hostMeters(bare), []);
 });
 
 test("an exec-only host is online or offline and never low on disk", () => {
-  const execOnly = { name: "omarchy", reachable: true, boxes: 0, cpus: 0, memBytes: 0, cpuUsed: 0, memUsed: 0, diskBytes: 0, diskUsed: 0, diskLow: true, execOnly: true, shared: [], history: null };
+  const execOnly = { state: "agents off", cpuFree: 0, memFree: 0, diskFree: 0, name: "omarchy", reachable: true, boxes: 0, cpus: 0, memBytes: 0, cpuUsed: 0, memUsed: 0, diskBytes: 0, diskUsed: 0, diskLow: true, execOnly: true, shared: [], history: null };
   assert.equal(diskLow(execOnly), false);
   assert.equal(diskLow({ ...execOnly, execOnly: false }), true);
   assert.equal(hostLoads([execOnly])[0]?.diskLow ?? false, false);
@@ -133,7 +133,7 @@ test("an exec-only host is online or offline and never low on disk", () => {
 
 const gib = 2 ** 30;
 const now = Date.parse("2026-11-04T12:00:00Z");
-const host = (name: string, over: Partial<HostSummary> = {}): HostSummary => ({ name, reachable: true, boxes: 2, cpus: 10, memBytes: 100 * gib, cpuUsed: 5, memUsed: 50 * gib,
+const host = (name: string, over: Partial<HostSummary> = {}): HostSummary => ({ state: "ready", cpuFree: 0, memFree: 0, diskFree: 0, name, reachable: true, boxes: 2, cpus: 10, memBytes: 100 * gib, cpuUsed: 5, memUsed: 50 * gib,
   diskBytes: 1000 * gib, diskUsed: 500 * gib, diskLow: false, shared: [], history: null, agents: true, ci: true, ...over });
 const names = (hosts: readonly HostSummary[]) => hosts.map(h => h.name);
 const all = hostChips[0];
@@ -231,11 +231,25 @@ test("the engine's machine merges into its registered host: the plane's figures,
 
 test("a host with GPUs gets a tile of the VRAM asked of its cards, and the list's bars stay at three", () => {
   const gib = 2 ** 30;
-  const h = { name: "gpu", reachable: true, boxes: 1, cpus: 8, memBytes: 32 * gib, cpuUsed: 1, memUsed: 8 * gib, diskBytes: 500 * gib, diskUsed: 100 * gib, diskLow: false, shared: [], history: null,
-    gpus: [{ index: 0, name: "RTX 3090 Ti", memBytes: 24 * gib, requestedBytes: 6 * gib }, { index: 1, name: "GTX 1050 Ti", memBytes: 4 * gib }] };
+  const h = { state: "ready", cpuFree: 7, memFree: 24 * gib, diskFree: 400 * gib, name: "gpu", reachable: true, boxes: 1, cpus: 8, memBytes: 32 * gib, cpuUsed: 1, memUsed: 8 * gib, diskBytes: 500 * gib, diskUsed: 100 * gib, diskLow: false, shared: [], history: null,
+    gpus: [{ index: 0, name: "RTX 3090 Ti", memBytes: 24 * gib, freeBytes: 15.6 * gib, requestedBytes: 6 * gib }, { index: 1, name: "GTX 1050 Ti", memBytes: 4 * gib, freeBytes: 3.6 * gib }] };
   assert.deepEqual(hostMeters(h).slice(3).map(({ label, text, percent, busy }) => ({ label, text, percent, busy })), [{ label: "GPU asked", text: "6.0 of 28 GB", percent: 21, busy: false }]);
   assert.equal(hostMeters({ ...h, gpus: [] }).length, 3);
   assert.equal(hostBars(h).length, 3);
   assert.equal(gpuLine(h.gpus[0]), "RTX 3090 Ti, 6.0 of 24 GB asked");
   assert.equal(gpuLine(h.gpus[1]), "GTX 1050 Ti, 0.0 of 4 GB asked");
+});
+
+test("reservations remain separate from measured free disk", () => {
+ const gib = 2 ** 30;
+ const h = { ...machine, diskBytes: 930 * gib, diskUsed: 819 * gib,
+ reservations: { cpuMilli: 12000, cpuCap: 32000, memory: 92 * gib, memoryCap: 104 * gib, disk: 4 * gib, diskCap: 18 * gib } };
+ assert.equal(hostReservations(h), "Reserved: CPU 12/32 cores · memory 92.0/104.0 GiB · disk 4.0/18.0 GiB");
+ assert.ok(JSON.stringify(hostMeters(h)).includes("111 GB free"));
+});
+
+test("merged engine machine retains registered admission reservations", () => {
+ const reservations = { cpuMilli: 1000, cpuCap: 32000, memory: 4, memoryCap: 32, disk: 5, diskCap: 50 };
+ const merged = machines([{ ...machine, name: "control-plane" }, { ...machine, name: "engine", engineHost: true, reservations }]);
+ assert.deepEqual(merged[0].reservations, reservations);
 });

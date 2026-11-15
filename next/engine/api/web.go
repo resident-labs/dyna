@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -231,10 +232,16 @@ func (w *Web) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/connect/") || r.URL.Path == "/api/logout" {
 			x, _, ok, err := w.connect.Authenticate(r.Context(), r, origin)
 			if err != nil {
+				if r.URL.Path == "/api/connect/renew" {
+					slog.Warn("Connect renew refused", "status", 503, "reason", "authentication unavailable", "relay_device", x.RelayDevice)
+				}
 				http.Error(out, "unavailable", http.StatusServiceUnavailable)
 				return
 			}
 			if !ok {
+				if r.URL.Path == "/api/connect/renew" {
+					slog.Warn("Connect renew refused", "status", 401, "reason", "unauthorized", "relay_device", x.RelayDevice)
+				}
 				http.Error(out, "unauthorized", http.StatusUnauthorized)
 				return
 			}

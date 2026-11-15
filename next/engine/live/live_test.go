@@ -68,3 +68,21 @@ func TestActivityPublicationOrder(t *testing.T) {
 		t.Fatalf("activity order disagrees with stream: %v (%d), %v (%d)", gotFirst, firstOrder, gotLast, lastOrder)
 	}
 }
+
+// A finished call goes to streams and leaves the session's latest label as it was.
+func TestFinishedCallKeepsTheLatestLabel(t *testing.T) {
+	l := New(func(map[contract.SessionID]struct{}) {})
+	_, events := l.Subscribe("r", 2)
+	handle, _ := l.CreateSession("a")
+	label := contract.TurnActivity{Session: "a", Turn: "t", Label: "open"}
+	finished := contract.TurnActivity{Session: "a", Turn: "t", Finished: &contract.ToolFinished{Call: "c"}}
+	handle.PublishActivity("r", label, contract.Event{Body: label})
+	handle.PublishActivity("r", finished, contract.Event{Body: finished})
+	<-events
+	if got := (<-events).Body.(contract.TurnActivity); got.Finished == nil || got.Finished.Call != "c" {
+		t.Fatalf("stream got %+v", got)
+	}
+	if got, _ := l.Activity("a"); got.Label != "open" || got.Finished != nil {
+		t.Fatalf("latest is %+v", got)
+	}
+}

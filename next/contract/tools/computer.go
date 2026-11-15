@@ -7,7 +7,7 @@ func typeOf(v any) reflect.Type { return reflect.TypeOf(v) }
 // The computer's actions are v1's, one to a call (spec 5.14). The box handles every action itself (box/computer).
 
 // computerHelp opens the tool's description, for every action.
-const computerHelp = "The box desktop is 1280x800, with Chromium in a window and a taskbar; any action but stop starts it."
+const computerHelp = "The box desktop is X11 on TigerVNC Xvnc, 1280x800, with JWM (no compositor), Chromium and a taskbar. GL (llvmpipe) and Vulkan (lavapipe) use Mesa software rendering by default; GPU boxes can use their installed Vulkan ICD. check reports renderers and tests whether pixels reach screenshots; any action but stop starts it. Computer tool actions in a box run one at a time, so parallel calls queue; stop bypasses the queue to recover a stalled desktop. Chromium page actions time out after 30 s; if a page screenshot times out, take a desktop screenshot or use the visual tool."
 
 // computerFields describes the fields several actions take, once, so the tool's flat schema reads the same for each.
 var computerFields = map[string]string{
@@ -82,11 +82,12 @@ type ComputerWaitRequest struct {
 }
 
 type ComputerScreenshotRequest struct {
-	X      *int `json:"x,omitempty"`
-	Y      *int `json:"y,omitempty"`
-	Width  int  `json:"width,omitempty"`
-	Height int  `json:"height,omitempty"`
-	Page   bool `json:"page,omitempty" desc:"Capture Chromium's whole page, beyond its window, instead of the desktop."`
+	Window string `json:"window,omitempty" desc:"An X11 window ID (decimal or hex), instead of a region or page; captures the visible client area, not hidden pixels."`
+	X      *int   `json:"x,omitempty"`
+	Y      *int   `json:"y,omitempty"`
+	Width  int    `json:"width,omitempty"`
+	Height int    `json:"height,omitempty"`
+	Page   bool   `json:"page,omitempty" desc:"Capture Chromium's page beyond its window, clipped to 16384 px tall."`
 }
 
 type ComputerLaunchRequest struct {
@@ -94,6 +95,8 @@ type ComputerLaunchRequest struct {
 	TimeoutMS int    `json:"timeout_ms,omitempty" desc:"How long to wait for the new window, up to 60000 ms; 15000 by default."`
 	Status    string `json:"status,omitempty"`
 }
+
+type ComputerCheckRequest struct{}
 
 type ComputerStopRequest struct {
 	Status string `json:"status,omitempty"`
@@ -113,8 +116,9 @@ func computerActions() []BoxAction {
 		action("type", ComputerType, ComputerTypeRequest{}, "Type text: with selector, into that element in Chromium, as a paste; without, as keystrokes into the window with the keyboard focus, in any app, any characters. Newlines press Enter. Returns what changed."),
 		action("text", ComputerText, ComputerTextRequest{}, "Read the text of the element at selector in Chromium's page, or of the whole page without one."),
 		action("wait", ComputerWait, ComputerWaitRequest{}, "Wait ms, for an app that needs time before the next input."),
-		action("screenshot", ComputerScreenshot, ComputerScreenshotRequest{}, "Return a PNG of the whole desktop, any app, without the pointer; or of a region, x, y, width and height, which costs less to read; or of Chromium's whole page with page."),
+		action("screenshot", ComputerScreenshot, ComputerScreenshotRequest{}, "Return a PNG, warning when it is one solid colour, of the whole desktop, any app, without the pointer; or of a region, x, y, width and height, which costs less to read; or the visible client area of window by X11 ID; or of Chromium's whole page with page."),
 		action("launch", ComputerLaunch, ComputerLaunchRequest{}, "Start command on the desktop and wait for its new window; returns the window's title and the log of its output. It runs until it exits or the desktop stops. For a command without a window, use bash; DISPLAY=:1 reaches the desktop from there."),
+		action("check", ComputerCheck, ComputerCheckRequest{}, "Report the desktop, resolution and renderer, and run temporary GL gears and a Vulkan cube to check that their window interiors draw non-black, non-solid pixels through the screenshot path. The test windows close afterwards; focus may change."),
 		action("stop", ComputerStop, ComputerStopRequest{}, "Stop the desktop and everything on it, to free its memory; the next action starts it again."),
 	}
 }

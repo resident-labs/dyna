@@ -31,10 +31,24 @@ type MCPServer struct {
 }
 
 // WriteAgentMCPConfig writes the dyna server and its tool exposure, with the added servers beside it. The dyna tools wait for
-// tool_search, so their schemas stay out of what every request sends, and post stays direct because most turns end with it.
-func WriteAgentMCPConfig(path, description string, added map[string]MCPServer) error {
+// tool_search, so their schemas stay out of what every request sends; post stays direct because most turns end with it, and
+// goal stays direct for a session that holds goals (not root), so it keeps its plan current without a search first, and advisor
+// stays direct for a root whose room has an advisor, so it asks before it commits to an approach. Its call can wait 15 minutes, so the
+// server's timeout goes past that.
+func WriteAgentMCPConfig(path, description string, goals, advisor bool, added map[string]MCPServer) error {
+	direct := map[string]string{"post": "direct"}
+	if goals {
+		direct["goal"] = "direct"
+	}
+	if advisor {
+		direct["advisor"] = "direct"
+	}
+	timeout := 600
+	if advisor {
+		timeout = 960
+	}
 	servers := map[string]MCPServer{
-		"dyna": {URL: DynaMCPURL, Exposure: "deferred", ToolExposure: map[string]string{"post": "direct"}, Description: description, Timeout: 600},
+		"dyna": {URL: DynaMCPURL, Exposure: "deferred", ToolExposure: direct, Description: description, Timeout: timeout},
 	}
 	maps.Insert(servers, maps.All(added))
 	data, err := json.Marshal(struct {

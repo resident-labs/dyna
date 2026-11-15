@@ -134,7 +134,7 @@ func TestEndTurnIgnoresPostBeforeTurnStart(t *testing.T) {
 	}
 }
 
-// A completed turn wakes the session it answers only when nothing will start its own session again.
+// Waiting notices wake the parent without paying the reply debt.
 func TestEndTurnReplyWaitsWhileTheSessionStillWaits(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -148,6 +148,9 @@ func TestEndTurnReplyWaitsWhileTheSessionStillWaits(t *testing.T) {
 		{"child at work", "INSERT INTO sessions(id,room,name,profile,state,goal,created_at,parent) VALUES('grand','room','grand','p','open','',0,'child'); INSERT INTO turns(id,session,started_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) VALUES('g','grand',1,'','',0,0,0,0)", 0, contract.TurnCompleted, false},
 		{"closed child", "INSERT INTO sessions(id,room,name,profile,state,goal,created_at,parent,closed_at) VALUES('grand','room','grand','p','closed','',0,'child',1); INSERT INTO turns(id,session,started_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) VALUES('g','grand',1,'','',0,0,0,0)", 0, contract.TurnCompleted, true},
 		{"child briefed", "INSERT INTO sessions(id,room,name,profile,state,goal,created_at,parent) VALUES('grand','room','grand','p','open','',0,'child'); INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state) VALUES('session','grand',(SELECT seq FROM events WHERE id='start'),'engine','none','','','','',1,'pending')", 0, contract.TurnCompleted, false},
+		{"child's job running", "INSERT INTO sessions(id,room,name,profile,state,goal,created_at,parent,shell_jobs) VALUES('grand','room','grand','p','open','',0,'child',1)", 0, contract.TurnCompleted, false},
+		{"child still waits itself", "INSERT INTO sessions(id,room,name,profile,state,goal,created_at,parent) VALUES('grand','room','grand','p','open','',0,'child'); INSERT INTO replies_owed(session,replies) VALUES('grand','[]')", 0, contract.TurnCompleted, false},
+		{"child stopped while it owes", "INSERT INTO sessions(id,room,name,profile,state,goal,created_at,parent,model_retry_at) VALUES('grand','room','grand','p','open','',0,'child',-1); INSERT INTO replies_owed(session,replies) VALUES('grand','[]')", 0, contract.TurnCompleted, true},
 		{"own input unread", "INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state) VALUES('session','child',(SELECT seq FROM events WHERE id='start'),'engine','none','','','','',1,'pending')", 0, contract.TurnCompleted, true},
 		{"failed with a job running", "", 1, contract.TurnFailed, true},
 		{"stopped with a job running", "", 1, contract.TurnStopped, true},
@@ -187,8 +190,28 @@ func TestEndTurnReplyWaitsWhileTheSessionStillWaits(t *testing.T) {
 			if err := s.EndTurn(ctx, "child", output, end); err != nil {
 				t.Fatal(err)
 			}
+			events, err := s.Events(ctx, "room", 0, 100, []contract.EventType{"turn.ended"})
+			if err != nil || len(events) != 1 {
+				t.Fatalf("events: %v %v", events, err)
+			}
+			body := events[0].Body.(contract.TurnEnded)
+			if body.Final != "text" {
+				t.Fatalf("stored text changed: %+v", body)
+			}
+			if tc.wake && body.WaitingNotice != "" {
+				t.Fatalf("unexpected notice: %s", body.WaitingNotice)
+			}
+			if !tc.wake {
+				label := "child grand"
+				if tc.jobs > 0 {
+					label = "1 job"
+				}
+				if body.WaitingNotice != "child's turn ended; it is waiting for "+label+"." {
+					t.Fatalf("notice: %s", body.WaitingNotice)
+				}
+			}
 			var wake bool
-			if err := s.Read().QueryRowContext(ctx, "SELECT d.wake FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.type='turn.ended' AND d.to_id='parent'").Scan(&wake); err != nil || wake != tc.wake {
+			if err := s.Read().QueryRowContext(ctx, "SELECT d.wake FROM deliveries d JOIN events e ON e.seq=d.seq WHERE e.type='turn.ended' AND d.to_id='parent'").Scan(&wake); err != nil || !wake {
 				t.Fatalf("wake %v, want %v: %v", wake, tc.wake, err)
 			}
 			if owed, err := s.RepliesOwed(ctx, "child"); err != nil || (len(owed) == 1) == tc.wake {
@@ -206,7 +229,7 @@ func TestEndTurnReplyWaitsWhileTheSessionStillWaits(t *testing.T) {
 			if err := s.WakeOwedReplies(ctx, later); err != nil || pending() != before {
 				t.Fatalf("woke a session that still waits or owes nothing: %d to %d, %v", before, pending(), err)
 			}
-			if _, err := s.writer.ExecContext(ctx, "DELETE FROM turns WHERE id='g'; DELETE FROM deliveries WHERE state='pending' AND to_id IN ('child','grand'); UPDATE sessions SET shell_jobs=0"); err != nil {
+			if _, err := s.writer.ExecContext(ctx, "DELETE FROM turns WHERE id='g'; DELETE FROM replies_owed WHERE session='grand'; DELETE FROM deliveries WHERE state='pending' AND to_id IN ('child','grand'); UPDATE sessions SET shell_jobs=0"); err != nil {
 				t.Fatal(err)
 			}
 			for range 2 {

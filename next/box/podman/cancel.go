@@ -2,7 +2,9 @@ package podman
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
@@ -29,9 +31,21 @@ func (e RemoteCancellationUnconfirmed) Error() string {
 }
 func (e RemoteCancellationUnconfirmed) Unwrap() error { return e.Err }
 
+// errKernelRemnant: the group outlived the cancel only as threads that cannot return to user space (a zombie leader, a
+// SIGKILLed thread waiting on the disk). The operation stays unconfirmed for its caller, but it no longer fences the
+// host: it can start nothing new, so later operations may claim their own cleanup.
+var errKernelRemnant = errors.New("only killed threads stuck in the kernel remain")
+
 func (h *Host) cancelRemote(ctx context.Context, token string) error {
 	args := append(h.direct(), h.destination, "bash -c "+quote(cancelRemoteScript)+" dyna-cancel "+quote(token))
 	if _, err := h.runner.Run(ctx, nil, args...); err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 3 {
+			h.pendingMu.Lock()
+			delete(h.pendingCancels, token)
+			h.pendingMu.Unlock()
+			return RemoteCancellationUnconfirmed{Err: errKernelRemnant}
+		}
 		return RemoteCancellationUnconfirmed{Err: err}
 	}
 	h.pendingMu.Lock()
@@ -52,7 +66,7 @@ func (h *Host) joinPending(ctx context.Context) error {
 	bounded, cancel := context.WithTimeout(ctx, box.StartCleanupBudget)
 	defer cancel()
 	for _, token := range tokens {
-		if err := h.cancelRemote(bounded, token); err != nil {
+		if err := h.cancelRemote(bounded, token); err != nil && !errors.Is(err, errKernelRemnant) {
 			return err
 		}
 	}
@@ -96,6 +110,8 @@ normal=1
 
 // procps pgrep checks the whole recorded group, including receive/output workers.
 // Only status 1 confirms absence; alive members and every other failure retain ownership.
+// Exit 3 is weaker: at the deadline every thread of every member is a zombie or has SIGKILL pending, so none returns to
+// user space, but a syscall in flight (a disk wait) may still finish. Ownership of the directory and temps is kept.
 const cancelRemoteScript = `set -eu
 dir="/tmp/dyna-start-$1"
 mkdir -m 700 "$dir" 2>/dev/null || test -d "$dir" || exit 1
@@ -108,14 +124,28 @@ kill -KILL -- "-$pid" 2>/dev/null || true
 end=$((SECONDS+20))
 while true; do
  status=0
- pgrep -g "$pid" >/dev/null 2>&1 || status=$?
+ members=$(pgrep -g "$pid" 2>/dev/null) || status=$?
  case "$status" in
   0) ;;
   1)
  ` + removeFrameTemps + `rm -rf -- "$dir"; exit 0 ;;
   *) exit 1 ;;
  esac
- if [ "$SECONDS" -ge "$end" ]; then exit 1; fi
+ if [ "$SECONDS" -ge "$end" ]; then
+  # Every thread, not only each leader pgrep lists: a zombie leader can keep live threads.
+  [ -n "$members" ] || exit 1
+  for member in $members; do
+   for task in /proc/$member/task/*; do
+    state=; pending=0
+    test -r "$task/status" || continue
+    while IFS=$': \t' read -r key value _; do
+     case "$key" in State) state=$value ;; ShdPnd|SigPnd) pending=$((pending | 16#$value)) ;; esac
+    done < "$task/status" || exit 1
+    [ "$state" = Z ] || [ $((pending & 0x100)) -ne 0 ] || exit 1
+   done
+  done
+  exit 3
+ fi
  sleep 0.05
 done
 `

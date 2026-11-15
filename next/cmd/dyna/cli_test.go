@@ -375,7 +375,7 @@ func TestPoolCommandsMapFlags(t *testing.T) {
 		t.Fatalf("%+v", f.roomHosts)
 	}
 	runCLI(t, f, "room", "hosts", "horizon", "--clear")
-	if f.roomHosts.Room != "horizon" || len(f.roomHosts.Only) != 0 {
+	if f.roomHosts.Room != "horizon" || len(f.roomHosts.Only) != 0 || !f.roomHosts.Clear {
 		t.Fatalf("%+v", f.roomHosts)
 	}
 	for _, args := range [][]string{{"room", "hosts", "horizon"}, {"room", "hosts", "horizon", "--clear", "--only", "boats"}} {
@@ -438,8 +438,17 @@ func TestRoomDeleteNeedsDiscard(t *testing.T) {
 func TestRoomRepos(t *testing.T) {
 	f := &fakeClient{}
 	runCLI(t, f, "room", "repo", "add", "r", "owner/a", "--default")
-	if f.repoAdd.Room != "r" || f.repoAdd.Repo != "owner/a" || !f.repoAdd.Default {
+	if f.repoAdd.Room != "r" || f.repoAdd.Repo != "owner/a" || !f.repoAdd.Default || f.repoAdd.PREvents != nil {
 		t.Fatalf("%+v", f.repoAdd)
+	}
+	for _, mode := range []string{"on", "off"} {
+		runCLI(t, f, "room", "repo", "add", "r", "owner/a", "--pr-events", mode)
+		if f.repoAdd.PREvents == nil || *f.repoAdd.PREvents != (mode == "on") {
+			t.Fatalf("--pr-events %s: %+v", mode, f.repoAdd)
+		}
+	}
+	if _, err := execCLI(f, "room", "repo", "add", "r", "owner/a", "--pr-events", "yes"); err == nil || !strings.Contains(err.Error(), "on or off") {
+		t.Fatalf("invalid PR events flag: %v", err)
 	}
 	out := runCLI(t, f, "room", "repo", "list", "r")
 	if f.repoList.Room != "r" || out != "owner/a (default)\nowner/b\n" {
@@ -499,6 +508,10 @@ func TestSessionRestartMapsID(t *testing.T) {
 	f := &fakeClient{}
 	runCLI(t, f, "session", "restart", "s")
 	if f.restart.Session != "s" {
+		t.Fatalf("%+v", f.restart)
+	}
+	runCLI(t, f, "session", "restart", "s", "--host", "other")
+	if f.restart.Host != "other" {
 		t.Fatalf("%+v", f.restart)
 	}
 	if _, err := execCLI(f, "session", "restart"); err == nil {
@@ -674,10 +687,22 @@ func TestDeviceListPrintsDevices(t *testing.T) {
 	}
 }
 func TestHostListPrintsDiskState(t *testing.T) {
-	f := &fakeClient{hosts: []contract.HostSummary{{Name: contract.ControlPlane, DiskBytes: 100 << 30, DiskUsed: 40 << 30}, {Name: "worker", DiskBytes: 100 << 30, DiskUsed: 90 << 30, DiskLow: true, Agents: true, CI: true, CIScale: 3, Runners: 2, EngineHost: true}}}
+	f := &fakeClient{hosts: []contract.HostSummary{{Name: contract.ControlPlane, DiskBytes: 100 << 30, DiskUsed: 40 << 30, DiskFree: 60 << 30}, {Name: "worker", DiskBytes: 100 << 30, DiskUsed: 90 << 30, DiskFree: 10 << 30, DiskLow: true, Agents: true, CI: true, CIScale: 3, Runners: 2, EngineHost: true}}}
 	out := runCLI(t, f, "host", "list")
-	if out != "control-plane\t40 GiB\t100 GiB\tok\tengine machine: host exec and room folders only; same machine as worker\nworker\t90 GiB\t100 GiB\tlow\tagents on\tci on (scale 3, 2 runners now)\tengine host\n" {
+	if out != "control-plane\t60 GiB\t100 GiB\tok\tengine machine: host exec and room folders only; same machine as worker\nworker\t10 GiB\t100 GiB\tlow\tagents on\tci on (scale 3, 2 runners now)\tengine host\n" {
 		t.Fatalf("output=%q", out)
+	}
+}
+func TestHostListPrintsEachGPU(t *testing.T) {
+	f := &fakeClient{hosts: []contract.HostSummary{{Name: "gpu", GPUs: []contract.GPU{
+		{Index: 0, Name: "RTX 3090", MemBytes: 24 << 30, FreeBytes: 10 << 30},
+		{Index: 1, Name: "GTX 1050 Ti", MemBytes: 4 << 30},
+	}}}}
+	out := runCLI(t, f, "host", "list")
+	for _, want := range []string{"GPU 0 RTX 3090: 24 GiB memory, 10 GiB free", "GPU 1 GTX 1050 Ti: 4.0 GiB memory, 0 B free"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output %q missing %q", out, want)
+		}
 	}
 }
 func TestDeviceRevokeMapsID(t *testing.T) {
@@ -917,5 +942,19 @@ func TestPrStatusCancelledNames(t *testing.T) {
 	out := runCLI(t, f, "pr", "status", "1807", "--repo", "o/r")
 	if !strings.Contains(out, "CI cancelled: verify, pool-watch") || strings.Contains(out, "ci=success") {
 		t.Fatal(out)
+	}
+}
+
+func (f *fakeClient) OwnerTimezone(_ context.Context, q contract.OwnerTimezoneRequest) (contract.OwnerTimezoneResponse, error) {
+	if q.Zone != nil {
+		return contract.OwnerTimezoneResponse{Zone: *q.Zone}, nil
+	}
+	return contract.OwnerTimezoneResponse{}, nil
+}
+
+func TestOwnerTimezoneCLI(t *testing.T) {
+	f := &fakeClient{}
+	if got := runCLI(t, f, "owner", "timezone", "America/Chicago"); !strings.Contains(got, "America/Chicago") {
+		t.Fatal(got)
 	}
 }

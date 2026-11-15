@@ -121,7 +121,7 @@ func TestCodexHandoffAndBargeIn(t *testing.T) {
 	send(t, fake, message{"type": "response.function_call_arguments.done", "name": "background_agent", "call_id": "d1", "arguments": "{\"prompt\":\"build it\"}"})
 	select {
 	case p := <-started:
-		if p != "build it" {
+		if p != delegation("build it", "", false) {
 			t.Fatal(p)
 		}
 	case <-time.After(time.Second):
@@ -229,7 +229,7 @@ func TestResponseQueueAndSteeringPreserveFirstHandoff(t *testing.T) {
 	started := make(chan struct{})
 	go func() {
 		_ = run(ctx, page, provider, testDispatch(func(ctx context.Context, p string) (string, error) {
-			if p == "first" {
+			if p == delegation("first", "", false) {
 				close(started)
 				select {
 				case <-finish:
@@ -416,7 +416,7 @@ func TestCodexParserAliasesAndToolFallback(t *testing.T) {
 	send(t, fake, message{"type": "conversation.item.done", "item": message{"type": "function_call", "id": "fallback-id", "name": "background_agent", "arguments": "malformed-but-nonempty"}})
 	select {
 	case p := <-posted:
-		if p != "malformed-but-nonempty" {
+		if !strings.Contains(p, "<input>malformed-but-nonempty</input>") {
 			t.Fatal(p)
 		}
 	case <-ctx.Done():

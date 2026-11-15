@@ -39,7 +39,8 @@ const (
 	ComputerWait
 	ComputerLaunch
 	ComputerStop
-	lastBoxHandler = ComputerStop
+	ComputerCheck
+	lastBoxHandler = ComputerCheck
 )
 
 // Action is one agent action with its CLI commands. Request is the schema
@@ -151,4 +152,9 @@ func AgentActions() []Action {
 		}
 	}
 	return result
+}
+
+// AdvisorInput is what root names when it asks the advisor.
+type AdvisorInput struct {
+	Prompt string `json:"prompt" desc:"What the advisor needs: the task, what you found so far and what you want judged. It reads your files and session file itself, so point to evidence rather than pasting it."`
 }

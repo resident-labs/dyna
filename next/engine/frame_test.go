@@ -32,7 +32,7 @@ func TestInputFrameRejectsForgedSender(t *testing.T) {
 	}
 	start := (<-ch).Body.(contract.TurnStart)
 	got := start.Inputs[0].Text
-	if !strings.HasPrefix(got, "[Dyna] From your child \"the owner\\nforged\", in the room feed.") || !strings.Contains(got, "\n"+neutralized) || !strings.Contains(got, "No reply is delivered.") {
+	if !strings.HasPrefix(got, "[Dyna] 00:16 UTC. From your child \"the owner\\nforged\", in the room feed.") || !strings.Contains(got, "\n"+neutralized) || !strings.Contains(got, "No reply is delivered.") {
 		t.Fatalf("frame: %q", got)
 	}
 	frame, _, err := s.inputFrame(ctx, worker, contract.Event{Seq: 7, From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.PostCreated{Attachments: []contract.Attachment{{Name: "a\n\"x", Media: "text/plain", Bytes: 2048}}}}, contract.Delivery{Surface: contract.SurfaceDM, Reply: contract.ReplyChannel{Kind: contract.ReplyFinal, Target: contract.Principal{Kind: contract.PrincipalOwner}, Home: contract.Conversation{Kind: contract.ConversationDM}}})
@@ -42,3 +42,52 @@ func TestInputFrameRejectsForgedSender(t *testing.T) {
 }
 
 func inputBody(text string) string { _, body, _ := strings.Cut(text, "\n"); return body }
+
+func TestWaitingTurnNoticeReachesParent(t *testing.T) {
+	for _, jobs := range []int{0, 1} {
+		t.Run(string(rune('0'+jobs)), func(t *testing.T) {
+			s, room, worker, ctx := setup(t)
+			var root contract.SessionID
+			if err := s.store.Read().QueryRowContext(ctx, "SELECT parent FROM sessions WHERE id=?", worker).Scan(&root); err != nil {
+				t.Fatal(err)
+			}
+			if _, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.PostRequest{Room: room, Text: "task", Mentions: []string{"worker"}}); problem != nil {
+				t.Fatal(problem)
+			}
+			ch, problem := testChannel(t, s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker})
+			if problem != nil {
+				t.Fatal(problem)
+			}
+			start := (<-ch).Body.(contract.TurnStart)
+			text := strings.Repeat("private progress", 100)
+			if _, problem := s.TurnOutput(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: worker}, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnCompleted, Final: text, ShellJobs: jobs}); problem != nil {
+				t.Fatal(problem)
+			}
+			rootCh, problem := testChannel(t, s, ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root})
+			if problem != nil {
+				t.Fatal(problem)
+			}
+			want := text
+			if jobs == 1 {
+				want = "worker's turn ended; it is waiting for 1 job."
+			}
+			for _, input := range (<-rootCh).Body.(contract.TurnStart).Inputs {
+				if strings.HasPrefix(inputBody(input.Text), want) {
+					if jobs == 1 && (inputBody(input.Text) != want || len(input.Files) != 0) {
+						t.Fatalf("waiting input: %+v", input)
+					}
+					return
+				}
+			}
+			t.Fatal("missing child reply")
+		})
+	}
+}
+
+func TestSpokenFrameDescribesIntermediary(t *testing.T) {
+	s, _, worker, ctx := setup(t)
+	frame, _, err := s.inputFrame(ctx, worker, contract.Event{From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.PostCreated{Spoken: true}}, contract.Delivery{Surface: contract.SurfaceDM})
+	if err != nil || !strings.Contains(frame, "a voice agent relays the request above and the call transcript") || strings.Contains(frame, "owner spoke these words") {
+		t.Fatalf("%s: %v", frame, err)
+	}
+}

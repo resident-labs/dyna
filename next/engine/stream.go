@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"regexp"
+	"slices"
 	"time"
 
 	"github.com/resident-labs/dyna/engine/prompt"
@@ -227,6 +228,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 	handle.Unlock()
 	slog.Info("box channel connected", "session", session.ID, "box", session.Box, "stale", stale)
 	s.reconciler.Connected(session.Box)
+	s.stopOrphanedAgents(ctx, session.ID)
 	out := make(chan contract.BoxMessage)
 	go func() {
 		defer func() {
@@ -258,6 +260,12 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					case <-ctx.Done():
 						return
 					}
+				case message := <-channel.Agents():
+					select {
+					case out <- message:
+					case <-ctx.Done():
+						return
+					}
 				case <-ctx.Done():
 					return
 				}
@@ -282,7 +290,9 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 		replay := true
 		diffAsked := false
 		var stopSent contract.TurnID
-		reloadSent := 1 // a crew's box says hello with its run's script, and a run starts on version 1
+		pauseSent, stepsSent := false, []string(nil)
+		var releasedSent []string
+		reloadSent := 0 // Send current script and pause state on every channel; Reload ignores a script version it already has.
 		for {
 			if !handle.Lock() {
 				return
@@ -350,7 +360,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					reason, cause = streamWorkflowReadFailed, err
 					return
 				}
-				if run.State == contract.WorkflowRunning && run.Version != reloadSent {
+				if run.State == contract.WorkflowRunning && (run.Version != reloadSent || run.Paused != pauseSent || !slices.Equal(run.PausedSteps, stepsSent) || !slices.Equal(run.ReleasedSteps, releasedSent)) {
 					workflow, err := s.boxWorkflow(ctx, run, current.Size.MemBytes)
 					if err != nil {
 						reason, cause = streamWorkflowReadFailed, err
@@ -359,6 +369,8 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					select {
 					case out <- contract.BoxMessage{Body: contract.WorkflowReload{Workflow: *workflow}}:
 						reloadSent = run.Version
+						pauseSent, stepsSent = run.Paused, run.PausedSteps
+						releasedSent = run.ReleasedSteps
 					case <-ctx.Done():
 						reason, cause = streamCanceled, ctx.Err()
 						return
@@ -395,6 +407,14 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 				return
 			}
 			replay = false
+			turnTime := started.Time
+			if turn != "" {
+				turnTime, err = s.store.TurnStartedAt(ctx, turn)
+				if err != nil {
+					reason, cause = streamFrameFailed, err
+					return
+				}
+			}
 			var start []contract.TurnInput
 			var steer []contract.TurnSteer
 			for _, delivery := range deliveries {
@@ -403,17 +423,26 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					reason, cause = streamDeliveryReadFailed, err
 					return
 				}
+				if body, ok := event.Body.(contract.TurnEnded); ok && body.WaitingNotice != "" {
+					// Keep the stored event whole; a waiting turn is not a result.
+					body.Final = body.WaitingNotice
+					body.Attachments, body.Data, body.DataAttachment = nil, "", nil
+					event.Body = body
+				}
 				text, err := room.RenderDelivery(event.Body)
 				if err != nil {
 					reason, cause = streamDeliveryRenderFailed, err
 					return
 				}
-				frame, files, err := s.inputFrame(ctx, session.ID, event, contract.Delivery{Surface: delivery.Surface, Reply: delivery.Reply, MeantFor: delivery.MeantFor, Why: delivery.Why})
+				frame, files, err := s.inputFrameAt(ctx, session.ID, event, turnTime, contract.Delivery{Surface: delivery.Surface, Reply: delivery.Reply, MeantFor: delivery.MeantFor, Why: delivery.Why})
 				if err != nil {
 					reason, cause = streamFrameFailed, err
 					return
 				}
 				input := contract.TurnInput{Delivery: delivery.Seq, Surface: delivery.Surface, Reply: delivery.Reply, Text: frame + "\n" + quotedDynaMarker.ReplaceAllString(s.deliveryData(event, text), "${1}[quoted]"), Files: files}
+				if post, ok := event.Body.(contract.PostCreated); ok {
+					input.WorkflowStep = post.WorkflowStep
+				}
 				if delivery.Queue == nil {
 					start = append(start, input)
 				} else {
@@ -450,6 +479,12 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 						return
 					}
 					sections = snapshot.Sections
+					clock, err := s.frameClock(ctx, turnTime, turnTime)
+					if err != nil {
+						reason, cause = streamSnapshotFailed, err
+						return
+					}
+					sections = append(sections, contract.ContextSection{Key: "dyna_time", Text: "Turn started: " + turnTime.UTC().Format("2006-01-02") + " " + clock + "."})
 					sections, err = s.store.TurnSections(ctx, turn, sections)
 					if err != nil {
 						reason, cause = streamSectionsSaveFailed, err

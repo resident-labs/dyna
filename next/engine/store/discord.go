@@ -204,3 +204,42 @@ func (s *Store) DeleteDiscordOwned(ctx context.Context, room contract.RoomID, gu
 		return err
 	})
 }
+
+// SetDiscordDMRoute records the room selected by member-based DM routing.
+func (s *Store) SetDiscordDMRoute(ctx context.Context, channel, guild string, room contract.RoomID) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "INSERT INTO discord_dm_routes(channel,guild,room) VALUES(?,?,?) ON CONFLICT(channel) DO UPDATE SET guild=excluded.guild,room=excluded.room", channel, guild, room)
+		return err
+	})
+}
+func (s *Store) DiscordDMRoutes(ctx context.Context, room contract.RoomID) (map[string]string, error) {
+	rows, err := s.Read().QueryContext(ctx, "SELECT d.channel,d.guild FROM discord_dm_routes d JOIN discord_routes r ON r.guild=d.guild AND r.room=d.room AND r.channel='' WHERE d.room=?", room)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := map[string]string{}
+	for rows.Next() {
+		var channel, guild string
+		if err := rows.Scan(&channel, &guild); err != nil {
+			return nil, err
+		}
+		result[channel] = guild
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) DiscordResume(ctx context.Context, credential string) (string, error) {
+	var data string
+	err := s.Read().QueryRowContext(ctx, "SELECT value FROM meta WHERE key=?", "discord_resume:"+credential).Scan(&data)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return data, err
+}
+func (s *Store) SetDiscordResume(ctx context.Context, credential, data string) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", "discord_resume:"+credential, data)
+		return err
+	})
+}

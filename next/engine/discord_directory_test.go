@@ -1,0 +1,135 @@
+package engine
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/discord"
+	"github.com/resident-labs/dyna/engine/store"
+)
+
+func TestDiscordResumeRestoresNewThreadBeforeReplay(t *testing.T) {
+	f := discordFixture(t)
+	if err := f.s.store.SetDiscordRoute(f.ctx, store.DiscordRoute{Guild: "099", Room: f.room, Session: f.root}, false); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(f.ctx, 3*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v10/guilds/099":
+			w.WriteHeader(http.StatusForbidden)
+		case "/api/v10/guilds/100":
+			fmt.Fprint(w, `{"id":"100","name":"Horizon","roles":[{"id":"11","name":"Bot","tags":{"bot_id":"900"}}]}`)
+		case "/api/v10/guilds/100/channels":
+			fmt.Fprint(w, `[{"id":"200","name":"general","type":0}]`)
+		case "/api/v10/guilds/100/threads/active":
+			fmt.Fprint(w, `{"threads":[{"id":"201","parent_id":"200","name":"new thread","type":11}]}`)
+		case "/gateway":
+			c, err := websocket.Accept(w, r, nil)
+			if err != nil {
+				return
+			}
+			defer c.CloseNow()
+			c.Write(ctx, websocket.MessageText, []byte(`{"op":10,"d":{"heartbeat_interval":10000}}`))
+			_, data, err := c.Read(ctx)
+			if err != nil || !strings.Contains(string(data), `"op":6`) {
+				t.Errorf("not RESUME: %s %v", data, err)
+				return
+			}
+			c.Write(ctx, websocket.MessageText, []byte(`{"op":0,"s":56,"t":"RESUMED","d":{}}`))
+			c.Write(ctx, websocket.MessageText, []byte(`{"op":0,"s":57,"t":"MESSAGE_CREATE","d":{"id":"300","guild_id":"100","channel_id":"201","content":"missed","author":{"id":"1","username":"owner"},"mention_roles":["11"],"member":{"roles":["11"]}}}`))
+			<-ctx.Done()
+		default:
+			fmt.Fprint(w, `[]`)
+		}
+	}))
+	defer srv.Close()
+	client := &discord.Client{HTTP: srv.Client(), Endpoint: srv.URL, Token: "test-secret", BotID: "900"}
+	updates := make(chan struct{})
+	g := discord.Gateway{Client: client, URL: strings.Replace(srv.URL, "http:", "ws:", 1) + "/gateway", Bot: "900", Directory: &f.s.discordDirectory,
+		LoadResume: func(context.Context) (discord.ResumeState, error) {
+			return discord.ResumeState{Session: "saved", Seq: 55}, nil
+		},
+		PrepareResume: func(ctx context.Context) error { return f.s.discordRestoreDirectory(ctx, client) },
+		Receive: func(ctx context.Context, m discord.Message) error {
+			// Exercise role mutation beside the actual intake and directory readers.
+			go func() {
+				defer close(updates)
+				for i := 0; i < 1000; i++ {
+					f.s.discordDirectory.Apply("GUILD_ROLE_UPDATE", []byte(`{"guild_id":"100","role":{"id":"11","name":"updated","tags":{"bot_id":"900"}}}`))
+				}
+			}()
+			for i := 0; i < 1000; i++ {
+				f.s.discordDirectory.Server("100")
+			}
+			err := f.s.discordInput(ctx, client, m)
+			<-updates
+			cancel()
+			return err
+		},
+	}
+	g.Run(ctx)
+	events, err := f.s.store.Events(f.ctx, f.room, 0, 100, []contract.EventType{"discord.message"})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("replay: %d events, %v", len(events), err)
+	}
+	message := events[0].Body.(contract.DiscordMessage)
+	if message.Thread != "201" || message.ChannelName != "new thread" {
+		t.Fatalf("missing thread metadata: %+v", message)
+	}
+}
+
+func TestDiscordDirectoryOversizedResponses(t *testing.T) {
+	f := discordFixture(t)
+	var server discord.Server
+	server.ID = "100"
+	for i := 0; i < 150; i++ {
+		id := fmt.Sprint(i + 1000)
+		server.Roles = append(server.Roles, discord.Role{ID: id, Name: strings.Repeat("r", 150)})
+		server.Channels = append(server.Channels, discord.Channel{ID: id, Name: strings.Repeat("c", 150), Type: 0})
+		server.Threads = append(server.Threads, discord.Channel{ID: "2" + id, Parent: id, Name: strings.Repeat("t", 150), Type: 11})
+	}
+	guild := server
+	guild.Channels, guild.Threads = nil, nil
+	responses := map[string]any{
+		"/api/v10/guilds/100":                guild,
+		"/api/v10/guilds/100/channels":       server.Channels,
+		"/api/v10/guilds/100/threads/active": map[string]any{"threads": server.Threads},
+	}
+	bodies := map[string][]byte{}
+	for path, value := range responses {
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(data) <= 20*1024 {
+			t.Fatalf("fixture %s too small", path)
+		}
+		bodies[path] = data
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(bodies[r.URL.Path]) }))
+	defer srv.Close()
+	client := &discord.Client{HTTP: srv.Client(), Endpoint: srv.URL, Token: "test-secret", BotID: "900"}
+	if err := f.s.discordRestoreDirectory(f.ctx, client); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := f.s.discordDirectory.Server("100")
+	if !ok || len(got.Roles) != 150 {
+		t.Fatalf("roles %d", len(got.Roles))
+	}
+	if _, ok := f.s.discordDirectory.Channel("1149"); !ok {
+		t.Fatal("missing final channel")
+	}
+	if thread, ok := f.s.discordDirectory.Channel("21149"); !ok || thread.Parent != "1149" {
+		t.Fatal("missing final thread")
+	}
+}

@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/coder/websocket"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/voice"
 )
 
 func (s *Service) VoiceStatus(ctx context.Context, p contract.Principal, _ contract.VoiceStatusRequest) (contract.VoiceStatusResponse, *contract.Error) {
@@ -65,6 +67,22 @@ func (s *Service) Voice(ctx context.Context, room contract.RoomID) (func(*websoc
 			unsubscribe()
 			return err
 		}
+		history, err := s.store.EventsPage(ctx, room, 0, 1<<62, 256, []contract.EventType{"post.created"}, root)
+		if err != nil {
+			unsubscribe()
+			return err
+		}
+		var startup strings.Builder
+		for _, event := range history {
+			if b, ok := event.Body.(contract.PostCreated); ok && b.Home.Kind == contract.ConversationDM && b.Home.Session == root {
+				if event.From.Kind == contract.PrincipalOwner {
+					startup.WriteString("user: " + b.Text + "\n")
+				} else if event.From.Session == root {
+					startup.WriteString("assistant: " + b.Text + "\n")
+				}
+			}
+		}
+		firstHandoff := true
 		var handoffMu sync.Mutex
 		var handoffInput contract.EventID
 		var handoffTurn contract.TurnID
@@ -184,11 +202,16 @@ func (s *Service) Voice(ctx context.Context, room contract.RoomID) (func(*websoc
 				return nil, err
 			}
 			busy := session.Turn != "" || handoffResult != nil
-			result, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: room, Text: text, Spoken: true, Home: contract.Conversation{Kind: contract.ConversationDM, Session: root}})
+			instructions := ""
+			if firstHandoff {
+				instructions = voice.StartInstructions
+			}
+			result, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: room, Text: text, Context: instructions, Spoken: true, Home: contract.Conversation{Kind: contract.ConversationDM, Session: root}})
 			if problem != nil {
 				handoffMu.Unlock()
 				return nil, errors.New(problem.Message)
 			}
+			firstHandoff = false
 			if busy {
 				handoffMu.Unlock()
 				return func(context.Context) (string, error) {
@@ -214,6 +237,23 @@ func (s *Service) Voice(ctx context.Context, room contract.RoomID) (func(*websoc
 				}
 			}, nil
 		}
-		return s.voice.Start(ctx, string(room), page, func(ctx context.Context) (*websocket.Conn, error) { return s.searchProxy.DialRealtime(ctx, ids) }, dispatch, backend)
+		return s.voice.Start(ctx, string(room), page, func(ctx context.Context) (*websocket.Conn, error) { return s.searchProxy.DialRealtime(ctx, ids) }, dispatch, backend, voice.Options{Startup: startup.String(), End: func(ctx context.Context, tail string) error {
+			if tail != "" {
+				instructions := voice.EndInstructions
+				if firstHandoff {
+					instructions = voice.StartInstructions + "\n" + instructions
+				}
+				_, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: room, Text: tail, Context: instructions, Spoken: true, Home: contract.Conversation{Kind: contract.ConversationDM, Session: root}})
+				if problem != nil {
+					return errors.New(problem.Message)
+				}
+				return nil
+			}
+			notice, err := s.engineEvent(room, contract.SessionNotice{Session: root, Text: voice.EndInstructions})
+			if err != nil {
+				return err
+			}
+			return s.store.SendSessionNotice(ctx, notice, root)
+		}})
 	}, nil
 }

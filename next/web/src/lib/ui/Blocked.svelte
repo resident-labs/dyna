@@ -2,10 +2,12 @@
   import Icon, { type IconName } from "./Icon.svelte";
   // Why the page shows no rooms, centred in the feed: an icon, what happened, and what the owner can do about it.
   // A link to something that does not exist gets one line and a way back; navigate keeps the back link inside the app.
-  type Kind = "unreachable" | "no-room" | "no-session" | "no-page";
+  type Kind = "renew-wait" | "sign-in-unavailable" | "unreachable" | "no-room" | "no-session" | "no-page";
   let { kind, onretry, back, navigate }: { kind: Kind; onretry?: () => void; back?: { href: string; label: string };
     navigate?: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void } = $props();
   const states: Record<Kind, { icon: IconName; title: string; line: string }> = {
+    "renew-wait": { icon: "plug", title: "Waiting to renew your sign-in.", line: "Too many renewal requests arrived at once. This page tries again by itself." },
+    "sign-in-unavailable": { icon: "plug", title: "The sign-in service is not answering.", line: "This page tries again by itself. You do not need to restart Dyna." },
     unreachable: { icon: "plug", title: "Dyna is not reachable.", line: "This page tries again by itself. Check that the Dyna engine is running." },
     "no-room": { icon: "room", title: "This room does not exist.", line: "The address may be old, or the room may be gone. Pick a room from the menu." },
     "no-session": { icon: "chat", title: "There is nothing to show for this session.", line: "It may be closed with no messages, or the address may be old." },

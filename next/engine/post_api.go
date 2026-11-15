@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"mime"
 	"os"
@@ -194,7 +195,7 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	}
 	surface := contract.SurfaceFeed
 	if req.Home.Kind == contract.ConversationDM {
-		own := caller.Kind == contract.PrincipalOwner || (caller.Kind == contract.PrincipalSession && req.Home.Session == caller.Session)
+		own := caller.Kind == contract.PrincipalOwner || req.Awaited || (caller.Kind == contract.PrincipalSession && req.Home.Session == caller.Session)
 		if !own || req.Home.Session == "" || len(req.Mentions) != 0 {
 			return contract.PostResponse{}, invalid("invalid DM")
 		}
@@ -253,6 +254,13 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 				}
 			}
 			if errors.Is(err, store.ErrNotFound) {
+				ended, err := s.store.EndedWorkflowNamed(ctx, targetRoom, address.Name)
+				if err != nil {
+					return contract.PostResponse{}, failure(err)
+				}
+				if ended.ID != "" {
+					return contract.PostResponse{}, invalid(fmt.Sprintf("workflow run %s has ended (%s) and its result went to its parent; workflow status %s shows it, and workflow run with resume starts a new one from it.", address.Name, ended.State, ended.ID))
+				}
 				return contract.PostResponse{}, invalid("no open session named " + address.Name + " in this room; it may have closed, and session list shows the room's sessions")
 			}
 			if err != nil {
@@ -272,11 +280,16 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	if surface == contract.SurfaceDM {
 		recipients = append(recipients, room.Recipient{Session: req.Home.Session, Explicit: true})
 	}
-	event, err := s.event(req.Room, caller, contract.PostCreated{Spoken: req.Spoken, Source: source, Text: req.Text, Data: req.Data, DataAttachment: req.DataAttachment, Mentions: mentions, Home: req.Home, ReplyTo: req.ReplyTo, Attachments: req.Attachments, ClientID: req.ClientID, ToolCallID: req.ToolCallID})
+	event, err := s.event(req.Room, caller, contract.PostCreated{WorkflowStep: req.WorkflowStep, Spoken: req.Spoken, Source: source, Text: req.Text, Data: req.Data, DataAttachment: req.DataAttachment, Mentions: mentions, Home: req.Home, ReplyTo: req.ReplyTo, Attachments: req.Attachments, ClientID: req.ClientID, ToolCallID: req.ToolCallID, Context: req.Context})
 	if err != nil {
 		return contract.PostResponse{}, failure(err)
 	}
 	deliveries := tree.Deliveries(room.DeliveryInput{Event: event, Surface: surface, Recipients: recipients, HasMentions: len(req.Mentions) > 0, Home: req.Home, ReplyTo: req.ReplyTo})
+	if req.Awaited {
+		for i := range deliveries {
+			deliveries[i].Reply = contract.ReplyChannel{Kind: contract.ReplyNone}
+		}
+	}
 	id, seq, err := s.store.PostOnce(ctx, event, deliveries, req.VisualUpdate, req.VisualReply)
 	var superseded *store.VisualSupersededError
 	if errors.As(err, &superseded) {

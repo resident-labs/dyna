@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/resident-labs/dyna/box/dynaext"
 	"github.com/resident-labs/dyna/harness/testutil"
 
 	"github.com/resident-labs/dyna/contract"
@@ -167,16 +166,11 @@ func TestWorktreeAndMergeRunNoRepositoryHooks(t *testing.T) {
 
 func TestASchemaWorktreeStepKeepsItsOutput(t *testing.T) {
 	h, _ := newTreeHarness(t)
-	h.work = func(dir string, submit dynaext.Submit) {
-		if err := os.WriteFile(filepath.Join(dir, "out.json"), []byte(`{"count": 3}`), 0600); err != nil {
-			t.Error(err)
-		}
-		if _, end, err := submit("out.json"); !end || err != nil {
-			t.Errorf("submit %v %v", end, err)
-		}
+	h.reply = func(string, string) (contract.TurnEnded, error) {
+		return contract.TurnEnded{Final: `{"count": 3}`}, nil
 	}
 	got := h.result(crewMeta + `return await agent('counted', { worktree: true, schema: { type: 'object' } })`).(map[string]any)
-	if fmt.Sprint(got["output"]) != "map[count:3]" || got["text"] != nil || fmt.Sprint(got["files"]) != "[counted.txt out.json]" {
+	if fmt.Sprint(got["output"]) != "map[count:3]" || got["text"] != nil || fmt.Sprint(got["files"]) != "[counted.txt]" {
 		t.Fatalf("result %v", got)
 	}
 }
@@ -632,7 +626,7 @@ func TestALockWaitDoesNotCountAgainstAWorkersTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	work, cancel := lock.timeout(ctx, 300*time.Millisecond)
+	work, cancel := lock.timeout(ctx, 300*time.Millisecond, nil)
 	defer cancel()
 	queued, finished := make(chan struct{}), make(chan struct{})
 	go func() {

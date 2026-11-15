@@ -3,7 +3,7 @@
   import StatusPill from "./StatusPill.svelte";
   import type { WorkflowInfo } from "../contract.gen.ts";
   import { count, formatTime } from "../feed.ts";
-  import { minutesLabel, runWords } from "../workflow.ts";
+  import { minutesLabel, runWords, serviceLine } from "../workflow.ts";
   // One workflow run in the sessions panel. It is not an agent, so it has no round face: a solid squared tile whose color is
   // the run's state (green running, red failed, grey done, and an outline for stopped) and whose figure is its step count, then the name in
   // the text color, then one muted line that starts with the state word (see facts). Beside the name, the right edge shows how
@@ -15,7 +15,7 @@
   // What is unusual comes first, so the cut falls on the description: the failures, then the script's status or description,
   // then the steps the run has (and how many run), which say what the tile's figure counts.
   let facts = $derived([...run.failed ? [`${count(run.failed, "step")} failed`] : [],
-    ...[run.status || run.description].filter(text => text && text !== "No steps yet"),
+    ...[run.status || (run.service ? serviceLine(run.service) : run.description)].filter(text => text && text !== "No steps yet"),
     ...run.steps ? [count(steps, "step"), ...live && run.running ? [`${run.running} in progress`] : []] : live && run.steps === 0 ? ["No steps yet"] : []]);
   // A running run's age counts up.
   let now = $state(Date.now());

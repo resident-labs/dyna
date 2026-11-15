@@ -127,3 +127,25 @@ func TestAVerdictInAReviewBodyIsTheReviewToo(t *testing.T) {
 		t.Fatalf("review %q over GitHub's request", got.Review)
 	}
 }
+
+func TestOwnReviewProvenance(t *testing.T) {
+	for _, author := range []string{"me", "other"} {
+		pull := pullJSON(t, `null`, `"APPROVED"`, "")
+		raw := fmt.Sprintf(`{"latestOpinionatedReviews":{"nodes":[{"state":"APPROVED","author":{"login":%q}}]}}`, author)
+		if err := json.Unmarshal([]byte(raw), &pull); err != nil {
+			t.Fatal(err)
+		}
+		seen := pull.observed("me", at)
+		if seen.OwnReview != (author == "me") {
+			t.Fatalf("%s own review %v", author, seen.OwnReview)
+		}
+		update, _ := ComparePR(tracked(nil), nil, nil, &seen, "me", at)
+		own := false
+		for _, kind := range update.Change.OwnKinds {
+			own = own || kind == contract.PrChangeApproved
+		}
+		if own != (author == "me") {
+			t.Fatalf("%s: %+v", author, update.Change)
+		}
+	}
+}

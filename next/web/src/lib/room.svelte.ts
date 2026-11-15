@@ -7,7 +7,7 @@ import { boxFailures, countOf, statusOf, turnFailures, type BoxFailure, type Cou
 import { prKey } from "./feed.ts";
 import { startLabel } from "./start.ts";
 import type { BoxStartStatus } from "./contract.gen.ts";
-import type { ActivityKind, BoxState, Conversation, FailureCause, Decision, Event, Goal, OpRequested, OpResult, OpState, PrSummary, Question, SessionStarted, SessionWaiting, WorkflowInfo, WorkflowStatusLine, WorkflowStep } from "./contract.gen.ts";
+import type { ActivityKind, BoxState, ToolFinished, Conversation, FailureCause, Decision, Event, Goal, OpRequested, OpResult, OpState, PrSummary, Question, SessionStarted, SessionWaiting, WorkflowInfo, WorkflowStatusLine, WorkflowStep } from "./contract.gen.ts";
 
 
 // An operation of the room as the Requests panel shows it: its card, then its decision and run.
@@ -38,6 +38,8 @@ export class RoomStore {
   readonly activity = new SvelteMap<string, string>();
   // The kind of that activity, set and cleared with it. An engine that predates kinds sends none, which reads as a plain activity.
   readonly activityKinds = new SvelteMap<string, ActivityKind>();
+  // The calls of a parallel batch that ended before their results reached the transcript, per session. A turn that starts or ends clears them.
+  readonly finished = new SvelteMap<string, ReadonlyMap<string, ToolFinished>>();
   // The running turn's labels so far, newest last, kept while the page is open: the engine keeps only the latest one,
   // so a page opened mid-turn starts from that. A DM shows them as the turn's steps.
   readonly steps = new SvelteMap<string, string[]>();
@@ -352,6 +354,8 @@ export class RoomStore {
     // A live activity label has seq 0 and never reaches a window; a label of another turn is stale.
     if (event.type === "turn.activity") {
       if (this.turns.get(event.body.session) === event.body.turn) {
+        const { session, finished } = event.body;
+        if (finished) { this.finished.set(session, new Map(this.finished.get(session)).set(finished.call, finished)); return; }
         this.activity.set(event.body.session, event.body.label);
         this.activityKinds.set(event.body.session, event.body.kind);
         const steps = this.steps.get(event.body.session) ?? [];
@@ -360,6 +364,12 @@ export class RoomStore {
       return;
     }
     // A step row and a status line have seq 0 too. They reach an open run page and the run's counts and line, never a window.
+    if (event.type === "workflow.pause_changed") {
+      const { session, paused } = event.body, run = this.workflows.get(session);
+      if (run) this.workflows.set(session, { ...run, paused });
+      this.runPages.get(session)?.step();
+      return;
+    }
     if (event.type === "workflow.step_changed") {
       const { session, step, steps, running, failed } = event.body, run = this.workflows.get(session);
       if (run?.state === "running") this.workflows.set(session, { ...run, steps, running, failed });
@@ -399,6 +409,7 @@ export class RoomStore {
         this.sessions.delete(event.body.session);
         this.activity.delete(event.body.session);
         this.activityKinds.delete(event.body.session);
+        this.finished.delete(event.body.session);
         this.steps.delete(event.body.session);
         void this.readGoals(); // Its goals moved to its parent.
         break;
@@ -449,6 +460,7 @@ export class RoomStore {
         this.turns.set(event.body.session, event.body.turn);
         this.activity.delete(event.body.session);
         this.activityKinds.delete(event.body.session);
+        this.finished.delete(event.body.session);
         this.steps.delete(event.body.session);
         break;
       case "turn.ended":
@@ -458,6 +470,7 @@ export class RoomStore {
           this.stopFailed.delete(event.body.session);
           this.activity.delete(event.body.session);
           this.activityKinds.delete(event.body.session);
+          this.finished.delete(event.body.session);
           this.steps.delete(event.body.session);
         }
         // Only a completed turn clears the failure; a stopped turn did not succeed.
