@@ -143,9 +143,10 @@ or later `lastOutcome`, and `transcript read` shows the kept input making progre
 The engine keeps each session's full transcript on its host, at `<data>/rooms/<room>/transcripts/<session>/*.jsonl`
 (`<data>`: the engine's data directory, from `systemctl --user cat` of its unit), and it outlives the box. It holds every tool
 call's full arguments, which `transcript read` clips. Root reads it with bash on the engine host.
-- `edit` and `write` calls rebuild exactly: a short script replays each assistant message's `toolCall` items in file order,
-  `write` (`path`, `content`) and `edit` (`path`, old and new text; read one call for the field names), onto a fresh checkout
-  on a new branch. An `edit` that does not apply means a call was missed or the change came another way: read around it.
+- `edit` and `write` calls rebuild exactly: a short script replays them in file order onto a fresh checkout on a new branch. A
+  call is an item of an assistant message's `message.content`: `{"type":"toolCall","name":"write","arguments":{"path","content"}}`
+  or `{"type":"toolCall","name":"edit","arguments":{"path","edits":[{"oldText","newText"}]}}`. An `edit` that does not apply
+  means a call was missed or the change came another way: read around it.
 - `bash` changes come back only sometimes: redo them from their commands (`sed -i`, a formatter, a generator) and check
   against later output. Build output and installed tools are gone.
 
