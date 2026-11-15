@@ -113,7 +113,10 @@ func (s *Service) AdmissionNotices(ctx context.Context) error {
 					return strings.Compare(string(a.ID), string(c.ID))
 				})
 				for _, held := range holders[:min(8, len(holders))] {
-					label := string(held.Room)
+					label, err := s.store.RoomNameOf(ctx, held.Room)
+					if err != nil {
+						return err
+					}
 					if problem := s.roomAccess(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: reader}, held.Room); problem == nil {
 						holder, err := s.store.Session(ctx, held.Session)
 						if err != nil {

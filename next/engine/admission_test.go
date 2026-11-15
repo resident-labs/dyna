@@ -12,13 +12,15 @@ import (
 
 func TestAdmissionNoticeOncePerPendingSpell(t *testing.T) {
 	r := newGoalRig(t)
-	r.exec("UPDATE boxes SET host='host' WHERE state='ready'")
-	r.exec("UPDATE hosts SET mem_bytes=? WHERE name='host'", 2*box.GiB)
+	if err := r.st.AddHost(r.ctx, box.Host{Name: "desktop", State: box.HostReady, CPUs: 8, MemBytes: 2 * box.GiB, DiskBytes: 100 * box.GiB, CIScale: 1, CheckedAt: r.now()}); err != nil {
+		t.Fatal(err)
+	}
+	r.exec("UPDATE boxes SET host='desktop' WHERE state='ready'")
 	b, err := r.st.Box(r.ctx, mustSessionBox(t, r, r.child))
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.exec("UPDATE boxes SET state='pending',reason='memory',host='host' WHERE id=?", b.ID)
+	r.exec("UPDATE boxes SET state='pending',reason='memory',host='desktop' WHERE id=?", b.ID)
 	count := func() int {
 		var n int
 		if err := r.st.Read().QueryRowContext(r.ctx, "SELECT count(*) FROM events WHERE type='session.notice' AND client_id LIKE 'admission:%'").Scan(&n); err != nil {
@@ -46,7 +48,7 @@ func TestAdmissionNoticeOncePerPendingSpell(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Log("Rendered sample notice:\n" + text)
-	if !strings.Contains(text, "of 8.0 GiB reserved (4× 2.0 GiB") || !strings.Contains(text, "/lead:") {
+	if !strings.Contains(text, "of 8.0 GiB reserved (4× 2.0 GiB") || !strings.Contains(text, "room/lead:") || strings.Contains(text, string(r.room)+"/lead") || !strings.Contains(text, "Pinned to desktop") {
 		t.Fatalf("wrong explanation: %s", text)
 	}
 	r.exec("UPDATE boxes SET reason='cpu',updated_at=? WHERE id=?", r.now().UnixMilli(), b.ID)
