@@ -379,6 +379,70 @@ func namespaceCommand(root, mode string, args ...string) *exec.Cmd {
 	return exec.Command("bash", append([]string{"-c", namespaceRecoveryScript(root), "fixture", root, "b", mode}, args...)...)
 }
 
+func TestNamespaceProcessGone(t *testing.T) {
+	for _, tc := range []struct {
+		state string
+		gone  bool
+	}{
+		{"Z", true}, {"X", true}, {"S", false}, {"R", false}, {"", false},
+	} {
+		t.Run(tc.state, func(t *testing.T) {
+			proc := t.TempDir()
+			if tc.state != "" {
+				if err := os.WriteFile(filepath.Join(proc, "stat"), []byte("42 (command ) with spaces) "+tc.state+" 0 0\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := exec.Command("bash", "-c", namespaceProcAccess+`namespace_process_gone "$1"`, "fixture", proc).Run()
+			if (err == nil) != tc.gone {
+				t.Fatalf("gone = %v, want %v (%v)", err == nil, tc.gone, err)
+			}
+		})
+	}
+	missing := filepath.Join(t.TempDir(), "vanished")
+	if err := exec.Command("bash", "-c", namespaceProcAccess+`namespace_process_gone "$1"`, "fixture", missing).Run(); err != nil {
+		t.Fatalf("vanished process not skipped: %v", err)
+	}
+}
+
+func TestNamespaceRecoveryCheckSkipsZombieAndVanishedProcess(t *testing.T) {
+	root := t.TempDir()
+	proc := filepath.Join(root, "fixture-proc")
+	if err := os.MkdirAll(proc, 0700); err != nil {
+		t.Fatal(err)
+	}
+	child := exec.Command("sleep", "60")
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = child.Process.Kill(); _ = child.Wait() })
+	if err := child.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	pid := strconv.Itoa(child.Process.Pid)
+	if err := os.Symlink("/proc/"+pid, filepath.Join(proc, pid)); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		stat, err := os.ReadFile("/proc/" + pid + "/stat")
+		if err == nil && strings.HasPrefix(string(stat)[strings.LastIndex(string(stat), ") ")+2:], "Z ") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("child did not become zombie")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if out, err := namespaceCommand(root, "recover", "--check").CombinedOutput(); err != nil {
+		t.Fatalf("zombie blocked check: %v: %s", err, out)
+	}
+	_ = child.Wait()
+	if out, err := namespaceCommand(root, "recover", "--check").CombinedOutput(); err != nil {
+		t.Fatalf("vanished process blocked check: %v: %s", err, out)
+	}
+}
+
 func TestNamespaceUnreadableProcDecision(t *testing.T) {
 	uid := os.Geteuid()
 	for _, tc := range []struct {

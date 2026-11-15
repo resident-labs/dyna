@@ -30,7 +30,18 @@ func (e NamespaceUncertain) Error() string {
 func (e NamespaceUncertain) Unwrap() error { return e.Err }
 
 // namespaceProcAccess is shared with fixture tests of the procfs trust boundary.
-const namespaceProcAccess = `namespace_other_user() {
+const namespaceProcAccess = `namespace_process_gone() {
+ if ! IFS= read -r process_stat 2>/dev/null < "$1/stat"; then
+  test ! -d "$1"
+  return $?
+ fi
+ read -r process_state rest <<< "${process_stat##*) }"
+ # Zombies and dead tasks have no descriptor table, even while procfs keeps
+ # their entry pending reaping. Exited processes may disappear at any read.
+ case $process_state in Z|X) return 0;; esac
+ return 1
+}
+namespace_other_user() {
  while read -r field real effective rest; do
   if test "$field" = Uid:; then
    test "$real" != "$EUID" && test "$effective" != "$EUID"
@@ -162,9 +173,10 @@ namespace_stale_holders() {
  exec 8>&- 9>&-
  pids=
  for proc in /proc/[0-9]*; do
+  namespace_process_gone "$proc" && continue
   if ! test -r "$proc/fd" || ! test -x "$proc/fd"; then
-   test ! -d "$proc" && continue
    namespace_unreadable_safe "$proc" && continue
+   namespace_process_gone "$proc" && continue
    printf 'namespace recovery refused: unreadable descriptors for %s\n' "$proc" >&2
    return 1
   fi
@@ -174,11 +186,13 @@ namespace_stale_holders() {
    { while IFS= read -r line; do
      case $line in 'lock:'*' FLOCK '*' WRITE '*) held=1;; esac
     done < "$proc/fdinfo/${fd##*/}"; } 2>/dev/null || {
+    namespace_process_gone "$proc" && continue 2
     printf 'namespace recovery refused: unreadable lock info for %s\n' "$fd" >&2
     return 1
    }
    test "$held" = 1 || continue
    exe=$(readlink -- "$proc/exe") || {
+    namespace_process_gone "$proc" && continue 2
     printf 'namespace recovery refused: unreadable executable for %s\n' "$proc" >&2
     return 1
    }
