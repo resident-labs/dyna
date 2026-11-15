@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { diskLow, hang, hostBars, gpuLine, hostChips, hostGroup, hostLabel, hostLine, hostLoads, hostMeters, hostName, hostOrder, hostState, hostText, largeShared, lastSeen, machines, onHost, roomSessions } from "./hosts.ts";
+import { diskLow, hang, hostBars, gpuLine, hostChips, hostGroup, hostLabel, hostLine, hostLoads, hostMeters, hostReservations, hostName, hostOrder, hostState, hostText, largeShared, lastSeen, machines, onHost, roomSessions } from "./hosts.ts";
 import { listView } from "./settings-list.ts";
 import type { HostSummary } from "./contract.gen.ts";
 
@@ -238,4 +238,12 @@ test("a host with GPUs gets a tile of the VRAM asked of its cards, and the list'
   assert.equal(hostBars(h).length, 3);
   assert.equal(gpuLine(h.gpus[0]), "RTX 3090 Ti, 6.0 of 24 GB asked");
   assert.equal(gpuLine(h.gpus[1]), "GTX 1050 Ti, 0.0 of 4 GB asked");
+});
+
+test("reservations remain separate from measured free disk", () => {
+ const gib = 2 ** 30;
+ const h = { ...machine, diskBytes: 930 * gib, diskUsed: 819 * gib,
+ reservations: { cpuMilli: 12000, cpuCap: 32000, memory: 92 * gib, memoryCap: 104 * gib, disk: 4 * gib, diskCap: 18 * gib } };
+ assert.equal(hostReservations(h), "Reserved: CPU 12/32 cores · memory 92.0/104.0 GiB · disk 4.0/18.0 GiB");
+ assert.ok(JSON.stringify(hostMeters(h)).includes("111 GB free"));
 });
