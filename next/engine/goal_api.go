@@ -77,10 +77,6 @@ func (s *Service) GoalSet(ctx context.Context, caller contract.Principal, req co
 		}
 		req.Session = holder.ID
 	}
-	holder := req.Session
-	if holder == "" && caller.Kind == contract.PrincipalSession {
-		holder = caller.Session
-	}
 	event, err := s.event(room, caller, contract.GoalSet{})
 	if err != nil {
 		return contract.GoalSetResponse{}, failure(err)
