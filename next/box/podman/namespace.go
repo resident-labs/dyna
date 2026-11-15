@@ -105,6 +105,7 @@ namespace_stale_holders() {
   if ! test -r "$proc/fd" || ! test -x "$proc/fd"; then
    test ! -d "$proc" && continue
    namespace_other_user "$proc" && continue
+   printf 'namespace recovery refused: unreadable descriptors for %s\n' "$proc" >&2
    return 1
   fi
   for fd in "$proc"/fd/*; do
@@ -112,10 +113,19 @@ namespace_stale_holders() {
    held=0
    { while IFS= read -r line; do
      case $line in 'lock:'*' FLOCK '*' WRITE '*) held=1;; esac
-    done < "$proc/fdinfo/${fd##*/}"; } 2>/dev/null || return 1
+    done < "$proc/fdinfo/${fd##*/}"; } 2>/dev/null || {
+    printf 'namespace recovery refused: unreadable lock info for %s\n' "$fd" >&2
+    return 1
+   }
    test "$held" = 1 || continue
-   exe=$(readlink -- "$proc/exe") || return 1
-   test "${exe##*/}" = conmon || return 1
+   exe=$(readlink -- "$proc/exe") || {
+    printf 'namespace recovery refused: unreadable executable for %s\n' "$proc" >&2
+    return 1
+   }
+   test "${exe##*/}" = conmon || {
+    printf 'namespace recovery refused: non-conmon holder %s (%s)\n' "$proc" "$exe" >&2
+    return 1
+   }
    pids="$pids ${proc##*/}"
    break
   done
