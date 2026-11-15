@@ -124,21 +124,23 @@ type WorkflowStatusLine struct {
 // WorkflowStep is one journal row, without its result. Version is the script version that started it; a step a resumed run
 // kept has none. Lane names the key the step is about, as the script tagged it, and Phase its stage.
 type WorkflowStep struct {
-	Key        string            `json:"key"`
-	Parent     string            `json:"parent,omitempty"`
-	Kind       WorkflowStepKind  `json:"kind"`
-	Name       string            `json:"name"`
-	Phase      string            `json:"phase,omitempty"`
-	Lane       string            `json:"lane,omitempty"`
-	Profile    ProfileName       `json:"profile,omitempty"`
-	Version    int               `json:"version,omitempty"`
-	State      WorkflowStepState `json:"state"`
-	Reason     string            `json:"reason,omitempty"`
-	Transcript string            `json:"transcript,omitempty"` // the worker's session file, as transcript.append names it
-	More       bool              `json:"more,omitempty"`       // workflow.step holds more than this row says
-	Usage      Usage             `json:"usage"`
-	Started    time.Time         `json:"started"`
-	Ended      time.Time         `json:"ended,omitzero"`
+	Key          string            `json:"key"`
+	Parent       string            `json:"parent,omitempty"`
+	Kind         WorkflowStepKind  `json:"kind"`
+	Name         string            `json:"name"`
+	Phase        string            `json:"phase,omitempty"`
+	Lane         string            `json:"lane,omitempty"`
+	Profile      ProfileName       `json:"profile,omitempty"`
+	Version      int               `json:"version,omitempty"`
+	State        WorkflowStepState `json:"state"`
+	Reason       string            `json:"reason,omitempty"`
+	Transcript   string            `json:"transcript,omitempty"` // the worker's session file, as transcript.append names it
+	ToolCalls    int               `json:"toolCalls"`
+	LastActivity time.Time         `json:"lastActivity,omitzero"`
+	More         bool              `json:"more,omitempty"` // workflow.step holds more than this row says
+	Usage        Usage             `json:"usage"`
+	Started      time.Time         `json:"started"`
+	Ended        time.Time         `json:"ended,omitzero"`
 }
 
 // WorkflowStatusRequest names a run, or the crew session that hosts it.

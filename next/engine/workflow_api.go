@@ -18,6 +18,7 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/engine/workflowmeta"
 	"github.com/resident-labs/dyna/harness"
+	"github.com/resident-labs/dyna/harness/pig"
 	"github.com/resident-labs/dyna/room"
 )
 
@@ -244,6 +245,28 @@ func (s *Service) WorkflowStatus(ctx context.Context, caller contract.Principal,
 	}
 	info.Result = harness.Mask(info.Result)
 	for i := range steps {
+		if steps[i].Transcript != "" {
+			worker, err := s.store.WorkflowWorker(ctx, run.Session, steps[i].Key)
+			if err != nil {
+				return contract.WorkflowStatusResponse{}, failure(err)
+			}
+			files, err := s.store.TranscriptFiles(ctx, worker.Session)
+			if err != nil {
+				return contract.WorkflowStatusResponse{}, failure(err)
+			}
+			reader := pig.TranscriptReader{Dir: s.layout.Transcripts(run.Room, worker.Session), Acked: map[string]int64{}}
+			for _, file := range files {
+				reader.Acked[file.Path] = file.Acked
+			}
+			progress, err := reader.Progress(steps[i].Transcript)
+			if err != nil {
+				return contract.WorkflowStatusResponse{}, failure(err)
+			}
+			steps[i].ToolCalls, steps[i].LastActivity = progress.ToolCalls, progress.LastActivity
+			if steps[i].State == contract.WorkflowStepRunning {
+				steps[i].Usage = progress.Usage
+			}
+		}
 		maskStep(&steps[i])
 	}
 	lines := make([]contract.WorkflowStatusLine, 0, len(run.StatusLines))
