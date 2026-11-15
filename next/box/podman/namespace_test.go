@@ -287,6 +287,33 @@ func TestNamespaceCreateHasBoundedLockWaitAndNoFallback(t *testing.T) {
 
 // Podman's conmon daemon inherits FD 8 even after podman start returns. The
 // completed command must release that shared lock without waiting for conmon.
+// CI runners may have protected same-UID processes that correctly prevent a
+// real host-wide recovery. Limit these fixtures to their own process set, but
+// keep symlinks to real proc entries so locks and exe identity remain real.
+func namespaceRecoveryScript(root string) string {
+	proc := filepath.Join(root, "fixture-proc")
+	register := "mkdir -p -- " + quote(proc) + "\nln -s /proc/$$ " + quote(proc) + "/$$\n"
+	return register + strings.ReplaceAll(namespaceScript, "/proc/[0-9]*", quote(proc)+"/[0-9]*")
+}
+
+type namespaceRecoveryRunner struct{ root string }
+
+func (r namespaceRecoveryRunner) Run(ctx context.Context, in []byte, args ...string) ([]byte, error) {
+	args = slices.Clone(args)
+	last := len(args) - 1
+	args[last] = strings.ReplaceAll(args[last], quote(namespaceScript), quote(namespaceRecoveryScript(r.root)))
+	return (nativeShellRunner{}).Run(ctx, in, args...)
+}
+
+func namespaceRecoveryHost(t *testing.T, root string) *Host {
+	t.Helper()
+	h, err := New("user@host", t.TempDir(), "h", namespaceRecoveryRunner{root}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
 func TestNamespaceOrphanProcess(t *testing.T) {
 	if os.Getenv("DYNA_NAMESPACE_ORPHAN") != "1" {
 		return
@@ -334,6 +361,13 @@ wait`, "fixture", executable, pidFile)
 		t.Fatalf("fixture exe: %q %v; output: %s", exe, err, readNamespaceFile(t, pidFile+".log"))
 	}
 	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	proc := filepath.Join(root, "fixture-proc")
+	if err := os.MkdirAll(proc, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/proc/"+strconv.Itoa(pid), filepath.Join(proc, strconv.Itoa(pid))); err != nil {
+		t.Fatal(err)
+	}
 	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +376,7 @@ wait`, "fixture", executable, pidFile)
 }
 
 func namespaceCommand(root, mode string, args ...string) *exec.Cmd {
-	return exec.Command("bash", append([]string{"-c", namespaceScript, "fixture", root, "b", mode}, args...)...)
+	return exec.Command("bash", append([]string{"-c", namespaceRecoveryScript(root), "fixture", root, "b", mode}, args...)...)
 }
 
 func TestNamespaceUnreadableProcDecision(t *testing.T) {
@@ -373,8 +407,79 @@ func TestNamespaceUnreadableProcDecision(t *testing.T) {
 	}
 }
 
+func TestNamespaceUnreadableSessionDecision(t *testing.T) {
+	uid := os.Geteuid()
+	for _, tc := range []struct {
+		name, command, start string
+		birth                int
+		skip                 bool
+	}{
+		{"old process", "unknown", "100", 1100, true},
+		{"new process", "unknown", "10000", 1050, false},
+		{"rounded boundary", "unknown", "10000", 1101, false},
+		{"missing birth", "unknown", "100", 0, false},
+		{"missing stat", "unknown", "", 1100, false},
+		{"sshd session", "sshd-session: pip@notty", "", 0, true},
+		{"sshd", "sshd: pip@notty", "", 0, true},
+		{"pam", "(sd-pam)", "", 0, true},
+		{"ssh agent", "/usr/bin/ssh-agent", "", 0, true},
+		{"gpg agent", "gpg-agent", "", 0, true},
+		{"argument only", "bash\x00ssh-agent", "", 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			proc := t.TempDir()
+			if err := os.WriteFile(filepath.Join(proc, "status"), []byte(fmt.Sprintf("Uid:\t%d\t%d\t%d\t%d\n", uid, uid, uid, uid)), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(proc, "cmdline"), []byte(tc.command+"\x00"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if tc.start != "" {
+				stat := "42 (fixture ) with spaces) S " + strings.Repeat("0 ", 18) + tc.start + "\n"
+				if err := os.WriteFile(filepath.Join(proc, "stat"), []byte(stat), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			script := namespaceProcAccess + fmt.Sprintf("lock_birth=%d; boot=1000; ticks_per_second=100\n", tc.birth) + `namespace_unreadable_safe "$1"`
+			err := exec.Command("bash", "-c", script, "fixture", proc).Run()
+			if (err == nil) != tc.skip {
+				t.Fatalf("skip = %v, want %v (%v)", err == nil, tc.skip, err)
+			}
+		})
+	}
+}
+
+func TestNamespaceRecoveryCheckDoesNotRotate(t *testing.T) {
+	for _, stale := range []bool{false, true} {
+		t.Run(strconv.FormatBool(stale), func(t *testing.T) {
+			root := t.TempDir()
+			if stale {
+				namespaceOrphan(t, root, "conmon")
+			} else {
+				if err := os.MkdirAll(filepath.Join(root, "locks"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(root, "locks", "box-b.lock"), nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			path := filepath.Join(root, "locks", "box-b.lock")
+			before, _ := os.Stat(path)
+			out, err := namespaceCommand(root, "recover", "--check").CombinedOutput()
+			if err != nil || !strings.Contains(string(out), "check passed") {
+				t.Fatalf("check: %s: %v", out, err)
+			}
+			after, err := os.Stat(path)
+			if err != nil || !os.SameFile(before, after) {
+				t.Fatalf("check rotated: %v", err)
+			}
+		})
+	}
+}
+
 func TestNamespaceStaleConmonRecovery(t *testing.T) {
-	root, h := namespaceFixture(t)
+	root := t.TempDir()
+	h := namespaceRecoveryHost(t, root)
 	pid := namespaceOrphan(t, root, "conmon")
 	path := filepath.Join(root, "locks", "box-b.lock")
 	before, err := os.Stat(path)
@@ -409,7 +514,8 @@ func TestNamespaceBody252DoesNotRecover(t *testing.T) {
 }
 
 func TestNamespaceLiveHolderNotRecovered(t *testing.T) {
-	root, h := namespaceFixture(t)
+	root := t.TempDir()
+	h := namespaceRecoveryHost(t, root)
 	namespaceOrphan(t, root, "worker")
 	path := filepath.Join(root, "locks", "box-b.lock")
 	before, _ := os.Stat(path)

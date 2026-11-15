@@ -39,6 +39,27 @@ const namespaceProcAccess = `namespace_other_user() {
  done < "$1/status" 2>/dev/null
  return 1
 }
+namespace_unreadable_safe() {
+ namespace_other_user "$1" && return 0
+ # Session title names are a correctness guard, not a security boundary:
+ # a malicious same-user process could forge them, but wrapper descendants
+ # never carry these names. Check argv[0], not arbitrary command arguments.
+ command=
+ IFS= read -r -d '' command < "$1/cmdline" 2>/dev/null || true
+ case ${command##*/} in
+  sshd-session:*|sshd:*|'(sd-pam)'|ssh-agent|gpg-agent) return 0;;
+ esac
+ # Only wrappers open these private files; an older unrelated process cannot
+ # have inherited an FD opened later. If birth time or clock data is missing,
+ # this proof is unavailable. Round the process start UP, including btime's
+ # one-second precision, and compare to the birth time rounded DOWN.
+ test "$lock_birth" -gt 0 && test "$boot" -gt 0 && test "$ticks_per_second" -gt 0 || return 1
+ IFS= read -r process_stat < "$1/stat" || return 1
+ read -ra fields <<< "${process_stat##*) }"
+ start=${fields[19]:-}
+ [[ "$start" =~ ^[0-9]+$ ]] || return 1
+ test $((boot + (start + ticks_per_second - 1) / ticks_per_second + 1)) -lt "$lock_birth"
+}
 `
 
 // FD 8 is intentionally inherited by every mutating child. In particular, do
@@ -96,15 +117,16 @@ namespace_scan_holders() {
 # Recovery takes only the rotation lock, never the abandoned lock itself.
 # Only the host user opens these 0600 files in its private data directory; root
 # does not touch them. Inherited descriptors also stay in that user's wrapper
-# tree. Unreadable fd directories of other users cannot matter, but an unreadable
-# same-user process (or unreadable status) must prevent rotation.
+# tree. Unreadable other-user directories cannot matter. For same-user processes
+# we require proof they predate the file or a known non-Dyna session title (see
+# namespace_unreadable_safe). All other unreadable processes refuse rotation.
 namespace_stale_holders() {
  exec 8>&- 9>&-
  pids=
  for proc in /proc/[0-9]*; do
   if ! test -r "$proc/fd" || ! test -x "$proc/fd"; then
    test ! -d "$proc" && continue
-   namespace_other_user "$proc" && continue
+   namespace_unreadable_safe "$proc" && continue
    printf 'namespace recovery refused: unreadable descriptors for %s\n' "$proc" >&2
    return 1
   fi
@@ -130,7 +152,7 @@ namespace_stale_holders() {
    break
   done
  done
- test -n "$pids" || return 1
+ test -n "$pids" || test "$check" = 1 || return 1
  printf '%s\n' "$pids"
 }
 namespace_stale_scan() {
@@ -144,6 +166,14 @@ namespace_stale_scan() {
  wait "$scan"
 }
 if test "$mode" = recover; then
+ check=0
+ test "${1:-}" != --check || check=1
+ lock_birth=$(stat -c %W -- "$root/locks/box-$id.lock") || lock_birth=0
+ boot=0
+ while read -r key value rest; do
+  test "$key" != btime || { boot=$value; break; }
+ done < /proc/stat
+ ticks_per_second=$(getconf CLK_TCK) || ticks_per_second=0
  exec 9> "$root/locks/box-$id.rotate"
  flock -x -w 10 9 || exit 254
  SECONDS=0
@@ -153,6 +183,10 @@ if test "$mode" = recover; then
  namespace_stale_scan || exit 254
  IFS= read -r second < "$root/locks/box-$id.rotate.new" || exit 254
  test "$first" = "$second" || exit 254
+ if test "$check" = 1; then
+  printf 'namespace recovery check passed: box %s; eligible conmon pids:%s\n' "$id" "$first"
+  exit 0
+ fi
  : > "$root/locks/box-$id.rotate.new"
  mv -f -- "$root/locks/box-$id.rotate.new" "$root/locks/box-$id.lock"
  exec 9>&-
