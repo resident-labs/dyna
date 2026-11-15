@@ -79,6 +79,8 @@ func TestWorkflowProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	resumed, err := s.WorkflowStep(ctx, "resume", "step")
+	// Kept steps retain activity and counts but do not charge tokens to the new run.
+	step.Usage = contract.Usage{}
 	if err != nil || resumed != step {
 		t.Fatalf("resumed %+v; original %+v: %v", resumed, step, err)
 	}
@@ -87,7 +89,7 @@ func TestWorkflowProgress(t *testing.T) {
 		t.Fatalf("resumed offset %d: %v", offset, err)
 	}
 	summary, err := s.WorkflowSummary(ctx, "resume")
-	if err != nil || summary.Usage != final {
+	if err != nil || summary.Usage != (contract.Usage{}) {
 		t.Fatalf("summary %+v: %v", summary, err)
 	}
 }

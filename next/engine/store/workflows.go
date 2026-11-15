@@ -123,8 +123,8 @@ func insertWorkflow(ctx context.Context, tx *sql.Tx, session contract.SessionID,
 	if err != nil || run.Resume == "" {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(run,key,parent,kind,name,phase,lane,profile,detail,state,result,reason,transcript,started_at,ended_at,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,progress_offset,tool_calls,last_activity)
-		SELECT ?,key,parent,kind,name,phase,lane,profile,detail,state,result,reason,transcript,started_at,ended_at,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,progress_offset,tool_calls,last_activity FROM workflow_steps WHERE run=? AND state=? AND kind!=?`,
+	_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(run,key,parent,kind,name,phase,lane,profile,detail,state,result,reason,transcript,started_at,ended_at,progress_offset,tool_calls,last_activity)
+		SELECT ?,key,parent,kind,name,phase,lane,profile,detail,state,result,reason,transcript,started_at,ended_at,progress_offset,tool_calls,last_activity FROM workflow_steps WHERE run=? AND state=? AND kind!=?`,
 		run.ID, run.Resume, contract.WorkflowStepDone, contract.WorkflowStepWorkflow)
 	return err
 }
