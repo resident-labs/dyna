@@ -9,7 +9,7 @@ type ReservationLoad struct {
 	CPU, RunnerCPU, HeldCPU                                                   int
 	Memory, RunnerMemory, HeldMemory                                          int64
 	CPUBudget, MemoryBudget, CPUCap, MemoryCap, RunnerCPUCap, RunnerMemoryCap int64
-	DiskFree                                                                  int64
+	DiskFree, DiskNeeded                                                      int64
 }
 
 // Reservations is shared by placement and its explanations. Existing containers
@@ -24,12 +24,22 @@ func Reservations(h Host, boxes []Box, request Box) ReservationLoad {
 	}
 	l.CPUCap, l.MemoryCap = scale*l.CPUBudget, 4*l.MemoryBudget
 	l.RunnerCPUCap, l.RunnerMemoryCap = 2*int64(h.CIScale)*l.CPUBudget, int64(h.CIScale)*l.MemoryBudget
+	l.DiskNeeded = diskRequest(request.Size.Name)
 	for _, b := range boxes {
-		if b.ID == request.ID && b.Host != "" && b.Image != "" && request.Image != RunnerImage {
+		if b.ID != request.ID || b.Host == "" {
+			continue
+		}
+		if b.Image != "" && request.Image != RunnerImage {
 			l.HeldCPU -= runners
 			l.HeldMemory -= runnerMem
-			break
 		}
+		if !(b.State == contract.BoxPending && b.Image == "") {
+			l.DiskNeeded = 0
+			if !b.PlacedAt.Before(h.CheckedAt) {
+				l.DiskNeeded = diskRequest(b.Size.Name)
+			}
+		}
+		break
 	}
 	return l
 }

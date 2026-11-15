@@ -159,11 +159,7 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 			reason = PendingMemory
 			continue
 		}
-		if existing == nil || (existing.State == contract.BoxPending && existing.Image == "") {
-			disk -= diskRequest(request.Size.Name)
-		} else if !existing.PlacedAt.Before(h.CheckedAt) {
-			disk -= diskRequest(existing.Size.Name)
-		}
+		disk -= load.DiskNeeded
 		if disk < h.DiskFloor {
 			reason = PendingDisk
 			continue

@@ -174,7 +174,7 @@ func admissionHost(h box.Host, boxes []box.Box, b box.Box) string {
 	case box.PendingMemory:
 		return fmt.Sprintf("%s: memory %s of %s reserved (4× %s after services); this box needs %s. Measured use %s of %s (80%% backstop). CI runners: %s of %s reserved.", h.Name, admissionBytes(l.HeldMemory), admissionBytes(l.MemoryCap), admissionBytes(l.MemoryBudget), admissionBytes(b.Size.MemBytes), admissionBytes(h.MemUsed), admissionBytes(h.MemBytes), admissionBytes(l.RunnerMemory), admissionBytes(l.RunnerMemoryCap))
 	case box.PendingDisk:
-		return fmt.Sprintf("%s: disk %s available after reservations, %s floor; this box's new allocation needs %s. Measured free %s of %s.", h.Name, admissionBytes(l.DiskFree), admissionBytes(h.DiskFloor), admissionBytes(box.DiskRequest(b.Size.Name)), admissionBytes(h.DiskBytes), admissionBytes(h.DiskTotal))
+		return fmt.Sprintf("%s: disk %s available after reservations, %s floor; this box adds %s before the next disk sample. Measured free %s of %s.", h.Name, admissionBytes(l.DiskFree), admissionBytes(h.DiskFloor), admissionBytes(l.DiskNeeded), admissionBytes(h.DiskBytes), admissionBytes(h.DiskTotal))
 	case box.PendingGPU:
 		text := fmt.Sprintf("%s: this box needs %d GiB GPU memory.", h.Name, b.GPU)
 		for _, g := range h.GPUs {
