@@ -4,7 +4,7 @@
   import { confirm } from "../modal.ts";
   import { startLabel } from "../start.ts";
   import { boxWords } from "../feed.ts";
-  import { diskLow, gpuLine, hostBars, hostChips, hostGroup, hostLine, hostMeters, hostName, hostOrder, hostState, hostText, largeShared, lastSeen, machines, roomSessions, sharedSize,
+  import { diskLow, gpuLine, hostBars, hostChips, hostGroup, hostLine, hostMeters, hostReservations, hostName, hostOrder, hostState, hostText, largeShared, lastSeen, machines, roomSessions, sharedSize,
     watchHosts } from "../hosts.ts";
   import type { HostProblem, HostSummary, RoomSummary } from "../contract.gen.ts";
   import Avatar from "./Avatar.svelte";
@@ -176,6 +176,7 @@
 {#snippet host(h: HostSummary)}{@const meters = hostMeters(h)}{@const seen = h.reachable ? undefined : lastSeen(h, now)}{@const groups = roomSessions(h, roomName)}
   {#if h.execOnly}<p class="small muted">Exec only: nothing is placed here, and only host exec uses it. It passes the base host checks; turning Agents or CI on runs the full host check first.</p>{/if}
   {#if meters.length && (h.reachable || seen)}<div class="tiles" class:dimmed={!h.reachable}>{#each meters as meter (meter.label)}<MeterTile {meter} />{/each}</div>{/if}
+  {#if hostReservations(h)}<p class="small muted">{hostReservations(h)}</p>{/if}
   <dl class="facts">{#if h.execOnly || !h.reachable}<dt>State</dt><dd>{#if h.reachable}Online{:else}<StatusPill tone="error" label="Unreachable" />{" · "}{seen ?? "Not seen yet"}{/if}</dd>{/if}
     {#if h.health === "degraded"}<dt>Scheduling</dt><dd><StatusPill tone="warning" label="Degraded" /> · No new boxes or runners until a good probe</dd>{/if}
     {#if !h.execOnly}<dt>Workspaces</dt><dd>{h.boxes.toLocaleString("en")} running</dd>{/if}

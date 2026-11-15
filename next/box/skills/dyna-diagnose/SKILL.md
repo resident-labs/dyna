@@ -163,3 +163,5 @@ on, their runners, `degraded`, and a room's CI runner image that failed to build
 Send it where AGENTS.md says Dyna bugs go, with: room, session and box IDs, host, the UTC time
 window, the event seqs, the `cause`, `reason` and `error` you read, the journal lines, and what you
 tried with each result.
+
+After 5 minutes pending admission, the parent and room root receive a system notice with the blocking reason, reservation holders and next steps; `host list` shows current reservations and free disk.

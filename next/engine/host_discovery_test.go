@@ -128,7 +128,7 @@ func TestHostListSessionAllowlistDropsOtherRoomsMetadata(t *testing.T) {
 				}
 				continue
 			}
-			want := contract.HostSummary{Name: "shared", State: "ready", Agents: true, RunnerImages: []contract.RunnerImageProblem{ownProblem}}
+			want := contract.HostSummary{Reservations: &contract.HostReservations{}, Name: "shared", State: "ready", Agents: true, RunnerImages: []contract.RunnerImageProblem{ownProblem}}
 			if live {
 				want.CPUFree, want.MemFree, want.DiskFree = 7, 8, 9
 				want.Health = contract.HostHealthy

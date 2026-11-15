@@ -458,6 +458,7 @@ type RunnerImageProblem struct {
 }
 
 type HostSummary struct {
+	Reservations *HostReservations    `json:"reservations,omitempty"`
 	State        string               `json:"state"` // ready, degraded, agents off, or the host setup state
 	CPUFree      float64              `json:"cpuFree"`
 	MemFree      int64                `json:"memFree"`
@@ -1311,4 +1312,14 @@ type SigningKeyRequest struct{}
 // SigningKeyResponse holds the line to add on GitHub as a signing key.
 type SigningKeyResponse struct {
 	PublicKey string `json:"publicKey"`
+}
+
+// HostReservations exposes aggregate admission holds without holder identities.
+type HostReservations struct {
+	CPUMilli  int64 `json:"cpuMilli"`
+	CPUCap    int64 `json:"cpuCap"`
+	Memory    int64 `json:"memory"`
+	MemoryCap int64 `json:"memoryCap"`
+	Disk      int64 `json:"disk"`
+	DiskCap   int64 `json:"diskCap"`
 }

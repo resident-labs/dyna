@@ -104,7 +104,7 @@ func hostCommand(getClient func() client) *cobra.Command {
 	}}
 	limitHost.Flags().StringSliceVar(&limitRooms, "room", nil, "Room ID this host serves (repeatable)")
 	limitHost.Flags().BoolVar(&limitAll, "all", false, "Serve every room")
-	list := &cobra.Command{Use: "list", Args: cobra.NoArgs, Short: "Show each host's disk use, switches, CI scale, runners and GPUs", RunE: func(cmd *cobra.Command, _ []string) error {
+	list := &cobra.Command{Use: "list", Args: cobra.NoArgs, Short: "Show free disk and admission reservations against caps", Long: "Show measured disk free of total and CPU, memory and disk admission reservations against their caps. Session boxes reserve against 4× capacity after services; CI has separate caps. Measured free memory alone does not imply admission capacity. After 5 minutes pending, the parent and room root receive a system notice with the reason, numbers, holders and next steps.", RunE: func(cmd *cobra.Command, _ []string) error {
 		r, err := getClient().HostList(cmd.Context(), contract.HostListRequest{})
 		if err != nil {
 			return err
@@ -117,7 +117,7 @@ func hostCommand(getClient func() client) *cobra.Command {
 			}
 		}
 		for _, h := range r.Hosts {
-			state, used, total := "ok", humanize.IBytes(uint64(h.DiskUsed)), humanize.IBytes(uint64(h.DiskBytes))
+			state, used, total := "ok", humanize.IBytes(uint64(h.DiskFree)), humanize.IBytes(uint64(h.DiskBytes))
 			if h.ExecOnly {
 				state, used, total = "offline", "-", "-"
 				if h.Reachable {
@@ -159,6 +159,9 @@ func hostCommand(getClient func() client) *cobra.Command {
 				if h.EngineHost {
 					state += "\tengine host"
 				}
+			}
+			if r := h.Reservations; r != nil {
+				state += fmt.Sprintf("\tcpu %.1f/%.1f reserved, mem %s/%s reserved, %s free, disk %s/%s reserved", float64(r.CPUMilli)/1000, float64(r.CPUCap)/1000, humanize.IBytes(uint64(max(0, r.Memory))), humanize.IBytes(uint64(max(0, r.MemoryCap))), humanize.IBytes(uint64(max(0, h.MemFree))), humanize.IBytes(uint64(max(0, r.Disk))), humanize.IBytes(uint64(max(0, r.DiskCap))))
 			}
 			for _, gpu := range h.GPUs {
 				state += fmt.Sprintf("\tGPU %d %s: %s memory, %s free", gpu.Index, gpu.Name, humanize.IBytes(uint64(gpu.MemBytes)), humanize.IBytes(uint64(gpu.FreeBytes)))

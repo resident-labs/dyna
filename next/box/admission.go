@@ -148,33 +148,14 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 			reason = PendingMemory
 			continue
 		}
-		cpu, runnerCPU, mem, runnerMem, disk := hostLoad(h, boxes, request.ID)
-		serviceCPU, serviceMem, serviceDisk := h.serviceLoad("")
-		disk -= serviceDisk
-		// Services come off the top at 1x, so the budgets below are what is left of the host.
-		cpuBudget, memBudget := int64(h.CPUs)*1000-serviceCPU, h.MemBytes-serviceMem
-		// A session box idles most of the time, so a host takes four times its CPUs of them. A CI runner is busy for its whole
-		// job but uses about half its CPUs on average, between links, tests and waits, so a host takes twice its CPUs of
-		// runners. At four times, hosts ran at two to six times their CPUs and jobs took two to three times as long; at once,
-		// they sat half idle. CI capacity scales reservations, with real memory as the backstop.
-		scale := int64(h.CIScale)
-		totalCPUScale := int64(4)
-		// The shared 4x ceiling must not truncate 3x/4x CI capacity. Session requests keep that ceiling.
-		if request.Image == RunnerImage {
-			totalCPUScale = max(totalCPUScale, 2*scale)
-		}
-		// A box whose container exists on a host can run nowhere else, so runners do not hold it out: it is held to what session
-		// boxes reserve, where it would otherwise wait a whole CI job to wake. A new box and a runner are held to every
-		// reservation, and a new box goes to another host. The measured memory above still refuses a host that is really full.
-		heldCPU, heldMem := cpu, mem
-		if existing != nil && existing.Image != "" && request.Image != RunnerImage {
-			heldCPU, heldMem = cpu-runnerCPU, mem-runnerMem
-		}
-		if int64(heldCPU+request.Size.CPUs)*1000 > totalCPUScale*cpuBudget || request.Image == RunnerImage && int64(runnerCPU+request.Size.CPUs)*1000 > 2*scale*cpuBudget {
+		load := Reservations(h, boxes, request)
+		cpu, runnerCPU, mem, disk := load.CPU, load.RunnerCPU, load.Memory, load.DiskFree
+		cpuBudget, memBudget := load.CPUBudget, load.MemoryBudget
+		if int64(load.HeldCPU+request.Size.CPUs)*1000 > load.CPUCap || request.Image == RunnerImage && int64(runnerCPU+request.Size.CPUs)*1000 > load.RunnerCPUCap {
 			reason = PendingCPU
 			continue
 		}
-		if heldMem+request.Size.MemBytes > 4*memBudget || request.Image == RunnerImage && runnerMem+request.Size.MemBytes > scale*memBudget {
+		if load.HeldMemory+request.Size.MemBytes > load.MemoryCap || request.Image == RunnerImage && load.RunnerMemory+request.Size.MemBytes > load.RunnerMemoryCap {
 			reason = PendingMemory
 			continue
 		}

@@ -65,6 +65,8 @@ func (s *Service) HostListWithLoad(ctx context.Context, who contract.Principal, 
 		result.Hosts = nil // the control plane does not place session boxes
 	}
 	for _, host := range hosts {
+		l := box.Reservations(host, boxes, box.Box{})
+		reservations := &contract.HostReservations{CPUMilli: int64(l.CPU) * 1000, CPUCap: l.CPUCap, Memory: l.Memory, MemoryCap: l.MemoryCap, Disk: host.DiskBytes - l.DiskFree, DiskCap: max(0, host.DiskBytes-host.DiskFloor)}
 		if room != "" {
 			if host.ExecOnly || (host.Pool == "" && len(host.Rooms) > 0 && !slices.Contains(host.Rooms, room)) {
 				continue
@@ -101,7 +103,7 @@ func (s *Service) HostListWithLoad(ctx context.Context, who contract.Principal, 
 		} else if host.Health == contract.HostDegraded {
 			state = "degraded"
 		}
-		result.Hosts = append(result.Hosts, contract.HostSummary{State: state, CPUFree: float64(host.CPUs), MemFree: max(0, host.MemBytes-host.MemUsed), DiskFree: host.DiskBytes, Health: host.Health, DiskBytes: host.DiskTotal, DiskUsed: max(0, host.DiskTotal-host.DiskBytes), Name: host.Name, Problem: host.Problem, Sessions: sessions[host.Name], Shared: []contract.RoomShared{}, Pool: host.Pool, Agents: !host.NoAgents, CI: host.CI, CIScale: host.CIScale, Rooms: host.Rooms, ExecOnly: host.ExecOnly, Runners: runners[host.Name], RunnerImages: imageProblems[host.Name], CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.ExecOnly && !host.CheckedAt.IsZero() && box.DiskLow(host.DiskBytes, host.DiskFloor), EngineHost: host.EngineHost != nil && *host.EngineHost, Leftovers: leftovers[host.Name], GPUs: cards, Services: services[host.Name], ServiceHost: s.reconciler.ServiceHostStatus(host.Name)})
+		result.Hosts = append(result.Hosts, contract.HostSummary{Reservations: reservations, State: state, CPUFree: float64(host.CPUs), MemFree: max(0, host.MemBytes-host.MemUsed), DiskFree: host.DiskBytes, Health: host.Health, DiskBytes: host.DiskTotal, DiskUsed: max(0, host.DiskTotal-host.DiskBytes), Name: host.Name, Problem: host.Problem, Sessions: sessions[host.Name], Shared: []contract.RoomShared{}, Pool: host.Pool, Agents: !host.NoAgents, CI: host.CI, CIScale: host.CIScale, Rooms: host.Rooms, ExecOnly: host.ExecOnly, Runners: runners[host.Name], RunnerImages: imageProblems[host.Name], CPUs: host.CPUs, MemBytes: host.MemBytes, DiskLow: !host.ExecOnly && !host.CheckedAt.IsZero() && box.DiskLow(host.DiskBytes, host.DiskFloor), EngineHost: host.EngineHost != nil && *host.EngineHost, Leftovers: leftovers[host.Name], GPUs: cards, Services: services[host.Name], ServiceHost: s.reconciler.ServiceHostStatus(host.Name)})
 	}
 	if load != nil {
 		if err := load(ctx, result.Hosts); err != nil {
@@ -113,7 +115,8 @@ func (s *Service) HostListWithLoad(ctx context.Context, who contract.Principal, 
 			// Session inventory is an allowlist, applied after live measurements so
 			// enrichment cannot restore owner-only history, counts or identities.
 			entry := contract.HostSummary{
-				Name: host.Name, State: host.State, Health: host.Health,
+				Name: host.Name, State: host.State, Health: host.Health, Reservations: host.Reservations,
+				DiskBytes: host.DiskBytes, DiskUsed: host.DiskUsed,
 				Agents: host.Agents, CI: host.CI,
 				CPUFree: host.CPUFree, MemFree: host.MemFree, DiskFree: host.DiskFree,
 				Services: host.Services,

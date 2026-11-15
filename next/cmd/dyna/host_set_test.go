@@ -46,14 +46,14 @@ func TestHostSetSendsOnlyTheSwitchesGiven(t *testing.T) {
 
 func TestHostListShowsBothSwitches(t *testing.T) {
 	f := &fakeClient{hosts: []contract.HostSummary{
-		{Name: contract.ControlPlane, DiskBytes: 100 << 30, DiskUsed: 40 << 30},
-		{Name: "pve", DiskBytes: 100 << 30, DiskUsed: 10 << 30, CI: true},
-		{Name: "worker", DiskBytes: 100 << 30, DiskUsed: 10 << 30, Agents: true},
+		{Name: contract.ControlPlane, DiskBytes: 100 << 30, DiskUsed: 40 << 30, DiskFree: 60 << 30},
+		{Name: "pve", DiskBytes: 100 << 30, DiskUsed: 10 << 30, DiskFree: 90 << 30, CI: true},
+		{Name: "worker", DiskBytes: 100 << 30, DiskUsed: 10 << 30, DiskFree: 90 << 30, Agents: true},
 	}}
 	out := runCLI(t, f, "host", "list")
-	want := "control-plane\t40 GiB\t100 GiB\tok\tengine machine: host exec and room folders only\n" +
-		"pve\t10 GiB\t100 GiB\tok\tagents off\tci on (scale 0, 0 runners now)\n" +
-		"worker\t10 GiB\t100 GiB\tok\tagents on\tci off\n"
+	want := "control-plane\t60 GiB\t100 GiB\tok\tengine machine: host exec and room folders only\n" +
+		"pve\t90 GiB\t100 GiB\tok\tagents off\tci on (scale 0, 0 runners now)\n" +
+		"worker\t90 GiB\t100 GiB\tok\tagents on\tci off\n"
 	if out != want {
 		t.Fatalf("output=%q", out)
 	}

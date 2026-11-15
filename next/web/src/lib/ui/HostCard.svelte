@@ -3,7 +3,7 @@
   import type { HostSummary } from "../contract.gen.ts";
   import { startLabel } from "../start.ts";
   import { boxWords, count } from "../feed.ts";
-  import { diskLow, hang, hostLabel, hostMeters, largeShared, lastSeen, roomSessions, sharedSize } from "../hosts.ts";
+  import { diskLow, hang, hostLabel, hostMeters, hostReservations, largeShared, lastSeen, roomSessions, sharedSize } from "../hosts.ts";
   import Avatar from "./Avatar.svelte";
   import MeterTile from "./MeterTile.svelte";
   import StatusPill from "./StatusPill.svelte";
@@ -40,6 +40,7 @@
       {:else if listed}<button type="button" class="count" bind:this={button} popovertarget={`sessions-${host.name}`} aria-haspopup="dialog" aria-expanded={open}>{count(host.boxes, "workspace")}</button>
       {:else if host.name !== "control-plane"}{count(host.boxes, "workspace")}{/if}</span></h3>
   {#if host.reachable || seen}<div class="tiles" class:dimmed={!host.reachable}>{#each hostMeters(host) as meter (meter.label)}<MeterTile {meter} />{/each}</div>{/if}
+  {#if hostReservations(host)}<p class="aside seen">{hostReservations(host)}</p>{/if}
   {#if seen}<p class="aside seen">{seen}</p>{/if}
   {#if host.pool || host.runners}<p class="aside seen">{[host.pool && `Pool ${host.pool}`, host.runners && count(host.runners, "CI runner")].filter(Boolean).join(" · ")}</p>{/if}
   {#each largeShared(host) as folder (folder.room)}<p class="aside shared">Shared folder of {roomName(folder.room)}: {sharedSize(folder.bytes)}</p>{/each}

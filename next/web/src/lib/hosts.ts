@@ -156,3 +156,11 @@ export const hostChips: Chip<HostSummary>[] = [
 ];
 
 export const hostText = (h: HostSummary) => `${h.name} ${h.engineHost ? "Dyna host" : ""} ${h.pool ?? ""}`;
+
+// Aggregate admission reservations, separate from the measured-load meters.
+export function hostReservations(h: HostSummary): string | undefined {
+ const r = h.reservations;
+ if (!r) return undefined;
+ const gib = (n: number) => (n / 2 ** 30).toFixed(1);
+ return `Reserved: CPU ${r.cpuMilli / 1000}/${r.cpuCap / 1000} cores · memory ${gib(r.memory)}/${gib(r.memoryCap)} GiB · disk ${gib(r.disk)}/${gib(r.diskCap)} GiB`;
+}
