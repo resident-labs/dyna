@@ -1,1 +1,0 @@
-{"type":"message","timestamp":"2026-11-14T01:00:02Z","message":{"role":"toolResult","nestedCalls":{"calls":[{"id":"outer/1"},{"id":"outer/2"}],"complete":true}}}

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 )
@@ -30,6 +31,7 @@ func setupWorkflow(t *testing.T) workflowCase {
 	t.Helper()
 	s, room, _, ctx := setup(t)
 	s.profiles = crewProfiles{}
+	s.SetLayout(box.Layout{Data: t.TempDir(), HostData: t.TempDir()}) // transcripts a test syncs stay out of the repository
 	var root contract.SessionID
 	if err := s.store.Read().QueryRowContext(ctx, "SELECT id FROM sessions WHERE room=? AND parent IS NULL", room).Scan(&root); err != nil {
 		t.Fatal(err)
