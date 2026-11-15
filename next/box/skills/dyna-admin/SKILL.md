@@ -40,6 +40,7 @@ unless a paragraph below says otherwise. Read again after the change. Rows marke
 | You see | Change | Read | Whose |
 |---|---|---|---|
 | GitHub write refused* | `room set ROOM --github-writes GROUPS@REPOS` | the refusal | yours |
+| The owner wants local time in input frames | `owner timezone ZONE` (IANA name; `""` clears) | `owner timezone` | the owner's, install-wide |
 | The owner wants an advisor, or a new profile for it | `room advisor ROOM PROFILE` (`none` removes it) | dyna_advisor | the owner's: it is a room setting only the owner changes |
 | A repository is not in the room | `room repo add ROOM owner/repo` | `room repo list ROOM` | yours |
 | `runs-on: dyna-…` jobs sit queued | `room repo ci owner/repo --on [--max N]` | dyna_room | yours |

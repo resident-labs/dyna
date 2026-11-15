@@ -64,6 +64,7 @@ const (
 	MethodAccountsQuota           Method = "accounts.quota"
 	MethodRoomPause               Method = "room.pause"
 	MethodRoomSetLimits           Method = "room.set_limits"
+	MethodOwnerTimezone           Method = "owner.timezone"
 	MethodRoomSet                 Method = "room.set"
 	MethodRoomCreate              Method = "room.create"
 	MethodRoomDelete              Method = "room.delete"
@@ -1325,4 +1326,12 @@ type HostReservations struct {
 	MemoryCap int64 `json:"memoryCap"`
 	Disk      int64 `json:"disk"`
 	DiskCap   int64 `json:"diskCap"`
+}
+
+// OwnerTimezoneRequest reads the install-wide zone, or sets it when Zone is present. Empty clears it.
+type OwnerTimezoneRequest struct {
+	Zone *string `json:"zone,omitempty"`
+}
+type OwnerTimezoneResponse struct {
+	Zone string `json:"zone"`
 }

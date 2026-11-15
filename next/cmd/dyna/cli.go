@@ -36,6 +36,19 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	root.AddCommand(discordCommand(getClient))
 
 	root.AddCommand(roomCommand(getClient))
+	owner := &cobra.Command{Use: "owner"}
+	owner.AddCommand(&cobra.Command{Use: "timezone [ZONE]", Short: "Read or set the owner's IANA time zone; empty clears it", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		req := contract.OwnerTimezoneRequest{}
+		if len(args) == 1 {
+			req.Zone = &args[0]
+		}
+		result, err := getClient().OwnerTimezone(cmd.Context(), req)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+	}})
+	root.AddCommand(owner)
 
 	root.AddCommand(sessionCommand(getClient))
 	root.AddCommand(postCommand(getClient), visualCommand())

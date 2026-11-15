@@ -944,3 +944,17 @@ func TestPrStatusCancelledNames(t *testing.T) {
 		t.Fatal(out)
 	}
 }
+
+func (f *fakeClient) OwnerTimezone(_ context.Context, q contract.OwnerTimezoneRequest) (contract.OwnerTimezoneResponse, error) {
+	if q.Zone != nil {
+		return contract.OwnerTimezoneResponse{Zone: *q.Zone}, nil
+	}
+	return contract.OwnerTimezoneResponse{}, nil
+}
+
+func TestOwnerTimezoneCLI(t *testing.T) {
+	f := &fakeClient{}
+	if got := runCLI(t, f, "owner", "timezone", "America/Chicago"); !strings.Contains(got, "America/Chicago") {
+		t.Fatal(got)
+	}
+}

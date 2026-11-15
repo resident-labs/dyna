@@ -440,6 +440,7 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 		return contract.DiscordSendResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "Discord unavailable"}
 	})
+	call(mux, contract.MethodOwnerTimezone, c, a.service.OwnerTimezone)
 	call(mux, contract.MethodRoomSet, c, a.service.RoomSet)
 	call(mux, contract.MethodRoomRepoAdd, c, a.service.RoomRepoAdd)
 	call(mux, contract.MethodRoomRepos, c, a.service.RoomRepos)

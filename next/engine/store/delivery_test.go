@@ -45,6 +45,20 @@ func TestDeliveryReplyRoundTrip(t *testing.T) {
 	if err != nil || len(inputs) != 2 || inputs[0].Reply != reply || inputs[0].Surface != contract.SurfaceDM {
 		t.Fatalf("inputs %+v: %v", inputs, err)
 	}
+	original, err := s.TurnStartedAt(ctx, "turn")
+	if err != nil || !original.Equal(now) {
+		t.Fatalf("%v %v", original, err)
+	}
+	start.Time = now.Add(24 * time.Hour)
+	start.ID = "replayed-start"
+	active, _, _, err := s.Dispatch(ctx, "s", "unused", start, true)
+	if err != nil || active != "turn" {
+		t.Fatalf("%s %v", active, err)
+	}
+	replayed, err := s.TurnStartedAt(ctx, active)
+	if err != nil || !replayed.Equal(original) {
+		t.Fatalf("replay changed turn start: %v %v", replayed, err)
+	}
 }
 
 func TestAdmissionRechecksIntentAndDeadline(t *testing.T) {

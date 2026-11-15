@@ -33,11 +33,11 @@ func TestOwnerFrameNamesTheDevicesHost(t *testing.T) {
 		}
 		return f
 	}
-	if got := frame("dev_laptop"); got[:len("[Dyna] From the owner, on omarchy, in the room feed.")] != "[Dyna] From the owner, on omarchy, in the room feed." {
+	if got := frame("dev_laptop"); got[:len("[Dyna] Jan 1 00:00 UTC. From the owner, on omarchy, in the room feed.")] != "[Dyna] Jan 1 00:00 UTC. From the owner, on omarchy, in the room feed." {
 		t.Fatalf("laptop: %q", got)
 	}
 	for _, device := range []contract.DeviceID{"dev_phone", ""} {
-		if got := frame(device); got[:len("[Dyna] From the owner, in the room feed.")] != "[Dyna] From the owner, in the room feed." {
+		if got := frame(device); got[:len("[Dyna] Jan 1 00:00 UTC. From the owner, in the room feed.")] != "[Dyna] Jan 1 00:00 UTC. From the owner, in the room feed." {
 			t.Fatalf("%q: %q", device, got)
 		}
 	}
@@ -45,7 +45,7 @@ func TestOwnerFrameNamesTheDevicesHost(t *testing.T) {
 	if _, problem := s.DeviceSetHost(ctx, owner, contract.DeviceSetHostRequest{ID: "dev_laptop"}); problem != nil {
 		t.Fatal(problem)
 	}
-	if got := frame("dev_laptop"); got[:len("[Dyna] From the owner, in")] != "[Dyna] From the owner, in" {
+	if got := frame("dev_laptop"); got[:len("[Dyna] Jan 1 00:00 UTC. From the owner, in")] != "[Dyna] Jan 1 00:00 UTC. From the owner, in" {
 		t.Fatalf("cleared: %q", got)
 	}
 }
