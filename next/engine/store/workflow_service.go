@@ -26,10 +26,10 @@ type Served struct {
 
 // DroppedEvent is a row that failed without a handler's say: its box took it three times and never finished it.
 type DroppedEvent struct {
-	Row         int64
-	Key         string
-	FirstOfKey  bool // no earlier failure of this key is waiting for a success to end it
-	HandOvers   int
+	Row        int64
+	Key        string
+	FirstOfKey bool // no earlier failure of this key is waiting for a success to end it
+	HandOvers  int
 }
 
 func updateServed(ctx context.Context, tx *sql.Tx, run contract.WorkflowRunID, change func(*Served)) error {
@@ -249,19 +249,29 @@ func (s *Store) FailService(ctx context.Context, sub contract.SubscriptionID, ou
 		if _, err := tx.ExecContext(ctx, "UPDATE subscriptions SET failures=?,hold_until=?,last_at=?,last_result=? WHERE id=?", outcome.Failures, millis(outcome.HoldUntil), events[0].Time.UnixMilli(), outcome.Result, sub); err != nil {
 			return err
 		}
-		for i, event := range events {
-			seq, err := s.AppendEvent(tx, event)
-			if err != nil {
+		if _, err := s.AppendEvent(tx, events[0]); err != nil {
+			return err
+		}
+		for _, notice := range events[1:] {
+			if err := s.noticeSession(ctx, tx, parent, notice); err != nil {
 				return err
-			}
-			if i > 0 {
-				if err := s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: parent}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}); err != nil {
-					return err
-				}
 			}
 		}
 		return nil
 	})
+}
+
+// NoticeSession stores a notice and wakes a session with it.
+func (s *Store) NoticeSession(ctx context.Context, to contract.SessionID, notice contract.Event) error {
+	return s.Write(ctx, func(tx *sql.Tx) error { return s.noticeSession(ctx, tx, to, notice) })
+}
+
+func (s *Store) noticeSession(ctx context.Context, tx *sql.Tx, to contract.SessionID, notice contract.Event) error {
+	seq, err := s.AppendEvent(tx, notice)
+	if err != nil {
+		return err
+	}
+	return s.InsertDelivery(ctx, tx, seq, notice.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: to}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
 }
 
 // Info is what a run page shows of a service: Starting until its box first asked for events. The keys are the caller's.

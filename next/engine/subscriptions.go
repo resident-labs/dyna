@@ -289,6 +289,9 @@ func (s *Service) SubscriptionAdd(ctx context.Context, caller contract.Principal
 		if _, _, problem := s.workflowScript(ctx, sub.Room, sub.Workflow.Script); problem != nil {
 			return contract.SubscriptionAddResponse{}, problem
 		}
+		if problem := checkServes(sub.Workflow.Script); problem != nil {
+			return contract.SubscriptionAddResponse{}, problem
+		}
 		if sub.Parent != "" {
 			target, problem := s.subscriptionSession(ctx, caller, sub.Room, string(sub.Parent))
 			if problem != nil {
@@ -312,6 +315,7 @@ func (s *Service) SubscriptionAdd(ctx context.Context, caller contract.Principal
 		}
 		return contract.SubscriptionAddResponse{}, failure(err)
 	}
+	s.pokeSubscriptions()
 	return contract.SubscriptionAddResponse{ID: sub.ID}, nil
 }
 
@@ -392,6 +396,7 @@ func (s *Service) SubscriptionRemove(ctx context.Context, caller contract.Princi
 	if err := s.store.RemoveSubscription(ctx, req.ID); err != nil {
 		return contract.SubscriptionRemoveResponse{}, failure(err)
 	}
+	s.pokeSubscriptions()
 	return contract.SubscriptionRemoveResponse{}, nil
 }
 

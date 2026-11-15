@@ -187,7 +187,7 @@ func (s *Service) fireDue(ctx context.Context) error {
 			failures = append(failures, s.beginRun(ctx, sub, now))
 		}
 	}
-	failures = append(failures, s.fireWorkflowSubscriptions(ctx))
+	failures = append(failures, s.serveSubscriptions(ctx))
 	return errors.Join(failures...)
 }
 

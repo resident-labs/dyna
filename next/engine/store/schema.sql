@@ -136,6 +136,7 @@ CREATE TABLE discord_owned (room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CA
 CREATE INDEX discord_outbox_group ON discord_outbox(group_key,id);
 CREATE TABLE workflow_subscriptions (sub TEXT PRIMARY KEY REFERENCES subscriptions(id) ON DELETE CASCADE, script TEXT NOT NULL, args TEXT NOT NULL, key TEXT NOT NULL, latest INTEGER NOT NULL, parent TEXT NOT NULL, include_own INTEGER NOT NULL);
 CREATE TABLE workflow_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, sub TEXT NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE, key TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, run TEXT NOT NULL DEFAULT '', boot TEXT NOT NULL DEFAULT '', handovers INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX workflow_queue_key ON workflow_queue(sub,key,id);
 CREATE TABLE workflow_state (sub TEXT NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(sub,key));
 CREATE TABLE workflow_streaks (sub TEXT NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE, key TEXT NOT NULL, PRIMARY KEY(sub,key));
 
