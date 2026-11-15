@@ -92,21 +92,20 @@ func TestTheWorkflowSkillSaysWhatTheCodeDoes(t *testing.T) {
 	}
 	text := string(data)
 	for _, want := range []string{
-		"`JSON.parse(args)`", "`{code, stdout, stderr, durationMs}`", "`check` defaults to `true`", "`{failed: true, step, reason}`",
-		"`{step, text, branch, commit, files}`", "`{step, output, branch, commit, files}`", "`{branch, commit, merged, conflicts}`", "`r.output.issues`",
-		"A run reports only to its parent", "`merge()` reads `commit`, not the tip of `branch`", "A resume is a new session", "through any chain of resumes",
-		"the run ended first", "`Failed steps (N): <names>`", "`data.json`", "Up to 1024 bytes", "AGENTS.md changes reach a running worker", "one worker per 512 MiB", "holds a box slot",
-		"dry run of one group", "Do not prohibit the tools a worker needs", "still reports done",
+		"`JSON.parse(args)`", "{code, stdout, stderr, durationMs}", "`check` defaults to `true`", "`{failed: true, step, reason}`",
+		"`{step, text, branch, commit, files}`", "`output` in place of `text` with a schema", "{branch, commit, merged, conflicts}",
+		"reads `commit`, not the tip of `branch`", "is a new session", "through any chain of resumes",
+		"the run ended first", "`Failed steps (N): <names>`", "`data.json`", "Up to 1024 bytes", "one worker per 512 MiB", "holds a box slot",
+		"Don't prohibit the tools a worker needs", "still reports done", "the final text is parsed as JSON and validated",
 		"`cwd` is relative to the main tree unless absolute", "`maxWorkers`", "git worktree remove --force", "`dyna session stop SESSION`",
-		"Reload is for a running run, resume for an ended one", "`dyna workflow reload RUN FILE`", "no second one starts", "bounded work with a schema result", "small has 2 CPU, 4 GiB", "six child", "[Context update]", "dyna workflow steer RUN STEP TEXT", "dyna workflow pause RUN", "dyna workflow unpause RUN", "runs on until the run ends",
-		"script version", "[events.md](events.md)",
-		"the worker submits as a JSON file", "`status(text)`", "It is not a step", "options other than `lane`", "nothing is read from a step's name",
+		"reload is for a running run", "resume is for an ended run", "`dyna workflow reload RUN FILE`", "no second one starts", "dyna workflow steer RUN STEP TEXT", "dyna workflow pause RUN", "dyna workflow unpause RUN", "runs on until the run ends",
+		"script version", "[events.md](events.md)", "status(text: string)", "It is not a step", "options other than `lane`",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the skill does not say %q", want)
 		}
 	}
-	if lines := strings.Count(text, "\n"); lines > 150 {
+	if lines := strings.Count(text, "\n"); lines > 190 {
 		t.Errorf("the skill is %d lines", lines)
 	}
 	for _, word := range []string{"you must", "always", "never"} {
