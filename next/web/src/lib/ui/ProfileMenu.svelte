@@ -8,6 +8,7 @@
   // session.profile_changed updates, so the value moves only once the engine has changed it. Until the list loads, the
   // profile's name stands in for its label; opening the menu asks again after a failed load. With a room it is that room's advisor
   // instead: the same menu with None beside the profiles, which sets the room's advisor setting, and an empty profile reads None.
+  // onchanged runs after a change and each time the menu opens, so a value another tab set is current before a choice.
   let { session, profile, switchable, room, onchanged }: { session: string; profile: string; switchable: boolean; room?: string; onchanged?: () => void } = $props();
   const NONE = "(none)";
   let profiles: ProfileSummary[] | undefined = $state();
@@ -25,6 +26,7 @@
   async function show(next: boolean, refocus = false) {
     if (busy) return;
     if (next && !profiles) await load();
+    if (next) onchanged?.();
     open = next && Boolean(profiles);
     if (!open && refocus) button?.focus();
   }

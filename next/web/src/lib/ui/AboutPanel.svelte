@@ -51,7 +51,8 @@
     const asked = room;
     void call("room.list", {}).then(answer => { if (asked === room) advisor = (answer.rooms ?? []).find(item => item.id === asked)?.advisor ?? ""; }, () => { if (asked === room) advisor = ""; });
   }
-  $effect(() => { if (isRoot) loadAdvisor(); });
+  // Each time the panel is shown, since another tab may have changed it.
+  $effect(() => { if (isRoot && shown) loadAdvisor(); });
   let subscriptions: SubscriptionInfo[] = $state([]);
   $effect(() => {
     if (!isRoot) { subscriptions = []; return; }
