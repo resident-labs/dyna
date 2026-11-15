@@ -123,7 +123,8 @@ export function segmentDuration(segments: TimelineSegment[], index: number, star
 }
 
 // Dyna: Transcript items already arrive in timeline order, and posts can belong to a tool.
-export type TimelineGroup = { kind: "work"; id: string; items: TranscriptItem[] } | { kind: "item" | "posts"; id: string; item: TranscriptItem };
+// An advisor call that has its result is followed by the advisor's answer as a message, which stays in view when the work folds.
+export type TimelineGroup = { kind: "work"; id: string; items: TranscriptItem[] } | { kind: "item" | "posts" | "advice"; id: string; item: TranscriptItem };
 export function deriveTimelineGroups(items: TranscriptItem[]): TimelineGroup[] {
   const result: TimelineGroup[] = [];
   for (const item of items) {
@@ -135,6 +136,7 @@ export function deriveTimelineGroups(items: TranscriptItem[]): TimelineGroup[] {
     if (item.kind === "tool" && ((item.posts?.length ?? 0) > 0 || item.postsOmitted)) {
       result.push({ kind: "posts", id: "posts:" + item.id, item });
     }
+    if (item.kind === "tool" && item.ended && item.output && titleOf(item).kind === "advisor") result.push({ kind: "advice", id: "advice:" + item.id, item });
   }
   return result;
 }

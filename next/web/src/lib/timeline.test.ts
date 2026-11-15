@@ -325,3 +325,10 @@ test("a call that ended early stops running with its duration, while its batch w
   const landed = [{ ...items[0], ended: "2026-11-14T10:00:01.000Z" }];
   assert.equal(withFinished(landed, new Map([["a", { call: "a", durationMs: 8 }]]))[0], landed[0]);
 });
+
+test("an advisor call that has its result is followed by the answer, which stays when the work folds", () => {
+  const call = (id: string, patch: Partial<TranscriptItem> = {}): TranscriptItem => ({ id, turn: "t", at: "", kind: "tool", tool: "mcp__dyna__advisor", ended: "2026-01-01T00:00:01Z", output: '{"answer":"Use the cache."}', ...patch });
+  const items: TranscriptItem[] = [{ id: "r", turn: "t", at: "", kind: "tool", tool: "read" }, call("a"), { id: "b", turn: "t", at: "", kind: "tool", tool: "bash" }, call("running", { ended: undefined, output: undefined })];
+  assert.deepEqual(deriveTimelineGroups(items).map(group => [group.kind, group.id]), [["work", "r"], ["advice", "advice:a"], ["work", "b"]]);
+  assert.deepEqual(shownTimelineGroups(items, true).map(group => group.kind), ["advice"]);
+});

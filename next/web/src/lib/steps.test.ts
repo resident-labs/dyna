@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { activityLabel, activeVerb, elapsed, stepTime, stepTitle, titleOf, toolPart } from "./steps.ts";
+import { activityLabel, advisorReply, activeVerb, elapsed, stepTime, stepTitle, titleOf, toolPart } from "./steps.ts";
 import { summarizeWork } from "./timeline.ts";
 import type { TranscriptItem } from "./contract.gen.ts";
 
@@ -59,4 +59,11 @@ test("root's advisor call is its own row, that opens to its prompt", () => {
   const item = { id: "i", turn: "t", kind: "tool", at: "", tool: "mcp__dyna__advisor", arguments: JSON.stringify({ prompt: "Which cache should the store use?" }) } as TranscriptItem;
   assert.deepEqual([titleOf(item).kind, titleOf(item).verb, titleOf(item).target], ["advisor", "Asked the advisor", ""]);
   assert.equal(summarizeWork([item, item]), "Asked the advisor");
+});
+
+test("the advisor's reply is the answer, its note and its profile, and an older result is the text", () => {
+  assert.deepEqual(advisorReply('{"answer":"Use the cache.","note":"root was stopped; the answer is what it had said so far","advisor":"fable"}'), { answer: "Use the cache.", note: "root was stopped; the answer is what it had said so far", advisor: "fable" });
+  assert.deepEqual(advisorReply('{"answer":"Done"}'), { answer: "Done", note: undefined, advisor: undefined });
+  assert.deepEqual(advisorReply("root was stopped. What it had said:\n\nhalf"), { answer: "root was stopped. What it had said:\n\nhalf" });
+  assert.deepEqual(advisorReply('{"other":1}'), { answer: '{"other":1}' });
 });

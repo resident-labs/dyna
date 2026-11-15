@@ -70,19 +70,19 @@ func (s *Service) Advisor(ctx context.Context, caller contract.Principal, req co
 	if err != nil {
 		return contract.AdvisorResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "the advisor could not run: " + err.Error()}
 	}
-	return advisorAnswer(result), nil
+	answer := advisorAnswer(result)
+	answer.Advisor = name
+	return answer, nil
 }
 
-// advisorAnswer is root's tool result: the advisor's final text, or what it had when something ended its turn, with the reason.
+// advisorAnswer is root's tool result: the advisor's final text, or what it had when something ended its turn, with a note of what ended it.
 func advisorAnswer(result agentResult) contract.AdvisorResponse {
 	var reason string
 	switch result.Cause {
-	case agentOwnerStopped:
-		reason = "the owner stopped the advisor"
 	case agentCancelled:
-		reason = "your turn was stopped, so the advisor was stopped"
+		reason = "root was stopped"
 	case agentTimedOut:
-		reason = fmt.Sprintf("the advisor did not answer within %s", agentTimeout)
+		reason = fmt.Sprintf("the advisor timed out after %s", agentTimeout)
 	case agentBoxGone:
 		reason = "the box went away while the advisor ran"
 	case "":
@@ -99,9 +99,9 @@ func advisorAnswer(result agentResult) contract.AdvisorResponse {
 		}
 	}
 	if result.Final == "" {
-		return contract.AdvisorResponse{Answer: reason + "; it had said nothing yet."}
+		return contract.AdvisorResponse{Note: reason + "; it had said nothing yet"}
 	}
-	return contract.AdvisorResponse{Answer: reason + ". What it had said:\n\n" + result.Final}
+	return contract.AdvisorResponse{Answer: result.Final, Note: reason + "; the answer is what it had said so far"}
 }
 
 // setAdvisor sets the room's advisor: a profile, or none.

@@ -12,12 +12,10 @@
   import ReadThumb from "./ReadThumb.svelte";
   import RunFields from "./RunFields.svelte";
   import { readMedia } from "../media.ts";
-  import { parsedJson } from "../json.ts";
-  import { call } from "../client.ts";
   import AgentRead from "./AgentRead.svelte";
   import Self from "./TranscriptWorkRow.svelte";
 
-  let { items: reported, finished, ended, started, now, activity, chunks, onload, onopen, session, onmedia, operate = false, bare = false }: {
+  let { items: reported, finished, ended, started, now, activity, chunks, onload, onopen, session, onmedia, bare = false }: {
     items: TranscriptItem[];
     finished?: ReadonlyMap<string, ToolFinished>;
     ended: boolean;
@@ -29,21 +27,15 @@
     onopen: () => void;
     session: string;
     onmedia: (key: string) => void;
-    operate?: boolean;
     bare?: boolean; // no heading: the group is under a row that says what it is
   } = $props();
-  // The steps an advisor call's agent has taken, by call, and the calls the owner is stopping.
+  // The steps an advisor call's agent has taken, by call. Stopping root's turn stops the call.
   let agentSteps: Record<string, number> = $state({});
-  let stopping: Record<string, boolean> = $state({});
-  async function stopAgent(item: TranscriptItem) {
-    stopping[item.id] = true;
-    try { await call("agent.stop", { session, id: item.id }); } catch { stopping[item.id] = false; }
-  }
 
   const icons: Record<StepKind, IconName> = { read: "file", edit: "edit", write: "write", search: "search", list: "list", run: "terminal", fetch: "globe", advisor: "chat", tool: "tool" };
   const parts = ["arguments", "output"] as const;
-  // The advisor's answer is prose, shown as a message is. The tool returns it as {answer}, and an older or cut result is the text itself.
-  const advice = (text: string) => { const value = parsedJson(text); const answer = value && typeof value === "object" && !Array.isArray(value) ? value["answer"] : undefined; return typeof answer === "string" ? answer : text; };
+  // The advisor's answer is a message after the call, in the thread: the row links to it instead of repeating it.
+  const showAnswer = (id: string) => document.getElementById("advice-" + id)?.scrollIntoView({ block: "center" });
   let failures: Record<string, boolean> = $state({});
   let loading: Record<string, boolean> = $state({});
   let expandedContent: Record<string, boolean> = $state({});
@@ -122,7 +114,6 @@
       {#if item.image}{@const media = readMedia(session, item.turn, item.at, title.full, item.image)}<ReadThumb src={media.src} name={media.attachments[0].name} onopen={() => onmedia(media.key)} />{/if}
       {#if running && title.kind === "advisor" && agentSteps[item.id]}<span class="steps">{agentSteps[item.id]} {agentSteps[item.id] === 1 ? "step" : "steps"}</span>{/if}
       <span class="time">{running ? elapsed(item.at, now) : stepTime({ started: item.at, ended: item.ended })}</span>
-      {#if running && title.kind === "advisor" && operate}<button type="button" class="stop" disabled={stopping[item.id]} onclick={(event) => { event.preventDefault(); event.stopPropagation(); void stopAgent(item); }}>{stopping[item.id] ? "Stopping" : "Stop"}</button>{/if}
       {#if item.failed}<StatusPill tone="failed" label="Failed" word />{/if}
       <span class="entry-chevron"><TranscriptIcon kind="chevron" /></span>
     </summary>
@@ -147,7 +138,7 @@
           {/if}
           {#if item[name] || chunks[key(item, name)] !== undefined}
             {@const part = toolPart(name, chunks[key(item, name)] ?? item[name] ?? "", title.kind, !!item.more && chunks[key(item, name)] === undefined)}
-            {#if title.kind === "advisor" && name === "output"}<div class="advice"><Markdown text={advice(chunks[key(item, name)] ?? item[name] ?? "")} source={{ key: item.id, from: { kind: "session", session }, at: item.at }} /></div>
+            {#if title.kind === "advisor" && name === "output"}<button type="button" class="advice-link" onclick={() => showAnswer(item.id)}>Read the answer below</button>
             {:else if part.text}{@const lines = part.text.split("\n")}<pre>{(expandedContent[key(item, name)] ? lines : lines.slice(0, 12)).join("\n")}</pre>{#if lines.length > 12 && !expandedContent[key(item, name)]}<button onclick={() => expandedContent[key(item, name)] = true}>Show all</button>{/if}{/if}
             {#if part.fields.length}<div class="fields"><RunFields fields={part.fields} /></div>{/if}
           {/if}
@@ -185,12 +176,9 @@
 {/if}
 
 <style>
-  .advice { padding: 4px 0 4px 0; font-size: 14px; }
+  .advice-link { padding: 4px 0; font-size: 14px; text-decoration: underline; text-underline-offset: 2px; }
   .agent { padding: 2px 0 6px 0; }
   .steps { white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; }
-  .stop { margin-left: 4px; padding: 0 8px; min-height: 22px; border: 1px solid var(--border, currentColor); border-radius: 6px; font-size: 12px; }
-  .stop:disabled { opacity: 0.6; cursor: default; }
-  @media (hover: none) { .stop { min-height: 36px; padding: 0 12px; } }
   .group, .entry { color: var(--muted); font-size: 14px; line-height: 1.625; }
   .group-heading { display: flex; align-items: center; gap: 6px; }
   .thought-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
