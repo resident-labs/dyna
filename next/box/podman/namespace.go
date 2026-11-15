@@ -39,21 +39,17 @@ namespace_process_gone() {
  fi
  read -r process_state rest <<< "${process_stat##*) }"
  case $process_state in Z|X) ;; *) return 1;; esac
- # A zombie leader may still have live threads sharing its descriptor table.
- # Only a wholly dead thread group is unable to retain a namespace flock.
- if ! test -r "$1/task" || ! test -x "$1/task"; then
-  test ! -d "$1" && return 0
-  return 2
- fi
- for task in "$1"/task/[0-9]*; do
-  if ! IFS= read -r task_stat 2>/dev/null < "$task/stat"; then
-   test ! -d "$task" && continue
-   return 2
-  fi
-  read -r task_state rest <<< "${task_stat##*) }"
-  case $task_state in Z|X) ;; *) return 2;; esac
- done
- return 0
+ # A zombie leader may still have workers sharing its descriptor table.
+ # A task-directory snapshot is insufficient: a sampled worker could spawn
+ # a replacement before exiting. Threads: 1 proves only the dead leader
+ # remains, with no worker capable of spawning another thread.
+ threads=; thread_extra=
+ { while read -r field value rest; do
+    if test "$field" = Threads:; then threads=$value; thread_extra=$rest; break; fi
+   done 2>/dev/null < "$1/status"; } 2>/dev/null || true
+ test "$threads" = 1 && test -z "$thread_extra" && return 0
+ test ! -d "$1" && return 0
+ return 2
 }
 namespace_other_user() {
  while read -r field real effective rest; do

@@ -381,35 +381,22 @@ func namespaceCommand(root, mode string, args ...string) *exec.Cmd {
 
 func TestNamespaceProcessGone(t *testing.T) {
 	for _, tc := range []struct {
-		state, worker string
-		gone          bool
+		state, threads string
+		gone           bool
 	}{
-		{"Z", "", true}, {"X", "", true}, {"S", "", false}, {"R", "", false}, {"", "", false},
-		{"Z", "S", false}, {"Z", "Z", true}, {"Z", "unknown", false},
+		{"Z", "1", true}, {"X", "1", true}, {"S", "1", false}, {"R", "1", false}, {"", "1", false},
+		{"Z", "2", false}, {"Z", "unknown", false}, {"Z", "", false}, {"Z", "0", false}, {"Z", "1 invalid", false},
 	} {
-		t.Run(tc.state+tc.worker, func(t *testing.T) {
+		t.Run(tc.state+tc.threads, func(t *testing.T) {
 			proc := t.TempDir()
 			if tc.state != "" {
 				stat := []byte("42 (command ) with spaces) " + tc.state + " 0 0\n")
 				if err := os.WriteFile(filepath.Join(proc, "stat"), stat, 0600); err != nil {
 					t.Fatal(err)
 				}
-				task := filepath.Join(proc, "task", "42")
-				if err := os.MkdirAll(task, 0700); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(task, "stat"), stat, 0600); err != nil {
-					t.Fatal(err)
-				}
-				if tc.worker != "" {
-					task = filepath.Join(proc, "task", "43")
-					if err := os.MkdirAll(task, 0700); err != nil {
+				if tc.threads != "" {
+					if err := os.WriteFile(filepath.Join(proc, "status"), []byte("Threads:\t"+tc.threads+"\n"), 0600); err != nil {
 						t.Fatal(err)
-					}
-					if tc.worker != "unknown" {
-						if err := os.WriteFile(filepath.Join(task, "stat"), []byte("43 (worker) "+tc.worker+" 0\n"), 0600); err != nil {
-							t.Fatal(err)
-						}
 					}
 				}
 			}
