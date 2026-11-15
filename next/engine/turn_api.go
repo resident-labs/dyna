@@ -127,9 +127,6 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		if hasChildren {
 			vars.Role = prompt.Lead
 		}
-		if session.Advisor {
-			vars.Role = prompt.Advisor
-		}
 	}
 	var workflow *contract.BoxWorkflow
 	run, err := s.store.SessionWorkflow(ctx, session.ID)

@@ -54,16 +54,12 @@ func setAdvisorProfile(t *testing.T, s *Service, ctx context.Context, room contr
 	}
 }
 
-func TestOnlyTheOwnerSetsTheAdvisorAndItStartsNoSession(t *testing.T) {
+func TestOnlyTheOwnerSetsTheAdvisor(t *testing.T) {
 	r := newGoalRig(t)
 	if _, e := r.s.RoomSet(r.ctx, asSession(r.root), contract.RoomSetRequest{Room: r.room, Advisor: new(contract.ProfileName)}); e == nil {
 		t.Fatal("root set the advisor through room set")
 	}
 	setAdvisorProfile(t, r.s, r.ctx, r.room, "test")
-	var sessions int
-	if err := r.st.Read().QueryRowContext(r.ctx, "SELECT COUNT(*) FROM sessions WHERE advisor=1").Scan(&sessions); err != nil || sessions != 0 {
-		t.Fatalf("%d advisor sessions: %v", sessions, err)
-	}
 	rooms, e := r.s.RoomList(r.ctx, ownerCaller, contract.RoomListRequest{})
 	if e != nil || len(rooms.Rooms) != 1 || rooms.Rooms[0].Advisor != "test" {
 		t.Fatalf("room list: %v %+v", e, rooms)
@@ -174,12 +170,9 @@ func TestAdvisorAsksAnInBoxAgentAndReturnsItsFinalText(t *testing.T) {
 	if state := r.agentState("call_1"); state != "completed" {
 		t.Fatalf("the agent record is %q", state)
 	}
-	var feed, sessions int
+	var feed int
 	if err := r.st.Read().QueryRowContext(r.ctx, "SELECT COUNT(*) FROM events WHERE type='post.created' AND from_kind='session' AND home IS NULL").Scan(&feed); err != nil || feed != 0 {
 		t.Fatalf("%d posts reached the feed: %v", feed, err)
-	}
-	if err := r.st.Read().QueryRowContext(r.ctx, "SELECT COUNT(*) FROM sessions WHERE advisor=1").Scan(&sessions); err != nil || sessions != 0 {
-		t.Fatalf("%d advisor sessions", sessions)
 	}
 }
 
@@ -558,5 +551,31 @@ func TestTheOwnersStopReachesAnAgentByItsRowAfterARestart(t *testing.T) {
 	}
 	if _, e := r.s.AgentStop(r.ctx, ownerCaller, contract.AgentStopRequest{Session: r.root, ID: "call_1"}); e == nil {
 		t.Fatal("an ended agent was stopped again")
+	}
+}
+
+// The CLI passes `dyna room advisor ROOM PROFILE` what the owner typed, a room's name as often as its ID.
+func TestARoomSettingTakesTheRoomsNameOrID(t *testing.T) {
+	r := newGoalRig(t)
+	name, err := r.st.RoomNameOf(r.ctx, r.room)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []contract.RoomID{contract.RoomID(name), r.room} {
+		profile := contract.ProfileName("test")
+		if _, e := r.s.RoomSet(r.ctx, ownerCaller, contract.RoomSetRequest{Room: ref, Advisor: &profile}); e != nil {
+			t.Fatalf("room %q: %v", ref, e)
+		}
+		if got, err := r.st.RoomAdvisorProfile(r.ctx, r.room); err != nil || got != profile {
+			t.Fatalf("room %q: the advisor is %q (%v)", ref, got, err)
+		}
+		none := contract.ProfileName("")
+		if _, e := r.s.RoomSet(r.ctx, ownerCaller, contract.RoomSetRequest{Room: ref, Advisor: &none}); e != nil {
+			t.Fatal(e)
+		}
+	}
+	profile := contract.ProfileName("test")
+	if _, e := r.s.RoomSet(r.ctx, ownerCaller, contract.RoomSetRequest{Room: "nowhere", Advisor: &profile}); e == nil || !strings.Contains(e.Message, "unknown room") {
+		t.Fatalf("an unknown room: %v", e)
 	}
 }

@@ -208,12 +208,3 @@ func (s *Service) advisorDelta(ctx context.Context, root contract.SessionID, sin
 	}
 	return "Root's work since your last answer:\n\n" + note + strings.Join(out[len(out)-kept:], "\n\n"), nil
 }
-
-// IsAdvisor reports whether a principal is the advisor session.
-func (s *Service) IsAdvisor(ctx context.Context, who contract.Principal) bool {
-	if who.Kind != contract.PrincipalSession {
-		return false
-	}
-	session, err := s.store.Session(ctx, who.Session)
-	return err == nil && session.Advisor
-}
