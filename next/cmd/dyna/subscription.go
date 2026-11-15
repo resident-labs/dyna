@@ -214,7 +214,7 @@ dyna subscription events lists the event types.`,
 	events := &cobra.Command{Use: "events", Short: "List the event types a subscription can name", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return printEventTypes(cmd.OutOrStdout())
 	}}
-	var fireKey, event string
+	var fireKey, event, data string
 	fire := &cobra.Command{Use: "fire ID", Short: "Queue an event for a workflow service, with real state (root or owner)", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		req := contract.SubscriptionFireRequest{ID: contract.SubscriptionID(args[0])}
 		if cmd.Flags().Changed("key") {
@@ -226,11 +226,19 @@ dyna subscription events lists the event types.`,
 			}
 			req.Event = json.RawMessage(event)
 		}
+		if cmd.Flags().Changed("data") {
+			if !json.Valid([]byte(data)) {
+				return fmt.Errorf("--data must be JSON")
+			}
+			req.Data = json.RawMessage(data)
+		}
 		_, err := call[contract.SubscriptionFireRequest, contract.SubscriptionFireResponse](cmd.Context(), get(), contract.MethodSubscriptionFire, req)
 		return err
 	}}
 	fire.Flags().StringVar(&fireKey, "key", "", "Override the resolved serial key")
-	fire.Flags().StringVar(&event, "event", "", "Full event envelope as JSON; omitted sends hook.due")
+	fire.Flags().StringVar(&event, "event", "", "Full event envelope as JSON; omit event and data for hook.due")
+	fire.Flags().StringVar(&data, "data", "", "Any JSON up to 1 MiB, sent as hook.fired body.data")
+	fire.MarkFlagsMutuallyExclusive("event", "data")
 	var updateWorkflow, updateArgs, updateKey, updateParent string
 	var updateWhere []string
 	var updateLatest bool

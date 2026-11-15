@@ -279,6 +279,12 @@ func decodeEventBody(t EventType, data json.RawMessage) (EventBody, error) {
 			return nil, err
 		}
 		return v, nil
+	case "hook.fired":
+		var v HookFired
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case "host.disk_low":
 		var v HostDiskLow
 		if err := json.Unmarshal(data, &v); err != nil {
@@ -616,7 +622,7 @@ func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs, error) {
 	}
 }
 
-var eventBodyTypes = []EventType{"account.failed", "account.quota_low", "box.changed", "box.pressure", "checkin.due", "computer.changed", "connect.connector", "conversation.read", "discord.channel.created", "discord.channel.deleted", "discord.channel.updated", "discord.files_retrieved", "discord.member.joined", "discord.member.left", "discord.message", "discord.role.created", "discord.role.deleted", "discord.role.updated", "engine.restarted", "git.main_ci_finished", "git.main_updated", "github.ci.finished", "github.comment", "github.issue.changed", "github.issue.closed", "github.issue.opened", "github.label", "github.mention", "github.pr.changed", "github.pr.closed", "github.pr.merged", "github.pr.opened", "goal.ended", "goal.item_changed", "goal.set", "grant.expired", "hook.digest", "hook.due", "hook.finished", "host.disk_low", "host.switches_changed", "image.built", "image.failed", "notice.posted", "op.decided", "op.ran", "op.requested", "post.created", "post.sent", "question.answered", "question.asked", "question.withdrawn", "room.deleted", "room.deleting", "room.limits_changed", "room.paused", "room.resumed", "service.changed", "service.failed", "session.closed", "session.compacted", "session.failed", "session.moved", "session.notice", "session.profile_changed", "session.restarted", "session.started", "shell.job.ended", "shell.job.running", "tool.failed", "transcript.changed", "turn.activity", "turn.ended", "turn.started", "workflow.ended", "workflow.pause_changed", "workflow.status_changed", "workflow.step_changed"}
+var eventBodyTypes = []EventType{"account.failed", "account.quota_low", "box.changed", "box.pressure", "checkin.due", "computer.changed", "connect.connector", "conversation.read", "discord.channel.created", "discord.channel.deleted", "discord.channel.updated", "discord.files_retrieved", "discord.member.joined", "discord.member.left", "discord.message", "discord.role.created", "discord.role.deleted", "discord.role.updated", "engine.restarted", "git.main_ci_finished", "git.main_updated", "github.ci.finished", "github.comment", "github.issue.changed", "github.issue.closed", "github.issue.opened", "github.label", "github.mention", "github.pr.changed", "github.pr.closed", "github.pr.merged", "github.pr.opened", "goal.ended", "goal.item_changed", "goal.set", "grant.expired", "hook.digest", "hook.due", "hook.finished", "hook.fired", "host.disk_low", "host.switches_changed", "image.built", "image.failed", "notice.posted", "op.decided", "op.ran", "op.requested", "post.created", "post.sent", "question.answered", "question.asked", "question.withdrawn", "room.deleted", "room.deleting", "room.limits_changed", "room.paused", "room.resumed", "service.changed", "service.failed", "session.closed", "session.compacted", "session.failed", "session.moved", "session.notice", "session.profile_changed", "session.restarted", "session.started", "shell.job.ended", "shell.job.running", "tool.failed", "transcript.changed", "turn.activity", "turn.ended", "turn.started", "workflow.ended", "workflow.pause_changed", "workflow.status_changed", "workflow.step_changed"}
 
 func (m BoxMessage) MarshalJSON() ([]byte, error) {
 	if m.Body == nil {
@@ -759,6 +765,7 @@ var eventDocs = map[EventType]string{"account.failed": "",
 	"hook.digest":             "what a digest's Wake delivers: the events its on matched since the last one, each rendered as a wake would be",
 	"hook.due":                "what a scheduled Wake delivers, since a schedule has no event of its own",
 	"hook.finished":           "ends one Run (spec 8.5) and wakes nobody",
+	"hook.fired":              "carries custom JSON supplied by a manual subscription fire",
 	"host.disk_low":           "a host running low on disk",
 	"host.switches_changed":   "audits an owner's host.set in each room, without waking sessions",
 	"image.built":             "",

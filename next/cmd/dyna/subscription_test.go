@@ -110,6 +110,8 @@ func TestSubscriptionFollowUpRequests(t *testing.T) {
 		method, body string
 	}{
 		{[]string{"fire", "sub"}, "fire", "{\"id\":\"sub\"}"},
+		{[]string{"fire", "sub", "--data", `{"brief":"review"}`}, "fire", `{"id":"sub","data":{"brief":"review"}}`},
+		{[]string{"fire", "sub", "--data", "null"}, "fire", `{"id":"sub","data":null}`},
 		{[]string{"fire", "sub", "--key", "", "--event", "{\"type\":\"hook.due\",\"body\":{}}"}, "fire", "{\"id\":\"sub\",\"key\":\"\",\"event\":{\"type\":\"hook.due\",\"body\":{}}}"},
 		{[]string{"update", "sub", "--latest=false", "--key", "", "--parent", "", "--where", "kind=pushed,opened"}, "update", "{\"id\":\"sub\",\"latest\":false,\"key\":\"\",\"parent\":\"\",\"where\":[\"kind=pushed,opened\"]}"},
 		{[]string{"update", "sub", "--where", ""}, "update", `{"id":"sub","where":[]}`},
@@ -147,7 +149,7 @@ func TestSubscriptionFollowUpRequests(t *testing.T) {
 	}
 }
 func TestSubscriptionFollowUpRejectsInvalidInput(t *testing.T) {
-	for _, args := range [][]string{{"fire", "sub", "--event", "{"}, {"update", "sub", "--args", "{}"}, {"state", "sub", "--value", "null"}, {"state", "sub", "--key", "k", "--value", "{"}} {
+	for _, args := range [][]string{{"fire", "sub", "--data", "{"}, {"fire", "sub", "--data", "null", "--event", "{}"}, {"fire", "sub", "--event", "{"}, {"update", "sub", "--args", "{}"}, {"state", "sub", "--value", "null"}, {"state", "sub", "--key", "k", "--value", "{"}} {
 		cmd := subscriptionCommand(func() *socketClient { t.Fatal("unexpected request"); return nil })
 		cmd.SetArgs(args)
 		if err := cmd.Execute(); err == nil {

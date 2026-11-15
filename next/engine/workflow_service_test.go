@@ -411,3 +411,66 @@ func TestServiceHandsARowOverAgainWhenItsReplyWasLost(t *testing.T) {
 		t.Fatalf("a row the box holds, handed a third time: %+v", more)
 	}
 }
+
+func TestServiceManualFirePayload(t *testing.T) {
+	for _, data := range []string{`{"brief":"review","items":[1,true,null]}`, `null`, `42`, `"text"`, `[]`} {
+		t.Run(data, func(t *testing.T) {
+			s := newService(t, false)
+			template := "{repo}#{number}"
+			if _, problem := s.SubscriptionUpdate(s.ctx, s.owner, contract.SubscriptionUpdateRequest{ID: s.sub, Key: &template}); problem != nil {
+				t.Fatal(problem)
+			}
+			if _, problem := s.SubscriptionFire(s.ctx, s.owner, contract.SubscriptionFireRequest{ID: s.sub, Data: json.RawMessage(data)}); problem != nil {
+				t.Fatal(problem)
+			}
+			_, box := s.run()
+			events := s.poll(box, "boot", 10)
+			if len(events) != 1 || events[0].Key != "#0" {
+				t.Fatalf("events: %+v", events)
+			}
+			var event contract.Event
+			if err := json.Unmarshal(events[0].Event, &event); err != nil {
+				t.Fatal(err)
+			}
+			body, ok := event.Body.(contract.HookFired)
+			if !ok || body.Subscription != s.sub || string(body.Data) != data {
+				t.Fatalf("handler body: %+v", event.Body)
+			}
+		})
+	}
+}
+
+func TestServiceManualHookDueSubscription(t *testing.T) {
+	for _, event := range []json.RawMessage{nil, json.RawMessage(`{"type":"hook.due","body":{}}`), json.RawMessage(`{"type":"hook.due","body":{"subscription":"wrong"}}`)} {
+		s := newService(t, false)
+		if _, problem := s.SubscriptionFire(s.ctx, s.owner, contract.SubscriptionFireRequest{ID: s.sub, Event: event}); problem != nil {
+			t.Fatal(problem)
+		}
+		_, box := s.run()
+		events := s.poll(box, "boot", 10)
+		if len(events) != 1 {
+			t.Fatalf("events: %+v", events)
+		}
+		var got contract.Event
+		if err := json.Unmarshal(events[0].Event, &got); err != nil {
+			t.Fatal(err)
+		}
+		if body, ok := got.Body.(contract.HookDue); !ok || body.Subscription != s.sub {
+			t.Fatalf("handler body: %+v", got.Body)
+		}
+	}
+}
+
+func TestServiceManualFireRejectsInvalidData(t *testing.T) {
+	s := newService(t, false)
+	for _, req := range []contract.SubscriptionFireRequest{
+		{Data: json.RawMessage(`null`), Event: json.RawMessage(`{"type":"hook.due","body":{}}`)},
+		{Data: json.RawMessage(`{`)},
+		{Data: json.RawMessage(`"` + strings.Repeat("a", 1<<20) + `"`)},
+	} {
+		req.ID = s.sub
+		if _, problem := s.SubscriptionFire(s.ctx, s.owner, req); problem == nil {
+			t.Fatalf("accepted invalid request")
+		}
+	}
+}

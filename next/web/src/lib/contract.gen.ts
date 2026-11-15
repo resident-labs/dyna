@@ -639,7 +639,7 @@ export type SubscriptionAddResponse = { id: SubscriptionID; };
 export type SubscriptionListRequest = { room?: RoomID; };
 export type SubscriptionListResponse = { subscriptions: Array<SubscriptionInfo> | null; };
 export type SubscriptionInfo = { waiting: number; subscription: Subscription; disabled?: boolean; default?: boolean; running?: boolean; failures?: number; nextAt?: string | null; lastAt?: string | null; last?: HookResult; };
-export type SubscriptionFireRequest = { id: SubscriptionID; key?: string | null; event?: JSONValue; };
+export type SubscriptionFireRequest = { id: SubscriptionID; key?: string | null; event?: JSONValue; data?: JSONValue; };
 export type SubscriptionFireResponse = { };
 export type SubscriptionUpdateRequest = { id: SubscriptionID; workflow?: WorkflowSubscription | null; where?: Array<string> | null | null; key?: string | null; latest?: boolean | null; parent?: SessionID | null; };
 export type SubscriptionUpdateResponse = { };
@@ -653,6 +653,7 @@ export type SubscriptionSetEnabledResponse = { };
 export type HookResult = "passed" | "failed" | "stopped";
 export type HookFinished = { subscription: SubscriptionID; result: HookResult; exitCode: number; cause?: FailureCause; output?: string; failures?: number; retryAt?: string | null; };
 export type HookDue = { subscription: SubscriptionID; };
+export type HookFired = { subscription: SubscriptionID; data: JSONValue; };
 export type HookDigest = { subscription: SubscriptionID; events: Array<string> | null; more?: number; };
 export type NoticePosted = { text: string; };
 export type EventFields = { };
@@ -775,6 +776,7 @@ export type EventBody =
   | { type: "hook.digest"; body: HookDigest }
   | { type: "hook.due"; body: HookDue }
   | { type: "hook.finished"; body: HookFinished }
+  | { type: "hook.fired"; body: HookFired }
   | { type: "host.disk_low"; body: HostDiskLow }
   | { type: "host.switches_changed"; body: HostSwitchesChanged }
   | { type: "image.built"; body: ImageBuilt }

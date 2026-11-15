@@ -3,6 +3,8 @@ package dynamcp
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -53,6 +55,38 @@ func TestSubscriptionAddCallsSayWhatEachFieldTakes(t *testing.T) {
 	}
 	if req.Scope != contract.ScopeSession || req.Session != "upstream-sync" || req.Every != "1h" || req.Wake != "upstream-sync" {
 		t.Fatalf("forwarded %+v", req)
+	}
+}
+
+func TestSubscriptionFireDataHTTPBoundary(t *testing.T) {
+	data := `"` + strings.Repeat("a", (1<<20)-2) + `"`
+	forwarded := false
+	server, err := New(func(_ context.Context, method contract.Method, body []byte) ([]byte, *contract.Error) {
+		forwarded = true
+		if method != contract.MethodSubscriptionFire {
+			t.Fatalf("method %s", method)
+		}
+		var req contract.SubscriptionFireRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatal(err)
+		}
+		if req.ID != "sub_a" || string(req.Data) != data {
+			t.Fatal("payload changed in transit")
+		}
+		return []byte(`{}`), nil
+	}, nil, post.Preparer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"subscription","arguments":{"action":"fire","id":"sub_a","data":` + data + `}}}`
+	w := httptest.NewRecorder()
+	server.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/dyna/", strings.NewReader(rpc)))
+	var got response
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !forwarded || got.Error != nil || strings.Contains(w.Body.String(), `"isError":true`) {
+		t.Fatalf("forwarded %v, response %s", forwarded, w.Body.String())
 	}
 }
 

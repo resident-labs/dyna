@@ -156,7 +156,8 @@ type SubscriptionInfo struct {
 type SubscriptionFireRequest struct {
 	ID    SubscriptionID  `json:"id"`
 	Key   *string         `json:"key,omitempty" desc:"Use this key as written instead of the one the event resolves to."`
-	Event json.RawMessage `json:"event,omitempty" desc:"An event envelope with top-level type and body; omitted queues a hook.due event. Filters do not apply to a manual fire."`
+	Event json.RawMessage `json:"event,omitempty" desc:"An event envelope with top-level type and body, at most 1 MiB; mutually exclusive with data. Omit both to queue hook.due. Filters do not apply to a manual fire."`
+	Data  json.RawMessage `json:"data,omitempty" desc:"Any JSON, at most 1 MiB, delivered as event.body.data in hook.fired. Mutually exclusive with event. The key template resolves with empty repo and number 0 unless key is supplied."`
 }
 type SubscriptionFireResponse struct{}
 
@@ -219,6 +220,12 @@ type HookDue struct {
 	Subscription SubscriptionID `json:"subscription"`
 }
 
+// HookFired carries custom JSON supplied by a manual subscription fire.
+type HookFired struct {
+	Subscription SubscriptionID  `json:"subscription"`
+	Data         json.RawMessage `json:"data"`
+}
+
 // HookDigest is what a digest's Wake delivers: the events its on matched since the last one, each rendered as a wake would be.
 type HookDigest struct {
 	Subscription SubscriptionID `json:"subscription"`
@@ -235,6 +242,8 @@ func (HookFinished) EventType() EventType { return "hook.finished" }
 func (HookFinished) isEventBody()         {}
 func (HookDue) EventType() EventType      { return "hook.due" }
 func (HookDue) isEventBody()              {}
+func (HookFired) EventType() EventType    { return "hook.fired" }
+func (HookFired) isEventBody()            {}
 func (HookDigest) EventType() EventType   { return "hook.digest" }
 func (HookDigest) isEventBody()           {}
 func (NoticePosted) EventType() EventType { return "notice.posted" }

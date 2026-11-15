@@ -364,7 +364,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req request
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	// A subscription.fire payload may itself be 1 MiB; leave room for the
+	// JSON-RPC envelope. The engine enforces each field's own limit.
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20))
 	if err := dec.Decode(&req); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(response{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{-32700, "Parse error."}})
