@@ -54,7 +54,7 @@
     <span class="figure">{time}</span></span>
   <span class="state">{#key state.word}<span in:fade={motion}>{#if state.tone}<StatusPill tone={state.tone} label={state.word} word />{:else}{state.word}{/if}</span>{/key}</span>
   <span class="go">{#if open === undefined && openable(step)}<Icon name="forwardChevron" size={14} />{/if}</span>
-  {#if step.kind === "agent"}<span class="progress">{step.toolCalls} tool {step.toolCalls === 1 ? "call" : "calls"}{#if step.state === "running"}<span class="activity" title={step.lastActivity}> · {step.lastActivity ? `Last activity ${fromNow(step.lastActivity, now)}` : "Waiting for activity"}</span>{/if}</span>{/if}
+  {#if step.kind === "agent"}<span class="progress">{step.toolCalls} tool {step.toolCalls === 1 ? "call" : "calls"}{#if step.state === "running"}<span class="activity" title={step.lastActivity ? `Last received transcript activity: ${step.lastActivity}` : "No transcript activity received yet"}> · {step.lastActivity ? `Last activity ${fromNow(step.lastActivity, now)}` : "Waiting for activity"}</span>{/if}</span>{/if}
 {/snippet}
 
 {#snippet row(node: StepNode, depth: number)}
