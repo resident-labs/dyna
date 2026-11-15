@@ -648,7 +648,7 @@ test("step rows reach only the open run page, and the run's end and a new connec
   }) as typeof fetch;
   const usage = { model: "", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
   const run = { run: "wf", room: "r", session: "crew", name: "crew", profiles: ["p"], state: "running" as const, failed: 0, usage, started: "" };
-  const step = { key: "a", kind: "agent" as const, name: "a", state: "running" as const, usage, started: "" };
+  const step = { toolCalls: 0, key: "a", kind: "agent" as const, name: "a", state: "running" as const, usage, started: "" };
   try {
     const store = new RoomStore("r", (_room, _after, _apply, _factory, _schedule, opened) => { hello = opened ?? (() => {}); return () => {}; });
     await store.open();
