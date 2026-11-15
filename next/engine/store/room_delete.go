@@ -148,6 +148,7 @@ var deleteRoom = []string{
 	`DELETE FROM workflow_subscriptions WHERE sub IN (SELECT id FROM subscriptions WHERE ` + roomSubscriptions + `)`,
 	`DELETE FROM workflow_queue WHERE sub IN (SELECT id FROM subscriptions WHERE ` + roomSubscriptions + `)`,
 	`DELETE FROM workflow_state WHERE sub IN (SELECT id FROM subscriptions WHERE ` + roomSubscriptions + `)`,
+	`DELETE FROM workflow_streaks WHERE sub IN (SELECT id FROM subscriptions WHERE ` + roomSubscriptions + `)`,
 	`DELETE FROM subscriptions WHERE ` + roomSubscriptions,
 	`DELETE FROM hostexec_runs WHERE grant_id IN (SELECT id FROM grants WHERE room=?1) OR op IN (SELECT id FROM operations WHERE room=?1 OR (by_kind='session' AND by_id IN (SELECT id FROM sessions WHERE room=?1)))`,
 	`DELETE FROM client_replays WHERE ref IN (SELECT id FROM sessions WHERE room=?1) OR ref IN (SELECT id FROM operations WHERE room=?1) OR ref IN (SELECT id FROM questions WHERE room=?1) OR (caller_kind='session' AND caller_id IN (SELECT id FROM sessions WHERE room=?1)) OR (method='goal.set' AND ref LIKE ?1||'/%')`,

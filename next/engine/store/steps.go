@@ -6,13 +6,16 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 123
+const schemaVersion = 124
 
 const agentsTable = `CREATE TABLE agents (id TEXT PRIMARY KEY, session TEXT NOT NULL REFERENCES sessions(id), turn TEXT NOT NULL, name TEXT NOT NULL, state TEXT NOT NULL, transcript TEXT NOT NULL DEFAULT '', start_offset INTEGER NOT NULL DEFAULT 0, started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL DEFAULT 0, model TEXT NOT NULL DEFAULT '', input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, cache_read_tokens INTEGER NOT NULL DEFAULT 0, cache_write_tokens INTEGER NOT NULL DEFAULT 0)`
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
+	// A subscription's workflow is a service: one run that serves the queue. Its rows are claimed by the run's box start and
+	// handed over again after a lost box, so an old claim, and the per-event runs of the last release, are released.
+	123: {`ALTER TABLE workflow_runs ADD COLUMN served TEXT NOT NULL DEFAULT ''`, `ALTER TABLE workflow_steps ADD COLUMN event INTEGER NOT NULL DEFAULT 0`, `ALTER TABLE workflow_queue ADD COLUMN boot TEXT NOT NULL DEFAULT ''`, `ALTER TABLE workflow_queue ADD COLUMN handovers INTEGER NOT NULL DEFAULT 0`, `UPDATE workflow_queue SET run=''`, `CREATE UNIQUE INDEX workflow_runs_service ON workflow_runs(sub) WHERE sub!='' AND key='' AND state='running'`, `CREATE TABLE workflow_streaks (sub TEXT NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE, key TEXT NOT NULL, PRIMARY KEY(sub,key))`},
 	// Complete transcript records contribute once to a running workflow step's persisted totals.
 	122: {`ALTER TABLE workflow_steps ADD COLUMN progress_offset INTEGER NOT NULL DEFAULT 0`, `ALTER TABLE workflow_steps ADD COLUMN tool_calls INTEGER NOT NULL DEFAULT 0`, `ALTER TABLE workflow_steps ADD COLUMN last_activity INTEGER NOT NULL DEFAULT 0`},
 	// The advisor is an agent in root's box, not a session: each open advisor session starts closing with its box to close, and the flag goes.

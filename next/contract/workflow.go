@@ -87,32 +87,59 @@ type WorkflowReloadResponse struct {
 // List's Branch is the first recorded branch; status retains the most recent recorded branch. Version is the script version it runs, 1
 // until a reload. Status is the script's latest status() line, empty when it wrote none.
 type WorkflowInfo struct {
-	Run           WorkflowRunID  `json:"run"`
-	Room          RoomID         `json:"room"`
-	Session       SessionID      `json:"session"`
-	Subscription  SubscriptionID `json:"subscription,omitempty"`
-	Key           string         `json:"key,omitempty"`
-	Name          string         `json:"name"`
-	Description   string         `json:"description,omitempty"`
-	Profiles      []ProfileName  `json:"profiles"`
-	Repo          RepoName       `json:"repo,omitempty"`
-	Commit        string         `json:"commit,omitempty"`
-	Branch        string         `json:"branch,omitempty"` // the crew session's recorded branch, which its workers' branches extend
-	Version       int            `json:"version,omitempty"`
-	State         WorkflowState  `json:"state"`
-	Paused        bool           `json:"paused,omitempty"`
-	PausedSteps   []string       `json:"pausedSteps,omitempty"`
-	ReleasedSteps []string       `json:"releasedSteps,omitempty"`
-	Result        string         `json:"result,omitempty"`
-	Steps         int            `json:"steps,omitempty"`
-	Failed        int            `json:"failed"`
-	FailedSteps   []string       `json:"failedSteps,omitempty"`
-	Running       int            `json:"running,omitempty"`
-	Status        string         `json:"status,omitempty"`
-	StatusAt      time.Time      `json:"statusAt,omitzero"`
-	Usage         Usage          `json:"usage"`
-	Started       time.Time      `json:"started"`
-	Ended         time.Time      `json:"ended,omitzero"`
+	Run           WorkflowRunID    `json:"run"`
+	Room          RoomID           `json:"room"`
+	Session       SessionID        `json:"session"`
+	Subscription  SubscriptionID   `json:"subscription,omitempty"`
+	Key           string           `json:"key,omitempty"`
+	Name          string           `json:"name"`
+	Description   string           `json:"description,omitempty"`
+	Profiles      []ProfileName    `json:"profiles"`
+	Repo          RepoName         `json:"repo,omitempty"`
+	Commit        string           `json:"commit,omitempty"`
+	Branch        string           `json:"branch,omitempty"` // the crew session's recorded branch, which its workers' branches extend
+	Version       int              `json:"version,omitempty"`
+	State         WorkflowState    `json:"state"`
+	Paused        bool             `json:"paused,omitempty"`
+	PausedSteps   []string         `json:"pausedSteps,omitempty"`
+	ReleasedSteps []string         `json:"releasedSteps,omitempty"`
+	Result        string           `json:"result,omitempty"`
+	Service       *WorkflowService `json:"service,omitempty"`
+	Steps         int              `json:"steps,omitempty"`
+	Failed        int              `json:"failed"`
+	FailedSteps   []string         `json:"failedSteps,omitempty"`
+	Running       int              `json:"running,omitempty"`
+	Status        string           `json:"status,omitempty"`
+	StatusAt      time.Time        `json:"statusAt,omitzero"`
+	Usage         Usage            `json:"usage"`
+	Started       time.Time        `json:"started"`
+	Ended         time.Time        `json:"ended,omitzero"`
+}
+
+// WorkflowService is what a run that serves events shows. State is starting until its box first asks for events, then
+// serving. Keys lists each key with events waiting or in a handler. Handled and Failed count the events whose handlers have
+// ended, and Usage is the usage of the steps dropped with them: a service's journal holds only what is in flight.
+type WorkflowService struct {
+	State     WorkflowServiceState `json:"state"`
+	Keys      []WorkflowServiceKey `json:"keys"`
+	Handled   int                  `json:"handled"`
+	Failed    int                  `json:"failed"`
+	LastEvent time.Time            `json:"lastEvent,omitzero"`
+	Usage     Usage                `json:"usage"`
+}
+
+type WorkflowServiceState string
+
+const (
+	WorkflowServiceStarting WorkflowServiceState = "starting"
+	WorkflowServiceServing  WorkflowServiceState = "serving"
+)
+
+// WorkflowServiceKey counts one key's events: waiting in the queue, and handed to the box.
+type WorkflowServiceKey struct {
+	Key      string `json:"key"`
+	Waiting  int    `json:"waiting"`
+	InFlight int    `json:"inFlight"`
 }
 
 // WorkflowStatusLine is one status() line and when the script wrote it.
@@ -248,6 +275,8 @@ type WorkflowStepStartRequest struct {
 	Profile ProfileName      `json:"profile,omitempty"`
 	Detail  string           `json:"detail"`
 	Version int              `json:"version,omitempty"`
+	// Event is the queue row of the handler that made the call, or zero for the script's body.
+	Event int64 `json:"event,omitempty"`
 	// Feature names the feature the call uses, so the settings can turn it off: worktree for agent() with a worktree, merge, run, workflow and post. Empty for a step that no switch gates.
 	Feature WorkflowFeature `json:"feature,omitempty"`
 }
@@ -327,7 +356,9 @@ func (WorkflowStatusChanged) isEventBody()         {}
 
 const MethodWorkflowState Method = "workflow.state"
 
+// WorkflowStateRequest reads or writes the state of the key of Row, the event a handler is handling.
 type WorkflowStateRequest struct {
+	Row   int64           `json:"row"`
 	Value json.RawMessage `json:"value,omitempty"`
 }
 type WorkflowStateResponse struct {
@@ -364,3 +395,33 @@ type WorkflowPauseChanged struct {
 
 func (WorkflowPauseChanged) EventType() EventType { return "workflow.pause_changed" }
 func (WorkflowPauseChanged) isEventBody()         {}
+
+const (
+	MethodWorkflowEvents    Method = "workflow.events"
+	MethodWorkflowEventDone Method = "workflow.event_done"
+)
+
+// WorkflowEventsRequest is how a service's box asks for events to handle: the engine claims up to Limit rows, the oldest of
+// each key that has none in a handler, and hands them over. Boot names this start of the box. A row claimed by an earlier
+// start was never acknowledged, so it is handed over again.
+type WorkflowEventsRequest struct {
+	Boot  string `json:"boot"`
+	Limit int    `json:"limit"`
+}
+
+// WorkflowEvent is one claimed queue row. Row names it for its acknowledgement and for the state calls of its handler.
+type WorkflowEvent struct {
+	Row   int64           `json:"row"`
+	Key   string          `json:"key"`
+	Event json.RawMessage `json:"event"`
+}
+type WorkflowEventsResponse struct {
+	Events []WorkflowEvent `json:"events"`
+}
+
+// WorkflowEventDoneRequest acknowledges a row when its handler has ended. Error is empty for a handler that returned.
+type WorkflowEventDoneRequest struct {
+	Row   int64  `json:"row"`
+	Error string `json:"error,omitempty"`
+}
+type WorkflowEventDoneResponse struct{}

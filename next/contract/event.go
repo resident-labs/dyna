@@ -562,3 +562,12 @@ const (
 
 func (ConversationRead) EventType() EventType { return "conversation.read" }
 func (ConversationRead) isEventBody()         {}
+
+// Plus adds the tokens of other to u's. The model stays u's.
+func (u Usage) Plus(other Usage) Usage {
+	u.InputTokens += other.InputTokens
+	u.OutputTokens += other.OutputTokens
+	u.CacheReadTokens += other.CacheReadTokens
+	u.CacheWriteTokens += other.CacheWriteTokens
+	return u
+}

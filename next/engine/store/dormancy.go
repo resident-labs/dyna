@@ -54,10 +54,11 @@ func (s *Store) StopStale(ctx context.Context, ids []contract.SessionID) ([]cont
 
 // WakeStopped starts a stopped box again when a wake is waiting for it, which a stale stop leaves on purpose, or when it has
 // an open child, so a stale stop is a restart for a parent. The rows are the record, so a box stopped just before an engine
-// restart still comes back. A paused room waits for its resume.
+// restart still comes back. A running service run wants its box up too: an update stopped it while it waited for events.
+// A paused room waits for its resume.
 func (s *Store) WakeStopped(ctx context.Context) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE boxes SET want='run' WHERE want='stop' AND state='stopped' AND EXISTS (SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND s.state='open' AND s.closed_at IS NULL AND r.paused_at IS NULL AND (EXISTS (SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=s.id AND d.wake=1 AND d.state='pending' AND d.state IN ('pending','taken')) OR EXISTS (SELECT 1 FROM sessions c WHERE c.parent=s.id AND c.closed_at IS NULL)))`)
+		_, err := tx.ExecContext(ctx, `UPDATE boxes SET want='run' WHERE want='stop' AND state='stopped' AND EXISTS (SELECT 1 FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=boxes.session AND s.state='open' AND s.closed_at IS NULL AND r.paused_at IS NULL AND (EXISTS (SELECT 1 FROM deliveries d WHERE d.to_kind='session' AND d.to_id=s.id AND d.wake=1 AND d.state='pending' AND d.state IN ('pending','taken')) OR EXISTS (SELECT 1 FROM sessions c WHERE c.parent=s.id AND c.closed_at IS NULL) OR EXISTS (SELECT 1 FROM workflow_runs r WHERE r.session=s.id AND r.state='running' AND r.sub!='' AND r.key='')))`)
 		return err
 	})
 }
