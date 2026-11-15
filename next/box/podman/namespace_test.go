@@ -3,6 +3,7 @@ package podman
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -140,10 +141,10 @@ func (r delayedNamespaceRunner) Run(ctx context.Context, in []byte, args ...stri
 	if strings.Contains(command, "'delete'") {
 		gate := "echo entered > " + quote(r.entered.path) + "; IFS= read -r _ < " + quote(r.release.path) + "\n"
 		gate += "trap " + quote("echo finished > "+quote(r.finished.path)) + " EXIT\n"
-		if strings.Count(command, "flock -x -w 15 8") != 1 {
+		if strings.Count(command, `flock -x -w "$remaining" 8`) != 1 {
 			return nil, errors.New("namespace flock anchor changed")
 		}
-		command = strings.Replace(command, "flock -x -w 15 8", strings.ReplaceAll(gate, "'", `'\''`)+"flock -x -w 15 8", 1)
+		command = strings.Replace(command, `flock -x -w "$remaining" 8`, strings.ReplaceAll(gate, "'", `'\''`)+`flock -x -w "$remaining" 8`, 1)
 		args = append([]string(nil), args...)
 		args[len(args)-1] = command
 	}
@@ -286,6 +287,284 @@ func TestNamespaceCreateHasBoundedLockWaitAndNoFallback(t *testing.T) {
 
 // Podman's conmon daemon inherits FD 8 even after podman start returns. The
 // completed command must release that shared lock without waiting for conmon.
+// namespaceOrphan leaves a real executable holding inherited FD 8 after the
+// entire wrapper process group dies. A symlink to sleep would still have an exe
+// basename of sleep, so copy it instead.
+func namespaceOrphan(t *testing.T, root, name string) int {
+	t.Helper()
+	sleep, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(executable, readNamespaceFile(t, sleep), 0700); err != nil {
+		t.Fatal(err)
+	}
+	pidFile := filepath.Join(root, "orphan")
+	cmd := exec.Command("bash", "-c", namespaceScript, "fixture", root, "b", "use", "bash", "-c", `setsid "$1" 120 </dev/null >/dev/null 2>&1 &
+printf '%s\n' "$!" > "$2"
+wait`, "fixture", executable, pidFile)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); _ = cmd.Wait() })
+	var pid int
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		raw, _ := os.ReadFile(pidFile)
+		pid, _ = strconv.Atoi(strings.TrimSpace(string(raw)))
+		exe, _ := os.Readlink("/proc/" + strconv.Itoa(pid) + "/exe")
+		if pid > 0 && filepath.Base(exe) == name {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	exe, err := os.Readlink("/proc/" + strconv.Itoa(pid) + "/exe")
+	if err != nil || filepath.Base(exe) != name {
+		t.Fatalf("fixture exe: %q %v", exe, err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Wait()
+	return pid
+}
+
+func namespaceCommand(root, mode string, args ...string) *exec.Cmd {
+	return exec.Command("bash", append([]string{"-c", namespaceScript, "fixture", root, "b", mode}, args...)...)
+}
+
+func TestNamespaceUnreadableProcDecision(t *testing.T) {
+	uid := os.Geteuid()
+	for _, tc := range []struct {
+		name   string
+		status string
+		skip   bool
+	}{
+		{"other user", fmt.Sprintf("Uid:\t%d\t%d\t%d\t%d\n", uid+1, uid+1, uid+1, uid+1), true},
+		{"same real uid", fmt.Sprintf("Uid:\t%d\t%d\t%d\t%d\n", uid, uid+1, uid+1, uid+1), false},
+		{"same effective uid", fmt.Sprintf("Uid:\t%d\t%d\t%d\t%d\n", uid+1, uid, uid, uid), false},
+		{"no uid", "Name:\tfixture\n", false},
+		{"missing status", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			proc := t.TempDir()
+			if tc.status != "" {
+				if err := os.WriteFile(filepath.Join(proc, "status"), []byte(tc.status), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := exec.Command("bash", "-c", namespaceProcAccess+`namespace_other_user "$1"`, "fixture", proc).Run()
+			if (err == nil) != tc.skip {
+				t.Fatalf("skip = %v, want %v (%v)", err == nil, tc.skip, err)
+			}
+		})
+	}
+}
+
+func TestNamespaceStaleConmonRecovery(t *testing.T) {
+	root, h := namespaceFixture(t)
+	pid := namespaceOrphan(t, root, "conmon")
+	path := filepath.Join(root, "locks", "box-b.lock")
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Mode().Perm() != 0600 {
+		t.Fatalf("lock permissions: %v", before.Mode())
+	}
+	if _, err := h.BoxEpoch(context.Background(), "b"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(path)
+	if err != nil || os.SameFile(before, after) {
+		t.Fatalf("not rotated: %v", err)
+	}
+	if err := syscall.Kill(pid, 0); err != nil {
+		t.Fatalf("recovery killed conmon: %v", err)
+	}
+}
+
+func TestNamespaceBody252DoesNotRecover(t *testing.T) {
+	root, h := namespaceFixture(t)
+	_, err := h.namespace(context.Background(), "b", "use", "bash", "-c", "exit 252")
+	var exit remoteExit
+	if !errors.As(err, &exit) || exit != 1 {
+		t.Fatalf("body status not distinguished from lock timeout: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "locks", "box-b.rotate.new")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("body failure invoked recovery")
+	}
+}
+
+func TestNamespaceLiveHolderNotRecovered(t *testing.T) {
+	root, h := namespaceFixture(t)
+	namespaceOrphan(t, root, "worker")
+	path := filepath.Join(root, "locks", "box-b.lock")
+	before, _ := os.Stat(path)
+	_, err := h.BoxEpoch(context.Background(), "b")
+	var uncertain NamespaceUncertain
+	if !errors.As(err, &uncertain) {
+		t.Fatalf("live holder not fenced: %v", err)
+	}
+	after, err := os.Stat(path)
+	if err != nil || !os.SameFile(before, after) {
+		t.Fatalf("live lock rotated: %v", err)
+	}
+}
+
+func TestNamespaceConcurrentRecovery(t *testing.T) {
+	root := t.TempDir()
+	pid := namespaceOrphan(t, root, "conmon")
+	results := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() { results <- namespaceCommand(root, "recover").Run() }()
+	}
+	// This waiter may open either inode. It must run exactly once, serialized
+	// with a fresh acquirer even if it opened the abandoned inode.
+	body := `mkdir "$1/critical" || exit 90
+sleep 0.2
+rmdir "$1/critical"`
+	waiter := namespaceCommand(root, "use", "bash", "-c", body, "fixture", root)
+	if err := waiter.Start(); err != nil {
+		t.Fatal(err)
+	}
+	success := 0
+	for i := 0; i < 2; i++ {
+		if err := <-results; err == nil {
+			success++
+		} else {
+			var exited *exec.ExitError
+			if !errors.As(err, &exited) || exited.ExitCode() != 254 {
+				t.Fatalf("unexpected recovery failure: %v", err)
+			}
+		}
+	}
+	if success != 1 {
+		t.Fatalf("rotations: %d", success)
+	}
+	fresh := namespaceCommand(root, "use", "bash", "-c", body, "fixture", root)
+	if err := fresh.Start(); err != nil {
+		t.Fatal(err)
+	}
+	_ = syscall.Kill(pid, syscall.SIGKILL)
+	if err := waiter.Wait(); err != nil {
+		t.Fatalf("old acquirer: %v", err)
+	}
+	if err := fresh.Wait(); err != nil {
+		t.Fatalf("fresh acquirer: %v", err)
+	}
+}
+
+func TestNamespaceConmonExitsBeforeRotation(t *testing.T) {
+	root := t.TempDir()
+	pid := namespaceOrphan(t, root, "conmon")
+	entered, release := newScriptSignal(t), newScriptSignal(t)
+	defer release.write(t, "go")
+	mv, err := exec.LookPath("mv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := t.TempDir()
+	gate := "#!/bin/bash\nprintf 'entered\\n' > " + quote(entered.path) + "; IFS= read -r _ < " + quote(release.path) + "\nexec " + quote(mv) + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(tools, "mv"), []byte(gate), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", tools+":"+os.Getenv("PATH"))
+	recovery := namespaceCommand(root, "recover")
+	if err := recovery.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = recovery.Process.Kill(); _ = recovery.Wait() })
+	if got := entered.read(t); got != "entered" {
+		t.Fatalf("mv gate: %q", got)
+	}
+	body := `mkdir "$1/critical" || exit 90
+sleep 0.2
+rmdir "$1/critical"`
+	waiter := namespaceCommand(root, "use", "bash", "-c", body, "fixture", root)
+	if err := waiter.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = waiter.Process.Kill(); _ = waiter.Wait() })
+	_ = syscall.Kill(pid, syscall.SIGKILL)
+	rotate := filepath.Join(root, "locks", "box-b.rotate")
+	deadline := time.Now().Add(5 * time.Second)
+	for !slices.Contains(holdersOf(t, rotate), waiter.Process.Pid) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !slices.Contains(holdersOf(t, rotate), waiter.Process.Pid) {
+		t.Fatal("old-inode acquirer did not join rotation fence")
+	}
+	if _, err := os.Stat(filepath.Join(root, "critical")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("old-inode work started before rename")
+	}
+	release.write(t, "go")
+	if err := recovery.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	fresh := namespaceCommand(root, "use", "bash", "-c", body, "fixture", root)
+	if err := fresh.Run(); err != nil {
+		t.Fatalf("fresh acquirer: %v", err)
+	}
+	if err := waiter.Wait(); err != nil {
+		t.Fatalf("old acquirer: %v", err)
+	}
+}
+
+func TestNamespaceWaiterRechecksRotatedInode(t *testing.T) {
+	root := t.TempDir()
+	pid := namespaceOrphan(t, root, "conmon")
+	path := filepath.Join(root, "locks", "box-b.lock")
+	marker := filepath.Join(root, "ran")
+	waiter := namespaceCommand(root, "use", "touch", marker)
+	if err := waiter.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = waiter.Process.Kill(); _ = waiter.Wait() })
+	deadline := time.Now().Add(5 * time.Second)
+	for !slices.Contains(holdersOf(t, path), waiter.Process.Pid) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !slices.Contains(holdersOf(t, path), waiter.Process.Pid) {
+		t.Fatal("waiter never opened old inode")
+	}
+	if out, err := namespaceCommand(root, "recover").CombinedOutput(); err != nil {
+		t.Fatalf("recover: %v: %s", err, out)
+	}
+	lock, err := os.OpenFile(path, os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	_ = syscall.Kill(pid, syscall.SIGKILL)
+	// Once FD 8 points at the new inode, it must remain blocked by our lock.
+	deadline = time.Now().Add(5 * time.Second)
+	for !slices.Contains(holdersOf(t, path), waiter.Process.Pid) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !slices.Contains(holdersOf(t, path), waiter.Process.Pid) {
+		t.Fatal("waiter did not reopen rotated inode")
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("waiter ran without new lock")
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	if err := waiter.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNamespaceCompletedCommandReleasesInheritedLock(t *testing.T) {
 	for _, status := range []string{"0", "42"} {
 		t.Run(status, func(t *testing.T) {

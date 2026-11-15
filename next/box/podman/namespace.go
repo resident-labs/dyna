@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -28,17 +29,32 @@ func (e NamespaceUncertain) Error() string {
 }
 func (e NamespaceUncertain) Unwrap() error { return e.Err }
 
+// namespaceProcAccess is shared with fixture tests of the procfs trust boundary.
+const namespaceProcAccess = `namespace_other_user() {
+ while read -r field real effective rest; do
+  if test "$field" = Uid:; then
+   test "$real" != "$EUID" && test "$effective" != "$EUID"
+   return $?
+  fi
+ done < "$1/status" 2>/dev/null
+ return 1
+}
+`
+
 // FD 8 is intentionally inherited by every mutating child. In particular, do
 // not use flock --close or close this descriptor at a nested exec boundary.
 // A completed command explicitly unlocks the shared description: Podman can
 // leave conmon holding FD 8 after its synchronous command returns. Without
 // this unlock, that daemon fences the box for its entire lifetime. Do not use
 // an EXIT trap: interrupted wrappers must retain the lock in surviving work.
-// Both files live outside all container, workspace, stack and room trees.
-const namespaceScript = `set -eu
+// All namespace files live outside container, workspace, stack and room trees.
+const namespaceScript = namespaceProcAccess + `set -eu
+umask 077
+trap : HUP PIPE TERM
 root=$1; id=$2; mode=$3; shift 3
 mkdir -p -- "$root/locks"
 exec 8> "$root/locks/box-$id.lock"
+chmod 600 -- "$root/locks/box-$id.lock"
 namespace_lock_holders() {
  # The scan runs in a subshell that closes the lock descriptor and starts no program: only builtins read /proc, so killing
  # the subshell leaves nothing behind, and nothing of it can hold the lock or the caller's streams.
@@ -77,7 +93,79 @@ namespace_scan_holders() {
  if kill -KILL "$scan" 2>/dev/null; then printf ' (scan stopped after 2s)\n' >&2; fi
  wait "$scan" 2>/dev/null || true
 }
-flock -x -w 15 8 || { namespace_scan_holders || true; exit 252; }
+# Recovery takes only the rotation lock, never the abandoned lock itself.
+# Only the host user opens these 0600 files in its private data directory; root
+# does not touch them. Inherited descriptors also stay in that user's wrapper
+# tree. Unreadable fd directories of other users cannot matter, but an unreadable
+# same-user process (or unreadable status) must prevent rotation.
+namespace_stale_holders() {
+ exec 8>&- 9>&-
+ pids=
+ for proc in /proc/[0-9]*; do
+  if ! test -r "$proc/fd" || ! test -x "$proc/fd"; then
+   test ! -d "$proc" && continue
+   namespace_other_user "$proc" && continue
+   return 1
+  fi
+  for fd in "$proc"/fd/*; do
+   test "$fd" -ef "$root/locks/box-$id.lock" || continue
+   held=0
+   { while IFS= read -r line; do
+     case $line in 'lock:'*' FLOCK '*' WRITE '*) held=1;; esac
+    done < "$proc/fdinfo/${fd##*/}"; } 2>/dev/null || return 1
+   test "$held" = 1 || continue
+   exe=$(readlink -- "$proc/exe") || return 1
+   test "${exe##*/}" = conmon || return 1
+   pids="$pids ${proc##*/}"
+   break
+  done
+ done
+ test -n "$pids" || return 1
+ printf '%s\n' "$pids"
+}
+namespace_stale_scan() {
+ (namespace_stale_holders) > "$root/locks/box-$id.rotate.new" &
+ scan=$!
+ while kill -0 "$scan" 2>/dev/null && test "$SECONDS" -lt 10; do sleep 0.1; done
+ if kill -KILL "$scan" 2>/dev/null; then
+  wait "$scan" 2>/dev/null || true
+  return 1
+ fi
+ wait "$scan"
+}
+if test "$mode" = recover; then
+ exec 9> "$root/locks/box-$id.rotate"
+ flock -x -w 10 9 || exit 254
+ SECONDS=0
+ namespace_stale_scan || exit 254
+ IFS= read -r first < "$root/locks/box-$id.rotate.new" || exit 254
+ sleep 1
+ namespace_stale_scan || exit 254
+ IFS= read -r second < "$root/locks/box-$id.rotate.new" || exit 254
+ test "$first" = "$second" || exit 254
+ : > "$root/locks/box-$id.rotate.new"
+ mv -f -- "$root/locks/box-$id.rotate.new" "$root/locks/box-$id.lock"
+ exec 9>&-
+ printf 'rotated namespace lock: box %s; conmon pids:%s\n' "$id" "$first"
+ exit 0
+fi
+SECONDS=0
+while :; do
+ remaining=$((15 - SECONDS))
+ test "$remaining" -gt 0 || { namespace_scan_holders || true; exit 252; }
+ flock -x -w "$remaining" 8 || { namespace_scan_holders || true; exit 252; }
+ # Fence the check-to-command boundary against rotation. A conmon can exit
+ # after the last scan, letting a waiter acquire the old inode before mv.
+ exec 9> "$root/locks/box-$id.rotate"
+ remaining=$((15 - SECONDS))
+ test "$remaining" -gt 0 && flock -x -w "$remaining" 9 || exit 252
+ if test /proc/$$/fd/8 -ef "$root/locks/box-$id.lock"; then
+  exec 9>&-
+  break
+ fi
+ exec 9>&-
+ exec 8> "$root/locks/box-$id.lock"
+done
 epoch_file="$root/locks/box-$id.epoch"
 epoch=0
 if test -e "$epoch_file"; then
@@ -98,12 +186,19 @@ esac
 status=0
 "$@" || status=$?
 flock -u 8
+# Reserve 252 for proof that the body never ran. A body using that code is
+# still a failure, but must never trigger automatic mutation retry.
+test "$status" != 252 || status=1
 exit "$status"`
 
 func (h *Host) namespace(ctx context.Context, id contract.BoxID, mode string, command ...string) ([]byte, error) {
 	args := []string{"bash", "-c", namespaceScript, "dyna-box-namespace", h.dataDir, string(id), mode}
-	var out []byte
-	var err error
+	run := func(args []string) ([]byte, error) {
+		if mode == "read" || mode == "delete" {
+			return h.executeOver(ctx, h.direct(), nil, args...)
+		}
+		return h.run(ctx, args...)
+	}
 	if mode == "read" || mode == "delete" {
 		// Restoring the mux's forwards can unlink a box socket. Read/delete must
 		// reach the host epoch check without that implicit mutation as well.
@@ -113,9 +208,15 @@ func (h *Host) namespace(ctx context.Context, id contract.BoxID, mode string, co
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-		out, err = h.executeOver(ctx, h.direct(), nil, append(args, command...)...)
-	} else {
-		out, err = h.run(ctx, append(args, command...)...)
+	}
+	out, err := run(append(args, command...))
+	var timedOut remoteExit
+	if errors.As(err, &timedOut) && timedOut == 252 {
+		recovery := []string{"bash", "-c", namespaceScript, "dyna-box-namespace", h.dataDir, string(id), "recover"}
+		if recovered, recoveryErr := run(recovery); recoveryErr == nil {
+			log.Printf("%s", strings.TrimSpace(string(recovered)))
+			out, err = run(append(args, command...))
+		}
 	}
 	var exit remoteExit
 	if errors.As(err, &exit) {
