@@ -32,6 +32,7 @@ for (const width of [1440, 390]) {
  const running = page.locator('[data-step="review"]');
  await running.getByText("12 tool calls", { exact: false }).waitFor();
  assert.match(await running.innerText(), /Last activity just now/);
+ assert.equal(await running.locator(".activity").getAttribute("title"), "Last received transcript activity: 2026-11-13T09:29:58Z");
  assert.equal(await running.locator('[title^="Tokens so far:"]').innerText(), "4.5k");
  assert.match(await page.locator('[data-step="finished"]').innerText(), /8 tool calls/);
  assert.match(await page.locator(".step").filter({ hasText: "Check final results" }).innerText(), /0 tool calls.*Waiting for activity/s);
