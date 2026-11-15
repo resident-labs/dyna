@@ -4,6 +4,29 @@
   import { voice, voiceCall, startCall } from './store.svelte.ts';
   let { room, name = room, composer }: { room: string; name?: string; composer?: HTMLElement } = $props();
   let available = $state(false), now = $state(Date.now()), bottom = $state(0), right = $state(20), dockWidth = $state(420);
+  let position = $state<{ x: number; y: number } | null>(null);
+  function clampPosition(x: number, y: number) {
+    const rect = widget?.getBoundingClientRect();
+    return { x: Math.max(0, Math.min(x, window.innerWidth - (rect?.width ?? 420))), y: Math.max(0, Math.min(y, window.innerHeight - (rect?.height ?? 100))) };
+  }
+  function drag(event: PointerEvent) {
+    if (window.innerWidth <= 600 || event.button !== 0 || !widget) return;
+    const rect = widget.getBoundingClientRect(), x = event.clientX, y = event.clientY;
+    const target = event.currentTarget as HTMLElement;
+    target.setPointerCapture(event.pointerId);
+    const move = (e: PointerEvent) => { position = clampPosition(rect.x + e.clientX - x, rect.y + e.clientY - y); };
+    const end = () => {
+      target.removeEventListener('pointermove', move); target.removeEventListener('pointerup', end); target.removeEventListener('pointercancel', end);
+      if (position) localStorage.setItem('dyna.voice.position', JSON.stringify(position));
+    };
+    target.addEventListener('pointermove', move); target.addEventListener('pointerup', end); target.addEventListener('pointercancel', end);
+  }
+  $effect(() => {
+    if (!widget) return;
+    const observer = new ResizeObserver(() => { if (position) position = clampPosition(position.x, position.y); });
+    observer.observe(widget);
+    return () => observer.disconnect();
+  });
   let refreshVersion = $state(0);
   let expanded = $state(false), offer = $state(false);
   let transcript: HTMLDivElement | undefined = $state();
@@ -38,18 +61,24 @@
     return () => { alive = false; };
   });
   onMount(() => {
+    const saved = localStorage.getItem('dyna.voice.position');
+    if (saved) {
+      try { const value = JSON.parse(saved); if (Number.isFinite(value?.x) && Number.isFinite(value?.y)) position = clampPosition(value.x, value.y); } catch { /* Ignore corrupt preferences. */ }
+    }
+    const resize = () => { if (position) position = clampPosition(position.x, position.y); };
+    window.addEventListener('resize', resize);
     const refresh = () => refreshVersion++;
     const timer = setInterval(() => now = Date.now(), 1000);
     window.addEventListener('focus', refresh);
-    return () => { clearInterval(timer); window.removeEventListener('focus', refresh); };
+    return () => { window.removeEventListener('resize', resize); clearInterval(timer); window.removeEventListener('focus', refresh); };
   });
 </script>
 <svelte:window onkeydown={event => { if (event.key === 'Escape') { expanded = false; offer = false; } }} />
 {#if available}<button type="button" class="call" aria-label={other ? `Call active in ${voice.name}` : 'Call'} onclick={() => { if (other) offer = !offer; else if (view.active) { voice.visible = true; void tick().then(() => widget?.focus()); } else begin(); }}>{view.active && !other ? 'In call' : 'Call'}</button>{/if}
 {#if offer && other}<div class="offer"><span>Call active in {voice.name}.</span> <button type="button" onclick={() => { voiceCall.stop(); offer = false; begin(); }}>End it and call here</button><button type="button" aria-label="Dismiss call offer" onclick={() => offer = false}>×</button></div>{/if}
 {#if voice.visible}
-  <aside class="voice" aria-label="Voice call" tabindex="-1" bind:this={widget} style={`--dock-bottom:${bottom}px;--dock-right:${right}px;--dock-width:${dockWidth}px`}>
-    <div class="controls"><div class="identity"><strong><span class="dot" class:listening={label === 'Listening'} class:speaking={label === 'Speaking'} class:working={label === 'Working'} class:failed={!view.active && view.status !== 'Call ended'} style={`--level:${view.level ?? 0}`}></span>{voice.name}<span class="elapsed">· {duration}</span></strong><span role="status" aria-live="polite">{label}{!view.active && view.status !== 'Call ended' ? ` · ${view.status}` : ''}</span></div>
+  <aside class="voice" aria-label="Voice call" tabindex="-1" bind:this={widget} style={`--position-left:${position ? position.x + 'px' : 'auto'};--position-top:${position ? position.y + 'px' : 'auto'};--position-bottom:${position ? 'auto' : bottom + 'px'};--dock-bottom:${bottom}px;--dock-right:${right}px;--dock-width:${dockWidth}px`}>
+    <div class="controls"><div class="identity" onpointerdown={drag} role="presentation"><strong><span class="dot" class:listening={label === 'Listening'} class:speaking={label === 'Speaking'} class:working={label === 'Working'} class:failed={!view.active && view.status !== 'Call ended'} style={`--level:${view.level ?? 0}`}></span>{voice.name}<span class="elapsed">· {duration}</span></strong><span role="status" aria-live="polite">{label}{!view.active && view.status !== 'Call ended' ? ` · ${view.status}` : ''}</span></div>
       {#if view.active}<button type="button" aria-pressed={view.muted} onclick={() => voiceCall.mute()}>{view.muted ? 'Unmute' : 'Mute'}</button><button type="button" class="hangup" onclick={() => voiceCall.stop()}>Hang up</button>
       {:else}<button type="button" onclick={() => { expanded = false; startCall(voice.room, voice.name); }}>Call again</button>{/if}
       {#if !view.active}<button type="button" class="close" aria-label="Close voice call" onclick={() => voice.visible = false}>×</button>{/if}
@@ -61,11 +90,11 @@
   .call, .voice button, .offer button { font: inherit; font-size: 13px; color: var(--text); background: none; border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; cursor: pointer; white-space: nowrap; }
   button:hover { background: var(--hover); } button:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
   .voice, .offer { position: fixed; z-index: 100; right: 20px; box-sizing: border-box; padding: 12px 14px; background: var(--raised); color: var(--text); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 24px var(--shadow-md); font-size: 13px; line-height: 1.4; }
-  .voice { bottom: var(--dock-bottom); right: var(--dock-right); width: min(var(--dock-width), calc(100vw - 32px)); } .offer { top: 56px; max-width: calc(100vw - 24px); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  .controls { display: flex; align-items: center; gap: 7px; } .identity { flex: 1; min-width: 0; display: grid; gap: 3px; } .identity strong { display: flex; align-items: center; gap: 5px; font-weight: 500; overflow-wrap: anywhere; } .identity > span, .elapsed { color: var(--muted); font-size: 12px; } .elapsed { white-space: nowrap; font-weight: 400; }
+  .voice { left: var(--position-left); top: var(--position-top); bottom: var(--position-bottom); right: var(--dock-right); width: min(var(--dock-width), calc(100vw - 32px)); } .offer { top: 56px; max-width: calc(100vw - 24px); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .controls { display: flex; align-items: center; gap: 7px; } .identity { cursor: grab; touch-action: none; flex: 1; min-width: 0; display: grid; gap: 3px; } .identity strong { display: flex; align-items: center; gap: 5px; font-weight: 500; overflow-wrap: anywhere; } .identity > span, .elapsed { color: var(--muted); font-size: 12px; } .elapsed { white-space: nowrap; font-weight: 400; }
   .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); } .dot.listening { background: var(--focus); transform: scale(calc(1 + var(--level) * .5)); transition: transform 80ms; } .dot.speaking { background: var(--focus); animation: pulse 2s ease-in-out infinite; } .dot.working { opacity: .5; } .dot.failed { background: var(--danger); }
   @keyframes pulse { 50% { opacity: .4; } } @media (prefers-reduced-motion: reduce) { .dot { animation: none !important; transition: none !important; transform: none !important; } }
   .voice .hangup { color: var(--danger); } .voice .close { border: none; padding: 5px; color: var(--muted); }
   details { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); color: var(--muted); } summary { cursor: pointer; font-size: 12px; } .transcript { max-height: 180px; overflow: auto; color: var(--text); } p { overflow-wrap: anywhere; margin: 10px 0 0; } p strong { color: var(--muted); font-weight: 500; }
-  @media (max-width: 600px) { .voice { bottom: var(--dock-bottom); right: 0; width: 100%; padding: 10px 12px; } .voice button { min-height: 44px; min-width: 44px; padding: 6px; } .controls { gap: 4px; } .identity strong { font-size: 12px; gap: 4px; } .elapsed { font-size: 11px; } }
+  @media (max-width: 600px) { .voice { left: auto; top: auto; bottom: var(--dock-bottom); right: 0; width: 100%; padding: 10px 12px; } .voice button { min-height: 44px; min-width: 44px; padding: 6px; } .controls { gap: 4px; } .identity strong { font-size: 12px; gap: 4px; } .elapsed { font-size: 11px; } }
 </style>

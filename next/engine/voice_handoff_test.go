@@ -49,6 +49,21 @@ func TestVoiceHandoffIdleBusyAndFinal(t *testing.T) {
 	})}
 	go proxyServer.Serve(proxy.Listener)
 	defer proxyServer.Close()
+	_, problem := s.Post(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.PostRequest{Room: room, Text: "oldest context\n" + strings.Repeat("old context ", 2200), Home: contract.Conversation{Kind: contract.ConversationDM, Session: root}})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	for _, msg := range []struct {
+		from contract.Principal
+		text string
+	}{
+		{contract.Principal{Kind: contract.PrincipalSession, Session: root}, "root middle message"},
+		{contract.Principal{Kind: contract.PrincipalOwner}, "newest owner message"},
+	} {
+		if _, problem := s.Post(ctx, msg.from, contract.PostRequest{Room: room, Text: msg.text, Home: contract.Conversation{Kind: contract.ConversationDM, Session: root}}); problem != nil {
+			t.Fatal(problem)
+		}
+	}
 	run, problem := s.Voice(ctx, room)
 	if problem != nil {
 		t.Fatal(problem)
@@ -77,9 +92,22 @@ func TestVoiceHandoffIdleBusyAndFinal(t *testing.T) {
 	if err := wsjson.Read(ctx, provider, &session); err != nil {
 		t.Fatal(err)
 	}
+	var startup map[string]any
+	if err := wsjson.Read(ctx, provider, &startup); err != nil {
+		t.Fatal(err)
+	}
+	startupJSON, _ := json.Marshal(startup)
+	encoded := string(startupJSON)
+	middle, newest := strings.Index(encoded, "root middle message"), strings.Index(encoded, "newest owner message")
+	if middle < 0 || newest <= middle || strings.Contains(encoded, "oldest context") || !strings.Contains(encoded, "…output truncated…") || !strings.Contains(encoded, "developer") {
+		t.Fatal(startup)
+	}
 	sendTool := func(id, prompt string) {
 		t.Helper()
 		if err := wsjson.Write(ctx, provider, map[string]any{"type": "input_audio_buffer.committed", "item_id": "owner-" + id}); err != nil {
+			t.Fatal(err)
+		}
+		if err := wsjson.Write(ctx, provider, map[string]any{"type": "conversation.item.input_audio_transcription.completed", "item_id": "owner-" + id, "transcript": prompt}); err != nil {
 			t.Fatal(err)
 		}
 		args, _ := json.Marshal(map[string]string{"prompt": prompt})
@@ -130,13 +158,26 @@ func TestVoiceHandoffIdleBusyAndFinal(t *testing.T) {
 	for _, event := range events {
 		if post, ok := event.Body.(contract.PostCreated); ok && post.Spoken {
 			posted = append(posted, post.Text)
+			if !strings.Contains(post.Text, "<transcript_delta>user:") {
+				t.Fatal(post)
+			}
+			if (len(posted) == 1) != strings.Contains(post.Context, "Realtime conversation started.") {
+				t.Fatal("start not once", post.Context)
+			}
 		}
 	}
-	if len(posted) != 2 || posted[0] != "start a voice task" || posted[1] != "steer this task" {
+	if len(posted) != 2 || !strings.Contains(posted[0], "<input>start a voice task</input>") || !strings.Contains(posted[1], "<input>steer this task</input>") {
 		t.Fatalf("owner post order: %q", posted)
 	}
 	start := nextTurn(t, s, ctx, root)
-	if !strings.Contains(start.Inputs[0].Text, "start a voice task") {
+	handoffIndex := -1
+	for i, input := range start.Inputs {
+		if strings.Contains(input.Text, "start a voice task") {
+			handoffIndex = i
+			break
+		}
+	}
+	if handoffIndex < 0 {
 		t.Fatalf("input: %+v", start.Inputs)
 	}
 	if _, problem := s.TurnOutput(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnCompleted, Final: "voice final answer"}); problem != nil {
@@ -148,7 +189,7 @@ func TestVoiceHandoffIdleBusyAndFinal(t *testing.T) {
 	if finalItems != 1 {
 		t.Fatalf("final BACKEND items: %d", finalItems)
 	}
-	post, err := s.store.Event(ctx, int64(start.Inputs[0].Delivery))
+	post, err := s.store.Event(ctx, int64(start.Inputs[handoffIndex].Delivery))
 	if err != nil {
 		t.Fatal(err)
 	}

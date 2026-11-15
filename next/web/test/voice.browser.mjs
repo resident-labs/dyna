@@ -99,6 +99,17 @@ try {
   const desktopWidget = await page.locator('aside[aria-label="Voice call"]').boundingBox();
   assert.ok(desktopWidget.x + desktopWidget.width <= desktopComposer.x + desktopComposer.width + 1);
   assert.ok(desktopWidget.y + desktopWidget.height <= desktopComposer.y);
+  const identity = await page.locator('.voice .identity').boundingBox();
+  await page.mouse.move(identity.x + 15, identity.y + 10);
+  await page.mouse.down(); await page.mouse.move(160, 150, { steps: 8 }); await page.mouse.up();
+  const dragged = await page.locator('.voice').boundingBox();
+  assert.ok(dragged.x < desktopWidget.x && dragged.y < desktopWidget.y, 'drag changes position');
+  assert.ok(await page.evaluate(() => !!localStorage.getItem('dyna.voice.position')));
+  await page.screenshot({ path: output + '/dragged-1440.png' });
+  await page.mouse.move(dragged.x + 15, dragged.y + 15); await page.mouse.down();
+  await page.mouse.move(1439, 999, { steps: 8 }); await page.mouse.up();
+  const bounded = await page.locator('.voice').boundingBox();
+  assert.ok(bounded.x >= 0 && bounded.y >= 0 && bounded.x + bounded.width <= 1441 && bounded.y + bounded.height <= 1001);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(100);
   const composer = await page.getByRole('combobox', { name: 'Message', exact: true }).boundingBox();
@@ -108,7 +119,7 @@ try {
   assert.ok(mute.height >= 44);
   await page.keyboard.press('Escape');
   assert.equal(await page.getByRole('button', { name: 'Hang up' }).count(), 1);
-  await page.screenshot({ path: output + '/real-dm-390-dark.png' });
+  await page.screenshot({ path: output + '/dragged-390.png' });
   await page.getByRole('button', { name: 'Mute', exact: true }).focus();
   await page.keyboard.press('Tab');
   assert.equal(await page.evaluate(() => document.activeElement.textContent), 'Hang up');

@@ -31,7 +31,7 @@ func (m *Manager) Stop() {
 
 // Start holds the call until either connection ends. backend contains only root
 // DM posts and questions. Its producer must observe ctx when the call ends.
-func (m *Manager) Start(ctx context.Context, room string, page *websocket.Conn, dial func(context.Context) (*websocket.Conn, error), dispatch func(context.Context, string) (func(context.Context) (string, error), error), backend <-chan string) (err error) {
+func (m *Manager) Start(ctx context.Context, room string, page *websocket.Conn, dial func(context.Context) (*websocket.Conn, error), dispatch func(context.Context, string) (func(context.Context) (string, error), error), backend <-chan string, options ...Options) (err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	m.mu.Lock()
 	if m.cancel != nil {
@@ -67,7 +67,7 @@ func (m *Manager) Start(ctx context.Context, room string, page *websocket.Conn, 
 		return err
 	}
 	defer provider.Close(websocket.StatusNormalClosure, "call ended")
-	return run(ctx, page, provider, dispatch, backend, callLimits{60 * time.Second, 10 * time.Minute, 2 * time.Hour})
+	return run(ctx, page, provider, dispatch, backend, callLimits{60 * time.Second, 10 * time.Minute, 2 * time.Hour}, options...)
 }
 
 type frame struct {
@@ -95,7 +95,7 @@ func readFrames(ctx context.Context, c *websocket.Conn) <-chan frame {
 	return out
 }
 
-func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(context.Context, string) (func(context.Context) (string, error), error), backend <-chan string, limits callLimits) error {
+func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(context.Context, string) (func(context.Context) (string, error), error), backend <-chan string, limits callLimits, options ...Options) (err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	provider.SetReadLimit(2 << 20)
@@ -103,6 +103,23 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 	if err := writeJSON(ctx, provider, sessionUpdate()); err != nil {
 		return err
 	}
+	var opts Options
+	if len(options) > 0 {
+		opts = options[0]
+	}
+	if item := startupItem(opts.Startup); item != nil {
+		if err := writeJSON(ctx, provider, item); err != nil {
+			return err
+		}
+	}
+	var transcript callTranscript
+	defer func() {
+		if opts.End != nil {
+			endCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer stop()
+			err = errors.Join(err, opts.End(endCtx, transcript.end()))
+		}
+	}()
 	pf, vf := readFrames(ctx, page), readFrames(ctx, provider)
 	timer := time.NewTimer(limits.page)
 	defer timer.Stop()
@@ -320,6 +337,7 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 				if event.Type == "conversation.item.input_audio_transcription.delta" {
 					role = "owner"
 				}
+				transcript.update(event.ItemID, role, event.Delta, false)
 				if err := writeJSON(ctx, page, message{"type": "transcript", "role": role, "item_id": event.ItemID, "delta": event.Delta}); err != nil {
 					return err
 				}
@@ -331,6 +349,7 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 				if event.Type == "conversation.item.input_audio_transcription.completed" {
 					role = "owner"
 				}
+				transcript.update(event.ItemID, role, event.Transcript, true)
 				if err := writeJSON(ctx, page, message{"type": "transcript", "role": role, "item_id": event.ItemID, "text": event.Transcript}); err != nil {
 					return err
 				}
@@ -366,7 +385,10 @@ func run(ctx context.Context, page, provider *websocket.Conn, dispatch func(cont
 					continue
 				}
 				ownerReady = false
-				wait, dispatchErr := dispatch(ctx, request)
+				wait, dispatchErr := dispatch(ctx, delegation(request, transcript.text(), false))
+				if dispatchErr == nil {
+					transcript = callTranscript{}
+				}
 				active++
 				if err := writeJSON(ctx, page, message{"type": "response_done", "working": true}); err != nil {
 					return err
