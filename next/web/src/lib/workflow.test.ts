@@ -72,6 +72,8 @@ test("only a worker with a file opens, and the address names it", () => {
 test("a run's line is its script's status, or its counts when the script wrote none", () => {
   assert.deepEqual(runStatus({ status: "Wave 3: 6 of 7 landed", steps: 76, running: 1, failed: 0 }), { text: "Wave 3: 6 of 7 landed", script: true });
   assert.deepEqual(runStatus({ steps: 76, running: 1, failed: 0 }), { text: "75 of 76 steps · 1 running", script: false });
+  const service = { state: "serving" as const, keys: [{ key: "a", waiting: 2, inFlight: 1 }, { key: "b", waiting: 0, inFlight: 1 }], handled: 14, failed: 1, usage: { model: "", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } };
+  assert.deepEqual(runStatus({ steps: 3, running: 2, failed: 0, service }), { text: "serving · 2 waiting · 2 in flight · 14 handled · 1 failed", script: false });
   assert.equal(countedLine({ steps: 12, running: 0, failed: 2 }), "12 steps · 2 failed");
   assert.equal(countedLine({ steps: 1, running: 0, failed: 0 }), "1 step");
   assert.equal(countedLine({ steps: 0, running: 0, failed: 0 }), "No steps yet");

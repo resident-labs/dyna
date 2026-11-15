@@ -6,7 +6,7 @@
   import { RunState } from "../run.svelte.ts";
   import { boxReason, formatTime, fromNow, fullTime } from "../feed.ts";
   import { formatTimelineDuration } from "../timeline.ts";
-  import { FAILED, branchLink, commitLink, countedLine, flow, mergeFields, minutesLabel, openable, reading, runWords, runningFor, shortCommit, shownFacts, shownStep, stepTime, stepTitle, stepWord, tally, tokenDetail, tokens, total } from "../workflow.ts";
+  import { FAILED, branchLink, commitLink, countedLine, flow, serviceLine, mergeFields, minutesLabel, openable, reading, runWords, runningFor, shortCommit, shownFacts, shownStep, stepTime, stepTitle, stepWord, tally, tokenDetail, tokens, total } from "../workflow.ts";
   import CollapsibleBody from "./CollapsibleBody.svelte";
   import Icon from "./Icon.svelte";
   import Markdown from "./Markdown.svelte";
@@ -213,7 +213,7 @@
       <header>
         <div class="heading">
           <h2>{info.name}</h2>
-          {#if info.paused && !ended}<StatusPill tone="warning" label="Paused" />{:else if words.tone}<StatusPill tone={words.tone} label={words.word} />{:else}<span class="muted">{words.word}</span>{/if}
+          {#if info.paused && !ended}<StatusPill tone="warning" label="Paused" />{:else if words.tone}<StatusPill tone={words.tone} label={words.word} />{:else}<span class="muted">{words.word}</span>{/if}{#if info.service}<span class="muted"> · service</span>{/if}
           {#if info.state === "running" && operate && store.running(session)}
             <div class="controls">
               <button type="button" class="control" disabled={pauseBusy} title={info.paused ? "Start new steps again" : "No new steps start; running workers keep going and can still be steered"} onclick={pause}>{pauseBusy ? (info.paused ? "Unpausing…" : "Pausing…") : info.paused ? "Unpause" : "Pause"}</button>
@@ -237,8 +237,8 @@
         <div class="said" class:script={!!said}>
           {#if info.state === "running"}<WorkingDot />{/if}
           {#if shownLines.length > 1}<button type="button" class="line" aria-expanded={earlier} title={earlier ? "Hide what the script said before" : "Show what the script said before"}
-            onclick={() => { earlier = !earlier; }}>{said?.text ?? countedLine({ steps: steps.length, ...counts })}<span class="chevron" class:open={earlier}><Icon name="chevron" size={14} /></span></button>
-          {:else}<p class="line">{said?.text ?? countedLine({ steps: steps.length, ...counts })}</p>{/if}
+            onclick={() => { earlier = !earlier; }}>{said?.text ?? (info.service ? serviceLine(info.service) : countedLine({ steps: steps.length, ...counts }))}<span class="chevron" class:open={earlier}><Icon name="chevron" size={14} /></span></button>
+          {:else}<p class="line">{said?.text ?? (info.service ? serviceLine(info.service) : countedLine({ steps: steps.length, ...counts }))}</p>{/if}
           {#if said}<span class="age" title={fullTime(said.at)}>written by the script · {fromNow(said.at, now)}</span>{/if}
         </div>
         {#if earlier && shownLines.length > 1}

@@ -74,7 +74,7 @@
           <p class="section">Running</p>
           {#each running as run (run.session)}{@const line = runStatus(run)}
             <a class="run" href={href(run)} onclick={pick} aria-current={session === run.session ? "page" : undefined} title={run.description}>
-              <span class="dot"><WorkingDot /></span><strong>{run.name}</strong><span class="when">{minutesLabel(Math.max(0, now - Date.parse(run.started)))}</span>
+              <span class="dot"><WorkingDot /></span><strong>{run.name}</strong>{#if run.service}<span class="when">service</span>{/if}<span class="when">{minutesLabel(Math.max(0, now - Date.parse(run.started)))}</span>
               <span class="line" class:said={line.script}>{line.text}</span></a>
           {/each}
         {/if}

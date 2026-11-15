@@ -208,7 +208,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `subscription_files` |
 | `subscription_runs` | one row for each Run in progress, which is what stops a subscription overlapping itself |
 | `workflow_runs` | one row for each run of a script, tied to its run session (9.2) |
-| `workflow_subscriptions` | saved workflow action and key policy |
+| `workflow_subscriptions` | saved workflow service: script, args and key policy |
 | `workflow_queue` | bounded events by subscription and key: waiting, or claimed by a service run, with the box start and hand-over count |
 | `workflow_state` | small JSON state by subscription and key |
 | `workflow_streaks` | the keys of a workflow service whose failures its parent has been told of, until one event of the key succeeds |
@@ -760,6 +760,7 @@ One list answers "what does this session still hold?". `Responsibilities(session
 | shell job | needs box | yes | yes | stops |
 | open terminal | needs box | yes | yes | stops |
 | workflow run, a run's own, while its turn is open | needs box | yes | yes | stops |
+| workflow service waiting for events | none | no | no | stops |
 | goal held | owes work | yes | no | goes to the parent; under root it is unheld, listed in `unheld` of the close result and under root in `goal list` |
 | open tracked PR | owes work | yes | no | goes to the parent |
 | open tracked issue | owes work | no | no | goes to the parent |
@@ -1171,33 +1172,62 @@ Each channel is a distinct reply destination. Discord inputs are immediate, bypa
 
 The `discord` tool is declared in mapped rooms and is callable only by a mapping's answering session and its ancestors. `read` resolves a channel ID or exact scoped channel name, returns oldest-first outside-wrapped messages with paging, and retrieves a single message's attachments through a no-reply input delivery. `send` posts text and box files; `api` calls REST under `/api/v10`, adds the token, sends an optional audit-log reason, retries once after a 429 delay, and caps responses at 20 KB. Scope permits `/guilds/SERVER/...` for a server mapped to the room, `/channels/CHANNEL/...` for every channel and thread of its mapped servers as well as its explicitly mapped channels and their threads, and `GET /users/ID`. Everything else, including the bot's account and creating servers, is refused. Gateway metadata supplies channel ownership. Paths must be canonical with no empty or dot segments or percent escapes. Query and recursively nested JSON fields named guild_id or ending in channel_id must contain string IDs within the same mapped scope. Input duplicate detection uses discord_messages' primary key rather than scanning events. The `dyna-discord` skill supplies administration recipes and recommends a cheap front session without a repository or host access for public servers. There are no per-user sessions, slash-command input, voice, reactions, buttons or web settings.
 
-### Event-started workflow runs
+### Workflow services
 
-A room subscription may name a `workflow` action instead of `wake` or `run`.
-It saves script source and object args; the CLI reads `--workflow FILE`, just as
-`workflow run FILE` does. The engine adds the committed event envelope as
-`args.event`. A literal `key`, or a template using `{repo}` and `{number}`, owns
-a serial queue and JSON state within this subscription. No key means a single
-queue. `latest` replaces only a queued event with the newest. Up to 256 events wait
-per subscription; further events remain in the room log. A failed run releases
-its key and is not retried. A room run limit leaves the event queued for a later tick. Other refused starts consume their event, count a failure,
-and backs off subsequent starts using the command-subscription backoff. Its first
-failure sends a notice to the parent; later failures stay in hook.finished
-until a successful start resets the count. Different keys may run concurrently under room limits.
+A room subscription may name a `workflow` action instead of `wake` or `run`. It
+saves script source and object args; the CLI reads `--workflow FILE`, just as
+`workflow run FILE` does. The subscription is a **service**: one workflow run, in
+one box, that stays up and handles the room's events. Per-event runs do not exist.
 
-Root or owner registers the action; its run is a child of root or the live room
-session named by `parent`, which receives posts and results only on failure or a non-empty return. If the report
-session has closed or is closing, the new run is a child of root instead. Existing
-workflow permissions and GitHub write restrictions apply. Run status names the
-originating subscription and key. Disabling a subscription holds new starts;
-removing it removes pending events and state but does not supersede a running run.
+**Script.** The body runs at each box start and sets up. `serve(handler)` registers
+`handler(event, key, state)`; once the body ends, the run waits for events.
+`event` is the committed envelope, `key` the resolved key and `state` that key's
+state. The engine refuses a `--workflow` script that never calls `serve`, and the
+box fails a run whose body ends without it. `serve` outside a subscription, twice or in
+a `workflow()` child throws. Every handler's workers share the box's slots and
+profile limits.
 
-`await state.get()` and `await state.set(value)` call `workflow.state` through the
-run's socket. An active event run accesses its own subscription/key state;
-a caller cannot supply another key. Hand-started runs instead have temporary state, initially null, discarded when they end. State is JSON up to 64 KiB, null initially.
-Writes persist immediately, including on failure, and are not journaled steps.
-Own-account comment, changes_requested, approved and metadata do not start runs
-unless `includeOwn` is true; pushed, merged and ci_* remain eligible. Filters run
-after those suppressed kinds are removed. Batched PR changes split by PR first.
+**Queue.** Events stay in `workflow_queue`. A literal `key`, or a template using
+`{repo}` and `{number}`, owns a serial queue; no key means a single queue.
+`latest` replaces only a waiting row, never one a handler holds. Up to 256 events
+wait per subscription; further events remain in the room log. The box asks for
+events with `workflow.events` (boot name and room for a limit): the engine claims
+the oldest row of each key with none in a handler of that box start and hands it over.
+A row claimed by an earlier box start or run is handed over again, so a lost box, a
+restart or an engine restart redelivers it. A row handed over 3 times and still
+unacknowledged fails and the parent is told, so a poison event cannot loop. The box acknowledges
+a row with `workflow.event_done` when its handler returns or throws. A thrown handler
+fails only its row; the parent is told once per streak of failures of that key
+(`workflow_streaks`), and the service goes on. A reload runs a handler in flight again in the
+box, with the new script.
+
+**Steps.** A handler runs in a VM of its own: the script runs again, the body's steps
+return their stored results and `serve` calls the handler with its event. Handler steps
+are scoped by the queue row (`workflow_steps.event`), so a redelivered row replays its own
+finished steps and two rows never share any. Body steps are scoped by the box start, so
+each new box runs the body for real. An acknowledged row's steps leave the journal; the run
+keeps `handled`, `failed`, the last event time and their usage in `workflow_runs.served`.
+Usage is recorded as each step finishes.
+
+**Run.** `subscription add` starts the run as root's child or the live room session named
+by `parent` (root when it has closed). At most one exists, enforced by a unique index, and it
+holds one run slot and counts against `maxRuns`. `subscription update --workflow` reloads
+it; `disable` stops it, events wait, and `enable` starts it again; `remove` ends it and
+deletes the queue and state. A run that ends in failure restarts after 1, 5, then 30 minutes,
+with the parent told once per streak; the first events request of a box ends the streak.
+A lost box restarts as any workflow box does. The box never stops for being quiet, because its
+turn never ends. A serving turn is exempt from check-ins. An update that restarts boxes waits
+for the service to have no handler in flight, then the body runs again and waiting rows stay queued.
+
+**Observe.** `workflow status` and the run page show the state (starting, serving), the events
+waiting and in a handler by key, and the totals handled and failed. The Runs list marks a service.
+
+Root or owner registers the action. Existing workflow permissions and GitHub write restrictions
+apply. `await state.get()` and `await state.set(value)` call `workflow.state` with the handler's row:
+a handler reaches its own key only. Hand-started runs instead have temporary state, discarded when
+they end. State is JSON up to 64 KiB, null initially. Writes persist immediately, including on
+failure, and are not journaled steps. Own-account comment, changes_requested, approved and metadata do not
+queue events unless `includeOwn` is true; pushed, merged and ci_* remain eligible. Filters run after
+those suppressed kinds are removed. Batched PR changes split by PR first.
 
 Root or owner can queue an event manually with `subscription fire {id, key?, event?}`: event is a full envelope, omitted means synthetic hook.due, and key overrides the resolved key. `subscription update` replaces supplied workflow, where, key, latest or parent fields while preserving queue and state. `subscription state` lists keys, reads a supplied key, or writes a supplied JSON value (null resets it). Own account means the GitHub account Dyna acts as in this room. `kind=pushed,opened` matches either kind.

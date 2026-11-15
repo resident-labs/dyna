@@ -43,6 +43,7 @@ Script body hooks:
 - merge(results, opts?: {base?, label?}): Promise<{branch, commit, merged, conflicts}> — merge the worktree results (each `commit`, in order) from `base` (the pinned commit by default) into `<run session branch>-run`. A conflict or failed `parallel` entry lands in `conflicts`; misuse or git failure throws. See Worktrees.
 - workflow(path: string, args?: any): Promise<any> — run another script inline as a sub-step and return what it returns. Nests one level; the child's `meta` is ignored, and it reruns on every call.
 - post(to, text, data?, opts?: {lane?}): Promise<{event, seq}> — post to the run's parent (`to` is `parent` or its name; any other mention fails the step), once however often the script replays.
+- serve(handler: async (event, key, state) => void): void — only in a script attached to a subscription (events.md): the body is setup that runs at each box start, and once it ends the run stays up and calls `handler` for each event, with the event envelope, its key and that key's `state` (`get()`, `set(v)`). Keys run concurrently in one box; a key's events run in order. Call it once, in the script itself. A subscription's script whose body ends without it is refused; `workflow run` refuses it.
 - status(text: string): void — set the run's one-line status under its name on the run page and in the Runs list. It is not a step and does not replay.
 - log(message: string): void — emit a progress message into the run's journal. phase(title: string): void — start a new phase; subsequent agent() calls are grouped under this title.
 - args: any — the JSON text passed as `--args` or the tool's `args`, already parsed (`null` without it): `JSON.parse(args)` throws on an object. Use it to parameterize a script — a research question, target path or config object — instead of a side-channel file.
@@ -179,4 +180,4 @@ Every call is a keyed step. A key hashes kind, prompt or command, options other 
 
 ## Start a script from events
 
-Root can attach a script to room events, with one run at a time per key and saved state. Read [events.md](events.md).
+Root can attach a script to room events as a service: one run that stays up in one box, handles each event with `serve()` and keeps saved state per key. Read [events.md](events.md).

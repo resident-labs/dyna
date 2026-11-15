@@ -1,4 +1,4 @@
-import type { WorkflowInfo, WorkflowMerge, WorkflowState, WorkflowStep, WorkflowStepResponse } from "./contract.gen.ts";
+import type { WorkflowInfo, WorkflowService, WorkflowMerge, WorkflowState, WorkflowStep, WorkflowStepResponse } from "./contract.gen.ts";
 import { count, formatTime } from "./feed.ts";
 import { parsedJson, type Json } from "./json.ts";
 import { formatTimelineDuration } from "./timeline.ts";
@@ -133,9 +133,16 @@ export function countedLine({ steps, running, failed }: { steps: number; running
   return [running ? `${steps - running} of ${steps} steps` : count(steps, "step"), ...running ? [`${running} running`] : [], ...failed ? [`${failed} failed`] : []].join(" · ");
 }
 
-// A run's one line: its script's latest status(), or its counts.
-export const runStatus = (run: Pick<WorkflowInfo, "status" | "steps" | "running" | "failed">): { text: string; script: boolean } =>
-  run.status ? { text: run.status, script: true } : { text: countedLine({ steps: run.steps ?? 0, running: run.running ?? 0, failed: run.failed }), script: false };
+// What a service shows of itself, as "serving · 2 waiting · 1 in flight · 14 handled · 1 failed".
+export function serviceLine({ state, keys: listed, handled, failed }: WorkflowService): string {
+  const keys = listed ?? [];
+  const waiting = keys.reduce((n, key) => n + key.waiting, 0), inFlight = keys.reduce((n, key) => n + key.inFlight, 0);
+  return [state, ...waiting ? [`${waiting} waiting`] : [], ...inFlight ? [`${inFlight} in flight`] : [], `${handled} handled`, ...failed ? [`${failed} failed`] : []].join(" · ");
+}
+
+// A run's one line: its script's latest status(), a service's counts of events, or its steps' counts.
+export const runStatus = (run: Pick<WorkflowInfo, "status" | "steps" | "running" | "failed" | "service">): { text: string; script: boolean } =>
+  run.status ? { text: run.status, script: true } : run.service ? { text: serviceLine(run.service), script: false } : { text: countedLine({ steps: run.steps ?? 0, running: run.running ?? 0, failed: run.failed }), script: false };
 
 // A worker with a file has a transcript to open.
 export const openable = (step: WorkflowStep): boolean => step.kind === "agent" && !!step.transcript;
