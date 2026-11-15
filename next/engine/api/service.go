@@ -108,6 +108,7 @@ type Service interface {
 	RoomDelete(context.Context, contract.Principal, contract.RoomDeleteRequest) (contract.RoomDeleteResponse, *contract.Error)
 	HostSetLimits(context.Context, contract.Principal, contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, *contract.Error)
 	HostSet(context.Context, contract.Principal, contract.HostSetRequest) (contract.HostSetResponse, *contract.Error)
+	OwnerTimezone(context.Context, contract.Principal, contract.OwnerTimezoneRequest) (contract.OwnerTimezoneResponse, *contract.Error)
 	RoomSet(context.Context, contract.Principal, contract.RoomSetRequest) (contract.RoomSetResponse, *contract.Error)
 	RoomRepoAdd(context.Context, contract.Principal, contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, *contract.Error)
 	RoomRepos(context.Context, contract.Principal, contract.RoomReposRequest) (contract.RoomReposResponse, *contract.Error)
