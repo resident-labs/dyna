@@ -17,7 +17,6 @@ import (
 	"github.com/resident-labs/dyna/harness"
 	"github.com/resident-labs/dyna/harness/testutil"
 
-	"github.com/resident-labs/dyna/box/dynaext"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -119,8 +118,6 @@ type fakeWorker struct {
 	act           func(dir, prompt string) // what the worker does to its tree before it answers
 	hold          func(ctx context.Context, prompt string) error
 	dir           string
-	work          func(dir string, submit dynaext.Submit) // what a schema worker does with its submit tool
-	submit        dynaext.Submit
 	steer         func(contract.TurnInput) error  // nil: no turn is running to take a steer
 	read          func(contract.DeliverySeq) bool // whether the session holds a steer it queued
 }
@@ -128,9 +125,6 @@ type fakeWorker struct {
 func (w *fakeWorker) Start(ctx context.Context, id contract.TurnID, inputs []contract.TurnInput, _ func()) (contract.TurnEnded, error) {
 	if w.act != nil {
 		w.act(w.dir, inputs[0].Text)
-	}
-	if w.work != nil && w.submit != nil {
-		w.work(w.dir, w.submit)
 	}
 	if w.hold != nil {
 		if err := w.hold(ctx, inputs[0].Text); err != nil {
@@ -166,9 +160,8 @@ type crewHarness struct {
 	workflow *contract.BoxWorkflow
 	timeout  int // the room's default step timeout in seconds, as the engine sends it
 	t        *testing.T
-	work     func(dir string, submit dynaext.Submit)
 	mu       sync.Mutex
-	submits  []bool // whether each opened worker had the submit tool
+	schemas  []string // the schema each opened worker was given
 	journal  *fakeJournal
 	started  atomic.Int32
 	reply    func(prompt, model string) (contract.TurnEnded, error)
@@ -213,16 +206,16 @@ func (h *crewHarness) start(script string, profiles ...contract.WorkflowProfile)
 	crew, err := NewCrew(CrewConfig{
 		Workflow: workflow,
 		Engine:   h.journal,
-		Open: func(_ context.Context, profile contract.WorkflowProfile, folder, dir string, submit dynaext.Submit) (crewWorker, error) {
+		Open: func(_ context.Context, profile contract.WorkflowProfile, folder, dir string, schema json.RawMessage) (crewWorker, error) {
 			data, err := os.ReadFile(filepath.Join(folder, "models.json"))
 			if err != nil || !strings.Contains(string(data), contract.WorkerHeader) {
 				h.t.Errorf("worker configuration %s: %v", data, err)
 			}
 			h.started.Add(1)
 			h.mu.Lock()
-			h.submits = append(h.submits, submit != nil)
+			h.schemas = append(h.schemas, string(schema))
 			h.mu.Unlock()
-			return &fakeWorker{reply: h.reply, act: h.act, work: h.work, submit: submit, hold: h.hold, steer: h.steer, read: h.read, dir: dir, model: profile.Model.ID, file: filepath.Join(sessions, fmt.Sprintf("w%d.jsonl", opened.Add(1)))}, nil
+			return &fakeWorker{reply: h.reply, act: h.act, hold: h.hold, steer: h.steer, read: h.read, dir: dir, model: profile.Model.ID, file: filepath.Join(sessions, fmt.Sprintf("w%d.jsonl", opened.Add(1)))}, nil
 		},
 		Transcript: NewTranscript(&transcriptEngine{}, sessions),
 		Workdir:    h.workdir,
@@ -673,7 +666,7 @@ func TestStoppingARunStoresNothing(t *testing.T) {
 	}
 	state, sessions := t.TempDir(), t.TempDir()
 	crew, err := NewCrew(CrewConfig{Workflow: contract.BoxWorkflow{Script: crewMeta + `return await agent('long')`, Profiles: []contract.WorkflowProfile{{Name: "fast"}}, Workers: 1}, Engine: h.journal, Transcript: NewTranscript(&transcriptEngine{}, sessions), Workdir: h.workdir, Sessions: sessions, State: state,
-		Open: func(context.Context, contract.WorkflowProfile, string, string, dynaext.Submit) (crewWorker, error) {
+		Open: func(context.Context, contract.WorkflowProfile, string, string, json.RawMessage) (crewWorker, error) {
 			return &fakeWorker{reply: h.reply, hold: hold, file: filepath.Join(sessions, "w.jsonl")}, nil
 		}})
 	if err != nil {
@@ -706,7 +699,7 @@ func TestAReconnectDoesNotRestartTheScript(t *testing.T) {
 	}
 	state, sessions := t.TempDir(), t.TempDir()
 	crew, err := NewCrew(CrewConfig{Workflow: contract.BoxWorkflow{Script: crewMeta + `return await agent('long')`, Profiles: []contract.WorkflowProfile{{Name: "fast"}}, Workers: 1}, Engine: h.journal, Transcript: NewTranscript(&transcriptEngine{}, sessions), Workdir: h.workdir, Sessions: sessions, State: state,
-		Open: func(context.Context, contract.WorkflowProfile, string, string, dynaext.Submit) (crewWorker, error) {
+		Open: func(context.Context, contract.WorkflowProfile, string, string, json.RawMessage) (crewWorker, error) {
 			h.started.Add(1)
 			return &fakeWorker{reply: h.reply, file: filepath.Join(sessions, "w.jsonl")}, nil
 		}})
@@ -826,7 +819,7 @@ func TestARecoveredCrewFilesItsWorkersUnderItsTurn(t *testing.T) {
 	sessions := t.TempDir()
 	var delivery contract.DeliverySeq
 	crew, err := NewCrew(CrewConfig{Workflow: contract.BoxWorkflow{Script: crewMeta + `return await agent('one')`, Profiles: []contract.WorkflowProfile{{Name: "fast"}}, Workers: 1}, Engine: h.journal, Transcript: NewTranscript(&transcriptEngine{}, sessions), Workdir: h.workdir, Sessions: sessions, State: t.TempDir(),
-		Open: func(context.Context, contract.WorkflowProfile, string, string, dynaext.Submit) (crewWorker, error) {
+		Open: func(context.Context, contract.WorkflowProfile, string, string, json.RawMessage) (crewWorker, error) {
 			return recordingWorker{fakeWorker: &fakeWorker{reply: h.reply, file: filepath.Join(sessions, "w.jsonl")}, delivery: &delivery}, nil
 		}})
 	if err != nil {

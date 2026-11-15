@@ -573,3 +573,18 @@ func TestAResumedSessionGetsANewHeadAsOneContextUpdate(t *testing.T) {
 		t.Fatalf("the system prompt changed: %s", requests[1].System)
 	}
 }
+
+// A worker whose final text a script rejects takes a second turn in the same session, which carries the first.
+func TestASessionTakesASecondTurnAfterStartReturns(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "Done."}}, []pigtest.Block{{Text: `{"count": 3}`}})
+	h := open(t, model)
+	if first := start(t, h, "count them"); first.Final != "Done." {
+		t.Fatalf("first turn %+v", first)
+	}
+	if second := start(t, h, "that was not JSON"); second.Final != `{"count": 3}` || second.Outcome != contract.TurnCompleted {
+		t.Fatalf("second turn %+v", second)
+	}
+	if got := lastMessage(model.Requests()[1]); !strings.Contains(got, "that was not JSON") || !strings.Contains(string(model.Requests()[1].Messages[0]), "count them") {
+		t.Fatalf("the second request %s", got)
+	}
+}
