@@ -58,10 +58,12 @@ func sessionCommand(getClient func() client) *cobra.Command {
 		}
 		return err
 	}}
-	restart := &cobra.Command{Use: "restart SESSION", Short: "Replace a failed session box", Long: "Replace a failed session box. The old volume and unpushed work are lost. Removes the container and workspace/stack volumes on every known current or prior host before resetting the box. If cleanup on any of those hosts fails, as when it does not answer, the box stays failed and the error names the host; run restart again once that host answers (host list shows it). Deletion may already be partial; it is not rolled back.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := getClient().SessionRestart(cmd.Context(), contract.SessionRestartRequest{Session: contract.SessionID(args[0])})
+	var restartHost string
+	restart := &cobra.Command{Use: "restart SESSION", Short: "Replace a failed or never-created pending session box", Long: "Replace a failed session box, or re-place a pending box never created on any host. Pending boxes with existing files are refused. --host replaces a host/same-host pin within the room host rule; without it the pin stays. For a failed box, The old volume and unpushed work are lost. Removes the container and workspace/stack volumes on every known current or prior host before resetting the box. If cleanup on any of those hosts fails, as when it does not answer, the box stays failed and the error names the host; run restart again once that host answers (host list shows it). Deletion may already be partial; it is not rolled back.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := getClient().SessionRestart(cmd.Context(), contract.SessionRestartRequest{Session: contract.SessionID(args[0]), Host: contract.HostName(restartHost)})
 		return err
 	}}
+	restart.Flags().StringVar(&restartHost, "host", "", "Replace the placement pin with this host, within the room host rule")
 	var refreshRoom string
 	refresh := &cobra.Command{Use: "refresh [SESSION]", Short: "Mark a box to restart once nothing needs it", Long: "Mark a running box to restart once no turn, job or terminal needs it. It keeps its volume, unlike session restart, which discards it.", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if (len(args) == 1) == (refreshRoom != "") {

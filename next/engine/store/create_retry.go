@@ -19,12 +19,13 @@ const (
 
 // allocationRetryEligibility reads structured provenance, never a human reason. StartSession writes an initial pending
 // BoxChanged in the box's transaction and assigns its Host only for pinned placement (sameHost or an explicit host). An explicit owner restart ends that initial
-// affinity. Events survive as long as the room's boxes; absent legacy/import provenance is unknown, not permission to move.
+// affinity. Pending-to-pending restarts retain or replace the pin in their Host.
+// Events survive as long as the room's boxes; absent legacy/import provenance is unknown, not permission to move.
 // Its unused proof is shared with volume cleanup and covers the box's whole recorded history, never image or created_at.
 func allocationRetryEligibility(ctx context.Context, tx *sql.Tx, id contract.BoxID, room contract.RoomID) (createRetryEligibility, error) {
 	var host contract.HostName
 	var restarted bool
-	err := tx.QueryRowContext(ctx, `SELECT coalesce(json_extract(CAST(body AS TEXT),'$.host'),''),coalesce(json_extract(CAST(body AS TEXT),'$.from'),'')='failed' FROM events WHERE room=? AND type='box.changed' AND json_extract(CAST(body AS TEXT),'$.box')=? AND json_extract(CAST(body AS TEXT),'$.to')='pending' AND (coalesce(json_extract(CAST(body AS TEXT),'$.from'),'')='' OR (from_kind='owner' AND json_extract(CAST(body AS TEXT),'$.from')='failed')) ORDER BY seq DESC LIMIT 1`, room, id).Scan(&host, &restarted)
+	err := tx.QueryRowContext(ctx, `SELECT coalesce(json_extract(CAST(body AS TEXT),'$.host'),''),coalesce(json_extract(CAST(body AS TEXT),'$.from'),'')='failed' FROM events WHERE room=? AND type='box.changed' AND json_extract(CAST(body AS TEXT),'$.box')=? AND json_extract(CAST(body AS TEXT),'$.to')='pending' AND (coalesce(json_extract(CAST(body AS TEXT),'$.from'),'')='' OR (from_kind='owner' AND json_extract(CAST(body AS TEXT),'$.from')='failed') OR (from_kind IN ('owner','session') AND json_extract(CAST(body AS TEXT),'$.from')='pending')) ORDER BY seq DESC LIMIT 1`, room, id).Scan(&host, &restarted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return createRetryUnknown, nil
 	}

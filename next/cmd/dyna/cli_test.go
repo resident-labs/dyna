@@ -510,6 +510,10 @@ func TestSessionRestartMapsID(t *testing.T) {
 	if f.restart.Session != "s" {
 		t.Fatalf("%+v", f.restart)
 	}
+	runCLI(t, f, "session", "restart", "s", "--host", "other")
+	if f.restart.Host != "other" {
+		t.Fatalf("%+v", f.restart)
+	}
 	if _, err := execCLI(f, "session", "restart"); err == nil {
 		t.Fatal("restart accepted a missing session")
 	}

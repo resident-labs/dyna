@@ -617,6 +617,8 @@ type SessionSetBranchRequest struct {
 type SessionSetBranchResponse struct{}
 type SessionRestartRequest struct {
 	Session SessionID `json:"session"`
+	// Host replaces a placement pin, within the room host rule. Omit to keep the pin.
+	Host HostName `json:"host,omitempty"`
 }
 type SessionRestartResponse struct{}
 
