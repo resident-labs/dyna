@@ -44,6 +44,7 @@ func TestAdmissionNoticeOncePerPendingSpell(t *testing.T) {
 	if err := r.st.Read().QueryRowContext(r.ctx, "SELECT json_extract(body,'$.text') FROM events WHERE type='session.notice' LIMIT 1").Scan(&text); err != nil {
 		t.Fatal(err)
 	}
+	t.Log("Rendered sample notice:\n" + text)
 	if !strings.Contains(text, "of 256 GiB reserved (4× 64 GiB") || !strings.Contains(text, "/lead:") {
 		t.Fatalf("wrong explanation: %s", text)
 	}

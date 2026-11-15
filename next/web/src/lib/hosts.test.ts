@@ -247,3 +247,9 @@ test("reservations remain separate from measured free disk", () => {
  assert.equal(hostReservations(h), "Reserved: CPU 12/32 cores · memory 92.0/104.0 GiB · disk 4.0/18.0 GiB");
  assert.ok(JSON.stringify(hostMeters(h)).includes("111 GB free"));
 });
+
+test("merged engine machine retains registered admission reservations", () => {
+ const reservations = { cpuMilli: 1000, cpuCap: 32000, memory: 4, memoryCap: 32, disk: 5, diskCap: 50 };
+ const merged = machines([{ ...machine, name: "control-plane" }, { ...machine, name: "engine", engineHost: true, reservations }]);
+ assert.deepEqual(merged[0].reservations, reservations);
+});

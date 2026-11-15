@@ -40,7 +40,7 @@ export function machines(hosts: HostSummary[]): HostSummary[] {
   if (!plane || !same || !hostMeters(plane).length) return hosts;
   const merged = { ...plane, name: same.name, reachable: same.reachable, lastSeen: same.lastSeen, boxes: plane.boxes + same.boxes, runners: same.runners,
     agents: same.agents, ci: same.ci, ciScale: same.ciScale, rooms: same.rooms, problem: same.problem, health: same.health,
-    diskLow: diskLow(plane) || diskLow(same), sessions: [...plane.sessions ?? [], ...same.sessions ?? []], engineHost: true };
+    reservations: same.reservations, diskLow: diskLow(plane) || diskLow(same), sessions: [...plane.sessions ?? [], ...same.sessions ?? []], engineHost: true };
   return hosts.filter(h => h !== same).map(h => h === plane ? merged : h);
 }
 

@@ -71,13 +71,25 @@ func (s *Service) AdmissionNotices(ctx context.Context) error {
 			} else {
 				lines = append(lines, "Not pinned; eligible hosts follow (room and host rules still apply).")
 			}
+			if b.Reason == string(box.PendingRoomLimit) {
+				candidates = []box.Host{{Name: "room limits"}}
+			}
 			if len(candidates) == 0 {
 				lines = append(lines, "No eligible registered host; check host list and the room's host rule or pool.")
 			}
 			for _, h := range candidates {
-				lines = append(lines, admissionHost(h, boxes, b))
+				if b.Reason == string(box.PendingRoomLimit) {
+					var services []box.ServiceHold
+					for _, host := range hosts {
+						services = append(services, host.Services...)
+					}
+					cpu, mem := box.RoomQuarters(b.Room, boxes, services, b.ID, "")
+					lines = append(lines, fmt.Sprintf("Room %s: CPU %.2f of %d cores reserved, memory %s of %s reserved (boxes count at one quarter, services whole); this box adds %.2f cores and %s. A zero cap means unlimited. Moving hosts does not release a room limit.", b.Room, float64(cpu)/4000, row.Limits.CPUs, admissionBytes(mem/4), admissionBytes(row.Limits.MemBytes), float64(b.Size.CPUs)/4, admissionBytes(b.Size.MemBytes/4)))
+				} else {
+					lines = append(lines, admissionHost(h, boxes, b))
+				}
 				holders := slices.DeleteFunc(slices.Clone(boxes), func(v box.Box) bool {
-					return v.ID == b.ID || v.Host != h.Name || v.State == contract.BoxFailed || v.State == contract.BoxDeleted || (b.Reason == "disk" && !box.UnmeasuredDisk(h, v)) || (b.Reason == "gpu" && (!v.HoldsGPU() || v.GPU == 0)) || (b.Reason != "disk" && b.Reason != "gpu" && !box.HoldsCompute(v))
+					return v.ID == b.ID || (b.Reason == string(box.PendingRoomLimit) && v.Room != b.Room) || (b.Reason != string(box.PendingRoomLimit) && v.Host != h.Name) || ((b.Reason == "cpu" || b.Reason == "memory") && b.Image != "" && b.Image != box.RunnerImage && v.Image == box.RunnerImage) || v.State == contract.BoxFailed || v.State == contract.BoxDeleted || (b.Reason == "disk" && !box.UnmeasuredDisk(h, v)) || (b.Reason == "gpu" && (!v.HoldsGPU() || v.GPU == 0)) || (b.Reason != "disk" && b.Reason != "gpu" && !box.HoldsCompute(v))
 				})
 				weight := func(v box.Box) int64 {
 					switch b.Reason {
@@ -112,6 +124,9 @@ func (s *Service) AdmissionNotices(ctx context.Context) error {
 						return fmt.Errorf("admission holder access: %s", problem.Message)
 					}
 					size := admissionBytes(weight(held))
+					if b.Reason == string(box.PendingRoomLimit) {
+						size = fmt.Sprintf("%.2f cores and %s reserved", float64(held.Size.CPUs)/4, admissionBytes(held.Size.MemBytes/4))
+					}
 					if b.Reason == "cpu" {
 						size = fmt.Sprintf("%d CPUs", weight(held))
 					}
