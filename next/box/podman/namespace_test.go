@@ -381,16 +381,36 @@ func namespaceCommand(root, mode string, args ...string) *exec.Cmd {
 
 func TestNamespaceProcessGone(t *testing.T) {
 	for _, tc := range []struct {
-		state string
-		gone  bool
+		state, worker string
+		gone          bool
 	}{
-		{"Z", true}, {"X", true}, {"S", false}, {"R", false}, {"", false},
+		{"Z", "", true}, {"X", "", true}, {"S", "", false}, {"R", "", false}, {"", "", false},
+		{"Z", "S", false}, {"Z", "Z", true}, {"Z", "unknown", false},
 	} {
-		t.Run(tc.state, func(t *testing.T) {
+		t.Run(tc.state+tc.worker, func(t *testing.T) {
 			proc := t.TempDir()
 			if tc.state != "" {
-				if err := os.WriteFile(filepath.Join(proc, "stat"), []byte("42 (command ) with spaces) "+tc.state+" 0 0\n"), 0600); err != nil {
+				stat := []byte("42 (command ) with spaces) " + tc.state + " 0 0\n")
+				if err := os.WriteFile(filepath.Join(proc, "stat"), stat, 0600); err != nil {
 					t.Fatal(err)
+				}
+				task := filepath.Join(proc, "task", "42")
+				if err := os.MkdirAll(task, 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(task, "stat"), stat, 0600); err != nil {
+					t.Fatal(err)
+				}
+				if tc.worker != "" {
+					task = filepath.Join(proc, "task", "43")
+					if err := os.MkdirAll(task, 0700); err != nil {
+						t.Fatal(err)
+					}
+					if tc.worker != "unknown" {
+						if err := os.WriteFile(filepath.Join(task, "stat"), []byte("43 (worker) "+tc.worker+" 0\n"), 0600); err != nil {
+							t.Fatal(err)
+						}
+					}
 				}
 			}
 			err := exec.Command("bash", "-c", namespaceProcAccess+`namespace_process_gone "$1"`, "fixture", proc).Run()

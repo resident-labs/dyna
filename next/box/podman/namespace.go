@@ -30,16 +30,30 @@ func (e NamespaceUncertain) Error() string {
 func (e NamespaceUncertain) Unwrap() error { return e.Err }
 
 // namespaceProcAccess is shared with fixture tests of the procfs trust boundary.
-const namespaceProcAccess = `namespace_process_gone() {
+const namespaceProcAccess = `# 0: wholly gone; 1: live/unknown leader; 2: dead leader with an unproven
+# thread group whose descriptors may be hidden by procfs.
+namespace_process_gone() {
  if ! IFS= read -r process_stat 2>/dev/null < "$1/stat"; then
   test ! -d "$1"
   return $?
  fi
  read -r process_state rest <<< "${process_stat##*) }"
- # Zombies and dead tasks have no descriptor table, even while procfs keeps
- # their entry pending reaping. Exited processes may disappear at any read.
- case $process_state in Z|X) return 0;; esac
- return 1
+ case $process_state in Z|X) ;; *) return 1;; esac
+ # A zombie leader may still have live threads sharing its descriptor table.
+ # Only a wholly dead thread group is unable to retain a namespace flock.
+ if ! test -r "$1/task" || ! test -x "$1/task"; then
+  test ! -d "$1" && return 0
+  return 2
+ fi
+ for task in "$1"/task/[0-9]*; do
+  if ! IFS= read -r task_stat 2>/dev/null < "$task/stat"; then
+   test ! -d "$task" && continue
+   return 2
+  fi
+  read -r task_state rest <<< "${task_stat##*) }"
+  case $task_state in Z|X) ;; *) return 2;; esac
+ done
+ return 0
 }
 namespace_other_user() {
  while read -r field real effective rest; do
@@ -173,8 +187,10 @@ namespace_stale_holders() {
  exec 8>&- 9>&-
  pids=
  for proc in /proc/[0-9]*; do
-  namespace_process_gone "$proc" && continue
-  if ! test -r "$proc/fd" || ! test -x "$proc/fd"; then
+  if namespace_process_gone "$proc"; then continue; else gone_status=$?; fi
+  # A dead leader's fd directory can look readable but empty while live
+  # workers retain its flock. Treat that hidden table as unreadable too.
+  if test "$gone_status" = 2 || ! test -r "$proc/fd" || ! test -x "$proc/fd"; then
    namespace_unreadable_safe "$proc" && continue
    namespace_process_gone "$proc" && continue
    printf 'namespace recovery refused: unreadable descriptors for %s\n' "$proc" >&2
