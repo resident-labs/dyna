@@ -1,17 +1,20 @@
 package pig
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/MichaelKinsy/PiG/ai"
 )
 
 func TestTranscriptProgress(t *testing.T) {
 	data := `{"type":"session","timestamp":"2026-11-14T00:00:00Z"}
 {"type":"message","timestamp":"2026-11-14T00:00:01Z","message":{"role":"assistant","usage":{"input":10,"output":2,"cacheRead":3,"cacheWrite":4},"content":[{"type":"toolCall"},{"type":"toolCall"}]}}
-{"type":"message","timestamp":"2026-11-14T00:00:02Z","message":{"role":"toolResult","details":{"calls":[{"id":"outer/1"},{"id":"outer/2"}]},"content":[{"type":"text","text":"done"}]}}
+{"type":"message","timestamp":"2026-11-14T00:00:02Z","message":{"role":"toolResult","nestedCalls":{"calls":[{"id":"outer/1"},{"id":"outer/2"}]},"content":[{"type":"text","text":"done"}]}}
 {"type":"message","timestamp":"2026-11-14T00:00:03Z","message":{"role":"assistant","usage":{"input":5,"output":6},"content":[{"type":"text","text":"done"}]}}
 `
 	p, err := readProgress(strings.NewReader(data + `{"type":"message","timestamp":"2026-11-14T00:00:04Z"`))
@@ -33,5 +36,21 @@ func TestTranscriptProgress(t *testing.T) {
 	p, err = r.Progress("not-arrived.jsonl")
 	if err != nil || p.ToolCalls != 0 || !p.LastActivity.IsZero() {
 		t.Fatalf("missing: %+v %v", p, err)
+	}
+}
+
+func TestTranscriptProgressPiGNestedCalls(t *testing.T) {
+	message := ai.ToolResultMessage{ToolName: "codemode", NestedCalls: &ai.NestedToolCalls{Calls: []ai.NestedToolCallRecord{{ID: "outer/1"}, {ID: "outer/2"}}, Complete: true}, Details: map[string]any{"calls": []any{"unrelated"}}}
+	data, err := json.Marshal(struct {
+		Type      string               `json:"type"`
+		Timestamp string               `json:"timestamp"`
+		Message   ai.ToolResultMessage `json:"message"`
+	}{"message", "2026-11-14T00:00:02Z", message})
+	if err != nil {
+		t.Fatal(err)
+	}
+	progress, err := readProgress(strings.NewReader(string(data) + "\n"))
+	if err != nil || progress.ToolCalls != 2 {
+		t.Fatalf("PiG tool result: %+v %v; data %s", progress, err, data)
 	}
 }

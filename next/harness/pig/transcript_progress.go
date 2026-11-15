@@ -33,8 +33,8 @@ func readProgress(r io.Reader) (TranscriptProgress, error) {
 			Type      string
 			Timestamp time.Time
 			Message   struct {
-				Role    string
-				Details struct {
+				Role        string
+				NestedCalls struct {
 					Calls []struct{ ID string }
 				}
 				Usage   struct{ Input, Output, CacheRead, CacheWrite int64 }
@@ -48,7 +48,7 @@ func readProgress(r io.Reader) (TranscriptProgress, error) {
 			progress.LastActivity = record.Timestamp
 		}
 		if record.Message.Role == "toolResult" {
-			progress.ToolCalls += len(record.Message.Details.Calls)
+			progress.ToolCalls += len(record.Message.NestedCalls.Calls)
 		}
 		if record.Message.Role != "assistant" {
 			continue
