@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
@@ -56,6 +57,8 @@ type crewEngine interface {
 	WorkflowStepTranscript(context.Context, contract.WorkflowStepTranscriptRequest) error
 	WorkflowSetStatus(context.Context, contract.WorkflowSetStatusRequest) error
 	WorkflowState(context.Context, contract.WorkflowStateRequest) (contract.WorkflowStateResponse, error)
+	WorkflowEvents(context.Context, contract.WorkflowEventsRequest) (contract.WorkflowEventsResponse, error)
+	WorkflowEventDone(context.Context, contract.WorkflowEventDoneRequest) error
 	WorkflowPost(context.Context, contract.PostRequest) (contract.PostResponse, error)
 }
 
@@ -107,7 +110,9 @@ type Crew struct {
 	taken    map[contract.DeliverySeq]bool
 	delivery contract.DeliverySeq // workers carry it, so the engine files their transcripts under the crew's turn
 	turn     contract.TurnID
-	dryState json.RawMessage // hand-started state lives only in this crew
+	dryState json.RawMessage                  // hand-started state lives only in this crew
+	boot     string                           // names this start of the script to the engine, which hands an event over again to a new one
+	held     map[int64]contract.WorkflowEvent // the events whose handlers have not ended, which a reload runs again
 	stop     context.CancelFunc
 }
 
@@ -350,6 +355,7 @@ func (c *Crew) Start(ctx context.Context, id contract.TurnID, inputs []contract.
 		c.delivery = input.Delivery
 	}
 	c.turn, c.stop = id, cancel
+	c.boot, c.held = rand.Text(), make(map[int64]contract.WorkflowEvent)
 	profiles := c.workflow.Profiles
 	c.mu.Unlock()
 	started()
@@ -393,6 +399,8 @@ type crewCall struct {
 	Parent  string          `json:"parent"`
 	Phase   string          `json:"phase"`
 	Lane    string          `json:"lane"`
+	Scope   string          `json:"scope"` // the box start for a body's steps, the queue row for a handler's; empty outside a service
+	Event   int64           `json:"event"` // the queue row of a handler's calls
 	Payload json.RawMessage `json:"payload"`
 	Opts    json.RawMessage `json:"opts"`
 	run     *execution      // the execution that made the call
@@ -456,7 +464,15 @@ func (c *Crew) execute(ctx, work context.Context, steps *sync.WaitGroup, workflo
 	if args == "" {
 		args = "null"
 	}
-	end, err := c.runScript(work, run, workflow.Script, args, "", 0)
+	var service *serviceMode
+	if workflow.Subscription != "" {
+		service = &serviceMode{Scope: "boot:" + c.boot}
+	}
+	end, err := c.runScript(work, run, workflow.Script, args, "", 0, service)
+	if err == nil && end.Failure == nil && end.Served {
+		// The body has set up. The run now hands events to handlers, until a reload or the end of the run stops the VM.
+		c.serve(work, run, workflow)
+	}
 	switch {
 	case reloaded.Load():
 		return "", true, nil
@@ -474,6 +490,22 @@ func (c *Crew) execute(ctx, work context.Context, steps *sync.WaitGroup, workflo
 type scriptEnd struct {
 	Value   string         `json:"value"`
 	Failure *scriptFailure `json:"failure"`
+	Served  bool           `json:"served"` // the body ended after serve(): the run now handles events
+}
+
+// serviceMode is what a script of a subscription's run knows about its place. Scope keys the steps of the body: the box start.
+// A handler's VM runs the same script again with Handler set, and its steps take the queue row as their scope, once serve()
+// hands it the event. A child script keeps the scope and row of the call that started it.
+type serviceMode struct {
+	Scope   string        `json:"scope"`
+	Row     int64         `json:"row"`
+	Handler *handlerEvent `json:"handler,omitempty"`
+}
+
+type handlerEvent struct {
+	Row   int64           `json:"row"`
+	Key   string          `json:"key"`
+	Event json.RawMessage `json:"event"`
 }
 
 // scriptFailure is why a script threw. A parent script reads the Reason, a failed run shows the Report, and Step names the
@@ -488,7 +520,7 @@ const (
 	// crewScriptMemory bounds one script's VM. A script holds the results of its steps, which are at most a megabyte each.
 	crewScriptMemory = 256 << 20
 	// crewAPI is the names of the script API, which crew_prelude.js builds and the script's own scope declares.
-	crewAPI = "state, args, phase, log, console, status, agent, run, merge, post, parallel, pipeline, workflow, Date, Math"
+	crewAPI = "state, args, phase, log, console, status, agent, run, merge, post, serve, parallel, pipeline, workflow, Date, Math"
 )
 
 //go:embed crew_prelude.js
@@ -500,7 +532,7 @@ var metaDeclaration = regexp.MustCompile(`^((?:\s|//[^\n]*\n|/\*[\s\S]*?\*/)*)ex
 // runScript runs source in a VM of its own on PiG's codemode sandbox and serves the calls it makes, with args as the script's
 // `args`. A child script, at depth 1, is one level down from the run's own, under the key of the step that started it.
 // It returns an error only when the VM could not finish: the run stopped, or the sandbox failed.
-func (c *Crew) runScript(work context.Context, run *execution, source, args, parent string, depth int) (scriptEnd, error) {
+func (c *Crew) runScript(work context.Context, run *execution, source, args, parent string, depth int, service *serviceMode) (scriptEnd, error) {
 	// A script waits hours for its workers, so the VM has no deadline: every step has its own timeout, and the run's turn
 	// ends it when it is stopped.
 	sandbox, err := codemode.NewSandbox(codemode.SandboxOptions{TimeoutMs: math.Inf(1), MemoryLimitBytes: crewScriptMemory, Globals: []codemode.Tool{
@@ -551,10 +583,11 @@ func (c *Crew) runScript(work context.Context, run *execution, source, args, par
 	defer sandbox.Close()
 	argsLiteral, _ := json.Marshal(args)
 	parentLiteral, _ := json.Marshal(parent)
+	serviceLiteral, _ := json.Marshal(service)
 	// The script is the body of a function that names the API, with its own block inside, so its declarations may reuse those
 	// names. It starts on the first line, so the line numbers of its errors are its own.
 	code := "async function script({" + crewAPI + "}) {{" + metaDeclaration.ReplaceAllString(source, "${1}const meta") + "\n}}\n" +
-		"return await (" + crewPrelude + ")(dyna.call, dyna.send, " + string(argsLiteral) + ", " + string(parentLiteral) + ", " + strconv.Itoa(depth) + ")(script)"
+		"return await (" + crewPrelude + ")(dyna.call, dyna.send, " + string(argsLiteral) + ", " + string(parentLiteral) + ", " + strconv.Itoa(depth) + ", " + strconv.Quote(string(serviceLiteral)) + ")(script)"
 	result, err := sandbox.Execute(run.ctx, code, codemode.ExecuteOptions{})
 	if err != nil {
 		return scriptEnd{}, err
@@ -582,6 +615,9 @@ func finalText(value json.RawMessage) string {
 func (c *Crew) handle(ctx context.Context, call crewCall) crewReply {
 	switch call.Op {
 	case "state_get", "state_set":
+		if c.config.Workflow.Subscription != "" && call.Event == 0 {
+			return crewReply{Error: "state belongs to an event: use the state that serve() gives the handler"}
+		}
 		if c.config.Workflow.Subscription == "" {
 			if call.Op == "state_set" && (len(call.Payload) > 65536 || !json.Valid(call.Payload)) {
 				return crewReply{Error: "state is JSON of at most 64 KiB"}
@@ -597,7 +633,7 @@ func (c *Crew) handle(ctx context.Context, call crewCall) crewReply {
 			}
 			return crewReply{Value: value}
 		}
-		req := contract.WorkflowStateRequest{}
+		req := contract.WorkflowStateRequest{Row: call.Event}
 		if call.Op == "state_set" {
 			req.Value = call.Payload
 		}
@@ -628,7 +664,11 @@ func (c *Crew) stepKey(call crewCall, profile contract.ProfileName) string {
 		_ = json.Unmarshal(raw, &value)
 		return value
 	}
-	data, _ := json.Marshal([]any{call.Op, canonical(call.Payload), canonical(call.Opts), call.Parent, profile})
+	parts := []any{call.Op, canonical(call.Payload), canonical(call.Opts), call.Parent, profile}
+	if call.Scope != "" {
+		parts = append(parts, call.Scope)
+	}
+	data, _ := json.Marshal(parts)
 	sum := sha256.Sum256(data)
 	key := hex.EncodeToString(sum[:])
 	ordinal := 0
@@ -714,7 +754,7 @@ func (c *Crew) journal(ctx context.Context, call crewCall, key, name string, inf
 	if runes := []rune(lane); len(runes) > laneRunes {
 		lane = string(runes[:laneRunes])
 	}
-	stored, err := c.config.Engine.WorkflowStepStart(ctx, contract.WorkflowStepStartRequest{Key: key, Parent: call.Parent, Kind: info.kind, Name: name, Phase: info.phase, Lane: lane, Profile: info.profile, Detail: detail, Version: call.run.number(), Feature: info.feature})
+	stored, err := c.config.Engine.WorkflowStepStart(ctx, contract.WorkflowStepStartRequest{Key: key, Parent: call.Parent, Kind: info.kind, Name: name, Phase: info.phase, Lane: lane, Profile: info.profile, Detail: detail, Version: call.run.number(), Event: call.Event, Feature: info.feature})
 	if err != nil {
 		return crewReply{Error: err.Error(), Step: name}
 	}
@@ -1131,7 +1171,7 @@ func (c *Crew) workflowCall(ctx context.Context, call crewCall) crewReply {
 	}
 	info := stepInfo{kind: contract.WorkflowStepWorkflow, feature: contract.WorkflowFeatureWorkflow, detail: body.Ref}
 	key, name := c.stepKey(call, ""), info.name()
-	if _, err := c.config.Engine.WorkflowStepStart(ctx, contract.WorkflowStepStartRequest{Key: key, Parent: call.Parent, Kind: info.kind, Name: name, Phase: call.Phase, Detail: body.Ref, Version: call.run.number(), Feature: info.feature}); err != nil {
+	if _, err := c.config.Engine.WorkflowStepStart(ctx, contract.WorkflowStepStartRequest{Key: key, Parent: call.Parent, Kind: info.kind, Name: name, Phase: call.Phase, Detail: body.Ref, Version: call.run.number(), Event: call.Event, Feature: info.feature}); err != nil {
 		return crewReply{Error: err.Error(), Step: name}
 	}
 	script, err := os.ReadFile(path)
@@ -1141,7 +1181,7 @@ func (c *Crew) workflowCall(ctx context.Context, call crewCall) crewReply {
 		}
 		return crewReply{Error: err.Error(), Step: name}
 	}
-	end, err := c.runScript(ctx, call.run, string(script), string(body.Args), key, 1)
+	end, err := c.runScript(ctx, call.run, string(script), string(body.Args), key, 1, &serviceMode{Scope: call.Scope, Row: call.Event})
 	if err != nil {
 		// The VM stopped with the run, or with this version of it, so the step is left open for the next to join.
 		return crewReply{Error: err.Error(), Step: name}

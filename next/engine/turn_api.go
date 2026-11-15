@@ -233,6 +233,19 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 	if err != nil {
 		return contract.TurnOutputResponse{}, failure(err)
 	}
+	if crew && run.Subscription != "" && run.Key == "" && summary.State == contract.WorkflowFailed {
+		// A service that ends in failure starts again after a wait, and its parent hears of the first failure in a row.
+		sub, err := s.store.SubscriptionByID(ctx, run.Subscription)
+		if err == nil {
+			var parent contract.SessionID
+			if parent, err = s.runParent(ctx, run); err == nil {
+				err = s.failService(ctx, sub, parent, contract.CauseWorkflowFailed, req.Error)
+			}
+		}
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			log.Printf("workflow %s service failure: %v", run.ID, err)
+		}
+	}
 	if crew {
 		// Closing saves a diff of what the workers left unpushed. A close that fails here leaves a quiet box, which the dormant
 		// sweep closes, and the run's result is already safe.

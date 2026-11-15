@@ -9,7 +9,7 @@ import (
 
 func TestSubscriptionFireUpdateAndStateKeepQueueAndState(t *testing.T) {
 	w := setupWorkflow(t)
-	sub := addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, On: []contract.EventType{"notice.posted"}, Workflow: &contract.WorkflowSubscription{Script: workflowScript}, Key: "original"})
+	sub := addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, On: []contract.EventType{"notice.posted"}, Workflow: &contract.WorkflowSubscription{Script: serviceScript}, Key: "original"})
 	key := "pr-1"
 	state, problem := w.SubscriptionState(w.ctx, w.owner, contract.SubscriptionStateRequest{ID: sub, Key: &key, Value: json.RawMessage(`{"head":"old"}`)})
 	if problem != nil || len(state.States) != 1 || string(state.States[0].Value) != `{"head":"old"}` {
@@ -37,7 +37,7 @@ func TestSubscriptionFireUpdateAndStateKeepQueueAndState(t *testing.T) {
 	changedKey := "new-template"
 	latest := true
 	parent := w.root
-	if _, problem := w.SubscriptionUpdate(w.ctx, w.owner, contract.SubscriptionUpdateRequest{ID: sub, Workflow: &contract.WorkflowSubscription{Script: workflowScript, Args: map[string]json.RawMessage{"updated": json.RawMessage("true")}}, Key: &changedKey, Latest: &latest, Parent: &parent}); problem != nil {
+	if _, problem := w.SubscriptionUpdate(w.ctx, w.owner, contract.SubscriptionUpdateRequest{ID: sub, Workflow: &contract.WorkflowSubscription{Script: serviceScript, Args: map[string]json.RawMessage{"updated": json.RawMessage("true")}}, Key: &changedKey, Latest: &latest, Parent: &parent}); problem != nil {
 		t.Fatal(problem)
 	}
 	stored, err := w.store.SubscriptionByID(w.ctx, sub)
@@ -57,9 +57,13 @@ func TestSubscriptionFireUpdateAndStateKeepQueueAndState(t *testing.T) {
 	if err := w.fireDue(w.ctx); err != nil {
 		t.Fatal(err)
 	}
-	var run contract.WorkflowRunID
-	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT id FROM workflow_runs WHERE sub=?", sub).Scan(&run); err != nil {
+	run, err := w.store.ServiceRun(w.ctx, sub)
+	if err != nil {
 		t.Fatal(err)
+	}
+	events, problem := w.WorkflowEvents(w.ctx, sessionCaller(run.Session), contract.WorkflowEventsRequest{Boot: "boot", Limit: 10})
+	if problem != nil || len(events.Events) != 1 || events.Events[0].Key != key {
+		t.Fatalf("hand-over %+v %v", events, problem)
 	}
 	listedSubscriptions, listProblem = w.SubscriptionList(w.ctx, w.owner, contract.SubscriptionListRequest{Room: w.room})
 	if listProblem != nil {
@@ -67,26 +71,19 @@ func TestSubscriptionFireUpdateAndStateKeepQueueAndState(t *testing.T) {
 	}
 	for _, info := range listedSubscriptions.Subscriptions {
 		if info.Subscription.ID == sub && info.Waiting != 0 {
-			t.Fatalf("running event counted as waiting: %+v", info)
+			t.Fatalf("event in a handler counted as waiting: %+v", info)
 		}
 	}
-	active, err := w.store.WorkflowRun(w.ctx, run)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if active.Key != key {
-		t.Fatal("fire did not keep literal key")
-	}
-	got, problem := w.WorkflowState(w.ctx, sessionCaller(active.Session), contract.WorkflowStateRequest{})
+	got, problem := w.WorkflowState(w.ctx, sessionCaller(run.Session), contract.WorkflowStateRequest{Row: events.Events[0].Row})
 	if problem != nil || string(got.Value) != `{"head":"old"}` {
 		t.Fatalf("real state %s %v", got.Value, problem)
 	}
 	var args map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(active.Args), &args); err != nil {
+	if err := json.Unmarshal([]byte(run.Args), &args); err != nil {
 		t.Fatal(err)
 	}
 	if string(args["updated"]) != "true" {
-		t.Fatal("queued run did not use updated script args")
+		t.Fatal("the running service did not take the updated script args")
 	}
 	listed, problem := w.SubscriptionState(w.ctx, w.owner, contract.SubscriptionStateRequest{ID: sub})
 	if problem != nil || len(listed.States) != 1 {
@@ -119,11 +116,11 @@ func TestWorkflowRunLimitLeavesEventUnclaimed(t *testing.T) {
 	w := setupWorkflow(t)
 	one := 1
 	w.set(w.room, contract.WorkflowSettings{MaxRuns: &one})
-	busy, problem := w.WorkflowRun(w.ctx, w.owner, contract.WorkflowRunRequest{Room: w.room, Script: workflowScript})
+	busy, problem := w.WorkflowRun(w.ctx, w.owner, contract.WorkflowRunRequest{Room: w.room, Script: serviceScript})
 	if problem != nil {
 		t.Fatal(problem)
 	}
-	sub := addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, On: []contract.EventType{"notice.posted"}, Workflow: &contract.WorkflowSubscription{Script: workflowScript}, Latest: true})
+	sub := addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, On: []contract.EventType{"notice.posted"}, Workflow: &contract.WorkflowSubscription{Script: serviceScript}, Latest: true})
 	tick := func() {
 		t.Helper()
 		if err := w.fireDue(w.ctx); err != nil {
@@ -168,7 +165,7 @@ func TestWorkflowRunLimitLeavesEventUnclaimed(t *testing.T) {
 
 func TestSubscriptionUpdateFiltersAndManualFire(t *testing.T) {
 	w := setupWorkflow(t)
-	sub := addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, On: []contract.EventType{"github.pr.changed"}, Where: []string{"kind=pushed"}, Workflow: &contract.WorkflowSubscription{Script: workflowScript}, Key: "{repo}#{number}"})
+	sub := addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, On: []contract.EventType{"github.pr.changed"}, Where: []string{"kind=pushed"}, Workflow: &contract.WorkflowSubscription{Script: serviceScript}, Key: "{repo}#{number}"})
 	filters := []string{"kind=opened,pushed"}
 	if _, problem := w.SubscriptionUpdate(w.ctx, w.owner, contract.SubscriptionUpdateRequest{ID: sub, Where: &filters}); problem != nil {
 		t.Fatal(problem)
@@ -220,7 +217,7 @@ func TestSubscriptionUpdateFiltersAndManualFire(t *testing.T) {
 
 func TestEnablingLatestCoalescesOnTheNextEvent(t *testing.T) {
 	w := setupWorkflow(t)
-	sub := addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, On: []contract.EventType{"notice.posted"}, Workflow: &contract.WorkflowSubscription{Script: workflowScript}})
+	sub := addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, On: []contract.EventType{"notice.posted"}, Workflow: &contract.WorkflowSubscription{Script: serviceScript}})
 	for range 2 {
 		if _, problem := w.SubscriptionFire(w.ctx, w.owner, contract.SubscriptionFireRequest{ID: sub}); problem != nil {
 			t.Fatal(problem)
@@ -250,7 +247,7 @@ func TestEnablingLatestCoalescesOnTheNextEvent(t *testing.T) {
 
 func TestLatestRealDispatchCoalescesWaitingEvents(t *testing.T) {
 	w := setupWorkflow(t)
-	sub := addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, On: []contract.EventType{"notice.posted"}, Workflow: &contract.WorkflowSubscription{Script: workflowScript}})
+	sub := addSubscription(t, w.Service, w.ctx, contract.SubscriptionAddRequest{Scope: contract.ScopeRoom, Room: w.room, On: []contract.EventType{"notice.posted"}, Workflow: &contract.WorkflowSubscription{Script: serviceScript}})
 	for range 2 {
 		if _, problem := w.SubscriptionFire(w.ctx, w.owner, contract.SubscriptionFireRequest{ID: sub}); problem != nil {
 			t.Fatal(problem)
@@ -284,19 +281,12 @@ func TestLatestRealDispatchCoalescesWaitingEvents(t *testing.T) {
 	if err := w.fireDue(w.ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.store.Write(w.ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(w.ctx, "UPDATE workflow_runs SET state='done' WHERE sub=?", sub)
-		return err
-	}); err != nil {
+	run, err := w.store.ServiceRun(w.ctx, sub)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := w.fireDue(w.ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.store.Read().QueryRowContext(w.ctx, "SELECT count(*) FROM workflow_runs WHERE sub=?", sub).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 1 {
-		t.Fatalf("same event started %d runs", count)
+	events, problem := w.WorkflowEvents(w.ctx, sessionCaller(run.Session), contract.WorkflowEventsRequest{Boot: "boot", Limit: 10})
+	if problem != nil || len(events.Events) != 1 {
+		t.Fatalf("hand-over %+v %v", events, problem)
 	}
 }

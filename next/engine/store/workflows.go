@@ -23,8 +23,7 @@ type WorkflowRun struct {
 	Room          contract.RoomID
 	Session       contract.SessionID
 	Subscription  contract.SubscriptionID
-	Key           string
-	Queue         int64 // pending subscription event, bound atomically at session creation
+	Key           string // the key of a per-event run from before services; a service's run has none
 	Name          string
 	Description   string
 	Script        string
@@ -42,6 +41,7 @@ type WorkflowRun struct {
 	MaxRuns       int // the most runs going in the room, counted when this one starts; 0 is no limit
 	Version       int
 	StatusLines   []contract.WorkflowStatusLine // the script's latest status() lines, oldest first
+	Served        Served                        // what a service run has finished, and when its box first asked for events
 	Started       time.Time
 	Ended         time.Time
 }
@@ -49,15 +49,20 @@ type WorkflowRun struct {
 // workflowStatusLines is how many status() lines a run keeps.
 const workflowStatusLines = 20
 
-const workflowColumns = "sub,key,id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,result,version,status_lines,started_at,ended_at,paused,paused_steps,released_steps"
+const workflowColumns = "sub,key,id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,result,version,status_lines,started_at,ended_at,paused,paused_steps,released_steps,served"
 
 func scanWorkflow(row interface{ Scan(...any) error }) (WorkflowRun, error) {
 	var run WorkflowRun
-	var profiles, lines, pausedSteps, releasedSteps string
+	var profiles, lines, pausedSteps, releasedSteps, served string
 	var started, ended int64
-	err := row.Scan(&run.Subscription, &run.Key, &run.ID, &run.Room, &run.Session, &run.Name, &run.Description, &run.Script, &run.Args, &profiles, &run.Repo, &run.Commit, &run.Image, &run.State, &run.Result, &run.Version, &lines, &started, &ended, &run.Paused, &pausedSteps, &releasedSteps)
+	err := row.Scan(&run.Subscription, &run.Key, &run.ID, &run.Room, &run.Session, &run.Name, &run.Description, &run.Script, &run.Args, &profiles, &run.Repo, &run.Commit, &run.Image, &run.State, &run.Result, &run.Version, &lines, &started, &ended, &run.Paused, &pausedSteps, &releasedSteps, &served)
 	if err != nil {
 		return run, err
+	}
+	if served != "" {
+		if err := json.Unmarshal([]byte(served), &run.Served); err != nil {
+			return run, err
+		}
 	}
 	if err := json.Unmarshal([]byte(pausedSteps), &run.PausedSteps); err != nil {
 		return run, err
@@ -84,25 +89,6 @@ func insertWorkflow(ctx context.Context, tx *sql.Tx, session contract.SessionID,
 		}
 		if going >= run.MaxRuns {
 			return ErrWorkflowRunLimit
-		}
-	}
-	if run.Queue != 0 {
-		if err := tx.QueryRowContext(ctx, "SELECT sub,key FROM workflow_queue WHERE id=?", run.Queue).Scan(&run.Subscription, &run.Key); err != nil {
-			return err
-		}
-		result, err := tx.ExecContext(ctx, "UPDATE workflow_queue SET run=? WHERE id=? AND run='starting'", run.ID, run.Queue)
-		if err != nil {
-			return err
-		}
-		n, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			return ErrNotFound
-		}
-		if _, err := tx.ExecContext(ctx, "UPDATE subscriptions SET failures=0,hold_until=0 WHERE id=?", run.Subscription); err != nil {
-			return err
 		}
 	}
 	profiles, err := json.Marshal(run.Profiles)
@@ -147,7 +133,7 @@ func (s *Store) WorkflowRuns(ctx context.Context, room contract.RoomID) ([]Workf
 // Branch is the crew's first recorded branch, with rowid breaking timestamp ties.
 func (s *Store) WorkflowList(ctx context.Context, room contract.RoomID) ([]contract.WorkflowInfo, error) {
 	rows, err := s.Read().QueryContext(ctx, `WITH runs AS (
- SELECT sub,key,id,room,session,name,description,profiles,repo,commit_sha,version,state,status_lines,started_at,ended_at
+ SELECT sub,key,id,room,session,name,description,profiles,repo,commit_sha,version,state,status_lines,started_at,ended_at,served
  FROM workflow_runs WHERE room=? ORDER BY started_at DESC,id DESC LIMIT 100
  ), steps AS (
  SELECT w.run,w.state,w.name,w.started_at,w.input_tokens,w.output_tokens,w.cache_read_tokens,w.cache_write_tokens, row_number() OVER (PARTITION BY w.run,w.state ORDER BY w.started_at,w.rowid) AS ordinal
@@ -157,7 +143,7 @@ func (s *Store) WorkflowList(ctx context.Context, room contract.RoomID) ([]contr
  json_group_array(name ORDER BY started_at,ordinal) FILTER (WHERE state='failed' AND ordinal<=20) AS names,
  SUM(input_tokens) AS input,SUM(output_tokens) AS output,SUM(cache_read_tokens) AS cache_read,SUM(cache_write_tokens) AS cache_write
  FROM steps GROUP BY run
- ) SELECT r.sub,r.key,r.id,r.room,r.session,r.name,r.description,r.profiles,r.repo,r.commit_sha,r.version,r.state,r.status_lines,r.started_at,r.ended_at,
+ ) SELECT r.sub,r.key,r.id,r.room,r.session,r.name,r.description,r.profiles,r.repo,r.commit_sha,r.version,r.state,r.status_lines,r.started_at,r.ended_at,r.served,
  COALESCE((SELECT branch FROM session_branches b WHERE b.repo=r.repo AND b.session=r.session ORDER BY created_at,rowid LIMIT 1),''),
  COALESCE(t.steps,0),COALESCE(t.running,0),COALESCE(t.failed,0),COALESCE(t.names,'[]'),
  COALESCE(t.input,0),COALESCE(t.output,0),COALESCE(t.cache_read,0),COALESCE(t.cache_write,0)
@@ -169,9 +155,9 @@ func (s *Store) WorkflowList(ctx context.Context, room contract.RoomID) ([]contr
 	runs := []contract.WorkflowInfo{}
 	for rows.Next() {
 		var run contract.WorkflowInfo
-		var profiles, lines, names string
+		var profiles, lines, names, served string
 		var started, ended int64
-		if err := rows.Scan(&run.Subscription, &run.Key, &run.Run, &run.Room, &run.Session, &run.Name, &run.Description, &profiles, &run.Repo, &run.Commit, &run.Version, &run.State, &lines, &started, &ended, &run.Branch, &run.Steps, &run.Running, &run.Failed, &names, &run.Usage.InputTokens, &run.Usage.OutputTokens, &run.Usage.CacheReadTokens, &run.Usage.CacheWriteTokens); err != nil {
+		if err := rows.Scan(&run.Subscription, &run.Key, &run.Run, &run.Room, &run.Session, &run.Name, &run.Description, &profiles, &run.Repo, &run.Commit, &run.Version, &run.State, &lines, &started, &ended, &served, &run.Branch, &run.Steps, &run.Running, &run.Failed, &names, &run.Usage.InputTokens, &run.Usage.OutputTokens, &run.Usage.CacheReadTokens, &run.Usage.CacheWriteTokens); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(profiles), &run.Profiles); err != nil {
@@ -189,6 +175,16 @@ func (s *Store) WorkflowList(ctx context.Context, room contract.RoomID) ([]contr
 		}
 		run.Started = time.UnixMilli(started).UTC()
 		run.Ended = fromMillis(ended)
+		if run.Subscription != "" && run.Key == "" {
+			var kept Served
+			if served != "" {
+				if err := json.Unmarshal([]byte(served), &kept); err != nil {
+					return nil, err
+				}
+			}
+			run.Service = kept.Info(run.State == contract.WorkflowRunning)
+			run.Usage = run.Usage.Plus(kept.Usage)
+		}
 		runs = append(runs, run)
 	}
 	return runs, rows.Err()
@@ -276,8 +272,8 @@ func (s *Store) StartWorkflowStep(ctx context.Context, run contract.WorkflowRunI
 			return err
 		}
 		stored = contract.WorkflowStepStartResponse{}
-		_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(run,key,parent,kind,name,phase,lane,profile,detail,state,started_at,version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
-			ON CONFLICT(run,key) DO UPDATE SET state=excluded.state,lane=excluded.lane,reason='',transcript='',started_at=excluded.started_at,ended_at=0,version=excluded.version,progress_offset=0,tool_calls=0,last_activity=0,input_tokens=0,output_tokens=0,cache_read_tokens=0,cache_write_tokens=0`, run, req.Key, req.Parent, req.Kind, req.Name, req.Phase, req.Lane, req.Profile, req.Detail, contract.WorkflowStepRunning, at.UnixMilli(), req.Version)
+		_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(run,key,parent,kind,name,phase,lane,profile,detail,state,started_at,version,event) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+			ON CONFLICT(run,key) DO UPDATE SET state=excluded.state,lane=excluded.lane,reason='',transcript='',started_at=excluded.started_at,ended_at=0,version=excluded.version,progress_offset=0,tool_calls=0,last_activity=0,input_tokens=0,output_tokens=0,cache_read_tokens=0,cache_write_tokens=0`, run, req.Key, req.Parent, req.Kind, req.Name, req.Phase, req.Lane, req.Profile, req.Detail, contract.WorkflowStepRunning, at.UnixMilli(), req.Version, req.Event)
 		return err
 	})
 	return stored, err

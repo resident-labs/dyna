@@ -146,7 +146,7 @@ func TestWorkflowProgressMigration(t *testing.T) {
  INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('crew','room','crew','p','ready','',0);
  INSERT INTO workflow_runs(id,room,session,name,description,script,args,profiles,repo,commit_sha,image,state,started_at) VALUES('run','room','crew','test','','script','','[]','owner/repo','','','running',1);
  INSERT INTO workflow_steps(run,key,parent,kind,name,phase,profile,detail,state,input_tokens,started_at) VALUES('run','step','','agent','test','','p','','running',7,1);
- ALTER TABLE workflow_steps DROP COLUMN progress_offset;
+ DROP INDEX workflow_runs_service; DROP TABLE workflow_streaks; ALTER TABLE workflow_runs DROP COLUMN served; DROP INDEX workflow_queue_key; ALTER TABLE workflow_queue DROP COLUMN boot; ALTER TABLE workflow_queue DROP COLUMN handovers; ALTER TABLE workflow_steps DROP COLUMN event; ALTER TABLE workflow_steps DROP COLUMN progress_offset;
  ALTER TABLE workflow_steps DROP COLUMN tool_calls;
  ALTER TABLE workflow_steps DROP COLUMN last_activity;
  UPDATE meta SET value='122' WHERE key='schema_version';`)

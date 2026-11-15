@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 	"strconv"
@@ -47,6 +48,9 @@ func (s *Service) SubscriptionUpdate(ctx context.Context, caller contract.Princi
 	if _, _, problem := s.workflowScript(ctx, sub.Room, sub.Workflow.Script); problem != nil {
 		return contract.SubscriptionUpdateResponse{}, problem
 	}
+	if problem := checkServes(sub.Workflow.Script); problem != nil {
+		return contract.SubscriptionUpdateResponse{}, problem
+	}
 	if sub.Parent != "" {
 		target, problem := s.subscriptionSession(ctx, caller, sub.Room, string(sub.Parent))
 		if problem != nil {
@@ -56,6 +60,17 @@ func (s *Service) SubscriptionUpdate(ctx context.Context, caller contract.Princi
 			return contract.SubscriptionUpdateResponse{}, invalid("parent must be in this room")
 		}
 		sub.Parent = target.ID
+	}
+	// A new script reloads the running service, as workflow reload does. With no run, the next start reads it.
+	if req.Workflow != nil {
+		run, err := s.store.ServiceRun(ctx, sub.ID)
+		if err == nil {
+			if _, problem := s.reloadRun(ctx, run, sub.Workflow.Script); problem != nil {
+				return contract.SubscriptionUpdateResponse{}, problem
+			}
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return contract.SubscriptionUpdateResponse{}, failure(err)
+		}
 	}
 	if err := s.store.UpdateWorkflowSubscription(ctx, sub.Subscription); err != nil {
 		return contract.SubscriptionUpdateResponse{}, failure(err)

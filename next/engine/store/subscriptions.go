@@ -175,7 +175,7 @@ func (s *Store) AddSubscription(ctx context.Context, sub contract.Subscription, 
 }
 
 const subscriptionSelect = `SELECT s.id,s.scope,COALESCE(s.room,''),COALESCE(s.session,''),s.every_ms,s.wake_kind,s.wake_id,s.run_image,s.run_size,s.run_host,s.enabled,s.due_at,s.hold_until,s.failures,s.last_at,s.last_result,s.last_seq,
-(EXISTS(SELECT 1 FROM subscription_runs u WHERE u.sub=s.id) OR EXISTS(SELECT 1 FROM workflow_queue q JOIN workflow_runs r ON r.id=q.run WHERE q.sub=s.id AND r.state='running')),
+(EXISTS(SELECT 1 FROM subscription_runs u WHERE u.sub=s.id) OR EXISTS(SELECT 1 FROM workflow_runs r WHERE r.sub=s.id AND r.key='' AND r.state='running')),
 EXISTS(SELECT 1 FROM rooms r WHERE (r.paused_at IS NOT NULL OR r.state!='open') AND r.id IN (s.room,(SELECT t.room FROM sessions t WHERE t.id=s.wake_id)))
 FROM subscriptions s `
 
@@ -488,7 +488,7 @@ func (s *Store) DueSubscriptions(ctx context.Context, now time.Time) ([]Subscrip
 	}
 	var due []Subscription
 	for _, sub := range subs {
-		if !sub.Held && !sub.Running {
+		if !sub.Held && (!sub.Running || sub.Workflow != nil) { // a service always runs; its schedule only queues events
 			due = append(due, sub)
 		}
 	}

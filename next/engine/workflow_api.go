@@ -70,10 +70,10 @@ func (s *Service) workflowScript(ctx context.Context, roomID contract.RoomID, sc
 // WorkflowRun checks a script and starts its crew: one child session of the caller, in one box, whose only turn runs it.
 // Everything a script can get wrong in its meta fails here, before a box or a model is spent on it.
 func (s *Service) WorkflowRun(ctx context.Context, caller contract.Principal, req contract.WorkflowRunRequest) (contract.WorkflowRunResponse, *contract.Error) {
-	return s.workflowRun(ctx, caller, req, 0)
+	return s.workflowRun(ctx, caller, req, "")
 }
 
-func (s *Service) workflowRun(ctx context.Context, caller contract.Principal, req contract.WorkflowRunRequest, queue int64) (contract.WorkflowRunResponse, *contract.Error) {
+func (s *Service) workflowRun(ctx context.Context, caller contract.Principal, req contract.WorkflowRunRequest, service contract.SubscriptionID) (contract.WorkflowRunResponse, *contract.Error) {
 	var response contract.WorkflowRunResponse
 	roomID, problem := s.workflowRoom(ctx, caller, req.Room)
 	if problem != nil {
@@ -125,7 +125,7 @@ func (s *Service) workflowRun(ctx context.Context, caller contract.Principal, re
 	if !mentionName.MatchString(name) {
 		return response, invalid("meta.name must be letters, digits, dots, underscores or hyphens, at most 57 of them, and start with a letter or digit")
 	}
-	run := store.WorkflowRun{Queue: queue, ID: contract.WorkflowRunID(runID), Room: roomID, Name: meta.Name, Description: meta.Description, Script: req.Script, Args: req.Args, Profiles: meta.Profiles, Repo: repo, Resume: req.Resume, MaxRuns: effective.MaxRuns}
+	run := store.WorkflowRun{Subscription: service, ID: contract.WorkflowRunID(runID), Room: roomID, Name: meta.Name, Description: meta.Description, Script: req.Script, Args: req.Args, Profiles: meta.Profiles, Repo: repo, Resume: req.Resume, MaxRuns: effective.MaxRuns}
 	started, problem := s.startSession(ctx, caller, contract.SessionStartRequest{Room: roomID, Name: name, Profile: meta.Profiles[0], Repo: repo, Size: cmp.Or(meta.Size, effective.Size), GPU: meta.GPU, Brief: "Run workflow " + meta.Name + ".", ClientID: req.ClientID}, "", &run)
 	if problem != nil {
 		return response, problem
@@ -141,13 +141,21 @@ func (s *Service) workflowRun(ctx context.Context, caller contract.Principal, re
 // WorkflowReload gives a running run a new script, which its crew runs in place of the old one in the same box, on the same
 // branches and journal. The meta must keep the run's name, repo and size, which its session and box were made for.
 func (s *Service) WorkflowReload(ctx context.Context, caller contract.Principal, req contract.WorkflowReloadRequest) (contract.WorkflowReloadResponse, *contract.Error) {
-	var response contract.WorkflowReloadResponse
 	run, problem := s.managedWorkflow(ctx, caller, req.Run)
 	if problem != nil {
-		return response, problem
+		return contract.WorkflowReloadResponse{}, problem
 	}
+	if run.Subscription != "" && run.Key == "" {
+		return contract.WorkflowReloadResponse{}, invalid("this run is a workflow service: subscription update ID --workflow FILE reloads it and keeps the script for restarts")
+	}
+	return s.reloadRun(ctx, run, req.Script)
+}
+
+// reloadRun makes script the newest version of a running run.
+func (s *Service) reloadRun(ctx context.Context, run store.WorkflowRun, script string) (contract.WorkflowReloadResponse, *contract.Error) {
+	var response contract.WorkflowReloadResponse
 	ended := &contract.Error{Code: contract.ErrConflict, Message: "run " + string(run.ID) + " has ended; reload is for a running run, and workflow run with resume starts a new one from an ended run"}
-	meta, repo, problem := s.workflowScript(ctx, run.Room, req.Script)
+	meta, repo, problem := s.workflowScript(ctx, run.Room, script)
 	if problem != nil {
 		return response, problem
 	}
@@ -167,7 +175,7 @@ func (s *Service) WorkflowReload(ctx context.Context, caller contract.Principal,
 			return response, invalid(fmt.Sprintf("a reload keeps the run's meta.%s, which is %s, and this script has %s; a different %s needs a new run", field.name, metaText(field.was), metaText(field.now), field.name))
 		}
 	}
-	version, err := s.store.ReloadWorkflow(ctx, run.ID, req.Script, meta.Description, meta.Profiles, s.now())
+	version, err := s.store.ReloadWorkflow(ctx, run.ID, script, meta.Description, meta.Profiles, s.now())
 	if errors.Is(err, store.ErrWorkflowEnded) {
 		return response, ended
 	}
@@ -202,7 +210,26 @@ func (s *Service) workflowInfo(ctx context.Context, run store.WorkflowRun) (cont
 	if n := len(run.StatusLines); n > 0 {
 		info.Status, info.StatusAt = harness.Mask(run.StatusLines[n-1].Text), run.StatusLines[n-1].At
 	}
-	return info, err
+	if err != nil {
+		return info, err
+	}
+	return info, s.addService(ctx, &info, run.Served)
+}
+
+// addService fills what a service's run shows: its state and counts, its events by key while it runs, and the usage of the
+// steps its journal no longer holds.
+func (s *Service) addService(ctx context.Context, info *contract.WorkflowInfo, served store.Served) error {
+	if info.Subscription == "" || info.Key != "" {
+		return nil
+	}
+	info.Service = served.Info(info.State == contract.WorkflowRunning)
+	info.Usage = info.Usage.Plus(served.Usage)
+	if info.State != contract.WorkflowRunning {
+		return nil
+	}
+	keys, err := s.store.ServiceKeys(ctx, info.Subscription)
+	info.Service.Keys = keys
+	return err
 }
 
 // statusLineRunes bounds a status() line: one line that a run's header and the Runs list show whole or nearly.
@@ -286,6 +313,11 @@ func (s *Service) WorkflowList(ctx context.Context, caller contract.Principal, r
 	}
 	for i := range runs {
 		runs[i].Status = harness.Mask(runs[i].Status)
+		if runs[i].Service != nil && runs[i].State == contract.WorkflowRunning {
+			if runs[i].Service.Keys, err = s.store.ServiceKeys(ctx, runs[i].Subscription); err != nil {
+				return contract.WorkflowListResponse{}, failure(err)
+			}
+		}
 	}
 	response := contract.WorkflowListResponse{Runs: runs}
 	return response, nil
@@ -491,6 +523,7 @@ func (s *Service) workflowSummary(ctx context.Context, run store.WorkflowRun, st
 	}
 	summary, err := s.store.WorkflowSummary(ctx, run.ID)
 	summary.Session, summary.Name, summary.State = run.Session, run.Name, state
+	summary.Usage = summary.Usage.Plus(run.Served.Usage)
 	return summary, err
 }
 

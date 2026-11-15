@@ -70,7 +70,7 @@ func TestSubscriptionFieldsAreDescribed(t *testing.T) {
 				t.Errorf("%s has no description", field)
 			}
 		}
-		if description := item.InputSchema.Properties["key"].Description; !strings.Contains(description, "fire: Use this key as written") || !strings.Contains(description, "add: Runs one at a time") {
+		if description := item.InputSchema.Properties["key"].Description; !strings.Contains(description, "fire: Use this key as written") || !strings.Contains(description, "add: A key's events are handled") {
 			t.Errorf("action-specific key descriptions lost: %s", description)
 		}
 		for _, field := range []string{"every", "wake", "session"} {

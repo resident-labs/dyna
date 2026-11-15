@@ -95,9 +95,9 @@ func TestSubscriptionWorkflowDescription(t *testing.T) {
 	for _, key := range []string{"", "{repo}#{number}"} {
 		sub := contract.Subscription{Workflow: &contract.WorkflowSubscription{Script: "export const meta = {name: 'review', profiles: ['sol']}\n"}, Key: key}
 		line := describeSubscription(contract.SubscriptionInfo{Subscription: sub})
-		want := "workflow review"
+		want := "service review"
 		if key != "" {
-			want += " per " + key
+			want += " by " + key
 		}
 		if !strings.Contains(line, want+"\t") {
 			t.Fatal(line)

@@ -31,6 +31,7 @@ type CheckinSession struct {
 	Box        contract.BoxState
 	BoxChanged time.Time // when the box reached its state
 	Turn       bool      // a turn is running
+	Serving    bool      // that turn is a workflow service's, which runs for as long as the service does and so is never stalled
 	Last       time.Time // when the running turn last used a tool or else started, the last turn ended, or the session was created
 	Failed     bool      // the last turn failed
 	Retrying   bool      // a model retry is scheduled
@@ -100,6 +101,8 @@ func (s CheckinSession) stillness(now time.Time) (state contract.CheckinState, r
 		return contract.CheckinBlocked, "its box has not started", s.BoxChanged, !stuck(s.BoxChanged)
 	}
 	switch {
+	case s.Serving:
+		return contract.CheckinIdle, "", s.Last, false
 	case s.Turn:
 		return contract.CheckinBlocked, "its turn has run a long time", s.Last, !stuck(s.Last)
 	case s.Pending, s.Retrying, s.Blocked, s.Jobs > 0:
@@ -133,7 +136,7 @@ func PlanCheckins(sessions []CheckinSession, now time.Time) []CheckinPlan {
 	}
 	plans := make(map[contract.SessionID]*CheckinPlan)
 	for _, s := range sessions {
-		if s.Goal == "" || s.Closing || busyBelow[s.ID] || s.Failure != "" && s.Failure != s.FailureTold {
+		if s.Goal == "" || s.Serving || s.Closing || busyBelow[s.ID] || s.Failure != "" && s.Failure != s.FailureTold {
 			continue // A failure goes out as its own notice, first.
 		}
 		if s.Total > 0 && s.Open == 0 {

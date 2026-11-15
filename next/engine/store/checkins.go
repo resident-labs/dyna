@@ -114,6 +114,15 @@ func (s *Store) readCheckinRoom(ctx context.Context, tx *sql.Tx, id contract.Roo
 		bySession[sessions[i].ID] = &sessions[i]
 		ids[i] = sessions[i].ID
 	}
+	serving, err := listIDs[contract.SessionID](ctx, tx, "SELECT session FROM workflow_runs WHERE room=? AND sub!='' AND key='' AND state='running'", id)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, session := range serving {
+		if s := bySession[session]; s != nil {
+			s.Serving = s.Turn
+		}
+	}
 	waits, err := sessionWaits(ctx, tx, id)
 	if err != nil {
 		return nil, nil, err
