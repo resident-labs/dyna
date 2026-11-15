@@ -328,7 +328,20 @@ func TestServiceReloadRunsAHandlerAgainWithTheNewVersion(t *testing.T) {
 	for h.started.Load() < 1 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	crew.Reload(contract.BoxWorkflow{Run: "wf_1", Subscription: "sub_1", Version: 2, Script: crewMeta + "serve(async () => { await agent('slow'); await agent('v2') })", Profiles: crewProfiles, Workers: 16})
+	crew.Reload(contract.BoxWorkflow{Run: "wf_1", Subscription: "sub_1", Version: 2, Script: crewMeta + "await run('echo v2 body'); serve(async () => { await agent('slow'); await agent('v2') })", Profiles: crewProfiles, Workers: 16})
+	// Reload stops the old version asynchronously. Release the slow step only once the new version's body has run, so the old
+	// handler cannot finish the event first.
+	bodyRan := func() bool {
+		h.journal.mu.Lock()
+		defer h.journal.mu.Unlock()
+		return slices.ContainsFunc(h.journal.started, func(name string) bool { return strings.Contains(name, "echo v2 body") })
+	}
+	for !bodyRan() {
+		if time.Now().After(deadline) {
+			t.Fatal("the new version's body did not run")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	close(release)
 	q.waitAcked(t, 1)
 	stopped(t, crew, ended)
