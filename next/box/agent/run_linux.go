@@ -43,13 +43,28 @@ type boxHarness interface {
 	Done() <-chan struct{}
 }
 
-// crewInstructions is a crew worker's whole prompt: the core every agent shares, which box.hello sends as WorkerInstructions (never the session's own Instructions), and the role of a worker in a crew. The hello has a workflow.
-func crewInstructions(hello contract.BoxHelloResponse, tree string) string {
-	text := hello.WorkerInstructions + "\n\n# Your role: workflow worker\n\n" + "You are one worker of workflow " + hello.Workflow.Name + ", a process in your session's box, not a session of your own. Your final text is returned to the script as your result: it is a return value, not a message, so it holds the result itself and is not posted. With a schema, it is that JSON alone. Nothing wakes a worker: a command that outlasts bash's wait becomes a job, which job output reads until it ends, and a job waiting for the build lock is normal.\n"
-	if tree == "" {
-		return text + "Other workers share this box and this working tree: stay within the work your prompt gives you.\n"
+// crewInstructions is a crew worker's whole prompt: the core every agent shares, which box.hello sends as WorkerInstructions, then Claude Code's workflow subagent prompt for plain text output nearly word
+// for word. A step with a schema adds one line, the one departure from Claude, whose worker answers with a tool call:
+// Dyna runs every model, and some providers reject an arbitrary schema as a tool's input. A worker gets no
+// skills index; its AGENTS.md files and tools are its own. A note follows, as Claude's isolated-worktree
+// reminder follows: the worker's own git worktree at tree beside the main working folder, or the tree it shares with the other workers.
+func crewInstructions(core string, schema json.RawMessage, tree, main string) string {
+	text := core + "\n\n# Your role: workflow worker\n\n" + `You are a worker spawned by a workflow script. Use the tools available to complete the task.
+
+CRITICAL: Your final text response is returned **verbatim** as a string to the calling script — it is your return value, not a message to a human.
+- Output the literal result (data, JSON, text). Do NOT output confirmations like "Done." or "Sent."
+- If asked for JSON, return ONLY the raw JSON — no code fences, no prose, no markdown.
+- Do NOT use post to deliver your answer. Put your answer in your final text response.
+- Be concise. The script will parse your output.
+`
+	if len(schema) > 0 {
+		text += "- Your final message must be only a JSON value matching this schema, with no prose around it:\n" + string(schema) + "\n"
 	}
-	return text + "You have your own git worktree at " + tree + " on your own branch, and other workers cannot see it. Work only there. When you end, whatever you left there is committed and pushed for you, except ignored files. Cargo builds share CARGO_TARGET_DIR with the other workers, so reach a binary with cargo run or through that folder, not through ./target.\n"
+	const jobs = " Nothing wakes a worker, and ending your turn ends the step. So wait for a job inside the turn with job output, despite the rule above."
+	if tree == "" {
+		return text + "\n---\nOther workers share this box and this working tree: stay within the work your prompt gives you." + jobs + "\n"
+	}
+	return text + "\n---\nYou are running in an isolated git worktree at `" + tree + "` (a separate working copy of the repo). Changes you make here do NOT affect the main working directory (`" + main + "`) or other workers. Work normally — what you leave here, except ignored files, is committed and pushed for you when you end. Cargo builds share CARGO_TARGET_DIR with the other workers, so reach a binary with cargo run or through that folder, not through ./target." + jobs + "\n"
 }
 
 // Run connects the box, serves its model route, and runs the Pi session.
@@ -192,14 +207,14 @@ func Run(ctx context.Context) error {
 	var files func() []string            // the session files to keep sending
 	var steered func(contract.Interrupt) // a crew's script takes no input, so its workers' commands never step aside
 	if hello.Workflow != nil {
-		open := func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string, submit dynaext.Submit) (crewWorker, error) {
+		open := func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string, schema json.RawMessage) (crewWorker, error) {
 			tree := dir
 			if dir == workdir {
 				tree = ""
 			}
 			c := workerConfig(pig.Config{AgentDir: piDir, SessionDir: sessions, Notice: func(text string) { go notice(text) }}, profile, folder, dir)
-			c.Instructions = crewInstructions(hello, tree)
-			c.Extensions = []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: dir, Shell: jobs, Dyna: dynaTools, Submit: submit})}
+			c.Instructions, c.NoSkills = crewInstructions(hello.WorkerInstructions, schema, tree, workdir), true
+			c.Extensions = []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: dir, Shell: jobs, Dyna: dynaTools})}
 			return pig.Open(ctx, c)
 		}
 		config := CrewConfig{Workflow: *hello.Workflow, TextOnlyModels: hello.TextOnlyModels, Engine: client, Open: open, Transcript: transcript, Workdir: workdir, Sessions: sessions, State: piDir}

@@ -1,23 +1,38 @@
 package agent
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/resident-labs/dyna/contract"
 )
 
-// A crew worker's prompt is the core box.hello sends as WorkerInstructions, then its role as a workflow worker, in the unified prompt's rendering.
-// The session's own Instructions, which hold its identity and root's host paths, never reach a worker.
-func TestACrewWorkersPromptIsTheCoreAndItsRole(t *testing.T) {
-	rendering, err := os.ReadFile("testdata/render-worker.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	core, _, _ := strings.Cut(string(rendering), "\n\n# Your role: workflow worker")
-	hello := contract.BoxHelloResponse{Instructions: "You are root of room r. The session's own prompt.", WorkerInstructions: core, Workflow: &contract.BoxWorkflow{Name: "sweep"}}
-	if got := crewInstructions(hello, "/box/work/sweep/w3"); got != string(rendering) {
-		t.Fatalf("prompt:\n%s\nwant:\n%s", got, rendering)
+const core = "You are a Dyna agent. The shared base prompt.\n\n# How work goes\n\nThe core text."
+
+const promptSchema = `{"type":"object","required":["count"],"properties":{"count":{"type":"number"}}}`
+
+// A crew worker's prompt is the core every agent shares, then Claude Code's workflow subagent prompt for plain text, with one line for a schema and a note on its
+// tree.
+func TestACrewWorkersPromptIsTheWorkflowSubagentPrompt(t *testing.T) {
+	for name, got := range map[string]string{
+		"worker-plain.txt":       crewInstructions(core, nil, "", "/box/work/sweep"),
+		"worker-schema.txt":      crewInstructions(core, json.RawMessage(promptSchema), "", "/box/work/sweep"),
+		"worker-schema-tree.txt": crewInstructions(core, json.RawMessage(promptSchema), "/box/work/sweep/w3", "/box/work/sweep"),
+	} {
+		if os.Getenv("DYNA_UPDATE_GOLDEN") != "" {
+			if err := os.WriteFile("testdata/"+name, []byte(got), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		want, err := os.ReadFile("testdata/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != string(want) {
+			t.Errorf("%s:\n%s\nwant:\n%s", name, got, want)
+		}
+		if !strings.HasPrefix(got, core+"\n\n# Your role: workflow worker\n\nYou are a worker spawned by a workflow script.") || strings.Contains(got, "submit") {
+			t.Errorf("%s is not the core and the worker prompt", name)
+		}
 	}
 }

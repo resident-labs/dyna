@@ -52,6 +52,8 @@ type Config struct {
 	// agent with a fixed tool list does not need.
 	Tools []string
 	Bare  bool
+	// NoSkills leaves the skills index out of the prompt: a workflow worker's prompt is its own, and it still reads the AGENTS.md files.
+	NoSkills bool
 }
 
 // Harness drives one retained PiG session.
@@ -114,7 +116,7 @@ func Open(ctx context.Context, c Config) (*Harness, error) {
 			SystemPrompt:       &c.Instructions,
 			AppendSystemPrompt: []string{},
 			NoExtensions:       c.Bare,
-			NoSkills:           c.Bare,
+			NoSkills:           c.Bare || c.NoSkills,
 			NoPromptTemplates:  c.Bare,
 			NoContextFiles:     c.Bare,
 		},

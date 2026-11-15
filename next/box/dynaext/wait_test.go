@@ -27,7 +27,7 @@ func TestJobOutputChecksBelongToTheInputRunNotModelRequests(t *testing.T) {
 		args, _ := json.Marshal(map[string]string{"code": code})
 		return []pigtest.Block{{Tool: "codemode", Input: string(args)}}
 	}
-	b := newSessionShell(t, "test-model", nil, nil, shell.Config{After: func(d time.Duration) <-chan time.Time {
+	b := newSessionShell(t, "test-model", nil, shell.Config{After: func(d time.Duration) <-chan time.Time {
 		ch := make(chan time.Time, 1)
 		if d == 30*time.Second {
 			waits.Add(1)
