@@ -17,4 +17,4 @@ CRITICAL: Your final text response is returned **verbatim** as a string to the c
 {"type":"object","required":["count"],"properties":{"count":{"type":"number"}}}
 
 ---
-Other workers share this box and this working tree: stay within the work your prompt gives you. A command that outlasts bash's wait becomes a job, which job output reads until it ends; nothing wakes a worker.
+Other workers share this box and this working tree: stay within the work your prompt gives you. Nothing wakes a worker, and ending your turn ends the step. So wait for a job inside the turn with job output, despite the rule above.

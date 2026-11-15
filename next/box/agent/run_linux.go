@@ -60,7 +60,7 @@ CRITICAL: Your final text response is returned **verbatim** as a string to the c
 	if len(schema) > 0 {
 		text += "- Your final message must be only a JSON value matching this schema, with no prose around it:\n" + string(schema) + "\n"
 	}
-	const jobs = " A command that outlasts bash's wait becomes a job, which job output reads until it ends; nothing wakes a worker."
+	const jobs = " Nothing wakes a worker, and ending your turn ends the step. So wait for a job inside the turn with job output, despite the rule above."
 	if tree == "" {
 		return text + "\n---\nOther workers share this box and this working tree: stay within the work your prompt gives you." + jobs + "\n"
 	}
