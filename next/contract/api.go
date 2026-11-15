@@ -1199,7 +1199,7 @@ func (saved *DiffSavedRequest) CloseNotice(session string) string {
 	var text string
 	switch {
 	case saved == nil:
-		return fmt.Sprintf("Session %s closed; not checked, nothing saved (its box was not running, or did not report in time). Anything it had not pushed is gone.", session)
+		return fmt.Sprintf("Session %s closed; not checked, nothing saved (its box was not running, or did not report in time). Anything it had not pushed is gone from the box; its transcript is still on the engine host, and the dyna-diagnose skill says how to rebuild from it.", session)
 	case saved.Error != "":
 		return fmt.Sprintf("Session %s closed; no diff was saved (%s). Anything it had not pushed is gone.", session, saved.Error)
 	case saved.File == "":

@@ -148,7 +148,7 @@ func TestCloseNoticeSaysWhatBecameOfTheWork(t *testing.T) {
 		saved *DiffSavedRequest
 		want  []string
 	}{
-		{nil, []string{"not checked, nothing saved", "did not report in time"}},
+		{nil, []string{"not checked, nothing saved", "did not report in time", "dyna-diagnose"}},
 		{&DiffSavedRequest{}, []string{"nothing was unpushed"}},
 		{&DiffSavedRequest{Error: "disk full"}, []string{"no diff was saved (disk full)"}},
 		{&DiffSavedRequest{File: "/box/shared/archives/s-1.diff", Commits: 2, Files: 3}, []string{"2 commits and 3 changed files", "/box/shared/archives/s-1.diff"}},

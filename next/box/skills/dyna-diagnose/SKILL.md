@@ -138,6 +138,19 @@ running go on, so stop them. Resume (`room pause` with `paused` false) in the sa
 the owner can. After any action, check that `session list` shows the box `ready` and a new `turn`
 or later `lastOutcome`, and `transcript read` shows the kept input making progress.
 
+## Box lost before its work was pushed
+
+The engine keeps each session's full transcript on its host, at `<data>/rooms/<room>/transcripts/<session>/*.jsonl`
+(`<data>`: the engine's data directory, from `systemctl --user cat` of its unit), and it outlives the box. It holds every tool
+call's full arguments, which `transcript read` clips. Root reads it with bash on the engine host.
+- `edit` and `write` calls rebuild exactly: a short script replays each assistant message's `toolCall` items in file order,
+  `write` (`path`, `content`) and `edit` (`path`, old and new text; read one call for the field names), onto a fresh checkout
+  on a new branch. An `edit` that does not apply means a call was missed or the change came another way: read around it.
+- `bash` changes come back only sometimes: redo them from their commands (`sed -i`, a formatter, a generator) and check
+  against later output. Build output and installed tools are gone.
+
+Push the branch and tell the session's parent what it holds and what could not be rebuilt.
+
 ## CI jobs
 
 First the checks in dyna-ci, "When runs look stuck". Then `dyna host list`: hosts with `ci`
