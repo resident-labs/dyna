@@ -157,7 +157,7 @@ func TestVoiceHandoffIdleBusyAndFinal(t *testing.T) {
 		t.Fatalf("owner post order: %q", posted)
 	}
 	start := nextTurn(t, s, ctx, root)
-	if !strings.Contains(start.Inputs[0].Text, "start a voice task") {
+	if len(start.Inputs) < 2 || !strings.Contains(start.Inputs[1].Text, "start a voice task") {
 		t.Fatalf("input: %+v", start.Inputs)
 	}
 	if _, problem := s.TurnOutput(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, contract.TurnOutputRequest{Turn: start.Turn, Outcome: contract.TurnCompleted, Final: "voice final answer"}); problem != nil {
