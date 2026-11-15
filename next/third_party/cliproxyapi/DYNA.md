@@ -89,6 +89,8 @@ Each later patch to this folder must be its own commit. Each patch must add an e
   - `isClaudeFable51Model`, `isClaudeFable51OnlyModel` and `claudeModelHasPerTurnEffort` also match Fable 5.2. A capture of Claude Code 2.1.321 in print mode on 2026-11-09 showed the same betas, body keys and thinking shape for 5.1 and 5.2; its interactive mode was not measured.
   Drop all three when a subtree pull brings upstream's own Fable 5.2 support, and take upstream's values where they differ.
 
+- Short selection cooldown wait: `sdk/cliproxy/auth/dyna_admission.go` holds Dyna requests through model cooldowns of at most 60 seconds, with up to 250 milliseconds of jitter and request-context cancellation. The wait is bounded across repeated selections and happens before any executor runs, so it cannot replay a generation. Other callers and longer cooldowns retain the upstream policy. This serves `engine/model` sessions and workflow workers; the regression test there runs 63 concurrent requests through the real auth manager. No ramp or box-client timeout is added.
+
 ## Pulls
 
 - `v8.0.49` (2026-11-01): `git subtree pull` merged with no conflicts. Every patch above still applies, and none is obsolete: PR #5434 stays open and unmerged, PR #5833 was closed unmerged. The release changes plugin login, Gemini sanitizing and Codex commentary through Claude clients. The commentary option defaults to off, so `engine/model` sees no change in routing, management paths or credential handling. `TestResponsesInterruptStopsHTTPUpstream` and `TestCodexClientModelsApplyPatchRouting` are flaky on `v8.0.48` with Dyna's patches too, and `TestEnsureClientsWaitsForPreviousTargetClose` fails there on every run, so this pull did not cause them; CI does not run them.
