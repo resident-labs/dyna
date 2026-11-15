@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -28,17 +29,112 @@ func (e NamespaceUncertain) Error() string {
 }
 func (e NamespaceUncertain) Unwrap() error { return e.Err }
 
+// namespaceProcAccess is shared with fixture tests of the procfs trust boundary.
+const namespaceProcAccess = `# 0: wholly gone; 1: live/unknown leader; 2: dead leader with an unproven
+# thread group whose descriptors may be hidden by procfs.
+namespace_process_gone() {
+ if ! IFS= read -r process_stat 2>/dev/null < "$1/stat"; then
+  test ! -d "$1"
+  return $?
+ fi
+ read -r process_state rest <<< "${process_stat##*) }"
+ case $process_state in Z|X) ;; *) return 1;; esac
+ # A zombie leader may still have workers sharing its descriptor table.
+ # A task-directory snapshot is insufficient: a sampled worker could spawn
+ # a replacement before exiting. Threads: 1 proves only the dead leader
+ # remains, with no worker capable of spawning another thread.
+ threads=; thread_extra=
+ { while read -r field value rest; do
+    if test "$field" = Threads:; then threads=$value; thread_extra=$rest; break; fi
+   done 2>/dev/null < "$1/status"; } 2>/dev/null || true
+ test "$threads" = 1 && test -z "$thread_extra" && return 0
+ test ! -d "$1" && return 0
+ return 2
+}
+namespace_other_user() {
+ while read -r field real effective rest; do
+  if test "$field" = Uid:; then
+   test "$real" != "$EUID" && test "$effective" != "$EUID"
+   return $?
+  fi
+ done < "$1/status" 2>/dev/null
+ return 1
+}
+namespace_unreadable_safe() {
+ namespace_other_user "$1" && return 0
+ # Session title names are a correctness guard, not a security boundary:
+ # a malicious same-user process could forge them, but wrapper descendants
+ # never carry these names. Check argv[0], not arbitrary command arguments.
+ command=
+ IFS= read -r -d '' command < "$1/cmdline" 2>/dev/null || true
+ case ${command##*/} in
+  sshd-session:*|sshd:*|'(sd-pam)'|ssh-agent|gpg-agent) return 0;;
+ esac
+ # age_ticks is accepted only from same-boot metadata bound to this inode.
+ # Only wrappers open the file; older unrelated processes cannot inherit it.
+ # Start ticks round down, while our pre-creation sample rounds up: exclude
+ # the ambiguous boundary tick too. Realtime adjustments never enter this proof.
+ test "$age_ticks" -gt 0 || return 1
+ IFS= read -r process_stat < "$1/stat" || return 1
+ read -ra fields <<< "${process_stat##*) }"
+ start=${fields[19]:-}
+ [[ "$start" =~ ^[0-9]+$ ]] || return 1
+ test $((start + 1)) -lt "$age_ticks"
+}
+namespace_birth_clock() {
+ IFS= read -r birth_boot < /proc/sys/kernel/random/boot_id || return 1
+ read -r uptime rest < /proc/uptime || return 1
+ hz=$(getconf CLK_TCK) || return 1
+ [[ "$uptime" =~ ^([0-9]+)\.([0-9]{2})$ ]] || return 1
+ # Linux exports uptime in hundredths. Sample before creating the inode.
+ birth_ticks=$((BASH_REMATCH[1] * hz + (10#${BASH_REMATCH[2]} * hz + 99) / 100))
+}
+namespace_write_birth() {
+ inode=$(stat -c %d:%i -- "$1") || return 1
+ printf '%s %s %s\n' "$birth_boot" "$birth_ticks" "$inode" > "$birth_file.new" || return 1
+ mv -f -- "$birth_file.new" "$birth_file"
+}
+namespace_load_birth() {
+ age_ticks=0
+ IFS= read -r current_boot < /proc/sys/kernel/random/boot_id || return 1
+ read -r recorded_boot recorded_ticks recorded_inode extra 2>/dev/null < "$birth_file" || return 1
+ test -z "$extra" && test "$recorded_boot" = "$current_boot" || return 1
+ [[ "$recorded_ticks" =~ ^[1-9][0-9]*$ ]] && test "${#recorded_ticks}" -lt 18 || return 1
+ inode=$(stat -c %d:%i -- "$root/locks/box-$id.lock") || return 1
+ test "$recorded_inode" = "$inode" || return 1
+ age_ticks=$recorded_ticks
+}
+`
+
 // FD 8 is intentionally inherited by every mutating child. In particular, do
 // not use flock --close or close this descriptor at a nested exec boundary.
 // A completed command explicitly unlocks the shared description: Podman can
 // leave conmon holding FD 8 after its synchronous command returns. Without
 // this unlock, that daemon fences the box for its entire lifetime. Do not use
-// an EXIT trap: interrupted wrappers must retain the lock in surviving work.
-// Both files live outside all container, workspace, stack and room trees.
-const namespaceScript = `set -eu
+// an EXIT unlock trap: interrupted wrappers retain the lock in surviving work.
+// All namespace files live outside container, workspace, stack and room trees.
+const namespaceScript = namespaceProcAccess + `set -eu
+umask 077
+trap : HUP PIPE TERM
 root=$1; id=$2; mode=$3; shift 3
-mkdir -p -- "$root/locks"
-exec 8> "$root/locks/box-$id.lock"
+check=0
+if test "$mode" = recover && test "${1:-}" = --check; then check=1; fi
+birth_file="$root/locks/box-$id.born"
+SECONDS=0
+if test "$check" = 0; then
+ mkdir -p -- "$root/locks"
+ exec 9> "$root/locks/box-$id.rotate"
+ flock -x -w 15 9 || exit 252
+ if ! test -e "$root/locks/box-$id.lock"; then
+  namespace_birth_clock || exit 251
+  exec 8> "$root/locks/box-$id.lock"
+  namespace_write_birth "$root/locks/box-$id.lock" || exit 251
+ else
+  exec 8> "$root/locks/box-$id.lock"
+ fi
+ chmod 600 -- "$root/locks/box-$id.lock"
+ exec 9>&-
+fi
 namespace_lock_holders() {
  # The scan runs in a subshell that closes the lock descriptor and starts no program: only builtins read /proc, so killing
  # the subshell leaves nothing behind, and nothing of it can hold the lock or the caller's streams.
@@ -77,7 +173,109 @@ namespace_scan_holders() {
  if kill -KILL "$scan" 2>/dev/null; then printf ' (scan stopped after 2s)\n' >&2; fi
  wait "$scan" 2>/dev/null || true
 }
-flock -x -w 15 8 || { namespace_scan_holders || true; exit 252; }
+# Recovery takes only the rotation lock, never the abandoned lock itself.
+# Only the host user opens these 0600 files in its private data directory; root
+# does not touch them. Inherited descriptors also stay in that user's wrapper
+# tree. Unreadable other-user directories cannot matter. For same-user processes
+# we require proof they predate the file or a known non-Dyna session title (see
+# namespace_unreadable_safe). All other unreadable processes refuse rotation.
+namespace_stale_holders() {
+ exec 8>&- 9>&-
+ pids=
+ for proc in /proc/[0-9]*; do
+  if namespace_process_gone "$proc"; then continue; else gone_status=$?; fi
+  # A dead leader's fd directory can look readable but empty while live
+  # workers retain its flock. Treat that hidden table as unreadable too.
+  if test "$gone_status" = 2 || ! test -r "$proc/fd" || ! test -x "$proc/fd"; then
+   namespace_unreadable_safe "$proc" && continue
+   namespace_process_gone "$proc" && continue
+   printf 'namespace recovery refused: unreadable descriptors for %s\n' "$proc" >&2
+   return 1
+  fi
+  for fd in "$proc"/fd/*; do
+   test "$fd" -ef "$root/locks/box-$id.lock" || continue
+   held=0
+   { while IFS= read -r line; do
+     case $line in 'lock:'*' FLOCK '*' WRITE '*) held=1;; esac
+    done < "$proc/fdinfo/${fd##*/}"; } 2>/dev/null || {
+    namespace_process_gone "$proc" && continue 2
+    printf 'namespace recovery refused: unreadable lock info for %s\n' "$fd" >&2
+    return 1
+   }
+   test "$held" = 1 || continue
+   exe=$(readlink -- "$proc/exe") || {
+    namespace_process_gone "$proc" && continue 2
+    printf 'namespace recovery refused: unreadable executable for %s\n' "$proc" >&2
+    return 1
+   }
+   test "${exe##*/}" = conmon || {
+    printf 'namespace recovery refused: non-conmon holder %s (%s)\n' "$proc" "$exe" >&2
+    return 1
+   }
+   pids="$pids ${proc##*/}"
+   break
+  done
+ done
+ test -n "$pids" || test "$check" = 1 || return 1
+ printf '%s\n' "$pids"
+}
+namespace_stale_scan() {
+ (namespace_stale_holders) > "$scan_result" &
+ scan=$!
+ while kill -0 "$scan" 2>/dev/null && test "$SECONDS" -lt 10; do sleep 0.1; done
+ if kill -KILL "$scan" 2>/dev/null; then
+  wait "$scan" 2>/dev/null || true
+  return 1
+ fi
+ wait "$scan"
+}
+if test "$mode" = recover; then
+ if test "$check" = 1; then
+  # --check never creates or modifies anything in the locks directory. Its
+  # only scratch is a temporary scan result, removed on exit. No lock FD is open.
+  scan_result=$(mktemp "${TMPDIR:-/tmp}/dyna-namespace-check.XXXXXX") || exit 254
+  trap 'rm -f -- "$scan_result"' EXIT
+ else
+  exec 9> "$root/locks/box-$id.rotate"
+  flock -x -w 10 9 || exit 254
+  scan_result="$root/locks/box-$id.rotate.new"
+ fi
+ namespace_load_birth || true
+ SECONDS=0
+ namespace_stale_scan || exit 254
+ IFS= read -r first < "$scan_result" || exit 254
+ sleep 1
+ namespace_stale_scan || exit 254
+ IFS= read -r second < "$scan_result" || exit 254
+ test "$first" = "$second" || exit 254
+ if test "$check" = 1; then
+  printf 'namespace recovery check passed: box %s; eligible conmon pids:%s\n' "$id" "$first"
+  exit 0
+ fi
+ namespace_birth_clock || exit 254
+ fresh=$(mktemp "$root/locks/box-$id.lock.XXXXXX") || exit 254
+ mv -f -- "$fresh" "$root/locks/box-$id.lock"
+ namespace_write_birth "$root/locks/box-$id.lock" || exit 254
+ exec 9>&-
+ printf 'rotated namespace lock: box %s; conmon pids:%s\n' "$id" "$first"
+ exit 0
+fi
+while :; do
+ remaining=$((15 - SECONDS))
+ test "$remaining" -gt 0 || { namespace_scan_holders || true; exit 252; }
+ flock -x -w "$remaining" 8 || { namespace_scan_holders || true; exit 252; }
+ # Fence the check-to-command boundary against rotation. A conmon can exit
+ # after the last scan, letting a waiter acquire the old inode before mv.
+ exec 9> "$root/locks/box-$id.rotate"
+ remaining=$((15 - SECONDS))
+ test "$remaining" -gt 0 && flock -x -w "$remaining" 9 || exit 252
+ if test /proc/$$/fd/8 -ef "$root/locks/box-$id.lock"; then
+  exec 9>&-
+  break
+ fi
+ exec 9>&-
+ exec 8> "$root/locks/box-$id.lock"
+done
 epoch_file="$root/locks/box-$id.epoch"
 epoch=0
 if test -e "$epoch_file"; then
@@ -98,12 +296,19 @@ esac
 status=0
 "$@" || status=$?
 flock -u 8
+# Reserve 252 for proof that the body never ran. A body using that code is
+# still a failure, but must never trigger automatic mutation retry.
+test "$status" != 252 || status=1
 exit "$status"`
 
 func (h *Host) namespace(ctx context.Context, id contract.BoxID, mode string, command ...string) ([]byte, error) {
 	args := []string{"bash", "-c", namespaceScript, "dyna-box-namespace", h.dataDir, string(id), mode}
-	var out []byte
-	var err error
+	run := func(args []string) ([]byte, error) {
+		if mode == "read" || mode == "delete" {
+			return h.executeOver(ctx, h.direct(), nil, args...)
+		}
+		return h.run(ctx, args...)
+	}
 	if mode == "read" || mode == "delete" {
 		// Restoring the mux's forwards can unlink a box socket. Read/delete must
 		// reach the host epoch check without that implicit mutation as well.
@@ -113,9 +318,15 @@ func (h *Host) namespace(ctx context.Context, id contract.BoxID, mode string, co
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-		out, err = h.executeOver(ctx, h.direct(), nil, append(args, command...)...)
-	} else {
-		out, err = h.run(ctx, append(args, command...)...)
+	}
+	out, err := run(append(args, command...))
+	var timedOut remoteExit
+	if errors.As(err, &timedOut) && timedOut == 252 {
+		recovery := []string{"bash", "-c", namespaceScript, "dyna-box-namespace", h.dataDir, string(id), "recover"}
+		if recovered, recoveryErr := run(recovery); recoveryErr == nil {
+			log.Printf("%s", strings.TrimSpace(string(recovered)))
+			out, err = run(append(args, command...))
+		}
 	}
 	var exit remoteExit
 	if errors.As(err, &exit) {
