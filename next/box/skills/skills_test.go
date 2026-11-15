@@ -338,7 +338,7 @@ func TestTheDiagnoseSkillIsForRoot(t *testing.T) {
 		t.Fatalf("%+v %v", meta, err)
 	}
 	text := string(data)
-	for _, want := range []string{"dyna-audience: root", "beforeSeq", "no_hello", "room-limit", "model_failed", "journalctl --user", "engine host named in your prompt", "When runs look stuck", "Box lost before its work was pushed", "transcripts/<session>", "oldText"} {
+	for _, want := range []string{"dyna-audience: root", "beforeSeq", "no_hello", "room-limit", "model_failed", "journalctl --user", "engine host named in your prompt", "When runs look stuck", "Box lost before its work was pushed", "transcripts/<session>", "oldText", "isError", "chronological"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the skill does not say %q", want)
 		}

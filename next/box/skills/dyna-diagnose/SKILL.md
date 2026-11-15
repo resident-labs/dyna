@@ -141,16 +141,17 @@ or later `lastOutcome`, and `transcript read` shows the kept input making progre
 ## Box lost before its work was pushed
 
 The engine keeps each session's full transcript on its host, at `<data>/rooms/<room>/transcripts/<session>/*.jsonl`
-(`<data>`: the engine's data directory, from `systemctl --user cat` of its unit), and it outlives the box. It holds every tool
-call's full arguments, which `transcript read` clips. Root reads it with bash on the engine host.
-- `edit` and `write` calls rebuild exactly: a short script replays them in file order onto a fresh checkout on a new branch. A
-  call is an item of an assistant message's `message.content`: `{"type":"toolCall","name":"write","arguments":{"path","content"}}`
-  or `{"type":"toolCall","name":"edit","arguments":{"path","edits":[{"oldText","newText"}]}}`. An `edit` that does not apply
-  means a call was missed or the change came another way: read around it.
-- `bash` changes come back only sometimes: redo them from their commands (`sed -i`, a formatter, a generator) and check
-  against later output. Build output and installed tools are gone.
-
-Push the branch and tell the session's parent what it holds and what could not be rebuilt.
+(`<data>`: the engine's data directory, from `systemctl --user cat` of its unit), and it outlives the box. It holds every
+tool call's full arguments, which `transcript read` clips. Root reads it with bash on the engine host.
+- `edit` and `write` calls rebuild exactly. A call is an item of an assistant message's `message.content`:
+  `{"type":"toolCall","id","name":"write","arguments":{"path","content"}}` or `{..."name":"edit","arguments":{"path",
+  "edits":[{"oldText","newText"}]}}`. Its result is a later message with `message.role` `toolResult` and `message.toolCallId`
+  equal to the call's `id`: skip every call whose result has `isError` true, since it changed nothing.
+- `bash` changes come back only sometimes: redo them from their commands (`sed -i`, a formatter, a generator). Build
+  output and installed tools are gone.
+Replay in file order, which is chronological: successful writes, edits and recovered bash changes interleaved as they
+happened, onto a fresh checkout on a new branch, so each edit sees the file as it was then. Push the branch and tell the
+session's parent what it holds and what could not be rebuilt.
 
 ## CI jobs
 
