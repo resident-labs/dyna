@@ -13,6 +13,7 @@ import (
 func TestAdmissionNoticeOncePerPendingSpell(t *testing.T) {
 	r := newGoalRig(t)
 	r.exec("UPDATE boxes SET host='host' WHERE state='ready'")
+	r.exec("UPDATE hosts SET mem_bytes=? WHERE name='host'", 2*box.GiB)
 	b, err := r.st.Box(r.ctx, mustSessionBox(t, r, r.child))
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +46,7 @@ func TestAdmissionNoticeOncePerPendingSpell(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Log("Rendered sample notice:\n" + text)
-	if !strings.Contains(text, "of 256 GiB reserved (4× 64 GiB") || !strings.Contains(text, "/lead:") {
+	if !strings.Contains(text, "of 8.0 GiB reserved (4× 2.0 GiB") || !strings.Contains(text, "/lead:") {
 		t.Fatalf("wrong explanation: %s", text)
 	}
 	r.exec("UPDATE boxes SET reason='cpu',updated_at=? WHERE id=?", r.now().UnixMilli(), b.ID)
