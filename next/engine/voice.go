@@ -73,8 +73,7 @@ func (s *Service) Voice(ctx context.Context, room contract.RoomID) (func(*websoc
 			return err
 		}
 		var startup strings.Builder
-		for i := len(history) - 1; i >= 0; i-- {
-			event := history[i]
+		for _, event := range history {
 			if b, ok := event.Body.(contract.PostCreated); ok && b.Home.Kind == contract.ConversationDM && b.Home.Session == root {
 				if event.From.Kind == contract.PrincipalOwner {
 					startup.WriteString("user: " + b.Text + "\n")
