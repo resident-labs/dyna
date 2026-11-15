@@ -287,24 +287,33 @@ func TestNamespaceCreateHasBoundedLockWaitAndNoFallback(t *testing.T) {
 
 // Podman's conmon daemon inherits FD 8 even after podman start returns. The
 // completed command must release that shared lock without waiting for conmon.
+func TestNamespaceOrphanProcess(t *testing.T) {
+	if os.Getenv("DYNA_NAMESPACE_ORPHAN") != "1" {
+		return
+	}
+	time.Sleep(120 * time.Second)
+	os.Exit(0)
+}
+
 // namespaceOrphan leaves a real executable holding inherited FD 8 after the
-// entire wrapper process group dies. A symlink to sleep would still have an exe
-// basename of sleep, so copy it instead.
+// entire wrapper process group dies. Copy the test binary: symlinks preserve
+// the target exe basename, and multicall coreutils can reject renamed sleep.
 func namespaceOrphan(t *testing.T, root, name string) int {
 	t.Helper()
-	sleep, err := exec.LookPath("sleep")
+	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
 	executable := filepath.Join(t.TempDir(), name)
-	if err := os.WriteFile(executable, readNamespaceFile(t, sleep), 0700); err != nil {
+	if err := os.WriteFile(executable, readNamespaceFile(t, self), 0700); err != nil {
 		t.Fatal(err)
 	}
 	pidFile := filepath.Join(root, "orphan")
-	cmd := exec.Command("bash", "-c", namespaceScript, "fixture", root, "b", "use", "bash", "-c", `setsid "$1" 120 </dev/null >/dev/null 2>&1 &
+	cmd := exec.Command("bash", "-c", namespaceScript, "fixture", root, "b", "use", "bash", "-c", `setsid "$1" -test.run=^TestNamespaceOrphanProcess$ </dev/null >"$2.log" 2>&1 &
 printf '%s\n' "$!" > "$2"
 wait`, "fixture", executable, pidFile)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Env = append(os.Environ(), "DYNA_NAMESPACE_ORPHAN=1")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +331,7 @@ wait`, "fixture", executable, pidFile)
 	}
 	exe, err := os.Readlink("/proc/" + strconv.Itoa(pid) + "/exe")
 	if err != nil || filepath.Base(exe) != name {
-		t.Fatalf("fixture exe: %q %v", exe, err)
+		t.Fatalf("fixture exe: %q %v; output: %s", exe, err, readNamespaceFile(t, pidFile+".log"))
 	}
 	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
 	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
