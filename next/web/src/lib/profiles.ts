@@ -11,7 +11,7 @@ export const profileRows = (entries: readonly ProfileEntry[] | null): ProfileSum
 // for those plain capitals get wrong.
 const SHOWN_AS: Record<string, string> = { gpt: "GPT", glm: "GLM", mimo: "MiMo", deepseek: "DeepSeek" };
 export const thinking: Record<ThinkingLevel, string> = {
-  off: "no thinking", minimal: "minimal thinking", low: "low thinking", medium: "medium thinking", high: "high thinking", xhigh: "very high thinking",
+  off: "no thinking", minimal: "minimal thinking", low: "low thinking", medium: "medium thinking", high: "high thinking", xhigh: "very high thinking", max: "maximum thinking",
 };
 export const providers: Record<ModelProvider, string> = { anthropic: "Anthropic", openai: "OpenAI-compatible" };
 

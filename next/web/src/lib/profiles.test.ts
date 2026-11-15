@@ -58,6 +58,14 @@ test("a listed entry becomes a row, and saving it sends back exactly the listed 
 
 const sample = (name: string, more: Partial<ProfileSummary> = {}): ProfileSummary => ({ name, provider: "openai", model: "glm-5.3", description: "", taste: 0, diagnostics: 0, intelligence: 0, cost: 0, inUse: 0, thinking: "low", ...more });
 
+test("maximum thinking is displayed and preserved when saving", () => {
+  const profile = sample("luna", { thinking: "max" });
+  assert.equal(profileLabel(profile).detail, "maximum thinking");
+  assert.equal(profileLine(profile, false), "glm-5.3 · maximum");
+  assert.equal(profileLine(profile, true), "glm-5.3 · maximum thinking · not rated");
+  assert.equal(profileForSave(profile).thinking, "max");
+});
+
 test("the chips are All, In use and Not rated, and a profile with any rating is rated", () => {
   assert.deepEqual(profileChips.map(chip => chip.label), ["All", "In use", "Not rated"]);
   const [, inUse, unrated] = profileChips;

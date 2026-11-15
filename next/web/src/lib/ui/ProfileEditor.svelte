@@ -31,7 +31,7 @@
   ] as const;
   const levels: { value: ThinkingLevel; label: string }[] = [
     { value: "off", label: "Off" }, { value: "minimal", label: "Minimal" }, { value: "low", label: "Low" },
-    { value: "medium", label: "Medium" }, { value: "high", label: "High" }, { value: "xhigh", label: "Very high" },
+    { value: "medium", label: "Medium" }, { value: "high", label: "High" }, { value: "xhigh", label: "Very high" }, { value: "max", label: "Maximum" },
   ];
   type Rated = (typeof ratings)[number]["key"];
   // A rating is one slider (ratingKey). The pointer previews the fill up to the step under it.

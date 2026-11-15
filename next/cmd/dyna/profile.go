@@ -52,7 +52,7 @@ func profileCommand(getClient func() client) *cobra.Command {
 		create                                         bool
 	)
 	set := &cobra.Command{Use: "set NAME [--FIELD VALUE]...", Short: "Change a profile's fields; a field left out stays", Long: "Change a profile. It reads the stored profile, changes only the fields whose flags are given and writes the whole profile back, so a one-flag change drops nothing. Sessions on the profile move to the new model at their next turn.\n\n" +
-		"--create makes a new profile instead; the fields not given start empty, and the engine refuses one that is not valid (a provider, a model among the allowed models and a thinking level are needed). --thinking is off, minimal, low, medium, high or xhigh. --images on|off says whether the models take images; --allowed-models lists the models a session may call, and --model must be one of them. --taste, --diagnostics, --intelligence and --cost are ratings 0..10, and 0 is unrated. --max-concurrent limits workflow workers on the profile, 0 for no limit; --compact-tokens is the compaction trigger, 0 for Pi's default.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		"--create makes a new profile instead; the fields not given start empty, and the engine refuses one that is not valid (a provider, a model among the allowed models and a thinking level are needed). --thinking is off, minimal, low, medium, high, xhigh or max. --images on|off says whether the models take images; --allowed-models lists the models a session may call, and --model must be one of them. --taste, --diagnostics, --intelligence and --cost are ratings 0..10, and 0 is unrated. --max-concurrent limits workflow workers on the profile, 0 for no limit; --compact-tokens is the compaction trigger, 0 for Pi's default.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		var p contract.Profile
 		if create {
 			p = contract.Profile{Name: contract.ProfileName(args[0])}
@@ -115,7 +115,7 @@ func profileCommand(getClient func() client) *cobra.Command {
 	set.Flags().StringVar(&provider, "provider", "", "anthropic or openai")
 	set.Flags().StringVar(&model, "model", "", "the model it runs")
 	set.Flags().StringSliceVar(&allowed, "allowed-models", nil, "every model a session on it may call (MODEL[,MODEL...])")
-	set.Flags().StringVar(&thinking, "thinking", "", "off, minimal, low, medium, high or xhigh")
+	set.Flags().StringVar(&thinking, "thinking", "", "off, minimal, low, medium, high, xhigh or max")
 	set.Flags().StringVar(&images, "images", "", "on or off")
 	set.Flags().IntVar(&taste, "taste", 0, "rating 0..10")
 	set.Flags().IntVar(&diagnostics, "diagnostics", 0, "rating 0..10")

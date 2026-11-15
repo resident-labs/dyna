@@ -200,14 +200,14 @@ func Models(textOnly ...contract.TextOnlyModel) ModelsConfig {
 		}
 		model.InputLimits = &modelInputLimits{Images: modelImageLimits{Resize: modelImageResize{MaxWidth: 2000, MaxHeight: 2000, MaxBytes: 4718592, JPEGQuality: 80}}}
 		level := func(s string) *string { return &s }
-		// Pi ai 1.4.0-dyna.13.228dd4febd41, catalog openai/gpt-5.5.
+		// OpenAI-compatible fallback, including max effort for newer models such as gpt-6-luna.
 		switch entry.Provider {
 		case contract.ModelProviderOpenAI:
 			model.API, model.ContextWindow = "openai-responses", 272000
 			model.Compat = map[string]bool{"supportsStrictMode": true, "supportsOpenAIGrammarTools": true, "supportsAdditionalTools": true, "supportsToolSearch": true, "supportsMidConvoSystemMessages": true}
-			model.ThinkingLevelMap = map[string]*string{"off": level("none"), "minimal": nil, "low": level("low"), "medium": level("medium"), "high": level("high"), "xhigh": level("xhigh"), "max": nil}
+			model.ThinkingLevelMap = map[string]*string{"off": level("none"), "minimal": nil, "low": level("low"), "medium": level("medium"), "high": level("high"), "xhigh": level("xhigh"), "max": level("max")}
 			model.InputLimits.MaxRequestBytes, model.InputLimits.Images.MaxPerRequest = 536870912, 1500
-		// Pi ai 1.4.0-dyna.13.228dd4febd41, catalog anthropic/claude-opus-4-8.
+		// PiG's anthropic/claude-opus-4-8 catalog supports both xhigh and max.
 		case contract.ModelProviderAnthropic:
 			model.API, model.ContextWindow = "anthropic-messages", 1000000
 			model.Compat = map[string]bool{"supportsMidConvoSystemMessages": true, "supportsMidConvoToolChanges": true, "forceAdaptiveThinking": true, "supportsTemperature": false, "supportsStrictTools": true}
