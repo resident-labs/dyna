@@ -17,6 +17,16 @@ func TestUncataloguedModelTakesImages(t *testing.T) {
 	}
 }
 
+func TestFallbackModelsSupportMaxThinking(t *testing.T) {
+	for _, provider := range []contract.ModelProvider{contract.ModelProviderOpenAI, contract.ModelProviderAnthropic} {
+		models := agent.Models(contract.TextOnlyModel{Provider: provider, Model: "custom"})
+		got := models.Providers[string(provider)].Models[0].ThinkingLevelMap["max"]
+		if got == nil || *got != "max" {
+			t.Fatalf("%s max effort = %v, want max", provider, got)
+		}
+	}
+}
+
 func TestTextOnlyModels(t *testing.T) {
 	entries := []contract.TextOnlyModel{{Provider: contract.ModelProviderOpenAI, Model: "glm-5.3"}, {Provider: contract.ModelProviderOpenAI, Model: "alternate"}, {Provider: contract.ModelProviderAnthropic, Model: "other"}}
 	models := agent.Models(entries...)

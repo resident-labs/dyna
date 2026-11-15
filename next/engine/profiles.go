@@ -94,7 +94,7 @@ func validateProfiles(profiles map[contract.ProfileName]profile) error {
 			return fmt.Errorf("profile %q: invalid provider", name)
 		}
 		switch p.Thinking {
-		case contract.ThinkingOff, contract.ThinkingMinimal, contract.ThinkingLow, contract.ThinkingMedium, contract.ThinkingHigh, contract.ThinkingXHigh:
+		case contract.ThinkingOff, contract.ThinkingMinimal, contract.ThinkingLow, contract.ThinkingMedium, contract.ThinkingHigh, contract.ThinkingXHigh, contract.ThinkingMax:
 		default:
 			return fmt.Errorf("profile %q: invalid thinking level", name)
 		}
