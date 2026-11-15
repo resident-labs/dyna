@@ -2,6 +2,8 @@ package engine
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
@@ -32,6 +34,14 @@ func TestWorkflowLiveAndFinishedProgress(t *testing.T) {
 	if _, e := w.WorkflowStepEnd(w.ctx, crew, contract.WorkflowStepEndRequest{Key: "alpha-key", State: contract.WorkflowStepDone, Transcript: "worker.jsonl", Usage: contract.Usage{InputTokens: 20, OutputTokens: 8}, Result: "null"}); e != nil {
 		t.Fatal(e)
 	}
+	// Finishing freezes the count, even if later transcript bytes arrive.
+	if _, e := appendTranscript(w.Service, w.ctx, crew, "worker.jsonl", int64(len(data)), data); e != nil {
+		t.Fatal(e)
+	}
+	if err := os.Remove(filepath.Join(w.layout.Transcripts(w.room, crew.Session), "worker.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	// Status must use the persisted snapshot, without opening the transcript.
 	status, e = w.WorkflowStatus(w.ctx, w.owner, contract.WorkflowStatusRequest{Run: first.Run})
 	if e != nil || status.Steps[0].ToolCalls != 1 || status.Steps[0].Usage.InputTokens != 20 || status.Steps[0].Usage.OutputTokens != 8 {
 		t.Fatalf("finished: %+v %v", status, e)

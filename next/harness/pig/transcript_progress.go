@@ -18,17 +18,19 @@ type TranscriptProgress struct {
 	LastActivity time.Time      `json:"lastActivity,omitzero"`
 }
 
-func readProgress(r io.Reader) (TranscriptProgress, error) {
-	var progress TranscriptProgress
+// ReadProgress reads only complete newline-delimited records. Offset is the number
+// of bytes consumed through the last complete record; a caller can resume there.
+func ReadProgress(r io.Reader) (progress TranscriptProgress, offset int64, err error) {
 	reader := bufio.NewReader(r)
 	for {
 		line, err := reader.ReadBytes('\n')
 		if err == io.EOF {
-			return progress, nil
+			return progress, offset, nil
 		}
 		if err != nil {
-			return progress, err
+			return progress, offset, err
 		}
+		offset += int64(len(line))
 		var record struct {
 			Type      string
 			Timestamp time.Time
@@ -63,13 +65,4 @@ func readProgress(r io.Reader) (TranscriptProgress, error) {
 		progress.Usage.CacheReadTokens += record.Message.Usage.CacheRead
 		progress.Usage.CacheWriteTokens += record.Message.Usage.CacheWrite
 	}
-}
-
-func (r TranscriptReader) Progress(path string) (TranscriptProgress, error) {
-	file, section, err := r.open(path, 0, nil)
-	if err != nil || file == nil {
-		return TranscriptProgress{}, err
-	}
-	defer file.Close()
-	return readProgress(section)
 }

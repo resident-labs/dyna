@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -18,7 +19,6 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/engine/workflowmeta"
 	"github.com/resident-labs/dyna/harness"
-	"github.com/resident-labs/dyna/harness/pig"
 	"github.com/resident-labs/dyna/room"
 )
 
@@ -245,28 +245,6 @@ func (s *Service) WorkflowStatus(ctx context.Context, caller contract.Principal,
 	}
 	info.Result = harness.Mask(info.Result)
 	for i := range steps {
-		if steps[i].Transcript != "" {
-			worker, err := s.store.WorkflowWorker(ctx, run.Session, steps[i].Key)
-			if err != nil {
-				return contract.WorkflowStatusResponse{}, failure(err)
-			}
-			files, err := s.store.TranscriptFiles(ctx, worker.Session)
-			if err != nil {
-				return contract.WorkflowStatusResponse{}, failure(err)
-			}
-			reader := pig.TranscriptReader{Dir: s.layout.Transcripts(run.Room, worker.Session), Acked: map[string]int64{}}
-			for _, file := range files {
-				reader.Acked[file.Path] = file.Acked
-			}
-			progress, err := reader.Progress(steps[i].Transcript)
-			if err != nil {
-				return contract.WorkflowStatusResponse{}, failure(err)
-			}
-			steps[i].ToolCalls, steps[i].LastActivity = progress.ToolCalls, progress.LastActivity
-			if steps[i].State == contract.WorkflowStepRunning {
-				steps[i].Usage = progress.Usage
-			}
-		}
 		maskStep(&steps[i])
 	}
 	lines := make([]contract.WorkflowStatusLine, 0, len(run.StatusLines))
@@ -382,6 +360,8 @@ func (s *Service) WorkflowStepEnd(ctx context.Context, caller contract.Principal
 	if req.State != contract.WorkflowStepDone && req.State != contract.WorkflowStepFailed {
 		return contract.WorkflowStepEndResponse{}, invalid("invalid step state")
 	}
+	s.transcriptMu.Lock()
+	defer s.transcriptMu.Unlock()
 	if err := s.store.EndWorkflowStep(ctx, run.ID, req, s.now()); err != nil {
 		return contract.WorkflowStepEndResponse{}, failure(err)
 	}
@@ -397,8 +377,28 @@ func (s *Service) WorkflowStepTranscript(ctx context.Context, caller contract.Pr
 	if !filepath.IsLocal(req.Transcript) {
 		return contract.WorkflowStepTranscriptResponse{}, invalid("transcript path must be local")
 	}
+	s.transcriptMu.Lock()
+	defer s.transcriptMu.Unlock()
 	if err := s.store.SetWorkflowStepTranscript(ctx, run.ID, req.Key, req.Transcript); err != nil {
 		return contract.WorkflowStepTranscriptResponse{}, failure(err)
+	}
+	// Registration can race ahead of or behind the first transcript sync.
+	ack, err := s.store.TranscriptOffset(ctx, run.Session, req.Transcript)
+	if err != nil {
+		return contract.WorkflowStepTranscriptResponse{}, failure(err)
+	}
+	if ack > 0 {
+		file, err := os.Open(filepath.Join(s.layout.Transcripts(run.Room, run.Session), req.Transcript))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return contract.WorkflowStepTranscriptResponse{}, failure(err)
+		}
+		if file != nil {
+			err = s.syncWorkflowProgress(ctx, run.Session, req.Transcript, file, ack)
+			_ = file.Close()
+			if err != nil {
+				return contract.WorkflowStepTranscriptResponse{}, failure(err)
+			}
+		}
 	}
 	s.publishStep(ctx, run, req.Key)
 	return contract.WorkflowStepTranscriptResponse{}, nil
