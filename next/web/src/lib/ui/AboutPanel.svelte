@@ -45,7 +45,13 @@
   $effect(() => { void open?.profile; loadAccount(); });
   // Root's panel is the room's, so it shows what the room is subscribed to. A list that cannot load shows nothing.
   let isRoot = $derived(open !== undefined && !open.parent);
-  let advisor = $derived([...store.sessions.values()].find(item => item.advisor));
+  // The advisor is a room setting (a profile, or none); room.list carries it. One that cannot load reads None.
+  let advisor = $state("");
+  function loadAdvisor(): void {
+    const asked = room;
+    void call("room.list", {}).then(answer => { if (asked === room) advisor = (answer.rooms ?? []).find(item => item.id === asked)?.advisor ?? ""; }, () => { if (asked === room) advisor = ""; });
+  }
+  $effect(() => { if (isRoot) loadAdvisor(); });
   let subscriptions: SubscriptionInfo[] = $state([]);
   $effect(() => {
     if (!isRoot) { subscriptions = []; return; }
@@ -86,7 +92,7 @@
     {#if parent && open?.parent}<dt>Parent</dt><dd><a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(open.parent)}`} onclick={navigate}>{parent}</a></dd>{/if}
     {#if open?.profile}<dt>Profile</dt><dd><ProfileMenu {session} profile={open.profile} {switchable} /></dd>{/if}
     {#if account}<dt>Account</dt><dd><AccountMenu {session} {account} {switchable} onchanged={loadAccount} /></dd>{/if}
-    {#if isRoot}<dt>Advisor</dt><dd class="advisor"><ProfileMenu {session} {room} profile={advisor?.profile ?? ""} {switchable} />{#if advisor}<a href={`/r/${encodeURIComponent(room)}/s/${encodeURIComponent(advisor.session)}`} onclick={navigate}>Open</a>{/if}</dd>{/if}
+    {#if isRoot}<dt>Advisor</dt><dd class="advisor"><ProfileMenu {session} {room} profile={advisor} {switchable} onchanged={loadAdvisor} /></dd>{/if}
   </dl>
   {#key session}<BoxFacts {store} {session} {shown} />{/key}
   {#if goal}

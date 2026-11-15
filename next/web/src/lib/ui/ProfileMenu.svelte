@@ -8,7 +8,7 @@
   // session.profile_changed updates, so the value moves only once the engine has changed it. Until the list loads, the
   // profile's name stands in for its label; opening the menu asks again after a failed load. With a room it is that room's advisor
   // instead: the same menu with None beside the profiles, which sets the room's advisor setting, and an empty profile reads None.
-  let { session, profile, switchable, room }: { session: string; profile: string; switchable: boolean; room?: string } = $props();
+  let { session, profile, switchable, room, onchanged }: { session: string; profile: string; switchable: boolean; room?: string; onchanged?: () => void } = $props();
   const NONE = "(none)";
   let profiles: ProfileSummary[] | undefined = $state();
   let open = $state(false), busy = $state(false), failure = $state("");
@@ -33,7 +33,7 @@
     if (name === (profile || NONE)) return;
     busy = true;
     failure = "";
-    await (room ? call("room.set", { room, advisor: name === NONE ? "" : name }) : call("session.set_profile", { session, profile: name })).catch(() => { failure = "The profile did not change. Try again."; });
+    await (room ? call("room.set", { room, advisor: name === NONE ? "" : name }) : call("session.set_profile", { session, profile: name })).then(() => onchanged?.(), () => { failure = "The profile did not change. Try again."; });
     busy = false;
   }
 </script>
