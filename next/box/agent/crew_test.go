@@ -39,6 +39,7 @@ type fakeJournal struct {
 	pin         string
 	// by step name, the script version that started each step
 	versions map[string]int
+	queue    queueFake
 }
 
 func newFakeJournal() *fakeJournal {
@@ -73,6 +74,7 @@ func (j *fakeJournal) WorkflowStepStart(_ context.Context, req contract.Workflow
 	j.started = append(j.started, req.Name)
 	j.features[req.Name] = req.Feature
 	j.names[req.Key] = req.Name
+	j.queue.stepEvent(req.Key, req.Event)
 	j.lanes[req.Key] = req.Lane
 	j.phases[req.Key] = req.Phase
 	if stored, ok := j.steps[req.Key]; ok && req.Kind != contract.WorkflowStepWorkflow {
@@ -1183,16 +1185,17 @@ func TestScriptManualStateIsDiscardedOutsideTheStepJournal(t *testing.T) {
 
 func TestCrewStateBoundary(t *testing.T) {
 	for _, event := range []bool{false, true} {
+		row := int64(0)
 		c := &Crew{config: CrewConfig{Engine: &fakeJournal{}}}
 		if event {
-			c.config.Workflow.Subscription = "sub_test"
+			c.config.Workflow.Subscription, row = "sub_test", 7
 		}
-		get := func() crewReply { return c.handle(context.Background(), crewCall{Op: "state_get"}) }
+		get := func() crewReply { return c.handle(context.Background(), crewCall{Op: "state_get", Event: row}) }
 		if got := get(); string(got.Value.(json.RawMessage)) != "null" {
 			t.Fatalf("initial: %+v", got)
 		}
 		value := json.RawMessage(`{"head":"abc"}`)
-		if got := c.handle(context.Background(), crewCall{Op: "state_set", Payload: value}); got.Error != "" {
+		if got := c.handle(context.Background(), crewCall{Op: "state_set", Event: row, Payload: value}); got.Error != "" {
 			t.Fatal(got.Error)
 		}
 		if got := get(); string(got.Value.(json.RawMessage)) != string(value) {
@@ -1200,7 +1203,7 @@ func TestCrewStateBoundary(t *testing.T) {
 		}
 		if !event {
 			for _, value := range []string{`{`, `"` + strings.Repeat("x", 65535) + `"`} {
-				if got := c.handle(context.Background(), crewCall{Op: "state_set", Payload: json.RawMessage(value)}); got.Error == "" {
+				if got := c.handle(context.Background(), crewCall{Op: "state_set", Event: row, Payload: json.RawMessage(value)}); got.Error == "" {
 					t.Fatal("accepted invalid state")
 				}
 			}
@@ -1208,7 +1211,7 @@ func TestCrewStateBoundary(t *testing.T) {
 				t.Fatal("invalid state overwrote value")
 			}
 			limit := json.RawMessage(`"` + strings.Repeat("x", 65534) + `"`)
-			if got := c.handle(context.Background(), crewCall{Op: "state_set", Payload: limit}); got.Error != "" {
+			if got := c.handle(context.Background(), crewCall{Op: "state_set", Event: row, Payload: limit}); got.Error != "" {
 				t.Fatal("rejected 64 KiB state:", got.Error)
 			}
 		}

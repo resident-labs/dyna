@@ -1,4 +1,4 @@
-(function (callHost, sendHost, argsText, parent, depth) {
+(function (callHost, sendHost, argsText, parent, depth, serviceText) {
   // The script API of a crew, built inside the script's own VM. The box agent owns the journal and the workers: callHost asks
   // it for a step and resolves with its reply, and sendHost hands it a line that has no reply. The VM keeps a script's values,
   // and the promises of this API, in one realm. The clock and randomness stay out of what a resumed script can see.
@@ -16,16 +16,28 @@
   };
   const RandomlessMath = Object.create(Math, { random: { value: forbidden("Math.random()") } });
 
+  // A run for a subscription serves its events. Its body runs once for each box start, and a VM of its own runs the same script
+  // again for each event: that VM's body replays the stored steps of the box start, and serve() hands it the event. Steps have
+  // a scope: the box start for the body, and the queue row for a handler, so a redelivered row finds its own steps again.
+  // service is null for a run that serves nothing. handler is set in the VM of an event.
+  const service = JSON.parse(serviceText);
+  let scope = service?.scope ?? "";
+  let row = service?.row ?? 0;
+  let replaying = service?.handler != null;
+  let served = false;
+  let handled = null;
+
   let current = "";
   const call = async (message) => {
-    const reply = await callHost({ parent, phase: current, ...message });
+    const reply = await callHost({ parent, phase: current, scope, event: row, ...message });
     if (reply.error === undefined) return reply.value;
     throw Object.assign(new Error(reply.error), { failed: true, step: reply.step, reason: reply.error });
   };
   // Lines reach the box agent one after another in the order the script wrote them, as the sandbox runs calls side by side.
   let lines = Promise.resolve();
   const emit = (message) => {
-    const line = { parent, phase: current, ...message };
+    if (replaying) return; // the body's lines were written when the box started
+    const line = { parent, phase: current, scope, event: row, ...message };
     lines = lines.then(() => sendHost(line));
   };
   const reasonOf = (error) => error?.reason ?? (String(error?.message ?? error) || "the script threw");
@@ -96,6 +108,26 @@
           return value;
         }),
       ),
+    // serve(handler) makes the run a service: the script's body is its setup, and each event of the subscription calls
+    // handler(event, key, state) once its body has finished.
+    serve: (handler) => {
+      if (depth > 0) throw new Error("serve() belongs in the run's own script, not in one that workflow() runs");
+      if (!service) throw new Error("serve() needs a subscription: dyna subscription add --workflow starts a service, and workflow run does not");
+      if (served) throw new Error("serve() is called once");
+      served = true;
+      if (!service.handler) return;
+      scope = "event:" + service.handler.row;
+      row = service.handler.row;
+      replaying = false;
+      handled = (async () => {
+        try {
+          await handler(service.handler.event, service.handler.key, api.state);
+          return { value: "null" };
+        } catch (error) {
+          return failure(error, "the handler");
+        }
+      })();
+    },
     workflow: async (ref, value) => {
       if (depth > 0) throw new Error("workflow() nests one level: a child script cannot call it");
       return call({ op: "workflow", payload: { ref: String(ref), args: JSON.parse(JSON.stringify(value ?? null)) } });
@@ -110,7 +142,14 @@
     try {
       const text = JSON.stringify((await script(api)) ?? null);
       if (text === undefined) throw new Error("the script returned a value that JSON cannot hold");
-      return { value: text };
+      if (service && depth === 0 && !served) {
+        throw new Error("the script's body ended without calling serve(). A workflow subscription runs as a service: call serve(async (event, key, state) => { … }) to handle each event, where the script used to read args.event and end");
+      }
+      if (handled) {
+        const outcome = await handled;
+        return outcome.failed ? { failure: { reason: outcome.reason, report: outcome.reason, step: outcome.step } } : outcome;
+      }
+      return { value: text, served: served && !service.handler };
     } catch (error) {
       const report = String(error?.step ? error.message : error?.stack ? error + "\n" + error.stack : error) || "the script threw";
       return { failure: { reason: reasonOf(error), report, step: error?.step ?? "" } };

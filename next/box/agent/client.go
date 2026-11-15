@@ -427,3 +427,12 @@ func (c *Client) watchShell(ctx context.Context, jobs *shell.Server, generation 
 func (c *Client) WorkflowState(ctx context.Context, req contract.WorkflowStateRequest) (contract.WorkflowStateResponse, error) {
 	return request[contract.WorkflowStateRequest, contract.WorkflowStateResponse](ctx, c, contract.MethodWorkflowState, req)
 }
+
+func (c *Client) WorkflowEvents(ctx context.Context, req contract.WorkflowEventsRequest) (contract.WorkflowEventsResponse, error) {
+	return request[contract.WorkflowEventsRequest, contract.WorkflowEventsResponse](ctx, c, contract.MethodWorkflowEvents, req)
+}
+
+func (c *Client) WorkflowEventDone(ctx context.Context, req contract.WorkflowEventDoneRequest) error {
+	_, err := request[contract.WorkflowEventDoneRequest, contract.WorkflowEventDoneResponse](ctx, c, contract.MethodWorkflowEventDone, req)
+	return err
+}
