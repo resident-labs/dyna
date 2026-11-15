@@ -41,3 +41,8 @@ func (s *Store) SendAdmissionNotice(ctx context.Context, b box.Box, event contra
 		return s.InsertDelivery(ctx, tx, seq, body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: to}, Surface: contract.SurfaceEngine, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true})
 	})
 }
+
+// AdmissionReaders returns the open parent and room root, without duplicating a root parent.
+func (s *Store) AdmissionReaders(ctx context.Context, room contract.RoomID, session contract.SessionID) ([]contract.SessionID, error) {
+	return queryAll(ctx, s.Read(), func(rows scanner) (id contract.SessionID, err error) { err = rows.Scan(&id); return }, `SELECT id FROM sessions WHERE room=? AND closed_at IS NULL AND (id=(SELECT parent FROM sessions WHERE id=?) OR parent IS NULL)`, room, session)
+}

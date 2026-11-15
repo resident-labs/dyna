@@ -45,21 +45,7 @@ func (s *Service) AdmissionNotices(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		recipients, err := s.store.Read().QueryContext(ctx, `SELECT id FROM sessions WHERE room=? AND closed_at IS NULL AND (id=(SELECT parent FROM sessions WHERE id=?) OR parent IS NULL)`, b.Room, b.Session)
-		if err != nil {
-			return err
-		}
-		var readers []contract.SessionID
-		for recipients.Next() {
-			var id contract.SessionID
-			if err := recipients.Scan(&id); err != nil {
-				recipients.Close()
-				return err
-			}
-			readers = append(readers, id)
-		}
-		err = recipients.Err()
-		recipients.Close()
+		readers, err := s.store.AdmissionReaders(ctx, b.Room, b.Session)
 		if err != nil {
 			return err
 		}
