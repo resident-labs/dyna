@@ -35,10 +35,10 @@ func hostLoad(h Host, boxes []Box, self contract.BoxID) (cpu, runnerCPU int, mem
 		if b.Host != h.Name || b.ID == self || b.State == contract.BoxDeleted || b.State == contract.BoxFailed {
 			continue
 		}
-		if (b.State != contract.BoxPending && b.Image == "") || (!b.PlacedAt.Before(h.CheckedAt) && !(b.State == contract.BoxPending && b.Image == "")) {
+		if UnmeasuredDisk(h, b) {
 			disk -= diskRequest(b.Size.Name)
 		}
-		if b.State != contract.BoxStopped && b.State != contract.BoxPending {
+		if HoldsCompute(b) {
 			cpu += b.Size.CPUs
 			mem += b.Size.MemBytes
 			if b.Image == RunnerImage {

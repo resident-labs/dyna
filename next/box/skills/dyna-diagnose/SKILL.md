@@ -74,7 +74,7 @@ A failed turn (`turn.ended` `cause`; the next input starts a new turn):
 | `harness_failed` | the agent program stopped; a third crash without a completed turn fails the box. Post once; on another failure, `session restart` |
 | `setup_failed` | the box could not set up the repository: the turn's `error` says why |
 
-A pending box (`boxReason`):
+A pending box (`boxReason`): After 5 minutes pending admission, the parent and room root receive a system notice with the blocking reason, reservation holders and next steps; `host list` shows current reservations and free disk.
 
 | Reason | Do |
 |---|---|

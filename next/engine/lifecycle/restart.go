@@ -10,8 +10,8 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
-// QuiesceRestart claims a failed box's names against admission, lifecycle work and
-// leftover repayment. The caller must recheck its failed snapshot after the join,
+// QuiesceRestart claims a failed or never-created pending box's names against admission,
+// lifecycle work and leftover repayment. The caller must recheck its snapshot after the join,
 // and release after cleanup and the reset commit. It grants no deletion authority.
 // Only the short claim/release holds pass; unrelated boxes keep progressing while
 // the old box's workers or host take time. Concurrent restart claims refuse.

@@ -198,6 +198,9 @@ func (s *Service) GoalJournal(ctx context.Context, caller contract.Principal, re
 
 // FailureNotices tells ancestors of sessions that just failed.
 func (s *Service) FailureNotices(ctx context.Context) error {
+	if err := s.AdmissionNotices(ctx); err != nil {
+		return err
+	}
 	return s.store.SendFailureNotices(ctx, s.now(), s.engineEvent)
 }
 

@@ -51,7 +51,7 @@ func TestHostListIncludesLoadAndRunningBoxes(t *testing.T) {
 	b := &Boxes{Store: listStore{}, loads: map[contract.HostName]hostLoad{"host": {summary: contract.HostSummary{Reachable: true, Health: contract.HostDegraded, CPUUsed: 1.5, MemUsed: 512, DiskBytes: 100, DiskUsed: 20}}}}
 	svc := serviceWithHosts{Service: engine.New(st, nil, nil, time.Now), boxes: b}
 	got, problem := svc.HostList(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.HostListRequest{})
-	want := contract.HostSummary{State: "degraded", Health: contract.HostDegraded, CPUFree: 6.5, MemFree: 3584, DiskFree: 80, DiskBytes: 100, DiskUsed: 20, DiskLow: true, Shared: []contract.RoomShared{}, Name: "host", Reachable: true, Boxes: 1, CPUs: 8, MemBytes: 4096, Agents: true, CIScale: 1, CPUUsed: 1.5, MemUsed: 512, History: []contract.HostLoadPoint{}}
+	want := contract.HostSummary{Reservations: &contract.HostReservations{CPUCap: 32000, MemoryCap: 16384}, State: "degraded", Health: contract.HostDegraded, CPUFree: 6.5, MemFree: 3584, DiskFree: 80, DiskBytes: 100, DiskUsed: 20, DiskLow: true, Shared: []contract.RoomShared{}, Name: "host", Reachable: true, Boxes: 1, CPUs: 8, MemBytes: 4096, Agents: true, CIScale: 1, CPUUsed: 1.5, MemUsed: 512, History: []contract.HostLoadPoint{}}
 	if problem != nil || len(got.Hosts) != 2 || !reflect.DeepEqual(got.Hosts[1], want) {
 		t.Fatalf("hosts: %+v, error: %v", got, problem)
 	}
