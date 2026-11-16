@@ -528,11 +528,12 @@ type RoomReposRequest struct {
 }
 
 // RepoCISetRequest turns a repository's CI runners on or off. Max bounds its runners across sizes, and zero leaves the
-// number to admission.
+// number to admission. Hosts overrides the room rule; nil keeps the list, and an empty list clears it.
 type RepoCISetRequest struct {
-	Repo RepoName `json:"repo"`
-	On   bool     `json:"on"`
-	Max  int      `json:"max,omitempty"`
+	Hosts []string `json:"hosts"`
+	Repo  RepoName `json:"repo"`
+	On    bool     `json:"on"`
+	Max   int      `json:"max,omitempty"`
 }
 type RepoCISetResponse struct{}
 type RoomReposResponse struct {

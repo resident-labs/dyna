@@ -927,7 +927,7 @@ const leaseWrite = 30 * time.Second
 
 // renew writes the lease while the pool is alive for the repository: a listener of it runs and has not failed since its last
 // poll, and a host that is ready, has
-// ci on and is allowed by the room's rule answered this pass's survey. Free slots, the bound, disk, memory and the polls'
+// ci on and is allowed by the repository's effective host rule answered this pass's survey. Free slots, the bound, disk, memory and the polls'
 // capacity do not count, so a full pool keeps its lease. Only the time of the last write is kept in memory, so the first pass
 // after a start writes at once.
 func (p *Pool) renew(ctx context.Context, repo contract.RepoName, hosts []box.Host, only []string) error {
@@ -947,7 +947,7 @@ func (p *Pool) renew(ctx context.Context, repo contract.RepoName, hosts []box.Ho
 		}
 	}
 	if !listening || !slices.ContainsFunc(hosts, func(h box.Host) bool {
-		// The room's rule names hosts, or the pool of a node; a per-session node serves its one box only.
+		// The effective rule names hosts, or the pool of a node; a per-session node serves its one box only.
 		name := string(h.Name)
 		if h.Pool != "" {
 			name = h.Pool

@@ -181,13 +181,22 @@ func roomCommand(getClient func() client) *cobra.Command {
 	}}
 	var ciOn, ciOff bool
 	var ciMax int
-	repoCI := &cobra.Command{Use: "ci REPO", Short: "Turn a repository's CI runners on or off", Long: "--on serves the repository's jobs that say runs-on: dyna-small, dyna-medium, dyna-large or dyna-xlarge, each from a runner of that size, on a host with ci on that the room's host rule allows (room hosts ROOM --only, the same rule as its boxes; there is no host choice per repository), picked as admission picks one for a box, or on a node of the room's pool. --max bounds its runners across sizes. --off removes them at once. See next/docs/ci-runners.md.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := getClient().RepoCISet(cmd.Context(), contract.RepoCISetRequest{Repo: contract.RepoName(args[0]), On: ciOn, Max: ciMax})
+	var ciHosts string
+	repoCI := &cobra.Command{Use: "ci REPO", Short: "Turn a repository's CI runners on or off", Long: "--on serves the repository's jobs that say runs-on: dyna-small, dyna-medium, dyna-large or dyna-xlarge, each from a runner of that size, on a host with ci on allowed by --hosts (comma-separated hosts and at most one pool), or by the room's host rule when no repository list is set. --hosts '' clears the list; omitting it keeps the list, picked as admission picks one for a box, or on a node of the room's pool. --max bounds its runners across sizes. --off removes them at once. See next/docs/ci-runners.md.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		var hosts []string
+		if cmd.Flags().Changed("hosts") {
+			hosts = []string{}
+			if ciHosts != "" {
+				hosts = strings.Split(ciHosts, ",")
+			}
+		}
+		_, err := getClient().RepoCISet(cmd.Context(), contract.RepoCISetRequest{Repo: contract.RepoName(args[0]), On: ciOn, Max: ciMax, Hosts: hosts})
 		return err
 	}}
 	repoCI.Flags().BoolVar(&ciOn, "on", false, "Serve the repository's jobs from Dyna's runners")
 	repoCI.Flags().BoolVar(&ciOff, "off", false, "Stop its runners, even mid-job, and leave its jobs to GitHub-hosted runners")
 	repoCI.Flags().IntVar(&ciMax, "max", 0, "Most runners at once across sizes; none means as many as admission allows")
+	repoCI.Flags().StringVar(&ciHosts, "hosts", "", "CI hosts and at most one pool, comma-separated; empty clears the override")
 	repoCI.MarkFlagsOneRequired("on", "off")
 	repoCI.MarkFlagsMutuallyExclusive("on", "off")
 	repoCI.MarkFlagsMutuallyExclusive("off", "max")
