@@ -75,8 +75,9 @@ that no job waits for a pool that does not exist yet.
 6. Set the repository variable `DYNA_CI_SELF_HOSTED` to `true`, and give each pool
    job its size, as `runs-on: dyna-medium`.
 
-Adding a host later is steps 2 to 4. Nothing else changes: no repository names its
-hosts.
+Adding a host later is steps 2 to 4. A repository can limit its runners with
+`dyna room repo ci REPO --on --hosts A,B`; omitting `--hosts` keeps its list, and
+`--hosts ''` clears it to follow the room's rule.
 
 ## Where a runner goes
 
@@ -92,10 +93,12 @@ host's build is done, it counts as not ready. A host where a session box is pend
 new runner when only runners keep that box out, so the box gets the next free slot. Runners and boxes count against each other there, and several
 runners share a host while it has room, up to 16, one per slot. A host with ci off
 gets no new runner. The agents switch and the room list keep sessions off a host,
-so a runner ignores both.
+so a runner ignores the agents switch.
 
-The repository's room is its default room, and its rule (`dyna room hosts ROOM
---only POOL,HOST`) holds its runners as it holds its boxes. With no rule, runners may use any host and any shared pool node. When no host takes a
+The repository's room is its default room. Its CI host list, when set, replaces the
+room's rule (`dyna room hosts ROOM --only POOL,HOST`) for runners only. Both lists
+name hosts and at most one pool, not individual pool nodes. Without a repository
+list, runners follow the room rule. With neither rule, runners may use any host and any shared pool node. When no host takes a
 job and the rule names a pool that can grow, the job waits for a node, as a box
 does: the pool makes one of the runner's size, the next poll places the runner
 there, and the pool takes the node back once nothing has held it for `--idle`. A

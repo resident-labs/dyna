@@ -17,10 +17,10 @@ import (
 // ErrPoolExists refuses a second pool of one name.
 var ErrPoolExists = errors.New("pool already exists")
 
-// PoolInUseError refuses to remove a pool that still has nodes, or that a room's rule names.
+// PoolInUseError refuses to remove a pool that still has nodes, or that a room or repository rule names.
 type PoolInUseError struct {
-	Name         string
-	Nodes, Rooms []string
+	Name                string
+	Nodes, Rooms, Repos []string
 }
 
 func (e *PoolInUseError) Error() string {
@@ -30,6 +30,9 @@ func (e *PoolInUseError) Error() string {
 	}
 	if len(e.Rooms) > 0 {
 		held = append(held, "the --only rule of "+strings.Join(e.Rooms, ", "))
+	}
+	if len(e.Repos) > 0 {
+		held = append(held, "the CI host rule of "+strings.Join(e.Repos, ", "))
 	}
 	return fmt.Sprintf("pool %s still has %s", e.Name, strings.Join(held, " and "))
 }
@@ -60,7 +63,7 @@ func (s *Store) AddPool(ctx context.Context, p Pool) error {
 	})
 }
 
-// RemovePool deletes an empty pool that no room names, so no rule ever points at nothing.
+// RemovePool deletes an empty pool that no room or repository names, so no rule ever points at nothing.
 func (s *Store) RemovePool(ctx context.Context, name string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		nodes, err := listIDs[string](ctx, tx, "SELECT name FROM hosts WHERE pool=? ORDER BY name", name)
@@ -71,8 +74,12 @@ func (s *Store) RemovePool(ctx context.Context, name string) error {
 		if err != nil {
 			return err
 		}
-		if len(nodes)+len(rooms) > 0 {
-			return &PoolInUseError{Name: name, Nodes: nodes, Rooms: rooms}
+		repos, err := listIDs[string](ctx, tx, "SELECT DISTINCT rr.repo FROM room_repos rr, json_each(rr.ci_hosts) j WHERE j.value=? ORDER BY rr.repo", name)
+		if err != nil {
+			return err
+		}
+		if len(nodes)+len(rooms)+len(repos) > 0 {
+			return &PoolInUseError{Name: name, Nodes: nodes, Rooms: rooms, Repos: repos}
 		}
 		result, err := tx.ExecContext(ctx, "DELETE FROM pools WHERE name=?", name)
 		return noRows(result, err, fmt.Errorf("pool %s: %w", name, ErrNotFound))

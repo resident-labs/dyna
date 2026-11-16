@@ -58,6 +58,12 @@ func TestContextRoomCI(t *testing.T) {
 			t.Fatalf("default settings with CI: %q", got)
 		}
 	}
+	if err := r.s.store.SetRepoCI(ctx, "owner/a", true, 0, []string{"ci-host"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := snapshot(r.worker); got != "Dyna CI runners: owner/a [hosts: ci-host], owner/z (dyna-ci skill)" {
+		t.Fatal(got)
+	}
 	// Fresh snapshots (the source for each new turn) notice flips without a cached setting.
 	for _, repo := range []contract.RepoName{"owner/a", "owner/z"} {
 		if err := r.s.store.SetRepoCI(ctx, repo, false, 0); err != nil {

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -752,12 +753,20 @@ func TestRoomLimitCommand(t *testing.T) {
 func TestRepoCICommand(t *testing.T) {
 	f := &fakeClient{}
 	runCLI(t, f, "room", "repo", "ci", "a/b", "--on", "--max", "4")
-	if f.repoCI != (contract.RepoCISetRequest{Repo: "a/b", On: true, Max: 4}) {
+	if !reflect.DeepEqual(f.repoCI, contract.RepoCISetRequest{Repo: "a/b", On: true, Max: 4}) {
 		t.Fatalf("%+v", f.repoCI)
 	}
 	runCLI(t, f, "room", "repo", "ci", "a/b", "--off")
-	if f.repoCI != (contract.RepoCISetRequest{Repo: "a/b"}) {
+	if !reflect.DeepEqual(f.repoCI, contract.RepoCISetRequest{Repo: "a/b"}) {
 		t.Fatalf("%+v", f.repoCI)
+	}
+	runCLI(t, f, "room", "repo", "ci", "a/b", "--on", "--hosts", "ci,pool")
+	if !reflect.DeepEqual(f.repoCI.Hosts, []string{"ci", "pool"}) {
+		t.Fatal(f.repoCI)
+	}
+	runCLI(t, f, "room", "repo", "ci", "a/b", "--on", "--hosts", "")
+	if f.repoCI.Hosts == nil || len(f.repoCI.Hosts) != 0 {
+		t.Fatal(f.repoCI)
 	}
 	for _, args := range [][]string{{"a/b"}, {"a/b", "--on", "--off"}, {"a/b", "--off", "--max", "2"}} {
 		f := &fakeClient{}

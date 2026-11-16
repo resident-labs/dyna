@@ -210,7 +210,11 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	var runners []string
 	for _, repo := range ciRepos {
 		if repo.Room == session.Room {
-			runners = append(runners, string(repo.Repo))
+			name := string(repo.Repo)
+			if len(repo.Hosts) > 0 {
+				name += " [hosts: " + strings.Join(repo.Hosts, ", ") + "]"
+			}
+			runners = append(runners, name)
 		}
 	}
 	if len(runners) > 0 {
