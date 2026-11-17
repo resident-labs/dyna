@@ -9,7 +9,8 @@
 # The compatibility notes at the end show old spellings for existing deployments.
 config-version: 8
 
-# Optional model catalog sources: http(s) URLs or absolute local file paths.
+# Optional model catalog sources: "embed", http(s) URLs or absolute local file paths.
+# "embed" pins that catalog to bundled data without remote refresh.
 # Each explicit source overrides --local-model; otherwise --local-model uses
 # embedded catalogs, and normal mode uses the official remote sources.
 # Failed refreshes retain the last valid catalog; custom sources never fall back

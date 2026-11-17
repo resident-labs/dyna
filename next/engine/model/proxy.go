@@ -80,6 +80,10 @@ func NewProxy(dir, authDir, managementKey string) (*Proxy, error) {
 		return nil, err
 	}
 	cfg.AuthDir = authDir
+	// Keep our catalog additions: upstream refresh replaces these catalogs wholesale
+	// and can remove models released after its last update.
+	cfg.Models.Catalog = "embed"
+	cfg.Models.CodexCatalog = "embed"
 	// A transient upstream failure is not evidence that the account is unusable.
 	// Keep auth and quota cooling, but let PiG retry on the same sole credential.
 	// Pinned limitation (accepted): a late 5xx can clear a concurrent 401/403 cooldown; the next 401/403 sets it again.
