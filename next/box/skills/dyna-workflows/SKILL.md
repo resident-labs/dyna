@@ -177,7 +177,7 @@ Every call is a keyed step. A key hashes kind, prompt or command, options other 
 
 - `dyna workflow reload RUN FILE` (reload is for a running run) fixes a prompt or adds steps while finished work stays. A running step the new script calls keeps its worker: no second one starts; one it drops runs on until the run ends.
 - `dyna workflow run FILE --resume RUN` (resume is for an ended run of the same room and repository) is a new session with the same pinned commit. Failed, cut-off and `workflow()` steps rerun; main-tree files are lost. Worktree branches are fetched back (a deleted one fails), and it can push through any chain of resumes.
-- Editing a profile changes the model and cap for workers that start afterward, including in a running service. It does not reload the script or switch a running worker's model.
+- Editing a profile changes the model and cap for workers that start afterward, including in a running service. It does not reload the script or switch a running worker's model. If a declared profile is removed, new calls to it fail; a removed default does not fall back to another profile.
 
 ## Start a script from events
 

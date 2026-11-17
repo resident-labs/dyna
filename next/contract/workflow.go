@@ -254,6 +254,7 @@ func (WorkflowReload) isBoxMessageBody()              {}
 type WorkflowProfile struct {
 	Name              ProfileName `json:"name"`
 	Model             ModelChoice `json:"model"`
+	Unavailable       bool        `json:"unavailable,omitempty"` // still declared in meta, but removed from the profile configuration
 	CompactTokens     int         `json:"compactTokens,omitempty"`
 	MaxConcurrent     int         `json:"maxConcurrent,omitempty"`
 	ModelInstructions string      `json:"modelInstructions,omitempty"`

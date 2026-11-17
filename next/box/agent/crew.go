@@ -857,7 +857,7 @@ func (c *Crew) acquireProfile(ctx context.Context, name contract.ProfileName) (c
 	for {
 		c.mu.Lock()
 		index := slices.IndexFunc(c.workflow.Profiles, func(p contract.WorkflowProfile) bool { return p.Name == name })
-		if index < 0 {
+		if index < 0 || c.workflow.Profiles[index].Unavailable {
 			c.mu.Unlock()
 			return contract.WorkflowProfile{}, nil, nil, fmt.Errorf("profile %q is not available in this workflow", name)
 		}

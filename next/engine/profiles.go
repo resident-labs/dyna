@@ -33,6 +33,10 @@ type profile struct {
 	MaxConcurrent int                    `json:"maxConcurrent,omitempty"`
 }
 
+func (p profile) modelChoice() contract.ModelChoice {
+	return contract.ModelChoice{Provider: p.Provider, ID: p.Model, Thinking: p.Thinking}
+}
+
 // Profile operations take the profile lock, then the store transaction. The post-commit
 // wake hook calls non-blocking Kick, then takes wakeMu. wakeMu is a leaf lock.
 // No box IO runs while the profile lock is held.
@@ -224,7 +228,7 @@ func (p *ProfileConfig) Model(name contract.ProfileName) (contract.ModelChoice, 
 		slices.Sort(names)
 		return contract.ModelChoice{}, nil, fmt.Errorf("unknown profile %q; the profiles are %s", name, strings.Join(names, ", "))
 	}
-	return contract.ModelChoice{Provider: profile.Provider, ID: profile.Model, Thinking: profile.Thinking}, slices.Clone(profile.AllowedModels), nil
+	return profile.modelChoice(), slices.Clone(profile.AllowedModels), nil
 }
 
 func (p *ProfileConfig) update(name contract.ProfileName, value *profile, create bool) *contract.Error {

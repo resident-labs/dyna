@@ -124,7 +124,8 @@ func TestProfileChangesReachTheRunningServiceBox(t *testing.T) {
 		if !ok {
 			return false
 		}
-		if updated := msg.Workflow; updated.Version != initial.Version || len(updated.Profiles) != 1 || updated.Profiles[0].Name != "deep" {
+		if updated := msg.Workflow; updated.Version != initial.Version || len(updated.Profiles) != 2 ||
+			updated.Profiles[0] != (contract.WorkflowProfile{Name: "fast", Unavailable: true}) || updated.Profiles[1].Model.ID != next.Model {
 			t.Fatalf("replacement reload: %+v", updated)
 		}
 		return true

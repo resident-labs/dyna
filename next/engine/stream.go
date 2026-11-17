@@ -358,7 +358,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					return
 				}
 				if run.State == contract.WorkflowRunning {
-					profiles, models := s.workflowProfiles(run.Profiles), s.profiles.TextOnlyModels()
+					profiles, models := s.workflowProfiles(run.Profiles)
 					if sent == nil || run.Version != sent.Version || run.Paused != sent.Paused ||
 						!slices.Equal(run.PausedSteps, sent.PausedSteps) || !slices.Equal(run.ReleasedSteps, sent.ReleasedSteps) ||
 						!slices.Equal(profiles, sent.Profiles) || !slices.Equal(models, sent.TextOnlyModels) {

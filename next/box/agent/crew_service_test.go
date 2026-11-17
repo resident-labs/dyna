@@ -435,6 +435,15 @@ func TestServiceRefreshesProfilesWithoutRestarting(t *testing.T) {
 	}
 }
 
+func TestRemovedDefaultProfileDoesNotFallBackToAnotherProfile(t *testing.T) {
+	h := newCrewHarness(t)
+	result := h.run(crewMeta+`await agent('explicit', {profile: 'deep'}); return await agent('default')`,
+		contract.WorkflowProfile{Name: "fast", Unavailable: true}, crewProfiles[1])
+	if result.Outcome != contract.TurnFailed || !strings.Contains(result.Error, `profile "fast" is not available`) || h.started.Load() != 1 {
+		t.Fatalf("turn %+v, %d workers started", result, h.started.Load())
+	}
+}
+
 func TestServiceSetupAfterServeStaysUnderTheBoxStart(t *testing.T) {
 	h := serviceHarness(t)
 	q := &h.journal.queue
