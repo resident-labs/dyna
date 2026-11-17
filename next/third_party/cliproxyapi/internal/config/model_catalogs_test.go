@@ -77,7 +77,7 @@ func TestModelCatalogConfigValidation(t *testing.T) {
 			}
 		}
 	}
-	for _, raw := range []string{"models: {}", "models: {catalog: ''}", "models: {codex-catalog: 'https://example.com/models.json'}"} {
+	for _, raw := range []string{"models: {}", "models: {catalog: ''}", "models: {catalog: embed, codex-catalog: embed, devin-catalog: embed}", "models: {codex-catalog: 'https://example.com/models.json'}"} {
 		if errValidate := ValidateV8Config([]byte(raw)); errValidate != nil {
 			t.Fatal(errValidate)
 		}
