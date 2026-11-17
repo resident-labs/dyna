@@ -57,7 +57,7 @@ func TestThreeMismatchesFailTheStepWithTheLastText(t *testing.T) {
 	prompts := answers(h, text("Done."))
 	crew, ended := h.start(crewMeta + `return 1`)
 	<-ended
-	out := crew.worker(t.Context(), strings.Repeat("0", 64), crewProfiles[0], "p", agentOpts{Schema: []byte(`{"type":"object","required":["count"]}`)}, h.workdir)
+	out := crew.worker(t.Context(), strings.Repeat("0", 64), crewProfiles[0].Name, "p", agentOpts{Schema: []byte(`{"type":"object","required":["count"]}`)}, h.workdir)
 	if out.cause != contract.CauseBadResult || out.value != nil || len(*prompts) != schemaAttempts || !strings.Contains(out.reason, "its last text: Done.") {
 		t.Fatalf("outcome %+v after %d turns", out, len(*prompts))
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -30,6 +31,10 @@ type profile struct {
 	Thinking      contract.ThinkingLevel `json:"thinking"`
 	CompactTokens int                    `json:"compactTokens,omitempty"`
 	MaxConcurrent int                    `json:"maxConcurrent,omitempty"`
+}
+
+func (p profile) modelChoice() contract.ModelChoice {
+	return contract.ModelChoice{Provider: p.Provider, ID: p.Model, Thinking: p.Thinking}
 }
 
 // Profile operations take the profile lock, then the store transaction. The post-commit
@@ -223,7 +228,7 @@ func (p *ProfileConfig) Model(name contract.ProfileName) (contract.ModelChoice, 
 		slices.Sort(names)
 		return contract.ModelChoice{}, nil, fmt.Errorf("unknown profile %q; the profiles are %s", name, strings.Join(names, ", "))
 	}
-	return contract.ModelChoice{Provider: profile.Provider, ID: profile.Model, Thinking: profile.Thinking}, slices.Clone(profile.AllowedModels), nil
+	return profile.modelChoice(), slices.Clone(profile.AllowedModels), nil
 }
 
 func (p *ProfileConfig) update(name contract.ProfileName, value *profile, create bool) *contract.Error {
@@ -291,10 +296,13 @@ func (s *Service) ProfileSet(ctx context.Context, who contract.Principal, req co
 	v := req.Profile
 	images := v.Images == nil || *v.Images
 	err := p.update(v.Name, &profile{Description: v.Description, Taste: v.Taste, Diagnostics: v.Diagnostics, Intelligence: v.Intelligence, Cost: v.Cost, Provider: v.Provider, Model: v.Model, Images: images, AllowedModels: slices.Clone(v.AllowedModels), Thinking: v.Thinking, CompactTokens: v.CompactTokens, MaxConcurrent: v.MaxConcurrent}, req.Create)
-	if err == nil && !req.Create {
-		// An edit can move every session on the profile to another model at its next turn.
-		if sessions, readErr := s.store.SessionsOnProfile(ctx, v.Name); readErr == nil {
-			s.sessionsMoved(ctx, sessions, v.Name)
+	if err == nil {
+		s.wakeWorkflowsOnProfile(ctx, v.Name)
+		if !req.Create {
+			// An edit can move every session on the profile to another model at its next turn.
+			if sessions, readErr := s.store.SessionsOnProfile(ctx, v.Name); readErr == nil {
+				s.sessionsMoved(ctx, sessions, v.Name)
+			}
 		}
 	}
 	return contract.ProfileSetResponse{}, err
@@ -378,11 +386,28 @@ func (s *Service) ProfileRemove(ctx context.Context, who contract.Principal, req
 			moved = sessions
 			return nil
 		})
+		if problem == nil {
+			s.wakeWorkflowsOnProfile(ctx, req.Name)
+		}
 		// Replace holds the profile lock while it moves, and this takes that lock and reads the proxy.
 		s.sessionsMoved(ctx, moved, req.Replacement)
 		return contract.ProfileRemoveResponse{}, problem
 	}
-	return contract.ProfileRemoveResponse{}, p.Remove(req.Name, func() (bool, error) {
+	problem := p.Remove(req.Name, func() (bool, error) {
 		return s.store.ProfileInUse(ctx, req.Name)
 	})
+	if problem == nil {
+		s.wakeWorkflowsOnProfile(ctx, req.Name)
+	}
+	return contract.ProfileRemoveResponse{}, problem
+}
+
+// wakeWorkflowsOnProfile wakes the box streams, which send a reload if the crew's profiles changed.
+func (s *Service) wakeWorkflowsOnProfile(ctx context.Context, name contract.ProfileName) {
+	sessions, err := s.store.WorkflowsOnProfile(context.WithoutCancel(ctx), name)
+	if err != nil {
+		log.Printf("wake workflows on profile %q: %v", name, err)
+		return
+	}
+	s.live.Wake(sessions, nil)
 }

@@ -58,7 +58,7 @@ func (c *Crew) removeTree(ctx context.Context, dir string) {
 
 // treeWorker runs a worker in its own tree and saves what it leaves before the step can be stored, so a stored step always has
 // its work on the remote. The tree goes once its work is saved, so a script finds the same thing here as in a replacement box.
-func (c *Crew) treeWorker(ctx context.Context, key, name string, profile contract.WorkflowProfile, prompt string, opts agentOpts) stepOutcome {
+func (c *Crew) treeWorker(ctx context.Context, key, name string, profile contract.ProfileName, prompt string, opts agentOpts) stepOutcome {
 	if c.config.Base == "" {
 		return stepOutcome{reason: "worktree: true needs a repository, and this run has none"}
 	}
