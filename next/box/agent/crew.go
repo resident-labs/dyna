@@ -74,9 +74,8 @@ type crewWorker interface {
 
 // CrewConfig is what a crew's box hands it.
 type CrewConfig struct {
-	Workflow       contract.BoxWorkflow
-	TextOnlyModels []contract.TextOnlyModel
-	Engine         crewEngine
+	Workflow contract.BoxWorkflow
+	Engine   crewEngine
 	// Open starts a worker for a step in dir, its working tree. Folder is the worker's own, for the time it runs, and holds
 	// its model configuration in models.json.
 	Open       func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string, schema json.RawMessage) (crewWorker, error)
@@ -93,27 +92,28 @@ type CrewConfig struct {
 // journal, not this process, holds what has finished. A restarted box runs the script again and stored steps return at once.
 // A reload runs a new version in the same turn, and a step still running here is joined, not started again.
 type Crew struct {
-	config       CrewConfig
-	slots        chan struct{}
-	builds       *buildLock
-	shims        string
-	repo         sync.Mutex    // the changes to the one repository that all trees share
-	reloads      chan struct{} // a newer version of the script is waiting
-	pauseChanged chan struct{} // a pause change wakes calls waiting to start
+	config  CrewConfig
+	slots   chan struct{}
+	builds  *buildLock
+	shims   string
+	repo    sync.Mutex    // the changes to the one repository that all trees share
+	reloads chan struct{} // a newer version of the script is waiting
 
-	mu       sync.Mutex
-	workflow contract.BoxWorkflow // the newest version of the script, which a reload replaces
-	limits   map[contract.ProfileName]chan struct{}
-	running  map[string]*runningStep               // by key, the steps this box is running
-	workers  map[string]crewWorker                 // by key, the workers that are open: a post to the run reaches each
-	queued   map[contract.DeliverySeq][]crewWorker // the open workers that queued a post and have not said whether they read it
-	taken    map[contract.DeliverySeq]bool
-	delivery contract.DeliverySeq // workers carry it, so the engine files their transcripts under the crew's turn
-	turn     contract.TurnID
-	dryState json.RawMessage                  // hand-started state lives only in this crew
-	boot     string                           // names this start of the script to the engine, which hands an event over again to a new one
-	held     map[int64]contract.WorkflowEvent // the events whose handlers have not ended, which a reload runs again
-	stop     context.CancelFunc
+	mu           sync.Mutex
+	workflow     contract.BoxWorkflow // the newest script, pauses and profiles
+	pauseChanged chan struct{}        // a pause change wakes calls waiting to start
+	slotsChanged chan struct{}        // a profile or available slot changed
+	profileInUse map[contract.ProfileName]int
+	running      map[string]*runningStep               // by key, the steps this box is running
+	workers      map[string]crewWorker                 // by key, the workers that are open: a post to the run reaches each
+	queued       map[contract.DeliverySeq][]crewWorker // the open workers that queued a post and have not said whether they read it
+	taken        map[contract.DeliverySeq]bool
+	delivery     contract.DeliverySeq // workers carry it, so the engine files their transcripts under the crew's turn
+	turn         contract.TurnID
+	dryState     json.RawMessage                  // hand-started state lives only in this crew
+	boot         string                           // names this start of the script to the engine, which hands an event over again to a new one
+	held         map[int64]contract.WorkflowEvent // the events whose handlers have not ended, which a reload runs again
+	stop         context.CancelFunc
 }
 
 // runningStep is one step in this box. A call with its key waits for its reply.
@@ -150,27 +150,18 @@ func NewCrew(config CrewConfig) (*Crew, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Crew{config: config, slots: make(chan struct{}, max(config.Workflow.Workers, 1)), builds: builds, shims: shims, reloads: make(chan struct{}, 1), pauseChanged: make(chan struct{}),
-		workflow: config.Workflow, limits: make(map[contract.ProfileName]chan struct{}), running: make(map[string]*runningStep), workers: make(map[string]crewWorker), queued: make(map[contract.DeliverySeq][]crewWorker), taken: make(map[contract.DeliverySeq]bool)}
-	c.addLimits(config.Workflow.Profiles)
-	return c, nil
+	return &Crew{config: config, slots: make(chan struct{}, max(config.Workflow.Workers, 1)), builds: builds, shims: shims, reloads: make(chan struct{}, 1), pauseChanged: make(chan struct{}), slotsChanged: make(chan struct{}),
+		workflow: config.Workflow, profileInUse: make(map[contract.ProfileName]int), running: make(map[string]*runningStep), workers: make(map[string]crewWorker), queued: make(map[contract.DeliverySeq][]crewWorker), taken: make(map[contract.DeliverySeq]bool)}, nil
 }
 
-// addLimits gives each profile with a limit its own slots. A profile that has them keeps them, with the steps that hold them.
-func (c *Crew) addLimits(profiles []contract.WorkflowProfile) {
-	for _, profile := range profiles {
-		if _, ok := c.limits[profile.Name]; !ok && profile.MaxConcurrent > 0 {
-			c.limits[profile.Name] = make(chan struct{}, profile.MaxConcurrent)
-		}
-	}
-}
-
-// Reload makes workflow the script this crew runs, when it is newer than the one it has. The running script's host stops and
-// the new version starts in its place, in the same turn. Steps already running go on, so a call with one of their keys waits
-// for that step, and any the new version does not call stop when the run ends.
+// Reload updates pauses and profiles without restarting the script or any worker. A newer script starts in the same turn,
+// joining any steps it calls that are still running. Steps the new version does not call stop when the run ends.
 func (c *Crew) Reload(workflow contract.BoxWorkflow) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if workflow.Version < c.workflow.Version {
+		return
+	}
 	if workflow.Paused != c.workflow.Paused || !slices.Equal(workflow.PausedSteps, c.workflow.PausedSteps) || !slices.Equal(workflow.ReleasedSteps, c.workflow.ReleasedSteps) {
 		c.workflow.ReleasedSteps = slices.Clone(workflow.ReleasedSteps)
 		c.workflow.PausedSteps = slices.Clone(workflow.PausedSteps)
@@ -178,11 +169,15 @@ func (c *Crew) Reload(workflow contract.BoxWorkflow) {
 		close(c.pauseChanged)
 		c.pauseChanged = make(chan struct{})
 	}
-	if workflow.Version <= c.workflow.Version {
+	if !slices.Equal(workflow.Profiles, c.workflow.Profiles) {
+		c.workflow.Profiles = workflow.Profiles
+		c.notifySlotsChanged()
+	}
+	c.workflow.TextOnlyModels = workflow.TextOnlyModels
+	if workflow.Version == c.workflow.Version {
 		return
 	}
 	c.workflow = workflow
-	c.addLimits(workflow.Profiles)
 	select {
 	case c.reloads <- struct{}{}:
 	default:
@@ -840,9 +835,9 @@ func (c *Crew) agentCall(ctx context.Context, call crewCall) crewReply {
 			return stepOutcome{reason: fmt.Sprintf("profile %q is not in this workflow's meta.profiles", opts.Profile)}
 		}
 		if opts.Worktree {
-			return c.treeWorker(ctx, key, info.name(), *profile, prompt, opts)
+			return c.treeWorker(ctx, key, info.name(), profile.Name, prompt, opts)
 		}
-		return c.worker(ctx, key, *profile, prompt, opts, c.config.Workdir)
+		return c.worker(ctx, key, profile.Name, prompt, opts, c.config.Workdir)
 	})
 	if opts.Worktree {
 		return c.restore(ctx, call, reply)
@@ -850,20 +845,46 @@ func (c *Crew) agentCall(ctx context.Context, call crewCall) crewReply {
 	return reply
 }
 
-func acquire(ctx context.Context, slots chan struct{}) (func(), error) {
-	if slots == nil {
-		return func() {}, nil
-	}
-	select {
-	case slots <- struct{}{}:
-		return func() { <-slots }, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
+// notifySlotsChanged wakes workers waiting for a profile slot. The caller holds c.mu.
+func (c *Crew) notifySlotsChanged() {
+	close(c.slotsChanged)
+	c.slotsChanged = make(chan struct{})
+}
+
+// acquireProfile reads the current model and limit when a worker can start, not when the script queued its call.
+// Count workers even on uncapped profiles so a cap can be applied without interrupting them.
+func (c *Crew) acquireProfile(ctx context.Context, name contract.ProfileName) (contract.WorkflowProfile, []contract.TextOnlyModel, func(), error) {
+	for {
+		c.mu.Lock()
+		index := slices.IndexFunc(c.workflow.Profiles, func(p contract.WorkflowProfile) bool { return p.Name == name })
+		if index < 0 {
+			c.mu.Unlock()
+			return contract.WorkflowProfile{}, nil, nil, fmt.Errorf("profile %q is not available in this workflow", name)
+		}
+		profile := c.workflow.Profiles[index]
+		if profile.MaxConcurrent == 0 || c.profileInUse[name] < profile.MaxConcurrent {
+			c.profileInUse[name]++
+			models := c.workflow.TextOnlyModels
+			c.mu.Unlock()
+			return profile, models, func() {
+				c.mu.Lock()
+				c.profileInUse[name]--
+				c.notifySlotsChanged()
+				c.mu.Unlock()
+			}, nil
+		}
+		changed := c.slotsChanged
+		c.mu.Unlock()
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return contract.WorkflowProfile{}, nil, nil, ctx.Err()
+		}
 	}
 }
 
 // worker runs one Pi to its final text, or to JSON that matches the schema.
-func (c *Crew) worker(ctx context.Context, key string, profile contract.WorkflowProfile, prompt string, opts agentOpts, dir string) (out stepOutcome) {
+func (c *Crew) worker(ctx context.Context, key string, profileName contract.ProfileName, prompt string, opts agentOpts, dir string) (out stepOutcome) {
 	var schema *jsonschema.Schema
 	if len(opts.Schema) > 0 {
 		var err error
@@ -871,16 +892,17 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 			return stepOutcome{reason: "schema: " + err.Error()}
 		}
 	}
-	c.mu.Lock()
-	profileSlots := c.limits[profile.Name]
-	c.mu.Unlock()
-	for _, slots := range []chan struct{}{c.slots, profileSlots} {
-		release, err := acquire(ctx, slots)
-		if err != nil {
-			return stepOutcome{reason: err.Error()}
-		}
-		defer release()
+	select {
+	case c.slots <- struct{}{}:
+		defer func() { <-c.slots }()
+	case <-ctx.Done():
+		return stepOutcome{reason: ctx.Err().Error()}
 	}
+	profile, models, release, err := c.acquireProfile(ctx, profileName)
+	if err != nil {
+		return stepOutcome{reason: err.Error()}
+	}
+	defer release()
 	limit := c.timeout(opts.Timeout)
 	pauseTime := &buildLock{}
 	ctx, cancel := c.builds.timeout(ctx, limit, pauseTime.waited)
@@ -890,7 +912,7 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 		return stepOutcome{reason: err.Error()}
 	}
 	defer os.RemoveAll(folder)
-	data, err := json.Marshal(WorkerModels(key[:16], c.config.TextOnlyModels...))
+	data, err := json.Marshal(WorkerModels(key[:16], models...))
 	if err != nil {
 		return stepOutcome{reason: err.Error()}
 	}

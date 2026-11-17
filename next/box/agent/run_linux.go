@@ -217,7 +217,7 @@ func Run(ctx context.Context) error {
 			c.Extensions = []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: dir, Shell: jobs, Dyna: dynaTools})}
 			return pig.Open(ctx, c)
 		}
-		config := CrewConfig{Workflow: *hello.Workflow, TextOnlyModels: hello.TextOnlyModels, Engine: client, Open: open, Transcript: transcript, Workdir: workdir, Sessions: sessions, State: piDir}
+		config := CrewConfig{Workflow: *hello.Workflow, Engine: client, Open: open, Transcript: transcript, Workdir: workdir, Sessions: sessions, State: piDir}
 		if len(hello.Repos) > 0 {
 			config.Branch, config.Base = hello.Repos[0].Branch, hello.Repos[0].Commit
 		}

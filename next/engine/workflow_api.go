@@ -481,9 +481,14 @@ func (s *Service) publishStep(ctx context.Context, run store.WorkflowRun, key st
 	s.live.Publish(run.Room, event, false)
 }
 
-// boxWorkflow is what a hello tells a crew's box. A profile removed since the run started is left out, so a call to it fails.
-// The room's workflow settings narrow its workers and set its default timeout.
+// boxWorkflow is what a hello tells a crew's box.
 func (s *Service) boxWorkflow(ctx context.Context, run store.WorkflowRun, memory int64) (*contract.BoxWorkflow, error) {
+	return s.boxWorkflowWithProfiles(ctx, run, memory, s.workflowProfiles(run.Profiles), s.profiles.TextOnlyModels())
+}
+
+// boxWorkflowWithProfiles reuses the profiles read for a reload. The room's workflow settings
+// narrow its workers and set its default timeout.
+func (s *Service) boxWorkflowWithProfiles(ctx context.Context, run store.WorkflowRun, memory int64, profiles []contract.WorkflowProfile, models []contract.TextOnlyModel) (*contract.BoxWorkflow, error) {
 	effective, err := s.store.WorkflowEffective(ctx, run.Room)
 	if err != nil {
 		return nil, err
@@ -492,13 +497,18 @@ func (s *Service) boxWorkflow(ctx context.Context, run store.WorkflowRun, memory
 	if effective.MaxWorkers > 0 {
 		workers = min(workers, effective.MaxWorkers)
 	}
-	workflow := &contract.BoxWorkflow{Subscription: run.Subscription, Run: run.ID, Name: run.Name, Script: run.Script, Version: run.Version, Paused: run.Paused, PausedSteps: run.PausedSteps, ReleasedSteps: run.ReleasedSteps, Args: run.Args, Workers: workers, Timeout: effective.Timeout}
-	for _, name := range run.Profiles {
+	return &contract.BoxWorkflow{Subscription: run.Subscription, Run: run.ID, Name: run.Name, Script: run.Script, Version: run.Version, Paused: run.Paused, PausedSteps: run.PausedSteps, ReleasedSteps: run.ReleasedSteps, Args: run.Args, Workers: workers, Timeout: effective.Timeout, Profiles: profiles, TextOnlyModels: models}, nil
+}
+
+// workflowProfiles leaves out a profile removed since the run started, so a call to it fails.
+func (s *Service) workflowProfiles(names []contract.ProfileName) []contract.WorkflowProfile {
+	var profiles []contract.WorkflowProfile
+	for _, name := range names {
 		if profile, err := s.workflowProfile(name); err == nil {
-			workflow.Profiles = append(workflow.Profiles, profile)
+			profiles = append(profiles, profile)
 		}
 	}
-	return workflow, nil
+	return profiles
 }
 
 // workflowProfile is a profile as an agent in a box needs it: its model, compaction trigger and concurrency limit.

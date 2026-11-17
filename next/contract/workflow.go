@@ -226,22 +226,23 @@ type WorkflowListResponse struct {
 // BoxWorkflow is what a crew's box runs. Each hello carries it, so a new box can restart the script, and a reload carries it
 // to the box that runs the script.
 type BoxWorkflow struct {
-	Run           WorkflowRunID     `json:"run"`
-	Subscription  SubscriptionID    `json:"subscription,omitempty"`
-	Name          string            `json:"name"`
-	Script        string            `json:"script"`
-	Version       int               `json:"version"`
-	Paused        bool              `json:"paused"`
-	PausedSteps   []string          `json:"pausedSteps,omitempty"`
-	ReleasedSteps []string          `json:"releasedSteps,omitempty"`
-	Args          string            `json:"args,omitempty"`
-	Profiles      []WorkflowProfile `json:"profiles"` // in meta's order: the first is the default
-	Workers       int               `json:"workers"`  // how many crew workers may run at once: the box's memory allows some, and the maxWorkers setting may allow fewer
-	Timeout       int               `json:"timeout"`  // seconds an agent() worker may run when the script sets no timeout: the timeout setting
+	Run            WorkflowRunID     `json:"run"`
+	Subscription   SubscriptionID    `json:"subscription,omitempty"`
+	Name           string            `json:"name"`
+	Script         string            `json:"script"`
+	Version        int               `json:"version"`
+	Paused         bool              `json:"paused"`
+	PausedSteps    []string          `json:"pausedSteps,omitempty"`
+	ReleasedSteps  []string          `json:"releasedSteps,omitempty"`
+	Args           string            `json:"args,omitempty"`
+	Profiles       []WorkflowProfile `json:"profiles"`                 // in meta's order: the first is the default
+	TextOnlyModels []TextOnlyModel   `json:"textOnlyModels,omitempty"` // model definitions not supplied by Pi's catalog
+	Workers        int               `json:"workers"`                  // the box's memory allows some, and the maxWorkers setting may allow fewer
+	Timeout        int               `json:"timeout"`                  // seconds an agent() worker may run when the script sets no timeout
 }
 
-// WorkflowReload hands a crew's box a newer version of its script. The engine sends the run's current version on each channel,
-// and a box already on it ignores it.
+// WorkflowReload carries the current script, pause state and worker profiles to a crew's box.
+// Only a newer script version restarts the script.
 type WorkflowReload struct {
 	Workflow BoxWorkflow `json:"workflow"`
 }

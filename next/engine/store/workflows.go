@@ -124,6 +124,12 @@ func (s *Store) WorkflowRun(ctx context.Context, id contract.WorkflowRunID) (Wor
 	return scanWorkflow(s.Read().QueryRowContext(ctx, "SELECT "+workflowColumns+" FROM workflow_runs WHERE id=?", id))
 }
 
+// WorkflowsOnProfile returns the sessions of running workflows that list the profile in meta.profiles.
+func (s *Store) WorkflowsOnProfile(ctx context.Context, name contract.ProfileName) ([]contract.SessionID, error) {
+	return listIDs[contract.SessionID](ctx, s.Read(), `SELECT session FROM workflow_runs
+		WHERE state=? AND EXISTS (SELECT 1 FROM json_each(profiles) WHERE value=?)`, contract.WorkflowRunning, name)
+}
+
 // WorkflowRuns lists a room's newest runs.
 func (s *Store) WorkflowRuns(ctx context.Context, room contract.RoomID) ([]WorkflowRun, error) {
 	return queryAll(ctx, s.Read(), scanWorkflow, "SELECT "+workflowColumns+" FROM workflow_runs WHERE room=? ORDER BY started_at DESC,id DESC LIMIT 100", room)
