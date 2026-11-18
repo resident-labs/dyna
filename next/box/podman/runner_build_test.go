@@ -12,7 +12,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-// Runners on one host share its cache, read-only, and each writes only the build folder of its own slot. A slot holds one
+// Runners on one host share its cache, read-only, and each writes its own slot's build folder. A slot holds one
 // running runner, so two jobs never share a build folder at once, whatever their sizes or repositories. Each sees its folder at
 // one path, and Cargo's home and target in it where a box of its repository has them, so the compiler cache's keys match across
 // slots and with boxes.
@@ -24,25 +24,25 @@ func TestConcurrentRunnersGetDistinctBuildFolders(t *testing.T) {
 	var writable [][]string
 	for _, spec := range []box.RunnerSpec{first, second} {
 		work, _ := box.RepoFolder(spec.Repo)
-		args := runnerArgs(spec, "/data/ci-build/"+strconv.Itoa(spec.Slot), work)
+		args := runnerArgs(spec, "/data/ci-build/"+strconv.Itoa(spec.Slot), "/data/ci-keep/"+strings.Replace(string(spec.Repo), "/", "+", 1), work)
 		var mounts []string
 		for i, arg := range args {
 			if arg == "--mount" && strings.HasPrefix(args[i+1], "type=bind,") {
 				mounts = append(mounts, args[i+1])
 			}
 		}
-		if len(mounts) != 5 || mounts[0] != "type=bind,source=/data/cache,destination=/cache,ro" || mounts[4] != "type=bind,source=/data/sock/build-cache,destination=/run/dyna-build-cache,ro" {
+		if len(mounts) != 6 || mounts[0] != "type=bind,source=/data/cache,destination=/cache,ro" || mounts[5] != "type=bind,source=/data/sock/build-cache,destination=/run/dyna-build-cache,ro" {
 			t.Fatalf("slot %d mounts %v", spec.Slot, mounts)
 		}
-		writable = append(writable, mounts[1:4])
+		writable = append(writable, mounts[1:5])
 		_, folder, _ := strings.Cut(mounts[1], ",destination=")
 		if !slices.Contains(args, "DYNA_CI_BUILD="+folder) {
 			t.Fatalf("DYNA_CI_BUILD does not name the writable folder %s: %v", mounts[1], args)
 		}
 	}
 	want := [][]string{
-		{"type=bind,source=/data/ci-build/0,destination=/build", "type=bind,source=/data/ci-build/0/cargo,destination=/box/cache/cargo", "type=bind,source=/data/ci-build/0/target,destination=/box/work/owner/repo/target"},
-		{"type=bind,source=/data/ci-build/1,destination=/build", "type=bind,source=/data/ci-build/1/cargo,destination=/box/cache/cargo", "type=bind,source=/data/ci-build/1/target,destination=/box/work/owner/other/target"},
+		{"type=bind,source=/data/ci-build/0,destination=/build", "type=bind,source=/data/ci-build/0/cargo,destination=/box/cache/cargo", "type=bind,source=/data/ci-build/0/target,destination=/box/work/owner/repo/target", "type=bind,source=/data/ci-keep/owner+repo,destination=/keep"},
+		{"type=bind,source=/data/ci-build/1,destination=/build", "type=bind,source=/data/ci-build/1/cargo,destination=/box/cache/cargo", "type=bind,source=/data/ci-build/1/target,destination=/box/work/owner/other/target", "type=bind,source=/data/ci-keep/owner+other,destination=/keep"},
 	}
 	if !reflect.DeepEqual(writable, want) {
 		t.Fatalf("writable mounts %v, want %v", writable, want)

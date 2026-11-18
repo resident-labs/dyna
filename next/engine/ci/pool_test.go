@@ -114,7 +114,7 @@ func (d *fakeDriver) StartRunner(_ context.Context, s box.RunnerSpec) error {
 	d.runners = append(d.runners, box.Runner{Name: s.Name, Repo: s.Repo, ID: s.ID, Slot: s.Slot, Size: s.Size, Running: true})
 	return nil
 }
-func (d *fakeDriver) ListRunners(ctx context.Context, reclaim bool) ([]box.Runner, bool, error) {
+func (d *fakeDriver) ListRunners(ctx context.Context, reclaim bool, _ []contract.RepoName) ([]box.Runner, bool, error) {
 	d.listCtx, d.reclaimed = ctx, reclaim
 	return slices.Clone(d.runners), d.egress, d.listErr
 }

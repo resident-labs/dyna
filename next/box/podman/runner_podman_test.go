@@ -82,7 +82,7 @@ RUN printf '#!/bin/sh\nexec sleep 600\n' > /usr/bin/tini && chmod +x /usr/bin/ti
 			t.Fatal(err)
 		}
 	}
-	found, _, err := h.ListRunners(ctx, false)
+	found, _, err := h.ListRunners(ctx, false, []contract.RepoName{specs[0].Repo})
 	if err != nil || len(found) != 2 || found[0].Size.Name == found[1].Size.Name {
 		t.Fatalf("listed %+v: %v", found, err)
 	}
@@ -91,13 +91,14 @@ RUN printf '#!/bin/sh\nexec sleep 600\n' > /usr/bin/tini && chmod +x /usr/bin/ti
 		script := fmt.Sprintf(`set -e
 cat /cache/gomod/seed
 echo %s > "$DYNA_CI_BUILD/proof"
+if [ %d -eq 0 ]; then echo shared > "$DYNA_CI_KEEP/proof"; else test "$(cat "$DYNA_CI_KEEP/proof")" = shared; fi
 touch "$CARGO_HOME/proof" "$CARGO_TARGET_DIR/proof"
 if touch /cache/escape 2>/dev/null; then echo wrote the cache; exit 1; fi
 if touch /cache/gomod/seed 2>/dev/null; then echo wrote a box file; exit 1; fi
-test ! -e /cache/ci && test ! -e /cache/ci-build
-echo "$DYNA_CI_CACHE $DYNA_CI_BUILD"`, spec.Size.Name)
+test ! -e /cache/ci && test ! -e /cache/ci-build && test ! -e /cache/ci-keep
+echo "$DYNA_CI_CACHE $DYNA_CI_BUILD $DYNA_CI_KEEP"`, spec.Size.Name, spec.Slot)
 		out := realPodman(t, "exec", spec.Name, "sh", "-c", script)
-		if want := "from a box\n/cache /build"; out != want {
+		if want := "from a box\n/cache /build /keep"; out != want {
 			t.Fatalf("runner %d said %q, want %q", i, out, want)
 		}
 		written, err := os.ReadFile(filepath.Join(builds, slot, "proof"))
@@ -117,7 +118,7 @@ echo "$DYNA_CI_CACHE $DYNA_CI_BUILD"`, spec.Size.Name)
 
 	// A folder past the cap is emptied, and the next runner gets it back empty and its own.
 	realPodman(t, "--cgroup-manager=systemd", "rm", "--force", "--time", "0", specs[0].Name)
-	if _, err := h.run(ctx, "bash", "-c", buildScript, "dyna-ci-build", filepath.Join(builds, "0"), string(specs[0].Repo), "0", "16", cache); err != nil {
+	if _, err := h.run(ctx, "bash", "-c", buildScript, "dyna-ci-build", filepath.Join(builds, "0"), string(specs[0].Repo), "0", "16", cache, layout.HostCIKeep()); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(filepath.Join(builds, "0"))

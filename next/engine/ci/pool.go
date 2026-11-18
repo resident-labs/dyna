@@ -49,7 +49,7 @@ type Driver interface {
 	RemoveEgress(context.Context) error
 	StartRunner(context.Context, box.RunnerSpec) error
 	// ListRunners also frees every idle build folder when reclaim is set.
-	ListRunners(ctx context.Context, reclaim bool) ([]box.Runner, bool, error)
+	ListRunners(ctx context.Context, reclaim bool, repos []contract.RepoName) ([]box.Runner, bool, error)
 	RemoveRunner(context.Context, string) error
 }
 
@@ -424,6 +424,11 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 	}) || slices.ContainsFunc(s.services, func(row store.ServiceRow) bool {
 		return row.State == contract.ServicePending && row.Reason == contract.ServiceNoDisk
 	})
+	// Keep caches follow the global CI configuration, not a host's placement rules or one room's layers.
+	configured := make([]contract.RepoName, 0, len(repos))
+	for _, repo := range repos {
+		configured = append(configured, repo.Repo)
+	}
 	var unanswered []contract.HostName
 	for _, host := range hosts {
 		if host.Pool != "" {
@@ -445,7 +450,7 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 		var runners []box.Runner
 		var egress bool
 		if err == nil {
-			runners, egress, err = driver.ListRunners(ctx, reclaim)
+			runners, egress, err = driver.ListRunners(ctx, reclaim, configured)
 		}
 		if err != nil {
 			s.failures = append(s.failures, fmt.Errorf("host %s: %w", host.Name, err))
@@ -473,7 +478,7 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 }
 
 // runnerBox makes a runner visible to admission. It has an image, so admission counts its CPUs and memory but no disk: all
-// it writes goes to tmpfs or to its build folder on the host.
+// it writes goes to tmpfs or to its build and keep folders on the host.
 func runnerBox(name string, host contract.HostName, size contract.BoxSize) box.Box {
 	return box.Box{ID: contract.BoxID(name), Host: host, Image: box.RunnerImage, Size: size, State: contract.BoxReady}
 }

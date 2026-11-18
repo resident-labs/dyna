@@ -68,6 +68,13 @@ checkout) and `/tmp` are tmpfs, each capped at three quarters of the size's memo
 `target` at `CARGO_TARGET_DIR`, the paths a box of the repository uses. A slot is emptied when it switches
 repositories. A folder over its cap when a job starts (80 GiB, less on a small disk, never under 40 GiB) loses
 `target`, then everything. `DYNA_CI_CACHE` is the host's box cache, read-only; it does not contain `/build`.
+
+`/keep` (`DYNA_CI_KEEP`) is a writable cache shared by concurrent jobs of this repository on this host. A job on
+another host starts cold. Every job that can run here can write it, including same-repository PRs; fork PRs are
+refused. Key entries by a hash of their inputs. Write temporary files inside `/keep`, then `mv` them into place:
+`/tmp` and `$HOME` are on tmpfs. `/keep` is never in GitHub's cache or the host's shared box cache. A cache over
+20 GiB is emptied at the next runner start when no runner holds it; low disk space can reclaim idle caches sooner.
+
 The only network is an HTTPS proxy (`https_proxy`) to port 443 of public addresses: plain HTTP, SSH remotes such as
 `git@github.com:`, other ports and private or LAN addresses fail, as does a tool that ignores the proxy.
 
