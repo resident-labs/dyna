@@ -473,7 +473,7 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 }
 
 // runnerBox makes a runner visible to admission. It has an image, so admission counts its CPUs and memory but no disk: all
-// it writes goes to tmpfs, or to its build folder in the host's cache.
+// it writes goes to tmpfs or to its build folder on the host.
 func runnerBox(name string, host contract.HostName, size contract.BoxSize) box.Box {
 	return box.Box{ID: contract.BoxID(name), Host: host, Image: box.RunnerImage, Size: size, State: contract.BoxReady}
 }
@@ -869,8 +869,8 @@ func (p *Pool) buildAhead(ctx context.Context, host *surveyed, layers map[contra
 }
 
 // freeSlot picks the slot of a new runner on a host: its proxy socket and its build folder. Every repository's runners count,
-// because they share that host's proxy and cache. A slot a dead runner used is free, and the lowest
-// free slot is taken so that its build folder, which outlives the container, is the one most recently filled.
+// because they share that host's proxy and reuse its slots. A slot a dead runner used is free, and the lowest free slot
+// is taken so that its build folder, which outlives the container, is the one most recently filled.
 func freeSlot(runners []box.Runner) (int, error) {
 	used := make(map[int]bool)
 	for _, runner := range runners {

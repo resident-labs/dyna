@@ -23,11 +23,12 @@ import (
 const runnerEntrypoint = `["/usr/bin/tini","--","/opt/dyna-ci/entrypoint.sh"]`
 
 const (
-	ciLabel         = "dyna.ci" // "runner" or "egress"
-	runnerRepoLabel = "dyna.ci.repo"
-	runnerIDLabel   = "dyna.ci.id"
-	runnerSlotLabel = "dyna.ci.slot"
-	runnerSizeLabel = "dyna.ci.size"
+	ciLabel          = "dyna.ci" // "runner" or "egress"
+	runnerRepoLabel  = "dyna.ci.repo"
+	runnerIDLabel    = "dyna.ci.id"
+	runnerSlotLabel  = "dyna.ci.slot"
+	runnerSizeLabel  = "dyna.ci.size"
+	runnerBuildLabel = "dyna.ci.private-build"
 	// egressName names both the proxy container and the volume that carries its sockets.
 	egressName  = "dyna-ci-egress"
 	egressMount = "/run/dyna-egress"
@@ -36,8 +37,7 @@ const (
 	// runnerLimit is the host's own bound, in seconds. A job shares a user with the
 	// entrypoint's timeout, so it can stop that clock. This one is outside the container.
 	runnerLimit = "--timeout=22200" // 6 hours 10 minutes
-	// cacheMount is where a runner reads the host's cache, the folder the host's boxes mount at /box/cache. It writes only its
-	// slot's build folder there, reclaimed after its runner container is gone.
+	// cacheMount is where a runner reads the host's cache, the folder the host's boxes mount at /box/cache.
 	cacheMount = "/cache"
 	// buildMount is where a runner writes its slot's build folder, one path for every slot. sccache's keys hold the paths a
 	// build hands the compiler, so the folder's cargo and target folders are mounted again where a box has them, and a job and
@@ -50,29 +50,47 @@ const (
 	cacheLimitKB = 80 << 20
 )
 
-// buildFolder is a slot's build folder, relative to the host's cache.
-func buildFolder(slot int) string { return path.Join("ci", strconv.Itoa(slot)) }
-
-// buildScript makes a slot's build folder, owned by the runner's user. A folder grown past cacheLimitKB loses its target
-// folder, the compiled output that grows with every branch and that the compiler cache can rebuild; what a job downloaded
-// or installed stays. Only a folder still past the limit without it is emptied. du
-// and rm run in Podman's user namespace, where the job's files live. Its cargo and target folders are mounts of their own.
-const buildScript = `b="$1"; limit="$2"; slots="$3"
-mkdir -p -- "$b"
-# The runner's user must pass through the cache root and ci/ to reach its folder; a box may have made them 700.
-chmod a+rx -- "$(dirname -- "$(dirname -- "$b")")" "$(dirname -- "$b")"
+// buildScript makes a slot's build folder, owned by the runner's user. The last repository is recorded beside the
+// folder, outside the mount, so a job cannot claim to be the next repository. Only jobs of the same repo reuse files.
+// A folder grown past cacheLimitKB loses its compiled output first, since the compiler cache can rebuild it, and only if
+// still over the limit is it emptied. du and rm run in Podman's user namespace, where the job's files live.
+const buildScript = `set -eu -o pipefail
+b="$1"; repo="$2"; limit="$3"; slots="$4"; cache="$5"
+# A box or the compiler-cache service may have created the cache without traverse permission.
+mkdir -p -- "$cache"
+chmod u+x -- "$cache"
+pending() { echo 'legacy CI slot folders remain in the shared cache; waiting for migration' >&2; exit 1; }
+if [ -L "$cache/ci" ]; then pending; fi
+if [ -e "$cache/ci" ]; then
+  [ -d "$cache/ci" ] && [ -x "$cache/ci" ] || pending
+  for ((slot=0; slot<slots; slot++)); do
+    if [ -e "$cache/ci/$slot" ] || [ -L "$cache/ci/$slot" ]; then pending; fi
+  done
+fi
+chmod a+rx -- "$cache"
+mkdir -p -m 0700 -- "$(dirname -- "$b")"
+if [ ! -f "$b.repo" ] || [ "$(< "$b.repo")" != "$repo" ]; then
+  podman unshare rm -rf -- "$b"
+fi
+podman unshare mkdir -p -- "$b"
 # Every slot at the limit must fit in the disk above twice its floor (box.DiskFloor), as in pruneRunnerFoldersScript.
-set -- $(df -Pk -- "$b" | tail -1)
+disk=$(df -Pk -- "$b" | tail -1)
+set -- $disk
 floor=$(( $2 / 10 )); [ "$floor" -ge 20971520 ] || floor=20971520
 share=$(( ($2 - 2 * floor) / slots )); [ "$share" -ge 41943040 ] || share=41943040
 [ "$limit" -le "$share" ] || limit=$share
-over() { [ "$(podman unshare du -sk "$b" | cut -f1)" -gt "$limit" ]; }
-if over; then
-  if [ -d "$b/target" ]; then podman unshare find "$b/target" -mindepth 1 -delete; fi
-  if over; then podman unshare find "$b" -mindepth 1 -delete; fi
+used=$(podman unshare du -sk -- "$b" | cut -f1)
+if [ "$used" -gt "$limit" ]; then
+  podman unshare rm -rf -- "$b/target"
+  used=$(podman unshare du -sk -- "$b" | cut -f1)
+  if [ "$used" -gt "$limit" ]; then podman unshare rm -rf -- "$b"; fi
 fi
+# Only real directories may become the extra bind mounts, never links left by a job.
+podman unshare mkdir -p -- "$b"
+podman unshare find "$b" -mindepth 1 -maxdepth 1 \( -name cargo -o -name target \) ! -type d -delete
 podman unshare mkdir -p -- "$b/cargo" "$b/target"
-podman unshare chown 1001:1001 "$b" "$b/cargo" "$b/target"`
+podman unshare chown 1001:1001 "$b" "$b/cargo" "$b/target"
+printf '%s\n' "$repo" > "$b.repo"`
 
 // BuildRunnerImage builds or reuses the shared runner image, and drops any older one. With a layer it builds the room's image on
 // that and returns the room's tag, dropping the room's older ones. The shared image stays on the host as the fallback.
@@ -174,17 +192,16 @@ func (h *Host) RemoveEgress(ctx context.Context) error {
 }
 
 // runnerArgs never carries the JIT config, which reaches podman on standard input.
-func runnerArgs(s box.RunnerSpec) []string {
+func runnerArgs(s box.RunnerSpec, build, work string) []string {
 	memory := strconv.FormatInt(s.Size.MemBytes, 10)
 	// tmpfs pages count against the memory limit, so one job can never hold more than that. Leaving
 	// a quarter for processes means a full disk is an ordinary write error, not an OOM kill.
 	disk := fmt.Sprintf("size=%d", s.Size.MemBytes/4*3)
-	build := filepath.Join(s.Cache, buildFolder(s.Slot))
-	work, _ := box.RepoFolder(s.Repo) // StartRunner checked the name
 	target := path.Join(work, "target")
 	return []string{"podman", "--cgroup-manager=systemd", "run", "--detach", "--rm", runnerLimit, "--name", s.Name,
 		"--label", ciLabel + "=runner", "--label", runnerRepoLabel + "=" + string(s.Repo), "--label", runnerIDLabel + "=" + strconv.FormatInt(s.ID, 10),
 		"--label", runnerSlotLabel + "=" + strconv.Itoa(s.Slot), "--label", runnerSizeLabel + "=" + string(s.Size.Name),
+		"--label", runnerBuildLabel + "=1",
 		"--cgroup-parent=" + runnerSlice,
 		// A host's containers.conf can default to host networking, so this is always explicit.
 		"--network=none", "--read-only", "--cap-drop=all", "--security-opt=no-new-privileges", "--user", "1001:1001",
@@ -214,19 +231,24 @@ func runnerArgs(s box.RunnerSpec) []string {
 func (h *Host) StartRunner(ctx context.Context, s box.RunnerSpec) error {
 	h.runnerMu.Lock()
 	defer h.runnerMu.Unlock()
-	if _, err := box.RepoFolder(s.Repo); err != nil {
+	work, err := box.RepoFolder(s.Repo)
+	if err != nil {
 		return errors.New("invalid runner")
 	}
 	if s.Name == "" || strings.HasPrefix(s.Name, "-") || s.Image == "" || s.Config == "" || strings.ContainsAny(s.Config, "\n\x00") || s.Slot < 0 || s.Slot >= box.RunnerSlots {
 		return errors.New("invalid runner")
 	}
-	if _, sized := box.Size(s.Size.Name); !sized || !filepath.IsAbs(s.Cache) || strings.ContainsAny(s.Cache, ",=\n\x00") || !filepath.IsAbs(s.BuildCache) || strings.ContainsAny(s.BuildCache, ",=\n\x00") {
+	slot := strconv.Itoa(s.Slot)
+	build := filepath.Join((box.Layout{HostData: h.dataDir}).HostCIBuild(), slot)
+	if _, sized := box.Size(s.Size.Name); !sized || !filepath.IsAbs(s.Cache) || !filepath.IsAbs(s.BuildCache) ||
+		strings.ContainsAny(s.Cache+s.BuildCache+build, ",=\n\x00") {
 		return errors.New("invalid runner")
 	}
-	if _, err := h.run(ctx, "bash", "-c", buildScript, "dyna-ci-build", filepath.Join(s.Cache, buildFolder(s.Slot)), strconv.Itoa(cacheLimitKB), strconv.Itoa(box.RunnerSlots)); err != nil {
+	ctx = WithRemoteCancellation(ctx)
+	if _, err := h.run(ctx, "bash", "-c", buildScript, "dyna-ci-build", build, string(s.Repo), strconv.Itoa(cacheLimitKB), strconv.Itoa(box.RunnerSlots), s.Cache); err != nil {
 		return fmt.Errorf("prepare build folder: %w", err)
 	}
-	args := append([]string{"bash", "-c", `IFS= read -r ACTIONS_RUNNER_INPUT_JITCONFIG && export ACTIONS_RUNNER_INPUT_JITCONFIG && exec "$@"`, "dyna-runner"}, runnerArgs(s)...)
+	args := append([]string{"bash", "-c", `IFS= read -r ACTIONS_RUNNER_INPUT_JITCONFIG && export ACTIONS_RUNNER_INPUT_JITCONFIG && exec "$@"`, "dyna-runner"}, runnerArgs(s, build, work)...)
 	// Podman's output says why it failed, and it never holds the config, which is only in its environment.
 	out, err := h.runInput(ctx, []byte(s.Config+"\n"), args...)
 	var exit remoteExit
@@ -241,32 +263,64 @@ func (h *Host) StartRunner(ctx context.Context, s box.RunnerSpec) error {
 // host's disk has room. Under twice the disk floor (box.DiskFloor) it removes canonical slot directories without a
 // container, highest slot first because new runners take the lowest free slot, until there is room again. With "all"
 // it removes every such directory whatever the disk holds, for a box or service that waits for disk.
-// Include stopped containers, and fail closed if Podman cannot list them. This never
-// touches named volumes (including legacy dyna.ci=cache volumes).
-const pruneRunnerFoldersScript = `set -eu
-root="$1"; slots="$2"; all="$3"
-[ -d "$root" ] || exit 0
+// Old slot folders in the shared cache go even when there is room. Move a held folder out of view without copying
+// or breaking a running container's binds, then remove it once the old container is gone. Include stopped containers
+// and fail closed if Podman cannot list them. This never touches named volumes.
+const pruneRunnerFoldersScript = `set -eu -o pipefail
+root="$1"; slots="$2"; all="$3"; legacy="$4"; retired="$root/.legacy"
+slot_holders() {
+  podman ps --all --filter label=dyna.ci.slot --format '{{.Label "dyna.ci.slot"}} {{.Label "dyna.ci.private-build"}}'
+}
 roomy() {
   [ "$all" != all ] || return 1
   set -- $(df -Pk -- "$root" | tail -1)
   floor=$(( $2 / 10 )); [ "$floor" -ge 20971520 ] || floor=20971520
   [ "$4" -ge $(( 2 * floor )) ]
 }
-if roomy; then exit 0; fi
-held=$(podman ps --all --filter label=dyna.ci.slot --format '{{.Label "dyna.ci.slot"}}')
+if [ -d "$legacy" ] || [ -d "$retired" ]; then
+  holders=$(slot_holders)
+  old_held=$(awk '$2 != "1" { print $1 }' <<< "$holders")
+  (
+    # Stay in the old directory once opened: the shared cache must not redirect cleanup through a link.
+    cd -P -- "$(dirname -- "$legacy")" 2>/dev/null || exit 0
+    old="$PWD/$(basename -- "$legacy")"
+    [ ! -L "$old" ] && cd -P -- "$old" 2>/dev/null && [ "$PWD" = "$old" ] || exit 0
+    for ((slot=slots-1; slot>=0; slot--)); do
+      [ -e "./$slot" ] || [ -L "./$slot" ] || continue
+      if ! grep -qxF -- "$slot" <<< "$old_held"; then
+        podman unshare rm -rf -- "./$slot"
+      elif [ ! -e "$retired/$slot" ] && [ ! -L "$retired/$slot" ]; then
+        mkdir -p -m 0700 -- "$root" "$retired"
+        # Rename without copying or deleting any live files. If it fails, new starts wait for the old runner.
+        perl -e 'rename($ARGV[0], $ARGV[1]) or exit 1' -- "./$slot" "$retired/$slot" 2>/dev/null || true
+      fi
+    done
+  )
+  rmdir -- "$legacy" 2>/dev/null || true
+  if [ -d "$retired" ]; then
+    for ((slot=slots-1; slot>=0; slot--)); do
+      if ! grep -qxF -- "$slot" <<< "$old_held" && { [ -e "$retired/$slot" ] || [ -L "$retired/$slot" ]; }; then
+        podman unshare rm -rf -- "$retired/$slot"
+      fi
+    done
+    rmdir -- "$retired" 2>/dev/null || true
+  fi
+fi
+if [ ! -d "$root" ] || roomy; then exit 0; fi
+if [ -z "${holders+x}" ]; then holders=$(slot_holders); fi
+held=$(awk '{ print $1 }' <<< "$holders")
 for ((slot=slots-1; slot>=0; slot--)); do
-  if ! grep -qxF -- "$slot" <<< "$held"; then
-    if [ -e "$root/$slot" ] || [ -L "$root/$slot" ]; then
-      podman unshare rm -rf -- "$root/$slot"
-      if roomy; then exit 0; fi
-    fi
+  if ! grep -qxF -- "$slot" <<< "$held" && { [ -e "$root/$slot" ] || [ -L "$root/$slot" ]; }; then
+    podman unshare rm -rf -- "$root/$slot" "$root/$slot.repo"
+    if roomy; then exit 0; fi
   fi
 done`
 
 // pruneRunnerFolders requires runnerMu, so preparing a slot cannot race its cleanup.
 func (h *Host) pruneRunnerFolders(ctx context.Context, all bool) error {
 	layout := box.Layout{HostData: h.dataDir}
-	_, err := h.runUnbounded(ctx, nil, "bash", "-c", pruneRunnerFoldersScript, "dyna-ci-prune", filepath.Join(layout.HostCache(), "ci"), strconv.Itoa(box.RunnerSlots), map[bool]string{true: "all"}[all])
+	_, err := h.runUnbounded(WithRemoteCancellation(ctx), nil, "bash", "-c", pruneRunnerFoldersScript, "dyna-ci-prune",
+		layout.HostCIBuild(), strconv.Itoa(box.RunnerSlots), map[bool]string{true: "all"}[all], filepath.Join(layout.HostCache(), "ci"))
 	return err
 }
 

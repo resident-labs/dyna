@@ -14,7 +14,7 @@ import (
 func TestRunnerArgsNameTheEntrypointAndUserBeforeTheImage(t *testing.T) {
 	spec := testSpec()
 	spec.Image = "localhost/dyna-ci-room-room_1:abc-def"
-	args := runnerArgs(spec)
+	args := runnerArgs(spec, "/data/ci-build/3", "/box/work/owner/repo")
 	image := len(args) - 1
 	if args[image] != spec.Image {
 		t.Fatalf("image is not last: %v", args)

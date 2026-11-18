@@ -65,9 +65,9 @@ The job runs as user 1001 on a read-only root, so `apt-get` and `sudo` fail. The
 build-essential, git, curl, jq and python3, without Go, Node or Rust: setup actions install them. `$HOME` (with the
 checkout) and `/tmp` are tmpfs, each capped at three quarters of the size's memory and counted against it.
 `/build` (`DYNA_CI_BUILD`) is the host slot's persistent folder: its `cargo` is mounted at `CARGO_HOME` and its
-`target` at `CARGO_TARGET_DIR`, the paths a box of the repository uses. The next job on a slot may be another
-repository's, so never rely on what an earlier job left; a folder over its cap when a job starts (80 GiB, less on a
-small disk, never under 40 GiB) loses `target`, then everything. `DYNA_CI_CACHE` is the host's box cache, read-only.
+`target` at `CARGO_TARGET_DIR`, the paths a box of the repository uses. A slot is emptied when it switches
+repositories. A folder over its cap when a job starts (80 GiB, less on a small disk, never under 40 GiB) loses
+`target`, then everything. `DYNA_CI_CACHE` is the host's box cache, read-only; it does not contain `/build`.
 The only network is an HTTPS proxy (`https_proxy`) to port 443 of public addresses: plain HTTP, SSH remotes such as
 `git@github.com:`, other ports and private or LAN addresses fail, as does a tool that ignores the proxy.
 
