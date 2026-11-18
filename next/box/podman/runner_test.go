@@ -555,14 +555,18 @@ func TestRunnerSurveyAndRemovalPruneFolders(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		found := false
-		for _, args := range runner.args {
-			if strings.Contains(strings.Join(args, " "), "dyna-ci-prune") {
-				found = true
+		action, prune := -1, -1
+		for i, args := range runner.args {
+			command := strings.Join(args, " ")
+			switch {
+			case strings.Contains(command, "dyna-ci-prune"):
+				prune = i
+			case strings.Contains(command, "'podman' '--cgroup-manager=systemd' 'ps'") || strings.Contains(command, "'podman' '--cgroup-manager=systemd' 'rm'"):
+				action = i
 			}
 		}
-		if !found {
-			t.Fatalf("remove=%v did not prune", remove)
+		if action < 0 || prune <= action {
+			t.Fatalf("remove=%v: action at %d, prune at %d; must prune after action", remove, action, prune)
 		}
 	}
 }

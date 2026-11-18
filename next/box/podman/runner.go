@@ -389,9 +389,8 @@ func (h *Host) pruneRunnerFolders(ctx context.Context, all bool, repos []contrac
 func (h *Host) ListRunners(ctx context.Context, reclaim bool, repos []contract.RepoName) ([]box.Runner, bool, error) {
 	h.runnerMu.Lock()
 	defer h.runnerMu.Unlock()
-	if err := h.pruneRunnerFolders(ctx, reclaim, repos); err != nil {
-		return nil, false, err
-	}
+	// Take inventory first. A runner that exits during pruning must still be counted this pass so the pool
+	// comes back for any folders it held, even if all repositories have turned CI off.
 	out, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "ps", "--all", "--filter", "label="+ciLabel, "--format", "json")
 	if err != nil {
 		return nil, false, err
@@ -428,6 +427,9 @@ func (h *Host) ListRunners(ctx context.Context, reclaim bool, repos []contract.R
 			size, _ = box.Size(contract.BoxSizeLarge)
 		}
 		runners = append(runners, box.Runner{Name: r.Names[0], Repo: contract.RepoName(r.Labels[runnerRepoLabel]), ID: id, Slot: slot, Size: size, Running: r.State == "running"})
+	}
+	if err := h.pruneRunnerFolders(ctx, reclaim, repos); err != nil {
+		return nil, false, err
 	}
 	return runners, egress, nil
 }
