@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,8 +15,8 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-// On real rootless Podman: two runners of different sizes on one host each write their own build folder inside the host's
-// cache, read the rest of it, and change nothing else there, and a folder past the cap is emptied before the next job.
+// On real rootless Podman: two runners of different sizes on one host each write only their own build folder outside the host
+// cache, and a folder past the cap is emptied before the next job.
 // DYNA_PODMAN_TEST_CI_BASE names a local image with sh, sleep and touch. Run it in a store of its own, with
 // CONTAINERS_STORAGE_CONF, since it makes the proxy's volume under its real name.
 func TestRealRunnersKeepTheirOwnBuildFolders(t *testing.T) {
@@ -25,17 +26,18 @@ func TestRealRunnersKeepTheirOwnBuildFolders(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	h, err := New("local", t.TempDir(), "host", hereShell{}, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
 	// The job's files belong to a subordinate UID, so only Podman's user namespace can remove them.
 	dir, err := os.MkdirTemp("", "dyna-ci-cache-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer exec.Command("podman", "unshare", "rm", "-rf", dir).Run()
-	cache := filepath.Join(dir, "cache")
+	h, err := New("local", t.TempDir(), "host", hereShell{}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout := box.Layout{HostData: dir}
+	cache, builds := layout.HostCache(), layout.HostCIBuild()
 	if err := os.MkdirAll(filepath.Join(cache, "gomod"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +51,10 @@ func TestRealRunnersKeepTheirOwnBuildFolders(t *testing.T) {
 
 	stamp := time.Now().UnixNano()
 	image := fmt.Sprintf("localhost/dyna-ci-realtest:%d", stamp)
-	file := fmt.Sprintf("FROM %s\nENTRYPOINT [\"sleep\", \"600\"]\n", base)
+	file := fmt.Sprintf(`FROM %s
+USER root
+RUN printf '#!/bin/sh\nexec sleep 600\n' > /usr/bin/tini && chmod +x /usr/bin/tini
+`, base)
 	build := exec.CommandContext(ctx, "podman", "build", "--quiet", "--tag", image, "-f", "-", dir)
 	build.Stdin = strings.NewReader(file)
 	if out, err := build.CombinedOutput(); err != nil {
@@ -79,29 +84,29 @@ func TestRealRunnersKeepTheirOwnBuildFolders(t *testing.T) {
 		t.Fatalf("listed %+v: %v", found, err)
 	}
 	for i, spec := range specs {
-		other := buildFolder(1 - spec.Slot)
+		slot := strconv.Itoa(spec.Slot)
 		script := fmt.Sprintf(`set -e
 cat /cache/gomod/seed
 echo %s > "$DYNA_CI_BUILD/proof"
 touch "$CARGO_HOME/proof" "$CARGO_TARGET_DIR/proof"
 if touch /cache/escape 2>/dev/null; then echo wrote the cache; exit 1; fi
 if touch /cache/gomod/seed 2>/dev/null; then echo wrote a box file; exit 1; fi
-if touch /cache/%s/intrude 2>/dev/null; then echo wrote another slot; exit 1; fi
-echo "$DYNA_CI_CACHE $DYNA_CI_BUILD"`, spec.Size.Name, other)
+test ! -e /cache/ci && test ! -e /cache/ci-build
+echo "$DYNA_CI_CACHE $DYNA_CI_BUILD"`, spec.Size.Name)
 		out := realPodman(t, "exec", spec.Name, "sh", "-c", script)
 		if want := "from a box\n/cache /build"; out != want {
 			t.Fatalf("runner %d said %q, want %q", i, out, want)
 		}
-		written, err := os.ReadFile(filepath.Join(cache, buildFolder(spec.Slot), "proof"))
+		written, err := os.ReadFile(filepath.Join(builds, slot, "proof"))
 		if err != nil || strings.TrimSpace(string(written)) != string(spec.Size.Name) {
 			t.Fatalf("slot %d folder on the host holds %q: %v", spec.Slot, written, err)
 		}
 		for _, folder := range []string{"cargo", "target"} {
-			if _, err := os.Stat(filepath.Join(cache, buildFolder(spec.Slot), folder, "proof")); err != nil {
+			if _, err := os.Stat(filepath.Join(builds, slot, folder, "proof")); err != nil {
 				t.Fatalf("slot %d's %s folder is not Cargo's: %v", spec.Slot, folder, err)
 			}
 		}
-		t.Logf("%s runner: wrote %s on the host, and nothing else", spec.Size.Name, filepath.Join(cache, buildFolder(spec.Slot), "proof"))
+		t.Logf("%s runner: wrote %s on the host, and nothing else", spec.Size.Name, filepath.Join(builds, slot, "proof"))
 	}
 	if _, err := os.Stat(filepath.Join(cache, "escape")); err == nil {
 		t.Fatal("a runner wrote the cache outside its folder")
@@ -109,19 +114,19 @@ echo "$DYNA_CI_CACHE $DYNA_CI_BUILD"`, spec.Size.Name, other)
 
 	// A folder past the cap is emptied, and the next runner gets it back empty and its own.
 	realPodman(t, "--cgroup-manager=systemd", "rm", "--force", "--time", "0", specs[0].Name)
-	if _, err := h.run(ctx, "bash", "-c", buildScript, "dyna-ci-build", filepath.Join(cache, buildFolder(0)), "0", "16"); err != nil {
+	if _, err := h.run(ctx, "bash", "-c", buildScript, "dyna-ci-build", filepath.Join(builds, "0"), string(specs[0].Repo), "0", "16"); err != nil {
 		t.Fatal(err)
 	}
-	entries, err := os.ReadDir(filepath.Join(cache, buildFolder(0)))
+	entries, err := os.ReadDir(filepath.Join(builds, "0"))
 	if err != nil || len(entries) != 2 || entries[0].Name() != "cargo" || entries[1].Name() != "target" {
 		t.Fatalf("a folder past the cap kept %v: %v", entries, err)
 	}
 	for _, entry := range entries {
-		if inside, err := os.ReadDir(filepath.Join(cache, buildFolder(0), entry.Name())); err != nil || len(inside) != 0 {
+		if inside, err := os.ReadDir(filepath.Join(builds, "0", entry.Name())); err != nil || len(inside) != 0 {
 			t.Fatalf("a folder past the cap kept %s/%v: %v", entry.Name(), inside, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(cache, buildFolder(1), "proof")); err != nil {
+	if _, err := os.Stat(filepath.Join(builds, "1", "proof")); err != nil {
 		t.Fatalf("emptying one slot touched another: %v", err)
 	}
 }

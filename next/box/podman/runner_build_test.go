@@ -23,7 +23,8 @@ func TestConcurrentRunnersGetDistinctBuildFolders(t *testing.T) {
 	first.Size, second.Name, second.Repo = small, "dyna-ci-pve-2", "owner/other"
 	var writable [][]string
 	for _, spec := range []box.RunnerSpec{first, second} {
-		args := runnerArgs(spec)
+		work, _ := box.RepoFolder(spec.Repo)
+		args := runnerArgs(spec, "/data/ci-build/"+strconv.Itoa(spec.Slot), work)
 		var mounts []string
 		for i, arg := range args {
 			if arg == "--mount" && strings.HasPrefix(args[i+1], "type=bind,") {
@@ -40,8 +41,8 @@ func TestConcurrentRunnersGetDistinctBuildFolders(t *testing.T) {
 		}
 	}
 	want := [][]string{
-		{"type=bind,source=/data/cache/ci/0,destination=/build", "type=bind,source=/data/cache/ci/0/cargo,destination=/box/cache/cargo", "type=bind,source=/data/cache/ci/0/target,destination=/box/work/owner/repo/target"},
-		{"type=bind,source=/data/cache/ci/1,destination=/build", "type=bind,source=/data/cache/ci/1/cargo,destination=/box/cache/cargo", "type=bind,source=/data/cache/ci/1/target,destination=/box/work/owner/other/target"},
+		{"type=bind,source=/data/ci-build/0,destination=/build", "type=bind,source=/data/ci-build/0/cargo,destination=/box/cache/cargo", "type=bind,source=/data/ci-build/0/target,destination=/box/work/owner/repo/target"},
+		{"type=bind,source=/data/ci-build/1,destination=/build", "type=bind,source=/data/ci-build/1/cargo,destination=/box/cache/cargo", "type=bind,source=/data/ci-build/1/target,destination=/box/work/owner/other/target"},
 	}
 	if !reflect.DeepEqual(writable, want) {
 		t.Fatalf("writable mounts %v, want %v", writable, want)
@@ -67,7 +68,7 @@ func TestStartRunnerPreparesItsBuildFolderFirst(t *testing.T) {
 	prepared, started := -1, -1
 	for i, args := range runner.args {
 		joined := strings.Join(args, " ")
-		if strings.Contains(joined, "podman unshare chown 1001:1001") && strings.Contains(joined, "/data/cache/ci/3") && strings.Contains(joined, strconv.Itoa(cacheLimitKB)) {
+		if strings.Contains(joined, "podman unshare chown 1001:1001") && strings.Contains(joined, h.dataDir+"/ci-build/3") && strings.Contains(joined, strconv.Itoa(cacheLimitKB)) {
 			prepared = i
 		}
 		if strings.Contains(joined, "dyna-runner") {
