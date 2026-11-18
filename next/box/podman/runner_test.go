@@ -472,10 +472,11 @@ func TestPruneMigratesLegacyFoldersEvenWithSpace(t *testing.T) {
 	podman := `#!/bin/bash
 case "$1" in
 ps) [[ "$*" == *--all* ]] && echo "0 $PRIVATE_BUILD" ;;
-unshare) shift; exec "$@" ;;
+unshare) shift; echo "$1" >> "$UNSHARE_LOG"; exec "$@" ;;
 *) exit 9 ;;
 esac
 `
+	unshareLog := filepath.Join(bin, "unshare.log")
 	df := "#!/bin/bash\nprintf 'Filesystem 1024-blocks Used Available Capacity Mounted\n/dev/x 1048576000 0 900000000 10%% /\n'\n"
 	for name, body := range map[string]string{"df": df, "podman": podman} {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0755); err != nil {
@@ -485,7 +486,7 @@ esac
 	prune := func(private string) {
 		t.Helper()
 		cmd := exec.Command("bash", "-c", pruneRunnerFoldersScript, "test", root, "16", "", legacy, "", "")
-		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "PRIVATE_BUILD="+private)
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "PRIVATE_BUILD="+private, "UNSHARE_LOG="+unshareLog)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%v: %s", err, out)
 		}
@@ -509,6 +510,10 @@ esac
 	prune("")
 	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
 		t.Errorf("old slots remain in the shared cache: %v", err)
+	}
+	// The folder belongs to the runner's user, so the host user may not rename it to another parent outside the namespace.
+	if log, err := os.ReadFile(unshareLog); err != nil || !strings.Contains(string(log), "perl\n") {
+		t.Errorf("rename ran outside Podman's user namespace: %q %v", log, err)
 	}
 	retired := filepath.Join(root, ".legacy", "0")
 	if newInfo, err := os.Stat(retired); err != nil || !os.SameFile(legacyInfo, newInfo) {

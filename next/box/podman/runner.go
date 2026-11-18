@@ -323,8 +323,9 @@ if [ -d "$legacy" ] || [ -d "$retired" ]; then
         podman unshare rm -rf -- "./$slot"
       elif [ ! -e "$retired/$slot" ] && [ ! -L "$retired/$slot" ]; then
         mkdir -p -m 0700 -- "$root" "$retired"
-        # Rename without copying or deleting any live files. If it fails, new starts wait for the old runner.
-        perl -e 'rename($ARGV[0], $ARGV[1]) or exit 1' -- "./$slot" "$retired/$slot" 2>/dev/null || true
+        # Rename without copying or deleting any live files. A directory that moves to another parent changes its own ".."
+        # entry, so the rename runs as the folder's owner, in Podman's user namespace. If it fails, new starts wait for the old runner.
+        podman unshare perl -e 'rename($ARGV[0], $ARGV[1]) or exit 1' -- "./$slot" "$retired/$slot" 2>/dev/null || true
       fi
     done
   )
