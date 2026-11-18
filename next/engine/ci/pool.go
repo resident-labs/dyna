@@ -48,8 +48,8 @@ type Driver interface {
 	EnsureEgress(ctx context.Context, image string) error
 	RemoveEgress(context.Context) error
 	StartRunner(context.Context, box.RunnerSpec) error
-	// ListRunners also frees every idle build folder when reclaim is set.
-	ListRunners(ctx context.Context, reclaim bool) ([]box.Runner, bool, error)
+	// ListRunners reclaims idle caches, and removes keep folders for repositories not in repos.
+	ListRunners(ctx context.Context, reclaim bool, repos []contract.RepoName) ([]box.Runner, bool, error)
 	RemoveRunner(context.Context, string) error
 }
 
@@ -107,7 +107,7 @@ type Pool struct {
 	LayerLimit time.Duration
 
 	mu        sync.Mutex
-	clean     bool // no repository wants runners and no host holds any
+	clean     map[contract.HostName]bool // hosts cleaned after the last repository turned CI off; nil while CI is on
 	listeners map[scaleSet]*listening
 	images    map[imageKey]string          // each host's current runner images, once built or found there
 	fellBack  map[imageKey]time.Time       // room layers whose build failed on a host, when, so its jobs run on the shared image
@@ -183,9 +183,16 @@ func (p *Pool) Tick(ctx context.Context, group *sync.WaitGroup) error {
 		}
 	}
 	failures := p.steer(ctx, wanted, group)
-	if len(repos) == 0 && p.clean {
-		return errors.Join(failures...)
+	if len(repos) == 0 && p.clean != nil {
+		hosts, err := p.Store.Hosts(ctx)
+		if err != nil {
+			return errors.Join(append(failures, err)...)
+		}
+		if !slices.ContainsFunc(hosts, func(host box.Host) bool { return host.State == box.HostReady && !p.clean[host.Name] }) {
+			return errors.Join(failures...)
+		}
 	}
+	p.clean = nil
 	// The lock is held across SSH, and --off acts here. A host that hangs must not leave a repository that cannot be turned off.
 	// A build-ahead outlives this pass, so it takes the context Run gave, not the pass's timeout.
 	buildCtx := ctx
@@ -253,11 +260,15 @@ func (p *Pool) Tick(ctx context.Context, group *sync.WaitGroup) error {
 		}
 		p.reaped[repo] = now.Add(reapEvery)
 	}
-	// One pass after the last repository leaves removes its runners. A pass that failed looks again, and the first pass
-	// reaps what an earlier engine left. A pass that found a runner looks again too: its build folder is reclaimed by the
-	// survey of the pass after it is gone.
+	// A pass that removed runners must come back for their caches. Once CI is off and ready hosts are clean,
+	// skip SSH until another host is ready, including one that was unreachable when CI turned off.
 	held := slices.ContainsFunc(hosts, func(h box.Host) bool { return len(view.hosts[h.Name].runners) > 0 })
-	p.clean = len(repos) == 0 && len(failures) == 0 && !held
+	if len(view.repos) == 0 && len(failures) == 0 && !held {
+		p.clean = make(map[contract.HostName]bool, len(hosts))
+		for _, host := range hosts {
+			p.clean[host.Name] = true
+		}
+	}
 	return errors.Join(failures...)
 }
 
@@ -424,6 +435,11 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 	}) || slices.ContainsFunc(s.services, func(row store.ServiceRow) bool {
 		return row.State == contract.ServicePending && row.Reason == contract.ServiceNoDisk
 	})
+	// Keep caches follow the global CI configuration, not a host's placement rules or one room's layers.
+	configured := make([]contract.RepoName, 0, len(repos))
+	for _, repo := range repos {
+		configured = append(configured, repo.Repo)
+	}
 	var unanswered []contract.HostName
 	for _, host := range hosts {
 		if host.Pool != "" {
@@ -445,7 +461,7 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 		var runners []box.Runner
 		var egress bool
 		if err == nil {
-			runners, egress, err = driver.ListRunners(ctx, reclaim)
+			runners, egress, err = driver.ListRunners(ctx, reclaim, configured)
 		}
 		if err != nil {
 			s.failures = append(s.failures, fmt.Errorf("host %s: %w", host.Name, err))
@@ -473,7 +489,7 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 }
 
 // runnerBox makes a runner visible to admission. It has an image, so admission counts its CPUs and memory but no disk: all
-// it writes goes to tmpfs or to its build folder on the host.
+// it writes goes to tmpfs or to its build and keep folders on the host.
 func runnerBox(name string, host contract.HostName, size contract.BoxSize) box.Box {
 	return box.Box{ID: contract.BoxID(name), Host: host, Image: box.RunnerImage, Size: size, State: contract.BoxReady}
 }

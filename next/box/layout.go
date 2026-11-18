@@ -42,6 +42,7 @@ import (
 //	<HostData>/cache/                               dependency caches, which boxes share
 //	<HostData>/cache/build-cache/                   the compiler cache, which boxes and CI runners share through its server
 //	<HostData>/ci-build/<slot>/                    one CI runner's writable build folder
+//	<HostData>/ci-keep/<key>/                      a repository's writable cache shared by its runners
 //	<HostData>/share/rooms/<room>/shared/           /box/shared on another host, through its one mount of <Data>/rooms
 //	<HostData>/share/cache/                         that mount's local cache
 //	<HostData>/sock/share.sock                      the forwarded socket that mount reads through
@@ -290,6 +291,9 @@ func (l Layout) HostCache() string { return filepath.Join(l.HostData, "cache") }
 
 // HostCIBuild is the parent of the runner slots' private build folders.
 func (l Layout) HostCIBuild() string { return filepath.Join(l.HostData, "ci-build") }
+
+// HostCIKeep is the parent of the repositories' private runner caches.
+func (l Layout) HostCIKeep() string { return filepath.Join(l.HostData, "ci-keep") }
 
 // HostBuildCache is the store of a host's compiler cache, among its dependency caches.
 func (l Layout) HostBuildCache() string { return filepath.Join(l.HostCache(), "build-cache") }

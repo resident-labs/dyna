@@ -56,7 +56,7 @@ func newFrameHost(t *testing.T) (*Host, *frameRunner) {
 }
 
 func TestRunnerArgsKeepTheContainerSealed(t *testing.T) {
-	args := runnerArgs(testSpec(), "/data/ci-build/3", "/box/work/owner/repo")
+	args := runnerArgs(testSpec(), "/data/ci-build/3", "/data/ci-keep/owner+repo", "/box/work/owner/repo")
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
 		"--rm", "--timeout=22200", "--network=none", "--read-only", "--cap-drop=all", "--security-opt=no-new-privileges", "--user 1001:1001",
@@ -69,6 +69,7 @@ func TestRunnerArgsKeepTheContainerSealed(t *testing.T) {
 		"--mount type=bind,source=/data/sock/build-cache,destination=/run/dyna-build-cache,ro",
 		"--mount type=bind,source=/data/ci-build/3/cargo,destination=/box/cache/cargo",
 		"--mount type=bind,source=/data/ci-build/3/target,destination=/box/work/owner/repo/target",
+		"--mount type=bind,source=/data/ci-keep/owner+repo,destination=/keep", "--env DYNA_CI_KEEP=/keep",
 		"--env CARGO_HOME=/box/cache/cargo", "--env CARGO_TARGET_DIR=/box/work/owner/repo/target",
 	} {
 		if !strings.Contains(joined, want) {
@@ -142,7 +143,7 @@ func TestListRunnersSeparatesTheProxy(t *testing.T) {
 {"Names":["dyna-ci-pve-1"],"State":"running","Labels":{"dyna.ci":"runner","dyna.ci.repo":"owner/repo","dyna.ci.id":"42","dyna.ci.slot":"3","dyna.ci.size":"medium"}},
 {"Names":["dyna-ci-pve-2"],"State":"created","Labels":{"dyna.ci":"runner","dyna.ci.repo":"owner/repo","dyna.ci.id":"43","dyna.ci.slot":"0"}},
 {"Names":["dyna-ci-egress"],"State":"running","Labels":{"dyna.ci":"egress"}}]`)
-	found, egress, err := h.ListRunners(context.Background(), false)
+	found, egress, err := h.ListRunners(context.Background(), false, nil)
 	if err != nil || !egress || len(found) != 2 {
 		t.Fatalf("%+v %v %v", found, egress, err)
 	}
@@ -293,7 +294,7 @@ esac
 			if err := os.WriteFile(filepath.Join(bin, "df"), []byte(df), 0755); err != nil {
 				t.Fatal(err)
 			}
-			cmd := exec.Command("bash", "-c", pruneRunnerFoldersScript, "test", root, "16", "", filepath.Join(root, "no-legacy"))
+			cmd := exec.Command("bash", "-c", pruneRunnerFoldersScript, "test", root, "16", "", filepath.Join(root, "no-legacy"), "", "")
 			cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), fmt.Sprint("FAIL_LIST=", failed))
 			out, err := cmd.CombinedOutput()
 			if (err != nil) != failed {
@@ -340,7 +341,7 @@ func TestPruneRunnerFoldersKeepsThemWhileTheDiskHasRoom(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			cmd := exec.Command("bash", "-c", pruneRunnerFoldersScript, "test", root, "16", os.Getenv("PRUNE_ALL"), filepath.Join(root, "no-legacy"))
+			cmd := exec.Command("bash", "-c", pruneRunnerFoldersScript, "test", root, "16", os.Getenv("PRUNE_ALL"), filepath.Join(root, "no-legacy"), "", "")
 			cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "FREE="+c.free, "COUNT="+filepath.Join(bin, "count"))
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("%v: %s", err, out)
@@ -380,7 +381,7 @@ func TestBuildFolderPastItsCapLosesTargetFirst(t *testing.T) {
 			if err := os.WriteFile(root+".repo", []byte("owner/repo\n"), 0644); err != nil {
 				t.Fatal(err)
 			}
-			cmd := exec.Command("bash", "-c", buildScript, "test", root, "owner/repo", "200", "16", filepath.Join(t.TempDir(), "cache"))
+			cmd := exec.Command("bash", "-c", buildScript, "test", root, "owner/repo", "200", "16", filepath.Join(t.TempDir(), "cache"), "")
 			cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("%v: %s", err, out)
@@ -414,7 +415,7 @@ func TestBuildFolderClearsRepoChangesAndRejectsMountLinks(t *testing.T) {
 	}
 	prepare := func(repo string) {
 		t.Helper()
-		cmd := exec.Command("bash", "-c", buildScript, "test", build, repo, "10240", "16", cache)
+		cmd := exec.Command("bash", "-c", buildScript, "test", build, repo, "10240", "16", cache, "")
 		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%v: %s", err, out)
@@ -483,7 +484,7 @@ esac
 	}
 	prune := func(private string) {
 		t.Helper()
-		cmd := exec.Command("bash", "-c", pruneRunnerFoldersScript, "test", root, "16", "", legacy)
+		cmd := exec.Command("bash", "-c", pruneRunnerFoldersScript, "test", root, "16", "", legacy, "", "")
 		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "PRIVATE_BUILD="+private)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%v: %s", err, out)
@@ -532,7 +533,7 @@ func TestBuildFolderWaitsForLegacyMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	build := filepath.Join(root, "ci-build", "2")
-	cmd := exec.Command("bash", "-c", buildScript, "test", build, "owner/repo", "200", "16", cache)
+	cmd := exec.Command("bash", "-c", buildScript, "test", build, "owner/repo", "200", "16", cache, "")
 	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "waiting for migration") {
 		t.Fatalf("started while an old slot was still visible: %v: %s", err, out)
 	}
@@ -549,19 +550,23 @@ func TestRunnerSurveyAndRemovalPruneFolders(t *testing.T) {
 		if remove {
 			err = h.RemoveRunner(context.Background(), "dyna-ci-test")
 		} else {
-			_, _, err = h.ListRunners(context.Background(), false)
+			_, _, err = h.ListRunners(context.Background(), false, nil)
 		}
 		if err != nil {
 			t.Fatal(err)
 		}
-		found := false
-		for _, args := range runner.args {
-			if strings.Contains(strings.Join(args, " "), "dyna-ci-prune") {
-				found = true
+		action, prune := -1, -1
+		for i, args := range runner.args {
+			command := strings.Join(args, " ")
+			switch {
+			case strings.Contains(command, "dyna-ci-prune"):
+				prune = i
+			case strings.Contains(command, "'podman' '--cgroup-manager=systemd' 'ps'") || strings.Contains(command, "'podman' '--cgroup-manager=systemd' 'rm'"):
+				action = i
 			}
 		}
-		if !found {
-			t.Fatalf("remove=%v did not prune", remove)
+		if action < 0 || prune <= action {
+			t.Fatalf("remove=%v: action at %d, prune at %d; must prune after action", remove, action, prune)
 		}
 	}
 }
