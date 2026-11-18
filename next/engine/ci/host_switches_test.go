@@ -135,6 +135,28 @@ func TestABoxWaitingForDiskReclaimsIdleBuildFolders(t *testing.T) {
 	}
 }
 
+func TestTurningOffLastRepoReclaimsCachesWhenAnOfflineHostReturns(t *testing.T) {
+	f := newFixture(0)
+	offline := readyHost("offline", 32*box.GiB)
+	offline.State = box.HostUnreachable
+	returning := f.addHost(offline)
+	f.store.repos = nil
+	f.tick(t)
+	if returning.reclaimed || !f.drivers["pve"].reclaimed {
+		t.Fatal("only the ready host should have been cleaned")
+	}
+	f.drivers["pve"].reclaimed = false
+	f.tick(t)
+	if f.drivers["pve"].reclaimed {
+		t.Fatal("a host that stays offline should not trigger another survey")
+	}
+	f.store.hosts[1].State = box.HostReady
+	f.tick(t)
+	if !returning.reclaimed {
+		t.Fatal("the returning host's idle caches were not reclaimed")
+	}
+}
+
 // A pending service comes before a runner as a pending box does, on the hosts it could take: its declared host and its room's rule
 // narrow them, so a service that cannot go to a host holds no runner back there.
 func TestARunnerSkipsAHostWhereAServiceWaitsForRoom(t *testing.T) {
