@@ -467,7 +467,7 @@ func TestPruneMigratesIdleLegacyFoldersEvenWithSpace(t *testing.T) {
 	}
 	podman := `#!/bin/bash
 case "$1" in
-ps) [[ "$*" == *--all* ]] && echo 0 ;;
+ps) [[ "$*" == *--all* ]] && echo "0 $PRIVATE_BUILD" ;;
 unshare) shift; exec "$@" ;;
 *) exit 9 ;;
 esac
@@ -478,18 +478,32 @@ esac
 			t.Fatal(err)
 		}
 	}
-	cmd := exec.Command("bash", "-c", pruneRunnerFoldersScript, "test", root, "16", "", legacy)
-	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("%v: %s", err, out)
-	}
-	if _, err := os.Stat(filepath.Join(legacy, "1")); !os.IsNotExist(err) {
-		t.Errorf("idle legacy slot remains: %v", err)
-	}
-	for _, folder := range []string{filepath.Join(legacy, "0"), filepath.Join(root, "1")} {
-		if _, err := os.Stat(folder); err != nil {
-			t.Errorf("%s was not preserved: %v", folder, err)
+	prune := func(private string) {
+		t.Helper()
+		cmd := exec.Command("bash", "-c", pruneRunnerFoldersScript, "test", root, "16", "", legacy)
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "PRIVATE_BUILD="+private)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", err, out)
 		}
+	}
+	legacyInfo, err := os.Stat(filepath.Join(legacy, "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prune("")
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Errorf("old slots remain in the shared cache: %v", err)
+	}
+	retired := filepath.Join(root, ".legacy", "0")
+	if newInfo, err := os.Stat(retired); err != nil || !os.SameFile(legacyInfo, newInfo) {
+		t.Fatalf("held slot was not renamed: %v", err)
+	}
+	prune("1") // A new runner using slot 0 does not hold the legacy folder.
+	if _, err := os.Stat(retired); !os.IsNotExist(err) {
+		t.Errorf("stale slot was not reclaimed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "1")); err != nil {
+		t.Errorf("new layout was not preserved: %v", err)
 	}
 }
 
@@ -499,9 +513,12 @@ func TestBuildFolderWaitsForLegacyMigration(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(cache, "ci", "8"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chmod(cache, 0600); err != nil {
+		t.Fatal(err)
+	}
 	build := filepath.Join(root, "ci-build", "2")
 	cmd := exec.Command("bash", "-c", buildScript, "test", build, "owner/repo", "200", "16", cache)
-	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "legacy CI slot folders remain") {
+	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "waiting for migration") {
 		t.Fatalf("started while an old slot was still visible: %v: %s", err, out)
 	}
 	if _, err := os.Stat(build); !os.IsNotExist(err) {

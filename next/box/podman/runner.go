@@ -23,11 +23,12 @@ import (
 const runnerEntrypoint = `["/usr/bin/tini","--","/opt/dyna-ci/entrypoint.sh"]`
 
 const (
-	ciLabel         = "dyna.ci" // "runner" or "egress"
-	runnerRepoLabel = "dyna.ci.repo"
-	runnerIDLabel   = "dyna.ci.id"
-	runnerSlotLabel = "dyna.ci.slot"
-	runnerSizeLabel = "dyna.ci.size"
+	ciLabel          = "dyna.ci" // "runner" or "egress"
+	runnerRepoLabel  = "dyna.ci.repo"
+	runnerIDLabel    = "dyna.ci.id"
+	runnerSlotLabel  = "dyna.ci.slot"
+	runnerSizeLabel  = "dyna.ci.size"
+	runnerBuildLabel = "dyna.ci.private-build"
 	// egressName names both the proxy container and the volume that carries its sockets.
 	egressName  = "dyna-ci-egress"
 	egressMount = "/run/dyna-egress"
@@ -55,15 +56,17 @@ const (
 // still over the limit is it emptied. du and rm run in Podman's user namespace, where the job's files live.
 const buildScript = `set -eu -o pipefail
 b="$1"; repo="$2"; limit="$3"; slots="$4"; cache="$5"
-# A survey may have left a legacy folder mounted by an old runner. Do not expose it through a new /cache mount.
-for ((slot=0; slot<slots; slot++)); do
-  if [ -e "$cache/ci/$slot" ] || [ -L "$cache/ci/$slot" ]; then
-    echo 'legacy CI slot folders remain in the shared cache; wait for old runners to leave' >&2
-    exit 1
-  fi
-done
-# A box or the compiler-cache service may have created the cache at 0700. The read-only runner mount must be readable.
+# A box or the compiler-cache service may have created the cache without traverse permission.
 mkdir -p -- "$cache"
+chmod u+x -- "$cache"
+pending() { echo 'legacy CI slot folders remain in the shared cache; waiting for migration' >&2; exit 1; }
+if [ -L "$cache/ci" ]; then pending; fi
+if [ -e "$cache/ci" ]; then
+  [ -d "$cache/ci" ] && [ -x "$cache/ci" ] || pending
+  for ((slot=0; slot<slots; slot++)); do
+    if [ -e "$cache/ci/$slot" ] || [ -L "$cache/ci/$slot" ]; then pending; fi
+  done
+fi
 chmod a+rx -- "$cache"
 mkdir -p -m 0700 -- "$(dirname -- "$b")"
 if [ ! -f "$b.repo" ] || [ "$(< "$b.repo")" != "$repo" ]; then
@@ -198,6 +201,7 @@ func runnerArgs(s box.RunnerSpec, build, work string) []string {
 	return []string{"podman", "--cgroup-manager=systemd", "run", "--detach", "--rm", runnerLimit, "--name", s.Name,
 		"--label", ciLabel + "=runner", "--label", runnerRepoLabel + "=" + string(s.Repo), "--label", runnerIDLabel + "=" + strconv.FormatInt(s.ID, 10),
 		"--label", runnerSlotLabel + "=" + strconv.Itoa(s.Slot), "--label", runnerSizeLabel + "=" + string(s.Size.Name),
+		"--label", runnerBuildLabel + "=1",
 		"--cgroup-parent=" + runnerSlice,
 		// A host's containers.conf can default to host networking, so this is always explicit.
 		"--network=none", "--read-only", "--cap-drop=all", "--security-opt=no-new-privileges", "--user", "1001:1001",
@@ -259,37 +263,55 @@ func (h *Host) StartRunner(ctx context.Context, s box.RunnerSpec) error {
 // host's disk has room. Under twice the disk floor (box.DiskFloor) it removes canonical slot directories without a
 // container, highest slot first because new runners take the lowest free slot, until there is room again. With "all"
 // it removes every such directory whatever the disk holds, for a box or service that waits for disk.
-// Old slot folders in the shared cache go even when there is room, as soon as their containers are gone. Include stopped
-// containers and fail closed if Podman cannot list them. This never touches named volumes.
+// Old slot folders in the shared cache go even when there is room. Move a held folder out of view without copying
+// or breaking a running container's binds, then remove it once the old container is gone. Include stopped containers
+// and fail closed if Podman cannot list them. This never touches named volumes.
 const pruneRunnerFoldersScript = `set -eu -o pipefail
-root="$1"; slots="$2"; all="$3"; legacy="$4"
+root="$1"; slots="$2"; all="$3"; legacy="$4"; retired="$root/.legacy"
+slot_holders() {
+  podman ps --all --filter label=dyna.ci.slot --format '{{.Label "dyna.ci.slot"}} {{.Label "dyna.ci.private-build"}}'
+}
 roomy() {
   [ "$all" != all ] || return 1
   set -- $(df -Pk -- "$root" | tail -1)
   floor=$(( $2 / 10 )); [ "$floor" -ge 20971520 ] || floor=20971520
   [ "$4" -ge $(( 2 * floor )) ]
 }
-if [ ! -d "$legacy" ] || [ -L "$legacy" ]; then
-  if [ ! -d "$root" ] || roomy; then exit 0; fi
-  legacy=
-fi
-held=$(podman ps --all --filter label=dyna.ci.slot --format '{{.Label "dyna.ci.slot"}}')
-if [ -n "$legacy" ]; then
+if [ -d "$legacy" ] || [ -d "$retired" ]; then
+  holders=$(slot_holders)
+  old_held=$(awk '$2 != "1" { print $1 }' <<< "$holders")
   (
-    # Stay in the old directory once opened: the shared cache must not redirect removal through a link.
-    cd -P -- "$(dirname -- "$legacy")"
+    # Stay in the old directory once opened: the shared cache must not redirect cleanup through a link.
+    cd -P -- "$(dirname -- "$legacy")" 2>/dev/null || exit 0
     old="$PWD/$(basename -- "$legacy")"
-    cd -P -- "$old" || exit 0
-    [ "$PWD" = "$old" ] || exit 0
+    [ ! -L "$old" ] && cd -P -- "$old" 2>/dev/null && [ "$PWD" = "$old" ] || exit 0
     for ((slot=slots-1; slot>=0; slot--)); do
-      if ! grep -qxF -- "$slot" <<< "$held" && { [ -e "./$slot" ] || [ -L "./$slot" ]; }; then
+      [ -e "./$slot" ] || [ -L "./$slot" ] || continue
+      if ! grep -qxF -- "$slot" <<< "$old_held"; then
         podman unshare rm -rf -- "./$slot"
+      elif [ ! -e "$retired/$slot" ] && [ ! -L "$retired/$slot" ]; then
+        mkdir -p -m 0700 -- "$root" "$retired"
+        # mv must rename, never copy a live folder across mounts. If it cannot move, new starts wait.
+        if src=$(findmnt -n -o ID --target "$PWD/$slot") && dst=$(findmnt -n -o ID --target "$retired") &&
+           [ -n "$src" ] && [ "$src" = "$dst" ]; then
+          mv -T -- "./$slot" "$retired/$slot" || true
+        fi
       fi
     done
   )
   rmdir -- "$legacy" 2>/dev/null || true
-  if [ ! -d "$root" ] || roomy; then exit 0; fi
+  if [ -d "$retired" ]; then
+    for ((slot=slots-1; slot>=0; slot--)); do
+      if ! grep -qxF -- "$slot" <<< "$old_held" && { [ -e "$retired/$slot" ] || [ -L "$retired/$slot" ]; }; then
+        podman unshare rm -rf -- "$retired/$slot"
+      fi
+    done
+    rmdir -- "$retired" 2>/dev/null || true
+  fi
 fi
+if [ ! -d "$root" ] || roomy; then exit 0; fi
+if [ -z "${holders+x}" ]; then holders=$(slot_holders); fi
+held=$(awk '{ print $1 }' <<< "$holders")
 for ((slot=slots-1; slot>=0; slot--)); do
   if ! grep -qxF -- "$slot" <<< "$held" && { [ -e "$root/$slot" ] || [ -L "$root/$slot" ]; }; then
     podman unshare rm -rf -- "$root/$slot" "$root/$slot.repo"
