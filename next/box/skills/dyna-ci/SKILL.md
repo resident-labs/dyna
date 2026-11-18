@@ -5,11 +5,10 @@ description: Use when you write, debug or speed up a GitHub Actions workflow, or
 
 # Run GitHub Actions on Dyna's runners
 
-Dyna runs a repository's Actions jobs on its own hosts, one runner container per job, sized by `runs-on` and gone
-when the job ends. The repositories it serves are on dyna_room's "Dyna CI runners" line. Turning a repository's
-runners on or off, its runner maximum, hosts and host rules are root's (dyna-admin); other sessions ask their parent.
-Runners go only to hosts with ci on. A repository's host list, shown on the Dyna CI runners line when set, overrides
-the room's host rule for CI only; without that list, runners follow `room hosts ROOM --only`, as boxes do.
+Dyna runs one container per job, sized by `runs-on`, on a host with CI on. dyna_room's "Dyna CI runners" line lists
+served repositories and any repository host override. Without an override, runners follow `room hosts ROOM --only`,
+as boxes do. Turning runners on or off, setting their maximum, and picking hosts are root's (dyna-admin); other
+sessions ask their parent.
 
 ## Route a job
 
@@ -40,9 +39,8 @@ sets `needs: route` and `runs-on: ${{ needs.route.outputs.runner }}`:
           echo "runner=$r" >> "$GITHUB_OUTPUT"
 ```
 The route is fixed once picked: if the pool dies after that, its jobs wait for a runner, up to GitHub's 24 hours.
-Add a watcher beside them: copy `pool-watch.py` from this skill's folder into the repository (here `.github/`) and
-add this job, with no `name:`. It cancels the run once its pool jobs have made no progress for 20 minutes and two
-looks 3 minutes apart find no pool job of the repository running or just finished; a queue behind a busy pool stays.
+Copy `pool-watch.py` from this skill to `.github/` and add this job with no `name:`. It cancels after 20 minutes
+without progress and two looks 3 minutes apart finding no repository pool job running or just finished.
 ```yaml
   pool-watch:
     needs: route
@@ -69,11 +67,10 @@ checkout) and `/tmp` are tmpfs, each capped at three quarters of the size's memo
 repositories. A folder over its cap when a job starts (80 GiB, less on a small disk, never under 40 GiB) loses
 `target`, then everything. `DYNA_CI_CACHE` is the host's box cache, read-only; it does not contain `/build`.
 
-`/keep` (`DYNA_CI_KEEP`) is a writable cache shared by concurrent jobs of this repository on this host. A job on
-another host starts cold. Every job that can run here can write it, including same-repository PRs; fork PRs are
-refused. Key entries by a hash of their inputs. Write temporary files inside `/keep`, then `mv` them into place:
-`/tmp` and `$HOME` are on tmpfs. `/keep` is never in GitHub's cache or the host's shared box cache. A cache over
-20 GiB is emptied at the next runner start when no runner holds it; low disk space can reclaim idle caches sooner.
+`/keep` (`DYNA_CI_KEEP`) is writable by concurrent jobs of this repository on this host, including same-repo PRs;
+fork PRs are refused. Other hosts start cold. Key entries by input hash. Write temporary files inside `/keep`, then
+`mv` them into place (`/tmp` and `$HOME` are tmpfs). This cache is neither in GitHub's cache nor the shared box cache.
+A runner start empties it above 20 GiB if idle; low disk space can reclaim it sooner.
 
 The only network is an HTTPS proxy (`https_proxy`) to port 443 of public addresses: plain HTTP, SSH remotes such as
 `git@github.com:`, other ports and private or LAN addresses fail, as does a tool that ignores the proxy.
@@ -100,19 +97,17 @@ USER root
 RUN apt-get update && apt-get install -y --no-install-recommends mesa-vulkan-drivers && rm -rf /var/lib/apt/lists/*
 USER 1001:1001
 ```
-First run `dyna image show ci-runner`: if the room has one, rebuild its folder from that Containerfile and the
-listed files (show gives their names, not contents) and keep it. Save yours with the image tool or
-`dyna image save ci-runner ./dir`, which replaces it. Dyna's user, entrypoint, read-only root and network hold
-whatever it says. A host builds it, in minutes, when a job there first needs it; a failed build runs jobs on the
-shared image. So check with a job that uses the new package; if it is missing, root reads the build error in
-`dyna host list` (dyna-admin). To undo, save the kept folder again, or `dyna image remove ci-runner` if none existed.
+Run `dyna image show ci-runner` and keep the old folder (show gives file names, not contents). Replace it with the
+image tool or `dyna image save ci-runner ./dir`. Dyna still sets the user, entrypoint, read-only root and network.
+A host builds the layer on demand and falls back to the shared image if it fails. Check with a job that uses the new
+package; root reads build errors in `dyna host list` (dyna-admin). To undo, save the kept folder again, or run
+`dyna image remove ci-runner` if none existed.
 
 ## Inspect and control a run
 
 Read runs, jobs and job step status with the GitHub tools `actions_list` and `actions_get`, and logs with
 `get_job_logs` after the job ends: GitHub gives no log of a running job, so a missing one does not mean it is stuck.
-Dispatch, rerun and cancel use `actions_run_trigger`, present when dyna_room's "GitHub writes" line includes
-`actions`; without it, ask your parent (root: dyna-admin).
+Dispatch, rerun and cancel use `actions_run_trigger` with GitHub writes `actions`; otherwise ask your parent.
 
 ## When runs look stuck
 
