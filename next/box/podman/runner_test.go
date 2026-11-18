@@ -493,6 +493,22 @@ esac
 	}
 }
 
+func TestBuildFolderWaitsForLegacyMigration(t *testing.T) {
+	root := t.TempDir()
+	cache := filepath.Join(root, "cache")
+	if err := os.MkdirAll(filepath.Join(cache, "ci", "8"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	build := filepath.Join(root, "ci-build", "2")
+	cmd := exec.Command("bash", "-c", buildScript, "test", build, "owner/repo", "200", "16", cache)
+	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "legacy CI slot folders remain") {
+		t.Fatalf("started while an old slot was still visible: %v: %s", err, out)
+	}
+	if _, err := os.Stat(build); !os.IsNotExist(err) {
+		t.Errorf("new build folder exists before cleanup: %v", err)
+	}
+}
+
 func TestRunnerSurveyAndRemovalPruneFolders(t *testing.T) {
 	for _, remove := range []bool{false, true} {
 		h, runner := newFrameHost(t)

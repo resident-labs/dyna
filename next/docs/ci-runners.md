@@ -198,7 +198,7 @@ GiB of memory.
 Each runner is a rootless Podman container, built from
 `next/box/images/ci-runner` and set in `next/box/podman/runner.go`:
 
-- **Host:** two host mounts, the host's cache and the socket of its compiler cache,
+- **Host:** the shared cache, the compiler-cache socket, and its own build mounts,
   below. No Podman socket, no capabilities, `no-new-privileges`, a read-only image.
   Its process runs as a subordinate UID on the host, not as the host user.
 - **Network:** `--network=none`. It has only loopback and no route. The only way
@@ -217,20 +217,15 @@ Each runner is a rootless Podman container, built from
   alone on the host gets all of it, and an idle job's long poll takes nothing.
 - **Disk:** `/home/runner` and `/tmp` are each a tmpfs capped at three quarters of
   the memory limit, and `/dev/shm` is Podman's default, 64 MB and `noexec`. All of it
-  counts against that limit. The one write path that outlives the job is its build
-  folder in the host's cache. `/cache` (`DYNA_CI_CACHE`) is the host's cache, the
-  folder its boxes mount at `/box/cache`, every room's alike, mounted read-only: a
-  job reads what the boxes fetched, and cannot change their files. The build folder
-  of the runner's slot, `/cache/ci/N` there, is the one writable mount, at `/build`
-  (`DYNA_CI_BUILD`) in every slot. Two of its folders are mounted again where a box
-  of the repository has them: `cargo` at `/box/cache/cargo` (`CARGO_HOME`) and
-  `target` at `/box/work/<owner>/<repo>/target` (`CARGO_TARGET_DIR`). So Cargo's
-  downloads and build stay warm, as on upstream projects' own runners, with no setup
-  in the workflow. A slot holds one running runner on its host, and the pool gives slots out
-  under its lock, so two jobs never share a build folder at once, whatever their
-  sizes or repositories. A job sees the other slots' folders read-only. Only the
-  repository's own pushes and pull requests reach the pool. Before a job starts, a
-  build folder over 40 GiB is emptied. Everything else a job wrote dies with it.
+  counts against that limit. `/cache` (`DYNA_CI_CACHE`) is the shared host cache that
+  boxes mount at `/box/cache`, read-only in a runner. The job's build folder is
+  `<hostData>/ci-build/<slot>`, outside that cache, and only its slot mounts it at
+  `/build` (`DYNA_CI_BUILD`). Two of its folders are mounted again where a box of the
+  repository has them: `cargo` at `/box/cache/cargo` (`CARGO_HOME`) and `target` at
+  `/box/work/<owner>/<repo>/target` (`CARGO_TARGET_DIR`). A slot holds one running
+  runner; when it switches repositories, the folder is emptied. Before a job starts,
+  a build folder over its cap (40–80 GiB based on disk size) loses `target`, then
+  everything if still too large. Everything else a job wrote dies with it.
 - **Compiler cache:** Cargo compiles through sccache, which reads and writes the
   host's compiler cache, the one its boxes use, through a socket mounted at
   `/run/dyna-build-cache` that the entrypoint relays to `127.0.0.1:3129` (spec 5.6).

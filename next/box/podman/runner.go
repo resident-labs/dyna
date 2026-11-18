@@ -55,6 +55,13 @@ const (
 // still over the limit is it emptied. du and rm run in Podman's user namespace, where the job's files live.
 const buildScript = `set -eu -o pipefail
 b="$1"; repo="$2"; limit="$3"; slots="$4"; cache="$5"
+# A survey may have left a legacy folder mounted by an old runner. Do not expose it through a new /cache mount.
+for ((slot=0; slot<slots; slot++)); do
+  if [ -e "$cache/ci/$slot" ] || [ -L "$cache/ci/$slot" ]; then
+    echo 'legacy CI slot folders remain in the shared cache; wait for old runners to leave' >&2
+    exit 1
+  fi
+done
 # A box or the compiler-cache service may have created the cache at 0700. The read-only runner mount must be readable.
 mkdir -p -- "$cache"
 chmod a+rx -- "$cache"
