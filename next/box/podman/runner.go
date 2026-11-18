@@ -291,11 +291,8 @@ if [ -d "$legacy" ] || [ -d "$retired" ]; then
         podman unshare rm -rf -- "./$slot"
       elif [ ! -e "$retired/$slot" ] && [ ! -L "$retired/$slot" ]; then
         mkdir -p -m 0700 -- "$root" "$retired"
-        # mv must rename, never copy a live folder across mounts. If it cannot move, new starts wait.
-        if src=$(findmnt -n -o ID --target "$PWD/$slot") && dst=$(findmnt -n -o ID --target "$retired") &&
-           [ -n "$src" ] && [ "$src" = "$dst" ]; then
-          mv -T -- "./$slot" "$retired/$slot" || true
-        fi
+        # Rename without copying or deleting any live files. If it fails, new starts wait for the old runner.
+        perl -e 'rename($ARGV[0], $ARGV[1]) or exit 1' -- "./$slot" "$retired/$slot" 2>/dev/null || true
       fi
     done
   )

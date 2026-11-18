@@ -457,7 +457,10 @@ func TestBuildFolderClearsRepoChangesAndRejectsMountLinks(t *testing.T) {
 	}
 }
 
-func TestPruneMigratesIdleLegacyFoldersEvenWithSpace(t *testing.T) {
+func TestPruneMigratesLegacyFoldersEvenWithSpace(t *testing.T) {
+	if _, err := exec.LookPath("perl"); err != nil {
+		t.Skip("Perl is needed to exercise rename-only migration of a live slot")
+	}
 	root, cache, bin := t.TempDir(), t.TempDir(), t.TempDir()
 	legacy := filepath.Join(cache, "ci")
 	for _, folder := range []string{filepath.Join(legacy, "0"), filepath.Join(legacy, "1"), filepath.Join(root, "1")} {
@@ -488,6 +491,18 @@ esac
 	}
 	legacyInfo, err := os.Stat(filepath.Join(legacy, "0"))
 	if err != nil {
+		t.Fatal(err)
+	}
+	// If rename is unavailable or fails (for example, across filesystems), the running slot must stay intact.
+	blocked := filepath.Join(bin, "perl")
+	if err := os.WriteFile(blocked, []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	prune("")
+	if stillThere, err := os.Stat(filepath.Join(legacy, "0")); err != nil || !os.SameFile(legacyInfo, stillThere) {
+		t.Fatalf("failed rename affected a held slot: %v", err)
+	}
+	if err := os.Remove(blocked); err != nil {
 		t.Fatal(err)
 	}
 	prune("")
