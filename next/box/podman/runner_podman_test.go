@@ -38,6 +38,9 @@ func TestRealRunnersKeepTheirOwnBuildFolders(t *testing.T) {
 	}
 	layout := box.Layout{HostData: dir}
 	cache, builds := layout.HostCache(), layout.HostCIBuild()
+	if err := os.Mkdir(cache, 0700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(cache, "gomod"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +117,7 @@ echo "$DYNA_CI_CACHE $DYNA_CI_BUILD"`, spec.Size.Name)
 
 	// A folder past the cap is emptied, and the next runner gets it back empty and its own.
 	realPodman(t, "--cgroup-manager=systemd", "rm", "--force", "--time", "0", specs[0].Name)
-	if _, err := h.run(ctx, "bash", "-c", buildScript, "dyna-ci-build", filepath.Join(builds, "0"), string(specs[0].Repo), "0", "16"); err != nil {
+	if _, err := h.run(ctx, "bash", "-c", buildScript, "dyna-ci-build", filepath.Join(builds, "0"), string(specs[0].Repo), "0", "16", cache); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(filepath.Join(builds, "0"))

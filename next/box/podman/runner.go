@@ -54,8 +54,11 @@ const (
 // A folder grown past cacheLimitKB loses its compiled output first, since the compiler cache can rebuild it, and only if
 // still over the limit is it emptied. du and rm run in Podman's user namespace, where the job's files live.
 const buildScript = `set -eu -o pipefail
-b="$1"; repo="$2"; limit="$3"; slots="$4"
-mkdir -p -- "$(dirname -- "$b")"
+b="$1"; repo="$2"; limit="$3"; slots="$4"; cache="$5"
+# A box or the compiler-cache service may have created the cache at 0700. The read-only runner mount must be readable.
+mkdir -p -- "$cache"
+chmod a+rx -- "$cache"
+mkdir -p -m 0700 -- "$(dirname -- "$b")"
 if [ ! -f "$b.repo" ] || [ "$(< "$b.repo")" != "$repo" ]; then
   podman unshare rm -rf -- "$b"
 fi
@@ -231,7 +234,7 @@ func (h *Host) StartRunner(ctx context.Context, s box.RunnerSpec) error {
 		return errors.New("invalid runner")
 	}
 	ctx = WithRemoteCancellation(ctx)
-	if _, err := h.run(ctx, "bash", "-c", buildScript, "dyna-ci-build", build, string(s.Repo), strconv.Itoa(cacheLimitKB), strconv.Itoa(box.RunnerSlots)); err != nil {
+	if _, err := h.run(ctx, "bash", "-c", buildScript, "dyna-ci-build", build, string(s.Repo), strconv.Itoa(cacheLimitKB), strconv.Itoa(box.RunnerSlots), s.Cache); err != nil {
 		return fmt.Errorf("prepare build folder: %w", err)
 	}
 	args := append([]string{"bash", "-c", `IFS= read -r ACTIONS_RUNNER_INPUT_JITCONFIG && export ACTIONS_RUNNER_INPUT_JITCONFIG && exec "$@"`, "dyna-runner"}, runnerArgs(s, build, work)...)

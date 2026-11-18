@@ -380,7 +380,7 @@ func TestBuildFolderPastItsCapLosesTargetFirst(t *testing.T) {
 			if err := os.WriteFile(root+".repo", []byte("owner/repo\n"), 0644); err != nil {
 				t.Fatal(err)
 			}
-			cmd := exec.Command("bash", "-c", buildScript, "test", root, "owner/repo", "200", "16")
+			cmd := exec.Command("bash", "-c", buildScript, "test", root, "owner/repo", "200", "16", filepath.Join(t.TempDir(), "cache"))
 			cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("%v: %s", err, out)
@@ -404,19 +404,26 @@ func TestBuildFolderPastItsCapLosesTargetFirst(t *testing.T) {
 
 func TestBuildFolderClearsRepoChangesAndRejectsMountLinks(t *testing.T) {
 	build, bin := filepath.Join(t.TempDir(), "ci-build", "3"), t.TempDir()
+	cache := filepath.Join(t.TempDir(), "cache")
+	if err := os.Mkdir(cache, 0700); err != nil {
+		t.Fatal(err)
+	}
 	podman := "#!/bin/bash\ncase \"$1\" in unshare) shift; [ \"$1\" = chown ] || exec \"$@\" ;; *) exit 9 ;; esac\n"
 	if err := os.WriteFile(filepath.Join(bin, "podman"), []byte(podman), 0755); err != nil {
 		t.Fatal(err)
 	}
 	prepare := func(repo string) {
 		t.Helper()
-		cmd := exec.Command("bash", "-c", buildScript, "test", build, repo, "10240", "16")
+		cmd := exec.Command("bash", "-c", buildScript, "test", build, repo, "10240", "16", cache)
 		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%v: %s", err, out)
 		}
 	}
 	prepare("one/repo")
+	if info, err := os.Stat(cache); err != nil || info.Mode().Perm()&0055 != 0055 {
+		t.Fatalf("the runner cannot read the cache: %v %v", info, err)
+	}
 	if err := os.Remove(filepath.Join(build, "cargo")); err != nil {
 		t.Fatal(err)
 	}
