@@ -336,7 +336,7 @@ type Observed struct {
 // pullFields is everything a read asks per PR.
 const pullFields = `number state merged headRefOid headRepository{nameWithOwner} mergeable mergeStateStatus reviewDecision
 latestOpinionatedReviews(first:20,writersOnly:true){nodes{state author{login}}}
-commits(last:1){nodes{commit{oid ` + suiteFields + ` statusCheckRollup{state contexts(first:50){totalCount pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion checkSuite{conclusion branch{name} workflowRun{event runNumber workflow{id}}}} ...on StatusContext{context state}}}}}}}
+commits(last:1){nodes{commit{oid ` + suiteFields + ` statusCheckRollup{state contexts(first:50){totalCount pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion checkSuite{conclusion matchingPullRequests(first:2){nodes{number}} workflowRun{event runNumber workflow{id}}}} ...on StatusContext{context state}}}}}}}
 reviews(last:20){nodes{fullDatabaseId state body url author{login} submittedAt lastEditedAt}}
 comments(last:20){nodes{body author{login} createdAt lastEditedAt}}`
 
@@ -363,9 +363,11 @@ type gqlRollup struct {
 			TargetURL  string `json:"targetUrl"`
 			CheckSuite struct {
 				Conclusion string `json:"conclusion"`
-				Branch     *struct {
-					Name string `json:"name"`
-				} `json:"branch"`
+				PRs        struct {
+					Nodes []struct {
+						Number int `json:"number"`
+					} `json:"nodes"`
+				} `json:"matchingPullRequests"`
 				WorkflowRun *struct {
 					Event     string `json:"event"`
 					RunNumber int    `json:"runNumber"`
@@ -456,22 +458,30 @@ func summarizeContexts(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string)
 	if len(rollup.Contexts.Nodes) > 0 {
 		// A stacked PR pushed with its base gets two pull_request runs of each workflow on one head, and the newer cancels the
 		// older. On a PR head, a cancelled job of a pull_request run counts for nothing once a later pull_request run of the same
-		// workflow and branch finished that job, in a suite that was not cancelled itself. Main heads and other triggers keep
-		// every cancellation, and a run with no workflow or branch never matches.
-		replaceable := func(run string) bool { return rule == ciPullHead && run == "pull_request" }
-		type job struct{ workflow, event, branch, name string }
+		// workflow, for the same single PR, finished that job in a suite that was not cancelled itself. Main heads, other
+		// triggers and suites that match no PR or several keep every cancellation.
+		type job struct {
+			workflow string
+			pr       int
+			name     string
+		}
+		keys := make([]*job, len(rollup.Contexts.Nodes))
 		finished := map[job]int{}
-		for _, check := range rollup.Contexts.Nodes {
+		for i, check := range rollup.Contexts.Nodes {
 			suite := check.CheckSuite
-			if run := suite.WorkflowRun; run != nil && replaceable(run.Event) && run.Workflow.ID != "" && suite.Branch != nil && check.Status == "COMPLETED" && check.Conclusion != "CANCELLED" && suite.Conclusion != "CANCELLED" {
-				key := job{run.Workflow.ID, run.Event, suite.Branch.Name, check.Name}
+			run := suite.WorkflowRun
+			if rule != ciPullHead || run == nil || run.Event != "pull_request" || run.Workflow.ID == "" || len(suite.PRs.Nodes) != 1 {
+				continue
+			}
+			key := job{run.Workflow.ID, suite.PRs.Nodes[0].Number, check.Name}
+			keys[i] = &key
+			if check.Status == "COMPLETED" && check.Conclusion != "CANCELLED" && suite.Conclusion != "CANCELLED" {
 				finished[key] = max(finished[key], run.RunNumber)
 			}
 		}
 		ci, cancelled := contract.PrCISuccess, []string{}
-		for _, check := range rollup.Contexts.Nodes {
-			suite := check.CheckSuite
-			if run := suite.WorkflowRun; check.Conclusion == "CANCELLED" && run != nil && replaceable(run.Event) && run.Workflow.ID != "" && suite.Branch != nil && finished[job{run.Workflow.ID, run.Event, suite.Branch.Name, check.Name}] > run.RunNumber {
+		for i, check := range rollup.Contexts.Nodes {
+			if check.Conclusion == "CANCELLED" && keys[i] != nil && finished[*keys[i]] > check.CheckSuite.WorkflowRun.RunNumber {
 				continue
 			}
 			name := check.Name
@@ -807,7 +817,7 @@ func (c *Client) CommitsCI(ctx context.Context, repo contract.RepoName, shas []s
 		fields += fmt.Sprintf(" h%d:object(oid:$h%d){...ci}", i, i)
 	}
 	query := "query($owner:String!,$name:String!" + declared + "){viewer{login} repository(owner:$owner,name:$name){" + fields + "}}" +
-		fmt.Sprintf(" fragment ci on Commit{"+suiteFields+" statusCheckRollup{state contexts(first:%d){totalCount pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion detailsUrl checkSuite{conclusion branch{name} workflowRun{event runNumber workflow{id}}}} ...on StatusContext{context state targetUrl}}}}}", ciRunsRead)
+		fmt.Sprintf(" fragment ci on Commit{"+suiteFields+" statusCheckRollup{state contexts(first:%d){totalCount pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion detailsUrl checkSuite{conclusion matchingPullRequests(first:2){nodes{number}} workflowRun{event runNumber workflow{id}}}} ...on StatusContext{context state targetUrl}}}}}", ciRunsRead)
 	repository, err := c.graphQL(ctx, query, variables)
 	if err != nil {
 		return nil, err
