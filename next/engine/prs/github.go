@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -335,7 +336,7 @@ type Observed struct {
 // pullFields is everything a read asks per PR.
 const pullFields = `number state merged headRefOid headRepository{nameWithOwner} mergeable mergeStateStatus reviewDecision
 latestOpinionatedReviews(first:20,writersOnly:true){nodes{state author{login}}}
-commits(last:1){nodes{commit{oid ` + suiteFields + ` statusCheckRollup{state contexts(first:50){totalCount pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion checkSuite{workflowRun{event runNumber workflow{databaseId}}}} ...on StatusContext{context state}}}}}}}
+commits(last:1){nodes{commit{oid ` + suiteFields + ` statusCheckRollup{state contexts(first:50){totalCount pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion checkSuite{workflowRun{event runNumber workflow{id}}}} ...on StatusContext{context state}}}}}}}
 reviews(last:20){nodes{fullDatabaseId state body url author{login} submittedAt lastEditedAt}}
 comments(last:20){nodes{body author{login} createdAt lastEditedAt}}`
 
@@ -365,7 +366,7 @@ type gqlRollup struct {
 					Event     string `json:"event"`
 					RunNumber int    `json:"runNumber"`
 					Workflow  struct {
-						DatabaseID int64 `json:"databaseId"`
+						ID string `json:"id"`
 					} `json:"workflow"`
 				} `json:"workflowRun"`
 			} `json:"checkSuite"`
@@ -449,22 +450,19 @@ func summarizeContexts(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string)
 	}
 	var failed []string
 	if len(rollup.Contexts.Nodes) > 0 {
-		// A newer run of one workflow for one trigger on this head replaces an older one: a stacked PR pushed with its base gets
-		// two runs, and the newer cancels the older. Only the newest run of each counts.
-		type trigger struct {
-			workflow int64
-			event    string
-		}
-		newest := map[trigger]int{}
+		// A stacked PR pushed with its base gets two runs of each workflow on one head, and the newer cancels the older. A
+		// cancelled job counts for nothing once a later run of the same workflow, for the same trigger, finished that job.
+		type job struct{ workflow, event, name string }
+		finished := map[job]int{}
 		for _, check := range rollup.Contexts.Nodes {
-			if run := check.CheckSuite.WorkflowRun; run != nil {
-				key := trigger{run.Workflow.DatabaseID, run.Event}
-				newest[key] = max(newest[key], run.RunNumber)
+			if run := check.CheckSuite.WorkflowRun; run != nil && run.Workflow.ID != "" && check.Status == "COMPLETED" && check.Conclusion != "CANCELLED" {
+				key := job{run.Workflow.ID, run.Event, check.Name}
+				finished[key] = max(finished[key], run.RunNumber)
 			}
 		}
 		ci, cancelled := contract.PrCISuccess, []string{}
 		for _, check := range rollup.Contexts.Nodes {
-			if run := check.CheckSuite.WorkflowRun; run != nil && run.RunNumber < newest[trigger{run.Workflow.DatabaseID, run.Event}] {
+			if run := check.CheckSuite.WorkflowRun; check.Conclusion == "CANCELLED" && run != nil && run.Workflow.ID != "" && finished[job{run.Workflow.ID, run.Event, check.Name}] > run.RunNumber {
 				continue
 			}
 			name := check.Name
@@ -476,7 +474,9 @@ func summarizeContexts(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string)
 				pending = true
 			case check.Type == "StatusContext" && check.State == "SUCCESS", check.Conclusion == "SUCCESS" || check.Conclusion == "SKIPPED" || check.Conclusion == "NEUTRAL":
 			case check.Conclusion == "CANCELLED":
-				cancelled = append(cancelled, name)
+				if !slices.Contains(cancelled, name) {
+					cancelled = append(cancelled, name)
+				}
 			default:
 				ci = contract.PrCIFailure
 				failed = append(failed, name)
@@ -798,7 +798,7 @@ func (c *Client) CommitsCI(ctx context.Context, repo contract.RepoName, shas []s
 		fields += fmt.Sprintf(" h%d:object(oid:$h%d){...ci}", i, i)
 	}
 	query := "query($owner:String!,$name:String!" + declared + "){viewer{login} repository(owner:$owner,name:$name){" + fields + "}}" +
-		fmt.Sprintf(" fragment ci on Commit{"+suiteFields+" statusCheckRollup{state contexts(first:%d){totalCount pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion detailsUrl checkSuite{workflowRun{event runNumber workflow{databaseId}}}} ...on StatusContext{context state targetUrl}}}}}", ciRunsRead)
+		fmt.Sprintf(" fragment ci on Commit{"+suiteFields+" statusCheckRollup{state contexts(first:%d){totalCount pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion detailsUrl checkSuite{workflowRun{event runNumber workflow{id}}}} ...on StatusContext{context state targetUrl}}}}}", ciRunsRead)
 	repository, err := c.graphQL(ctx, query, variables)
 	if err != nil {
 		return nil, err
