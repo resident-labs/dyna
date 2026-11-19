@@ -66,8 +66,16 @@ func TestCancellationPrecedence(t *testing.T) {
 // Shape of sunrise-org/sunrise#3107 at 6f31f19555: pushed with its base, the PR got two events, so dyna-checks ran as 2859 and
 // 2860 and modding-book as 1064 and 1065 on one head. Each newer run cancelled the older one and passed, skipping some jobs.
 func TestLaterRunReplacesCancelledJob(t *testing.T) {
+	suite := func(workflow, event, branch, suiteConclusion string, run int, name, status, conclusion string) string {
+		ref := "null"
+		if branch != "" {
+			ref = fmt.Sprintf(`{"name":%q}`, branch)
+		}
+		return fmt.Sprintf(`{"__typename":"CheckRun","name":%q,"status":%q,"conclusion":%q,"checkSuite":{"conclusion":%q,"branch":%s,"workflowRun":{"event":%q,"runNumber":%d,"workflow":{"id":%q}}}}`, name, status, conclusion, suiteConclusion, ref, event, run, workflow)
+	}
+	// check is a job in a finished run of branch stack-top; the run's suite takes the job's conclusion.
 	check := func(workflow, event string, run int, name, status, conclusion string) string {
-		return fmt.Sprintf(`{"__typename":"CheckRun","name":%q,"status":%q,"conclusion":%q,"checkSuite":{"workflowRun":{"event":%q,"runNumber":%d,"workflow":{"id":%q}}}}`, name, status, conclusion, event, run, workflow)
+		return suite(workflow, event, "stack-top", conclusion, run, name, status, conclusion)
 	}
 	const checks, book = "W_checks", "W_book"
 	twins := []string{
@@ -90,6 +98,10 @@ func TestLaterRunReplacesCancelledJob(t *testing.T) {
 		{"newer run still running", []string{twins[1], check(checks, "pull_request", 2860, "verify", "IN_PROGRESS", "")}, contract.PrCIPending, nil},
 		{"older failure still counts", []string{check(checks, "pull_request", 2859, "verify", "COMPLETED", "FAILURE"), twins[3]}, contract.PrCIFailure, []string{"verify"}},
 		{"newer run failed the job", []string{twins[1], check(checks, "pull_request", 2860, "verify", "COMPLETED", "FAILURE")}, contract.PrCIFailure, []string{"verify"}},
+		{"replacement suite cancelled", []string{twins[1], suite(checks, "pull_request", "stack-top", "CANCELLED", 2860, "verify", "COMPLETED", "SKIPPED")}, contract.PrCICancelled, []string{"verify"}},
+		{"skipped in a passing replacement", []string{twins[1], suite(checks, "pull_request", "stack-top", "SUCCESS", 2860, "verify", "COMPLETED", "SKIPPED")}, contract.PrCISuccess, nil},
+		{"another branch", []string{twins[1], suite(checks, "pull_request", "other", "SUCCESS", 2860, "verify", "COMPLETED", "SUCCESS")}, contract.PrCICancelled, []string{"verify"}},
+		{"tag push has no branch", []string{check(checks, "push", 7, "verify", "COMPLETED", "CANCELLED"), suite(checks, "push", "", "SUCCESS", 8, "verify", "COMPLETED", "SUCCESS")}, contract.PrCICancelled, []string{"verify"}},
 		{"unknown workflow", []string{check("", "pull_request", 2859, "verify", "COMPLETED", "CANCELLED"), check("", "pull_request", 2860, "verify", "COMPLETED", "SUCCESS")}, contract.PrCICancelled, []string{"verify"}},
 		{"same job name in another workflow", []string{twins[1], check(book, "pull_request", 1065, "verify", "COMPLETED", "SUCCESS")}, contract.PrCICancelled, []string{"verify"}},
 		{"another trigger", []string{check(checks, "push", 7, "verify", "COMPLETED", "CANCELLED"), twins[3]}, contract.PrCICancelled, []string{"verify"}},
