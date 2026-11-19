@@ -26,7 +26,7 @@ func TestHorizon1807Cancelled(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, rule := range []ciRule{ciPullHead, ciMainHead} {
-		got, names := summarizeCI(&rollup, gqlSuites{}, rule, time.Now())
+		got, names := summarizeCI(&rollup, gqlSuites{}, rule, 0, time.Now())
 		if got != contract.PrCI("cancelled") || !slices.Equal(names, []string{"verify", "pool-watch"}) {
 			t.Fatalf("rule %v: %s %v, want cancelled [verify pool-watch]", rule, got, names)
 		}
@@ -54,7 +54,7 @@ func TestCancellationPrecedence(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, rule := range []ciRule{ciMainHead, ciPullHead} {
-				got, names := summarizeCI(&r, gqlSuites{}, rule, time.Now())
+				got, names := summarizeCI(&r, gqlSuites{}, rule, 0, time.Now())
 				if got != tt.want || !slices.Equal(names, tt.names) {
 					t.Fatalf("%s %v", got, names)
 				}
@@ -98,6 +98,7 @@ func TestLaterRunReplacesCancelledJob(t *testing.T) {
 		{"replacement suite cancelled", []string{twins[1], suite(checks, "pull_request", pr, "CANCELLED", 2860, "verify", "COMPLETED", "SKIPPED")}, contract.PrCICancelled, []string{"verify"}},
 		{"skipped in a passing replacement", []string{twins[1], suite(checks, "pull_request", pr, "SUCCESS", 2860, "verify", "COMPLETED", "SKIPPED")}, contract.PrCISuccess, nil},
 		{"another PR", []string{twins[1], suite(checks, "pull_request", `{"number":3108}`, "SUCCESS", 2860, "verify", "COMPLETED", "SUCCESS")}, contract.PrCICancelled, []string{"verify"}},
+		{"both runs for another PR", []string{suite(checks, "pull_request", `{"number":3108}`, "CANCELLED", 2859, "verify", "COMPLETED", "CANCELLED"), suite(checks, "pull_request", `{"number":3108}`, "SUCCESS", 2860, "verify", "COMPLETED", "SUCCESS")}, contract.PrCICancelled, []string{"verify"}},
 		{"two PRs on one head branch", []string{suite(checks, "pull_request", pr+`,{"number":3108}`, "CANCELLED", 2859, "verify", "COMPLETED", "CANCELLED"), suite(checks, "pull_request", pr+`,{"number":3108}`, "SUCCESS", 2860, "verify", "COMPLETED", "SUCCESS")}, contract.PrCICancelled, []string{"verify"}},
 		{"no matching PR", []string{suite(checks, "pull_request", "", "CANCELLED", 2859, "verify", "COMPLETED", "CANCELLED"), suite(checks, "pull_request", "", "SUCCESS", 2860, "verify", "COMPLETED", "SUCCESS")}, contract.PrCICancelled, []string{"verify"}},
 		{"schedule runs", []string{check(checks, "schedule", 7, "verify", "COMPLETED", "CANCELLED"), check(checks, "schedule", 8, "verify", "COMPLETED", "SKIPPED")}, contract.PrCICancelled, []string{"verify"}},
@@ -111,7 +112,7 @@ func TestLaterRunReplacesCancelledJob(t *testing.T) {
 			if err := json.Unmarshal([]byte(`{"state":"FAILURE","contexts":{"nodes":[`+strings.Join(tt.nodes, ",")+`]}}`), &r); err != nil {
 				t.Fatal(err)
 			}
-			if got, names := summarizeCI(&r, gqlSuites{}, ciPullHead, time.Now()); got != tt.want || !slices.Equal(names, tt.names) {
+			if got, names := summarizeCI(&r, gqlSuites{}, ciPullHead, 3107, time.Now()); got != tt.want || !slices.Equal(names, tt.names) {
 				t.Fatalf("%s %v, want %s %v", got, names, tt.want, tt.names)
 			}
 		})
@@ -121,7 +122,7 @@ func TestLaterRunReplacesCancelledJob(t *testing.T) {
 		if err := json.Unmarshal([]byte(`{"state":"FAILURE","contexts":{"nodes":[`+strings.Join(twins, ",")+`]}}`), &r); err != nil {
 			t.Fatal(err)
 		}
-		if got, names := summarizeCI(&r, gqlSuites{}, ciMainHead, time.Now()); got != contract.PrCICancelled || !slices.Equal(names, []string{"verify", "book"}) {
+		if got, names := summarizeCI(&r, gqlSuites{}, ciMainHead, 0, time.Now()); got != contract.PrCICancelled || !slices.Equal(names, []string{"verify", "book"}) {
 			t.Fatalf("%s %v, want cancelled [verify book]", got, names)
 		}
 	})
