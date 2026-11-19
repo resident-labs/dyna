@@ -454,14 +454,16 @@ func summarizeContexts(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string)
 	}
 	var failed []string
 	if len(rollup.Contexts.Nodes) > 0 {
-		// A stacked PR pushed with its base gets two runs of each workflow on one head, and the newer cancels the older. A
-		// cancelled job counts for nothing once a later run of the same workflow, for the same trigger and branch, finished that
-		// job in a suite that was not cancelled itself. A run with no workflow or branch never matches.
+		// A stacked PR pushed with its base gets two pull_request runs of each workflow on one head, and the newer cancels the
+		// older. On a PR head, a cancelled job of a pull_request run counts for nothing once a later pull_request run of the same
+		// workflow and branch finished that job, in a suite that was not cancelled itself. Main heads and other triggers keep
+		// every cancellation, and a run with no workflow or branch never matches.
+		replaceable := func(run string) bool { return rule == ciPullHead && run == "pull_request" }
 		type job struct{ workflow, event, branch, name string }
 		finished := map[job]int{}
 		for _, check := range rollup.Contexts.Nodes {
 			suite := check.CheckSuite
-			if run := suite.WorkflowRun; run != nil && run.Workflow.ID != "" && suite.Branch != nil && check.Status == "COMPLETED" && check.Conclusion != "CANCELLED" && suite.Conclusion != "CANCELLED" {
+			if run := suite.WorkflowRun; run != nil && replaceable(run.Event) && run.Workflow.ID != "" && suite.Branch != nil && check.Status == "COMPLETED" && check.Conclusion != "CANCELLED" && suite.Conclusion != "CANCELLED" {
 				key := job{run.Workflow.ID, run.Event, suite.Branch.Name, check.Name}
 				finished[key] = max(finished[key], run.RunNumber)
 			}
@@ -469,7 +471,7 @@ func summarizeContexts(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string)
 		ci, cancelled := contract.PrCISuccess, []string{}
 		for _, check := range rollup.Contexts.Nodes {
 			suite := check.CheckSuite
-			if run := suite.WorkflowRun; check.Conclusion == "CANCELLED" && run != nil && run.Workflow.ID != "" && suite.Branch != nil && finished[job{run.Workflow.ID, run.Event, suite.Branch.Name, check.Name}] > run.RunNumber {
+			if run := suite.WorkflowRun; check.Conclusion == "CANCELLED" && run != nil && replaceable(run.Event) && run.Workflow.ID != "" && suite.Branch != nil && finished[job{run.Workflow.ID, run.Event, suite.Branch.Name, check.Name}] > run.RunNumber {
 				continue
 			}
 			name := check.Name

@@ -101,22 +101,29 @@ func TestLaterRunReplacesCancelledJob(t *testing.T) {
 		{"replacement suite cancelled", []string{twins[1], suite(checks, "pull_request", "stack-top", "CANCELLED", 2860, "verify", "COMPLETED", "SKIPPED")}, contract.PrCICancelled, []string{"verify"}},
 		{"skipped in a passing replacement", []string{twins[1], suite(checks, "pull_request", "stack-top", "SUCCESS", 2860, "verify", "COMPLETED", "SKIPPED")}, contract.PrCISuccess, nil},
 		{"another branch", []string{twins[1], suite(checks, "pull_request", "other", "SUCCESS", 2860, "verify", "COMPLETED", "SUCCESS")}, contract.PrCICancelled, []string{"verify"}},
-		{"tag push has no branch", []string{check(checks, "push", 7, "verify", "COMPLETED", "CANCELLED"), suite(checks, "push", "", "SUCCESS", 8, "verify", "COMPLETED", "SUCCESS")}, contract.PrCICancelled, []string{"verify"}},
+		{"schedule runs", []string{check(checks, "schedule", 7, "verify", "COMPLETED", "CANCELLED"), check(checks, "schedule", 8, "verify", "COMPLETED", "SKIPPED")}, contract.PrCICancelled, []string{"verify"}},
 		{"unknown workflow", []string{check("", "pull_request", 2859, "verify", "COMPLETED", "CANCELLED"), check("", "pull_request", 2860, "verify", "COMPLETED", "SUCCESS")}, contract.PrCICancelled, []string{"verify"}},
 		{"same job name in another workflow", []string{twins[1], check(book, "pull_request", 1065, "verify", "COMPLETED", "SUCCESS")}, contract.PrCICancelled, []string{"verify"}},
 		{"another trigger", []string{check(checks, "push", 7, "verify", "COMPLETED", "CANCELLED"), twins[3]}, contract.PrCICancelled, []string{"verify"}},
+		{"push runs", []string{check(checks, "push", 7, "verify", "COMPLETED", "CANCELLED"), check(checks, "push", 8, "verify", "COMPLETED", "SUCCESS")}, contract.PrCICancelled, []string{"verify"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			var r gqlRollup
 			if err := json.Unmarshal([]byte(`{"state":"FAILURE","contexts":{"nodes":[`+strings.Join(tt.nodes, ",")+`]}}`), &r); err != nil {
 				t.Fatal(err)
 			}
-			for _, rule := range []ciRule{ciMainHead, ciPullHead} {
-				got, names := summarizeCI(&r, gqlSuites{}, rule, time.Now())
-				if got != tt.want || !slices.Equal(names, tt.names) {
-					t.Fatalf("%s %v, want %s %v", got, names, tt.want, tt.names)
-				}
+			if got, names := summarizeCI(&r, gqlSuites{}, ciPullHead, time.Now()); got != tt.want || !slices.Equal(names, tt.names) {
+				t.Fatalf("%s %v, want %s %v", got, names, tt.want, tt.names)
 			}
 		})
 	}
+	t.Run("main head", func(t *testing.T) {
+		var r gqlRollup
+		if err := json.Unmarshal([]byte(`{"state":"FAILURE","contexts":{"nodes":[`+strings.Join(twins, ",")+`]}}`), &r); err != nil {
+			t.Fatal(err)
+		}
+		if got, names := summarizeCI(&r, gqlSuites{}, ciMainHead, time.Now()); got != contract.PrCICancelled || !slices.Equal(names, []string{"verify", "book"}) {
+			t.Fatalf("%s %v, want cancelled [verify book]", got, names)
+		}
+	})
 }
