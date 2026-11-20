@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -316,6 +317,10 @@ func commands(ctx context.Context, body io.ReadCloser, session contract.SessionI
 			return nil, nil, false, err
 		}
 		prefix.Write(line)
+		// A push from a shallow clone names its shallow commits first, one "shallow <oid>" line each, before the commands.
+		if oid, ok := strings.CutPrefix(strings.TrimSuffix(string(line), "\n"), "shallow "); ok && len(refs) == 0 && validOID(oid) {
+			continue
+		}
 		command, caps, hasCaps := strings.Cut(string(line), "\x00")
 		if hasCaps {
 			for _, cap := range strings.Fields(caps) {
@@ -415,4 +420,13 @@ func reaches(ctx context.Context, rooms RoomRepositories, repo contract.RepoName
 		return holder == "" || slices.Contains(sessions, holder), err
 	}
 	return false, nil
+}
+
+// validOID is a full hexadecimal object name, SHA-1 or SHA-256.
+func validOID(oid string) bool {
+	if len(oid) != 40 && len(oid) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(oid)
+	return err == nil
 }

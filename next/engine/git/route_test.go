@@ -199,3 +199,29 @@ func TestRefusesAPushToAnArchiveRef(t *testing.T) {
 		t.Fatalf("the push went upstream: %s", w.Body.String())
 	}
 }
+
+// A push from a shallow clone sends "shallow <oid>" lines before its commands (sunrise-org/sunrise, 2026-11-20).
+func TestForwardsShallowClonePush(t *testing.T) {
+	target, _ := url.Parse("https://github.com")
+	shallow := "shallow " + strings.Repeat("4", 40)
+	line := strings.Repeat("0", 40) + " " + strings.Repeat("1", 40) + " refs/heads/work\x00report-status\n"
+	body := fmt.Sprintf("%04x%s%04x%s0000PACK", len(shallow)+4, shallow, len(line)+4, line)
+	transport := roundTrip(func(r *http.Request) (*http.Response, error) {
+		if got, err := io.ReadAll(r.Body); err != nil || string(got) != body {
+			t.Fatalf("bad forwarded body: %q %v", got, err)
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("ok"))}, nil
+	})
+	w := httptest.NewRecorder()
+	Handler(target, transport, "secret", "ses_1", "room", routeAccess()).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
+	if w.Code != 200 {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	// A shallow line after a command is not part of the protocol.
+	late := fmt.Sprintf("%04x%s%04x%s0000PACK", len(line)+4, line, len(shallow)+4, shallow)
+	w = httptest.NewRecorder()
+	Handler(target, transport, "secret", "ses_1", "room", routeAccess()).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(late)))
+	if w.Code != 400 {
+		t.Fatalf("late shallow line: status %d", w.Code)
+	}
+}
