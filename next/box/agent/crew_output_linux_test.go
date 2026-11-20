@@ -8,20 +8,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MichaelKinsy/PiG/coding/extension"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness/pig"
 	"github.com/resident-labs/dyna/harness/pig/pigtest"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-func newPiGCrew(t *testing.T, model *pigtest.Model) *crewHarness {
+func newPiGCrew(t *testing.T, model *pigtest.Model, extensions ...extension.InlineExtension) *crewHarness {
 	t.Helper()
 	h := newCrewHarness(t)
 	state := pigtest.AgentDir(t, model, "")
 	h.open = func(ctx context.Context, _ contract.WorkflowProfile, _, dir string, document json.RawMessage, schema *jsonschema.Schema) (crewWorker, error) {
 		c := pig.Config{Dir: dir, AgentDir: state, SessionDir: filepath.Join(state, "sessions"), New: true,
 			Model:        contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "test-model"},
-			Instructions: crewInstructions("test core", document, "", dir)}
+			Instructions: crewInstructions("test core", document, "", dir), Extensions: extensions}
 		if schema != nil {
 			c.ResultTool = structuredOutput(schema)
 		}
@@ -77,6 +78,29 @@ func TestAStructuredOutputCallEndsTheStepDespiteAQueuedSteer(t *testing.T) {
 	result := runWithSteer(t, model, crewMeta+`return await agent('count them', `+countSchema+`)`, false)
 	if result.Outcome != contract.TurnCompleted || result.Final != `{"count":1}` || len(model.Requests()) != 1 {
 		t.Fatalf("result %+v, %d model requests", result, len(model.Requests()))
+	}
+}
+
+func TestAStructuredOutputCallSkipsExtensionSettleContinuation(t *testing.T) {
+	model := pigtest.NewModel(
+		[]pigtest.Block{{Tool: "StructuredOutput", Input: `{"result":{"count":1}}`}},
+		[]pigtest.Block{{Tool: "StructuredOutput", Input: `{"result":{"count":2}}`}},
+	)
+	settled := 0
+	continueOnce := extension.NamedInlineExtension{Name: "once-more", Factory: func(api extension.API) error {
+		api.OnAgentBeforeSettle(func(context.Context, *extension.AgentBeforeSettleEvent) (extension.AgentBeforeSettleEventResult, error) {
+			settled++
+			if settled > 1 {
+				return extension.AgentBeforeSettleEventResult{}, nil
+			}
+			entries := []extension.SessionBoundaryDraft{{Type: "custom_message", CustomType: "once-more", Content: "Reply again."}}
+			return extension.AgentBeforeSettleEventResult{Entries: &entries, Continue: new(true)}, nil
+		})
+		return nil
+	}}
+	got := newPiGCrew(t, model, continueOnce).result(crewMeta + `return await agent('count them', ` + countSchema + `)`).(map[string]any)
+	if got["count"] != float64(1) || len(model.Requests()) != 1 || settled != 0 {
+		t.Fatalf("result %v after %d model requests, %d settle hooks", got, len(model.Requests()), settled)
 	}
 }
 

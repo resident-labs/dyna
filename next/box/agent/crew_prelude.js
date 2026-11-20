@@ -151,12 +151,12 @@
       }
       if (handled) {
         const outcome = handled;
-        return outcome.failed ? { failure: { reason: outcome.reason, report: outcome.reason, step: outcome.step } } : outcome;
+        return outcome.failed ? { failure: { reason: outcome.reason, report: outcome.reason, step: outcome.step, rawText: outcome.rawText } } : outcome;
       }
       return { value: text, served: served && !service.handler };
     } catch (error) {
       const report = String(error?.step ? error.message : error?.stack ? error + "\n" + error.stack : error) || "the script threw";
-      return { failure: { reason: reasonOf(error), report, step: error?.step ?? "" } };
+      return { failure: { reason: reasonOf(error), report, step: error?.step ?? "", rawText: error?.rawText } };
     } finally {
       // The script's last lines reach the journal before its end does.
       await lines;

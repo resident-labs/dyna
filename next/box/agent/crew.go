@@ -507,9 +507,10 @@ type handlerEvent struct {
 // scriptFailure is why a script threw. A parent script reads the Reason, a failed run shows the Report, and Step names the
 // step whose failure it was, if one did.
 type scriptFailure struct {
-	Reason string `json:"reason"`
-	Report string `json:"report"`
-	Step   string `json:"step"`
+	Reason  string `json:"reason"`
+	Report  string `json:"report"`
+	Step    string `json:"step"`
+	RawText string `json:"rawText,omitempty"`
 }
 
 const (
@@ -964,29 +965,26 @@ func (c *Crew) worker(ctx context.Context, key string, profileName contract.Prof
 		usage.InputTokens, usage.OutputTokens, usage.CacheReadTokens, usage.CacheWriteTokens = usage.InputTokens+ended.Usage.InputTokens, usage.OutputTokens+ended.Usage.OutputTokens, usage.CacheReadTokens+ended.Usage.CacheReadTokens, usage.CacheWriteTokens+ended.Usage.CacheWriteTokens
 		out.rawText = cmp.Or(ended.LastText, out.rawText)
 		tooLarge := ended.Outcome == contract.TurnFailed && ended.Cause == contract.CauseOutputLimit
-		if schema == nil || ended.ToolResult != nil || err != nil || context.Cause(ctx) != nil || (ended.Outcome != contract.TurnCompleted && !tooLarge) {
+		if schema == nil || ended.ToolResult != nil || err != nil || context.Cause(ctx) != nil || (ended.Outcome != contract.TurnCompleted && ended.Outcome != contract.TurnFailed) {
 			break
 		}
 		problem = "the worker ended without a StructuredOutput call or a closing message"
-		if tooLarge {
-			problem = "the reply reached the output limit before it ended"
-		} else {
-			// Don't read the combined Final: it may contain multiple replies separated by steers.
-			for i, text := range slices.Backward(ended.ClosingTexts) {
-				data, mismatch := readResult(schema, text)
-				if mismatch == "" {
-					value, problem = data, ""
-					break
-				}
-				if i == len(ended.ClosingTexts)-1 {
-					problem = mismatch
-				}
-			}
-			if problem == "" {
+		// Don't read the combined Final or truncated text. A steer can follow a complete reply, so check those replies
+		// even when the last model request failed or hit its output limit.
+		for i, text := range slices.Backward(ended.ClosingTexts) {
+			data, mismatch := readResult(schema, text)
+			if mismatch == "" {
+				value = data
 				break
 			}
+			if i == len(ended.ClosingTexts)-1 {
+				problem = mismatch
+			}
 		}
-		if turns >= schemaAttempts {
+		if tooLarge {
+			problem = "the reply reached the output limit before it ended"
+		}
+		if value != nil || (ended.Outcome == contract.TurnFailed && !tooLarge) || turns >= schemaAttempts {
 			break
 		}
 		inputs = "Your result was not accepted: " + problem + ".\n\n"
@@ -1003,6 +1001,8 @@ func (c *Crew) worker(ctx context.Context, key string, profileName contract.Prof
 		out.reason = fmt.Sprintf("timed out after %s", limit)
 	case ended.ToolResult != nil:
 		out.value = ended.ToolResult
+	case value != nil:
+		out.value = value
 	case err != nil:
 		out.reason = err.Error()
 	case ended.Outcome != contract.TurnCompleted && !(schema != nil && ended.Cause == contract.CauseOutputLimit):
@@ -1010,10 +1010,8 @@ func (c *Crew) worker(ctx context.Context, key string, profileName contract.Prof
 		if out.reason == "" {
 			out.reason = "the worker's turn " + string(ended.Outcome)
 		}
-	case schema != nil && problem != "":
-		out.cause, out.reason = contract.CauseBadResult, fmt.Sprintf("no valid structured result after %d turns: %s", schemaAttempts, problem)
 	case schema != nil:
-		out.value = value
+		out.cause, out.reason = contract.CauseBadResult, fmt.Sprintf("no valid structured result after %d turns: %s", schemaAttempts, problem)
 	case ended.Final == "":
 		out.reason = "the worker ended with no text"
 	default:
@@ -1226,7 +1224,7 @@ func (c *Crew) workflowCall(ctx context.Context, call crewCall) crewReply {
 		if end.Failure.Step == "" {
 			end.Failure.Step = body.Ref
 		}
-		return crewReply{Error: end.Failure.Reason, Step: end.Failure.Step}
+		return crewReply{Error: end.Failure.Reason, Step: end.Failure.Step, RawText: end.Failure.RawText}
 	}
 	return crewReply{Value: json.RawMessage(end.Value)}
 }

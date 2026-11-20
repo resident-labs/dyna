@@ -1,6 +1,7 @@
 package pig
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -18,13 +19,13 @@ type EndPost struct {
 
 // turn is what a session's events build up while one turn runs.
 type turn struct {
-	id             contract.TurnID
-	activity       func(contract.TurnID, contract.ActivityKind, string)
-	finished       func(contract.TurnID, contract.ToolFinished) // nil when nobody listens
-	result         contract.TurnEnded
-	batch          endBatch
-	reply          replyText
-	captureReplies bool
+	id           contract.TurnID
+	activity     func(contract.TurnID, contract.ActivityKind, string)
+	finished     func(contract.TurnID, contract.ToolFinished) // nil when nobody listens
+	result       contract.TurnEnded
+	batch        endBatch
+	reply        replyText
+	finishResult context.CancelFunc // schema workers only: stops the prompt after a valid tool result
 }
 
 func newTurn(id contract.TurnID, activity func(contract.TurnID, contract.ActivityKind, string)) *turn {
@@ -76,7 +77,7 @@ func (t *turn) message(m agent.AgentMessage) {
 		if current != "" {
 			t.result.LastText = current
 		}
-		if t.captureReplies && closing && a.StopReason == ai.StopReasonStop {
+		if t.finishResult != nil && closing && a.StopReason == ai.StopReasonStop {
 			t.result.ClosingTexts = append(t.result.ClosingTexts, current)
 		}
 		t.result.Usage.Model = a.ModelID

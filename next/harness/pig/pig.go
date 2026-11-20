@@ -93,17 +93,10 @@ var _ harness.Harness = (*Harness)(nil)
 
 // Open starts the session, continuing the newest one in the session folder if there is one.
 func Open(ctx context.Context, c Config) (*Harness, error) {
-	h := &Harness{done: make(chan struct{}), modelInstructions: c.ModelInstructions}
 	extensions := append([]extension.InlineExtension{}, c.Extensions...)
 	if c.ResultTool != nil {
 		extensions = append(extensions, extension.NamedInlineExtension{Name: "workflow-result", Factory: func(api extension.API) error {
 			api.RegisterTool(*c.ResultTool)
-			// The coding session checks compaction again after the agent loop ends. A finished worker won't use a summary.
-			api.OnSessionBeforeCompact(func(context.Context, extension.SessionBeforeCompactEvent) (extension.SessionBeforeCompactResult, error) {
-				h.mu.Lock()
-				defer h.mu.Unlock()
-				return extension.SessionBeforeCompactResult{Cancel: h.turn != nil && h.turn.result.ToolResult != nil}, nil
-			})
 			return nil
 		}})
 	}
@@ -153,7 +146,7 @@ func Open(ctx context.Context, c Config) (*Harness, error) {
 			c.Notice(fmt.Sprintf("extension %s failed to load: %s", failed.Path, failed.Error))
 		}
 	}
-	h.services, h.models = services, models
+	h := &Harness{services: services, models: models, done: make(chan struct{}), modelInstructions: c.ModelInstructions}
 	if err := h.start(ctx, c); err != nil {
 		h.release()
 		return nil, err
@@ -204,16 +197,13 @@ func (h *Harness) start(ctx context.Context, c Config) error {
 					continue
 				}
 				h.mu.Lock()
-				if h.turn != nil {
+				if h.turn != nil && h.turn.result.ToolResult == nil {
 					h.turn.result.ToolResult = data
+					// FinishTurn ends the agent loop before it polls steers. End the enclosing prompt too,
+					// so the coding session doesn't run compaction or an extension's settle continuation.
+					h.turn.finishResult()
 				}
 				h.mu.Unlock()
-				// FinishTurn stops the agent loop before it polls steers. Drop pending inputs and close admission too:
-				// the coding session would otherwise see a queued input at settle and start another loop.
-				h.queue.Lock()
-				h.running = false
-				h.session.ClearQueue()
-				h.queue.Unlock()
 				return &agent.AgentTurnDecision{Action: agent.AgentTurnEnd}, nil
 			}
 			return previous(ctx, turn)
@@ -320,7 +310,11 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, send func(context
 	}
 	t := newTurn(id, activity)
 	t.finished = h.Finished
-	t.captureReplies = h.resultTool != ""
+	sendCtx := context.WithoutCancel(ctx)
+	if h.resultTool != "" {
+		sendCtx, t.finishResult = context.WithCancel(sendCtx)
+		defer t.finishResult()
+	}
 	h.mu.Lock()
 	h.turn = t
 	h.mu.Unlock()
@@ -328,7 +322,7 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, send func(context
 	h.running = true
 	h.queue.Unlock()
 	sent := make(chan error, 1)
-	h.sends.Go(func() { sent <- send(context.WithoutCancel(ctx)) })
+	h.sends.Go(func() { sent <- send(sendCtx) })
 	var err error
 	select {
 	case err = <-sent:

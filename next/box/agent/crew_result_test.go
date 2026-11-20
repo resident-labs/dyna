@@ -2,6 +2,8 @@ package agent
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -79,6 +81,19 @@ func TestThreeMismatchesFailTheStepWithTheLastText(t *testing.T) {
 }
 
 // A reply that reached the output limit is told the result is too large for text, and to write it to a file.
+func TestANestedWorkflowPassesAlongAFailedWorkersRawText(t *testing.T) {
+	h := newCrewHarness(t)
+	answers(h, text("not JSON"))
+	child := crewMeta + `return await agent('count them', ` + countSchema + `)`
+	if err := os.WriteFile(filepath.Join(h.workdir, "child.js"), []byte(child), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got := h.result(crewMeta + `return await workflow('child.js').catch(err => err.rawText)`)
+	if got != "not JSON" {
+		t.Fatalf("raw text %q", got)
+	}
+}
+
 func TestAFailedStepCapsRawTextWithoutCuttingARune(t *testing.T) {
 	h := newCrewHarness(t)
 	answers(h, text(strings.Repeat("x", stepResultBytes-1)+"érest"))
@@ -97,6 +112,18 @@ func TestATooLargeReplyIsToldToWriteAFile(t *testing.T) {
 	got := h.result(crewMeta + `return await agent('count them', ` + countSchema + `)`).(map[string]any)
 	if got["count"] != float64(2) || len(*prompts) != 2 || !strings.Contains((*prompts)[1], "write it to a file") && !strings.Contains((*prompts)[1], "Write it to a file") {
 		t.Fatalf("%v, prompts %q", got, *prompts)
+	}
+}
+
+func TestTextFallbackKeepsAnEarlierCompleteReplyAfterOutputLimit(t *testing.T) {
+	h := newCrewHarness(t)
+	prompts := answers(h, contract.TurnEnded{
+		Outcome: contract.TurnFailed, Cause: contract.CauseOutputLimit,
+		ClosingTexts: []string{`{"count":1}`}, LastText: `{"count":`,
+	})
+	got := h.result(crewMeta + `return await agent('count them', ` + countSchema + `)`).(map[string]any)
+	if got["count"] != float64(1) || len(*prompts) != 1 {
+		t.Fatalf("result %v after %d turns", got, len(*prompts))
 	}
 }
 
