@@ -167,7 +167,7 @@ func TestWorktreeAndMergeRunNoRepositoryHooks(t *testing.T) {
 func TestASchemaWorktreeStepKeepsItsOutput(t *testing.T) {
 	h, _ := newTreeHarness(t)
 	h.reply = func(string, string) (contract.TurnEnded, error) {
-		return contract.TurnEnded{Final: `{"count": 3}`}, nil
+		return text(`{"count": 3}`), nil
 	}
 	got := h.result(crewMeta + `return await agent('counted', { worktree: true, schema: { type: 'object' } })`).(map[string]any)
 	if fmt.Sprint(got["output"]) != "map[count:3]" || got["text"] != nil || fmt.Sprint(got["files"]) != "[counted.txt]" {

@@ -36,7 +36,7 @@ import (
 const (
 	// stepTimeout is how long a worker or command may run when the script sets no timeout, as in v1.
 	stepTimeout = 5 * time.Hour
-	// schemaAttempts is how many submits a schema worker gets.
+	// schemaAttempts is how many turns a schema worker gets if it stops without a result.
 	schemaAttempts = 3
 	// stepResultBytes bounds what one step stores. The rest of a long output belongs in a file in the tree.
 	stepResultBytes = 1 << 20
@@ -78,7 +78,7 @@ type CrewConfig struct {
 	Engine   crewEngine
 	// Open starts a worker for a step in dir, its working tree. Folder is the worker's own, for the time it runs, and holds
 	// its model configuration in models.json.
-	Open       func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string, schema json.RawMessage) (crewWorker, error)
+	Open       func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string, document json.RawMessage, schema *jsonschema.Schema) (crewWorker, error)
 	Transcript *Transcript
 	Workdir    string
 	Branch     string // the session's branch, which names the crew's other branches
@@ -402,10 +402,11 @@ type crewCall struct {
 }
 
 type crewReply struct {
-	Value  any    `json:"value,omitempty"`
-	Error  string `json:"error,omitempty"`
-	Step   string `json:"step,omitempty"`
-	stored bool   // the journal had it, so this box may never have run it
+	Value   any    `json:"value,omitempty"`
+	Error   string `json:"error,omitempty"`
+	Step    string `json:"step,omitempty"`
+	RawText string `json:"rawText,omitempty"`
+	stored  bool   // the journal had it, so this box may never have run it
 }
 
 // script runs the newest version of the script and serves its calls until it ends. A reload stops that version's VM and runs
@@ -705,6 +706,7 @@ func (s stepInfo) name() string {
 type stepOutcome struct {
 	value      any
 	reason     string
+	rawText    string                // the last assistant text, kept in the journal only on failure
 	cause      contract.FailureCause // set for the failures that have a type
 	transcript string
 	usage      contract.Usage
@@ -755,11 +757,9 @@ func (c *Crew) journal(ctx context.Context, call crewCall, key, name string, inf
 	}
 	switch stored.State {
 	case contract.WorkflowStepDone:
-		var value any
-		_ = json.Unmarshal([]byte(stored.Result), &value)
-		return crewReply{Value: value, stored: true}
+		return crewReply{Value: json.RawMessage(cmp.Or(stored.Result, "null")), stored: true}
 	case contract.WorkflowStepFailed:
-		return crewReply{Error: stored.Reason, Step: name}
+		return crewReply{Error: stored.Reason, Step: name, RawText: stored.RawText}
 	}
 	out := work(ctx, key)
 	if ctx.Err() != nil {
@@ -775,6 +775,10 @@ func (c *Crew) journal(ctx context.Context, call crewCall, key, name string, inf
 	}
 	if end.Reason != "" {
 		end.State = contract.WorkflowStepFailed
+		end.RawText = out.rawText
+		if len(end.RawText) > stepResultBytes {
+			end.RawText = strings.ToValidUTF8(end.RawText[:stepResultBytes], "")
+		}
 	} else {
 		end.Result = string(data)
 	}
@@ -782,7 +786,7 @@ func (c *Crew) journal(ctx context.Context, call crewCall, key, name string, inf
 		return crewReply{Error: err.Error(), Step: name}
 	}
 	if end.Reason != "" {
-		return crewReply{Error: end.Reason, Step: name}
+		return crewReply{Error: end.Reason, Step: name, RawText: end.RawText}
 	}
 	return crewReply{Value: out.value}
 }
@@ -919,7 +923,7 @@ func (c *Crew) worker(ctx context.Context, key string, profileName contract.Prof
 	if err := os.WriteFile(filepath.Join(folder, "models.json"), data, 0600); err != nil {
 		return stepOutcome{reason: err.Error()}
 	}
-	worker, err := c.config.Open(ctx, profile, folder, dir, opts.Schema)
+	worker, err := c.config.Open(ctx, profile, folder, dir, opts.Schema, schema)
 	if err != nil {
 		return stepOutcome{reason: "the worker did not start: " + err.Error()}
 	}
@@ -952,30 +956,44 @@ func (c *Crew) worker(ctx context.Context, key string, profileName contract.Prof
 	inputs := prompt
 	var ended contract.TurnEnded
 	var usage contract.Usage
-	var value any
+	var value json.RawMessage
 	var problem string
 	for turns := 1; ; turns++ {
 		ended, err = worker.Start(ctx, turn, []contract.TurnInput{{Delivery: delivery, Text: inputs}}, func() {})
 		c.settle(context.WithoutCancel(ctx), worker)
 		usage.InputTokens, usage.OutputTokens, usage.CacheReadTokens, usage.CacheWriteTokens = usage.InputTokens+ended.Usage.InputTokens, usage.OutputTokens+ended.Usage.OutputTokens, usage.CacheReadTokens+ended.Usage.CacheReadTokens, usage.CacheWriteTokens+ended.Usage.CacheWriteTokens
-		// A step with a schema reads its final text as the result; one that does not match goes back to the worker, in its own session, to fix.
+		out.rawText = cmp.Or(ended.LastText, out.rawText)
 		tooLarge := ended.Outcome == contract.TurnFailed && ended.Cause == contract.CauseOutputLimit
-		if schema == nil || err != nil || context.Cause(ctx) != nil || (ended.Outcome != contract.TurnCompleted && !tooLarge) {
+		if schema == nil || ended.ToolResult != nil || err != nil || context.Cause(ctx) != nil || (ended.Outcome != contract.TurnCompleted && !tooLarge) {
 			break
 		}
+		problem = "the worker ended without a StructuredOutput call or a closing message"
 		if tooLarge {
 			problem = "the reply reached the output limit before it ended"
-		} else if value, problem = readResult(schema, ended.Final); problem == "" {
-			break
+		} else {
+			// Don't read the combined Final: it may contain multiple replies separated by steers.
+			for i, text := range slices.Backward(ended.ClosingTexts) {
+				data, mismatch := readResult(schema, text)
+				if mismatch == "" {
+					value, problem = data, ""
+					break
+				}
+				if i == len(ended.ClosingTexts)-1 {
+					problem = mismatch
+				}
+			}
+			if problem == "" {
+				break
+			}
 		}
 		if turns >= schemaAttempts {
 			break
 		}
-		inputs = "Your final message was not accepted: " + problem + ".\n\n"
+		inputs = "Your result was not accepted: " + problem + ".\n\n"
 		if tooLarge {
-			inputs += "The result is too large to return as text. Write it to a file in your working folder and put its path in your final message, in the shape the schema allows."
+			inputs += "The result is too large to return directly. Write it to a file in your working folder and return its path with StructuredOutput, in the shape the schema allows."
 		} else {
-			inputs += "Reply again with only a JSON value that matches the schema, with no prose around it."
+			inputs += "Call StructuredOutput with a result matching the schema."
 		}
 	}
 	out.usage = usage
@@ -983,6 +1001,8 @@ func (c *Crew) worker(ctx context.Context, key string, profileName contract.Prof
 	switch {
 	case errors.Is(context.Cause(ctx), context.DeadlineExceeded):
 		out.reason = fmt.Sprintf("timed out after %s", limit)
+	case ended.ToolResult != nil:
+		out.value = ended.ToolResult
 	case err != nil:
 		out.reason = err.Error()
 	case ended.Outcome != contract.TurnCompleted && !(schema != nil && ended.Cause == contract.CauseOutputLimit):
@@ -991,7 +1011,7 @@ func (c *Crew) worker(ctx context.Context, key string, profileName contract.Prof
 			out.reason = "the worker's turn " + string(ended.Outcome)
 		}
 	case schema != nil && problem != "":
-		out.cause, out.reason = contract.CauseBadResult, fmt.Sprintf("the worker's final text does not match the schema, after %d turns: %s; its last text: %s", schemaAttempts, problem, clip(ended.Final, 500))
+		out.cause, out.reason = contract.CauseBadResult, fmt.Sprintf("no valid structured result after %d turns: %s", schemaAttempts, problem)
 	case schema != nil:
 		out.value = value
 	case ended.Final == "":
@@ -1006,29 +1026,16 @@ var fenced = regexp.MustCompile("(?s)^```[A-Za-z]*\\s*\n(.*?)\n?```$")
 
 // readResult reads a schema step's final text as its result: the whole text is JSON, or it is exactly one fenced block of it.
 // Prose around the JSON is a mismatch, as is a text like "Done.". What is wrong comes back as the problem to tell the worker.
-func readResult(schema *jsonschema.Schema, text string) (value any, problem string) {
+func readResult(schema *jsonschema.Schema, text string) (json.RawMessage, string) {
 	text = strings.TrimSpace(text)
 	if m := fenced.FindStringSubmatch(text); m != nil && !strings.Contains(m[1], "```") {
 		text = strings.TrimSpace(m[1])
 	}
-	if len(text) > stepResultBytes {
-		return nil, fmt.Sprintf("the text is %d bytes, over the limit of %d", len(text), stepResultBytes)
-	}
-	value, err := jsonschema.UnmarshalJSON(strings.NewReader(text))
+	value, err := validateResult(schema, []byte(text))
 	if err != nil {
-		return nil, "it is not JSON: " + err.Error()
-	}
-	if err := schema.Validate(value); err != nil {
 		return nil, err.Error()
 	}
 	return value, ""
-}
-
-func clip(text string, n int) string {
-	if r := []rune(text); len(r) > n {
-		return string(r[:n]) + "…"
-	}
-	return text
 }
 
 func compileSchema(raw json.RawMessage) (*jsonschema.Schema, error) {
