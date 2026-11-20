@@ -629,6 +629,11 @@ func (h *Handler) RequestAntigravityToken(c *gin.Context) {
 			SetOAuthSessionError(state, "Failed to exchange token")
 			return
 		}
+		if DynaMemoryOAuthCallbacks && strings.TrimSpace(tokenResp.RefreshToken) == "" {
+			// A grant without renewal must not replace a working saved sign-in.
+			SetOAuthSessionError(state, "Google did not issue a refresh token")
+			return
+		}
 
 		email, errInfo := authSvc.FetchUserInfo(ctx, accessToken)
 		if errInfo != nil {

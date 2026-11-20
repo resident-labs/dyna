@@ -95,7 +95,7 @@ Each later patch to this folder must be its own commit. Each patch must add an e
 
 - Antigravity Hub client versions from upstream `f72f8bfd6a1c` and `f2b003035dbe`: use the 2.33.0 fallback and its matching changelist for accounts Dyna routes. The endpoint uses these values for model availability; an unmapped online version falls back to a known version/changelist pair.
 
-- Antigravity's management OAuth uses the same in-memory callback and verified completion handoff as the other Dyna sign-ins. The Dyna staging hook prefixes its model IDs with `antigravity/`, so `engine/model` keeps those routes separate from direct subscriptions. The upstream account probe still determines which models from the embedded catalog a credential serves.
+- Antigravity's management OAuth uses the same in-memory callback and verified completion handoff as the other Dyna sign-ins. The Dyna staging hook prefixes its model IDs with `antigravity/`, so `engine/model` keeps those routes separate from direct subscriptions. The upstream account probe still determines which models from the embedded catalog a credential serves. Dyna rejects an access-only grant before saving so a reconnect cannot discard a working refresh token.
 - Antigravity usage follows [Quotio's parser](https://github.com/nguyenphutrong/quotio/blob/474bc2afc26a0dd1bee49decda720f74a100a713/apps/cli/src/providers/antigravity.rs#L239-L255) for `quotaInfo` in Google's `fetchAvailableModels` response. Dyna's shared quota reader polls independently of entitlement changes, so the display can refresh more often than the three-hour catalog probe. The readings have a model and reset time, not an invented window length. No paid credit fallback is enabled.
 
 ## Pulls
