@@ -79,8 +79,9 @@ export function busiestWindow(rows: Pick<UsageRow, "title" | "windows">[]): stri
   const windows = rows.flatMap(({ title, windows }) => windows.map(w => ({ title, w })));
   const top = windows.reduce<(typeof windows)[number] | undefined>((max, next) => !max || next.w.usedPercent > max.w.usedPercent ? next : max, undefined);
   if (!top) return undefined;
-  const label = windowLabel({ ...top.w, model: undefined });
-  return `${top.title} · ${label}${top.w.model ? ` (${top.w.model})` : ""} ${Math.round(top.w.usedPercent)}% used`;
+  const label = top.w.model && !top.w.seconds ? top.w.model
+    : windowLabel({ ...top.w, model: undefined }) + (top.w.model ? ` (${top.w.model})` : "");
+  return `${top.title} · ${label} ${Math.round(top.w.usedPercent)}% used`;
 }
 
 // "2 h 10 min", "3 d 4 h" or "10 min" until a time, with no-break spaces so it wraps as one; none when it is not
@@ -95,14 +96,15 @@ function until(at: string, now: number): string | undefined {
 // A typed kind names the period; a model-specific limit names its model too.
 export function windowLabel(w: UsageWindow): string {
   const period = w.kind === "five_hour" ? "5-hour" : w.kind === "weekly" ? "Weekly" : w.kind === "monthly" ? "Monthly" : w.seconds > 0 ? span(w.seconds) : "Usage";
-  return w.model ? `${period} · ${w.model}` : period;
+  return w.model ? (period === "Usage" ? w.model : `${period} · ${w.model}`) : period;
 }
 
 // A model-specific window shows only when it adds something: it has been used, and it reads differently from the
 // account's own window for that period. Kimi reports its Code pool as a copy of its monthly limit.
+// A durationless model reading stands on its own, even if unused.
 export function visibleWindows(windows: UsageWindow[]): UsageWindow[] {
   const repeats = (w: UsageWindow) => windows.some(o => !o.model && o.seconds === w.seconds && o.resetsAt === w.resetsAt && usedOf(o) === usedOf(w));
-  return windows.filter(w => !w.model || (Math.round(w.usedPercent) > 0 && !repeats(w)));
+  return windows.filter(w => !w.model || !w.seconds || (Math.round(w.usedPercent) > 0 && !repeats(w)));
 }
 
 const usedOf = (w: UsageWindow) => Math.min(100, Math.max(0, Math.round(w.usedPercent)));
@@ -113,9 +115,9 @@ export function limitReached(w: UsageWindow, now: number): boolean {
   return usedOf(w) >= 100 && !(resets > 0 && resets <= now);
 }
 
-// Whether an account takes no more work for now: a window has nothing left, or no balance has credit.
+// Whether an account takes no more work for now: an account-wide window has nothing left, or no balance has credit.
 export function outOfLimit(row: Pick<UsageRow, "windows" | "balances">, now: number): boolean {
-  return row.windows.some(w => limitReached(w, now)) || (row.balances.length > 0 && row.balances.every(b => Number(b.amount) <= 0));
+  return row.windows.some(w => !w.model && limitReached(w, now)) || (row.balances.length > 0 && row.balances.every(b => Number(b.amount) <= 0));
 }
 
 // What an account the owner hid waits for: the reset of its busiest window, or a balance above today's. Without

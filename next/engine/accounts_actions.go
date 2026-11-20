@@ -295,7 +295,7 @@ func (s *AccountActions) AccountsRename(ctx context.Context, caller contract.Pri
 
 func (s *AccountActions) AccountsImportOAuth(ctx context.Context, caller contract.Principal, req contract.AccountsImportOAuthRequest) (contract.AccountsImportOAuthResponse, *contract.Error) {
 	label, labelOK := model.CleanAccountLabel(req.Label)
-	if _, ok := model.OAuthProxyProvider(req.Provider); !ok || !labelOK || req.ExpiresAt.Unix() <= 0 || len(req.Credential) == 0 || len(req.Credential) > 16384 {
+	if _, ok := model.ImportOAuthProxyProvider(req.Provider); !ok || !labelOK || req.ExpiresAt.Unix() <= 0 || len(req.Credential) == 0 || len(req.Credential) > 16384 {
 		return contract.AccountsImportOAuthResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "invalid account input"}
 	}
 	req.Label = label

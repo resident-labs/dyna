@@ -1,6 +1,7 @@
 package management
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -63,6 +64,7 @@ type dynaUsage struct {
 // responses to model traffic.
 type dynaUsageSource struct {
 	request  func(*coreauth.Auth) (string, http.Header)
+	postBody func(*coreauth.Auth) []byte
 	parse    func(gjson.Result, time.Time) dynaUsage
 	absent   int
 	observed func(*coreauth.Auth, time.Time) dynaUsage
@@ -76,6 +78,7 @@ var dynaUsageSources = map[string]dynaUsageSource{
 	"openai-compatible-deepseek":    {request: requestDeepSeekUsage, parse: parseDeepSeekUsage},
 	"openai-compatible-opencode-go": {request: requestOpenCodeUsage, parse: parseOpenCodeUsage, absent: http.StatusForbidden},
 	"meta":                          {observed: observedMetaUsage},
+	"antigravity":                   {request: requestAntigravityUsage, postBody: antigravityUsageBody, parse: parseAntigravityUsage},
 }
 
 // dynaUsageTransport is a variable so tests never reach a provider.
@@ -122,7 +125,12 @@ func (h *Handler) readDynaUsage(ctx context.Context, source dynaUsageSource, aut
 	if url == "" {
 		return entry
 	}
-	status, body, errFetch := h.fetchDynaUsage(ctx, auth, url, header)
+	method := http.MethodGet
+	var payload io.Reader
+	if source.postBody != nil {
+		method, payload = http.MethodPost, bytes.NewReader(source.postBody(auth))
+	}
+	status, body, errFetch := h.fetchDynaUsage(ctx, auth, method, url, header, payload)
 	if errFetch != nil {
 		log.WithError(errFetch).Debug("management usage request failed")
 		entry.State = dynaUsageUnreachable
@@ -146,8 +154,8 @@ func (h *Handler) readDynaUsage(ctx context.Context, source dynaUsageSource, aut
 	return entry
 }
 
-func (h *Handler) fetchDynaUsage(ctx context.Context, auth *coreauth.Auth, url string, header http.Header) (int, []byte, error) {
-	request, errRequest := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+func (h *Handler) fetchDynaUsage(ctx context.Context, auth *coreauth.Auth, method, url string, header http.Header, payload io.Reader) (int, []byte, error) {
+	request, errRequest := http.NewRequestWithContext(ctx, method, url, payload)
 	if errRequest != nil {
 		return 0, nil, errRequest
 	}

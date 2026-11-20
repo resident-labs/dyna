@@ -168,7 +168,7 @@ func proxyKeyRoutes(router *gin.Engine, service **cliproxy.Service, credentials 
 			c.Status(http.StatusBadRequest)
 			return
 		}
-		provider, ok := model.OAuthProxyProvider(req.Provider)
+		provider, ok := model.ImportOAuthProxyProvider(req.Provider)
 		if !ok {
 			c.Status(http.StatusBadRequest)
 			return

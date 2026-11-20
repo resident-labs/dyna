@@ -69,12 +69,12 @@ export const sessionCount = (count: number) => `${count} ${count === 1 ? "sessio
 
 export type ProfileModel = { id: string; provider: ModelProvider };
 
-// The models the proxy routes for connected accounts. Only Claude speaks Anthropic's API; everything else goes through
-// the OpenAI-compatible route, including a provider the owner added.
+// Use the Messages API for Claude and Antigravity (including Gemini there). The rest use the OpenAI-compatible route.
 export function profileModels(accounts: readonly Account[]): ProfileModel[] {
   const found = new Map<string, ProfileModel>();
   for (const account of accounts) {
-    for (const id of account.models ?? []) found.set(id, { id, provider: account.provider === "anthropic" ? "anthropic" : "openai" });
+    const provider = account.provider === "anthropic" || account.provider === "antigravity" ? "anthropic" : "openai";
+    for (const id of account.models ?? []) found.set(id, { id, provider });
   }
   return [...found.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
