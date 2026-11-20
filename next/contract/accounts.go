@@ -8,14 +8,15 @@ type AccountID string
 type AccountProvider string
 
 const (
-	ProviderAnthropic  AccountProvider = "anthropic"
-	ProviderOpenAI     AccountProvider = "openai"
-	ProviderKimi       AccountProvider = "kimi"
-	ProviderXAI        AccountProvider = "xai"
-	ProviderZAI        AccountProvider = "zai"
-	ProviderOpencodeGo AccountProvider = "opencode-go"
-	ProviderDeepSeek   AccountProvider = "deepseek"
-	ProviderMeta       AccountProvider = "meta"
+	ProviderAnthropic   AccountProvider = "anthropic"
+	ProviderOpenAI      AccountProvider = "openai"
+	ProviderKimi        AccountProvider = "kimi"
+	ProviderXAI         AccountProvider = "xai"
+	ProviderZAI         AccountProvider = "zai"
+	ProviderOpencodeGo  AccountProvider = "opencode-go"
+	ProviderDeepSeek    AccountProvider = "deepseek"
+	ProviderMeta        AccountProvider = "meta"
+	ProviderAntigravity AccountProvider = "antigravity"
 )
 
 type AccountAction string

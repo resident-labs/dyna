@@ -38,10 +38,13 @@ test("a profile can choose any model the proxy routes, custom providers included
   assert.deepEqual(profileModels([
     account("custom-acme", ["custom-acme/local-one"]),
     account("anthropic", ["claude-opus-5-5"]),
+    account("antigravity", ["antigravity/claude-opus-5-5-high", "antigravity/gemini-4-neon-xhigh"]),
     account("zai", ["glm-5.3"]),
     account("opencode-go", ["glm-5.3"]),
     account("meta"),
   ]), [
+    { id: "antigravity/claude-opus-5-5-high", provider: "anthropic" },
+    { id: "antigravity/gemini-4-neon-xhigh", provider: "anthropic" },
     { id: "claude-opus-5-5", provider: "anthropic" },
     { id: "custom-acme/local-one", provider: "openai" },
     { id: "glm-5.3", provider: "openai" },
