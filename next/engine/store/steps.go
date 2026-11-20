@@ -6,13 +6,14 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 125
+const schemaVersion = 126
 
 const agentsTable = `CREATE TABLE agents (id TEXT PRIMARY KEY, session TEXT NOT NULL REFERENCES sessions(id), turn TEXT NOT NULL, name TEXT NOT NULL, state TEXT NOT NULL, transcript TEXT NOT NULL DEFAULT '', start_offset INTEGER NOT NULL DEFAULT 0, started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL DEFAULT 0, model TEXT NOT NULL DEFAULT '', input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, cache_read_tokens INTEGER NOT NULL DEFAULT 0, cache_write_tokens INTEGER NOT NULL DEFAULT 0)`
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
+	125: {`ALTER TABLE workflow_steps ADD COLUMN raw_text TEXT NOT NULL DEFAULT ''`},
 	124: {`ALTER TABLE room_repos ADD COLUMN ci_hosts TEXT NOT NULL DEFAULT '[]'`},
 	// A subscription's workflow is a service: one run that serves the queue. Its rows are claimed by the run's box start and
 	// handed over again after a lost box, so an old claim, and the per-event runs of the last release, are released.

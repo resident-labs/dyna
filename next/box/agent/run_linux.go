@@ -27,6 +27,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness"
 	"github.com/resident-labs/dyna/harness/pig"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 const (
@@ -43,22 +44,26 @@ type boxHarness interface {
 	Done() <-chan struct{}
 }
 
-// crewInstructions is a crew worker's whole prompt: the core every agent shares, which box.hello sends as WorkerInstructions, then Claude Code's workflow subagent prompt for plain text output nearly word
-// for word. A step with a schema adds one line, the one departure from Claude, whose worker answers with a tool call:
-// Dyna runs every model, and some providers reject an arbitrary schema as a tool's input. A worker gets no
-// skills index; its AGENTS.md files and tools are its own. A note follows, as Claude's isolated-worktree
-// reminder follows: the worker's own git worktree at tree beside the main working folder, or the tree it shares with the other workers.
+// crewInstructions follows the shared core with Claude Code's workflow worker instructions, adapted for Dyna.
+// The step's schema goes in the prompt because providers don't support arbitrary JSON Schemas as tool parameters.
 func crewInstructions(core string, schema json.RawMessage, tree, main string) string {
-	text := core + "\n\n# Your role: workflow worker\n\n" + `You are a worker spawned by a workflow script. Use the tools available to complete the task.
+	text := core + "\n\n# Your role: workflow worker\n\nYou are a worker spawned by a workflow script. Use the tools available to complete the task.\n\n"
+	if len(schema) > 0 {
+		text += `CRITICAL: You MUST call StructuredOutput exactly once to return your final answer.
+- Do your work, then call StructuredOutput with your answer in its result argument, matching the schema below.
+- Do NOT put your answer in a text response or a post.
+- If validation fails, read the tool error and call StructuredOutput again with a corrected result.
+- A successful call ends the turn. No acknowledgment needed.
 
-CRITICAL: Your final text response is returned **verbatim** as a string to the calling script — it is your return value, not a message to a human.
+Result schema:
+` + string(schema) + "\n"
+	} else {
+		text += `CRITICAL: Your final text response is returned **verbatim** as a string to the calling script — it is your return value, not a message to a human.
 - Output the literal result (data, JSON, text). Do NOT output confirmations like "Done." or "Sent."
 - If asked for JSON, return ONLY the raw JSON — no code fences, no prose, no markdown.
 - Do NOT use post to deliver your answer. Put your answer in your final text response.
 - Be concise. The script will parse your output.
 `
-	if len(schema) > 0 {
-		text += "- Your final message must be only a JSON value matching this schema, with no prose around it:\n" + string(schema) + "\n"
 	}
 	const jobs = " Nothing wakes a worker, and ending your turn ends the step. So wait for a job inside the turn with job output, despite the rule above."
 	if tree == "" {
@@ -207,13 +212,16 @@ func Run(ctx context.Context) error {
 	var files func() []string            // the session files to keep sending
 	var steered func(contract.Interrupt) // a crew's script takes no input, so its workers' commands never step aside
 	if hello.Workflow != nil {
-		open := func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string, schema json.RawMessage) (crewWorker, error) {
+		open := func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string, document json.RawMessage, schema *jsonschema.Schema) (crewWorker, error) {
 			tree := dir
 			if dir == workdir {
 				tree = ""
 			}
 			c := workerConfig(pig.Config{AgentDir: piDir, SessionDir: sessions, Notice: func(text string) { go notice(text) }}, profile, folder, dir)
-			c.Instructions, c.NoSkills = crewInstructions(hello.WorkerInstructions, schema, tree, workdir), true
+			c.Instructions, c.NoSkills = crewInstructions(hello.WorkerInstructions, document, tree, workdir), true
+			if schema != nil {
+				c.ResultTool = structuredOutput(schema)
+			}
 			c.Extensions = []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: dir, Shell: jobs, Dyna: dynaTools})}
 			return pig.Open(ctx, c)
 		}

@@ -27,9 +27,11 @@ type Block struct {
 type Model struct {
 	// InputTokens is the input each response reports using; zero reports 10.
 	InputTokens int
-	mu          sync.Mutex
-	script      [][]Block
-	requests    []Request
+	// BeforeResponse runs after the request is recorded and before its response starts streaming.
+	BeforeResponse func(requestNumber int)
+	mu             sync.Mutex
+	script         [][]Block
+	requests       []Request
 }
 
 // Request is the part of a request the tests read.
@@ -57,6 +59,9 @@ func (m *Model) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	n, input := len(m.requests), m.InputTokens
 	m.mu.Unlock()
+	if m.BeforeResponse != nil {
+		m.BeforeResponse(n)
+	}
 	if input == 0 {
 		input = 10
 	}

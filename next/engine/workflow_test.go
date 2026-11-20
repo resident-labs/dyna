@@ -313,11 +313,15 @@ func TestAStepChangeIsLiveAndQuiet(t *testing.T) {
 	if _, problem := w.WorkflowStepTranscript(w.ctx, crew, contract.WorkflowStepTranscriptRequest{Key: "a", Transcript: "../a.jsonl"}); problem == nil {
 		t.Fatal("a path outside the crew's folder was taken")
 	}
-	if _, problem := w.WorkflowStepEnd(w.ctx, crew, contract.WorkflowStepEndRequest{Key: "a", State: contract.WorkflowStepFailed, Reason: "refused: password=hunter2hunter2", Transcript: "a.jsonl", Usage: contract.Usage{OutputTokens: 5}}); problem != nil {
+	const raw = "\nA partial answer. password=example-secret\n"
+	if _, problem := w.WorkflowStepEnd(w.ctx, crew, contract.WorkflowStepEndRequest{Key: "a", State: contract.WorkflowStepFailed, Reason: "refused: password=hunter2hunter2", RawText: raw, Transcript: "a.jsonl", Usage: contract.Usage{OutputTokens: 5}}); problem != nil {
 		t.Fatal(problem)
 	}
-	if stored, problem := w.WorkflowStepStart(w.ctx, crew, contract.WorkflowStepStartRequest{Key: "a", Kind: contract.WorkflowStepAgent}); problem != nil || stored.State != contract.WorkflowStepFailed {
+	if stored, problem := w.WorkflowStepStart(w.ctx, crew, contract.WorkflowStepStartRequest{Key: "a", Kind: contract.WorkflowStepAgent}); problem != nil || stored.State != contract.WorkflowStepFailed || stored.RawText != raw {
 		t.Fatalf("a stored step: %+v, %+v", stored, problem)
+	}
+	if detail, problem := w.WorkflowStep(w.ctx, w.owner, contract.WorkflowStepRequest{Session: crew.Session, Key: "a"}); problem != nil || detail.Result != "" || !strings.HasPrefix(detail.RawText, "\nA partial answer.") || strings.Contains(detail.RawText, "example-secret") {
+		t.Fatalf("step detail: %+v, %+v", detail, problem)
 	}
 	var got []contract.WorkflowStep
 	for len(live) > 0 {

@@ -191,10 +191,12 @@ type WorkflowStepRequest struct {
 	Key     string    `json:"key"`
 }
 
-// WorkflowStepResponse is what a row leaves out: the prompt, command or text it ran, and its result as JSON text.
+// WorkflowStepResponse is what a row leaves out: the prompt, command or text it ran, its result as JSON text,
+// and the worker's last assistant text if the step failed.
 type WorkflowStepResponse struct {
-	Detail string `json:"detail,omitempty"`
-	Result string `json:"result,omitempty"`
+	Detail  string `json:"detail,omitempty"`
+	Result  string `json:"result,omitempty"`
+	RawText string `json:"rawText,omitempty"`
 }
 
 // WorkflowMerge is what merge() returns and stores as its step's result.
@@ -286,9 +288,10 @@ type WorkflowStepStartRequest struct {
 
 // WorkflowStepStartResponse carries the stored outcome. An empty State means the step has none and is now running.
 type WorkflowStepStartResponse struct {
-	State  WorkflowStepState `json:"state,omitempty"`
-	Result string            `json:"result,omitempty"`
-	Reason string            `json:"reason,omitempty"`
+	State   WorkflowStepState `json:"state,omitempty"`
+	Result  string            `json:"result,omitempty"`
+	Reason  string            `json:"reason,omitempty"`
+	RawText string            `json:"rawText,omitempty"`
 }
 
 // WorkflowStepEndRequest stores a step's outcome. Result is JSON text.
@@ -297,6 +300,7 @@ type WorkflowStepEndRequest struct {
 	State      WorkflowStepState `json:"state"`
 	Result     string            `json:"result,omitempty"`
 	Reason     string            `json:"reason,omitempty"`
+	RawText    string            `json:"rawText,omitempty"` // failed worker's last assistant text
 	Transcript string            `json:"transcript,omitempty"`
 	Usage      Usage             `json:"usage"`
 }

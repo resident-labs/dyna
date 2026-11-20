@@ -1,6 +1,9 @@
 package contract
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // StreamHello is sent before events on each stream connection.
 type StreamHello struct {
@@ -260,6 +263,10 @@ type TurnEnded struct {
 	Jobs []ShellJobID `json:"jobs,omitempty"`
 	// EndPosts carries the harness's result to TurnOutputRequest.EndPosts. The event records the same fact in Replies.
 	EndPosts []EventID `json:"-"`
+	// Workflow worker outputs are local to the box. Only schema steps collect the tool result and closing messages.
+	ToolResult   json.RawMessage `json:"-"` // JSON validated by the return tool
+	ClosingTexts []string        `json:"-"` // whole closing messages in transcript order
+	LastText     string          `json:"-"` // latest assistant text, even if it wasn't a complete answer
 	// Unread carries the runner's result to TurnOutputRequest.Unread.
 	Unread []DeliverySeq `json:"-"`
 }
@@ -405,7 +412,7 @@ const (
 	CauseSetupFailed         FailureCause = "setup_failed"          // the box could not set up the session's repository before the turn
 	CauseModelFailed         FailureCause = "model_failed"          // the model provider refused or failed the request
 	CauseOutputLimit         FailureCause = "output_limit"          // the reply reached the model's output limit
-	CauseBadResult           FailureCause = "bad_result"            // a schema step's worker ended without a final text that matches the schema
+	CauseBadResult           FailureCause = "bad_result"            // a workflow worker ended without a result that matches the schema
 	CauseHarnessFailed       FailureCause = "harness_failed"        // the agent program stopped or could not run the turn
 	CauseSetModelFailed      FailureCause = "set_model_failed"      // the agent program refused the session's new model
 	CauseNotStarted          FailureCause = "not_started"           // on a stopped turn: it stopped before Pi took its inputs, so they stay pending

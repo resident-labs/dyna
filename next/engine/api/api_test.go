@@ -71,6 +71,25 @@ func boxCaller() Caller {
 	return Caller{Principal: contract.Principal{Kind: contract.PrincipalSession, Session: "session-a"}, Box: "box-a", Room: "room-a"}
 }
 
+func TestWorkflowStepEndAcceptsFullRawTextEvenWithJSONEscaping(t *testing.T) {
+	mux := http.NewServeMux()
+	raw := strings.Repeat("\x00", 1<<20)
+	call(mux, contract.MethodWorkflowStepEnd, boxCaller(), func(_ context.Context, _ contract.Principal, req contract.WorkflowStepEndRequest) (contract.WorkflowStepEndResponse, *contract.Error) {
+		if req.RawText != raw {
+			t.Errorf("received %d bytes of the worker's text, want %d", len(req.RawText), len(raw))
+		}
+		return contract.WorkflowStepEndResponse{}, nil
+	})
+	body, err := json.Marshal(contract.WorkflowStepEndRequest{Key: "step", State: contract.WorkflowStepFailed, Reason: "invalid result", RawText: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := request(mux, "/v1/"+string(contract.MethodWorkflowStepEnd), string(body))
+	if w.Code != http.StatusOK {
+		t.Fatalf("%d bytes on the wire: HTTP %d: %s", len(body), w.Code, w.Body)
+	}
+}
+
 type helloService struct{ *fakeService }
 
 func (helloService) Events(context.Context, contract.Principal, contract.RoomID, int64) (<-chan contract.Event, *contract.Error) {

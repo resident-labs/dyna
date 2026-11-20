@@ -11,8 +11,7 @@ const core = "You are a Dyna agent. The shared base prompt.\n\n# How work goes\n
 
 const promptSchema = `{"type":"object","required":["count"],"properties":{"count":{"type":"number"}}}`
 
-// A crew worker's prompt is the core every agent shares, then Claude Code's workflow subagent prompt for plain text, with one line for a schema and a note on its
-// tree.
+// A worker gets the shared core, instructions for returning text or a structured result, and a note on its tree.
 func TestACrewWorkersPromptIsTheWorkflowSubagentPrompt(t *testing.T) {
 	for name, got := range map[string]string{
 		"worker-plain.txt":       crewInstructions(core, nil, "", "/box/work/sweep"),

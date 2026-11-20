@@ -290,11 +290,12 @@ func (s *Service) WorkflowStep(ctx context.Context, caller contract.Principal, r
 	if problem := s.roomAccess(ctx, caller, run.Room); problem != nil {
 		return contract.WorkflowStepResponse{}, problem
 	}
-	detail, result, err := s.store.WorkflowStepOutput(ctx, run.ID, req.Key)
+	out, err := s.store.WorkflowStepOutput(ctx, run.ID, req.Key)
 	if err != nil {
 		return contract.WorkflowStepResponse{}, failure(err)
 	}
-	return contract.WorkflowStepResponse{Detail: harness.Mask(detail), Result: harness.Mask(result)}, nil
+	out.Detail, out.Result, out.RawText = harness.Mask(out.Detail), harness.Mask(out.Result), harness.Mask(out.RawText)
+	return out, nil
 }
 
 // maskStep covers what a read can show: a step's name quotes its command and its reason quotes the command's output.
