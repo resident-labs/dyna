@@ -565,46 +565,55 @@ func (h *Handler) RequestAntigravityToken(c *gin.Context) {
 		}
 	}
 
+	if DynaMemoryOAuthCallbacks {
+		dynaPrepareCallback(state)
+	}
 	go func() {
 		if isWebUI {
 			defer stopCallbackForwarderInstance(antigravity.CallbackPort, forwarder)
 		}
 
-		waitFile := filepath.Join(cfg.AuthDir, fmt.Sprintf(".oauth-antigravity-%s.oauth", state))
-		deadline := time.Now().Add(5 * time.Minute)
-		var authCode string
-		for {
-			if !IsOAuthSessionPending(state, "antigravity") {
-				return
-			}
-			if time.Now().After(deadline) {
-				log.Error("oauth flow timed out")
+		var payload map[string]string
+		if DynaMemoryOAuthCallbacks {
+			defer dynaClearCallback(state)
+			var errWait error
+			payload, errWait = dynaWaitCallback(state)
+			if errWait != nil {
 				SetOAuthSessionError(state, "OAuth flow timed out")
 				return
 			}
-			if data, errReadFile := os.ReadFile(waitFile); errReadFile == nil {
-				var payload map[string]string
-				_ = json.Unmarshal(data, &payload)
-				_ = os.Remove(waitFile)
-				if errStr := strings.TrimSpace(payload["error"]); errStr != "" {
-					log.Errorf("Authentication failed: %s", errStr)
-					SetOAuthSessionError(state, "Authentication failed")
+		} else {
+			waitFile := filepath.Join(cfg.AuthDir, fmt.Sprintf(".oauth-antigravity-%s.oauth", state))
+			deadline := time.Now().Add(5 * time.Minute)
+			for {
+				if !IsOAuthSessionPending(state, "antigravity") {
 					return
 				}
-				if payloadState := strings.TrimSpace(payload["state"]); payloadState != "" && payloadState != state {
-					log.Errorf("Authentication failed: state mismatch")
-					SetOAuthSessionError(state, "Authentication failed: state mismatch")
+				if time.Now().After(deadline) {
+					log.Error("oauth flow timed out")
+					SetOAuthSessionError(state, "OAuth flow timed out")
 					return
 				}
-				authCode = strings.TrimSpace(payload["code"])
-				if authCode == "" {
-					log.Error("Authentication failed: code not found")
-					SetOAuthSessionError(state, "Authentication failed: code not found")
-					return
+				if data, errReadFile := os.ReadFile(waitFile); errReadFile == nil {
+					_ = json.Unmarshal(data, &payload)
+					_ = os.Remove(waitFile)
+					break
 				}
-				break
+				time.Sleep(500 * time.Millisecond)
 			}
-			time.Sleep(500 * time.Millisecond)
+		}
+		if strings.TrimSpace(payload["error"]) != "" {
+			SetOAuthSessionError(state, "Authentication failed")
+			return
+		}
+		if payloadState := strings.TrimSpace(payload["state"]); payloadState != "" && payloadState != state {
+			SetOAuthSessionError(state, "Authentication failed: state mismatch")
+			return
+		}
+		authCode := strings.TrimSpace(payload["code"])
+		if authCode == "" {
+			SetOAuthSessionError(state, "Authentication failed: code not found")
+			return
 		}
 
 		tokenResp, errToken := authSvc.ExchangeCodeForTokens(ctx, authCode, redirectURI)
@@ -690,7 +699,7 @@ func (h *Handler) RequestAntigravityToken(c *gin.Context) {
 			return
 		}
 
-		CompleteOAuthSession(state)
+		h.dynaCompleteOAuth(state, record)
 		fmt.Printf("Authentication successful! Token saved to %s\n", savedPath)
 		if projectID != "" {
 			fmt.Printf("Using GCP project: %s\n", util.HideAPIKey(projectID))

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/auth/antigravity"
 	sdkauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
@@ -12,6 +13,10 @@ import (
 // StageDynaCredential keeps a credential out of routing until it is bound.
 func StageDynaCredential(_ context.Context, auth *coreauth.Auth) error {
 	auth.Disabled = true
+	if auth.Provider == "antigravity" {
+		// Its models must not share a route with direct Anthropic or Gemini.
+		auth.Prefix = antigravity.DynaModelPrefix
+	}
 	return nil
 }
 

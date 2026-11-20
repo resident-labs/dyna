@@ -24,9 +24,13 @@ const (
 	UserInfoEndpoint = "https://www.googleapis.com/oauth2/v2/userinfo?alt=json"
 )
 
+// DynaModelPrefix isolates these models from the same models on other accounts.
+const DynaModelPrefix = "antigravity"
+
 // Antigravity API configuration
 const (
 	APIEndpoint      = "https://cloudcode-pa.googleapis.com"
 	DailyAPIEndpoint = "https://daily-cloudcode-pa.googleapis.com"
 	APIVersion       = "v1internal"
+	ModelsPath       = "/" + APIVersion + ":fetchAvailableModels"
 )

@@ -721,7 +721,7 @@ func writeOAuthCallbackFile(authDir, canonicalProvider, state, code, errorMessag
 		return "", err
 	}
 
-	if DynaMemoryOAuthCallbacks && (canonicalProvider == "anthropic" || canonicalProvider == "codex") {
+	if DynaMemoryOAuthCallbacks && (canonicalProvider == "anthropic" || canonicalProvider == "codex" || canonicalProvider == "antigravity") {
 		return "memory", dynaWriteCallback(state, code, errorMessage)
 	}
 

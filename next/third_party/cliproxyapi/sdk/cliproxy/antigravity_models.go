@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/auth/antigravity"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/misc"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
@@ -26,8 +27,8 @@ import (
 )
 
 const (
-	antigravityModelBaseURLDaily     = "https://daily-cloudcode-pa.googleapis.com"
-	antigravityModelsPath            = "/v1internal:fetchAvailableModels"
+	antigravityModelBaseURLDaily     = antigravity.DailyAPIEndpoint
+	antigravityModelsPath            = antigravity.ModelsPath
 	antigravityPersistedHintsMetaKey = "antigravity_capability_hints"
 	antigravityCapabilityCacheTTL    = registry.ModelsRefreshInterval
 	antigravityCapabilityRetryBase   = time.Minute
