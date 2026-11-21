@@ -155,6 +155,10 @@ func (m *Mirror) Default(ctx context.Context, repo contract.RepoName) (string, e
 	if err := m.checkAccess(ctx, repo); err != nil {
 		return "", err
 	}
+	return m.mirrorDefault(ctx, repo)
+}
+
+func (m *Mirror) mirrorDefault(ctx context.Context, repo contract.RepoName) (string, error) {
 	path, err := m.Layout.Git(repo)
 	if err != nil {
 		return "", err
@@ -349,15 +353,19 @@ func (m *Mirror) ComposeFile(ctx context.Context, repo contract.RepoName, name s
 	return nil, nil
 }
 
-// DefaultBranch uses the mirror's default branch when available. A room repository can be pushed to
-// before any checkout needs its mirror, so fall back to asking GitHub for HEAD without fetching objects.
-func (m *Mirror) DefaultBranch(ctx context.Context, repo contract.RepoName) (string, error) {
+// DefaultBranch reads only local metadata when the mirror knows the default. For a secondary repository,
+// remote permits a fallback to GitHub, since no box setup need have fetched its mirror. When remote is false,
+// an unknown default is returned as an empty name; the primary repository has already had branch allocation.
+func (m *Mirror) DefaultBranch(ctx context.Context, repo contract.RepoName, remote bool) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if m.Cloned(repo) {
-		if base, err := m.Default(ctx, repo); err == nil && base != "" {
+		if base, err := m.mirrorDefault(ctx, repo); err == nil && base != "" {
 			return base, nil
 		}
+	}
+	if !remote {
+		return "", nil
 	}
 	env, err := m.authEnv(ctx, repo)
 	if err != nil {

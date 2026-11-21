@@ -28,7 +28,7 @@ import (
 //
 // Every failed upstream request is logged, and one that GitHub answered with a 5xx (or, for a push, with a commit_refs error)
 // is sent once more when its body was kept; see retrier.
-func Handler(upstream *url.URL, transport http.RoundTripper, token string, session contract.SessionID, room contract.RoomID, rooms RoomRepositories, defaultBranch func(context.Context, contract.RepoName) (string, error)) http.Handler {
+func Handler(upstream *url.URL, transport http.RoundTripper, token string, session contract.SessionID, room contract.RoomID, rooms RoomRepositories, defaultBranch func(context.Context, contract.RepoName, bool) (string, error)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/git/"), "/")
 		if !strings.HasPrefix(r.URL.Path, "/git/") || (len(parts) != 3 && len(parts) != 4) || !validPart(parts[0]) || !strings.HasSuffix(parts[1], ".git") || !validPart(strings.TrimSuffix(parts[1], ".git")) {
@@ -343,7 +343,7 @@ func commands(body io.ReadCloser) (io.ReadCloser, []string, bool, error) {
 
 // checkPush checks all commands before reserving any names or forwarding the pack. A secondary push of a
 // session's own name reserves it transactionally; a PR or resumed run grants access without transferring ownership.
-func checkPush(ctx context.Context, rooms RoomRepositories, defaultBranch func(context.Context, contract.RepoName) (string, error), source, repo contract.RepoName, session contract.SessionID, refs []string) (bool, error) {
+func checkPush(ctx context.Context, rooms RoomRepositories, defaultBranch func(context.Context, contract.RepoName, bool) (string, error), source, repo contract.RepoName, session contract.SessionID, refs []string) (bool, error) {
 	if len(refs) == 0 {
 		return true, nil
 	}
@@ -361,14 +361,12 @@ func checkPush(ctx context.Context, rooms RoomRepositories, defaultBranch func(c
 			claims = append(claims, branch)
 		}
 	}
-	if repo != source {
-		base, err := defaultBranch(ctx, repo)
-		if err != nil {
-			return false, err
-		}
-		if slices.Contains(refs, "refs/heads/"+base) {
-			return false, nil
-		}
+	base, err := defaultBranch(ctx, repo, repo != source)
+	if err != nil {
+		return false, err
+	}
+	if base != "" && slices.Contains(refs, "refs/heads/"+base) {
+		return false, nil
 	}
 	if len(claims) != 0 {
 		if err := rooms.RecordPushedBranches(ctx, source, repo, session, claims, time.Now()); err != nil {

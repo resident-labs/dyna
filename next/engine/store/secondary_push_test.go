@@ -74,7 +74,9 @@ func TestPushToAnotherRoomRepository(t *testing.T) {
 		{"master", "o/secondary", []string{"master"}, http.StatusOK, false, nil},
 		{"HEAD", "o/secondary", []string{"HEAD"}, http.StatusOK, false, nil},
 		{"default branch", "o/secondary", []string{"work-default"}, http.StatusOK, false, nil},
+		{"primary default matching a topic", "o/primary", []string{"work-default"}, http.StatusOK, false, nil},
 		{"ordinary own-repo push", "o/primary", []string{"work"}, http.StatusOK, true, nil},
+		{"primary cache miss", "o/primary", []string{"work-cache-miss"}, http.StatusOK, true, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before, err := s.SessionBranches(ctx, "o/secondary", "a")
@@ -105,9 +107,12 @@ func TestPushToAnotherRoomRepository(t *testing.T) {
 				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("ok"))}, nil
 			})
 			w := httptest.NewRecorder()
-			gitroute.Handler(target, transport, "secret", "a", "r", s, func(_ context.Context, repo contract.RepoName) (string, error) {
-				if repo != "o/secondary" || repo != tc.repo {
-					t.Errorf("unexpected default-branch lookup for %q while pushing to %q", repo, tc.repo)
+			gitroute.Handler(target, transport, "secret", "a", "r", s, func(_ context.Context, repo contract.RepoName, remote bool) (string, error) {
+				if repo != tc.repo || remote != (tc.repo != "o/primary") {
+					t.Errorf("unexpected default-branch lookup for %q with remote=%t while pushing to %q", repo, remote, tc.repo)
+				}
+				if slices.Contains(tc.branches, "work-cache-miss") {
+					return "", nil
 				}
 				if slices.Contains(tc.branches, "work-raced") {
 					if err := s.AddBranch(ctx, repo, "b", "work-raced", time.Unix(2, 0)); err != nil {

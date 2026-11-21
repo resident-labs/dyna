@@ -66,7 +66,7 @@ func (fakeAccess) RecordPushedBranches(context.Context, contract.RepoName, contr
 	return nil
 }
 
-func defaultMain(context.Context, contract.RepoName) (string, error) { return "main", nil }
+func defaultMain(context.Context, contract.RepoName, bool) (string, error) { return "main", nil }
 
 type roundTrip func(*http.Request) (*http.Response, error)
 

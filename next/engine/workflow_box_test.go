@@ -210,7 +210,7 @@ func (r crewRepos) Seed(ctx context.Context, session contract.SessionID, host co
 	return repos, "", err
 }
 
-func (crewRepos) DefaultBranch(context.Context, contract.RepoName) (string, error) {
+func (crewRepos) DefaultBranch(context.Context, contract.RepoName, bool) (string, error) {
 	return "main", nil
 }
 

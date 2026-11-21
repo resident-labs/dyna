@@ -37,8 +37,8 @@ func (r *Repositories) Ref(ctx context.Context, repo contract.RepoName, ref stri
 	return r.Mirror.Ref(ctx, repo, ref)
 }
 
-func (r *Repositories) DefaultBranch(ctx context.Context, repo contract.RepoName) (string, error) {
-	return r.Mirror.DefaultBranch(ctx, repo)
+func (r *Repositories) DefaultBranch(ctx context.Context, repo contract.RepoName, remote bool) (string, error) {
+	return r.Mirror.DefaultBranch(ctx, repo, remote)
 }
 
 // Seed is Get for a session's first setup: it refreshes from GitHub first, and the notice says when that did not happen.

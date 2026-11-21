@@ -97,7 +97,7 @@ func (s *Service) prOpen(token string, endpoint *url.URL, transport http.RoundTr
 				return fmt.Errorf("%w: branch %s not found on %s; push it first", approve.ErrInvalid, head, repo)
 			}
 			if repo != session.Repo {
-				base, err := s.repos.DefaultBranch(ctx, repo)
+				base, err := s.repos.DefaultBranch(ctx, repo, true)
 				if err != nil {
 					return fmt.Errorf("%w: cannot read the default branch on %s", approve.ErrInvalid, repo)
 				}
