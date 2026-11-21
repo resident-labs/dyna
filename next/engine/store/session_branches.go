@@ -21,14 +21,14 @@ func (s *Store) SessionBranches(ctx context.Context, repo contract.RepoName, ses
 // BranchHolder returns the session that is not closed and has branch recorded on repo, or "" when none has.
 func (s *Store) BranchHolder(ctx context.Context, repo contract.RepoName, branch string) (contract.SessionID, error) {
 	var holder contract.SessionID
-	err := s.Read().QueryRowContext(ctx, "SELECT b.session FROM session_branches b JOIN sessions o ON o.id=b.session WHERE b.repo=? AND b.branch=? AND o.closed_at IS NULL", repo, branch).Scan(&holder)
+	err := s.Read().QueryRowContext(ctx, "SELECT b.session FROM session_branches b JOIN sessions o ON o.id=b.session WHERE b.repo=? COLLATE NOCASE AND b.branch=? AND o.closed_at IS NULL", repo, branch).Scan(&holder)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
 	return holder, err
 }
 
-const heldByAnother = "SELECT EXISTS(SELECT 1 FROM session_branches b JOIN sessions o ON o.id=b.session WHERE b.repo=? AND b.branch=? AND b.session!=? AND o.closed_at IS NULL)"
+const heldByAnother = "SELECT EXISTS(SELECT 1 FROM session_branches b JOIN sessions o ON o.id=b.session WHERE b.repo=? COLLATE NOCASE AND b.branch=? AND b.session!=? AND o.closed_at IS NULL)"
 
 // ClaimBranch records the session's branch on repo and returns it: the one it already has, else the first of wanted,
 // wanted-2, wanted-3 and on that is not in unavailable and that no other session that is not closed has.
@@ -55,6 +55,26 @@ func (s *Store) ClaimBranch(ctx context.Context, repo contract.RepoName, session
 		}
 	})
 	return branch, err
+}
+
+// RecordPushedBranches reserves names on a secondary repository before a push is forwarded. It records all
+// the names or none, and leaves existing rows alone. The caller has checked where the names come from.
+func (s *Store) RecordPushedBranches(ctx context.Context, repo contract.RepoName, session contract.SessionID, branches []string, at time.Time) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		for _, branch := range branches {
+			var held bool
+			if err := tx.QueryRowContext(ctx, heldByAnother, repo, branch, session).Scan(&held); err != nil {
+				return err
+			}
+			if held {
+				return ErrBranchTaken
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO session_branches(repo,branch,session,created_at) VALUES(?,?,?,?) ON CONFLICT DO NOTHING", repo, branch, session, at.UnixMilli()); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // AddBranch records branch as the session's newest, so its branch from now on. Its earlier rows stay its own.

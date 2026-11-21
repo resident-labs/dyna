@@ -26,6 +26,10 @@ func (r *fakeRepos) DeleteArchiveRef(_ context.Context, _ contract.RepoName, ref
 	return r.err
 }
 
+func (*fakeRepos) RemoteDefault(context.Context, contract.RepoName) (string, error) {
+	return "main", nil
+}
+
 func (r *fakeRepos) Ref(_ context.Context, repo contract.RepoName, _ string) (string, error) {
 	r.calls++
 	if hash := r.commits[repo]; hash != "" {

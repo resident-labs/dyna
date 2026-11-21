@@ -314,7 +314,7 @@ func Run(ctx context.Context, cfg Config) error {
 			if login != "" {
 				transport = githubaccount.Transport{Base: transport, Label: fmt.Sprintf("GitHub account %s of room %s", login, c.Room), Token: credential}
 			}
-			enginegit.Handler(&url.URL{Scheme: "https", Host: "github.com"}, transport, credential, c.Principal.Session, c.Room, st).ServeHTTP(w, r)
+			enginegit.Handler(&url.URL{Scheme: "https", Host: "github.com"}, transport, credential, c.Principal.Session, c.Room, st, mirror.RemoteDefault).ServeHTTP(w, r)
 		})
 	})
 	files, err := connect.OpenFiles(cfg.Data)

@@ -70,6 +70,18 @@ func (c gitCache) PushCache(ctx context.Context, mirror, cache string, refs []st
 	return nil
 }
 
+func TestRemoteDefaultDoesNotNeedAMirror(t *testing.T) {
+	root := t.TempDir()
+	work, remote := filepath.Join(root, "work"), filepath.Join(root, "github", "owner", "repo.git")
+	runReal(t, "", "init", "-b", "develop", work)
+	runReal(t, work, "commit", "--allow-empty", "-m", "first")
+	runReal(t, "", "clone", "--bare", work, remote)
+	mirror := &Mirror{Token: "secret", Runner: &localGitHub{root: filepath.Join(root, "github")}}
+	if got, err := mirror.RemoteDefault(t.Context(), "owner/repo"); err != nil || got != "develop" {
+		t.Fatalf("remote default %q: %v", got, err)
+	}
+}
+
 // seedFixture has a mirror that already fetched once, and a remote that moved on after.
 type seedFixture struct {
 	github     *localGitHub

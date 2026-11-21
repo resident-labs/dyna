@@ -635,9 +635,9 @@ func TestPrOpenMapsFlagsAndBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := &fakeClient{submitResp: contract.OpSubmitResponse{Operation: contract.Operation{Result: &contract.OpResult{Output: "https://example.test/pr/1"}}}}
-	out := runCLI(t, f, "pr", "open", "--title", "Add thing", "--body-file", body, "--base", "dev", "--draft")
+	out := runCLI(t, f, "pr", "open", "--title", "Add thing", "--body-file", body, "--base", "dev", "--draft", "--repo", "owner/secondary")
 	args, ok := f.submit.Operation.Args.(contract.PrOpenArgs)
-	if !ok || f.submit.Operation.Kind != "pr.open" || args.Title != "Add thing" || args.Body != "## Summary\n" || args.Base != "dev" || !args.Draft {
+	if !ok || f.submit.Operation.Kind != "pr.open" || args.Title != "Add thing" || args.Body != "## Summary\n" || args.Base != "dev" || !args.Draft || args.Repo != "owner/secondary" {
 		t.Fatalf("%+v", f.submit)
 	}
 	if out != "https://example.test/pr/1\n" {

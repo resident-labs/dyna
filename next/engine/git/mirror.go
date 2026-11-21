@@ -349,6 +349,28 @@ func (m *Mirror) ComposeFile(ctx context.Context, repo contract.RepoName, name s
 	return nil, nil
 }
 
+// RemoteDefault reads GitHub's current default branch without relying on a local mirror.
+func (m *Mirror) RemoteDefault(ctx context.Context, repo contract.RepoName) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	env, err := m.authEnv(ctx, repo)
+	if err != nil {
+		return "", err
+	}
+	out, err := m.Runner.Run(ctx, env, "ls-remote", "--symref", "https://github.com/"+string(repo)+".git", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if ref, ok := strings.CutPrefix(line, "ref: refs/heads/"); ok {
+			if branch, target, ok := strings.Cut(ref, "\t"); ok && target == "HEAD" && branch != "" {
+				return branch, nil
+			}
+		}
+	}
+	return "", errors.New("remote default branch not found")
+}
+
 // Ref reads one remote reference without fetching its objects.
 func (m *Mirror) Ref(ctx context.Context, repo contract.RepoName, ref string) (result string, problem error) {
 	defer func() {

@@ -234,7 +234,7 @@ func TestDraftOpenCloseParentPush(t *testing.T) {
 			line := strings.Repeat("0", 40) + " " + strings.Repeat("1", 40) + " refs/heads/pr-worker\x00report-status\n"
 			body := fmt.Sprintf("%04x%s0000PACK", len(line)+4, line)
 			w := httptest.NewRecorder()
-			enginegit.Handler(target, transport, "secret", parent, record.Room, s.store).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
+			enginegit.Handler(target, transport, "secret", parent, record.Room, s.store, s.repos.RemoteDefault).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
 			if !forwarded {
 				t.Fatalf("receive-pack rejected parent: %d %s", w.Code, w.Body.String())
 			}

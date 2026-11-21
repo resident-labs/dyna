@@ -93,7 +93,7 @@ func TestPRTeamPushRoute(t *testing.T) {
 			if tt.caller == "foreign" {
 				room = "other"
 			}
-			gitroute.Handler(target, transport, "secret", tt.caller, room, s).ServeHTTP(w, httptest.NewRequest("POST", "/git/o/r.git/git-receive-pack", strings.NewReader(body)))
+			gitroute.Handler(target, transport, "secret", tt.caller, room, s, func(context.Context, contract.RepoName) (string, error) { return "main", nil }).ServeHTTP(w, httptest.NewRequest("POST", "/git/o/r.git/git-receive-pack", strings.NewReader(body)))
 			if forwarded != tt.want {
 				t.Errorf("receive-pack forwarded = %v; want %v: %s", forwarded, tt.want, w.Body.String())
 			}
