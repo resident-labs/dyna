@@ -70,15 +70,25 @@ func (c gitCache) PushCache(ctx context.Context, mirror, cache string, refs []st
 	return nil
 }
 
-func TestRemoteDefaultDoesNotNeedAMirror(t *testing.T) {
+func TestDefaultBranchDoesNotNeedAMirror(t *testing.T) {
 	root := t.TempDir()
 	work, remote := filepath.Join(root, "work"), filepath.Join(root, "github", "owner", "repo.git")
 	runReal(t, "", "init", "-b", "develop", work)
 	runReal(t, work, "commit", "--allow-empty", "-m", "first")
 	runReal(t, "", "clone", "--bare", work, remote)
 	mirror := &Mirror{Token: "secret", Runner: &localGitHub{root: filepath.Join(root, "github")}}
-	if got, err := mirror.RemoteDefault(t.Context(), "owner/repo"); err != nil || got != "develop" {
+	if got, err := mirror.DefaultBranch(t.Context(), "owner/repo"); err != nil || got != "develop" {
 		t.Fatalf("remote default %q: %v", got, err)
+	}
+}
+
+func TestDefaultBranchUsesTheMirrorWhenPresent(t *testing.T) {
+	f := newSeedFixture(t)
+	remote := filepath.Join(f.github.root, "owner", "repo.git")
+	runReal(t, f.work, "push", remote, "HEAD:develop")
+	runReal(t, "", "--git-dir", remote, "symbolic-ref", "HEAD", "refs/heads/develop")
+	if got, err := f.mirror.DefaultBranch(t.Context(), "owner/repo"); err != nil || got != "main" {
+		t.Fatalf("mirror default %q: %v", got, err)
 	}
 }
 

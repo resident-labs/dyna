@@ -62,7 +62,7 @@ func (a fakeAccess) OwnsPRBranch(context.Context, contract.RepoName, contract.Se
 	return false, nil
 }
 
-func (fakeAccess) RecordPushedBranches(context.Context, contract.RepoName, contract.SessionID, []string, time.Time) error {
+func (fakeAccess) RecordPushedBranches(context.Context, contract.RepoName, contract.RepoName, contract.SessionID, []string, time.Time) error {
 	return nil
 }
 

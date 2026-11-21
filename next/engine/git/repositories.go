@@ -18,7 +18,7 @@ type RoomRepositories interface {
 	ResumedSessions(context.Context, contract.RepoName, contract.SessionID) ([]contract.SessionID, error)
 	SessionBranches(context.Context, contract.RepoName, contract.SessionID) ([]string, error)
 	BranchHolder(context.Context, contract.RepoName, string) (contract.SessionID, error)
-	RecordPushedBranches(context.Context, contract.RepoName, contract.SessionID, []string, time.Time) error
+	RecordPushedBranches(context.Context, contract.RepoName, contract.RepoName, contract.SessionID, []string, time.Time) error
 	ClaimBranch(context.Context, contract.RepoName, contract.SessionID, string, map[string]bool, time.Time) (string, error)
 }
 
@@ -37,8 +37,8 @@ func (r *Repositories) Ref(ctx context.Context, repo contract.RepoName, ref stri
 	return r.Mirror.Ref(ctx, repo, ref)
 }
 
-func (r *Repositories) RemoteDefault(ctx context.Context, repo contract.RepoName) (string, error) {
-	return r.Mirror.RemoteDefault(ctx, repo)
+func (r *Repositories) DefaultBranch(ctx context.Context, repo contract.RepoName) (string, error) {
+	return r.Mirror.DefaultBranch(ctx, repo)
 }
 
 // Seed is Get for a session's first setup: it refreshes from GitHub first, and the notice says when that did not happen.

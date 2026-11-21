@@ -15,6 +15,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/approve"
 	enginegit "github.com/resident-labs/dyna/engine/git"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 // PrOpen registers pull request creation.
@@ -22,40 +23,40 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 	return s.accountEntry(token, func(credential string) approve.Entry { return s.prOpen(credential, endpoint, transport) })
 }
 func (s *Service) prOpen(token string, endpoint *url.URL, transport http.RoundTripper) approve.Entry {
-	lookup := func(ctx context.Context, who contract.Principal, input contract.PrOpenArgs) (room contract.RoomID, repo contract.RepoName, head string, err error) {
+	lookup := func(ctx context.Context, who contract.Principal, input contract.PrOpenArgs) (store.Session, contract.RepoName, string, error) {
 		if who.Kind != contract.PrincipalSession {
-			return "", "", "", approve.ErrForbidden
+			return store.Session{}, "", "", approve.ErrForbidden
 		}
 		session, err := s.store.Session(ctx, who.Session)
 		if err != nil {
-			return "", "", "", err
+			return session, "", "", err
 		}
-		repo = input.Repo
+		repo := input.Repo
 		if repo == "" {
 			repo = session.Repo
 		}
 		if repo == "" {
-			return "", "", "", fmt.Errorf("%w: the session has no repository; specify repo", approve.ErrInvalid)
+			return session, "", "", fmt.Errorf("%w: the session has no repository; specify repo", approve.ErrInvalid)
 		}
 		repos, err := s.store.RoomRepos(ctx, session.Room)
 		if err != nil {
-			return "", "", "", err
+			return session, "", "", err
 		}
 		if !slices.ContainsFunc(repos, func(item contract.RoomRepo) bool { return item.Repo == repo }) {
-			return "", "", "", fmt.Errorf("%w: repository %s is not in the room", approve.ErrForbidden, repo)
+			return session, "", "", fmt.Errorf("%w: repository %s is not in the room", approve.ErrForbidden, repo)
 		}
-		head = input.Head
+		head := input.Head
 		if head == "" {
 			recorded, err := s.store.SessionBranches(ctx, session.Repo, who.Session)
 			if err != nil {
-				return "", "", "", err
+				return session, "", "", err
 			}
 			if len(recorded) == 0 {
-				return "", "", "", fmt.Errorf("%w: the session has no branch recorded yet; head was not given", approve.ErrInvalid)
+				return session, "", "", fmt.Errorf("%w: the session has no branch recorded yet; head was not given", approve.ErrInvalid)
 			}
 			head = recorded[0]
 		}
-		return session.Room, repo, head, nil
+		return session, repo, head, nil
 	}
 	return approve.Entry{
 		Scope: contract.ScopeOperate,
@@ -65,7 +66,7 @@ func (s *Service) prOpen(token string, endpoint *url.URL, transport http.RoundTr
 		},
 		Check: func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {
 			input := args.(contract.PrOpenArgs)
-			_, repo, head, err := lookup(ctx, who, input)
+			session, repo, head, err := lookup(ctx, who, input)
 			if err != nil {
 				return err
 			}
@@ -74,10 +75,6 @@ func (s *Service) prOpen(token string, endpoint *url.URL, transport http.RoundTr
 				return err
 			}
 			if !allowed {
-				session, err := s.store.Session(ctx, who.Session)
-				if err != nil {
-					return err
-				}
 				own, err := s.store.SessionBranches(ctx, session.Repo, who.Session)
 				if err != nil {
 					return err
@@ -99,12 +96,14 @@ func (s *Service) prOpen(token string, endpoint *url.URL, transport http.RoundTr
 				}
 				return fmt.Errorf("%w: branch %s not found on %s; push it first", approve.ErrInvalid, head, repo)
 			}
-			base, err := s.repos.RemoteDefault(ctx, repo)
-			if err != nil {
-				return fmt.Errorf("%w: cannot read the default branch on %s", approve.ErrInvalid, repo)
-			}
-			if head == base {
-				return fmt.Errorf("%w: branch %s is the protected default branch on %s", approve.ErrForbidden, head, repo)
+			if repo != session.Repo {
+				base, err := s.repos.DefaultBranch(ctx, repo)
+				if err != nil {
+					return fmt.Errorf("%w: cannot read the default branch on %s", approve.ErrInvalid, repo)
+				}
+				if head == base {
+					return fmt.Errorf("%w: branch %s is the protected default branch on %s", approve.ErrForbidden, head, repo)
+				}
 			}
 			return nil
 		},
@@ -115,7 +114,7 @@ func (s *Service) prOpen(token string, endpoint *url.URL, transport http.RoundTr
 		},
 		Execute: func(ctx context.Context, _ contract.OpID, args contract.OpArgs, who contract.Principal) contract.OpResult {
 			input := args.(contract.PrOpenArgs)
-			room, repo, head, err := lookup(ctx, who, input)
+			session, repo, head, err := lookup(ctx, who, input)
 			if err != nil {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
 			}
@@ -163,7 +162,7 @@ func (s *Service) prOpen(token string, endpoint *url.URL, transport http.RoundTr
 			}
 			link := fmt.Sprintf("https://github.com/%s/pull/%d", repo, payload.Number)
 			result := contract.OpResult{Output: link, PR: &contract.PrOpenResult{Number: payload.Number, URL: link}}
-			event, err := s.event(room, who, contract.PrOpened{Repo: repo, Number: payload.Number, Session: who.Session, URL: link})
+			event, err := s.event(session.Room, who, contract.PrOpened{Repo: repo, Number: payload.Number, Session: who.Session, URL: link})
 			if err == nil {
 				err = s.store.RecordPROpen(ctx, repo, payload.Number, who.Session, head, input.Title, link, event, nil)
 			}

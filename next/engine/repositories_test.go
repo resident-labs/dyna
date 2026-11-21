@@ -26,7 +26,7 @@ func (r *fakeRepos) DeleteArchiveRef(_ context.Context, _ contract.RepoName, ref
 	return r.err
 }
 
-func (*fakeRepos) RemoteDefault(context.Context, contract.RepoName) (string, error) {
+func (*fakeRepos) DefaultBranch(context.Context, contract.RepoName) (string, error) {
 	return "main", nil
 }
 

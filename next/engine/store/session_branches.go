@@ -58,16 +58,18 @@ func (s *Store) ClaimBranch(ctx context.Context, repo contract.RepoName, session
 }
 
 // RecordPushedBranches reserves names on a secondary repository before a push is forwarded. It records all
-// the names or none, and leaves existing rows alone. The caller has checked where the names come from.
-func (s *Store) RecordPushedBranches(ctx context.Context, repo contract.RepoName, session contract.SessionID, branches []string, at time.Time) error {
+// the names or none, rechecking live holders on both repositories and leaving existing rows alone.
+func (s *Store) RecordPushedBranches(ctx context.Context, source, repo contract.RepoName, session contract.SessionID, branches []string, at time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		for _, branch := range branches {
-			var held bool
-			if err := tx.QueryRowContext(ctx, heldByAnother, repo, branch, session).Scan(&held); err != nil {
-				return err
-			}
-			if held {
-				return ErrBranchTaken
+			for _, target := range []contract.RepoName{source, repo} {
+				var held bool
+				if err := tx.QueryRowContext(ctx, heldByAnother, target, branch, session).Scan(&held); err != nil {
+					return err
+				}
+				if held {
+					return ErrBranchTaken
+				}
 			}
 			if _, err := tx.ExecContext(ctx, "INSERT INTO session_branches(repo,branch,session,created_at) VALUES(?,?,?,?) ON CONFLICT DO NOTHING", repo, branch, session, at.UnixMilli()); err != nil {
 				return err

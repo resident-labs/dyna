@@ -5,7 +5,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -29,7 +28,7 @@ import (
 //
 // Every failed upstream request is logged, and one that GitHub answered with a 5xx (or, for a push, with a commit_refs error)
 // is sent once more when its body was kept; see retrier.
-func Handler(upstream *url.URL, transport http.RoundTripper, token string, session contract.SessionID, room contract.RoomID, rooms RoomRepositories, remoteDefault func(context.Context, contract.RepoName) (string, error)) http.Handler {
+func Handler(upstream *url.URL, transport http.RoundTripper, token string, session contract.SessionID, room contract.RoomID, rooms RoomRepositories, defaultBranch func(context.Context, contract.RepoName) (string, error)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/git/"), "/")
 		if !strings.HasPrefix(r.URL.Path, "/git/") || (len(parts) != 3 && len(parts) != 4) || !validPart(parts[0]) || !strings.HasSuffix(parts[1], ".git") || !validPart(strings.TrimSuffix(parts[1], ".git")) {
@@ -69,7 +68,7 @@ func Handler(upstream *url.URL, transport http.RoundTripper, token string, sessi
 				http.Error(w, "repository access unavailable", http.StatusServiceUnavailable)
 				return
 			}
-			allowed, err := checkPush(ctx, rooms, remoteDefault, selected.Repo, repo, session, refs)
+			allowed, err := checkPush(ctx, rooms, defaultBranch, selected.Repo, repo, session, refs)
 			if err != nil {
 				http.Error(w, "repository access unavailable", http.StatusServiceUnavailable)
 				return
@@ -344,7 +343,7 @@ func commands(body io.ReadCloser) (io.ReadCloser, []string, bool, error) {
 
 // checkPush checks all commands before reserving any names or forwarding the pack. A secondary push of a
 // session's own name reserves it transactionally; a PR or resumed run grants access without transferring ownership.
-func checkPush(ctx context.Context, rooms RoomRepositories, remoteDefault func(context.Context, contract.RepoName) (string, error), source, repo contract.RepoName, session contract.SessionID, refs []string) (bool, error) {
+func checkPush(ctx context.Context, rooms RoomRepositories, defaultBranch func(context.Context, contract.RepoName) (string, error), source, repo contract.RepoName, session contract.SessionID, refs []string) (bool, error) {
 	if len(refs) == 0 {
 		return true, nil
 	}
@@ -362,15 +361,17 @@ func checkPush(ctx context.Context, rooms RoomRepositories, remoteDefault func(c
 			claims = append(claims, branch)
 		}
 	}
-	base, err := remoteDefault(ctx, repo)
-	if err != nil {
-		return false, err
-	}
-	if slices.Contains(refs, "refs/heads/"+base) {
-		return false, nil
+	if repo != source {
+		base, err := defaultBranch(ctx, repo)
+		if err != nil {
+			return false, err
+		}
+		if slices.Contains(refs, "refs/heads/"+base) {
+			return false, nil
+		}
 	}
 	if len(claims) != 0 {
-		if err := rooms.RecordPushedBranches(ctx, repo, session, claims, time.Now()); err != nil {
+		if err := rooms.RecordPushedBranches(ctx, source, repo, session, claims, time.Now()); err != nil {
 			if errors.Is(err, store.ErrBranchTaken) {
 				return false, nil
 			}
@@ -391,7 +392,7 @@ func pushRule(ctx context.Context, rooms RoomRepositories, source, repo contract
 	}
 	rule := fmt.Sprintf("not owned by this session: it can push %s, %s-<topic>, those branches of a workflow run it resumes, and the branch of an open PR it owns, or an open PR owned by a session in its parent's team (its own team for root) or above it", recorded[0], recorded[0])
 	if repo != source {
-		rule += fmt.Sprintf("; on %s its own names must not be held by another open session", repo)
+		rule += fmt.Sprintf("; to push its own names on %s, they must not be held by another open session there or on %s", repo, source)
 	}
 	return rule + "; main, master, HEAD and the default branch are protected", nil
 }
@@ -409,7 +410,7 @@ func ValidBranch(name string) bool {
 // CanPushBranch checks branch ownership on a room repository without recording a claim or consulting GitHub.
 func CanPushBranch(ctx context.Context, rooms RoomRepositories, repo contract.RepoName, session contract.SessionID, branch string) (bool, error) {
 	selected, err := rooms.Session(ctx, session)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, store.ErrNotFound) {
 		return false, nil
 	}
 	if err != nil {
@@ -428,6 +429,23 @@ func CanPushBranch(ctx context.Context, rooms RoomRepositories, repo contract.Re
 	return allowed, err
 }
 
+// CanRunActionsOnBranch keeps the existing Actions rights: the session's own and resumed branches on its
+// selected repository, plus PR branch rights. A secondary push or reservation does not grant Actions writes.
+func CanRunActionsOnBranch(ctx context.Context, rooms RoomRepositories, repo contract.RepoName, session contract.SessionID, branch string) (bool, error) {
+	selected, err := rooms.Session(ctx, session)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if repo != selected.Repo {
+		return rooms.OwnsPRBranch(ctx, repo, session, branch)
+	}
+	allowed, _, err := pushAccess(ctx, rooms, selected.Repo, repo, session, branch)
+	return allowed, err
+}
+
 // pushAccess reports whether the name is reachable, and whether that right comes from the session's own branch.
 // Only its selected repository supplies names: recording work-topic on a second repository must not make
 // work-topic a new base there. PR grants and branch holders are checked on the destination repository.
@@ -439,7 +457,7 @@ func pushAccess(ctx context.Context, rooms RoomRepositories, source, repo contra
 	if err != nil {
 		return false, false, err
 	}
-	if match, err := reaches(ctx, rooms, repo, []contract.SessionID{session}, bases, branch); match || err != nil {
+	if match, err := reaches(ctx, rooms, source, repo, []contract.SessionID{session}, bases, branch); match || err != nil {
 		return match, match, err
 	}
 	if owned, err := rooms.OwnsPRBranch(ctx, repo, session, branch); owned || err != nil {
@@ -455,22 +473,30 @@ func pushAccess(ctx context.Context, rooms RoomRepositories, source, repo contra
 		if err != nil {
 			return false, false, err
 		}
-		if match, err := reaches(ctx, rooms, repo, holders, recorded, branch); match || err != nil {
+		if match, err := reaches(ctx, rooms, source, repo, holders, recorded, branch); match || err != nil {
 			return match, false, err
 		}
 	}
 	return false, false, nil
 }
 
-// reaches reports whether branch is one of recorded or a topic of one, and no session outside sessions has it.
-func reaches(ctx context.Context, rooms RoomRepositories, repo contract.RepoName, sessions []contract.SessionID, recorded []string, branch string) (bool, error) {
+// reaches reports whether branch is one of recorded or a topic of one, and no session outside sessions has it
+// in the repository that supplied the name or the repository receiving the push.
+func reaches(ctx context.Context, rooms RoomRepositories, source, repo contract.RepoName, sessions []contract.SessionID, recorded []string, branch string) (bool, error) {
 	for _, base := range recorded {
 		topic, ok := strings.CutPrefix(branch, base+"-")
 		if branch != base && !(ok && refSafe(topic)) {
 			continue
 		}
-		holder, err := rooms.BranchHolder(ctx, repo, branch)
-		return holder == "" || slices.Contains(sessions, holder), err
+		holder, err := rooms.BranchHolder(ctx, source, branch)
+		if err != nil || holder != "" && !slices.Contains(sessions, holder) {
+			return false, err
+		}
+		if source != repo {
+			holder, err = rooms.BranchHolder(ctx, repo, branch)
+			return holder == "" || slices.Contains(sessions, holder), err
+		}
+		return true, nil
 	}
 	return false, nil
 }

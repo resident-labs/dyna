@@ -349,10 +349,16 @@ func (m *Mirror) ComposeFile(ctx context.Context, repo contract.RepoName, name s
 	return nil, nil
 }
 
-// RemoteDefault reads GitHub's current default branch without relying on a local mirror.
-func (m *Mirror) RemoteDefault(ctx context.Context, repo contract.RepoName) (string, error) {
+// DefaultBranch uses the mirror's default branch when available. A room repository can be pushed to
+// before any checkout needs its mirror, so fall back to asking GitHub for HEAD without fetching objects.
+func (m *Mirror) DefaultBranch(ctx context.Context, repo contract.RepoName) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	if m.Cloned(repo) {
+		if base, err := m.Default(ctx, repo); err == nil && base != "" {
+			return base, nil
+		}
+	}
 	env, err := m.authEnv(ctx, repo)
 	if err != nil {
 		return "", err

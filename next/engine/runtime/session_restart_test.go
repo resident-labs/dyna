@@ -20,7 +20,7 @@ import (
 
 type restartBarrierRepos struct{ beforeReplacementCreate }
 
-func (*restartBarrierRepos) RemoteDefault(context.Context, contract.RepoName) (string, error) {
+func (*restartBarrierRepos) DefaultBranch(context.Context, contract.RepoName) (string, error) {
 	return "main", nil
 }
 

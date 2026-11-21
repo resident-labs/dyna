@@ -38,7 +38,7 @@ func TestPrOpenOnAnotherRoomRepository(t *testing.T) {
 	if err := s.store.AddBranch(ctx, "owner/repo", child, "pr-child", time.Unix(1, 0)); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.RecordPushedBranches(ctx, repo, child, []string{"pr-child", "pr-child-topic"}, time.Unix(2, 0)); err != nil {
+	if err := s.store.RecordPushedBranches(ctx, "owner/repo", repo, child, []string{"pr-child", "pr-child-topic"}, time.Unix(2, 0)); err != nil {
 		t.Fatal(err)
 	}
 	pull := fakegithub.Pull{Repo: repo, Number: 37, Title: "Secondary", Rollup: "FAILURE", ReviewDecision: "CHANGES_REQUESTED"}
