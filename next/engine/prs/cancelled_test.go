@@ -96,7 +96,7 @@ func TestLaterRunReplacesCancelledJob(t *testing.T) {
 		{"older failure still counts", []string{check(checks, "pull_request", 2859, "verify", "COMPLETED", "FAILURE"), twins[3]}, contract.PrCIFailure, []string{"verify"}},
 		{"newer run failed the job", []string{twins[1], check(checks, "pull_request", 2860, "verify", "COMPLETED", "FAILURE")}, contract.PrCIFailure, []string{"verify"}},
 		{"replacement suite cancelled", []string{twins[1], suite(checks, "pull_request", pr, "CANCELLED", 2860, "verify", "COMPLETED", "SKIPPED")}, contract.PrCICancelled, []string{"verify"}},
-		{"skipped in a passing replacement", []string{twins[1], suite(checks, "pull_request", pr, "SUCCESS", 2860, "verify", "COMPLETED", "SKIPPED")}, contract.PrCISuccess, nil},
+		{"skipped in a passing replacement", []string{twins[1], suite(checks, "pull_request", pr, "SUCCESS", 2860, "verify", "COMPLETED", "SKIPPED")}, contract.PrCINone, nil}, // nothing that counts ran: the replaced job is left out and the rest skipped
 		{"another PR", []string{twins[1], suite(checks, "pull_request", `{"number":3108}`, "SUCCESS", 2860, "verify", "COMPLETED", "SUCCESS")}, contract.PrCICancelled, []string{"verify"}},
 		{"both runs for another PR", []string{suite(checks, "pull_request", `{"number":3108}`, "CANCELLED", 2859, "verify", "COMPLETED", "CANCELLED"), suite(checks, "pull_request", `{"number":3108}`, "SUCCESS", 2860, "verify", "COMPLETED", "SUCCESS")}, contract.PrCICancelled, []string{"verify"}},
 		{"two PRs on one head branch", []string{suite(checks, "pull_request", pr+`,{"number":3108}`, "CANCELLED", 2859, "verify", "COMPLETED", "CANCELLED"), suite(checks, "pull_request", pr+`,{"number":3108}`, "SUCCESS", 2860, "verify", "COMPLETED", "SUCCESS")}, contract.PrCICancelled, []string{"verify"}},
