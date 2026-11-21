@@ -1,0 +1,27 @@
+{
+  "models": {
+    "claude-opus-5-5-high": {"displayName":"Claude Opus 5.5 (High)","apiProvider":"API_PROVIDER_ANTHROPIC_VERTEX","modelProvider":"MODEL_PROVIDER_ANTHROPIC","quotaInfo":{"remainingFraction":1,"resetTime":"2026-10-06T16:58:00Z"}},
+    "claude-opus-5-5-low": {"displayName":"Claude Opus 5.5 (Low)","apiProvider":"API_PROVIDER_ANTHROPIC_VERTEX","modelProvider":"MODEL_PROVIDER_ANTHROPIC","quotaInfo":{"remainingFraction":1,"resetTime":"2026-10-06T16:58:00Z"}},
+    "claude-opus-5-5-medium": {"displayName":"Claude Opus 5.5 (Medium)","apiProvider":"API_PROVIDER_ANTHROPIC_VERTEX","modelProvider":"MODEL_PROVIDER_ANTHROPIC","quotaInfo":{"remainingFraction":1,"resetTime":"2026-10-06T16:58:00Z"}},
+    "claude-sonnet-5-5-high": {"displayName":"Claude Sonnet 5.5 (High)","apiProvider":"API_PROVIDER_ANTHROPIC_VERTEX","modelProvider":"MODEL_PROVIDER_ANTHROPIC","quotaInfo":{"remainingFraction":1,"resetTime":"2026-10-06T16:58:00Z"}},
+    "claude-sonnet-5-5-low": {"displayName":"Claude Sonnet 5.5 (Low)","apiProvider":"API_PROVIDER_ANTHROPIC_VERTEX","modelProvider":"MODEL_PROVIDER_ANTHROPIC","quotaInfo":{"remainingFraction":1,"resetTime":"2026-10-06T16:58:00Z"}},
+    "claude-sonnet-5-5-medium": {"displayName":"Claude Sonnet 5.5 (Medium)","apiProvider":"API_PROVIDER_ANTHROPIC_VERTEX","modelProvider":"MODEL_PROVIDER_ANTHROPIC","quotaInfo":{"remainingFraction":1,"resetTime":"2026-10-06T16:58:00Z"}},
+    "gemini-2.5-flash": {"displayName":"Gemini 3.5 Flash Lite","apiProvider":"API_PROVIDER_GOOGLE_GEMINI","modelProvider":"MODEL_PROVIDER_GOOGLE","quotaInfo":{"remainingFraction":0.99058527,"resetTime":"2026-10-06T16:40:00Z"}},
+    "gemini-2.5-flash-lite": {"displayName":"Gemini 3.5 Flash Lite","apiProvider":"API_PROVIDER_GOOGLE_GEMINI","modelProvider":"MODEL_PROVIDER_GOOGLE","quotaInfo":{"remainingFraction":0.99058527,"resetTime":"2026-10-06T16:40:00Z"}},
+    "gemini-2.5-flash-thinking": {"displayName":"Gemini 3.5 Flash Lite","apiProvider":"API_PROVIDER_GOOGLE_GEMINI","modelProvider":"MODEL_PROVIDER_GOOGLE","quotaInfo":{"remainingFraction":0.99058527,"resetTime":"2026-10-06T16:40:00Z"}},
+    "gemini-2.5-pro": {"displayName":"Gemini 2.5 Pro","apiProvider":"API_PROVIDER_GOOGLE_GEMINI","modelProvider":"MODEL_PROVIDER_GOOGLE","quotaInfo":{"remainingFraction":0.99058527,"resetTime":"2026-10-06T16:40:00Z"}},
+    "gemini-3-flash": {"displayName":"Gemini 3 Flash","apiProvider":"API_PROVIDER_GOOGLE_GEMINI","modelProvider":"MODEL_PROVIDER_GOOGLE","quotaInfo":{"remainingFraction":0.99058527,"resetTime":"2026-10-06T16:40:00Z"}},
+    "gemini-3.1-flash-image": {"displayName":"Gemini 3.1 Flash Image","apiProvider":"API_PROVIDER_GOOGLE_GEMINI","modelProvider":"MODEL_PROVIDER_GOOGLE","quotaInfo":{"remainingFraction":0.99058527,"resetTime":"2026-10-06T16:40:00Z"}},
+    "gemini-3.1-flash-lite": {"displayName":"Gemini 3.1 Flash Lite","apiProvider":"API_PROVIDER_GOOGLE_GEMINI","modelProvider":"MODEL_PROVIDER_GOOGLE","quotaInfo":{"remainingFraction":0.99058527,"resetTime":"2026-10-06T16:40:00Z"}},
+    "gemini-3.5-flash-lite": {"displayName":"Gemini 3.5 Flash Lite","apiProvider":"API_PROVIDER_GOOGLE_GEMINI","modelProvider":"MODEL_PROVIDER_GOOGLE","quotaInfo":{"remainingFraction":0.99058527,"resetTime":"2026-10-06T16:40:00Z"}},
+    "gemini-3.8-flash-tiered": {"apiProvider":"API_PROVIDER_GOOGLE_GEMINI","modelProvider":"MODEL_PROVIDER_GOOGLE","quotaInfo":{"remainingFraction":0.99058527,"resetTime":"2026-10-06T16:40:00Z"}},
+    "gemini-4-hydrogen-sonar": {"apiProvider":"API_PROVIDER_GOOGLE_GEMINI","modelProvider":"MODEL_PROVIDER_GOOGLE","quotaInfo":{"remainingFraction":0.99058527,"resetTime":"2026-10-06T16:40:00Z"}},
+    "gpt-oss-120b-medium": {"displayName":"GPT-OSS 120B (Medium)","apiProvider":"API_PROVIDER_OPENAI_VERTEX","modelProvider":"MODEL_PROVIDER_OPENAI","quotaInfo":{"remainingFraction":1,"resetTime":"2026-10-06T16:58:00Z"}},
+    "tab_flash_lite_preview": {"apiProvider":"API_PROVIDER_GOOGLE_GEMINI","modelProvider":"MODEL_PROVIDER_GOOGLE","quotaInfo":{"remainingFraction":1}},
+    "tab_jump_flash_lite_preview": {"apiProvider":"API_PROVIDER_GOOGLE_GEMINI","modelProvider":"MODEL_PROVIDER_GOOGLE","quotaInfo":{"remainingFraction":1}}
+  },
+  "groupedModels": {
+    "claude-opus-5-5": {"displayName":"Claude Opus 5.5","supportedThinkingLevels":[{"thinkingSuffix":"low","thinkingDisplayName":"Low"},{"thinkingSuffix":"medium","thinkingDisplayName":"Medium"},{"thinkingSuffix":"high","thinkingDisplayName":"High"}]},
+    "claude-sonnet-5-5": {"displayName":"Claude Sonnet 5.5","supportedThinkingLevels":[{"thinkingSuffix":"low","thinkingDisplayName":"Low"},{"thinkingSuffix":"medium","thinkingDisplayName":"Medium"},{"thinkingSuffix":"high","thinkingDisplayName":"High"}]}
+  }
+}

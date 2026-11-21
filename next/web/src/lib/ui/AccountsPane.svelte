@@ -220,7 +220,7 @@
   <span class="lines"><span class="title"><span class="name" title={each.name}>{each.name}</span>{#if pill}<StatusPill tone={pill.tone} label={pill.label} />{/if}</span>
     <span class="line">{accountLine(each)}</span></span>
   {#if hint}<span class="hint" class:compact title={hint.bars.map(bar => `${bar.label} ${bar.percent}%`).join(" · ")}>
-    {#each hint.bars as bar (bar.label)}<span class="usebar" class:busy={bar.busy}><i style:width="{bar.percent}%"></i></span>{/each}<span class="peak">{hint.peak}%</span></span>{/if}
+    {#each hint.bars as bar}<span class="usebar" class:busy={bar.busy}><i style:width="{bar.percent}%"></i></span>{/each}<span class="peak">{hint.peak}%</span></span>{/if}
 {/snippet}
 
 {#snippet empty()}<button type="button" class="btn" onclick={start}>Add an account</button>{/snippet}

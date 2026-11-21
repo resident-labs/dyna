@@ -78,6 +78,18 @@ test("a row's usage hint is a bar for each of three windows and the peak of them
   assert.equal(usageHint(item(acct("a"), use("a", { windows: [win(89.4)] })), now)?.bars[0].busy, false);
 });
 
+test("accounts shows both Antigravity pools at a glance, including the unused pool", () => {
+  const windows: UsageWindow[] = [
+    { ...win(0, "other", "Claude and GPT-OSS models"), seconds: 0, models: ["claude-opus-5-5-high", "gpt-oss-120b-medium"] },
+    { ...win(0.94, "other", "Gemini models"), seconds: 0, models: ["gemini-3-flash", "gemini-3.1-flash-lite"] },
+  ];
+  const antigravity = item(acct("ultra", { provider: "antigravity" }), use("ultra", { provider: "antigravity", windows }));
+  assert.deepEqual(usageHint(antigravity, now), {
+    bars: [{ label: "Claude and GPT-OSS models", percent: 0, busy: false }, { label: "Gemini models", percent: 1, busy: false }],
+    peak: 1,
+  });
+});
+
 test("no usage hint for an expired sign-in, a usage cause, or no windows", () => {
   const windows = [win(40)];
   assert.equal(usageHint(item(acct("a", { state: "sign_in_expired" }), use("a", { windows })), now), undefined);

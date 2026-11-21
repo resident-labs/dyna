@@ -6,8 +6,8 @@
 </script>
 
 <div class="tile" class:busy={m.busy}>
-  <span class="name">{m.label}</span><span><strong>{m.percent}%</strong>{#if m.unit}<span class="unit">{m.unit}</span>{/if}</span>
-  <span class="track" role="meter" aria-label={m.label} aria-valuetext={m.text} aria-valuenow={m.percent} aria-valuemin={0} aria-valuemax={100}>
+  <span class="name" title={m.detail}>{m.label}</span><span><strong>{m.percent}%</strong>{#if m.unit}<span class="unit">{m.unit}</span>{/if}</span>
+  <span class="track" role="meter" aria-label={m.label} title={m.detail} aria-valuetext={m.text} aria-valuenow={m.percent} aria-valuemin={0} aria-valuemax={100}>
     <span class="fill" style:width="{m.percent}%"></span></span>
   <span class="text">{m.text}</span>
 </div>

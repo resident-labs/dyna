@@ -360,10 +360,12 @@ const (
 	UsageWindowOther    UsageWindowKind = "other"
 )
 
+// UsageWindow is account-wide unless Model names a model or pool. Models lists the pool's members.
 type UsageWindow struct {
 	Name        string          `json:"name"`
 	Kind        UsageWindowKind `json:"kind"`
 	Model       string          `json:"model,omitempty"`
+	Models      []string        `json:"models,omitempty"`
 	UsedPercent float64         `json:"usedPercent"`
 	Seconds     int64           `json:"seconds"`
 	ResetsAt    time.Time       `json:"resetsAt"`

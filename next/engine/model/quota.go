@@ -245,12 +245,13 @@ func (q *Quotas) cached(index string) (quotaEntry, bool) {
 }
 
 type quotaWindow struct {
-	Name        string  `json:"name"`
-	Kind        string  `json:"kind"`
-	Scope       string  `json:"scope"`
-	Seconds     int64   `json:"seconds"`
-	Utilization float64 `json:"utilization"`
-	ResetsAt    string  `json:"resets_at"`
+	Name        string   `json:"name"`
+	Kind        string   `json:"kind"`
+	Scope       string   `json:"scope"`
+	Models      []string `json:"models"`
+	Seconds     int64    `json:"seconds"`
+	Utilization float64  `json:"utilization"`
+	ResetsAt    string   `json:"resets_at"`
 }
 
 type quotaFile struct {
@@ -284,7 +285,7 @@ func quotaUsage(file Credential, account contract.AccountID, data json.RawMessag
 		usage.Balances = reading.Balances
 		for _, w := range reading.Windows {
 			reset, _ := time.Parse(time.RFC3339Nano, w.ResetsAt)
-			usage.Windows = append(usage.Windows, contract.UsageWindow{Name: w.Name, Kind: contract.UsageWindowKind(w.Kind), Model: w.Scope, UsedPercent: w.Utilization, Seconds: w.Seconds, ResetsAt: reset})
+			usage.Windows = append(usage.Windows, contract.UsageWindow{Name: w.Name, Kind: contract.UsageWindowKind(w.Kind), Model: w.Scope, Models: w.Models, UsedPercent: w.Utilization, Seconds: w.Seconds, ResetsAt: reset})
 		}
 		slices.SortStableFunc(usage.Windows, func(a, b contract.UsageWindow) int {
 			if a.Kind == contract.UsageWindowFiveHour && b.Kind != contract.UsageWindowFiveHour {
