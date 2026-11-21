@@ -123,7 +123,7 @@ func TestCISummaryDoesNotSettlePartialPages(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, rule := range []ciRule{ciPullHead, ciMainHead} {
-			if got, _ := summarizeCI(answer.Rollup, answer.Suites, rule, time.Now()); got != contract.PrCIPending {
+			if got, _ := summarizeCI(answer.Rollup, answer.Suites, rule, 0, time.Now()); got != contract.PrCIPending {
 				t.Errorf("partial page settled as %s: %s", got, raw)
 			}
 		}
@@ -144,7 +144,7 @@ func TestVisibleFailureSettlesIncompleteCI(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, rule := range []ciRule{ciPullHead, ciMainHead} {
-				got, names := summarizeCI(&rollup, suites, rule, time.Now())
+				got, names := summarizeCI(&rollup, suites, rule, 0, time.Now())
 				if got != contract.PrCIFailure || !slices.Equal(names, []string{"lint"}) {
 					t.Fatalf("%s %v: %s %v", typ, truncated, got, names)
 				}
@@ -160,7 +160,7 @@ func TestEmptyFailureRollupWaitsForPendingSuite(t *testing.T) {
 	}
 	for _, state := range []string{"FAILURE", "ERROR"} {
 		for _, rule := range []ciRule{ciPullHead, ciMainHead} {
-			got, _ := summarizeCI(&gqlRollup{State: state}, suites, rule, time.Now())
+			got, _ := summarizeCI(&gqlRollup{State: state}, suites, rule, 0, time.Now())
 			if got != contract.PrCIPending {
 				t.Fatalf("%s %d: %s", state, rule, got)
 			}
@@ -179,7 +179,7 @@ func TestFailedSuiteOverridesEmptyAggregateAndPendingSuites(t *testing.T) {
 		}
 		for _, state := range []string{"FAILURE", "ERROR"} {
 			for _, rule := range []ciRule{ciPullHead, ciMainHead} {
-				got, names := summarizeCI(&gqlRollup{State: state}, suites, rule, time.Now())
+				got, names := summarizeCI(&gqlRollup{State: state}, suites, rule, 0, time.Now())
 				if got != contract.PrCIFailure || !slices.Equal(names, []string{"actions (workflow run failed)"}) {
 					t.Fatalf("%s %d: %s %v", state, rule, got, names)
 				}
