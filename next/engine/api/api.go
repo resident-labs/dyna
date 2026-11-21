@@ -862,7 +862,12 @@ func call[Req, Resp any](mux *http.ServeMux, m contract.Method, c Caller, fn fun
 			return
 		}
 		var req *Req
-		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20))
+		var limit int64 = 4 << 20
+		if m == contract.MethodWorkflowStepEnd {
+			// A failed worker's raw text is capped at 1 MiB before JSON can expand it to 6 MiB with escapes.
+			limit = 8 << 20
+		}
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&req); err != nil {
 			writeError(w, badBody(err))

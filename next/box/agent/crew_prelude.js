@@ -32,7 +32,7 @@
   const call = async (message) => {
     const reply = await callHost({ parent, phase: current, scope, event: row, ...message });
     if (reply.error === undefined) return reply.value;
-    throw Object.assign(new Error(reply.error), { failed: true, step: reply.step, reason: reply.error });
+    throw Object.assign(new Error(reply.error), { failed: true, step: reply.step, reason: reply.error, rawText: reply.rawText });
   };
   // Lines reach the box agent one after another in the order the script wrote them, as the sandbox runs calls side by side.
   let lines = Promise.resolve();
@@ -46,7 +46,7 @@
   const failure = (error, where) => {
     const reason = reasonOf(error);
     if (!error?.failed) emit({ op: "failed", payload: where + ": " + reason });
-    return { failed: true, step: error?.step ?? where, reason };
+    return { failed: true, step: error?.step ?? where, reason, rawText: error?.rawText };
   };
   // In a handler a step's lane is its key unless the script names another.
   const handlerKey = () => (!replaying && service?.handler ? service.handler.key : "");
@@ -151,12 +151,12 @@
       }
       if (handled) {
         const outcome = handled;
-        return outcome.failed ? { failure: { reason: outcome.reason, report: outcome.reason, step: outcome.step } } : outcome;
+        return outcome.failed ? { failure: { reason: outcome.reason, report: outcome.reason, step: outcome.step, rawText: outcome.rawText } } : outcome;
       }
       return { value: text, served: served && !service.handler };
     } catch (error) {
       const report = String(error?.step ? error.message : error?.stack ? error + "\n" + error.stack : error) || "the script threw";
-      return { failure: { reason: reasonOf(error), report, step: error?.step ?? "" } };
+      return { failure: { reason: reasonOf(error), report, step: error?.step ?? "", rawText: error?.rawText } };
     } finally {
       // The script's last lines reach the journal before its end does.
       await lines;

@@ -1,6 +1,7 @@
 package pig
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -18,12 +19,13 @@ type EndPost struct {
 
 // turn is what a session's events build up while one turn runs.
 type turn struct {
-	id       contract.TurnID
-	activity func(contract.TurnID, contract.ActivityKind, string)
-	finished func(contract.TurnID, contract.ToolFinished) // nil when nobody listens
-	result   contract.TurnEnded
-	batch    endBatch
-	reply    replyText
+	id           contract.TurnID
+	activity     func(contract.TurnID, contract.ActivityKind, string)
+	finished     func(contract.TurnID, contract.ToolFinished) // nil when nobody listens
+	result       contract.TurnEnded
+	batch        endBatch
+	reply        replyText
+	finishResult context.CancelFunc // schema workers only: stops the prompt after a valid tool result
 }
 
 func newTurn(id contract.TurnID, activity func(contract.TurnID, contract.ActivityKind, string)) *turn {
@@ -70,7 +72,14 @@ func (t *turn) message(m agent.AgentMessage) {
 	case m.Assistant != nil:
 		a := m.Assistant.Observe()
 		t.batch.assistant(a.Content)
-		t.result.Final = t.reply.assistant(a.Content)
+		final, current, closing := t.reply.assistant(a.Content)
+		t.result.Final = final
+		if current != "" {
+			t.result.LastText = current
+		}
+		if t.finishResult != nil && closing && a.StopReason == ai.StopReasonStop {
+			t.result.ClosingTexts = append(t.result.ClosingTexts, current)
+		}
 		t.result.Usage.Model = a.ModelID
 		if a.ResponseModel != "" {
 			t.result.Usage.Model = a.ResponseModel
@@ -135,8 +144,8 @@ type replyText struct {
 	kept, closing string
 }
 
-// assistant returns the final text so far. Only a message with no tool call can close an answer.
-func (r *replyText) assistant(content []ai.AssistantContentBlock) string {
+// assistant returns the final text so far and this message's text. Only a message with no tool call can close an answer.
+func (r *replyText) assistant(content []ai.AssistantContentBlock) (final, current string, closing bool) {
 	var text []string
 	r.closing = ""
 	working := false
@@ -148,11 +157,11 @@ func (r *replyText) assistant(content []ai.AssistantContentBlock) string {
 			working = true
 		}
 	}
-	current := strings.Join(text, "\n")
+	current = strings.Join(text, "\n")
 	if !working {
 		r.closing = current
 	}
-	return joinReply(r.kept, current)
+	return joinReply(r.kept, current), current, !working
 }
 
 // steered keeps the answer a new input landed after.

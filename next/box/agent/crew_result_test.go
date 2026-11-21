@@ -2,6 +2,8 @@ package agent
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -24,7 +26,9 @@ func answers(h *crewHarness, replies ...contract.TurnEnded) *[]string {
 	return &prompts
 }
 
-func text(final string) contract.TurnEnded { return contract.TurnEnded{Final: final} }
+func text(final string) contract.TurnEnded {
+	return contract.TurnEnded{Final: final, ClosingTexts: []string{final}, LastText: final}
+}
 
 func TestASchemaStepsFinalTextIsParsedAsItsResult(t *testing.T) {
 	for name, final := range map[string]string{"bare": `{"count": 3}`, "padded": "\n {\"count\": 3}\n", "fenced": "```json\n{\"count\": 3}\n```"} {
@@ -46,7 +50,7 @@ func TestAMismatchComesBackToTheSameWorkerAndARetrySucceeds(t *testing.T) {
 		if got["count"] != float64(4) || len(*prompts) != 2 || h.started.Load() != 1 {
 			t.Fatalf("%s: %v, %d turns, %d workers", name, got, len(*prompts), h.started.Load())
 		}
-		if follow := (*prompts)[1]; !strings.Contains(follow, "not accepted") || !strings.Contains(follow, "only a JSON value") {
+		if follow := (*prompts)[1]; !strings.Contains(follow, "not accepted") || !strings.Contains(follow, "Call StructuredOutput") {
 			t.Errorf("%s: the follow-up is %q", name, follow)
 		}
 	}
@@ -54,25 +58,72 @@ func TestAMismatchComesBackToTheSameWorkerAndARetrySucceeds(t *testing.T) {
 
 func TestThreeMismatchesFailTheStepWithTheLastText(t *testing.T) {
 	h := newCrewHarness(t)
-	prompts := answers(h, text("Done."))
-	crew, ended := h.start(crewMeta + `return 1`)
-	<-ended
-	out := crew.worker(t.Context(), strings.Repeat("0", 64), crewProfiles[0].Name, "p", agentOpts{Schema: []byte(`{"type":"object","required":["count"]}`)}, h.workdir)
-	if out.cause != contract.CauseBadResult || out.value != nil || len(*prompts) != schemaAttempts || !strings.Contains(out.reason, "its last text: Done.") {
-		t.Fatalf("outcome %+v after %d turns", out, len(*prompts))
+	prompts := answers(h, text(`{"count":"many"}`), text("\nStill working.\n"), text("\nDone.\n"))
+	script := crewMeta + `
+		const step = () => agent('count them', ` + countSchema + `)
+		try { await step() } catch (err) {
+			const [failed] = await parallel([() => { throw err }])
+			return { raw: err.rawText, failed }
+		}
+	`
+	for range 2 { // A restarted box replays the stored failure, including the raw text.
+		got := h.result(script).(map[string]any)
+		failed := got["failed"].(map[string]any)
+		if got["raw"] != "\nDone.\n" || failed["rawText"] != got["raw"] || failed["failed"] != true || len(*prompts) != schemaAttempts || strings.Contains(failed["reason"].(string), "Done.") {
+			t.Fatalf("failure %+v after %d turns", got, len(*prompts))
+		}
 	}
-	if got := h.run(crewMeta + `return await agent('count them', ` + countSchema + `)`); got.Outcome != contract.TurnCompleted && !strings.Contains(got.Error, "schema") {
-		t.Fatalf("turn %+v", got)
+	for _, step := range h.journal.steps {
+		if step.State != contract.WorkflowStepFailed || step.RawText != "\nDone.\n" || step.Result != "" {
+			t.Fatalf("journal %+v", step)
+		}
 	}
 }
 
 // A reply that reached the output limit is told the result is too large for text, and to write it to a file.
+func TestANestedWorkflowPassesAlongAFailedWorkersRawText(t *testing.T) {
+	h := newCrewHarness(t)
+	answers(h, text("not JSON"))
+	child := crewMeta + `return await agent('count them', ` + countSchema + `)`
+	if err := os.WriteFile(filepath.Join(h.workdir, "child.js"), []byte(child), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got := h.result(crewMeta + `return await workflow('child.js').catch(err => err.rawText)`)
+	if got != "not JSON" {
+		t.Fatalf("raw text %q", got)
+	}
+}
+
+func TestAFailedStepCapsRawTextWithoutCuttingARune(t *testing.T) {
+	h := newCrewHarness(t)
+	answers(h, text(strings.Repeat("x", stepResultBytes-1)+"érest"))
+	got := h.result(crewMeta + `
+		try { await agent('count them', ` + countSchema + `) }
+		catch (err) { return err.rawText.length }
+	`)
+	if got != float64(stepResultBytes-1) {
+		t.Fatalf("raw length %v", got)
+	}
+}
+
 func TestATooLargeReplyIsToldToWriteAFile(t *testing.T) {
 	h := newCrewHarness(t)
 	prompts := answers(h, contract.TurnEnded{Outcome: contract.TurnFailed, Cause: contract.CauseOutputLimit}, text(`{"count": 2}`))
 	got := h.result(crewMeta + `return await agent('count them', ` + countSchema + `)`).(map[string]any)
 	if got["count"] != float64(2) || len(*prompts) != 2 || !strings.Contains((*prompts)[1], "write it to a file") && !strings.Contains((*prompts)[1], "Write it to a file") {
 		t.Fatalf("%v, prompts %q", got, *prompts)
+	}
+}
+
+func TestTextFallbackKeepsAnEarlierCompleteReplyAfterOutputLimit(t *testing.T) {
+	h := newCrewHarness(t)
+	prompts := answers(h, contract.TurnEnded{
+		Outcome: contract.TurnFailed, Cause: contract.CauseOutputLimit,
+		ClosingTexts: []string{`{"count":1}`}, LastText: `{"count":`,
+	})
+	got := h.result(crewMeta + `return await agent('count them', ` + countSchema + `)`).(map[string]any)
+	if got["count"] != float64(1) || len(*prompts) != 1 {
+		t.Fatalf("result %v after %d turns", got, len(*prompts))
 	}
 }
 

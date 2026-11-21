@@ -3,6 +3,7 @@ package pig
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -54,6 +55,9 @@ type Config struct {
 	Bare  bool
 	// NoSkills leaves the skills index out of the prompt: a workflow worker's prompt is its own, and it still reads the AGENTS.md files.
 	NoSkills bool
+	// ResultTool is a workflow step's return tool. On success its JSON details end the turn and become the result.
+	// Workers with a result tool also retain the individual closing messages for a text fallback.
+	ResultTool *extension.ToolDefinition
 }
 
 // Harness drives one retained PiG session.
@@ -72,6 +76,7 @@ type Harness struct {
 	// Model guidance and the last snapshot are replaced only between turns.
 	modelInstructions string
 	sections          []contract.ContextSection
+	resultTool        string // empty outside a workflow schema step
 
 	mu   sync.Mutex
 	turn *turn // the turn running now, nil between turns
@@ -89,6 +94,12 @@ var _ harness.Harness = (*Harness)(nil)
 // Open starts the session, continuing the newest one in the session folder if there is one.
 func Open(ctx context.Context, c Config) (*Harness, error) {
 	extensions := append([]extension.InlineExtension{}, c.Extensions...)
+	if c.ResultTool != nil {
+		extensions = append(extensions, extension.NamedInlineExtension{Name: "workflow-result", Factory: func(api extension.API) error {
+			api.RegisterTool(*c.ResultTool)
+			return nil
+		}})
+	}
 	if !c.Bare {
 		extensions = append(extensions,
 			extension.NamedInlineExtension{Name: "codemode", Replaceable: true, Factory: codemode.CreateCodemodeExtension(codemode.Options{})},
@@ -176,6 +187,28 @@ func (h *Harness) start(ctx context.Context, c Config) error {
 		return err
 	}
 	h.session = created.Session
+	if c.ResultTool != nil {
+		h.resultTool = c.ResultTool.Name
+		previous := h.session.Agent().FinishTurnHook()
+		h.session.Agent().SetFinishTurn(func(ctx context.Context, turn agent.AgentTurnContext) (*agent.AgentTurnDecision, error) {
+			for _, result := range turn.ToolResults {
+				data, ok := result.Details.(json.RawMessage)
+				if result.ToolName != h.resultTool || result.IsError || !ok {
+					continue
+				}
+				h.mu.Lock()
+				if h.turn != nil && h.turn.result.ToolResult == nil {
+					h.turn.result.ToolResult = data
+					// FinishTurn ends the agent loop before it polls steers. End the enclosing prompt too,
+					// so the coding session doesn't run compaction or an extension's settle continuation.
+					h.turn.finishResult()
+				}
+				h.mu.Unlock()
+				return &agent.AgentTurnDecision{Action: agent.AgentTurnEnd}, nil
+			}
+			return previous(ctx, turn)
+		})
+	}
 	h.session.SetCompactionTriggerTokens(c.CompactTokens)
 	// The listener sees every event, in order, before Prompt returns. Nothing reads the buffered event channel, which
 	// would otherwise fill during a long turn and hold the agent loop.
@@ -277,6 +310,11 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, send func(context
 	}
 	t := newTurn(id, activity)
 	t.finished = h.Finished
+	sendCtx := context.WithoutCancel(ctx)
+	if h.resultTool != "" {
+		sendCtx, t.finishResult = context.WithCancel(sendCtx)
+		defer t.finishResult()
+	}
 	h.mu.Lock()
 	h.turn = t
 	h.mu.Unlock()
@@ -284,7 +322,7 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, send func(context
 	h.running = true
 	h.queue.Unlock()
 	sent := make(chan error, 1)
-	h.sends.Go(func() { sent <- send(context.WithoutCancel(ctx)) })
+	h.sends.Go(func() { sent <- send(sendCtx) })
 	var err error
 	select {
 	case err = <-sent:
