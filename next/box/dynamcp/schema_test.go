@@ -142,8 +142,7 @@ func TestSharedFieldsAndTheToolDescriptionComeFromTheToolkit(t *testing.T) {
 	t.Fatal("no computer tool")
 }
 
-// A property only some of a tool's actions take names them, since the actions share one schema and each decodes strictly:
-// pr open takes no repo.
+// A property only some of a tool's actions take names them, since the actions share one schema and each decodes strictly.
 func TestAPropertySomeActionsTakeNamesThem(t *testing.T) {
 	tools, _, err := registry()
 	if err != nil {
@@ -154,7 +153,7 @@ func TestAPropertySomeActionsTakeNamesThem(t *testing.T) {
 			continue
 		}
 		repo := tool.InputSchema.Properties["repo"].Description
-		if !strings.Contains(repo, "For ") || strings.Contains(repo, "open") || !strings.Contains(repo, "status") {
+		if !strings.HasSuffix(repo, "For open, status, track and untrack.") {
 			t.Fatalf("repo says %q", repo)
 		}
 		if title := tool.InputSchema.Properties["title"].Description; !strings.HasSuffix(title, "For open.") {
