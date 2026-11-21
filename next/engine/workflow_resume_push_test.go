@@ -43,6 +43,9 @@ func TestAResumedRunOwnsTheBranchesOfItsChainAndNoOthers(t *testing.T) {
 	if err := w.store.AddRoomRepo(w.ctx, w.room, repo, true); err != nil {
 		t.Fatal(err)
 	}
+	if err := w.store.AddRoomRepo(w.ctx, w.room, "owner/secondary", false); err != nil {
+		t.Fatal(err)
+	}
 	first, firstCrew := w.start(w.owner, workflowScript)
 	w.endRun(firstCrew)
 	second, secondCrew := w.resume(first.Run)
@@ -70,6 +73,9 @@ func TestAResumedRunOwnsTheBranchesOfItsChainAndNoOthers(t *testing.T) {
 	}
 	if !w.canPush(repo, second.Session, branch(first.Session, "-0123456789ab")) {
 		t.Error("the second run cannot push the first run's branch")
+	}
+	if !w.canPush("owner/secondary", third.Session, branch(first.Session, "-0123456789ab")) {
+		t.Error("the third run cannot push the first run's branch to a second room repository")
 	}
 
 	// A resume reaches back along its own chain and nowhere else.

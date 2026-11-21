@@ -35,7 +35,7 @@ func pushTo(t *testing.T, rooms RoomRepositories, branch string) (string, bool) 
 	line := strings.Repeat("0", 40) + " " + strings.Repeat("1", 40) + " refs/heads/" + branch + "\x00report-status\n"
 	body := fmt.Sprintf("%04x%s0000PACK", len(line)+4, line)
 	w := httptest.NewRecorder()
-	Handler(target, transport, "secret", "ses_1", "room", rooms).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
+	Handler(target, transport, "secret", "ses_1", "room", rooms, defaultMain).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
 	return w.Body.String(), forwarded
 }
 

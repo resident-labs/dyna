@@ -62,36 +62,22 @@ func (a fakeAccess) OwnsPRBranch(context.Context, contract.RepoName, contract.Se
 	return false, nil
 }
 
+func (fakeAccess) RecordPushedBranches(context.Context, contract.RepoName, contract.RepoName, contract.SessionID, []string, time.Time) error {
+	return nil
+}
+
+func defaultMain(context.Context, contract.RepoName, bool) (string, error) { return "main", nil }
+
 type roundTrip func(*http.Request) (*http.Response, error)
 
 func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
-func TestOtherRoomRepositoryAllowsFetchButRejectsPush(t *testing.T) {
-	target, _ := url.Parse("https://github.com")
-	called := 0
-	transport := roundTrip(func(*http.Request) (*http.Response, error) {
-		called++
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("ok"))}, nil
-	})
-	handler := Handler(target, transport, "secret", "ses_1", "room", routeAccess())
-	fetch := httptest.NewRecorder()
-	handler.ServeHTTP(fetch, httptest.NewRequest("GET", "/git/owner/other.git/info/refs?service=git-upload-pack", nil))
-	advertise := httptest.NewRecorder()
-	handler.ServeHTTP(advertise, httptest.NewRequest("GET", "/git/owner/other.git/info/refs?service=git-receive-pack", nil))
-	body := &packReader{header: "pack"}
-	push := httptest.NewRecorder()
-	handler.ServeHTTP(push, httptest.NewRequest("POST", "/git/owner/other.git/git-receive-pack", body))
-	if fetch.Code != 200 || advertise.Code != http.StatusForbidden || push.Code != http.StatusForbidden || !body.drained || called != 1 {
-		t.Fatalf("fetch %d, advertisement %d, push %d, drained %v, calls %d", fetch.Code, advertise.Code, push.Code, body.drained, called)
-	}
-}
 
 func TestRejectsOtherRooms(t *testing.T) {
 	target, _ := url.Parse("https://github.com")
 	called := false
 	transport := roundTrip(func(*http.Request) (*http.Response, error) { called = true; return nil, nil })
 	w := httptest.NewRecorder()
-	Handler(target, transport, "secret", "ses_1", "room", fakeAccess{}).ServeHTTP(w, httptest.NewRequest("GET", "/git/owner/repo.git/info/refs?service=git-upload-pack", nil))
+	Handler(target, transport, "secret", "ses_1", "room", fakeAccess{}, defaultMain).ServeHTTP(w, httptest.NewRequest("GET", "/git/owner/repo.git/info/refs?service=git-upload-pack", nil))
 	if w.Code != http.StatusForbidden || called {
 		t.Fatalf("status %d, called %v", w.Code, called)
 	}
@@ -122,7 +108,7 @@ func TestRejectsUnownedPushBeforeUpstream(t *testing.T) {
 	line := strings.Repeat("0", 40) + " " + strings.Repeat("1", 40) + " refs/heads/main\x00report-status\n"
 	body := &packReader{header: fmt.Sprintf("%04x%s0000", len(line)+4, line)}
 	w := httptest.NewRecorder()
-	Handler(target, transport, "secret", "ses_1", "room", routeAccess()).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", body))
+	Handler(target, transport, "secret", "ses_1", "room", routeAccess(), defaultMain).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", body))
 	if called || !body.drained || !strings.Contains(w.Body.String(), "ng refs/heads/main not owned by this session") {
 		t.Fatalf("upstream called %v, response %q", called, w.Body.String())
 	}
@@ -133,7 +119,7 @@ func TestRejectsSidebandPushWithSidebandReport(t *testing.T) {
 	line := strings.Repeat("0", 40) + " " + strings.Repeat("1", 40) + " refs/heads/main\x00report-status side-band-64k\n"
 	body := fmt.Sprintf("%04x%s0000PACK", len(line)+4, line)
 	w := httptest.NewRecorder()
-	Handler(target, roundTrip(func(*http.Request) (*http.Response, error) { t.Fatal("upstream called"); return nil, nil }), "secret", "ses_1", "room", routeAccess()).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
+	Handler(target, roundTrip(func(*http.Request) (*http.Response, error) { t.Fatal("upstream called"); return nil, nil }), "secret", "ses_1", "room", routeAccess(), defaultMain).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
 	if len(w.Body.Bytes()) < 5 || w.Body.Bytes()[4] != 1 || !strings.Contains(w.Body.String(), "ng refs/heads/main") {
 		t.Fatalf("invalid sideband report %q", w.Body.String())
 	}
@@ -154,7 +140,7 @@ func TestForwardsOwnedPushAndReplacesCredential(t *testing.T) {
 	req := httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body))
 	req.Header.Set("Authorization", "bad")
 	w := httptest.NewRecorder()
-	Handler(target, transport, "secret", "ses_1", "room", routeAccess()).ServeHTTP(w, req)
+	Handler(target, transport, "secret", "ses_1", "room", routeAccess(), defaultMain).ServeHTTP(w, req)
 	if w.Code != 200 {
 		t.Fatalf("status %d", w.Code)
 	}
@@ -175,7 +161,7 @@ func TestTopicBranchPushAuthorization(t *testing.T) {
 			line := strings.Repeat("0", 40) + " " + strings.Repeat("1", 40) + " refs/heads/" + tc.branch + "\x00report-status\n"
 			body := fmt.Sprintf("%04x%s0000PACK", len(line)+4, line)
 			w := httptest.NewRecorder()
-			Handler(target, transport, "secret", "ses_1", "room", routeAccess()).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
+			Handler(target, transport, "secret", "ses_1", "room", routeAccess(), defaultMain).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
 			if called != tc.allowed {
 				t.Fatalf("called %v, response %s", called, w.Body.String())
 			}
@@ -194,7 +180,7 @@ func TestRefusesAPushToAnArchiveRef(t *testing.T) {
 	line := strings.Repeat("0", 40) + " " + strings.Repeat("1", 40) + " refs/dyna/archive/ses_1\x00report-status\n"
 	body := fmt.Sprintf("%04x%s0000PACK", len(line)+4, line)
 	w := httptest.NewRecorder()
-	Handler(target, transport, "secret", "ses_1", "room", routeAccess()).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
+	Handler(target, transport, "secret", "ses_1", "room", routeAccess(), defaultMain).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
 	if called {
 		t.Fatalf("the push went upstream: %s", w.Body.String())
 	}
@@ -213,14 +199,14 @@ func TestForwardsShallowClonePush(t *testing.T) {
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("ok"))}, nil
 	})
 	w := httptest.NewRecorder()
-	Handler(target, transport, "secret", "ses_1", "room", routeAccess()).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
+	Handler(target, transport, "secret", "ses_1", "room", routeAccess(), defaultMain).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
 	if w.Code != 200 {
 		t.Fatalf("status %d: %s", w.Code, w.Body.String())
 	}
 	// A shallow line after a command is not part of the protocol.
 	late := fmt.Sprintf("%04x%s%04x%s0000PACK", len(line)+4, line, len(shallow)+4, shallow)
 	w = httptest.NewRecorder()
-	Handler(target, transport, "secret", "ses_1", "room", routeAccess()).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(late)))
+	Handler(target, transport, "secret", "ses_1", "room", routeAccess(), defaultMain).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(late)))
 	if w.Code != 400 {
 		t.Fatalf("late shallow line: status %d", w.Code)
 	}

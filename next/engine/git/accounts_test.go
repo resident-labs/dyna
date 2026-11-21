@@ -66,7 +66,7 @@ func TestRoomCredentialsOnGitRouteAndMirror(t *testing.T) {
 			}
 			return &http.Response{StatusCode: 401, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("Bad credentials"))}, nil
 		})
-		handler := Handler(target, transport, token, "ses_1", tc.room, routeAccess())
+		handler := Handler(target, transport, token, "ses_1", tc.room, routeAccess(), defaultMain)
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest("GET", "/git/owner/repo.git/info/refs?service=git-upload-pack", nil))
 		if response.Code != 401 || seen != 1 {

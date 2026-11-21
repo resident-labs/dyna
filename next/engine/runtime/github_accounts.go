@@ -29,7 +29,7 @@ func accountTools(ctx context.Context, st accountToolStore, credentials *githuba
 		return githubmcp.Handler(ctx, client.Token, client.Reads(client.Transport), func(ctx context.Context, repo contract.RepoName, number int) (bool, error) {
 			return st.OwnsPR(ctx, repo, githubwrites.SessionFrom(ctx), number)
 		}, func(ctx context.Context, repo contract.RepoName, branch string) (bool, error) {
-			return enginegit.CanPushBranch(ctx, st, repo, githubwrites.SessionFrom(ctx), branch)
+			return enginegit.CanRunActionsOnBranch(ctx, st, repo, githubwrites.SessionFrom(ctx), branch)
 		})
 	}
 	if len(builders) > 0 {
