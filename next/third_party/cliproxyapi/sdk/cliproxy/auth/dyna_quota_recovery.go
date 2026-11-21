@@ -8,10 +8,11 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 )
 
-// Dyna: a fresh usage read can disprove an older credential-wide rejection.
+// Dyna: a fresh usage read can disprove an older credential-wide rejection, for Claude and Codex, whose
+// limits an owner can reset before the rejection's own deadline.
 // Do not use successful inference alone: it may be an in-flight request or a
 // model outside the exhausted window. Independent model failures stay intact.
-func (m *Manager) reconcileClaudeQuotaReading(id string, hint QuotaResetHint) {
+func (m *Manager) reconcileQuotaReading(id string, hint QuotaResetHint) {
 	now := time.Now()
 	if !hint.current(now) || hint.Prepaid || hint.Empty {
 		return
@@ -32,7 +33,7 @@ func (m *Manager) reconcileClaudeQuotaReading(id string, hint QuotaResetHint) {
 	defer release()
 	m.mu.Lock()
 	a := m.auths[id]
-	if a == nil || a.Provider != "claude" || a.RegistrationEpoch != hint.registrationEpoch ||
+	if a == nil || (a.Provider != "claude" && a.Provider != "codex") || a.RegistrationEpoch != hint.registrationEpoch ||
 		a.Quota.Reason != "credential_quota" || !a.Quota.Exceeded || !hint.ObservedAt.After(a.UpdatedAt) || hasUnauthorizedAuthFailure(a) {
 		m.mu.Unlock()
 		return

@@ -230,7 +230,7 @@ func (m *Manager) publishQuotaReading(authID string, hint QuotaResetHint, epoch 
 	}
 	board.hints[authID] = hint
 	board.mu.Unlock()
-	m.reconcileClaudeQuotaReading(authID, hint)
+	m.reconcileQuotaReading(authID, hint)
 }
 
 // SetQuotaRefresher installs the reader that cold picks start. refresh reports whether

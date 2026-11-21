@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-func TestDynaClaudeQuotaRecoveryEvidence(t *testing.T) {
+func TestDynaQuotaRecoveryEvidence(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		mutate  func(*Auth, *QuotaResetHint)
@@ -18,7 +18,8 @@ func TestDynaClaudeQuotaRecoveryEvidence(t *testing.T) {
 		{"empty", func(_ *Auth, h *QuotaResetHint) { h.Windows = nil }, false},
 		{"exhausted", func(_ *Auth, h *QuotaResetHint) { h.Windows[0].UsedPercent = 100 }, false},
 		{"unauthorized", func(a *Auth, _ *QuotaResetHint) { a.LastError = &Error{HTTPStatus: 401} }, false},
-		{"other-provider", func(a *Auth, _ *QuotaResetHint) { a.Provider = "codex" }, false},
+		{"codex", func(a *Auth, _ *QuotaResetHint) { a.Provider = "codex" }, true},
+		{"other-provider", func(a *Auth, _ *QuotaResetHint) { a.Provider = "antigravity" }, false},
 		{"new-registration", func(a *Auth, _ *QuotaResetHint) { a.RegistrationEpoch++ }, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
