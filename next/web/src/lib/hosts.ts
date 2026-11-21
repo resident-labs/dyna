@@ -26,7 +26,7 @@ export function hang(button: Pick<DOMRect, "top" | "right" | "bottom">, width: n
 export const diskLow = (h: HostSummary) => h.diskLow && !h.execOnly;
 
 // One tile on a Home card: the label, the percent large with an optional muted unit after it, a bar, and the text.
-export type Meter = { label: string; text: string; percent: number; busy: boolean; unit?: string };
+export type Meter = { label: string; text: string; percent: number; busy: boolean; unit?: string; detail?: string };
 
 // One card per machine. When the engine runs on a registered host, host.list reports that machine twice: the control
 // plane with whole-machine figures, and the registered host with only dyna.slice's use of its allowance (cores less

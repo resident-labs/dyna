@@ -43,8 +43,9 @@ type dynaQuotaEntryFields struct {
 // dynaQuotaWindowFields extends authFileQuotaWindow. Non-Claude windows use the
 // kinds five_hour, weekly, monthly and other.
 type dynaQuotaWindowFields struct {
-	Name    string `json:"name,omitempty"`
-	Seconds int64  `json:"seconds,omitempty"`
+	Name    string   `json:"name,omitempty"`
+	Seconds int64    `json:"seconds,omitempty"`
+	Models  []string `json:"models,omitempty"`
 }
 
 // dynaQuotaBalance is a prepaid balance. It is for display, not a limit.

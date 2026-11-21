@@ -178,6 +178,11 @@ func devAccounts(now time.Time) []devAccount {
 		account(contract.ProviderKimi, "kimi", "kimi", "kimi", ""),
 		account(contract.ProviderZAI, "openai-compatible-zai", "zai", "zai", ""),
 		account(contract.ProviderMeta, "meta", "meta", "meta", "", window(contract.UsageWindowFiveHour, 12, 2*time.Hour), window(contract.UsageWindowWeekly, 5, 76*time.Hour)),
+		account(contract.ProviderAntigravity, "antigravity", "antigravity", "Google AI Ultra", "",
+			contract.UsageWindow{Name: "claude", Kind: contract.UsageWindowOther, Model: "Claude and GPT-OSS models", ResetsAt: now.Add(4*time.Hour + 58*time.Minute),
+				Models: []string{"claude-opus-5-5-high", "claude-sonnet-5-5-high", "gpt-oss-120b-medium"}},
+			contract.UsageWindow{Name: "gemini", Kind: contract.UsageWindowOther, Model: "Gemini models", UsedPercent: 0.94, ResetsAt: now.Add(4*time.Hour + 40*time.Minute),
+				Models: []string{"gemini-3.8-flash-tiered", "gemini-3-flash", "gemini-3.1-flash-image", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite"}}),
 		{contract.ProviderDeepSeek, contract.AccountUsage{AccountID: "deepseek", Provider: "openai-compatible-deepseek", Label: "deepseek", Balances: []contract.UsageBalance{{Currency: "CNY", Amount: "110.00"}, {Currency: "USD", Amount: "3.50"}}}},
 		account(contract.ProviderAnthropic, "claude", "unused", "unused.seat", "", model("Fable", 0)),
 		account(contract.ProviderAnthropic, "claude", "calm", "review.bot", "", window(contract.UsageWindowFiveHour, 0, 0), window(contract.UsageWindowWeekly, 60, 24*time.Hour)),
@@ -199,7 +204,7 @@ func (d devService) AccountsQuota(context.Context, contract.Principal, contract.
 	if !d.empty {
 		for _, a := range d.accounts(time.Now()) {
 			// The account each provider's routing would pick next; the rest wait in Hidden.
-			a.usage.Active = slices.Contains([]contract.AccountID{"single", "team", "meta", "deepseek"}, a.usage.AccountID)
+			a.usage.Active = slices.Contains([]contract.AccountID{"single", "team", "meta", "deepseek", "antigravity"}, a.usage.AccountID)
 			response.Accounts = append(response.Accounts, a.usage)
 		}
 	}

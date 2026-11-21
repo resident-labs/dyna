@@ -153,5 +153,6 @@ export function windowMeter(w: UsageWindow, now: number): Meter {
   const used = usedOf(w);
   const resets = until(w.resetsAt, now);
   const text = !limitReached(w, now) ? `${100 - used}% left` + (resets ? ` · ${resets}` : "") : resets ? `Resets in ${resets}` : "Limit reached";
-  return { label: windowLabel(w), percent: used, unit: "used", busy: used >= 90, text };
+  const detail = w.models?.length ? { detail: w.models.join("\n") } : {};
+  return { label: windowLabel(w), percent: used, unit: "used", busy: used >= 90, text, ...detail };
 }

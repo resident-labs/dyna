@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -141,7 +142,7 @@ func TestGetAuthFileQuotaReportsClaudeOAuthWindows(t *testing.T) {
 		t.Fatalf("windows = %#v, want %#v", entry.Windows, want)
 	}
 	for i := range want {
-		if entry.Windows[i] != want[i] {
+		if !reflect.DeepEqual(entry.Windows[i], want[i]) {
 			t.Fatalf("window %d = %#v, want %#v", i, entry.Windows[i], want[i])
 		}
 	}
@@ -202,7 +203,7 @@ func TestParseClaudeOAuthUsageFallsBackToLegacyWindows(t *testing.T) {
 		t.Fatalf("windows = %#v, want %#v", windows, want)
 	}
 	for i := range want {
-		if windows[i] != want[i] {
+		if !reflect.DeepEqual(windows[i], want[i]) {
 			t.Fatalf("window %d = %#v, want %#v", i, windows[i], want[i])
 		}
 	}

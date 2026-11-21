@@ -3,9 +3,11 @@ package model
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -223,6 +225,20 @@ func TestQuotaReadsEveryProviderThroughOneEndpoint(t *testing.T) {
 	now = now.Add(6 * time.Minute)
 	if _, err := q.Read(context.Background()); err != nil || calls != 2 {
 		t.Fatalf("cache did not expire: calls = %d, error = %v", calls, err)
+	}
+}
+
+func TestAntigravityQuotaNormalizesPoolMembership(t *testing.T) {
+	data := json.RawMessage(`{"files":[{"auth_index":"index","state":"ok","windows":[
+		{"kind":"other","name":"shared","scope":"Claude and GPT-OSS models","models":["claude-opus-5-5-high","gpt-oss-120b-medium"],"utilization":1}
+	]}]}`)
+	usage, _ := quotaUsage(Credential{Index: "index", Provider: "antigravity"}, "ultra", data, nil)
+	if len(usage.Windows) != 1 {
+		t.Fatalf("windows = %#v, want one", usage.Windows)
+	}
+	w := usage.Windows[0]
+	if w.Model != "Claude and GPT-OSS models" || !slices.Equal(w.Models, []string{"claude-opus-5-5-high", "gpt-oss-120b-medium"}) {
+		t.Fatalf("pool = %#v", w)
 	}
 }
 

@@ -108,6 +108,28 @@ test("Antigravity shows model quota without guessing a period or marking the ent
   assert.equal(outOfLimit({ windows: [neon, opus], balances: [] }, now), false);
 });
 
+test("Antigravity pool meters keep members, resets and scope, even at zero use", () => {
+  const now = Date.parse("2026-11-20T10:00:00Z");
+  const thirdParty: UsageWindow = {
+    name: "claude", kind: "other", seconds: 0, model: "Claude and GPT-OSS models", usedPercent: 0,
+    models: ["claude-opus-5-5-high", "gpt-oss-120b-medium"], resetsAt: "2026-11-20T14:58:00Z",
+  };
+  const gemini: UsageWindow = {
+    ...thirdParty, name: "gemini", model: "Gemini models", usedPercent: 0.94,
+    models: ["gemini-3-flash", "gemini-3.1-flash-lite"], resetsAt: "2026-11-20T14:40:00Z",
+  };
+  const [row] = usageRows([usageOf("ultra", "Ultra", "antigravity", [thirdParty, gemini])]);
+  assert.equal(row.windows.length, 2);
+  assert.deepEqual(row.windows.map(w => windowMeter(w, now)), [
+    { label: "Claude and GPT-OSS models", percent: 0, unit: "used", busy: false, text: "100% left · 4\u00a0h\u00a058\u00a0min",
+      detail: "claude-opus-5-5-high\ngpt-oss-120b-medium" },
+    { label: "Gemini models", percent: 1, unit: "used", busy: false, text: "99% left · 4\u00a0h\u00a040\u00a0min",
+      detail: "gemini-3-flash\ngemini-3.1-flash-lite" },
+  ]);
+  assert.equal(busiestWindow([row]), "Ultra · Gemini models 1% used");
+  assert.equal(outOfLimit({ ...row, windows: [{ ...gemini, usedPercent: 100 }, thirdParty] }, now), false);
+});
+
 test("Usage keeps every account that reports, and active needs both routing and a good sign-in", () => {
   const list: AccountsListResponse = { providers: [], accounts: (["connected", "quota_low", "unknown", "failed"] as const).map(state => ({ id: state, provider: "anthropic", label: "", rooms: null, preferred: null, state })) };
   const rows = usageRows(["connected", "quota_low", "unknown", "failed", "new"].map(id => usageOf(id, id, "claude")), list);
