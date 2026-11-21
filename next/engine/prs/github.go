@@ -475,10 +475,14 @@ func summarizeContexts(rollup *gqlRollup, rule ciRule, pr int) (contract.PrCI, [
 				finished[key] = max(finished[key], run.RunNumber)
 			}
 		}
-		ci, cancelled := contract.PrCISuccess, []string{}
+		// A head whose every context was skipped ran nothing: GitHub skips a conflicting PR's pull_request runs, so it is no CI, not a pass.
+		ci, cancelled, ran := contract.PrCISuccess, []string{}, false
 		for i, check := range rollup.Contexts.Nodes {
 			if check.Conclusion == "CANCELLED" && keys[i] != nil && finished[*keys[i]] > check.CheckSuite.WorkflowRun.RunNumber {
 				continue
+			}
+			if check.Conclusion != "SKIPPED" {
+				ran = true
 			}
 			name := check.Name
 			if check.Type == "StatusContext" {
@@ -502,6 +506,9 @@ func summarizeContexts(rollup *gqlRollup, rule ciRule, pr int) (contract.PrCI, [
 		}
 		if ci != contract.PrCIFailure && len(cancelled) > 0 {
 			ci, failed = contract.PrCICancelled, cancelled
+		}
+		if !ran {
+			return contract.PrCINone, nil
 		}
 		return ci, failed
 	}

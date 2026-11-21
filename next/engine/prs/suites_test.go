@@ -221,3 +221,27 @@ func TestMainCILeavesOutDispatchedRuns(t *testing.T) {
 		})
 	}
 }
+
+// Model horizon sunrise#3932: a conflicting PR runs no pull_request workflows, and its head's only check was a skipped job.
+// Skipped contexts alone are no CI, never a pass; one that ran beside them still decides.
+func TestOnlySkippedChecksAreNoCI(t *testing.T) {
+	suites := []fakegithub.Suite{{Status: "COMPLETED", Conclusion: "SKIPPED", App: "github-actions", Workflow: "proof", Runs: 1}}
+	for _, step := range []struct {
+		name   string
+		checks []fakegithub.Check
+		want   contract.PrCI
+	}{
+		{"only skipped", []fakegithub.Check{{Name: "Proof", Conclusion: "SKIPPED"}}, contract.PrCINone},
+		{"skipped beside a pass", []fakegithub.Check{{Name: "Proof", Conclusion: "SKIPPED"}, {Name: "build", Conclusion: "SUCCESS"}}, contract.PrCISuccess},
+		{"skipped beside a neutral run", []fakegithub.Check{{Name: "Proof", Conclusion: "SKIPPED"}, {Name: "scan", Conclusion: "NEUTRAL"}}, contract.PrCISuccess},
+	} {
+		t.Run(step.name, func(t *testing.T) {
+			c, server, at := client(t)
+			s := slices.Clone(suites)
+			s[0].CreatedAt = at.Now()
+			server.Add(fakegithub.Pull{Repo: "owner/repo", Number: 1, Head: sha, Rollup: "SUCCESS", Checks: step.checks, Suites: s})
+			server.SetCommit("owner/repo", sha, fakegithub.Commit{Rollup: "SUCCESS", Checks: step.checks, Suites: s})
+			assertBothCI(t, c, step.want)
+		})
+	}
+}
