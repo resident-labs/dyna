@@ -39,4 +39,8 @@
   /* One column grid for every card, so a card of one window keeps a tile of the same width and bars compare across
      cards. 150 px keeps a reset time readable; several model-specific windows wrap. */
   .card .tiles { grid-auto-flow: row; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  @supports (grid-template-rows: subgrid) {
+    /* Share the label, figure, bar and reset rows so a wrapped label cannot stagger the meters. */
+    .tiles > :global(.tile) { grid-row: span 4; grid-template-rows: subgrid; }
+  }
 </style>
