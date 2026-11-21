@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -56,6 +57,29 @@ func TestDynaQuotaHintClaudeWindows(t *testing.T) {
 	}
 	if fable := byName["Fable"]; fable.UsedPercent != 100 || !fable.ResetAt.IsZero() {
 		t.Fatalf("Go's zero time should read as no reset: %+v", fable)
+	}
+}
+
+func TestDynaQuotaHintKeepsAntigravityRoutingModelScoped(t *testing.T) {
+	usage := dynaParse(t, parseAntigravityUsage, `{"models":{
+		"gemini-3-flash":{"quotaInfo":{"remainingFraction":0,"resetTime":"2026-10-06T16:40:00Z"}},
+		"gemini-3.1-flash-image":{"quotaInfo":{"remainingFraction":0,"resetTime":"2026-10-06T16:40:00Z"}},
+		"claude-opus-5-5-high":{"quotaInfo":{"remainingFraction":0.75,"resetTime":"2026-10-06T16:58:00Z"}}
+	}}`)
+	entry := authFileQuotaEntry{Provider: "antigravity", ObservedAt: dynaUsageNow.Format(time.RFC3339)}
+	entry.setUsage(usage)
+	if len(entry.Windows) != 2 {
+		t.Fatalf("display windows = %+v, want two pools", entry.Windows)
+	}
+	hint, ok := dynaQuotaHint(entry)
+	want := []coreauth.QuotaResetWindow{
+		{Model: "antigravity/claude-opus-5-5-high", UsedPercent: 25, ResetAt: dynaUsageNow.Add(4*time.Hour + 58*time.Minute)},
+		{Model: "antigravity/gemini-3-flash", UsedPercent: 100, ResetAt: dynaUsageNow.Add(4*time.Hour + 40*time.Minute)},
+		{Model: "antigravity/gemini-3.1-flash-image", UsedPercent: 100, ResetAt: dynaUsageNow.Add(4*time.Hour + 40*time.Minute)},
+	}
+	// Only the two Gemini member IDs are spent, not unrelated models or the account as a whole.
+	if !ok || hint.Empty || !slices.Equal(hint.Windows, want) {
+		t.Fatalf("routing hint = %+v; want %+v", hint, want)
 	}
 }
 

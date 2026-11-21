@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/auth/antigravity"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	"golang.org/x/sync/singleflight"
@@ -147,7 +148,17 @@ func dynaQuotaHint(entry authFileQuotaEntry) (coreauth.QuotaResetHint, bool) {
 		hint.Windows = dynaClaudeResetWindows(entry.Windows)
 	case dynaUsageOK:
 		for _, window := range entry.Windows {
-			hint.Windows = append(hint.Windows, coreauth.QuotaResetWindow{Model: window.Scope, Seconds: window.Seconds, UsedPercent: window.Utilization, ResetAt: dynaResetTime(window.ResetsAt)})
+			read := coreauth.QuotaResetWindow{Model: window.Scope, Seconds: window.Seconds, UsedPercent: window.Utilization, ResetAt: dynaResetTime(window.ResetsAt)}
+			if entry.Provider == "antigravity" && len(window.Models) != 0 {
+				// The display label is not a model ID. Publish the same limit for
+				// each pool member so routing still matches its qualified ID.
+				for _, model := range window.Models {
+					read.Model = antigravity.DynaModelPrefix + "/" + model
+					hint.Windows = append(hint.Windows, read)
+				}
+			} else {
+				hint.Windows = append(hint.Windows, read)
+			}
 		}
 		hint.Prepaid = len(entry.Windows) == 0 && len(entry.Balances) != 0
 		hint.Empty = len(entry.Balances) != 0
