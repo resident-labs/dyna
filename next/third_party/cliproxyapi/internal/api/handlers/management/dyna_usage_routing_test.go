@@ -66,7 +66,7 @@ func TestDynaQuotaHintKeepsAntigravityRoutingModelScoped(t *testing.T) {
 		"gemini-3.1-flash-image":{"quotaInfo":{"remainingFraction":0,"resetTime":"2026-10-06T16:40:00Z"}},
 		"claude-opus-5-5-high":{"quotaInfo":{"remainingFraction":0.75,"resetTime":"2026-10-06T16:58:00Z"}}
 	}}`)
-	entry := authFileQuotaEntry{Provider: "antigravity", ObservedAt: dynaUsageNow.Format(time.RFC3339)}
+	entry := authFileQuotaEntry{Provider: "Antigravity", ObservedAt: dynaUsageNow.Format(time.RFC3339)}
 	entry.setUsage(usage)
 	if len(entry.Windows) != 2 {
 		t.Fatalf("display windows = %+v, want two pools", entry.Windows)

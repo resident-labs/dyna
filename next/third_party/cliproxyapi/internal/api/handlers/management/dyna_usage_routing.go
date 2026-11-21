@@ -149,7 +149,7 @@ func dynaQuotaHint(entry authFileQuotaEntry) (coreauth.QuotaResetHint, bool) {
 	case dynaUsageOK:
 		for _, window := range entry.Windows {
 			read := coreauth.QuotaResetWindow{Model: window.Scope, Seconds: window.Seconds, UsedPercent: window.Utilization, ResetAt: dynaResetTime(window.ResetsAt)}
-			if entry.Provider == "antigravity" && len(window.Models) != 0 {
+			if len(window.Models) != 0 && strings.EqualFold(entry.Provider, "antigravity") {
 				// The display label is not a model ID. Publish the same limit for
 				// each pool member so routing still matches its qualified ID.
 				for _, model := range window.Models {
