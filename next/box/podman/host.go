@@ -233,13 +233,25 @@ func (h *Host) bind(ctx context.Context, f box.Forward) error {
 	var err error
 	if f.Box != "" {
 		_, err = h.execute(ctx, "bash", "-c", `mkdir -p -- "$1" && chmod 0700 -- "$1" && rm -f -- "$2"`, "dyna", filepath.Dir(f.HostPath), f.HostPath)
+	} else if f.Service != "" {
+		_, err = h.execute(ctx, "bash", "-c", `mkdir -p -- "$1" && chmod 0755 -- "$1" && rm -f -- "$2"`, "dyna", filepath.Dir(f.HostPath), f.HostPath)
 	} else {
 		_, err = h.execute(ctx, "bash", "-c", `mkdir -p -- "$1" && rm -f -- "$2"`, "dyna", filepath.Dir(f.HostPath), f.HostPath)
 	}
 	if err != nil {
 		return err
 	}
-	return h.control(ctx, "forward", "-R", spec)
+	if err := h.control(ctx, "forward", "-R", spec); err != nil {
+		return err
+	}
+	if f.Service != "" {
+		// Service containers run with UserNS=nomap (subordinate UIDs), so the forwarded socket created by sshd
+		// (mode 0600, owned by the host user) needs world rw inside its per-service folder (under 0700 HostData).
+		if _, err := h.execute(ctx, "chmod", "0666", "--", f.HostPath); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func validateForward(f box.Forward) error {
 	if strings.ContainsAny(f.HostPath+f.EnginePath, ":\n") || !filepath.IsAbs(f.HostPath) || !filepath.IsAbs(f.EnginePath) {
@@ -247,6 +259,9 @@ func validateForward(f box.Forward) error {
 	}
 	if f.Box != "" && (filepath.Base(f.HostPath) != box.EngineSocket || filepath.Base(filepath.Dir(f.HostPath)) != string(f.Box)) {
 		return errors.New("invalid box socket path")
+	}
+	if f.Service != "" && (filepath.Base(f.HostPath) != box.FeedSocket || filepath.Base(filepath.Dir(f.HostPath)) != string(f.Service)) {
+		return errors.New("invalid service socket path")
 	}
 	return nil
 }
@@ -295,6 +310,10 @@ func (h *Host) RemoveForward(ctx context.Context, f box.Forward) error {
 		}
 		delete(h.forwards, f)
 		delete(h.bound, f)
+	}
+	if f.Service != "" {
+		_, err := h.execute(ctx, "bash", "-c", `rm -f -- "$1" && { [ ! -d "$2" ] || rmdir -- "$2"; }`, "dyna", f.HostPath, filepath.Dir(f.HostPath))
+		return err
 	}
 	return nil
 }

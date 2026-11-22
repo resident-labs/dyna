@@ -826,3 +826,49 @@ func TestStoppedServiceIsStoppedAgainIfItsUnitComesBackRunning(t *testing.T) {
 		t.Fatalf("stopped row hid a running unit: %+v unit=%+v", row.Service, rig.host.Service.Units[row.ID])
 	}
 }
+
+type feedServiceHosts struct {
+	serviceHosts
+	ensured []contract.ServiceID
+	removed []contract.ServiceID
+}
+
+func (f *feedServiceHosts) EnsureFeedSocket(_ context.Context, _ contract.HostName, id contract.ServiceID, _ contract.RoomID, _ contract.ServiceName) (string, error) {
+	f.ensured = append(f.ensured, id)
+	return "/host/sock/" + string(id), nil
+}
+
+func (f *feedServiceHosts) RemoveFeedSocket(_ context.Context, _ contract.HostName, id contract.ServiceID) error {
+	f.removed = append(f.removed, id)
+	return nil
+}
+
+func TestFeedServiceLifecycleEnsuresAndRemovesFeedSocket(t *testing.T) {
+	rig := newServiceRig(t)
+	feeds := &feedServiceHosts{serviceHosts: serviceHosts{rig.host}}
+	rig.r.SetServices(feeds, ServiceTimings{Start: 50 * time.Millisecond, Stable: 20 * time.Millisecond, Health: 50 * time.Millisecond, Poll: time.Millisecond, CheckEvery: time.Hour})
+
+	spec := contract.ServiceSpec{Name: "agent-chat", Image: digestImage, Feed: true}
+	rig.declare(spec)
+	row := rig.settle()
+	if row.State != contract.ServiceRunning {
+		t.Fatalf("state = %s, want running", row.State)
+	}
+	if !slices.Contains(feeds.ensured, row.ID) {
+		t.Fatalf("EnsureFeedSocket not called: ensured=%v", feeds.ensured)
+	}
+	unit := rig.host.Service.Files[row.ID]
+	if !strings.Contains(unit, "Volume=/host/sock/"+string(row.ID)+":/run/dyna-feed:ro") ||
+		!strings.Contains(unit, `Environment="DYNA_FEED_SOCKET=/run/dyna-feed/feed.sock"`) {
+		t.Fatalf("feed quadlet missing socket mount/env:\n%s", unit)
+	}
+
+	// Removing the feed service removes its feed socket and host forward.
+	if err := rig.r.RemoveService(rig.ctx, row.ID); err != nil {
+		t.Fatal(err)
+	}
+	rig.settle()
+	if !slices.Contains(feeds.removed, row.ID) {
+		t.Fatalf("RemoveFeedSocket not called on remove: removed=%v", feeds.removed)
+	}
+}

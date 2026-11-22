@@ -80,6 +80,13 @@ const (
 	ServiceDefaultDisk  = ServiceSize("1GiB")
 	// ServiceImageEstimate is the size admission assumes for an image no host has measured yet.
 	ServiceImageEstimate = 1 << 30
+	// Feed service socket path and limits (spec 5.18).
+	ServiceFeedSocketDir  = "/run/dyna-feed"
+	ServiceFeedSocketPath = "/run/dyna-feed/feed.sock"
+	ServiceFeedTextMax    = 16 << 10 // 16 KiB inbound text limit
+	ServiceFeedDataMax    = 32 << 10 // 32 KiB inbound data limit
+	ServiceFeedRatePerMin = 60       // max 60 inbound calls per minute per feed service
+	ServiceFeedOutboxMax  = 64 << 10 // 64 KiB outbound message text limit
 )
 
 // ServiceSpec is the declaration: one shape for every kind of service. Only Name and Image are required, and Parse fills the
@@ -98,6 +105,8 @@ type ServiceSpec struct {
 	Host    HostName          `json:"host,omitempty" desc:"A host in the room's rule. Without it admission picks one. Once placed the service stays."`
 	Restart ServiceRestart    `json:"restart,omitempty" desc:"always (default) or on-failure."`
 	Health  []string          `json:"health,omitempty" desc:"A command run in the container to gate an update. Without it, ten seconds running counts as healthy."`
+	Feed    bool              `json:"feed,omitempty" desc:"Mount a per-service engine Unix socket at DYNA_FEED_SOCKET for inbound messages and an outbound queue."`
+	Senders []string          `json:"senders,omitempty" desc:"Sessions allowed to call service send for this feed (by name or ID). Default is root only."`
 }
 
 // PortProto is the protocol of a published port.
@@ -218,6 +227,21 @@ func (s ServiceSpec) Parse() (ServiceParts, error) {
 		p.Ports = append(p.Ports, binding)
 		s.Ports[i] = ServicePort(fmt.Sprintf("%d:%d/%s", binding.Host, binding.Container, binding.Proto))
 	}
+	if len(s.Senders) > 0 {
+		if !s.Feed {
+			return p, fmt.Errorf("senders requires feed: true")
+		}
+		seenSenders := map[string]bool{}
+		s.Senders = slices.Clone(s.Senders)
+		for i, sender := range s.Senders {
+			trimmed := strings.TrimSpace(sender)
+			if trimmed == "" || trimmed != sender || len(trimmed) > 64 || hasControl(trimmed) || strings.ContainsAny(trimmed, " \t") || seenSenders[trimmed] {
+				return p, fmt.Errorf("sender %q: a sender is a unique non-empty session name or ID with no whitespace", sender)
+			}
+			seenSenders[trimmed] = true
+			s.Senders[i] = trimmed
+		}
+	}
 	p.Spec = s
 	return p, nil
 }
@@ -279,6 +303,13 @@ type ServiceSecretStatus struct {
 	Set  bool   `json:"set"`
 }
 
+// ServiceFeedStats holds feed counters and last inbound message time for a feed service.
+type ServiceFeedStats struct {
+	LastMessageAt *time.Time `json:"lastMessageAt,omitempty"`
+	MessagesIn    int64      `json:"messagesIn"`
+	MessagesOut   int64      `json:"messagesOut"`
+}
+
 // Service is a declaration with what the engine observed of it.
 type Service struct {
 	ID         ServiceID             `json:"id"`
@@ -301,6 +332,7 @@ type Service struct {
 	Restarts   int                   `json:"restarts"`
 	Since      time.Time             `json:"since,omitzero"`
 	Secrets    []ServiceSecretStatus `json:"secrets,omitempty"`
+	Feed       *ServiceFeedStats     `json:"feed,omitempty"`
 }
 
 // HostService is a service as a host's summary lists it.

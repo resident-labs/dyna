@@ -108,9 +108,9 @@ func checkSubscriptionShape(req contract.SubscriptionAddRequest) *contract.Error
 		}
 	}
 	if len(req.Where) > 0 && (len(req.On) == 0 || slices.ContainsFunc(req.On, func(kind contract.EventType) bool {
-		return !strings.HasPrefix(string(kind), "github.") && !strings.HasPrefix(string(kind), "git.")
+		return !strings.HasPrefix(string(kind), "github.") && !strings.HasPrefix(string(kind), "git.") && !strings.HasPrefix(string(kind), "service.")
 	})) {
-		return invalid("where filters github.* and git.* events: dyna subscription events lists them")
+		return invalid("where filters github.*, git.* and service.* events: dyna subscription events lists them")
 	}
 	if req.Workflow != nil {
 		if req.Scope != contract.ScopeRoom {

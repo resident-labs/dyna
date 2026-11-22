@@ -185,6 +185,29 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		return text + "\nError: " + contract.Outside("tool result", "", b.Error), nil
 	case contract.HookFinished:
 		return fmt.Sprintf("Subscription %s finished: %s, exit code %d. Last output:\n%s", b.Subscription, b.Result, b.ExitCode, contract.Outside("subscription "+string(b.Subscription), "", b.Output)), nil
+	case contract.ServiceMessage:
+		text := b.Text
+		if len(b.Data) > 0 && string(b.Data) != "null" {
+			if text != "" {
+				text += "\n\n"
+			}
+			text += "data: " + string(b.Data)
+		}
+		return contract.Outside(string(b.Service), b.Author, text), nil
+	case contract.ServiceFailure:
+		text := fmt.Sprintf("Service %s failed", b.Name)
+		if b.Host != "" {
+			text += " on " + string(b.Host)
+		}
+		text += ": " + string(b.Reason)
+		if b.Cause != "" {
+			text += " (" + string(b.Cause) + ")"
+		}
+		text += "."
+		if b.Detail != "" {
+			text += "\n" + contract.Outside("service "+string(b.Name), "", b.Detail)
+		}
+		return text, nil
 	case contract.OpDecided:
 		return fmt.Sprintf("Operation %s: %s. %s", b.ID, b.State, b.Decision.Reason), nil
 	case contract.OpRan:

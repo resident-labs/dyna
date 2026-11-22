@@ -220,6 +220,8 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `service_secrets` | the owner's secret values for a service, write-only (5.18) |
 | `service_leftovers` | a removed service that a host offline at the time still holds, removed when the host returns (5.18) |
 | `service_image_sizes` | the latest measured size of a service image source, separate from desired declarations and reservations (5.18) |
+| `service_feed_messages` | inbound message IDs seen per feed service, for retry deduplication (5.18) |
+| `service_outbox` | outbound messages queued by `service.send` for a feed service to long-poll and acknowledge (5.18) |
 | `browsers` | owner-level named shared browser profiles (5.14) |
 
 ### 4.3 Data on disk
@@ -689,7 +691,9 @@ Not promised: isolation from the network the host can reach, kernel separation b
 
 **Logs.** `service.logs` needs the admin scope until the agent tool masks secret values in the lines (5.18, later change). It reads the user journal of the unit, `journalctl --user -u dyna-svc-<id> -o short-iso -n N`, N from 1 to 2000 and 200 by default, with an optional `--since`. Retention is journald's.
 
-**Interfaces.** The methods `service.set`, `service.list`, `service.show`, `service.logs`, `service.restart`, `service.stop`, `service.start`, `service.update`, `service.rollback`, `service.remove` and `service.secret_set` are the owner's, with `dyna service` as the CLI: `list`, `show`, `logs`, `restart`, `stop`, `start`, `update`, `rollback`, `set --file F` or flags, `remove` and `secret set`.
+**Interfaces.** The methods `service.set`, `service.list`, `service.show`, `service.logs`, `service.restart`, `service.stop`, `service.start`, `service.update`, `service.rollback`, `service.remove` and `service.secret_set` are the owner's, with `dyna service` as the CLI: `list`, `show`, `logs`, `restart`, `stop`, `start`, `update`, `rollback`, `set --file F` or flags, `remove`, `secret set` and `send`.
+
+**Feed services.** A service declared with `"feed": true` bridges an outside feed into its room through a dedicated per-service Unix socket (`$DYNA_FEED_SOCKET=/run/dyna-feed/feed.sock`), forwarded over the host SSH master into a read-only bind mount beside the service's quadlet (mode `0755` folder, `0666` socket for `UserNS=nomap`). Because each listener is bound to one immutable `(service_id, room, name)` tuple, no token is needed and a service cannot spoof another service or room. On `POST /v1/messages` (`{id, author, text, data?}`), the engine validates limits (`text` ≤ 16 KiB and `data` ≤ 32 KiB, else 413; 60 calls/min per service, else 429), deduplicates retries by `(service, id)` in `service_feed_messages`, increments `feed_in` and `feed_last_at`, and appends `service.message` (`{service, id, author, text, data?}`). `service.message` wakes nobody on its own; ordinary subscriptions route it via `where: ["service=<name>"]` to a session or workflow, framed as `From service <name>` and wrapped in `<outside source="<name>" author="<author>">` (never as the owner). Declaring a feed adds a `service.failed` subscription waking room root if none covers the service yet; `service.failed` is deliverable. For outbound delivery, sessions permitted by the service's `senders` list (default room root only; the owner always may) call `service.send` (`{service, to, text}`, MCP `service send`, CLI `dyna service send`), which queues the message in `service_outbox`, increments `feed_out`, and appends `service.sent` to the room log. The service long-polls `GET /v1/outbox` on its socket and acknowledges each delivered message with `POST /v1/outbox/{id}`; unacknowledged rows are returned again on retry, and acks are scoped to the socket's service ID. `service.list` and `service.show` report `feed: {lastMessageAt, messagesIn, messagesOut}`, and About displays Services alongside Subscriptions (showing state, host, last error, feed stats and routing subscriptions).
 
 ## 6. Host exec
 

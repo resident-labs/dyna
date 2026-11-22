@@ -189,6 +189,8 @@ type ServiceUnitSpec struct {
 	Parts contract.ServiceParts
 	// Image is the reference that runs: a local tag with the content id of a room image, or a registry digest.
 	Image string
+	// FeedSocketDir is the host folder holding feed.sock for a feed service, mounted read-only at /run/dyna-feed.
+	FeedSocketDir string
 }
 
 // ServiceHostCheck is what the service host check found.

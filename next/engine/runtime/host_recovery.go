@@ -54,6 +54,21 @@ func (b *Boxes) Restore(ctx context.Context) error {
 			return err
 		}
 	}
+	services, err := b.Store.Services(ctx, "")
+	if err != nil {
+		return err
+	}
+	for _, svc := range services {
+		if svc.Host == "" || svc.Want == contract.ServiceWantRemove {
+			continue
+		}
+		if !svc.Spec.Feed && (svc.Live == nil || !svc.Live.Spec.Feed) {
+			continue
+		}
+		if err := b.Sockets.AddService(svc.ID, svc.Room, svc.Spec.Name); err != nil {
+			return err
+		}
+	}
 	hosts, err := b.Store.Hosts(ctx)
 	if err != nil {
 		return err
@@ -218,6 +233,24 @@ func (b *Boxes) restoreHost(ctx context.Context, name contract.HostName) error {
 		}
 		if err := host.AddForward(ctx, b.forward(record.ID)); err != nil {
 			failed = append(failed, fmt.Errorf("box %s: %w", record.ID, err))
+			if ctx.Err() != nil {
+				break
+			}
+		}
+	}
+	services, err := b.Store.Services(ctx, "")
+	if err != nil {
+		return err
+	}
+	for _, svc := range services {
+		if svc.Host != name || svc.Want == contract.ServiceWantRemove {
+			continue
+		}
+		if !svc.Spec.Feed && (svc.Live == nil || !svc.Live.Spec.Feed) {
+			continue
+		}
+		if err := host.AddForward(ctx, b.serviceForward(svc.ID)); err != nil {
+			failed = append(failed, fmt.Errorf("service %s: %w", svc.ID, err))
 			if ctx.Err() != nil {
 				break
 			}

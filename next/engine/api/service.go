@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"time"
+
 	"github.com/coder/websocket"
 	"github.com/resident-labs/dyna/contract"
 )
@@ -91,6 +93,10 @@ type Service interface {
 	ServiceRollback(context.Context, contract.Principal, contract.ServiceRollbackRequest) (contract.ServiceActionResponse, *contract.Error)
 	ServiceRemove(context.Context, contract.Principal, contract.ServiceRemoveRequest) (contract.ServiceActionResponse, *contract.Error)
 	ServiceSecretSet(context.Context, contract.Principal, contract.ServiceSecretSetRequest) (contract.ServiceSecretSetResponse, *contract.Error)
+	ServiceSend(context.Context, contract.Principal, contract.ServiceSendRequest) (contract.ServiceSendResponse, *contract.Error)
+	ServiceFeedMessage(context.Context, contract.ServiceID, contract.RoomID, contract.ServiceName, contract.FeedMessageRequest) (contract.FeedMessageResponse, *contract.Error)
+	ServiceFeedOutbox(context.Context, contract.ServiceID, time.Duration, int) (contract.FeedOutboxResponse, *contract.Error)
+	ServiceFeedAck(context.Context, contract.ServiceID, string) *contract.Error
 	WorkflowSettings(context.Context, contract.Principal, contract.WorkflowSettingsRequest) (contract.WorkflowSettingsResponse, *contract.Error)
 	WorkflowSet(context.Context, contract.Principal, contract.WorkflowSetRequest) (contract.WorkflowSetResponse, *contract.Error)
 	RoomHosts(context.Context, contract.Principal, contract.RoomHostsRequest) (contract.RoomHostsResponse, *contract.Error)

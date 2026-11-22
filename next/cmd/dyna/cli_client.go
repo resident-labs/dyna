@@ -60,6 +60,7 @@ type client interface {
 	ServiceRollback(context.Context, contract.ServiceRef) (contract.ServiceActionResponse, error)
 	ServiceRemove(context.Context, contract.ServiceRef) (contract.ServiceActionResponse, error)
 	ServiceSecretSet(context.Context, contract.ServiceSecretSetRequest) (contract.ServiceSecretSetResponse, error)
+	ServiceSend(context.Context, contract.ServiceSendRequest) (contract.ServiceSendResponse, error)
 	PoolRemove(context.Context, contract.PoolRemoveRequest) (contract.PoolRemoveResponse, error)
 	RoomHosts(context.Context, contract.RoomHostsRequest) (contract.RoomHostsResponse, error)
 	RoomSetLimits(context.Context, contract.RoomSetLimitsRequest) (contract.RoomSetLimitsResponse, error)
@@ -489,6 +490,10 @@ func (c *socketClient) ServiceRemove(ctx context.Context, q contract.ServiceRef)
 
 func (c *socketClient) ServiceSecretSet(ctx context.Context, q contract.ServiceSecretSetRequest) (contract.ServiceSecretSetResponse, error) {
 	return call[contract.ServiceSecretSetRequest, contract.ServiceSecretSetResponse](ctx, c, contract.MethodServiceSecretSet, q)
+}
+
+func (c *socketClient) ServiceSend(ctx context.Context, q contract.ServiceSendRequest) (contract.ServiceSendResponse, error) {
+	return call[contract.ServiceSendRequest, contract.ServiceSendResponse](ctx, c, contract.MethodServiceSend, q)
 }
 
 func (c *socketClient) OwnerTimezone(ctx context.Context, q contract.OwnerTimezoneRequest) (contract.OwnerTimezoneResponse, error) {

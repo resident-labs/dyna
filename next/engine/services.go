@@ -113,7 +113,11 @@ func (s *Service) ServiceSet(ctx context.Context, who contract.Principal, req co
 		return contract.ServiceSetResponse{}, serviceFailure(err)
 	}
 	s.reconciler.Kick()
-	return contract.ServiceSetResponse{Service: row.Service}, nil
+	note := ""
+	if parts.Spec.Feed {
+		note = s.ensureFeedFailureSubscription(ctx, req.Room, parts.Spec.Name)
+	}
+	return contract.ServiceSetResponse{Service: row.Service, Note: note}, nil
 }
 
 func (s *Service) ServiceList(ctx context.Context, _ contract.Principal, req contract.ServiceListRequest) (contract.ServiceListResponse, *contract.Error) {

@@ -73,21 +73,22 @@ type BoxSocketGeneration struct{ entry *socket }
 
 // Sockets owns listener lifetimes and revokes existing connections on removal.
 type Sockets struct {
-	mu      sync.Mutex
-	api     *API
-	runtime string
-	uid     uint32
-	peer    PeerUID
-	owner   *socket
-	lock    *os.File
-	boxes   map[contract.BoxID]*socket
+	mu       sync.Mutex
+	api      *API
+	runtime  string
+	uid      uint32
+	peer     PeerUID
+	owner    *socket
+	lock     *os.File
+	boxes    map[contract.BoxID]*socket
+	services map[contract.ServiceID]*socket
 }
 
 func NewSockets(api *API, runtime string, ownerUID uint32, peer PeerUID) *Sockets {
 	if peer == nil {
 		peer = UnixPeerUID
 	}
-	return &Sockets{api: api, runtime: runtime, uid: ownerUID, peer: peer, boxes: make(map[contract.BoxID]*socket)}
+	return &Sockets{api: api, runtime: runtime, uid: ownerUID, peer: peer, boxes: make(map[contract.BoxID]*socket), services: make(map[contract.ServiceID]*socket)}
 }
 
 func (s *Sockets) OpenOwner() error {
@@ -159,6 +160,50 @@ func (s *Sockets) AddRun(id contract.BoxID, sub contract.SubscriptionID, room co
 	s.boxes[id] = &socket{server: server, listener: l}
 	go server.Serve(l)
 	return nil
+}
+
+// ServiceSocketPath returns the engine-side Unix socket path for a feed service.
+func (s *Sockets) ServiceSocketPath(id contract.ServiceID) string {
+	return filepath.Join(s.runtime, "services", string(id)+".sock")
+}
+
+// AddService binds a feed service's Unix socket to its immutable service ID, room and name.
+// It is idempotent if the service socket is already open.
+func (s *Sockets) AddService(id contract.ServiceID, room contract.RoomID, name contract.ServiceName) error {
+	if id == "" || room == "" || name == "" || string(id) == "." || string(id) == ".." || strings.ContainsAny(string(id), "/\\") {
+		return fmt.Errorf("invalid service binding")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.services[id]; ok {
+		return nil
+	}
+	if err := s.acquire(); err != nil {
+		return err
+	}
+	path := s.ServiceSocketPath(id)
+	l, err := listen(path)
+	if err != nil {
+		return err
+	}
+	server := &http.Server{Handler: s.api.feedHandler(id, room, name)}
+	s.services[id] = &socket{server: server, listener: l}
+	go server.Serve(l)
+	return nil
+}
+
+// RemoveService closes a feed service's Unix socket and unlinks it.
+func (s *Sockets) RemoveService(id contract.ServiceID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok := s.services[id]
+	if !ok {
+		return nil
+	}
+	delete(s.services, id)
+	err := closeSocket(entry)
+	_ = os.Remove(s.ServiceSocketPath(id))
+	return err
 }
 
 // acquire serializes socket cleanup across engine processes. The lock file is
@@ -283,6 +328,13 @@ func (s *Sockets) Close() error {
 			first = err
 		}
 		delete(s.boxes, id)
+	}
+	for id, entry := range s.services {
+		if err := closeSocket(entry); first == nil {
+			first = err
+		}
+		_ = os.Remove(s.ServiceSocketPath(id))
+		delete(s.services, id)
 	}
 	if s.lock != nil {
 		if err := s.lock.Close(); first == nil {

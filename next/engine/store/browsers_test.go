@@ -106,6 +106,11 @@ func TestBrowserLeasesMigrationDropsTableAndKeepsProfiles(t *testing.T) {
 		INSERT INTO browsers(name,generation) VALUES('personal',4);
 		CREATE TABLE browser_leases (profile TEXT PRIMARY KEY REFERENCES browsers(name) ON DELETE CASCADE, box TEXT NOT NULL, session TEXT NOT NULL, generation INTEGER NOT NULL, since INTEGER NOT NULL);
 		INSERT INTO browser_leases(profile,box,session,generation,since) VALUES('personal','box_1','ses_1',4,1700000000000);
+		DROP TABLE service_feed_messages;
+		DROP TABLE service_outbox;
+		ALTER TABLE services DROP COLUMN feed_in;
+		ALTER TABLE services DROP COLUMN feed_out;
+		ALTER TABLE services DROP COLUMN feed_last_at;
 		UPDATE meta SET value='127' WHERE key='schema_version';
 	`)
 	if err != nil {

@@ -10,13 +10,14 @@ import (
 // EventFields are what a subscription's Where can name on an event. An event about many items, as one pass's change is, has one
 // set for each thing in it, and a Where holds if one set meets all of it.
 type EventFields struct {
-	Repo   RepoName
-	Number int
-	Author string
-	Actor  string
-	Label  string
-	Kind   string // one PrChangeKind of a change, such as pushed, or the result of a default-branch CI
-	Text   string
+	Repo    RepoName
+	Number  int
+	Author  string
+	Actor   string
+	Label   string
+	Kind    string // one PrChangeKind of a change, such as pushed, or the result of a default-branch CI
+	Service string
+	Text    string
 }
 
 func (f EventFields) value(key string) string {
@@ -36,6 +37,8 @@ func (f EventFields) value(key string) string {
 		return f.Label
 	case "kind":
 		return f.Kind
+	case "service":
+		return f.Service
 	}
 	return f.Text
 }
@@ -87,6 +90,14 @@ func Fields(body EventBody) []EventFields {
 		for _, change := range b.Changes {
 			out = append(out, changeFields(EventFields{Repo: change.Issue.Repo, Number: change.Issue.Number, Author: change.Issue.Author}, change.Kinds, change.Actions, change.Comments)...)
 		}
+	case ServiceMessage:
+		out = append(out, EventFields{Service: string(b.Service), Author: b.Author, Text: b.Text})
+	case ServiceFailure:
+		out = append(out, EventFields{Service: string(b.Name)})
+	case ServiceChanged:
+		out = append(out, EventFields{Service: string(b.Name)})
+	case ServiceSent:
+		out = append(out, EventFields{Service: string(b.Service), Text: b.Text})
 	}
 	return out
 }
@@ -97,7 +108,7 @@ type whereClause struct {
 	kinds          []string
 }
 
-var whereKeys = []string{"repo", "number", "author", "actor", "label", "kind"}
+var whereKeys = []string{"repo", "number", "author", "actor", "label", "kind", "service"}
 
 func parseWhere(text string) (whereClause, error) {
 	if value, ok := strings.CutPrefix(text, "text~"); ok && value != "" {

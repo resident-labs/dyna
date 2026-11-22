@@ -84,8 +84,8 @@ export type InstructionsGetRequest = { room?: RoomID; };
 export type InstructionsGetResponse = { text: string; hash: string; savedAt?: string | null; };
 export type InstructionsSetRequest = { room?: RoomID; text: string; base: string; };
 export type InstructionsSetResponse = { hash: string; };
-export type Method = "addon.list" | "addon.set_enabled" | "addon.set_root_only" | "addon.set_hosts" | "box.notice" | "mcp.add" | "mcp.list" | "mcp.remove" | "package.add" | "package.list" | "package.remove" | "skill.list" | "skill.remove" | "skill.save" | "agent.started" | "agent.ended" | "instructions.get" | "instructions.set" | "web.login" | "web.search" | "git.sign" | "signing.key" | "websearch.set_key" | "websearch.remove_key" | "proxy.key" | "proxy.usage" | "conversation.read" | "room.list" | "session.list" | "diff.saved" | "delivery.done" | "host.add" | "host.set_limits" | "host.set" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "owner.timezone" | "room.set" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "advisor" | "session.set_profile" | "session.account" | "session.set_account" | "session.set_branch" | "session.restart" | "session.refresh" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.compacted" | "box.hello" | "computer.changed" | "computer.start" | "browser.create" | "browser.list" | "browser.remove" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.job.running" | "shell.output" | "box.stats" | "box.stats.report" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "device.set_host" | "room.discord" | "discord.api" | "discord.send" | "discord.configure" | "discord.instructions" | "discord.read" | "discord.export" | "discord.plan" | "discord.apply" | "discord.policy" | "discord.check" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "hostexec.stop" | "image.list" | "image.remove" | "image.save" | "image.show" | "issue.list" | "issue.status" | "issue.track" | "issue.untrack" | "search.posts" | "search.sessions" | "search.rooms" | "history.read" | "transcript.digest" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pool.add" | "pool.list" | "pool.remove" | "pool.set" | "room.hosts" | "host.remove" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "session.responsibilities" | "room.github" | "service.set" | "service.list" | "service.show" | "service.logs" | "service.restart" | "service.stop" | "service.start" | "service.update" | "service.rollback" | "service.remove" | "service.secret_set" | "subscription.fire" | "subscription.update" | "subscription.state" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled" | "voice.status" | "voice.stop" | "workflow.run" | "workflow.reload" | "workflow.status" | "workflow.step" | "workflow.list" | "workflow.pin" | "workflow.step_start" | "workflow.step_end" | "workflow.step_transcript" | "workflow.set_status" | "workflow.pause" | "workflow.unpause" | "workflow.steer" | "workflow.state" | "workflow.events" | "workflow.event_done" | "workflow.settings" | "workflow.set";
-export type ErrorCode = "podman_required" | "invalid" | "unknown_action" | "not_found" | "forbidden" | "cross_room_attachment" | "conflict" | "room_limited" | "profile_exists" | "move_busy" | "has_children" | "parent_closing" | "session_closing" | "stale" | "github_quota" | "visual_superseded" | "unavailable" | "reconnect_unavailable" | "models_unavailable" | "store_from_v1" | "store_too_old" | "no_gpu" | "gpu_too_large" | "no_grant" | "command_too_long" | "port_taken" | "port_privileged";
+export type Method = "addon.list" | "addon.set_enabled" | "addon.set_root_only" | "addon.set_hosts" | "box.notice" | "mcp.add" | "mcp.list" | "mcp.remove" | "package.add" | "package.list" | "package.remove" | "skill.list" | "skill.remove" | "skill.save" | "agent.started" | "agent.ended" | "instructions.get" | "instructions.set" | "web.login" | "web.search" | "git.sign" | "signing.key" | "websearch.set_key" | "websearch.remove_key" | "proxy.key" | "proxy.usage" | "conversation.read" | "room.list" | "session.list" | "diff.saved" | "delivery.done" | "host.add" | "host.set_limits" | "host.set" | "host.list" | "accounts.list" | "accounts.connect" | "accounts.reconnect" | "accounts.connect_callback" | "accounts.connect_status" | "accounts.set_key" | "accounts.import_oauth" | "accounts.remove" | "accounts.set_limits" | "accounts.rename" | "profile.set" | "profile.remove" | "profile.list" | "accounts.quota" | "room.pause" | "room.set_limits" | "owner.timezone" | "room.set" | "room.create" | "room.delete" | "room.repo.add" | "room.repos" | "repo.ci.set" | "session.start" | "compose.list" | "session.close" | "session.stop" | "advisor" | "session.set_profile" | "session.account" | "session.set_account" | "session.set_branch" | "session.restart" | "session.refresh" | "session.move" | "post" | "post.search" | "session.search" | "events.list" | "box.compacted" | "box.hello" | "computer.changed" | "computer.start" | "browser.create" | "browser.list" | "browser.remove" | "turn.output" | "turn.activity" | "transcript.fetch" | "transcript.append" | "transcript.read" | "session.work" | "shell.job.ended" | "shell.job.running" | "shell.output" | "box.stats" | "box.stats.report" | "connect.start" | "connect.status" | "connect.cancel" | "connect.unlink" | "context.snapshot" | "device.pair" | "device.list" | "device.scopes" | "device.revoke" | "device.set_scopes" | "device.set_host" | "room.discord" | "discord.api" | "discord.send" | "discord.configure" | "discord.instructions" | "discord.read" | "discord.export" | "discord.plan" | "discord.apply" | "discord.policy" | "discord.check" | "goal.set" | "goal.list" | "goal.item" | "goal.done" | "goal.journal" | "hostexec.list" | "hostexec.run" | "hostexec.stop" | "image.list" | "image.remove" | "image.save" | "image.show" | "issue.list" | "issue.status" | "issue.track" | "issue.untrack" | "search.posts" | "search.sessions" | "search.rooms" | "history.read" | "transcript.digest" | "op.submit" | "op.decide" | "op.withdraw" | "op.list" | "pool.add" | "pool.list" | "pool.remove" | "pool.set" | "room.hosts" | "host.remove" | "pr.list" | "pr.status" | "pr.track" | "pr.untrack" | "question.ask" | "question.answer" | "question.list" | "session.responsibilities" | "room.github" | "service.set" | "service.list" | "service.show" | "service.logs" | "service.restart" | "service.stop" | "service.start" | "service.update" | "service.rollback" | "service.remove" | "service.secret_set" | "service.send" | "subscription.fire" | "subscription.update" | "subscription.state" | "subscription.add" | "subscription.list" | "subscription.remove" | "subscription.set_enabled" | "voice.status" | "voice.stop" | "workflow.run" | "workflow.reload" | "workflow.status" | "workflow.step" | "workflow.list" | "workflow.pin" | "workflow.step_start" | "workflow.step_end" | "workflow.step_transcript" | "workflow.set_status" | "workflow.pause" | "workflow.unpause" | "workflow.steer" | "workflow.state" | "workflow.events" | "workflow.event_done" | "workflow.settings" | "workflow.set";
+export type ErrorCode = "podman_required" | "invalid" | "unknown_action" | "not_found" | "forbidden" | "cross_room_attachment" | "conflict" | "room_limited" | "profile_exists" | "move_busy" | "has_children" | "parent_closing" | "session_closing" | "stale" | "github_quota" | "visual_superseded" | "unavailable" | "reconnect_unavailable" | "models_unavailable" | "store_from_v1" | "store_too_old" | "no_gpu" | "gpu_too_large" | "no_grant" | "command_too_long" | "port_taken" | "port_privileged" | "rate_limited" | "too_large";
 export type Error = { code: ErrorCode; message: string; visual?: VisualSuperseded | null; limited?: RoomLimited | null; workflow?: WorkflowRefused | null; githubWrites?: GitHubWritesRefused | null; };
 export type VisualSuperseded = { event: EventID; version: number; seq: number; };
 export type RoomLimited = { accounts?: Array<AccountID> | null; hosts?: Array<HostName> | null; };
@@ -592,17 +592,18 @@ export type ServiceWant = "run" | "stop" | "remove";
 export type ServiceState = "pending" | "deploying" | "running" | "crashing" | "stopped" | "failed" | "unreachable" | "removing";
 export type ServiceReason = "image" | "unit" | "start" | "health" | "cpu" | "memory" | "disk" | "room-host" | "room-limit" | "service_host" | "port_taken" | "port_in_use" | "port_privileged" | "secret_missing" | "image_build" | "image_pull" | "unit_failed" | "start_failed" | "health_failed" | "crash_loop" | "rolled_back" | "host_unreachable" | "host_removed";
 export type ServiceRestart = "always" | "on-failure";
-export type ServiceSpec = { name: ServiceName; image: string; command?: Array<string> | null; ports?: Array<ServicePort> | null; env?: Record<string, string> | null; secrets?: Array<string> | null; data?: string; cpus?: number; memory?: ServiceSize; disk?: ServiceSize; host?: HostName; restart?: ServiceRestart; health?: Array<string> | null; };
+export type ServiceSpec = { name: ServiceName; image: string; command?: Array<string> | null; ports?: Array<ServicePort> | null; env?: Record<string, string> | null; secrets?: Array<string> | null; data?: string; cpus?: number; memory?: ServiceSize; disk?: ServiceSize; host?: HostName; restart?: ServiceRestart; health?: Array<string> | null; feed?: boolean; senders?: Array<string> | null; };
 export type PortProto = "tcp" | "udp";
 export type PortBinding = { };
 export type ServiceParts = { };
 export type ServiceSecretStatus = { name: string; set: boolean; };
-export type Service = { id: ServiceID; room: RoomID; spec: ServiceSpec; generation: number; host?: HostName; want: ServiceWant; state: ServiceState; reason?: ServiceReason; cause?: ServiceReason; detail?: string; lastState?: ServiceState; deployed: number; imageRef?: string; previousRef?: string; cpuMilli: number; memBytes: number; diskBytes: number; restarts: number; since?: string; secrets?: Array<ServiceSecretStatus> | null; };
+export type ServiceFeedStats = { lastMessageAt?: string | null; messagesIn: number; messagesOut: number; };
+export type Service = { id: ServiceID; room: RoomID; spec: ServiceSpec; generation: number; host?: HostName; want: ServiceWant; state: ServiceState; reason?: ServiceReason; cause?: ServiceReason; detail?: string; lastState?: ServiceState; deployed: number; imageRef?: string; previousRef?: string; cpuMilli: number; memBytes: number; diskBytes: number; restarts: number; since?: string; secrets?: Array<ServiceSecretStatus> | null; feed?: ServiceFeedStats | null; };
 export type HostService = { room: RoomID; name: ServiceName; state: ServiceState; cpuMilli: number; memBytes: number; };
 export type ServiceHostIssue = "no_linger" | "no_quadlet" | "no_pasta";
 export type ServiceHostStatus = { issues?: Array<ServiceHostIssue> | null; lowestPort: number; };
 export type ServiceSetRequest = { room: RoomID; spec: ServiceSpec; };
-export type ServiceSetResponse = { service: Service; };
+export type ServiceSetResponse = { service: Service; note?: string; };
 export type ServiceListRequest = { room?: RoomID; };
 export type ServiceListResponse = { services: Array<Service> | null; };
 export type ServiceRef = { room: RoomID; name: ServiceName; };
@@ -619,8 +620,16 @@ export type ServiceRollbackRequest = ServiceRef;
 export type ServiceRemoveRequest = ServiceRef;
 export type ServiceSecretSetRequest = { room: RoomID; name: ServiceName; secret: string; value: string; };
 export type ServiceSecretSetResponse = { };
+export type ServiceSendRequest = { room?: RoomID; service: ServiceName; to: string; text: string; };
+export type ServiceSendResponse = { id: string; };
+export type FeedMessageRequest = { id: string; author: string; text: string; data?: JSONValue; };
+export type FeedMessageResponse = { ok: boolean; duplicate?: boolean; };
+export type FeedOutboxMessage = { id: string; to: string; text: string; at: string; };
+export type FeedOutboxResponse = { messages: Array<FeedOutboxMessage> | null; };
 export type ServiceChanged = { service: ServiceID; name: ServiceName; host?: HostName; from?: ServiceState; to: ServiceState; reason?: ServiceReason; cause?: ServiceReason; };
 export type ServiceFailure = { service: ServiceID; name: ServiceName; host?: HostName; reason: ServiceReason; cause?: ServiceReason; detail?: string; };
+export type ServiceMessage = { service: ServiceName; id: string; author: string; text: string; data?: JSONValue; };
+export type ServiceSent = { service: ServiceName; id: string; to: string; text: string; };
 export type ServiceRestartResponse = ServiceActionResponse;
 export type ServiceStopResponse = ServiceActionResponse;
 export type ServiceStartResponse = ServiceActionResponse;
@@ -804,6 +813,8 @@ export type EventBody =
   | { type: "room.resumed"; body: RoomResumed }
   | { type: "service.changed"; body: ServiceChanged }
   | { type: "service.failed"; body: ServiceFailure }
+  | { type: "service.message"; body: ServiceMessage }
+  | { type: "service.sent"; body: ServiceSent }
   | { type: "session.closed"; body: SessionClosed }
   | { type: "session.compacted"; body: SessionCompacted }
   | { type: "session.failed"; body: SessionFailed }
@@ -864,6 +875,10 @@ export const ServiceMinMemory = 67108864;
 export const ServiceMaxMemory = 17179869184;
 export const ServiceMaxDisk = 107374182400;
 export const ServiceImageEstimate = 1073741824;
+export const ServiceFeedTextMax = 16384;
+export const ServiceFeedDataMax = 32768;
+export const ServiceFeedRatePerMin = 60;
+export const ServiceFeedOutboxMax = 65536;
 export const ServiceLogsMax = 2000;
 export const ServiceLogsDefault = 200;
 export const DefaultWorkflowTimeout = 18000;
@@ -1037,6 +1052,7 @@ export interface MethodMap {
   "service.rollback": { request: ServiceRollbackRequest; response: ServiceRollbackResponse };
   "service.remove": { request: ServiceRemoveRequest; response: ServiceRemoveResponse };
   "service.secret_set": { request: ServiceSecretSetRequest; response: ServiceSecretSetResponse };
+  "service.send": { request: ServiceSendRequest; response: ServiceSendResponse };
   "subscription.fire": { request: SubscriptionFireRequest; response: SubscriptionFireResponse };
   "subscription.update": { request: SubscriptionUpdateRequest; response: SubscriptionUpdateResponse };
   "subscription.state": { request: SubscriptionStateRequest; response: SubscriptionStateResponse };

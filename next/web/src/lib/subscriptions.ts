@@ -6,24 +6,43 @@ const units: Record<string, number> = { h: 3_600_000, m: 60_000, s: 1_000, ms: 1
 export const durationMs = (text: string): number =>
   [...text.matchAll(/(\d+(?:\.\d+)?)(ms|h|m|s)/g)].reduce((sum, [, value, unit]) => sum + Number(value) * units[unit], 0);
 
-const period = (every: string): string => {
-  const minutes = Math.round(durationMs(every) / 60_000);
-  if (minutes < 60) return `Every ${minutes} min`;
+const interval = (every: string): string => {
+  const ms = durationMs(every);
+  if (ms > 0 && ms < 60_000) return `${Math.round(ms / 1_000)} s`;
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `${minutes} min`;
   const hours = minutes / 60;
-  return Number.isInteger(hours) ? `Every ${hours} h` : `Every ${minutes} min`;
+  return Number.isInteger(hours) ? `${hours} h` : `${minutes} min`;
+};
+
+const period = (every: string): string => `Every ${interval(every)}`;
+
+// How a subscription runs, in plain words: "on event" (on only), "schedule · <interval>" (every only),
+// or "digest · <interval>" (on plus every, batched).
+export const subscriptionKind = ({ subscription }: SubscriptionInfo): string => {
+  const hasOn = (subscription.on?.length ?? 0) > 0;
+  if (hasOn && subscription.every) return `digest · ${interval(subscription.every)}`;
+  if (subscription.every) return `schedule · ${interval(subscription.every)}`;
+  return "on event";
 };
 
 // What fires a subscription, as one short phrase. A long list of events reads as its count, unless `whole` asks for every
-// event, as the hooks list does.
+// event, as the subscriptions list does.
 export const subscriptionWhen = ({ subscription }: SubscriptionInfo, whole = false): string => {
   const on = subscription.on ?? [];
   const where = subscription.where?.length ? ` where ${subscription.where.join(", ")}` : "";
+  if (on.length && subscription.every) {
+    const events = on.length > 2 && !whole ? `On ${on.length} events${where}` : `On ${on.join(", ")}${where}`;
+    return `${events}, every ${interval(subscription.every)}`;
+  }
   return subscription.every ? period(subscription.every) : on.length > 2 && !whole ? `On ${on.length} events${where}` : `On ${on.join(", ")}${where}`;
 };
 
-// What a subscription does. A Run reads as its command, and a wake as the session it wakes.
+// What a subscription does. A Run reads as its command, a workflow as its script, and a wake as the session it wakes.
 export const subscriptionAction = ({ subscription }: SubscriptionInfo, name: (session: string) => string): string =>
-  subscription.run ? `Runs ${subscription.run.command?.join(" ") ?? ""}` : `Wakes ${subscription.wake ? name(subscription.wake) : "a session"}`;
+  subscription.run ? `Runs ${subscription.run.command?.join(" ") ?? ""}` :
+    subscription.workflow ? `Runs ${words(subscription.workflow.script) || subscription.workflow.script}` :
+      `Wakes ${subscription.wake ? name(subscription.wake) : "a session"}`;
 
 // Where a subscription stands, for the owner to read at a glance. Nothing to say reads as nothing.
 export function subscriptionState(info: SubscriptionInfo): string {
@@ -87,7 +106,7 @@ export function subscriptionRows(list: readonly SubscriptionInfo[], name: (sessi
     const run = info.subscription.run;
     const hook = run ? hookName(run.command) : { name: subscriptionAction(info, name), args: [] };
     const state = subscriptionState(info);
-    return { id: info.subscription.id, name: hook.name, args: hook.args, when: subscriptionWhen(info), fires: subscriptionWhen(info, true), command: run?.command?.join(" ") ?? "",
+    return { id: info.subscription.id, name: hook.name, args: hook.args, kind: subscriptionKind(info), when: subscriptionWhen(info), fires: subscriptionWhen(info, true), command: run?.command?.join(" ") ?? "",
       state: state === "Passing" ? "" : state, failing: failing(info), disabled: !!info.disabled, wake: !run,
       title: [run ? subscriptionAction(info, name) : "", info.subscription.on?.join(", ") ?? ""].filter(Boolean).join("\n") };
   });

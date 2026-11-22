@@ -134,6 +134,9 @@ type Service struct {
 	migrator               *images.Migrator
 	runnerImageProblems    func() map[contract.HostName][]contract.RunnerImageProblem
 	addonSources           *addons.Sources
+	feedMu                 sync.Mutex
+	feedRates              map[contract.ServiceID][]time.Time
+	feedOutboxWait         map[contract.ServiceID]chan struct{}
 }
 
 // createSession publishes before checking the store, so close can retire the handle.

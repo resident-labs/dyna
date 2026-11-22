@@ -918,6 +918,9 @@ func (f *fakeClient) ServiceSecretSet(_ context.Context, q contract.ServiceSecre
 	f.serviceSecret = q
 	return contract.ServiceSecretSetResponse{}, nil
 }
+func (f *fakeClient) ServiceSend(_ context.Context, q contract.ServiceSendRequest) (contract.ServiceSendResponse, error) {
+	return contract.ServiceSendResponse{ID: "out_1"}, nil
+}
 
 func TestPrStackListStatusRendering(t *testing.T) {
 	for _, args := range [][]string{{"pr", "list"}, {"pr", "status", "12", "--repo", "owner/repo"}} {
@@ -996,5 +999,13 @@ func TestBrowserCLI(t *testing.T) {
 	runCLI(t, f, "room", "browser", "room_1", "none")
 	if f.roomSet == nil || f.roomSet.Browser == nil || *f.roomSet.Browser != "" {
 		t.Fatalf("room browser clear: %+v", f.roomSet)
+	}
+}
+
+func TestServiceSendCLI(t *testing.T) {
+	f := &fakeClient{}
+	got := runCLI(t, f, "service", "send", "--room", "room_1", "agent-chat", "#general", "hello world")
+	if strings.TrimSpace(got) != "out_1" {
+		t.Fatalf("service send output = %q, want out_1", got)
 	}
 }
