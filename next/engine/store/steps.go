@@ -6,13 +6,22 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 128
+const schemaVersion = 129
 
 const agentsTable = `CREATE TABLE agents (id TEXT PRIMARY KEY, session TEXT NOT NULL REFERENCES sessions(id), turn TEXT NOT NULL, name TEXT NOT NULL, state TEXT NOT NULL, transcript TEXT NOT NULL DEFAULT '', start_offset INTEGER NOT NULL DEFAULT 0, started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL DEFAULT 0, model TEXT NOT NULL DEFAULT '', input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, cache_read_tokens INTEGER NOT NULL DEFAULT 0, cache_write_tokens INTEGER NOT NULL DEFAULT 0)`
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
+	// Feed services (spec 5.18): message dedupe, outbound queue and counters on services.
+	128: {
+		`ALTER TABLE services ADD COLUMN feed_in INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE services ADD COLUMN feed_out INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE services ADD COLUMN feed_last_at INTEGER NOT NULL DEFAULT 0`,
+		`CREATE TABLE service_feed_messages (service TEXT NOT NULL REFERENCES services(id), id TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY(service, id))`,
+		`CREATE TABLE service_outbox (id TEXT PRIMARY KEY, service TEXT NOT NULL REFERENCES services(id), room TEXT NOT NULL REFERENCES rooms(id), recipient TEXT NOT NULL, text TEXT NOT NULL, created_at INTEGER NOT NULL, acked_at INTEGER NOT NULL DEFAULT 0)`,
+		`CREATE INDEX service_outbox_pending ON service_outbox(service, created_at) WHERE acked_at = 0`,
+	},
 	127: {
 		`DROP TABLE IF EXISTS browser_leases`,
 		`ALTER TABLE browsers DROP COLUMN generation`,

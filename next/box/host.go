@@ -55,6 +55,7 @@ type ContainerStatus struct {
 }
 type Forward struct {
 	Box                  contract.BoxID
+	Service              contract.ServiceID
 	HostPath, EnginePath string
 }
 

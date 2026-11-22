@@ -325,6 +325,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodServiceRollback, c, a.service.ServiceRollback)
 	call(mux, contract.MethodServiceRemove, c, a.service.ServiceRemove)
 	call(mux, contract.MethodServiceSecretSet, c, a.service.ServiceSecretSet)
+	call(mux, contract.MethodServiceSend, c, a.service.ServiceSend)
 	call(mux, contract.MethodWorkflowSettings, c, a.service.WorkflowSettings)
 	call(mux, contract.MethodWorkflowSet, c, a.service.WorkflowSet)
 	call(mux, contract.MethodRoomHosts, c, a.service.RoomHosts)
@@ -936,12 +937,89 @@ func writeError(w http.ResponseWriter, err *contract.Error) {
 		status = http.StatusForbidden
 	case contract.ErrNotFound:
 		status = http.StatusNotFound
-	case contract.ErrConflict, contract.ErrRoomLimited, contract.ErrProfileExists, contract.ErrStale, contract.ErrVisualSuperseded, contract.ErrMoveBusy, contract.ErrHasChildren, contract.ErrParentClosing, contract.ErrSessionClosing:
+	case contract.ErrConflict, contract.ErrRoomLimited, contract.ErrProfileExists, contract.ErrStale, contract.ErrVisualSuperseded, contract.ErrMoveBusy, contract.ErrHasChildren, contract.ErrParentClosing, contract.ErrSessionClosing, contract.ErrPortTaken, contract.ErrPortPrivileged:
 		status = http.StatusConflict
+	case contract.ErrTooLarge:
+		status = http.StatusRequestEntityTooLarge
+	case contract.ErrRateLimited:
+		status = http.StatusTooManyRequests
+		w.Header().Set("Retry-After", "60")
 	case contract.ErrUnavailable, contract.ErrReconnectUnavailable:
 		status = http.StatusServiceUnavailable
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(err)
+}
+
+// feedHandler serves a feed service's per-service Unix socket. The socket listener fixes the service ID, room
+// and name, so no token is needed and a service cannot spoof another service or room.
+func (a *API) feedHandler(id contract.ServiceID, room contract.RoomID, name contract.ServiceName) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		var req contract.FeedMessageRequest
+		const bodyLimit = 128 << 10
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, bodyLimit))
+		if err := dec.Decode(&req); err != nil {
+			var tooBig *http.MaxBytesError
+			if errors.As(err, &tooBig) {
+				writeError(w, &contract.Error{Code: contract.ErrTooLarge, Message: "request body too large"})
+				return
+			}
+			writeError(w, invalid())
+			return
+		}
+		var extra json.RawMessage
+		if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+			writeError(w, invalid())
+			return
+		}
+		resp, problem := a.service.ServiceFeedMessage(r.Context(), id, room, name, req)
+		if problem != nil {
+			writeError(w, problem)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+	mux.HandleFunc("GET /v1/outbox", func(w http.ResponseWriter, r *http.Request) {
+		wait := 25 * time.Second
+		if raw := r.URL.Query().Get("wait"); raw != "" {
+			d, err := time.ParseDuration(raw)
+			if err != nil || d < 0 {
+				writeError(w, &contract.Error{Code: contract.ErrInvalid, Message: "wait must be a non-negative duration"})
+				return
+			}
+			wait = d
+		}
+		limit := 20
+		if raw := r.URL.Query().Get("limit"); raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil || n < 1 {
+				writeError(w, &contract.Error{Code: contract.ErrInvalid, Message: "limit must be a positive integer"})
+				return
+			}
+			limit = n
+		}
+		resp, problem := a.service.ServiceFeedOutbox(r.Context(), id, wait, limit)
+		if problem != nil {
+			if r.Context().Err() != nil {
+				return
+			}
+			writeError(w, problem)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+	mux.HandleFunc("POST /v1/outbox/{id}", func(w http.ResponseWriter, r *http.Request) {
+		msgID := r.PathValue("id")
+		if problem := a.service.ServiceFeedAck(r.Context(), id, msgID); problem != nil {
+			writeError(w, problem)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	})
+	return mux
 }

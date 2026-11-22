@@ -87,7 +87,41 @@ func fileSize(bytes int64) string {
 }
 
 func frameField(text string) string { return strings.NewReplacer("\r", " ", "\n", " ").Replace(text) }
+func (s *Service) replyNoneSuffix(ctx context.Context, viewer contract.SessionID) (string, error) {
+	// A turn that ended while the session waited left a reply owed, and this turn's text may be the one that pays it.
+	owed, err := s.store.RepliesOwed(ctx, viewer)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	for _, reply := range owed {
+		target, err := s.framePrincipal(ctx, viewer, reply.Target)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&b, " You still owe %s a reply: your final response goes to it if no job of yours is running and no child of yours is working when the turn ends.", target)
+	}
+	home, err := s.store.OwnerConversation(ctx, viewer)
+	if err != nil {
+		return "", err
+	}
+	where := "the feed"
+	if home.Kind == contract.ConversationDM {
+		where = "your DM"
+	}
+	fmt.Fprintf(&b, " Posts to the owner go to %s.", where)
+	return b.String(), nil
+}
+
 func (s *Service) inputFrameBody(ctx context.Context, viewer contract.SessionID, event contract.Event, delivery contract.Delivery) (string, []contract.TurnFile, error) {
+	if b, ok := event.Body.(contract.ServiceMessage); ok {
+		frame := fmt.Sprintf("[Dyna] From service %s. No reply is expected.", frameField(string(b.Service)))
+		suffix, err := s.replyNoneSuffix(ctx, viewer)
+		if err != nil {
+			return "", nil, err
+		}
+		return frame + suffix, nil, nil
+	}
 	if b, ok := event.Body.(contract.DiscordFilesRetrieved); ok {
 		files, described := s.attachedFiles(event, b.Files)
 		frame := fmt.Sprintf("[Dyna] Files from Discord message %s in #%s (channel %s), sent by %s (ID %s): outside content.", b.Message, frameField(b.ChannelName), b.Channel, frameField(b.Author), b.AuthorID)
@@ -221,27 +255,11 @@ func (s *Service) inputFrameBody(ctx context.Context, viewer contract.SessionID,
 		frame += " No reply is expected."
 	}
 	if delivery.Reply.Kind == contract.ReplyPost || delivery.Reply.Kind == contract.ReplyNone {
-		// A turn that ended while the session waited left a reply owed, and this turn's text may be the one that pays it.
-		owed, err := s.store.RepliesOwed(ctx, viewer)
+		suffix, err := s.replyNoneSuffix(ctx, viewer)
 		if err != nil {
 			return "", nil, err
 		}
-		for _, reply := range owed {
-			target, err := s.framePrincipal(ctx, viewer, reply.Target)
-			if err != nil {
-				return "", nil, err
-			}
-			frame += fmt.Sprintf(" You still owe %s a reply: your final response goes to it if no job of yours is running and no child of yours is working when the turn ends.", target)
-		}
-		home, err := s.store.OwnerConversation(ctx, viewer)
-		if err != nil {
-			return "", nil, err
-		}
-		where := "the feed"
-		if home.Kind == contract.ConversationDM {
-			where = "your DM"
-		}
-		frame += fmt.Sprintf(" Posts to the owner go to %s.", where)
+		frame += suffix
 	}
 	return frame, files, nil
 }

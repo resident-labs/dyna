@@ -55,6 +55,11 @@ export class RoomStore {
   private readonly read = new SvelteMap<string, number>();
   // Sessions whose box runs a computer the owner can watch.
   readonly computers = new SvelteSet<string>();
+  // Incremented on service.* room events so AboutPanel refreshes its service list while visible.
+  private _servicesVersion = 0;
+  private servicesChanged = () => {};
+  private subscribeServices = createSubscriber(update => { this.servicesChanged = update; });
+  get servicesVersion(): number { this.subscribeServices(); return this._servicesVersion; }
   // Background shell jobs still running, as of each session's last turn end and the jobs that ended since.
   readonly shellJobs = new SvelteMap<string, number>();
   // Current engine-computed waits; changes reread one room list, never one call per row.
@@ -500,6 +505,10 @@ export class RoomStore {
         if (known) this.requests.set(event.body.id, { ...known, ...event.body });
         break;
       }
+      case "service.changed": case "service.failed": case "service.message": case "service.sent":
+        this._servicesVersion++;
+        this.servicesChanged();
+        break;
     }
   }
 }

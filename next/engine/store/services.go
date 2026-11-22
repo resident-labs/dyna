@@ -65,15 +65,15 @@ func (row ServiceRow) Reservation() contract.ServiceParts {
 	return parts
 }
 
-const serviceColumns = `id,room,spec,generation,host,cpu_milli,mem_bytes,disk_bytes,image_bytes,image_estimate,want,state,reason,cause,detail,last_state,deployed_generation,image_ref,previous_ref,target_ref,deployed_spec,unit_sha,restarts,since,updated_at,placed_at,rev`
+const serviceColumns = `id,room,spec,generation,host,cpu_milli,mem_bytes,disk_bytes,image_bytes,image_estimate,want,state,reason,cause,detail,last_state,deployed_generation,image_ref,previous_ref,target_ref,deployed_spec,unit_sha,restarts,since,updated_at,placed_at,rev,feed_in,feed_out,feed_last_at`
 
 func scanService(r scanner) (ServiceRow, error) {
 	var row ServiceRow
 	var spec []byte
 	var live string
 	var host sql.NullString
-	var since, updated, placed int64
-	err := r.Scan(&row.ID, &row.Room, &spec, &row.Generation, &host, &row.CPUMilli, &row.MemBytes, &row.DiskBytes, &row.ImageBytes, &row.ImageEstimate, &row.Want, &row.State, &row.Reason, &row.Cause, &row.Detail, &row.LastState, &row.Deployed, &row.ImageRef, &row.Previous, &row.Target, &live, &row.UnitSHA, &row.Restarts, &since, &updated, &placed, &row.Rev)
+	var since, updated, placed, feedIn, feedOut, feedLastAt int64
+	err := r.Scan(&row.ID, &row.Room, &spec, &row.Generation, &host, &row.CPUMilli, &row.MemBytes, &row.DiskBytes, &row.ImageBytes, &row.ImageEstimate, &row.Want, &row.State, &row.Reason, &row.Cause, &row.Detail, &row.LastState, &row.Deployed, &row.ImageRef, &row.Previous, &row.Target, &live, &row.UnitSHA, &row.Restarts, &since, &updated, &placed, &row.Rev, &feedIn, &feedOut, &feedLastAt)
 	if err != nil {
 		return row, err
 	}
@@ -102,6 +102,14 @@ func scanService(r scanner) (ServiceRow, error) {
 	row.Updated = time.UnixMilli(updated)
 	if placed != 0 {
 		row.Placed = time.UnixMilli(placed)
+	}
+	if row.Spec.Feed {
+		stats := &contract.ServiceFeedStats{MessagesIn: feedIn, MessagesOut: feedOut}
+		if feedLastAt > 0 {
+			t := time.UnixMilli(feedLastAt).UTC()
+			stats.LastMessageAt = &t
+		}
+		row.Feed = stats
 	}
 	return row, nil
 }
@@ -386,7 +394,7 @@ func (s *Store) DeleteService(ctx context.Context, row ServiceRow, owed bool) er
 				return err
 			}
 		}
-		for _, q := range []string{"DELETE FROM service_secrets WHERE service=?", "DELETE FROM services WHERE id=?"} {
+		for _, q := range []string{"DELETE FROM service_feed_messages WHERE service=?", "DELETE FROM service_outbox WHERE service=?", "DELETE FROM service_secrets WHERE service=?", "DELETE FROM services WHERE id=?"} {
 			if _, err := tx.ExecContext(ctx, q, row.ID); err != nil {
 				return err
 			}

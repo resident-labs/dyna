@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { SubscriptionInfo } from "./contract.gen.ts";
-import { hookName, subscriptionAction, subscriptionRows, subscriptionState, subscriptionSummary, subscriptionWhen } from "./subscriptions.ts";
+import { hookName, subscriptionAction, subscriptionKind, subscriptionRows, subscriptionState, subscriptionSummary, subscriptionWhen } from "./subscriptions.ts";
 
 const run = { command: ["bash", "watch.sh"], image: "base", size: "small" as const };
 const info = (subscription: Partial<SubscriptionInfo["subscription"]>, rest: Partial<SubscriptionInfo> = {}): SubscriptionInfo =>
@@ -20,6 +20,7 @@ test("a subscription says what it does", () => {
   const name = (session: string) => session === "ses_root" ? "root" : "?";
   assert.equal(subscriptionAction(info({ run }), name), "Runs bash watch.sh");
   assert.equal(subscriptionAction(info({ wake: "ses_root" }), name), "Wakes root");
+  assert.equal(subscriptionAction(info({ workflow: { script: "// triage https://example.com/a/b\nserve(async () => {});" } }), name), "Runs workflow");
 });
 
 test("a subscription's state puts the worst news first", () => {
@@ -112,4 +113,22 @@ test("a row names its script, keeps the raw line for its tooltip, and tells apar
   assert.deepEqual(rows.map(row => [row.name, row.detail]), [["Author watch", "levzzz5154"], ["Author watch", "Sylviromi"], ["Solo", ""]]);
   assert.equal(rows[0].title, "Runs bash author-watch.sh levzzz5154 3");
   assert.equal(rows[0].when, "Every 15 min");
+});
+
+test("each subscription is tagged by kind: on event, schedule, or digest", () => {
+  assert.equal(subscriptionKind(info({ on: ["service.message"], where: ["service=agent-chat"], wake: "ses_sunrise" })), "on event");
+  assert.equal(subscriptionKind(info({ every: "30m", run })), "schedule · 30 min");
+  assert.equal(subscriptionKind(info({ every: "2h", run })), "schedule · 2 h");
+  assert.equal(subscriptionKind(info({ on: ["github.pr.opened"], every: "20m", wake: "ses_root" })), "digest · 20 min");
+  assert.equal(subscriptionWhen(info({ on: ["github.pr.opened"], every: "20m", wake: "ses_root" }), true), "On github.pr.opened, every 20 min");
+  const rows = subscriptionRows([
+    info({ id: "sub_1", on: ["service.message"], wake: "ses_sunrise" }),
+    info({ id: "sub_2", every: "15m", run }),
+    info({ id: "sub_3", on: ["github.comment"], every: "20m", wake: "ses_root" }),
+  ], id => id === "ses_sunrise" ? "sunrise" : "root");
+  assert.deepEqual(rows.map(r => [r.id, r.kind]), [
+    ["sub_2", "schedule · 15 min"],
+    ["sub_1", "on event"],
+    ["sub_3", "digest · 20 min"],
+  ]);
 });

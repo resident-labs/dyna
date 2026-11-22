@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/resident-labs/dyna/box"
+	"github.com/resident-labs/dyna/contract"
 )
 
 // ServiceSliceName is the slice every service runs in, under dyna.slice by its name.
@@ -59,6 +60,10 @@ func RenderServiceUnit(u box.ServiceUnitSpec) string {
 	}
 	if p.Spec.Data != "" {
 		line("Volume=%s:%s", name, p.Spec.Data)
+	}
+	if u.FeedSocketDir != "" {
+		line("Volume=%s:%s:ro", u.FeedSocketDir, contract.ServiceFeedSocketDir)
+		line("Environment=%s", unitWord("DYNA_FEED_SOCKET="+contract.ServiceFeedSocketPath))
 	}
 	for _, key := range slices.Sorted(maps.Keys(p.Spec.Env)) {
 		line("Environment=%s", unitWord(key+"="+p.Spec.Env[key]))

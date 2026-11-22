@@ -176,6 +176,9 @@ func (offlineRestoreStore) Box(_ context.Context, id contract.BoxID) (box.Box, e
 func (offlineRestoreStore) Session(context.Context, contract.SessionID) (store.Session, error) {
 	return store.Session{Room: "r"}, nil
 }
+func (offlineRestoreStore) Services(context.Context, contract.RoomID) ([]store.ServiceRow, error) {
+	return nil, nil
+}
 
 type offlineRunner struct {
 	mu               sync.Mutex

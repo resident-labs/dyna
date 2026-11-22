@@ -2,20 +2,22 @@
   import AccountMenu from "./AccountMenu.svelte";
   import BoxFacts from "./BoxFacts.svelte";
   import FoldRow from "./FoldRow.svelte";
-  import HooksList from "./HooksList.svelte";
   import Icon, { type IconName } from "./Icon.svelte";
   import Modal from "./Modal.svelte";
   import ProfileMenu from "./ProfileMenu.svelte";
+  import ServicesList from "./ServicesList.svelte";
   import StatusPill from "./StatusPill.svelte";
+  import SubscriptionsList from "./SubscriptionsList.svelte";
   import WrapText from "./WrapText.svelte";
   import { fromNow, fullTime } from "../feed.ts";
   import { goalTree, openLeaves } from "../goals.ts";
   import { call } from "../client.ts";
   import { confirmClose } from "../session-confirms.ts";
+  import { serviceSummary } from "../services.ts";
   import { descendants, holdRows } from "../session-tree.ts";
   import { subscriptionSummary } from "../subscriptions.ts";
   import type { RoomStore } from "../room.svelte.ts";
-  import type { Responsibility, ResponsibilityKind, SessionAccountResponse, SubscriptionInfo } from "../contract.gen.ts";
+  import type { Responsibility, ResponsibilityKind, Service, SessionAccountResponse, SubscriptionInfo } from "../contract.gen.ts";
   // What a DM's session is, in the order the owner asks: who it is, the box it runs in, then what it holds. The goal folds to
   // a line or two, its todo list is one line, and each kind of hold is one line that opens its whole list in a modal, so the first two never leave
   // the screen and nothing pushes the panel sideways. A row without a value does not show, and a session holding nothing
@@ -56,8 +58,20 @@
   let subscriptions: SubscriptionInfo[] = $state([]);
   $effect(() => {
     if (!isRoot) { subscriptions = []; return; }
+    if (!shown) return;
     const asked = room;
-    void call("subscription.list", { room: asked }).then(answer => { if (asked === room) subscriptions = answer.subscriptions ?? []; }, () => { subscriptions = []; });
+    void call("subscription.list", { room: asked }).then(answer => { if (asked === room) subscriptions = answer.subscriptions ?? []; }, () => { if (asked === room) subscriptions = []; });
+  });
+  let services: Service[] = $state([]);
+  function loadServices(): void {
+    const asked = room;
+    void call("service.list", { room: asked }).then(answer => { if (asked === room) services = answer.services ?? []; }, () => { if (asked === room) services = []; });
+  }
+  $effect(() => {
+    if (!isRoot) { services = []; return; }
+    if (!shown) return;
+    void store.servicesVersion;
+    loadServices();
   });
   // The engine's list of what this session still holds. Anything that can change it reads it again; one that cannot load shows nothing.
   let holds: Responsibility[] = $state([]);
@@ -71,10 +85,11 @@
     const child = childOf(name);
     return child && `/r/${encodeURIComponent(room)}/s/${encodeURIComponent(child.session)}`;
   }));
-  let hooks = $derived(subscriptionSummary(subscriptions));
+  let subs = $derived(subscriptionSummary(subscriptions));
+  let svcs = $derived(serviceSummary(services));
   const holdIcons: Partial<Record<ResponsibilityKind, IconName>> = { pr: "pr", issue: "issue", child: "people", terminal: "terminal", workflow: "list", question: "chat" };
-  // Each hold, and the room's hooks, is one line here; the full list opens in a modal. A list that empties closes it.
-  let showing: ResponsibilityKind | "hooks" | "todo" | undefined = $state();
+  // Each hold, and the room's subscriptions and services, is one line here; the full list opens in a modal.
+  let showing: ResponsibilityKind | "subscriptions" | "services" | "todo" | undefined = $state();
   $effect(() => { void session; showing = undefined; });
   let shownHold = $derived(held.find(row => row.kind === showing && row.opens));
   // A link in a modal goes where it says and takes the modal away with it.
@@ -111,7 +126,7 @@
       </section>
     {/if}
   {/if}
-  {#if held.length || hooks.count}
+  {#if held.length || subs.count || svcs.count}
     <section>
       <h3>Holds</h3>
       {#snippet line(icon: IconName, label: string, count: number, blocked: boolean, health = "", failing = false)}
@@ -123,7 +138,8 @@
           {#if row.opens}<button type="button" class="hold" aria-haspopup="dialog" onclick={() => { showing = row.kind; }}>{@render line(holdIcons[row.kind] ?? "list", row.label, row.count, row.blocked)}<span class="go"><Icon name="forwardChevron" size={12} /></span></button>
           {:else}<div class="hold">{@render line(holdIcons[row.kind] ?? "list", row.label, row.count, row.blocked)}</div>{/if}
         {/each}
-        {#if hooks.count}<button type="button" class="hold" aria-haspopup="dialog" onclick={() => { showing = "hooks"; }}>{@render line("plug", "Hooks", hooks.count, false, hooks.health, hooks.failing)}<span class="go"><Icon name="forwardChevron" size={12} /></span></button>{/if}
+        {#if svcs.count}<button type="button" class="hold" aria-haspopup="dialog" onclick={() => { showing = "services"; loadServices(); }}>{@render line("stack", "Services", svcs.count, false, svcs.health, svcs.failing)}<span class="go"><Icon name="forwardChevron" size={12} /></span></button>{/if}
+        {#if subs.count}<button type="button" class="hold" aria-haspopup="dialog" onclick={() => { showing = "subscriptions"; }}>{@render line("plug", "Subscriptions", subs.count, false, subs.health, subs.failing)}<span class="go"><Icon name="forwardChevron" size={12} /></span></button>{/if}
       </div>
     </section>
   {/if}
@@ -160,9 +176,13 @@
   <Modal title="Todo" count={left ? `${left} open` : undefined} onclose={() => { showing = undefined; }}>
     <ul class="todo">{#each goalTree(todo) as item (item.number)}<li class:quiet={item.state !== "open"} class:dropped={item.state === "dropped"}>{@render mark(item.state)}<WrapText text={item.text} />{#if item.subtasks.length}<ul>{#each item.subtasks as sub (sub.number)}<li class:quiet={sub.state !== "open"} class:dropped={sub.state === "dropped"}>{@render mark(sub.state)}<WrapText text={sub.text} /></li>{/each}</ul>{/if}</li>{/each}</ul>
   </Modal>
-{:else if showing === "hooks" && hooks.count}
-  <Modal title="Hooks" count={hooks.count} onclose={() => { showing = undefined; }}>
-    <HooksList {subscriptions} name={id => store.names.get(id) ?? id} />
+{:else if showing === "subscriptions" && subs.count}
+  <Modal title="Subscriptions" count={subs.count} onclose={() => { showing = undefined; }}>
+    <SubscriptionsList {subscriptions} name={id => store.names.get(id) ?? id} />
+  </Modal>
+{:else if showing === "services" && svcs.count}
+  <Modal title="Services" count={svcs.count} onclose={() => { showing = undefined; }}>
+    <ServicesList {services} {subscriptions} name={id => store.names.get(id) ?? id} {now} />
   </Modal>
 {/if}
 

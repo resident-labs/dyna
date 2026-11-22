@@ -21,6 +21,12 @@ type ServiceHosts interface {
 	ServiceRoomImage(ctx context.Context, host contract.HostName, room contract.RoomID, name string) (string, error)
 }
 
+// ServiceFeeds is an optional extension of ServiceHosts that opens, forwards and removes a feed service's engine socket.
+type ServiceFeeds interface {
+	EnsureFeedSocket(ctx context.Context, host contract.HostName, id contract.ServiceID, room contract.RoomID, name contract.ServiceName) (string, error)
+	RemoveFeedSocket(ctx context.Context, host contract.HostName, id contract.ServiceID) error
+}
+
 // ServiceTimings bound the waits of a deploy. Start is how long the unit has to become active, Stable how long a service with no
 // health command must stay active, Health the health gate, Poll the gap between looks, and CheckEvery how long a service host
 // check is trusted.
@@ -266,6 +272,9 @@ func (r *Reconciler) serviceStep(ctx context.Context, row store.ServiceRow, host
 	if host.State != box.HostReady {
 		// A host that is gone takes its services' state with it, and nothing moves them: a removal is owed instead.
 		if row.Want == contract.ServiceWantRemove {
+			if feeds, ok := r.svc.hosts.(ServiceFeeds); ok {
+				_ = feeds.RemoveFeedSocket(ctx, "", row.ID)
+			}
 			return r.store.DeleteService(ctx, row, true)
 		}
 		if row.State == contract.ServiceUnreachable {
@@ -295,6 +304,11 @@ func (r *Reconciler) serviceStep(ctx context.Context, row store.ServiceRow, host
 	if row.Want == contract.ServiceWantRemove {
 		if err := driver.RemoveService(ctx, row.ID); err != nil {
 			return fmt.Errorf("service %s: remove: %w", row.ID, err)
+		}
+		if feeds, ok := r.svc.hosts.(ServiceFeeds); ok {
+			if err := feeds.RemoveFeedSocket(ctx, row.Host, row.ID); err != nil {
+				log.Printf("lifecycle: service %s: remove feed socket: %v", row.ID, err)
+			}
 		}
 		return r.store.DeleteService(ctx, row, false)
 	}
@@ -425,7 +439,15 @@ func (r *Reconciler) rewriteService(ctx context.Context, row store.ServiceRow, d
 			}
 		}
 	}
-	if _, err := driver.WriteServiceUnit(ctx, box.ServiceUnitSpec{ID: row.ID, Room: row.Room, Parts: parts, Image: row.ImageRef}); err != nil {
+	var feedDir string
+	if parts.Spec.Feed {
+		if feeds, ok := r.svc.hosts.(ServiceFeeds); ok {
+			if feedDir, err = feeds.EnsureFeedSocket(ctx, row.Host, row.ID, row.Room, parts.Spec.Name); err != nil {
+				return fmt.Errorf("service %s: feed socket: %w", row.ID, err)
+			}
+		}
+	}
+	if _, err := driver.WriteServiceUnit(ctx, box.ServiceUnitSpec{ID: row.ID, Room: row.Room, Parts: parts, Image: row.ImageRef, FeedSocketDir: feedDir}); err != nil {
 		return fmt.Errorf("service %s: write unit: %w", row.ID, err)
 	}
 	if row.Want == contract.ServiceWantRun {
@@ -634,7 +656,15 @@ func (r *Reconciler) runDeploy(ctx context.Context, row *store.ServiceRow, drive
 			return &deployFailure{contract.ServiceUnitFailed, fmt.Sprintf("secret %s could not be written to the host", name)}
 		}
 	}
-	sha, err := driver.WriteServiceUnit(ctx, box.ServiceUnitSpec{ID: row.ID, Room: row.Room, Parts: row.Parts, Image: ref})
+	var feedDir string
+	if row.Parts.Spec.Feed {
+		if feeds, ok := r.svc.hosts.(ServiceFeeds); ok {
+			if feedDir, err = feeds.EnsureFeedSocket(ctx, row.Host, row.ID, row.Room, row.Parts.Spec.Name); err != nil {
+				return &deployFailure{contract.ServiceUnitFailed, fmt.Sprintf("feed socket: %v", err)}
+			}
+		}
+	}
+	sha, err := driver.WriteServiceUnit(ctx, box.ServiceUnitSpec{ID: row.ID, Room: row.Room, Parts: row.Parts, Image: ref, FeedSocketDir: feedDir})
 	if err != nil {
 		return &deployFailure{contract.ServiceUnitFailed, err.Error()}
 	}
@@ -669,7 +699,13 @@ func (r *Reconciler) runDeploy(ctx context.Context, row *store.ServiceRow, drive
 	next.ImageBytes, next.ImageEstimate = size, 0
 	next.ImageRef, next.Target, next.UnitSHA, next.Deployed = ref, "", sha, row.Generation
 	next.State, next.Reason, next.Cause, next.Detail, next.LastState = contract.ServiceRunning, "", "", "", ""
-	*row, _, err = r.saveService(ctx, *row, next)
+	var saved bool
+	*row, saved, err = r.saveService(ctx, *row, next)
+	if err == nil && saved && !row.Parts.Spec.Feed {
+		if feeds, ok := r.svc.hosts.(ServiceFeeds); ok {
+			_ = feeds.RemoveFeedSocket(ctx, row.Host, row.ID)
+		}
+	}
 	return err
 }
 
@@ -735,7 +771,15 @@ func (r *Reconciler) failDeploy(ctx context.Context, row store.ServiceRow, drive
 			failure.Reason, failure.Cause = contract.ServiceRolledBack, fail.reason
 		}
 	}
-	_, _, err := r.saveService(ctx, row, next, failure)
+	_, saved, err := r.saveService(ctx, row, next, failure)
+	if err == nil && saved {
+		liveFeed := next.State == contract.ServiceRunning && row.Live != nil && row.Live.Spec.Feed
+		if !liveFeed {
+			if feeds, ok := r.svc.hosts.(ServiceFeeds); ok {
+				_ = feeds.RemoveFeedSocket(ctx, row.Host, row.ID)
+			}
+		}
+	}
 	return err
 }
 
@@ -976,6 +1020,11 @@ func (r *Reconciler) repayServiceLeftovers(ctx context.Context, host contract.Ho
 		if err := driver.RemoveService(ctx, id); err != nil {
 			return fmt.Errorf("host %s: remove service %s: %w", host, id, err)
 		}
+		if feeds, ok := r.svc.hosts.(ServiceFeeds); ok {
+			if err := feeds.RemoveFeedSocket(ctx, host, id); err != nil {
+				log.Printf("host %s: remove leftover feed socket %s: %v", host, id, err)
+			}
+		}
 		if err := r.store.ForgetServiceLeftover(ctx, host, id); err != nil {
 			return err
 		}
@@ -989,6 +1038,15 @@ func (r *Reconciler) removeServiceFromHost(ctx context.Context, row store.Servic
 	driver, err := r.svc.hosts.ServiceDriver(ctx, row.Host)
 	if err == nil {
 		err = driver.RemoveService(ctx, row.ID)
+	}
+	if feeds, ok := r.svc.hosts.(ServiceFeeds); ok {
+		host := row.Host
+		if err != nil {
+			host = ""
+		}
+		if sockErr := feeds.RemoveFeedSocket(ctx, host, row.ID); sockErr != nil {
+			log.Printf("host %s: discard feed socket %s: %v", row.Host, row.ID, sockErr)
+		}
 	}
 	if err != nil {
 		log.Printf("host %s: discard service %s: %v", row.Host, row.ID, err)

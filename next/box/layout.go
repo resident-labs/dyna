@@ -49,6 +49,7 @@ import (
 //	<HostData>/sock/share.sock                      the forwarded socket that mount reads through
 //	<HostData>/sock/build-cache/cache.sock          the compiler cache's server, which boxes and CI runners mount
 //	<HostData>/sock/<box>/engine.sock               a box's forwarded socket, gone with the box
+//	<HostData>/sock/<service>/feed.sock             a feed service's forwarded socket, gone with the service
 //	<HostData>/runs/<run>/                          a subscription Run's files, gone with the Run
 //
 // Box volumes are Podman's, so they are not here. One path inside them is Dyna's:
@@ -74,6 +75,8 @@ const (
 	AddonBundle = "addons.tgz"
 	// EngineSocket is the name of a box's socket in its host folder.
 	EngineSocket = "engine.sock"
+	// FeedSocket is the name of a feed service's socket in its host folder.
+	FeedSocket = "feed.sock"
 )
 
 func roomFolder(rooms string, room contract.RoomID) (string, error) {
@@ -373,6 +376,16 @@ func (l Layout) HostSocketFolder(id contract.BoxID) string {
 // HostSocket is a box's forwarded socket on its host.
 func (l Layout) HostSocket(id contract.BoxID) string {
 	return filepath.Join(l.HostSocketFolder(id), EngineSocket)
+}
+
+// HostServiceSocketFolder is the folder a feed service mounts for its socket.
+func (l Layout) HostServiceSocketFolder(id contract.ServiceID) string {
+	return filepath.Join(l.HostData, "sock", string(id))
+}
+
+// HostServiceSocket is a feed service's forwarded socket on its host.
+func (l Layout) HostServiceSocket(id contract.ServiceID) string {
+	return filepath.Join(l.HostServiceSocketFolder(id), FeedSocket)
 }
 
 // HostRun is the folder of one subscription Run's files.
