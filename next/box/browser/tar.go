@@ -146,7 +146,6 @@ func PackProfile(dir string, w io.Writer) error {
 		}
 	})
 	if err != nil {
-		_ = tw.Close()
 		return err
 	}
 	return tw.Close()

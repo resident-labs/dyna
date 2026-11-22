@@ -47,7 +47,8 @@ type Reconciler struct {
 	idle          map[contract.HostName]time.Time // when each shared node last held a box, as this engine saw
 	audited       map[string]time.Time            // when each pool last ran list
 	roomSteps     map[string]chan struct{}
-	browserSteps  map[string]bool                 // browser profile names currently recovering from a dead box
+	browserSteps  map[string]bool         // browser profile names currently recovering from a dead box
+	browserBoxes  map[contract.BoxID]bool // boxes currently undergoing browser lease recovery
 	quiesced      map[contract.BoxID]bool // process-local owner restart fences; never deletion authority
 	retained      map[store.Leftover]bool // completed container-only work, not volume deletion permission
 	active        map[contract.BoxID]*activeStep
@@ -63,7 +64,7 @@ func New(st *store.Store, boxes BoxAdapter, view View, repos Repositories, event
 	st.SetTerminals(func(id contract.SessionID) bool { return view.OpenTerminal(id) })
 	return &Reconciler{store: st, boxes: boxes, view: view, repos: repos, event: event, now: now, createContext: func(ctx context.Context) (context.Context, context.CancelFunc) {
 		return context.WithTimeout(ctx, box.StartPreparationBudget)
-	}, kick: make(chan struct{}, 1), roomSteps: make(map[string]chan struct{}), browserSteps: make(map[string]bool), quiesced: make(map[contract.BoxID]bool), retained: make(map[store.Leftover]bool), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool), disconnected: make(map[contract.BoxID]time.Time), idle: make(map[contract.HostName]time.Time), audited: make(map[string]time.Time)}
+	}, kick: make(chan struct{}, 1), roomSteps: make(map[string]chan struct{}), browserSteps: make(map[string]bool), browserBoxes: make(map[contract.BoxID]bool), quiesced: make(map[contract.BoxID]bool), retained: make(map[store.Leftover]bool), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool), disconnected: make(map[contract.BoxID]time.Time), idle: make(map[contract.HostName]time.Time), audited: make(map[string]time.Time)}
 }
 func (r *Reconciler) SetHostHealth(read func(contract.HostName) contract.HostHealth) {
 	r.hostHealth = read
@@ -463,7 +464,7 @@ func (r *Reconciler) browserLeasePass(ctx context.Context, rows []store.Lifecycl
 	}
 	for _, lease := range leases {
 		r.mu.Lock()
-		busy := r.browserSteps[lease.Profile] || r.active[lease.Box] != nil
+		busy := r.browserSteps[lease.Profile] || r.browserBoxes[lease.Box] || r.active[lease.Box] != nil
 		r.mu.Unlock()
 		if busy {
 			continue
@@ -480,7 +481,13 @@ func (r *Reconciler) browserLeasePass(ctx context.Context, rows []store.Lifecycl
 		var recover, checkVolume bool
 		switch {
 		case !ok || b.State == contract.BoxDeleted:
-			recover, checkVolume = true, false
+			leftovers, err := r.store.BoxLeftovers(ctx, lease.Box)
+			if err != nil {
+				return err
+			}
+			if len(leftovers) == 0 {
+				recover, checkVolume = true, false
+			}
 		case b.State == contract.BoxStopped:
 			if b.Image == "" || b.Host == "" {
 				recover, checkVolume = true, false
@@ -498,11 +505,12 @@ func (r *Reconciler) browserLeasePass(ctx context.Context, rows []store.Lifecycl
 			continue
 		}
 		r.mu.Lock()
-		if r.browserSteps[lease.Profile] {
+		if r.browserSteps[lease.Profile] || r.browserBoxes[lease.Box] || r.active[lease.Box] != nil {
 			r.mu.Unlock()
 			continue
 		}
 		r.browserSteps[lease.Profile] = true
+		r.browserBoxes[lease.Box] = true
 		r.wg.Add(1)
 		r.mu.Unlock()
 		go func(l store.BrowserLeaseRow, host contract.HostName, checkVol bool) {
@@ -510,6 +518,7 @@ func (r *Reconciler) browserLeasePass(ctx context.Context, rows []store.Lifecycl
 			defer func() {
 				r.mu.Lock()
 				delete(r.browserSteps, l.Profile)
+				delete(r.browserBoxes, l.Box)
 				r.mu.Unlock()
 				r.Kick()
 			}()
@@ -522,7 +531,7 @@ func (r *Reconciler) browserLeasePass(ctx context.Context, rows []store.Lifecycl
 }
 func (r *Reconciler) launch(ctx context.Context, row store.LifecycleBox) {
 	r.mu.Lock()
-	if r.active[row.ID] != nil || r.hosts[row.Host] >= 4 {
+	if r.active[row.ID] != nil || r.browserBoxes[row.ID] || r.hosts[row.Host] >= 4 {
 		r.mu.Unlock()
 		return
 	}

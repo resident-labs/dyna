@@ -25,6 +25,10 @@ type BrowserVolumes interface {
 	RemoveBrowserProfile(ctx context.Context, host contract.HostName, id contract.BoxID) error
 }
 
+// maxBrowserCheckinBytes bounds a single shared browser profile checkin body so one box
+// cannot fill the engine host's disk. Overridden in tests.
+var maxBrowserCheckinBytes int64 = 4 << 30
+
 var errStaleBrowserLease = errors.New("browser lease no longer matches; checkin refused")
 
 func (s *Service) browserLock(name string) *sync.Mutex {
@@ -194,6 +198,7 @@ func (s *Service) handleBrowserCheckout(w http.ResponseWriter, r *http.Request, 
 	}
 	dir, err := s.layout.Browser(profile)
 	if err != nil {
+		_, _ = s.store.BrowserFinishCheckin(context.WithoutCancel(r.Context()), profile, boxID, gen)
 		writeBrowserJSONError(w, http.StatusInternalServerError, contract.ErrUnavailable, err.Error())
 		return
 	}
@@ -205,6 +210,7 @@ func (s *Service) handleBrowserCheckout(w http.ResponseWriter, r *http.Request, 
 	w.Header().Set("X-Dyna-Browser-Generation", strconv.FormatInt(gen, 10))
 	if err := browser.PackProfile(dir, w); err != nil {
 		log.Printf("browser checkout %s (%s): %v", profile, boxID, err)
+		panic(http.ErrAbortHandler)
 	}
 }
 
@@ -242,8 +248,14 @@ func (s *Service) handleBrowserCheckin(w http.ResponseWriter, r *http.Request, b
 		writeBrowserJSONError(w, http.StatusConflict, contract.ErrConflict, errStaleBrowserLease.Error())
 		return
 	}
-	tmpDir, err := s.unpackBrowserTemp(profile, r.Body)
+	body := http.MaxBytesReader(w, r.Body, maxBrowserCheckinBytes)
+	tmpDir, err := s.unpackBrowserTemp(profile, body)
 	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeBrowserJSONError(w, http.StatusRequestEntityTooLarge, contract.ErrInvalid, fmt.Sprintf("browser profile checkin exceeds %d byte limit", maxErr.Limit))
+			return
+		}
 		writeBrowserJSONError(w, http.StatusBadRequest, contract.ErrInvalid, fmt.Sprintf("invalid browser profile tar: %v", err))
 		return
 	}
@@ -314,8 +326,12 @@ func (s *Service) commitBrowserCheckin(ctx context.Context, profile string, boxI
 		}
 		return err
 	}
-	ok, err := s.store.BrowserFinishCheckin(ctx, profile, boxID, gen)
+	ok, err := s.store.BrowserFinishCheckin(context.WithoutCancel(ctx), profile, boxID, gen)
 	if err != nil {
+		_ = os.Rename(dir, tmpDir)
+		if hasCurrent {
+			_ = os.Rename(prev, dir)
+		}
 		return err
 	}
 	if !ok {

@@ -13,9 +13,9 @@ import (
 func TestShouldExcludeAndPackUnpackRoundtrip(t *testing.T) {
 	src := t.TempDir()
 	kept := map[string]string{
-		"Local State":                                `{"os_crypt":{}}`,
-		"Default/Cookies":                            "session=abc123",
-		"Default/Preferences":                        `{"profile":{}}`,
+		"Local State":         `{"os_crypt":{}}`,
+		"Default/Cookies":     "session=abc123",
+		"Default/Preferences": `{"profile":{}}`,
 		"Default/Local Storage/leveldb/000003.log":   "ls-data",
 		"Default/IndexedDB/https_example.com_0/data": "idb-data",
 		"Default/Service Worker/Database/MANIFEST":   "sw-db",

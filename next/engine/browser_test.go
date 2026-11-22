@@ -274,3 +274,45 @@ func TestRecoverBrowserLeaseFromDeadBoxVolume(t *testing.T) {
 		t.Fatalf("lease still held after recovery: holds=%v err=%v", holds, err)
 	}
 }
+
+func TestBrowserCheckinSizeLimit(t *testing.T) {
+	r := newGrantRig(t)
+	ctx := t.Context()
+	r.s.SetLayout(box.Layout{Data: t.TempDir()})
+	if _, p := r.s.BrowserCreate(ctx, r.owner, contract.BrowserCreateRequest{Name: "capped"}); p != nil {
+		t.Fatal(p)
+	}
+	name := "capped"
+	if _, p := r.s.RoomSet(ctx, r.owner, contract.RoomSetRequest{Room: r.room, Browser: &name}); p != nil {
+		t.Fatal(p)
+	}
+	h := r.s.BrowserSync(r.worker, "box_cap", r.room)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/browser/checkout", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("checkout = %d", rec.Code)
+	}
+	gen := rec.Header().Get("X-Dyna-Browser-Generation")
+
+	oldLimit := maxBrowserCheckinBytes
+	maxBrowserCheckinBytes = 256
+	t.Cleanup(func() { maxBrowserCheckinBytes = oldLimit })
+
+	big := t.TempDir()
+	if err := os.WriteFile(filepath.Join(big, "data"), bytes.Repeat([]byte("a"), 2048), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var tarBuf bytes.Buffer
+	if err := browser.PackProfile(big, &tarBuf); err != nil {
+		t.Fatal(err)
+	}
+	recIn := httptest.NewRecorder()
+	h.ServeHTTP(recIn, httptest.NewRequest(http.MethodPost, "/v1/browser/checkin?profile=capped&generation="+gen, bytes.NewReader(tarBuf.Bytes())))
+	if recIn.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversize checkin status = %d, want 413 (body=%s)", recIn.Code, recIn.Body.String())
+	}
+	problem := contract.ReadError(recIn.Body)
+	if !strings.Contains(problem.Message, "exceeds 256 byte limit") {
+		t.Fatalf("oversize error message = %q", problem.Message)
+	}
+}

@@ -209,6 +209,35 @@ func TestSharedKilledChromiumSkipsCheckin(t *testing.T) {
 	}
 }
 
+func TestSharedKilledChromiumRetryStillDiscards(t *testing.T) {
+	store := &fakeProfileStore{
+		lease:      Lease{Profile: "work", Generation: 3},
+		seedFile:   "initial=1",
+		checkinErr: errors.New("temporary disconnect"),
+	}
+	ready := filepath.Join(t.TempDir(), "ready")
+	script := "#!/bin/sh\ntrap '' TERM\ntouch " + ready + "\nwhile true; do sleep 1; done\n"
+	p, _ := fakeSharedDesktop(t, script, store)
+	p.closeTimeout = 250 * time.Millisecond
+
+	if _, err := p.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitFor(t, func() bool { _, err := os.Stat(ready); return err == nil })
+	if err := p.Stop(); err == nil {
+		t.Fatal("expected first Stop to return transient checkin error")
+	}
+	store.mu.Lock()
+	store.checkinErr = nil
+	store.mu.Unlock()
+	if err := p.Stop(); err != nil {
+		t.Fatalf("retry Stop: %v", err)
+	}
+	if store.count() != 2 || !store.last().discard {
+		t.Fatalf("retry after killed Chromium must still discard, got count=%d last=%+v", store.count(), store.last())
+	}
+}
+
 func TestSharedIdleReleaseAndViewerPause(t *testing.T) {
 	store := &fakeProfileStore{
 		lease:    Lease{Profile: "work", Generation: 4},

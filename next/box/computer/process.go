@@ -309,6 +309,7 @@ func (p *Process) Start(ctx context.Context) (string, error) {
 	p.mu.Lock()
 	needCheckout := p.display == nil && p.store != nil && p.lease.Profile == ""
 	p.mu.Unlock()
+	var checkedOut Lease
 	if needCheckout {
 		dir := p.sharedDir()
 		if err := os.RemoveAll(dir); err != nil {
@@ -320,6 +321,7 @@ func (p *Process) Start(ctx context.Context) (string, error) {
 			return "", err
 		}
 		if lease.Profile != "" {
+			checkedOut = lease
 			p.mu.Lock()
 			p.lease = lease
 			p.browserUnclean = false
@@ -327,13 +329,19 @@ func (p *Process) Start(ctx context.Context) (string, error) {
 		}
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	report := p.exit
 	p.exit = ""
 	p.setup()
 	if p.display == nil {
 		if err := p.startDisplay(ctx); err != nil {
 			p.exit = report
+			if checkedOut.Profile != "" {
+				p.browserUnclean = true
+				p.mu.Unlock()
+				_ = p.stopLocked()
+				return "", err
+			}
+			p.mu.Unlock()
 			return "", err
 		}
 	}
@@ -355,9 +363,17 @@ func (p *Process) Start(ctx context.Context) (string, error) {
 	}
 	if err != nil {
 		p.exit = report
+		if checkedOut.Profile != "" {
+			p.browserUnclean = true
+			p.mu.Unlock()
+			_ = p.stopLocked()
+			return "", err
+		}
+		p.mu.Unlock()
 		return "", err
 	}
 	p.resetIdleTimerLocked()
+	p.mu.Unlock()
 	return report, nil
 }
 
@@ -526,7 +542,10 @@ func (p *Process) stopLocked() error {
 		return nil
 	}
 	p.mu.Lock()
-	unclean := p.browserUnclean || !cleanBrowser
+	if !cleanBrowser {
+		p.browserUnclean = true
+	}
+	unclean := p.browserUnclean
 	p.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), checkinTimeout)
 	defer cancel()

@@ -205,6 +205,7 @@ func (h *Host) PullBrowserProfile(ctx context.Context, id contract.BoxID, dst io
 	args := append(h.direct(), "-T", h.destination,
 		"podman unshare bash -c "+quote(pullBrowserProfileScript)+" dyna-browser-pull "+quote(string(id)))
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd.WaitDelay = 2 * time.Second
 	var stderr bytes.Buffer
 	cmd.Stdout = dst
 	cmd.Stderr = &stderr

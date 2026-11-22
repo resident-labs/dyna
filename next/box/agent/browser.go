@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/resident-labs/dyna/box/browser"
 	"github.com/resident-labs/dyna/box/computer"
@@ -42,11 +43,15 @@ func (c *Client) Checkout(ctx context.Context, dir string) (computer.Lease, erro
 	if profile == "" || err != nil || gen <= 0 {
 		return computer.Lease{}, fmt.Errorf("browser checkout: invalid response headers")
 	}
+	lease := computer.Lease{Profile: profile, Generation: gen}
 	if err := browser.UnpackProfile(resp.Body, dir); err != nil {
 		_ = os.RemoveAll(dir)
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		_ = c.Checkin(releaseCtx, lease, "", true)
+		cancel()
 		return computer.Lease{}, fmt.Errorf("unpack shared browser profile %s: %w", profile, err)
 	}
-	return computer.Lease{Profile: profile, Generation: gen}, nil
+	return lease, nil
 }
 
 // Checkin packs dir and streams it back to the engine, releasing the shared browser profile lease.

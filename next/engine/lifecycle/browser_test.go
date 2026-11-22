@@ -108,4 +108,46 @@ func TestBrowserLeasePassUnreachableVsStopped(t *testing.T) {
 	if holds, err := st.BoxHoldsBrowserLease(ctx, "box_stopped"); err != nil || holds {
 		t.Fatalf("box_stopped lease should be released: holds=%v err=%v", holds, err)
 	}
+
+	// An abandoned (BoxDeleted) box with a remaining host leftover keeps its lease until the leftover clears.
+	if err := st.BrowserCreate(ctx, "prof_abandoned"); err != nil {
+		t.Fatal(err)
+	}
+	ev3 := contract.Event{ID: "e3", Room: room, Time: now, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionStarted{}}
+	boxEv3 := contract.Event{ID: "be3", Room: room, Time: now, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{}}
+	if _, err := st.StartSession(ctx, store.Session{ID: "ses_ab", Room: room, Name: "ab", Profile: "sol", Box: "box_ab"}, "", contract.BoxSizeAgent, "", ev3, boxEv3, "", false, "", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetRoomBrowser(ctx, room, "prof_abandoned"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := st.BrowserCheckout(ctx, "box_ab", "ses_ab", room, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddHost(ctx, box.Host{Name: "h_down", SSH: "u@down", State: box.HostUnreachable}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddBoxLeftover(ctx, "h_down", room, "box_ab", "dyna-box_ab.slice"); err != nil {
+		t.Fatal(err)
+	}
+	rowsWithAbandoned := []store.LifecycleBox{
+		{Box: box.Box{ID: "box_ab", Host: "h_down", State: contract.BoxDeleted, Image: "img"}},
+	}
+	if err := r.browserLeasePass(ctx, rowsWithAbandoned, hostState); err != nil {
+		t.Fatal(err)
+	}
+	r.wg.Wait()
+	if holds, err := st.BoxHoldsBrowserLease(ctx, "box_ab"); err != nil || !holds {
+		t.Fatalf("abandoned box with leftover should keep lease: holds=%v err=%v", holds, err)
+	}
+	if err := st.ForgetLeftover(ctx, store.Leftover{Host: "h_down", Room: room, Box: "box_ab", Slice: "dyna-box_ab.slice"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.browserLeasePass(ctx, rowsWithAbandoned, hostState); err != nil {
+		t.Fatal(err)
+	}
+	r.wg.Wait()
+	if holds, err := st.BoxHoldsBrowserLease(ctx, "box_ab"); err != nil || holds {
+		t.Fatalf("abandoned box lease should release once leftover clears: holds=%v err=%v", holds, err)
+	}
 }
