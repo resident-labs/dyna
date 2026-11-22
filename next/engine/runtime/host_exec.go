@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 
@@ -37,22 +36,6 @@ func (b *Boxes) ExecArgv(ctx context.Context, host contract.HostName, id contrac
 		return nil, err
 	}
 	return h.ExecArgv(id, argv...), nil
-}
-
-func (b *Boxes) PullBrowserProfile(ctx context.Context, host contract.HostName, id contract.BoxID, dst io.Writer) (bool, error) {
-	h, err := b.host(ctx, host)
-	if err != nil {
-		return false, err
-	}
-	return h.PullBrowserProfile(ctx, id, dst)
-}
-
-func (b *Boxes) RemoveBrowserProfile(ctx context.Context, host contract.HostName, id contract.BoxID) error {
-	h, err := b.host(ctx, host)
-	if err != nil {
-		return err
-	}
-	return h.RemoveBrowserProfile(ctx, id)
 }
 
 // engineScopeRunner uses SSH even for the engine host: setsid alone does not

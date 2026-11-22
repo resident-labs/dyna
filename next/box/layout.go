@@ -33,7 +33,7 @@ import (
 //	<Data>/store.db, <Data>/store.lock              the store and its lock
 //	<Data>/connect/                                 Connect credentials
 //	<Data>/pools/<name>/script                      a node pool's script, which runs here and no box can reach
-//	<Data>/browsers/<name>/                         a shared Chromium browser profile, with <name>.prev/ beside it
+//	<Data>/browsers/<name>/jar.json                 a shared browser profile's cookie jar (mode 0600)
 //	<Data>/cliproxy/, <Data>/cliproxy/auth-v2/      the model proxy and its sign-in folder
 //	<Data>/git/<owner>/<repo>.git                   repository mirrors, which rooms share
 //	<HostData>/instructions/global/AGENTS.md        the global copy a box mounts
@@ -178,7 +178,16 @@ func (l Layout) Browser(name string) (string, error) {
 	return filepath.Join(l.Browsers(), name), nil
 }
 
-// BrowserPrev is the previous copy kept beside a shared browser profile.
+// BrowserJar is one shared browser profile's cookie jar file on the engine host.
+func (l Layout) BrowserJar(name string) (string, error) {
+	dir, err := l.Browser(name)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "jar.json"), nil
+}
+
+// BrowserPrev is the legacy v1 previous folder beside a shared browser profile, kept for migration cleanup.
 func (l Layout) BrowserPrev(name string) (string, error) {
 	dir, err := l.Browser(name)
 	if err != nil {

@@ -3,11 +3,14 @@ package computer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/resident-labs/dyna/box/browser"
 )
 
 type target struct {
@@ -85,6 +88,20 @@ func connect(ctx context.Context, base string) (_ *DevTools, resultErr error) {
 
 func (d *DevTools) Close() { _ = d.conn.Close(websocket.StatusNormalClosure, "") }
 
+type devToolsProtoError struct {
+	method  string
+	message string
+}
+
+func (e *devToolsProtoError) Error() string {
+	return fmt.Sprintf("DevTools %s: %s", e.method, e.message)
+}
+
+func isDevToolsProtoError(err error) bool {
+	var pe *devToolsProtoError
+	return errors.As(err, &pe)
+}
+
 // Call sends one protocol command and returns its result.
 func (d *DevTools) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
 	if method == "Page.navigate" {
@@ -114,7 +131,7 @@ func (d *DevTools) Call(ctx context.Context, method string, params json.RawMessa
 			continue
 		}
 		if msg.Error != nil {
-			return nil, fmt.Errorf("DevTools %s: %s", method, msg.Error.Message)
+			return nil, &devToolsProtoError{method: method, message: msg.Error.Message}
 		}
 		return msg.Result, nil
 	}
@@ -138,40 +155,123 @@ func (d *DevTools) WaitLoad(ctx context.Context) error {
 	return nil
 }
 
-// CloseBrowser asks Chromium to shut down cleanly via DevTools Browser.close so cookies,
-// Local Storage, and IndexedDB flush to disk before the process exits.
-func CloseBrowser(ctx context.Context, base string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/json/version", nil)
+// GetCookies reads all browser cookies via Storage.getCookies.
+// Errors never include cookie values.
+func (d *DevTools) GetCookies(ctx context.Context) ([]browser.Cookie, error) {
+	rawResult, err := d.Call(ctx, "Storage.getCookies", json.RawMessage(`{}`))
 	if err != nil {
-		return err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	var version struct {
-		WebSocket string `json:"webSocketDebuggerUrl"`
-	}
-	err = json.NewDecoder(resp.Body).Decode(&version)
-	resp.Body.Close()
-	if err != nil {
-		return err
-	}
-	if version.WebSocket != "" {
-		conn, _, err := websocket.Dial(ctx, version.WebSocket, nil)
-		if err != nil {
-			return err
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
-		defer conn.Close(websocket.StatusNormalClosure, "")
-		d := &DevTools{conn: conn}
-		_, err = d.Call(ctx, "Browser.close", nil)
-		return err
+		return nil, errors.New("DevTools Storage.getCookies failed")
 	}
-	d, err := connect(ctx, base)
+	var payload struct {
+		Cookies []json.RawMessage `json:"cookies"`
+	}
+	if err := json.Unmarshal(rawResult, &payload); err != nil {
+		return nil, errors.New("decode Storage.getCookies response")
+	}
+	out := make([]browser.Cookie, 0, len(payload.Cookies))
+	for i, raw := range payload.Cookies {
+		c, err := browser.ParseCookie(raw)
+		if err != nil {
+			return nil, fmt.Errorf("cookie %d: %w", i, err)
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+// SetCookies applies cookies via Storage.setCookies, falling back to per-cookie calls if Chromium
+// rejects a cookie in the batch. Protocol-level rejections of individual cookies are logged by count
+// only (never values) and skipped so one bad cookie cannot stall sync; transport/context errors fail.
+func (d *DevTools) SetCookies(ctx context.Context, cookies []browser.Cookie) error {
+	if len(cookies) == 0 {
+		return nil
+	}
+	params, err := json.Marshal(struct {
+		Cookies []browser.Cookie `json:"cookies"`
+	}{Cookies: cookies})
 	if err != nil {
-		return err
+		return errors.New("encode Storage.setCookies request")
 	}
-	defer d.Close()
-	_, err = d.Call(ctx, "Browser.close", nil)
-	return err
+	_, err = d.Call(ctx, "Storage.setCookies", params)
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if !isDevToolsProtoError(err) {
+		return errors.New("DevTools Storage.setCookies connection failed")
+	}
+	if len(cookies) == 1 {
+		log.Printf("computer: DevTools Storage.setCookies skipped 1 rejected cookie")
+		return nil
+	}
+	skipped := 0
+	for _, c := range cookies {
+		one, err := json.Marshal(struct {
+			Cookies []browser.Cookie `json:"cookies"`
+		}{Cookies: []browser.Cookie{c}})
+		if err != nil {
+			skipped++
+			continue
+		}
+		if _, err := d.Call(ctx, "Storage.setCookies", one); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if !isDevToolsProtoError(err) {
+				return errors.New("DevTools Storage.setCookies connection failed")
+			}
+			skipped++
+		}
+	}
+	if skipped > 0 {
+		log.Printf("computer: DevTools Storage.setCookies skipped %d of %d rejected cookies", skipped, len(cookies))
+	}
+	return nil
+}
+
+// DeleteCookies removes cookies matching keys via Network.deleteCookies.
+// Protocol-level rejections are logged by count only; transport/context errors fail.
+func (d *DevTools) DeleteCookies(ctx context.Context, keys []browser.CookieKey) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	skipped := 0
+	for _, k := range keys {
+		params := struct {
+			Name         string          `json:"name"`
+			Domain       string          `json:"domain"`
+			Path         string          `json:"path"`
+			PartitionKey json.RawMessage `json:"partitionKey,omitempty"`
+		}{
+			Name:   k.Name,
+			Domain: k.Domain,
+			Path:   k.Path,
+		}
+		if k.HasPartitionKey() {
+			params.PartitionKey = k.PartitionKey
+		}
+		raw, err := json.Marshal(params)
+		if err != nil {
+			skipped++
+			continue
+		}
+		if _, err := d.Call(ctx, "Network.deleteCookies", raw); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if !isDevToolsProtoError(err) {
+				return errors.New("DevTools Network.deleteCookies connection failed")
+			}
+			skipped++
+		}
+	}
+	if skipped > 0 {
+		log.Printf("computer: DevTools Network.deleteCookies skipped %d of %d rejected deletes", skipped, len(keys))
+	}
+	return nil
 }

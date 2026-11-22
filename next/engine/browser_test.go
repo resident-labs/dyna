@@ -3,23 +3,33 @@ package engine
 import (
 	"bytes"
 	"context"
-	"io"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/browser"
 	"github.com/resident-labs/dyna/contract"
-	"github.com/resident-labs/dyna/engine/store"
 )
 
-func TestBrowserCheckoutCheckinConflictAndContext(t *testing.T) {
+func testCookie(t *testing.T, obj map[string]any) browser.Cookie {
+	t.Helper()
+	b, err := json.Marshal(obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := browser.ParseCookie(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func TestBrowserSyncConcurrentContextAndCounts(t *testing.T) {
 	r := newGrantRig(t)
 	ctx := t.Context()
 	dataDir := t.TempDir()
@@ -33,6 +43,15 @@ func TestBrowserCheckoutCheckinConflictAndContext(t *testing.T) {
 		t.Fatalf("non-owner list: %+v", problem)
 	}
 
+	// Before assigning a profile, sync returns 204 No Content.
+	hA := r.s.BrowserSync(r.worker, r.room)
+	hB := r.s.BrowserSync(r.root, r.room)
+	rec0 := httptest.NewRecorder()
+	hA.ServeHTTP(rec0, httptest.NewRequest(http.MethodGet, "/v1/browser/sync", nil))
+	if rec0.Code != http.StatusNoContent {
+		t.Fatalf("no-profile GET status = %d, want 204", rec0.Code)
+	}
+
 	// Owner creates profile and assigns it to r.room.
 	if _, problem := r.s.BrowserCreate(ctx, r.owner, contract.BrowserCreateRequest{Name: "personal"}); problem != nil {
 		t.Fatal(problem)
@@ -42,7 +61,6 @@ func TestBrowserCheckoutCheckinConflictAndContext(t *testing.T) {
 		t.Fatal(problem)
 	}
 
-	// dyna_room shows alone line first.
 	roomSection := func(who contract.Principal) string {
 		res, problem := r.s.ContextSnapshot(ctx, who, contract.ContextSnapshotRequest{Section: contract.ContextRoom})
 		if problem != nil {
@@ -55,11 +73,11 @@ func TestBrowserCheckoutCheckinConflictAndContext(t *testing.T) {
 		}
 		return ""
 	}
-	if got := roomSection(r.worker); got != "Browser: personal; one session at a time" {
+	if got := roomSection(r.worker); got != "Browser: personal" {
 		t.Fatalf("dyna_room alone = %q", got)
 	}
 
-	// Assign same profile to a second room; dyna_room now lists the sibling room.
+	// Assign same profile to a second room; dyna_room lists sibling without exclusivity text.
 	room2, problem := r.s.RoomCreate(ctx, r.owner, contract.RoomCreateRequest{Name: "ops", RootProfile: "test"})
 	if problem != nil {
 		t.Fatal(problem)
@@ -67,252 +85,205 @@ func TestBrowserCheckoutCheckinConflictAndContext(t *testing.T) {
 	if _, problem := r.s.RoomSet(ctx, r.owner, contract.RoomSetRequest{Room: room2.Room, Browser: &profileName}); problem != nil {
 		t.Fatal(problem)
 	}
-	if got := roomSection(r.worker); got != "Browser: personal, shared with ops; one session at a time" {
+	if got := roomSection(r.worker); got != "Browser: personal, shared with ops" {
 		t.Fatalf("dyna_room shared = %q", got)
 	}
 
-	// Box A checks out the profile over BrowserSync.
-	boxA := contract.BoxID("box_a")
-	boxB := contract.BoxID("box_b")
-	hA := r.s.BrowserSync(r.worker, boxA, r.room)
-	hB := r.s.BrowserSync(r.root, boxB, r.room)
-
-	rec := httptest.NewRecorder()
-	hA.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/browser/checkout", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("checkout A status = %d body=%s", rec.Code, rec.Body.String())
+	// Both Box A and Box B pull at once with no exclusivity.
+	recPullA := httptest.NewRecorder()
+	hA.ServeHTTP(recPullA, httptest.NewRequest(http.MethodGet, "/v1/browser/sync", nil))
+	if recPullA.Code != http.StatusOK {
+		t.Fatalf("pull A status = %d", recPullA.Code)
 	}
-	if rec.Header().Get("X-Dyna-Browser-Profile") != "personal" {
-		t.Fatalf("checkout profile header = %q", rec.Header().Get("X-Dyna-Browser-Profile"))
-	}
-	genA, err := strconv.ParseInt(rec.Header().Get("X-Dyna-Browser-Generation"), 10, 64)
-	if err != nil || genA <= 1 {
-		t.Fatalf("checkout gen = %q %v", rec.Header().Get("X-Dyna-Browser-Generation"), err)
+	recPullB := httptest.NewRecorder()
+	hB.ServeHTTP(recPullB, httptest.NewRequest(http.MethodGet, "/v1/browser/sync", nil))
+	if recPullB.Code != http.StatusOK {
+		t.Fatalf("pull B status = %d", recPullB.Code)
 	}
 
-	// Box B checkout is refused with conflict naming holding session and room and how it frees.
-	recB := httptest.NewRecorder()
-	hB.ServeHTTP(recB, httptest.NewRequest(http.MethodPost, "/v1/browser/checkout", nil))
-	if recB.Code != http.StatusConflict {
-		t.Fatalf("checkout B status = %d, want 409", recB.Code)
+	// Box A pushes cookies (including a secret token value).
+	const secretVal = "LIVE_EMAIL_SESSION_SECRET_XYZ"
+	cHost := testCookie(t, map[string]any{
+		"name": "__Host-auth", "value": secretVal, "domain": "mail.example.com", "path": "/", "secure": true, "httpOnly": true, "sameSite": "Lax", "expires": -1, "session": true,
+	})
+	cPart := testCookie(t, map[string]any{
+		"name": "part", "value": "p1", "domain": ".shop.example.org", "path": "/", "secure": true, "sameSite": "None", "expires": -1, "session": true,
+		"partitionKey": map[string]any{"topLevelSite": "https://example.net", "hasCrossSiteAncestor": false},
+	})
+	pushBody, _ := json.Marshal(browser.SyncRequest{
+		Profile:     "personal",
+		BaseVersion: 0,
+		Upserts:     []browser.Cookie{cHost, cPart},
+	})
+	recPushA := httptest.NewRecorder()
+	hA.ServeHTTP(recPushA, httptest.NewRequest(http.MethodPost, "/v1/browser/sync", bytes.NewReader(pushBody)))
+	if recPushA.Code != http.StatusOK {
+		t.Fatalf("push A status = %d", recPushA.Code)
 	}
-	errB := contract.ReadError(recB.Body)
-	for _, want := range []string{"personal", "worker", "computer stop", "idle"} {
-		if !strings.Contains(errB.Message, want) {
-			t.Errorf("refusal %q missing %q", errB.Message, want)
-		}
+	var respA browser.SyncResponse
+	if err := json.Unmarshal(recPushA.Body.Bytes(), &respA); err != nil {
+		t.Fatal(err)
+	}
+	if respA.Profile != "personal" || respA.Version != 1 || len(respA.Upserts) != 0 {
+		t.Fatalf("push A resp: profile=%q ver=%d upserts=%d", respA.Profile, respA.Version, len(respA.Upserts))
 	}
 
-	// Box A writes a cookie and checks in.
-	workA := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(workA, "Default"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(workA, "Default", "Cookies"), []byte("auth=secret-cookie"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	var tarBuf bytes.Buffer
-	if err := browser.PackProfile(workA, &tarBuf); err != nil {
-		t.Fatal(err)
-	}
-	recIn := httptest.NewRecorder()
-	hA.ServeHTTP(recIn, httptest.NewRequest(http.MethodPost, "/v1/browser/checkin?profile=personal&generation="+strconv.FormatInt(genA, 10), bytes.NewReader(tarBuf.Bytes())))
-	if recIn.Code != http.StatusOK {
-		t.Fatalf("checkin A status = %d body=%s", recIn.Code, recIn.Body.String())
+	// Verify jar.json written with mode 0600 on disk.
+	jarPath := filepath.Join(dataDir, "browsers", "personal", browser.JarFilename)
+	info, err := os.Stat(jarPath)
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("jar.json stat: err=%v info=%v", err, info)
 	}
 
-	// Box B now checks out and receives the cookie from Box A.
-	recB2 := httptest.NewRecorder()
-	hB.ServeHTTP(recB2, httptest.NewRequest(http.MethodPost, "/v1/browser/checkout", nil))
-	if recB2.Code != http.StatusOK {
-		t.Fatalf("checkout B after checkin status = %d body=%s", recB2.Code, recB2.Body.String())
+	// Box B syncs from version 0 and receives both cookies.
+	syncBBody, _ := json.Marshal(browser.SyncRequest{Profile: "personal", BaseVersion: 0})
+	recSyncB := httptest.NewRecorder()
+	hB.ServeHTTP(recSyncB, httptest.NewRequest(http.MethodPost, "/v1/browser/sync", bytes.NewReader(syncBBody)))
+	if recSyncB.Code != http.StatusOK {
+		t.Fatalf("sync B status = %d", recSyncB.Code)
 	}
-	workB := t.TempDir()
-	if err := browser.UnpackProfile(recB2.Body, workB); err != nil {
+	var respB browser.SyncResponse
+	if err := json.Unmarshal(recSyncB.Body.Bytes(), &respB); err != nil {
 		t.Fatal(err)
 	}
-	gotCookie, err := os.ReadFile(filepath.Join(workB, "Default", "Cookies"))
-	if err != nil || string(gotCookie) != "auth=secret-cookie" {
-		t.Fatalf("box B cookie = %q %v", gotCookie, err)
-	}
-	genB, _ := strconv.ParseInt(recB2.Header().Get("X-Dyna-Browser-Generation"), 10, 64)
-
-	// Owner runs release; Box B's late checkin is refused with 409 and does not overwrite engine copy.
-	relRes, problem := r.s.BrowserRelease(ctx, r.owner, contract.BrowserReleaseRequest{Name: "personal"})
-	if problem != nil || !relRes.Released {
-		t.Fatalf("BrowserRelease = %+v %+v", relRes, problem)
-	}
-	if err := os.WriteFile(filepath.Join(workB, "Default", "Cookies"), []byte("stale-overwrite"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	var staleTar bytes.Buffer
-	if err := browser.PackProfile(workB, &staleTar); err != nil {
-		t.Fatal(err)
-	}
-	recLate := httptest.NewRecorder()
-	hB.ServeHTTP(recLate, httptest.NewRequest(http.MethodPost, "/v1/browser/checkin?profile=personal&generation="+strconv.FormatInt(genB, 10), bytes.NewReader(staleTar.Bytes())))
-	if recLate.Code != http.StatusConflict {
-		t.Fatalf("late checkin status = %d, want 409", recLate.Code)
-	}
-	onDisk, err := os.ReadFile(filepath.Join(dataDir, "browsers", "personal", "Default", "Cookies"))
-	if err != nil || string(onDisk) != "auth=secret-cookie" {
-		t.Fatalf("profile overwritten after release: %q %v", onDisk, err)
+	if respB.Version != 1 || len(respB.Upserts) != 2 {
+		t.Fatalf("sync B resp: ver=%d upserts=%d", respB.Version, len(respB.Upserts))
 	}
 
-	// Second checkin rotates previous copy to .prev.
-	recA2 := httptest.NewRecorder()
-	hA.ServeHTTP(recA2, httptest.NewRequest(http.MethodPost, "/v1/browser/checkout", nil))
-	genA2, _ := strconv.ParseInt(recA2.Header().Get("X-Dyna-Browser-Generation"), 10, 64)
-	if err := os.WriteFile(filepath.Join(workA, "Default", "Cookies"), []byte("auth=v2"), 0600); err != nil {
+	// Box B deletes cPart -> Box A receives tombstone on next sync.
+	delBody, _ := json.Marshal(browser.SyncRequest{Profile: "personal", BaseVersion: 1, Deletes: []browser.CookieKey{cPart.Key}})
+	recDelB := httptest.NewRecorder()
+	hB.ServeHTTP(recDelB, httptest.NewRequest(http.MethodPost, "/v1/browser/sync", bytes.NewReader(delBody)))
+	if recDelB.Code != http.StatusOK {
+		t.Fatalf("del B status = %d", recDelB.Code)
+	}
+	pullA2Body, _ := json.Marshal(browser.SyncRequest{Profile: "personal", BaseVersion: 1})
+	recPullA2 := httptest.NewRecorder()
+	hA.ServeHTTP(recPullA2, httptest.NewRequest(http.MethodPost, "/v1/browser/sync", bytes.NewReader(pullA2Body)))
+	if recPullA2.Code != http.StatusOK {
+		t.Fatalf("pull A2 status = %d", recPullA2.Code)
+	}
+	var respA2 browser.SyncResponse
+	if err := json.Unmarshal(recPullA2.Body.Bytes(), &respA2); err != nil {
 		t.Fatal(err)
 	}
-	var v2Tar bytes.Buffer
-	if err := browser.PackProfile(workA, &v2Tar); err != nil {
+	if respA2.Version != 2 || len(respA2.Deletes) != 1 || respA2.Deletes[0].ID() != cPart.Key.ID() {
+		t.Fatalf("pull A2 resp: ver=%d deletes=%d", respA2.Version, len(respA2.Deletes))
+	}
+
+	// BrowserList returns counts only and never contains cookie values.
+	listRes, problem := r.s.BrowserList(ctx, r.owner, contract.BrowserListRequest{})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	listJSON, _ := json.Marshal(listRes)
+	if strings.Contains(string(listJSON), secretVal) {
+		t.Fatal("BrowserList response leaked a cookie value")
+	}
+	if len(listRes.Browsers) != 1 || listRes.Browsers[0].Cookies != 1 || listRes.Browsers[0].Version != 2 {
+		t.Fatalf("BrowserList = %+v", listRes.Browsers)
+	}
+
+	// Switching the room to a different profile ignores stale pushes from personal and returns work's jar.
+	if _, problem := r.s.BrowserCreate(ctx, r.owner, contract.BrowserCreateRequest{Name: "work"}); problem != nil {
+		t.Fatal(problem)
+	}
+	workName := "work"
+	if _, problem := r.s.RoomSet(ctx, r.owner, contract.RoomSetRequest{Room: r.room, Browser: &workName}); problem != nil {
+		t.Fatal(problem)
+	}
+	stalePush, _ := json.Marshal(browser.SyncRequest{Profile: "personal", BaseVersion: 2, Deletes: []browser.CookieKey{cHost.Key}})
+	recSwitch := httptest.NewRecorder()
+	hA.ServeHTTP(recSwitch, httptest.NewRequest(http.MethodPost, "/v1/browser/sync", bytes.NewReader(stalePush)))
+	if recSwitch.Code != http.StatusOK {
+		t.Fatalf("switch status = %d", recSwitch.Code)
+	}
+	var respSwitch browser.SyncResponse
+	if err := json.Unmarshal(recSwitch.Body.Bytes(), &respSwitch); err != nil {
 		t.Fatal(err)
 	}
-	recIn2 := httptest.NewRecorder()
-	hA.ServeHTTP(recIn2, httptest.NewRequest(http.MethodPost, "/v1/browser/checkin?profile=personal&generation="+strconv.FormatInt(genA2, 10), bytes.NewReader(v2Tar.Bytes())))
-	if recIn2.Code != http.StatusOK {
-		t.Fatalf("checkin v2 status = %d", recIn2.Code)
-	}
-	prevCookie, err := os.ReadFile(filepath.Join(dataDir, "browsers", "personal.prev", "Default", "Cookies"))
-	if err != nil || string(prevCookie) != "auth=secret-cookie" {
-		t.Fatalf(".prev cookie = %q %v", prevCookie, err)
-	}
-	curCookie, err := os.ReadFile(filepath.Join(dataDir, "browsers", "personal", "Default", "Cookies"))
-	if err != nil || string(curCookie) != "auth=v2" {
-		t.Fatalf("current cookie = %q %v", curCookie, err)
+	if respSwitch.Profile != "work" || respSwitch.Version != 0 {
+		t.Fatalf("switch resp: profile=%q ver=%d", respSwitch.Profile, respSwitch.Version)
 	}
 }
 
-type fakeBrowserVolumes struct {
-	*fakeBoxes
-	tarData []byte
-	found   bool
-	pullErr error
-	removed []contract.BoxID
-}
-
-func (f *fakeBrowserVolumes) PullBrowserProfile(_ context.Context, _ contract.HostName, _ contract.BoxID, dst io.Writer) (bool, error) {
-	if f.pullErr != nil {
-		return false, f.pullErr
-	}
-	if !f.found {
-		return false, nil
-	}
-	_, err := dst.Write(f.tarData)
-	return true, err
-}
-
-func (f *fakeBrowserVolumes) RemoveBrowserProfile(_ context.Context, _ contract.HostName, id contract.BoxID) error {
-	f.removed = append(f.removed, id)
-	return nil
-}
-
-func TestRecoverBrowserLeaseFromDeadBoxVolume(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	now := time.Unix(1_700_000_000, 0).UTC()
-	ctx := t.Context()
-
-	src := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(src, "Default"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(src, "Default", "Cookies"), []byte("recovered=1"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	var tarBuf bytes.Buffer
-	if err := browser.PackProfile(src, &tarBuf); err != nil {
-		t.Fatal(err)
-	}
-
-	vols := &fakeBrowserVolumes{fakeBoxes: &fakeBoxes{}, tarData: tarBuf.Bytes(), found: true}
-	dataDir := t.TempDir()
-	svc := New(st, vols, fakeProfiles{}, func() time.Time { return now })
-	svc.SetLayout(box.Layout{Data: dataDir})
-
-	room := contract.RoomID("room_1")
-	if err := st.CreateRoom(ctx, room, "work", now); err != nil {
-		t.Fatal(err)
-	}
-	owner := contract.Principal{Kind: contract.PrincipalOwner}
-	if _, p := svc.BrowserCreate(ctx, owner, contract.BrowserCreateRequest{Name: "shared"}); p != nil {
-		t.Fatal(p)
-	}
-	if err := st.SetRoomBrowser(ctx, room, "shared"); err != nil {
-		t.Fatal(err)
-	}
-	boxID := contract.BoxID("box_dead")
-	sesID := contract.SessionID("ses_dead")
-	ev := contract.Event{ID: "e_dead", Room: room, Time: now, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionStarted{}}
-	boxEv := contract.Event{ID: "be_dead", Room: room, Time: now, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{}}
-	if _, err := st.StartSession(ctx, store.Session{ID: sesID, Room: room, Name: "worker", Profile: "sol", Box: boxID}, "", contract.BoxSizeAgent, "", ev, boxEv, "", false, "", "", 0); err != nil {
-		t.Fatal(err)
-	}
-	_, gen, _, err := st.BrowserCheckout(ctx, boxID, sesID, room, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	lease := store.BrowserLeaseRow{Profile: "shared", Box: boxID, Session: sesID, Generation: gen}
-	if err := svc.RecoverBrowserLease(ctx, lease, "host1", true); err != nil {
-		t.Fatalf("RecoverBrowserLease: %v", err)
-	}
-	got, err := os.ReadFile(filepath.Join(dataDir, "browsers", "shared", "Default", "Cookies"))
-	if err != nil || string(got) != "recovered=1" {
-		t.Fatalf("recovered cookie = %q %v", got, err)
-	}
-	if len(vols.removed) != 1 || vols.removed[0] != boxID {
-		t.Fatalf("volume cleanup not called: %v", vols.removed)
-	}
-	holds, err := st.BoxHoldsBrowserLease(ctx, boxID)
-	if err != nil || holds {
-		t.Fatalf("lease still held after recovery: holds=%v err=%v", holds, err)
-	}
-}
-
-func TestBrowserCheckinSizeLimit(t *testing.T) {
+func TestBrowserSyncSizeLimitAndMigration(t *testing.T) {
 	r := newGrantRig(t)
 	ctx := t.Context()
-	r.s.SetLayout(box.Layout{Data: t.TempDir()})
-	if _, p := r.s.BrowserCreate(ctx, r.owner, contract.BrowserCreateRequest{Name: "capped"}); p != nil {
+	dataDir := t.TempDir()
+	r.s.SetLayout(box.Layout{Data: dataDir})
+
+	if _, p := r.s.BrowserCreate(ctx, r.owner, contract.BrowserCreateRequest{Name: "personal"}); p != nil {
 		t.Fatal(p)
 	}
-	name := "capped"
+	name := "personal"
 	if _, p := r.s.RoomSet(ctx, r.owner, contract.RoomSetRequest{Room: r.room, Browser: &name}); p != nil {
 		t.Fatal(p)
 	}
-	h := r.s.BrowserSync(r.worker, "box_cap", r.room)
+
+	// Simulate a v1 profile folder + .prev on disk and clear cached jar to emulate engine restart.
+	profDir := filepath.Join(dataDir, "browsers", "personal")
+	prevDir := filepath.Join(dataDir, "browsers", "personal.prev")
+	if err := os.MkdirAll(filepath.Join(profDir, "Default"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profDir, "Default", "Cookies"), []byte("sqlite"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(prevDir, "Default"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	r.s.setCachedBrowserJar("personal", nil)
+
+	migratedCookie := testCookie(t, map[string]any{
+		"name": "session_id", "value": "migrated-val", "domain": "site.example.com", "path": "/", "secure": true, "httpOnly": true, "expires": -1, "session": true,
+	})
+	r.s.extractV1Cookies = func(_ context.Context, _ string) ([]browser.Cookie, error) {
+		return []browser.Cookie{migratedCookie}, nil
+	}
+
+	// Startup migration converts v1 folder -> jar.json and removes Default/ and .prev/.
+	r.s.MigrateBrowsers(ctx)
+	if _, err := os.Stat(filepath.Join(profDir, browser.JarFilename)); err != nil {
+		t.Fatalf("jar.json missing after MigrateBrowsers: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(profDir, "Default")); !os.IsNotExist(err) {
+		t.Fatalf("v1 Default folder not deleted: %v", err)
+	}
+	if _, err := os.Stat(prevDir); !os.IsNotExist(err) {
+		t.Fatalf("v1 .prev folder not deleted: %v", err)
+	}
+
+	// Box pulling receives the migrated cookie.
+	h := r.s.BrowserSync(r.worker, r.room)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/browser/checkout", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/browser/sync", nil))
 	if rec.Code != http.StatusOK {
-		t.Fatalf("checkout = %d", rec.Code)
+		t.Fatalf("pull after migration status = %d", rec.Code)
 	}
-	gen := rec.Header().Get("X-Dyna-Browser-Generation")
-
-	oldLimit := maxBrowserCheckinBytes
-	maxBrowserCheckinBytes = 256
-	t.Cleanup(func() { maxBrowserCheckinBytes = oldLimit })
-
-	big := t.TempDir()
-	if err := os.WriteFile(filepath.Join(big, "data"), bytes.Repeat([]byte("a"), 2048), 0600); err != nil {
+	var resp browser.SyncResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	var tarBuf bytes.Buffer
-	if err := browser.PackProfile(big, &tarBuf); err != nil {
-		t.Fatal(err)
+	if resp.Version != 1 || len(resp.Upserts) != 1 || resp.Upserts[0].Key.Name != "session_id" {
+		t.Fatalf("pull after migration resp: ver=%d upserts=%d", resp.Version, len(resp.Upserts))
 	}
-	recIn := httptest.NewRecorder()
-	h.ServeHTTP(recIn, httptest.NewRequest(http.MethodPost, "/v1/browser/checkin?profile=capped&generation="+gen, bytes.NewReader(tarBuf.Bytes())))
-	if recIn.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("oversize checkin status = %d, want 413 (body=%s)", recIn.Code, recIn.Body.String())
+
+	// Oversize push (> 5 MiB) is refused with 413 and leaves jar unchanged.
+	bigVal := strings.Repeat("x", 600*1024)
+	var big []browser.Cookie
+	for i := 0; i < 10; i++ {
+		big = append(big, testCookie(t, map[string]any{
+			"name": "big" + string(rune('a'+i)), "value": bigVal, "domain": "example.com", "path": "/", "expires": -1, "session": true,
+		}))
 	}
-	problem := contract.ReadError(recIn.Body)
-	if !strings.Contains(problem.Message, "exceeds 256 byte limit") {
-		t.Fatalf("oversize error message = %q", problem.Message)
+	bigBody, _ := json.Marshal(browser.SyncRequest{Profile: "personal", BaseVersion: 1, Upserts: big})
+	recBig := httptest.NewRecorder()
+	h.ServeHTTP(recBig, httptest.NewRequest(http.MethodPost, "/v1/browser/sync", bytes.NewReader(bigBody)))
+	if recBig.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversize push status = %d, want 413", recBig.Code)
+	}
+	if strings.Contains(recBig.Body.String(), bigVal) {
+		t.Fatal("oversize error leaked cookie value")
 	}
 }

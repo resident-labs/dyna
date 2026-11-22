@@ -11,7 +11,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-func TestBrowserProfilesLeasesAndRelease(t *testing.T) {
+func TestBrowserProfilesAndRooms(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -20,7 +20,6 @@ func TestBrowserProfilesLeasesAndRelease(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(1_700_000_000, 0).UTC()
 
-	// Create two rooms and their root sessions.
 	roomA := contract.RoomID("room_a")
 	roomB := contract.RoomID("room_b")
 	if err := s.CreateRoom(ctx, roomA, "alpha", now); err != nil {
@@ -29,22 +28,7 @@ func TestBrowserProfilesLeasesAndRelease(t *testing.T) {
 	if err := s.CreateRoom(ctx, roomB, "beta", now); err != nil {
 		t.Fatal(err)
 	}
-	sesA := contract.SessionID("ses_a")
-	sesB := contract.SessionID("ses_b")
-	boxA := contract.BoxID("box_a")
-	boxB := contract.BoxID("box_b")
-	evA := contract.Event{ID: "e_a", Room: roomA, Time: now, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionStarted{}}
-	boxEvA := contract.Event{ID: "be_a", Room: roomA, Time: now, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{}}
-	evB := contract.Event{ID: "e_b", Room: roomB, Time: now, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionStarted{}}
-	boxEvB := contract.Event{ID: "be_b", Room: roomB, Time: now, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{}}
-	if _, err := s.StartSession(ctx, Session{ID: sesA, Room: roomA, Name: "root", Profile: "sol", Box: boxA}, "", contract.BoxSizeAgent, "", evA, boxEvA, "", false, "", "", 0); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.StartSession(ctx, Session{ID: sesB, Room: roomB, Name: "worker", Profile: "sol", Box: boxB}, "", contract.BoxSizeAgent, "", evB, boxEvB, "", false, "", "", 0); err != nil {
-		t.Fatal(err)
-	}
 
-	// Create profile & duplicate refusal.
 	if err := s.BrowserCreate(ctx, "personal"); err != nil {
 		t.Fatal(err)
 	}
@@ -52,9 +36,9 @@ func TestBrowserProfilesLeasesAndRelease(t *testing.T) {
 		t.Fatalf("duplicate create = %v, want ErrBrowserExists", err)
 	}
 
-	// Room without profile checks out empty.
-	if prof, gen, holder, err := s.BrowserCheckout(ctx, boxA, sesA, roomA, now); err != nil || prof != "" || gen != 0 || holder != nil {
-		t.Fatalf("no-profile checkout: prof=%q gen=%d holder=%+v err=%v", prof, gen, holder, err)
+	// Room without profile returns empty.
+	if prof, others, err := s.RoomBrowser(ctx, roomA); err != nil || prof != "" || len(others) != 0 {
+		t.Fatalf("no-profile RoomBrowser: prof=%q others=%v err=%v", prof, others, err)
 	}
 
 	// Assign to roomA, then roomB.
@@ -73,73 +57,15 @@ func TestBrowserProfilesLeasesAndRelease(t *testing.T) {
 		t.Fatalf("RoomBrowser shared: prof=%q others=%v err=%v", prof, others, err)
 	}
 
+	// BrowserList lists rooms.
+	list, err := s.BrowserList(ctx)
+	if err != nil || len(list) != 1 || list[0].Name != "personal" || !slices.Equal(list[0].Rooms, []string{"alpha", "beta"}) {
+		t.Fatalf("BrowserList: %+v %v", list, err)
+	}
+
 	// Remove refused while rooms reference it.
 	if err := s.BrowserRemove(ctx, "personal"); !errors.Is(err, ErrBrowserInUse) {
 		t.Fatalf("remove while referenced = %v, want ErrBrowserInUse", err)
-	}
-
-	// Checkout by boxA succeeds, bumps generation 1 -> 2.
-	prof, gen1, holder, err := s.BrowserCheckout(ctx, boxA, sesA, roomA, now)
-	if err != nil || prof != "personal" || gen1 != 2 || holder != nil {
-		t.Fatalf("checkout A: prof=%q gen=%d holder=%+v err=%v", prof, gen1, holder, err)
-	}
-	// Idempotent repeat checkout by same boxA keeps gen1.
-	prof, genSame, _, err := s.BrowserCheckout(ctx, boxA, sesA, roomA, now.Add(time.Second))
-	if err != nil || prof != "personal" || genSame != gen1 {
-		t.Fatalf("idempotent checkout A: prof=%q gen=%d err=%v", prof, genSame, err)
-	}
-	// Second boxB is refused with ErrBrowserLeased and holder metadata.
-	_, _, holder, err = s.BrowserCheckout(ctx, boxB, sesB, roomB, now.Add(2*time.Second))
-	if !errors.Is(err, ErrBrowserLeased) || holder == nil || holder.Box != boxA || holder.SessionName != "root" || holder.RoomName != "alpha" {
-		t.Fatalf("checkout B conflict: holder=%+v err=%v", holder, err)
-	}
-	// BrowserList reports rooms and active lease.
-	list, err := s.BrowserList(ctx)
-	if err != nil || len(list) != 1 || list[0].Lease == nil || list[0].Lease.Box != boxA || !slices.Equal(list[0].Rooms, []string{"alpha", "beta"}) {
-		t.Fatalf("BrowserList: %+v %v", list, err)
-	}
-	// Stale generation checkin is refused.
-	if ok, err := s.BrowserLeaseMatches(ctx, "personal", boxA, gen1-1); err != nil || ok {
-		t.Fatalf("stale matches: ok=%v err=%v", ok, err)
-	}
-	if ok, err := s.BrowserFinishCheckin(ctx, "personal", boxA, gen1-1); err != nil || ok {
-		t.Fatalf("stale finish: ok=%v err=%v", ok, err)
-	}
-	// Wrong box checkin is refused.
-	if ok, err := s.BrowserFinishCheckin(ctx, "personal", boxB, gen1); err != nil || ok {
-		t.Fatalf("wrong box finish: ok=%v err=%v", ok, err)
-	}
-	// Remove refused while leased.
-	if err := s.BrowserRemove(ctx, "personal"); !errors.Is(err, ErrBrowserLeased) {
-		t.Fatalf("remove while leased = %v, want ErrBrowserLeased", err)
-	}
-
-	// Owner release drops lease, bumps generation 2 -> 3, refuses boxA's late checkin.
-	released, genAfterRelease, err := s.BrowserRelease(ctx, "personal")
-	if err != nil || !released || genAfterRelease != 3 {
-		t.Fatalf("BrowserRelease: released=%v gen=%d err=%v", released, genAfterRelease, err)
-	}
-	if ok, err := s.BrowserLeaseMatches(ctx, "personal", boxA, gen1); err != nil || ok {
-		t.Fatalf("late match after release: ok=%v err=%v", ok, err)
-	}
-	if ok, err := s.BrowserFinishCheckin(ctx, "personal", boxA, gen1); err != nil || ok {
-		t.Fatalf("late checkin after release: ok=%v err=%v", ok, err)
-	}
-
-	// Now boxB checks out cleanly with monotonic generation 4.
-	_, gen2, _, err := s.BrowserCheckout(ctx, boxB, sesB, roomB, now.Add(3*time.Second))
-	if err != nil || gen2 != 4 {
-		t.Fatalf("checkout B after release: gen=%d err=%v", gen2, err)
-	}
-	if holds, err := s.BoxHoldsBrowserLease(ctx, boxB); err != nil || !holds {
-		t.Fatalf("BoxHoldsBrowserLease B: holds=%v err=%v", holds, err)
-	}
-	// Matching checkin releases lease.
-	if ok, err := s.BrowserFinishCheckin(ctx, "personal", boxB, gen2); err != nil || !ok {
-		t.Fatalf("matching checkin B: ok=%v err=%v", ok, err)
-	}
-	if holds, err := s.BoxHoldsBrowserLease(ctx, boxB); err != nil || holds {
-		t.Fatalf("BoxHoldsBrowserLease B after checkin: holds=%v err=%v", holds, err)
 	}
 
 	// Unassign rooms and remove profile.
@@ -151,5 +77,55 @@ func TestBrowserProfilesLeasesAndRelease(t *testing.T) {
 	}
 	if err := s.BrowserRemove(ctx, "personal"); err != nil {
 		t.Fatalf("BrowserRemove: %v", err)
+	}
+	if err := s.BrowserRemove(ctx, "personal"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second remove = %v, want ErrNotFound", err)
+	}
+}
+
+func TestBrowserLeasesMigrationDropsTableAndKeepsProfiles(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state.db")
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Downgrade to schema 127 (v1 browsers + browser_leases with active lease).
+	_, err = s.writer.Exec(`
+		INSERT INTO rooms(id,name,created_at,cpus,mem_bytes,browser) VALUES('room_life','life',0,0,0,'personal');
+		ALTER TABLE browsers ADD COLUMN generation INTEGER NOT NULL DEFAULT 1;
+		INSERT INTO browsers(name,generation) VALUES('personal',4);
+		CREATE TABLE browser_leases (profile TEXT PRIMARY KEY REFERENCES browsers(name) ON DELETE CASCADE, box TEXT NOT NULL, session TEXT NOT NULL, generation INTEGER NOT NULL, since INTEGER NOT NULL);
+		INSERT INTO browser_leases(profile,box,session,generation,since) VALUES('personal','box_1','ses_1',4,1700000000000);
+		UPDATE meta SET value='127' WHERE key='schema_version';
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err = Open(dir)
+	if err != nil {
+		t.Fatalf("upgrade 127->128: %v", err)
+	}
+	defer s.Close()
+
+	// browser_leases must be gone.
+	var count int
+	if err := s.Read().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='browser_leases'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("browser_leases still exists: count=%d err=%v", count, err)
+	}
+	// browsers.generation must be gone, while personal and room assignment survive.
+	if _, err := s.Read().Exec(`SELECT generation FROM browsers`); err == nil {
+		t.Fatal("browsers.generation column still exists")
+	}
+	prof, _, err := s.RoomBrowser(context.Background(), "room_life")
+	if err != nil || prof != "personal" {
+		t.Fatalf("RoomBrowser after migration: prof=%q err=%v", prof, err)
+	}
+	list, err := s.BrowserList(context.Background())
+	if err != nil || len(list) != 1 || list[0].Name != "personal" || !slices.Equal(list[0].Rooms, []string{"life"}) {
+		t.Fatalf("BrowserList after migration: %+v %v", list, err)
 	}
 }

@@ -973,15 +973,11 @@ func (f *fakeClient) BrowserCreate(_ context.Context, q contract.BrowserCreateRe
 }
 
 func (f *fakeClient) BrowserList(_ context.Context, _ contract.BrowserListRequest) (contract.BrowserListResponse, error) {
-	return contract.BrowserListResponse{Browsers: []contract.BrowserSummary{{Name: "personal", Generation: 2, Rooms: []string{"ops"}}}}, nil
+	return contract.BrowserListResponse{Browsers: []contract.BrowserSummary{{Name: "personal", Rooms: []string{"ops"}, Cookies: 12, Version: 2}}}, nil
 }
 
 func (f *fakeClient) BrowserRemove(_ context.Context, _ contract.BrowserRemoveRequest) (contract.BrowserRemoveResponse, error) {
 	return contract.BrowserRemoveResponse{}, nil
-}
-
-func (f *fakeClient) BrowserRelease(_ context.Context, _ contract.BrowserReleaseRequest) (contract.BrowserReleaseResponse, error) {
-	return contract.BrowserReleaseResponse{Released: true, Generation: 3}, nil
 }
 
 func TestBrowserCLI(t *testing.T) {
@@ -989,10 +985,7 @@ func TestBrowserCLI(t *testing.T) {
 	if got := runCLI(t, f, "browser", "create", "personal"); !strings.Contains(got, "personal") {
 		t.Fatal(got)
 	}
-	if got := runCLI(t, f, "browser", "list"); !strings.Contains(got, "personal") {
-		t.Fatal(got)
-	}
-	if got := runCLI(t, f, "browser", "release", "personal"); !strings.Contains(got, "released personal (generation 3)") {
+	if got := runCLI(t, f, "browser", "list"); !strings.Contains(got, "personal") || !strings.Contains(got, `"cookies":12`) {
 		t.Fatal(got)
 	}
 	runCLI(t, f, "browser", "remove", "personal")

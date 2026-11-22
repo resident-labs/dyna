@@ -94,7 +94,6 @@ const (
 	MethodBrowserCreate           Method = "browser.create"
 	MethodBrowserList             Method = "browser.list"
 	MethodBrowserRemove           Method = "browser.remove"
-	MethodBrowserRelease          Method = "browser.release"
 	MethodTurnOutput              Method = "turn.output"
 	MethodTurnActivity            Method = "turn.activity"
 	MethodTranscriptFetch         Method = "transcript.fetch"
@@ -1155,34 +1154,16 @@ type BrowserListResponse struct {
 }
 
 type BrowserSummary struct {
-	Name       string        `json:"name"`
-	Generation int64         `json:"generation"`
-	Rooms      []string      `json:"rooms,omitempty"`
-	Lease      *BrowserLease `json:"lease,omitempty"`
-}
-
-type BrowserLease struct {
-	Box         BoxID     `json:"box"`
-	Session     SessionID `json:"session"`
-	SessionName string    `json:"sessionName,omitempty"`
-	Room        RoomID    `json:"room,omitempty"`
-	RoomName    string    `json:"roomName,omitempty"`
-	Generation  int64     `json:"generation"`
-	Since       time.Time `json:"since"`
+	Name    string   `json:"name"`
+	Rooms   []string `json:"rooms,omitempty"`
+	Cookies int      `json:"cookies"`
+	Version int64    `json:"version"`
 }
 
 type BrowserRemoveRequest struct {
 	Name string `json:"name"`
 }
 type BrowserRemoveResponse struct{}
-
-type BrowserReleaseRequest struct {
-	Name string `json:"name"`
-}
-type BrowserReleaseResponse struct {
-	Released   bool  `json:"released"`
-	Generation int64 `json:"generation"`
-}
 
 // ShellWatchStart asks the box agent to post each shell job's output with shell.output while the
 // owner watches. Each start begins a new generation, and its first post resets every job's view.

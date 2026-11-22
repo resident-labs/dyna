@@ -1,18 +1,18 @@
 package agent
 
 import (
-	"archive/tar"
-	"bytes"
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
-	"sync"
 	"testing"
+
+	"github.com/resident-labs/dyna/box/browser"
+	"github.com/resident-labs/dyna/contract"
 )
 
-func TestCheckoutTruncatedTarReleasesLease(t *testing.T) {
+func TestBrowserCookieSyncClient(t *testing.T) {
 	socket := filepath.Join(t.TempDir(), "engine.sock")
 	ln, err := net.Listen("unix", socket)
 	if err != nil {
@@ -20,51 +20,68 @@ func TestCheckoutTruncatedTarReleasesLease(t *testing.T) {
 	}
 	defer ln.Close()
 
-	var mu sync.Mutex
-	var discarded bool
-	var discardProfile, discardGen string
-
+	var step int
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1/browser/checkout":
-			w.Header().Set("Content-Type", "application/x-tar")
-			w.Header().Set("X-Dyna-Browser-Profile", "work")
-			w.Header().Set("X-Dyna-Browser-Generation", "7")
-			// Write a tar header claiming 4096 bytes, then only 10 bytes and abort the stream.
-			var buf bytes.Buffer
-			tw := tar.NewWriter(&buf)
-			_ = tw.WriteHeader(&tar.Header{Name: "Default/Cookies", Mode: 0600, Size: 4096})
-			_, _ = w.Write(buf.Bytes())
-			_, _ = w.Write([]byte("truncated!"))
-			if f, ok := w.(http.Flusher); ok {
-				f.Flush()
-			}
-			panic(http.ErrAbortHandler)
-		case "/v1/browser/checkin":
-			mu.Lock()
-			discarded = r.URL.Query().Get("discard") == "1"
-			discardProfile = r.URL.Query().Get("profile")
-			discardGen = r.URL.Query().Get("generation")
-			mu.Unlock()
-			w.WriteHeader(http.StatusOK)
-		default:
+		if r.URL.Path != "/v1/browser/sync" {
 			http.NotFound(w, r)
+			return
+		}
+		step++
+		switch step {
+		case 1:
+			if r.Method != http.MethodGet {
+				t.Errorf("step 1 method = %s, want GET", r.Method)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case 2:
+			if r.Method != http.MethodGet || r.URL.Query().Get("since") != "3" {
+				t.Errorf("step 2 = %s %s", r.Method, r.URL.RawQuery)
+			}
+			c, _ := browser.ParseCookie([]byte(`{"name":"sid","value":"v1","domain":"example.com","path":"/","expires":-1,"session":true}`))
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(browser.SyncResponse{Profile: "personal", Version: 4, Upserts: []browser.Cookie{c}})
+		case 3:
+			if r.Method != http.MethodPost {
+				t.Errorf("step 3 method = %s, want POST", r.Method)
+			}
+			var got browser.SyncRequest
+			if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+				t.Errorf("decode req: %v", err)
+			}
+			if got.Profile != "personal" || got.BaseVersion != 4 || len(got.Upserts) != 1 {
+				t.Errorf("unexpected sync req: profile=%q base=%d upserts=%d", got.Profile, got.BaseVersion, len(got.Upserts))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(browser.SyncResponse{Profile: "personal", Version: 5})
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			_ = json.NewEncoder(w).Encode(contract.Error{Code: contract.ErrInvalid, Message: "cookie jar limit exceeded"})
 		}
 	})}
 	go func() { _ = srv.Serve(ln) }()
 	defer srv.Close()
 
 	client := NewClient(socket)
-	dir := filepath.Join(t.TempDir(), "computer-shared")
-	if _, err := client.Checkout(context.Background(), dir); err == nil {
-		t.Fatal("expected error on truncated checkout tar")
+	ctx := context.Background()
+
+	// 204 -> active=false, err=nil.
+	if _, active, err := client.PullCookies(ctx, 0); err != nil || active {
+		t.Fatalf("pull 204: active=%v err=%v", active, err)
 	}
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Fatalf("partial checkout dir not cleaned up: %v", err)
+	// GET with since -> active=true.
+	resp, active, err := client.PullCookies(ctx, 3)
+	if err != nil || !active || resp.Profile != "personal" || resp.Version != 4 || len(resp.Upserts) != 1 {
+		t.Fatalf("pull 200: active=%v resp=%+v err=%v", active, resp, err)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if !discarded || discardProfile != "work" || discardGen != "7" {
-		t.Fatalf("expected discard checkin for work gen 7, got discarded=%v profile=%q gen=%q", discarded, discardProfile, discardGen)
+	// POST sync -> version 5.
+	c, _ := browser.ParseCookie([]byte(`{"name":"a","value":"b","domain":"example.com","path":"/","expires":-1,"session":true}`))
+	resp, active, err = client.SyncCookies(ctx, browser.SyncRequest{Profile: "personal", BaseVersion: 4, Upserts: []browser.Cookie{c}})
+	if err != nil || !active || resp.Version != 5 {
+		t.Fatalf("sync 200: active=%v ver=%d err=%v", active, resp.Version, err)
+	}
+	// Error status returns engine message.
+	if _, _, err := client.SyncCookies(ctx, browser.SyncRequest{Profile: "personal", BaseVersion: 5}); err == nil || err.Error() != "cookie jar limit exceeded" {
+		t.Fatalf("sync 413 err = %v", err)
 	}
 }

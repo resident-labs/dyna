@@ -64,13 +64,9 @@ func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox, host
 		if err != nil {
 			return err
 		}
-		hasLease, err := r.store.BoxHoldsBrowserLease(ctx, row.ID)
-		if err != nil {
-			return err
-		}
 		var due time.Time
-		if (row.Want == store.WantClose && hadTurns || hasLease) && r.view.Connected(row.Session) {
-			due = r.now().Add(diffWait) // The box saves its diff and checks in any browser lease first; its report brings the removal sooner.
+		if row.Want == store.WantClose && hadTurns && r.view.Connected(row.Session) {
+			due = r.now().Add(diffWait) // The box saves its diff first; its report brings the removal sooner.
 		}
 		changed, err := r.change(ctx, row.Box, next, due, 0, "", "", false)
 		if err != nil || !changed {
@@ -89,38 +85,12 @@ func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox, host
 }
 
 func (r *Reconciler) closeStep(ctx context.Context, row store.LifecycleBox) error {
-	if r.browsers != nil {
-		leases, err := r.store.BrowserLeases(ctx)
-		if err == nil {
-			for _, lease := range leases {
-				if lease.Box != row.ID {
-					continue
-				}
-				// Stop the container first so its volume is quiescent before pulling any remaining profile.
-				if row.Host != "" && row.Image != "" {
-					_ = r.boxes.Stop(ctx, row.ID)
-					_ = r.browsers.RecoverBrowserLease(ctx, lease, row.Host, true)
-				} else {
-					_ = r.browsers.RecoverBrowserLease(ctx, lease, row.Host, false)
-				}
-			}
-		}
-	}
 	err := r.boxes.Remove(ctx, row.ID)
 	var superseded box.NamespaceSuperseded
 	if errors.As(err, &superseded) {
 		err = nil
 	}
 	if err == nil {
-		if r.browsers != nil {
-			if leases, lerr := r.store.BrowserLeases(ctx); lerr == nil {
-				for _, lease := range leases {
-					if lease.Box == row.ID {
-						_ = r.browsers.RecoverBrowserLease(ctx, lease, row.Host, false)
-					}
-				}
-			}
-		}
 		next := row.Box
 		next.State, next.Reason = contract.BoxDeleted, ""
 		_, err = r.change(ctx, row.Box, next, time.Time{}, row.Failures, "", "", false)

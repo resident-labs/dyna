@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/box"
+	"github.com/resident-labs/dyna/box/browser"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/addons"
 	"github.com/resident-labs/dyna/engine/approve"
@@ -122,6 +123,8 @@ type Service struct {
 	layout              box.Layout
 	browserMu           sync.Mutex
 	browserLocks        map[string]*sync.Mutex
+	browserJars         map[string]*browser.Jar
+	extractV1Cookies    func(context.Context, string) ([]browser.Cookie, error)
 	roomData            sync.RWMutex // writers of a room folder share it; removing one takes it alone
 	instructionsMu      sync.Mutex
 	publishInstructions func(context.Context)
@@ -182,7 +185,6 @@ func New(st *store.Store, boxes lifecycle.BoxAdapter, profiles Profiles, now fun
 	s := &Service{hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now, hookPoke: make(chan struct{}, 1), addonSources: addons.NewSources()}
 	s.reconciler = lifecycle.New(st, boxes, s, nil, s.event, now)
 	s.reconciler.SetRoomData(s)
-	s.reconciler.SetBrowserRecovery(s)
 	s.live = live.New(s.deliverWakes)
 	st.SetWake(s.queueWakes)
 	go s.live.Run(st.Done())

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -402,30 +401,6 @@ func (a Agent) post(ctx context.Context, path string, body any) (Started, error)
 // Start starts the desktop, or the parts of it that stopped.
 func (a Agent) Start(ctx context.Context) (Started, error) {
 	return a.post(ctx, "/computer", StartRequest{})
-}
-
-// WatchViewer tells the box agent that a VNC viewer is connected until the returned cleanup function runs
-// or ctx ends, preventing idle release of a shared browser profile while the owner is watching.
-func (a Agent) WatchViewer(ctx context.Context) func() {
-	pr, pw := io.Pipe()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://dyna/computer/viewer", pr)
-		if err != nil {
-			return
-		}
-		resp, err := a.client.Do(req)
-		if err != nil {
-			return
-		}
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
-	}()
-	return func() {
-		_ = pw.Close()
-		<-done
-	}
 }
 
 // actionSlot serializes desktop actions; stop bypasses it to recover a stalled desktop.

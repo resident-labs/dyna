@@ -167,8 +167,6 @@ func computerCommand(socket string) *cobra.Command {
 	stop := command("stop", cobra.NoArgs, computer.Stop, nil)
 	// The engine runs this through podman exec for the owner's view; it does not start the desktop.
 	stream := &cobra.Command{Use: "stream", Short: "Carry the desktop's VNC stream over stdin and stdout", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		stopViewer := agent.WatchViewer(cmd.Context())
-		defer stopViewer()
 		return computer.Stream(cmd.Context(), computer.VNCSocket, cmd.InOrStdin(), cmd.OutOrStdout())
 	}}
 	check := command("check", cobra.NoArgs, computer.Check, nil)

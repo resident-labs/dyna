@@ -525,7 +525,6 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodBrowserCreate, c, a.service.BrowserCreate)
 	call(mux, contract.MethodBrowserList, c, a.service.BrowserList)
 	call(mux, contract.MethodBrowserRemove, c, a.service.BrowserRemove)
-	call(mux, contract.MethodBrowserRelease, c, a.service.BrowserRelease)
 	call(mux, contract.MethodVoiceStatus, c, a.service.VoiceStatus)
 	call(mux, contract.MethodVoiceStop, c, a.service.VoiceStop)
 	mux.HandleFunc("GET /v1/voice", func(w http.ResponseWriter, r *http.Request) {
@@ -775,8 +774,8 @@ func (a *API) handler(c Caller) http.Handler {
 	}
 	if box(c) && a.browser != nil {
 		browserHandler := a.browser(c)
-		mux.Handle("POST /v1/browser/checkout", browserHandler)
-		mux.Handle("POST /v1/browser/checkin", browserHandler)
+		mux.Handle("GET /v1/browser/sync", browserHandler)
+		mux.Handle("POST /v1/browser/sync", browserHandler)
 	}
 	if box(c) && a.git != nil {
 		mux.Handle("/git/", a.git(c))
