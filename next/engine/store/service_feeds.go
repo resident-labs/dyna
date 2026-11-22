@@ -120,7 +120,7 @@ func (s *Store) RoomRootSession(ctx context.Context, room contract.RoomID) (cont
 
 // PendingServiceOutbox returns up to limit unacknowledged outbound messages for serviceID, oldest first.
 func (s *Store) PendingServiceOutbox(ctx context.Context, serviceID contract.ServiceID, limit int) ([]contract.FeedOutboxMessage, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT id,recipient,text,created_at FROM service_outbox WHERE service=? AND acked_at=0 ORDER BY created_at,id LIMIT ?", serviceID, limit)
+	rows, err := s.Read().QueryContext(ctx, "SELECT id,recipient,text,created_at FROM service_outbox WHERE service=? AND acked_at=0 ORDER BY created_at,rowid LIMIT ?", serviceID, limit)
 	if err != nil {
 		return nil, err
 	}

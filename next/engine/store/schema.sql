@@ -128,7 +128,7 @@ CREATE TABLE service_leftovers (host TEXT NOT NULL REFERENCES hosts(name), room 
 CREATE TABLE service_image_sizes (room TEXT NOT NULL, source TEXT NOT NULL, bytes INTEGER NOT NULL, measured_at INTEGER NOT NULL, PRIMARY KEY(room, source));
 CREATE TABLE service_feed_messages (service TEXT NOT NULL REFERENCES services(id), id TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY(service, id));
 CREATE TABLE service_outbox (id TEXT PRIMARY KEY, service TEXT NOT NULL REFERENCES services(id), room TEXT NOT NULL REFERENCES rooms(id), recipient TEXT NOT NULL, text TEXT NOT NULL, created_at INTEGER NOT NULL, acked_at INTEGER NOT NULL DEFAULT 0);
-CREATE INDEX service_outbox_pending ON service_outbox(service, created_at, id) WHERE acked_at = 0;
+CREATE INDEX service_outbox_pending ON service_outbox(service, created_at) WHERE acked_at = 0;
 
 CREATE TABLE discord_routes (guild TEXT NOT NULL, channel TEXT NOT NULL, room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, session TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', policy TEXT NOT NULL DEFAULT '', policy_resolved TEXT NOT NULL DEFAULT '', PRIMARY KEY(guild,channel));
 CREATE TABLE discord_outbox (id INTEGER PRIMARY KEY, room TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE, session TEXT NOT NULL, channel TEXT NOT NULL, message TEXT NOT NULL, text TEXT NOT NULL, group_key TEXT NOT NULL DEFAULT '', attempts INTEGER NOT NULL DEFAULT 0, due_at INTEGER NOT NULL DEFAULT 0);
