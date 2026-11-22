@@ -303,6 +303,7 @@ func Run(ctx context.Context, cfg Config) error {
 	})
 	apiServer.SetFilesRoute(func(c api.Caller) http.Handler { return service.Files(c.Principal, c.Room) })
 	apiServer.SetSharedRoute(func(c api.Caller) http.Handler { return service.Shared(c.Principal) })
+	apiServer.SetBrowserRoute(func(c api.Caller) http.Handler { return service.BrowserSync(c.Principal, c.Box, c.Room) })
 	apiServer.SetGitRoute(func(c api.Caller) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			credential, login, err := credentials.Room(r.Context(), c.Room)

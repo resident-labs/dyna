@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/discord/policy"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 // requestChars keeps a question's line short enough for several in the section's budget.
@@ -173,6 +175,13 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	}
 	if account.Login != "" {
 		lines = append(lines, "GitHub account: "+account.Login)
+	}
+	browserProfile, sharedWith, err := s.store.RoomBrowser(ctx, session.Room)
+	if err != nil && !errors.Is(err, store.ErrRoomNotFound) {
+		return contract.ContextSnapshotResponse{}, failure(err)
+	}
+	if browserProfile != "" {
+		lines = append(lines, formatRoomBrowserLine(browserProfile, sharedWith))
 	}
 	// What the room allows every session, when it is on: the GitHub writes of its githubWrites setting (spec 7.9).
 	granted, err := s.GitHubWritesOf(ctx, session.Room)

@@ -42,6 +42,10 @@ type client interface {
 	HostSetLimits(context.Context, contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, error)
 	HostSet(context.Context, contract.HostSetRequest) (contract.HostSetResponse, error)
 	OwnerTimezone(context.Context, contract.OwnerTimezoneRequest) (contract.OwnerTimezoneResponse, error)
+	BrowserCreate(context.Context, contract.BrowserCreateRequest) (contract.BrowserCreateResponse, error)
+	BrowserList(context.Context, contract.BrowserListRequest) (contract.BrowserListResponse, error)
+	BrowserRemove(context.Context, contract.BrowserRemoveRequest) (contract.BrowserRemoveResponse, error)
+	BrowserRelease(context.Context, contract.BrowserReleaseRequest) (contract.BrowserReleaseResponse, error)
 	RoomSet(context.Context, contract.RoomSetRequest) (contract.RoomSetResponse, error)
 	HostRemove(context.Context, contract.HostRemoveRequest) (contract.HostRemoveResponse, error)
 	PoolAdd(context.Context, contract.PoolAddRequest) (contract.PoolAddResponse, error)
@@ -490,4 +494,20 @@ func (c *socketClient) ServiceSecretSet(ctx context.Context, q contract.ServiceS
 
 func (c *socketClient) OwnerTimezone(ctx context.Context, q contract.OwnerTimezoneRequest) (contract.OwnerTimezoneResponse, error) {
 	return call[contract.OwnerTimezoneRequest, contract.OwnerTimezoneResponse](ctx, c, contract.MethodOwnerTimezone, q)
+}
+
+func (c *socketClient) BrowserCreate(ctx context.Context, q contract.BrowserCreateRequest) (contract.BrowserCreateResponse, error) {
+	return call[contract.BrowserCreateRequest, contract.BrowserCreateResponse](ctx, c, contract.MethodBrowserCreate, q)
+}
+
+func (c *socketClient) BrowserList(ctx context.Context, q contract.BrowserListRequest) (contract.BrowserListResponse, error) {
+	return call[contract.BrowserListRequest, contract.BrowserListResponse](ctx, c, contract.MethodBrowserList, q)
+}
+
+func (c *socketClient) BrowserRemove(ctx context.Context, q contract.BrowserRemoveRequest) (contract.BrowserRemoveResponse, error) {
+	return call[contract.BrowserRemoveRequest, contract.BrowserRemoveResponse](ctx, c, contract.MethodBrowserRemove, q)
+}
+
+func (c *socketClient) BrowserRelease(ctx context.Context, q contract.BrowserReleaseRequest) (contract.BrowserReleaseResponse, error) {
+	return call[contract.BrowserReleaseRequest, contract.BrowserReleaseResponse](ctx, c, contract.MethodBrowserRelease, q)
 }

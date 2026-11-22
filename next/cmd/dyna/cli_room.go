@@ -90,7 +90,21 @@ func roomCommand(getClient func() client) *cobra.Command {
 		_, err := getClient().RoomSet(cmd.Context(), contract.RoomSetRequest{Room: contract.RoomID(args[0]), GitSigning: &on})
 		return err
 	}}
-	room.AddCommand(limit, setRoom, advisor, signing, roomHostsCommand(getClient))
+	browser := &cobra.Command{
+		Use:   "browser ROOM NAME|none",
+		Short: "Set the room's shared browser profile, or none",
+		Long:  "Set the room's shared Chromium profile (created with dyna browser create NAME), or none to turn it off. Several rooms may share one profile, one session at a time. Pin rooms sharing a profile to one home host with dyna room hosts, because Google and some shops bind sessions partly to device and IP and a box on another host may ask to sign in again.",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[1]
+			if name == "none" {
+				name = ""
+			}
+			_, err := getClient().RoomSet(cmd.Context(), contract.RoomSetRequest{Room: contract.RoomID(args[0]), Browser: &name})
+			return err
+		},
+	}
+	room.AddCommand(limit, setRoom, advisor, signing, browser, roomHostsCommand(getClient))
 	var rootProfile string
 	create := &cobra.Command{Use: "create NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		r, err := getClient().RoomCreate(cmd.Context(), contract.RoomCreateRequest{Name: args[0], RootProfile: contract.ProfileName(rootProfile)})

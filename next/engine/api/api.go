@@ -33,6 +33,7 @@ type API struct {
 	web        *Web
 	files      func(Caller) http.Handler
 	shared     func(Caller) http.Handler
+	browser    func(Caller) http.Handler
 	connect    ConnectOperations
 }
 
@@ -49,8 +50,9 @@ func New(service Service, model func(Caller) http.Handler) *API {
 	return &API{service: service, model: model}
 }
 
-func (a *API) SetFilesRoute(route func(Caller) http.Handler)  { a.files = route }
-func (a *API) SetSharedRoute(route func(Caller) http.Handler) { a.shared = route }
+func (a *API) SetFilesRoute(route func(Caller) http.Handler)   { a.files = route }
+func (a *API) SetSharedRoute(route func(Caller) http.Handler)  { a.shared = route }
+func (a *API) SetBrowserRoute(route func(Caller) http.Handler) { a.browser = route }
 
 // SetLocalModelRoute configures the owner socket's model route before opening sockets.
 func (a *API) SetLocalModelRoute(route http.Handler) { a.localModel = route }
@@ -520,6 +522,10 @@ func (a *API) handler(c Caller) http.Handler {
 		}
 		return a.service.ComputerStart(ctx, p, req)
 	})
+	call(mux, contract.MethodBrowserCreate, c, a.service.BrowserCreate)
+	call(mux, contract.MethodBrowserList, c, a.service.BrowserList)
+	call(mux, contract.MethodBrowserRemove, c, a.service.BrowserRemove)
+	call(mux, contract.MethodBrowserRelease, c, a.service.BrowserRelease)
 	call(mux, contract.MethodVoiceStatus, c, a.service.VoiceStatus)
 	call(mux, contract.MethodVoiceStop, c, a.service.VoiceStop)
 	mux.HandleFunc("GET /v1/voice", func(w http.ResponseWriter, r *http.Request) {
@@ -766,6 +772,11 @@ func (a *API) handler(c Caller) http.Handler {
 		})
 		mux.Handle("GET /v1/rooms/{room}/shared/tree", shared)
 		mux.Handle("GET /v1/rooms/{room}/shared/file", shared)
+	}
+	if box(c) && a.browser != nil {
+		browserHandler := a.browser(c)
+		mux.Handle("POST /v1/browser/checkout", browserHandler)
+		mux.Handle("POST /v1/browser/checkin", browserHandler)
 	}
 	if box(c) && a.git != nil {
 		mux.Handle("/git/", a.git(c))

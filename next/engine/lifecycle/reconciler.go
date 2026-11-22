@@ -41,11 +41,13 @@ type Reconciler struct {
 	repos         Repositories
 	roomHosts     RoomHosts
 	roomData      RoomData
+	browsers      BrowserRecovery
 	nodes         Nodes
 	runners       Runners
 	idle          map[contract.HostName]time.Time // when each shared node last held a box, as this engine saw
 	audited       map[string]time.Time            // when each pool last ran list
 	roomSteps     map[string]chan struct{}
+	browserSteps  map[string]bool                 // browser profile names currently recovering from a dead box
 	quiesced      map[contract.BoxID]bool // process-local owner restart fences; never deletion authority
 	retained      map[store.Leftover]bool // completed container-only work, not volume deletion permission
 	active        map[contract.BoxID]*activeStep
@@ -61,7 +63,7 @@ func New(st *store.Store, boxes BoxAdapter, view View, repos Repositories, event
 	st.SetTerminals(func(id contract.SessionID) bool { return view.OpenTerminal(id) })
 	return &Reconciler{store: st, boxes: boxes, view: view, repos: repos, event: event, now: now, createContext: func(ctx context.Context) (context.Context, context.CancelFunc) {
 		return context.WithTimeout(ctx, box.StartPreparationBudget)
-	}, kick: make(chan struct{}, 1), roomSteps: make(map[string]chan struct{}), quiesced: make(map[contract.BoxID]bool), retained: make(map[store.Leftover]bool), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool), disconnected: make(map[contract.BoxID]time.Time), idle: make(map[contract.HostName]time.Time), audited: make(map[string]time.Time)}
+	}, kick: make(chan struct{}, 1), roomSteps: make(map[string]chan struct{}), browserSteps: make(map[string]bool), quiesced: make(map[contract.BoxID]bool), retained: make(map[store.Leftover]bool), active: make(map[contract.BoxID]*activeStep), hosts: make(map[contract.HostName]int), fresh: make(map[contract.BoxID]bool), disconnected: make(map[contract.BoxID]time.Time), idle: make(map[contract.HostName]time.Time), audited: make(map[string]time.Time)}
 }
 func (r *Reconciler) SetHostHealth(read func(contract.HostName) contract.HostHealth) {
 	r.hostHealth = read
@@ -99,6 +101,9 @@ func (r *Reconciler) hostRestoring(host contract.HostName) bool {
 
 // SetRoomData enables room deletion before the reconciler runs.
 func (r *Reconciler) SetRoomData(data RoomData) { r.roomData = data }
+
+// SetBrowserRecovery enables dead-box shared browser lease recovery before the reconciler runs.
+func (r *Reconciler) SetBrowserRecovery(browsers BrowserRecovery) { r.browsers = browsers }
 
 // SetRoomHosts adds the host side of room deletion before the reconciler runs.
 func (r *Reconciler) SetRoomHosts(hosts RoomHosts) { r.roomHosts = hosts }
@@ -436,7 +441,84 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	if err := r.servicePass(ctx, hosts, all); err != nil {
 		return err
 	}
+	if err := r.browserLeasePass(ctx, rows, hostState); err != nil {
+		return err
+	}
 	return r.roomPass(ctx, hosts)
+}
+
+// browserLeasePass recovers shared browser leases held by boxes confirmed stopped or removed.
+// A box on an unreachable host (or BoxLost) keeps its lease until confirmed stopped or removed.
+func (r *Reconciler) browserLeasePass(ctx context.Context, rows []store.LifecycleBox, hostState map[contract.HostName]box.HostState) error {
+	if r.browsers == nil {
+		return nil
+	}
+	leases, err := r.store.BrowserLeases(ctx)
+	if err != nil || len(leases) == 0 {
+		return err
+	}
+	byBox := make(map[contract.BoxID]box.Box, len(rows))
+	for _, row := range rows {
+		byBox[row.ID] = row.Box
+	}
+	for _, lease := range leases {
+		r.mu.Lock()
+		busy := r.browserSteps[lease.Profile] || r.active[lease.Box] != nil
+		r.mu.Unlock()
+		if busy {
+			continue
+		}
+		b, ok := byBox[lease.Box]
+		if !ok {
+			var err error
+			b, err = r.store.Box(ctx, lease.Box)
+			if err != nil && err != store.ErrNotFound {
+				return err
+			}
+			ok = err == nil
+		}
+		var recover, checkVolume bool
+		switch {
+		case !ok || b.State == contract.BoxDeleted:
+			recover, checkVolume = true, false
+		case b.State == contract.BoxStopped:
+			if b.Image == "" || b.Host == "" {
+				recover, checkVolume = true, false
+			} else if hostState[b.Host] == box.HostReady {
+				recover, checkVolume = true, true
+			}
+		case b.State == contract.BoxFailed && (b.Reason == containerStoppedReason || b.Reason == "container missing"):
+			if b.Host == "" {
+				recover, checkVolume = true, false
+			} else if hostState[b.Host] == box.HostReady {
+				recover, checkVolume = true, true
+			}
+		}
+		if !recover {
+			continue
+		}
+		r.mu.Lock()
+		if r.browserSteps[lease.Profile] {
+			r.mu.Unlock()
+			continue
+		}
+		r.browserSteps[lease.Profile] = true
+		r.wg.Add(1)
+		r.mu.Unlock()
+		go func(l store.BrowserLeaseRow, host contract.HostName, checkVol bool) {
+			defer r.wg.Done()
+			defer func() {
+				r.mu.Lock()
+				delete(r.browserSteps, l.Profile)
+				r.mu.Unlock()
+				r.Kick()
+			}()
+			if err := r.browsers.RecoverBrowserLease(ctx, l, host, checkVol); err != nil && ctx.Err() == nil {
+				log.Printf("browser lease recovery %s (%s): %v", l.Profile, l.Box, err)
+			}
+		}(lease, b.Host, checkVolume)
+	}
+	return nil
 }
 func (r *Reconciler) launch(ctx context.Context, row store.LifecycleBox) {
 	r.mu.Lock()

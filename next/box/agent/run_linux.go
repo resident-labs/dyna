@@ -81,13 +81,13 @@ func Run(ctx context.Context) error {
 	errs := make(chan error, 4)
 	states := make(chan struct{}, 1)
 	var computerRunning atomic.Bool
-	closeComputer, err := computer.Serve(ctx, "/run/dyna/agent.sock", errs, func(running bool) {
+	desktop, closeComputer, err := computer.Serve(ctx, "/run/dyna/agent.sock", errs, func(running bool) {
 		computerRunning.Store(running)
 		select {
 		case states <- struct{}{}:
 		default:
 		}
-	})
+	}, client)
 	if err != nil {
 		return err
 	}
@@ -346,6 +346,9 @@ func Run(ctx context.Context) error {
 				closing.Store(true)
 				var report *contract.DiffSavedRequest // one try: a retry of the report sends this one again
 				return closeBox(ctx, h, transcript, files, time.After, func(ctx context.Context) error {
+					if err := desktop.Stop(); err != nil {
+						log.Printf("closeBox: stop computer: %v", err)
+					}
 					if report == nil {
 						saved := saveDiff(ctx, "/box/work", diffFolder, hello.Session, save.Name, hello.Repos, runGit)
 						report = &saved
