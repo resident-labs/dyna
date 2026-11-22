@@ -203,7 +203,7 @@ func UnpackProfile(r io.Reader, dir string) error {
 			if err := os.MkdirAll(dst, mode); err != nil {
 				return err
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			if err := os.Remove(dst); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
