@@ -234,7 +234,7 @@ func (h *Host) bind(ctx context.Context, f box.Forward) error {
 	if f.Box != "" {
 		_, err = h.execute(ctx, "bash", "-c", `mkdir -p -- "$1" && chmod 0700 -- "$1" && rm -f -- "$2"`, "dyna", filepath.Dir(f.HostPath), f.HostPath)
 	} else if f.Service != "" {
-		_, err = h.execute(ctx, "bash", "-c", `mkdir -p -- "$1" && chmod 0755 -- "$1" && rm -f -- "$2"`, "dyna", filepath.Dir(f.HostPath), f.HostPath)
+		_, err = h.execute(ctx, "bash", "-c", `mkdir -p -- "$2" && chmod 0700 -- "$1" && chmod 0755 -- "$2" && rm -f -- "$3"`, "dyna", filepath.Dir(filepath.Dir(f.HostPath)), filepath.Dir(f.HostPath), f.HostPath)
 	} else {
 		_, err = h.execute(ctx, "bash", "-c", `mkdir -p -- "$1" && rm -f -- "$2"`, "dyna", filepath.Dir(f.HostPath), f.HostPath)
 	}

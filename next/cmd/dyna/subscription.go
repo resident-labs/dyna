@@ -119,8 +119,8 @@ func subscriptionCommand(get func() *socketClient) *cobra.Command {
 --every takes a duration such as 1h, 15m or 90s, of at least 1m. --session and --wake take a session's name in --room, or its
 ses_… ID.
 
---where keeps only the github.* and git.* events it matches, and the engine checks it before anything starts. Each --where is one of
-key=value, key!=value or text~value, and all of them must hold. Keys are repo, author, actor, label, kind and number. kind is a change kind of github.pr.changed, such as pushed, ci_failed or merged; kind=pushed,opened matches either. github.pr.changed covers tracked PRs and every open PR with the repository room setting prEvents on (owner CLI on the engine host: dyna room repo add ROOM REPO --pr-events on). pushed carries push.before and push.after. text~ is a plain
+--where keeps only the github.*, git.* and service.* events it matches, and the engine checks it before anything starts. Each --where is one of
+key=value, key!=value or text~value, and all of them must hold. Keys are repo, author, actor, label, kind, number and service. kind is a change kind of github.pr.changed, such as pushed, ci_failed or merged; kind=pushed,opened matches either. github.pr.changed covers tracked PRs and every open PR with the repository room setting prEvents on (owner CLI on the engine host: dyna room repo add ROOM REPO --pr-events on). pushed carries push.before and push.after. text~ is a plain
 substring of a comment or a body. A field the event does not have matches neither = nor !=.
 
 --workflow starts a service instead: one run in one box that stays up, and whose script calls serve(handler) to handle each event

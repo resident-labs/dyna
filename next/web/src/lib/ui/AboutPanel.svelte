@@ -58,15 +58,20 @@
   let subscriptions: SubscriptionInfo[] = $state([]);
   $effect(() => {
     if (!isRoot) { subscriptions = []; return; }
+    if (!shown) return;
     const asked = room;
-    void call("subscription.list", { room: asked }).then(answer => { if (asked === room) subscriptions = answer.subscriptions ?? []; }, () => { subscriptions = []; });
+    void call("subscription.list", { room: asked }).then(answer => { if (asked === room) subscriptions = answer.subscriptions ?? []; }, () => { if (asked === room) subscriptions = []; });
   });
   let services: Service[] = $state([]);
+  function loadServices(): void {
+    const asked = room;
+    void call("service.list", { room: asked }).then(answer => { if (asked === room) services = answer.services ?? []; }, () => { if (asked === room) services = []; });
+  }
   $effect(() => {
     if (!isRoot) { services = []; return; }
-    void shown;
-    const asked = room;
-    void call("service.list", { room: asked }).then(answer => { if (asked === room) services = answer.services ?? []; }, () => { services = []; });
+    if (!shown) return;
+    void store.servicesVersion;
+    loadServices();
   });
   // The engine's list of what this session still holds. Anything that can change it reads it again; one that cannot load shows nothing.
   let holds: Responsibility[] = $state([]);
@@ -133,7 +138,7 @@
           {#if row.opens}<button type="button" class="hold" aria-haspopup="dialog" onclick={() => { showing = row.kind; }}>{@render line(holdIcons[row.kind] ?? "list", row.label, row.count, row.blocked)}<span class="go"><Icon name="forwardChevron" size={12} /></span></button>
           {:else}<div class="hold">{@render line(holdIcons[row.kind] ?? "list", row.label, row.count, row.blocked)}</div>{/if}
         {/each}
-        {#if svcs.count}<button type="button" class="hold" aria-haspopup="dialog" onclick={() => { showing = "services"; }}>{@render line("stack", "Services", svcs.count, false, svcs.health, svcs.failing)}<span class="go"><Icon name="forwardChevron" size={12} /></span></button>{/if}
+        {#if svcs.count}<button type="button" class="hold" aria-haspopup="dialog" onclick={() => { showing = "services"; loadServices(); }}>{@render line("stack", "Services", svcs.count, false, svcs.health, svcs.failing)}<span class="go"><Icon name="forwardChevron" size={12} /></span></button>{/if}
         {#if subs.count}<button type="button" class="hold" aria-haspopup="dialog" onclick={() => { showing = "subscriptions"; }}>{@render line("plug", "Subscriptions", subs.count, false, subs.health, subs.failing)}<span class="go"><Icon name="forwardChevron" size={12} /></span></button>{/if}
       </div>
     </section>

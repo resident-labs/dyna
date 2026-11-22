@@ -7,6 +7,7 @@ import (
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/images"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 // ServiceDriver gives the reconciler a host's service operations over the host's SSH connection.
@@ -34,6 +35,16 @@ func (b *Boxes) serviceForward(id contract.ServiceID) box.Forward {
 		HostPath:   b.Layout.HostServiceSocket(id),
 		EnginePath: b.Sockets.ServiceSocketPath(id),
 	}
+}
+
+func serviceWantsFeed(svc store.ServiceRow) bool {
+	if svc.Want == contract.ServiceWantRemove || svc.State == contract.ServiceFailed {
+		return false
+	}
+	if svc.Reason == contract.ServiceRolledBack && svc.Live != nil {
+		return svc.Live.Spec.Feed
+	}
+	return svc.Spec.Feed || (svc.Live != nil && svc.Live.Spec.Feed)
 }
 
 // EnsureFeedSocket opens the engine-side listener for a feed service and forwards it onto host, returning the host

@@ -108,9 +108,19 @@ func (s *Store) EnqueueServiceOutbox(
 	})
 }
 
+// RoomRootSession returns the open root session ID of room, or "" if none exists.
+func (s *Store) RoomRootSession(ctx context.Context, room contract.RoomID) (contract.SessionID, error) {
+	var id contract.SessionID
+	err := s.Read().QueryRowContext(ctx, "SELECT id FROM sessions WHERE room=? AND parent IS NULL AND closed_at IS NULL LIMIT 1", room).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return id, err
+}
+
 // PendingServiceOutbox returns up to limit unacknowledged outbound messages for serviceID, oldest first.
 func (s *Store) PendingServiceOutbox(ctx context.Context, serviceID contract.ServiceID, limit int) ([]contract.FeedOutboxMessage, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT id,recipient,text,created_at FROM service_outbox WHERE service=? AND acked_at=0 ORDER BY created_at,rowid LIMIT ?", serviceID, limit)
+	rows, err := s.Read().QueryContext(ctx, "SELECT id,recipient,text,created_at FROM service_outbox WHERE service=? AND acked_at=0 ORDER BY created_at,id LIMIT ?", serviceID, limit)
 	if err != nil {
 		return nil, err
 	}

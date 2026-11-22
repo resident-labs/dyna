@@ -14,7 +14,7 @@
     <li class:off={row.disabled}>
       <p class="head"><strong>{row.name}</strong>{#if row.args.length}<span class="args">{row.args.join(" ")}</span>{/if}<span class="kind">{row.kind}</span>
         {#if row.failing}<StatusPill tone="failed" word label={row.state || "Failed"} />{:else if row.state}<span class="state">{row.state}</span>{/if}</p>
-      <p class="when">{row.fires}</p>
+      {#if !row.kind.startsWith("schedule · ")}<p class="when">{row.fires}</p>{/if}
       {#if row.command}<code>{row.command}</code>{/if}
     </li>
   {/each}

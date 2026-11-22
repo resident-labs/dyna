@@ -20,6 +20,7 @@ test("a subscription says what it does", () => {
   const name = (session: string) => session === "ses_root" ? "root" : "?";
   assert.equal(subscriptionAction(info({ run }), name), "Runs bash watch.sh");
   assert.equal(subscriptionAction(info({ wake: "ses_root" }), name), "Wakes root");
+  assert.equal(subscriptionAction(info({ workflow: { script: "// triage https://example.com/a/b\nserve(async () => {});" } }), name), "Runs workflow");
 });
 
 test("a subscription's state puts the worst news first", () => {

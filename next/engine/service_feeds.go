@@ -13,7 +13,7 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
-// ensureFeedFailureSubscription ensures a dead feed service reaches someone in the room: if no enabled subscription
+// ensureFeedFailureSubscription ensures a dead feed service reaches someone in the room: if no subscription
 // already watches service.failed for this service and the room has an open root session, it adds one waking root.
 // Otherwise it returns a hint describing what to add.
 func (s *Service) ensureFeedFailureSubscription(ctx context.Context, room contract.RoomID, name contract.ServiceName) string {
@@ -23,23 +23,16 @@ func (s *Service) ensureFeedFailureSubscription(ctx context.Context, room contra
 	}
 	probe := contract.ServiceFailure{Name: name}
 	for _, sub := range subs {
-		if sub.Disabled || !slices.Contains(sub.On, probe.EventType()) {
+		if !slices.Contains(sub.On, probe.EventType()) {
 			continue
 		}
 		if contract.MatchesWhere(sub.Where, probe) {
 			return ""
 		}
 	}
-	list, err := s.store.SessionList(ctx, contract.SessionListRequest{Room: room}, 25)
+	root, err := s.store.RoomRootSession(ctx, room)
 	if err != nil {
 		return ""
-	}
-	var root contract.SessionID
-	for _, sess := range list.Sessions {
-		if sess.Parent == "" {
-			root = sess.ID
-			break
-		}
 	}
 	if root == "" {
 		return fmt.Sprintf("add a subscription so a dead feed reaches someone: dyna subscription add --room %s --on service.failed --where service=%s --wake root", room, name)
@@ -136,9 +129,6 @@ func (s *Service) ServiceFeedMessage(ctx context.Context, serviceID contract.Ser
 		if len(req.Data) > contract.ServiceFeedDataMax {
 			return contract.FeedMessageResponse{}, &contract.Error{Code: contract.ErrTooLarge, Message: fmt.Sprintf("data exceeds %d bytes", contract.ServiceFeedDataMax)}
 		}
-		if !json.Valid(req.Data) {
-			return contract.FeedMessageResponse{}, invalid("data must be valid JSON")
-		}
 		data = req.Data
 	}
 	if req.Text == "" && len(data) == 0 {
@@ -173,8 +163,11 @@ func (s *Service) ServiceFeedOutbox(ctx context.Context, serviceID contract.Serv
 	var deadline <-chan time.Time
 	var timer *time.Timer
 	for {
-		// Subscribe before reading so a concurrent ServiceSend cannot slip between read and wait.
-		notify := s.feedOutboxChan(serviceID)
+		// Subscribe before reading when waiting, so a concurrent ServiceSend cannot slip between read and wait.
+		var notify chan struct{}
+		if wait > 0 {
+			notify = s.feedOutboxChan(serviceID)
+		}
 		msgs, err := s.store.PendingServiceOutbox(ctx, serviceID, limit)
 		if err != nil {
 			if timer != nil {

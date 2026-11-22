@@ -699,8 +699,9 @@ func (r *Reconciler) runDeploy(ctx context.Context, row *store.ServiceRow, drive
 	next.ImageBytes, next.ImageEstimate = size, 0
 	next.ImageRef, next.Target, next.UnitSHA, next.Deployed = ref, "", sha, row.Generation
 	next.State, next.Reason, next.Cause, next.Detail, next.LastState = contract.ServiceRunning, "", "", "", ""
-	*row, _, err = r.saveService(ctx, *row, next)
-	if err == nil && !row.Parts.Spec.Feed {
+	var saved bool
+	*row, saved, err = r.saveService(ctx, *row, next)
+	if err == nil && saved && !row.Parts.Spec.Feed {
 		if feeds, ok := r.svc.hosts.(ServiceFeeds); ok {
 			_ = feeds.RemoveFeedSocket(ctx, row.Host, row.ID)
 		}
@@ -770,7 +771,15 @@ func (r *Reconciler) failDeploy(ctx context.Context, row store.ServiceRow, drive
 			failure.Reason, failure.Cause = contract.ServiceRolledBack, fail.reason
 		}
 	}
-	_, _, err := r.saveService(ctx, row, next, failure)
+	_, saved, err := r.saveService(ctx, row, next, failure)
+	if err == nil && saved {
+		liveFeed := next.State == contract.ServiceRunning && row.Live != nil && row.Live.Spec.Feed
+		if !liveFeed {
+			if feeds, ok := r.svc.hosts.(ServiceFeeds); ok {
+				_ = feeds.RemoveFeedSocket(ctx, row.Host, row.ID)
+			}
+		}
+	}
 	return err
 }
 
@@ -1011,6 +1020,11 @@ func (r *Reconciler) repayServiceLeftovers(ctx context.Context, host contract.Ho
 		if err := driver.RemoveService(ctx, id); err != nil {
 			return fmt.Errorf("host %s: remove service %s: %w", host, id, err)
 		}
+		if feeds, ok := r.svc.hosts.(ServiceFeeds); ok {
+			if err := feeds.RemoveFeedSocket(ctx, host, id); err != nil {
+				log.Printf("host %s: remove leftover feed socket %s: %v", host, id, err)
+			}
+		}
 		if err := r.store.ForgetServiceLeftover(ctx, host, id); err != nil {
 			return err
 		}
@@ -1024,6 +1038,15 @@ func (r *Reconciler) removeServiceFromHost(ctx context.Context, row store.Servic
 	driver, err := r.svc.hosts.ServiceDriver(ctx, row.Host)
 	if err == nil {
 		err = driver.RemoveService(ctx, row.ID)
+	}
+	if feeds, ok := r.svc.hosts.(ServiceFeeds); ok {
+		host := row.Host
+		if err != nil {
+			host = ""
+		}
+		if sockErr := feeds.RemoveFeedSocket(ctx, host, row.ID); sockErr != nil {
+			log.Printf("host %s: discard feed socket %s: %v", row.Host, row.ID, sockErr)
+		}
 	}
 	if err != nil {
 		log.Printf("host %s: discard service %s: %v", row.Host, row.ID, err)

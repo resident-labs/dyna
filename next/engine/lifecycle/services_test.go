@@ -872,3 +872,39 @@ func TestFeedServiceLifecycleEnsuresAndRemovesFeedSocket(t *testing.T) {
 		t.Fatalf("RemoveFeedSocket not called on remove: removed=%v", feeds.removed)
 	}
 }
+
+func TestFeedServiceRollbackAndLeftoverCleanupRemoveFeedSocket(t *testing.T) {
+	rig := newServiceRig(t)
+	feeds := &feedServiceHosts{serviceHosts: serviceHosts{rig.host}}
+	rig.r.SetServices(feeds, ServiceTimings{Start: 50 * time.Millisecond, Stable: 20 * time.Millisecond, Health: 50 * time.Millisecond, Poll: time.Millisecond, CheckEvery: time.Hour})
+
+	// Start as a non-feed service.
+	rig.declare(contract.ServiceSpec{Name: "bridge", Image: digestImage, Feed: false})
+	row := rig.settle()
+	if row.State != contract.ServiceRunning {
+		t.Fatalf("initial state = %s, want running", row.State)
+	}
+
+	// Update to feed: true with a failing image pull so deploy rolls back to Live (Feed: false).
+	rig.host.Service.Fail[fakehost.PullService] = errors.New("pull boom")
+	rig.declare(contract.ServiceSpec{Name: "bridge", Image: digestImage2, Feed: true})
+	row = rig.settle()
+	if row.State != contract.ServiceRunning || row.Reason != contract.ServiceRolledBack {
+		t.Fatalf("after rollback: state=%s reason=%s", row.State, row.Reason)
+	}
+	if !slices.Contains(feeds.removed, row.ID) {
+		t.Fatalf("expected RemoveFeedSocket after rollback to non-feed live spec, removed=%v", feeds.removed)
+	}
+
+	// Recording a leftover debt and repaying it also cleans up any leftover feed socket on the host.
+	leftoverID := contract.ServiceID("svc_leftover_feed")
+	if err := rig.st.AddServiceLeftover(rig.ctx, row.Host, "r", leftoverID); err != nil {
+		t.Fatal(err)
+	}
+	if err := rig.r.repayServiceLeftovers(rig.ctx, row.Host); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(feeds.removed, leftoverID) {
+		t.Fatalf("expected RemoveFeedSocket in repayServiceLeftovers, removed=%v", feeds.removed)
+	}
+}

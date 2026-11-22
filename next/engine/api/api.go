@@ -958,7 +958,7 @@ func (a *API) feedHandler(id contract.ServiceID, room contract.RoomID, name cont
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/messages", func(w http.ResponseWriter, r *http.Request) {
 		var req contract.FeedMessageRequest
-		const bodyLimit = 64 << 10
+		const bodyLimit = 128 << 10
 		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, bodyLimit))
 		if err := dec.Decode(&req); err != nil {
 			var tooBig *http.MaxBytesError

@@ -37,11 +37,14 @@ test("serviceRoutes matches enabled service.message subscriptions for a feed", (
   const subs = [
     sub({ id: "s1", on: ["service.message"], where: ["service=agent-chat"], wake: "ses_sunrise" }),
     sub({ id: "s2", on: ["service.message"], where: ["service=other-feed"], wake: "ses_root" }),
-    sub({ id: "s3", on: ["service.message"], workflow: { script: "/box/shared/triage-feed.js" } }),
+    sub({ id: "s3", on: ["service.message"], workflow: { script: "// handle https://example.com/hook\nserve(async e => e);" } }),
     sub({ id: "s4", on: ["service.failed"], where: ["service=agent-chat"], wake: "ses_root" }),
     sub({ id: "s5", on: ["service.message"], where: ["service=agent-chat"], wake: "ses_root" }, { disabled: true }),
+    sub({ id: "s6", on: ["service.message"], where: ["service!=agent-chat"], wake: "ses_root" }),
+    sub({ id: "s7", on: ["service.message"], where: ["service=agent-chat", "service=other-feed"], wake: "ses_root" }),
+    sub({ id: "s8", on: ["service.message"], where: ["service!=other-feed"], run: { command: ["bash", "triage-feed.sh"], image: "base", size: "small" } }),
   ];
-  assert.deepEqual(serviceRoutes(svc, subs, names), ["→ wakes sunrise", "→ runs triage feed"]);
+  assert.deepEqual(serviceRoutes(svc, subs, names), ["→ wakes sunrise", "→ runs workflow", "→ runs Triage feed"]);
 });
 
 test("serviceRows sorts failures first and formats feed stats and errors", () => {

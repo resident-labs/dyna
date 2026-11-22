@@ -59,10 +59,7 @@ func (b *Boxes) Restore(ctx context.Context) error {
 		return err
 	}
 	for _, svc := range services {
-		if svc.Host == "" || svc.Want == contract.ServiceWantRemove {
-			continue
-		}
-		if !svc.Spec.Feed && (svc.Live == nil || !svc.Live.Spec.Feed) {
+		if svc.Host == "" || !serviceWantsFeed(svc) {
 			continue
 		}
 		if err := b.Sockets.AddService(svc.ID, svc.Room, svc.Spec.Name); err != nil {
@@ -243,10 +240,7 @@ func (b *Boxes) restoreHost(ctx context.Context, name contract.HostName) error {
 		return err
 	}
 	for _, svc := range services {
-		if svc.Host != name || svc.Want == contract.ServiceWantRemove {
-			continue
-		}
-		if !svc.Spec.Feed && (svc.Live == nil || !svc.Live.Spec.Feed) {
+		if svc.Host != name || !serviceWantsFeed(svc) {
 			continue
 		}
 		if err := host.AddForward(ctx, b.serviceForward(svc.ID)); err != nil {

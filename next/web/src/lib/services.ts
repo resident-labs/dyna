@@ -37,11 +37,6 @@ const states: Record<ServiceState, string> = {
 
 const isBadState = (state: ServiceState): boolean => state === "failed" || state === "crashing" || state === "unreachable";
 
-const scriptLabel = (script: string): string => {
-  const base = (script.split("/").at(-1) ?? script).replace(/\.(js|mjs|cjs|ts|sh|py)$/, "").replace(/[-_.]+/g, " ").trim();
-  return base || script;
-};
-
 // The room's services as one line in About ("Services 2"), with how they stand.
 // Failures surface immediately; otherwise show deploying/pending or "all running" when every active service is running.
 export function serviceSummary(list: readonly Service[]): { count: number; health: string; failing: boolean } {
@@ -58,8 +53,14 @@ export function serviceSummary(list: readonly Service[]): { count: number; healt
 }
 
 function matchesService(where: readonly string[] | null | undefined, serviceName: string): boolean {
-  const filters = (where ?? []).filter(clause => clause.startsWith("service=")).map(clause => clause.slice("service=".length));
-  return filters.length === 0 || filters.includes(serviceName);
+  for (const clause of where ?? []) {
+    if (clause.startsWith("service=")) {
+      if (clause.slice("service=".length) !== serviceName) return false;
+    } else if (clause.startsWith("service!=")) {
+      if (clause.slice("service!=".length) === serviceName) return false;
+    }
+  }
+  return true;
 }
 
 // Enabled subscriptions that route service.message events from this feed service.
@@ -71,7 +72,7 @@ export function serviceRoutes(service: Service, subscriptions: readonly Subscrip
     if (!sub.on?.includes("service.message")) continue;
     if (!matchesService(sub.where, service.spec.name)) continue;
     if (sub.wake) routes.push(`→ wakes ${name(sub.wake)}`);
-    else if (sub.workflow) routes.push(`→ runs ${scriptLabel(sub.workflow.script)}`);
+    else if (sub.workflow) routes.push("→ runs workflow");
     else if (sub.run) routes.push(`→ runs ${hookName(sub.run.command).name}`);
   }
   return routes;

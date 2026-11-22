@@ -38,10 +38,11 @@ export const subscriptionWhen = ({ subscription }: SubscriptionInfo, whole = fal
   return subscription.every ? period(subscription.every) : on.length > 2 && !whole ? `On ${on.length} events${where}` : `On ${on.join(", ")}${where}`;
 };
 
-// What a subscription does. A Run reads as its command, a workflow as its script, and a wake as the session it wakes.
+// What a subscription does. A Run reads as its command, a workflow as "Runs workflow" (script holds JS source, not a path),
+// and a wake as the session it wakes.
 export const subscriptionAction = ({ subscription }: SubscriptionInfo, name: (session: string) => string): string =>
   subscription.run ? `Runs ${subscription.run.command?.join(" ") ?? ""}` :
-    subscription.workflow ? `Runs ${words(subscription.workflow.script) || subscription.workflow.script}` :
+    subscription.workflow ? "Runs workflow" :
       `Wakes ${subscription.wake ? name(subscription.wake) : "a session"}`;
 
 // Where a subscription stands, for the owner to read at a glance. Nothing to say reads as nothing.
