@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -235,11 +236,18 @@ func TestBrowserSyncSizeLimitAndMigration(t *testing.T) {
 	}
 	r.s.setCachedBrowserJar("personal", nil)
 
-	migratedCookie := testCookie(t, map[string]any{
-		"name": "session_id", "value": "migrated-val", "domain": "site.example.com", "path": "/", "secure": true, "httpOnly": true, "expires": -1, "session": true,
-	})
-	r.s.extractV1Cookies = func(_ context.Context, _ string) ([]browser.Cookie, error) {
-		return []browser.Cookie{migratedCookie}, nil
+	encVal, err := browser.EncryptV1CookieValue("site.example.com", "migrated-val", 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.s.readV1Cookies = func(_ context.Context, _ string) (browser.V1CookieDB, error) {
+		return browser.V1CookieDB{
+			Version: 24,
+			Rows: []browser.V1CookieRow{{
+				HostKey: "site.example.com", Name: "session_id", EncryptedValue: encVal, Path: "/",
+				IsSecure: true, IsHTTPOnly: true, IsPersistent: false, HasExpires: false, SameSite: -1,
+			}},
+		}, nil
 	}
 
 	// Startup migration converts v1 folder -> jar.json and removes Default/ and .prev/.
@@ -285,5 +293,78 @@ func TestBrowserSyncSizeLimitAndMigration(t *testing.T) {
 	}
 	if strings.Contains(recBig.Body.String(), bigVal) {
 		t.Fatal("oversize error leaked cookie value")
+	}
+}
+
+func TestBrowserFailedMigrationPreservesV1AndNeverBlocksSync(t *testing.T) {
+	r := newGrantRig(t)
+	ctx := t.Context()
+	dataDir := t.TempDir()
+	r.s.SetLayout(box.Layout{Data: dataDir})
+
+	if _, p := r.s.BrowserCreate(ctx, r.owner, contract.BrowserCreateRequest{Name: "personal"}); p != nil {
+		t.Fatal(p)
+	}
+	name := "personal"
+	if _, p := r.s.RoomSet(ctx, r.owner, contract.RoomSetRequest{Room: r.room, Browser: &name}); p != nil {
+		t.Fatal(p)
+	}
+
+	// Create a v1 Default/Cookies file and force migration to fail.
+	profDir := filepath.Join(dataDir, "browsers", "personal")
+	cookiesPath := filepath.Join(profDir, "Default", "Cookies")
+	if err := os.MkdirAll(filepath.Dir(cookiesPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cookiesPath, []byte("not-a-valid-sqlite"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r.s.setCachedBrowserJar("personal", nil)
+	r.s.readV1Cookies = func(_ context.Context, _ string) (browser.V1CookieDB, error) {
+		return browser.V1CookieDB{}, errors.New("corrupt v1 cookies db")
+	}
+
+	// Startup migration fails gracefully without deleting v1 files.
+	r.s.MigrateBrowsers(ctx)
+	if _, err := os.Stat(cookiesPath); err != nil {
+		t.Fatalf("v1 Cookies file not preserved after failed migration: %v", err)
+	}
+
+	// GET /v1/browser/sync succeeds with an empty jar (never 500).
+	h := r.s.BrowserSync(r.worker, r.room)
+	recGet := httptest.NewRecorder()
+	h.ServeHTTP(recGet, httptest.NewRequest(http.MethodGet, "/v1/browser/sync", nil))
+	if recGet.Code != http.StatusOK {
+		t.Fatalf("GET sync after failed migration status = %d, want 200", recGet.Code)
+	}
+	var respGet browser.SyncResponse
+	if err := json.Unmarshal(recGet.Body.Bytes(), &respGet); err != nil {
+		t.Fatal(err)
+	}
+	if respGet.Profile != "personal" || respGet.Version != 0 || len(respGet.Upserts) != 0 {
+		t.Fatalf("GET sync resp = %+v, want empty personal jar", respGet)
+	}
+
+	// POST /v1/browser/sync succeeds in memory without writing jar.json over the preserved v1 folder.
+	c := testCookie(t, map[string]any{
+		"name": "live", "value": "v1", "domain": "example.com", "path": "/", "expires": -1, "session": true,
+	})
+	postBody, _ := json.Marshal(browser.SyncRequest{Profile: "personal", BaseVersion: 0, Upserts: []browser.Cookie{c}})
+	recPost := httptest.NewRecorder()
+	h.ServeHTTP(recPost, httptest.NewRequest(http.MethodPost, "/v1/browser/sync", bytes.NewReader(postBody)))
+	if recPost.Code != http.StatusOK {
+		t.Fatalf("POST sync after failed migration status = %d, want 200", recPost.Code)
+	}
+	if _, err := os.Stat(filepath.Join(profDir, browser.JarFilename)); !os.IsNotExist(err) {
+		t.Fatalf("jar.json should not be written while v1 migration is pending retry: %v", err)
+	}
+	if _, err := os.Stat(cookiesPath); err != nil {
+		t.Fatalf("v1 Cookies file was lost after sync: %v", err)
+	}
+
+	// BrowserList succeeds cleanly as well.
+	listRes, p := r.s.BrowserList(ctx, r.owner, contract.BrowserListRequest{})
+	if p != nil || len(listRes.Browsers) != 1 {
+		t.Fatalf("BrowserList after failed migration: res=%+v err=%+v", listRes, p)
 	}
 }

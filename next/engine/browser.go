@@ -54,12 +54,33 @@ func (s *Service) setCachedBrowserJar(name string, jar *browser.Jar) {
 	s.browserJars[name] = jar
 }
 
+func (s *Service) isBrowserMigrationFailed(name string) bool {
+	s.browserMu.Lock()
+	defer s.browserMu.Unlock()
+	return s.browserMigrationFailed[name]
+}
+
+func (s *Service) setBrowserMigrationFailed(name string, failed bool) {
+	s.browserMu.Lock()
+	defer s.browserMu.Unlock()
+	if s.browserMigrationFailed == nil {
+		s.browserMigrationFailed = map[string]bool{}
+	}
+	if !failed {
+		delete(s.browserMigrationFailed, name)
+		return
+	}
+	s.browserMigrationFailed[name] = true
+}
+
 func browserNameError(name string) *contract.Error {
 	return invalid(fmt.Sprintf("invalid browser profile name %q: use 1 to 64 letters, digits, hyphens or underscores, starting with a letter or digit, and not \"none\"", name))
 }
 
 // loadBrowserJarLocked returns the profile's cookie jar, loading from disk or migrating a v1
-// Chromium profile folder once if needed. Caller must hold s.browserLock(name).
+// Chromium profile folder once if needed. A failed v1 migration is logged without cookie values,
+// leaves the v1 folder intact for retry, and falls back to an empty jar so sync is never blocked.
+// Caller must hold s.browserLock(name).
 func (s *Service) loadBrowserJarLocked(ctx context.Context, name string) (*browser.Jar, error) {
 	if jar := s.cachedBrowserJar(name); jar != nil {
 		return jar, nil
@@ -87,19 +108,36 @@ func (s *Service) loadBrowserJarLocked(ctx context.Context, name string) (*brows
 	}
 	if found {
 		_ = os.RemoveAll(prevDir)
+		s.setBrowserMigrationFailed(name, false)
 		s.setCachedBrowserJar(name, jar)
 		return jar, nil
 	}
-	migratedJar, migrated, err := browser.MigrateV1Profile(ctx, dir, prevDir, s.now(), s.extractV1Cookies)
+	readDB := s.readV1Cookies
+	if readDB == nil {
+		readDB = store.ReadV1ChromiumCookies
+	}
+	migratedJar, migrated, err := browser.MigrateV1Profile(ctx, dir, prevDir, s.now(), readDB)
 	if err != nil {
-		return nil, err
+		if migrated && migratedJar != nil {
+			log.Printf("browser profile %s: migrated v1 profile (%d cookies), cleanup warning: %v", name, migratedJar.LiveCount(s.now()), err)
+			s.setBrowserMigrationFailed(name, false)
+			s.setCachedBrowserJar(name, migratedJar)
+			return migratedJar, nil
+		}
+		log.Printf("browser profile %s: v1 migration failed (v1 profile preserved; serving empty jar): %v", name, err)
+		jar = browser.NewJar()
+		s.setBrowserMigrationFailed(name, true)
+		s.setCachedBrowserJar(name, jar)
+		return jar, nil
 	}
 	if migrated {
 		log.Printf("browser profile %s: migrated v1 profile to cookie jar (%d cookies)", name, migratedJar.LiveCount(s.now()))
+		s.setBrowserMigrationFailed(name, false)
 		s.setCachedBrowserJar(name, migratedJar)
 		return migratedJar, nil
 	}
 	jar = browser.NewJar()
+	s.setBrowserMigrationFailed(name, false)
 	s.setCachedBrowserJar(name, jar)
 	return jar, nil
 }
@@ -204,6 +242,7 @@ func (s *Service) BrowserRemove(ctx context.Context, caller contract.Principal, 
 		}
 	}
 	s.setCachedBrowserJar(req.Name, nil)
+	s.setBrowserMigrationFailed(req.Name, false)
 	if s.layout.Data != "" {
 		if dir, err := s.layout.Browser(req.Name); err == nil {
 			_ = os.RemoveAll(dir)
@@ -302,7 +341,7 @@ func (s *Service) BrowserSync(_ contract.Principal, room contract.RoomID) http.H
 			writeBrowserJSONError(w, http.StatusInternalServerError, contract.ErrUnavailable, "failed to sync browser cookie jar")
 			return
 		}
-		if changed && s.layout.Data != "" {
+		if changed && s.layout.Data != "" && !s.isBrowserMigrationFailed(profile) {
 			jarPath, err := s.layout.BrowserJar(profile)
 			if err != nil {
 				writeBrowserJSONError(w, http.StatusInternalServerError, contract.ErrUnavailable, "failed to resolve browser cookie jar path")

@@ -80,14 +80,14 @@ func (f *fakeCookieBrowser) DeleteCookies(_ context.Context, keys []browser.Cook
 func (f *fakeCookieBrowser) Close() {}
 
 type fakeCookieStore struct {
-	mu       sync.Mutex
-	profile  string
-	pullErr  error
-	syncErr  error
-	jar      *browser.Jar
-	now      func() time.Time
-	pulls    int
-	syncs    []browser.SyncRequest
+	mu      sync.Mutex
+	profile string
+	pullErr error
+	syncErr error
+	jar     *browser.Jar
+	now     func() time.Time
+	pulls   int
+	syncs   []browser.SyncRequest
 }
 
 func newFakeCookieStore(profile string, now func() time.Time) *fakeCookieStore {

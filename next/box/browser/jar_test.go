@@ -1,19 +1,16 @@
 package browser
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
-
-	"github.com/coder/websocket"
 )
 
 func makeCookie(t *testing.T, obj map[string]any) Cookie {
@@ -247,15 +244,105 @@ func TestJarDiskMode0600AndNoValueInErrors(t *testing.T) {
 	}
 }
 
-func TestMigrateV1ChromiumProfileFixture(t *testing.T) {
-	bin, err := findChromium()
+func TestV1CookieEncryptDecrypt(t *testing.T) {
+	const secret = "super-secret-cookie-token-123"
+
+	// DB version >= 24 (SHA-256 host_key prefix).
+	enc24, err := EncryptV1CookieValue("app.example.com", secret, 24)
 	if err != nil {
-		t.Skip("chromium not available in test environment")
+		t.Fatal(err)
 	}
+	if !bytes.HasPrefix(enc24, []byte("v10")) {
+		t.Fatalf("missing v10 prefix")
+	}
+	got24, err := DecryptV1CookieValue("app.example.com", "", enc24, 24)
+	if err != nil || got24 != secret {
+		t.Fatalf("decrypt v24: got=%q err=%v", got24, err)
+	}
+	// Wrong host_key must be rejected without leaking the secret.
+	if _, err := DecryptV1CookieValue("other.example.com", "", enc24, 24); err == nil {
+		t.Fatal("expected host digest mismatch error")
+	} else if strings.Contains(err.Error(), secret) {
+		t.Fatal("decrypt error leaked secret value")
+	}
+
+	// Empty value at version 24.
+	encEmpty, err := EncryptV1CookieValue("plain.example.com", "", 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := DecryptV1CookieValue("plain.example.com", "", encEmpty, 24); err != nil || got != "" {
+		t.Fatalf("decrypt empty v24: got=%q err=%v", got, err)
+	}
+
+	// DB version < 24 (no host_key digest prefix).
+	enc23, err := EncryptV1CookieValue("legacy.example.com", secret, 23)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got23, err := DecryptV1CookieValue("legacy.example.com", "", enc23, 23); err != nil || got23 != secret {
+		t.Fatalf("decrypt v23: got=%q err=%v", got23, err)
+	}
+
+	// Plaintext fallback when encrypted_value is empty.
+	if gotPlain, err := DecryptV1CookieValue("plain.example.com", "plain-val", nil, 24); err != nil || gotPlain != "plain-val" {
+		t.Fatalf("plain fallback: got=%q err=%v", gotPlain, err)
+	}
+
+	// Unsupported v11 prefix fails without leaking bytes.
+	if _, err := DecryptV1CookieValue("app.example.com", "", append([]byte("v11"), []byte(secret)...), 24); err == nil {
+		t.Fatal("expected v11 error")
+	} else if strings.Contains(err.Error(), secret) {
+		t.Fatal("v11 error leaked cookie bytes")
+	}
+}
+
+func TestDecodeV1CookiesAndMigrateProfile(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	futureUnix := now.Add(48 * time.Hour).Unix()
+	futureChromium := (futureUnix + chromiumEpochOffsetSec) * 1_000_000
+
+	encHost, err := EncryptV1CookieValue("mail.example.com", "host-secret", 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encPart, err := EncryptV1CookieValue(".shop.example.org", "part-secret", 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encSess, err := EncryptV1CookieValue("plain.example.com", "sess-secret", 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	v1db := V1CookieDB{
+		Version: 24,
+		Rows: []V1CookieRow{
+			{
+				HostKey: "mail.example.com", Name: "__Host-login", EncryptedValue: encHost, Path: "/",
+				ExpiresUTC: futureChromium, IsSecure: true, IsHTTPOnly: true, IsPersistent: true, HasExpires: true,
+				Priority: 1, SameSite: 1, SourceScheme: 2, SourcePort: 443, HasCrossSiteAncestor: true, // unpartitioned ignores HasCrossSiteAncestor
+			},
+			{
+				HostKey: ".shop.example.org", TopFrameSiteKey: "https://example.net", Name: "part_login", EncryptedValue: encPart, Path: "/p",
+				ExpiresUTC: futureChromium, IsSecure: true, IsHTTPOnly: false, IsPersistent: true, HasExpires: true,
+				Priority: 2, SameSite: 0, SourceScheme: 2, SourcePort: 443, HasCrossSiteAncestor: false,
+			},
+			{
+				HostKey: "plain.example.com", Name: "sess", EncryptedValue: encSess, Path: "/",
+				ExpiresUTC: 0, IsSecure: false, IsHTTPOnly: true, IsPersistent: false, HasExpires: false,
+				Priority: 0, SameSite: -1, SourceScheme: 1, SourcePort: 80,
+			},
+		},
+	}
+
 	root := t.TempDir()
 	profileDir := filepath.Join(root, "personal")
 	prevDir := filepath.Join(root, "personal.prev")
-	if err := os.MkdirAll(profileDir, 0700); err != nil {
+	if err := os.MkdirAll(filepath.Join(profileDir, "Default"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profileDir, "Default", "Cookies"), []byte("sqlite"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(prevDir, "Default"), 0700); err != nil {
@@ -265,80 +352,49 @@ func TestMigrateV1ChromiumProfileFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Seed a real v1 Chromium profile fixture via headless Chromium.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	cmd := exec.Command(bin,
-		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
-		"--no-first-run", "--no-default-browser-check", "--password-store=basic",
-		"--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0",
-		"--user-data-dir="+profileDir, "about:blank",
-	)
-	cmd.Env = withoutEnv(os.Environ(), "DISPLAY")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
+	// Failed reader preserves v1 files intact.
+	if _, migrated, err := MigrateV1Profile(context.Background(), profileDir, prevDir, now, func(context.Context, string) (V1CookieDB, error) {
+		return V1CookieDB{}, errors.New("read failed")
+	}); err == nil || migrated {
+		t.Fatalf("failed migration: migrated=%v err=%v", migrated, err)
 	}
-	done := make(chan struct{})
-	var waitErr error
-	go func() { waitErr = cmd.Wait(); close(done) }()
-	wsURL, err := waitDevToolsActivePort(ctx, filepath.Join(profileDir, "DevToolsActivePort"), done, &waitErr)
-	if err != nil {
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		<-done
-		t.Fatal(err)
-	}
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
-	if err != nil {
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		<-done
-		t.Fatal(err)
-	}
-	conn.SetReadLimit(devToolsReadLimit)
-	future := float64(time.Now().Add(48 * time.Hour).Unix())
-	seed, _ := json.Marshal(map[string]any{
-		"cookies": []map[string]any{
-			{"name": "__Host-login", "value": "fixture-host", "domain": "mail.example.com", "path": "/", "secure": true, "httpOnly": true, "sameSite": "Lax", "expires": future},
-			{"name": "part_login", "value": "fixture-part", "domain": ".shop.example.org", "path": "/", "secure": true, "sameSite": "None", "expires": future, "partitionKey": map[string]any{"topLevelSite": "https://example.net", "hasCrossSiteAncestor": false}},
-		},
-	})
-	if _, err := cdpCall(ctx, conn, 1, "Storage.setCookies", seed); err != nil {
-		t.Fatal(err)
-	}
-	_, _ = cdpCall(ctx, conn, 2, "Browser.close", nil)
-	_ = conn.Close(websocket.StatusNormalClosure, "")
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		<-done
-	}
-	// Leave a stale SingletonLock to ensure migration handles it cleanly.
-	_ = os.Symlink("stale-host-999999", filepath.Join(profileDir, "SingletonLock"))
 	if !HasV1Profile(profileDir) {
-		t.Fatal("fixture did not create v1 Default/Cookies")
+		t.Fatal("failed migration deleted v1 profile")
 	}
 
-	// Run real migration.
-	jar, migrated, err := MigrateV1Profile(ctx, profileDir, prevDir, time.Now().UTC(), nil)
-	if err != nil {
-		t.Fatalf("MigrateV1Profile: %v", err)
+	// Successful migration writes jar.json (0600) and deletes v1 Default/ and .prev.
+	jar, migrated, err := MigrateV1Profile(context.Background(), profileDir, prevDir, now, func(context.Context, string) (V1CookieDB, error) {
+		return v1db, nil
+	})
+	if err != nil || !migrated {
+		t.Fatalf("MigrateV1Profile: migrated=%v err=%v", migrated, err)
 	}
-	if !migrated {
-		t.Fatal("expected migrated=true")
+	if jar.Version != 1 || jar.LiveCount(now) != 3 {
+		t.Fatalf("migrated jar: ver=%d count=%d, want ver=1 count=3", jar.Version, jar.LiveCount(now))
 	}
-	if jar.Version != 1 || jar.LiveCount(time.Now().UTC()) != 2 {
-		t.Fatalf("migrated jar: ver=%d count=%d, want ver=1 count=2", jar.Version, jar.LiveCount(time.Now().UTC()))
-	}
-	names := map[string]bool{}
+
+	byName := map[string]map[string]any{}
 	for _, entry := range jar.Cookies() {
-		names[entry.Key.Name] = true
+		var m map[string]any
+		if err := json.Unmarshal(entry.Cookie.Raw, &m); err != nil {
+			t.Fatal(err)
+		}
+		byName[entry.Key.Name] = m
 	}
-	if !names["__Host-login"] || !names["part_login"] {
-		t.Fatalf("migrated cookie names = %v", names)
+	if byName["__Host-login"]["value"] != "host-secret" || byName["__Host-login"]["sameSite"] != "Lax" || byName["__Host-login"]["partitionKey"] != nil {
+		t.Fatalf("unexpected __Host-login: %v", byName["__Host-login"])
+	}
+	if byName["part_login"]["value"] != "part-secret" || byName["part_login"]["sameSite"] != "None" {
+		t.Fatalf("unexpected part_login: %v", byName["part_login"])
+	}
+	pk, _ := byName["part_login"]["partitionKey"].(map[string]any)
+	if pk == nil || pk["topLevelSite"] != "https://example.net" || pk["hasCrossSiteAncestor"] != false {
+		t.Fatalf("unexpected part_login partitionKey: %v", byName["part_login"]["partitionKey"])
+	}
+	if byName["sess"]["value"] != "sess-secret" || byName["sess"]["session"] != true || byName["sess"]["expires"] != float64(-1) || byName["sess"]["sameSite"] != nil {
+		t.Fatalf("unexpected sess: %v", byName["sess"])
 	}
 
-	// Verify jar.json exists with mode 0600, v1 Default/ is gone, and .prev is gone.
 	jarPath := filepath.Join(profileDir, JarFilename)
 	info, err := os.Stat(jarPath)
 	if err != nil || info.Mode().Perm() != 0600 {
@@ -353,8 +409,7 @@ func TestMigrateV1ChromiumProfileFixture(t *testing.T) {
 	}
 
 	// Second call is a no-op.
-	_, migratedAgain, err := MigrateV1Profile(ctx, profileDir, prevDir, time.Now().UTC(), nil)
-	if err != nil || migratedAgain {
+	if _, migratedAgain, err := MigrateV1Profile(context.Background(), profileDir, prevDir, now, nil); err != nil || migratedAgain {
 		t.Fatalf("second MigrateV1Profile: migrated=%v err=%v", migratedAgain, err)
 	}
 }
