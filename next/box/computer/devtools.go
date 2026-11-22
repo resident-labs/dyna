@@ -172,12 +172,17 @@ func (d *DevTools) GetCookies(ctx context.Context) ([]browser.Cookie, error) {
 		return nil, errors.New("decode Storage.getCookies response")
 	}
 	out := make([]browser.Cookie, 0, len(payload.Cookies))
-	for i, raw := range payload.Cookies {
+	skipped := 0
+	for _, raw := range payload.Cookies {
 		c, err := browser.ParseCookie(raw)
 		if err != nil {
-			return nil, fmt.Errorf("cookie %d: %w", i, err)
+			skipped++
+			continue
 		}
 		out = append(out, c)
+	}
+	if skipped > 0 {
+		log.Printf("computer: DevTools Storage.getCookies skipped %d invalid cookies", skipped)
 	}
 	return out, nil
 }

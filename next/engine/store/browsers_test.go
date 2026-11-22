@@ -147,13 +147,15 @@ func TestReadV1ChromiumCookiesRealProfile(t *testing.T) {
 	}
 
 	startHeadless := func(profileDir string) (context.Context, *websocket.Conn, func()) {
-		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+		var stderr bytes.Buffer
 		cmd := exec.Command(bin,
 			"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
 			"--no-first-run", "--no-default-browser-check", "--password-store=basic",
 			"--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0",
 			"--user-data-dir="+profileDir, "about:blank",
 		)
+		cmd.Stderr = &stderr
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		if err := cmd.Start(); err != nil {
 			cancel()
@@ -164,7 +166,7 @@ func TestReadV1ChromiumCookiesRealProfile(t *testing.T) {
 
 		var wsURL string
 		portFile := filepath.Join(profileDir, "DevToolsActivePort")
-		for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); {
 			if data, err := os.ReadFile(portFile); err == nil {
 				lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 				if len(lines) >= 2 {
@@ -175,12 +177,18 @@ func TestReadV1ChromiumCookiesRealProfile(t *testing.T) {
 					}
 				}
 			}
+			select {
+			case <-done:
+				cancel()
+				t.Fatalf("chromium exited before writing DevToolsActivePort: %s", stderr.String())
+			case <-time.After(50 * time.Millisecond):
+			}
 		}
 		if wsURL == "" {
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 			<-done
 			cancel()
-			t.Fatal("chromium did not write DevToolsActivePort")
+			t.Fatalf("chromium did not write DevToolsActivePort: %s", stderr.String())
 		}
 		conn, _, err := websocket.Dial(ctx, wsURL, nil)
 		if err != nil {

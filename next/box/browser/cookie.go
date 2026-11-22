@@ -61,10 +61,8 @@ func compareKeyID(a, b KeyID) int {
 }
 
 // NormalizeKey validates and canonicalizes a CookieKey without including secret values in errors.
+// RFC 6265 allows nameless cookies (empty Name); Domain is required.
 func NormalizeKey(k CookieKey) (CookieKey, error) {
-	if k.Name == "" {
-		return CookieKey{}, errors.New("cookie key missing name")
-	}
 	if k.Domain == "" {
 		return CookieKey{}, errors.New("cookie key missing domain")
 	}

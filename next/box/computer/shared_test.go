@@ -1,6 +1,7 @@
 package computer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -88,6 +89,7 @@ type fakeCookieStore struct {
 	now     func() time.Time
 	pulls   int
 	syncs   []browser.SyncRequest
+	onSync  func()
 }
 
 func newFakeCookieStore(profile string, now func() time.Time) *fakeCookieStore {
@@ -118,6 +120,12 @@ func (f *fakeCookieStore) PullCookies(_ context.Context, since int64) (browser.S
 }
 
 func (f *fakeCookieStore) SyncCookies(_ context.Context, req browser.SyncRequest) (browser.SyncResponse, bool, error) {
+	f.mu.Lock()
+	hook := f.onSync
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.syncs = append(f.syncs, req)
@@ -367,47 +375,122 @@ func TestDesktopStartCleansLegacySharedNeverBlocksAndSyncsOnStop(t *testing.T) {
 	}
 }
 
+func TestCookieSyncPreservesInFlightLocalChanges(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	maxExp := float64(now.Add(400 * 24 * time.Hour).Unix())
+	farExp := float64(now.Add(1000 * 24 * time.Hour).Unix())
+	clamp := func(c browser.Cookie) browser.Cookie {
+		if c.Expires > maxExp {
+			var obj map[string]any
+			_ = json.Unmarshal(c.Raw, &obj)
+			obj["expires"] = maxExp
+			b, _ := json.Marshal(obj)
+			norm, _ := browser.ParseCookie(b)
+			return norm
+		}
+		return c
+	}
+
+	store := newFakeCookieStore("personal", func() time.Time { return now })
+	existing := mustCookie(t, map[string]any{
+		"name": "existing", "value": "e1", "domain": "example.com", "path": "/", "expires": -1, "session": true,
+	})
+	store.seed(existing)
+
+	chrome := newFakeCookieBrowser(clamp)
+	syncer := newCookieSyncer(store, func(context.Context) (cookieSession, error) { return chrome, nil }, func() time.Time { return now })
+
+	if err := syncer.syncOnce(context.Background(), true); err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+
+	// Remote box pushes a far-future cookie (which Chromium will clamp).
+	remote := mustCookie(t, map[string]any{
+		"name": "remote_c", "value": "r1", "domain": "remote.example.com", "path": "/", "expires": farExp, "session": false,
+	})
+	store.seed(remote)
+
+	// While SyncCookies is in flight, a user logs in (new_local) AND logs out (deletes existing) in Chromium.
+	inFlightLogin := mustCookie(t, map[string]any{
+		"name": "new_local", "value": "l1", "domain": "local.example.com", "path": "/", "expires": -1, "session": true,
+	})
+	fired := false
+	store.onSync = func() {
+		if fired {
+			return
+		}
+		fired = true
+		chrome.mu.Lock()
+		chrome.cookies[inFlightLogin.Key.ID()] = inFlightLogin
+		delete(chrome.cookies, existing.Key.ID())
+		chrome.mu.Unlock()
+	}
+
+	// Tick 1 pulls remote_c while in-flight local changes occur concurrently.
+	if err := syncer.syncOnce(context.Background(), true); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	// Tick 2 must push BOTH new_local (upsert) and existing (delete), and must NOT echo remote_c.
+	if err := syncer.syncOnce(context.Background(), true); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	last := store.syncs[len(store.syncs)-1]
+	if len(last.Upserts) != 1 || last.Upserts[0].Key.Name != "new_local" {
+		t.Fatalf("tick 2 upserts = %+v, want only new_local", last.Upserts)
+	}
+	if len(last.Deletes) != 1 || last.Deletes[0].Name != "existing" {
+		t.Fatalf("tick 2 deletes = %+v, want only existing", last.Deletes)
+	}
+}
+
 func TestDevToolsCookieRoundTrip(t *testing.T) {
 	bin, err := exec.LookPath("chromium")
 	if err != nil {
 		t.Skip("chromium not installed")
 	}
 	dir := t.TempDir()
+	var stderr bytes.Buffer
 	cmd := exec.Command(bin,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
 		"--no-first-run", "--no-default-browser-check", "--password-store=basic",
 		"--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0",
 		"--user-data-dir="+dir, "about:blank",
 	)
+	cmd.Stderr = &stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
 	t.Cleanup(func() {
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		_ = cmd.Wait()
+		<-done
 	})
 
 	portFile := filepath.Join(dir, "DevToolsActivePort")
 	var port int
-	waitFor(t, func() bool {
-		b, err := os.ReadFile(portFile)
-		if err != nil {
-			return false
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); {
+		if b, err := os.ReadFile(portFile); err == nil {
+			lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+			if len(lines) >= 2 {
+				if p, err := strconv.Atoi(strings.TrimSpace(lines[0])); err == nil && p > 0 {
+					port = p
+					break
+				}
+			}
 		}
-		lines := strings.Split(strings.TrimSpace(string(b)), "\n")
-		if len(lines) < 2 {
-			return false
+		select {
+		case err := <-done:
+			t.Fatalf("chromium exited before writing DevToolsActivePort (err=%v): %s", err, stderr.String())
+		case <-time.After(50 * time.Millisecond):
 		}
-		p, err := strconv.Atoi(strings.TrimSpace(lines[0]))
-		if err != nil || p <= 0 {
-			return false
-		}
-		port = p
-		return true
-	})
+	}
+	if port == 0 {
+		t.Fatalf("timed out waiting for DevToolsActivePort (stderr=%s)", stderr.String())
+	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	dt, err := Connect(ctx, fmt.Sprintf("http://127.0.0.1:%d", port))
 	if err != nil {
@@ -426,16 +509,19 @@ func TestDevToolsCookieRoundTrip(t *testing.T) {
 	cKeep := mustCookie(t, map[string]any{
 		"name": "sess-dt", "value": "s1", "domain": "example.com", "path": "/", "httpOnly": true, "expires": -1, "session": true,
 	})
+	cNameless := mustCookie(t, map[string]any{
+		"name": "", "value": "bare-dt", "domain": "bare.example.com", "path": "/", "expires": future,
+	})
 
-	if err := dt.SetCookies(ctx, []browser.Cookie{cHost, cPart, cKeep}); err != nil {
+	if err := dt.SetCookies(ctx, []browser.Cookie{cHost, cPart, cKeep, cNameless}); err != nil {
 		t.Fatalf("SetCookies: %v", err)
 	}
 	got, err := dt.GetCookies(ctx)
 	if err != nil {
 		t.Fatalf("GetCookies: %v", err)
 	}
-	if len(got) != 3 {
-		t.Fatalf("GetCookies count = %d, want 3", len(got))
+	if len(got) != 4 {
+		t.Fatalf("GetCookies count = %d, want 4", len(got))
 	}
 	// Passing read-back cookies verbatim into SetCookies must succeed with zero diff on next read-back.
 	if err := dt.SetCookies(ctx, got); err != nil {
@@ -450,8 +536,8 @@ func TestDevToolsCookieRoundTrip(t *testing.T) {
 		t.Fatalf("read-back diff not empty: upserts=%d deletes=%d", len(upserts), len(deletes))
 	}
 
-	// Delete __Host- and partitioned cookies via Network.deleteCookies.
-	if err := dt.DeleteCookies(ctx, []browser.CookieKey{cHost.Key, cPart.Key}); err != nil {
+	// Delete __Host-, partitioned, and nameless cookies via Network.deleteCookies.
+	if err := dt.DeleteCookies(ctx, []browser.CookieKey{cHost.Key, cPart.Key, cNameless.Key}); err != nil {
 		t.Fatalf("DeleteCookies: %v", err)
 	}
 	afterDel, err := dt.GetCookies(ctx)

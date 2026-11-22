@@ -121,7 +121,7 @@ func (s *cookieSyncer) syncOnce(ctx context.Context, allowInit bool) error {
 		return nil
 	}
 
-	if resp.Profile != s.profile || len(resp.Upserts) > 0 || len(resp.Deletes) > 0 {
+	if resp.Profile != s.profile {
 		if err := sess.SetCookies(ctx, resp.Upserts); err != nil {
 			return err
 		}
@@ -133,6 +133,34 @@ func (s *cookieSyncer) syncOnce(ctx context.Context, allowInit bool) error {
 			return err
 		}
 		s.baseline = browser.CookieMap(readBack)
+	} else if len(resp.Upserts) > 0 || len(resp.Deletes) > 0 {
+		if err := sess.SetCookies(ctx, resp.Upserts); err != nil {
+			return err
+		}
+		if err := sess.DeleteCookies(ctx, resp.Deletes); err != nil {
+			return err
+		}
+		readBack, err := sess.GetCookies(ctx)
+		if err != nil {
+			return err
+		}
+		readBackMap := browser.CookieMap(readBack)
+		// Start from the pre-sync snapshot and fold in only the keys returned by the engine
+		// (using Chromium's read-back for upserts to avoid normalization echo loops). Any local
+		// logins or logouts that happened during SyncCookies remain visible to the next diff.
+		nextBaseline := browser.CookieMap(current)
+		for _, k := range resp.Deletes {
+			delete(nextBaseline, k.ID())
+		}
+		for _, c := range resp.Upserts {
+			id := c.Key.ID()
+			if norm, ok := readBackMap[id]; ok {
+				nextBaseline[id] = norm
+			} else {
+				delete(nextBaseline, id)
+			}
+		}
+		s.baseline = nextBaseline
 	} else {
 		s.baseline = browser.CookieMap(current)
 	}

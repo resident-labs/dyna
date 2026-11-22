@@ -211,12 +211,20 @@ func TestDiffCookiesSkipsLocallyExpired(t *testing.T) {
 
 func TestJarDiskMode0600AndNoValueInErrors(t *testing.T) {
 	const secret = "SUPER_SECRET_COOKIE_TOKEN_999"
-	_, err := ParseCookie([]byte(`{"name":"","value":"` + secret + `","domain":"example.com","path":"/"}`))
+	_, err := ParseCookie([]byte(`{"name":"sid","value":"` + secret + `","domain":"","path":"/"}`))
 	if err == nil {
-		t.Fatal("expected error for missing name")
+		t.Fatal("expected error for missing domain")
 	}
 	if strings.Contains(err.Error(), secret) {
 		t.Fatal("error message leaked cookie value")
+	}
+	// RFC 6265 nameless cookies (empty name, non-empty domain) must be accepted.
+	nameless, err := ParseCookie([]byte(`{"name":"","value":"bare","domain":"example.com","path":"/","expires":-1,"session":true}`))
+	if err != nil {
+		t.Fatalf("nameless cookie rejected: %v", err)
+	}
+	if nameless.Key.Name != "" || nameless.Key.Domain != "example.com" {
+		t.Fatalf("unexpected nameless key: %+v", nameless.Key)
 	}
 
 	now := time.Unix(1_800_000_000, 0).UTC()
@@ -314,6 +322,10 @@ func TestDecodeV1CookiesAndMigrateProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	encNameless, err := EncryptV1CookieValue("bare.example.com", "bare-val", 24)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	v1db := V1CookieDB{
 		Version: 24,
@@ -333,7 +345,29 @@ func TestDecodeV1CookiesAndMigrateProfile(t *testing.T) {
 				ExpiresUTC: 0, IsSecure: false, IsHTTPOnly: true, IsPersistent: false, HasExpires: false,
 				Priority: 0, SameSite: -1, SourceScheme: 1, SourcePort: 80,
 			},
+			{
+				// RFC 6265 nameless cookie must decode cleanly.
+				HostKey: "bare.example.com", Name: "", EncryptedValue: encNameless, Path: "/",
+				ExpiresUTC: futureChromium, IsSecure: false, IsHTTPOnly: false, IsPersistent: true, HasExpires: true,
+				Priority: 1, SameSite: -1, SourceScheme: 1, SourcePort: 80,
+			},
+			{
+				// One undecryptable row must be skipped without aborting migration of the valid cookies.
+				HostKey: "broken.example.com", Name: "bad", EncryptedValue: []byte("v11corrupt"), Path: "/",
+				ExpiresUTC: futureChromium, IsPersistent: true, HasExpires: true, SameSite: -1,
+			},
 		},
+	}
+
+	// If every row in a non-empty DB fails to decode, DecodeV1Cookies must return an error so migration
+	// preserves the v1 profile intact instead of deleting it.
+	if _, err := DecodeV1Cookies(V1CookieDB{
+		Version: 24,
+		Rows: []V1CookieRow{{
+			HostKey: "only.example.com", Name: "k", EncryptedValue: []byte("v11corrupt"), Path: "/",
+		}},
+	}); err == nil {
+		t.Fatal("expected error when all v1 cookie rows fail to decode")
 	}
 
 	root := t.TempDir()
@@ -369,8 +403,8 @@ func TestDecodeV1CookiesAndMigrateProfile(t *testing.T) {
 	if err != nil || !migrated {
 		t.Fatalf("MigrateV1Profile: migrated=%v err=%v", migrated, err)
 	}
-	if jar.Version != 1 || jar.LiveCount(now) != 3 {
-		t.Fatalf("migrated jar: ver=%d count=%d, want ver=1 count=3", jar.Version, jar.LiveCount(now))
+	if jar.Version != 1 || jar.LiveCount(now) != 4 {
+		t.Fatalf("migrated jar: ver=%d count=%d, want ver=1 count=4", jar.Version, jar.LiveCount(now))
 	}
 
 	byName := map[string]map[string]any{}
@@ -393,6 +427,9 @@ func TestDecodeV1CookiesAndMigrateProfile(t *testing.T) {
 	}
 	if byName["sess"]["value"] != "sess-secret" || byName["sess"]["session"] != true || byName["sess"]["expires"] != float64(-1) || byName["sess"]["sameSite"] != nil {
 		t.Fatalf("unexpected sess: %v", byName["sess"])
+	}
+	if byName[""]["value"] != "bare-val" || byName[""]["domain"] != "bare.example.com" {
+		t.Fatalf("unexpected nameless cookie: %v", byName[""])
 	}
 
 	jarPath := filepath.Join(profileDir, JarFilename)

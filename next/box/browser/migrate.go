@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -164,13 +165,21 @@ func EncryptV1CookieValue(hostKey, value string, dbVersion int) ([]byte, error) 
 }
 
 // DecodeV1Cookies decrypts and converts v1 Chromium SQLite rows into validated CDP cookies.
-// Errors never include cookie values.
+// Individual undecryptable or malformed rows are skipped (logged by count only, never values)
+// as long as at least one row decodes; if every non-empty DB row fails, an error is returned
+// so migration preserves the v1 profile intact.
 func DecodeV1Cookies(db V1CookieDB) ([]Cookie, error) {
 	cookies := make([]Cookie, 0, len(db.Rows))
+	skipped := 0
+	var firstErr error
 	for i, row := range db.Rows {
 		val, err := DecryptV1CookieValue(row.HostKey, row.Value, row.EncryptedValue, db.Version)
 		if err != nil {
-			return nil, fmt.Errorf("row %d: %w", i, err)
+			skipped++
+			if firstErr == nil {
+				firstErr = fmt.Errorf("row %d: %w", i, err)
+			}
+			continue
 		}
 		path := row.Path
 		if path == "" {
@@ -228,13 +237,27 @@ func DecodeV1Cookies(db V1CookieDB) ([]Cookie, error) {
 
 		raw, err := json.Marshal(obj)
 		if err != nil {
-			return nil, fmt.Errorf("row %d: encode cookie", i)
+			skipped++
+			if firstErr == nil {
+				firstErr = fmt.Errorf("row %d: encode cookie", i)
+			}
+			continue
 		}
 		c, err := ParseCookie(raw)
 		if err != nil {
-			return nil, fmt.Errorf("row %d: %w", i, err)
+			skipped++
+			if firstErr == nil {
+				firstErr = fmt.Errorf("row %d: %w", i, err)
+			}
+			continue
 		}
 		cookies = append(cookies, c)
+	}
+	if skipped > 0 {
+		if len(cookies) == 0 {
+			return nil, fmt.Errorf("all %d v1 cookie rows failed to decode (%w)", skipped, firstErr)
+		}
+		log.Printf("browser migration: skipped %d of %d undecodable v1 cookie rows", skipped, len(db.Rows))
 	}
 	return cookies, nil
 }
