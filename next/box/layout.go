@@ -33,6 +33,7 @@ import (
 //	<Data>/store.db, <Data>/store.lock              the store and its lock
 //	<Data>/connect/                                 Connect credentials
 //	<Data>/pools/<name>/script                      a node pool's script, which runs here and no box can reach
+//	<Data>/browsers/<name>/                         a shared Chromium browser profile, with <name>.prev/ beside it
 //	<Data>/cliproxy/, <Data>/cliproxy/auth-v2/      the model proxy and its sign-in folder
 //	<Data>/git/<owner>/<repo>.git                   repository mirrors, which rooms share
 //	<HostData>/instructions/global/AGENTS.md        the global copy a box mounts
@@ -138,6 +139,53 @@ func (l Layout) Pool(name string) string { return filepath.Join(l.Pools(), name)
 
 // PoolScript is a pool's script.
 func (l Layout) PoolScript(name string) string { return filepath.Join(l.Pool(name), "script") }
+
+// ValidBrowserName reports whether name is a valid shared browser profile name:
+// 1 to 64 ASCII letters, digits, hyphens or underscores, starting with a letter or digit,
+// and not the reserved word "none".
+func ValidBrowserName(name string) bool {
+	if len(name) == 0 || len(name) > 64 || strings.EqualFold(name, "none") {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		letter := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+		digit := c >= '0' && c <= '9'
+		if i == 0 {
+			if !letter && !digit {
+				return false
+			}
+			continue
+		}
+		if !letter && !digit && c != '-' && c != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+// Browsers is the folder of owner-level shared browser profiles on the engine host.
+func (l Layout) Browsers() string { return filepath.Join(l.Data, "browsers") }
+
+// Browser is one shared browser profile's folder on the engine host.
+func (l Layout) Browser(name string) (string, error) {
+	if !ValidBrowserName(name) {
+		return "", fmt.Errorf("invalid browser profile name %q", name)
+	}
+	if !filepath.IsAbs(l.Data) {
+		return "", fmt.Errorf("data folder %q is not absolute", l.Data)
+	}
+	return filepath.Join(l.Browsers(), name), nil
+}
+
+// BrowserPrev is the previous copy kept beside a shared browser profile.
+func (l Layout) BrowserPrev(name string) (string, error) {
+	dir, err := l.Browser(name)
+	if err != nil {
+		return "", err
+	}
+	return dir + ".prev", nil
+}
 
 // Proxy is the model proxy's folder.
 func (l Layout) Proxy() string { return filepath.Join(l.Data, "cliproxy") }

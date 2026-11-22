@@ -32,6 +32,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	root.AddCommand(hostCommand(getClient))
 	root.AddCommand(poolCommand(getClient))
 	root.AddCommand(serviceCommand(getClient))
+	root.AddCommand(browserCommand(getClient))
 	root.AddCommand(profileCommand(getClient), accountCommand(getClient), addonCommand(getClient))
 	root.AddCommand(discordCommand(getClient))
 

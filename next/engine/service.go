@@ -120,6 +120,8 @@ type Service struct {
 	toolCalls           map[contract.SessionID]map[string]seenCall // under transcriptMu
 	agents              agentRuns
 	layout              box.Layout
+	browserMu           sync.Mutex
+	browserLocks        map[string]*sync.Mutex
 	roomData            sync.RWMutex // writers of a room folder share it; removing one takes it alone
 	instructionsMu      sync.Mutex
 	publishInstructions func(context.Context)
@@ -180,6 +182,7 @@ func New(st *store.Store, boxes lifecycle.BoxAdapter, profiles Profiles, now fun
 	s := &Service{hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now, hookPoke: make(chan struct{}, 1), addonSources: addons.NewSources()}
 	s.reconciler = lifecycle.New(st, boxes, s, nil, s.event, now)
 	s.reconciler.SetRoomData(s)
+	s.reconciler.SetBrowserRecovery(s)
 	s.live = live.New(s.deliverWakes)
 	st.SetWake(s.queueWakes)
 	go s.live.Run(st.Done())

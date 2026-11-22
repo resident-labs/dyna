@@ -45,8 +45,33 @@ func desktopArgs(socket string) []string {
 		"-AlwaysShared", "-AcceptSetDesktopSize=0", "-FrameRate", "60"}
 }
 
-// Profile is Chromium's profile, in the box's volume, so it lasts across restarts.
+// Profile is Chromium's per-box profile, in the box's volume, so it lasts across restarts.
 const Profile = "/box/computer"
+
+// SharedProfile is Chromium's working copy while a box holds a shared browser profile lease.
+// It is deleted once the profile is checked back in, leaving Profile untouched.
+const SharedProfile = "/box/computer-shared"
+
+const (
+	defaultIdleTimeout       = 15 * time.Minute
+	cleanBrowserCloseTimeout = 5 * time.Second
+	checkinTimeout           = 30 * time.Second
+)
+
+// Lease identifies a box's active checkout of an owner-level shared browser profile.
+type Lease struct {
+	Profile    string
+	Generation int64
+}
+
+// ErrStaleLease reports that the engine refused a checkin because the lease generation no longer matches.
+var ErrStaleLease = errors.New("browser lease no longer matches")
+
+// ProfileStore checks shared browser profiles out from and back into the engine.
+type ProfileStore interface {
+	Checkout(ctx context.Context, dir string) (Lease, error)
+	Checkin(ctx context.Context, lease Lease, dir string, discard bool) error
+}
 
 // extensions are the image's unpacked Chromium extensions, uBlock Origin Lite and I still don't care about cookies.
 const extensions = "/opt/dyna/extensions/ubol,/opt/dyna/extensions/isdcac"
@@ -158,28 +183,78 @@ func (p *program) kill() {
 	}
 }
 
-// Process owns the desktop until its context is cancelled: the display, then the window manager and Chromium on it, all
+// Process owns the desktop until Close: the display, then the window manager and Chromium on it, all
 // in the computer cgroup. Nothing runs until the first Start.
 type Process struct {
-	mu      sync.Mutex
-	display *program
-	wm      *program
-	browser *program
-	apps    map[*program]struct{} // what launch started
-	stopped *program              // the display Stop ended, whose exit is no news
-	exit    string
-	ooms    uint64 // the computer cgroup's OOM kills when a program last exited
-	root    string // the box's cgroup
-	socket  string // the display's VNC socket; the window manager's config goes beside it
-	tmp     string // where X keeps its lock and socket
-	profile string // Chromium's profile
-	once    sync.Once
-	group   *os.File
-	notify  func(bool)
+	opMu           sync.Mutex // serializes Start, Stop, Close and idle releases
+	mu             sync.Mutex
+	display        *program
+	wm             *program
+	browser        *program
+	apps           map[*program]struct{} // what launch started
+	stopped        *program              // the display Stop ended, whose exit is no news
+	stoppedBrowser *program              // the Chromium Stop closed cleanly, whose exit is no news
+	exit           string
+	ooms           uint64 // the computer cgroup's OOM kills when a program last exited
+	root           string // the box's cgroup
+	socket         string // the display's VNC socket; the window manager's config goes beside it
+	tmp            string // where X keeps its lock and socket
+	profile        string // Chromium's per-box profile
+	sharedProfile  string // Chromium's checked-out shared profile
+	devtoolsURL    string // DevTools endpoint for Browser.close
+	store          ProfileStore
+	lease          Lease
+	browserUnclean bool
+	viewers        int
+	idleSeq        uint64
+	idleTimeout    time.Duration
+	closeTimeout   time.Duration
+	idleTimer      *time.Timer
+	closed         bool
+	once           sync.Once
+	group          *os.File
+	notify         func(bool)
 }
 
 func NewProcess() *Process {
-	return &Process{root: "/sys/fs/cgroup", socket: VNCSocket, tmp: "/tmp", profile: Profile}
+	return &Process{
+		root:          "/sys/fs/cgroup",
+		socket:        VNCSocket,
+		tmp:           "/tmp",
+		profile:       Profile,
+		sharedProfile: SharedProfile,
+		devtoolsURL:   URL,
+		idleTimeout:   defaultIdleTimeout,
+		closeTimeout:  cleanBrowserCloseTimeout,
+	}
+}
+
+func (p *Process) sharedDir() string {
+	if p.sharedProfile != "" {
+		return p.sharedProfile
+	}
+	return SharedProfile
+}
+
+func (p *Process) devtoolsBase() string {
+	if p.devtoolsURL != "" {
+		return p.devtoolsURL
+	}
+	return URL
+}
+
+func (p *Process) browserCloseLimit() time.Duration {
+	if p.closeTimeout > 0 {
+		return p.closeTimeout
+	}
+	return cleanBrowserCloseTimeout
+}
+
+func (p *Process) idleLimit() time.Duration {
+	if p.idleTimeout > 0 {
+		return p.idleTimeout
+	}
+	return defaultIdleTimeout
 }
 
 func (p *Process) setup() {
@@ -193,17 +268,80 @@ func (p *Process) setup() {
 	})
 }
 
+func (p *Process) stopIdleTimerLocked() {
+	p.idleSeq++
+	if p.idleTimer != nil {
+		p.idleTimer.Stop()
+		p.idleTimer = nil
+	}
+}
+
+func (p *Process) resetIdleTimerLocked() {
+	p.stopIdleTimerLocked()
+	if p.closed || p.lease.Profile == "" || p.display == nil || p.viewers > 0 {
+		return
+	}
+	seq := p.idleSeq
+	p.idleTimer = time.AfterFunc(p.idleLimit(), func() {
+		p.stopIfIdle(seq)
+	})
+}
+
+func (p *Process) stopIfIdle(seq uint64) {
+	p.opMu.Lock()
+	defer p.opMu.Unlock()
+	p.mu.Lock()
+	stale := p.closed || p.idleSeq != seq || p.viewers > 0 || p.lease.Profile == "" || p.display == nil
+	p.mu.Unlock()
+	if stale {
+		return
+	}
+	if err := p.stopLocked(); err != nil {
+		log.Printf("computer: idle shared browser release failed: %v", err)
+	}
+}
+
 // Start returns a previous exit report once, and starts the parts of the desktop that are not running. A Chromium the
 // owner closed opens again on the next use.
 func (p *Process) Start(ctx context.Context) (string, error) {
+	p.opMu.Lock()
+	defer p.opMu.Unlock()
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	needCheckout := p.display == nil && p.store != nil && p.lease.Profile == ""
+	p.mu.Unlock()
+	var checkedOut Lease
+	if needCheckout {
+		dir := p.sharedDir()
+		if err := os.RemoveAll(dir); err != nil {
+			return "", err
+		}
+		lease, err := p.store.Checkout(ctx, dir)
+		if err != nil {
+			_ = os.RemoveAll(dir)
+			return "", err
+		}
+		if lease.Profile != "" {
+			checkedOut = lease
+			p.mu.Lock()
+			p.lease = lease
+			p.browserUnclean = false
+			p.mu.Unlock()
+		}
+	}
+	p.mu.Lock()
 	report := p.exit
 	p.exit = ""
 	p.setup()
 	if p.display == nil {
 		if err := p.startDisplay(ctx); err != nil {
 			p.exit = report
+			if checkedOut.Profile != "" {
+				p.browserUnclean = true
+				p.mu.Unlock()
+				_ = p.stopLocked()
+				return "", err
+			}
+			p.mu.Unlock()
 			return "", err
 		}
 	}
@@ -211,18 +349,31 @@ func (p *Process) Start(ctx context.Context) (string, error) {
 	if p.wm == nil {
 		config := filepath.Join(filepath.Dir(p.socket), "jwmrc")
 		if err = os.WriteFile(config, jwmrc, 0644); err == nil {
-			p.wm, err = p.spawn(ctx, os.Stderr, "jwm", "-f", config)
+			p.wm, err = p.spawn(os.Stderr, "jwm", "-f", config)
 		}
 	}
+	profileDir := p.profile
+	if p.lease.Profile != "" {
+		profileDir = p.sharedDir()
+	}
 	if err == nil && p.browser == nil {
-		if err = clearProfileLock(p.profile); err == nil {
-			p.browser, err = p.spawn(ctx, os.Stderr, "chromium", browserArgs(p.profile)...)
+		if err = clearProfileLock(profileDir); err == nil {
+			p.browser, err = p.spawn(os.Stderr, "chromium", browserArgs(profileDir)...)
 		}
 	}
 	if err != nil {
 		p.exit = report
+		if checkedOut.Profile != "" {
+			p.browserUnclean = true
+			p.mu.Unlock()
+			_ = p.stopLocked()
+			return "", err
+		}
+		p.mu.Unlock()
 		return "", err
 	}
+	p.resetIdleTimerLocked()
+	p.mu.Unlock()
 	return report, nil
 }
 
@@ -244,7 +395,7 @@ func (p *Process) startDisplay(ctx context.Context) error {
 	if err := os.MkdirAll(filepath.Dir(p.socket), 0755); err != nil {
 		return err
 	}
-	display, err := p.spawn(ctx, os.Stderr, "Xvnc", desktopArgs(p.socket)...)
+	display, err := p.spawn(os.Stderr, "Xvnc", desktopArgs(p.socket)...)
 	if err != nil {
 		return err
 	}
@@ -286,7 +437,7 @@ func (p *Process) Launch(ctx context.Context, command string) (string, error) {
 		return "", err
 	}
 	defer log.Close()
-	app, err := p.spawn(ctx, log, "sh", "-c", command)
+	app, err := p.spawn(log, "sh", "-c", command)
 	if err != nil {
 		return "", err
 	}
@@ -294,15 +445,86 @@ func (p *Process) Launch(ctx context.Context, command string) (string, error) {
 		p.apps = map[*program]struct{}{}
 	}
 	p.apps[app] = struct{}{}
+	p.resetIdleTimerLocked()
 	return log.Name(), nil
 }
 
-// Stop stops the desktop and what runs on it, for the agent's stop action. The next Start starts it again.
-func (p *Process) Stop() {
+// Stop stops the desktop and what runs on it, for the agent's stop action. When a shared browser profile
+// is checked out, Chromium is closed cleanly first and the profile is checked back into the engine.
+// The next Start starts the desktop again.
+func (p *Process) Stop() error {
+	p.opMu.Lock()
+	defer p.opMu.Unlock()
+	return p.stopLocked()
+}
+
+// closeBrowserCleanly asks Chromium to exit via DevTools Browser.close and falls back to SIGTERM.
+// It returns true only if Chromium exited before the deadline without being SIGKILLed.
+func (p *Process) closeBrowserCleanly(browser *program) bool {
+	if browser == nil {
+		return true
+	}
+	limit := p.browserCloseLimit()
+	deadline := time.Now().Add(limit)
+	dtCtx, cancel := context.WithTimeout(context.Background(), min(2*time.Second, limit))
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- CloseBrowser(dtCtx, p.devtoolsBase()) }()
+	select {
+	case <-browser.done:
+		cancel()
+		return true
+	case err := <-closeDone:
+		cancel()
+		if err == nil {
+			// DevTools accepted Browser.close; give Chromium time to flush and exit before trying SIGTERM.
+			grace := time.NewTimer(min(time.Second, time.Until(deadline)))
+			select {
+			case <-browser.done:
+				grace.Stop()
+				return true
+			case <-grace.C:
+			}
+		}
+	case <-time.After(time.Until(deadline)):
+		cancel()
+		browser.kill()
+		<-browser.done
+		return false
+	}
+	// Fall back to SIGTERM on Chromium's main PID so it flushes its profile cleanly.
+	_ = syscall.Kill(browser.cmd.Process.Pid, syscall.SIGTERM)
+	remaining := time.Until(deadline)
+	if remaining < 0 {
+		remaining = 0
+	}
+	timer := time.NewTimer(remaining)
+	defer timer.Stop()
+	select {
+	case <-browser.done:
+		return true
+	case <-timer.C:
+		browser.kill()
+		<-browser.done
+		return false
+	}
+}
+
+func (p *Process) stopLocked() error {
 	p.mu.Lock()
+	p.stopIdleTimerLocked()
 	display := p.display
+	browser := p.browser
+	lease := p.lease
 	p.stopped = display
+	if lease.Profile != "" {
+		p.stoppedBrowser = browser
+	}
 	p.mu.Unlock()
+
+	cleanBrowser := true
+	if lease.Profile != "" && browser != nil {
+		cleanBrowser = p.closeBrowserCleanly(browser)
+	}
 	if display != nil {
 		display.kill()
 		<-display.done
@@ -313,20 +535,71 @@ func (p *Process) Stop() {
 		gone := p.display == nil && p.wm == nil && p.browser == nil && len(p.apps) == 0
 		p.mu.Unlock()
 		if gone {
-			return
+			break
 		}
+	}
+	if lease.Profile == "" || p.store == nil {
+		return nil
+	}
+	p.mu.Lock()
+	if !cleanBrowser {
+		p.browserUnclean = true
+	}
+	unclean := p.browserUnclean
+	p.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), checkinTimeout)
+	defer cancel()
+	err := p.store.Checkin(ctx, lease, p.sharedDir(), unclean)
+	if err == nil || errors.Is(err, ErrStaleLease) {
+		if errors.Is(err, ErrStaleLease) {
+			log.Printf("computer: shared browser %s checkin refused (stale lease); discarding local copy", lease.Profile)
+		}
+		_ = os.RemoveAll(p.sharedDir())
+		p.mu.Lock()
+		p.lease = Lease{}
+		p.browserUnclean = false
+		p.mu.Unlock()
+		return nil
+	}
+	return err
+}
+
+func (p *Process) releaseUnexpectedLease(lease Lease) {
+	p.opMu.Lock()
+	defer p.opMu.Unlock()
+	p.mu.Lock()
+	if p.lease != lease || p.display != nil {
+		p.mu.Unlock()
+		return
+	}
+	p.mu.Unlock()
+	if p.store == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), checkinTimeout)
+	defer cancel()
+	err := p.store.Checkin(ctx, lease, p.sharedDir(), true)
+	if err == nil || errors.Is(err, ErrStaleLease) {
+		_ = os.RemoveAll(p.sharedDir())
+		p.mu.Lock()
+		if p.lease == lease {
+			p.lease = Lease{}
+			p.browserUnclean = false
+		}
+		p.mu.Unlock()
+	} else {
+		log.Printf("computer: releasing shared browser %s after desktop exit: %v", lease.Profile, err)
 	}
 }
 
 // spawn starts one program of the desktop in its own process group in the computer cgroup, and watches it. The caller
 // holds p.mu.
-func (p *Process) spawn(ctx context.Context, out io.Writer, name string, args ...string) (*program, error) {
+func (p *Process) spawn(out io.Writer, name string, args ...string) (*program, error) {
 	command := func() *exec.Cmd {
-		cmd := exec.CommandContext(ctx, name, args...)
+		cmd := exec.Command(name, args...)
 		cmd.Env = desktopEnv(p.socket)
 		cmd.Stdout, cmd.Stderr = out, out
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 		return cmd
 	}
 	cmd := command()
@@ -346,25 +619,26 @@ func (p *Process) spawn(ctx context.Context, out io.Writer, name string, args ..
 		return nil, err
 	}
 	started := &program{name: name, cmd: cmd, done: make(chan struct{})}
-	go p.watch(ctx, started)
+	go p.watch(started)
 	return started, nil
 }
 
 // watch waits for a program to exit. The display takes the rest of the desktop with it. An exit nobody asked for is
 // reported on the next Start, unless the display went first and stopped the program. The programs share one cgroup, so
 // an OOM kill counts for the first exit after it.
-func (p *Process) watch(ctx context.Context, exited *program) {
+func (p *Process) watch(exited *program) {
 	err := exited.cmd.Wait()
 	close(exited.done)
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	count := oomCount(p.root)
 	killed := count > p.ooms
 	p.ooms = count
 	what := "Chromium"
+	var unexpectedLease Lease
 	switch exited {
 	case p.display:
 		p.display = nil
+		p.stopIdleTimerLocked()
 		p.wm.kill()
 		p.browser.kill()
 		for app := range p.apps {
@@ -373,20 +647,38 @@ func (p *Process) watch(ctx context.Context, exited *program) {
 		if p.notify != nil {
 			p.notify(false)
 		}
+		if exited != p.stopped && p.lease.Profile != "" {
+			p.browserUnclean = true
+			unexpectedLease = p.lease
+		}
 		what = "The desktop"
 	case p.wm:
 		p.wm = nil
+		p.mu.Unlock()
 		return
 	case p.browser:
 		p.browser = nil
+		if killed {
+			p.browserUnclean = true
+		}
+		if exited == p.stoppedBrowser {
+			p.mu.Unlock()
+			return
+		}
+		if err != nil && p.lease.Profile != "" {
+			p.browserUnclean = true
+		}
 		if p.display == nil {
+			p.mu.Unlock()
 			return
 		}
 	default:
 		delete(p.apps, exited)
+		p.mu.Unlock()
 		return
 	}
-	if ctx.Err() != nil || exited == p.stopped {
+	if p.closed || exited == p.stopped {
+		p.mu.Unlock()
 		return
 	}
 	if killed {
@@ -396,21 +688,39 @@ func (p *Process) watch(ctx context.Context, exited *program) {
 	} else {
 		p.exit = what + " exited"
 	}
+	p.mu.Unlock()
+	if unexpectedLease.Profile != "" {
+		go p.releaseUnexpectedLease(unexpectedLease)
+	}
 }
 
-// Close stops the desktop and waits for its programs to exit.
+// Close stops the desktop cleanly (checking in any held shared browser profile) and waits for its programs to exit.
 func (p *Process) Close() {
+	p.opMu.Lock()
+	defer p.opMu.Unlock()
 	p.mu.Lock()
-	running := []*program{p.browser, p.wm, p.display}
-	for app := range p.apps {
-		running = append(running, app)
-	}
+	p.closed = true
+	p.stopIdleTimerLocked()
+	hasLease := p.lease.Profile != ""
 	group := p.group
+	p.group = nil
 	p.mu.Unlock()
-	for _, program := range running {
-		if program != nil {
-			program.kill()
-			<-program.done
+	if hasLease {
+		if err := p.stopLocked(); err != nil {
+			log.Printf("computer: shared browser checkin on close failed: %v", err)
+		}
+	} else {
+		p.mu.Lock()
+		running := []*program{p.browser, p.wm, p.display}
+		for app := range p.apps {
+			running = append(running, app)
+		}
+		p.mu.Unlock()
+		for _, program := range running {
+			if program != nil {
+				program.kill()
+				<-program.done
+			}
 		}
 	}
 	if group != nil {
@@ -418,24 +728,25 @@ func (p *Process) Close() {
 	}
 }
 
-// Serve starts the private agent socket and returns its cleanup function.
-func Serve(ctx context.Context, socket string, errs chan<- error, notify func(bool)) (func(), error) {
+// Serve starts the private agent socket and returns the desktop Process and its cleanup function.
+func Serve(ctx context.Context, socket string, errs chan<- error, notify func(bool), store ProfileStore) (*Process, func(), error) {
 	if err := os.MkdirAll(filepath.Dir(socket), 0755); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := os.Remove(socket); err != nil && !os.IsNotExist(err) {
-		return nil, err
+		return nil, nil, err
 	}
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	desktop := NewProcess()
 	desktop.notify = notify
+	desktop.store = store
 	desktop.setup()
 	server := &http.Server{Handler: desktop.Handler(ctx)}
 	go func() { errs <- server.Serve(listener) }()
-	return func() {
+	return desktop, func() {
 		_ = server.Close()
 		desktop.Close()
 		_ = os.Remove(socket)
@@ -448,18 +759,38 @@ type StartRequest struct {
 }
 
 // Handler serves the private in-box endpoint: POST /computer starts the desktop, /computer/launch starts the desktop and
-// then a command on it, and /computer/stop stops it. Every computer action but stop starts the desktop through it first.
+// then a command on it, /computer/stop stops it, and /computer/viewer tracks an open VNC viewer stream.
 func (p *Process) Handler(ctx context.Context) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.NotFound(w, r)
 			return
 		}
+		if r.URL.Path == "/computer/viewer" {
+			p.mu.Lock()
+			p.viewers++
+			p.stopIdleTimerLocked()
+			p.mu.Unlock()
+			defer func() {
+				p.mu.Lock()
+				p.viewers--
+				if p.viewers == 0 {
+					p.resetIdleTimerLocked()
+				}
+				p.mu.Unlock()
+			}()
+			w.WriteHeader(http.StatusOK)
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			_, _ = io.Copy(io.Discard, r.Body)
+			return
+		}
 		var started Started
 		var err error
 		switch r.URL.Path {
 		case "/computer/stop":
-			p.Stop()
+			err = p.Stop()
 		case "/computer", "/computer/launch", "/computer/check":
 			var req StartRequest
 			if r.URL.Path == "/computer/launch" {

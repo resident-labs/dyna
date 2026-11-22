@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -161,6 +162,72 @@ func (h *Host) TerminalArgv(id contract.BoxID) []string {
 func (h *Host) ExecArgv(id contract.BoxID, argv ...string) []string {
 	args := append(h.direct(), "-T", h.destination, "podman", "exec", "-i", string(id))
 	return append(args, argv...)
+}
+
+const browserVolumeAbsentExit = 44
+
+const pullBrowserProfileScript = `set -eu
+vol="dyna-box-$1"
+if ! podman volume exists "$vol" >/dev/null 2>&1; then
+  exit 44
+fi
+mp=$(podman volume mount "$vol")
+cleanup() { podman volume unmount "$vol" >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+if [ ! -d "$mp/computer-shared" ]; then
+  exit 44
+fi
+tar -C "$mp/computer-shared" -cf - \
+  --exclude='Cache' \
+  --exclude='Code Cache' \
+  --exclude='GPUCache' \
+  --exclude='ShaderCache' \
+  --exclude='GrShaderCache' \
+  --exclude='DawnCache' \
+  --exclude='Service Worker/CacheStorage' \
+  --exclude='Service Worker/ScriptCache' \
+  --exclude='Crashpad' \
+  --exclude='Singleton*' .`
+
+const removeBrowserProfileScript = `set -eu
+vol="dyna-box-$1"
+if ! podman volume exists "$vol" >/dev/null 2>&1; then
+  exit 0
+fi
+mp=$(podman volume mount "$vol")
+cleanup() { podman volume unmount "$vol" >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+rm -rf -- "$mp/computer-shared"`
+
+// PullBrowserProfile streams a tar of /box/computer-shared from a stopped box's volume into dst.
+// It returns found=false when the volume or computer-shared folder does not exist.
+func (h *Host) PullBrowserProfile(ctx context.Context, id contract.BoxID, dst io.Writer) (bool, error) {
+	args := append(h.direct(), "-T", h.destination,
+		"podman unshare bash -c "+quote(pullBrowserProfileScript)+" dyna-browser-pull "+quote(string(id)))
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd.WaitDelay = 2 * time.Second
+	var stderr bytes.Buffer
+	cmd.Stdout = dst
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == browserVolumeAbsentExit {
+		return false, nil
+	}
+	msg := strings.TrimSpace(stderr.String())
+	if msg != "" {
+		return false, fmt.Errorf("pull browser profile %s: %w: %s", id, err, msg)
+	}
+	return false, fmt.Errorf("pull browser profile %s: %w", id, err)
+}
+
+// RemoveBrowserProfile removes /box/computer-shared from a stopped box's volume if present.
+func (h *Host) RemoveBrowserProfile(ctx context.Context, id contract.BoxID) error {
+	_, err := h.run(ctx, "podman", "unshare", "bash", "-c", removeBrowserProfileScript, "dyna-browser-rm", string(id))
+	return err
 }
 
 func (h *Host) control(ctx context.Context, op string, extra ...string) error {

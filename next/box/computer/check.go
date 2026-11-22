@@ -81,7 +81,7 @@ func (p *Process) drawProbe(ctx context.Context, name string, args []string) (re
 	}
 	var output bytes.Buffer
 	p.mu.Lock()
-	app, err := p.spawn(ctx, &output, "stdbuf", append([]string{"-oL", name}, args...)...)
+	app, err := p.spawn(&output, "stdbuf", append([]string{"-oL", name}, args...)...)
 	if err == nil {
 		if p.apps == nil {
 			p.apps = map[*program]struct{}{}

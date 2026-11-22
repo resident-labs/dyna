@@ -5,6 +5,7 @@ import (
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 type BoxSpec struct {
@@ -58,6 +59,11 @@ type RoomHosts interface {
 type RoomData interface {
 	RemoveRoomData(contract.RoomID) error
 	RoomDeleted(contract.RoomID)
+}
+
+// BrowserRecovery recovers or releases a shared browser profile lease held by a stopped or removed box.
+type BrowserRecovery interface {
+	RecoverBrowserLease(ctx context.Context, lease store.BrowserLeaseRow, host contract.HostName, checkVolume bool) error
 }
 
 type View interface {

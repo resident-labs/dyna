@@ -91,6 +91,10 @@ const (
 	MethodBoxHello                Method = "box.hello"
 	MethodComputerChanged         Method = "computer.changed"
 	MethodComputerStart           Method = "computer.start"
+	MethodBrowserCreate           Method = "browser.create"
+	MethodBrowserList             Method = "browser.list"
+	MethodBrowserRemove           Method = "browser.remove"
+	MethodBrowserRelease          Method = "browser.release"
 	MethodTurnOutput              Method = "turn.output"
 	MethodTurnActivity            Method = "turn.activity"
 	MethodTranscriptFetch         Method = "transcript.fetch"
@@ -211,6 +215,8 @@ type RoomSetRequest struct {
 	Advisor *ProfileName `json:"advisor,omitempty"`
 	// GitSigning switches the signing of the room's commits and tags with the engine's key, as the owner. Nil leaves it as it is.
 	GitSigning *bool `json:"gitSigning,omitempty"`
+	// Browser sets the room's shared browser profile. Empty turns it off. Nil leaves it as it is.
+	Browser *string `json:"browser,omitempty"`
 }
 
 // RootApproval names the owner-class operations a room's root may also decide, when the owner allows it for the room.
@@ -253,6 +259,8 @@ type RoomSummary struct {
 	Advisor ProfileName `json:"advisor,omitempty"`
 	// GitSigning is whether the room's boxes sign their commits and tags with the engine's key.
 	GitSigning bool `json:"gitSigning,omitempty"`
+	// Browser is the room's shared browser profile; empty when it has none.
+	Browser string `json:"browser,omitempty"`
 	// GitHubWrites is the room's githubWrites setting, as the owner set it; nil when it is off.
 	GitHubWrites *GitHubWrites `json:"githubWrites,omitempty"`
 	// Questions are those the owner has not answered.
@@ -1133,6 +1141,48 @@ type ComputerStartRequest struct {
 	Session SessionID `json:"session"`
 }
 type ComputerStartResponse struct{}
+
+type BrowserCreateRequest struct {
+	Name string `json:"name"`
+}
+type BrowserCreateResponse struct {
+	Name string `json:"name"`
+}
+
+type BrowserListRequest struct{}
+type BrowserListResponse struct {
+	Browsers []BrowserSummary `json:"browsers"`
+}
+
+type BrowserSummary struct {
+	Name       string        `json:"name"`
+	Generation int64         `json:"generation"`
+	Rooms      []string      `json:"rooms,omitempty"`
+	Lease      *BrowserLease `json:"lease,omitempty"`
+}
+
+type BrowserLease struct {
+	Box         BoxID     `json:"box"`
+	Session     SessionID `json:"session"`
+	SessionName string    `json:"sessionName,omitempty"`
+	Room        RoomID    `json:"room,omitempty"`
+	RoomName    string    `json:"roomName,omitempty"`
+	Generation  int64     `json:"generation"`
+	Since       time.Time `json:"since"`
+}
+
+type BrowserRemoveRequest struct {
+	Name string `json:"name"`
+}
+type BrowserRemoveResponse struct{}
+
+type BrowserReleaseRequest struct {
+	Name string `json:"name"`
+}
+type BrowserReleaseResponse struct {
+	Released   bool  `json:"released"`
+	Generation int64 `json:"generation"`
+}
 
 // ShellWatchStart asks the box agent to post each shell job's output with shell.output while the
 // owner watches. Each start begins a new generation, and its first post resets every job's view.

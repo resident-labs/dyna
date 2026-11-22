@@ -137,3 +137,41 @@ func (d *DevTools) WaitLoad(ctx context.Context) error {
 	}
 	return nil
 }
+
+// CloseBrowser asks Chromium to shut down cleanly via DevTools Browser.close so cookies,
+// Local Storage, and IndexedDB flush to disk before the process exits.
+func CloseBrowser(ctx context.Context, base string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/json/version", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	var version struct {
+		WebSocket string `json:"webSocketDebuggerUrl"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&version)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	if version.WebSocket != "" {
+		conn, _, err := websocket.Dial(ctx, version.WebSocket, nil)
+		if err != nil {
+			return err
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		d := &DevTools{conn: conn}
+		_, err = d.Call(ctx, "Browser.close", nil)
+		return err
+	}
+	d, err := connect(ctx, base)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	_, err = d.Call(ctx, "Browser.close", nil)
+	return err
+}

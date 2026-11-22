@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"slices"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 )
@@ -86,8 +87,8 @@ func (s *Service) RoomSet(ctx context.Context, caller contract.Principal, req co
 		}
 		return contract.RoomSetResponse{}, forbidden()
 	}
-	if len(req.RootApproves) == 0 && req.GitHubWrites == nil && req.Advisor == nil && req.GitSigning == nil {
-		return contract.RoomSetResponse{}, invalid("set rootApproves, githubWrites, advisor or gitSigning")
+	if len(req.RootApproves) == 0 && req.GitHubWrites == nil && req.Advisor == nil && req.GitSigning == nil && req.Browser == nil {
+		return contract.RoomSetResponse{}, invalid("set rootApproves, githubWrites, advisor, gitSigning or browser")
 	}
 	room, _, err := s.store.ResolveRoom(ctx, string(req.Room)) // the CLI passes a name or an ID
 	if err != nil {
@@ -124,6 +125,18 @@ func (s *Service) RoomSet(ctx context.Context, caller contract.Principal, req co
 	if req.Advisor != nil {
 		if problem := s.setAdvisor(ctx, req.Room, *req.Advisor); problem != nil {
 			return contract.RoomSetResponse{}, problem
+		}
+	}
+	if req.Browser != nil {
+		name := *req.Browser
+		if name != "" && !box.ValidBrowserName(name) {
+			return contract.RoomSetResponse{}, browserNameError(name)
+		}
+		if err := s.store.SetRoomBrowser(ctx, req.Room, name); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return contract.RoomSetResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("unknown browser profile %q", name)}
+			}
+			return contract.RoomSetResponse{}, failure(err)
 		}
 	}
 	return contract.RoomSetResponse{}, nil

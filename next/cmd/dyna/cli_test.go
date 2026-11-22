@@ -967,3 +967,41 @@ func TestOwnerTimezoneCLI(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func (f *fakeClient) BrowserCreate(_ context.Context, q contract.BrowserCreateRequest) (contract.BrowserCreateResponse, error) {
+	return contract.BrowserCreateResponse{Name: q.Name}, nil
+}
+
+func (f *fakeClient) BrowserList(_ context.Context, _ contract.BrowserListRequest) (contract.BrowserListResponse, error) {
+	return contract.BrowserListResponse{Browsers: []contract.BrowserSummary{{Name: "personal", Generation: 2, Rooms: []string{"ops"}}}}, nil
+}
+
+func (f *fakeClient) BrowserRemove(_ context.Context, _ contract.BrowserRemoveRequest) (contract.BrowserRemoveResponse, error) {
+	return contract.BrowserRemoveResponse{}, nil
+}
+
+func (f *fakeClient) BrowserRelease(_ context.Context, _ contract.BrowserReleaseRequest) (contract.BrowserReleaseResponse, error) {
+	return contract.BrowserReleaseResponse{Released: true, Generation: 3}, nil
+}
+
+func TestBrowserCLI(t *testing.T) {
+	f := &fakeClient{}
+	if got := runCLI(t, f, "browser", "create", "personal"); !strings.Contains(got, "personal") {
+		t.Fatal(got)
+	}
+	if got := runCLI(t, f, "browser", "list"); !strings.Contains(got, "personal") {
+		t.Fatal(got)
+	}
+	if got := runCLI(t, f, "browser", "release", "personal"); !strings.Contains(got, "released personal (generation 3)") {
+		t.Fatal(got)
+	}
+	runCLI(t, f, "browser", "remove", "personal")
+	runCLI(t, f, "room", "browser", "room_1", "personal")
+	if f.roomSet == nil || f.roomSet.Browser == nil || *f.roomSet.Browser != "personal" {
+		t.Fatalf("room browser set: %+v", f.roomSet)
+	}
+	runCLI(t, f, "room", "browser", "room_1", "none")
+	if f.roomSet == nil || f.roomSet.Browser == nil || *f.roomSet.Browser != "" {
+		t.Fatalf("room browser clear: %+v", f.roomSet)
+	}
+}
