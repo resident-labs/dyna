@@ -45,7 +45,6 @@ type client interface {
 	BrowserCreate(context.Context, contract.BrowserCreateRequest) (contract.BrowserCreateResponse, error)
 	BrowserList(context.Context, contract.BrowserListRequest) (contract.BrowserListResponse, error)
 	BrowserRemove(context.Context, contract.BrowserRemoveRequest) (contract.BrowserRemoveResponse, error)
-	BrowserRelease(context.Context, contract.BrowserReleaseRequest) (contract.BrowserReleaseResponse, error)
 	RoomSet(context.Context, contract.RoomSetRequest) (contract.RoomSetResponse, error)
 	HostRemove(context.Context, contract.HostRemoveRequest) (contract.HostRemoveResponse, error)
 	PoolAdd(context.Context, contract.PoolAddRequest) (contract.PoolAddResponse, error)
@@ -506,8 +505,4 @@ func (c *socketClient) BrowserList(ctx context.Context, q contract.BrowserListRe
 
 func (c *socketClient) BrowserRemove(ctx context.Context, q contract.BrowserRemoveRequest) (contract.BrowserRemoveResponse, error) {
 	return call[contract.BrowserRemoveRequest, contract.BrowserRemoveResponse](ctx, c, contract.MethodBrowserRemove, q)
-}
-
-func (c *socketClient) BrowserRelease(ctx context.Context, q contract.BrowserReleaseRequest) (contract.BrowserReleaseResponse, error) {
-	return call[contract.BrowserReleaseRequest, contract.BrowserReleaseResponse](ctx, c, contract.MethodBrowserRelease, q)
 }

@@ -5,32 +5,23 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
-	"time"
 
+	"github.com/resident-labs/dyna/box/browser"
 	"github.com/resident-labs/dyna/contract"
 )
 
 var (
 	// ErrBrowserExists reports a duplicate shared browser profile name.
 	ErrBrowserExists = errors.New("browser profile already exists")
-	// ErrBrowserLeased reports that another box currently holds the profile lease.
-	ErrBrowserLeased = errors.New("browser profile is in use")
 	// ErrBrowserInUse reports that open rooms still reference the browser profile.
 	ErrBrowserInUse = errors.New("browser profile is in use by rooms")
 )
-
-// BrowserLeaseRow is a row of browser_leases enriched with session and room names when available.
-type BrowserLeaseRow struct {
-	Profile     string
-	Box         contract.BoxID
-	Session     contract.SessionID
-	SessionName string
-	Room        contract.RoomID
-	RoomName    string
-	Generation  int64
-	Since       time.Time
-}
 
 // BrowserCreate registers a new named shared browser profile.
 func (s *Store) BrowserCreate(ctx context.Context, name string) error {
@@ -42,21 +33,14 @@ func (s *Store) BrowserCreate(ctx context.Context, name string) error {
 		if exists > 0 {
 			return ErrBrowserExists
 		}
-		_, err := tx.ExecContext(ctx, "INSERT INTO browsers(name,generation) VALUES(?,1)", name)
+		_, err := tx.ExecContext(ctx, "INSERT INTO browsers(name) VALUES(?)", name)
 		return err
 	})
 }
 
-// BrowserList returns every shared browser profile with its rooms and active lease.
+// BrowserList returns every shared browser profile with the open rooms naming it.
 func (s *Store) BrowserList(ctx context.Context) ([]contract.BrowserSummary, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT b.name, b.generation,
-		COALESCE(l.box,''), COALESCE(l.session,''), COALESCE(l.generation,0), COALESCE(l.since,0),
-		COALESCE(s.name,''), COALESCE(s.room,''), COALESCE(r.name,'')
-		FROM browsers b
-		LEFT JOIN browser_leases l ON l.profile=b.name
-		LEFT JOIN sessions s ON s.id=l.session
-		LEFT JOIN rooms r ON r.id=s.room
-		ORDER BY b.name`)
+	rows, err := s.Read().QueryContext(ctx, "SELECT name FROM browsers ORDER BY name")
 	if err != nil {
 		return nil, err
 	}
@@ -65,21 +49,8 @@ func (s *Store) BrowserList(ctx context.Context) ([]contract.BrowserSummary, err
 	byName := map[string]int{}
 	for rows.Next() {
 		var item contract.BrowserSummary
-		var boxID, sessionID, sessionName, roomID, roomName string
-		var leaseGen, since int64
-		if err := rows.Scan(&item.Name, &item.Generation, &boxID, &sessionID, &leaseGen, &since, &sessionName, &roomID, &roomName); err != nil {
+		if err := rows.Scan(&item.Name); err != nil {
 			return nil, err
-		}
-		if boxID != "" {
-			item.Lease = &contract.BrowserLease{
-				Box:         contract.BoxID(boxID),
-				Session:     contract.SessionID(sessionID),
-				SessionName: sessionName,
-				Room:        contract.RoomID(roomID),
-				RoomName:    roomName,
-				Generation:  leaseGen,
-				Since:       time.UnixMilli(since).UTC(),
-			}
 		}
 		byName[item.Name] = len(out)
 		out = append(out, item)
@@ -105,19 +76,11 @@ func (s *Store) BrowserList(ctx context.Context) ([]contract.BrowserSummary, err
 	return out, roomRows.Err()
 }
 
-// BrowserRemove deletes a profile if it exists, is not leased, and is not named by any open room.
+// BrowserRemove deletes a profile if it exists and is not named by any open room.
 func (s *Store) BrowserRemove(ctx context.Context, name string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		var gen int64
-		if err := tx.QueryRowContext(ctx, "SELECT generation FROM browsers WHERE name=?", name).Scan(&gen); err != nil {
-			return err
-		}
-		var boxID, sessionID string
-		err := tx.QueryRowContext(ctx, "SELECT box, session FROM browser_leases WHERE profile=?", name).Scan(&boxID, &sessionID)
-		if err == nil {
-			return fmt.Errorf("%w: held by session %s (box %s); stop its computer or run dyna browser release %s first", ErrBrowserLeased, sessionID, boxID, name)
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
+		var exists string
+		if err := tx.QueryRowContext(ctx, "SELECT name FROM browsers WHERE name=?", name).Scan(&exists); err != nil {
 			return err
 		}
 		rooms, err := listIDs[string](ctx, tx, "SELECT name FROM rooms WHERE state='open' AND browser=? ORDER BY name", name)
@@ -136,8 +99,8 @@ func (s *Store) BrowserRemove(ctx context.Context, name string) error {
 func (s *Store) SetRoomBrowser(ctx context.Context, room contract.RoomID, name string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		if name != "" {
-			var gen int64
-			if err := tx.QueryRowContext(ctx, "SELECT generation FROM browsers WHERE name=?", name).Scan(&gen); err != nil {
+			var exists string
+			if err := tx.QueryRowContext(ctx, "SELECT name FROM browsers WHERE name=?", name).Scan(&exists); err != nil {
 				return err
 			}
 		}
@@ -167,131 +130,152 @@ func (s *Store) RoomBrowser(ctx context.Context, room contract.RoomID) (string, 
 	return name, others, err
 }
 
-// BrowserCheckout acquires the lease on the room's shared browser profile for boxID/sessionID.
-// When the room has no shared browser profile, it returns empty profile name and nil error.
-// When another box holds the lease, it returns the profile name, the current holder, and ErrBrowserLeased.
-// When the same box already holds the lease, it returns the existing generation idempotently.
-func (s *Store) BrowserCheckout(ctx context.Context, boxID contract.BoxID, sessionID contract.SessionID, room contract.RoomID, now time.Time) (string, int64, *BrowserLeaseRow, error) {
-	var profile string
-	var gen int64
-	var holder *BrowserLeaseRow
-	err := s.Write(ctx, func(tx *sql.Tx) error {
-		if err := tx.QueryRowContext(ctx, "SELECT browser FROM rooms WHERE id=? AND state='open'", room).Scan(&profile); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return ErrRoomNotFound
-			}
-			return err
-		}
-		if profile == "" {
-			return nil
-		}
-		var currentGen int64
-		if err := tx.QueryRowContext(ctx, "SELECT generation FROM browsers WHERE name=?", profile).Scan(&currentGen); err != nil {
-			return err
-		}
-		var existing BrowserLeaseRow
-		var since int64
-		err := tx.QueryRowContext(ctx, `SELECT l.profile, l.box, l.session, l.generation, l.since,
-			COALESCE(s.name,''), COALESCE(s.room,''), COALESCE(r.name,'')
-			FROM browser_leases l
-			LEFT JOIN sessions s ON s.id=l.session
-			LEFT JOIN rooms r ON r.id=s.room
-			WHERE l.profile=?`, profile).Scan(&existing.Profile, &existing.Box, &existing.Session, &existing.Generation, &since, &existing.SessionName, &existing.Room, &existing.RoomName)
-		if err == nil {
-			existing.Since = time.UnixMilli(since).UTC()
-			if existing.Box == boxID {
-				gen = existing.Generation
-				return nil
-			}
-			holder = &existing
-			return ErrBrowserLeased
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		gen = currentGen + 1
-		if _, err := tx.ExecContext(ctx, "UPDATE browsers SET generation=? WHERE name=?", gen, profile); err != nil {
-			return err
-		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO browser_leases(profile,box,session,generation,since) VALUES(?,?,?,?,?)", profile, boxID, sessionID, gen, now.UnixMilli())
-		return err
-	})
-	return profile, gen, holder, err
-}
-
-// BrowserLeaseMatches reports whether boxID still holds the lease on profile at generation.
-func (s *Store) BrowserLeaseMatches(ctx context.Context, profile string, boxID contract.BoxID, generation int64) (bool, error) {
-	var matches bool
-	err := s.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM browser_leases WHERE profile=? AND box=? AND generation=?)", profile, boxID, generation).Scan(&matches)
-	return matches, err
-}
-
-// BrowserFinishCheckin releases the lease only if profile, boxID, and generation still match.
-func (s *Store) BrowserFinishCheckin(ctx context.Context, profile string, boxID contract.BoxID, generation int64) (bool, error) {
-	var ok bool
-	err := s.Write(ctx, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, "DELETE FROM browser_leases WHERE profile=? AND box=? AND generation=?", profile, boxID, generation)
-		if err != nil {
-			return err
-		}
-		n, err := res.RowsAffected()
-		ok = n > 0
-		return err
-	})
-	return ok, err
-}
-
-// BrowserRelease forcibly releases any lease on profile and bumps its generation so any late checkin is refused.
-func (s *Store) BrowserRelease(ctx context.Context, name string) (released bool, generation int64, err error) {
-	err = s.Write(ctx, func(tx *sql.Tx) error {
-		var cur int64
-		if err := tx.QueryRowContext(ctx, "SELECT generation FROM browsers WHERE name=?", name).Scan(&cur); err != nil {
-			return err
-		}
-		res, err := tx.ExecContext(ctx, "DELETE FROM browser_leases WHERE profile=?", name)
-		if err != nil {
-			return err
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		released = n > 0
-		generation = cur + 1
-		_, err = tx.ExecContext(ctx, "UPDATE browsers SET generation=? WHERE name=?", generation, name)
-		return err
-	})
-	return released, generation, err
-}
-
-// BoxHoldsBrowserLease reports whether boxID currently holds any browser profile lease.
-func (s *Store) BoxHoldsBrowserLease(ctx context.Context, boxID contract.BoxID) (bool, error) {
-	var holds bool
-	err := s.Read().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM browser_leases WHERE box=?)", boxID).Scan(&holds)
-	return holds, err
-}
-
-// BrowserLeases returns all currently active browser leases.
-func (s *Store) BrowserLeases(ctx context.Context) ([]BrowserLeaseRow, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT l.profile, l.box, l.session, l.generation, l.since,
-		COALESCE(s.name,''), COALESCE(s.room,''), COALESCE(r.name,'')
-		FROM browser_leases l
-		LEFT JOIN sessions s ON s.id=l.session
-		LEFT JOIN rooms r ON r.id=s.room
-		ORDER BY l.profile`)
+func copyFilePrivate(src, dst string) error {
+	in, err := os.Open(src)
 	if err != nil {
-		return nil, err
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+// ReadV1ChromiumCookies copies a v1 Chromium Default/Cookies SQLite file (plus any adjacent WAL/SHM)
+// into a private temporary directory and reads its meta version and cookie rows without modifying
+// the source profile. Errors never include cookie values.
+func ReadV1ChromiumCookies(ctx context.Context, dbPath string) (browser.V1CookieDB, error) {
+	tmpDir, err := os.MkdirTemp("", "dyna-v1-cookies-*")
+	if err != nil {
+		return browser.V1CookieDB{}, fmt.Errorf("create temp dir for v1 cookies: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	if err := os.Chmod(tmpDir, 0700); err != nil {
+		return browser.V1CookieDB{}, fmt.Errorf("chmod temp dir: %w", err)
+	}
+
+	tmpDB := filepath.Join(tmpDir, "Cookies")
+	if err := copyFilePrivate(dbPath, tmpDB); err != nil {
+		return browser.V1CookieDB{}, fmt.Errorf("copy v1 cookies database: %w", err)
+	}
+	hasWAL := false
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if _, err := os.Stat(dbPath + suffix); err == nil {
+			if err := copyFilePrivate(dbPath+suffix, tmpDB+suffix); err != nil {
+				return browser.V1CookieDB{}, fmt.Errorf("copy v1 cookies%s: %w", suffix, err)
+			}
+			if suffix == "-wal" {
+				hasWAL = true
+			}
+		}
+	}
+
+	u := &url.URL{Scheme: "file", Path: filepath.ToSlash(tmpDB)}
+	if !hasWAL {
+		u.RawQuery = "mode=ro"
+	}
+	db, err := sql.Open("sqlite", u.String())
+	if err != nil {
+		return browser.V1CookieDB{}, fmt.Errorf("open v1 cookies database: %w", err)
+	}
+	defer db.Close()
+
+	var result browser.V1CookieDB
+	var verStr string
+	if err := db.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = 'version'`).Scan(&verStr); err == nil {
+		if v, err := strconv.Atoi(strings.TrimSpace(verStr)); err == nil {
+			result.Version = v
+		}
+	}
+
+	cols := map[string]bool{}
+	colRows, err := db.QueryContext(ctx, `PRAGMA table_info(cookies)`)
+	if err != nil {
+		return browser.V1CookieDB{}, fmt.Errorf("inspect v1 cookies schema: %w", err)
+	}
+	for colRows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var dflt any
+		var pk int
+		if err := colRows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			colRows.Close()
+			return browser.V1CookieDB{}, fmt.Errorf("scan v1 cookies schema: %w", err)
+		}
+		cols[name] = true
+	}
+	if err := colRows.Err(); err != nil {
+		colRows.Close()
+		return browser.V1CookieDB{}, fmt.Errorf("read v1 cookies schema: %w", err)
+	}
+	colRows.Close()
+	for _, req := range []string{"host_key", "name", "value", "encrypted_value", "path", "expires_utc", "is_secure", "is_httponly"} {
+		if !cols[req] {
+			return browser.V1CookieDB{}, fmt.Errorf("v1 cookies table missing required column %s", req)
+		}
+	}
+
+	colOr := func(name, fallback string) string {
+		if cols[name] {
+			return name
+		}
+		return fallback
+	}
+	query := fmt.Sprintf(
+		`SELECT host_key, %s, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, %s, %s, %s, %s, %s, %s, %s FROM cookies`,
+		colOr("top_frame_site_key", "''"),
+		colOr("is_persistent", "CASE WHEN expires_utc > 0 THEN 1 ELSE 0 END"),
+		colOr("has_expires", "CASE WHEN expires_utc > 0 THEN 1 ELSE 0 END"),
+		colOr("priority", "1"),
+		colOr("samesite", "-1"),
+		colOr("source_scheme", "0"),
+		colOr("source_port", "-1"),
+		colOr("has_cross_site_ancestor", "0"),
+	)
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return browser.V1CookieDB{}, fmt.Errorf("query v1 cookies: %w", err)
 	}
 	defer rows.Close()
-	var out []BrowserLeaseRow
 	for rows.Next() {
-		var row BrowserLeaseRow
-		var since int64
-		if err := rows.Scan(&row.Profile, &row.Box, &row.Session, &row.Generation, &since, &row.SessionName, &row.Room, &row.RoomName); err != nil {
-			return nil, err
+		var row browser.V1CookieRow
+		var isSecure, isHTTPOnly, isPersistent, hasExpires, hasCrossSite int
+		if err := rows.Scan(
+			&row.HostKey,
+			&row.TopFrameSiteKey,
+			&row.Name,
+			&row.Value,
+			&row.EncryptedValue,
+			&row.Path,
+			&row.ExpiresUTC,
+			&isSecure,
+			&isHTTPOnly,
+			&isPersistent,
+			&hasExpires,
+			&row.Priority,
+			&row.SameSite,
+			&row.SourceScheme,
+			&row.SourcePort,
+			&hasCrossSite,
+		); err != nil {
+			return browser.V1CookieDB{}, errors.New("scan v1 cookie row failed")
 		}
-		row.Since = time.UnixMilli(since).UTC()
-		out = append(out, row)
+		row.IsSecure = isSecure != 0
+		row.IsHTTPOnly = isHTTPOnly != 0
+		row.IsPersistent = isPersistent != 0
+		row.HasExpires = hasExpires != 0
+		row.HasCrossSiteAncestor = hasCrossSite != 0
+		result.Rows = append(result.Rows, row)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return browser.V1CookieDB{}, errors.New("iterate v1 cookie rows failed")
+	}
+	return result, nil
 }

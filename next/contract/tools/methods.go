@@ -39,7 +39,6 @@ var methodTable = []MethodEntry{
 	method(contract.MethodBrowserCreate, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodBrowserList, contract.ScopeRead, OwnerAccess),
 	method(contract.MethodBrowserRemove, contract.ScopeAdmin, OwnerAccess),
-	method(contract.MethodBrowserRelease, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodConnectCancel, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodConnectStart, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodConnectStatus, contract.ScopeAdmin, OwnerAccess),

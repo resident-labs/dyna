@@ -1,78 +1,273 @@
 package computer
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
-	"io"
-	"net/http"
-	"net/http/httptest"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/resident-labs/dyna/box/browser"
 )
 
-type fakeProfileStore struct {
-	mu          sync.Mutex
-	checkoutErr error
-	lease       Lease
-	seedFile    string
-	checkinErr  error
-	checkins    []fakeCheckin
+func mustCookie(t *testing.T, obj map[string]any) browser.Cookie {
+	t.Helper()
+	b, err := json.Marshal(obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := browser.ParseCookie(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
 }
 
-type fakeCheckin struct {
-	lease   Lease
-	discard bool
-	cookie  string
+// fakeCookieBrowser simulates Chromium's DevTools cookie store, including normalization
+// (such as clamping far-future expiry to +400 days).
+type fakeCookieBrowser struct {
+	mu      sync.Mutex
+	cookies map[browser.KeyID]browser.Cookie
+	clamp   func(browser.Cookie) browser.Cookie
 }
 
-func (f *fakeProfileStore) Checkout(_ context.Context, dir string) (Lease, error) {
+func newFakeCookieBrowser(clamp func(browser.Cookie) browser.Cookie) *fakeCookieBrowser {
+	return &fakeCookieBrowser{
+		cookies: map[browser.KeyID]browser.Cookie{},
+		clamp:   clamp,
+	}
+}
+
+func (f *fakeCookieBrowser) GetCookies(_ context.Context) ([]browser.Cookie, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.checkoutErr != nil {
-		return Lease{}, f.checkoutErr
+	out := make([]browser.Cookie, 0, len(f.cookies))
+	for _, c := range f.cookies {
+		out = append(out, c)
 	}
-	if f.lease.Profile == "" {
-		return Lease{}, nil
-	}
-	if err := os.MkdirAll(filepath.Join(dir, "Default"), 0700); err != nil {
-		return Lease{}, err
-	}
-	if f.seedFile != "" {
-		if err := os.WriteFile(filepath.Join(dir, "Default", "Cookies"), []byte(f.seedFile), 0600); err != nil {
-			return Lease{}, err
+	return out, nil
+}
+
+func (f *fakeCookieBrowser) SetCookies(_ context.Context, cookies []browser.Cookie) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, c := range cookies {
+		if f.clamp != nil {
+			c = f.clamp(c)
 		}
+		f.cookies[c.Key.ID()] = c
 	}
-	return f.lease, nil
+	return nil
 }
 
-func (f *fakeProfileStore) Checkin(_ context.Context, lease Lease, dir string, discard bool) error {
+func (f *fakeCookieBrowser) DeleteCookies(_ context.Context, keys []browser.CookieKey) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	var cookie string
-	if data, err := os.ReadFile(filepath.Join(dir, "Default", "Cookies")); err == nil {
-		cookie = string(data)
+	for _, k := range keys {
+		delete(f.cookies, k.ID())
 	}
-	f.checkins = append(f.checkins, fakeCheckin{lease: lease, discard: discard, cookie: cookie})
-	return f.checkinErr
+	return nil
 }
 
-func (f *fakeProfileStore) count() int {
+func (f *fakeCookieBrowser) Close() {}
+
+type fakeCookieStore struct {
+	mu      sync.Mutex
+	profile string
+	pullErr error
+	syncErr error
+	jar     *browser.Jar
+	now     func() time.Time
+	pulls   int
+	syncs   []browser.SyncRequest
+	onSync  func()
+}
+
+func newFakeCookieStore(profile string, now func() time.Time) *fakeCookieStore {
+	return &fakeCookieStore{
+		profile: profile,
+		jar:     browser.NewJar(),
+		now:     now,
+	}
+}
+
+func (f *fakeCookieStore) PullCookies(_ context.Context, since int64) (browser.SyncResponse, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return len(f.checkins)
+	f.pulls++
+	if f.pullErr != nil {
+		return browser.SyncResponse{}, false, f.pullErr
+	}
+	if f.profile == "" {
+		return browser.SyncResponse{}, false, nil
+	}
+	next, resp, _, _, err := f.jar.Sync(f.now(), browser.SyncRequest{BaseVersion: since})
+	if err != nil {
+		return browser.SyncResponse{}, false, err
+	}
+	f.jar = next
+	resp.Profile = f.profile
+	return resp, true, nil
 }
 
-func (f *fakeProfileStore) last() fakeCheckin {
+func (f *fakeCookieStore) SyncCookies(_ context.Context, req browser.SyncRequest) (browser.SyncResponse, bool, error) {
+	f.mu.Lock()
+	hook := f.onSync
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.checkins[len(f.checkins)-1]
+	f.syncs = append(f.syncs, req)
+	if f.syncErr != nil {
+		return browser.SyncResponse{}, false, f.syncErr
+	}
+	if f.profile == "" {
+		return browser.SyncResponse{}, false, nil
+	}
+	next, resp, _, _, err := f.jar.Sync(f.now(), req)
+	if err != nil {
+		return browser.SyncResponse{}, false, err
+	}
+	f.jar = next
+	resp.Profile = f.profile
+	return resp, true, nil
 }
 
-func fakeSharedDesktop(t *testing.T, chromiumScript string, store ProfileStore) (*Process, string) {
+func (f *fakeCookieStore) seed(c browser.Cookie) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	next, _, _, _, err := f.jar.Sync(f.now(), browser.SyncRequest{Upserts: []browser.Cookie{c}})
+	if err != nil {
+		panic(err)
+	}
+	f.jar = next
+}
+
+func TestCookieSyncReadBackPreventsEcho(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	maxExp := float64(now.Add(400 * 24 * time.Hour).Unix())
+	farExp := float64(now.Add(1000 * 24 * time.Hour).Unix())
+
+	// Fake Chromium clamps any expiry beyond 400 days.
+	clamp := func(c browser.Cookie) browser.Cookie {
+		if c.Expires > maxExp {
+			var obj map[string]any
+			_ = json.Unmarshal(c.Raw, &obj)
+			obj["expires"] = maxExp
+			b, _ := json.Marshal(obj)
+			norm, _ := browser.ParseCookie(b)
+			return norm
+		}
+		return c
+	}
+
+	store := newFakeCookieStore("personal", func() time.Time { return now })
+	store.seed(mustCookie(t, map[string]any{
+		"name": "long_lived", "value": "v1", "domain": "example.com", "path": "/", "expires": farExp, "session": false,
+	}))
+
+	chrome := newFakeCookieBrowser(clamp)
+	syncer := newCookieSyncer(store, func(context.Context) (cookieSession, error) { return chrome, nil }, func() time.Time { return now })
+
+	// Initial pull applies cookie (clamped by Chromium) and reads back the clamped cookie as baseline.
+	if err := syncer.syncOnce(context.Background(), true); err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+	// Next tick must compute ZERO upserts and ZERO deletes (no echo loop!).
+	if err := syncer.syncOnce(context.Background(), true); err != nil {
+		t.Fatalf("second sync: %v", err)
+	}
+	if len(store.syncs) != 1 || len(store.syncs[0].Upserts) != 0 || len(store.syncs[0].Deletes) != 0 {
+		t.Fatalf("expected zero echo after initial pull, got upserts=%d deletes=%d", len(store.syncs[0].Upserts), len(store.syncs[0].Deletes))
+	}
+
+	// Remote box pushes another far-future cookie; this box pulls it, Chromium clamps it, and next tick has zero echo.
+	store.seed(mustCookie(t, map[string]any{
+		"name": "remote_far", "value": "v2", "domain": "example.org", "path": "/", "expires": farExp, "session": false,
+	}))
+	if err := syncer.syncOnce(context.Background(), true); err != nil {
+		t.Fatalf("pull remote sync: %v", err)
+	}
+	if err := syncer.syncOnce(context.Background(), true); err != nil {
+		t.Fatalf("post-remote sync: %v", err)
+	}
+	last := store.syncs[len(store.syncs)-1]
+	if len(last.Upserts) != 0 || len(last.Deletes) != 0 {
+		t.Fatalf("expected zero echo after remote pull, got upserts=%d deletes=%d", len(last.Upserts), len(last.Deletes))
+	}
+}
+
+func TestCookieSyncNoPushBeforeFirstPullAndLocalExpiry(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	clock := func() time.Time { return now }
+
+	store := newFakeCookieStore("personal", clock)
+	expiring := mustCookie(t, map[string]any{
+		"name": "short", "value": "s1", "domain": "example.com", "path": "/", "expires": float64(now.Add(5 * time.Minute).Unix()), "session": false,
+	})
+	live := mustCookie(t, map[string]any{
+		"name": "auth", "value": "a1", "domain": "example.com", "path": "/", "expires": float64(now.Add(24 * time.Hour).Unix()), "session": false,
+	})
+	store.seed(expiring)
+	store.seed(live)
+	store.pullErr = errors.New("engine temporarily unreachable")
+
+	chrome := newFakeCookieBrowser(nil)
+	syncer := newCookieSyncer(store, func(context.Context) (cookieSession, error) { return chrome, nil }, clock)
+
+	// Failed initial pull must not initialize or push anything.
+	if err := syncer.syncOnce(context.Background(), true); err == nil {
+		t.Fatal("expected initial pull error")
+	}
+	if len(store.syncs) != 0 {
+		t.Fatalf("pushed before first pull succeeded: %d syncs", len(store.syncs))
+	}
+	// Stop-time sync (allowInit=false) before initial pull must be a no-op and never push deletes.
+	if err := syncer.syncOnce(context.Background(), false); err != nil {
+		t.Fatalf("stop sync before init: %v", err)
+	}
+	if len(store.syncs) != 0 {
+		t.Fatalf("stop sync pushed before first pull: %d syncs", len(store.syncs))
+	}
+
+	// Engine recovers: next tick pulls both cookies and establishes baseline.
+	store.pullErr = nil
+	if err := syncer.syncOnce(context.Background(), true); err != nil {
+		t.Fatalf("recovery pull: %v", err)
+	}
+	if len(chrome.cookies) != 2 {
+		t.Fatalf("chrome cookies after pull = %d, want 2", len(chrome.cookies))
+	}
+
+	// Advance clock past expiring's expiry and remove both expiring (natural expiry) and live (logout) from Chromium.
+	now = now.Add(10 * time.Minute)
+	delete(chrome.cookies, expiring.Key.ID())
+	delete(chrome.cookies, live.Key.ID())
+
+	if err := syncer.syncOnce(context.Background(), true); err != nil {
+		t.Fatalf("diff sync: %v", err)
+	}
+	if len(store.syncs) != 1 {
+		t.Fatalf("sync count = %d, want 1", len(store.syncs))
+	}
+	// Only live should be pushed as a delete; expiring expired locally.
+	if len(store.syncs[0].Deletes) != 1 || store.syncs[0].Deletes[0].Name != "auth" {
+		t.Fatalf("unexpected deletes pushed: %+v", store.syncs[0].Deletes)
+	}
+}
+
+func fakeCookieDesktop(t *testing.T, chromiumScript string, store CookieStore, chrome *fakeCookieBrowser, now func() time.Time) (*Process, string) {
 	t.Helper()
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, "computer"), 0700); err != nil {
@@ -94,15 +289,18 @@ func fakeSharedDesktop(t *testing.T, chromiumScript string, store ProfileStore) 
 		t.Fatal(err)
 	}
 	p := &Process{
-		root:          root,
-		socket:        filepath.Join(root, "run", "vnc.sock"),
-		tmp:           tmp,
-		profile:       filepath.Join(root, "profile"),
-		sharedProfile: filepath.Join(root, "computer-shared"),
-		devtoolsURL:   "http://127.0.0.1:1", // refuses fast so tests exercise SIGTERM/deadline deterministically
-		store:         store,
-		idleTimeout:   defaultIdleTimeout,
-		closeTimeout:  2 * time.Second,
+		root:         root,
+		socket:       filepath.Join(root, "run", "vnc.sock"),
+		tmp:          tmp,
+		profile:      filepath.Join(root, "profile"),
+		legacyShared: filepath.Join(root, "computer-shared"),
+		devtoolsURL:  "http://127.0.0.1:1",
+		cookies:      store,
+		syncInterval: 50 * time.Millisecond,
+		cookieConnect: func(context.Context) (cookieSession, error) {
+			return chrome, nil
+		},
+		now: now,
 	}
 	if err := os.Mkdir(p.profile, 0700); err != nil {
 		t.Fatal(err)
@@ -111,178 +309,242 @@ func fakeSharedDesktop(t *testing.T, chromiumScript string, store ProfileStore) 
 	return p, root
 }
 
-func TestSharedCheckoutRefusalDoesNotStartDesktop(t *testing.T) {
-	const refusal = "browser profile work is in use by alice in room ops; it frees when that session's computer stops (computer stop) or goes idle"
-	store := &fakeProfileStore{checkoutErr: errors.New(refusal)}
-	p, root := fakeSharedDesktop(t, "#!/bin/sh\necho started > "+filepath.Join(t.TempDir(), "x")+"\nexec sleep 600\n", store)
-	_, err := p.Start(context.Background())
-	if err == nil || err.Error() != refusal {
-		t.Fatalf("Start err = %v, want %q", err, refusal)
-	}
-	p.mu.Lock()
-	running := p.display != nil || p.wm != nil || p.browser != nil
-	p.mu.Unlock()
-	if running {
-		t.Fatal("desktop started despite checkout refusal")
-	}
-	if _, err := os.Stat(filepath.Join(root, "run", "vnc.sock")); !os.IsNotExist(err) {
-		t.Fatalf("Xvnc ran despite checkout refusal: %v", err)
-	}
-}
+func TestDesktopStartCleansLegacySharedNeverBlocksAndSyncsOnStop(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	clock := func() time.Time { return now }
+	store := newFakeCookieStore("personal", clock)
+	store.pullErr = errors.New("temporary outage")
+	chrome := newFakeCookieBrowser(nil)
 
-func TestSharedCheckoutCleanStopAndDeleteLocalCopy(t *testing.T) {
-	store := &fakeProfileStore{
-		lease:    Lease{Profile: "work", Generation: 2},
-		seedFile: "initial=1",
-	}
 	outArgs := filepath.Join(t.TempDir(), "chromium.args")
-	// Fake Chromium writes an updated cookie when it receives SIGTERM and exits cleanly.
-	script := `#!/bin/sh
-echo "$*" > ` + outArgs + `
-for arg in "$@"; do
-  case "$arg" in
-    --user-data-dir=*) dir="${arg#--user-data-dir=}" ;;
-  esac
-done
-trap 'printf "updated=2" > "$dir/Default/Cookies"; exit 0' TERM
-while true; do sleep 1; done
-`
-	p, _ := fakeSharedDesktop(t, script, store)
-	if err := os.WriteFile(filepath.Join(p.profile, "local-marker"), []byte("keep"), 0600); err != nil {
+	script := "#!/bin/sh\necho \"$*\" > " + outArgs + "\nexec sleep 600\n"
+	p, _ := fakeCookieDesktop(t, script, store, chrome, clock)
+
+	// Create a leftover v1 /box/computer-shared folder.
+	if err := os.MkdirAll(filepath.Join(p.legacyShared, "Default"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p.legacyShared, "Default", "Cookies"), []byte("old"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
+	// Start must succeed even though initial pull fails, delete legacy /box/computer-shared,
+	// and launch Chromium with the per-box profile.
 	if _, err := p.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v", err)
+		t.Fatalf("Start blocked by failed pull: %v", err)
+	}
+	if _, err := os.Stat(p.legacyShared); !os.IsNotExist(err) {
+		t.Fatalf("legacy computer-shared not deleted on Start: %v", err)
 	}
 	waitFor(t, func() bool { data, _ := os.ReadFile(outArgs); return len(data) > 0 })
 	args, _ := os.ReadFile(outArgs)
-	if !strings.Contains(string(args), "--user-data-dir="+p.sharedProfile) {
-		t.Fatalf("Chromium did not use sharedProfile: %s", args)
+	if !strings.Contains(string(args), "--user-data-dir="+p.profile) {
+		t.Fatalf("Chromium did not use per-box profile: %s", args)
 	}
+
+	// Recover store; the sync loop retries the initial pull automatically.
+	store.mu.Lock()
+	store.pullErr = nil
+	store.mu.Unlock()
+	store.seed(mustCookie(t, map[string]any{
+		"name": "initial", "value": "v0", "domain": "example.com", "path": "/", "expires": -1, "session": true,
+	}))
+	waitFor(t, func() bool {
+		chrome.mu.Lock()
+		defer chrome.mu.Unlock()
+		return len(chrome.cookies) == 1
+	})
+
+	// Add a new login cookie right before Stop; Stop must run one final sync before killing Chromium.
+	p.syncInterval = time.Hour // ensure the final sync comes from Stop, not the periodic ticker
+	loginCookie := mustCookie(t, map[string]any{
+		"name": "__Host-newlogin", "value": "fresh", "domain": "app.example.com", "path": "/", "secure": true, "httpOnly": true, "expires": -1, "session": true,
+	})
+	chrome.mu.Lock()
+	chrome.cookies[loginCookie.Key.ID()] = loginCookie
+	chrome.mu.Unlock()
 
 	if err := p.Stop(); err != nil {
 		t.Fatalf("Stop: %v", err)
-	}
-	if store.count() != 1 {
-		t.Fatalf("checkins = %d, want 1", store.count())
-	}
-	got := store.last()
-	if got.discard || got.cookie != "updated=2" || got.lease != store.lease {
-		t.Fatalf("checkin = %+v", got)
-	}
-	if _, err := os.Stat(p.sharedProfile); !os.IsNotExist(err) {
-		t.Fatalf("sharedProfile not deleted after checkin: %v", err)
-	}
-	// Per-box profile must remain untouched.
-	if marker, err := os.ReadFile(filepath.Join(p.profile, "local-marker")); err != nil || string(marker) != "keep" {
-		t.Fatalf("per-box profile changed: %q %v", marker, err)
-	}
-}
-
-func TestSharedKilledChromiumSkipsCheckin(t *testing.T) {
-	store := &fakeProfileStore{
-		lease:    Lease{Profile: "work", Generation: 3},
-		seedFile: "initial=1",
-	}
-	ready := filepath.Join(t.TempDir(), "ready")
-	// Fake Chromium ignores SIGTERM so Stop must SIGKILL it.
-	script := "#!/bin/sh\ntrap '' TERM\ntouch " + ready + "\nwhile true; do sleep 1; done\n"
-	p, _ := fakeSharedDesktop(t, script, store)
-	p.closeTimeout = 250 * time.Millisecond
-
-	if _, err := p.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	waitFor(t, func() bool { _, err := os.Stat(ready); return err == nil })
-	if err := p.Stop(); err != nil {
-		t.Fatalf("Stop: %v", err)
-	}
-	if store.count() != 1 {
-		t.Fatalf("checkins = %d, want 1", store.count())
-	}
-	if !store.last().discard {
-		t.Fatalf("killed Chromium must skip checkin (discard=true), got %+v", store.last())
-	}
-	if _, err := os.Stat(p.sharedProfile); !os.IsNotExist(err) {
-		t.Fatalf("sharedProfile not deleted: %v", err)
-	}
-}
-
-func TestSharedKilledChromiumRetryStillDiscards(t *testing.T) {
-	store := &fakeProfileStore{
-		lease:      Lease{Profile: "work", Generation: 3},
-		seedFile:   "initial=1",
-		checkinErr: errors.New("temporary disconnect"),
-	}
-	ready := filepath.Join(t.TempDir(), "ready")
-	script := "#!/bin/sh\ntrap '' TERM\ntouch " + ready + "\nwhile true; do sleep 1; done\n"
-	p, _ := fakeSharedDesktop(t, script, store)
-	p.closeTimeout = 250 * time.Millisecond
-
-	if _, err := p.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	waitFor(t, func() bool { _, err := os.Stat(ready); return err == nil })
-	if err := p.Stop(); err == nil {
-		t.Fatal("expected first Stop to return transient checkin error")
 	}
 	store.mu.Lock()
-	store.checkinErr = nil
+	gotCount := store.jar.LiveCount(now)
 	store.mu.Unlock()
-	if err := p.Stop(); err != nil {
-		t.Fatalf("retry Stop: %v", err)
-	}
-	if store.count() != 2 || !store.last().discard {
-		t.Fatalf("retry after killed Chromium must still discard, got count=%d last=%+v", store.count(), store.last())
+	if gotCount != 2 {
+		t.Fatalf("jar cookie count after Stop = %d, want 2", gotCount)
 	}
 }
 
-func TestSharedIdleReleaseAndViewerPause(t *testing.T) {
-	store := &fakeProfileStore{
-		lease:    Lease{Profile: "work", Generation: 4},
-		seedFile: "cookie=ok",
-	}
-	script := "#!/bin/sh\ntrap 'exit 0' TERM\nwhile true; do sleep 1; done\n"
-	p, _ := fakeSharedDesktop(t, script, store)
-	p.idleTimeout = 150 * time.Millisecond
-
-	srv := httptest.NewServer(p.Handler(context.Background()))
-	defer srv.Close()
-
-	// Start desktop with a VNC viewer connected; idle timer must NOT fire while viewer stays open.
-	if _, err := p.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	pr, pw := io.Pipe()
-	viewerDone := make(chan struct{})
-	go func() {
-		defer close(viewerDone)
-		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/computer/viewer", pr)
-		resp, err := http.DefaultClient.Do(req)
-		if err == nil {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
+func TestCookieSyncPreservesInFlightLocalChanges(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	maxExp := float64(now.Add(400 * 24 * time.Hour).Unix())
+	farExp := float64(now.Add(1000 * 24 * time.Hour).Unix())
+	clamp := func(c browser.Cookie) browser.Cookie {
+		if c.Expires > maxExp {
+			var obj map[string]any
+			_ = json.Unmarshal(c.Raw, &obj)
+			obj["expires"] = maxExp
+			b, _ := json.Marshal(obj)
+			norm, _ := browser.ParseCookie(b)
+			return norm
 		}
-	}()
-	waitFor(t, func() bool { p.mu.Lock(); defer p.mu.Unlock(); return p.viewers == 1 })
-
-	// Sleep past idleTimeout while viewer is connected: lease must remain held.
-	time.Sleep(300 * time.Millisecond)
-	if store.count() != 0 {
-		t.Fatalf("idle release fired while VNC viewer was connected")
+		return c
 	}
 
-	// Disconnect viewer; idle timer starts and releases the profile.
-	_ = pw.Close()
-	<-viewerDone
-
-	waitFor(t, func() bool {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		return store.count() == 1 && p.display == nil && p.browser == nil && p.lease.Profile == ""
+	store := newFakeCookieStore("personal", func() time.Time { return now })
+	existing := mustCookie(t, map[string]any{
+		"name": "existing", "value": "e1", "domain": "example.com", "path": "/", "expires": -1, "session": true,
 	})
-	if store.last().discard {
-		t.Fatalf("idle release should be a clean checkin, got %+v", store.last())
+	store.seed(existing)
+
+	chrome := newFakeCookieBrowser(clamp)
+	syncer := newCookieSyncer(store, func(context.Context) (cookieSession, error) { return chrome, nil }, func() time.Time { return now })
+
+	if err := syncer.syncOnce(context.Background(), true); err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+
+	// Remote box pushes a far-future cookie (which Chromium will clamp).
+	remote := mustCookie(t, map[string]any{
+		"name": "remote_c", "value": "r1", "domain": "remote.example.com", "path": "/", "expires": farExp, "session": false,
+	})
+	store.seed(remote)
+
+	// While SyncCookies is in flight, a user logs in (new_local) AND logs out (deletes existing) in Chromium.
+	inFlightLogin := mustCookie(t, map[string]any{
+		"name": "new_local", "value": "l1", "domain": "local.example.com", "path": "/", "expires": -1, "session": true,
+	})
+	fired := false
+	store.onSync = func() {
+		if fired {
+			return
+		}
+		fired = true
+		chrome.mu.Lock()
+		chrome.cookies[inFlightLogin.Key.ID()] = inFlightLogin
+		delete(chrome.cookies, existing.Key.ID())
+		chrome.mu.Unlock()
+	}
+
+	// Tick 1 pulls remote_c while in-flight local changes occur concurrently.
+	if err := syncer.syncOnce(context.Background(), true); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	// Tick 2 must push BOTH new_local (upsert) and existing (delete), and must NOT echo remote_c.
+	if err := syncer.syncOnce(context.Background(), true); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	last := store.syncs[len(store.syncs)-1]
+	if len(last.Upserts) != 1 || last.Upserts[0].Key.Name != "new_local" {
+		t.Fatalf("tick 2 upserts = %+v, want only new_local", last.Upserts)
+	}
+	if len(last.Deletes) != 1 || last.Deletes[0].Name != "existing" {
+		t.Fatalf("tick 2 deletes = %+v, want only existing", last.Deletes)
+	}
+}
+
+func TestDevToolsCookieRoundTrip(t *testing.T) {
+	bin, err := exec.LookPath("chromium")
+	if err != nil {
+		t.Skip("chromium not installed")
+	}
+	dir := t.TempDir()
+	var stderr bytes.Buffer
+	cmd := exec.Command(bin,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+		"--no-first-run", "--no-default-browser-check", "--password-store=basic",
+		"--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0",
+		"--user-data-dir="+dir, "about:blank",
+	)
+	cmd.Stderr = &stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	t.Cleanup(func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		<-done
+	})
+
+	portFile := filepath.Join(dir, "DevToolsActivePort")
+	var port int
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); {
+		if b, err := os.ReadFile(portFile); err == nil {
+			lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+			if len(lines) >= 2 {
+				if p, err := strconv.Atoi(strings.TrimSpace(lines[0])); err == nil && p > 0 {
+					port = p
+					break
+				}
+			}
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("chromium exited before writing DevToolsActivePort (err=%v): %s", err, stderr.String())
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	if port == 0 {
+		t.Fatalf("timed out waiting for DevToolsActivePort (stderr=%s)", stderr.String())
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	dt, err := Connect(ctx, fmt.Sprintf("http://127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dt.Close()
+
+	future := float64(time.Now().Add(24 * time.Hour).Unix())
+	cHost := mustCookie(t, map[string]any{
+		"name": "__Host-dt", "value": "h1", "domain": "app.example.com", "path": "/", "secure": true, "httpOnly": true, "sameSite": "Lax", "expires": -1, "session": true,
+	})
+	cPart := mustCookie(t, map[string]any{
+		"name": "part-dt", "value": "p1", "domain": ".sub.example.org", "path": "/p", "secure": true, "sameSite": "None", "expires": future,
+		"partitionKey": map[string]any{"topLevelSite": "https://example.net", "hasCrossSiteAncestor": false},
+	})
+	cKeep := mustCookie(t, map[string]any{
+		"name": "sess-dt", "value": "s1", "domain": "example.com", "path": "/", "httpOnly": true, "expires": -1, "session": true,
+	})
+	cNameless := mustCookie(t, map[string]any{
+		"name": "", "value": "bare-dt", "domain": "bare.example.com", "path": "/", "expires": future,
+	})
+
+	if err := dt.SetCookies(ctx, []browser.Cookie{cHost, cPart, cKeep, cNameless}); err != nil {
+		t.Fatalf("SetCookies: %v", err)
+	}
+	got, err := dt.GetCookies(ctx)
+	if err != nil {
+		t.Fatalf("GetCookies: %v", err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("GetCookies count = %d, want 4", len(got))
+	}
+	// Passing read-back cookies verbatim into SetCookies must succeed with zero diff on next read-back.
+	if err := dt.SetCookies(ctx, got); err != nil {
+		t.Fatalf("round-trip SetCookies: %v", err)
+	}
+	got2, err := dt.GetCookies(ctx)
+	if err != nil {
+		t.Fatalf("GetCookies 2: %v", err)
+	}
+	upserts, deletes := browser.DiffCookies(browser.CookieMap(got), got2, time.Now().UTC())
+	if len(upserts) != 0 || len(deletes) != 0 {
+		t.Fatalf("read-back diff not empty: upserts=%d deletes=%d", len(upserts), len(deletes))
+	}
+
+	// Delete __Host-, partitioned, and nameless cookies via Network.deleteCookies.
+	if err := dt.DeleteCookies(ctx, []browser.CookieKey{cHost.Key, cPart.Key, cNameless.Key}); err != nil {
+		t.Fatalf("DeleteCookies: %v", err)
+	}
+	afterDel, err := dt.GetCookies(ctx)
+	if err != nil {
+		t.Fatalf("GetCookies after delete: %v", err)
+	}
+	if len(afterDel) != 1 || afterDel[0].Key.Name != "sess-dt" {
+		t.Fatalf("cookies after delete count=%d, want only sess-dt", len(afterDel))
 	}
 }

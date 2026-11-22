@@ -51,7 +51,6 @@ type Service interface {
 	BrowserCreate(context.Context, contract.Principal, contract.BrowserCreateRequest) (contract.BrowserCreateResponse, *contract.Error)
 	BrowserList(context.Context, contract.Principal, contract.BrowserListRequest) (contract.BrowserListResponse, *contract.Error)
 	BrowserRemove(context.Context, contract.Principal, contract.BrowserRemoveRequest) (contract.BrowserRemoveResponse, *contract.Error)
-	BrowserRelease(context.Context, contract.Principal, contract.BrowserReleaseRequest) (contract.BrowserReleaseResponse, *contract.Error)
 	ComputerStream(context.Context, contract.SessionID) ([]string, func(), *contract.Error)
 	RoomSetLimits(context.Context, contract.Principal, contract.RoomSetLimitsRequest) (contract.RoomSetLimitsResponse, *contract.Error)
 	RoomPause(context.Context, contract.Principal, contract.RoomPauseRequest) (contract.RoomPauseResponse, *contract.Error)

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/box"
+	"github.com/resident-labs/dyna/box/browser"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/addons"
 	"github.com/resident-labs/dyna/engine/approve"
@@ -116,20 +117,23 @@ type Service struct {
 	readMu            sync.Mutex // preserves commit and live broadcast order
 	restarts          sync.Map   // BoxID -> *restartClaim; completion fences delayed API callers too
 	// transcriptMu serializes appends, so each offset check and write runs alone.
-	transcriptMu        sync.Mutex
-	toolCalls           map[contract.SessionID]map[string]seenCall // under transcriptMu
-	agents              agentRuns
-	layout              box.Layout
-	browserMu           sync.Mutex
-	browserLocks        map[string]*sync.Mutex
-	roomData            sync.RWMutex // writers of a room folder share it; removing one takes it alone
-	instructionsMu      sync.Mutex
-	publishInstructions func(context.Context)
-	addons              *addons.Files
-	images              *images.Store
-	migrator            *images.Migrator
-	runnerImageProblems func() map[contract.HostName][]contract.RunnerImageProblem
-	addonSources        *addons.Sources
+	transcriptMu           sync.Mutex
+	toolCalls              map[contract.SessionID]map[string]seenCall // under transcriptMu
+	agents                 agentRuns
+	layout                 box.Layout
+	browserMu              sync.Mutex
+	browserLocks           map[string]*sync.Mutex
+	browserJars            map[string]*browser.Jar
+	browserMigrationFailed map[string]bool
+	readV1Cookies          func(context.Context, string) (browser.V1CookieDB, error)
+	roomData               sync.RWMutex // writers of a room folder share it; removing one takes it alone
+	instructionsMu         sync.Mutex
+	publishInstructions    func(context.Context)
+	addons                 *addons.Files
+	images                 *images.Store
+	migrator               *images.Migrator
+	runnerImageProblems    func() map[contract.HostName][]contract.RunnerImageProblem
+	addonSources           *addons.Sources
 }
 
 // createSession publishes before checking the store, so close can retire the handle.
@@ -182,7 +186,6 @@ func New(st *store.Store, boxes lifecycle.BoxAdapter, profiles Profiles, now fun
 	s := &Service{hostexecTimeout: context.WithTimeout, store: st, boxes: boxes, profiles: profiles, now: now, hookPoke: make(chan struct{}, 1), addonSources: addons.NewSources()}
 	s.reconciler = lifecycle.New(st, boxes, s, nil, s.event, now)
 	s.reconciler.SetRoomData(s)
-	s.reconciler.SetBrowserRecovery(s)
 	s.live = live.New(s.deliverWakes)
 	st.SetWake(s.queueWakes)
 	go s.live.Run(st.Done())

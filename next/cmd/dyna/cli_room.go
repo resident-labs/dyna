@@ -93,7 +93,7 @@ func roomCommand(getClient func() client) *cobra.Command {
 	browser := &cobra.Command{
 		Use:   "browser ROOM NAME|none",
 		Short: "Set the room's shared browser profile, or none",
-		Long:  "Set the room's shared Chromium profile (created with dyna browser create NAME), or none to turn it off. Several rooms may share one profile, one session at a time. Pin rooms sharing a profile to one home host with dyna room hosts, because Google and some shops bind sessions partly to device and IP and a box on another host may ask to sign in again.",
+		Long:  "Set the room's shared browser profile (created with dyna browser create NAME), or none to turn it off. Every session in rooms sharing a profile shares its cookie jar concurrently. Pin rooms sharing a profile to one host with dyna room hosts if a site binds sessions to IP or device.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[1]
