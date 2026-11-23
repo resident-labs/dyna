@@ -134,4 +134,15 @@ func TestModelFailureRetries(t *testing.T) {
 	if err := s.Read().QueryRowContext(ctx, "SELECT model_retry_at,model_retries FROM sessions WHERE id='s'").Scan(&retryAt, &retries); err != nil || retryAt != 0 || retries != 0 {
 		t.Fatalf("completed: %d %d %v", retryAt, retries, err)
 	}
+	post("short-reset")
+	finish(10, contract.TurnFailed, contract.CauseModelFailed, 1)
+	if err := s.Read().QueryRowContext(ctx, "SELECT model_retry_at FROM sessions WHERE id='s'").Scan(&retryAt); err != nil || retryAt < now.Add(30*time.Second).UnixMilli() || retryAt >= now.Add(33*time.Second).UnixMilli() {
+		t.Fatalf("short retry wasn't scheduled at the 30-second floor plus jitter: %d %v", retryAt, err)
+	}
+	if err := s.WakeModelRetries(ctx, time.UnixMilli(retryAt)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Read().QueryRowContext(ctx, "SELECT wake FROM deliveries WHERE to_id='s' AND state='pending'").Scan(&wake); err != nil || !wake {
+		t.Fatalf("wake at hinted deadline %v: %v", wake, err)
+	}
 }

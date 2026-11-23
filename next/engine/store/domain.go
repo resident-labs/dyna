@@ -374,9 +374,9 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			if retries < 8 && !cancelled {
 				delay := 5 * time.Minute * time.Duration(1<<retries)
 				if output.ModelRetryAfterSeconds > 0 {
-					reset := time.Duration(output.ModelRetryAfterSeconds) * time.Second
-					jitter := randv2.Int64N(int64(min(reset/10, 30*time.Second)))
-					retryAt = event.Time.Add(max(reset, 30*time.Second)).Add(time.Duration(jitter)).UnixMilli()
+					base := max(time.Duration(output.ModelRetryAfterSeconds)*time.Second, 30*time.Second)
+					jitter := randv2.Int64N(int64(min(base/10, 30*time.Second)))
+					retryAt = event.Time.Add(base + time.Duration(jitter)).UnixMilli()
 				} else {
 					retryAt = event.Time.Add(min(delay, time.Hour)).UnixMilli()
 				}

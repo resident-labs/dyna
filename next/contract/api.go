@@ -823,6 +823,11 @@ type BoxHelloResponse struct {
 	// GitHub says the engine serves GitHub's read-only MCP tools at /github/ on the box socket, with its own token.
 	GitHub bool `json:"github,omitempty"`
 }
+
+// MaxModelRetryAfterSeconds bounds the reset hints the box may report. Longer
+// cooldowns use the normal retry ladder so a changed account can recover sooner.
+const MaxModelRetryAfterSeconds = 3600
+
 type TurnOutputRequest struct {
 	DataAttachment *int         `json:"-"`
 	Data           JSONData     `json:"data,omitempty"`

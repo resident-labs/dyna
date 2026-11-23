@@ -62,6 +62,9 @@ func serve(client *http.Client, clientKey, affinityID string, routes map[string]
 	proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: "cliproxy"})
 	proxy.Transport = client.Transport
 	proxy.FlushInterval = -1
+	if affinityID != contract.LocalClient {
+		proxy.ModifyResponse = preserveModelRetryHint
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		method, ok := routes[r.URL.Path]
 		if !ok {

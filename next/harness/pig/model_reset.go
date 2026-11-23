@@ -5,16 +5,19 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
+
+	"github.com/resident-labs/dyna/contract"
 )
 
 // PiG's assistant event has only the final error text. Its HTTP adapters put
-// the status before the body, and prefix errors from a Retry-After above its
-// in-turn retry cap with the requested delay.
+// the status before the body (the route copies Retry-After into reset_seconds).
+// With provider retries enabled, PiG may replace the body with the requested
+// delay and the error's message when the delay exceeds its in-turn cap.
 var resetError = regexp.MustCompile(`(?s)^(?:Server requested ([0-9]+)s retry delay \(max: [0-9]+s\)\. )?(?:[A-Za-z][A-Za-z _-]* \()?(429|502|503)\)?(?::? (.*))?$`)
 
 type resetBody struct {
 	Code         json.RawMessage `json:"code"`
+	Message      string          `json:"message"`
 	ResetSeconds int64           `json:"reset_seconds"`
 }
 
@@ -46,15 +49,19 @@ func modelRetryAfterSeconds(message string) int64 {
 	default:
 		// OpenAI's capped-delay error can preserve the message but omit the
 		// code and body. Accept only the messages of those same 429s.
-		known429 := body == "Rate limit reached for requests" || body == "The service may be temporarily overloaded" ||
-			(strings.HasPrefix(body, "All credentials for model ") && strings.Contains(body, " are cooling down"))
-		if status == "429" && (hint == "" || !known429) {
+		text := detail.Message
+		if text == "" {
+			text = body
+		}
+		known429 := text == "Rate limit reached for requests" || text == "The service may be temporarily overloaded" ||
+			(strings.HasPrefix(text, "All credentials for model ") && strings.Contains(text, " are cooling down"))
+		if status == "429" && !known429 {
 			return 0
 		}
 	}
 	seconds, _ := strconv.ParseInt(hint, 10, 64)
 	seconds = max(seconds, detail.ResetSeconds)
-	if seconds < 0 || seconds > int64((1<<63-1)/time.Second) {
+	if seconds < 0 || seconds > contract.MaxModelRetryAfterSeconds {
 		return 0
 	}
 	return seconds
