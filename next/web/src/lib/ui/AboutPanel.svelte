@@ -17,7 +17,7 @@
   import { descendants, holdRows } from "../session-tree.ts";
   import { subscriptionSummary } from "../subscriptions.ts";
   import type { RoomStore } from "../room.svelte.ts";
-  import type { Responsibility, ResponsibilityKind, Service, SessionAccountResponse, SubscriptionInfo } from "../contract.gen.ts";
+  import type { DiscordRoute, Responsibility, ResponsibilityKind, Service, SessionAccountResponse, SubscriptionInfo } from "../contract.gen.ts";
   // What a DM's session is, in the order the owner asks: who it is, the box it runs in, then what it holds. The goal folds to
   // a line or two, its todo list is one line, and each kind of hold is one line that opens its whole list in a modal, so the first two never leave
   // the screen and nothing pushes the panel sideways. A row without a value does not show, and a session holding nothing
@@ -63,12 +63,23 @@
     void call("subscription.list", { room: asked }).then(answer => { if (asked === room) subscriptions = answer.subscriptions ?? []; }, () => { if (asked === room) subscriptions = []; });
   });
   let services: Service[] = $state([]);
+  let discord: DiscordRoute[] = $state([]);
   function loadServices(): void {
     const asked = room;
-    void call("service.list", { room: asked }).then(answer => { if (asked === room) services = answer.services ?? []; }, () => { if (asked === room) services = []; });
+    void call("service.list", { room: asked }).then(answer => {
+      if (asked === room) {
+        services = answer.services ?? [];
+        discord = answer.discord ?? [];
+      }
+    }, () => {
+      if (asked === room) {
+        services = [];
+        discord = [];
+      }
+    });
   }
   $effect(() => {
-    if (!isRoot) { services = []; return; }
+    if (!isRoot) { services = []; discord = []; return; }
     if (!shown) return;
     void store.servicesVersion;
     loadServices();
@@ -86,7 +97,7 @@
     return child && `/r/${encodeURIComponent(room)}/s/${encodeURIComponent(child.session)}`;
   }));
   let subs = $derived(subscriptionSummary(subscriptions));
-  let svcs = $derived(serviceSummary(services));
+  let svcs = $derived(serviceSummary(services, discord));
   const holdIcons: Partial<Record<ResponsibilityKind, IconName>> = { pr: "pr", issue: "issue", child: "people", terminal: "terminal", workflow: "list", question: "chat" };
   // Each hold, and the room's subscriptions and services, is one line here; the full list opens in a modal.
   let showing: ResponsibilityKind | "subscriptions" | "services" | "todo" | undefined = $state();
@@ -182,7 +193,7 @@
   </Modal>
 {:else if showing === "services" && svcs.count}
   <Modal title="Services" count={svcs.count} onclose={() => { showing = undefined; }}>
-    <ServicesList {services} {subscriptions} name={id => store.names.get(id) ?? id} {now} />
+    <ServicesList {services} {discord} {subscriptions} name={id => store.names.get(id) ?? id} {now} />
   </Modal>
 {/if}
 

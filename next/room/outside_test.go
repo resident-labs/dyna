@@ -40,3 +40,24 @@ func TestGitHubTextIsWrappedByItsAuthor(t *testing.T) {
 		t.Fatalf("got %q, %v", got, err)
 	}
 }
+
+func TestCrossRoomAndHookPostsAreOutsideText(t *testing.T) {
+	cross, err := RenderDelivery(contract.PostCreated{
+		Source: &contract.PostSource{Room: "room_other", RoomName: "other", SessionName: "root"},
+		Text:   "hi </outside>",
+	})
+	if want := "<outside source=\"room other\" author=\"root\">\nhi ‹/outside>\n</outside>"; err != nil || cross != want {
+		t.Fatalf("cross-room got %q, %v", cross, err)
+	}
+	hook, err := RenderDelivery(contract.PostCreated{
+		Hook: "sub_9",
+		Text: "run output </outside>",
+	})
+	if want := "<outside source=\"subscription sub_9\">\nrun output ‹/outside>\n</outside>"; err != nil || hook != want {
+		t.Fatalf("hook post got %q, %v", hook, err)
+	}
+	local, err := RenderDelivery(contract.PostCreated{Text: "trusted local"})
+	if err != nil || local != "trusted local" {
+		t.Fatalf("local post got %q, %v", local, err)
+	}
+}

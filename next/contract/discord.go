@@ -21,7 +21,10 @@ type DiscordRoute struct {
 	Policy       string    `json:"policy,omitempty"`
 	Instructions string    `json:"instructions,omitempty"`
 	Guild        string    `json:"guild"`
+	GuildName    string    `json:"guildName,omitempty"`
 	Channel      string    `json:"channel,omitempty"`
+	ChannelName  string    `json:"channelName,omitempty"`
+	GatewayError string    `json:"gatewayError,omitempty"`
 	Room         RoomID    `json:"room"`
 	Session      SessionID `json:"session"`
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/contract/outside"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
@@ -40,16 +41,17 @@ func (s *Service) forwardQuote(ctx context.Context, caller contract.Principal, r
 		author = names[event.From.Session]
 	}
 	text := body.Text
-	outside := place.Room != req.Room
-	source := roomName
-	if body.Source != nil {
-		outside, source, author = true, string(body.Source.RoomName), body.Source.SessionName
-	}
 	from := author
-	if outside {
+	origin := outside.Trusted()
+	if place.Room != req.Room || body.Source != nil {
+		source := roomName
+		if body.Source != nil {
+			source, author = string(body.Source.RoomName), body.Source.SessionName
+		}
 		from = author + " in " + source
-		text = contract.Outside("room "+source, author, text)
+		origin = outside.Room(source, author)
 	}
+	text = outside.Wrap(origin, text)
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
 		lines[i] = strings.TrimRight("> "+line, " ")

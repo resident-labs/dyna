@@ -50,7 +50,8 @@ type ServiceListRequest struct {
 	Room RoomID `json:"room,omitempty"` // empty lists every room's services
 }
 type ServiceListResponse struct {
-	Services []Service `json:"services"`
+	Services []Service      `json:"services"`
+	Discord  []DiscordRoute `json:"discord,omitempty"`
 }
 
 // ServiceRef names a service in a room.

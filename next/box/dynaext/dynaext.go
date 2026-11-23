@@ -23,6 +23,7 @@ import (
 	"github.com/resident-labs/dyna/box/dynamcp"
 	"github.com/resident-labs/dyna/box/shell"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/contract/outside"
 	"github.com/resident-labs/dyna/harness/pig"
 )
 
@@ -335,17 +336,14 @@ func outsideResult(_ context.Context, e extension.ToolResultEvent) (extension.To
 	if !found || !strings.HasPrefix(result.ToolName, "mcp__") || server == "dyna" {
 		return extension.ToolResultEventResult{}, nil
 	}
-	source := "mcp " + server
-	if server == "github" {
-		source = server
-	}
+	origin := outside.MCP(server)
 	content := make([]any, len(result.Content))
 	for i, block := range result.Content {
 		content[i] = block
 		// PiG gives a block as the JSON object it is.
 		if fields, ok := block.(map[string]any); ok && fields["type"] == "text" {
 			text, _ := fields["text"].(string)
-			content[i] = map[string]any{"type": "text", "text": contract.Outside(source, "", text)}
+			content[i] = map[string]any{"type": "text", "text": outside.Wrap(origin, text)}
 		}
 	}
 	return extension.ToolResultEventResult{Content: content, StructuredContent: result.StructuredContent}, nil

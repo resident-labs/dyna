@@ -1,11 +1,13 @@
 package room
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/contract/outside"
 )
 
 // RenderDelivery renders the event bodies that may be delivered to a session.
@@ -16,17 +18,17 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		for _, file := range b.Attachments {
 			lines = append(lines, fmt.Sprintf("%q (%d bytes): %s", file.Name, file.Size, file.Status))
 		}
-		return contract.Outside("discord attachments", b.Author+" ("+b.AuthorID+")", strings.Join(lines, "\n")), nil
+		return outside.Wrap(outside.DiscordAttachments(b.Author, b.AuthorID), strings.Join(lines, "\n")), nil
 	case contract.DiscordMessage:
 		words := b.Text + b.RichContent
 		if b.History != "" {
 			words = b.History + "\n\n" + b.Author + ": " + words
 		}
-		text := contract.Outside("discord #"+b.ChannelName, b.Author, words)
+		text := outside.Wrap(outside.DiscordChannel(b.ChannelName, b.Author), words)
 		if b.Owner {
-			text = b.Text
+			text = outside.Wrap(outside.Trusted(), b.Text)
 			if b.History+b.RichContent != "" {
-				text = contract.Outside("discord #"+b.ChannelName, "", b.History+b.RichContent) + "\n\n" + text
+				text = outside.Wrap(outside.DiscordChannel(b.ChannelName, ""), b.History+b.RichContent) + "\n\n" + text
 			}
 		}
 		if len(b.Attachments) > 0 {
@@ -34,7 +36,7 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 			for _, file := range b.Attachments {
 				attachments = append(attachments, fmt.Sprintf("%q (%d bytes): %s", file.Name, file.Size, file.Status))
 			}
-			text += "\n" + contract.Outside("discord attachments", b.Author+" ("+b.AuthorID+")", "Attachments: "+strings.Join(attachments, ", "))
+			text += "\n" + outside.Wrap(outside.DiscordAttachments(b.Author, b.AuthorID), "Attachments: "+strings.Join(attachments, ", "))
 		}
 		return text, nil
 	case contract.DiscordMemberJoined:
@@ -58,13 +60,19 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 	case contract.OpRequested:
 		return fmt.Sprintf("%s\nDecide it with op decide, id %s: approve true or false, with a reason when you deny.", b.Card.Body, b.ID), nil
 	case contract.PostCreated:
+		text := b.Text
+		if b.Source != nil {
+			text = outside.Wrap(outside.Room(cmp.Or(string(b.Source.RoomName), string(b.Source.Room)), b.Source.SessionName), text)
+		} else if b.Hook != "" {
+			text = outside.Wrap(outside.Subscription(string(b.Hook)), text)
+		}
 		if b.Context != "" {
 			if b.Spoken {
-				return b.Context + "\n\n" + b.Text, nil
+				return b.Context + "\n\n" + text, nil
 			}
-			return b.Context + "\n\nRoot's prompt:\n\n" + b.Text, nil
+			return b.Context + "\n\nRoot's prompt:\n\n" + text, nil
 		}
-		return b.Text, nil
+		return text, nil
 	case contract.SessionRestarted:
 		switch {
 		case b.ImageUpdated:
@@ -180,11 +188,11 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		}
 		text += "."
 		if b.Args != "" {
-			text += "\nArguments: " + contract.Outside("tool call", "", b.Args)
+			text += "\nArguments: " + outside.Wrap(outside.ToolCall(), b.Args)
 		}
-		return text + "\nError: " + contract.Outside("tool result", "", b.Error), nil
+		return text + "\nError: " + outside.Wrap(outside.ToolResult(), b.Error), nil
 	case contract.HookFinished:
-		return fmt.Sprintf("Subscription %s finished: %s, exit code %d. Last output:\n%s", b.Subscription, b.Result, b.ExitCode, contract.Outside("subscription "+string(b.Subscription), "", b.Output)), nil
+		return fmt.Sprintf("Subscription %s finished: %s, exit code %d. Last output:\n%s", b.Subscription, b.Result, b.ExitCode, outside.Wrap(outside.Subscription(string(b.Subscription)), b.Output)), nil
 	case contract.ServiceMessage:
 		text := b.Text
 		if len(b.Data) > 0 && string(b.Data) != "null" {
@@ -193,7 +201,7 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 			}
 			text += "data: " + string(b.Data)
 		}
-		return contract.Outside(string(b.Service), b.Author, text), nil
+		return outside.Wrap(outside.Feed(string(b.Service), b.Author), text), nil
 	case contract.ServiceFailure:
 		text := fmt.Sprintf("Service %s failed", b.Name)
 		if b.Host != "" {
@@ -205,7 +213,7 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 		}
 		text += "."
 		if b.Detail != "" {
-			text += "\n" + contract.Outside("service "+string(b.Name), "", b.Detail)
+			text += "\n" + outside.Wrap(outside.Service(string(b.Name)), b.Detail)
 		}
 		return text, nil
 	case contract.OpDecided:
@@ -282,11 +290,11 @@ func renderGitHubItem(item contract.GitHubItem) string {
 	lines := []string{fmt.Sprintf("%s %s#%d: %s. %s", item.Kind, item.Repo, item.Number, strings.Join(said, "; "), item.URL)}
 	lines = append(lines, wrapped...)
 	if item.Text != "" {
-		text := item.Text
+		origin := outside.Trusted()
 		if item.Outside {
-			text = contract.Outside("github", "@"+item.Actor, text)
+			origin = outside.GitHub(item.Actor)
 		}
-		lines = append(lines, text)
+		lines = append(lines, outside.Wrap(origin, item.Text))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -347,7 +355,7 @@ func actionParts(actions []contract.GitHubItem, words map[contract.PrChangeKind]
 		}
 		said = append(said, strings.Join(parts, ", ")+by(actor))
 		if len(text) > 0 {
-			wrapped = append(wrapped, contract.Outside("github", "@"+actor, strings.Join(text, "\n")))
+			wrapped = append(wrapped, outside.Wrap(outside.GitHub(actor), strings.Join(text, "\n")))
 		}
 		start = end
 	}
@@ -377,11 +385,11 @@ func changeHead(noun string, repo contract.RepoName, number int, url string, wor
 func commentLines(comments []contract.PrComment, more int) []string {
 	var lines []string
 	for _, comment := range comments {
-		text := comment.Body
+		origin := outside.Trusted()
 		if comment.Outside {
-			text = contract.Outside("github", "@"+comment.Author, text)
+			origin = outside.GitHub(comment.Author)
 		}
-		lines = append(lines, fmt.Sprintf("Comment by @%s, %s:\n%s", comment.Author, comment.URL, text))
+		lines = append(lines, fmt.Sprintf("Comment by @%s, %s:\n%s", comment.Author, comment.URL, outside.Wrap(origin, comment.Body)))
 	}
 	if more > 0 {
 		lines = append(lines, fmt.Sprintf("%d more comments on GitHub.", more))
@@ -402,19 +410,15 @@ func renderPRChanged(b contract.PrChanged) string {
 		}) {
 			lines = append(lines, "The checks ran on "+change.PR.Head+".")
 		}
+		checkOrigin := outside.Trusted()
+		if change.Outside {
+			checkOrigin = outside.GitHub(change.PR.Author)
+		}
 		if len(change.PR.CancelledChecks) > 0 {
-			checks := strings.Join(change.PR.CancelledChecks, ", ")
-			if change.Outside {
-				checks = contract.Outside("github", "@"+change.PR.Author, checks)
-			}
-			lines = append(lines, "CI cancelled: "+checks)
+			lines = append(lines, "CI cancelled: "+outside.Wrap(checkOrigin, strings.Join(change.PR.CancelledChecks, ", ")))
 		}
 		if len(change.FailedChecks) > 0 {
-			checks := strings.Join(change.FailedChecks, ", ")
-			if change.Outside {
-				checks = contract.Outside("github", "@"+change.PR.Author, checks)
-			}
-			lines = append(lines, "Failed checks: "+checks)
+			lines = append(lines, "Failed checks: "+outside.Wrap(checkOrigin, strings.Join(change.FailedChecks, ", ")))
 		}
 		if push := change.Push; push != nil {
 			lines = append(lines, fmt.Sprintf("Head moved %s -> %s.", push.Before, push.After))
@@ -560,7 +564,7 @@ func renderDiscordMember(verb string, b contract.DiscordMemberJoined) string {
 		who = "bot"
 	}
 	return fmt.Sprintf("Discord server %s: %s %s %s; the account was created %s.\n", b.Server, who, b.User, verb, b.Created.Format("2006-01-02")) +
-		contract.Outside("discord server "+b.Server, "", "name: "+b.Name)
+		outside.Wrap(outside.DiscordServer(b.Server), "name: "+b.Name)
 }
 
 var discordChannelKinds = map[int]string{0: "text channel", 2: "voice channel", 4: "category", 5: "announcement channel", 13: "stage channel", 15: "forum channel", 16: "media channel"}
@@ -575,10 +579,10 @@ func renderDiscordChannel(verb string, b contract.DiscordChannelCreated) string 
 		text += ", in category " + b.Parent
 		names += "\ncategory: " + b.ParentName
 	}
-	return text + ".\n" + contract.Outside("discord server "+b.Server, "", names)
+	return text + ".\n" + outside.Wrap(outside.DiscordServer(b.Server), names)
 }
 
 func renderDiscordRole(verb string, b contract.DiscordRoleCreated) string {
 	return fmt.Sprintf("Discord server %s: role %s %s.\n", b.Server, b.Role, verb) +
-		contract.Outside("discord server "+b.Server, "", "name: "+b.Name)
+		outside.Wrap(outside.DiscordServer(b.Server), "name: "+b.Name)
 }

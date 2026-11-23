@@ -129,6 +129,22 @@ func (s *Service) ServiceList(ctx context.Context, _ contract.Principal, req con
 	for _, row := range rows {
 		result.Services = append(result.Services, row.Service)
 	}
+	routes, err := s.store.DiscordRoutes(ctx, req.Room)
+	if err != nil {
+		return contract.ServiceListResponse{}, failure(err)
+	}
+	if len(routes) > 0 {
+		bot, err := s.store.DiscordBot(ctx)
+		if err != nil {
+			return contract.ServiceListResponse{}, failure(err)
+		}
+		if bot.ID != "" {
+			result.Discord = make([]contract.DiscordRoute, 0, len(routes))
+			for _, r := range routes {
+				result.Discord = append(result.Discord, s.discordRouteContract(r, bot.Failure))
+			}
+		}
+	}
 	return result, nil
 }
 

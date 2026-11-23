@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { Service, SubscriptionInfo } from "./contract.gen.ts";
+import type { DiscordRoute, Service, SubscriptionInfo } from "./contract.gen.ts";
 import { serviceError, serviceRoutes, serviceRows, serviceSummary } from "./services.ts";
 
 const makeService = (overrides: Partial<Service> = {}): Service => ({
@@ -67,4 +67,40 @@ test("serviceRows sorts failures first and formats feed stats and errors", () =>
   assert.deepEqual(rows[1].routes, ["→ wakes sunrise"]);
   assert.equal(rows[2].feed, false);
   assert.equal(serviceError(makeService({ reason: "health_failed", detail: "" })), "Health check failed");
+});
+
+test("Discord routes appear as built-in feeds in serviceSummary and serviceRows", () => {
+  const routes: DiscordRoute[] = [
+    { guild: "100", guildName: "Resident Labs", channel: "200", channelName: "support", room: "room_1", session: "ses_front" },
+    { guild: "100", guildName: "Resident Labs", room: "room_1", session: "ses_root" },
+    { guild: "101", channel: "300", room: "room_1", session: "ses_ops", gatewayError: "gateway disconnected" },
+  ];
+  const names = (id: string) => ({ ses_front: "front", ses_root: "root", ses_ops: "ops" }[id] ?? id);
+
+  assert.deepEqual(serviceSummary([], routes.slice(0, 2)), { count: 2, health: "all running", failing: false });
+  assert.deepEqual(serviceSummary([makeService()], routes), { count: 4, health: "1 failing", failing: true });
+
+  const rows = serviceRows([makeService()], [], names, Date.parse("2026-11-22T22:00:00Z"), routes);
+  assert.equal(rows.length, 4);
+  // Failing Discord route sorts first.
+  assert.equal(rows[0].name, "Discord");
+  assert.equal(rows[0].builtIn, true);
+  assert.equal(rows[0].failing, true);
+  assert.equal(rows[0].host, "channel 300");
+  assert.equal(rows[0].detail, "server 101");
+  assert.equal(rows[0].error, "gateway disconnected");
+  assert.deepEqual(rows[0].routes, ["→ wakes ops"]);
+
+  // Healthy container service and built-in Discord routes follow.
+  const support = rows.find(r => r.host === "#support");
+  assert.ok(support);
+  assert.equal(support.builtIn, true);
+  assert.equal(support.state, "Active");
+  assert.equal(support.detail, "Resident Labs · channel 200");
+  assert.deepEqual(support.routes, ["→ wakes front"]);
+
+  const wholeServer = rows.find(r => r.host === "Resident Labs");
+  assert.ok(wholeServer);
+  assert.equal(wholeServer.detail, "All channels · server 100");
+  assert.deepEqual(wholeServer.routes, ["→ wakes root"]);
 });
