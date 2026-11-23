@@ -47,8 +47,13 @@ func modelRetryAfterSeconds(message string) int64 {
 			detail = *nested
 		}
 	}
+	var fallback int64
 	switch strings.Trim(string(detail.Code), `"`) {
-	case "1302", "1305", "model_cooldown":
+	case "1302":
+		fallback = 60
+	case "1305":
+		fallback = 20
+	case "model_cooldown":
 	default:
 		// OpenAI's capped-delay error can preserve the message but omit the
 		// code and body. Accept only the messages of those same 429s.
@@ -66,6 +71,9 @@ func modelRetryAfterSeconds(message string) int64 {
 	seconds = max(seconds, detail.ResetSeconds)
 	if seconds > contract.MaxModelRetryAfterSeconds {
 		return 0
+	}
+	if status == "429" && seconds == 0 {
+		return fallback
 	}
 	return seconds
 }

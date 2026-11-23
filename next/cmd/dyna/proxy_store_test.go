@@ -86,6 +86,22 @@ func TestProxyStoreLoadsKeyEndpointFromCatalog(t *testing.T) {
 	if loaded[0].Attributes["api_key"] != "invented-key" {
 		t.Fatal("loading the endpoint lost the key")
 	}
+	if retries, ok := loaded[0].RequestRetryOverride(); !ok || retries != 3 {
+		t.Fatalf("existing z.ai key retry override = %d, %v; want 3, true", retries, ok)
+	}
+
+	created, err := mgr.Register(proxyauth.WithAuthCreationIntent(ctx), &proxyauth.Auth{
+		ID:         "dyna-key-fedcba9876543210fedcba9876543210",
+		Provider:   "openai-compatible-zai",
+		Attributes: map[string]string{"api_key": "invented-new-key"},
+		Metadata:   map[string]any{"type": "openai-compatibility"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retries, ok := created.RequestRetryOverride(); !ok || retries != 3 {
+		t.Fatalf("new z.ai key retry override = %d, %v; want 3, true", retries, ok)
+	}
 }
 
 func TestProxyStoreReloadsCredentialAndRejectsDuplicate(t *testing.T) {

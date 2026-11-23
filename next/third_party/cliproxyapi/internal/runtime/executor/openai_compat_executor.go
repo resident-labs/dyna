@@ -222,7 +222,7 @@ func (e *OpenAICompatExecutor) executeWithCredentials(ctx context.Context, auth 
 		b, _ := io.ReadAll(httpResp.Body)
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
-		err = newOpenAICompatStatusError(httpResp.StatusCode, httpResp.Header, b)
+		err = e.newStatusError(httpResp.StatusCode, httpResp.Header, b)
 		return resp, err
 	}
 	body, err := io.ReadAll(httpResp.Body)
@@ -330,7 +330,7 @@ func (e *OpenAICompatExecutor) executeImages(ctx context.Context, auth *cliproxy
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), body))
-		err = newOpenAICompatStatusError(httpResp.StatusCode, httpResp.Header, body)
+		err = e.newStatusError(httpResp.StatusCode, httpResp.Header, body)
 		return resp, err
 	}
 
@@ -462,7 +462,7 @@ func (e *OpenAICompatExecutor) executeStreamWithCredentials(ctx context.Context,
 		if errClose := httpResp.Body.Close(); errClose != nil {
 			log.Errorf("openai compat executor: close response body error: %v", errClose)
 		}
-		err = newOpenAICompatStatusError(httpResp.StatusCode, httpResp.Header, b)
+		err = e.newStatusError(httpResp.StatusCode, httpResp.Header, b)
 		return nil, err
 	}
 	out := make(chan cliproxyexecutor.StreamChunk)
@@ -1212,18 +1212,14 @@ func (e statusErr) IsTransientRateLimit() bool { return e.transientRateLimit }
 
 const openAICompatTPMFallbackRetryAfter = time.Minute
 
-func newOpenAICompatStatusError(status int, headers http.Header, body []byte) statusErr {
+func (e *OpenAICompatExecutor) newStatusError(status int, headers http.Header, body []byte) statusErr {
 	return statusErr{
 		code:       status,
 		msg:        string(body),
-		retryAfter: openAICompatRetryAfter(status, headers, body, time.Now()),
+		retryAfter: openAICompatRetryAfter(e.provider, status, headers, body, time.Now()),
 	}
 }
 
-// openAICompatRetryAfter preserves the provider's standard Retry-After signal.
-// Some OpenAI-compatible providers omit that header for explicit per-minute
-// token limits; in that narrow case a one-minute fallback prevents immediate
-// replay of the same large request while keeping the retry wait bounded.
 // parseRetryAfterHeader parses an HTTP Retry-After header in either the
 // delay-seconds or HTTP-date form. A present, valid value always yields a
 // non-nil result so that an explicit immediate retry (0 seconds or a past
@@ -1257,7 +1253,8 @@ func parseRetryAfterHeader(headers http.Header, now time.Time) *time.Duration {
 	return nil
 }
 
-func openAICompatRetryAfter(status int, headers http.Header, body []byte, now time.Time) *time.Duration {
+// Preserve provider-supplied Retry-After before looking for a known body code.
+func openAICompatRetryAfter(provider string, status int, headers http.Header, body []byte, now time.Time) *time.Duration {
 	if status != http.StatusTooManyRequests {
 		return nil
 	}
@@ -1265,6 +1262,22 @@ func openAICompatRetryAfter(status int, headers http.Header, body []byte, now ti
 		return retryAfter
 	}
 
+	if provider == "openai-compatible-zai" {
+		code := gjson.GetBytes(body, "error.code").String()
+		if code == "" {
+			code = gjson.GetBytes(body, "code").String()
+		}
+		switch code {
+		case "1302":
+			delay := time.Minute
+			return &delay
+		case "1305":
+			delay := 20 * time.Second
+			return &delay
+		}
+	}
+
+	// Explicit per-minute token limits often omit Retry-After.
 	code := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "error.code").String()))
 	message := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "error.message").String()))
 	if strings.Contains(code, "tpmratelimitexceeded") ||

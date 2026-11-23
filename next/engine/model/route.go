@@ -60,6 +60,7 @@ var boxRoutes = map[string]string{
 // replaces the caller's credentials and affinity headers with the engine's.
 func serve(client *http.Client, clientKey, affinityID string, routes map[string]string, allow func(string) bool, eligibleIDs []string, pinnedID string, preferredIDs []string, crew bool, sent ...func(context.Context) error) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: "cliproxy"})
+	// Use the wire idle timeout, not the client's management-call timeout.
 	proxy.Transport = client.Transport
 	proxy.FlushInterval = -1
 	if affinityID != contract.LocalClient {

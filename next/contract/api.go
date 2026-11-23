@@ -26,8 +26,8 @@ type InstructionsSetResponse struct {
 	Hash string `json:"hash"`
 }
 
-// ModelWireIdleTimeout leaves room for the proxy's five-minute admission hold
-// and up to 30 seconds of jitter before a provider's normal five-minute wait.
+// ModelWireIdleTimeout leaves room for the proxy's shared 5m30s cooldown
+// budget and the provider's normal time to first output.
 const ModelWireIdleTimeout = 11 * time.Minute
 
 type Method string

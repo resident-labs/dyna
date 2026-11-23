@@ -262,6 +262,9 @@ func TestExistingKeyAccountsSurviveTheMoveToPresets(t *testing.T) {
 	var seen *http.Request
 	manager.SetRoundTripperProvider(importTestTransportProvider{&seen})
 	for _, auth := range loaded {
+		if _, ok := auth.RequestRetryOverride(); ok && auth.Provider != "openai-compatible-zai" {
+			t.Errorf("non-z.ai key %s picked up a retry override", auth.Provider)
+		}
 		if _, err := manager.Register(coreauth.WithSkipPersist(ctx), auth); err != nil {
 			t.Fatal(err)
 		}

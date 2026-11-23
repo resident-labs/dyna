@@ -166,7 +166,7 @@ func TestProxySingleCodexCredentialCooldownPolicy(t *testing.T) {
 		manager := newCooldownTestManager(t, cfg, upstream.URL)
 		// A thin HTTP adapter calls the real CLIProxyAPI execution/error handlers.
 		// Dyna's real route and Unix socket lead into the real auth manager;
-		// only its executor and the upstream are fixtures. PiG owns retries.
+		// only its executor and the upstream are fixtures. Codex retries here are PiG's.
 		base := handlers.NewBaseAPIHandlers(&cfg.SDKConfig, manager)
 		adapter := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Header.Get("Authorization") != "Bearer "+p.clientKey || r.URL.Path != "/v1/responses" {
