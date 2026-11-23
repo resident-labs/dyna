@@ -484,8 +484,19 @@ func TestTranscriptFeedMessagesAndSent(t *testing.T) {
 	if !sawSteer || !sawNestedSent || !sawLooseSent {
 		t.Fatalf("steer=%v nested=%v loose=%v items=%+v", sawSteer, sawNestedSent, sawLooseSent, turn.Items)
 	}
+	if len(page.Steps) != 1 || page.Steps[0].Tool != "mcp__dyna__service" {
+		t.Fatalf("expected only tool step (no blank step for loose service.sent), got %+v", page.Steps)
+	}
 	chunk, problem := s.TranscriptRead(ctx, theOwner, contract.TranscriptReadRequest{Session: caller.Session, Turn: "turn_feed", Item: string(sentCallID), Part: contract.TranscriptPartText})
 	if problem != nil || chunk.Chunk != longReply {
 		t.Fatalf("chunk problem=%v len=%d want=%d", problem, len(chunk.Chunk), len(longReply))
+	}
+	digest, problem := s.TranscriptDigest(ctx, theOwner, contract.TranscriptDigestRequest{Session: string(caller.Session), Turn: "turn_feed"})
+	if problem != nil || len(digest.Turns) != 1 {
+		t.Fatalf("digest failed: problem=%v turns=%d", problem, len(digest.Turns))
+	}
+	joined := strings.Join(digest.Turns[0].Steps, "\n")
+	if !strings.Contains(joined, "→ @alice/team: ") || !strings.Contains(joined, "→ @bob/team: logs look fine") {
+		t.Fatalf("digest missing service.sent steps: %q", joined)
 	}
 }

@@ -49,7 +49,8 @@
 
 {#snippet feedLine(event: Extract<Event, { type: "service.message" }>)}
   {@const service = event.body.service || "feed"}
-  {service} <span class="feed-tag">feed</span>{describe(event, name).slice(service.length)}
+  {@const rest = describe(event, name).slice(event.body.service.length)}
+  {service} <span class="feed-tag">feed</span>{#if rest && !rest.startsWith(" · ") && !rest.startsWith(": ")}{" · "}{/if}{rest}
 {/snippet}
 
 {#snippet summary()}<span class="summary">{workSummary(row.events, name, row.until)} <time datetime={row.events[0].at}>{row.events.length > 1 || row.until ? timeSpan(row.events[0].at, row.until ?? row.events.at(-1)?.at ?? row.events[0].at) : clock(row.events[0].at)}</time></span>{/snippet}

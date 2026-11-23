@@ -147,10 +147,11 @@ func serviceCommand(getClient func() client) *cobra.Command {
 			text = strings.TrimSuffix(string(raw), "\n")
 		}
 		result, err := getClient().ServiceSend(cmd.Context(), contract.ServiceSendRequest{
-			Room:    contract.RoomID(sendRoom),
-			Service: contract.ServiceName(args[0]),
-			To:      args[1],
-			Text:    text,
+			Room:       contract.RoomID(sendRoom),
+			Service:    contract.ServiceName(args[0]),
+			To:         args[1],
+			Text:       text,
+			ToolCallID: os.Getenv(contract.ToolCallIDEnv),
 		})
 		if err == nil {
 			fmt.Fprintln(cmd.OutOrStdout(), result.ID)

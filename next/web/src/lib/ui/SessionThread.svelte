@@ -353,7 +353,7 @@
       <time datetime={at} title={fullTime(at)}>{formatTime(at)}</time>
     </div>
     <CollapsibleBody>
-      {#if text}<Markdown rhythm="thread" {text} source={{ key, from: { kind: "engine" }, at }} />{/if}
+      {#if text}<Markdown rhythm="thread" {text} mentions={false} />{/if}
       {#if feed.data !== undefined}<PostData value={feed.data} />{/if}
       {@render textRetry(turn, part)}
     </CollapsibleBody>
@@ -395,12 +395,14 @@
   {#if shown.kind === "feed"}
     {@render feedMessage(key, shown.feed, shown.text, input.at, turn, part)}
   {:else if shown.kind !== "message"}
-    {@const name = input.source ? sourceLabel(input.source) : input.from.session ? sender("session", input.from.session) : undefined}
-    <div class="muted turn-note input-line" class:failure={shown.kind === "failed"} title={formatTime(input.at)}>
-      <span class="slot"><Icon name={shown.kind === "failed" ? "warning" : "inbox"} size={14} /></span>
-      {#if name}<span class="agent-sender">{#if !input.source || hasRoom(input.source.room)}<a href={`/r/${encodeURIComponent(input.source?.room ?? store.room)}/s/${encodeURIComponent(input.from.session ?? "")}`} onclick={navigate} style:--hue={hue(name)}>{name}</a>{:else}<strong class={input.from.kind} style:--hue={hue(name)}>{name}</strong>{/if}</span>{/if}
-      <span>{#if shown.restart}<EngineRestartNotice event={shown.restart} />{:else}{shown.text}{/if}</span>
-    </div>
+    {#if !(input.type === "service.message" && input.more && chunks[part + "/text"] === undefined && chunkFailed[part + "/text"])}
+      {@const name = input.source ? sourceLabel(input.source) : input.from.session ? sender("session", input.from.session) : undefined}
+      <div class="muted turn-note input-line" class:failure={shown.kind === "failed"} title={formatTime(input.at)}>
+        <span class="slot"><Icon name={shown.kind === "failed" ? "warning" : "inbox"} size={14} /></span>
+        {#if name}<span class="agent-sender">{#if !input.source || hasRoom(input.source.room)}<a href={`/r/${encodeURIComponent(input.source?.room ?? store.room)}/s/${encodeURIComponent(input.from.session ?? "")}`} onclick={navigate} style:--hue={hue(name)}>{name}</a>{:else}<strong class={input.from.kind} style:--hue={hue(name)}>{name}</strong>{/if}</span>{/if}
+        <span>{#if shown.restart}<EngineRestartNotice event={shown.restart} />{:else}{shown.text}{/if}</span>
+      </div>
+    {/if}
     {@render textRetry(turn, part)}
   {:else if input.from.kind === "owner"}{@render ownerMessage(key, input.at, false, body)}
   {:else}{@render inbound(key, input.from, input.at, body, !!input.attachments?.length, input.source)}{/if}
@@ -521,11 +523,11 @@
   /* Mirrors .bubble from the other side. */
   .agent-input { align-self: flex-start; max-width: 80%; min-width: 0; padding: 12px 16px; background: var(--raised); border-radius: 12px; }
   .agent-input .agent-sender { margin-bottom: 4px; }
-  .feed-input { align-self: flex-start; max-width: 80%; min-width: 0; padding: 11px 15px; border: 1px solid var(--line); border-left: 2px dashed var(--firm); border-radius: 10px; background: var(--post-hover); }
+  .feed-input { align-self: flex-start; max-width: 80%; min-width: 0; padding: 11px 15px; border: 1px dashed var(--firm); border-radius: 12px; background: var(--post-hover); }
   .feed-sender { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 7px; margin-bottom: 6px; min-width: 0; }
   .feed-icon { display: inline-flex; align-items: center; color: var(--muted); }
   .feed-service { color: var(--text); font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
-  .feed-tag { padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 11.5px; font-weight: 500; line-height: 18px; white-space: nowrap; }
+  .feed-tag { padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 11px; font-weight: 500; line-height: 18px; white-space: nowrap; }
   .feed-author { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
   .feed-sender time { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .service-sent-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; margin-bottom: 4px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }

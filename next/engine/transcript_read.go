@@ -399,7 +399,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 		}
 		if req.Turn != "" {
 			for _, item := range t.Items {
-				if item.Kind == contract.TranscriptTool || item.Kind == contract.TranscriptPost {
+				if item.Kind == contract.TranscriptTool || (item.Kind == contract.TranscriptPost && item.Tool != "") {
 					response.Steps = append(response.Steps, pig.TranscriptStep(item))
 				}
 			}

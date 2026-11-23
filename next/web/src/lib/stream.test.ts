@@ -236,3 +236,21 @@ for (const advertised of [true, false]) test(`stall watchdog compatibility: adve
   }
   stop(); assert.equal(tasks.size, 0); advance(100000); assert.equal(sources.length, advertised ? 2 : 1);
 });
+
+test("service.sent from a session invalidates that session's transcript", () => {
+  const calls: (string | undefined)[] = [];
+  const unwatch = watchTranscripts(session => calls.push(session));
+  const sources: EventConnection[] = [];
+  const stop = stream("room", () => 0, () => {}, () => {
+    const source: EventConnection = { onmessage: null, onerror: null, addEventListener() {}, close() {} };
+    sources.push(source);
+    return source;
+  });
+  sources[0].onmessage?.(new MessageEvent("message", { data: JSON.stringify({
+    seq: 8, id: "e-sent", at: "", from: { kind: "session", session: "ses_1" }, type: "service.sent",
+    body: { service: "agent-chat", id: "out_1", to: "@alice", text: "hi" },
+  }) }));
+  assert.deepEqual(calls, ["ses_1"]);
+  unwatch();
+  stop();
+});
