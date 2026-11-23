@@ -259,6 +259,10 @@ func TestExistingKeyAccountsSurviveTheMoveToPresets(t *testing.T) {
 		t.Fatal("the custom provider lost its model")
 	}
 	defer cliproxy.GlobalModelRegistry().UnregisterClient(customID)
+	// A model the preset gained after the account was saved reaches it.
+	if err := service.ActivateDynaCredential(ctx, existing[0].id, "glm-5.4"); err != nil {
+		t.Fatal("the z.ai account did not gain glm-5.4 from its preset")
+	}
 	for _, account := range existing {
 		if err := service.ActivateDynaCredential(ctx, account.id, account.model); err != nil {
 			t.Fatalf("%s lost its model %s", account.name, account.model)
