@@ -123,7 +123,7 @@ with `service.changed`, `service.failed`, `service.message`, `service.sent`.
 
 Mounted at `DYNA_FEED_SOCKET=/run/dyna-feed/feed.sock` (no token; socket is identity):
 - **Inbound:** `POST /v1/messages` `{id, author, text, data?}` (`text` ≤ 16 KiB, 60/min, deduped by `id`) emits `service.message` (wakes nobody alone). Route via `{scope: room, on: [service.message], where: ["service=NAME"], wake: SESSION}`; delivered as `From service NAME` in `<outside>`.
-- **Outbound:** allowed `senders` (root by default) call `service send` (`{service, to, text}`) or `dyna service send SERVICE TO TEXT`. Service long-polls `GET /v1/outbox` and acks `POST /v1/outbox/{id}`.
+- **Outbound:** allowed `senders` (root by default) call `service send` (`{service, to, text}`) or `dyna service send SERVICE TO TEXT`. The service long-polls `GET /v1/outbox?wait=25s` (wait at most 1m): 200 `{"messages":[{"id","to","text","at"}]}`, up to 20, and `{"messages":[]}` when the wait ends empty (never 204). It acks each with `POST /v1/outbox/{id}`; an unacked message comes back on every later GET.
 
 ## Why a service is not running
 

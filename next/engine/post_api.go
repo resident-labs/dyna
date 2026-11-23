@@ -60,6 +60,21 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 		if err != nil {
 			return contract.PostResponse{}, failure(err)
 		}
+		// A room is named by its ID or its name; the name resolves here, once, so a cross-room post to "dyna" reaches it.
+		if req.Room != "" && req.Room != session.Room {
+			if err := s.store.RoomExists(ctx, req.Room); errors.Is(err, store.ErrNotFound) {
+				id, err := s.store.RoomByName(ctx, contract.RoomName(req.Room))
+				if errors.Is(err, store.ErrNotFound) {
+					return contract.PostResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "room not found: give its room ID (room_…) or its name"}
+				}
+				if err != nil {
+					return contract.PostResponse{}, failure(err)
+				}
+				req.Room = id
+			} else if err != nil {
+				return contract.PostResponse{}, failure(err)
+			}
+		}
 		if session.Room != req.Room {
 			tree, err := s.store.RoomTree(ctx, session.Room)
 			if err != nil {
@@ -304,8 +319,11 @@ func (s *Service) Post(ctx context.Context, caller contract.Principal, req contr
 	if errors.Is(err, store.ErrVisualForbidden) {
 		return contract.PostResponse{}, forbidden()
 	}
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, store.ErrNotFound) && (req.VisualUpdate != "" || req.VisualReply != "") {
 		return contract.PostResponse{}, invalid("visual not found")
+	}
+	if errors.Is(err, store.ErrNotFound) && source != nil {
+		return contract.PostResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "that room has no open root to receive the post"}
 	}
 	if err != nil {
 		return contract.PostResponse{}, failure(err)
