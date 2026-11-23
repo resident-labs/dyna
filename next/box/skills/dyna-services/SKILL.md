@@ -57,7 +57,7 @@ it in `/box/shared/services/NAME.json` and pass `--file` the path the prompt's F
 | Field | Rule (default) |
 |---|---|
 | `name` | 1 to 40 of `a-z`, `0-9`, `-`, starting with a letter; required |
-| `image` | a room image name, or a registry reference pinned by digest; a tag alone is refused; required |
+| `image` | a room image name (give its folder an empty `service-only` file so boxes never pick it; dyna-images), or a registry reference pinned by digest; a tag alone is refused; required |
 | `command` | replaces the image's CMD (the image's) |
 | `ports` | `PORT`, `PORT/udp` or `HOSTPORT:PORT/tcp`, published on every address of the host (none) |
 | `env`, `secrets` | plain values, and names whose values you set apart; no name starts with `DYNA_` |

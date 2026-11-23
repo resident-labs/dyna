@@ -336,3 +336,20 @@ func TestRunnerLayerIDReadsTheIdAlone(t *testing.T) {
 		t.Fatalf("id %q, layer %+v: %v %v", id, layer, err, idErr)
 	}
 }
+
+// Horizon, 2026-11-23: a room image for a feed service must not make every box start choose between images.
+func TestServiceOnlyImageIsNotABoxImage(t *testing.T) {
+	store := &Store{Layout: box.Layout{Data: t.TempDir()}}
+	if _, err := store.Save("r", "horizon", pack(t, map[string]string{"Containerfile": "ARG DYNA_BASE\nFROM ${DYNA_BASE}\n"})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Save("r", "agent-chat", pack(t, map[string]string{"Containerfile": "ARG DYNA_BASE\nFROM ${DYNA_BASE}\n", "service-only": ""})); err != nil {
+		t.Fatal(err)
+	}
+	if name, _, _, _, err := store.Context("r", ""); err != nil || name != "horizon" {
+		t.Fatalf("a service-only image made box starts choose: %q %v", name, err)
+	}
+	if name, _, _, _, err := store.Context("r", "agent-chat"); err != nil || name != "agent-chat" {
+		t.Fatalf("a service names its service-only image: %q %v", name, err)
+	}
+}
