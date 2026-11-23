@@ -213,6 +213,17 @@ func TestExistingKeyAccountsSurviveTheMoveToPresets(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// The z.ai account was saved with its own list, before the preset gained glm-5.4.
+		if account.proxy == "openai-compatible-zai" {
+			var saved coreauth.Auth
+			if err := json.Unmarshal(record, &saved); err != nil {
+				t.Fatal(err)
+			}
+			saved.Attributes[cliproxy.DynaModelsAttribute] = "glm-5.3,discovered-one"
+			if record, err = json.Marshal(saved); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if err := db.SaveProxyAuth(ctx, store.ProxyAuth{ID: account.id, Provider: account.proxy, Record: record}, true); err != nil {
 			t.Fatal(err)
 		}
@@ -259,6 +270,12 @@ func TestExistingKeyAccountsSurviveTheMoveToPresets(t *testing.T) {
 		t.Fatal("the custom provider lost its model")
 	}
 	defer cliproxy.GlobalModelRegistry().UnregisterClient(customID)
+	// A model the preset gained after the account was saved reaches it, and the account keeps what it discovered.
+	for _, id := range []string{"glm-5.4", "discovered-one"} {
+		if err := service.ActivateDynaCredential(ctx, existing[0].id, id); err != nil {
+			t.Fatalf("the z.ai account cannot serve %s", id)
+		}
+	}
 	for _, account := range existing {
 		if err := service.ActivateDynaCredential(ctx, account.id, account.model); err != nil {
 			t.Fatalf("%s lost its model %s", account.name, account.model)
