@@ -29,7 +29,7 @@ case "$suite" in
     ;;
   next-extras)
     # Run Dyna's vendored proxy tests in their separate Go module, in parallel with next.
-    (cd third_party/cliproxyapi && go test -count=1 ./internal/api/handlers/management ./sdk/cliproxy/auth -run '^TestDyna')
+    (cd third_party/cliproxyapi && go test -count=1 ./internal/api/handlers/management ./sdk/cliproxy/auth ./internal/runtime/executor -run '^(TestDyna|TestOpenAICompat.*RetryAfter)')
     ;;
   next-web)
     # next/web is the v2 web app, a Svelte project with its own package.json.
