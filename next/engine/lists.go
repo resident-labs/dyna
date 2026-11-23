@@ -38,7 +38,7 @@ func (s *Service) RoomList(ctx context.Context, caller contract.Principal, _ con
 				continue
 			}
 			result.Rooms[i].Working = append(result.Rooms[i].Working, item.Session)
-			activity, order := s.live.Activity(item.Session)
+			activity, order, _ := s.live.Activity(item.Session)
 			if activity.Turn == item.Turn && activity.Label != "" && order > newest[i] {
 				newest[i] = order
 				result.Rooms[i].Latest = &contract.RoomActivity{Session: activity.Session, Name: item.Name, Label: activity.Label}
@@ -76,7 +76,7 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 		if session.Start == nil && s.startStatus != nil && (session.BoxState == contract.BoxCreating || session.BoxState == contract.BoxStarting) {
 			session.Start = s.startStatus(session.Box)
 		}
-		activity, _ := s.live.Activity(session.ID)
+		activity, _, activityAt := s.live.Activity(session.ID)
 		session.Computer = contract.ComputerStopped
 		if handle, ok := s.live.LookupSession(session.ID); ok && handle.Lock() {
 			session.Computer = handle.ComputerState()
@@ -85,6 +85,7 @@ func (s *Service) SessionList(ctx context.Context, caller contract.Principal, re
 		if session.Turn != "" && activity.Turn == session.Turn {
 			session.Activity = activity.Label
 			session.ActivityKind = activity.Kind
+			session.ActivityAt = activityAt
 		}
 	}
 	return result, nil

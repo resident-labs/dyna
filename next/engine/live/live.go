@@ -4,6 +4,7 @@ package live
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -32,6 +33,7 @@ type Session struct {
 	removed       bool
 	activity      contract.TurnActivity
 	activityOrder uint64
+	activityAt    time.Time
 	channel       *Channel
 	stale         bool
 	refresh       string
@@ -152,25 +154,25 @@ func (s *Session) PublishActivity(room contract.RoomID, activity contract.TurnAc
 	l.mu.Lock()
 	l.activityCount++
 	if activity.Finished == nil { // a finished call is passed on, and the session's latest label stays
-		s.activity, s.activityOrder = activity, l.activityCount
+		s.activity, s.activityOrder, s.activityAt = activity, l.activityCount, event.Time.UTC()
 	}
 	l.mu.Unlock()
 	l.Publish(room, event, false)
 	return true
 }
 
-// Activity returns the last activity and its global order, or zero values.
-func (l *Live) Activity(id contract.SessionID) (contract.TurnActivity, uint64) {
+// Activity returns the last activity, its global order, and when it began, or zero values.
+func (l *Live) Activity(id contract.SessionID) (contract.TurnActivity, uint64, time.Time) {
 	s, ok := l.LookupSession(id)
 	if !ok {
-		return contract.TurnActivity{}, 0
+		return contract.TurnActivity{}, 0, time.Time{}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.removed {
-		return contract.TurnActivity{}, 0
+		return contract.TurnActivity{}, 0, time.Time{}
 	}
-	return s.activity, s.activityOrder
+	return s.activity, s.activityOrder, s.activityAt
 }
 
 // Wake queues store notifications without taking mu.

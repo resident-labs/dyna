@@ -138,31 +138,49 @@ func TestActivityKindReachesTheSessionList(t *testing.T) {
 	r.turn(r.lead, "good")
 	r.notice(r.child)
 	turn := r.begin(r.child)
-	kindOf := func() contract.ActivityKind {
+	childSummary := func() contract.SessionSummary {
 		page, e := r.s.SessionList(r.ctx, ownerCaller, contract.SessionListRequest{Room: r.room})
 		if e != nil {
 			t.Fatal(e)
 		}
 		for _, session := range page.Sessions {
 			if session.ID == r.child {
-				return session.ActivityKind
+				return session
 			}
 		}
 		t.Fatal("no child")
-		return ""
+		return contract.SessionSummary{}
 	}
+	if got := childSummary(); !got.ActivityAt.IsZero() {
+		t.Fatalf("activityAt before activity = %v, want zero", got.ActivityAt)
+	}
+	var prev time.Time
 	for _, tc := range []struct{ kind, want contract.ActivityKind }{
 		{contract.ActivityCompaction, contract.ActivityCompaction},
 		{contract.ActivityModel, contract.ActivityModel},
 		{contract.ActivityModelWait, contract.ActivityModelWait},
 		{"", contract.ActivityTool}, // a box agent that predates kinds
 	} {
+		r.advance(time.Minute)
+		wantAt := r.now().UTC()
 		if _, e := r.s.TurnActivity(r.ctx, asSession(r.child), contract.TurnActivityRequest{Turn: turn, Kind: tc.kind, Label: "x"}); e != nil {
 			t.Fatal(e)
 		}
-		if got := kindOf(); got != tc.want {
-			t.Fatalf("kind %q listed as %q, want %q", tc.kind, got, tc.want)
+		got := childSummary()
+		if got.ActivityKind != tc.want {
+			t.Fatalf("kind %q listed as %q, want %q", tc.kind, got.ActivityKind, tc.want)
 		}
+		if !got.ActivityAt.Equal(wantAt) || !got.ActivityAt.After(prev) {
+			t.Fatalf("activityAt = %v (prev %v), want %v", got.ActivityAt, prev, wantAt)
+		}
+		prev = got.ActivityAt
+	}
+	r.advance(time.Minute)
+	if _, e := r.s.TurnActivity(r.ctx, asSession(r.child), contract.TurnActivityRequest{Turn: turn, Kind: contract.ActivityTool, Label: "x", Finished: &contract.ToolFinished{Call: "c"}}); e != nil {
+		t.Fatal(e)
+	}
+	if got := childSummary(); !got.ActivityAt.Equal(prev) {
+		t.Fatalf("finished call moved activityAt to %v, want %v", got.ActivityAt, prev)
 	}
 	if _, e := r.s.TurnActivity(r.ctx, asSession(r.child), contract.TurnActivityRequest{Turn: turn, Kind: "dancing", Label: "x"}); e == nil || e.Code != contract.ErrInvalid {
 		t.Fatalf("unknown kind: %+v", e)

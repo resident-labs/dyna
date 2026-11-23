@@ -313,6 +313,7 @@ type SessionSummary struct {
 	Turn         TurnID          `json:"turn,omitempty"`         // the running turn; a failed or lost box runs none, whatever it left open
 	Activity     string          `json:"activity,omitempty"`     // the running turn's latest TurnActivity label
 	ActivityKind ActivityKind    `json:"activityKind,omitempty"` // the kind of that activity, set with it
+	ActivityAt   time.Time       `json:"activityAt,omitzero"`    // when the running turn's latest activity began
 	LastOutcome  TurnOutcome     `json:"lastOutcome,omitempty"`  // of the last ended turn that was not stopped; a stopped turn neither fails nor succeeds
 	ShellJobs    int             `json:"shellJobs,omitempty"`    // TurnEnded.ShellJobs of the last ended turn
 	Waiting      *SessionWaiting `json:"waiting,omitempty"`      // current wait, only when no turn is running
