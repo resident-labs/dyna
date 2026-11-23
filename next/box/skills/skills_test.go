@@ -35,8 +35,11 @@ func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
 	for _, item := range BuiltIn() {
 		byName[item.Name] = item
 	}
-	if extend := byName["dyna-extend"]; len(byName) != 11 || !strings.HasPrefix(extend.Description, "Use when sessions need a skill, Pi package or MCP server") || !extend.BuiltIn || byName["dyna-discord"].Name == "" {
+	if extend := byName["dyna-extend"]; len(byName) != 12 || !strings.HasPrefix(extend.Description, "Use when sessions need a skill, Pi package or MCP server") || !extend.BuiltIn || byName["dyna-discord"].Name == "" {
 		t.Fatalf("%+v", byName)
+	}
+	if guide := byName["dyna-sessions"]; guide.Name == "" || guide.RootOnly {
+		t.Fatalf("session guide must be built in for all sessions: %+v", guide)
 	}
 	if !IsBuiltIn("dyna-extend") || IsBuiltIn("other") {
 		t.Fatal("IsBuiltIn")

@@ -1,6 +1,6 @@
 ---
 name: dyna-discord
-description: Use when a Discord message reaches you or you act on Discord (answer or relay a message, set up a front session, manage channels, roles, members, threads or polls, or keep a server's structure and standing messages as a folder with export, plan and apply).
+description: Use when handling Discord messages, relays, front sessions, channels, roles, members, threads, polls, or server structure and standing messages (export, plan and apply).
 ---
 # Answer and act on Discord
 One bot serves the whole machine; each mapping of your room routes a server or one channel to an

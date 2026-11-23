@@ -588,11 +588,18 @@ func (s *Store) settleGoal(ctx context.Context, tx *sql.Tx, event contract.Event
 	if doneWhen != "" {
 		heading += " — done when: " + doneWhen
 	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO goal_items(room,goal,number,parent,text,state,created_at,updated_at) VALUES(?,?,?,0,?,?,?,?)", event.Room, into, header, heading, contract.GoalItemOpen, at, at); err != nil {
+	// The old goal retains the full text and items. Its new heading and any copied legacy items must fit the item limit.
+	fitItem := func(text string) string {
+		if runes := []rune(text); len(runes) > contract.GoalItemTextLimit {
+			return string(runes[:contract.GoalItemTextLimit-1]) + "…"
+		}
+		return text
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO goal_items(room,goal,number,parent,text,state,created_at,updated_at) VALUES(?,?,?,0,?,?,?,?)", event.Room, into, header, fitItem(heading), contract.GoalItemOpen, at, at); err != nil {
 		return out, err
 	}
 	for i, leaf := range open {
-		if _, err := tx.ExecContext(ctx, "INSERT INTO goal_items(room,goal,number,parent,text,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", event.Room, into, header+1+i, header, leaf, contract.GoalItemOpen, at, at); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO goal_items(room,goal,number,parent,text,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", event.Room, into, header+1+i, header, fitItem(leaf), contract.GoalItemOpen, at, at); err != nil {
 			return out, err
 		}
 	}

@@ -501,7 +501,7 @@ return JSON.stringify({ box, host, refused, jobs: jobs.jobs.length });`)},
 
 	result = last(task("task-big"))
 	full := regexp.MustCompile(`Full output: (\S+)`).FindStringSubmatch(result.Text)
-	if full == nil || len(result.Text) > 21<<10 || !strings.Contains(result.Text, "\n20000\n") || strings.Contains(result.Text, "\n1\n") {
+	if full == nil || len(result.Text) > 13<<10 || !strings.Contains(result.Text, "\n20000\n") || strings.Contains(result.Text, "\n1\n") {
 		t.Fatalf("a long output: %d bytes: %.200s", len(result.Text), result.Text)
 	}
 	if out, err := exec.Command("podman", "exec", string(id), "wc", "-l", full[1]).CombinedOutput(); err != nil || !strings.HasPrefix(string(out), "20000 ") {

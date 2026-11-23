@@ -10,14 +10,13 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
-// goalTextLimit caps every piece of goal text: a goal, its done condition, an item, a summary or a journal line.
-const goalTextLimit = 16000
+// Summaries and journal entries are not included in the prompt.
+const goalDetailLimit = 16000
+const goalJournalHint = "a file or the goal journal"
 
-func checkGoalText(values ...string) *contract.Error {
-	for _, value := range values {
-		if utf8.RuneCountInString(value) > goalTextLimit {
-			return invalid(fmt.Sprintf("goal text is longer than %d characters", goalTextLimit))
-		}
+func checkGoalText(field, value string, limit int, detailIn string) *contract.Error {
+	if utf8.RuneCountInString(value) > limit {
+		return invalid(fmt.Sprintf("%s is longer than %d characters; keep the detail in %s", field, limit, detailIn))
 	}
 	return nil
 }
@@ -62,7 +61,10 @@ func (s *Service) GoalSet(ctx context.Context, caller contract.Principal, req co
 	if len(req.ClientID) > 64 {
 		return contract.GoalSetResponse{}, invalid("clientId is longer than 64 characters")
 	}
-	if e := checkGoalText(req.Text, req.DoneWhen); e != nil {
+	if e := checkGoalText("goal text", req.Text, contract.GoalTextLimit, goalJournalHint); e != nil {
+		return contract.GoalSetResponse{}, e
+	}
+	if e := checkGoalText("doneWhen", req.DoneWhen, contract.GoalTextLimit, goalJournalHint); e != nil {
 		return contract.GoalSetResponse{}, e
 	}
 	room, e := s.goalRoom(ctx, caller, req.Room)
@@ -128,7 +130,7 @@ func (s *Service) GoalItem(ctx context.Context, caller contract.Principal, req c
 	default:
 		return contract.GoalItemResponse{}, invalid("state must be open, done or dropped")
 	}
-	if e := checkGoalText(req.Text); e != nil {
+	if e := checkGoalText("goal item text", req.Text, contract.GoalItemTextLimit, goalJournalHint); e != nil {
 		return contract.GoalItemResponse{}, e
 	}
 	room, e := s.goalRoom(ctx, caller, req.Room)
@@ -153,7 +155,7 @@ func (s *Service) GoalDone(ctx context.Context, caller contract.Principal, req c
 	if req.Summary == "" {
 		return contract.GoalDoneResponse{}, invalid("summary is required: say in a sentence or two what the goal achieved, or why it is dropped")
 	}
-	if e := checkGoalText(req.Summary); e != nil {
+	if e := checkGoalText("goal summary", req.Summary, goalDetailLimit, "a file"); e != nil {
 		return contract.GoalDoneResponse{}, e
 	}
 	room, e := s.goalRoom(ctx, caller, req.Room)
@@ -174,7 +176,7 @@ func (s *Service) GoalDone(ctx context.Context, caller contract.Principal, req c
 }
 
 func (s *Service) GoalJournal(ctx context.Context, caller contract.Principal, req contract.GoalJournalRequest) (contract.GoalJournalResponse, *contract.Error) {
-	if e := checkGoalText(req.Text); e != nil {
+	if e := checkGoalText("goal journal line", req.Text, goalDetailLimit, "a file"); e != nil {
 		return contract.GoalJournalResponse{}, e
 	}
 	room, e := s.goalRoom(ctx, caller, req.Room)
