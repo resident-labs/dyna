@@ -341,7 +341,14 @@ var ErrImageChoice = errors.New("the room has several images, so a compose file 
 // BoxImages lists the room's box images: every image but the CI runner's.
 func (s *Store) BoxImages(room contract.RoomID) ([]contract.RoomImage, error) {
 	all, err := s.List(room)
-	return slices.DeleteFunc(all, func(image contract.RoomImage) bool { return image.Name == contract.CIRunnerImage }), err
+	// An image folder holding a service-only file is for services alone, so a second one never makes box starts choose.
+	return slices.DeleteFunc(all, func(image contract.RoomImage) bool {
+		if image.Name == contract.CIRunnerImage {
+			return true
+		}
+		_, statErr := os.Stat(filepath.Join(s.Layout.Images(room), image.Name, "service-only"))
+		return statErr == nil
+	}), err
 }
 
 // Context reads a box image for a build: the one called wanted, or the room's sole box image when wanted is empty. It
