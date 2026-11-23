@@ -1,4 +1,4 @@
-import type { Service, ServiceReason, ServiceState, SubscriptionInfo } from "./contract.gen.ts";
+import type { DiscordRoute, Service, ServiceReason, ServiceState, SubscriptionInfo } from "./contract.gen.ts";
 import { fromNow } from "./feed.ts";
 import { hookName } from "./subscriptions.ts";
 
@@ -37,19 +37,25 @@ const states: Record<ServiceState, string> = {
 
 const isBadState = (state: ServiceState): boolean => state === "failed" || state === "crashing" || state === "unreachable";
 
-// The room's services as one line in About ("Services 2"), with how they stand.
-// Failures surface immediately; otherwise show deploying/pending or "all running" when every active service is running.
-export function serviceSummary(list: readonly Service[]): { count: number; health: string; failing: boolean } {
+// The room's services and built-in feeds as one line in About ("Services 2"), with how they stand.
+// Failures surface immediately; otherwise show deploying/pending or "all running" when every active entry is healthy.
+export function serviceSummary(
+  list: readonly Service[],
+  discord: readonly DiscordRoute[] = [],
+): { count: number; health: string; failing: boolean } {
   const active = list.filter(service => service.want !== "remove" && service.state !== "removing");
-  const failed = active.filter(service => isBadState(service.state)).length;
-  if (failed) return { count: active.length, health: `${failed} failing`, failing: true };
+  const total = active.length + discord.length;
+  const failedServices = active.filter(service => isBadState(service.state)).length;
+  const failedDiscord = discord.filter(route => Boolean(route.gatewayError?.trim())).length;
+  const failed = failedServices + failedDiscord;
+  if (failed) return { count: total, health: `${failed} failing`, failing: true };
   const deploying = active.filter(service => service.state === "deploying").length;
   const pending = active.filter(service => service.state === "pending").length;
-  const running = active.filter(service => service.state === "running").length;
-  if (deploying) return { count: active.length, health: `${deploying} deploying`, failing: false };
-  if (pending) return { count: active.length, health: `${pending} pending`, failing: false };
-  const health = active.length > 0 && running === active.length ? "all running" : running > 0 ? `${running} running` : "";
-  return { count: active.length, health, failing: false };
+  const running = active.filter(service => service.state === "running").length + (discord.length - failedDiscord);
+  if (deploying) return { count: total, health: `${deploying} deploying`, failing: false };
+  if (pending) return { count: total, health: `${pending} pending`, failing: false };
+  const health = total > 0 && running === total ? "all running" : running > 0 ? `${running} running` : "";
+  return { count: total, health, failing: false };
 }
 
 function matchesService(where: readonly string[] | null | undefined, serviceName: string): boolean {
@@ -95,6 +101,8 @@ export interface ServiceRow {
   stopped: boolean;
   error: string;
   feed: boolean;
+  builtIn: boolean;
+  detail: string;
   lastMessage: string;
   lastMessageAt: string | null;
   messagesIn: number;
@@ -104,34 +112,83 @@ export interface ServiceRow {
 
 const stateRank: Record<ServiceState, number> = { failed: 0, crashing: 1, unreachable: 2, deploying: 3, pending: 4, running: 5, stopped: 6, removing: 7 };
 
-// Rows for About's Services modal: failures first, then active, then stopped, with feed counters and routing.
+function discordRow(route: DiscordRoute, name: (session: string) => string): { rank: number; sortKey: string; row: ServiceRow } {
+  const error = route.gatewayError?.trim() ?? "";
+  const failing = Boolean(error);
+  const channel = route.channel?.trim() ?? "";
+  const channelName = route.channelName?.trim() ?? "";
+  const guildName = route.guildName?.trim() ?? "";
+  let host = "";
+  let detail = "";
+  if (channel) {
+    host = channelName ? `#${channelName}` : `channel ${channel}`;
+    if (guildName && channelName) detail = `${guildName} · channel ${channel}`;
+    else if (guildName) detail = guildName;
+    else if (channelName) detail = `server ${route.guild} · channel ${channel}`;
+    else detail = `server ${route.guild}`;
+  } else {
+    host = guildName || `server ${route.guild}`;
+    detail = guildName ? `All channels · server ${route.guild}` : "All channels";
+  }
+  return {
+    rank: failing ? 0 : 5,
+    sortKey: `discord:${route.guild}:${channel}`,
+    row: {
+      id: `discord:${route.guild}:${channel || "*"}`,
+      name: "Discord",
+      host,
+      state: failing ? "Failed" : "Active",
+      failing,
+      stopped: false,
+      error,
+      feed: true,
+      builtIn: true,
+      detail,
+      lastMessage: "",
+      lastMessageAt: null,
+      messagesIn: 0,
+      messagesOut: 0,
+      routes: route.session ? [`→ wakes ${name(route.session)}`] : [],
+    },
+  };
+}
+
+// Rows for About's Services modal: failures first, then active (including built-in Discord feeds), then stopped.
 export function serviceRows(
   list: readonly Service[],
   subscriptions: readonly SubscriptionInfo[],
   name: (session: string) => string,
   now = Date.now(),
+  discord: readonly DiscordRoute[] = [],
 ): ServiceRow[] {
-  return list
+  const entries: { rank: number; sortKey: string; row: ServiceRow }[] = list
     .filter(service => service.want !== "remove" && service.state !== "removing")
-    .slice()
-    .sort((a, b) => stateRank[a.state] - stateRank[b.state] || a.spec.name.localeCompare(b.spec.name))
     .map(service => {
       const isFeed = Boolean(service.spec.feed || service.feed);
       const lastAt = service.feed?.lastMessageAt ?? null;
       return {
-        id: service.id,
-        name: service.spec.name,
-        host: service.host ?? "",
-        state: states[service.state],
-        failing: isBadState(service.state),
-        stopped: service.state === "stopped",
-        error: serviceError(service),
-        feed: isFeed,
-        lastMessage: lastAt ? fromNow(lastAt, Math.max(now, Date.parse(lastAt))) : "No messages yet",
-        lastMessageAt: lastAt,
-        messagesIn: service.feed?.messagesIn ?? 0,
-        messagesOut: service.feed?.messagesOut ?? 0,
-        routes: isFeed ? serviceRoutes(service, subscriptions, name) : [],
+        rank: stateRank[service.state],
+        sortKey: service.spec.name,
+        row: {
+          id: service.id,
+          name: service.spec.name,
+          host: service.host ?? "",
+          state: states[service.state],
+          failing: isBadState(service.state),
+          stopped: service.state === "stopped",
+          error: serviceError(service),
+          feed: isFeed,
+          builtIn: false,
+          detail: "",
+          lastMessage: lastAt ? fromNow(lastAt, Math.max(now, Date.parse(lastAt))) : "No messages yet",
+          lastMessageAt: lastAt,
+          messagesIn: service.feed?.messagesIn ?? 0,
+          messagesOut: service.feed?.messagesOut ?? 0,
+          routes: isFeed ? serviceRoutes(service, subscriptions, name) : [],
+        },
       };
     });
+  for (const route of discord) entries.push(discordRow(route, name));
+  entries.sort((a, b) => a.rank - b.rank || a.sortKey.localeCompare(b.sortKey));
+  return entries.map(entry => entry.row);
 }

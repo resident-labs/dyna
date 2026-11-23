@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/contract/outside"
 	"github.com/resident-labs/dyna/engine/prs"
 	"github.com/resident-labs/dyna/engine/store"
 )
@@ -29,13 +30,16 @@ func textWriter(author, viewer string, meta store.ItemMeta) string {
 // A PR with no author yet came from pr.open and no pass has read it, so its title is the session's own.
 func prFor(caller contract.Principal, p store.TrackedPR, viewer string) contract.PrSummary {
 	summary := p.PrSummary
+	titleOrigin := outside.Trusted()
 	if writer := textWriter(summary.Author, viewer, p.Meta); caller.Kind == contract.PrincipalSession && summary.Author != "" && writer != "" {
-		summary.Title = contract.Outside("github", "@"+writer, summary.Title)
+		titleOrigin = outside.GitHub(writer)
 	}
+	summary.Title = outside.Wrap(titleOrigin, summary.Title)
 	if caller.Kind == contract.PrincipalSession && p.HeadRepo != p.Repo && summary.Author != viewer {
+		checkOrigin := outside.GitHub(summary.Author)
 		summary.CancelledChecks = append([]string(nil), summary.CancelledChecks...)
 		for i, name := range summary.CancelledChecks {
-			summary.CancelledChecks[i] = contract.Outside("github", "@"+summary.Author, name)
+			summary.CancelledChecks[i] = outside.Wrap(checkOrigin, name)
 		}
 	}
 	return summary

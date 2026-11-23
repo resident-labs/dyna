@@ -16,6 +16,7 @@ import (
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/api"
+	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/room"
 )
 
@@ -566,5 +567,53 @@ func TestServiceFeedOutsideInjectionAndEscapedBodyLimit(t *testing.T) {
 	bigResp.Body.Close()
 	if bigResp.StatusCode != http.StatusOK {
 		t.Fatalf("escaped valid message status = %d, want 200 (wire=%d bytes)", bigResp.StatusCode, len(bigPayload))
+	}
+}
+
+func TestServiceListIncludesDiscordRoutes(t *testing.T) {
+	s, _, roomA, rootA, frontA, _, ctx := setupFeedRig(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	roomBResp, problem := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "room-b", RootProfile: "model"})
+	if problem != nil {
+		t.Fatalf("create room-b: %+v", problem)
+	}
+	roomB := roomBResp.Room
+	rootB, err := s.store.RoomRootSession(ctx, roomB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.store.SetDiscordBot(ctx, store.DiscordBot{ID: "bot1", Name: "DynaBot", Failure: "gateway reconnecting"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SetDiscordRoute(ctx, store.DiscordRoute{Guild: "100", Channel: "200", Room: roomA, Session: frontA}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SetDiscordRoute(ctx, store.DiscordRoute{Guild: "100", Room: roomA, Session: rootA}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SetDiscordRoute(ctx, store.DiscordRoute{Guild: "101", Channel: "300", Room: roomB, Session: rootB}, false); err != nil {
+		t.Fatal(err)
+	}
+	s.discordDirectory.Apply("GUILD_CREATE", json.RawMessage(`{"id":"100","name":"Resident Labs","channels":[{"id":"200","guild_id":"100","name":"support","type":0}]}`))
+
+	listedA, problem := s.ServiceList(ctx, owner, contract.ServiceListRequest{Room: roomA})
+	if problem != nil {
+		t.Fatalf("ServiceList roomA: %+v", problem)
+	}
+	if len(listedA.Discord) != 2 {
+		t.Fatalf("roomA discord routes = %+v, want 2", listedA.Discord)
+	}
+	// Ordered by guild, channel: whole-server route ("") then channel "200".
+	if listedA.Discord[0].Guild != "100" || listedA.Discord[0].GuildName != "Resident Labs" || listedA.Discord[0].Channel != "" || listedA.Discord[0].Session != rootA || listedA.Discord[0].GatewayError != "gateway reconnecting" {
+		t.Fatalf("whole-server route = %+v", listedA.Discord[0])
+	}
+	if listedA.Discord[1].Channel != "200" || listedA.Discord[1].ChannelName != "support" || listedA.Discord[1].GuildName != "Resident Labs" || listedA.Discord[1].Session != frontA {
+		t.Fatalf("channel route = %+v", listedA.Discord[1])
+	}
+
+	listedAll, problem := s.ServiceList(ctx, owner, contract.ServiceListRequest{})
+	if problem != nil || len(listedAll.Discord) != 3 {
+		t.Fatalf("ServiceList all = %+v, %+v", listedAll.Discord, problem)
 	}
 }

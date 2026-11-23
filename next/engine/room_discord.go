@@ -88,9 +88,29 @@ func (s *Service) DiscordConfigure(ctx context.Context, caller contract.Principa
 	}
 	out := contract.DiscordConfigureResponse{BotID: b.ID, BotName: b.Name, Owner: b.Owner, GatewayError: b.Failure}
 	for _, r := range routes {
-		out.Routes = append(out.Routes, contract.DiscordRoute{Guild: r.Guild, Channel: r.Channel, Room: r.Room, Session: r.Session, Instructions: r.Instructions, Policy: r.Policy})
+		out.Routes = append(out.Routes, s.discordRouteContract(r, ""))
 	}
 	return out, nil
+}
+func (s *Service) discordRouteContract(r store.DiscordRoute, gatewayError string) contract.DiscordRoute {
+	out := contract.DiscordRoute{
+		Guild:        r.Guild,
+		Channel:      r.Channel,
+		Room:         r.Room,
+		Session:      r.Session,
+		Instructions: r.Instructions,
+		Policy:       r.Policy,
+		GatewayError: gatewayError,
+	}
+	if server, ok := s.discordDirectory.Server(r.Guild); ok {
+		out.GuildName = server.Name
+	}
+	if r.Channel != "" {
+		if ch, ok := s.discordDirectory.Channel(r.Channel); ok {
+			out.ChannelName = ch.Name
+		}
+	}
+	return out
 }
 func discordID(id string) bool {
 	return id != "" && strings.IndexFunc(id, func(r rune) bool { return r < '0' || r > '9' }) < 0
@@ -170,7 +190,7 @@ func (s *Service) RoomDiscord(ctx context.Context, caller contract.Principal, re
 	}
 	var out contract.RoomDiscordResponse
 	for _, r := range routes {
-		out.Routes = append(out.Routes, contract.DiscordRoute{Guild: r.Guild, Channel: r.Channel, Room: r.Room, Session: r.Session, Instructions: r.Instructions, Policy: r.Policy})
+		out.Routes = append(out.Routes, s.discordRouteContract(r, ""))
 	}
 	return out, nil
 }

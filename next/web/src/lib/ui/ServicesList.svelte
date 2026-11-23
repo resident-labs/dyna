@@ -1,26 +1,34 @@
 <script lang="ts">
-  import type { Service, SubscriptionInfo } from "../contract.gen.ts";
+  import type { DiscordRoute, Service, SubscriptionInfo } from "../contract.gen.ts";
   import { fullTime } from "../feed.ts";
   import { serviceRows } from "../services.ts";
   import StatusPill from "./StatusPill.svelte";
-  // The room's declared services, in About's Services modal: failures first, then active, then stopped.
-  // Each row shows state, host, last error, and for a feed: last message time, in/out counts, and routing subscriptions.
-  let { services, subscriptions, name, now }: {
+  // The room's declared services and built-in Discord feeds, in About's Services modal: failures first, then active, then stopped.
+  // Each row shows state, host/channel, last error, and for a feed: last message time, in/out counts, and routing.
+  let { services, discord = [], subscriptions, name, now }: {
     services: Service[];
+    discord?: DiscordRoute[];
     subscriptions: SubscriptionInfo[];
     name: (session: string) => string;
     now: number;
   } = $props();
-  let rows = $derived(serviceRows(services, subscriptions, name, now));
+  let rows = $derived(serviceRows(services, subscriptions, name, now, discord));
 </script>
 
 <ul>
   {#each rows as row (row.id)}
     <li class:off={row.stopped}>
-      <p class="head"><strong>{row.name}</strong>{#if row.feed}<span class="tag">feed</span>{/if}{#if row.host}<span class="host">{row.host}</span>{/if}
+      <p class="head"><strong>{row.name}</strong>{#if row.builtIn}<span class="tag">built-in feed</span>{:else if row.feed}<span class="tag">feed</span>{/if}{#if row.host}<span class="host">{row.host}</span>{/if}
         {#if row.failing}<StatusPill tone="failed" word label={row.state} />{:else}<span class="state">{row.state}</span>{/if}</p>
       {#if row.error}<p class="error" class:danger={row.failing}>{row.error}</p>{/if}
-      {#if row.feed}
+      {#if row.builtIn}
+        {#if row.detail}<p class="stats">{row.detail}</p>{/if}
+        {#if row.routes.length}
+          <p class="routes">{#each row.routes as route, index (index)}<span class="route">{route}</span>{/each}</p>
+        {:else}
+          <p class="routes empty">No active session</p>
+        {/if}
+      {:else if row.feed}
         <p class="stats">
           {#if row.lastMessageAt}Last message <time datetime={row.lastMessageAt} title={fullTime(row.lastMessageAt)}>{row.lastMessage}</time>{:else}{row.lastMessage}{/if}
           <span aria-hidden="true">·</span>
