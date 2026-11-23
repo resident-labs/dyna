@@ -849,6 +849,7 @@ export type BoxMessageBody =
   | { type: "turn.stop"; body: TurnStop }
   | { type: "workflow.reload"; body: WorkflowReload }
 ;
+export const MaxModelRetryAfterSeconds = 3600;
 export const SessionListPage = 25;
 export const MaxGPUGiB = 1048576;
 export const NavPageBytes = 8192;
