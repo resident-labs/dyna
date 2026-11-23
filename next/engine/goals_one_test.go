@@ -42,6 +42,54 @@ func TestASessionHoldsOneGoal(t *testing.T) {
 	}
 }
 
+func TestGoalTextLimits(t *testing.T) {
+	r := newGoalRig(t)
+	lead := asSession(r.lead)
+	goalText := strings.Repeat("界", 300)
+	itemText := strings.Repeat("界", 160)
+	check := func(e *contract.Error, field string) {
+		t.Helper()
+		if e == nil || e.Code != contract.ErrInvalid || !strings.HasPrefix(e.Message, field+" characters") || !strings.Contains(e.Message, "a file or the goal journal") {
+			t.Fatalf("want limit for %s, got %v", field, e)
+		}
+	}
+	_, e := r.s.GoalSet(r.ctx, lead, contract.GoalSetRequest{Text: goalText + "!", DoneWhen: goalText})
+	check(e, "goal text is longer than 300")
+	own, e := r.s.GoalSet(r.ctx, lead, contract.GoalSetRequest{Text: goalText, DoneWhen: goalText})
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, e = r.s.GoalSet(r.ctx, lead, contract.GoalSetRequest{Goal: own.Goal, DoneWhen: goalText + "!"})
+	check(e, "doneWhen is longer than 300")
+	_, e = r.s.SessionStart(r.ctx, lead, contract.SessionStartRequest{Room: r.room, Name: "limited", Profile: "test", Goal: goalText + "!"})
+	check(e, "goal is longer than 300")
+	_, e = r.s.SessionStart(r.ctx, lead, contract.SessionStartRequest{Room: r.room, Name: "limited", Profile: "test", Goal: goalText, DoneWhen: goalText + "!"})
+	check(e, "doneWhen is longer than 300")
+	_, e = r.s.GoalItem(r.ctx, lead, contract.GoalItemRequest{Text: itemText + "!"})
+	check(e, "goal item text is longer than 160")
+	item, e := r.s.GoalItem(r.ctx, lead, contract.GoalItemRequest{Text: itemText})
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, e = r.s.GoalItem(r.ctx, lead, contract.GoalItemRequest{Item: item.Item, Text: itemText + "!"})
+	check(e, "goal item text is longer than 160")
+	got := r.goals(r.lead, false)[0]
+	if got.Text != goalText || got.DoneWhen != goalText || len(got.Items) != 1 || got.Items[0].Text != itemText {
+		t.Fatalf("stored goal and item do not match the accepted text: %+v", got)
+	}
+	detail := strings.Repeat("界", 16000)
+	journal, e := r.s.GoalJournal(r.ctx, lead, contract.GoalJournalRequest{Text: detail})
+	if e != nil || len(journal.Entries) != 1 || journal.Entries[0].Text != detail {
+		t.Fatalf("journal did not keep long detail: %v", e)
+	}
+	if _, e := r.s.GoalDone(r.ctx, lead, contract.GoalDoneRequest{Drop: true, Summary: detail}); e != nil {
+		t.Fatal(e)
+	}
+	if got := r.goals(r.lead, true)[0].Summary; got != detail {
+		t.Fatal("summary did not keep long detail")
+	}
+}
+
 func TestSubtasksKeepNoOpenItemUnderASettledOne(t *testing.T) {
 	r := newGoalRig(t)
 	child := asSession(r.child)
@@ -128,6 +176,32 @@ func TestACloseEndsAFinishedGoalAndFoldsAnOpenOne(t *testing.T) {
 	}
 	if _, e := r.s.GoalItem(r.ctx, lead, contract.GoalItemRequest{Goal: held, Text: "late"}); e == nil || !strings.Contains(e.Message, "was folded into "+string(goals[0].ID)+" as item 1") {
 		t.Fatalf("using the folded goal: %v", e)
+	}
+}
+
+func TestFoldedItemsFitTheirLimit(t *testing.T) {
+	r := newGoalRig(t)
+	lead, child := asSession(r.lead), asSession(r.child)
+	if _, e := r.s.GoalSet(r.ctx, lead, contract.GoalSetRequest{Text: "lead work", DoneWhen: "led"}); e != nil {
+		t.Fatal(e)
+	}
+	long := strings.Repeat("界", 300)
+	if _, e := r.s.GoalSet(r.ctx, child, contract.GoalSetRequest{Goal: "g1", Text: long, DoneWhen: long}); e != nil {
+		t.Fatal(e)
+	}
+	item, e := r.s.GoalItem(r.ctx, child, contract.GoalItemRequest{Text: "before caps"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	r.exec("UPDATE goal_items SET text=? WHERE room=? AND goal=1 AND number=?", long, r.room, item.Item)
+	r.close(r.child)
+	items := r.goals(r.lead, false)[0].Items
+	if len(items) != 2 || len([]rune(items[0].Text)) != 160 || !strings.HasPrefix(items[0].Text, "from child, g1: ") || items[1].Text != strings.Repeat("界", 159)+"…" {
+		t.Fatalf("folded items do not fit their limit: %+v", items)
+	}
+	old := r.goals(r.child, true)[0]
+	if old.Text != long || old.DoneWhen != long || old.Items[0].Text != long {
+		t.Fatalf("original goal was changed: %+v", old)
 	}
 }
 
