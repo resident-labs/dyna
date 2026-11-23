@@ -12,6 +12,7 @@ func TestModelRetryResetFromPiGError(t *testing.T) {
 		{`429 {"code":"1302","message":"Rate limit reached for requests","reset_seconds":8}`, 8},
 		{`429 {"error":{"code":1305,"message":"The service may be temporarily overloaded","reset_seconds":62}}`, 62},
 		{`503: {"code":"server_is_overloaded","reset_seconds":60}`, 60},
+		{`503: {"error":"Overloaded","reset_seconds":60}`, 60},
 		{`429 {"type":"error","error":{"type":"rate_limit_error","message":"All credentials for model claude are cooling down","reset_seconds":120}}`, 120},
 		{`Server requested 120s retry delay (max: 20s). 429 {"type":"error","error":{"type":"rate_limit_error","message":"All credentials for model claude are cooling down"}}`, 120},
 		{`OpenAI API error (429): {"code":"model_cooldown","reset_seconds":120}`, 120},

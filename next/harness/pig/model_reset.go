@@ -35,13 +35,16 @@ func modelRetryAfterSeconds(message string) int64 {
 	}
 	var payload struct {
 		resetBody
-		Error *resetBody `json:"error"`
+		Error json.RawMessage `json:"error"`
 	}
 	var detail resetBody
 	if json.Unmarshal([]byte(body), &payload) == nil {
 		detail = payload.resetBody
-		if payload.Error != nil {
-			detail = *payload.Error
+		// OpenAI may already have unwrapped the error envelope. In that
+		// case an upstream string-valued error must not hide a sibling reset.
+		var nested *resetBody
+		if json.Unmarshal(payload.Error, &nested) == nil && nested != nil {
+			detail = *nested
 		}
 	}
 	switch strings.Trim(string(detail.Code), `"`) {
@@ -61,7 +64,7 @@ func modelRetryAfterSeconds(message string) int64 {
 	}
 	seconds, _ := strconv.ParseInt(hint, 10, 64)
 	seconds = max(seconds, detail.ResetSeconds)
-	if seconds < 0 || seconds > contract.MaxModelRetryAfterSeconds {
+	if seconds > contract.MaxModelRetryAfterSeconds {
 		return 0
 	}
 	return seconds
