@@ -14,10 +14,10 @@ import (
 // outsideTagMentions lists the non-test Go files that mention <outside> in
 // documentation or system-prompt prose rather than building a wrapper.
 var outsideTagMentions = map[string]bool{
-	"cmd/dyna/subscription.go":  true,
-	"contract/tools/methods.go": true,
+	"cmd/dyna/subscription.go":   true,
+	"contract/tools/methods.go":  true,
 	"contract/tools/toolkits.go": true,
-	"engine/prompt/prompt.go":   true,
+	"engine/prompt/prompt.go":    true,
 }
 
 // outsideWrapFiles lists every non-test Go file outside contract/outside that
