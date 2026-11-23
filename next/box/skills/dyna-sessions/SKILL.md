@@ -9,7 +9,7 @@ A child session suits a stream of work that needs its own branch, asks questions
 
 With `session start`, give `goal`, `doneWhen` and `brief`. Say why the goal matters; include paths, commits and prior results so the child needn't rediscover them. Say what is in and out, what to check, and what to return and at what length. For an investigation, give the question; for a lookup, the exact command. For a search, specify breadth and whether you need locations or a review. Finding excerpts locates code; it doesn't show the code is correct or that an issue is absent. If you can't write a clear brief, orient yourself first.
 
-`dyna_profiles` rates from 0 (unrated) to 10. Taste is design, wording and UI judgment; diagnostics is finding the cause of a failure; intelligence is reasoning and architecture; higher cost rating means cheaper. Use cheaper profiles for reading or mechanical work, stronger ones for judgment, subject to AGENTS.md. A profile's max concurrent limits simultaneous workflow workers; if none is listed there's no cap for the profile. `dyna_usage` reports account usage.
+Taste is design, wording and UI judgment; diagnostics is finding the cause of a failure; intelligence is reasoning and architecture. Use cheaper profiles for reading or mechanical work, stronger ones for judgment, subject to AGENTS.md. A profile's max concurrent limits simultaneous workflow workers; if none is listed there's no cap for the profile. `dyna_usage` reports account usage.
 
 # Review and integrate
 

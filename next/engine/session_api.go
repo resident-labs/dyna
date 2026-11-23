@@ -21,10 +21,10 @@ func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, r
 	if len(req.ClientID) > 64 {
 		return contract.SessionStartResponse{}, invalid("clientId is longer than 64 characters")
 	}
-	if e := checkGoalText("goal", req.Goal, contract.GoalTextLimit); e != nil {
+	if e := checkGoalText("goal", req.Goal, contract.GoalTextLimit, "brief or a file"); e != nil {
 		return contract.SessionStartResponse{}, e
 	}
-	if e := checkGoalText("doneWhen", req.DoneWhen, contract.GoalTextLimit); e != nil {
+	if e := checkGoalText("doneWhen", req.DoneWhen, contract.GoalTextLimit, "brief or a file"); e != nil {
 		return contract.SessionStartResponse{}, e
 	}
 	if !mentionName.MatchString(req.Name) {

@@ -77,7 +77,7 @@ type PostInput struct {
 	Room         contract.RoomID       `json:"room" desc:"Room name or ID; defaults to yours. Only root can post plain text to another room's root in its feed."`
 	Text         string                `json:"text"`
 	Mentions     []string              `json:"mentions,omitempty" desc:"parent, children, siblings, or name/ID of your parent or a session under it. Route anything else through your parent; cross-room use root only. Omit to post to the owner."`
-	Home         contract.Conversation `json:"home,omitempty" desc:"A session can name only its own DM ({kind: dm}). Omit for the feed if mentioning sessions; otherwise use this turn's owner conversation, the last one, or the feed."`
+	Home         contract.Conversation `json:"home,omitempty" desc:"A session may name only its own DM ({kind: dm}). Default: feed with mentions; otherwise this turn's owner conversation, then the last one, then the feed."`
 	ReplyTo      contract.EventID      `json:"replyTo,omitempty"`
 	ClientID     string                `json:"clientId,omitempty"`
 	VisualUpdate contract.EventID      `json:"visualUpdate,omitempty"`

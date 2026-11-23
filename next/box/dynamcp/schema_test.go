@@ -98,7 +98,7 @@ func TestFieldDescriptionsComeFromTheContract(t *testing.T) {
 	}
 	for _, tc := range []struct{ tool, field, want string }{
 		{"post", "room", "Room name or ID; defaults to yours. Only root can post plain text to another room's root in its feed."},
-		{"post", "home", "A session can name only its own DM ({kind: dm}). Omit for the feed if mentioning sessions; otherwise use this turn's owner conversation, the last one, or the feed."},
+		{"post", "home", "A session may name only its own DM ({kind: dm}). Default: feed with mentions; otherwise this turn's owner conversation, then the last one, then the feed."},
 		{"room", "home", "home narrows the log to one owner DM: {kind: dm, session: ses_…}. For log."},
 		{"visual", "file", "Absolute, or relative to your working directory."},
 	} {

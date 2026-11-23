@@ -47,32 +47,32 @@ func TestGoalTextLimits(t *testing.T) {
 	lead := asSession(r.lead)
 	goalText := strings.Repeat("界", 300)
 	itemText := strings.Repeat("界", 160)
-	check := func(e *contract.Error, field string) {
+	check := func(e *contract.Error, field, detailIn string) {
 		t.Helper()
-		if e == nil || e.Code != contract.ErrInvalid || !strings.HasPrefix(e.Message, field+" characters") || !strings.Contains(e.Message, "a file or the goal journal") {
+		if e == nil || e.Code != contract.ErrInvalid || !strings.HasPrefix(e.Message, field+" characters") || !strings.Contains(e.Message, detailIn) {
 			t.Fatalf("want limit for %s, got %v", field, e)
 		}
 	}
 	_, e := r.s.GoalSet(r.ctx, lead, contract.GoalSetRequest{Text: goalText + "!", DoneWhen: goalText})
-	check(e, "goal text is longer than 300")
+	check(e, "goal text is longer than 300", "a file or the goal journal")
 	own, e := r.s.GoalSet(r.ctx, lead, contract.GoalSetRequest{Text: goalText, DoneWhen: goalText})
 	if e != nil {
 		t.Fatal(e)
 	}
 	_, e = r.s.GoalSet(r.ctx, lead, contract.GoalSetRequest{Goal: own.Goal, DoneWhen: goalText + "!"})
-	check(e, "doneWhen is longer than 300")
+	check(e, "doneWhen is longer than 300", "a file or the goal journal")
 	_, e = r.s.SessionStart(r.ctx, lead, contract.SessionStartRequest{Room: r.room, Name: "limited", Profile: "test", Goal: goalText + "!"})
-	check(e, "goal is longer than 300")
+	check(e, "goal is longer than 300", "brief or a file")
 	_, e = r.s.SessionStart(r.ctx, lead, contract.SessionStartRequest{Room: r.room, Name: "limited", Profile: "test", Goal: goalText, DoneWhen: goalText + "!"})
-	check(e, "doneWhen is longer than 300")
+	check(e, "doneWhen is longer than 300", "brief or a file")
 	_, e = r.s.GoalItem(r.ctx, lead, contract.GoalItemRequest{Text: itemText + "!"})
-	check(e, "goal item text is longer than 160")
+	check(e, "goal item text is longer than 160", "a file or the goal journal")
 	item, e := r.s.GoalItem(r.ctx, lead, contract.GoalItemRequest{Text: itemText})
 	if e != nil {
 		t.Fatal(e)
 	}
 	_, e = r.s.GoalItem(r.ctx, lead, contract.GoalItemRequest{Item: item.Item, Text: itemText + "!"})
-	check(e, "goal item text is longer than 160")
+	check(e, "goal item text is longer than 160", "a file or the goal journal")
 	got := r.goals(r.lead, false)[0]
 	if got.Text != goalText || got.DoneWhen != goalText || len(got.Items) != 1 || got.Items[0].Text != itemText {
 		t.Fatalf("stored goal and item do not match the accepted text: %+v", got)
