@@ -3,6 +3,7 @@ package live
 import (
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -62,8 +63,8 @@ func TestActivityPublicationOrder(t *testing.T) {
 	done.Wait()
 	first := (<-events).Body.(contract.TurnActivity)
 	last := (<-events).Body.(contract.TurnActivity)
-	gotFirst, firstOrder := l.Activity(first.Session)
-	gotLast, lastOrder := l.Activity(last.Session)
+	gotFirst, firstOrder, _ := l.Activity(first.Session)
+	gotLast, lastOrder, _ := l.Activity(last.Session)
 	if gotFirst != first || gotLast != last || firstOrder >= lastOrder {
 		t.Fatalf("activity order disagrees with stream: %v (%d), %v (%d)", gotFirst, firstOrder, gotLast, lastOrder)
 	}
@@ -74,15 +75,16 @@ func TestFinishedCallKeepsTheLatestLabel(t *testing.T) {
 	l := New(func(map[contract.SessionID]struct{}) {})
 	_, events := l.Subscribe("r", 2)
 	handle, _ := l.CreateSession("a")
+	startedAt := time.Unix(1000, 0).UTC()
 	label := contract.TurnActivity{Session: "a", Turn: "t", Label: "open"}
 	finished := contract.TurnActivity{Session: "a", Turn: "t", Finished: &contract.ToolFinished{Call: "c"}}
-	handle.PublishActivity("r", label, contract.Event{Body: label})
-	handle.PublishActivity("r", finished, contract.Event{Body: finished})
+	handle.PublishActivity("r", label, contract.Event{Time: startedAt, Body: label})
+	handle.PublishActivity("r", finished, contract.Event{Time: startedAt.Add(time.Minute), Body: finished})
 	<-events
 	if got := (<-events).Body.(contract.TurnActivity); got.Finished == nil || got.Finished.Call != "c" {
 		t.Fatalf("stream got %+v", got)
 	}
-	if got, _ := l.Activity("a"); got.Label != "open" || got.Finished != nil {
-		t.Fatalf("latest is %+v", got)
+	if got, _, at := l.Activity("a"); got.Label != "open" || got.Finished != nil || !at.Equal(startedAt) {
+		t.Fatalf("latest is %+v at %v, want %v", got, at, startedAt)
 	}
 }
