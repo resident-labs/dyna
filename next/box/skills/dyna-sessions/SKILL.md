@@ -7,15 +7,13 @@ description: Use when briefing or reviewing sessions, or troubleshooting turn de
 
 A child session suits a stream of work that needs its own branch, asks questions, or keeps context across wakes. For many coordinated workers, use the dyna-workflows skill. The workflow result goes to its starter; root can attach a workflow to a subscription to start it on events. Workers can be steered and paused, and dyna_workflows shows any room restrictions.
 
-With `session start`, give `goal`, `doneWhen` and `brief`. Say why the goal matters; include paths, commits and prior results so the child needn't rediscover them. Say what is in and out, what to check, and what to return and at what length. For an investigation, give the question; for a lookup, the exact command. For a search, specify breadth and whether you need locations or a review. Finding excerpts locates code; it doesn't show the code is correct or that an issue is absent. If you can't write a clear brief, orient yourself first.
+For an investigation, give the question; for a lookup, the exact command. For a search, specify breadth and whether you need locations or a review. Finding excerpts locates code; it doesn't show the code is correct or that an issue is absent.
 
 Taste is design, wording and UI judgment; diagnostics is finding the cause of a failure; intelligence is reasoning and architecture. Use cheaper profiles for reading or mechanical work, stronger ones for judgment, subject to AGENTS.md. A profile's max concurrent limits simultaneous workflow workers; if none is listed there's no cap for the profile. `dyna_usage` reports account usage.
 
 # Review and integrate
 
-Verify the child's claim against its evidence, for example the diff and CI on the current head. A result should state done, partial or blocked; failures or skips; the branch, commit or PR, affected paths, checks and consequential defaults. Leave out the work diary and unrequested code.
-
-Give a fresh reviewer the work, not your conclusion. One reviewer suffices for small changes. For high stakes, use several lenses (correctness, security, performance, reproduction) and a last pass for missing cases, unverified claims or unread sources. A workflow can run one worker per lens and a final pass over their results.
+Choose review lenses for the work: correctness, security, performance or whether it reproduces. A workflow can run one worker per lens and a final pass over their results.
 
 # Delivery and troubleshooting
 

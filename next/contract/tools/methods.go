@@ -196,7 +196,7 @@ var methodTable = []MethodEntry{
 		act("package", "remove", typ[contract.AddonRemoveRequest](), "Remove a Pi package by the name package list shows. global needs the owner's approval.", "package remove"),
 	),
 	method(contract.MethodPost, contract.ScopeOperate, UserAccess,
-		act("post", "send", typ[PostInput](), "Post text, attach files (paths) or publish a visual (html; visualUpdate replaces it). If a parent can't receive a mention it goes to the next available ancestor. A successful endTurn post stands for all owed replies if all calls in that message end the turn; queued input continues it. In codemode it posts without ending the turn (turnContinues).", "post"),
+		act("post", "send", typ[PostInput](), "Post text, attach files (paths) or publish a visual (html; visualUpdate replaces it). If a parent can't receive a mention it goes to the next available ancestor. endTurn ends the turn on this post whatever reply the turn owes and wherever the post goes, and the post stands as every reply the turn owes. The turn ends when the post succeeds and every tool call in the same message also ends it; a queued input continues it. In codemode it posts without ending the turn (turnContinues).", "post"),
 	),
 	method(contract.MethodPostSearch, contract.ScopeRead, OwnerAccess),
 	method(contract.MethodPrList, contract.ScopeRead, UserAccess,
