@@ -13,6 +13,7 @@ import (
 	"github.com/MichaelKinsy/PiG/coding/extension"
 	"github.com/MichaelKinsy/PiG/coding/extension/builtin/codemode"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/harness/pig"
 )
 
 // Interrupted is the cause of a script stopped for an input from above.
@@ -53,7 +54,7 @@ func (i *Interrupts) Send(sender contract.Interrupt) {
 }
 
 func codemodeTool(interrupts *Interrupts, settings func() extension.Settings) extension.ToolDefinition {
-	definition := codemode.Definition(codemode.Options{Models: true, GetSettings: settings})
+	definition := codemode.Definition(codemode.Options{Models: true, GetSettings: settings, DefaultMaxOutputTokens: pig.CodemodeOutputTokens})
 	// PrepareLoadout regenerates the description, so extend it there as well.
 	const note = " A message from the owner or an agent above gives a running script 5 seconds to finish, then stops it with output so far and a call summary; its store writes are not saved. Background bash jobs keep running."
 	definition.Description += note

@@ -92,6 +92,9 @@ type Harness struct {
 
 var _ harness.Harness = (*Harness)(nil)
 
+// CodemodeOutputTokens is the default budget for model-facing script output.
+const CodemodeOutputTokens = 3000
+
 // Open starts the session, continuing the newest one in the session folder if there is one.
 func Open(ctx context.Context, c Config) (*Harness, error) {
 	extensions := append([]extension.InlineExtension{}, c.Extensions...)
@@ -103,7 +106,7 @@ func Open(ctx context.Context, c Config) (*Harness, error) {
 	}
 	if !c.Bare {
 		extensions = append(extensions,
-			extension.NamedInlineExtension{Name: "codemode", Replaceable: true, Factory: codemode.CreateCodemodeExtension(codemode.Options{})},
+			extension.NamedInlineExtension{Name: "codemode", Replaceable: true, Factory: codemode.CreateCodemodeExtension(codemode.Options{DefaultMaxOutputTokens: CodemodeOutputTokens})},
 			extension.NamedInlineExtension{Name: "tool-search", Replaceable: true, Factory: toolsearch.CreateToolSearchExtensionWith(toolsearch.Options{DeferredToolsSection: true, DefaultLimit: 3})},
 			extension.NamedInlineExtension{Name: "mcp", Replaceable: true, Factory: mcpext.CreateMcpExtension(mcpext.Options{AgentDir: c.AgentDir, ConfigDirName: ".pi", DeferredToolsSection: true})},
 		)
@@ -183,7 +186,10 @@ func (h *Harness) start(ctx context.Context, c Config) error {
 	if len(c.Tools) > 0 {
 		tools = c.Tools
 	}
-	created, err := coding.CreateAgentSessionFromServices(coding.CreateAgentSessionFromServicesOptions{Services: h.services, SessionManager: manager, Model: model, ThinkingLevel: ai.ModelThinkingLevel(c.Model.Thinking), Tools: tools, ContextUpdates: true, ActiveEffortAtTopLevel: true})
+	created, err := coding.CreateAgentSessionFromServices(coding.CreateAgentSessionFromServicesOptions{
+		Services: h.services, SessionManager: manager, Model: model, ThinkingLevel: ai.ModelThinkingLevel(c.Model.Thinking),
+		Tools: tools, ContextUpdates: true, ActiveEffortAtTopLevel: true, ReadMaxLines: 1000, ReadMaxBytes: 25 << 10,
+	})
 	if err != nil {
 		return err
 	}
