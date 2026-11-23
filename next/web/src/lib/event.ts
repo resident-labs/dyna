@@ -96,7 +96,7 @@ const bodies: Record<string, Check> = {
   "service.changed": object({ service: string, name: string, host: optional(string), from: optional(string), to: string, reason: optional(string), cause: optional(string) }),
   "service.failed": object({ service: string, name: string, host: optional(string), reason: string, cause: optional(string), detail: optional(string) }),
   "service.message": object({ service: string, id: string, author: string, text: string, data: optional(nullable(() => true)) }),
-  "service.sent": object({ service: string, id: string, to: string, text: string }),
+  "service.sent": object({ service: string, id: string, to: string, text: string, toolCallId: optional(string) }),
   "github.comment": githubAction,
   "github.label": githubAction,
   "github.mention": githubAction,

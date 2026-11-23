@@ -137,6 +137,7 @@ export function stream(
         // Turn boundaries need not append transcript bytes: reload at start so a cold
         // session shows Working before Pi writes, and at end so live steps settle.
         if ((owner && event.type === "transcript.changed") || (room && (!attentionAfter || event.room === room) && (event.type === "turn.started" || event.type === "turn.ended"))) for (const listener of transcriptListeners) listener(event.body.session);
+        else if (room && (!attentionAfter || event.room === room) && event.type === "service.sent" && event.from.session) for (const listener of transcriptListeners) listener(event.from.session);
         apply(event);
       }
       delay = 500;

@@ -99,10 +99,11 @@ type ServiceSecretSetResponse struct{}
 
 // ServiceSendRequest queues an outbound message for a feed service to poll and deliver externally.
 type ServiceSendRequest struct {
-	Room    RoomID      `json:"room,omitempty" desc:"Room ID; omitted means your room."`
-	Service ServiceName `json:"service" desc:"Feed service name."`
-	To      string      `json:"to" desc:"Destination address understood by the service."`
-	Text    string      `json:"text" desc:"Message text to send."`
+	Room       RoomID      `json:"room,omitempty" desc:"Room ID; omitted means your room."`
+	Service    ServiceName `json:"service" desc:"Feed service name."`
+	To         string      `json:"to" desc:"Destination address understood by the service."`
+	Text       string      `json:"text" desc:"Message text to send."`
+	ToolCallID string      `json:"toolCallId,omitempty"`
 }
 type ServiceSendResponse struct {
 	ID string `json:"id"`
@@ -169,10 +170,11 @@ type ServiceMessage struct {
 
 // ServiceSent records an outbound message queued for a feed service via service.send.
 type ServiceSent struct {
-	Service ServiceName `json:"service"`
-	ID      string      `json:"id"`
-	To      string      `json:"to"`
-	Text    string      `json:"text"`
+	Service    ServiceName `json:"service"`
+	ID         string      `json:"id"`
+	To         string      `json:"to"`
+	Text       string      `json:"text"`
+	ToolCallID string      `json:"toolCallId,omitempty"`
 }
 
 func (ServiceChanged) EventType() EventType { return "service.changed" }

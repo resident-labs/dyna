@@ -311,7 +311,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 					if !found {
 						return response, invalid("unknown transcript item")
 					}
-					return transcriptChunk(response, harness.Mask(event.Body.(contract.PostCreated).Text), req.Offset)
+					return transcriptChunk(response, harness.Mask(transcriptview.PostText(event)), req.Offset)
 				}
 				item := t.Items[0]
 				if item.Kind == contract.TranscriptPost && req.Part == contract.TranscriptPartText {
@@ -320,7 +320,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 						return response, failure(err)
 					}
 					if found {
-						return transcriptChunk(response, harness.Mask(event.Body.(contract.PostCreated).Text), req.Offset)
+						return transcriptChunk(response, harness.Mask(transcriptview.PostText(event)), req.Offset)
 					}
 				}
 				value := item.Output
@@ -399,7 +399,7 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 		}
 		if req.Turn != "" {
 			for _, item := range t.Items {
-				if item.Kind == contract.TranscriptTool || item.Kind == contract.TranscriptPost {
+				if item.Kind == contract.TranscriptTool || (item.Kind == contract.TranscriptPost && item.Tool != "") {
 					response.Steps = append(response.Steps, pig.TranscriptStep(item))
 				}
 			}

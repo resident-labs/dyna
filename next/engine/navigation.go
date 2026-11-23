@@ -523,10 +523,18 @@ func (s *Service) TranscriptDigest(ctx context.Context, caller contract.Principa
 				}
 				step(label + status)
 				for _, post := range item.Posts {
-					step("post: " + post.Text)
+					if post.Type == (contract.ServiceSent{}).EventType() {
+						step("→ " + post.To + ": " + post.Text)
+					} else {
+						step("post: " + post.Text)
+					}
 				}
 			case contract.TranscriptPost:
-				step("post: " + item.Text)
+				if item.Type == (contract.ServiceSent{}).EventType() {
+					step("→ " + item.To + ": " + item.Text)
+				} else {
+					step("post: " + item.Text)
+				}
 			case contract.TranscriptText:
 				out.Text, finalCut = clipRunes(item.Text, contract.TranscriptTextChars)
 				finalID = item.ID

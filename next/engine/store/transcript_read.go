@@ -101,7 +101,7 @@ func (s *Store) TranscriptTurnMetadata(ctx context.Context, session contract.Ses
 }
 
 const transcriptPostsQuery = ` FROM events e JOIN turns t ON t.session=? AND t.id=?
-WHERE e.type='post.created' AND e.from_kind='session' AND e.from_id=t.session
+WHERE e.type IN ('post.created','service.sent') AND e.from_kind='session' AND e.from_id=t.session
 AND e.seq>t.started_seq
 AND NOT EXISTS (SELECT 1 FROM turns n WHERE n.session=t.session AND n.started_seq>t.started_seq AND n.started_seq<=e.seq)
 AND NOT EXISTS (SELECT 1 FROM events ended WHERE ended.room=(SELECT room FROM sessions WHERE id=t.session) AND ended.type='turn.ended' AND ended.from_kind='session' AND ended.from_id=t.session AND json_extract(CAST(ended.body AS TEXT),'$.turn')=t.id AND ended.seq>t.started_seq AND ended.seq<=e.seq)`
@@ -209,7 +209,7 @@ func (s *Store) TranscriptDeliveries(ctx context.Context, session contract.Sessi
 
 // TranscriptSteers returns the deliveries a running turn took as messages to read, a child's reply among them. A machine wake, such as a shell job's end, does not split the turn's work.
 func (s *Store) TranscriptSteers(ctx context.Context, session contract.SessionID) (map[contract.DeliverySeq]bool, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT d.seq FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_kind=? AND d.to_id=? AND d.queue IS NOT NULL AND e.type IN ('post.created','question.answered','turn.ended')", contract.PrincipalSession, session)
+	rows, err := s.Read().QueryContext(ctx, "SELECT d.seq FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_kind=? AND d.to_id=? AND d.queue IS NOT NULL AND e.type IN ('post.created','question.answered','turn.ended','service.message')", contract.PrincipalSession, session)
 	if err != nil {
 		return nil, err
 	}

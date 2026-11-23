@@ -228,6 +228,9 @@ func (s *Service) ServiceSend(ctx context.Context, who contract.Principal, req c
 	if len(req.Text) > contract.ServiceFeedOutboxMax {
 		return contract.ServiceSendResponse{}, &contract.Error{Code: contract.ErrTooLarge, Message: fmt.Sprintf("text exceeds %d bytes", contract.ServiceFeedOutboxMax)}
 	}
+	if len(req.ToolCallID) > 4096 || (req.ToolCallID != "" && who.Kind != contract.PrincipalSession) {
+		return contract.ServiceSendResponse{}, invalid("invalid tool call ID")
+	}
 	room := req.Room
 	var callerSession store.Session
 	if who.Kind == contract.PrincipalSession {
@@ -264,7 +267,7 @@ func (s *Service) ServiceSend(ctx context.Context, who contract.Principal, req c
 	if err != nil {
 		return contract.ServiceSendResponse{}, failure(err)
 	}
-	err = s.store.EnqueueServiceOutbox(ctx, row.ID, room, row.Spec.Name, msgID, to, req.Text, now, func(r contract.RoomID, body contract.EventBody) (contract.Event, error) {
+	err = s.store.EnqueueServiceOutbox(ctx, row.ID, room, row.Spec.Name, msgID, to, req.Text, req.ToolCallID, now, func(r contract.RoomID, body contract.EventBody) (contract.Event, error) {
 		return s.event(r, who, body)
 	})
 	if err != nil {

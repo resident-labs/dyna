@@ -261,7 +261,7 @@ var methodTable = []MethodEntry{
 	method(contract.MethodServiceRemove, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodServiceSecretSet, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodServiceSend, contract.ScopeOperate, UserAccess,
-		act("service", "send", typ[contract.ServiceSendRequest](), "Queue an outbound message for a feed service in your room. Only sessions listed in the service's senders (root by default) may send; agents never call a service's published port directly.", "service send"),
+		act("service", "send", typ[ServiceSendInput](), "Queue an outbound message for a feed service in your room. Only sessions listed in the service's senders (root by default) may send; agents never call a service's published port directly.", "service send"),
 	),
 	method(contract.MethodSessionRestart, contract.ScopeOperate, UserAccess,
 		act("session", "restart", typ[contract.SessionRestartRequest](), "Replace a failed box or re-place a pending box never created on any host, for session (name or ID), any session under you at any depth. Pending boxes with existing files are refused. host replaces a host/sameHost pin within the room host rule; omitting host keeps the pin. For a failed box, unpushed work is lost. Removes its container and workspace/stack volumes on every known current or prior host before resetting it. If cleanup on any of those hosts fails, as when the host does not answer, the session stays failed and the error names the host; call restart again once that host answers (host list shows it). Deletion may already be partial.", "session restart"),
