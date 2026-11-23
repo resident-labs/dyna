@@ -16,23 +16,30 @@ const (
 	dynaMaxAdmissionJitter   = 30 * time.Second
 )
 
-// One deadline follows the request through credential failover and retry rounds.
+// One deadline bounds both selection and retry waits, not execution or streaming.
 func withDynaAdmissionDeadline(ctx context.Context) context.Context {
-	if _, ok := ctx.Value(dynaAdmissionDeadlineKey{}).(time.Time); ok {
+	if ctx.Value(dynaAdmissionDeadlineKey{}) != nil || ctx.Value(dynaEligibleContextKey{}) == nil {
 		return ctx
 	}
 	return context.WithValue(ctx, dynaAdmissionDeadlineKey{}, time.Now().Add(dynaMaxAdmissionCooldown+dynaMaxAdmissionJitter))
+}
+
+func dynaRetryWaitLimit(ctx context.Context, maxWait time.Duration) time.Duration {
+	if deadline, ok := ctx.Value(dynaAdmissionDeadlineKey{}).(time.Time); ok {
+		return min(maxWait, max(0, time.Until(deadline)))
+	}
+	return maxWait
 }
 
 // Dyna holds short selection cooldowns instead of spending the caller's retry
 // budget. No executor has run when selection reports cooldown, so retrying here
 // cannot duplicate a generation. Non-Dyna callers retain the upstream policy.
 func (m *Manager) pickNextMixed(ctx context.Context, providers []string, model string, opts cliproxyexecutor.Options, tried map[string]struct{}) (*Auth, ProviderExecutor, string, error) {
-	if authSelectionEligibilityForRequest(ctx, opts).allowedIDs == nil {
+	ctx = withDynaAdmissionDeadline(ctx)
+	deadline, ok := ctx.Value(dynaAdmissionDeadlineKey{}).(time.Time)
+	if !ok {
 		return m.pickNextMixedRaw(ctx, providers, model, opts, tried)
 	}
-	ctx = withDynaAdmissionDeadline(ctx)
-	deadline := ctx.Value(dynaAdmissionDeadlineKey{}).(time.Time)
 	for {
 		a, executor, provider, err := m.pickNextMixedRaw(ctx, providers, model, opts, tried)
 		if err == nil {

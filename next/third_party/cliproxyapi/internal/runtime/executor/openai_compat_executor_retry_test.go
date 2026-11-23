@@ -16,11 +16,12 @@ import (
 func TestOpenAICompatRetryAfter(t *testing.T) {
 	now := time.Date(2026, time.September, 3, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
-		name    string
-		status  int
-		headers http.Header
-		body    string
-		want    *time.Duration
+		name     string
+		provider string
+		status   int
+		headers  http.Header
+		body     string
+		want     *time.Duration
 	}{
 		{
 			name:    "delta seconds header",
@@ -54,6 +55,34 @@ func TestOpenAICompatRetryAfter(t *testing.T) {
 			want:    durationPointer(5 * time.Second),
 		},
 		{
+			name:     "z.ai request-rate limit without hint",
+			provider: "openai-compatible-zai",
+			status:   http.StatusTooManyRequests,
+			body:     `{"code":"1302","message":"Rate limit reached for requests"}`,
+			want:     durationPointer(time.Minute),
+		},
+		{
+			name:     "z.ai overload without hint",
+			provider: "openai-compatible-zai",
+			status:   http.StatusTooManyRequests,
+			body:     `{"error":{"code":1305,"message":"The service may be temporarily overloaded"}}`,
+			want:     durationPointer(20 * time.Second),
+		},
+		{
+			name:     "explicit z.ai hint wins",
+			provider: "openai-compatible-zai",
+			status:   http.StatusTooManyRequests,
+			headers:  http.Header{"Retry-After": {"15"}},
+			body:     `{"code":"1302"}`,
+			want:     durationPointer(15 * time.Second),
+		},
+		{
+			name:     "z.ai code from another provider has no special cooldown",
+			provider: "not-zai",
+			status:   http.StatusTooManyRequests,
+			body:     `{"code":"1302"}`,
+		},
+		{
 			name:   "generic 429 has no invented deadline",
 			status: http.StatusTooManyRequests,
 			body:   `{"error":{"code":"rate_limit"}}`,
@@ -67,7 +96,7 @@ func TestOpenAICompatRetryAfter(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := openAICompatRetryAfter(test.status, test.headers, []byte(test.body), now)
+			got := openAICompatRetryAfter(test.provider, test.status, test.headers, []byte(test.body), now)
 			if test.want == nil {
 				if got != nil {
 					t.Fatalf("retry-after = %v, want nil", *got)
