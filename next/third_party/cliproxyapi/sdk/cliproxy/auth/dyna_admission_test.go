@@ -5,11 +5,38 @@ import (
 	"encoding/base64"
 	"fmt"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	executor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 )
+
+func TestDynaAdmissionWaitsThroughTwoMinuteCooldown(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const id, provider, model = "admission-long", "admission-test", "admission-model"
+		manager := NewManager(nil, nil, nil)
+		exec := &dynaExecutor{successExecutor: successExecutor{provider: provider}}
+		manager.RegisterExecutor(exec)
+		ctx := WithDynaEligibleAuth(t.Context(), []string{base64.RawURLEncoding.EncodeToString([]byte(id))})
+		if _, err := manager.Register(ctx, &Auth{ID: id, Provider: provider, Status: StatusActive}); err != nil {
+			t.Fatal(err)
+		}
+		registry.GetGlobalRegistry().RegisterClient(id, provider, []*registry.ModelInfo{{ID: model}})
+		defer registry.GetGlobalRegistry().UnregisterClient(id)
+
+		reset := 120 * time.Second
+		manager.MarkResult(ctx, Result{AuthID: id, Model: model, RetryAfter: &reset, Error: &Error{HTTPStatus: 429, Message: "rate limited"}})
+		start := time.Now()
+		_, err := manager.Execute(ctx, []string{provider}, executor.Request{Model: model}, executor.Options{})
+		if elapsed := time.Since(start); err != nil || elapsed < reset || elapsed >= reset+12*time.Second {
+			t.Fatalf("waited %s for %s cooldown: %v", elapsed, reset, err)
+		}
+		if len(exec.calls) != 1 || exec.calls[0] != id {
+			t.Fatalf("upstream calls = %v", exec.calls)
+		}
+	})
+}
 
 type admissionFailoverSelector struct{ picks int }
 

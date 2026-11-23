@@ -52,8 +52,9 @@ func dialWaiting(ctx context.Context, socket string, wait time.Duration) (net.Co
 // without sending them on, and closes the socket on them as it exits, so such a call reached no provider. A model call is kept in
 // memory for this; git's requests stream, so only a failed dial sends one again. A call that fails after its headers stays failed.
 type holding struct {
-	next http.RoundTripper
-	wait time.Duration
+	next        http.RoundTripper
+	wait        time.Duration // restart retry window; the dial also has its own budget
+	headersWait time.Duration // a connected engine may be holding for a cooldown
 }
 
 func (h holding) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -79,19 +80,23 @@ func (h holding) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, err
 		}
 	}
+	headersWait := h.headersWait
+	if headersWait == 0 {
+		headersWait = contract.ModelWireIdleTimeout
+	}
 	waiting, cancel := context.WithTimeout(req.Context(), h.wait)
 	defer cancel()
 	var delay backoff
 	for {
 		attemptCtx, cancelAttempt := context.WithCancel(req.Context())
-		stopBudget := context.AfterFunc(waiting, cancelAttempt)
+		timer := time.AfterFunc(headersWait, cancelAttempt)
 		attempt := req.Clone(attemptCtx)
 		attempt.Body, attempt.ContentLength = http.NoBody, int64(len(kept))
 		if len(kept) > 0 {
 			attempt.Body = io.NopCloser(bytes.NewReader(kept))
 		}
 		resp, err := h.next.RoundTrip(attempt)
-		stopBudget()
+		timer.Stop()
 		if err == nil {
 			// Headers end the restart hold. A healthy response may stream for hours.
 			resp.Body = &cancelModelBody{ReadCloser: resp.Body, cancel: cancelAttempt}

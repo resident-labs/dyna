@@ -26,6 +26,10 @@ type InstructionsSetResponse struct {
 	Hash string `json:"hash"`
 }
 
+// ModelWireIdleTimeout leaves room for the proxy's five-minute admission hold
+// and up to 30 seconds of jitter before a provider's normal five-minute wait.
+const ModelWireIdleTimeout = 11 * time.Minute
+
 type Method string
 
 const (
@@ -819,6 +823,11 @@ type BoxHelloResponse struct {
 	// GitHub says the engine serves GitHub's read-only MCP tools at /github/ on the box socket, with its own token.
 	GitHub bool `json:"github,omitempty"`
 }
+
+// MaxModelRetryAfterSeconds bounds the reset hints the box may report. Longer
+// cooldowns use the normal retry ladder so a changed account can recover sooner.
+const MaxModelRetryAfterSeconds = 3600
+
 type TurnOutputRequest struct {
 	DataAttachment *int         `json:"-"`
 	Data           JSONData     `json:"data,omitempty"`
@@ -835,6 +844,8 @@ type TurnOutputRequest struct {
 	Usage          Usage        `json:"usage"`
 	// Unread names inputs the turn ended without giving to Pi, because their files were still on the way. The next turn takes them.
 	Unread []DeliverySeq `json:"unread,omitempty"`
+	// ModelRetryAfterSeconds is the provider's reset hint for a model_failed turn.
+	ModelRetryAfterSeconds int64 `json:"modelRetryAfterSeconds,omitempty"`
 }
 type TurnOutputResponse struct{}
 

@@ -269,6 +269,8 @@ type TurnEnded struct {
 	LastText     string          `json:"-"` // latest assistant text, even if it wasn't a complete answer
 	// Unread carries the runner's result to TurnOutputRequest.Unread.
 	Unread []DeliverySeq `json:"-"`
+	// ModelRetryAfterSeconds carries the harness's reset hint to TurnOutputRequest.
+	ModelRetryAfterSeconds int64 `json:"-"`
 }
 
 type ConversationRead struct {

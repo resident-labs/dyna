@@ -34,7 +34,7 @@ func Handler(socket string, clientKey, sessionID string, allowedModels, eligible
 }
 
 func unixClient(socket string) *http.Client {
-	return &http.Client{Transport: idleTransport(socket, streamIdleTimeout), Timeout: 30 * time.Second}
+	return &http.Client{Transport: idleTransport(socket, contract.ModelWireIdleTimeout), Timeout: 30 * time.Second}
 }
 
 func handler(client *http.Client, clientKey, sessionID string, allowedModels, eligibleIDs []string, pinnedID string, preferredIDs []string, crew bool, sent ...func(context.Context) error) http.Handler {
@@ -62,6 +62,9 @@ func serve(client *http.Client, clientKey, affinityID string, routes map[string]
 	proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: "cliproxy"})
 	proxy.Transport = client.Transport
 	proxy.FlushInterval = -1
+	if affinityID != contract.LocalClient {
+		proxy.ModifyResponse = preserveModelRetryHint
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		method, ok := routes[r.URL.Path]
 		if !ok {

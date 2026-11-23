@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	randv2 "math/rand/v2"
 	"slices"
 	"strings"
 	"time"
@@ -372,10 +373,13 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			}
 			if retries < 8 && !cancelled {
 				delay := 5 * time.Minute * time.Duration(1<<retries)
-				if delay > time.Hour {
-					delay = time.Hour
+				if output.ModelRetryAfterSeconds > 0 {
+					base := max(time.Duration(output.ModelRetryAfterSeconds)*time.Second, 30*time.Second)
+					jitter := randv2.Int64N(int64(min(base/10, 30*time.Second)))
+					retryAt = event.Time.Add(base + time.Duration(jitter)).UnixMilli()
+				} else {
+					retryAt = event.Time.Add(min(delay, time.Hour)).UnixMilli()
 				}
-				retryAt = event.Time.Add(delay).UnixMilli()
 				retries++
 				deferred = true
 			}

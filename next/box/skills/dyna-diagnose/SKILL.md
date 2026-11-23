@@ -69,7 +69,7 @@ A failed turn (`turn.ended` `cause`; the next input starts a new turn):
 
 | Cause | Do |
 |---|---|
-| `model_failed` | it retries by itself 8 times over about 5 hours. Read dyna_usage, then `dyna account quota`; move it with `session set_profile` to another provider's profile, or `dyna session set-account SESSION ACCOUNT` |
+| `model_failed` | it retries by itself up to 8 times, at the provider's reported reset when known or on a 5-minute to 1-hour backoff. A short model cooldown may still be waiting in the running turn. If failures persist, read dyna_usage, then `dyna account quota`; move it with `session set_profile` to another provider's profile, or `dyna session set-account SESSION ACCOUNT` |
 | `output_limit` | post to it to continue in smaller pieces |
 | `harness_failed` | the agent program stopped; a third crash without a completed turn fails the box. Post once; on another failure, `session restart` |
 | `setup_failed` | the box could not set up the repository: the turn's `error` says why |

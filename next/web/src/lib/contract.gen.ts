@@ -182,7 +182,7 @@ export type ModelChoice = { provider: ModelProvider; id: string; thinking: Think
 export type BoxRepo = { name: RepoName; cache: string; branch: string; base: string; commit?: string; };
 export type TextOnlyModel = { provider: ModelProvider; model: string; images?: boolean; };
 export type BoxHelloResponse = { discord?: boolean; room: RoomID; root?: boolean; advisor?: boolean; gitName?: string; gitEmail?: string; gitSigningKey?: string; compactTokens?: number; instructions: string; modelInstructions?: string; workerInstructions?: string; session: SessionID; box: BoxID; model: ModelChoice; textOnlyModels?: Array<TextOnlyModel> | null; repos?: Array<BoxRepo> | null; transcripts?: Array<TranscriptFile> | null; workflow?: BoxWorkflow | null; github?: boolean; };
-export type TurnOutputRequest = { data?: JSONData; shellJobs: number; jobs?: Array<ShellJobID> | null; error?: string; cause?: FailureCause; turn: TurnID; outcome: TurnOutcome; final?: string; endPosts?: Array<EventID> | null; model: string; usage: Usage; unread?: Array<DeliverySeq> | null; };
+export type TurnOutputRequest = { data?: JSONData; shellJobs: number; jobs?: Array<ShellJobID> | null; error?: string; cause?: FailureCause; turn: TurnID; outcome: TurnOutcome; final?: string; endPosts?: Array<EventID> | null; model: string; usage: Usage; unread?: Array<DeliverySeq> | null; modelRetryAfterSeconds?: number; };
 export type TurnOutputResponse = { };
 export type TurnActivityRequest = { turn: TurnID; kind?: ActivityKind; label: string; finished?: ToolFinished | null; };
 export type TurnActivityResponse = { };
@@ -849,6 +849,7 @@ export type BoxMessageBody =
   | { type: "turn.stop"; body: TurnStop }
   | { type: "workflow.reload"; body: WorkflowReload }
 ;
+export const MaxModelRetryAfterSeconds = 3600;
 export const SessionListPage = 25;
 export const MaxGPUGiB = 1048576;
 export const NavPageBytes = 8192;

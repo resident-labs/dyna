@@ -56,6 +56,7 @@ func (t *turn) event(e agent.AgentEvent) {
 	case agent.AgentSettledEvent:
 		if e.Aborted {
 			t.result.Outcome, t.result.Error, t.result.Cause = contract.TurnStopped, "", ""
+			t.result.ModelRetryAfterSeconds = 0
 		} else if t.result.Outcome == contract.TurnCompleted {
 			t.batch.apply(&t.result)
 		}
@@ -90,9 +91,11 @@ func (t *turn) message(m agent.AgentMessage) {
 			t.result.Usage.CacheReadTokens += int64(a.Usage.CacheRead)
 			t.result.Usage.CacheWriteTokens += int64(a.Usage.CacheWrite)
 		}
+		t.result.ModelRetryAfterSeconds = 0
 		switch a.StopReason {
 		case ai.StopReasonError:
 			t.result.Outcome, t.result.Error, t.result.Cause = contract.TurnFailed, a.ErrorMessage, contract.CauseModelFailed
+			t.result.ModelRetryAfterSeconds = modelRetryAfterSeconds(a.ErrorMessage)
 		case ai.StopReasonLength:
 			t.result.Outcome, t.result.Error, t.result.Cause = contract.TurnFailed, a.ErrorMessage, contract.CauseOutputLimit
 		case ai.StopReasonAborted:
