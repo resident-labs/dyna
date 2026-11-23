@@ -851,6 +851,8 @@ export type BoxMessageBody =
 ;
 export const MaxModelRetryAfterSeconds = 3600;
 export const SessionListPage = 25;
+export const GoalTextLimit = 300;
+export const GoalItemTextLimit = 160;
 export const MaxGPUGiB = 1048576;
 export const NavPageBytes = 8192;
 export const SearchLimitDefault = 10;

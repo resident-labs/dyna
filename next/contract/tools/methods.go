@@ -53,7 +53,7 @@ var methodTable = []MethodEntry{
 		act("goal", "list", typ[contract.GoalListRequest](), "List the room's active goals and their items. session narrows it to one holder; all adds ended goals.", "goal list"),
 	),
 	method(contract.MethodGoalItem, contract.ScopeOperate, UserAccess,
-		act("goal", "item", typ[contract.GoalItemRequest](), "Add text (at most 160 characters); parent makes a subtask, one level deep. With item, edit text or state. Done requires settled subtasks; drop also drops open subtasks. Adding or opening a subtask reopens its parent.", "goal item"),
+		act("goal", "item", typ[contract.GoalItemRequest](), "Add text (at most 160 characters); parent makes a subtask, one level deep. With item, edit text or set state to open, done or dropped. Done requires settled subtasks; drop also drops open subtasks. Adding or opening a subtask reopens its parent.", "goal item"),
 	),
 	method(contract.MethodGoalDone, contract.ScopeOperate, UserAccess,
 		act("goal", "done", typ[contract.GoalDoneRequest](), "End goal once its done condition holds and no item is open. summary is required: a sentence or two on what was done, or why it was given up. Set drop to give it up instead.", "goal done"),
