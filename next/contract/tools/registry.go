@@ -158,3 +158,11 @@ func AgentActions() []Action {
 type AdvisorInput struct {
 	Prompt string `json:"prompt" desc:"What the advisor needs: the task, what you found so far and what you want judged. It reads your files and session file itself, so point to evidence rather than pasting it."`
 }
+
+// ServiceSendInput is what a session names when sending to a feed service; toolCallId is injected by the box.
+type ServiceSendInput struct {
+	Room    contract.RoomID      `json:"room,omitempty" desc:"Room ID; omitted means your room."`
+	Service contract.ServiceName `json:"service" desc:"Feed service name."`
+	To      string               `json:"to" desc:"Destination address understood by the service."`
+	Text    string               `json:"text" desc:"Message text to send."`
+}

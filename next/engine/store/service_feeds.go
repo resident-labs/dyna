@@ -73,7 +73,7 @@ func (s *Store) EnqueueServiceOutbox(
 	serviceID contract.ServiceID,
 	room contract.RoomID,
 	name contract.ServiceName,
-	msgID, to, text string,
+	msgID, to, text, toolCallID string,
 	now time.Time,
 	newEvent func(contract.RoomID, contract.EventBody) (contract.Event, error),
 ) error {
@@ -95,10 +95,11 @@ func (s *Store) EnqueueServiceOutbox(
 			return err
 		}
 		event, err := newEvent(room, contract.ServiceSent{
-			Service: name,
-			ID:      msgID,
-			To:      to,
-			Text:    text,
+			Service:    name,
+			ID:         msgID,
+			To:         to,
+			Text:       text,
+			ToolCallID: toolCallID,
 		})
 		if err != nil {
 			return err

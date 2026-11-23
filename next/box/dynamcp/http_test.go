@@ -381,3 +381,32 @@ func TestVisualCheckReadsFromTheWorkingDirectory(t *testing.T) {
 		t.Fatalf("%q", files)
 	}
 }
+
+func TestServiceSendInjectsToolCallID(t *testing.T) {
+	var sent contract.ServiceSendRequest
+	server, err := New(func(_ context.Context, method contract.Method, data []byte) ([]byte, *contract.Error) {
+		if method != contract.MethodServiceSend {
+			t.Fatalf("unexpected method %q", method)
+		}
+		if err := json.Unmarshal(data, &sent); err != nil {
+			t.Fatal(err)
+		}
+		return []byte(`{"id":"out_1"}`), nil
+	}, nil, post.Preparer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := arguments(t, `{"action":"send","service":"agent-chat","to":"@alice/team","text":"hello"}`)
+	args[contract.ToolCallIDArgument] = json.RawMessage(`"call-send-1"`)
+	if out := server.call(context.Background(), callParams{Name: "service", Arguments: args}); out.IsError {
+		t.Fatalf("unexpected error: %+v", out)
+	}
+	if sent.Service != "agent-chat" || sent.To != "@alice/team" || sent.Text != "hello" || sent.ToolCallID != "call-send-1" {
+		t.Fatalf("sent=%+v", sent)
+	}
+	// Model-provided toolCallId must be rejected by strict decoding.
+	bad := server.call(context.Background(), callParams{Name: "service", Arguments: arguments(t, `{"action":"send","service":"agent-chat","to":"@alice/team","text":"hello","toolCallId":"spoof"}`)})
+	if !bad.IsError {
+		t.Fatalf("expected unknown field rejection, got %+v", bad)
+	}
+}

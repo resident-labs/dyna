@@ -968,6 +968,8 @@ type TranscriptItem struct {
 	Seq            int64                   `json:"seq,omitempty"`
 	Home           *Conversation           `json:"home,omitempty"`
 	Mentions       []SessionID             `json:"mentions,omitempty"` // the sessions a post names
+	Service        ServiceName             `json:"service,omitempty"`  // feed service for a service.sent item
+	To             string                  `json:"to,omitempty"`       // recipient address for a service.sent item
 	Bytes          int64                   `json:"bytes,omitempty"`
 	Tokens         int64                   `json:"tokens,omitempty"`
 	ErrorName      string                  `json:"errorName,omitempty"` // an attempt_failed item's failure, such as SocketError

@@ -1,5 +1,5 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
-import type { ActivityKind, EngineRestarted, Event, ToolFinished, TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
+import type { ActivityKind, EngineRestarted, Event, JSONData, ToolFinished, TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
 import { engineRestartText } from "./engine-restarted.ts";
 import { decodeEvent } from "./event.ts";
 import { causes, formatTime } from "./feed.ts";
@@ -8,13 +8,25 @@ export function pendingStartBrief(brief: string | undefined, turns: TranscriptTu
   return brief && !turns.some(turn => turn.inputs?.some(input => input.type === "session.started")) ? brief : undefined;
 }
 
-// Dyna: Someone's words are a message. An engine notice is one plain line, as T3 Code shows a notification, never a post.
-export type TimelineInput = { kind: "message" | "line" | "failed"; text: string; restart?: EngineRestarted };
-const line = (text: string): TimelineInput => ({ kind: "line", text });
+// Dyna: Someone's words are a message, an incoming feed message carries its service/author as outside text, and an engine notice is one plain line.
+export type TimelineFeed = { service: string; author: string; data?: JSONData };
+export type TimelineInput =
+  | { kind: "message" | "line" | "failed"; text: string; restart?: EngineRestarted }
+  | { kind: "feed"; text: string; feed: TimelineFeed };
+const line = (text: string) => ({ kind: "line" as const, text });
 
 function eventInput(event: Event): TimelineInput | undefined {
   switch (event.type) {
     case "discord.message": return { kind: "message", text: `Discord · ${event.body.author} · #${event.body.channelName}\n${[event.body.history, event.body.text, event.body.richContent, ...(event.body.attachments ?? []).map(file => `${file.name} (${file.size} bytes): ${file.url}`)].filter(Boolean).join("\n\n")}` };
+    case "service.message": return {
+      kind: "feed",
+      text: event.body.text,
+      feed: {
+        service: event.body.service,
+        author: event.body.author,
+        ...(event.body.data !== undefined && event.body.data !== null ? { data: JSON.stringify(event.body.data) } : {}),
+      },
+    };
     case "session.started": return event.body.brief ? { kind: "message", text: event.body.brief } : line("Session started");
     case "turn.ended": {
       const { outcome, final, cause, error } = event.body;
@@ -50,13 +62,16 @@ function eventInput(event: Event): TimelineInput | undefined {
 export function timelineInput(input: TranscriptInput, full?: string): TimelineInput {
   if (input.type === "post.created" || input.type === "question.answered") return { kind: "message", text: full ?? input.text };
   const neutral = line(`Event: ${input.type}`);
-  if (input.more && full === undefined) return input.type === "turn.ended" ? { kind: "message", text: "" } : input.type === "session.started" ? line("Session started") : neutral;
+  if (input.more && full === undefined) return input.type === "turn.ended" ? { kind: "message", text: "" } : input.type === "session.started" ? line("Session started") : input.type === "service.message" ? line("Loading feed message…") : neutral;
   try {
     const event = decodeEvent({ id: input.id, seq: input.seq, room: input.room, at: input.at, from: input.from, type: input.type, body: JSON.parse(full ?? input.text) });
     return (event && eventInput(event)) ?? neutral;
   } catch { return neutral; }
 }
-export const timelineInputText = (input: TranscriptInput, full?: string): string => timelineInput(input, full).text;
+export const timelineInputText = (input: TranscriptInput, full?: string): string => {
+  const shown = timelineInput(input, full);
+  return shown.kind === "feed" ? `${shown.feed.service} · ${shown.feed.author}${shown.text ? `: ${shown.text}` : ""}` : shown.text;
+};
 
 // Dyna: A steer is an input that a running turn read, so it reads as one.
 export function steerInput(item: TranscriptItem): TranscriptInput {

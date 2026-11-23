@@ -5,7 +5,7 @@
   import { transcriptReader } from "../transcript-reader.ts";
   import { decodeEvent } from "../event.ts";
   import { hue } from "../identity.ts";
-  import { visibleAttachments, boxRow, causes, dayLabel, formatTime, waits } from "../feed.ts";
+  import { visibleAttachments, boxRow, causes, dayLabel, formatTime, fullTime, waits } from "../feed.ts";
   import BoxRestart from "./BoxRestart.svelte";
   import { watchTranscripts } from "../stream.ts";
   import { sourceLabel } from "../source.ts";
@@ -28,7 +28,7 @@
   import QuestionCard from "./QuestionCard.svelte";
   import RequestCard from "./RequestCard.svelte";
   import EngineRestartNotice from "./EngineRestartNotice.svelte";
-  import { attemptFailedNote, compactionNote, engineEventsNote, finalTimelineItem, foldInputRuns, ownPost, postDestination, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief, workingLine } from "../timeline.ts";
+  import { attemptFailedNote, compactionNote, engineEventsNote, finalTimelineItem, foldInputRuns, ownPost, postDestination, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief, workingLine, type TimelineFeed } from "../timeline.ts";
 
   // With step, the thread reads one worker of a crew: its transcript alone, and nothing that was sent to the crew.
   let { hasRoom, session, step, roomName, store, admin = false, operate, unsent, onunsent, onsettled, onpostlocation, navigate, startingBrief, clock = Date.now }: { hasRoom: (room: RoomID) => boolean; startingBrief?: string; session: string; step?: string; roomName: string; store: RoomStore; admin?: boolean; operate: boolean; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
@@ -342,17 +342,47 @@
   </div>
 {/snippet}
 
+<!-- An outside feed message is framed with a dashed left rule and faint tint so it reads as external text, not an owner or session post. -->
+{#snippet feedMessage(key: string, feed: TimelineFeed, text: string, at: string, turn: TranscriptTurn, part: string)}
+  <div class="feed-input" data-media-key={key} aria-label={feed.author ? `Outside feed message from ${feed.author} via ${feed.service}` : `Outside feed message via ${feed.service}`}>
+    <div class="feed-sender">
+      <span class="feed-icon" aria-hidden="true"><Icon name="inbox" size={14} /></span>
+      <strong class="feed-service">{feed.service}</strong>
+      <span class="feed-tag" title="Outside text from a feed">feed</span>
+      {#if feed.author}<span class="feed-author">{feed.author}</span>{/if}
+      <time datetime={at} title={fullTime(at)}>{formatTime(at)}</time>
+    </div>
+    <CollapsibleBody>
+      {#if text}<Markdown rhythm="thread" {text} source={{ key, from: { kind: "engine" }, at }} />{/if}
+      {#if feed.data !== undefined}<PostData value={feed.data} />{/if}
+      {@render textRetry(turn, part)}
+    </CollapsibleBody>
+  </div>
+{/snippet}
+
 {#snippet postItem(turn: TranscriptTurn, item: TranscriptItem)}
-  {@const to = item.kind === "post" ? postDestination(item, session, store.room, roomName, id => sender("session", id)) : undefined}
-  {#snippet destination()}<div class="post-destination"><PostTarget to={to!} onjump={item.room && item.seq ? () => onpostlocation(item.room!, item.seq!) : undefined} /></div>{/snippet}
-  {#snippet content()}
-    {@render message(item.id, chunks[item.id + "/text"] ?? item.text ?? "", item.attachments, item.event ?? item.id, item.at, item.data, item.dataRef, item.dataAttachment, item.from ?? { kind: "session", session })}
-    {@render textRetry(turn, item.id)}
-  {/snippet}
-  {#snippet body()}{#if to}{@render destination()}{/if}{@render content()}{/snippet}
-  {#if item.kind === "post" && !ownPost(item, session)}{@render inbound(item.id, item.from ?? { kind: "engine" }, item.at, body, !!item.attachments?.length)}
-  <!-- A post to somewhere else is the session's own writing, so it reads whole like its replies; a rule and its destination mark where it went. -->
-  {:else}<div class="agent-message" class:sent={!!to} data-media-key={item.id}>{@render body()}</div>{/if}
+  {#if item.kind === "post" && item.type === "service.sent"}
+    <div class="agent-message sent service-sent" data-media-key={item.id}>
+      <div class="service-sent-head">
+        {#if item.to}<span class="service-sent-to">→ {item.to}</span>{#if item.service}<span class="service-sent-sep" aria-hidden="true">·</span><span class="service-sent-via">{item.service}</span>{/if}{:else if item.service}<span class="service-sent-to">→ {item.service}</span>{/if}{#if item.to || item.service}<span class="service-sent-sep" aria-hidden="true">·</span>{/if}<time datetime={item.at} title={fullTime(item.at)}>{formatTime(item.at)}</time>
+      </div>
+      <CollapsibleBody>
+        <Markdown rhythm="thread" text={chunks[item.id + "/text"] ?? item.text ?? ""} source={{ key: item.id, from: item.from ?? { kind: "session", session }, at: item.at }} />
+        {@render textRetry(turn, item.id)}
+      </CollapsibleBody>
+    </div>
+  {:else}
+    {@const to = item.kind === "post" ? postDestination(item, session, store.room, roomName, id => sender("session", id)) : undefined}
+    {#snippet destination()}<div class="post-destination"><PostTarget to={to!} onjump={item.room && item.seq ? () => onpostlocation(item.room!, item.seq!) : undefined} /></div>{/snippet}
+    {#snippet content()}
+      {@render message(item.id, chunks[item.id + "/text"] ?? item.text ?? "", item.attachments, item.event ?? item.id, item.at, item.data, item.dataRef, item.dataAttachment, item.from ?? { kind: "session", session })}
+      {@render textRetry(turn, item.id)}
+    {/snippet}
+    {#snippet body()}{#if to}{@render destination()}{/if}{@render content()}{/snippet}
+    {#if item.kind === "post" && !ownPost(item, session)}{@render inbound(item.id, item.from ?? { kind: "engine" }, item.at, body, !!item.attachments?.length)}
+    <!-- A post to somewhere else is the session's own writing, so it reads whole like its replies; a rule and its destination mark where it went. -->
+    {:else}<div class="agent-message" class:sent={!!to} data-media-key={item.id}>{@render body()}</div>{/if}
+  {/if}
 {/snippet}
 
 <!-- What a session read, at the start of a turn or as a steer. Part names the item whose full text loads for it. -->
@@ -362,7 +392,9 @@
     {@render message(key, shown.text, input.attachments, input.id, input.at, input.data, input.dataRef, input.dataAttachment, input.from)}
     {@render textRetry(turn, part)}
   {/snippet}
-  {#if shown.kind !== "message"}
+  {#if shown.kind === "feed"}
+    {@render feedMessage(key, shown.feed, shown.text, input.at, turn, part)}
+  {:else if shown.kind !== "message"}
     {@const name = input.source ? sourceLabel(input.source) : input.from.session ? sender("session", input.from.session) : undefined}
     <div class="muted turn-note input-line" class:failure={shown.kind === "failed"} title={formatTime(input.at)}>
       <span class="slot"><Icon name={shown.kind === "failed" ? "warning" : "inbox"} size={14} /></span>
@@ -489,6 +521,17 @@
   /* Mirrors .bubble from the other side. */
   .agent-input { align-self: flex-start; max-width: 80%; min-width: 0; padding: 12px 16px; background: var(--raised); border-radius: 12px; }
   .agent-input .agent-sender { margin-bottom: 4px; }
+  .feed-input { align-self: flex-start; max-width: 80%; min-width: 0; padding: 11px 15px; border: 1px solid var(--line); border-left: 2px dashed var(--firm); border-radius: 10px; background: var(--post-hover); }
+  .feed-sender { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 7px; margin-bottom: 6px; min-width: 0; }
+  .feed-icon { display: inline-flex; align-items: center; color: var(--muted); }
+  .feed-service { color: var(--text); font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+  .feed-tag { padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 11.5px; font-weight: 500; line-height: 18px; white-space: nowrap; }
+  .feed-author { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .feed-sender time { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .service-sent-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; margin-bottom: 4px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .service-sent-to { color: var(--text); font-weight: 500; overflow-wrap: anywhere; }
+  .service-sent-via { overflow-wrap: anywhere; }
+  .service-sent-head time { white-space: nowrap; }
   .agent-sender { display: flex; flex: none; align-items: center; gap: 8px; min-width: 0; }
   .input-line { align-items: flex-start; line-height: 24px; overflow-wrap: anywhere; }
   .agent-sender :is(a, strong) { min-width: 0; overflow: hidden; color: oklch(var(--id-name) var(--hue)); font-size: 14px; font-weight: 600; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
@@ -525,7 +568,7 @@
   /* Sticky inside the scroller and without height, so it centers on the column and changes no scroll length. */
   .latest-bar { position: sticky; bottom: 8px; display: flex; justify-content: center; height: 0; }
   .latest { flex: none; height: 28px; padding: 0 12px; transform: translateY(-100%); border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--text); font-size: 13px; font-weight: 500; }
-  @media (max-width: 600px) { .thread { scrollbar-gutter: stable; } .body { padding: 12px 16px; } }
+  @media (max-width: 600px) { .thread { scrollbar-gutter: stable; } .body { padding: 12px 16px; } .feed-input { max-width: 94%; } }
   @media (pointer: coarse) { button { min-height: 40px; } .latest { height: 40px; } }
   @media (prefers-reduced-motion: reduce) {
     .spinner { animation: none; }

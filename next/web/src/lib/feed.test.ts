@@ -466,3 +466,25 @@ test("work across different displayed minutes keeps a range", () => {
 test("matching clock digits in different day periods do not collapse", () => {
   assert.ok(timeSpan("2026-11-09T08:52:00Z", "2026-11-09T20:52:00Z").includes(" – "));
 });
+
+test("service.message and service.sent fold into the room feed work row with concise summaries", () => {
+  const at = (seq: number, seconds: number, body: EventBody, from: Principal = { kind: "engine" }) =>
+    ({ ...event(seq, body, from), at: new Date(seconds * 1000).toISOString() });
+  const incoming = at(1, 0, { type: "service.message", body: { service: "agent-chat", id: "m1", author: "@x/y", text: "Line one\nLine two" } });
+  const start = at(2, 5, { type: "turn.started", body: { session: "l", turn: "t1", inputs: ["1"] } });
+  const outgoing = at(3, 40, { type: "service.sent", body: { service: "agent-chat", id: "out_1", to: "@x/y", text: "Checked and fixed" } }, lead);
+  const end = at(4, 65, { type: "turn.ended", body: { session: "l", turn: "t1", outcome: "completed", usage } });
+
+  assert.equal(subject(incoming), undefined);
+  assert.equal(subject(outgoing), "l");
+  assert.equal(describe(incoming, id => names[id] ?? id), "agent-chat · @x/y: Line one Line two");
+  assert.equal(describe(outgoing, id => names[id] ?? id), "lead-web → @x/y · agent-chat: Checked and fixed");
+  assert.equal(describe(at(5, 70, { type: "service.message", body: { service: "alerts", id: "m2", author: "pager", text: "", data: { ok: false } } }), id => id), "alerts · pager (data)");
+
+  const rows = feedRows([incoming, start, outgoing, end], { kind: "feed" });
+  assert.deepEqual(rows.map(row => row.kind), ["work"]);
+  const work = rows[0];
+  assert.ok(work.kind === "work");
+  assert.equal(workSummary(work.events, id => names[id] ?? id), "lead-web worked for 1 min · 1 feed message · 1 sent to feed");
+  assert.equal(workIsBare([incoming], id => id), true);
+});
