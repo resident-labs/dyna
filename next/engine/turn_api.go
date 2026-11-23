@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/resident-labs/dyna/engine/prompt"
@@ -190,6 +191,9 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 	case "", contract.CauseSetupFailed, contract.CauseModelFailed, contract.CauseOutputLimit, contract.CauseHarnessFailed, contract.CauseSetModelFailed, contract.CauseNotStarted, contract.CauseWorkflowFailed:
 	default:
 		return contract.TurnOutputResponse{}, invalid("invalid turn cause")
+	}
+	if req.ModelRetryAfterSeconds < 0 || req.ModelRetryAfterSeconds > int64((1<<63-1)/time.Second) || (req.ModelRetryAfterSeconds != 0 && req.Cause != contract.CauseModelFailed) {
+		return contract.TurnOutputResponse{}, invalid("model retry reset needs a model failure and a valid duration")
 	}
 	// Close stops the agent program under a running turn, so that turn reports the program's end. The session is closing, so
 	// the turn was ended by the close and did not fail.

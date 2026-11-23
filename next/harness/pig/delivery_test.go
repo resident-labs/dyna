@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MichaelKinsy/PiG/agent"
+	"github.com/MichaelKinsy/PiG/ai"
 	"github.com/MichaelKinsy/PiG/coding/extension"
 
 	"github.com/resident-labs/dyna/contract"
@@ -151,6 +153,59 @@ func TestContinueFinishesATurnLeftRunning(t *testing.T) {
 	sent := requests[len(requests)-1].Messages
 	if len(requests) != 2 || len(sent) != 3 || !strings.Contains(string(sent[2]), "interrupted: the session restarted") {
 		t.Fatalf("%d requests; the last sent %s", len(requests), sent)
+	}
+}
+
+func TestModelRetryContinuesAfterSystemCheckpoint(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "recovered"}})
+	c := config(t, model, "")
+	c.Model.ID = "tools-model"
+	h, err := Open(t.Context(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = h.Close() })
+	appendMessage := func(m agent.AgentMessage) {
+		t.Helper()
+		if _, err := h.session.SessionManager().AppendMessage(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, raw := range []string{recordedUser, recordedTwoCalls, recordedFailed, recordedPlain} {
+		var entry recorded
+		var m agent.AgentMessage
+		if err := json.Unmarshal([]byte(raw), &entry); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(entry.Message, &m); err != nil {
+			t.Fatal(err)
+		}
+		appendMessage(m)
+	}
+	// Tool search can leave a system checkpoint after its result. Omitting the
+	// failed model request must expose the pending result, not end recovery.
+	appendMessage(agent.AgentMessage{System: &ai.SystemMessage{Content: ai.SystemText("tool setup"), Timestamp: 4}})
+	appendMessage(agent.AgentMessage{Assistant: &agent.AssistantMessage{Role: agent.RoleAssistant, API: "anthropic-messages", Provider: "anthropic", ModelID: c.Model.ID, StopReason: ai.StopReasonError, ErrorMessage: "model unavailable", Timestamp: 5}})
+	h.session.RefreshContext()
+	input := contract.TurnInput{Delivery: 9, Text: "go"}
+	if result, done, err := h.Recover("retry", []contract.TurnInput{input}); err != nil || done || result.Cause != contract.CauseModelFailed {
+		t.Fatalf("recover: %+v, done=%v, err=%v", result, done, err)
+	}
+	started := false
+	result, err := h.Continue(t.Context(), "retry", func() { started = true })
+	if err != nil || !started || result.Outcome != contract.TurnCompleted || result.Final != "recovered" {
+		t.Fatalf("continue: %+v, started=%v, err=%v", result, started, err)
+	}
+	requests := model.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("got %d requests, want 1", len(requests))
+	}
+	body, err := json.Marshal(requests[0].Messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(body), `"text":"go"`) != 1 || strings.Count(string(body), `"type":"tool_result"`) != 2 || strings.Contains(string(body), "model unavailable") {
+		t.Fatalf("retried with the wrong messages: %s", body)
 	}
 }
 

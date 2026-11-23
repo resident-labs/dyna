@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -187,6 +188,13 @@ func (h *Harness) start(ctx context.Context, c Config) error {
 		return err
 	}
 	h.session = created.Session
+	// The Responses watchdog starts before headers, when the proxy may still
+	// be waiting for an eligible account to recover.
+	stream := h.session.Agent().EffectiveStreamFunction()
+	h.session.Agent().SetStreamFunction(func(ctx context.Context, model *ai.Model, transcript ai.TranscriptContext, options ai.StreamOptions) (*ai.AssistantMessageEventStream, error) {
+		options.StallTimeoutMs = new(int(contract.ModelWireIdleTimeout.Milliseconds()))
+		return stream(ctx, model, transcript, options)
+	})
 	if c.ResultTool != nil {
 		h.resultTool = c.ResultTool.Name
 		previous := h.session.Agent().FinishTurnHook()
@@ -294,7 +302,27 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contra
 // inputs again. A tool call that has no result is not run again.
 func (h *Harness) Continue(ctx context.Context, id contract.TurnID, started func()) (contract.TurnEnded, error) {
 	return h.run(ctx, id, func(ctx context.Context) error {
-		return h.session.ContinueRecovered(ctx, coding.ContinueOptions{Interrupted: interrupted, Started: started})
+		err := h.session.ContinueRecovered(ctx, coding.ContinueOptions{Interrupted: interrupted, Started: started})
+		if !errors.Is(err, coding.ErrNothingToContinue) {
+			return err
+		}
+		// PiG omits the failed attempt from the projected transcript before
+		// checking the tail. A system checkpoint (for instance from tool_search)
+		// is not an answer and can sit after the pending input or tool result.
+		for _, msg := range slices.Backward(h.session.Agent().Messages()) {
+			if msg.System != nil {
+				continue
+			}
+			if msg.Assistant != nil {
+				break // an actual answer, not a pending request
+			}
+			_, err = h.session.RunAgentPrompt(ctx, func(ctx context.Context) ([]agent.AgentMessage, error) {
+				started()
+				return h.session.Agent().ContinueMessages(ctx)
+			})
+			return err
+		}
+		return err
 	})
 }
 

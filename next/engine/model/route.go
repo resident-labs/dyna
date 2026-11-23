@@ -34,7 +34,7 @@ func Handler(socket string, clientKey, sessionID string, allowedModels, eligible
 }
 
 func unixClient(socket string) *http.Client {
-	return &http.Client{Transport: idleTransport(socket, streamIdleTimeout), Timeout: 30 * time.Second}
+	return &http.Client{Transport: idleTransport(socket, contract.ModelWireIdleTimeout), Timeout: 30 * time.Second}
 }
 
 func handler(client *http.Client, clientKey, sessionID string, allowedModels, eligibleIDs []string, pinnedID string, preferredIDs []string, crew bool, sent ...func(context.Context) error) http.Handler {

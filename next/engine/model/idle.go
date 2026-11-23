@@ -7,8 +7,6 @@ import (
 	"time"
 )
 
-const streamIdleTimeout = 300 * time.Second
-
 // idleConn measures wire silence, including the wait for response headers. Every
 // successful read (including SSE comments) buys another full idle interval.
 // HTTP transport cancellation closes the connection and interrupts Read.

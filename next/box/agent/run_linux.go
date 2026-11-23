@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/MichaelKinsy/PiG/ai"
 	"github.com/MichaelKinsy/PiG/coding/extension"
 	"github.com/resident-labs/dyna/box"
 
@@ -74,6 +75,9 @@ Result schema:
 
 // Run connects the box, serves its model route, and runs the Pi session.
 func Run(ctx context.Context) error {
+	if err := ai.ConfigureHTTPDispatcher(int(contract.ModelWireIdleTimeout.Milliseconds())); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	steps := box.NewStepLog("box agent")

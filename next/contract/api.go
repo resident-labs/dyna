@@ -26,6 +26,10 @@ type InstructionsSetResponse struct {
 	Hash string `json:"hash"`
 }
 
+// ModelWireIdleTimeout leaves room for the proxy's five-minute admission hold
+// and up to 30 seconds of jitter before a provider's normal five-minute wait.
+const ModelWireIdleTimeout = 11 * time.Minute
+
 type Method string
 
 const (
@@ -835,6 +839,8 @@ type TurnOutputRequest struct {
 	Usage          Usage        `json:"usage"`
 	// Unread names inputs the turn ended without giving to Pi, because their files were still on the way. The next turn takes them.
 	Unread []DeliverySeq `json:"unread,omitempty"`
+	// ModelRetryAfterSeconds is the provider's reset hint for a model_failed turn.
+	ModelRetryAfterSeconds int64 `json:"modelRetryAfterSeconds,omitempty"`
 }
 type TurnOutputResponse struct{}
 

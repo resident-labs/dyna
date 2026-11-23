@@ -9,12 +9,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/resident-labs/dyna/contract"
 )
 
 func TestStreamWireIdle(t *testing.T) {
-	if streamIdleTimeout != 300*time.Second {
-		t.Fatal(streamIdleTimeout)
-	}
 	for _, mode := range []string{"headers", "body", "keepalive", "cancel", "ended"} {
 		t.Run(mode, func(t *testing.T) {
 			socket := filepath.Join(t.TempDir(), "s")
@@ -95,7 +94,7 @@ func TestCancelBlockedModelUpload(t *testing.T) {
 	}()
 	defer listener.Close()
 	defer close(release)
-	client := &http.Client{Transport: idleTransport(socket, streamIdleTimeout)}
+	client := &http.Client{Transport: idleTransport(socket, contract.ModelWireIdleTimeout)}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, "POST", "http://proxy/", strings.NewReader(strings.Repeat("x", 8<<20)))
