@@ -74,15 +74,15 @@ type MethodEntry struct {
 
 // PostInput is what a caller names. A desc tag on a request field becomes that field's description in the tool schema.
 type PostInput struct {
-	Room         contract.RoomID       `json:"room" desc:"Room ID or name; omitted means your room. A root can name another room to post plain text to its root in the feed."`
+	Room         contract.RoomID       `json:"room" desc:"Default: your room. Only root can post plain text to another room's root."`
 	Text         string                `json:"text"`
-	Mentions     []string              `json:"mentions,omitempty" desc:"Who receives the post: parent, children, siblings, or by name or ID your parent or any session under it. The engine refuses any other mention, such as your grandparent or another branch; your parent passes anything else on. For a cross-room root post use only root. With no mentions, the post goes to the owner."`
-	Home         contract.Conversation `json:"home,omitempty" desc:"A session may name only its own DM, {kind: dm}. With no home, a post that names no session goes to the owner's conversation with you: where this turn's reply to the owner goes, else where the owner last wrote to you, else the feed. One that names sessions goes to the feed."`
+	Mentions     []string              `json:"mentions,omitempty" desc:"parent, children, siblings, or name/ID of your parent or a session under it. Route anything else through your parent; cross-room use root only. Omit to post to the owner."`
+	Home         contract.Conversation `json:"home,omitempty" desc:"A session can name only its own DM ({kind: dm}). Omit for the feed if mentioning sessions; otherwise use this turn's owner conversation, the last one, or the feed."`
 	ReplyTo      contract.EventID      `json:"replyTo,omitempty"`
 	ClientID     string                `json:"clientId,omitempty"`
 	VisualUpdate contract.EventID      `json:"visualUpdate,omitempty"`
 	VisualReply  contract.EventID      `json:"visualReply,omitempty"`
-	Forward      contract.EventID      `json:"forward,omitempty" desc:"A post ID to forward, quoted under Forwarded from <author> · <time>; text is your note and may be empty. Any room's feed post, or a DM post of your own room; a post of another room carries its text and no files."`
+	Forward      contract.EventID      `json:"forward,omitempty" desc:"Forward a feed post or your room's DM by ID, with optional text. Cross-room forwards omit files."`
 	Paths        []string              `json:"paths,omitempty"`
 	HTML         string                `json:"html,omitempty"`
 	AllowNet     bool                  `json:"allowNet,omitempty"`
