@@ -138,9 +138,11 @@ func (s *Service) ServiceList(ctx context.Context, _ contract.Principal, req con
 		if err != nil {
 			return contract.ServiceListResponse{}, failure(err)
 		}
-		result.Discord = make([]contract.DiscordRoute, 0, len(routes))
-		for _, r := range routes {
-			result.Discord = append(result.Discord, s.discordRouteContract(r, bot.Failure))
+		if bot.ID != "" {
+			result.Discord = make([]contract.DiscordRoute, 0, len(routes))
+			for _, r := range routes {
+				result.Discord = append(result.Discord, s.discordRouteContract(r, bot.Failure))
+			}
 		}
 	}
 	return result, nil

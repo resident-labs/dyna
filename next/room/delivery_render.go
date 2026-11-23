@@ -1,6 +1,7 @@
 package room
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -59,13 +60,19 @@ func RenderDelivery(body contract.EventBody) (string, error) {
 	case contract.OpRequested:
 		return fmt.Sprintf("%s\nDecide it with op decide, id %s: approve true or false, with a reason when you deny.", b.Card.Body, b.ID), nil
 	case contract.PostCreated:
+		text := b.Text
+		if b.Source != nil {
+			text = outside.Wrap(outside.Room(cmp.Or(string(b.Source.RoomName), string(b.Source.Room)), b.Source.SessionName), text)
+		} else if b.Hook != "" {
+			text = outside.Wrap(outside.Subscription(string(b.Hook)), text)
+		}
 		if b.Context != "" {
 			if b.Spoken {
-				return b.Context + "\n\n" + b.Text, nil
+				return b.Context + "\n\n" + text, nil
 			}
-			return b.Context + "\n\nRoot's prompt:\n\n" + b.Text, nil
+			return b.Context + "\n\nRoot's prompt:\n\n" + text, nil
 		}
-		return b.Text, nil
+		return text, nil
 	case contract.SessionRestarted:
 		switch {
 		case b.ImageUpdated:

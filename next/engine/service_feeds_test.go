@@ -616,4 +616,28 @@ func TestServiceListIncludesDiscordRoutes(t *testing.T) {
 	if problem != nil || len(listedAll.Discord) != 3 {
 		t.Fatalf("ServiceList all = %+v, %+v", listedAll.Discord, problem)
 	}
+
+	// Closing a room's root session must not fail SQL scan on fallback lookup; Session becomes "".
+	if err := s.store.CloseSession(ctx, rootB, contract.Event{ID: "close-rootB", Room: roomB, Time: s.now(), From: owner, Body: contract.SessionClosed{Session: rootB}}); err != nil {
+		t.Fatal(err)
+	}
+	listedClosed, problem := s.ServiceList(ctx, owner, contract.ServiceListRequest{Room: roomB})
+	if problem != nil {
+		t.Fatalf("ServiceList roomB after root closed: %+v", problem)
+	}
+	if len(listedClosed.Discord) != 1 || listedClosed.Discord[0].Session != "" {
+		t.Fatalf("roomB closed root route = %+v, want 1 route with empty Session", listedClosed.Discord)
+	}
+
+	// Clearing the Discord bot hides stale routes so About does not report them Active.
+	if err := s.store.SetDiscordBot(ctx, store.DiscordBot{}); err != nil {
+		t.Fatal(err)
+	}
+	listedCleared, problem := s.ServiceList(ctx, owner, contract.ServiceListRequest{Room: roomA})
+	if problem != nil {
+		t.Fatalf("ServiceList cleared bot: %+v", problem)
+	}
+	if len(listedCleared.Discord) != 0 {
+		t.Fatalf("cleared bot routes = %+v, want empty", listedCleared.Discord)
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -121,6 +122,22 @@ func callsOutsideWrap(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	alias := ""
+	for _, imp := range file.Imports {
+		val, err := strconv.Unquote(imp.Path.Value)
+		if err != nil || val != "github.com/resident-labs/dyna/contract/outside" {
+			continue
+		}
+		if imp.Name != nil {
+			alias = imp.Name.Name
+		} else {
+			alias = "outside"
+		}
+		break
+	}
+	if alias == "" {
+		return false, nil
+	}
 	var called bool
 	ast.Inspect(file, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
@@ -132,7 +149,7 @@ func callsOutsideWrap(path string) (bool, error) {
 			return true
 		}
 		pkg, ok := sel.X.(*ast.Ident)
-		if ok && pkg.Name == "outside" {
+		if ok && pkg.Name == alias {
 			called = true
 		}
 		return true

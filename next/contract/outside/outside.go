@@ -116,13 +116,13 @@ func Wrap(origin Origin, text string) string {
 	if origin.trusted {
 		return text
 	}
-	source := origin.source
+	source := strings.TrimSpace(attributeValue.Replace(origin.source))
 	if source == "" {
 		source = "outside"
 	}
-	open := `<outside source="` + attributeValue.Replace(source) + `"`
-	if origin.author != "" {
-		open += ` author="` + attributeValue.Replace(origin.author) + `"`
+	open := `<outside source="` + source + `"`
+	if author := strings.TrimSpace(attributeValue.Replace(origin.author)); author != "" {
+		open += ` author="` + author + `"`
 	}
 	return open + ">\n" + outsideTag.ReplaceAllString(text, "‹${1}") + "\n</outside>"
 }

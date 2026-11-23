@@ -80,4 +80,7 @@ func TestWrapCleansAttributes(t *testing.T) {
 	if want := "<outside source=\"web x=1\" author=\"exa mple.com\">\nt\n</outside>"; got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
+	if stripped := Wrap(Origin{source: "\"<>", author: "\"\n\r<>"}, "t"); stripped != "<outside source=\"outside\">\nt\n</outside>" {
+		t.Fatalf("stripped-only attributes = %q", stripped)
+	}
 }
