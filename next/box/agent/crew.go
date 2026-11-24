@@ -1025,7 +1025,8 @@ func (c *Crew) worker(ctx context.Context, key string, profileName contract.Prof
 // What is wrong comes back as the problem to tell the worker.
 func readResult(schema *jsonschema.Schema, text string) (json.RawMessage, string) {
 	text = strings.TrimSpace(text)
-	value, err := validateResult(schema, []byte(text))
+	raw := []byte(text)
+	value, err := validateResult(schema, raw)
 	if err == nil {
 		return value, ""
 	}
@@ -1038,8 +1039,8 @@ func readResult(schema *jsonschema.Schema, text string) (json.RawMessage, string
 			problem = err
 		}
 	}
-	if candidate, ok := lastJSONContainer(text); ok && candidate != text && (!hasBlock || candidate != block) {
-		if value, err := validateResult(schema, []byte(candidate)); err == nil {
+	if candidate, ok := lastJSONContainer(raw); ok && len(candidate) != len(raw) && (!hasBlock || string(candidate) != block) {
+		if value, err := validateResult(schema, candidate); err == nil {
 			return value, ""
 		} else {
 			problem = err
@@ -1078,24 +1079,19 @@ func lastFencedBlock(text string) (string, bool) {
 	return last, found
 }
 
-// lastJSONContainer scans from the end for the last balanced top-level JSON object or array in text.
-func lastJSONContainer(text string) (string, bool) {
-	firstOpen := strings.IndexAny(text, "{[")
+// lastJSONContainer scans from the end for the last balanced top-level JSON object or array in raw.
+// Work is bounded linearly so adversarial input (unmatched quotes or nested non-JSON brackets)
+// cannot go quadratic in the shared box agent process.
+func lastJSONContainer(raw []byte) ([]byte, bool) {
+	firstOpen := bytes.IndexAny(raw, "{[")
 	if firstOpen < 0 {
-		return "", false
+		return nil, false
 	}
-	// Prefix count of '{' and '[' lets a backward scan abort as soon as fewer openers remain than needed.
-	opens := make([]int, len(text))
-	count := 0
-	for i := firstOpen; i < len(text); i++ {
-		opens[i] = count
-		if text[i] == '{' || text[i] == '[' {
-			count++
-		}
-	}
+	totalOpens := bytes.Count(raw[firstOpen:], []byte{'{'}) + bytes.Count(raw[firstOpen:], []byte{'['})
+	budget := min(max(len(raw)*4, 4096), 8<<20)
 	var stack []byte
-	for end := len(text) - 1; end > firstOpen; end-- {
-		if text[end] != '}' && text[end] != ']' {
+	for end := len(raw) - 1; end > firstOpen && budget > 0; end-- {
+		if raw[end] != '}' && raw[end] != ']' {
 			continue
 		}
 		stack = stack[:0]
@@ -1103,15 +1099,21 @@ func lastJSONContainer(text string) (string, bool) {
 		start := -1
 	scan:
 		for i := end; i >= firstOpen; i-- {
-			c := text[i]
+			budget--
+			if budget <= 0 {
+				break scan
+			}
+			c := raw[i]
 			if c == '"' {
 				slashes := 0
-				for j := i - 1; j >= firstOpen && text[j] == '\\'; j-- {
+				for j := i - 1; j >= firstOpen && raw[j] == '\\'; j-- {
 					slashes++
 				}
 				if slashes%2 == 0 {
 					inString = !inString
 				}
+				i -= slashes
+				budget -= slashes
 				continue
 			}
 			if inString {
@@ -1120,12 +1122,12 @@ func lastJSONContainer(text string) (string, bool) {
 			switch c {
 			case '}':
 				stack = append(stack, '{')
-				if len(stack) > opens[i] {
+				if len(stack) > totalOpens {
 					break scan
 				}
 			case ']':
 				stack = append(stack, '[')
-				if len(stack) > opens[i] {
+				if len(stack) > totalOpens {
 					break scan
 				}
 			case '{', '[':
@@ -1140,13 +1142,14 @@ func lastJSONContainer(text string) (string, bool) {
 			}
 		}
 		if start >= 0 {
-			candidate := text[start : end+1]
-			if json.Valid([]byte(candidate)) {
+			candidate := raw[start : end+1]
+			budget -= len(candidate)
+			if json.Valid(candidate) {
 				return candidate, true
 			}
 		}
 	}
-	return "", false
+	return nil, false
 }
 
 func compileSchema(raw json.RawMessage) (*jsonschema.Schema, error) {

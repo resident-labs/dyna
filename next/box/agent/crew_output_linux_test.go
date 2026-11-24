@@ -174,7 +174,7 @@ func TestAStructuredOutputCallAcceptsAStringEncodedObjectAndHintsTheType(t *test
 		}
 		if tool.Name == "StructuredOutput" {
 			found = true
-			if !strings.Contains(string(tool.Input), `"result":{"type":"object"}`) || strings.Contains(string(tool.Input), `"count"`) {
+			if !strings.Contains(string(tool.Input), `"result":{"description":`) || strings.Contains(string(tool.Input), `"result":{"type":"object"}`) || strings.Contains(string(tool.Input), `"count"`) {
 				t.Fatalf("tool's parameter schema was %s", tool.Input)
 			}
 		}

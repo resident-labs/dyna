@@ -187,7 +187,7 @@ func TestStructuredOutputAcceptsStringEncodedJSONAndKeepsStringSchemasAsStrings(
 	if err != nil {
 		t.Fatalf("string-encoded object rejected: %v", err)
 	}
-	if !strings.Contains(string(tool.Parameters), `"result":{"type":"object"}`) || strings.Contains(string(tool.Parameters), `"body_path"`) {
+	if !strings.Contains(string(tool.Parameters), `"result":{"description":`) || strings.Contains(string(tool.Parameters), `"result":{"type":"object"}`) || strings.Contains(string(tool.Parameters), `"body_path"`) {
 		t.Fatalf("object parameters = %s", tool.Parameters)
 	}
 	var got map[string]any
@@ -241,7 +241,7 @@ func TestStructuredOutputParameterTypeHints(t *testing.T) {
 		schema string
 		want   string
 	}{
-		{"object", `{"type":"object","properties":{"a":{"type":"string"}}}`, `"result":{"type":"object"}`},
+		{"object", `{"type":"object","properties":{"a":{"type":"string"}}}`, `"result":{"description":"JSON object matching the result schema."}`},
 		{"array", `{"type":"array","items":{"type":"string"}}`, `"result":{"type":"array","items":{}}`},
 		{"string", `{"type":"string"}`, `"result":{"type":"string"}`},
 		{"number", `{"type":"number"}`, `"result":{"type":"number"}`},
@@ -324,6 +324,8 @@ func TestReadResultExtractsLastFencedBlockOrJSONAfterProse(t *testing.T) {
 		{"wrong shape after prose", `Here is the result: {"count": "many"}`, "want number"},
 		{"wrong shape in fence", "```json\n{\"count\": \"many\"}\n```", "want number"},
 		{"nested object not plucked from top-level object", `Result: {"outer": {"count": 1}}`, "missing property"},
+		{"adversarial unmatched quote and closers", `{"` + strings.Repeat("}", 100_000), "not JSON"},
+		{"adversarial nested non-json brackets", strings.Repeat("[", 50_000) + "x" + strings.Repeat("]", 50_000), "not JSON"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw, problem := readResult(objSchema, tc.text)

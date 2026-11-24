@@ -17,11 +17,16 @@ const structuredOutputAnyResult = `{"type":"object","properties":{"result":{}},"
 func structuredOutput(schema *jsonschema.Schema) *extension.ToolDefinition {
 	// Providers don't accept the full JSON Schema dialect that workflow scripts can use,
 	// so keep the wrapper minimal while hinting a single top-level type when present.
+	// Avoid bare {"type":"object"} here: Antigravity's schema cleaner injects a synthetic
+	// required "reason" property into property-less object schemas and strips "reason" back
+	// out of tool arguments, which corrupts schemas that declare a real "reason" field.
 	resultType := `{}`
 	if schema.Types != nil {
 		if types := schema.Types.ToStrings(); len(types) == 1 {
 			switch types[0] {
-			case "object", "string", "number", "integer", "boolean":
+			case "object":
+				resultType = `{"description":"JSON object matching the result schema."}`
+			case "string", "number", "integer", "boolean":
 				resultType = `{"type":"` + types[0] + `"}`
 			case "array":
 				resultType = `{"type":"array","items":{}}`
