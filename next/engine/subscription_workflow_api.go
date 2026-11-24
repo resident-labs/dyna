@@ -27,6 +27,12 @@ func (s *Service) SubscriptionUpdate(ctx context.Context, caller contract.Princi
 	if problem != nil {
 		return contract.SubscriptionUpdateResponse{}, problem
 	}
+	if req.On != nil {
+		sub.On = *req.On
+	}
+	if req.Every != nil {
+		sub.Every = contract.Duration(*req.Every)
+	}
 	if req.Workflow != nil {
 		sub.Workflow = req.Workflow
 	}
@@ -44,6 +50,10 @@ func (s *Service) SubscriptionUpdate(ctx context.Context, caller contract.Princi
 	}
 	if problem := checkSubscriptionShape(contract.SubscriptionAddRequest{Scope: sub.Scope, On: sub.On, Every: sub.Every, Where: sub.Where, Workflow: sub.Workflow, Key: sub.Key, Latest: sub.Latest, Parent: sub.Parent, IncludeOwn: sub.IncludeOwn}); problem != nil {
 		return contract.SubscriptionUpdateResponse{}, problem
+	}
+	if sub.Every != "" {
+		period, _ := checkEvery(sub.Every)
+		sub.Every = contract.DurationOf(period)
 	}
 	if _, _, problem := s.workflowScript(ctx, sub.Room, sub.Workflow.Script); problem != nil {
 		return contract.SubscriptionUpdateResponse{}, problem
@@ -72,7 +82,10 @@ func (s *Service) SubscriptionUpdate(ctx context.Context, caller contract.Princi
 			return contract.SubscriptionUpdateResponse{}, failure(err)
 		}
 	}
-	if err := s.store.UpdateWorkflowSubscription(ctx, sub.Subscription); err != nil {
+	if err := s.store.UpdateWorkflowSubscription(ctx, sub.Subscription, s.now()); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return contract.SubscriptionUpdateResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: "unknown subscription " + strconv.Quote(string(req.ID))}
+		}
 		return contract.SubscriptionUpdateResponse{}, failure(err)
 	}
 	s.pokeSubscriptions()

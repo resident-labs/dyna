@@ -112,7 +112,49 @@ func TestSubscriptionFieldsAreDescribed(t *testing.T) {
 				t.Errorf("%s is %s", field, got)
 			}
 		}
+		for _, field := range []string{"on", "every"} {
+			desc := item.InputSchema.Properties[field].Description
+			if !strings.HasSuffix(desc, "For add and update.") || strings.Contains(desc, "add: ") {
+				t.Errorf("%s description: %s", field, desc)
+			}
+		}
+		if !strings.Contains(item.Description, "on replaces event types") || !strings.Contains(item.Description, "every replaces the schedule") {
+			t.Errorf("update help lacks on/every guidance: %s", item.Description)
+		}
 		return
 	}
 	t.Fatal("no subscription tool")
+}
+
+func TestSubscriptionUpdateCallsForwardOnAndEveryAndRefuseNumericEvery(t *testing.T) {
+	var forwarded []byte
+	server, err := New(func(_ context.Context, m contract.Method, body []byte) ([]byte, *contract.Error) {
+		if m != contract.MethodSubscriptionUpdate {
+			t.Fatalf("forwarded %s", m)
+		}
+		forwarded = body
+		return []byte(`{}`), nil
+	}, nil, post.Preparer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := server.call(context.Background(), callParams{Name: "subscription", Arguments: arguments(t, `{"action":"update","id":"sub_a","every":300}`)})
+	var problem contract.Error
+	if err := json.Unmarshal(out.StructuredContent, &problem); err != nil {
+		t.Fatal(err)
+	}
+	if !out.IsError || problem.Code != contract.ErrInvalid || problem.Message != `every is a duration string such as "1h", "15m" or "90s", not the number 300` || forwarded != nil {
+		t.Fatalf("numeric every: %+v, forwarded %s", problem, forwarded)
+	}
+	out = server.call(context.Background(), callParams{Name: "subscription", Arguments: arguments(t, `{"action":"update","id":"sub_a","on":["github.pr.changed","github.ci.finished"],"every":""}`)})
+	if out.IsError {
+		t.Fatalf("%+v", out)
+	}
+	var req contract.SubscriptionUpdateRequest
+	if err := json.Unmarshal(forwarded, &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.ID != "sub_a" || req.On == nil || len(*req.On) != 2 || (*req.On)[1] != "github.ci.finished" || req.Every == nil || *req.Every != "" {
+		t.Fatalf("forwarded %+v", req)
+	}
 }

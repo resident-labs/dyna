@@ -122,8 +122,8 @@ refuses `serve`.
 - `dyna subscription update ID --workflow push-review.js --args JSON` reloads the running service (`workflow reload`
   refuses a service: the subscription keeps the script for restarts), ends a failure wait,
   as `workflow reload` does, and keeps state and queued events. A handler in flight runs again with
-  the new script, and its finished steps still hit. `--where`, `--key`, `--latest` and `--parent`
-  replace settings; `--where ''` clears filters.
+  the new script, and its finished steps still hit. `--on`, `--every`, `--where`, `--key`,
+  `--latest` and `--parent` replace settings; `--on ''`, `--every ''` and `--where ''` clear them.
 - `dyna subscription disable ID` stops the run and events wait in the queue; `enable` starts it again.
   `remove` ends it for good and deletes its state.
 - A run that ends in failure, or whose box is lost, starts again on its own after 1, 5, then 30

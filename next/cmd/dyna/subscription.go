@@ -239,13 +239,25 @@ dyna subscription events lists the event types.`,
 	fire.Flags().StringVar(&event, "event", "", "Full event envelope as JSON; omit event and data for hook.due")
 	fire.Flags().StringVar(&data, "data", "", "Any JSON up to 1 MiB, sent as hook.fired body.data")
 	fire.MarkFlagsMutuallyExclusive("event", "data")
-	var updateWorkflow, updateArgs, updateKey, updateParent string
-	var updateWhere []string
+	var updateWorkflow, updateArgs, updateKey, updateParent, updateEvery string
+	var updateOn, updateWhere []string
 	var updateLatest bool
 	update := &cobra.Command{Use: "update ID", Short: "Change a workflow service without losing state or queued events", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		req := contract.SubscriptionUpdateRequest{ID: contract.SubscriptionID(args[0])}
 		if cmd.Flags().Changed("args") && !cmd.Flags().Changed("workflow") {
 			return fmt.Errorf("--args needs --workflow")
+		}
+		if cmd.Flags().Changed("on") {
+			on := []contract.EventType{}
+			if !(len(updateOn) == 1 && updateOn[0] == "") {
+				for _, kind := range updateOn {
+					on = append(on, contract.EventType(kind))
+				}
+			}
+			req.On = &on
+		}
+		if cmd.Flags().Changed("every") {
+			req.Every = &updateEvery
 		}
 		if cmd.Flags().Changed("workflow") {
 			script, err := os.ReadFile(updateWorkflow)
@@ -278,6 +290,8 @@ dyna subscription events lists the event types.`,
 		_, err := call[contract.SubscriptionUpdateRequest, contract.SubscriptionUpdateResponse](cmd.Context(), get(), contract.MethodSubscriptionUpdate, req)
 		return err
 	}}
+	update.Flags().StringArrayVar(&updateOn, "on", nil, "Replacement event types (repeatable); an empty value clears them")
+	update.Flags().StringVar(&updateEvery, "every", "", "Replacement schedule duration; an empty value clears it")
 	update.Flags().StringVar(&updateWorkflow, "workflow", "", "Replacement script file; reloads the running service")
 	update.Flags().StringVar(&updateArgs, "args", "", "Replacement workflow args as a JSON object")
 	update.Flags().StringArrayVar(&updateWhere, "where", nil, "Replacement filters (repeatable); an empty value clears them")
