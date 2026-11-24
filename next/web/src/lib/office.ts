@@ -46,7 +46,7 @@ export type OfficeFrameMessage =
   | { type: "office:open"; url: string }
   | { type: "office:close" };
 
-const validHttpUrl = (value: unknown): string | null => {
+export const validHttpUrl = (value: unknown): string | null => {
   if (typeof value !== "string" || value.length === 0 || value.length > 4096) return null;
   let parsed: URL;
   try { parsed = new URL(value); } catch { return null; }

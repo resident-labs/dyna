@@ -22,7 +22,7 @@ const officeDevHeaders: Plugin = {
     server.middlewares.use((req, res, next) => {
       const pathname = (req.url ?? "/").split("?", 1)[0];
       if (pathname === "/office.html") {
-        res.setHeader("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; img-src blob: data:; frame-ancestors 'self'");
+        res.setHeader("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; base-uri 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; img-src blob: data:; frame-ancestors 'self'");
       } else if (pathname.startsWith("/src/") || pathname.startsWith("/node_modules/") || pathname.startsWith("/@")) {
         res.setHeader("Access-Control-Allow-Origin", "*");
       }
@@ -58,7 +58,7 @@ function admit(req: { url?: string; headers: Record<string, string | string[] | 
   delete req.headers["x-trial-key"];
   return sent === key && [undefined, `http://${req.headers.host}`].includes(req.headers.origin as string | undefined);
 }
-const gate: Plugin = { name: "trial-gate", apply: "serve", transformIndexHtml: () => [{ tag: "script", attrs: { type: "module" }, children: sendKey, injectTo: "head-prepend" }],
+const gate: Plugin = { name: "trial-gate", apply: "serve", transformIndexHtml: (_html, ctx) => ctx.path === "/index.html" ? [{ tag: "script", attrs: { type: "module" }, children: sendKey, injectTo: "head-prepend" }] : [],
   configureServer: server => {
     server.middlewares.use((req, res, next) => {
       if (!req.url?.startsWith("/v1/")) { next(); return; }

@@ -78,7 +78,7 @@ func TestOfficeViewerUsesStrictSandboxCSPAndCORSForModuleAssets(t *testing.T) {
 		return rec
 	}
 	office := get("/office.html")
-	wantCSP := "sandbox allow-scripts; default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; img-src blob: data:; frame-ancestors 'self'"
+	wantCSP := "sandbox allow-scripts; default-src 'none'; base-uri 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; img-src blob: data:; frame-ancestors 'self'"
 	if office.Code != 200 || office.Header().Get("Content-Security-Policy") != wantCSP || office.Header().Get("Cache-Control") != "no-cache" {
 		t.Fatalf("office.html: %d %v", office.Code, office.Header())
 	}

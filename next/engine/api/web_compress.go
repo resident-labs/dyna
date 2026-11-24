@@ -56,7 +56,7 @@ func (w *Web) serveApp(out http.ResponseWriter, r *http.Request, name string, da
 	if name == "office.html" {
 		// The office document viewer runs inside a sandboxed iframe with an opaque origin; it cannot touch the app's origin
 		// or make network requests, and only loads bundled scripts, styles, and fonts from self.
-		out.Header().Set("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; img-src blob: data:; frame-ancestors 'self'")
+		out.Header().Set("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; base-uri 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; img-src blob: data:; frame-ancestors 'self'")
 	}
 	if strings.HasPrefix(name, "assets/") {
 		out.Header().Set("Cache-Control", "public, max-age=31536000, immutable")

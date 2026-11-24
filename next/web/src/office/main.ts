@@ -2,7 +2,7 @@ import "@fontsource/ibm-plex-sans/latin-400.css";
 import "@fontsource/ibm-plex-sans/latin-500.css";
 import "@fontsource/ibm-plex-sans/latin-600.css";
 import "@fontsource/ibm-plex-sans/latin-700.css";
-import { parseOfficeParentMessage, type OfficeTheme } from "../lib/office.ts";
+import { parseOfficeParentMessage, validHttpUrl, type OfficeTheme } from "../lib/office.ts";
 
 const root = document.getElementById("root")!;
 const style = document.createElement("style");
@@ -179,13 +179,13 @@ window.addEventListener("keydown", event => {
   if (event.key === "Escape") window.parent.postMessage({ type: "office:close" }, "*");
 });
 
-// Intercept every link click inside rendered documents. Only http(s) links are forwarded to the parent.
+// Intercept every link click inside rendered documents (HTML and SVG). Only http(s) links are forwarded to the parent.
 document.addEventListener("click", event => {
-  const target = event.target instanceof Element ? event.target.closest("a[href]") : null;
-  if (!(target instanceof HTMLAnchorElement)) return;
+  const target = event.target instanceof Element ? event.target.closest("a[href], a[*|href]") : null;
+  if (!target) return;
   event.preventDefault();
   event.stopPropagation();
-  const href = target.getAttribute("href")?.trim() ?? "";
+  const href = (target.getAttribute("href") ?? target.getAttribute("xlink:href") ?? "").trim();
   if (!href) return;
   if (href.startsWith("#")) {
     const id = href.slice(1);
@@ -193,26 +193,27 @@ document.addEventListener("click", event => {
     anchor?.scrollIntoView({ behavior: "smooth" });
     return;
   }
-  let parsed: URL;
-  try { parsed = new URL(href); } catch { return; }
-  if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-    window.parent.postMessage({ type: "office:open", url: parsed.href }, "*");
-  }
+  const safe = validHttpUrl(href);
+  if (safe) window.parent.postMessage({ type: "office:open", url: safe }, "*");
 }, true);
 
 // Neutralize anchor attributes inside rendered DOM so middle-click or right-click cannot navigate the sandbox frame.
 function stripUnsafeLinks(container: ParentNode) {
   for (const anchor of container.querySelectorAll("a")) {
-    const href = anchor.getAttribute("href")?.trim() ?? "";
+    const href = (anchor.getAttribute("href") ?? anchor.getAttribute("xlink:href") ?? "").trim();
     anchor.removeAttribute("target");
     anchor.setAttribute("rel", "noopener noreferrer");
     if (href.startsWith("#")) continue;
-    let safe = false;
-    try {
-      const parsed = new URL(href);
-      safe = parsed.protocol === "http:" || parsed.protocol === "https:";
-    } catch { safe = false; }
-    if (!safe) anchor.removeAttribute("href");
+    if (!validHttpUrl(href)) {
+      anchor.removeAttribute("href");
+      anchor.removeAttribute("xlink:href");
+    }
+  }
+}
+
+function revokeBlobUrls(container: ParentNode) {
+  for (const img of container.querySelectorAll<HTMLImageElement>("img[src^='blob:']")) {
+    URL.revokeObjectURL(img.src);
   }
 }
 
@@ -255,8 +256,9 @@ function makeZoomBar(initialScale: number, onScale: (scale: number) => void, ext
   };
 }
 
-async function renderWord(buffer: ArrayBuffer, name: string): Promise<() => void> {
+async function renderWord(buffer: ArrayBuffer, name: string, isCancelled: () => boolean): Promise<() => void> {
   const { renderAsync } = await import("docx-preview");
+  if (isCancelled()) return () => {};
   const host = document.createElement("div");
   host.className = "doc-host";
   const styleHost = document.createElement("div");
@@ -306,7 +308,6 @@ async function renderWord(buffer: ArrayBuffer, name: string): Promise<() => void
   const { bar, setLabel, sync } = makeZoomBar(1, requested => {
     applyScale(requested);
   });
-  root.replaceChildren(bar, scroll);
 
   await renderAsync(buffer, host, styleHost, {
     inWrapper: true,
@@ -321,9 +322,15 @@ async function renderWord(buffer: ArrayBuffer, name: string): Promise<() => void
     useBase64URL: false,
   });
 
+  if (isCancelled()) {
+    revokeBlobUrls(host);
+    return () => {};
+  }
+
   stripUnsafeLinks(host);
   const pageCount = host.querySelectorAll("section.docx").length;
   setLabel(pageCount === 1 ? "1 page" : `${pageCount} pages`);
+  root.replaceChildren(bar, scroll);
 
   const refresh = () => {
     measure();
@@ -336,12 +343,16 @@ async function renderWord(buffer: ArrayBuffer, name: string): Promise<() => void
   }
   const ro = new ResizeObserver(refresh);
   ro.observe(scroll);
-  return () => { ro.disconnect(); };
+  return () => {
+    ro.disconnect();
+    revokeBlobUrls(host);
+  };
 }
 
 const MAX_SHEET_ROWS = 1000;
 const MAX_SHEET_COLS = 50;
 const MAX_CELL_LEN = 2000;
+const MAX_SLIDES = 80;
 
 function columnLabel(index: number): string {
   let n = index + 1;
@@ -354,9 +365,11 @@ function columnLabel(index: number): string {
   return out;
 }
 
-async function renderSpreadsheet(buffer: ArrayBuffer, name: string): Promise<() => void> {
+async function renderSpreadsheet(buffer: ArrayBuffer, name: string, isCancelled: () => boolean): Promise<() => void> {
   const XLSX = await import("xlsx");
-  const workbook = XLSX.read(new Uint8Array(buffer), { type: "array", cellDates: true });
+  if (isCancelled()) return () => {};
+  // Bound parsed rows during decode so huge/sparse workbooks cannot exhaust memory.
+  const workbook = XLSX.read(new Uint8Array(buffer), { type: "array", cellDates: true, sheetRows: MAX_SHEET_ROWS + 1 });
   if (!workbook.SheetNames.length) throw new Error("Workbook has no sheets");
 
   const bar = document.createElement("div");
@@ -382,30 +395,9 @@ async function renderSpreadsheet(buffer: ArrayBuffer, name: string): Promise<() 
     selected = index;
     tabs.forEach((tab, i) => tab.setAttribute("aria-selected", i === index ? "true" : "false"));
     const sheetName = workbook.SheetNames[index];
-    const sheet = workbook.Sheets[sheetName];
-    const raw = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, defval: "" });
-
-    const totalRows = raw.length;
-    const moreRows = totalRows > MAX_SHEET_ROWS;
-    const rows = moreRows ? raw.slice(0, MAX_SHEET_ROWS) : raw;
-    let width = 0;
-    let clipped = false;
-    for (const row of rows) {
-      if (row.length > MAX_SHEET_COLS) { width = MAX_SHEET_COLS; clipped = true; }
-      else if (row.length > width) width = row.length;
-    }
-
-    const parts: string[] = [];
-    if (moreRows) parts.push(`Showing the first ${MAX_SHEET_ROWS.toLocaleString("en-US")} of ${totalRows.toLocaleString("en-US")} rows.`);
-    if (clipped) parts.push(`Columns beyond ${MAX_SHEET_COLS} or very long cells are cut.`);
-    if (parts.length) {
-      note.textContent = `${parts.join(" ")} Download the file for the rest.`;
-      note.hidden = false;
-    } else {
+    const sheet = Object.hasOwn(workbook.Sheets, sheetName) ? workbook.Sheets[sheetName] : undefined;
+    if (!sheet || !sheet["!ref"]) {
       note.hidden = true;
-    }
-
-    if (!rows.length || width === 0) {
       const empty = document.createElement("div");
       empty.className = "empty";
       empty.textContent = "This sheet is empty.";
@@ -413,6 +405,37 @@ async function renderSpreadsheet(buffer: ArrayBuffer, name: string): Promise<() 
       return;
     }
 
+    // Clamp both row and column bounds before materializing the 2D array so sparse sheets
+    // (e.g. cells at A1 and XFD1048576) never allocate millions of empty cells.
+    const fullRange = XLSX.utils.decode_range(sheet["!ref"]);
+    const totalRows = fullRange.e.r - fullRange.s.r + 1;
+    const totalCols = fullRange.e.c - fullRange.s.c + 1;
+    const moreRows = totalRows > MAX_SHEET_ROWS;
+    const moreCols = totalCols > MAX_SHEET_COLS;
+    const clampedRange = {
+      s: { r: fullRange.s.r, c: fullRange.s.c },
+      e: {
+        r: Math.min(fullRange.e.r, fullRange.s.r + MAX_SHEET_ROWS - 1),
+        c: Math.min(fullRange.e.c, fullRange.s.c + MAX_SHEET_COLS - 1),
+      },
+    };
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, defval: "", range: clampedRange });
+    let width = 0;
+    for (const row of rows) {
+      if (row.length > width) width = row.length;
+    }
+    width = Math.min(width, MAX_SHEET_COLS);
+
+    if (!rows.length || width === 0) {
+      note.hidden = true;
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = "This sheet is empty.";
+      scroll.replaceChildren(empty);
+      return;
+    }
+
+    let longCells = false;
     const table = document.createElement("table");
     table.className = "sheet-table";
     const thead = document.createElement("thead");
@@ -424,7 +447,7 @@ async function renderSpreadsheet(buffer: ArrayBuffer, name: string): Promise<() 
     for (let c = 0; c < width; c++) {
       const th = document.createElement("th");
       th.scope = "col";
-      th.textContent = columnLabel(c);
+      th.textContent = columnLabel(fullRange.s.c + c);
       headRow.append(th);
     }
     thead.append(headRow);
@@ -435,7 +458,7 @@ async function renderSpreadsheet(buffer: ArrayBuffer, name: string): Promise<() 
       const num = document.createElement("th");
       num.className = "row-num";
       num.scope = "row";
-      num.textContent = String(r + 1);
+      num.textContent = String(fullRange.s.r + r + 1);
       tr.append(num);
       const line = rows[r];
       for (let c = 0; c < width; c++) {
@@ -443,17 +466,26 @@ async function renderSpreadsheet(buffer: ArrayBuffer, name: string): Promise<() 
         let text = line[c] == null ? "" : String(line[c]);
         if (text.length > MAX_CELL_LEN) {
           text = text.slice(0, MAX_CELL_LEN);
-          clipped = true;
+          longCells = true;
         }
         td.textContent = text;
         tr.append(td);
       }
       tbody.append(tr);
     }
-    if (clipped && note.hidden) {
-      note.textContent = "Some long cells are cut. Download the file for the rest.";
+
+    const parts: string[] = [];
+    if (moreRows) parts.push(`Showing the first ${MAX_SHEET_ROWS.toLocaleString("en-US")} rows.`);
+    if (moreCols && longCells) parts.push(`Columns beyond ${MAX_SHEET_COLS} and some long cells are cut.`);
+    else if (moreCols) parts.push(`Columns beyond ${MAX_SHEET_COLS} are cut.`);
+    else if (longCells) parts.push("Some long cells are cut.");
+    if (parts.length) {
+      note.textContent = `${parts.join(" ")} Download the file for the rest.`;
       note.hidden = false;
+    } else {
+      note.hidden = true;
     }
+
     table.append(thead, tbody);
     scroll.replaceChildren(table);
     scroll.scrollTop = 0;
@@ -476,78 +508,101 @@ async function renderSpreadsheet(buffer: ArrayBuffer, name: string): Promise<() 
   return () => {};
 }
 
-async function renderSlides(buffer: ArrayBuffer, name: string): Promise<() => void> {
+async function renderSlides(buffer: ArrayBuffer, name: string, isCancelled: () => boolean): Promise<() => void> {
   const mod = await import("pptxviewjs");
+  if (isCancelled()) return () => {};
   const PPTXViewer = mod.PPTXViewer ?? mod.default?.PPTXViewer;
   if (!PPTXViewer) throw new Error("PPTXViewer unavailable");
 
   const viewer = new PPTXViewer({ slideSizeMode: "fit", enableThumbnails: false, autoRenderFirstSlide: false });
-  await viewer.loadFile(buffer);
-  const count = viewer.getSlideCount();
-  if (count <= 0) {
-    viewer.destroy();
-    throw new Error("Presentation has no slides");
-  }
-
-  // Extract slide aspect ratio from the loaded presentation if present (default 16:9).
-  const dims = (viewer as unknown as { presentation?: { slideSize?: { cx?: number; cy?: number } } }).presentation?.slideSize;
-  const aspect = dims?.cx && dims?.cy && dims.cx > 0 && dims.cy > 0 ? dims.cx / dims.cy : 16 / 9;
-  const baseWidth = 1280;
-  const baseHeight = Math.round(baseWidth / aspect);
-
-  let zoom = 1;
-  const scroll = document.createElement("div");
-  scroll.className = "slides-scroll";
-  scroll.tabIndex = 0;
-  scroll.setAttribute("role", "region");
-  scroll.setAttribute("aria-label", name);
-  const stack = document.createElement("div");
-  stack.className = "slides-stack";
-  scroll.append(stack);
-
-  const applySlideWidth = (requested?: number) => {
-    if (requested === 0) zoom = 1;
-    else if (requested !== undefined) zoom = Math.min(2.5, Math.max(0.25, Math.round(requested * 100) / 100));
-    const available = Math.max(240, scroll.clientWidth - (window.innerWidth <= 640 ? 20 : 32));
-    const fitWidth = Math.min(960, available);
-    stack.style.width = `${Math.round(fitWidth * zoom)}px`;
-    sync(zoom, zoom === 1 ? "Fit" : `${Math.round(zoom * 100)}%`);
-  };
-
-  const { bar, setLabel, sync } = makeZoomBar(1, requested => applySlideWidth(requested));
-  setLabel(count === 1 ? "1 slide" : `${count} slides`);
-  root.replaceChildren(bar, scroll);
-  applySlideWidth();
-
-  const ro = new ResizeObserver(() => applySlideWidth());
-  ro.observe(scroll);
-
-  let destroyed = false;
-  for (let i = 0; i < count; i++) {
-    if (destroyed) break;
-    const card = document.createElement("div");
-    card.className = "slide-card";
-    const frame = document.createElement("div");
-    frame.className = "slide-frame";
-    frame.style.aspectRatio = `${baseWidth} / ${baseHeight}`;
-    const canvas = document.createElement("canvas");
-    canvas.width = baseWidth;
-    canvas.height = baseHeight;
-    canvas.setAttribute("aria-label", `Slide ${i + 1} of ${count}`);
-    frame.append(canvas);
-    const caption = document.createElement("span");
-    caption.className = "slide-label";
-    caption.textContent = `Slide ${i + 1} of ${count}`;
-    card.append(frame, caption);
-    stack.append(card);
-    await viewer.renderSlide(i, canvas);
-  }
-
-  return () => {
-    destroyed = true;
-    ro.disconnect();
+  let ro: ResizeObserver | undefined;
+  const dispose = () => {
+    ro?.disconnect();
+    ro = undefined;
     viewer.destroy();
   };
+
+  try {
+    await viewer.loadFile(buffer);
+    if (isCancelled()) {
+      dispose();
+      return () => {};
+    }
+    const count = viewer.getSlideCount();
+    if (count <= 0) throw new Error("Presentation has no slides");
+
+    // Extract and clamp slide aspect ratio so crafted slideSize dimensions cannot allocate huge or zero canvases.
+    const dims = (viewer as unknown as { presentation?: { slideSize?: { cx?: number; cy?: number } } }).presentation?.slideSize;
+    const rawAspect = dims?.cx && dims?.cy && dims.cx > 0 && dims.cy > 0 ? dims.cx / dims.cy : 16 / 9;
+    const aspect = Number.isFinite(rawAspect) ? Math.min(4, Math.max(0.25, rawAspect)) : 16 / 9;
+    const baseWidth = 1280;
+    const baseHeight = Math.max(1, Math.round(baseWidth / aspect));
+    const shownCount = Math.min(count, MAX_SLIDES);
+
+    let zoom = 1;
+    const scroll = document.createElement("div");
+    scroll.className = "slides-scroll";
+    scroll.tabIndex = 0;
+    scroll.setAttribute("role", "region");
+    scroll.setAttribute("aria-label", name);
+    const stack = document.createElement("div");
+    stack.className = "slides-stack";
+    scroll.append(stack);
+
+    const applySlideWidth = (requested?: number) => {
+      if (requested === 0) zoom = 1;
+      else if (requested !== undefined) zoom = Math.min(2.5, Math.max(0.25, Math.round(requested * 100) / 100));
+      const available = Math.max(240, scroll.clientWidth - (window.innerWidth <= 640 ? 20 : 32));
+      const fitWidth = Math.min(960, available);
+      stack.style.width = `${Math.round(fitWidth * zoom)}px`;
+      sync(zoom, zoom === 1 ? "Fit" : `${Math.round(zoom * 100)}%`);
+    };
+
+    const { bar, setLabel, sync } = makeZoomBar(1, requested => applySlideWidth(requested));
+    setLabel(count === 1 ? "1 slide" : `${count} slides`);
+    const children: HTMLElement[] = [bar];
+    if (count > MAX_SLIDES) {
+      const note = document.createElement("p");
+      note.className = "note";
+      note.setAttribute("role", "status");
+      note.textContent = `Showing the first ${MAX_SLIDES} of ${count} slides. Download the file for the rest.`;
+      children.push(note);
+    }
+    children.push(scroll);
+    root.replaceChildren(...children);
+    applySlideWidth();
+
+    ro = new ResizeObserver(() => applySlideWidth());
+    ro.observe(scroll);
+
+    for (let i = 0; i < shownCount; i++) {
+      if (isCancelled()) {
+        dispose();
+        return () => {};
+      }
+      const card = document.createElement("div");
+      card.className = "slide-card";
+      const frame = document.createElement("div");
+      frame.className = "slide-frame";
+      frame.style.aspectRatio = `${baseWidth} / ${baseHeight}`;
+      const canvas = document.createElement("canvas");
+      canvas.width = baseWidth;
+      canvas.height = baseHeight;
+      canvas.setAttribute("aria-label", `Slide ${i + 1} of ${count}`);
+      frame.append(canvas);
+      const caption = document.createElement("span");
+      caption.className = "slide-label";
+      caption.textContent = `Slide ${i + 1} of ${count}`;
+      card.append(frame, caption);
+      stack.append(card);
+      await viewer.renderSlide(i, canvas);
+    }
+
+    return dispose;
+  } catch (err) {
+    dispose();
+    throw err;
+  }
 }
 
 window.addEventListener("message", async event => {
@@ -558,23 +613,24 @@ window.addEventListener("message", async event => {
   if (message.type === "office:theme") return;
 
   activeId = message.id;
+  const isCancelled = () => activeId !== message.id;
   cleanup?.();
   cleanup = undefined;
   root.replaceChildren();
 
   try {
     let dispose: () => void;
-    if (message.kind === "word") dispose = await renderWord(message.buffer, message.name);
-    else if (message.kind === "spreadsheet") dispose = await renderSpreadsheet(message.buffer, message.name);
-    else dispose = await renderSlides(message.buffer, message.name);
-    if (activeId !== message.id) {
+    if (message.kind === "word") dispose = await renderWord(message.buffer, message.name, isCancelled);
+    else if (message.kind === "spreadsheet") dispose = await renderSpreadsheet(message.buffer, message.name, isCancelled);
+    else dispose = await renderSlides(message.buffer, message.name, isCancelled);
+    if (isCancelled()) {
       dispose();
       return;
     }
     cleanup = dispose;
     window.parent.postMessage({ type: "office:rendered", id: message.id }, "*");
   } catch {
-    if (activeId === message.id) {
+    if (!isCancelled()) {
       window.parent.postMessage({ type: "office:error", id: message.id }, "*");
     }
   }

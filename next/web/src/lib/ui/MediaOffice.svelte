@@ -16,11 +16,16 @@
   let renderId = 0;
   let pendingBuffer = $state.raw<ArrayBuffer | undefined>();
   let lastOpen = 0;
+  let knownTooLarge = $derived(file.bytes > officeSizeLimit);
+  // Track loads per iframe element so retrying with a fresh iframe starts at 0.
+  const frameLoads = new WeakMap<HTMLIFrameElement, number>();
 
   $effect(() => {
     src; kind; attempt;
-    if (file.bytes > officeSizeLimit) {
+    if (knownTooLarge) {
       status = "too-large";
+      ready = false;
+      rendered = false;
       pendingBuffer = undefined;
       return;
     }
@@ -30,10 +35,10 @@
     pendingBuffer = undefined;
     void readOfficeBytes(src, controller.signal).then(result => {
       if (controller.signal.aborted) return;
-      if (result === "too-large") { status = "too-large"; return; }
+      if (result === "too-large") { status = "too-large"; ready = false; return; }
       pendingBuffer = result;
     }, () => {
-      if (!controller.signal.aborted) status = "load-failed";
+      if (!controller.signal.aborted) { status = "load-failed"; ready = false; }
     });
     return () => controller.abort();
   });
@@ -58,12 +63,12 @@
     frame.contentWindow.postMessage({ type: "office:theme", theme: current }, "*");
   });
 
-  let loaded = 0;
-
   function onFrameLoad() {
-    loaded++;
-    // A second load means the frame navigated away after its initial load; fail closed.
-    if (loaded > 1) {
+    if (!frame) return;
+    const count = (frameLoads.get(frame) ?? 0) + 1;
+    frameLoads.set(frame, count);
+    // A second load on the same iframe means it navigated away after its initial load; fail closed.
+    if (count > 1) {
       ready = false;
       rendered = false;
       status = "parse-failed";

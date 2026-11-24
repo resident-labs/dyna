@@ -14,7 +14,7 @@
     failed = false; loading = false;
     // Text and office modes already check their fetch response. Frames and download-only cards cannot
     // report HTTP failures, so check a byte before showing those shared-file modes.
-    if (item.sharedPath === undefined || ["text", "markdown", "table", "word", "spreadsheet", "slides"].includes(kind) || !rendered) return;
+    if (item.sharedPath === undefined || ["text", "markdown", "table"].includes(kind) || isOfficeKind(kind) || !rendered) return;
     const controller = new AbortController();
     loading = true;
     void fetch(src, { signal: controller.signal, headers: { Range: "bytes=0-0" } }).then(response => {
