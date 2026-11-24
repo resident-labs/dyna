@@ -7,7 +7,9 @@ export type MediaItem = { file: Attachment; src?: string; sharedPath?: string; s
 
 export type MediaRow = { key: string; from: Principal; at: string; event?: string; room?: string; src?: string; attachments: Attachment[] };
 
-export type MediaKind = "visual" | "image" | "video" | "svg" | "html" | "pdf" | "markdown" | "table" | "text" | "file";
+export type MediaKind = "visual" | "image" | "video" | "svg" | "html" | "pdf" | "markdown" | "table" | "word" | "spreadsheet" | "slides" | "text" | "file";
+export type OfficeKind = "word" | "spreadsheet" | "slides";
+export const isOfficeKind = (kind: MediaKind): kind is OfficeKind => kind === "word" || kind === "spreadsheet" || kind === "slides";
 
 export function conversationMedia(rows: MediaRow[]): MediaItem[] {
   return rows.flatMap(row => row.attachments.map((file, position) => ({ file, src: row.src, key: row.key, position, from: row.from, at: row.at, event: row.event, room: row.room })));
@@ -41,6 +43,31 @@ export function tableDelimiter(file: Pick<Attachment, "name" | "media">): "," | 
 const textExtension = /^\.(txt|log|json|jsonc|jsonl|ndjson|yaml|yml|toml|ini|conf|config|env|xml|html|htm|svg|css|scss|sass|less|js|jsx|mjs|cjs|ts|tsx|mts|cts|py|pyi|rb|go|rs|swift|kt|kts|java|c|h|cc|cpp|hpp|cs|php|sh|bash|zsh|fish|sql|graphql|gql|vue|svelte|r|lua|ex|exs|erl|hs|clj|dart|diff|patch|lock|properties|gradle)$/;
 const textName = /^(dockerfile|makefile|gemfile|rakefile|license|readme)(\.|$)/;
 const structuredMedia = /^application\/(json|.*\+json|x-ndjson|xml|.*\+xml|javascript|x-javascript|yaml|x-yaml|toml|sql|x-sh)$/;
+const wordMedia = new Set([
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
+]);
+const spreadsheetMedia = new Set([
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+  "application/vnd.oasis.opendocument.spreadsheet",
+]);
+const slidesMedia = new Set([
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+]);
+
+function officeKind(media: string, extension: string): OfficeKind | undefined {
+  if (wordMedia.has(media)) return "word";
+  if (spreadsheetMedia.has(media)) return "spreadsheet";
+  if (slidesMedia.has(media)) return "slides";
+  // Office files are ZIP archives (or binary .xls) and are often uploaded with generic or zip MIME types.
+  if (isGeneric(media) || media === "application/zip" || media === "application/x-zip-compressed") {
+    if (extension === ".docx" || extension === ".dotx") return "word";
+    if (extension === ".xlsx" || extension === ".xls" || extension === ".ods") return "spreadsheet";
+    if (extension === ".pptx") return "slides";
+  }
+  return undefined;
+}
 
 // The one place that decides how a file shows. The file route serves the declared type, so a page or drawing declared
 // as anything else reads as its source.
@@ -52,6 +79,8 @@ export function mediaKind(file: Pick<Attachment, "name" | "media" | "visual">): 
   if (media.startsWith("video/") && !generic) return "video";
   if (media === "text/html") return "html";
   if (media === "application/pdf") return "pdf";
+  const office = officeKind(media, extension);
+  if (office) return office;
   if (media === "text/markdown" || media === "text/x-markdown" || generic && /^\.(md|markdown|mdown|mkd|mdx)$/.test(extension)) return "markdown";
   if (tableDelimiter(file)) return "table";
   if (media.startsWith("text/") || structuredMedia.test(media) || generic && (textExtension.test(extension) || textName.test(name))) return "text";
