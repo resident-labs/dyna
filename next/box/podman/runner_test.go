@@ -130,7 +130,7 @@ func TestStartRunnerRefusesUnsafeInput(t *testing.T) {
 func TestEgressAloneHasHostNetworkAndNoCapabilities(t *testing.T) {
 	sum := strings.Repeat("a", 64)
 	args := strings.Join(egressArgs("image", "/data/bin", sum), " ")
-	for _, want := range []string{"--network=host", "--read-only", "--cap-drop=all", "--security-opt=no-new-privileges", "--user 1001:1001", "/data/bin/" + sum + ":/opt/dyna/bin/current:ro", "ci-egress --dir /run/dyna-egress"} {
+	for _, want := range []string{"--network=host", "--read-only", "--cap-drop=all", "--security-opt=no-new-privileges", "--user 1001:1001", "--label dyna.binary=" + sum, "/data/bin/" + sum + ":/opt/dyna/bin/current:ro", "ci-egress --dir /run/dyna-egress"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("args miss %q: %s", want, args)
 		}
@@ -139,18 +139,37 @@ func TestEgressAloneHasHostNetworkAndNoCapabilities(t *testing.T) {
 
 func TestListRunnersSeparatesTheProxy(t *testing.T) {
 	h, runner := newFrameHost(t)
+	sum := strings.Repeat("a", 64)
 	runner.reply = []byte(`[
 {"Names":["dyna-ci-pve-1"],"State":"running","Labels":{"dyna.ci":"runner","dyna.ci.repo":"owner/repo","dyna.ci.id":"42","dyna.ci.slot":"3","dyna.ci.size":"medium"}},
 {"Names":["dyna-ci-pve-2"],"State":"created","Labels":{"dyna.ci":"runner","dyna.ci.repo":"owner/repo","dyna.ci.id":"43","dyna.ci.slot":"0"}},
-{"Names":["dyna-ci-egress"],"State":"running","Labels":{"dyna.ci":"egress"}}]`)
+{"Names":["dyna-ci-egress"],"State":"running","Labels":{"dyna.ci":"egress","dyna.binary":"` + sum + `"}}]`)
 	found, egress, err := h.ListRunners(context.Background(), false, nil)
-	if err != nil || !egress || len(found) != 2 {
-		t.Fatalf("%+v %v %v", found, egress, err)
+	if err != nil || egress != (box.Egress{Present: true, Running: true, Binary: sum}) || len(found) != 2 {
+		t.Fatalf("%+v %+v %v", found, egress, err)
 	}
 	medium, _ := box.Size(contract.BoxSizeMedium)
 	large, _ := box.Size(contract.BoxSizeLarge)
 	if found[0] != (box.Runner{Name: "dyna-ci-pve-1", Repo: "owner/repo", ID: 42, Slot: 3, Size: medium, Running: true}) || found[1].Running || found[1].Size != large {
 		t.Fatalf("%+v", found)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		reply string
+		want  box.Egress
+	}{
+		{"absent", `[]`, box.Egress{}},
+		{"legacy running without binary label", `[{"Names":["dyna-ci-egress"],"State":"running","Labels":{"dyna.ci":"egress"}}]`, box.Egress{Present: true, Running: true}},
+		{"stopped with binary label", `[{"Names":["dyna-ci-egress"],"State":"exited","Labels":{"dyna.ci":"egress","dyna.binary":"` + sum + `"}}]`, box.Egress{Present: true, Running: false, Binary: sum}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner.reply = []byte(tc.reply)
+			_, got, err := h.ListRunners(context.Background(), false, nil)
+			if err != nil || got != tc.want {
+				t.Fatalf("got %+v, %v; want %+v", got, err, tc.want)
+			}
+		})
 	}
 }
 

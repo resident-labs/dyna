@@ -40,6 +40,16 @@ var Sizes = []contract.BoxSizeName{contract.BoxSizeSmall, contract.BoxSizeMedium
 // SetName is a size's scale set, and the one label a workflow's runs-on names: dyna-small to dyna-xlarge.
 func SetName(size contract.BoxSizeName) string { return "dyna-" + string(size) }
 
+// EgressState describes a host's CI egress proxy relative to the current engine binary.
+type EgressState uint8
+
+const (
+	EgressAbsent  EgressState = iota // no egress container on the host
+	EgressStopped                    // egress container exists but is not running
+	EgressStale                      // egress container is running an older or unpinned binary
+	EgressCurrent                    // egress container is running and pins the current binary
+)
+
 // Driver is what the pool needs from one host.
 type Driver interface {
 	BuildRunnerImage(context.Context, *box.RunnerLayer) (string, error)
@@ -49,7 +59,7 @@ type Driver interface {
 	RemoveEgress(context.Context) error
 	StartRunner(context.Context, box.RunnerSpec) error
 	// ListRunners reclaims idle caches, and removes keep folders for repositories not in repos.
-	ListRunners(ctx context.Context, reclaim bool, repos []contract.RepoName) ([]box.Runner, bool, error)
+	ListRunners(ctx context.Context, reclaim bool, repos []contract.RepoName) ([]box.Runner, EgressState, error)
 	RemoveRunner(context.Context, string) error
 }
 
@@ -375,7 +385,7 @@ type surveyed struct {
 	host    box.Host
 	driver  Driver
 	runners []box.Runner
-	egress  bool
+	egress  EgressState
 }
 
 func (p *Pool) survey(ctx context.Context) (survey, error) {
@@ -459,7 +469,7 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 		}
 		driver, err := p.Hosts(ctx, host.Name)
 		var runners []box.Runner
-		var egress bool
+		var egress EgressState
 		if err == nil {
 			runners, egress, err = driver.ListRunners(ctx, reclaim, configured)
 		}
@@ -790,11 +800,11 @@ func (p *Pool) prepare(ctx context.Context, host *surveyed, layer *box.RunnerLay
 		p.remember(host.host.Name, layer, result)
 		image = result.image
 	}
-	if !host.egress {
+	if host.egress != EgressCurrent {
 		if err := host.driver.EnsureEgress(ctx, image); err != nil {
 			return "", err
 		}
-		host.egress = true
+		host.egress = EgressCurrent
 	}
 	return image, nil
 }
@@ -927,11 +937,12 @@ func (p *Pool) sweep(ctx context.Context, host *surveyed, view survey, alive map
 		serving = true
 	}
 	// A host with ci off keeps its proxy while its runners finish their jobs.
-	if !serving && host.egress && (!host.host.CI || len(view.repos) == 0) {
+	// An idle host also drops a stopped or stale proxy so old or unpinned binary mounts do not linger.
+	if !serving && host.egress != EgressAbsent && (host.egress != EgressCurrent || !host.host.CI || len(view.repos) == 0) {
 		return host.driver.RemoveEgress(ctx)
 	}
 	// Its restart policy covers a crash, not a stop or a host restart, and a runner with no proxy loses its job.
-	if serving && !host.egress {
+	if serving && (host.egress == EgressAbsent || host.egress == EgressStopped) {
 		_, err := p.prepare(ctx, host, nil)
 		return err
 	}

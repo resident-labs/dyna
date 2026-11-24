@@ -44,7 +44,23 @@ SH
 cat > "$tmp/tools/systemctl" <<'SH'
 #!/usr/bin/env bash
 echo "$*" >> "$TEST_LOG"
-if [[ ${FAKE_STAGE_STOPPED:-0} == 1 && $* == *is-active*dyna-stage-* ]]; then exit 3; fi
+if [[ $* == *is-active*dyna-stage-* ]]; then
+  unit=${*: -1}
+  if [[ -n ${FAKE_STAGE_UNIT_STATES:-} ]]; then
+    for entry in $FAKE_STAGE_UNIT_STATES; do
+      if [[ ${entry%%=*} == "$unit" ]]; then
+        spec=${entry#*=}
+        state=${spec%%:*}
+        code=${spec#*:}
+        [[ -z $state ]] || echo "$state"
+        exit "$code"
+      fi
+    done
+    echo inactive
+    exit 3
+  fi
+  if [[ ${FAKE_STAGE_STOPPED:-0} == 1 ]]; then exit 3; fi
+fi
 if [[ $* == *InvocationID* ]]; then echo 0123456789abcdef0123456789abcdef; fi
 SH
 cat > "$tmp/tools/curl" <<'SH'
@@ -231,4 +247,46 @@ for scenario in namespace lifecycle no-idle timeout null-timeout unmarked-timeou
     grep -q 'failed: box lifecycle smoke.*fix forward' "$tmp/out"
   fi
 done
+# Staging prune keeps the current artifact, the newest 5 others, any with an active/transitioning
+# staging unit, any when systemctl errors unexpectedly, and non-SHA entries/symlinks; older inactive
+# artifacts are removed.
+rm -rf "$tmp/install/staging" "$tmp/install/failed-next" "$tmp/install/deployed-next" "$TEST_REFRESH"
+mkdir -p "$tmp/install/staging"
+current_sum=$(printf '%s' 'assets/index-app.js' | sha256sum | cut -d ' ' -f 1)
+# Pre-seed current with an ancient mtime to verify it is always kept regardless of age.
+mkdir -p "$tmp/install/staging/$current_sum"
+printf '%s' 'assets/index-app.js' > "$tmp/install/staging/$current_sum/dyna"
+touch -d '@1000000000' "$tmp/install/staging/$current_sum"
+make_sha() { printf '%012x%052x' "$1" "$1"; }
+sums=()
+for n in 1 2 3 4 5 6 7 8 9 10; do
+  s=$(make_sha "$n")
+  sums+=("$s")
+  mkdir -p "$tmp/install/staging/$s"
+  printf 'bin-%d' "$n" > "$tmp/install/staging/$s/dyna"
+  touch -d "@$((1700000000 + n * 10))" "$tmp/install/staging/$s"
+done
+# Non-SHA directory and symlink must be left untouched.
+mkdir -p "$tmp/install/staging/notes"
+ln -s "$tmp/install/staging/${sums[9]}" "$tmp/install/staging/$(make_sha 99)"
+# Oldest 5 are sums[0..4]; newest 5 are sums[5..9].
+# Make sums[0] inactive (exit 3), sums[1] active (exit 0), sums[2] activating (exit 3),
+# sums[3] systemd error (exit 1), sums[4] unknown/missing unit (exit 4).
+unit_states="dyna-stage-${sums[0]:0:12}=inactive:3"
+unit_states+=" dyna-stage-${sums[1]:0:12}=active:0"
+unit_states+=" dyna-stage-${sums[2]:0:12}=activating:3"
+unit_states+=" dyna-stage-${sums[3]:0:12}=:1"
+unit_states+=" dyna-stage-${sums[4]:0:12}=:4"
+FAKE_STAGE_UNIT_STATES="$unit_states" "$script" "${args[@]}" >"$tmp/out" 2>&1
+test -d "$tmp/install/staging/$current_sum"
+for idx in 5 6 7 8 9; do
+  test -d "$tmp/install/staging/${sums[$idx]}" || { echo "newest staging ${sums[$idx]} was pruned" >&2; exit 1; }
+done
+test ! -e "$tmp/install/staging/${sums[0]}" || { echo "old inactive staging was not pruned" >&2; exit 1; }
+test -d "$tmp/install/staging/${sums[1]}" || { echo "active staging was pruned" >&2; exit 1; }
+test -d "$tmp/install/staging/${sums[2]}" || { echo "activating staging was pruned" >&2; exit 1; }
+test -d "$tmp/install/staging/${sums[3]}" || { echo "staging was pruned despite systemctl error" >&2; exit 1; }
+test ! -e "$tmp/install/staging/${sums[4]}" || { echo "old unknown-unit staging was not pruned" >&2; exit 1; }
+test -d "$tmp/install/staging/notes" || { echo "non-SHA directory was pruned" >&2; exit 1; }
+test -L "$tmp/install/staging/$(make_sha 99)" || { echo "symlink in staging was pruned" >&2; exit 1; }
 echo 'deploy-trial tests passed'

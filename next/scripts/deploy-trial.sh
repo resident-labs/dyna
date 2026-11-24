@@ -72,7 +72,8 @@ if "$dry_run"; then
   echo "Dry run passed; staged $sha without installing."
   exit 0
 fi
-# The independent unit owns this immutable artifact until it finishes. Never prune staging/ with stage/.
+# The independent unit owns this immutable artifact until it finishes, so staging/ is pruned separately
+# from stage/ and never removes an artifact whose unit is still active.
 # Its ready-host snapshot is read-only, so a new binary cannot migrate the live old engine's store.
 step='stage hosts'
 sum=$(sha256sum "$stage/dyna" | cut -d ' ' -f 1)
@@ -213,5 +214,29 @@ step='record deploy'
 printf '%s\n' "$tree" > "$prefix/deployed-next"
 rm -f "$prefix/failed-next"
 find "$prefix/stage" -mindepth 1 -maxdepth 1 -type d ! -name "$sha" -exec rm -rf -- {} +
+staging_keep=5
+if [[ -d $prefix/staging ]]; then
+  mapfile -t old_staging < <(
+    for dir in "$prefix/staging"/*; do
+      [[ -d $dir && ! -L $dir ]] || continue
+      name=${dir##*/}
+      [[ $name =~ ^[0-9a-f]{64}$ && $name != "$sum" ]] || continue
+      mtime=$(stat -c '%.Y' -- "$dir") || continue
+      printf '%s\t%s\n' "$mtime" "$name"
+    done | LC_ALL=C sort -t $'\t' -k1,1nr -k2,2
+  )
+  for ((i = staging_keep; i < ${#old_staging[@]}; i++)); do
+    old_sum=${old_staging[i]#*$'\t'}
+    rc=0
+    state=$(systemctl --user is-active "dyna-stage-${old_sum:0:12}" 2>/dev/null) || rc=$?
+    if [[ $rc -eq 0 || $state == activating || $state == deactivating || $state == reloading ]]; then
+      continue
+    fi
+    if [[ $rc -ne 3 && $rc -ne 4 ]]; then
+      continue
+    fi
+    rm -rf -- "$prefix/staging/$old_sum"
+  done
+fi
 trap - ERR
 echo "Deployed $sha; service, web and box lifecycle checks passed."
