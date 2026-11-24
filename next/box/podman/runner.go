@@ -196,8 +196,8 @@ func (h *Host) EnsureEgress(ctx context.Context, image, bin, sum string) error {
 	if _, err := h.run(ctx, args...); err != nil {
 		return err
 	}
-	// A runner's mount needs its slot's directory, which the proxy makes as it starts.
-	_, err := h.run(ctx, "podman", "exec", egressName, "bash", "-c", `for _ in {1..100}; do [ -S "$1" ] && exit 0; sleep 0.1; done; exit 1`, "dyna-egress",
+	// A runner's mount needs its slot's directory and a live listener, not a stale socket inode from --replace.
+	_, err := h.run(ctx, "podman", "exec", egressName, "bash", "-c", `for _ in {1..100}; do socat -T 1 -u /dev/null "UNIX-CONNECT:$1" 2>/dev/null && exit 0; sleep 0.1; done; exit 1`, "dyna-egress",
 		fmt.Sprintf("%s/%d/%s", egressMount, box.RunnerSlots-1, box.EgressSocket))
 	return err
 }

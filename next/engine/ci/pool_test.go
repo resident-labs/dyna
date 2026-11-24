@@ -50,20 +50,20 @@ type fakeDriver struct {
 	egressEnsured int
 	egressRemoved int
 	builds        int
-	specs       []box.RunnerSpec
-	removed     []string
-	startErr    error
-	listErr     error
-	listCtx     context.Context
-	reclaimed   bool
-	gate        chan struct{} // when set, a build waits for it to close
-	buildMu     sync.Mutex    // a build-ahead runs beside placement
-	onEgress    func()        // runs when the proxy is started, which a sweep does
-	layerBuilds []string      // the id of each room layer built here
-	failLayer   error         // when set, building a room layer fails with it
-	hangLayer   bool          // when set, building a room layer waits for its context
-	failShared  error         // when set, building the shared image fails with it
-	pruned      [][]contract.RoomID
+	specs         []box.RunnerSpec
+	removed       []string
+	startErr      error
+	listErr       error
+	listCtx       context.Context
+	reclaimed     bool
+	gate          chan struct{} // when set, a build waits for it to close
+	buildMu       sync.Mutex    // a build-ahead runs beside placement
+	onEgress      func()        // runs when the proxy is started, which a sweep does
+	layerBuilds   []string      // the id of each room layer built here
+	failLayer     error         // when set, building a room layer fails with it
+	hangLayer     bool          // when set, building a room layer waits for its context
+	failShared    error         // when set, building the shared image fails with it
+	pruned        [][]contract.RoomID
 }
 
 func (d *fakeDriver) BuildRunnerImage(ctx context.Context, layer *box.RunnerLayer) (string, error) {
@@ -369,16 +369,20 @@ func TestStaleProxyIsReplacedOnStartAndRemovedWhenIdle(t *testing.T) {
 		t.Fatalf("ci-off host with stale proxy: state=%v removed=%d", hd.egress, hd.egressRemoved)
 	}
 
-	// A running job keeps its working stale proxy until it finishes, then the next tick removes it.
-	r := newFixture(1)
+	// A running job keeps its working stale proxy on both tick and a second job's start, then the next idle tick removes it.
+	r := newFixture(2)
 	defer r.stop()
 	size, _ := box.Size(large)
 	rd := r.drivers["pve"]
-	rd.runners = []box.Runner{{Name: "dyna-ci-pve-working", Repo: repo, ID: 7, Size: size, Running: true}}
+	rd.runners = []box.Runner{{Name: "dyna-ci-pve-working", Repo: repo, ID: 7, Slot: 0, Size: size, Running: true}}
 	rd.egress = EgressStale
 	r.tick(t)
 	if rd.egress != EgressStale || rd.egressEnsured != 0 || rd.egressRemoved != 0 {
 		t.Fatalf("tick disrupted a serving stale proxy: state=%v ensured=%d removed=%d", rd.egress, rd.egressEnsured, rd.egressRemoved)
+	}
+	r.scale(2)
+	if len(rd.runners) != 2 || rd.egress != EgressStale || rd.egressEnsured != 0 {
+		t.Fatalf("starting a second runner disrupted the serving stale proxy: runners=%d state=%v ensured=%d", len(rd.runners), rd.egress, rd.egressEnsured)
 	}
 	rd.runners = nil
 	r.tick(t)

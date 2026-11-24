@@ -154,6 +154,7 @@ func TestListRunnersSeparatesTheProxy(t *testing.T) {
 		t.Fatalf("%+v", found)
 	}
 
+	otherSum := strings.Repeat("b", 64)
 	for _, tc := range []struct {
 		name  string
 		reply string
@@ -162,6 +163,8 @@ func TestListRunnersSeparatesTheProxy(t *testing.T) {
 		{"absent", `[]`, box.Egress{}},
 		{"legacy running without binary label", `[{"Names":["dyna-ci-egress"],"State":"running","Labels":{"dyna.ci":"egress"}}]`, box.Egress{Present: true, Running: true}},
 		{"stopped with binary label", `[{"Names":["dyna-ci-egress"],"State":"exited","Labels":{"dyna.ci":"egress","dyna.binary":"` + sum + `"}}]`, box.Egress{Present: true, Running: false, Binary: sum}},
+		{"multiple mismatched binaries", `[{"Names":["dyna-ci-egress"],"State":"running","Labels":{"dyna.ci":"egress","dyna.binary":"` + sum + `"}},{"Names":["dyna-ci-egress-old"],"State":"running","Labels":{"dyna.ci":"egress","dyna.binary":"` + otherSum + `"}}]`, box.Egress{Present: true, Running: true}},
+		{"multiple with one stopped", `[{"Names":["dyna-ci-egress"],"State":"running","Labels":{"dyna.ci":"egress","dyna.binary":"` + sum + `"}},{"Names":["dyna-ci-egress-old"],"State":"exited","Labels":{"dyna.ci":"egress","dyna.binary":"` + sum + `"}}]`, box.Egress{Present: true, Running: false, Binary: sum}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runner.reply = []byte(tc.reply)

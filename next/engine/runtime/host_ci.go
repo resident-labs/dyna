@@ -39,7 +39,7 @@ func (h ciHost) ListRunners(ctx context.Context, reclaim bool, repos []contract.
 		return runners, ci.EgressAbsent, nil
 	case !egress.Running:
 		return runners, ci.EgressStopped, nil
-	case wanted != "" && egress.Binary == wanted:
+	case egress.Binary == wanted:
 		return runners, ci.EgressCurrent, nil
 	default:
 		return runners, ci.EgressStale, nil

@@ -800,7 +800,10 @@ func (p *Pool) prepare(ctx context.Context, host *surveyed, layer *box.RunnerLay
 		p.remember(host.host.Name, layer, result)
 		image = result.image
 	}
-	if host.egress != EgressCurrent {
+	// Keep a working stale proxy while another runner is mid-job so --replace does not sever its tunnels;
+	// sweep drops it once the host goes idle.
+	serving := slices.ContainsFunc(host.runners, func(r box.Runner) bool { return r.Running })
+	if host.egress != EgressCurrent && !(host.egress == EgressStale && serving) {
 		if err := host.driver.EnsureEgress(ctx, image); err != nil {
 			return "", err
 		}

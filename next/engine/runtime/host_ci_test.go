@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -14,9 +15,11 @@ import (
 
 type ciFrameRunner struct {
 	reply []byte
+	calls int
 }
 
 func (r *ciFrameRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte, error) {
+	r.calls++
 	if !slices.Contains(args, "bash") && !strings.Contains(args[len(args)-1], "dyna-frame") {
 		return nil, nil
 	}
@@ -58,5 +61,15 @@ func TestCIHostListRunnersClassifiesEgressBinary(t *testing.T) {
 				t.Fatalf("got %v, %v; want %v", got, err, tc.want)
 			}
 		})
+	}
+
+	// A binarySum error fails closed before touching the host.
+	badBoxes := &Boxes{}
+	wantErr := errors.New("binary unreadable")
+	badBoxes.binOnce.Do(func() { badBoxes.binErr = wantErr })
+	runner.calls = 0
+	badDriver := ciHost{Host: h, name: "pve", boxes: badBoxes}
+	if _, got, err := badDriver.ListRunners(context.Background(), false, nil); !errors.Is(err, wantErr) || got != ci.EgressAbsent || runner.calls != 0 {
+		t.Fatalf("binarySum error: got %v, %v, calls=%d", got, err, runner.calls)
 	}
 }
