@@ -163,12 +163,35 @@ type SubscriptionFireResponse struct{}
 
 type SubscriptionUpdateRequest struct {
 	ID       SubscriptionID        `json:"id"`
+	On       *[]EventType          `json:"on,omitempty" desc:"Event types that fire it, such as github.pr.opened; dyna subscription events lists them. Give on, every, or both for a digest: with both, the matching events gather and each every that has any wakes once with all of them."`
+	Every    *string               `json:"every,omitempty" desc:"A schedule, as a duration string such as 1h, 15m or 90s, of at least 1m. Give on, every, or both for a digest, which needs wake."`
 	Workflow *WorkflowSubscription `json:"workflow,omitempty" desc:"Replaces script and args together; omitted args become none."`
 	Where    *[]string             `json:"where,omitempty" desc:"Filters on repo, author, actor, label, kind, number or service: key=value, key!=value or text~value; all must hold; kind=a,b matches any."`
 	Key      *string               `json:"key,omitempty" desc:"A key's events are handled one at a time, keys at once: a literal, or a template with {repo} and {number}, such as {repo}#{number}."`
 	Latest   *bool                 `json:"latest,omitempty" desc:"Keep only the newest waiting event per key; an event in a handler is never replaced."`
 	Parent   *SessionID            `json:"parent,omitempty" desc:"The session the service reports to and that may steer it; root by default, or when it has closed."`
 }
+
+// UnmarshalJSON refuses a number for every, naming the field and the form it takes.
+func (r *SubscriptionUpdateRequest) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if raw, ok := fields["every"]; ok && !jsonString(raw) {
+		return fmt.Errorf(`every is a duration string such as "1h", "15m" or "90s", not %s`, rawKind(raw))
+	}
+	type plain SubscriptionUpdateRequest
+	var v plain
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&v); err != nil {
+		return err
+	}
+	*r = SubscriptionUpdateRequest(v)
+	return nil
+}
+
 type SubscriptionUpdateResponse struct{}
 
 type SubscriptionStateRequest struct {

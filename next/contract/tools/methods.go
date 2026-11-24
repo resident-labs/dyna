@@ -348,7 +348,7 @@ var methodTable = []MethodEntry{
 		act("subscription", "fire", typ[contract.SubscriptionFireRequest](), "Queue one event for a room workflow subscription, for its service to handle, using real state. Root or owner only. event is a full event envelope; data is any JSON up to 1 MiB sent as hook.fired with body {subscription, data}. Supply only one; omit both for hook.due. key overrides the resolved key; data resolves templates with empty repo and number 0.", "subscription fire"),
 	),
 	method(contract.MethodSubscriptionUpdate, contract.ScopeAdmin, UserAccess,
-		act("subscription", "update", typ[contract.SubscriptionUpdateRequest](), "Update a room workflow subscription without losing state or queued events. Root or owner only. Only supplied fields change; workflow replaces script and args, and reloads the running service as workflow reload does.", "subscription update"),
+		act("subscription", "update", typ[contract.SubscriptionUpdateRequest](), "Update a room workflow subscription without losing state or queued events. Root or owner only. Only supplied fields change; on replaces event types (empty list clears them), every replaces the schedule (empty string clears it), and workflow replaces script and args and reloads the running service as workflow reload does.", "subscription update"),
 	),
 	method(contract.MethodSubscriptionState, contract.ScopeAdmin, UserAccess,
 		act("subscription", "state", typ[contract.SubscriptionStateRequest](), "List per-key state when key is omitted, or read one key. Supply value to write JSON; null resets it. Root or owner only.", "subscription state"),
