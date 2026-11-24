@@ -2,18 +2,19 @@
   import type { Snippet } from "svelte";
   import MediaText from "./MediaText.svelte";
   import MediaFile from "./MediaFile.svelte";
-  import { mediaKind, mediaSrc, type MediaItem } from "../media.ts";
+  import MediaOffice from "./MediaOffice.svelte";
+  import { isOfficeKind, mediaKind, mediaSrc, type MediaItem } from "../media.ts";
   import { sharedFolder, parentPath } from "../shared.ts";
-  let { item, rendered, image, visual }: { item: MediaItem; rendered: boolean; image?: Snippet; visual?: Snippet } = $props();
+  let { item, rendered, image, visual, onclose }: { item: MediaItem; rendered: boolean; image?: Snippet; visual?: Snippet; onclose?: () => void } = $props();
   const showFolder = sharedFolder();
   let src = $derived(mediaSrc(item)), kind = $derived(mediaKind(item.file));
   let folder = $derived(item.sharedPath !== undefined ? parentPath(item.sharedPath) : undefined);
   let failed = $state(false), loading = $state(false);
   $effect(() => {
     failed = false; loading = false;
-    // Text modes already check their Range response. Frames and download-only cards cannot
+    // Text and office modes already check their fetch response. Frames and download-only cards cannot
     // report HTTP failures, so check a byte before showing those shared-file modes.
-    if (item.sharedPath === undefined || ["text", "markdown", "table"].includes(kind) || !rendered) return;
+    if (item.sharedPath === undefined || ["text", "markdown", "table", "word", "spreadsheet", "slides"].includes(kind) || !rendered) return;
     const controller = new AbortController();
     loading = true;
     void fetch(src, { signal: controller.signal, headers: { Range: "bytes=0-0" } }).then(response => {
@@ -40,6 +41,8 @@
       {:else if kind === "pdf" && navigator.pdfViewerEnabled}
         <!-- The browser's viewer refuses a sandbox attribute. The file route's own sandbox header still applies to anything that is not a PDF. -->
         {#key src}<iframe {src} title={item.file.name} referrerpolicy="no-referrer"></iframe>{/key}
+      {:else if isOfficeKind(kind)}
+        {#key src}<MediaOffice file={item.file} {src} {kind} onfolder={folder !== undefined ? () => showFolder(folder!) : undefined} {onclose} />{/key}
       {:else if kind === "file" || kind === "pdf"}
         <MediaFile file={item.file} {src} reason="No preview for this file." />
       {:else}

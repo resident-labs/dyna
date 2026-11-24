@@ -59,6 +59,37 @@ func TestWebAppFilesAreCachedAndCompressed(t *testing.T) {
 	}
 }
 
+func TestOfficeViewerUsesStrictSandboxCSPAndCORSForModuleAssets(t *testing.T) {
+	app := fstest.MapFS{
+		"index.html":       {Data: []byte("<!doctype html>")},
+		"office.html":      {Data: []byte("<!doctype html><script type=module src=/assets/office-abc.js></script>")},
+		"assets/office.js": {Data: []byte("export const ok = true;")},
+		"assets/style.css": {Data: []byte("body{}")},
+	}
+	w, err := NewWeb(New(&fakeService{}, nil), "127.0.0.1:7790", app, time.Now, &streamDeviceStore{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := func(path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		w.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://dyna.localhost:7790"+path, nil))
+		return rec
+	}
+	office := get("/office.html")
+	wantCSP := "sandbox allow-scripts; default-src 'none'; script-src 'self'; img-src blob: data:; style-src 'unsafe-inline'; frame-ancestors 'self'"
+	if office.Code != 200 || office.Header().Get("Content-Security-Policy") != wantCSP || office.Header().Get("Cache-Control") != "no-cache" {
+		t.Fatalf("office.html: %d %v", office.Code, office.Header())
+	}
+	js := get("/assets/office.js")
+	if js.Code != 200 || js.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("office.js CORS: %d %v", js.Code, js.Header())
+	}
+	css := get("/assets/style.css")
+	if css.Code != 200 || css.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("style.css unexpected CORS: %d %v", css.Code, css.Header())
+	}
+}
+
 // An API answer is compressed for a client that takes gzip; an event stream and an image pass through, and a flushed
 // stream still reaches the client.
 func TestGzipWriterCompressesAnswersAndPassesStreams(t *testing.T) {

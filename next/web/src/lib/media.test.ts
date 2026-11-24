@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { conversationMedia, decodePreview, hasSource, mediaKind, mediaSrc, mediaStep, parseTable, previewLimit, previewNote, readMedia, readPreview, sourceToggle, tableDelimiter } from "./media.ts";
+import { conversationMedia, decodePreview, hasSource, isOfficeKind, mediaKind, mediaSrc, mediaStep, parseTable, previewLimit, previewNote, readMedia, readPreview, sourceToggle, tableDelimiter } from "./media.ts";
 import type { MediaRow } from "./media.ts";
 
 const visual = { id: "v", version: 1, title: "Card", height: 100, allowNet: false, banner: "", thumbnail: "", shots: null, checks: null };
@@ -32,11 +32,38 @@ test("the media kind follows the declared type, then the extension of a type tha
     ["a.yaml", "application/yaml", "text"], ["a.go", "application/octet-stream", "text"], ["Dockerfile", "application/octet-stream", "text"], ["a.manifest", "application/ld+json", "text"],
     ["a.ts", "video/mp2t", "text"],
     ["a.pdf", "application/pdf", "pdf"], ["a.pdf", "application/octet-stream", "file"], ["a.zip", "application/zip", "file"], ["a.bin", "application/octet-stream", "file"], ["noextension", "", "file"],
+    // Office documents: Word, spreadsheets and slides by declared MIME type, or by extension with generic/zip MIME types.
+    ["report.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "word"],
+    ["template.dotx", "application/vnd.openxmlformats-officedocument.wordprocessingml.template", "word"],
+    ["notes.docx", "application/octet-stream", "word"],
+    ["notes.DOCX", "application/zip", "word"],
+    ["template.dotx", "", "word"],
+    ["budget.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "spreadsheet"],
+    ["legacy.xls", "application/vnd.ms-excel", "spreadsheet"],
+    ["sheet.ods", "application/vnd.oasis.opendocument.spreadsheet", "spreadsheet"],
+    ["budget.xlsx", "application/octet-stream", "spreadsheet"],
+    ["budget.xlsx", "application/zip", "spreadsheet"],
+    ["legacy.xls", "", "spreadsheet"],
+    ["sheet.ODS", "application/x-zip-compressed", "spreadsheet"],
+    ["deck.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "slides"],
+    ["deck.pptx", "application/octet-stream", "slides"],
+    ["deck.PPTX", "application/zip", "slides"],
+    // Legacy .doc/.ppt and .odt/.odp are out of scope and remain plain file downloads.
+    ["old.doc", "application/msword", "file"],
+    ["old.doc", "application/octet-stream", "file"],
+    ["old.ppt", "application/vnd.ms-powerpoint", "file"],
+    ["old.odt", "application/vnd.oasis.opendocument.text", "file"],
+    ["old.odp", "application/vnd.oasis.opendocument.presentation", "file"],
     // The file route serves the declared type, so a page or drawing declared as anything else reads as its source.
     ["a.html", "text/plain", "text"], ["a.svg", "text/plain", "text"], ["a.html", "application/octet-stream", "text"], ["a.svg", "application/octet-stream", "text"],
+    ["a.docx", "application/json", "text"],
   ];
   for (const [name, media, kind] of cases) assert.equal(mediaKind({ name, media }), kind, `${name} as ${media}`);
   assert.equal(mediaKind({ name: "card.html", media: "text/html", visual }), "visual");
+  assert.equal(isOfficeKind("word"), true);
+  assert.equal(isOfficeKind("spreadsheet"), true);
+  assert.equal(isOfficeKind("slides"), true);
+  assert.equal(isOfficeKind("pdf"), false);
 });
 
 test("a table takes its delimiter from the type or a plain type's extension", () => {
@@ -47,7 +74,7 @@ test("a table takes its delimiter from the type or a plain type's extension", ()
 
 test("the rendered kinds offer their source, and the toggle says what comes next", () => {
   assert.deepEqual(["markdown", "table", "html", "svg", "visual"].filter(kind => hasSource(kind as never)).length, 5);
-  assert.deepEqual(["image", "video", "text", "file"].filter(kind => hasSource(kind as never)), []);
+  assert.deepEqual(["image", "video", "word", "spreadsheet", "slides", "text", "file"].filter(kind => hasSource(kind as never)), []);
   assert.equal(sourceToggle("markdown", true), "Show source");
   assert.equal(sourceToggle("markdown", false), "Show rendered markdown");
   assert.equal(sourceToggle("table", false), "Show table");

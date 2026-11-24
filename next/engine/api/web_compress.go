@@ -53,8 +53,17 @@ func (c *gzipCache) get(name string, data []byte) []byte {
 // serveApp writes an app file. A hashed file under assets/ never changes, so the browser keeps it for a year; any other
 // file, index.html above all, is checked again on each load so a deploy shows at once.
 func (w *Web) serveApp(out http.ResponseWriter, r *http.Request, name string, data []byte) {
+	if name == "office.html" {
+		// The office document viewer runs inside a sandboxed iframe with an opaque origin; it cannot touch the app's origin
+		// or make network requests, and only loads bundled scripts from self.
+		out.Header().Set("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; script-src 'self'; img-src blob: data:; style-src 'unsafe-inline'; frame-ancestors 'self'")
+	}
 	if strings.HasPrefix(name, "assets/") {
 		out.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		// Module scripts loaded by the sandboxed office.html iframe run from an opaque "null" origin and require CORS.
+		if path.Ext(name) == ".js" {
+			out.Header().Set("Access-Control-Allow-Origin", "*")
+		}
 	} else {
 		out.Header().Set("Cache-Control", "no-cache")
 	}

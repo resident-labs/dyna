@@ -136,7 +136,7 @@
       <button class="tool" aria-label="Close" title="Close" onclick={() => dialog.close()} bind:this={closer}><Icon name="close" /></button>
     </header>
     <div class="stage" class:media-gesture={gestures} bind:this={stage} use:wheel onpointerdown={down} onpointermove={drag} onpointerup={up} onpointercancel={up} onclick={e => { if (background && e.target === stage && moved < 8) dialog.close(); }} role="presentation">
-      <MediaContent {item} {rendered}>
+      <MediaContent {item} {rendered} onclose={() => dialog.close()}>
         {#snippet visual()}        <div class="visual-stage">{#if visualFailed}<div class="visual-error">The card did not load. <button onclick={() => visualAttempt++}>Retry</button></div>
         {:else if versions.length && item.file.visual}{#key item.key + ":" + item.file.visual.version}<VisualCardMedia {versions} selected={item.file.visual.version} room={item.room ?? room} send={async (text, event) => { await call("post", { room: item.room ?? room, text, visualReply: event }); }} />{/key}{/if}</div>{/snippet}
         {#snippet image()}{#if imageFailed}<div class="visual-error">The file did not load. {#if folder !== undefined}<button onclick={() => showFolder(parentPath(folder!))}>Show in folder</button>{/if}</div>{:else}        <img {src} alt={item.file.name} draggable="false" onerror={() => imageFailed = true} onload={event => { if (event.currentTarget instanceof HTMLImageElement) natural = { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }; }}

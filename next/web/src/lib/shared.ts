@@ -11,7 +11,15 @@ export const parentPath = (path: string) => path.split("/").slice(0, -1).join("/
 export function sharedMedia(room: string, path: string, source: MessageSource, bytes?: number, modified?: string): MediaItem {
   const name = path.split("/").at(-1) ?? path;
   const extension = name.split(".").at(-1)?.toLowerCase() ?? "";
-  const media = ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif", bmp: "image/bmp", ico: "image/x-icon", svg: "image/svg+xml", html: "text/html", htm: "text/html", pdf: "application/pdf", mp4: "video/mp4", webm: "video/webm" } as Record<string, string>)[extension] ?? "application/octet-stream";
+  const media = ({
+    png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif", bmp: "image/bmp", ico: "image/x-icon", svg: "image/svg+xml", html: "text/html", htm: "text/html", pdf: "application/pdf", mp4: "video/mp4", webm: "video/webm",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    dotx: "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    xls: "application/vnd.ms-excel",
+    ods: "application/vnd.oasis.opendocument.spreadsheet",
+    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  } as Record<string, string>)[extension] ?? "application/octet-stream";
   return { ...source, room, position: 0, src: sharedURL(room, path), file: { name, media, bytes: bytes ?? 0, sha256: "" }, sharedPath: path, sizeKnown: bytes !== undefined, ...(modified ? { modified } : {}) };
 }
 
