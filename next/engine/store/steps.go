@@ -6,13 +6,18 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 129
+const schemaVersion = 130
 
 const agentsTable = `CREATE TABLE agents (id TEXT PRIMARY KEY, session TEXT NOT NULL REFERENCES sessions(id), turn TEXT NOT NULL, name TEXT NOT NULL, state TEXT NOT NULL, transcript TEXT NOT NULL DEFAULT '', start_offset INTEGER NOT NULL DEFAULT 0, started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL DEFAULT 0, model TEXT NOT NULL DEFAULT '', input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, cache_read_tokens INTEGER NOT NULL DEFAULT 0, cache_write_tokens INTEGER NOT NULL DEFAULT 0)`
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
+	// Session conversation clearing: pending clear timestamp on sessions, and the turn that consumed it.
+	129: {
+		`ALTER TABLE sessions ADD COLUMN cleared_at INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE turns ADD COLUMN cleared_at INTEGER NOT NULL DEFAULT 0`,
+	},
 	// Feed services (spec 5.18): message dedupe, outbound queue and counters on services.
 	128: {
 		`ALTER TABLE services ADD COLUMN feed_in INTEGER NOT NULL DEFAULT 0`,

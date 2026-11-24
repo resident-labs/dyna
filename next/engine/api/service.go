@@ -132,6 +132,7 @@ type Service interface {
 	BoxCompacted(context.Context, contract.Principal, contract.BoxCompactedRequest) (contract.BoxCompactedResponse, *contract.Error)
 	SessionSetAccount(context.Context, contract.Principal, contract.SessionSetAccountRequest) (contract.SessionSetAccountResponse, *contract.Error)
 	SessionSetBranch(context.Context, contract.Principal, contract.SessionSetBranchRequest) (contract.SessionSetBranchResponse, *contract.Error)
+	SessionClear(context.Context, contract.Principal, contract.SessionClearRequest) (contract.SessionClearResponse, *contract.Error)
 	SessionRestart(context.Context, contract.Principal, contract.SessionRestartRequest) (contract.SessionRestartResponse, *contract.Error)
 	SessionRefresh(context.Context, contract.Principal, contract.SessionRefreshRequest) (contract.SessionRefreshResponse, *contract.Error)
 	SessionSearch(context.Context, contract.Principal, contract.SessionSearchRequest) (contract.SessionSearchResponse, *contract.Error)

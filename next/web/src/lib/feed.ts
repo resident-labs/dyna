@@ -238,7 +238,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       // A job without an open turn stays in the work buffer below.
     }
     if (home.kind === "dm" && session !== home.session) continue;
-    if (event.type === "engine.restarted" || event.type === "room.paused" || event.type === "room.resumed" || event.type === "room.limits_changed" || event.type === "host.switches_changed" || event.type === "room.deleting" || event.type === "hook.digest") {
+    if (event.type === "engine.restarted" || event.type === "room.paused" || event.type === "room.resumed" || event.type === "room.limits_changed" || event.type === "host.switches_changed" || event.type === "room.deleting" || event.type === "hook.digest" || event.type === "session.cleared") {
       const previous = deferred.at(-1);
       if (event.type === "room.resumed" && previous?.kind === "notice" && previous.event.type === "room.paused" && sameAuthor(previous.event.from, event.from) && Date.parse(event.at) - Date.parse(previous.event.at) <= 300_000) previous.resumedAt = event.at;
       else deferred.push({ kind: "notice", key: `n${event.seq}`, event });
@@ -325,7 +325,7 @@ export const eventGroups: Record<Event["type"], string> = {
   "discord.member.joined": "Discord joins", "discord.member.left": "Discord leaves", "discord.channel.created": "Discord channels created", "discord.channel.updated": "Discord channels changed", "discord.channel.deleted": "Discord channels deleted", "discord.role.created": "Discord roles created", "discord.role.updated": "Discord roles changed", "discord.role.deleted": "Discord roles deleted",
   "connect.connector": "Connect connector changes", "account.failed": "account failures", "account.quota_low": "account quota alerts",
   "post.sent": "sent posts", "post.created": "posts", "session.started": "sessions started", "session.closed": "sessions closed", "session.compacted": "compactions",
-  "session.restarted": "boxes replaced", "session.moved": "sessions moved", "session.profile_changed": "profiles changed",
+  "session.restarted": "boxes replaced", "session.moved": "sessions moved", "session.cleared": "conversations cleared", "session.profile_changed": "profiles changed",
   "turn.started": "turns started", "turn.ended": "turns ended", "turn.activity": "turn updates", "transcript.changed": "transcript updates",
   "computer.changed": "computer changes", "box.changed": "box changes", "box.pressure": "memory warnings",
   "room.paused": "pauses", "room.resumed": "resumes", "room.limits_changed": "room limits changed", "room.deleting": "room deletions", "room.deleted": "room deletions",
@@ -534,6 +534,7 @@ export function describe(event: Event, name: Name): string {
     case "session.closed": return `${name(event.body.session)} closed${event.body.reason ? ` ${closeReasons[event.body.reason]}` : ""}`;
     case "session.compacted": return event.body.error ? `${name(event.body.session)} could not compact its conversation` : `${name(event.body.session)} compacted its conversation`;
     case "session.moved": return `${name(event.body.session)} moved under ${name(event.body.newParent)}`;
+    case "session.cleared": return `Cleared ${name(event.body.session)}'s conversation`;
     case "computer.changed": return `${name(event.body.session)} ${event.body.to === "running" ? "opened" : "closed"} its computer`;
     case "box.changed": return ""; // feedRows keeps box changes out of work rows.
     case "turn.started": return "";

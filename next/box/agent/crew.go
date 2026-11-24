@@ -332,7 +332,8 @@ func (c *Crew) settle(ctx context.Context, worker crewWorker) {
 func (c *Crew) FollowUp(ctx context.Context, input contract.TurnInput) error {
 	return c.Steer(ctx, input)
 }
-func (c *Crew) ClearQueue(context.Context) error { return nil }
+func (c *Crew) ClearQueue(context.Context) error      { return nil }
+func (c *Crew) NewConversation(context.Context) error { return nil }
 
 // Start runs the script as the session's turn and returns when it settles. A script that throws fails the run; a failed
 // worker only fails its step, which the script may handle.

@@ -25,6 +25,7 @@ var ErrParentClosing = errors.New("parent session is closing")
 // ErrNameTaken is a session start whose name an open session in the room already has.
 var ErrNameTaken = errors.New("session name taken")
 var ErrSessionClosing = errors.New("session is closing")
+var ErrTurnRunning = errors.New("session has a running turn")
 var ErrVisualForbidden = errors.New("visual belongs to another room or author")
 var ErrVisualNoAuthor = errors.New("visual has no session author")
 
@@ -53,6 +54,7 @@ type Session struct {
 	GPU         contract.GPUGiB // the VRAM its box asks of a card (5.5); set to start, not read back
 	Root        bool            // read back only: the session has no parent
 	Closing     bool            // read back only: the session is closing
+	ClearedAt   int64           // read back only: unix millis when a clear is pending for the next turn, or 0
 	// Workflow makes the new session a crew. It is set only to start one: Session does not read it back.
 	Workflow *WorkflowRun
 }
@@ -425,6 +427,26 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='pending',turn=NULL,queue=NULL,wake=0 WHERE to_kind=? AND to_id=? AND turn=? AND state IN ('taken','read')", contract.PrincipalSession, session, output.Turn); err != nil {
 				return err
 			}
+			// If this turn carried a pending clear and ended before the harness wrote a fresh turn,
+			// restore sessions.cleared_at so the next turn still starts fresh and clear the divider on this unstarted turn.
+			var clearedAt int64
+			if err := tx.QueryRowContext(ctx, "SELECT cleared_at FROM turns WHERE id=?", output.Turn).Scan(&clearedAt); err != nil {
+				return err
+			}
+			if clearedAt > 0 {
+				var written bool
+				if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM transcript_turns WHERE session=? AND turn=?)", session, output.Turn).Scan(&written); err != nil {
+					return err
+				}
+				if !written {
+					if _, err := tx.ExecContext(ctx, "UPDATE sessions SET cleared_at=CASE WHEN cleared_at=0 THEN ? ELSE cleared_at END WHERE id=?", clearedAt, session); err != nil {
+						return err
+					}
+					if _, err := tx.ExecContext(ctx, "UPDATE turns SET cleared_at=0 WHERE id=?", output.Turn); err != nil {
+						return err
+					}
+				}
+			}
 		}
 		ended, err := s.endPosts(ctx, tx, event.Room, session, output)
 		if err != nil {
@@ -640,8 +662,56 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 
 func (s *Store) Session(ctx context.Context, id contract.SessionID) (Session, error) {
 	var session Session
-	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.repo,s.profile,b.id,s.close_reason,s.compose,s.parent IS NULL,s.state='closing',COALESCE((SELECT id FROM turns WHERE session=s.id AND ended_at IS NULL),'') FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL", id).Scan(&session.ID, &session.Room, &session.Name, &session.Repo, &session.Profile, &session.Box, &session.CloseReason, &session.Compose, &session.Root, &session.Closing, &session.Turn)
+	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.repo,s.profile,b.id,s.close_reason,s.compose,s.parent IS NULL,s.state='closing',s.cleared_at,COALESCE((SELECT id FROM turns WHERE session=s.id AND ended_at IS NULL),'') FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL", id).Scan(&session.ID, &session.Room, &session.Name, &session.Repo, &session.Profile, &session.Box, &session.CloseReason, &session.Compose, &session.Root, &session.Closing, &session.ClearedAt, &session.Turn)
 	return session, err
+}
+
+// ClearSession marks an open, idle session to start a fresh harness conversation on its next turn
+// and records the session.cleared event in the same transaction.
+func (s *Store) ClearSession(ctx context.Context, session contract.SessionID, event contract.Event) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		var state string
+		err := tx.QueryRowContext(ctx, "SELECT state FROM sessions WHERE id=? AND closed_at IS NULL", session).Scan(&state)
+		if err != nil {
+			return err
+		}
+		if state != "open" {
+			return ErrSessionClosing
+		}
+		var running bool
+		if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM turns WHERE session=? AND ended_at IS NULL)", session).Scan(&running); err != nil {
+			return err
+		}
+		if running {
+			return ErrTurnRunning
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE sessions SET cleared_at=? WHERE id=?", event.Time.UnixMilli(), session); err != nil {
+			return err
+		}
+		_, err = s.AppendEvent(tx, event)
+		return err
+	})
+}
+
+// TurnCleared reports whether turn was dispatched with a pending clear.
+func (s *Store) TurnCleared(ctx context.Context, turn contract.TurnID) (bool, error) {
+	var cleared int64
+	err := s.Read().QueryRowContext(ctx, "SELECT cleared_at FROM turns WHERE id=?", turn).Scan(&cleared)
+	return cleared > 0, err
+}
+
+// PendingClearedAt returns the session's pending clear timestamp if cleared after its latest turn.
+func (s *Store) PendingClearedAt(ctx context.Context, session contract.SessionID) (*time.Time, error) {
+	var cleared int64
+	err := s.Read().QueryRowContext(ctx, "SELECT cleared_at FROM sessions WHERE id=?", session).Scan(&cleared)
+	if err != nil {
+		return nil, err
+	}
+	if cleared == 0 {
+		return nil, nil
+	}
+	t := time.UnixMilli(cleared).UTC()
+	return &t, nil
 }
 
 func (s *Store) RoomByName(ctx context.Context, name contract.RoomName) (contract.RoomID, error) {
@@ -1119,7 +1189,11 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 					return nil
 				}
 			}
-			if _, err := tx.ExecContext(ctx, "UPDATE sessions SET model_retry_at=CASE WHEN model_retry_at!=0 THEN -1 ELSE 0 END WHERE id=?", session); err != nil {
+			var clearedAt int64
+			if err := tx.QueryRowContext(ctx, "SELECT cleared_at FROM sessions WHERE id=?", session).Scan(&clearedAt); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "UPDATE sessions SET model_retry_at=CASE WHEN model_retry_at!=0 THEN -1 ELSE 0 END, cleared_at=0 WHERE id=?", session); err != nil {
 				return err
 			}
 			var ids []contract.EventID
@@ -1131,7 +1205,7 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 			if err != nil {
 				return err
 			}
-			_, err = tx.ExecContext(ctx, "INSERT INTO turns(id,session,started_at,started_seq,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) VALUES(?,?,?,?,?,?,?,?,?,?)", active, session, started.Time.UnixMilli(), seq, "", "", 0, 0, 0, 0)
+			_, err = tx.ExecContext(ctx, "INSERT INTO turns(id,session,started_at,started_seq,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cleared_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", active, session, started.Time.UnixMilli(), seq, "", "", 0, 0, 0, 0, clearedAt)
 			if err != nil {
 				return err
 			}

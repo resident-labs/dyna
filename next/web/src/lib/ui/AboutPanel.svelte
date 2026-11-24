@@ -12,7 +12,7 @@
   import { fromNow, fullTime } from "../feed.ts";
   import { goalTree, openLeaves } from "../goals.ts";
   import { call } from "../client.ts";
-  import { confirmClose } from "../session-confirms.ts";
+  import { confirmClear, confirmClose } from "../session-confirms.ts";
   import { serviceSummary } from "../services.ts";
   import { descendants, holdRows } from "../session-tree.ts";
   import { subscriptionSummary } from "../subscriptions.ts";
@@ -111,6 +111,10 @@
     const under = descendants([...store.sessions.values()], closing);
     if (await confirmClose(closing, open?.name ?? "this session", under, id => store.names.get(id), event.currentTarget)) done();
   }
+  async function askClear(event: MouseEvent & { currentTarget: HTMLButtonElement }): Promise<void> {
+    await confirmClear(session, open?.name ?? "this session", event.currentTarget);
+  }
+  let canClear = $derived(switchable && open !== undefined && !store.crew(session) && !store.running(session) && !store.starting(session));
 </script>
 
 <div class="about">
@@ -156,10 +160,10 @@
   {/if}
   </div>
   <div class="end">
-  {#if open?.startedAt || open?.parent}
+  {#if open?.startedAt || open?.parent || canClear}
     <div class="endnote">
       {#if open?.startedAt}<p class="times"><time datetime={open.startedAt} title={fullTime(open.startedAt)}>Started {ago(open.startedAt)}</time>{#if open.lastTurnAt}<time datetime={open.lastTurnAt} title={fullTime(open.lastTurnAt)}>Last turn {ago(open.lastTurnAt)}</time>{/if}</p>{/if}
-      {#if open?.parent}<button type="button" class="close-link" aria-haspopup="dialog" onclick={event => void askClose(event)}>Close session</button>{/if}
+      {#if canClear || open?.parent}<span class="end-actions">{#if canClear}<button type="button" class="action-link" aria-haspopup="dialog" onclick={event => void askClear(event)}>Clear conversation…</button>{/if}{#if open?.parent}<button type="button" class="close-link" aria-haspopup="dialog" onclick={event => void askClose(event)}>Close session</button>{/if}</span>{/if}
     </div>
   {/if}
   </div>
@@ -226,8 +230,10 @@
   .mark { display: grid; place-items: center; height: 20px; color: var(--muted); text-decoration: none; }
   .ring::before { content: ""; width: 9px; height: 9px; border: 1.5px solid var(--muted); border-radius: 50%; }
   a, button { padding: 0; border: 0; border-radius: 4px; background: none; color: var(--focus); font: inherit; text-decoration: none; cursor: pointer; }
-  .endnote { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
-  .close-link { flex: none; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+  .endnote { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 6px 12px; }
+  .end-actions { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+  .action-link, .close-link { flex: none; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+  .action-link:hover { color: var(--text); text-decoration: underline; }
   .close-link:hover { color: var(--danger); text-decoration: none; }
   a:hover, .close-link:hover { text-decoration: underline; }
   a:focus-visible, button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

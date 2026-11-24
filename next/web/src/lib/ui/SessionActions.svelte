@@ -1,6 +1,6 @@
 <script lang="ts">
   import { call } from "../client.ts";
-  import { confirmClose, confirmRestart } from "../session-confirms.ts";
+  import { confirmClear, confirmClose, confirmRestart } from "../session-confirms.ts";
   import { descendants, sessionActions, type SessionAction } from "../session-tree.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import MenuList from "./MenuList.svelte";
@@ -13,7 +13,7 @@
     onclose: (refocus: boolean) => void; onclosed: (sessions: string[]) => void;
   } = $props();
   type Entry = { key: string; label: string };
-  const labels: Record<SessionAction, string> = { move: "Move under…", stop: "Stop", restart: "Restart box…", close: "Close session…" };
+  const labels: Record<SessionAction, string> = { move: "Move under…", stop: "Stop", clear: "Clear conversation…", restart: "Restart box…", close: "Close session…" };
   let step: "actions" | "move" = $state("actions");
   let busy = $state(false), failure = $state("");
   let root: HTMLDivElement;
@@ -26,13 +26,15 @@
   // A session may move under any session in its room except itself and its descendants. The engine checks the same rule.
   let view: { label: string; items: Entry[]; note?: string } = $derived.by(() => {
     if (step === "move") return { label: `Move ${name} under`, items: sessions.filter(item => item.session !== session && !under.includes(item.session)).map(item => ({ key: item.session, label: item.name })), note: failure };
-    const actions = sessionActions(open?.parent, (store.running(session) || store.starting(session)) && !store.stopping.has(session), store.boxes.get(session));
+    const busy = store.running(session) || store.starting(session);
+    const actions = sessionActions(open?.parent, busy && !store.stopping.has(session), store.boxes.get(session), busy);
     return { label: `Actions for ${name}`, items: actions.map(key => ({ key, label: labels[key] })) };
   });
   // The menu closes first, and its props go with it, so these read what they need now.
-  async function ask(action: "close" | "restart") {
+  async function ask(action: "clear" | "close" | "restart") {
     const id = session, label = name, below = [...under], names = (other: string) => store.names.get(other), done = onclosed, row = trigger;
     onclose(false);
+    if (action === "clear") { await confirmClear(id, label, row); return; }
     if (action === "restart") { await confirmRestart(id, label, row); return; }
     if (await confirmClose(id, label, below, names, row)) done([id, ...below]);
   }
@@ -46,7 +48,7 @@
     if (busy) return;
     if (step === "actions") {
       if (key === "stop") { store.stop(session); onclose(true); }
-      else if (key === "close" || key === "restart") void ask(key);
+      else if (key === "clear" || key === "close" || key === "restart") void ask(key);
       else step = "move";
     } else if (key === open?.parent) onclose(true);
     else void move(key);

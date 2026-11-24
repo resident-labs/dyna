@@ -303,6 +303,7 @@ var methodTable = []MethodEntry{
 	method(contract.MethodSessionAccount, contract.ScopeRead, OwnerAccess),
 	method(contract.MethodSessionSetAccount, contract.ScopeOperate, OwnerAccess),
 	method(contract.MethodSessionSetBranch, contract.ScopeOperate, OwnerAccess),
+	method(contract.MethodSessionClear, contract.ScopeOperate, OwnerAccess),
 	method(contract.MethodSessionStart, contract.ScopeOperate, UserAccess,
 		act("session", "start", typ[contract.SessionStartRequest](), "Start a child session. Give name and profile. Keep goal and doneWhen to 300 characters each; put detail in brief or a file. Omit parent to use the caller; room, repo, goal, doneWhen, brief, size, sameHost, host, gpu and compose are optional. host pins a new box to that named host; sameHost resolves the parent’s host instead (choose only one), and either waits for capacity without relocation or other-host retry; host must exist, have agents enabled, not be exec-only and satisfy the room host rule. Omit compose to use the file named default, if there is one. An unpinned never-ready allocation with no image or turn that fails with create_failed automatically tries one other eligible host; the budget survives engine restarts. Existing work is not relocated.", "session start"),
 	),

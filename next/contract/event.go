@@ -198,6 +198,11 @@ type SessionMoved struct {
 	NewParent SessionID `json:"newParent"`
 }
 
+// SessionCleared records that the owner cleared the session's conversation so its next turn starts fresh.
+type SessionCleared struct {
+	Session SessionID `json:"session"`
+}
+
 type SessionCloseReason string
 
 const (
@@ -521,6 +526,9 @@ func (SessionRestarted) isEventBody()         {}
 
 func (SessionMoved) EventType() EventType { return "session.moved" }
 func (SessionMoved) isEventBody()         {}
+
+func (SessionCleared) EventType() EventType { return "session.cleared" }
+func (SessionCleared) isEventBody()         {}
 
 func (SessionClosed) EventType() EventType    { return "session.closed" }
 func (SessionClosed) isEventBody()            {}

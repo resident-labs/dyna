@@ -251,6 +251,7 @@ func Run(ctx context.Context) error {
 			CompactTokens:     hello.CompactTokens,
 			Instructions:      hello.Instructions,
 			ModelInstructions: hello.ModelInstructions,
+			New:               hello.Fresh,
 			Extensions:        []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: workdir, Shell: jobs, Dyna: dynaTools, Interrupts: interrupts})},
 			Notice:            func(text string) { go notice(text) },
 		})
@@ -265,14 +266,13 @@ func Run(ctx context.Context) error {
 	// In-box agents run beside the session's own turn, in this process. A crew's box runs none yet.
 	var agents *Agents
 	if crew == nil {
-		parentFile := files()[0]
 		sessionFiles := files
 		agents = NewAgents(ctx, AgentsConfig{
 			Engine:     client,
 			Transcript: transcript,
 			Sessions:   sessions,
 			Orient: func(ctx context.Context) string {
-				return "Your parent's conversation is the file " + parentFile + ": it holds everything its agent has done and been asked, and you can read it.\n\nThe state of its working repository " + workdir + ":\n" + gitBlock(ctx, workdir)
+				return "Your parent's conversation is the file " + sessionFiles()[0] + ": it holds everything its agent has done and been asked, and you can read it.\n\nThe state of its working repository " + workdir + ":\n" + gitBlock(ctx, workdir)
 			},
 			Open: func(ctx context.Context, turn contract.AgentTurn, dir string, toolCall func()) (agentSession, error) {
 				return openAgent(ctx, piDir, workdir, hello.WorkerInstructions, Models(hello.TextOnlyModels...), func(text string) { go notice(text) }, turn, dir, toolCall)

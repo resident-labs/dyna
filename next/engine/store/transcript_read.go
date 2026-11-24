@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -33,6 +35,34 @@ func (s *Store) TranscriptTurnsIntersecting(ctx context.Context, session contrac
 		err = rows.Scan(&turn)
 		return
 	}, `SELECT turn FROM transcript_turns WHERE session=? AND path=? AND start<? AND (start>=? OR start=(SELECT max(start) FROM transcript_turns WHERE session=? AND path=? AND start<=?)) ORDER BY start`, session, path, end, start, session, path, start)
+}
+
+// TranscriptTurnCleared returns the cleared_at timestamp for each turn in ids that started after a clear.
+func (s *Store) TranscriptTurnCleared(ctx context.Context, session contract.SessionID, turns []contract.TurnID) (map[contract.TurnID]time.Time, error) {
+	result := make(map[contract.TurnID]time.Time)
+	if len(turns) == 0 {
+		return result, nil
+	}
+	args := make([]any, 0, len(turns)+1)
+	args = append(args, session)
+	for _, id := range turns {
+		args = append(args, id)
+	}
+	placeholders := strings.Repeat("?,", len(turns)-1) + "?"
+	rows, err := s.Read().QueryContext(ctx, `SELECT id,cleared_at FROM turns WHERE session=? AND cleared_at>0 AND id IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id contract.TurnID
+		var cleared int64
+		if err := rows.Scan(&id, &cleared); err != nil {
+			return nil, err
+		}
+		result[id] = time.UnixMilli(cleared).UTC()
+	}
+	return result, rows.Err()
 }
 
 // TranscriptTurnMetadata returns a bounded newest-first page without loading sent posts.
