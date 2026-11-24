@@ -85,6 +85,13 @@ func (s *Store) lifecycleBoxes(ctx context.Context, activeOnly bool) ([]Lifecycl
 	return boxes, rows.Err()
 }
 
+// SessionBoxHost returns the host assigned to a session's box, or empty if unplaced.
+func (s *Store) SessionBoxHost(ctx context.Context, session contract.SessionID) (contract.HostName, error) {
+	var host sql.NullString
+	err := s.Read().QueryRowContext(ctx, "SELECT host FROM boxes WHERE session=?", session).Scan(&host)
+	return contract.HostName(host.String), err
+}
+
 func (s *Store) Box(ctx context.Context, id contract.BoxID) (box.Box, error) {
 	boxes, err := s.Boxes(ctx)
 	if err != nil {

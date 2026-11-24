@@ -61,6 +61,8 @@ type WorkflowRunRequest struct {
 	Script   string        `json:"script"`
 	Args     string        `json:"args,omitempty"`
 	Resume   WorkflowRunID `json:"resume,omitempty"`
+	Host     HostName      `json:"host,omitempty"`
+	SameHost bool          `json:"sameHost,omitempty"`
 	ClientID string        `json:"clientId,omitempty"`
 }
 type WorkflowRunResponse struct {

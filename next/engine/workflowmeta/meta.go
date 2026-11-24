@@ -20,6 +20,7 @@ type Meta struct {
 	Size        contract.BoxSizeName   `json:"size"`
 	Repo        contract.RepoName      `json:"repo"`
 	GPU         contract.GPUGiB        `json:"gpu"`
+	Host        contract.HostName      `json:"host"`
 }
 
 var (
