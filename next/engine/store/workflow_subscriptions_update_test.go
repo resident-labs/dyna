@@ -93,7 +93,7 @@ func TestUpdateWorkflowSubscriptionOnAndEveryKeepsStateAndQueue(t *testing.T) {
 		t.Fatalf("after adding every: on=%v every=%q due=%v want=%v", got.On, got.Every, got.DueAt, t2.Add(5*time.Minute))
 	}
 
-	// Unchanged every (e.g. changing only key later) keeps existing due_at.
+	// Unchanged every (e.g. changing only key, or equivalent duration "300s") keeps existing due_at.
 	t3 := t2.Add(2 * time.Minute)
 	sub.Key = "other"
 	if err := s.UpdateWorkflowSubscription(ctx, sub, t3); err != nil {
@@ -106,9 +106,7 @@ func TestUpdateWorkflowSubscriptionOnAndEveryKeepsStateAndQueue(t *testing.T) {
 	if !got.DueAt.Equal(t2.Add(5 * time.Minute)) {
 		t.Fatalf("unchanged every moved due_at to %v, want %v", got.DueAt, t2.Add(5*time.Minute))
 	}
-
-	// Change every to 15m: due_at becomes t3 + 15m.
-	sub.Every = "15m"
+	sub.Every = "300s"
 	if err := s.UpdateWorkflowSubscription(ctx, sub, t3); err != nil {
 		t.Fatal(err)
 	}
@@ -116,8 +114,31 @@ func TestUpdateWorkflowSubscriptionOnAndEveryKeepsStateAndQueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Every != "15m" || !got.DueAt.Equal(t3.Add(15*time.Minute)) {
-		t.Fatalf("after changing every: every=%q due=%v want=%v", got.Every, got.DueAt, t3.Add(15*time.Minute))
+	if !got.DueAt.Equal(t2.Add(5 * time.Minute)) {
+		t.Fatalf("equivalent duration moved due_at to %v, want %v", got.DueAt, t2.Add(5*time.Minute))
+	}
+
+	// Change every to 15m: due_at becomes t3 + 15m, and a stale QueueScheduledWorkflow no-ops.
+	stale := got
+	sub.Every = "15m"
+	if err := s.UpdateWorkflowSubscription(ctx, sub, t3); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.QueueScheduledWorkflow(ctx, stale, contract.Event{
+		ID:   "ev_stale",
+		Room: "r",
+		Time: t3,
+		From: contract.Principal{Kind: contract.PrincipalEngine},
+		Body: contract.HookDue{Subscription: sub.ID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.SubscriptionByID(ctx, sub.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Every != "15m" || !got.DueAt.Equal(t3.Add(15*time.Minute)) || got.Waiting != 1 {
+		t.Fatalf("after changing every: every=%q due=%v want=%v waiting=%d", got.Every, got.DueAt, t3.Add(15*time.Minute), got.Waiting)
 	}
 
 	// Remove every (switch back to on): due_at clears to zero and nothing is due.
