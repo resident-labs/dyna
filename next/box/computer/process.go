@@ -314,6 +314,9 @@ func (p *Process) startDisplay(ctx context.Context) error {
 		case <-wait.Done():
 			p.display = nil
 			display.kill()
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			return errors.New("the desktop did not start in 10 seconds")
 		case <-time.After(20 * time.Millisecond):
 		}
@@ -532,10 +535,17 @@ func (p *Process) Handler(ctx context.Context) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
+		reqCtx, cancel := context.WithCancel(r.Context())
+		stop := context.AfterFunc(ctx, cancel)
+		defer func() {
+			stop()
+			cancel()
+		}()
 		var started Started
 		var err error
 		switch r.URL.Path {
 		case "/computer/stop":
+			_, _ = io.Copy(io.Discard, io.LimitReader(r.Body, 64<<10))
 			err = p.Stop()
 		case "/computer", "/computer/launch", "/computer/check":
 			var req StartRequest
@@ -545,13 +555,15 @@ func (p *Process) Handler(ctx context.Context) http.Handler {
 					return
 				}
 			}
+			// Drain any remaining request body so net/http's background reader can observe client disconnect and cancel r.Context().
+			_, _ = io.Copy(io.Discard, io.LimitReader(r.Body, 64<<10))
 			started.URL = URL
-			started.Exit, err = p.Start(ctx)
+			started.Exit, err = p.Start(reqCtx)
 			if err == nil && r.URL.Path == "/computer/check" {
-				started.Log = p.Check(r.Context())
+				started.Log = p.Check(reqCtx)
 			}
 			if err == nil && req.Launch != "" {
-				started.Log, err = p.Launch(ctx, req.Launch)
+				started.Log, err = p.Launch(reqCtx, req.Launch)
 			}
 		default:
 			http.NotFound(w, r)

@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -305,18 +307,46 @@ func modifier(keysym uint32) bool {
 	return keysym >= 0xffe1 && keysym <= 0xffee && keysym != 0xffe5 && keysym != 0xffe6
 }
 
-// xdotoolCommand is xdotool on the desktop, for the pointer and window lookups; keys go to Xvnc. It reads window names
-// as UTF-8, which the box's C locale would refuse.
-func xdotoolCommand(ctx context.Context, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "xdotool", args...)
-	cmd.Env = append(os.Environ(), "DISPLAY="+display, "LC_ALL=C.UTF-8")
+var (
+	commandTimeout   = 15 * time.Second
+	commandWaitDelay = time.Second
+)
+
+// desktopCommand runs a short desktop helper in its own process group so cancellation kills
+// grandchildren too, and WaitDelay keeps an inherited stdout/stderr pipe from hanging Output.
+func desktopCommand(ctx context.Context, env []string, name string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = env
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = commandWaitDelay
 	return cmd
 }
 
-// xdotool runs one chain of xdotool commands on the desktop.
+// xdotoolCommand is xdotool on the desktop, for the pointer and window lookups; keys go to Xvnc. It reads window names
+// as UTF-8, which the box's C locale would refuse.
+func xdotoolCommand(ctx context.Context, args ...string) *exec.Cmd {
+	return desktopCommand(ctx, append(os.Environ(), "DISPLAY="+display, "LC_ALL=C.UTF-8"), "xdotool", args...)
+}
+
+// xdotool runs one chain of xdotool commands on the desktop with the default per-command timeout.
 func xdotool(ctx context.Context, args ...string) error {
-	cmd := xdotoolCommand(ctx, args...)
+	return xdotoolWithTimeout(ctx, commandTimeout, args...)
+}
+
+func xdotoolWithTimeout(ctx context.Context, timeout time.Duration, args ...string) error {
+	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	cmd := xdotoolCommand(cmdCtx, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
+		if cmdCtx.Err() != nil {
+			return fmt.Errorf("xdotool: %w", cmdCtx.Err())
+		}
 		return fmt.Errorf("xdotool: %v: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
@@ -328,8 +358,12 @@ func seconds(ms int) string { return strconv.FormatFloat(float64(ms)/1000, 'f', 
 // the pointer goes through xdotool, two connections, so the keys are Xvnc's before the chain starts, and the chain's
 // events get a moment to land before they go up. A failed chain still lets them go.
 func holding(ctx context.Context, held []uint32, chain []string) error {
+	return holdingWithTimeout(ctx, held, commandTimeout, chain)
+}
+
+func holdingWithTimeout(ctx context.Context, held []uint32, timeout time.Duration, chain []string) error {
 	if len(held) == 0 {
-		return xdotool(ctx, chain...)
+		return xdotoolWithTimeout(ctx, timeout, chain...)
 	}
 	k, err := DialKeyboard(ctx, desktopSocket)
 	if err != nil {
@@ -342,8 +376,15 @@ func holding(ctx context.Context, held []uint32, chain []string) error {
 	if err := k.Sync(ctx); err != nil {
 		return err
 	}
-	err = xdotool(ctx, chain...)
-	time.Sleep(50 * time.Millisecond)
+	err = xdotoolWithTimeout(ctx, timeout, chain...)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	select {
+	case <-time.After(50 * time.Millisecond):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	if up := k.Up(reversed(held)...); err == nil {
 		err = up
 	}
@@ -362,12 +403,18 @@ func reversed(keysyms []uint32) []uint32 {
 // desktopSocket is the display's VNC socket, which the actions read the screen and send keys through.
 var desktopSocket = VNCSocket
 
+var (
+	agentDialTimeout = 5 * time.Second
+	agentCallTimeout = 30 * time.Second
+	agentStopTimeout = 15 * time.Second
+)
+
 // Agent reaches the box agent's computer endpoint, which owns the desktop.
 type Agent struct{ client *http.Client }
 
 func NewAgent(socket string) Agent {
 	return Agent{client: &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+		return (&net.Dialer{Timeout: agentDialTimeout}).DialContext(ctx, "unix", socket)
 	}}}}
 }
 
@@ -379,6 +426,12 @@ type Started struct {
 }
 
 func (a Agent) post(ctx context.Context, path string, body any) (Started, error) {
+	timeout := agentCallTimeout
+	if path == "/computer/stop" {
+		timeout = agentStopTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	data, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://dyna"+path, bytes.NewReader(data))
 	if err != nil {
@@ -403,8 +456,12 @@ func (a Agent) Start(ctx context.Context) (Started, error) {
 	return a.post(ctx, "/computer", StartRequest{})
 }
 
-// actionSlot serializes desktop actions; stop bypasses it to recover a stalled desktop.
+// actionSlot serializes desktop actions; stop bypasses it and cancels any in-flight action.
 var actionSlot = make(chan struct{}, 1)
+var (
+	activeActionMu     sync.Mutex
+	activeActionCancel context.CancelFunc
+)
 
 // pageActionTimeout bounds a complete DevTools action. A variable lets tests avoid a 30 second wait.
 var pageActionTimeout = 30 * time.Second
@@ -418,6 +475,12 @@ func Do(ctx context.Context, agent Agent, action Action, r Request) (Result, err
 		return Result{}, err
 	}
 	if action == Stop {
+		activeActionMu.Lock()
+		cancel := activeActionCancel
+		activeActionMu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
 		if _, err := agent.post(ctx, "/computer/stop", nil); err != nil {
 			return Result{}, err
 		}
@@ -432,11 +495,21 @@ func Do(ctx context.Context, agent Agent, action Action, r Request) (Result, err
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
-	started, err := agent.Start(ctx)
+	actionCtx, actionCancel := context.WithCancel(ctx)
+	activeActionMu.Lock()
+	activeActionCancel = actionCancel
+	activeActionMu.Unlock()
+	defer func() {
+		activeActionMu.Lock()
+		activeActionCancel = nil
+		activeActionMu.Unlock()
+		actionCancel()
+	}()
+	started, err := agent.Start(actionCtx)
 	if err != nil {
 		return Result{}, err
 	}
-	result, err := run(ctx, agent, started.URL, action, r)
+	result, err := run(actionCtx, agent, started.URL, action, r)
 	if started.Exit != "" {
 		result.Text = strings.TrimSpace(started.Exit + ". " + result.Text)
 	}
@@ -535,17 +608,26 @@ func run(ctx context.Context, agent Agent, base string, action Action, r Request
 	changes, watchErr := WatchChanges(ctx, desktopSocket)
 	if watchErr == nil {
 		defer changes.Close()
+	} else if ctx.Err() != nil {
+		return Result{}, ctx.Err()
 	}
 	text, err := input(ctx, base, action, r)
 	if err != nil || action == Move {
 		return Result{Text: text}, err
 	}
 	if watchErr != nil {
-		time.Sleep(200 * time.Millisecond) // v1's fixed pause when damage was unavailable
-		return Result{Text: text}, nil
+		select {
+		case <-time.After(200 * time.Millisecond): // v1's fixed pause when damage was unavailable
+			return Result{Text: text}, nil
+		case <-ctx.Done():
+			return Result{}, ctx.Err()
+		}
 	}
 	settled, err := changes.Settle(ctx, time.Second, 200*time.Millisecond, 3*time.Second)
 	if err != nil {
+		if ctx.Err() != nil {
+			return Result{}, ctx.Err()
+		}
 		return Result{Text: text}, nil
 	}
 	return Result{Text: strings.TrimSpace(text + " " + settled.Describe())}, nil
@@ -599,9 +681,10 @@ func input(ctx context.Context, base string, action Action, r Request) (string, 
 		for _, p := range r.Path[1:] {
 			chain = append(chain, "mousemove", strconv.Itoa(p.X), strconv.Itoa(p.Y), "sleep", seconds(step))
 		}
-		err := holding(ctx, keys, append(chain, "mouseup", "1"))
+		dragTimeout := commandTimeout + time.Duration(len(r.Path)*step)*time.Millisecond
+		err := holdingWithTimeout(ctx, keys, dragTimeout, append(chain, "mouseup", "1"))
 		if err != nil {
-			_ = xdotool(context.WithoutCancel(ctx), "mouseup", "1")
+			_ = xdotoolWithTimeout(context.WithoutCancel(ctx), 2*time.Second, "mouseup", "1")
 			return "", err
 		}
 		end := r.Path[len(r.Path)-1]
@@ -682,11 +765,15 @@ func press(ctx context.Context, chord []uint32, hold time.Duration) error {
 // windows lists the desktop's visible windows.
 func windows(ctx context.Context) (map[string]bool, error) {
 	// EWMH lists clients, including unnamed Vulkan apps, but not JWM frames.
-	cmd := exec.CommandContext(ctx, "xprop", "-root", "_NET_CLIENT_LIST")
-	cmd.Env = desktopEnv(VNCSocket)
+	cmdCtx, cancel := context.WithTimeout(ctx, commandTimeout)
+	defer cancel()
+	cmd := desktopCommand(cmdCtx, desktopEnv(VNCSocket), "xprop", "-root", "_NET_CLIENT_LIST")
 	out, err := cmd.Output()
+	if cmdCtx.Err() != nil {
+		return nil, cmdCtx.Err()
+	}
 	var exit *exec.ExitError
-	if err != nil && !(errors.As(err, &exit) && len(out) == 0) { // no window at all exits 1
+	if err != nil && !(errors.As(err, &exit) && exit.ExitCode() == 1 && len(out) == 0) { // no window at all exits 1
 		return nil, err
 	}
 	seen := map[string]bool{}
@@ -730,7 +817,9 @@ func launch(ctx context.Context, agent Agent, r Request) (Result, error) {
 			if before[id] {
 				continue
 			}
-			name, _ := xdotoolCommand(ctx, "getwindowname", id).Output()
+			nameCtx, nameCancel := context.WithTimeout(ctx, commandTimeout)
+			name, _ := xdotoolCommand(nameCtx, "getwindowname", id).Output()
+			nameCancel()
 			return Result{Text: fmt.Sprintf("Opened %q, window %s. Its output goes to %s.", strings.TrimSpace(string(name)), id, started.Log)}, nil
 		}
 	}
