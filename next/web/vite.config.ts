@@ -72,7 +72,8 @@ export default defineConfig({
     target: "es2022",
     rollupOptions: {
       input: {
-        main: resolve(__dirname, "index.html"),
+        // The deploy checks the binary for assets/index-*, so the app entry keeps the name index.
+        index: resolve(__dirname, "index.html"),
         office: resolve(__dirname, "office.html"),
       },
     },
