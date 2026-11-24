@@ -339,40 +339,38 @@ func TestProcessStartHonorsRequestCancellation(t *testing.T) {
 	t.Setenv("PATH", root+":"+os.Getenv("PATH"))
 	p := &Process{root: root, socket: filepath.Join(root, "run", "vnc.sock"), tmp: filepath.Join(root, "tmp"), profile: filepath.Join(root, "profile")}
 	t.Cleanup(p.Close)
-	handler := p.Handler(context.Background())
+
+	agentSocket := filepath.Join(root, "agent.sock")
+	listener, err := net.Listen("unix", agentSocket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: p.Handler(context.Background())}
+	go server.Serve(listener)
+	t.Cleanup(func() { _ = server.Close() })
+	agent := NewAgent(agentSocket)
 
 	reqCtx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest(http.MethodPost, "/computer", nil).WithContext(reqCtx)
-	done := make(chan int, 1)
+	done := make(chan error, 1)
 	go func() {
-		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, req)
-		done <- w.Code
+		_, err := agent.Start(reqCtx)
+		done <- err
 	}()
 	waitFor(t, func() bool { _, err := os.Stat(started); return err == nil })
 	cancel()
 	select {
-	case code := <-done:
-		if code != http.StatusInternalServerError {
-			t.Fatalf("cancelled start status = %d, want 500", code)
+	case err := <-done:
+		if err == nil {
+			t.Fatal("cancelled start unexpectedly succeeded")
 		}
 	case <-time.After(time.Second):
-		t.Fatal("Process.Handler ignored request cancellation during Start")
+		t.Fatal("agent.Start did not return after cancellation")
 	}
 
-	// opMu must be free so stop returns immediately.
-	stopDone := make(chan int, 1)
-	go func() {
-		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/computer/stop", nil))
-		stopDone <- w.Code
-	}()
-	select {
-	case code := <-stopDone:
-		if code != http.StatusOK {
-			t.Fatalf("stop status = %d, want 200", code)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("stop blocked on opMu after cancelled start")
+	// Draining r.Body lets net/http cancel r.Context() on client disconnect so opMu is freed immediately.
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+	defer stopCancel()
+	if _, err := agent.post(stopCtx, "/computer/stop", nil); err != nil {
+		t.Fatalf("stop blocked on opMu after cancelled start: %v", err)
 	}
 }

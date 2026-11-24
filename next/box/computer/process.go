@@ -545,6 +545,7 @@ func (p *Process) Handler(ctx context.Context) http.Handler {
 		var err error
 		switch r.URL.Path {
 		case "/computer/stop":
+			_, _ = io.Copy(io.Discard, io.LimitReader(r.Body, 64<<10))
 			err = p.Stop()
 		case "/computer", "/computer/launch", "/computer/check":
 			var req StartRequest
@@ -554,6 +555,8 @@ func (p *Process) Handler(ctx context.Context) http.Handler {
 					return
 				}
 			}
+			// Drain any remaining request body so net/http's background reader can observe client disconnect and cancel r.Context().
+			_, _ = io.Copy(io.Discard, io.LimitReader(r.Body, 64<<10))
 			started.URL = URL
 			started.Exit, err = p.Start(reqCtx)
 			if err == nil && r.URL.Path == "/computer/check" {

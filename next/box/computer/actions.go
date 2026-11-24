@@ -769,11 +769,11 @@ func windows(ctx context.Context) (map[string]bool, error) {
 	defer cancel()
 	cmd := desktopCommand(cmdCtx, desktopEnv(VNCSocket), "xprop", "-root", "_NET_CLIENT_LIST")
 	out, err := cmd.Output()
+	if cmdCtx.Err() != nil {
+		return nil, cmdCtx.Err()
+	}
 	var exit *exec.ExitError
-	if err != nil && !(errors.As(err, &exit) && len(out) == 0) { // no window at all exits 1
-		if cmdCtx.Err() != nil {
-			return nil, cmdCtx.Err()
-		}
+	if err != nil && !(errors.As(err, &exit) && exit.ExitCode() == 1 && len(out) == 0) { // no window at all exits 1
 		return nil, err
 	}
 	seen := map[string]bool{}

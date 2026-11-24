@@ -761,7 +761,6 @@ func TestXdotoolGrandchildPipeDoesNotHangOnCancelOrTimeout(t *testing.T) {
 
 	prevDelay, prevTimeout := commandWaitDelay, commandTimeout
 	commandWaitDelay = 80 * time.Millisecond
-	commandTimeout = 150 * time.Millisecond
 	t.Cleanup(func() {
 		commandWaitDelay = prevDelay
 		commandTimeout = prevTimeout
@@ -786,12 +785,63 @@ func TestXdotoolGrandchildPipeDoesNotHangOnCancelOrTimeout(t *testing.T) {
 	}
 
 	_ = os.Remove(started)
+	commandTimeout = 150 * time.Millisecond
 	start := time.Now()
 	if err := xdotool(context.Background(), "click", "1"); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("xdotool timeout error = %v, want context.DeadlineExceeded", err)
 	}
 	if time.Since(start) > time.Second {
 		t.Fatalf("xdotool timeout took %v", time.Since(start))
+	}
+}
+
+// A killed xprop (SIGKILL on cancel/timeout) produces an *exec.ExitError with empty stdout
+// and must return ctx's error instead of being mistaken for an empty desktop window list.
+func TestWindowsHonorsCancelAndTimeout(t *testing.T) {
+	dir := t.TempDir()
+	started := filepath.Join(dir, "xprop.started")
+	mode := filepath.Join(dir, "xprop.mode")
+	script := "#!/bin/sh\nif [ \"$(cat " + mode + " 2>/dev/null)\" = empty ]; then exit 1; fi\ntouch " + started + "\nexec sleep 5\n"
+	if err := os.WriteFile(filepath.Join(dir, "xprop"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	// Exit 1 with empty stdout still means no windows on the desktop.
+	if err := os.WriteFile(mode, []byte("empty"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := windows(context.Background()); err != nil || len(got) != 0 {
+		t.Fatalf("empty desktop: got=%v err=%v", got, err)
+	}
+	_ = os.Remove(mode)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := windows(ctx)
+		done <- err
+	}()
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("windows cancel error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("windows ignored cancellation")
+	}
+
+	prevTimeout := commandTimeout
+	commandTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { commandTimeout = prevTimeout })
+	if _, err := windows(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("windows timeout error = %v, want context.DeadlineExceeded", err)
 	}
 }
 
