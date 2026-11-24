@@ -22,7 +22,7 @@ const officeDevHeaders: Plugin = {
     server.middlewares.use((req, res, next) => {
       const pathname = (req.url ?? "/").split("?", 1)[0];
       if (pathname === "/office.html") {
-        res.setHeader("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; script-src 'self'; img-src blob: data:; style-src 'unsafe-inline'; frame-ancestors 'self'");
+        res.setHeader("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; img-src blob: data:; frame-ancestors 'self'");
       } else if (pathname.startsWith("/src/") || pathname.startsWith("/node_modules/") || pathname.startsWith("/@")) {
         res.setHeader("Access-Control-Allow-Origin", "*");
       }

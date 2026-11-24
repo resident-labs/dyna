@@ -1,23 +1,45 @@
+import "@fontsource/ibm-plex-sans/latin-400.css";
+import "@fontsource/ibm-plex-sans/latin-500.css";
+import "@fontsource/ibm-plex-sans/latin-600.css";
+import "@fontsource/ibm-plex-sans/latin-700.css";
 import { parseOfficeParentMessage, type OfficeTheme } from "../lib/office.ts";
 
 const root = document.getElementById("root")!;
 const style = document.createElement("style");
 style.textContent = `
+  /* Map common Office fonts onto installed metric-compatible faces or bundled IBM Plex Sans / Liberation Serif so
+     documents never fall back to a monospace default on Linux systems without Microsoft core fonts. */
+  @font-face { font-family: 'Calibri'; font-weight: 400; src: local('Calibri'), local('Carlito'), local('Liberation Sans'), local('IBM Plex Sans'); }
+  @font-face { font-family: 'Calibri'; font-weight: 700; src: local('Calibri Bold'), local('Carlito Bold'), local('Liberation Sans Bold'), local('IBM Plex Sans Bold'); }
+  @font-face { font-family: 'Calibri Light'; font-weight: 300 400; src: local('Calibri Light'), local('Carlito'), local('Liberation Sans'), local('IBM Plex Sans'); }
+  @font-face { font-family: 'Aptos'; font-weight: 400; src: local('Aptos'), local('Carlito'), local('Liberation Sans'), local('IBM Plex Sans'); }
+  @font-face { font-family: 'Aptos'; font-weight: 700; src: local('Aptos Bold'), local('Carlito Bold'), local('Liberation Sans Bold'), local('IBM Plex Sans Bold'); }
+  @font-face { font-family: 'Aptos Display'; font-weight: 400 700; src: local('Aptos Display'), local('Carlito'), local('Liberation Sans'), local('IBM Plex Sans'); }
+  @font-face { font-family: 'Segoe UI'; font-weight: 400; src: local('Segoe UI'), local('Carlito'), local('Liberation Sans'), local('IBM Plex Sans'); }
+  @font-face { font-family: 'Segoe UI'; font-weight: 700; src: local('Segoe UI Bold'), local('Carlito Bold'), local('Liberation Sans Bold'), local('IBM Plex Sans Bold'); }
+  @font-face { font-family: 'Arial'; font-weight: 400; src: local('Arial'), local('Liberation Sans'), local('IBM Plex Sans'); }
+  @font-face { font-family: 'Arial'; font-weight: 700; src: local('Arial Bold'), local('Liberation Sans Bold'), local('IBM Plex Sans Bold'); }
+  @font-face { font-family: 'Cambria'; font-weight: 400; src: local('Cambria'), local('Caladea'), local('Liberation Serif'); }
+  @font-face { font-family: 'Cambria'; font-weight: 700; src: local('Cambria Bold'), local('Caladea Bold'), local('Liberation Serif Bold'); }
+  @font-face { font-family: 'Times New Roman'; font-weight: 400; src: local('Times New Roman'), local('Liberation Serif'), local('Caladea'); }
+  @font-face { font-family: 'Times New Roman'; font-weight: 700; src: local('Times New Roman Bold'), local('Liberation Serif Bold'), local('Caladea Bold'); }
+  @font-face { font-family: 'Georgia'; font-weight: 400; src: local('Georgia'), local('Liberation Serif'), local('Caladea'); }
+
   :root {
     --bg: #131416; --sidebar: #0c0d0e; --raised: #1b1c1f;
     --line: rgb(255 255 255 / 8%); --firm: rgb(255 255 255 / 14%);
     --selected: rgb(255 255 255 / 9%); --hover: rgb(255 255 255 / 4%);
     --focus: #93a6f5; --text: #e8e9eb; --muted: #9c9fa6;
     --shadow: rgb(0 0 0 / 36%);
-    --sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --sans: 'IBM Plex Sans', 'Adwaita Sans', 'Liberation Sans', system-ui, sans-serif;
     --mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
     font: 14px/1.45 var(--sans);
     -webkit-font-smoothing: antialiased;
   }
   * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: transparent transparent; }
   :hover { scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent; }
-  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: var(--sidebar); color: var(--text); }
-  #root { width: 100%; height: 100%; display: flex; flex-direction: column; min-height: 0; }
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: var(--sidebar); color: var(--text); font-family: var(--sans); }
+  #root { width: 100%; height: 100%; display: flex; flex-direction: column; min-height: 0; font-family: var(--sans); }
   button { font: inherit; color: inherit; cursor: pointer; }
   button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 
@@ -65,6 +87,7 @@ style.textContent = `
   .doc-host .docx-wrapper > section.docx {
     background: #ffffff;
     color: #1a1c20;
+    font-family: var(--sans);
     box-shadow: 0 4px 20px var(--shadow) !important;
     border-radius: 2px;
     margin-bottom: 0 !important;
