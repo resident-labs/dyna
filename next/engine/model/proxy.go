@@ -80,10 +80,16 @@ func NewProxy(dir, authDir, managementKey string) (*Proxy, error) {
 		return nil, err
 	}
 	cfg.AuthDir = authDir
+	// Keep our catalog additions: upstream refresh replaces these catalogs wholesale
+	// and can remove models released after its last update.
+	cfg.Models.Catalog = "embed"
+	cfg.Models.CodexCatalog = "embed"
 	// A transient upstream failure is not evidence that the account is unusable.
-	// Keep auth and quota cooling, but let PiG retry on the same sole credential.
+	// Keep auth and quota cooling, but leave a sole credential usable after a 5xx.
 	// Pinned limitation (accepted): a late 5xx can clear a concurrent 401/403 cooldown; the next 401/403 sets it again.
 	cfg.TransientErrorCooldownSeconds = -1
+	// Only z.ai keys opt into retry rounds. Other credentials keep the default of zero.
+	cfg.MaxRetryInterval = 300
 	// An owner-added provider's models keep its prefix, so its name for a model never
 	// routes a built-in model's requests to the owner's address.
 	cfg.ForceModelPrefix = true

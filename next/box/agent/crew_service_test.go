@@ -353,6 +353,97 @@ func TestServiceReloadRunsAHandlerAgainWithTheNewVersion(t *testing.T) {
 	_ = fmt.Sprint()
 }
 
+func TestServiceRefreshesProfilesWithoutRestarting(t *testing.T) {
+	h := serviceHarness(t)
+	h.workflow.Profiles = slices.Clone(h.workflow.Profiles)
+	h.workflow.Profiles[0].MaxConcurrent = 1
+	oldModel := h.workflow.Profiles[0].Model.ID
+	q := &h.journal.queue
+	q.add("a", `{}`)
+	first, release := make(chan struct{}), make(chan struct{})
+	h.hold = func(ctx context.Context, prompt string) error {
+		if prompt == "a" {
+			close(first)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return nil
+	}
+	models := make(chan [2]string, 3)
+	h.reply = func(prompt, model string) (contract.TurnEnded, error) {
+		models <- [2]string{prompt, model}
+		return contract.TurnEnded{Final: "ok"}, nil
+	}
+	h.workflow.Script = crewMeta + `serve(async (event, key, state) => {
+		if (key === 'a') await state.set((await state.get() ?? 0) + 1)
+		await agent(key)
+	})`
+	crew, ended := h.start(h.workflow.Script)
+	defer stopped(t, crew, ended)
+	select {
+	case <-first:
+	case <-time.After(10 * time.Second):
+		t.Fatal("first worker did not start")
+	}
+	q.add("b", `{}`)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		h.journal.mu.Lock()
+		queued := slices.Contains(h.journal.started, "agent: b")
+		h.journal.mu.Unlock()
+		if queued {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("second worker did not reach the queue")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := h.started.Load(); got != 1 {
+		t.Fatalf("started %d workers with a profile limit of 1", got)
+	}
+
+	updated := *h.workflow
+	updated.Profiles = slices.Clone(updated.Profiles)
+	updated.Profiles[0].Model.ID = "new-model"
+	updated.Profiles[0].MaxConcurrent = 2
+	crew.Reload(updated)
+	expect := func(prompt, model string) {
+		t.Helper()
+		select {
+		case got := <-models:
+			if want := [2]string{prompt, model}; got != want {
+				t.Fatalf("worker %v, want %v", got, want)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("worker %s did not finish", prompt)
+		}
+	}
+	expect("b", "new-model") // The higher cap releases a queued worker onto the new model.
+	q.add("c", `{}`)
+	expect("c", "new-model")
+	close(release)
+	expect("a", oldModel)
+	q.waitAcked(t, 3)
+	h.journal.mu.Lock()
+	defer h.journal.mu.Unlock()
+	if count := string(h.journal.state); count != "1" {
+		t.Fatalf("the in-flight handler ran %s times, want 1", count)
+	}
+}
+
+func TestRemovedDefaultProfileDoesNotFallBackToAnotherProfile(t *testing.T) {
+	h := newCrewHarness(t)
+	result := h.run(crewMeta+`await agent('explicit', {profile: 'deep'}); return await agent('default')`,
+		contract.WorkflowProfile{Name: "fast", Unavailable: true}, crewProfiles[1])
+	if result.Outcome != contract.TurnFailed || !strings.Contains(result.Error, `profile "fast" is not available`) || h.started.Load() != 1 {
+		t.Fatalf("turn %+v, %d workers started", result, h.started.Load())
+	}
+}
+
 func TestServiceSetupAfterServeStaysUnderTheBoxStart(t *testing.T) {
 	h := serviceHarness(t)
 	q := &h.journal.queue

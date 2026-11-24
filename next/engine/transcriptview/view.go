@@ -40,7 +40,26 @@ func Clip(value string, maxBytes int) string {
 	return strings.ToValidUTF8(value[:maxBytes], "")
 }
 
+func PostText(event contract.Event) string {
+	switch body := event.Body.(type) {
+	case contract.ServiceSent:
+		return body.Text
+	default:
+		return event.Body.(contract.PostCreated).Text
+	}
+}
+
 func ApplyPost(item *contract.TranscriptItem, event contract.Event) {
+	if sent, ok := event.Body.(contract.ServiceSent); ok {
+		text := harness.Mask(sent.Text)
+		item.Kind, item.Type, item.Event, item.Room, item.Seq, item.Text = contract.TranscriptPost, sent.EventType(), event.ID, event.Room, event.Seq, Clip(text, 4096)
+		from := event.From
+		item.From = &from
+		item.More = item.More || len(text) > 4096
+		item.Service = sent.Service
+		item.To = harness.Mask(sent.To)
+		return
+	}
 	post := event.Body.(contract.PostCreated)
 	text := harness.Mask(post.Text)
 	item.Kind, item.Event, item.Room, item.Seq, item.Text = contract.TranscriptPost, event.ID, event.Room, event.Seq, Clip(text, 4096)

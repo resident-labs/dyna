@@ -2,6 +2,9 @@ package engine
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -44,6 +47,89 @@ func (s serviceCase) run() (store.WorkflowRun, contract.Principal) {
 		s.t.Fatal(err)
 	}
 	return run, sessionCaller(run.Session)
+}
+
+func TestProfileChangesReachTheRunningServiceBox(t *testing.T) {
+	s := newService(t, false)
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	if err := os.WriteFile(path, []byte(`{
+		"test": {"provider":"openai","model":"test-model","allowedModels":["test-model"],"thinking":"off"},
+		"fast": {"provider":"openai","model":"fast-model","allowedModels":["fast-model"],"thinking":"off"},
+		"deep": {"provider":"openai","model":"deep-model","allowedModels":["deep-model"],"thinking":"off"}
+	}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	profiles, err := LoadProfiles(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.profiles = profiles
+	s.fire("one")
+	run, box := s.run()
+	channel, problem := testChannel(t, s.Service, s.ctx, box)
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	var initial contract.BoxWorkflow
+	await := func(match func(contract.BoxMessageBody) bool) {
+		t.Helper()
+		timer := time.NewTimer(10 * time.Second)
+		defer timer.Stop()
+		for {
+			select {
+			case msg, ok := <-channel:
+				if !ok {
+					t.Fatal("box channel closed")
+				}
+				if match(msg.Body) {
+					return
+				}
+			case <-timer.C:
+				t.Fatal("expected message did not reach the box")
+			}
+		}
+	}
+	await(func(body contract.BoxMessageBody) bool {
+		if msg, ok := body.(contract.WorkflowReload); ok {
+			initial = msg.Workflow
+		}
+		_, started := body.(contract.TurnStart)
+		return started
+	})
+	if initial.Run != run.ID || len(initial.Profiles) != 2 || initial.Profiles[1].Model.ID != "deep-model" {
+		t.Fatalf("initial workflow: %+v", initial)
+	}
+	next := contract.Profile{Name: "deep", Provider: contract.ModelProviderOpenAI, Model: "new-deep-model", AllowedModels: []string{"deep-model", "new-deep-model"}, Thinking: contract.ThinkingHigh, MaxConcurrent: 3}
+	if _, problem := s.ProfileSet(s.ctx, s.owner, contract.ProfileSetRequest{Profile: next}); problem != nil {
+		t.Fatal(problem)
+	}
+	await(func(body contract.BoxMessageBody) bool {
+		msg, ok := body.(contract.WorkflowReload)
+		if !ok {
+			return false
+		}
+		updated := msg.Workflow
+		if updated.Version != initial.Version || updated.Script != initial.Script || len(updated.Profiles) != 2 ||
+			updated.Profiles[0] != initial.Profiles[0] || updated.Profiles[1].Model.ID != next.Model || updated.Profiles[1].MaxConcurrent != next.MaxConcurrent ||
+			!slices.Contains(updated.TextOnlyModels, contract.TextOnlyModel{Provider: next.Provider, Model: next.Model, Images: true}) {
+			t.Fatalf("profile reload: %+v", updated)
+		}
+		return true
+	})
+	if _, problem := s.ProfileRemove(s.ctx, s.owner, contract.ProfileRemoveRequest{Name: "fast", Replacement: "deep"}); problem != nil {
+		t.Fatal(problem)
+	}
+	await(func(body contract.BoxMessageBody) bool {
+		msg, ok := body.(contract.WorkflowReload)
+		if !ok {
+			return false
+		}
+		if updated := msg.Workflow; updated.Version != initial.Version || len(updated.Profiles) != 2 ||
+			updated.Profiles[0] != (contract.WorkflowProfile{Name: "fast", Unavailable: true}) || updated.Profiles[1].Model.ID != next.Model {
+			t.Fatalf("replacement reload: %+v", updated)
+		}
+		return true
+	})
 }
 
 func (s serviceCase) poll(box contract.Principal, boot string, limit int) []contract.WorkflowEvent {
@@ -409,5 +495,68 @@ func TestServiceHandsARowOverAgainWhenItsReplyWasLost(t *testing.T) {
 	}
 	if more := s.poll(box, "boot1", 10); len(more) != 0 {
 		t.Fatalf("a row the box holds, handed a third time: %+v", more)
+	}
+}
+
+func TestServiceManualFirePayload(t *testing.T) {
+	for _, data := range []string{`{"brief":"review","items":[1,true,null]}`, `null`, `42`, `"text"`, `[]`} {
+		t.Run(data, func(t *testing.T) {
+			s := newService(t, false)
+			template := "{repo}#{number}"
+			if _, problem := s.SubscriptionUpdate(s.ctx, s.owner, contract.SubscriptionUpdateRequest{ID: s.sub, Key: &template}); problem != nil {
+				t.Fatal(problem)
+			}
+			if _, problem := s.SubscriptionFire(s.ctx, s.owner, contract.SubscriptionFireRequest{ID: s.sub, Data: json.RawMessage(data)}); problem != nil {
+				t.Fatal(problem)
+			}
+			_, box := s.run()
+			events := s.poll(box, "boot", 10)
+			if len(events) != 1 || events[0].Key != "#0" {
+				t.Fatalf("events: %+v", events)
+			}
+			var event contract.Event
+			if err := json.Unmarshal(events[0].Event, &event); err != nil {
+				t.Fatal(err)
+			}
+			body, ok := event.Body.(contract.HookFired)
+			if !ok || body.Subscription != s.sub || string(body.Data) != data {
+				t.Fatalf("handler body: %+v", event.Body)
+			}
+		})
+	}
+}
+
+func TestServiceManualHookDueSubscription(t *testing.T) {
+	for _, event := range []json.RawMessage{nil, json.RawMessage(`{"type":"hook.due","body":{}}`), json.RawMessage(`{"type":"hook.due","body":{"subscription":"wrong"}}`)} {
+		s := newService(t, false)
+		if _, problem := s.SubscriptionFire(s.ctx, s.owner, contract.SubscriptionFireRequest{ID: s.sub, Event: event}); problem != nil {
+			t.Fatal(problem)
+		}
+		_, box := s.run()
+		events := s.poll(box, "boot", 10)
+		if len(events) != 1 {
+			t.Fatalf("events: %+v", events)
+		}
+		var got contract.Event
+		if err := json.Unmarshal(events[0].Event, &got); err != nil {
+			t.Fatal(err)
+		}
+		if body, ok := got.Body.(contract.HookDue); !ok || body.Subscription != s.sub {
+			t.Fatalf("handler body: %+v", got.Body)
+		}
+	}
+}
+
+func TestServiceManualFireRejectsInvalidData(t *testing.T) {
+	s := newService(t, false)
+	for _, req := range []contract.SubscriptionFireRequest{
+		{Data: json.RawMessage(`null`), Event: json.RawMessage(`{"type":"hook.due","body":{}}`)},
+		{Data: json.RawMessage(`{`)},
+		{Data: json.RawMessage(`"` + strings.Repeat("a", 1<<20) + `"`)},
+	} {
+		req.ID = s.sub
+		if _, problem := s.SubscriptionFire(s.ctx, s.owner, req); problem == nil {
+			t.Fatalf("accepted invalid request")
+		}
 	}
 }

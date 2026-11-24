@@ -15,6 +15,7 @@ func TestProxyRestartPrunesOnlyUnboundSupportedCredentials(t *testing.T) {
 	for _, auth := range []ProxyAuth{
 		{ID: "bound", Provider: "claude", Record: []byte("{}")},
 		{ID: "orphan", Provider: "codex", Record: []byte("{}")},
+		{ID: "orphan-antigravity", Provider: "antigravity", Record: []byte("{}")},
 		{ID: "dyna-key-0123456789abcdef0123456789abcdef", Provider: "openai-compatible-zai", Record: []byte("{}")},
 		{ID: "unsupported", Provider: "other", Record: []byte("{}")},
 	} {

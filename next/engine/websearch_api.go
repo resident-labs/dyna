@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/contract/outside"
 	"github.com/resident-labs/dyna/engine/model"
 	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/engine/websearch"
@@ -171,7 +172,8 @@ func (s *Service) WebSearch(ctx context.Context, caller contract.Principal, req 
 				if u, err := url.Parse(r.URL); err == nil {
 					domain = u.Hostname()
 				}
-				out.Results = append(out.Results, contract.WebSearchResult{Title: contract.Outside("web", domain, r.Title), URL: r.URL, Snippet: contract.Outside("web", domain, r.Snippet), Provider: contract.WebSearchProvider(r.Provider)})
+				origin := outside.Web(domain)
+				out.Results = append(out.Results, contract.WebSearchResult{Title: outside.Wrap(origin, r.Title), URL: r.URL, Snippet: outside.Wrap(origin, r.Snippet), Provider: contract.WebSearchProvider(r.Provider)})
 			}
 			return out, nil
 		}

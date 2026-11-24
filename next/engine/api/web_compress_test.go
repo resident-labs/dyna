@@ -59,6 +59,40 @@ func TestWebAppFilesAreCachedAndCompressed(t *testing.T) {
 	}
 }
 
+func TestOfficeViewerUsesStrictSandboxCSPAndCORSForModuleAssets(t *testing.T) {
+	app := fstest.MapFS{
+		"index.html":        {Data: []byte("<!doctype html>")},
+		"office.html":       {Data: []byte("<!doctype html><script type=module src=/assets/office-abc.js></script>")},
+		"assets/office.js":  {Data: []byte("export const ok = true;")},
+		"assets/style.css":  {Data: []byte("body{}")},
+		"assets/font.woff2": {Data: []byte("wOF2")},
+		"assets/icon.png":   {Data: []byte("png")},
+	}
+	w, err := NewWeb(New(&fakeService{}, nil), "127.0.0.1:7790", app, time.Now, &streamDeviceStore{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := func(path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		w.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://dyna.localhost:7790"+path, nil))
+		return rec
+	}
+	office := get("/office.html")
+	wantCSP := "sandbox allow-scripts; default-src 'none'; base-uri 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; img-src blob: data:; frame-ancestors 'self'"
+	if office.Code != 200 || office.Header().Get("Content-Security-Policy") != wantCSP || office.Header().Get("Cache-Control") != "no-cache" {
+		t.Fatalf("office.html: %d %v", office.Code, office.Header())
+	}
+	for _, asset := range []string{"/assets/office.js", "/assets/style.css", "/assets/font.woff2"} {
+		rec := get(asset)
+		if rec.Code != 200 || rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+			t.Fatalf("%s CORS: %d %v", asset, rec.Code, rec.Header())
+		}
+	}
+	if png := get("/assets/icon.png"); png.Code != 200 || png.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("icon.png unexpected CORS: %d %v", png.Code, png.Header())
+	}
+}
+
 // An API answer is compressed for a client that takes gzip; an event stream and an image pass through, and a flushed
 // stream still reaches the client.
 func TestGzipWriterCompressesAnswersAndPassesStreams(t *testing.T) {

@@ -7,7 +7,7 @@ func SetDynaOAuthCompletionHook(hook func(state, authID string)) {
 	management.DynaOAuthCompletionHook = hook
 }
 
-// EnableDynaMemoryOAuthCallbacks avoids callback files for Claude and Codex.
+// EnableDynaMemoryOAuthCallbacks avoids callback files for Claude, Codex and Antigravity.
 func EnableDynaMemoryOAuthCallbacks() {
 	management.DynaMemoryOAuthCallbacks = true
 }

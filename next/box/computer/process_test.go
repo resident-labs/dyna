@@ -328,3 +328,49 @@ func waitFor(t *testing.T, ok func() bool) {
 	t.Helper()
 	testutil.Eventually(t, 5*time.Second, "computer process state", ok)
 }
+
+func TestProcessStartHonorsRequestCancellation(t *testing.T) {
+	root := t.TempDir()
+	started := filepath.Join(root, "xvnc.started")
+	// Xvnc sleeps without creating the VNC socket, so startDisplay waits for it.
+	if err := os.WriteFile(filepath.Join(root, "Xvnc"), []byte("#!/bin/sh\ntouch "+started+"\nexec sleep 600\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", root+":"+os.Getenv("PATH"))
+	p := &Process{root: root, socket: filepath.Join(root, "run", "vnc.sock"), tmp: filepath.Join(root, "tmp"), profile: filepath.Join(root, "profile")}
+	t.Cleanup(p.Close)
+
+	agentSocket := filepath.Join(root, "agent.sock")
+	listener, err := net.Listen("unix", agentSocket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: p.Handler(context.Background())}
+	go server.Serve(listener)
+	t.Cleanup(func() { _ = server.Close() })
+	agent := NewAgent(agentSocket)
+
+	reqCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := agent.Start(reqCtx)
+		done <- err
+	}()
+	waitFor(t, func() bool { _, err := os.Stat(started); return err == nil })
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("cancelled start unexpectedly succeeded")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("agent.Start did not return after cancellation")
+	}
+
+	// Draining r.Body lets net/http cancel r.Context() on client disconnect so opMu is freed immediately.
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+	defer stopCancel()
+	if _, err := agent.post(stopCtx, "/computer/stop", nil); err != nil {
+		t.Fatalf("stop blocked on opMu after cancelled start: %v", err)
+	}
+}

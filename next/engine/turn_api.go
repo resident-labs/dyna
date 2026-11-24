@@ -155,7 +155,7 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		githubAvailable = githubAvailable && (account.Login != "" || s.githubAccounts.DefaultToken != "")
 	}
 	_, discordProblem := s.discordClient(ctx, caller)
-	return contract.BoxHelloResponse{Discord: discordProblem == nil, Room: session.Room, GitName: gitName, GitEmail: gitEmail, GitSigningKey: signingKey, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: prompt.ModelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: prompt.Session(vars), WorkerInstructions: prompt.Core, Root: vars.Role == prompt.Root, Advisor: vars.Advisor, Workflow: workflow, GitHub: githubAvailable}, nil
+	return contract.BoxHelloResponse{Discord: discordProblem == nil, Room: session.Room, GitName: gitName, GitEmail: gitEmail, GitSigningKey: signingKey, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: prompt.ModelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: prompt.Session(vars), WorkerInstructions: prompt.Core, Root: vars.Role == prompt.Root, Advisor: vars.Advisor, Workflow: workflow, GitHub: githubAvailable, Fresh: session.ClearedAt > 0}, nil
 }
 
 func (s *Service) DeliveryDone(ctx context.Context, caller contract.Principal, req contract.DeliveryDoneRequest) (contract.DeliveryDoneResponse, *contract.Error) {
@@ -190,6 +190,9 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 	case "", contract.CauseSetupFailed, contract.CauseModelFailed, contract.CauseOutputLimit, contract.CauseHarnessFailed, contract.CauseSetModelFailed, contract.CauseNotStarted, contract.CauseWorkflowFailed:
 	default:
 		return contract.TurnOutputResponse{}, invalid("invalid turn cause")
+	}
+	if req.ModelRetryAfterSeconds < 0 || req.ModelRetryAfterSeconds > contract.MaxModelRetryAfterSeconds || (req.ModelRetryAfterSeconds != 0 && req.Cause != contract.CauseModelFailed) {
+		return contract.TurnOutputResponse{}, invalid("model retry reset needs a model failure and a valid duration")
 	}
 	// Close stops the agent program under a running turn, so that turn reports the program's end. The session is closing, so
 	// the turn was ended by the close and did not fail.

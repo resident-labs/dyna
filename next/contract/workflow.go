@@ -191,10 +191,12 @@ type WorkflowStepRequest struct {
 	Key     string    `json:"key"`
 }
 
-// WorkflowStepResponse is what a row leaves out: the prompt, command or text it ran, and its result as JSON text.
+// WorkflowStepResponse is what a row leaves out: the prompt, command or text it ran, its result as JSON text,
+// and the worker's last assistant text if the step failed.
 type WorkflowStepResponse struct {
-	Detail string `json:"detail,omitempty"`
-	Result string `json:"result,omitempty"`
+	Detail  string `json:"detail,omitempty"`
+	Result  string `json:"result,omitempty"`
+	RawText string `json:"rawText,omitempty"`
 }
 
 // WorkflowMerge is what merge() returns and stores as its step's result.
@@ -226,22 +228,23 @@ type WorkflowListResponse struct {
 // BoxWorkflow is what a crew's box runs. Each hello carries it, so a new box can restart the script, and a reload carries it
 // to the box that runs the script.
 type BoxWorkflow struct {
-	Run           WorkflowRunID     `json:"run"`
-	Subscription  SubscriptionID    `json:"subscription,omitempty"`
-	Name          string            `json:"name"`
-	Script        string            `json:"script"`
-	Version       int               `json:"version"`
-	Paused        bool              `json:"paused"`
-	PausedSteps   []string          `json:"pausedSteps,omitempty"`
-	ReleasedSteps []string          `json:"releasedSteps,omitempty"`
-	Args          string            `json:"args,omitempty"`
-	Profiles      []WorkflowProfile `json:"profiles"` // in meta's order: the first is the default
-	Workers       int               `json:"workers"`  // how many crew workers may run at once: the box's memory allows some, and the maxWorkers setting may allow fewer
-	Timeout       int               `json:"timeout"`  // seconds an agent() worker may run when the script sets no timeout: the timeout setting
+	Run            WorkflowRunID     `json:"run"`
+	Subscription   SubscriptionID    `json:"subscription,omitempty"`
+	Name           string            `json:"name"`
+	Script         string            `json:"script"`
+	Version        int               `json:"version"`
+	Paused         bool              `json:"paused"`
+	PausedSteps    []string          `json:"pausedSteps,omitempty"`
+	ReleasedSteps  []string          `json:"releasedSteps,omitempty"`
+	Args           string            `json:"args,omitempty"`
+	Profiles       []WorkflowProfile `json:"profiles"`                 // in meta's order: the first is the default
+	TextOnlyModels []TextOnlyModel   `json:"textOnlyModels,omitempty"` // model definitions not supplied by Pi's catalog
+	Workers        int               `json:"workers"`                  // the box's memory allows some, and the maxWorkers setting may allow fewer
+	Timeout        int               `json:"timeout"`                  // seconds an agent() worker may run when the script sets no timeout
 }
 
-// WorkflowReload hands a crew's box a newer version of its script. The engine sends the run's current version on each channel,
-// and a box already on it ignores it.
+// WorkflowReload carries the current script, pause state and worker profiles to a crew's box.
+// Only a newer script version restarts the script.
 type WorkflowReload struct {
 	Workflow BoxWorkflow `json:"workflow"`
 }
@@ -253,6 +256,7 @@ func (WorkflowReload) isBoxMessageBody()              {}
 type WorkflowProfile struct {
 	Name              ProfileName `json:"name"`
 	Model             ModelChoice `json:"model"`
+	Unavailable       bool        `json:"unavailable,omitempty"` // still declared in meta, but removed from the profile configuration
 	CompactTokens     int         `json:"compactTokens,omitempty"`
 	MaxConcurrent     int         `json:"maxConcurrent,omitempty"`
 	ModelInstructions string      `json:"modelInstructions,omitempty"`
@@ -284,9 +288,10 @@ type WorkflowStepStartRequest struct {
 
 // WorkflowStepStartResponse carries the stored outcome. An empty State means the step has none and is now running.
 type WorkflowStepStartResponse struct {
-	State  WorkflowStepState `json:"state,omitempty"`
-	Result string            `json:"result,omitempty"`
-	Reason string            `json:"reason,omitempty"`
+	State   WorkflowStepState `json:"state,omitempty"`
+	Result  string            `json:"result,omitempty"`
+	Reason  string            `json:"reason,omitempty"`
+	RawText string            `json:"rawText,omitempty"`
 }
 
 // WorkflowStepEndRequest stores a step's outcome. Result is JSON text.
@@ -295,6 +300,7 @@ type WorkflowStepEndRequest struct {
 	State      WorkflowStepState `json:"state"`
 	Result     string            `json:"result,omitempty"`
 	Reason     string            `json:"reason,omitempty"`
+	RawText    string            `json:"rawText,omitempty"` // failed worker's last assistant text
 	Transcript string            `json:"transcript,omitempty"`
 	Usage      Usage             `json:"usage"`
 }

@@ -4,6 +4,7 @@
   import type { Attention } from "../attention.svelte.ts";
   import type { RoomStore } from "../room.svelte.ts";
   import type { ShellJob } from "../shell.ts";
+  import { confirmClear } from "../session-confirms.ts";
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
   import JobsTool from "./JobsTool.svelte";
@@ -30,6 +31,8 @@
   // A run that is going shows on the closed panel's toggle, as the Runs button did.
   let runsGoing = $derived(store.ready ? [...store.workflows.values()].filter(run => run.state === "running").length : 0);
   let faces = $derived(!session && !panelShown && working > 0);
+  let canClear = $derived(!!session && !closed && !store.crew(session) && attention.can("operate") && !store.running(session) && !store.starting(session));
+  let sessionName = $derived(session ? store.names.get(session) ?? "this session" : "");
 </script>
 
 <div class="actions" class:session={!!session}>
@@ -39,6 +42,7 @@
     <Icon name="inbox" />{#if waiting}<StatusPill tone="warning" label="Waiting" count={waiting} />{/if}
   </button>
   <RoomMenu bind:this={roomMenu} {phone} {paused} operate={attention.can("operate")} admin={attention.can("admin")} {onpause} {oninstructions}
+    onclear={canClear && session ? trigger => void confirmClear(session, sessionName, trigger) : undefined}
     onrequests={phone ? onrequests : undefined} onjobs={phone ? () => void jobsTool?.show() : undefined}
     onterminal={phone && session && !closed && attention.can("terminal") && store.boxes.get(session) === "ready" ? onterminal : undefined} oncomputer={phone && session && !closed && attention.can("computers") && store.boxes.get(session) === "ready" ? oncomputer : undefined} waiting={phone ? waiting : 0} />
   <button type="button" class="panel-toggle" bind:this={toggle} aria-label={"Sessions" + (faces ? `, ${working} working` : "") + (runsGoing ? `, ${count(runsGoing, "workflow")} running` : "") + (store.counts.failed ? ", a session failed" : "")}

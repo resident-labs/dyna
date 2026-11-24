@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -85,6 +86,7 @@ type fakeClient struct {
 	closed         contract.SessionCloseResponse
 	setProfile     contract.SessionSetProfileRequest
 	setBranch      contract.SessionSetBranchRequest
+	clear          contract.SessionClearRequest
 	restart        contract.SessionRestartRequest
 	refresh        contract.SessionRefreshRequest
 	refreshed      contract.SessionRefreshResponse
@@ -263,6 +265,10 @@ func (f *fakeClient) SessionStart(_ context.Context, q contract.SessionStartRequ
 func (f *fakeClient) SessionSetBranch(_ context.Context, q contract.SessionSetBranchRequest) (contract.SessionSetBranchResponse, error) {
 	f.setBranch = q
 	return contract.SessionSetBranchResponse{}, nil
+}
+func (f *fakeClient) SessionClear(_ context.Context, q contract.SessionClearRequest) (contract.SessionClearResponse, error) {
+	f.clear = q
+	return contract.SessionClearResponse{}, nil
 }
 func (f *fakeClient) SessionSetProfile(_ context.Context, q contract.SessionSetProfileRequest) (contract.SessionSetProfileResponse, error) {
 	f.setProfile = q
@@ -504,6 +510,16 @@ func TestSessionSetBranchMapsArgs(t *testing.T) {
 		t.Fatalf("%+v", f.setBranch)
 	}
 }
+func TestSessionClearMapsID(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "session", "clear", "ses_1")
+	if f.clear.Session != "ses_1" {
+		t.Fatalf("%+v", f.clear)
+	}
+	if _, err := execCLI(f, "session", "clear"); err == nil {
+		t.Fatal("clear accepted a missing session")
+	}
+}
 func TestSessionRestartMapsID(t *testing.T) {
 	f := &fakeClient{}
 	runCLI(t, f, "session", "restart", "s")
@@ -634,9 +650,9 @@ func TestPrOpenMapsFlagsAndBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := &fakeClient{submitResp: contract.OpSubmitResponse{Operation: contract.Operation{Result: &contract.OpResult{Output: "https://example.test/pr/1"}}}}
-	out := runCLI(t, f, "pr", "open", "--title", "Add thing", "--body-file", body, "--base", "dev", "--draft")
+	out := runCLI(t, f, "pr", "open", "--title", "Add thing", "--body-file", body, "--base", "dev", "--draft", "--repo", "owner/secondary")
 	args, ok := f.submit.Operation.Args.(contract.PrOpenArgs)
-	if !ok || f.submit.Operation.Kind != "pr.open" || args.Title != "Add thing" || args.Body != "## Summary\n" || args.Base != "dev" || !args.Draft {
+	if !ok || f.submit.Operation.Kind != "pr.open" || args.Title != "Add thing" || args.Body != "## Summary\n" || args.Base != "dev" || !args.Draft || args.Repo != "owner/secondary" {
 		t.Fatalf("%+v", f.submit)
 	}
 	if out != "https://example.test/pr/1\n" {
@@ -752,12 +768,20 @@ func TestRoomLimitCommand(t *testing.T) {
 func TestRepoCICommand(t *testing.T) {
 	f := &fakeClient{}
 	runCLI(t, f, "room", "repo", "ci", "a/b", "--on", "--max", "4")
-	if f.repoCI != (contract.RepoCISetRequest{Repo: "a/b", On: true, Max: 4}) {
+	if !reflect.DeepEqual(f.repoCI, contract.RepoCISetRequest{Repo: "a/b", On: true, Max: 4}) {
 		t.Fatalf("%+v", f.repoCI)
 	}
 	runCLI(t, f, "room", "repo", "ci", "a/b", "--off")
-	if f.repoCI != (contract.RepoCISetRequest{Repo: "a/b"}) {
+	if !reflect.DeepEqual(f.repoCI, contract.RepoCISetRequest{Repo: "a/b"}) {
 		t.Fatalf("%+v", f.repoCI)
+	}
+	runCLI(t, f, "room", "repo", "ci", "a/b", "--on", "--hosts", "ci,pool")
+	if !reflect.DeepEqual(f.repoCI.Hosts, []string{"ci", "pool"}) {
+		t.Fatal(f.repoCI)
+	}
+	runCLI(t, f, "room", "repo", "ci", "a/b", "--on", "--hosts", "")
+	if f.repoCI.Hosts == nil || len(f.repoCI.Hosts) != 0 {
+		t.Fatal(f.repoCI)
 	}
 	for _, args := range [][]string{{"a/b"}, {"a/b", "--on", "--off"}, {"a/b", "--off", "--max", "2"}} {
 		f := &fakeClient{}
@@ -909,6 +933,9 @@ func (f *fakeClient) ServiceSecretSet(_ context.Context, q contract.ServiceSecre
 	f.serviceSecret = q
 	return contract.ServiceSecretSetResponse{}, nil
 }
+func (f *fakeClient) ServiceSend(_ context.Context, q contract.ServiceSendRequest) (contract.ServiceSendResponse, error) {
+	return contract.ServiceSendResponse{ID: "out_1"}, nil
+}
 
 func TestPrStackListStatusRendering(t *testing.T) {
 	for _, args := range [][]string{{"pr", "list"}, {"pr", "status", "12", "--repo", "owner/repo"}} {
@@ -956,5 +983,44 @@ func TestOwnerTimezoneCLI(t *testing.T) {
 	f := &fakeClient{}
 	if got := runCLI(t, f, "owner", "timezone", "America/Chicago"); !strings.Contains(got, "America/Chicago") {
 		t.Fatal(got)
+	}
+}
+
+func (f *fakeClient) BrowserCreate(_ context.Context, q contract.BrowserCreateRequest) (contract.BrowserCreateResponse, error) {
+	return contract.BrowserCreateResponse{Name: q.Name}, nil
+}
+
+func (f *fakeClient) BrowserList(_ context.Context, _ contract.BrowserListRequest) (contract.BrowserListResponse, error) {
+	return contract.BrowserListResponse{Browsers: []contract.BrowserSummary{{Name: "personal", Rooms: []string{"ops"}, Cookies: 12, Version: 2}}}, nil
+}
+
+func (f *fakeClient) BrowserRemove(_ context.Context, _ contract.BrowserRemoveRequest) (contract.BrowserRemoveResponse, error) {
+	return contract.BrowserRemoveResponse{}, nil
+}
+
+func TestBrowserCLI(t *testing.T) {
+	f := &fakeClient{}
+	if got := runCLI(t, f, "browser", "create", "personal"); !strings.Contains(got, "personal") {
+		t.Fatal(got)
+	}
+	if got := runCLI(t, f, "browser", "list"); !strings.Contains(got, "personal") || !strings.Contains(got, `"cookies":12`) {
+		t.Fatal(got)
+	}
+	runCLI(t, f, "browser", "remove", "personal")
+	runCLI(t, f, "room", "browser", "room_1", "personal")
+	if f.roomSet == nil || f.roomSet.Browser == nil || *f.roomSet.Browser != "personal" {
+		t.Fatalf("room browser set: %+v", f.roomSet)
+	}
+	runCLI(t, f, "room", "browser", "room_1", "none")
+	if f.roomSet == nil || f.roomSet.Browser == nil || *f.roomSet.Browser != "" {
+		t.Fatalf("room browser clear: %+v", f.roomSet)
+	}
+}
+
+func TestServiceSendCLI(t *testing.T) {
+	f := &fakeClient{}
+	got := runCLI(t, f, "service", "send", "--room", "room_1", "agent-chat", "#general", "hello world")
+	if strings.TrimSpace(got) != "out_1" {
+		t.Fatalf("service send output = %q, want out_1", got)
 	}
 }

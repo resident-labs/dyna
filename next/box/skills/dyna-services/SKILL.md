@@ -57,7 +57,7 @@ it in `/box/shared/services/NAME.json` and pass `--file` the path the prompt's F
 | Field | Rule (default) |
 |---|---|
 | `name` | 1 to 40 of `a-z`, `0-9`, `-`, starting with a letter; required |
-| `image` | a room image name, or a registry reference pinned by digest; a tag alone is refused; required |
+| `image` | a room image name (give its folder an empty `service-only` file so boxes never pick it; dyna-images), or a registry reference pinned by digest; a tag alone is refused; required |
 | `command` | replaces the image's CMD (the image's) |
 | `ports` | `PORT`, `PORT/udp` or `HOSTPORT:PORT/tcp`, published on every address of the host (none) |
 | `env`, `secrets` | plain values, and names whose values you set apart; no name starts with `DYNA_` |
@@ -66,6 +66,7 @@ it in `/box/shared/services/NAME.json` and pass `--file` the path the prompt's F
 | `disk` | accounting for the volume and logs, up to 100GiB, not a quota (1GiB) |
 | `host` | a host your room may use (admission picks one) |
 | `restart`, `health` | `always` or `on-failure` (always); a command that gates an update (10 s active) |
+| `feed`, `senders` | `feed: true` mounts `DYNA_FEED_SOCKET` (`/run/dyna-feed/feed.sock`); `senders` lists sessions allowed to call `service send` (root only) |
 
 The root filesystem is read-only: the service writes only to `data` and a 64 MiB `/tmp`. It has its own
 network namespace and cannot reach the host's loopback. Prefer a small registry image pinned by digest;
@@ -114,10 +115,15 @@ only by setting the previous value again.
 dyna service logs ROOM NAME --lines 500 --since 1h   # 1 to 2000 lines, 200 by default
 ```
 
-Log lines are not masked: a service that prints a secret shows it to you, so do not quote such lines.
-By default nothing wakes you when a service fails. To hear of it, add a subscription
-`{scope: room, on: [service.failed], wake: root}`; it fires on `crash_loop`, `rolled_back` and `failed`.
-For history, use the `room log` tool with types `service.changed` and `service.failed`.
+Log lines are not masked: never quote lines that print a secret. By default nothing wakes you on failure;
+add `{scope: room, on: [service.failed], wake: root}` (auto-added for `feed: true`). History: `room log`
+with `service.changed`, `service.failed`, `service.message`, `service.sent`.
+
+## Feed services (`feed: true`)
+
+Mounted at `DYNA_FEED_SOCKET=/run/dyna-feed/feed.sock` (no token; socket is identity):
+- **Inbound:** `POST /v1/messages` `{id, author, text, data?}` (`text` ≤ 16 KiB, 60/min, deduped by `id`) emits `service.message` (wakes nobody alone). Route via `{scope: room, on: [service.message], where: ["service=NAME"], wake: SESSION}`; delivered as `From service NAME` in `<outside>`.
+- **Outbound:** allowed `senders` (root by default) call `service send` (`{service, to, text}`) or `dyna service send SERVICE TO TEXT`. The service long-polls `GET /v1/outbox?wait=25s` (wait at most 1m): 200 `{"messages":[{"id","to","text","at"}]}`, up to 20, and `{"messages":[]}` when the wait ends empty (never 204). It acks each with `POST /v1/outbox/{id}`; an unacked message comes back on every later GET.
 
 ## Why a service is not running
 

@@ -28,9 +28,8 @@ case "$suite" in
     go test -count=1 -tags=dyna_integration ./engine/model -run '^TestKimiCompletionBindsAcrossProxyNotification$'
     ;;
   next-extras)
-    # The vendored CLIProxyAPI is a separate Go module. Its management test runs as its own check,
-    # in parallel with next, to keep the next job under its budget.
-    (cd third_party/cliproxyapi && go test -count=1 ./internal/api/handlers/management -run '^TestDyna')
+    # Run Dyna's vendored proxy tests in their separate Go module, in parallel with next.
+    (cd third_party/cliproxyapi && go test -count=1 ./internal/api/handlers/management ./sdk/cliproxy/auth ./internal/runtime/executor -run '^(TestDyna|TestOpenAICompat.*RetryAfter)')
     ;;
   next-web)
     # next/web is the v2 web app, a Svelte project with its own package.json.

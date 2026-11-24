@@ -12,7 +12,7 @@ import (
 
 func prCommand(getClient func() client) *cobra.Command {
 	pr := &cobra.Command{Use: "pr"}
-	var prTitle, prBodyFile, prBase, prHead string
+	var prTitle, prBodyFile, prBase, prHead, prOpenRepo string
 	var prDraft bool
 	prOpen := &cobra.Command{Use: "open", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		var body string
@@ -25,7 +25,7 @@ func prCommand(getClient func() client) *cobra.Command {
 		}
 		r, err := getClient().OpSubmit(cmd.Context(), contract.OpSubmitRequest{Operation: contract.Operation{
 			Kind: "pr.open",
-			Args: contract.PrOpenArgs{Title: prTitle, Body: body, Base: prBase, Head: prHead, Draft: prDraft},
+			Args: contract.PrOpenArgs{Repo: contract.RepoName(prOpenRepo), Title: prTitle, Body: body, Base: prBase, Head: prHead, Draft: prDraft},
 		}})
 		if err != nil {
 			return err
@@ -35,6 +35,7 @@ func prCommand(getClient func() client) *cobra.Command {
 	prOpen.Flags().StringVar(&prTitle, "title", "", "Pull request title")
 	prOpen.Flags().StringVar(&prBodyFile, "body-file", "", "File with the pull request body")
 	prOpen.Flags().StringVar(&prHead, "head", "", "Head branch (default: session branch)")
+	prOpen.Flags().StringVar(&prOpenRepo, "repo", "", "Room repository as owner/name (default: the session's repository)")
 	prOpen.Flags().StringVar(&prBase, "base", "main", "Base branch")
 	prOpen.Flags().BoolVar(&prDraft, "draft", false, "Open as a draft")
 	_ = prOpen.MarkFlagRequired("title") // fails only for an undefined flag, and "title" is defined above

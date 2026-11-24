@@ -3,10 +3,12 @@ package pig
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -54,6 +56,9 @@ type Config struct {
 	Bare  bool
 	// NoSkills leaves the skills index out of the prompt: a workflow worker's prompt is its own, and it still reads the AGENTS.md files.
 	NoSkills bool
+	// ResultTool is a workflow step's return tool. On success its JSON details end the turn and become the result.
+	// Workers with a result tool also retain the individual closing messages for a text fallback.
+	ResultTool *extension.ToolDefinition
 }
 
 // Harness drives one retained PiG session.
@@ -72,9 +77,12 @@ type Harness struct {
 	// Model guidance and the last snapshot are replaced only between turns.
 	modelInstructions string
 	sections          []contract.ContextSection
+	resultTool        string // empty outside a workflow schema step
+	initialTools      []string
 
-	mu   sync.Mutex
-	turn *turn // the turn running now, nil between turns
+	mu          sync.Mutex
+	turn        *turn // the turn running now, nil between turns
+	sessionFile string
 
 	delivered deliveries
 
@@ -86,12 +94,21 @@ type Harness struct {
 
 var _ harness.Harness = (*Harness)(nil)
 
+// CodemodeOutputTokens is the default budget for model-facing script output.
+const CodemodeOutputTokens = 3000
+
 // Open starts the session, continuing the newest one in the session folder if there is one.
 func Open(ctx context.Context, c Config) (*Harness, error) {
 	extensions := append([]extension.InlineExtension{}, c.Extensions...)
+	if c.ResultTool != nil {
+		extensions = append(extensions, extension.NamedInlineExtension{Name: "workflow-result", Factory: func(api extension.API) error {
+			api.RegisterTool(*c.ResultTool)
+			return nil
+		}})
+	}
 	if !c.Bare {
 		extensions = append(extensions,
-			extension.NamedInlineExtension{Name: "codemode", Replaceable: true, Factory: codemode.CreateCodemodeExtension(codemode.Options{})},
+			extension.NamedInlineExtension{Name: "codemode", Replaceable: true, Factory: codemode.CreateCodemodeExtension(codemode.Options{DefaultMaxOutputTokens: CodemodeOutputTokens})},
 			extension.NamedInlineExtension{Name: "tool-search", Replaceable: true, Factory: toolsearch.CreateToolSearchExtensionWith(toolsearch.Options{DeferredToolsSection: true, DefaultLimit: 3})},
 			extension.NamedInlineExtension{Name: "mcp", Replaceable: true, Factory: mcpext.CreateMcpExtension(mcpext.Options{AgentDir: c.AgentDir, ConfigDirName: ".pi", DeferredToolsSection: true})},
 		)
@@ -171,11 +188,43 @@ func (h *Harness) start(ctx context.Context, c Config) error {
 	if len(c.Tools) > 0 {
 		tools = c.Tools
 	}
-	created, err := coding.CreateAgentSessionFromServices(coding.CreateAgentSessionFromServicesOptions{Services: h.services, SessionManager: manager, Model: model, ThinkingLevel: ai.ModelThinkingLevel(c.Model.Thinking), Tools: tools, ContextUpdates: true, ActiveEffortAtTopLevel: true})
+	created, err := coding.CreateAgentSessionFromServices(coding.CreateAgentSessionFromServicesOptions{
+		Services: h.services, SessionManager: manager, Model: model, ThinkingLevel: ai.ModelThinkingLevel(c.Model.Thinking),
+		Tools: tools, ContextUpdates: true, ActiveEffortAtTopLevel: true, ReadMaxLines: 1000, ReadMaxBytes: 25 << 10,
+	})
 	if err != nil {
 		return err
 	}
 	h.session = created.Session
+	// The Responses watchdog starts before headers, when the proxy may still
+	// be waiting for an eligible account to recover.
+	stream := h.session.Agent().EffectiveStreamFunction()
+	h.session.Agent().SetStreamFunction(func(ctx context.Context, model *ai.Model, transcript ai.TranscriptContext, options ai.StreamOptions) (*ai.AssistantMessageEventStream, error) {
+		options.StallTimeoutMs = new(int(contract.ModelWireIdleTimeout.Milliseconds()))
+		return stream(ctx, model, transcript, options)
+	})
+	if c.ResultTool != nil {
+		h.resultTool = c.ResultTool.Name
+		previous := h.session.Agent().FinishTurnHook()
+		h.session.Agent().SetFinishTurn(func(ctx context.Context, turn agent.AgentTurnContext) (*agent.AgentTurnDecision, error) {
+			for _, result := range turn.ToolResults {
+				data, ok := result.Details.(json.RawMessage)
+				if result.ToolName != h.resultTool || result.IsError || !ok {
+					continue
+				}
+				h.mu.Lock()
+				if h.turn != nil && h.turn.result.ToolResult == nil {
+					h.turn.result.ToolResult = data
+					// FinishTurn ends the agent loop before it polls steers. End the enclosing prompt too,
+					// so the coding session doesn't run compaction or an extension's settle continuation.
+					h.turn.finishResult()
+				}
+				h.mu.Unlock()
+				return &agent.AgentTurnDecision{Action: agent.AgentTurnEnd}, nil
+			}
+			return previous(ctx, turn)
+		})
+	}
 	h.session.SetCompactionTriggerTokens(c.CompactTokens)
 	// The listener sees every event, in order, before Prompt returns. Nothing reads the buffered event channel, which
 	// would otherwise fill during a long turn and hold the agent loop.
@@ -195,6 +244,10 @@ func (h *Harness) start(ctx context.Context, c Config) error {
 		h.stop()
 		return errors.Join(err, h.session.Close())
 	}
+	h.initialTools = slices.Clone(h.session.ActiveToolNames())
+	h.mu.Lock()
+	h.sessionFile = h.session.Path()
+	h.mu.Unlock()
 	if err := h.SetPromptSections(ctx, nil); err != nil {
 		h.stop()
 		return errors.Join(err, h.session.Close())
@@ -261,7 +314,27 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contra
 // inputs again. A tool call that has no result is not run again.
 func (h *Harness) Continue(ctx context.Context, id contract.TurnID, started func()) (contract.TurnEnded, error) {
 	return h.run(ctx, id, func(ctx context.Context) error {
-		return h.session.ContinueRecovered(ctx, coding.ContinueOptions{Interrupted: interrupted, Started: started})
+		err := h.session.ContinueRecovered(ctx, coding.ContinueOptions{Interrupted: interrupted, Started: started})
+		if !errors.Is(err, coding.ErrNothingToContinue) {
+			return err
+		}
+		// PiG omits the failed attempt from the projected transcript before
+		// checking the tail. A system checkpoint (for instance from tool_search)
+		// is not an answer and can sit after the pending input or tool result.
+		for _, msg := range slices.Backward(h.session.Agent().Messages()) {
+			if msg.System != nil {
+				continue
+			}
+			if msg.Assistant != nil {
+				break // an actual answer, not a pending request
+			}
+			_, err = h.session.RunAgentPrompt(ctx, func(ctx context.Context) ([]agent.AgentMessage, error) {
+				started()
+				return h.session.Agent().ContinueMessages(ctx)
+			})
+			return err
+		}
+		return err
 	})
 }
 
@@ -277,6 +350,11 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, send func(context
 	}
 	t := newTurn(id, activity)
 	t.finished = h.Finished
+	sendCtx := context.WithoutCancel(ctx)
+	if h.resultTool != "" {
+		sendCtx, t.finishResult = context.WithCancel(sendCtx)
+		defer t.finishResult()
+	}
 	h.mu.Lock()
 	h.turn = t
 	h.mu.Unlock()
@@ -284,7 +362,7 @@ func (h *Harness) run(ctx context.Context, id contract.TurnID, send func(context
 	h.running = true
 	h.queue.Unlock()
 	sent := make(chan error, 1)
-	h.sends.Go(func() { sent <- send(context.WithoutCancel(ctx)) })
+	h.sends.Go(func() { sent <- send(sendCtx) })
 	var err error
 	select {
 	case err = <-sent:
@@ -402,9 +480,35 @@ func (h *Harness) SetPromptSections(_ context.Context, sections []contract.Conte
 	return nil
 }
 
+// NewConversation starts a fresh PiG session file in the session directory while keeping prior files on disk.
+// If the current session already has no messages (for example after box.hello opened a fresh session),
+// it is left in place rather than creating a second unused file.
+// It resets active tools to the session's initial set and clears cached delivery state so the next turn starts clean.
+func (h *Harness) NewConversation(ctx context.Context) error {
+	if len(h.session.Messages()) > 0 {
+		if err := h.session.NewSession(""); err != nil {
+			return err
+		}
+		h.mu.Lock()
+		h.sessionFile = h.session.Path()
+		h.mu.Unlock()
+	}
+	if len(h.initialTools) > 0 {
+		h.session.SetActiveToolsByName(h.initialTools)
+	}
+	h.delivered.mu.Lock()
+	h.delivered.path, h.delivered.read, h.delivered.seen = "", 0, nil
+	h.delivered.mu.Unlock()
+	return h.SetPromptSections(ctx, h.sections)
+}
+
 func (h *Harness) Abort(ctx context.Context) error { return h.session.Abort(ctx) }
 
-func (h *Harness) SessionFile() string { return h.session.Path() }
+func (h *Harness) SessionFile() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.sessionFile
+}
 
 // Done closes when the session closes.
 func (h *Harness) Done() <-chan struct{} { return h.done }

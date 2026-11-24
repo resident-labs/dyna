@@ -40,6 +40,16 @@ var Sizes = []contract.BoxSizeName{contract.BoxSizeSmall, contract.BoxSizeMedium
 // SetName is a size's scale set, and the one label a workflow's runs-on names: dyna-small to dyna-xlarge.
 func SetName(size contract.BoxSizeName) string { return "dyna-" + string(size) }
 
+// EgressState describes a host's CI egress proxy relative to the current engine binary.
+type EgressState uint8
+
+const (
+	EgressAbsent  EgressState = iota // no egress container on the host
+	EgressStopped                    // egress container exists but is not running
+	EgressStale                      // egress container is running an older or unpinned binary
+	EgressCurrent                    // egress container is running and pins the current binary
+)
+
 // Driver is what the pool needs from one host.
 type Driver interface {
 	BuildRunnerImage(context.Context, *box.RunnerLayer) (string, error)
@@ -48,8 +58,8 @@ type Driver interface {
 	EnsureEgress(ctx context.Context, image string) error
 	RemoveEgress(context.Context) error
 	StartRunner(context.Context, box.RunnerSpec) error
-	// ListRunners also frees every idle build folder when reclaim is set.
-	ListRunners(ctx context.Context, reclaim bool) ([]box.Runner, bool, error)
+	// ListRunners reclaims idle caches, and removes keep folders for repositories not in repos.
+	ListRunners(ctx context.Context, reclaim bool, repos []contract.RepoName) ([]box.Runner, EgressState, error)
 	RemoveRunner(context.Context, string) error
 }
 
@@ -107,7 +117,7 @@ type Pool struct {
 	LayerLimit time.Duration
 
 	mu        sync.Mutex
-	clean     bool // no repository wants runners and no host holds any
+	clean     map[contract.HostName]bool // hosts cleaned after the last repository turned CI off; nil while CI is on
 	listeners map[scaleSet]*listening
 	images    map[imageKey]string          // each host's current runner images, once built or found there
 	fellBack  map[imageKey]time.Time       // room layers whose build failed on a host, when, so its jobs run on the shared image
@@ -183,9 +193,16 @@ func (p *Pool) Tick(ctx context.Context, group *sync.WaitGroup) error {
 		}
 	}
 	failures := p.steer(ctx, wanted, group)
-	if len(repos) == 0 && p.clean {
-		return errors.Join(failures...)
+	if len(repos) == 0 && p.clean != nil {
+		hosts, err := p.Store.Hosts(ctx)
+		if err != nil {
+			return errors.Join(append(failures, err)...)
+		}
+		if !slices.ContainsFunc(hosts, func(host box.Host) bool { return host.State == box.HostReady && !p.clean[host.Name] }) {
+			return errors.Join(failures...)
+		}
 	}
+	p.clean = nil
 	// The lock is held across SSH, and --off acts here. A host that hangs must not leave a repository that cannot be turned off.
 	// A build-ahead outlives this pass, so it takes the context Run gave, not the pass's timeout.
 	buildCtx := ctx
@@ -253,11 +270,15 @@ func (p *Pool) Tick(ctx context.Context, group *sync.WaitGroup) error {
 		}
 		p.reaped[repo] = now.Add(reapEvery)
 	}
-	// One pass after the last repository leaves removes its runners. A pass that failed looks again, and the first pass
-	// reaps what an earlier engine left. A pass that found a runner looks again too: its build folder is reclaimed by the
-	// survey of the pass after it is gone.
+	// A pass that removed runners must come back for their caches. Once CI is off and ready hosts are clean,
+	// skip SSH until another host is ready, including one that was unreachable when CI turned off.
 	held := slices.ContainsFunc(hosts, func(h box.Host) bool { return len(view.hosts[h.Name].runners) > 0 })
-	p.clean = len(repos) == 0 && len(failures) == 0 && !held
+	if len(view.repos) == 0 && len(failures) == 0 && !held {
+		p.clean = make(map[contract.HostName]bool, len(hosts))
+		for _, host := range hosts {
+			p.clean[host.Name] = true
+		}
+	}
 	return errors.Join(failures...)
 }
 
@@ -364,7 +385,7 @@ type surveyed struct {
 	host    box.Host
 	driver  Driver
 	runners []box.Runner
-	egress  bool
+	egress  EgressState
 }
 
 func (p *Pool) survey(ctx context.Context) (survey, error) {
@@ -424,6 +445,11 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 	}) || slices.ContainsFunc(s.services, func(row store.ServiceRow) bool {
 		return row.State == contract.ServicePending && row.Reason == contract.ServiceNoDisk
 	})
+	// Keep caches follow the global CI configuration, not a host's placement rules or one room's layers.
+	configured := make([]contract.RepoName, 0, len(repos))
+	for _, repo := range repos {
+		configured = append(configured, repo.Repo)
+	}
 	var unanswered []contract.HostName
 	for _, host := range hosts {
 		if host.Pool != "" {
@@ -443,9 +469,9 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 		}
 		driver, err := p.Hosts(ctx, host.Name)
 		var runners []box.Runner
-		var egress bool
+		var egress EgressState
 		if err == nil {
-			runners, egress, err = driver.ListRunners(ctx, reclaim)
+			runners, egress, err = driver.ListRunners(ctx, reclaim, configured)
 		}
 		if err != nil {
 			s.failures = append(s.failures, fmt.Errorf("host %s: %w", host.Name, err))
@@ -473,7 +499,7 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 }
 
 // runnerBox makes a runner visible to admission. It has an image, so admission counts its CPUs and memory but no disk: all
-// it writes goes to tmpfs, or to its build folder in the host's cache.
+// it writes goes to tmpfs or to its build and keep folders on the host.
 func runnerBox(name string, host contract.HostName, size contract.BoxSize) box.Box {
 	return box.Box{ID: contract.BoxID(name), Host: host, Image: box.RunnerImage, Size: size, State: contract.BoxReady}
 }
@@ -774,11 +800,14 @@ func (p *Pool) prepare(ctx context.Context, host *surveyed, layer *box.RunnerLay
 		p.remember(host.host.Name, layer, result)
 		image = result.image
 	}
-	if !host.egress {
+	// Keep a working stale proxy while another runner is mid-job so --replace does not sever its tunnels;
+	// sweep drops it once the host goes idle.
+	serving := slices.ContainsFunc(host.runners, func(r box.Runner) bool { return r.Running })
+	if host.egress != EgressCurrent && !(host.egress == EgressStale && serving) {
 		if err := host.driver.EnsureEgress(ctx, image); err != nil {
 			return "", err
 		}
-		host.egress = true
+		host.egress = EgressCurrent
 	}
 	return image, nil
 }
@@ -869,8 +898,8 @@ func (p *Pool) buildAhead(ctx context.Context, host *surveyed, layers map[contra
 }
 
 // freeSlot picks the slot of a new runner on a host: its proxy socket and its build folder. Every repository's runners count,
-// because they share that host's proxy and cache. A slot a dead runner used is free, and the lowest
-// free slot is taken so that its build folder, which outlives the container, is the one most recently filled.
+// because they share that host's proxy and reuse its slots. A slot a dead runner used is free, and the lowest free slot
+// is taken so that its build folder, which outlives the container, is the one most recently filled.
 func freeSlot(runners []box.Runner) (int, error) {
 	used := make(map[int]bool)
 	for _, runner := range runners {
@@ -911,11 +940,12 @@ func (p *Pool) sweep(ctx context.Context, host *surveyed, view survey, alive map
 		serving = true
 	}
 	// A host with ci off keeps its proxy while its runners finish their jobs.
-	if !serving && host.egress && (!host.host.CI || len(view.repos) == 0) {
+	// An idle host also drops a stopped or stale proxy so old or unpinned binary mounts do not linger.
+	if !serving && host.egress != EgressAbsent && (host.egress != EgressCurrent || !host.host.CI || len(view.repos) == 0) {
 		return host.driver.RemoveEgress(ctx)
 	}
 	// Its restart policy covers a crash, not a stop or a host restart, and a runner with no proxy loses its job.
-	if serving && !host.egress {
+	if serving && (host.egress == EgressAbsent || host.egress == EgressStopped) {
 		_, err := p.prepare(ctx, host, nil)
 		return err
 	}
@@ -927,7 +957,7 @@ const leaseWrite = 30 * time.Second
 
 // renew writes the lease while the pool is alive for the repository: a listener of it runs and has not failed since its last
 // poll, and a host that is ready, has
-// ci on and is allowed by the room's rule answered this pass's survey. Free slots, the bound, disk, memory and the polls'
+// ci on and is allowed by the repository's effective host rule answered this pass's survey. Free slots, the bound, disk, memory and the polls'
 // capacity do not count, so a full pool keeps its lease. Only the time of the last write is kept in memory, so the first pass
 // after a start writes at once.
 func (p *Pool) renew(ctx context.Context, repo contract.RepoName, hosts []box.Host, only []string) error {
@@ -947,7 +977,7 @@ func (p *Pool) renew(ctx context.Context, repo contract.RepoName, hosts []box.Ho
 		}
 	}
 	if !listening || !slices.ContainsFunc(hosts, func(h box.Host) bool {
-		// The room's rule names hosts, or the pool of a node; a per-session node serves its one box only.
+		// The effective rule names hosts, or the pool of a node; a per-session node serves its one box only.
 		name := string(h.Name)
 		if h.Pool != "" {
 			name = h.Pool

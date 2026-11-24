@@ -113,7 +113,11 @@ func (s *Service) ServiceSet(ctx context.Context, who contract.Principal, req co
 		return contract.ServiceSetResponse{}, serviceFailure(err)
 	}
 	s.reconciler.Kick()
-	return contract.ServiceSetResponse{Service: row.Service}, nil
+	note := ""
+	if parts.Spec.Feed {
+		note = s.ensureFeedFailureSubscription(ctx, req.Room, parts.Spec.Name)
+	}
+	return contract.ServiceSetResponse{Service: row.Service, Note: note}, nil
 }
 
 func (s *Service) ServiceList(ctx context.Context, _ contract.Principal, req contract.ServiceListRequest) (contract.ServiceListResponse, *contract.Error) {
@@ -124,6 +128,22 @@ func (s *Service) ServiceList(ctx context.Context, _ contract.Principal, req con
 	result := contract.ServiceListResponse{Services: []contract.Service{}}
 	for _, row := range rows {
 		result.Services = append(result.Services, row.Service)
+	}
+	routes, err := s.store.DiscordRoutes(ctx, req.Room)
+	if err != nil {
+		return contract.ServiceListResponse{}, failure(err)
+	}
+	if len(routes) > 0 {
+		bot, err := s.store.DiscordBot(ctx)
+		if err != nil {
+			return contract.ServiceListResponse{}, failure(err)
+		}
+		if bot.ID != "" {
+			result.Discord = make([]contract.DiscordRoute, 0, len(routes))
+			for _, r := range routes {
+				result.Discord = append(result.Discord, s.discordRouteContract(r, bot.Failure))
+			}
+		}
 	}
 	return result, nil
 }

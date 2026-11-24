@@ -210,6 +210,10 @@ func (r crewRepos) Seed(ctx context.Context, session contract.SessionID, host co
 	return repos, "", err
 }
 
+func (crewRepos) DefaultBranch(context.Context, contract.RepoName, bool) (string, error) {
+	return "main", nil
+}
+
 func (r crewRepos) Ref(ctx context.Context, _ contract.RepoName, ref string) (string, error) {
 	out, err := exec.CommandContext(ctx, "git", "-C", r.origin, "rev-parse", ref).Output()
 	return strings.TrimSpace(string(out)), err
@@ -348,7 +352,7 @@ func (c *realCrew) addRepo(server *api.API, root string, files map[string]string
 		c.t.Fatal(err)
 	}
 	server.SetGitRoute(func(caller api.Caller) http.Handler {
-		return enginegit.Handler(upstream, http.DefaultTransport, "test-token", caller.Principal.Session, caller.Room, c.s.store)
+		return enginegit.Handler(upstream, http.DefaultTransport, "test-token", caller.Principal.Session, caller.Room, c.s.store, c.s.repos.DefaultBranch)
 	})
 	if err := c.s.store.AddRoomRepo(c.ctx, c.room, "owner/repo", true); err != nil {
 		c.t.Fatal(err)

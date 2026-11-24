@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"time"
+
 	"github.com/coder/websocket"
 	"github.com/resident-labs/dyna/contract"
 )
@@ -48,6 +50,9 @@ type Service interface {
 	BoxStatsReport(context.Context, contract.Principal, contract.BoxStatsReportRequest) (contract.BoxStatsReportResponse, *contract.Error)
 	ComputerChanged(context.Context, contract.Principal, contract.ComputerChangedRequest) (contract.ComputerChangedResponse, *contract.Error)
 	ComputerStart(context.Context, contract.Principal, contract.ComputerStartRequest) (contract.ComputerStartResponse, *contract.Error)
+	BrowserCreate(context.Context, contract.Principal, contract.BrowserCreateRequest) (contract.BrowserCreateResponse, *contract.Error)
+	BrowserList(context.Context, contract.Principal, contract.BrowserListRequest) (contract.BrowserListResponse, *contract.Error)
+	BrowserRemove(context.Context, contract.Principal, contract.BrowserRemoveRequest) (contract.BrowserRemoveResponse, *contract.Error)
 	ComputerStream(context.Context, contract.SessionID) ([]string, func(), *contract.Error)
 	RoomSetLimits(context.Context, contract.Principal, contract.RoomSetLimitsRequest) (contract.RoomSetLimitsResponse, *contract.Error)
 	RoomPause(context.Context, contract.Principal, contract.RoomPauseRequest) (contract.RoomPauseResponse, *contract.Error)
@@ -88,6 +93,10 @@ type Service interface {
 	ServiceRollback(context.Context, contract.Principal, contract.ServiceRollbackRequest) (contract.ServiceActionResponse, *contract.Error)
 	ServiceRemove(context.Context, contract.Principal, contract.ServiceRemoveRequest) (contract.ServiceActionResponse, *contract.Error)
 	ServiceSecretSet(context.Context, contract.Principal, contract.ServiceSecretSetRequest) (contract.ServiceSecretSetResponse, *contract.Error)
+	ServiceSend(context.Context, contract.Principal, contract.ServiceSendRequest) (contract.ServiceSendResponse, *contract.Error)
+	ServiceFeedMessage(context.Context, contract.ServiceID, contract.RoomID, contract.ServiceName, contract.FeedMessageRequest) (contract.FeedMessageResponse, *contract.Error)
+	ServiceFeedOutbox(context.Context, contract.ServiceID, time.Duration, int) (contract.FeedOutboxResponse, *contract.Error)
+	ServiceFeedAck(context.Context, contract.ServiceID, string) *contract.Error
 	WorkflowSettings(context.Context, contract.Principal, contract.WorkflowSettingsRequest) (contract.WorkflowSettingsResponse, *contract.Error)
 	WorkflowSet(context.Context, contract.Principal, contract.WorkflowSetRequest) (contract.WorkflowSetResponse, *contract.Error)
 	RoomHosts(context.Context, contract.Principal, contract.RoomHostsRequest) (contract.RoomHostsResponse, *contract.Error)
@@ -123,6 +132,7 @@ type Service interface {
 	BoxCompacted(context.Context, contract.Principal, contract.BoxCompactedRequest) (contract.BoxCompactedResponse, *contract.Error)
 	SessionSetAccount(context.Context, contract.Principal, contract.SessionSetAccountRequest) (contract.SessionSetAccountResponse, *contract.Error)
 	SessionSetBranch(context.Context, contract.Principal, contract.SessionSetBranchRequest) (contract.SessionSetBranchResponse, *contract.Error)
+	SessionClear(context.Context, contract.Principal, contract.SessionClearRequest) (contract.SessionClearResponse, *contract.Error)
 	SessionRestart(context.Context, contract.Principal, contract.SessionRestartRequest) (contract.SessionRestartResponse, *contract.Error)
 	SessionRefresh(context.Context, contract.Principal, contract.SessionRefreshRequest) (contract.SessionRefreshResponse, *contract.Error)
 	SessionSearch(context.Context, contract.Principal, contract.SessionSearchRequest) (contract.SessionSearchResponse, *contract.Error)

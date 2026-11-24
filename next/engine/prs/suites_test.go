@@ -123,7 +123,7 @@ func TestCISummaryDoesNotSettlePartialPages(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, rule := range []ciRule{ciPullHead, ciMainHead} {
-			if got, _ := summarizeCI(answer.Rollup, answer.Suites, rule, time.Now()); got != contract.PrCIPending {
+			if got, _ := summarizeCI(answer.Rollup, answer.Suites, rule, 0, time.Now()); got != contract.PrCIPending {
 				t.Errorf("partial page settled as %s: %s", got, raw)
 			}
 		}
@@ -144,7 +144,7 @@ func TestVisibleFailureSettlesIncompleteCI(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, rule := range []ciRule{ciPullHead, ciMainHead} {
-				got, names := summarizeCI(&rollup, suites, rule, time.Now())
+				got, names := summarizeCI(&rollup, suites, rule, 0, time.Now())
 				if got != contract.PrCIFailure || !slices.Equal(names, []string{"lint"}) {
 					t.Fatalf("%s %v: %s %v", typ, truncated, got, names)
 				}
@@ -160,7 +160,7 @@ func TestEmptyFailureRollupWaitsForPendingSuite(t *testing.T) {
 	}
 	for _, state := range []string{"FAILURE", "ERROR"} {
 		for _, rule := range []ciRule{ciPullHead, ciMainHead} {
-			got, _ := summarizeCI(&gqlRollup{State: state}, suites, rule, time.Now())
+			got, _ := summarizeCI(&gqlRollup{State: state}, suites, rule, 0, time.Now())
 			if got != contract.PrCIPending {
 				t.Fatalf("%s %d: %s", state, rule, got)
 			}
@@ -179,7 +179,7 @@ func TestFailedSuiteOverridesEmptyAggregateAndPendingSuites(t *testing.T) {
 		}
 		for _, state := range []string{"FAILURE", "ERROR"} {
 			for _, rule := range []ciRule{ciPullHead, ciMainHead} {
-				got, names := summarizeCI(&gqlRollup{State: state}, suites, rule, time.Now())
+				got, names := summarizeCI(&gqlRollup{State: state}, suites, rule, 0, time.Now())
 				if got != contract.PrCIFailure || !slices.Equal(names, []string{"actions (workflow run failed)"}) {
 					t.Fatalf("%s %d: %s %v", state, rule, got, names)
 				}
@@ -218,6 +218,30 @@ func TestMainCILeavesOutDispatchedRuns(t *testing.T) {
 			if got.Result != step.want || slices.ContainsFunc(got.Runs, func(r contract.CIRun) bool { return r.Name == gate.Name }) {
 				t.Fatalf("%+v, want %s without the dispatched run", got, step.want)
 			}
+		})
+	}
+}
+
+// Model horizon sunrise#3932: a conflicting PR runs no pull_request workflows, and its head's only check was a skipped job.
+// Skipped contexts alone are no CI, never a pass; one that ran beside them still decides.
+func TestOnlySkippedChecksAreNoCI(t *testing.T) {
+	suites := []fakegithub.Suite{{Status: "COMPLETED", Conclusion: "SKIPPED", App: "github-actions", Workflow: "proof", Runs: 1}}
+	for _, step := range []struct {
+		name   string
+		checks []fakegithub.Check
+		want   contract.PrCI
+	}{
+		{"only skipped", []fakegithub.Check{{Name: "Proof", Conclusion: "SKIPPED"}}, contract.PrCINone},
+		{"skipped beside a pass", []fakegithub.Check{{Name: "Proof", Conclusion: "SKIPPED"}, {Name: "build", Conclusion: "SUCCESS"}}, contract.PrCISuccess},
+		{"skipped beside a neutral run", []fakegithub.Check{{Name: "Proof", Conclusion: "SKIPPED"}, {Name: "scan", Conclusion: "NEUTRAL"}}, contract.PrCISuccess},
+	} {
+		t.Run(step.name, func(t *testing.T) {
+			c, server, at := client(t)
+			s := slices.Clone(suites)
+			s[0].CreatedAt = at.Now()
+			server.Add(fakegithub.Pull{Repo: "owner/repo", Number: 1, Head: sha, Rollup: "SUCCESS", Checks: step.checks, Suites: s})
+			server.SetCommit("owner/repo", sha, fakegithub.Commit{Rollup: "SUCCESS", Checks: step.checks, Suites: s})
+			assertBothCI(t, c, step.want)
 		})
 	}
 }

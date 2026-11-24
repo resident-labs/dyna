@@ -53,7 +53,7 @@ func TestRealDesktop(t *testing.T) {
 	ctx := context.Background()
 	socket := filepath.Join(t.TempDir(), "agent.sock")
 	errs := make(chan error, 1)
-	closeDesktop, err := Serve(ctx, socket, errs, func(bool) {})
+	_, closeDesktop, err := Serve(ctx, socket, errs, func(bool) {}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

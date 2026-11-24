@@ -279,6 +279,12 @@ func decodeEventBody(t EventType, data json.RawMessage) (EventBody, error) {
 			return nil, err
 		}
 		return v, nil
+	case "hook.fired":
+		var v HookFired
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case "host.disk_low":
 		var v HostDiskLow
 		if err := json.Unmarshal(data, &v); err != nil {
@@ -395,6 +401,24 @@ func decodeEventBody(t EventType, data json.RawMessage) (EventBody, error) {
 		return v, nil
 	case "service.failed":
 		var v ServiceFailure
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
+	case "service.message":
+		var v ServiceMessage
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
+	case "service.sent":
+		var v ServiceSent
+		if err := json.Unmarshal(data, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
+	case "session.cleared":
+		var v SessionCleared
 		if err := json.Unmarshal(data, &v); err != nil {
 			return nil, err
 		}
@@ -616,7 +640,7 @@ func decodeOpArgs(k OpKind, data json.RawMessage) (OpArgs, error) {
 	}
 }
 
-var eventBodyTypes = []EventType{"account.failed", "account.quota_low", "box.changed", "box.pressure", "checkin.due", "computer.changed", "connect.connector", "conversation.read", "discord.channel.created", "discord.channel.deleted", "discord.channel.updated", "discord.files_retrieved", "discord.member.joined", "discord.member.left", "discord.message", "discord.role.created", "discord.role.deleted", "discord.role.updated", "engine.restarted", "git.main_ci_finished", "git.main_updated", "github.ci.finished", "github.comment", "github.issue.changed", "github.issue.closed", "github.issue.opened", "github.label", "github.mention", "github.pr.changed", "github.pr.closed", "github.pr.merged", "github.pr.opened", "goal.ended", "goal.item_changed", "goal.set", "grant.expired", "hook.digest", "hook.due", "hook.finished", "host.disk_low", "host.switches_changed", "image.built", "image.failed", "notice.posted", "op.decided", "op.ran", "op.requested", "post.created", "post.sent", "question.answered", "question.asked", "question.withdrawn", "room.deleted", "room.deleting", "room.limits_changed", "room.paused", "room.resumed", "service.changed", "service.failed", "session.closed", "session.compacted", "session.failed", "session.moved", "session.notice", "session.profile_changed", "session.restarted", "session.started", "shell.job.ended", "shell.job.running", "tool.failed", "transcript.changed", "turn.activity", "turn.ended", "turn.started", "workflow.ended", "workflow.pause_changed", "workflow.status_changed", "workflow.step_changed"}
+var eventBodyTypes = []EventType{"account.failed", "account.quota_low", "box.changed", "box.pressure", "checkin.due", "computer.changed", "connect.connector", "conversation.read", "discord.channel.created", "discord.channel.deleted", "discord.channel.updated", "discord.files_retrieved", "discord.member.joined", "discord.member.left", "discord.message", "discord.role.created", "discord.role.deleted", "discord.role.updated", "engine.restarted", "git.main_ci_finished", "git.main_updated", "github.ci.finished", "github.comment", "github.issue.changed", "github.issue.closed", "github.issue.opened", "github.label", "github.mention", "github.pr.changed", "github.pr.closed", "github.pr.merged", "github.pr.opened", "goal.ended", "goal.item_changed", "goal.set", "grant.expired", "hook.digest", "hook.due", "hook.finished", "hook.fired", "host.disk_low", "host.switches_changed", "image.built", "image.failed", "notice.posted", "op.decided", "op.ran", "op.requested", "post.created", "post.sent", "question.answered", "question.asked", "question.withdrawn", "room.deleted", "room.deleting", "room.limits_changed", "room.paused", "room.resumed", "service.changed", "service.failed", "service.message", "service.sent", "session.cleared", "session.closed", "session.compacted", "session.failed", "session.moved", "session.notice", "session.profile_changed", "session.restarted", "session.started", "shell.job.ended", "shell.job.running", "tool.failed", "transcript.changed", "turn.activity", "turn.ended", "turn.started", "workflow.ended", "workflow.pause_changed", "workflow.status_changed", "workflow.step_changed"}
 
 func (m BoxMessage) MarshalJSON() ([]byte, error) {
 	if m.Body == nil {
@@ -759,6 +783,7 @@ var eventDocs = map[EventType]string{"account.failed": "",
 	"hook.digest":             "what a digest's Wake delivers: the events its on matched since the last one, each rendered as a wake would be",
 	"hook.due":                "what a scheduled Wake delivers, since a schedule has no event of its own",
 	"hook.finished":           "ends one Run (spec 8.5) and wakes nobody",
+	"hook.fired":              "carries custom JSON supplied by a manual subscription fire",
 	"host.disk_low":           "a host running low on disk",
 	"host.switches_changed":   "audits an owner's host.set in each room, without waking sessions",
 	"image.built":             "",
@@ -779,6 +804,9 @@ var eventDocs = map[EventType]string{"account.failed": "",
 	"room.resumed":            "",
 	"service.changed":         "says a service's state or reason changed, or that it was declared or removed",
 	"service.failed":          "says a service entered crash_loop, rolled_back or failed, once for each time it did",
+	"service.message":         "an outside message posted by a feed service on its engine socket",
+	"service.sent":            "records an outbound message queued for a feed service via service.send",
+	"session.cleared":         "records that the owner cleared the session's conversation so its next turn starts fresh",
 	"session.closed":          "a session closing, with what it handed on",
 	"session.compacted":       "records one compaction of a quiet box before its stop, or a failed try",
 	"session.failed":          "a session or a box failing, told to To as soon as the engine sees it",
@@ -804,4 +832,4 @@ var eventDocs = map[EventType]string{"account.failed": "",
 var AllOpKinds = []OpKind{"accounts.action", "addon.global", "hostexec.grant", "hostexec.run", "pool.add", "pr.open", "pr.stack", "room.hosts"}
 
 // AllMethods lists every Method constant.
-var AllMethods = []Method{"accounts.connect", "accounts.connect_callback", "accounts.connect_status", "accounts.import_oauth", "accounts.list", "accounts.quota", "accounts.reconnect", "accounts.remove", "accounts.rename", "accounts.set_key", "accounts.set_limits", "addon.list", "addon.set_enabled", "addon.set_hosts", "addon.set_root_only", "advisor", "agent.ended", "agent.started", "box.compacted", "box.hello", "box.notice", "box.stats", "box.stats.report", "compose.list", "computer.changed", "computer.start", "connect.cancel", "connect.start", "connect.status", "connect.unlink", "context.snapshot", "conversation.read", "delivery.done", "device.list", "device.pair", "device.revoke", "device.scopes", "device.set_host", "device.set_scopes", "diff.saved", "discord.api", "discord.apply", "discord.check", "discord.configure", "discord.export", "discord.instructions", "discord.plan", "discord.policy", "discord.read", "discord.send", "events.list", "git.sign", "goal.done", "goal.item", "goal.journal", "goal.list", "goal.set", "history.read", "host.add", "host.list", "host.remove", "host.set", "host.set_limits", "hostexec.list", "hostexec.run", "hostexec.stop", "image.list", "image.remove", "image.save", "image.show", "instructions.get", "instructions.set", "issue.list", "issue.status", "issue.track", "issue.untrack", "mcp.add", "mcp.list", "mcp.remove", "op.decide", "op.list", "op.submit", "op.withdraw", "owner.timezone", "package.add", "package.list", "package.remove", "pool.add", "pool.list", "pool.remove", "pool.set", "post", "post.search", "pr.list", "pr.status", "pr.track", "pr.untrack", "profile.list", "profile.remove", "profile.set", "proxy.key", "proxy.usage", "question.answer", "question.ask", "question.list", "repo.ci.set", "room.create", "room.delete", "room.discord", "room.github", "room.hosts", "room.list", "room.pause", "room.repo.add", "room.repos", "room.set", "room.set_limits", "search.posts", "search.rooms", "search.sessions", "service.list", "service.logs", "service.remove", "service.restart", "service.rollback", "service.secret_set", "service.set", "service.show", "service.start", "service.stop", "service.update", "session.account", "session.close", "session.list", "session.move", "session.refresh", "session.responsibilities", "session.restart", "session.search", "session.set_account", "session.set_branch", "session.set_profile", "session.start", "session.stop", "session.work", "shell.job.ended", "shell.job.running", "shell.output", "signing.key", "skill.list", "skill.remove", "skill.save", "subscription.add", "subscription.fire", "subscription.list", "subscription.remove", "subscription.set_enabled", "subscription.state", "subscription.update", "transcript.append", "transcript.digest", "transcript.fetch", "transcript.read", "turn.activity", "turn.output", "voice.status", "voice.stop", "web.login", "web.search", "websearch.remove_key", "websearch.set_key", "workflow.event_done", "workflow.events", "workflow.list", "workflow.pause", "workflow.pin", "workflow.reload", "workflow.run", "workflow.set", "workflow.set_status", "workflow.settings", "workflow.state", "workflow.status", "workflow.steer", "workflow.step", "workflow.step_end", "workflow.step_start", "workflow.step_transcript", "workflow.unpause"}
+var AllMethods = []Method{"accounts.connect", "accounts.connect_callback", "accounts.connect_status", "accounts.import_oauth", "accounts.list", "accounts.quota", "accounts.reconnect", "accounts.remove", "accounts.rename", "accounts.set_key", "accounts.set_limits", "addon.list", "addon.set_enabled", "addon.set_hosts", "addon.set_root_only", "advisor", "agent.ended", "agent.started", "box.compacted", "box.hello", "box.notice", "box.stats", "box.stats.report", "browser.create", "browser.list", "browser.remove", "compose.list", "computer.changed", "computer.start", "connect.cancel", "connect.start", "connect.status", "connect.unlink", "context.snapshot", "conversation.read", "delivery.done", "device.list", "device.pair", "device.revoke", "device.scopes", "device.set_host", "device.set_scopes", "diff.saved", "discord.api", "discord.apply", "discord.check", "discord.configure", "discord.export", "discord.instructions", "discord.plan", "discord.policy", "discord.read", "discord.send", "events.list", "git.sign", "goal.done", "goal.item", "goal.journal", "goal.list", "goal.set", "history.read", "host.add", "host.list", "host.remove", "host.set", "host.set_limits", "hostexec.list", "hostexec.run", "hostexec.stop", "image.list", "image.remove", "image.save", "image.show", "instructions.get", "instructions.set", "issue.list", "issue.status", "issue.track", "issue.untrack", "mcp.add", "mcp.list", "mcp.remove", "op.decide", "op.list", "op.submit", "op.withdraw", "owner.timezone", "package.add", "package.list", "package.remove", "pool.add", "pool.list", "pool.remove", "pool.set", "post", "post.search", "pr.list", "pr.status", "pr.track", "pr.untrack", "profile.list", "profile.remove", "profile.set", "proxy.key", "proxy.usage", "question.answer", "question.ask", "question.list", "repo.ci.set", "room.create", "room.delete", "room.discord", "room.github", "room.hosts", "room.list", "room.pause", "room.repo.add", "room.repos", "room.set", "room.set_limits", "search.posts", "search.rooms", "search.sessions", "service.list", "service.logs", "service.remove", "service.restart", "service.rollback", "service.secret_set", "service.send", "service.set", "service.show", "service.start", "service.stop", "service.update", "session.account", "session.clear", "session.close", "session.list", "session.move", "session.refresh", "session.responsibilities", "session.restart", "session.search", "session.set_account", "session.set_branch", "session.set_profile", "session.start", "session.stop", "session.work", "shell.job.ended", "shell.job.running", "shell.output", "signing.key", "skill.list", "skill.remove", "skill.save", "subscription.add", "subscription.fire", "subscription.list", "subscription.remove", "subscription.set_enabled", "subscription.state", "subscription.update", "transcript.append", "transcript.digest", "transcript.fetch", "transcript.read", "turn.activity", "turn.output", "voice.status", "voice.stop", "web.login", "web.search", "websearch.remove_key", "websearch.set_key", "workflow.event_done", "workflow.events", "workflow.list", "workflow.pause", "workflow.pin", "workflow.reload", "workflow.run", "workflow.set", "workflow.set_status", "workflow.settings", "workflow.state", "workflow.status", "workflow.steer", "workflow.step", "workflow.step_end", "workflow.step_start", "workflow.step_transcript", "workflow.unpause"}

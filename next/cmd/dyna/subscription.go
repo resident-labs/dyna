@@ -119,8 +119,8 @@ func subscriptionCommand(get func() *socketClient) *cobra.Command {
 --every takes a duration such as 1h, 15m or 90s, of at least 1m. --session and --wake take a session's name in --room, or its
 ses_… ID.
 
---where keeps only the github.* and git.* events it matches, and the engine checks it before anything starts. Each --where is one of
-key=value, key!=value or text~value, and all of them must hold. Keys are repo, author, actor, label, kind and number. kind is a change kind of github.pr.changed, such as pushed, ci_failed or merged; kind=pushed,opened matches either. github.pr.changed covers tracked PRs and every open PR with the repository room setting prEvents on (owner CLI on the engine host: dyna room repo add ROOM REPO --pr-events on). pushed carries push.before and push.after. text~ is a plain
+--where keeps only the github.*, git.* and service.* events it matches, and the engine checks it before anything starts. Each --where is one of
+key=value, key!=value or text~value, and all of them must hold. Keys are repo, author, actor, label, kind, number and service. kind is a change kind of github.pr.changed, such as pushed, ci_failed or merged; kind=pushed,opened matches either. github.pr.changed covers tracked PRs and every open PR with the repository room setting prEvents on (owner CLI on the engine host: dyna room repo add ROOM REPO --pr-events on). pushed carries push.before and push.after. text~ is a plain
 substring of a comment or a body. A field the event does not have matches neither = nor !=.
 
 --workflow starts a service instead: one run in one box that stays up, and whose script calls serve(handler) to handle each event
@@ -214,7 +214,7 @@ dyna subscription events lists the event types.`,
 	events := &cobra.Command{Use: "events", Short: "List the event types a subscription can name", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return printEventTypes(cmd.OutOrStdout())
 	}}
-	var fireKey, event string
+	var fireKey, event, data string
 	fire := &cobra.Command{Use: "fire ID", Short: "Queue an event for a workflow service, with real state (root or owner)", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		req := contract.SubscriptionFireRequest{ID: contract.SubscriptionID(args[0])}
 		if cmd.Flags().Changed("key") {
@@ -226,18 +226,38 @@ dyna subscription events lists the event types.`,
 			}
 			req.Event = json.RawMessage(event)
 		}
+		if cmd.Flags().Changed("data") {
+			if !json.Valid([]byte(data)) {
+				return fmt.Errorf("--data must be JSON")
+			}
+			req.Data = json.RawMessage(data)
+		}
 		_, err := call[contract.SubscriptionFireRequest, contract.SubscriptionFireResponse](cmd.Context(), get(), contract.MethodSubscriptionFire, req)
 		return err
 	}}
 	fire.Flags().StringVar(&fireKey, "key", "", "Override the resolved serial key")
-	fire.Flags().StringVar(&event, "event", "", "Full event envelope as JSON; omitted sends hook.due")
-	var updateWorkflow, updateArgs, updateKey, updateParent string
-	var updateWhere []string
+	fire.Flags().StringVar(&event, "event", "", "Full event envelope as JSON; omit event and data for hook.due")
+	fire.Flags().StringVar(&data, "data", "", "Any JSON up to 1 MiB, sent as hook.fired body.data")
+	fire.MarkFlagsMutuallyExclusive("event", "data")
+	var updateWorkflow, updateArgs, updateKey, updateParent, updateEvery string
+	var updateOn, updateWhere []string
 	var updateLatest bool
 	update := &cobra.Command{Use: "update ID", Short: "Change a workflow service without losing state or queued events", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		req := contract.SubscriptionUpdateRequest{ID: contract.SubscriptionID(args[0])}
 		if cmd.Flags().Changed("args") && !cmd.Flags().Changed("workflow") {
 			return fmt.Errorf("--args needs --workflow")
+		}
+		if cmd.Flags().Changed("on") {
+			on := []contract.EventType{}
+			if !(len(updateOn) == 1 && updateOn[0] == "") {
+				for _, kind := range updateOn {
+					on = append(on, contract.EventType(kind))
+				}
+			}
+			req.On = &on
+		}
+		if cmd.Flags().Changed("every") {
+			req.Every = &updateEvery
 		}
 		if cmd.Flags().Changed("workflow") {
 			script, err := os.ReadFile(updateWorkflow)
@@ -270,6 +290,8 @@ dyna subscription events lists the event types.`,
 		_, err := call[contract.SubscriptionUpdateRequest, contract.SubscriptionUpdateResponse](cmd.Context(), get(), contract.MethodSubscriptionUpdate, req)
 		return err
 	}}
+	update.Flags().StringArrayVar(&updateOn, "on", nil, "Replacement event types (repeatable); an empty value clears them")
+	update.Flags().StringVar(&updateEvery, "every", "", "Replacement schedule duration; an empty value clears it")
 	update.Flags().StringVar(&updateWorkflow, "workflow", "", "Replacement script file; reloads the running service")
 	update.Flags().StringVar(&updateArgs, "args", "", "Replacement workflow args as a JSON object")
 	update.Flags().StringArrayVar(&updateWhere, "where", nil, "Replacement filters (repeatable); an empty value clears them")

@@ -19,9 +19,10 @@ func serviceCommand(getClient func() client) *cobra.Command {
 		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\tgeneration %d, running %d\n", s.Spec.Name, s.Host, s.State, s.Reason, s.Cause, s.Generation, s.Deployed)
 	}
 	var file, host, image, data, restart string
-	var env, secrets, ports, health []string
+	var env, secrets, ports, health, senders []string
 	var cpus float64
 	var memory, disk string
+	var feed bool
 	set := &cobra.Command{Use: "set ROOM [--file F | --name N --image I ...]", Short: "Declare a service, or change the declaration of the one with that name", Long: "Declare a service from a JSON file of the declaration (--file) or from flags. Changing a service bumps its generation and redeploys it. A secret is declared by name here and given its value with `service secret set`.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		var spec contract.ServiceSpec
 		if file != "" {
@@ -33,7 +34,7 @@ func serviceCommand(getClient func() client) *cobra.Command {
 				return fmt.Errorf("%s: %w", file, err)
 			}
 		} else {
-			spec = contract.ServiceSpec{Name: contract.ServiceName(cmd.Flag("name").Value.String()), Image: image, Data: data, CPUs: cpus, Memory: contract.ServiceSize(memory), Disk: contract.ServiceSize(disk), Host: contract.HostName(host), Restart: contract.ServiceRestart(restart), Secrets: secrets, Health: health}
+			spec = contract.ServiceSpec{Name: contract.ServiceName(cmd.Flag("name").Value.String()), Image: image, Data: data, CPUs: cpus, Memory: contract.ServiceSize(memory), Disk: contract.ServiceSize(disk), Host: contract.HostName(host), Restart: contract.ServiceRestart(restart), Secrets: secrets, Health: health, Feed: feed, Senders: senders}
 			for _, p := range ports {
 				spec.Ports = append(spec.Ports, contract.ServicePort(p))
 			}
@@ -48,6 +49,9 @@ func serviceCommand(getClient func() client) *cobra.Command {
 		result, err := getClient().ServiceSet(cmd.Context(), contract.ServiceSetRequest{Room: contract.RoomID(args[0]), Spec: spec})
 		if err == nil {
 			show(cmd.OutOrStdout(), result.Service)
+			if result.Note != "" {
+				fmt.Fprintln(cmd.OutOrStdout(), result.Note)
+			}
 		}
 		return err
 	}}
@@ -64,6 +68,8 @@ func serviceCommand(getClient func() client) *cobra.Command {
 	set.Flags().StringArrayVar(&env, "env", nil, "NAME=value; the value stays in shell history, so a secret goes through `service secret set`")
 	set.Flags().StringArrayVar(&secrets, "secret", nil, "the name of a secret environment variable")
 	set.Flags().StringArrayVar(&health, "health", nil, "the health command's words")
+	set.Flags().BoolVar(&feed, "feed", false, "mount a per-service engine socket (DYNA_FEED_SOCKET) for inbound messages and outbox polling")
+	set.Flags().StringArrayVar(&senders, "sender", nil, "session allowed to call `service send` for this feed (default root only)")
 	list := &cobra.Command{Use: "list [ROOM]", Short: "List services", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		req := contract.ServiceListRequest{}
 		if len(args) == 1 {
@@ -87,6 +93,13 @@ func serviceCommand(getClient func() client) *cobra.Command {
 				state = "set"
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "secret %s\t%s\n", s.Name, state)
+		}
+		if result.Service.Feed != nil {
+			last := "never"
+			if result.Service.Feed.LastMessageAt != nil {
+				last = result.Service.Feed.LastMessageAt.Local().Format(time.DateTime)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "feed\tin=%d\tout=%d\tlast=%s\n", result.Service.Feed.MessagesIn, result.Service.Feed.MessagesOut, last)
 		}
 		if result.Service.Detail != "" {
 			fmt.Fprintln(cmd.OutOrStdout(), result.Service.Detail)
@@ -121,7 +134,32 @@ func serviceCommand(getClient func() client) *cobra.Command {
 		return err
 	}}
 	secret.AddCommand(secretSet)
-	service.AddCommand(set, list, detail, logs,
+	var sendRoom string
+	send := &cobra.Command{Use: "send SERVICE TO [TEXT]", Short: "Queue an outbound message for a feed service", Long: "Queue an outbound message for a feed service in your room (or --room for the owner). If TEXT is omitted, it is read from stdin.", Args: cobra.RangeArgs(2, 3), RunE: func(cmd *cobra.Command, args []string) error {
+		var text string
+		if len(args) == 3 {
+			text = args[2]
+		} else {
+			raw, err := io.ReadAll(cmd.InOrStdin())
+			if err != nil {
+				return err
+			}
+			text = strings.TrimSuffix(string(raw), "\n")
+		}
+		result, err := getClient().ServiceSend(cmd.Context(), contract.ServiceSendRequest{
+			Room:       contract.RoomID(sendRoom),
+			Service:    contract.ServiceName(args[0]),
+			To:         args[1],
+			Text:       text,
+			ToolCallID: os.Getenv(contract.ToolCallIDEnv),
+		})
+		if err == nil {
+			fmt.Fprintln(cmd.OutOrStdout(), result.ID)
+		}
+		return err
+	}}
+	send.Flags().StringVar(&sendRoom, "room", "", "room ID (required on the owner socket; omitted in a box uses your room)")
+	service.AddCommand(set, list, detail, logs, send,
 		action("restart", "Restart a service's unit", func(c client, cmd *cobra.Command, r contract.ServiceRef) (contract.ServiceActionResponse, error) {
 			return c.ServiceRestart(cmd.Context(), r)
 		}),

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/box"
+	"github.com/resident-labs/dyna/box/browser"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/addons"
 	"github.com/resident-labs/dyna/engine/approve"
@@ -40,6 +41,7 @@ type Profiles interface {
 type Repositories interface {
 	Get(context.Context, contract.SessionID, contract.HostName, bool) ([]contract.BoxRepo, error)
 	Ref(context.Context, contract.RepoName, string) (string, error)
+	DefaultBranch(context.Context, contract.RepoName, bool) (string, error)
 	// Unavailable is the branch names no session may have on a repository: protected names, its default and the mirror's.
 	Unavailable(context.Context, contract.RepoName) (map[string]bool, error)
 	// Seed is Get with a bounded refresh from GitHub; the string is a notice for the session when the refresh did not happen.
@@ -115,18 +117,26 @@ type Service struct {
 	readMu            sync.Mutex // preserves commit and live broadcast order
 	restarts          sync.Map   // BoxID -> *restartClaim; completion fences delayed API callers too
 	// transcriptMu serializes appends, so each offset check and write runs alone.
-	transcriptMu        sync.Mutex
-	toolCalls           map[contract.SessionID]map[string]seenCall // under transcriptMu
-	agents              agentRuns
-	layout              box.Layout
-	roomData            sync.RWMutex // writers of a room folder share it; removing one takes it alone
-	instructionsMu      sync.Mutex
-	publishInstructions func(context.Context)
-	addons              *addons.Files
-	images              *images.Store
-	migrator            *images.Migrator
-	runnerImageProblems func() map[contract.HostName][]contract.RunnerImageProblem
-	addonSources        *addons.Sources
+	transcriptMu           sync.Mutex
+	toolCalls              map[contract.SessionID]map[string]seenCall // under transcriptMu
+	agents                 agentRuns
+	layout                 box.Layout
+	browserMu              sync.Mutex
+	browserLocks           map[string]*sync.Mutex
+	browserJars            map[string]*browser.Jar
+	browserMigrationFailed map[string]bool
+	readV1Cookies          func(context.Context, string) (browser.V1CookieDB, error)
+	roomData               sync.RWMutex // writers of a room folder share it; removing one takes it alone
+	instructionsMu         sync.Mutex
+	publishInstructions    func(context.Context)
+	addons                 *addons.Files
+	images                 *images.Store
+	migrator               *images.Migrator
+	runnerImageProblems    func() map[contract.HostName][]contract.RunnerImageProblem
+	addonSources           *addons.Sources
+	feedMu                 sync.Mutex
+	feedRates              map[contract.ServiceID][]time.Time
+	feedOutboxWait         map[contract.ServiceID]chan struct{}
 }
 
 // createSession publishes before checking the store, so close can retire the handle.

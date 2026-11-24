@@ -33,6 +33,7 @@ import (
 //	<Data>/store.db, <Data>/store.lock              the store and its lock
 //	<Data>/connect/                                 Connect credentials
 //	<Data>/pools/<name>/script                      a node pool's script, which runs here and no box can reach
+//	<Data>/browsers/<name>/jar.json                 a shared browser profile's cookie jar (mode 0600)
 //	<Data>/cliproxy/, <Data>/cliproxy/auth-v2/      the model proxy and its sign-in folder
 //	<Data>/git/<owner>/<repo>.git                   repository mirrors, which rooms share
 //	<HostData>/instructions/global/AGENTS.md        the global copy a box mounts
@@ -41,11 +42,14 @@ import (
 //	<HostData>/bin/<version>/dyna                   engine binaries, with a current link
 //	<HostData>/cache/                               dependency caches, which boxes share
 //	<HostData>/cache/build-cache/                   the compiler cache, which boxes and CI runners share through its server
+//	<HostData>/ci-build/<slot>/                    one CI runner's writable build folder
+//	<HostData>/ci-keep/<key>/                      a repository's writable cache shared by its runners
 //	<HostData>/share/rooms/<room>/shared/           /box/shared on another host, through its one mount of <Data>/rooms
 //	<HostData>/share/cache/                         that mount's local cache
 //	<HostData>/sock/share.sock                      the forwarded socket that mount reads through
 //	<HostData>/sock/build-cache/cache.sock          the compiler cache's server, which boxes and CI runners mount
 //	<HostData>/sock/<box>/engine.sock               a box's forwarded socket, gone with the box
+//	<HostData>/sock/<service>/feed.sock             a feed service's forwarded socket, gone with the service
 //	<HostData>/runs/<run>/                          a subscription Run's files, gone with the Run
 //
 // Box volumes are Podman's, so they are not here. One path inside them is Dyna's:
@@ -71,6 +75,8 @@ const (
 	AddonBundle = "addons.tgz"
 	// EngineSocket is the name of a box's socket in its host folder.
 	EngineSocket = "engine.sock"
+	// FeedSocket is the name of a feed service's socket in its host folder.
+	FeedSocket = "feed.sock"
 )
 
 func roomFolder(rooms string, room contract.RoomID) (string, error) {
@@ -136,6 +142,62 @@ func (l Layout) Pool(name string) string { return filepath.Join(l.Pools(), name)
 
 // PoolScript is a pool's script.
 func (l Layout) PoolScript(name string) string { return filepath.Join(l.Pool(name), "script") }
+
+// ValidBrowserName reports whether name is a valid shared browser profile name:
+// 1 to 64 ASCII letters, digits, hyphens or underscores, starting with a letter or digit,
+// and not the reserved word "none".
+func ValidBrowserName(name string) bool {
+	if len(name) == 0 || len(name) > 64 || strings.EqualFold(name, "none") {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		letter := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+		digit := c >= '0' && c <= '9'
+		if i == 0 {
+			if !letter && !digit {
+				return false
+			}
+			continue
+		}
+		if !letter && !digit && c != '-' && c != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+// Browsers is the folder of owner-level shared browser profiles on the engine host.
+func (l Layout) Browsers() string { return filepath.Join(l.Data, "browsers") }
+
+// Browser is one shared browser profile's folder on the engine host.
+func (l Layout) Browser(name string) (string, error) {
+	if !ValidBrowserName(name) {
+		return "", fmt.Errorf("invalid browser profile name %q", name)
+	}
+	if !filepath.IsAbs(l.Data) {
+		return "", fmt.Errorf("data folder %q is not absolute", l.Data)
+	}
+	return filepath.Join(l.Browsers(), name), nil
+}
+
+// BrowserJar is one shared browser profile's cookie jar file on the engine host.
+func (l Layout) BrowserJar(name string) (string, error) {
+	dir, err := l.Browser(name)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "jar.json"), nil
+}
+
+// BrowserPrev is the legacy v1 previous folder beside a shared browser profile, kept for migration cleanup.
+func (l Layout) BrowserPrev(name string) (string, error) {
+	dir, err := l.Browser(name)
+	if err != nil {
+		return "", err
+	}
+	return dir + ".prev", nil
+}
 
 // Proxy is the model proxy's folder.
 func (l Layout) Proxy() string { return filepath.Join(l.Data, "cliproxy") }
@@ -287,6 +349,12 @@ func (l Layout) HostBinary() string { return filepath.Join(l.HostBin(), "current
 // HostCache is the dependency cache folder of a host.
 func (l Layout) HostCache() string { return filepath.Join(l.HostData, "cache") }
 
+// HostCIBuild is the parent of the runner slots' private build folders.
+func (l Layout) HostCIBuild() string { return filepath.Join(l.HostData, "ci-build") }
+
+// HostCIKeep is the parent of the repositories' private runner caches.
+func (l Layout) HostCIKeep() string { return filepath.Join(l.HostData, "ci-keep") }
+
 // HostBuildCache is the store of a host's compiler cache, among its dependency caches.
 func (l Layout) HostBuildCache() string { return filepath.Join(l.HostCache(), "build-cache") }
 
@@ -308,6 +376,16 @@ func (l Layout) HostSocketFolder(id contract.BoxID) string {
 // HostSocket is a box's forwarded socket on its host.
 func (l Layout) HostSocket(id contract.BoxID) string {
 	return filepath.Join(l.HostSocketFolder(id), EngineSocket)
+}
+
+// HostServiceSocketFolder is the folder a feed service mounts for its socket.
+func (l Layout) HostServiceSocketFolder(id contract.ServiceID) string {
+	return filepath.Join(l.HostData, "sock", string(id))
+}
+
+// HostServiceSocket is a feed service's forwarded socket on its host.
+func (l Layout) HostServiceSocket(id contract.ServiceID) string {
+	return filepath.Join(l.HostServiceSocketFolder(id), FeedSocket)
 }
 
 // HostRun is the folder of one subscription Run's files.

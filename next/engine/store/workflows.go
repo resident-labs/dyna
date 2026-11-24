@@ -124,6 +124,12 @@ func (s *Store) WorkflowRun(ctx context.Context, id contract.WorkflowRunID) (Wor
 	return scanWorkflow(s.Read().QueryRowContext(ctx, "SELECT "+workflowColumns+" FROM workflow_runs WHERE id=?", id))
 }
 
+// WorkflowsOnProfile returns the sessions of running workflows that list the profile in meta.profiles.
+func (s *Store) WorkflowsOnProfile(ctx context.Context, name contract.ProfileName) ([]contract.SessionID, error) {
+	return listIDs[contract.SessionID](ctx, s.Read(), `SELECT session FROM workflow_runs
+		WHERE state=? AND EXISTS (SELECT 1 FROM json_each(profiles) WHERE value=?)`, contract.WorkflowRunning, name)
+}
+
 // WorkflowRuns lists a room's newest runs.
 func (s *Store) WorkflowRuns(ctx context.Context, room contract.RoomID) ([]WorkflowRun, error) {
 	return queryAll(ctx, s.Read(), scanWorkflow, "SELECT "+workflowColumns+" FROM workflow_runs WHERE room=? ORDER BY started_at DESC,id DESC LIMIT 100", room)
@@ -260,7 +266,7 @@ func (s *Store) StartWorkflowStep(ctx context.Context, run contract.WorkflowRunI
 	var stored contract.WorkflowStepStartResponse
 	err := s.Write(ctx, func(tx *sql.Tx) error {
 		stored = contract.WorkflowStepStartResponse{}
-		err := tx.QueryRowContext(ctx, "SELECT state,result,reason FROM workflow_steps WHERE run=? AND key=?", run, req.Key).Scan(&stored.State, &stored.Result, &stored.Reason)
+		err := tx.QueryRowContext(ctx, "SELECT state,result,reason,raw_text FROM workflow_steps WHERE run=? AND key=?", run, req.Key).Scan(&stored.State, &stored.Result, &stored.Reason, &stored.RawText)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
@@ -313,8 +319,8 @@ func (s *Store) WorkflowCounts(ctx context.Context, run contract.WorkflowRunID) 
 // EndWorkflowStep stores a step's outcome. A retried report writes the same row.
 func (s *Store) EndWorkflowStep(ctx context.Context, run contract.WorkflowRunID, req contract.WorkflowStepEndRequest, at time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, "UPDATE workflow_steps SET state=?,result=?,reason=?,transcript=?,input_tokens=?,output_tokens=?,cache_read_tokens=?,cache_write_tokens=?,ended_at=? WHERE run=? AND key=?",
-			req.State, req.Result, req.Reason, req.Transcript, req.Usage.InputTokens, req.Usage.OutputTokens, req.Usage.CacheReadTokens, req.Usage.CacheWriteTokens, at.UnixMilli(), run, req.Key)
+		result, err := tx.ExecContext(ctx, "UPDATE workflow_steps SET state=?,result=?,reason=?,raw_text=?,transcript=?,input_tokens=?,output_tokens=?,cache_read_tokens=?,cache_write_tokens=?,ended_at=? WHERE run=? AND key=?",
+			req.State, req.Result, req.Reason, req.RawText, req.Transcript, req.Usage.InputTokens, req.Usage.OutputTokens, req.Usage.CacheReadTokens, req.Usage.CacheWriteTokens, at.UnixMilli(), run, req.Key)
 		if err != nil {
 			return err
 		}
@@ -434,10 +440,11 @@ func (s *Store) WorkflowStep(ctx context.Context, run contract.WorkflowRunID, ke
 	return scanWorkflowStep(s.Read().QueryRowContext(ctx, "SELECT "+workflowStepColumns+" FROM workflow_steps WHERE run=? AND key=?", run, key))
 }
 
-// WorkflowStepOutput reads the prompt, command or text a row ran, and its stored result.
-func (s *Store) WorkflowStepOutput(ctx context.Context, run contract.WorkflowRunID, key string) (detail, result string, err error) {
-	err = s.Read().QueryRowContext(ctx, "SELECT detail,result FROM workflow_steps WHERE run=? AND key=?", run, key).Scan(&detail, &result)
-	return detail, result, err
+// WorkflowStepOutput reads the prompt, command or text a row ran, and its stored output.
+func (s *Store) WorkflowStepOutput(ctx context.Context, run contract.WorkflowRunID, key string) (contract.WorkflowStepResponse, error) {
+	var out contract.WorkflowStepResponse
+	err := s.Read().QueryRowContext(ctx, "SELECT detail,result,raw_text FROM workflow_steps WHERE run=? AND key=?", run, key).Scan(&out.Detail, &out.Result, &out.RawText)
+	return out, err
 }
 
 // WorkerTranscript is where one worker's transcript lies. Session is the crew that ran it: a resumed run keeps a finished step's

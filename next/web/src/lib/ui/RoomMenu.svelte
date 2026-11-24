@@ -4,7 +4,7 @@
   import StatusPill from "./StatusPill.svelte";
   // The room's less frequent actions. On a phone they sit behind the header's button; elsewhere a right click on the
   // room's rail icon opens them at the pointer, and focus returns to that icon.
-  let { phone, paused, operate, admin, onpause, oninstructions, onterminal, oncomputer, onrequests, onjobs, waiting = 0 }: { phone: boolean; onrequests?: () => void; onjobs?: () => void; waiting?: number; paused: boolean; operate: boolean; admin: boolean; onpause: () => void; oninstructions: () => void; onterminal?: () => void; oncomputer?: () => void } = $props();
+  let { phone, paused, operate, admin, onpause, oninstructions, onclear, onterminal, oncomputer, onrequests, onjobs, waiting = 0 }: { phone: boolean; onrequests?: () => void; onjobs?: () => void; waiting?: number; paused: boolean; operate: boolean; admin: boolean; onpause: () => void; oninstructions: () => void; onclear?: (trigger?: HTMLElement | null) => void; onterminal?: () => void; oncomputer?: () => void } = $props();
   let open = $state(false);
   let root: HTMLDivElement;
   let button: HTMLButtonElement | undefined = $state();
@@ -28,7 +28,8 @@
   function atPointer(node: HTMLElement, moved: boolean) { if (moved) document.body.append(node); return { destroy() { if (moved) node.remove(); } }; }
   // A page the menu opened returns focus here when it closes.
   export function focus(options?: FocusOptions) { button?.focus(options); }
-  const menuLabel = "Room menu";
+  const menuLabel = $derived(onclear && !phone && !at ? "Session menu" : "Room menu");
+  $effect(() => { if (open && !phone && !at && !onclear) open = false; });
   // Up and Down move between entries, Home and End jump, Escape closes and Tab leaves.
   function move(event: KeyboardEvent) {
     const all = items();
@@ -42,18 +43,19 @@
 
 <svelte:window onpointerdown={event => { if (open && event.target instanceof Node && !root.contains(event.target) && !list?.contains(event.target)) void show(false); }} />
 <div class="menu" bind:this={root}>
-  {#if phone}<button type="button" class="open" bind:this={button} aria-haspopup="menu" aria-expanded={open} aria-controls="room-menu"
+  {#if phone || onclear}<button type="button" class="open" bind:this={button} aria-haspopup="menu" aria-expanded={open} aria-controls="room-menu"
     aria-label={menuLabel} title={menuLabel}
     onclick={() => void show(!open)} onkeydown={event => { if (event.key === "ArrowDown") { event.preventDefault(); void show(true); } }}>
     <Icon name="more" /></button>{/if}
   {#if open}
-    <div class="list" class:pointer={at} style:left={at && `${at.x}px`} style:top={at && `${at.y}px`} role="menu" id="room-menu" aria-label="Room menu" tabindex="-1" bind:this={list} onkeydown={move} use:atPointer={!!at}>
+    <div class="list" class:pointer={at} style:left={at && `${at.x}px`} style:top={at && `${at.y}px`} role="menu" id="room-menu" aria-label={menuLabel} tabindex="-1" bind:this={list} onkeydown={move} use:atPointer={!!at}>
+      {#if onclear && !at}<button type="button" role="menuitem" tabindex="-1" onclick={() => { const trigger = button; void show(false); onclear(trigger); }}>Clear conversation…</button>{/if}
       {#if onrequests}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onrequests(); }}>Requests{#if waiting}<StatusPill tone="warning" label="Requests waiting" count={waiting} />{/if}</button>{/if}
       {#if onjobs}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onjobs(); }}>Jobs</button>{/if}
       {#if onterminal}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onterminal(); }}>Terminal</button>{/if}
       {#if oncomputer}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); oncomputer(); }}>Computer</button>{/if}
-      {#if admin}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); oninstructions(); }}>Instructions</button>{/if}
-      {#if operate}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onpause(); }}>{paused ? "Resume room" : "Pause room"}</button>{/if}
+      {#if (phone || at) && admin}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); oninstructions(); }}>Instructions</button>{/if}
+      {#if (phone || at) && operate}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onpause(); }}>{paused ? "Resume room" : "Pause room"}</button>{/if}
     </div>
   {/if}
 </div>

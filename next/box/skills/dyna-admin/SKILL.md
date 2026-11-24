@@ -43,7 +43,7 @@ unless a paragraph below says otherwise. Read again after the change. Rows marke
 | The owner wants local time in input frames | `owner timezone ZONE` (IANA name; `""` clears) | `owner timezone` | the owner's, install-wide |
 | The owner wants an advisor, or a new profile for it | `room advisor ROOM PROFILE` (`none` removes it) | dyna_advisor | the owner's: it is a room setting only the owner changes |
 | A repository is not in the room | `room repo add ROOM owner/repo` | `room repo list ROOM` | yours |
-| `runs-on: dyna-…` jobs sit queued | `room repo ci owner/repo --on [--max N]` | dyna_room | yours |
+| `runs-on: dyna-…` jobs sit queued | `room repo ci owner/repo --on [--max N] [--hosts A,B]` | dyna_room | yours |
 | New boxes wait or go to the wrong host* | `room hosts ROOM --only [POOL,]HOST,…` | none | yours |
 | Boxes wait while hosts have room* | `room limit ROOM --cpus N --mem SIZE` | `room log` | yours |
 | Workflow refused, or runs capped* | `workflow set --room ROOM SETTING=VALUE` | `workflow settings` | yours |
@@ -77,6 +77,8 @@ settings stay refused with every group on; those go through a host grant and `gh
 **GitHub account.** Attribution is the owner's choice: do not set or change a room's GitHub account. If
 commits read under the wrong name, tell the owner what `room github ROOM` prints.
 
+**Repository CI hosts.** `room repo ci REPO --on --hosts A,B` replaces the CI host list for the repository's default room. It names hosts and at most one pool; hosts still need ci on. This list overrides the room's rule for runners, not agent boxes. `--hosts ''` clears it to follow the room; omitting `--hosts` keeps it. The Dyna CI runners context line shows a list when set.
+
 **Room hosts and limits.** No command prints a room's host rule: take the current one from your earlier
 report, the room's state file or the `op.requested` card that set it. `--only` names the whole rule, so
 record the new one there too. Undo with `--clear` when the room had no rule; ask the owner for an older
@@ -91,6 +93,9 @@ A session's choice (`session set-account`, SESSION from `session list`) wins ove
 command prints a session's current choice (the owner sees it on its About panel), so set one only on a
 session with none, undo with `session set-account SESSION auto`, and ask the owner to change an existing
 one. Connecting, removing or renaming an account and its key are the owner's, in Settings > Accounts.
+For Google AI Ultra, choose Add an account → Google Antigravity and sign in with the account that holds the plan.
+Paste the full localhost address into Dyna and click Finish, even if that page does not load. For a profile, use
+`anthropic` (the Messages API) and copy the `antigravity/…` ID from the account's Models into Model and Allowed models.
 
 **Hosts.** `host list` prints each host's agents and ci switches, and its CI scale while ci is on.
 `host set NAME --agents on|off --ci on|off --ci-scale N` changes them; N is an integer from 1 to 4.

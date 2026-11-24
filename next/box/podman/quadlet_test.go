@@ -92,6 +92,26 @@ func TestServiceQuadletHoldsNoSecretValue(t *testing.T) {
 	}
 }
 
+func TestFeedServiceQuadletMountsSocketReadOnlyAndSetsEnv(t *testing.T) {
+	parts, err := contract.ServiceSpec{Name: "agent-chat", Image: "chat", Feed: true}.Parse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := RenderServiceUnit(box.ServiceUnitSpec{
+		ID: "svc_feed", Room: "room_1", Parts: parts, Image: "localhost/dyna-img-chat:1",
+		FeedSocketDir: "/var/lib/dyna/sock/svc_feed",
+	})
+	for _, want := range []string{
+		"UserNS=nomap", "Network=pasta:--no-map-gw", "DropCapability=all", "NoNewPrivileges=true", "ReadOnly=true",
+		"Volume=/var/lib/dyna/sock/svc_feed:/run/dyna-feed:ro",
+		`Environment="DYNA_FEED_SOCKET=/run/dyna-feed/feed.sock"`,
+	} {
+		if !strings.Contains(file, "\n"+want+"\n") {
+			t.Errorf("missing line %q in:\n%s", want, file)
+		}
+	}
+}
+
 type recordRunner struct {
 	args  [][]string
 	stdin [][]byte

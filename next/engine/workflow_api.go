@@ -290,11 +290,12 @@ func (s *Service) WorkflowStep(ctx context.Context, caller contract.Principal, r
 	if problem := s.roomAccess(ctx, caller, run.Room); problem != nil {
 		return contract.WorkflowStepResponse{}, problem
 	}
-	detail, result, err := s.store.WorkflowStepOutput(ctx, run.ID, req.Key)
+	out, err := s.store.WorkflowStepOutput(ctx, run.ID, req.Key)
 	if err != nil {
 		return contract.WorkflowStepResponse{}, failure(err)
 	}
-	return contract.WorkflowStepResponse{Detail: harness.Mask(detail), Result: harness.Mask(result)}, nil
+	out.Detail, out.Result, out.RawText = harness.Mask(out.Detail), harness.Mask(out.Result), harness.Mask(out.RawText)
+	return out, nil
 }
 
 // maskStep covers what a read can show: a step's name quotes its command and its reason quotes the command's output.
@@ -481,9 +482,15 @@ func (s *Service) publishStep(ctx context.Context, run store.WorkflowRun, key st
 	s.live.Publish(run.Room, event, false)
 }
 
-// boxWorkflow is what a hello tells a crew's box. A profile removed since the run started is left out, so a call to it fails.
-// The room's workflow settings narrow its workers and set its default timeout.
+// boxWorkflow is what a hello tells a crew's box.
 func (s *Service) boxWorkflow(ctx context.Context, run store.WorkflowRun, memory int64) (*contract.BoxWorkflow, error) {
+	profiles, models := s.workflowProfiles(run.Profiles)
+	return s.boxWorkflowWithProfiles(ctx, run, memory, profiles, models)
+}
+
+// boxWorkflowWithProfiles reuses the profiles read for a reload. The room's workflow settings
+// narrow its workers and set its default timeout.
+func (s *Service) boxWorkflowWithProfiles(ctx context.Context, run store.WorkflowRun, memory int64, profiles []contract.WorkflowProfile, models []contract.TextOnlyModel) (*contract.BoxWorkflow, error) {
 	effective, err := s.store.WorkflowEffective(ctx, run.Room)
 	if err != nil {
 		return nil, err
@@ -492,13 +499,37 @@ func (s *Service) boxWorkflow(ctx context.Context, run store.WorkflowRun, memory
 	if effective.MaxWorkers > 0 {
 		workers = min(workers, effective.MaxWorkers)
 	}
-	workflow := &contract.BoxWorkflow{Subscription: run.Subscription, Run: run.ID, Name: run.Name, Script: run.Script, Version: run.Version, Paused: run.Paused, PausedSteps: run.PausedSteps, ReleasedSteps: run.ReleasedSteps, Args: run.Args, Workers: workers, Timeout: effective.Timeout}
-	for _, name := range run.Profiles {
-		if profile, err := s.workflowProfile(name); err == nil {
-			workflow.Profiles = append(workflow.Profiles, profile)
+	return &contract.BoxWorkflow{Subscription: run.Subscription, Run: run.ID, Name: run.Name, Script: run.Script, Version: run.Version, Paused: run.Paused, PausedSteps: run.PausedSteps, ReleasedSteps: run.ReleasedSteps, Args: run.Args, Workers: workers, Timeout: effective.Timeout, Profiles: profiles, TextOnlyModels: models}, nil
+}
+
+// workflowProfiles reads worker choices, caps and model definitions from one revision. Keep the declared
+// order even if a profile was removed, so a bare agent() call does not silently switch defaults.
+func (s *Service) workflowProfiles(names []contract.ProfileName) ([]contract.WorkflowProfile, []contract.TextOnlyModel) {
+	profiles := make([]contract.WorkflowProfile, 0, len(names))
+	if config, ok := s.profiles.(*ProfileConfig); ok {
+		config.mu.RLock()
+		// An edit replaces these values instead of modifying them in place.
+		entries, models := config.entries, config.textOnly
+		config.mu.RUnlock()
+		for _, name := range names {
+			if p, ok := entries[name]; ok {
+				model := p.modelChoice()
+				profiles = append(profiles, contract.WorkflowProfile{Name: name, Model: model, ModelInstructions: prompt.ModelInstructions(model), CompactTokens: p.CompactTokens, MaxConcurrent: p.MaxConcurrent})
+			} else {
+				profiles = append(profiles, contract.WorkflowProfile{Name: name, Unavailable: true})
+			}
 		}
+		return profiles, slices.Clone(models)
 	}
-	return workflow, nil
+	// Read-only resolvers have no edits to serialize.
+	for _, name := range names {
+		profile, err := s.workflowProfile(name)
+		if err != nil {
+			profile = contract.WorkflowProfile{Name: name, Unavailable: true}
+		}
+		profiles = append(profiles, profile)
+	}
+	return profiles, s.profiles.TextOnlyModels()
 }
 
 // workflowProfile is a profile as an agent in a box needs it: its model, compaction trigger and concurrency limit.

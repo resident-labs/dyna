@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -202,7 +203,7 @@ func TestHoldingBudgetCancelsHungAttempt(t *testing.T) {
 	req := httptest.NewRequest("POST", "http://dyna/model/v1/messages", strings.NewReader("{}"))
 	done := make(chan error, 1)
 	go func() {
-		_, err := (holding{next: transportFunc(func(r *http.Request) (*http.Response, error) { <-r.Context().Done(); return nil, r.Context().Err() }), wait: 30 * time.Millisecond}).RoundTrip(req)
+		_, err := (holding{next: transportFunc(func(r *http.Request) (*http.Response, error) { <-r.Context().Done(); return nil, r.Context().Err() }), wait: 30 * time.Millisecond, headersWait: 30 * time.Millisecond}).RoundTrip(req)
 		done <- err
 	}()
 	select {
@@ -215,13 +216,31 @@ func TestHoldingBudgetCancelsHungAttempt(t *testing.T) {
 	}
 }
 
+func TestHoldingAllowsCooldownBeyondRestartWindow(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		req := httptest.NewRequestWithContext(t.Context(), "POST", "http://dyna/model/v1/messages", strings.NewReader("{}"))
+		resp, err := (holding{wait: 120 * time.Second, next: transportFunc(func(r *http.Request) (*http.Response, error) {
+			select {
+			case <-r.Context().Done():
+				return nil, r.Context().Err()
+			case <-time.After(5*time.Minute + 30*time.Second):
+				return &http.Response{Body: http.NoBody}, nil
+			}
+		})}).RoundTrip(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	})
+}
+
 func TestHoldingHeadersReleaseBudget(t *testing.T) {
 	var attempt context.Context
 	req := httptest.NewRequest("POST", "http://dyna/model/v1/messages", strings.NewReader("{}"))
 	response, err := (holding{next: transportFunc(func(r *http.Request) (*http.Response, error) {
 		attempt = r.Context()
 		return &http.Response{Body: io.NopCloser(strings.NewReader("healthy"))}, nil
-	}), wait: 30 * time.Millisecond}).RoundTrip(req)
+	}), wait: 30 * time.Millisecond, headersWait: 30 * time.Millisecond}).RoundTrip(req)
 	if err != nil {
 		t.Fatal(err)
 	}

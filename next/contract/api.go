@@ -26,6 +26,10 @@ type InstructionsSetResponse struct {
 	Hash string `json:"hash"`
 }
 
+// ModelWireIdleTimeout leaves room for the proxy's shared 5m30s cooldown
+// budget and the provider's normal time to first output.
+const ModelWireIdleTimeout = 11 * time.Minute
+
 type Method string
 
 const (
@@ -80,6 +84,7 @@ const (
 	MethodSessionAccount          Method = "session.account"
 	MethodSessionSetAccount       Method = "session.set_account"
 	MethodSessionSetBranch        Method = "session.set_branch"
+	MethodSessionClear            Method = "session.clear"
 	MethodSessionRestart          Method = "session.restart"
 	MethodSessionRefresh          Method = "session.refresh"
 	MethodSessionMove             Method = "session.move"
@@ -91,6 +96,9 @@ const (
 	MethodBoxHello                Method = "box.hello"
 	MethodComputerChanged         Method = "computer.changed"
 	MethodComputerStart           Method = "computer.start"
+	MethodBrowserCreate           Method = "browser.create"
+	MethodBrowserList             Method = "browser.list"
+	MethodBrowserRemove           Method = "browser.remove"
 	MethodTurnOutput              Method = "turn.output"
 	MethodTurnActivity            Method = "turn.activity"
 	MethodTranscriptFetch         Method = "transcript.fetch"
@@ -211,6 +219,8 @@ type RoomSetRequest struct {
 	Advisor *ProfileName `json:"advisor,omitempty"`
 	// GitSigning switches the signing of the room's commits and tags with the engine's key, as the owner. Nil leaves it as it is.
 	GitSigning *bool `json:"gitSigning,omitempty"`
+	// Browser sets the room's shared browser profile. Empty turns it off. Nil leaves it as it is.
+	Browser *string `json:"browser,omitempty"`
 }
 
 // RootApproval names the owner-class operations a room's root may also decide, when the owner allows it for the room.
@@ -253,6 +263,8 @@ type RoomSummary struct {
 	Advisor ProfileName `json:"advisor,omitempty"`
 	// GitSigning is whether the room's boxes sign their commits and tags with the engine's key.
 	GitSigning bool `json:"gitSigning,omitempty"`
+	// Browser is the room's shared browser profile; empty when it has none.
+	Browser string `json:"browser,omitempty"`
 	// GitHubWrites is the room's githubWrites setting, as the owner set it; nil when it is off.
 	GitHubWrites *GitHubWrites `json:"githubWrites,omitempty"`
 	// Questions are those the owner has not answered.
@@ -302,6 +314,7 @@ type SessionSummary struct {
 	Turn         TurnID          `json:"turn,omitempty"`         // the running turn; a failed or lost box runs none, whatever it left open
 	Activity     string          `json:"activity,omitempty"`     // the running turn's latest TurnActivity label
 	ActivityKind ActivityKind    `json:"activityKind,omitempty"` // the kind of that activity, set with it
+	ActivityAt   time.Time       `json:"activityAt,omitzero"`    // when the running turn's latest activity began
 	LastOutcome  TurnOutcome     `json:"lastOutcome,omitempty"`  // of the last ended turn that was not stopped; a stopped turn neither fails nor succeeds
 	ShellJobs    int             `json:"shellJobs,omitempty"`    // TurnEnded.ShellJobs of the last ended turn
 	Waiting      *SessionWaiting `json:"waiting,omitempty"`      // current wait, only when no turn is running
@@ -360,10 +373,12 @@ const (
 	UsageWindowOther    UsageWindowKind = "other"
 )
 
+// UsageWindow is account-wide unless Model names a model or pool. Models lists the pool's members.
 type UsageWindow struct {
 	Name        string          `json:"name"`
 	Kind        UsageWindowKind `json:"kind"`
 	Model       string          `json:"model,omitempty"`
+	Models      []string        `json:"models,omitempty"`
 	UsedPercent float64         `json:"usedPercent"`
 	Seconds     int64           `json:"seconds"`
 	ResetsAt    time.Time       `json:"resetsAt"`
@@ -528,11 +543,12 @@ type RoomReposRequest struct {
 }
 
 // RepoCISetRequest turns a repository's CI runners on or off. Max bounds its runners across sizes, and zero leaves the
-// number to admission.
+// number to admission. Hosts overrides the room rule; nil keeps the list, and an empty list clears it.
 type RepoCISetRequest struct {
-	Repo RepoName `json:"repo"`
-	On   bool     `json:"on"`
-	Max  int      `json:"max,omitempty"`
+	Hosts []string `json:"hosts"`
+	Repo  RepoName `json:"repo"`
+	On    bool     `json:"on"`
+	Max   int      `json:"max,omitempty"`
 }
 type RepoCISetResponse struct{}
 type RoomReposResponse struct {
@@ -616,6 +632,13 @@ type SessionSetBranchRequest struct {
 	Branch  string    `json:"branch"`
 }
 type SessionSetBranchResponse struct{}
+
+// SessionClearRequest starts a fresh harness conversation for Session on its next turn, keeping the session, box,
+// files, branch, goal, children, holds, subscriptions and pending deliveries. Owner-only.
+type SessionClearRequest struct {
+	Session SessionID `json:"session"`
+}
+type SessionClearResponse struct{}
 type SessionRestartRequest struct {
 	Session SessionID `json:"session"`
 	// Host replaces a placement pin, within the room host rule. Omit to keep the pin.
@@ -808,7 +831,14 @@ type BoxHelloResponse struct {
 	Workflow           *BoxWorkflow     `json:"workflow,omitempty"` // a crew's box runs this script and no Pi of its own
 	// GitHub says the engine serves GitHub's read-only MCP tools at /github/ on the box socket, with its own token.
 	GitHub bool `json:"github,omitempty"`
+	// Fresh says the session's conversation was cleared since its last turn, so the box starts a new session file instead of resuming.
+	Fresh bool `json:"fresh,omitempty"`
 }
+
+// MaxModelRetryAfterSeconds bounds the reset hints the box may report. Longer
+// cooldowns use the normal retry ladder so a changed account can recover sooner.
+const MaxModelRetryAfterSeconds = 3600
+
 type TurnOutputRequest struct {
 	DataAttachment *int         `json:"-"`
 	Data           JSONData     `json:"data,omitempty"`
@@ -825,6 +855,8 @@ type TurnOutputRequest struct {
 	Usage          Usage        `json:"usage"`
 	// Unread names inputs the turn ended without giving to Pi, because their files were still on the way. The next turn takes them.
 	Unread []DeliverySeq `json:"unread,omitempty"`
+	// ModelRetryAfterSeconds is the provider's reset hint for a model_failed turn.
+	ModelRetryAfterSeconds int64 `json:"modelRetryAfterSeconds,omitempty"`
 }
 type TurnOutputResponse struct{}
 
@@ -958,6 +990,8 @@ type TranscriptItem struct {
 	Seq            int64                   `json:"seq,omitempty"`
 	Home           *Conversation           `json:"home,omitempty"`
 	Mentions       []SessionID             `json:"mentions,omitempty"` // the sessions a post names
+	Service        ServiceName             `json:"service,omitempty"`  // feed service for a service.sent item
+	To             string                  `json:"to,omitempty"`       // recipient address for a service.sent item
 	Bytes          int64                   `json:"bytes,omitempty"`
 	Tokens         int64                   `json:"tokens,omitempty"`
 	ErrorName      string                  `json:"errorName,omitempty"` // an attempt_failed item's failure, such as SocketError
@@ -1015,6 +1049,8 @@ type TranscriptTurn struct {
 	NextMandatoryPost int               `json:"nextMandatoryPost,omitempty"`
 	Tail              bool              `json:"tail,omitempty"`
 	NextPost          int               `json:"nextPost,omitempty"`
+	// ClearedAt is set when the session's conversation was cleared before this turn.
+	ClearedAt *time.Time `json:"clearedAt,omitempty"`
 }
 type TranscriptStep struct {
 	Turn    TurnID           `json:"turn"`
@@ -1034,6 +1070,8 @@ type TranscriptReadResponse struct {
 	More       bool             `json:"more"`
 	Chunk      string           `json:"chunk,omitempty"`
 	NextOffset int              `json:"nextOffset,omitempty"`
+	// ClearedAt is set when the session's conversation was cleared after its latest turn.
+	ClearedAt *time.Time `json:"clearedAt,omitempty"`
 }
 type TranscriptAppendRequest struct {
 	Path   string `json:"path"`
@@ -1105,6 +1143,8 @@ type TurnStart struct {
 	// TextOnlyModels is the list box.hello gave, as it is now: a profile made since the box started can name a model the
 	// box's models.json lacks, and Pi sends such a model to a route the engine does not serve.
 	TextOnlyModels []TextOnlyModel `json:"textOnlyModels,omitempty"`
+	// Fresh says the session's conversation was cleared before this turn, so the harness starts a new session file first.
+	Fresh bool `json:"fresh,omitempty"`
 }
 type TurnQueue string
 
@@ -1130,6 +1170,30 @@ type ComputerStartRequest struct {
 	Session SessionID `json:"session"`
 }
 type ComputerStartResponse struct{}
+
+type BrowserCreateRequest struct {
+	Name string `json:"name"`
+}
+type BrowserCreateResponse struct {
+	Name string `json:"name"`
+}
+
+type BrowserListRequest struct{}
+type BrowserListResponse struct {
+	Browsers []BrowserSummary `json:"browsers"`
+}
+
+type BrowserSummary struct {
+	Name    string   `json:"name"`
+	Rooms   []string `json:"rooms,omitempty"`
+	Cookies int      `json:"cookies"`
+	Version int64    `json:"version"`
+}
+
+type BrowserRemoveRequest struct {
+	Name string `json:"name"`
+}
+type BrowserRemoveResponse struct{}
 
 // ShellWatchStart asks the box agent to post each shell job's output with shell.output while the
 // owner watches. Each start begins a new generation, and its first post resets every job's view.

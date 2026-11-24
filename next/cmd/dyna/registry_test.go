@@ -28,7 +28,7 @@ func TestRegistryCLIBindings(t *testing.T) {
 func TestSharedPostHelp(t *testing.T) {
 	root := newRootCmd()
 	cmd, _, err := root.Find([]string{"post"})
-	if err != nil || !strings.HasPrefix(cmd.Short, "Send or update a post.") {
+	if err != nil || !strings.HasPrefix(cmd.Short, "Post text, attach files") {
 		t.Fatalf("post help: %q %v", cmd.Short, err)
 	}
 }

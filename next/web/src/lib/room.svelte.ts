@@ -34,6 +34,8 @@ export class RoomStore {
   // Sessions the owner asked to stop until their turn ends, and those whose request did not reach the engine.
   readonly stopping = new SvelteSet<string>();
   readonly stopFailed = new SvelteSet<string>();
+  // Sessions whose conversation was cleared, with the event timestamp, so an open DM updates immediately.
+  readonly cleared = new SvelteMap<string, string>();
   // The running turn's latest activity label per session, such as "read spec.md".
   readonly activity = new SvelteMap<string, string>();
   // The kind of that activity, set and cleared with it. An engine that predates kinds sends none, which reads as a plain activity.
@@ -55,6 +57,11 @@ export class RoomStore {
   private readonly read = new SvelteMap<string, number>();
   // Sessions whose box runs a computer the owner can watch.
   readonly computers = new SvelteSet<string>();
+  // Incremented on service.* room events so AboutPanel refreshes its service list while visible.
+  private _servicesVersion = 0;
+  private servicesChanged = () => {};
+  private subscribeServices = createSubscriber(update => { this.servicesChanged = update; });
+  get servicesVersion(): number { this.subscribeServices(); return this._servicesVersion; }
   // Background shell jobs still running, as of each session's last turn end and the jobs that ended since.
   readonly shellJobs = new SvelteMap<string, number>();
   // Current engine-computed waits; changes reread one room list, never one call per row.
@@ -432,6 +439,9 @@ export class RoomStore {
         if (moved) this.sessions.set(event.body.session, { ...moved, parent: event.body.newParent });
         break;
       }
+      case "session.cleared":
+        this.cleared.set(event.body.session, event.at);
+        break;
       case "box.changed": {
         const { session, to, cause } = event.body, reason = pendingReason(to, event.body.reason);
         this.boxes.set(session, to);
@@ -500,6 +510,10 @@ export class RoomStore {
         if (known) this.requests.set(event.body.id, { ...known, ...event.body });
         break;
       }
+      case "service.changed": case "service.failed": case "service.message": case "service.sent":
+        this._servicesVersion++;
+        this.servicesChanged();
+        break;
     }
   }
 }

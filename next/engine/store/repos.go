@@ -16,7 +16,7 @@ var ErrRoomNotFound = errors.New("unknown room")
 var ErrRepoNotFound = errors.New("unknown repository")
 
 // SetRepoCI turns a repository's CI runners on or off. Max bounds them across sizes, and zero leaves them to admission.
-func (s *Store) SetRepoCI(ctx context.Context, repo contract.RepoName, on bool, max int) error {
+func (s *Store) SetRepoCI(ctx context.Context, repo contract.RepoName, on bool, max int, hosts ...[]string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		if on {
 			var count int
@@ -28,32 +28,51 @@ func (s *Store) SetRepoCI(ctx context.Context, repo contract.RepoName, on bool, 
 			}
 		}
 		result, err := tx.ExecContext(ctx, "UPDATE repos SET ci=?, ci_max=? WHERE repo=?", on, max, repo)
-		return noRows(result, err, ErrRepoNotFound)
+		if err := noRows(result, err, ErrRepoNotFound); err != nil {
+			return err
+		}
+		if len(hosts) > 0 && hosts[0] != nil {
+			encoded, err := json.Marshal(hosts[0])
+			if err != nil {
+				return err
+			}
+			_, err = tx.ExecContext(ctx, "UPDATE room_repos SET ci_hosts=? WHERE repo=? AND room=(SELECT default_room FROM repos WHERE repo=?)", string(encoded), repo, repo)
+			return err
+		}
+		return nil
 	})
 }
 
-// CIRepo is a repository whose CI runs on Dyna's runners, with its room and that room's rule, which its runners follow as
-// the room's boxes do.
+// CIRepo is a repository whose CI runs on Dyna, with its effective host rule.
 type CIRepo struct {
-	Repo contract.RepoName
-	Max  int
-	Room contract.RoomID
-	Only []string
+	Repo  contract.RepoName
+	Max   int
+	Room  contract.RoomID
+	Only  []string
+	Hosts []string // The repository override, empty when it follows the room.
 }
 
 // CIRepos lists the repositories whose CI is on.
 func (s *Store) CIRepos(ctx context.Context) ([]CIRepo, error) {
 	return queryAll(ctx, s.Read(), func(rows scanner) (CIRepo, error) {
 		var repo CIRepo
-		var only string
-		if err := rows.Scan(&repo.Repo, &repo.Max, &repo.Room, &only); err != nil {
+		var only, hosts string
+		if err := rows.Scan(&repo.Repo, &repo.Max, &repo.Room, &only, &hosts); err != nil {
 			return repo, err
 		}
 		if err := json.Unmarshal([]byte(only), &repo.Only); err != nil {
 			return repo, err
 		}
+		if err := json.Unmarshal([]byte(hosts), &repo.Hosts); err != nil {
+			return repo, err
+		}
+		if len(repo.Hosts) > 0 {
+			repo.Only = repo.Hosts
+		} else {
+			repo.Hosts = nil
+		}
 		return repo, nil
-	}, "SELECT p.repo, p.ci_max, p.default_room, r.only_hosts FROM repos p JOIN rooms r ON r.id=p.default_room WHERE p.ci=1 ORDER BY p.repo")
+	}, "SELECT p.repo, p.ci_max, p.default_room, r.only_hosts, COALESCE(rr.ci_hosts, '[]') FROM repos p JOIN rooms r ON r.id=p.default_room LEFT JOIN room_repos rr ON rr.room=p.default_room AND rr.repo=p.repo WHERE p.ci=1 ORDER BY p.repo")
 }
 
 // RoomRepos returns the repositories listed by a room.

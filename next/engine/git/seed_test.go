@@ -70,6 +70,31 @@ func (c gitCache) PushCache(ctx context.Context, mirror, cache string, refs []st
 	return nil
 }
 
+func TestDefaultBranchDoesNotNeedAMirror(t *testing.T) {
+	root := t.TempDir()
+	work, remote := filepath.Join(root, "work"), filepath.Join(root, "github", "owner", "repo.git")
+	runReal(t, "", "init", "-b", "develop", work)
+	runReal(t, work, "commit", "--allow-empty", "-m", "first")
+	runReal(t, "", "clone", "--bare", work, remote)
+	mirror := &Mirror{Token: "secret", Runner: &localGitHub{root: filepath.Join(root, "github")}}
+	if got, err := mirror.DefaultBranch(t.Context(), "owner/repo", false); err != nil || got != "" {
+		t.Fatalf("a primary lookup without a mirror should not reach GitHub, got %q: %v", got, err)
+	}
+	if got, err := mirror.DefaultBranch(t.Context(), "owner/repo", true); err != nil || got != "develop" {
+		t.Fatalf("remote default %q: %v", got, err)
+	}
+}
+
+func TestDefaultBranchUsesTheMirrorWhenPresent(t *testing.T) {
+	f := newSeedFixture(t)
+	remote := filepath.Join(f.github.root, "owner", "repo.git")
+	runReal(t, f.work, "push", remote, "HEAD:develop")
+	runReal(t, "", "--git-dir", remote, "symbolic-ref", "HEAD", "refs/heads/develop")
+	if got, err := f.mirror.DefaultBranch(t.Context(), "owner/repo", true); err != nil || got != "main" {
+		t.Fatalf("mirror default %q: %v", got, err)
+	}
+}
+
 // seedFixture has a mirror that already fetched once, and a remote that moved on after.
 type seedFixture struct {
 	github     *localGitHub

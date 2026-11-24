@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 )
@@ -53,7 +55,30 @@ func (s *Service) RepoCISet(ctx context.Context, caller contract.Principal, req 
 	if req.Max < 0 || !req.On && req.Max != 0 {
 		return contract.RepoCISetResponse{}, invalid("max is a number of runners, for a repository that is on")
 	}
-	if err := s.store.SetRepoCI(ctx, req.Repo, req.On, req.Max); err != nil {
+	if len(req.Hosts) > 0 {
+		hosts, err := s.store.Hosts(ctx)
+		if err != nil {
+			return contract.RepoCISetResponse{}, failure(err)
+		}
+		pools, err := s.store.Pools(ctx)
+		if err != nil {
+			return contract.RepoCISetResponse{}, failure(err)
+		}
+		named := 0
+		for i, name := range req.Hosts {
+			pool := slices.ContainsFunc(pools, func(p store.Pool) bool { return p.Name == name })
+			if pool {
+				named++
+			}
+			if !pool && !slices.ContainsFunc(hosts, func(h box.Host) bool { return string(h.Name) == name && h.Pool == "" }) || slices.Contains(req.Hosts[:i], name) {
+				return contract.RepoCISetResponse{}, invalid(name + " is not a pool or a host, or it comes twice")
+			}
+		}
+		if named > 1 {
+			return contract.RepoCISetResponse{}, invalid("a repository's CI host rule names at most one pool")
+		}
+	}
+	if err := s.store.SetRepoCI(ctx, req.Repo, req.On, req.Max, req.Hosts); err != nil {
 		if errors.Is(err, store.ErrRepoNotFound) {
 			return contract.RepoCISetResponse{}, invalid("unknown repository")
 		}

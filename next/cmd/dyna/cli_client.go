@@ -42,6 +42,9 @@ type client interface {
 	HostSetLimits(context.Context, contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, error)
 	HostSet(context.Context, contract.HostSetRequest) (contract.HostSetResponse, error)
 	OwnerTimezone(context.Context, contract.OwnerTimezoneRequest) (contract.OwnerTimezoneResponse, error)
+	BrowserCreate(context.Context, contract.BrowserCreateRequest) (contract.BrowserCreateResponse, error)
+	BrowserList(context.Context, contract.BrowserListRequest) (contract.BrowserListResponse, error)
+	BrowserRemove(context.Context, contract.BrowserRemoveRequest) (contract.BrowserRemoveResponse, error)
 	RoomSet(context.Context, contract.RoomSetRequest) (contract.RoomSetResponse, error)
 	HostRemove(context.Context, contract.HostRemoveRequest) (contract.HostRemoveResponse, error)
 	PoolAdd(context.Context, contract.PoolAddRequest) (contract.PoolAddResponse, error)
@@ -57,6 +60,7 @@ type client interface {
 	ServiceRollback(context.Context, contract.ServiceRef) (contract.ServiceActionResponse, error)
 	ServiceRemove(context.Context, contract.ServiceRef) (contract.ServiceActionResponse, error)
 	ServiceSecretSet(context.Context, contract.ServiceSecretSetRequest) (contract.ServiceSecretSetResponse, error)
+	ServiceSend(context.Context, contract.ServiceSendRequest) (contract.ServiceSendResponse, error)
 	PoolRemove(context.Context, contract.PoolRemoveRequest) (contract.PoolRemoveResponse, error)
 	RoomHosts(context.Context, contract.RoomHostsRequest) (contract.RoomHostsResponse, error)
 	RoomSetLimits(context.Context, contract.RoomSetLimitsRequest) (contract.RoomSetLimitsResponse, error)
@@ -72,6 +76,7 @@ type client interface {
 	SessionClose(context.Context, contract.SessionCloseRequest) (contract.SessionCloseResponse, error)
 	SessionSetProfile(context.Context, contract.SessionSetProfileRequest) (contract.SessionSetProfileResponse, error)
 	SessionSetBranch(context.Context, contract.SessionSetBranchRequest) (contract.SessionSetBranchResponse, error)
+	SessionClear(context.Context, contract.SessionClearRequest) (contract.SessionClearResponse, error)
 	SessionRestart(context.Context, contract.SessionRestartRequest) (contract.SessionRestartResponse, error)
 	SessionRefresh(context.Context, contract.SessionRefreshRequest) (contract.SessionRefreshResponse, error)
 	Post(context.Context, contract.PostRequest) (contract.PostResponse, error)
@@ -311,6 +316,10 @@ func (c *socketClient) SessionSetBranch(ctx context.Context, q contract.SessionS
 	return call[contract.SessionSetBranchRequest, contract.SessionSetBranchResponse](ctx, c, contract.MethodSessionSetBranch, q)
 }
 
+func (c *socketClient) SessionClear(ctx context.Context, q contract.SessionClearRequest) (contract.SessionClearResponse, error) {
+	return call[contract.SessionClearRequest, contract.SessionClearResponse](ctx, c, contract.MethodSessionClear, q)
+}
+
 func (c *socketClient) SessionSetProfile(ctx context.Context, q contract.SessionSetProfileRequest) (contract.SessionSetProfileResponse, error) {
 	return call[contract.SessionSetProfileRequest, contract.SessionSetProfileResponse](ctx, c, contract.MethodSessionSetProfile, q)
 }
@@ -488,6 +497,22 @@ func (c *socketClient) ServiceSecretSet(ctx context.Context, q contract.ServiceS
 	return call[contract.ServiceSecretSetRequest, contract.ServiceSecretSetResponse](ctx, c, contract.MethodServiceSecretSet, q)
 }
 
+func (c *socketClient) ServiceSend(ctx context.Context, q contract.ServiceSendRequest) (contract.ServiceSendResponse, error) {
+	return call[contract.ServiceSendRequest, contract.ServiceSendResponse](ctx, c, contract.MethodServiceSend, q)
+}
+
 func (c *socketClient) OwnerTimezone(ctx context.Context, q contract.OwnerTimezoneRequest) (contract.OwnerTimezoneResponse, error) {
 	return call[contract.OwnerTimezoneRequest, contract.OwnerTimezoneResponse](ctx, c, contract.MethodOwnerTimezone, q)
+}
+
+func (c *socketClient) BrowserCreate(ctx context.Context, q contract.BrowserCreateRequest) (contract.BrowserCreateResponse, error) {
+	return call[contract.BrowserCreateRequest, contract.BrowserCreateResponse](ctx, c, contract.MethodBrowserCreate, q)
+}
+
+func (c *socketClient) BrowserList(ctx context.Context, q contract.BrowserListRequest) (contract.BrowserListResponse, error) {
+	return call[contract.BrowserListRequest, contract.BrowserListResponse](ctx, c, contract.MethodBrowserList, q)
+}
+
+func (c *socketClient) BrowserRemove(ctx context.Context, q contract.BrowserRemoveRequest) (contract.BrowserRemoveResponse, error) {
+	return call[contract.BrowserRemoveRequest, contract.BrowserRemoveResponse](ctx, c, contract.MethodBrowserRemove, q)
 }

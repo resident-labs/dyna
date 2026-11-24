@@ -33,12 +33,12 @@ func TestCIOffLetsRunningJobsFinish(t *testing.T) {
 		t.Fatalf("capacity %d, runners %+v, registered %v", capacity, d.runners, f.sets.names)
 	}
 	f.tick(t)
-	if len(d.runners) != 1 || len(d.removed) != 0 || len(f.api.deleted) != 0 || !d.egress {
+	if len(d.runners) != 1 || len(d.removed) != 0 || len(f.api.deleted) != 0 || d.egress != EgressCurrent {
 		t.Fatalf("a tick removed the working runner or its proxy: runners %+v, removed %v, deleted %v", d.runners, d.removed, f.api.deleted)
 	}
 	d.runners = nil // its job ended
 	f.tick(t)
-	if d.egress {
+	if d.egress != EgressAbsent {
 		t.Fatal("a host with ci off kept its proxy after its last runner")
 	}
 }
@@ -132,6 +132,28 @@ func TestABoxWaitingForDiskReclaimsIdleBuildFolders(t *testing.T) {
 	f.tick(t)
 	if f.drivers["pve"].reclaimed {
 		t.Fatal("CI off: still surveying a clean host")
+	}
+}
+
+func TestTurningOffLastRepoReclaimsCachesWhenAnOfflineHostReturns(t *testing.T) {
+	f := newFixture(0)
+	offline := readyHost("offline", 32*box.GiB)
+	offline.State = box.HostUnreachable
+	returning := f.addHost(offline)
+	f.store.repos = nil
+	f.tick(t)
+	if returning.reclaimed || !f.drivers["pve"].reclaimed {
+		t.Fatal("only the ready host should have been cleaned")
+	}
+	f.drivers["pve"].reclaimed = false
+	f.tick(t)
+	if f.drivers["pve"].reclaimed {
+		t.Fatal("a host that stays offline should not trigger another survey")
+	}
+	f.store.hosts[1].State = box.HostReady
+	f.tick(t)
+	if !returning.reclaimed {
+		t.Fatal("the returning host's idle caches were not reclaimed")
 	}
 }
 

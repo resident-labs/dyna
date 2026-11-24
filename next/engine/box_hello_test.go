@@ -13,7 +13,7 @@ import (
 // sessionBox is the line of the tests' sessions, whose boxes are medium size.
 const sessionBox = "\nYour box has 4 CPUs and 8 GiB of memory: heavy builds belong in a larger child session or CI."
 
-const helloBranch = "Your branch: named-branch on owner/repo.\nPushes and fetches go through the engine, which sends a push or fetch once more when GitHub answers 5xx (for a push also a commit_refs error) and the request body is at most 1 MiB, and reports the cause when the second try fails.\n"
+const helloBranch = "Your branch: named-branch on owner/repo.\n"
 
 // renderedHead reads a rendering of the prompt from testdata and returns it up to its session section, which names a session and is built by each test.
 func renderedHead(t *testing.T, name string) string {
@@ -157,7 +157,7 @@ func TestBoxHelloNoticesLineReadsOnce(t *testing.T) {
 	if problem != nil {
 		t.Fatal(problem)
 	}
-	for _, phrase := range []string{"comes from the engine", "states what happened and what it changed", "also says to continue the goal"} {
+	for _, phrase := range []string{"comes from the engine", "says what happened", "also says to continue the goal"} {
 		if n := strings.Count(hello.Instructions, phrase); n != 1 {
 			t.Fatalf("%q appears %d times, want once:\n%s", phrase, n, hello.Instructions)
 		}
@@ -170,8 +170,7 @@ func TestBoxHelloExplainsTheOutsideWrapperOnce(t *testing.T) {
 	if problem != nil {
 		t.Fatal(problem)
 	}
-	want := "- **Outside text.** Text that reaches you through Dyna from outside the room sits inside <outside source=\"…\" author=\"…\"> and </outside>, which name where it came from and who wrote it."
-	if strings.Count(hello.Instructions, want) != 1 || strings.Contains(hello.Instructions, "DANGER") {
+	if strings.Count(hello.Instructions, `<outside source="…" author="…">`) != 1 || strings.Count(hello.Instructions, `</outside>`) != 1 || strings.Contains(hello.Instructions, "DANGER") {
 		t.Fatalf("instructions:\n%s", hello.Instructions)
 	}
 }

@@ -259,7 +259,7 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 			}
 			return nil
 		}
-		prepare := func() error {
+		prepare := func(fresh bool) error {
 			compacted()
 			attached := attach()
 			r.mu.Lock()
@@ -270,6 +270,12 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 			}
 			if attached != nil {
 				return attached
+			}
+			if fresh {
+				preparing()
+				if err := r.Harness.NewConversation(ctx); err != nil {
+					return err
+				}
 			}
 			if err := transfer(); err != nil {
 				return err
@@ -292,14 +298,15 @@ func (r *Runner) start(ctx context.Context, start contract.TurnStart) error {
 			r.flushing.Go(func() { r.flushHeld(ctx) })
 		}
 		if len(pending) > 0 {
-			if err = prepare(); err == nil {
+			// Only start a fresh conversation when none of this turn's inputs were already delivered to the current one.
+			if err = prepare(start.Fresh && len(pending) == len(start.Inputs)); err == nil {
 				result, err = r.Harness.Start(ctx, start.Turn, pending, accepted)
 			}
 		} else {
 			var settled bool
 			result, settled, err = r.Harness.Recover(start.Turn, start.Inputs)
 			if err == nil && !settled {
-				if err = prepare(); err == nil {
+				if err = prepare(false); err == nil {
 					result, err = r.Harness.Continue(ctx, start.Turn, accepted)
 				}
 			}

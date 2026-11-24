@@ -35,8 +35,11 @@ func TestTheDefaultSkillIsBuiltIn(t *testing.T) {
 	for _, item := range BuiltIn() {
 		byName[item.Name] = item
 	}
-	if extend := byName["dyna-extend"]; len(byName) != 11 || !strings.HasPrefix(extend.Description, "Use when sessions need a skill, Pi package or MCP server") || !extend.BuiltIn || byName["dyna-discord"].Name == "" {
+	if extend := byName["dyna-extend"]; len(byName) != 12 || !strings.HasPrefix(extend.Description, "Use when sessions need a skill, Pi package or MCP server") || !extend.BuiltIn || byName["dyna-discord"].Name == "" {
 		t.Fatalf("%+v", byName)
+	}
+	if guide := byName["dyna-sessions"]; guide.Name == "" || guide.RootOnly {
+		t.Fatalf("session guide must be built in for all sessions: %+v", guide)
 	}
 	if !IsBuiltIn("dyna-extend") || IsBuiltIn("other") {
 		t.Fatal("IsBuiltIn")
@@ -92,11 +95,11 @@ func TestTheWorkflowSkillSaysWhatTheCodeDoes(t *testing.T) {
 	}
 	text := string(data)
 	for _, want := range []string{
-		"`JSON.parse(args)`", "{code, stdout, stderr, durationMs}", "`check` defaults to `true`", "`{failed: true, step, reason}`",
+		"`JSON.parse(args)`", "{code, stdout, stderr, durationMs}", "`check` defaults to `true`", "`{failed: true, step, reason, rawText?}`",
 		"`{step, text, branch, commit, files}`", "`output` in place of `text` with a schema", "{branch, commit, merged, conflicts}",
 		"reads `commit`, not the tip of `branch`", "is a new session", "through any chain of resumes",
 		"the run ended first", "`Failed steps (N): <names>`", "`data.json`", "Up to 1024 bytes", "one worker per 512 MiB", "holds a box slot",
-		"Don't prohibit the tools a worker needs", "still reports done", "the final text is parsed as JSON and validated",
+		"Don't prohibit the tools a worker needs", "still reports done", "validated `StructuredOutput` result", "`.rawText` holds its last assistant text",
 		"`cwd` is relative to the main tree unless absolute", "`maxWorkers`", "git worktree remove --force", "`dyna session stop SESSION`",
 		"reload is for a running run", "resume is for an ended run", "`dyna workflow reload RUN FILE`", "no second one starts", "dyna workflow steer RUN STEP TEXT", "dyna workflow pause RUN", "dyna workflow unpause RUN", "runs on until the run ends",
 		"script version", "[events.md](events.md)", "status(text: string)", "It is not a step", "options other than `lane`",

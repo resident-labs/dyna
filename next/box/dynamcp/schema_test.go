@@ -97,8 +97,8 @@ func TestFieldDescriptionsComeFromTheContract(t *testing.T) {
 		described[item.Name] = item.InputSchema.Properties
 	}
 	for _, tc := range []struct{ tool, field, want string }{
-		{"post", "room", "Room ID; omitted means your room. A root can name another room to post plain text to its root in the feed."},
-		{"post", "home", "A session may name only its own DM, {kind: dm}. With no home, a post that names no session goes to the owner's conversation with you: where this turn's reply to the owner goes, else where the owner last wrote to you, else the feed. One that names sessions goes to the feed."},
+		{"post", "room", "Room name or ID; defaults to yours. Only root can post plain text to another room's root in its feed."},
+		{"post", "home", "A session may name only its own DM ({kind: dm}). Default: feed with mentions; otherwise this turn's owner conversation, then the last one, then the feed."},
 		{"room", "home", "home narrows the log to one owner DM: {kind: dm, session: ses_…}. For log."},
 		{"visual", "file", "Absolute, or relative to your working directory."},
 	} {
@@ -142,8 +142,7 @@ func TestSharedFieldsAndTheToolDescriptionComeFromTheToolkit(t *testing.T) {
 	t.Fatal("no computer tool")
 }
 
-// A property only some of a tool's actions take names them, since the actions share one schema and each decodes strictly:
-// pr open takes no repo.
+// A property only some of a tool's actions take names them, since the actions share one schema and each decodes strictly.
 func TestAPropertySomeActionsTakeNamesThem(t *testing.T) {
 	tools, _, err := registry()
 	if err != nil {
@@ -154,7 +153,7 @@ func TestAPropertySomeActionsTakeNamesThem(t *testing.T) {
 			continue
 		}
 		repo := tool.InputSchema.Properties["repo"].Description
-		if !strings.Contains(repo, "For ") || strings.Contains(repo, "open") || !strings.Contains(repo, "status") {
+		if !strings.HasSuffix(repo, "For open, status, track and untrack.") {
 			t.Fatalf("repo says %q", repo)
 		}
 		if title := tool.InputSchema.Properties["title"].Description; !strings.HasSuffix(title, "For open.") {

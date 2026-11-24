@@ -35,6 +35,9 @@ test("path media uses the message identity, a guessed type and the shared route"
   assert.equal(mediaKind(sharedMedia("dyna", "a.go", source).file), "text");
   assert.equal(mediaKind(sharedMedia("dyna", "a.md", source).file), "markdown");
   assert.equal(mediaKind(sharedMedia("dyna", "a.svg", source).file), "svg");
+  assert.equal(mediaKind(sharedMedia("dyna", "essay.docx", source).file), "word");
+  assert.equal(mediaKind(sharedMedia("dyna", "grades.xlsx", source).file), "spreadsheet");
+  assert.equal(mediaKind(sharedMedia("dyna", "deck.pptx", source).file), "slides");
   assert.equal(sharedMedia("dyna", "empty.txt", source, 0).sizeKnown, true);
   assert.equal(sharedMedia("dyna", "a.go", source, 123, "2026-11-05T09:00:00Z").modified, "2026-11-05T09:00:00Z");
 });

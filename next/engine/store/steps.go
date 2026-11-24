@@ -6,13 +6,38 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 124
+const schemaVersion = 130
 
 const agentsTable = `CREATE TABLE agents (id TEXT PRIMARY KEY, session TEXT NOT NULL REFERENCES sessions(id), turn TEXT NOT NULL, name TEXT NOT NULL, state TEXT NOT NULL, transcript TEXT NOT NULL DEFAULT '', start_offset INTEGER NOT NULL DEFAULT 0, started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL DEFAULT 0, model TEXT NOT NULL DEFAULT '', input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, cache_read_tokens INTEGER NOT NULL DEFAULT 0, cache_write_tokens INTEGER NOT NULL DEFAULT 0)`
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
+	// Session conversation clearing: pending clear timestamp on sessions, and the turn that consumed it.
+	129: {
+		`ALTER TABLE sessions ADD COLUMN cleared_at INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE turns ADD COLUMN cleared_at INTEGER NOT NULL DEFAULT 0`,
+	},
+	// Feed services (spec 5.18): message dedupe, outbound queue and counters on services.
+	128: {
+		`ALTER TABLE services ADD COLUMN feed_in INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE services ADD COLUMN feed_out INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE services ADD COLUMN feed_last_at INTEGER NOT NULL DEFAULT 0`,
+		`CREATE TABLE service_feed_messages (service TEXT NOT NULL REFERENCES services(id), id TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY(service, id))`,
+		`CREATE TABLE service_outbox (id TEXT PRIMARY KEY, service TEXT NOT NULL REFERENCES services(id), room TEXT NOT NULL REFERENCES rooms(id), recipient TEXT NOT NULL, text TEXT NOT NULL, created_at INTEGER NOT NULL, acked_at INTEGER NOT NULL DEFAULT 0)`,
+		`CREATE INDEX service_outbox_pending ON service_outbox(service, created_at) WHERE acked_at = 0`,
+	},
+	127: {
+		`DROP TABLE IF EXISTS browser_leases`,
+		`ALTER TABLE browsers DROP COLUMN generation`,
+	},
+	126: {
+		`CREATE TABLE browsers (name TEXT PRIMARY KEY, generation INTEGER NOT NULL DEFAULT 1)`,
+		`CREATE TABLE browser_leases (profile TEXT PRIMARY KEY REFERENCES browsers(name) ON DELETE CASCADE, box TEXT NOT NULL, session TEXT NOT NULL, generation INTEGER NOT NULL, since INTEGER NOT NULL)`,
+		`ALTER TABLE rooms ADD COLUMN browser TEXT NOT NULL DEFAULT ''`,
+	},
+	125: {`ALTER TABLE workflow_steps ADD COLUMN raw_text TEXT NOT NULL DEFAULT ''`},
+	124: {`ALTER TABLE room_repos ADD COLUMN ci_hosts TEXT NOT NULL DEFAULT '[]'`},
 	// A subscription's workflow is a service: one run that serves the queue. Its rows are claimed by the run's box start and
 	// handed over again after a lost box, so an old claim, and the per-event runs of the last release, are released.
 	123: {`ALTER TABLE workflow_runs ADD COLUMN served TEXT NOT NULL DEFAULT ''`, `ALTER TABLE workflow_steps ADD COLUMN event INTEGER NOT NULL DEFAULT 0`, `ALTER TABLE workflow_queue ADD COLUMN boot TEXT NOT NULL DEFAULT ''`, `ALTER TABLE workflow_queue ADD COLUMN handovers INTEGER NOT NULL DEFAULT 0`, `UPDATE workflow_queue SET run=''`, `CREATE UNIQUE INDEX workflow_runs_service ON workflow_runs(sub) WHERE sub!='' AND key='' AND state='running'`, `CREATE INDEX workflow_queue_key ON workflow_queue(sub,key,id)`, `CREATE TABLE workflow_streaks (sub TEXT NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE, key TEXT NOT NULL, PRIMARY KEY(sub,key))`},

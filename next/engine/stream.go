@@ -290,9 +290,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 		replay := true
 		diffAsked := false
 		var stopSent contract.TurnID
-		pauseSent, stepsSent := false, []string(nil)
-		var releasedSent []string
-		reloadSent := 0 // Send current script and pause state on every channel; Reload ignores a script version it already has.
+		var sent *contract.BoxWorkflow // A new channel sends the current script, pauses and profiles again.
 		for {
 			if !handle.Lock() {
 				return
@@ -353,27 +351,29 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 				}
 				dispatch = s.store.DispatchStale
 			}
-			// A reload reaches a crew's box on its next channel too, which ignores a version it already runs.
 			if crew {
 				run, err := s.store.SessionWorkflow(ctx, session.ID)
 				if err != nil {
 					reason, cause = streamWorkflowReadFailed, err
 					return
 				}
-				if run.State == contract.WorkflowRunning && (run.Version != reloadSent || run.Paused != pauseSent || !slices.Equal(run.PausedSteps, stepsSent) || !slices.Equal(run.ReleasedSteps, releasedSent)) {
-					workflow, err := s.boxWorkflow(ctx, run, current.Size.MemBytes)
-					if err != nil {
-						reason, cause = streamWorkflowReadFailed, err
-						return
-					}
-					select {
-					case out <- contract.BoxMessage{Body: contract.WorkflowReload{Workflow: *workflow}}:
-						reloadSent = run.Version
-						pauseSent, stepsSent = run.Paused, run.PausedSteps
-						releasedSent = run.ReleasedSteps
-					case <-ctx.Done():
-						reason, cause = streamCanceled, ctx.Err()
-						return
+				if run.State == contract.WorkflowRunning {
+					profiles, models := s.workflowProfiles(run.Profiles)
+					if sent == nil || run.Version != sent.Version || run.Paused != sent.Paused ||
+						!slices.Equal(run.PausedSteps, sent.PausedSteps) || !slices.Equal(run.ReleasedSteps, sent.ReleasedSteps) ||
+						!slices.Equal(profiles, sent.Profiles) || !slices.Equal(models, sent.TextOnlyModels) {
+						workflow, err := s.boxWorkflowWithProfiles(ctx, run, current.Size.MemBytes, profiles, models)
+						if err != nil {
+							reason, cause = streamWorkflowReadFailed, err
+							return
+						}
+						select {
+						case out <- contract.BoxMessage{Body: contract.WorkflowReload{Workflow: *workflow}}:
+							sent = workflow
+						case <-ctx.Done():
+							reason, cause = streamCanceled, ctx.Err()
+							return
+						}
 					}
 				}
 			}
@@ -491,8 +491,13 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 						return
 					}
 				}
+				fresh, err := s.store.TurnCleared(ctx, turn)
+				if err != nil {
+					reason, cause = streamDispatchFailed, err
+					return
+				}
 				select {
-				case out <- contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: start, Model: model, ModelInstructions: prompt.ModelInstructions(model), CompactTokens: s.profiles.CompactionTokens(profile), TextOnlyModels: s.profiles.TextOnlyModels(), Sections: sections}}:
+				case out <- contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: start, Model: model, ModelInstructions: prompt.ModelInstructions(model), CompactTokens: s.profiles.CompactionTokens(profile), TextOnlyModels: s.profiles.TextOnlyModels(), Sections: sections, Fresh: fresh}}:
 				case <-ctx.Done():
 					reason, cause = streamCanceled, ctx.Err()
 					return

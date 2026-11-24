@@ -45,8 +45,11 @@ func desktopArgs(socket string) []string {
 		"-AlwaysShared", "-AcceptSetDesktopSize=0", "-FrameRate", "60"}
 }
 
-// Profile is Chromium's profile, in the box's volume, so it lasts across restarts.
+// Profile is Chromium's per-box profile, in the box's volume, so it lasts across restarts.
 const Profile = "/box/computer"
+
+// legacySharedProfile is the v1 shared browser checkout folder removed at the next desktop start.
+const legacySharedProfile = "/box/computer-shared"
 
 // extensions are the image's unpacked Chromium extensions, uBlock Origin Lite and I still don't care about cookies.
 const extensions = "/opt/dyna/extensions/ubol,/opt/dyna/extensions/isdcac"
@@ -158,28 +161,61 @@ func (p *program) kill() {
 	}
 }
 
-// Process owns the desktop until its context is cancelled: the display, then the window manager and Chromium on it, all
+// Process owns the desktop until Close: the display, then the window manager and Chromium on it, all
 // in the computer cgroup. Nothing runs until the first Start.
 type Process struct {
-	mu      sync.Mutex
-	display *program
-	wm      *program
-	browser *program
-	apps    map[*program]struct{} // what launch started
-	stopped *program              // the display Stop ended, whose exit is no news
-	exit    string
-	ooms    uint64 // the computer cgroup's OOM kills when a program last exited
-	root    string // the box's cgroup
-	socket  string // the display's VNC socket; the window manager's config goes beside it
-	tmp     string // where X keeps its lock and socket
-	profile string // Chromium's profile
-	once    sync.Once
-	group   *os.File
-	notify  func(bool)
+	opMu          sync.Mutex // serializes Start, Stop and Close
+	mu            sync.Mutex
+	display       *program
+	wm            *program
+	browser       *program
+	apps          map[*program]struct{} // what launch started
+	stopped       *program              // the display Stop ended, whose exit is no news
+	exit          string
+	ooms          uint64 // the computer cgroup's OOM kills when a program last exited
+	root          string // the box's cgroup
+	socket        string // the display's VNC socket; the window manager's config goes beside it
+	tmp           string // where X keeps its lock and socket
+	profile       string // Chromium's per-box profile
+	legacyShared  string // legacy v1 /box/computer-shared folder to delete on Start
+	devtoolsURL   string // DevTools endpoint for cookie sync
+	cookies       CookieStore
+	syncInterval  time.Duration
+	cookieConnect func(context.Context) (cookieSession, error)
+	now           func() time.Time
+	syncer        *cookieSyncer
+	syncCancel    context.CancelFunc
+	syncDone      chan struct{}
+	closed        bool
+	once          sync.Once
+	group         *os.File
+	notify        func(bool)
 }
 
 func NewProcess() *Process {
-	return &Process{root: "/sys/fs/cgroup", socket: VNCSocket, tmp: "/tmp", profile: Profile}
+	return &Process{
+		root:         "/sys/fs/cgroup",
+		socket:       VNCSocket,
+		tmp:          "/tmp",
+		profile:      Profile,
+		legacyShared: legacySharedProfile,
+		devtoolsURL:  URL,
+		syncInterval: defaultCookieSyncInterval,
+	}
+}
+
+func (p *Process) legacySharedDir() string {
+	if p.legacyShared != "" {
+		return p.legacyShared
+	}
+	return legacySharedProfile
+}
+
+func (p *Process) devtoolsBase() string {
+	if p.devtoolsURL != "" {
+		return p.devtoolsURL
+	}
+	return URL
 }
 
 func (p *Process) setup() {
@@ -196,14 +232,20 @@ func (p *Process) setup() {
 // Start returns a previous exit report once, and starts the parts of the desktop that are not running. A Chromium the
 // owner closed opens again on the next use.
 func (p *Process) Start(ctx context.Context) (string, error) {
+	p.opMu.Lock()
+	defer p.opMu.Unlock()
+
+	// Remove any leftover v1 /box/computer-shared directory from before v2.
+	_ = os.RemoveAll(p.legacySharedDir())
+
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	report := p.exit
 	p.exit = ""
 	p.setup()
 	if p.display == nil {
 		if err := p.startDisplay(ctx); err != nil {
 			p.exit = report
+			p.mu.Unlock()
 			return "", err
 		}
 	}
@@ -211,17 +253,27 @@ func (p *Process) Start(ctx context.Context) (string, error) {
 	if p.wm == nil {
 		config := filepath.Join(filepath.Dir(p.socket), "jwmrc")
 		if err = os.WriteFile(config, jwmrc, 0644); err == nil {
-			p.wm, err = p.spawn(ctx, os.Stderr, "jwm", "-f", config)
+			p.wm, err = p.spawn(os.Stderr, "jwm", "-f", config)
 		}
 	}
+	var startedBrowser *program
 	if err == nil && p.browser == nil {
 		if err = clearProfileLock(p.profile); err == nil {
-			p.browser, err = p.spawn(ctx, os.Stderr, "chromium", browserArgs(p.profile)...)
+			p.browser, err = p.spawn(os.Stderr, "chromium", browserArgs(p.profile)...)
+			if err == nil {
+				startedBrowser = p.browser
+			}
 		}
 	}
 	if err != nil {
 		p.exit = report
+		p.mu.Unlock()
 		return "", err
+	}
+	p.mu.Unlock()
+
+	if startedBrowser != nil {
+		p.startCookieSync(ctx, startedBrowser)
 	}
 	return report, nil
 }
@@ -244,7 +296,7 @@ func (p *Process) startDisplay(ctx context.Context) error {
 	if err := os.MkdirAll(filepath.Dir(p.socket), 0755); err != nil {
 		return err
 	}
-	display, err := p.spawn(ctx, os.Stderr, "Xvnc", desktopArgs(p.socket)...)
+	display, err := p.spawn(os.Stderr, "Xvnc", desktopArgs(p.socket)...)
 	if err != nil {
 		return err
 	}
@@ -262,6 +314,9 @@ func (p *Process) startDisplay(ctx context.Context) error {
 		case <-wait.Done():
 			p.display = nil
 			display.kill()
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			return errors.New("the desktop did not start in 10 seconds")
 		case <-time.After(20 * time.Millisecond):
 		}
@@ -281,12 +336,12 @@ func (p *Process) Launch(ctx context.Context, command string) (string, error) {
 	if p.display == nil {
 		return "", errors.New("the desktop is not running")
 	}
-	log, err := os.CreateTemp("", "dyna-launch-*.log")
+	logFile, err := os.CreateTemp("", "dyna-launch-*.log")
 	if err != nil {
 		return "", err
 	}
-	defer log.Close()
-	app, err := p.spawn(ctx, log, "sh", "-c", command)
+	defer logFile.Close()
+	app, err := p.spawn(logFile, "sh", "-c", command)
 	if err != nil {
 		return "", err
 	}
@@ -294,11 +349,20 @@ func (p *Process) Launch(ctx context.Context, command string) (string, error) {
 		p.apps = map[*program]struct{}{}
 	}
 	p.apps[app] = struct{}{}
-	return log.Name(), nil
+	return logFile.Name(), nil
 }
 
-// Stop stops the desktop and what runs on it, for the agent's stop action. The next Start starts it again.
-func (p *Process) Stop() {
+// Stop runs a final cookie sync while Chromium is still running, then stops the desktop and what runs on it.
+// The next Start starts the desktop again.
+func (p *Process) Stop() error {
+	p.opMu.Lock()
+	defer p.opMu.Unlock()
+	return p.stopLocked()
+}
+
+func (p *Process) stopLocked() error {
+	p.stopCookieSync(true)
+
 	p.mu.Lock()
 	display := p.display
 	p.stopped = display
@@ -313,20 +377,20 @@ func (p *Process) Stop() {
 		gone := p.display == nil && p.wm == nil && p.browser == nil && len(p.apps) == 0
 		p.mu.Unlock()
 		if gone {
-			return
+			break
 		}
 	}
+	return nil
 }
 
 // spawn starts one program of the desktop in its own process group in the computer cgroup, and watches it. The caller
 // holds p.mu.
-func (p *Process) spawn(ctx context.Context, out io.Writer, name string, args ...string) (*program, error) {
+func (p *Process) spawn(out io.Writer, name string, args ...string) (*program, error) {
 	command := func() *exec.Cmd {
-		cmd := exec.CommandContext(ctx, name, args...)
+		cmd := exec.Command(name, args...)
 		cmd.Env = desktopEnv(p.socket)
 		cmd.Stdout, cmd.Stderr = out, out
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 		return cmd
 	}
 	cmd := command()
@@ -346,18 +410,17 @@ func (p *Process) spawn(ctx context.Context, out io.Writer, name string, args ..
 		return nil, err
 	}
 	started := &program{name: name, cmd: cmd, done: make(chan struct{})}
-	go p.watch(ctx, started)
+	go p.watch(started)
 	return started, nil
 }
 
 // watch waits for a program to exit. The display takes the rest of the desktop with it. An exit nobody asked for is
 // reported on the next Start, unless the display went first and stopped the program. The programs share one cgroup, so
 // an OOM kill counts for the first exit after it.
-func (p *Process) watch(ctx context.Context, exited *program) {
+func (p *Process) watch(exited *program) {
 	err := exited.cmd.Wait()
 	close(exited.done)
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	count := oomCount(p.root)
 	killed := count > p.ooms
 	p.ooms = count
@@ -365,6 +428,9 @@ func (p *Process) watch(ctx context.Context, exited *program) {
 	switch exited {
 	case p.display:
 		p.display = nil
+		if p.syncCancel != nil {
+			p.syncCancel()
+		}
 		p.wm.kill()
 		p.browser.kill()
 		for app := range p.apps {
@@ -376,17 +442,24 @@ func (p *Process) watch(ctx context.Context, exited *program) {
 		what = "The desktop"
 	case p.wm:
 		p.wm = nil
+		p.mu.Unlock()
 		return
 	case p.browser:
 		p.browser = nil
+		if p.syncCancel != nil {
+			p.syncCancel()
+		}
 		if p.display == nil {
+			p.mu.Unlock()
 			return
 		}
 	default:
 		delete(p.apps, exited)
+		p.mu.Unlock()
 		return
 	}
-	if ctx.Err() != nil || exited == p.stopped {
+	if p.closed || exited == p.stopped {
+		p.mu.Unlock()
 		return
 	}
 	if killed {
@@ -396,21 +469,27 @@ func (p *Process) watch(ctx context.Context, exited *program) {
 	} else {
 		p.exit = what + " exited"
 	}
+	p.mu.Unlock()
 }
 
-// Close stops the desktop and waits for its programs to exit.
+// Close runs a final cookie sync if Chromium is running, then stops the desktop and waits for its programs to exit.
 func (p *Process) Close() {
+	p.opMu.Lock()
+	defer p.opMu.Unlock()
+	p.stopCookieSync(true)
 	p.mu.Lock()
+	p.closed = true
 	running := []*program{p.browser, p.wm, p.display}
 	for app := range p.apps {
 		running = append(running, app)
 	}
 	group := p.group
+	p.group = nil
 	p.mu.Unlock()
-	for _, program := range running {
-		if program != nil {
-			program.kill()
-			<-program.done
+	for _, prog := range running {
+		if prog != nil {
+			prog.kill()
+			<-prog.done
 		}
 	}
 	if group != nil {
@@ -418,24 +497,25 @@ func (p *Process) Close() {
 	}
 }
 
-// Serve starts the private agent socket and returns its cleanup function.
-func Serve(ctx context.Context, socket string, errs chan<- error, notify func(bool)) (func(), error) {
+// Serve starts the private agent socket and returns the desktop Process and its cleanup function.
+func Serve(ctx context.Context, socket string, errs chan<- error, notify func(bool), cookies CookieStore) (*Process, func(), error) {
 	if err := os.MkdirAll(filepath.Dir(socket), 0755); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := os.Remove(socket); err != nil && !os.IsNotExist(err) {
-		return nil, err
+		return nil, nil, err
 	}
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	desktop := NewProcess()
 	desktop.notify = notify
+	desktop.cookies = cookies
 	desktop.setup()
 	server := &http.Server{Handler: desktop.Handler(ctx)}
 	go func() { errs <- server.Serve(listener) }()
-	return func() {
+	return desktop, func() {
 		_ = server.Close()
 		desktop.Close()
 		_ = os.Remove(socket)
@@ -448,18 +528,25 @@ type StartRequest struct {
 }
 
 // Handler serves the private in-box endpoint: POST /computer starts the desktop, /computer/launch starts the desktop and
-// then a command on it, and /computer/stop stops it. Every computer action but stop starts the desktop through it first.
+// then a command on it, and /computer/stop stops it.
 func (p *Process) Handler(ctx context.Context) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.NotFound(w, r)
 			return
 		}
+		reqCtx, cancel := context.WithCancel(r.Context())
+		stop := context.AfterFunc(ctx, cancel)
+		defer func() {
+			stop()
+			cancel()
+		}()
 		var started Started
 		var err error
 		switch r.URL.Path {
 		case "/computer/stop":
-			p.Stop()
+			_, _ = io.Copy(io.Discard, io.LimitReader(r.Body, 64<<10))
+			err = p.Stop()
 		case "/computer", "/computer/launch", "/computer/check":
 			var req StartRequest
 			if r.URL.Path == "/computer/launch" {
@@ -468,13 +555,15 @@ func (p *Process) Handler(ctx context.Context) http.Handler {
 					return
 				}
 			}
+			// Drain any remaining request body so net/http's background reader can observe client disconnect and cancel r.Context().
+			_, _ = io.Copy(io.Discard, io.LimitReader(r.Body, 64<<10))
 			started.URL = URL
-			started.Exit, err = p.Start(ctx)
+			started.Exit, err = p.Start(reqCtx)
 			if err == nil && r.URL.Path == "/computer/check" {
-				started.Log = p.Check(r.Context())
+				started.Log = p.Check(reqCtx)
 			}
 			if err == nil && req.Launch != "" {
-				started.Log, err = p.Launch(ctx, req.Launch)
+				started.Log, err = p.Launch(reqCtx, req.Launch)
 			}
 		default:
 			http.NotFound(w, r)

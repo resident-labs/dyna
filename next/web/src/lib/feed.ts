@@ -96,7 +96,8 @@ export function subject(event: Event): string | undefined {
   switch (event.type) {
     case "discord.files_retrieved": case "discord.message": case "discord.member.joined": case "discord.member.left": case "discord.channel.created": case "discord.channel.updated": case "discord.channel.deleted": case "discord.role.created": case "discord.role.updated": case "discord.role.deleted": case "host.switches_changed": case "engine.restarted": return undefined;
     case "post.sent": case "git.main_updated": case "git.main_ci_finished": case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": case "session.failed": case "goal.set": case "goal.item_changed": case "goal.ended": case "checkin.due": return undefined;
-    case "service.changed": case "service.failed": case "hook.finished": case "hook.due": case "hook.digest": case "notice.posted": case "transcript.changed": case "connect.connector": case "account.failed": case "account.quota_low": case "room.paused": case "room.resumed": case "room.limits_changed": case "room.deleting": case "room.deleted": case "host.disk_low": case "conversation.read": case "post.created": case "image.built": case "image.failed": case "box.pressure": case "grant.expired": case "session.profile_changed": return undefined;
+    case "service.changed": case "service.failed": case "service.message": case "hook.fired": case "hook.finished": case "hook.due": case "hook.digest": case "notice.posted": return undefined;
+    case "service.sent": return event.from.session;
     case "op.requested": return event.body.by.session;
     case "op.decided": case "op.ran": return event.from.session;
     default: return event.body.session;
@@ -104,7 +105,7 @@ export function subject(event: Event): string | undefined {
 }
 
 // Events with no row. Goals show in About and the session list; failures show on the box and turn events they report.
-// A pull request's rows come from github.pr.changed. The typed PR events, issue events, feed items, git.main_updated and git.main_ci_finished exist for subscribers and sessions.
+// A pull request's rows come from github.pr.changed. The typed PR events, issue events, git.main_updated and git.main_ci_finished exist for subscribers and sessions.
 // A running job's status is for the session that owns the job.
 const unshown = new Set<Event["type"]>(["discord.member.joined", "discord.member.left", "discord.channel.created", "discord.channel.updated", "discord.channel.deleted", "discord.role.created", "discord.role.updated", "discord.role.deleted", "shell.job.running", "workflow.pause_changed", "workflow.step_changed", "workflow.status_changed", "session.profile_changed", "transcript.changed", "session.failed", "goal.set", "goal.item_changed", "goal.ended", "checkin.due", "github.pr.merged", "github.pr.closed", "github.ci.finished", "git.main_updated", "git.main_ci_finished", "github.issue.opened", "github.comment", "github.label", "github.mention", "github.issue.changed", "github.issue.closed", "service.changed", "service.failed"]);
 
@@ -182,7 +183,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
     if (event.type === "account.failed" || event.type === "account.quota_low" || event.type === "host.disk_low" || event.type === "question.asked" || event.type === "question.answered" || event.type === "question.withdrawn") continue;
     // A schedule that does its job quietly says nothing. A failure and any post of its own still show.
     // Failed tool calls reach the feed only as a digest's row.
-    if (event.type === "hook.due" || event.type === "tool.failed" || event.type === "hook.finished" && event.body.result !== "failed") continue;
+    if (event.type === "hook.fired" || event.type === "hook.due" || event.type === "tool.failed" || event.type === "hook.finished" && event.body.result !== "failed") continue;
     const firstAt = work[0]?.at ?? (deferred[0]?.kind === "notice" ? deferred[0].event.at : deferred[0]?.kind === "failed" || deferred[0]?.kind === "request" || deferred[0]?.kind === "restarted" || deferred[0]?.kind === "run" ? deferred[0].at : undefined);
     if (firstAt && new Date(firstAt).toDateString() !== new Date(event.at).toDateString()) flush();
     if (event.type === "discord.message") {
@@ -237,7 +238,7 @@ export function feedRows(events: Event[], home: Conversation, pending: Pending[]
       // A job without an open turn stays in the work buffer below.
     }
     if (home.kind === "dm" && session !== home.session) continue;
-    if (event.type === "engine.restarted" || event.type === "room.paused" || event.type === "room.resumed" || event.type === "room.limits_changed" || event.type === "host.switches_changed" || event.type === "room.deleting" || event.type === "hook.digest") {
+    if (event.type === "engine.restarted" || event.type === "room.paused" || event.type === "room.resumed" || event.type === "room.limits_changed" || event.type === "host.switches_changed" || event.type === "room.deleting" || event.type === "hook.digest" || event.type === "session.cleared") {
       const previous = deferred.at(-1);
       if (event.type === "room.resumed" && previous?.kind === "notice" && previous.event.type === "room.paused" && sameAuthor(previous.event.from, event.from) && Date.parse(event.at) - Date.parse(previous.event.at) <= 300_000) previous.resumedAt = event.at;
       else deferred.push({ kind: "notice", key: `n${event.seq}`, event });
@@ -324,7 +325,7 @@ export const eventGroups: Record<Event["type"], string> = {
   "discord.member.joined": "Discord joins", "discord.member.left": "Discord leaves", "discord.channel.created": "Discord channels created", "discord.channel.updated": "Discord channels changed", "discord.channel.deleted": "Discord channels deleted", "discord.role.created": "Discord roles created", "discord.role.updated": "Discord roles changed", "discord.role.deleted": "Discord roles deleted",
   "connect.connector": "Connect connector changes", "account.failed": "account failures", "account.quota_low": "account quota alerts",
   "post.sent": "sent posts", "post.created": "posts", "session.started": "sessions started", "session.closed": "sessions closed", "session.compacted": "compactions",
-  "session.restarted": "boxes replaced", "session.moved": "sessions moved", "session.profile_changed": "profiles changed",
+  "session.restarted": "boxes replaced", "session.moved": "sessions moved", "session.cleared": "conversations cleared", "session.profile_changed": "profiles changed",
   "turn.started": "turns started", "turn.ended": "turns ended", "turn.activity": "turn updates", "transcript.changed": "transcript updates",
   "computer.changed": "computer changes", "box.changed": "box changes", "box.pressure": "memory warnings",
   "room.paused": "pauses", "room.resumed": "resumes", "room.limits_changed": "room limits changed", "room.deleting": "room deletions", "room.deleted": "room deletions",
@@ -332,11 +333,11 @@ export const eventGroups: Record<Event["type"], string> = {
   "question.asked": "questions", "question.answered": "questions answered", "question.withdrawn": "questions withdrawn",
   "image.built": "images built", "image.failed": "image builds failed", "github.pr.opened": "pull requests opened", "github.pr.changed": "pull request updates",
   "github.pr.merged": "pull requests merged", "github.pr.closed": "pull requests closed", "github.ci.finished": "CI results", "git.main_updated": "default branch moves", "git.main_ci_finished": "default branch CI results", "github.issue.opened": "issues opened", "github.comment": "GitHub comments", "github.label": "GitHub labels", "github.mention": "GitHub mentions", "github.issue.changed": "issue updates", "github.issue.closed": "issues closed",
-  "hook.finished": "subscription runs", "hook.due": "subscription wakes", "hook.digest": "subscription digests", "tool.failed": "failed tool calls", "notice.posted": "notices", "session.notice": "box notices",
+  "hook.fired": "manual subscription events", "hook.finished": "subscription runs", "hook.due": "subscription wakes", "hook.digest": "subscription digests", "tool.failed": "failed tool calls", "notice.posted": "notices", "session.notice": "box notices",
   "shell.job.ended": "jobs finished", "shell.job.running": "job status", "grant.expired": "host grants expired",
   "host.switches_changed": "host switch changes", "host.disk_low": "disk warnings", "conversation.read": "read positions", "workflow.ended": "workflow runs", "workflow.step_changed": "workflow steps", "workflow.status_changed": "workflow status lines", "workflow.pause_changed": "workflow pauses",
   "engine.restarted": "engine restarts",
-  "service.changed": "service changes", "service.failed": "service failures",
+  "service.changed": "service changes", "service.failed": "service failures", "service.message": "feed messages", "service.sent": "messages sent to feed",
   "session.failed": "failure notices", "goal.set": "goals set", "goal.item_changed": "goal items changed", "goal.ended": "goals ended", "checkin.due": "check-ins",
 };
 
@@ -467,7 +468,7 @@ export function prWords(pr: PrSummary): { label: string; tone?: "failed" | "warn
 export function workSummary(events: Event[], name: Name, until?: string, from?: string): string {
   if (events.length === 1 && !until && events[0].type !== "turn.started" && events[0].type !== "turn.ended" && events[0].type !== "shell.job.ended" && events[0].type !== "computer.changed" && !(events[0].type === "session.closed" && events[0].body.reason)) return describe(events[0], name) || "Activity";
   const turns = new Set<string>();
-  let stopped = 0, jobs = 0, images = 0, prs = 0, updates = 0, started = 0, closed = 0, memory = 0;
+  let stopped = 0, jobs = 0, images = 0, prs = 0, updates = 0, started = 0, closed = 0, memory = 0, feedMessages = 0, feedSent = 0;
   const approvals = new Map<string, number>();
   let first = Infinity, last = -Infinity;
   for (const event of events) {
@@ -485,6 +486,8 @@ export function workSummary(events: Event[], name: Name, until?: string, from?: 
       case "github.pr.opened": prs++; break;
       case "github.pr.changed": updates++; break;
       case "box.pressure": memory++; break;
+      case "service.message": feedMessages++; break;
+      case "service.sent": feedSent++; break;
       case "op.decided": if (event.body.decision.approved) { const by = event.body.decision.by.session ? name(event.body.decision.by.session) : "you"; approvals.set(by, (approvals.get(by) ?? 0) + 1); } break;
     }
   }
@@ -498,6 +501,8 @@ export function workSummary(events: Event[], name: Name, until?: string, from?: 
   const workers = sessions.length > 3 ? `${named.join(", ")} and ${sessions.length - 3} more` : names;
   const parts = [
     sessions.length && `${workers} worked${sessions.length === 1 && last >= first ? ` for ${took}` : ""}`,
+    feedMessages && count(feedMessages, "feed message"),
+    feedSent && `${feedSent} sent to feed`,
     stopped && `${count(stopped, "turn")} stopped`,
     jobs && count(jobs, "job"),
     images && `${count(images, "image")} built`,
@@ -529,6 +534,7 @@ export function describe(event: Event, name: Name): string {
     case "session.closed": return `${name(event.body.session)} closed${event.body.reason ? ` ${closeReasons[event.body.reason]}` : ""}`;
     case "session.compacted": return event.body.error ? `${name(event.body.session)} could not compact its conversation` : `${name(event.body.session)} compacted its conversation`;
     case "session.moved": return `${name(event.body.session)} moved under ${name(event.body.newParent)}`;
+    case "session.cleared": return `Cleared ${name(event.body.session)}'s conversation`;
     case "computer.changed": return `${name(event.body.session)} ${event.body.to === "running" ? "opened" : "closed"} its computer`;
     case "box.changed": return ""; // feedRows keeps box changes out of work rows.
     case "turn.started": return "";
@@ -551,6 +557,17 @@ export function describe(event: Event, name: Name): string {
     case "github.pr.opened": return `${name(event.body.session ?? "")} opened pull request ${event.body.repo}#${event.body.number}`;
     case "github.pr.changed": return wakingChanges(event.body).map(changeLine).join(" · ");
     case "service.changed": case "service.failed": return "";
+    case "service.message": {
+      const line = event.body.text.replace(/\s+/g, " ").trim();
+      const preview = line.length > 140 ? `${line.slice(0, 139)}…` : line;
+      return `${event.body.service} · ${event.body.author}${preview ? `: ${preview}` : " (data)"}`;
+    }
+    case "service.sent": {
+      const who = event.from.kind === "owner" ? "You" : event.from.session ? name(event.from.session) : event.body.service;
+      const line = event.body.text.replace(/\s+/g, " ").trim();
+      const preview = line.length > 140 ? `${line.slice(0, 139)}…` : line;
+      return `${who} → ${event.body.to} · ${event.body.service}${preview ? `: ${preview}` : ""}`;
+    }
     case "discord.member.joined": case "discord.member.left": case "discord.channel.created": case "discord.channel.updated": case "discord.channel.deleted": case "discord.role.created": case "discord.role.updated": case "discord.role.deleted": return ""; // subscribers hear of server events; no feed row shows them.
     case "github.pr.merged": case "github.pr.closed": case "github.ci.finished": case "git.main_updated": case "git.main_ci_finished": case "github.issue.opened": case "github.comment": case "github.label": case "github.mention": case "github.issue.changed": case "github.issue.closed": return ""; // feedRows shows no row for them.
     case "grant.expired": return "A host execution grant expired";
@@ -578,6 +595,7 @@ export function describe(event: Event, name: Name): string {
     case "post.sent": case "post.created": return event.body.text;
     case "hook.finished": return `A subscription's run ${event.body.result}: ${event.body.cause ? causes[event.body.cause] : `exit code ${event.body.exitCode}`}`;
     case "hook.due": return "A subscription woke a session";
+    case "hook.fired": return "A subscription received custom data";
     case "hook.digest": {
       const count = (event.body.events?.length ?? 0) + (event.body.more ?? 0);
       return `Digest of ${count} ${count === 1 ? "event" : "events"} from subscription ${event.body.subscription}`;

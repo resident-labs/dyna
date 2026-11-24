@@ -126,6 +126,8 @@ func TestUpgradeRecordsEarlierSessionsBranches(t *testing.T) {
 		"ALTER TABLE pr_owners DROP COLUMN position",
 		"ALTER TABLE hosts DROP COLUMN ci_scale", "ALTER TABLE boxes DROP COLUMN create_retry_host",
 		"ALTER TABLE rooms DROP COLUMN github_writes",
+		"DROP TABLE service_feed_messages",
+		"DROP TABLE service_outbox",
 		"DROP TABLE service_leftovers",
 		"DROP TABLE service_secrets",
 		"DROP TABLE services",
@@ -133,7 +135,7 @@ func TestUpgradeRecordsEarlierSessionsBranches(t *testing.T) {
 		"DROP TABLE repo_heads",
 		"INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES ('room','room',1,0,0)",
 		"INSERT INTO sessions(id,room,name,profile,state,goal,created_at,repo) VALUES ('ses_with','room','with','p','ready','',7,'owner/repo'),('ses_without','room','without','p','ready','',8,'')",
-		"DROP INDEX goals_holder; CREATE INDEX goals_holder ON goals(session) WHERE state='active'; ALTER TABLE goal_items DROP COLUMN parent; ALTER TABLE goals DROP COLUMN folded_goal; ALTER TABLE goals DROP COLUMN folded_item; ALTER TABLE workflow_runs DROP COLUMN released_steps; ALTER TABLE rooms DROP COLUMN advisor_profile; DROP TABLE agents; ALTER TABLE rooms DROP COLUMN git_signing; ALTER TABLE workflow_runs DROP COLUMN paused_steps; ALTER TABLE workflow_runs DROP COLUMN paused; DROP INDEX workflow_runs_service; DROP TABLE workflow_streaks; ALTER TABLE workflow_runs DROP COLUMN served; ALTER TABLE workflow_runs DROP COLUMN sub; ALTER TABLE workflow_runs DROP COLUMN key; DROP TABLE workflow_queue; DROP TABLE workflow_state; DROP TABLE workflow_subscriptions; ALTER TABLE room_repos DROP COLUMN pr_events; ALTER TABLE room_repos DROP COLUMN pr_census_at; ALTER TABLE workflow_steps DROP COLUMN event; ALTER TABLE workflow_steps DROP COLUMN progress_offset; ALTER TABLE workflow_steps DROP COLUMN tool_calls; ALTER TABLE workflow_steps DROP COLUMN last_activity; UPDATE meta SET value='89' WHERE key='schema_version'",
+		"DROP INDEX goals_holder; CREATE INDEX goals_holder ON goals(session) WHERE state='active'; ALTER TABLE goal_items DROP COLUMN parent; ALTER TABLE goals DROP COLUMN folded_goal; ALTER TABLE goals DROP COLUMN folded_item; ALTER TABLE workflow_runs DROP COLUMN released_steps; ALTER TABLE rooms DROP COLUMN advisor_profile; DROP TABLE agents; ALTER TABLE rooms DROP COLUMN git_signing; ALTER TABLE workflow_runs DROP COLUMN paused_steps; ALTER TABLE workflow_runs DROP COLUMN paused; DROP INDEX workflow_runs_service; DROP TABLE workflow_streaks; ALTER TABLE workflow_runs DROP COLUMN served; ALTER TABLE workflow_runs DROP COLUMN sub; ALTER TABLE workflow_runs DROP COLUMN key; DROP TABLE workflow_queue; DROP TABLE workflow_state; DROP TABLE workflow_subscriptions; ALTER TABLE room_repos DROP COLUMN pr_events; ALTER TABLE room_repos DROP COLUMN pr_census_at; ALTER TABLE workflow_steps DROP COLUMN event; ALTER TABLE workflow_steps DROP COLUMN progress_offset; ALTER TABLE workflow_steps DROP COLUMN tool_calls; ALTER TABLE workflow_steps DROP COLUMN last_activity; ALTER TABLE room_repos DROP COLUMN ci_hosts; ALTER TABLE workflow_steps DROP COLUMN raw_text; DROP TABLE browsers; ALTER TABLE rooms DROP COLUMN browser; ALTER TABLE sessions DROP COLUMN cleared_at; ALTER TABLE turns DROP COLUMN cleared_at; UPDATE meta SET value='89' WHERE key='schema_version'",
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatalf("%s: %v", q, err)

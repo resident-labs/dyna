@@ -59,7 +59,7 @@ func captureLog(t *testing.T) *bytes.Buffer {
 func push(t *testing.T, transport http.RoundTripper, req *http.Request) *httptest.ResponseRecorder {
 	target, _ := url.Parse("https://github.com")
 	w := httptest.NewRecorder()
-	Handler(target, transport, "secret-token", "ses_1", "room", routeAccess()).ServeHTTP(w, req)
+	Handler(target, transport, "secret-token", "ses_1", "room", routeAccess(), defaultMain).ServeHTTP(w, req)
 	return w
 }
 
@@ -262,7 +262,7 @@ func TestSyntheticResponsesCarryTheirOwnHeaders(t *testing.T) {
 		header.Set("Content-Type", "text/html")
 		return &http.Response{StatusCode: 500, ContentLength: 4, Header: header, Body: io.NopCloser(strings.NewReader("boom"))}
 	}
-	server := httptest.NewServer(Handler(target, &upstreamScript{replies: []func() *http.Response{failing}}, "secret-token", "ses_1", "room", routeAccess()))
+	server := httptest.NewServer(Handler(target, &upstreamScript{replies: []func() *http.Response{failing}}, "secret-token", "ses_1", "room", routeAccess(), defaultMain))
 	defer server.Close()
 	resp, err := http.Post(server.URL+"/git/owner/repo.git/git-receive-pack", "application/x-git-receive-pack-request", strings.NewReader(pushBody("")))
 	if err != nil {

@@ -23,6 +23,7 @@ import (
 	"github.com/resident-labs/dyna/box/dynamcp"
 	"github.com/resident-labs/dyna/box/shell"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/contract/outside"
 	"github.com/resident-labs/dyna/harness/pig"
 )
 
@@ -36,7 +37,7 @@ type Config struct {
 
 const (
 	// outputLimit is what the model reads of a long output; the whole output goes to a file.
-	outputLimit = 20 << 10
+	outputLimit = 12 << 10
 	movedNote   = "The job is in the background. You can end your turn and Dyna will wake you when it completes."
 	steppedNote = " sent you a message, so this command moved to the background, where it keeps running. job output reads its new output, and Dyna will wake you when it completes."
 	// abortedNote is bash's answer when the turn was stopped during the call. The job server keeps a command that had
@@ -133,7 +134,7 @@ func bash(c Config, roots map[string]string) extension.ToolDefinition {
 	return extension.ToolDefinition{
 		Name:          "bash",
 		Label:         "bash",
-		Description:   "Run a bash command. A command that only sleeps, optionally followed by a bare echo or true, is refused. It runs in the foreground for up to 30 s, then keeps running in the background as a job. Never detach a command with nohup, setsid, disown or a trailing &: Dyna can't see it and won't wake you when it ends. A message from the owner or an agent above moves a foreground command to the background.\njob output returns only text printed since the last read, and is empty when a job printed nothing.\nThe command runs as bash -c, so its text is in the process list. pkill -f with a pattern from that text also matches this shell and ends the job with SIGTERM. A command in this box runs at low CPU priority (nice 19), so you stay responsive while a build uses the box's CPU; a host run is not changed.\nhost runs the command on that machine instead of this box, under your host grant. A host run goes on through an engine restart (a deploy) or a dropped connection, and its output and exit code still reach the job; if the restarted engine cannot follow it, the job ends with a failure that names the restart, the host and the unit.\nIf a pre-commit hook fails, no commit was created. Fix the cause, stage the fix and retry the commit; do not amend the previous commit to recover from this failure. Do not bypass hooks or signing checks unless the owner explicitly authorized that bypass.\nFor searches, narrow the directory and file pattern first. Use rg -l when you need paths, rg -n for matching lines and rg -c for counts. If output is truncated, narrow or page the result before drawing conclusions about what was not found.",
+		Description:   "Run bash here or on a granted host. After 30 s or a message from the owner or an ancestor, the command continues as a job. Don't detach it (nohup, setsid, disown or trailing &): Dyna loses it. Sleep-only commands, even followed by echo or true, are refused. bash -c puts the command in the process list; pkill -f can kill that shell too.\nOutput shows up to the last 12 KiB and names a file with the full output when cut. Narrow searches (rg -l for paths, -n for lines, -c for counts) or page with read. After a failed commit hook, fix, stage and retry; don't amend. Never bypass hooks or signing without explicit owner approval.",
 		PromptSnippet: "Run bash commands, here or on a host",
 		Parameters:    json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"},"description":{"type":"string","description":"What the command is for, as its title in the Jobs list"},"cwd":{"type":"string"},"host":{"type":"string"},"timeout":{"type":"integer","description":"Seconds, not milliseconds, before the command is stopped, at most 7200. A host run stops at 600 by default"}},"required":["command"]}`),
 		OutputSchema:  jobSchema,
@@ -163,7 +164,7 @@ func job(c Config, reader *shell.OutputReader) extension.ToolDefinition {
 	return extension.ToolDefinition{
 		Name:          "job",
 		Label:         "job",
-		Description:   "Background jobs that bash started, including foreground commands moved aside by a message from the owner or an agent above. Dyna wakes the session when a background job completes, at 5, 15 and 30 minutes and then hourly while it runs, and once when it has had no output, CPU use, reads or writes for 5 minutes; each notice carries its last output lines and its processes. A process list or cache statistics do not show whether a job is working: read its output before saying anything about it.\noutput: read a job's new output. On a running job it waits up to 30 s and returns everything printed meanwhile, earlier only when the job ends or a message arrives. After a job answered still running this turn, another output call for it returns immediately with a reminder to end the turn; it does not consume output. The first check of the next turn waits normally, and finished results are always returned.\nstop: stop a job and its whole process group.\nlist: list the jobs.",
+		Description:   "Dyna wakes you when a job ends, at 5, 15 and 30 minutes then hourly, and once after 5 minutes with no output or activity. Check output before judging progress.\noutput: new text since the last read (up to 12 KiB; full output saved to a file). Waits up to 30 s, or until completion or a message. After a still-running result, another check that turn doesn't wait or consume output; it works normally next turn or when finished.\nstop: stop the job's process group.",
 		PromptSnippet: "Read, stop or list background jobs",
 		Parameters:    json.RawMessage(`{"type":"object","properties":{"action":{"type":"string","enum":["output","stop","list"]},"job":{"type":"string"}},"required":["action"]}`),
 		OutputSchema:  jobSchema,
@@ -335,17 +336,14 @@ func outsideResult(_ context.Context, e extension.ToolResultEvent) (extension.To
 	if !found || !strings.HasPrefix(result.ToolName, "mcp__") || server == "dyna" {
 		return extension.ToolResultEventResult{}, nil
 	}
-	source := "mcp " + server
-	if server == "github" {
-		source = server
-	}
+	origin := outside.MCP(server)
 	content := make([]any, len(result.Content))
 	for i, block := range result.Content {
 		content[i] = block
 		// PiG gives a block as the JSON object it is.
 		if fields, ok := block.(map[string]any); ok && fields["type"] == "text" {
 			text, _ := fields["text"].(string)
-			content[i] = map[string]any{"type": "text", "text": contract.Outside(source, "", text)}
+			content[i] = map[string]any{"type": "text", "text": outside.Wrap(origin, text)}
 		}
 	}
 	return extension.ToolResultEventResult{Content: content, StructuredContent: result.StructuredContent}, nil

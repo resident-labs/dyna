@@ -65,7 +65,7 @@ Undo: `dyna image save NAME ~/img-old`, then refresh as in step 5. A session who
 
 Keep one box image per room and extend it. With two or more, every box whose compose file has no `build`,
 the root's included (a root takes no compose file), fails to start with "the room has several images, so a compose
-file must choose one". `dyna image remove NAME` of the last box image returns the room to the plain base.
+file must choose one". An image for a service alone holds an empty file `service-only` beside its Containerfile; it is not a box image, so it never counts here. `dyna image remove NAME` of the last box image returns the room to the plain base.
 
 The CI runner image (`ci-runner`) is in dyna-ci.
 

@@ -3,6 +3,8 @@ package dynamcp
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -56,6 +58,38 @@ func TestSubscriptionAddCallsSayWhatEachFieldTakes(t *testing.T) {
 	}
 }
 
+func TestSubscriptionFireDataHTTPBoundary(t *testing.T) {
+	data := `"` + strings.Repeat("a", (1<<20)-2) + `"`
+	forwarded := false
+	server, err := New(func(_ context.Context, method contract.Method, body []byte) ([]byte, *contract.Error) {
+		forwarded = true
+		if method != contract.MethodSubscriptionFire {
+			t.Fatalf("method %s", method)
+		}
+		var req contract.SubscriptionFireRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatal(err)
+		}
+		if req.ID != "sub_a" || string(req.Data) != data {
+			t.Fatal("payload changed in transit")
+		}
+		return []byte(`{}`), nil
+	}, nil, post.Preparer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"subscription","arguments":{"action":"fire","id":"sub_a","data":` + data + `}}}`
+	w := httptest.NewRecorder()
+	server.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/dyna/", strings.NewReader(rpc)))
+	var got response
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !forwarded || got.Error != nil || strings.Contains(w.Body.String(), `"isError":true`) {
+		t.Fatalf("forwarded %v, response %s", forwarded, w.Body.String())
+	}
+}
+
 func TestSubscriptionFieldsAreDescribed(t *testing.T) {
 	list, _, err := registry()
 	if err != nil {
@@ -78,7 +112,49 @@ func TestSubscriptionFieldsAreDescribed(t *testing.T) {
 				t.Errorf("%s is %s", field, got)
 			}
 		}
+		for _, field := range []string{"on", "every"} {
+			desc := item.InputSchema.Properties[field].Description
+			if !strings.HasSuffix(desc, "For add and update.") || strings.Contains(desc, "add: ") {
+				t.Errorf("%s description: %s", field, desc)
+			}
+		}
+		if !strings.Contains(item.Description, "on replaces event types") || !strings.Contains(item.Description, "every replaces the schedule") {
+			t.Errorf("update help lacks on/every guidance: %s", item.Description)
+		}
 		return
 	}
 	t.Fatal("no subscription tool")
+}
+
+func TestSubscriptionUpdateCallsForwardOnAndEveryAndRefuseNumericEvery(t *testing.T) {
+	var forwarded []byte
+	server, err := New(func(_ context.Context, m contract.Method, body []byte) ([]byte, *contract.Error) {
+		if m != contract.MethodSubscriptionUpdate {
+			t.Fatalf("forwarded %s", m)
+		}
+		forwarded = body
+		return []byte(`{}`), nil
+	}, nil, post.Preparer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := server.call(context.Background(), callParams{Name: "subscription", Arguments: arguments(t, `{"action":"update","id":"sub_a","every":300}`)})
+	var problem contract.Error
+	if err := json.Unmarshal(out.StructuredContent, &problem); err != nil {
+		t.Fatal(err)
+	}
+	if !out.IsError || problem.Code != contract.ErrInvalid || problem.Message != `every is a duration string such as "1h", "15m" or "90s", not the number 300` || forwarded != nil {
+		t.Fatalf("numeric every: %+v, forwarded %s", problem, forwarded)
+	}
+	out = server.call(context.Background(), callParams{Name: "subscription", Arguments: arguments(t, `{"action":"update","id":"sub_a","on":["github.pr.changed","github.ci.finished"],"every":""}`)})
+	if out.IsError {
+		t.Fatalf("%+v", out)
+	}
+	var req contract.SubscriptionUpdateRequest
+	if err := json.Unmarshal(forwarded, &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.ID != "sub_a" || req.On == nil || len(*req.On) != 2 || (*req.On)[1] != "github.ci.finished" || req.Every == nil || *req.Every != "" {
+		t.Fatalf("forwarded %+v", req)
+	}
 }

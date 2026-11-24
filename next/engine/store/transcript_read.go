@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -33,6 +35,34 @@ func (s *Store) TranscriptTurnsIntersecting(ctx context.Context, session contrac
 		err = rows.Scan(&turn)
 		return
 	}, `SELECT turn FROM transcript_turns WHERE session=? AND path=? AND start<? AND (start>=? OR start=(SELECT max(start) FROM transcript_turns WHERE session=? AND path=? AND start<=?)) ORDER BY start`, session, path, end, start, session, path, start)
+}
+
+// TranscriptTurnCleared returns the cleared_at timestamp for each turn in ids that started after a clear.
+func (s *Store) TranscriptTurnCleared(ctx context.Context, session contract.SessionID, turns []contract.TurnID) (map[contract.TurnID]time.Time, error) {
+	result := make(map[contract.TurnID]time.Time)
+	if len(turns) == 0 {
+		return result, nil
+	}
+	args := make([]any, 0, len(turns)+1)
+	args = append(args, session)
+	for _, id := range turns {
+		args = append(args, id)
+	}
+	placeholders := strings.Repeat("?,", len(turns)-1) + "?"
+	rows, err := s.Read().QueryContext(ctx, `SELECT id,cleared_at FROM turns WHERE session=? AND cleared_at>0 AND id IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id contract.TurnID
+		var cleared int64
+		if err := rows.Scan(&id, &cleared); err != nil {
+			return nil, err
+		}
+		result[id] = time.UnixMilli(cleared).UTC()
+	}
+	return result, rows.Err()
 }
 
 // TranscriptTurnMetadata returns a bounded newest-first page without loading sent posts.
@@ -101,7 +131,7 @@ func (s *Store) TranscriptTurnMetadata(ctx context.Context, session contract.Ses
 }
 
 const transcriptPostsQuery = ` FROM events e JOIN turns t ON t.session=? AND t.id=?
-WHERE e.type='post.created' AND e.from_kind='session' AND e.from_id=t.session
+WHERE e.type IN ('post.created','service.sent') AND e.from_kind='session' AND e.from_id=t.session
 AND e.seq>t.started_seq
 AND NOT EXISTS (SELECT 1 FROM turns n WHERE n.session=t.session AND n.started_seq>t.started_seq AND n.started_seq<=e.seq)
 AND NOT EXISTS (SELECT 1 FROM events ended WHERE ended.room=(SELECT room FROM sessions WHERE id=t.session) AND ended.type='turn.ended' AND ended.from_kind='session' AND ended.from_id=t.session AND json_extract(CAST(ended.body AS TEXT),'$.turn')=t.id AND ended.seq>t.started_seq AND ended.seq<=e.seq)`
@@ -209,7 +239,7 @@ func (s *Store) TranscriptDeliveries(ctx context.Context, session contract.Sessi
 
 // TranscriptSteers returns the deliveries a running turn took as messages to read, a child's reply among them. A machine wake, such as a shell job's end, does not split the turn's work.
 func (s *Store) TranscriptSteers(ctx context.Context, session contract.SessionID) (map[contract.DeliverySeq]bool, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT d.seq FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_kind=? AND d.to_id=? AND d.queue IS NOT NULL AND e.type IN ('post.created','question.answered','turn.ended')", contract.PrincipalSession, session)
+	rows, err := s.Read().QueryContext(ctx, "SELECT d.seq FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_kind=? AND d.to_id=? AND d.queue IS NOT NULL AND e.type IN ('post.created','question.answered','turn.ended','service.message')", contract.PrincipalSession, session)
 	if err != nil {
 		return nil, err
 	}

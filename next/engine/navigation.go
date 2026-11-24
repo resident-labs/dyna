@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/contract/outside"
 	"github.com/resident-labs/dyna/engine/store"
 	"github.com/resident-labs/dyna/harness/pig"
 )
@@ -155,9 +156,11 @@ func (s *Service) SearchPosts(ctx context.Context, caller contract.Principal, re
 		}
 		out.Snippet, _ = clipRunes(hit.Snippet, contract.SearchSnippetChars)
 		// Text of another room, or delivered from one, is outside text to an agent. The owner reads it plain.
+		origin := outside.Trusted()
 		if !owner && (hit.RoomName != ownName || hit.Source != nil) {
-			out.Snippet = contract.Outside("room "+source, author, out.Snippet)
+			origin = outside.Room(source, author)
 		}
+		out.Snippet = outside.Wrap(origin, out.Snippet)
 		result.Posts = append(result.Posts, out)
 	}
 	kept := fitPage(&result)
@@ -186,8 +189,12 @@ func (s *Service) SearchSessions(ctx context.Context, caller contract.Principal,
 	for i := range hits {
 		hits[i].Goal, _ = clipRunes(hits[i].Goal, contract.SearchGoalChars)
 		// A goal is free text of the room it came from: outside text to an agent of another room. Names are not.
-		if !owner && hits[i].Goal != "" && hits[i].Room != ownName {
-			hits[i].Goal = contract.Outside("room "+hits[i].Room, hits[i].Name, hits[i].Goal)
+		if hits[i].Goal != "" {
+			origin := outside.Trusted()
+			if !owner && hits[i].Room != ownName {
+				origin = outside.Room(hits[i].Room, hits[i].Name)
+			}
+			hits[i].Goal = outside.Wrap(origin, hits[i].Goal)
 		}
 	}
 	result := contract.SearchResponse{Sessions: hits, Total: total}
@@ -357,9 +364,11 @@ func (s *Service) HistoryRead(ctx context.Context, caller contract.Principal, re
 			source, author = string(body.Source.RoomName), body.Source.SessionName
 		}
 		// Text of another room, or delivered from one, is outside text to an agent. The owner reads it plain.
+		origin := outside.Trusted()
 		if !owner && (room != own || body.Source != nil) {
-			post.Text = contract.Outside("room "+source, author, post.Text)
+			origin = outside.Room(source, author)
 		}
+		post.Text = outside.Wrap(origin, post.Text)
 		for _, file := range body.Attachments {
 			post.Files = append(post.Files, fmt.Sprintf("%s (%s, %d KB)", file.Name, file.Media, (file.Bytes+1023)/1024))
 		}
@@ -514,10 +523,18 @@ func (s *Service) TranscriptDigest(ctx context.Context, caller contract.Principa
 				}
 				step(label + status)
 				for _, post := range item.Posts {
-					step("post: " + post.Text)
+					if post.Type == (contract.ServiceSent{}).EventType() {
+						step("→ " + post.To + ": " + post.Text)
+					} else {
+						step("post: " + post.Text)
+					}
 				}
 			case contract.TranscriptPost:
-				step("post: " + item.Text)
+				if item.Type == (contract.ServiceSent{}).EventType() {
+					step("→ " + item.To + ": " + item.Text)
+				} else {
+					step("post: " + item.Text)
+				}
 			case contract.TranscriptText:
 				out.Text, finalCut = clipRunes(item.Text, contract.TranscriptTextChars)
 				finalID = item.ID

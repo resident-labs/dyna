@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/contract/outside"
 	"github.com/resident-labs/dyna/engine/prs"
 	"github.com/resident-labs/dyna/engine/store"
 )
@@ -15,16 +16,16 @@ import (
 // issueFor returns an issue for this caller. Free text on an issue by anyone but the owner's account reaches a session wrapped (decision 13).
 func issueFor(caller contract.Principal, i store.TrackedIssue, viewer string) contract.IssueSummary {
 	summary := i.IssueSummary
-	writer := textWriter(summary.Author, viewer, i.Meta)
-	if caller.Kind != contract.PrincipalSession || writer == "" {
-		return summary
+	origin := outside.Trusted()
+	if writer := textWriter(summary.Author, viewer, i.Meta); caller.Kind == contract.PrincipalSession && writer != "" {
+		origin = outside.GitHub(writer)
 	}
-	summary.Title = contract.Outside("github", "@"+writer, summary.Title)
+	summary.Title = outside.Wrap(origin, summary.Title)
 	if summary.Milestone != "" {
-		summary.Milestone = contract.Outside("github", "@"+writer, summary.Milestone)
+		summary.Milestone = outside.Wrap(origin, summary.Milestone)
 	}
-	if len(summary.Labels) > 0 {
-		summary.Labels = []string{contract.Outside("github", "@"+writer, strings.Join(summary.Labels, ", "))}
+	if !origin.Trusted() && len(summary.Labels) > 0 {
+		summary.Labels = []string{outside.Wrap(origin, strings.Join(summary.Labels, ", "))}
 	}
 	return summary
 }

@@ -165,6 +165,7 @@ func Run(ctx context.Context, cfg Config) error {
 	boxes := &Boxes{Store: st, HeartbeatStore: st, Runtime: cfg.Runtime, Layout: layout, Version: cfg.Version, Context: boxCtx}
 	service := engine.New(st, boxes, profiles, time.Now)
 	service.SetLayout(layout)
+	service.MigrateBrowsers(ctx)
 	binary, err := boxes.binarySum()
 	if err != nil {
 		return fmt.Errorf("hash binary: %w", err)
@@ -303,6 +304,7 @@ func Run(ctx context.Context, cfg Config) error {
 	})
 	apiServer.SetFilesRoute(func(c api.Caller) http.Handler { return service.Files(c.Principal, c.Room) })
 	apiServer.SetSharedRoute(func(c api.Caller) http.Handler { return service.Shared(c.Principal) })
+	apiServer.SetBrowserRoute(func(c api.Caller) http.Handler { return service.BrowserSync(c.Principal, c.Room) })
 	apiServer.SetGitRoute(func(c api.Caller) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			credential, login, err := credentials.Room(r.Context(), c.Room)
@@ -314,7 +316,7 @@ func Run(ctx context.Context, cfg Config) error {
 			if login != "" {
 				transport = githubaccount.Transport{Base: transport, Label: fmt.Sprintf("GitHub account %s of room %s", login, c.Room), Token: credential}
 			}
-			enginegit.Handler(&url.URL{Scheme: "https", Host: "github.com"}, transport, credential, c.Principal.Session, c.Room, st).ServeHTTP(w, r)
+			enginegit.Handler(&url.URL{Scheme: "https", Host: "github.com"}, transport, credential, c.Principal.Session, c.Room, st, mirror.DefaultBranch).ServeHTTP(w, r)
 		})
 	})
 	files, err := connect.OpenFiles(cfg.Data)

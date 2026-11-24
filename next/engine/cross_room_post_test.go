@@ -99,3 +99,27 @@ func TestOwnerPostWithoutRoomIsRefused(t *testing.T) {
 		t.Fatalf("stored %d err %v", stored, err)
 	}
 }
+
+// Model horizon, 2026-11-23: root posted with room "dyna", a name, and got "visual not found".
+// A room name resolves to its ID; an unknown one says how to name a room.
+func TestRootCrossRoomPostByName(t *testing.T) {
+	s, _, root, ctx := setupRoot(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	other, problem := s.RoomCreate(ctx, owner, contract.RoomCreateRequest{Name: "other", RootProfile: "test"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	caller := contract.Principal{Kind: contract.PrincipalSession, Session: root}
+	sent, problem := s.Post(ctx, caller, contract.PostRequest{Room: "other", Text: "hello", Mentions: []string{"root"}})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	events, err := s.store.Events(ctx, other.Room, sent.Seq-1, 10, []contract.EventType{"post.created"})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("events: %v %v", events, err)
+	}
+	_, problem = s.Post(ctx, caller, contract.PostRequest{Room: "nowhere", Text: "hello", Mentions: []string{"root"}})
+	if problem == nil || problem.Code != contract.ErrNotFound || strings.Contains(problem.Message, "visual") {
+		t.Fatalf("unknown room: %+v", problem)
+	}
+}

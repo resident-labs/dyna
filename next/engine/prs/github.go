@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -335,7 +336,7 @@ type Observed struct {
 // pullFields is everything a read asks per PR.
 const pullFields = `number state merged headRefOid headRepository{nameWithOwner} mergeable mergeStateStatus reviewDecision
 latestOpinionatedReviews(first:20,writersOnly:true){nodes{state author{login}}}
-commits(last:1){nodes{commit{oid ` + suiteFields + ` statusCheckRollup{state contexts(first:50){totalCount pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion} ...on StatusContext{context state}}}}}}}
+commits(last:1){nodes{commit{oid ` + suiteFields + ` statusCheckRollup{state contexts(first:50){totalCount pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion checkSuite{conclusion matchingPullRequests(first:2){nodes{number}} workflowRun{event runNumber workflow{id}}}} ...on StatusContext{context state}}}}}}}
 reviews(last:20){nodes{fullDatabaseId state body url author{login} submittedAt lastEditedAt}}
 comments(last:20){nodes{body author{login} createdAt lastEditedAt}}`
 
@@ -361,8 +362,18 @@ type gqlRollup struct {
 			State      string `json:"state"`
 			TargetURL  string `json:"targetUrl"`
 			CheckSuite struct {
+				Conclusion string `json:"conclusion"`
+				PRs        struct {
+					Nodes []struct {
+						Number int `json:"number"`
+					} `json:"nodes"`
+				} `json:"matchingPullRequests"`
 				WorkflowRun *struct {
-					Event string `json:"event"`
+					Event     string `json:"event"`
+					RunNumber int    `json:"runNumber"`
+					Workflow  struct {
+						ID string `json:"id"`
+					} `json:"workflow"`
 				} `json:"workflowRun"`
 			} `json:"checkSuite"`
 		} `json:"nodes"`
@@ -404,7 +415,7 @@ type gqlSuites struct {
 // contexts all read success or skipped: a workflow run whose jobs never started
 // (a startup failure or a broken workflow file) leaves only skipped contexts or
 // none, and its suite's conclusion is the only sign of it.
-func summarizeCI(rollup *gqlRollup, suites gqlSuites, rule ciRule, now time.Time) (contract.PrCI, []string) {
+func summarizeCI(rollup *gqlRollup, suites gqlSuites, rule ciRule, pr int, now time.Time) (contract.PrCI, []string) {
 	pending := suites.PageInfo.HasNextPage || suites.TotalCount > len(suites.Nodes)
 	var failedSuites []string
 	for _, suite := range suites.Nodes {
@@ -421,7 +432,7 @@ func summarizeCI(rollup *gqlRollup, suites gqlSuites, rule ciRule, now time.Time
 			failedSuites = append(failedSuites, name+" (workflow run failed)")
 		}
 	}
-	ci, failed := summarizeContexts(rollup, rule)
+	ci, failed := summarizeContexts(rollup, rule, pr)
 	// A failing context already names the job; a failed suite adds a name only when no context shows the failure.
 	if (ci != contract.PrCIFailure || len(failed) == 0) && len(failedSuites) > 0 {
 		return contract.PrCIFailure, failedSuites
@@ -434,7 +445,7 @@ func summarizeCI(rollup *gqlRollup, suites gqlSuites, rule ciRule, now time.Time
 	return ci, failed
 }
 
-func summarizeContexts(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string) {
+func summarizeContexts(rollup *gqlRollup, rule ciRule, pr int) (contract.PrCI, []string) {
 	// A visible failure is definitive even when other contexts are unread or pending.
 	pending := rollup != nil && (rollup.Contexts.PageInfo.HasNextPage || rollup.Contexts.TotalCount > len(rollup.Contexts.Nodes))
 	if pending && len(rollup.Contexts.Nodes) == 0 {
@@ -445,8 +456,34 @@ func summarizeContexts(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string)
 	}
 	var failed []string
 	if len(rollup.Contexts.Nodes) > 0 {
-		ci, cancelled := contract.PrCISuccess, []string{}
-		for _, check := range rollup.Contexts.Nodes {
+		// A stacked PR pushed with its base gets two pull_request runs of each workflow on one head, and the newer cancels the
+		// older. On PR pr's head, a cancelled job of a pull_request run counts for nothing once a later pull_request run of the
+		// same workflow finished a job of that name in a suite that was not cancelled itself, where both suites match pr alone.
+		// Main heads (pr 0), other triggers and suites that match no PR, another or several keep every cancellation.
+		type job struct{ workflow, name string }
+		keys := make([]*job, len(rollup.Contexts.Nodes))
+		finished := map[job]int{}
+		for i, check := range rollup.Contexts.Nodes {
+			suite := check.CheckSuite
+			run := suite.WorkflowRun
+			if pr == 0 || run == nil || run.Event != "pull_request" || run.Workflow.ID == "" || len(suite.PRs.Nodes) != 1 || suite.PRs.Nodes[0].Number != pr {
+				continue
+			}
+			key := job{run.Workflow.ID, check.Name}
+			keys[i] = &key
+			if check.Status == "COMPLETED" && check.Conclusion != "CANCELLED" && suite.Conclusion != "CANCELLED" {
+				finished[key] = max(finished[key], run.RunNumber)
+			}
+		}
+		// A head whose every context was skipped ran nothing: GitHub skips a conflicting PR's pull_request runs, so it is no CI, not a pass.
+		ci, cancelled, ran := contract.PrCISuccess, []string{}, false
+		for i, check := range rollup.Contexts.Nodes {
+			if check.Conclusion == "CANCELLED" && keys[i] != nil && finished[*keys[i]] > check.CheckSuite.WorkflowRun.RunNumber {
+				continue
+			}
+			if check.Conclusion != "SKIPPED" {
+				ran = true
+			}
 			name := check.Name
 			if check.Type == "StatusContext" {
 				name = check.Context
@@ -456,7 +493,9 @@ func summarizeContexts(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string)
 				pending = true
 			case check.Type == "StatusContext" && check.State == "SUCCESS", check.Conclusion == "SUCCESS" || check.Conclusion == "SKIPPED" || check.Conclusion == "NEUTRAL":
 			case check.Conclusion == "CANCELLED":
-				cancelled = append(cancelled, name)
+				if !slices.Contains(cancelled, name) {
+					cancelled = append(cancelled, name)
+				}
 			default:
 				ci = contract.PrCIFailure
 				failed = append(failed, name)
@@ -467,6 +506,9 @@ func summarizeContexts(rollup *gqlRollup, rule ciRule) (contract.PrCI, []string)
 		}
 		if ci != contract.PrCIFailure && len(cancelled) > 0 {
 			ci, failed = contract.PrCICancelled, cancelled
+		}
+		if !ran {
+			return contract.PrCINone, nil
 		}
 		return ci, failed
 	}
@@ -741,7 +783,7 @@ func (p gqlPull) observed(viewer string, now time.Time) Observed {
 	if len(p.Commits.Nodes) > 0 && p.Commits.Nodes[0].Commit.OID != p.HeadRefOid {
 		seen.CI = contract.PrCIPending
 	} else if len(p.Commits.Nodes) > 0 {
-		seen.CI, seen.FailedChecks = summarizeCI(p.Commits.Nodes[0].Commit.StatusCheckRollup, p.Commits.Nodes[0].Commit.CheckSuites, ciPullHead, now)
+		seen.CI, seen.FailedChecks = summarizeCI(p.Commits.Nodes[0].Commit.StatusCheckRollup, p.Commits.Nodes[0].Commit.CheckSuites, ciPullHead, p.Number, now)
 	}
 	for _, review := range p.Reviews.Nodes {
 		if review.State == "PENDING" {
@@ -817,7 +859,7 @@ func (c *Client) CommitsCI(ctx context.Context, repo contract.RepoName, shas []s
 				commit.StatusCheckRollup = nil
 			}
 		}
-		result, _ := summarizeCI(commit.StatusCheckRollup, commit.CheckSuites, ciMainHead, c.Now())
+		result, _ := summarizeCI(commit.StatusCheckRollup, commit.CheckSuites, ciMainHead, 0, c.Now())
 		read := CommitCI{Result: result}
 		if rollup := commit.StatusCheckRollup; rollup != nil {
 			read.Truncated = rollup.Contexts.PageInfo.HasNextPage || rollup.Contexts.TotalCount > len(rollup.Contexts.Nodes)

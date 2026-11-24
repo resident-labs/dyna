@@ -2,10 +2,12 @@ package runtime
 
 import (
 	"context"
+	"errors"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/box/images"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 // ServiceDriver gives the reconciler a host's service operations over the host's SSH connection.
@@ -25,4 +27,56 @@ func (b *Boxes) ServiceRoomImage(ctx context.Context, name contract.HostName, ro
 	}
 	tag, _, err := b.toolchain(ctx, h, name, room, image, base)
 	return tag, err
+}
+
+func (b *Boxes) serviceForward(id contract.ServiceID) box.Forward {
+	return box.Forward{
+		Service:    id,
+		HostPath:   b.Layout.HostServiceSocket(id),
+		EnginePath: b.Sockets.ServiceSocketPath(id),
+	}
+}
+
+func serviceWantsFeed(svc store.ServiceRow) bool {
+	if svc.Want == contract.ServiceWantRemove || svc.State == contract.ServiceFailed {
+		return false
+	}
+	if svc.Reason == contract.ServiceRolledBack && svc.Live != nil {
+		return svc.Live.Spec.Feed
+	}
+	return svc.Spec.Feed || (svc.Live != nil && svc.Live.Spec.Feed)
+}
+
+// EnsureFeedSocket opens the engine-side listener for a feed service and forwards it onto host, returning the host
+// folder that the service quadlet bind-mounts read-only.
+func (b *Boxes) EnsureFeedSocket(ctx context.Context, name contract.HostName, id contract.ServiceID, room contract.RoomID, svcName contract.ServiceName) (string, error) {
+	if b.Sockets == nil {
+		return "", errors.New("engine sockets unavailable")
+	}
+	if err := b.Sockets.AddService(id, room, svcName); err != nil {
+		return "", err
+	}
+	h, err := b.host(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	if err := h.AddForward(ctx, b.serviceForward(id)); err != nil {
+		return "", err
+	}
+	return b.Layout.HostServiceSocketFolder(id), nil
+}
+
+// RemoveFeedSocket cancels the host forward (when host is named) and closes the engine-side listener for a feed service.
+func (b *Boxes) RemoveFeedSocket(ctx context.Context, name contract.HostName, id contract.ServiceID) error {
+	var hostErr error
+	if name != "" && b.Sockets != nil {
+		if h, err := b.host(ctx, name); err == nil {
+			hostErr = h.RemoveForward(ctx, b.serviceForward(id))
+		}
+	}
+	var sockErr error
+	if b.Sockets != nil {
+		sockErr = b.Sockets.RemoveService(id)
+	}
+	return errors.Join(hostErr, sockErr)
 }

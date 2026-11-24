@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-func TestDynaClaudeQuotaRecoveryEvidence(t *testing.T) {
+func TestDynaQuotaRecoveryEvidence(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		mutate  func(*Auth, *QuotaResetHint)
@@ -18,7 +18,8 @@ func TestDynaClaudeQuotaRecoveryEvidence(t *testing.T) {
 		{"empty", func(_ *Auth, h *QuotaResetHint) { h.Windows = nil }, false},
 		{"exhausted", func(_ *Auth, h *QuotaResetHint) { h.Windows[0].UsedPercent = 100 }, false},
 		{"unauthorized", func(a *Auth, _ *QuotaResetHint) { a.LastError = &Error{HTTPStatus: 401} }, false},
-		{"other-provider", func(a *Auth, _ *QuotaResetHint) { a.Provider = "codex" }, false},
+		{"codex", func(a *Auth, _ *QuotaResetHint) { a.Provider = "codex" }, true},
+		{"other-provider", func(a *Auth, _ *QuotaResetHint) { a.Provider = "antigravity" }, false},
 		{"new-registration", func(a *Auth, _ *QuotaResetHint) { a.RegistrationEpoch++ }, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -39,8 +40,9 @@ func TestDynaClaudeQuotaRecoveryEvidence(t *testing.T) {
 				if a.ModelStates["wrapped"].cooldownRecordedSeq != 42 || a.ModelStates["wrapped"].LastError.HTTPStatus != 503 {
 					t.Fatal("lost independent shadow")
 				}
-				if !a.ModelStates["independent"].Quota.Exceeded {
-					t.Fatal("cleared independent quota")
+				// Codex limits are account-wide, so its unscoped window releases a quota layer at the same deadline.
+				if a.ModelStates["independent"].Quota.Exceeded == (a.Provider == "codex") {
+					t.Fatal("independent quota layer handled wrongly for " + a.Provider)
 				}
 				// A replay cannot clear a subsequent credential rejection.
 				a.Quota = QuotaState{Exceeded: true, Reason: "credential_quota"}
@@ -49,6 +51,31 @@ func TestDynaClaudeQuotaRecoveryEvidence(t *testing.T) {
 				if !a.Quota.Exceeded {
 					t.Fatal("replay cleared fresh rejection")
 				}
+			}
+		})
+	}
+}
+
+// Model 2026-11-21: after a Codex reset, a first release freed the sibling models, but the reporting model kept its own
+// quota layer, and the credential read "quota" aggregated from it. A Codex read has only unscoped windows; they release it.
+// Claude in the same shape keeps the layer: its unscoped weekly window does not prove a model's own limit.
+func TestDynaCodexReportingModelRecovers(t *testing.T) {
+	for _, provider := range []string{"codex", "claude"} {
+		t.Run(provider, func(t *testing.T) {
+			manager := NewManager(nil, nil, nil)
+			now := time.Now()
+			deadline := now.Add(120 * time.Hour)
+			a := &Auth{ID: "reporting", Provider: provider, RegistrationEpoch: 1, Status: StatusActive, UpdatedAt: now.Add(-time.Minute), Quota: QuotaState{Exceeded: true, Reason: "quota", NextRecoverAt: deadline}}
+			a.ModelStates = map[string]*ModelState{
+				"gpt-6.2-sol": {Status: StatusError, Unavailable: true, UpdatedAt: now.Add(-20 * time.Minute), NextRetryAfter: deadline, Quota: QuotaState{Exceeded: true, Reason: "quota", NextRecoverAt: deadline}},
+				"gpt-6-luna":  {Status: StatusActive},
+			}
+			reader := a.Clone()
+			manager.auths[a.ID] = a
+			manager.PublishQuotaReadingForAuth(reader, QuotaResetHint{ObservedAt: now, Windows: []QuotaResetWindow{{Seconds: 604800, UsedPercent: 0, ResetAt: now.Add(168 * time.Hour)}}})
+			released := !a.ModelStates["gpt-6.2-sol"].Quota.Exceeded && !a.Quota.Exceeded
+			if released != (provider == "codex") {
+				t.Fatalf("released=%v for %s", released, provider)
 			}
 		})
 	}

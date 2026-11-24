@@ -36,7 +36,7 @@ import (
 const (
 	// stepTimeout is how long a worker or command may run when the script sets no timeout, as in v1.
 	stepTimeout = 5 * time.Hour
-	// schemaAttempts is how many submits a schema worker gets.
+	// schemaAttempts is how many turns a schema worker gets if it stops without a result.
 	schemaAttempts = 3
 	// stepResultBytes bounds what one step stores. The rest of a long output belongs in a file in the tree.
 	stepResultBytes = 1 << 20
@@ -74,12 +74,11 @@ type crewWorker interface {
 
 // CrewConfig is what a crew's box hands it.
 type CrewConfig struct {
-	Workflow       contract.BoxWorkflow
-	TextOnlyModels []contract.TextOnlyModel
-	Engine         crewEngine
+	Workflow contract.BoxWorkflow
+	Engine   crewEngine
 	// Open starts a worker for a step in dir, its working tree. Folder is the worker's own, for the time it runs, and holds
 	// its model configuration in models.json.
-	Open       func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string, schema json.RawMessage) (crewWorker, error)
+	Open       func(ctx context.Context, profile contract.WorkflowProfile, folder, dir string, document json.RawMessage, schema *jsonschema.Schema) (crewWorker, error)
 	Transcript *Transcript
 	Workdir    string
 	Branch     string // the session's branch, which names the crew's other branches
@@ -93,27 +92,28 @@ type CrewConfig struct {
 // journal, not this process, holds what has finished. A restarted box runs the script again and stored steps return at once.
 // A reload runs a new version in the same turn, and a step still running here is joined, not started again.
 type Crew struct {
-	config       CrewConfig
-	slots        chan struct{}
-	builds       *buildLock
-	shims        string
-	repo         sync.Mutex    // the changes to the one repository that all trees share
-	reloads      chan struct{} // a newer version of the script is waiting
-	pauseChanged chan struct{} // a pause change wakes calls waiting to start
+	config  CrewConfig
+	slots   chan struct{}
+	builds  *buildLock
+	shims   string
+	repo    sync.Mutex    // the changes to the one repository that all trees share
+	reloads chan struct{} // a newer version of the script is waiting
 
-	mu       sync.Mutex
-	workflow contract.BoxWorkflow // the newest version of the script, which a reload replaces
-	limits   map[contract.ProfileName]chan struct{}
-	running  map[string]*runningStep               // by key, the steps this box is running
-	workers  map[string]crewWorker                 // by key, the workers that are open: a post to the run reaches each
-	queued   map[contract.DeliverySeq][]crewWorker // the open workers that queued a post and have not said whether they read it
-	taken    map[contract.DeliverySeq]bool
-	delivery contract.DeliverySeq // workers carry it, so the engine files their transcripts under the crew's turn
-	turn     contract.TurnID
-	dryState json.RawMessage                  // hand-started state lives only in this crew
-	boot     string                           // names this start of the script to the engine, which hands an event over again to a new one
-	held     map[int64]contract.WorkflowEvent // the events whose handlers have not ended, which a reload runs again
-	stop     context.CancelFunc
+	mu           sync.Mutex
+	workflow     contract.BoxWorkflow // the newest script, pauses and profiles
+	pauseChanged chan struct{}        // a pause change wakes calls waiting to start
+	slotsChanged chan struct{}        // a profile or available slot changed
+	profileInUse map[contract.ProfileName]int
+	running      map[string]*runningStep               // by key, the steps this box is running
+	workers      map[string]crewWorker                 // by key, the workers that are open: a post to the run reaches each
+	queued       map[contract.DeliverySeq][]crewWorker // the open workers that queued a post and have not said whether they read it
+	taken        map[contract.DeliverySeq]bool
+	delivery     contract.DeliverySeq // workers carry it, so the engine files their transcripts under the crew's turn
+	turn         contract.TurnID
+	dryState     json.RawMessage                  // hand-started state lives only in this crew
+	boot         string                           // names this start of the script to the engine, which hands an event over again to a new one
+	held         map[int64]contract.WorkflowEvent // the events whose handlers have not ended, which a reload runs again
+	stop         context.CancelFunc
 }
 
 // runningStep is one step in this box. A call with its key waits for its reply.
@@ -150,27 +150,18 @@ func NewCrew(config CrewConfig) (*Crew, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Crew{config: config, slots: make(chan struct{}, max(config.Workflow.Workers, 1)), builds: builds, shims: shims, reloads: make(chan struct{}, 1), pauseChanged: make(chan struct{}),
-		workflow: config.Workflow, limits: make(map[contract.ProfileName]chan struct{}), running: make(map[string]*runningStep), workers: make(map[string]crewWorker), queued: make(map[contract.DeliverySeq][]crewWorker), taken: make(map[contract.DeliverySeq]bool)}
-	c.addLimits(config.Workflow.Profiles)
-	return c, nil
+	return &Crew{config: config, slots: make(chan struct{}, max(config.Workflow.Workers, 1)), builds: builds, shims: shims, reloads: make(chan struct{}, 1), pauseChanged: make(chan struct{}), slotsChanged: make(chan struct{}),
+		workflow: config.Workflow, profileInUse: make(map[contract.ProfileName]int), running: make(map[string]*runningStep), workers: make(map[string]crewWorker), queued: make(map[contract.DeliverySeq][]crewWorker), taken: make(map[contract.DeliverySeq]bool)}, nil
 }
 
-// addLimits gives each profile with a limit its own slots. A profile that has them keeps them, with the steps that hold them.
-func (c *Crew) addLimits(profiles []contract.WorkflowProfile) {
-	for _, profile := range profiles {
-		if _, ok := c.limits[profile.Name]; !ok && profile.MaxConcurrent > 0 {
-			c.limits[profile.Name] = make(chan struct{}, profile.MaxConcurrent)
-		}
-	}
-}
-
-// Reload makes workflow the script this crew runs, when it is newer than the one it has. The running script's host stops and
-// the new version starts in its place, in the same turn. Steps already running go on, so a call with one of their keys waits
-// for that step, and any the new version does not call stop when the run ends.
+// Reload updates pauses and profiles without restarting the script or any worker. A newer script starts in the same turn,
+// joining any steps it calls that are still running. Steps the new version does not call stop when the run ends.
 func (c *Crew) Reload(workflow contract.BoxWorkflow) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if workflow.Version < c.workflow.Version {
+		return
+	}
 	if workflow.Paused != c.workflow.Paused || !slices.Equal(workflow.PausedSteps, c.workflow.PausedSteps) || !slices.Equal(workflow.ReleasedSteps, c.workflow.ReleasedSteps) {
 		c.workflow.ReleasedSteps = slices.Clone(workflow.ReleasedSteps)
 		c.workflow.PausedSteps = slices.Clone(workflow.PausedSteps)
@@ -178,11 +169,15 @@ func (c *Crew) Reload(workflow contract.BoxWorkflow) {
 		close(c.pauseChanged)
 		c.pauseChanged = make(chan struct{})
 	}
-	if workflow.Version <= c.workflow.Version {
+	if !slices.Equal(workflow.Profiles, c.workflow.Profiles) {
+		c.workflow.Profiles = workflow.Profiles
+		c.notifySlotsChanged()
+	}
+	c.workflow.TextOnlyModels = workflow.TextOnlyModels
+	if workflow.Version == c.workflow.Version {
 		return
 	}
 	c.workflow = workflow
-	c.addLimits(workflow.Profiles)
 	select {
 	case c.reloads <- struct{}{}:
 	default:
@@ -337,7 +332,8 @@ func (c *Crew) settle(ctx context.Context, worker crewWorker) {
 func (c *Crew) FollowUp(ctx context.Context, input contract.TurnInput) error {
 	return c.Steer(ctx, input)
 }
-func (c *Crew) ClearQueue(context.Context) error { return nil }
+func (c *Crew) ClearQueue(context.Context) error      { return nil }
+func (c *Crew) NewConversation(context.Context) error { return nil }
 
 // Start runs the script as the session's turn and returns when it settles. A script that throws fails the run; a failed
 // worker only fails its step, which the script may handle.
@@ -407,10 +403,11 @@ type crewCall struct {
 }
 
 type crewReply struct {
-	Value  any    `json:"value,omitempty"`
-	Error  string `json:"error,omitempty"`
-	Step   string `json:"step,omitempty"`
-	stored bool   // the journal had it, so this box may never have run it
+	Value   any    `json:"value,omitempty"`
+	Error   string `json:"error,omitempty"`
+	Step    string `json:"step,omitempty"`
+	RawText string `json:"rawText,omitempty"`
+	stored  bool   // the journal had it, so this box may never have run it
 }
 
 // script runs the newest version of the script and serves its calls until it ends. A reload stops that version's VM and runs
@@ -511,9 +508,10 @@ type handlerEvent struct {
 // scriptFailure is why a script threw. A parent script reads the Reason, a failed run shows the Report, and Step names the
 // step whose failure it was, if one did.
 type scriptFailure struct {
-	Reason string `json:"reason"`
-	Report string `json:"report"`
-	Step   string `json:"step"`
+	Reason  string `json:"reason"`
+	Report  string `json:"report"`
+	Step    string `json:"step"`
+	RawText string `json:"rawText,omitempty"`
 }
 
 const (
@@ -710,6 +708,7 @@ func (s stepInfo) name() string {
 type stepOutcome struct {
 	value      any
 	reason     string
+	rawText    string                // the last assistant text, kept in the journal only on failure
 	cause      contract.FailureCause // set for the failures that have a type
 	transcript string
 	usage      contract.Usage
@@ -760,11 +759,9 @@ func (c *Crew) journal(ctx context.Context, call crewCall, key, name string, inf
 	}
 	switch stored.State {
 	case contract.WorkflowStepDone:
-		var value any
-		_ = json.Unmarshal([]byte(stored.Result), &value)
-		return crewReply{Value: value, stored: true}
+		return crewReply{Value: json.RawMessage(cmp.Or(stored.Result, "null")), stored: true}
 	case contract.WorkflowStepFailed:
-		return crewReply{Error: stored.Reason, Step: name}
+		return crewReply{Error: stored.Reason, Step: name, RawText: stored.RawText}
 	}
 	out := work(ctx, key)
 	if ctx.Err() != nil {
@@ -780,6 +777,10 @@ func (c *Crew) journal(ctx context.Context, call crewCall, key, name string, inf
 	}
 	if end.Reason != "" {
 		end.State = contract.WorkflowStepFailed
+		end.RawText = out.rawText
+		if len(end.RawText) > stepResultBytes {
+			end.RawText = strings.ToValidUTF8(end.RawText[:stepResultBytes], "")
+		}
 	} else {
 		end.Result = string(data)
 	}
@@ -787,7 +788,7 @@ func (c *Crew) journal(ctx context.Context, call crewCall, key, name string, inf
 		return crewReply{Error: err.Error(), Step: name}
 	}
 	if end.Reason != "" {
-		return crewReply{Error: end.Reason, Step: name}
+		return crewReply{Error: end.Reason, Step: name, RawText: end.RawText}
 	}
 	return crewReply{Value: out.value}
 }
@@ -840,9 +841,9 @@ func (c *Crew) agentCall(ctx context.Context, call crewCall) crewReply {
 			return stepOutcome{reason: fmt.Sprintf("profile %q is not in this workflow's meta.profiles", opts.Profile)}
 		}
 		if opts.Worktree {
-			return c.treeWorker(ctx, key, info.name(), *profile, prompt, opts)
+			return c.treeWorker(ctx, key, info.name(), profile.Name, prompt, opts)
 		}
-		return c.worker(ctx, key, *profile, prompt, opts, c.config.Workdir)
+		return c.worker(ctx, key, profile.Name, prompt, opts, c.config.Workdir)
 	})
 	if opts.Worktree {
 		return c.restore(ctx, call, reply)
@@ -850,20 +851,46 @@ func (c *Crew) agentCall(ctx context.Context, call crewCall) crewReply {
 	return reply
 }
 
-func acquire(ctx context.Context, slots chan struct{}) (func(), error) {
-	if slots == nil {
-		return func() {}, nil
-	}
-	select {
-	case slots <- struct{}{}:
-		return func() { <-slots }, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
+// notifySlotsChanged wakes workers waiting for a profile slot. The caller holds c.mu.
+func (c *Crew) notifySlotsChanged() {
+	close(c.slotsChanged)
+	c.slotsChanged = make(chan struct{})
+}
+
+// acquireProfile reads the current model and limit when a worker can start, not when the script queued its call.
+// Count workers even on uncapped profiles so a cap can be applied without interrupting them.
+func (c *Crew) acquireProfile(ctx context.Context, name contract.ProfileName) (contract.WorkflowProfile, []contract.TextOnlyModel, func(), error) {
+	for {
+		c.mu.Lock()
+		index := slices.IndexFunc(c.workflow.Profiles, func(p contract.WorkflowProfile) bool { return p.Name == name })
+		if index < 0 || c.workflow.Profiles[index].Unavailable {
+			c.mu.Unlock()
+			return contract.WorkflowProfile{}, nil, nil, fmt.Errorf("profile %q is not available in this workflow", name)
+		}
+		profile := c.workflow.Profiles[index]
+		if profile.MaxConcurrent == 0 || c.profileInUse[name] < profile.MaxConcurrent {
+			c.profileInUse[name]++
+			models := c.workflow.TextOnlyModels
+			c.mu.Unlock()
+			return profile, models, func() {
+				c.mu.Lock()
+				c.profileInUse[name]--
+				c.notifySlotsChanged()
+				c.mu.Unlock()
+			}, nil
+		}
+		changed := c.slotsChanged
+		c.mu.Unlock()
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return contract.WorkflowProfile{}, nil, nil, ctx.Err()
+		}
 	}
 }
 
 // worker runs one Pi to its final text, or to JSON that matches the schema.
-func (c *Crew) worker(ctx context.Context, key string, profile contract.WorkflowProfile, prompt string, opts agentOpts, dir string) (out stepOutcome) {
+func (c *Crew) worker(ctx context.Context, key string, profileName contract.ProfileName, prompt string, opts agentOpts, dir string) (out stepOutcome) {
 	var schema *jsonschema.Schema
 	if len(opts.Schema) > 0 {
 		var err error
@@ -871,16 +898,17 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 			return stepOutcome{reason: "schema: " + err.Error()}
 		}
 	}
-	c.mu.Lock()
-	profileSlots := c.limits[profile.Name]
-	c.mu.Unlock()
-	for _, slots := range []chan struct{}{c.slots, profileSlots} {
-		release, err := acquire(ctx, slots)
-		if err != nil {
-			return stepOutcome{reason: err.Error()}
-		}
-		defer release()
+	select {
+	case c.slots <- struct{}{}:
+		defer func() { <-c.slots }()
+	case <-ctx.Done():
+		return stepOutcome{reason: ctx.Err().Error()}
 	}
+	profile, models, release, err := c.acquireProfile(ctx, profileName)
+	if err != nil {
+		return stepOutcome{reason: err.Error()}
+	}
+	defer release()
 	limit := c.timeout(opts.Timeout)
 	pauseTime := &buildLock{}
 	ctx, cancel := c.builds.timeout(ctx, limit, pauseTime.waited)
@@ -890,14 +918,14 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 		return stepOutcome{reason: err.Error()}
 	}
 	defer os.RemoveAll(folder)
-	data, err := json.Marshal(WorkerModels(key[:16], c.config.TextOnlyModels...))
+	data, err := json.Marshal(WorkerModels(key[:16], models...))
 	if err != nil {
 		return stepOutcome{reason: err.Error()}
 	}
 	if err := os.WriteFile(filepath.Join(folder, "models.json"), data, 0600); err != nil {
 		return stepOutcome{reason: err.Error()}
 	}
-	worker, err := c.config.Open(ctx, profile, folder, dir, opts.Schema)
+	worker, err := c.config.Open(ctx, profile, folder, dir, opts.Schema, schema)
 	if err != nil {
 		return stepOutcome{reason: "the worker did not start: " + err.Error()}
 	}
@@ -930,30 +958,41 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 	inputs := prompt
 	var ended contract.TurnEnded
 	var usage contract.Usage
-	var value any
+	var value json.RawMessage
 	var problem string
 	for turns := 1; ; turns++ {
 		ended, err = worker.Start(ctx, turn, []contract.TurnInput{{Delivery: delivery, Text: inputs}}, func() {})
 		c.settle(context.WithoutCancel(ctx), worker)
 		usage.InputTokens, usage.OutputTokens, usage.CacheReadTokens, usage.CacheWriteTokens = usage.InputTokens+ended.Usage.InputTokens, usage.OutputTokens+ended.Usage.OutputTokens, usage.CacheReadTokens+ended.Usage.CacheReadTokens, usage.CacheWriteTokens+ended.Usage.CacheWriteTokens
-		// A step with a schema reads its final text as the result; one that does not match goes back to the worker, in its own session, to fix.
+		out.rawText = cmp.Or(ended.LastText, out.rawText)
 		tooLarge := ended.Outcome == contract.TurnFailed && ended.Cause == contract.CauseOutputLimit
-		if schema == nil || err != nil || context.Cause(ctx) != nil || (ended.Outcome != contract.TurnCompleted && !tooLarge) {
+		if schema == nil || ended.ToolResult != nil || err != nil || context.Cause(ctx) != nil || (ended.Outcome != contract.TurnCompleted && ended.Outcome != contract.TurnFailed) {
 			break
+		}
+		problem = "the worker ended without a StructuredOutput call or a closing message"
+		// Don't read the combined Final or truncated text. A steer can follow a complete reply, so check those replies
+		// even when the last model request failed or hit its output limit.
+		for i, text := range slices.Backward(ended.ClosingTexts) {
+			data, mismatch := readResult(schema, text)
+			if mismatch == "" {
+				value = data
+				break
+			}
+			if i == len(ended.ClosingTexts)-1 {
+				problem = mismatch
+			}
 		}
 		if tooLarge {
 			problem = "the reply reached the output limit before it ended"
-		} else if value, problem = readResult(schema, ended.Final); problem == "" {
+		}
+		if value != nil || (ended.Outcome == contract.TurnFailed && !tooLarge) || turns >= schemaAttempts {
 			break
 		}
-		if turns >= schemaAttempts {
-			break
-		}
-		inputs = "Your final message was not accepted: " + problem + ".\n\n"
+		inputs = "Your result was not accepted: " + problem + ".\n\n"
 		if tooLarge {
-			inputs += "The result is too large to return as text. Write it to a file in your working folder and put its path in your final message, in the shape the schema allows."
+			inputs += "The result is too large to return directly. Write it to a file in your working folder and return its path with StructuredOutput, in the shape the schema allows."
 		} else {
-			inputs += "Reply again with only a JSON value that matches the schema, with no prose around it."
+			inputs += "Call StructuredOutput with a result matching the schema."
 		}
 	}
 	out.usage = usage
@@ -961,6 +1000,10 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 	switch {
 	case errors.Is(context.Cause(ctx), context.DeadlineExceeded):
 		out.reason = fmt.Sprintf("timed out after %s", limit)
+	case ended.ToolResult != nil:
+		out.value = ended.ToolResult
+	case value != nil:
+		out.value = value
 	case err != nil:
 		out.reason = err.Error()
 	case ended.Outcome != contract.TurnCompleted && !(schema != nil && ended.Cause == contract.CauseOutputLimit):
@@ -968,10 +1011,8 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 		if out.reason == "" {
 			out.reason = "the worker's turn " + string(ended.Outcome)
 		}
-	case schema != nil && problem != "":
-		out.cause, out.reason = contract.CauseBadResult, fmt.Sprintf("the worker's final text does not match the schema, after %d turns: %s; its last text: %s", schemaAttempts, problem, clip(ended.Final, 500))
 	case schema != nil:
-		out.value = value
+		out.cause, out.reason = contract.CauseBadResult, fmt.Sprintf("no valid structured result after %d turns: %s", schemaAttempts, problem)
 	case ended.Final == "":
 		out.reason = "the worker ended with no text"
 	default:
@@ -980,33 +1021,136 @@ func (c *Crew) worker(ctx context.Context, key string, profile contract.Workflow
 	return out
 }
 
-var fenced = regexp.MustCompile("(?s)^```[A-Za-z]*\\s*\n(.*?)\n?```$")
-
-// readResult reads a schema step's final text as its result: the whole text is JSON, or it is exactly one fenced block of it.
-// Prose around the JSON is a mismatch, as is a text like "Done.". What is wrong comes back as the problem to tell the worker.
-func readResult(schema *jsonschema.Schema, text string) (value any, problem string) {
+// readResult reads a schema step's final text as its result: first the whole text,
+// then the last fenced block, then the last balanced top-level JSON object or array.
+// What is wrong comes back as the problem to tell the worker.
+func readResult(schema *jsonschema.Schema, text string) (json.RawMessage, string) {
 	text = strings.TrimSpace(text)
-	if m := fenced.FindStringSubmatch(text); m != nil && !strings.Contains(m[1], "```") {
-		text = strings.TrimSpace(m[1])
+	raw := []byte(text)
+	value, err := validateResult(schema, raw)
+	if err == nil {
+		return value, ""
 	}
-	if len(text) > stepResultBytes {
-		return nil, fmt.Sprintf("the text is %d bytes, over the limit of %d", len(text), stepResultBytes)
+	problem := err
+	block, hasBlock := lastFencedBlock(text)
+	if hasBlock {
+		if value, err := validateResult(schema, []byte(block)); err == nil {
+			return value, ""
+		} else {
+			problem = err
+		}
 	}
-	value, err := jsonschema.UnmarshalJSON(strings.NewReader(text))
-	if err != nil {
-		return nil, "it is not JSON: " + err.Error()
+	if candidate, ok := lastJSONContainer(raw); ok && len(candidate) != len(raw) && (!hasBlock || string(candidate) != block) {
+		if value, err := validateResult(schema, candidate); err == nil {
+			return value, ""
+		} else {
+			problem = err
+		}
 	}
-	if err := schema.Validate(value); err != nil {
-		return nil, err.Error()
-	}
-	return value, ""
+	return nil, problem.Error()
 }
 
-func clip(text string, n int) string {
-	if r := []rune(text); len(r) > n {
-		return string(r[:n]) + "…"
+// lastFencedBlock returns the trimmed body of the last closed backtick-fenced block in text.
+func lastFencedBlock(text string) (string, bool) {
+	lines := strings.Split(text, "\n")
+	var last string
+	var found bool
+	fenceLen := 0
+	startLine := 0
+	for i, raw := range lines {
+		line := strings.TrimRight(raw, "\r")
+		trimmed := strings.TrimLeft(line, " \t")
+		ticks := 0
+		for ticks < len(trimmed) && trimmed[ticks] == '`' {
+			ticks++
+		}
+		if fenceLen == 0 {
+			if ticks >= 3 && !strings.ContainsRune(trimmed[ticks:], '`') {
+				fenceLen = ticks
+				startLine = i + 1
+			}
+			continue
+		}
+		if ticks >= fenceLen && strings.TrimSpace(trimmed[ticks:]) == "" {
+			last = strings.TrimSpace(strings.Join(lines[startLine:i], "\n"))
+			found = true
+			fenceLen = 0
+		}
 	}
-	return text
+	return last, found
+}
+
+// lastJSONContainer scans from the end for the last balanced top-level JSON object or array in raw.
+// Work is bounded linearly so adversarial input (unmatched quotes or nested non-JSON brackets)
+// cannot go quadratic in the shared box agent process.
+func lastJSONContainer(raw []byte) ([]byte, bool) {
+	firstOpen := bytes.IndexAny(raw, "{[")
+	if firstOpen < 0 {
+		return nil, false
+	}
+	totalOpens := bytes.Count(raw[firstOpen:], []byte{'{'}) + bytes.Count(raw[firstOpen:], []byte{'['})
+	budget := min(max(len(raw)*4, 4096), 8<<20)
+	var stack []byte
+	for end := len(raw) - 1; end > firstOpen && budget > 0; end-- {
+		if raw[end] != '}' && raw[end] != ']' {
+			continue
+		}
+		stack = stack[:0]
+		inString := false
+		start := -1
+	scan:
+		for i := end; i >= firstOpen; i-- {
+			budget--
+			if budget <= 0 {
+				break scan
+			}
+			c := raw[i]
+			if c == '"' {
+				slashes := 0
+				for j := i - 1; j >= firstOpen && raw[j] == '\\'; j-- {
+					slashes++
+				}
+				if slashes%2 == 0 {
+					inString = !inString
+				}
+				i -= slashes
+				budget -= slashes
+				continue
+			}
+			if inString {
+				continue
+			}
+			switch c {
+			case '}':
+				stack = append(stack, '{')
+				if len(stack) > totalOpens {
+					break scan
+				}
+			case ']':
+				stack = append(stack, '[')
+				if len(stack) > totalOpens {
+					break scan
+				}
+			case '{', '[':
+				if len(stack) == 0 || stack[len(stack)-1] != c {
+					break scan
+				}
+				stack = stack[:len(stack)-1]
+				if len(stack) == 0 {
+					start = i
+					break scan
+				}
+			}
+		}
+		if start >= 0 {
+			candidate := raw[start : end+1]
+			budget -= len(candidate)
+			if json.Valid(candidate) {
+				return candidate, true
+			}
+		}
+	}
+	return nil, false
 }
 
 func compileSchema(raw json.RawMessage) (*jsonschema.Schema, error) {
@@ -1197,7 +1341,7 @@ func (c *Crew) workflowCall(ctx context.Context, call crewCall) crewReply {
 		if end.Failure.Step == "" {
 			end.Failure.Step = body.Ref
 		}
-		return crewReply{Error: end.Failure.Reason, Step: end.Failure.Step}
+		return crewReply{Error: end.Failure.Reason, Step: end.Failure.Step, RawText: end.Failure.RawText}
 	}
 	return crewReply{Value: json.RawMessage(end.Value)}
 }

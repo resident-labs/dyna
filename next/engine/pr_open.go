@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -22,19 +23,40 @@ func (s *Service) PrOpen(token string, endpoint *url.URL, transport http.RoundTr
 	return s.accountEntry(token, func(credential string) approve.Entry { return s.prOpen(credential, endpoint, transport) })
 }
 func (s *Service) prOpen(token string, endpoint *url.URL, transport http.RoundTripper) approve.Entry {
-	lookup := func(ctx context.Context, who contract.Principal) (store.Session, string, error) {
+	lookup := func(ctx context.Context, who contract.Principal, input contract.PrOpenArgs) (store.Session, contract.RepoName, string, error) {
 		if who.Kind != contract.PrincipalSession {
-			return store.Session{}, "", approve.ErrForbidden
+			return store.Session{}, "", "", approve.ErrForbidden
 		}
 		session, err := s.store.Session(ctx, who.Session)
 		if err != nil {
-			return session, "", err
+			return session, "", "", err
 		}
-		recorded, err := s.store.SessionBranches(ctx, session.Repo, who.Session)
-		if err != nil || len(recorded) == 0 {
-			return session, "", err
+		repo := input.Repo
+		if repo == "" {
+			repo = session.Repo
 		}
-		return session, recorded[0], nil
+		if repo == "" {
+			return session, "", "", fmt.Errorf("%w: the session has no repository; specify repo", approve.ErrInvalid)
+		}
+		repos, err := s.store.RoomRepos(ctx, session.Room)
+		if err != nil {
+			return session, "", "", err
+		}
+		if !slices.ContainsFunc(repos, func(item contract.RoomRepo) bool { return item.Repo == repo }) {
+			return session, "", "", fmt.Errorf("%w: repository %s is not in the room", approve.ErrForbidden, repo)
+		}
+		head := input.Head
+		if head == "" {
+			recorded, err := s.store.SessionBranches(ctx, session.Repo, who.Session)
+			if err != nil {
+				return session, "", "", err
+			}
+			if len(recorded) == 0 {
+				return session, "", "", fmt.Errorf("%w: the session has no branch recorded yet; head was not given", approve.ErrInvalid)
+			}
+			head = recorded[0]
+		}
+		return session, repo, head, nil
 	}
 	return approve.Entry{
 		Scope: contract.ScopeOperate,
@@ -44,18 +66,11 @@ func (s *Service) prOpen(token string, endpoint *url.URL, transport http.RoundTr
 		},
 		Check: func(ctx context.Context, args contract.OpArgs, who contract.Principal) error {
 			input := args.(contract.PrOpenArgs)
-			session, head, err := lookup(ctx, who)
+			session, repo, head, err := lookup(ctx, who, input)
 			if err != nil {
 				return err
 			}
-			defaulted := input.Head == ""
-			if !defaulted {
-				head = input.Head
-			}
-			if head == "" {
-				return fmt.Errorf("%w: the session has no branch recorded yet; head was not given", approve.ErrInvalid)
-			}
-			allowed, err := enginegit.CanPushBranch(ctx, s.store, session.Repo, who.Session, head)
+			allowed, err := enginegit.CanPushBranch(ctx, s.store, repo, who.Session, head)
 			if err != nil {
 				return err
 			}
@@ -65,23 +80,30 @@ func (s *Service) prOpen(token string, endpoint *url.URL, transport http.RoundTr
 					return err
 				}
 				if len(own) == 0 {
-					return fmt.Errorf("%w: branch %s is not recorded for this session or a session under it, and this session has no branch on %s; a session's branch is recorded when its box is set up with the repository, so open the PR from a session that has one", approve.ErrForbidden, head, session.Repo)
+					return fmt.Errorf("%w: branch %s is not recorded for this session or a session under it, and this session has no branch yet; a session's branch is recorded when its box is set up with the repository, so open the PR from a session that has one", approve.ErrForbidden, head)
 				}
-				return fmt.Errorf("%w: branch %s is not recorded for this session or a session under it; push to %s, or to a name that starts with %s-, and open the PR from that", approve.ErrForbidden, head, strings.Join(own, " or "), own[0])
+				return fmt.Errorf("%w: branch %s is not owned by this session on %s; push to %s, or to a name that starts with %s-, and open the PR from that", approve.ErrForbidden, head, repo, strings.Join(own, " or "), own[0])
 			}
 			switch {
-			case session.Repo == "":
-				return fmt.Errorf("%w: the session has no repository", approve.ErrInvalid)
 			case strings.TrimSpace(input.Title) == "":
 				return fmt.Errorf("%w: title is required", approve.ErrInvalid)
 			case strings.TrimSpace(input.Base) == "":
 				return fmt.Errorf("%w: base is required, such as main", approve.ErrInvalid)
 			}
-			if _, err := s.repos.Ref(ctx, session.Repo, "refs/heads/"+head); err != nil {
-				if defaulted {
-					return fmt.Errorf("%w: branch %s not found on %s; head was not given and defaulted to it; head names another branch", approve.ErrInvalid, head, session.Repo)
+			if _, err := s.repos.Ref(ctx, repo, "refs/heads/"+head); err != nil {
+				if input.Head == "" {
+					return fmt.Errorf("%w: branch %s not found on %s; head was not given and defaulted to it; head names another branch", approve.ErrInvalid, head, repo)
 				}
-				return fmt.Errorf("%w: branch %s not found on %s; push it first", approve.ErrInvalid, head, session.Repo)
+				return fmt.Errorf("%w: branch %s not found on %s; push it first", approve.ErrInvalid, head, repo)
+			}
+			if repo != session.Repo {
+				base, err := s.repos.DefaultBranch(ctx, repo, true)
+				if err != nil {
+					return fmt.Errorf("%w: cannot read the default branch on %s", approve.ErrInvalid, repo)
+				}
+				if head == base {
+					return fmt.Errorf("%w: branch %s is the protected default branch on %s", approve.ErrForbidden, head, repo)
+				}
 			}
 			return nil
 		},
@@ -91,23 +113,20 @@ func (s *Service) prOpen(token string, endpoint *url.URL, transport http.RoundTr
 			return input, err
 		},
 		Execute: func(ctx context.Context, _ contract.OpID, args contract.OpArgs, who contract.Principal) contract.OpResult {
-			session, head, err := lookup(ctx, who)
-			if err != nil {
-				return contract.OpResult{Cause: contract.CauseInternal, Error: "session repository unavailable"}
-			}
 			input := args.(contract.PrOpenArgs)
-			defaulted := input.Head == ""
-			if !defaulted {
-				head = input.Head
+			session, repo, head, err := lookup(ctx, who, input)
+			if err != nil {
+				return contract.OpResult{Cause: contract.CauseInternal, Error: err.Error()}
 			}
+			defaulted := input.Head == ""
 			if token == "" {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: "GitHub token is not set"}
 			}
-			// The request has only strings and a boolean, which JSON always encodes.
-			input.Head = head
+			// Repo selects the URL, not a field in GitHub's request body.
+			input.Repo, input.Head = "", head
 			body, _ := json.Marshal(input)
 			target := *endpoint
-			target.Path = strings.TrimRight(target.Path, "/") + "/repos/" + string(session.Repo) + "/pulls"
+			target.Path = strings.TrimRight(target.Path, "/") + "/repos/" + string(repo) + "/pulls"
 			request, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(body))
 			if err != nil {
 				return contract.OpResult{Cause: contract.CauseInternal, Error: "cannot create PR request"}
@@ -141,11 +160,11 @@ func (s *Service) prOpen(token string, endpoint *url.URL, transport http.RoundTr
 			if err != nil || payload.Number <= 0 {
 				return contract.OpResult{Cause: contract.CauseGithubFailed, Error: "GitHub may have opened the PR but returned an invalid response; reconcile before retrying"}
 			}
-			link := fmt.Sprintf("https://github.com/%s/pull/%d", session.Repo, payload.Number)
+			link := fmt.Sprintf("https://github.com/%s/pull/%d", repo, payload.Number)
 			result := contract.OpResult{Output: link, PR: &contract.PrOpenResult{Number: payload.Number, URL: link}}
-			event, err := s.event(session.Room, who, contract.PrOpened{Repo: session.Repo, Number: payload.Number, Session: who.Session, URL: link})
+			event, err := s.event(session.Room, who, contract.PrOpened{Repo: repo, Number: payload.Number, Session: who.Session, URL: link})
 			if err == nil {
-				err = s.store.RecordPROpen(ctx, session.Repo, payload.Number, who.Session, head, input.Title, link, event, nil)
+				err = s.store.RecordPROpen(ctx, repo, payload.Number, who.Session, head, input.Title, link, event, nil)
 			}
 			// GitHub created the PR, so a failed record is told in the output and does not fail the call.
 			if err != nil {

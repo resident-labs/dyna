@@ -154,11 +154,12 @@ func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxye
 			preferredUpstreamErr = errExec
 		}
 		lastErr = errExec
-		wait, shouldRetry := m.shouldRetryAfterErrorWithAttempted(ctx, opts, errExec, attempt, normalized, retryModel, maxWait, -1, defaultRequestRetry, roundAttempted)
+		roundMaxWait := dynaRetryWaitLimit(ctx, maxWait)
+		wait, shouldRetry := m.shouldRetryAfterErrorWithAttempted(ctx, opts, errExec, attempt, normalized, retryModel, roundMaxWait, -1, defaultRequestRetry, roundAttempted)
 		if !shouldRetry {
 			break
 		}
-		if errWait := waitForCooldown(ctx, wait, maxWait); errWait != nil {
+		if errWait := waitForCooldown(ctx, wait, roundMaxWait); errWait != nil {
 			return cliproxyexecutor.Response{}, errWait
 		}
 	}
@@ -217,11 +218,12 @@ func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req clip
 			preferredUpstreamErr = errExec
 		}
 		lastErr = errExec
-		wait, shouldRetry := m.shouldRetryAfterErrorWithAttempted(ctx, opts, errExec, attempt, normalized, retryModel, maxWait, -1, defaultRequestRetry, roundAttempted)
+		roundMaxWait := dynaRetryWaitLimit(ctx, maxWait)
+		wait, shouldRetry := m.shouldRetryAfterErrorWithAttempted(ctx, opts, errExec, attempt, normalized, retryModel, roundMaxWait, -1, defaultRequestRetry, roundAttempted)
 		if !shouldRetry {
 			break
 		}
-		if errWait := waitForCooldown(ctx, wait, maxWait); errWait != nil {
+		if errWait := waitForCooldown(ctx, wait, roundMaxWait); errWait != nil {
 			return cliproxyexecutor.Response{}, errWait
 		}
 	}
@@ -292,11 +294,12 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 			return nil, unwrapExecutionBoundaryError(errStream)
 		}
 		lastErr = errStream
-		wait, shouldRetry := m.shouldRetryAfterErrorWithAttempted(ctx, opts, errStream, attempt, normalized, retryModel, maxWait, homeRetryLimit, defaultRequestRetry, roundAttempted)
+		roundMaxWait := dynaRetryWaitLimit(ctx, maxWait)
+		wait, shouldRetry := m.shouldRetryAfterErrorWithAttempted(ctx, opts, errStream, attempt, normalized, retryModel, roundMaxWait, homeRetryLimit, defaultRequestRetry, roundAttempted)
 		if !shouldRetry {
 			break
 		}
-		if errWait := waitForCooldown(ctx, wait, maxWait); errWait != nil {
+		if errWait := waitForCooldown(ctx, wait, roundMaxWait); errWait != nil {
 			return nil, errWait
 		}
 		attempt++

@@ -48,6 +48,17 @@ test("a subscription shows in the feed only when it fails", () => {
   assert.ok(dayRows([failing], { kind: "feed" }).length > 0);
 });
 
+test("manual subscription data decodes without adding a feed row", () => {
+  for (const data of [null, 42, "text", [], { brief: "review" }]) {
+    const fired = decodeEvent({ seq: 1, id: "a", at: "2026-10-31T12:00:00Z", from: { kind: "engine" }, type: "hook.fired", body: { subscription: "sub_a", data } });
+    assert.ok(fired);
+    assert.deepEqual(fired.body, { subscription: "sub_a", data });
+    assert.equal(subject(fired), undefined);
+    assert.equal(describe(fired, id => id), "A subscription received custom data");
+    assert.equal(dayRows([fired], { kind: "feed" }).length, 0);
+  }
+});
+
 test("Discord input is a named feed post with attachment metadata", () => {
  const input = event(1, { type: "discord.message", body: { channel: "200", channelName: "general", guildName: "Horizon", author: "ari", authorID: "2", displayName: "Ari", message: "300", text: "Question", history: "owner: Context", attachments: [{ name: "message.txt", size: 1234, url: "https://example.invalid/message.txt" }] } });
  const rows = feedRows([input], { kind: "feed" });
@@ -55,6 +66,27 @@ test("Discord input is a named feed post with attachment metadata", () => {
  const row = rows[0];
  assert.equal(row.kind, "post");
  if (row.kind === "post") { assert.equal(row.discordAuthor, "Discord · ari · #general"); assert.match(row.text, /message.txt \(1234 bytes\)/); assert.match(row.text, /owner: Context/); }
+});
+
+test("session.cleared decodes and renders as a quiet feed notice", () => {
+  const cleared = decodeEvent({
+    seq: 4,
+    id: "d",
+    at: "2026-10-31T12:00:03Z",
+    from: { kind: "owner" },
+    type: "session.cleared",
+    body: { session: "l" },
+  });
+  assert.ok(cleared);
+  assert.equal(subject(cleared), "l");
+  assert.equal(describe(cleared, id => names[id] ?? id), "Cleared lead-web's conversation");
+  const rows = feedRows([cleared], { kind: "feed" });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].kind, "notice");
+  if (rows[0].kind === "notice") {
+    assert.equal(rows[0].event.type, "session.cleared");
+    assert.equal(rows[0].event.body.session, "l");
+  }
 });
 
 function event(seq: number, body: EventBody, from: Principal = { kind: "engine" }): Event {
@@ -454,4 +486,26 @@ test("work across different displayed minutes keeps a range", () => {
 
 test("matching clock digits in different day periods do not collapse", () => {
   assert.ok(timeSpan("2026-11-09T08:52:00Z", "2026-11-09T20:52:00Z").includes(" – "));
+});
+
+test("service.message and service.sent fold into the room feed work row with concise summaries", () => {
+  const at = (seq: number, seconds: number, body: EventBody, from: Principal = { kind: "engine" }) =>
+    ({ ...event(seq, body, from), at: new Date(seconds * 1000).toISOString() });
+  const incoming = at(1, 0, { type: "service.message", body: { service: "agent-chat", id: "m1", author: "@x/y", text: "Line one\nLine two" } });
+  const start = at(2, 5, { type: "turn.started", body: { session: "l", turn: "t1", inputs: ["1"] } });
+  const outgoing = at(3, 40, { type: "service.sent", body: { service: "agent-chat", id: "out_1", to: "@x/y", text: "Checked and fixed" } }, lead);
+  const end = at(4, 65, { type: "turn.ended", body: { session: "l", turn: "t1", outcome: "completed", usage } });
+
+  assert.equal(subject(incoming), undefined);
+  assert.equal(subject(outgoing), "l");
+  assert.equal(describe(incoming, id => names[id] ?? id), "agent-chat · @x/y: Line one Line two");
+  assert.equal(describe(outgoing, id => names[id] ?? id), "lead-web → @x/y · agent-chat: Checked and fixed");
+  assert.equal(describe(at(5, 70, { type: "service.message", body: { service: "alerts", id: "m2", author: "pager", text: "", data: { ok: false } } }), id => id), "alerts · pager (data)");
+
+  const rows = feedRows([incoming, start, outgoing, end], { kind: "feed" });
+  assert.deepEqual(rows.map(row => row.kind), ["work"]);
+  const work = rows[0];
+  assert.ok(work.kind === "work");
+  assert.equal(workSummary(work.events, id => names[id] ?? id), "lead-web worked for 1 min · 1 feed message · 1 sent to feed");
+  assert.equal(workIsBare([incoming], id => id), true);
 });

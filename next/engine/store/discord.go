@@ -46,7 +46,7 @@ type DiscordRoute struct {
 }
 
 func (s *Store) DiscordRoutes(ctx context.Context, room contract.RoomID) ([]DiscordRoute, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT guild,channel,room,instructions,policy,policy_resolved,CASE WHEN EXISTS(SELECT 1 FROM sessions WHERE id=d.session AND closed_at IS NULL) THEN session ELSE (SELECT id FROM sessions WHERE room=d.room AND parent IS NULL AND closed_at IS NULL) END FROM discord_routes d WHERE ?='' OR room=? ORDER BY guild,channel`, room, room)
+	rows, err := s.Read().QueryContext(ctx, `SELECT guild,channel,room,instructions,policy,policy_resolved,CASE WHEN EXISTS(SELECT 1 FROM sessions WHERE id=d.session AND closed_at IS NULL) THEN session ELSE COALESCE((SELECT id FROM sessions WHERE room=d.room AND parent IS NULL AND closed_at IS NULL), '') END FROM discord_routes d WHERE ?='' OR room=? ORDER BY guild,channel`, room, room)
 	if err != nil {
 		return nil, err
 	}

@@ -157,17 +157,66 @@ func TestBashRunsInTheSessionTree(t *testing.T) {
 
 // The model reads the end of a long output, and the whole output is in the file the note names.
 func TestALongOutputIsCutToItsEnd(t *testing.T) {
-	b := newSession(t, []pigtest.Block{{Tool: "bash", Input: `{"command":"seq 1 20000"}`}}, []pigtest.Block{{Text: "ok"}})
+	b := newSession(t, []pigtest.Block{{Tool: "bash", Input: `{"command":"seq -w 000000001 000020000"}`}}, []pigtest.Block{{Text: "ok"}})
 	b.turn(t, "count")
 	got := b.toolResult(t, 1)
-	if strings.Contains(got, `\n1\n2\n`) || !strings.Contains(got, `\n20000\n`) {
+	if len(got) > 14<<10 || strings.Contains(got, `000000001\n`) || !strings.Contains(got, `\n000020000\n`) {
 		t.Fatalf("not cut to its end: %.200s", got)
 	}
 	_, after, ok := strings.Cut(got, "Full output: ")
 	path, _, _ := strings.Cut(after, " ")
 	whole, err := os.ReadFile(path)
-	if !ok || err != nil || !strings.HasPrefix(string(whole), "1\n2\n") {
+	if !ok || err != nil || !strings.HasPrefix(string(whole), "000000001\n000000002\n") {
 		t.Fatalf("full output at %q: %v", path, err)
+	}
+}
+
+func TestReadCapsLeaveContinuation(t *testing.T) {
+	for _, tc := range []struct {
+		name, text, notice string
+	}{
+		{"lines", strings.Repeat("short\n", 1100), "Showing lines 1-1000 of 1100. Use offset=1001"},
+		{"bytes", strings.Repeat(strings.Repeat("x", 1023)+"\n", 30), "Showing lines 1-25 of 30 (25.0KB limit). Use offset=26"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newSession(t, []pigtest.Block{{Tool: "read", Input: `{"path":"large.txt"}`}}, []pigtest.Block{{Text: "ok"}})
+			if err := os.WriteFile(filepath.Join(b.dir, "large.txt"), []byte(strings.TrimSuffix(tc.text, "\n")), 0600); err != nil {
+				t.Fatal(err)
+			}
+			b.turn(t, "read it")
+			if got := b.toolResult(t, 1); !strings.Contains(got, tc.notice) {
+				t.Fatalf("missing %q at end of result: %s", tc.notice, got[max(0, len(got)-160):])
+			}
+			for _, tool := range b.model.Requests()[0].Tools {
+				if strings.Contains(string(tool), `"name":"read"`) && !strings.Contains(string(tool), "1000 lines or 25.0KB") {
+					t.Fatalf("incorrect read description: %s", tool)
+				}
+			}
+		})
+	}
+}
+
+func TestCodemodeOutputCapCanBeOverridden(t *testing.T) {
+	const source = `return "x".repeat(16000);`
+	for _, tc := range []struct {
+		name, code string
+		truncated  bool
+	}{
+		{"default", source, true},
+		{"explicit", `// @options: {"max_output_tokens": 5000}` + "\n" + source, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]string{"code": tc.code})
+			b := newSession(t, []pigtest.Block{{Tool: "codemode", Input: string(args)}}, []pigtest.Block{{Text: "ok"}})
+			b.turn(t, "run script")
+			got := b.toolResult(t, 1)
+			if strings.Contains(got, "Warning: truncated output") != tc.truncated {
+				t.Fatalf("unexpected truncation: %.180s", got)
+			}
+			if tc.truncated && !strings.Contains(got, "Full output:") {
+				t.Fatal("missing path to full output")
+			}
+		})
 	}
 }
 

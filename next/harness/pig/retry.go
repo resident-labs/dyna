@@ -5,12 +5,14 @@ import (
 	"fmt"
 
 	"github.com/MichaelKinsy/PiG/coding"
+	"github.com/resident-labs/dyna/contract"
 )
 
 // boundModelRetries uses PiG's existing retry loops, not another retry layer.
 // Agent waits total at most 2 + 4 + 4 seconds. Each of its four requests
 // can wait at most 20 seconds for one provider retry: 90 seconds in all.
-// Zero/disabled and stricter user settings remain stricter.
+// Zero/disabled and stricter retry settings remain stricter. The provider's
+// independent response-header timer must allow the proxy's cooldown wait.
 func boundModelRetries(settings *coding.SettingsManager) error {
 	agent := settings.GetRetrySettings()
 	provider := settings.GetProviderRetrySettings()
@@ -25,8 +27,8 @@ func boundModelRetries(settings *coding.SettingsManager) error {
 	// PiG exposes Settings but not its nested retry construction types.
 	// Decode this host-owned override once through its public settings boundary.
 	var override coding.Settings
-	if err := json.Unmarshal([]byte(fmt.Sprintf(`{"retry":{"enabled":%t,"maxRetries":%d,"baseDelayMs":%d,"maxAgentDelayMs":%d,"provider":{"maxRetries":%d,"maxRetryDelayMs":%d}}}`,
-		agent.Enabled, min(3, max(0, agent.MaxRetries)), min(2000, max(0, agent.BaseDelayMs)), min(4000, max(0, agent.MaxAgentDelayMs)), retries, min(20000, delay))), &override); err != nil {
+	if err := json.Unmarshal([]byte(fmt.Sprintf(`{"retry":{"enabled":%t,"maxRetries":%d,"baseDelayMs":%d,"maxAgentDelayMs":%d,"provider":{"maxRetries":%d,"maxRetryDelayMs":%d,"timeoutMs":%d}}}`,
+		agent.Enabled, min(3, max(0, agent.MaxRetries)), min(2000, max(0, agent.BaseDelayMs)), min(4000, max(0, agent.MaxAgentDelayMs)), retries, min(20000, delay), contract.ModelWireIdleTimeout.Milliseconds())), &override); err != nil {
 		return err
 	}
 	settings.ApplyOverrides(override)

@@ -37,7 +37,7 @@ var newClaudeOAuthUsageClient = func(cfg *config.Config, proxyURL string) claude
 
 // authFileQuotaWindow is one usage window as reported by the provider.
 // Kind keeps the provider's own vocabulary (Anthropic: "session",
-// "weekly_all", "weekly_scoped"); Scope names the model for scoped windows.
+// "weekly_all", "weekly_scoped"); Scope names the model or pool for scoped windows.
 type authFileQuotaWindow struct {
 	Kind        string  `json:"kind"`
 	Utilization float64 `json:"utilization"`

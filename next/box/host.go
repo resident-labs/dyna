@@ -55,6 +55,7 @@ type ContainerStatus struct {
 }
 type Forward struct {
 	Box                  contract.BoxID
+	Service              contract.ServiceID
 	HostPath, EnginePath string
 }
 
@@ -92,6 +93,14 @@ type Runner struct {
 	Slot    int
 	Size    contract.BoxSize
 	Running bool
+}
+
+// Egress describes the CI egress proxy container found on a host.
+type Egress struct {
+	Present bool
+	Running bool
+	// Binary is the immutable engine checksum pinned by the container; empty means an older unpinned container.
+	Binary string
 }
 
 // BaseImage is the Run image that needs no repository: dyna-base itself.

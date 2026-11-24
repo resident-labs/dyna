@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/contract/outside"
 	"github.com/resident-labs/dyna/engine/discord"
 )
 
@@ -63,7 +64,7 @@ func (s *Service) DiscordRead(ctx context.Context, caller contract.Principal, re
 			}
 		}
 		if len(matches) != 1 {
-			return empty, invalid("channel name is unknown or ambiguous; use an ID. Available channels: " + contract.Outside("discord directory", "", strings.Join(candidates, ", ")))
+			return empty, invalid("channel name is unknown or ambiguous; use an ID. Available channels: " + outside.Wrap(outside.DiscordDirectory(), strings.Join(candidates, ", ")))
 		}
 		channel = matches[0]
 	}
@@ -143,5 +144,5 @@ func (s *Service) DiscordRead(ctx context.Context, caller contract.Principal, re
 	if fileStatus != "" {
 		lines = append(lines, fileStatus)
 	}
-	return contract.DiscordReadResponse{Channel: channel, Text: contract.Outside("discord channel "+channel, "", strings.Join(lines, "\n\n"))}, nil
+	return contract.DiscordReadResponse{Channel: channel, Text: outside.Wrap(outside.DiscordChannelID(channel), strings.Join(lines, "\n\n"))}, nil
 }

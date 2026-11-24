@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/box/post"
 	"github.com/resident-labs/dyna/box/skills"
@@ -379,5 +381,91 @@ func TestVisualCheckReadsFromTheWorkingDirectory(t *testing.T) {
 	}
 	if len(files) != 2 || files[0] != "/box/work/repo/visuals/plan.html" || files[1] != "/box/shared/plan.html" {
 		t.Fatalf("%q", files)
+	}
+}
+
+func TestServiceSendInjectsToolCallID(t *testing.T) {
+	var sent contract.ServiceSendRequest
+	server, err := New(func(_ context.Context, method contract.Method, data []byte) ([]byte, *contract.Error) {
+		if method != contract.MethodServiceSend {
+			t.Fatalf("unexpected method %q", method)
+		}
+		if err := json.Unmarshal(data, &sent); err != nil {
+			t.Fatal(err)
+		}
+		return []byte(`{"id":"out_1"}`), nil
+	}, nil, post.Preparer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := arguments(t, `{"action":"send","service":"agent-chat","to":"@alice/team","text":"hello"}`)
+	args[contract.ToolCallIDArgument] = json.RawMessage(`"call-send-1"`)
+	if out := server.call(context.Background(), callParams{Name: "service", Arguments: args}); out.IsError {
+		t.Fatalf("unexpected error: %+v", out)
+	}
+	if sent.Service != "agent-chat" || sent.To != "@alice/team" || sent.Text != "hello" || sent.ToolCallID != "call-send-1" {
+		t.Fatalf("sent=%+v", sent)
+	}
+	// Model-provided toolCallId must be rejected by strict decoding.
+	bad := server.call(context.Background(), callParams{Name: "service", Arguments: arguments(t, `{"action":"send","service":"agent-chat","to":"@alice/team","text":"hello","toolCallId":"spoof"}`)})
+	if !bad.IsError {
+		t.Fatalf("expected unknown field rejection, got %+v", bad)
+	}
+}
+
+// An MCP notifications/cancelled for an in-flight computer call must cancel computer.Do's ctx
+// and release actionSlot promptly so the next computer call does not hang behind it.
+func TestComputerMCPCancelReleasesActionSlot(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "agent.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{}, 2)
+	agentServer := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		_, _ = w.Write([]byte(`{"url":"http://127.0.0.1:1"}`))
+	})}
+	go agentServer.Serve(listener)
+	t.Cleanup(func() { agentServer.Close() })
+
+	server, err := New(nil, BoxTools(socket), post.Preparer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/dyna/", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"computer","arguments":{"action":"wait","ms":10000},"_meta":{"progressToken":"p1"}}}`))
+	req.Header.Set("Accept", "text/event-stream")
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { server.ServeHTTP(w, req); close(done) }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first computer call did not start")
+	}
+
+	cancelReq := httptest.NewRequest(http.MethodPost, "/dyna/", strings.NewReader(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1}}`))
+	server.ServeHTTP(httptest.NewRecorder(), cancelReq)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("MCP stream did not end on notifications/cancelled")
+	}
+
+	next := httptest.NewRequest(http.MethodPost, "/dyna/", strings.NewReader(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"computer","arguments":{"action":"wait","ms":0}}}`))
+	w2 := httptest.NewRecorder()
+	nextDone := make(chan struct{})
+	go func() { server.ServeHTTP(w2, next); close(nextDone) }()
+	select {
+	case <-nextDone:
+	case <-time.After(time.Second):
+		t.Fatal("second computer call hung on actionSlot after first call was cancelled")
+	}
+	if strings.Contains(w2.Body.String(), `"isError":true`) || !strings.Contains(w2.Body.String(), "Waited 0 ms.") {
+		t.Fatalf("second computer call = %s", w2.Body.String())
 	}
 }

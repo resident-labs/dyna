@@ -408,3 +408,95 @@ func TestTranscriptDefersUnusedMaps(t *testing.T) {
 		}
 	}
 }
+
+func TestTranscriptFeedMessagesAndSent(t *testing.T) {
+	s, ctx, caller := transcriptCaller(t)
+	session, err := s.store.Session(ctx, caller.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	longReply := strings.Repeat("reply ", 900)
+	var inputSeq, steerSeq int64
+	var sentCallID, sentLooseID contract.EventID
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		var err error
+		inputEv := contract.Event{ID: "feed-in", Room: session.Room, From: contract.Principal{Kind: contract.PrincipalEngine}, Time: time.Unix(1, 0), Body: contract.ServiceMessage{Service: "agent-chat", ID: "m1", Author: "@alice/team", Text: "check `worker-2`"}}
+		if inputSeq, err = s.store.AppendEvent(tx, inputEv); err != nil {
+			return err
+		}
+		start := contract.Event{ID: "feed-start", Room: session.Room, From: caller, Time: time.Unix(2, 0), Body: contract.TurnStarted{Session: caller.Session, Turn: "turn_feed", Inputs: []contract.EventID{inputEv.ID}}}
+		startSeq, err := s.store.AppendEvent(tx, start)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO turns(id,session,started_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,started_seq) VALUES('turn_feed',?,0,'','',0,0,0,0,?)`, caller.Session, startSeq); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state,turn) VALUES('session',?,?,'session','none','','','','',1,'done','turn_feed')`, caller.Session, inputSeq); err != nil {
+			return err
+		}
+		steerEv := contract.Event{ID: "feed-steer", Room: session.Room, From: contract.Principal{Kind: contract.PrincipalEngine}, Time: time.Unix(4, 0), Body: contract.ServiceMessage{Service: "agent-chat", ID: "m2", Author: "@bob/team", Text: "also check logs"}}
+		if steerSeq, err = s.store.AppendEvent(tx, steerEv); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO deliveries(to_kind,to_id,seq,surface,reply_kind,reply_target_kind,reply_target_id,reply_home,reply_to,wake,state,turn,queue) VALUES('session',?,?,'session','none','','','','',1,'done','turn_feed','steer')`, caller.Session, steerSeq); err != nil {
+			return err
+		}
+		sentCallID = "sent-call"
+		if _, err := s.store.AppendEvent(tx, contract.Event{ID: sentCallID, Room: session.Room, From: caller, Time: time.Unix(5, 0), Body: contract.ServiceSent{Service: "agent-chat", ID: "out_1", To: "@alice/team", Text: longReply, ToolCallID: "svc-call"}}); err != nil {
+			return err
+		}
+		sentLooseID = "sent-loose"
+		_, err = s.store.AppendEvent(tx, contract.Event{ID: sentLooseID, Room: session.Room, From: caller, Time: time.Unix(6, 0), Body: contract.ServiceSent{Service: "agent-chat", ID: "out_2", To: "@bob/team", Text: "logs look fine"}})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	lines := fmt.Sprintf(`{"type":"message","id":"u1","timestamp":"1970-01-01T00:00:02Z","message":{"role":"user","deliveryId":"%d"}}`+"\n"+
+		`{"type":"message","id":"a1","timestamp":"1970-01-01T00:00:03Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"svc-call","name":"mcp__dyna__service","arguments":{"action":"send"}}]}}`+"\n"+
+		`{"type":"message","id":"r1","timestamp":"1970-01-01T00:00:03Z","message":{"role":"toolResult","toolCallId":"svc-call","content":[{"type":"text","text":"{\"id\":\"out_1\"}"}]}}`+"\n"+
+		`{"type":"message","id":"u2","timestamp":"1970-01-01T00:00:04Z","message":{"role":"user","deliveryId":"%d"}}`+"\n", inputSeq, steerSeq)
+	if _, problem := appendTranscript(s, ctx, caller, "feed.jsonl", 0, lines); problem != nil {
+		t.Fatal(problem)
+	}
+	page, problem := s.TranscriptRead(ctx, theOwner, contract.TranscriptReadRequest{Session: caller.Session, Turn: "turn_feed"})
+	if problem != nil || len(page.Turns) != 1 {
+		t.Fatalf("read failed: problem=%v turns=%d", problem, len(page.Turns))
+	}
+	turn := page.Turns[0]
+	if len(turn.Inputs) != 1 || turn.Inputs[0].Type != (contract.ServiceMessage{}).EventType() {
+		t.Fatalf("unexpected inputs: %+v", turn.Inputs)
+	}
+	var sawSteer, sawNestedSent, sawLooseSent bool
+	for _, item := range turn.Items {
+		if item.Kind == contract.TranscriptSteer && item.Type == (contract.ServiceMessage{}).EventType() && item.Event == "feed-steer" {
+			sawSteer = true
+		}
+		for _, post := range item.Posts {
+			if post.Event == sentCallID && post.Type == (contract.ServiceSent{}).EventType() && post.Service == "agent-chat" && post.To == "@alice/team" && post.More {
+				sawNestedSent = true
+			}
+		}
+		if item.Kind == contract.TranscriptPost && item.Event == sentLooseID && item.Type == (contract.ServiceSent{}).EventType() && item.Service == "agent-chat" && item.To == "@bob/team" && item.Text == "logs look fine" {
+			sawLooseSent = true
+		}
+	}
+	if !sawSteer || !sawNestedSent || !sawLooseSent {
+		t.Fatalf("steer=%v nested=%v loose=%v items=%+v", sawSteer, sawNestedSent, sawLooseSent, turn.Items)
+	}
+	if len(page.Steps) != 1 || page.Steps[0].Tool != "mcp__dyna__service" {
+		t.Fatalf("expected only tool step (no blank step for loose service.sent), got %+v", page.Steps)
+	}
+	chunk, problem := s.TranscriptRead(ctx, theOwner, contract.TranscriptReadRequest{Session: caller.Session, Turn: "turn_feed", Item: string(sentCallID), Part: contract.TranscriptPartText})
+	if problem != nil || chunk.Chunk != longReply {
+		t.Fatalf("chunk problem=%v len=%d want=%d", problem, len(chunk.Chunk), len(longReply))
+	}
+	digest, problem := s.TranscriptDigest(ctx, theOwner, contract.TranscriptDigestRequest{Session: string(caller.Session), Turn: "turn_feed"})
+	if problem != nil || len(digest.Turns) != 1 {
+		t.Fatalf("digest failed: problem=%v turns=%d", problem, len(digest.Turns))
+	}
+	joined := strings.Join(digest.Turns[0].Steps, "\n")
+	if !strings.Contains(joined, "→ @alice/team: ") || !strings.Contains(joined, "→ @bob/team: logs look fine") {
+		t.Fatalf("digest missing service.sent steps: %q", joined)
+	}
+}

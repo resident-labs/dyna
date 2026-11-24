@@ -80,6 +80,9 @@ type dynaFakeProviderStore struct{}
 func (dynaFakeProviderStore) List(context.Context) ([]*coreauth.Auth, error) { return nil, nil }
 func (dynaFakeProviderStore) Delete(context.Context, string) error           { return nil }
 func (dynaFakeProviderStore) Save(_ context.Context, auth *coreauth.Auth) (string, error) {
+	if auth.Storage == nil {
+		return auth.ID, nil
+	}
 	raw, err := json.Marshal(auth.Storage)
 	if err != nil {
 		return "", err

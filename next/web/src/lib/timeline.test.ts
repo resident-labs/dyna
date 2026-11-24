@@ -332,3 +332,29 @@ test("an advisor call that has its result is followed by the answer, which stays
   assert.deepEqual(deriveTimelineGroups(items).map(group => [group.kind, group.id]), [["work", "r"], ["advice", "advice:a"], ["work", "b"]]);
   assert.deepEqual(shownTimelineGroups(items, true).map(group => group.kind), ["advice"]);
 });
+
+test("service.message decodes as an outside feed input with service, author, markdown text and optional data", () => {
+  const input: TranscriptInput = {
+    id: "ev_1", seq: 10, at: "2026-11-23T01:00:00Z", room: "r", type: "service.message", from: { kind: "engine" },
+    text: JSON.stringify({ service: "agent-chat", id: "m1", author: "@x/y", text: "Check **worker-2**", data: { severity: "high" } }),
+  };
+  assert.deepEqual(timelineInput(input), {
+    kind: "feed",
+    text: "Check **worker-2**",
+    feed: { service: "agent-chat", author: "@x/y", data: '{"severity":"high"}' },
+  });
+  assert.equal(timelineInputText(input), "agent-chat · @x/y: Check **worker-2**");
+  assert.deepEqual(timelineInput({ ...input, text: "{", more: true }), { kind: "line", text: "Loading feed message…" });
+  assert.deepEqual(timelineInput({ ...input, text: "{", more: true }, input.text), {
+    kind: "feed",
+    text: "Check **worker-2**",
+    feed: { service: "agent-chat", author: "@x/y", data: '{"severity":"high"}' },
+  });
+});
+
+test("a service.sent item attached to a tool call stays visible when work folds", () => {
+  const sent: TranscriptItem = { id: "ev_2", event: "ev_2", seq: 11, turn: "t", at: "2026-11-23T01:01:00Z", kind: "post", type: "service.sent", from: { kind: "session", session: "s" }, service: "agent-chat", to: "@x/y", text: "On it" };
+  const items: TranscriptItem[] = [{ id: "call_1", turn: "t", at: "2026-11-23T01:01:00Z", kind: "tool", tool: "mcp__dyna__service", posts: [sent] }];
+  assert.deepEqual(shownTimelineGroups(items, true).map(group => group.kind), ["posts"]);
+  assert.equal(finalTimelineItem(items, "s")?.id, "ev_2");
+});

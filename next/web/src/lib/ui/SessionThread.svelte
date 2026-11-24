@@ -5,7 +5,7 @@
   import { transcriptReader } from "../transcript-reader.ts";
   import { decodeEvent } from "../event.ts";
   import { hue } from "../identity.ts";
-  import { visibleAttachments, boxRow, causes, dayLabel, formatTime, waits } from "../feed.ts";
+  import { visibleAttachments, boxRow, causes, dayLabel, formatTime, fullTime, waits } from "../feed.ts";
   import BoxRestart from "./BoxRestart.svelte";
   import { watchTranscripts } from "../stream.ts";
   import { sourceLabel } from "../source.ts";
@@ -28,7 +28,7 @@
   import QuestionCard from "./QuestionCard.svelte";
   import RequestCard from "./RequestCard.svelte";
   import EngineRestartNotice from "./EngineRestartNotice.svelte";
-  import { attemptFailedNote, compactionNote, engineEventsNote, finalTimelineItem, foldInputRuns, ownPost, postDestination, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief, workingLine } from "../timeline.ts";
+  import { attemptFailedNote, compactionNote, engineEventsNote, finalTimelineItem, foldInputRuns, ownPost, postDestination, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief, workingLine, type TimelineFeed } from "../timeline.ts";
 
   // With step, the thread reads one worker of a crew: its transcript alone, and nothing that was sent to the crew.
   let { hasRoom, session, step, roomName, store, admin = false, operate, unsent, onunsent, onsettled, onpostlocation, navigate, startingBrief, clock = Date.now }: { hasRoom: (room: RoomID) => boolean; startingBrief?: string; session: string; step?: string; roomName: string; store: RoomStore; admin?: boolean; operate: boolean; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
@@ -51,6 +51,7 @@
   const waited = new Set<string>();
   let decided = $derived.by(() => { for (const request of requesting) waited.add(request.id); return [...store.requests.values()].filter(request => request.state !== "pending" && waited.has(request.id)); });
   let turns: TranscriptTurn[] = $state([]);
+  let clearedAt: string | undefined = $state();
   let pendingBrief = $derived(pendingStartBrief(startingBrief, turns));
   let expandedTurns: Record<string, boolean> = $state({});
   let before: string | undefined = $state();
@@ -128,7 +129,7 @@
     resending = false;
     if (loaded.every(Boolean)) for (const input of inputs) void send({ room: store.room, home: { kind: "dm", session }, text: timelineInput(input, chunks["input:" + input.id + "/text"]).text, attachments: input.attachments?.length ? input.attachments : undefined });
   }
-  let quiet = $derived(!turns.length && !queuedPosts.length && !pendingPosts.length && !pendingBrief && !asking.length && !requesting.length);
+  let quiet = $derived(!turns.length && !queuedPosts.length && !pendingPosts.length && !pendingBrief && !asking.length && !requesting.length && !clearedAt);
   // The first message after a turn may start a new day. It waits outside any turn, so its day mark is here too.
   let waitingSince = $derived(queuedPosts[0]?.at ?? pendingPosts[0]?.at);
 
@@ -160,6 +161,7 @@
             ...(paging.has(turn.id + "/older") ? { olderItems: previous.olderItems, nextItem: previous.nextItem } : {}) } : turn;
         })];
         if (!retained.length) before = page.before;
+        clearedAt = page.clearedAt ?? undefined;
       }
       failed = false;
       loaded = true;
@@ -178,6 +180,15 @@
   }
   // view.newest is a plain read, so the effect also follows the events themselves: what arrives while the owner watches is read.
   $effect(() => { void view.ordered.length; markRead(); });
+  // Reload transcript when this session's conversation is cleared while the DM is open.
+  let seenCleared = untrack(() => step ? undefined : store.cleared.get(session));
+  $effect(() => {
+    const at = step ? undefined : store.cleared.get(session);
+    if (at && at !== seenCleared) {
+      seenCleared = at;
+      if (untrack(() => loaded)) void load();
+    }
+  });
   onMount(() => {
     document.addEventListener("visibilitychange", markRead);
     const stop = watchTranscripts(id => { if (!id || id === session) void load(); });
@@ -342,17 +353,47 @@
   </div>
 {/snippet}
 
+<!-- An outside feed message is framed with a dashed left rule and faint tint so it reads as external text, not an owner or session post. -->
+{#snippet feedMessage(key: string, feed: TimelineFeed, text: string, at: string, turn: TranscriptTurn, part: string)}
+  <div class="feed-input" data-media-key={key} aria-label={feed.author ? `Outside feed message from ${feed.author} via ${feed.service}` : `Outside feed message via ${feed.service}`}>
+    <div class="feed-sender">
+      <span class="feed-icon" aria-hidden="true"><Icon name="inbox" size={14} /></span>
+      <strong class="feed-service">{feed.service}</strong>
+      <span class="feed-tag" title="Outside text from a feed">feed</span>
+      {#if feed.author}<span class="feed-author">{feed.author}</span>{/if}
+      <time datetime={at} title={fullTime(at)}>{formatTime(at)}</time>
+    </div>
+    <CollapsibleBody>
+      {#if text}<Markdown rhythm="thread" {text} mentions={false} />{/if}
+      {#if feed.data !== undefined}<PostData value={feed.data} />{/if}
+      {@render textRetry(turn, part)}
+    </CollapsibleBody>
+  </div>
+{/snippet}
+
 {#snippet postItem(turn: TranscriptTurn, item: TranscriptItem)}
-  {@const to = item.kind === "post" ? postDestination(item, session, store.room, roomName, id => sender("session", id)) : undefined}
-  {#snippet destination()}<div class="post-destination"><PostTarget to={to!} onjump={item.room && item.seq ? () => onpostlocation(item.room!, item.seq!) : undefined} /></div>{/snippet}
-  {#snippet content()}
-    {@render message(item.id, chunks[item.id + "/text"] ?? item.text ?? "", item.attachments, item.event ?? item.id, item.at, item.data, item.dataRef, item.dataAttachment, item.from ?? { kind: "session", session })}
-    {@render textRetry(turn, item.id)}
-  {/snippet}
-  {#snippet body()}{#if to}{@render destination()}{/if}{@render content()}{/snippet}
-  {#if item.kind === "post" && !ownPost(item, session)}{@render inbound(item.id, item.from ?? { kind: "engine" }, item.at, body, !!item.attachments?.length)}
-  <!-- A post to somewhere else is the session's own writing, so it reads whole like its replies; a rule and its destination mark where it went. -->
-  {:else}<div class="agent-message" class:sent={!!to} data-media-key={item.id}>{@render body()}</div>{/if}
+  {#if item.kind === "post" && item.type === "service.sent"}
+    <div class="agent-message sent service-sent" data-media-key={item.id}>
+      <div class="service-sent-head">
+        {#if item.to}<span class="service-sent-to">→ {item.to}</span>{#if item.service}<span class="service-sent-sep" aria-hidden="true">·</span><span class="service-sent-via">{item.service}</span>{/if}{:else if item.service}<span class="service-sent-to">→ {item.service}</span>{/if}{#if item.to || item.service}<span class="service-sent-sep" aria-hidden="true">·</span>{/if}<time datetime={item.at} title={fullTime(item.at)}>{formatTime(item.at)}</time>
+      </div>
+      <CollapsibleBody>
+        <Markdown rhythm="thread" text={chunks[item.id + "/text"] ?? item.text ?? ""} source={{ key: item.id, from: item.from ?? { kind: "session", session }, at: item.at }} />
+        {@render textRetry(turn, item.id)}
+      </CollapsibleBody>
+    </div>
+  {:else}
+    {@const to = item.kind === "post" ? postDestination(item, session, store.room, roomName, id => sender("session", id)) : undefined}
+    {#snippet destination()}<div class="post-destination"><PostTarget to={to!} onjump={item.room && item.seq ? () => onpostlocation(item.room!, item.seq!) : undefined} /></div>{/snippet}
+    {#snippet content()}
+      {@render message(item.id, chunks[item.id + "/text"] ?? item.text ?? "", item.attachments, item.event ?? item.id, item.at, item.data, item.dataRef, item.dataAttachment, item.from ?? { kind: "session", session })}
+      {@render textRetry(turn, item.id)}
+    {/snippet}
+    {#snippet body()}{#if to}{@render destination()}{/if}{@render content()}{/snippet}
+    {#if item.kind === "post" && !ownPost(item, session)}{@render inbound(item.id, item.from ?? { kind: "engine" }, item.at, body, !!item.attachments?.length)}
+    <!-- A post to somewhere else is the session's own writing, so it reads whole like its replies; a rule and its destination mark where it went. -->
+    {:else}<div class="agent-message" class:sent={!!to} data-media-key={item.id}>{@render body()}</div>{/if}
+  {/if}
 {/snippet}
 
 <!-- What a session read, at the start of a turn or as a steer. Part names the item whose full text loads for it. -->
@@ -362,13 +403,17 @@
     {@render message(key, shown.text, input.attachments, input.id, input.at, input.data, input.dataRef, input.dataAttachment, input.from)}
     {@render textRetry(turn, part)}
   {/snippet}
-  {#if shown.kind !== "message"}
-    {@const name = input.source ? sourceLabel(input.source) : input.from.session ? sender("session", input.from.session) : undefined}
-    <div class="muted turn-note input-line" class:failure={shown.kind === "failed"} title={formatTime(input.at)}>
-      <span class="slot"><Icon name={shown.kind === "failed" ? "warning" : "inbox"} size={14} /></span>
-      {#if name}<span class="agent-sender">{#if !input.source || hasRoom(input.source.room)}<a href={`/r/${encodeURIComponent(input.source?.room ?? store.room)}/s/${encodeURIComponent(input.from.session ?? "")}`} onclick={navigate} style:--hue={hue(name)}>{name}</a>{:else}<strong class={input.from.kind} style:--hue={hue(name)}>{name}</strong>{/if}</span>{/if}
-      <span>{#if shown.restart}<EngineRestartNotice event={shown.restart} />{:else}{shown.text}{/if}</span>
-    </div>
+  {#if shown.kind === "feed"}
+    {@render feedMessage(key, shown.feed, shown.text, input.at, turn, part)}
+  {:else if shown.kind !== "message"}
+    {#if !(input.type === "service.message" && input.more && chunks[part + "/text"] === undefined && chunkFailed[part + "/text"])}
+      {@const name = input.source ? sourceLabel(input.source) : input.from.session ? sender("session", input.from.session) : undefined}
+      <div class="muted turn-note input-line" class:failure={shown.kind === "failed"} title={formatTime(input.at)}>
+        <span class="slot"><Icon name={shown.kind === "failed" ? "warning" : "inbox"} size={14} /></span>
+        {#if name}<span class="agent-sender">{#if !input.source || hasRoom(input.source.room)}<a href={`/r/${encodeURIComponent(input.source?.room ?? store.room)}/s/${encodeURIComponent(input.from.session ?? "")}`} onclick={navigate} style:--hue={hue(name)}>{name}</a>{:else}<strong class={input.from.kind} style:--hue={hue(name)}>{name}</strong>{/if}</span>{/if}
+        <span>{#if shown.restart}<EngineRestartNotice event={shown.restart} />{:else}{shown.text}{/if}</span>
+      </div>
+    {/if}
     {@render textRetry(turn, part)}
   {:else if input.from.kind === "owner"}{@render ownerMessage(key, input.at, false, body)}
   {:else}{@render inbound(key, input.from, input.at, body, !!input.attachments?.length, input.source)}{/if}
@@ -393,6 +438,7 @@
     {/if}
     {#each turns as turn, index (turn.id)}
       {@const segments = timelineSegments(turn.id, turn.items ?? [])}
+      {#if turn.clearedAt}<p class="cleared-divider" role="separator"><span>Conversation cleared · <time datetime={turn.clearedAt} title={fullTime(turn.clearedAt)}>{formatTime(turn.clearedAt)}</time></span></p>{/if}
       {@render dayMark(turn.started, turns[index - 1]?.started)}
       <article data-turn={turn.id} class:ended={!running(turn)}>
         {#each foldInputRuns(turn.inputs ?? []) as run (run.kind === "input" ? run.input.id : run.id)}
@@ -432,6 +478,7 @@
       </article>
     {/each}
     <!-- A box that failed or was lost ends the thread: the turn it held stopped there, and nothing runs until it is back. -->
+    {#if clearedAt && !step}<p class="cleared-divider" role="separator"><span>Conversation cleared · <time datetime={clearedAt} title={fullTime(clearedAt)}>{formatTime(clearedAt)}</time></span></p>{/if}
     {#if boxFailed}
       {@const row = boxRow(boxFailed.box, boxFailed.cause)}
       <div class="failure box-failed" role="status"><span class="slot"><Icon name="warning" size={16} /></span><span><strong>{row.label}</strong>{#if row.cause}{` · ${row.cause}`}{/if}</span>
@@ -474,6 +521,8 @@
   /* The feed's form of the card, at the thread's own edge. */
   .question :global(.card.feed) { margin-left: 16px; }
   .day { margin: 0; color: var(--muted); font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: center; }
+  .cleared-divider { margin: 8px 0; display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; text-align: center; }
+  .cleared-divider::before, .cleared-divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
   .owner-message { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
   .bubble { max-width: 80%; min-width: 0; padding: 12px 16px; background: var(--raised); border-radius: 12px; }
   .bubble.sending { opacity: 0.5; }
@@ -489,6 +538,17 @@
   /* Mirrors .bubble from the other side. */
   .agent-input { align-self: flex-start; max-width: 80%; min-width: 0; padding: 12px 16px; background: var(--raised); border-radius: 12px; }
   .agent-input .agent-sender { margin-bottom: 4px; }
+  .feed-input { align-self: flex-start; max-width: 80%; min-width: 0; padding: 11px 15px; border: 1px dashed var(--firm); border-radius: 12px; background: var(--post-hover); }
+  .feed-sender { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 7px; margin-bottom: 6px; min-width: 0; }
+  .feed-icon { display: inline-flex; align-items: center; color: var(--muted); }
+  .feed-service { color: var(--text); font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+  .feed-tag { padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 11px; font-weight: 500; line-height: 18px; white-space: nowrap; }
+  .feed-author { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .feed-sender time { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .service-sent-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; margin-bottom: 4px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .service-sent-to { color: var(--text); font-weight: 500; overflow-wrap: anywhere; }
+  .service-sent-via { overflow-wrap: anywhere; }
+  .service-sent-head time { white-space: nowrap; }
   .agent-sender { display: flex; flex: none; align-items: center; gap: 8px; min-width: 0; }
   .input-line { align-items: flex-start; line-height: 24px; overflow-wrap: anywhere; }
   .agent-sender :is(a, strong) { min-width: 0; overflow: hidden; color: oklch(var(--id-name) var(--hue)); font-size: 14px; font-weight: 600; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
@@ -525,7 +585,7 @@
   /* Sticky inside the scroller and without height, so it centers on the column and changes no scroll length. */
   .latest-bar { position: sticky; bottom: 8px; display: flex; justify-content: center; height: 0; }
   .latest { flex: none; height: 28px; padding: 0 12px; transform: translateY(-100%); border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--text); font-size: 13px; font-weight: 500; }
-  @media (max-width: 600px) { .thread { scrollbar-gutter: stable; } .body { padding: 12px 16px; } }
+  @media (max-width: 600px) { .thread { scrollbar-gutter: stable; } .body { padding: 12px 16px; } .feed-input { max-width: 94%; } }
   @media (pointer: coarse) { button { min-height: 40px; } .latest { height: 40px; } }
   @media (prefers-reduced-motion: reduce) {
     .spinner { animation: none; }

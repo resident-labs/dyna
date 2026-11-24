@@ -21,7 +21,10 @@ func (s *Service) SessionStart(ctx context.Context, caller contract.Principal, r
 	if len(req.ClientID) > 64 {
 		return contract.SessionStartResponse{}, invalid("clientId is longer than 64 characters")
 	}
-	if e := checkGoalText(req.Goal, req.DoneWhen); e != nil {
+	if e := checkGoalText("goal", req.Goal, contract.GoalTextLimit, "brief or a file"); e != nil {
+		return contract.SessionStartResponse{}, e
+	}
+	if e := checkGoalText("doneWhen", req.DoneWhen, contract.GoalTextLimit, "brief or a file"); e != nil {
 		return contract.SessionStartResponse{}, e
 	}
 	if !mentionName.MatchString(req.Name) {
@@ -680,6 +683,41 @@ func (s *Service) SessionSetBranch(ctx context.Context, caller contract.Principa
 		err = s.store.SendSessionNotice(ctx, notice, target.ID)
 	}
 	if err != nil {
+		return response, failure(err)
+	}
+	return response, nil
+}
+
+// SessionClear starts a fresh harness conversation on the session's next turn, keeping the session, box,
+// files, branch, goal, children, holds, subscriptions and pending deliveries. Owner-only.
+func (s *Service) SessionClear(ctx context.Context, caller contract.Principal, req contract.SessionClearRequest) (contract.SessionClearResponse, *contract.Error) {
+	var response contract.SessionClearResponse
+	if caller.Kind != contract.PrincipalOwner {
+		return response, forbidden()
+	}
+	target, problem := s.resolveSession(ctx, caller, req.Session)
+	if problem != nil {
+		return response, problem
+	}
+	if _, err := s.store.SessionWorkflow(ctx, target.ID); err == nil {
+		return response, invalid("workflow sessions have no conversation to clear")
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return response, failure(err)
+	}
+	event, err := s.event(target.Room, caller, contract.SessionCleared{Session: target.ID})
+	if err != nil {
+		return response, failure(err)
+	}
+	if err := s.store.ClearSession(ctx, target.ID, event); err != nil {
+		if errors.Is(err, store.ErrTurnRunning) {
+			return response, &contract.Error{Code: contract.ErrConflict, Message: "stop the turn first"}
+		}
+		if errors.Is(err, store.ErrSessionClosing) {
+			return response, &contract.Error{Code: contract.ErrConflict, Message: "session is closing"}
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			return response, &contract.Error{Code: contract.ErrNotFound, Message: fmt.Sprintf("session %s is closed or does not exist", req.Session)}
+		}
 		return response, failure(err)
 	}
 	return response, nil

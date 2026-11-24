@@ -64,7 +64,7 @@ func TestShortCooldownWaitConcurrentRequests(t *testing.T) {
 	if elapsed := starts[len(starts)-1].Sub(starts[0]); elapsed < 30*time.Millisecond {
 		t.Fatalf("cooldown retries have no jitter: %s", elapsed)
 	}
-	cool(61 * time.Second)
+	cool(301 * time.Second)
 	start := time.Now()
 	_, err = manager.Execute(ctx, []string{"codex"}, executor.Request{Model: "gpt-5.1-codex"}, executor.Options{})
 	if err == nil || time.Since(start) > time.Second {

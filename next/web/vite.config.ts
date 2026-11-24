@@ -1,9 +1,35 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 // The build rewrites the entry script and drops its attributes. The engine's CSP allows no inline script, so this attribute
-// is what keeps the first paint behind the module that applies the stored theme.
-const renderBlocking: Plugin = { name: "render-blocking-entry", apply: "build", transformIndexHtml: { order: "post", handler: html => html.replace('<script type="module"', '<script type="module" blocking="render"') } };
+// is what keeps the first paint behind the module that applies the stored theme. Only index.html needs render-blocking;
+// office.html runs inside a sandboxed iframe and loads its document asynchronously.
+const renderBlocking: Plugin = {
+  name: "render-blocking-entry",
+  apply: "build",
+  transformIndexHtml: {
+    order: "post",
+    handler: (html, ctx) => ctx.path === "/index.html" ? html.replace('<script type="module"', '<script type="module" blocking="render"') : html,
+  },
+};
+// office.html runs in a sandboxed iframe (opaque "null" origin) under strict CSP. During `vite` dev, mirror the engine's
+// CSP header on /office.html and allow module scripts to load cross-origin from the opaque origin.
+const officeDevHeaders: Plugin = {
+  name: "office-dev-headers",
+  apply: "serve",
+  configureServer: server => {
+    server.middlewares.use((req, res, next) => {
+      const pathname = (req.url ?? "/").split("?", 1)[0];
+      if (pathname === "/office.html") {
+        res.setHeader("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; base-uri 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; img-src blob: data:; frame-ancestors 'self'");
+      } else if (pathname.startsWith("/src/") || pathname.startsWith("/node_modules/") || pathname.startsWith("/@")) {
+        res.setHeader("Access-Control-Allow-Origin", "*");
+      }
+      next();
+    });
+  },
+};
 // Dev only: trial-view.sh sets DYNA_TRIAL_COOKIE to a curl cookie jar, and the dev server sends /v1 (calls, the event
 // streams and the WebSockets of the terminal and the computer view) to the trial engine as its read-scope Web QA device.
 // The engine refuses every write from that device, and its sockets too. To try the terminal or a computer through the
@@ -32,7 +58,7 @@ function admit(req: { url?: string; headers: Record<string, string | string[] | 
   delete req.headers["x-trial-key"];
   return sent === key && [undefined, `http://${req.headers.host}`].includes(req.headers.origin as string | undefined);
 }
-const gate: Plugin = { name: "trial-gate", apply: "serve", transformIndexHtml: () => [{ tag: "script", attrs: { type: "module" }, children: sendKey, injectTo: "head-prepend" }],
+const gate: Plugin = { name: "trial-gate", apply: "serve", transformIndexHtml: (_html, ctx) => ctx.path === "/index.html" ? [{ tag: "script", attrs: { type: "module" }, children: sendKey, injectTo: "head-prepend" }] : [],
   configureServer: server => {
     server.middlewares.use((req, res, next) => {
       if (!req.url?.startsWith("/v1/")) { next(); return; }
@@ -42,9 +68,18 @@ const gate: Plugin = { name: "trial-gate", apply: "serve", transformIndexHtml: (
   } };
 // noVNC awaits at its top level as it loads, which needs ES2022; the computer view loads it on demand.
 export default defineConfig({
-  build: { target: "es2022" },
+  build: {
+    target: "es2022",
+    rollupOptions: {
+      input: {
+        // The deploy checks the binary for assets/index-*, so the app entry keeps the name index.
+        index: resolve(__dirname, "index.html"),
+        office: resolve(__dirname, "office.html"),
+      },
+    },
+  },
   optimizeDeps: { esbuildOptions: { target: "es2022" } },
-  plugins: [svelte(), renderBlocking, ...cookie && key ? [gate] : []],
+  plugins: [svelte(), renderBlocking, officeDevHeaders, ...cookie && key ? [gate] : []],
   // A WebSocket's upgrade skips the middlewares, so the proxy's bypass, which Vite calls for an upgrade without a
   // response, admits it, and a refused one is closed.
   server: cookie && key ? { cors: false, proxy: { "/v1": { target: "http://127.0.0.1:7790", ws: true,

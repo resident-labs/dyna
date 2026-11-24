@@ -58,3 +58,35 @@ func TestSubscriptionAddRequestDecodes(t *testing.T) {
 		t.Fatalf("unknown field: %v", err)
 	}
 }
+
+func TestSubscriptionUpdateRequestDecodes(t *testing.T) {
+	var req SubscriptionUpdateRequest
+	if err := json.Unmarshal([]byte(`{"id":"sub_a","on":["github.pr.changed","github.ci.finished"],"every":"15m"}`), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.ID != "sub_a" || req.On == nil || len(*req.On) != 2 || (*req.On)[1] != "github.ci.finished" || req.Every == nil || *req.Every != "15m" {
+		t.Fatalf("%+v", req)
+	}
+	// null leaves fields nil; empty string clears every.
+	req = SubscriptionUpdateRequest{}
+	if err := json.Unmarshal([]byte(`{"id":"sub_a","on":null,"every":null}`), &req); err != nil || req.On != nil || req.Every != nil {
+		t.Fatalf("null: %+v %v", req, err)
+	}
+	req = SubscriptionUpdateRequest{}
+	if err := json.Unmarshal([]byte(`{"id":"sub_a","on":[],"every":""}`), &req); err != nil || req.On == nil || len(*req.On) != 0 || req.Every == nil || *req.Every != "" {
+		t.Fatalf("empty: %+v %v", req, err)
+	}
+	for body, want := range map[string]string{
+		`{"id":"sub_a","every":3600}`: `every is a duration string such as "1h", "15m" or "90s", not the number 3600`,
+		`{"id":"sub_a","every":true}`: `every is a duration string such as "1h", "15m" or "90s", not true`,
+	} {
+		if err := json.Unmarshal([]byte(body), &req); err == nil || err.Error() != want {
+			t.Errorf("%s: %v", body, err)
+		}
+	}
+	dec := json.NewDecoder(bytes.NewReader([]byte(`{"id":"sub_a","to":"x"}`)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err == nil || err.Error() != `json: unknown field "to"` {
+		t.Fatalf("unknown field: %v", err)
+	}
+}

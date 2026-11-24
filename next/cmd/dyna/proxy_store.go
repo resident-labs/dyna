@@ -44,7 +44,7 @@ func (s *proxyStore) List(context.Context) ([]*proxyauth.Auth, error) {
 	auths := make([]*proxyauth.Auth, 0, len(records))
 	for _, record := range records {
 		switch record.Provider {
-		case "claude", "codex", "kimi", "xai", "meta", "openai-compatible-zai", "openai-compatible-opencode-go", "openai-compatible-deepseek":
+		case "claude", "codex", "kimi", "xai", "meta", "antigravity", "openai-compatible-zai", "openai-compatible-opencode-go", "openai-compatible-deepseek":
 		default:
 			if !model.IsCustomProxyProvider(record.Provider) {
 				continue
@@ -54,15 +54,15 @@ func (s *proxyStore) List(context.Context) ([]*proxyauth.Auth, error) {
 		if err := json.Unmarshal(record.Record, &auth); err != nil {
 			return nil, errors.New("proxy store record invalid")
 		}
-		// A key record keeps the URL it was created with, and the executor sends to
-		// that URL. The preset decides, so a corrected endpoint reaches old accounts.
-		// Records from before providers held their models take the preset's.
+		// A key record keeps the URL and models it was created with, and the executor sends to
+		// that URL. The preset decides, so a corrected endpoint and a newly released model
+		// reach old accounts: its models lead, and the account's own discovered ones follow.
 		if preset, ok := model.PresetForProxy(record.Provider); ok && auth.Attributes != nil {
 			auth.Attributes["base_url"] = preset.URL
-			if auth.Attributes[cliproxy.DynaModelsAttribute] == "" {
-				auth.Attributes[cliproxy.DynaModelsAttribute] = strings.Join(preset.Models, ",")
-			}
+			saved := strings.Split(auth.Attributes[cliproxy.DynaModelsAttribute], ",")
+			auth.Attributes[cliproxy.DynaModelsAttribute] = strings.Join(mergeModels(preset.Models, saved), ",")
 		}
+		applyProxyRetryPolicy(&auth)
 		// Only bound credentials may be enabled after proxy restart.
 		auth.Disabled = !record.Bound
 		if record.Bound && auth.Status == proxyauth.StatusDisabled {
@@ -71,6 +71,16 @@ func (s *proxyStore) List(context.Context) ([]*proxyauth.Auth, error) {
 		auths = append(auths, &auth)
 	}
 	return auths, nil
+}
+
+// Apply the provider policy to both existing records and newly adopted credentials.
+func applyProxyRetryPolicy(auth *proxyauth.Auth) {
+	if auth.Provider == "openai-compatible-zai" && auth.AuthKind() == proxyauth.AuthKindAPIKey {
+		if auth.Metadata == nil {
+			auth.Metadata = make(map[string]any)
+		}
+		auth.Metadata["request_retry"] = 3
+	}
 }
 
 func (s *proxyStore) Save(ctx context.Context, auth *proxyauth.Auth) (string, error) {
@@ -118,6 +128,7 @@ func (s *proxyStore) Save(ctx context.Context, auth *proxyauth.Auth) (string, er
 			return "", errors.New("proxy credential missing")
 		}
 	}
+	applyProxyRetryPolicy(copy)
 	raw, err := json.Marshal(copy)
 	if err != nil {
 		return "", errors.New("proxy credential invalid")

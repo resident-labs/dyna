@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -167,11 +169,30 @@ func (s *Store) FireSubscriptionWorkflow(ctx context.Context, sub Subscription, 
 	return queued, err
 }
 
-func (s *Store) UpdateWorkflowSubscription(ctx context.Context, sub contract.Subscription) error {
+func (s *Store) UpdateWorkflowSubscription(ctx context.Context, sub contract.Subscription, at time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		period, err := sub.Every.Parse()
+		if err != nil {
+			return err
+		}
+		var oldEvery int64
+		if err := tx.QueryRowContext(ctx, "SELECT every_ms FROM subscriptions WHERE id=?", sub.ID).Scan(&oldEvery); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
 		args, err := json.Marshal(sub.Workflow.Args)
 		if err != nil {
 			return err
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM subscription_events WHERE sub=?", sub.ID); err != nil {
+			return err
+		}
+		for _, kind := range sub.On {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO subscription_events(sub,event_type) VALUES(?,?)", sub.ID, kind); err != nil {
+				return err
+			}
 		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM subscription_where WHERE sub=?", sub.ID); err != nil {
 			return err
@@ -182,7 +203,16 @@ func (s *Store) UpdateWorkflowSubscription(ctx context.Context, sub contract.Sub
 			}
 		}
 		// A new script may fix what failed, so an update also ends the wait before the service starts again.
-		if _, err = tx.ExecContext(ctx, "UPDATE subscriptions SET failures=0,hold_until=0 WHERE id=?", sub.ID); err != nil {
+		every := period.Milliseconds()
+		if every != oldEvery {
+			var due int64
+			if every > 0 {
+				due = at.UnixMilli() + every
+			}
+			if _, err = tx.ExecContext(ctx, "UPDATE subscriptions SET every_ms=?,due_at=?,failures=0,hold_until=0 WHERE id=?", every, due, sub.ID); err != nil {
+				return err
+			}
+		} else if _, err = tx.ExecContext(ctx, "UPDATE subscriptions SET failures=0,hold_until=0 WHERE id=?", sub.ID); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, "UPDATE workflow_subscriptions SET script=?,args=?,key=?,latest=?,parent=? WHERE sub=?", sub.Workflow.Script, string(args), sub.Key, sub.Latest, sub.Parent, sub.ID)

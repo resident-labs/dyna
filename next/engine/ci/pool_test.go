@@ -45,23 +45,25 @@ func (s *fakeStore) LifecycleBoxes(context.Context) ([]store.LifecycleBox, error
 func (s *fakeStore) Pools(context.Context) ([]store.Pool, error) { return s.pools, nil }
 
 type fakeDriver struct {
-	runners     []box.Runner
-	egress      bool
-	builds      int
-	specs       []box.RunnerSpec
-	removed     []string
-	startErr    error
-	listErr     error
-	listCtx     context.Context
-	reclaimed   bool
-	gate        chan struct{} // when set, a build waits for it to close
-	buildMu     sync.Mutex    // a build-ahead runs beside placement
-	onEgress    func()        // runs when the proxy is started, which a sweep does
-	layerBuilds []string      // the id of each room layer built here
-	failLayer   error         // when set, building a room layer fails with it
-	hangLayer   bool          // when set, building a room layer waits for its context
-	failShared  error         // when set, building the shared image fails with it
-	pruned      [][]contract.RoomID
+	runners       []box.Runner
+	egress        EgressState
+	egressEnsured int
+	egressRemoved int
+	builds        int
+	specs         []box.RunnerSpec
+	removed       []string
+	startErr      error
+	listErr       error
+	listCtx       context.Context
+	reclaimed     bool
+	gate          chan struct{} // when set, a build waits for it to close
+	buildMu       sync.Mutex    // a build-ahead runs beside placement
+	onEgress      func()        // runs when the proxy is started, which a sweep does
+	layerBuilds   []string      // the id of each room layer built here
+	failLayer     error         // when set, building a room layer fails with it
+	hangLayer     bool          // when set, building a room layer waits for its context
+	failShared    error         // when set, building the shared image fails with it
+	pruned        [][]contract.RoomID
 }
 
 func (d *fakeDriver) BuildRunnerImage(ctx context.Context, layer *box.RunnerLayer) (string, error) {
@@ -102,10 +104,15 @@ func (d *fakeDriver) EnsureEgress(context.Context, string) error {
 	if d.onEgress != nil {
 		d.onEgress()
 	}
-	d.egress = true
+	d.egressEnsured++
+	d.egress = EgressCurrent
 	return nil
 }
-func (d *fakeDriver) RemoveEgress(context.Context) error { d.egress = false; return nil }
+func (d *fakeDriver) RemoveEgress(context.Context) error {
+	d.egressRemoved++
+	d.egress = EgressAbsent
+	return nil
+}
 func (d *fakeDriver) StartRunner(_ context.Context, s box.RunnerSpec) error {
 	d.specs = append(d.specs, s)
 	if d.startErr != nil {
@@ -114,7 +121,7 @@ func (d *fakeDriver) StartRunner(_ context.Context, s box.RunnerSpec) error {
 	d.runners = append(d.runners, box.Runner{Name: s.Name, Repo: s.Repo, ID: s.ID, Slot: s.Slot, Size: s.Size, Running: true})
 	return nil
 }
-func (d *fakeDriver) ListRunners(ctx context.Context, reclaim bool) ([]box.Runner, bool, error) {
+func (d *fakeDriver) ListRunners(ctx context.Context, reclaim bool, _ []contract.RepoName) ([]box.Runner, EgressState, error) {
 	d.listCtx, d.reclaimed = ctx, reclaim
 	return slices.Clone(d.runners), d.egress, d.listErr
 }
@@ -256,7 +263,7 @@ func TestRunnersFollowAssignedJobsUpToTheBound(t *testing.T) {
 		t.Fatalf("idle pool: capacity %d, registered %v", capacity, f.sets.names)
 	}
 	f.scale(1)
-	if len(f.drivers["pve"].runners) != 1 || !f.drivers["pve"].egress || f.drivers["pve"].builds != 1 {
+	if len(f.drivers["pve"].runners) != 1 || f.drivers["pve"].egress != EgressCurrent || f.drivers["pve"].builds != 1 {
 		t.Fatalf("one job: %+v", f.drivers["pve"])
 	}
 	spec := f.drivers["pve"].specs[0]
@@ -317,10 +324,70 @@ func TestATickRestoresTheProxyARunningJobNeeds(t *testing.T) {
 	defer f.stop()
 	f.scale(1)
 	d := f.drivers["pve"]
-	d.egress = false // stopped, or the host restarted, so the restart policy did nothing
+	d.egress = EgressStopped // stopped, or the host restarted, so the restart policy did nothing
 	f.tick(t)
-	if !d.egress {
+	if d.egress != EgressCurrent {
 		t.Fatal("the running job was left with no proxy")
+	}
+}
+
+func TestStaleProxyIsReplacedOnStartAndRemovedWhenIdle(t *testing.T) {
+	// A stale proxy is replaced via EnsureEgress when a job starts, whereas a current proxy is reused.
+	f := newFixture(2)
+	defer f.stop()
+	d := f.drivers["pve"]
+	d.egress = EgressStale
+	f.scale(1)
+	if d.egress != EgressCurrent || d.egressEnsured != 1 {
+		t.Fatalf("stale proxy on start: state=%v ensured=%d", d.egress, d.egressEnsured)
+	}
+	f.scale(2)
+	if d.egressEnsured != 1 {
+		t.Fatalf("current proxy was unnecessarily recreated: ensured=%d", d.egressEnsured)
+	}
+
+	// An idle host drops a stale or stopped proxy on tick so old binary mounts do not linger.
+	for _, state := range []EgressState{EgressStale, EgressStopped} {
+		g := newFixture(1)
+		defer g.stop()
+		gd := g.drivers["pve"]
+		gd.egress = state
+		g.tick(t)
+		if gd.egress != EgressAbsent || gd.egressRemoved != 1 || gd.egressEnsured != 0 {
+			t.Fatalf("idle host with state %v: got state=%v removed=%d ensured=%d", state, gd.egress, gd.egressRemoved, gd.egressEnsured)
+		}
+	}
+
+	// A CI-off host with a stale proxy removes it once no runner is serving.
+	h := newFixture(1)
+	defer h.stop()
+	h.store.hosts[0].CI = false
+	hd := h.drivers["pve"]
+	hd.egress = EgressStale
+	h.tick(t)
+	if hd.egress != EgressAbsent || hd.egressRemoved != 1 {
+		t.Fatalf("ci-off host with stale proxy: state=%v removed=%d", hd.egress, hd.egressRemoved)
+	}
+
+	// A running job keeps its working stale proxy on both tick and a second job's start, then the next idle tick removes it.
+	r := newFixture(2)
+	defer r.stop()
+	size, _ := box.Size(large)
+	rd := r.drivers["pve"]
+	rd.runners = []box.Runner{{Name: "dyna-ci-pve-working", Repo: repo, ID: 7, Slot: 0, Size: size, Running: true}}
+	rd.egress = EgressStale
+	r.tick(t)
+	if rd.egress != EgressStale || rd.egressEnsured != 0 || rd.egressRemoved != 0 {
+		t.Fatalf("tick disrupted a serving stale proxy: state=%v ensured=%d removed=%d", rd.egress, rd.egressEnsured, rd.egressRemoved)
+	}
+	r.scale(2)
+	if len(rd.runners) != 2 || rd.egress != EgressStale || rd.egressEnsured != 0 {
+		t.Fatalf("starting a second runner disrupted the serving stale proxy: runners=%d state=%v ensured=%d", len(rd.runners), rd.egress, rd.egressEnsured)
+	}
+	rd.runners = nil
+	r.tick(t)
+	if rd.egress != EgressAbsent || rd.egressRemoved != 1 {
+		t.Fatalf("tick did not remove stale proxy after job finished: state=%v removed=%d", rd.egress, rd.egressRemoved)
 	}
 }
 
@@ -328,7 +395,7 @@ func TestAnIdleHostGetsNoProxyUntilAJobNeedsIt(t *testing.T) {
 	f := newFixture(1)
 	defer f.stop()
 	f.tick(t)
-	if d := f.drivers["pve"]; d.egress { // the image builds ahead, the proxy waits
+	if d := f.drivers["pve"]; d.egress != EgressAbsent { // the image builds ahead, the proxy waits
 		t.Fatal("an idle pool started a proxy")
 	}
 }
@@ -511,7 +578,7 @@ func TestTurningOffRemovesRunnersAndEveryScaleSetThenGoesQuiet(t *testing.T) {
 	f.scale(2)
 	f.store.repos = nil
 	f.tick(t) // cancels the listeners and removes the runners
-	if len(f.drivers["pve"].runners) != 0 || !slices.Equal(f.api.deleted, []int64{1, 2}) || f.drivers["pve"].egress {
+	if len(f.drivers["pve"].runners) != 0 || !slices.Equal(f.api.deleted, []int64{1, 2}) || f.drivers["pve"].egress != EgressAbsent {
 		t.Fatalf("driver %+v, deleted %v", f.drivers["pve"], f.api.deleted)
 	}
 	f.group.Wait()
@@ -565,7 +632,7 @@ func TestRestartAdoptsWorkingRunnersAndReapsTheRest(t *testing.T) {
 	f := newFixture(2)
 	size, _ := box.Size(large)
 	f.drivers["pve"].runners = []box.Runner{{Name: "dyna-ci-pve-working", Repo: repo, ID: 7, Size: size, Running: true}, {Name: "dyna-ci-pve-dead", Repo: repo, ID: 8, Size: size}}
-	f.drivers["pve"].egress = true
+	f.drivers["pve"].egress = EgressCurrent
 	f.api.list = []Registration{
 		{ID: 7, Name: "dyna-ci-pve-working", Status: "offline"},
 		{ID: 8, Name: "dyna-ci-pve-dead", Status: "offline"},
@@ -641,7 +708,7 @@ func TestLeaseRenewsWithEverySlotBusy(t *testing.T) {
 	// The bound is spent by a runner of another size, so this set's capacity is 0 though the pool is alive.
 	small, _ := box.Size(contract.BoxSizeSmall)
 	f.drivers["pve"].runners = []box.Runner{{Name: "dyna-ci-pve-1", Repo: repo, ID: 100, Slot: 0, Size: small, Running: true}}
-	f.drivers["pve"].egress = true
+	f.drivers["pve"].egress = EgressCurrent
 	if capacity := f.scale(1); capacity != 0 {
 		t.Fatalf("pool not saturated: capacity %d", capacity)
 	}

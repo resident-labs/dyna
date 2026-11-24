@@ -10,6 +10,12 @@ const (
 	MethodGoalJournal Method = "goal.journal"
 )
 
+// Limits for new goal text, in Unicode characters.
+const (
+	GoalTextLimit     = 300 // goal and done condition
+	GoalItemTextLimit = 160
+)
+
 type GoalState string
 
 const (
