@@ -55,8 +55,14 @@ func (s *Service) SubscriptionUpdate(ctx context.Context, caller contract.Princi
 		period, _ := checkEvery(sub.Every)
 		sub.Every = contract.DurationOf(period)
 	}
-	if _, _, problem := s.workflowScript(ctx, sub.Room, sub.Workflow.Script); problem != nil {
+	meta, _, problem := s.workflowScript(ctx, sub.Room, sub.Workflow.Script)
+	if problem != nil {
 		return contract.SubscriptionUpdateResponse{}, problem
+	}
+	if meta.Host != "" {
+		if problem := s.validateSessionHost(ctx, sub.Room, meta.Host); problem != nil {
+			return contract.SubscriptionUpdateResponse{}, problem
+		}
 	}
 	if problem := checkServes(sub.Workflow.Script); problem != nil {
 		return contract.SubscriptionUpdateResponse{}, problem

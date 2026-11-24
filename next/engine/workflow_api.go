@@ -121,8 +121,8 @@ func (s *Service) workflowRun(ctx context.Context, caller contract.Principal, re
 			return response, invalid("a resumed run stays on its repository, " + string(resumed.Repo))
 		}
 		if req.Host == "" && !req.SameHost && meta.Host == "" {
-			prevHost, err := s.store.SessionBoxHost(ctx, resumed.Session)
-			if err != nil && !errors.Is(err, store.ErrNotFound) {
+			prevHost, err := s.store.SessionPinnedHost(ctx, roomID, resumed.Session)
+			if err != nil {
 				return response, failure(err)
 			}
 			host = prevHost

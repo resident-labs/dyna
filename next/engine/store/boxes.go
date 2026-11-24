@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -85,11 +86,15 @@ func (s *Store) lifecycleBoxes(ctx context.Context, activeOnly bool) ([]Lifecycl
 	return boxes, rows.Err()
 }
 
-// SessionBoxHost returns the host assigned to a session's box, or empty if unplaced.
-func (s *Store) SessionBoxHost(ctx context.Context, session contract.SessionID) (contract.HostName, error) {
-	var host sql.NullString
-	err := s.Read().QueryRowContext(ctx, "SELECT host FROM boxes WHERE session=?", session).Scan(&host)
-	return contract.HostName(host.String), err
+// SessionPinnedHost returns the host a session's box was pinned to, or empty if unpinned.
+func (s *Store) SessionPinnedHost(ctx context.Context, room contract.RoomID, session contract.SessionID) (contract.HostName, error) {
+	var host contract.HostName
+	var restarted bool
+	err := s.Read().QueryRowContext(ctx, `SELECT coalesce(json_extract(CAST(body AS TEXT),'$.host'),''),coalesce(json_extract(CAST(body AS TEXT),'$.from'),'')='failed' FROM events WHERE room=? AND type='box.changed' AND json_extract(CAST(body AS TEXT),'$.session')=? AND json_extract(CAST(body AS TEXT),'$.to')='pending' AND (coalesce(json_extract(CAST(body AS TEXT),'$.from'),'')='' OR (from_kind='owner' AND json_extract(CAST(body AS TEXT),'$.from')='failed') OR (from_kind IN ('owner','session') AND json_extract(CAST(body AS TEXT),'$.from')='pending')) ORDER BY seq DESC LIMIT 1`, room, session).Scan(&host, &restarted)
+	if errors.Is(err, sql.ErrNoRows) || restarted {
+		return "", nil
+	}
+	return host, err
 }
 
 func (s *Store) Box(ctx context.Context, id contract.BoxID) (box.Box, error) {

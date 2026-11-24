@@ -286,8 +286,14 @@ func (s *Service) SubscriptionAdd(ctx context.Context, caller contract.Principal
 		return contract.SubscriptionAddResponse{}, problem
 	}
 	if sub.Workflow != nil {
-		if _, _, problem := s.workflowScript(ctx, sub.Room, sub.Workflow.Script); problem != nil {
+		meta, _, problem := s.workflowScript(ctx, sub.Room, sub.Workflow.Script)
+		if problem != nil {
 			return contract.SubscriptionAddResponse{}, problem
+		}
+		if meta.Host != "" {
+			if problem := s.validateSessionHost(ctx, sub.Room, meta.Host); problem != nil {
+				return contract.SubscriptionAddResponse{}, problem
+			}
 		}
 		if problem := checkServes(sub.Workflow.Script); problem != nil {
 			return contract.SubscriptionAddResponse{}, problem

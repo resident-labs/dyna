@@ -26,7 +26,7 @@ func workflowCommand(get func() *socketClient) *cobra.Command {
 	run.Flags().StringVar(&args, "args", "", "JSON the script reads as args")
 	run.Flags().StringVar(&resume, "resume", "", "An ended run whose finished steps this run keeps, so only changed steps run; reload changes a running one")
 	run.Flags().StringVar(&host, "host", "", "Pin the run's box to a named host (overrides meta.host; cannot combine with --same-host)")
-	run.Flags().BoolVar(&sameHost, "same-host", false, "Place the run's box on the caller's host (overrides meta.host; cannot combine with --host)")
+	run.Flags().BoolVar(&sameHost, "same-host", false, "Place the run's box on the parent's host (caller's, or root's when started by the owner); overrides meta.host; cannot combine with --host")
 	run.Flags().StringVar(&clientID, "client-id", "", "Retry key: the same key returns the first run")
 	reload := &cobra.Command{Use: "reload RUN FILE", Short: "Give a running run a new script, in the same session and box. Finished steps return their results, running ones are joined, and new ones start.", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
 		script, err := os.ReadFile(args[1])

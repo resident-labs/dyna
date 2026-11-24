@@ -86,6 +86,23 @@ func TestWorkflowRunHostPlacementAndPrecedence(t *testing.T) {
 	if pinnedHost != "beta" {
 		t.Fatalf("initial BoxChanged host = %q, want beta", pinnedHost)
 	}
+
+	// Owner calling sameHost resolves root's host.
+	rootSession, err := w.store.Session(w.ctx, w.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootBox, err := w.store.Box(w.ctx, rootSession.Box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerSame, problem := w.WorkflowRun(w.ctx, w.owner, contract.WorkflowRunRequest{Room: w.room, Script: workflowScript, SameHost: true})
+	if problem != nil {
+		t.Fatalf("owner sameHost: %v", problem)
+	}
+	if b, err := w.store.Box(w.ctx, ownerSame.Box); err != nil || b.Host != rootBox.Host {
+		t.Fatalf("owner sameHost box host = %q, want root host %q (err=%v)", b.Host, rootBox.Host, err)
+	}
 }
 
 func TestWorkflowRunHostRefusals(t *testing.T) {
@@ -198,6 +215,93 @@ func TestWorkflowResumeKeepsHostUnlessOverridden(t *testing.T) {
 	}
 	if b, err := w.store.Box(w.ctx, overriddenMeta.Box); err != nil || b.Host != "beta" {
 		t.Fatalf("overridden meta box host = %q, want beta (err=%v)", b.Host, err)
+	}
+
+	// Resume with sameHost overrides to the caller's host.
+	child, problem := w.SessionStart(w.ctx, w.owner, contract.SessionStartRequest{Room: w.room, Name: "resumer", Profile: "fast", Host: "beta"})
+	if problem != nil {
+		t.Fatalf("child session: %v", problem)
+	}
+	overriddenSame, problem := w.WorkflowRun(w.ctx, contract.Principal{Kind: contract.PrincipalSession, Session: child.Session}, contract.WorkflowRunRequest{Room: w.room, Script: workflowScript, Resume: first.Run, SameHost: true})
+	if problem != nil {
+		t.Fatalf("resume with sameHost override: %v", problem)
+	}
+	if b, err := w.store.Box(w.ctx, overriddenSame.Box); err != nil || b.Host != "beta" {
+		t.Fatalf("overridden sameHost box host = %q, want beta (err=%v)", b.Host, err)
+	}
+
+	// Resuming an unpinned run stays unpinned, even if the previous run's box was dynamically placed on a host that is later removed.
+	unpinned, problem := w.WorkflowRun(w.ctx, w.owner, contract.WorkflowRunRequest{Room: w.room, Script: workflowScript})
+	if problem != nil {
+		t.Fatalf("unpinned run: %v", problem)
+	}
+	unpinnedCrew := contract.Principal{Kind: contract.PrincipalSession, Session: unpinned.Session}
+	unpinnedStart := w.turn(unpinnedCrew)
+	if _, problem := w.TurnOutput(w.ctx, unpinnedCrew, contract.TurnOutputRequest{Turn: unpinnedStart.Turn, Outcome: contract.TurnCompleted, Model: "m"}); problem != nil {
+		t.Fatal(problem)
+	}
+	resumedUnpinned, problem := w.WorkflowRun(w.ctx, w.owner, contract.WorkflowRunRequest{Room: w.room, Script: workflowScript, Resume: unpinned.Run})
+	if problem != nil {
+		t.Fatalf("resume unpinned run: %v", problem)
+	}
+	if pin, err := w.store.SessionPinnedHost(w.ctx, w.room, resumedUnpinned.Session); err != nil || pin != "" {
+		t.Fatalf("resumed unpinned run should not be pinned, got %q (err=%v)", pin, err)
+	}
+
+	// Resuming a pinned run whose host was later disabled is refused unless overridden.
+	if _, problem := w.HostSet(w.ctx, w.owner, contract.HostSetRequest{Host: "alpha", Agents: boolPtr(false)}); problem != nil {
+		t.Fatal(problem)
+	}
+	if _, problem := w.WorkflowRun(w.ctx, w.owner, contract.WorkflowRunRequest{Room: w.room, Script: workflowScript, Resume: first.Run}); problem == nil || !strings.Contains(problem.Message, "agents disabled") {
+		t.Fatalf("resuming pinned run on disabled host: %v", problem)
+	}
+	if _, problem := w.WorkflowRun(w.ctx, w.owner, contract.WorkflowRunRequest{Room: w.room, Script: workflowScript, Resume: first.Run, Host: "beta"}); problem != nil {
+		t.Fatalf("resuming pinned run with new host override: %v", problem)
+	}
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+func TestWorkflowSubscriptionMetaHost(t *testing.T) {
+	w := setupWorkflowHosts(t)
+	badScript := "export const meta = { name: 'svc', profiles: ['fast'], host: 'exec' }\nserve(async () => {})\n"
+	if _, problem := w.SubscriptionAdd(w.ctx, w.owner, contract.SubscriptionAddRequest{
+		Scope:    contract.ScopeRoom,
+		Room:     w.room,
+		On:       []contract.EventType{"notice.posted"},
+		Workflow: &contract.WorkflowSubscription{Script: badScript},
+	}); problem == nil || !strings.Contains(problem.Message, "exec-only") {
+		t.Fatalf("SubscriptionAdd with exec-only meta.host: %v", problem)
+	}
+
+	goodScript := "export const meta = { name: 'svc', profiles: ['fast'], host: 'alpha' }\nserve(async () => {})\n"
+	added, problem := w.SubscriptionAdd(w.ctx, w.owner, contract.SubscriptionAddRequest{
+		Scope:    contract.ScopeRoom,
+		Room:     w.room,
+		On:       []contract.EventType{"notice.posted"},
+		Workflow: &contract.WorkflowSubscription{Script: goodScript},
+	})
+	if problem != nil {
+		t.Fatalf("SubscriptionAdd with valid meta.host: %v", problem)
+	}
+
+	if _, problem := w.SubscriptionUpdate(w.ctx, w.owner, contract.SubscriptionUpdateRequest{
+		ID:       added.ID,
+		Workflow: &contract.WorkflowSubscription{Script: badScript},
+	}); problem == nil || !strings.Contains(problem.Message, "exec-only") {
+		t.Fatalf("SubscriptionUpdate with exec-only meta.host: %v", problem)
+	}
+
+	// Starting the service pins its run box to meta.host.
+	if err := w.serveSubscriptions(w.ctx); err != nil {
+		t.Fatalf("serveSubscriptions: %v", err)
+	}
+	run, err := w.store.ServiceRun(w.ctx, added.ID)
+	if err != nil {
+		t.Fatalf("ServiceRun: %v", err)
+	}
+	if pin, err := w.store.SessionPinnedHost(w.ctx, w.room, run.Session); err != nil || pin != "alpha" {
+		t.Fatalf("service run pin = %q, want alpha (err=%v)", pin, err)
 	}
 }
 
