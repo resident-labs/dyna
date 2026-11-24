@@ -1020,20 +1020,133 @@ func (c *Crew) worker(ctx context.Context, key string, profileName contract.Prof
 	return out
 }
 
-var fenced = regexp.MustCompile("(?s)^```[A-Za-z]*\\s*\n(.*?)\n?```$")
-
-// readResult reads a schema step's final text as its result: the whole text is JSON, or it is exactly one fenced block of it.
-// Prose around the JSON is a mismatch, as is a text like "Done.". What is wrong comes back as the problem to tell the worker.
+// readResult reads a schema step's final text as its result: first the whole text,
+// then the last fenced block, then the last balanced top-level JSON object or array.
+// What is wrong comes back as the problem to tell the worker.
 func readResult(schema *jsonschema.Schema, text string) (json.RawMessage, string) {
 	text = strings.TrimSpace(text)
-	if m := fenced.FindStringSubmatch(text); m != nil && !strings.Contains(m[1], "```") {
-		text = strings.TrimSpace(m[1])
-	}
 	value, err := validateResult(schema, []byte(text))
-	if err != nil {
-		return nil, err.Error()
+	if err == nil {
+		return value, ""
 	}
-	return value, ""
+	problem := err
+	block, hasBlock := lastFencedBlock(text)
+	if hasBlock {
+		if value, err := validateResult(schema, []byte(block)); err == nil {
+			return value, ""
+		} else {
+			problem = err
+		}
+	}
+	if candidate, ok := lastJSONContainer(text); ok && candidate != text && (!hasBlock || candidate != block) {
+		if value, err := validateResult(schema, []byte(candidate)); err == nil {
+			return value, ""
+		} else {
+			problem = err
+		}
+	}
+	return nil, problem.Error()
+}
+
+// lastFencedBlock returns the trimmed body of the last closed backtick-fenced block in text.
+func lastFencedBlock(text string) (string, bool) {
+	lines := strings.Split(text, "\n")
+	var last string
+	var found bool
+	fenceLen := 0
+	startLine := 0
+	for i, raw := range lines {
+		line := strings.TrimRight(raw, "\r")
+		trimmed := strings.TrimLeft(line, " \t")
+		ticks := 0
+		for ticks < len(trimmed) && trimmed[ticks] == '`' {
+			ticks++
+		}
+		if fenceLen == 0 {
+			if ticks >= 3 && !strings.ContainsRune(trimmed[ticks:], '`') {
+				fenceLen = ticks
+				startLine = i + 1
+			}
+			continue
+		}
+		if ticks >= fenceLen && strings.TrimSpace(trimmed[ticks:]) == "" {
+			last = strings.TrimSpace(strings.Join(lines[startLine:i], "\n"))
+			found = true
+			fenceLen = 0
+		}
+	}
+	return last, found
+}
+
+// lastJSONContainer scans from the end for the last balanced top-level JSON object or array in text.
+func lastJSONContainer(text string) (string, bool) {
+	firstOpen := strings.IndexAny(text, "{[")
+	if firstOpen < 0 {
+		return "", false
+	}
+	// Prefix count of '{' and '[' lets a backward scan abort as soon as fewer openers remain than needed.
+	opens := make([]int, len(text))
+	count := 0
+	for i := firstOpen; i < len(text); i++ {
+		opens[i] = count
+		if text[i] == '{' || text[i] == '[' {
+			count++
+		}
+	}
+	var stack []byte
+	for end := len(text) - 1; end > firstOpen; end-- {
+		if text[end] != '}' && text[end] != ']' {
+			continue
+		}
+		stack = stack[:0]
+		inString := false
+		start := -1
+	scan:
+		for i := end; i >= firstOpen; i-- {
+			c := text[i]
+			if c == '"' {
+				slashes := 0
+				for j := i - 1; j >= firstOpen && text[j] == '\\'; j-- {
+					slashes++
+				}
+				if slashes%2 == 0 {
+					inString = !inString
+				}
+				continue
+			}
+			if inString {
+				continue
+			}
+			switch c {
+			case '}':
+				stack = append(stack, '{')
+				if len(stack) > opens[i] {
+					break scan
+				}
+			case ']':
+				stack = append(stack, '[')
+				if len(stack) > opens[i] {
+					break scan
+				}
+			case '{', '[':
+				if len(stack) == 0 || stack[len(stack)-1] != c {
+					break scan
+				}
+				stack = stack[:len(stack)-1]
+				if len(stack) == 0 {
+					start = i
+					break scan
+				}
+			}
+		}
+		if start >= 0 {
+			candidate := text[start : end+1]
+			if json.Valid([]byte(candidate)) {
+				return candidate, true
+			}
+		}
+	}
+	return "", false
 }
 
 func compileSchema(raw json.RawMessage) (*jsonschema.Schema, error) {

@@ -154,6 +154,36 @@ func TestTheTextFallbackChecksClosingMessagesIndividually(t *testing.T) {
 	}
 }
 
+func TestAStructuredOutputCallAcceptsAStringEncodedObjectAndHintsTheType(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{
+		{Tool: "StructuredOutput", Input: `{"result":"{\"count\":5}"}`},
+	})
+	got := newPiGCrew(t, model).result(crewMeta + `return await agent('count them', ` + countSchema + `)`).(map[string]any)
+	requests := model.Requests()
+	if got["count"] != float64(5) || len(requests) != 1 {
+		t.Fatalf("result %v after %d model requests", got, len(requests))
+	}
+	found := false
+	for _, raw := range requests[0].Tools {
+		var tool struct {
+			Name  string          `json:"name"`
+			Input json.RawMessage `json:"input_schema"`
+		}
+		if err := json.Unmarshal(raw, &tool); err != nil {
+			t.Fatal(err)
+		}
+		if tool.Name == "StructuredOutput" {
+			found = true
+			if !strings.Contains(string(tool.Input), `"result":{"type":"object"}`) || strings.Contains(string(tool.Input), `"count"`) {
+				t.Fatalf("tool's parameter schema was %s", tool.Input)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("StructuredOutput tool was not offered")
+	}
+}
+
 func TestAPlainTextWorkerDoesNotGetStructuredOutput(t *testing.T) {
 	model := pigtest.NewModel([]pigtest.Block{{Text: "plain text"}})
 	got := newPiGCrew(t, model).result(crewMeta + `return await agent('say something')`)
