@@ -1020,20 +1020,136 @@ func (c *Crew) worker(ctx context.Context, key string, profileName contract.Prof
 	return out
 }
 
-var fenced = regexp.MustCompile("(?s)^```[A-Za-z]*\\s*\n(.*?)\n?```$")
-
-// readResult reads a schema step's final text as its result: the whole text is JSON, or it is exactly one fenced block of it.
-// Prose around the JSON is a mismatch, as is a text like "Done.". What is wrong comes back as the problem to tell the worker.
+// readResult reads a schema step's final text as its result: first the whole text,
+// then the last fenced block, then the last balanced top-level JSON object or array.
+// What is wrong comes back as the problem to tell the worker.
 func readResult(schema *jsonschema.Schema, text string) (json.RawMessage, string) {
 	text = strings.TrimSpace(text)
-	if m := fenced.FindStringSubmatch(text); m != nil && !strings.Contains(m[1], "```") {
-		text = strings.TrimSpace(m[1])
+	raw := []byte(text)
+	value, err := validateResult(schema, raw)
+	if err == nil {
+		return value, ""
 	}
-	value, err := validateResult(schema, []byte(text))
-	if err != nil {
-		return nil, err.Error()
+	problem := err
+	block, hasBlock := lastFencedBlock(text)
+	if hasBlock {
+		if value, err := validateResult(schema, []byte(block)); err == nil {
+			return value, ""
+		} else {
+			problem = err
+		}
 	}
-	return value, ""
+	if candidate, ok := lastJSONContainer(raw); ok && len(candidate) != len(raw) && (!hasBlock || string(candidate) != block) {
+		if value, err := validateResult(schema, candidate); err == nil {
+			return value, ""
+		} else {
+			problem = err
+		}
+	}
+	return nil, problem.Error()
+}
+
+// lastFencedBlock returns the trimmed body of the last closed backtick-fenced block in text.
+func lastFencedBlock(text string) (string, bool) {
+	lines := strings.Split(text, "\n")
+	var last string
+	var found bool
+	fenceLen := 0
+	startLine := 0
+	for i, raw := range lines {
+		line := strings.TrimRight(raw, "\r")
+		trimmed := strings.TrimLeft(line, " \t")
+		ticks := 0
+		for ticks < len(trimmed) && trimmed[ticks] == '`' {
+			ticks++
+		}
+		if fenceLen == 0 {
+			if ticks >= 3 && !strings.ContainsRune(trimmed[ticks:], '`') {
+				fenceLen = ticks
+				startLine = i + 1
+			}
+			continue
+		}
+		if ticks >= fenceLen && strings.TrimSpace(trimmed[ticks:]) == "" {
+			last = strings.TrimSpace(strings.Join(lines[startLine:i], "\n"))
+			found = true
+			fenceLen = 0
+		}
+	}
+	return last, found
+}
+
+// lastJSONContainer scans from the end for the last balanced top-level JSON object or array in raw.
+// Work is bounded linearly so adversarial input (unmatched quotes or nested non-JSON brackets)
+// cannot go quadratic in the shared box agent process.
+func lastJSONContainer(raw []byte) ([]byte, bool) {
+	firstOpen := bytes.IndexAny(raw, "{[")
+	if firstOpen < 0 {
+		return nil, false
+	}
+	totalOpens := bytes.Count(raw[firstOpen:], []byte{'{'}) + bytes.Count(raw[firstOpen:], []byte{'['})
+	budget := min(max(len(raw)*4, 4096), 8<<20)
+	var stack []byte
+	for end := len(raw) - 1; end > firstOpen && budget > 0; end-- {
+		if raw[end] != '}' && raw[end] != ']' {
+			continue
+		}
+		stack = stack[:0]
+		inString := false
+		start := -1
+	scan:
+		for i := end; i >= firstOpen; i-- {
+			budget--
+			if budget <= 0 {
+				break scan
+			}
+			c := raw[i]
+			if c == '"' {
+				slashes := 0
+				for j := i - 1; j >= firstOpen && raw[j] == '\\'; j-- {
+					slashes++
+				}
+				if slashes%2 == 0 {
+					inString = !inString
+				}
+				i -= slashes
+				budget -= slashes
+				continue
+			}
+			if inString {
+				continue
+			}
+			switch c {
+			case '}':
+				stack = append(stack, '{')
+				if len(stack) > totalOpens {
+					break scan
+				}
+			case ']':
+				stack = append(stack, '[')
+				if len(stack) > totalOpens {
+					break scan
+				}
+			case '{', '[':
+				if len(stack) == 0 || stack[len(stack)-1] != c {
+					break scan
+				}
+				stack = stack[:len(stack)-1]
+				if len(stack) == 0 {
+					start = i
+					break scan
+				}
+			}
+		}
+		if start >= 0 {
+			candidate := raw[start : end+1]
+			budget -= len(candidate)
+			if json.Valid(candidate) {
+				return candidate, true
+			}
+		}
+	}
+	return nil, false
 }
 
 func compileSchema(raw json.RawMessage) (*jsonschema.Schema, error) {
