@@ -29,7 +29,8 @@
   function atPointer(node: HTMLElement, moved: boolean) { if (moved) document.body.append(node); return { destroy() { if (moved) node.remove(); } }; }
   // A page the menu opened returns focus here when it closes.
   export function focus(options?: FocusOptions) { button?.focus(options); }
-  const menuLabel = $derived(onclear && !phone ? "Session menu" : "Room menu");
+  const menuLabel = $derived(onclear && !phone && !at ? "Session menu" : "Room menu");
+  $effect(() => { if (open && !phone && !at && !onclear) open = false; });
   // Up and Down move between entries, Home and End jump, Escape closes and Tab leaves.
   function move(event: KeyboardEvent) {
     const all = items();

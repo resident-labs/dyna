@@ -26,7 +26,8 @@
   // A session may move under any session in its room except itself and its descendants. The engine checks the same rule.
   let view: { label: string; items: Entry[]; note?: string } = $derived.by(() => {
     if (step === "move") return { label: `Move ${name} under`, items: sessions.filter(item => item.session !== session && !under.includes(item.session)).map(item => ({ key: item.session, label: item.name })), note: failure };
-    const actions = sessionActions(open?.parent, (store.running(session) || store.starting(session)) && !store.stopping.has(session), store.boxes.get(session));
+    const busy = store.running(session) || store.starting(session);
+    const actions = sessionActions(open?.parent, busy && !store.stopping.has(session), store.boxes.get(session), busy);
     return { label: `Actions for ${name}`, items: actions.map(key => ({ key, label: labels[key] })) };
   });
   // The menu closes first, and its props go with it, so these read what they need now.

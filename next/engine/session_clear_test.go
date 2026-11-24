@@ -310,3 +310,87 @@ func TestSessionClearEndToEndFreshConversation(t *testing.T) {
 		t.Fatalf("session goal was not preserved: %+v (%v)", goals, problem)
 	}
 }
+
+// Double clear before a turn stays pending; if the first turn after clear is stopped before starting
+// (CauseNotStarted) or fails before writing a fresh turn, the clear is restored so the next turn still starts fresh.
+func TestSessionClearPreservedAcrossDoubleClearAndPreStartStop(t *testing.T) {
+	s, room, worker, ctx := setup(t)
+	s.SetLayout(box.Layout{Data: t.TempDir()})
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	caller := boxCaller(worker)
+
+	channel, problem := testChannel(t, s, ctx, caller)
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	// Finish initial turn 1.
+	t1 := (<-channel).Body.(contract.TurnStart)
+	if _, problem := s.TurnOutput(ctx, caller, contract.TurnOutputRequest{Turn: t1.Turn, Outcome: contract.TurnCompleted, Final: "done"}); problem != nil {
+		t.Fatal(problem)
+	}
+
+	// Clearing twice while idle succeeds and keeps a single pending clear.
+	if _, problem := s.SessionClear(ctx, owner, contract.SessionClearRequest{Session: worker}); problem != nil {
+		t.Fatalf("first clear: %+v", problem)
+	}
+	if _, problem := s.SessionClear(ctx, owner, contract.SessionClearRequest{Session: worker}); problem != nil {
+		t.Fatalf("second clear: %+v", problem)
+	}
+
+	// Post triggers turn 2 (Fresh=true), which is stopped before starting (CauseNotStarted).
+	if _, problem := s.Post(ctx, owner, contract.PostRequest{
+		Room: room,
+		Home: contract.Conversation{Kind: contract.ConversationDM, Session: worker},
+		Text: "first attempt",
+	}); problem != nil {
+		t.Fatal(problem)
+	}
+	t2 := (<-channel).Body.(contract.TurnStart)
+	if !t2.Fresh {
+		t.Fatal("turn 2 should have Fresh=true")
+	}
+	if _, problem := s.TurnOutput(ctx, caller, contract.TurnOutputRequest{
+		Turn:    t2.Turn,
+		Outcome: contract.TurnStopped,
+		Cause:   contract.CauseNotStarted,
+	}); problem != nil {
+		t.Fatal(problem)
+	}
+
+	// Pending clear must be restored on the session and removed from the unstarted turn.
+	hello, problem := s.BoxHello(ctx, caller, contract.BoxHelloRequest{})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if !hello.Fresh {
+		t.Fatal("BoxHello should still report Fresh=true after pre-start stop")
+	}
+	tr, problem := s.TranscriptRead(ctx, owner, contract.TranscriptReadRequest{Session: worker})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if tr.ClearedAt == nil {
+		t.Fatal("TranscriptRead should still report pending ClearedAt after pre-start stop")
+	}
+	for _, turn := range tr.Turns {
+		if turn.ID == t2.Turn && turn.ClearedAt != nil {
+			t.Fatalf("unstarted turn %s should not carry ClearedAt", t2.Turn)
+		}
+	}
+
+	// Next turn after a new message still receives Fresh=true.
+	if _, problem := s.Post(ctx, owner, contract.PostRequest{
+		Room: room,
+		Home: contract.Conversation{Kind: contract.ConversationDM, Session: worker},
+		Text: "second attempt",
+	}); problem != nil {
+		t.Fatal(problem)
+	}
+	t3 := (<-channel).Body.(contract.TurnStart)
+	if !t3.Fresh {
+		t.Fatal("turn 3 should still have Fresh=true after turn 2 stopped before starting")
+	}
+	if _, problem := s.TurnOutput(ctx, caller, contract.TurnOutputRequest{Turn: t3.Turn, Outcome: contract.TurnCompleted, Final: "fresh"}); problem != nil {
+		t.Fatal(problem)
+	}
+}

@@ -64,7 +64,7 @@ func (h *harnessFake) Steer(_ context.Context, input contract.TurnInput) error {
 func (h *harnessFake) FollowUp(context.Context, contract.TurnInput) error {
 	panic("unexpected follow-up")
 }
-func (h *harnessFake) Abort(context.Context) error      { return nil }
+func (h *harnessFake) Abort(context.Context) error           { return nil }
 func (h *harnessFake) ClearQueue(context.Context) error      { return nil }
 func (h *harnessFake) NewConversation(context.Context) error { return nil }
 func (*harnessFake) Compact(context.Context, int64) (harness.Compaction, error) {

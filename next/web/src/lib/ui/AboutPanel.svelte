@@ -114,7 +114,7 @@
   async function askClear(event: MouseEvent & { currentTarget: HTMLButtonElement }): Promise<void> {
     await confirmClear(session, open?.name ?? "this session", event.currentTarget);
   }
-  let canClear = $derived(switchable && open !== undefined && !store.running(session) && !store.starting(session));
+  let canClear = $derived(switchable && open !== undefined && !store.crew(session) && !store.running(session) && !store.starting(session));
 </script>
 
 <div class="about">

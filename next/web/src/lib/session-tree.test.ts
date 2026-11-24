@@ -6,8 +6,10 @@ import type { Status } from "./status.ts";
 
 test("a session's actions follow what the engine takes", () => {
   assert.deepEqual(sessionActions(undefined, false), ["clear"]);
+  assert.deepEqual(sessionActions(undefined, false, "ready", true), []);
   assert.deepEqual(sessionActions(undefined, true, "failed"), ["stop", "restart"]);
   assert.deepEqual(sessionActions("root", false, "ready"), ["move", "clear", "close"]);
+  assert.deepEqual(sessionActions("root", false, "ready", true), ["move", "close"]);
   assert.deepEqual(sessionActions("root", true, "failed"), ["move", "stop", "restart", "close"]);
 });
 

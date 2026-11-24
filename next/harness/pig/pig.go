@@ -80,8 +80,9 @@ type Harness struct {
 	resultTool        string // empty outside a workflow schema step
 	initialTools      []string
 
-	mu   sync.Mutex
-	turn *turn // the turn running now, nil between turns
+	mu          sync.Mutex
+	turn        *turn // the turn running now, nil between turns
+	sessionFile string
 
 	delivered deliveries
 
@@ -244,6 +245,9 @@ func (h *Harness) start(ctx context.Context, c Config) error {
 		return errors.Join(err, h.session.Close())
 	}
 	h.initialTools = slices.Clone(h.session.ActiveToolNames())
+	h.mu.Lock()
+	h.sessionFile = h.session.Path()
+	h.mu.Unlock()
 	if err := h.SetPromptSections(ctx, nil); err != nil {
 		h.stop()
 		return errors.Join(err, h.session.Close())
@@ -485,6 +489,9 @@ func (h *Harness) NewConversation(ctx context.Context) error {
 		if err := h.session.NewSession(""); err != nil {
 			return err
 		}
+		h.mu.Lock()
+		h.sessionFile = h.session.Path()
+		h.mu.Unlock()
 	}
 	if len(h.initialTools) > 0 {
 		h.session.SetActiveToolsByName(h.initialTools)
@@ -497,7 +504,11 @@ func (h *Harness) NewConversation(ctx context.Context) error {
 
 func (h *Harness) Abort(ctx context.Context) error { return h.session.Abort(ctx) }
 
-func (h *Harness) SessionFile() string { return h.session.Path() }
+func (h *Harness) SessionFile() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.sessionFile
+}
 
 // Done closes when the session closes.
 func (h *Harness) Done() <-chan struct{} { return h.done }

@@ -41,9 +41,27 @@ func TestNewConversationStartsFreshAndKeepsOldFile(t *testing.T) {
 		t.Fatalf("old session file missing turn 1: %v", err)
 	}
 
+	// Concurrent SessionFile reads during NewConversation must be race-free (go test -race).
+	stopRead := make(chan struct{})
+	readerDone := make(chan struct{})
+	go func() {
+		defer close(readerDone)
+		for {
+			select {
+			case <-stopRead:
+				return
+			default:
+				_ = h.SessionFile()
+			}
+		}
+	}()
 	if err := h.NewConversation(ctx); err != nil {
+		close(stopRead)
+		<-readerDone
 		t.Fatal(err)
 	}
+	close(stopRead)
+	<-readerDone
 	newFile := h.SessionFile()
 	if newFile == oldFile {
 		t.Fatalf("expected a new session file path, still got %s", newFile)

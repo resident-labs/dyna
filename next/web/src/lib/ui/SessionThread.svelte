@@ -181,7 +181,14 @@
   // view.newest is a plain read, so the effect also follows the events themselves: what arrives while the owner watches is read.
   $effect(() => { void view.ordered.length; markRead(); });
   // Reload transcript when this session's conversation is cleared while the DM is open.
-  $effect(() => { const at = step ? undefined : store.cleared.get(session); if (at && loaded) void load(); });
+  let seenCleared = untrack(() => step ? undefined : store.cleared.get(session));
+  $effect(() => {
+    const at = step ? undefined : store.cleared.get(session);
+    if (at && at !== seenCleared) {
+      seenCleared = at;
+      if (untrack(() => loaded)) void load();
+    }
+  });
   onMount(() => {
     document.addEventListener("visibilitychange", markRead);
     const stop = watchTranscripts(id => { if (!id || id === session) void load(); });

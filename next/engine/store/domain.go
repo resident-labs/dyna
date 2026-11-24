@@ -427,6 +427,26 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET state='pending',turn=NULL,queue=NULL,wake=0 WHERE to_kind=? AND to_id=? AND turn=? AND state IN ('taken','read')", contract.PrincipalSession, session, output.Turn); err != nil {
 				return err
 			}
+			// If this turn carried a pending clear and ended before the harness wrote a fresh turn,
+			// restore sessions.cleared_at so the next turn still starts fresh and clear the divider on this unstarted turn.
+			var clearedAt int64
+			if err := tx.QueryRowContext(ctx, "SELECT cleared_at FROM turns WHERE id=?", output.Turn).Scan(&clearedAt); err != nil {
+				return err
+			}
+			if clearedAt > 0 {
+				var written bool
+				if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM transcript_turns WHERE session=? AND turn=?)", session, output.Turn).Scan(&written); err != nil {
+					return err
+				}
+				if !written {
+					if _, err := tx.ExecContext(ctx, "UPDATE sessions SET cleared_at=CASE WHEN cleared_at=0 THEN ? ELSE cleared_at END WHERE id=?", clearedAt, session); err != nil {
+						return err
+					}
+					if _, err := tx.ExecContext(ctx, "UPDATE turns SET cleared_at=0 WHERE id=?", output.Turn); err != nil {
+						return err
+					}
+				}
+			}
 		}
 		ended, err := s.endPosts(ctx, tx, event.Room, session, output)
 		if err != nil {
