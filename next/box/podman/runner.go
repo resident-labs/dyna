@@ -24,6 +24,7 @@ const runnerEntrypoint = `["/usr/bin/tini","--","/opt/dyna-ci/entrypoint.sh"]`
 
 const (
 	ciLabel          = "dyna.ci" // "runner" or "egress"
+	binaryLabel      = "dyna.binary"
 	runnerRepoLabel  = "dyna.ci.repo"
 	runnerIDLabel    = "dyna.ci.id"
 	runnerSlotLabel  = "dyna.ci.slot"
@@ -176,7 +177,7 @@ func roomRunnerRepo(room contract.RoomID) string {
 func egressArgs(image, bin, sum string) []string {
 	// A runner with no proxy holds its slot until its time limit, so a crashed proxy restarts by itself.
 	return []string{"podman", "--cgroup-manager=systemd", "run", "--detach", "--replace", "--restart=always", "--name", egressName,
-		"--label", ciLabel + "=egress", "--cgroup-parent=" + runnerSlice,
+		"--label", ciLabel + "=egress", "--label", binaryLabel + "=" + sum, "--cgroup-parent=" + runnerSlice,
 		// The proxy alone sees the host's network, and only to leave it for a public address.
 		"--network=host", "--read-only", "--cap-drop=all", "--security-opt=no-new-privileges", "--user", "1001:1001",
 		"--cpus=4", "--memory=1g", "--memory-swap=1g", "--pids-limit=512",
@@ -195,8 +196,8 @@ func (h *Host) EnsureEgress(ctx context.Context, image, bin, sum string) error {
 	if _, err := h.run(ctx, args...); err != nil {
 		return err
 	}
-	// A runner's mount needs its slot's directory, which the proxy makes as it starts.
-	_, err := h.run(ctx, "podman", "exec", egressName, "bash", "-c", `for _ in {1..100}; do [ -S "$1" ] && exit 0; sleep 0.1; done; exit 1`, "dyna-egress",
+	// A runner's mount needs its slot's directory and a live listener, not a stale socket inode from --replace.
+	_, err := h.run(ctx, "podman", "exec", egressName, "bash", "-c", `for _ in {1..100}; do socat -T 1 -u /dev/null "UNIX-CONNECT:$1" 2>/dev/null && exit 0; sleep 0.1; done; exit 1`, "dyna-egress",
 		fmt.Sprintf("%s/%d/%s", egressMount, box.RunnerSlots-1, box.EgressSocket))
 	return err
 }
@@ -387,15 +388,15 @@ func (h *Host) pruneRunnerFolders(ctx context.Context, all bool, repos []contrac
 
 // ListRunners reclaims idle slot and keep folders on a host short of disk, and all of them when something waits for disk.
 // It also removes idle keep folders for repositories no longer served by the pool. It reports both runner containers and
-// whether the proxy is running.
-func (h *Host) ListRunners(ctx context.Context, reclaim bool, repos []contract.RepoName) ([]box.Runner, bool, error) {
+// the proxy container's state and pinned binary checksum.
+func (h *Host) ListRunners(ctx context.Context, reclaim bool, repos []contract.RepoName) ([]box.Runner, box.Egress, error) {
 	h.runnerMu.Lock()
 	defer h.runnerMu.Unlock()
 	// Take inventory first. A runner that exits during pruning must still be counted this pass so the pool
 	// comes back for any folders it held, even if all repositories have turned CI off.
 	out, err := h.run(ctx, "podman", "--cgroup-manager=systemd", "ps", "--all", "--filter", "label="+ciLabel, "--format", "json")
 	if err != nil {
-		return nil, false, err
+		return nil, box.Egress{}, err
 	}
 	var records []struct {
 		Names  []string          `json:"Names"`
@@ -403,25 +404,32 @@ func (h *Host) ListRunners(ctx context.Context, reclaim bool, repos []contract.R
 		State  string            `json:"State"`
 	}
 	if err := json.Unmarshal(out, &records); err != nil {
-		return nil, false, err
+		return nil, box.Egress{}, err
 	}
 	var runners []box.Runner
-	egress := false
+	var egress box.Egress
 	for _, r := range records {
 		if r.Labels[ciLabel] == "egress" {
-			egress = egress || r.State == "running"
+			if egress.Present {
+				egress.Running = egress.Running && r.State == "running"
+				if r.Labels[binaryLabel] != egress.Binary {
+					egress.Binary = ""
+				}
+			} else {
+				egress = box.Egress{Present: true, Running: r.State == "running", Binary: r.Labels[binaryLabel]}
+			}
 			continue
 		}
 		if len(r.Names) == 0 {
-			return nil, false, errors.New("runner container has no name")
+			return nil, box.Egress{}, errors.New("runner container has no name")
 		}
 		id, err := strconv.ParseInt(r.Labels[runnerIDLabel], 10, 64)
 		if err != nil {
-			return nil, false, fmt.Errorf("runner %s: %w", r.Names[0], err)
+			return nil, box.Egress{}, fmt.Errorf("runner %s: %w", r.Names[0], err)
 		}
 		slot, err := strconv.Atoi(r.Labels[runnerSlotLabel])
 		if err != nil {
-			return nil, false, fmt.Errorf("runner %s: %w", r.Names[0], err)
+			return nil, box.Egress{}, fmt.Errorf("runner %s: %w", r.Names[0], err)
 		}
 		// A runner an older engine started has no size, and was large unless its repository said otherwise.
 		size, sized := box.Size(contract.BoxSizeName(r.Labels[runnerSizeLabel]))
@@ -431,7 +439,7 @@ func (h *Host) ListRunners(ctx context.Context, reclaim bool, repos []contract.R
 		runners = append(runners, box.Runner{Name: r.Names[0], Repo: contract.RepoName(r.Labels[runnerRepoLabel]), ID: id, Slot: slot, Size: size, Running: r.State == "running"})
 	}
 	if err := h.pruneRunnerFolders(ctx, reclaim, repos); err != nil {
-		return nil, false, err
+		return nil, box.Egress{}, err
 	}
 	return runners, egress, nil
 }

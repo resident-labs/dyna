@@ -33,12 +33,12 @@ func TestCIOffLetsRunningJobsFinish(t *testing.T) {
 		t.Fatalf("capacity %d, runners %+v, registered %v", capacity, d.runners, f.sets.names)
 	}
 	f.tick(t)
-	if len(d.runners) != 1 || len(d.removed) != 0 || len(f.api.deleted) != 0 || !d.egress {
+	if len(d.runners) != 1 || len(d.removed) != 0 || len(f.api.deleted) != 0 || d.egress != EgressCurrent {
 		t.Fatalf("a tick removed the working runner or its proxy: runners %+v, removed %v, deleted %v", d.runners, d.removed, f.api.deleted)
 	}
 	d.runners = nil // its job ended
 	f.tick(t)
-	if d.egress {
+	if d.egress != EgressAbsent {
 		t.Fatal("a host with ci off kept its proxy after its last runner")
 	}
 }
