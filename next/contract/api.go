@@ -84,6 +84,7 @@ const (
 	MethodSessionAccount          Method = "session.account"
 	MethodSessionSetAccount       Method = "session.set_account"
 	MethodSessionSetBranch        Method = "session.set_branch"
+	MethodSessionClear            Method = "session.clear"
 	MethodSessionRestart          Method = "session.restart"
 	MethodSessionRefresh          Method = "session.refresh"
 	MethodSessionMove             Method = "session.move"
@@ -631,6 +632,13 @@ type SessionSetBranchRequest struct {
 	Branch  string    `json:"branch"`
 }
 type SessionSetBranchResponse struct{}
+
+// SessionClearRequest starts a fresh harness conversation for Session on its next turn, keeping the session, box,
+// files, branch, goal, children, holds, subscriptions and pending deliveries. Owner-only.
+type SessionClearRequest struct {
+	Session SessionID `json:"session"`
+}
+type SessionClearResponse struct{}
 type SessionRestartRequest struct {
 	Session SessionID `json:"session"`
 	// Host replaces a placement pin, within the room host rule. Omit to keep the pin.
@@ -823,6 +831,8 @@ type BoxHelloResponse struct {
 	Workflow           *BoxWorkflow     `json:"workflow,omitempty"` // a crew's box runs this script and no Pi of its own
 	// GitHub says the engine serves GitHub's read-only MCP tools at /github/ on the box socket, with its own token.
 	GitHub bool `json:"github,omitempty"`
+	// Fresh says the session's conversation was cleared since its last turn, so the box starts a new session file instead of resuming.
+	Fresh bool `json:"fresh,omitempty"`
 }
 
 // MaxModelRetryAfterSeconds bounds the reset hints the box may report. Longer
@@ -1039,6 +1049,8 @@ type TranscriptTurn struct {
 	NextMandatoryPost int               `json:"nextMandatoryPost,omitempty"`
 	Tail              bool              `json:"tail,omitempty"`
 	NextPost          int               `json:"nextPost,omitempty"`
+	// ClearedAt is set when the session's conversation was cleared before this turn.
+	ClearedAt *time.Time `json:"clearedAt,omitempty"`
 }
 type TranscriptStep struct {
 	Turn    TurnID           `json:"turn"`
@@ -1058,6 +1070,8 @@ type TranscriptReadResponse struct {
 	More       bool             `json:"more"`
 	Chunk      string           `json:"chunk,omitempty"`
 	NextOffset int              `json:"nextOffset,omitempty"`
+	// ClearedAt is set when the session's conversation was cleared after its latest turn.
+	ClearedAt *time.Time `json:"clearedAt,omitempty"`
 }
 type TranscriptAppendRequest struct {
 	Path   string `json:"path"`
@@ -1129,6 +1143,8 @@ type TurnStart struct {
 	// TextOnlyModels is the list box.hello gave, as it is now: a profile made since the box started can name a model the
 	// box's models.json lacks, and Pi sends such a model to a route the engine does not serve.
 	TextOnlyModels []TextOnlyModel `json:"textOnlyModels,omitempty"`
+	// Fresh says the session's conversation was cleared before this turn, so the harness starts a new session file first.
+	Fresh bool `json:"fresh,omitempty"`
 }
 type TurnQueue string
 

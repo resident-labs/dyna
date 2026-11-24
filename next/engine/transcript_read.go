@@ -6,6 +6,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/resident-labs/dyna/engine/transcriptview"
@@ -97,9 +98,27 @@ func (s *Service) TranscriptRead(ctx context.Context, caller contract.Principal,
 		response.More = true
 		work = work[:limit]
 	}
+	var turnCleared map[contract.TurnID]time.Time
+	if req.Step == "" && req.Agent == "" && len(work) > 0 {
+		ids := make([]contract.TurnID, len(work))
+		for i, w := range work {
+			ids[i] = w.Started.Body.(contract.TurnStarted).Turn
+		}
+		if turnCleared, err = s.store.TranscriptTurnCleared(ctx, req.Session, ids); err != nil {
+			return response, failure(err)
+		}
+	}
+	if req.Step == "" && req.Agent == "" && req.Before == "" && req.Turn == "" && req.Item == "" {
+		if response.ClearedAt, err = s.store.PendingClearedAt(ctx, req.Session); err != nil {
+			return response, failure(err)
+		}
+	}
 	for _, w := range work {
 		started := w.Started.Body.(contract.TurnStarted)
 		t := contract.TranscriptTurn{ID: started.Turn, Started: w.Started.Time, Inputs: []contract.TranscriptInput{}, Items: []contract.TranscriptItem{}}
+		if at, ok := turnCleared[started.Turn]; ok {
+			t.ClearedAt = &at
+		}
 		if w.Ended != nil {
 			t.Ended = &w.Ended.Time
 			t.DurationMS = w.Ended.Time.Sub(w.Started.Time).Milliseconds()

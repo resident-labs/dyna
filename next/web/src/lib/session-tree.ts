@@ -69,11 +69,12 @@ export function handNote(handed: Responsibility[], to: string): string {
   return `This hands ${parts.length ? `${parts.join(", ")} and ${last}` : last} to ${to}.`;
 }
 
-export type SessionAction = "move" | "stop" | "restart" | "close";
+export type SessionAction = "move" | "stop" | "clear" | "restart" | "close";
 
 // The actions the engine takes for a session now. Root has no parent, so it stays where it is and stays open.
+// Any idle session can have its conversation cleared; a running turn must stop first.
 export function sessionActions(parent: string | undefined, stoppable: boolean, box?: BoxState): SessionAction[] {
-  return [...(parent ? ["move"] as const : []), ...(stoppable ? ["stop"] as const : []), ...(box === "failed" ? ["restart"] as const : []), ...(parent ? ["close"] as const : [])];
+  return [...(parent ? ["move"] as const : []), ...(stoppable ? ["stop"] as const : ["clear"] as const), ...(box === "failed" ? ["restart"] as const : []), ...(parent ? ["close"] as const : [])];
 }
 
 type Summary = { size: number; top: Status; quiet: boolean; inside: Status };

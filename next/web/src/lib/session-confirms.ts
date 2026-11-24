@@ -23,3 +23,17 @@ export function confirmRestart(session: string, name: string, opener?: HTMLEleme
       throw error;
     }) });
 }
+
+export const clearNote = "It forgets this conversation; its files, goal and children stay.";
+
+export function confirmClear(session: string, name: string, opener?: HTMLElement | null): Promise<boolean> {
+  return confirm({
+    title: `Start ${name} fresh?`,
+    message: clearNote,
+    action: "Clear conversation",
+    danger: false,
+    opener,
+    failed: error => error instanceof APIError && error.detail.code === "conflict" ? error.detail.message : "The conversation did not clear. Try again.",
+    run: () => call("session.clear", { session }),
+  });
+}

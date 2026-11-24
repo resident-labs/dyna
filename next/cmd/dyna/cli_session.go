@@ -96,6 +96,10 @@ func sessionCommand(getClient func() client) *cobra.Command {
 		_, err := getClient().SessionSetBranch(cmd.Context(), contract.SessionSetBranchRequest{Session: contract.SessionID(args[0]), Branch: args[1]})
 		return err
 	}}
+	clearCmd := &cobra.Command{Use: "clear SESSION", Short: "Clear a session's conversation so its next turn starts fresh (owner only)", Long: "Clear a session's model conversation so its next turn starts fresh, keeping the session, box, files, branch, goal, children, holds, subscriptions and pending deliveries. Refuses while a turn is running (stop the turn first).", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := getClient().SessionClear(cmd.Context(), contract.SessionClearRequest{Session: contract.SessionID(args[0])})
+		return err
+	}}
 	session.AddCommand(&cobra.Command{Use: "list ROOM", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		result, err := getClient().SessionList(cmd.Context(), contract.SessionListRequest{Room: contract.RoomID(args[0])})
 		if err != nil {
@@ -131,6 +135,6 @@ func sessionCommand(getClient func() client) *cobra.Command {
 	}}
 	composeList.Flags().StringVar(&composeRoom, "room", "", "Room ID")
 	composeList.Flags().StringVar(&composeRepo, "repo", "", "Repository a child would use")
-	session.AddCommand(start, closeCmd, restart, refresh, setProfile, setBranch, composeList)
+	session.AddCommand(start, closeCmd, restart, refresh, setProfile, setBranch, clearCmd, composeList)
 	return session
 }

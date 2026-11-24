@@ -242,6 +242,11 @@ func (d devService) SessionSetBranch(context.Context, contract.Principal, contra
 	return contract.SessionSetBranchResponse{}, nil
 }
 
+// SessionClear delegates to the embedded Service in dev mode.
+func (d devService) SessionClear(ctx context.Context, caller contract.Principal, req contract.SessionClearRequest) (contract.SessionClearResponse, *contract.Error) {
+	return d.Service.SessionClear(ctx, caller, req)
+}
+
 // SessionSetAccount keeps a choice in memory.
 func (d devService) SessionSetAccount(_ context.Context, _ contract.Principal, req contract.SessionSetAccountRequest) (contract.SessionSetAccountResponse, *contract.Error) {
 	if req.Account == "" {

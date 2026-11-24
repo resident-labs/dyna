@@ -55,6 +55,7 @@ const bodies: Record<string, Check> = {
   "session.restarted": object({ session: string, imageUpdated: optional(boolean), stopped: optional(boolean), refreshed: optional(boolean), openGoal: optional(boolean), clientId: optional(string) }),
   "session.started": object({ session: string, name: string, parent: optional(string), profile: string, goal: optional(string), doneWhen: optional(string), brief: optional(string), workflow: optional(boolean) }),
   "session.moved": object({ session: string, newParent: string }),
+  "session.cleared": object({ session: string }),
   "session.closed": object({ session: string, reason: optional(oneOf("dormant", "disk")), unheld: optional(nullable(array(string))), folded: optional(nullable(array(object({ goal: string, into: string, item: number })))) }),
   "session.compacted": object({ session: string, turn: string, usage, tokensBefore: optional(number), tokensAfter: optional(number), error: optional(string) }),
   "computer.changed": object({ session: string, to: computerState }),

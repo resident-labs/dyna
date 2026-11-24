@@ -34,6 +34,8 @@ export class RoomStore {
   // Sessions the owner asked to stop until their turn ends, and those whose request did not reach the engine.
   readonly stopping = new SvelteSet<string>();
   readonly stopFailed = new SvelteSet<string>();
+  // Sessions whose conversation was cleared, with the event timestamp, so an open DM updates immediately.
+  readonly cleared = new SvelteMap<string, string>();
   // The running turn's latest activity label per session, such as "read spec.md".
   readonly activity = new SvelteMap<string, string>();
   // The kind of that activity, set and cleared with it. An engine that predates kinds sends none, which reads as a plain activity.
@@ -437,6 +439,9 @@ export class RoomStore {
         if (moved) this.sessions.set(event.body.session, { ...moved, parent: event.body.newParent });
         break;
       }
+      case "session.cleared":
+        this.cleared.set(event.body.session, event.at);
+        break;
       case "box.changed": {
         const { session, to, cause } = event.body, reason = pendingReason(to, event.body.reason);
         this.boxes.set(session, to);

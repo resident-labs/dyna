@@ -78,6 +78,7 @@ type Harness struct {
 	modelInstructions string
 	sections          []contract.ContextSection
 	resultTool        string // empty outside a workflow schema step
+	initialTools      []string
 
 	mu   sync.Mutex
 	turn *turn // the turn running now, nil between turns
@@ -242,6 +243,7 @@ func (h *Harness) start(ctx context.Context, c Config) error {
 		h.stop()
 		return errors.Join(err, h.session.Close())
 	}
+	h.initialTools = slices.Clone(h.session.ActiveToolNames())
 	if err := h.SetPromptSections(ctx, nil); err != nil {
 		h.stop()
 		return errors.Join(err, h.session.Close())
@@ -472,6 +474,25 @@ func (h *Harness) SetPromptSections(_ context.Context, sections []contract.Conte
 	}
 	h.sections = append([]contract.ContextSection(nil), sections...)
 	return nil
+}
+
+// NewConversation starts a fresh PiG session file in the session directory while keeping prior files on disk.
+// If the current session already has no messages (for example after box.hello opened a fresh session),
+// it is left in place rather than creating a second unused file.
+// It resets active tools to the session's initial set and clears cached delivery state so the next turn starts clean.
+func (h *Harness) NewConversation(ctx context.Context) error {
+	if len(h.session.Messages()) > 0 {
+		if err := h.session.NewSession(""); err != nil {
+			return err
+		}
+	}
+	if len(h.initialTools) > 0 {
+		h.session.SetActiveToolsByName(h.initialTools)
+	}
+	h.delivered.mu.Lock()
+	h.delivered.path, h.delivered.read, h.delivered.seen = "", 0, nil
+	h.delivered.mu.Unlock()
+	return h.SetPromptSections(ctx, h.sections)
 }
 
 func (h *Harness) Abort(ctx context.Context) error { return h.session.Abort(ctx) }

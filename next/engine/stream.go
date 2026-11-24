@@ -491,8 +491,13 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 						return
 					}
 				}
+				fresh, err := s.store.TurnCleared(ctx, turn)
+				if err != nil {
+					reason, cause = streamDispatchFailed, err
+					return
+				}
 				select {
-				case out <- contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: start, Model: model, ModelInstructions: prompt.ModelInstructions(model), CompactTokens: s.profiles.CompactionTokens(profile), TextOnlyModels: s.profiles.TextOnlyModels(), Sections: sections}}:
+				case out <- contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: start, Model: model, ModelInstructions: prompt.ModelInstructions(model), CompactTokens: s.profiles.CompactionTokens(profile), TextOnlyModels: s.profiles.TextOnlyModels(), Sections: sections, Fresh: fresh}}:
 				case <-ctx.Done():
 					reason, cause = streamCanceled, ctx.Err()
 					return

@@ -51,6 +51,7 @@
   const waited = new Set<string>();
   let decided = $derived.by(() => { for (const request of requesting) waited.add(request.id); return [...store.requests.values()].filter(request => request.state !== "pending" && waited.has(request.id)); });
   let turns: TranscriptTurn[] = $state([]);
+  let clearedAt: string | undefined = $state();
   let pendingBrief = $derived(pendingStartBrief(startingBrief, turns));
   let expandedTurns: Record<string, boolean> = $state({});
   let before: string | undefined = $state();
@@ -128,7 +129,7 @@
     resending = false;
     if (loaded.every(Boolean)) for (const input of inputs) void send({ room: store.room, home: { kind: "dm", session }, text: timelineInput(input, chunks["input:" + input.id + "/text"]).text, attachments: input.attachments?.length ? input.attachments : undefined });
   }
-  let quiet = $derived(!turns.length && !queuedPosts.length && !pendingPosts.length && !pendingBrief && !asking.length && !requesting.length);
+  let quiet = $derived(!turns.length && !queuedPosts.length && !pendingPosts.length && !pendingBrief && !asking.length && !requesting.length && !clearedAt);
   // The first message after a turn may start a new day. It waits outside any turn, so its day mark is here too.
   let waitingSince = $derived(queuedPosts[0]?.at ?? pendingPosts[0]?.at);
 
@@ -160,6 +161,7 @@
             ...(paging.has(turn.id + "/older") ? { olderItems: previous.olderItems, nextItem: previous.nextItem } : {}) } : turn;
         })];
         if (!retained.length) before = page.before;
+        clearedAt = page.clearedAt ?? undefined;
       }
       failed = false;
       loaded = true;
@@ -178,6 +180,8 @@
   }
   // view.newest is a plain read, so the effect also follows the events themselves: what arrives while the owner watches is read.
   $effect(() => { void view.ordered.length; markRead(); });
+  // Reload transcript when this session's conversation is cleared while the DM is open.
+  $effect(() => { const at = step ? undefined : store.cleared.get(session); if (at && loaded) void load(); });
   onMount(() => {
     document.addEventListener("visibilitychange", markRead);
     const stop = watchTranscripts(id => { if (!id || id === session) void load(); });
@@ -427,6 +431,7 @@
     {/if}
     {#each turns as turn, index (turn.id)}
       {@const segments = timelineSegments(turn.id, turn.items ?? [])}
+      {#if turn.clearedAt}<p class="cleared-divider" role="separator"><span>Conversation cleared · <time datetime={turn.clearedAt} title={fullTime(turn.clearedAt)}>{formatTime(turn.clearedAt)}</time></span></p>{/if}
       {@render dayMark(turn.started, turns[index - 1]?.started)}
       <article data-turn={turn.id} class:ended={!running(turn)}>
         {#each foldInputRuns(turn.inputs ?? []) as run (run.kind === "input" ? run.input.id : run.id)}
@@ -466,6 +471,7 @@
       </article>
     {/each}
     <!-- A box that failed or was lost ends the thread: the turn it held stopped there, and nothing runs until it is back. -->
+    {#if clearedAt && !step}<p class="cleared-divider" role="separator"><span>Conversation cleared · <time datetime={clearedAt} title={fullTime(clearedAt)}>{formatTime(clearedAt)}</time></span></p>{/if}
     {#if boxFailed}
       {@const row = boxRow(boxFailed.box, boxFailed.cause)}
       <div class="failure box-failed" role="status"><span class="slot"><Icon name="warning" size={16} /></span><span><strong>{row.label}</strong>{#if row.cause}{` · ${row.cause}`}{/if}</span>
@@ -508,6 +514,8 @@
   /* The feed's form of the card, at the thread's own edge. */
   .question :global(.card.feed) { margin-left: 16px; }
   .day { margin: 0; color: var(--muted); font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: center; }
+  .cleared-divider { margin: 8px 0; display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; text-align: center; }
+  .cleared-divider::before, .cleared-divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
   .owner-message { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
   .bubble { max-width: 80%; min-width: 0; padding: 12px 16px; background: var(--raised); border-radius: 12px; }
   .bubble.sending { opacity: 0.5; }

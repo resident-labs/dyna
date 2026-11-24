@@ -68,6 +68,27 @@ test("Discord input is a named feed post with attachment metadata", () => {
  if (row.kind === "post") { assert.equal(row.discordAuthor, "Discord · ari · #general"); assert.match(row.text, /message.txt \(1234 bytes\)/); assert.match(row.text, /owner: Context/); }
 });
 
+test("session.cleared decodes and renders as a quiet feed notice", () => {
+  const cleared = decodeEvent({
+    seq: 4,
+    id: "d",
+    at: "2026-10-31T12:00:03Z",
+    from: { kind: "owner" },
+    type: "session.cleared",
+    body: { session: "l" },
+  });
+  assert.ok(cleared);
+  assert.equal(subject(cleared), "l");
+  assert.equal(describe(cleared, id => names[id] ?? id), "Cleared lead-web's conversation");
+  const rows = feedRows([cleared], { kind: "feed" });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].kind, "notice");
+  if (rows[0].kind === "notice") {
+    assert.equal(rows[0].event.type, "session.cleared");
+    assert.equal(rows[0].event.body.session, "l");
+  }
+});
+
 function event(seq: number, body: EventBody, from: Principal = { kind: "engine" }): Event {
   return { seq, id: String(seq), at: "", from, ...body };
 }

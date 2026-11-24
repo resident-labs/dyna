@@ -110,7 +110,7 @@ func TestBrowserLeasesMigrationDropsTableAndKeepsProfiles(t *testing.T) {
 		DROP TABLE service_outbox;
 		ALTER TABLE services DROP COLUMN feed_in;
 		ALTER TABLE services DROP COLUMN feed_out;
-		ALTER TABLE services DROP COLUMN feed_last_at;
+		ALTER TABLE services DROP COLUMN feed_last_at; ALTER TABLE sessions DROP COLUMN cleared_at; ALTER TABLE turns DROP COLUMN cleared_at;
 		UPDATE meta SET value='127' WHERE key='schema_version';
 	`)
 	if err != nil {

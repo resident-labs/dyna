@@ -86,6 +86,7 @@ type fakeClient struct {
 	closed         contract.SessionCloseResponse
 	setProfile     contract.SessionSetProfileRequest
 	setBranch      contract.SessionSetBranchRequest
+	clear          contract.SessionClearRequest
 	restart        contract.SessionRestartRequest
 	refresh        contract.SessionRefreshRequest
 	refreshed      contract.SessionRefreshResponse
@@ -264,6 +265,10 @@ func (f *fakeClient) SessionStart(_ context.Context, q contract.SessionStartRequ
 func (f *fakeClient) SessionSetBranch(_ context.Context, q contract.SessionSetBranchRequest) (contract.SessionSetBranchResponse, error) {
 	f.setBranch = q
 	return contract.SessionSetBranchResponse{}, nil
+}
+func (f *fakeClient) SessionClear(_ context.Context, q contract.SessionClearRequest) (contract.SessionClearResponse, error) {
+	f.clear = q
+	return contract.SessionClearResponse{}, nil
 }
 func (f *fakeClient) SessionSetProfile(_ context.Context, q contract.SessionSetProfileRequest) (contract.SessionSetProfileResponse, error) {
 	f.setProfile = q
@@ -503,6 +508,16 @@ func TestSessionSetBranchMapsArgs(t *testing.T) {
 	runCLI(t, f, "session", "set-branch", "ses_1", "portizon-wasm")
 	if f.setBranch.Session != "ses_1" || f.setBranch.Branch != "portizon-wasm" {
 		t.Fatalf("%+v", f.setBranch)
+	}
+}
+func TestSessionClearMapsID(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "session", "clear", "ses_1")
+	if f.clear.Session != "ses_1" {
+		t.Fatalf("%+v", f.clear)
+	}
+	if _, err := execCLI(f, "session", "clear"); err == nil {
+		t.Fatal("clear accepted a missing session")
 	}
 }
 func TestSessionRestartMapsID(t *testing.T) {

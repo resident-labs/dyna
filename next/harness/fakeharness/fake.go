@@ -46,6 +46,7 @@ type Harness struct {
 	CompactFunc func(context.Context, int64) (harness.Compaction, error)
 	Compacts    int   // each Compact call
 	Clears      int   // each ClearQueue call
+	FreshStarts int   // each NewConversation call
 	SteerErr    error // what Steer and FollowUp return, if set
 	delivered   map[contract.DeliverySeq]bool
 	stopped     chan struct{}
@@ -113,6 +114,13 @@ func (h *Harness) Compact(ctx context.Context, over int64) (harness.Compaction, 
 		return compact(ctx, over)
 	}
 	return harness.Compaction{}, nil
+}
+
+func (h *Harness) NewConversation(context.Context) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.FreshStarts++
+	return nil
 }
 
 func (*Harness) SetPromptSections(context.Context, []contract.ContextSection) error { return nil }

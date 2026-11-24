@@ -76,6 +76,7 @@ type client interface {
 	SessionClose(context.Context, contract.SessionCloseRequest) (contract.SessionCloseResponse, error)
 	SessionSetProfile(context.Context, contract.SessionSetProfileRequest) (contract.SessionSetProfileResponse, error)
 	SessionSetBranch(context.Context, contract.SessionSetBranchRequest) (contract.SessionSetBranchResponse, error)
+	SessionClear(context.Context, contract.SessionClearRequest) (contract.SessionClearResponse, error)
 	SessionRestart(context.Context, contract.SessionRestartRequest) (contract.SessionRestartResponse, error)
 	SessionRefresh(context.Context, contract.SessionRefreshRequest) (contract.SessionRefreshResponse, error)
 	Post(context.Context, contract.PostRequest) (contract.PostResponse, error)
@@ -313,6 +314,10 @@ func (c *socketClient) SessionStart(ctx context.Context, q contract.SessionStart
 
 func (c *socketClient) SessionSetBranch(ctx context.Context, q contract.SessionSetBranchRequest) (contract.SessionSetBranchResponse, error) {
 	return call[contract.SessionSetBranchRequest, contract.SessionSetBranchResponse](ctx, c, contract.MethodSessionSetBranch, q)
+}
+
+func (c *socketClient) SessionClear(ctx context.Context, q contract.SessionClearRequest) (contract.SessionClearResponse, error) {
+	return call[contract.SessionClearRequest, contract.SessionClearResponse](ctx, c, contract.MethodSessionClear, q)
 }
 
 func (c *socketClient) SessionSetProfile(ctx context.Context, q contract.SessionSetProfileRequest) (contract.SessionSetProfileResponse, error) {
