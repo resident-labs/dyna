@@ -328,3 +328,51 @@ func waitFor(t *testing.T, ok func() bool) {
 	t.Helper()
 	testutil.Eventually(t, 5*time.Second, "computer process state", ok)
 }
+
+func TestProcessStartHonorsRequestCancellation(t *testing.T) {
+	root := t.TempDir()
+	started := filepath.Join(root, "xvnc.started")
+	// Xvnc sleeps without creating the VNC socket, so startDisplay waits for it.
+	if err := os.WriteFile(filepath.Join(root, "Xvnc"), []byte("#!/bin/sh\ntouch "+started+"\nexec sleep 600\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", root+":"+os.Getenv("PATH"))
+	p := &Process{root: root, socket: filepath.Join(root, "run", "vnc.sock"), tmp: filepath.Join(root, "tmp"), profile: filepath.Join(root, "profile")}
+	t.Cleanup(p.Close)
+	handler := p.Handler(context.Background())
+
+	reqCtx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodPost, "/computer", nil).WithContext(reqCtx)
+	done := make(chan int, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		done <- w.Code
+	}()
+	waitFor(t, func() bool { _, err := os.Stat(started); return err == nil })
+	cancel()
+	select {
+	case code := <-done:
+		if code != http.StatusInternalServerError {
+			t.Fatalf("cancelled start status = %d, want 500", code)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Process.Handler ignored request cancellation during Start")
+	}
+
+	// opMu must be free so stop returns immediately.
+	stopDone := make(chan int, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/computer/stop", nil))
+		stopDone <- w.Code
+	}()
+	select {
+	case code := <-stopDone:
+		if code != http.StatusOK {
+			t.Fatalf("stop status = %d, want 200", code)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stop blocked on opMu after cancelled start")
+	}
+}

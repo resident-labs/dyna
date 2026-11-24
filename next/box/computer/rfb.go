@@ -14,6 +14,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -53,20 +54,40 @@ type rfbClient struct {
 	bytesPerPixel int
 }
 
+var (
+	rfbDialTimeout  = 5 * time.Second
+	rfbTimeout      = 10 * time.Second
+	rfbWriteTimeout = 5 * time.Second
+	watchTimeout    = 5 * time.Second
+)
+
+var aLongTimeAgo = time.Unix(1, 0)
+
 // dialRFB connects to the display with security None. bytesPerPixel is 4 for true pixels, or 1 for the coarse pixels
 // that only show where the screen changed.
 func dialRFB(ctx context.Context, socket string, bytesPerPixel int) (*rfbClient, error) {
-	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	dialCtx, cancel := context.WithTimeout(ctx, rfbTimeout)
+	defer cancel()
+	conn, err := (&net.Dialer{Timeout: rfbDialTimeout}).DialContext(dialCtx, "unix", socket)
 	if err != nil {
 		return nil, fmt.Errorf("the desktop is not running: %w", err)
 	}
 	c := &rfbClient{conn: conn, r: bufio.NewReaderSize(conn, 1<<20), bytesPerPixel: bytesPerPixel}
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
-	}
-	if err := c.handshake(); err != nil {
+	deadline, _ := dialCtx.Deadline()
+	_ = conn.SetDeadline(deadline)
+	stop := context.AfterFunc(dialCtx, func() { _ = conn.SetDeadline(aLongTimeAgo) })
+	err = c.handshake()
+	stopped := stop()
+	if err != nil {
 		conn.Close()
+		if !stopped && ctx.Err() == context.Canceled {
+			return nil, fmt.Errorf("desktop handshake: %w", ctx.Err())
+		}
 		return nil, fmt.Errorf("desktop handshake: %w", err)
+	}
+	if !stopped {
+		conn.Close()
+		return nil, fmt.Errorf("desktop handshake: %w", dialCtx.Err())
 	}
 	_ = conn.SetDeadline(time.Time{})
 	return c, nil
@@ -166,11 +187,15 @@ func DialKeyboard(ctx context.Context, socket string) (*Keyboard, error) {
 
 // Close lets go of every key still down, and ends the connection.
 func (k *Keyboard) Close() {
-	_ = k.Up(k.held...)
+	if len(k.held) > 0 {
+		held := k.held
+		k.held = nil
+		_ = k.send(false, held, time.Second)
+	}
 	k.c.Close()
 }
 
-func (k *Keyboard) send(down bool, keysyms []uint32) error {
+func (k *Keyboard) send(down bool, keysyms []uint32, timeout time.Duration) error {
 	flag := byte(0)
 	if down {
 		flag = 1
@@ -179,32 +204,53 @@ func (k *Keyboard) send(down bool, keysyms []uint32) error {
 	for _, keysym := range keysyms {
 		events = binary.BigEndian.AppendUint32(append(events, 4, flag, 0, 0), keysym)
 	}
+	_ = k.c.conn.SetWriteDeadline(time.Now().Add(timeout))
 	_, err := k.c.conn.Write(events)
+	_ = k.c.conn.SetWriteDeadline(time.Time{})
 	return err
 }
 
 // Down presses keys in order, and Up lets them go in order.
 func (k *Keyboard) Down(keysyms ...uint32) error {
 	k.held = append(k.held, keysyms...)
-	return k.send(true, keysyms)
+	return k.send(true, keysyms, rfbWriteTimeout)
 }
 
 func (k *Keyboard) Up(keysyms ...uint32) error {
 	k.held = slices.DeleteFunc(k.held, func(held uint32) bool { return slices.Contains(keysyms, held) })
-	return k.send(false, keysyms)
+	return k.send(false, keysyms, rfbWriteTimeout)
+}
+
+func rfbErr(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return context.DeadlineExceeded
+	}
+	return err
 }
 
 // Sync returns once Xvnc has taken the events before it, as it answers a request sent after them, so input from
 // another source, such as xdotool's pointer, comes after them, and the settle that follows sees what they did.
 func (k *Keyboard) Sync(ctx context.Context) error {
+	syncCtx, cancel := context.WithTimeout(ctx, rfbTimeout)
+	defer cancel()
+	deadline, _ := syncCtx.Deadline()
+	_ = k.c.conn.SetDeadline(deadline)
+	stop := context.AfterFunc(syncCtx, func() { _ = k.c.conn.SetDeadline(aLongTimeAgo) })
+	defer func() {
+		if stop() {
+			_ = k.c.conn.SetDeadline(time.Time{})
+		}
+	}()
 	if err := k.c.request(false, Rect{0, 0, 1, 1}); err != nil {
-		return err
+		return rfbErr(syncCtx, err)
 	}
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = k.c.conn.SetReadDeadline(deadline)
+	if _, err := k.c.update(nil); err != nil {
+		return rfbErr(syncCtx, err)
 	}
-	_, err := k.c.update(nil)
-	return err
+	return nil
 }
 
 // TypeText types text on the desktop, a press and a release for each character.
@@ -214,11 +260,22 @@ func TypeText(ctx context.Context, socket, text string) error {
 		return err
 	}
 	defer k.Close()
+	stop := context.AfterFunc(ctx, func() { _ = k.c.conn.Close() })
+	defer stop()
 	for _, keysym := range textKeysyms(text) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := k.Down(keysym); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			return err
 		}
 		if err := k.Up(keysym); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			return err
 		}
 	}
@@ -331,9 +388,14 @@ func (e *NoFrameError) Unwrap() error { return e.Err }
 
 // Capture returns a PNG of region of the desktop, or of all of it when region is empty. The pointer is not in it.
 func Capture(ctx context.Context, socket string, region Rect) (shot []byte, err error) {
-	ctx, cancel := context.WithTimeout(ctx, captureTimeout)
+	parent := ctx
+	ctx, cancel := context.WithTimeout(parent, captureTimeout)
 	defer cancel()
 	defer func() {
+		if err != nil && parent.Err() != nil {
+			err = parent.Err()
+			return
+		}
 		if errors.Is(err, os.ErrDeadlineExceeded) {
 			err = &NoFrameError{Within: captureTimeout, Err: err}
 		}
@@ -352,6 +414,8 @@ func Capture(ctx context.Context, socket string, region Rect) (shot []byte, err 
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = c.conn.SetDeadline(deadline)
 	}
+	stop := context.AfterFunc(parent, func() { _ = c.conn.SetDeadline(aLongTimeAgo) })
+	defer stop()
 	img := image.NewRGBA(image.Rect(region.X, region.Y, region.X+region.Width, region.Y+region.Height))
 	if err := c.request(false, region); err != nil {
 		return nil, err
@@ -385,26 +449,48 @@ type Changes struct {
 	updates chan Rect
 	ended   chan error
 	done    chan struct{}
+	once    sync.Once
 	pending bool
 }
 
 // WatchChanges connects and takes the screen as it is, before the action.
 func WatchChanges(ctx context.Context, socket string) (*Changes, error) {
-	c, err := dialRFB(ctx, socket, 1)
+	initCtx, cancel := context.WithTimeout(ctx, watchTimeout)
+	defer cancel()
+	c, err := dialRFB(initCtx, socket, 1)
 	if err != nil {
 		return nil, err
 	}
-	w := &Changes{c: c, updates: make(chan Rect), ended: make(chan error, 1), done: make(chan struct{})}
-	if err := c.request(false, Rect{0, 0, c.width, c.height}); err != nil {
+	deadline, _ := initCtx.Deadline()
+	_ = c.conn.SetDeadline(deadline)
+	stop := context.AfterFunc(initCtx, func() { _ = c.conn.SetDeadline(aLongTimeAgo) })
+	fail := func(err error) (*Changes, error) {
+		stop()
 		c.Close()
-		return nil, err
+		return nil, rfbErr(initCtx, err)
+	}
+	region := Rect{0, 0, c.width, c.height}
+	if err := c.request(false, region); err != nil {
+		return fail(err)
 	}
 	for baseline := (Rect{}); baseline.empty(); {
 		if baseline, err = c.update(nil); err != nil {
-			c.Close()
-			return nil, err
+			return fail(err)
+		}
+		// A cursor-only update consumes the request too. Ask again rather than
+		// waiting forever for a frame the server has not been asked to send.
+		if baseline.empty() {
+			if err := c.request(false, region); err != nil {
+				return fail(err)
+			}
 		}
 	}
+	if !stop() {
+		c.Close()
+		return nil, initCtx.Err()
+	}
+	_ = c.conn.SetDeadline(time.Time{})
+	w := &Changes{c: c, updates: make(chan Rect), ended: make(chan error, 1), done: make(chan struct{})}
 	go func() {
 		for {
 			r, err := c.update(nil)
@@ -422,12 +508,38 @@ func WatchChanges(ctx context.Context, socket string) (*Changes, error) {
 	return w, nil
 }
 
-func (w *Changes) Close() { close(w.done); w.c.Close() }
+func (w *Changes) Close() {
+	w.once.Do(func() {
+		close(w.done)
+		w.c.Close()
+	})
+}
+
+func (w *Changes) requestIncremental(ctx context.Context, timeout time.Duration) error {
+	writeTimeout := min(timeout, rfbWriteTimeout)
+	if writeTimeout <= 0 {
+		writeTimeout = rfbWriteTimeout
+	}
+	deadline := time.Now().Add(writeTimeout)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	_ = w.c.conn.SetWriteDeadline(deadline)
+	stop := context.AfterFunc(ctx, func() { _ = w.c.conn.SetWriteDeadline(aLongTimeAgo) })
+	err := w.c.request(true, Rect{0, 0, w.c.width, w.c.height})
+	if stop() {
+		_ = w.c.conn.SetWriteDeadline(time.Time{})
+	}
+	if err != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
+}
 
 // next waits up to timeout for a change. A request the server has not answered yet stays asked.
 func (w *Changes) next(ctx context.Context, timeout time.Duration) (Rect, bool, error) {
 	if !w.pending {
-		if err := w.c.request(true, Rect{0, 0, w.c.width, w.c.height}); err != nil {
+		if err := w.requestIncremental(ctx, timeout); err != nil {
 			return Rect{}, false, err
 		}
 		w.pending = true
@@ -439,7 +551,7 @@ func (w *Changes) next(ctx context.Context, timeout time.Duration) (Rect, bool, 
 		case r := <-w.updates:
 			w.pending = false
 			if r.empty() { // a cursor shape alone
-				if err := w.c.request(true, Rect{0, 0, w.c.width, w.c.height}); err != nil {
+				if err := w.requestIncremental(ctx, timeout); err != nil {
 					return Rect{}, false, err
 				}
 				w.pending = true

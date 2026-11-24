@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"image/png"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -50,8 +49,7 @@ func (p *Process) Check(ctx context.Context) string {
 	}{{"GL", "glxgears", []string{"-geometry", "256x256"}}, {"Vulkan", "vkcube", []string{"--width", "256", "--height", "256"}}} {
 		report += "\n" + probe.label + ": " + p.drawProbe(ctx, probe.command, probe.args)
 	}
-	cmd := exec.CommandContext(ctx, "glxinfo", "-B")
-	cmd.Env = desktopEnv(p.socket)
+	cmd := desktopCommand(ctx, desktopEnv(p.socket), "glxinfo", "-B")
 	if out, err := cmd.Output(); err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			if strings.Contains(line, "OpenGL renderer string:") {
@@ -60,8 +58,7 @@ func (p *Process) Check(ctx context.Context) string {
 		}
 	}
 	// Enumeration needs no presentation surface; the cube above tests WSI.
-	cmd = exec.CommandContext(ctx, "vulkaninfo", "--summary")
-	cmd.Env = append(desktopEnv(p.socket), "DISPLAY=")
+	cmd = desktopCommand(ctx, append(desktopEnv(p.socket), "DISPLAY="), "vulkaninfo", "--summary")
 	if out, err := cmd.Output(); err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			if strings.Contains(line, "deviceName") {
@@ -152,10 +149,14 @@ func (p *Process) drawProbe(ctx context.Context, name string, args []string) (re
 // windowRect uses absolute client coordinates; xdotool's geometry can count a
 // reparenting WM's frame offset twice. Screenshots read only the visible desktop.
 func windowRect(ctx context.Context, id string) (Rect, error) {
-	cmd := exec.CommandContext(ctx, "xwininfo", "-id", id)
-	cmd.Env = append(desktopEnv(VNCSocket), "LC_ALL=C")
+	cmdCtx, cancel := context.WithTimeout(ctx, commandTimeout)
+	defer cancel()
+	cmd := desktopCommand(cmdCtx, append(desktopEnv(VNCSocket), "LC_ALL=C"), "xwininfo", "-id", id)
 	out, err := cmd.Output()
 	if err != nil {
+		if cmdCtx.Err() != nil {
+			return Rect{}, fmt.Errorf("window %s: %w", id, cmdCtx.Err())
+		}
 		return Rect{}, fmt.Errorf("window %s: %w", id, err)
 	}
 	values := map[string]int{}

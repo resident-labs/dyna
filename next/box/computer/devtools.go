@@ -86,7 +86,7 @@ func connect(ctx context.Context, base string) (_ *DevTools, resultErr error) {
 	}
 }
 
-func (d *DevTools) Close() { _ = d.conn.Close(websocket.StatusNormalClosure, "") }
+func (d *DevTools) Close() { _ = d.conn.CloseNow() }
 
 type devToolsProtoError struct {
 	method  string

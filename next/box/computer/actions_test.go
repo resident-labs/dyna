@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -452,5 +453,423 @@ func TestCaptureRequestsPixelsAfterCursorOnlyUpdate(t *testing.T) {
 	red, green, blue, _ := im.At(0, 0).RGBA()
 	if red != 65535 || green != 0 || blue != 0 {
 		t.Fatalf("pixel = %d,%d,%d", red, green, blue)
+	}
+}
+
+// Reproduces the click hang when Xvnc answers WatchChanges' baseline request with a
+// cursor-only pseudo-encoding update: WatchChanges must request pixels again instead
+// of blocking forever waiting for an unrequested frame.
+func TestWatchChangesRequestsPixelsAfterCursorOnlyUpdate(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "vnc.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+		r := bufio.NewReader(conn)
+		read := func(n int) { _, _ = io.ReadFull(r, make([]byte, n)) }
+		_, _ = conn.Write([]byte("RFB 003.008\n\x01\x01"))
+		read(13)
+		_, _ = conn.Write(make([]byte, 4))
+		read(1)
+		_, _ = conn.Write(append([]byte{0, 1, 0, 1}, make([]byte, 20)...))
+		read(20)      // pixel format
+		read(4 + 3*4) // encodings
+		read(10)      // initial baseline request
+		// Cursor-only update (encoding -239 = 0xffffff11) consumes the request.
+		_, _ = conn.Write([]byte{0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 17})
+		read(10) // WatchChanges must ask again
+		_, _ = conn.Write([]byte{0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0x55})
+		_, _ = io.Copy(io.Discard, r)
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	changes, err := WatchChanges(ctx, socket)
+	if err != nil {
+		t.Fatalf("WatchChanges: %v", err)
+	}
+	changes.Close()
+}
+
+// A desktop that accepts WatchChanges but never answers its baseline request must
+// honor ctx cancellation (releasing actionSlot promptly) and watchTimeout.
+func TestWatchChangesHonorsCancelAndTimeout(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "vnc.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	connected := make(chan struct{}, 2)
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				r := bufio.NewReader(c)
+				read := func(n int) { _, _ = io.ReadFull(r, make([]byte, n)) }
+				_, _ = c.Write([]byte("RFB 003.008\n\x01\x01"))
+				read(13)
+				_, _ = c.Write(make([]byte, 4))
+				read(1)
+				_, _ = c.Write(append([]byte{0, 1, 0, 1}, make([]byte, 20)...))
+				read(20)      // pixel format
+				read(4 + 3*4) // encodings
+				read(10)      // baseline request — never answer it
+				select {
+				case connected <- struct{}{}:
+				default:
+				}
+				_, _ = io.Copy(io.Discard, r)
+			}(conn)
+		}
+	}()
+	prevSocket := desktopSocket
+	desktopSocket = socket
+	t.Cleanup(func() { desktopSocket = prevSocket })
+
+	var launched []string
+	agent := fakeAgent(t, &launched)
+
+	// Cancel a click stuck inside WatchChanges; actionSlot must be freed promptly.
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := Do(ctx, agent, Click, Request{X: number(10), Y: number(20)})
+		done <- err
+	}()
+	select {
+	case <-connected:
+	case <-time.After(time.Second):
+		t.Fatal("click did not reach WatchChanges")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled click error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled click hung in WatchChanges")
+	}
+
+	nextCtx, nextCancel := context.WithTimeout(context.Background(), time.Second)
+	defer nextCancel()
+	if _, err := Do(nextCtx, agent, Wait, Request{MS: number(0)}); err != nil {
+		t.Fatalf("action after cancelled click failed (actionSlot wedged?): %v", err)
+	}
+
+	// Without cancellation, WatchChanges must still time out on watchTimeout.
+	prevWatch := watchTimeout
+	watchTimeout = 80 * time.Millisecond
+	t.Cleanup(func() { watchTimeout = prevWatch })
+	start := time.Now()
+	_, err = WatchChanges(context.Background(), socket)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("WatchChanges timeout error = %v, want context.DeadlineExceeded", err)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatalf("WatchChanges took %v", time.Since(start))
+	}
+}
+
+func TestRFBHandshakeCaptureAndKeyboardSyncHonorCancelAndTimeout(t *testing.T) {
+	t.Run("dialRFB handshake", func(t *testing.T) {
+		socket := filepath.Join(t.TempDir(), "vnc.sock")
+		listener, err := net.Listen("unix", socket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer listener.Close()
+		accepted := make(chan struct{}, 2)
+		go func() {
+			for {
+				conn, err := listener.Accept()
+				if err != nil {
+					return
+				}
+				go func(c net.Conn) {
+					defer c.Close()
+					accepted <- struct{}{}
+					_, _ = io.Copy(io.Discard, c)
+				}(conn)
+			}
+		}()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() {
+			_, err := dialRFB(ctx, socket, 1)
+			done <- err
+		}()
+		<-accepted
+		cancel()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("handshake cancel error = %v, want context.Canceled", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("dialRFB ignored cancellation")
+		}
+
+		prev := rfbTimeout
+		rfbTimeout = 80 * time.Millisecond
+		t.Cleanup(func() { rfbTimeout = prev })
+		if _, err := dialRFB(context.Background(), socket, 1); !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Fatalf("handshake timeout error = %v, want deadline exceeded", err)
+		}
+	})
+
+	t.Run("Capture cancel", func(t *testing.T) {
+		socket := filepath.Join(t.TempDir(), "vnc.sock")
+		listener, err := net.Listen("unix", socket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer listener.Close()
+		requested := make(chan struct{}, 1)
+		go func() {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			r := bufio.NewReader(conn)
+			read := func(n int) { _, _ = io.ReadFull(r, make([]byte, n)) }
+			_, _ = conn.Write([]byte("RFB 003.008\n\x01\x01"))
+			read(13)
+			_, _ = conn.Write(make([]byte, 4))
+			read(1)
+			_, _ = conn.Write(append([]byte{0, 1, 0, 1}, make([]byte, 20)...))
+			read(20 + 4 + 3*4 + 10)
+			requested <- struct{}{}
+			_, _ = io.Copy(io.Discard, r)
+		}()
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() {
+			_, err := Capture(ctx, socket, Rect{})
+			done <- err
+		}()
+		<-requested
+		cancel()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("capture cancel error = %v, want context.Canceled", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("Capture ignored ctx cancellation")
+		}
+	})
+
+	t.Run("Keyboard.Sync cancel and timeout", func(t *testing.T) {
+		socket := filepath.Join(t.TempDir(), "vnc.sock")
+		listener, err := net.Listen("unix", socket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer listener.Close()
+		requested := make(chan struct{}, 2)
+		go func() {
+			for {
+				conn, err := listener.Accept()
+				if err != nil {
+					return
+				}
+				go func(c net.Conn) {
+					defer c.Close()
+					r := bufio.NewReader(c)
+					read := func(n int) { _, _ = io.ReadFull(r, make([]byte, n)) }
+					_, _ = c.Write([]byte("RFB 003.008\n\x01\x01"))
+					read(13)
+					_, _ = c.Write(make([]byte, 4))
+					read(1)
+					_, _ = c.Write(append([]byte{0, 1, 0, 1}, make([]byte, 20)...))
+					read(20 + 4 + 3*4 + 10)
+					requested <- struct{}{}
+					_, _ = io.Copy(io.Discard, r)
+				}(conn)
+			}
+		}()
+
+		k, err := DialKeyboard(context.Background(), socket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer k.Close()
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- k.Sync(ctx) }()
+		<-requested
+		cancel()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("Keyboard.Sync cancel error = %v, want context.Canceled", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("Keyboard.Sync ignored cancellation")
+		}
+
+		prev := rfbTimeout
+		rfbTimeout = 80 * time.Millisecond
+		t.Cleanup(func() { rfbTimeout = prev })
+		k2, err := DialKeyboard(context.Background(), socket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer k2.Close()
+		if err := k2.Sync(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Keyboard.Sync timeout error = %v, want context.DeadlineExceeded", err)
+		}
+	})
+}
+
+// Even if a grandchild spawned by xdotool escapes the process group and keeps stdout open,
+// commandWaitDelay and commandTimeout prevent CombinedOutput from hanging forever.
+func TestXdotoolGrandchildPipeDoesNotHangOnCancelOrTimeout(t *testing.T) {
+	dir := t.TempDir()
+	started := filepath.Join(dir, "started")
+	pids := filepath.Join(dir, "pids")
+	// setsid detaches the grandchild into its own session/pgrp while inheriting stdout/stderr.
+	script := "#!/bin/sh\nsetsid sleep 5 &\necho $! >> " + pids + "\ntouch " + started + "\nsleep 5\n"
+	if err := os.WriteFile(filepath.Join(dir, "xdotool"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		raw, _ := os.ReadFile(pids)
+		for _, field := range strings.Fields(string(raw)) {
+			if pid, err := strconv.Atoi(field); err == nil {
+				_ = syscall.Kill(-pid, syscall.SIGKILL)
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	})
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	prevDelay, prevTimeout := commandWaitDelay, commandTimeout
+	commandWaitDelay = 80 * time.Millisecond
+	commandTimeout = 150 * time.Millisecond
+	t.Cleanup(func() {
+		commandWaitDelay = prevDelay
+		commandTimeout = prevTimeout
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- xdotool(ctx, "click", "1") }()
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("xdotool cancel error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("xdotool hung with open grandchild pipe on cancel")
+	}
+
+	_ = os.Remove(started)
+	start := time.Now()
+	if err := xdotool(context.Background(), "click", "1"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("xdotool timeout error = %v, want context.DeadlineExceeded", err)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatalf("xdotool timeout took %v", time.Since(start))
+	}
+}
+
+// computer stop must cancel a stuck in-flight action so actionSlot recovers for subsequent calls.
+func TestStopCancelsStuckActionAndRecoversSlot(t *testing.T) {
+	started := make(chan struct{}, 1)
+	stopped := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/computer/stop" {
+			stopped <- struct{}{}
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	agent := Agent{client: &http.Client{Transport: redirectTransport{base: server.URL}}}
+
+	// Point desktopSocket at a VNC socket that accepts WatchChanges and never sends a baseline.
+	socket := filepath.Join(t.TempDir(), "vnc.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		r := bufio.NewReader(conn)
+		read := func(n int) { _, _ = io.ReadFull(r, make([]byte, n)) }
+		_, _ = conn.Write([]byte("RFB 003.008\n\x01\x01"))
+		read(13)
+		_, _ = conn.Write(make([]byte, 4))
+		read(1)
+		_, _ = conn.Write(append([]byte{0, 1, 0, 1}, make([]byte, 20)...))
+		read(20 + 4 + 3*4 + 10)
+		started <- struct{}{}
+		_, _ = io.Copy(io.Discard, r)
+	}()
+	prevSocket := desktopSocket
+	desktopSocket = socket
+	t.Cleanup(func() { desktopSocket = prevSocket })
+
+	stuck := make(chan error, 1)
+	go func() {
+		_, err := Do(context.Background(), agent, Click, Request{X: number(10), Y: number(20)})
+		stuck <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("stuck click did not enter WatchChanges")
+	}
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+	defer stopCancel()
+	if _, err := Do(stopCtx, agent, Stop, Request{}); err != nil {
+		t.Fatalf("stop failed: %v", err)
+	}
+	select {
+	case <-stopped:
+	default:
+		t.Fatal("stop did not hit /computer/stop")
+	}
+	select {
+	case err := <-stuck:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("stuck click error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stop did not abort stuck click")
+	}
+
+	// Next action acquires actionSlot and succeeds immediately.
+	nextCtx, nextCancel := context.WithTimeout(context.Background(), time.Second)
+	defer nextCancel()
+	if _, err := Do(nextCtx, agent, Wait, Request{MS: number(0)}); err != nil {
+		t.Fatalf("action after stop failed: %v", err)
 	}
 }
