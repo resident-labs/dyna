@@ -30,6 +30,8 @@ const (
 	leaseEvery = 5 * time.Minute
 	reapEvery  = time.Hour
 	retryAfter = 5 * time.Minute
+	// surveyLimit bounds one host's survey, so a hung host cannot stall the pool or lease renewal.
+	surveyLimit = 60 * time.Second
 	// scaleLimit is one pass, and leaves room for the first image build on a host.
 	scaleLimit = 20 * time.Minute
 )
@@ -115,9 +117,12 @@ type Pool struct {
 	Layer   func(contract.RoomID) (*box.RunnerLayer, error)
 	// LayerLimit is how long one layer may build, layerLimit when zero.
 	LayerLimit time.Duration
+	// SurveyLimit is how long surveying one host may take, surveyLimit when zero.
+	SurveyLimit time.Duration
 
 	mu        sync.Mutex
 	clean     map[contract.HostName]bool // hosts cleaned after the last repository turned CI off; nil while CI is on
+	ciClean   map[contract.HostName]bool // hosts last seen with no runners and no egress
 	listeners map[scaleSet]*listening
 	images    map[imageKey]string          // each host's current runner images, once built or found there
 	fellBack  map[imageKey]time.Time       // room layers whose build failed on a host, when, so its jobs run on the shared image
@@ -208,7 +213,7 @@ func (p *Pool) Tick(ctx context.Context, group *sync.WaitGroup) error {
 	buildCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, scaleLimit)
 	defer cancel()
-	view, err := p.survey(ctx)
+	view, err := p.survey(ctx, false)
 	if err != nil {
 		return err
 	}
@@ -349,7 +354,7 @@ func (p *Pool) scale(ctx context.Context, key scaleSet, assigned int) int {
 	// The lock is held across SSH, so a host that hangs cannot stall the others for long.
 	ctx, cancel := context.WithTimeout(ctx, scaleLimit)
 	defer cancel()
-	view, err := p.survey(ctx)
+	view, err := p.survey(ctx, true)
 	if err != nil {
 		log.Printf("ci pool: %v", err)
 		return 0
@@ -388,7 +393,7 @@ type surveyed struct {
 	egress  EgressState
 }
 
-func (p *Pool) survey(ctx context.Context) (survey, error) {
+func (p *Pool) survey(ctx context.Context, skipDegraded bool) (survey, error) {
 	s := survey{repos: make(map[contract.RepoName]store.CIRepo), hosts: make(map[contract.HostName]*surveyed), nodes: make(map[string]int)}
 	repos, err := p.Store.CIRepos(ctx)
 	if err != nil {
@@ -450,6 +455,14 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 	for _, repo := range repos {
 		configured = append(configured, repo.Repo)
 	}
+	p.shown.Lock()
+	hasPlaced := make(map[contract.HostName]bool, len(p.placed))
+	for _, b := range p.placed {
+		hasPlaced[b.Host] = true
+	}
+	p.shown.Unlock()
+
+	var toProbe []box.Host
 	var unanswered []contract.HostName
 	for _, host := range hosts {
 		if host.Pool != "" {
@@ -461,24 +474,67 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 		if host.State != box.HostReady {
 			continue
 		}
+		if skipDegraded && host.Health == contract.HostDegraded && !hasPlaced[host.Name] {
+			unanswered = append(unanswered, host.Name)
+			continue
+		}
+		if !host.CI && p.ciClean[host.Name] && !reclaim {
+			continue
+		}
 		if p.Memory != nil {
 			host.MemUsed = p.Memory(host.Name)
 		}
 		if p.CPU != nil {
 			host.CPUUsed = p.CPU(host.Name)
 		}
-		driver, err := p.Hosts(ctx, host.Name)
-		var runners []box.Runner
-		var egress EgressState
-		if err == nil {
-			runners, egress, err = driver.ListRunners(ctx, reclaim, configured)
-		}
-		if err != nil {
-			s.failures = append(s.failures, fmt.Errorf("host %s: %w", host.Name, err))
+		toProbe = append(toProbe, host)
+	}
+
+	limit := p.SurveyLimit
+	if limit == 0 {
+		limit = surveyLimit
+	}
+	type probeResult struct {
+		driver  Driver
+		runners []box.Runner
+		egress  EgressState
+		err     error
+	}
+	results := make([]probeResult, len(toProbe))
+	var wg sync.WaitGroup
+	for i, host := range toProbe {
+		wg.Add(1)
+		go func(i int, host box.Host) {
+			defer wg.Done()
+			hostCtx, cancel := context.WithTimeout(ctx, limit)
+			defer cancel()
+			driver, err := p.Hosts(hostCtx, host.Name)
+			var runners []box.Runner
+			var egress EgressState
+			if err == nil {
+				runners, egress, err = driver.ListRunners(hostCtx, reclaim, configured)
+			}
+			results[i] = probeResult{driver: driver, runners: runners, egress: egress, err: err}
+		}(i, host)
+	}
+	wg.Wait()
+
+	for i, host := range toProbe {
+		r := results[i]
+		if r.err != nil {
+			s.failures = append(s.failures, fmt.Errorf("host %s: %w", host.Name, r.err))
 			unanswered = append(unanswered, host.Name)
 			continue
 		}
-		s.hosts[host.Name] = &surveyed{host: host, driver: driver, runners: runners, egress: egress}
+		if len(r.runners) == 0 && r.egress == EgressAbsent {
+			if p.ciClean == nil {
+				p.ciClean = make(map[contract.HostName]bool)
+			}
+			p.ciClean[host.Name] = true
+		} else {
+			delete(p.ciClean, host.Name)
+		}
+		s.hosts[host.Name] = &surveyed{host: host, driver: r.driver, runners: r.runners, egress: r.egress}
 	}
 	// A host that did not answer still holds what it held, as far as the node pools know. Publishing a new runner snapshot is
 	// serialized with service and box admission, just as claiming a runner is.
@@ -619,6 +675,7 @@ func (p *Pool) place(ctx context.Context, key scaleSet, assigned int, view surve
 
 // start prepares a host and starts one runner on it.
 func (p *Pool) start(ctx context.Context, key scaleSet, host *surveyed, size contract.BoxSize, layer *box.RunnerLayer) (string, error) {
+	delete(p.ciClean, host.host.Name)
 	image, err := p.prepare(ctx, host, layer)
 	if err != nil {
 		return "", err
@@ -942,7 +999,16 @@ func (p *Pool) sweep(ctx context.Context, host *surveyed, view survey, alive map
 	// A host with ci off keeps its proxy while its runners finish their jobs.
 	// An idle host also drops a stopped or stale proxy so old or unpinned binary mounts do not linger.
 	if !serving && host.egress != EgressAbsent && (host.egress != EgressCurrent || !host.host.CI || len(view.repos) == 0) {
-		return host.driver.RemoveEgress(ctx)
+		if err := host.driver.RemoveEgress(ctx); err != nil {
+			return err
+		}
+		host.egress = EgressAbsent
+	}
+	if !serving && host.egress == EgressAbsent {
+		if p.ciClean == nil {
+			p.ciClean = make(map[contract.HostName]bool)
+		}
+		p.ciClean[host.host.Name] = true
 	}
 	// Its restart policy covers a crash, not a stop or a host restart, and a runner with no proxy loses its job.
 	if serving && (host.egress == EgressAbsent || host.egress == EgressStopped) {

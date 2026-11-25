@@ -41,6 +41,12 @@ func TestCIOffLetsRunningJobsFinish(t *testing.T) {
 	if d.egress != EgressAbsent {
 		t.Fatal("a host with ci off kept its proxy after its last runner")
 	}
+	calls := d.listCalls
+	f.tick(t)
+	f.scale(1)
+	if d.listCalls != calls {
+		t.Fatalf("clean ci-off host was surveyed again: %d -> %d", calls, d.listCalls)
+	}
 }
 
 // A CI host keeps sessions off with agents off, and its room list is for sessions too: the pool still starts its runners.
