@@ -2344,6 +2344,8 @@ func isTerminalRefreshGrantMessage(message string) bool {
 	for _, token := range []string{
 		"refresh_token_reused",
 		"refresh_token_expired",
+		// Anthropic returns {"error": "invalid_grant", "error_description": "Refresh token expired"}.
+		"refresh token expired",
 		"refresh_token_invalidated",
 		"token_revoked",
 		"invalid_client",
@@ -2367,6 +2369,10 @@ func isTerminalRefreshError(auth *Auth, err error) bool {
 		return isTerminalRefreshError(auth, partErr.OuterRefreshError()) ||
 			isTerminalRefreshError(auth, partErr.SIWCRefreshError())
 	}
+	var authErr *Error
+	if errors.As(err, &authErr) && authErr != nil && isTerminalRefreshGrantMessage(authErr.Code) {
+		return true
+	}
 	if isUnauthorizedError(err) || isTerminalRefreshGrantMessage(err.Error()) {
 		return true
 	}
@@ -2388,6 +2394,9 @@ func terminalRefreshErrorCode(message string, statusCode int) string {
 		if strings.Contains(lower, code) {
 			return code
 		}
+	}
+	if strings.Contains(lower, "refresh token expired") {
+		return "refresh_token_expired"
 	}
 	if isInvalidGrantErrorMessage(lower) {
 		return "invalid_grant"
@@ -2425,8 +2434,13 @@ func sanitizeRenewalError(auth *Auth, err error) *Error {
 		}
 	}
 	terminal := isTerminalRefreshError(auth, err)
+	code := terminalRefreshErrorCode(raw, statusCode)
+	var existingAuthErr *Error
+	if errors.As(err, &existingAuthErr) && existingAuthErr != nil && isKnownSafeOAuthErrorCode(existingAuthErr.Code) {
+		code = strings.ToLower(strings.TrimSpace(existingAuthErr.Code))
+	}
 	return &Error{
-		Code:       terminalRefreshErrorCode(raw, statusCode),
+		Code:       code,
 		Message:    sanitizeRenewalMessage(raw),
 		HTTPStatus: statusCode,
 		Retryable:  !terminal,
