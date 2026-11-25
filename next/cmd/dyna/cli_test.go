@@ -869,12 +869,23 @@ func TestWorkflowRunSendsTheFileItNames(t *testing.T) {
 	command := workflowCommand(func() *socketClient { return newClient(socket) })
 	var out bytes.Buffer
 	command.SetOut(&out)
-	command.SetArgs([]string{"run", script, "--args", `{"n":1}`, "--resume", "wf_0"})
+	command.SetArgs([]string{"run", script, "--args", `{"n":1}`, "--resume", "wf_0", "--host", "alpha"})
 	if err := command.ExecuteContext(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got.Script != "export const meta = {}" || got.Args != `{"n":1}` || got.Resume != "wf_0" || !strings.Contains(out.String(), "wf_1") {
+	if got.Script != "export const meta = {}" || got.Args != `{"n":1}` || got.Resume != "wf_0" || got.Host != "alpha" || got.SameHost || !strings.Contains(out.String(), "wf_1") {
 		t.Fatalf("sent %+v, printed %s", got, out.String())
+	}
+	got = contract.WorkflowRunRequest{}
+	out.Reset()
+	command = workflowCommand(func() *socketClient { return newClient(socket) })
+	command.SetOut(&out)
+	command.SetArgs([]string{"run", script, "--same-host"})
+	if err := command.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !got.SameHost || got.Host != "" {
+		t.Fatalf("same-host sent %+v", got)
 	}
 }
 

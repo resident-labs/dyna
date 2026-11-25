@@ -13,17 +13,20 @@ import (
 
 func workflowCommand(get func() *socketClient) *cobra.Command {
 	c := &cobra.Command{Use: "workflow"}
-	var room, args, resume, clientID string
+	var room, args, resume, host, clientID string
+	var sameHost bool
 	run := &cobra.Command{Use: "run FILE", Short: "Start a workflow script. Its result arrives as a final reply.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, files []string) error {
 		script, err := os.ReadFile(files[0])
 		if err != nil {
 			return err
 		}
-		return printCall[contract.WorkflowRunResponse](cmd, get(), contract.MethodWorkflowRun, contract.WorkflowRunRequest{Room: contract.RoomID(room), Script: string(script), Args: args, Resume: contract.WorkflowRunID(resume), ClientID: clientID})
+		return printCall[contract.WorkflowRunResponse](cmd, get(), contract.MethodWorkflowRun, contract.WorkflowRunRequest{Room: contract.RoomID(room), Script: string(script), Args: args, Resume: contract.WorkflowRunID(resume), Host: contract.HostName(host), SameHost: sameHost, ClientID: clientID})
 	}}
 	run.Flags().StringVar(&room, "room", "", "Room; a session may omit it for its own")
 	run.Flags().StringVar(&args, "args", "", "JSON the script reads as args")
 	run.Flags().StringVar(&resume, "resume", "", "An ended run whose finished steps this run keeps, so only changed steps run; reload changes a running one")
+	run.Flags().StringVar(&host, "host", "", "Pin the run's box to a named host (overrides meta.host; cannot combine with --same-host)")
+	run.Flags().BoolVar(&sameHost, "same-host", false, "Place the run's box on the parent's host (caller's, or root's when started by the owner); overrides meta.host; cannot combine with --host")
 	run.Flags().StringVar(&clientID, "client-id", "", "Retry key: the same key returns the first run")
 	reload := &cobra.Command{Use: "reload RUN FILE", Short: "Give a running run a new script, in the same session and box. Finished steps return their results, running ones are joined, and new ones start.", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
 		script, err := os.ReadFile(args[1])
