@@ -1,7 +1,7 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.test.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { workingLine, compactionNote, summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineSegments, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, withFinished, workLayout, foldInputRuns, engineEventsNote, attemptFailedNote } from "./timeline.ts";
+import { workingLine, compactionNote, summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, queuedTimelinePosts, steerInput, timelineInput, timelineInputText, timelineSegments, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, withFinished, workFoldLabel, workLayout, foldInputRuns, engineEventsNote, attemptFailedNote } from "./timeline.ts";
 import type { TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
 
 const steer = (id: string, at = ""): TranscriptItem => ({ id: `steer:${id}`, event: id, seq: 6, turn: "t", at, kind: "steer", from: { kind: "owner" } });
@@ -35,13 +35,6 @@ test("a turn's work splits at each steer, and back-to-back steers split once", (
   assert.deepEqual(timelineSegments("t", [work("a")]).map(segment => segment.id), ["t"]);
 });
 
-// Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.test.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
-test("the top row keeps the whole turn's time, and a steer's row counts from that steer", () => {
-  const segments = timelineSegments("t", [work("a"), steer("one", "2026-11-01T00:00:10Z"), steer("two", "2026-11-01T00:00:12Z"), work("b"), steer("three", "2026-11-01T00:00:20Z"), work("c")]);
-  const durations = segments.map((_, index) => segmentDuration(segments, index, "2026-11-01T00:00:00Z", "2026-11-01T00:00:25Z"));
-  assert.deepEqual(durations, [25_000, 8_000, 5_000]);
-});
-
 test("a steer is no answer, and the turn's last message comes after it", () => {
   const before: TranscriptItem = { id: "a", turn: "t", at: "", kind: "text", text: "first" };
   const after: TranscriptItem = { id: "b", turn: "t", at: "", kind: "text", text: "second" };
@@ -49,21 +42,32 @@ test("a steer is no answer, and the turn's last message comes after it", () => {
   assert.equal(finalTimelineItem([before, steer("sent")], "s")?.id, "a");
 });
 
-const thinking = (id: string): TranscriptItem => ({ id, turn: "t", at: "", kind: "thinking", text: id });
+const thinking = (id: string, at = "", ended?: string): TranscriptItem => ({ id, turn: "t", at, ended, kind: "thinking", text: id });
 const text = (id: string): TranscriptItem => ({ id, turn: "t", at: "", kind: "text", text: id });
-const shown = (items: TranscriptItem[], folded: boolean) => shownTimelineGroups(items, folded).map(group => group.kind === "work" ? group.items.map(item => item.id).join("+") : group.id);
+const toolAt = (id: string, at: string, ended?: string): TranscriptItem => ({ id, turn: "t", at, ended, kind: "tool", tool: "bash" });
+const groupIds = (items: TranscriptItem[]) => deriveTimelineGroups(items).map(group => group.kind === "work" ? group.items.map(item => item.id).join("+") : group.id);
 
-// Horizon's root answered, thought again, and closed with one more paragraph. The fold hid the answer under its last line.
-test("a closed fold keeps every text the agent wrote, and opening it puts the work back between them", () => {
-  const items = [thinking("plan"), text("answer"), thinking("count"), text("closing")];
-  assert.deepEqual(shown(items, true), ["answer", "closing"]);
-  assert.deepEqual(shown(items, false), ["plan", "answer", "count", "closing"]);
+test("interleaved narration and work stay in their real order, with each run of work as its own group", () => {
+  const items = [thinking("plan"), work("a"), work("b"), text("narration"), work("c"), text("answer"), steer("sent"), work("d"), text("later"), work("e"), steer("again"), text("last")];
+  assert.deepEqual(timelineSegments("t", items).map(segment => groupIds(segment.items)), [
+    ["plan+a+b", "narration", "c", "answer"],
+    ["d", "later", "e"],
+    ["last"],
+  ]);
 });
 
-test("text between tool calls stays in order, in every segment, and only work folds", () => {
-  const items = [text("narration"), work("a"), text("answer"), steer("sent"), work("b"), text("later"), work("c"), steer("again"), text("last")];
-  assert.deepEqual(timelineSegments("t", items).map(segment => shown(segment.items, true)), [["narration", "answer"], ["later"], ["last"]]);
-  assert.deepEqual(timelineSegments("t", items).map(segment => shown(segment.items, false)), [["narration", "a", "answer"], ["b", "later", "c"], ["last"]]);
+test("workFoldLabel counts tools and uses wall-clock span, or counts thoughts when there are no tools", () => {
+  assert.equal(workFoldLabel([
+    thinking("p", "2026-11-01T00:00:00Z"),
+    toolAt("a", "2026-11-01T00:00:02Z", "2026-11-01T00:00:10Z"),
+    toolAt("b", "2026-11-01T00:00:05Z", "2026-11-01T00:00:42Z"),
+    toolAt("c", "2026-11-01T00:00:05Z", "2026-11-01T00:00:20Z"),
+  ]), "3 tool calls · 42s");
+  assert.equal(workFoldLabel([toolAt("a", "2026-11-01T00:00:00Z", "2026-11-01T00:00:03.200Z")]), "1 tool call · 3.2s");
+  assert.equal(workFoldLabel([toolAt("a", "2026-11-01T00:00:00Z", "2026-11-01T00:01:14Z"), toolAt("b", "2026-11-01T00:00:30Z", "2026-11-01T00:01:14Z")]), "2 tool calls · 1m 14s");
+  assert.equal(workFoldLabel([thinking("p", "2026-11-01T00:00:00Z", "2026-11-01T00:00:04Z")]), "1 thought · 4s");
+  assert.equal(workFoldLabel([thinking("p1", "2026-11-01T00:00:00Z"), thinking("p2", "2026-11-01T00:00:00Z")]), "2 thoughts");
+  assert.equal(workFoldLabel([toolAt("a", "")]), "1 tool call");
 });
 
 test("a repeat read of a turn keeps one steer, in its place", () => {
@@ -150,19 +154,18 @@ test("T3 durations choose units after rounding", () => {
   assert.equal(formatTimelineDuration(59_500), "1m");
 });
 
-test("a text-only turn has nothing to fold", () => {
-  assert.deepEqual(shown([text("first"), text("final")], true), ["first", "final"]);
+test("a text-only turn has no work groups", () => {
+  assert.deepEqual(groupIds([text("first"), text("final")]), ["first", "final"]);
 });
 
 const ownedPost = (id: string, at: string): TranscriptItem => ({ id, turn: "t", at, kind: "post", from: { kind: "session", session: "s" }, home: { kind: "feed" }, room: "r" });
 const message = (id: string, at: string): TranscriptItem => ({ id, turn: "t", at, kind: "text", text: id });
 
-test("a post that ends the turn is its final message, and the text before it still shows", () => {
+test("a post that ends the turn is its final message, and the text and work before it stay in order", () => {
   const tool: TranscriptItem = { id: "tool", turn: "t", at: "2026-11-01T00:00:01Z", kind: "tool", posts: [ownedPost("post", "2026-11-01T00:00:02Z")] };
   const items = [message("narration", "2026-11-01T00:00:01Z"), tool];
   assert.equal(finalTimelineItem(items, "s")?.id, "post");
-  assert.deepEqual(shown(items, true), ["narration", "posts:tool"]);
-  assert.deepEqual(shown(items, false), ["narration", "tool", "posts:tool"]);
+  assert.deepEqual(groupIds(items), ["narration", "tool", "posts:tool"]);
 });
 
 test("text after a mid-turn post stays the final message, also when a shell post sorts last", () => {
@@ -326,11 +329,10 @@ test("a call that ended early stops running with its duration, while its batch w
   assert.equal(withFinished(landed, new Map([["a", { call: "a", durationMs: 8 }]]))[0], landed[0]);
 });
 
-test("an advisor call that has its result is followed by the answer, which stays when the work folds", () => {
+test("an advisor call that has its result is followed by the answer between work groups", () => {
   const call = (id: string, patch: Partial<TranscriptItem> = {}): TranscriptItem => ({ id, turn: "t", at: "", kind: "tool", tool: "mcp__dyna__advisor", ended: "2026-01-01T00:00:01Z", output: '{"answer":"Use the cache."}', ...patch });
   const items: TranscriptItem[] = [{ id: "r", turn: "t", at: "", kind: "tool", tool: "read" }, call("a"), { id: "b", turn: "t", at: "", kind: "tool", tool: "bash" }, call("running", { ended: undefined, output: undefined })];
   assert.deepEqual(deriveTimelineGroups(items).map(group => [group.kind, group.id]), [["work", "r"], ["advice", "advice:a"], ["work", "b"]]);
-  assert.deepEqual(shownTimelineGroups(items, true).map(group => group.kind), ["advice"]);
 });
 
 test("service.message decodes as an outside feed input with service, author, markdown text and optional data", () => {
@@ -352,9 +354,9 @@ test("service.message decodes as an outside feed input with service, author, mar
   });
 });
 
-test("a service.sent item attached to a tool call stays visible when work folds", () => {
+test("a service.sent item attached to a tool call follows its work group", () => {
   const sent: TranscriptItem = { id: "ev_2", event: "ev_2", seq: 11, turn: "t", at: "2026-11-23T01:01:00Z", kind: "post", type: "service.sent", from: { kind: "session", session: "s" }, service: "agent-chat", to: "@x/y", text: "On it" };
   const items: TranscriptItem[] = [{ id: "call_1", turn: "t", at: "2026-11-23T01:01:00Z", kind: "tool", tool: "mcp__dyna__service", posts: [sent] }];
-  assert.deepEqual(shownTimelineGroups(items, true).map(group => group.kind), ["posts"]);
+  assert.deepEqual(deriveTimelineGroups(items).map(group => group.kind), ["work", "posts"]);
   assert.equal(finalTimelineItem(items, "s")?.id, "ev_2");
 });

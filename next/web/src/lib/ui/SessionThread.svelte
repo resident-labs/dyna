@@ -28,7 +28,7 @@
   import QuestionCard from "./QuestionCard.svelte";
   import RequestCard from "./RequestCard.svelte";
   import EngineRestartNotice from "./EngineRestartNotice.svelte";
-  import { attemptFailedNote, compactionNote, engineEventsNote, finalTimelineItem, foldInputRuns, ownPost, postDestination, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, segmentDuration, shownTimelineGroups, steerInput, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief, workingLine, type TimelineFeed } from "../timeline.ts";
+  import { attemptFailedNote, compactionNote, deriveTimelineGroups, engineEventsNote, finalTimelineItem, foldInputRuns, ownPost, postDestination, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, steerInput, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief, workFoldLabel, workingLine, type TimelineFeed } from "../timeline.ts";
 
   // With step, the thread reads one worker of a crew: its transcript alone, and nothing that was sent to the crew.
   let { hasRoom, session, step, roomName, store, admin = false, operate, unsent, onunsent, onsettled, onpostlocation, navigate, startingBrief, clock = Date.now }: { hasRoom: (room: RoomID) => boolean; startingBrief?: string; session: string; step?: string; roomName: string; store: RoomStore; admin?: boolean; operate: boolean; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
@@ -53,7 +53,7 @@
   let turns: TranscriptTurn[] = $state([]);
   let clearedAt: string | undefined = $state();
   let pendingBrief = $derived(pendingStartBrief(startingBrief, turns));
-  let expandedTurns: Record<string, boolean> = $state({});
+  let expandedWork: Record<string, boolean> = $state({});
   let before: string | undefined = $state();
   let now = $state(clock());
   // An open turn of a closed session or a failed box never ends, so it does not count as running.
@@ -446,17 +446,27 @@
           {:else}<p class="muted turn-note input-line" title={formatTime(run.from)}><span class="slot"><Icon name="inbox" size={14} /></span><span>{engineEventsNote(run)}</span></p>{/if}
         {/each}
         {#each segments as segment, position (segment.id)}
-          {@const hasWork = (!position && !!turn.olderItems) || segment.items.some(item => item.kind === "tool" || item.kind === "thinking")}
           {#each segment.steers as steer (steer.id)}{@render inputRow(turn, steer.id, steer.id, steerInput(steer))}{/each}
-          <!-- Dyna: Only thoughts and tool calls fold. The agent's text and posts stay in view, in order, around them. -->
-          {#if turn.ended && hasWork}
-            <button class="work-header" aria-expanded={!!expandedTurns[segment.id]} onclick={() => { expandedTurns[segment.id] = !expandedTurns[segment.id]; if (expandedTurns[segment.id] && turn.olderItems) void readContinuation(turn, "older"); }}>{position ? "Continued" : "Worked"} for {formatTimelineDuration(segmentDuration(segments, position, turn.started, turn.ended))}<span class:open={expandedTurns[segment.id]}><Icon name="chevron" size={14} /></span></button>
+          <!-- Dyna: In a finished turn, each work group collapses in place to its own row so narration stays divided by the work it refers to. -->
+          {#if turn.ended && !position && turn.olderItems}
+            <button class="work-header" onclick={() => void readContinuation(turn, "older")}>Earlier work<span><Icon name="chevron" size={14} /></span></button>
           {/if}
-          {#each shownTimelineGroups(segment.items, !!turn.ended && !expandedTurns[segment.id]) as group (group.id)}
+          {#each deriveTimelineGroups(segment.items) as group (group.id)}
             {#if group.kind === "work"}
-              <TranscriptWorkRow items={group.items} finished={store.finished.get(session)} ended={!running(turn)} started={turn.started} {now} activity={store.activityKinds.get(session)} {chunks} {session} onmedia={key => openMedia(key, 0)}
-                onopen={() => { if (turn.olderItems) void readContinuation(turn, "older"); }}
-                onload={async (item, part) => { if (!await fetchPart(turn.id, item.id, part)) throw new Error("Part did not load"); }} />
+              {#if turn.ended}
+                <div class="work-fold">
+                  <button class="work-header" aria-expanded={!!expandedWork[group.id]} onclick={() => { expandedWork[group.id] = !expandedWork[group.id]; if (expandedWork[group.id] && turn.olderItems) void readContinuation(turn, "older"); }}>{workFoldLabel(group.items)}<span class:open={expandedWork[group.id]}><Icon name="chevron" size={14} /></span></button>
+                  {#if expandedWork[group.id]}
+                    <TranscriptWorkRow items={group.items} finished={store.finished.get(session)} ended={!running(turn)} started={turn.started} {now} activity={store.activityKinds.get(session)} {chunks} {session} onmedia={key => openMedia(key, 0)}
+                      onopen={() => { if (turn.olderItems) void readContinuation(turn, "older"); }}
+                      onload={async (item, part) => { if (!await fetchPart(turn.id, item.id, part)) throw new Error("Part did not load"); }} />
+                  {/if}
+                </div>
+              {:else}
+                <TranscriptWorkRow items={group.items} finished={store.finished.get(session)} ended={!running(turn)} started={turn.started} {now} activity={store.activityKinds.get(session)} {chunks} {session} onmedia={key => openMedia(key, 0)}
+                  onopen={() => { if (turn.olderItems) void readContinuation(turn, "older"); }}
+                  onload={async (item, part) => { if (!await fetchPart(turn.id, item.id, part)) throw new Error("Part did not load"); }} />
+              {/if}
             {:else if group.kind === "advice"}
               <AdvisorAnswer item={group.item} {chunks} {session} onload={async (item, part) => { if (!await fetchPart(turn.id, item.id, part)) throw new Error("Part did not load"); }} />
             {:else if group.kind === "posts"}
@@ -555,6 +565,7 @@
   .agent-sender strong { color: var(--text); }
   .agent-sender a:hover { text-decoration: underline; }
   .agent-sender time { flex: none; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .work-fold { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
   /* These rows share the work rows' grid: a 24 px icon slot and a 6 px gap, at their size. */
   .work-header, .turn-note, .failure { min-height: 24px; font-size: 14px; }
   .work-header { display: flex; align-items: center; align-self: flex-start; gap: 4px; color: var(--muted); }
