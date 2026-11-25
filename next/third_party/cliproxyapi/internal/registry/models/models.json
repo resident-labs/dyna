@@ -281,11 +281,11 @@
     {
       "id": "claude-fable-5-2",
       "object": "model",
-      "created": 1794182400,
+      "created": 1794250800,
       "owned_by": "anthropic",
       "type": "claude",
       "display_name": "Claude Fable 5.2",
-      "description": "Claude Fable 5.2, the successor to Claude Fable 5.1.",
+      "description": "Claude Fable 5.2 extends Claude Fable 5 at the same input and output prices, with cache reads at a quarter of the cost, and brings stronger long-running agentic coding, multistep research, and document, spreadsheet, and slide work.",
       "context_length": 1000000,
       "max_completion_tokens": 128000,
       "thinking": {
@@ -1041,7 +1041,7 @@
       "name": "models/gemini-4-argon",
       "description": "Gemini 4 Argon",
       "context_length": 1048576,
-      "max_completion_tokens": 1048576,
+      "max_completion_tokens": 65536,
       "thinking": {
         "min": 128,
         "max": 65535,
@@ -1064,6 +1064,36 @@
       "native_capabilities": {
         "web_search": true
       }
+    },
+    {
+      "id": "gemini-omni-1.2-flash",
+      "object": "model",
+      "owned_by": "google",
+      "type": "gemini",
+      "display_name": "Gemini Omni 1.2 Flash",
+      "name": "models/gemini-omni-1.2-flash",
+      "version": "1.2",
+      "description": "Gemini Omni 1.2 Flash",
+      "context_length": 131072,
+      "max_completion_tokens": 65536,
+      "thinking": {
+        "min": 128,
+        "max": 32768,
+        "dynamic_allowed": true,
+        "levels": [
+          "low",
+          "high"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "supportedOutputModalities": [
+        "text",
+        "video"
+      ]
     }
   ],
   "vertex": [
@@ -1762,7 +1792,7 @@
       "name": "gemini-4-argon",
       "description": "Gemini 4 Argon",
       "context_length": 1048576,
-      "max_completion_tokens": 1048576,
+      "max_completion_tokens": 65536,
       "thinking": {
         "min": 128,
         "max": 65535,
@@ -1785,6 +1815,130 @@
       "native_capabilities": {
         "web_search": true
       }
+    },
+    {
+      "id": "gemini-4-carbon",
+      "object": "model",
+      "owned_by": "google",
+      "type": "gemini",
+      "display_name": "Gemini 4 Carbon",
+      "name": "gemini-4-carbon",
+      "description": "Gemini 4 Carbon",
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "thinking": {
+        "min": 128,
+        "max": 65535,
+        "dynamic_allowed": true,
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "native_capabilities": {
+        "web_search": true
+      }
+    },
+    {
+      "id": "gemini-4-hydrogen",
+      "object": "model",
+      "owned_by": "google",
+      "type": "gemini",
+      "display_name": "Gemini 4 Hydrogen",
+      "name": "gemini-4-hydrogen",
+      "description": "Gemini 4 Hydrogen",
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "native_capabilities": {
+        "web_search": true
+      }
+    },
+    {
+      "id": "gemini-4-neon",
+      "object": "model",
+      "owned_by": "google",
+      "type": "gemini",
+      "display_name": "Gemini 4 Neon",
+      "name": "gemini-4-neon",
+      "description": "Gemini 4 Neon",
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "native_capabilities": {
+        "web_search": true
+      }
+    },
+    {
+      "id": "gemini-omni-1.2-flash",
+      "object": "model",
+      "owned_by": "google",
+      "type": "gemini",
+      "display_name": "Gemini Omni 1.2 Flash",
+      "name": "gemini-omni-1.2-flash",
+      "description": "Gemini Omni 1.2 Flash",
+      "context_length": 131072,
+      "max_completion_tokens": 260640,
+      "thinking": {
+        "min": 128,
+        "max": 32768,
+        "dynamic_allowed": true,
+        "levels": [
+          "low",
+          "high"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "supportedOutputModalities": [
+        "text",
+        "video"
+      ]
     }
   ],
   "gemini-cli": [
@@ -2619,18 +2773,151 @@
       "native_capabilities": {
         "web_search": true
       }
+    },
+    {
+      "id": "gemini-4-argon",
+      "object": "model",
+      "owned_by": "google",
+      "type": "gemini",
+      "display_name": "Gemini 4 Argon",
+      "name": "models/gemini-4-argon",
+      "version": "3.0",
+      "description": "Gemini 4 Argon",
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "thinking": {
+        "min": 128,
+        "max": 65535,
+        "dynamic_allowed": true,
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "native_capabilities": {
+        "web_search": true
+      }
+    },
+    {
+      "id": "gemini-4-carbon",
+      "object": "model",
+      "owned_by": "google",
+      "type": "gemini",
+      "display_name": "Gemini 4 Carbon",
+      "name": "models/gemini-4-carbon",
+      "version": "3.0",
+      "description": "Gemini 4 Carbon",
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "thinking": {
+        "min": 128,
+        "max": 65535,
+        "dynamic_allowed": true,
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "native_capabilities": {
+        "web_search": true
+      }
+    },
+    {
+      "id": "gemini-4-hydrogen",
+      "object": "model",
+      "owned_by": "google",
+      "type": "gemini",
+      "display_name": "Gemini 4 Hydrogen",
+      "name": "models/gemini-4-hydrogen",
+      "version": "3.0",
+      "description": "Gemini 4 Hydrogen",
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "thinking": {
+        "min": 128,
+        "max": 65535,
+        "dynamic_allowed": true,
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "native_capabilities": {
+        "web_search": true
+      }
+    },
+    {
+      "id": "gemini-omni-1.2-flash",
+      "object": "model",
+      "owned_by": "google",
+      "type": "gemini",
+      "display_name": "Gemini Omni 1.2 Flash",
+      "name": "models/gemini-omni-1.2-flash",
+      "version": "1.2",
+      "description": "Gemini Omni 1.2 Flash",
+      "context_length": 131072,
+      "max_completion_tokens": 65536,
+      "thinking": {
+        "min": 128,
+        "max": 32768,
+        "dynamic_allowed": true,
+        "levels": [
+          "low",
+          "high"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "supportedOutputModalities": [
+        "text",
+        "video"
+      ]
     }
   ],
   "codex-free": [
     {
-      "id": "gpt-6-luna",
+      "id": "gpt-6-chat-thinking",
       "object": "model",
       "created": 1790035200,
       "owned_by": "openai",
       "type": "openai",
-      "display_name": "GPT 6.0 Luna",
+      "display_name": "GPT-6 Chat Thinking",
       "version": "gpt-6.0",
-      "description": "GPT-6 Luna Codex model.",
+      "description": "GPT-6 Chat Thinking for the paid CCA experiment.",
       "context_length": 272000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
@@ -2658,15 +2945,15 @@
       "support_configuration_update": true
     },
     {
-      "id": "gpt-6.1-terra",
+      "id": "gpt-6-luna",
       "object": "model",
-      "created": 1792972800,
+      "created": 1790035200,
       "owned_by": "openai",
       "type": "openai",
-      "display_name": "GPT 6.1 Terra",
+      "display_name": "GPT 6.0 Luna",
       "version": "gpt-6.0",
-      "description": "A fast, efficient model for visual reasoning, precise computer use, and clear, natural writing.",
-      "context_length": 500000,
+      "description": "GPT-6 Luna Codex model.",
+      "context_length": 272000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -2804,13 +3091,48 @@
     {
       "id": "gpt-6.2-astra",
       "object": "model",
-      "created": 1794873600,
+      "created": 1794942000,
       "owned_by": "openai",
       "type": "openai",
       "display_name": "GPT 6.2 Astra",
       "version": "gpt-6.2",
-      "description": "GPT-6.2 Astra is our most intelligent model yet, with state-of-the-art performance in computer use, browsing, software engineering, science, and professional work.",
+      "description": "GPT-6.2 Astra is our most capable model for your hardest projects, from start to finish.",
       "context_length": 272000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "native_capabilities": {
+        "web_search": true
+      },
+      "support_configuration_update": true
+    },
+    {
+      "id": "gpt-6.2-sol",
+      "object": "model",
+      "created": 1794942000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6.2 Sol",
+      "version": "gpt-6.2",
+      "description": "GPT-6.2 Astra is our go-to model for everyday work, from coding to powering agents at scale.",
+      "context_length": 500000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -2880,41 +3202,6 @@
       "display_name": "GPT 6.0 Sol",
       "version": "gpt-6.0",
       "description": "GPT-6 Sol Codex model.",
-      "context_length": 272000,
-      "max_completion_tokens": 128000,
-      "supported_parameters": [
-        "tools"
-      ],
-      "thinking": {
-        "levels": [
-          "low",
-          "medium",
-          "high",
-          "xhigh",
-          "max"
-        ]
-      },
-      "supportedInputModalities": [
-        "text",
-        "image"
-      ],
-      "supportedOutputModalities": [
-        "text"
-      ],
-      "native_capabilities": {
-        "web_search": true
-      },
-      "support_configuration_update": true
-    },
-    {
-      "id": "gpt-6.2-sol",
-      "object": "model",
-      "created": 1794873600,
-      "owned_by": "openai",
-      "type": "openai",
-      "display_name": "GPT 6.2 Sol",
-      "version": "gpt-6.2",
-      "description": "Latest workhorse model for coding and everyday work.",
       "context_length": 272000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
@@ -3020,6 +3307,41 @@
       "display_name": "GPT 6.0 Luna",
       "version": "gpt-6.0",
       "description": "GPT-6 Luna Codex model.",
+      "context_length": 272000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "native_capabilities": {
+        "web_search": true
+      },
+      "support_configuration_update": true
+    },
+    {
+      "id": "gpt-6-chat-thinking",
+      "object": "model",
+      "created": 1790035200,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT-6 Chat Thinking",
+      "version": "gpt-6.0",
+      "description": "GPT-6 Chat Thinking for the paid CCA experiment.",
       "context_length": 272000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
@@ -3192,13 +3514,48 @@
     {
       "id": "gpt-6.2-astra",
       "object": "model",
-      "created": 1794873600,
+      "created": 1794942000,
       "owned_by": "openai",
       "type": "openai",
       "display_name": "GPT 6.2 Astra",
       "version": "gpt-6.2",
-      "description": "GPT-6.2 Astra is our most intelligent model yet, with state-of-the-art performance in computer use, browsing, software engineering, science, and professional work.",
+      "description": "GPT-6.2 Astra is our most capable model for your hardest projects, from start to finish.",
       "context_length": 272000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "native_capabilities": {
+        "web_search": true
+      },
+      "support_configuration_update": true
+    },
+    {
+      "id": "gpt-6.2-sol",
+      "object": "model",
+      "created": 1794942000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6.2 Sol",
+      "version": "gpt-6.2",
+      "description": "GPT-6.2 Astra is our go-to model for everyday work, from coding to powering agents at scale.",
+      "context_length": 500000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -3268,41 +3625,6 @@
       "display_name": "GPT 6.0 Sol",
       "version": "gpt-6.0",
       "description": "GPT-6 Sol Codex model.",
-      "context_length": 272000,
-      "max_completion_tokens": 128000,
-      "supported_parameters": [
-        "tools"
-      ],
-      "thinking": {
-        "levels": [
-          "low",
-          "medium",
-          "high",
-          "xhigh",
-          "max"
-        ]
-      },
-      "supportedInputModalities": [
-        "text",
-        "image"
-      ],
-      "supportedOutputModalities": [
-        "text"
-      ],
-      "native_capabilities": {
-        "web_search": true
-      },
-      "support_configuration_update": true
-    },
-    {
-      "id": "gpt-6.2-sol",
-      "object": "model",
-      "created": 1794873600,
-      "owned_by": "openai",
-      "type": "openai",
-      "display_name": "GPT 6.2 Sol",
-      "version": "gpt-6.2",
-      "description": "Latest workhorse model for coding and everyday work.",
       "context_length": 272000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
@@ -3408,6 +3730,41 @@
       "display_name": "GPT 6.0 Luna",
       "version": "gpt-6.0",
       "description": "GPT-6 Luna Codex model.",
+      "context_length": 272000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "native_capabilities": {
+        "web_search": true
+      },
+      "support_configuration_update": true
+    },
+    {
+      "id": "gpt-6-chat-thinking",
+      "object": "model",
+      "created": 1790035200,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT-6 Chat Thinking",
+      "version": "gpt-6.0",
+      "description": "GPT-6 Chat Thinking for the paid CCA experiment.",
       "context_length": 272000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
@@ -3580,13 +3937,48 @@
     {
       "id": "gpt-6.2-astra",
       "object": "model",
-      "created": 1794873600,
+      "created": 1794942000,
       "owned_by": "openai",
       "type": "openai",
       "display_name": "GPT 6.2 Astra",
       "version": "gpt-6.2",
-      "description": "GPT-6.2 Astra is our most intelligent model yet, with state-of-the-art performance in computer use, browsing, software engineering, science, and professional work.",
+      "description": "GPT-6.2 Astra is our most capable model for your hardest projects, from start to finish.",
       "context_length": 272000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "native_capabilities": {
+        "web_search": true
+      },
+      "support_configuration_update": true
+    },
+    {
+      "id": "gpt-6.2-sol",
+      "object": "model",
+      "created": 1794942000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6.2 Sol",
+      "version": "gpt-6.2",
+      "description": "GPT-6.2 Astra is our go-to model for everyday work, from coding to powering agents at scale.",
+      "context_length": 500000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -3656,41 +4048,6 @@
       "display_name": "GPT 6.0 Sol",
       "version": "gpt-6.0",
       "description": "GPT-6 Sol Codex model.",
-      "context_length": 272000,
-      "max_completion_tokens": 128000,
-      "supported_parameters": [
-        "tools"
-      ],
-      "thinking": {
-        "levels": [
-          "low",
-          "medium",
-          "high",
-          "xhigh",
-          "max"
-        ]
-      },
-      "supportedInputModalities": [
-        "text",
-        "image"
-      ],
-      "supportedOutputModalities": [
-        "text"
-      ],
-      "native_capabilities": {
-        "web_search": true
-      },
-      "support_configuration_update": true
-    },
-    {
-      "id": "gpt-6.2-sol",
-      "object": "model",
-      "created": 1794873600,
-      "owned_by": "openai",
-      "type": "openai",
-      "display_name": "GPT 6.2 Sol",
-      "version": "gpt-6.2",
-      "description": "Latest workhorse model for coding and everyday work.",
       "context_length": 272000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
@@ -3796,6 +4153,41 @@
       "display_name": "GPT 6.0 Luna",
       "version": "gpt-6.0",
       "description": "GPT-6 Luna Codex model.",
+      "context_length": 272000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "native_capabilities": {
+        "web_search": true
+      },
+      "support_configuration_update": true
+    },
+    {
+      "id": "gpt-6-chat-thinking",
+      "object": "model",
+      "created": 1790035200,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT-6 Chat Thinking",
+      "version": "gpt-6.0",
+      "description": "GPT-6 Chat Thinking for the paid CCA experiment.",
       "context_length": 272000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
@@ -5132,6 +5524,40 @@
     }
   ],
   "meta": [
+    {
+      "id": "muse-ember-1.0",
+      "object": "model",
+      "created": 1794182400,
+      "owned_by": "meta",
+      "type": "meta",
+      "display_name": "Muse Ember 1.0",
+      "name": "muse-ember-1.0",
+      "description": "Meta's smallest and most efficient model designed for complex reasoning execution, tool calls, coding subtasks, routing, extraction, and long document parsing.",
+      "context_length": 1048576,
+      "max_completion_tokens": 524288,
+      "thinking": {
+        "levels": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image",
+        "video",
+        "audio"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "native_capabilities": {
+        "web_search": true
+      }
+    },
     {
       "id": "muse-wonder-1.0",
       "object": "model",
