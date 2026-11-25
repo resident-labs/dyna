@@ -131,14 +131,8 @@ export function foldInputRuns(inputs: TranscriptInput[]): InputRun[] {
 }
 export const engineEventsNote = ({ count, from, to }: { count: number; from: string; to: string }): string => `${count} engine events, ${formatTime(from)} to ${formatTime(to)}`;
 
-// Dyna: A segment runs from its steer to the next one or the turn's end. The first keeps the whole turn's time.
-export function segmentDuration(segments: TimelineSegment[], index: number, started: string, ended: string): number {
-  if (!index) return Date.parse(ended) - Date.parse(started);
-  return Date.parse(segments[index + 1]?.steers[0]?.at ?? ended) - Date.parse(segments[index].steers.at(-1)!.at);
-}
-
 // Dyna: Transcript items already arrive in timeline order, and posts can belong to a tool.
-// An advisor call that has its result is followed by the advisor's answer as a message, which stays in view when the work folds.
+// An advisor call that has its result is followed by the advisor's answer as a message, which stays in view between work groups.
 export type TimelineGroup = { kind: "work"; id: string; items: TranscriptItem[] } | { kind: "item" | "posts" | "advice"; id: string; item: TranscriptItem };
 export function deriveTimelineGroups(items: TranscriptItem[]): TimelineGroup[] {
   const result: TimelineGroup[] = [];
@@ -172,11 +166,19 @@ export function withFinished(items: TranscriptItem[], finished?: ReadonlyMap<str
   });
 }
 
-// Dyna: A closed fold hides thoughts and tool calls only. Text the agent wrote to the reader, and its posts, are never
-// work: they stay in the thread in order, and opening the fold puts the work back between them.
-export function shownTimelineGroups(items: TranscriptItem[], folded: boolean): TimelineGroup[] {
-  const groups = deriveTimelineGroups(items);
-  return folded ? groups.filter(group => group.kind !== "work") : groups;
+// Dyna: In a finished turn, each work group collapses in place to its tool count (or thought count when there are no tools)
+// and its wall-clock span, so narration texts stay in view in their real order around the work they refer to.
+export function workFoldLabel(items: TranscriptItem[]): string {
+  const tools = items.filter(item => item.kind === "tool").length;
+  const label = tools ? `${tools} ${tools === 1 ? "tool call" : "tool calls"}` : `${items.length} ${items.length === 1 ? "thought" : "thoughts"}`;
+  let start = Infinity, end = -Infinity;
+  for (const item of items) {
+    const at = Date.parse(item.at);
+    if (Number.isFinite(at)) { start = Math.min(start, at); end = Math.max(end, at); }
+    const done = item.ended ? Date.parse(item.ended) : NaN;
+    if (Number.isFinite(done)) end = Math.max(end, done);
+  }
+  return Number.isFinite(start) && end > start ? `${label} · ${formatTimelineDuration(end - start)}` : label;
 }
 
 // Dyna: The transcript holds a session's own posts: nested under their tool call, or sent from a shell at the end of the items.
