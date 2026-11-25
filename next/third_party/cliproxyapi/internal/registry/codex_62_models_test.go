@@ -21,9 +21,12 @@ func TestEmbeddedCodex62Models(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tier := range []string{"codex-team", "codex-plus", "codex-pro", "codex-free"} {
-		for _, model := range []struct{ id, name string }{
-			{"gpt-6.2-sol", "GPT 6.2 Sol"},
-			{"gpt-6.2-astra", "GPT 6.2 Astra"},
+		for _, model := range []struct {
+			id, name      string
+			contextLength int
+		}{
+			{"gpt-6.2-sol", "GPT 6.2 Sol", 500000},
+			{"gpt-6.2-astra", "GPT 6.2 Astra", 272000},
 		} {
 			count := 0
 			for _, got := range catalogs[tier] {
@@ -31,7 +34,7 @@ func TestEmbeddedCodex62Models(t *testing.T) {
 					continue
 				}
 				count++
-				if got.DisplayName != model.name || got.Created != 1794873600 || got.ContextLength != 272000 || !slices.Contains(got.Input, "image") || !slices.Equal(got.Thinking.Levels, []string{"low", "medium", "high", "xhigh", "max"}) {
+				if got.DisplayName != model.name || got.Created != 1794942000 || got.ContextLength != model.contextLength || !slices.Contains(got.Input, "image") || !slices.Equal(got.Thinking.Levels, []string{"low", "medium", "high", "xhigh", "max"}) {
 					t.Errorf("%s: unexpected metadata: %+v", tier, got)
 				}
 			}
