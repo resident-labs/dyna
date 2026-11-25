@@ -213,8 +213,14 @@ func piInstall(ctx context.Context, dir, source string) error {
 	if err := loader.ReloadWith(ctx); err != nil {
 		return fmt.Errorf("install failed: %w", err)
 	}
+	exts := loader.GetExtensions()
+	for _, warning := range exts.Warnings {
+		if warning.Path == source && strings.HasPrefix(warning.Warning, "failed to install") {
+			return fmt.Errorf("install failed: %s", warning.Warning)
+		}
+	}
 	var failures []string
-	for _, failed := range loader.GetExtensions().Errors {
+	for _, failed := range exts.Errors {
 		failures = append(failures, failed.Error)
 	}
 	if len(failures) > 0 {

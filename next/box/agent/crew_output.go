@@ -12,8 +12,6 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-const structuredOutputAnyResult = `{"type":"object","properties":{"result":{}},"required":["result"],"additionalProperties":false}`
-
 func structuredOutput(schema *jsonschema.Schema) *extension.ToolDefinition {
 	// Providers don't accept the full JSON Schema dialect that workflow scripts can use,
 	// so keep the wrapper minimal while hinting a single top-level type when present.
@@ -38,8 +36,34 @@ func structuredOutput(schema *jsonschema.Schema) *extension.ToolDefinition {
 		Exposure:    extension.ToolExposureModelOnly, // a nested call can't end the worker's turn
 		Description: "Return your final answer in result, matching the workflow step's schema. A valid call ends the step; if the call reports a validation error, fix it and call again.",
 		Parameters:  json.RawMessage(`{"type":"object","properties":{"result":` + resultType + `},"required":["result"],"additionalProperties":false}`),
-		// Let PiG pass a string-encoded JSON result through to Execute so it can unwrap and validate against the step schema.
-		ValidationParameters: json.RawMessage(structuredOutputAnyResult),
+		// Unwrap a string-encoded JSON result before PiG validates against Parameters.
+		PrepareArguments: func(raw json.RawMessage) (json.RawMessage, error) {
+			var obj map[string]json.RawMessage
+			if json.Unmarshal(raw, &obj) != nil {
+				return raw, nil
+			}
+			res, ok := obj["result"]
+			if !ok {
+				return raw, nil
+			}
+			var encoded string
+			if json.Unmarshal(res, &encoded) != nil {
+				return raw, nil
+			}
+			if _, err := validateResult(schema, res); err == nil {
+				return raw, nil
+			}
+			decoded, err := validateResult(schema, []byte(encoded))
+			if err != nil {
+				return raw, nil
+			}
+			obj["result"] = decoded
+			out, err := json.Marshal(obj)
+			if err != nil {
+				return raw, nil
+			}
+			return out, nil
+		},
 		Execute: func(_ context.Context, _ string, args json.RawMessage, _ extension.AgentToolUpdateCallback) (extension.AgentToolResult, error) {
 			var input struct {
 				Result json.RawMessage `json:"result"`
