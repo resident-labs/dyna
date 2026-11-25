@@ -55,6 +55,9 @@ type fakeDriver struct {
 	startErr      error
 	listErr       error
 	listCtx       context.Context
+	listCalls     int
+	hangList      bool
+	onList        func(context.Context)
 	reclaimed     bool
 	gate          chan struct{} // when set, a build waits for it to close
 	buildMu       sync.Mutex    // a build-ahead runs beside placement
@@ -123,6 +126,14 @@ func (d *fakeDriver) StartRunner(_ context.Context, s box.RunnerSpec) error {
 }
 func (d *fakeDriver) ListRunners(ctx context.Context, reclaim bool, _ []contract.RepoName) ([]box.Runner, EgressState, error) {
 	d.listCtx, d.reclaimed = ctx, reclaim
+	d.listCalls++
+	if d.onList != nil {
+		d.onList(ctx)
+	}
+	if d.hangList {
+		<-ctx.Done()
+		return nil, EgressAbsent, ctx.Err()
+	}
 	return slices.Clone(d.runners), d.egress, d.listErr
 }
 func (d *fakeDriver) RemoveRunner(_ context.Context, name string) error {
@@ -610,6 +621,73 @@ func TestTickGivesUpOnAHostThatHangs(t *testing.T) {
 	defer f.stop()
 	if _, bounded := f.drivers["pve"].listCtx.Deadline(); !bounded {
 		t.Fatal("a tick has no time limit")
+	}
+}
+
+// One hung host cannot stall the pool: surveys run concurrently under SurveyLimit, so Tick renews the lease and scale places
+// runners on healthy hosts within a short bound.
+func TestHungHostDoesNotStallLeaseOrScaling(t *testing.T) {
+	f := newFixture(2)
+	defer f.stop()
+	f.pool.SurveyLimit = 50 * time.Millisecond
+	rendezvous := make(chan struct{})
+	overlapped := make(chan struct{}, 1)
+	hung1 := f.addHost(readyHost("hung1", 64*box.GiB))
+	hung1.hangList = true
+	hung1.onList = func(ctx context.Context) {
+		select {
+		case rendezvous <- struct{}{}:
+			overlapped <- struct{}{}
+		case <-ctx.Done():
+		}
+	}
+	hung2 := f.addHost(readyHost("hung2", 64*box.GiB))
+	hung2.hangList = true
+	hung2.onList = func(ctx context.Context) {
+		select {
+		case <-rendezvous:
+		case <-ctx.Done():
+		}
+	}
+
+	tickStart := time.Now()
+	err := f.pool.Tick(context.Background(), &f.group)
+	tickElapsed := time.Since(tickStart)
+	if err == nil || !strings.Contains(err.Error(), "hung1") || !strings.Contains(err.Error(), "hung2") || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Tick error = %v, want deadline errors for hung1 and hung2", err)
+	}
+	if tickElapsed > 500*time.Millisecond {
+		t.Fatalf("Tick took %v, want bounded by SurveyLimit", tickElapsed)
+	}
+	select {
+	case <-overlapped:
+	default:
+		t.Fatal("hung1 and hung2 were not surveyed concurrently")
+	}
+	if len(f.api.leases) != 1 || !f.api.leases[0].Equal(f.now.Add(leaseFor)) {
+		t.Fatalf("Tick did not renew lease: %v", f.api.leases)
+	}
+	hung1.onList, hung2.onList = nil, nil
+
+	// Wait for pve's build-ahead before scaling.
+	for {
+		f.pool.mu.Lock()
+		busy := len(f.pool.building) > 0
+		f.pool.mu.Unlock()
+		if !busy {
+			break
+		}
+		runtime.Gosched()
+	}
+
+	scaleStart := time.Now()
+	capacity := f.scale(1)
+	scaleElapsed := time.Since(scaleStart)
+	if scaleElapsed > 500*time.Millisecond {
+		t.Fatalf("scale took %v, want bounded by SurveyLimit", scaleElapsed)
+	}
+	if capacity < 1 || len(f.drivers["pve"].runners) != 1 {
+		t.Fatalf("scale failed on healthy host: capacity=%d, pve runners=%d", capacity, len(f.drivers["pve"].runners))
 	}
 }
 
