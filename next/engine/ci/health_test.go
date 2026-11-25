@@ -43,29 +43,31 @@ func TestDegradedSchedulingHealthStopsNewRunners(t *testing.T) {
 	f.stop()
 }
 
-// A degraded host with no known runners is skipped completely, so a hung degraded host does not even cost SurveyLimit.
-func TestDegradedHungHostWithNoRunnersIsSkipped(t *testing.T) {
+// A degraded host with no known runners is skipped during scale, while Tick still surveys it (bounded by SurveyLimit) so
+// stopped runners and proxies left behind after a restart are swept.
+func TestDegradedHostSkippedInScaleButSweptInTick(t *testing.T) {
 	f := newFixture(2)
 	defer f.stop()
+	size, _ := box.Size(large)
 	desktop := f.addHost(readyHost("desktop", 64*box.GiB))
-	desktop.hangList = true
+	desktop.runners = []box.Runner{{Name: "dyna-ci-desktop-dead", Repo: repo, ID: 9, Slot: 0, Size: size, Running: false}}
+	desktop.egress = EgressStale
 	f.pool.Health = func(name contract.HostName) contract.HostHealth {
 		if name == "desktop" {
 			return contract.HostDegraded
 		}
 		return contract.HostHealthy
 	}
-	f.tick(t)
-	if desktop.listCalls != 0 {
-		t.Fatalf("degraded host was surveyed %d times", desktop.listCalls)
-	}
-	if len(f.api.leases) != 1 {
-		t.Fatalf("leases %v", f.api.leases)
-	}
+	// scale skips desktop (empty p.placed) and places on pve.
 	if capacity := f.scale(1); capacity < 1 || len(f.drivers["pve"].runners) != 1 {
 		t.Fatalf("capacity=%d, pve runners=%d", capacity, len(f.drivers["pve"].runners))
 	}
 	if desktop.listCalls != 0 {
 		t.Fatalf("degraded host was surveyed %d times during scale", desktop.listCalls)
+	}
+	// Tick still surveys desktop and sweeps its stopped runner and stale proxy.
+	f.tick(t)
+	if desktop.listCalls != 1 || len(desktop.runners) != 0 || desktop.egress != EgressAbsent {
+		t.Fatalf("Tick did not sweep degraded host: listCalls=%d runners=%+v egress=%v", desktop.listCalls, desktop.runners, desktop.egress)
 	}
 }

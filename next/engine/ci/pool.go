@@ -32,10 +32,8 @@ const (
 	retryAfter = 5 * time.Minute
 	// surveyLimit bounds one host's survey, so a hung host cannot stall the pool or lease renewal.
 	surveyLimit = 60 * time.Second
-	// scaleLimit bounds one pass holding p.mu; per-host surveys are bounded by surveyLimit.
-	scaleLimit = 5 * time.Minute
-	// buildLimit bounds one host's background build-ahead, which builds the shared image and each room's layer.
-	buildLimit = 20 * time.Minute
+	// scaleLimit is one pass, and leaves room for the first image build on a host.
+	scaleLimit = 20 * time.Minute
 )
 
 // Sizes are the runner sizes a workflow can ask for, one scale set each. A session's agent size is too small for a job.
@@ -215,7 +213,7 @@ func (p *Pool) Tick(ctx context.Context, group *sync.WaitGroup) error {
 	buildCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, scaleLimit)
 	defer cancel()
-	view, err := p.survey(ctx)
+	view, err := p.survey(ctx, false)
 	if err != nil {
 		return err
 	}
@@ -356,7 +354,7 @@ func (p *Pool) scale(ctx context.Context, key scaleSet, assigned int) int {
 	// The lock is held across SSH, so a host that hangs cannot stall the others for long.
 	ctx, cancel := context.WithTimeout(ctx, scaleLimit)
 	defer cancel()
-	view, err := p.survey(ctx)
+	view, err := p.survey(ctx, true)
 	if err != nil {
 		log.Printf("ci pool: %v", err)
 		return 0
@@ -395,7 +393,7 @@ type surveyed struct {
 	egress  EgressState
 }
 
-func (p *Pool) survey(ctx context.Context) (survey, error) {
+func (p *Pool) survey(ctx context.Context, skipDegraded bool) (survey, error) {
 	s := survey{repos: make(map[contract.RepoName]store.CIRepo), hosts: make(map[contract.HostName]*surveyed), nodes: make(map[string]int)}
 	repos, err := p.Store.CIRepos(ctx)
 	if err != nil {
@@ -465,6 +463,7 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 	p.shown.Unlock()
 
 	var toProbe []box.Host
+	var unanswered []contract.HostName
 	for _, host := range hosts {
 		if host.Pool != "" {
 			s.nodes[host.Pool]++
@@ -475,7 +474,8 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 		if host.State != box.HostReady {
 			continue
 		}
-		if host.Health == contract.HostDegraded && !hasPlaced[host.Name] {
+		if skipDegraded && host.Health == contract.HostDegraded && !hasPlaced[host.Name] {
+			unanswered = append(unanswered, host.Name)
 			continue
 		}
 		if !host.CI && p.ciClean[host.Name] && !reclaim {
@@ -519,7 +519,6 @@ func (p *Pool) survey(ctx context.Context) (survey, error) {
 	}
 	wg.Wait()
 
-	var unanswered []contract.HostName
 	for i, host := range toProbe {
 		r := results[i]
 		if r.err != nil {
@@ -918,7 +917,7 @@ func (p *Pool) buildAhead(ctx context.Context, host *surveyed, layers map[contra
 	group.Add(1)
 	go func() {
 		defer group.Done()
-		buildCtx, cancel := context.WithTimeout(ctx, buildLimit)
+		buildCtx, cancel := context.WithTimeout(ctx, scaleLimit)
 		defer cancel()
 		results := make([]built, len(want))
 		errs := make([]error, len(want))
