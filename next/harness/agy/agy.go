@@ -25,6 +25,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness"
 	"github.com/resident-labs/dyna/harness/agy/acp"
+	"github.com/resident-labs/dyna/harness/agy/handoff"
 )
 
 // MCPServer is a tool server given to agy. With a URL it is sent as an HTTP server (agy accepts one although it
@@ -53,6 +54,10 @@ type Config struct {
 	New                             bool          // a fresh conversation instead of resuming the stored one
 	CancelTimeout                   time.Duration // wait for the prompt's response after session/cancel, then kill; default 15s as T3 (ARUN:92)
 	Notice                          func(string)  // out-of-turn warnings
+	// Handoff is the earlier conversation as handoff.Build renders it. It starts a fresh agy session (New, or one agy could not resume)
+	// and rides once on that session's first prompt (handoff.Prompt, T3 ContextHandoffDelivery.ts withInlineContext). It is ignored when the
+	// stored session resumes. It is kept in agy-session.json until agy has accepted the prompt, so a restart delivers it too.
+	Handoff string
 }
 
 // Harness drives one agy process and its conversation.
@@ -75,6 +80,8 @@ type Harness struct {
 	entries int64
 
 	mu         sync.Mutex
+	handoff    string // the handoff the next prompt carries, until agy has accepted a prompt that did
+	supplied   string // Config.Handoff, kept for a resume that fails, until a prompt carried a handoff
 	p          *process
 	sessionID  string
 	turn       *turn
@@ -176,7 +183,29 @@ func Open(ctx context.Context, c Config) (*Harness, error) {
 	}
 	h := &Harness{cfg: c, done: make(chan struct{}), modelText: c.ModelInstructions, nonce: time.Now().UnixNano(),
 		promptInactivity: defaultPromptInactivity, holdMax: defaultHoldMax, watchEvery: defaultWatchEvery}
-	if !c.New {
+	// A handoff waits in the session file until agy accepted the prompt that carried it. One a previous run left there is delivered
+	// by this one, unless the mirror says it was: a crash between the two, which must never resend it.
+	fresh, pending := c.New, ""
+	if meta.Mirror != "" {
+		mirror := filepath.Join(c.SessionDir, meta.Mirror)
+		switch {
+		case handoffDelivered(mirror):
+			// The one that was delivered, so its session is the conversation and a New asked for with it is a restart of the same boot.
+			fresh = fresh && c.Handoff == ""
+		case meta.Handoff != "":
+			pending = meta.Handoff
+			// A fresh session a previous run opened for the handoff, which took no prompt, is used rather than another opened.
+			fresh = fresh && !mirrorEmpty(mirror)
+		}
+	}
+	h.handoff = pending
+	if c.Handoff != "" && (fresh || (pending != "" && c.New)) {
+		h.handoff = c.Handoff
+	}
+	if !handoffDelivered(filepath.Join(c.SessionDir, meta.Mirror)) {
+		h.supplied = c.Handoff
+	}
+	if !fresh {
 		h.sessionID, h.mirror = meta.SessionID, filepath.Join(c.SessionDir, meta.Mirror)
 	}
 	if h.sessionID == "" || meta.Mirror == "" {
@@ -412,7 +441,41 @@ func (h *Harness) setup(ctx context.Context, p *process) error {
 			err = h.openSession(ctx, p, h.sessionID)
 		}
 	}
+	if errors.Is(err, errResumeRejected) {
+		return h.resumeFailed(ctx, p)
+	}
 	return err
+}
+
+// errResumeRejected is agy refusing to resume the stored conversation: it has no such session any more, or cannot resume at all.
+// Neither a process that exited nor a sign-in error is this.
+var errResumeRejected = errors.New("agy could not resume its conversation")
+
+// resumeFailed starts a fresh session in place of the one agy cannot resume, and hands the earlier conversation to it, built from
+// this harness's own mirror files, as T3 does for a thread its provider cannot resume natively (portable-handoffs.md). A handoff the
+// caller supplied is the one used.
+func (h *Harness) resumeFailed(ctx context.Context, p *process) error {
+	carried, err := h.mirrorHandoff()
+	if err != nil {
+		return err
+	}
+	h.notice("agy's saved conversation could not be resumed; a new one is opened and the earlier conversation is handed to it")
+	return h.newSession(ctx, p, carried)
+}
+
+// mirrorHandoff is the handoff a replacement session starts from: one still waiting to be delivered, else the conversation as the
+// mirror files record it.
+func (h *Harness) mirrorHandoff() (string, error) {
+	h.mu.Lock()
+	pending, supplied := h.handoff, h.supplied
+	h.mu.Unlock()
+	if pending != "" {
+		return pending, nil
+	}
+	if supplied != "" {
+		return supplied, nil
+	}
+	return handoff.Build(h.mirrorFiles(), 0)
 }
 
 // authenticate signs in with oauth-personal, the only method Dyna uses. An agent with no sign-in is ASUP:167-177.
@@ -506,11 +569,16 @@ func (h *Harness) openSession(ctx context.Context, p *process, resume string) er
 	id := resume
 	if resume != "" {
 		if !p.resume {
-			return errors.New("agy does not advertise session/resume, so its conversation cannot be resumed")
+			return fmt.Errorf("%w: agy does not advertise session/resume", errResumeRejected)
 		}
 		params["sessionId"] = resume
 		if err := p.client.Call(ctx, "session/resume", params, &res); err != nil {
-			return h.exitError("session/resume", err, p)
+			failed := h.exitError("session/resume", err, p)
+			var rpc *acp.Error
+			if errors.As(err, &rpc) && !errors.Is(failed, ErrSignInRequired) {
+				return fmt.Errorf("%w: %w", errResumeRejected, failed)
+			}
+			return failed
 		}
 	} else {
 		if err := p.client.Call(ctx, "session/new", params, &res); err != nil {
@@ -533,7 +601,10 @@ func (h *Harness) openSession(ctx context.Context, p *process, resume string) er
 	h.fm.Lock()
 	h.mirror = mirror
 	h.fm.Unlock()
-	if err := writeMeta(h.cfg.SessionDir, sessionMeta{SessionID: id, Mirror: filepath.Base(mirror)}); err != nil {
+	h.mu.Lock()
+	pending := h.handoff
+	h.mu.Unlock()
+	if err := writeMeta(h.cfg.SessionDir, sessionMeta{SessionID: id, Mirror: filepath.Base(mirror), Handoff: pending}); err != nil {
 		return err
 	}
 	// Dyna answers permissions itself, as T3's full-access mode does, which keeps agy in `default` (T3 antigravitySessionMode,

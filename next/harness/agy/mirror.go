@@ -2,6 +2,7 @@ package agy
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -29,6 +31,8 @@ var mirrorName = regexp.MustCompile(`^agy-(\d+)\.jsonl$`)
 type sessionMeta struct {
 	SessionID string `json:"sessionId"`
 	Mirror    string `json:"mirror"`
+	// Handoff is the earlier conversation a fresh session has yet to be given: it stays until agy has accepted the prompt that carried it.
+	Handoff string `json:"handoff,omitempty"`
 }
 
 func readMeta(dir string) (sessionMeta, error) {
@@ -71,6 +75,62 @@ func nextMirror(dir string) (string, error) {
 	return filepath.Join(dir, fmt.Sprintf("agy-%d.jsonl", highest+1)), nil
 }
 
+// mirrorFiles is every mirror file in the session directory, oldest first: the conversations this harness has had.
+func (h *Harness) mirrorFiles() []string {
+	entries, _ := os.ReadDir(h.cfg.SessionDir)
+	type numbered struct {
+		n    int
+		path string
+	}
+	var found []numbered
+	for _, entry := range entries {
+		if m := mirrorName.FindStringSubmatch(entry.Name()); m != nil {
+			n, _ := strconv.Atoi(m[1])
+			found = append(found, numbered{n, filepath.Join(h.cfg.SessionDir, entry.Name())})
+		}
+	}
+	slices.SortFunc(found, func(a, b numbered) int { return a.n - b.n })
+	paths := make([]string, len(found))
+	for i, f := range found {
+		paths[i] = f.path
+	}
+	return paths
+}
+
+// mirrorEmpty reports a mirror that has no entry yet.
+func mirrorEmpty(path string) bool {
+	info, err := os.Stat(path)
+	return err != nil || info.Size() == 0
+}
+
+// handoffDelivered reports whether the mirror records a prompt that carried the handoff, which agy accepted.
+func handoffDelivered(path string) bool {
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	reader := bufio.NewReaderSize(file, 1<<20)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if bytes.Contains(line, []byte(`"handoff":true`)) {
+			var entry struct {
+				Type    string
+				Message struct {
+					Role    string
+					Handoff bool
+				}
+			}
+			if json.Unmarshal(line, &entry) == nil && entry.Type == "message" && entry.Message.Role == "user" && entry.Message.Handoff {
+				return true
+			}
+		}
+		if err != nil {
+			return false
+		}
+	}
+}
+
 // record appends one Pi message entry to the mirror.
 func (h *Harness) record(message map[string]any) error {
 	h.fm.Lock()
@@ -102,13 +162,18 @@ func (h *Harness) recordEnding(reason, message string) {
 	}
 }
 
-func (h *Harness) recordInputs(inputs []contract.TurnInput) error {
-	for _, input := range inputs {
-		err := h.record(map[string]any{
+// recordInputs writes what agy was sent. The first input is marked when its prompt carried the handoff: the text recorded is the user's own.
+func (h *Harness) recordInputs(inputs []contract.TurnInput, handoff bool) error {
+	for i, input := range inputs {
+		entry := map[string]any{
 			"role":       "user",
 			"deliveryId": strconv.FormatInt(int64(input.Delivery), 10),
 			"content":    []map[string]any{{"type": "text", "text": input.Text}},
-		})
+		}
+		if handoff && i == 0 {
+			entry["handoff"] = true
+		}
+		err := h.record(entry)
 		if err != nil {
 			return err
 		}
@@ -169,4 +234,19 @@ func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, e
 	}
 	_, found := d.seen[strconv.FormatInt(int64(id), 10)]
 	return found, nil
+}
+
+// handoffAccepted forgets the handoff once agy has taken the prompt that carried it, and records that in the session file.
+func (h *Harness) handoffAccepted() {
+	h.mu.Lock()
+	h.handoff = ""
+	h.supplied = ""
+	id := h.sessionID
+	h.mu.Unlock()
+	h.fm.Lock()
+	mirror := h.mirror
+	h.fm.Unlock()
+	if err := writeMeta(h.cfg.SessionDir, sessionMeta{SessionID: id, Mirror: filepath.Base(mirror)}); err != nil {
+		log.Printf("agy: record the handoff as delivered: %v", err)
+	}
 }

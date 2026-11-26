@@ -16,6 +16,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness"
 	"github.com/resident-labs/dyna/harness/agy/acp"
+	"github.com/resident-labs/dyna/harness/agy/handoff"
 	"github.com/resident-labs/dyna/harness/agy/sessiondb"
 )
 
@@ -64,6 +65,7 @@ type turn struct {
 	committed  map[string]int
 	recording  int // prompts being sent whose inputs are not in the mirror yet; what agy answers meanwhile waits in held, so the mirror reads the user input first
 	held       []map[string]any
+	carried    bool // the prompt being sent carries the handoff, which is delivered once agy has accepted it
 	openCalls  int
 	outlive    int  // open calls that outlive the prompt
 	answered   bool // agy has gone on from the prompt: a tool call or a thought came (a 404 after that is transient)
@@ -110,10 +112,14 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contra
 	broken := h.broken
 	h.mu.Unlock()
 	if broken {
-		// The saved conversation fails every prompt (T3 Outcome:53-55, 231-241). T3 starts a fresh session with a portable
-		// handoff of the thread's context; that is a later change here, so for now the context is not carried over.
-		h.notice("agy's saved conversation can no longer be sent to the model; a blank one is opened, without the old context")
-		if err := h.NewConversationForce(ctx); err != nil {
+		// The saved conversation fails every prompt (T3 Outcome:53-55, 231-241): T3 starts a fresh session with a portable handoff of
+		// the thread's context, and so does this, from the mirror files.
+		carried, err := h.mirrorHandoff()
+		if err != nil {
+			return contract.TurnEnded{Turn: id}, err
+		}
+		h.notice("agy's saved conversation can no longer be sent to the model; a new one is opened and the earlier conversation is handed to it")
+		if err := h.freshConversation(ctx, carried); err != nil {
 			return contract.TurnEnded{Turn: id}, err
 		}
 	}
@@ -331,6 +337,12 @@ func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process,
 	}
 	for i, input := range inputs {
 		text := input.Text
+		if i == 0 && !slash && !steer && h.handoff != "" {
+			// T3 puts the history ahead of the user's text in the same message (ContextHandoffDelivery.ts withInlineContext); a slash command is
+			// not given it, as T3 defers the context to the turn after (isSlashCommandMessage).
+			text = handoff.Prompt(h.handoff, text)
+			t.carried = true
+		}
 		if i == 0 && instructions != "" {
 			text = instructions + "\n\n<user_request>\n" + text + "\n</user_request>"
 		}
@@ -432,10 +444,16 @@ func (h *Harness) begin(t *turn, inputs []contract.TurnInput, started func(), st
 		return h.exitError("session/prompt", err, p)
 	}
 	// agy has the prompt now. A mirror that cannot be written fails the turn when the prompt ends, but does not leave it running unseen.
-	if err := h.recordInputs(inputs); err != nil {
+	h.mu.Lock()
+	carried := t.carried
+	t.carried = false
+	h.mu.Unlock()
+	if err := h.recordInputs(inputs, carried); err != nil {
 		h.mu.Lock()
 		t.err = errors.Join(t.err, err)
 		h.mu.Unlock()
+	} else if carried {
+		h.handoffAccepted()
 	}
 	h.recorded(t)
 	t.queuedOnce.Do(func() { close(t.queued) })
@@ -1149,21 +1167,29 @@ func (h *Harness) NewConversation(ctx context.Context) error {
 	if info, err := os.Stat(path); err != nil || info.Size() == 0 {
 		return nil
 	}
-	return h.newSession(ctx, p)
+	return h.newSession(ctx, p, "")
 }
 
 // NewConversationForce opens a new session even when the conversation has entries.
 func (h *Harness) NewConversationForce(ctx context.Context) error {
+	return h.freshConversation(ctx, "")
+}
+
+// freshConversation opens a new session that starts from the handoff, if there is one.
+func (h *Harness) freshConversation(ctx context.Context, carried string) error {
 	if err := h.ensure(ctx); err != nil {
 		return err
 	}
 	h.mu.Lock()
 	p := h.p
 	h.mu.Unlock()
-	return h.newSession(ctx, p)
+	return h.newSession(ctx, p, carried)
 }
 
-func (h *Harness) newSession(ctx context.Context, p *process) error {
+func (h *Harness) newSession(ctx context.Context, p *process, carried string) error {
+	h.mu.Lock()
+	h.handoff = carried
+	h.mu.Unlock()
 	if err := h.openSession(ctx, p, ""); err != nil {
 		return err
 	}

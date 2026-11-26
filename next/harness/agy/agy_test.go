@@ -241,10 +241,15 @@ func TestOpenNewAndResume(t *testing.T) {
 		t.Fatalf("set_config_option calls = %v", options)
 	}
 	h2.Close()
-	// T3 has no fallback: a session agy cannot resume fails the open.
+	// A session agy cannot resume is replaced with a fresh one that starts from the handoff (handoff_test.go).
 	t.Setenv("FAKE_AGY_MISSING", "fake-session-1")
-	if _, err := Open(context.Background(), c); err == nil || !strings.Contains(err.Error(), "session/resume failed") {
-		t.Fatalf("open = %v", err)
+	h3, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h3.Close()
+	if h3.SessionFile() != filepath.Join(c.SessionDir, "agy-2.jsonl") {
+		t.Fatalf("file = %s", h3.SessionFile())
 	}
 }
 
@@ -679,6 +684,11 @@ func TestInvalidThinkingSignatureBreaksTheConversation(t *testing.T) {
 	if len(r.calls(t, "session/new")) != 2 {
 		t.Fatalf("the next turn opens a new session: %d", len(r.calls(t, "session/new")))
 	}
+	// The new session starts from what the old one said.
+	prompts := r.prompts(t)
+	if last := strings.Join(prompts[len(prompts)-1], "\n"); !strings.Contains(last, "[Historical user; user_message") || !strings.Contains(last, "signature") {
+		t.Fatalf("the prompt carries no handoff: %s", last)
+	}
 }
 
 func TestStaleSessionUpdateIsIgnored(t *testing.T) {
@@ -716,15 +726,6 @@ func TestPermissionModeIsPutBackToDefault(t *testing.T) {
 	_, r, _ := open(t, map[string]string{"FAKE_AGY_MODE": "yolo"}, nil)
 	if len(r.calls(t, "session/set_mode")) != 1 || !strings.Contains(string(r.calls(t, "session/set_mode")[0].Params), `"modeId":"default"`) {
 		t.Fatal("no set_mode default")
-	}
-}
-
-func TestResumeNeedsTheCapability(t *testing.T) {
-	_, _, c := open(t, nil, nil)
-	t.Setenv("FAKE_AGY_NO_RESUME", "1")
-	c.New = false
-	if _, err := Open(context.Background(), c); err == nil || !strings.Contains(err.Error(), "does not advertise session/resume") {
-		t.Fatalf("err = %v", err)
 	}
 }
 

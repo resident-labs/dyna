@@ -46,7 +46,7 @@ func TestTranscriptMarkerIsStableAcrossPagesAndRecentReads(t *testing.T) {
 	if err != nil || seen != 4 || !more || len(page) != 1 || page[0].Kind != contract.TranscriptAttemptFailed || page[0].Index != 2 {
 		t.Fatalf("page=%+v seen=%d more=%v err=%v", page, seen, more, err)
 	}
-	recent, seen, more, err := readTranscriptMode(strings.NewReader(failedAttemptRecords), attemptDeliveries, nil, "x", "", 0, 64, 16<<20, true)
+	recent, seen, more, err := readTranscriptMode(strings.NewReader(failedAttemptRecords), attemptDeliveries, nil, "x", "", 0, 64, 16<<20, true, false)
 	if err != nil || seen != 4 || more || len(recent) != 4 || recent[2].Kind != contract.TranscriptAttemptFailed || recent[3].Text != "the lock is free" {
 		t.Fatalf("recent=%+v seen=%d more=%v err=%v", recent, seen, more, err)
 	}
