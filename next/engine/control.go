@@ -24,6 +24,14 @@ func (s *Service) SessionStop(ctx context.Context, caller contract.Principal, re
 	if err != nil {
 		return contract.SessionStopResponse{}, failure(err)
 	}
+	if !stopping && s.profiles.Harness(target.Profile) == contract.HarnessAgy {
+		if handle, ok := s.live.LookupSession(target.ID); ok && handle.Lock() {
+			if channel := handle.Channel(); channel != nil {
+				channel.AskStop()
+			}
+			handle.Unlock()
+		}
+	}
 	return contract.SessionStopResponse{Stopping: accepted || stopping}, nil
 }
 

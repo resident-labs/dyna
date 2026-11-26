@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -500,17 +501,28 @@ func (s *Service) AgyProfile(name contract.ProfileName) bool {
 	return s.profiles.Harness(name) == contract.HarnessAgy
 }
 
-// agyAccountProfiles is every agy profile when name is one, and nothing otherwise: one Google account serves all of them, so their
-// open sessions share the limit. A pig profile's max-concurrent bounds workflow workers only.
-func (s *Service) agyAccountProfiles(name contract.ProfileName) []contract.ProfileName {
-	if s.profiles.Harness(name) != contract.HarnessAgy {
-		return nil
+// agyAccount is what one Google account allows when name is an agy profile, and nothing otherwise: every agy profile shares the
+// account, so their open sessions share one limit, the smallest max-concurrent among them. Call it inside withProfile, so that a
+// profile added or edited meanwhile cannot slip past the count. A pig profile's max-concurrent bounds workflow workers only.
+func (s *Service) agyAccount(name contract.ProfileName) ([]contract.ProfileName, int) {
+	if p, ok := s.profiles.(*ProfileConfig); ok {
+		return p.agyAccountLocked(name)
+	}
+	return nil, 0
+}
+
+// agyAccountLocked is agyAccount for a caller that holds p.mu.
+func (p *ProfileConfig) agyAccountLocked(name contract.ProfileName) ([]contract.ProfileName, int) {
+	if p.entries[name].Harness != contract.HarnessAgy {
+		return nil, 0
 	}
 	var names []contract.ProfileName
-	for _, p := range s.profiles.List() {
-		if p.Harness == contract.HarnessAgy {
-			names = append(names, p.Name)
+	limit := math.MaxInt
+	for profile, entry := range p.entries {
+		if entry.Harness == contract.HarnessAgy {
+			names = append(names, profile)
+			limit = min(limit, entry.MaxConcurrent)
 		}
 	}
-	return names
+	return names, limit
 }

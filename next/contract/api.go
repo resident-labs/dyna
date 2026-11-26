@@ -1183,6 +1183,8 @@ type TurnSteer struct {
 	Queue     TurnQueue  `json:"queue"`
 	Interrupt *Interrupt `json:"interrupt,omitempty"` // actual sender checked by the engine against the receiving session's tree
 }
+
+// TurnStop stops a running turn. With no turn named it stops work an agy harness left running after its last turn ended.
 type TurnStop struct {
 	Turn   TurnID `json:"turn"`
 	Reason string `json:"reason"`

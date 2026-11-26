@@ -21,6 +21,8 @@ type Channel struct {
 	compactTurn  contract.TurnID
 	compactSend  bool
 	compactUntil time.Time
+	// A stop asked while no turn runs, which the box loop still has to send.
+	stopSend bool
 }
 
 // Lock is transitional while channel coordination and terminal state remain in engine.
@@ -184,3 +186,17 @@ func (c *Channel) TakeCompact() (contract.TurnID, bool) {
 
 // CompactAnswered ends the wait for a compaction. The caller holds the session lock.
 func (c *Channel) CompactAnswered() { c.compactUntil = time.Time{} }
+
+// AskStop asks the box loop to send a stop that names no turn: the box passes it to a harness that can still be running work
+// after its turn ended. The caller holds the session lock.
+func (c *Channel) AskStop() {
+	c.stopSend = true
+	c.Wake()
+}
+
+// TakeStop returns a stop waiting to be sent. The caller holds the session lock.
+func (c *Channel) TakeStop() bool {
+	send := c.stopSend
+	c.stopSend = false
+	return send
+}

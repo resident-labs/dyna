@@ -296,12 +296,21 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 				return
 			}
 			compactTurn, compact := channel.TakeCompact()
+			stopIdle := channel.TakeStop()
 			shellDesired := handle.ShellWatchGeneration()
 			shellChanged := channel.ShellWatchChanged(shellDesired)
 			handle.Unlock()
 			if !sendWatch(ctx, out, shellChanged, shellDesired, contract.ShellWatchStart{Generation: shellDesired}, contract.ShellWatchStop{}) {
 				reason, cause = streamWatchStopped, ctx.Err()
 				return
+			}
+			if stopIdle {
+				select {
+				case out <- contract.BoxMessage{Body: contract.TurnStop{Reason: "Stopped by request"}}:
+				case <-ctx.Done():
+					reason, cause = streamCanceled, ctx.Err()
+					return
+				}
 			}
 			if compact {
 				select {

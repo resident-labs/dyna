@@ -17,7 +17,7 @@ const agyProfilesJSON = `{
   "test": {"provider": "anthropic", "model": "m", "allowedModels": ["m"], "thinking": "low"},
   "other": {"provider": "openai", "model": "m", "allowedModels": ["m"], "thinking": "low", "harness": "pig"},
   "gem": {"provider": "google", "model": "gemini-3.8-flash", "allowedModels": ["gemini-3.8-flash"], "thinking": "low", "harness": "agy", "maxConcurrent": 2},
-  "gem2": {"provider": "google", "model": "gemini-3.8-pro", "allowedModels": ["gemini-3.8-pro"], "thinking": "low", "harness": "agy", "maxConcurrent": 2}
+  "gem2": {"provider": "google", "model": "gemini-3.8-pro", "allowedModels": ["gemini-3.8-pro"], "thinking": "low", "harness": "agy", "maxConcurrent": 3}
 }`
 
 func loadAgyProfiles(t *testing.T, text string) (*ProfileConfig, error) {
@@ -196,7 +196,8 @@ func TestBoxHelloCarriesTheHarness(t *testing.T) {
 	}
 }
 
-// One Google account serves every agy profile, so the limit counts their open sessions together.
+// One Google account serves every agy profile, so the limit counts their open sessions together, and with differing max-concurrent
+// (gem 2, gem2 3) it is the smallest.
 func TestAgyLimitCountsEveryAgyProfile(t *testing.T) {
 	s, room, _, owner := agySetup(t)
 	ctx := t.Context()

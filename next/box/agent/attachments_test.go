@@ -302,3 +302,15 @@ func TestRunnerHandsBackASteerTheTurnEndedWithout(t *testing.T) {
 }
 
 var _ harness.Harness = (*settlingHarness)(nil)
+
+// A stop that names no turn reaches the harness, which may still run work its last turn left behind (agy).
+func TestRunnerStopWithNoTurnAbortsTheHarness(t *testing.T) {
+	h := newTransferHarness()
+	runner := &Runner{Harness: h, Sink: &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 1)}}
+	if err := runner.Handle(context.Background(), contract.BoxMessage{Body: contract.TurnStop{Reason: "Stopped by request"}}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"abort"}; !reflect.DeepEqual(h.calls, want) {
+		t.Fatalf("the harness saw %v", h.calls)
+	}
+}
