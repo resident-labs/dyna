@@ -446,8 +446,11 @@ func (s *Service) wakeWorkflowsOnProfile(ctx context.Context, name contract.Prof
 // agyHost is the one host agy sessions run on: the owner signs in to Google there, and one IP uses the login.
 const agyHost contract.HostName = "hermeslab"
 
-// harnessOf is the harness a profile runs on. A profile a read-only resolver lists without one runs on pig.
+// harnessOf is the harness a profile runs on. A profile a read-only resolver lists without one runs on pig, as does any when no profiles are configured.
 func (s *Service) harnessOf(name contract.ProfileName) contract.Harness {
+	if s.profiles == nil {
+		return contract.HarnessPig
+	}
 	for _, p := range s.profiles.List() {
 		if p.Name == name && p.Harness != "" {
 			return p.Harness

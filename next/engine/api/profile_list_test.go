@@ -63,7 +63,7 @@ func TestProfileListOwnerOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	yes := true
-	want := []contract.ProfileEntry{{Profile: contract.Profile{Name: "a", Provider: contract.ModelProviderAnthropic, Model: "a-model", Images: &yes, AllowedModels: []string{"a-model"}, Thinking: contract.ThinkingLow}}, {Profile: contract.Profile{Name: "z", Provider: contract.ModelProviderOpenAI, Model: "z-model", Images: &yes, AllowedModels: []string{"z-model"}, Thinking: contract.ThinkingHigh}}}
+	want := []contract.ProfileEntry{{Profile: contract.Profile{Name: "a", Provider: contract.ModelProviderAnthropic, Model: "a-model", Images: &yes, AllowedModels: []string{"a-model"}, Thinking: contract.ThinkingLow, Harness: contract.HarnessPig}}, {Profile: contract.Profile{Name: "z", Provider: contract.ModelProviderOpenAI, Model: "z-model", Images: &yes, AllowedModels: []string{"z-model"}, Thinking: contract.ThinkingHigh, Harness: contract.HarnessPig}}}
 	if !reflect.DeepEqual(result.Profiles, want) {
 		t.Fatalf("profiles: %+v", result.Profiles)
 	}
