@@ -87,7 +87,7 @@ func TestContainerMountsAgyFilesForAgySessionsOnly(t *testing.T) {
 	has := func(c box.ContainerSpec, want box.Mount) bool {
 		return slices.Contains(c.Mounts, want)
 	}
-	binary := box.Mount{HostPath: "/opt/agy/antigravity", BoxPath: "/opt/agy/antigravity", ReadOnly: true}
+	binary := box.Mount{HostPath: "/host/agy/antigravity", BoxPath: "/opt/agy/antigravity", ReadOnly: true}
 	account := box.Mount{HostPath: "/host/agy/accounts/main", BoxPath: "/opt/agy/account"}
 	_, agy := b.container(lifecycle.BoxSpec{Agy: true}, "image", box.Mount{})
 	if !has(agy, binary) || !has(agy, account) {

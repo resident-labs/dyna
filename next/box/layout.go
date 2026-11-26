@@ -343,7 +343,10 @@ func (l Layout) HostGit(repo contract.RepoName) (string, error) {
 // HostAgyAccount is the signed-in agy profile folder on the agy host, which a box of an agy session mounts read-write. Dyna never reads it.
 func (l Layout) HostAgyAccount() string { return filepath.Join(l.HostData, "agy", "accounts", "main") }
 
-// AgyBinary is the agy program on the agy host and in the box.
+// HostAgyBinary is the installed agy program on the agy host, which a box of an agy session mounts read-only.
+func (l Layout) HostAgyBinary() string { return filepath.Join(l.HostData, "agy", "antigravity") }
+
+// AgyBinary is where the agy program sits in the box.
 const AgyBinary = "/opt/agy/antigravity"
 
 // HostBin is the folder of engine binaries on a host.

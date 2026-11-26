@@ -16,7 +16,8 @@ import (
 const agyProfilesJSON = `{
   "test": {"provider": "anthropic", "model": "m", "allowedModels": ["m"], "thinking": "low"},
   "other": {"provider": "openai", "model": "m", "allowedModels": ["m"], "thinking": "low", "harness": "pig"},
-  "gem": {"provider": "google", "model": "gemini-3.8-flash", "allowedModels": ["gemini-3.8-flash"], "thinking": "low", "harness": "agy", "maxConcurrent": 2}
+  "gem": {"provider": "google", "model": "gemini-3.8-flash", "allowedModels": ["gemini-3.8-flash"], "thinking": "low", "harness": "agy", "maxConcurrent": 2},
+  "gem2": {"provider": "google", "model": "gemini-3.8-pro", "allowedModels": ["gemini-3.8-pro"], "thinking": "low", "harness": "agy", "maxConcurrent": 2}
 }`
 
 func loadAgyProfiles(t *testing.T, text string) (*ProfileConfig, error) {
@@ -192,6 +193,22 @@ func TestBoxHelloCarriesTheHarness(t *testing.T) {
 	}
 	if hello.Harness != contract.HarnessAgy || hello.Agy == nil || hello.Agy.Binary != "/opt/agy/antigravity" || hello.Agy.GeminiDir == "" {
 		t.Fatalf("agy hello: %q %+v", hello.Harness, hello.Agy)
+	}
+}
+
+// One Google account serves every agy profile, so the limit counts their open sessions together.
+func TestAgyLimitCountsEveryAgyProfile(t *testing.T) {
+	s, room, _, owner := agySetup(t)
+	ctx := t.Context()
+	for name, profile := range map[string]contract.ProfileName{"one": "gem", "two": "gem2"} {
+		if _, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: name, Profile: profile}); e != nil {
+			t.Fatal(e)
+		}
+	}
+	for _, profile := range []contract.ProfileName{"gem", "gem2"} {
+		if _, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "more", Profile: profile}); e == nil || e.Code != contract.ErrConflict || !strings.Contains(e.Message, "across every agy profile") {
+			t.Fatalf("%s: %v", profile, e)
+		}
 	}
 }
 

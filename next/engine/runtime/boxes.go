@@ -572,7 +572,7 @@ func (b *Boxes) container(spec lifecycle.BoxSpec, image string, shared box.Mount
 	}
 	if spec.Agy {
 		c.Mounts = append(c.Mounts,
-			box.Mount{HostPath: box.AgyBinary, BoxPath: box.AgyBinary, ReadOnly: true},
+			box.Mount{HostPath: b.Layout.HostAgyBinary(), BoxPath: box.AgyBinary, ReadOnly: true},
 			box.Mount{HostPath: b.Layout.HostAgyAccount(), BoxPath: contract.AgyGeminiDir})
 	}
 	for _, repo := range spec.Repos {

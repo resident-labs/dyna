@@ -44,21 +44,24 @@ var ErrProfileFull = errors.New("profile has its limit of open sessions")
 
 // Session describes the stored session and its box.
 type Session struct {
-	ID           contract.SessionID
-	Turn         contract.TurnID // read back only: active turn captured with session identity
-	Room         contract.RoomID
-	Name         string
-	Repo         contract.RepoName
-	Profile      contract.ProfileName
-	Box          contract.BoxID
-	CloseReason  contract.SessionCloseReason
-	NewRoomName  string          // nonempty only for a new room root
-	Compose      string          // the compose file this session chose when it started, or ""
-	GPU          contract.GPUGiB // the VRAM its box asks of a card (5.5); set to start, not read back
-	ProfileLimit int             // set to start, not read back: the open sessions its profile allows at once, or 0 for any number
-	Root         bool            // read back only: the session has no parent
-	Closing      bool            // read back only: the session is closing
-	ClearedAt    int64           // read back only: unix millis when a clear is pending for the next turn, or 0
+	ID          contract.SessionID
+	Turn        contract.TurnID // read back only: active turn captured with session identity
+	Room        contract.RoomID
+	Name        string
+	Repo        contract.RepoName
+	Profile     contract.ProfileName
+	Box         contract.BoxID
+	CloseReason contract.SessionCloseReason
+	NewRoomName string          // nonempty only for a new room root
+	Compose     string          // the compose file this session chose when it started, or ""
+	GPU         contract.GPUGiB // the VRAM its box asks of a card (5.5); set to start, not read back
+	// AccountProfiles are every profile that shares one account with this session's, and AccountLimit the open sessions that account
+	// allows at once. Both are set to start, not read back; with no profiles there is no limit.
+	AccountProfiles []contract.ProfileName
+	AccountLimit    int
+	Root            bool  // read back only: the session has no parent
+	Closing         bool  // read back only: the session is closing
+	ClearedAt       int64 // read back only: unix millis when a clear is pending for the next turn, or 0
 	// Workflow makes the new session a crew. It is set only to start one: Session does not read it back.
 	Workflow *WorkflowRun
 }
@@ -119,12 +122,12 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 				return err
 			}
 		}
-		if session.ProfileLimit > 0 {
+		if len(session.AccountProfiles) > 0 {
 			var open int
-			if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions WHERE profile=? AND closed_at IS NULL", session.Profile).Scan(&open); err != nil {
+			if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions WHERE profile IN (SELECT value FROM json_each(?)) AND closed_at IS NULL", mustJSON(session.AccountProfiles)).Scan(&open); err != nil {
 				return err
 			}
-			if open >= session.ProfileLimit {
+			if open >= session.AccountLimit {
 				return ErrProfileFull
 			}
 		}

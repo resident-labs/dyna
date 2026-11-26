@@ -87,6 +87,12 @@ func TestAgyQuotaFailureWakesOnceAtTheReset(t *testing.T) {
 	if err := s.Read().QueryRowContext(ctx, "SELECT model_retry_at FROM sessions WHERE id='s'").Scan(&retryAt); err != nil {
 		t.Fatal(err)
 	}
+	if _, due, err := s.CompactionDue(ctx, "s", true); err != nil || due {
+		t.Fatalf("an agy session compacts after a failed turn: %v %v", due, err)
+	}
+	if _, due, err := s.CompactionDue(ctx, "s", false); err != nil || !due {
+		t.Fatalf("a pig session stopped compacting: %v %v", due, err)
+	}
 	resetAt := now.Add(time.Duration(reset) * time.Second).UnixMilli()
 	if retryAt < resetAt || retryAt > resetAt+int64(time.Minute/time.Millisecond) {
 		t.Fatalf("retry at %d, want the reset %d plus a little jitter", retryAt, resetAt)

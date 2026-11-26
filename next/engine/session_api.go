@@ -152,7 +152,8 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 			return contract.SessionStartResponse{}, problem
 		}
 	}
-	session := store.Session{ID: contract.SessionID(sid), Room: req.Room, Name: req.Name, Repo: repo, Profile: req.Profile, Box: contract.BoxID(bid), NewRoomName: roomName, Compose: composeName, GPU: req.GPU, Workflow: run, ProfileLimit: s.agyLimit(req.Profile)}
+	accountProfiles := s.agyAccountProfiles(req.Profile)
+	session := store.Session{ID: contract.SessionID(sid), Room: req.Room, Name: req.Name, Repo: repo, Profile: req.Profile, Box: contract.BoxID(bid), NewRoomName: roomName, Compose: composeName, GPU: req.GPU, Workflow: run, AccountProfiles: accountProfiles, AccountLimit: s.profiles.MaxConcurrent(req.Profile)}
 	event, err := s.event(req.Room, caller, contract.SessionStarted{Session: session.ID, Name: req.Name, Parent: parent, Profile: req.Profile, Goal: req.Goal, DoneWhen: req.DoneWhen, Brief: req.Brief, Workflow: run != nil})
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
@@ -199,7 +200,7 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		response, err = s.store.StartSession(ctx, session, parent, sizeName, req.Goal, event, initial, "", req.SameHost, req.Host, req.ClientID, s.maxDepth)
 		if err != nil {
 			if errors.Is(err, store.ErrProfileFull) {
-				return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("profile %s allows %d open sessions at once, and they are open; close one, or ask the owner to raise its max-concurrent", req.Profile, session.ProfileLimit)}
+				return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("the agy account allows %d open sessions at once across every agy profile, and they are open; close one, or ask the owner to raise max-concurrent on profile %s", session.AccountLimit, req.Profile)}
 			}
 			var treeErr *store.TreeError
 			if errors.As(err, &treeErr) {

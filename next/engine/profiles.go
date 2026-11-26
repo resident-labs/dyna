@@ -500,11 +500,17 @@ func (s *Service) AgyProfile(name contract.ProfileName) bool {
 	return s.profiles.Harness(name) == contract.HarnessAgy
 }
 
-// agyLimit is the open sessions an agy profile allows at once: one Google account serves them all, and the design starts the
-// limit at 2. A pig profile's max-concurrent bounds workflow workers only, so it is 0 here.
-func (s *Service) agyLimit(name contract.ProfileName) int {
+// agyAccountProfiles is every agy profile when name is one, and nothing otherwise: one Google account serves all of them, so their
+// open sessions share the limit. A pig profile's max-concurrent bounds workflow workers only.
+func (s *Service) agyAccountProfiles(name contract.ProfileName) []contract.ProfileName {
 	if s.profiles.Harness(name) != contract.HarnessAgy {
-		return 0
+		return nil
 	}
-	return s.profiles.MaxConcurrent(name)
+	var names []contract.ProfileName
+	for _, p := range s.profiles.List() {
+		if p.Harness == contract.HarnessAgy {
+			names = append(names, p.Name)
+		}
+	}
+	return names
 }
