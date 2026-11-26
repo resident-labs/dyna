@@ -1196,3 +1196,22 @@ func TestAnOlderPromptsLateCommitDoesNotOverwriteANewerOne(t *testing.T) {
 		t.Fatalf("told dyna_goal = %q, want v2", got)
 	}
 }
+
+func TestAnswerArrivingBeforeTheInputsAreRecordedIsWrittenAfterThem(t *testing.T) {
+	h, _, _ := open(t, nil, nil)
+	tn := &turn{recording: 1}
+	h.mu.Lock()
+	tn.write(h, map[string]any{"role": "assistant", "content": []map[string]any{{"type": "text", "text": "early answer"}}})
+	h.mu.Unlock()
+	if data, _ := os.ReadFile(h.SessionFile()); strings.Contains(string(data), "early answer") {
+		t.Fatal("the answer was written before the inputs")
+	}
+	if err := h.recordInputs([]contract.TurnInput{input(1, "go")}); err != nil {
+		t.Fatal(err)
+	}
+	h.recorded(tn)
+	data, _ := os.ReadFile(h.SessionFile())
+	if u, a := strings.Index(string(data), `"go"`), strings.Index(string(data), "early answer"); u < 0 || a < u {
+		t.Fatalf("mirror = %s", data)
+	}
+}
