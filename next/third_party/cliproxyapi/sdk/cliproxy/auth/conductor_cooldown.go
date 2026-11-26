@@ -1008,7 +1008,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 			} else {
 				clearAuthStateOnSuccess(auth, now)
 			}
-		} else if !m.dynaRecordQuotaRefusal(auth, result.Error, now) {
+		} else if !m.dynaRecordQuotaRefusal(ctx, auth, result.Error, now) {
 			if modelKey != "" {
 				if !shouldSkipCredentialCooldown(result.Error) {
 					disableCooling := m.cooldownDisabledForAuth(auth)

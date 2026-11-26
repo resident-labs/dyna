@@ -3,6 +3,7 @@ package management
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,73 +32,105 @@ const (
 
 type dynaUsageShare struct {
 	mu      sync.Mutex
-	entries map[string]dynaSharedUsage
+	entries map[string]*dynaSharedUsage
 	reads   singleflight.Group
 }
 
 type dynaSharedUsage struct {
-	at    time.Time
-	entry authFileQuotaEntry
+	at          time.Time // zero while the request is in flight
+	entry       authFileQuotaEntry
+	invalidated atomic.Bool
 }
 
-func (s *dynaUsageShare) recent(key string, now time.Time) (authFileQuotaEntry, bool) {
+func (s *dynaUsageShare) recent(key string, now time.Time) *dynaSharedUsage {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	shared, ok := s.entries[key]
-	return shared.entry, ok && now.Sub(shared.at) < dynaUsageShareAge
+	if read := s.entries[key]; read != nil && !read.at.IsZero() && now.Sub(read.at) < dynaUsageShareAge {
+		return read
+	}
+	return nil
 }
 
-func (s *dynaUsageShare) keep(key string, entry authFileQuotaEntry, now time.Time) {
+func dynaUsageKey(authID string, registration uint64) string {
+	return authID + "\x00" + strconv.FormatUint(registration, 10)
+}
+
+func (s *dynaUsageShare) invalidate(authID string, registration uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for old, shared := range s.entries {
-		if now.Sub(shared.at) >= dynaUsageShareAge {
-			delete(s.entries, old)
-		}
+	key := dynaUsageKey(authID, registration)
+	if read := s.entries[key]; read != nil {
+		read.invalidated.Store(true)
+		delete(s.entries, key)
 	}
-	if s.entries == nil {
-		s.entries = make(map[string]dynaSharedUsage)
-	}
-	s.entries[key] = dynaSharedUsage{at: now, entry: entry}
 }
 
 // sharedQuota answers from a recent read or joins one in flight. A failed read is
 // shared too, so a provider that just refused is not asked again at once. The read
-// outlives the caller that started it, and every read publishes to routing.
+// outlives the caller that started it. Invalidated reads never publish to routing.
 func (h *Handler) sharedQuota(ctx context.Context, cfg *config.Config, manager *coreauth.Manager, auth *coreauth.Auth) authFileQuotaEntry {
-	key := auth.ID + "\x00" + strconv.FormatUint(auth.RegistrationEpoch, 10)
-	if entry, ok := h.dynaUsage.recent(key, time.Now()); ok {
-		return entry
+	return h.readSharedQuota(ctx, cfg, manager, auth, false)
+}
+
+func (h *Handler) readSharedQuota(ctx context.Context, cfg *config.Config, manager *coreauth.Manager, auth *coreauth.Auth, afterRefusal bool) authFileQuotaEntry {
+	s := &h.dynaUsage
+	key := dynaUsageKey(auth.ID, auth.RegistrationEpoch)
+	if read := s.recent(key, time.Now()); read != nil {
+		return read.entry
 	}
-	value, _, _ := h.dynaUsage.reads.Do(key, func() (any, error) {
-		if entry, ok := h.dynaUsage.recent(key, time.Now()); ok {
-			return entry, nil
+	for {
+		started := false
+		value, _, _ := s.reads.Do(key, func() (any, error) {
+			if read := s.recent(key, time.Now()); read != nil {
+				return read, nil
+			}
+			started = true
+			read := new(dynaSharedUsage)
+			s.mu.Lock()
+			for old, shared := range s.entries {
+				if !shared.at.IsZero() && time.Since(shared.at) >= dynaUsageShareAge {
+					delete(s.entries, old)
+				}
+			}
+			if s.entries == nil {
+				s.entries = make(map[string]*dynaSharedUsage)
+			}
+			s.entries[key] = read
+			s.mu.Unlock()
+			readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynaUsageReadLimit)
+			defer cancel()
+			if source, ok := dynaUsageSourceFor(auth); ok {
+				read.entry = h.readDynaUsage(readCtx, source, auth)
+			} else {
+				read.entry = fetchClaudeOAuthQuota(readCtx, cfg, auth)
+			}
+			if hint, ok := dynaQuotaHint(read.entry); ok {
+				manager.PublishQuotaReadingForAuth(auth, hint, func() bool { return !read.invalidated.Load() })
+			}
+			s.mu.Lock()
+			read.at = time.Now()
+			s.mu.Unlock()
+			return read, nil
+		})
+		read := value.(*dynaSharedUsage)
+		if !afterRefusal || started || !read.invalidated.Load() {
+			return read.entry
 		}
-		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynaUsageReadLimit)
-		defer cancel()
-		var entry authFileQuotaEntry
-		if source, ok := dynaUsageSourceFor(auth); ok {
-			entry = h.readDynaUsage(readCtx, source, auth)
-		} else {
-			entry = fetchClaudeOAuthQuota(readCtx, cfg, auth)
-		}
-		h.dynaUsage.keep(key, entry, time.Now())
-		if hint, ok := dynaQuotaHint(entry); ok {
-			manager.PublishQuotaReadingForAuth(auth, hint)
-		}
-		return entry, nil
-	})
-	return value.(authFileQuotaEntry)
+		// A targeted refresh joined an older read invalidated by the refusal.
+		// Wait for that flight to finish before starting its replacement. If
+		// our own read was invalidated, the newer refusal queues the next read.
+		afterRefusal = false
+	}
 }
 
 // bindDynaRefresh gives cold picks a way to ask for readings without a request waiting.
 func (h *Handler) bindDynaRefresh(manager *coreauth.Manager) {
-	manager.SetQuotaRefresher(h.refreshDynaUsage)
+	manager.SetQuotaRefresher(h.refreshDynaUsage, h.dynaUsage.invalidate)
 }
 
-// refreshDynaUsage reads one credential, or the provider pool if authID is
-// empty, and reports a 429 from any of them.
-func (h *Handler) refreshDynaUsage(provider, authID string) bool {
+// refreshDynaUsage reads the requested credentials, or the provider pool if
+// authIDs is empty, and reports a 429 from any of them.
+func (h *Handler) refreshDynaUsage(provider string, authIDs []string) bool {
 	h.mu.Lock()
 	manager, cfg := h.authManager, h.cfg
 	h.mu.Unlock()
@@ -108,13 +141,13 @@ func (h *Handler) refreshDynaUsage(provider, authID string) bool {
 	var reads sync.WaitGroup
 	slots := make(chan struct{}, authFileQuotaConcurrency)
 	for _, auth := range manager.List() {
-		if auth == nil || auth.Disabled || (authID != "" && auth.ID != authID) || !strings.EqualFold(strings.TrimSpace(auth.Provider), provider) || !dynaQuotaReadable(auth) {
+		if auth == nil || auth.Disabled || (len(authIDs) != 0 && !slices.Contains(authIDs, auth.ID)) || !strings.EqualFold(strings.TrimSpace(auth.Provider), provider) || !dynaQuotaReadable(auth) {
 			continue
 		}
 		reads.Go(func() {
 			slots <- struct{}{}
 			defer func() { <-slots }()
-			entry := h.sharedQuota(context.Background(), cfg, manager, auth)
+			entry := h.readSharedQuota(context.Background(), cfg, manager, auth, len(authIDs) != 0)
 			if entry.State == dynaUsageRateLimited || entry.StatusCode == http.StatusTooManyRequests {
 				limited.Store(true)
 			}

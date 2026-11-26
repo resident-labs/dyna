@@ -565,7 +565,8 @@ func (h *ClaudeCodeAPIHandler) WriteErrorResponse(c *gin.Context, msg *interface
 	if msg != nil && msg.StatusCode > 0 {
 		status = msg.StatusCode
 	}
-	if msg != nil && msg.DirectResponse {
+	terminalQuota := msg != nil && coreauth.IsDynaTerminalQuota(msg.Error)
+	if msg != nil && msg.DirectResponse && !terminalQuota {
 		for key, values := range handlers.FilterUpstreamHeaders(msg.Headers) {
 			if len(values) == 0 || handlers.IsCPAReservedResponseHeader(key) {
 				continue
@@ -614,6 +615,9 @@ func (h *ClaudeCodeAPIHandler) WriteErrorResponse(c *gin.Context, msg *interface
 		}
 	}
 
+	if terminalQuota {
+		c.Writer.Header().Set("X-Should-Retry", "false")
+	}
 	body, err := json.Marshal(h.toClaudeError(msg))
 	if err != nil {
 		body = []byte(`{"type":"error","error":{"type":"api_error","message":"Internal Server Error"}}`)
@@ -629,6 +633,9 @@ func (h *ClaudeCodeAPIHandler) WriteErrorResponse(c *gin.Context, msg *interface
 func claudeErrorText(err error) string {
 	if err == nil {
 		return ""
+	}
+	if coreauth.IsDynaTerminalQuota(err) {
+		return err.Error()
 	}
 	type responseBodyProvider interface {
 		ResponseBody() []byte

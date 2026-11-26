@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"encoding/base64"
 	"net/http"
 	"slices"
 	"strings"
@@ -118,7 +119,10 @@ func TestDynaStaleReadingAllowsOneRefusalAndRequestsRefresh(t *testing.T) {
 		time.Sleep(SoonestResetRefreshInterval) // Advance synctest's clock, not wall time.
 		resetPublish(m, "backup", resetFutureWeek(50, 48*time.Hour))
 		refreshes := make(chan string, 4)
-		m.SetQuotaRefresher(func(provider, id string) bool { refreshes <- provider + ":" + id; return false })
+		m.SetQuotaRefresher(func(provider string, ids []string) bool {
+			refreshes <- provider + ":" + strings.Join(ids, ",")
+			return false
+		}, nil)
 		exec.executeErrors["stale"] = dynaTestQuotaError{}
 		if _, err := m.Execute(t.Context(), []string{"claude"}, req, opts); err != nil {
 			t.Fatal(err)
@@ -131,6 +135,68 @@ func TestDynaStaleReadingAllowsOneRefusalAndRequestsRefresh(t *testing.T) {
 			t.Fatal("quota refusal did not ask for one targeted usage refresh")
 		}
 	})
+}
+
+func TestDynaRefusalsQueueOneReadPerCredentialBehindProviderBackoff(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m, _ := newDynaQuotaManager(t, "queued-a", "queued-b")
+		reads := make(chan []string, 4)
+		m.SetQuotaRefresher(func(_ string, ids []string) bool {
+			reads <- ids
+			return len(ids) == 0 // The first provider sweep hits its usage-endpoint rate limit.
+		}, nil)
+		m.quotaBoard.requestRefresh(m.List(), time.Now())
+		synctest.Wait()
+		if len(reads) != 1 || len(<-reads) != 0 {
+			t.Fatal("expected one initial provider sweep")
+		}
+		resetPublish(m, "queued-a", resetFutureWeek(50, 3*time.Hour))
+		for _, id := range []string{"queued-a", "queued-b", "queued-a"} {
+			m.MarkResult(t.Context(), Result{AuthID: id, Provider: "claude", Model: dynaOpusModel, Error: &Error{HTTPStatus: 429, Message: "weekly quota exhausted"}})
+		}
+		account, _ := m.GetByID("queued-a")
+		if _, ok := m.quotaBoard.hint(account); ok {
+			t.Fatal("refusal left the prior usage observation eligible for ranking")
+		}
+		time.Sleep(2*SoonestResetRefreshInterval - time.Second)
+		synctest.Wait()
+		if len(reads) != 0 {
+			t.Fatal("refusal bypassed the usage-endpoint backoff")
+		}
+		time.Sleep(time.Second)
+		synctest.Wait()
+		if len(reads) != 1 {
+			t.Fatalf("queued reads after backoff: %d; want 1", len(reads))
+		}
+		ids := <-reads
+		slices.Sort(ids)
+		if !slices.Equal(ids, []string{"queued-a", "queued-b"}) {
+			t.Fatalf("refusing credentials to refresh: %v", ids)
+		}
+	})
+}
+
+func TestDynaQuotaOnlyStreamBootstrapMarksTerminalFailure(t *testing.T) {
+	for _, status := range []int{429, 503} {
+		m, exec := newDynaQuotaManager(t, "bootstrap-a", "bootstrap-b")
+		exec.streamFirstErrors = map[string]error{
+			"bootstrap-a": &Error{HTTPStatus: status, Message: "first account failed"},
+			"bootstrap-b": dynaTestQuotaError{},
+		}
+		ids := []string{base64.RawURLEncoding.EncodeToString([]byte("bootstrap-a")), base64.RawURLEncoding.EncodeToString([]byte("bootstrap-b"))}
+		ctx := WithDynaEligibleAuth(t.Context(), ids)
+		resetPublish(m, "bootstrap-a", resetFutureWeek(50, time.Hour))
+		resetPublish(m, "bootstrap-b", resetFutureWeek(50, 2*time.Hour))
+		stream, err := m.ExecuteStream(ctx, []string{"claude"}, cliproxyexecutor.Request{Model: dynaOpusModel}, cliproxyexecutor.Options{})
+		if err == nil {
+			for chunk := range stream.Chunks {
+				err = chunk.Err
+			}
+		}
+		if err == nil || IsDynaTerminalQuota(err) != (status == 429) || !slices.Equal(exec.StreamCalls(), []string{"bootstrap-a", "bootstrap-b"}) {
+			t.Fatalf("first status=%d: err=%v, calls=%v", status, err, exec.StreamCalls())
+		}
+	}
 }
 
 func TestDynaClaudeForbiddenStillQuarantines(t *testing.T) {
