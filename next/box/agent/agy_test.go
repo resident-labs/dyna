@@ -89,3 +89,43 @@ func TestAgySessionGetsTheRoomInstructionsOnce(t *testing.T) {
 		t.Fatal("an instruction file was written into the profile folder")
 	}
 }
+
+// The retry wake of a quota failure replays the same delivery. It must not report success from the error text agy mirrored as its
+// answer: the turn runs again with one new prompt, "Continue where you left off.", and only that answer completes it.
+func TestARetryWakeAfterAQuotaFailureSendsOneContinuePrompt(t *testing.T) {
+	dir := t.TempDir()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(dir, "agent.log")
+	t.Setenv(fakeagent.EnvVar, "1")
+	t.Setenv("FAKE_AGY_LOG", log)
+	hello := contract.BoxHelloResponse{Harness: contract.HarnessAgy, Fresh: true, Agy: &contract.BoxAgy{Binary: exe, GeminiDir: t.TempDir()}, Model: contract.ModelChoice{ID: "gemini-3.8-flash", Thinking: contract.ThinkingLow}}
+	h, err := openAgy(t.Context(), hello, t.TempDir(), t.TempDir(), nil, &activity{}, func(string) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	sink := &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 4)}
+	runner := &Runner{Harness: h, Sink: sink}
+	start := func(turn contract.TurnID) contract.TurnEnded {
+		t.Helper()
+		message := contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: []contract.TurnInput{{Delivery: 1, Text: "quota"}}}}
+		if err := runner.Handle(t.Context(), message); err != nil {
+			t.Fatal(err)
+		}
+		return <-sink.done
+	}
+	if first := start("t1"); first.Outcome != contract.TurnFailed || first.Cause != contract.CauseModelFailed || first.ModelRetryAfterSeconds == 0 {
+		t.Fatalf("the quota failure ended as %+v", first)
+	}
+	retry := start("t2")
+	if retry.Outcome != contract.TurnCompleted {
+		t.Fatalf("the retry ended as %+v", retry)
+	}
+	data, _ := os.ReadFile(log)
+	if n := strings.Count(string(data), "Continue where you left off."); n != 1 {
+		t.Fatalf("%d continue prompts after the retry wake, want 1", n)
+	}
+}
