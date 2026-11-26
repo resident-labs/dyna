@@ -95,8 +95,9 @@ func (h *Handler) bindDynaRefresh(manager *coreauth.Manager) {
 	manager.SetQuotaRefresher(h.refreshDynaUsage)
 }
 
-// refreshDynaUsage reads one provider's credentials and reports a 429 from any of them.
-func (h *Handler) refreshDynaUsage(provider string) bool {
+// refreshDynaUsage reads one credential, or the provider pool if authID is
+// empty, and reports a 429 from any of them.
+func (h *Handler) refreshDynaUsage(provider, authID string) bool {
 	h.mu.Lock()
 	manager, cfg := h.authManager, h.cfg
 	h.mu.Unlock()
@@ -107,7 +108,7 @@ func (h *Handler) refreshDynaUsage(provider string) bool {
 	var reads sync.WaitGroup
 	slots := make(chan struct{}, authFileQuotaConcurrency)
 	for _, auth := range manager.List() {
-		if auth == nil || auth.Disabled || !strings.EqualFold(strings.TrimSpace(auth.Provider), provider) || !dynaQuotaReadable(auth) {
+		if auth == nil || auth.Disabled || (authID != "" && auth.ID != authID) || !strings.EqualFold(strings.TrimSpace(auth.Provider), provider) || !dynaQuotaReadable(auth) {
 			continue
 		}
 		reads.Go(func() {

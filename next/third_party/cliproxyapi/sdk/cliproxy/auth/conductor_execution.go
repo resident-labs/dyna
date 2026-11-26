@@ -700,7 +700,7 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 					return cliproxyexecutor.Response{}, errExec
 				}
 				authErr = errExec
-				if result.CredentialScope {
+				if result.CredentialScope || dynaQuotaRefusal(auth, result.Error) {
 					break
 				}
 				continue
@@ -923,7 +923,7 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 					return cliproxyexecutor.Response{}, errExec
 				}
 				authErr = errExec
-				if result.CredentialScope {
+				if result.CredentialScope || dynaQuotaRefusal(auth, result.Error) {
 					break
 				}
 				continue

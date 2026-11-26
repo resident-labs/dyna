@@ -163,7 +163,7 @@ func TestRefreshReusesARecentHomeRead(t *testing.T) {
 	fake := dynaFixedUsage(t, http.StatusOK, dynaRoutingCodexUsage)
 	handler := dynaUsageHandler(t, dynaRoutingCodex("codex-1"))
 	runAuthFileQuota(t, handler, "")
-	if handler.refreshDynaUsage("codex") {
+	if handler.refreshDynaUsage("codex", "") {
 		t.Fatal("reported a rate limit")
 	}
 	if got := dynaRoutingCalls(fake); got != 1 {
@@ -177,11 +177,22 @@ func TestRefreshReadsOnlyItsProviderAndReportsARateLimit(t *testing.T) {
 	disabled.Disabled = true
 	other := &coreauth.Auth{ID: "kimi-1", Provider: "kimi", Metadata: map[string]any{"access_token": "invented-token"}}
 	handler := dynaUsageHandler(t, dynaRoutingCodex("codex-1"), disabled, other)
-	if !handler.refreshDynaUsage("codex") {
+	if !handler.refreshDynaUsage("codex", "") {
 		t.Fatal("a 429 was not reported")
 	}
 	if got := dynaRoutingCalls(fake); got != 1 {
 		t.Fatalf("requests = %d", got)
+	}
+}
+
+func TestRefusalRefreshReadsOnlyTheRefusingCredential(t *testing.T) {
+	fake := dynaFixedUsage(t, http.StatusOK, dynaRoutingCodexUsage)
+	handler := dynaUsageHandler(t, dynaRoutingCodex("codex-1"), dynaRoutingCodex("codex-2"))
+	if handler.refreshDynaUsage("codex", "codex-2") {
+		t.Fatal("successful usage read reported a rate limit")
+	}
+	if got := dynaRoutingCalls(fake); got != 1 {
+		t.Fatalf("targeted refresh started %d requests", got)
 	}
 }
 
