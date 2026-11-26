@@ -47,6 +47,8 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 	failures := row.Failures
 	var cause contract.FailureCause
 	var runtimeFailure bool
+	// permanent is a creation no retry can mend.
+	var permanent bool
 	var createPhase contract.CreatePhase
 	var workErr error
 	switch {
@@ -145,6 +147,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			createPhase = phase
 			log.Printf("box %s: creation failed in %s: %v", b.ID, phase, workErr)
 		}
+		var mount box.MissingMount
 		var missing box.MissingDevice
 		if errors.As(workErr, &missing) {
 			next.State, next.Reason = contract.BoxFailed, missing.Error()
@@ -153,6 +156,9 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			} else {
 				cause = contract.CauseNestedDeviceMissing
 			}
+		} else if errors.As(workErr, &mount) {
+			next.State, next.Reason, cause = contract.BoxFailed, mount.Error(), contract.CauseCreateFailed
+			permanent = true
 		} else if workErr != nil {
 			failures++
 			if errors.Is(createCause, context.DeadlineExceeded) {
@@ -252,6 +258,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 				}
 			}
 		}
+		var mount box.MissingMount
 		var missing box.MissingDevice
 		if errors.As(workErr, &missing) {
 			next.State, next.Reason = contract.BoxFailed, missing.Error()
@@ -260,6 +267,8 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			} else {
 				cause = contract.CauseNestedDeviceMissing
 			}
+		} else if errors.As(workErr, &mount) {
+			next.State, next.Reason, cause = contract.BoxFailed, mount.Error(), contract.CauseStartFailed
 		} else if workErr != nil {
 			next.State = contract.BoxStopped
 			failures++
@@ -286,7 +295,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 	if row.Want == store.WantStop && b.State != contract.BoxLost && workErr != nil {
 		return errors.Join(r.store.RetryStartStop(ctx, row, due, failures), workErr)
 	}
-	changed, err := r.change(ctx, b, next, due, failures, cause, createPhase, runtimeFailure)
+	changed, err := r.change(ctx, b, next, due, failures, cause, createPhase, runtimeFailure, permanent)
 	var shareDown box.ShareDown
 	if changed && err == nil && errors.As(workErr, &shareDown) && shareDown.Permanent {
 		err = r.store.QuarantineShare(ctx, b)

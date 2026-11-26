@@ -234,6 +234,10 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 			missing.Host = string(spec.Host)
 			return "", missing
 		}
+		var mount box.MissingMount
+		if errors.As(err, &mount) {
+			return "", mount
+		}
 		var imageErr box.ImageCreateError
 		if errors.As(err, &imageErr) {
 			return "", err
@@ -362,7 +366,30 @@ func (b *Boxes) Start(ctx context.Context, id contract.BoxID) error {
 			}
 		}
 	}
-	return run(contract.StartContainer, func(ctx context.Context) error { return host.StartContainer(ctx, id) })
+	// A closing box starts only to archive, so a missing sign-in cannot hold up its close.
+	agy := record.State != contract.BoxClosing && b.Pressure != nil && b.Pressure.AgyProfile(session.Profile)
+	return run(contract.StartContainer, func(ctx context.Context) error {
+		if err := b.checkAgySources(ctx, host, agy); err != nil {
+			return err
+		}
+		return host.StartContainer(ctx, id)
+	})
+}
+
+// checkAgySources refuses a start of an agy box whose program or signed-in folder is gone from its host, with the create's text, as a
+// container made before they went would start on whatever Podman finds there.
+func (b *Boxes) checkAgySources(ctx context.Context, host interface {
+	CheckPresent(context.Context, box.Mount) error
+}, agy bool) error {
+	if !agy {
+		return nil
+	}
+	for _, m := range b.agyMounts() {
+		if err := host.CheckPresent(ctx, m); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // closingLeftovers refuses to start a closing box that has neither container nor volume on its host, as when its create never
@@ -549,6 +576,15 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image stri
 	return nil
 }
 
+// agyMounts are what a box of an agy session mounts from its host: the installed program and the signed-in profile folder. Each must
+// be there already, which a create and a warm start both check.
+func (b *Boxes) agyMounts() []box.Mount {
+	return []box.Mount{
+		{HostPath: b.Layout.HostAgyBinary(), BoxPath: box.AgyBinary, ReadOnly: true, Present: "agy binary not installed at " + b.Layout.HostAgyBinary()},
+		{HostPath: b.Layout.HostAgyAccount(), BoxPath: contract.AgyGeminiDir, Present: "agy account folder missing at " + b.Layout.HostAgyAccount() + ": sign in first"},
+	}
+}
+
 func (b *Boxes) container(spec lifecycle.BoxSpec, image string, shared box.Mount) (box.Slice, box.ContainerSpec) {
 	size := spec.Size
 	slice := box.Slice{Name: spec.Slice, CPUs: size.CPUs, MemHigh: size.MemBytes, MemMax: size.MemBytes * 3 / 2, Pids: size.Pids}
@@ -571,9 +607,7 @@ func (b *Boxes) container(spec lifecycle.BoxSpec, image string, shared box.Mount
 			box.Mount{HostPath: filepath.Dir(b.Layout.HostRootAddons(spec.Room)), BoxPath: "/run/dyna/root-addons/room", ReadOnly: true, MakeDir: true})
 	}
 	if spec.Agy {
-		c.Mounts = append(c.Mounts,
-			box.Mount{HostPath: b.Layout.HostAgyBinary(), BoxPath: box.AgyBinary, ReadOnly: true},
-			box.Mount{HostPath: b.Layout.HostAgyAccount(), BoxPath: contract.AgyGeminiDir})
+		c.Mounts = append(c.Mounts, b.agyMounts()...)
 	}
 	for _, repo := range spec.Repos {
 		c.Mounts = append(c.Mounts, box.Mount{HostPath: repo.Cache, BoxPath: repo.Cache, ReadOnly: true})

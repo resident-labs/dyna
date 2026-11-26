@@ -107,7 +107,7 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 			}
 			if scenario == "first-create-finished" {
 				// The first Create reply persisted its image before any hello or turn.
-				if err := st.FinishCreate(ctx, original, "first-image", "", now.Add(time.Minute), 0, event(contract.BoxChanged{}), false); err != nil {
+				if err := st.FinishCreate(ctx, original, "first-image", "", now.Add(time.Minute), 0, event(contract.BoxChanged{}), false, false); err != nil {
 					t.Fatal(err)
 				}
 				before, err := st.Box(ctx, "b")

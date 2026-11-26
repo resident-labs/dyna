@@ -37,7 +37,7 @@ func (r *failureRig) finishAllocation(b box.Box, cause contract.FailureCause, fa
 	r.t.Helper()
 	r.events++
 	event := contract.Event{ID: contract.EventID(fmt.Sprintf("allocation-%d", r.events)), Room: "r", Time: r.now, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{Cause: cause, Phase: contract.CreatePhaseBox}}
-	if err := r.s.FinishCreate(r.ctx, b, image, failure, r.now, 3, event, true); err != nil {
+	if err := r.s.FinishCreate(r.ctx, b, image, failure, r.now, 3, event, true, false); err != nil {
 		r.t.Fatal(err)
 	}
 }

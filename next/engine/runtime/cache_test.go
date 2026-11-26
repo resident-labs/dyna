@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"context"
+	"errors"
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/lifecycle"
@@ -87,8 +89,8 @@ func TestContainerMountsAgyFilesForAgySessionsOnly(t *testing.T) {
 	has := func(c box.ContainerSpec, want box.Mount) bool {
 		return slices.Contains(c.Mounts, want)
 	}
-	binary := box.Mount{HostPath: "/host/agy/antigravity", BoxPath: "/opt/agy/antigravity", ReadOnly: true}
-	account := box.Mount{HostPath: "/host/agy/accounts/main", BoxPath: "/opt/agy/account"}
+	binary := box.Mount{HostPath: "/host/agy/antigravity", BoxPath: "/opt/agy/antigravity", ReadOnly: true, Present: "agy binary not installed at /host/agy/antigravity"}
+	account := box.Mount{HostPath: "/host/agy/accounts/main", BoxPath: "/opt/agy/account", Present: "agy account folder missing at /host/agy/accounts/main: sign in first"}
 	_, agy := b.container(lifecycle.BoxSpec{Agy: true}, "image", box.Mount{})
 	if !has(agy, binary) || !has(agy, account) {
 		t.Fatalf("agy mounts: %#v", agy.Mounts)
@@ -96,5 +98,42 @@ func TestContainerMountsAgyFilesForAgySessionsOnly(t *testing.T) {
 	_, pig := b.container(lifecycle.BoxSpec{}, "image", box.Mount{})
 	if has(pig, binary) || has(pig, account) {
 		t.Fatalf("pig mounts: %#v", pig.Mounts)
+	}
+}
+
+type presentHost struct {
+	missing map[string]bool
+	checked []string
+}
+
+func (h *presentHost) CheckPresent(_ context.Context, m box.Mount) error {
+	h.checked = append(h.checked, m.HostPath)
+	if h.missing[m.HostPath] {
+		return box.MissingMount{Text: m.Present}
+	}
+	return nil
+}
+
+// A warm start of an agy box checks both sources and refuses with the create's text; a box that is not agy, or is closing, is not checked.
+func TestWarmStartChecksTheAgySources(t *testing.T) {
+	b := &Boxes{Layout: box.Layout{HostData: "/host"}}
+	ctx := context.Background()
+	present := &presentHost{}
+	if err := b.checkAgySources(ctx, present, true); err != nil || len(present.checked) != 2 {
+		t.Fatalf("present sources: %v, checked %v", err, present.checked)
+	}
+	for _, gone := range []struct{ path, text string }{
+		{"/host/agy/antigravity", "agy binary not installed at /host/agy/antigravity"},
+		{"/host/agy/accounts/main", "agy account folder missing at /host/agy/accounts/main: sign in first"},
+	} {
+		host := &presentHost{missing: map[string]bool{gone.path: true}}
+		var missing box.MissingMount
+		if err := b.checkAgySources(ctx, host, true); !errors.As(err, &missing) || missing.Text != gone.text {
+			t.Fatalf("%s gone: %v", gone.path, err)
+		}
+	}
+	skipped := &presentHost{missing: map[string]bool{"/host/agy/antigravity": true}}
+	if err := b.checkAgySources(ctx, skipped, false); err != nil || len(skipped.checked) != 0 {
+		t.Fatalf("a box that is not agy, or is closing: %v, checked %v", err, skipped.checked)
 	}
 }

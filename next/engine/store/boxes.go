@@ -224,8 +224,10 @@ func (s *Store) QuarantineShare(ctx context.Context, b box.Box) error {
 	})
 }
 
-// FinishCreate records the host result without overwriting a concurrent hello.
-func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure string, due time.Time, failures int, event contract.Event, runtimeFailure bool) error {
+// FinishCreate records the host result without overwriting a concurrent hello. A permanent failure is one no retry can mend, as a
+// source the box mounts that is missing: the box fails with the failure text, with no further attempt and no other host.
+// It does not count against the host.
+func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure string, due time.Time, failures int, event contract.Event, runtimeFailure bool, permanent bool) error {
 	finished, ok := event.Body.(contract.BoxChanged)
 	if !ok {
 		return fmt.Errorf("finish create of box %s: event body is %T, not a box change", b.ID, event.Body)
@@ -249,9 +251,9 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 		reason := ""
 		if failure != "" {
 			image = b.Image
-			if state != contract.BoxCreating || failures >= 3 {
+			if state != contract.BoxCreating || failures >= 3 || permanent {
 				to, reason = contract.BoxFailed, string(contract.CauseCreateFailed)
-				if failures >= 3 {
+				if failures >= 3 || permanent {
 					reason = failure // the step may know more, as for a compose file that cannot run
 				}
 			} else {
@@ -266,7 +268,7 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 		if failure != "" && savedImage != "" {
 			image = savedImage
 		}
-		terminalCreateFailure := to == contract.BoxFailed && cause == contract.CauseCreateFailed
+		terminalCreateFailure := to == contract.BoxFailed && cause == contract.CauseCreateFailed && !permanent
 		safeState := savedHost != "" && state == contract.BoxCreating && savedImage == ""
 		eligibility := createRetryUnknown
 		if terminalCreateFailure && retryHost == "" && safeState {

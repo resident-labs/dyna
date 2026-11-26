@@ -68,7 +68,7 @@ func (r *Reconciler) closePass(ctx context.Context, row store.LifecycleBox, host
 		if row.Want == store.WantClose && hadTurns && r.view.Connected(row.Session) {
 			due = r.now().Add(diffWait) // The box saves its diff first; its report brings the removal sooner.
 		}
-		changed, err := r.change(ctx, row.Box, next, due, 0, "", "", false)
+		changed, err := r.change(ctx, row.Box, next, due, 0, "", "", false, false)
 		if err != nil || !changed {
 			return err
 		}
@@ -93,7 +93,7 @@ func (r *Reconciler) closeStep(ctx context.Context, row store.LifecycleBox) erro
 	if err == nil {
 		next := row.Box
 		next.State, next.Reason = contract.BoxDeleted, ""
-		_, err = r.change(ctx, row.Box, next, time.Time{}, row.Failures, "", "", false)
+		_, err = r.change(ctx, row.Box, next, time.Time{}, row.Failures, "", "", false, false)
 		return err
 	}
 	if ctx.Err() != nil {

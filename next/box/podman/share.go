@@ -15,6 +15,8 @@ const (
 	shareUpLine = "dyna-share up"
 	// shareDownStatus is how a host refuses to make a folder under a mount that is down.
 	shareDownStatus = remoteExit(253)
+	// missingMountStatus is how a host says a mount's source is not there.
+	missingMountStatus = remoteExit(252)
 	// shareUnmountableStatus is how shareNeeds says the host can never mount, whatever its wait: fusermount3 is not setuid.
 	shareUnmountableStatus = remoteExit(2)
 	// shareNeeds says what a host lacks for its mount, and exits 1, or 2 when no wait will help. Dyna changes no host system file itself.
@@ -75,6 +77,8 @@ exit 1
 	shareServerScript = `systemctl --user -q is-active dyna-share-server.service && exit 0
 systemd-run --user --quiet --collect --unit=dyna-share-server.service -- "$1" share serve --rooms "$2" --listen "$3"
 `
+	// presentScript only stats the path $1.
+	presentScript = `[ -e "$1" ] || exit 252`
 	// mountFolderScript makes the folder $1, which sits on the mount $2 if there is one.
 	mountFolderScript = `if [ -n "$2" ] && ! mountpoint -q -- "$2" 2>/dev/null; then exit 253; fi; if [ ! -e "$1" ]; then mkdir -p -m 0700 -- "$1"; fi`
 )
@@ -107,8 +111,25 @@ func (h *Host) EnsureShare(ctx context.Context, layout box.Layout) error {
 	return err
 }
 
+// CheckPresent stats the source of a mount that must exist, never reading it, and says what to do if it is not there. A mount that
+// need not exist passes.
+func (h *Host) CheckPresent(ctx context.Context, m box.Mount) error {
+	if m.Present == "" {
+		return nil
+	}
+	_, err := h.run(ctx, "bash", "-c", presentScript, "dyna", m.HostPath)
+	if errors.Is(err, missingMountStatus) {
+		return box.MissingMount{Text: m.Present}
+	}
+	return err
+}
+
 // makeMountFolder makes the folder of a writable mount, or of one that asks for it.
 func (h *Host) makeMountFolder(ctx context.Context, m box.Mount) error {
+	// A source the box cannot start without is never made here, and a vanished one is not made again.
+	if m.Present != "" {
+		return h.CheckPresent(ctx, m)
+	}
 	if m.ReadOnly && !m.MakeDir {
 		return nil
 	}

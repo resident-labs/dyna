@@ -156,7 +156,7 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 				// A late failed result cannot overwrite Stop; importantly the stored
 				// image remains empty even though readiness and session work are proven.
 				late := event(contract.BoxChanged{From: contract.BoxCreating, To: contract.BoxFailed, Cause: contract.CauseCreateFailed, Phase: contract.CreatePhaseBox})
-				if err := st.FinishCreate(ctx, original, "", "host start reply failed", now.Add(time.Minute), 1, late, true); err != nil {
+				if err := st.FinishCreate(ctx, original, "", "host start reply failed", now.Add(time.Minute), 1, late, true, false); err != nil {
 					t.Fatal(err)
 				}
 			}

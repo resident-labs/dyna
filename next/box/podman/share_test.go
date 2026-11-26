@@ -246,3 +246,51 @@ func TestEnsureShareTellsAPermanentFailureFromATransientOne(t *testing.T) {
 		}
 	}
 }
+
+// A mount a box cannot start without is only stat'd: when it is missing the create is refused with its text and Podman never
+// makes an empty folder there, and the folder of a present one is left as it is.
+func TestAPresentMountIsCheckedNotMade(t *testing.T) {
+	h, err := New("user@host", t.TempDir(), "host", localShell{path: os.Getenv("PATH")}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder := filepath.Join(t.TempDir(), "agy", "accounts", "main")
+	mount := box.Mount{HostPath: folder, BoxPath: "/opt/agy/account", Present: "agy account folder missing at " + folder + ": sign in first"}
+	err = h.makeMountFolder(context.Background(), mount)
+	var missing box.MissingMount
+	if !errors.As(err, &missing) || missing.Text != mount.Present {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Stat(folder); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the missing folder was made: %v", err)
+	}
+	if err := os.MkdirAll(folder, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.makeMountFolder(context.Background(), mount); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(t.TempDir(), "antigravity")
+	err = h.makeMountFolder(context.Background(), box.Mount{HostPath: binary, BoxPath: "/opt/agy/antigravity", ReadOnly: true, Present: "agy binary not installed at " + binary})
+	if !errors.As(err, &missing) || missing.Text != "agy binary not installed at "+binary {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// A mount that need not exist passes the check, and a required one is only stat'd: it is never made, even when it vanished.
+func TestCheckPresentOnlyStats(t *testing.T) {
+	h, err := New("user@host", t.TempDir(), "host", localShell{path: os.Getenv("PATH")}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder := filepath.Join(t.TempDir(), "gone")
+	if err := h.CheckPresent(context.Background(), box.Mount{HostPath: folder, BoxPath: "/x"}); err != nil {
+		t.Fatalf("a mount that need not exist: %v", err)
+	}
+	if err := h.makeMountFolder(context.Background(), box.Mount{HostPath: folder, BoxPath: "/x", Present: "gone"}); !errors.As(err, new(box.MissingMount)) {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Stat(folder); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a required folder was made: %v", err)
+	}
+}

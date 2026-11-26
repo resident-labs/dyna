@@ -41,6 +41,11 @@ func (e NothingOnHost) Error() string {
 	return fmt.Sprintf("box %s has no container and no volume on host %s", e.Box, e.Host)
 }
 
+// MissingMount says a path a box must mount from its host is not there, and carries what the owner does about it.
+type MissingMount struct{ Text string }
+
+func (e MissingMount) Error() string { return e.Text }
+
 type MissingDevice struct {
 	Need Need
 	Host string
