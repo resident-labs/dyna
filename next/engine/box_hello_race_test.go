@@ -68,7 +68,7 @@ func TestACreateResultAfterTheHelloKeepsTheSessionStartupBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.FinishCreate(ctx, before, greeted.Image, "", now.Add(time.Minute), 0, event, false); err != nil {
+	if err := s.store.FinishCreate(ctx, before, greeted.Image, "", now.Add(time.Minute), 0, event, false, false); err != nil {
 		t.Fatal(err)
 	}
 	after, err := s.store.Box(ctx, session.Box)

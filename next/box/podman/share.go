@@ -111,14 +111,24 @@ func (h *Host) EnsureShare(ctx context.Context, layout box.Layout) error {
 	return err
 }
 
+// CheckPresent stats the source of a mount that must exist, never reading it, and says what to do if it is not there. A mount that
+// need not exist passes.
+func (h *Host) CheckPresent(ctx context.Context, m box.Mount) error {
+	if m.Present == "" {
+		return nil
+	}
+	_, err := h.run(ctx, "bash", "-c", presentScript, "dyna", m.HostPath)
+	if errors.Is(err, missingMountStatus) {
+		return box.MissingMount{Text: m.Present}
+	}
+	return err
+}
+
 // makeMountFolder makes the folder of a writable mount, or of one that asks for it.
 func (h *Host) makeMountFolder(ctx context.Context, m box.Mount) error {
+	// A source the box cannot start without is never made here, and a vanished one is not made again.
 	if m.Present != "" {
-		if _, err := h.run(ctx, "bash", "-c", presentScript, "dyna", m.HostPath); errors.Is(err, missingMountStatus) {
-			return box.MissingMount{Text: m.Present}
-		} else if err != nil {
-			return err
-		}
+		return h.CheckPresent(ctx, m)
 	}
 	if m.ReadOnly && !m.MakeDir {
 		return nil

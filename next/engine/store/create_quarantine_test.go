@@ -30,7 +30,7 @@ func TestCreateQuarantine(t *testing.T) {
 	event := func(i int) contract.Event {
 		return contract.Event{ID: contract.EventID(fmt.Sprintf("e%d", i)), Room: "r", Time: time.UnixMilli(100), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{Cause: contract.CauseCreateFailed}}
 	}
-	if err := s.FinishCreate(ctx, b, "", "retry", time.Time{}, 1, event(9), false); err != nil {
+	if err := s.FinishCreate(ctx, b, "", "retry", time.Time{}, 1, event(9), false, false); err != nil {
 		t.Fatal(err)
 	}
 	var retries int
@@ -40,7 +40,7 @@ func TestCreateQuarantine(t *testing.T) {
 	if _, err := s.writer.Exec("UPDATE boxes SET state='creating',host='h',create_retry_host='' WHERE id='b'"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.FinishCreate(ctx, b, "", "image build failed", time.Time{}, 3, event(10), false); err != nil {
+	if err := s.FinishCreate(ctx, b, "", "image build failed", time.Time{}, 3, event(10), false, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Read().QueryRow("SELECT create_failures FROM hosts WHERE name='h'").Scan(&retries); err != nil || retries != 0 {
@@ -50,7 +50,7 @@ func TestCreateQuarantine(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 3; i++ {
-		if err := s.FinishCreate(ctx, b, "", "failure", time.Time{}, 3, event(i), true); err != nil {
+		if err := s.FinishCreate(ctx, b, "", "failure", time.Time{}, 3, event(i), true, false); err != nil {
 			t.Fatal(err)
 		}
 		if i < 2 {
@@ -86,7 +86,7 @@ func TestCreateQuarantine(t *testing.T) {
 	if _, err := s.writer.Exec("UPDATE boxes SET state='creating',host='h',create_retry_host='' WHERE id='b'"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.FinishCreate(ctx, b, "image", "", time.Time{}, 0, event(3), false); err != nil {
+	if err := s.FinishCreate(ctx, b, "image", "", time.Time{}, 0, event(3), false, false); err != nil {
 		t.Fatal(err)
 	}
 	hosts, _ = s.Hosts(ctx)
@@ -102,7 +102,7 @@ func TestCreateQuarantine(t *testing.T) {
 	if err := s.SetHostSwitches(ctx, "h", nil, nil, nil, true, hostSwitchEvent); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.FinishCreate(ctx, b, "", "failure", time.Time{}, 3, event(4), true); err != nil {
+	if err := s.FinishCreate(ctx, b, "", "failure", time.Time{}, 3, event(4), true, false); err != nil {
 		t.Fatal(err)
 	}
 	var count int
@@ -115,7 +115,7 @@ func TestCreateQuarantine(t *testing.T) {
 	}
 	missing := event(5)
 	missing.Body = contract.BoxChanged{Cause: contract.CauseKVMDeviceMissing}
-	if err := s.FinishCreate(ctx, b, "", "KVM unavailable", time.Time{}, 0, missing, false); err != nil {
+	if err := s.FinishCreate(ctx, b, "", "KVM unavailable", time.Time{}, 0, missing, false, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Read().QueryRow("SELECT create_failures FROM hosts WHERE name='h'").Scan(&count); err != nil || count != 0 {
@@ -151,7 +151,7 @@ func TestQuarantineDetachesWaitingBoxes(t *testing.T) {
 		t.Fatal(err)
 	}
 	event := contract.Event{ID: "e", Room: "r", Time: time.UnixMilli(100), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{Cause: contract.CauseCreateFailed}}
-	if err := s.FinishCreate(ctx, b, "", "failure", time.Time{}, 3, event, true); err != nil {
+	if err := s.FinishCreate(ctx, b, "", "failure", time.Time{}, 3, event, true, false); err != nil {
 		t.Fatal(err)
 	}
 	var waiting, built, pinned sql.NullString

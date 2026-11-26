@@ -44,7 +44,7 @@ func TestRetainedDebtCacheDoesNotCoverRestartedIncarnation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.st.FinishCreate(ctx, fresh, "", "new creation failed", f.now, 3, contract.Event{ID: "independent-new-create-failed", Room: "r", Time: f.now.Add(time.Second), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{Cause: contract.CauseCreateFailed, Phase: contract.CreatePhaseBox}}, true); err != nil {
+	if err := f.st.FinishCreate(ctx, fresh, "", "new creation failed", f.now, 3, contract.Event{ID: "independent-new-create-failed", Room: "r", Time: f.now.Add(time.Second), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{Cause: contract.CauseCreateFailed, Phase: contract.CreatePhaseBox}}, true, false); err != nil {
 		t.Fatal(err)
 	}
 	if after, err := f.st.Box(ctx, "b"); err != nil || after.State != contract.BoxFailed || after.Host != "old" {

@@ -179,7 +179,7 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 	}
 	size, _ := box.Size(contract.BoxSizeAgent)
 	event := contract.Event{ID: "e", Room: "r", Time: time.UnixMilli(100), From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{}}
-	if err := s.FinishCreate(ctx, box.Box{ID: "b", Session: "s", Host: "h", Size: size, State: contract.BoxCreating}, "runner", "", time.Time{}, 0, event, false); err != nil {
+	if err := s.FinishCreate(ctx, box.Box{ID: "b", Session: "s", Host: "h", Size: size, State: contract.BoxCreating}, "runner", "", time.Time{}, 0, event, false, false); err != nil {
 		t.Fatal(err)
 	}
 	var problem string

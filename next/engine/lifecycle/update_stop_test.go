@@ -35,7 +35,7 @@ func TestStopIntentRejectsStaleLossObservation(t *testing.T) {
 	}
 	next := old
 	next.State, next.Reason = contract.BoxLost, boxDisconnectedReason
-	changed, err := rig.r.change(rig.ctx, old, next, time.Time{}, 0, contract.CauseHostLost, "", false)
+	changed, err := rig.r.change(rig.ctx, old, next, time.Time{}, 0, contract.CauseHostLost, "", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}

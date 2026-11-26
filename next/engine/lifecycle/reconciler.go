@@ -174,7 +174,7 @@ func (r *Reconciler) cancel(id contract.BoxID) <-chan struct{} {
 	r.mu.Unlock()
 	return step.done
 }
-func (r *Reconciler) change(ctx context.Context, old, next box.Box, due time.Time, failures int, cause contract.FailureCause, phase contract.CreatePhase, runtimeFailure bool) (bool, error) {
+func (r *Reconciler) change(ctx context.Context, old, next box.Box, due time.Time, failures int, cause contract.FailureCause, phase contract.CreatePhase, runtimeFailure bool, permanent bool) (bool, error) {
 	session, err := r.store.Session(ctx, old.Session)
 	if err != nil {
 		return false, err
@@ -184,7 +184,7 @@ func (r *Reconciler) change(ctx context.Context, old, next box.Box, due time.Tim
 		return false, err
 	}
 	if old.State == contract.BoxCreating && (next.State == contract.BoxStarting || next.State == contract.BoxFailed || next.State == contract.BoxPending) {
-		return true, r.store.FinishCreate(ctx, old, next.Image, next.Reason, due, failures, event, runtimeFailure)
+		return true, r.store.FinishCreate(ctx, old, next.Image, next.Reason, due, failures, event, runtimeFailure, permanent)
 	}
 	return r.store.SetBoxLifecycle(ctx, old, next, due, failures, event)
 }
@@ -281,7 +281,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 				if hostState[b.Host] == box.HostUnreachable {
 					next.Reason = "host unreachable"
 				}
-				changed, err := r.change(ctx, b, next, time.Time{}, row.Failures, contract.CauseHostLost, "", false)
+				changed, err := r.change(ctx, b, next, time.Time{}, row.Failures, contract.CauseHostLost, "", false, false)
 				if err != nil {
 					return err
 				}
@@ -363,7 +363,7 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 		if next.State == b.State && next.Reason == b.Reason {
 			continue
 		}
-		changed, err := r.change(ctx, b, next, time.Time{}, row.Failures, admissionCause, "", false)
+		changed, err := r.change(ctx, b, next, time.Time{}, row.Failures, admissionCause, "", false, false)
 		if err != nil {
 			return err
 		}
