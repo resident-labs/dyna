@@ -414,10 +414,26 @@ func (e *KimiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 		var frame []byte
 		var frameSize int
 		incompleteFrame := statusErr{code: http.StatusBadGateway, msg: "upstream stream ended with incomplete SSE data frame", streamTruncated: true}
-		processFrame := func() bool {
+		observe := func(line []byte) {
+			reporter.ObserveResponseModel(line)
+			streamUsage.ObserveOpenAIStream(line)
+		}
+		processFrame := func(interrupted bool) bool {
 			line, name := frame, eventName
 			frame, eventName, frameSize = nil, "", 0
 			payload := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data: ")))
+			if errPayload, ok := openAICompatStreamDataError(payload, name); ok {
+				observe(line)
+				failPayload(errPayload)
+				return false
+			}
+			if interrupted {
+				// Keep valid usage, but don't deliver data or a success marker from an unclosed frame.
+				if gjson.ValidBytes(payload) {
+					observe(line)
+				}
+				return true
+			}
 			isErrorEvent := openAICompatErrorEvent(name)
 			if len(payload) == 0 {
 				if isErrorEvent {
@@ -434,10 +450,6 @@ func (e *KimiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 				return false
 			}
 			if !isDone {
-				if errPayload, ok := openAICompatStreamDataError(payload, name); ok {
-					failPayload(errPayload)
-					return false
-				}
 				if isErrorEvent {
 					failPayload(statusErr{code: http.StatusBadGateway, msg: string(payload)})
 					return false
@@ -453,8 +465,7 @@ func (e *KimiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 			if bytes.IndexByte(line, '\n') >= 0 {
 				line = bytes.ReplaceAll(line, []byte("\n"), []byte(" "))
 			}
-			reporter.ObserveResponseModel(line)
-			streamUsage.ObserveOpenAIStream(line)
+			observe(line)
 			if !emit(line) {
 				return false
 			}
@@ -469,14 +480,14 @@ func (e *KimiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 			trimmed := bytes.TrimSpace(line)
 			switch {
 			case len(trimmed) == 0:
-				if !processFrame() {
+				if !processFrame(false) {
 					return
 				}
 			case bytes.HasPrefix(trimmed, dataTag):
 				// Scanner bounds each line; also bound all data lines held for one event.
 				frameSize += len(line) + 1
 				if frameSize > helps.StreamScannerBuffer {
-					errFrame := statusErr{code: http.StatusBadGateway, msg: "upstream SSE frame exceeds 50 MiB"}
+					errFrame := statusErr{code: http.StatusBadGateway, msg: "upstream SSE frame exceeds 50 MiB", streamTruncated: true}
 					failStream(errFrame, errFrame)
 					return
 				}
@@ -499,15 +510,23 @@ func (e *KimiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 		if errCtx := ctx.Err(); errCtx != nil && (errScan == nil || errors.Is(errScan, errCtx)) {
 			return
 		}
-		if errScan == nil && !sawDone && !processFrame() {
+		lineTooLong := errors.Is(errScan, bufio.ErrTooLong)
+		if !sawDone && !lineTooLong && !processFrame(errScan != nil) {
 			return
 		}
-		// An unfinished patch must retain its structured error even on a read failure.
+		// An unfinished patch retains its structured error, without cooling the
+		// credential when the validation failure follows a transport cut.
+		patchErr.streamTruncated = errScan != nil
 		if helps.EndApplyPatchStream(ctx, param, reporter, out, patchErr) {
 			return
 		}
 		if errScan != nil {
-			failStream(errScan, errScan)
+			msg := "upstream stream interrupted before [DONE]"
+			if lineTooLong {
+				msg = "upstream SSE line exceeds 50 MiB"
+			}
+			errTruncated := statusErr{code: http.StatusBadGateway, msg: msg, streamTruncated: true, diagnostic: errScan.Error()}
+			failStream(errTruncated, errTruncated)
 			return
 		}
 		if !sawDone && !sawFinishReason {

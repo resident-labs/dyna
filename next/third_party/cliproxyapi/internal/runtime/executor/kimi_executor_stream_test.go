@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -153,6 +154,29 @@ func TestKimiChatStreamBoundaries(t *testing.T) {
 	}
 }
 
+func TestKimiChatStreamReadFailurePreservesObservedUsage(t *testing.T) {
+	body := strings.TrimSuffix(kimiChatPartial, "\n")
+	chunks, _, records := runKimiHTTPStream(t, sdktranslator.FormatOpenAI, sdktranslator.FormatClaude, kimiChatStreamRequest, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprint(len(body)+12))
+		_, _ = io.WriteString(w, body)
+	})
+	var gotTruncation bool
+	for chunk := range chunks {
+		var e statusErr
+		if len(chunk.Payload) != 0 || !errors.As(chunk.Err, &e) || e.StatusCode() != http.StatusBadGateway || !e.IsStreamTruncated() {
+			t.Fatalf("want only a typed truncation error, got %q, %v", chunk.Payload, chunk.Err)
+		}
+		gotTruncation = true
+	}
+	if !gotTruncation {
+		t.Fatal("no truncation error")
+	}
+	record := kimiUsageRecord(t, records, true, 12, 3)
+	if record.Fail.Code != usage.FailureStreamTruncatedCode || record.Detail.ToolUsageDetails == nil || record.Detail.ToolUsageDetails.ToolCallsRequested == nil || *record.Detail.ToolUsageDetails.ToolCallsRequested != 1 {
+		t.Fatalf("truncation classification or observed tool usage lost: %+v, %+v", record.Fail, record.Detail.ToolUsageDetails)
+	}
+}
+
 func TestKimiChatStreamFrameLimits(t *testing.T) {
 	for _, tc := range []struct {
 		name, wantErr string
@@ -160,7 +184,7 @@ func TestKimiChatStreamFrameLimits(t *testing.T) {
 		lines         int
 	}{
 		{name: "multiline_above_old_limit", lineBytes: 1_500_000, lines: 1},
-		{name: "oversized_line", lineBytes: helps.StreamScannerBuffer, lines: 1, wantErr: "token too long"},
+		{name: "oversized_line", lineBytes: helps.StreamScannerBuffer, lines: 1, wantErr: "line exceeds 50 MiB"},
 		{name: "oversized_multiline_frame", lineBytes: helps.StreamScannerBuffer/2 + 1, lines: 2, wantErr: "frame exceeds 50 MiB"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -184,10 +208,13 @@ func TestKimiChatStreamFrameLimits(t *testing.T) {
 				}
 			}
 			if tc.wantErr != "" {
-				if errStream == nil || !strings.Contains(errStream.Error(), tc.wantErr) || len(payload) != 0 {
-					t.Fatalf("stream error = %v, payload length = %d, want %q and no payload", errStream, len(payload), tc.wantErr)
+				var e statusErr
+				if len(payload) != 0 || !errors.As(errStream, &e) || e.StatusCode() != http.StatusBadGateway || !e.IsStreamTruncated() || !strings.Contains(e.Error(), tc.wantErr) {
+					t.Fatalf("stream error = %v, payload length = %d, want typed %q and no payload", errStream, len(payload), tc.wantErr)
 				}
-				kimiUsageRecord(t, records, true, 0, 0)
+				if record := kimiUsageRecord(t, records, true, 0, 0); record.Fail.Code != usage.FailureStreamTruncatedCode {
+					t.Fatalf("usage failure code = %q", record.Fail.Code)
+				}
 				return
 			}
 			if errStream != nil || len(gjson.GetBytes(payload, "choices.0.ignored").Str) != tc.lineBytes || bytes.Contains(payload, []byte("\n")) {
