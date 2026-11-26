@@ -82,6 +82,7 @@ type Server struct {
 	mu       sync.Mutex
 	pending  map[string]context.CancelFunc
 	preparer post.Preparer
+	agy      surface
 }
 
 func New(forward Forward, local Local, preparer post.Preparer, discordEnabled ...bool) (*Server, error) {
@@ -103,7 +104,9 @@ func New(forward Forward, local Local, preparer post.Preparer, discordEnabled ..
 	for _, tool := range list {
 		names = append(names, tool.Name)
 	}
-	return &Server{list: list, names: strings.Join(names, ", "), actions: actions, forward: forward, local: local, pending: make(map[string]context.CancelFunc), preparer: preparer}, nil
+	s := &Server{list: list, names: strings.Join(names, ", "), actions: actions, forward: forward, local: local, pending: make(map[string]context.CancelFunc), preparer: preparer}
+	s.agy = s.agySurface()
+	return s, nil
 }
 
 // Description names the areas from the same registry as tools/list. It ranks the dyna tools in tool_search and answers
@@ -343,10 +346,10 @@ func sendProgress(w http.ResponseWriter, token json.RawMessage, count int) {
 	writeEvent(w, notice)
 }
 
-func (s *Server) stream(ctx context.Context, w http.ResponseWriter, p callParams) Result {
+func (s *Server) stream(ctx context.Context, w http.ResponseWriter, p callParams, run func(context.Context, callParams) Result) Result {
 	sendProgress(w, p.Meta.ProgressToken, 0)
 	done := make(chan Result, 1)
-	go func() { done <- s.call(ctx, p) }()
+	go func() { done <- run(ctx, p) }()
 	tick := time.NewTicker(30 * time.Second)
 	defer tick.Stop()
 	progress := 0
@@ -363,7 +366,17 @@ func (s *Server) stream(ctx context.Context, w http.ResponseWriter, p callParams
 	}
 }
 
+// ServeHTTP serves the full listing, which Pi reads.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.serve(w, r, surface{tools: s.list, instructions: s.Description()})
+}
+
+// Agy serves the compact listing for agy; its calls run the same code as ServeHTTP's.
+func (s *Server) Agy() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.serve(w, r, s.agy) })
+}
+
+func (s *Server) serve(w http.ResponseWriter, r *http.Request, surf surface) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
@@ -416,7 +429,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Version string `json:"version"`
 			} `json:"serverInfo"`
 			Instructions string `json:"instructions"`
-		}{ProtocolVersion: p.ProtocolVersion, Instructions: s.Description(), ServerInfo: struct {
+		}{ProtocolVersion: p.ProtocolVersion, Instructions: surf.instructions, ServerInfo: struct {
 			Name    string `json:"name"`
 			Version string `json:"version"`
 		}{"dyna", "1"}})
@@ -425,12 +438,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "tools/list":
 		resp.Result = marshal(struct {
 			Tools []Tool `json:"tools"`
-		}{s.list})
+		}{surf.tools})
 	case "tools/call":
 		var p callParams
 		if err := json.Unmarshal(req.Params, &p); err != nil || p.Arguments == nil {
 			resp.Error = &rpcError{-32602, "Invalid tool call."}
 			break
+		}
+		run := func(ctx context.Context, p callParams) Result {
+			var verb string
+			_ = json.Unmarshal(p.Arguments["action"], &verb)
+			out := s.call(ctx, p)
+			if surf.compact && out.IsError {
+				out = s.withHelp(out, p.Name, verb)
+			}
+			return out
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), callTimeout)
 		s.mu.Lock()
@@ -445,11 +467,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if len(p.Meta.ProgressToken) > 0 && strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.Header().Set("Cache-Control", "no-cache")
-			resp.Result = marshal(s.stream(ctx, w, p))
+			resp.Result = marshal(s.stream(ctx, w, p, run))
 			writeEvent(w, resp)
 			return
 		}
-		resp.Result = marshal(s.call(ctx, p))
+		resp.Result = marshal(run(ctx, p))
 	default:
 		resp.Error = &rpcError{-32601, "Method not found."}
 	}
