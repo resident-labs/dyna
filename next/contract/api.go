@@ -793,6 +793,9 @@ const (
 // AgyGeminiDir is where a box sees the signed-in agy profile folder.
 const AgyGeminiDir = "/opt/agy/account"
 
+// GitHubAgyPath is where the box socket serves GitHub's tools as agy declares them (short descriptions, help behind github_help); /github/ is the full listing.
+const GitHubAgyPath = "/github-agy/"
+
 // BoxAgy says where the agy harness's files are in the box: the program, and the signed-in profile directory, mounted read-write from the host; nothing in it is read or copied.
 type BoxAgy struct {
 	Binary    string `json:"binary"`

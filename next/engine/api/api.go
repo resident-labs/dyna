@@ -786,7 +786,9 @@ func (a *API) handler(c Caller) http.Handler {
 		mux.HandleFunc("/model/", func(w http.ResponseWriter, r *http.Request) { a.model(c).ServeHTTP(w, r) })
 	}
 	if box(c) {
-		mux.HandleFunc("/github/", func(w http.ResponseWriter, r *http.Request) { a.githubTools(c, w, r) })
+		for _, path := range []string{"/github/", contract.GitHubAgyPath} {
+			mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) { a.githubTools(c, w, r) })
+		}
 	}
 	// Never on the web listener, which Connect carries off the host.
 	if owner(c) && !c.Web && a.localModel != nil {
