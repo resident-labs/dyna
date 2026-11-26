@@ -2,14 +2,17 @@ package api
 
 import (
 	"context"
-	"github.com/resident-labs/dyna/engine/githubwrites"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/githubmcp"
+	"github.com/resident-labs/dyna/engine/githubwrites"
 )
 
 type githubToolsService struct {
@@ -92,5 +95,37 @@ func TestGitHubToolsGetTheSocketsRoomWrites(t *testing.T) {
 	call("room_b")
 	if len(seen) != 2 || !seen[0].On() || !seen[0].Allows("acme/app") || seen[1].On() {
 		t.Fatalf("grants seen: %+v", seen)
+	}
+}
+
+// A box socket serves GitHub's tools at /github/ in full and at /github-agy/ as agy declares them: github_help is in the second
+// listing and not in the first, from the service's one handler.
+func TestBoxSocketServesTheAgyGitHubListing(t *testing.T) {
+	handler, err := githubmcp.Handler(t.Context(), "token", http.DefaultTransport, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(New(&githubToolsService{tools: handler}, nil).handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalSession, Session: "ses_a"}, Box: "box_a", Room: "room_a"}))
+	defer server.Close()
+	names := func(path string) []string {
+		t.Helper()
+		session, err := mcp.NewClient(&mcp.Implementation{Name: "agy", Version: "test"}, nil).Connect(t.Context(), &mcp.StreamableClientTransport{Endpoint: server.URL + path}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer session.Close()
+		listed, err := session.ListTools(t.Context(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for _, tool := range listed.Tools {
+			names = append(names, tool.Name)
+		}
+		return names
+	}
+	full, agy := names("/github/"), names(contract.GitHubAgyPath)
+	if slices.Contains(full, "github_help") || !slices.Contains(agy, "github_help") || !slices.Contains(full, "search_code") || len(agy) != len(full)+1 {
+		t.Fatalf("full %v\nagy %v", full, agy)
 	}
 }

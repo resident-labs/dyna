@@ -67,6 +67,21 @@ func bare(v any) any {
 	return v
 }
 
+// terse is for a tool still over maxTool once bare: a property keeps its name and type, and its enum values and nested fields, which
+// github_help lists, go. projects_write is the one that needs it.
+func terse(schema any) any {
+	object, _ := schema.(map[string]any)
+	properties, _ := object["properties"].(map[string]any)
+	for name, value := range properties {
+		field, _ := value.(map[string]any)
+		delete(field, "enum")
+		if _, nested := field["properties"]; nested {
+			properties[name] = map[string]any{"type": "object"}
+		}
+	}
+	return schema
+}
+
 func holdsObjects(items any) bool {
 	object, _ := items.(map[string]any)
 	_, shaped := object["properties"]
@@ -133,6 +148,9 @@ func compactTool(tool *mcp.Tool) (string, error) {
 	}
 	tool.Description = compactDescription(tool.Description)
 	tool.InputSchema = bare(parsed)
+	if size, _ := json.Marshal(map[string]any{"name": tool.Name, "description": tool.Description, "inputSchema": tool.InputSchema}); len(size) > maxTool {
+		tool.InputSchema = terse(tool.InputSchema)
+	}
 	return help, nil
 }
 

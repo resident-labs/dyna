@@ -104,12 +104,7 @@ func TestAgyListingIsCompactForEveryTool(t *testing.T) {
 		largest := 0
 		for name, tool := range agyTools {
 			data, _ := json.Marshal(map[string]any{"name": tool.Name, "description": tool.Description, "inputSchema": tool.InputSchema})
-			limit := maxTool
-			if name == "projects_write" {
-				// Only with the projects group on: its method enum and 25 fields cannot go under maxTool bare, and 1,750 is still under agy's cut of about 1,800.
-				limit = 1750
-			}
-			if len(data) > limit {
+			if len(data) > maxTool {
 				t.Errorf("writes %v: %s declares %d bytes", writes, name, len(data))
 			}
 			largest = max(largest, len(data))
@@ -125,7 +120,8 @@ func TestAgyListingIsCompactForEveryTool(t *testing.T) {
 				t.Errorf("%s is only in the agy listing", name)
 				continue
 			}
-			if want := asMap(t, whole.InputSchema); !reflect.DeepEqual(withoutHeaders(bare(want)), schema) {
+			want := withoutHeaders(bare(asMap(t, whole.InputSchema)))
+			if terse := (name == "projects_write"); terse && !reflect.DeepEqual(withoutShapes(want), withoutShapes(schema)) || !terse && !reflect.DeepEqual(want, schema) {
 				t.Errorf("%s: compact schema differs from the full one beyond descriptions", name)
 			}
 			if first, _, _ := strings.Cut(whole.Description, "\n"); !strings.HasPrefix(tool.Description, strings.TrimSuffix(first, "…")[:min(len(first), firstLine-1)]) {
@@ -162,8 +158,8 @@ func TestHelpAnswersTheFullText(t *testing.T) {
 			}
 		}
 	}
-	for tool, want := range map[string]string{"search_issues": "query", "pull_request_read": "get_files", "actions_list": "jobs is the list itself", "projects_write": "pass item_id or node_id"} {
-		got, _ := agy.CallTool(ctx, &mcp.CallToolParams{Name: helpName, Arguments: map[string]any{"tool": tool}})
+	for tool, want := range map[string]string{"search_issues": "query", "pull_request_read": "get_files", "actions_list": "jobs is the list itself", "projects_write": "pass item_id or node_id", "projects_write ": "update_project_items", " projects_write": "updated_field.value", "projects_write  ": "items[] each is: "} {
+		got, _ := agy.CallTool(ctx, &mcp.CallToolParams{Name: helpName, Arguments: map[string]any{"tool": strings.TrimSpace(tool)}})
 		if got == nil || !strings.Contains(text(got), want) {
 			t.Errorf("%s help lacks %q: %v", tool, want, got)
 		}
@@ -218,4 +214,15 @@ func TestAgyCallsAreTheFullOnesAndRefusalsCarryHelp(t *testing.T) {
 	if !strings.Contains(message, "get_files") {
 		t.Fatalf("a mistyped argument carries no help: %q", message)
 	}
+}
+
+// withoutShapes keeps each property's name and type and nothing under it, which is all a terse listing promises.
+func withoutShapes(schema any) any {
+	object := schema.(map[string]any)
+	properties, _ := object["properties"].(map[string]any)
+	names := map[string]any{}
+	for name, value := range properties {
+		names[name], _ = value.(map[string]any)["type"]
+	}
+	return map[string]any{"properties": names, "required": object["required"]}
 }
