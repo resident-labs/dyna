@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"regexp"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/resident-labs/dyna/engine/prompt"
@@ -351,6 +352,11 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 			update := s.binary
 			if !stale {
 				update = handle.Refresh()
+			}
+			if update == "" {
+				if fence, err := s.store.HandoffFence(ctx, session.ID); err == nil && fence > 0 {
+					update = "handoff-" + strconv.FormatInt(fence, 10)
+				}
 			}
 			dispatch := s.store.Dispatch
 			if update != "" {

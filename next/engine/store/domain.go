@@ -62,6 +62,8 @@ type Session struct {
 	Root            bool  // read back only: the session has no parent
 	Closing         bool  // read back only: the session is closing
 	ClearedAt       int64 // read back only: unix millis when a clear is pending for the next turn, or 0
+	Handoff         bool  // read back only: its next conversation starts from a handoff of the earlier files
+	HandoffGen      int64 // read back only: names that handoff, the events seq it became due at; 0 when none
 	// Workflow makes the new session a crew. It is set only to start one: Session does not read it back.
 	Workflow *WorkflowRun
 }
@@ -368,6 +370,10 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 				return ErrTurnConflict
 			}
 			return nil
+		}
+		// A turn that started after the handoff became due has carried it; one that was already running when it was set has not.
+		if _, err := tx.ExecContext(ctx, "UPDATE sessions SET handoff=0 WHERE id=? AND handoff>0 AND handoff<(SELECT COALESCE(started_seq,0) FROM turns WHERE id=?)", session, output.Turn); err != nil {
+			return err
 		}
 		deferred := false
 		if output.Outcome == contract.TurnCompleted {
@@ -684,7 +690,8 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 
 func (s *Store) Session(ctx context.Context, id contract.SessionID) (Session, error) {
 	var session Session
-	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.repo,s.profile,b.id,s.close_reason,s.compose,s.parent IS NULL,s.state='closing',s.cleared_at,COALESCE((SELECT id FROM turns WHERE session=s.id AND ended_at IS NULL),'') FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL", id).Scan(&session.ID, &session.Room, &session.Name, &session.Repo, &session.Profile, &session.Box, &session.CloseReason, &session.Compose, &session.Root, &session.Closing, &session.ClearedAt, &session.Turn)
+	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.repo,s.profile,b.id,s.close_reason,s.compose,s.parent IS NULL,s.state='closing',s.cleared_at,COALESCE((SELECT id FROM turns WHERE session=s.id AND ended_at IS NULL),''),s.handoff FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL", id).Scan(&session.ID, &session.Room, &session.Name, &session.Repo, &session.Profile, &session.Box, &session.CloseReason, &session.Compose, &session.Root, &session.Closing, &session.ClearedAt, &session.Turn, &session.HandoffGen)
+	session.Handoff = session.HandoffGen > 0
 	return session, err
 }
 
@@ -1080,7 +1087,7 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 	var paused bool
 	err = s.Write(ctx, func(tx *sql.Tx) error {
 		var boxID contract.BoxID
-		err := tx.QueryRowContext(ctx, `SELECT b.id,s.profile,r.paused_at IS NOT NULL FROM sessions s JOIN boxes b ON b.session=s.id JOIN rooms r ON r.id=s.room WHERE s.id=? AND s.state='open' AND s.closed_at IS NULL AND b.want='run' AND b.state='ready'`, session).Scan(&boxID, &profile, &paused)
+		err := tx.QueryRowContext(ctx, `SELECT b.id,s.profile,r.paused_at IS NOT NULL FROM sessions s JOIN boxes b ON b.session=s.id JOIN rooms r ON r.id=s.room WHERE s.id=? AND s.state='open' AND s.closed_at IS NULL AND b.want='run' AND b.state='ready' AND NOT (s.handoff>0 AND b.hello_seq<=s.handoff)`, session).Scan(&boxID, &profile, &paused)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -1227,7 +1234,7 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 			if err != nil {
 				return err
 			}
-			_, err = tx.ExecContext(ctx, "INSERT INTO turns(id,session,started_at,started_seq,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cleared_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", active, session, started.Time.UnixMilli(), seq, "", "", 0, 0, 0, 0, clearedAt)
+			_, err = tx.ExecContext(ctx, "INSERT INTO turns(id,session,started_at,started_seq,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cleared_at,profile) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", active, session, started.Time.UnixMilli(), seq, "", "", 0, 0, 0, 0, clearedAt, profile)
 			if err != nil {
 				return err
 			}

@@ -137,3 +137,13 @@ func TestWarmStartChecksTheAgySources(t *testing.T) {
 		t.Fatalf("a box that is not agy, or is closing: %v, checked %v", err, skipped.checked)
 	}
 }
+
+// A container is labelled with the handoff its session waited on when it was made, so one made before a harness switch is stale
+// and one made after it is not.
+func TestContainerCarriesTheHandoffLabel(t *testing.T) {
+	b := &Boxes{Layout: box.Layout{HostData: "/host"}}
+	_, c := b.container(lifecycle.BoxSpec{Agy: true, Handoff: 42}, "image", box.Mount{})
+	if !slices.Contains(c.Labels, box.Label{Key: box.HandoffLabel, Value: "42"}) {
+		t.Fatalf("labels %#v", c.Labels)
+	}
+}

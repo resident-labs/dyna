@@ -44,6 +44,10 @@ type ContainerSpec struct {
 	GPUCard *int
 }
 
+// HandoffLabel records on a container the generation of the handoff its session was waiting on when it was made, so that a
+// session that changed harness since finds its container stale, and one made after the change does not.
+const HandoffLabel = "dyna.handoff"
+
 // ContainerLayout identifies the mount layout created by the current engine.
 const ContainerLayout = "6"
 
@@ -55,6 +59,9 @@ type ContainerStatus struct {
 	Binary string
 	// Stack is the Hash of the stack the container was made for.
 	Stack string
+	// Handoff is the handoff a session was waiting on when the container was made (its generation), empty for a container made
+	// before there was one. A container made for a handoff that is still pending is the one that session wants.
+	Handoff string
 }
 type Forward struct {
 	Box                  contract.BoxID

@@ -44,7 +44,7 @@ func (s *Store) SessionsOnProfile(ctx context.Context, name contract.ProfileName
 }
 
 // SetSessionProfile changes the profile and delivers the change atomically.
-func (s *Store) SetSessionProfile(ctx context.Context, target contract.SessionID, profile contract.ProfileName, event contract.Event) error {
+func (s *Store) SetSessionProfile(ctx context.Context, target contract.SessionID, profile contract.ProfileName, event contract.Event, harness *HarnessSwitch) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		tree, err := loadTree(ctx, tx, event.Room)
 		if err != nil {
@@ -52,6 +52,28 @@ func (s *Store) SetSessionProfile(ctx context.Context, target contract.SessionID
 		}
 		if !tree.CanManage(event.From, target) {
 			return ErrTreeForbidden
+		}
+		if harness != nil {
+			var state string
+			if err := tx.QueryRowContext(ctx, "SELECT state FROM sessions WHERE id=? AND closed_at IS NULL", target).Scan(&state); err != nil {
+				return err
+			}
+			if state != "open" {
+				return ErrSessionClosing
+			}
+			if len(harness.Profiles) > 0 {
+				var open int
+				if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions WHERE profile IN (SELECT value FROM json_each(?)) AND closed_at IS NULL", mustJSON(harness.Profiles)).Scan(&open); err != nil {
+					return err
+				}
+				if open >= harness.Limit {
+					return ErrProfileFull
+				}
+			}
+			// The handoff is due from the next turn, not from one already running.
+			if _, err := tx.ExecContext(ctx, "UPDATE sessions SET handoff=MAX(1,(SELECT COALESCE(MAX(seq),0) FROM events)) WHERE id=?", target); err != nil {
+				return err
+			}
 		}
 		return s.setProfile(ctx, tx, target, profile, event)
 	})
@@ -89,4 +111,23 @@ func (s *Store) setProfile(ctx context.Context, tx *sql.Tx, target contract.Sess
 		return err
 	}
 	return s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: target}, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: outcome == contract.TurnFailed})
+}
+
+// HarnessSwitch says a session's profile change is a change of harness, which starts its native conversation again from a
+// handoff. Profiles are the agy profiles when the session moves onto agy, so the account's limit is held inside the same
+// transaction; nil for a change within one harness.
+type HarnessSwitch struct {
+	Profiles []contract.ProfileName
+	Limit    int
+}
+
+// TurnProfile is the profile a turn was dispatched under, which names the harness that served it: dispatch waits for a box that
+// serves the session's current harness. Empty for a turn from before the column existed.
+func (s *Store) TurnProfile(ctx context.Context, session contract.SessionID, turn contract.TurnID) (contract.ProfileName, error) {
+	var profile contract.ProfileName
+	err := s.Read().QueryRowContext(ctx, "SELECT profile FROM turns WHERE session=? AND id=?", session, turn).Scan(&profile)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return profile, err
 }

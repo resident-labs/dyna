@@ -177,6 +177,7 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	}
 	spec.Root = session.Root
 	spec.Agy = b.Pressure != nil && b.Pressure.AgyProfile(session.Profile)
+	spec.Handoff = session.HandoffGen
 	if err := b.Sockets.AddBox(spec.Box, spec.Session, session.Room); err != nil {
 		return "", box.RuntimeCreateError{Err: err}
 	}
@@ -303,6 +304,12 @@ func (b *Boxes) Inspect(ctx context.Context, id contract.BoxID) (box.ContainerSt
 		return box.ContainerStatus{}, false, err
 	}
 	status.StaleLayout = status.StaleLayout || status.Binary != wanted
+	// A container made before the session's pending handoff is the one for its old harness, with the mounts of that one.
+	if record, err := b.Store.Box(ctx, id); err == nil {
+		if session, err := b.Store.Session(ctx, record.Session); err == nil && session.HandoffGen > 0 {
+			status.StaleLayout = status.StaleLayout || status.Handoff != strconv.FormatInt(session.HandoffGen, 10)
+		}
+	}
 	return status, true, nil
 }
 
@@ -548,6 +555,7 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image stri
 	}
 	spec.Root = session.Root
 	spec.Agy = b.Pressure != nil && b.Pressure.AgyProfile(session.Profile)
+	spec.Handoff = session.HandoffGen
 	slice, c := b.container(spec, image, shared)
 	if err := run(contract.StartSlice, func(ctx context.Context) error { return h.EnsureSlice(ctx, slice) }); err != nil {
 		return err
@@ -605,6 +613,9 @@ func (b *Boxes) container(spec lifecycle.BoxSpec, image string, shared box.Mount
 		c.Mounts = append(c.Mounts,
 			box.Mount{HostPath: filepath.Dir(b.Layout.HostRootAddons("")), BoxPath: "/run/dyna/root-addons/global", ReadOnly: true, MakeDir: true},
 			box.Mount{HostPath: filepath.Dir(b.Layout.HostRootAddons(spec.Room)), BoxPath: "/run/dyna/root-addons/room", ReadOnly: true, MakeDir: true})
+	}
+	if spec.Handoff > 0 {
+		c.Labels = append(c.Labels, box.Label{Key: box.HandoffLabel, Value: strconv.FormatInt(spec.Handoff, 10)})
 	}
 	if spec.Agy {
 		c.Mounts = append(c.Mounts, b.agyMounts()...)

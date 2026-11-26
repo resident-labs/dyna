@@ -20,6 +20,8 @@ type BoxSpec struct {
 	Stack   *box.Stack
 	GPUCard *int // the card the box was assigned, nil when it asked for none
 	Agy     bool // the session runs on the agy harness, so its box mounts agy's program and signed-in profile folder
+	// Handoff is the generation of the handoff its session waits on, 0 for none; the container is labelled with it.
+	Handoff int64
 }
 
 type BoxAdapter interface {

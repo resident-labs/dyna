@@ -6,13 +6,22 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 130
+const schemaVersion = 131
 
 const agentsTable = `CREATE TABLE agents (id TEXT PRIMARY KEY, session TEXT NOT NULL REFERENCES sessions(id), turn TEXT NOT NULL, name TEXT NOT NULL, state TEXT NOT NULL, transcript TEXT NOT NULL DEFAULT '', start_offset INTEGER NOT NULL DEFAULT 0, started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL DEFAULT 0, model TEXT NOT NULL DEFAULT '', input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, cache_read_tokens INTEGER NOT NULL DEFAULT 0, cache_write_tokens INTEGER NOT NULL DEFAULT 0)`
 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
+	// agy: the events seq from which a session's fresh conversation needs a handoff (it changed harness), what its box said at its last
+	// hello (the events seq it started from, and whether it can hand a conversation over), and the profile each turn was dispatched
+	// under, which names the harness that serves it.
+	130: {
+		`ALTER TABLE sessions ADD COLUMN handoff INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE boxes ADD COLUMN hello_seq INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE boxes ADD COLUMN can_handoff INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE turns ADD COLUMN profile TEXT NOT NULL DEFAULT ''`,
+	},
 	// Session conversation clearing: pending clear timestamp on sessions, and the turn that consumed it.
 	129: {
 		`ALTER TABLE sessions ADD COLUMN cleared_at INTEGER NOT NULL DEFAULT 0`,
