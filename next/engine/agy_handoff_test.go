@@ -288,3 +288,71 @@ func TestRunningAgyTurnKeepsItsHarnessWhenItsProfileIsRemoved(t *testing.T) {
 		t.Fatalf("retries %d: %v", retries, err)
 	}
 }
+
+// A box still starting that was made before the switch is refused its hello, so it gets no initialize of the new harness and no
+// startup time, and its stop is requested for a replacement made with the new layout.
+func TestStartingBoxMadeBeforeTheSwitchIsRefusedAndStopped(t *testing.T) {
+	s, room, _, owner := agySetup(t)
+	ctx := t.Context()
+	sid := startOn(t, s, room, "old-layout", "other", "hermeslab")
+	readySession(t, s, sid)
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE boxes SET state='starting' WHERE session=?", sid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, e := s.SessionSetProfile(ctx, owner, contract.SessionSetProfileRequest{Session: sid, Profile: "gem"}); e != nil {
+		t.Fatal(e)
+	}
+	hello, p := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{CanHandoff: true, WaitForChannel: true})
+	if p == nil || p.Code != contract.ErrConflict || hello.Agy != nil {
+		t.Fatalf("hello = %+v, %v", hello, p)
+	}
+	session, err := s.store.Session(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	box, err := s.store.Box(ctx, session.Box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want string
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT want FROM boxes WHERE id=?", box.ID).Scan(&want); err != nil {
+		t.Fatal(err)
+	}
+	if want != "stop" {
+		t.Fatalf("box want %q", want)
+	}
+}
+
+// A profile edit takes the registry's write lock for its check, so it waits for an assignment that holds the read lock from its
+// decision to its commit; the assignment cannot decide on a definition the edit changes before it commits.
+func TestProfileEditWaitsForAnAssignmentInFlight(t *testing.T) {
+	config, err := loadAgyProfiles(t, agyProfilesJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inside, release, done := make(chan struct{}), make(chan struct{}), make(chan *contract.Error)
+	go config.WithProfile("test", func() *contract.Error {
+		close(inside)
+		<-release
+		return nil
+	})
+	<-inside
+	go func() {
+		done <- config.Set("test", &profile{Provider: "google", Model: "gemini-3.8-flash", AllowedModels: []string{"gemini-3.8-flash"}, Thinking: "low", MaxConcurrent: 1, Harness: contract.HarnessAgy}, false, func(profile) *contract.Error { return nil })
+	}()
+	select {
+	case <-done:
+		t.Fatal("the edit committed while an assignment was in flight")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	if problem := <-done; problem != nil {
+		t.Fatal(problem)
+	}
+	if config.Harness("test") != contract.HarnessAgy {
+		t.Fatal("the edit did not apply")
+	}
+}

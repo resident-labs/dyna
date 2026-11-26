@@ -46,6 +46,21 @@ func (s *Store) StopQuiet(ctx context.Context, ids []contract.SessionID, cutoff 
 	return s.stopFree(ctx, ids, false, quiet, cutoff.UnixMilli())
 }
 
+// StopStartingBox asks for the stop of a box that is still starting, which no turn runs in, and says whether it did.
+func (s *Store) StopStartingBox(ctx context.Context, box contract.BoxID) (bool, error) {
+	var stopped bool
+	err := s.Write(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, "UPDATE boxes SET want='stop' WHERE id=? AND want='run' AND state IN ('creating','starting')", box)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		stopped = n > 0
+		return err
+	})
+	return stopped, err
+}
+
 // StopStale requests stops for boxes on an old binary, or marked to restart, as soon as nothing runs in them, with no wait.
 // An open child does not hold one back: WakeStopped starts its parent again at once. A wake
 // on its way does not hold one back: its delivery stays stored, DispatchStale opens no turn on a box nothing needs, and WakeStopped

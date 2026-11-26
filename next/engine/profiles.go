@@ -337,20 +337,20 @@ func (s *Service) ProfileSet(ctx context.Context, who contract.Principal, req co
 	if slices.ContainsFunc(append(slices.Clone(v.AllowedModels), v.Model), func(id string) bool { return strings.HasPrefix(id, "antigravity/") }) {
 		return contract.ProfileSetResponse{}, invalid("antigravity/ models no longer run through the proxy; make a profile with --harness agy and --provider google instead")
 	}
-	if !req.Create {
-		for _, old := range p.List() {
-			if old.Name != v.Name || old.Harness == v.Harness {
-				continue
-			}
-			if used, err := s.store.ProfileInUse(ctx, v.Name); err != nil {
-				return contract.ProfileSetResponse{}, failure(err)
-			} else if used {
-				return contract.ProfileSetResponse{}, &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("profile %s runs on %s and open sessions use it, and a session cannot move between pig and agy; make a new profile on %s for new sessions, or close those sessions first", v.Name, old.Harness, v.Harness)}
-			}
-		}
-	}
 	images := v.Images == nil || *v.Images
-	err := p.update(v.Name, &profile{Description: v.Description, Taste: v.Taste, Diagnostics: v.Diagnostics, Intelligence: v.Intelligence, Cost: v.Cost, Provider: v.Provider, Model: v.Model, Images: images, AllowedModels: slices.Clone(v.AllowedModels), Thinking: v.Thinking, CompactTokens: v.CompactTokens, MaxConcurrent: v.MaxConcurrent, Harness: v.Harness}, req.Create)
+	// A change of harness is refused while sessions use the profile, checked under the registry's write lock: an assignment holds the
+	// read lock from its decision to its commit, so none can land on the old harness meanwhile.
+	err := p.Set(v.Name, &profile{Description: v.Description, Taste: v.Taste, Diagnostics: v.Diagnostics, Intelligence: v.Intelligence, Cost: v.Cost, Provider: v.Provider, Model: v.Model, Images: images, AllowedModels: slices.Clone(v.AllowedModels), Thinking: v.Thinking, CompactTokens: v.CompactTokens, MaxConcurrent: v.MaxConcurrent, Harness: v.Harness}, req.Create, func(old profile) *contract.Error {
+		if old.Harness == v.Harness {
+			return nil
+		}
+		if used, err := s.store.ProfileInUse(ctx, v.Name); err != nil {
+			return failure(err)
+		} else if used {
+			return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("profile %s runs on %s and open sessions use it, and a session cannot move between pig and agy; make a new profile on %s for new sessions, or close those sessions first", v.Name, old.Harness, v.Harness)}
+		}
+		return nil
+	})
 	if err == nil {
 		s.wakeWorkflowsOnProfile(ctx, v.Name)
 		if !req.Create {
@@ -361,6 +361,18 @@ func (s *Service) ProfileSet(ctx context.Context, who contract.Principal, req co
 		}
 	}
 	return contract.ProfileSetResponse{}, err
+}
+
+// Set writes a profile after check, which sees the profile it replaces, under the write lock. check is not called for a new profile.
+func (p *ProfileConfig) Set(name contract.ProfileName, value *profile, create bool, check func(old profile) *contract.Error) *contract.Error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if old, ok := p.entries[name]; ok && !create {
+		if problem := check(old); problem != nil {
+			return problem
+		}
+	}
+	return p.updateLocked(name, value, create)
 }
 
 // WithProfile protects a profile from removal while fn commits a session write.

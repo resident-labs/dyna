@@ -768,19 +768,19 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 	if _, _, err := s.profiles.Model(req.Profile); err != nil {
 		return response, invalid("unknown profile")
 	}
-	switching := s.profiles.Harness(target.Profile) != s.profiles.Harness(req.Profile)
-	if switching {
-		if problem := s.checkHarnessSwitch(ctx, target, req.Profile); problem != nil {
-			return response, problem
-		}
-	}
 	event, err := s.event(target.Room, caller, contract.SessionProfileChanged{Session: target.ID, Profile: req.Profile})
 	if err != nil {
 		return response, failure(err)
 	}
+	switching := false
+	// The harnesses are compared, the target checked and the write committed under one hold of the profile registry, so an edit of
+	// either profile cannot land between the decision and the write.
 	problem = s.withProfile(req.Profile, func() *contract.Error {
 		var harness *store.HarnessSwitch
-		if switching {
+		if switching = s.profiles.Harness(target.Profile) != s.profiles.Harness(req.Profile); switching {
+			if problem := s.checkHarnessSwitch(ctx, target, req.Profile); problem != nil {
+				return problem
+			}
 			harness = &store.HarnessSwitch{RequireHandoff: true}
 			harness.Profiles, harness.Limit = s.agyAccount(req.Profile)
 		}

@@ -22,6 +22,19 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	if err != nil {
 		return contract.BoxHelloResponse{}, failure(err)
 	}
+	// A container made before the session's handoff became due has the old harness's layout: it lacks the mounts and the label the new
+	// harness needs, so it is told nothing, given no startup time and replaced. A box already up with a turn running is left to finish
+	// it: the stored fence stops it between turns.
+	if session.HandoffGen > 0 && req.LaunchGen != session.HandoffGen {
+		stopped, err := s.store.StopStartingBox(ctx, session.Box)
+		if err != nil {
+			return contract.BoxHelloResponse{}, failure(err)
+		}
+		if stopped {
+			s.reconciler.Kick()
+			return contract.BoxHelloResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "this box was made before its session changed harness and is being replaced"}
+		}
+	}
 	// This goes before the box is ready, or a mark from its last run could stop it again.
 	if handle, ok := s.lookupSession(session.ID); ok {
 		handle.ClearRefresh()
