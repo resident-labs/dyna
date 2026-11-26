@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/harness/agy/acp"
 )
 
 // The mirror is a Pi-format session file, <SessionDir>/agy-<n>.jsonl, that the harness writes from agy's updates, so the
@@ -35,6 +36,8 @@ type sessionMeta struct {
 	Handoff string `json:"handoff,omitempty"`
 	// Gen is the generation of the handoff the session was opened for, pending or delivered.
 	Gen string `json:"handoffGen,omitempty"`
+	// Sending is set while the handoff is on its way to agy. A restart that finds it set cannot tell whether agy took it.
+	Sending bool `json:"handoffSending,omitempty"`
 }
 
 func readMeta(dir string) (sessionMeta, error) {
@@ -105,35 +108,6 @@ func mirrorEmpty(path string) bool {
 	return err != nil || info.Size() == 0
 }
 
-// handoffDelivered reports whether the mirror records a prompt that carried the handoff, which agy accepted.
-func handoffDelivered(path, gen string) bool {
-	file, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer file.Close()
-	reader := bufio.NewReaderSize(file, 1<<20)
-	for {
-		line, err := reader.ReadBytes('\n')
-		if bytes.Contains(line, []byte(`"handoff":true`)) {
-			var entry struct {
-				Type    string
-				Message struct {
-					Role       string
-					Handoff    bool
-					HandoffGen string
-				}
-			}
-			if json.Unmarshal(line, &entry) == nil && entry.Type == "message" && entry.Message.Role == "user" && entry.Message.Handoff && entry.Message.HandoffGen == gen {
-				return true
-			}
-		}
-		if err != nil {
-			return false
-		}
-	}
-}
-
 // record appends one Pi message entry to the mirror.
 func (h *Harness) record(message map[string]any) error {
 	h.fm.Lock()
@@ -165,19 +139,13 @@ func (h *Harness) recordEnding(reason, message string) {
 	}
 }
 
-// recordInputs writes what agy was sent. The first input is marked when its prompt carried the handoff: the text recorded is the user's own.
-func (h *Harness) recordInputs(inputs []contract.TurnInput, handoff bool) error {
-	h.mu.Lock()
-	gen := h.gen
-	h.mu.Unlock()
-	for i, input := range inputs {
+// recordInputs writes what agy was sent.
+func (h *Harness) recordInputs(inputs []contract.TurnInput) error {
+	for _, input := range inputs {
 		entry := map[string]any{
 			"role":       "user",
 			"deliveryId": strconv.FormatInt(int64(input.Delivery), 10),
 			"content":    []map[string]any{{"type": "text", "text": input.Text}},
-		}
-		if handoff && i == 0 {
-			entry["handoff"], entry["handoffGen"] = true, gen
 		}
 		err := h.record(entry)
 		if err != nil {
@@ -242,17 +210,80 @@ func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, e
 	return found, nil
 }
 
-// handoffAccepted forgets the handoff once agy has taken the prompt that carried it, and records that in the session file.
-func (h *Harness) handoffAccepted() {
-	h.mu.Lock()
-	h.handoff = ""
-	h.supplied = ""
-	id, gen := h.sessionID, h.gen
-	h.mu.Unlock()
-	h.fm.Lock()
-	mirror := h.mirror
-	h.fm.Unlock()
-	if err := writeMeta(h.cfg.SessionDir, sessionMeta{SessionID: id, Mirror: filepath.Base(mirror), Gen: gen}); err != nil {
-		log.Printf("agy: record the handoff as delivered: %v", err)
+// handoffDelivered reports whether the mirror records that agy took the handoff of this generation: a line of its own, written once
+// the prompt that carried it was answered, which the transcript readers pass over.
+func handoffDelivered(path, gen string) bool {
+	file, err := os.Open(path)
+	if err != nil {
+		return false
 	}
+	defer file.Close()
+	reader := bufio.NewReaderSize(file, 1<<20)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if bytes.Contains(line, []byte(`"type":"handoff"`)) {
+			var entry struct{ Type, Gen string }
+			if json.Unmarshal(line, &entry) == nil && entry.Type == "handoff" && entry.Gen == gen {
+				return true
+			}
+		}
+		if err != nil {
+			return false
+		}
+	}
+}
+
+// handoffSending records that the history is on its way to agy, in the session file, before it is written to agy.
+func (h *Harness) handoffSending() {
+	h.mu.Lock()
+	pending, id, gen := h.handoff, h.sessionID, h.gen
+	h.mu.Unlock()
+	h.writeHandoffMeta(sessionMeta{SessionID: id, Handoff: pending, Gen: gen, Sending: true})
+}
+
+func (h *Harness) writeHandoffMeta(meta sessionMeta) {
+	h.fm.Lock()
+	meta.Mirror = filepath.Base(h.mirror)
+	h.fm.Unlock()
+	if err := writeMeta(h.cfg.SessionDir, meta); err != nil {
+		log.Printf("agy: record the handoff's state: %v", err)
+	}
+}
+
+// handoffResult settles a handoff by what agy answered the prompt that carried it (T3 ContextHandoffDelivery.ts persists the delivery as
+// pending around the injection and restores it when the provider refused the prompt before consuming it):
+//   - agy took it (a result, or an error of its own): the handoff is delivered, and the mirror says so;
+//   - agy refused the prompt as invalid (-32600 to -32602), so it never consumed it: the handoff is pending again, for the next prompt;
+//   - no answer (the process went, the connection broke): whether agy took it cannot be known. T3 replaces the native thread
+//     (ContextHandoffDeliveryUncertainError), and so does this: the next Start opens a fresh session and hands the history over again.
+//     The old session may have had it too, which costs tokens; it is never lost.
+func (h *Harness) handoffResult(err error) {
+	var rpc *acp.Error
+	rejected := errors.As(err, &rpc)
+	h.mu.Lock()
+	pending, id, gen := h.handoff, h.sessionID, h.gen
+	switch {
+	case err != nil && !rejected:
+		h.broken = true // the conversation is replaced; h.handoff still holds the history for it
+		h.mu.Unlock()
+		return
+	case rejected && rpc.Code >= -32602 && rpc.Code <= -32600:
+		h.sending = false
+		h.mu.Unlock()
+		h.writeHandoffMeta(sessionMeta{SessionID: id, Handoff: pending, Gen: gen})
+		return
+	}
+	h.handoff, h.supplied, h.sending = "", "", false
+	h.mu.Unlock()
+	line, _ := json.Marshal(map[string]any{"type": "handoff", "gen": gen})
+	h.fm.Lock()
+	path := h.mirror
+	h.fm.Unlock()
+	if file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err != nil {
+		log.Printf("agy: record the handoff as delivered: %v", err)
+	} else {
+		file.Write(append(line, '\n'))
+		file.Close()
+	}
+	h.writeHandoffMeta(sessionMeta{SessionID: id, Gen: gen})
 }

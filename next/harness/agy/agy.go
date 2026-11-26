@@ -87,6 +87,7 @@ type Harness struct {
 	mu          sync.Mutex
 	handoff     string // the handoff the next prompt carries, until agy has accepted a prompt that did
 	gen         string // the generation of the handoff, pending or delivered, that the session was opened for
+	sending     bool   // a prompt carrying the handoff was sent and agy has not answered it yet
 	suppliedGen string
 	supplied    string // Config.Handoff, kept for a resume that fails, until a prompt carried a handoff
 	p           *process
@@ -200,10 +201,16 @@ func Open(ctx context.Context, c Config) (*Harness, error) {
 		gen = hex.EncodeToString(sum[:8])
 	}
 	mirror := filepath.Join(c.SessionDir, meta.Mirror)
+	// A history that was on its way to agy when the last run ended may or may not have reached it: T3 replaces the native thread
+	// (ContextHandoffDeliveryUncertainError), so a fresh session is opened and given it again.
+	ambiguous := meta.Sending && meta.Handoff != "" && !handoffDelivered(mirror, meta.Gen)
 	sameGen := c.Handoff != "" && meta.Mirror != "" && meta.Gen == gen
-	fresh := c.New && !sameGen
+	fresh := (c.New && !sameGen) || ambiguous
 	h.gen = meta.Gen
 	switch {
+	case ambiguous:
+		h.handoff = meta.Handoff
+		h.notice("the earlier conversation may not have reached agy; a new session is opened and it is handed over again")
 	case fresh:
 		h.handoff, h.gen = c.Handoff, gen
 	case meta.Handoff != "" && !handoffDelivered(mirror, meta.Gen):
@@ -590,7 +597,9 @@ func (h *Harness) openSession(ctx context.Context, p *process, resume string) er
 		if err := p.client.Call(ctx, "session/resume", params, &res); err != nil {
 			failed := h.exitError("session/resume", err, p)
 			var rpc *acp.Error
-			if errors.As(err, &rpc) && !errors.Is(failed, ErrSignInRequired) {
+			// Only a conversation agy does not have is replaced. A refusal that is an account, limit or verification failure is the failure
+			// it is, and ends the open once, as T3's does.
+			if errors.As(err, &rpc) && !errors.Is(failed, ErrSignInRequired) && classify(rpc.Message, time.Now(), true) == nil {
 				return fmt.Errorf("%w: %w", errResumeRejected, failed)
 			}
 			return failed

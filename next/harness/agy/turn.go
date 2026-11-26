@@ -73,7 +73,6 @@ type turn struct {
 	committed  map[string]int
 	recording  int // prompts being sent whose inputs are not in the mirror yet; what agy answers meanwhile waits in held, so the mirror reads the user input first
 	held       []map[string]any
-	carried    bool // the prompt being sent carries the handoff, which is delivered once agy has accepted it
 	openCalls  int
 	outlive    int  // open calls that outlive the prompt
 	answered   bool // agy has gone on from the prompt: a tool call or a thought came (a 404 after that is transient)
@@ -300,14 +299,14 @@ type told struct {
 // around it. A steer carries only the changed context entries, its text and attachments, with no instructions and no runtime
 // info (adapter.ts:10875-10899), and counts what the turn's earlier prompts offered as seen, so overlapping prompts do not
 // repeat it. It returns what to mark as told once the prompt has been answered (adapter.ts:10185-10225).
-func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process, steer bool) ([]map[string]any, func(bool), error) {
+func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process, steer bool) (blocks []map[string]any, commit func(bool), carried bool, err error) {
 	// The attachments are read first, so that nothing is offered until the prompt can be built.
 	var attachments []map[string]any
 	var total int64
 	for _, input := range inputs {
 		attached, err := attachmentBlocks(input.Files, p, &total)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, false, err
 		}
 		attachments = append(attachments, attached...)
 	}
@@ -321,7 +320,6 @@ func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process,
 	if offeredBefore != nil && offeredBefore.gen == state.gen {
 		state = *offeredBefore
 	}
-	var blocks []map[string]any
 	next := told{gen: state.gen, instructions: state.instructions, context: map[string]string{}, runtime: state.runtime}
 	for k, v := range state.context {
 		next.context[k] = v
@@ -345,11 +343,11 @@ func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process,
 	}
 	for i, input := range inputs {
 		text := input.Text
-		if i == 0 && !slash && !steer && h.handoff != "" {
+		if i == 0 && !slash && !steer && h.handoff != "" && !h.sending {
 			// T3 puts the history ahead of the user's text in the same message (ContextHandoffDelivery.ts withInlineContext); a slash command is
 			// not given it, as T3 defers the context to the turn after (isSlashCommandMessage).
 			text = handoff.Prompt(h.handoff, text)
-			t.carried = true
+			carried, h.sending = true, true
 		}
 		if i == 0 && instructions != "" {
 			text = instructions + "\n\n<user_request>\n" + text + "\n</user_request>"
@@ -373,7 +371,7 @@ func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process,
 	t.seq++
 	seq := t.seq
 	// commit runs with Harness.mu held, in the same scope that settles the prompt, before anything wakes the turn.
-	commit := func(failed bool) {
+	commit = func(failed bool) {
 		if h.told.gen != next.gen {
 			return
 		}
@@ -402,7 +400,7 @@ func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process,
 			h.told.runtime = next.runtime
 		}
 	}
-	return blocks, commit, nil
+	return blocks, commit, carried, nil
 }
 
 // resetTold makes the next prompt carry everything again: agy's process restarted, or its conversation was compacted or is new
@@ -424,7 +422,7 @@ func (h *Harness) begin(t *turn, inputs []contract.TurnInput, started func(), st
 	h.mu.Lock()
 	p, sid := h.p, h.sessionID
 	h.mu.Unlock()
-	blocks, commit, err := h.promptBlocks(t, inputs, p, steer)
+	blocks, commit, carried, err := h.promptBlocks(t, inputs, p, steer)
 	if err != nil {
 		h.mu.Lock()
 		t.open--
@@ -432,6 +430,11 @@ func (h *Harness) begin(t *turn, inputs []contract.TurnInput, started func(), st
 		h.mu.Unlock()
 		t.signal()
 		return err
+	}
+	if carried {
+		// The history is marked as being sent before the wire write, so a crash after it is told from one before it (T3 persists the
+		// delivery as pending around the injection, ContextHandoffDelivery.ts).
+		h.handoffSending()
 	}
 	h.mu.Lock()
 	t.recording++
@@ -444,6 +447,9 @@ func (h *Harness) begin(t *turn, inputs []contract.TurnInput, started func(), st
 	pending, err := p.client.Start("session/prompt", map[string]any{"sessionId": sid, "prompt": blocks})
 	if err != nil {
 		h.recorded(t)
+		if carried {
+			h.handoffResult(err)
+		}
 		h.mu.Lock()
 		t.open--
 		t.settle()
@@ -452,16 +458,10 @@ func (h *Harness) begin(t *turn, inputs []contract.TurnInput, started func(), st
 		return h.exitError("session/prompt", err, p)
 	}
 	// agy has the prompt now. A mirror that cannot be written fails the turn when the prompt ends, but does not leave it running unseen.
-	h.mu.Lock()
-	carried := t.carried
-	t.carried = false
-	h.mu.Unlock()
-	if err := h.recordInputs(inputs, carried); err != nil {
+	if err := h.recordInputs(inputs); err != nil {
 		h.mu.Lock()
 		t.err = errors.Join(t.err, err)
 		h.mu.Unlock()
-	} else if carried {
-		h.handoffAccepted()
 	}
 	h.recorded(t)
 	t.queuedOnce.Do(func() { close(t.queued) })
@@ -479,6 +479,9 @@ func (h *Harness) begin(t *turn, inputs []contract.TurnInput, started func(), st
 			} `json:"usage"`
 		}
 		err := pending.Wait(context.Background(), &raw)
+		if carried {
+			h.handoffResult(err)
+		}
 		// Unlocked: the log is read from disk.
 		var step *sessiondb.Step
 		if err == nil && log != nil {
@@ -1209,7 +1212,7 @@ func (h *Harness) freshConversation(ctx context.Context, carried, gen string) er
 
 func (h *Harness) newSession(ctx context.Context, p *process, carried, gen string) error {
 	h.mu.Lock()
-	h.handoff, h.gen = carried, gen
+	h.handoff, h.gen, h.sending = carried, gen, false
 	h.mu.Unlock()
 	if err := h.openSession(ctx, p, ""); err != nil {
 		return err

@@ -183,6 +183,10 @@ func (a *agent) handle(id json.RawMessage, method string, raw json.RawMessage) {
 		}
 		a.reply(id, map[string]any{"_meta": map[string]any{"antigravity": map[string]any{"tier": map[string]any{"name": "fake"}}}})
 	case "session/new", "session/resume":
+		if method == "session/resume" && os.Getenv("FAKE_AGY_RESUME_RESTRICTION") != "" {
+			a.fail(id, -32603, "Error 403, Message: Your account is restricted (TOS_VIOLATION), Status: PERMISSION_DENIED")
+			return
+		}
 		if os.Getenv("FAKE_AGY_REAUTH") != "" && a.authCount < 2 {
 			a.fail(id, -32000, "authentication required")
 			return
@@ -264,6 +268,10 @@ func (a *agent) handle(id json.RawMessage, method string, raw json.RawMessage) {
 		}
 		if _, rest, ok := strings.Cut(text, "<user_request>\n"); ok {
 			text = strings.TrimSuffix(rest, "\n</user_request>")
+		}
+		// A handoff puts the history ahead of the user's text (handoff.Prompt).
+		if _, rest, ok := strings.Cut(text, "\n\nUser message:\n"); ok {
+			text = rest
 		}
 		verb, _, _ := strings.Cut(text, " ")
 		a.mu.Lock()
@@ -424,6 +432,8 @@ func (a *agent) prompt(id json.RawMessage, text string, steered, held chan strin
 		a.send(map[string]any{"id": "perm-question", "method": "session/request_permission", "params": map[string]any{"sessionId": a.session(), "toolCall": map[string]any{"toolCallId": "interaction_1", "title": "Pick"}, "options": []map[string]any{{"optionId": "a", "name": "A", "kind": "allow_once"}}}})
 		a.text("asked")
 		a.end(id, "end_turn")
+	case "rejectprompt":
+		a.fail(id, -32602, "invalid prompt parameters before accepting user input")
 	case "rpcerror":
 		a.fail(id, -32603, "boom")
 	case "refusal":

@@ -1074,7 +1074,7 @@ func TestAnOverlappingSteerCarriesOnlyWhatIsNew(t *testing.T) {
 	p := h.p
 	h.mu.Unlock()
 	tn := &turn{}
-	first, _, err := h.promptBlocks(tn, []contract.TurnInput{input(1, "go")}, p, false)
+	first, _, _, err := h.promptBlocks(tn, []contract.TurnInput{input(1, "go")}, p, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1083,7 +1083,7 @@ func TestAnOverlappingSteerCarriesOnlyWhatIsNew(t *testing.T) {
 	}
 	// The first prompt is still in flight: the steer repeats nothing it offered, and carries no instructions or runtime info.
 	h.SetPromptSections(ctx, []contract.ContextSection{{Key: "dyna_goal", Text: "ship it"}, {Key: "dyna_time", Text: "noon"}})
-	steer, _, err := h.promptBlocks(tn, []contract.TurnInput{input(2, "also")}, p, true)
+	steer, _, _, err := h.promptBlocks(tn, []contract.TurnInput{input(2, "also")}, p, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1181,12 +1181,12 @@ func TestAnOlderPromptsLateCommitDoesNotOverwriteANewerOne(t *testing.T) {
 	p := h.p
 	h.mu.Unlock()
 	tn := &turn{}
-	_, commitA, err := h.promptBlocks(tn, []contract.TurnInput{input(1, "go")}, p, false)
+	_, commitA, _, err := h.promptBlocks(tn, []contract.TurnInput{input(1, "go")}, p, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	h.SetPromptSections(ctx, []contract.ContextSection{{Key: "dyna_goal", Text: "v2"}})
-	_, commitB, err := h.promptBlocks(tn, []contract.TurnInput{input(2, "also")}, p, true)
+	_, commitB, _, err := h.promptBlocks(tn, []contract.TurnInput{input(2, "also")}, p, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1210,7 +1210,7 @@ func TestAnswerArrivingBeforeTheInputsAreRecordedIsWrittenAfterThem(t *testing.T
 	if data, _ := os.ReadFile(h.SessionFile()); strings.Contains(string(data), "early answer") {
 		t.Fatal("the answer was written before the inputs")
 	}
-	if err := h.recordInputs([]contract.TurnInput{input(1, "go")}, false); err != nil {
+	if err := h.recordInputs([]contract.TurnInput{input(1, "go")}); err != nil {
 		t.Fatal(err)
 	}
 	h.recorded(tn)

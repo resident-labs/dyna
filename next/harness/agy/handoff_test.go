@@ -1,11 +1,17 @@
 package agy
 
 import (
+	"bytes"
 	"context"
+	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/harness/agy/acp"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // lastPrompt is the whole of the last prompt the agent received.
@@ -37,7 +43,7 @@ func TestHandoffRidesTheFirstPromptOfAFreshSessionOnce(t *testing.T) {
 	}
 	// The mirror holds the user's own words, with the entry that carried the handoff marked.
 	mirror := mirrorText(t, h)
-	if strings.Contains(mirror, "EARLIER CONTEXT") || strings.Count(mirror, `"handoff":true`) != 1 {
+	if strings.Contains(mirror, "EARLIER CONTEXT") || strings.Count(mirror, `"type":"handoff"`) != 1 {
 		t.Fatalf("mirror = %s", mirror)
 	}
 	meta, _ := readMeta(c.SessionDir)
@@ -262,5 +268,99 @@ func TestAPathIsNotASlashCommand(t *testing.T) {
 		if slashCommand.MatchString(text) != want {
 			t.Errorf("slash(%q) != %v", text, want)
 		}
+	}
+}
+
+func TestAPromptAgyRefusesAsInvalidKeepsTheHandoffPending(t *testing.T) {
+	h, r, c := open(t, nil, func(c *Config) { c.Handoff = "EARLIER CONTEXT" })
+	if _, err := h.Start(context.Background(), "t1", []contract.TurnInput{input(1, "rejectprompt")}, nil); err == nil {
+		t.Fatal("the refusal was not reported")
+	}
+	meta, _ := readMeta(c.SessionDir)
+	if meta.Handoff == "" || meta.Sending || handoffDelivered(h.SessionFile(), meta.Gen) {
+		t.Fatalf("meta = %+v: the refused prompt consumed the handoff", meta)
+	}
+	start(t, h, "t2", input(2, "say hello"))
+	if !strings.Contains(lastPrompt(t, r), "EARLIER CONTEXT\n\nUser message:\nsay hello") {
+		t.Fatalf("prompt = %s", lastPrompt(t, r))
+	}
+}
+
+func TestAHandoffWhoseDeliveryIsUncertainIsGivenToAFreshSession(t *testing.T) {
+	h, r, c := open(t, nil, func(c *Config) { c.Handoff = "EARLIER CONTEXT" })
+	res, _ := h.Start(context.Background(), "t1", []contract.TurnInput{input(1, "crash")}, nil)
+	_ = res
+	h.Close()
+	meta, _ := readMeta(c.SessionDir)
+	if meta.Handoff == "" || !meta.Sending {
+		t.Fatalf("meta = %+v: an unanswered prompt is not marked as being sent", meta)
+	}
+	// The next run cannot know whether agy took it: a fresh native session gets it again (T3 ContextHandoffDeliveryUncertainError).
+	c.New = false
+	h2, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h2.Close()
+	start(t, h2, "t2", input(2, "say hello"))
+	if n := len(r.calls(t, "session/new")); n != 2 || !strings.Contains(lastPrompt(t, r), "EARLIER CONTEXT\n\nUser message:\nsay hello") {
+		t.Fatalf("sessions %d, prompt = %s", n, lastPrompt(t, r))
+	}
+}
+
+func TestAResumeRefusedForAnAccountFailureFailsOnce(t *testing.T) {
+	h, r, c := open(t, nil, nil)
+	start(t, h, "t1", input(1, "say hello"))
+	h.Close()
+	t.Setenv("FAKE_AGY_RESUME_RESTRICTION", "1")
+	c.New = false
+	if next, err := Open(context.Background(), c); err == nil || len(r.calls(t, "session/new")) != 1 {
+		if next != nil {
+			next.Close()
+		}
+		t.Fatalf("open = %v, session/new calls = %d", err, len(r.calls(t, "session/new")))
+	}
+}
+
+func TestASteerCannotConsumeTheHandoffAnotherPromptCarries(t *testing.T) {
+	dir := t.TempDir()
+	read, write := io.Pipe()
+	defer read.Close()
+	defer write.Close()
+	var sent bytes.Buffer
+	p := &process{client: acp.NewClient(read, &sent, acp.Handler{})}
+	tn := &turn{id: "t", open: 2, wake: make(chan struct{}, 1), queued: make(chan struct{})}
+	var warnings atomic.Int32
+	paused, release := make(chan struct{}), make(chan struct{})
+	h := &Harness{p: p, turn: tn, sessionID: "native", mirror: filepath.Join(dir, "agy-1.jsonl"), handoff: "PENDING_HISTORY", cfg: Config{GeminiDir: dir, SessionDir: dir, Notice: func(string) {
+		if warnings.Add(1) == 1 {
+			close(paused)
+			<-release
+		}
+	}}}
+	result := make(chan error, 1)
+	go func() { result <- h.begin(tn, []contract.TurnInput{input(1, "normal follow up")}, nil, false) }()
+	select {
+	case <-paused:
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("the follow-up did not reach the pause")
+	}
+	// The carrying prompt is built and not yet sent; a steer and a second prompt meanwhile carry nothing and settle nothing.
+	err := h.begin(tn, []contract.TurnInput{input(2, "interruption")}, nil, true)
+	err2 := h.begin(tn, []contract.TurnInput{input(3, "another")}, nil, false)
+	before := sent.String()
+	h.mu.Lock()
+	still := h.handoff
+	h.mu.Unlock()
+	close(release)
+	if err != nil || err2 != nil || <-result != nil {
+		t.Fatal(err, err2)
+	}
+	if strings.Contains(before, "PENDING_HISTORY") || still != "PENDING_HISTORY" {
+		t.Fatalf("the history was sent early or consumed: %q, %q", before, still)
+	}
+	if n := strings.Count(sent.String(), "PENDING_HISTORY"); n != 1 {
+		t.Fatalf("the history was sent %d times", n)
 	}
 }
