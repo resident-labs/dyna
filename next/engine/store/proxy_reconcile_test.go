@@ -16,6 +16,7 @@ func TestProxyRestartPrunesOnlyUnboundSupportedCredentials(t *testing.T) {
 		{ID: "bound", Provider: "claude", Record: []byte("{}")},
 		{ID: "orphan", Provider: "codex", Record: []byte("{}")},
 		{ID: "orphan-antigravity", Provider: "antigravity", Record: []byte("{}")},
+		{ID: "bound-antigravity", Provider: "antigravity", Record: []byte("{}")},
 		{ID: "dyna-key-0123456789abcdef0123456789abcdef", Provider: "openai-compatible-zai", Record: []byte("{}")},
 		{ID: "unsupported", Provider: "other", Record: []byte("{}")},
 	} {
@@ -26,11 +27,17 @@ func TestProxyRestartPrunesOnlyUnboundSupportedCredentials(t *testing.T) {
 	if err := s.BindAccount(ctx, "account", "bound", "anthropic", "Invented"); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.BindAccount(ctx, "gemini", "bound-antigravity", "antigravity", "Old"); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.PruneUnboundProxyAuths(ctx); err != nil {
 		t.Fatal(err)
 	}
 	auths, err := s.ListProxyAuths(ctx)
 	if err != nil || len(auths) != 2 || auths[0].ID != "bound" || auths[1].ID != "unsupported" {
 		t.Fatal("restart reconciliation lost or retained the wrong credential")
+	}
+	if accounts, err := s.Accounts(ctx); err != nil || len(accounts) != 1 {
+		t.Fatalf("a bound Antigravity account stayed: %v %v", accounts, err)
 	}
 }

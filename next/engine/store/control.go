@@ -12,10 +12,10 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-// RequestTurnStop persists the request and wakes the box channel after commit.
-func (s *Store) RequestTurnStop(ctx context.Context, session contract.SessionID, now time.Time) (bool, error) {
-	var stopping bool
-	err := s.Write(ctx, func(tx *sql.Tx) error {
+// RequestTurnStop persists the request and wakes the box channel after commit. It reports whether anything was stopped, and whether
+// a turn was running to be stopped, which cancelling a pending retry alone does not make true.
+func (s *Store) RequestTurnStop(ctx context.Context, session contract.SessionID, now time.Time) (stopping, running bool, err error) {
+	err = s.Write(ctx, func(tx *sql.Tx) error {
 		// Cancel pending non-owner work, including due retries queued for a box.
 		// Owner posts retain their wake, whether pending or assigned as steers.
 		if _, err := tx.ExecContext(ctx, "UPDATE deliveries SET wake=0 WHERE to_kind='session' AND to_id=? AND state='pending' AND NOT EXISTS (SELECT 1 FROM events e WHERE e.seq=deliveries.seq AND e.from_kind='owner' AND e.type='post.created')", session); err != nil {
@@ -41,13 +41,14 @@ func (s *Store) RequestTurnStop(ctx context.Context, session contract.SessionID,
 			return err
 		}
 		n, err = result.RowsAffected()
-		stopping = stopping || n > 0
+		running = n > 0
+		stopping = stopping || running
 		if stopping {
 			s.wakePending = append(s.wakePending, session)
 		}
 		return err
 	})
-	return stopping, err
+	return stopping, running, err
 }
 
 func (s *Store) StopRequested(ctx context.Context, session contract.SessionID) (contract.TurnID, error) {

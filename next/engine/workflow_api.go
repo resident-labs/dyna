@@ -55,6 +55,9 @@ func (s *Service) workflowScript(ctx context.Context, roomID contract.RoomID, sc
 		if _, _, err := s.profiles.Model(name); err != nil {
 			return meta, "", invalid("unknown profile " + string(name))
 		}
+		if problem := s.pigOnly(name, "workflow workers"); problem != nil {
+			return meta, "", problem
+		}
 	}
 	repos, err := s.store.RoomRepos(ctx, roomID)
 	if err != nil {

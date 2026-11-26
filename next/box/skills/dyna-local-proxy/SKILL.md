@@ -29,8 +29,7 @@ The key only exists on the owner socket, so these commands never work from a box
 
 ## Models
 
-Use real model names, such as `claude-opus-5-5`, not Dyna profile names. Keep the prefix on names
-like `antigravity/claude-opus-5-5-high` so the call uses the Antigravity account. To list models:
+Use real model names, such as `claude-opus-5-5`, not Dyna profile names. To list models:
 
 ```bash
 curl -H "Authorization: Bearer $OPENAI_API_KEY" "$OPENAI_BASE_URL/models"

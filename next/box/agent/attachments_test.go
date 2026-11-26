@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -302,3 +303,45 @@ func TestRunnerHandsBackASteerTheTurnEndedWithout(t *testing.T) {
 }
 
 var _ harness.Harness = (*settlingHarness)(nil)
+
+// A stop that names no turn reaches the harness, which may still run work its last turn left behind (agy).
+func TestRunnerStopWithNoTurnAbortsTheHarness(t *testing.T) {
+	h := newTransferHarness()
+	runner := &Runner{Harness: h, Sink: &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 1)}}
+	if err := runner.Handle(context.Background(), contract.BoxMessage{Body: contract.TurnStop{Reason: "Stopped by request"}}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"abort"}; !reflect.DeepEqual(h.calls, want) {
+		t.Fatalf("the harness saw %v", h.calls)
+	}
+}
+
+// A turn-less stop queued while no turn ran can arrive after the next turn started: it is not for that turn.
+func TestRunnerTurnlessStopLeavesARunningTurnAlone(t *testing.T) {
+	h := &settlingHarness{transferHarness: newTransferHarness(), end: make(chan struct{})}
+	sink := &sinkFake{acked: make(map[contract.DeliverySeq]bool), done: make(chan contract.TurnEnded, 1)}
+	runner := &Runner{Harness: h, Sink: sink}
+	ctx := context.Background()
+	if err := runner.Handle(ctx, filedTurn(false)); err != nil {
+		t.Fatal(err)
+	}
+	runner.mu.Lock()
+	ready := runner.ready
+	runner.mu.Unlock()
+	<-ready
+	if err := runner.Handle(ctx, contract.BoxMessage{Body: contract.TurnStop{Reason: "Stopped by request"}}); err != nil {
+		t.Fatal(err)
+	}
+	h.mu.Lock()
+	aborted := slices.Contains(h.calls, "abort")
+	h.mu.Unlock()
+	if aborted {
+		t.Fatal("a turn-less stop aborted the turn that started after it was queued")
+	}
+	if err := runner.Handle(ctx, contract.BoxMessage{Body: contract.TurnStop{Turn: "turn_1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-sink.done; got.Outcome != "completed" && got.Outcome != "stopped" {
+		t.Fatalf("turn: %+v", got)
+	}
+}

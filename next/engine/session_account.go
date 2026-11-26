@@ -23,6 +23,10 @@ func (s *AccountActions) accountsForProfile(ctx context.Context, room contract.R
 	if err != nil {
 		return sessionAccounts{}, err
 	}
+	// An agy session never calls the proxy, so no proxy account serves it.
+	if s.service.profiles.Harness(profile) == contract.HarnessAgy {
+		return sessionAccounts{}, nil
+	}
 	bindings, err := s.service.store.Accounts(ctx)
 	if err != nil {
 		return sessionAccounts{}, err

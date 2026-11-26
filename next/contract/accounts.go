@@ -204,6 +204,8 @@ type Profile struct {
 	AllowedModels []string      `json:"allowedModels"`
 	CompactTokens int           `json:"compactTokens"`
 	MaxConcurrent int           `json:"maxConcurrent"`
+	// Harness is empty for pig in a request; profile.list always names it.
+	Harness Harness `json:"harness,omitempty"`
 }
 type ProfileSetRequest struct {
 	Create  bool    `json:"create"`

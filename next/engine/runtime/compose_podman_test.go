@@ -334,9 +334,11 @@ func TestComposeStackOnRealPodman(t *testing.T) {
 
 type stackProfiles struct{}
 
-func (stackProfiles) TextOnlyModels() []contract.TextOnlyModel  { return nil }
-func (stackProfiles) List() []contract.Profile                  { return nil }
-func (stackProfiles) CompactionTokens(contract.ProfileName) int { return 0 }
+func (stackProfiles) TextOnlyModels() []contract.TextOnlyModel      { return nil }
+func (stackProfiles) List() []contract.Profile                      { return nil }
+func (stackProfiles) CompactionTokens(contract.ProfileName) int     { return 0 }
+func (stackProfiles) Harness(contract.ProfileName) contract.Harness { return contract.HarnessPig }
+func (stackProfiles) MaxConcurrent(contract.ProfileName) int        { return 0 }
 func (stackProfiles) Model(contract.ProfileName) (contract.ModelChoice, []string, error) {
 	return contract.ModelChoice{}, nil, nil
 }

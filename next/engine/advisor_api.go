@@ -110,6 +110,9 @@ func (s *Service) setAdvisor(ctx context.Context, room contract.RoomID, profile 
 		if _, _, err := s.profiles.Model(profile); err != nil {
 			return invalid("unknown profile " + string(profile))
 		}
+		if problem := s.pigOnly(profile, "the advisor"); problem != nil {
+			return problem
+		}
 	}
 	if err := s.store.SetRoomAdvisorProfile(ctx, room, profile); err != nil {
 		return failure(err)

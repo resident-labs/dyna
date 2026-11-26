@@ -93,9 +93,7 @@ A session's choice (`session set-account`, SESSION from `session list`) wins ove
 command prints a session's current choice (the owner sees it on its About panel), so set one only on a
 session with none, undo with `session set-account SESSION auto`, and ask the owner to change an existing
 one. Connecting, removing or renaming an account and its key are the owner's, in Settings > Accounts.
-For Google AI Ultra, choose Add an account → Google Antigravity and sign in with the account that holds the plan.
-Paste the full localhost address into Dyna and click Finish, even if that page does not load. For a profile, use
-`anthropic` (the Messages API) and copy the `antigravity/…` ID from the account's Models into Model and Allowed models.
+Gemini does not go through accounts or the proxy: a profile with `--harness agy` (provider `google`) runs Google's agent; the context profiles section says which.
 
 **Hosts.** `host list` prints each host's agents and ci switches, and its CI scale while ci is on.
 `host set NAME --agents on|off --ci on|off --ci-scale N` changes them; N is an integer from 1 to 4.

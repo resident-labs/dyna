@@ -155,7 +155,12 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		githubAvailable = githubAvailable && (account.Login != "" || s.githubAccounts.DefaultToken != "")
 	}
 	_, discordProblem := s.discordClient(ctx, caller)
-	return contract.BoxHelloResponse{Discord: discordProblem == nil, Room: session.Room, GitName: gitName, GitEmail: gitEmail, GitSigningKey: signingKey, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: prompt.ModelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: prompt.Session(vars), WorkerInstructions: prompt.Core, Root: vars.Role == prompt.Root, Advisor: vars.Advisor, Workflow: workflow, GitHub: githubAvailable, Fresh: session.ClearedAt > 0}, nil
+	harness := s.profiles.Harness(session.Profile)
+	var agy *contract.BoxAgy
+	if harness == contract.HarnessAgy {
+		agy = &agyMount
+	}
+	return contract.BoxHelloResponse{Harness: harness, Agy: agy, Discord: discordProblem == nil, Room: session.Room, GitName: gitName, GitEmail: gitEmail, GitSigningKey: signingKey, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: prompt.ModelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: prompt.Session(vars), WorkerInstructions: prompt.Core, Root: vars.Role == prompt.Root, Advisor: vars.Advisor, Workflow: workflow, GitHub: githubAvailable, Fresh: session.ClearedAt > 0}, nil
 }
 
 func (s *Service) DeliveryDone(ctx context.Context, caller contract.Principal, req contract.DeliveryDoneRequest) (contract.DeliveryDoneResponse, *contract.Error) {
@@ -200,6 +205,7 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 		req.Outcome, req.Cause, req.Error = contract.TurnStopped, contract.CauseClosed, ""
 	}
 	req.Usage.Model = req.Model
+	req.OneWake = s.profiles.Harness(session.Profile) == contract.HarnessAgy
 	run, err := s.store.SessionWorkflow(ctx, session.ID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return contract.TurnOutputResponse{}, failure(err)

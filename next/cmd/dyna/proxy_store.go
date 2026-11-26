@@ -44,7 +44,7 @@ func (s *proxyStore) List(context.Context) ([]*proxyauth.Auth, error) {
 	auths := make([]*proxyauth.Auth, 0, len(records))
 	for _, record := range records {
 		switch record.Provider {
-		case "claude", "codex", "kimi", "xai", "meta", "antigravity", "openai-compatible-zai", "openai-compatible-opencode-go", "openai-compatible-deepseek":
+		case "claude", "codex", "kimi", "xai", "meta", "openai-compatible-zai", "openai-compatible-opencode-go", "openai-compatible-deepseek":
 		default:
 			if !model.IsCustomProxyProvider(record.Provider) {
 				continue
@@ -88,7 +88,7 @@ func applyProxyRoutingPolicy(auth *proxyauth.Auth) {
 		if auth.AuthKind() != proxyauth.AuthKindOAuth {
 			return
 		}
-	case "codex", "kimi", "xai", "meta", "antigravity", "openai-compatible-opencode-go", "openai-compatible-deepseek":
+	case "codex", "kimi", "xai", "meta", "openai-compatible-opencode-go", "openai-compatible-deepseek":
 	default:
 		return
 	}

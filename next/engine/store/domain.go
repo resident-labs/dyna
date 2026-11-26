@@ -39,6 +39,9 @@ func (e *VisualSupersededError) Error() string { return "visual has a newer vers
 
 var ErrParentHostAbsent = errors.New("sameHost requires a parent with an assigned host")
 
+// ErrProfileFull refuses a new session on a profile that already has its limit of open sessions.
+var ErrProfileFull = errors.New("profile has its limit of open sessions")
+
 // Session describes the stored session and its box.
 type Session struct {
 	ID          contract.SessionID
@@ -52,9 +55,13 @@ type Session struct {
 	NewRoomName string          // nonempty only for a new room root
 	Compose     string          // the compose file this session chose when it started, or ""
 	GPU         contract.GPUGiB // the VRAM its box asks of a card (5.5); set to start, not read back
-	Root        bool            // read back only: the session has no parent
-	Closing     bool            // read back only: the session is closing
-	ClearedAt   int64           // read back only: unix millis when a clear is pending for the next turn, or 0
+	// AccountProfiles are every profile that shares one account with this session's, and AccountLimit the open sessions that account
+	// allows at once. Both are set to start, not read back; with no profiles there is no limit.
+	AccountProfiles []contract.ProfileName
+	AccountLimit    int
+	Root            bool  // read back only: the session has no parent
+	Closing         bool  // read back only: the session is closing
+	ClearedAt       int64 // read back only: unix millis when a clear is pending for the next turn, or 0
 	// Workflow makes the new session a crew. It is set only to start one: Session does not read it back.
 	Workflow *WorkflowRun
 }
@@ -113,6 +120,15 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 			}
 			if err := checkDepth(tree.Depth(parent)+1, maxDepth); err != nil {
 				return err
+			}
+		}
+		if len(session.AccountProfiles) > 0 {
+			var open int
+			if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions WHERE profile IN (SELECT value FROM json_each(?)) AND closed_at IS NULL", mustJSON(session.AccountProfiles)).Scan(&open); err != nil {
+				return err
+			}
+			if open >= session.AccountLimit {
+				return ErrProfileFull
 			}
 		}
 		if clientID != "" {
@@ -373,7 +389,13 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			if cancelled {
 				retryAt = -1
 			}
-			if retries < 8 && !cancelled {
+			if output.OneWake && !cancelled {
+				// One wake per failed turn, at the stated reset exactly, whatever came before; no reset, no retry.
+				retryAt, deferred = 0, output.ModelRetryAfterSeconds > 0
+				if deferred {
+					retryAt = event.Time.Add(time.Duration(output.ModelRetryAfterSeconds) * time.Second).UnixMilli()
+				}
+			} else if retries < 8 && !cancelled {
 				delay := 5 * time.Minute * time.Duration(1<<retries)
 				if output.ModelRetryAfterSeconds > 0 {
 					base := max(time.Duration(output.ModelRetryAfterSeconds)*time.Second, 30*time.Second)

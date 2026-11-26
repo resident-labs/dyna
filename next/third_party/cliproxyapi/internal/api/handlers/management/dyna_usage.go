@@ -79,8 +79,9 @@ var dynaUsageSources = map[string]dynaUsageSource{
 	"openai-compatible-deepseek":    {request: requestDeepSeekUsage, parse: parseDeepSeekUsage},
 	"openai-compatible-opencode-go": {request: requestOpenCodeUsage, parse: parseOpenCodeUsage, absent: http.StatusForbidden},
 	"meta":                          {observed: observedMetaUsage},
-	"antigravity":                   {request: requestAntigravityUsage, postBody: antigravityUsageBody, parse: parseAntigravityUsage},
 }
+
+// Antigravity has no source: Google's Gemini reaches Dyna only through agy, and nothing polls its quota.
 
 // dynaUsageTransport is a variable so tests never reach a provider.
 var dynaUsageTransport = func(h *Handler, auth *coreauth.Auth) http.RoundTripper {

@@ -20,9 +20,21 @@ func (s *Service) SessionStop(ctx context.Context, caller contract.Principal, re
 		s.reconciler.CancelStart(id)
 		s.reconciler.Kick()
 	}
-	stopping, err := s.store.RequestTurnStop(ctx, target.ID, s.now())
+	stopping, running, err := s.store.RequestTurnStop(ctx, target.ID, s.now())
 	if err != nil {
 		return contract.SessionStopResponse{}, failure(err)
+	}
+	// An agy harness can run work after its turn ended, and a pending quota retry makes stopping true with no turn to stop. With no
+	// turn running, a turn-less stop goes out; a running turn gets the named stop from the stream. The box ignores the turn-less one
+	// if a turn has started by the time it arrives.
+	if !running && s.profiles.Harness(target.Profile) == contract.HarnessAgy {
+		if handle, ok := s.live.LookupSession(target.ID); ok && handle.Lock() {
+			if channel := handle.Channel(); channel != nil {
+				channel.AskStop()
+				stopping = true
+			}
+			handle.Unlock()
+		}
 	}
 	return contract.SessionStopResponse{Stopping: accepted || stopping}, nil
 }

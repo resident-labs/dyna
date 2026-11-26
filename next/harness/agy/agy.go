@@ -389,7 +389,7 @@ func (h *Harness) setup(ctx context.Context, p *process) error {
 		} `json:"agentCapabilities"`
 	}
 	err := p.client.Call(ctx, "initialize", map[string]any{
-		"protocolVersion":    1,
+		"protocolVersion":    2, // T3 asks for 2 (ARUN:2330); agy answers 1
 		"clientInfo":         map[string]any{"name": "dyna", "title": "Dyna", "version": "0.1"},
 		"clientCapabilities": map[string]any{"fs": map[string]any{"readTextFile": false, "writeTextFile": false}, "terminal": false},
 	}, &init)

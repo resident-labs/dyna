@@ -115,7 +115,7 @@ func TestCancelledModelRetryIsNotTerminal(t *testing.T) {
 						finish(i, contract.TurnFailed, contract.CauseModelFailed)
 					}
 					terminal("exhausted", 1)
-					if stopping, err := s.RequestTurnStop(ctx, "s", now); err != nil || stopping {
+					if stopping, _, err := s.RequestTurnStop(ctx, "s", now); err != nil || stopping {
 						t.Fatalf("exhausted stop: %v %v", stopping, err)
 					}
 					terminal("Stop must not conceal true exhaustion", 1)
@@ -123,7 +123,7 @@ func TestCancelledModelRetryIsNotTerminal(t *testing.T) {
 					post("work-after-exhaustion", contract.ReplyNone)
 					dispatch(9)
 					terminal("new active work does not hide exhaustion", 1)
-					if stopping, err := s.RequestTurnStop(ctx, "s", now); err != nil || !stopping {
+					if stopping, _, err := s.RequestTurnStop(ctx, "s", now); err != nil || !stopping {
 						t.Fatalf("stop new work: %v %v", stopping, err)
 					}
 					finish(9, contract.TurnStopped, "")
@@ -157,7 +157,7 @@ func TestCancelledModelRetryIsNotTerminal(t *testing.T) {
 					}
 					terminal("legacy active retry after reopen", 0)
 				}
-				if stopping, err := s.RequestTurnStop(ctx, "s", now); err != nil || !stopping {
+				if stopping, _, err := s.RequestTurnStop(ctx, "s", now); err != nil || !stopping {
 					t.Fatalf("stop: %v %v", stopping, err)
 				}
 				if phase == "active stopped" || phase == "legacy active stopped" {
@@ -205,7 +205,7 @@ func TestCancelledModelRetryIsNotTerminal(t *testing.T) {
 					post("work-after-harness-failure", contract.ReplyNone)
 					dispatch(3)
 					terminal("new active work does not hide non-model failure", 1)
-					if stopping, err := s.RequestTurnStop(ctx, "s", now); err != nil || !stopping {
+					if stopping, _, err := s.RequestTurnStop(ctx, "s", now); err != nil || !stopping {
 						t.Fatalf("stop new work: %v %v", stopping, err)
 					}
 					finish(3, contract.TurnStopped, "")

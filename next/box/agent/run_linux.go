@@ -242,25 +242,33 @@ func Run(ctx context.Context) error {
 		}
 		h, files = crew, crew.Files
 	} else {
-		interrupts := dynaext.NewInterrupts()
-		session, err := pig.Open(ctx, pig.Config{
-			Dir:               workdir,
-			AgentDir:          piDir,
-			SessionDir:        sessions,
-			Model:             hello.Model,
-			CompactTokens:     hello.CompactTokens,
-			Instructions:      hello.Instructions,
-			ModelInstructions: hello.ModelInstructions,
-			New:               hello.Fresh,
-			Extensions:        []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: workdir, Shell: jobs, Dyna: dynaTools, Interrupts: interrupts})},
-			Notice:            func(text string) { go notice(text) },
-		})
-		if err != nil {
-			return err
+		if hello.Harness == contract.HarnessAgy {
+			session, err := openAgy(ctx, hello, workdir, sessions, agyContextFiles, activity, func(text string) { go notice(text) })
+			if err != nil {
+				return err
+			}
+			h, files = session, func() []string { return []string{session.SessionFile()} }
+		} else {
+			interrupts := dynaext.NewInterrupts()
+			session, err := pig.Open(ctx, pig.Config{
+				Dir:               workdir,
+				AgentDir:          piDir,
+				SessionDir:        sessions,
+				Model:             hello.Model,
+				CompactTokens:     hello.CompactTokens,
+				Instructions:      hello.Instructions,
+				ModelInstructions: hello.ModelInstructions,
+				New:               hello.Fresh,
+				Extensions:        []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: workdir, Shell: jobs, Dyna: dynaTools, Interrupts: interrupts})},
+				Notice:            func(text string) { go notice(text) },
+			})
+			if err != nil {
+				return err
+			}
+			session.Activity = activity.set
+			session.Finished = activity.finish
+			h, files, steered = session, func() []string { return []string{session.SessionFile()} }, func(sender contract.Interrupt) { jobs.StepAside(sender); interrupts.Send(sender) }
 		}
-		session.Activity = activity.set
-		session.Finished = activity.finish
-		h, files, steered = session, func() []string { return []string{session.SessionFile()} }, func(sender contract.Interrupt) { jobs.StepAside(sender); interrupts.Send(sender) }
 	}
 	defer h.Close()
 	// In-box agents run beside the session's own turn, in this process. A crew's box runs none yet.

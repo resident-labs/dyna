@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/credential"
 	"github.com/resident-labs/dyna/engine/discord"
@@ -162,6 +163,9 @@ func (s *Service) RoomDiscord(ctx context.Context, caller contract.Principal, re
 		session, err := s.store.SessionByName(ctx, room, name)
 		if err != nil {
 			return contract.RoomDiscordResponse{}, invalid("answering session is not open in this room")
+		}
+		if !req.Remove && s.profiles.Harness(session.Profile) == contract.HarnessAgy {
+			return contract.RoomDiscordResponse{}, invalid(fmt.Sprintf("session %s runs on an agy profile, and outside feeds such as Discord are not routed to agy sessions; name a session on a pig profile", session.Name))
 		}
 		instructions := ""
 		policyText, policyResolved := "", ""

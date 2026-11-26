@@ -24,7 +24,7 @@ func (f *fakeClient) ProfileRemove(_ context.Context, q contract.ProfileRemoveRe
 func storedProfiles() []contract.ProfileEntry {
 	off := false
 	return []contract.ProfileEntry{
-		{Profile: contract.Profile{Name: "opus", Provider: contract.ModelProviderAnthropic, Model: "claude-opus", Images: new(true), Thinking: contract.ThinkingHigh, AllowedModels: []string{"claude-opus", "claude-sonnet"}, Description: "best", Taste: 10, Diagnostics: 9, Intelligence: 10, Cost: 4, CompactTokens: 7, MaxConcurrent: 4}, InUse: 3},
+		{Profile: contract.Profile{Name: "opus", Provider: contract.ModelProviderAnthropic, Model: "claude-opus", Images: new(true), Thinking: contract.ThinkingHigh, AllowedModels: []string{"claude-opus", "claude-sonnet"}, Description: "best", Taste: 10, Diagnostics: 9, Intelligence: 10, Cost: 4, CompactTokens: 7, MaxConcurrent: 4, Harness: contract.HarnessPig}, InUse: 3},
 		{Profile: contract.Profile{Name: "text", Provider: contract.ModelProviderOpenAI, Model: "glm", Images: &off, Thinking: contract.ThinkingOff, AllowedModels: []string{"glm"}}},
 	}
 }
@@ -76,7 +76,7 @@ func TestProfileListShowRemove(t *testing.T) {
 	if out, want := runCLI(t, f, "profile", "list"), "opus\tanthropic claude-opus\thigh\timages on\t3 in use\ntext\topenai glm\toff\timages off\t0 in use\n"; out != want {
 		t.Fatalf("list: %q", out)
 	}
-	want := "name: opus\ndescription: best\nprovider: anthropic\nmodel: claude-opus\nallowed-models: claude-opus,claude-sonnet\nthinking: high\nimages: on\ntaste: 10\ndiagnostics: 9\nintelligence: 10\ncost: 4\ncompact-tokens: 7\nmax-concurrent: 4\nin-use: 3\n"
+	want := "name: opus\ndescription: best\nprovider: anthropic\nmodel: claude-opus\nallowed-models: claude-opus,claude-sonnet\nthinking: high\nimages: on\ntaste: 10\ndiagnostics: 9\nintelligence: 10\ncost: 4\ncompact-tokens: 7\nmax-concurrent: 4\nin-use: 3\nharness: pig\n"
 	if out := runCLI(t, f, "profile", "show", "opus"); out != want {
 		t.Fatalf("show: %q", out)
 	}
@@ -96,5 +96,13 @@ func TestProfileListAndShowTreatMissingImagesAsOn(t *testing.T) {
 	}
 	if out := runCLI(t, f, "profile", "show", "old"); !strings.Contains(out, "images: on\n") {
 		t.Fatalf("show: %q", out)
+	}
+}
+
+func TestProfileSetHarness(t *testing.T) {
+	f := &fakeClient{profiles: storedProfiles()}
+	runCLI(t, f, "profile", "set", "opus", "--harness", "agy")
+	if f.profileSet == nil || f.profileSet.Profile.Harness != contract.HarnessAgy {
+		t.Fatalf("%+v", f.profileSet)
 	}
 }

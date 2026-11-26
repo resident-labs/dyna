@@ -142,7 +142,7 @@ INSERT INTO boxes(id,session,host,image,size,state,reason,slice,created_at,updat
 			}
 			runtime := &Boxes{Store: st, Sockets: sockets, Layout: box.Layout{Data: root, HostData: root}, Runtime: t.TempDir(), hosts: map[contract.HostName]*podman.Host{"h": h}, restored: map[contract.HostName]bool{"h": true}}
 			if scenario == "explicit-restart-used" {
-				service := engine.New(st, runtime, nil, func() time.Time { return now })
+				service := engine.New(st, runtime, stackProfiles{}, func() time.Time { return now })
 				if _, problem := service.SessionRestart(ctx, contract.Principal{Kind: contract.PrincipalOwner}, contract.SessionRestartRequest{Session: "s"}); problem != nil {
 					t.Fatalf("owner restart: %v", problem)
 				}

@@ -57,6 +57,11 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		}
 	}
 
+	host, problem := s.agyPlacement(req.Profile, req.Host, req.SameHost)
+	if problem != nil {
+		return contract.SessionStartResponse{}, problem
+	}
+	req.Host = host
 	if req.Host != "" {
 		if req.SameHost {
 			return contract.SessionStartResponse{}, invalid("host and sameHost cannot be used together")
@@ -189,10 +194,14 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		return contract.SessionStartResponse{}, failure(err)
 	}
 	var response contract.SessionStartResponse
-	problem := s.withProfile(req.Profile, func() *contract.Error {
+	problem = s.withProfile(req.Profile, func() *contract.Error {
 		var err error
+		session.AccountProfiles, session.AccountLimit = s.agyAccount(req.Profile)
 		response, err = s.store.StartSession(ctx, session, parent, sizeName, req.Goal, event, initial, "", req.SameHost, req.Host, req.ClientID, s.maxDepth)
 		if err != nil {
+			if errors.Is(err, store.ErrProfileFull) {
+				return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("the agy account allows %d open sessions at once across every agy profile, and they are open; close one, or ask the owner to raise max-concurrent on the agy profiles", session.AccountLimit)}
+			}
 			var treeErr *store.TreeError
 			if errors.As(err, &treeErr) {
 				return invalid(treeErr.Error())
@@ -452,6 +461,11 @@ func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal,
 	if old.State != contract.BoxFailed && old.State != contract.BoxPending {
 		return contract.SessionRestartResponse{}, conflict
 	}
+	host, problem := s.agyPlacement(session.Profile, req.Host, false)
+	if problem != nil {
+		return contract.SessionRestartResponse{}, problem
+	}
+	req.Host = host
 	if req.Host != "" {
 		if problem := s.validateSessionHost(ctx, session.Room, req.Host); problem != nil {
 			return contract.SessionRestartResponse{}, problem
@@ -732,6 +746,9 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 	}
 	if _, _, err := s.profiles.Model(req.Profile); err != nil {
 		return response, invalid("unknown profile")
+	}
+	if was, now := s.profiles.Harness(target.Profile), s.profiles.Harness(req.Profile); was != now {
+		return response, &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s runs on %s and profile %s on %s, and a live session cannot move between pig and agy; start a new session on %s, and give it what it needs in its brief", target.Name, was, req.Profile, now, req.Profile)}
 	}
 	event, err := s.event(target.Room, caller, contract.SessionProfileChanged{Session: target.ID, Profile: req.Profile})
 	if err != nil {

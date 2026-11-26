@@ -85,6 +85,17 @@ func (r *Runner) Handle(ctx context.Context, message contract.BoxMessage) error 
 	case contract.Compact:
 		return r.compact(ctx, m)
 	case contract.TurnStop:
+		if m.Turn == "" {
+			// A stop with no turn reaches work the agy harness's last turn left behind. It was queued while no turn ran, so one that
+			// started or is ending since owns the next stop, and this one is not for it.
+			r.mu.Lock()
+			idle := r.active == "" && !r.settling
+			r.mu.Unlock()
+			if !idle {
+				return nil
+			}
+			return r.Harness.Abort(ctx)
+		}
 		r.mu.Lock()
 		active, transferring, ready := r.active == m.Turn, r.transferring, r.ready
 		if active && transferring {

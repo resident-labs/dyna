@@ -26,7 +26,7 @@ func (s *Service) CompactBeforeStop(ctx context.Context, id contract.SessionID) 
 	if s.Stale(id) {
 		return false // This stop is for an update and a wake may be waiting on it, and an older box agent would not answer.
 	}
-	turn, due, err := s.store.CompactionDue(ctx, id)
+	turn, due, err := s.store.CompactionDue(ctx, id, s.onAgy(ctx, id))
 	if err != nil {
 		log.Printf("session %s: compaction before stop: %v", id, err)
 		return false
@@ -74,4 +74,10 @@ func (s *Service) BoxCompacted(ctx context.Context, caller contract.Principal, r
 	}
 	s.reconciler.Kick()
 	return response, nil
+}
+
+// onAgy says the session runs on the agy harness, whose failed turn may be a limit that an idle compaction prompt would hit again.
+func (s *Service) onAgy(ctx context.Context, id contract.SessionID) bool {
+	session, err := s.store.Session(ctx, id)
+	return err == nil && s.profiles.Harness(session.Profile) == contract.HarnessAgy
 }

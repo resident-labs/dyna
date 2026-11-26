@@ -90,7 +90,9 @@ type fakeProfiles struct{}
 func (fakeProfiles) TextOnlyModels() []contract.TextOnlyModel { return nil }
 func (fakeProfiles) List() []contract.Profile                 { return nil }
 
-func (fakeProfiles) CompactionTokens(contract.ProfileName) int { return 0 }
+func (fakeProfiles) CompactionTokens(contract.ProfileName) int     { return 0 }
+func (fakeProfiles) Harness(contract.ProfileName) contract.Harness { return contract.HarnessPig }
+func (fakeProfiles) MaxConcurrent(contract.ProfileName) int        { return 0 }
 
 func (fakeProfiles) Model(contract.ProfileName) (contract.ModelChoice, []string, error) {
 	return contract.ModelChoice{Provider: contract.ModelProviderAnthropic, ID: "model", Thinking: contract.ThinkingLow}, []string{"model"}, nil

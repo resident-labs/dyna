@@ -132,6 +132,9 @@ func (s *Service) WorkflowSet(ctx context.Context, caller contract.Principal, re
 		if _, _, err := s.profiles.Model(name); err != nil {
 			return response, invalid("unknown profile " + string(name))
 		}
+		if problem := s.pigOnly(name, "workflow workers"); problem != nil {
+			return response, problem
+		}
 	}
 	if req.Room != store.GlobalWorkflowScope {
 		if err := s.store.RoomOpen(ctx, req.Room); err != nil {

@@ -444,7 +444,9 @@ func (p profiles) List() []contract.Profile {
 	return list
 }
 
-func (profiles) CompactionTokens(contract.ProfileName) int { return 0 }
+func (profiles) CompactionTokens(contract.ProfileName) int     { return 0 }
+func (profiles) Harness(contract.ProfileName) contract.Harness { return contract.HarnessPig }
+func (profiles) MaxConcurrent(contract.ProfileName) int        { return 0 }
 
 func (profiles) Model(contract.ProfileName) (contract.ModelChoice, []string, error) {
 	return contract.ModelChoice{Provider: contract.ModelProviderOpenAI, ID: "fake", Thinking: contract.ThinkingOff}, []string{"fake"}, nil

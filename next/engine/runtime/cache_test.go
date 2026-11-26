@@ -81,3 +81,20 @@ func TestContainerSeesItsSizeLimits(t *testing.T) {
 		t.Fatalf("env %v lacks OMP_THREAD_LIMIT=1, which nproc reads", c.Env)
 	}
 }
+
+func TestContainerMountsAgyFilesForAgySessionsOnly(t *testing.T) {
+	b := &Boxes{Layout: box.Layout{HostData: "/host"}}
+	has := func(c box.ContainerSpec, want box.Mount) bool {
+		return slices.Contains(c.Mounts, want)
+	}
+	binary := box.Mount{HostPath: "/host/agy/antigravity", BoxPath: "/opt/agy/antigravity", ReadOnly: true}
+	account := box.Mount{HostPath: "/host/agy/accounts/main", BoxPath: "/opt/agy/account"}
+	_, agy := b.container(lifecycle.BoxSpec{Agy: true}, "image", box.Mount{})
+	if !has(agy, binary) || !has(agy, account) {
+		t.Fatalf("agy mounts: %#v", agy.Mounts)
+	}
+	_, pig := b.container(lifecycle.BoxSpec{}, "image", box.Mount{})
+	if has(pig, binary) || has(pig, account) {
+		t.Fatalf("pig mounts: %#v", pig.Mounts)
+	}
+}

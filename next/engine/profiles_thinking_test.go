@@ -23,19 +23,15 @@ func TestLoadProfilesThinkingMax(t *testing.T) {
 	}
 }
 
-func TestLoadProfilesKeepsAntigravityModelRoute(t *testing.T) {
+// A live profiles.json that still names an antigravity/ model must not stop the engine: it loads, and an edit is refused.
+func TestLoadProfilesKeepsALeftoverAntigravityProfile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	data := `{"neon":{"provider":"anthropic","model":"antigravity/gemini-4-neon-xhigh","allowedModels":["antigravity/gemini-4-neon-xhigh"],"thinking":"xhigh"}}`
 	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
 		t.Fatal(err)
 	}
-	profiles, err := LoadProfiles(path)
-	if err != nil {
+	if _, err := LoadProfiles(path); err != nil {
 		t.Fatal(err)
-	}
-	choice, allowed, err := profiles.Model("neon")
-	if err != nil || choice.Provider != contract.ModelProviderAnthropic || choice.Thinking != contract.ThinkingXHigh || choice.ID != "antigravity/gemini-4-neon-xhigh" || len(allowed) != 1 || allowed[0] != choice.ID {
-		t.Fatalf("profile model = %+v, allowed %v: %v", choice, allowed, err)
 	}
 }
 
