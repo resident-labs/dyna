@@ -494,6 +494,9 @@ func TestApplyPatchRepairResponsesSourceTerminalNonStream(t *testing.T) {
 				if provider == "xai" && mode == "empty" {
 					assertXAIEmptyStream(t, errExecute)
 					wantMessage = xaiEmptyStreamMessage
+				} else if provider == "meta" && mode == "empty" {
+					assertMetaTruncation(t, errExecute)
+					wantMessage = metaIncompleteStreamMessage
 				} else {
 					assertTask6PatchError(t, errExecute)
 				}

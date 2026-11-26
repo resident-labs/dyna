@@ -256,7 +256,7 @@ func TestMetaTruncationDoesNotReplayOrCool(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				requests.Add(1)
 				w.Header().Set("Content-Type", "text/event-stream")
-				w.WriteHeader(http.StatusOK)
+				_, _ = io.WriteString(w, "data: {\"type\":\"response.done\"}\n\n")
 			}))
 			defer server.Close()
 			manager := cliproxyauth.NewManager(nil, nil, nil)
@@ -299,6 +299,73 @@ func TestMetaTruncationDoesNotReplayOrCool(t *testing.T) {
 				if state := auth.ModelStates[model]; state != nil && (state.Unavailable || !state.NextRetryAfter.IsZero()) {
 					t.Fatalf("model cooled after truncation: %+v", state)
 				}
+			}
+		})
+	}
+}
+
+func TestMetaAcceptedBodyValidation(t *testing.T) {
+	done := strings.Replace(metaTerminalDisconnectCompleted, "response.completed", "response.done", 1)
+	const patch = `{"input":"hello","tools":[{"type":"custom","name":"apply_patch"}]}`
+	for _, tc := range []struct {
+		name, body, payload string
+		stream, cut, fail   bool
+		tokens              int64
+	}{
+		{"bare_done_stream", "event: response.done\ndata: {\"type\":\"response.done\"}\n\n", patch, true, false, true, 0},
+		{"bare_done_sse", "data: {\"type\":\"response.done\"}\n\n", patch, false, false, true, 0},
+		{"bare_done_json", `{"type":"response.done"}`, patch, false, false, true, 0},
+		{"invalid_terminal_json", "data: {\"type\":\"response.done\",\"response\":{}\n\n", patch, false, false, true, 0},
+		{"raw_response", `{"object":"response","status":"completed","output":[],"usage":{"input_tokens":10,"output_tokens":5}}`, `{"input":"hello"}`, false, false, false, 10},
+		{"terminal_before_cut", done + "event: response.subscription_usage\ndata: {", `{"input":"hello"}`, false, true, false, 10},
+		{"progress_before_cut", metaProgressUsage, `{"input":"hello"}`, false, true, true, 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if tc.cut {
+					w.Header().Set("Content-Length", "2048")
+				}
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer server.Close()
+			auth := &cliproxyauth.Auth{ID: t.Name(), Provider: "meta", Attributes: map[string]string{"api_key": "meta-token", "base_url": server.URL}}
+			capture := &metaTerminalDisconnectUsageCapture{authID: auth.ID, records: make(chan usage.Record, 1)}
+			usage.RegisterNamedPlugin(t.Name(), capture)
+			t.Cleanup(func() { usage.RegisterNamedPlugin(t.Name(), metaTerminalDisconnectUsageNoop{}) })
+			exec := NewMetaExecutor(&config.Config{})
+			req := cliproxyexecutor.Request{Model: "muse-wonder-1.0", Payload: []byte(tc.payload)}
+			opts := cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatOpenAIResponse, Stream: tc.stream}
+			if tc.stream {
+				result, err := exec.ExecuteStream(t.Context(), auth, req, opts)
+				if err != nil {
+					t.Fatal(err)
+				}
+				chunk, ok := <-result.Chunks
+				if !ok || len(chunk.Payload) != 0 {
+					t.Fatalf("unexpected malformed terminal output: %+v", chunk)
+				}
+				assertMetaTruncation(t, chunk.Err)
+				if chunk, ok := <-result.Chunks; ok {
+					t.Fatalf("unexpected chunk after truncation: %+v", chunk)
+				}
+			} else {
+				result, err := exec.Execute(t.Context(), auth, req, opts)
+				if tc.fail {
+					assertMetaTruncation(t, err)
+					if len(result.Payload) != 0 {
+						t.Fatalf("unexpected response on truncation: %s", result.Payload)
+					}
+				} else if err != nil || !strings.Contains(string(result.Payload), `"status":"completed"`) {
+					t.Fatalf("response = %s, error = %v", result.Payload, err)
+				}
+			}
+			select {
+			case record := <-capture.records:
+				if record.Failed != tc.fail || record.Detail.InputTokens != tc.tokens {
+					t.Fatalf("unexpected usage outcome: %+v", record)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for usage")
 			}
 		})
 	}

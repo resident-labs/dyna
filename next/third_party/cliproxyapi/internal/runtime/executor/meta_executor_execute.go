@@ -145,12 +145,13 @@ func (e *MetaExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req
 
 	data, errRead := io.ReadAll(httpResp.Body)
 	if errRead != nil {
-		if ctx.Err() == nil && httpResp.StatusCode >= 200 && httpResp.StatusCode < 300 {
-			errRead = statusErr{code: http.StatusBadGateway, msg: fmt.Sprintf("%s: %v", metaIncompleteStreamMessage, errRead), streamTruncated: true}
-		}
 		helps.RecordAPIResponseError(ctx, e.cfg, errRead)
-		return resp, errRead
+		if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+			return resp, errRead
+		}
 	}
+	// An accepted response may already have a terminal and only lack quota
+	// data. Inspect the events ReadAll retained even after a transport cut.
 	helps.AppendAPIResponseChunk(ctx, e.cfg, data)
 	reporter.ObserveResponseModel(data)
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
@@ -164,6 +165,9 @@ func (e *MetaExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req
 	var upstreamUsage helps.StreamUsageBuffer
 	out, errCompleted := e.translateMetaCompleted(ctx, req, prepared, data, &upstreamUsage)
 	if errCompleted != nil {
+		if status, ok := errCompleted.(statusErr); ok && status.IsStreamTruncated() && ctx.Err() != nil {
+			errCompleted = ctx.Err()
+		}
 		upstreamUsage.PublishFailure(ctx, reporter, errCompleted)
 		return resp, errCompleted
 	}
@@ -223,6 +227,9 @@ func (e *MetaExecutor) translateMetaCompleted(ctx context.Context, req cliproxye
 		upstreamUsage.ObserveResponsesStream(eventData)
 		if errEvent := metaStreamEventError(eventData); errEvent != nil {
 			return metaCompletedTranslation{}, errEvent
+		}
+		if isMetaTerminalResponseEvent(eventType) && !validMetaTerminalEnvelope(eventData) {
+			break
 		}
 		events, errBridge := prepared.applyPatch.Transform(eventData)
 		if errBridge != nil {
@@ -455,6 +462,10 @@ func isMetaTerminalResponseEvent(eventType string) bool {
 	return eventType == "response.completed" || eventType == "response.incomplete" || eventType == "response.done"
 }
 
+func validMetaTerminalEnvelope(data []byte) bool {
+	return gjson.ValidBytes(data) && gjson.GetBytes(data, "response").IsObject()
+}
+
 func normalizeMetaTerminalEvent(eventData []byte, eventType string) (string, []byte) {
 	if eventType != "response.done" {
 		return eventType, eventData
@@ -478,6 +489,9 @@ func metaAsCompletedEvent(data []byte) ([]byte, bool) {
 	root := gjson.ParseBytes(trimmed)
 	eventType := root.Get("type").String()
 	if isMetaTerminalResponseEvent(eventType) {
+		if !root.Get("response").IsObject() {
+			return nil, false
+		}
 		_, normalized := normalizeMetaTerminalEvent(trimmed, eventType)
 		return normalized, true
 	}

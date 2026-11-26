@@ -230,7 +230,10 @@ func (e *MetaExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 				fail(errEvent)
 				return
 			}
-			terminal := isMetaTerminalResponseEvent(eventType) && gjson.ValidBytes(eventData)
+			terminal := isMetaTerminalResponseEvent(eventType)
+			if terminal && !validMetaTerminalEnvelope(eventData) {
+				break
+			}
 			if terminal {
 				eventData = patchCodexCompletedOutput(eventData, outputItemsByIndex, outputItemsFallback)
 				if eventType == "response.done" && !nativeResponses {
