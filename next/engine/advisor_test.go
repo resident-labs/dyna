@@ -32,7 +32,7 @@ func TestBoxHelloGivesRootTheAdvisorSectionWhenTheRoomHasOne(t *testing.T) {
 	if problem != nil || !hello.Advisor {
 		t.Fatalf("root hello: %v %+v", problem, hello.Advisor)
 	}
-	want := renderedHead(t, "root-advisor") + fmt.Sprintf("You are root of room room (ID %[1]s), session %[2]s.\nFiles: /box/shared is /data/rooms/%[1]s/shared/ on host.\nStanding rules: the global AGENTS.md is /data/AGENTS.md on host and this room's is /data/rooms/%[1]s/AGENTS.md; bash with host host edits them. The engine copies each room's file to every host for boxes and rewrites that copy at each sync.\nYour box has 1 CPU and 2 GiB of memory: heavy builds belong in a larger child session or CI.", room, root)
+	want := renderedHead(t, "root-advisor") + fmt.Sprintf("You are root of room room (ID %[1]s), session %[2]s.\nFiles: /box/shared is /data/rooms/%[1]s/shared/ on host.\nStanding rules: the global AGENTS.md is /data/AGENTS.md on host and this room's is /data/rooms/%[1]s/AGENTS.md; bash with host host edits them. The engine copies each room's file to every host for boxes and rewrites that copy at each sync.\nYour box has 1 CPU and 2 GiB of memory: heavy builds belong with an integrator or CI.", room, root)
 	if hello.Instructions != want {
 		t.Fatalf("root instructions:\n%s\nwant:\n%s", hello.Instructions, want)
 	}
