@@ -147,6 +147,15 @@ func (a *agent) options() []map[string]any {
 func (a *agent) handle(id json.RawMessage, method string, raw json.RawMessage) {
 	switch method {
 	case "initialize":
+		// The client asks for protocol 2 as T3 does; the real agy answers 1 whatever it is asked.
+		var ask struct {
+			ProtocolVersion int `json:"protocolVersion"`
+		}
+		json.Unmarshal(raw, &ask)
+		if ask.ProtocolVersion != 2 {
+			a.fail(id, -32602, "unsupported protocol version")
+			return
+		}
 		version := os.Getenv("FAKE_AGY_VERSION")
 		if version == "" {
 			version = "1.5.18"
