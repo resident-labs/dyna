@@ -15,6 +15,8 @@ Taste is design, wording and UI judgment; diagnostics is finding the cause of a 
 
 Choose review lenses for the work: correctness, security, performance or whether it reproduces. A workflow can run one worker per lens and a final pass over their results.
 
+An integrator works on its own branch: it fetches the commit the reviewer passed (`git fetch origin <branch>`) and merges it there, because a session cannot push to a sibling's branch or open a PR from it. The approval that counts is on the integrated head. PR events go to the session that opened the PR, so the integrator passes them to the lead.
+
 # Delivery and troubleshooting
 
 `dyna_contacts` lists your parent and siblings and `dyna_children` lists your children. Direct owner inputs reply to the owner. Inputs within a minute of turn end batch into the next turn, except owner, sibling and ancestor posts, your own job completions, question answers and subscription wakes. Context updates are shared with sessions holding the changed section. Compaction also runs on model transfer and when a quiet box with more than 100,000 tokens is about to stop. For exact wording, recover it via history, transcript or the original file, not the summary.

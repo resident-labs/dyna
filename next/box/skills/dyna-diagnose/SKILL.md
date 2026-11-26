@@ -96,7 +96,7 @@ blocked on a failed box or turn, the tables above; on an undecided request (`op.
 it (dyna-admin).
 
 A slow turn in a small box is often the box itself: an agent-size box has 1 CPU, and a build there
-starves the agent. Move heavy work to a child started with a larger `size`.
+starves the agent. Move heavy work to your team's integrator, or to a child started with a larger `size` when no session holds that job.
 
 ## 5. The machine
 
