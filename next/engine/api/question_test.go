@@ -107,9 +107,11 @@ func TestQuestionThroughTheAPI(t *testing.T) {
 
 type questionProfiles struct{}
 
-func (questionProfiles) TextOnlyModels() []contract.TextOnlyModel  { return nil }
-func (questionProfiles) List() []contract.Profile                  { return nil }
-func (questionProfiles) CompactionTokens(contract.ProfileName) int { return 0 }
+func (questionProfiles) TextOnlyModels() []contract.TextOnlyModel      { return nil }
+func (questionProfiles) List() []contract.Profile                      { return nil }
+func (questionProfiles) CompactionTokens(contract.ProfileName) int     { return 0 }
+func (questionProfiles) Harness(contract.ProfileName) contract.Harness { return contract.HarnessPig }
+func (questionProfiles) MaxConcurrent(contract.ProfileName) int        { return 0 }
 func (questionProfiles) Model(contract.ProfileName) (contract.ModelChoice, []string, error) {
 	return contract.ModelChoice{}, nil, nil
 }

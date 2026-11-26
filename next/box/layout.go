@@ -340,13 +340,13 @@ func (l Layout) HostGit(repo contract.RepoName) (string, error) {
 	return repoFolder(l.HostGitRoot(), repo)
 }
 
-// HostBin is the folder of engine binaries on a host.
 // HostAgyAccount is the signed-in agy profile folder on the agy host, which a box of an agy session mounts read-write. Dyna never reads it.
 func (l Layout) HostAgyAccount() string { return filepath.Join(l.HostData, "agy", "accounts", "main") }
 
 // AgyBinary is the agy program on the agy host and in the box.
 const AgyBinary = "/opt/agy/antigravity"
 
+// HostBin is the folder of engine binaries on a host.
 func (l Layout) HostBin() string { return filepath.Join(l.HostData, "bin") }
 
 // HostBinary is the engine binary a host runs, which the current link names.

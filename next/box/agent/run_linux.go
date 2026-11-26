@@ -243,12 +243,10 @@ func Run(ctx context.Context) error {
 		h, files = crew, crew.Files
 	} else {
 		if hello.Harness == contract.HarnessAgy {
-			session, err := openAgy(ctx, hello, workdir, sessions, agyContextFiles, func(text string) { go notice(text) })
+			session, err := openAgy(ctx, hello, workdir, sessions, agyContextFiles, activity, func(text string) { go notice(text) })
 			if err != nil {
 				return err
 			}
-			session.Activity = activity.set
-			session.Finished = activity.finish
 			h, files = session, func() []string { return []string{session.SessionFile()} }
 		} else {
 			interrupts := dynaext.NewInterrupts()

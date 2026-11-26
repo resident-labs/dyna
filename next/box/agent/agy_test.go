@@ -21,7 +21,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestOpenAgyNeedsItsFiles(t *testing.T) {
-	_, err := openAgy(t.Context(), contract.BoxHelloResponse{Harness: contract.HarnessAgy}, "/box/work", t.TempDir(), nil, func(string) {})
+	_, err := openAgy(t.Context(), contract.BoxHelloResponse{Harness: contract.HarnessAgy}, "/box/work", t.TempDir(), nil, &activity{}, func(string) {})
 	if err == nil || !strings.Contains(err.Error(), "without its files") {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestAgySessionGetsTheRoomInstructionsOnce(t *testing.T) {
 	t.Setenv("FAKE_AGY_LOG", log)
 	profile := t.TempDir()
 	hello := contract.BoxHelloResponse{Harness: contract.HarnessAgy, Instructions: "be Dyna", Fresh: true, Agy: &contract.BoxAgy{Binary: exe, GeminiDir: profile}, Model: contract.ModelChoice{ID: "gemini-3.8-flash", Thinking: contract.ThinkingLow}}
-	h, err := openAgy(t.Context(), hello, t.TempDir(), t.TempDir(), []string{global, room, filepath.Join(dir, "missing.md")}, func(string) {})
+	h, err := openAgy(t.Context(), hello, t.TempDir(), t.TempDir(), []string{global, room, filepath.Join(dir, "missing.md")}, &activity{}, func(string) {})
 	if err != nil {
 		t.Fatal(err)
 	}

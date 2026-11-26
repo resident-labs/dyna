@@ -62,9 +62,6 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		return contract.SessionStartResponse{}, problem
 	}
 	req.Host = host
-	if problem := s.agyRoom(ctx, req.Profile); problem != nil {
-		return contract.SessionStartResponse{}, problem
-	}
 	if req.Host != "" {
 		if req.SameHost {
 			return contract.SessionStartResponse{}, invalid("host and sameHost cannot be used together")
@@ -155,7 +152,7 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 			return contract.SessionStartResponse{}, problem
 		}
 	}
-	session := store.Session{ID: contract.SessionID(sid), Room: req.Room, Name: req.Name, Repo: repo, Profile: req.Profile, Box: contract.BoxID(bid), NewRoomName: roomName, Compose: composeName, GPU: req.GPU, Workflow: run}
+	session := store.Session{ID: contract.SessionID(sid), Room: req.Room, Name: req.Name, Repo: repo, Profile: req.Profile, Box: contract.BoxID(bid), NewRoomName: roomName, Compose: composeName, GPU: req.GPU, Workflow: run, ProfileLimit: s.agyLimit(req.Profile)}
 	event, err := s.event(req.Room, caller, contract.SessionStarted{Session: session.ID, Name: req.Name, Parent: parent, Profile: req.Profile, Goal: req.Goal, DoneWhen: req.DoneWhen, Brief: req.Brief, Workflow: run != nil})
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
@@ -201,6 +198,9 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		var err error
 		response, err = s.store.StartSession(ctx, session, parent, sizeName, req.Goal, event, initial, "", req.SameHost, req.Host, req.ClientID, s.maxDepth)
 		if err != nil {
+			if errors.Is(err, store.ErrProfileFull) {
+				return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("profile %s allows %d open sessions at once, and they are open; close one, or ask the owner to raise its max-concurrent", req.Profile, session.ProfileLimit)}
+			}
 			var treeErr *store.TreeError
 			if errors.As(err, &treeErr) {
 				return invalid(treeErr.Error())
@@ -746,7 +746,7 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 	if _, _, err := s.profiles.Model(req.Profile); err != nil {
 		return response, invalid("unknown profile")
 	}
-	if was, now := s.harnessOf(target.Profile), s.harnessOf(req.Profile); was != now {
+	if was, now := s.profiles.Harness(target.Profile), s.profiles.Harness(req.Profile); was != now {
 		return response, &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s runs on %s and profile %s on %s, and a live session cannot move between pig and agy; start a new session on %s, and give it what it needs in its brief", target.Name, was, req.Profile, now, req.Profile)}
 	}
 	event, err := s.event(target.Room, caller, contract.SessionProfileChanged{Session: target.ID, Profile: req.Profile})

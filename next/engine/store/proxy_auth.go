@@ -28,10 +28,20 @@ func (s *Store) ListProxyAuths(ctx context.Context) ([]ProxyAuth, error) {
 	}, "SELECT p.id,p.provider,p.record,p.updated_at,EXISTS (SELECT 1 FROM accounts a WHERE a.proxy_id=p.id) FROM proxy_auths p ORDER BY p.id")
 }
 
-// PruneUnboundProxyAuths reconciles interrupted account creation before proxy startup.
+// PruneUnboundProxyAuths reconciles interrupted account creation before proxy startup. It also drops every Antigravity account and
+// credential, bound or not: Gemini reaches Dyna only through agy, so nothing serves antigravity/* through the proxy.
 func (s *Store) PruneUnboundProxyAuths(ctx context.Context) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "DELETE FROM proxy_auths WHERE (provider IN ('claude','codex','kimi','xai','meta','antigravity') OR id GLOB 'dyna-key-[0-9a-f]*') AND NOT EXISTS (SELECT 1 FROM accounts WHERE proxy_id=proxy_auths.id)")
+		for _, drop := range []string{
+			"DELETE FROM session_accounts WHERE account IN (SELECT id FROM accounts WHERE provider='antigravity')",
+			"DELETE FROM accounts WHERE provider='antigravity'",
+			"DELETE FROM proxy_auths WHERE provider='antigravity'",
+		} {
+			if _, err := tx.ExecContext(ctx, drop); err != nil {
+				return err
+			}
+		}
+		_, err := tx.ExecContext(ctx, "DELETE FROM proxy_auths WHERE (provider IN ('claude','codex','kimi','xai','meta') OR id GLOB 'dyna-key-[0-9a-f]*') AND NOT EXISTS (SELECT 1 FROM accounts WHERE proxy_id=proxy_auths.id)")
 		return err
 	})
 }

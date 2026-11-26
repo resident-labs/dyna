@@ -155,7 +155,7 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		githubAvailable = githubAvailable && (account.Login != "" || s.githubAccounts.DefaultToken != "")
 	}
 	_, discordProblem := s.discordClient(ctx, caller)
-	harness := s.harnessOf(session.Profile)
+	harness := s.profiles.Harness(session.Profile)
 	var agy *contract.BoxAgy
 	if harness == contract.HarnessAgy {
 		agy = &agyMount

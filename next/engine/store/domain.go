@@ -39,22 +39,26 @@ func (e *VisualSupersededError) Error() string { return "visual has a newer vers
 
 var ErrParentHostAbsent = errors.New("sameHost requires a parent with an assigned host")
 
+// ErrProfileFull refuses a new session on a profile that already has its limit of open sessions.
+var ErrProfileFull = errors.New("profile has its limit of open sessions")
+
 // Session describes the stored session and its box.
 type Session struct {
-	ID          contract.SessionID
-	Turn        contract.TurnID // read back only: active turn captured with session identity
-	Room        contract.RoomID
-	Name        string
-	Repo        contract.RepoName
-	Profile     contract.ProfileName
-	Box         contract.BoxID
-	CloseReason contract.SessionCloseReason
-	NewRoomName string          // nonempty only for a new room root
-	Compose     string          // the compose file this session chose when it started, or ""
-	GPU         contract.GPUGiB // the VRAM its box asks of a card (5.5); set to start, not read back
-	Root        bool            // read back only: the session has no parent
-	Closing     bool            // read back only: the session is closing
-	ClearedAt   int64           // read back only: unix millis when a clear is pending for the next turn, or 0
+	ID           contract.SessionID
+	Turn         contract.TurnID // read back only: active turn captured with session identity
+	Room         contract.RoomID
+	Name         string
+	Repo         contract.RepoName
+	Profile      contract.ProfileName
+	Box          contract.BoxID
+	CloseReason  contract.SessionCloseReason
+	NewRoomName  string          // nonempty only for a new room root
+	Compose      string          // the compose file this session chose when it started, or ""
+	GPU          contract.GPUGiB // the VRAM its box asks of a card (5.5); set to start, not read back
+	ProfileLimit int             // set to start, not read back: the open sessions its profile allows at once, or 0 for any number
+	Root         bool            // read back only: the session has no parent
+	Closing      bool            // read back only: the session is closing
+	ClearedAt    int64           // read back only: unix millis when a clear is pending for the next turn, or 0
 	// Workflow makes the new session a crew. It is set only to start one: Session does not read it back.
 	Workflow *WorkflowRun
 }
@@ -113,6 +117,15 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 			}
 			if err := checkDepth(tree.Depth(parent)+1, maxDepth); err != nil {
 				return err
+			}
+		}
+		if session.ProfileLimit > 0 {
+			var open int
+			if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions WHERE profile=? AND closed_at IS NULL", session.Profile).Scan(&open); err != nil {
+				return err
+			}
+			if open >= session.ProfileLimit {
+				return ErrProfileFull
 			}
 		}
 		if clientID != "" {

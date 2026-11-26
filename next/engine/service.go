@@ -34,6 +34,8 @@ type Profiles interface {
 	List() []contract.Profile
 	TextOnlyModels() []contract.TextOnlyModel
 	CompactionTokens(contract.ProfileName) int
+	Harness(contract.ProfileName) contract.Harness
+	MaxConcurrent(contract.ProfileName) int
 	Model(contract.ProfileName) (contract.ModelChoice, []string, error)
 }
 

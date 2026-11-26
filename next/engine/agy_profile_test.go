@@ -1,9 +1,12 @@
 package engine
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/resident-labs/dyna/box"
@@ -40,6 +43,7 @@ func TestProfileHarnessValidation(t *testing.T) {
 	for name, text := range map[string]string{
 		"unknown harness":    `{"x": {"provider": "anthropic", "model": "m", "allowedModels": ["m"], "thinking": "low", "harness": "codex"}}`,
 		"agy needs google":   `{"x": {"provider": "anthropic", "model": "m", "allowedModels": ["m"], "thinking": "low", "harness": "agy"}}`,
+		"agy needs a limit":  `{"x": {"provider": "google", "model": "m", "allowedModels": ["m"], "thinking": "low", "harness": "agy"}}`,
 		"pig refuses google": `{"x": {"provider": "google", "model": "m", "allowedModels": ["m"], "thinking": "low"}}`,
 	} {
 		if _, err := loadAgyProfiles(t, text); err == nil {
@@ -201,5 +205,33 @@ func TestAgyProfileLimitsOpenSessions(t *testing.T) {
 	}
 	if _, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "three", Profile: "gem"}); e == nil || e.Code != contract.ErrConflict || !strings.Contains(e.Message, "allows 2 open sessions at once") {
 		t.Fatalf("a third agy session: %v", e)
+	}
+}
+
+func TestProfileSetRefusesAnAntigravityModel(t *testing.T) {
+	s, _, _, owner := agySetup(t)
+	req := contract.ProfileSetRequest{Create: true, Profile: contract.Profile{Name: "neon", Provider: contract.ModelProviderAnthropic, Model: "antigravity/gemini", AllowedModels: []string{"antigravity/gemini"}, Thinking: contract.ThinkingLow}}
+	if _, e := s.ProfileSet(t.Context(), owner, req); e == nil || !strings.Contains(e.Message, "--harness agy") {
+		t.Fatalf("%v", e)
+	}
+}
+
+// Starts race for the last place: the count and the insert share one store transaction, so exactly the limit succeed.
+func TestAgyLimitHoldsUnderConcurrentStarts(t *testing.T) {
+	s, room, _, owner := agySetup(t)
+	var wg sync.WaitGroup
+	var started atomic.Int32
+	for i := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, e := s.SessionStart(t.Context(), owner, contract.SessionStartRequest{Room: room, Name: fmt.Sprint("racer", i), Profile: "gem"}); e == nil {
+				started.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if started.Load() != 2 {
+		t.Fatalf("%d sessions started on a profile that allows 2", started.Load())
 	}
 }

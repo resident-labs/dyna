@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/resident-labs/dyna/box"
 	"log"
 	"os"
 	"path/filepath"
@@ -15,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/MichaelKinsy/PiG/ai"
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 )
@@ -68,6 +68,9 @@ func LoadProfiles(path string) (*ProfileConfig, error) {
 		if err := decoder.Decode(&p); err != nil {
 			return nil, fmt.Errorf("profile %q: %w", name, err)
 		}
+		if slices.ContainsFunc(append(slices.Clone(p.AllowedModels), p.Model), func(id string) bool { return strings.HasPrefix(id, "antigravity/") }) {
+			log.Printf("profile %q names an antigravity/ model, which no proxy account serves any more; move it to a profile with harness agy", name)
+		}
 		profiles[name] = p
 	}
 	if len(profiles) == 0 {
@@ -97,11 +100,6 @@ func validateProfiles(profiles map[contract.ProfileName]profile) error {
 		}
 		switch p.Harness {
 		case contract.HarnessPig:
-			for _, id := range append(slices.Clone(p.AllowedModels), p.Model) {
-				if strings.HasPrefix(id, "antigravity/") {
-					return fmt.Errorf("profile %q: the antigravity route through the proxy is gone; Gemini runs on a profile with harness agy", name)
-				}
-			}
 			switch p.Provider {
 			case contract.ModelProviderAnthropic, contract.ModelProviderOpenAI:
 			default:
@@ -110,6 +108,9 @@ func validateProfiles(profiles map[contract.ProfileName]profile) error {
 		case contract.HarnessAgy:
 			if p.Provider != contract.ModelProviderGoogle {
 				return fmt.Errorf("profile %q: an agy profile has provider google", name)
+			}
+			if p.MaxConcurrent == 0 {
+				return fmt.Errorf("profile %q: an agy profile needs max-concurrent above 0, because one Google account serves every agy session", name)
 			}
 		default:
 			return fmt.Errorf("profile %q: harness is pig or agy", name)
@@ -235,6 +236,22 @@ func (p *ProfileConfig) CompactionTokens(name contract.ProfileName) int {
 	return p.entries[name].CompactTokens
 }
 
+// Harness is the harness a profile runs on; an unknown profile reads as pig, and its caller's own unknown-profile check refuses it.
+func (p *ProfileConfig) Harness(name contract.ProfileName) contract.Harness {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if profile, ok := p.entries[name]; ok {
+		return profile.Harness
+	}
+	return contract.HarnessPig
+}
+
+func (p *ProfileConfig) MaxConcurrent(name contract.ProfileName) int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.entries[name].MaxConcurrent
+}
+
 func (p *ProfileConfig) Model(name contract.ProfileName) (contract.ModelChoice, []string, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -315,6 +332,9 @@ func (s *Service) ProfileSet(ctx context.Context, who contract.Principal, req co
 	v := req.Profile
 	if v.Harness == "" {
 		v.Harness = contract.HarnessPig
+	}
+	if slices.ContainsFunc(append(slices.Clone(v.AllowedModels), v.Model), func(id string) bool { return strings.HasPrefix(id, "antigravity/") }) {
+		return contract.ProfileSetResponse{}, invalid("antigravity/ models no longer run through the proxy; make a profile with --harness agy and --provider google instead")
 	}
 	if !req.Create {
 		for _, old := range p.List() {
@@ -452,22 +472,9 @@ func (s *Service) wakeWorkflowsOnProfile(ctx context.Context, name contract.Prof
 // agyHost is the one host agy sessions run on: the owner signs in to Google there, and one IP uses the login.
 const agyHost contract.HostName = "hermeslab"
 
-// harnessOf is the harness a profile runs on. A profile a read-only resolver lists without one runs on pig, as does any when no profiles are configured.
-func (s *Service) harnessOf(name contract.ProfileName) contract.Harness {
-	if s.profiles == nil {
-		return contract.HarnessPig
-	}
-	for _, p := range s.profiles.List() {
-		if p.Name == name && p.Harness != "" {
-			return p.Harness
-		}
-	}
-	return contract.HarnessPig
-}
-
 // pigOnly refuses an agy profile where only PiG runs: a workflow's workers and the room's advisor.
 func (s *Service) pigOnly(name contract.ProfileName, what string) *contract.Error {
-	if s.harnessOf(name) == contract.HarnessAgy {
+	if s.profiles.Harness(name) == contract.HarnessAgy {
 		return invalid(fmt.Sprintf("profile %s runs on agy, and %s run only on PiG profiles; pick a profile whose harness is pig", name, what))
 	}
 	return nil
@@ -475,7 +482,7 @@ func (s *Service) pigOnly(name contract.ProfileName, what string) *contract.Erro
 
 // agyPlacement pins a session on an agy profile to agyHost. host is what the caller asked for: empty, or a host the session may not take.
 func (s *Service) agyPlacement(profile contract.ProfileName, host contract.HostName, sameHost bool) (contract.HostName, *contract.Error) {
-	if s.harnessOf(profile) != contract.HarnessAgy {
+	if s.profiles.Harness(profile) != contract.HarnessAgy {
 		return host, nil
 	}
 	if sameHost || host != "" && host != agyHost {
@@ -490,23 +497,14 @@ var agyMount = contract.BoxAgy{Binary: box.AgyBinary, GeminiDir: contract.AgyGem
 
 // AgyProfile says a profile runs on the agy harness.
 func (s *Service) AgyProfile(name contract.ProfileName) bool {
-	return s.harnessOf(name) == contract.HarnessAgy
+	return s.profiles.Harness(name) == contract.HarnessAgy
 }
 
-// agyRoom refuses a new session on an agy profile that already has its max-concurrent open sessions: Google's one signed-in
-// account runs a bounded number of agy processes at once, and the design starts that at 2.
-func (s *Service) agyRoom(ctx context.Context, name contract.ProfileName) *contract.Error {
-	for _, p := range s.profiles.List() {
-		if p.Name != name || p.Harness != contract.HarnessAgy || p.MaxConcurrent == 0 {
-			continue
-		}
-		counts, err := s.store.ProfileUsage(ctx)
-		if err != nil {
-			return failure(err)
-		}
-		if counts[name] >= p.MaxConcurrent {
-			return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("profile %s allows %d open sessions at once, and %d are open; close one, or ask the owner to raise its max-concurrent", name, p.MaxConcurrent, counts[name])}
-		}
+// agyLimit is the open sessions an agy profile allows at once: one Google account serves them all, and the design starts the
+// limit at 2. A pig profile's max-concurrent bounds workflow workers only, so it is 0 here.
+func (s *Service) agyLimit(name contract.ProfileName) int {
+	if s.profiles.Harness(name) != contract.HarnessAgy {
+		return 0
 	}
-	return nil
+	return s.profiles.MaxConcurrent(name)
 }
