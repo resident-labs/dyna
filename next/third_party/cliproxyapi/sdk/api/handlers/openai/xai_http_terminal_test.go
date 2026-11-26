@@ -25,16 +25,17 @@ import (
 
 func TestXAIHTTPTerminal(t *testing.T) {
 	const (
-		model        = "grok-4.7"
-		delta        = `data: {"type":"response.output_text.delta","delta":"partial"}` + "\n"
-		malformed    = `data: {"type":"response.completed","response":{"output":[` + "\n"
-		limited      = "event: response.failed\ndata: {\"type\":\"response.failed\",\ndata: \"response\":{\"status\":\"failed\",\"error\":{\"code\":\"resource_exhausted\",\"message\":\"provider overloaded\"}}}\n"
-		wrappedLimit = `data: {"type":"error","error":{},"body":{"error":{"code":"resource_exhausted","message":"wrapped provider limit"}}}`
-		mergedLimit  = `data: {"type":"error","error":{"message":"provider rate limit"},"body":{"error":{"code":"resource_exhausted","message":"nested fallback"}}}`
-		plainError   = "event: error\ndata: upstream gateway refusal"
-		reverseError = "data: upstream gateway refusal\nevent: error\ndata: later"
-		badPatch     = `data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"a","call_id":"c","name":"apply_patch","arguments":""}}` + "\n\n" + `data: {"type":"response.completed"}` + "\n\n"
-		done         = `data: {"type":"response.done","response":{"id":"resp_ok","status":"completed","model":"grok-4.7","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ready"}]}],"usage":{"input_tokens":7,"output_tokens":3}}}` + "\n\n"
+		model         = "grok-4.7"
+		delta         = `data: {"type":"response.output_text.delta","delta":"partial"}` + "\n"
+		malformed     = `data: {"type":"response.completed","response":{"output":[` + "\n"
+		limited       = "event: response.failed\ndata: {\"type\":\"response.failed\",\ndata: \"response\":{\"status\":\"failed\",\"error\":{\"code\":\"resource_exhausted\",\"message\":\"provider overloaded\"}}}\n"
+		wrappedLimit  = `data: {"type":"error","error":{},"body":{"error":{"code":"resource_exhausted","message":"wrapped provider limit"}}}`
+		mergedLimit   = `data: {"type":"error","error":{"message":"provider rate limit"},"body":{"error":{"code":"resource_exhausted","message":"nested fallback"}}}`
+		responseLimit = `data: {"type":"error","error":{"message":"provider rate limit"},"response":{"status":"failed","error":{"code":"resource_exhausted"}}}`
+		plainError    = "event: error\ndata: upstream gateway refusal"
+		reverseError  = "data: upstream gateway refusal\nevent: error\ndata: later"
+		badPatch      = `data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"a","call_id":"c","name":"apply_patch","arguments":""}}` + "\n\n" + `data: {"type":"response.completed"}` + "\n\n"
+		done          = `data: {"type":"response.done","response":{"id":"resp_ok","status":"completed","model":"grok-4.7","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ready"}]}],"usage":{"input_tokens":7,"output_tokens":3}}}` + "\n\n"
 	)
 	for _, tc := range []struct {
 		name, body, want                                      string
@@ -72,6 +73,8 @@ func TestXAIHTTPTerminal(t *testing.T) {
 		{name: "buffered_429_merge_outer_message_and_nested_code", body: mergedLimit, want: "provider rate limit", short: true, limit: true, status: 429, posts: 2, cooled: 2},
 		{name: "stream_429_merge_outer_message_and_nested_code", stream: true, body: mergedLimit, want: "provider rate limit", short: true, limit: true, status: 429, posts: 2, cooled: 2},
 		{name: "stream_429_merge_after_output", stream: true, body: delta + "\n" + mergedLimit, want: "provider rate limit", short: true, limit: true, status: 200, posts: 1, cooled: 1},
+		{name: "buffered_429_merge_response_error_code", body: responseLimit, want: "provider rate limit", short: true, limit: true, status: 429, posts: 2, cooled: 2},
+		{name: "stream_429_merge_response_error_code", stream: true, body: responseLimit, want: "provider rate limit", short: true, limit: true, status: 429, posts: 2, cooled: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var posts atomic.Int32

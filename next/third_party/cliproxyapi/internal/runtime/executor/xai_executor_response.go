@@ -1197,15 +1197,19 @@ func xaiTerminalError(eventName string, data []byte, validJSON bool, headers htt
 	}
 	responseStatus := root.Get("response.status").String()
 	outerFailure := root.Get("error")
-	var details []gjson.Result
+	responseFailure := root.Get("response.error")
+	primary := outerFailure
+	var alternate gjson.Result
 	switch {
 	case eventType == "error", eventType == "" && (outerFailure.IsObject() || outerFailure.Type == gjson.String) && !root.Get("output").Exists():
 		if root.Type == gjson.String {
-			details = append(details, root)
+			primary = root
 		}
 	case eventType == "response.failed", eventType == "response.error", eventType == "response.cancelled", eventType == "response.canceled",
 		responseStatus == "failed", responseStatus == "cancelled", responseStatus == "canceled":
-		details = append(details, root.Get("response.error"))
+		if responseFailure.Type != gjson.Null {
+			primary, alternate = responseFailure, outerFailure
+		}
 	default:
 		switch eventType {
 		case "response.completed", "response.incomplete", "response.done":
@@ -1215,37 +1219,35 @@ func xaiTerminalError(eventName string, data []byte, validJSON bool, headers htt
 		}
 		return statusErr{}, false
 	}
-	// A wrapper may put the human-facing message outside the provider's
-	// machine-readable code. Fill fields independently in envelope order.
-	details = append(details, outerFailure, root.Get("body.error"))
+	// Match upstream xaiTerminalErrorDoc: the selected envelope wins, and
+	// each missing field falls back to response.error, root, then body.error.
+	wrappedFailure := root.Get("body.error")
 	body := []byte(`{"error":{}}`)
-	if details[0].IsObject() {
-		body, _ = sjson.SetRawBytes(body, "error", []byte(details[0].Raw))
-	}
-	for _, field := range []string{"code", "type", "param", "message"} {
-		path := "error." + field
-		if strings.TrimSpace(gjson.GetBytes(body, path).String()) != "" {
-			continue
+	for _, detail := range []gjson.Result{primary, alternate} {
+		hasDetail := detail.IsObject() && len(detail.Map()) > 0
+		if hasDetail {
+			body, _ = sjson.SetRawBytes(body, "error", []byte(detail.Raw))
 		}
-		var value gjson.Result
-		for _, errorDetail := range details {
-			value = errorDetail.Get(field)
-			if field == "message" && errorDetail.Type == gjson.String {
-				value = errorDetail
+		for _, field := range []struct{ key, rootKey string }{{"code", "code"}, {"type", "error_type"}, {"param", "param"}, {"message", "message"}} {
+			selected, wrapped := detail.Get(field.key), wrappedFailure.Get(field.key)
+			if field.key == "message" {
+				if detail.Type == gjson.String {
+					selected = detail
+				}
+				if wrappedFailure.Type == gjson.String {
+					wrapped = wrappedFailure
+				}
 			}
-			if strings.TrimSpace(value.String()) != "" {
-				break
+			for _, value := range []gjson.Result{selected, responseFailure.Get(field.key), root.Get(field.rootKey), wrapped} {
+				if strings.TrimSpace(value.String()) != "" {
+					body, _ = sjson.SetRawBytes(body, "error."+field.key, []byte(value.Raw))
+					hasDetail = true
+					break
+				}
 			}
 		}
-		if strings.TrimSpace(value.String()) == "" {
-			rootField := field
-			if field == "type" {
-				rootField = "error_type"
-			}
-			value = root.Get(rootField)
-		}
-		if value.Type != gjson.Null {
-			body, _ = sjson.SetRawBytes(body, path, []byte(value.Raw))
+		if hasDetail || alternate.Type == gjson.Null {
+			break
 		}
 	}
 	if seq := root.Get("sequence_number"); seq.Type == gjson.Number {
