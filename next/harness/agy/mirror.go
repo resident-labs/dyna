@@ -119,12 +119,6 @@ func (h *Harness) mirrorFiles() []string {
 	return paths
 }
 
-// mirrorEmpty reports a mirror that has no entry yet.
-func mirrorEmpty(path string) bool {
-	info, err := os.Stat(path)
-	return err != nil || info.Size() == 0
-}
-
 // record appends one Pi message entry to the mirror.
 func (h *Harness) record(message map[string]any) error {
 	h.fm.Lock()
