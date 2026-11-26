@@ -67,6 +67,8 @@ type callParams struct {
 	Meta      struct {
 		ProgressToken json.RawMessage `json:"progressToken"`
 	} `json:"_meta"`
+	// compact is set for the agy endpoint, which answers the action help itself.
+	compact bool
 }
 
 // Forward makes a single box-socket API request and returns its typed error unchanged.
@@ -160,6 +162,14 @@ func decodeProblem(err error, name string, a action) string {
 }
 
 func (s *Server) call(ctx context.Context, p callParams) Result {
+	return s.callVerb(ctx, p, nil)
+}
+
+// callVerb is call, and says the action it ran, or the one it was asked for if it refused, through verb.
+func (s *Server) callVerb(ctx context.Context, p callParams, verb *string) Result {
+	if verb == nil {
+		verb = new(string)
+	}
 	verbs, ok := s.actions[p.Name]
 	if !ok {
 		return failure(contract.ErrUnknownAction, "Unknown tool. Valid tools: "+s.names)
@@ -169,19 +179,21 @@ func (s *Server) call(ctx context.Context, p callParams) Result {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	var verb string
 	if raw := p.Arguments["action"]; len(raw) > 0 {
-		if err := json.Unmarshal(raw, &verb); err != nil {
+		if err := json.Unmarshal(raw, verb); err != nil {
 			return failure(contract.ErrInvalid, "action is a string. Valid actions: "+strings.Join(names, ", "))
 		}
 	}
-	if verb == "" {
+	if *verb == "" {
 		if len(names) > 1 {
 			return failure(contract.ErrInvalid, "action is required. Valid actions: "+strings.Join(names, ", "))
 		}
-		verb = names[0]
+		*verb = names[0]
 	}
-	a, ok := verbs[verb]
+	if _, real := verbs[agyHelp]; p.compact && *verb == agyHelp && !real {
+		return s.helpResult(p.Name)
+	}
+	a, ok := verbs[*verb]
 	if !ok {
 		return failure(contract.ErrUnknownAction, "Unknown action. Valid actions: "+strings.Join(names, ", "))
 	}
@@ -208,7 +220,7 @@ func (s *Server) call(ctx context.Context, p callParams) Result {
 	if err := dec.Decode(decoded); err != nil {
 		name := p.Name
 		if len(names) > 1 {
-			name += " " + verb
+			name += " " + *verb
 		}
 		return failure(contract.ErrInvalid, decodeProblem(err, name, a))
 	}
@@ -447,8 +459,8 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, surf surface) {
 		}
 		run := func(ctx context.Context, p callParams) Result {
 			var verb string
-			_ = json.Unmarshal(p.Arguments["action"], &verb)
-			out := s.call(ctx, p)
+			p.compact = surf.compact
+			out := s.callVerb(ctx, p, &verb)
 			if surf.compact && out.IsError {
 				out = s.withHelp(out, p.Name, verb)
 			}

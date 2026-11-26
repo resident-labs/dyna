@@ -39,21 +39,41 @@ func bare(s schema) schema {
 }
 
 func compactTool(t Tool) Tool {
-	t.Description = t.Title + "."
-	if verbs := t.InputSchema.Properties["action"].Enum; len(verbs) > 0 {
-		t.Description += " Actions: " + strings.Join(verbs, ", ") + "."
-	}
-	t.Description += " What each does and takes: the server instructions; a refused call returns it."
 	t.InputSchema = bare(t.InputSchema)
+	action := t.InputSchema.Properties["action"]
+	action.Enum = append(slices.Clone(action.Enum), agyHelp)
+	t.InputSchema.Properties["action"] = action
+	t.Description = t.Title + ". Actions: " + strings.Join(action.Enum, ", ") + ". Call action help for what each does and its fields."
 	return t
+}
+
+// agyHelp is the action each tool of the agy listing adds: it answers the tool's help, which the listing leaves out, without
+// forwarding anything.
+const agyHelp = "help"
+
+// helpText is everything the full listing says of a tool: what each action does, then each field with its description, which
+// actions take it and its format, from the same registry text.
+func helpText(t Tool) string {
+	text := t.Description
+	for _, key := range slices.Sorted(maps.Keys(t.InputSchema.Properties)) {
+		if description := t.InputSchema.Properties[key].Description; description != "" {
+			text += "\n" + key + ": " + description
+		}
+	}
+	return text
+}
+
+func (s *Server) helpResult(name string) Result {
+	tool, _ := s.Tool(name)
+	return Result{Content: []Content{{Type: "text", Text: helpText(tool)}}}
 }
 
 func (s *Server) agySurface() surface {
 	list := make([]Tool, len(s.list))
-	help := []string{s.Description()}
+	help := []string{s.Description() + " Each tool takes action help, which answers its help in full."}
 	for i, tool := range s.list {
 		list[i] = compactTool(tool)
-		help = append(help, "## "+tool.Name+"\n"+tool.Description)
+		help = append(help, "## "+tool.Name+"\n"+helpText(tool))
 	}
 	return surface{tools: list, instructions: strings.Join(help, "\n\n"), compact: true}
 }

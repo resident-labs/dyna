@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -142,5 +143,74 @@ func TestAgyCallsMatchTheFullEndpoint(t *testing.T) {
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"context","arguments":{"action":"show"}}}`
 	if a, b := rpc(t, server.Agy(), body), rpc(t, server, body); string(a) != string(b) || !strings.Contains(string(a), "echo") {
 		t.Fatalf("agy %s\nfull %s", a, b)
+	}
+}
+
+// The field help a call needs before it acts is in the instructions and in the help action, from the registry that the full
+// listing's descriptions come from.
+func TestAgyHelpCarriesTheFieldHelp(t *testing.T) {
+	server, err := New(nil, nil, post.Preparer{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	init := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`
+	var agy struct{ Instructions string }
+	_ = json.Unmarshal(rpc(t, server.Agy(), init), &agy)
+	fields := 0
+	for _, tool := range server.list {
+		var out struct {
+			Content []struct{ Text string } `json:"content"`
+			IsError bool                    `json:"isError"`
+		}
+		call := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"` + tool.Name + `","arguments":{"action":"help"}}}`
+		if err := json.Unmarshal(rpc(t, server.Agy(), call), &out); err != nil || out.IsError || len(out.Content) != 1 {
+			t.Fatalf("%s help: %+v, %v", tool.Name, out, err)
+		}
+		if out.Content[0].Text != helpText(tool) || !strings.Contains(agy.Instructions, helpText(tool)) {
+			t.Errorf("%s: help differs from the registry's text", tool.Name)
+		}
+		for key, property := range tool.InputSchema.Properties {
+			if property.Description == "" {
+				continue
+			}
+			fields++
+			if !strings.Contains(out.Content[0].Text, key+": "+property.Description) {
+				t.Errorf("%s.%s: its description is not in the help", tool.Name, key)
+			}
+		}
+	}
+	if fields == 0 {
+		t.Fatal("no field descriptions were checked")
+	}
+	// A description that no action's prose says: subscription's latest is stated only in its field.
+	subscription, _ := server.Tool("subscription")
+	latest := subscription.InputSchema.Properties["latest"].Description
+	prose := ""
+	for _, a := range server.actions["subscription"] {
+		prose += a.help
+	}
+	if latest == "" || strings.Contains(prose, latest) || !strings.Contains(agy.Instructions, latest) {
+		t.Fatalf("latest: %q", latest)
+	}
+}
+
+// Help is an action of the agy listing only: the full endpoint refuses it as before, and every compact tool lists it.
+func TestHelpIsAgyOnly(t *testing.T) {
+	server, err := New(nil, nil, post.Preparer{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range server.list {
+		if slices.Contains(tool.InputSchema.Properties["action"].Enum, agyHelp) {
+			t.Errorf("%s: the full listing has a help action", tool.Name)
+		}
+		compact := compactTool(tool)
+		if !slices.Contains(compact.InputSchema.Properties["action"].Enum, agyHelp) || !strings.Contains(compact.Description, "Call action help") {
+			t.Errorf("%s: the compact tool does not offer help: %q", tool.Name, compact.Description)
+		}
+	}
+	call := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"goal","arguments":{"action":"help"}}}`
+	if got := string(rpc(t, server, call)); !strings.Contains(got, "Unknown action") {
+		t.Fatalf("the full endpoint answered help: %s", got)
 	}
 }
