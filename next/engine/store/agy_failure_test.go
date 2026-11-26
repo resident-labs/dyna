@@ -80,7 +80,7 @@ func TestAgyQuotaFailureWakesOnceAtTheReset(t *testing.T) {
 	const days = 5
 	reset := int64(days * 24 * 3600)
 	ended := contract.Event{ID: "end", Room: "r", Time: now, From: principal, Body: contract.TurnEnded{Session: "s", Turn: "turn", Outcome: contract.TurnFailed, Cause: contract.CauseModelFailed}}
-	if err := s.EndTurn(ctx, "s", contract.TurnOutputRequest{Turn: "turn", Outcome: contract.TurnFailed, Cause: contract.CauseModelFailed, ModelRetryAfterSeconds: reset}, ended); err != nil {
+	if err := s.EndTurn(ctx, "s", contract.TurnOutputRequest{Turn: "turn", Outcome: contract.TurnFailed, Cause: contract.CauseModelFailed, ModelRetryAfterSeconds: reset, OneWake: true}, ended); err != nil {
 		t.Fatal(err)
 	}
 	var retryAt int64
@@ -112,5 +112,70 @@ func TestAgyQuotaFailureWakesOnceAtTheReset(t *testing.T) {
 	}
 	if err := s.WakeModelRetries(ctx, now.Add(time.Duration(reset+240)*time.Second)); err != nil || wakes() != 1 {
 		t.Fatalf("woken twice: %d %v", wakes(), err)
+	}
+}
+
+// An agy turn that fails on a limit gets at most one wake, at its own reset, however many retries came before; with no stated reset
+// it gets none. Other profiles keep the eight-attempt ladder.
+func TestAgyQuotaRetryIsOutsideTheLadder(t *testing.T) {
+	now := time.Unix(1000, 0)
+	for _, c := range []struct {
+		name    string
+		reset   int64
+		oneWake bool
+		retries int
+		want    string
+	}{
+		{"agy, reset, after eight attempts", 3600, true, 8, "at the reset"},
+		{"agy, no reset", 0, true, 0, "none"},
+		{"pig, no reset, ladder", 0, false, 0, "ladder"},
+		{"pig, reset, after eight attempts", 3600, false, 8, "none"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			s, err := Open(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			if _, err = s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+ INSERT INTO sessions(id,room,name,profile,state,goal,created_at,model_retries) VALUES('s','r','s','p','open','',0,` + string(rune('0'+c.retries)) + `);
+ INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at) VALUES('b','s','','agent','ready','','',0,0)`); err != nil {
+				t.Fatal(err)
+			}
+			principal := contract.Principal{Kind: contract.PrincipalSession, Session: "s"}
+			post := contract.Event{ID: "post", Room: "r", Time: now, From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.PostCreated{Text: "work"}}
+			if _, err := s.Post(ctx, post, []contract.Delivery{{To: principal, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: true}}); err != nil {
+				t.Fatal(err)
+			}
+			started := contract.Event{ID: "start", Room: "r", Time: now, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.TurnStarted{}}
+			if _, _, _, err := s.Dispatch(ctx, "s", "turn", started, false); err != nil {
+				t.Fatal(err)
+			}
+			ended := contract.Event{ID: "end", Room: "r", Time: now, From: principal, Body: contract.TurnEnded{Session: "s", Turn: "turn", Outcome: contract.TurnFailed, Cause: contract.CauseModelFailed}}
+			output := contract.TurnOutputRequest{Turn: "turn", Outcome: contract.TurnFailed, Cause: contract.CauseModelFailed, ModelRetryAfterSeconds: c.reset, OneWake: c.oneWake}
+			if err := s.EndTurn(ctx, "s", output, ended); err != nil {
+				t.Fatal(err)
+			}
+			var retryAt int64
+			if err := s.Read().QueryRowContext(ctx, "SELECT model_retry_at FROM sessions WHERE id='s'").Scan(&retryAt); err != nil {
+				t.Fatal(err)
+			}
+			at := time.UnixMilli(retryAt).Sub(now)
+			switch c.want {
+			case "at the reset":
+				if at < time.Hour || at > time.Hour+30*time.Second {
+					t.Fatalf("retry in %v, want the reset plus a little jitter", at)
+				}
+			case "ladder":
+				if at < 5*time.Minute {
+					t.Fatalf("retry in %v, want the first ladder step", at)
+				}
+			case "none":
+				if retryAt > 0 {
+					t.Fatalf("a retry was scheduled in %v", at)
+				}
+			}
+		})
 	}
 }

@@ -882,6 +882,9 @@ type TurnOutputRequest struct {
 	Unread []DeliverySeq `json:"unread,omitempty"`
 	// ModelRetryAfterSeconds is the provider's reset hint for a model_failed turn.
 	ModelRetryAfterSeconds int64 `json:"modelRetryAfterSeconds,omitempty"`
+	// OneWake is set by the engine, not the box, for a session whose failed turn gets at most one retry: at the stated reset, and none
+	// without one. It stands outside the eight-attempt ladder that other profiles use.
+	OneWake bool `json:"-"`
 }
 type TurnOutputResponse struct{}
 

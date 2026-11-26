@@ -24,10 +24,13 @@ func (s *Service) SessionStop(ctx context.Context, caller contract.Principal, re
 	if err != nil {
 		return contract.SessionStopResponse{}, failure(err)
 	}
-	if !stopping && s.profiles.Harness(target.Profile) == contract.HarnessAgy {
+	// An agy harness can run work after its turn ended, and a pending quota retry makes stopping true with no turn to stop, so the
+	// turn-less stop goes out whatever else this stop did. It is idempotent beside a stop that names the running turn.
+	if s.profiles.Harness(target.Profile) == contract.HarnessAgy {
 		if handle, ok := s.live.LookupSession(target.ID); ok && handle.Lock() {
 			if channel := handle.Channel(); channel != nil {
 				channel.AskStop()
+				stopping = true
 			}
 			handle.Unlock()
 		}

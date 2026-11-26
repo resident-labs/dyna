@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"github.com/resident-labs/dyna/engine/live"
 	"os"
 	"path/filepath"
 	"strings"
@@ -271,5 +272,32 @@ func TestDiscordRouteRefusesAnAgySession(t *testing.T) {
 	_, e := f.s.RoomDiscord(f.ctx, owner, contract.RoomDiscordRequest{Room: f.room, Server: "100", Session: "gemini"})
 	if e == nil || !strings.Contains(e.Message, "name a session on a pig profile") {
 		t.Fatalf("%v", e)
+	}
+}
+
+// A stop reaches an agy harness whether or not a turn runs, and whether or not it also cancelled a quota retry (which alone makes
+// stopping true): work the last turn left behind runs on.
+func TestStopReachesAnAgyHarnessWithNoTurn(t *testing.T) {
+	s, room, _, owner := agySetup(t)
+	ctx := t.Context()
+	started, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "gemini", Profile: "gem"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	// A quota failure with a stated reset leaves a retry pending.
+	handle, _ := s.live.CreateSession(started.Session)
+	handle.Lock()
+	channel := live.NewChannel(func() {})
+	handle.SetChannel(channel)
+	handle.Unlock()
+	stopped, e := s.SessionStop(ctx, owner, contract.SessionStopRequest{Session: started.Session})
+	if e != nil || !stopped.Stopping {
+		t.Fatalf("stop: %+v %v", stopped, e)
+	}
+	handle.Lock()
+	sent := channel.TakeStop()
+	handle.Unlock()
+	if !sent {
+		t.Fatal("the stop did not reach the agy harness")
 	}
 }
