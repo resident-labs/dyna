@@ -603,6 +603,9 @@ func TestPromptCarriesInstructionsOnceAndContextWhenChanged(t *testing.T) {
 		!strings.HasPrefix(got[0][2], "<runtime_info>") {
 		t.Fatalf("first prompt = %q", got[0])
 	}
+	if strings.Count(got[0][1], helpLine) != 1 || strings.Contains(got[1][0], helpLine) {
+		t.Fatalf("the help line is not in the first prompt exactly once: %q", got)
+	}
 	if len(got[1]) != 1 || got[1][0] != "say b" {
 		t.Fatalf("second prompt = %q", got[1])
 	}

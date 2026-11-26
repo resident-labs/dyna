@@ -33,6 +33,9 @@ const (
 // (T3 shows them to the user; Dyna has nobody to ask).
 const askOwnerLine = "You cannot ask the owner questions through Antigravity's own question prompts or forms; they are cancelled. To ask the owner something, use Dyna's question tool."
 
+// helpLine is there because agy does not show its model the tools' field descriptions: each dyna tool lists its actions and fields in its help action.
+const helpLine = "Before first using a dyna tool, call its `help` action: it lists the actions and each field."
+
 var errInactive = errors.New("agy sent no update for too long; the turn was ended")
 
 // block is one part of the assistant message being built.
@@ -331,7 +334,7 @@ func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process,
 	instructions := ""
 	if !slash && !steer && !state.instructions {
 		parts := slices.DeleteFunc(append([]string{h.cfg.Instructions}, h.cfg.ProjectInstructions...), func(s string) bool { return s == "" })
-		parts = append(parts, askOwnerLine)
+		parts = append(parts, askOwnerLine, helpLine)
 		instructions = "<dyna_instructions>\n" + strings.Join(parts, "\n\n") + "\n</dyna_instructions>"
 		next.instructions = true
 	}
