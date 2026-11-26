@@ -307,85 +307,90 @@ func TestWriteToolsFollowTheRoomsGroups(t *testing.T) {
 	}
 }
 
+// paths are the two endpoints a box reaches: the full listing and agy's. Their calls are the same handler.
+var paths = []string{"/github/", contract.GitHubAgyPath}
+
 func TestOwnedPullLifecycleThroughMCP(t *testing.T) {
-	for _, caller := range []contract.SessionID{"owner", "sibling"} {
-		t.Run(string(caller), func(t *testing.T) {
-			ctx := context.Background()
-			var mu sync.Mutex
-			var patches []map[string]any
-			fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Header.Get("Authorization") != "Bearer engine-token" {
-					t.Error("missing engine token")
-				}
-				w.Header().Set("Content-Type", "application/json")
-				if r.URL.Path != "/repos/o/r/pulls/7" {
-					t.Errorf("unexpected route: %s", r.URL.Path)
-				}
-				if r.Method == "PATCH" {
-					var body map[string]any
-					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-						t.Error(err)
+	for _, path := range paths {
+		for _, caller := range []contract.SessionID{"owner", "sibling"} {
+			t.Run(path+string(caller), func(t *testing.T) {
+				ctx := context.Background()
+				var mu sync.Mutex
+				var patches []map[string]any
+				fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Header.Get("Authorization") != "Bearer engine-token" {
+						t.Error("missing engine token")
 					}
-					mu.Lock()
-					patches = append(patches, body)
-					mu.Unlock()
-				} else if r.Method != "GET" {
-					t.Errorf("unexpected method: %s", r.Method)
-				}
-				fmt.Fprint(w, `{"id":7,"number":7,"node_id":"PR_7","title":"title","state":"open"}`)
-			}))
-			defer fake.Close()
-			target, _ := url.Parse(fake.URL)
-			handler, err := Handler(ctx, "engine-token", &toFake{target: target}, func(ctx context.Context, repo contract.RepoName, number int) (bool, error) {
-				if repo != "o/r" || number != 7 {
-					t.Errorf("ownership target: %s %d", repo, number)
-				}
-				return githubwrites.SessionFrom(ctx) == "owner", nil
-			}, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			grant := contract.GitHubWrites{Repos: []contract.RepoName{"o/r"}, Groups: []contract.GitHubWriteGroup{contract.GitHubWritePulls}}
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				handler.ServeHTTP(w, r.WithContext(githubwrites.WithSession(githubwrites.WithAllowed(r.Context(), grant), caller)))
-			}))
-			defer server.Close()
-			session, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil).Connect(ctx, &mcp.StreamableClientTransport{Endpoint: server.URL}, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer session.Close()
-			if _, err := session.ListTools(ctx, nil); err != nil {
-				t.Fatal(err)
-			}
-			for key, value := range map[string]string{"state": "closed", "base": "release"} {
-				values := []string{value}
-				if key == "state" {
-					values = append(values, "open")
-				}
-				for _, value := range values {
-					result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "update_pull_request", Arguments: map[string]any{"owner": "o", "repo": "r", "pullNumber": 7, key: value}})
-					if err != nil {
-						t.Fatal(err)
+					w.Header().Set("Content-Type", "application/json")
+					if r.URL.Path != "/repos/o/r/pulls/7" {
+						t.Errorf("unexpected route: %s", r.URL.Path)
 					}
-					if caller == "owner" && result.IsError {
-						t.Fatalf("owner %s=%s: %s", key, value, text(result))
+					if r.Method == "PATCH" {
+						var body map[string]any
+						if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+							t.Error(err)
+						}
+						mu.Lock()
+						patches = append(patches, body)
+						mu.Unlock()
+					} else if r.Method != "GET" {
+						t.Errorf("unexpected method: %s", r.Method)
 					}
-					if caller != "owner" && (!result.IsError || !strings.Contains(text(result), "pr_not_owned")) {
-						t.Fatalf("sibling: %s", text(result))
+					fmt.Fprint(w, `{"id":7,"number":7,"node_id":"PR_7","title":"title","state":"open"}`)
+				}))
+				defer fake.Close()
+				target, _ := url.Parse(fake.URL)
+				handler, err := Handler(ctx, "engine-token", &toFake{target: target}, func(ctx context.Context, repo contract.RepoName, number int) (bool, error) {
+					if repo != "o/r" || number != 7 {
+						t.Errorf("ownership target: %s %d", repo, number)
+					}
+					return githubwrites.SessionFrom(ctx) == "owner", nil
+				}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				grant := contract.GitHubWrites{Repos: []contract.RepoName{"o/r"}, Groups: []contract.GitHubWriteGroup{contract.GitHubWritePulls}}
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					handler.ServeHTTP(w, r.WithContext(githubwrites.WithSession(githubwrites.WithAllowed(r.Context(), grant), caller)))
+				}))
+				defer server.Close()
+				session, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil).Connect(ctx, &mcp.StreamableClientTransport{Endpoint: server.URL + path}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer session.Close()
+				if _, err := session.ListTools(ctx, nil); err != nil {
+					t.Fatal(err)
+				}
+				for key, value := range map[string]string{"state": "closed", "base": "release"} {
+					values := []string{value}
+					if key == "state" {
+						values = append(values, "open")
+					}
+					for _, value := range values {
+						result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "update_pull_request", Arguments: map[string]any{"owner": "o", "repo": "r", "pullNumber": 7, key: value}})
+						if err != nil {
+							t.Fatal(err)
+						}
+						if caller == "owner" && result.IsError {
+							t.Fatalf("owner %s=%s: %s", key, value, text(result))
+						}
+						if caller != "owner" && (!result.IsError || !strings.Contains(text(result), "pr_not_owned")) {
+							t.Fatalf("sibling: %s", text(result))
+						}
 					}
 				}
-			}
-			mu.Lock()
-			defer mu.Unlock()
-			want := 0
-			if caller == "owner" {
-				want = 3
-			}
-			if len(patches) != want {
-				t.Fatalf("patches = %v", patches)
-			}
-		})
+				mu.Lock()
+				defer mu.Unlock()
+				want := 0
+				if caller == "owner" {
+					want = 3
+				}
+				if len(patches) != want {
+					t.Fatalf("patches = %v", patches)
+				}
+			})
+		}
 	}
 }
 
@@ -461,6 +466,12 @@ func TestWorkflowJobsAreNotNested(t *testing.T) {
 
 // Through the server, as Pi calls it: an older protocol gets the handler's text, which must come out flat.
 func TestWorkflowJobsAreFlatThroughTheServer(t *testing.T) {
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) { workflowJobsAreFlat(t, path) })
+	}
+}
+
+func workflowJobsAreFlat(t *testing.T, path string) {
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"total_count":1,"jobs":[{"id":5,"name":"next","status":"completed","conclusion":"failure"}]}`)
@@ -474,7 +485,7 @@ func TestWorkflowJobsAreFlatThroughTheServer(t *testing.T) {
 	}
 	server := httptest.NewServer(handler)
 	defer server.Close()
-	session, err := mcp.NewClient(&mcp.Implementation{Name: "pi", Version: "test"}, nil).Connect(ctx, &mcp.StreamableClientTransport{Endpoint: server.URL}, &mcp.ClientSessionOptions{ProtocolVersion: "2025-06-18"})
+	session, err := mcp.NewClient(&mcp.Implementation{Name: "pi", Version: "test"}, nil).Connect(ctx, &mcp.StreamableClientTransport{Endpoint: server.URL + path}, &mcp.ClientSessionOptions{ProtocolVersion: "2025-06-18"})
 	if err != nil {
 		t.Fatal(err)
 	}

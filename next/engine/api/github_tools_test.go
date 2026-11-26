@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,10 @@ import (
 	"github.com/resident-labs/dyna/engine/githubmcp"
 	"github.com/resident-labs/dyna/engine/githubwrites"
 )
+
+type transportFunc func(*http.Request) (*http.Response, error)
+
+func (f transportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 type githubToolsService struct {
 	fakeService
@@ -101,7 +106,7 @@ func TestGitHubToolsGetTheSocketsRoomWrites(t *testing.T) {
 // A box socket serves GitHub's tools at /github/ in full and at /github-agy/ as agy declares them: github_help is in the second
 // listing and not in the first, from the service's one handler.
 func TestBoxSocketServesTheAgyGitHubListing(t *testing.T) {
-	handler, err := githubmcp.Handler(t.Context(), "token", http.DefaultTransport, nil, nil)
+	handler, err := githubmcp.Handler(t.Context(), "token", transportFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("a listing reached GitHub") }), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

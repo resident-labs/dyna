@@ -89,50 +89,18 @@ func holdsObjects(items any) bool {
 	return shaped || oneOf
 }
 
-// fields lists every property of a schema with its type, enum and description, nested ones by their dotted path.
-func fields(prefix string, schema map[string]any, out *[]string) {
-	properties, _ := schema["properties"].(map[string]any)
-	for _, name := range slices.Sorted(func(yield func(string) bool) {
-		for name := range properties {
-			if !yield(name) {
-				return
-			}
-		}
-	}) {
-		field, _ := properties[name].(map[string]any)
-		line := prefix + name
-		if kind, ok := field["type"].(string); ok {
-			line += " (" + kind
-			if enum, ok := field["enum"].([]any); ok {
-				line += ", one of " + strings.Trim(fmt.Sprint(enum), "[]")
-			}
-			line += ")"
-		}
-		if description, ok := field["description"].(string); ok {
-			line += ": " + description
-		}
-		*out = append(*out, line)
-		fields(prefix+name+".", field, out)
-		if items, ok := field["items"]; ok && holdsObjects(items) {
-			shape, _ := json.Marshal(items)
-			*out = append(*out, prefix+name+"[] each is: "+string(shape))
-		}
-	}
-}
+// helpSchema marks where a help text holds the tool's schema: the whole of what the listing drops, as upstream wrote it, so format, default,
+// required, enum and nested fields all survive.
+const helpSchema = "\n\nParameters (JSON schema):\n"
 
-// helpText is everything the full listing says of a tool: its whole description and each field.
+// helpText is everything the full listing says of a tool: its whole description and its schema before any stripping.
 func helpText(name, description string, schema any) (string, error) {
-	data, err := json.Marshal(schema)
-	if err != nil {
-		return "", err
-	}
-	var parsed map[string]any
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		return "", err
-	}
-	lines := []string{name + ": " + description}
-	fields("", parsed, &lines)
-	return strings.Join(lines, "\n"), nil
+	var out strings.Builder
+	encoder := json.NewEncoder(&out)
+	encoder.SetEscapeHTML(false)
+	out.WriteString(name + ": " + description + helpSchema)
+	err := encoder.Encode(schema)
+	return strings.TrimSpace(out.String()), err
 }
 
 // compactTool replaces a tool's description and schema with the agy listing's, and returns the help it drops.

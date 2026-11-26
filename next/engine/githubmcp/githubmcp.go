@@ -105,7 +105,9 @@ func Handler(ctx context.Context, token string, reads http.RoundTripper, owns fu
 			return servers[key], nil
 		}
 		offered := func(tool *inventory.ServerTool) bool {
-			return !slices.Contains(excluded, tool.Tool.Name) && (tool.IsReadOnly() || slices.Contains(names, tool.Tool.Name))
+			// A tool upstream makes in two variants for a feature flag is offered as the one the flags pick; the other must not take its help.
+			flagged := tool.FeatureRule.Enabled(func(flag inventory.FeatureFlag) bool { return slices.Contains(features, string(flag)) })
+			return flagged && !slices.Contains(excluded, tool.Tool.Name) && (tool.IsReadOnly() || slices.Contains(names, tool.Tool.Name))
 		}
 		help := map[string]string{}
 		tools := github.AllTools(t, github.WithHost(utils.HostTypeDotcom))
