@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -367,55 +368,174 @@ func (e *KimiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 			}
 		}()
 		scanner := bufio.NewScanner(httpResp.Body)
-		scanner.Buffer(nil, 1_048_576) // 1MB
+		scanner.Buffer(nil, helps.StreamScannerBuffer)
 		claudeInputTokens := helps.NewClaudeInputTokenState(from, to, responseFormat, originalPayload)
 		var streamUsage helps.StreamUsageBuffer
-		defer streamUsage.Publish(ctx, reporter)
+		var terminalDelivered bool
+		defer func() {
+			if errCtx := ctx.Err(); errCtx != nil && !terminalDelivered {
+				streamUsage.PublishFailure(ctx, reporter, errCtx)
+				return
+			}
+			streamUsage.Publish(ctx, reporter)
+		}()
+		failStream := func(errStream, loggedErr error) {
+			helps.RecordAPIResponseError(ctx, e.cfg, loggedErr)
+			streamUsage.PublishFailure(ctx, reporter, loggedErr)
+			select {
+			case out <- cliproxyexecutor.StreamChunk{Err: errStream}:
+			case <-ctx.Done():
+			}
+		}
+		failPayload := func(errStream statusErr) {
+			failStream(errStream, statusErr{code: errStream.code, msg: "upstream stream returned an error payload"})
+		}
 		var param any
-		helps.InitializeApplyPatchStream(ctx, to, responseFormat, req.Model, helps.ApplyPatchOriginalRequest(req, opts), body, &param)
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			helps.AppendAPIResponseChunk(ctx, e.cfg, line)
+		originalRequest := helps.ApplyPatchOriginalRequest(req, opts)
+		patchErr := statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}
+		helps.InitializeApplyPatchStream(ctx, to, responseFormat, req.Model, originalRequest, body, &param)
+		emit := func(line []byte) bool {
+			chunks := helps.TranslateStreamWithClaudeInputTokens(ctx, to, responseFormat, req.Model, originalRequest, body, line, &param, claudeInputTokens)
+			helps.RecordApplyPatchStreamFailureWithUsage(ctx, param, reporter, &streamUsage, patchErr)
+			for _, chunk := range chunks {
+				terminal := !terminalDelivered && kimiStreamChunkIsTerminal(chunk)
+				select {
+				case out <- cliproxyexecutor.StreamChunk{Payload: chunk}:
+					terminalDelivered = terminalDelivered || terminal
+				case <-ctx.Done():
+					return false
+				}
+			}
+			return !helps.StopApplyPatchStreamWithUsage(ctx, param, reporter, &streamUsage, out, patchErr)
+		}
+
+		var sawDone, sawFinishReason bool
+		var eventName string
+		var frame []byte
+		var frameSize int
+		incompleteFrame := statusErr{code: http.StatusBadGateway, msg: "upstream stream ended with incomplete SSE data frame", streamTruncated: true}
+		observe := func(line []byte) {
 			reporter.ObserveResponseModel(line)
 			streamUsage.ObserveOpenAIStream(line)
-			chunks := helps.TranslateStreamWithClaudeInputTokens(ctx, to, responseFormat, req.Model, helps.ApplyPatchOriginalRequest(req, opts), body, bytes.Clone(line), &param, claudeInputTokens)
-			helps.RecordApplyPatchStreamFailure(ctx, param, reporter, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage})
-			for i := range chunks {
-				select {
-				case out <- cliproxyexecutor.StreamChunk{Payload: chunks[i]}:
-				case <-ctx.Done():
+		}
+		processFrame := func(interrupted bool) bool {
+			line, name := frame, eventName
+			frame, eventName, frameSize = nil, "", 0
+			payload := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data: ")))
+			if errPayload, ok := openAICompatStreamDataError(payload, name); ok {
+				observe(line)
+				failPayload(errPayload)
+				return false
+			}
+			if interrupted {
+				// Keep valid usage, but don't deliver data or a success marker from an unclosed frame.
+				if gjson.ValidBytes(payload) {
+					observe(line)
+				}
+				return true
+			}
+			isErrorEvent := openAICompatErrorEvent(name)
+			if len(payload) == 0 {
+				if isErrorEvent {
+					errEvent := statusErr{code: http.StatusBadGateway, msg: "upstream error event ended without data"}
+					failStream(errEvent, errEvent)
+					return false
+				}
+				return true
+			}
+			isDone := bytes.Equal(payload, []byte("[DONE]"))
+			if isDone && isErrorEvent {
+				errEvent := statusErr{code: http.StatusBadGateway, msg: "upstream error event ended before [DONE]"}
+				failStream(errEvent, errEvent)
+				return false
+			}
+			if !isDone {
+				if isErrorEvent {
+					failPayload(statusErr{code: http.StatusBadGateway, msg: string(payload)})
+					return false
+				}
+				if !gjson.ValidBytes(payload) {
+					failStream(incompleteFrame, incompleteFrame)
+					return false
+				}
+				sawFinishReason = sawFinishReason || kimiChatHasPrimaryFinishReason(payload)
+			}
+			// A valid multiline JSON frame can have newlines only outside strings.
+			// The downstream Chat handler writes one data line per translated chunk.
+			if bytes.IndexByte(line, '\n') >= 0 {
+				line = bytes.ReplaceAll(line, []byte("\n"), []byte(" "))
+			}
+			observe(line)
+			if !emit(line) {
+				return false
+			}
+			sawDone = isDone
+			terminalDelivered = terminalDelivered || sawDone
+			return true
+		}
+
+		for !sawDone && scanner.Scan() {
+			line := scanner.Bytes()
+			helps.AppendAPIResponseChunk(ctx, e.cfg, line)
+			trimmed := bytes.TrimSpace(line)
+			switch {
+			case len(trimmed) == 0:
+				if !processFrame(false) {
+					return
+				}
+			case bytes.HasPrefix(trimmed, dataTag):
+				// Scanner bounds each line; also bound all data lines held for one event.
+				frameSize += len(line) + 1
+				if frameSize > helps.StreamScannerBuffer {
+					errFrame := statusErr{code: http.StatusBadGateway, msg: "upstream SSE frame exceeds 50 MiB", streamTruncated: true}
+					failStream(errFrame, errFrame)
+					return
+				}
+				if len(frame) == 0 {
+					frame = append(frame, "data: "...)
+				} else {
+					frame = append(frame, '\n')
+				}
+				frame = append(frame, bytes.TrimSpace(trimmed[len(dataTag):])...)
+			case bytes.HasPrefix(trimmed, []byte("event:")):
+				eventName = strings.TrimSpace(string(trimmed[len("event:"):]))
+			case trimmed[0] == '{' || trimmed[0] == '[':
+				if errPayload, ok := openAICompatStreamDataError(trimmed, eventName); ok {
+					failPayload(errPayload)
 					return
 				}
 			}
-			if helps.StopApplyPatchStream(ctx, param, reporter, out, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}) {
-				return
-			}
 		}
-		if helps.EndApplyPatchStream(ctx, param, reporter, out, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}) {
+		errScan := scanner.Err()
+		if errCtx := ctx.Err(); errCtx != nil && (errScan == nil || errors.Is(errScan, errCtx)) {
 			return
 		}
-		if errScan := scanner.Err(); errScan != nil {
-			helps.RecordAPIResponseError(ctx, e.cfg, errScan)
-			if !streamUsage.PublishFailure(ctx, reporter, errScan) {
-				reporter.PublishFailure(ctx, errScan)
-			}
-			select {
-			case out <- cliproxyexecutor.StreamChunk{Err: errScan}:
-			case <-ctx.Done():
-			}
+		lineTooLong := errors.Is(errScan, bufio.ErrTooLong)
+		if !sawDone && !lineTooLong && !processFrame(errScan != nil) {
 			return
 		}
-		if ctx.Err() != nil {
+		// An unfinished patch retains its structured error, without cooling the
+		// credential when the validation failure follows a transport cut.
+		patchErr.streamTruncated = errScan != nil
+		if helps.EndApplyPatchStream(ctx, param, reporter, out, patchErr) {
 			return
 		}
-		doneChunks := helps.TranslateStreamWithClaudeInputTokens(ctx, to, responseFormat, req.Model, helps.ApplyPatchOriginalRequest(req, opts), body, []byte("[DONE]"), &param, claudeInputTokens)
-		helps.RecordApplyPatchStreamFailure(ctx, param, reporter, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage})
-		for i := range doneChunks {
-			select {
-			case out <- cliproxyexecutor.StreamChunk{Payload: doneChunks[i]}:
-			case <-ctx.Done():
-				return
+		if errScan != nil {
+			msg := "upstream stream interrupted before [DONE]"
+			if lineTooLong {
+				msg = "upstream SSE line exceeds 50 MiB"
 			}
+			errTruncated := statusErr{code: http.StatusBadGateway, msg: msg, streamTruncated: true, diagnostic: errScan.Error()}
+			failStream(errTruncated, errTruncated)
+			return
+		}
+		if !sawDone && !sawFinishReason {
+			errTruncated := statusErr{code: http.StatusBadGateway, msg: "upstream stream closed before [DONE]", streamTruncated: true}
+			failStream(errTruncated, errTruncated)
+			return
+		}
+		if !sawDone && emit([]byte("data: [DONE]")) {
+			terminalDelivered = true
 		}
 	}()
 	return &cliproxyexecutor.StreamResult{Headers: httpResp.Header.Clone(), Chunks: out}, nil
@@ -690,76 +810,105 @@ func (e *KimiExecutor) executeResponsesStream(ctx context.Context, auth *cliprox
 		}()
 
 		scanner := bufio.NewScanner(httpResp.Body)
-		scanner.Buffer(nil, 52_428_800)
+		scanner.Buffer(nil, helps.StreamScannerBuffer)
 		customBridge := helps.NewKimiResponsesCustomToolState(originalRequest)
 		bridge := helps.NewApplyPatchResponsesState(opts.SourceFormat, originalRequest, originalRequest)
-		sendFailure := func(errFailure error) {
-			errFailure = statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}
-			reporter.PublishFailure(ctx, errFailure)
+		var streamUsage helps.StreamUsageBuffer
+		var terminalDelivered, pendingTerminalFrame bool
+		defer func() {
+			if errCtx := ctx.Err(); errCtx != nil && !terminalDelivered {
+				streamUsage.PublishFailure(ctx, reporter, errCtx)
+				return
+			}
+			streamUsage.Publish(ctx, reporter)
+		}()
+		sendError := func(errStream error) {
 			select {
-			case out <- cliproxyexecutor.StreamChunk{Err: errFailure}:
+			case out <- cliproxyexecutor.StreamChunk{Err: errStream}:
 			case <-ctx.Done():
 			}
 		}
-		var streamUsage helps.StreamUsageBuffer
-		defer streamUsage.Publish(ctx, reporter)
+		patchErr := statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}
 		var param any
 
 		emitTranslatedLine := func(line []byte) bool {
-			helps.RecordApplyPatchStreamFailure(ctx, param, reporter, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage})
 			if responseFormat == sdktranslator.FormatOpenAIResponse {
 				chunkPayload := make([]byte, len(line)+1)
 				copy(chunkPayload, line)
 				chunkPayload[len(line)] = '\n'
 				select {
 				case out <- cliproxyexecutor.StreamChunk{Payload: chunkPayload}:
+					if !terminalDelivered {
+						trimmed := bytes.TrimSpace(line)
+						switch {
+						case bytes.HasPrefix(trimmed, dataTag):
+							payload := bytes.TrimSpace(trimmed[len(dataTag):])
+							pendingTerminalFrame = kimiResponsesTerminal(gjson.GetBytes(payload, "type").String()) && gjson.ValidBytes(payload)
+							// Both bridges can return a data line with its delimiter already attached.
+							terminalDelivered = pendingTerminalFrame && bytes.HasSuffix(line, []byte("\n"))
+						case len(trimmed) == 0 && pendingTerminalFrame:
+							terminalDelivered = true
+						}
+						if terminalDelivered {
+							pendingTerminalFrame = false
+						}
+					}
 					return true
 				case <-ctx.Done():
 					return false
 				}
 			}
 			chunks := sdktranslator.TranslateStream(ctx, sdktranslator.FormatOpenAIResponse, responseFormat, req.Model, originalRequest, body, line, &param)
-			helps.RecordApplyPatchStreamFailure(ctx, param, reporter, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage})
-			for i := range chunks {
+			helps.RecordApplyPatchStreamFailureWithUsage(ctx, param, reporter, &streamUsage, patchErr)
+			for _, chunk := range chunks {
+				terminal := !terminalDelivered && kimiStreamChunkIsTerminal(chunk)
 				select {
-				case out <- cliproxyexecutor.StreamChunk{Payload: chunks[i]}:
+				case out <- cliproxyexecutor.StreamChunk{Payload: chunk}:
+					terminalDelivered = terminalDelivered || terminal
 				case <-ctx.Done():
 					return false
 				}
 			}
-			if helps.StopApplyPatchStream(ctx, param, reporter, out, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}) {
-				return false
-			}
-			return true
+			return !helps.StopApplyPatchStreamWithUsage(ctx, param, reporter, &streamUsage, out, patchErr)
 		}
 
+		var eventName string
 		for scanner.Scan() {
 			line := scanner.Bytes()
 			helps.AppendAPIResponseChunk(ctx, e.cfg, line)
 			reporter.ObserveResponseModel(line)
 
-			if bytes.HasPrefix(line, dataTag) {
-				dataBytes := bytes.TrimSpace(line[len(dataTag):])
-				eventType := gjson.GetBytes(dataBytes, "type").String()
-				if eventType == "response.completed" || eventType == "response.incomplete" || eventType == "response.done" {
+			trimmed := bytes.TrimSpace(line)
+			switch {
+			case len(trimmed) == 0:
+				eventName = ""
+			case bytes.HasPrefix(trimmed, []byte("event:")):
+				eventName = strings.TrimSpace(string(trimmed[len("event:"):]))
+			case bytes.HasPrefix(trimmed, dataTag):
+				dataBytes := bytes.TrimSpace(trimmed[len(dataTag):])
+				if kimiResponsesTerminal(gjson.GetBytes(dataBytes, "type").String()) {
 					if usage, ok := helps.ParseCodexUsage(dataBytes); ok && (usage.TotalTokens > 0 || usage.InputTokens > 0) {
 						streamUsage.Observe(usage, true)
 					} else if usage := helps.ParseOpenAIUsage(dataBytes); usage.TotalTokens > 0 || usage.InputTokens > 0 {
 						streamUsage.Observe(usage, true)
 					}
 				}
+				if errPayload, ok := openAICompatStreamDataError(dataBytes, eventName); ok {
+					// Preserve the structured event for the client. Only store a content-free diagnostic.
+					streamUsage.PublishFailure(ctx, reporter, statusErr{code: errPayload.code, msg: "upstream stream returned an error payload"})
+				}
 			}
 
 			customLines, errCustom := customBridge.Stream(bytes.Clone(line))
 			if errCustom != nil {
-				reporter.PublishFailure(ctx, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage})
-				sendFailure(errCustom)
+				streamUsage.PublishFailure(ctx, reporter, patchErr)
+				sendError(patchErr)
 				return
 			}
 			for _, customLine := range customLines {
 				lines, errTransform := bridge.Stream(customLine)
 				if errTransform != nil {
-					reporter.PublishFailure(ctx, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage})
+					streamUsage.PublishFailure(ctx, reporter, patchErr)
 				}
 				for _, converted := range lines {
 					if !emitTranslatedLine(converted) {
@@ -767,19 +916,23 @@ func (e *KimiExecutor) executeResponsesStream(ctx context.Context, auth *cliprox
 					}
 				}
 				if errTransform != nil {
-					sendFailure(errTransform)
+					sendError(patchErr)
 					return
 				}
 			}
 		}
+		errScan := scanner.Err()
+		if errCtx := ctx.Err(); errCtx != nil && (errScan == nil || errors.Is(errScan, errCtx)) {
+			return
+		}
 		customFinishEvents, errCustomFinish := customBridge.FinishStream()
 		if errCustomFinish != nil {
-			reporter.PublishFailure(ctx, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage})
+			streamUsage.PublishFailure(ctx, reporter, patchErr)
 		}
 		for _, event := range customFinishEvents {
 			lines, errTransform := bridge.Stream(event)
 			if errTransform != nil {
-				reporter.PublishFailure(ctx, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage})
+				streamUsage.PublishFailure(ctx, reporter, patchErr)
 			}
 			for _, line := range lines {
 				if !emitTranslatedLine(line) {
@@ -789,7 +942,7 @@ func (e *KimiExecutor) executeResponsesStream(ctx context.Context, auth *cliprox
 		}
 		finishEvents, errFinish := bridge.FinishStream()
 		if errFinish != nil {
-			reporter.PublishFailure(ctx, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage})
+			streamUsage.PublishFailure(ctx, reporter, patchErr)
 		}
 		for _, event := range finishEvents {
 			if !emitTranslatedLine(event) {
@@ -797,25 +950,59 @@ func (e *KimiExecutor) executeResponsesStream(ctx context.Context, auth *cliprox
 			}
 		}
 		if errFinish != nil || errCustomFinish != nil {
-			failure := errFinish
-			if failure == nil {
-				failure = errCustomFinish
-			}
-			sendFailure(failure)
+			sendError(patchErr)
 			return
 		}
-
-		if errScan := scanner.Err(); errScan != nil {
+		if errScan != nil {
 			helps.RecordAPIResponseError(ctx, e.cfg, errScan)
-			reporter.PublishFailure(ctx, errScan)
-			select {
-			case out <- cliproxyexecutor.StreamChunk{Err: errScan}:
-			case <-ctx.Done():
-			}
+			streamUsage.PublishFailure(ctx, reporter, errScan)
+			sendError(errScan)
+			return
+		}
+		if pendingTerminalFrame {
+			emitTranslatedLine(nil)
 		}
 	}()
 
 	return &cliproxyexecutor.StreamResult{Headers: httpResp.Header.Clone(), Chunks: out}, nil
+}
+
+func kimiChatHasPrimaryFinishReason(payload []byte) bool {
+	for i, choice := range gjson.GetBytes(payload, "choices").Array() {
+		index := choice.Get("index")
+		if (!index.Exists() && i == 0) || (index.Type == gjson.Number && index.Num == 0) {
+			reason := choice.Get("finish_reason")
+			return reason.Type == gjson.String && strings.TrimSpace(reason.Str) != ""
+		}
+	}
+	return false
+}
+
+func kimiResponsesTerminal(eventType string) bool {
+	switch eventType {
+	case "response.completed", "response.incomplete", "response.done":
+		return true
+	default:
+		return false
+	}
+}
+
+func kimiStreamChunkIsTerminal(chunk []byte) bool {
+	for line := range bytes.SplitSeq(chunk, []byte("\n")) {
+		trimmed := bytes.TrimSpace(line)
+		trimmed = bytes.TrimSpace(bytes.TrimPrefix(trimmed, dataTag))
+		if bytes.Equal(trimmed, []byte("[DONE]")) {
+			return true
+		}
+		if len(trimmed) == 0 || trimmed[0] != '{' {
+			continue
+		}
+		kind := gjson.GetBytes(trimmed, "type").String()
+		if kind == "message_stop" || kimiResponsesTerminal(kind) || kimiChatHasPrimaryFinishReason(trimmed) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *KimiExecutor) executeKimiResponsesCompaction(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {

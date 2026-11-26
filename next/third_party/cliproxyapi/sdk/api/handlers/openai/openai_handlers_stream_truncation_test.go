@@ -3,13 +3,19 @@ package openai
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor"
+	_ "github.com/router-for-me/CLIProxyAPI/v8/internal/translator"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
@@ -332,5 +338,93 @@ func TestCompletionsStreamSingleChunkWithFinishReasonStillCompletes(t *testing.T
 	}
 	if strings.Contains(out, "upstream stream closed before") {
 		t.Errorf("single chunk legacy completions stream was wrongly flagged as truncated: %q", out)
+	}
+}
+
+// Test the real executor and auth manager, not just the handler's own bootstrap
+// retry counter: the manager can otherwise pick a second credential before any
+// framed output reaches the client, even with handler bootstrap retries disabled.
+func TestKimiChatAcceptedStreamLocalFailureDoesNotReplayOrCool(t *testing.T) {
+	const (
+		model         = "kimi-k3.1-pro"
+		line          = `data: {"id":"chat_1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]}` + "\n"
+		upstreamError = `data: {"error":{"message":"provider overloaded","status":429}}` + "\n"
+	)
+	for _, tc := range []struct {
+		name, initial, errorText           string
+		shortBody, oversized, wantCooldown bool
+		status                             int
+	}{
+		{name: "clean_eof", initial: line, errorText: "closed before [DONE]", status: http.StatusOK},
+		{name: "short_before_delimiter", initial: line, shortBody: true, errorText: "interrupted before [DONE]", status: http.StatusBadGateway},
+		{name: "short_after_delimiter", initial: line + "\n", shortBody: true, errorText: "interrupted before [DONE]", status: http.StatusOK},
+		{name: "cap_before_first_payload", oversized: true, errorText: "frame exceeds 50 MiB", status: http.StatusBadGateway},
+		{name: "cap_after_first_payload", initial: line + "\n", oversized: true, errorText: "frame exceeds 50 MiB", status: http.StatusOK},
+		{name: "intact_provider_error_before_transport_cut", initial: line + "\n" + upstreamError, shortBody: true, errorText: "provider overloaded", status: http.StatusOK, wantCooldown: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
+					t.Errorf("unexpected upstream request: %s %s", r.Method, r.URL.Path)
+				}
+				calls.Add(1)
+				w.Header().Set("Content-Type", "text/event-stream")
+				if tc.shortBody {
+					w.Header().Set("Content-Length", fmt.Sprint(len(tc.initial)+12))
+				}
+				_, _ = io.WriteString(w, tc.initial)
+				if tc.oversized {
+					// A valid JSON event larger than 50 MiB in total, with each data line below the scanner cap.
+					padding := strings.Repeat("a", 26*1024*1024)
+					_, _ = io.WriteString(w, `data: {"choices":[],"first":"`)
+					_, _ = io.WriteString(w, padding)
+					_, _ = io.WriteString(w, "\",\ndata: \"second\":\"")
+					_, _ = io.WriteString(w, padding)
+					_, _ = io.WriteString(w, "\"}\n\n")
+				}
+				w.(http.Flusher).Flush()
+			}))
+			t.Cleanup(server.Close)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			manager := coreauth.NewManager(nil, nil, nil)
+			manager.RegisterExecutor(executor.NewKimiExecutor(&sdkconfig.Config{}))
+			authIDs := make([]string, 0, 2)
+			for i := range 2 {
+				id := fmt.Sprintf("%s/%d", t.Name(), i)
+				auth := &coreauth.Auth{ID: id, Provider: "kimi", Status: coreauth.StatusActive, Attributes: map[string]string{"base_url": server.URL, "api_key": fmt.Sprint(i)}}
+				if _, err := manager.Register(ctx, auth); err != nil {
+					t.Fatal(err)
+				}
+				authIDs = append(authIDs, id)
+				registry.GetGlobalRegistry().RegisterClient(id, "kimi", []*registry.ModelInfo{{ID: model}})
+				t.Cleanup(func() { registry.GetGlobalRegistry().UnregisterClient(id) })
+			}
+			const path = "/v1/chat/completions"
+			router := gin.New()
+			router.POST(path, NewOpenAIAPIHandler(handlers.NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, manager)).ChatCompletions)
+			body := `{"model":"` + model + `","stream":true,"messages":[{"role":"user","content":"hi"}]}`
+			out := httptest.NewRecorder()
+			router.ServeHTTP(out, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)).WithContext(ctx))
+			if calls.Load() != 1 || out.Code != tc.status || !strings.Contains(out.Body.String(), tc.errorText) || strings.Contains(out.Body.String(), "data: [DONE]") {
+				t.Fatalf("POSTs=%d status=%d body=%q; want one POST and HTTP %d with %q", calls.Load(), out.Code, out.Body.String(), tc.status, tc.errorText)
+			}
+			cooled := 0
+			for _, id := range authIDs {
+				auth, _ := manager.GetByID(id)
+				state := auth.ModelStates[model]
+				if !auth.NextRetryAfter.IsZero() || (state != nil && !state.NextRetryAfter.IsZero()) {
+					cooled++
+					if tc.wantCooldown && (auth.LastError == nil || auth.LastError.HTTPStatus != http.StatusTooManyRequests) {
+						t.Errorf("upstream 429 was not preserved: %+v", auth.LastError)
+					}
+				}
+			}
+			if (tc.wantCooldown && cooled != 1) || (!tc.wantCooldown && cooled != 0) {
+				t.Errorf("%d credentials cooled; want a cooldown only for the genuine upstream error", cooled)
+			}
+		})
 	}
 }
