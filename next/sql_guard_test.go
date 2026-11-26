@@ -44,7 +44,7 @@ func TestSQLCallsStayInStore(t *testing.T) {
 }
 
 // sqlCallsOutsideStore parses the non-test Go files under root, skipping
-// engine/store and third_party, and returns every SQL call and database/sql import.
+// engine/store, harness/agy/sessiondb and third_party, and returns every SQL call and database/sql import.
 func sqlCallsOutsideStore(root string) ([]sqlCall, error) {
 	var calls []sqlCall
 	fset := token.NewFileSet()
@@ -58,7 +58,8 @@ func sqlCallsOutsideStore(root string) ([]sqlCall, error) {
 		}
 		rel = filepath.ToSlash(rel)
 		if d.IsDir() {
-			if rel == "engine/store" || d.Name() == "third_party" || d.Name() == "node_modules" {
+			// harness/agy/sessiondb reads agy's own session log, a SQLite file that Dyna does not own, read-only.
+			if rel == "engine/store" || rel == "harness/agy/sessiondb" || d.Name() == "third_party" || d.Name() == "node_modules" {
 				return filepath.SkipDir
 			}
 			return nil
