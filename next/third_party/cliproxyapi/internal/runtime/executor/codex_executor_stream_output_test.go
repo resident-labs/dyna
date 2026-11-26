@@ -719,3 +719,83 @@ func TestCodexExecutorExecuteStream_EmptyStreamCompletionOutputUsesOutputItemDon
 		t.Fatalf("response.output[0].content[0].text = %q, want %q; completed=%s", gotContent, "ok", string(completed))
 	}
 }
+
+func TestCodexExecutorChatCompletionsStreamOutput(t *testing.T) {
+	const failed = `{"type":"response.failed","response":{"id":"resp_1","status":"failed","error":{"message":"Upstream request rejected.","type":"invalid_request_error","code":"invalid_value"}}}`
+	for _, tt := range []struct {
+		name, terminal string
+		fail           bool
+	}{
+		{"completed", `{"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}`, false},
+		{"failed", failed, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				for _, event := range []string{
+					`{"type":"response.created","response":{"id":"resp_1","model":"gpt-5.4-mini"}}`,
+					`{"type":"response.output_item.added","output_index":0,"item":{"id":"a","type":"message"}}`,
+					`{"type":"response.output_text.delta","item_id":"a","delta":"Alpha"}`,
+					`{"type":"response.output_item.added","output_index":1,"item":{"id":"b","type":"message"}}`,
+					`{"type":"response.output_item.done","output_index":1,"item":{"id":"b","type":"message","content":[{"type":"output_text","text":"Beta"}]}}`,
+					`{"type":"response.output_item.done","output_index":0,"item":{"id":"a","type":"message","content":[{"type":"output_text","text":"Alpha"}]}}`,
+					tt.terminal,
+				} {
+					_, _ = io.WriteString(w, "data: "+event+"\n\n")
+				}
+			}))
+			defer server.Close()
+
+			executor := NewCodexExecutor(&config.Config{})
+			auth := &cliproxyauth.Auth{Attributes: map[string]string{"base_url": server.URL, "api_key": "test"}}
+			req := cliproxyexecutor.Request{
+				Model:   "gpt-5.4-mini",
+				Payload: []byte(`{"model":"gpt-5.4-mini","messages":[{"role":"user","content":"hello"}]}`),
+			}
+			opts := cliproxyexecutor.Options{SourceFormat: sdktranslator.FromString("openai"), Stream: true}
+			result, err := executor.ExecuteStream(t.Context(), auth, req, opts)
+			if err != nil {
+				t.Fatalf("ExecuteStream: %v", err)
+			}
+			var text strings.Builder
+			var streamErr error
+			var finish string
+			var totalTokens int64
+			for chunk := range result.Chunks {
+				if chunk.Err != nil {
+					streamErr = chunk.Err
+					continue
+				}
+				if gjson.GetBytes(chunk.Payload, "error").Exists() {
+					t.Fatalf("HTTP executor returned an error as a success chunk: %s", chunk.Payload)
+				}
+				text.WriteString(gjson.GetBytes(chunk.Payload, "choices.0.delta.content").Str)
+				if choice := gjson.GetBytes(chunk.Payload, "choices.0.finish_reason"); choice.Type == gjson.String {
+					finish = choice.Str
+					totalTokens = gjson.GetBytes(chunk.Payload, "usage.total_tokens").Int()
+				}
+			}
+			if got := text.String(); got != "AlphaBeta" {
+				t.Fatalf("stream text = %q, want AlphaBeta", got)
+			}
+			if tt.fail {
+				if finish != "" {
+					t.Fatalf("failed stream emitted finish_reason %q", finish)
+				}
+				opts.Stream = false
+				_, nonStreamErr := executor.Execute(t.Context(), auth, req, opts)
+				for _, failure := range []error{streamErr, nonStreamErr} {
+					if failure == nil || statusCodeFromTestError(t, failure) != http.StatusBadRequest {
+						t.Fatalf("expected upstream HTTP 400 status error; got %v", failure)
+					}
+					assertCodexErrorCode(t, failure.Error(), "invalid_request_error", "invalid_value")
+					if got := gjson.Get(failure.Error(), "error.message").Str; got != "Upstream request rejected." {
+						t.Fatalf("upstream error message = %q; payload=%s", got, failure)
+					}
+				}
+			} else if streamErr != nil || finish != "stop" || totalTokens != 5 {
+				t.Fatalf("completed stream error=%v finish=%q total_tokens=%d; want nil, stop, 5", streamErr, finish, totalTokens)
+			}
+		})
+	}
+}

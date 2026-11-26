@@ -68,12 +68,14 @@ func convertOpenAIRequestToCodex(modelName string, inputRawJSON []byte, stream b
 	// 	out, _ = sjson.SetBytes(out, "max_output_tokens", v.Value())
 	// }
 
-	// Map reasoning effort
-	if v := gjson.GetBytes(rawJSON, "reasoning_effort"); v.Exists() {
-		out, _ = sjson.SetBytes(out, "reasoning.effort", v.Value())
-	} else {
-		out, _ = sjson.SetBytes(out, "reasoning.effort", "medium")
+	// Codex defaults to medium when the Chat request leaves reasoning effort unset.
+	effort := "medium"
+	if v := root.Get("reasoning_effort"); v.Type == gjson.String {
+		if value := strings.TrimSpace(v.Str); value != "" {
+			effort = value
+		}
 	}
+	out, _ = sjson.SetBytes(out, "reasoning.effort", effort)
 	if serviceTier := normalizeCodexServiceTier(root.Get("service_tier")); serviceTier != "" {
 		out, _ = sjson.SetBytes(out, "service_tier", serviceTier)
 	}
