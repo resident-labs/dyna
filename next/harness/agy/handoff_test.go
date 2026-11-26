@@ -277,7 +277,7 @@ func TestAPromptAgyRefusesAsInvalidKeepsTheHandoffPending(t *testing.T) {
 		t.Fatal("the refusal was not reported")
 	}
 	meta, _ := readMeta(c.SessionDir)
-	if meta.Status != handoffPending || meta.Handoff == "" || handoffDelivered(h.SessionFile(), meta.Gen) {
+	if meta.Status != handoffPending || meta.Handoff == "" || handoffDelivered(h.SessionFile(), meta.Gen, "engine") {
 		t.Fatalf("meta = %+v: the refused prompt consumed the handoff", meta)
 	}
 	start(t, h, "t2", input(2, "say hello"))
@@ -458,5 +458,65 @@ func TestAHandoffAfterAClearReadsOnlyWhatCameAfterIt(t *testing.T) {
 	// The earlier files are still there for the transcript.
 	if _, err := os.Stat(filepath.Join(c.SessionDir, "agy-1.jsonl")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestALocalFallbackNeverChangesTheEnginesGeneration(t *testing.T) {
+	h, r, c := open(t, nil, func(c *Config) { c.Handoff, c.HandoffGen = "ORIGINAL HISTORY", "7" })
+	start(t, h, "t1", input(1, "say the first words"))
+	h.Close()
+	// The same hello is replayed and agy cannot resume: the history is rebuilt from the mirror, as a record of its own.
+	t.Setenv("FAKE_AGY_MISSING", "fake-session-1")
+	h2, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h2.Close()
+	meta, _ := readMeta(c.SessionDir)
+	if meta.Gen != "7" || meta.Status != handoffAccepted || meta.Fallback == "" || meta.FallbackStatus != handoffPending {
+		t.Fatalf("meta = %+v", meta)
+	}
+	// A restart before the next turn, with the same hello once more: no third native conversation, no original history.
+	t.Setenv("FAKE_AGY_MISSING", "") // the fake names its sessions from 1 in every process, so the replacement has the refused id
+	h3, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h3.Close()
+	start(t, h3, "t2", input(2, "say more"))
+	got := lastPrompt(t, r)
+	if n := len(r.calls(t, "session/new")); n != 2 || strings.Contains(got, "ORIGINAL HISTORY") || !strings.Contains(got, "say the first words\n") && !strings.Contains(got, "say the first words") {
+		t.Fatalf("sessions %d, prompt = %s", n, got)
+	}
+	meta, _ = readMeta(c.SessionDir)
+	if meta.Gen != "7" || meta.FallbackStatus != handoffAccepted {
+		t.Fatalf("meta = %+v", meta)
+	}
+}
+
+func TestAClearedGenerationStaysClearedAcrossAFallbackAndARestart(t *testing.T) {
+	h, r, c := open(t, nil, func(c *Config) { c.Handoff, c.HandoffGen = "CLEARED HISTORY", "7" })
+	if err := h.NewConversation(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.Close()
+	t.Setenv("FAKE_AGY_MISSING", "fake-session-1")
+	h2, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h2.Close()
+	t.Setenv("FAKE_AGY_MISSING", "")
+	h3, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h3.Close()
+	start(t, h3, "t1", input(1, "say hello"))
+	if strings.Contains(lastPrompt(t, r), "CLEARED HISTORY") {
+		t.Fatalf("prompt = %s", lastPrompt(t, r))
+	}
+	if meta, _ := readMeta(c.SessionDir); meta.Gen != "7" {
+		t.Fatalf("meta = %+v", meta)
 	}
 }

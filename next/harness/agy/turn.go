@@ -120,12 +120,12 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contra
 	if broken {
 		// The saved conversation fails every prompt (T3 Outcome:53-55, 231-241): T3 starts a fresh session with a portable handoff of
 		// the thread's context, and so does this, from the mirror files.
-		carried, gen, err := h.mirrorHandoff()
+		carried, gen, local, err := h.mirrorHandoff()
 		if err != nil {
 			return contract.TurnEnded{Turn: id}, err
 		}
 		h.notice("agy's saved conversation can no longer be sent to the model; a new one is opened and the earlier conversation is handed to it")
-		if err := h.freshConversation(ctx, carried, gen); err != nil {
+		if err := h.freshConversation(ctx, carried, gen, local); err != nil {
 			return contract.TurnEnded{Turn: id}, err
 		}
 	}
@@ -342,11 +342,15 @@ func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process,
 	}
 	for i, input := range inputs {
 		text := input.Text
-		if i == 0 && !slash && !steer && h.handoff != "" && h.hstatus == handoffPending {
+		if i == 0 && !slash && !steer && (h.handoff != "" && h.hstatus == handoffPending || h.fbText != "" && h.fbStatus == handoffPending) {
 			// T3 puts the history ahead of the user's text in the same message (ContextHandoffDelivery.ts withInlineContext); a slash command is
 			// not given it, as T3 defers the context to the turn after (isSlashCommandMessage).
-			text = handoff.Prompt(h.handoff, text)
-			carried, h.hstatus = true, handoffSending
+			if h.handoff != "" && h.hstatus == handoffPending {
+				text, h.hstatus, h.carryKind = handoff.Prompt(h.handoff, text), handoffSending, "engine"
+			} else {
+				text, h.fbStatus, h.carryKind = handoff.Prompt(h.fbText, text), handoffSending, "fallback"
+			}
+			carried = true
 		}
 		if i == 0 && instructions != "" {
 			text = instructions + "\n\n<user_request>\n" + text + "\n</user_request>"
@@ -435,7 +439,12 @@ func (h *Harness) begin(t *turn, inputs []contract.TurnInput, started func(), st
 		// delivery as pending around the injection, ContextHandoffDelivery.ts). A mark that cannot be saved stops the send.
 		if err := h.writeState(); err != nil {
 			h.mu.Lock()
-			h.hstatus = handoffPending
+			if h.carryKind == "fallback" {
+				h.fbStatus = handoffPending
+			} else {
+				h.hstatus = handoffPending
+			}
+			h.carryKind = ""
 			t.open--
 			t.settle()
 			h.mu.Unlock()
@@ -1184,7 +1193,7 @@ func (h *Harness) NewConversation(ctx context.Context) error {
 	// /clear drops a handoff that was not delivered, whatever the mirror holds; the generation stays, so the same one replayed does not
 	// bring it back.
 	h.mu.Lock()
-	gen, pending := h.gen, h.handoff != ""
+	gen, pending := h.gen, h.handoff != "" || h.fbText != ""
 	h.mu.Unlock()
 	if gen != "" || pending {
 		if err := h.handoffMove(handoffCleared); err != nil {
@@ -1192,7 +1201,7 @@ func (h *Harness) NewConversation(ctx context.Context) error {
 		}
 	}
 	if info, err := os.Stat(h.mirrorPath()); err == nil && info.Size() > 0 {
-		if err := h.newSession(ctx, p, "", gen); err != nil {
+		if err := h.newSession(ctx, p, "", gen, false); err != nil {
 			return err
 		}
 	}
@@ -1204,30 +1213,40 @@ func (h *Harness) NewConversationForce(ctx context.Context) error {
 	h.mu.Lock()
 	gen := h.gen
 	h.mu.Unlock()
-	return h.freshConversation(ctx, "", gen)
+	return h.freshConversation(ctx, "", gen, false)
 }
 
 // freshConversation opens a new session that starts from the handoff, if there is one.
-func (h *Harness) freshConversation(ctx context.Context, carried, gen string) error {
+func (h *Harness) freshConversation(ctx context.Context, carried, gen string, local bool) error {
 	if err := h.ensure(ctx); err != nil {
 		return err
 	}
 	h.mu.Lock()
 	p := h.p
 	h.mu.Unlock()
-	return h.newSession(ctx, p, carried, gen)
+	return h.newSession(ctx, p, carried, gen, local)
 }
 
-func (h *Harness) newSession(ctx context.Context, p *process, carried, gen string) error {
+func (h *Harness) newSession(ctx context.Context, p *process, carried, gen string, local bool) error {
 	h.mu.Lock()
-	h.handoff, h.gen = carried, gen
-	switch {
-	case carried != "":
-		h.hstatus = handoffPending
-	case gen != "" && h.hstatus != handoffCleared:
-		h.hstatus = handoffAccepted
-	case gen == "":
-		h.hstatus = ""
+	h.carryKind = ""
+	if local {
+		// A history built from the mirrors goes to the fallback record; the engine's generation and status stay.
+		h.fbText, h.fbStatus = carried, handoffAccepted
+		if carried != "" {
+			h.fbStatus = handoffPending
+		}
+	} else {
+		h.fbText, h.fbStatus = "", ""
+		h.handoff, h.gen = carried, gen
+		switch {
+		case carried != "":
+			h.hstatus = handoffPending
+		case gen != "" && h.hstatus != handoffCleared:
+			h.hstatus = handoffAccepted
+		case gen == "":
+			h.hstatus = ""
+		}
 	}
 	h.mu.Unlock()
 	if err := h.openSession(ctx, p, ""); err != nil {

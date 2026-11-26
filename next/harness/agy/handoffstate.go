@@ -29,6 +29,7 @@ const (
 
 // handoffOpen is what Open starts from: the session file's state and what the caller asked for.
 type handoffOpen struct {
+	fbText, fbStatus      string // the fallback record (sessionMeta.Fallback)
 	fresh                 bool   // open a new native session instead of resuming the stored one
 	text, gen, status     string // the handoff the session starts with
 	supplied, suppliedGen string // the history to use if agy cannot resume, in place of one built from the mirror
@@ -46,7 +47,7 @@ func requestedGen(c Config) string {
 
 // planOpen decides, from the stored state and the request, how Open starts. delivered says the mirror records the stored
 // generation as taken by agy: a crash between the answer and the session file.
-func planOpen(c Config, meta sessionMeta, delivered bool) handoffOpen {
+func planOpen(c Config, meta sessionMeta, delivered, fbDelivered bool) handoffOpen {
 	req := requestedGen(c)
 	stored, status, text := meta.Gen, meta.Status, meta.Handoff
 	if status == "" && text != "" {
@@ -56,11 +57,20 @@ func planOpen(c Config, meta sessionMeta, delivered bool) handoffOpen {
 		status, text = handoffAccepted, ""
 	}
 	p := handoffOpen{fresh: c.New, gen: stored, status: status, text: text}
+	fbStatus := meta.FallbackStatus
+	if fbStatus == "" && meta.Fallback != "" {
+		fbStatus = handoffPending
+	}
+	if fbStatus == handoffSending && fbDelivered {
+		fbStatus = handoffAccepted
+	}
+	p.fbText, p.fbStatus = meta.Fallback, fbStatus
 	switch {
 	case c.New && (meta.Mirror == "" || req != stored || req == ""):
 		// A new intent starts a fresh session with its own history, whatever the stored state was, uncertain or not. With no handoff
 		// requested it starts blank.
 		p.text, p.gen, p.status = c.Handoff, req, handoffPending
+		p.fbText, p.fbStatus = "", "" // a new intent drops the old local history
 		if c.Handoff == "" {
 			p.status = handoffAccepted // an explicit generation with no history still stands for the session it opened
 			if req == "" {
@@ -72,11 +82,18 @@ func planOpen(c Config, meta sessionMeta, delivered bool) handoffOpen {
 		// (ContextHandoffDeliveryUncertainError); so does this, and gives the history again.
 		p.fresh, p.status = true, handoffPending
 		p.notice = "the earlier conversation may not have reached agy; a new session is opened and it is handed over again"
+	case fbStatus == handoffSending && meta.Fallback != "":
+		// The same, for a history built locally: it may or may not have arrived, and the engine's record is not touched.
+		p.fresh, p.fbStatus = true, handoffPending
+		p.notice = "the earlier conversation may not have reached agy; a new session is opened and it is handed over again"
 	default:
 		p.fresh = false // the same generation again is its session
 	}
 	if p.status == handoffAccepted && p.text != "" || p.status == handoffCleared {
 		p.text = ""
+	}
+	if p.fbStatus == handoffAccepted || p.fbStatus == handoffCleared {
+		p.fbText = ""
 	}
 	// What the caller gave stands in for the mirror when agy cannot resume, unless its generation was already taken or cleared.
 	if c.Handoff != "" && !(req == stored && slices.Contains([]string{handoffAccepted, handoffCleared}, status)) {
@@ -88,7 +105,7 @@ func planOpen(c Config, meta sessionMeta, delivered bool) handoffOpen {
 // state is the session file's content for the harness as it is now.
 func (h *Harness) state() sessionMeta {
 	h.mu.Lock()
-	meta := sessionMeta{SessionID: h.sessionID, Handoff: h.handoff, Gen: h.gen, Status: h.hstatus, ClearFrom: h.clearFrom}
+	meta := sessionMeta{SessionID: h.sessionID, Handoff: h.handoff, Gen: h.gen, Status: h.hstatus, ClearFrom: h.clearFrom, Fallback: h.fbText, FallbackStatus: h.fbStatus}
 	h.mu.Unlock()
 	h.fm.Lock()
 	meta.Mirror = filepath.Base(h.mirror)
@@ -103,14 +120,30 @@ func (h *Harness) writeState() error { return writeMeta(h.cfg.SessionDir, h.stat
 // crash between the two does not give the history again. Moving to accepted or cleared drops the text.
 func (h *Harness) handoffMove(to string) error {
 	h.mu.Lock()
-	h.hstatus = to
+	// A change after a prompt carried a history applies to the record that prompt carried; /clear drops both.
+	kind := h.carryKind
 	gen := h.gen
-	if to == handoffAccepted || to == handoffCleared {
-		h.handoff, h.supplied = "", ""
+	if to == handoffCleared {
+		h.hstatus, h.fbStatus = to, to
+		h.handoff, h.supplied, h.fbText = "", "", ""
+	} else if kind == "fallback" {
+		h.fbStatus = to
+		gen = ""
+		if to == handoffAccepted {
+			h.fbText = ""
+		}
+	} else {
+		h.hstatus = to
+		if to == handoffAccepted {
+			h.handoff, h.supplied = "", ""
+		}
+	}
+	if to != handoffSending {
+		h.carryKind = ""
 	}
 	h.mu.Unlock()
 	if to == handoffAccepted {
-		line, _ := json.Marshal(map[string]any{"type": "handoff", "gen": gen})
+		line, _ := json.Marshal(map[string]any{"type": "handoff", "gen": gen, "kind": handoffKind(kind)})
 		h.fm.Lock()
 		path := h.mirror
 		h.fm.Unlock()
@@ -122,6 +155,14 @@ func (h *Harness) handoffMove(to string) error {
 		}
 	}
 	return h.writeState()
+}
+
+// handoffKind names the record in the mirror's line: the engine's, or the local fallback.
+func handoffKind(kind string) string {
+	if kind == "fallback" {
+		return kind
+	}
+	return "engine"
 }
 
 // markCleared records that a /clear began the current mirror file: a handoff built from the mirrors starts there.

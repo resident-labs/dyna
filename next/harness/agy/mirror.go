@@ -41,6 +41,10 @@ type sessionMeta struct {
 	// ClearFrom is the mirror file a /clear began: a handoff built from the mirrors reads this file and the ones after it, never the
 	// conversation before. The files stay for the transcript.
 	ClearFrom string `json:"clearFrom,omitempty"`
+	// Fallback is a history this harness built from its own mirrors after agy could not resume. It is a record of its own, apart from the
+	// engine's generation above: replacing the native session locally never changes what the engine's handoff was.
+	Fallback       string `json:"fallback,omitempty"`
+	FallbackStatus string `json:"fallbackStatus,omitempty"`
 }
 
 func readMeta(dir string) (sessionMeta, error) {
@@ -225,7 +229,7 @@ func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, e
 
 // handoffDelivered reports whether the mirror records that agy took the handoff of this generation: a line of its own, written once
 // the prompt that carried it was answered, which the transcript readers pass over.
-func handoffDelivered(path, gen string) bool {
+func handoffDelivered(path, gen, kind string) bool {
 	file, err := os.Open(path)
 	if err != nil {
 		return false
@@ -235,8 +239,8 @@ func handoffDelivered(path, gen string) bool {
 	for {
 		line, err := reader.ReadBytes('\n')
 		if bytes.Contains(line, []byte(`"type":"handoff"`)) {
-			var entry struct{ Type, Gen string }
-			if json.Unmarshal(line, &entry) == nil && entry.Type == "handoff" && entry.Gen == gen {
+			var entry struct{ Type, Gen, Kind string }
+			if json.Unmarshal(line, &entry) == nil && entry.Type == "handoff" && entry.Gen == gen && entry.Kind == kind {
 				return true
 			}
 		}

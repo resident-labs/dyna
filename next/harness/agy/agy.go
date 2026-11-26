@@ -87,6 +87,9 @@ type Harness struct {
 	gen         string // the generation of the handoff, pending or delivered, that the session was opened for
 	clearFrom   string // the mirror file the last /clear began (sessionMeta.ClearFrom)
 	hstatus     string // the handoff's status (handoffstate.go)
+	fbText      string // the fallback record: a history built from the mirrors (sessionMeta.Fallback)
+	fbStatus    string
+	carryKind   string // which record the prompt in flight carries: "engine" or "fallback"
 	suppliedGen string
 	supplied    string // Config.Handoff, kept for a resume that fails, until a prompt carried a handoff
 	p           *process
@@ -190,12 +193,14 @@ func Open(ctx context.Context, c Config) (*Harness, error) {
 	}
 	h := &Harness{cfg: c, done: make(chan struct{}), modelText: c.ModelInstructions, nonce: time.Now().UnixNano(),
 		promptInactivity: defaultPromptInactivity, holdMax: defaultHoldMax, watchEvery: defaultWatchEvery}
-	plan := planOpen(c, meta, meta.Mirror != "" && handoffDelivered(filepath.Join(c.SessionDir, meta.Mirror), meta.Gen))
+	mirror := filepath.Join(c.SessionDir, meta.Mirror)
+	plan := planOpen(c, meta, meta.Mirror != "" && handoffDelivered(mirror, meta.Gen, "engine"), meta.Mirror != "" && handoffDelivered(mirror, "", "fallback"))
 	if plan.notice != "" {
 		h.notice(plan.notice)
 	}
 	h.handoff, h.gen, h.hstatus = plan.text, plan.gen, plan.status
 	h.clearFrom = meta.ClearFrom
+	h.fbText, h.fbStatus = plan.fbText, plan.fbStatus
 	h.supplied, h.suppliedGen = plan.supplied, plan.suppliedGen
 	fresh := plan.fresh
 	if !fresh {
@@ -448,34 +453,39 @@ var errResumeRejected = errors.New("agy could not resume its conversation")
 // this harness's own mirror files, as T3 does for a thread its provider cannot resume natively (portable-handoffs.md). A handoff the
 // caller supplied is the one used.
 func (h *Harness) resumeFailed(ctx context.Context, p *process) error {
-	carried, gen, err := h.mirrorHandoff()
+	carried, gen, local, err := h.mirrorHandoff()
 	if err != nil {
 		return err
 	}
 	h.notice("agy's saved conversation could not be resumed; a new one is opened and the earlier conversation is handed to it")
-	return h.newSession(ctx, p, carried, gen)
+	return h.newSession(ctx, p, carried, gen, local)
 }
 
 // mirrorHandoff is the handoff a replacement session starts from: one still waiting to be delivered, else the conversation as the
 // mirror files record it.
-func (h *Harness) mirrorHandoff() (text, gen string, err error) {
+func (h *Harness) mirrorHandoff() (text, gen string, local bool, err error) {
 	h.mu.Lock()
 	pending, supplied := h.handoff, h.supplied
 	gen, suppliedGen := h.gen, h.suppliedGen
+	fb := h.fbText
 	h.mu.Unlock()
 	if pending != "" {
-		return pending, gen, nil
+		return pending, gen, false, nil
 	}
 	if supplied != "" {
-		return supplied, suppliedGen, nil
+		return supplied, suppliedGen, false, nil
+	}
+	// A history built here is a record of its own: the engine's generation and what became of its handoff stay as they were.
+	if fb != "" {
+		return fb, "", true, nil
 	}
 	text, err = handoff.Build(h.mirrorFiles(), 0)
 	if errors.Is(err, handoff.ErrBudget) {
 		// T3 fails the turn here; a conversation with nothing to start from is better than none, and the notice says so.
 		h.notice("the earlier conversation does not fit a handoff; the new session starts without it")
-		return "", "", nil
+		return "", "", true, nil
 	}
-	return text, "", err
+	return text, "", true, err
 }
 
 // authenticate signs in with oauth-personal, the only method Dyna uses. An agent with no sign-in is ASUP:167-177.
