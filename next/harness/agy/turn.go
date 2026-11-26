@@ -28,6 +28,10 @@ const (
 	defaultWatchEvery       = 10 * time.Second
 )
 
+// askOwnerLine tells agy what to do instead of asking the user in its own way: Dyna answers agy's native questions and forms as cancelled
+// (T3 shows them to the user; Dyna has nobody to ask).
+const askOwnerLine = "You cannot ask the owner questions through Antigravity's own question prompts or forms; they are cancelled. To ask the owner something, use Dyna's question tool."
+
 var errInactive = errors.New("agy sent no update for too long; the turn was ended")
 
 // block is one part of the assistant message being built.
@@ -53,6 +57,7 @@ type turn struct {
 	lastUpdate time.Time
 	calls      map[string]*call
 	idled      map[string]bool // launches the session's records no longer show at work; a finished call is not one of them (T3 idleReportedSubagents, adapter.ts:5277-5308)
+	detached   bool            // what agy does on its own, with no turn: its mirror entries are marked, so Recover never takes them for a turn's answer (T3 runs them as a continuation run of their own, adapter.ts:10676-10756)
 	resumed    bool            // T3's outcomeResumed: "continue" was sent once after a late 404 (adapter.ts:10244-10275)
 	offered    *told           // what the turn's prompts have offered so far, so an overlapping steer does not repeat it (T3 appContextOffered, adapter.ts:10875-10899)
 	openCalls  int
@@ -118,7 +123,7 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contra
 	h.mu.Lock()
 	h.flushIdle()
 	h.turn = t
-	h.detached = false
+	h.detached, h.quarantine = false, false
 	t.open = 1
 	h.mu.Unlock()
 	defer close(t.finished)
@@ -145,14 +150,14 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contra
 		}
 		if f := t.fail; f != nil && f.resume && !t.resumed && !t.stopped && t.err == nil && !t.aborted {
 			// A 404 after the model answered is a transient edge error: T3 reports a retry and sends "continue" once, in the same
-			// turn, and a second failure ends it (adapter.ts:10242-10275).
+			// turn, and a second failure ends it (adapter.ts:10242-10275). It goes as a short steer-style prompt, with no instructions.
 			t.resumed, t.fail = true, nil
 			t.kept, t.cur = joinReply(t.kept, t.cur), ""
 			t.open++
 			t.settledAt = time.Time{}
 			h.mu.Unlock()
 			h.notice("agy hit a transient error (" + f.message + "); sending \"continue\" once")
-			if err := h.begin(t, []contract.TurnInput{{Text: "continue"}}, nil, false); err != nil {
+			if err := h.begin(t, []contract.TurnInput{{Text: "continue"}}, nil, true); err != nil {
 				return h.endTurn(t, err)
 			}
 			continue
@@ -278,16 +283,26 @@ type told struct {
 // info (adapter.ts:10875-10899), and counts what the turn's earlier prompts offered as seen, so overlapping prompts do not
 // repeat it. It returns what to mark as told once the prompt has been answered (adapter.ts:10185-10225).
 func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process, steer bool) ([]map[string]any, func(bool), error) {
+	// The attachments are read first, so that nothing is offered until the prompt can be built.
+	var attachments []map[string]any
+	var total int64
+	for _, input := range inputs {
+		attached, err := attachmentBlocks(input.Files, p, &total)
+		if err != nil {
+			return nil, nil, err
+		}
+		attachments = append(attachments, attached...)
+	}
+	slash := strings.HasPrefix(strings.TrimSpace(inputs[0].Text), "/")
+	// What the prompt offers is read, built and recorded as offered in one scope, so a prompt built meanwhile sees it and neither
+	// overwrites the other's state (T3 does this in one step of the turn's run, adapter.ts:10867-10899).
 	h.mu.Lock()
+	defer h.mu.Unlock()
 	state := h.told
 	offeredBefore := t.offered
 	if offeredBefore != nil && offeredBefore.gen == state.gen {
 		state = *offeredBefore
 	}
-	current := h.current()
-	model := h.cfg.Model
-	h.mu.Unlock()
-	slash := strings.HasPrefix(strings.TrimSpace(inputs[0].Text), "/")
 	var blocks []map[string]any
 	next := told{gen: state.gen, instructions: state.instructions, context: map[string]string{}, runtime: state.runtime}
 	for k, v := range state.context {
@@ -295,7 +310,7 @@ func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process,
 	}
 	sent := map[string]string{}
 	if !slash {
-		for _, s := range current {
+		for _, s := range h.current() {
 			if state.context[string(s.Key)] != s.Text {
 				blocks = append(blocks, map[string]any{"type": "text", "text": "<external_" + string(s.Key) + ">" + s.Text + "</external_" + string(s.Key) + ">"})
 				next.context[string(s.Key)] = s.Text
@@ -306,9 +321,8 @@ func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process,
 	instructions := ""
 	if !slash && !steer && !state.instructions {
 		parts := slices.DeleteFunc(append([]string{h.cfg.Instructions}, h.cfg.ProjectInstructions...), func(s string) bool { return s == "" })
-		if len(parts) > 0 {
-			instructions = "<dyna_instructions>\n" + strings.Join(parts, "\n\n") + "\n</dyna_instructions>"
-		}
+		parts = append(parts, askOwnerLine)
+		instructions = "<dyna_instructions>\n" + strings.Join(parts, "\n\n") + "\n</dyna_instructions>"
 		next.instructions = true
 	}
 	for i, input := range inputs {
@@ -318,15 +332,9 @@ func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process,
 		}
 		blocks = append(blocks, map[string]any{"type": "text", "text": text})
 	}
-	var total int64
-	for _, input := range inputs {
-		attached, err := attachmentBlocks(input.Files, p, &total)
-		if err != nil {
-			return nil, nil, err
-		}
-		blocks = append(blocks, attached...)
-	}
+	blocks = append(blocks, attachments...)
 	if !slash && !steer {
+		model := h.cfg.Model
 		info := "<runtime_info>In case you're asked: you are running in Dyna through the agy harness, as " + model.ID
 		if model.Thinking != "" {
 			info += " with " + string(model.Thinking) + " reasoning effort"
@@ -337,12 +345,9 @@ func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process,
 			next.runtime = info
 		}
 	}
-	h.mu.Lock()
 	t.offered = &next
-	h.mu.Unlock()
+	// commit runs with Harness.mu held, in the same scope that settles the prompt, before anything wakes the turn.
 	commit := func(failed bool) {
-		h.mu.Lock()
-		defer h.mu.Unlock()
 		if h.told.gen != next.gen {
 			return
 		}
@@ -361,7 +366,9 @@ func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process,
 			}
 		}
 		h.told.instructions = h.told.instructions || next.instructions
-		h.told.runtime = next.runtime
+		if next.runtime != "" {
+			h.told.runtime = next.runtime
+		}
 	}
 	return blocks, commit, nil
 }
@@ -440,21 +447,20 @@ func (h *Harness) begin(t *turn, inputs []contract.TurnInput, started func(), st
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		t.finishPrompt(h, p, raw.StopReason, step, raw.Usage.InputTokens, raw.Usage.OutputTokens, raw.Usage.CachedReadTokens, raw.Usage.CachedWriteTokens, err)
-		// T3 marks the prompt's contents as told unless it was cancelled, refused or failed (adapter.ts:10185-10192).
+		// T3 marks the prompt's contents as told unless it was cancelled, refused or failed (adapter.ts:10185-10192). This happens
+		// before the turn is woken, so what it reads of the failure is settled (adapter.ts:10867-10899).
 		if err == nil && raw.StopReason != "cancelled" && raw.StopReason != "refusal" {
-			h.mu.Unlock()
 			commit(t.fail != nil)
-			h.mu.Lock()
 		}
+		t.signal()
 	}()
 	return nil
 }
 
-// finishPrompt takes a prompt's response. Harness.mu is held.
+// finishPrompt takes a prompt's response. Harness.mu is held, and the caller wakes the turn once it has settled the rest.
 func (t *turn) finishPrompt(h *Harness, p *process, reason string, step *sessiondb.Step, in, out, cachedRead, cachedWrite int64, err error) {
 	t.open--
 	t.settle()
-	defer t.signal()
 	if err != nil {
 		if t.aborted || t.err != nil {
 			return
@@ -536,7 +542,11 @@ func (h *Harness) watch(t *turn, stop <-chan struct{}) {
 // (extractPermissionQuestion, adapter.ts:8236-8258); Dyna has nobody to ask, so it is cancelled, which agy reads as no answer.
 
 func (h *Harness) request(method string, raw json.RawMessage) (any, error) {
-	if method != "session/request_permission" {
+	switch method {
+	case "elicitation/create", "session/elicitation":
+		return elicitation(method, raw), nil
+	case "session/request_permission":
+	default:
 		return nil, &acp.Error{Code: acp.MethodNotFound, Message: "method not found: " + method}
 	}
 	var req struct {
@@ -556,8 +566,11 @@ func (h *Harness) request(method string, raw json.RawMessage) (any, error) {
 	cancelled := map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}
 	h.mu.Lock()
 	foreign := h.sessionID != "" && req.SessionID != h.sessionID
+	// After Stop a request with no turn is cancelled, as T3 does (awaitRequestTurn, adapter.ts:6547). Without a quarantine T3
+	// waits for a continuation run to answer it; Dyna has none, so it is answered at once.
+	stopped := h.turn == nil && h.quarantine
 	h.mu.Unlock()
-	if foreign {
+	if foreign || stopped {
 		return cancelled, nil
 	}
 	// Choices of a question are not approvals (AntigravityProtocol.ts:78-83).
@@ -572,6 +585,25 @@ func (h *Harness) request(method string, raw json.RawMessage) (any, error) {
 		}
 	}
 	return cancelled, nil
+}
+
+// elicitation answers agy's request for input as T3 answers one nobody responds to: a form is cancelled, any other mode is declined
+// (adapter.ts:8423-8544). The wire shape is flat for elicitation/create and nested under "action" for the legacy session/elicitation
+// (effect-acp client.test.ts:1691-1723). T3 shows the form to the user; Dyna cannot ask, so it is always cancelled. The agent is told in
+// its instructions to ask the owner through Dyna's question tool.
+func elicitation(method string, raw json.RawMessage) any {
+	var req struct {
+		Mode string `json:"mode"`
+	}
+	_ = json.Unmarshal(raw, &req)
+	action := "decline"
+	if req.Mode == "form" {
+		action = "cancel"
+	}
+	if method == "session/elicitation" {
+		return map[string]any{"action": map[string]any{"action": action}}
+	}
+	return map[string]any{"action": action}
 }
 
 // notify folds a session/update into the running turn and the harness's caches.
@@ -634,8 +666,12 @@ func (h *Harness) notify(method string, raw json.RawMessage) {
 	// mirror as they come, where the transcript shows them.
 	t := h.turn
 	if t == nil {
+		// After Stop nothing agy does on its own is kept, until the next turn or process (T3 stoppedRunQuarantine, adapter.ts:6139, 6547).
+		if h.quarantine {
+			return
+		}
 		if h.idle == nil {
-			h.idle = &turn{calls: map[string]*call{}, idled: map[string]bool{}, wake: make(chan struct{}, 1), activity: func(contract.TurnID, contract.ActivityKind, string) {}}
+			h.idle = &turn{detached: true, calls: map[string]*call{}, idled: map[string]bool{}, wake: make(chan struct{}, 1), activity: func(contract.TurnID, contract.ActivityKind, string) {}}
 		}
 		t = h.idle
 	}
@@ -750,7 +786,7 @@ func (h *Harness) toolUpdate(t *turn, id, name, title, kind, status string, inpu
 	}
 	failed := status == "failed"
 	err := h.record(map[string]any{
-		"role": "toolResult", "toolCallId": id, "toolName": c.name, "isError": failed,
+		"role": "toolResult", "toolCallId": id, "toolName": c.name, "isError": failed, "detached": t.detached,
 		"content": []map[string]any{{"type": "text", "text": strings.Join(text, "\n")}},
 	})
 	if err != nil && t.err == nil {
@@ -778,7 +814,7 @@ func (t *turn) flush(h *Harness) {
 		}
 	}
 	t.blocks = nil
-	if err := h.record(map[string]any{"role": "assistant", "content": content}); err != nil && t.err == nil {
+	if err := h.record(map[string]any{"role": "assistant", "content": content, "detached": t.detached}); err != nil && t.err == nil {
 		t.err = err
 	}
 }
@@ -818,6 +854,7 @@ func (h *Harness) Recover(id contract.TurnID, inputs []contract.TurnInput) (cont
 				Role       string
 				DeliveryID string
 				StopReason string
+				Detached   bool
 				Content    []struct{ Type, Text string }
 			}
 		}
@@ -825,6 +862,9 @@ func (h *Harness) Recover(id contract.TurnID, inputs []contract.TurnInput) (cont
 			continue
 		}
 		m := entry.Message
+		if m.Detached {
+			continue // what agy did on its own after the turn is no part of it, whatever the turn's ending was
+		}
 		if m.Role == "user" && m.DeliveryID == want {
 			found, final, stopped = true, "", false
 			continue
@@ -896,6 +936,8 @@ func (h *Harness) ClearQueue(context.Context) error {
 func (h *Harness) Abort(ctx context.Context) error {
 	h.mu.Lock()
 	t := h.turn
+	// Stop quarantines what agy does on its own until the next turn or process (T3 quarantineStoppedRun, adapter.ts:9484).
+	h.quarantine = true
 	h.mu.Unlock()
 	if t != nil {
 		return h.cancel(ctx, t)

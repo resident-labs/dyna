@@ -74,24 +74,25 @@ type Harness struct {
 	nonce   int64
 	entries int64
 
-	mu        sync.Mutex
-	p         *process
-	sessionID string
-	turn      *turn
-	held      []contract.TurnInput // follow-ups waiting for the prompt response
-	sections  []contract.ContextSection
-	told      told            // what the process was told; it starts empty with each process (T3 adapter.ts promptInstructionStates)
-	broken    bool            // agy's saved conversation fails every prompt (INVALID_THINKING_SIGNATURE); the next Start opens a new one
-	detached  bool            // a turn ended with agy still running a tool call or a reply: Abort then cancels it (quirk 3)
-	restart   bool            // a prompt ended in a failure found in the session log: the next use starts a new process (T3 runtimeRestartRequired)
-	blocked   bool            // the last turn ended in a limit or an account refusal: Compact sends no prompt (root ruling 5)
-	idle      *turn           // what agy did with no turn running, until it is written to the mirror
-	compacted map[string]bool // compactions already seen, by id
-	modelText string
-	context   int64 // input and cached tokens of the last prompt
-	used      int64 // agy's usage_update
-	commands  map[string]bool
-	closed    bool
+	mu         sync.Mutex
+	p          *process
+	sessionID  string
+	turn       *turn
+	held       []contract.TurnInput // follow-ups waiting for the prompt response
+	sections   []contract.ContextSection
+	told       told            // what the process was told; it starts empty with each process (T3 adapter.ts promptInstructionStates)
+	broken     bool            // agy's saved conversation fails every prompt (INVALID_THINKING_SIGNATURE); the next Start opens a new one
+	detached   bool            // a turn ended with agy still running a tool call or a reply: Abort then cancels it (quirk 3)
+	restart    bool            // a prompt ended in a failure found in the session log: the next use starts a new process (T3 runtimeRestartRequired)
+	quarantine bool            // Stop was sent with no turn running: what agy does on its own is dropped until the next turn or process (T3 stoppedRunQuarantine, adapter.ts:9484, cleared 8902, 10627)
+	blocked    bool            // the last turn ended in a limit or an account refusal: Compact sends no prompt (root ruling 5)
+	idle       *turn           // what agy did with no turn running, until it is written to the mirror
+	compacted  map[string]bool // compactions already seen, by id
+	modelText  string
+	context    int64 // input and cached tokens of the last prompt
+	used       int64 // agy's usage_update
+	commands   map[string]bool
+	closed     bool
 
 	delivered deliveries
 }
@@ -305,7 +306,7 @@ func (h *Harness) ensure(ctx context.Context) error {
 	h.p = p
 	// What a process was told, and any work it ran, goes with it (T3 keeps this state per runtime).
 	h.resetTold()
-	h.detached = false
+	h.detached, h.quarantine = false, false
 	h.mu.Unlock()
 	return nil
 }
@@ -435,15 +436,15 @@ func (h *Harness) authenticate(ctx context.Context, p *process) error {
 // failure.ts:curatedCauseMessages, AntigravityAuth.ts:safeAuthFailure). What agy said goes to the box log instead.
 func (h *Harness) exitError(what string, err error, p *process) error {
 	if errors.Is(err, acp.ErrClosed) {
-		log.Printf("agy exited during %s: %s", what, p.tail.String())
+		log.Printf("agy exited during %s: %s", what, safeMessage(p.tail.String()))
 		return fmt.Errorf("agy exited unexpectedly during %s; its output is in the box log", what)
 	}
 	var rpc *acp.Error
 	if !errors.As(err, &rpc) {
-		log.Printf("agy %s: %v", what, err)
+		log.Printf("agy %s: %s", what, safeMessage(err.Error()))
 		return fmt.Errorf("agy %s failed", what)
 	}
-	log.Printf("agy %s: %v", what, err)
+	log.Printf("agy %s: %s", what, safeMessage(err.Error()))
 	switch {
 	case rpc.Code == -32000:
 		return ErrSignInRequired
@@ -573,7 +574,9 @@ func (h *Harness) applyModel(ctx context.Context, p *process) error {
 		err := p.client.Call(ctx, "session/set_config_option", map[string]any{"sessionId": sid, "configId": set.id, "value": set.value}, &res)
 		var rpc *acp.Error
 		if errors.As(err, &rpc) {
-			return fmt.Errorf("%w: %v", harness.ErrRefused, rpc)
+			// agy's own text is not shown (T3 safeAuthFailure, AntigravityAuth.ts:146-173 shows a fixed message); it goes to the box log.
+			log.Printf("agy set_config_option %s: %s", set.id, safeMessage(rpc.Error()))
+			return fmt.Errorf("%w: agy did not accept %s %q (code %d)", harness.ErrRefused, set.id, set.value, rpc.Code)
 		}
 		if err != nil {
 			return h.exitError("session/set_config_option", err, p)

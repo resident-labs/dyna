@@ -389,6 +389,28 @@ func (a *agent) prompt(id json.RawMessage, text string, steered, held chan strin
 		time.Sleep(400 * time.Millisecond)
 		a.text("late reply")
 		a.update(map[string]any{"sessionUpdate": "usage_update", "used": 10, "size": 100})
+	// A failure, then a reply the agent streams on its own afterwards.
+	case "quotalate":
+		a.step(sessiondb.StepError, "Error 429, Message: quota, Status: RESOURCE_EXHAUSTED")
+		a.text("Error 429")
+		a.end(id, "end_turn")
+		time.Sleep(400 * time.Millisecond)
+		a.text("detached reply")
+		a.update(map[string]any{"sessionUpdate": "usage_update", "used": 10, "size": 100})
+	// A permission asked after the turn ended.
+	case "permlate":
+		a.text("ok")
+		a.end(id, "end_turn")
+		time.Sleep(400 * time.Millisecond)
+		a.permission("late")
+	// agy's own questions: a form, the legacy form and a question put as a permission.
+	case "elicit":
+		a.send(map[string]any{"id": "elicit-form", "method": "elicitation/create", "params": map[string]any{"mode": "form", "message": "q", "requestedSchema": map[string]any{"type": "object", "properties": map[string]any{}}}})
+		a.send(map[string]any{"id": "elicit-legacy", "method": "session/elicitation", "params": map[string]any{"mode": "form", "message": "q", "requestedSchema": map[string]any{"type": "object", "properties": map[string]any{}}}})
+		a.send(map[string]any{"id": "elicit-url", "method": "elicitation/create", "params": map[string]any{"mode": "url", "message": "q", "url": "https://example.com", "elicitationId": "e1"}})
+		a.send(map[string]any{"id": "perm-question", "method": "session/request_permission", "params": map[string]any{"sessionId": a.session(), "toolCall": map[string]any{"toolCallId": "interaction_1", "title": "Pick"}, "options": []map[string]any{{"optionId": "a", "name": "A", "kind": "allow_once"}}}})
+		a.text("asked")
+		a.end(id, "end_turn")
 	case "rpcerror":
 		a.fail(id, -32603, "boom")
 	case "refusal":

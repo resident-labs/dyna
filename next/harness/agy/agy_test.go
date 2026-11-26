@@ -1099,3 +1099,67 @@ func mustJSON(v any) []byte {
 	data, _ := json.Marshal(v)
 	return data
 }
+
+func answerOf(t *testing.T, r *rig, id string) string {
+	t.Helper()
+	got := ""
+	for _, m := range r.messages(t) {
+		if string(m.ID) == `"`+id+`"` && len(m.Result) > 0 {
+			got = string(m.Result)
+		}
+	}
+	return got
+}
+
+func TestDetachedOutputAfterAFailureDoesNotCompleteTheTurn(t *testing.T) {
+	h, r, _ := open(t, nil, nil)
+	res := start(t, h, "t1", input(1, "quotalate"))
+	if res.Outcome != contract.TurnFailed {
+		t.Fatalf("res = %+v", res)
+	}
+	eventually(t, "the detached reply in the mirror", func() bool {
+		data, _ := os.ReadFile(h.SessionFile())
+		return strings.Contains(string(data), "detached reply")
+	})
+	// The retry wake reuses the delivery id: the reply agy streamed on its own is no answer to it.
+	if _, settled, err := h.Recover("t1", []contract.TurnInput{input(1, "quotalate")}); err != nil || settled {
+		t.Fatalf("recover took detached output for the answer: %v %v", settled, err)
+	}
+	if res, err := h.Continue(context.Background(), "t1", func() {}); err != nil || res.Outcome != contract.TurnCompleted {
+		t.Fatalf("continue = %+v %v", res, err)
+	}
+	prompts := r.prompts(t)
+	if last := prompts[len(prompts)-1]; !strings.Contains(strings.Join(last, "\n"), "Continue where you left off.") {
+		t.Fatalf("prompts = %q", prompts)
+	}
+}
+
+func TestStopQuarantinesWhatAgyDoesOnItsOwn(t *testing.T) {
+	h, r, _ := open(t, nil, nil)
+	start(t, h, "t1", input(1, "permlate"))
+	if err := h.Abort(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the cancelled answer", func() bool { return strings.Contains(answerOf(t, r, "perm-late"), `"cancelled"`) })
+	// The next turn lifts it.
+	start(t, h, "t2", input(2, "permlate"))
+	eventually(t, "the allowed answer", func() bool { return strings.Contains(answerOf(t, r, "perm-late"), `"selected"`) })
+}
+
+func TestAgysQuestionsAreAnsweredCancelled(t *testing.T) {
+	h, r, _ := open(t, nil, nil)
+	start(t, h, "t1", input(1, "elicit"))
+	for id, want := range map[string]string{
+		"elicit-form":   `{"action":"cancel"}`,
+		"elicit-legacy": `{"action":{"action":"cancel"}}`,
+		"elicit-url":    `{"action":"decline"}`,
+		"perm-question": `{"outcome":{"outcome":"cancelled"}}`,
+	} {
+		if got := answerOf(t, r, id); got != want {
+			t.Errorf("%s answered %s, want %s", id, got, want)
+		}
+	}
+	if p := r.prompts(t); !strings.Contains(strings.Join(p[0], "\n"), "Dyna's question tool") {
+		t.Errorf("the instructions do not name the question tool: %q", p[0])
+	}
+}
