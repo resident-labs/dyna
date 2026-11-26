@@ -250,6 +250,14 @@ func Run(ctx context.Context) error {
 			}
 			h, files = session, func() []string { return []string{session.SessionFile()} }
 		} else {
+			rec, err := adoptHandoff(hello, handoffMarker)
+			if err != nil {
+				return err
+			}
+			open, next, err := planOpen(rec, sessions, hello.Fresh)
+			if err != nil {
+				return err
+			}
 			interrupts := dynaext.NewInterrupts()
 			session, err := pig.Open(ctx, pig.Config{
 				Dir:               workdir,
@@ -259,7 +267,8 @@ func Run(ctx context.Context) error {
 				CompactTokens:     hello.CompactTokens,
 				Instructions:      hello.Instructions,
 				ModelInstructions: hello.ModelInstructions,
-				New:               hello.Fresh,
+				New:               open.New,
+				Resume:            open.Resume,
 				Extensions:        []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: workdir, Shell: jobs, Dyna: dynaTools, Interrupts: interrupts})},
 				Notice:            func(text string) { go notice(text) },
 			})
@@ -268,7 +277,16 @@ func Run(ctx context.Context) error {
 			}
 			session.Activity = activity.set
 			session.Finished = activity.finish
-			h, files, steered = session, func() []string { return []string{session.SessionFile()} }, func(sender contract.Interrupt) { jobs.StepAside(sender); interrupts.Send(sender) }
+			piHarness := &handoffStart{boxHarness: session, file: session.SessionFile, sessions: sessions, path: handoffMarker, rec: rec}
+			if next != rec {
+				if err := piHarness.move(next); err != nil {
+					return err
+				}
+			}
+			if err := piHarness.attach(ctx); err != nil {
+				return err
+			}
+			h, files, steered = piHarness, func() []string { return []string{session.SessionFile()} }, func(sender contract.Interrupt) { jobs.StepAside(sender); interrupts.Send(sender) }
 		}
 	}
 	defer h.Close()

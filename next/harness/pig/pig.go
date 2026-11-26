@@ -39,6 +39,9 @@ type Config struct {
 	// New starts a session file of its own. Without it the session continues the newest file in SessionDir, as a
 	// restarted box does; a crew's workers share one folder, and none may take another's.
 	New bool
+	// Resume is the session file to continue, in place of the newest in SessionDir. It is for a caller that knows which file holds the
+	// conversation; New wins over it.
+	Resume string
 	// CompactTokens is the context size at which the session compacts itself; zero leaves it to the model's window.
 	CompactTokens int
 	// ModelsFile is the models.json the session reads in place of AgentDir's.
@@ -173,8 +176,10 @@ func (h *Harness) start(ctx context.Context, c Config) error {
 	}
 	var resume string
 	if !c.New {
-		if resume, err = newest(c.SessionDir); err != nil {
-			return err
+		if resume = c.Resume; resume == "" {
+			if resume, err = newest(c.SessionDir); err != nil {
+				return err
+			}
 		}
 	}
 	manager, err := coding.SessionManagerFor(h.services, coding.SessionStartOptions{SessionDir: c.SessionDir, ResumePath: resume})

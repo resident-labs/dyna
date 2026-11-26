@@ -105,7 +105,7 @@ func planOpen(c Config, meta sessionMeta, delivered, fbDelivered bool) handoffOp
 // state is the session file's content for the harness as it is now.
 func (h *Harness) state() sessionMeta {
 	h.mu.Lock()
-	meta := sessionMeta{SessionID: h.sessionID, Handoff: h.handoff, Gen: h.gen, Status: h.hstatus, ClearFrom: h.clearFrom, Fallback: h.fbText, FallbackStatus: h.fbStatus}
+	meta := sessionMeta{SessionID: h.sessionID, Handoff: h.handoff, Gen: h.gen, Status: h.hstatus, Cleared: h.cleared, Fallback: h.fbText, FallbackStatus: h.fbStatus}
 	h.mu.Unlock()
 	h.fm.Lock()
 	meta.Mirror = filepath.Base(h.mirror)
@@ -165,11 +165,11 @@ func handoffKind(kind string) string {
 	return "engine"
 }
 
-// markCleared records that a /clear began the current mirror file: a handoff built from the mirrors starts there.
+// markCleared records that a /clear left every other session file behind: a handoff starts from the current mirror.
 func (h *Harness) markCleared() error {
-	from := filepath.Base(h.mirrorPath())
+	keep := filepath.Base(h.mirrorPath())
 	h.mu.Lock()
-	h.clearFrom = from
+	h.cleared = clearedWith(h.cfg.SessionDir, keep, h.cleared)
 	h.mu.Unlock()
 	return h.writeState()
 }
