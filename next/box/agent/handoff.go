@@ -24,7 +24,10 @@ func handoffHistory(sessions string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cleared := agy.ClearedFiles(sessions)
+	cleared, err := agy.ClearedFiles(sessions)
+	if err != nil {
+		return "", err
+	}
 	type file struct {
 		path string
 		mod  int64
@@ -91,9 +94,11 @@ func (s handoffState) owed(delivered func(contract.DeliverySeq) (bool, error)) (
 }
 
 // handoffStart wraps Pi. A /clear records the files it leaves behind where agy's own does, so a later handoff reads none of them. While a
-// handoff is pending it also gives the first prompt the history of the conversation Pi takes over, as agy does for itself. Before that
-// prompt runs, marker records the input that carries it. A /clear drops the history and records the generation alone, so it is never
-// given after the clear, and fails if that cannot be recorded.
+// handoff is owed it gives the prompt the history of the conversation Pi takes over, as agy does for itself. Before that prompt runs,
+// marker records the input that carries it, and every start checks Pi's ledger of delivered inputs for it (PiG answers the preflight
+// before it writes the prompt, so no callback can say it was taken): delivered settles the handoff, and not delivered carries the
+// history again, with the next input. A /clear drops the history and the carrier, and records the generation alone, so it is never
+// given after the clear; it fails if it cannot record that.
 type handoffStart struct {
 	boxHarness
 	sessions, history, marker string
@@ -104,6 +109,23 @@ type handoffStart struct {
 
 func (h *handoffStart) Start(ctx context.Context, turn contract.TurnID, inputs []contract.TurnInput, accepted func()) (contract.TurnEnded, error) {
 	h.mu.Lock()
+	if h.state.Carrier > 0 {
+		took, err := h.boxHarness.Delivered(ctx, h.state.Carrier)
+		if err != nil {
+			h.mu.Unlock()
+			return contract.TurnEnded{}, err
+		}
+		if took {
+			settled := handoffState{Gen: h.state.Gen}
+			if err := settled.save(h.marker); err != nil {
+				h.mu.Unlock()
+				return contract.TurnEnded{}, err
+			}
+			h.history, h.state = "", settled
+		} else {
+			h.state.Pending = true
+		}
+	}
 	if h.state.Pending && len(inputs) > 0 {
 		next := handoffState{Gen: h.state.Gen, Carrier: inputs[0].Delivery}
 		if err := next.save(h.marker); err != nil {
@@ -112,7 +134,8 @@ func (h *handoffStart) Start(ctx context.Context, turn contract.TurnID, inputs [
 		}
 		inputs = append([]contract.TurnInput(nil), inputs...)
 		inputs[0].Text = handoff.Prompt(h.history, inputs[0].Text)
-		h.history, h.state = "", next
+		// The history stays until the carrier is seen delivered.
+		h.state = next
 	}
 	h.mu.Unlock()
 	return h.boxHarness.Start(ctx, turn, inputs, accepted)
@@ -127,7 +150,7 @@ func (h *handoffStart) NewConversation(ctx context.Context) error {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.state.Pending {
+	if h.state.Pending || h.state.Carrier > 0 {
 		next := handoffState{Gen: h.state.Gen}
 		if err := next.save(h.marker); err != nil {
 			return err

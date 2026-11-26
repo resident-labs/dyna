@@ -273,7 +273,8 @@ func Run(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			// A carried history whose input Pi never recorded is carried again, on the conversation it already opened.
+			// A carried history whose input Pi never recorded is owed again, on the conversation it already opened. Each start checks the
+			// carrier again, so a prompt Pi refuses before writing it carries the history with the next one.
 			if state.Pending, err = state.owed(func(seq contract.DeliverySeq) (bool, error) { return session.Delivered(ctx, seq) }); err != nil {
 				return err
 			}

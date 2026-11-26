@@ -33,7 +33,7 @@ func TestHandoffHistoryReadsConversationFilesOldestFirst(t *testing.T) {
 	dir := t.TempDir()
 	conversation(t, dir, "b.jsonl", time.Hour, "second question")
 	conversation(t, dir, "a.jsonl", 2*time.Hour, "first question")
-	if err := os.WriteFile(filepath.Join(dir, "agy-session.json"), []byte("{not a conversation"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "agy-session.json"), []byte(`{"sessionId":"x"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	got, err := handoffHistory(dir)
@@ -51,6 +51,7 @@ func hello(gen string) contract.BoxHelloResponse {
 
 type startRecorder struct {
 	boxHarness
+	ledger  map[contract.DeliverySeq]bool // the inputs Pi's session file records
 	texts   []string
 	refuse  bool
 	cleared int
@@ -63,6 +64,10 @@ func (r *startRecorder) Start(_ context.Context, _ contract.TurnID, inputs []con
 	}
 	accepted()
 	return contract.TurnEnded{}, nil
+}
+
+func (r *startRecorder) Delivered(_ context.Context, seq contract.DeliverySeq) (bool, error) {
+	return r.ledger[seq], nil
 }
 
 func (r *startRecorder) NewConversation(context.Context) error {
@@ -118,10 +123,15 @@ func TestHandoffStartRecordsTheCarrierAndCarriesOnce(t *testing.T) {
 	rec := &startRecorder{}
 	h := pending(t, rec, marker, "HISTORY")
 	inputs := []contract.TurnInput{{Delivery: 41, Text: "hello"}}
-	for range 2 {
-		if _, err := h.Start(t.Context(), "t", inputs, func() {}); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := h.Start(t.Context(), "t", inputs, func() {}); err != nil {
+		t.Fatal(err)
+	}
+	if state := savedState(t, marker); state.Gen != "7" || state.Pending || state.Carrier != 41 {
+		t.Fatalf("state %+v", state)
+	}
+	rec.ledger = map[contract.DeliverySeq]bool{41: true}
+	if _, err := h.Start(t.Context(), "t", inputs, func() {}); err != nil {
+		t.Fatal(err)
 	}
 	if len(rec.texts) != 2 || !strings.Contains(rec.texts[0], "HISTORY") || !strings.Contains(rec.texts[0], "hello") || rec.texts[1] != "hello" {
 		t.Fatalf("prompts %q", rec.texts)
@@ -129,8 +139,9 @@ func TestHandoffStartRecordsTheCarrierAndCarriesOnce(t *testing.T) {
 	if inputs[0].Text != "hello" {
 		t.Fatal("the caller's input was changed")
 	}
-	if state := savedState(t, marker); state.Gen != "7" || state.Pending || state.Carrier != 41 {
-		t.Fatalf("state %+v", state)
+	// The second start saw the carrier delivered and settled the handoff.
+	if state := savedState(t, marker); state.Carrier != 0 {
+		t.Fatalf("settled state %+v", state)
 	}
 }
 
@@ -228,8 +239,64 @@ func TestAgyClearBoundaryKeepsPostClearPiMessages(t *testing.T) {
 	}
 }
 
-// After a restart the history is owed again when the input that carried it is not in Pi's ledger (PiG answers the preflight before it
-// writes the prompt), and not when it is.
+// When Pi rejects the carrying prompt before it is delivered, the next start in the same box carries the history again, and once the
+// ledger holds the carrier the handoff settles.
+func TestHandoffCarriedAgainAfterAPromptPiNeverRecorded(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "state.json")
+	rec := &startRecorder{refuse: true}
+	h := pending(t, rec, marker, "HISTORY")
+	if _, err := h.Start(t.Context(), "t1", []contract.TurnInput{{Delivery: 5, Text: "first"}}, func() {}); err == nil {
+		t.Fatal("the refusal was swallowed")
+	}
+	rec.refuse = false
+	if _, err := h.Start(t.Context(), "t2", []contract.TurnInput{{Delivery: 6, Text: "second"}}, func() {}); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.texts) != 2 || !strings.Contains(rec.texts[0], "HISTORY") || !strings.Contains(rec.texts[1], "HISTORY") || !strings.Contains(rec.texts[1], "second") {
+		t.Fatalf("prompts %q", rec.texts)
+	}
+	if state := savedState(t, marker); state.Carrier != 6 {
+		t.Fatalf("the carrier is %d, want the input that carried it last", state.Carrier)
+	}
+}
+
+// After a delivered handoff, a successful /clear retires the old carrier: a restart onto the new file must not find an input its ledger
+// cannot see and reopen a settled generation.
+func TestClearRetiresTheCarrierOfADeliveredHandoff(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "state.json")
+	rec := &startRecorder{}
+	h := pending(t, rec, marker, "HISTORY")
+	if _, err := h.Start(t.Context(), "t", []contract.TurnInput{{Delivery: 41, Text: "hi"}}, func() {}); err != nil {
+		t.Fatal(err)
+	}
+	rec.ledger = map[contract.DeliverySeq]bool{41: true}
+	if err := h.NewConversation(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if state := savedState(t, marker); state.Gen != "7" || state.Pending || state.Carrier != 0 {
+		t.Fatalf("state %+v", state)
+	}
+	if _, err := h.Start(t.Context(), "t2", []contract.TurnInput{{Delivery: 42, Text: "after"}}, func() {}); err != nil {
+		t.Fatal(err)
+	}
+	if rec.texts[1] != "after" {
+		t.Fatalf("the history was carried again after the clear: %q", rec.texts[1])
+	}
+}
+
+// An unreadable record of what a /clear left behind fails the history, rather than sending what the clear dropped.
+func TestHandoffHistoryFailsOnAnUnreadableClearRecord(t *testing.T) {
+	dir := t.TempDir()
+	conversation(t, dir, "pi.jsonl", time.Hour, "an old question")
+	if err := os.WriteFile(filepath.Join(dir, "agy-session.json"), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := handoffHistory(dir); err == nil {
+		t.Fatalf("history sent with no clear boundary:\n%s", got)
+	}
+}
+
+// After a restart the history is owed again when the input that carried it is not in Pi's ledger, and not when it is.
 func TestHandoffOwedFollowsTheCarriersDelivery(t *testing.T) {
 	ledger := map[contract.DeliverySeq]bool{41: true}
 	delivered := func(seq contract.DeliverySeq) (bool, error) { return ledger[seq], nil }

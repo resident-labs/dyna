@@ -48,10 +48,10 @@ type sessionMeta struct {
 }
 
 // ClearedFiles are the session files in dir that a /clear left behind, whichever harness cleared. The box never reads inside the
-// profile folder: this is the file this harness keeps in the session folder.
-func ClearedFiles(dir string) []string {
-	meta, _ := readMeta(dir)
-	return meta.Cleared
+// profile folder: this is the file this harness keeps in the session folder. An unreadable record is an error, never "no clear": a history sent without the boundary would carry what a /clear dropped.
+func ClearedFiles(dir string) ([]string, error) {
+	meta, err := readMeta(dir)
+	return meta.Cleared, err
 }
 
 // MarkCleared records a /clear in dir: every session file there but keep, the one the new conversation writes, is left behind. Pi's /clear

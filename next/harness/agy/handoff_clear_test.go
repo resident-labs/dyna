@@ -18,7 +18,8 @@ func TestMarkClearedLeavesEveryOtherConversationFileBehind(t *testing.T) {
 	if err := MarkCleared(dir, "agy-2.jsonl"); err != nil {
 		t.Fatal(err)
 	}
-	if got := ClearedFiles(dir); !slices.Equal(got, []string{"a.jsonl", "agy-1.jsonl"}) {
+	got, err := ClearedFiles(dir)
+	if err != nil || !slices.Equal(got, []string{"a.jsonl", "agy-1.jsonl"}) {
 		t.Fatalf("cleared %v", got)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "b.jsonl"), []byte("x\n"), 0o600); err != nil {
@@ -27,7 +28,8 @@ func TestMarkClearedLeavesEveryOtherConversationFileBehind(t *testing.T) {
 	if err := MarkCleared(dir, "b.jsonl"); err != nil {
 		t.Fatal(err)
 	}
-	if got := ClearedFiles(dir); !slices.Equal(got, []string{"a.jsonl", "agy-1.jsonl", "agy-2.jsonl"}) {
+	got, err = ClearedFiles(dir)
+	if err != nil || !slices.Equal(got, []string{"a.jsonl", "agy-1.jsonl", "agy-2.jsonl"}) {
 		t.Fatalf("cleared %v", got)
 	}
 }
