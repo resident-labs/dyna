@@ -784,6 +784,9 @@ const (
 	HarnessAgy Harness = "agy" // Google's Antigravity agent over ACP, on host hermeslab only
 )
 
+// AgyGeminiDir is where a box sees the signed-in agy profile folder.
+const AgyGeminiDir = "/opt/agy/account"
+
 // BoxAgy says where the agy harness's files are in the box: the program, and the signed-in profile directory, mounted read-write from the host; nothing in it is read or copied.
 type BoxAgy struct {
 	Binary    string `json:"binary"`

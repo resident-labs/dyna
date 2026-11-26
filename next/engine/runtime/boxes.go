@@ -176,6 +176,7 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 		return "", err
 	}
 	spec.Root = session.Root
+	spec.Agy = b.Pressure != nil && b.Pressure.AgyProfile(session.Profile)
 	if err := b.Sockets.AddBox(spec.Box, spec.Session, session.Room); err != nil {
 		return "", box.RuntimeCreateError{Err: err}
 	}
@@ -519,6 +520,7 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image stri
 		return err
 	}
 	spec.Root = session.Root
+	spec.Agy = b.Pressure != nil && b.Pressure.AgyProfile(session.Profile)
 	slice, c := b.container(spec, image, shared)
 	if err := run(contract.StartSlice, func(ctx context.Context) error { return h.EnsureSlice(ctx, slice) }); err != nil {
 		return err
@@ -567,6 +569,11 @@ func (b *Boxes) container(spec lifecycle.BoxSpec, image string, shared box.Mount
 		c.Mounts = append(c.Mounts,
 			box.Mount{HostPath: filepath.Dir(b.Layout.HostRootAddons("")), BoxPath: "/run/dyna/root-addons/global", ReadOnly: true, MakeDir: true},
 			box.Mount{HostPath: filepath.Dir(b.Layout.HostRootAddons(spec.Room)), BoxPath: "/run/dyna/root-addons/room", ReadOnly: true, MakeDir: true})
+	}
+	if spec.Agy {
+		c.Mounts = append(c.Mounts,
+			box.Mount{HostPath: box.AgyBinary, BoxPath: box.AgyBinary, ReadOnly: true},
+			box.Mount{HostPath: b.Layout.HostAgyAccount(), BoxPath: contract.AgyGeminiDir})
 	}
 	for _, repo := range spec.Repos {
 		c.Mounts = append(c.Mounts, box.Mount{HostPath: repo.Cache, BoxPath: repo.Cache, ReadOnly: true})

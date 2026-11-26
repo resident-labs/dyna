@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/resident-labs/dyna/box"
 	"log"
 	"os"
 	"path/filepath"
@@ -480,4 +481,9 @@ func (s *Service) agyPlacement(profile contract.ProfileName, host contract.HostN
 
 // The agy program and the signed-in profile directory are mounted into the box by the host's root, the directory read-write.
 // Dyna never reads or copies a file in it.
-var agyMount = contract.BoxAgy{Binary: "/opt/agy/antigravity", GeminiDir: "/opt/agy/account"}
+var agyMount = contract.BoxAgy{Binary: box.AgyBinary, GeminiDir: contract.AgyGeminiDir}
+
+// AgyProfile says a profile runs on the agy harness.
+func (s *Service) AgyProfile(name contract.ProfileName) bool {
+	return s.harnessOf(name) == contract.HarnessAgy
+}
