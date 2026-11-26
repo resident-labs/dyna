@@ -156,7 +156,8 @@ func (e *XAIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth
 			return len(chunks), true
 		}
 		var sawData bool
-		for eventName, raw := range xaiResponseEvents(scanner) {
+		for event := range xaiResponseEvents(scanner) {
+			raw := event.data
 			if bytes.Equal(raw, []byte("[DONE]")) {
 				if terminalSent {
 					emitTranslatedLine([]byte("data: [DONE]"), false)
@@ -171,11 +172,11 @@ func (e *XAIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth
 			validJSON := gjson.ValidBytes(raw)
 			if validJSON {
 				streamUsage.ObserveResponsesStream(raw)
-			} else if scanner.Unterminated() && scanner.Err() != nil {
+			} else if event.unterminated && scanner.Err() != nil {
 				// An interrupted final line isn't a provider plain-text error.
 				break
 			}
-			if errTerminal, failed := xaiTerminalError(eventName, raw, validJSON, httpResp.Header); failed {
+			if errTerminal, failed := xaiTerminalError(event.name, raw, validJSON, httpResp.Header); failed {
 				fail(errTerminal)
 				return
 			}
@@ -203,8 +204,8 @@ func (e *XAIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth
 					}
 				}
 				terminal := terminalKind == "response.completed" || terminalKind == "response.incomplete"
-				if eventName != "" {
-					if _, ok := emitTranslatedLine(xaiNormalizeReasoningSummaryEventLine([]byte("event: "+eventName), kind), false); !ok {
+				if event.name != "" {
+					if _, ok := emitTranslatedLine(xaiNormalizeReasoningSummaryEventLine([]byte("event: "+event.name), kind), false); !ok {
 						return
 					}
 				}

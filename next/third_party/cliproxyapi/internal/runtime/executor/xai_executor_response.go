@@ -1116,17 +1116,25 @@ const (
 	xaiIncompleteStreamMessage = "xai stream error: stream closed before terminal event"
 )
 
+type xaiResponseEvent struct {
+	name         string
+	data         []byte
+	unterminated bool
+}
+
 // xaiResponseEvents associates SSE event names with data. The shared scanner
 // assembles split JSON and also accepts complete data lines without delimiters.
-// Hold untyped data for one field boundary so an event name after data works too.
-func xaiResponseEvents(scanner *helps.CodexSSEScanner) iter.Seq2[string, []byte] {
-	return func(yield func(string, []byte) bool) {
+// Hold untyped data and its line completeness until the next field boundary
+// so an event name after data works too.
+func xaiResponseEvents(scanner *helps.CodexSSEScanner) iter.Seq[xaiResponseEvent] {
+	return func(yield func(xaiResponseEvent) bool) {
 		var name string
-		var pending []byte
+		var pending xaiResponseEvent
 		flush := func() bool {
-			eventName, data := name, pending
-			name, pending = "", nil
-			return len(data) == 0 || yield(eventName, data)
+			event := pending
+			event.name = name
+			name, pending = "", xaiResponseEvent{}
+			return len(event.data) == 0 || yield(event)
 		}
 		for scanner.Scan() {
 			line := scanner.Bytes()
@@ -1141,20 +1149,21 @@ func xaiResponseEvents(scanner *helps.CodexSSEScanner) iter.Seq2[string, []byte]
 				}
 				name = strings.TrimSpace(string(line[len(xaiEventTag):]))
 			case bytes.HasPrefix(line, xaiDataTag):
-				if pending != nil && !flush() {
+				if pending.data != nil && !flush() {
 					return
 				}
 				data := bytes.TrimSpace(line[len(xaiDataTag):])
 				if len(data) == 0 {
 					continue
 				}
+				event := xaiResponseEvent{name: name, data: data, unterminated: scanner.Unterminated()}
 				if name == "" && !bytes.Equal(data, []byte("[DONE]")) && gjson.GetBytes(data, "type").String() == "" {
-					pending = bytes.Clone(data)
+					event.data = bytes.Clone(data)
+					pending = event
 					continue
 				}
-				eventName := name
 				name = ""
-				if !yield(eventName, data) {
+				if !yield(event) {
 					return
 				}
 			}

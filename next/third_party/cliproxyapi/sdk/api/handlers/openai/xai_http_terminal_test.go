@@ -32,6 +32,7 @@ func TestXAIHTTPTerminal(t *testing.T) {
 		wrappedLimit = `data: {"type":"error","error":{},"body":{"error":{"code":"resource_exhausted","message":"wrapped provider limit"}}}`
 		mergedLimit  = `data: {"type":"error","error":{"message":"provider rate limit"},"body":{"error":{"code":"resource_exhausted","message":"nested fallback"}}}`
 		plainError   = "event: error\ndata: upstream gateway refusal"
+		reverseError = "data: upstream gateway refusal\nevent: error\ndata: later"
 		badPatch     = `data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"a","call_id":"c","name":"apply_patch","arguments":""}}` + "\n\n" + `data: {"type":"response.completed"}` + "\n\n"
 		done         = `data: {"type":"response.done","response":{"id":"resp_ok","status":"completed","model":"grok-4.7","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ready"}]}],"usage":{"input_tokens":7,"output_tokens":3}}}` + "\n\n"
 	)
@@ -62,6 +63,8 @@ func TestXAIHTTPTerminal(t *testing.T) {
 		{name: "stream_plain_error_read_cut", stream: true, body: "event: error\ndata: upstream ga", want: "closed before", short: true, status: 502, posts: 1, truncated: true},
 		{name: "buffered_complete_plain_error", body: plainError + "\n", want: "upstream gateway refusal", short: true, status: 502, posts: 2, cooled: 2},
 		{name: "stream_complete_plain_error", stream: true, body: delta + "\n" + plainError + "\n", want: "upstream gateway refusal", short: true, status: 200, posts: 1, cooled: 1},
+		{name: "buffered_complete_error_before_cut_line", body: reverseError, want: "upstream gateway refusal", short: true, status: 502, posts: 2, cooled: 2},
+		{name: "stream_complete_error_before_cut_line", stream: true, body: delta + "\n" + reverseError, want: "upstream gateway refusal", short: true, status: 200, posts: 1, cooled: 1},
 		{name: "buffered_wrapped_429", body: wrappedLimit, want: "wrapped provider limit", short: true, limit: true, status: 429, posts: 2, cooled: 2},
 		{name: "stream_wrapped_429_before_output", stream: true, body: wrappedLimit, want: "response.done", short: true, limit: true, recover: true, status: 200, posts: 2, cooled: 1},
 		{name: "stream_wrapped_429_after_output", stream: true, body: delta + "\n" + wrappedLimit, want: "wrapped provider limit", short: true, limit: true, status: 200, posts: 1, cooled: 1},

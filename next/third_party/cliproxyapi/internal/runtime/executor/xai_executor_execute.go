@@ -104,7 +104,8 @@ func (e *XAIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req 
 	}
 
 	scanner := helps.NewCodexSSEScanner(ctx, bytes.NewReader(data), len(data)+1)
-	for eventName, eventData := range xaiResponseEvents(scanner) {
+	for event := range xaiResponseEvents(scanner) {
+		eventData := event.data
 		if bytes.Equal(eventData, []byte("[DONE]")) {
 			break
 		}
@@ -112,12 +113,12 @@ func (e *XAIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req 
 		validJSON := gjson.ValidBytes(eventData)
 		if validJSON {
 			upstreamUsage.ObserveResponsesStream(eventData)
-		} else if scanner.Unterminated() && errRead != nil {
+		} else if event.unterminated && errRead != nil {
 			// ScanLines also yields a short final line on a read error. Unlike
 			// intact JSON, plain text needs the line ending to prove completion.
 			break
 		}
-		if terminalErr, failed := xaiTerminalError(eventName, eventData, validJSON, httpResp.Header); failed {
+		if terminalErr, failed := xaiTerminalError(event.name, eventData, validJSON, httpResp.Header); failed {
 			return resp, terminalErr
 		}
 		if !validJSON {
