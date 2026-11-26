@@ -1188,15 +1188,15 @@ func xaiTerminalError(eventName string, data []byte, validJSON bool, headers htt
 	}
 	responseStatus := root.Get("response.status").String()
 	outerFailure := root.Get("error")
-	failure := outerFailure
+	var details []gjson.Result
 	switch {
 	case eventType == "error", eventType == "" && (outerFailure.IsObject() || outerFailure.Type == gjson.String) && !root.Get("output").Exists():
 		if root.Type == gjson.String {
-			failure = root
+			details = append(details, root)
 		}
 	case eventType == "response.failed", eventType == "response.error", eventType == "response.cancelled", eventType == "response.canceled",
 		responseStatus == "failed", responseStatus == "cancelled", responseStatus == "canceled":
-		failure = root.Get("response.error")
+		details = append(details, root.Get("response.error"))
 	default:
 		switch eventType {
 		case "response.completed", "response.incomplete", "response.done":
@@ -1206,30 +1206,37 @@ func xaiTerminalError(eventName string, data []byte, validJSON bool, headers htt
 		}
 		return statusErr{}, false
 	}
-	// Wrapper errors sometimes provide an empty outer error object and
-	// put the real reason and code under body.error.
-	if xaiErrorDetailEmpty(failure) {
-		failure = outerFailure
-		if xaiErrorDetailEmpty(failure) {
-			failure = root.Get("body.error")
-		}
-	}
-
+	// A wrapper may put the human-facing message outside the provider's
+	// machine-readable code. Fill fields independently in envelope order.
+	details = append(details, outerFailure, root.Get("body.error"))
 	body := []byte(`{"error":{}}`)
-	if failure.IsObject() {
-		body, _ = sjson.SetRawBytes(body, "error", []byte(failure.Raw))
-	} else if failure.Type == gjson.String {
-		body, _ = sjson.SetBytes(body, "error.message", failure.String())
+	if details[0].IsObject() {
+		body, _ = sjson.SetRawBytes(body, "error", []byte(details[0].Raw))
 	}
 	for _, field := range []string{"code", "type", "param", "message"} {
-		path := field
-		if field == "type" {
-			path = "error_type"
+		path := "error." + field
+		if strings.TrimSpace(gjson.GetBytes(body, path).String()) != "" {
+			continue
 		}
-		if gjson.GetBytes(body, "error."+field).Type == gjson.Null {
-			if value := root.Get(path); value.Type != gjson.Null {
-				body, _ = sjson.SetRawBytes(body, "error."+field, []byte(value.Raw))
+		var value gjson.Result
+		for _, errorDetail := range details {
+			value = errorDetail.Get(field)
+			if field == "message" && errorDetail.Type == gjson.String {
+				value = errorDetail
 			}
+			if strings.TrimSpace(value.String()) != "" {
+				break
+			}
+		}
+		if strings.TrimSpace(value.String()) == "" {
+			rootField := field
+			if field == "type" {
+				rootField = "error_type"
+			}
+			value = root.Get(rootField)
+		}
+		if value.Type != gjson.Null {
+			body, _ = sjson.SetRawBytes(body, path, []byte(value.Raw))
 		}
 	}
 	if seq := root.Get("sequence_number"); seq.Type == gjson.Number {
@@ -1278,13 +1285,6 @@ func xaiTerminalError(eventName string, data []byte, validJSON bool, headers htt
 		status = http.StatusTooManyRequests
 	}
 	return xaiHTTPStatusErr(status, body, headers), true
-}
-
-func xaiErrorDetailEmpty(value gjson.Result) bool {
-	if value.IsObject() {
-		return len(value.Map()) == 0
-	}
-	return value.Type != gjson.String || strings.TrimSpace(value.String()) == ""
 }
 
 func xaiHTTPStatusErr(code int, body []byte, headers http.Header) statusErr {

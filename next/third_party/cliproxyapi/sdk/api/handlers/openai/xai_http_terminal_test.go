@@ -30,6 +30,7 @@ func TestXAIHTTPTerminal(t *testing.T) {
 		malformed    = `data: {"type":"response.completed","response":{"output":[` + "\n"
 		limited      = "event: response.failed\ndata: {\"type\":\"response.failed\",\ndata: \"response\":{\"status\":\"failed\",\"error\":{\"code\":\"resource_exhausted\",\"message\":\"provider overloaded\"}}}\n"
 		wrappedLimit = `data: {"type":"error","error":{},"body":{"error":{"code":"resource_exhausted","message":"wrapped provider limit"}}}`
+		mergedLimit  = `data: {"type":"error","error":{"message":"provider rate limit"},"body":{"error":{"code":"resource_exhausted","message":"nested fallback"}}}`
 		plainError   = "event: error\ndata: upstream gateway refusal"
 		badPatch     = `data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"a","call_id":"c","name":"apply_patch","arguments":""}}` + "\n\n" + `data: {"type":"response.completed"}` + "\n\n"
 		done         = `data: {"type":"response.done","response":{"id":"resp_ok","status":"completed","model":"grok-4.7","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ready"}]}],"usage":{"input_tokens":7,"output_tokens":3}}}` + "\n\n"
@@ -65,6 +66,9 @@ func TestXAIHTTPTerminal(t *testing.T) {
 		{name: "stream_wrapped_429_before_output", stream: true, body: wrappedLimit, want: "response.done", short: true, limit: true, recover: true, status: 200, posts: 2, cooled: 1},
 		{name: "stream_wrapped_429_after_output", stream: true, body: delta + "\n" + wrappedLimit, want: "wrapped provider limit", short: true, limit: true, status: 200, posts: 1, cooled: 1},
 		{name: "stream_wrapped_429_retry_after", stream: true, body: wrappedLimit, want: "wrapped provider limit", short: true, limit: true, status: 429, posts: 2, cooled: 2},
+		{name: "buffered_429_merge_outer_message_and_nested_code", body: mergedLimit, want: "provider rate limit", short: true, limit: true, status: 429, posts: 2, cooled: 2},
+		{name: "stream_429_merge_outer_message_and_nested_code", stream: true, body: mergedLimit, want: "provider rate limit", short: true, limit: true, status: 429, posts: 2, cooled: 2},
+		{name: "stream_429_merge_after_output", stream: true, body: delta + "\n" + mergedLimit, want: "provider rate limit", short: true, limit: true, status: 200, posts: 1, cooled: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var posts atomic.Int32
@@ -127,8 +131,16 @@ func TestXAIHTTPTerminal(t *testing.T) {
 			if tc.status == http.StatusTooManyRequests && rec.Header().Get("Retry-After") != "73" {
 				t.Errorf("Retry-After = %q, want 73", rec.Header().Get("Retry-After"))
 			}
-			if tc.limit && !tc.recover && strings.Contains(rec.Body.String(), "closed before") {
-				t.Errorf("provider failure was treated as local truncation: %q", rec.Body.String())
+			if tc.limit && !tc.recover {
+				wantCode := `"code":"resource_exhausted"`
+				if tc.stream && tc.status == http.StatusTooManyRequests {
+					// Once stream bootstrap exhausts all credentials, the cooldown
+					// envelope retains the provider code and reason in its cause.
+					wantCode = `"last_upstream_error":"resource_exhausted: ` + tc.want + `"`
+				}
+				if !strings.Contains(rec.Body.String(), wantCode) {
+					t.Errorf("provider error code was lost: %q", rec.Body.String())
+				}
 			}
 			cooled := 0
 			for i := range 2 {
