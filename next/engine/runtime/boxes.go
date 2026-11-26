@@ -234,6 +234,10 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 			missing.Host = string(spec.Host)
 			return "", missing
 		}
+		var mount box.MissingMount
+		if errors.As(err, &mount) {
+			return "", mount
+		}
 		var imageErr box.ImageCreateError
 		if errors.As(err, &imageErr) {
 			return "", err
@@ -572,8 +576,8 @@ func (b *Boxes) container(spec lifecycle.BoxSpec, image string, shared box.Mount
 	}
 	if spec.Agy {
 		c.Mounts = append(c.Mounts,
-			box.Mount{HostPath: b.Layout.HostAgyBinary(), BoxPath: box.AgyBinary, ReadOnly: true},
-			box.Mount{HostPath: b.Layout.HostAgyAccount(), BoxPath: contract.AgyGeminiDir})
+			box.Mount{HostPath: b.Layout.HostAgyBinary(), BoxPath: box.AgyBinary, ReadOnly: true, Present: "agy binary not installed at " + b.Layout.HostAgyBinary()},
+			box.Mount{HostPath: b.Layout.HostAgyAccount(), BoxPath: contract.AgyGeminiDir, Present: "agy account folder missing at " + b.Layout.HostAgyAccount() + ": sign in first"})
 	}
 	for _, repo := range spec.Repos {
 		c.Mounts = append(c.Mounts, box.Mount{HostPath: repo.Cache, BoxPath: repo.Cache, ReadOnly: true})

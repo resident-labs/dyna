@@ -145,6 +145,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			createPhase = phase
 			log.Printf("box %s: creation failed in %s: %v", b.ID, phase, workErr)
 		}
+		var mount box.MissingMount
 		var missing box.MissingDevice
 		if errors.As(workErr, &missing) {
 			next.State, next.Reason = contract.BoxFailed, missing.Error()
@@ -153,6 +154,8 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			} else {
 				cause = contract.CauseNestedDeviceMissing
 			}
+		} else if errors.As(workErr, &mount) {
+			next.State, next.Reason, cause = contract.BoxFailed, mount.Error(), contract.CauseCreateFailed
 		} else if workErr != nil {
 			failures++
 			if errors.Is(createCause, context.DeadlineExceeded) {
@@ -252,6 +255,7 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 				}
 			}
 		}
+		var mount box.MissingMount
 		var missing box.MissingDevice
 		if errors.As(workErr, &missing) {
 			next.State, next.Reason = contract.BoxFailed, missing.Error()
@@ -260,6 +264,8 @@ func (r *Reconciler) step(ctx context.Context, row store.LifecycleBox) error {
 			} else {
 				cause = contract.CauseNestedDeviceMissing
 			}
+		} else if errors.As(workErr, &mount) {
+			next.State, next.Reason, cause = contract.BoxFailed, mount.Error(), contract.CauseStartFailed
 		} else if workErr != nil {
 			next.State = contract.BoxStopped
 			failures++

@@ -17,6 +17,9 @@ type Mount struct {
 	HostPath, BoxPath string
 	ReadOnly          bool
 	MakeDir           bool
+	// Present is what a box cannot start without: the host stats HostPath, never reads it, and the create is refused with this text
+	// if it is missing, since Podman would make an empty folder there.
+	Present string
 	// OnMount names the mount that HostPath sits on. Under a mount that is down lies a plain empty folder, so the host makes
 	// no folder there.
 	OnMount string
