@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -163,7 +164,7 @@ func TestRefreshReusesARecentHomeRead(t *testing.T) {
 	fake := dynaFixedUsage(t, http.StatusOK, dynaRoutingCodexUsage)
 	handler := dynaUsageHandler(t, dynaRoutingCodex("codex-1"))
 	runAuthFileQuota(t, handler, "")
-	if handler.refreshDynaUsage("codex") {
+	if handler.refreshDynaUsage("codex", nil) {
 		t.Fatal("reported a rate limit")
 	}
 	if got := dynaRoutingCalls(fake); got != 1 {
@@ -177,12 +178,61 @@ func TestRefreshReadsOnlyItsProviderAndReportsARateLimit(t *testing.T) {
 	disabled.Disabled = true
 	other := &coreauth.Auth{ID: "kimi-1", Provider: "kimi", Metadata: map[string]any{"access_token": "invented-token"}}
 	handler := dynaUsageHandler(t, dynaRoutingCodex("codex-1"), disabled, other)
-	if !handler.refreshDynaUsage("codex") {
+	if !handler.refreshDynaUsage("codex", nil) {
 		t.Fatal("a 429 was not reported")
 	}
 	if got := dynaRoutingCalls(fake); got != 1 {
 		t.Fatalf("requests = %d", got)
 	}
+}
+
+func TestRefusalRefreshReplacesOnlyTheRefusingCredentialsCachedRead(t *testing.T) {
+	refusing := dynaRoutingCodex("codex-2")
+	refusing.Metadata[coreauth.DynaRequestQuotaOnly] = true
+	handler := dynaUsageHandler(t, dynaRoutingCodex("codex-1"), refusing)
+	synctest.Test(t, func(t *testing.T) {
+		fake := dynaFixedUsage(t, http.StatusOK, dynaRoutingCodexUsage)
+		runAuthFileQuota(t, handler, "")
+		if got := dynaRoutingCalls(fake); got != 2 {
+			t.Fatalf("initial cache fill started %d requests", got)
+		}
+		handler.authManager.MarkResult(t.Context(), coreauth.Result{AuthID: "codex-2", Provider: "codex", Error: &coreauth.Error{HTTPStatus: 429, Message: "weekly quota exhausted"}})
+		synctest.Wait()
+		runAuthFileQuota(t, handler, "")
+		if got := dynaRoutingCalls(fake); got != 3 {
+			t.Fatalf("refusal must replace exactly one cached reading; total requests = %d", got)
+		}
+	})
+}
+
+func TestRefusalDiscardsARoutingReadingAlreadyInFlight(t *testing.T) {
+	refusing := dynaRoutingCodex("codex-1")
+	refusing.Metadata[coreauth.DynaRequestQuotaOnly] = true
+	handler := dynaUsageHandler(t, refusing)
+	handler.authManager.SetSelector(&coreauth.SoonestResetSelector{})
+	synctest.Test(t, func(t *testing.T) {
+		started, release := make(chan struct{}), make(chan struct{})
+		var calls atomic.Int32
+		dynaUseTransport(t, &dynaFakeUsage{respond: func(*http.Request) (*http.Response, error) {
+			if calls.Add(1) == 1 {
+				close(started)
+				<-release
+				return dynaResponse(http.StatusOK, dynaRoutingCodexUsage), nil
+			}
+			return dynaResponse(http.StatusTooManyRequests, `{}`), nil
+		}})
+		auth := handler.authManager.List()[0]
+		go handler.sharedQuota(t.Context(), handler.cfg, handler.authManager, auth)
+		<-started
+		handler.authManager.MarkResult(t.Context(), coreauth.Result{AuthID: auth.ID, Provider: auth.Provider, Error: &coreauth.Error{HTTPStatus: 429, Message: "weekly quota exhausted"}})
+		synctest.Wait()
+		close(release)
+		synctest.Wait()
+		views := handler.authManager.QuotaRoutingSnapshot().Providers["codex"]
+		if calls.Load() != 2 || len(views) != 1 || views[0].Deadline != nil {
+			t.Fatalf("failure to replace invalidated flight: calls=%d views=%+v", calls.Load(), views)
+		}
+	})
 }
 
 func TestFailedReadKeepsTheLastReading(t *testing.T) {

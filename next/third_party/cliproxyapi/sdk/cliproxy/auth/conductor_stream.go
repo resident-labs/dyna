@@ -513,7 +513,7 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 				return nil, errStream
 			}
 			lastErr = errStream
-			if result.CredentialScope {
+			if result.CredentialScope || dynaQuotaRefusal(auth, result.Error) {
 				return nil, preferredExecutionAttemptError(errStream, upstreamErr)
 			}
 			continue
@@ -628,7 +628,7 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 				syncPreferredUpstreamError(&upstreamErr, bootstrapErr)
 				discardStreamChunks(streamResult.Chunks)
 				lastErr = bootstrapErr
-				if result.CredentialScope {
+				if result.CredentialScope || dynaQuotaRefusal(auth, result.Error) {
 					currentErr := newStreamBootstrapError(bootstrapErr, streamResult.Headers)
 					return nil, preferredExecutionAttemptError(currentErr, upstreamErr)
 				}

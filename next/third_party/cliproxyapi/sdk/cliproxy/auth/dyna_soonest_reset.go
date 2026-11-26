@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"math"
+	"net/http"
 	"regexp"
 	"sort"
 	"strconv"
@@ -45,9 +46,8 @@ const (
 	// mean anything.
 	soonestResetPaceMinimum = 30 * time.Minute
 	// SoonestResetRefreshInterval is the least time between reads a cold pick starts
-	// for one provider. A reading younger than this counts as current. Reset times do
-	// not move, and a real 429 cools the account anyway, so a reading only has to keep
-	// the gates near the truth. See DYNA.md for why ten minutes.
+	// for one provider. A reading younger than this is fresh enough to exclude a
+	// spent account; older readings may rank accounts but cannot exclude them.
 	SoonestResetRefreshInterval = 10 * time.Minute
 	// soonestResetRefreshCeiling bounds the wait after repeated 429s from a reader.
 	soonestResetRefreshCeiling = 2 * time.Hour
@@ -100,12 +100,16 @@ func (h QuotaResetHint) current(now time.Time) bool {
 // lives on the Manager, so a selector swap on hot reload keeps it, and a Pick reaches
 // it through the context. It never reads a provider itself.
 type quotaResetBoard struct {
-	mu       sync.RWMutex
-	hints    map[string]QuotaResetHint
-	refresh  func(provider string) (rateLimited bool)
-	next     map[string]time.Time
-	failures map[string]int
-	running  map[string]bool
+	mu         sync.RWMutex
+	hints      map[string]QuotaResetHint
+	refresh    func(provider string, authIDs []string) (rateLimited bool)
+	invalidate func(authID string, registration uint64)
+	next       map[string]time.Time
+	failures   map[string]int
+	running    map[string]bool
+	// Pending read requests never participate in account eligibility.
+	pending   map[string]map[string]struct{}
+	scheduled map[string]bool
 }
 
 func (b *quotaResetBoard) hint(auth *Auth) (QuotaResetHint, bool) {
@@ -150,26 +154,72 @@ func (b *quotaResetBoard) requestRefresh(auths []*Auth, now time.Time) {
 		provider := strings.ToLower(strings.TrimSpace(auth.Provider))
 		if _, seen := asked[provider]; !seen {
 			asked[provider] = struct{}{}
-			b.startRefresh(provider, now)
+			b.mu.Lock()
+			b.startRefreshLocked(provider, now)
+			b.mu.Unlock()
 		}
 	}
 }
 
-func (b *quotaResetBoard) startRefresh(provider string, now time.Time) {
+func (b *quotaResetBoard) requestRefusalRefresh(auth *Auth, now time.Time) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if reading, ok := b.hints[auth.ID]; ok && reading.registrationEpoch == auth.RegistrationEpoch && !reading.ObservedAt.After(now) {
+		delete(b.hints, auth.ID)
+	}
+	if b.invalidate != nil {
+		b.invalidate(auth.ID, auth.RegistrationEpoch)
+	}
+	if b.refresh == nil {
+		return
+	}
+	if b.pending == nil {
+		b.pending = make(map[string]map[string]struct{})
+		b.scheduled = make(map[string]bool)
+	}
+	provider := strings.ToLower(strings.TrimSpace(auth.Provider))
+	if b.pending[provider] == nil {
+		b.pending[provider] = make(map[string]struct{})
+	}
+	b.pending[provider][auth.ID] = struct{}{}
+	b.schedulePendingRefreshLocked(provider, now)
+}
+
+func (b *quotaResetBoard) schedulePendingRefreshLocked(provider string, now time.Time) {
+	if len(b.pending[provider]) == 0 || b.refresh == nil || b.running[provider] || b.scheduled[provider] {
+		return
+	}
+	if delay := b.next[provider].Sub(now); delay > 0 {
+		b.scheduled[provider] = true
+		time.AfterFunc(delay, func() {
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			delete(b.scheduled, provider)
+			b.schedulePendingRefreshLocked(provider, time.Now())
+		})
+		return
+	}
+	b.startRefreshLocked(provider, now)
+}
+
+func (b *quotaResetBoard) startRefreshLocked(provider string, now time.Time) {
 	if b.refresh == nil || b.running[provider] || now.Before(b.next[provider]) {
 		return
 	}
 	if b.running == nil {
 		b.running, b.next, b.failures = make(map[string]bool), make(map[string]time.Time), make(map[string]int)
 	}
+	var authIDs []string
+	for id := range b.pending[provider] {
+		authIDs = append(authIDs, id)
+	}
+	delete(b.pending, provider)
 	b.running[provider] = true
 	b.next[provider] = now.Add(SoonestResetRefreshInterval)
-	go b.runRefresh(provider, b.refresh, now)
+	go b.runRefresh(provider, authIDs, b.refresh, now)
 }
 
-func (b *quotaResetBoard) runRefresh(provider string, refresh func(string) bool, started time.Time) {
+func (b *quotaResetBoard) runRefresh(provider string, authIDs []string, refresh func(string, []string) bool, started time.Time) {
 	rateLimited := false
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -178,36 +228,38 @@ func (b *quotaResetBoard) runRefresh(provider string, refresh func(string) bool,
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		b.running[provider] = false
-		if !rateLimited {
+		if rateLimited {
+			b.failures[provider]++
+			wait := soonestResetRefreshCeiling
+			if shift := b.failures[provider]; shift < 8 {
+				wait = min(SoonestResetRefreshInterval<<shift, soonestResetRefreshCeiling)
+			}
+			b.next[provider] = started.Add(wait)
+		} else {
 			delete(b.failures, provider)
-			return
 		}
-		b.failures[provider]++
-		wait := soonestResetRefreshCeiling
-		if shift := b.failures[provider]; shift < 8 {
-			wait = min(SoonestResetRefreshInterval<<shift, soonestResetRefreshCeiling)
-		}
-		b.next[provider] = started.Add(wait)
+		b.schedulePendingRefreshLocked(provider, time.Now())
 	}()
-	rateLimited = refresh(provider)
+	rateLimited = refresh(provider, authIDs)
 }
 
 // PublishQuotaReading records a reader's result for a credential. Everything that
 // reads usage publishes here, so a read Home started serves routing too. A failed read
 // publishes nothing, which leaves the last reading in place.
 func (m *Manager) PublishQuotaReading(authID string, hint QuotaResetHint) {
-	m.publishQuotaReading(authID, hint, nil)
+	m.publishQuotaReading(authID, hint, nil, nil)
 }
 
 // PublishQuotaReadingForAuth binds a completed read to the credential it started on.
-func (m *Manager) PublishQuotaReadingForAuth(auth *Auth, hint QuotaResetHint) {
+// stillCurrent runs under the board lock, serialized with refusal invalidation.
+func (m *Manager) PublishQuotaReadingForAuth(auth *Auth, hint QuotaResetHint, stillCurrent func() bool) {
 	if auth == nil {
 		return
 	}
-	m.publishQuotaReading(auth.ID, hint, &auth.RegistrationEpoch)
+	m.publishQuotaReading(auth.ID, hint, &auth.RegistrationEpoch, stillCurrent)
 }
 
-func (m *Manager) publishQuotaReading(authID string, hint QuotaResetHint, epoch *uint64) {
+func (m *Manager) publishQuotaReading(authID string, hint QuotaResetHint, epoch *uint64, stillCurrent func() bool) {
 	if m == nil {
 		return
 	}
@@ -221,26 +273,30 @@ func (m *Manager) publishQuotaReading(authID string, hint QuotaResetHint, epoch 
 	m.mu.RUnlock()
 	board := &m.quotaBoard
 	board.mu.Lock()
+	defer board.mu.Unlock()
+	if stillCurrent != nil && !stillCurrent() {
+		return
+	}
 	if current, ok := board.hints[authID]; ok && current.registrationEpoch == hint.registrationEpoch && current.ObservedAt.After(hint.ObservedAt) {
-		board.mu.Unlock()
 		return
 	}
 	if board.hints == nil {
 		board.hints = make(map[string]QuotaResetHint)
 	}
 	board.hints[authID] = hint
-	board.mu.Unlock()
-	m.reconcileQuotaReading(authID, hint)
 }
 
-// SetQuotaRefresher installs the reader that cold picks start. refresh reports whether
-// the provider answered 429. It runs on its own goroutine, never on a request.
-func (m *Manager) SetQuotaRefresher(refresh func(provider string) (rateLimited bool)) {
+// SetQuotaRefresher installs the usage reader. An empty list asks for a
+// provider sweep; refusals ask for the affected credentials. The refresh
+// runs asynchronously. Invalidate only clears that credential's read cache;
+// it must not do I/O or call back into the manager.
+func (m *Manager) SetQuotaRefresher(refresh func(provider string, authIDs []string) (rateLimited bool), invalidate func(authID string, registration uint64)) {
 	if m == nil {
 		return
 	}
 	m.quotaBoard.mu.Lock()
 	m.quotaBoard.refresh = refresh
+	m.quotaBoard.invalidate = invalidate
 	m.quotaBoard.mu.Unlock()
 }
 
@@ -370,6 +426,49 @@ func rankSoonestReset(auth *Auth, hint QuotaResetHint, known bool, model string,
 		rank.class = soonestResetPaid
 	}
 	return rank
+}
+
+// dynaSpent checks only fresh, applicable windows that are actually exhausted.
+// Ranking still uses reserve gates and older readings, but those never deny a pick.
+func (b *quotaResetBoard) dynaSpent(auth *Auth, model string, now time.Time) (bool, time.Time) {
+	hint, ok := b.hint(auth)
+	if !ok || hint.ObservedAt.IsZero() || hint.ObservedAt.After(now) || now.Sub(hint.ObservedAt) >= SoonestResetRefreshInterval {
+		return false, time.Time{}
+	}
+	spent := hint.Empty
+	undated := hint.Empty
+	var recovers time.Time
+	for i := range hint.Windows {
+		window := &hint.Windows[i]
+		if !(window.UsedPercent >= 100) || !quotaWindowApplies(window, model) || (!window.ResetAt.IsZero() && !window.ResetAt.After(now)) {
+			continue
+		}
+		spent = true
+		undated = undated || window.ResetAt.IsZero()
+		if window.ResetAt.After(recovers) {
+			recovers = window.ResetAt
+		}
+	}
+	if undated {
+		recovers = time.Time{}
+	}
+	return spent, recovers
+}
+
+// dynaQuotaSpentError is not a model cooldown: do not hold the request open
+// or run retry rounds waiting for a reading's subscription reset.
+type dynaQuotaSpentError struct{ reset time.Duration }
+
+func (e *dynaQuotaSpentError) StatusCode() int { return http.StatusTooManyRequests }
+
+func (e *dynaQuotaSpentError) SafeResponseHeaders() http.Header { return safeRetryAfterHeader(e.reset) }
+
+func (e *dynaQuotaSpentError) Error() string {
+	const detail = `{"error":{"code":"dyna_quota_spent","message":"Quota exceeded on all eligible accounts"`
+	if reset := e.SafeResponseHeaders().Get("Retry-After"); reset != "" {
+		return detail + `,"reset_seconds":` + reset + `}}`
+	}
+	return detail + `}}`
 }
 
 // quotaWindowApplies reports whether a window limits a model. A model-scoped window

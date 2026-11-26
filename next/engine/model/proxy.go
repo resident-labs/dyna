@@ -85,7 +85,7 @@ func NewProxy(dir, authDir, managementKey string) (*Proxy, error) {
 	cfg.Models.Catalog = "embed"
 	cfg.Models.CodexCatalog = "embed"
 	// A transient upstream failure is not evidence that the account is unusable.
-	// Keep auth and quota cooling, but leave a sole credential usable after a 5xx.
+	// Keep auth cooling and z.ai pacing, but leave a sole credential usable after a 5xx.
 	// Pinned limitation (accepted): a late 5xx can clear a concurrent 401/403 cooldown; the next 401/403 sets it again.
 	cfg.TransientErrorCooldownSeconds = -1
 	// Only z.ai keys opt into retry rounds. Other credentials keep the default of zero.

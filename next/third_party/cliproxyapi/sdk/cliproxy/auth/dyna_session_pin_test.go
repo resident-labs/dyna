@@ -26,20 +26,21 @@ func TestPinOutranksAffinityAndRanking(t *testing.T) {
 }
 
 func TestPinFallsBackToAutomatic(t *testing.T) {
-	manager := resetManager(t, "first", "second")
-	resetPublish(manager, "first", resetFutureWeek(50, 2*time.Hour))
-	resetPublish(manager, "second", resetFutureWeek(0, 96*time.Hour))
 	tests := []struct {
-		name  string
-		pin   string
-		tried map[string]struct{}
+		name       string
+		pin        string
+		tried      map[string]struct{}
+		secondLeft float64
 	}{
-		{"spent", "second", nil},
-		{"removed", "gone", nil},
-		{"refused this request", "first", map[string]struct{}{"first": {}}},
+		{"spent", "second", nil, 0},
+		{"removed", "gone", nil, 50},
+		{"refused this request", "first", map[string]struct{}{"first": {}}, 50},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			manager := resetManager(t, "first", "second")
+			resetPublish(manager, "first", resetFutureWeek(50, 2*time.Hour))
+			resetPublish(manager, "second", resetFutureWeek(test.secondLeft, 96*time.Hour))
 			picked, _, err := manager.pickNext(resetPinned(test.pin), "claude", "", resetSessionOptions("session-"+test.name), test.tried)
 			if err != nil {
 				t.Fatalf("a pin failed the turn: %v", err)

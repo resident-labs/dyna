@@ -583,11 +583,19 @@ func (m *Manager) availableAuthsForRouteModelWithPriorityMode(auths []*Auth, pro
 	availableByPriority := make(map[int][]*Auth)
 	cooldownCount := 0
 	unauthorizedCount := 0
-	var earliest time.Time
+	var earliest, quotaReset time.Time
+	var quotaSpent bool
 	for _, candidate := range auths {
 		checkModel := m.selectionModelForAuth(candidate, routeModel)
 		blocked, reason, next := isAuthBlockedForModel(candidate, checkModel, now)
 		if !blocked {
+			if spent, reset := m.quotaBoard.dynaSpent(candidate, checkModel, now); spent {
+				quotaSpent = true
+				if !reset.IsZero() && (quotaReset.IsZero() || reset.Before(quotaReset)) {
+					quotaReset = reset
+				}
+				continue
+			}
 			priority := authPriority(candidate)
 			availableByPriority[priority] = append(availableByPriority[priority], candidate)
 			continue
@@ -604,6 +612,9 @@ func (m *Manager) availableAuthsForRouteModelWithPriorityMode(auths []*Auth, pro
 	}
 
 	if len(availableByPriority) == 0 {
+		if quotaSpent {
+			return nil, &dynaQuotaSpentError{reset: quotaReset.Sub(now)}
+		}
 		lastCandidateErr := latestCandidateErrorForModel(auths, func(candidate *Auth) string {
 			return m.selectionModelForAuth(candidate, routeModel)
 		})

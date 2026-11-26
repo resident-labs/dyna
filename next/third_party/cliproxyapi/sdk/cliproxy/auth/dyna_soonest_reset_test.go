@@ -282,7 +282,7 @@ type heldUsageRead struct {
 	release chan struct{}
 }
 
-func (b *heldUsageRead) run(string) bool {
+func (b *heldUsageRead) run(string, []string) bool {
 	b.calls.Add(1)
 	<-b.release
 	return false
@@ -356,7 +356,7 @@ func TestRefreshIsDedupedAndRateLimited(t *testing.T) {
 
 func TestRefreshBacksOffAfterARateLimit(t *testing.T) {
 	var calls atomic.Int32
-	board := &quotaResetBoard{refresh: func(string) bool { calls.Add(1); return true }}
+	board := &quotaResetBoard{refresh: func(string, []string) bool { calls.Add(1); return true }}
 	auths := resetAuths("a")
 	at := resetNow
 	for want, wait := range []time.Duration{20 * time.Minute, 40 * time.Minute, 80 * time.Minute, soonestResetRefreshCeiling, soonestResetRefreshCeiling} {
@@ -377,7 +377,7 @@ func TestRefreshBacksOffAfterARateLimit(t *testing.T) {
 func TestFreshReadingsAskForNoRefresh(t *testing.T) {
 	var calls atomic.Int32
 	board := resetBoard(map[string][]QuotaResetWindow{"a": {resetWeek(50, time.Hour)}})
-	board.refresh = func(string) bool { calls.Add(1); return false }
+	board.refresh = func(string, []string) bool { calls.Add(1); return false }
 	board.requestRefresh(resetAuths("a"), resetNow)
 	waitBoardIdle(t, board, "claude")
 	if calls.Load() != 0 {
@@ -388,7 +388,7 @@ func TestFreshReadingsAskForNoRefresh(t *testing.T) {
 func TestPassedResetAsksForARefresh(t *testing.T) {
 	var calls atomic.Int32
 	board := resetBoard(map[string][]QuotaResetWindow{"a": {resetWeek(50, -time.Minute)}})
-	board.refresh = func(string) bool { calls.Add(1); return false }
+	board.refresh = func(string, []string) bool { calls.Add(1); return false }
 	board.requestRefresh(resetAuths("a"), resetNow)
 	waitBoardIdle(t, board, "claude")
 	if calls.Load() != 1 {
@@ -398,7 +398,7 @@ func TestPassedResetAsksForARefresh(t *testing.T) {
 
 func TestRefreshPanicDoesNotStopLaterRefreshes(t *testing.T) {
 	var calls atomic.Int32
-	board := &quotaResetBoard{refresh: func(string) bool {
+	board := &quotaResetBoard{refresh: func(string, []string) bool {
 		calls.Add(1)
 		panic("invented")
 	}}

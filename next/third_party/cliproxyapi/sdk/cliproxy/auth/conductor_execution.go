@@ -121,7 +121,7 @@ func preferredExecutionAttemptError(fallback, upstream error) error {
 // Execute performs a non-streaming execution using the configured selector and executor.
 // It supports multiple providers for the same model and round-robins the starting provider per model.
 func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
-	ctx = withDynaAdmissionDeadline(ctx)
+	ctx = withDynaQuotaAttempts(withDynaAdmissionDeadline(ctx))
 	ctx = cliproxyexecutor.WithRequestProxyURL(ctx, opts.ProxyURL)
 	req, opts = cliproxysession.Enrich(req, opts)
 	ctx = WithCodexClientRequest(ctx, IsCodexClientRequest(ctx, opts.Headers))
@@ -178,14 +178,14 @@ func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxye
 				return resp, nil
 			}
 		}
-		return cliproxyexecutor.Response{}, lastErr
+		return cliproxyexecutor.Response{}, dynaTerminalQuota(ctx, lastErr)
 	}
 	return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
 }
 
 // It supports multiple providers for the same model and round-robins the starting provider per model.
 func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
-	ctx = withDynaAdmissionDeadline(ctx)
+	ctx = withDynaQuotaAttempts(withDynaAdmissionDeadline(ctx))
 	ctx = cliproxyexecutor.WithRequestProxyURL(ctx, opts.ProxyURL)
 	req, opts = cliproxysession.Enrich(req, opts)
 	ctx = WithCodexClientRequest(ctx, IsCodexClientRequest(ctx, opts.Headers))
@@ -234,7 +234,7 @@ func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req clip
 			}
 		}
 		lastErr = preferredExecutionAttemptError(lastErr, preferredUpstreamErr)
-		return cliproxyexecutor.Response{}, unwrapExecutionBoundaryError(lastErr)
+		return cliproxyexecutor.Response{}, dynaTerminalQuota(ctx, unwrapExecutionBoundaryError(lastErr))
 	}
 	return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
 }
@@ -242,7 +242,7 @@ func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req clip
 // ExecuteStream performs a streaming execution using the configured selector and executor.
 // It supports multiple providers for the same model and round-robins the starting provider per model.
 func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
-	ctx = withDynaAdmissionDeadline(ctx)
+	ctx = withDynaQuotaAttempts(withDynaAdmissionDeadline(ctx))
 	ctx = cliproxyexecutor.WithRequestProxyURL(ctx, opts.ProxyURL)
 	req, opts = cliproxysession.Enrich(req, opts)
 	ctx = WithCodexClientRequest(ctx, IsCodexClientRequest(ctx, opts.Headers))
@@ -323,6 +323,7 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 				return result, nil
 			}
 		}
+		lastErr = dynaTerminalQuota(ctx, lastErr)
 		var bootstrapErr *streamBootstrapError
 		if errors.As(lastErr, &bootstrapErr) && bootstrapErr != nil {
 			return streamErrorResult(bootstrapErr.Headers(), lastErr), nil
@@ -700,7 +701,7 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 					return cliproxyexecutor.Response{}, errExec
 				}
 				authErr = errExec
-				if result.CredentialScope {
+				if result.CredentialScope || dynaQuotaRefusal(auth, result.Error) {
 					break
 				}
 				continue
@@ -923,7 +924,7 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 					return cliproxyexecutor.Response{}, errExec
 				}
 				authErr = errExec
-				if result.CredentialScope {
+				if result.CredentialScope || dynaQuotaRefusal(auth, result.Error) {
 					break
 				}
 				continue
