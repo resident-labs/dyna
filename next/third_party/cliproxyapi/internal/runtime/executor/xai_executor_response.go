@@ -2,10 +2,13 @@ package executor
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
+	"iter"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1106,6 +1109,176 @@ func xaiPatchCompletedOutput(eventData []byte, outputItemsByIndex map[int64][]by
 
 	patched, _ := sjson.SetRawBytes(eventData, "response.output", outputArray)
 	return patched
+}
+
+const (
+	xaiEmptyStreamMessage      = "xai stream error: empty upstream stream"
+	xaiIncompleteStreamMessage = "xai stream error: stream closed before terminal event"
+)
+
+// xaiResponseEvents associates SSE event names with data. The shared scanner
+// assembles split JSON and also accepts complete data lines without delimiters.
+// Hold untyped data for one field boundary so an event name after data works too.
+func xaiResponseEvents(scanner *helps.CodexSSEScanner) iter.Seq2[string, []byte] {
+	return func(yield func(string, []byte) bool) {
+		var name string
+		var pending []byte
+		flush := func() bool {
+			eventName, data := name, pending
+			name, pending = "", nil
+			return len(data) == 0 || yield(eventName, data)
+		}
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			switch {
+			case len(line) == 0:
+				if !flush() {
+					return
+				}
+			case bytes.HasPrefix(line, xaiEventTag):
+				if name != "" && !flush() {
+					return
+				}
+				name = strings.TrimSpace(string(line[len(xaiEventTag):]))
+			case bytes.HasPrefix(line, xaiDataTag):
+				if pending != nil && !flush() {
+					return
+				}
+				data := bytes.TrimSpace(line[len(xaiDataTag):])
+				if len(data) == 0 {
+					continue
+				}
+				if name == "" && !bytes.Equal(data, []byte("[DONE]")) && gjson.GetBytes(data, "type").String() == "" {
+					pending = bytes.Clone(data)
+					continue
+				}
+				eventName := name
+				name = ""
+				if !yield(eventName, data) {
+					return
+				}
+			}
+		}
+		flush()
+	}
+}
+
+// xaiDoneEventType selects the terminal form expected by the translators.
+func xaiDoneEventType(data []byte) string {
+	if gjson.GetBytes(data, "response.status").String() == "incomplete" || gjson.GetBytes(data, "response.incomplete_details").IsObject() {
+		return "response.incomplete"
+	}
+	return "response.completed"
+}
+
+// xaiTerminalFailure normalizes an accepted HTTP stream's explicit upstream
+// refusal. Local EOF and broken JSON must never be mistaken for a provider 429.
+func xaiTerminalFailure(eventName string, data []byte, validJSON bool, headers http.Header) (statusErr, bool) {
+	if !validJSON {
+		if eventName == "error" && len(data) > 0 && data[0] != '{' && data[0] != '[' {
+			body, _ := sjson.SetBytes([]byte(`{"error":{}}`), "error.message", string(data))
+			return xaiHTTPStatusErr(http.StatusBadGateway, body, headers), true
+		}
+		return statusErr{}, false
+	}
+	root := gjson.ParseBytes(data)
+	eventType := root.Get("type").String()
+	if eventName == "error" || eventName == "response.failed" || eventName == "response.error" {
+		eventType = eventName
+	}
+	responseStatus := root.Get("response.status").String()
+	failure := root.Get("error")
+	switch {
+	case eventType == "error", eventType == "" && (failure.IsObject() || failure.Type == gjson.String) && !root.Get("output").Exists():
+		if root.Type == gjson.String {
+			failure = root
+		}
+	case eventType == "response.failed", eventType == "response.error", eventType == "response.cancelled", eventType == "response.canceled",
+		responseStatus == "failed", responseStatus == "cancelled", responseStatus == "canceled":
+		failure = root.Get("response.error")
+	default:
+		return statusErr{}, false
+	}
+	if failure.Type == gjson.Null {
+		failure = root.Get("error")
+	}
+	if failure.Type == gjson.Null {
+		failure = root.Get("body.error")
+	}
+
+	body := []byte(`{"error":{}}`)
+	if failure.IsObject() {
+		body, _ = sjson.SetRawBytes(body, "error", []byte(failure.Raw))
+	} else if failure.Type == gjson.String {
+		body, _ = sjson.SetBytes(body, "error.message", failure.String())
+	}
+	for _, field := range []string{"code", "type", "param", "message"} {
+		path := field
+		if field == "type" {
+			path = "error_type"
+		}
+		if gjson.GetBytes(body, "error."+field).Type == gjson.Null {
+			if value := root.Get(path); value.Type != gjson.Null {
+				body, _ = sjson.SetRawBytes(body, "error."+field, []byte(value.Raw))
+			}
+		}
+	}
+	if seq := root.Get("sequence_number"); seq.Type == gjson.Number {
+		body, _ = sjson.SetRawBytes(body, "sequence_number", []byte(seq.Raw))
+	}
+	code := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "error.code").String()))
+	kind := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "error.type").String()))
+	message := strings.TrimSpace(gjson.GetBytes(body, "error.message").String())
+	if message == "" {
+		message = cmp.Or(gjson.GetBytes(body, "error.code").String(), gjson.GetBytes(body, "error.type").String(), "upstream stream failed without error details")
+		body, _ = sjson.SetBytes(body, "error.message", message)
+	}
+	for _, path := range []string{
+		"status", "status_code", "error.status", "error.status_code", "response.status_code", "response.error.status", "response.error.status_code",
+		"body.status", "body.status_code", "body.error.status", "body.error.status_code",
+	} {
+		if status, _ := strconv.Atoi(strings.TrimSpace(root.Get(path).String())); status >= 400 && status <= 599 {
+			return xaiHTTPStatusErr(status, body, headers), true
+		}
+	}
+	if status, _ := strconv.Atoi(code); status >= 400 && status <= 599 {
+		return xaiHTTPStatusErr(status, body, headers), true
+	}
+
+	status := http.StatusBadGateway
+	switch {
+	case kind == "authentication_error", code == "invalid_api_key", code == "unauthorized",
+		strings.HasPrefix(code, "unauthenticated"), isXAIBadCredentialsBody(body):
+		status = http.StatusUnauthorized
+	case kind == "permission_error", code == "forbidden", strings.HasPrefix(code, "permission_denied"), strings.HasPrefix(code, "permission-denied"):
+		status = http.StatusForbidden
+	case kind == "not_found_error", code == "not_found", code == "model_not_found":
+		status = http.StatusNotFound
+	case kind == "rate_limit_error", code == "rate_limit_exceeded", code == "rate_limit",
+		strings.Contains(code, "resource_exhausted"), strings.Contains(code, "resource-exhausted"):
+		status = http.StatusTooManyRequests
+	case kind == "invalid_request_error", kind == "invalid_request", kind == "bad_request_error", kind == "image_generation_user_error",
+		code == "invalid_request_error", code == "invalid_value", code == "invalid_argument", code == "invalid-argument",
+		code == "context_length_exceeded", code == "context_too_large", code == "cyber_policy", code == "content_policy_violation":
+		status = http.StatusBadRequest
+	case kind == "service_unavailable_error", code == "server_is_overloaded", code == "service_unavailable":
+		status = http.StatusServiceUnavailable
+	}
+	// Reuse xaiStatusErr's free-tier exhaustion detection and rolling-window hint.
+	if status == http.StatusBadGateway && xaiStatusErr(http.StatusTooManyRequests, body).retryAfter != nil {
+		status = http.StatusTooManyRequests
+	}
+	return xaiHTTPStatusErr(status, body, headers), true
+}
+
+func xaiHTTPStatusErr(code int, body []byte, headers http.Header) statusErr {
+	err := xaiStatusErr(code, body)
+	if err.code == http.StatusTooManyRequests {
+		if delay := parseRetryAfterHeader(headers, time.Now()); delay != nil {
+			err.retryAfter = delay
+		}
+	}
+	return err
 }
 
 // xaiFreeUsageExhaustedCooldown is the free-tier rolling window advertised by

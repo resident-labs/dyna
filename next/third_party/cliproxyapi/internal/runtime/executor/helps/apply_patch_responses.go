@@ -32,6 +32,7 @@ type ApplyPatchResponsesState struct {
 	upstream               []byte
 	eventLine              []byte
 	active, failed, closed bool
+	sawPatch               bool
 	transportDone          bool
 }
 
@@ -516,6 +517,18 @@ func (s *ApplyPatchResponsesState) Transform(event []byte) ([][]byte, error) {
 	var out [][]byte
 	for _, e := range events {
 		converted, errTransform := s.Bridge.Transform(e)
+		if s.active && !s.sawPatch {
+			// The bridge emits custom input events only once it has acquired a patch call.
+			kind := gjson.GetBytes(e, "type").String()
+			if kind != "response.custom_tool_call_input.delta" && kind != "response.custom_tool_call_input.done" {
+				for _, event := range converted {
+					switch gjson.GetBytes(event, "type").String() {
+					case "response.custom_tool_call_input.delta", "response.custom_tool_call_input.done":
+						s.sawPatch = true
+					}
+				}
+			}
+		}
 		out = append(out, converted...)
 		if errTransform != nil {
 			s.failed = true
@@ -528,6 +541,12 @@ func (s *ApplyPatchResponsesState) Transform(event []byte) ([][]byte, error) {
 		s.byDispatcherKey, s.records, s.upstream = nil, nil, nil
 	}
 	return out, nil
+}
+
+// HasPatchActivity distinguishes an unclosed patch call or dispatcher from a
+// stream that merely declared the tool but did not use it.
+func (s *ApplyPatchResponsesState) HasPatchActivity() bool {
+	return s.active && (s.failed || s.sawPatch || s.unfinishedDispatcher() || s.Bridge.Finish() != nil)
 }
 
 // Finish validates source response closure independently of completed tool input.
