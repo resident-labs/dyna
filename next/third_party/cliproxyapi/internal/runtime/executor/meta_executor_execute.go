@@ -145,6 +145,9 @@ func (e *MetaExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req
 
 	data, errRead := io.ReadAll(httpResp.Body)
 	if errRead != nil {
+		if ctx.Err() == nil && httpResp.StatusCode >= 200 && httpResp.StatusCode < 300 {
+			errRead = statusErr{code: http.StatusBadGateway, msg: fmt.Sprintf("%s: %v", metaIncompleteStreamMessage, errRead), streamTruncated: true}
+		}
 		helps.RecordAPIResponseError(ctx, e.cfg, errRead)
 		return resp, errRead
 	}
@@ -231,8 +234,9 @@ func (e *MetaExecutor) translateMetaCompleted(ctx context.Context, req cliproxye
 			switch eventType {
 			case "response.output_item.done":
 				xaiCollectOutputItemDone(eventData, outputItemsByIndex, &outputItemsFallback)
-			case "response.completed", "response.incomplete":
+			case "response.completed", "response.incomplete", "response.done":
 				completedData := patchCodexCompletedOutput(eventData, outputItemsByIndex, outputItemsFallback)
+				_, completedData = normalizeMetaTerminalEvent(completedData, eventType)
 				upstreamUsage.ObserveResponsesStream(completedData)
 				var param any
 				out := sdktranslator.TranslateNonStream(ctx, prepared.to, prepared.responseFormat, req.Model, prepared.originalPayload, prepared.body, completedData, &param)
@@ -244,6 +248,10 @@ func (e *MetaExecutor) translateMetaCompleted(ctx context.Context, req cliproxye
 		}
 	}
 
+	if errEvent := metaStreamEventError(bytes.TrimSpace(data)); errEvent != nil {
+		upstreamUsage.ObserveResponsesStream(data)
+		return metaCompletedTranslation{}, errEvent
+	}
 	if completedData, ok := metaAsCompletedEvent(data); ok {
 		if detail, okUsage := helps.ParseCodexUsage(completedData); okUsage {
 			upstreamUsage.Observe(detail, true)
@@ -263,10 +271,11 @@ func (e *MetaExecutor) translateMetaCompleted(ctx context.Context, req cliproxye
 		return metaCompletedTranslation{payload: out, sourceEvent: completedData}, nil
 	}
 
-	if errFinish := prepared.applyPatch.Finish(); errFinish != nil {
-		return metaCompletedTranslation{}, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}
+	message := metaIncompleteStreamMessage
+	if prepared.applyPatch.HasPatchActivity() && prepared.applyPatch.Finish() != nil {
+		message = helps.ApplyPatchUpstreamErrorMessage
 	}
-	return metaCompletedTranslation{}, statusErr{code: http.StatusRequestTimeout, msg: "meta stream error: stream disconnected before response.completed or response.incomplete"}
+	return metaCompletedTranslation{}, statusErr{code: http.StatusBadGateway, msg: message, streamTruncated: true}
 }
 
 func (e *MetaExecutor) executeMetaCompaction(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
@@ -393,6 +402,7 @@ func applyMetaAPIHeaders(req *http.Request, auth *cliproxyauth.Auth, token strin
 const (
 	metaNotFoundCooldown           = 5 * time.Minute
 	metaSubscriptionUsageEventType = "response.subscription_usage"
+	metaIncompleteStreamMessage    = "upstream stream closed before terminal event"
 )
 
 var metaEventTag = []byte("event:")
@@ -430,7 +440,8 @@ func wrapMetaUpstreamError(statusCode int, body []byte) error {
 
 func metaStreamEventError(eventData []byte) error {
 	eventType := gjson.GetBytes(eventData, "type").String()
-	if eventType != "error" && eventType != "response.failed" {
+	failedDone := eventType == "response.done" && strings.EqualFold(strings.TrimSpace(gjson.GetBytes(eventData, "response.status").String()), "failed")
+	if eventType != "error" && eventType != "response.failed" && !failedDone {
 		return nil
 	}
 	statusCode := http.StatusBadGateway
@@ -440,15 +451,35 @@ func metaStreamEventError(eventData []byte) error {
 	return wrapMetaUpstreamError(statusCode, eventData)
 }
 
+func isMetaTerminalResponseEvent(eventType string) bool {
+	return eventType == "response.completed" || eventType == "response.incomplete" || eventType == "response.done"
+}
+
+func normalizeMetaTerminalEvent(eventData []byte, eventType string) (string, []byte) {
+	if eventType != "response.done" {
+		return eventType, eventData
+	}
+	target := "response.completed"
+	if strings.EqualFold(strings.TrimSpace(gjson.GetBytes(eventData, "response.status").String()), "incomplete") {
+		target = "response.incomplete"
+	}
+	normalized, err := sjson.SetBytes(eventData, "type", target)
+	if err != nil {
+		return eventType, eventData
+	}
+	return target, normalized
+}
+
 func metaAsCompletedEvent(data []byte) ([]byte, bool) {
 	trimmed := bytes.TrimSpace(data)
 	if !gjson.ValidBytes(trimmed) {
 		return nil, false
 	}
 	root := gjson.ParseBytes(trimmed)
-	switch root.Get("type").String() {
-	case "response.completed", "response.incomplete":
-		return trimmed, true
+	eventType := root.Get("type").String()
+	if isMetaTerminalResponseEvent(eventType) {
+		_, normalized := normalizeMetaTerminalEvent(trimmed, eventType)
+		return normalized, true
 	}
 	if root.Get("object").String() == "response" || root.Get("output").Exists() {
 		wrapped, errSet := sjson.SetRawBytes([]byte(`{"type":"response.completed"}`), "response", trimmed)
