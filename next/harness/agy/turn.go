@@ -62,6 +62,8 @@ type turn struct {
 	offered    *told           // what the turn's prompts have offered so far, so an overlapping steer does not repeat it (T3 appContextOffered, adapter.ts:10875-10899)
 	seq        int             // the last prompt offer made, numbered; committed holds the offer each context key was last committed from, so a late response of an older prompt never overwrites a newer one (T3 appContextCommittedSequence, adapter.ts:10096-10125)
 	committed  map[string]int
+	recording  int // prompts being sent whose inputs are not in the mirror yet; what agy answers meanwhile waits in held, so the mirror reads the user input first
+	held       []map[string]any
 	openCalls  int
 	outlive    int  // open calls that outlive the prompt
 	answered   bool // agy has gone on from the prompt: a tool call or a thought came (a 404 after that is transient)
@@ -411,6 +413,9 @@ func (h *Harness) begin(t *turn, inputs []contract.TurnInput, started func(), st
 		t.signal()
 		return err
 	}
+	h.mu.Lock()
+	t.recording++
+	h.mu.Unlock()
 	// The log is read before the prompt so that only the steps it adds are looked at.
 	log, warning := sessiondb.Open(h.cfg.GeminiDir, sid)
 	if warning != "" {
@@ -418,6 +423,7 @@ func (h *Harness) begin(t *turn, inputs []contract.TurnInput, started func(), st
 	}
 	pending, err := p.client.Start("session/prompt", map[string]any{"sessionId": sid, "prompt": blocks})
 	if err != nil {
+		h.recorded(t)
 		h.mu.Lock()
 		t.open--
 		t.settle()
@@ -431,6 +437,7 @@ func (h *Harness) begin(t *turn, inputs []contract.TurnInput, started func(), st
 		t.err = errors.Join(t.err, err)
 		h.mu.Unlock()
 	}
+	h.recorded(t)
 	t.queuedOnce.Do(func() { close(t.queued) })
 	if started != nil {
 		started()
@@ -796,7 +803,7 @@ func (h *Harness) toolUpdate(t *turn, id, name, title, kind, status string, inpu
 		}
 	}
 	failed := status == "failed"
-	err := h.record(map[string]any{
+	err := t.write(h, map[string]any{
 		"role": "toolResult", "toolCallId": id, "toolName": c.name, "isError": failed, "detached": t.detached,
 		"content": []map[string]any{{"type": "text", "text": strings.Join(text, "\n")}},
 	})
@@ -806,6 +813,32 @@ func (h *Harness) toolUpdate(t *turn, id, name, title, kind, status string, inpu
 	if t.toolFinish != nil {
 		t.toolFinish(t.id, contract.ToolFinished{Call: id, Failed: failed})
 	}
+}
+
+// write appends an entry to the mirror, or holds it while a prompt's inputs are not in the mirror yet: agy's answer can arrive before begin
+// has recorded what it answers, and an entry before its turn's user entry belongs to no turn when the mirror is read. Harness.mu is held.
+func (t *turn) write(h *Harness, entry map[string]any) error {
+	if t.recording > 0 {
+		t.held = append(t.held, entry)
+		return nil
+	}
+	return h.record(entry)
+}
+
+// recorded ends a prompt's wait for its inputs to be recorded, and writes what was held once no prompt waits.
+func (h *Harness) recorded(t *turn) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	t.recording--
+	if t.recording > 0 {
+		return
+	}
+	for _, entry := range t.held {
+		if err := h.record(entry); err != nil && t.err == nil {
+			t.err = err
+		}
+	}
+	t.held = nil
 }
 
 // flush writes the assistant message built so far to the mirror. Harness.mu is held.
@@ -825,7 +858,7 @@ func (t *turn) flush(h *Harness) {
 		}
 	}
 	t.blocks = nil
-	if err := h.record(map[string]any{"role": "assistant", "content": content, "detached": t.detached}); err != nil && t.err == nil {
+	if err := t.write(h, map[string]any{"role": "assistant", "content": content, "detached": t.detached}); err != nil && t.err == nil {
 		t.err = err
 	}
 }
