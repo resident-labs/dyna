@@ -26,6 +26,27 @@ var (
 	dataTag = []byte("data:")
 )
 
+// An event may carry either key or both; output index 0 is a valid key.
+type messageStreamKey struct {
+	itemID      string
+	outputIndex int64
+}
+
+type messageStreamState struct {
+	itemID           string
+	hasOutputIndex   bool
+	suppressFallback bool
+	done             bool
+}
+
+type messageTextEvent int
+
+const (
+	messageAdded messageTextEvent = iota
+	messageDelta
+	messageDone
+)
+
 type toolCallStreamState struct {
 	Index            int
 	ArgumentsEmitted bool
@@ -101,6 +122,9 @@ type ConvertCliToOpenAIParams struct {
 	currentToolCall       *toolCallStreamState
 	citationKeys          map[string]struct{}
 	emittedTextRunes      int64
+	messageStates         map[messageStreamKey]*messageStreamState
+	hasAnonymousMessage   bool
+	unattributedText      bool
 	LastImageHashByItemID map[string][32]byte
 }
 
@@ -140,6 +164,10 @@ func ConvertCodexResponseToOpenAI(_ context.Context, modelName string, originalR
 	template := []byte(`{"id":"","object":"chat.completion.chunk","created":12345,"model":"model","choices":[{"index":0,"delta":{},"finish_reason":null,"native_finish_reason":null}]}`)
 
 	rootResult := gjson.ParseBytes(rawJSON)
+	dataType := rootResult.Get("type").String()
+	if dataType == "response.failed" || dataType == "error" {
+		return [][]byte{buildCodexFailedOpenAIError(rootResult)}
+	}
 
 	p := (*param).(*ConvertCliToOpenAIParams)
 	if tier := codexResponseServiceTier(rootResult.Get("response")); tier != "" {
@@ -151,14 +179,15 @@ func ConvertCodexResponseToOpenAI(_ context.Context, modelName string, originalR
 		template, _ = sjson.SetBytes(template, "service_tier", p.ServiceTier)
 	}
 
-	typeResult := rootResult.Get("type")
-	dataType := typeResult.String()
 	if dataType == "response.created" {
-		(*param).(*ConvertCliToOpenAIParams).ResponseID = rootResult.Get("response.id").String()
-		(*param).(*ConvertCliToOpenAIParams).CreatedAt = rootResult.Get("response.created_at").Int()
-		(*param).(*ConvertCliToOpenAIParams).Model = rootResult.Get("response.model").String()
-		if (*param).(*ConvertCliToOpenAIParams).LastImageHashByItemID == nil {
-			(*param).(*ConvertCliToOpenAIParams).LastImageHashByItemID = make(map[string][32]byte)
+		p.ResponseID = rootResult.Get("response.id").String()
+		p.CreatedAt = rootResult.Get("response.created_at").Int()
+		p.Model = rootResult.Get("response.model").String()
+		p.messageStates = nil
+		p.hasAnonymousMessage = false
+		p.unattributedText = false
+		if p.LastImageHashByItemID == nil {
+			p.LastImageHashByItemID = make(map[string][32]byte)
 		}
 		return [][]byte{}
 	}
@@ -212,6 +241,9 @@ func ConvertCodexResponseToOpenAI(_ context.Context, modelName string, originalR
 			template, _ = sjson.SetBytes(template, "choices.0.delta.role", "assistant")
 			template, _ = sjson.SetBytes(template, "choices.0.delta.content", delta)
 			p.emittedTextRunes += int64(utf8.RuneCountInString(delta))
+			if delta != "" {
+				p.observeMessage(rootResult, gjson.Result{}, messageDelta)
+			}
 		}
 	} else if dataType == "response.output_text.annotation.added" || dataType == "response.output_text.done" || dataType == "response.content_part.done" {
 		citations := buildCodexURLCitations(codexAnnotationsFromEvent(rootResult), p.emittedTextRunes, p.citationKeys)
@@ -272,7 +304,12 @@ func ConvertCodexResponseToOpenAI(_ context.Context, modelName string, originalR
 		template, _ = sjson.SetBytes(template, "choices.0.native_finish_reason", nativeFinishReason)
 	} else if dataType == "response.output_item.added" {
 		itemResult := rootResult.Get("item")
-		if !itemResult.Exists() || !isCodexToolCallType(itemResult.Get("type").String()) {
+		itemType := itemResult.Get("type").String()
+		if itemType == "message" {
+			p.observeMessage(rootResult, itemResult, messageAdded)
+			return [][]byte{}
+		}
+		if !isCodexToolCallType(itemType) {
 			return [][]byte{}
 		}
 
@@ -350,16 +387,35 @@ func ConvertCodexResponseToOpenAI(_ context.Context, modelName string, originalR
 		if !itemResult.Exists() {
 			return [][]byte{}
 		}
-		if itemResult.Get("type").String() == "message" {
+		itemType := itemResult.Get("type").String()
+		if itemType == "message" {
+			var fallback strings.Builder
+			if p.observeMessage(rootResult, itemResult, messageDone) {
+				for _, part := range itemResult.Get("content").Array() {
+					if part.Get("type").String() == "output_text" {
+						fallback.WriteString(part.Get("text").String())
+					}
+				}
+			}
 			citations := buildCodexURLCitations(codexAnnotationsFromEvent(rootResult), p.emittedTextRunes, p.citationKeys)
-			if len(citations) == 0 {
+			if fallback.Len() == 0 && len(citations) == 0 {
 				return [][]byte{}
 			}
 			template, _ = sjson.SetBytes(template, "choices.0.delta.role", "assistant")
-			template, _ = sjson.SetRawBytes(template, "choices.0.delta.annotations", translatorcommon.JoinRawArray(citations))
+			if fallback.Len() > 0 {
+				text := fallback.String()
+				template, _ = sjson.SetBytes(template, "choices.0.delta.content", text)
+				p.emittedTextRunes += int64(utf8.RuneCountInString(text))
+				if len(p.messageStates) == 0 {
+					// A keyless snapshot cannot be distinguished from later replays.
+					p.unattributedText = true
+				}
+			}
+			if len(citations) > 0 {
+				template, _ = sjson.SetRawBytes(template, "choices.0.delta.annotations", translatorcommon.JoinRawArray(citations))
+			}
 			return [][]byte{template}
 		}
-		itemType := itemResult.Get("type").String()
 		if itemType == "image_generation_call" {
 			itemID := itemResult.Get("id").String()
 			b64 := itemResult.Get("result").String()
@@ -475,6 +531,9 @@ func ConvertCodexResponseToOpenAINonStream(_ context.Context, _ string, original
 	rootResult := gjson.ParseBytes(rawJSON)
 	// Verify this is a terminal response event.
 	responseType := rootResult.Get("type").String()
+	if responseType == "response.failed" || responseType == "error" {
+		return buildCodexFailedOpenAIError(rootResult)
+	}
 	if responseType != "response.completed" && responseType != "response.incomplete" {
 		return []byte{}
 	}
@@ -554,7 +613,6 @@ func ConvertCodexResponseToOpenAINonStream(_ context.Context, _ string, original
 							if text := summaryItem.Get("text").String(); text != "" {
 								reasoningText += text
 							}
-							break
 						}
 					}
 				}
@@ -679,6 +737,37 @@ func ConvertCodexResponseToOpenAINonStream(_ context.Context, _ string, original
 	return template
 }
 
+func buildCodexFailedOpenAIError(event gjson.Result) []byte {
+	errNode := event.Get("response.error")
+	if errNode.Type == gjson.Null {
+		errNode = event.Get("error")
+	}
+	message := strings.TrimSpace(errNode.Str)
+	if message == "" {
+		message = strings.TrimSpace(errNode.Get("message").String())
+	}
+	if message == "" {
+		message = strings.TrimSpace(event.Get("message").String())
+	}
+	if message == "" {
+		message = "upstream response failed"
+	}
+	kind := strings.TrimSpace(errNode.Get("type").String())
+	if kind == "" {
+		kind = "server_error"
+	}
+	body, _ := sjson.SetBytes([]byte(`{"error":{}}`), "error.message", message)
+	body, _ = sjson.SetBytes(body, "error.type", kind)
+	code := errNode.Get("code")
+	if code.Type == gjson.Null {
+		code = event.Get("code")
+	}
+	if value := strings.TrimSpace(code.String()); value != "" {
+		body, _ = sjson.SetBytes(body, "error.code", value)
+	}
+	return body
+}
+
 func codexAnnotationResults(value gjson.Result) []gjson.Result {
 	if !value.Exists() {
 		return nil
@@ -759,6 +848,111 @@ func buildCodexURLCitations(annotations []gjson.Result, runeOffset int64, seen m
 		citations = append(citations, citation)
 	}
 	return citations
+}
+
+// observeMessage updates item attribution and reports whether a done event can
+// supply fallback text without replaying text already sent in a delta.
+func (p *ConvertCliToOpenAIParams) observeMessage(event, item gjson.Result, kind messageTextEvent) bool {
+	if p.unattributedText {
+		return false
+	}
+	itemID := strings.TrimSpace(item.Get("id").Str)
+	if itemID == "" {
+		itemID = strings.TrimSpace(event.Get("item_id").Str)
+	}
+	index := event.Get("output_index")
+	hasIndex := index.Type == gjson.Number
+	if itemID == "" && !hasIndex {
+		if kind == messageAdded {
+			p.hasAnonymousMessage = true
+			return false
+		}
+		if kind == messageDone && len(p.messageStates) == 0 {
+			// No keyed item or unattributed text has been seen, so the first
+			// nonempty snapshot can supply text without replaying a delta.
+			return true
+		}
+	}
+
+	var state *messageStreamState
+	if itemID != "" {
+		state = p.messageStates[messageStreamKey{itemID: itemID}]
+	}
+	var indexKey messageStreamKey
+	if hasIndex {
+		indexKey.outputIndex = index.Int()
+		if byIndex := p.messageStates[indexKey]; byIndex != nil && (itemID == "" || byIndex.itemID == "" || byIndex.itemID == itemID) {
+			if state == nil {
+				state = byIndex
+			} else if state != byIndex {
+				// Earlier events may have supplied only one of the two keys.
+				state.suppressFallback = state.suppressFallback || byIndex.suppressFallback
+				state.done = state.done || byIndex.done
+			}
+		}
+	}
+
+	var ambiguous bool
+	if state == nil && kind != messageAdded && (itemID == "" || !hasIndex) {
+		if p.hasAnonymousMessage {
+			// An anonymous announcement is a possible match even when only one
+			// keyed item is open. A delta could replay in any later snapshot.
+			if kind == messageDelta {
+				p.unattributedText = true
+			}
+			return false
+		}
+		var sole *messageStreamState
+		for _, open := range p.messageStates {
+			if open.done || open == sole || (itemID != "" && open.itemID != "") || (hasIndex && open.hasOutputIndex) {
+				continue
+			}
+			if sole == nil {
+				sole = open
+				continue
+			}
+			ambiguous = true
+			if kind == messageDelta {
+				// Keep the streamed delta, but don't replay any item it could belong to.
+				sole.suppressFallback = true
+				open.suppressFallback = true
+			}
+		}
+		if !ambiguous {
+			state = sole
+		}
+	}
+
+	if state == nil && itemID == "" && !hasIndex {
+		if kind == messageDelta && !ambiguous {
+			// No open item explains the delta; a later announcement may describe it.
+			p.unattributedText = true
+		}
+		return false
+	}
+	if state == nil {
+		state = &messageStreamState{suppressFallback: ambiguous}
+	}
+	if p.messageStates == nil {
+		p.messageStates = make(map[messageStreamKey]*messageStreamState)
+	}
+	if itemID != "" && state.itemID == "" {
+		state.itemID = strings.Clone(itemID)
+		p.messageStates[messageStreamKey{itemID: state.itemID}] = state
+	}
+	if hasIndex {
+		state.hasOutputIndex = true
+		p.messageStates[indexKey] = state
+	}
+	switch kind {
+	case messageDelta:
+		state.suppressFallback = true
+	case messageDone:
+		fallback := !state.done && !state.suppressFallback
+		state.done = true
+		return fallback
+	}
+	return false
 }
 
 func registerToolCallState(p *ConvertCliToOpenAIParams, eventResult, itemResult gjson.Result, state *toolCallStreamState) {

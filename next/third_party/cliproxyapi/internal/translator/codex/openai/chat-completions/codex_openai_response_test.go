@@ -1058,3 +1058,209 @@ func TestApplyPatchChatResponseOrdinaryFunctionPreference(t *testing.T) {
 		t.Fatalf("ordinary preference stolen: %s", out)
 	}
 }
+
+func TestConvertCodexResponseToOpenAIMessageTextFallback(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		events []string
+		want   string
+	}{
+		{
+			name: "interleaved items and repeated done",
+			events: []string{
+				`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"a"}}`,
+				`{"type":"response.output_text.delta","output_index":0,"delta":"Alpha"}`,
+				`{"type":"response.output_item.added","output_index":1,"item":{"type":"message","id":"b"}}`,
+				`{"type":"response.output_text.delta","item_id":"b","delta":""}`,
+				`{"type":"response.output_item.added","output_index":2,"item":{"type":"message","id":"c"}}`,
+				`{"type":"response.output_text.delta","item_id":"c","delta":"Charlie"}`,
+				`{"type":"response.output_item.done","output_index":1,"item":{"type":"message","content":[{"type":"output_text","text":"Be"},{"type":"output_text","text":"ta"}]}}`,
+				`{"type":"response.output_item.done","item":{"type":"message","id":"a","content":[{"type":"output_text","text":"Alpha"}]}}`,
+				`{"type":"response.output_item.done","output_index":2,"item":{"type":"message","content":[{"type":"output_text","text":"Charlie"}]}}`,
+				`{"type":"response.output_item.done","item":{"type":"message","id":"b","content":[{"type":"output_text","text":"Beta"}]}}`,
+			},
+			want: "AlphaCharlieBeta",
+		},
+		{
+			name: "done links earlier partial keys",
+			events: []string{
+				`{"type":"response.output_item.added","item":{"type":"message","id":"a"}}`,
+				`{"type":"response.output_text.delta","output_index":0,"delta":"Alpha"}`,
+				`{"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"a","content":[{"type":"output_text","text":"Alpha"}]}}`,
+			},
+			want: "Alpha",
+		},
+		{
+			name: "unkeyed delta goes to sole open item",
+			events: []string{
+				`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"a"}}`,
+				`{"type":"response.output_text.delta","delta":"Alpha"}`,
+				`{"type":"response.output_item.added","output_index":1,"item":{"type":"message","id":"b"}}`,
+				`{"type":"response.output_item.done","output_index":1,"item":{"type":"message","id":"b","content":[{"type":"output_text","text":"Beta"}]}}`,
+				`{"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"a","content":[{"type":"output_text","text":"Alpha"}]}}`,
+			},
+			want: "AlphaBeta",
+		},
+		{
+			name: "sole open item links partial keys without a paired event",
+			events: []string{
+				`{"type":"response.output_item.added","item":{"type":"message","id":"a"}}`,
+				`{"type":"response.output_text.delta","output_index":0,"delta":"Alpha"}`,
+				`{"type":"response.output_item.done","item":{"type":"message","id":"a","content":[{"type":"output_text","text":"Alpha"}]}}`,
+			},
+			want: "Alpha",
+		},
+		{
+			name: "link only the compatible open item",
+			events: []string{
+				`{"type":"response.output_item.added","output_index":0,"item":{"type":"message"}}`,
+				`{"type":"response.output_item.added","output_index":1,"item":{"type":"message","id":"b"}}`,
+				`{"type":"response.output_text.delta","item_id":"a","delta":"Alpha"}`,
+				`{"type":"response.output_item.done","output_index":1,"item":{"type":"message","id":"b","content":[{"type":"output_text","text":"Beta"}]}}`,
+				`{"type":"response.output_item.done","output_index":0,"item":{"type":"message","content":[{"type":"output_text","text":"Alpha"}]}}`,
+			},
+			want: "AlphaBeta",
+		},
+		{
+			name: "distinct partial announcements stay distinct",
+			events: []string{
+				`{"type":"response.output_item.added","item":{"type":"message","id":"a"}}`,
+				`{"type":"response.output_item.added","output_index":1,"item":{"type":"message"}}`,
+				`{"type":"response.output_text.delta","output_index":1,"delta":"Beta"}`,
+				`{"type":"response.output_item.done","item":{"type":"message","id":"a","content":[{"type":"output_text","text":"Alpha"}]}}`,
+				`{"type":"response.output_item.done","output_index":1,"item":{"type":"message","content":[{"type":"output_text","text":"Beta"}]}}`,
+			},
+			want: "BetaAlpha",
+		},
+		{
+			name: "ambiguous unkeyed delta suppresses fallback only for possible matches",
+			events: []string{
+				`{"type":"response.output_item.added","item":{"type":"message","id":"a"}}`,
+				`{"type":"response.output_item.added","item":{"type":"message","id":"b"}}`,
+				`{"type":"response.output_text.delta","delta":"Alpha"}`,
+				`{"type":"response.output_item.added","output_index":2,"item":{"type":"message","id":"c"}}`,
+				`{"type":"response.output_item.done","item":{"type":"message","id":"b","content":[{"type":"output_text","text":"Beta"}]}}`,
+				`{"type":"response.output_item.done","item":{"type":"message","id":"a","content":[{"type":"output_text","text":"Alpha"}]}}`,
+				`{"type":"response.output_item.done","output_index":2,"item":{"type":"message","id":"c","content":[{"type":"output_text","text":"Charlie"}]}}`,
+			},
+			want: "AlphaCharlie",
+		},
+		{
+			name: "ambiguous partial delta is not assigned to one of multiple items",
+			events: []string{
+				`{"type":"response.output_item.added","item":{"type":"message","id":"a"}}`,
+				`{"type":"response.output_item.added","item":{"type":"message","id":"b"}}`,
+				`{"type":"response.output_text.delta","output_index":0,"delta":"Alpha"}`,
+				`{"type":"response.output_item.done","item":{"type":"message","id":"b","content":[{"type":"output_text","text":"Beta"}]}}`,
+				`{"type":"response.output_item.done","item":{"type":"message","id":"a","content":[{"type":"output_text","text":"Alpha"}]}}`,
+			},
+			want: "Alpha",
+		},
+		{
+			name: "unkeyed text before announcements cannot safely be matched to a later done",
+			events: []string{
+				`{"type":"response.output_text.delta","delta":"Alpha"}`,
+				`{"type":"response.output_item.added","item":{"type":"message","id":"a"}}`,
+				`{"type":"response.output_item.added","item":{"type":"message","id":"b"}}`,
+				`{"type":"response.output_item.done","item":{"type":"message","id":"b","content":[{"type":"output_text","text":"Beta"}]}}`,
+				`{"type":"response.output_item.done","item":{"type":"message","id":"a","content":[{"type":"output_text","text":"Alpha"}]}}`,
+			},
+			want: "Alpha",
+		},
+		{
+			name: "anonymous done without deltas supplies text once",
+			events: []string{
+				`{"type":"response.created","response":{"id":"resp_1"}}`,
+				`{"type":"response.output_item.added","item":{"type":"message"}}`,
+				`{"type":"response.output_item.done","item":{"type":"message","content":[]}}`,
+				`{"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text","text":"Beta"}]}}`,
+				`{"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text","text":"Beta"}]}}`,
+				`{"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}`,
+			},
+			want: "Beta",
+		},
+		{
+			name: "anonymous announcement is another candidate for a keyless delta",
+			events: []string{
+				`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"a"}}`,
+				`{"type":"response.output_item.added","item":{"type":"message"}}`,
+				`{"type":"response.output_text.delta","delta":"Beta"}`,
+				`{"type":"response.output_item.done","output_index":1,"item":{"type":"message","id":"b","content":[{"type":"output_text","text":"Beta"}]}}`,
+				`{"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"a","content":[{"type":"output_text","text":"Alpha"}]}}`,
+			},
+			want: "Beta",
+		},
+		{
+			name: "anonymous announcement does not block backfill when deltas have keys",
+			events: []string{
+				`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"a"}}`,
+				`{"type":"response.output_item.added","item":{"type":"message"}}`,
+				`{"type":"response.output_text.delta","output_index":0,"item_id":"a","delta":"Alpha"}`,
+				`{"type":"response.output_item.done","output_index":1,"item":{"type":"message","id":"b","content":[{"type":"output_text","text":"Beta"}]}}`,
+				`{"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"a","content":[{"type":"output_text","text":"Alpha"}]}}`,
+			},
+			want: "AlphaBeta",
+		},
+		{
+			name: "response.created resets reused state",
+			events: []string{
+				`{"type":"response.output_text.delta","item_id":"a","delta":"Alpha"}`,
+				`{"type":"response.output_item.added","item":{"type":"message"}}`,
+				`{"type":"response.output_text.delta","delta":"!"}`,
+				`{"type":"response.created","response":{"id":"resp_next"}}`,
+				`{"type":"response.output_item.done","item":{"type":"message","id":"a","content":[{"type":"output_text","text":"Beta"}]}}`,
+			},
+			want: "Alpha!Beta",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var param any
+			var text strings.Builder
+			for _, event := range tt.events {
+				for _, chunk := range ConvertCodexResponseToOpenAI(t.Context(), "gpt-5.4", nil, nil, []byte("data: "+event), &param) {
+					text.WriteString(gjson.GetBytes(chunk, "choices.0.delta.content").Str)
+				}
+			}
+			if got := text.String(); got != tt.want {
+				t.Fatalf("stream text = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConvertCodexResponseToOpenAINonStreamMultipartSummary(t *testing.T) {
+	event := []byte(`{"type":"response.completed","response":{"status":"completed","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":""},{"type":"summary_text","text":"Step 1. "},{"type":"summary_text","text":"Step 2."}]}]}}`)
+	out := ConvertCodexResponseToOpenAINonStream(t.Context(), "gpt-5.4", nil, nil, event, nil)
+	if got := gjson.GetBytes(out, "choices.0.message.reasoning_content").Str; got != "Step 1. Step 2." {
+		t.Fatalf("reasoning_content = %q, want both non-empty summary parts; payload=%s", got, out)
+	}
+}
+
+func TestConvertCodexResponseToOpenAIFailedEvents(t *testing.T) {
+	for _, tt := range []struct {
+		name, event         string
+		message, kind, code string
+	}{
+		{"nested error", `{"type":"response.failed","response":{"error":{"message":"rate limit exceeded","type":"rate_limit_error","code":"rate_limit"}}}`, "rate limit exceeded", "rate_limit_error", "rate_limit"},
+		{"string error", `{"type":"error","error":" backend overloaded ","code":"server_overloaded"}`, "backend overloaded", "server_error", "server_overloaded"},
+		{"top-level fields", `{"type":"error","error":null,"message":"backend boom","code":null}`, "backend boom", "server_error", ""},
+		{"no error details", `{"type":"response.failed","response":{}}`, "upstream response failed", "server_error", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var param any
+			chunks := ConvertCodexResponseToOpenAI(t.Context(), "gpt-5.4", nil, nil, []byte("data: "+tt.event), &param)
+			if len(chunks) != 1 {
+				t.Fatalf("expected one error chunk, got %d", len(chunks))
+			}
+			body := ConvertCodexResponseToOpenAINonStream(t.Context(), "gpt-5.4", nil, nil, []byte(tt.event), nil)
+			for _, out := range [][]byte{chunks[0], body} {
+				parsed := gjson.ParseBytes(out)
+				node := parsed.Get("error")
+				code := node.Get("code")
+				if node.Get("message").Str != tt.message || node.Get("type").Str != tt.kind || code.Str != tt.code || code.Exists() != (tt.code != "") || parsed.Get("choices").Exists() {
+					t.Fatalf("error payload = %s, want message=%q, type=%q, code=%q and no choices", out, tt.message, tt.kind, tt.code)
+				}
+			}
+		})
+	}
+}

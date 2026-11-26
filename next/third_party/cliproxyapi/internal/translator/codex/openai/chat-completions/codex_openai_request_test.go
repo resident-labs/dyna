@@ -1876,3 +1876,31 @@ func TestConvertOpenAIRequestToCodexParallelToolCalls(t *testing.T) {
 		})
 	}
 }
+
+func TestConvertOpenAIRequestToCodexReasoningEffort(t *testing.T) {
+	for _, tt := range []struct {
+		value string
+		want  string
+	}{
+		{``, "medium"},
+		{`null`, "medium"},
+		{`""`, "medium"},
+		{`"  "`, "medium"},
+		{`123`, "medium"},
+		{`" high "`, "high"},
+	} {
+		t.Run(tt.value, func(t *testing.T) {
+			body := `{"messages":[{"role":"user","content":"hi"}]}`
+			if tt.value != "" {
+				body = `{"reasoning_effort":` + tt.value + `,` + body[1:]
+			}
+			out, err := ConvertOpenAIRequestToCodex("gpt-5.4", []byte(body), true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := gjson.GetBytes(out, "reasoning.effort").Str; got != tt.want {
+				t.Fatalf("reasoning.effort = %q, want %q; body=%s", got, tt.want, out)
+			}
+		})
+	}
+}

@@ -2222,9 +2222,18 @@ func TestModelsWithClientVersionReturnsCodexCatalog(t *testing.T) {
 	if got, _ := gpt55["max_tokens"].(float64); got != 64000 {
 		t.Fatalf("gpt-5.5 max_tokens = %v, want 64000", gpt55["max_tokens"])
 	}
-	serviceTiers, ok := gpt55["service_tiers"].([]any)
-	if !ok || len(serviceTiers) != 1 {
-		t.Fatalf("expected gpt-5.5 priority service tier, got %#v", gpt55["service_tiers"])
+	serviceTiers, _ := gpt55["service_tiers"].([]any)
+	wantTierIDs := map[string]bool{"priority": true, "ultrafast": true}
+	if len(serviceTiers) != len(wantTierIDs) {
+		t.Fatalf("expected exactly priority and ultrafast gpt-5.5 service tiers, got %#v", gpt55["service_tiers"])
+	}
+	for _, entry := range serviceTiers {
+		tier, _ := entry.(map[string]any)
+		id, _ := tier["id"].(string)
+		if !wantTierIDs[id] {
+			t.Fatalf("unexpected or duplicate gpt-5.5 service tier ID %q in %#v", id, serviceTiers)
+		}
+		delete(wantTierIDs, id)
 	}
 	if custom == nil {
 		t.Fatal("expected custom model codex catalog entry")
