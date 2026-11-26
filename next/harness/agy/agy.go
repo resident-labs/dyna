@@ -6,6 +6,7 @@ package agy
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -43,8 +44,11 @@ type Config struct {
 	Dir        string // cwd of the process and the session
 	SessionDir string // the mirror file, the agy session id
 	Model      contract.ModelChoice
-	// Instructions and ModelInstructions are appended to agy's system prompt at session new and resume.
+	// Instructions (Dyna's session instructions) and ProjectInstructions (one labelled entry per AGENTS.md) ride on the first
+	// prompt, as T3 puts its instructions (T3 orchestrationInstructions.ts t3AcpPromptWithInstructions, adapter.ts:10022).
+	// ModelInstructions are a context section, resent when TransferModel changes them.
 	Instructions, ModelInstructions string
+	ProjectInstructions             []string
 	MCPServers                      []MCPServer
 	New                             bool          // a fresh conversation instead of resuming the stored one
 	CancelTimeout                   time.Duration // wait for the prompt's response after session/cancel, then kill; default 15s as T3 (ARUN:92)
@@ -60,10 +64,10 @@ type Harness struct {
 
 	cfg Config
 	// The inactivity limits (turn.go); fields so a test can shorten them.
-	promptInactivity, toolInactivity, watchEvery time.Duration
-	done                                         chan struct{}
-	doneOnce                                     sync.Once
-	starting                                     sync.Mutex // serializes spawning a process
+	promptInactivity, holdMax, watchEvery time.Duration
+	done                                  chan struct{}
+	doneOnce                              sync.Once
+	starting                              sync.Mutex // serializes spawning a process
 
 	fm      sync.Mutex // the mirror file: its path and entry count; never held with mu
 	mirror  string
@@ -76,7 +80,9 @@ type Harness struct {
 	turn      *turn
 	held      []contract.TurnInput // follow-ups waiting for the prompt response
 	sections  []contract.ContextSection
-	sent      []contract.ContextSection // what the session was told: the append, then each prompt's diff
+	told      told // what the process was told; it starts empty with each process (T3 adapter.ts promptInstructionStates)
+	broken    bool // agy's saved conversation fails every prompt (INVALID_THINKING_SIGNATURE); the next Start opens a new one
+	detached  bool // a turn ended with agy still running a tool call or a reply: Abort then cancels it (quirk 3)
 	modelText string
 	context   int64 // input and cached tokens of the last prompt
 	used      int64 // agy's usage_update
@@ -96,17 +102,36 @@ type process struct {
 	exited  chan struct{}
 	version string
 	steers  bool
-	append  bool
 	options []configOption
 	tail    tail
+
+	resume                 bool // sessionCapabilities.resume
+	image, audio, embedded bool // promptCapabilities
 }
 
+// configOption is a session config option. A choice is a value, or a group of choices (T3 ACPS:253-334 reads both).
 type configOption struct {
 	ID           string `json:"id"`
 	CurrentValue string `json:"currentValue"`
 	Options      []struct {
-		Value string `json:"value"`
+		Value   string `json:"value"`
+		Options []struct {
+			Value string `json:"value"`
+		} `json:"options"`
 	} `json:"options"`
+}
+
+func (o configOption) lists(value string) bool {
+	for _, c := range o.Options {
+		if c.Value == value || slices.ContainsFunc(c.Options, func(g struct {
+			Value string `json:"value"`
+		}) bool {
+			return g.Value == value
+		}) {
+			return true
+		}
+	}
+	return false
 }
 
 // tail keeps the end of the process's stderr for error messages.
@@ -146,7 +171,7 @@ func Open(ctx context.Context, c Config) (*Harness, error) {
 		return nil, err
 	}
 	h := &Harness{cfg: c, done: make(chan struct{}), modelText: c.ModelInstructions, nonce: time.Now().UnixNano(),
-		promptInactivity: defaultPromptInactivity, toolInactivity: defaultToolInactivity, watchEvery: defaultWatchEvery}
+		promptInactivity: defaultPromptInactivity, holdMax: defaultHoldMax, watchEvery: defaultWatchEvery}
 	if !c.New {
 		h.sessionID, h.mirror = meta.SessionID, filepath.Join(c.SessionDir, meta.Mirror)
 	}
@@ -177,14 +202,17 @@ var caBundles = []string{"/etc/ssl/certs/ca-bundle.crt", "/etc/ssl/certs/ca-cert
 // 1.5 CLI keeps the login in the profile and not in the OS keyring.
 func environment(base []string, geminiDir, tmp string) []string {
 	var env []string
-	hasCA, hasSSH := false, false
+	hasCA, hasSSH, nix := false, false, ""
 	for _, kv := range base {
-		name, _, _ := strings.Cut(kv, "=")
-		if name == "SSL_CERT_FILE" && kv != "SSL_CERT_FILE=" {
-			hasCA = true
+		name, value, _ := strings.Cut(kv, "=")
+		// T3 sets the CA file only when neither variable is defined at all (ASUP:225-229), and the host's SSH_CONNECTION when non-empty.
+		hasCA = hasCA || name == "SSL_CERT_FILE" || name == "SSL_CERT_DIR"
+		hasSSH = hasSSH || (name == "SSH_CONNECTION" && value != "")
+		if name == "NIX_SSL_CERT_FILE" {
+			nix = value
 		}
-		hasSSH = hasSSH || (name == "SSH_CONNECTION" && kv != "SSH_CONNECTION=")
-		if !slices.Contains(dropped, name) {
+		// T3 matches the names case-insensitively (ASUP:204-209).
+		if !slices.Contains(dropped, strings.ToUpper(name)) {
 			env = append(env, kv)
 		}
 	}
@@ -194,7 +222,11 @@ func environment(base []string, geminiDir, tmp string) []string {
 		env = append(env, "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0")
 	}
 	if !hasCA {
-		for _, path := range caBundles {
+		// Relative paths would resolve differently in the project directory (ASUP:443-469).
+		for _, path := range append([]string{nix}, caBundles...) {
+			if !filepath.IsAbs(path) {
+				continue
+			}
 			if _, err := os.Stat(path); err == nil {
 				env = append(env, "SSL_CERT_FILE="+path)
 				break
@@ -246,6 +278,9 @@ func (h *Harness) ensure(ctx context.Context) error {
 	}
 	h.mu.Lock()
 	h.p = p
+	// What a process was told, and any work it ran, goes with it (T3 keeps this state per runtime).
+	h.resetTold()
+	h.detached = false
 	h.mu.Unlock()
 	return nil
 }
@@ -317,11 +352,14 @@ func (h *Harness) setup(ctx context.Context, p *process) error {
 	var init struct {
 		AgentInfo struct{ Version string } `json:"agentInfo"`
 		Caps      struct {
-			Meta struct {
-				Antigravity struct {
-					SystemPrompt struct{ Append bool } `json:"systemPrompt"`
-				}
-			} `json:"_meta"`
+			Prompt struct {
+				Image           bool `json:"image"`
+				Audio           bool `json:"audio"`
+				EmbeddedContext bool `json:"embeddedContext"`
+			} `json:"promptCapabilities"`
+			Session struct {
+				Resume *json.RawMessage `json:"resume"`
+			} `json:"sessionCapabilities"`
 		} `json:"agentCapabilities"`
 	}
 	err := p.client.Call(ctx, "initialize", map[string]any{
@@ -334,7 +372,8 @@ func (h *Harness) setup(ctx context.Context, p *process) error {
 	}
 	p.version = init.AgentInfo.Version
 	p.steers = steersWithPrompt(p.version)
-	p.append = init.Caps.Meta.Antigravity.SystemPrompt.Append
+	p.image, p.audio, p.embedded = init.Caps.Prompt.Image, init.Caps.Prompt.Audio, init.Caps.Prompt.EmbeddedContext
+	p.resume = init.Caps.Session.Resume != nil
 	if err := h.authenticate(ctx, p); err != nil {
 		return err
 	}
@@ -373,22 +412,13 @@ func (h *Harness) exitError(what string, err error, p *process) error {
 	return fmt.Errorf("agy %s: %w", what, err)
 }
 
-// current is every context section the session should know, the model's guidance first.
+// current is every context section the session should be told, the model's guidance first.
 func (h *Harness) current() []contract.ContextSection {
 	var all []contract.ContextSection
 	if h.modelText != "" {
 		all = append(all, contract.ContextSection{Key: "model_instructions", Text: h.modelText})
 	}
 	return append(all, h.sections...)
-}
-
-// appendText is the system prompt agy gets: Dyna's instructions and every section, as pig puts them in its system prompt.
-func (h *Harness) appendText() string {
-	parts := []string{h.cfg.Instructions}
-	for _, s := range h.current() {
-		parts = append(parts, "<"+string(s.Key)+">\n"+s.Text+"\n</"+string(s.Key)+">")
-	}
-	return strings.Join(slices.DeleteFunc(parts, func(s string) bool { return s == "" }), "\n\n")
 }
 
 func (h *Harness) mcpServers() []map[string]any {
@@ -416,24 +446,26 @@ func (h *Harness) mcpServers() []map[string]any {
 	return servers
 }
 
-// openSession resumes the conversation, or starts one when there is none or agy no longer has it, and applies the model.
-// agy keeps its conversations under --gemini-dir/antigravity-acp (--app-data-dir is joined under --gemini-dir), so they
-// live with the login and not in SessionDir. TODO: spike A decides whether the box can split them.
+// openSession resumes the conversation, or starts one when there is none, and applies the model. agy keeps its
+// conversations under --gemini-dir/antigravity-acp (--app-data-dir is joined under --gemini-dir), so they live with the login
+// and not in SessionDir. Nothing is appended to agy's system prompt: T3 appends only a session-invariant block
+// (ASUP:87-105), and Dyna has none. The instructions ride on the first prompt (turn.go).
 func (h *Harness) openSession(ctx context.Context, p *process, resume string) error {
 	params := map[string]any{"cwd": h.cfg.Dir, "mcpServers": h.mcpServers()}
-	h.mu.Lock()
-	text := h.appendText()
-	h.mu.Unlock()
-	if p.append && text != "" {
-		params["_meta"] = map[string]any{"antigravity": map[string]any{"systemPrompt": map[string]any{"append": text}}}
-	}
 	var res struct {
 		SessionID     string         `json:"sessionId"`
 		ConfigOptions []configOption `json:"configOptions"`
+		Modes         struct {
+			Current string `json:"currentModeId"`
+		} `json:"modes"`
 	}
-	// T3 has no fallback: a conversation agy cannot resume fails the open (ARUN:2463-2490).
+	// T3 has no fallback: a conversation agy cannot resume fails the open (ARUN:2463-2490), and so does an agent that does not
+	// advertise resume.
 	id := resume
 	if resume != "" {
+		if !p.resume {
+			return errors.New("agy does not advertise session/resume, so its conversation cannot be resumed")
+		}
 		params["sessionId"] = resume
 		if err := p.client.Call(ctx, "session/resume", params, &res); err != nil {
 			return h.exitError("session/resume", err, p)
@@ -454,13 +486,20 @@ func (h *Harness) openSession(ctx context.Context, p *process, resume string) er
 		}
 	}
 	h.mu.Lock()
-	h.sessionID, h.sent = id, h.current()
+	h.sessionID = id
 	h.mu.Unlock()
 	h.fm.Lock()
 	h.mirror = mirror
 	h.fm.Unlock()
 	if err := writeMeta(h.cfg.SessionDir, sessionMeta{SessionID: id, Mirror: filepath.Base(mirror)}); err != nil {
 		return err
+	}
+	// Dyna answers permissions itself, as T3's full-access mode does, which keeps agy in `default` (T3 antigravitySessionMode,
+	// ASUP:170-185: yolo and auto_edit stay default); a session that resumed in another mode is put back.
+	if res.Modes.Current != "" && res.Modes.Current != "default" {
+		if err := p.client.Call(ctx, "session/set_mode", map[string]any{"sessionId": id, "modeId": "default"}, nil); err != nil {
+			return h.exitError("session/set_mode", err, p)
+		}
 	}
 	return h.applyModel(ctx, p)
 }
@@ -483,14 +522,7 @@ func (h *Harness) applyModel(ctx context.Context, p *process) error {
 		if set.value == "" {
 			continue
 		}
-		listed := false
-		for _, option := range p.options {
-			listed = listed || (option.ID == set.id && slices.ContainsFunc(option.Options, func(o struct {
-				Value string `json:"value"`
-			}) bool {
-				return o.Value == set.value
-			}))
-		}
+		listed := slices.ContainsFunc(p.options, func(o configOption) bool { return o.ID == set.id && o.lists(set.value) })
 		if !listed {
 			return fmt.Errorf("%w: agy does not list %s %q", harness.ErrRefused, set.id, set.value)
 		}

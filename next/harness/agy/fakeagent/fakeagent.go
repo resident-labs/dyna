@@ -30,8 +30,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/resident-labs/dyna/harness/agy/sessiondb"
 )
 
 // EnvVar is what a test sets in the re-executed process so its TestMain calls Run.
@@ -44,6 +48,8 @@ type agent struct {
 	log    *os.File
 
 	mu        sync.Mutex
+	sid       string // the session the updates are for
+	gemini    string // --gemini-dir
 	sessions  int
 	authCount int
 	model     string
@@ -54,6 +60,11 @@ type agent struct {
 // Run serves the agent protocol on in and out until in ends.
 func Run(in io.Reader, out io.Writer) {
 	a := &agent{out: out, model: "gemini-4-neon", thought: "high"}
+	for i, arg := range os.Args {
+		if arg == "--gemini-dir" && i+1 < len(os.Args) {
+			a.gemini = os.Args[i+1]
+		}
+	}
 	if path := os.Getenv("FAKE_AGY_LOG"); path != "" {
 		a.log, _ = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	}
@@ -102,8 +113,21 @@ func (a *agent) fail(id json.RawMessage, code int, message string) {
 	a.send(map[string]any{"id": id, "error": map[string]any{"code": code, "message": message}})
 }
 
+func (a *agent) session() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.sid
+}
+
 func (a *agent) update(update map[string]any) {
-	a.send(map[string]any{"method": "session/update", "params": map[string]any{"sessionId": "x", "update": update}})
+	a.send(map[string]any{"method": "session/update", "params": map[string]any{"sessionId": a.session(), "update": update}})
+}
+
+// step writes a step into the session's log the way agy does, before the prompt's response.
+func (a *agent) step(stepType int, payload string) {
+	if err := sessiondb.AppendStep(a.gemini, a.session(), stepType, payload); err != nil {
+		panic(err)
+	}
 }
 
 func (a *agent) options() []map[string]any {
@@ -127,10 +151,14 @@ func (a *agent) handle(id json.RawMessage, method string, raw json.RawMessage) {
 		if version == "" {
 			version = "1.5.18"
 		}
-		meta := map[string]any{"antigravity": map[string]any{"tier": true, "systemPrompt": map[string]any{"append": os.Getenv("FAKE_AGY_NO_APPEND") == ""}}}
+		meta := map[string]any{"antigravity": map[string]any{"tier": true, "systemPrompt": map[string]any{"append": true}}}
+		resume := map[string]any{"resume": map[string]any{}}
+		if os.Getenv("FAKE_AGY_NO_RESUME") != "" {
+			resume = map[string]any{}
+		}
 		a.reply(id, map[string]any{
 			"protocolVersion":   1,
-			"agentCapabilities": map[string]any{"loadSession": true, "promptCapabilities": map[string]any{"image": true}, "sessionCapabilities": map[string]any{"resume": map[string]any{}}, "_meta": meta},
+			"agentCapabilities": map[string]any{"loadSession": true, "promptCapabilities": map[string]any{"image": true, "audio": false, "embeddedContext": true}, "sessionCapabilities": resume, "_meta": meta},
 			"agentInfo":         map[string]any{"name": "Antigravity ACP Server", "version": version},
 			"authMethods":       []map[string]any{{"id": "oauth-personal", "name": "Log in with Google"}},
 		})
@@ -161,8 +189,18 @@ func (a *agent) handle(id json.RawMessage, method string, raw json.RawMessage) {
 		a.mu.Lock()
 		a.sessions++
 		sid := fmt.Sprintf("fake-session-%d", a.sessions)
+		if method == "session/resume" {
+			sid = p.SessionID
+		}
+		a.sid = sid
 		a.mu.Unlock()
-		result := map[string]any{"configOptions": a.options()}
+		// agy has created its conversations directory by now.
+		os.MkdirAll(filepath.Join(a.gemini, "antigravity-acp", "conversations"), 0o700)
+		mode := "default"
+		if m := os.Getenv("FAKE_AGY_MODE"); m != "" {
+			mode = m
+		}
+		result := map[string]any{"configOptions": a.options(), "modes": map[string]any{"currentModeId": mode, "availableModes": []map[string]any{{"id": "default"}, {"id": "plan"}}}}
 		if method == "session/new" {
 			result["sessionId"] = sid
 		}
@@ -175,9 +213,15 @@ func (a *agent) handle(id json.RawMessage, method string, raw json.RawMessage) {
 		if os.Getenv("FAKE_AGY_STARTUP_PERMISSION") != "" {
 			go a.permission("startup")
 		}
+	case "session/set_mode":
+		a.reply(id, map[string]any{})
 	case "session/set_config_option":
 		var p struct{ ConfigID, Value string }
 		json.Unmarshal(raw, &p)
+		if p.ConfigID == "thought_level" && os.Getenv("FAKE_AGY_FAIL_THOUGHT") != "" {
+			a.fail(id, -32602, "invalid thought level")
+			return
+		}
 		a.mu.Lock()
 		if p.ConfigID == "model" {
 			a.model = p.Value
@@ -202,9 +246,15 @@ func (a *agent) handle(id json.RawMessage, method string, raw json.RawMessage) {
 			Prompt []struct{ Text string } `json:"prompt"`
 		}
 		json.Unmarshal(raw, &p)
+		// The user text is the last block that is not the runtime info, inside <user_request> the first time.
 		text := ""
-		if len(p.Prompt) > 0 {
-			text = p.Prompt[len(p.Prompt)-1].Text
+		for _, b := range p.Prompt {
+			if !strings.HasPrefix(b.Text, "<runtime_info>") && !strings.HasPrefix(b.Text, "<external_") {
+				text = b.Text
+			}
+		}
+		if _, rest, ok := strings.Cut(text, "<user_request>\n"); ok {
+			text = strings.TrimSuffix(rest, "\n</user_request>")
 		}
 		verb, _, _ := strings.Cut(text, " ")
 		a.mu.Lock()
@@ -229,7 +279,7 @@ func (a *agent) handle(id json.RawMessage, method string, raw json.RawMessage) {
 // permission asks as agy does for a shell command and logs the answer.
 func (a *agent) permission(title string) {
 	a.send(map[string]any{"id": "perm-" + title, "method": "session/request_permission", "params": map[string]any{
-		"sessionId": "x",
+		"sessionId": a.session(),
 		"toolCall":  map[string]any{"toolCallId": "call_1", "name": "run_command", "kind": "execute", "title": title, "rawInput": map[string]any{"CommandLine": title}},
 		"options":   []map[string]any{{"optionId": "allow", "name": "Allow", "kind": "allow_once"}, {"optionId": "deny", "name": "Deny", "kind": "reject_once"}},
 	}})
@@ -287,20 +337,44 @@ func (a *agent) prompt(id json.RawMessage, text string, steered, held chan strin
 		}
 		a.text("after steer")
 		a.end(id, "end_turn")
+	// An upstream failure: agy shows it as chat text and ends the turn, and writes an error step to the session log.
 	case "quota":
-		a.text("Error 429, Message: You have exhausted your capacity on this model. Your quota will reset after 4m42s. Resets in 4m42s., Status: RESOURCE_EXHAUSTED")
-		a.end(id, "end_turn")
+		a.failStep(id, "Error 429, Message: You have exhausted your capacity on this model. Your quota will reset after 4m42s. Resets in 4m42s., Status: RESOURCE_EXHAUSTED", false)
 	case "forbidden":
-		a.text("Error 403, Message: The caller does not have permission, Status: PERMISSION_DENIED")
-		a.end(id, "end_turn")
+		a.failStep(id, "Error 403, Message: The caller does not have permission, Status: PERMISSION_DENIED", false)
 	case "tos":
-		a.text("Error 403, Message: Your account is restricted (TOS_VIOLATION), Status: PERMISSION_DENIED")
-		a.end(id, "end_turn")
+		a.failStep(id, "Error 403, Message: Your account is restricted (TOS_VIOLATION), Status: PERMISSION_DENIED", false)
 	case "validation":
-		a.text("{\"error\": {\"code\": 403, \"status\": \"PERMISSION_DENIED\", \"details\": [{\"reason\": \"VALIDATION_REQUIRED\", \"domain\": \"cloudcode-pa.googleapis.com\", \"metadata\": {\"validation_url\": \"https://accounts.google.com/verify\"}}]}}")
-		a.end(id, "end_turn")
+		a.failStep(id, "{\"error\": {\"code\": 403, \"status\": \"PERMISSION_DENIED\", \"details\": [{\"@type\": \"type.googleapis.com/google.rpc.ErrorInfo\", \"reason\": \"VALIDATION_REQUIRED\", \"domain\": \"cloudcode-pa.googleapis.com\", \"metadata\": {\"validation_url\": \"https://accounts.google.com/verify\"}}]}}", false)
 	case "fivexx":
-		a.text("Error 503, Message: backend unavailable, Status: UNAVAILABLE")
+		a.failStep(id, "Error 503, Message: backend unavailable, Status: UNAVAILABLE", false)
+	case "notfound":
+		a.failStep(id, "Error 404, Message: not found, Status: NOT_FOUND", false)
+	case "notfoundlate":
+		a.failStep(id, "Error 404, Message: not found, Status: NOT_FOUND", true)
+	case "signature":
+		a.failStep(id, "Error 400, Message: messages.3.content.0.thinking.signature: Field required, Status: INVALID_ARGUMENT", true)
+	case "odd":
+		a.failStep(id, "something nobody can parse", false)
+	// The reply only says it: no error step, so it is no failure.
+	case "quotatext":
+		a.text("Error 429, Message: quota, Status: RESOURCE_EXHAUSTED")
+		a.end(id, "end_turn")
+	// A command that outlives the prompt: the response comes first, the command ends after FAKE_AGY_BG_MS, with a reply.
+	case "bg":
+		call := map[string]any{"toolCallId": "bg_1", "name": "run_command", "kind": "execute", "title": "sleep", "rawInput": map[string]any{"CommandLine": "sleep 1"}}
+		a.text("started")
+		a.update(merge(call, map[string]any{"sessionUpdate": "tool_call", "status": "in_progress"}))
+		a.end(id, "end_turn")
+		delay, _ := time.ParseDuration(os.Getenv("FAKE_AGY_BG_DELAY"))
+		time.Sleep(delay)
+		a.update(merge(call, map[string]any{"sessionUpdate": "tool_call_update", "status": "completed", "rawOutput": map[string]any{"output": "slept"}}))
+		a.text("background done")
+		a.update(map[string]any{"sessionUpdate": "usage_update", "used": 10, "size": 100})
+	// A late update of a session agy has left must not reach the turn.
+	case "stale":
+		a.send(map[string]any{"method": "session/update", "params": map[string]any{"sessionId": "old-session", "update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "STALE"}}}})
+		a.text("fresh")
 		a.end(id, "end_turn")
 	case "rpcerror":
 		a.fail(id, -32603, "boom")
@@ -319,6 +393,16 @@ func (a *agent) prompt(id json.RawMessage, text string, steered, held chan strin
 		a.text("ok")
 		a.end(id, "end_turn")
 	}
+}
+
+// failStep ends a turn as agy ends one on an upstream failure; reached: the model had answered before it.
+func (a *agent) failStep(id json.RawMessage, text string, reached bool) {
+	if reached {
+		a.step(sessiondb.StepPlannerResponse, "answer")
+	}
+	a.step(sessiondb.StepError, text)
+	a.text(text)
+	a.end(id, "end_turn")
 }
 
 func merge(a, b map[string]any) map[string]any {

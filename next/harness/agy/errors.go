@@ -1,6 +1,7 @@
 package agy
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness"
+	"github.com/resident-labs/dyna/harness/agy/sessiondb"
 )
 
 // ErrSignInRequired is agy answering `authenticate` with no sign-in on this host (T3 ASUP:167-177).
@@ -17,28 +19,24 @@ var ErrSignInRequired = errors.New("agy is not signed in on this host")
 // ErrSubscriptionRequired is T3's text for a sign-in Google refuses for lack of a plan (AntigravityAuth.ts:157-159).
 var ErrSubscriptionRequired = errors.New("Google requires an eligible Antigravity subscription for this account.")
 
-// agy returns an upstream failure as a chat message and end_turn. T3 reads the session database to find it and classifies
-// the error step in turnFailure (acp/AntigravityTurnOutcome.ts:214-271, still so on T3 main d78106d). Only engine/store may
-// use database/sql here, so these are T3's patterns read from the turn's text. The text counts only when a line of it
-// starts with an error shape T3 reads (the API error, the status error or the HTTP error body), so an answer that merely
-// mentions a status code or a token such as SUBSCRIPTION_REQUIRED is not taken for an error. Go's regexp has no
-// lookaround, so the shapes are loosened a little. Like T3, there is no ban-specific handling: Google's message is shown.
-const maxErrorText = 16 << 10
-
+// agy returns an upstream failure as a chat message and end_turn. T3 finds it in the session's own log: the last step the
+// prompt added, when it is an error step (acp/AntigravityTurnOutcome.ts, turnFailure and watchAntigravityPromptOutcome), and
+// so does package sessiondb. Without that evidence only a typed `refusal` fails the turn; the reply text is never read. The
+// patterns below are T3's, with the lookarounds Go lacks loosened. Like T3, there is no ban-specific handling: Google's message
+// is shown.
 var (
-	apiError      = regexp.MustCompile(`(?sm)^[ \t]*Error (\d{3}), Message: (.+?), Status: ([A-Z_]+|\d{3}[^,\n]*)`)
-	statusError   = regexp.MustCompile(`(?m)^[ \t]*([A-Z_]+) \(code (\d{3})\): ([^\x00-\x1f]+)`)
-	errorBody     = regexp.MustCompile(`(?m)^[ \t]*\{\s*"error"\s*:`)
-	validation    = regexp.MustCompile(`"reason"\s*:\s*"VALIDATION_REQUIRED"`)
-	validationURL = regexp.MustCompile(`"validation_url"\s*:\s*"([^"]+)"`)
+	apiError    = regexp.MustCompile(`(?s)Error (\d{3}), Message: (.+?), Status: ([A-Z_]+|\d{3}[^,\n]*)`)
+	statusError = regexp.MustCompile(`([A-Z_]+) \(code (\d{3})\): ([^\p{Cc}]+)`)
+	errorJSON   = regexp.MustCompile(`\{\s*"error"\s*:`)
 
-	quotaExhausted = regexp.MustCompile(`\breason:QUOTA_EXHAUSTED\b`)
-	goDuration     = `((?:\d+(?:\.\d+)?(?:ns|us|µs|μs|ms|h|m|s))+)`
-	resetTimestamp = regexp.MustCompile(`\bquotaResetTimeStamp:([^\s\]]+)`)
-	resetAfter     = []*regexp.Regexp{
-		regexp.MustCompile(`\bquotaResetDelay:` + goDuration),
-		regexp.MustCompile(`\bretryDelay:` + goDuration),
-		regexp.MustCompile(`\bResets in ` + goDuration),
+	quotaExhausted   = regexp.MustCompile(`\breason:QUOTA_EXHAUSTED\b`)
+	invalidSignature = regexp.MustCompile("\\bmessages\\.\\d+\\.content\\.\\d+(?:\\.thinking\\.signature: Field required|: Invalid `signature` in `thinking` block)")
+	goDuration       = `((?:\d+(?:\.\d+)?(?:ns|us|µs|μs|ms|h|m|s))+)`
+	resetTimestamp   = regexp.MustCompile(`\bquotaResetTimeStamp:([^\s\]]+)`)
+	resetAfter       = []*regexp.Regexp{
+		regexp.MustCompile(`\bquotaResetDelay:` + goDuration + `(?:[\s\]]|$)`),
+		regexp.MustCompile(`\bretryDelay:` + goDuration + `(?:[\s\]]|$)`),
+		regexp.MustCompile(`\bResets in ` + goDuration + `(?:[^\w.]|\.\D|\.$|$)`),
 	}
 )
 
@@ -49,6 +47,7 @@ type failure struct {
 	cause      contract.FailureCause
 	message    string
 	retryAfter int64 // seconds, for CauseModelFailed
+	broken     bool  // agy's saved conversation can no longer be sent
 }
 
 func retryable(message string, reset time.Duration) *failure {
@@ -57,15 +56,89 @@ func retryable(message string, reset time.Duration) *failure {
 	return &failure{cause: contract.CauseModelFailed, message: harness.Mask(clip(message)), retryAfter: seconds}
 }
 
-// classify reads a turn's text or a JSON-RPC error message and returns nil for anything that is not a Google failure.
-func classify(text string, now time.Time) *failure {
-	if len(text) > maxErrorText {
-		return nil
+// validationRequired is T3's verificationErrorInfo: a 403 PERMISSION_DENIED JSON body whose details carry the
+// VALIDATION_REQUIRED ErrorInfo of cloudcode-pa. It returns the verification URL, which may be empty.
+func validationRequired(text string) (string, bool) {
+	for _, loc := range errorJSON.FindAllStringIndex(text, -1) {
+		obj := balancedJSON(text, loc[0])
+		if obj == "" {
+			continue
+		}
+		var body struct {
+			Error struct {
+				Code    int               `json:"code"`
+				Status  string            `json:"status"`
+				Details []json.RawMessage `json:"details"`
+			} `json:"error"`
+		}
+		if json.Unmarshal([]byte(obj), &body) != nil || body.Error.Code != 403 || body.Error.Status != "PERMISSION_DENIED" {
+			continue
+		}
+		for _, raw := range body.Error.Details {
+			var d struct {
+				Type     string `json:"@type"`
+				Domain   string `json:"domain"`
+				Reason   string `json:"reason"`
+				Metadata *struct {
+					URL any `json:"validation_url"`
+				} `json:"metadata"`
+			}
+			if json.Unmarshal(raw, &d) != nil || d.Type != "type.googleapis.com/google.rpc.ErrorInfo" ||
+				d.Domain != "cloudcode-pa.googleapis.com" || d.Reason != "VALIDATION_REQUIRED" {
+				continue
+			}
+			if d.Metadata != nil {
+				if u, ok := d.Metadata.URL.(string); ok {
+					return u, true
+				}
+			}
+			return "", true
+		}
 	}
-	if errorBody.MatchString(text) && validation.MatchString(text) {
+	return "", false
+}
+
+// balancedJSON is T3's balancedJsonObject: the object that starts at start, or "".
+func balancedJSON(text string, start int) string {
+	depth, inString, escaped := 0, false, false
+	for i := start; i < len(text); i++ {
+		ch := text[i]
+		switch {
+		case inString && escaped:
+			escaped = false
+		case inString && ch == '\\':
+			escaped = true
+		case inString && ch == '"':
+			inString = false
+		case inString:
+		case ch == '"':
+			inString = true
+		case ch == '{':
+			depth++
+		case ch == '}':
+			depth--
+			if depth == 0 {
+				return text[start : i+1]
+			}
+		}
+	}
+	return ""
+}
+
+// classify is T3's turnFailure (AntigravityTurnOutcome.ts:199-276) for an error text: from the session log's error step
+// (reachedModel: a planner response came in the prompt), or the message of a JSON-RPC error. It is nil when text is not an error.
+func classify(text string, now time.Time, reachedModel bool) *failure {
+	if quotaExhausted.MatchString(text) {
+		return retryable("You have reached your Antigravity quota for this period.", resetDelay(text, now))
+	}
+	if invalidSignature.MatchString(text) {
+		return &failure{cause: contract.CauseHarnessFailed, broken: true,
+			message: "Antigravity's saved conversation can no longer be sent to the model. The next message starts a fresh Antigravity session."}
+	}
+	if url, ok := validationRequired(text); ok {
 		message := "Verify your Google account, then retry this turn."
-		if m := validationURL.FindStringSubmatch(text); m != nil {
-			message += " " + m[1]
+		if url != "" {
+			message += " " + url
 		}
 		return &failure{cause: contract.CauseHarnessFailed, message: message}
 	}
@@ -77,15 +150,33 @@ func classify(text string, now time.Time) *failure {
 	} else {
 		return nil
 	}
-	reset := resetDelay(text, now)
-	if quotaExhausted.MatchString(text) || code == "429" || status == "RESOURCE_EXHAUSTED" {
-		return retryable(message, reset)
+	if code == "429" || status == "RESOURCE_EXHAUSTED" {
+		return retryable(message, resetDelay(text, now))
 	}
-	// T3 also retries a 404 after the model answered; the text cannot say whether it had, so a 404 is not retried.
-	if code >= "500" {
-		return retryable(message, reset)
+	// A 404 before the model answered is an unknown or unentitled model; after, a transient edge error (Outcome:263-276).
+	if code >= "500" || (code == "404" && reachedModel) {
+		return retryable(message, resetDelay(text, now))
 	}
 	return &failure{cause: contract.CauseHarnessFailed, message: harness.Mask(clip(message))}
+}
+
+// outcome is what the session log says about a prompt that ended (T3 turnFailure): a typed refusal is a usage limit, an
+// error step is classified, anything else is no failure.
+func outcome(reason string, step *sessiondb.Step, now time.Time) *failure {
+	if reason == "refusal" {
+		text := ""
+		if step != nil {
+			text = step.Error
+		}
+		return retryable("You have reached your Antigravity quota for this period.", resetDelay(text, now))
+	}
+	if step == nil || !step.IsError {
+		return nil
+	}
+	if f := classify(step.Error, now, step.ReachedModel); f != nil {
+		return f
+	}
+	return &failure{cause: contract.CauseHarnessFailed, message: "Antigravity stopped this turn because of an error."}
 }
 
 func clip(s string) string {
@@ -111,21 +202,13 @@ func resetDelay(text string, now time.Time) time.Duration {
 	return 0
 }
 
-// stopFailure is how a turn's stopReason, and its text on end_turn, ended it.
-func stopFailure(reason, text string, now time.Time) *failure {
+// stopFailure is how a stop reason other than a typed refusal or an error step ended a turn.
+func stopFailure(reason string) *failure {
 	switch reason {
-	case "end_turn":
-		return classify(text, now)
-	case "refusal":
-		// agy maps only the SDK's QUOTA_EXHAUSTED stop reason to refusal (T3 turnFailure).
-		if f := classify(text, now); f != nil && f.cause == contract.CauseModelFailed {
-			return f
-		}
-		return retryable("You have reached your Antigravity quota for this period.", 0)
+	case "end_turn", "refusal", "cancelled":
+		return nil
 	case "max_tokens":
 		return &failure{cause: contract.CauseOutputLimit, message: "the reply reached the model's output limit"}
-	case "cancelled":
-		return nil
 	}
 	return &failure{cause: contract.CauseHarnessFailed, message: fmt.Sprintf("agy stopped the turn: %s", reason)}
 }

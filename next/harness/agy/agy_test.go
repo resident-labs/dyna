@@ -207,7 +207,7 @@ func TestTurnWithToolCallsMirrorsPiTranscript(t *testing.T) {
 	}
 	json.Unmarshal(r.calls(t, "session/new")[0].Params, &session)
 	if session.Cwd != c.Dir || len(session.McpServers) != 1 || session.McpServers[0].Type != "http" || session.McpServers[0].URL != "http://127.0.0.1:7781/dyna/" ||
-		!strings.Contains(session.Meta.Antigravity.SystemPrompt.Append, "be Dyna") {
+		session.Meta.Antigravity.SystemPrompt.Append != "" {
 		t.Fatalf("session/new = %+v", session)
 	}
 }
@@ -295,7 +295,7 @@ func TestSteerSendsSecondPrompt(t *testing.T) {
 	if res.Outcome != contract.TurnCompleted || !strings.Contains(res.Final, "after steer") || res.Usage.OutputTokens != 40 {
 		t.Fatalf("result = %+v", res)
 	}
-	if got := r.prompts(t); len(got) != 2 || got[1][0] != "change course" || len(r.calls(t, "session/cancel")) != 0 {
+	if got := r.prompts(t); len(got) != 2 || !strings.Contains(got[1][0], "change course") || len(r.calls(t, "session/cancel")) != 0 {
 		t.Fatalf("prompts = %v", got)
 	}
 	for _, id := range []contract.DeliverySeq{1, 2} {
@@ -552,7 +552,7 @@ func TestModelTransferAndRefusal(t *testing.T) {
 	// The refused transfer left the model alone, and the guidance rides the next prompt as a section.
 	start(t, h, "t2", input(1, "say hi"))
 	got := r.prompts(t)[0]
-	if len(got) != 2 || !strings.Contains(got[0], "claude guidance") {
+	if len(got) != 3 || !strings.Contains(got[0], "claude guidance") {
 		t.Fatalf("prompt = %v", got)
 	}
 }
@@ -568,8 +568,10 @@ func TestOpenRefusesAnUnlistedModel(t *testing.T) {
 	}
 }
 
-func TestSectionChangesAreADiffAtTheHeadOfThePrompt(t *testing.T) {
-	h, r, _ := open(t, nil, nil)
+func TestPromptCarriesInstructionsOnceAndContextWhenChanged(t *testing.T) {
+	h, r, _ := open(t, nil, func(c *Config) {
+		c.ProjectInstructions = []string{`<project_instructions path="/a">rule a</project_instructions>`}
+	})
 	ctx := context.Background()
 	h.SetPromptSections(ctx, []contract.ContextSection{{Key: "dyna_goal", Text: "ship it"}})
 	start(t, h, "t1", input(1, "say a"))
@@ -577,9 +579,194 @@ func TestSectionChangesAreADiffAtTheHeadOfThePrompt(t *testing.T) {
 	h.SetPromptSections(ctx, []contract.ContextSection{{Key: "dyna_goal", Text: "ship it"}, {Key: "dyna_time", Text: "noon"}})
 	start(t, h, "t3", input(3, "say c"))
 	got := r.prompts(t)
-	if len(got[0]) != 2 || !strings.Contains(got[0][0], "ship it") || len(got[1]) != 1 || len(got[2]) != 2 ||
-		!strings.Contains(got[2][0], "noon") || strings.Contains(got[2][0], "ship it") {
+	// first: context, wrapped request, runtime info
+	if len(got[0]) != 3 || got[0][0] != "<external_dyna_goal>ship it</external_dyna_goal>" ||
+		!strings.Contains(got[0][1], "be Dyna") || !strings.Contains(got[0][1], "rule a") || !strings.Contains(got[0][1], "<user_request>\nsay a") ||
+		!strings.HasPrefix(got[0][2], "<runtime_info>") {
+		t.Fatalf("first prompt = %q", got[0])
+	}
+	if len(got[1]) != 1 || got[1][0] != "say b" {
+		t.Fatalf("second prompt = %q", got[1])
+	}
+	if len(got[2]) != 2 || got[2][0] != "<external_dyna_time>noon</external_dyna_time>" || got[2][1] != "say c" {
+		t.Fatalf("third prompt = %q", got[2])
+	}
+	// agy is given nothing in its system prompt, and a slash command carries nothing.
+	if strings.Contains(string(r.calls(t, "session/new")[0].Params), "systemPrompt") {
+		t.Fatal("session/new appended to the system prompt")
+	}
+}
+
+func TestCompactionResendsWhatAgyWasTold(t *testing.T) {
+	h, r, _ := open(t, nil, nil)
+	start(t, h, "t1", input(1, "say a"))
+	if c, err := h.Compact(context.Background(), 1); err != nil || !c.Compacted {
+		t.Fatalf("compact %+v %v", c, err)
+	}
+	start(t, h, "t2", input(2, "say b"))
+	got := r.prompts(t)
+	if got[1][0] != "/compact" || len(got[1]) != 1 {
+		t.Fatalf("a slash command carries nothing: %q", got[1])
+	}
+	if len(got[2]) != 2 || !strings.Contains(got[2][0], "<user_request>\nsay b") {
+		t.Fatalf("after compaction: %q", got[2])
+	}
+}
+
+func TestNewProcessIsToldAgain(t *testing.T) {
+	h, r, _ := open(t, nil, nil)
+	start(t, h, "t1", input(1, "say a"))
+	h.mu.Lock()
+	p := h.p
+	h.mu.Unlock()
+	p.kill()
+	c := h.cfg
+	c.New = false
+	start(t, h, "t2", input(2, "say b"))
+	if got := r.prompts(t); len(got) != 2 || !strings.Contains(got[1][0], "<user_request>") {
 		t.Fatalf("prompts = %q", got)
+	}
+	_ = c
+}
+
+func TestErrorsComeFromTheSessionLogNotTheReply(t *testing.T) {
+	h, _, _ := open(t, nil, nil)
+	res := start(t, h, "t1", input(1, "quotatext"))
+	if res.Outcome != contract.TurnCompleted || res.Final != "Error 429, Message: quota, Status: RESOURCE_EXHAUSTED" {
+		t.Fatalf("a reply that quotes an error is no failure: %+v", res)
+	}
+	res = start(t, h, "t2", input(2, "odd"))
+	if res.Outcome != contract.TurnFailed || res.Cause != contract.CauseHarnessFailed || res.Error != "Antigravity stopped this turn because of an error." {
+		t.Fatalf("odd error step: %+v", res)
+	}
+}
+
+func TestNotFoundIsRetriedOnlyAfterTheModelAnswered(t *testing.T) {
+	h, _, _ := open(t, nil, nil)
+	if res := start(t, h, "t1", input(1, "notfound")); res.Cause != contract.CauseHarnessFailed {
+		t.Fatalf("before: %+v", res)
+	}
+	if res := start(t, h, "t2", input(2, "notfoundlate")); res.Cause != contract.CauseModelFailed {
+		t.Fatalf("after: %+v", res)
+	}
+}
+
+func TestInvalidThinkingSignatureBreaksTheConversation(t *testing.T) {
+	h, r, _ := open(t, nil, nil)
+	res := start(t, h, "t1", input(1, "signature"))
+	if res.Outcome != contract.TurnFailed || res.Cause != contract.CauseHarnessFailed {
+		t.Fatalf("result %+v", res)
+	}
+	start(t, h, "t2", input(2, "say b"))
+	if len(r.calls(t, "session/new")) != 2 {
+		t.Fatalf("the next turn opens a new session: %d", len(r.calls(t, "session/new")))
+	}
+}
+
+func TestStaleSessionUpdateIsIgnored(t *testing.T) {
+	h, _, _ := open(t, nil, nil)
+	if res := start(t, h, "t1", input(1, "stale")); res.Final != "fresh" {
+		t.Fatalf("final = %q", res.Final)
+	}
+}
+
+func TestSettledTurnIsHeldForABackgroundCommandAndStopCancelsIt(t *testing.T) {
+	h, r, _ := open(t, map[string]string{"FAKE_AGY_BG_DELAY": "300ms"}, nil)
+	h.watchEvery = 20 * time.Millisecond
+	res := start(t, h, "t1", input(1, "bg"))
+	if res.Final != "background done" {
+		t.Fatalf("the turn ended before the command: %+v", res)
+	}
+	// A command that never ends is bounded by the hold limit, and the turn's end leaves it running until Stop.
+	h2, r2, _ := open(t, map[string]string{"FAKE_AGY_BG_DELAY": "1h"}, nil)
+	h2.watchEvery, h2.holdMax = 20*time.Millisecond, 150*time.Millisecond
+	res = start(t, h2, "t2", input(1, "bg"))
+	if res.Outcome != contract.TurnCompleted || res.LastText != "started" {
+		t.Fatalf("held turn: %+v", res)
+	}
+	if len(r2.calls(t, "session/cancel")) != 0 {
+		t.Fatal("the end of the turn cancelled the command")
+	}
+	if err := h2.Abort(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "session/cancel", func() bool { return len(r2.calls(t, "session/cancel")) == 1 })
+	_ = r
+}
+
+func TestPermissionModeIsPutBackToDefault(t *testing.T) {
+	_, r, _ := open(t, map[string]string{"FAKE_AGY_MODE": "yolo"}, nil)
+	if len(r.calls(t, "session/set_mode")) != 1 || !strings.Contains(string(r.calls(t, "session/set_mode")[0].Params), `"modeId":"default"`) {
+		t.Fatal("no set_mode default")
+	}
+}
+
+func TestResumeNeedsTheCapability(t *testing.T) {
+	_, _, c := open(t, nil, nil)
+	t.Setenv("FAKE_AGY_NO_RESUME", "1")
+	c.New = false
+	if _, err := Open(context.Background(), c); err == nil || !strings.Contains(err.Error(), "does not advertise session/resume") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestFailedThoughtLevelRestoresTheModel(t *testing.T) {
+	h, r, _ := open(t, map[string]string{"FAKE_AGY_FAIL_THOUGHT": "1"}, func(c *Config) { c.Model.Thinking = "" })
+	_, err := h.TransferModel(context.Background(), "t", contract.ModelChoice{ID: "gemini-4-neon", Thinking: contract.ThinkingLow}, 0, "")
+	if err == nil {
+		t.Fatal("expected a refusal")
+	}
+	calls := r.calls(t, "session/set_config_option")
+	last := string(calls[len(calls)-1].Params)
+	if !strings.Contains(last, `"value":"gemini-3.8-flash"`) {
+		t.Fatalf("the previous model was not put back: %s", last)
+	}
+}
+
+func TestEnvironmentCAHandling(t *testing.T) {
+	if env := environment([]string{"SSL_CERT_DIR=/certs"}, "/gd", "/t"); slices.ContainsFunc(env, func(s string) bool { return strings.HasPrefix(s, "SSL_CERT_FILE=") }) {
+		t.Errorf("SSL_CERT_DIR set: %v", env)
+	}
+	if env := environment([]string{"gemini_api_key=k"}, "/gd", "/t"); slices.Contains(env, "gemini_api_key=k") {
+		t.Errorf("env names are matched without case: %v", env)
+	}
+}
+
+func TestAttachments(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string, data []byte) contract.TurnFile {
+		path := filepath.Join(dir, name)
+		os.WriteFile(path, data, 0o600)
+		return contract.TurnFile{Path: path, Bytes: int64(len(data))}
+	}
+	p := &process{image: true, embedded: true}
+	var total int64
+	blocks, err := attachmentBlocks([]contract.TurnFile{write("a.png", []byte("png")), write("b.go", []byte("package x")), write("c.pdf", []byte("pdf")),
+		write("d.bin", []byte("\x00\x01")), write("e.mp3", []byte("mp3")), write("f.txt", []byte{0xff, 0xfe, 0x00})}, p, &total)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for _, b := range blocks {
+		kinds = append(kinds, b["type"].(string))
+	}
+	// the png, the Go file and the pdf; the binary, the unadvertised audio and the invalid text stay path-only
+	if !slices.Equal(kinds, []string{"image", "resource", "resource_link"}) {
+		t.Fatalf("kinds = %v", kinds)
+	}
+	if _, err := attachmentBlocks([]contract.TurnFile{write("big.png", make([]byte, maxImageBytes+1))}, p, new(int64)); err == nil {
+		t.Fatal("an image over 10 MiB must fail")
+	}
+	if blocks, _ := attachmentBlocks([]contract.TurnFile{write("a.png", []byte("png"))}, &process{}, new(int64)); len(blocks) != 0 {
+		t.Fatal("no image capability: path only")
+	}
+}
+
+func TestToolSummaryIsStrippedAtAnyDepth(t *testing.T) {
+	got := stripSummary(map[string]any{"toolSummary": "x", "a": map[string]any{"toolSummary": "y", "b": []any{map[string]any{"toolSummary": "z", "k": 1}}}})
+	data, _ := json.Marshal(got)
+	if strings.Contains(string(data), "toolSummary") {
+		t.Fatal(string(data))
 	}
 }
 
@@ -672,7 +859,7 @@ func TestClassify(t *testing.T) {
 	}{
 		{"Error 429, Message: Resource exhausted. Resets in 4m42s., Status: RESOURCE_EXHAUSTED", contract.CauseModelFailed, "Resource exhausted. Resets in 4m42s.", 282 * time.Second},
 		{"RESOURCE_EXHAUSTED (code 429): too many requests retryDelay:3.5s ]", contract.CauseModelFailed, "too many requests retryDelay:3.5s ]", 4 * time.Second},
-		{"Agent error:\nError 429, Message: out [reason:QUOTA_EXHAUSTED quotaResetDelay:1h2m3s ], Status: RESOURCE_EXHAUSTED", contract.CauseModelFailed, "out [reason:QUOTA_EXHAUSTED quotaResetDelay:1h2m3s ]", time.Hour},
+		{"Agent error:\nError 429, Message: out [reason:QUOTA_EXHAUSTED quotaResetDelay:1h2m3s ], Status: RESOURCE_EXHAUSTED", contract.CauseModelFailed, "", time.Hour},
 		{"Error 429, Message: out [quotaResetTimeStamp:" + now.Add(90*time.Second).UTC().Format(time.RFC3339) + " ], Status: RESOURCE_EXHAUSTED", contract.CauseModelFailed, "", 90 * time.Second},
 		{"Error 500, Message: backend, Status: INTERNAL", contract.CauseModelFailed, "backend", 0},
 		// Not retried: Google's own message, shown as it is (no ban-specific handling, as in T3).
@@ -680,18 +867,14 @@ func TestClassify(t *testing.T) {
 		{"Error 403, Message: restricted (TOS_VIOLATION), Status: PERMISSION_DENIED", contract.CauseHarnessFailed, "restricted (TOS_VIOLATION)", 0},
 		{"Error 403, Message: SUBSCRIPTION_REQUIRED, Status: PERMISSION_DENIED", contract.CauseHarnessFailed, "SUBSCRIPTION_REQUIRED", 0},
 		{"Error 404, Message: no such model, Status: NOT_FOUND", contract.CauseHarnessFailed, "no such model", 0},
-		{body, contract.CauseHarnessFailed, "Verify your Google account, then retry this turn. https://v/x", 0},
-		// An answer that talks about these is not an error.
-		{"The server returned 429 once, which I handled by retrying.", "", "", 0},
-		{"The code maps SUBSCRIPTION_REQUIRED to an account error.", "", "", 0},
-		{"The fixture has reason:QUOTA_EXHAUSTED quotaResetDelay:5s in it.", "", "", 0},
-		{"I saw TOS_VIOLATION in the log, and 'Error 403, Message: x, Status: PERMISSION_DENIED' is its shape.", "", "", 0},
-		{"the body is " + body, "", "", 0},
+		{strings.Replace(body, `"reason"`, `"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason"`, 1), contract.CauseHarnessFailed, "Verify your Google account, then retry this turn. https://v/x", 0},
+		{"nothing of the shapes", "", "", 0},
 		{"TOS_VIOLATION", "", "", 0},
-		{strings.Repeat("x ", 20000) + "\nError 429, Message: m, Status: RESOURCE_EXHAUSTED", "", "", 0},
+		// A 404 is retried only once the model had answered.
+		{"Error 404, Message: gone, Status: NOT_FOUND", contract.CauseHarnessFailed, "gone", 0},
 	}
 	for _, c := range cases {
-		f := classify(c.text, now)
+		f := classify(c.text, now, false)
 		switch {
 		case f == nil && c.cause != "":
 			t.Errorf("%.60q not classified", c.text)
