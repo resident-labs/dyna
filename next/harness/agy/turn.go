@@ -1,12 +1,14 @@
 package agy
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -689,19 +691,72 @@ func (t *turn) flush(h *Harness) {
 	}
 }
 
-// Continue reports the turn failed: agy cannot pick up a turn a stopped box agent left, and the engine retries.
-func (h *Harness) Continue(_ context.Context, id contract.TurnID, _ func()) (contract.TurnEnded, error) {
-	return contract.TurnEnded{Turn: id, Outcome: contract.TurnFailed, Cause: contract.CauseHarnessFailed, Error: "agy session was restarted; the engine retries"}, nil
+// Continue runs a turn the box agent stopped in the middle of, as T3 resumes a thread with no new user text: agy's session is
+// resumed and sent "Continue where you left off." (T3 ContextHandoffService), and the turn runs as any other, with the prompt in
+// the mirror's ledger.
+func (h *Harness) Continue(ctx context.Context, id contract.TurnID, started func()) (contract.TurnEnded, error) {
+	return h.Start(ctx, id, []contract.TurnInput{{Text: "Continue where you left off."}}, started)
 }
 
-// Recover reports the turn failed too, settled only if the mirror shows the turn's first input was delivered.
+// Recover reports the turn settled only if the mirror shows it finished: after the turn's first input, the last entry is an
+// assistant message that ends the turn, with no tool call. Otherwise the runner calls Continue.
 func (h *Harness) Recover(id contract.TurnID, inputs []contract.TurnInput) (contract.TurnEnded, bool, error) {
 	if len(inputs) == 0 {
 		return contract.TurnEnded{Turn: id}, false, errors.New("recovery needs at least one input")
 	}
-	res := contract.TurnEnded{Turn: id, Outcome: contract.TurnFailed, Cause: contract.CauseHarnessFailed, Error: "agy session was restarted; the engine retries"}
-	found, err := h.Delivered(context.Background(), inputs[0].Delivery)
-	return res, found, err
+	file, err := os.Open(h.mirrorPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return contract.TurnEnded{Turn: id}, false, nil
+	}
+	if err != nil {
+		return contract.TurnEnded{Turn: id}, false, err
+	}
+	defer file.Close()
+	want := strconv.FormatInt(int64(inputs[0].Delivery), 10)
+	found, final := false, ""
+	reader := bufio.NewReaderSize(file, 1<<20)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			break // EOF; a line left unfinished by a crash is not read
+		}
+		var entry struct {
+			Type    string
+			Message struct {
+				Role       string
+				DeliveryID string
+				Content    []struct{ Type, Text string }
+			}
+		}
+		if json.Unmarshal(line, &entry) != nil || entry.Type != "message" {
+			continue
+		}
+		m := entry.Message
+		if m.Role == "user" && m.DeliveryID == want {
+			found, final = true, ""
+			continue
+		}
+		if !found {
+			continue
+		}
+		final = ""
+		if m.Role == "assistant" {
+			text, tool := "", false
+			for _, b := range m.Content {
+				tool = tool || b.Type == "toolCall"
+				if b.Type == "text" {
+					text += b.Text
+				}
+			}
+			if !tool {
+				final = text
+			}
+		}
+	}
+	if !found || final == "" {
+		return contract.TurnEnded{Turn: id}, false, nil
+	}
+	return contract.TurnEnded{Turn: id, Outcome: contract.TurnCompleted, Final: final, LastText: final}, true, nil
 }
 
 // Steer is a second prompt while the first runs: agy 1.5 and later steers the turn with it (T3 ACPS:77-85, adapter.ts:10229-10345).

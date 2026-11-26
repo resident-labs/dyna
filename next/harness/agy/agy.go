@@ -269,8 +269,10 @@ func (h *Harness) ensure(ctx context.Context) error {
 		return errors.New("agy harness is closed")
 	}
 	if p != nil {
+		// A connection that has closed is a process that is going: start another, without waiting for it to be reaped.
 		select {
 		case <-p.exited:
+		case <-p.client.Done():
 		default:
 			return nil
 		}

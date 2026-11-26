@@ -443,10 +443,9 @@ func TestDeliveredSurvivesACrashAndTheInputMayArriveTwice(t *testing.T) {
 	if ok, _ := h.Delivered(context.Background(), 1); !ok {
 		t.Fatal("the input was sent, so the ledger has it")
 	}
-	// Recover: the first input is in the mirror, so the turn is settled as failed and the engine retries.
-	res, settled, err := h.Recover("t1", []contract.TurnInput{input(1, "crash")})
-	if err != nil || !settled || res.Outcome != contract.TurnFailed || res.Cause != contract.CauseHarnessFailed {
-		t.Fatalf("recover = %+v %v %v", res, settled, err)
+	// Recover: the turn had not finished, so it is not settled and the runner calls Continue.
+	if _, settled, err := h.Recover("t1", []contract.TurnInput{input(1, "crash")}); err != nil || settled {
+		t.Fatalf("recover settled an unfinished turn: %v", err)
 	}
 	if _, settled, _ := h.Recover("t2", []contract.TurnInput{input(7, "x")}); settled {
 		t.Fatal("an input the mirror lacks is not settled")
@@ -459,9 +458,30 @@ func TestDeliveredSurvivesACrashAndTheInputMayArriveTwice(t *testing.T) {
 	if n := strings.Count(string(data), `"deliveryId":"1"`); n != 2 {
 		t.Fatalf("delivery 1 recorded %d times", n)
 	}
-	cont, err := h.Continue(context.Background(), "t1", func() {})
-	if err != nil || cont.Outcome != contract.TurnFailed || cont.Cause != contract.CauseHarnessFailed {
-		t.Fatalf("continue = %+v %v", cont, err)
+	if res, settled, err := h.Recover("t1", []contract.TurnInput{input(1, "x")}); err != nil || !settled || res.Final != "again" {
+		t.Fatalf("a finished turn is settled: %+v %v %v", res, settled, err)
+	}
+}
+
+func TestContinueResumesAfterARestartMidTurn(t *testing.T) {
+	h, r, _ := open(t, nil, nil)
+	if _, err := h.Start(context.Background(), "t1", []contract.TurnInput{input(1, "crash")}, func() {}); err == nil {
+		t.Fatal("the crash must fail the start")
+	}
+	res, err := h.Continue(context.Background(), "t1", func() {})
+	if err != nil || res.Outcome != contract.TurnCompleted || res.Final != "ok" {
+		t.Fatalf("continue = %+v %v", res, err)
+	}
+	if len(r.calls(t, "session/resume")) != 1 {
+		t.Fatal("the new process did not resume the session")
+	}
+	prompts := r.prompts(t)
+	if last := prompts[len(prompts)-1]; !strings.Contains(strings.Join(last, "\n"), "Continue where you left off.") {
+		t.Fatalf("prompts = %q", prompts)
+	}
+	data, _ := os.ReadFile(h.SessionFile())
+	if !strings.Contains(string(data), "Continue where you left off.") {
+		t.Fatal("the continue prompt is not in the ledger")
 	}
 }
 
